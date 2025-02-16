@@ -1,0 +1,1264 @@
+@font-face {
+    font-family: 'DEMO';
+    src: url('https://obtain.fr/FONT/Demo-Regular.ttf') format('truetype');
+}
+
+body, html {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: 'DEMO', sans-serif;
+    background-color: rgba(9, 7, 38, 0.8) !important;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;  
+}
+
+/* Styliser l'icône de la maison */
+#home-link .material-symbols-outlined {
+    font-size: 24px; /* Augmenter la taille de l'icône */
+    color: white; /* Couleur de l'icône */
+    line-height: 1; /* Assure un bon alignement vertical de l'icône */
+}
+
+/* Styles pour le lien home */
+#home-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px; /* Largeur du bouton */
+    height: 40px; /* Hauteur du bouton */
+    background-color: rgba(0, 122, 255, 0.7);
+    border-radius: 5px;
+    transition: background-color 0.3s ease;
+    text-decoration: none; /* Supprimer le soulignement */
+    color: white; /* Couleur du lien */
+}
+
+/* Styles pour les états du lien */
+#home-link:link,
+#home-link:visited,
+#home-link:hover,
+#home-link:active {
+    text-decoration: none; /* Supprimer le soulignement */
+    color: white; /* Couleur du lien */
+}
+
+/* Changement de couleur au survol */
+#home-link:hover {
+    background-color: #023173;
+}
+
+/* Conserver le style existant de la search-box */
+#search-box {
+    background-color: rgba(9, 7, 38, 0.8) !important;
+    padding: 10px;
+    display: flex;
+    justify-content: space-between;  /* Espace entre gauche et droite */
+    align-items: center;
+    width: 100%;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    height: 40px; /* Fixer la hauteur de la barre */
+    transition: transform 0.3s ease-in-out, width 0.3s ease-in-out;
+}
+
+/* Lorsque la sidebar est active */
+.body-with-sidebar #search-box {
+    transform: translateX(240px);
+    width: calc(100% - 240px); /* Ajuster la largeur après le déplacement */
+    transition: transform 0.3s ease-in-out, width 0.3s ease-in-out;
+    will-change: transform, width;
+    position: relative;
+    z-index: 3000;
+}
+
+/* Lorsque la sidebar est fermée */
+.body-without-sidebar #search-box {
+    transform: translateX(0);
+    width: 100%;
+    transition: transform 0.3s ease-in-out, width 0.3s ease-in-out;
+    will-change: transform, width;
+    position: relative;
+    z-index: 3000;
+}
+
+#search-type {
+    padding: 8px;
+    font-size: 0.8em !important;
+    border: none !important;
+    border-radius: 5px;
+    width: 180px;
+    background-color: white !important;
+    color: black !important;
+}
+
+#grid-input {
+    flex-grow: 1;
+    padding: 9px;  
+    font-size: 0.8em !important;
+    border: none !important;
+    border-radius: 5px;
+    background-color: white !important;
+    color: black !important;
+    min-width: 350px;
+}
+
+#grid-input {
+    flex-grow: 1;  /* Le champ de recherche prend l'espace restant à gauche */
+    min-width: 250px; /* Limiter la largeur minimale */
+}
+
+#search-button:hover, #clear-map-button:hover, #edit-button:hover, #show-all-button:hover {
+    background-color: white !important;
+    color: #ff007f !important;
+}
+
+#search-button, #clear-map-button, #edit-button, #show-all-button {
+    padding: 4px 5px !important;
+    background-color: #ff007f !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 5px !important;
+    font-size: 0.8em !important;
+    cursor: pointer !important;
+    transition: background-color 0.3s ease, color 0.3s ease, transform 0.3s ease-in-out !important;
+}
+
+#search-button, #clear-map-button, #edit-button, #show-all-button i {
+    vertical-align: middle;
+}
+
+#show-all-button i {
+    font-size: 26px !important;
+}
+
+/* Pour garder le bouton hamburger visible en haut */
+#hamburger-button {
+    width: 35px;
+    height: 35px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(0, 122, 255, 0.7);
+    border-radius: 5px;
+    transition: background-color 0.3s ease;
+    text-decoration: none;
+    color: white;
+    cursor: pointer;
+    border: none;
+    margin-right: 10px;
+    z-index: 1000; /* S'assurer qu'il reste au premier plan */
+}
+
+#hamburger-button i {
+    font-size: 24px;
+    color: white;
+}
+
+#hamburger-button:hover {
+    background-color: #023173;
+}
+
+/* Sidebar */
+#sidebar {
+    width: 220px;
+    background-color: #222;
+    position: fixed;
+    top: 0;
+    transform: translateX(-240px); /* Cachée par défaut */
+    height: 100%;
+    padding: 10px;
+    transition: transform 0.3s ease-in-out;
+    z-index: 1000;
+}
+
+#sidebar.active {
+    transform: translateX(0);
+}
+
+/* Déplacement fluide du main-content */
+.body-with-sidebar #main-content {
+    transform: translateX(240px);
+    width: calc(100% - 240px); /* Ajuster la largeur après le décalage */
+    transition: transform 0.3s ease-in-out, width 0.3s ease-in-out;
+    will-change: transform, width;
+}
+
+.body-without-sidebar #main-content {
+    transform: translateX(0);
+    width: 100%; /* Pleine largeur quand sidebar fermée */
+    transition: transform 0.3s ease-in-out, width 0.3s ease-in-out;
+    will-change: transform, width;
+}
+
+#sidebar ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+#sidebar li {
+    padding: 15px;
+    border-bottom: 1px solid #333;
+}
+
+#sidebar a {
+    color: #ccc;
+    text-decoration: none;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+}
+
+#sidebar a i {
+    margin-right: 10px;
+}
+
+#sidebar a:hover {
+    background-color: #444;
+    color: white;
+}
+
+#sidebar select {
+    padding: 5px;
+    font-size: 14px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#sidebar label {
+    display: block;
+    margin-bottom: 3px;
+}
+
+.popup-buttons {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.popup-buttons button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background-color: #ff007f;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.75em;
+    cursor: pointer;
+    transition: background-color 0.3s ease, color 0.3s ease;
+    margin: 3px;
+    position: relative;
+}
+
+.popup-buttons button i {
+    font-size: 2em;
+}
+
+/* Supprime le soulignement des liens dans les popups */
+.popup-buttons a {
+    text-decoration: none !important;
+}
+
+/* Style au survol avec texte */
+.popup-buttons button::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: -22px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #333;
+    color: white;
+    font-size: 1.30em;
+    padding: 3px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: 1010;
+}
+
+.popup-buttons button:hover::after {
+    visibility: visible;
+    opacity: 1;
+}
+
+.popup-buttons button:hover {
+    background-color: white;
+    color: #ff007f;
+}
+
+.popup-photo {
+    text-align: center;
+    margin-top: 8px;
+}
+
+.popup-photo img {
+    width: 100%;
+    max-width: 250px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: transform 0.3s ease;
+}
+
+.popup-photo img:hover {
+    transform: scale(1.05);
+}
+
+/* Section de gauche (Recherche) */
+#left-section {
+    display: flex;
+    align-items: center;
+    gap: 10px; /* Espace entre les éléments de recherche */
+    flex-grow: 1; /* Prend tout l'espace disponible à gauche */
+    transition: transform 0.3s ease-in-out; /* Ajoute cette ligne */
+}
+
+/* Section de droite (Météo + Logo) */
+#right-section {
+    display: flex;
+    align-items: center;
+    gap: 20px; /* Espace entre la météo et le logo */
+    justify-content: flex-end; /* Aligner à droite */
+}
+
+#logo {
+    height: 100%;  /* Limiter la hauteur du logo à celle de la barre */
+    object-fit: contain;
+    max-width: 100px;  /* Limiter la largeur du logo */
+}
+
+/* Style pour le conteneur de la météo */
+.meteo-container {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    color: white; /* Police blanche */
+    font-size: 10px; /* Réduction de la taille de la police */
+}
+
+/* Règle spécifique pour les icônes de la météo */
+.meteo-container .material-symbols-outlined {
+    font-size: 10px;
+    margin-left: 5px; /* Ajuster le décalage si nécessaire */
+}
+
+
+.meteo-day {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+}
+
+.meteo-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.meteo-icon {
+    font-size: 12px; /* Taille de l'icône */
+}
+
+.meteo-date {
+    font-size: 10px; /* Taille réduite pour la date */
+    color: white;
+    text-align: center;
+}
+
+/* Bloc spécifique pour le lever/coucher du soleil */
+.sun-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 5px;
+    background: rgba(255, 255, 255, 0.1); /* Légère transparence */
+    border-radius: 8px;
+    font-size: 10px;
+    color: white;
+    min-width: 60px; /* Assurer une taille uniforme */
+}
+
+.sun-title {
+    font-weight: bold;
+    font-size: 11px;
+    margin-bottom: 3px;
+}
+
+.sun-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.sun-icon {
+    font-size: 12px;
+}
+
+/* Styles pour les flèches de variation */
+.material-symbols-outlined {
+    font-variation-settings:
+      'FILL' 0,
+      'wght' 700,
+      'GRAD' 200,
+      'opsz' 20;
+    color: white; /* Couleur blanche pour les icônes */
+    font-size: 16px; /* Ajuste la taille des icônes si nécessaire */
+    vertical-align: middle; /* Pour aligner les flèches au texte */
+}
+
+/* Styles génériques pour toutes les modales */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(9, 7, 38, 0.8); /* Bleu foncé avec opacité */
+    z-index: 1000;
+    display: none;
+}
+
+.modal-overlay.show {
+    opacity: 1;
+}
+
+/* Modale */
+.modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.9);
+    width: 700px;
+    max-width: 90%;
+    max-height: 80vh; /* Empêche la modale de dépasser l'écran */
+    overflow-y: auto; /* Active le défilement si nécessaire */
+    padding: 20px;
+    background-color: white;
+    border-radius: 8px;
+    z-index: 1001;
+    display: none;
+    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.2);
+    transition: transform 0.3s ease-out, opacity 0.3s ease-out;
+    opacity: 0;
+}
+
+/* Animation d'ouverture */
+.modal.show {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+.modal-content {
+    display: flex;
+    flex-direction: column;
+    width: 100%; /* S'assurer que le contenu occupe la largeur de la modale */
+    box-sizing: border-box;
+    overflow: hidden; /* Évite les scrolls inutiles */
+}
+
+.modal-content h3 {
+    margin-bottom: 15px;
+    color: #ff007f;
+    text-align: center;
+}
+
+.modal-buttons {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 20px;
+}
+
+.modal-buttons button {
+    padding: 10px 15px;
+    font-size: 14px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+.modal-buttons button:first-child {
+    background-color: #ccc;
+    color: black;
+}
+
+.modal-buttons button:first-child:hover {
+    background-color: #bbb;
+}
+
+.modal-buttons button:last-child {
+    background-color: #ff007f;
+    color: white;
+}
+
+.modal-buttons button:last-child:hover {
+    background-color: #e6006f;
+}
+
+.modal-header {
+    font-size: 1.1em;
+    font-weight: bold;
+    margin-bottom: 15px;
+    color: #333;
+}
+
+/* ❌ Bouton de fermeture */
+.modal .close {
+    position: absolute;
+    top: 20px;
+    right: 10px;
+    font-size: 35px;
+    cursor: pointer;
+    color: #333;
+    transition: color 0.3s ease;
+}
+
+.modal .close:hover {
+    color: #ff007f;
+}
+
+/* 📤 Label de sélection de fichier */
+.file-upload-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.file-upload-label {
+    background-color: #ff007f;
+    color: white;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 16px;
+    text-transform: uppercase;
+    font-weight: bold;
+    box-shadow: 0px 4px 6px rgba(255, 0, 127, 0.3);
+    transition: background-color 0.3s ease, box-shadow 0.3s ease, color 0.3s ease;
+}
+
+.file-upload-label:hover {
+    background-color: white;
+    color: #ff007f;
+    box-shadow: 0px 6px 12px rgba(255, 0, 127, 0.5);
+}
+
+/* 🖱 Icône d'upload */
+.upload-icon {
+    font-size: 20px;
+}
+
+/* 📁 Champ de fichier caché */
+input[type="file"] {
+    display: none;
+}
+
+/* 📝 Nom du fichier */
+.file-name {
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 200px;
+}
+
+.modal-buttons .cancel-btn {
+    background-color: #ddd;
+    color: #333;
+    padding: 10px 15px;
+    border-radius: 5px;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+.modal-buttons .cancel-btn:hover {
+    background-color: #bbb;
+}
+
+.modal-buttons .upload-btn {
+    background-color: #ff007f;
+    color: white;
+    padding: 10px 15px;
+    border-radius: 5px;
+    border: none;
+    cursor: pointer;
+    font-weight: bold;
+    transition: background-color 0.3s ease;
+}
+
+.modal-buttons .upload-btn:hover {
+    background-color: #d4006c;
+}
+
+#meteoTable {
+    border-collapse: collapse; /* Fusionner les bordures pour un rendu propre */
+    width: 100%; /* S'étend sur toute la largeur disponible */
+    margin-top: 20px; /* Ajoute un espace au-dessus du tableau */
+    font-family: 'Arial', sans-serif; /* Style de police propre */
+}
+
+#meteoTable th, #meteoTable td {
+    text-align: center; /* Centrer le contenu horizontalement */
+    vertical-align: middle; /* Centrer le contenu verticalement */
+    padding: 5px; /* Ajouter une marge intérieure aux cellules */
+    font-size: 12px; /* Taille de police plus petite pour les cellules du tableau */
+}
+
+#meteoTable th {
+    background-color: #f2f2f2; /* Couleur de fond légèrement grisée pour les en-têtes */
+    font-weight: bold; /* Texte en gras pour les en-têtes */
+    color: #333; /* Couleur du texte dans les en-têtes */
+}
+
+#meteoTable td {
+    background-color: #fff; /* Couleur de fond blanc pour les cellules */
+    color: #555; /* Couleur du texte pour le corps du tableau */
+}
+
+#meteoTable th, #meteoTable td {
+    border: 1px solid #ddd; /* Bordures fines et grises pour une séparation claire */
+}
+
+#meteoTable tr:nth-child(even) {
+    background-color: #f9f9f9; /* Lignes impaires avec un fond légèrement différent pour une meilleure lisibilité */
+}
+
+#meteoTable tr:hover {
+    background-color: #f1f1f1; /* Ajouter un effet de survol pour rendre le tableau plus interactif */
+    transition: background-color 0.2s ease-in-out; /* Transition douce pour l'effet de survol */
+}
+
+.chart-container {
+    width: 100%;
+    height: 300px; /* Fixe la hauteur du graphique */
+}
+
+#meteoChart {
+    width: 100% !important;
+    height: 300px !important; /* Hauteur fixe */
+}
+
+/* Style des cellules pour des valeurs importantes (ex: températures élevées, fortes pluies) */
+.important-cell {
+    background-color: #ffefc1; /* Fond jaune pâle pour attirer l'attention */
+    font-weight: bold;
+}
+
+/* Styles pour le tableau historique */
+#historicalTable, #horaireTable {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+#historicalTable th, #historicalTable td, #horaireTable th, #horaireTable td {
+    text-align: center;
+    vertical-align: middle;
+    padding: 8px;
+    border: 1px solid #ddd;
+    font-size: 0.8em;
+}
+
+#historicalTable th, #horaireTable th {
+    background-color: #f2f2f2;
+    font-weight: bold;
+}
+
+.icon {
+    font-size: 1.2em; /* Taille de l'icône */
+    margin-right: 5px; /* Ajoute un espace entre l'icône et le texte */
+    vertical-align: middle; /* Aligne l'icône au centre verticalement */
+}
+
+th span {
+    font-size: 0.9em; /* Taille du texte à côté de l'icône */
+    font-weight: bold; /* Donne un style gras au texte */
+}
+
+.modal-header {
+    display: flex;
+    justify-content: center; /* Centre le contenu horizontalement */
+    align-items: center; /* Centre verticalement le titre */
+    position: relative; /* Permet de positionner la croix sans affecter le titre */
+}
+
+.modal-header h3 {
+    margin: 0; /* Supprime les marges par défaut */
+    font-size: 1em; /* Ajuste la taille de la police du titre */
+    color: #ff007f; /* Couleur personnalisée pour le titre */
+    text-align: center; /* Assure un centrage du texte */
+    flex-grow: 1; /* Permet au titre de prendre tout l'espace restant */
+}
+
+.close {
+    position: absolute;
+    right: 10px; /* Positionne la croix à droite */
+    top: 50%;
+    transform: translateY(-50%); /* Centre verticalement la croix par rapport à l'en-tête */
+    font-size: 28px; /* Taille de l'icône de la croix */
+    color: #aaa;
+    cursor: pointer;
+}
+
+.close:hover,
+.close:focus {
+    color: black;
+    text-decoration: none;
+}
+
+/* La carte prend toute la largeur disponible */
+#map {
+    width: 100%;
+    height: calc(100vh - 97px);
+    transition: transform 0.3s ease-in-out;
+}
+
+/* Styles supplémentaires pour le bouton plein écran intégré dans Leaflet */
+.leaflet-control-fullscreen-btn {
+    background-color: #fff;
+    border: 2px solid #ccc;
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 5px;
+}
+
+.leaflet-control-fullscreen-btn:hover {
+    background-color: #ff007f;
+}
+
+.leaflet-control-fullscreen-btn .material-icons {
+    font-size: 26px; /* Ajustez cette valeur pour changer la taille de l'icône */
+    line-height: 1;
+    color: rgba(9, 7, 38, 0.8); 
+}
+
+footer {
+    background-color: rgba(9, 7, 38, 0.8);
+    color: white;
+    padding: 10px;
+    text-align: center;
+    font-family: 'DEMO', sans-serif;
+    font-size : 0.8em;
+    margin-top: auto; /* Le footer se place en bas si contenu insuffisant */
+}
+
+.popup-content {
+    font-size: 1.2em !important;
+    color: #333 !important;
+}
+
+.awesomplete {
+    z-index: 2000 !important; /* Pour que la fenêtre d'autocomplétion soit visible */
+}
+
+.awesomplete ul {
+    max-height: 200px;  /* Limite la hauteur de la liste des suggestions */
+    overflow-y: auto;   /* Ajoute une barre de défilement verticale */
+    padding-right: 10px; /* Ajoute de l'espace pour la scrollbar */
+}
+
+/* Conteneur parent */
+#traffic-container {
+    position: fixed;
+    top: 165px;
+    left: 0;
+    z-index: 1000;
+    display: flex; /* Assurer que le bouton reste à côté du tableau */
+    align-items: flex-start;
+}
+
+/* Tableau de Trafic */
+#traffic-table-container {
+    width: 276px;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    background-color: rgba(9, 7, 38, 0.8);
+    color: white;
+    border-radius: 10px;
+    box-shadow: 0 0 15px rgba(0,0,0,0.3);
+    padding: 10px;
+    transform: translateX(0);
+    transition: transform 0.3s ease;
+}
+
+/* Styliser les en-têtes */
+#traffic-table-container th {
+    background-color: #ff007f; /* Couleur de fond des en-têtes */
+    color: white;
+    padding: 5px;
+    text-align: left;
+}
+
+/* Styliser les lignes impaires et paires */
+#traffic-table-container tbody tr:nth-child(odd) {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+#traffic-table-container tbody tr:nth-child(even) {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Styliser les cellules */
+#traffic-table-container td {
+    padding: 3px;
+    cursor: pointer; /* Indiquer que les lignes sont cliquables */
+    background-color: transparent; /* Hérite de la couleur de la ligne */
+    font-size: 0.75em; /* Plus petite pour les données */
+}
+
+/* Ajouter un effet de survol */
+#traffic-table-container tbody tr:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+    transform: scale(1.02); /* Légère agrandissement */
+    transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+/* Ajouter une transition douce pour les lignes */
+#traffic-table-container tbody tr {
+    transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+#toggle-traffic-table:hover {
+    background-color: #e60073;
+}
+
+/* Bouton de repli/dépli */
+#toggle-traffic-table {
+    position: absolute; /* Positionné par rapport à son parent (traffic-container) */
+    top: 12px; /* Aligner le bouton verticalement */
+    right: -24px; /* Positionner le bouton juste à côté du tableau */
+    background-color: #ff007f;
+    color: white;
+    border: none;
+    border-radius: 0 5px 5px 0;
+    padding: 10px;
+    cursor: pointer;
+    z-index: 1000;
+    transition: background-color 0.3s ease, transform 0.3s ease; /* Animation lissée */
+    height: 31px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Quand le tableau est replié */
+#traffic-container.replie #traffic-table-container {
+    transform: translateX(-100%);
+}
+
+/* Quand le tableau est replié, on déplace également le bouton */
+#traffic-container.replie #toggle-traffic-table {
+    right: 0; /* Positionne le bouton au bord gauche */
+    transform: translateX(-265px); /* Ajuste la position du bouton pour qu'il suive le tableau */
+}
+
+.custom-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 14px;
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+}
+
+.custom-pin-icon .pin-container {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.custom-pin-icon .pin-icon {
+    width: 24px;
+    height: 24px;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-color: white;
+    border: 2px solid red; /* Bordure rouge autour de l'icône */
+    border-radius: 50%; /* Pour obtenir un cercle */
+    box-shadow: 0 2px 5px rgba(0,0,0,0.3); /* Ombre légère */
+}
+
+.custom-pin-icon .pin-pointer {
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 12px solid red; /* Couleur de la pointe */
+    margin-top: -2px; /* Ajuster pour coller la pointe à l'icône */
+}
+
+/* Responsivité pour les petits écrans, y compris iPhone */
+@media screen and (max-width: 600px) {
+    #traffic-table-container {
+        width: 90%;
+        left: 5%;
+        top: 100px;
+        max-height: calc(100vh - 150px); /* Ajustement pour mobile */
+    }
+
+    #toggle-traffic-table {
+        top: 100px;
+        left: 95%; /* Positionner à droite */
+        transform: translateX(-50%);
+        border-radius: 5px 5px 0 0;
+    }
+}
+
+/* Style du bouton principal */
+#menuBtn {
+    position: absolute;
+    bottom: 60px;
+    right: 20px;
+    background-color: white;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    box-shadow: 0px 2px 5px rgba(0,0,0,0.3);
+    cursor: pointer;
+    z-index: 1000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: background-color 0.3s ease, color 0.3s ease; /* Transition douce */
+}
+
+#menuBtn .material-icons {
+    font-size: 24px;
+    color: #555;
+    transition: color 0.3s ease; /* Transition douce pour la couleur */
+}
+
+/* Survol du bouton principal */
+#menuBtn:hover {
+    background-color: #ff007f; /* Couleur de fond sur survol */
+}
+
+#menuBtn:hover .material-icons {
+    color: white; /* Couleur de l'icône sur survol */
+}
+
+/* Style de base pour les sous-boutons */
+.subButton {
+    position: absolute;
+    right: 25px;
+    background-color: white;
+    border: none;
+    border-radius: 50%;
+    width: 35px;
+    height: 35px;
+    box-shadow: 0px 2px 5px rgba(0,0,0,0.3);
+    cursor: pointer;
+    display: none;
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+    transition: background-color 0.3s ease, color 0.3s ease; /* Transition douce */
+}
+
+.subButton .material-icons {
+    font-size: 18px;
+    color: #555;
+    transition: color 0.3s ease; /* Transition douce pour la couleur */
+}
+
+/* Survol des sous-boutons */
+.subButton:hover {
+    background-color: #ff007f; /* Couleur de fond sur survol */
+}
+
+.subButton:hover .material-icons {
+    color: white; /* Couleur de l'icône sur survol */
+}
+
+#drawPolygonBtn {
+    bottom: 130px;
+}
+
+#measureDistanceBtn {
+    bottom: 180px;
+}
+
+#drawCircleBtn {
+    bottom: 230px;
+}
+
+#editBtn {
+    bottom: 280px;
+}
+
+#clearPolygonsBtn {
+    bottom: 330px;
+}
+
+/* Conteneur du bouton slide */
+.slide-container {
+    position: fixed;
+    z-index: 1000; /* Ajustez pour s'assurer qu'il est au-dessus des autres éléments */
+}
+
+/* Position spécifique pour le toggle Traffic */
+.traffic-container {
+    position: fixed;   /* ou absolute, selon vos besoins */
+    right: 14px;         /* Position verticale pour Traffic */
+    top: 140px;        /* Position horizontale pour Traffic */
+}
+
+/* Position spécifique pour le toggle Event */
+.event-container {
+    position: fixed;
+    top: 180px;         /* Position verticale pour Event */
+    right: 14px;       /* Position horizontale pour Event */
+}
+
+/* Style du switch */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 80px;  /* Largeur ajustée pour le texte 'Traffic' */
+    height: 27px;
+}
+
+/* Cache l'input réel */
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+/* Style de base du slider utilisant la variable --primary-color */
+.slider {
+    position: relative;
+    background-color: white;
+    border: 2px solid var(--primary-color);
+    border-radius: 34px;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+    transition: background-color .4s, justify-content .4s;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end; /* Aligner le texte à droite par défaut (Off) */
+}
+  
+  .slider .slider-text {
+    color: var(--primary-color);
+    font-family: 'Arial', sans-serif;
+    font-size: 13px;
+    font-weight: bold;
+    transition: color .4s;
+    margin-right: 10px;
+}
+  
+  .slider .slider-button {
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 24px;
+    height: 24px;
+    background-color: var(--primary-color);
+    border-radius: 50%;
+    transition: transform .4s, background-color .4s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+  
+  .slider .slider-button::after {
+    content: 'Off';
+    color: white;
+    font-size: 10px;
+    font-weight: bold;
+}
+  
+  /* État activé du slider */
+  input:checked + .slider {
+    background-color: var(--primary-color);
+    justify-content: flex-start; /* Aligner le texte à gauche quand activé (On) */
+}
+  
+  input:checked + .slider .slider-text {
+    color: white;
+    margin-left: 10px;
+    margin-right: 0;
+}
+  
+  input:checked + .slider .slider-button {
+    transform: translateX(52px);
+    background-color: white;
+}
+  
+  input:checked + .slider .slider-button::after {
+    content: 'On';
+    color: var(--primary-color);
+}
+  
+  /* Slider Traffic (rose) */
+  .slider.traffic-slider {
+    --primary-color: #ff007f;
+}
+  
+  /* Slider Event (bleu) */
+  .slider.event-slider {
+    --primary-color: #007bff;
+}
+
+/* Conteneur global pour un compteur (regroupe le rond et le libellé) */
+.counter-container {
+    position: fixed; /* Positionné par rapport à la fenêtre */
+    z-index: 1000;   /* Pour s'assurer qu'il est au-dessus des autres éléments */
+    display: flex;   /* Pour disposer le compteur et le label côte à côte */
+    align-items: center;
+}
+
+/* Position spécifique du compteur d'Accidents */
+#accident-container {
+    top: 240px;  /* Ajustez la position verticale */
+    right: 10px; /* Ajustez la position horizontale */
+}
+
+/* Position spécifique du compteur d'Embouteillages */
+#jam-container {
+    top: 290px;  /* Ajustez la position verticale */
+    right: 10px; /* Ajustez la position horizontale */
+}
+
+/* Style commun pour le rond compteur */
+.counter {
+    background-color: green; /* Couleur par défaut, modifiable dynamiquement (ex : en .red) */
+    color: white;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2em;
+    box-shadow: 0 0 10px rgba(0,0,0,0.3);
+    transition: background-color 0.3s ease;
+}
+
+/* Lorsque le compteur doit être en rouge (par exemple, lorsqu'un événement se produit) */
+.counter.red {
+    background-color: red;
+}
+
+/* Style commun pour le label */
+.label {
+    background-color: green; /* À synchroniser avec le compteur */
+    color: white;
+    font-size: 14px;
+    font-family: 'Arial', sans-serif;
+    font-weight: bold;
+    padding: 5px 10px;
+    border-radius: 10px;
+    text-align: center;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+    margin-right: 5px; /* Espacement entre le rond et le label */
+}
+
+/* Variante pour le label en rouge, si besoin */
+.label.red {
+    background-color: red;
+}
+
+/* Styles pour l'icône des sanitaires */
+.sanitary-icon {
+    background-color: green;
+    color: white;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 10px;
+    text-align: center;
+    line-height: 1;
+}
+
+/* Container des messages flash */
+#flash-container {
+    position: fixed;
+    top: 70px; /* Ajusté pour apparaître sous la barre de navigation et le logo */
+    right: 50px;
+    z-index: 1010;
+    width: 300px; /* Largeur fixe */
+    display: flex;
+    flex-direction: column;
+    gap: 10px; /* Espace entre les messages */
+}
+
+/* Style commun aux messages flash */
+.flash-popup {
+    padding: 15px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: bold;
+    color: white;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+    animation: fadeout 10s ease forwards; /* Animation pour disparition */
+    opacity: 1;
+    transition: opacity 0.5s ease-in-out;
+}
+
+/* Catégorie validation (vert) */
+.flash-popup.success {
+    background-color: rgba(40, 167, 69, 0.9); /* Vert avec transparence */
+    border: 2px solid rgba(40, 167, 69, 1); /* Bordure verte opaque */
+}
+
+/* Catégorie erreur (rouge) */
+.flash-popup.error {
+    background-color: rgba(220, 53, 69, 0.9); /* Rouge avec transparence */
+    border: 2px solid rgba(220, 53, 69, 1); /* Bordure rouge opaque */
+}
+
+/* Catégorie attention (orange) */
+.flash-popup.warning {
+    background-color: rgba(246, 180, 87, 0.9); /* Orange avec transparence */
+    border: 2px solid rgba(246, 180, 87, 1); /* Bordure orange opaque */
+}
+
+/* Animation pour disparition */
+@keyframes fadeout {
+    0% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    90% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+}

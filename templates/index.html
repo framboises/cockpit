@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <!-- Métadonnées -->
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>LOOKER v2</title>
+
+    <!-- Feuilles de style -->
+    <!-- 1. Styles liés à Leaflet et ses plugins -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='libs/leaflet/leaflet.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='ressources/leaflet-compass-master/src/leaflet-compass.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+
+    <!-- 2. Bibliothèques CSS externes -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/photoswipe@5.4.4/dist/photoswipe.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/photoswipe-dynamic-caption-plugin@1.2.7/photoswipe-dynamic-caption-plugin.css">    
+
+    <!-- 3. Styles personnalisés -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+    <!-- Scripts -->
+    <!-- 1. Scripts liés à Leaflet et ses plugins -->
+    <script src="{{ url_for('static', filename='libs/leaflet/leaflet.js') }}"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+    <script src="{{ url_for('static', filename='ressources/leaflet-compass-master/src/leaflet-compass.js') }}"></script>
+    <script src="{{ url_for('static', filename='ressources/leaflet.polylineDecorator.js') }}"></script>
+
+    <!-- 2. Bibliothèques et utilitaires externes -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
+
+    <!-- 4. Scripts personnalisés -->
+    <script src="{{ url_for('static', filename='js/traduction.js') }}"></script>
+</head>    
+<body class="body-without-sidebar">
+    <div id="search-box">
+        <!-- Bouton Hamburger pour ouvrir la Sidebar -->
+        <button id="hamburger-button">
+            <i class="material-icons">menu</i>
+        </button>
+    
+        <!-- Conteneur de gauche (Recherche) -->
+        <div id="left-section">
+        </div>
+    
+        <!-- Conteneur de droite (Météo + Logo) -->
+        <div id="right-section">
+            <div id="meteo-previsions" class="meteo-container">
+                <!-- Les données météo seront insérées ici -->
+            </div>  
+            <img id="logo" src="{{ url_for('static', filename='img/ACO-logo-monochrome-universel-blanc.png') }}" alt="Logo ACO">
+        </div>
+    </div>
+    
+    <!-- Sidebar -->
+    <div id="sidebar">
+        <ul>
+            <!-- Lien vers le portail -->
+            <li>
+                <a href="http://safe.lemans.org/home">
+                    <i class="fa fa-tachometer-alt"></i> Tableaux de bord
+                </a>
+            </li>
+
+            <!-- Génération automatique des applications autorisées -->
+            {% for app in user_apps %}
+                <li>
+                    <a href="http://{{ app | lower }}.safe.lemans.org">
+                        <i class="fa fa-cube"></i> {{ app | capitalize }}
+                    </a>
+                </li>
+            {% endfor %}
+
+            <!-- Bouton "Accéder à la configuration" uniquement pour managers et admins -->
+            {% if "manager" in user_roles or "admin" in user_roles %}
+                <li>
+                    <a href="/edit">
+                        <i class="fa fa-cogs"></i> Configuration Looker
+                    </a>
+                </li>
+            {% endif %}
+
+            <!-- Sélecteur d'Événement -->
+            <li>
+                <label for="event-select" style="color: #ccc; font-size: 16px;">Événement</label>
+                <select id="event-select" style="width: 90%; margin-top: 5px;"></select>
+            </li>
+
+            <!-- Sélecteur d'Année -->
+            <li>
+                <label for="year-select" style="color: #ccc; font-size: 16px;">Année</label>
+                <select id="year-select" style="width: 90%; margin-top: 5px;"></select>
+            </li>
+
+            <!-- Bouton de déconnexion -->
+            <li>
+                <a href="/logout_redirect" style="color:red;">
+                    <i class="fa fa-sign-out-alt"></i> Se déconnecter
+                </a>
+            </li>
+        </ul>
+    </div>  
+    
+    <!-- Conteneur principal pour tout le contenu -->
+    <div id="main-content">
+        <!-- Carte OSM -->
+        <div id="map"></div>
+    
+        <!-- Conteneur parent pour le tableau de trafic et le bouton -->
+        <div id="traffic-container">
+            <div id="traffic-table-container">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Route</th>
+                            <th>Trajet</th>
+                            <th>Retard</th>
+                        </tr>
+                    </thead>
+                    <tbody id="traffic-info-body">
+                        <!-- Les embouteillages seront insérés ici par JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+            <!-- Bouton de Repli/Dépli pour le Tableau de Trafic -->
+            <button id="toggle-traffic-table">◀</button>
+        </div>
+
+        <!-- Container modal externe (initialement vide) -->
+        <div id="modal-flipcard-container"></div>
+
+        <!-- Conteneur général des flipcards -->
+        <div id="flipcards-container">
+            
+            <!-- Flipcard pour "Horaires Public" -->
+            <div class="flip-card" id="flipcard-public">
+                <div class="flip-card-inner">
+                <!-- Face avant (recto) -->
+                <div class="flip-card-front">
+                    <span class="material-symbols-outlined flip-icon">calendar_clock</span>
+                    <span class="flip-text">Horaires publics</span>
+                </div>
+                <!-- Face arrière (verso) -->
+                <div class="flip-card-back">
+                    <!-- L'en-tête sera inséré ici par le JS -->
+                    <table>
+                    <thead>
+                        <tr>
+                        <th>Date</th>
+                        <th>Ouverture</th>
+                        <th>Fermeture</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Les lignes seront insérées ici par JavaScript -->
+                    </tbody>
+                    </table>
+                </div>
+                </div>
+            </div>  
+  
+            <!-- Flipcard Montage/Démontage -->
+            <div class="flip-card" id="flipcard-montage">
+                <div class="flip-card-inner">
+                <!-- Face avant (recto) -->
+                <div class="flip-card-front">
+                    <span class="material-symbols-outlined flip-icon">handyman</span>
+                    <span class="flip-text">Montage Démontage</span>
+                </div>
+                <!-- Face arrière (verso) : le contenu sera remplacé par le JS -->
+                <div class="flip-card-back">
+                    <!-- Le contenu sera généré par populateMontageDemontage() -->
+                </div>
+                </div>
+            </div>  
+
+            <!-- Flipcard Arrivée -->
+            <div class="flip-card" id="flipcard-arrivee">
+                <div class="flip-card-inner">
+                <div class="flip-card-front">
+                    <span class="material-symbols-outlined flip-icon">sports_score</span>
+                    <span class="flip-text">Arrivées</span>
+                </div>
+                <div class="flip-card-back">
+                    <!-- Le contenu sera généré par la fonction populateArrivees() -->
+                    <p>Contenu Arrivée</p>
+                </div>
+                </div>
+            </div>  
+
+            <!-- Flipcard Scan -->
+            <div class="flip-card" id="flipcard-scan">
+                <div class="flip-card-inner">
+                <div class="flip-card-front">
+                    <span class="material-symbols-outlined flip-icon">qr_code_scanner</span>
+                    <span class="flip-text">Scans</span>
+                </div>
+                <div class="flip-card-back">
+                    <!-- Contenu du verso pour Scan -->
+                    <p>Contenu Scan</p>
+                </div>
+                </div>
+            </div>
+
+            <!-- Flipcard Postes de commandement -->
+            <div class="flip-card" id="flipcard-pc">
+                <div class="flip-card-inner">
+                <div class="flip-card-front">
+                    <span class="material-symbols-outlined flip-icon">local_police</span>
+                    <span class="flip-text">PC</span>
+                </div>
+                <div class="flip-card-back">
+                    <!-- Contenu du verso pour Postes de commandement -->
+                    <p>Contenu Postes de commandement</p>
+                </div>
+                </div>
+            </div>
+
+            <!-- Flipcard Accréditations -->
+            <div class="flip-card" id="flipcard-accred">
+                <div class="flip-card-inner">
+                <div class="flip-card-front">
+                    <span class="material-symbols-outlined flip-icon">badge</span>
+                    <span class="flip-text">ACCREDITATIONS</span>
+                </div>
+                <div class="flip-card-back">
+                    <!-- Contenu du verso pour accréditations -->
+                    <p>Contenu accréditations</p>
+                </div>
+                </div>
+            </div>
+        </div>    
+    </div> 
+
+    <!-- Modale pour les prévisions météo -->
+    <div id="meteoModal" class="modal">
+        <div class="modal-content">
+            <div id="meteo-details"></div>
+        </div>
+    </div>
+
+    <!-- Bouton Slide pour activer/désactiver le trafic -->
+    <div class="slide-container traffic-container">
+        <label class="switch">
+            <input type="checkbox" id="trafficToggle">
+            <span class="slider traffic-slider">
+                <span class="slider-text">Traffic</span>
+                <span class="slider-button"></span>
+            </span>
+        </label>
+    </div>
+
+    <!-- Compteur d'Accidents regroupé dans un container -->
+    <div id="accident-container" class="counter-container">
+        <div id="accident-label" class="label">
+            Accident
+        </div>
+        <div id="accident-counter" class="counter">
+            <span id="accident-number">0</span>
+        </div>
+    </div>
+
+    <!-- Compteur d'Embouteillages regroupé dans un container -->
+    <div id="jam-container" class="counter-container">
+        <div id="jam-label" class="label">
+            Ralentissement
+        </div>
+        <div id="jam-counter" class="counter">
+            <span id="jam-number">0</span>
+        </div>
+    </div>
+
+    <!-- Affichage des messages flash Flask -->
+    <div id="flash-container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="flash-popup {{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+    </div>
+
+    <!-- Overlay (indépendant de la modale) -->
+    <div class="modal-overlay" onclick="closeUploadModal()"></div>
+
+    <!-- Overlay pour assombrir l'arrière-plan -->
+    <div id="modalOverlay" class="modal-overlay"></div>
+
+    <!-- Modale météo -->
+    <div id="meteoModal" class="modal">
+        <div id="meteo-details" class="modal-content">
+            <!-- Contenu injecté dynamiquement -->
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+        TITAN - Techniques d'Intégration Topographique avec Navigation
+    </footer> 
+
+    <!-- Script principal -->
+    <script nonce="{{ nonce }}">var satelliteIconUrl = "{{ url_for('static', filename='img/satellite.png') }}";</script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/meteo.js') }}"></script>
+    <!-- Inclure le script des alertes -->
+    <script src="{{ url_for('static', filename='js/alerte.js') }}"></script>
+    <!-- Script de trafic -->
+    <script src="{{ url_for('static', filename='js/traffic.js') }}"></script> 
+    <!-- Script vue événement -->
+    <script src="{{ url_for('static', filename='js/event_view.js') }}"></script>     
+
+</body>
+</html>
