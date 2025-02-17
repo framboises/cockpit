@@ -190,11 +190,58 @@ def get_events():
     events = list(db['evenement'].find({}, {'_id': 0, 'nom': 1}))
     return jsonify(events)
 
+# Route pour servir les tuiles locales
+@app.route('/tiles/<z>/<x>/<y>.png')
+@role_required("user")
+def serve_tiles(z, x, y):
+    tile_directories = [
+        r'E:\TITAN\shared\satellite', # Windows serveur
+        r'C:\Users\l.arnault\satellite', # Windows PCA
+        '/Users/ludovic/Dropbox/ACO/TITAN/archives/looker/static/img/sat', # MAC OS laptop
+        '/Users/ludovicarnault/Dropbox/ACO/TITAN/looker/static/img/sat' # MAC OS maison
+    ]
+
+    for tile_directory in tile_directories:
+        tile_path = safe_join(tile_directory, z, x)
+        image_path = safe_join(tile_path, f'{y}.png')
+              
+        if os.path.exists(image_path):
+            return send_from_directory(tile_path, f'{y}.png')
+
+    return abort(404, description="Image non trouvée dans les répertoires spécifiés.")
+
 ################################################################################
 # ROUTES FLASK
 ################################################################################
 
+@app.route('/timetable', methods=['GET'])
+@role_required("user")
+def get_timetable():
+    # Récupère les paramètres d'URL pour l'événement et l'année
+    event = request.args.get('event')
+    year = request.args.get('year')
+    
+    if not event or not year:
+        return jsonify({"error": "Les paramètres 'event' et 'year' sont requis."}), 400
 
+    # Recherche dans la collection "timetable"
+    timetable_doc = db.timetable.find_one({"event": event, "year": year}, {"_id": 0})
+    
+    if not timetable_doc:
+        return jsonify({"error": "Aucune donnée trouvée pour cet événement et cette année."}), 404
+
+    return jsonify(timetable_doc)
+
+@app.route('/get_parametrage', methods=['GET'])
+@role_required("user")
+def get_parametrage():
+    event = request.args.get('event')
+    year = request.args.get('year')
+    parametrage = db['parametrages'].find_one({'event': event, 'year': year}, {'_id': 0, 'data': 1})
+    if parametrage:
+        return jsonify(parametrage['data'])
+    else:
+        return jsonify({})
 
 ################################################################################
 # METEO ET SOLEIL
@@ -337,6 +384,60 @@ def get_historique_meteo(date):
     except Exception as e:
         print(f"Erreur lors de la récupération des données historiques: {e}")
         return jsonify({'error': 'Server error'}), 500
+    
+@app.route('/meteo_previsions_6h', methods=['GET'])
+@role_required("user")
+def get_meteo_previsions_6h():
+    now = datetime.now()
+    six_hours_from_now = now + timedelta(hours=6)
+
+    # Rechercher les prévisions pour la journée actuelle
+    previsions_today = db.meteo_previsions.find_one({
+        'Date': now.strftime('%Y-%m-%d')
+    })
+
+    # Rechercher les prévisions pour le jour suivant si nécessaire
+    previsions_tomorrow = None
+    if six_hours_from_now.day != now.day:
+        previsions_tomorrow = db.meteo_previsions.find_one({
+            'Date': six_hours_from_now.strftime('%Y-%m-%d')
+        })
+
+    results = []
+
+    # Filtrer les heures de la journée actuelle en respectant la limite des 6 heures
+    if previsions_today and 'Heures' in previsions_today:
+        for heure in previsions_today['Heures']:
+            heure_str = heure['Heure']
+            heure_obj = datetime.strptime(f"{previsions_today['Date']} {heure_str}", '%Y-%m-%d %H:%M')
+
+            # Inclure les heures entre now et six_hours_from_now
+            if now <= heure_obj < six_hours_from_now:
+                results.append({
+                    'Date': previsions_today['Date'],
+                    'Heure': heure_str,
+                    'Température (°C)': int(heure['Température (°C)']),
+                    'Pluviométrie (mm)': float(heure['Pluviométrie (mm)']),
+                    'Vent rafale (km/h)': int(heure['Vent rafale (km/h)'])
+                })
+
+    # Ajouter les heures du jour suivant si nécessaire
+    if previsions_tomorrow and 'Heures' in previsions_tomorrow:
+        for heure in previsions_tomorrow['Heures']:
+            heure_str = heure['Heure']
+            heure_obj = datetime.strptime(f"{previsions_tomorrow['Date']} {heure_str}", '%Y-%m-%d %H:%M')
+
+            # Inclure les heures jusqu'à six_hours_from_now
+            if heure_obj <= six_hours_from_now:
+                results.append({
+                    'Date': previsions_tomorrow['Date'],
+                    'Heure': heure_str,
+                    'Température (°C)': int(heure['Température (°C)']),
+                    'Pluviométrie (mm)': float(heure['Pluviométrie (mm)']),
+                    'Vent rafale (km/h)': int(heure['Vent rafale (km/h)'])
+                })
+
+    return jsonify(results)
 
 @app.route('/sun_times', methods=['GET'])
 @role_required("user")  # 🔥 Accessible à tous les utilisateurs authentifiés

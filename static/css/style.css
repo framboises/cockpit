@@ -14,41 +14,6 @@ body, html {
     flex-direction: column;  
 }
 
-/* Styliser l'icône de la maison */
-#home-link .material-symbols-outlined {
-    font-size: 24px; /* Augmenter la taille de l'icône */
-    color: white; /* Couleur de l'icône */
-    line-height: 1; /* Assure un bon alignement vertical de l'icône */
-}
-
-/* Styles pour le lien home */
-#home-link {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px; /* Largeur du bouton */
-    height: 40px; /* Hauteur du bouton */
-    background-color: rgba(0, 122, 255, 0.7);
-    border-radius: 5px;
-    transition: background-color 0.3s ease;
-    text-decoration: none; /* Supprimer le soulignement */
-    color: white; /* Couleur du lien */
-}
-
-/* Styles pour les états du lien */
-#home-link:link,
-#home-link:visited,
-#home-link:hover,
-#home-link:active {
-    text-decoration: none; /* Supprimer le soulignement */
-    color: white; /* Couleur du lien */
-}
-
-/* Changement de couleur au survol */
-#home-link:hover {
-    background-color: #023173;
-}
-
 /* Conserver le style existant de la search-box */
 #search-box {
     background-color: rgba(9, 7, 38, 0.8) !important;
@@ -93,28 +58,14 @@ body, html {
     color: black !important;
 }
 
-#grid-input {
-    flex-grow: 1;
-    padding: 9px;  
-    font-size: 0.8em !important;
-    border: none !important;
-    border-radius: 5px;
-    background-color: white !important;
-    color: black !important;
-    min-width: 350px;
-}
-
-#grid-input {
-    flex-grow: 1;  /* Le champ de recherche prend l'espace restant à gauche */
-    min-width: 250px; /* Limiter la largeur minimale */
-}
-
-#search-button:hover, #clear-map-button:hover, #edit-button:hover, #show-all-button:hover {
+#hud-button:hover {
     background-color: white !important;
     color: #ff007f !important;
 }
 
-#search-button, #clear-map-button, #edit-button, #show-all-button {
+#hud-button {
+    width: 35px;
+    height: 35px;
     padding: 4px 5px !important;
     background-color: #ff007f !important;
     color: white !important;
@@ -125,12 +76,8 @@ body, html {
     transition: background-color 0.3s ease, color 0.3s ease, transform 0.3s ease-in-out !important;
 }
 
-#search-button, #clear-map-button, #edit-button, #show-all-button i {
+#hud-button i {
     vertical-align: middle;
-}
-
-#show-all-button i {
-    font-size: 26px !important;
 }
 
 /* Pour garder le bouton hamburger visible en haut */
@@ -325,9 +272,9 @@ body, html {
 /* Section de droite (Météo + Logo) */
 #right-section {
     display: flex;
-    align-items: center;
-    gap: 20px; /* Espace entre la météo et le logo */
-    justify-content: flex-end; /* Aligner à droite */
+    align-items: center; /* Aligne verticalement les éléments au centre */
+    justify-content: center; /* Centre les éléments sur l'axe principal */
+    gap: 15px;  /* Espacement entre les éléments */
 }
 
 #logo {
@@ -342,38 +289,25 @@ body, html {
     align-items: center;
     gap: 15px;
     color: white; /* Police blanche */
+}
+
+.meteo-hour-temp {
+    font-size: 12px; /* Réduction de la taille de la police */
+    font-weight: bold;
+}
+
+.meteo-rain, .meteo-wind {
+    font-style: italic;  /* Texte en italique */
     font-size: 10px; /* Réduction de la taille de la police */
-}
-
-/* Règle spécifique pour les icônes de la météo */
-.meteo-container .material-symbols-outlined {
-    font-size: 10px;
-    margin-left: 5px; /* Ajuster le décalage si nécessaire */
-}
-
-
-.meteo-day {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: 10px;
 }
 
 .meteo-item {
     display: flex;
-    align-items: center;
-    gap: 5px;
-}
-
-.meteo-icon {
-    font-size: 12px; /* Taille de l'icône */
+    flex-direction: column; /* Affiche les éléments verticalement */
 }
 
 .meteo-date {
-    font-size: 10px; /* Taille réduite pour la date */
-    color: white;
-    text-align: center;
+    display: none;
 }
 
 /* Bloc spécifique pour le lever/coucher du soleil */
@@ -415,7 +349,7 @@ body, html {
       'GRAD' 200,
       'opsz' 20;
     color: white; /* Couleur blanche pour les icônes */
-    font-size: 16px; /* Ajuste la taille des icônes si nécessaire */
+    font-size: 20px; /* Ajuste la taille des icônes si nécessaire */
     vertical-align: middle; /* Pour aligner les flèches au texte */
 }
 
@@ -528,56 +462,6 @@ body, html {
 
 .modal .close:hover {
     color: #ff007f;
-}
-
-/* 📤 Label de sélection de fichier */
-.file-upload-container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    margin-top: 15px;
-}
-
-.file-upload-label {
-    background-color: #ff007f;
-    color: white;
-    padding: 10px 20px;
-    border-radius: 5px;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 16px;
-    text-transform: uppercase;
-    font-weight: bold;
-    box-shadow: 0px 4px 6px rgba(255, 0, 127, 0.3);
-    transition: background-color 0.3s ease, box-shadow 0.3s ease, color 0.3s ease;
-}
-
-.file-upload-label:hover {
-    background-color: white;
-    color: #ff007f;
-    box-shadow: 0px 6px 12px rgba(255, 0, 127, 0.5);
-}
-
-/* 🖱 Icône d'upload */
-.upload-icon {
-    font-size: 20px;
-}
-
-/* 📁 Champ de fichier caché */
-input[type="file"] {
-    display: none;
-}
-
-/* 📝 Nom du fichier */
-.file-name {
-    font-size: 14px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 200px;
 }
 
 .modal-buttons .cancel-btn {
@@ -724,11 +608,19 @@ th span {
     text-decoration: none;
 }
 
-/* La carte prend toute la largeur disponible */
+/* La carte occupe le reste de l'espace */
 #map {
-    width: 100%;
+    flex: 1;
+    /* Si nécessaire, ajoutez une marge pour ne pas être collée à la timeline */
+    margin-left: 1rem;
+}
+
+/* Organise le contenu principal en flex pour placer la timeline et la carte côte à côte */
+#main-content {
+    display: flex;
+    flex-direction: row;
     height: calc(100vh - 97px);
-    transition: transform 0.3s ease-in-out;
+    position: relative;
 }
 
 /* Styles supplémentaires pour le bouton plein écran intégré dans Leaflet */
@@ -767,16 +659,6 @@ footer {
 .popup-content {
     font-size: 1.2em !important;
     color: #333 !important;
-}
-
-.awesomplete {
-    z-index: 2000 !important; /* Pour que la fenêtre d'autocomplétion soit visible */
-}
-
-.awesomplete ul {
-    max-height: 200px;  /* Limite la hauteur de la liste des suggestions */
-    overflow-y: auto;   /* Ajoute une barre de défilement verticale */
-    padding-right: 10px; /* Ajoute de l'espace pour la scrollbar */
 }
 
 /* Conteneur parent */
@@ -930,93 +812,6 @@ footer {
     }
 }
 
-/* Style du bouton principal */
-#menuBtn {
-    position: absolute;
-    bottom: 60px;
-    right: 20px;
-    background-color: white;
-    border: none;
-    border-radius: 50%;
-    width: 40px;
-    height: 40px;
-    box-shadow: 0px 2px 5px rgba(0,0,0,0.3);
-    cursor: pointer;
-    z-index: 1000;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    transition: background-color 0.3s ease, color 0.3s ease; /* Transition douce */
-}
-
-#menuBtn .material-icons {
-    font-size: 24px;
-    color: #555;
-    transition: color 0.3s ease; /* Transition douce pour la couleur */
-}
-
-/* Survol du bouton principal */
-#menuBtn:hover {
-    background-color: #ff007f; /* Couleur de fond sur survol */
-}
-
-#menuBtn:hover .material-icons {
-    color: white; /* Couleur de l'icône sur survol */
-}
-
-/* Style de base pour les sous-boutons */
-.subButton {
-    position: absolute;
-    right: 25px;
-    background-color: white;
-    border: none;
-    border-radius: 50%;
-    width: 35px;
-    height: 35px;
-    box-shadow: 0px 2px 5px rgba(0,0,0,0.3);
-    cursor: pointer;
-    display: none;
-    z-index: 1000;
-    justify-content: center;
-    align-items: center;
-    transition: background-color 0.3s ease, color 0.3s ease; /* Transition douce */
-}
-
-.subButton .material-icons {
-    font-size: 18px;
-    color: #555;
-    transition: color 0.3s ease; /* Transition douce pour la couleur */
-}
-
-/* Survol des sous-boutons */
-.subButton:hover {
-    background-color: #ff007f; /* Couleur de fond sur survol */
-}
-
-.subButton:hover .material-icons {
-    color: white; /* Couleur de l'icône sur survol */
-}
-
-#drawPolygonBtn {
-    bottom: 130px;
-}
-
-#measureDistanceBtn {
-    bottom: 180px;
-}
-
-#drawCircleBtn {
-    bottom: 230px;
-}
-
-#editBtn {
-    bottom: 280px;
-}
-
-#clearPolygonsBtn {
-    bottom: 330px;
-}
-
 /* Conteneur du bouton slide */
 .slide-container {
     position: fixed;
@@ -1028,13 +823,6 @@ footer {
     position: fixed;   /* ou absolute, selon vos besoins */
     right: 14px;         /* Position verticale pour Traffic */
     top: 140px;        /* Position horizontale pour Traffic */
-}
-
-/* Position spécifique pour le toggle Event */
-.event-container {
-    position: fixed;
-    top: 180px;         /* Position verticale pour Event */
-    right: 14px;       /* Position horizontale pour Event */
 }
 
 /* Style du switch */
@@ -1188,20 +976,184 @@ footer {
     background-color: red;
 }
 
-/* Styles pour l'icône des sanitaires */
-.sanitary-icon {
-    background-color: green;
-    color: white;
-    border-radius: 50%;
-    width: 30px;
-    height: 30px;
+/* --- Timeline Container --- */
+.timeline-container {
+    width: 25%; /* Ajustez cette valeur selon vos besoins */
+    overflow-y: auto;
+    background-color: rgba(9, 7, 38, 0.8) !important;
+    padding: 1rem;
+    color: #fff;
+}
+
+/* Personnalisation de la barre de défilement pour WebKit (Chrome, Edge, Safari) */
+.timeline-container::-webkit-scrollbar {
+    width: 4px; /* Largeur de la barre de scroll */
+}
+
+.timeline-container::-webkit-scrollbar-track {
+    background: rgba(9, 7, 38, 0.6); /* Couleur du fond de la barre */
+    border-radius: 10px;
+}
+
+.timeline-container::-webkit-scrollbar-thumb {
+    background: #ff007f; /* Couleur du curseur */
+    border-radius: 10px;
+    border: 2px solid rgba(9, 7, 38, 0.8); /* Bordure pour un effet encadré */
+}
+
+.timeline-container::-webkit-scrollbar-thumb:hover {
+    background: #e60073; /* Couleur du curseur au survol */
+}
+
+/* Compatibilité Firefox */
+.timeline-container {
+    scrollbar-width: thin;
+    scrollbar-color: #ff007f rgba(9, 7, 38, 0.6);
+}
+
+/* --- Section par date --- */
+.timetable-date-section {
+    margin-bottom: 1rem;
+    border-bottom: 1px solid #555;
+    padding-bottom: 0.5rem;
+}
+
+.timetable-date-section h5 {
+    margin-bottom: 0.5rem;
+    font-size: 1.2rem;
+    color: #ff69b4;
+}
+
+/* --- Vignette d'événement --- */
+/* Conteneur du header de la date */
+.date-header-container {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    margin-bottom: 0.5rem;
+}
+
+/* Le titre de la date */
+.date-header-container h5 {
+    margin: 0;
+    font-size: 1.2rem;
+    color: #ff69b4;
+}
+
+/* Bandeau indiquant l'état public */
+.banner-open, .banner-closed {
+    margin-top: 0.3rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+/* Bandeau pour état ouvert */
+.banner-open {
+    background-color: rgba(0, 255, 0, 0.2);
+    color: green;
+}
+
+/* Bandeau pour état fermé */
+.banner-closed {
+    background-color: rgba(255, 0, 0, 0.2);
+    color: red;
+}
+
+/* Conteneur résumé en deux colonnes */
+.event-summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
+
+/* Colonne gauche : titre (70%) */
+.event-title {
+    width: 70%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+/* Le titre lui-même : autorise le retour à la ligne */
+.event-title h5 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: bold;
+    /* Pas de white-space ou d'overflow pour permettre le wrapping */
+}
+
+/* Colonne droite : heures et lieu (30%) */
+.event-time {
+    width: 30%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+    text-align: right;
+}
+
+.event-time .time-info {
+    margin: 0;
+    font-size: 0.9rem;
+}
+
+.event-time .event-location {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #ccc;
+}
+
+/* Boutons (par exemple, le bouton d'extension) */
+.buttons-container {
     display: flex;
     align-items: center;
-    justify-content: center;
-    font-weight: bold;
-    font-size: 10px;
-    text-align: center;
-    line-height: 1;
+    gap: 0.5rem;
+}
+
+.expand-btn {
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-size: 1.5rem;
+    cursor: pointer;
+    transition: color 0.3s ease;
+}
+
+.expand-btn:hover {
+    color: #ff69b4;
+}
+
+/* Contenu détaillé (pliable) */
+.toggle-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+    font-size: 0.9rem;
+    color: #ddd;
+    margin-top: 0.5rem;
+}
+
+.event-item.expanded .toggle-content {
+    max-height: 500px; /* Valeur suffisante pour afficher le contenu */
+}
+
+/* Style global pour la vignette */
+.event-item {
+    background-color: #34495e;
+    padding: 0.8rem;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    position: relative;
+}
+
+.event-item:hover {
+    background-color: #2c3e50;
 }
 
 /* Container des messages flash */

@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>LOOKER v2</title>
+    <title>COCKPIT</title>
 
     <!-- Feuilles de style -->
     <!-- 1. Styles liés à Leaflet et ses plugins -->
@@ -46,7 +46,9 @@
         <button id="hamburger-button">
             <i class="material-icons">menu</i>
         </button>
-    
+        <button id="hud-button" title="Rechercher">
+            <i class="material-symbols-outlined">guardian</i> <!-- Loupe -->
+        </button>
         <!-- Conteneur de gauche (Recherche) -->
         <div id="left-section">
         </div>
@@ -79,15 +81,6 @@
                 </li>
             {% endfor %}
 
-            <!-- Bouton "Accéder à la configuration" uniquement pour managers et admins -->
-            {% if "manager" in user_roles or "admin" in user_roles %}
-                <li>
-                    <a href="/edit">
-                        <i class="fa fa-cogs"></i> Configuration Looker
-                    </a>
-                </li>
-            {% endif %}
-
             <!-- Sélecteur d'Événement -->
             <li>
                 <label for="event-select" style="color: #ccc; font-size: 16px;">Événement</label>
@@ -111,132 +104,20 @@
     
     <!-- Conteneur principal pour tout le contenu -->
     <div id="main-content">
+
+        <!-- Timeline Container (à gauche) -->
+        <div id="event-list" class="timeline-container">
+            <!-- Les événements seront injectés ici par le JS -->
+        </div>
+
         <!-- Carte OSM -->
         <div id="map"></div>
-    
-        <!-- Conteneur parent pour le tableau de trafic et le bouton -->
-        <div id="traffic-container">
-            <div id="traffic-table-container">
-                <table class="table table-striped">
-                    <thead>
-                        <tr>
-                            <th>Route</th>
-                            <th>Trajet</th>
-                            <th>Retard</th>
-                        </tr>
-                    </thead>
-                    <tbody id="traffic-info-body">
-                        <!-- Les embouteillages seront insérés ici par JavaScript -->
-                    </tbody>
-                </table>
-            </div>
-            <!-- Bouton de Repli/Dépli pour le Tableau de Trafic -->
-            <button id="toggle-traffic-table">◀</button>
-        </div>
 
         <!-- Container modal externe (initialement vide) -->
         <div id="modal-flipcard-container"></div>
 
         <!-- Conteneur général des flipcards -->
         <div id="flipcards-container">
-            
-            <!-- Flipcard pour "Horaires Public" -->
-            <div class="flip-card" id="flipcard-public">
-                <div class="flip-card-inner">
-                <!-- Face avant (recto) -->
-                <div class="flip-card-front">
-                    <span class="material-symbols-outlined flip-icon">calendar_clock</span>
-                    <span class="flip-text">Horaires publics</span>
-                </div>
-                <!-- Face arrière (verso) -->
-                <div class="flip-card-back">
-                    <!-- L'en-tête sera inséré ici par le JS -->
-                    <table>
-                    <thead>
-                        <tr>
-                        <th>Date</th>
-                        <th>Ouverture</th>
-                        <th>Fermeture</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <!-- Les lignes seront insérées ici par JavaScript -->
-                    </tbody>
-                    </table>
-                </div>
-                </div>
-            </div>  
-  
-            <!-- Flipcard Montage/Démontage -->
-            <div class="flip-card" id="flipcard-montage">
-                <div class="flip-card-inner">
-                <!-- Face avant (recto) -->
-                <div class="flip-card-front">
-                    <span class="material-symbols-outlined flip-icon">handyman</span>
-                    <span class="flip-text">Montage Démontage</span>
-                </div>
-                <!-- Face arrière (verso) : le contenu sera remplacé par le JS -->
-                <div class="flip-card-back">
-                    <!-- Le contenu sera généré par populateMontageDemontage() -->
-                </div>
-                </div>
-            </div>  
-
-            <!-- Flipcard Arrivée -->
-            <div class="flip-card" id="flipcard-arrivee">
-                <div class="flip-card-inner">
-                <div class="flip-card-front">
-                    <span class="material-symbols-outlined flip-icon">sports_score</span>
-                    <span class="flip-text">Arrivées</span>
-                </div>
-                <div class="flip-card-back">
-                    <!-- Le contenu sera généré par la fonction populateArrivees() -->
-                    <p>Contenu Arrivée</p>
-                </div>
-                </div>
-            </div>  
-
-            <!-- Flipcard Scan -->
-            <div class="flip-card" id="flipcard-scan">
-                <div class="flip-card-inner">
-                <div class="flip-card-front">
-                    <span class="material-symbols-outlined flip-icon">qr_code_scanner</span>
-                    <span class="flip-text">Scans</span>
-                </div>
-                <div class="flip-card-back">
-                    <!-- Contenu du verso pour Scan -->
-                    <p>Contenu Scan</p>
-                </div>
-                </div>
-            </div>
-
-            <!-- Flipcard Postes de commandement -->
-            <div class="flip-card" id="flipcard-pc">
-                <div class="flip-card-inner">
-                <div class="flip-card-front">
-                    <span class="material-symbols-outlined flip-icon">local_police</span>
-                    <span class="flip-text">PC</span>
-                </div>
-                <div class="flip-card-back">
-                    <!-- Contenu du verso pour Postes de commandement -->
-                    <p>Contenu Postes de commandement</p>
-                </div>
-                </div>
-            </div>
-
-            <!-- Flipcard Accréditations -->
-            <div class="flip-card" id="flipcard-accred">
-                <div class="flip-card-inner">
-                <div class="flip-card-front">
-                    <span class="material-symbols-outlined flip-icon">badge</span>
-                    <span class="flip-text">ACCREDITATIONS</span>
-                </div>
-                <div class="flip-card-back">
-                    <!-- Contenu du verso pour accréditations -->
-                    <p>Contenu accréditations</p>
-                </div>
-                </div>
-            </div>
         </div>    
     </div> 
 
@@ -310,13 +191,14 @@
     <!-- Script principal -->
     <script nonce="{{ nonce }}">var satelliteIconUrl = "{{ url_for('static', filename='img/satellite.png') }}";</script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/meteo.js') }}"></script>
     <!-- Inclure le script des alertes -->
     <script src="{{ url_for('static', filename='js/alerte.js') }}"></script>
     <!-- Script de trafic -->
-    <script src="{{ url_for('static', filename='js/traffic.js') }}"></script> 
-    <!-- Script vue événement -->
-    <script src="{{ url_for('static', filename='js/event_view.js') }}"></script>     
+    <script src="{{ url_for('static', filename='js/traffic.js') }}"></script>    
+    <!-- Script de météo -->
+    <script src="{{ url_for('static', filename='js/meteo.js') }}"></script>    
+    <!-- Script timetable -->
+    <script src="{{ url_for('static', filename='js/timeline.js') }}"></script>    
 
 </body>
 </html>

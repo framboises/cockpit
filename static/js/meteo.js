@@ -1,3 +1,50 @@
+// Fonction pour récupérer les prévisions pour les 6 prochaines heures et les afficher dans la navbar
+function fetchMeteoPrevisions6h() {
+    fetch('/meteo_previsions_6h')
+        .then(response => response.json())
+        .then(data => {
+            let meteoPrevisionsDiv = document.getElementById('meteo-previsions');
+            meteoPrevisionsDiv.innerHTML = ''; // Effacer tout contenu précédent
+
+            if (data.length === 0) {
+                meteoPrevisionsDiv.innerHTML = '<p>Aucune donnée météo disponible.</p>';
+                return;
+            }
+
+            data.forEach(prevision => {
+                let previsionElement = document.createElement('div');
+                previsionElement.className = 'meteo-item';
+
+                // Créer un bloc pour chaque prévision horaire avec la date affichée
+                previsionElement.innerHTML = `
+                    <div class="meteo-date">${prevision.Date}</div>
+                    <div class="meteo-hour-temp">
+                        ${prevision.Heure} - ${prevision['Température (°C)']}°
+                    </div>
+                    <div class="meteo-rain">
+                        🌧️ ${prevision['Pluviométrie (mm)']} mm
+                    </div>
+                    <div class="meteo-wind">
+                        🌪️ ${prevision['Vent rafale (km/h)']} km/h
+                    </div>
+                `;
+
+                // Ajouter l'événement click pour ouvrir la modale pour la date correspondante
+                previsionElement.addEventListener('click', () => {
+                    openMeteoModal(prevision.Date);
+                });
+
+                meteoPrevisionsDiv.appendChild(previsionElement);
+            });
+        })
+        .catch(error => console.error('Erreur lors de la récupération des prévisions météo :', error));
+}
+
+// Appel initial pour charger les données météo dès le chargement de la page
+document.addEventListener('DOMContentLoaded', fetchMeteoPrevisions6h);
+
+setTimeout(fetchSunTimes, 50); // 🌞 Ajouter le soleil après un court délai
+
 // Fonction pour ouvrir la modale météo avec overlay
 function openMeteoModal(date) {
     console.log("📅 Ouverture de la modale météo pour le :", date);
