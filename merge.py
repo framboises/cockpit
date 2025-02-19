@@ -468,7 +468,7 @@ def process_campings_horaires(campings_list, event, year):
                 date_str,
                 pub["open"],
                 pub["close"],
-                f"Camping {camping_name}",
+                f"Aire d'accueil {camping_name}",
                 "AA",
                 camping_name,
                 details,
