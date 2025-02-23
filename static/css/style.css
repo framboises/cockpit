@@ -1156,6 +1156,58 @@ footer {
     background-color: #2c3e50;
 }
 
+/* --- Statistiques --- */
+
+#counter-display {
+    position: absolute;
+    top: 10px;
+    left: 60px;
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    padding: 10px 15px;
+    border-radius: 5px;
+    z-index: 1000; /* Pour que le compteur soit au-dessus de la carte */
+    text-align: center;
+}
+
+#counter-display .counter-number {
+    font-size: 26px;
+    font-weight: bold;
+}
+
+#counter-display .counter-label {
+    font-size: 14px;
+}
+
+/* Si vous souhaitez positionner le conteneur par rapport à la fenêtre */
+#parking-indicators {
+    position: relative;
+    top: 100px;
+    left: 10px;
+    z-index: 1000; /* Pour qu'il soit au-dessus de la carte */
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 15%;
+}
+
+/* Exemple de style pour chaque indicateur individuel */
+.parking-indicator {
+    background-color: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    padding: 10px;
+    border-radius: 5px;
+    text-align: center;
+    font-weight: bold;
+}
+
+.terrain-name {
+    font-size: 20px;  /* Augmenter la taille du texte */
+    font-weight: bold;
+    display: block;
+    margin-bottom: -15px;
+}
+
 /* Container des messages flash */
 #flash-container {
     position: fixed;

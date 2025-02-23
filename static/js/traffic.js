@@ -110,8 +110,6 @@ document.getElementById('trafficToggle').addEventListener('change', function () 
     if (trafficEnabled) {
         // Afficher les lignes de trafic et déplier la table
         updateTrafficMap();
-        container.classList.remove('replie');
-        toggleButton.textContent = '◀';  // Flèche pour replier
     } else {
         // Effacer les lignes de trafic et replier la table
         if (window.alertMarkers) {
@@ -119,8 +117,6 @@ document.getElementById('trafficToggle').addEventListener('change', function () 
                 map.removeLayer(marker);
             });
         }
-        container.classList.add('replie');
-        toggleButton.textContent = '▶';  // Flèche pour déplier
     }
 });
 
@@ -143,15 +139,6 @@ function updateTrafficMap() {
                     map.removeLayer(layer);
                 }
             });
-
-            // Efface les anciennes lignes du tableau de trafic
-            const trafficInfoBody = document.querySelector('#traffic-info-body');
-            if (trafficInfoBody) {
-                trafficInfoBody.innerHTML = '';
-            } else {
-                console.error('Élément avec l\'id "traffic-info-body" introuvable.');
-                return;
-            }
 
             // Trier les routes par retard décroissant
             const sortedRoutes = data.routes.slice().sort((a, b) => {
@@ -187,24 +174,9 @@ function updateTrafficMap() {
 
                  // Ajoute une ligne de trafic avec une direction (flèche) sur la carte
                 drawTrafficLineWithDirection(route, color); // Utilise la fonction avec direction
-//                let polyline = L.polyline(latlngs, { color: color, trafficLayer: true }).addTo(map)
-//                    .bindPopup(`<b>Nom: ${route.name}</b><br>Retard: ${formatTime(calculateDelay(route.time, route.historicTime))}<br>Temps de trajet actuel : ${formatTime(route.time)}<br>Temps de trajet moyen : ${formatTime(route.historicTime)}`);
-
-                // Calcule le retard
-                let delay = calculateDelay(route.time, route.historicTime);
-                let travelTime = formatTime(route.time); // Assumant que 'time' est le temps de trajet
-
-                // Ajoute une ligne au tableau de trafic
-                let row = `<tr data-route-id="${route.id}">
-                    <td>${route.name}</td>
-                    <td>${travelTime}</td>
-                    <td>${formatTime(delay)}</td>
-                </tr>`;
-                trafficInfoBody.insertAdjacentHTML('beforeend', row);
+                // let polyline = L.polyline(latlngs, { color: color, trafficLayer: true }).addTo(map)
+                //                    .bindPopup(`<b>Nom: ${route.name}</b><br>Retard: ${formatTime(calculateDelay(route.time, route.historicTime))}<br>Temps de trajet actuel : ${formatTime(route.time)}<br>Temps de trajet moyen : ${formatTime(route.historicTime)}`);
             });
-
-            // Ajouter des événements de clic sur les lignes du tableau
-            addRowClickEvents(sortedRoutes);
         })
         .catch(error => console.error('Erreur lors de la récupération des données de trafic:', error));
 }
@@ -253,34 +225,48 @@ function addRowClickEvents(routes) {
     });
 }
 
-// Ajout d'un écouteur d'événement pour afficher/replier la table du trafic
-document.addEventListener('DOMContentLoaded', function() {
-    var container = document.getElementById('traffic-container');
-    container.classList.add('replie');  // Masquer la table de trafic au chargement
-
-    var toggleButton = document.getElementById('toggle-traffic-table');
-    toggleButton.textContent = '▶';  // Indiquer que la table est repliée
-
-    toggleButton.addEventListener('click', function() {
-        if (!trafficEnabled) {
-            showDynamicFlashMessage("Activez le trafic pour afficher la table.", "warning", 3000);
-            return; // Empêche l'ouverture de la table si le trafic est désactivé
-        }
-
-        container.classList.toggle('replie');  // Toggle la classe "replie"
-
-        // Change l'icône en fonction de l'état
-        if (container.classList.contains('replie')) {
-            toggleButton.textContent = '▶';  // Flèche pour déplier
-        } else {
-            toggleButton.textContent = '◀';  // Flèche pour replier
-        }
-    });
-});
-
 // Appel initial pour charger les données de trafic au chargement de la page
 document.addEventListener('DOMContentLoaded', function() {
     updateTrafficMap();
     // Mise à jour automatique toutes les 60 secondes
     setInterval(updateTrafficMap, 60000);
 });
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+// TEMPS D'ATTENTE PARKINGS/CAMPINGS
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+
+function updateParkingIndicators() {
+    fetch('/trafic/waiting_data_structured')
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('parking-indicators');
+            // Vider le conteneur pour éviter les doublons
+            container.innerHTML = "";
+
+            data.terrains.forEach(item => {
+                const div = document.createElement('div');
+                div.classList.add('parking-indicator');
+                const waiting_time = Math.max(0, item.currentTime - item.historicTime);
+
+                // Appliquer une couleur en fonction du niveau de sévérité avec 80% d'opacité
+                if (item.severity === 1) {
+                    div.style.backgroundColor = 'rgba(0, 128, 0, 0.8)'; // Vert
+                } else if (item.severity === 2) {
+                    div.style.backgroundColor = 'rgba(255, 165, 0, 0.8)'; // Orange
+                } else if (item.severity === 3) {
+                    div.style.backgroundColor = 'rgba(255, 0, 0, 0.8)'; // Rouge
+                }
+
+                div.innerHTML = `<span class="terrain-name">${item.terrain}</span><br>
+                                 Attente actuelle : ${waiting_time} s<br>`;
+                container.appendChild(div);
+            });
+        })
+        .catch(error => console.error('Erreur lors de la récupération des données de trafic :', error));
+}
+
+// Appel initial et mise à jour toutes les 30 secondes
+updateParkingIndicators();
+setInterval(updateParkingIndicators, 30000);

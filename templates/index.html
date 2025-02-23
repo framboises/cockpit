@@ -111,7 +111,18 @@
         </div>
 
         <!-- Carte OSM -->
-        <div id="map"></div>
+        <div id="map">
+            <!-- Compteur affiché en haut à gauche de la carte -->
+            <div id="counter-display">
+                <div class="counter-number">Loading...</div>
+                <div class="counter-label">Présents actuellement</div>
+            </div>
+
+            <!-- Conteneur pour les indicateurs de trafic / attente des parkings -->
+            <div id="parking-indicators">
+                <!-- Les indicateurs seront ajoutés dynamiquement via JavaScript -->
+            </div>
+        </div>
 
         <!-- Container modal externe (initialement vide) -->
         <div id="modal-flipcard-container"></div>
@@ -199,6 +210,8 @@
     <script src="{{ url_for('static', filename='js/meteo.js') }}"></script>    
     <!-- Script timetable -->
     <script src="{{ url_for('static', filename='js/timeline.js') }}"></script>    
+    <!-- Script contrôle d'accès -->
+    <script src="{{ url_for('static', filename='js/controle_access.js') }}"></script>    
 
 </body>
 </html>

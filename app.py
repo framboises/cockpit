@@ -500,6 +500,22 @@ app.register_blueprint(traffic_bp)
 # app.register_blueprint(meteo_bp)
 
 ################################################################################
+# CONTROLE D'ACCES
+################################################################################
+
+@app.route('/get_counter', methods=['GET'])
+@role_required("user")
+def get_counter():
+    # Rechercher le document avec counter_id "640", le plus récent en fonction du timestamp
+    counter_doc = db.data_access.find_one({"counter_id": "523"}, sort=[("timestamp", -1)])
+    if counter_doc:
+        current_value = counter_doc.get("current", "N/A")
+        return jsonify({"current": current_value})
+    else:
+        return jsonify({"current": "N/A"})
+
+
+################################################################################
 # Exécution
 ################################################################################
 
