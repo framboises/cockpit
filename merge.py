@@ -580,6 +580,6 @@ def main(event, year):
 # Exécution principale
 # -------------------------------------------------------------------
 if __name__ == "__main__":
-    event_value = "24H MOTOS"
+    event_value = "GPF"
     year_value = "2025"
     main(event_value, year_value)
