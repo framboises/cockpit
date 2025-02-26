@@ -1,0 +1,25 @@
+[
+    {
+        "category": "Controle",
+        "openChecklist": [
+        { "task": "Vérifier l'éclairage", "taskId": "t1" },
+        { "task": "Confirmer la présence du responsable", "taskId": "t2" }
+        ],
+        "closeChecklist": [
+        { "task": "Fermer toutes les entrées", "taskId": "t3" },
+        { "task": "Vérifier la fermeture des équipements", "taskId": "t4" }
+        ]
+    },
+    {
+        "category": "Controle",
+        "openChecklist": [
+        { "task": "Vérifier l'éclairage", "taskId": "t1" },
+        { "task": "Confirmer la présence du responsable", "taskId": "t2" }
+        ],
+        "closeChecklist": [
+        { "task": "Fermer toutes les entrées", "taskId": "t3" },
+        { "task": "Vérifier la fermeture des équipements", "taskId": "t4" }
+        ]
+    }
+]
+  
