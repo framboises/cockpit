@@ -1,2 +1,7 @@
 web.config
 __pycache__/
+.DS_Store
+static/.DS_Store
+static/css/.DS_Store
+static/js/.DS_Store
+static/ressources/.DS_Store
