@@ -1,3 +1,4 @@
+// meteo.js
 // Fonction pour récupérer les prévisions pour les 6 prochaines heures et les afficher dans la navbar
 function fetchMeteoPrevisions6h() {
     fetch('/meteo_previsions_6h')

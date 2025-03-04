@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <title>Parkings et Aires d'Accueil</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/common.css') }}">
+</head>
+<body>
+    <div id="grid-container">
+        {% for terrain in terrains %}
+        <div class="card parking-card" id="{{ terrain.id }}">
+            <div class="card-header">{{ terrain.name }}</div>
+            <div class="card-number">{{ terrain.scans }}</div>
+            <div class="card-subtext">Scans / Billets</div>
+            <div class="gauge">Gauge: {{ terrain.gauge }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    <script src="{{ url_for('static', filename='js/parkings.js') }}"></script>
+</body>
+</html>

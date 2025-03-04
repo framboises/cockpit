@@ -256,7 +256,7 @@ document.addEventListener('DOMContentLoaded', function () {
 // ALERTES
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
-  // Fonction mise à jour pour afficher un message flash dynamique
+// Fonction mise à jour pour afficher un message flash dynamique
 function showDynamicFlashMessage(message, category = 'success', duration = 3000) {
     const flashContainer = document.getElementById('flash-container');
 
@@ -282,3 +282,41 @@ function showDynamicFlashMessage(message, category = 'success', duration = 3000)
         }, 500); // Attendre la transition
     }, duration);
 }
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+// NAVBAR
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Assurez-vous que window.selectedEvent et window.selectedYear sont définis dans votre application.
+document.getElementById("stats-page-button").addEventListener("click", function(){
+    if (!window.selectedEvent || !window.selectedYear) {
+        showDynamicFlashMessage("Veuillez sélectionner un événement et une année", "error");
+        return;
+    }
+    var eventParam = encodeURIComponent(window.selectedEvent);
+    var yearParam  = encodeURIComponent(window.selectedYear);
+    var url = "/general_stat?event=" + eventParam + "&year=" + yearParam;
+    window.open(url, "_blank");
+});
+
+document.getElementById("parkings-page-button").addEventListener("click", function(){
+    if (!window.selectedEvent || !window.selectedYear) {
+        showDynamicFlashMessage("Veuillez sélectionner un événement et une année", "error");
+        return;
+    }
+    var eventParam = encodeURIComponent(window.selectedEvent);
+    var yearParam  = encodeURIComponent(window.selectedYear);
+    var url = "/terrains?event=" + eventParam + "&year=" + yearParam;
+    window.open(url, "_blank");
+});
+
+document.getElementById("doors-page-button").addEventListener("click", function(){
+    if (!window.selectedEvent || !window.selectedYear) {
+        showDynamicFlashMessage("Veuillez sélectionner un événement et une année", "error");
+        return;
+    }
+    var eventParam = encodeURIComponent(window.selectedEvent);
+    var yearParam  = encodeURIComponent(window.selectedYear);
+    var url = "/doors?event=" + eventParam + "&year=" + yearParam;
+    window.open(url, "_blank");
+});

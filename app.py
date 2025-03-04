@@ -145,7 +145,7 @@ def role_required(required_role):
     return decorator
 
 ################################################################################
-# Routes Flask
+# GENERAL
 ################################################################################
 
 def clean_collection_name(name):
@@ -211,7 +211,7 @@ def serve_tiles(z, x, y):
     return abort(404, description="Image non trouvée dans les répertoires spécifiés.")
 
 ################################################################################
-# ROUTES FLASK
+# TIMETABLE
 ################################################################################
 
 @app.route('/timetable', methods=['GET'])
@@ -242,6 +242,93 @@ def get_parametrage():
         return jsonify(parametrage['data'])
     else:
         return jsonify({})
+
+# -------------------------------------------------------------------------------
+# Route pour récupérer les catégories existantes dans la collection timetable
+# -------------------------------------------------------------------------------
+@app.route('/get_timetable_categories', methods=['GET'])
+@role_required("user")
+def get_timetable_categories():
+    try:
+        event = request.args.get('event')
+        year = request.args.get('year')
+        if not event or not year:
+            return jsonify({"categories": []}), 400
+
+        # S'assurer que year est une chaîne de caractères
+        year = str(year)
+
+        pipeline = [
+            {"$match": {"event": event, "year": year}},
+            {"$project": {"data": 1}},
+            {"$project": {"events": {"$objectToArray": "$data"}}},
+            {"$unwind": "$events"},
+            {"$unwind": "$events.v"},
+            {"$group": {"_id": "$events.v.category"}}
+        ]
+        result = list(db.timetable.aggregate(pipeline))
+        categories = [doc["_id"] for doc in result if doc["_id"]]
+        return jsonify({"categories": categories})
+    except Exception as e:
+        logger.error("Error getting categories: " + str(e))
+        return jsonify({"categories": []}), 500
+
+# -------------------------------------------------------------------------------
+# Route pour ajouter un événement dans la collection timetable
+# -------------------------------------------------------------------------------
+@app.route('/add_timetable_event', methods=['POST'])
+@role_required("user")
+def add_timetable_event():
+    try:
+        data = request.get_json()
+        # Récupérer les valeurs envoyées
+        event_name = data.get('event')
+        year = data.get('year')
+        date = data.get('date')
+        event_details = {
+            "start": data.get('start', "TBC"),
+            "end": data.get('end', "TBC"),
+            "duration": data.get('duration', ""),
+            "category": data.get('category'),
+            "activity": data.get('activity'),
+            "place": data.get('place'),
+            "department": data.get('department'),
+            "type": data.get('type', "Timetable"),
+            "origin": data.get('origin', "manual"),
+            "remark": data.get('remark', "")
+        }
+        # Générer un identifiant unique pour l'événement
+        event_details["_id"] = str(ObjectId())
+
+        # Vérifier si un document pour cet event et cette année existe déjà
+        timetable_doc = db.timetable.find_one({"event": event_name, "year": year})
+        if timetable_doc:
+            # Si la date existe déjà, on ajoute l'événement à la liste
+            if date in timetable_doc.get('data', {}):
+                db.timetable.update_one(
+                    {"_id": timetable_doc["_id"]},
+                    {"$push": {f"data.{date}": event_details}}
+                )
+            else:
+                # Sinon, on crée la clé pour cette date avec une liste contenant l'événement
+                db.timetable.update_one(
+                    {"_id": timetable_doc["_id"]},
+                    {"$set": {f"data.{date}": [event_details]}}
+                )
+        else:
+            # Création d'un nouveau document pour cet événement et cette année
+            new_doc = {
+                "event": event_name,
+                "year": str(year),
+                "data": {
+                    date: [event_details]
+                }
+            }
+            db.timetable.insert_one(new_doc)
+        return jsonify({"success": True, "message": "Événement ajouté avec succès."})
+    except Exception as e:
+        logger.error("Erreur lors de l'ajout de l'événement dans la timetable: " + str(e))
+        return jsonify({"success": False, "message": "Erreur lors de l'ajout de l'événement."}), 500
 
 ################################################################################
 # METEO ET SOLEIL
@@ -500,20 +587,189 @@ app.register_blueprint(traffic_bp)
 # app.register_blueprint(meteo_bp)
 
 ################################################################################
-# CONTROLE D'ACCES
+# DATA BILLETTERIE
 ################################################################################
 
 @app.route('/get_counter', methods=['GET'])
 @role_required("user")
 def get_counter():
-    # Rechercher le document avec counter_id "640", le plus récent en fonction du timestamp
-    counter_doc = db.data_access.find_one({"counter_id": "523"}, sort=[("timestamp", -1)])
+    event = request.args.get('event')
+    year = request.args.get('year')  # Ex. "2025"
+    
+    if not event:
+        return jsonify({"current": "N/A", "error": "Event parameter missing"}), 400
+    if not year:
+        return jsonify({"current": "N/A", "error": "Year parameter missing"}), 400
+
+    # Chercher l'événement dans la collection "evenement"
+    event_doc = db.evenement.find_one({"nom": event})
+    if not event_doc:
+        return jsonify({"current": "N/A", "error": "Event not found"}), 404
+
+    # Extraire la clé skidata depuis le document de l'événement
+    skidata = event_doc.get("skidata")
+    if not skidata:
+        return jsonify({"current": "N/A", "error": "Skidata not found for this event"}), 404
+
+    # Rechercher le document le plus récent dans data_access en fonction de skidata et de l'année transmise
+    counter_doc = db.data_access.find_one(
+        {"counter_id": str(skidata), "year": str(year)},
+        sort=[("timestamp", -1)]
+    )
     if counter_doc:
         current_value = counter_doc.get("current", "N/A")
         return jsonify({"current": current_value})
     else:
         return jsonify({"current": "N/A"})
+    
+@app.route('/get_counter_max', methods=['GET'])
+@role_required("user")
+def get_counter_max():
+    event = request.args.get('event')
+    year = request.args.get('year')  # Ex. "2025"
+    
+    if not event:
+        return jsonify({"current": "N/A", "error": "Event parameter missing"}), 400
+    if not year:
+        return jsonify({"current": "N/A", "error": "Year parameter missing"}), 400
 
+    # Chercher l'événement dans la collection "evenement"
+    event_doc = db.evenement.find_one({"nom": event})
+    if not event_doc:
+        return jsonify({"current": "N/A", "error": "Event not found"}), 404
+
+    # Extraire la clé skidata depuis le document de l'événement
+    skidata = event_doc.get("skidata")
+    if not skidata:
+        return jsonify({"current": "N/A", "error": "Skidata not found for this event"}), 404
+
+    # Rechercher le document avec la valeur "current" la plus élevée dans data_access
+    counter_doc = db.data_access.find_one(
+        {"counter_id": str(skidata), "year": str(year)},
+        sort=[("current", -1)]
+    )
+    
+    if counter_doc:
+        current_value = counter_doc.get("current", "N/A")
+        return jsonify({"current": current_value})
+    else:
+        return jsonify({"current": "N/A"})
+    
+################################################################################
+# MONITOR TV
+################################################################################
+
+@app.route('/general_stat', methods=['GET'])
+@role_required("user")
+def general_stat():
+    event = request.args.get("event")
+    year = request.args.get("year")
+    
+    if not event or not year:
+        return "Missing event or year parameter", 400
+
+    # Préparation de la structure des statistiques avec des placeholders
+    stats = {
+        "current_present": "N/A",              # Nombre de présents actuels
+        "current_present_gauge": "N/A",          # Jauge par rapport à l'affluence possible
+        "max_present_day": "N/A",                # Maximum présent de la journée
+        "max_present_event": "N/A",              # Maximum présent à l'événement
+        "total_entries": "N/A",                  # Nombre d'entrées depuis le début de l'événement
+        "unique_visitors": "N/A",                # Nombre de visiteurs uniques depuis le début
+        "previous_year_max": "N/A",              # Maximum de l'année précédente
+        "previous_year_current": "N/A"           # Chiffre de l'année précédente au même moment
+    }
+    
+    return render_template("general-stats.html", stats=stats, event=event, year=year)
+
+@app.route('/update_general_stat', methods=['GET'])
+@role_required("user")
+def update_general_stat():
+    event = request.args.get("event")
+    year = request.args.get("year")
+    
+    if not event or not year:
+        return jsonify({"error": "Missing event or year parameter"}), 400
+
+    # Préparation des statistiques actualisées (pour l'instant des placeholders "N/A")
+    stats = {
+        "current_present": "N/A",
+        "current_present_gauge": "N/A",
+        "max_present_day": "N/A",
+        "max_present_event": "N/A",
+        "total_entries": "N/A",
+        "unique_visitors": "N/A",
+        "previous_year_max": "N/A",
+        "previous_year_current": "N/A"
+    }
+    
+    return jsonify(stats)
+
+@app.route('/terrains', methods=['GET'])
+@role_required("user")
+def parkings():
+    event = request.args.get('event')
+    year = request.args.get('year')
+    if not event or not year:
+        return "Missing event or year parameter", 400
+
+    # Exemple de structure de données avec des placeholders pour chaque parking/aire d'accueil
+    terrains_data = [
+        {"id": "parking-a", "name": "Parking A", "scans": "N/A", "tickets": "N/A", "gauge": "N/A"},
+        {"id": "parking-b", "name": "Parking B", "scans": "N/A", "tickets": "N/A", "gauge": "N/A"},
+        {"id": "aire-accueil", "name": "Aire d'Accueil", "scans": "N/A", "tickets": "N/A", "gauge": "N/A"}
+    ]
+    
+    return render_template("terrains.html", terrains=terrains_data, event=event, year=year)
+
+@app.route('/update_parkings', methods=['GET'])
+@role_required("user")
+def update_parkings():
+    event = request.args.get('event')
+    year = request.args.get('year')
+    if not event or not year:
+        return jsonify({"error": "Missing event or year parameter"}), 400
+
+    # Remplacez ces valeurs par vos requêtes sur la base de données
+    terrains_data = [
+        {"id": "parking-a", "scans": "N/A", "tickets": "N/A", "gauge": "N/A"},
+        {"id": "parking-b", "scans": "N/A", "tickets": "N/A", "gauge": "N/A"},
+        {"id": "aire-accueil", "scans": "N/A", "tickets": "N/A", "gauge": "N/A"}
+    ]
+    return jsonify({"parkings": terrains_data})
+
+@app.route('/doors', methods=['GET'])
+@role_required("user")
+def doors():
+    event = request.args.get('event')
+    year = request.args.get('year')
+    if not event or not year:
+        return "Missing event or year parameter", 400
+
+    # Exemple de structure pour les portes avec des placeholders
+    doors_data = [
+        {"id": "door-1", "name": "Porte 1", "ranking": "N/A", "total_entries": "N/A", "rate": "N/A", "color": "N/A"},
+        {"id": "door-2", "name": "Porte 2", "ranking": "N/A", "total_entries": "N/A", "rate": "N/A", "color": "N/A"},
+        {"id": "door-3", "name": "Porte 3", "ranking": "N/A", "total_entries": "N/A", "rate": "N/A", "color": "N/A"}
+    ]
+    
+    return render_template("doors.html", doors=doors_data, event=event, year=year)
+
+@app.route('/update_doors', methods=['GET'])
+@role_required("user")
+def update_doors():
+    event = request.args.get('event')
+    year = request.args.get('year')
+    if not event or not year:
+        return jsonify({"error": "Missing event or year parameter"}), 400
+
+    # Remplacez ces valeurs par vos requêtes sur la base de données
+    doors_data = [
+        {"id": "door-1", "ranking": "N/A", "total_entries": "N/A", "rate": "N/A", "color": "N/A"},
+        {"id": "door-2", "ranking": "N/A", "total_entries": "N/A", "rate": "N/A", "color": "N/A"},
+        {"id": "door-3", "ranking": "N/A", "total_entries": "N/A", "rate": "N/A", "color": "N/A"}
+    ]
+    return jsonify({"doors": doors_data})
 
 ################################################################################
 # Exécution

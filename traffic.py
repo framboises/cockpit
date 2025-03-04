@@ -60,10 +60,10 @@ def get_trafic_data_parking_structured():
 
             # Détermination du statut en fonction du ratio
             # Par exemple, si le temps actuel est proche du temps historique, c'est "normal"
-            if ratio <= 1.1:
+            if ratio <= 5:
                 status = "normal"
                 severity = 1
-            elif ratio <= 1.5:
+            elif ratio <= 10:
                 status = "modéré"
                 severity = 2
             else:

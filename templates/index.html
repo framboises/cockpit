@@ -42,13 +42,37 @@
 </head>    
 <body class="body-without-sidebar">
     <div id="search-box">
+
         <!-- Bouton Hamburger pour ouvrir la Sidebar -->
         <button id="hamburger-button">
             <i class="material-icons">menu</i>
         </button>
-        <button id="hud-button" title="Rechercher">
-            <i class="material-symbols-outlined">guardian</i> <!-- Loupe -->
+
+        <!-- Bouton pour la recherche -->
+        <button class="icon-button" id="hud-button" title="Rechercher">
+            <i class="material-symbols-outlined">guardian</i>
         </button>
+        
+        <!-- Bouton pour ajouter un événement -->
+        <button class="icon-button" id="add-event-button" title="Ajouter un événement">
+            <i class="material-symbols-outlined">add</i>
+        </button>
+
+        <!-- Bouton pour afficher Statistiques Générales -->
+        <button class="icon-button" id="stats-page-button" title="Statistiques Générales">
+            <i class="material-symbols-outlined">insert_chart</i>
+        </button>
+
+        <!-- Bouton pour afficher Parkings et Aires d'Accueil -->
+        <button class="icon-button" id="parkings-page-button" title="Parkings et Aires d'Accueil">
+            <i class="material-symbols-outlined">local_parking</i>
+        </button>
+
+        <!-- Bouton pour afficher Portes -->
+        <button class="icon-button" id="doors-page-button" title="Portes">
+            <i class="material-symbols-outlined">door_front</i>
+        </button>
+
         <!-- Conteneur de gauche (Recherche) -->
         <div id="left-section">
         </div>
@@ -112,10 +136,27 @@
 
         <!-- Carte OSM -->
         <div id="map">
-            <!-- Compteur affiché en haut à gauche de la carte -->
-            <div id="counter-display">
-                <div class="counter-number">Loading...</div>
-                <div class="counter-label">Présents actuellement</div>
+            <!-- Conteneur global pour les statistiques -->
+            <div id="stats-container">
+                <!-- Bloc compteur -->
+                <div id="counter-display" class="stat-block">
+                    <div id="counter_now" class="counter-number">Loading...</div>
+                    <div class="counter-label">Présents actuellement</div>
+                </div>
+
+                <!-- Bloc d'affichage pour le compteur maximum -->
+                <div id="counter-max-display" class="stat-block">
+                    <div id="counter_max" class="counter-number">Loading...</div>
+                    <div class="counter-label">Présents maximum</div>
+                </div>
+
+                <!-- Exemple d'un autre bloc de statistique -->
+                <div id="autre-stat" class="stat-block">
+                    <div class="stat-number">123</div>
+                    <div class="stat-label">Autre Info</div>
+                </div>
+                
+                <!-- Ajoutez d'autres blocs au besoin -->
             </div>
 
             <!-- Conteneur pour les indicateurs de trafic / attente des parkings -->
@@ -191,6 +232,65 @@
     <div id="meteoModal" class="modal">
         <div id="meteo-details" class="modal-content">
             <!-- Contenu injecté dynamiquement -->
+        </div>
+    </div>
+
+    <!-- Modale pour ajouter un événement à la timetable -->
+    <div id="addEventModal" class="modal">
+        <div class="modal-content">
+            <span class="close" id="closeAddEvent">&times;</span>
+            <h3>Ajouter un événement à la Timetable</h3>
+            <form id="addEventForm">
+                <div class="form-group">
+                    <label for="event-date">Date (YYYY-MM-DD):</label>
+                    <input type="date" id="event-date" name="date" required class="form-input">
+                </div>
+
+                <div class="form-group">
+                    <label for="start-time">Heure de début:</label>
+                    <input type="text" id="start-time" name="start" placeholder="ex: 07:00 ou TBC" required class="form-input">
+                </div>
+
+                <div class="form-group">
+                    <label for="end-time">Heure de fin:</label>
+                    <input type="text" id="end-time" name="end" placeholder="ex: 20:00 ou TBC" required class="form-input">
+                </div>
+
+                <div class="form-group">
+                    <label for="duration">Durée:</label>
+                    <input type="text" id="duration" name="duration" placeholder="ex: 13:00" class="form-input">
+                </div>
+
+                <div class="form-group">
+                    <label for="category">Catégorie:</label>
+                    <select id="category" name="category" required class="form-input"></select>
+                </div>
+
+                <div class="form-group">
+                    <label for="activity">Activité:</label>
+                    <input type="text" id="activity" name="activity" required class="form-input">
+                </div>
+
+                <div class="form-group">
+                    <label for="place">Lieu:</label>
+                    <input type="text" id="place" name="place" class="form-input">
+                </div>
+
+                <div class="form-group">
+                    <label for="department">Département:</label>
+                    <input type="text" id="department" name="department" class="form-input">
+                </div>
+
+                <div class="form-group">
+                    <label for="remark">Remarques:</label>
+                    <textarea id="remark" name="remark" class="form-input"></textarea>
+                </div>
+
+                <div class="modal-buttons">
+                    <button type="button" class="cancel-btn" id="cancelAddEvent">Annuler</button>
+                    <button type="submit" class="upload-btn">Ajouter</button>
+                </div>
+            </form>
         </div>
     </div>
 

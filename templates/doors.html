@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <title>Portes</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/common.css') }}">
+</head>
+<body>
+    <div id="grid-container">
+        {% for door in doors|sort(attribute='ranking') %}
+        <div class="card door-card" id="{{ door.id }}">
+            <div class="card-header">{{ door.name }}</div>
+            <div class="card-ranking"># {{ door.ranking }}</div>
+            <div class="card-number">{{ door.rate }} <span class="small-text">scans/min</span></div>
+            <div class="card-subtext">Total entrées : {{ door.total_entries }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    <script src="{{ url_for('static', filename='js/doors.js') }}"></script>
+</body>
+</html>
