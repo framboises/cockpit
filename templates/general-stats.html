@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <title>Statistiques Générales</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/common.css') }}">
+</head>
+<body>
+    <div id="grid-container" class="general-stats">
+        <!-- Zone principale : Présents Actuels avec jauge -->
+        <div class="card primary" id="current-present">
+            <div class="card-number">{{ stats.current_present }}</div>
+            <div class="card-label">Présents Actuels</div>
+            <div class="gauge">Gauge: {{ stats.current_present_gauge }}</div>
+        </div>
+        <!-- Zone secondaire regroupant plusieurs infos -->
+        <div class="secondary-container">
+            <div class="card secondary" id="max-present-day">
+                <div class="card-number">{{ stats.max_present_day }}</div>
+                <div class="card-label">Max du Jour</div>
+            </div>
+            <div class="card secondary" id="max-present-event">
+                <div class="card-number">{{ stats.max_present_event }}</div>
+                <div class="card-label">Max de l'événement</div>
+            </div>
+        </div>
+        <!-- Zone pour les autres infos -->
+        <div class="others-container">
+            <div class="card" id="total-entries">
+                <div class="card-number">{{ stats.total_entries }}</div>
+                <div class="card-label">Entrées Totales</div>
+            </div>
+            <div class="card" id="unique-visitors">
+                <div class="card-number">{{ stats.unique_visitors }}</div>
+                <div class="card-label">Visiteurs Uniques</div>
+            </div>
+            <div class="card" id="previous-year-max">
+                <div class="card-number">{{ stats.previous_year_max }}</div>
+                <div class="card-label">Max Année Préc.</div>
+            </div>
+            <div class="card" id="previous-year-current">
+                <div class="card-number">{{ stats.previous_year_current }}</div>
+                <div class="card-label">Même Jour Année Préc.</div>
+            </div>
+        </div>
+    </div>    
+    <script src="{{ url_for('static', filename='js/stats1.js') }}"></script>
+</body>
+</html>

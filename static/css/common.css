@@ -1,0 +1,113 @@
+@font-face {
+    font-family: 'DEMO';
+    src: url('https://obtain.fr/FONT/Demo-Regular.ttf') format('truetype');
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: 'DEMO', sans-serif;
+    background-color: rgba(9,7,38,0.8);
+    overflow: hidden; /* Pas de scroll */
+}
+
+#grid-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    padding: 20px;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+/* Style commun des cartes */
+.card {
+    background-color: rgba(0,0,0,0.7);
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+/* Titres de carte */
+.card-header {
+    font-size: 2em;
+    margin-bottom: 10px;
+    font-weight: bold;
+}
+
+/* Grands chiffres */
+.card-number {
+    font-size: 4em;
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+/* Labels et sous-titres */
+.card-label, .card-subtext, .card-ranking {
+    font-size: 1.2em;
+    margin-bottom: 5px;
+}
+
+/* Zone de jauge ou indicateur graphique */
+.gauge {
+    margin-top: 10px;
+    font-size: 2em;
+}
+
+/* Pour la colorisation dynamique dans la page des portes */
+.green { color: #00ff00; }
+.orange { color: #ffa500; }
+.red { color: #ff0000; }
+
+/* Accentuation de la taille des chiffres pour l'info principale */
+.card.primary .card-number {
+    font-size: 6em;
+}
+
+/* L'info secondaire légèrement moins imposante */
+.card.secondary .card-number {
+    font-size: 4.5em;
+}
+
+/* Modifiez votre layout spécifique pour la page Statistiques Générales */
+.general-stats {
+    display: grid;
+    grid-template-areas:
+        "primary primary"
+        "secondary secondary"
+        "others others";
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto auto;
+    gap: 20px;
+    padding: 20px;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.general-stats .primary {
+    grid-area: primary;
+}
+
+/* Assignez la zone "secondary" au conteneur */
+.general-stats .secondary-container {
+    grid-area: secondary;
+    display: grid;
+    grid-template-columns: 1fr 1fr; /* ou ajustez selon vos besoins */
+    gap: 20px;
+}
+
+.others-container {
+    grid-area: others;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+}
+
+.small-text {
+    font-size: 0.3em; /* Ajustez la valeur selon vos préférences */
+}

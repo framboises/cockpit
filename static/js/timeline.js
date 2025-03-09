@@ -118,7 +118,6 @@ function fetchTimetable() {
         .then(response => response.json())
         .then(data => {
             const eventList = document.getElementById("event-list");
-            eventList.innerHTML = "<h4>Timetable</h4>"; // Titre de la section
 
             const sectionsByDate = {}; // Pour stocker les sections par date
 
@@ -214,8 +213,120 @@ function openTimetableItemModal(date, item) {
 document.addEventListener('DOMContentLoaded', function() {
     const hudButton = document.getElementById("hud-button");
     if (hudButton) {
-        hudButton.addEventListener("click", fetchTimetable);
+        hudButton.addEventListener("click", function() {
+            fetchTimetable();
+            updateGlobalCounter();
+        });
     } else {
         console.error("Le bouton avec l'ID 'hud-button' n'a pas été trouvé.");
     }
+});
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+// FONCTION AJOUT
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+
+document.addEventListener('DOMContentLoaded', function(){
+    // Références aux éléments
+    const addEventButton = document.getElementById('add-event-button');
+    const addEventModal = document.getElementById('addEventModal');
+    const closeAddEvent = document.getElementById('closeAddEvent');
+    const cancelAddEvent = document.getElementById('cancelAddEvent');
+    const addEventForm = document.getElementById('addEventForm');
+    const categorySelect = document.getElementById('category');
+
+    // Fonction pour ouvrir la modale en ajoutant la classe "show"
+    function openModal(modal) {
+        modal.style.display = 'block';
+        // Permettre la transition définie dans le CSS (opacity et scale)
+        setTimeout(() => {
+            modal.classList.add('show');
+        }, 10);
+    }
+    
+    // Fonction pour fermer la modale
+    function closeModal(modal) {
+        modal.classList.remove('show');
+        // Après la transition, masquer la modale
+        setTimeout(() => {
+            modal.style.display = 'none';
+        }, 300);
+    }
+    
+    // Ouvrir la modale lors du clic sur le bouton "Ajouter un événement"
+    addEventButton.addEventListener('click', function(){
+        // Charger les catégories depuis le serveur
+        fetch('/get_timetable_categories?event=' + encodeURIComponent(window.selectedEvent) + '&year=' + encodeURIComponent(window.selectedYear))
+        .then(response => response.json())
+        .then(data => {
+            categorySelect.innerHTML = '';
+            data.categories.forEach(cat => {
+                const option = document.createElement('option');
+                option.value = cat;
+                option.textContent = cat;
+                categorySelect.appendChild(option);
+            });
+        })
+        .catch(err => console.error("Erreur chargement catégories:", err));    
+        
+        openModal(addEventModal);
+    });
+    
+    // Fermer la modale au clic sur la croix ou le bouton Annuler
+    closeAddEvent.addEventListener('click', () => closeModal(addEventModal));
+    cancelAddEvent.addEventListener('click', () => closeModal(addEventModal));
+    
+    // Soumission du formulaire
+    addEventForm.addEventListener('submit', function(e){
+        e.preventDefault();
+        // Récupérer les valeurs du formulaire
+        const formData = {
+            // On suppose que l'événement et l'année sont les mêmes que ceux actuellement sélectionnés
+            event: window.selectedEvent || '24H MOTOS',
+            year: window.selectedYear || '2025',
+            date: document.getElementById('event-date').value,
+            start: document.getElementById('start-time').value,
+            end: document.getElementById('end-time').value,
+            duration: document.getElementById('duration').value,
+            category: document.getElementById('category').value,
+            activity: document.getElementById('activity').value,
+            place: document.getElementById('place').value,
+            department: document.getElementById('department').value,
+            remark: document.getElementById('remark').value,
+            type: "Timetable",
+            origin: "manual"
+        };
+        
+        fetch('/add_timetable_event', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+            },
+            body: JSON.stringify(formData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if(data.success){
+                // Afficher un message de succès (la fonction showDynamicFlashMessage est déjà définie dans main.js)
+                showDynamicFlashMessage("Événement ajouté avec succès", "success");
+                closeModal(addEventModal);
+                // Optionnel : rafraîchir la timeline pour refléter l'ajout
+                fetchTimetable();
+            } else {
+                showDynamicFlashMessage("Erreur lors de l'ajout de l'événement", "error");
+            }
+        })
+        .catch(err => {
+            console.error("Erreur lors de l'ajout de l'événement:", err);
+            showDynamicFlashMessage("Erreur lors de l'ajout de l'événement", "error");
+        });
+    });
+    
+    // Fermer la modale si l'utilisateur clique en dehors du contenu de la modale
+    window.addEventListener('click', function(e){
+        if(e.target == addEventModal){
+            closeModal(addEventModal);
+        }
+    });
 });
