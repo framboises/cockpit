@@ -90,9 +90,24 @@ def get_trafic_data_parking_structured():
     
 @traffic_bp.route('/alerts')
 def alerts():
-    # Remplacez l'URL par celle qui contient les alertes
     url = "https://www.waze.com/row-partnerhub-api/partners/19308574489/waze-feeds/fa96cebf-1625-4b4f-91a0-a5af6db60e49?format=1"
-    response = requests.get(url)
-    data = response.json()
-    alerts = data.get('alerts', [])
-    return jsonify(alerts)
+
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # Vérifie si la requête a réussi (code 200)
+
+        # Vérifie si la réponse n'est pas vide avant d'essayer de l'analyser en JSON
+        if not response.text.strip():  
+            return jsonify({"error": "Réponse vide de l'API Waze"}), 500
+        
+        # Tente de parser le JSON
+        try:
+            data = response.json()
+        except requests.exceptions.JSONDecodeError:
+            return jsonify({"error": "Données JSON invalides reçues de l'API Waze"}), 500
+
+        alerts = data.get('alerts', [])
+        return jsonify(alerts)
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": f"Erreur de connexion à l'API Waze : {str(e)}"}), 500
