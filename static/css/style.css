@@ -1,3 +1,205 @@
+/* === LAYOUT PRINCIPAL (GRID) === */
+#main-content {
+    display: grid;
+    grid-template-columns: 320px 1fr; /* widgets à gauche, timeline centre */
+    gap: 16px;
+    height: calc(100vh - 97px);
+    overflow: hidden;  
+    position: relative;
+    padding: 0 12px 12px; /* léger padding horizontal */
+}
+
+/* === PANNEAU WIDGETS === */
+#widgets-panel {
+    overflow-y: auto;
+    padding: 4px 0 8px;
+    scrollbar-width: thin;
+    scrollbar-color: #ff007f rgba(9, 7, 38, 0.6);
+}
+#widgets-panel::-webkit-scrollbar { width: 6px; }
+#widgets-panel::-webkit-scrollbar-track { background: rgba(9, 7, 38, 0.6); border-radius: 10px; }
+#widgets-panel::-webkit-scrollbar-thumb { background: #ff007f; border-radius: 10px; }
+
+.widget-card {
+    background: rgba(9, 7, 38, 0.8);
+    color: #fff;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    margin-bottom: 12px;
+    border: 1px solid rgba(255,255,255,0.06);
+}
+.widget-header {
+    background: #ff007f;
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 10px 10px 0 0;
+}
+.widget-header h3 { margin: 0; font-size: 0.95rem; letter-spacing: 0.3px; }
+.widget-body { padding: 10px 12px; }
+.widget-body.two-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* Blocs chiffres (réutilise tes stat-block) */
+.stat-block {
+    background: rgba(0, 0, 0, 0.55);
+    border-radius: 8px;
+    padding: 10px 12px;
+    text-align: center;
+}
+.counter-number { font-size: 26px; font-weight: bold; }
+.counter-label { font-size: 12px; opacity: 0.9; }
+
+/* Parkings list */
+#parking-indicators-list { display: flex; flex-direction: column; gap: 8px; }
+.parking-row {
+    background: rgba(0,0,0,0.45);
+    border-radius: 8px;
+    padding: 8px 10px;
+    display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center;
+}
+.parking-row .name { font-weight: 700; }
+.parking-row .state-pill {
+    padding: 4px 8px; border-radius: 20px; font-size: 12px; font-weight: 700; text-transform: uppercase;
+}
+.state-open { background: rgba(0,255,0,0.2); color: #00d000; }
+.state-busy { background: rgba(255,193,7,0.2); color: #f6b557; }
+.state-closed { background: rgba(255,0,0,0.2); color: #ff5a5a; }
+
+/* Trafic counters inline */
+.traffic-counters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 6px; }
+.traffic-counter .label { background: #0a7d0a; color: #fff; font-weight: 700; font-size: 12px; padding: 4px 8px; border-radius: 8px; margin-bottom: 6px; text-align: center; }
+.traffic-counter .counter { background: #0a7d0a; color: #fff; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto; box-shadow: 0 0 10px rgba(0,0,0,0.3); }
+
+/* Optionnel: tableau incidents trafic minimal */
+.traffic-table.minimal { font-size: 12px; color: #eee; }
+
+/* === TIMELINE CENTRÉE === */
+#timeline-main { overflow: hidden; }
+.timeline-container {
+    width: 100%;
+    max-width: 1100px;
+    margin: 0 auto;
+    overflow-y: auto;
+    height: 100%;
+    padding-right: 6px; /* pour scrollbar */
+    scrollbar-width: thin;
+    scrollbar-color: #ff007f rgba(9, 7, 38, 0.6);
+}
+.timeline-container::-webkit-scrollbar { width: 6px; }
+.timeline-container::-webkit-scrollbar-thumb { background: #ff007f; border-radius: 10px; }
+
+/* Cartes événements: on garde tes styles existants */
+.event-item { background-color: #34495e; padding: 0.8rem; border-radius: 8px; margin-bottom: 0.5rem; cursor: pointer; transition: background-color 0.3s ease; position: relative; }
+.event-item:hover { background-color: #2c3e50; }
+
+/* === RESPONSIVE === */
+@media (max-width: 900px) {
+    #main-content { grid-template-columns: 1fr; height: auto; }
+    #timeline-main { margin-top: 8px; }
+}
+
+/* === NETTOYAGE des éléments retirés === */
+#map, #stats-container, #parking-indicators,
+.slide-container.traffic-container,
+#accident-container, #jam-container,
+.leaflet-control-fullscreen-btn { display: none !important; }
+
+/* === Drawer latéral droit === */
+.event-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 420px;
+  max-width: 90vw;
+  height: 100vh;
+  background: #090726;
+  color: #fff;
+  box-shadow: -6px 0 20px rgba(0,0,0,0.4);
+  border-left: 1px solid rgba(255,255,255,0.06);
+  transform: translateX(100%);
+  transition: transform .28s ease;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+}
+.event-drawer.open { transform: translateX(0); }
+
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s ease;
+  z-index: 1990;
+}
+.drawer-overlay.show {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #ff007f;
+  color: #fff;
+  padding: 12px 14px;
+}
+.drawer-header h3 { margin: 0; font-size: 1rem; }
+
+.drawer-close {
+  background: transparent;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+}
+.drawer-close:hover { background: rgba(255,255,255,0.15); }
+
+.drawer-body {
+  padding: 12px 14px;
+  overflow-y: auto;
+  gap: 8px;
+  display: grid;
+}
+.drawer-body .field {
+  background: rgba(0,0,0,0.45);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.drawer-body .field .label {
+  font-size: 11px; text-transform: uppercase; opacity: .7; margin-bottom: 4px;
+}
+.drawer-body .field .value {
+  font-size: 14px; font-weight: 600;
+}
+
+.drawer-footer {
+  margin-top: auto;
+  padding: 10px 14px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  background: rgba(255,255,255,0.05);
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+.btn {
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 700;
+}
+.btn-primary { background: #ff007f; color: #fff; }
+.btn-primary:hover { background: #e60073; }
+.btn-secondary { background: #34495e; color: #fff; }
+.btn-secondary:hover { background: #2c3e50; }
+.btn-danger { background: #a3203a; color: #fff; }
+.btn-danger:hover { background: #871a2f; }
+
 @font-face {
     font-family: 'DEMO';
     src: url('https://obtain.fr/FONT/Demo-Regular.ttf') format('truetype');
@@ -35,7 +237,7 @@ body, html {
     transition: transform 0.3s ease-in-out, width 0.3s ease-in-out;
     will-change: transform, width;
     position: relative;
-    z-index: 3000;
+    z-index: 120;
 }
 
 /* Lorsque la sidebar est fermée */
@@ -45,7 +247,7 @@ body, html {
     transition: transform 0.3s ease-in-out, width 0.3s ease-in-out;
     will-change: transform, width;
     position: relative;
-    z-index: 3000;
+    z-index: 120;
 }
 
 #search-type {
@@ -633,21 +835,6 @@ th span {
     text-decoration: none;
 }
 
-/* La carte occupe le reste de l'espace */
-#map {
-    flex: 1;
-    /* Si nécessaire, ajoutez une marge pour ne pas être collée à la timeline */
-    margin-left: 1rem;
-}
-
-/* Organise le contenu principal en flex pour placer la timeline et la carte côte à côte */
-#main-content {
-    display: flex;
-    flex-direction: row;
-    height: calc(100vh - 97px);
-    position: relative;
-}
-
 /* Styles supplémentaires pour le bouton plein écran intégré dans Leaflet */
 .leaflet-control-fullscreen-btn {
     background-color: #fff;
@@ -745,29 +932,6 @@ footer {
 /* Ajouter une transition douce pour les lignes */
 #traffic-table-container tbody tr {
     transition: transform 0.2s ease, background-color 0.2s ease;
-}
-
-#toggle-traffic-table:hover {
-    background-color: #e60073;
-}
-
-/* Bouton de repli/dépli */
-#toggle-traffic-table {
-    position: absolute; /* Positionné par rapport à son parent (traffic-container) */
-    top: 12px; /* Aligner le bouton verticalement */
-    right: -24px; /* Positionner le bouton juste à côté du tableau */
-    background-color: #ff007f;
-    color: white;
-    border: none;
-    border-radius: 0 5px 5px 0;
-    padding: 10px;
-    cursor: pointer;
-    z-index: 1000;
-    transition: background-color 0.3s ease, transform 0.3s ease; /* Animation lissée */
-    height: 31px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
 }
 
 /* Quand le tableau est replié */
@@ -1001,35 +1165,6 @@ footer {
     background-color: red;
 }
 
-/* --- Timeline Container --- */
-.timeline-container {
-    width: 25%; /* Ajustez cette valeur selon vos besoins */
-    overflow-y: auto;
-    background-color: rgba(9, 7, 38, 0.8) !important;
-    padding: 1rem;
-    color: #fff;
-}
-
-/* Personnalisation de la barre de défilement pour WebKit (Chrome, Edge, Safari) */
-.timeline-container::-webkit-scrollbar {
-    width: 4px; /* Largeur de la barre de scroll */
-}
-
-.timeline-container::-webkit-scrollbar-track {
-    background: rgba(9, 7, 38, 0.6); /* Couleur du fond de la barre */
-    border-radius: 10px;
-}
-
-.timeline-container::-webkit-scrollbar-thumb {
-    background: #ff007f; /* Couleur du curseur */
-    border-radius: 10px;
-    border: 2px solid rgba(9, 7, 38, 0.8); /* Bordure pour un effet encadré */
-}
-
-.timeline-container::-webkit-scrollbar-thumb:hover {
-    background: #e60073; /* Couleur du curseur au survol */
-}
-
 /* Compatibilité Firefox */
 .timeline-container {
     scrollbar-width: thin;
@@ -1166,21 +1301,6 @@ footer {
     max-height: 500px; /* Valeur suffisante pour afficher le contenu */
 }
 
-/* Style global pour la vignette */
-.event-item {
-    background-color: #34495e;
-    padding: 0.8rem;
-    border-radius: 8px;
-    margin-bottom: 0.5rem;
-    cursor: pointer;
-    transition: background-color 0.3s ease;
-    position: relative;
-}
-
-.event-item:hover {
-    background-color: #2c3e50;
-}
-
 /* --- Statistiques --- */
 
 /* Conteneur global pour aligner les blocs horizontalement */
@@ -1191,64 +1311,6 @@ footer {
     display: flex;
     gap: 10px; /* espace entre les blocs */
     z-index: 1000; /* Pour que les blocs soient au-dessus de la carte */
-}
-
-/* Style commun pour chaque bloc de statistique */
-.stat-block {
-    background: rgba(0, 0, 0, 0.7);
-    color: #fff;
-    padding: 10px 15px;
-    border-radius: 5px;
-    text-align: center;
-}
-
-/* Styles spécifiques pour le compteur */
-.counter-number {
-    font-size: 26px;
-    font-weight: bold;
-}
-
-.counter-label {
-    font-size: 14px;
-}
-
-/* Exemple de style pour un autre bloc */
-.stat-number {
-    font-size: 26px;
-    font-weight: bold;
-}
-
-.stat-label {
-    font-size: 14px;
-}
-
-/* Si vous souhaitez positionner le conteneur par rapport à la fenêtre */
-#parking-indicators {
-    position: relative;
-    top: 100px;
-    left: 10px;
-    z-index: 1000; /* Pour qu'il soit au-dessus de la carte */
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    width: 15%;
-}
-
-/* Exemple de style pour chaque indicateur individuel */
-.parking-indicator {
-    background-color: rgba(0, 0, 0, 0.7);
-    color: #fff;
-    padding: 10px;
-    border-radius: 5px;
-    text-align: center;
-    font-weight: bold;
-}
-
-.terrain-name {
-    font-size: 20px;  /* Augmenter la taille du texte */
-    font-weight: bold;
-    display: block;
-    margin-bottom: -15px;
 }
 
 /* Container des messages flash */
@@ -1309,3 +1371,60 @@ footer {
         transform: translateY(-20px);
     }
 }
+
+/* TODO dans le drawer */
+.todo-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.todo-item { display:flex; align-items:center; gap:8px; }
+.todo-actions { display:flex; gap:8px; margin-top:8px; }
+.empty-todo { background: rgba(255,255,255,.08); padding:8px; border-radius:8px; }
+.prep-pill { padding: 2px 8px; border-radius: 999px; font-weight: 700; font-size: 12px; }
+.prep-none     { background: rgba(255,255,255,.08); color:#fff; }
+.prep-progress { background: rgba(255,193,7,.25); color:#f6b557; }
+.prep-true     { background: rgba(39,174,96,.25); color:#27ae60; }
+.event-drawer .form-input { width:100%; background: rgba(0,0,0,.35); color:#fff; border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:8px 10px; }
+.event-drawer textarea.form-input { resize: vertical; min-height: 80px; }
+
+/* TODO "post-it" dans les cartes */
+.todo-sticky {
+  background: #fff9c4;
+  color: #333;
+  border: 1px solid #f1d87a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  box-shadow: 0 2px 6px rgba(0,0,0,.1) inset, 0 2px 6px rgba(0,0,0,.12);
+}
+.todo-sticky h6 {
+  margin: 0 0 6px;
+  font-size: .9rem;
+  color: #7a5b00;
+  letter-spacing: .2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.todo-sticky ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.todo-sticky li { display: flex; align-items: center; gap: 8px; }
+
+.todo-checkbox {
+  appearance: none;
+  width: 16px; height: 16px;
+  border: 2px solid #d0b12e;
+  border-radius: 3px;
+  background: #fffbe6;
+  cursor: pointer;
+  position: relative;
+}
+.todo-checkbox:checked::after {
+  content: "";
+  position: absolute;
+  left: 3px; top: 0px;
+  width: 6px; height: 10px;
+  border-right: 2px solid #388e3c;
+  border-bottom: 2px solid #388e3c;
+  transform: rotate(45deg);
+}
+.todo-text.todo-done { opacity: .6; text-decoration: line-through; }
+
+/* cluster list */
+.cluster-list .cluster-line:hover { background: rgba(255,255,255,0.06); }

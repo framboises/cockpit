@@ -1,3 +1,7 @@
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+// HELPERS
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+
 // Fonction utilitaire pour convertir l'heure "HH:MM" en minutes depuis minuit
 function timeToMinutes(timeStr) {
     if (!timeStr || timeStr.toUpperCase() === "TBC") return Infinity;
@@ -9,6 +13,205 @@ function timeToMinutes(timeStr) {
 function truncateText(text, maxChars) {
     return text.length > maxChars ? text.substring(0, maxChars) + "…" : text;
 }
+
+// 🔹 Construit un index { 'YYYY-MM-DD': { is24h, openTime, closeTime } }
+function buildPublicDatesMap(parametrage) {
+  const map = {};
+  const dates = parametrage?.globalHoraires?.dates || parametrage?.data?.globalHoraires?.dates || [];
+  dates.forEach(d => {
+    if (d?.date) {
+      map[d.date] = {
+        is24h: !!d.is24h || (d.openTime === "00:00" && (d.closeTime === "23:59" || d.closeTime === "24:00")),
+        openTime: d.openTime || "00:00",
+        closeTime: d.closeTime || "23:59"
+      };
+    }
+  });
+  return map;
+}
+
+// 🔹 Retourne {text, className} pour une date donnée (YYYY-MM-DD)
+function getPublicBannerForDateStr(dateStr) {
+  const entry = window.publicDatesMap?.[dateStr];
+  if (!entry) {
+    return { text: "FERMÉ AU PUBLIC", className: "banner-closed" };
+  }
+  if (entry.is24h) {
+    return { text: "OUVERT AU PUBLIC — 24/24", className: "banner-open" };
+  }
+  return {
+    text: `OUVERT AU PUBLIC — ${entry.openTime} – ${entry.closeTime}`,
+    className: "banner-open"
+  };
+}
+
+// --- Helpers TODO robustes ---
+function splitTodo(raw) {
+  if (raw == null) return [];
+  // Si c'est déjà un tableau (strings ou objets), on normalise
+  if (Array.isArray(raw)) {
+    return raw
+      .map(v => (typeof v === 'string' ? v : (v?.text ?? String(v))).trim())
+      .filter(Boolean)
+      .map(line => {
+        const m = line.match(/^-?\s*\[(x|X|\s)?\]\s*(.*)$/);
+        if (m) return { text: m[2].trim(), done: !!m[1] && m[1].toLowerCase() === 'x' };
+        const done = /^[✓✔]/.test(line);
+        const clean = line.replace(/^[✓✔]\s*/, '');
+        return { text: clean, done };
+      });
+  }
+  // Sinon on convertit en string en dernier recours
+  const str = String(raw);
+  if (!str.trim()) return [];
+  return str
+    .split(/\r?\n|,/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(line => {
+      const m = line.match(/^-?\s*\[(x|X|\s)?\]\s*(.*)$/);
+      if (m) return { text: m[2].trim(), done: !!m[1] && m[1].toLowerCase() === 'x' };
+      const done = /^[✓✔]/.test(line);
+      const clean = line.replace(/^[✓✔]\s*/, '');
+      return { text: clean, done };
+    });
+}
+
+function serializeTodo(items) {
+  // Tolère un tableau mixte [{text,done}] | ['[x] foo'|'bar']
+  return (items || [])
+    .map(it => {
+      if (typeof it === 'string') {
+        const m = it.match(/^-?\s*\[(x|X|\s)?\]\s*(.*)$/);
+        if (m) return `- [${m[1] ? 'x' : ' '}] ${m[2].trim()}`;
+        return `- [ ] ${it.trim()}`;
+      }
+      const done = !!it.done;
+      const text = (it.text ?? '').trim();
+      return `- [${done ? 'x' : ' '}] ${text}`;
+    })
+    .join('\n');
+}
+
+function renderTodoSticky(item) {
+  const tasks = splitTodo(item.todo || "");
+  if (tasks.length === 0) return "";
+  const lis = tasks.map((t, idx) => `
+    <li data-idx="${idx}">
+      <input type="checkbox" class="todo-checkbox" ${t.done ? 'checked' : ''} />
+      <span class="todo-text ${t.done ? 'todo-done' : ''}">${t.text}</span>
+    </li>`).join('');
+  return `
+    <div class="todo-sticky" data-event-id="${item._id}">
+      <h6><span class="material-icons" style="font-size:16px;line-height:0;">checklist</span> Préparation</h6>
+      <ul>${lis}</ul>
+    </div>`;
+}
+
+// --- Helpers clustering ---
+function norm(s){ return (s||'').toString().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,''); }
+function isParkingItem(it) {
+  const c = norm(it.category), a = norm(it.activity), p = norm(it.place);
+  return /parking/.test(c) || /parking/.test(a) || /parking/.test(p);
+}
+function isAccueilItem(it) {
+  const c = norm(it.category), a = norm(it.activity), p = norm(it.place);
+  // "aire d'accueil", "aires accueil", "accueil camping", etc.
+  return /aire.*accueil|accueil.*aire|camping|caravane|camp-car|camping-car/.test(c+a+p);
+}
+
+const CLUSTER_CONFIG = {
+  parking: { label: 'Parkings',        match: isParkingItem,  icon: 'local_parking' },
+  accueil: { label: "Aires d'accueil", match: isAccueilItem,  icon: 'rv_hookup' },
+  portes:  { label: 'Portes',          match: isDoorItem,     icon: 'meeting_room' } // ou 'door_front'
+};
+
+function groupByClusters(items) {
+  const rest = [];
+  const buckets = {}; // key: `${type}|${kind}|${timeKey}` -> []
+
+  function detectType(it) {
+    if (CLUSTER_CONFIG.parking.match(it)) return 'parking';
+    if (CLUSTER_CONFIG.accueil.match(it)) return 'accueil';
+    if (CLUSTER_CONFIG.portes.match(it))  return 'portes';
+    return null;
+  }
+
+  items.forEach(it => {
+    const type = detectType(it);
+    if (!type) { rest.push(it); return; }
+
+    const kind = getOpenCloseKind(it); // 'open'|'close'|null
+    if (!kind) { // si on ne sait pas si c’est une ouverture ou une fermeture, on n’agrège pas
+      rest.push(it);
+      return;
+    }
+
+    const timeKey = getClusterTimeKey(it, kind); // "HH:MM" ou "TBC"
+    const key = `${type}|${kind}|${timeKey}`;
+    (buckets[key] ||= []).push(it);
+  });
+
+  const clusters = [];
+  Object.entries(buckets).forEach(([key, arr]) => {
+    const [type, kind, time] = key.split('|');
+    if (arr.length > 1) {
+      clusters.push({ type, kind, time, items: arr });
+    } else {
+      // si un seul item, ne crée pas de cluster, on laisse la carte individuelle
+      rest.push(arr[0]);
+    }
+  });
+
+  return { clusters, rest };
+}
+
+// résumé horaire pour un cluster: min(start) – max(end) si dispo
+function clusterTimeWindow(items){
+  const toMin = s => (s && s.toUpperCase() !== 'TBC') ? timeToMinutes(s) : Infinity;
+  const toMax = s => (s && s.toUpperCase() !== 'TBC') ? timeToMinutes(s) : -Infinity;
+  const minStart = Math.min(...items.map(it => toMin(it.start)));
+  const maxEnd   = Math.max(...items.map(it => toMax(it.end)));
+  const m2h = m => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+
+  let txt = 'TBC';
+  if (isFinite(minStart) && maxEnd !== -Infinity) txt = `${m2h(minStart)} - ${m2h(maxEnd)}`;
+  else if (isFinite(minStart)) txt = m2h(minStart);
+  else if (maxEnd !== -Infinity) txt = m2h(maxEnd);
+  return txt;
+}
+
+function isDoorItem(it) {
+  const s = norm(`${it.category||''} ${it.activity||''} ${it.place||''}`);
+  // tolérant : porte/portes, gate, portail, entrée/entree
+  return /\bporte?s?\b|\bgate\b|portail|entr[ée]e/.test(s);
+}
+
+function validTimeStr(s){ return !!(s && s.trim() && s.toUpperCase() !== 'TBC'); }
+
+function getOpenCloseKind(it){
+  const s = norm(`${it.activity||''} ${it.category||''} ${it.place||''}`);
+  // mots-clés tolérants
+  if (/\bouverture\b|ouvre(r|t)?|opening|\bopen\b/.test(s))   return 'open';
+  if (/\bfermeture\b|ferme(r|t)?|closing|\bclose(d)?\b/.test(s)) return 'close';
+  return null; // on ne force pas si on n'est pas sûr
+}
+
+// Retourne l'heure "clé" du regroupement:
+function getClusterTimeKey(it, kind){
+  if (kind === 'close') {
+    if (validTimeStr(it.end))   return it.end;
+    if (validTimeStr(it.start)) return it.start;
+  } else { // 'open' par défaut
+    if (validTimeStr(it.start)) return it.start;
+    if (validTimeStr(it.end))   return it.end;
+  }
+  return 'TBC';
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+// AFFICHAGE
+/////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // Fonction pour créer une vignette d'événement dans la timeline avec affichage en deux colonnes
 function createEventItem(date, item) {
@@ -25,12 +228,9 @@ function createEventItem(date, item) {
         iconHtml = `<span class="material-icons">info</span>`;
     }
 
-    // Extraire la partie française du titre (avant le slash)
-    let fullTitle = item.activity.split('/')[0].trim();
-    // Extraire la partie française du lieu (avant le slash)
-    let fullPlace = item.place.split('/')[0].trim();
-    // On tronque pour la version compacte (par exemple, à 50 caractères)
-    let truncatedTitle = truncateText(fullTitle, 50);
+    const fullTitle = (item.activity || '').split('/')[0].trim();
+    const fullPlace = (item.place || '').split('/')[0].trim();
+    const truncatedTitle = truncateText(fullTitle || 'Sans titre', 50);
 
     // Gestion de l'affichage des heures
     let timeInfo = "";
@@ -71,8 +271,76 @@ function createEventItem(date, item) {
             <p><strong>Département :</strong> ${item.department}</p>
             <p><strong>Lieu détaillé :</strong> ${item.place ? item.place : "Non spécifié"}</p>
             <p><strong>Commentaires :</strong> ${item.remark ? item.remark : "Non spécifié"}</p>
+            ${renderTodoSticky(item)}
         </div>
     `;
+
+    const sticky = eventItem.querySelector('.todo-sticky');
+    if (sticky) {
+    sticky.addEventListener('change', (e) => {
+        const input = e.target;
+        if (!input.classList.contains('todo-checkbox')) return;
+
+        const li = input.closest('li');
+        if (!li) return;
+
+        const idx = Number(li.dataset.idx);
+        const tasks = splitTodo(item.todo || "");
+        if (Number.isFinite(idx) && tasks[idx]) {
+        tasks[idx].done = input.checked;
+        item.todo = serializeTodo(tasks);
+
+        const txt = li.querySelector('.todo-text');
+        if (txt) txt.classList.toggle('todo-done', input.checked);
+
+        // Sauvegarde TODO
+        fetch('/update_timetable_event', {
+            method: 'POST',
+            headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+            },
+            body: JSON.stringify({
+            event: window.selectedEvent,
+            year: window.selectedYear,
+            date: eventItem.dataset.date,
+            _id: item._id,
+            todo: item.todo
+            })
+        })
+        .then(r => r.json())
+        .then(res => {
+            if (!res.success && typeof showDynamicFlashMessage === 'function') {
+            showDynamicFlashMessage("Échec de la sauvegarde TODO", "error");
+            }
+
+            // 🔵 ICI : on vérifie si tout est coché puis on marque prêt
+            const allDone = tasks.length > 0 && tasks.every(t => t.done);
+
+            // OPTION A : si tu as une route /set_preparation_ready
+            if (allDone && (item.preparation_checked || "").toLowerCase() !== "true") {
+            fetch('/set_preparation_ready', {
+                method: 'POST',
+                headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                },
+                body: JSON.stringify({
+                id: item._id,
+                event: window.selectedEvent,
+                year: window.selectedYear,
+                date: eventItem.dataset.date
+                })
+            }).then(()=> {
+                item.preparation_checked = "true";
+                applyPreparationStatus(eventItem, "true");
+            });
+            }
+        })
+        .catch(err => console.error("Save TODO failed:", err));
+        }
+    });
+    }
 
     // Attacher l'écouteur sur le bouton d'extension
     const expandBtn = eventItem.querySelector(".expand-btn");
@@ -84,13 +352,82 @@ function createEventItem(date, item) {
     }
 
     // Rendre la vignette cliquable pour ouvrir la modale détaillée (en dehors du bouton d'extension)
-    eventItem.addEventListener("click", function(e) {
-        if (!e.target.closest(".expand-btn")) {
-            openTimetableItemModal(date, item);
-        }
+    eventItem.addEventListener('click', function(e) {
+    if (!e.target.closest(".expand-btn")) {
+        openEventDrawer(date, item);
+    }
     });
     
     return eventItem;
+}
+
+function createClusterItem(date, cluster) {
+  const cfg = CLUSTER_CONFIG[cluster.type];
+  const count = cluster.items.length;
+  const kindLabel = cluster.kind === 'close' ? 'Fermeture' : 'Ouverture';
+  const timeInfo = cluster.time || 'TBC';
+
+  const el = document.createElement('div');
+  el.classList.add('event-item');
+  el.innerHTML = `
+    <div class="event-summary">
+      <div class="event-title">
+        <span class="material-icons">${cfg.icon}</span>
+        <h5>${cfg.label} — ${kindLabel} ${timeInfo} (${count})</h5>
+      </div>
+      <div class="event-time">
+        <p class="time-info">${timeInfo}</p>
+        <p class="event-location">Regroupement</p>
+      </div>
+      <div class="buttons-container">
+        <button class="expand-btn"><span class="material-icons">expand_more</span></button>
+      </div>
+    </div>
+    <div class="toggle-content">
+      <ul class="cluster-list" style="list-style:none; padding-left:0; margin:0;">
+        ${cluster.items.map(ch => {
+          const title = (ch.activity||'Sans titre').split('/')[0].trim();
+          const place = (ch.place||'—').split('/')[0].trim();
+          const hours = (ch.start && ch.start!=='TBC' ? ch.start : '') +
+                        (ch.end   && ch.end  !=='TBC' ? (' - '+ch.end) : '');
+          return `
+            <li class="cluster-line" data-child-id="${ch._id}" style="display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.08); cursor:pointer;">
+              <span class="material-icons" style="font-size:18px; opacity:.8;">chevron_right</span>
+              <div style="flex:1;">
+                <div style="font-weight:700;">${title}</div>
+                <div style="opacity:.8; font-size:12px;">${place} ${hours?('• '+hours):''}</div>
+              </div>
+            </li>`;
+        }).join('')}
+      </ul>
+    </div>
+  `;
+
+  // expand/collapse
+  el.querySelector('.expand-btn')?.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    toggleDetails(e, e.currentTarget);
+  });
+
+  // clic sur une sous-ligne -> ouvrir le drawer de l’item
+  el.querySelectorAll('.cluster-line').forEach(li=>{
+    li.addEventListener('click', ()=>{
+      const id = li.getAttribute('data-child-id');
+      const it = cluster.items.find(x => String(x._id) === String(id));
+      if (it) openEventDrawer(date, it);
+    });
+  });
+
+  // clic sur la carte -> expand
+  el.addEventListener('click', (e)=>{
+    if (!e.target.closest('.expand-btn')) {
+      el.classList.toggle('expanded');
+      const icon = el.querySelector('.expand-btn .material-icons');
+      icon.textContent = el.classList.contains('expanded') ? 'expand_less' : 'expand_more';
+    }
+  });
+
+  return el;
 }
 
 // Fonction pour basculer l'affichage des détails (expand/collapse)
@@ -118,6 +455,7 @@ function fetchTimetable() {
         .then(response => response.json())
         .then(data => {
             const eventList = document.getElementById("event-list");
+            if (eventList) eventList.innerHTML = "";  // <-- reset pour éviter les accumulations
 
             const sectionsByDate = {}; // Pour stocker les sections par date
 
@@ -140,26 +478,33 @@ function fetchTimetable() {
                     dateHeader.textContent = d.toLocaleDateString("fr-FR");
                     dateHeaderContainer.appendChild(dateHeader);
 
-                    // Vérifier si la journée contient un item avec category "General" et activity "Ouverture au public"
-                    const publicOpen = items.some(item => {
-                        return item.category === "General" &&
-                            item.activity.trim().toLowerCase() === "ouverture au public";
-                    });
+                    // Vérifier si la journée a des dates ouvertes au public
+                    const bannerInfo = getPublicBannerForDateStr(date); // <- date au format YYYY-MM-DD
                     const banner = document.createElement("p");
-                    banner.textContent = publicOpen ? "OUVERT AU PUBLIC" : "FERME AU PUBLIC";
-                    banner.classList.add(publicOpen ? "banner-open" : "banner-closed");
+                    banner.textContent = bannerInfo.text;
+                    banner.classList.add(bannerInfo.className);
                     dateHeaderContainer.appendChild(banner);
 
                     dateSection.appendChild(dateHeaderContainer);
 
-                    // Créer les vignettes pour chaque item, sauf ceux avec General / Ouverture au public
-                    items.forEach(item => {
-                        if (item.category === "General" && item.activity.trim().toLowerCase() === "ouverture au public") {
-                            // Ne pas générer la vignette pour cet item
-                            return;
-                        }
-                        const eventItem = createEventItem(date, item);
-                        dateSection.appendChild(eventItem);
+
+                    // On regroupe ici
+                    const { clusters, rest } = groupByClusters(items);
+
+                    // 1) Rendre les clusters (parkings / aires d’accueil)
+                    clusters.forEach(g => {
+                    const card = createClusterItem(date, g);
+                    dateSection.appendChild(card);
+                    });
+
+                    // 2) Rendre les autres items normalement,
+                    //    en excluant "General / Ouverture au public" comme avant
+                    rest.forEach(item => {
+                    if (item.category === "General" && item.activity?.trim()?.toLowerCase() === "ouverture au public") {
+                        return;
+                    }
+                    const card = createEventItem(date, item);
+                    dateSection.appendChild(card);
                     });
 
                     eventList.appendChild(dateSection);
@@ -187,39 +532,52 @@ function getTimeForSort(item) {
 // Nouvelle fonction pour récupérer les paramètres (paramétrage) via POST
 function fetchParametrage() {
     if (!window.selectedEvent || !window.selectedYear) {
-        console.error("Les variables globales 'selectedEvent' et 'selectedYear' doivent être définies.");
-        return Promise.resolve(null);
+    console.error("Les variables globales 'selectedEvent' et 'selectedYear' doivent être définies.");
+    return Promise.resolve(null);
     }
     return fetch('/get_parametrage?event=' + encodeURIComponent(window.selectedEvent) + '&year=' + encodeURIComponent(window.selectedYear))
-        .then(response => response.json())
-        .then(data => {
-            window.parametrage = data; // Stocke les données dans une variable globale
-            console.log("Paramétrage :", data);
-            return data;
-        })
-        .catch(error => {
-            console.error("Erreur lors de la récupération des paramètres :", error);
-            return Promise.resolve(null);
-        });
+    .then(response => response.json())
+    .then(data => {
+        window.parametrage = data;                // l'API te renvoie déjà le champ "data"
+        window.publicDatesMap = buildPublicDatesMap(data); // 👈 IMPORTANT
+        console.log('publicDatesMap:', window.publicDatesMap);
+        return data;
+    })
+    .catch(error => {
+        console.error("Erreur lors de la récupération des paramètres :", error);
+        window.publicDatesMap = {};               // évite les undefined
+        return Promise.resolve(null);
+    });
 }
+
 
 // Exemple de fonction pour ouvrir la modale détaillée pour un item
 function openTimetableItemModal(date, item) {
     console.log("Ouverture de la modale pour la date", date, "et l'item :", item);
-    // Implémentez ici l'ouverture de votre modale détaillée
+    // Redirige vers le tiroir latéral droit si disponible
+    if (window.openEventDrawer) {
+        // On passe la date aussi (pratique pour l'affichage)
+        window.openEventDrawer({ ...item, date });
+        return;
+    }
+    // Fallback simple si le drawer n'est pas chargé
+    alert("Détails événement indisponibles (drawer non chargé).");
 }
 
 // Écouteur sur le bouton HUD pour lancer fetchTimetable()
 document.addEventListener('DOMContentLoaded', function() {
-    const hudButton = document.getElementById("hud-button");
-    if (hudButton) {
-        hudButton.addEventListener("click", function() {
-            fetchTimetable();
-            updateGlobalCounter();
-        });
-    } else {
-        console.error("Le bouton avec l'ID 'hud-button' n'a pas été trouvé.");
-    }
+  const hudButton = document.getElementById("hud-button");
+  if (hudButton) {
+    hudButton.addEventListener("click", function() {
+      // ⚠️ d’abord le paramétrage, ensuite la timeline (pour avoir publicDatesMap prêt)
+      fetchParametrage().then(() => {
+        fetchTimetable();
+        updateGlobalCounter();
+      });
+    });
+  } else {
+    console.error("Le bouton avec l'ID 'hud-button' n'a pas été trouvé.");
+  }
 });
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -273,15 +631,30 @@ document.addEventListener('DOMContentLoaded', function(){
     });
     
     // Fermer la modale au clic sur la croix ou le bouton Annuler
-    closeAddEvent.addEventListener('click', () => closeModal(addEventModal));
-    cancelAddEvent.addEventListener('click', () => closeModal(addEventModal));
+    closeAddEvent.addEventListener('click', () => {
+        window.formMode = 'add';
+        window.editingItemId = null;
+        const title = addEventModal.querySelector('h3');
+        if (title) title.textContent = "Ajouter un événement à la Timetable";
+        closeModal(addEventModal);
+    });
+    cancelAddEvent.addEventListener('click', () => {
+        window.formMode = 'add';
+        window.editingItemId = null;
+        const title = addEventModal.querySelector('h3');
+        if (title) title.textContent = "Ajouter un événement à la Timetable";
+        closeModal(addEventModal);
+    });
     
-    // Soumission du formulaire
+    // Soumission du formulaire (ADD ou EDIT)
     addEventForm.addEventListener('submit', function(e){
         e.preventDefault();
+
+        const isEdit = (window.formMode === 'edit');
+        const endpoint = isEdit ? '/update_timetable_event' : '/add_timetable_event';
+
         // Récupérer les valeurs du formulaire
-        const formData = {
-            // On suppose que l'événement et l'année sont les mêmes que ceux actuellement sélectionnés
+        const payload = {
             event: window.selectedEvent || '24H MOTOS',
             year: window.selectedYear || '2025',
             date: document.getElementById('event-date').value,
@@ -294,32 +667,47 @@ document.addEventListener('DOMContentLoaded', function(){
             department: document.getElementById('department').value,
             remark: document.getElementById('remark').value,
             type: "Timetable",
-            origin: "manual"
+            origin: isEdit ? "manual-edit" : "manual"
         };
-        
-        fetch('/add_timetable_event', {
+
+        // Inclure l'ID en édition
+        if (isEdit) {
+            const hiddenId = addEventForm.querySelector('input[name=\"_id\"]');
+            const idVal = hiddenId ? hiddenId.value : (window.editingItemId || null);
+            if (idVal) payload._id = idVal;
+        }
+
+        fetch(endpoint, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                'X-CSRFToken': document.querySelector('meta[name=\"csrf-token\"]').getAttribute('content')
             },
-            body: JSON.stringify(formData)
+            body: JSON.stringify(payload)
         })
-        .then(response => response.json())
+        .then(r => r.json())
         .then(data => {
-            if(data.success){
-                // Afficher un message de succès (la fonction showDynamicFlashMessage est déjà définie dans main.js)
-                showDynamicFlashMessage("Événement ajouté avec succès", "success");
+            if (data.success) {
+                showDynamicFlashMessage(isEdit ? "Événement modifié avec succès" : "Événement ajouté avec succès", "success");
                 closeModal(addEventModal);
-                // Optionnel : rafraîchir la timeline pour refléter l'ajout
+
+                // Reset mode vers ADD et texte titre
+                window.formMode = 'add';
+                window.editingItemId = null;
+                const title = addEventModal.querySelector('h3');
+                if (title) title.textContent = "Ajouter un événement à la Timetable";
+
+                // Rafraîchir la timeline
+                const eventList = document.getElementById("event-list");
+                if (eventList) eventList.innerHTML = "";
                 fetchTimetable();
             } else {
-                showDynamicFlashMessage("Erreur lors de l'ajout de l'événement", "error");
+                showDynamicFlashMessage(data.message || "Erreur lors de l'enregistrement", "error");
             }
         })
         .catch(err => {
-            console.error("Erreur lors de l'ajout de l'événement:", err);
-            showDynamicFlashMessage("Erreur lors de l'ajout de l'événement", "error");
+            console.error("Erreur lors de l'enregistrement:", err);
+            showDynamicFlashMessage("Erreur lors de l'enregistrement", "error");
         });
     });
     
@@ -330,3 +718,393 @@ document.addEventListener('DOMContentLoaded', function(){
         }
     });
 });
+
+/**************************************************************
+ * DRAWER ÉVÉNEMENT (TODO + Préparation + Édition inline)
+ **************************************************************/
+let _drawerCurrent = { date: null, item: null };   // contexte courant
+const drawerEl      = document.getElementById('event-drawer');
+const drawerBodyEl  = document.getElementById('event-drawer-body');
+const drawerTitleEl = document.getElementById('drawer-title');
+const drawerOverlay = document.getElementById('event-drawer-overlay');
+const drawerClose   = document.getElementById('drawer-close');
+const btnEdit       = document.getElementById('drawer-edit');
+const btnDup        = document.getElementById('drawer-duplicate');
+const btnDel        = document.getElementById('drawer-delete');
+
+function openEventDrawer(date, item) {
+  _drawerCurrent = { date, item: structuredClone(item) }; // copie pour édition locale
+  renderDrawerView();
+  drawerEl.classList.add('open');
+  drawerOverlay.classList.add('show');
+  drawerEl.setAttribute('aria-hidden', 'false');
+}
+function closeEventDrawer() {
+  drawerEl.classList.remove('open');
+  drawerOverlay.classList.remove('show');
+  drawerEl.setAttribute('aria-hidden', 'true');
+}
+drawerOverlay?.addEventListener('click', closeEventDrawer);
+drawerClose?.addEventListener('click', closeEventDrawer);
+
+/* --- Helpers TODO --- */
+function parseTodos(todoField) {
+  if (!todoField) return [];
+  if (Array.isArray(todoField)) return todoField.map(s => s.toString());
+  return todoField
+    .toString()
+    .split(/\r?\n/)              // lignes
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+function stringifyTodos(list) {
+  return list.join('\n');
+}
+
+/* --- Vue en lecture --- */
+function renderDrawerView() {
+  const it = _drawerCurrent.item;
+  drawerTitleEl.textContent = it.activity || 'Événement';
+  const todoArray = parseTodos(it.todo);
+
+  const prep = (it.preparation_checked ?? "").toString().toLowerCase(); // "", "progress", "true"
+  const prepLabel =
+    prep === 'true' ? 'Prête'
+  : prep === 'progress' ? 'En cours'
+  : 'Non';
+
+  drawerBodyEl.innerHTML = `
+    <div class="field">
+      <div class="label">Date</div>
+      <div class="value">${_drawerCurrent.date}</div>
+    </div>
+    <div class="field">
+      <div class="label">Heures</div>
+      <div class="value">${(it.start && it.start!=='TBC')?it.start:'—'} ${(it.end && it.end!=='TBC')?(' - '+it.end):''}</div>
+    </div>
+    <div class="field">
+      <div class="label">Catégorie</div>
+      <div class="value">${it.category || '—'}</div>
+    </div>
+    <div class="field">
+      <div class="label">Lieu</div>
+      <div class="value">${it.place || '—'}</div>
+    </div>
+    <div class="field">
+      <div class="label">Département</div>
+      <div class="value">${it.department || '—'}</div>
+    </div>
+    <div class="field">
+      <div class="label">Remarques</div>
+      <div class="value">${it.remark || '—'}</div>
+    </div>
+
+    <div class="field">
+      <div class="label">Préparation</div>
+      <div class="value"><span class="prep-pill prep-${prep || 'none'}">${prepLabel}</span></div>
+    </div>
+
+    <div class="field">
+      <div class="label">TODO</div>
+      ${todoArray.length ? `
+        <ul class="todo-list">
+          ${todoArray.map((line, idx) => {
+            const done = /^\s*(\[x\]|x\s)/i.test(line);
+            const clean = line.replace(/^\s*(\[x\]|x\s)\s*/i, '');
+            return `
+              <li>
+                <label class="todo-item">
+                  <input type="checkbox" data-idx="${idx}" ${done ? 'checked':''}/>
+                  <span>${clean}</span>
+                </label>
+              </li>`;
+          }).join('')}
+        </ul>
+        <div class="todo-actions">
+          <button class="btn btn-secondary" id="todo-add-line">Ajouter une tâche</button>
+          <button class="btn btn-secondary" id="todo-clear-done">Supprimer tâches faites</button>
+          <button class="btn btn-primary"   id="todo-save">Enregistrer TODO</button>
+        </div>
+      ` : `
+        <div class="empty-todo">
+          Aucune tâche. <button class="btn btn-secondary" id="todo-add-first">Ajouter</button>
+        </div>
+      `}
+    </div>
+  `;
+
+  // Wiring TODO interactions
+  drawerBodyEl.querySelectorAll('input[type="checkbox"][data-idx]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const idx  = Number(cb.dataset.idx);
+      const list = parseTodos(_drawerCurrent.item.todo);
+      const line = list[idx] || '';
+      const clean = line.replace(/^\s*(\[x\]|x\s)\s*/i, '');
+      list[idx] = cb.checked ? `[x] ${clean}` : clean;
+      _drawerCurrent.item.todo = stringifyTodos(list);
+    });
+  });
+
+  const addLine = drawerBodyEl.querySelector('#todo-add-line');
+  const addFirst = drawerBodyEl.querySelector('#todo-add-first');
+  const clearDone = drawerBodyEl.querySelector('#todo-clear-done');
+  const saveTodo = drawerBodyEl.querySelector('#todo-save');
+
+  addLine?.addEventListener('click', () => {
+    const list = parseTodos(_drawerCurrent.item.todo);
+    const txt = prompt('Nouvelle tâche :');
+    if (txt && txt.trim()) {
+      list.push(txt.trim());
+      _drawerCurrent.item.todo = stringifyTodos(list);
+      renderDrawerView(); // re-render
+    }
+  });
+  addFirst?.addEventListener('click', () => {
+    const list = parseTodos(_drawerCurrent.item.todo);
+    const txt = prompt('Nouvelle tâche :');
+    if (txt && txt.trim()) {
+      list.push(txt.trim());
+      _drawerCurrent.item.todo = stringifyTodos(list);
+      renderDrawerView();
+    }
+  });
+  clearDone?.addEventListener('click', () => {
+    const list = parseTodos(_drawerCurrent.item.todo).filter(l => !/^\s*(\[x\]|x\s)/i.test(l));
+    _drawerCurrent.item.todo = stringifyTodos(list);
+    renderDrawerView();
+  });
+  saveTodo?.addEventListener('click', () => {
+    saveUpdate(_drawerCurrent.date, _drawerCurrent.item);
+  });
+}
+
+/* --- Vue édition inline --- */
+function renderDrawerEdit() {
+  const it = _drawerCurrent.item;
+  const todoText = stringifyTodos(parseTodos(it.todo));
+  drawerBodyEl.innerHTML = `
+    <div class="field">
+      <div class="label">Date</div>
+      <input class="form-input" type="date" id="edit-date" value="${_drawerCurrent.date}">
+    </div>
+    <div class="field">
+      <div class="label">Début</div>
+      <input class="form-input" type="text" id="edit-start" value="${(it.start && it.start!=='TBC')?it.start:''}" placeholder="HH:MM ou TBC">
+    </div>
+    <div class="field">
+      <div class="label">Fin</div>
+      <input class="form-input" type="text" id="edit-end" value="${(it.end && it.end!=='TBC')?it.end:''}" placeholder="HH:MM ou TBC">
+    </div>
+    <div class="field">
+      <div class="label">Durée</div>
+      <input class="form-input" type="text" id="edit-duration" value="${it.duration||''}">
+    </div>
+    <div class="field">
+      <div class="label">Catégorie</div>
+      <select class="form-input" id="edit-category"></select>
+    </div>
+    <div class="field">
+      <div class="label">Activité</div>
+      <input class="form-input" type="text" id="edit-activity" value="${it.activity||''}">
+    </div>
+    <div class="field">
+      <div class="label">Lieu</div>
+      <input class="form-input" type="text" id="edit-place" value="${it.place||''}">
+    </div>
+    <div class="field">
+      <div class="label">Département</div>
+      <input class="form-input" type="text" id="edit-dept" value="${it.department||''}">
+    </div>
+    <div class="field">
+      <div class="label">Remarques</div>
+      <textarea class="form-input" id="edit-remark">${it.remark||''}</textarea>
+    </div>
+    <div class="field">
+      <div class="label">TODO (une tâche par ligne)</div>
+      <textarea class="form-input" id="edit-todo" rows="6">${todoText}</textarea>
+    </div>
+    <div class="field">
+      <div class="label">État de préparation</div>
+      <select class="form-input" id="edit-prep">
+        <option value="">Non</option>
+        <option value="progress">En cours</option>
+        <option value="true">Prête</option>
+      </select>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button id="edit-cancel" class="btn btn-secondary" style="flex:1;">Annuler</button>
+      <button id="edit-save"   class="btn btn-primary"   style="flex:1;">Enregistrer</button>
+    </div>
+  `;
+
+  // Remplir catégories
+  const catSelect = drawerBodyEl.querySelector('#edit-category');
+  catSelect.innerHTML = '';
+  (window.categories || []).forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c; opt.textContent = c;
+    if (c === _drawerCurrent.item.category) opt.selected = true;
+    catSelect.appendChild(opt);
+  });
+
+  // Prépa
+  const prepSel = drawerBodyEl.querySelector('#edit-prep');
+  prepSel.value = (it.preparation_checked ?? '').toString().toLowerCase();
+
+  drawerBodyEl.querySelector('#edit-cancel').addEventListener('click', renderDrawerView);
+  drawerBodyEl.querySelector('#edit-save').addEventListener('click', () => {
+    const newItem = {
+      ..._drawerCurrent.item,
+      start:   (drawerBodyEl.querySelector('#edit-start').value || 'TBC').trim(),
+      end:     (drawerBodyEl.querySelector('#edit-end').value || 'TBC').trim(),
+      duration:drawerBodyEl.querySelector('#edit-duration').value.trim(),
+      category:drawerBodyEl.querySelector('#edit-category').value,
+      activity:drawerBodyEl.querySelector('#edit-activity').value.trim(),
+      place:   drawerBodyEl.querySelector('#edit-place').value.trim(),
+      department: drawerBodyEl.querySelector('#edit-dept').value.trim(),
+      remark:  drawerBodyEl.querySelector('#edit-remark').value.trim(),
+      todo:    drawerBodyEl.querySelector('#edit-todo').value, // texte multi-lignes
+      preparation_checked: drawerBodyEl.querySelector('#edit-prep').value
+    };
+    const newDate = drawerBodyEl.querySelector('#edit-date').value || _drawerCurrent.date;
+    _drawerCurrent = { date: newDate, item: newItem };
+    saveUpdate(newDate, newItem, true);
+  });
+}
+
+/* --- Boutons pied de drawer --- */
+btnEdit?.addEventListener('click', async () => {
+  // s’assurer qu’on a les catégories
+  if (!Array.isArray(window.categories) || window.categories.length === 0) {
+    await loadCategories?.().catch(()=>{});
+  }
+  renderDrawerEdit();
+});
+btnDup?.addEventListener('click', () => {
+  duplicateCurrent();
+});
+btnDel?.addEventListener('click', () => {
+  deleteCurrent();
+});
+
+/* --- Persistances serveur --- */
+// NB: ces routes doivent exister côté Flask :
+//  - POST /update_timetable_event
+//  - POST /delete_timetable_event
+//  - POST /add_timetable_event
+//  - POST /set_preparation_progress (optionnel utilisé ailleurs)
+//  - POST /set_preparation_ready   (optionnel)
+function saveUpdate(dateStr, item, closeAfter = false) {
+  const payload = {
+    event:      window.selectedEvent,
+    year:       window.selectedYear,
+    date:       dateStr,
+    _id:        item._id,
+    param_id:   item.param_id || null,
+    start:      item.start || 'TBC',
+    end:        item.end || 'TBC',
+    duration:   item.duration || '',
+    category:   item.category || '',
+    activity:   item.activity || '',
+    place:      item.place || '',
+    department: item.department || '',
+    remark:     item.remark || '',
+    todo:       item.todo || '',
+    preparation_checked: (item.preparation_checked ?? '').toString().toLowerCase()
+  };
+  fetch('/update_timetable_event', {
+    method: 'POST',
+    headers: {
+      'Content-Type':'application/json',
+      'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+    },
+    body: JSON.stringify(payload)
+  })
+  .then(r=>r.json())
+  .then(res=>{
+    if (res.success) {
+      showDynamicFlashMessage("Mise à jour réussie", "success");
+      fetchTimetable(); // rafraîchir la liste
+      closeAfter && closeEventDrawer();
+      // recharger la vue lecture avec l’objet mis à jour
+      !_drawerCurrent || renderDrawerView();
+    } else {
+      showDynamicFlashMessage("Erreur lors de l'enregistrement", "error");
+    }
+  })
+  .catch(()=> showDynamicFlashMessage("Erreur réseau", "error"));
+}
+
+function deleteCurrent() {
+  const it = _drawerCurrent.item;
+  if (!it || !it._id) return;
+  if (!confirm("Supprimer définitivement cet événement ?")) return;
+
+  const payload = {
+    event: window.selectedEvent,
+    year:  window.selectedYear,
+    date:  _drawerCurrent.date,
+    _id:   it._id
+  };
+  fetch('/delete_timetable_event', {
+    method: 'POST',
+    headers: {
+      'Content-Type':'application/json',
+      'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+    },
+    body: JSON.stringify(payload)
+  })
+  .then(r=>r.json())
+  .then(res=>{
+    if (res.success) {
+      showDynamicFlashMessage("Événement supprimé", "success");
+      fetchTimetable();
+      closeEventDrawer();
+    } else {
+      showDynamicFlashMessage("Suppression impossible", "error");
+    }
+  })
+  .catch(()=> showDynamicFlashMessage("Erreur réseau", "error"));
+}
+
+function duplicateCurrent() {
+  const it = _drawerCurrent.item;
+  if (!it) return;
+
+  const payload = {
+    event: window.selectedEvent,
+    year:  window.selectedYear,
+    date:  _drawerCurrent.date, // tu peux proposer une autre date via prompt si besoin
+    start: it.start || 'TBC',
+    end:   it.end   || 'TBC',
+    duration: it.duration || '',
+    category: it.category || '',
+    activity: (it.activity || '') + ' (copie)',
+    place: it.place || '',
+    department: it.department || '',
+    remark: it.remark || '',
+    type: "Timetable",
+    origin: "manual",
+    todo: it.todo || '',
+    preparation_checked: "" // on remet à blanc pour la copie
+  };
+
+  fetch('/add_timetable_event', {
+    method: 'POST',
+    headers: {
+      'Content-Type':'application/json',
+      'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+    },
+    body: JSON.stringify(payload)
+  })
+  .then(r=>r.json())
+  .then(res=>{
+    if (res.success) {
+      showDynamicFlashMessage("Événement dupliqué", "success");
+      fetchTimetable();
+    } else {
+      showDynamicFlashMessage("Erreur lors de la duplication", "error");
+    }
+  })
+  .catch(()=> showDynamicFlashMessage("Erreur réseau", "error"));
+}

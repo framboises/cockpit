@@ -1,244 +1,141 @@
-let accidentCount = 0; // Compteur d'accidents
-let jamCount = 0; // Compteur d'embouteillages
+// === Compteurs & stockage local (plus de carte) ===
+let accidentCount = 0;
+let jamCount = 0;
 let currentAlertIndex = 0;
-// Pendant l'updateAlerts, ajouter les alertes dans les tableaux respectifs
 let accidentAlerts = [];
 let jamAlerts = [];
 
-function createPinIcon(iconUrl, pinColor) {
-    return L.divIcon({
-        className: 'custom-pin-icon',
-        html: `
-            <div class="pin-container">
-                <div class="pin-icon" style="background-image: url(${iconUrl}); background-color: ${pinColor}; border-color: ${pinColor};"></div>
-                <div class="pin-pointer" style="border-top-color: ${pinColor};"></div>
-            </div>
-        `,
-        iconSize: [32, 42],
-        iconAnchor: [16, 42],
-        popupAnchor: [0, -42]
-    });
+// Utils DOM safe
+function $(id){ return document.getElementById(id); }
+function on(elOrId, evt, fn){
+  const el = typeof elOrId === "string" ? $(elOrId) : elOrId;
+  if (el) el.addEventListener(evt, fn, false);
 }
 
-// Fonction pour formater les timestamps en français
+// Format date FR
 function formatTimestamp(pubMillis) {
     const date = new Date(pubMillis);
     return date.toLocaleString('fr-FR');
 }
 
-// Fonction pour regrouper les points par rue et dessiner une polyline
-function connectPointsByStreet(alerts) {
-    const streets = {};
-
-    // Regrouper les points par nom de rue
-    alerts.forEach(alert => {
-        if (alert.type === 'ROAD_CLOSED' && alert.street) {
-            if (!streets[alert.street]) {
-                streets[alert.street] = [];
-            }
-            streets[alert.street].push([alert.location.y, alert.location.x]);
-        }
-    });
-
-    // Dessiner une polyline pour chaque rue
-    Object.keys(streets).forEach(street => {
-        const points = streets[street];
-        if (points.length > 1) {
-            const polyline = L.polyline(points, {
-                color: '#ff0000', // Rouge
-                dashArray: '10, 10', // Pointillé rouge et blanc
-                weight: 6 // Épaisseur de la ligne
-            }).addTo(map);
-            window.alertMarkers.push(polyline);
-        }
-    });
-}
-
-// Fonction pour zoomer sur un pin spécifique
-function zoomOnAlert(alert) {
-    const lat = alert.location.y;
-    const lng = alert.location.x;
-    map.setView([lat, lng], 16); // Zoom au niveau 16
-}
-
-// Fonction pour gérer les clics sur le compteur d'accidents
-function handleAccidentClick() {
-    if (accidentCount > 0) {
-        currentAlertIndex = (currentAlertIndex + 1) % accidentAlerts.length; // Passer à l'alerte suivante
-        const alert = accidentAlerts[currentAlertIndex]; // Récupérer l'alerte correspondante
-        zoomOnAlert(alert);
-    }
-}
-
-// Fonction pour gérer les clics sur le compteur d'embouteillages
-function handleJamClick() {
-    if (jamCount > 0) {
-        currentAlertIndex = (currentAlertIndex + 1) % jamAlerts.length; // Passer à l'alerte suivante
-        const alert = jamAlerts[currentAlertIndex]; // Récupérer l'alerte correspondante
-        zoomOnAlert(alert);
-    }
-}
-
-// Ajouter les gestionnaires de clics sur les compteurs
-document.getElementById('accident-counter').addEventListener('click', handleAccidentClick);
-document.getElementById('jam-counter').addEventListener('click', handleJamClick);
-
-// Ne pas oublier de trier les alertes par `pubMillis` en ordre décroissant lors de l'initialisation
+// Tri décroissant par date
 function sortAlertsByTime(alerts) {
     return alerts.sort((a, b) => b.pubMillis - a.pubMillis);
 }
 
-// Fonction pour mettre à jour les alertes sur la carte
-// Ajouter les marqueurs avec des icônes en style "pin"
-function updateAlerts() {
-    fetch('/alerts')
-        .then(response => response.json())
-        .then(data => {
-            // Efface les anciens marqueurs
-            if (window.alertMarkers) {
-                window.alertMarkers.forEach(marker => {
-                    map.removeLayer(marker);
-                });
-            }
-            window.alertMarkers = [];
-
-            accidentCount = 0; // Réinitialiser le compteur
-            jamCount = 0; // Réinitialiser le compteur d'embouteillages
-
-            accidentAlerts = []; // Réinitialiser les listes
-            jamAlerts = [];
-
-            data.forEach((alert) => {
-                const popupContent = `
-                    <b>Sous-type</b>: ${getSubtypeFr(alert.subtype)}<br>
-                    <b>Date et heure</b>: ${formatTimestamp(alert.pubMillis)}<br>
-                    <b>Description</b>: ${getSubtypeFr(alert.reportDescription)}<br>
-                    <b>Rue</b>: ${alert.street || 'Non spécifiée'}<br>
-                    <b>Confiance</b>: ${alert.confidence}/10<br>
-                    <b>Fiabilité</b>: ${alert.reliability}/10<br>
-                    <b>Utilisateur</b>: ${alert.reportByMunicipalityUser === 'true' ? 'Municipalité' : 'Utilisateur Waze'}
-                `;
-
-                if (alert.type === 'ACCIDENT') {
-                    accidentCount += 1;
-                    accidentAlerts.push(alert); // Ajouter à la liste d'accidents
-
-                    // Ajouter un marqueur d'accident avec une icône en style "pin"
-                    const marker = L.marker([alert.location.y, alert.location.x], { 
-                        icon: createPinIcon('/static/img/accident-icon.png') 
-                    })
-                    .addTo(map)
-                    .bindPopup(`<b>ACCIDENT</b><br>${popupContent}`);
-                    window.alertMarkers.push(marker);
-
-                } else if (alert.type === 'ROAD_CLOSED') {
-                    // Ajouter un marqueur pour route fermée avec une icône en style "pin"
-                    const marker = L.marker([alert.location.y, alert.location.x], { 
-                        icon: createPinIcon('/static/img/closed-road-icon.png') 
-                    })
-                    .addTo(map)
-                    .bindPopup(`<b>ROUTE FERMÉE</b><br>${popupContent}`);
-                    window.alertMarkers.push(marker);
-
-                } else if (alert.type === 'JAM') {
-                    jamCount += 1; // Incrémenter le compteur d'embouteillages
-                    jamAlerts.push(alert); // Ajouter à la liste d'embouteillages
-
-                    const pinColor = getPinColor(alert.subtype);
-                
-                    // Ajouter un marqueur pour l'embouteillage avec la couleur appropriée
-                    const marker = L.marker([alert.location.y, alert.location.x], {
-                        icon: createPinIcon('/static/img/jam-icon.png', pinColor)
-                    })
-                    .addTo(map)
-                    .bindPopup(`<b>EMBOUTEILLAGE</b><br>${popupContent}`);
-                    window.alertMarkers.push(marker);
-                }
-            });
-
-            // Trier les alertes par pubMillis en ordre inverse
-            accidentAlerts = sortAlertsByTime(accidentAlerts);
-            jamAlerts = sortAlertsByTime(jamAlerts);
-
-            // Connecter les points des routes fermées par rue
-            connectPointsByStreet(data);
-
-            // Mettre à jour le compteur d'accidents
-            updateAccidentCounter(accidentCount);
-            updateJamCounter(jamCount); // Nouvelle fonction pour les embouteillages
-        })
-        .catch(error => console.error('Erreur lors de la récupération des alertes:', error));
-}
-
-// Fonction pour traduire les sous-types en français
+// Traductions Waze
 function getSubtypeFr(subtype) {
     const subtypeMap = {
-        'ACCIDENT_MINOR': 'Accident Mineur',
-        'ACCIDENT_MAJOR': 'Accident Majeur',
-        'NO_SUBTYPE': 'Sans Sous-type',
-        'HAZARD_ON_ROAD_CONSTRUCTION': 'Danger sur la Route (Construction)',
-        'HAZARD_ON_ROAD_TRAFFIC_LIGHT_FAULT': 'Danger sur la Route (Défaut Feu de Circulation)',
-        'HAZARD_ON_ROAD_POT_HOLE': 'Danger sur la Route (Nid-de-poule)',
-        'ROAD_CLOSED_EVENT': 'Route Fermée',
+        'ACCIDENT_MINOR': 'Accident mineur',
+        'ACCIDENT_MAJOR': 'Accident majeur',
+        'NO_SUBTYPE': 'Sans sous-type',
+        'HAZARD_ON_ROAD_CONSTRUCTION': 'Travaux',
+        'HAZARD_ON_ROAD_TRAFFIC_LIGHT_FAULT': 'Feu de circulation en panne',
+        'HAZARD_ON_ROAD_POT_HOLE': 'Nid-de-poule',
+        'ROAD_CLOSED_EVENT': 'Route fermée',
+        'JAM_LIGHT_TRAFFIC': 'Circulation légère',
         'JAM_MODERATE_TRAFFIC': 'Circulation modérée',
         'JAM_HEAVY_TRAFFIC': 'Circulation dense',
-        'JAM_STAND_STILL_TRAFFIC': 'Circulation arrêtée',
-        'JAM_LIGHT_TRAFFIC': 'Circulation légère'
+        'JAM_STAND_STILL_TRAFFIC': 'Circulation arrêtée'
     };
     return subtypeMap[subtype] || subtype;
 }
 
-// Fonction pour mettre à jour le compteur d'accidents
+// MAJ visuelle des compteurs (widget)
 function updateAccidentCounter(count) {
-    const counter = document.getElementById('accident-number');
-    const counterDiv = document.getElementById('accident-counter');
-    const labelDiv = document.getElementById('accident-label');
-    counter.textContent = count;
-
-    if (count > 0) {
-        counterDiv.classList.add('red');
-        labelDiv.classList.add('red');
-    } else {
-        counterDiv.classList.remove('red');
-        labelDiv.classList.remove('red');
-    }
+    const num = $('accident-number');
+    if (num) num.textContent = count;
 }
-
-// Fonction pour mettre à jour le compteur d'embouteillages
 function updateJamCounter(count) {
-    const counter = document.getElementById('jam-number');
-    const counterDiv = document.getElementById('jam-counter');
-    const labelDiv = document.getElementById('jam-label');
-    counter.textContent = count;
-
-    if (count > 0) {
-        counterDiv.classList.add('red');
-        labelDiv.classList.add('red');
-    } else {
-        counterDiv.classList.remove('red');
-        labelDiv.classList.remove('red');
-    }
+    const num = $('jam-number');
+    if (num) num.textContent = count;
 }
 
-function getPinColor(subtype) {
-    switch (subtype) {
-        case 'JAM_LIGHT_TRAFFIC':
-            return '#FFA500'; // Jaune clair
-        case 'JAM_MODERATE_TRAFFIC':
-            return '#FF4500'; // Orange
-        case 'JAM_HEAVY_TRAFFIC':
-            return '#FF0000'; // Orange foncé
-        case 'JAM_STAND_STILL_TRAFFIC':
-            return '#8B0000'; // Rouge foncé
-        default:
-            return '#FF0000'; // Rouge par défaut
+// Rendu optionnel d'un tableau minimal dans #traffic-table-container (widget)
+function renderTrafficList(alerts) {
+    const box = $('traffic-table-container');
+    if (!box) return;
+
+    if (!alerts || !alerts.length) {
+        box.innerHTML = '<div style="opacity:.8;font-size:12px;">Aucune alerte trafic</div>';
+        return;
     }
+
+    const rows = alerts.slice(0, 30).map(a => {
+        const type = a.type;
+        const when = formatTimestamp(a.pubMillis);
+        const street = a.street || '—';
+        const subtype = getSubtypeFr(a.subtype || 'NO_SUBTYPE');
+        return `<tr><td>${type}</td><td>${subtype}</td><td>${street}</td><td>${when}</td></tr>`;
+    }).join('');
+
+    box.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead>
+                <tr style="background:#ff007f;color:#fff;">
+                    <th style="text-align:left;padding:6px;">Type</th>
+                    <th style="text-align:left;padding:6px;">Sous-type</th>
+                    <th style="text-align:left;padding:6px;">Rue</th>
+                    <th style="text-align:left;padding:6px;">Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${rows}
+            </tbody>
+        </table>`;
 }
 
-// Mise à jour de la carte et des alertes au chargement de la page
+// Récupération + agrégation (sans carte)
+function updateAlerts() {
+    fetch('/alerts')
+        .then(r => r.json())
+        .then(data => {
+            accidentCount = 0;
+            jamCount = 0;
+            accidentAlerts = [];
+            jamAlerts = [];
+
+            (data || []).forEach(alert => {
+                if (alert.type === 'ACCIDENT') {
+                    accidentCount++;
+                    accidentAlerts.push(alert);
+                } else if (alert.type === 'JAM') {
+                    jamCount++;
+                    jamAlerts.push(alert);
+                }
+            });
+
+            accidentAlerts = sortAlertsByTime(accidentAlerts);
+            jamAlerts = sortAlertsByTime(jamAlerts);
+
+            // MAJ compteurs
+            updateAccidentCounter(accidentCount);
+            updateJamCounter(jamCount);
+
+            // Rendu compact (accidents + jams mélangés triés)
+            const merged = sortAlertsByTime([...(data || [])]);
+            renderTrafficList(merged);
+        })
+        .catch(err => {
+            console.error('Erreur lors de la récupération des alertes:', err);
+        });
+}
+
+// Clicks (on clique sur les NUMÉROS eux-mêmes, présents dans le widget)
+on('accident-number', 'click', function () {
+    if (!accidentAlerts.length) return;
+    currentAlertIndex = (currentAlertIndex + 1) % accidentAlerts.length;
+    // Ici on pourrait ouvrir un détail ou surligner la ligne dans le tableau.
+    // Pas de map => noop visuel pour l’instant.
+});
+on('jam-number', 'click', function () {
+    if (!jamAlerts.length) return;
+    currentAlertIndex = (currentAlertIndex + 1) % jamAlerts.length;
+    // Idem : noop sans carte.
+});
+
+// Boucle de rafraîchissement
 document.addEventListener('DOMContentLoaded', function() {
     updateAlerts();
-
-    // Mise à jour automatique toutes les 60 secondes
     setInterval(updateAlerts, 60000);
 });

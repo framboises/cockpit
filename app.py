@@ -2,15 +2,9 @@
 import os
 import re
 import json
-import csv
-import bson
 import logging
-import chardet
 import jwt
-import math
-import uuid
 from datetime import datetime, timedelta, timezone
-from math import atan2, degrees, sqrt
 
 # Third-party imports
 from flask import (
@@ -18,16 +12,13 @@ from flask import (
     redirect, url_for, flash, session, abort, make_response
 )
 from flask_cors import CORS
-from flask_talisman import Talisman
 from flask_wtf.csrf import CSRFProtect
 from functools import wraps
 from zoneinfo import ZoneInfo
 from astral import LocationInfo
 from astral.sun import sun
-from PIL import Image
 from pymongo import MongoClient
-from werkzeug.utils import secure_filename, safe_join
-from shapely.geometry import Point, shape
+from werkzeug.utils import safe_join
 from bson.objectid import ObjectId
 from waitress import serve
 
@@ -76,7 +67,7 @@ MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
 client = MongoClient(MONGO_URI)
 
 # Sélection dynamique de la base de données
-db_name = 'titan_dev' if DEV_MODE else 'titan'
+db_name = 'titan' if DEV_MODE else 'titan'
 db = client[db_name]
 
 CORS(app)  # Activer CORS pour toutes les routes
@@ -295,7 +286,9 @@ def add_timetable_event():
             "department": data.get('department'),
             "type": data.get('type', "Timetable"),
             "origin": data.get('origin', "manual"),
-            "remark": data.get('remark', "")
+            "remark": data.get('remark', ""),
+            "todo": data.get('todo', ""),  # texte multi-lignes (une tâche par ligne)
+            "preparation_checked": (data.get('preparation_checked') or "").lower()  # "", "progress", "true"
         }
         # Générer un identifiant unique pour l'événement
         event_details["_id"] = str(ObjectId())
@@ -329,6 +322,236 @@ def add_timetable_event():
     except Exception as e:
         logger.error("Erreur lors de l'ajout de l'événement dans la timetable: " + str(e))
         return jsonify({"success": False, "message": "Erreur lors de l'ajout de l'événement."}), 500
+    
+# -------------------------------------------------------------------------------
+# Mettre à jour un événement (édition dans la liste imbriquée par date + _id)
+# payload attendu: { event, year, date, _id, start, end, duration, category, activity, place, department, remark }
+# -------------------------------------------------------------------------------
+@app.route('/update_timetable_event', methods=['POST'])
+@role_required("user")
+def update_timetable_event():
+    try:
+        data = request.get_json() or {}
+        event_name = data.get('event')
+        year = str(data.get('year'))
+        target_date = data.get('date')  # peut être une nouvelle date
+        ev_id = str(data.get('_id') or '')
+
+        if not all([event_name, year, target_date, ev_id]):
+            return jsonify({"success": False, "message": "Paramètres manquants (event/year/date/_id)."}), 400
+
+        doc = db.timetable.find_one({"event": event_name, "year": year})
+        if not doc:
+            return jsonify({"success": False, "message": "Document timetable introuvable."}), 404
+
+        data_map = doc.get('data') or {}
+
+        # 1) Tente sous la date cible
+        events_list = data_map.get(target_date, [])
+        idx = next((i for i, ev in enumerate(events_list) if str(ev.get('_id')) == ev_id), None)
+
+        # 2) Si pas trouvé, on cherche dans toutes les dates
+        found_date = target_date if idx is not None else None
+        if idx is None:
+            for d, lst in data_map.items():
+                j = next((i for i, ev in enumerate(lst) if str(ev.get('_id')) == ev_id), None)
+                if j is not None:
+                    found_date, idx = d, j
+                    break
+
+        if idx is None or found_date is None:
+            return jsonify({"success": False, "message": "Événement introuvable."}), 404
+
+        # Prépare les nouvelles valeurs
+        updated_fields = {
+            "start":               data.get("start", "TBC"),
+            "end":                 data.get("end", "TBC"),
+            "duration":            data.get("duration", ""),
+            "category":            data.get("category"),
+            "activity":            data.get("activity"),
+            "place":               data.get("place"),
+            "department":          data.get("department"),
+            "remark":              data.get("remark"),
+            "todo":                data.get("todo", ""),  # texte multi-lignes
+            "preparation_checked": (data.get("preparation_checked") or "").lower(),
+            "origin":              "manual-edit"
+        }
+
+        # Si la date d'origine ≠ la date cible -> on déplace l'objet
+        if found_date != target_date:
+            # on prend l'objet source, on le met à jour, puis on le push dans la target_date
+            src_event = data_map[found_date][idx]
+            for k, v in updated_fields.items():
+                if v is not None:
+                    src_event[k] = v
+
+            # supprime dans found_date
+            db.timetable.update_one(
+                {"_id": doc["_id"]},
+                {"$pull": {f"data.{found_date}": {"_id": ev_id}}}
+            )
+            # push dans target_date (créé si absent)
+            db.timetable.update_one(
+                {"_id": doc["_id"]},
+                {"$push": {f"data.{target_date}": src_event}}
+            )
+            return jsonify({"success": True, "message": "Événement déplacé et mis à jour."})
+
+        # Sinon même date -> simple $set par index
+        set_ops = {}
+        for k, v in updated_fields.items():
+            if v is not None:
+                set_ops[f"data.{found_date}.{idx}.{k}"] = v
+
+        if not set_ops:
+            return jsonify({"success": False, "message": "Aucune donnée à mettre à jour."}), 400
+
+        db.timetable.update_one({"_id": doc["_id"]}, {"$set": set_ops})
+        return jsonify({"success": True, "message": "Événement mis à jour."})
+
+    except Exception as e:
+        logger.error("Erreur update_timetable_event: %s", e, exc_info=True)
+        return jsonify({"success": False, "message": "Erreur serveur lors de la mise à jour."}), 500
+
+# -------------------------------------------------------------------------------
+# Supprimer un événement (par date + _id)
+# payload attendu: { event, year, date, _id }
+# -------------------------------------------------------------------------------
+@app.route('/delete_timetable_event', methods=['POST'])
+@role_required("user")
+def delete_timetable_event():
+    try:
+        data = request.get_json() or {}
+        event_name = data.get('event')
+        year = str(data.get('year'))
+        date = data.get('date')
+        ev_id = str(data.get('_id') or '')
+
+        if not all([event_name, year, date, ev_id]):
+            return jsonify({"success": False, "message": "Paramètres manquants (event/year/date/_id)."}), 400
+
+        res = db.timetable.update_one(
+            {"event": event_name, "year": year},
+            {"$pull": {f"data.{date}": {"_id": ev_id}}}
+        )
+        if res.modified_count == 0:
+            return jsonify({"success": False, "message": "Aucune suppression effectuée (événement introuvable)."}), 404
+
+        return jsonify({"success": True, "message": "Événement supprimé."})
+    except Exception as e:
+        logger.error("Erreur delete_timetable_event: %s", e)
+        return jsonify({"success": False, "message": "Erreur serveur lors de la suppression."}), 500
+
+# -------------------------------------------------------------------------------
+# Dupliquer un événement (copie le même jour avec un nouvel _id, ou autre date si fournie)
+# payload attendu: { event, year, date, _id, target_date? }
+# -------------------------------------------------------------------------------
+@app.route('/duplicate_timetable_event', methods=['POST'])
+@role_required("user")
+def duplicate_timetable_event():
+    try:
+        data = request.get_json() or {}
+        event_name = data.get('event')
+        year = str(data.get('year'))
+        date = data.get('date')
+        ev_id = str(data.get('_id') or '')
+        target_date = data.get('target_date') or date
+
+        if not all([event_name, year, date, ev_id, target_date]):
+            return jsonify({"success": False, "message": "Paramètres manquants (event/year/date/_id/target_date)."}), 400
+
+        doc = db.timetable.find_one({"event": event_name, "year": year})
+        if not doc:
+            return jsonify({"success": False, "message": "Document timetable introuvable."}), 404
+
+        src_list = (doc.get('data') or {}).get(date, [])
+        src = next((ev for ev in src_list if str(ev.get('_id')) == ev_id), None)
+        if not src:
+            return jsonify({"success": False, "message": "Événement source introuvable."}), 404
+
+        new_ev = dict(src)
+        new_ev["_id"] = str(ObjectId())
+        new_ev["origin"] = "duplicate"
+
+        db.timetable.update_one(
+            {"_id": doc["_id"]},
+            {"$push": {f"data.{target_date}": new_ev}}
+        )
+        return jsonify({"success": True, "message": "Événement dupliqué.", "new_id": new_ev["_id"]})
+    except Exception as e:
+        logger.error("Erreur duplicate_timetable_event: %s", e)
+        return jsonify({"success": False, "message": "Erreur serveur lors de la duplication."}), 500
+    
+    # -------------------------------------------------------------------------------
+# Passer en "progress" (préparation en cours)
+# payload: { event, year, date, id }
+# -------------------------------------------------------------------------------
+@app.route('/set_preparation_progress', methods=['POST'])
+@role_required("user")
+def set_preparation_progress():
+    try:
+        data = request.get_json() or {}
+        event_name = data.get('event')
+        year = str(data.get('year'))
+        date = data.get('date')
+        ev_id = str(data.get('id') or '')
+
+        if not all([event_name, year, date, ev_id]):
+            return jsonify({"success": False, "message": "Paramètres manquants (event/year/date/id)."}), 400
+
+        doc = db.timetable.find_one({"event": event_name, "year": year})
+        if not doc:
+            return jsonify({"success": False, "message": "Document timetable introuvable."}), 404
+
+        events = (doc.get('data') or {}).get(date, [])
+        idx = next((i for i, ev in enumerate(events) if str(ev.get('_id')) == ev_id), None)
+        if idx is None:
+            return jsonify({"success": False, "message": "Événement introuvable pour cette date."}), 404
+
+        db.timetable.update_one(
+            {"_id": doc["_id"]},
+            {"$set": {f"data.{date}.{idx}.preparation_checked": "progress"}}
+        )
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error("Erreur set_preparation_progress: %s", e, exc_info=True)
+        return jsonify({"success": False, "message": "Erreur serveur"}), 500
+
+
+# -------------------------------------------------------------------------------
+# Passer en "true" (préparation prête)
+# payload: { event, year, date, id }
+# -------------------------------------------------------------------------------
+@app.route('/set_preparation_ready', methods=['POST'])
+@role_required("user")
+def set_preparation_ready():
+    try:
+        data = request.get_json() or {}
+        event_name = data.get('event')
+        year = str(data.get('year'))
+        date = data.get('date')
+        ev_id = str(data.get('id') or '')
+
+        if not all([event_name, year, date, ev_id]):
+            return jsonify({"success": False, "message": "Paramètres manquants (event/year/date/id)."}), 400
+
+        doc = db.timetable.find_one({"event": event_name, "year": year})
+        if not doc:
+            return jsonify({"success": False, "message": "Document timetable introuvable."}), 404
+
+        events = (doc.get('data') or {}).get(date, [])
+        idx = next((i for i, ev in enumerate(events) if str(ev.get('_id')) == ev_id), None)
+        if idx is None:
+            return jsonify({"success": False, "message": "Événement introuvable pour cette date."}), 404
+
+        db.timetable.update_one(
+            {"_id": doc["_id"]},
+            {"$set": {f"data.{date}.{idx}.preparation_checked": "true"}}
+        )
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error("Erreur set_preparation_ready: %s", e, exc_info=True)
+        return jsonify({"success": False, "message": "Erreur serveur"}), 500
 
 ################################################################################
 # METEO ET SOLEIL

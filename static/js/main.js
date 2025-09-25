@@ -8,166 +8,41 @@ let categorySuggestions = {};
 let awesomplete; 
 let marker;
 let menuOpen = false;
-const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content ?? "";
 
 // Déclaration de variables globales pour stocker les sélections
 window.selectedEvent = null;
 window.selectedYear = null;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
-// LEAFLET INITIALISATION
+// UTILITAIRE
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// Initialisation carte
-var map=L.map('map',{
-    center:[47.938561591531936,0.2243184111156285],
-    zoom:14,
-    minZoom:10,
-    maxZoom:22,
-    touchZoom:true,
-    scrollWheelZoom:true,
-    doubleClickZoom:false,
-    zoomControl:true,
-    boxZoom:true,
-    dragPan:true,
-    tap:false
-});
-
-// Couches disponibles
-const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxNativeZoom: 19,
-    maxZoom: 22,
-});
-const arcgisSatelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 19,
-});
-const acoSatelliteLayer = L.tileLayer('/tiles/{z}/{x}/{y}.png', {
-    maxZoom: 22,
-    tms: true,
-});
-
-// Ajouter OSM par défaut
-osmLayer.addTo(map);
-
-// Bouton personnalisé avec menu radio
-const satelliteButton = L.control({ position: 'topright' });
-satelliteButton.onAdd = function (map) {
-    const div = L.DomUtil.create('div', 'custom-button');
-    div.innerHTML = '<img src="' + satelliteIconUrl + '" alt="Satellite View" style="width: 22px; height: 20px; cursor: pointer;">';
-
-    // Styles du bouton
-    div.style.backgroundColor = 'white';
-    div.style.padding = '5.5px';
-    div.style.borderRadius = '5px';
-    div.style.boxShadow = '0 0 5px rgba(0,0,0,0.5)';
-    div.style.position = 'relative'; // Important pour le positionnement du menu
-    div.style.display = 'inline-block';
-    L.DomEvent.disableClickPropagation(div);
-
-    // Créer le menu déroulant
-    const dropdownMenu = document.createElement('div');
-    dropdownMenu.style.position = 'absolute';
-    dropdownMenu.style.top = '0px'; // Juste en dessous du bouton
-    dropdownMenu.style.right = '40px';
-    dropdownMenu.style.backgroundColor = 'white';
-    dropdownMenu.style.border = '1px solid #ccc';
-    dropdownMenu.style.borderRadius = '5px';
-    dropdownMenu.style.boxShadow = '0 2px 5px rgba(0,0,0,0.3)';
-    dropdownMenu.style.padding = '10px';
-    dropdownMenu.style.zIndex = '1000';
-    dropdownMenu.style.display = 'none'; // Cacher par défaut
-    dropdownMenu.style.width = '150px';
-
-    // Ajouter les options radio
-    const layers = [
-        { name: 'Carte standard OSM', layer: osmLayer },
-        { name: 'Satellite EGIS', layer: arcgisSatelliteLayer },
-        { name: 'Satellite ACO', layer: acoSatelliteLayer },
-    ];
-
-    let currentLayer = osmLayer;
-
-    layers.forEach(({ name, layer }) => {
-        const label = document.createElement('label');
-        label.style.display = 'block';
-        label.style.cursor = 'pointer';
-
-        const radio = document.createElement('input');
-        radio.type = 'radio';
-        radio.name = 'mapLayer';
-        radio.style.marginRight = '10px';
-
-        if (currentLayer === layer) {
-            radio.checked = true;
-        }
-
-        // Gestionnaire d'événement pour changer la couche
-        radio.addEventListener('change', () => {
-            if (currentLayer !== layer) {
-                map.removeLayer(currentLayer);
-                map.addLayer(layer);
-                currentLayer = layer;
-            }
-        });
-
-        label.appendChild(radio);
-        label.appendChild(document.createTextNode(name));
-        dropdownMenu.appendChild(label);
-    });
-
-    // Ajouter le menu au bouton
-    div.appendChild(dropdownMenu);
-
-    // Gestion du clic sur le bouton
-    div.onclick = function () {
-        dropdownMenu.style.display = dropdownMenu.style.display === 'none' ? 'block' : 'none';
-    };
-
-    // Ajout d'un effet de survol
-    div.onmouseover = function() {
-        div.style.backgroundColor = '#ff007f'; // Fond rose au survol
-    };
-    div.onmouseout = function() {
-        div.style.backgroundColor = 'white'; // Revenir au fond blanc en quittant le survol
-    };  
-
-    // Cacher le menu si on clique en dehors
-    document.addEventListener('click', (e) => {
-        if (!div.contains(e.target)) {
-            dropdownMenu.style.display = 'none';
-        }
-    });
-
-    return div;
-};
-
-// Ajouter le bouton à la carte
-satelliteButton.addTo(map);
-
-L.control.scale({position:'bottomleft',metric:true,imperial:false}).addTo(map);
-
-function toggleFullScreen(){
-    if(!document.fullscreenElement){
-        document.documentElement.requestFullscreen().catch(err=>{
-            showDynamicFlashMessage(`Erreur plein écran : ${err.message}`, "error");
-        });
-    }else{
-        document.exitFullscreen();
-    }
+// Petit utilitaire safe pour brancher un listener si l'élément existe
+function on(elOrId, event, handler) {
+    const el = typeof elOrId === "string" ? document.getElementById(elOrId) : elOrId;
+    if (el) el.addEventListener(event, handler, false);
 }
 
-L.Control.FullscreenButton=L.Control.extend({
-    onAdd:function(map){
-        var button=L.DomUtil.create('button','leaflet-control-fullscreen-btn');
-        button.innerHTML='<span class="material-icons">fullscreen</span>';
-        button.title='Plein écran';
-        L.DomEvent.on(button,'click',toggleFullScreen);
-        L.DomEvent.disableClickPropagation(button);
-        return button;
-    }
-});
-L.control.fullscreenButton=function(opts){return new L.Control.FullscreenButton(opts);};
-L.control.fullscreenButton({position:'topright'}).addTo(map);
+// Helpers REST
+function apiPost(url, payload){
+return fetch(url, {
+    method: 'POST',
+    headers: {
+    'Content-Type': 'application/json',
+    'X-CSRFToken': (document.querySelector('meta[name="csrf-token"]')?.content) || ''
+    },
+    body: JSON.stringify(payload)
+}).then(r => r.json());
+}
+
+// Récup utilitaire
+function getCurrentEventYear() {
+return {
+    event: window.selectedEvent || '',
+    year: String(window.selectedYear || '')
+};
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 // SIDEBAR
@@ -178,21 +53,16 @@ document.addEventListener("DOMContentLoaded", function () {
     const hamburgerButton = document.getElementById("hamburger-button");
     const body = document.body;
     
-    hamburgerButton.addEventListener("click", function () {
-        if (sidebar.classList.contains("active")) {
-            sidebar.classList.remove("active");
-            body.classList.remove("body-with-sidebar");
-            body.classList.add("body-without-sidebar");
-        } else {
-            sidebar.classList.add("active");
-            body.classList.add("body-with-sidebar");
-            body.classList.remove("body-without-sidebar");
-        }
-    });
+    if (hamburgerButton && sidebar) {
+        hamburgerButton.addEventListener("click", function () {
+            const open = sidebar.classList.toggle("active");
+            body.classList.toggle("body-with-sidebar", open);
+            body.classList.toggle("body-without-sidebar", !open);
+        });
+    }
 });
 
 document.addEventListener('DOMContentLoaded', function () {
-  
     // Référence aux éléments select
     const eventSelect = document.getElementById('event-select');
     const yearSelect  = document.getElementById('year-select');
@@ -201,24 +71,24 @@ document.addEventListener('DOMContentLoaded', function () {
     fetch('/get_events')
     .then(response => response.json())
     .then(eventsData => {
+        if (!eventSelect) return;
+
         let defaultFound = false;
         eventsData.forEach(item => {
-        const option = document.createElement('option');
-        option.value = item.nom;      // On utilise la propriété 'nom'
-        option.textContent = item.nom;
-        eventSelect.appendChild(option);
+            const option = document.createElement('option');
+            option.value = item.nom;      // On utilise la propriété 'nom'
+            option.textContent = item.nom;
+            eventSelect.appendChild(option);
 
-        // Si l'événement est "24H AUTOS", on le sélectionne par défaut
-        if (item.nom === "24H AUTOS") {
-            option.selected = true;
-            window.selectedEvent = item.nom;
-            defaultFound = true;
-        }
+            if (item.nom === "24H AUTOS") {
+                option.selected = true;
+                window.selectedEvent = item.nom;
+                defaultFound = true;
+            }
         });
-        // Si "24H AUTOS" n'est pas trouvé, on sélectionne le premier élément
         if (!defaultFound && eventSelect.options.length > 0) {
-        eventSelect.selectedIndex = 0;
-        window.selectedEvent = eventSelect.options[0].value;
+            eventSelect.selectedIndex = 0;
+            window.selectedEvent = eventSelect.options[0].value;
         }
     })
     .catch(error => console.error('Erreur lors de la récupération des événements :', error));
@@ -226,97 +96,312 @@ document.addEventListener('DOMContentLoaded', function () {
     // --- Peuplement du select "Année" ---
     const currentYear = new Date().getFullYear();
     const startYear   = 2024;
-    // On génère les options de 2024 jusqu'à (année en cours + 1)
-    for (let year = startYear; year <= currentYear + 1; year++) {
-      const option = document.createElement('option');
-      option.value = year;
-      option.textContent = year;
-      // L'année en cours sera sélectionnée par défaut
-      if (year === currentYear) {
-        option.selected = true;
-        window.selectedYear = year;
-      }
-      yearSelect.appendChild(option);
+    if (yearSelect) {
+        for (let year = startYear; year <= currentYear + 1; year++) {
+            const option = document.createElement('option');
+            option.value = year;
+            option.textContent = year;
+            if (year === currentYear) {
+                option.selected = true;
+                window.selectedYear = year;
+            }
+            yearSelect.appendChild(option);
+        }
     }
   
-    // --- Écouteurs d'événements pour mettre à jour les variables globales lors d'un changement ---
-    eventSelect.addEventListener('change', function () {
-      window.selectedEvent = this.value;
-      console.log('Événement sélectionné :', window.selectedEvent);
-    });
-  
-    yearSelect.addEventListener('change', function () {
-      window.selectedYear = parseInt(this.value, 10);
-      console.log('Année sélectionnée :', window.selectedYear);
-    });
-  });
+    // --- Écouteurs d'événements pour mettre à jour les variables globales ---
+    if (eventSelect) {
+        eventSelect.addEventListener('change', function () {
+            window.selectedEvent = this.value;
+            console.log('Événement sélectionné :', window.selectedEvent);
+        });
+    }
+    if (yearSelect) {
+        yearSelect.addEventListener('change', function () {
+            window.selectedYear = parseInt(this.value, 10);
+            console.log('Année sélectionnée :', window.selectedYear);
+        });
+    }
+});
 
+// ==================== DRAWER ÉVÉNEMENT ====================
+(function(){
+  const drawer    = document.getElementById('event-drawer');
+  const overlay   = document.getElementById('event-drawer-overlay');
+  const closeBtn  = document.getElementById('drawer-close');
+  const bodyEl    = document.getElementById('event-drawer-body');
+  const titleEl   = document.getElementById('drawer-title');
+
+  // Expose global pour que timeline.js puisse l'appeler
+  window.openEventDrawer = function(eventItem) {
+    if (!drawer || !bodyEl) return;
+
+    // Titre
+    titleEl.textContent = eventItem?.activity || 'Événement';
+
+    // Rendu champs (adapte aux clés que tu as)
+    const fields = [
+      { label: 'Date', value: eventItem?.date },
+      { label: 'Heure', value: formatTimeRange(eventItem?.start, eventItem?.end) },
+      { label: 'Catégorie', value: eventItem?.category },
+      { label: 'Lieu', value: eventItem?.place },
+      { label: 'Département', value: eventItem?.department },
+      { label: 'Durée', value: eventItem?.duration },
+      { label: 'Remarque', value: eventItem?.remark }
+    ].filter(f => f.value && String(f.value).trim().length);
+
+    bodyEl.innerHTML = fields.map(f => `
+      <div class="field">
+        <div class="label">${f.label}</div>
+        <div class="value">${escapeHtml(String(f.value))}</div>
+      </div>
+    `).join('') || '<div style="opacity:.7">Aucune information.</div>';
+
+    // Stocker l’item courant pour les boutons
+    drawer.dataset.itemId = eventItem?._id || '';
+    drawer.dataset.itemRaw = JSON.stringify(eventItem || {});
+
+    // Ouvrir
+    drawer.classList.add('open');
+    overlay?.classList.add('show');
+    drawer.setAttribute('aria-hidden', 'false');
+  };
+
+  window.closeEventDrawer = function() {
+    drawer?.classList.remove('open');
+    overlay?.classList.remove('show');
+    drawer?.setAttribute('aria-hidden', 'true');
+  };
+
+  // Helpers
+  function pad2(n){ return (n+'').padStart(2,'0'); }
+  function formatTimeRange(start, end){
+    if (!start && !end) return '';
+    const s = (start && start !== 'TBC') ? start : '—';
+    const e = (end && end !== 'TBC') ? end   : '—';
+    return `${s} - ${e}`;
+  }
+  function escapeHtml(s){
+    return s.replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // Fermetures
+  overlay?.addEventListener('click', window.closeEventDrawer);
+  closeBtn?.addEventListener('click', window.closeEventDrawer);
+
+  // Boutons d’action (branche selon tes endpoints)
+    document.getElementById('drawer-edit')?.addEventListener('click', () => {
+    try {
+        const drawer = document.getElementById('event-drawer');
+        const item = JSON.parse(drawer.dataset.itemRaw || '{}');
+
+        // Référence à la modale d'ajout existante
+        const addEventModal = document.getElementById('addEventModal');
+        const addEventForm  = document.getElementById('addEventForm');
+
+        // Champs
+        const fDate   = document.getElementById('event-date');
+        const fStart  = document.getElementById('start-time');
+        const fEnd    = document.getElementById('end-time');
+        const fDur    = document.getElementById('duration');
+        const fCat    = document.getElementById('category');
+        const fAct    = document.getElementById('activity');
+        const fPlace  = document.getElementById('place');
+        const fDept   = document.getElementById('department');
+        const fRemark = document.getElementById('remark');
+
+        if (!addEventModal || !addEventForm) {
+        showDynamicFlashMessage("Modale d’édition introuvable.", "error");
+        return;
+        }
+
+        // Indiquer qu'on est en mode EDIT
+        window.formMode = 'edit';
+        window.editingItemId = item?._id || null;
+
+        // Injecter un input hidden pour l'ID si pas déjà présent
+        let hiddenId = addEventForm.querySelector('input[name="_id"]');
+        if (!hiddenId) {
+        hiddenId = document.createElement('input');
+        hiddenId.type = 'hidden';
+        hiddenId.name = '_id';
+        addEventForm.appendChild(hiddenId);
+        }
+        hiddenId.value = window.editingItemId || '';
+
+        // Pré-remplir
+        if (fDate)   fDate.value   = (item.date || '').slice(0,10); // yyyy-mm-dd
+        if (fStart)  fStart.value  = item.start   || '';
+        if (fEnd)    fEnd.value    = item.end     || '';
+        if (fDur)    fDur.value    = item.duration|| '';
+        if (fCat)    fCat.value    = item.category|| '';
+        if (fAct)    fAct.value    = item.activity|| '';
+        if (fPlace)  fPlace.value  = item.place   || '';
+        if (fDept)   fDept.value   = item.department || '';
+        if (fRemark) fRemark.value = item.remark  || '';
+
+        // Changer le titre de la modale
+        const title = addEventModal.querySelector('h3');
+        if (title) title.textContent = "Modifier un événement";
+
+        // Ouvrir la modale (réutilise tes fonctions si tu en as ; sinon ouverture simple)
+        addEventModal.style.display = 'block';
+        setTimeout(() => addEventModal.classList.add('show'), 10);
+
+        // Fermer le drawer
+        if (window.closeEventDrawer) window.closeEventDrawer();
+
+    } catch(e){
+        console.error(e);
+        showDynamicFlashMessage('Erreur à l’ouverture de l’édition', 'error');
+    }
+    });
+
+    // === Bouton DUPLIQUER ===
+    document.getElementById('drawer-duplicate')?.addEventListener('click', async () => {
+    try {
+        const drawer = document.getElementById('event-drawer');
+        const item = JSON.parse(drawer.dataset.itemRaw || '{}');
+
+        if (!item?._id || !item?.date) {
+        showDynamicFlashMessage("Événement incomplet (id/date manquant).", "error");
+        return;
+        }
+
+        // Demander la date cible (par défaut, même jour)
+        const defaultDate = item.date;
+        const target = window.prompt("Dupliquer à la date (YYYY-MM-DD) :", defaultDate);
+        if (target === null) return; // annulé
+
+        const re = /^\d{4}-\d{2}-\d{2}$/;
+        if (!re.test(target)) {
+        showDynamicFlashMessage("Format de date invalide (YYYY-MM-DD).", "error");
+        return;
+        }
+
+        const { event, year } = getCurrentEventYear();
+        if (!event || !year) {
+        showDynamicFlashMessage("Sélectionnez un événement et une année.", "error");
+        return;
+        }
+
+        const payload = {
+        event, year,
+        date: item.date,
+        _id: item._id,
+        target_date: target
+        };
+
+        const res = await apiPost('/duplicate_timetable_event', payload);
+        if (res?.success) {
+        showDynamicFlashMessage("Événement dupliqué.", "success");
+        // rafraîchir timeline
+        const eventList = document.getElementById("event-list");
+        if (eventList) eventList.innerHTML = "";
+        if (window.fetchTimetable) window.fetchTimetable();
+        // On peut laisser le drawer ouvert, mais on met à jour son contenu si on a dupliqué sur même jour
+        } else {
+        showDynamicFlashMessage(res?.message || "Erreur lors de la duplication.", "error");
+        }
+    } catch (e) {
+        console.error(e);
+        showDynamicFlashMessage("Erreur inattendue lors de la duplication.", "error");
+    }
+    });
+
+    // === Bouton SUPPRIMER ===
+    document.getElementById('drawer-delete')?.addEventListener('click', async () => {
+    try {
+        const drawer = document.getElementById('event-drawer');
+        const item = JSON.parse(drawer.dataset.itemRaw || '{}');
+
+        if (!item?._id || !item?.date) {
+        showDynamicFlashMessage("Événement incomplet (id/date manquant).", "error");
+        return;
+        }
+
+        const ok = window.confirm("Confirmer la suppression de cet événement ?");
+        if (!ok) return;
+
+        const { event, year } = getCurrentEventYear();
+        if (!event || !year) {
+        showDynamicFlashMessage("Sélectionnez un événement et une année.", "error");
+        return;
+        }
+
+        const payload = {
+        event, year,
+        date: item.date,
+        _id: item._id
+        };
+
+        const res = await apiPost('/delete_timetable_event', payload);
+        if (res?.success) {
+        showDynamicFlashMessage("Événement supprimé.", "success");
+        // fermer le drawer et rafraîchir la timeline
+        if (window.closeEventDrawer) window.closeEventDrawer();
+        const eventList = document.getElementById("event-list");
+        if (eventList) eventList.innerHTML = "";
+        if (window.fetchTimetable) window.fetchTimetable();
+        } else {
+        showDynamicFlashMessage(res?.message || "Erreur lors de la suppression.", "error");
+        }
+    } catch (e) {
+        console.error(e);
+        showDynamicFlashMessage("Erreur inattendue lors de la suppression.", "error");
+    }
+    });
+
+})();
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
-// ALERTES
+// ALERTES (flash)
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// Fonction mise à jour pour afficher un message flash dynamique
 function showDynamicFlashMessage(message, category = 'success', duration = 3000) {
     const flashContainer = document.getElementById('flash-container');
-
-    // Vérifier si le conteneur existe, sinon le créer
     if (!flashContainer) {
         console.error("Conteneur de messages flash introuvable !");
         return;
     }
-
-    // Créer un nouvel élément pour le message
     const flashMessage = document.createElement('div');
     flashMessage.textContent = message;
-    flashMessage.className = `flash-popup ${category}`; // Ajoute la classe en fonction de la catégorie
-
-    // Ajouter le message au conteneur
+    flashMessage.className = `flash-popup ${category}`;
     flashContainer.appendChild(flashMessage);
 
-    // Supprimer automatiquement le message après la durée spécifiée
     setTimeout(() => {
         flashMessage.style.opacity = '0';
-        setTimeout(() => {
-            flashMessage.remove();
-        }, 500); // Attendre la transition
+        setTimeout(() => flashMessage.remove(), 500);
     }, duration);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
-// NAVBAR
+// NAVBAR (safe listeners)
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// Assurez-vous que window.selectedEvent et window.selectedYear sont définis dans votre application.
-document.getElementById("stats-page-button").addEventListener("click", function(){
+on("stats-page-button", "click", function(){
     if (!window.selectedEvent || !window.selectedYear) {
         showDynamicFlashMessage("Veuillez sélectionner un événement et une année", "error");
         return;
     }
-    var eventParam = encodeURIComponent(window.selectedEvent);
-    var yearParam  = encodeURIComponent(window.selectedYear);
-    var url = "/general_stat?event=" + eventParam + "&year=" + yearParam;
+    const url = "/general_stat?event=" + encodeURIComponent(window.selectedEvent) + "&year=" + encodeURIComponent(window.selectedYear);
     window.open(url, "_blank");
 });
 
-document.getElementById("parkings-page-button").addEventListener("click", function(){
+on("parkings-page-button", "click", function(){
     if (!window.selectedEvent || !window.selectedYear) {
         showDynamicFlashMessage("Veuillez sélectionner un événement et une année", "error");
         return;
     }
-    var eventParam = encodeURIComponent(window.selectedEvent);
-    var yearParam  = encodeURIComponent(window.selectedYear);
-    var url = "/terrains?event=" + eventParam + "&year=" + yearParam;
+    const url = "/terrains?event=" + encodeURIComponent(window.selectedEvent) + "&year=" + encodeURIComponent(window.selectedYear);
     window.open(url, "_blank");
 });
 
-document.getElementById("doors-page-button").addEventListener("click", function(){
+on("doors-page-button", "click", function(){
     if (!window.selectedEvent || !window.selectedYear) {
         showDynamicFlashMessage("Veuillez sélectionner un événement et une année", "error");
         return;
     }
-    var eventParam = encodeURIComponent(window.selectedEvent);
-    var yearParam  = encodeURIComponent(window.selectedYear);
-    var url = "/doors?event=" + eventParam + "&year=" + yearParam;
+    const url = "/doors?event=" + encodeURIComponent(window.selectedEvent) + "&year=" + encodeURIComponent(window.selectedYear);
     window.open(url, "_blank");
 });
