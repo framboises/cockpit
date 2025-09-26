@@ -51,6 +51,21 @@ function updateJamCounter(count) {
     if (num) num.textContent = count;
 }
 
+// Gestion de la couleur
+function setTrafficColor(spanId, count) {
+    const span = $(spanId);
+    if (!span) return;
+    const container = span.closest('.traffic-counter');
+    if (!container) return;
+
+    const labelEl = container.querySelector('.label');
+    const counterEl = container.querySelector('.counter');
+
+    const isAlert = count > 0;
+    labelEl?.classList.toggle('red', isAlert);
+    counterEl?.classList.toggle('red', isAlert);
+}
+
 // Rendu optionnel d'un tableau minimal dans #traffic-table-container (widget)
 function renderTrafficList(alerts) {
     const box = $('traffic-table-container');
@@ -111,6 +126,10 @@ function updateAlerts() {
             // MAJ compteurs
             updateAccidentCounter(accidentCount);
             updateJamCounter(jamCount);
+
+            // ➕ Ajoute ces 2 lignes :
+            setTrafficColor('accident-number', accidentCount);
+            setTrafficColor('jam-number',      jamCount);
 
             // Rendu compact (accidents + jams mélangés triés)
             const merged = sortAlertsByTime([...(data || [])]);
