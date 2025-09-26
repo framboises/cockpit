@@ -64,13 +64,6 @@
                     <i class="fa fa-tachometer-alt"></i> Tableaux de bord
                 </a>
             </li>
-            {% for app in user_apps %}
-            <li>
-                <a href="http://{{ app | lower }}.safe.lemans.org">
-                    <i class="fa fa-cube"></i> {{ app | capitalize }}
-                </a>
-            </li>
-            {% endfor %}
             <li>
                 <label for="event-select" style="color:#ccc;font-size:16px;">Événement</label>
                 <select id="event-select" style="width:90%;margin-top:5px;"></select>

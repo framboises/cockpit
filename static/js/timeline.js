@@ -209,6 +209,171 @@ function getClusterTimeKey(it, kind){
   return 'TBC';
 }
 
+/**
+ * Supprime les paires ouverture/fermeture à la même heure pour un même type+lieu.
+ * - onlyMidnight=true => on ne cible que "00:00" (cas 24/24 oublié)
+ */
+function removeRedundantOpenClosePairs(byDate, { onlyMidnight = true } = {}) {
+  if (!byDate || typeof byDate !== 'object') return;
+
+  const dates = Object.keys(byDate).sort(); // YYYY-MM-DD
+
+  const normPlace = s => norm(s || '').replace(/\s+/g, ' ').trim();
+  const detectType = it => {
+    if (CLUSTER_CONFIG.parking.match(it)) return 'parking';
+    if (CLUSTER_CONFIG.accueil.match(it)) return 'accueil';
+    if (CLUSTER_CONFIG.portes.match(it))  return 'portes';
+    return null;
+  };
+
+  // 1) SAME-DAY: pour chaque date, si on trouve open & close à la même heure → supprimer les deux
+  const toDelete = {}; // date -> Set(_id)
+  const wantThisTime = (timeStr) => onlyMidnight ? timeStr === '00:00' : !!timeStr && timeStr !== 'TBC';
+
+  dates.forEach(date => {
+    const arr = byDate[date] || [];
+    const bucket = {}; // key: type|place|time -> {open:[], close:[]}
+
+    arr.forEach(it => {
+      const type = detectType(it);
+      if (!type) return;
+      const kind = getOpenCloseKind(it);        // 'open' | 'close' | null
+      if (!kind) return;
+
+      const timeKey = getClusterTimeKey(it, kind); // 'HH:MM' ou 'TBC'
+      if (!wantThisTime(timeKey)) return;          // filtre 00:00 par défaut
+
+      const placeKey = normPlace(it.place || '');
+      const key = `${type}|${placeKey}|${timeKey}`;
+      (bucket[key] ||= { open: [], close: [] })[kind].push(it);
+    });
+
+    Object.values(bucket).forEach(group => {
+      if (group.open.length && group.close.length) {
+        // on supprime toutes les cartes concernées des deux côtés
+        group.open.concat(group.close).forEach(it => {
+          if (!it || !it._id) return;
+          (toDelete[date] ||= new Set()).add(String(it._id));
+        });
+      }
+    });
+  });
+
+  // 2) CROSS-DAY (minuit croisé): fermeture 00:00 à J ET ouverture 00:00 à J+1 (même type+lieu) → supprimer les deux
+  // Seulement utile si on cible minuit
+  if (onlyMidnight) {
+    for (let i = 0; i < dates.length - 1; i++) {
+      const d0 = dates[i], d1 = dates[i + 1];
+      const a0 = (byDate[d0] || []).filter(it => getOpenCloseKind(it) === 'close' && getClusterTimeKey(it, 'close') === '00:00');
+      const a1 = (byDate[d1] || []).filter(it => getOpenCloseKind(it) === 'open'  && getClusterTimeKey(it, 'open')  === '00:00');
+
+      if (!a0.length || !a1.length) continue;
+
+      // index d1 (open) par type+place
+      const mapOpen = new Map();
+      a1.forEach(it => {
+        const type = detectType(it);
+        if (!type) return;
+        const key = `${type}|${normPlace(it.place||'')}`;
+        (mapOpen.get(key) || mapOpen.set(key, [])).push(it);
+      });
+
+      // pour chaque close(d0) 00:00, cherche open(d1) 00:00 sur même type+lieu
+      a0.forEach(itClose => {
+        const type = detectType(itClose);
+        if (!type) return;
+        const key = `${type}|${normPlace(itClose.place||'')}`;
+        const matches = mapOpen.get(key);
+        if (matches && matches.length) {
+          // supprime itClose et toutes les ouvertures d1 correspondantes
+          if (itClose._id) (toDelete[d0] ||= new Set()).add(String(itClose._id));
+          matches.forEach(itOpen => {
+            if (itOpen._id) (toDelete[d1] ||= new Set()).add(String(itOpen._id));
+          });
+        }
+      });
+    }
+  }
+
+  // 3) Appliquer la suppression
+  dates.forEach(date => {
+    const del = toDelete[date];
+    if (!del || !del.size) return;
+    byDate[date] = (byDate[date] || []).filter(it => !del.has(String(it._id)));
+  });
+}
+
+// Heures invalides -> Infinity (en fin)
+function isValidHHMM(s){ return !!(s && s.trim() && s.toUpperCase() !== 'TBC'); }
+
+// minute "primaire" par item, en respectant open/close quand on peut
+function getItemSortMinute(it){
+  const kind = getOpenCloseKind(it); // 'open'|'close'|null
+  if (kind === 'open') {
+    if (isValidHHMM(it.start)) return timeToMinutes(it.start);
+    if (isValidHHMM(it.end))   return timeToMinutes(it.end);
+    return Infinity;
+  }
+  if (kind === 'close') {
+    if (isValidHHMM(it.end))   return timeToMinutes(it.end);
+    if (isValidHHMM(it.start)) return timeToMinutes(it.start);
+    return Infinity;
+  }
+  // si on ne sait pas: start puis end
+  if (isValidHHMM(it.start)) return timeToMinutes(it.start);
+  if (isValidHHMM(it.end))   return timeToMinutes(it.end);
+  return Infinity;
+}
+
+// minute de tri pour un cluster
+function getClusterSortMinute(cluster){
+  if (cluster.time && cluster.time !== 'TBC') {
+    return timeToMinutes(cluster.time);
+  }
+  // sinon, on prend le min des minutes des items qu'il contient
+  const mins = cluster.items.map(getItemSortMinute).filter(m => Number.isFinite(m));
+  return mins.length ? Math.min(...mins) : Infinity;
+}
+
+// tie-breakers de tri (même minute)
+function labelForItem(it){
+  const title = (it.activity||'').split('/')[0].trim();
+  const place = (it.place||'').split('/')[0].trim();
+  return `${title} ${place}`.trim().toLowerCase();
+}
+
+// Renvoie 'ready' | 'progress' | 'none' | null (null => pas d'affichage)
+function getPrepStatus(item) {
+  const raw = (item.preparation_checked ?? "").toString().toLowerCase().trim();
+  if (raw === "true" || raw === "ready" || raw === "ok") return "ready";
+  if (raw === "progress" || raw === "inprogress")        return "progress";
+  if (raw === "false" || raw === "no" || raw === "non" || raw === "pending") return "none";
+
+  // 🔁 Fallback: déduire depuis le TODO si présent
+  const tasks = splitTodo(item.todo || "");
+  if (tasks.length === 0) return null;              // pas de statut affiché
+  const done = tasks.filter(t => t.done).length;
+  if (done === 0) return "none";
+  if (done === tasks.length) return "ready";
+  return "progress";
+}
+
+function getPrepLabel(status) {
+  return status === "ready"    ? "Prête"
+       : status === "progress" ? "En cours"
+       : status === "none"     ? "Non"
+       : "";
+}
+
+// Statut agrégé d’un cluster (affiche le "pire" rencontré)
+function getClusterPrepStatus(cluster) {
+  const list = cluster.items.map(getPrepStatus).filter(Boolean);
+  if (!list.length) return null;
+  if (list.includes("none")) return "none";
+  if (list.includes("progress")) return "progress";
+  return "ready";
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 // AFFICHAGE
 /////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -245,6 +410,11 @@ function createEventItem(date, item) {
         timeInfo = "TBC";
     }
 
+    const prepStatus = getPrepStatus(item);
+    const prepHtml = prepStatus
+    ? `<span class="prep-chip prep-${prepStatus}" title="Préparation : ${getPrepLabel(prepStatus)}">${getPrepLabel(prepStatus)}</span>`
+    : "";
+
     // Construction du résumé en deux colonnes
     eventItem.innerHTML = `
         <div class="event-summary">
@@ -255,6 +425,7 @@ function createEventItem(date, item) {
             <div class="event-time">
                 <p class="time-info">${timeInfo}</p>
                 <p class="event-location">${fullPlace}</p>
+                ${prepHtml}
             </div>
             <div class="buttons-container">
                 <button class="expand-btn">
@@ -367,6 +538,11 @@ function createClusterItem(date, cluster) {
   const kindLabel = cluster.kind === 'close' ? 'Fermeture' : 'Ouverture';
   const timeInfo = cluster.time || 'TBC';
 
+  const clusterPrep = getClusterPrepStatus(cluster);
+    const clusterPrepHtml = clusterPrep
+    ? `<span class="prep-chip prep-${clusterPrep}" title="Préparation : ${getPrepLabel(clusterPrep)}">${getPrepLabel(clusterPrep)}</span>`
+    : "";
+
   const el = document.createElement('div');
   el.classList.add('event-item');
   el.innerHTML = `
@@ -378,6 +554,7 @@ function createClusterItem(date, cluster) {
       <div class="event-time">
         <p class="time-info">${timeInfo}</p>
         <p class="event-location">Regroupement</p>
+        ${clusterPrepHtml}
       </div>
       <div class="buttons-container">
         <button class="expand-btn"><span class="material-icons">expand_more</span></button>
@@ -460,10 +637,11 @@ function fetchTimetable() {
             const sectionsByDate = {}; // Pour stocker les sections par date
 
             if (data.data) {
+                // 👇 nettoie les paires open/close à 00:00 (même jour + minuit croisé)
+               removeRedundantOpenClosePairs(data.data, { onlyMidnight: false });
+
                 Object.keys(data.data).sort().forEach(date => {
                     const items = data.data[date];
-                    // Trier les items selon getTimeForSort()
-                    items.sort((a, b) => getTimeForSort(a) - getTimeForSort(b));
 
                     const dateSection = document.createElement("div");
                     dateSection.classList.add("timetable-date-section");
@@ -487,24 +665,40 @@ function fetchTimetable() {
 
                     dateSection.appendChild(dateHeaderContainer);
 
-
-                    // On regroupe ici
+                    // 1) Regrouper
                     const { clusters, rest } = groupByClusters(items);
 
-                    // 1) Rendre les clusters (parkings / aires d’accueil)
-                    clusters.forEach(g => {
-                    const card = createClusterItem(date, g);
-                    dateSection.appendChild(card);
+                    // 2) Construire une liste combinée avec minute de tri
+                    const combined = [
+                        ...clusters.map(c => ({ kind:'cluster', minute: getClusterSortMinute(c), data: c })),
+                        ...rest.map(it => ({ kind:'item',    minute: getItemSortMinute(it),    data: it })),
+                    ];
+
+                    // 3) Trier: minute croissante, puis clusters avant items, puis label alpha
+                    combined.sort((a,b)=>{
+                        if (a.minute !== b.minute) return a.minute - b.minute;
+                        if (a.kind !== b.kind) return a.kind === 'cluster' ? -1 : 1; // option: cluster d'abord
+                        const la = a.kind==='cluster'
+                        ? `${a.data.type}|${a.data.kind}|${a.data.time||'zzz'}`.toLowerCase()
+                        : labelForItem(a.data);
+                        const lb = b.kind==='cluster'
+                        ? `${b.data.type}|${b.data.kind}|${b.data.time||'zzz'}`.toLowerCase()
+                        : labelForItem(b.data);
+                        return la.localeCompare(lb);
                     });
 
-                    // 2) Rendre les autres items normalement,
-                    //    en excluant "General / Ouverture au public" comme avant
-                    rest.forEach(item => {
-                    if (item.category === "General" && item.activity?.trim()?.toLowerCase() === "ouverture au public") {
-                        return;
-                    }
-                    const card = createEventItem(date, item);
-                    dateSection.appendChild(card);
+                    // 4) Rendu chronologique
+                    combined.forEach(node=>{
+                        if (node.kind === 'cluster') {
+                        const card = createClusterItem(date, node.data);
+                        dateSection.appendChild(card);
+                        } else {
+                        // on garde le filtre "General / Ouverture au public" si nécessaire
+                        const it = node.data;
+                        if (it.category === "General" && it.activity?.trim()?.toLowerCase() === "ouverture au public") return;
+                        const card = createEventItem(date, it);
+                        dateSection.appendChild(card);
+                        }
                     });
 
                     eventList.appendChild(dateSection);
@@ -516,6 +710,7 @@ function fetchTimetable() {
         .catch(error => console.error("Erreur lors de la récupération du timetable :", error));
 }
 
+/**
 function getTimeForSort(item) {
     // Si start est défini, non vide et différent de "TBC", on l'utilise
     if (item.start && item.start.trim() !== "" && item.start.toUpperCase() !== "TBC") {
@@ -527,7 +722,7 @@ function getTimeForSort(item) {
     }
     // Sinon, on retourne Infinity pour le classer en fin
     return Infinity;
-}
+} */
 
 // Nouvelle fonction pour récupérer les paramètres (paramétrage) via POST
 function fetchParametrage() {
