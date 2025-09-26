@@ -36,6 +36,9 @@
         <button class="icon-button" id="hud-button" title="Rechercher">
             <i class="material-symbols-outlined">guardian</i>
         </button>
+        <button class="icon-button" id="nowline-toggle" title="Auto-scroll Maintenant">
+            <i class="material-symbols-outlined">lock_clock</i>
+        </button>
         <button class="icon-button" id="add-event-button" title="Ajouter un événement">
             <i class="material-symbols-outlined">add</i>
         </button>
@@ -135,6 +138,9 @@
 
         <!-- Timeline au centre -->
         <main id="timeline-main">
+            <div id="now-line" hidden>
+                <span class="now-badge">--:--</span>
+            </div>
             <div id="event-list" class="timeline-container">
                 <!-- Événements injectés par timeline.js -->
             </div>

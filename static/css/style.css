@@ -1472,3 +1472,41 @@ footer {
 .prep-ready    { background: rgba(39,174,96,.25);  color:#27ae60; }   /* Prête */
 .prep-progress { background: rgba(255,193,7,.25); color:#f6b557; }   /* En cours */
 .prep-none     { background: rgba(255,255,255,.14); color:#fff; }    /* Non */
+
+/* === Ligne rouge "maintenant" dans la timeline === */
+/* Le conteneur timeline porte la ligne en position absolue */
+#timeline-main {
+  position: relative;
+}
+
+/* Ligne “maintenant” (rose) qui ne couvre QUE la timeline */
+#now-line {
+  position: absolute;
+  /* top en pixels piloté par JS (NowLineController._lineTopPx) */
+  left: 8px;                       /* proche du bord gauche de la timeline */
+  right: 8px;                      /* s'arrête avant le bord droit de la timeline */
+  height: 2px;
+  background: linear-gradient(90deg, #ff2d55, #ff77a9);
+  box-shadow: 0 0 0 1px rgba(255,45,85,0.3);
+  z-index: 2;                      /* au-dessus des cartes timeline */
+  pointer-events: none;            /* pas de capture de clics */
+  border-radius: 2px;
+}
+
+/* Badge heure collé au début de la ligne, bien visible à gauche */
+#now-line .now-badge {
+  position: absolute;
+  left: 0;                         /* ancré très à gauche de la ligne */
+  transform: translateY(-50%) translateX(-6px);
+  top: 50%;
+  background: #ff2d55;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 700;
+  padding: 4px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(255,45,85,0.35);
+  pointer-events: none;
+}

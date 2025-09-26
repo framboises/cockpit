@@ -381,6 +381,8 @@ function getClusterPrepStatus(cluster) {
 // Fonction pour créer une vignette d'événement dans la timeline avec affichage en deux colonnes
 function createEventItem(date, item) {
     const eventItem = document.createElement("div");
+    eventItem.dataset.date = date;                         // YYYY-MM-DD
+    eventItem.setAttribute('data-minute', getItemSortMinute(item)); // pour l’auto-scroll
     eventItem.classList.add("event-item");
 
     // Définir une icône selon la catégorie
@@ -545,6 +547,7 @@ function createClusterItem(date, cluster) {
 
   const el = document.createElement('div');
   el.classList.add('event-item');
+  el.setAttribute('data-minute', getClusterSortMinute(cluster)); // ← ajoute ceci
   el.innerHTML = `
     <div class="event-summary">
       <div class="event-title">
@@ -1303,3 +1306,294 @@ function duplicateCurrent() {
   })
   .catch(()=> showDynamicFlashMessage("Erreur réseau", "error"));
 }
+
+/******************************************************************
+ * Horloge simulable (console) + ligne rouge + auto-scroll
+ ******************************************************************/
+(function(){
+  // ---------- Horloge simulable ----------
+  const TimelineClock = {
+    _mode: 'real',          // 'real' | 'sim'
+    _simDate: null,         // Date simulée
+    _playing: false,
+    _speed: 1,              // minutes simulées / seconde réelle
+    _timer: null,
+    _lastTs: 0,
+
+    useReal(){
+      this._mode = 'real';
+      this._simDate = null;
+      this.pause();
+      console.info('[Clock] mode=real');
+    },
+    setSim(d){
+      let dt = null;
+      if (typeof d === 'string') {
+        const m = d.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})$/);
+        if (m) {
+          const [_, ymd, hh, mm] = m;
+          const [Y,M,D] = ymd.split('-').map(n=>parseInt(n,10));
+          dt = new Date(Y, M-1, D, parseInt(hh,10), parseInt(mm,10), 0, 0);
+        } else {
+          const parsed = new Date(d);
+          if (isNaN(+parsed)) { console.warn('[Clock] string invalide'); return; }
+          dt = parsed;
+        }
+      } else if (d instanceof Date) {
+        dt = new Date(d.getTime());
+      } else {
+        console.warn('[Clock] setSim attend "YYYY-MM-DD HH:MM" ou Date');
+        return;
+      }
+      this._mode = 'sim';
+      this._simDate = dt;
+      console.info('[Clock] mode=sim', this._simDate.toString());
+    },
+    setSpeed(minPerSec){
+      const v = Number(minPerSec);
+      if (!isFinite(v) || v <= 0) { console.warn('[Clock] vitesse invalide'); return; }
+      this._speed = v;
+      console.info('[Clock] speed =', this._speed, 'min/s');
+    },
+    play(){
+      if (this._mode !== 'sim') { console.warn('[Clock] play: passe d’abord en mode simulé avec setSim'); return; }
+      if (this._playing) return;
+      this._playing = true;
+      this._lastTs = performance.now();
+      this._timer = setInterval(()=>{
+        const now = performance.now();
+        const dtMs = now - this._lastTs;
+        this._lastTs = now;
+        // Avance en minutes simulées:
+        const advanceMin = (dtMs/1000) * this._speed;
+        this._simDate = new Date(this._simDate.getTime() + advanceMin*60*1000);
+      }, 200); // 5 ticks/sec pour un rendu fluide
+      console.info('[Clock] ▶ play');
+    },
+    pause(){
+      if (!this._playing) return;
+      clearInterval(this._timer);
+      this._timer = null;
+      this._playing = false;
+      console.info('[Clock] ❚❚ pause');
+    },
+    step(minutes=1){
+      if (this._mode !== 'sim' || !this._simDate) return;
+      const min = Number(minutes) || 1;
+      this._simDate = new Date(this._simDate.getTime() + min*60*1000);
+    },
+    get(){
+      return (this._mode === 'sim' && this._simDate)
+        ? new Date(this._simDate.getTime())
+        : new Date();
+    }
+  };
+  window.TimelineClock = TimelineClock; // API console
+
+  // --- Helpers mapping temps → position verticale ---
+  const _anchorsCache = new WeakMap(); // sectionEl -> {anchors, stamp}
+
+  function _buildTimeAnchorsForSection(sectionEl){
+    const items = Array.from(sectionEl.querySelectorAll('.event-item'));
+    const raw = [];
+    for (const el of items) {
+      const m = Number(el.getAttribute('data-minute'));
+      if (!isFinite(m)) continue;     // ignore TBC/Infinity
+      raw.push({ minute: m, y: el.offsetTop }); // y relatif au haut de la section
+    }
+    if (!raw.length) return [];
+
+    // Regroupement par minute identique → moyenne de y (stabilise l’interpolation)
+    const byMin = new Map();
+    for (const r of raw) {
+      const arr = byMin.get(r.minute) || [];
+      arr.push(r.y);
+      byMin.set(r.minute, arr);
+    }
+    const anchors = Array.from(byMin.entries())
+      .map(([minute, ys]) => ({ minute, y: ys.reduce((a,b)=>a+b,0)/ys.length }))
+      .sort((a,b)=> a.minute - b.minute);
+
+    return anchors;
+  }
+
+  function _getAnchors(sectionEl){
+    const stamp = sectionEl.scrollHeight + '|' + sectionEl.childElementCount;
+    const cached = _anchorsCache.get(sectionEl);
+    if (cached && cached.stamp === stamp) return cached.anchors;
+    const anchors = _buildTimeAnchorsForSection(sectionEl);
+    _anchorsCache.set(sectionEl, { anchors, stamp });
+    return anchors;
+  }
+
+  function _minuteToY(minute, anchors){
+    if (!anchors || anchors.length === 0) return 0;
+    if (anchors.length === 1) return anchors[0].y;
+
+    // Avant la première ancre: extrapole avec la première pente
+    if (minute <= anchors[0].minute) {
+      const a = anchors[0], b = anchors[1];
+      const slope = (b.y - a.y) / (b.minute - a.minute || 1);
+      return a.y + (minute - a.minute)*slope;
+    }
+    // Après la dernière ancre: extrapole avec la dernière pente
+    if (minute >= anchors[anchors.length-1].minute) {
+      const a = anchors[anchors.length-2], b = anchors[anchors.length-1];
+      const slope = (b.y - a.y) / (b.minute - a.minute || 1);
+      return b.y + (minute - b.minute)*slope;
+    }
+
+    // Entre deux ancres: interpolation linéaire
+    for (let i=0;i<anchors.length-1;i++){
+      const a = anchors[i], b = anchors[i+1];
+      if (minute >= a.minute && minute <= b.minute) {
+        const t = (minute - a.minute) / (b.minute - a.minute || 1);
+        return a.y + t*(b.y - a.y);
+      }
+    }
+    return anchors[anchors.length-1].y;
+  }
+
+  function fmtHHMM(d){
+    const h = String(d.getHours()).padStart(2,'0');
+    const m = String(d.getMinutes()).padStart(2,'0');
+    return `${h}:${m}`;
+  }
+
+  // ---------- Ligne rouge + auto-scroll ----------
+  const NowLineController = {
+    _enabled: false,
+    _timer: null,
+    _intervalMs: 15000,  // recalage périodique
+    _lineTopPx: 100,     // top CSS de #now-line
+    _lineEl: null,
+
+    init(){
+      // s’assure que la ligne existe bien DANS #timeline-main
+      const main = document.getElementById('timeline-main');
+      let el = document.getElementById('now-line');
+
+      if (!main) { console.warn('[NowLine] timeline-main introuvable'); return; }
+
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'now-line';
+        el.hidden = true;
+        el.innerHTML = '<span class="now-badge">--:--</span>';
+        main.prepend(el);
+      } else if (el.parentElement !== main) {
+        // si la ligne était ailleurs, on la déplace
+        el.remove();
+        main.prepend(el);
+      }
+
+      this._lineEl = el;
+
+      // applique le top initial en pixels (pilote la “hauteur” apparente de la ligne)
+      this._lineEl.style.top = `${this._lineTopPx}px`;
+    },
+    setInterval(ms){
+      const v = Number(ms);
+      if (!isFinite(v) || v < 100) return;
+      this._intervalMs = v;
+      if (this._enabled) { clearInterval(this._timer); this._timer = setInterval(()=>this._tick(), this._intervalMs); }
+    },
+    setLineTop(px){
+      const v = Number(px);
+      if (!isFinite(v) || v < 0) return;
+      this._lineTopPx = v;
+    },
+    start(){
+      if (this._enabled) return;
+      this._enabled = true;
+      this._lineEl.hidden = false;
+      this._tick(); // immédiat
+      this._timer = setInterval(()=>this._tick(), this._intervalMs);
+      console.info('[NowLine] auto-scroll ON');
+    },
+    stop(){
+      if (!this._enabled) return;
+      this._enabled = false;
+      this._lineEl.hidden = true;
+      if (this._timer) clearInterval(this._timer);
+      this._timer = null;
+      console.info('[NowLine] auto-scroll OFF');
+    },
+    toggle(){ this._enabled ? this.stop() : this.start(); },
+
+    _tick(){
+      const container = document.querySelector('.timeline-container');
+      if (!container || !this._lineEl) return;
+
+      // 1) met à jour l’heure dans le badge
+      const now = TimelineClock.get();
+      const badge = this._lineEl.querySelector('.now-badge');
+      if (badge) badge.textContent = fmtHHMM(now);
+
+      // 2) logique de recalage (identique à ta version basée sur ancres/interpolation)
+      const nowYMD = now.toISOString().slice(0,10);
+      const nowMin = now.getHours()*60 + now.getMinutes();
+
+      const sections = Array.from(container.querySelectorAll('.timetable-date-section'));
+      if (!sections.length) return;
+
+      const getSectionISODate = (section) => section.querySelector('.event-item')?.dataset?.date || null;
+
+      let targetSection = null;
+      for (const sec of sections) {
+        const iso = getSectionISODate(sec);
+        if (!iso) continue;
+        if (iso === nowYMD) { targetSection = sec; break; }
+        if (!targetSection && iso > nowYMD) targetSection = sec;
+      }
+      if (!targetSection) targetSection = sections[sections.length-1];
+
+      const anchors = _getAnchors(targetSection);
+      if (!anchors.length) return;
+
+      const targetISO = getSectionISODate(targetSection);
+      const minuteForSection = (targetISO === nowYMD) ? nowMin : anchors[0].minute;
+      const yInSection = _minuteToY(minuteForSection, anchors);
+
+      const contRect = container.getBoundingClientRect();
+      const secRect  = targetSection.getBoundingClientRect();
+      const currentScroll = container.scrollTop;
+      const sectionTopInContainer = secRect.top - contRect.top + currentScroll;
+
+      const desiredScrollTop = Math.max(0, sectionTopInContainer + yInSection - this._lineTopPx);
+      container.scrollTo({ top: desiredScrollTop, behavior: 'smooth' });
+
+      // 3) s’assure que la ligne est bien positionnée visuellement à _lineTopPx
+      this._lineEl.style.top = `${this._lineTopPx}px`;
+    }
+  };
+  window.NowLineController = NowLineController;
+  NowLineController.init();
+
+  // ---------- Bouton UI ----------
+  document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('nowline-toggle');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        NowLineController.toggle();
+        btn.title = NowLineController._enabled ? 'Auto-scroll arrêt' : 'Auto-scroll maintenant';
+        const icon = btn.querySelector('.material-symbols-outlined');
+        if (icon) icon.textContent = NowLineController._enabled ? 'pause_circle' : 'schedule';
+      });
+    }
+  });
+
+  // ---------- Recalage après rendu de la timeline ----------
+  // Appelé après chaque fetchTimetable() (en douceur, pour éviter les race conditions)
+  const _origFetch = window.fetchTimetable;
+  if (typeof _origFetch === 'function') {
+    window.fetchTimetable = function() {
+      const p = _origFetch.apply(this, arguments);
+      Promise.resolve(p).then(()=>{
+        // petit délai pour que le DOM soit prêt
+        setTimeout(()=> { NowLineController._enabled && NowLineController._tick(); }, 60);
+      });
+      return p;
+    };
+  }
+})();

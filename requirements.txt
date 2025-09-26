@@ -1,0 +1,7 @@
+Flask>=2.3.0
+Flask-Cors>=4.0.0
+Flask-WTF>=1.2.1
+PyJWT>=2.8.0
+pymongo>=4.6.0
+astral>=2.2
+waitress>=2.1.2
