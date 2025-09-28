@@ -1273,7 +1273,8 @@ footer {
 
 .event-time .time-info {
     margin: 0;
-    font-size: 0.9rem;
+    font-size: 0.8rem;
+    color: white;
 }
 
 .event-time .event-location {
@@ -1448,6 +1449,11 @@ footer {
   transform: rotate(45deg);
 }
 .todo-text.todo-done { opacity: .6; text-decoration: line-through; }
+/* Icône Material en marron dans le titre du bloc TODO */
+.todo-sticky h6 .material-icons,
+.todo-sticky h6 .material-symbols-outlined {
+  color: #7a5b00 !important; /* même teinte que ton h6 */
+}
 
 /* cluster list */
 .cluster-list .cluster-line:hover { background: rgba(255,255,255,0.06); }
@@ -1465,6 +1471,16 @@ footer {
   font-size: 11px;
   font-weight: 700;
   line-height: 1.3;
+  white-space: nowrap;
+}
+
+/* Variante compacte pour les chips dans les lignes de cluster */
+.prep-chip.sm {
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 10px;
+  display: inline-block;
   white-space: nowrap;
 }
 
@@ -1510,3 +1526,7 @@ footer {
   box-shadow: 0 2px 6px rgba(255,45,85,0.35);
   pointer-events: none;
 }
+
+.req { color:#E02424; margin-left:4px; }
+.hint { font-size:12px; opacity:.8; margin-left:6px; }
+.form-error { color:#E02424; font-size:12px; margin-top:4px; }

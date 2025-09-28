@@ -1,6 +1,7 @@
 import pymongo
 import logging
 from datetime import datetime, timedelta, timezone
+import uuid
 
 # Configuration du logging pour écrire dans un fichier (écrasé à chaque lancement)
 logging.basicConfig(
@@ -16,6 +17,10 @@ client = pymongo.MongoClient("mongodb://localhost:27017")
 db = client["titan_dev"]  # Remplacer par le nom de votre base
 parametrage_col = db["parametrages"]
 timetable_col = db["timetable"]
+
+def _mk_id(seed: str) -> str:
+    # UUID5 = déterministe (même seed => même id), pas aléatoire
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, seed))
 
 # -------------------------------------------------------------------
 # Fonction pour calculer la durée (HH:MM) entre deux heures (en considérant le passage au lendemain)
@@ -43,7 +48,8 @@ def compute_duration(open_time, close_time):
 def generate_vignettes_for_entry(date_str, open_time, close_time, base_activity, category, place, details, id_source, v_type, merge_remark=True):
     logger.debug(f"Generating vignettes for {base_activity} on {date_str}: open='{open_time}', close='{close_time}'")
     duration = compute_duration(open_time, close_time)
-    # Calcul de la date de fermeture
+
+    # Calcul de la date de fermeture (si passe minuit)
     closing_date = date_str
     try:
         t_open = datetime.strptime(open_time, "%H:%M")
@@ -54,14 +60,21 @@ def generate_vignettes_for_entry(date_str, open_time, close_time, base_activity,
             logger.debug(f"Pour {base_activity}, fermeture déplacée au {closing_date}")
     except Exception as e:
         logger.error(f"Erreur lors du calcul de la date de fermeture pour {base_activity} le {date_str}: {e}")
-    
+
+    # 🔐 IDs DÉTERMINISTES (sans changer la signature ni les champs métier)
+    open_activity  = f"Ouverture {base_activity}"
+    close_activity = f"Fermeture {base_activity}"
+    open_id  = _mk_id(f"{id_source}|{date_str}|{open_activity}")
+    close_id = _mk_id(f"{id_source}|{closing_date}|{close_activity}")
+
     open_vignette = {
+        "_id": open_id,  # 👈 ajouté
         "date": date_str,
         "start": open_time,
         "end": close_time if closing_date == date_str and close_time != "23:59" else "",
         "duration": duration,
         "category": category,
-        "activity": f"Ouverture {base_activity}",
+        "activity": open_activity,
         "place": place,
         "department": "SAFE",
         "type": v_type,
@@ -70,12 +83,13 @@ def generate_vignettes_for_entry(date_str, open_time, close_time, base_activity,
         "param_id": id_source
     }
     close_vignette = {
+        "_id": close_id,  # 👈 ajouté
         "date": closing_date,
         "start": "",
         "end": close_time,
         "duration": duration,
         "category": category,
-        "activity": f"Fermeture {base_activity}",
+        "activity": close_activity,
         "place": place,
         "department": "SAFE",
         "type": v_type,
@@ -545,19 +559,25 @@ def update_timetable_document(event, year, vignettes):
 
     for v in vignettes:
         date_key = v["date"]
-        if date_key not in data_field:
-            data_field[date_key] = []
-        # Recherche d'une vignette existante par param_id et activity
-        found = False
-        for i, existing in enumerate(data_field[date_key]):
-            if existing.get("param_id") == v.get("param_id") and existing.get("activity") == v.get("activity"):
-                data_field[date_key][i] = v
-                found = True
-                logger.debug(f"Vignette mise à jour pour {v['activity']} le {date_key}")
-                break
-        if not found:
-            data_field[date_key].append(v)
-            logger.debug(f"Nouvelle vignette ajoutée pour {v['activity']} le {date_key}")
+        data_field.setdefault(date_key, [])
+        items = data_field[date_key]
+
+        # 1) si _id présent → on remplace l'existant
+        if v.get("_id"):
+            idx = next((i for i, x in enumerate(items) if x.get("_id") == v["_id"]), None)
+            if idx is not None:
+                # Priorité à manual-edit si jamais tu merges deux flux
+                keep = v if v.get("origin") == "manual-edit" or items[idx].get("origin") != "manual-edit" else items[idx]
+                items[idx] = keep
+                continue
+
+        # 2) fallback historique: (param_id, activity)
+        idx = next((i for i, x in enumerate(items)
+                    if x.get("param_id") == v.get("param_id") and x.get("activity") == v.get("activity")), None)
+        if idx is not None:
+            items[idx] = v
+        else:
+            items.append(v)
 
     timetable_doc["data"] = data_field
     timetable_col.update_one({"event": event, "year": year}, {"$set": timetable_doc}, upsert=True)
@@ -579,7 +599,49 @@ def main(event, year):
 # -------------------------------------------------------------------
 # Exécution principale
 # -------------------------------------------------------------------
+# -------------------------------------------------------------------
+# Lancement interactif (choix année + événement)
+# -------------------------------------------------------------------
+EVENT_CHOICES = [
+    "24H AUTOS",
+    "24H MOTOS",
+    "GPF",
+    "GP EXPLORER",
+    "SUPERBIKE",
+    "LE MANS CLASSIC",
+    "24H CAMIONS",
+]
+
+def _prompt_year() -> str:
+    while True:
+        y = input("Année (format YYYY) : ").strip()
+        if len(y) == 4 and y.isdigit():
+            return y
+        print("⛔ Format invalide. Merci d'entrer une année sur 4 chiffres, ex: 2025.")
+
+def _prompt_event() -> str:
+    print("\nSélectionne l'événement :")
+    for i, name in enumerate(EVENT_CHOICES, start=1):
+        print(f"  {i}. {name}")
+    while True:
+        s = input("Numéro ou nom exact : ").strip()
+        # choix par numéro
+        if s.isdigit():
+            idx = int(s)
+            if 1 <= idx <= len(EVENT_CHOICES):
+                return EVENT_CHOICES[idx - 1]
+        # choix par nom (insensible à la casse/espaces)
+        for name in EVENT_CHOICES:
+            if s.lower() == name.lower():
+                return name
+        print("⛔ Choix invalide. Entre un numéro de la liste ou le nom exact.")
+
 if __name__ == "__main__":
-    event_value = "GPF"
-    year_value = "2025"
-    main(event_value, year_value)
+    try:
+        year_value = _prompt_year()
+        event_value = _prompt_event()
+        print(f"\n➡️  Lancement du merge pour '{event_value}' {year_value}...\n")
+        main(event_value, year_value)
+        print("\n✅ Terminé.")
+    except KeyboardInterrupt:
+        print("\nOpération annulée.")

@@ -94,13 +94,19 @@ function serializeTodo(items) {
 }
 
 function renderTodoSticky(item) {
+  const forceReady = (item.preparation_checked || "").toString().toLowerCase() === "true";
   const tasks = splitTodo(item.todo || "");
   if (tasks.length === 0) return "";
-  const lis = tasks.map((t, idx) => `
+
+  // ⬇️ si prêt -> on force l’affichage comme coché
+  const finalTasks = forceReady ? tasks.map(t => ({...t, done:true})) : tasks;
+
+  const lis = finalTasks.map((t, idx) => `
     <li data-idx="${idx}">
       <input type="checkbox" class="todo-checkbox" ${t.done ? 'checked' : ''} />
       <span class="todo-text ${t.done ? 'todo-done' : ''}">${t.text}</span>
     </li>`).join('');
+
   return `
     <div class="todo-sticky" data-event-id="${item._id}">
       <h6><span class="material-icons" style="font-size:16px;line-height:0;">checklist</span> Préparation</h6>
@@ -213,11 +219,10 @@ function getClusterTimeKey(it, kind){
  * Supprime les paires ouverture/fermeture à la même heure pour un même type+lieu.
  * - onlyMidnight=true => on ne cible que "00:00" (cas 24/24 oublié)
  */
-function removeRedundantOpenClosePairs(byDate, { onlyMidnight = true } = {}) {
+function removeRedundantOpenClosePairs(byDate, { mode = 'midnight' } = {}) {
   if (!byDate || typeof byDate !== 'object') return;
 
-  const dates = Object.keys(byDate).sort(); // YYYY-MM-DD
-
+  const dates = Object.keys(byDate).sort();
   const normPlace = s => norm(s || '').replace(/\s+/g, ' ').trim();
   const detectType = it => {
     if (CLUSTER_CONFIG.parking.match(it)) return 'parking';
@@ -226,80 +231,68 @@ function removeRedundantOpenClosePairs(byDate, { onlyMidnight = true } = {}) {
     return null;
   };
 
-  // 1) SAME-DAY: pour chaque date, si on trouve open & close à la même heure → supprimer les deux
-  const toDelete = {}; // date -> Set(_id)
-  const wantThisTime = (timeStr) => onlyMidnight ? timeStr === '00:00' : !!timeStr && timeStr !== 'TBC';
+  if (mode === 'off') return;
 
+  const toDelete = {};
+  const wantThisTime = (t) => (
+    mode === 'midnight' ? t === '00:00'
+  : mode === 'all'      ? (t && t !== 'TBC')
+  : false);
+
+  // 1) Same-day: supprime open & close à la même heure pour même type+lieu
   dates.forEach(date => {
     const arr = byDate[date] || [];
-    const bucket = {}; // key: type|place|time -> {open:[], close:[]}
-
+    const bucket = {};
     arr.forEach(it => {
       const type = detectType(it);
-      if (!type) return;
-      const kind = getOpenCloseKind(it);        // 'open' | 'close' | null
-      if (!kind) return;
-
-      const timeKey = getClusterTimeKey(it, kind); // 'HH:MM' ou 'TBC'
-      if (!wantThisTime(timeKey)) return;          // filtre 00:00 par défaut
-
-      const placeKey = normPlace(it.place || '');
-      const key = `${type}|${placeKey}|${timeKey}`;
-      (bucket[key] ||= { open: [], close: [] })[kind].push(it);
+      const kind = getOpenCloseKind(it);
+      if (!type || !kind) return;
+      const timeKey = getClusterTimeKey(it, kind);
+      if (!wantThisTime(timeKey)) return;
+      const key = `${type}|${normPlace(it.place||'')}|${timeKey}`;
+      (bucket[key] ||= { open:[], close:[] })[kind].push(it);
     });
-
     Object.values(bucket).forEach(group => {
       if (group.open.length && group.close.length) {
-        // on supprime toutes les cartes concernées des deux côtés
         group.open.concat(group.close).forEach(it => {
-          if (!it || !it._id) return;
-          (toDelete[date] ||= new Set()).add(String(it._id));
+          if (it?._id) (toDelete[date] ||= new Set()).add(String(it._id));
         });
       }
     });
   });
 
-  // 2) CROSS-DAY (minuit croisé): fermeture 00:00 à J ET ouverture 00:00 à J+1 (même type+lieu) → supprimer les deux
-  // Seulement utile si on cible minuit
-  if (onlyMidnight) {
+  // 2) Cross-day: ça n’a de sens qu’à minuit
+  if (mode === 'midnight') {
     for (let i = 0; i < dates.length - 1; i++) {
-      const d0 = dates[i], d1 = dates[i + 1];
+      const d0 = dates[i], d1 = dates[i+1];
       const a0 = (byDate[d0] || []).filter(it => getOpenCloseKind(it) === 'close' && getClusterTimeKey(it, 'close') === '00:00');
       const a1 = (byDate[d1] || []).filter(it => getOpenCloseKind(it) === 'open'  && getClusterTimeKey(it, 'open')  === '00:00');
 
       if (!a0.length || !a1.length) continue;
 
-      // index d1 (open) par type+place
       const mapOpen = new Map();
       a1.forEach(it => {
-        const type = detectType(it);
-        if (!type) return;
+        const type = detectType(it); if (!type) return;
         const key = `${type}|${normPlace(it.place||'')}`;
         (mapOpen.get(key) || mapOpen.set(key, [])).push(it);
       });
 
-      // pour chaque close(d0) 00:00, cherche open(d1) 00:00 sur même type+lieu
       a0.forEach(itClose => {
-        const type = detectType(itClose);
-        if (!type) return;
+        const type = detectType(itClose); if (!type) return;
         const key = `${type}|${normPlace(itClose.place||'')}`;
         const matches = mapOpen.get(key);
-        if (matches && matches.length) {
-          // supprime itClose et toutes les ouvertures d1 correspondantes
+        if (matches?.length) {
           if (itClose._id) (toDelete[d0] ||= new Set()).add(String(itClose._id));
-          matches.forEach(itOpen => {
-            if (itOpen._id) (toDelete[d1] ||= new Set()).add(String(itOpen._id));
-          });
+          matches.forEach(itOpen => itOpen?._id && (toDelete[d1] ||= new Set()).add(String(itOpen._id)));
         }
       });
     }
   }
 
-  // 3) Appliquer la suppression
+  // 3) Apply
   dates.forEach(date => {
     const del = toDelete[date];
-    if (!del || !del.size) return;
-    byDate[date] = (byDate[date] || []).filter(it => !del.has(String(it._id)));
+    if (del?.size) byDate[date] = (byDate[date] || []).filter(it => !del.has(String(it._id)));
   });
 }
 
@@ -374,9 +367,72 @@ function getClusterPrepStatus(cluster) {
   return "ready";
 }
 
+function ymdLocal(d){
+  const Y = d.getFullYear();
+  const M = String(d.getMonth()+1).padStart(2,'0');
+  const D = String(d.getDate()).padStart(2,'0');
+  return `${Y}-${M}-${D}`;
+}
+
+function requireIdOrWarn(item) {
+  if (!item || !item._id) {
+    typeof showDynamicFlashMessage === 'function' &&
+      showDynamicFlashMessage("Événement incomplet (id manquant)", "error");
+    return false;
+  }
+  return true;
+}
+
+function logDupesOnce(list, date) {
+  const counts = {};
+  for (const it of (list || [])) {
+    const id = String(it?._id ?? '');
+    if (!id) continue;
+    counts[id] = (counts[id] || 0) + 1;
+  }
+  const dupIds = Object.keys(counts).filter(id => counts[id] > 1);
+  if (dupIds.length) {
+    console.warn(`[TT DUP PAYLOAD] ${date} → ${dupIds.length} doublon(s)`, { date, dupIds, counts });
+  } else {
+    console.debug(`[TT OK PAYLOAD] ${date} (aucun doublon détecté)`);
+  }
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 // AFFICHAGE
 /////////////////////////////////////////////////////////////////////////////////////////////////////
+
+function applyPreparationStatus(cardEl, statusStr) {
+  const status = (statusStr || '').toString().toLowerCase();
+  const label = status === 'true' || status === 'ready' ? 'Prête'
+              : status === 'progress' ? 'En cours'
+              : 'Non';
+
+  // pastille dans le résumé
+  let chip = cardEl.querySelector('.prep-chip');
+  if (!chip) {
+    const timeCol = cardEl.querySelector('.event-time');
+    if (timeCol) {
+      chip = document.createElement('span');
+      chip.className = 'prep-chip';
+      timeCol.appendChild(chip);
+    }
+  }
+  if (chip) {
+    chip.className = `prep-chip prep-${(status === 'true' ? 'ready' : status || 'none')}`;
+    chip.textContent = label;
+  }
+
+  // cocher visuellement toutes les cases du sticky si présent
+  const sticky = cardEl.querySelector('.todo-sticky');
+  if (sticky) {
+    sticky.querySelectorAll('input.todo-checkbox').forEach(cb => {
+      cb.checked = (status === 'true');
+      const li = cb.closest('li');
+      li?.querySelector('.todo-text')?.classList.toggle('todo-done', cb.checked);
+    });
+  }
+}
 
 // Fonction pour créer une vignette d'événement dans la timeline avec affichage en deux colonnes
 function createEventItem(date, item) {
@@ -450,7 +506,7 @@ function createEventItem(date, item) {
 
     const sticky = eventItem.querySelector('.todo-sticky');
     if (sticky) {
-    sticky.addEventListener('change', (e) => {
+      sticky.addEventListener('change', (e) => {
         const input = e.target;
         if (!input.classList.contains('todo-checkbox')) return;
 
@@ -459,60 +515,91 @@ function createEventItem(date, item) {
 
         const idx = Number(li.dataset.idx);
         const tasks = splitTodo(item.todo || "");
-        if (Number.isFinite(idx) && tasks[idx]) {
+        if (!requireIdOrWarn(item)) return;
+        if (!Number.isFinite(idx) || !tasks[idx]) return;
+
+        // 1) maj du modèle local
         tasks[idx].done = input.checked;
         item.todo = serializeTodo(tasks);
 
         const txt = li.querySelector('.todo-text');
         if (txt) txt.classList.toggle('todo-done', input.checked);
 
-        // Sauvegarde TODO
+        // 2) sauvegarde TODO (toujours)
         fetch('/update_timetable_event', {
-            method: 'POST',
-            headers: {
+          method: 'POST',
+          headers: {
             'Content-Type': 'application/json',
             'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-            },
-            body: JSON.stringify({
+          },
+          body: JSON.stringify({
             event: window.selectedEvent,
             year: window.selectedYear,
             date: eventItem.dataset.date,
             _id: item._id,
             todo: item.todo
-            })
+          })
         })
         .then(r => r.json())
         .then(res => {
-            if (!res.success && typeof showDynamicFlashMessage === 'function') {
+          if (!res.success && typeof showDynamicFlashMessage === 'function') {
             showDynamicFlashMessage("Échec de la sauvegarde TODO", "error");
-            }
+          }
 
-            // 🔵 ICI : on vérifie si tout est coché puis on marque prêt
-            const allDone = tasks.length > 0 && tasks.every(t => t.done);
+          // 3) statut auto (ready / progress)
+          const doneCount = tasks.filter(t => t.done).length;
+          const allDone   = tasks.length > 0 && doneCount === tasks.length;
+          const newStatus = allDone ? "true" : (tasks.length ? "progress" : "");
 
-            // OPTION A : si tu as une route /set_preparation_ready
-            if (allDone && (item.preparation_checked || "").toLowerCase() !== "true") {
+          // rien à faire si inchangé
+          if ((item.preparation_checked || "").toLowerCase() === newStatus) {
+            applyPreparationStatus(eventItem, newStatus || 'none');
+            return;
+          }
+
+          // a) prêt → passe par /set_preparation_ready si tu l’as
+          if (allDone) {
             fetch('/set_preparation_ready', {
-                method: 'POST',
-                headers: {
+              method: 'POST',
+              headers: {
                 'Content-Type': 'application/json',
                 'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-                },
-                body: JSON.stringify({
+              },
+              body: JSON.stringify({
                 id: item._id,
                 event: window.selectedEvent,
                 year: window.selectedYear,
                 date: eventItem.dataset.date
-                })
-            }).then(()=> {
-                item.preparation_checked = "true";
-                applyPreparationStatus(eventItem, "true");
-            });
-            }
+              })
+            }).then(() => {
+              item.preparation_checked = "true";
+              applyPreparationStatus(eventItem, "true");
+            }).catch(()=>{});
+            return;
+          }
+
+          // b) non prêt → “progress” (et on persiste)
+          fetch('/update_timetable_event', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+            },
+            body: JSON.stringify({
+              event: window.selectedEvent,
+              year: window.selectedYear,
+              date: eventItem.dataset.date,
+              _id: item._id,
+              preparation_checked: newStatus,  // "progress" ou ""
+              todo: item.todo
+            })
+          }).then(() => {
+            item.preparation_checked = newStatus;
+            applyPreparationStatus(eventItem, newStatus || 'none');
+          }).catch(()=>{});
         })
         .catch(err => console.error("Save TODO failed:", err));
-        }
-    });
+      });
     }
 
     // Attacher l'écouteur sur le bouton d'extension
@@ -570,12 +657,20 @@ function createClusterItem(date, cluster) {
           const place = (ch.place||'—').split('/')[0].trim();
           const hours = (ch.start && ch.start!=='TBC' ? ch.start : '') +
                         (ch.end   && ch.end  !=='TBC' ? (' - '+ch.end) : '');
+
+          // ✅ statut individuel
+          const s = getPrepStatus(ch);                            // 'ready' | 'progress' | 'none' | null
+          const chip = s ? `<span class="prep-chip prep-${s} sm" title="Préparation : ${getPrepLabel(s)}">${getPrepLabel(s)}</span>` : '';
+
           return `
             <li class="cluster-line" data-child-id="${ch._id}" style="display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.08); cursor:pointer;">
               <span class="material-icons" style="font-size:18px; opacity:.8;">chevron_right</span>
-              <div style="flex:1;">
-                <div style="font-weight:700;">${title}</div>
-                <div style="opacity:.8; font-size:12px;">${place} ${hours?('• '+hours):''}</div>
+              <div style="flex:1; display:flex; align-items:center; gap:8px;">
+                <div style="flex:1;">
+                  <div style="font-weight:700;">${title}</div>
+                  <div style="opacity:.8; font-size:12px;">${place} ${hours?('• '+hours):''}</div>
+                </div>
+                ${chip}
               </div>
             </li>`;
         }).join('')}
@@ -641,13 +736,16 @@ function fetchTimetable() {
 
             if (data.data) {
                 // 👇 nettoie les paires open/close à 00:00 (même jour + minuit croisé)
-               removeRedundantOpenClosePairs(data.data, { onlyMidnight: false });
+               removeRedundantOpenClosePairs(data.data, { mode: 'all' });
 
                 Object.keys(data.data).sort().forEach(date => {
                     const items = data.data[date];
 
+                    logDupesOnce(items, date);
+
                     const dateSection = document.createElement("div");
                     dateSection.classList.add("timetable-date-section");
+                    dateSection.dataset.date = date;  
                     sectionsByDate[date] = dateSection;
 
                     // Créer un container pour le header de la date
@@ -791,6 +889,17 @@ document.addEventListener('DOMContentLoaded', function(){
     const addEventForm = document.getElementById('addEventForm');
     const categorySelect = document.getElementById('category');
 
+    // s'assurer que le champ hidden existe et réinitialiser pour une création
+    let prepHidden = addEventForm.querySelector('#prep-status-hidden');
+    if (!prepHidden) {
+      prepHidden = document.createElement('input');
+      prepHidden.type = 'hidden';
+      prepHidden.name = 'preparation_checked';
+      prepHidden.id = 'prep-status-hidden';
+      addEventForm.appendChild(prepHidden);
+    }
+    prepHidden.value = ''; // pas de statut imposé à la création
+
     // Fonction pour ouvrir la modale en ajoutant la classe "show"
     function openModal(modal) {
         modal.style.display = 'block';
@@ -810,22 +919,16 @@ document.addEventListener('DOMContentLoaded', function(){
     }
     
     // Ouvrir la modale lors du clic sur le bouton "Ajouter un événement"
-    addEventButton.addEventListener('click', function(){
-        // Charger les catégories depuis le serveur
-        fetch('/get_timetable_categories?event=' + encodeURIComponent(window.selectedEvent) + '&year=' + encodeURIComponent(window.selectedYear))
-        .then(response => response.json())
-        .then(data => {
-            categorySelect.innerHTML = '';
-            data.categories.forEach(cat => {
-                const option = document.createElement('option');
-                option.value = cat;
-                option.textContent = cat;
-                categorySelect.appendChild(option);
-            });
-        })
-        .catch(err => console.error("Erreur chargement catégories:", err));    
-        
-        openModal(addEventModal);
+    addEventButton.addEventListener('click', async function(){
+      const cats = await loadCategories();
+      categorySelect.innerHTML = '';
+      (cats || []).forEach(cat => {
+        const option = document.createElement('option');
+        option.value = cat;
+        option.textContent = cat;
+        categorySelect.appendChild(option);
+      });
+      openModal(addEventModal);
     });
     
     // Fermer la modale au clic sur la croix ou le bouton Annuler
@@ -851,6 +954,23 @@ document.addEventListener('DOMContentLoaded', function(){
         const isEdit = (window.formMode === 'edit');
         const endpoint = isEdit ? '/update_timetable_event' : '/add_timetable_event';
 
+        // Validation personnalisée: au moins start OU end
+        const startVal = (document.getElementById('start-time').value || '').trim();
+        const endVal   = (document.getElementById('end-time').value   || '').trim();
+
+        // Nettoyage anciens messages d'erreur éventuels
+        document.querySelectorAll('.form-error').forEach(n => n.remove());
+
+        if (!startVal && !endVal) {
+          const err = document.createElement('div');
+          err.className = 'form-error';
+          err.textContent = 'Saisir au moins une heure de début ou de fin.';
+          // on affiche l’erreur sous le champ "Heure de début"
+          document.getElementById('start-time').closest('.form-group').appendChild(err);
+          document.getElementById('start-time').focus();
+          return; // stop submit
+        }
+
         // Récupérer les valeurs du formulaire
         const payload = {
             event: window.selectedEvent || '24H MOTOS',
@@ -865,17 +985,31 @@ document.addEventListener('DOMContentLoaded', function(){
             department: document.getElementById('department').value,
             remark: document.getElementById('remark').value,
             type: "Timetable",
-            origin: isEdit ? "manual-edit" : "manual"
+            origin: isEdit ? "manual-edit" : "manual",
+            preparation_checked: (document.getElementById('prep-status-hidden')?.value ?? '')
         };
 
-        // Inclure l'ID en édition
+        // IDs pour décider si on UPDATE ou si on ADD
+        const editId      = (document.getElementById('edit-id-hidden')?.value || '').trim();
+        const editParamId = (document.getElementById('edit-param-hidden')?.value || '').trim();
+
+        // Ajouter les IDs au payload en mode édition
         if (isEdit) {
-            const hiddenId = addEventForm.querySelector('input[name=\"_id\"]');
-            const idVal = hiddenId ? hiddenId.value : (window.editingItemId || null);
-            if (idVal) payload._id = idVal;
+          if (editId)      payload._id = editId;
         }
 
-        fetch(endpoint, {
+        // Sécuriser l’endpoint : si on est en "edit" mais qu'on n'a ni _id ni param_id, on bascule en création
+        let finalEndpoint = endpoint;
+        if (isEdit && !editId) {
+          console.warn('[Timetable] Edit sans _id/param_id -> fallback création');
+          finalEndpoint   = '/add_timetable_event';
+          payload.origin  = 'manual';
+        }
+
+        // (facultatif mais utile)
+        console.debug('[Timetable submit]', { isEdit, finalEndpoint, payload });
+
+        fetch(finalEndpoint, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -945,27 +1079,55 @@ function closeEventDrawer() {
 drawerOverlay?.addEventListener('click', closeEventDrawer);
 drawerClose?.addEventListener('click', closeEventDrawer);
 
-/* --- Helpers TODO --- */
-function parseTodos(todoField) {
-  if (!todoField) return [];
-  if (Array.isArray(todoField)) return todoField.map(s => s.toString());
-  return todoField
-    .toString()
-    .split(/\r?\n/)              // lignes
-    .map(s => s.trim())
-    .filter(Boolean);
-}
-function stringifyTodos(list) {
-  return list.join('\n');
+function maybePromoteReadyFromTodos(dateStr, item, containerEl) {
+  const tasks = splitTodo(item.todo || "");
+  const allDone = tasks.length > 0 && tasks.every(t => t.done);
+
+  // si pas tout coché → "progress" (ou "none" s'il n'y a plus de tâches) sauf si déjà "true"
+  if (!allDone) {
+    if ((item.preparation_checked || "").toLowerCase() !== "true") {
+      item.preparation_checked = tasks.length ? "progress" : "";
+      const pill = containerEl?.querySelector('.prep-pill');
+      if (pill) {
+        pill.className = `prep-pill prep-${tasks.length ? 'progress' : 'none'}`;
+        pill.textContent = tasks.length ? 'En cours' : 'Non';
+      }
+    }
+    return;
+  }
+
+  // tout coché → "true"
+  if ((item.preparation_checked || "").toLowerCase() === "true") return;
+
+  item.preparation_checked = "true";
+  const pill = containerEl?.querySelector('.prep-pill');
+  if (pill) { pill.className = 'prep-pill prep-true'; pill.textContent = 'Prête'; }
+  if (!requireIdOrWarn(item)) return;
+
+  // (optionnel) notifie le serveur si la route existe
+  fetch('/set_preparation_ready', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+    },
+    body: JSON.stringify({
+      id: item._id,
+      event: window.selectedEvent,
+      year: window.selectedYear,
+      date: dateStr
+    })
+  }).catch(()=>{});
 }
 
 /* --- Vue en lecture --- */
 function renderDrawerView() {
   const it = _drawerCurrent.item;
   drawerTitleEl.textContent = it.activity || 'Événement';
-  const todoArray = parseTodos(it.todo);
+  const todoArray = splitTodo(it.todo || "");
+  const prep = (it.preparation_checked ?? "").toString().toLowerCase();
+  const forceReady = prep === 'true';
 
-  const prep = (it.preparation_checked ?? "").toString().toLowerCase(); // "", "progress", "true"
   const prepLabel =
     prep === 'true' ? 'Prête'
   : prep === 'progress' ? 'En cours'
@@ -1007,8 +1169,8 @@ function renderDrawerView() {
       ${todoArray.length ? `
         <ul class="todo-list">
           ${todoArray.map((line, idx) => {
-            const done = /^\s*(\[x\]|x\s)/i.test(line);
-            const clean = line.replace(/^\s*(\[x\]|x\s)\s*/i, '');
+            const done  = forceReady ? true : !!line.done;
+            const clean = line.text;
             return `
               <li>
                 <label class="todo-item">
@@ -1031,152 +1193,78 @@ function renderDrawerView() {
     </div>
   `;
 
-  // Wiring TODO interactions
+  // Wiring TODO interactions (version robuste + autosave)
   drawerBodyEl.querySelectorAll('input[type="checkbox"][data-idx]').forEach(cb => {
     cb.addEventListener('change', () => {
       const idx  = Number(cb.dataset.idx);
-      const list = parseTodos(_drawerCurrent.item.todo);
-      const line = list[idx] || '';
-      const clean = line.replace(/^\s*(\[x\]|x\s)\s*/i, '');
-      list[idx] = cb.checked ? `[x] ${clean}` : clean;
-      _drawerCurrent.item.todo = stringifyTodos(list);
+      const list = splitTodo(_drawerCurrent.item.todo || "");
+      if (!Number.isFinite(idx) || !list[idx]) return;
+
+      list[idx].done = cb.checked;
+      _drawerCurrent.item.todo = serializeTodo(list);
+
+      // statut auto (ready / progress) côté drawer
+      const doneCount = list.filter(t => t.done).length;
+      const allDone   = list.length > 0 && doneCount === list.length;
+      const newStatus = allDone ? "true" : (list.length ? "progress" : "");
+
+      if ((_drawerCurrent.item.preparation_checked || "").toLowerCase() !== newStatus) {
+        _drawerCurrent.item.preparation_checked = newStatus;
+
+        // maj visuelle immédiate
+        const pill = drawerBodyEl.querySelector('.prep-pill');
+        if (pill) {
+          pill.className = `prep-pill prep-${newStatus || 'none'}`;
+          pill.textContent = allDone ? 'Prête' : (list.length ? 'En cours' : 'Non');
+        }
+      }
+
+      // 🔸 AUTOSAVE pour la déco / coche
+      saveUpdate(_drawerCurrent.date, _drawerCurrent.item);
     });
   });
 
-  const addLine = drawerBodyEl.querySelector('#todo-add-line');
-  const addFirst = drawerBodyEl.querySelector('#todo-add-first');
+  const addLine   = drawerBodyEl.querySelector('#todo-add-line');
+  const addFirst  = drawerBodyEl.querySelector('#todo-add-first');
   const clearDone = drawerBodyEl.querySelector('#todo-clear-done');
-  const saveTodo = drawerBodyEl.querySelector('#todo-save');
+  const saveTodo  = drawerBodyEl.querySelector('#todo-save');
 
   addLine?.addEventListener('click', () => {
-    const list = parseTodos(_drawerCurrent.item.todo);
+    const list = splitTodo(_drawerCurrent.item.todo || "");
     const txt = prompt('Nouvelle tâche :');
     if (txt && txt.trim()) {
-      list.push(txt.trim());
-      _drawerCurrent.item.todo = stringifyTodos(list);
+      list.push({ text: txt.trim(), done: false });
+      _drawerCurrent.item.todo = serializeTodo(list);
       renderDrawerView(); // re-render
     }
   });
+
   addFirst?.addEventListener('click', () => {
-    const list = parseTodos(_drawerCurrent.item.todo);
+    const list = splitTodo(_drawerCurrent.item.todo || "");
     const txt = prompt('Nouvelle tâche :');
     if (txt && txt.trim()) {
-      list.push(txt.trim());
-      _drawerCurrent.item.todo = stringifyTodos(list);
+      list.push({ text: txt.trim(), done: false });
+      _drawerCurrent.item.todo = serializeTodo(list);
       renderDrawerView();
     }
   });
+
   clearDone?.addEventListener('click', () => {
-    const list = parseTodos(_drawerCurrent.item.todo).filter(l => !/^\s*(\[x\]|x\s)/i.test(l));
-    _drawerCurrent.item.todo = stringifyTodos(list);
+    const list = splitTodo(_drawerCurrent.item.todo || "").filter(l => !l.done);
+    _drawerCurrent.item.todo = serializeTodo(list);
     renderDrawerView();
   });
+
+  // bouton "Enregistrer TODO" manuel (au cas où)
   saveTodo?.addEventListener('click', () => {
     saveUpdate(_drawerCurrent.date, _drawerCurrent.item);
   });
 }
 
-/* --- Vue édition inline --- */
-function renderDrawerEdit() {
-  const it = _drawerCurrent.item;
-  const todoText = stringifyTodos(parseTodos(it.todo));
-  drawerBodyEl.innerHTML = `
-    <div class="field">
-      <div class="label">Date</div>
-      <input class="form-input" type="date" id="edit-date" value="${_drawerCurrent.date}">
-    </div>
-    <div class="field">
-      <div class="label">Début</div>
-      <input class="form-input" type="text" id="edit-start" value="${(it.start && it.start!=='TBC')?it.start:''}" placeholder="HH:MM ou TBC">
-    </div>
-    <div class="field">
-      <div class="label">Fin</div>
-      <input class="form-input" type="text" id="edit-end" value="${(it.end && it.end!=='TBC')?it.end:''}" placeholder="HH:MM ou TBC">
-    </div>
-    <div class="field">
-      <div class="label">Durée</div>
-      <input class="form-input" type="text" id="edit-duration" value="${it.duration||''}">
-    </div>
-    <div class="field">
-      <div class="label">Catégorie</div>
-      <select class="form-input" id="edit-category"></select>
-    </div>
-    <div class="field">
-      <div class="label">Activité</div>
-      <input class="form-input" type="text" id="edit-activity" value="${it.activity||''}">
-    </div>
-    <div class="field">
-      <div class="label">Lieu</div>
-      <input class="form-input" type="text" id="edit-place" value="${it.place||''}">
-    </div>
-    <div class="field">
-      <div class="label">Département</div>
-      <input class="form-input" type="text" id="edit-dept" value="${it.department||''}">
-    </div>
-    <div class="field">
-      <div class="label">Remarques</div>
-      <textarea class="form-input" id="edit-remark">${it.remark||''}</textarea>
-    </div>
-    <div class="field">
-      <div class="label">TODO (une tâche par ligne)</div>
-      <textarea class="form-input" id="edit-todo" rows="6">${todoText}</textarea>
-    </div>
-    <div class="field">
-      <div class="label">État de préparation</div>
-      <select class="form-input" id="edit-prep">
-        <option value="">Non</option>
-        <option value="progress">En cours</option>
-        <option value="true">Prête</option>
-      </select>
-    </div>
-    <div style="display:flex; gap:8px;">
-      <button id="edit-cancel" class="btn btn-secondary" style="flex:1;">Annuler</button>
-      <button id="edit-save"   class="btn btn-primary"   style="flex:1;">Enregistrer</button>
-    </div>
-  `;
-
-  // Remplir catégories
-  const catSelect = drawerBodyEl.querySelector('#edit-category');
-  catSelect.innerHTML = '';
-  (window.categories || []).forEach(c => {
-    const opt = document.createElement('option');
-    opt.value = c; opt.textContent = c;
-    if (c === _drawerCurrent.item.category) opt.selected = true;
-    catSelect.appendChild(opt);
-  });
-
-  // Prépa
-  const prepSel = drawerBodyEl.querySelector('#edit-prep');
-  prepSel.value = (it.preparation_checked ?? '').toString().toLowerCase();
-
-  drawerBodyEl.querySelector('#edit-cancel').addEventListener('click', renderDrawerView);
-  drawerBodyEl.querySelector('#edit-save').addEventListener('click', () => {
-    const newItem = {
-      ..._drawerCurrent.item,
-      start:   (drawerBodyEl.querySelector('#edit-start').value || 'TBC').trim(),
-      end:     (drawerBodyEl.querySelector('#edit-end').value || 'TBC').trim(),
-      duration:drawerBodyEl.querySelector('#edit-duration').value.trim(),
-      category:drawerBodyEl.querySelector('#edit-category').value,
-      activity:drawerBodyEl.querySelector('#edit-activity').value.trim(),
-      place:   drawerBodyEl.querySelector('#edit-place').value.trim(),
-      department: drawerBodyEl.querySelector('#edit-dept').value.trim(),
-      remark:  drawerBodyEl.querySelector('#edit-remark').value.trim(),
-      todo:    drawerBodyEl.querySelector('#edit-todo').value, // texte multi-lignes
-      preparation_checked: drawerBodyEl.querySelector('#edit-prep').value
-    };
-    const newDate = drawerBodyEl.querySelector('#edit-date').value || _drawerCurrent.date;
-    _drawerCurrent = { date: newDate, item: newItem };
-    saveUpdate(newDate, newItem, true);
-  });
-}
-
 /* --- Boutons pied de drawer --- */
 btnEdit?.addEventListener('click', async () => {
-  // s’assurer qu’on a les catégories
-  if (!Array.isArray(window.categories) || window.categories.length === 0) {
-    await loadCategories?.().catch(()=>{});
-  }
-  renderDrawerEdit();
+  if (!_drawerCurrent?.item) return;
+  await openEditModalFromDrawer(_drawerCurrent.date, _drawerCurrent.item);
 });
 btnDup?.addEventListener('click', () => {
   duplicateCurrent();
@@ -1193,12 +1281,12 @@ btnDel?.addEventListener('click', () => {
 //  - POST /set_preparation_progress (optionnel utilisé ailleurs)
 //  - POST /set_preparation_ready   (optionnel)
 function saveUpdate(dateStr, item, closeAfter = false) {
+  if (!requireIdOrWarn(item)) return;
   const payload = {
     event:      window.selectedEvent,
     year:       window.selectedYear,
     date:       dateStr,
     _id:        item._id,
-    param_id:   item.param_id || null,
     start:      item.start || 'TBC',
     end:        item.end || 'TBC',
     duration:   item.duration || '',
@@ -1235,6 +1323,7 @@ function saveUpdate(dateStr, item, closeAfter = false) {
 
 function deleteCurrent() {
   const it = _drawerCurrent.item;
+  if (!requireIdOrWarn(item)) return;
   if (!it || !it._id) return;
   if (!confirm("Supprimer définitivement cet événement ?")) return;
 
@@ -1242,7 +1331,7 @@ function deleteCurrent() {
     event: window.selectedEvent,
     year:  window.selectedYear,
     date:  _drawerCurrent.date,
-    _id:   it._id
+    _id:   it._id,
   };
   fetch('/delete_timetable_event', {
     method: 'POST',
@@ -1307,6 +1396,107 @@ function duplicateCurrent() {
   .catch(()=> showDynamicFlashMessage("Erreur réseau", "error"));
 }
 
+// ---- Chargement (et cache) des catégories ----
+async function loadCategories() {
+  try {
+    if (Array.isArray(window.categories) && window.categories.length) {
+      return window.categories; // cache
+    }
+    if (!window.selectedEvent || !window.selectedYear) {
+      console.warn('[loadCategories] selectedEvent/year manquants');
+      window.categories = [];
+      return window.categories;
+    }
+    const url = '/get_timetable_categories?event=' +
+      encodeURIComponent(window.selectedEvent) +
+      '&year=' + encodeURIComponent(window.selectedYear);
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    window.categories = Array.isArray(data?.categories) ? data.categories : [];
+    return window.categories;
+  } catch (e) {
+    console.error('[loadCategories] échec:', e);
+    window.categories = window.categories || [];
+    return window.categories;
+  }
+}
+
+async function openEditModalFromDrawer(dateStr, item) {
+  // 1) garantir qu'on a les catégories
+  const cats = await loadCategories().catch(()=>[]);
+
+  // 2) références
+  const addEventModal  = document.getElementById('addEventModal');
+  const addEventForm   = document.getElementById('addEventForm');
+  const titleEl        = addEventModal?.querySelector('h3');
+
+  // 3) passer en mode édition (utilisé par ton submit)
+  window.formMode = 'edit';
+  window.editingItemId = item._id || null;
+  if (titleEl) titleEl.textContent = "Modifier un événement de la Timetable";
+
+  // 4) remplir le select catégories
+  const categorySelect = document.getElementById('category');
+  if (categorySelect) {
+    categorySelect.innerHTML = '';
+    const source = (Array.isArray(cats) && cats.length) ? cats : (item.category ? [item.category] : []);
+    source.forEach(cat => {
+      const opt = document.createElement('option');
+      opt.value = cat;
+      opt.textContent = cat;
+      if (cat === item.category) opt.selected = true;
+      categorySelect.appendChild(opt);
+    });
+  }
+
+  // 5) pré-remplir tous les champs du formulaire
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v ?? ''; };
+  setVal('event-date',   dateStr || '');
+  setVal('start-time',   (item.start && item.start!=='TBC') ? item.start : '');
+  setVal('end-time',     (item.end   && item.end  !=='TBC') ? item.end   : '');
+  setVal('duration',     item.duration || '');
+  setVal('activity',     item.activity || '');
+  setVal('place',        item.place || '');
+  setVal('department',   item.department || '');
+  setVal('remark',       item.remark || '');
+
+  // 6) hidden _id (ID FIXE pour éviter toute ambiguïté)
+  let hidden = addEventForm.querySelector('#edit-id-hidden');
+  if (!hidden) {
+    hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.name = '_id';
+    hidden.id   = 'edit-id-hidden';
+    addEventForm.appendChild(hidden);
+  }
+  hidden.value = item._id || '';
+
+   // hidden pour conserver le statut de préparation pendant l'édition
+  let prepHidden = addEventForm.querySelector('input[name="preparation_checked"]');
+  if (!prepHidden) {
+    prepHidden = document.createElement('input');
+    prepHidden.type = 'hidden';
+    prepHidden.name = 'preparation_checked';
+    prepHidden.id = 'prep-status-hidden';
+    addEventForm.appendChild(prepHidden);
+  }
+  prepHidden.value = (item.preparation_checked ?? '').toString().toLowerCase();
+
+  // 7) fermer le drawer AVANT d’ouvrir la modale (évite le warning ARIA)
+  closeEventDrawer();
+  // enlever le focus actuel pour ne pas "cacher" un élément focusable
+  document.activeElement && document.activeElement.blur?.();
+
+  // 8) ouvrir la modale
+  const openModal = (modal)=>{
+    modal.style.display='block';
+    setTimeout(()=>modal.classList.add('show'),10);
+  };
+  openModal(addEventModal);
+}
+
 /******************************************************************
  * Horloge simulable (console) + ligne rouge + auto-scroll
  ******************************************************************/
@@ -1328,23 +1518,35 @@ function duplicateCurrent() {
     },
     setSim(d){
       let dt = null;
+
       if (typeof d === 'string') {
-        const m = d.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})$/);
+        // Accepte 1 ou 2 chiffres pour mois/jour, et HH:MM (obligatoire ici)
+        const m = d.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})$/);
         if (m) {
-          const [_, ymd, hh, mm] = m;
-          const [Y,M,D] = ymd.split('-').map(n=>parseInt(n,10));
-          dt = new Date(Y, M-1, D, parseInt(hh,10), parseInt(mm,10), 0, 0);
+          const Y  = Number(m[1]);
+          const Mo = Number(m[2]); // 1..12
+          const D  = Number(m[3]); // 1..31
+          const H  = Number(m[4]); // 0..23
+          const Mi = Number(m[5]); // 0..59
+          if ([Y,Mo,D,H,Mi].some(n => !Number.isFinite(n))) {
+            console.warn('[Clock] setSim: composant non numérique'); return;
+          }
+          // Date en FUSEAU LOCAL (important pour éviter l’effet UTC)
+          dt = new Date(Y, Mo - 1, D, H, Mi, 0, 0);
         } else {
+          // Fallback natif (toujours local si string sans Z)
           const parsed = new Date(d);
           if (isNaN(+parsed)) { console.warn('[Clock] string invalide'); return; }
           dt = parsed;
         }
       } else if (d instanceof Date) {
+        // Clone défensif
         dt = new Date(d.getTime());
       } else {
         console.warn('[Clock] setSim attend "YYYY-MM-DD HH:MM" ou Date');
         return;
       }
+
       this._mode = 'sim';
       this._simDate = dt;
       console.info('[Clock] mode=sim', this._simDate.toString());
@@ -1479,7 +1681,7 @@ function duplicateCurrent() {
         el = document.createElement('div');
         el.id = 'now-line';
         el.hidden = true;
-        el.innerHTML = '<span class="now-badge">--:--</span>';
+        el.innerHTML = '<span class="now-line-label">--:--</span>';
         main.prepend(el);
       } else if (el.parentElement !== main) {
         // si la ligne était ailleurs, on la déplace
@@ -1525,46 +1727,134 @@ function duplicateCurrent() {
       const container = document.querySelector('.timeline-container');
       if (!container || !this._lineEl) return;
 
-      // 1) met à jour l’heure dans le badge
-      const now = TimelineClock.get();
-      const badge = this._lineEl.querySelector('.now-badge');
-      if (badge) badge.textContent = fmtHHMM(now);
-
-      // 2) logique de recalage (identique à ta version basée sur ancres/interpolation)
-      const nowYMD = now.toISOString().slice(0,10);
-      const nowMin = now.getHours()*60 + now.getMinutes();
-
+      // --- Sections triées avec leur date ISO ---
       const sections = Array.from(container.querySelectorAll('.timetable-date-section'));
       if (!sections.length) return;
 
-      const getSectionISODate = (section) => section.querySelector('.event-item')?.dataset?.date || null;
+      const map = sections
+        .map(sec => ({ el: sec, iso: sec.dataset.date || null }))
+        .filter(x => !!x.iso)
+        .sort((a,b) => a.iso.localeCompare(b.iso));
+      if (!map.length) return;
 
-      let targetSection = null;
-      for (const sec of sections) {
-        const iso = getSectionISODate(sec);
-        if (!iso) continue;
-        if (iso === nowYMD) { targetSection = sec; break; }
-        if (!targetSection && iso > nowYMD) targetSection = sec;
+      // --- Heure courante (réelle/simulée) + libellé ---
+      const now    = TimelineClock.get();
+      const nowYMD = ymdLocal(now);
+      const nowMin = now.getHours()*60 + now.getMinutes();
+      const hh = String(now.getHours()).padStart(2,'0');
+      const mm = String(now.getMinutes()).padStart(2,'0');
+
+      const labelEl = this._lineEl.querySelector('.now-badge') || this._lineEl.querySelector('.now-line-label');
+      if (labelEl) labelEl.textContent = `${hh}:${mm}`;
+
+      // --- Section cible : aujourd’hui > dernière passée > première future ---
+      let target = map.find(x => x.iso === nowYMD);
+      if (!target) {
+        const past = map.filter(x => x.iso < nowYMD);
+        if (past.length) target = past[past.length - 1];
       }
-      if (!targetSection) targetSection = sections[sections.length-1];
+      if (!target) target = map[0];
 
-      const anchors = _getAnchors(targetSection);
-      if (!anchors.length) return;
+      const targetSection = target.el;
+      const targetISO     = target.iso;
 
-      const targetISO = getSectionISODate(targetSection);
-      const minuteForSection = (targetISO === nowYMD) ? nowMin : anchors[0].minute;
-      const yInSection = _minuteToY(minuteForSection, anchors);
+      // --- Cartes triées par minute (ignore Infinity/TBC) ---
+      const cards = Array.from(targetSection.querySelectorAll('.event-item'))
+        .map(el => ({ el, minute: parseInt(el.getAttribute('data-minute') || '999999', 10) }))
+        .filter(x => Number.isFinite(x.minute))
+        .sort((a,b) => a.minute - b.minute);
 
+      // --- Géométrie du container ---
       const contRect = container.getBoundingClientRect();
-      const secRect  = targetSection.getBoundingClientRect();
       const currentScroll = container.scrollTop;
-      const sectionTopInContainer = secRect.top - contRect.top + currentScroll;
+      const maxScroll = container.scrollHeight - container.clientHeight;
 
-      const desiredScrollTop = Math.max(0, sectionTopInContainer + yInSection - this._lineTopPx);
-      container.scrollTo({ top: desiredScrollTop, behavior: 'smooth' });
+      // util: poser la ligne à une position Y *dans le viewport du container*
+      const placeLineViewportY = (y) => {
+        let lineTop = Math.max(0, Math.min(container.clientHeight - 2, y));
+        this._lineEl.style.top = `${lineTop}px`;
+      };
 
-      // 3) s’assure que la ligne est bien positionnée visuellement à _lineTopPx
-      this._lineEl.style.top = `${this._lineTopPx}px`;
+      // --- Cas sans carte exploitable : caler sur le haut de section
+      if (!cards.length) {
+        const secRect = targetSection.getBoundingClientRect();
+        const sectionAbsTop = currentScroll + (secRect.top - contRect.top);
+
+        const desiredScrollTop = Math.max(0, sectionAbsTop - this._lineTopPx);
+        const clamped = Math.max(0, Math.min(desiredScrollTop, maxScroll));
+        container.scrollTo({ top: clamped, behavior: 'smooth' });
+
+        if (clamped !== desiredScrollTop) {
+          // butée → place la ligne sur le haut de section visible
+          const sectionTopViewportY = secRect.top - contRect.top;
+          placeLineViewportY(sectionTopViewportY);
+        } else {
+          // position standard
+          placeLineViewportY(this._lineTopPx);
+        }
+        console.info('[NowLine] fallback: section sans heures valides', targetISO);
+        return;
+      }
+
+      // --- Minute cible dans la section ---
+      let minuteTarget;
+      if (targetISO === nowYMD) {
+        const next = cards.find(c => c.minute >= nowMin);
+        minuteTarget = next ? next.minute : cards[cards.length-1].minute;
+      } else if (targetISO < nowYMD) {
+        minuteTarget = cards[cards.length-1].minute; // fin de journée passée
+      } else {
+        minuteTarget = cards[0].minute;              // début de journée future
+      }
+
+      // --- Carte pivot ---
+      const pivot = cards.find(c => c.minute >= minuteTarget) || cards[cards.length-1];
+
+      // --- Position absolue du top de la carte pivot ---
+      const cardRect = pivot.el.getBoundingClientRect();
+      const pivotAbsTop = currentScroll + (cardRect.top - contRect.top);
+
+      // On veut mettre le top de la carte à _lineTopPx
+      const desiredScrollTop = Math.max(0, pivotAbsTop - this._lineTopPx);
+      const clamped = Math.max(0, Math.min(desiredScrollTop, maxScroll));
+      container.scrollTo({ top: clamped, behavior: 'smooth' });
+
+      // --- Gestion des butées ---
+      if (clamped !== desiredScrollTop) {
+        const bottomSafe = 8;   // marge au-dessus du bas visible
+        const topSafe    = 8;   // marge sous le haut visible
+
+        if (clamped === maxScroll) {
+          // ➜ Butée BAS : ligne au bas de la DERNIÈRE carte
+          const lastCard = cards[cards.length - 1].el;
+          const lastRect = lastCard.getBoundingClientRect();
+          const lastBottomViewportY = lastRect.bottom - contRect.top;
+          const y = Math.min(container.clientHeight - bottomSafe, lastBottomViewportY);
+          placeLineViewportY(y);
+        } else if (clamped === 0) {
+          // ➜ Butée HAUT : ligne au haut de la PREMIÈRE carte
+          const firstCard = cards[0].el;
+          const firstRect = firstCard.getBoundingClientRect();
+          const firstTopViewportY = firstRect.top - contRect.top;
+          const y = Math.max(topSafe, firstTopViewportY);
+          placeLineViewportY(y);
+        } else {
+          // Sécurité : coller à la carte pivot
+          const pivotTopViewportY = cardRect.top - contRect.top;
+          placeLineViewportY(pivotTopViewportY);
+        }
+      } else {
+        // Pas de butée → position standard
+        placeLineViewportY(this._lineTopPx);
+      }
+
+      console.info('[NowLine] tick', {
+        section: targetISO,
+        minuteTarget,
+        pivotMinute: pivot.minute,
+        clampedTo: clamped,
+        maxScroll
+      });
     }
   };
   window.NowLineController = NowLineController;

@@ -76,9 +76,24 @@ TimelineClock.useReal()
 
 - **Simuler une heure précise** :
 ```js
-TimelineClock.setSim("2025-09-26 14:35")
+TimelineClock.setSim("2025-09-26 14:35") // format YYYY-MM-DD HH:MM
 ```
-*(format : `YYYY-MM-DD HH:MM`)*
+
+- **Démarrer / mettre en pause l’avance auto de l’horloge simulée** :
+```js
+TimelineClock.play()   // démarre l’avance
+TimelineClock.pause()  // met en pause
+```
+
+- **Régler la vitesse de lecture (minutes simulées par seconde réelle)** :
+```js
+TimelineClock.setSpeed(5) // ici: 5 minutes simulées / seconde réelle
+```
+
+- **Avancer d’un pas fixe (en minutes) en mode simulé** :
+```js
+TimelineClock.step(10) // avance de 10 minutes
+```
 
 - **Obtenir l’heure courante utilisée par l’app** :
 ```js
@@ -97,6 +112,8 @@ NowLineController.stop()
 NowLineController.toggle()
 ```
 
+> 💡 Astuce : après avoir modifié l’heure (simulée ou réelle), tu peux forcer un recalage avec `NowLineController._tick()` si besoin.
+
 ---
 
 ## ⚙️ Architecture
@@ -112,7 +129,7 @@ NowLineController.toggle()
 ## 🎨 Esthétique
 
 - Ligne rouge **fluide et lumineuse** (gradient rose/rouge, glow).
-- Badge **NOW** affiché à droite de la ligne.
+- Badge **NOW** affiché dans la timeline.
 - Scroll animé en **smooth** pour lisibilité.
 - Boutons cohérents avec le design global (icônes Material).
 
@@ -120,7 +137,7 @@ NowLineController.toggle()
 
 ## 🛠️ Points techniques
 
-- Chaque carte (`event-item`) est enrichie avec :
+- Chaque carte (`.event-item`) est enrichie avec :
   - `data-date` (YYYY-MM-DD)
   - `data-minute` (minute de tri, calculée sur start/end)
 - La ligne rouge utilise un offset fixe (`top:100px`) pour caler le scrolling.
@@ -128,6 +145,7 @@ NowLineController.toggle()
   - La date courante (réelle ou simulée).
   - Le prochain événement ≥ heure actuelle.
   - Sinon, le dernier événement de la section.
+- Gestion des butées de scroll (haut/bas) : si le conteneur est en butée, la ligne se translate pour **se poser sur la carte pivot** (dernière ou première selon le cas).
 
 ---
 
@@ -137,7 +155,7 @@ NowLineController.toggle()
 2. Cliquer sur le bouton **HUD** → la timeline et le paramétrage se chargent.
 3. Activer le bouton **⏱️ schedule** pour afficher la ligne rouge.
 4. Vérifier que la timeline suit bien l’heure réelle.
-5. (Optionnel) Ouvrir la **console navigateur** pour simuler une heure avec `TimelineClock.setSim(...)`.
+5. (Optionnel) Ouvrir la **console navigateur** pour simuler une heure avec `TimelineClock.setSim(...)` ou faire avancer le temps avec `TimelineClock.play()`.
 
 ---
 
