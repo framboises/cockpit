@@ -995,6 +995,122 @@ def update_doors():
     return jsonify({"doors": doors_data})
 
 ################################################################################
+# Gestion de la configuration des tâches automatiques cockpit
+################################################################################
+
+COL_TODOS = db['todos']  # schema: { type:str, todos:[str], createdAt, updatedAt }
+
+# Helpers
+
+def _pub(doc):
+    if not doc: return None
+    d = dict(doc)
+    d['_id'] = str(d['_id'])
+    return d
+
+@app.route('/api/todo-sets', methods=['GET'])
+@role_required("manager")
+
+def list_todo_sets():
+    q = {}
+    t = request.args.get('type')
+    if t: q['type'] = t
+    items = list(COL_TODOS.find(q).sort([('type', 1)]))
+    return jsonify([_pub(x) for x in items])
+
+@app.route('/api/todo-sets/<id>', methods=['GET'])
+@role_required("manager")
+
+def get_todo_set(id):
+    doc = COL_TODOS.find_one({'_id': ObjectId(id)})
+    if not doc: return jsonify({'error':'Not found'}), 404
+    return jsonify(_pub(doc))
+
+@app.route('/api/todo-sets', methods=['POST'])
+@role_required("manager")
+@csrf.exempt
+
+def create_todo_set():
+    data = request.get_json(force=True) or {}
+    typ = (data.get('type') or '').strip()
+    todos = data.get('todos') or []
+    if not typ:
+        return jsonify({'error':'type is required'}), 400
+    # ensure list of strings
+    todos = [str(x).strip() for x in todos if str(x).strip()]
+    doc = {
+        'type': typ,
+        'todos': todos,
+        'createdAt': datetime.utcnow(),
+        'updatedAt': datetime.utcnow(),
+    }
+    ins = COL_TODOS.insert_one(doc)
+    doc['_id'] = str(ins.inserted_id)
+    return jsonify(doc), 201
+
+@app.route('/api/todo-sets/<id>', methods=['PUT'])
+@role_required("manager")
+@csrf.exempt
+
+def update_todo_set(id):
+    data = request.get_json(force=True) or {}
+    patch = {}
+    if 'type' in data:
+        patch['type'] = (data.get('type') or '').strip()
+    if 'todos' in data:
+        todos = data.get('todos') or []
+        patch['todos'] = [str(x).strip() for x in todos if str(x).strip()]
+    if not patch: return jsonify({'error':'Empty update'}), 400
+    patch['updatedAt'] = datetime.utcnow()
+    res = COL_TODOS.find_one_and_update({'_id': ObjectId(id)}, {'$set': patch}, return_document=True)
+    if not res: return jsonify({'error':'Not found'}), 404
+    return jsonify(_pub(res))
+
+@app.route('/api/todo-sets/<id>', methods=['DELETE'])
+@role_required("manager")
+@csrf.exempt
+
+def delete_todo_set(id):
+    r = COL_TODOS.delete_one({'_id': ObjectId(id)})
+    if r.deleted_count == 0: return jsonify({'error':'Not found'}), 404
+    return jsonify({'ok': True})
+
+# (optionnel) supprimer en masse
+@app.route('/api/todo-sets/bulk-delete', methods=['POST'])
+@role_required("admin")
+@csrf.exempt
+
+def bulk_delete_todo_sets():
+    data = request.get_json(force=True) or {}
+    ids = [ObjectId(x) for x in (data.get('ids') or []) if x]
+    if not ids: return jsonify({'error':'No ids'}), 400
+    r = COL_TODOS.delete_many({'_id': {'$in': ids}})
+    return jsonify({'deleted': r.deleted_count})
+
+# (optionnel) index d’un item dans le tableau
+@app.route('/api/todo-sets/<id>/item/<int:idx>', methods=['DELETE'])
+@csrf.exempt
+@role_required("admin")
+
+def delete_todo_item(id, idx):
+    doc = COL_TODOS.find_one({'_id': ObjectId(id)})
+    if not doc: return jsonify({'error':'Not found'}), 404
+    arr = list(doc.get('todos') or [])
+    if not (0 <= idx < len(arr)):
+        return jsonify({'error':'Index out of range'}), 400
+    arr.pop(idx)
+    res = COL_TODOS.find_one_and_update(
+        {'_id': ObjectId(id)}, {'$set': {'todos': arr, 'updatedAt': datetime.utcnow()}}, return_document=True
+    )
+    return jsonify(_pub(res))
+
+@app.route('/config/todos')
+@role_required("manager")
+
+def edit_todo_sets_page():
+    return render_template('edit.html')
+
+################################################################################
 # Exécution
 ################################################################################
 

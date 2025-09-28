@@ -355,16 +355,66 @@ function getPrepLabel(status) {
   return status === "ready"    ? "Prête"
        : status === "progress" ? "En cours"
        : status === "none"     ? "Non"
+       : status === "late"     ? "En retard"
+       : status === "done"     ? "Terminé"
        : "";
 }
 
-// Statut agrégé d’un cluster (affiche le "pire" rencontré)
-function getClusterPrepStatus(cluster) {
-  const list = cluster.items.map(getPrepStatus).filter(Boolean);
-  if (!list.length) return null;
-  if (list.includes("none")) return "none";
-  if (list.includes("progress")) return "progress";
-  return "ready";
+// --- statut "runtime" (en fonction de l'heure courante) ---
+function getRuntimeDisplayStatus(baseStatus, item, cardDateStr, nowYMD, nowMin){
+  // si date passée → forcément “dépassé”
+  if (cardDateStr < nowYMD) {
+    if (baseStatus === 'ready') return 'done';
+    if (baseStatus === 'progress' || baseStatus === 'none' || !baseStatus) return 'late';
+    return baseStatus || 'none';
+  }
+  // si date future → pas d'effet
+  if (cardDateStr > nowYMD) return baseStatus || 'none';
+
+  // même jour
+  const startOk = item.start && item.start.toUpperCase() !== 'TBC';
+  const endOk   = item.end   && item.end.toUpperCase()   !== 'TBC';
+  let refMinute = Infinity;
+  if (startOk) refMinute = timeToMinutes(item.start);
+  else if (endOk) refMinute = timeToMinutes(item.end);
+
+  if (Number.isFinite(refMinute) && nowMin >= refMinute) {
+    if (baseStatus === 'ready') return 'done';
+    if (baseStatus === 'progress' || baseStatus === 'none' || !baseStatus) return 'late';
+  }
+  return baseStatus || 'none';
+}
+
+// Statut agrégé *runtime* d’un cluster (pire des statuts de ses enfants)
+function getClusterDisplayStatus(cluster, dateStr, nowYMD, nowMin) {
+  if (!cluster?.items?.length) return null;
+  let worst = null, worstScore = -1;
+  for (const ch of cluster.items) {
+    const s = getItemDisplayStatus(ch, dateStr, nowYMD, nowMin); // late/none/progress/ready/done
+    const score = statusPriorityValue(s);
+    if (score > worstScore) { worstScore = score; worst = s; }
+    if (worst === 'late') break; // on ne peut pas faire "pire"
+  }
+  return worst || null;
+}
+
+// ordre de sévérité (plus grand = pire)
+function statusPriorityValue(s) {
+  switch ((s || '').toLowerCase()) {
+    case 'late':     return 5; // pire
+    case 'none':     return 4;
+    case 'progress': return 3;
+    case 'ready':    return 2;
+    case 'done':     return 1; // meilleur
+    default:         return 0; // inconnu
+  }
+}
+
+// statut "base" (métier) -> déjà getPrepStatus(item)
+// statut "live" (intégrant l'heure) pour un *item*
+function getItemDisplayStatus(item, dateStr, nowYMD, nowMin) {
+  const base = getPrepStatus(item) || 'none';
+  return getRuntimeDisplayStatus(base, item, dateStr, nowYMD, nowMin);
 }
 
 function ymdLocal(d){
@@ -419,8 +469,17 @@ function applyPreparationStatus(cardEl, statusStr) {
     }
   }
   if (chip) {
-    chip.className = `prep-chip prep-${(status === 'true' ? 'ready' : status || 'none')}`;
-    chip.textContent = label;
+    // applique le statut de base, puis le runtime par dessus
+    const base = (status === 'true' ? 'ready' : status || 'none');
+    chip.className = `prep-chip prep-${base}`;
+    chip.textContent = getPrepLabel(base);
+    const cardDate = cardEl.closest('.timetable-date-section')?.dataset?.date || null;
+    const now = TimelineClock.get();
+    const disp = (cardDate && cardEl.__itemData)
+      ? getRuntimeDisplayStatus(base, cardEl.__itemData, cardDate, ymdLocal(now), now.getHours()*60+now.getMinutes())
+      : base;
+    chip.className = `prep-chip prep-${disp}`;
+    chip.textContent = getPrepLabel(disp);
   }
 
   // cocher visuellement toutes les cases du sticky si présent
@@ -437,6 +496,8 @@ function applyPreparationStatus(cardEl, statusStr) {
 // Fonction pour créer une vignette d'événement dans la timeline avec affichage en deux colonnes
 function createEventItem(date, item) {
     const eventItem = document.createElement("div");
+    // gardien local pour le recalcul des statuts “live”
+    eventItem.__itemData = item;
     eventItem.dataset.date = date;                         // YYYY-MM-DD
     eventItem.setAttribute('data-minute', getItemSortMinute(item)); // pour l’auto-scroll
     eventItem.classList.add("event-item");
@@ -468,9 +529,16 @@ function createEventItem(date, item) {
         timeInfo = "TBC";
     }
 
-    const prepStatus = getPrepStatus(item);
-    const prepHtml = prepStatus
-    ? `<span class="prep-chip prep-${prepStatus}" title="Préparation : ${getPrepLabel(prepStatus)}">${getPrepLabel(prepStatus)}</span>`
+    // statut “métier” (base)
+    const baseStatus = getPrepStatus(item);
+    // statut “runtime” (heure courante)
+    const _now = TimelineClock.get();
+    const _nowYMD = ymdLocal(_now);
+    const _nowMin = _now.getHours()*60 + _now.getMinutes();
+    const displayStatus = getRuntimeDisplayStatus(baseStatus, item, date, _nowYMD, _nowMin);
+
+    const prepHtml = displayStatus
+    ? `<span class="prep-chip prep-${displayStatus}" title="Préparation : ${getPrepLabel(displayStatus)}">${getPrepLabel(displayStatus)}</span>`
     : "";
 
     // Construction du résumé en deux colonnes
@@ -627,14 +695,21 @@ function createClusterItem(date, cluster) {
   const kindLabel = cluster.kind === 'close' ? 'Fermeture' : 'Ouverture';
   const timeInfo = cluster.time || 'TBC';
 
-  const clusterPrep = getClusterPrepStatus(cluster);
-    const clusterPrepHtml = clusterPrep
-    ? `<span class="prep-chip prep-${clusterPrep}" title="Préparation : ${getPrepLabel(clusterPrep)}">${getPrepLabel(clusterPrep)}</span>`
+  // ✅ statut runtime au moment du rendu
+  const _now = TimelineClock.get();
+  const _nowYMD = ymdLocal(_now);
+  const _nowMin = _now.getHours()*60 + _now.getMinutes();
+  const clusterDisp = getClusterDisplayStatus(cluster, date, _nowYMD, _nowMin);
+
+  const clusterPrepHtml = clusterDisp
+    ? `<span class="prep-chip prep-${clusterDisp}" title="Préparation : ${getPrepLabel(clusterDisp)}">${getPrepLabel(clusterDisp)}</span>`
     : "";
 
   const el = document.createElement('div');
   el.classList.add('event-item');
-  el.setAttribute('data-minute', getClusterSortMinute(cluster)); // ← ajoute ceci
+  el.setAttribute('data-minute', getClusterSortMinute(cluster));
+  el.__clusterData = { cluster, date }; // 👈 pour les recalculs live
+
   el.innerHTML = `
     <div class="event-summary">
       <div class="event-title">
@@ -657,11 +732,9 @@ function createClusterItem(date, cluster) {
           const place = (ch.place||'—').split('/')[0].trim();
           const hours = (ch.start && ch.start!=='TBC' ? ch.start : '') +
                         (ch.end   && ch.end  !=='TBC' ? (' - '+ch.end) : '');
-
-          // ✅ statut individuel
-          const s = getPrepStatus(ch);                            // 'ready' | 'progress' | 'none' | null
+          // chip individuel (base métier, pas besoin runtime ici dans la sous-ligne)
+          const s = getPrepStatus(ch);
           const chip = s ? `<span class="prep-chip prep-${s} sm" title="Préparation : ${getPrepLabel(s)}">${getPrepLabel(s)}</span>` : '';
-
           return `
             <li class="cluster-line" data-child-id="${ch._id}" style="display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.08); cursor:pointer;">
               <span class="material-icons" style="font-size:18px; opacity:.8;">chevron_right</span>
@@ -1855,6 +1928,38 @@ async function openEditModalFromDrawer(dateStr, item) {
         clampedTo: clamped,
         maxScroll
       });
+
+      // 🔁 Recalcule les statuts dynamiques sur TOUTES les cartes visibles (items + clusters)
+      try {
+        const allCards = Array.from(document.querySelectorAll('.timetable-date-section .event-item'));
+        for (const card of allCards) {
+          const cardDate = card.closest('.timetable-date-section')?.dataset?.date || null;
+          if (!cardDate) continue;
+
+          let chip = card.querySelector('.prep-chip');
+          if (!chip) continue;
+
+          // Cas 1 : carte d'ITEM individuel (créée via createEventItem)
+          if (card.__itemData) {
+            const item = card.__itemData;
+            const base = getPrepStatus(item) || 'none';
+            const disp = getRuntimeDisplayStatus(base, item, cardDate, nowYMD, nowMin);
+            chip.className = `prep-chip prep-${disp}`;
+            chip.textContent = getPrepLabel(disp);
+            continue;
+          }
+
+          // Cas 2 : carte de CLUSTER (créée via createClusterItem)
+          if (card.__clusterData) {
+            const { cluster, date } = card.__clusterData;
+            const disp = getClusterDisplayStatus(cluster, date || cardDate, nowYMD, nowMin);
+            if (disp) {
+              chip.className = `prep-chip prep-${disp}`;
+              chip.textContent = getPrepLabel(disp);
+            }
+          }
+        }
+      } catch(e) { console.warn('Refresh runtime statuses failed', e); }
     }
   };
   window.NowLineController = NowLineController;

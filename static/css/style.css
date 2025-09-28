@@ -1462,8 +1462,9 @@ footer {
   margin-right: 2px;             /* évite que le texte colle à la scrollbar */
 }
 
-/* Pastille de statut (petite, à droite) */
-.prep-chip {
+/* ========= Pastilles (base) ========= */
+.prep-chip,
+.prep-pill {
   display: inline-block;
   margin-top: 6px;
   padding: 2px 8px;
@@ -1472,6 +1473,7 @@ footer {
   font-weight: 700;
   line-height: 1.3;
   white-space: nowrap;
+  border: 1px solid transparent;
 }
 
 /* Variante compacte pour les chips dans les lignes de cluster */
@@ -1480,14 +1482,74 @@ footer {
   line-height: 1;
   padding: 3px 6px;
   border-radius: 10px;
-  display: inline-block;
-  white-space: nowrap;
 }
 
-/* Couleurs */
-.prep-ready    { background: rgba(39,174,96,.25);  color:#27ae60; }   /* Prête */
-.prep-progress { background: rgba(255,193,7,.25); color:#f6b557; }   /* En cours */
-.prep-none     { background: rgba(255,255,255,.14); color:#fff; }    /* Non */
+/* ========= Palette (variables faciles à retoucher) ========= */
+:root{
+  /* Prête (vert clair) */
+  --prep-ready-bg:   #b8eac7;
+  --prep-ready-fg:   #1b4332;
+
+  /* En cours (orange fluo saturé) */
+  --prep-progress-bg: #ffb347;  /* fond orange lumineux */
+  --prep-progress-fg: #000000;  /* texte orange néon */
+
+  /* Non (jaune clair) */
+  --prep-none-bg:    #fff3b0;
+  --prep-none-fg:    #5f4b00;
+
+  /* En retard (rouge) */
+  --prep-late-bg:    #e63946;
+  --prep-late-fg:    #fff;   /* blanc pour lisibilité */
+
+  /* Terminé (gris neutre clair) */
+  --prep-done-bg:    #e0e0e0;
+  --prep-done-fg:    #333;
+}
+
+/* ========= États ========= */
+.prep-ready {
+  background: var(--prep-ready-bg);
+  color: var(--prep-ready-fg);
+}
+
+.prep-progress {
+  background: var(--prep-progress-bg);
+  color: var(--prep-progress-fg);
+}
+
+.prep-none {
+  background: var(--prep-none-bg);
+  color: var(--prep-none-fg);
+}
+
+.prep-late {
+  background: var(--prep-late-bg);
+  color: var(--prep-late-fg);
+}
+
+.prep-done {
+  background: var(--prep-done-bg);
+  color: var(--prep-done-fg);
+}
+
+/* Petite anim quand le statut bascule */
+@keyframes prep-pop {
+  0%   { transform: scale(0.96); filter: brightness(1.1); }
+  70%  { transform: scale(1.02); filter: brightness(1.0); }
+  100% { transform: scale(1);    filter: none; }
+}
+.prep-chip, .prep-pill { animation: prep-pop .18s ease-out; }
+
+/* Accessibilité : contraste mini au focus clavier */
+.prep-chip:focus-visible,
+.prep-pill:focus-visible {
+  outline: 2px solid rgba(255,255,255,.6);
+  outline-offset: 2px;
+  box-shadow:
+    0 0 0 2px rgba(0,0,0,.4),
+    0 0 0 1px rgba(255,255,255,.25) inset;
+}
 
 /* === Ligne rouge "maintenant" dans la timeline === */
 /* Le conteneur timeline porte la ligne en position absolue */
@@ -1530,3 +1592,76 @@ footer {
 .req { color:#E02424; margin-left:4px; }
 .hint { font-size:12px; opacity:.8; margin-left:6px; }
 .form-error { color:#E02424; font-size:12px; margin-top:4px; }
+
+/* === Tables génériques (utilisé par edit.html) === */
+.table { width:100%; border-collapse: collapse; }
+.table th, .table td { padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.06); color: #ddd; vertical-align: top; }
+.table thead th { color:#fff; background: rgba(255,255,255,0.06); font-weight:600; }
+.table-striped tbody tr:nth-child(even) { background: rgba(255,255,255,0.03); }
+.table-hover tbody tr:hover { background: rgba(255,255,255,0.08); }
+.table-responsive { overflow: auto; }
+
+/* === Modale CRUD locale (évite les collisions avec .modal existantes) === */
+.crud-modal { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 3000; }
+.crud-modal[hidden] { display: none; }
+.crud-modal-dialog { background: rgba(9, 7, 38, 0.95); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; min-width: 640px; max-width: 900px; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+.crud-modal-header, .crud-modal-footer { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.crud-modal-footer { border-top: 1px solid rgba(255,255,255,0.08); border-bottom: none; }
+.crud-modal-header h3 { margin: 0; color: #fff; font-size: 1rem; }
+.crud-modal-close { background: transparent; border: none; color: #aaa; font-size: 20px; cursor: pointer; }
+.crud-modal-close:hover { color: #fff; }
+.crud-modal-body { padding: 12px 16px; }
+.crud-modal-body .form-row { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.crud-modal-body label { display: flex; flex-direction: column; color: #ddd; gap: 6px; }
+.crud-modal-body input, .crud-modal-body textarea { background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,0.12); color: #fff; border-radius: 6px; padding: 8px; }
+
+/* === Mise en page 1 colonne pour la page edit (footer collé en bas) === */
+.single-col-page #main-content {
+  display: block;          /* 1 colonne, pas de grid */
+  flex: 1 0 auto;          /* <-- prend l'espace restant pour pousser le footer en bas */
+  min-height: 0;           /* évite les surprises de calcul de hauteur */
+  overflow: visible;       /* pas de clipping vertical */
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+/* Confort: le tableau scrolle horizontalement si nécessaire */
+.single-col-page .table-responsive {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.single-col-page table.table th,
+.single-col-page table.table td {
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* === Footer sticky viewport - seulement pour la page edit === */
+.single-col-page footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;           /* occupe toute la largeur */
+  z-index: 120;
+  /* PAS de height ici -> il garde sa hauteur naturelle (padding etc.) */
+}
+
+/* Suivre l’ouverture/fermeture de la sidebar */
+.body-with-sidebar.single-col-page footer {
+  transform: translateX(240px);
+  width: calc(100% - 240px);
+}
+
+/* ---- Espace de respiration sous le contenu (utilise un tampon arbitraire) ---- */
+/* Ajuste la valeur si besoin, ça ne change PAS la hauteur du footer. */
+:root { --footer-gap: 56px; }
+
+.single-col-page #main-content {
+  padding-bottom: var(--footer-gap); /* évite que le footer recouvre le bas du CRUD */
+}
+
+.single-col-page .table-responsive {
+  margin-bottom: calc(var(--footer-gap) - 8px); /* que la dernière ligne soit entièrement visible au-dessus du footer */
+  padding-bottom: 8px;
+}

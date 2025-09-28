@@ -1,6 +1,7 @@
 import pymongo
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Optional, Tuple
 import uuid
 
 # Configuration du logging pour écrire dans un fichier (écrasé à chaque lancement)
@@ -14,9 +15,10 @@ logger = logging.getLogger(__name__)
 
 # Connexion à MongoDB
 client = pymongo.MongoClient("mongodb://localhost:27017")
-db = client["titan_dev"]  # Remplacer par le nom de votre base
+db = client["titan"]  # Remplacer par le nom de votre base
 parametrage_col = db["parametrages"]
 timetable_col = db["timetable"]
+todos_col = db["todos"]
 
 def _mk_id(seed: str) -> str:
     # UUID5 = déterministe (même seed => même id), pas aléatoire
@@ -25,7 +27,7 @@ def _mk_id(seed: str) -> str:
 # -------------------------------------------------------------------
 # Fonction pour calculer la durée (HH:MM) entre deux heures (en considérant le passage au lendemain)
 # -------------------------------------------------------------------
-def compute_duration(open_time, close_time):
+def compute_duration(open_time: str, close_time: str) -> str:
     try:
         t_open = datetime.strptime(open_time, "%H:%M")
         t_close = datetime.strptime(close_time, "%H:%M")
@@ -41,6 +43,113 @@ def compute_duration(open_time, close_time):
     duration = f"{hours:02}:{minutes:02}"
     logger.debug(f"Durée calculée entre {open_time} et {close_time} : {duration}")
     return duration
+
+# --- helper strict PC ---
+def _strict_pc_skips(open_h: str, close_h: str) -> Tuple[bool, bool]:
+    """
+    Retourne (skip_open, skip_close) pour les PC (Organisation/Autorités)
+    Règles:
+      - 06:00–23:59  => skip_close = True
+      - 00:00–23:59  => skip_open = True, skip_close = True (aucune vignette)
+      - 00:00–HH:MM  => skip_open = True
+      - sinon        => ne supprime rien
+    """
+    if open_h == "00:00" and close_h == "23:59":
+        return True, True
+    skip_open = (open_h == "00:00")
+    skip_close = (close_h == "23:59")
+    return skip_open, skip_close
+
+def _attach_todos(vignette: dict, base_activity: str, category: str, place: str, add_on: str = "open") -> dict:
+    """
+    Ajoute 'todo': [str, ...] sur la vignette (par convention: ouvertures).
+    - Ne crée rien si aucun todo n'existe pour ce type.
+    - Laisse la clé 'todos_type' (debug/filtrage), retire toute ancienne clé 'todos'.
+    """
+    try:
+        todo_type = _resolve_todo_type(base_activity, category, place)
+        if not todo_type:
+            return vignette
+        cache = _get_todos_cache()
+        todos_list = cache.get(todo_type) or []
+        if not todos_list:
+            return vignette
+        # normalisation
+        vignette.pop("todos", None)
+        vignette["todo"] = todos_list
+        vignette["todos_type"] = todo_type
+    except Exception as e:
+        logger.error(f"Echec _attach_todos ({base_activity}/{category}/{place}): {e}")
+    return vignette
+
+# -------------------------------------------------------------------
+# TODOS: cache  mapping type
+# -------------------------------------------------------------------
+_TODOS_CACHE: Optional[dict] = None
+
+def _get_todos_cache() -> dict:
+    """
+    Charge une fois la collection 'todos' sous la forme:
+      { "type": ["tâche 1", "tâche 2", ...], ... }
+    """
+    global _TODOS_CACHE
+    if _TODOS_CACHE is not None:
+        return _TODOS_CACHE
+    try:
+        _TODOS_CACHE = {
+            doc.get("type"): (doc.get("todos") or [])
+            for doc in todos_col.find({}, {"type": 1, "todos": 1})
+        }
+        # sécurité: forcer list[str]
+        for k, v in list(_TODOS_CACHE.items()):
+            if not isinstance(v, list):
+                _TODOS_CACHE[k] = []
+            else:
+                _TODOS_CACHE[k] = [str(x) for x in v]
+    except Exception as e:
+        logger.error(f"Impossible de charger la collection 'todos': {e}")
+        _TODOS_CACHE = {}
+    return _TODOS_CACHE
+
+def _resolve_todo_type(base_activity: str, category: str = "", place: str = "") -> Optional[str]:
+    """
+    Devine le type de todos à partir du libellé d'activité.
+    Retourne une clé existant dans la collection 'todos' ou None.
+    """
+    s = (base_activity or "").lower()
+
+    # principaux
+    if s.startswith("porte"):
+        return "portes"
+    if "parking" in s:
+        return "parkings"
+    if "aire d'accueil" in s or "camping" in s:
+        return "campings"
+    if "pc organisation" in s:
+        return "pcorga"
+    if "pc autorités" in s or "pc autorit" in s:
+        return "pcauthorities"
+    if "centre accréditation" in s or "centre accreditation" in s:
+        return "centreaccreditation"
+    if "help desk" in s:
+        return "helpdesk"
+    if "fin de la validité du badge" in s or "badge" in s:
+        return "badges"
+    if "scan" in s:
+        return "scan"
+    if "démontage" in s or "fin du montage" in s:
+        return "demontage"
+    if "montage" in s or "début du montage" in s:
+        return "montage"
+    if "tribune" in s:
+        return "tribunes"
+    if "passerelle" in s:
+        return "passerelles"
+    if "sanitaire" in s:
+        return "sanitaires"
+    if s.strip() == "au public":
+        return "global"
+    return None
 
 # -------------------------------------------------------------------
 # Génération de deux vignettes (ou une seule quand requis) à partir d’une paire d’heures
@@ -80,7 +189,8 @@ def generate_vignettes_for_entry(date_str, open_time, close_time, base_activity,
         "type": v_type,
         "origin": "paramétrage",
         "remark": f"Fermeture prévue: {closing_date} {close_time}" if merge_remark and open_time != close_time and closing_date != date_str else "",
-        "param_id": id_source
+        "param_id": id_source,
+        "preparation_checked": "non"
     }
     close_vignette = {
         "_id": close_id,  # 👈 ajouté
@@ -95,9 +205,15 @@ def generate_vignettes_for_entry(date_str, open_time, close_time, base_activity,
         "type": v_type,
         "origin": "paramétrage",
         "remark": "",
-        "param_id": id_source
+        "param_id": id_source,
+        "preparation_checked": "non"
     }
     logger.debug(f"Vignette Ouverture générée: {open_vignette}")
+    # ✅ Attache les tâches obligatoires sur la vignette d'ouverture
+    try:
+        open_vignette = _attach_todos(open_vignette, base_activity, category, place, add_on="open")
+    except Exception as e:
+        logger.error(f"_attach_todos failed for {base_activity} ({date_str}): {e}")
     logger.debug(f"Vignette Fermeture générée: {close_vignette}")
     return open_vignette, close_vignette
 
@@ -193,9 +309,12 @@ def process_global_horaires(global_data, event, year):
             "type": "Timetable",
             "origin": "paramétrage",
             "remark": "",
-            "param_id": id_source
+            "param_id": id_source,
+            "preparation_checked": "non"
         }
         vignettes.append(v)
+        # ✅ TODOS pour endBadge
+        v = _attach_todos(v, "Fin de la validité du badge salarié", "Controle", "Badges", add_on="open")
         logger.debug(f"Vignette endBadge générée: {v}")
     # Section "helpDesk"
     if "helpDesk" in global_data:
@@ -233,9 +352,12 @@ def process_global_horaires(global_data, event, year):
             "type": "Timetable",
             "origin": "paramétrage",
             "remark": f"Fermeture prévue: {end_dt.strftime('%H:%M')}",
-            "param_id": id_source
+            "param_id": id_source,
+            "preparation_checked": "non"
         }
         # Vignette de fermeture avec la date réelle de end_dt
+        # ✅ TODOS sur l'ouverture uniquement
+        open_v = _attach_todos(open_v, "Début du montage", "Controle", "Montage", add_on="open")
         close_v = {
             "date": end_dt.strftime("%Y-%m-%d"),
             "start": "",
@@ -248,7 +370,8 @@ def process_global_horaires(global_data, event, year):
             "type": "Timetable",
             "origin": "paramétrage",
             "remark": "",
-            "param_id": id_source
+            "param_id": id_source,
+            "preparation_checked": "non"
         }
         vignettes.extend([open_v, close_v])
     # Section "paddockScan"
@@ -270,42 +393,46 @@ def process_global_horaires(global_data, event, year):
             "type": "Timetable",
             "origin": "paramétrage",
             "remark": "",
-            "param_id": id_source
+            "param_id": id_source,
+            "preparation_checked": "non"
         }
         vignettes.append(v)
+        # ✅ TODOS pour paddockScan (ouverture)
+        v = _attach_todos(v, "Mise en place du contrôle par scan", "Controle", "Scan", add_on="open")
         logger.debug(f"Vignette paddockScan générée: {v}")
-    # Section "pcOrga"
-    for entry in global_data.get("pcOrga", []):
-        date_str = entry["date"]
-        id_source = entry.get("id", f"pcOrga_{date_str}_{entry.get('openTime','')}")
-        v_pair = generate_vignettes_for_entry(
-            date_str,
-            entry["openTime"],
-            entry["closeTime"],
-            "PC Organisation",
-            "Controle",
-            "PC Organisation",
-            {},
-            id_source,
-            "Organization"
-        )
-        vignettes.extend(v_pair)
-    # Section "pcAuthorities"
-    for entry in global_data.get("pcAuthorities", []):
-        date_str = entry["date"]
-        id_source = entry.get("id", f"pcAuthorities_{date_str}_{entry.get('openTime','')}")
-        v_pair = generate_vignettes_for_entry(
-            date_str,
-            entry["openTime"],
-            entry["closeTime"],
-            "PC Autorités",
-            "Controle",
-            "PC Autorités",
-            {},
-            id_source,
-            "Organization"
-        )
-        vignettes.extend(v_pair)
+        # Section "pcOrga"
+        for entry in global_data.get("pcOrga", []):
+            date_str = entry["date"]
+            id_source = entry.get("id", f"pcOrga_{date_str}_{entry.get('openTime','')}")
+            open_h, close_h = entry["openTime"], entry["closeTime"]
+
+            skip_open, skip_close = _strict_pc_skips(open_h, close_h)
+            open_v, close_v = generate_vignettes_for_entry(
+                date_str, open_h, close_h,
+                "PC Organisation", "Controle", "PC Organisation",
+                {}, id_source, "Organization"
+            )
+            if not skip_open:
+                vignettes.append(open_v)
+            if not skip_close:
+                vignettes.append(close_v)
+
+        # Section "pcAuthorities"
+        for entry in global_data.get("pcAuthorities", []):
+            date_str = entry["date"]
+            id_source = entry.get("id", f"pcAuthorities_{date_str}_{entry.get('openTime','')}")
+            open_h, close_h = entry["openTime"], entry["closeTime"]
+
+            skip_open, skip_close = _strict_pc_skips(open_h, close_h)
+            open_v, close_v = generate_vignettes_for_entry(
+                date_str, open_h, close_h,
+                "PC Autorités", "Controle", "PC Autorités",
+                {}, id_source, "Organization"
+            )
+            if not skip_open:
+                vignettes.append(open_v)
+            if not skip_close:
+                vignettes.append(close_v)
     # Section "scan"
     if "scan" in global_data:
         scan_iso = global_data["scan"]
@@ -324,9 +451,12 @@ def process_global_horaires(global_data, event, year):
             "type": "Timetable",
             "origin": "paramétrage",
             "remark": "",
-            "param_id": id_source
+            "param_id": id_source,
+            "preparation_checked": "non"
         }
         vignettes.append(v)
+        # ✅ TODOS pour scan
+        v = _attach_todos(v, "Mise en place du contrôle par scan", "Controle", "Scan", add_on="open")
         logger.debug(f"Vignette scan générée: {v}")
     logger.info(f"{len(vignettes)} vignettes générées pour globalHoraires")
     return vignettes
@@ -392,59 +522,137 @@ def process_portes_horaires(portes_data, event, year):
 def process_parkings_horaires(parkings_list, event, year):
     logger.info("Traitement de parkingsHoraires")
     vignettes = []
+
     for parking in parkings_list:
         id_source = parking.get("id", parking.get("name", "parking"))
         parking_name = parking.get("name", "Parking")
         details = parking.get("controle", {})
-        for date_entry in parking.get("dates", []):
+
+        # on trie les dates pour pouvoir regarder veille/lendemain
+        dates_list = sorted(parking.get("dates", []), key=lambda d: d["date"])
+
+        def is24h_flag(entry, key: str) -> bool:
+            """key ∈ {'organisation','public'} — renvoie True si ce sous-volet est 24/24."""
+            sub = entry.get(key, {}) or {}
+            return bool(entry.get("is24h")) or bool(sub.get("is24h"))
+
+        for i, date_entry in enumerate(dates_list):
             date_str = date_entry["date"]
-            org = date_entry.get("organisation", {})
-            pub = date_entry.get("public", {})
-            valid_org = org and "open" in org and "close" in org and not (org.get("is24h") or org.get("closed"))
-            valid_pub = pub and "open" in pub and "close" in pub and not (pub.get("is24h") or pub.get("closed"))
-            if valid_org and valid_pub and org["open"] == pub["open"] and org["close"] == pub["close"]:
-                v_pair = generate_vignettes_for_entry(
-                    date_str,
-                    org["open"],
-                    org["close"],
-                    f"Parking {parking_name}",
-                    "Parking",
-                    parking_name,
-                    {"remark": "Organisation & Public"},
-                    id_source,
-                    "Organization"
+            org = date_entry.get("organisation", {}) or {}
+            pub = date_entry.get("public", {}) or {}
+
+            org_ok = ("open" in org and "close" in org and not org.get("closed"))
+            pub_ok = ("open" in pub and "close" in pub and not pub.get("closed"))
+
+            # drapeaux 24/24 pour aujourd'hui / veille / lendemain (par flux)
+            org_24_today = is24h_flag(date_entry, "organisation")
+            pub_24_today = is24h_flag(date_entry, "public")
+
+            prev_entry = (dates_list[i-1] if i > 0 else {})
+            next_entry = (dates_list[i+1] if i < len(dates_list)-1 else {})
+
+            org_24_prev = is24h_flag(prev_entry, "organisation") if prev_entry else False
+            pub_24_prev = is24h_flag(prev_entry, "public") if prev_entry else False
+            org_24_next = is24h_flag(next_entry, "organisation") if next_entry else False
+            pub_24_next = is24h_flag(next_entry, "public") if next_entry else False
+
+            # --------- CAS COMBINÉ: mêmes horaires org/public ----------
+            combo = (
+                org_ok and pub_ok and
+                not org_24_today and not pub_24_today and
+                org.get("open") == pub.get("open") and
+                org.get("close") == pub.get("close")
+            )
+
+            if combo:
+                open_h  = org["open"]
+                close_h = org["close"]
+
+                # anti-redondances bords de période 24/24 (si l’un des flux bascule 24h)
+                skip_open  = (open_h == "00:00" and (org_24_prev or pub_24_prev))
+                skip_close = (close_h == "23:59" and (org_24_next or pub_24_next))
+
+                open_v, close_v = generate_vignettes_for_entry(
+                    date_str, open_h, close_h,
+                    f"Parking {parking_name}",  # libellé sans suffixe
+                    "Parking",                 # catégorie comme dans ton code pour le combiné
+                    parking_name, details, id_source, "Organization"
                 )
-                vignettes.extend(v_pair)
-                logger.debug(f"Fusionnées vignettes pour Parking {parking_name} (Organisation & Public) le {date_str}")
-            else:
-                if valid_org:
-                    v_pair = generate_vignettes_for_entry(
-                        date_str,
-                        org["open"],
-                        org["close"],
-                        f"Parking {parking_name} - Organisation",
-                        "Controle",
-                        parking_name,
-                        {},
-                        id_source,
-                        "Organization"
-                    )
-                    vignettes.extend(v_pair)
-                    logger.debug(f"Vignettes pour Parking {parking_name} - Organisation générées le {date_str}")
-                if valid_pub:
-                    v_pair = generate_vignettes_for_entry(
-                        date_str,
-                        pub["open"],
-                        pub["close"],
-                        f"Parking {parking_name} - Public",
-                        "Controle",
-                        parking_name,
-                        {},
-                        id_source,
-                        "Organization"
-                    )
-                    vignettes.extend(v_pair)
-                    logger.debug(f"Vignettes pour Parking {parking_name} - Public générées le {date_str}")
+
+                # fermeture à 00:00 qui déborde au lendemain alors que demain est 24/24 → on jette
+                drop_midnight_close_into_24h = (
+                    close_h == "00:00" and
+                    close_v["date"] != date_str and
+                    (org_24_next or pub_24_next)
+                )
+
+                if not skip_open:
+                    vignettes.append(open_v)
+                if not skip_close and not drop_midnight_close_into_24h:
+                    vignettes.append(close_v)
+
+                logger.debug(f"[PARKING COMBO] {parking_name} {date_str} open={open_h} close={close_h} "
+                             f"skip_open={skip_open} skip_close={skip_close} dropMidnight={drop_midnight_close_into_24h}")
+                continue  # on a géré ce jour en combiné
+
+            # --------- CAS SÉPARÉS: Organisation ----------
+            if org_ok and not org_24_today:
+                open_h  = org["open"]
+                close_h = org["close"]
+
+                skip_open  = (open_h == "00:00" and org_24_prev)
+                skip_close = (close_h == "23:59" and org_24_next)
+
+                open_v, close_v = generate_vignettes_for_entry(
+                    date_str, open_h, close_h,
+                    f"Parking {parking_name} - Organisation",
+                    "Controle",               # on conserve ta catégorie existante
+                    parking_name, details, id_source, "Organization"
+                )
+
+                drop_midnight_close_into_24h = (
+                    close_h == "00:00" and
+                    close_v["date"] != date_str and
+                    org_24_next
+                )
+
+                if not skip_open:
+                    vignettes.append(open_v)
+                if not skip_close and not drop_midnight_close_into_24h:
+                    vignettes.append(close_v)
+
+                logger.debug(f"[PARKING ORG] {parking_name} {date_str} open={open_h} close={close_h} "
+                             f"skip_open={skip_open} skip_close={skip_close} dropMidnight={drop_midnight_close_into_24h}")
+
+            # --------- CAS SÉPARÉS: Public ----------
+            if pub_ok and not pub_24_today:
+                open_h  = pub["open"]
+                close_h = pub["close"]
+
+                skip_open  = (open_h == "00:00" and pub_24_prev)
+                skip_close = (close_h == "23:59" and pub_24_next)
+
+                open_v, close_v = generate_vignettes_for_entry(
+                    date_str, open_h, close_h,
+                    f"Parking {parking_name} - Public",
+                    "Controle",               # on conserve ta catégorie existante
+                    parking_name, details, id_source, "Organization"
+                )
+
+                drop_midnight_close_into_24h = (
+                    close_h == "00:00" and
+                    close_v["date"] != date_str and
+                    pub_24_next
+                )
+
+                if not skip_open:
+                    vignettes.append(open_v)
+                if not skip_close and not drop_midnight_close_into_24h:
+                    vignettes.append(close_v)
+
+                logger.debug(f"[PARKING PUB] {parking_name} {date_str} open={open_h} close={close_h} "
+                             f"skip_open={skip_open} skip_close={skip_close} dropMidnight={drop_midnight_close_into_24h}")
+
     logger.info(f"{len(vignettes)} vignettes générées pour parkingsHoraires")
     return vignettes
 
@@ -460,24 +668,23 @@ def process_campings_horaires(campings_list, event, year):
         for i, date_entry in enumerate(dates_list):
             date_str = date_entry["date"]
             pub = date_entry.get("public", {})
-            # Si l'entrée est marquée is24h ou si les horaires sont manquants ou si "closed" est True, on ignore
-            if not pub or "open" not in pub or "close" not in pub or date_entry.get("is24h") or pub.get("closed"):
-                logger.debug(f"Ignoré camping {camping_name} pour {date_str}")
+
+            # 1) Déterminer 24/24 pour aujourd'hui/veille/lendemain
+            is24h_today = bool(date_entry.get("is24h") or pub.get("is24h"))
+            if is24h_today or not pub or "open" not in pub or "close" not in pub or pub.get("closed"):
+                logger.debug(f"Ignoré camping {camping_name} pour {date_str} (is24h={is24h_today} ou horaires manquants/fermés)")
                 continue
 
-            # Déterminer si l'ouverture ou la fermeture doivent être ignorées en fonction des jours adjacents
-            skip_open = False
-            skip_close = False
-            # Si l'heure d'ouverture est "00:00" et que la veille est en 24h
-            if pub.get("open") == "00:00" and i > 0 and dates_list[i-1].get("is24h") is True:
-                skip_open = True
-            # Si l'heure de fermeture est "23:59" et que le lendemain est en 24h
-            if pub.get("close") == "23:59" and i < len(dates_list)-1 and dates_list[i+1].get("is24h") is True:
-                skip_close = True
+            prev_pub = dates_list[i-1].get("public", {}) if i > 0 else {}
+            next_pub = dates_list[i+1].get("public", {}) if i < len(dates_list)-1 else {}
+            is24h_prev = bool((dates_list[i-1].get("is24h") if i > 0 else False) or prev_pub.get("is24h"))
+            is24h_next = bool((dates_list[i+1].get("is24h") if i < len(dates_list)-1 else False) or next_pub.get("is24h"))
 
-            logger.debug(f"Pour camping {camping_name} le {date_str}, skip_open={skip_open}, skip_close={skip_close}")
+            # 2) Anti-redondances sur les bords des périodes 24/24
+            skip_open  = (pub.get("open")  == "00:00" and is24h_prev)   # ex: dernier jour d’une période 24/24 → pas d’ouverture à 00:00
+            skip_close = (pub.get("close") == "23:59" and is24h_next)   # ex: veille d’une période 24/24 → pas de fermeture à 23:59
 
-            # Générer la paire de vignettes
+            # 3) Génération
             open_v, close_v = generate_vignettes_for_entry(
                 date_str,
                 pub["open"],
@@ -489,10 +696,17 @@ def process_campings_horaires(campings_list, event, year):
                 id_source,
                 "Organization"
             )
-            # N'ajouter que celles non ignorées
+
+            # 4) Cas spécial: close à 00:00 qui "passe" au lendemain alors que le lendemain est 24/24 → on jette
+            drop_midnight_close_into_24h = (
+                pub.get("close") == "00:00" and
+                close_v["date"] != date_str and   # donc ça a débordé au jour+1
+                is24h_next
+            )
+
             if not skip_open:
                 vignettes.append(open_v)
-            if not skip_close:
+            if not skip_close and not drop_midnight_close_into_24h:
                 vignettes.append(close_v)
     logger.info(f"{len(vignettes)} vignettes générées pour campingsHoraires")
     return vignettes
@@ -574,6 +788,18 @@ def update_timetable_document(event, year, vignettes):
         # 2) fallback historique: (param_id, activity)
         idx = next((i for i, x in enumerate(items)
                     if x.get("param_id") == v.get("param_id") and x.get("activity") == v.get("activity")), None)
+        
+        # 🔧 Normalisation éventuelle (anciens champs)
+        if "todos" in v and "todo" not in v:
+            try:
+                v["todo"] = [str(x) for x in (v.pop("todos") or [])]
+            except Exception:
+                v.pop("todos", None)
+                
+        # 🔧 Valeur par défaut du statut de préparation
+        if not v.get("preparation_checked"):
+            v["preparation_checked"] = "non"
+
         if idx is not None:
             items[idx] = v
         else:
