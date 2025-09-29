@@ -1665,3 +1665,127 @@ footer {
   margin-bottom: calc(var(--footer-gap) - 8px); /* que la dernière ligne soit entièrement visible au-dessus du footer */
   padding-bottom: 8px;
 }
+
+/* === Timeline Search === */
+#timeline-searchbar {
+  max-width: 1100px;
+  margin: 6px auto 0;
+  padding: 0 6px 6px;
+}
+.ts-input-wrap {
+  display: grid;
+  grid-template-columns: 28px 1fr 32px;
+  align-items: center;
+  gap: 8px;
+  background: rgba(9,7,38,0.8);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.ts-input-wrap .material-icons { color:#fff; opacity:.9; }
+#timeline-search-input {
+  background: transparent; border:none; outline:none; color:#fff; font-size:14px;
+}
+#timeline-search-clear {
+  background: transparent; border:none; color:#fff; cursor:pointer; border-radius:6px;
+}
+#timeline-search-clear:hover { background: rgba(255,255,255,0.12); }
+
+#timeline-search-results {
+  margin: 6px 0 0; padding: 0; list-style: none;
+  background: rgba(9,7,38,0.92);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  max-height: 260px; overflow: auto;
+  display: none;      /* togglé en JS */
+}
+#timeline-search-results.show { display: block; }
+#timeline-search-results li {
+  display: grid; grid-template-columns: 1fr auto; gap: 8px;
+  padding: 8px 10px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+#timeline-search-results li:last-child { border-bottom: none; }
+#timeline-search-results li:hover { background: rgba(255,255,255,0.06); }
+.tsr-title { color:#fff; font-weight:700; font-size:14px; }
+.tsr-meta  { color:#ccc; font-size:12px; }
+.tsr-date  { color:#ff69b4; font-size:12px; white-space:nowrap; margin-left: 8px; }
+
+/* surlignage temporaire quand on saute à la carte */
+@keyframes search-flash {
+  0% { box-shadow: 0 0 0 0 rgba(255,105,180,.0); }
+  20% { box-shadow: 0 0 0 4px rgba(255,105,180,.65); }
+  100% { box-shadow: 0 0 0 0 rgba(255,105,180,0); }
+}
+.event-item.search-highlight { animation: search-flash 1.2s ease-out; }
+.cluster-list .cluster-line.search-highlight { background: rgba(255,255,255,0.12); }
+
+/* --- Fix layout timeline + searchbar --- */
+#main-content { grid-template-rows: auto 1fr; }
+
+#widgets-panel {
+  grid-column: 1 / 2;
+  grid-row: 1 / span 2;           /* occupe la hauteur (recherche + timeline) */
+}
+
+#timeline-searchbar {
+  grid-column: 2 / 3;
+  grid-row: 1;                    /* au-dessus de la timeline, à droite */
+}
+
+#timeline-main {
+  grid-column: 2 / 3;
+  grid-row: 2;                    /* timeline sous la barre de recherche */
+  min-height: 0;                  /* indispensable pour que ça scrolle bien */
+}
+
+/* Responsive: 1 colonne */
+@media (max-width: 900px) {
+  #main-content {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto; /* widgets, searchbar, timeline */
+    height: auto;
+  }
+  #widgets-panel { grid-column: 1; grid-row: 1; }
+  #timeline-searchbar { grid-column: 1; grid-row: 2; }
+  #timeline-main { grid-column: 1; grid-row: 3; }
+}
+
+/* --- Timeline search width fix --- */
+#timeline-searchbar{width:100%;max-width:none;margin:0;padding:0;}
+#timeline-searchbar .ts-input-wrap,
+#timeline-search-results{
+  max-width:1100px;           /* comme .timeline-container */
+  margin:6px auto 0;          /* centré */
+  width:100%;
+}
+
+/* Étend la grille: [icône] [input] [select] [clear] */
+.ts-input-wrap {
+  display: grid;
+  grid-template-columns: 28px 1fr 240px 32px; /* ← 240px pour le select */
+  align-items: center;
+  gap: 8px;
+}
+
+#timeline-dept-filter {
+  background: rgba(255,255,255,0.95);
+  color: #000;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 14px;
+  outline: none;
+  width: 100%;
+}
+
+/* Sur mobile: le select passe à la ligne */
+@media (max-width: 900px) {
+  .ts-input-wrap {
+    grid-template-columns: 28px 1fr 32px;
+    grid-auto-rows: auto;
+    grid-row-gap: 6px;
+  }
+  #timeline-dept-filter {
+    grid-column: 1 / -1;
+  }
+}

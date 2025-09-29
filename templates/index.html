@@ -141,6 +141,19 @@
             </section>
         </aside>
 
+        <!-- Barre de recherche Timeline et filtre -->
+        <section id="timeline-searchbar" aria-label="Recherche timeline">
+        <div class="ts-input-wrap">
+            <i class="material-icons">search</i>
+            <input id="timeline-search-input" type="search" placeholder="Rechercher (activité, catégorie, lieu, remarque)…" autocomplete="off" />
+            <select id="timeline-dept-filter" title="Filtrer par département">
+            <option value="">Tous départements</option>
+            </select>
+            <button id="timeline-search-clear" title="Effacer"><span class="material-icons">close</span></button>
+        </div>
+        <ul id="timeline-search-results" role="listbox" aria-label="Résultats de recherche"></ul>
+        </section>
+
         <!-- Timeline au centre -->
         <main id="timeline-main">
             <div id="now-line" hidden>

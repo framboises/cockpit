@@ -799,7 +799,7 @@ function fetchTimetable() {
     }
     const url = '/timetable?event=' + encodeURIComponent(window.selectedEvent) + '&year=' + encodeURIComponent(window.selectedYear);
     
-    fetch(url)
+    return fetch(url)
         .then(response => response.json())
         .then(data => {
             const eventList = document.getElementById("event-list");
@@ -1991,4 +1991,318 @@ async function openEditModalFromDrawer(dateStr, item) {
       return p;
     };
   }
+})();
+
+/* ============================================================
+ * RECHERCHE TIMELINE
+ *  - construit un index au rendu (items et items dans clusters)
+ *  - filtre sur activity/category/place/remark
+ *  - clic résultat -> scroll vers la carte (ou cluster + sous-ligne)
+ * ============================================================ */
+
+(function(){
+  // index en mémoire
+  const TLIndex = {
+    // { id, date, minute, kind:'item'|'cluster-child', title, category, place, remark, el, clusterEl?, subLi? }
+    rows: [],
+    mapById: new Map(),
+    reset(){ this.rows = []; this.mapById = new Map(); },
+    add(row){
+      this.rows.push(row);
+      if (row.id) this.mapById.set(String(row.id), row);
+    },
+    get(id){ return this.mapById.get(String(id)); }
+  };
+  window.__TLIndex = TLIndex; // utile au debug
+
+  // Normalisation (réutilise ta norm)
+  function N(s){ return norm(s || ''); }
+
+  // Debounce utilitaire
+  function debounce(fn, wait=200){
+    let t; return (...args)=>{ clearTimeout(t); t = setTimeout(()=>fn(...args), wait); };
+  }
+
+  // --- Scroll & highlight
+  function scrollToTimelineTarget(row){
+    const container = document.querySelector('.timeline-container');
+    if (!container || !row) return;
+
+    // On cible l'élément principal à mettre sous la "ligne" top (comme NowLineController)
+    let targetEl = row.el || row.clusterEl;
+    if (!targetEl) return;
+
+    // Si c'est un cluster-child, on ouvre le cluster pour révéler la sous-ligne
+    if (row.kind === 'cluster-child' && row.clusterEl) {
+      // ouvrir si non ouvert
+      if (!row.clusterEl.classList.contains('expanded')) {
+        row.clusterEl.classList.add('expanded');
+        const icon = row.clusterEl.querySelector('.expand-btn .material-icons');
+        if (icon) icon.textContent = 'expand_less';
+      }
+      // petit délai pour que la sous-ligne existe bien en layout
+      setTimeout(()=> {
+        try { row.subLi?.scrollIntoView({ block:'center', behavior:'smooth' }); } catch(e){}
+        row.subLi?.classList.add('search-highlight');
+        setTimeout(()=> row.subLi?.classList.remove('search-highlight'), 1400);
+      }, 40);
+    }
+
+    // Calcul scrollTop pour placer la carte vers ~100px du haut
+    const contRect = container.getBoundingClientRect();
+    const cardRect = targetEl.getBoundingClientRect();
+    const currentScroll = container.scrollTop;
+    const yAbs = currentScroll + (cardRect.top - contRect.top);
+    const lineTop = (window.NowLineController?._lineTopPx ?? 100);
+    const desired = Math.max(0, yAbs - lineTop);
+    const maxScroll = container.scrollHeight - container.clientHeight;
+    const clamped = Math.max(0, Math.min(desired, maxScroll));
+    container.scrollTo({ top: clamped, behavior: 'smooth' });
+
+    // effet highlight court sur la carte/cluster
+    targetEl.classList.add('search-highlight');
+    setTimeout(()=> targetEl.classList.remove('search-highlight'), 1200);
+  }
+
+  // --- Rendu résultats
+  function renderResults(list){
+    const ul = document.getElementById('timeline-search-results');
+    if (!ul) return;
+    ul.innerHTML = '';
+    if (!list.length) { ul.classList.remove('show'); return; }
+
+    // Limite d’affichage
+    const MAX = 30;
+    const sliced = list.slice(0, MAX);
+
+    sliced.forEach(row => {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      const title = row.title || 'Sans titre';
+      const meta  = [row.place, row.category].filter(Boolean).join(' • ');
+      li.innerHTML = `
+        <div>
+          <div class="tsr-title">${title}</div>
+          <div class="tsr-meta">${meta}${row.remark ? ' • ' + row.remark : ''}</div>
+        </div>
+        <div class="tsr-date">${row.date}</div>
+      `;
+      li.addEventListener('click', () => {
+        ul.classList.remove('show');
+        scrollToTimelineTarget(row);
+      });
+      ul.appendChild(li);
+    });
+
+    ul.classList.add('show');
+  }
+
+  // --- Moteur de recherche
+  function searchIndex(q){
+    const qry = N(q).trim();
+    if (!qry) return [];
+    const toks = qry.split(/\s+/).filter(Boolean);
+    if (!toks.length) return [];
+
+    const activeDept = (document.getElementById('timeline-dept-filter')?.value || '').trim().toLowerCase();
+
+    // match: toutes les tokens doivent être trouvées dans le blob
+    const matches = [];
+    for (const r of TLIndex.rows) {
+      if (activeDept && (r.department || '').trim().toLowerCase() !== activeDept) continue;
+      const blob = N([r.title, r.category, r.place, r.remark].filter(Boolean).join(' | '));
+      const ok = toks.every(t => blob.includes(t));
+      if (ok) matches.push(r);
+    }
+
+    // ordre: date asc puis minute asc puis titre
+    matches.sort((a,b)=>{
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      const ma = Number.isFinite(a.minute) ? a.minute : 999999;
+      const mb = Number.isFinite(b.minute) ? b.minute : 999999;
+      if (ma !== mb) return ma - mb;
+      return (a.title||'').localeCompare(b.title||'');
+    });
+    return matches;
+  }
+
+  // --- UI handlers
+  function initTimelineSearchUI(){
+    const input = document.getElementById('timeline-search-input');
+    const clear = document.getElementById('timeline-search-clear');
+    const list  = document.getElementById('timeline-search-results');
+    if (!input || !clear || !list) return;
+
+    const doSearch = debounce(()=>{
+      const q = input.value || '';
+      const res = searchIndex(q);
+      renderResults(res);
+    }, 140);
+
+    input.addEventListener('input', doSearch);
+    input.addEventListener('keydown', (e)=>{
+      if (e.key === 'Escape') {
+        input.value = '';
+        list.classList.remove('show');
+      }
+      if (e.key === 'Enter') {
+        // si un premier résultat, on y va direct
+        const res = searchIndex(input.value || '');
+        if (res.length) {
+          list.classList.remove('show');
+          scrollToTimelineTarget(res[0]);
+        }
+      }
+    });
+    clear.addEventListener('click', ()=>{
+      input.value = '';
+      list.classList.remove('show');
+      input.focus();
+    });
+
+    // === Brancher le filtre Département ===
+    const sel = document.getElementById('timeline-dept-filter');
+    if (sel && !sel._wired) {
+      sel.addEventListener('change', () => {
+        applyDeptFilter(sel.value || '');
+        // si une recherche est en cours, rafraîchir la liste
+        if (input && input.value.trim()) {
+          const res = searchIndex(input.value);
+          renderResults(res);
+        }
+      });
+      sel._wired = true; // évite de brancher deux fois
+    }
+
+    // clic hors pour fermer
+    document.addEventListener('click', (e)=>{
+      if (!e.target.closest('#timeline-searchbar')) list.classList.remove('show');
+    });
+  }
+
+  // --- Hook d’indexation : on “patche” fetchTimetable pour remplir l’index après rendu
+  const _origFetchTT = window.fetchTimetable;
+  window.fetchTimetable = function(){
+    const p = _origFetchTT.apply(this, arguments);
+    return Promise.resolve(p)
+      .then(() => new Promise(r => setTimeout(r, 0)))  // ← laisse le DOM se peindre
+      .then(()=> {
+        // (ré)indexer
+        TLIndex.reset();
+
+        // 1) Items simples
+        document.querySelectorAll('.timetable-date-section').forEach(section=>{
+          const date = section.dataset.date || '';
+          section.querySelectorAll('.event-item').forEach(card=>{
+            // item individuel ?
+            if (card.__itemData) {
+              const it = card.__itemData;
+              TLIndex.add({
+                id: it._id,
+                date,
+                minute: getItemSortMinute(it),
+                kind: 'item',
+                title: (it.activity || '').split('/')[0].trim(),
+                category: it.category || '',
+                place: (it.place || '').split('/')[0].trim(),
+                department: it.department || '',
+                remark: it.remark || '',
+                el: card
+              });
+            }
+
+            // 2) Cluster : indexer chaque sous-ligne comme "cluster-child"
+            if (card.__clusterData) {
+              const cl = card.__clusterData.cluster;
+              const items = cl.items || [];
+              card.querySelectorAll('.cluster-line').forEach(li=>{
+                const cid = li.getAttribute('data-child-id');
+                const ch = items.find(x => String(x._id) === String(cid));
+                if (!ch) return;
+                TLIndex.add({
+                  id: ch._id,
+                  date,
+                  minute: getItemSortMinute(ch),
+                  kind: 'cluster-child',
+                  title: (ch.activity || '').split('/')[0].trim(),
+                  category: ch.category || '',
+                  place: (ch.place || '').split('/')[0].trim(),
+                  remark: ch.remark || '',
+                  department: ch.department || '',
+                  el: card,             // pour le highlight cluster
+                  clusterEl: card,      // carte cluster
+                  subLi: li             // sous-ligne à surligner
+                });
+              });
+            }
+          });
+        });
+
+        // Initialiser l’UI au premier rendu
+        initTimelineSearchUI();
+        populateDeptFilter();
+        applyDeptFilter(document.getElementById('timeline-dept-filter')?.value || '');
+    });
+  };
+
+  function buildDepartmentListFromIndex() {
+    const set = new Set();
+    for (const r of TLIndex.rows) {
+      const d = (r.department || '').trim();
+      if (d) set.add(d);
+    }
+    return Array.from(set).sort((a,b)=> a.localeCompare(b, 'fr', { numeric:true, sensitivity:'base' }));
+  }
+
+  function populateDeptFilter() {
+    const sel = document.getElementById('timeline-dept-filter');
+    if (!sel) return;
+    const prev = sel.value || '';
+    const list = buildDepartmentListFromIndex();
+
+    sel.innerHTML = '<option value="">Tous départements</option>' +
+      list.map(d => `<option value="${d}">${d}</option>`).join('');
+
+    if (prev && Array.from(sel.options).some(o => o.value === prev)) {
+      sel.value = prev;
+    }
+  }
+
+  function matchesDeptVal(depValue, selected) {
+    if (!selected) return true;
+    return (depValue || '').trim().toLowerCase() === selected.trim().toLowerCase();
+  }
+
+  function applyDeptFilter(selected) {
+    const container = document.querySelector('.timeline-container');
+    if (!container) return;
+
+    // Parcourt chaque section (jour)
+    container.querySelectorAll('.timetable-date-section').forEach(section => {
+      let sectionHasVisible = false;
+
+      section.querySelectorAll('.event-item').forEach(card => {
+        let show = true;
+
+        if (card.__itemData) {
+          // Carte d'item individuel
+          show = matchesDeptVal(card.__itemData.department, selected);
+        } else if (card.__clusterData) {
+          // Carte de cluster: visible si au moins un enfant matche
+          const cl = card.__clusterData.cluster;
+          show = (cl.items || []).some(ch => matchesDeptVal(ch.department, selected));
+        }
+
+        card.style.display = show ? '' : 'none';
+        if (show) sectionHasVisible = true;
+      });
+
+      // Cache la section entière si elle ne contient rien de visible
+      section.style.display = sectionHasVisible ? '' : 'none';
+    });
+
+    // Cache aussi la liste de suggestions si un filtre vient d'être appliqué
+    document.getElementById('timeline-search-results')?.classList.remove('show');
+  }
+
 })();
