@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/photoswipe@5.4.4/dist/photoswipe.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/photoswipe-dynamic-caption-plugin@1.2.7/photoswipe-dynamic-caption-plugin.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 
     <!-- Chart.js (si widgets graphiques) -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -24,6 +25,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
     <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 </head>
 
@@ -274,8 +276,22 @@
     </div>
 
     <!-- Overlays -->
-    <div class="modal-overlay" onclick="closeUploadModal()"></div>
     <div id="modalOverlay" class="modal-overlay"></div>
+
+    <!-- Popup accident -->
+    <div id="trafficMapModal" class="modal">
+        <div class="modal-content">
+          <div id="trafficModalHeader">
+            <h3 id="trafficMapTitle">Carte des alertes</h3>
+            <button id="trafficPrev" class="btn" title="Précédent">◀</button>
+            <div id="trafficPager" style="min-width:80px;text-align:center;opacity:.8;">— / —</div>
+            <button id="trafficNext" class="btn" title="Suivant">▶</button>
+            <button id="closeTrafficMap" aria-label="Fermer">×</button>
+          </div>
+          <div id="trafficSummary"></div>
+          <div id="trafficMap"></div>
+        </div>
+    </div>     
 
     <!-- Footer -->
     <footer>

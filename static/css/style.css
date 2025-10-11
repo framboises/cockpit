@@ -1789,3 +1789,92 @@ footer {
     grid-column: 1 / -1;
   }
 }
+
+.prep-status-group{ display:flex; gap:8px; flex-wrap:wrap; }
+
+.psg-btn{
+  border:1px solid rgba(255,255,255,0.25);
+  background:transparent;
+  padding:6px 10px;
+  border-radius:8px;
+  font-weight:600;
+  cursor:pointer;
+  color:#fff;                /* ← force le texte en blanc */
+}
+
+.psg-btn:hover,
+.psg-btn:focus-visible{
+  border-color:rgba(255,255,255,0.45);
+  outline:2px solid rgba(255,255,255,0.25);
+}
+
+.psg-btn.active{
+  outline:2px solid rgba(255,255,255,0.8);
+}
+
+.psg-btn:disabled{
+  opacity:.55; cursor:not-allowed;
+}
+
+.psg-hint{ margin-top:6px; font-size:12px; opacity:.75; }
+
+/* ================== PATCH MINIMAL – À COLLER TOUT EN BAS ================== */
+
+/* 1) Compat: quand .show est ajouté, on rend visible */
+.modal.show { 
+    display: block;                 /* ← sinon elle reste display:none */
+  }
+  .modal-overlay.show { 
+    display: block;                 /* ← sinon elle reste display:none */
+    pointer-events: all;
+  }
+  
+  /* 2) Ordre des couches: overlays < modales < drawer */
+  #modalOverlay { z-index: 2990; }  /* overlay générique */
+  #addEventModal, 
+  #meteoModal, 
+  #trafficMapModal { z-index: 3000; }  /* au-dessus du drawer (2000) */
+  
+  /* 3) Spécifique Trafic : largeur + layout interne plus confortables */
+  #trafficMapModal {
+    width: auto;            /* override du 700px générique */
+    max-width: none;        /* pas de contrainte max */
+    padding: 0;             /* pas de padding sur le conteneur externe */
+  }
+  
+  #trafficMapModal .modal-content {
+    width: min(1000px, 92vw);
+    max-height: 85vh;
+    padding: 0;             /* la boîte interne gère l'espace */
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+  }
+  
+  #trafficModalHeader {
+    background: #fff; color: #333;
+    display: grid;
+    grid-template-columns: 1fr auto auto auto auto;
+    gap: 10px; align-items: center;
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(0,0,0,.08);
+  }
+  
+  #trafficSummary { 
+    padding: 10px 12px 6px; 
+    background: #fff; 
+    color: #333; 
+  }
+  
+  #trafficMap {
+    height: 60vh;
+    min-height: 360px;
+    background: #f6f6f6;
+    margin: 0 12px 12px;
+    border-radius: 10px;
+  }
+  /* ================== FIN PATCH MINIMAL ================== */  
+  

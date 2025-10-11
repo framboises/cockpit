@@ -335,6 +335,11 @@ function labelForItem(it){
   return `${title} ${place}`.trim().toLowerCase();
 }
 
+function hasNoTodos(item) {
+  return splitTodo(item?.todo || "").length === 0;
+}
+function validHHMM(s) { return !!(s && s.trim() && s.toUpperCase() !== 'TBC'); } // déjà présent plus bas, OK
+
 // Renvoie 'ready' | 'progress' | 'none' | null (null => pas d'affichage)
 function getPrepStatus(item) {
   const raw = (item.preparation_checked ?? "").toString().toLowerCase().trim();
@@ -362,6 +367,20 @@ function getPrepLabel(status) {
 
 // --- statut "runtime" (en fonction de l'heure courante) ---
 function getRuntimeDisplayStatus(baseStatus, item, cardDateStr, nowYMD, nowMin){
+  // 🆕 Cas "aucune tâche" : on affiche Terminé uniquement si l'échéance est passée
+ if (hasNoTodos(item)) {
+    // Référence = end si valide, sinon start, sinon Infinity
+    let dueMin = Infinity;
+    if (validHHMM(item.end))   dueMin = timeToMinutes(item.end);
+    else if (validHHMM(item.start)) dueMin = timeToMinutes(item.start);
+
+    // date passée -> terminé, même si heure invalide
+    if (cardDateStr < nowYMD) return 'done';
+    // même jour -> terminé si l'heure de référence est dépassée
+    if (cardDateStr === nowYMD && Number.isFinite(dueMin) && nowMin >= dueMin) return 'done';
+    // sinon, on n'affiche rien de spécial (revient au statut de base)
+  }
+
   // si date passée → forcément “dépassé”
   if (cardDateStr < nowYMD) {
     if (baseStatus === 'ready') return 'done';
@@ -425,11 +444,15 @@ function ymdLocal(d){
 }
 
 function requireIdOrWarn(item) {
-  if (!item || !item._id) {
+  const evId = getEventId(item);
+  if (!evId) {
     typeof showDynamicFlashMessage === 'function' &&
       showDynamicFlashMessage("Événement incomplet (id manquant)", "error");
+    console.warn('[Timetable] ID manquant pour item:', item);
     return false;
   }
+  // normalise en mémoire pour les prochaines fois
+  if (item && !item._id && evId) item._id = evId;
   return true;
 }
 
@@ -446,6 +469,19 @@ function logDupesOnce(list, date) {
   } else {
     console.debug(`[TT OK PAYLOAD] ${date} (aucun doublon détecté)`);
   }
+}
+
+// --- ID helper unique (tolérant) ---
+function getEventId(item){
+  // 1) priorités: _id puis id
+  let v = item?._id ?? item?.id ?? '';
+  if (v != null && v !== '') return String(v);
+
+  // 2) fallback depuis le drawer (on y stocke l'ID à l'ouverture)
+  const fromDrawer = (drawerEl?.dataset?.eventId) || '';
+  if (fromDrawer) return String(fromDrawer);
+
+  return '';
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -495,6 +531,7 @@ function applyPreparationStatus(cardEl, statusStr) {
 
 // Fonction pour créer une vignette d'événement dans la timeline avec affichage en deux colonnes
 function createEventItem(date, item) {
+  if (!item._id && item.id) item._id = String(item.id);
     const eventItem = document.createElement("div");
     // gardien local pour le recalcul des statuts “live”
     eventItem.__itemData = item;
@@ -690,6 +727,7 @@ function createEventItem(date, item) {
 }
 
 function createClusterItem(date, cluster) {
+  cluster.items?.forEach(ch => { if (!ch._id && ch.id) ch._id = String(ch.id); });
   const cfg = CLUSTER_CONFIG[cluster.type];
   const count = cluster.items.length;
   const kindLabel = cluster.kind === 'close' ? 'Fermeture' : 'Ouverture';
@@ -1138,12 +1176,21 @@ const btnDup        = document.getElementById('drawer-duplicate');
 const btnDel        = document.getElementById('drawer-delete');
 
 function openEventDrawer(date, item) {
-  _drawerCurrent = { date, item: structuredClone(item) }; // copie pour édition locale
+  const safe = structuredClone(item || {});
+  if (!safe._id && safe.id) safe._id = String(safe.id);
+  if (safe._id) safe._id = String(safe._id);
+
+  _drawerCurrent = { date, item: safe };
+
+  // 🆕 garde-fou global: l’ID est accessible même si l’objet est re-cloné
+  if (drawerEl) drawerEl.dataset.eventId = safe._id || safe.id || '';
+
   renderDrawerView();
   drawerEl.classList.add('open');
   drawerOverlay.classList.add('show');
   drawerEl.setAttribute('aria-hidden', 'false');
 }
+
 function closeEventDrawer() {
   drawerEl.classList.remove('open');
   drawerOverlay.classList.remove('show');
@@ -1237,6 +1284,19 @@ function renderDrawerView() {
       <div class="value"><span class="prep-pill prep-${prep || 'none'}">${prepLabel}</span></div>
     </div>
 
+    <!-- === Contrôle direct du statut === -->
+    <div class="field">
+      <div class="label">Changer le statut</div>
+      <div class="value">
+        <div class="prep-status-group" role="group" aria-label="Statut de préparation">
+          <button type="button" class="psg-btn" data-status="none"     title="Marquer 'Non'">Non</button>
+          <button type="button" class="psg-btn" data-status="progress" title="Marquer 'En cours'">En cours</button>
+          <button type="button" class="psg-btn" data-status="true"     title="">Prête</button>
+        </div>
+        <div class="psg-hint">Astuce : “Prête” est verrouillé si des tâches TODO ne sont pas cochées.</div>
+      </div>
+    </div>
+
     <div class="field">
       <div class="label">TODO</div>
       ${todoArray.length ? `
@@ -1294,6 +1354,9 @@ function renderDrawerView() {
 
       // 🔸 AUTOSAVE pour la déco / coche
       saveUpdate(_drawerCurrent.date, _drawerCurrent.item);
+
+      // [AJOUT] Les TODO ont changé → mettre à jour les boutons (désactiver/activer "Prête")
+      updatePrepControls(drawerBodyEl, _drawerCurrent.item);
     });
   });
 
@@ -1331,7 +1394,22 @@ function renderDrawerView() {
   // bouton "Enregistrer TODO" manuel (au cas où)
   saveTodo?.addEventListener('click', () => {
     saveUpdate(_drawerCurrent.date, _drawerCurrent.item);
+
+    // Les TODO ont changé → mettre à jour les contrôles de statut (disable "Prête" si besoin)
+    updatePrepControls(drawerBodyEl, _drawerCurrent.item);
   });
+
+  // (1) Clic sur les boutons "Non / En cours / Prête"
+  drawerBodyEl.querySelectorAll('.prep-status-group .psg-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = btn.getAttribute('data-status'); // 'none' | 'progress' | 'true'
+      setPrepStatusFromDrawer(_drawerCurrent.date, _drawerCurrent.item, target);
+    });
+  });
+
+  // (2) État visuel initial (active/disabled + tooltip)
+  updatePrepControls(drawerBodyEl, _drawerCurrent.item);
+
 }
 
 /* --- Boutons pied de drawer --- */
@@ -1396,7 +1474,7 @@ function saveUpdate(dateStr, item, closeAfter = false) {
 
 function deleteCurrent() {
   const it = _drawerCurrent.item;
-  if (!requireIdOrWarn(item)) return;
+  if (!requireIdOrWarn(it)) return;
   if (!it || !it._id) return;
   if (!confirm("Supprimer définitivement cet événement ?")) return;
 
@@ -2304,5 +2382,149 @@ async function openEditModalFromDrawer(dateStr, item) {
     // Cache aussi la liste de suggestions si un filtre vient d'être appliqué
     document.getElementById('timeline-search-results')?.classList.remove('show');
   }
+
+  // Peut-on marquer "Prête" ? (OK si aucune tâche, ou si toutes cochées)
+  function canMarkReadyFromTodos(item){
+    const tasks = splitTodo(item.todo || "");
+    if (!tasks.length) return true;
+    return tasks.every(t => !!t.done);
+  }
+
+  // Libellé FR pour un statut
+  function getPrepLabelShort(s) {
+    return s === 'true' ? 'Prête'
+        : s === 'progress' ? 'En cours'
+        : 'Non';
+  }
+
+  // Met à jour l'état visuel des boutons + pastille dans le drawer
+  function updatePrepControls(containerEl, item){
+    if (!containerEl || !item) return;
+    const group = containerEl.querySelector('.prep-status-group');
+    if (!group) return;
+
+    const cur = (item.preparation_checked ?? '').toString().toLowerCase() || 'none';
+    group.querySelectorAll('[data-status]').forEach(btn=>{
+      const v = btn.getAttribute('data-status');
+      btn.classList.toggle('active', v === cur);
+    });
+
+    // Gère le bouton "Prête" (disable + tooltip si tâches incomplètes)
+    const btnReady = group.querySelector('[data-status="true"]');
+    if (btnReady) {
+      const allowed = canMarkReadyFromTodos(item);
+      btnReady.disabled = !allowed;
+      btnReady.title = allowed
+        ? 'Marquer comme prête'
+        : "Impossible : des tâches TODO ne sont pas cochées";
+    }
+
+    // Met à jour la pastille du drawer (visuel)
+    const pill = containerEl.querySelector('.prep-pill');
+    if (pill) {
+      const clsBase = 'prep-pill';
+      const cls = (cur === 'true' ? 'prep-true' : (cur === 'progress' ? 'prep-progress' : 'prep-none'));
+      pill.className = `${clsBase} ${cls}`;
+      pill.textContent = getPrepLabelShort(cur);
+    }
+  }
+
+  function setPrepStatusFromDrawer(dateStr, item, newStatus) {
+    if (!item) return;
+  
+    // -- ID robuste (_id | id | fallback depuis le drawer) --
+    const getEventId = (it) => {
+      const v = it?._id ?? it?.id ?? (window.drawerEl?.dataset?.eventId) ?? '';
+      return v ? String(v) : '';
+    };
+    const evId = getEventId(item);
+    if (!evId) {
+      typeof showDynamicFlashMessage === 'function' &&
+        showDynamicFlashMessage("ID manquant pour cet élément.", "error");
+      return;
+    }
+  
+    // -- Contexte requis --
+    if (!window.selectedEvent || !window.selectedYear || !dateStr) {
+      typeof showDynamicFlashMessage === 'function' &&
+        showDynamicFlashMessage("Contexte incomplet (event/year/date).", "error");
+      return;
+    }
+  
+    // -- Normalisation du statut demandé --
+    const norm = (s) => (s ?? '').toString().trim().toLowerCase();
+    const current = norm(item.preparation_checked);
+    let target = norm(newStatus);
+  
+    // accepter quelques alias
+    if (target === 'none' || target === 'non' || target === 'no' || target === 'false' || target === 'pending') target = '';
+    if (target === 'ready' || target === 'ok' || target === 'prête' || target === 'prete') target = 'true';
+    if (target === 'en cours' || target === 'inprogress') target = 'progress';
+  
+    if (current === target) return; // rien à faire
+  
+    // -- Règle métier : pas de "true" si TODO non cochées --
+    if (target === 'true' && !canMarkReadyFromTodos(item)) {
+      typeof showDynamicFlashMessage === 'function' &&
+        showDynamicFlashMessage("Des tâches TODO ne sont pas cochées — impossible de marquer 'Prête'.", "warning");
+      return;
+    }
+  
+    // -- Mise à jour optimiste locale (pour le rendu immédiat) --
+    item.preparation_checked = target;
+  
+    // -- util POST --
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+    const postJSON = (url, payload) =>
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+        body: JSON.stringify(payload)
+      });
+  
+    // -- après chaque requête : refresh + re-render --
+    const doAfter = () => {
+      try { fetchTimetable(); } catch(e){}
+      try { renderDrawerView(); } catch(e){}
+    };
+  
+    // -- Routage selon le statut cible --
+    if (target === 'true') {
+      // Prête → route dédiée (app.py attend {event,year,date,id})
+      postJSON('/set_preparation_ready', {
+        id: evId,
+        event: window.selectedEvent,
+        year: window.selectedYear,
+        date: dateStr
+      }).then(doAfter).catch(doAfter);
+  
+    } else if (target === 'progress') {
+      // En cours → route dédiée (app.py attend {event,year,date,id})
+      postJSON('/set_preparation_progress', {
+        id: evId,
+        event: window.selectedEvent,
+        year: window.selectedYear,
+        date: dateStr
+      }).then(doAfter).catch(doAfter);
+  
+    } else {
+      // Non ("") → passer par update_timetable_event
+      // IMPORTANT: envoyer null pour tous les autres champs pour ne PAS les écraser
+      postJSON('/update_timetable_event', {
+        event: window.selectedEvent,
+        year: window.selectedYear,
+        date: dateStr,
+        _id: evId,
+        preparation_checked: "",
+        start: null, end: null, duration: null,
+        category: null, activity: null, place: null,
+        department: null, remark: null, todo: null
+      }).then(doAfter).catch(doAfter);
+    }
+  }  
+
+  window.canMarkReadyFromTodos   = canMarkReadyFromTodos;
+  window.updatePrepControls      = updatePrepControls;
+  window.setPrepStatusFromDrawer = setPrepStatusFromDrawer;
 
 })();

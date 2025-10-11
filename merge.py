@@ -82,6 +82,23 @@ def _attach_todos(vignette: dict, base_activity: str, category: str, place: str,
         logger.error(f"Echec _attach_todos ({base_activity}/{category}/{place}): {e}")
     return vignette
 
+# À mettre en haut, près des helpers
+def _parse_iso_to_local(iso_str: Optional[str], tz_hours: int = 2) -> Optional[datetime]:
+    """Parse '2025-06-10T14:30:00Z' ou '...+00:00' -> datetime tz Europe/Paris(+2 l'été) ; None si invalide."""
+    if not iso_str or not isinstance(iso_str, str):
+        return None
+    try:
+        s = iso_str.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        return dt.astimezone(timezone(timedelta(hours=tz_hours)))
+    except Exception as e:
+        logger.error(f"_parse_iso_to_local: impossible de parser '{iso_str}': {e}")
+        return None
+    
+def _mk_seed_id(event: str, year: str, date: str, activity: str, place: str = "", param_id: str = "") -> str:
+    seed = f"{event}|{year}|{date}|{activity}|{place}|{param_id}"
+    return _mk_id(seed)
+
 # -------------------------------------------------------------------
 # TODOS: cache  mapping type
 # -------------------------------------------------------------------
@@ -238,174 +255,190 @@ def iterate_date_range(start_date_str, end_date_str):
 def process_global_horaires(global_data, event, year):
     logger.info("Traitement de globalHoraires")
     vignettes = []
-    # Section "center"
+
+    # -------- Section "center" --------
     for entry in global_data.get("center", []):
-        date_str = entry["date"]
-        id_source = entry.get("id", f"center_{date_str}_{entry.get('openTime','')}")
-        v_pair = generate_vignettes_for_entry(
-            date_str,
-            entry["openTime"],
-            entry["closeTime"],
-            "Centre accréditation",
-            "Accreditations",
-            "Centre accréditation",
-            {},
-            id_source,
-            "Organization"
-        )
-        vignettes.extend(v_pair)
-    # Section "dates"
-    for entry in global_data.get("dates", []):
-        if entry.get("is24h") or entry.get("closed"):
-            logger.info(f"Ignoré globalHoraires.dates pour {entry.get('date')} (is24h/closed)")
-            continue
-        date_str = entry["date"]
-        id_source = f"dates_{date_str}_{entry.get('openTime','')}"
-        v_pair = generate_vignettes_for_entry(
-            date_str,
-            entry["openTime"],
-            entry["closeTime"],
-            "au public",
-            "General",
-            "Controle",
-            {},
-            id_source,
-            "Timetable"
-        )
-        vignettes.extend(v_pair)
-    # Section "demontage"
-    if "demontage" in global_data:
-        dem = global_data["demontage"]
-        start_dt = datetime.fromisoformat(dem["start"].replace("Z", "+00:00")).astimezone(timezone(timedelta(hours=2)))
-        end_dt = datetime.fromisoformat(dem["end"].replace("Z", "+00:00")).astimezone(timezone(timedelta(hours=2)))
-        id_source = "demontage"
-        v_pair = generate_vignettes_for_entry(
-            start_dt.strftime("%Y-%m-%d"),
-            start_dt.strftime("%H:%M"),
-            end_dt.strftime("%H:%M"),
-            "Démontage",
-            "Controle",
-            "Demontage",
-            {},
-            id_source,
-            "Timetable"
-        )
-        vignettes.extend(v_pair)
-    # Section "endBadge" : une seule vignette
-    if "endBadge" in global_data:
-        end_badge_iso = global_data["endBadge"]
-        dt = datetime.fromisoformat(end_badge_iso.replace("Z", "+00:00")).astimezone(timezone(timedelta(hours=2)))
-        date_str = dt.strftime("%Y-%m-%d")
-        id_source = "endBadge"
-        v = {
-            "date": date_str,
-            "start": dt.strftime("%H:%M"),
-            "end": "",
-            "duration": "",
-            "category": "Controle",
-            "activity": "Fin de la validité du badge salarié",
-            "place": "Badges",
-            "department": "SAFE",
-            "type": "Timetable",
-            "origin": "paramétrage",
-            "remark": "",
-            "param_id": id_source,
-            "preparation_checked": "non"
-        }
-        vignettes.append(v)
-        # ✅ TODOS pour endBadge
-        v = _attach_todos(v, "Fin de la validité du badge salarié", "Controle", "Badges", add_on="open")
-        logger.debug(f"Vignette endBadge générée: {v}")
-    # Section "helpDesk"
-    if "helpDesk" in global_data:
-        hd = global_data["helpDesk"]
-        id_source = "helpDesk"
-        for d in iterate_date_range(hd["start"], hd["end"]):
+        try:
+            date_str = entry["date"]
+            open_t = entry.get("openTime")
+            close_t = entry.get("closeTime")
+            if not open_t or not close_t:
+                logger.warning(f"center {date_str}: horaires manquants -> ignoré")
+                continue
+            id_source = entry.get("id", f"center_{date_str}_{open_t}")
             v_pair = generate_vignettes_for_entry(
-                d,
-                hd["openTime"],
-                hd["closeTime"],
-                "Help Desk",
-                "Accreditations",
-                "Help Desk",
-                {},
-                id_source,
-                "Organization"
+                date_str, open_t, close_t,
+                "Centre accréditation", "Accreditations", "Centre accréditation",
+                {}, id_source, "Organization"
             )
             vignettes.extend(v_pair)
-    # Section "montage" – Traitement spécifique pour montage (longue période) :
-    if "montage" in global_data:
-        mon = global_data["montage"]
-        start_dt = datetime.fromisoformat(mon["start"].replace("Z", "+00:00")).astimezone(timezone(timedelta(hours=2)))
-        end_dt = datetime.fromisoformat(mon["end"].replace("Z", "+00:00")).astimezone(timezone(timedelta(hours=2)))
-        id_source = "montage"
-        # Vignette d'ouverture avec date du start_dt
-        open_v = {
-            "date": start_dt.strftime("%Y-%m-%d"),
-            "start": start_dt.strftime("%H:%M"),
-            "end": "",
-            "duration": compute_duration(start_dt.strftime("%H:%M"), end_dt.strftime("%H:%M")),
-            "category": "Controle",
-            "activity": "Début du montage",
-            "place": "Montage",
-            "department": "SAFE",
-            "type": "Timetable",
-            "origin": "paramétrage",
-            "remark": f"Fermeture prévue: {end_dt.strftime('%H:%M')}",
-            "param_id": id_source,
-            "preparation_checked": "non"
-        }
-        # Vignette de fermeture avec la date réelle de end_dt
-        # ✅ TODOS sur l'ouverture uniquement
-        open_v = _attach_todos(open_v, "Début du montage", "Controle", "Montage", add_on="open")
-        close_v = {
-            "date": end_dt.strftime("%Y-%m-%d"),
-            "start": "",
-            "end": end_dt.strftime("%H:%M"),
-            "duration": "",
-            "category": "Controle",
-            "activity": "Fin du montage",
-            "place": "Montage",
-            "department": "SAFE",
-            "type": "Timetable",
-            "origin": "paramétrage",
-            "remark": "",
-            "param_id": id_source,
-            "preparation_checked": "non"
-        }
-        vignettes.extend([open_v, close_v])
-    # Section "paddockScan"
-    if "paddockScan" in global_data:
-        ps_iso = global_data["paddockScan"]
-        dt = datetime.fromisoformat(ps_iso.replace("Z", "+00:00")).astimezone(timezone(timedelta(hours=2)))
-        date_str = dt.strftime("%Y-%m-%d")
-        id_source = "paddockScan"
-        # On génère une seule vignette pour le scan
-        v = {
-            "date": date_str,
-            "start": dt.strftime("%H:%M"),
-            "end": "",
-            "duration": "",
-            "category": "Controle",
-            "activity": "Mise en place du contrôle par scan",
-            "place": "Scan",
-            "department": "SAFE",
-            "type": "Timetable",
-            "origin": "paramétrage",
-            "remark": "",
-            "param_id": id_source,
-            "preparation_checked": "non"
-        }
-        vignettes.append(v)
-        # ✅ TODOS pour paddockScan (ouverture)
-        v = _attach_todos(v, "Mise en place du contrôle par scan", "Controle", "Scan", add_on="open")
-        logger.debug(f"Vignette paddockScan générée: {v}")
-        # Section "pcOrga"
-        for entry in global_data.get("pcOrga", []):
-            date_str = entry["date"]
-            id_source = entry.get("id", f"pcOrga_{date_str}_{entry.get('openTime','')}")
-            open_h, close_h = entry["openTime"], entry["closeTime"]
+        except KeyError as e:
+            logger.warning(f"center: clé manquante {e} -> entrée ignorée")
 
+    # -------- Section "dates" (au public) --------
+    for entry in global_data.get("dates", []):
+        try:
+            if entry.get("is24h") or entry.get("closed"):
+                logger.info(f"Ignoré globalHoraires.dates pour {entry.get('date')} (is24h/closed)")
+                continue
+            date_str = entry["date"]
+            open_t = entry.get("openTime")
+            close_t = entry.get("closeTime")
+            if not open_t or not close_t:
+                logger.warning(f"dates {date_str}: horaires manquants -> ignoré")
+                continue
+            id_source = f"dates_{date_str}_{open_t}"
+            v_pair = generate_vignettes_for_entry(
+                date_str, open_t, close_t,
+                "au public", "General", "Controle",
+                {}, id_source, "Timetable"
+            )
+            vignettes.extend(v_pair)
+        except KeyError as e:
+            logger.warning(f"dates: clé manquante {e} -> entrée ignorée")
+
+    # -------- Section "demontage" --------
+    if "demontage" in global_data:
+        dem = global_data.get("demontage") or {}
+        start_dt = _parse_iso_to_local(dem.get("start"))
+        end_dt   = _parse_iso_to_local(dem.get("end"))
+        if not start_dt or not end_dt:
+            logger.warning("globalHoraires.demontage incomplet -> ignoré")
+        else:
+            id_source = "demontage"
+            v_pair = generate_vignettes_for_entry(
+                start_dt.strftime("%Y-%m-%d"),
+                start_dt.strftime("%H:%M"),
+                end_dt.strftime("%H:%M"),
+                "Démontage", "Controle", "Demontage",
+                {}, id_source, "Timetable"
+            )
+            vignettes.extend(v_pair)
+
+    # -------- Section "endBadge" (une seule vignette) --------
+    if "endBadge" in global_data:
+        dt = _parse_iso_to_local(global_data.get("endBadge"))
+        if not dt:
+            logger.warning("globalHoraires.endBadge absent/invalide -> ignoré")
+        else:
+            date_str = dt.strftime("%Y-%m-%d")
+            id_source = "endBadge"
+            v = {
+                "_id": _mk_seed_id(event, year, date_str, "Fin de la validité du badge salarié", "Badges", id_source),
+                "date": date_str,
+                "start": dt.strftime("%H:%M"),
+                "end": "",
+                "duration": "",
+                "category": "Controle",
+                "activity": "Fin de la validité du badge salarié",
+                "place": "Badges",
+                "department": "SAFE",
+                "type": "Timetable",
+                "origin": "paramétrage",
+                "remark": "",
+                "param_id": id_source,
+                "preparation_checked": "non"
+            }
+            v = _attach_todos(v, "Fin de la validité du badge salarié", "Controle", "Badges", add_on="open")
+            vignettes.append(v)
+            logger.debug(f"Vignette endBadge générée: {v}")
+
+    # -------- Section "helpDesk" --------
+    if "helpDesk" in global_data:
+        hd = global_data.get("helpDesk") or {}
+        start_d = hd.get("start")
+        end_d   = hd.get("end")
+        open_t  = hd.get("openTime")
+        close_t = hd.get("closeTime")
+        if not start_d or not end_d or not open_t or not close_t:
+            logger.warning("globalHoraires.helpDesk incomplet -> ignoré")
+        else:
+            id_source = "helpDesk"
+            for d in iterate_date_range(start_d, end_d):
+                v_pair = generate_vignettes_for_entry(
+                    d, open_t, close_t,
+                    "Help Desk", "Accreditations", "Help Desk",
+                    {}, id_source, "Organization"
+                )
+                vignettes.extend(v_pair)
+
+    # -------- Section "montage" (longue période) --------
+    if "montage" in global_data:
+        mon = global_data.get("montage") or {}
+        start_dt = _parse_iso_to_local(mon.get("start"))
+        end_dt   = _parse_iso_to_local(mon.get("end"))
+        if not start_dt or not end_dt:
+            logger.warning("globalHoraires.montage incomplet -> ignoré")
+        else:
+            id_source = "montage"
+            open_v = {
+                "_id": _mk_seed_id(event, year, start_dt.strftime("%Y-%m-%d"), "Début du montage", "Montage", id_source),
+                "date": start_dt.strftime("%Y-%m-%d"),
+                "start": start_dt.strftime("%H:%M"),
+                "end": "",
+                "duration": compute_duration(start_dt.strftime("%H:%M"), end_dt.strftime("%H:%M")),
+                "category": "Controle",
+                "activity": "Début du montage",
+                "place": "Montage",
+                "department": "SAFE",
+                "type": "Timetable",
+                "origin": "paramétrage",
+                "remark": f"Fermeture prévue: {end_dt.strftime('%H:%M')}",
+                "param_id": id_source,
+                "preparation_checked": "non"
+            }
+            open_v = _attach_todos(open_v, "Début du montage", "Controle", "Montage", add_on="open")
+            close_v = {
+                "date": end_dt.strftime("%Y-%m-%d"),
+                "start": "",
+                "end": end_dt.strftime("%H:%M"),
+                "duration": "",
+                "category": "Controle",
+                "activity": "Fin du montage",
+                "place": "Montage",
+                "department": "SAFE",
+                "type": "Timetable",
+                "origin": "paramétrage",
+                "remark": "",
+                "param_id": id_source,
+                "preparation_checked": "non"
+            }
+            vignettes.extend([open_v, close_v])
+
+    # -------- Section "paddockScan" --------
+    if "paddockScan" in global_data:
+        dt = _parse_iso_to_local(global_data.get("paddockScan"))
+        if not dt:
+            logger.warning("globalHoraires.paddockScan invalide -> ignoré")
+        else:
+            id_source = "paddockScan"
+            v = {
+                "_id": _mk_seed_id(event, year, dt.strftime("%Y-%m-%d"), "Mise en place du contrôle par scan", "Scan", id_source),
+                "date": dt.strftime("%Y-%m-%d"),
+                "start": dt.strftime("%H:%M"),
+                "end": "",
+                "duration": "",
+                "category": "Controle",
+                "activity": "Mise en place du contrôle par scan",
+                "place": "Scan",
+                "department": "SAFE",
+                "type": "Timetable",
+                "origin": "paramétrage",
+                "remark": "",
+                "param_id": id_source,
+                "preparation_checked": "non"
+            }
+            v = _attach_todos(v, "Mise en place du contrôle par scan", "Controle", "Scan", add_on="open")
+            vignettes.append(v)
+            logger.debug(f"Vignette paddockScan générée: {v}")
+
+    # -------- Section "pcOrga" --------
+    for entry in global_data.get("pcOrga", []):
+        try:
+            date_str = entry["date"]
+            open_h = entry["openTime"]
+            close_h = entry["closeTime"]
+            id_source = entry.get("id", f"pcOrga_{date_str}_{open_h}")
             skip_open, skip_close = _strict_pc_skips(open_h, close_h)
             open_v, close_v = generate_vignettes_for_entry(
                 date_str, open_h, close_h,
@@ -416,13 +449,16 @@ def process_global_horaires(global_data, event, year):
                 vignettes.append(open_v)
             if not skip_close:
                 vignettes.append(close_v)
+        except KeyError as e:
+            logger.warning(f"pcOrga: clé manquante {e} -> entrée ignorée")
 
-        # Section "pcAuthorities"
-        for entry in global_data.get("pcAuthorities", []):
+    # -------- Section "pcAuthorities" --------
+    for entry in global_data.get("pcAuthorities", []):
+        try:
             date_str = entry["date"]
-            id_source = entry.get("id", f"pcAuthorities_{date_str}_{entry.get('openTime','')}")
-            open_h, close_h = entry["openTime"], entry["closeTime"]
-
+            open_h = entry["openTime"]
+            close_h = entry["closeTime"]
+            id_source = entry.get("id", f"pcAuthorities_{date_str}_{open_h}")
             skip_open, skip_close = _strict_pc_skips(open_h, close_h)
             open_v, close_v = generate_vignettes_for_entry(
                 date_str, open_h, close_h,
@@ -433,31 +469,36 @@ def process_global_horaires(global_data, event, year):
                 vignettes.append(open_v)
             if not skip_close:
                 vignettes.append(close_v)
-    # Section "scan"
+        except KeyError as e:
+            logger.warning(f"pcAuthorities: clé manquante {e} -> entrée ignorée")
+
+    # -------- Section "scan" (autre clé possible) --------
     if "scan" in global_data:
-        scan_iso = global_data["scan"]
-        dt = datetime.fromisoformat(scan_iso.replace("Z", "+00:00")).astimezone(timezone(timedelta(hours=2)))
-        date_str = dt.strftime("%Y-%m-%d")
-        id_source = "scan"
-        v = {
-            "date": date_str,
-            "start": dt.strftime("%H:%M"),
-            "end": "",
-            "duration": "",
-            "category": "Controle",
-            "activity": "Mise en place du contrôle par scan",
-            "place": "Scan",
-            "department": "SAFE",
-            "type": "Timetable",
-            "origin": "paramétrage",
-            "remark": "",
-            "param_id": id_source,
-            "preparation_checked": "non"
-        }
-        vignettes.append(v)
-        # ✅ TODOS pour scan
-        v = _attach_todos(v, "Mise en place du contrôle par scan", "Controle", "Scan", add_on="open")
-        logger.debug(f"Vignette scan générée: {v}")
+        dt = _parse_iso_to_local(global_data.get("scan"))
+        if not dt:
+            logger.warning("globalHoraires.scan invalide -> ignoré")
+        else:
+            id_source = "scan"
+            v = {
+                "_id": _mk_seed_id(event, year, dt.strftime("%Y-%m-%d"), "Mise en place du contrôle par scan", "Scan", id_source),
+                "date": dt.strftime("%Y-%m-%d"),
+                "start": dt.strftime("%H:%M"),
+                "end": "",
+                "duration": "",
+                "category": "Controle",
+                "activity": "Mise en place du contrôle par scan",
+                "place": "Scan",
+                "department": "SAFE",
+                "type": "Timetable",
+                "origin": "paramétrage",
+                "remark": "",
+                "param_id": id_source,
+                "preparation_checked": "non"
+            }
+            v = _attach_todos(v, "Mise en place du contrôle par scan", "Controle", "Scan", add_on="open")
+            vignettes.append(v)
+            logger.debug(f"Vignette scan générée: {v}")
+
     logger.info(f"{len(vignettes)} vignettes générées pour globalHoraires")
     return vignettes
 
@@ -773,6 +814,12 @@ def update_timetable_document(event, year, vignettes):
 
     for v in vignettes:
         date_key = v["date"]
+        if not v.get("_id"):
+            v["_id"] = _mk_seed_id(
+                event, year, date_key,
+                str(v.get("activity","")), str(v.get("place","")), str(v.get("param_id",""))
+            )
+        logger.warning(f"[update_timetable_document] _id manquant → généré: {v['_id']} ({v.get('activity')} @ {date_key})")
         data_field.setdefault(date_key, [])
         items = data_field[date_key]
 
@@ -836,6 +883,7 @@ EVENT_CHOICES = [
     "SUPERBIKE",
     "LE MANS CLASSIC",
     "24H CAMIONS",
+    "CONGRES SDIS",
 ]
 
 def _prompt_year() -> str:
