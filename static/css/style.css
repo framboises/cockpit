@@ -60,9 +60,21 @@
 .parking-row .state-pill {
     padding: 4px 8px; border-radius: 20px; font-size: 12px; font-weight: 700; text-transform: uppercase;
 }
-.state-open { background: rgba(0,255,0,0.2); color: #00d000; }
-.state-busy { background: rgba(255,193,7,0.2); color: #f6b557; }
-.state-closed { background: rgba(255,0,0,0.2); color: #ff5a5a; }
+/* Niveaux congestion */
+.state-pill.level-better   { background: rgba(0,180,0,.18);  color: #00d000; }  /* plus fluide */
+.state-pill.level-normal   { background: rgba(0,160,0,.18);  color: #00c000; }  /* normal */
+.state-pill.level-busy     { background: rgba(255,193,7,.22); color: #f6b557; } /* chargé */
+.state-pill.level-heavy    { background: rgba(255,80,0,.22);  color: #ff7a3a; } /* saturé */
+.state-pill.level-gridlock { background: rgba(200,0,0,.22);   color: #ff5a5a; } /* bouchon */
+
+/* container des deux pastilles IN/OUT dans la cellule de droite */
+.pill-duo {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 
 /* Trafic counters inline */
 .traffic-counters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 6px; }
@@ -1820,61 +1832,71 @@ footer {
 
 /* ================== PATCH MINIMAL – À COLLER TOUT EN BAS ================== */
 
-/* 1) Compat: quand .show est ajouté, on rend visible */
-.modal.show { 
-    display: block;                 /* ← sinon elle reste display:none */
-  }
-  .modal-overlay.show { 
-    display: block;                 /* ← sinon elle reste display:none */
-    pointer-events: all;
-  }
-  
-  /* 2) Ordre des couches: overlays < modales < drawer */
-  #modalOverlay { z-index: 2990; }  /* overlay générique */
-  #addEventModal, 
-  #meteoModal, 
-  #trafficMapModal { z-index: 3000; }  /* au-dessus du drawer (2000) */
-  
-  /* 3) Spécifique Trafic : largeur + layout interne plus confortables */
-  #trafficMapModal {
-    width: auto;            /* override du 700px générique */
-    max-width: none;        /* pas de contrainte max */
-    padding: 0;             /* pas de padding sur le conteneur externe */
-  }
-  
-  #trafficMapModal .modal-content {
-    width: min(1000px, 92vw);
-    max-height: 85vh;
-    padding: 0;             /* la boîte interne gère l'espace */
-    background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 10px 30px rgba(0,0,0,.35);
-    overflow: hidden;
-    display: grid;
-    grid-template-rows: auto auto 1fr;
-  }
-  
-  #trafficModalHeader {
-    background: #fff; color: #333;
-    display: grid;
-    grid-template-columns: 1fr auto auto auto auto;
-    gap: 10px; align-items: center;
-    padding: 10px 12px;
-    border-bottom: 1px solid rgba(0,0,0,.08);
-  }
-  
-  #trafficSummary { 
-    padding: 10px 12px 6px; 
-    background: #fff; 
-    color: #333; 
-  }
-  
-  #trafficMap {
-    height: 60vh;
-    min-height: 360px;
-    background: #f6f6f6;
-    margin: 0 12px 12px;
-    border-radius: 10px;
-  }
-  /* ================== FIN PATCH MINIMAL ================== */  
+/* 1) Base : présents au DOM mais invisibles tant qu'il n'y a pas .show */
+.modal,
+.modal-overlay {
+  display: block;            /* toujours dans le flux, plus de display:none */
+  opacity: 0;                /* invisible par défaut */
+  pointer-events: none;      /* ne capte pas les clics */
+  transition: opacity .2s ease;
+}
+
+/* 1bis) Visible quand .show est posé par le JS */
+.modal.show,
+.modal-overlay.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 2) Ordre des couches: overlay < modales < drawer */
+#modalOverlay { z-index: 2990; }     /* overlay générique */
+#addEventModal,
+#meteoModal,
+#trafficMapModal { z-index: 3000; }  /* au-dessus du drawer (2000) */
+
+/* 3) Spécifique Trafic : largeur + layout interne confortables */
+#trafficMapModal {
+  width: auto;        /* override du 700px générique */
+  max-width: none;    /* pas de contrainte max */
+  padding: 0;         /* pas de padding sur le conteneur externe */
+}
+
+#trafficMapModal .modal-content {
+  width: min(1000px, 92vw);
+  max-height: 85vh;
+  padding: 0;         /* la boîte interne gère l'espace */
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+}
+
+#trafficModalHeader {
+  background: #fff;
+  color: #333;
+  display: grid;
+  grid-template-columns: 1fr auto auto auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(0,0,0,.08);
+}
+
+#trafficSummary {
+  padding: 10px 12px 6px;
+  background: #fff;
+  color: #333;
+}
+
+#trafficMap {
+  height: 60vh;
+  min-height: 360px;
+  background: #f6f6f6;
+  margin: 0 12px 12px;
+  border-radius: 10px;
+}
+
+/* ================== FIN PATCH MINIMAL ================== */
   

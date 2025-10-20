@@ -46,170 +46,151 @@ document.addEventListener('DOMContentLoaded', fetchMeteoPrevisions6h);
 
 setTimeout(fetchSunTimes, 50); // 🌞 Ajouter le soleil après un court délai
 
-// Fonction pour ouvrir la modale météo avec overlay
+// Ouvre la modale Météo (pilotage par classes uniquement)
 function openMeteoModal(date) {
-    console.log("📅 Ouverture de la modale météo pour le :", date);
+  console.log("📅 Ouverture de la modale météo pour le :", date);
 
-    // Récupérer la modale et l'overlay
-    let modal = document.getElementById('meteoModal');
-    let overlay = document.getElementById('modalOverlay');
-    let modalContent = document.getElementById('meteo-details');
+  const modal        = document.getElementById('meteoModal');
+  const overlay      = document.getElementById('modalOverlay');
+  const modalContent = document.getElementById('meteo-details');
 
-    // Assurer que l'overlay et la modale sont bien cachés avant de charger le contenu
-    modal.style.display = "none";
-    overlay.style.display = "none";
-    
-    // Réinitialiser le contenu pour éviter l'accumulation de graphiques
-    modalContent.innerHTML = `<div class="modal-header">Chargement...</div>`;
+  if (!modal || !overlay || !modalContent) {
+    console.warn('[meteo] Élément introuvable (meteoModal / modalOverlay / meteo-details)');
+    return;
+  }
 
-    // Afficher l'overlay
-    overlay.style.display = "block";
-    overlay.classList.add("show");
+  // État initial (contenu de chargement)
+  modalContent.innerHTML = `<div class="modal-header">Chargement...</div>`;
 
-    // Récupération des prévisions météo
-    fetch(`/meteo_previsions/${date}`)
+  // Afficher overlay + modale par classes (pas de style inline)
+  overlay.classList.add('show');
+  modal.classList.add('show');
+  modal.setAttribute('aria-hidden', 'false');
+
+  // (Optionnel) bloquer le scroll de la page tant qu’une modale est ouverte
+  document.documentElement.style.overflow = 'hidden';
+  document.body.style.overflow = 'hidden';
+
+  // 1) Prévisions journalières
+  fetch(`/meteo_previsions/${date}`)
+    .then(response => response.json())
+    .then(day => {
+      if (day.error) {
+        console.error('❌ Erreur météo :', day.error);
+        modalContent.innerHTML = `
+          <div class="modal-header">
+            <h3>Erreur de chargement des prévisions</h3>
+            <span class="close" onclick="closeMeteoModal()">×</span>
+          </div>`;
+        return;
+      }
+
+      // 2) Historique pour la même date
+      return fetch(`/historique_meteo/${date}`)
         .then(response => response.json())
-        .then(day => {
-            if (day.error) {
-                console.error('❌ Erreur météo :', day.error);
-                modalContent.innerHTML = `<div class="modal-header"><h3>Erreur de chargement des prévisions</h3></div>`;
-                return;
+        .then(historicalData => {
+          // Structure de la modale
+          modalContent.innerHTML = `
+            <div class="modal-header">
+              <h3>Prévisions météo du ${formatDateToFull(day.Date)}</h3>
+              <span class="close" onclick="closeMeteoModal()">×</span>
+            </div>
+            <div class="modal-body">
+              <div class="historical-info">
+                <table id="historicalTable">
+                  <thead>
+                    <tr>
+                      <th>Année</th>
+                      <th><span class="icon">💧 Moy. mois</span></th>
+                      <th><span class="icon">🌡️ Min mois</span></th>
+                      <th><span class="icon">🔥 Max mois</span></th>
+                      <th><span class="icon">🌡️ Moy mois</span></th>
+                      <th><span class="icon">🌡️ Jour</span></th>
+                      <th><span class="icon">💧 Jour</span></th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <div class="chart-container">
+                <canvas id="meteoChart"></canvas>
+              </div>
+            </div>
+          `;
+
+          // Remplir le tableau historique
+          const tbody = modalContent.querySelector('#historicalTable tbody');
+          for (const year in historicalData) {
+            const data = historicalData[year];
+            const tr = document.createElement('tr');
+
+            if (data.message) {
+              tr.innerHTML = `
+                <td>${year}</td>
+                <td>${data['Précipitations Totales Mois (mm)']} mm</td>
+                <td>${data['Température Min Mois (°C)']}°C</td>
+                <td>${data['Température Max Mois (°C)']}°C</td>
+                <td>${data['Température Moyenne Mois (°C)']}°C</td>
+                <td colspan="2">${data.message}</td>
+              `;
+            } else {
+              const jourColumns = (year == new Date().getFullYear() || !data['Température Jour (°C)'])
+                ? `<td></td><td></td>`
+                : `<td>${data['Température Jour (°C)'].max}°C / ${data['Température Jour (°C)'].min}°C</td>
+                   <td>${data['Précipitations Jour (mm)']} mm</td>`;
+
+              tr.innerHTML = `
+                <td>${year}</td>
+                <td>${data['Précipitations Totales Mois (mm)']} mm</td>
+                <td>${data['Température Min Mois (°C)']}°C</td>
+                <td>${data['Température Max Mois (°C)']}°C</td>
+                <td>${data['Température Moyenne Mois (°C)']}°C</td>
+                ${jourColumns}
+              `;
             }
 
-            // Récupération des données historiques
-            fetch(`/historique_meteo/${date}`)
-                .then(response => response.json())
-                .then(historicalData => {
-                    console.log("📊 Données météo chargées avec succès.");
+            tbody.appendChild(tr);
+          }
 
-                    // Structure de la modale
-                    modalContent.innerHTML = `
-                        <div class="modal-header">
-                            <h3>Prévisions météo du ${formatDateToFull(day.Date)}</h3>
-                            <span class="close" onclick="closeMeteoModal()">×</span>
-                        </div>
-                        <div class="modal-body">
-                            <div class="historical-info">
-                                <table id="historicalTable">
-                                    <thead>
-                                        <tr>
-                                            <th>Année</th>
-                                            <th><span class="icon">💧 Moy. mois</span></th>
-                                            <th><span class="icon">🌡️ Min mois</span></th>
-                                            <th><span class="icon">🔥 Max mois</span></th>
-                                            <th><span class="icon">🌡️ Moy mois</span></th>
-                                            <th><span class="icon">🌡️ Jour</span></th>
-                                            <th><span class="icon">💧 Jour</span></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody></tbody>
-                                </table>
-                            </div>
-                            <div class="chart-container">
-                                <canvas id="meteoChart"></canvas>
-                            </div>
-                        </div>
-                    `;
+          // Graphique
+          const labels        = day.Heures.map(h => h.Heure);
+          const temperatures  = day.Heures.map(h => parseFloat(h['Température (°C)']));
+          const pluviometrie  = day.Heures.map(h => parseFloat(h['Pluviométrie (mm)']));
+          const ctx = document.getElementById('meteoChart').getContext('2d');
 
-                    // Ajout des données historiques
-                    let historicalTableBody = modalContent.querySelector('#historicalTable tbody');
-
-                    for (let year in historicalData) {
-                        let data = historicalData[year];
-                        let row = document.createElement('tr');
-                    
-                        if (data.message) {
-                            row.innerHTML = `
-                                <td>${year}</td>
-                                <td>${data['Précipitations Totales Mois (mm)']} mm</td>
-                                <td>${data['Température Min Mois (°C)']}°C</td>
-                                <td>${data['Température Max Mois (°C)']}°C</td>
-                                <td>${data['Température Moyenne Mois (°C)']}°C</td>
-                                <td colspan="2">${data.message}</td>  <!-- Ajoute un message au lieu des données manquantes -->
-                            `;
-                        } else {
-                            let jourColumns = (year == new Date().getFullYear() || !data['Température Jour (°C)'])
-                                ? `<td></td><td></td>`  // Année en cours ou données manquantes
-                                : `<td>${data['Température Jour (°C)'].max}°C / ${data['Température Jour (°C)'].min}°C</td>
-                                   <td>${data['Précipitations Jour (mm)']} mm</td>`;
-                    
-                            row.innerHTML = `
-                                <td>${year}</td>
-                                <td>${data['Précipitations Totales Mois (mm)']} mm</td>
-                                <td>${data['Température Min Mois (°C)']}°C</td>
-                                <td>${data['Température Max Mois (°C)']}°C</td>
-                                <td>${data['Température Moyenne Mois (°C)']}°C</td>
-                                ${jourColumns}
-                            `;
-                        }
-                        
-                        historicalTableBody.appendChild(row);
-                    }                    
-
-                    // Récupération des données pour le graphique
-                    let labels = day.Heures.map(heureData => heureData.Heure);
-                    let temperatures = day.Heures.map(heureData => parseFloat(heureData['Température (°C)']));
-                    let pluviometrie = day.Heures.map(heureData => parseFloat(heureData['Pluviométrie (mm)']));
-
-                    // Création du graphique
-                    let ctx = document.getElementById('meteoChart').getContext('2d');
-                    new Chart(ctx, {
-                        type: 'line',
-                        data: {
-                            labels: labels,
-                            datasets: [
-                                {
-                                    label: 'Température (°C)',
-                                    data: temperatures,
-                                    borderColor: 'red',
-                                    fill: false,
-                                    yAxisID: 'y1'
-                                },
-                                {
-                                    label: 'Pluviométrie (mm)',
-                                    data: pluviometrie,
-                                    borderColor: 'blue',
-                                    fill: false,
-                                    yAxisID: 'y2'
-                                }
-                            ]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            scales: {
-                                x: {
-                                    ticks: { maxRotation: 90, minRotation: 45 }
-                                },
-                                y1: {
-                                    type: 'linear',
-                                    position: 'left',
-                                    title: { display: true, text: 'Température (°C)' },
-                                    grid: { color: 'rgba(255, 99, 132, 0.2)' }
-                                },
-                                y2: {
-                                    type: 'linear',
-                                    position: 'right',
-                                    title: { display: true, text: 'Pluviométrie (mm)' },
-                                    grid: { display: false }
-                                }
-                            }
-                        }
-                    });
-
-                    // Afficher la modale et l'overlay
-                    modal.style.display = "flex";
-                    modal.classList.add("show");
-                })
-                .catch(error => {
-                    console.error('❌ Erreur lors de la récupération des données historiques :', error);
-                    modalContent.innerHTML += `<div class="modal-body">Impossible de récupérer l'historique météo.</div>`;
-                });
+          new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels,
+              datasets: [
+                { label: 'Température (°C)', data: temperatures, borderColor: 'red',  fill: false, yAxisID: 'y1' },
+                { label: 'Pluviométrie (mm)', data: pluviometrie, borderColor: 'blue', fill: false, yAxisID: 'y2' }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: {
+                x: { ticks: { maxRotation: 90, minRotation: 45 } },
+                y1: { type: 'linear', position: 'left',  title: { display: true, text: 'Température (°C)' }, grid: { color: 'rgba(255,99,132,.2)' } },
+                y2: { type: 'linear', position: 'right', title: { display: true, text: 'Pluviométrie (mm)' }, grid: { display: false } }
+              }
+            }
+          });
         })
-        .catch(error => {
-            console.error('❌ Erreur lors de la récupération des prévisions détaillées :', error);
-            modalContent.innerHTML = `<div class="modal-body">Impossible de récupérer les prévisions météo.</div>`;
+        .catch(err => {
+          console.error('❌ Erreur historique météo :', err);
+          modalContent.innerHTML += `<div class="modal-body">Impossible de récupérer l'historique météo.</div>`;
         });
+    })
+    .catch(err => {
+      console.error('❌ Erreur prévisions détaillées :', err);
+      modalContent.innerHTML = `
+        <div class="modal-header">
+          <h3>Impossible de récupérer les prévisions météo</h3>
+          <span class="close" onclick="closeMeteoModal()">×</span>
+        </div>`;
+    });
 }
 
 // Ajouter un écouteur pour fermer la modale en cliquant en dehors
@@ -222,18 +203,25 @@ document.getElementById('meteoModal').addEventListener('click', function (event)
     event.stopPropagation(); // Bloque la propagation du clic pour éviter de fermer la modale
 });
 
-// Fonction pour fermer la modale et l'overlay
+// Ferme la modale Météo (en respectant la cohabitation avec la modale Trafic)
 function closeMeteoModal() {
-    let modal = document.getElementById('meteoModal');
-    let overlay = document.getElementById('modalOverlay');
+  const modal   = document.getElementById('meteoModal');
+  const overlay = document.getElementById('modalOverlay');
 
-    modal.classList.remove("show");
-    overlay.classList.remove("show");
+  if (!modal || !overlay) return;
 
-    setTimeout(() => {
-        modal.style.display = "none";
-        overlay.style.display = "none";
-    }, 300); // Attendre la fin de la transition pour masquer
+  modal.classList.remove('show');
+  modal.setAttribute('aria-hidden', 'true');
+
+  // Ne retirer l’overlay que si aucune autre modale n’est ouverte
+  const trafficOpen = document.getElementById('trafficMapModal')?.classList.contains('show');
+  const addEventOpen = document.getElementById('addEventModal')?.classList.contains('show'); // si tu as d’autres modales
+  if (!trafficOpen && !addEventOpen) {
+    overlay.classList.remove('show');
+    // Débloquer le scroll seulement quand plus aucune modale n’est visible
+    document.documentElement.style.overflow = '';
+    document.body.style.overflow = '';
+  }
 }
 
 // Fonction pour formater la date en "Jour Mois Année"

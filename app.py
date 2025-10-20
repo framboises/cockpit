@@ -29,8 +29,8 @@ from traffic import traffic_bp
 # Configuration
 ################################################################################
 
-DEV_MODE = False
-CODING = False
+DEV_MODE = True
+CODING = True
 PORT = 5008 if DEV_MODE else 4008
 logging.basicConfig(level=logging.INFO if DEV_MODE else logging.WARNING)
 logger = logging.getLogger(__name__)

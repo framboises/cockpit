@@ -14,7 +14,7 @@ let trafficLayerGroup = null;
 let trafficModalType = null;   // 'ACCIDENT' | 'JAM'
 
 // Debug flag
-const DEBUG_TRAFFIC = true;
+const DEBUG_TRAFFIC = false;
 
 // ---------- Utils DOM ----------
 function $(id){ return document.getElementById(id); }
@@ -259,16 +259,30 @@ function openTrafficModal(type, startIndex = 0) {
   console.log('[traffic] openTrafficModal ->', type, 'accidents:', accidentAlerts.length, 'jams:', jamAlerts.length);
 
   const alerts = (type === 'ACCIDENT') ? accidentAlerts : jamAlerts;
+
+  // Aucun résultat ?
   if (!alerts || !alerts.length) {
-    if (DEBUG_TRAFFIC) console.log(`[traffic] openTrafficModal(${type}) ignoré : 0 alerte`);
-    if (ensureOpenModal()) {
+    if (DEBUG_TRAFFIC) {
+      console.log(`[traffic] [DEBUG] openTrafficModal(${type}) — affichage forcé avec 0 alerte`);
+      ensureOpenModal();
       setHeaderTitle(type, 0);
-      const mapDiv = $('trafficMap'); if (mapDiv) mapDiv.innerHTML = '';
-      const sum = $('trafficSummary'); if (sum) sum.textContent = 'Aucune alerte à afficher.';
+
+      // Message d’état vide
+      const sum = $('trafficSummary');
+      if (sum) sum.textContent = 'Aucune alerte à afficher.';
+
+      // Ne crée pas la carte si elle n’existe pas ; si elle existe, vide juste les couches
+      if (trafficLayerGroup) trafficLayerGroup.clearLayers();
+
+      // On ne va PAS plus loin (pas de renderCurrentAlertOnMap)
+      return;
+    } else {
+      console.log(`[traffic] openTrafficModal(${type}) ignoré : 0 alerte`);
+      return; // pas d’ouverture en mode normal
     }
-    return;
   }
 
+  // On a des alertes : on ouvre normalement
   trafficModalType = type;
   currentAlertIndex = Math.max(0, Math.min(startIndex, alerts.length - 1));
 
@@ -377,19 +391,6 @@ document.addEventListener('DOMContentLoaded', function() {
   });
 
   document.getElementById('modalOverlay')?.addEventListener('click', ensureCloseModal);
-
-  // Fermer si on clique en dehors du contenu (dans la zone de la modale mais pas dans .modal-content)
-    const modalEl = $('trafficMapModal');
-    modalEl?.addEventListener('click', (e) => {
-    const content = modalEl.querySelector('.modal-content');
-    if (!content || !content.contains(e.target)) {
-        ensureCloseModal();
-    }
-    });
-
-    // Empêcher la fermeture quand on clique DANS le contenu
-    modalEl?.querySelector('.modal-content')
-    ?.addEventListener('click', (e) => e.stopPropagation());
 
   // Démarre la boucle data
   updateAlerts();
