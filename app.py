@@ -35,8 +35,8 @@ PORT = 5008 if DEV_MODE else 4008
 logging.basicConfig(level=logging.INFO if DEV_MODE else logging.WARNING)
 logger = logging.getLogger(__name__)
 
-DEV_URL = "http://dev.safe.lemans.org"
-PROD_URL = "http://safe.lemans.org"
+DEV_URL = f"http://safe.lemans.org:{PORT}"
+PROD_URL = "https://safe.lemans.org"
 
 BASE_URL = DEV_URL if DEV_MODE else PROD_URL
 
@@ -144,21 +144,9 @@ def clean_collection_name(name):
 
 @app.route("/logout_redirect")
 def logout_redirect():
-    logger.info("Tentative de suppression du cookie access_token.")
-    
-    # Utilisation de BASE_URL pour l'URL cible
+    # Ici, le cookie SSO a déjà été supprimé par le portail.
     target_url = f"{BASE_URL}/login"
-    
-    response = make_response(redirect(target_url))
-    response.set_cookie(
-        "access_token",
-        "",
-        expires=0,
-        domain=".safe.lemans.org",
-        path="/"
-    )
-    logger.info(f"Cookie access_token supprimé. Redirection vers {target_url}.")
-    return response
+    return redirect(target_url)
 
 @app.route("/")
 @role_required("user")
