@@ -81,6 +81,9 @@ ROLE_HIERARCHY = {
     "manager": 2,
     "admin": 3,
 }
+ROLE_ORDER = ["user", "manager", "admin"]
+APP_KEY = "cockpit"
+SUPER_ADMIN_ROLE = "super_admin"
 
 def role_required(required_role):
     def decorator(f):
@@ -91,7 +94,9 @@ def role_required(required_role):
                 logger.info(f"[DEV_MODE] Bypassing authentication for role '{required_role}'")
                 request.user_payload = {
                     "apps": ["looker", "shiftsolver", "tagger"],
-                    "roles": ["admin"]
+                    "roles_by_app": {"cockpit": "admin"},
+                    "global_roles": [],
+                    "roles": ["user", "manager", "admin"]
                 }
                 return f(*args, **kwargs)
 
@@ -103,7 +108,6 @@ def role_required(required_role):
 
             try:
                 payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-                logger.info(f"Utilisateur authentifié : {payload}")
             except jwt.ExpiredSignatureError:
                 redirect_url = f"{BASE_URL}/home?message=Votre session a expiré. Veuillez vous reconnecter.&category=warning"
                 return redirect(redirect_url)
@@ -111,25 +115,34 @@ def role_required(required_role):
                 redirect_url = f"{BASE_URL}/home?message=Authentification invalide. Veuillez vous reconnecter.&category=error"
                 return redirect(redirect_url)
 
-            # Vérifier si l'utilisateur a accès à l'application
-            user_apps = payload.get("apps", [])
-            normalized_user_apps = [
-                re.sub(r'[^a-z0-9_-]', '', app.lower().replace(" ", ""))
-                for app in user_apps
-            ]  # Normaliser les noms d'applications
+            global_roles = payload.get("global_roles", []) or []
+            is_super_admin = SUPER_ADMIN_ROLE in global_roles
+            roles_by_app = payload.get("roles_by_app", {}) or {}
+            if not isinstance(roles_by_app, dict):
+                roles_by_app = {}
+            app_role = roles_by_app.get(APP_KEY)
 
-            if "looker" not in normalized_user_apps:
-                logger.warning("Accès refusé à Tagger pour cet utilisateur.")
+            if not is_super_admin and not app_role:
+                logger.warning("Accès refusé à Cockpit pour cet utilisateur.")
                 redirect_url = f"{BASE_URL}/home?message=Vous n'avez pas les droits nécessaires pour accéder à cette application.&category=error"
                 return redirect(redirect_url)
 
-            user_roles = payload.get("roles", [])
-            max_user_role_level = max([ROLE_HIERARCHY.get(role, 0) for role in user_roles])
+            effective_role = "admin" if is_super_admin else app_role
+            max_user_role_level = ROLE_HIERARCHY.get(effective_role, 0)
 
             if max_user_role_level < ROLE_HIERARCHY.get(required_role, 0):
                 flash(f"Accès interdit : cette fonctionnalité requiert un rôle '{required_role}'.", "error")
                 return redirect(request.referrer or "/")
 
+            if effective_role in ROLE_HIERARCHY:
+                payload["roles"] = [
+                    role for role in ROLE_ORDER
+                    if ROLE_HIERARCHY[role] <= ROLE_HIERARCHY[effective_role]
+                ]
+            else:
+                payload["roles"] = []
+            payload["app_role"] = effective_role
+            payload["is_super_admin"] = is_super_admin
             request.user_payload = payload
             return f(*args, **kwargs)
         return decorated_function
