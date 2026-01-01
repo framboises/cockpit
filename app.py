@@ -170,7 +170,7 @@ def clean_collection_name(name):
 @app.route("/logout_redirect")
 def logout_redirect():
     # Ici, le cookie SSO a déjà été supprimé par le portail.
-    target_url = f"{BASE_URL}/login"
+    target_url = f"{BASE_URL}/logout"
     return redirect(target_url)
 
 @app.route("/")
