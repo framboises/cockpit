@@ -29,8 +29,10 @@ from traffic import traffic_bp
 # Configuration
 ################################################################################
 
-DEV_MODE = True
-CODING = True
+TITAN_ENV = os.getenv("TITAN_ENV", "dev").strip().lower()
+IS_PROD = TITAN_ENV in {"prod", "production"}
+DEV_MODE = not IS_PROD
+CODING = os.getenv("CODING", "false").strip().lower() in {"1", "true", "yes"}
 PORT = 5008 if DEV_MODE else 4008
 logging.basicConfig(level=logging.INFO if DEV_MODE else logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -46,9 +48,17 @@ BASE_URL = DEV_URL if DEV_MODE else PROD_URL
 
 app = Flask(__name__, template_folder='templates')
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'HacB6vFEPpU3M04zMIIcuNtebrAvRME9T2vyqcYjGrQ')
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SECURE=not DEV_MODE,
+    SESSION_COOKIE_SAMESITE="Lax",
+)
 
 JWT_SECRET = os.getenv('JWT_SECRET', 'qXyKGSrVz2wVNhOep4tALcRzCzbkgaVFVfNqtKJk0YY')
 JWT_ALGORITHM = 'HS256'
+
+if IS_PROD and CODING:
+    raise ValueError("CODING must be disabled in production!")
 
 UPLOAD_FOLDER = './uploads'
 ALLOWED_EXTENSIONS = {'json', 'geojson', 'csv', 'bson'}
@@ -61,6 +71,8 @@ csrf = CSRFProtect(app)
 # Validation stricte pour la clé secrète en production
 if not DEV_MODE and app.config['SECRET_KEY'] == 'HacB6vFEPpU3M04zMIIcuNtebrAvRME9T2vyqcYjGrQ':
     raise ValueError("SECRET_KEY must be set securely in production!")
+if not DEV_MODE and JWT_SECRET == 'qXyKGSrVz2wVNhOep4tALcRzCzbkgaVFVfNqtKJk0YY':
+    raise ValueError("JWT_SECRET must be set securely in production!")
 
 # Connexion à MongoDB
 MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
