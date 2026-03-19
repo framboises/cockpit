@@ -1,33 +1,114 @@
 # traffic.py
 from flask import Blueprint, jsonify
-import requests
+import os
 import re
+import threading
+import time
+import requests
 
 traffic_bp = Blueprint('traffic', __name__)
 
-@traffic_bp.route('/trafic/data')
-def get_trafic_data():
+WAZE_CACHE_TTL_SECONDS = int(os.getenv("WAZE_CACHE_TTL_SECONDS", "60"))
+WAZE_TIMEOUT_SECONDS = int(os.getenv("WAZE_TIMEOUT_SECONDS", "10"))
+_WAZE_CACHE = {
+    "trafic": {"data": None, "ts": 0.0},
+    "alerts": {"data": None, "ts": 0.0},
+}
+_WAZE_CACHE_LOCK = threading.Lock()
+
+def _cache_get(key):
+    if WAZE_CACHE_TTL_SECONDS <= 0:
+        return None, "BYPASS"
+    now = time.time()
+    with _WAZE_CACHE_LOCK:
+        entry = _WAZE_CACHE.get(key)
+        if entry and entry["data"] is not None and (now - entry["ts"]) < WAZE_CACHE_TTL_SECONDS:
+            return entry["data"], "HIT"
+    return None, "MISS"
+
+def _cache_set(key, data):
+    if WAZE_CACHE_TTL_SECONDS <= 0:
+        return
+    with _WAZE_CACHE_LOCK:
+        _WAZE_CACHE[key] = {"data": data, "ts": time.time()}
+
+def _cache_get_stale(key):
+    with _WAZE_CACHE_LOCK:
+        entry = _WAZE_CACHE.get(key)
+        if entry and entry["data"] is not None:
+            return entry["data"]
+    return None
+
+def _jsonify_with_cache(payload, status):
+    response = jsonify(payload)
+    response.headers["X-Waze-Cache"] = status
+    return response
+
+def _get_waze_trafic_payload():
     url = 'https://www.waze.com/row-partnerhub-api/feeds-tvt/?id=1709107524427'
+    cached, cache_status = _cache_get("trafic")
+    if cached is not None:
+        return cached, cache_status
 
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=WAZE_TIMEOUT_SECONDS)
         response.raise_for_status()
+        trafic_data = response.json()
 
-        trafic_data = response.json()  # Conversion en JSON
-
-        # Vérification que les données contiennent bien la clé "routes"
         if not isinstance(trafic_data, dict) or "routes" not in trafic_data:
-            return jsonify({"error": "Format de données inattendu, clé 'routes' manquante"}), 500
+            raise ValueError("Format de données inattendu, clé 'routes' manquante")
+
+        _cache_set("trafic", trafic_data)
+        return trafic_data, "MISS"
+    except (requests.exceptions.RequestException, ValueError) as e:
+        stale = _cache_get_stale("trafic")
+        if stale is not None:
+            return stale, "STALE"
+        raise e
+
+def _get_waze_alerts_payload():
+    url = "https://www.waze.com/row-partnerhub-api/partners/19308574489/waze-feeds/fa96cebf-1625-4b4f-91a0-a5af6db60e49?format=1"
+    cached, cache_status = _cache_get("alerts")
+    if cached is not None:
+        return cached, cache_status
+
+    try:
+        response = requests.get(url, timeout=WAZE_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        if not response.text.strip():
+            raise ValueError("Réponse vide de l'API Waze")
+        try:
+            data = response.json()
+        except requests.exceptions.JSONDecodeError as e:
+            raise ValueError("Données JSON invalides reçues de l'API Waze") from e
+
+        alerts = data.get('alerts', [])
+        _cache_set("alerts", alerts)
+        return alerts, "MISS"
+    except (requests.exceptions.RequestException, ValueError) as e:
+        stale = _cache_get_stale("alerts")
+        if stale is not None:
+            return stale, "STALE"
+        raise e
+
+@traffic_bp.route('/trafic/data')
+def get_trafic_data():
+    try:
+        trafic_data, cache_status = _get_waze_trafic_payload()
 
         # Filtrage des routes dont le champ "name" commence par "#"
-        trafic_data["routes"] = [
-            route for route in trafic_data["routes"]
+        routes = trafic_data.get("routes", [])
+        if not isinstance(routes, list):
+            routes = []
+        filtered_routes = [
+            route for route in routes
             if isinstance(route, dict) and not route.get("name", "").startswith("#")
         ]
+        payload = dict(trafic_data)
+        payload["routes"] = filtered_routes
 
-        return jsonify(trafic_data)
-
-    except requests.exceptions.RequestException as e:
+        return _jsonify_with_cache(payload, cache_status)
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # Balises acceptées : ##, #I#, #O#, #I1#, #O2#, ...
@@ -71,14 +152,8 @@ def classify_congestion(current_time, historic_time):
 
 @traffic_bp.route('/trafic/waiting_data_structured')
 def get_trafic_data_parking_structured():
-    url = 'https://www.waze.com/row-partnerhub-api/feeds-tvt/?id=1709107524427'
     try:
-        response = requests.get(url)
-        response.raise_for_status()
-        trafic_data = response.json()
-
-        if not isinstance(trafic_data, dict) or "routes" not in trafic_data:
-            return jsonify({"error": "Format de données inattendu, clé 'routes' manquante"}), 500
+        trafic_data, cache_status = _get_waze_trafic_payload()
 
         # Agrégateur: clé = (terrain, direction)
         agg = {}
@@ -138,19 +213,17 @@ def get_trafic_data_parking_structured():
         # Tri par ratio décroissant (None en fin)
         terrains.sort(key=lambda t: (-1 if t["ratio"] is None else t["ratio"]), reverse=True)
 
-        return jsonify({
+        return _jsonify_with_cache({
             "terrains": terrains,
             "updateTime": trafic_data.get("updateTime")
-        })
-
-    except requests.exceptions.RequestException as e:
+        }, cache_status)
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
     
 @traffic_bp.route('/alerts')
 def alerts():
-    # Remplacez l'URL par celle qui contient les alertes
-    url = "https://www.waze.com/row-partnerhub-api/partners/19308574489/waze-feeds/fa96cebf-1625-4b4f-91a0-a5af6db60e49?format=1"
-    response = requests.get(url)
-    data = response.json()
-    alerts = data.get('alerts', [])
-    return jsonify(alerts)
+    try:
+        alerts_payload, cache_status = _get_waze_alerts_payload()
+        return _jsonify_with_cache(alerts_payload, cache_status)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500

@@ -1054,8 +1054,8 @@ def create_todo_set():
     doc = {
         'type': typ,
         'todos': todos,
-        'createdAt': datetime.utcnow(),
-        'updatedAt': datetime.utcnow(),
+        'createdAt': datetime.now(timezone.utc),
+        'updatedAt': datetime.now(timezone.utc),
     }
     ins = COL_TODOS.insert_one(doc)
     doc['_id'] = str(ins.inserted_id)
@@ -1074,7 +1074,7 @@ def update_todo_set(id):
         todos = data.get('todos') or []
         patch['todos'] = [str(x).strip() for x in todos if str(x).strip()]
     if not patch: return jsonify({'error':'Empty update'}), 400
-    patch['updatedAt'] = datetime.utcnow()
+    patch['updatedAt'] = datetime.now(timezone.utc)
     res = COL_TODOS.find_one_and_update({'_id': ObjectId(id)}, {'$set': patch}, return_document=True)
     if not res: return jsonify({'error':'Not found'}), 404
     return jsonify(_pub(res))
@@ -1113,7 +1113,7 @@ def delete_todo_item(id, idx):
         return jsonify({'error':'Index out of range'}), 400
     arr.pop(idx)
     res = COL_TODOS.find_one_and_update(
-        {'_id': ObjectId(id)}, {'$set': {'todos': arr, 'updatedAt': datetime.utcnow()}}, return_document=True
+        {'_id': ObjectId(id)}, {'$set': {'todos': arr, 'updatedAt': datetime.now(timezone.utc)}}, return_document=True
     )
     return jsonify(_pub(res))
 
