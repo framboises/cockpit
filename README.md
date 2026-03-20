@@ -3,6 +3,8 @@
 COCKPIT est une application web de supervision qui permet de suivre en temps réel la **timeline d’un événement** (24H, GP Explorer, etc.).  
 Elle centralise toutes les activités (ouvertures/fermetures de portes, parkings, aires d’accueil, courses, animations) et offre des outils pour la **préparation**, la **visualisation** et le **pilotage opérationnel**.
 
+ajouter la lecture des rapports de fréquentation et la lecture des rapports pc org
+
 ---
 
 ## 🚀 Fonctionnalités principales
