@@ -80,3 +80,7 @@ static/libs/    → Bibliothèques tierces (Leaflet)
 - État global : `window.selectedEvent`, `window.selectedYear`
 - Appels API via `apiPost()` avec headers CSRF
 - Simulation timeline en console : `TimelineClock.setSim("2025-09-26 14:35")`, `.play()`, `.setSpeed(5)`
+
+## Règles strictes
+
+- **JAMAIS de guillemets typographiques** dans le code JS/CSS/Python. Utiliser uniquement les apostrophes droites `'` et guillemets droits `"`. Les curly quotes `'`, `'`, `"`, `"` provoquent des SyntaxError silencieuses.

@@ -24,6 +24,7 @@ from waitress import serve
 
 # Local application imports
 from traffic import traffic_bp
+from merge import run_merge
 
 ################################################################################
 # Configuration
@@ -84,6 +85,35 @@ db = client[db_name]
 
 CORS(app)  # Activer CORS pour toutes les routes
 
+# Collections cockpit groupes/user-groups
+COL_GROUPS = db['cockpit_groups']
+COL_USER_GROUPS = db['cockpit_user_groups']
+COL_GROUPS.create_index("name", unique=True)
+COL_USER_GROUPS.create_index("user_id", unique=True)
+
+# Seed fake users en mode CODING pour tester la gestion des groupes
+if CODING:
+    _fake_cockpit_users = [
+        {"prenom": "Bruce", "nom": "WAYNE", "email": "bruce@wayneenterprise.com",
+         "titre": "CEO", "service": "DIRECTION",
+         "applications": ["Cockpit"], "roles_by_app": {"cockpit": "admin"}},
+        {"prenom": "Clark", "nom": "KENT", "email": "clark@dailyplanet.com",
+         "titre": "Reporter", "service": "COMMUNICATION",
+         "applications": ["Cockpit"], "roles_by_app": {"cockpit": "manager"}},
+        {"prenom": "Diana", "nom": "PRINCE", "email": "diana@themyscira.org",
+         "titre": "Ambassadrice", "service": "RELATIONS INTERNATIONALES",
+         "applications": ["Cockpit"], "roles_by_app": {"cockpit": "user"}},
+        {"prenom": "Barry", "nom": "ALLEN", "email": "barry@starlabs.com",
+         "titre": "Ingenieur", "service": "TECHNIQUE",
+         "applications": ["Cockpit"], "roles_by_app": {"cockpit": "user"}},
+    ]
+    for _u in _fake_cockpit_users:
+        db['users'].update_one(
+            {"email": _u["email"]},
+            {"$set": _u, "$setOnInsert": {"domain_user": False}},
+            upsert=True
+        )
+
 ################################################################################
 # Contrôle d'accès
 ################################################################################
@@ -108,7 +138,10 @@ def role_required(required_role):
                     "apps": ["looker", "shiftsolver", "tagger"],
                     "roles_by_app": {"cockpit": "admin"},
                     "global_roles": [],
-                    "roles": ["user", "manager", "admin"]
+                    "roles": ["user", "manager", "admin"],
+                    "firstname": "Bruce",
+                    "lastname": "WAYNE",
+                    "email": "bruce@wayneenterprise.com"
                 }
                 return f(*args, **kwargs)
 
@@ -180,7 +213,12 @@ def index():
     payload = getattr(request, 'user_payload', {})
     user_roles = payload.get("roles", [])
     user_apps = payload.get("apps", [])
-    return render_template("index.html", user_roles=user_roles, user_apps=user_apps)
+    user_firstname = payload.get("firstname", "")
+    user_lastname = payload.get("lastname", "")
+    user_email = payload.get("email", "")
+    return render_template("index.html", user_roles=user_roles, user_apps=user_apps,
+                           user_firstname=user_firstname, user_lastname=user_lastname,
+                           user_email=user_email)
 
 @app.errorhandler(404)
 def page_not_found(e):
@@ -246,6 +284,69 @@ def get_parametrage():
         return jsonify(parametrage['data'])
     else:
         return jsonify({})
+
+# -------------------------------------------------------------------------------
+# Routes pour la carte (event view)
+# -------------------------------------------------------------------------------
+@app.route('/get_gm_categories', methods=['GET'])
+@role_required("user")
+def get_gm_categories():
+    """Return enabled groundmaster categories with their config."""
+    cats = list(db['groundmaster_categories'].find(
+        {'enabled': True},
+        {'_id': 1, 'label': 1, 'icon': 1, 'dataKey': 1, 'collection': 1,
+         'mode': 1, 'scheduleConfig': 1, 'mapping': 1, 'sourceFormat': 1,
+         'storageType': 1, 'source': 1, 'cardFields': 1}
+    ))
+    for c in cats:
+        c['_id'] = str(c['_id'])
+    return jsonify(cats)
+
+
+@app.route('/gm_collection_data/<collection_name>', methods=['GET'])
+@role_required("user")
+def gm_collection_data(collection_name):
+    """Return GeoJSON features from a groundmaster collection."""
+    valid = db['groundmaster_categories'].find_one(
+        {'collection': collection_name, 'enabled': True}, {'_id': 1}
+    )
+    if not valid:
+        return jsonify({"error": "Collection not found"}), 404
+
+    doc = db[collection_name].find_one(
+        {'type': 'FeatureCollection'} if collection_name == 'terrains' else {},
+        {'features': 1, '_id': 0}
+    )
+    if doc and 'features' in doc:
+        features = doc['features']
+    else:
+        features = []
+
+    if not features:
+        docs = list(db[collection_name].find(
+            {'type': 'FeatureCollection'}, {'features': 1, '_id': 0}
+        ))
+        for d in docs:
+            features.extend(d.get('features', []))
+
+    return jsonify(features)
+
+
+@app.route('/get_parking_color', methods=['GET'])
+@role_required("user")
+def get_parking_color():
+    color_name = request.args.get("color")
+    if not color_name:
+        return jsonify({"error": "Le parametre 'color' est requis"}), 400
+    settings = db['signmanager_settings'].find_one({}, {'_id': 0, 'itineraire.couleurs': 1})
+    if not settings or 'itineraire' not in settings or 'couleurs' not in settings['itineraire']:
+        return jsonify({"color": "#808080"})
+    couleurs = settings['itineraire']['couleurs']
+    matching = next((c for c in couleurs if c.get("nom", "").lower() == color_name.lower()), None)
+    if matching:
+        return jsonify({"color": matching.get("hexa", "#808080")})
+    return jsonify({"color": "#808080"})
+
 
 # -------------------------------------------------------------------------------
 # Route pour récupérer les catégories existantes dans la collection timetable
@@ -890,7 +991,227 @@ def get_counter_max():
         return jsonify({"current": current_value})
     else:
         return jsonify({"current": "N/A"})
-    
+
+
+################################################################################
+# AFFLUENCE PREVISIONNELLE
+################################################################################
+
+@app.route('/get_affluence', methods=['GET'])
+@role_required("user")
+def get_affluence():
+    event = request.args.get("event")
+    year = request.args.get("year")
+    if not event or not year:
+        return jsonify({"error": "Missing event or year"}), 400
+
+    # Charger parametrages complet (data + tickets a la racine)
+    doc = db['parametrages'].find_one({'event': event, 'year': year}, {'_id': 0})
+    if not doc or 'data' not in doc:
+        return jsonify({"days": [], "total_ventes": None})
+
+    gh = doc['data'].get('globalHoraires', {})
+    public_days = gh.get('dates', [])
+    ticketing_config = gh.get('ticketing', [])
+    race_raw = doc['data'].get('race') or gh.get('race')
+    tickets = doc.get('tickets', {})
+    products_data = tickets.get('products', {})
+    last_update = tickets.get('lastUpdate')
+
+    if not public_days or not ticketing_config:
+        return jsonify({"days": [], "total_ventes": None, "last_update": last_update})
+
+    # Parser la date de course courante
+    race_date = None
+    if race_raw:
+        try:
+            if isinstance(race_raw, str):
+                race_date = datetime.fromisoformat(race_raw.replace('Z', '+00:00')).date()
+            else:
+                race_date = race_raw.date() if hasattr(race_raw, 'date') else None
+        except Exception:
+            race_date = None
+
+    # ── Charger parametrages N-1 (ventes precedentes) ──
+    prev_year_str = None
+    prev_param = None
+    prev_race_date = None
+    prev_products_data = {}
+    prev_ticketing_config = []
+    prev_public_days = []
+    current_year_int = int(year) if year.isdigit() else None
+
+    if current_year_int:
+        # Chercher le parametrage de l'annee precedente la plus recente
+        prev_candidates = list(db['parametrages'].find(
+            {'event': event, 'tickets': {'$exists': True}},
+            {'year': 1, 'data.globalHoraires': 1, 'data.race': 1, 'tickets': 1, '_id': 0}
+        ))
+        for cand in sorted(prev_candidates, key=lambda c: str(c.get('year', '')), reverse=True):
+            cand_year = cand.get('year', '')
+            try:
+                if int(cand_year) < current_year_int:
+                    prev_param = cand
+                    prev_year_str = cand_year
+                    break
+            except (ValueError, TypeError):
+                continue
+
+    if prev_param:
+        prev_gh = prev_param.get('data', {}).get('globalHoraires', {})
+        prev_ticketing_config = prev_gh.get('ticketing', [])
+        prev_public_days = prev_gh.get('dates', [])
+        prev_products_data = prev_param.get('tickets', {}).get('products', {})
+        prev_race_raw = prev_param.get('data', {}).get('race') or prev_gh.get('race')
+        if prev_race_raw:
+            try:
+                if isinstance(prev_race_raw, str):
+                    prev_race_date = datetime.fromisoformat(prev_race_raw.replace('Z', '+00:00')).date()
+                else:
+                    prev_race_date = prev_race_raw.date() if hasattr(prev_race_raw, 'date') else None
+            except Exception:
+                prev_race_date = None
+
+    # ── Charger historique_controle N-1 (pic presents) ──
+    prev_hist_doc = None
+    prev_hist_race_date = None
+    prev_data_by_day = {}
+    if race_date:
+        prev_hist_candidates = list(db['historique_controle'].find(
+            {'type': 'frequentation', 'event': event},
+            sort=[('year', -1)]
+        ))
+        for cand in prev_hist_candidates:
+            cand_year = cand.get('year')
+            if current_year_int and isinstance(cand_year, (int, float)) and int(cand_year) < current_year_int:
+                prev_hist_doc = cand
+                break
+
+        if prev_hist_doc:
+            prev_hist_year = prev_hist_doc.get('year')
+            prev_hist_race_raw = prev_hist_doc.get('race')
+            if not prev_hist_race_raw:
+                portes_doc = db['historique_controle'].find_one(
+                    {'type': 'portes', 'event': event, 'year': prev_hist_year},
+                    {'_id': 0, 'race': 1}
+                )
+                if portes_doc:
+                    prev_hist_race_raw = portes_doc.get('race')
+            try:
+                if isinstance(prev_hist_race_raw, str):
+                    prev_hist_race_date = datetime.fromisoformat(prev_hist_race_raw.replace('Z', '+00:00')).date()
+                else:
+                    prev_hist_race_date = prev_hist_race_raw.date() if hasattr(prev_hist_race_raw, 'date') else None
+            except Exception:
+                prev_hist_race_date = None
+
+            if prev_hist_race_date and prev_hist_doc.get('data'):
+                from collections import defaultdict
+                day_records = defaultdict(list)
+                for rec in prev_hist_doc['data']:
+                    rec_date = rec.get('date')
+                    if isinstance(rec_date, str):
+                        day_key = rec_date[:10]
+                    elif hasattr(rec_date, 'strftime'):
+                        day_key = rec_date.strftime('%Y-%m-%d')
+                    else:
+                        continue
+                    day_records[day_key].append(rec)
+                prev_data_by_day = dict(day_records)
+
+    # ── Construire la reponse par jour ──
+    result_days = []
+    total_ventes = 0
+    total_delta = 0
+    total_ventes_prev = 0
+    JOURS_FR = {0: 'Lun', 1: 'Mar', 2: 'Mer', 3: 'Jeu', 4: 'Ven', 5: 'Sam', 6: 'Dim'}
+
+    for day_info in public_days:
+        day_str = day_info.get('date', '')
+        try:
+            day_date = datetime.strptime(day_str, '%Y-%m-%d').date()
+        except Exception:
+            continue
+
+        label = JOURS_FR.get(day_date.weekday(), '') + ' ' + day_date.strftime('%d/%m')
+
+        # Ventes N pour ce jour
+        day_ventes = 0
+        day_delta = 0
+        for tc in ticketing_config:
+            days_scope = tc.get('days', [])
+            prods = tc.get('products', [])
+            applies = (days_scope == 'all') or (day_str in days_scope)
+            if not applies:
+                continue
+            for pname in prods:
+                pdata = products_data.get(pname)
+                if not pdata:
+                    continue
+                day_ventes += pdata.get('ventes', 0)
+                hist = pdata.get('history', [])
+                if len(hist) >= 2:
+                    day_delta += pdata.get('ventes', 0) - hist[-2].get('ventes', 0)
+
+        total_ventes += day_ventes
+        total_delta += day_delta
+
+        # Ventes N-1 pour le jour equivalent (meme offset depuis la course)
+        ventes_prev = None
+        if race_date and prev_race_date and prev_ticketing_config:
+            offset_days = (day_date - race_date).days
+            target_prev_date = prev_race_date + timedelta(days=offset_days)
+            target_prev_str = target_prev_date.strftime('%Y-%m-%d')
+
+            day_ventes_prev = 0
+            found_prev = False
+            for tc in prev_ticketing_config:
+                days_scope = tc.get('days', [])
+                prods = tc.get('products', [])
+                applies = (days_scope == 'all') or (target_prev_str in days_scope)
+                if not applies:
+                    continue
+                for pname in prods:
+                    pdata = prev_products_data.get(pname)
+                    if not pdata:
+                        continue
+                    day_ventes_prev += pdata.get('ventes', 0)
+                    found_prev = True
+
+            if found_prev:
+                ventes_prev = day_ventes_prev
+                total_ventes_prev += day_ventes_prev
+
+        # Pic N-1 depuis historique_controle
+        pic_prev = None
+        if race_date and prev_hist_race_date:
+            offset_days = (day_date - race_date).days
+            target_prev_date = prev_hist_race_date + timedelta(days=offset_days)
+            target_key = target_prev_date.strftime('%Y-%m-%d')
+            if target_key in prev_data_by_day:
+                records = prev_data_by_day[target_key]
+                pic_prev = max((r.get('present', 0) for r in records), default=0)
+
+        result_days.append({
+            "date": day_str,
+            "label": label,
+            "ventes": day_ventes,
+            "delta": day_delta,
+            "ventes_prev": ventes_prev,
+            "pic_prev": pic_prev,
+            "prev_year": prev_year_str
+        })
+
+    return jsonify({
+        "days": result_days,
+        "total_ventes": total_ventes,
+        "total_delta": total_delta,
+        "total_ventes_prev": total_ventes_prev if total_ventes_prev else None,
+        "last_update": last_update,
+        "prev_year": prev_year_str
+    })
+
+
 ################################################################################
 # MONITOR TV
 ################################################################################
@@ -1118,10 +1439,236 @@ def delete_todo_item(id, idx):
     return jsonify(_pub(res))
 
 @app.route('/config/todos')
-@role_required("manager")
-
+@role_required("admin")
 def edit_todo_sets_page():
-    return render_template('edit.html')
+    payload = getattr(request, 'user_payload', {})
+    user_roles = payload.get("roles", [])
+    user_firstname = payload.get("firstname", "")
+    user_lastname = payload.get("lastname", "")
+    user_email = payload.get("email", "")
+    return render_template('edit.html', user_roles=user_roles,
+                           user_firstname=user_firstname, user_lastname=user_lastname,
+                           user_email=user_email)
+
+################################################################################
+# Gestion des groupes et utilisateurs cockpit
+################################################################################
+
+@app.route('/api/cockpit-users', methods=['GET'])
+@role_required("admin")
+def list_cockpit_users():
+    users = list(db['users'].find(
+        {"applications": "Cockpit"},
+        {"prenom": 1, "nom": 1, "email": 1, "titre": 1, "service": 1, "roles_by_app.cockpit": 1}
+    ))
+    # Joindre les groupes
+    user_groups_map = {}
+    for ug in COL_USER_GROUPS.find():
+        user_groups_map[str(ug['user_id'])] = [str(g) for g in (ug.get('groups') or [])]
+    result = []
+    for u in users:
+        uid = str(u['_id'])
+        result.append({
+            '_id': uid,
+            'prenom': u.get('prenom', ''),
+            'nom': u.get('nom', ''),
+            'email': u.get('email', ''),
+            'titre': u.get('titre', ''),
+            'service': u.get('service', ''),
+            'cockpit_role': (u.get('roles_by_app') or {}).get('cockpit', 'user'),
+            'groups': user_groups_map.get(uid, [])
+        })
+    return jsonify(result)
+
+@app.route('/api/cockpit-users/<uid>/groups', methods=['PUT'])
+@role_required("admin")
+@csrf.exempt
+def set_user_groups(uid):
+    data = request.get_json(force=True) or {}
+    group_ids = data.get('groups') or []
+    # Valider que les groupes existent
+    oids = [ObjectId(g) for g in group_ids]
+    existing = COL_GROUPS.count_documents({"_id": {"$in": oids}})
+    if existing != len(oids):
+        return jsonify({"error": "Un ou plusieurs groupes invalides"}), 400
+    COL_USER_GROUPS.update_one(
+        {"user_id": ObjectId(uid)},
+        {"$set": {"user_id": ObjectId(uid), "groups": oids}},
+        upsert=True
+    )
+    return jsonify({"ok": True})
+
+@app.route('/api/groups', methods=['GET'])
+@role_required("admin")
+def list_groups():
+    groups = list(COL_GROUPS.find().sort([('name', 1)]))
+    # Compter les membres par groupe
+    all_ug = list(COL_USER_GROUPS.find())
+    for g in groups:
+        gid = g['_id']
+        count = sum(1 for ug in all_ug if gid in (ug.get('groups') or []))
+        g['member_count'] = count
+    return jsonify([_pub(g) for g in groups])
+
+@app.route('/api/groups', methods=['POST'])
+@role_required("admin")
+@csrf.exempt
+def create_group():
+    data = request.get_json(force=True) or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({"error": "Le nom est requis"}), 400
+    # Verifier unicite
+    if COL_GROUPS.find_one({"name": name}):
+        return jsonify({"error": "Un groupe avec ce nom existe deja"}), 409
+    doc = {
+        'name': name,
+        'description': (data.get('description') or '').strip(),
+        'color': (data.get('color') or '#6366f1').strip(),
+        'createdAt': datetime.now(timezone.utc),
+        'updatedAt': datetime.now(timezone.utc),
+    }
+    ins = COL_GROUPS.insert_one(doc)
+    doc['_id'] = str(ins.inserted_id)
+    return jsonify(doc), 201
+
+@app.route('/api/groups/<gid>', methods=['PUT'])
+@role_required("admin")
+@csrf.exempt
+def update_group(gid):
+    data = request.get_json(force=True) or {}
+    patch = {}
+    if 'name' in data:
+        patch['name'] = (data['name'] or '').strip()
+    if 'description' in data:
+        patch['description'] = (data['description'] or '').strip()
+    if 'color' in data:
+        patch['color'] = (data['color'] or '').strip()
+    if not patch:
+        return jsonify({"error": "Rien a modifier"}), 400
+    patch['updatedAt'] = datetime.now(timezone.utc)
+    res = COL_GROUPS.find_one_and_update(
+        {"_id": ObjectId(gid)}, {"$set": patch}, return_document=True
+    )
+    if not res:
+        return jsonify({"error": "Groupe introuvable"}), 404
+    return jsonify(_pub(res))
+
+@app.route('/api/groups/<gid>', methods=['DELETE'])
+@role_required("admin")
+@csrf.exempt
+def delete_group(gid):
+    oid = ObjectId(gid)
+    r = COL_GROUPS.delete_one({"_id": oid})
+    if r.deleted_count == 0:
+        return jsonify({"error": "Groupe introuvable"}), 404
+    # Retirer ce groupe de tous les user_groups
+    COL_USER_GROUPS.update_many({}, {"$pull": {"groups": oid}})
+    return jsonify({"ok": True})
+
+################################################################################
+# Webhook & Merge Config
+################################################################################
+
+WEBHOOK_TOKEN = os.getenv('WEBHOOK_TOKEN', 'dev-webhook-token-change-me')
+if IS_PROD and WEBHOOK_TOKEN == 'dev-webhook-token-change-me':
+    logger.warning("WEBHOOK_TOKEN non configure en production!")
+
+
+@app.route('/webhook/parametrage-updated', methods=['POST'])
+@csrf.exempt
+def webhook_parametrage_updated():
+    """Webhook appele par groundmaster quand un parametrage est modifie."""
+    token = request.headers.get('X-Webhook-Token', '')
+    if token != WEBHOOK_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    event = data.get('event')
+    year = data.get('year')
+    if not event or not year:
+        return jsonify({"error": "event et year requis"}), 400
+
+    try:
+        result = run_merge(db, event, str(year))
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Erreur webhook merge: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/merge-config', methods=['GET'])
+@role_required("admin")
+def list_merge_configs():
+    """Liste toutes les configs de merge + detection des categories non configurees."""
+    configs = list(db.merge_config.find({}, {"_id": 0}))
+    configured_keys = {c["data_key"] for c in configs}
+
+    # Detecter les categories groundmaster non configurees
+    gm_cats = list(db.groundmaster_categories.find({}, {"_id": 0}))
+    unconfigured = []
+    for cat in gm_cats:
+        dk = cat.get("dataKey")
+        if dk and dk not in configured_keys:
+            unconfigured.append({
+                "data_key": dk,
+                "label": cat.get("label", dk),
+                "mode": cat.get("mode", "schedule"),
+                "configured": False,
+            })
+
+    return jsonify({"configs": configs, "unconfigured": unconfigured})
+
+
+@app.route('/api/merge-config/<data_key>', methods=['PUT'])
+@role_required("admin")
+@csrf.exempt
+def update_merge_config(data_key):
+    """Cree ou met a jour la config de merge pour une categorie."""
+    data = request.get_json(silent=True) or {}
+    data["data_key"] = data_key
+
+    allowed_fields = {
+        "data_key", "label", "enabled", "mode",
+        "activity_label", "timeline_category", "timeline_type",
+        "department", "access_types", "todos_type", "vignette_fields",
+    }
+    clean = {k: v for k, v in data.items() if k in allowed_fields}
+
+    db.merge_config.update_one(
+        {"data_key": data_key},
+        {"$set": clean},
+        upsert=True
+    )
+    return jsonify({"ok": True})
+
+
+@app.route('/api/merge-config/<data_key>', methods=['DELETE'])
+@role_required("admin")
+@csrf.exempt
+def delete_merge_config(data_key):
+    """Supprime la config de merge pour une categorie."""
+    db.merge_config.delete_one({"data_key": data_key})
+    return jsonify({"ok": True})
+
+
+@app.route('/api/run-merge', methods=['POST'])
+@role_required("admin")
+def run_merge_manual():
+    """Lance le merge manuellement depuis l'UI admin."""
+    data = request.get_json(silent=True) or {}
+    event = data.get('event')
+    year = data.get('year')
+    if not event or not year:
+        return jsonify({"error": "event et year requis"}), 400
+
+    try:
+        result = run_merge(db, event, str(year))
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Erreur run_merge: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 ################################################################################
 # Exécution

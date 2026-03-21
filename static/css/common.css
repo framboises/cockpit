@@ -1,113 +1,181 @@
-@font-face {
-    font-family: 'DEMO';
-    src: url('https://obtain.fr/FONT/Demo-Regular.ttf') format('truetype');
+/* ==========================================================================
+   COMMON — Pages secondaires (doors, terrains, general-stats)
+   Affichage TV plein ecran — grandes polices, fort contraste
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --bg: #0f172a;
+  --card: rgba(30, 41, 59, 0.85);
+  --card-border: rgba(148, 163, 184, 0.15);
+  --text: #f1f5f9;
+  --muted: #94a3b8;
+  --brand: #2563eb;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --radius: 16px;
+  --shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
+
+*, *::before, *::after { box-sizing: border-box; }
 
 html, body {
-    margin: 0;
-    padding: 0;
-    height: 100%;
-    font-family: 'DEMO', sans-serif;
-    background-color: rgba(9,7,38,0.8);
-    overflow: hidden; /* Pas de scroll */
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: "Outfit", system-ui, -apple-system, sans-serif;
+  background: linear-gradient(145deg, #0f172a 0%, #1e293b 100%);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
 }
 
+/* Grid container */
 #grid-container {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 20px;
-    padding: 20px 40px;
-    height: 100%;
-    box-sizing: border-box;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+  padding: 24px 32px;
+  height: 100%;
+  box-sizing: border-box;
+  align-content: start;
 }
 
-/* Style commun des cartes */
+/* Cards */
 .card {
-    background-color: rgba(0,0,0,0.7);
-    border-radius: 10px;
-    padding: 20px;
-    text-align: center;
-    color: white;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  padding: 24px;
+  text-align: center;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-/* Titres de carte */
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+
+/* Card elements */
 .card-header {
-    font-size: 2em;
-    margin-bottom: 10px;
-    font-weight: bold;
+  font-size: 1.4em;
+  margin-bottom: 8px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
 }
 
-/* Grands chiffres */
 .card-number {
-    font-size: 4em;
-    font-weight: bold;
-    margin-bottom: 5px;
+  font-size: 4em;
+  font-weight: 700;
+  margin-bottom: 4px;
+  line-height: 1.1;
+  background: linear-gradient(135deg, #fff, #cbd5e1);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
-/* Labels et sous-titres */
 .card-label, .card-subtext, .card-ranking {
-    font-size: 1.2em;
-    margin-bottom: 5px;
+  font-size: 1.1em;
+  margin-bottom: 4px;
+  color: var(--muted);
 }
 
-/* Zone de jauge ou indicateur graphique */
+.card-ranking {
+  font-size: 0.9em;
+  color: var(--brand);
+  font-weight: 600;
+}
+
+/* Gauge */
 .gauge {
-    margin-top: 10px;
-    font-size: 2em;
+  margin-top: 12px;
+  font-size: 1.6em;
+  font-weight: 600;
+  color: var(--brand);
 }
 
-/* Pour la colorisation dynamique dans la page des portes */
-.green { color: #00ff00; }
-.orange { color: #ffa500; }
-.red { color: #ff0000; }
+/* Status colors */
+.green  { color: var(--success); }
+.orange { color: var(--warning); }
+.red    { color: var(--danger); }
 
-/* Accentuation de la taille des chiffres pour l'info principale */
+/* Primary card (prominent) */
 .card.primary .card-number {
-    font-size: 6em;
+  font-size: 6em;
 }
 
-/* L'info secondaire légèrement moins imposante */
+.card.primary {
+  background: linear-gradient(145deg, rgba(37, 99, 235, 0.15), rgba(30, 41, 59, 0.85));
+  border-color: rgba(37, 99, 235, 0.3);
+}
+
 .card.secondary .card-number {
-    font-size: 4.5em;
+  font-size: 4.5em;
 }
 
-/* Modifiez votre layout spécifique pour la page Statistiques Générales */
+/* General stats layout */
 .general-stats {
-    display: grid;
-    grid-template-areas:
-        "primary primary"
-        "secondary secondary"
-        "others others";
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto auto auto;
-    gap: 20px;
-    padding: 20px;
-    height: 100%;
-    box-sizing: border-box;
+  display: grid;
+  grid-template-areas:
+    "primary primary"
+    "secondary secondary"
+    "others others";
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto auto;
+  gap: 20px;
+  padding: 24px 32px;
+  height: 100%;
+  box-sizing: border-box;
 }
 
-.general-stats .primary {
-    grid-area: primary;
-}
+.general-stats .primary { grid-area: primary; }
 
-/* Assignez la zone "secondary" au conteneur */
 .general-stats .secondary-container {
-    grid-area: secondary;
-    display: grid;
-    grid-template-columns: 1fr 1fr; /* ou ajustez selon vos besoins */
-    gap: 20px;
+  grid-area: secondary;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
 }
 
 .others-container {
-    grid-area: others;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 20px;
+  grid-area: others;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
 }
 
 .small-text {
-    font-size: 0.3em; /* Ajustez la valeur selon vos préférences */
+  font-size: 0.3em;
+  color: var(--muted);
+}
+
+/* Responsive for smaller screens */
+@media (max-width: 768px) {
+  #grid-container {
+    grid-template-columns: 1fr;
+    padding: 16px;
+    gap: 12px;
+  }
+
+  .card-number { font-size: 3em; }
+  .card.primary .card-number { font-size: 4em; }
+}
+
+/* TV mode — extra large */
+@media (min-width: 1920px) {
+  .card-header { font-size: 1.8em; }
+  .card-number { font-size: 5em; }
+  .card.primary .card-number { font-size: 8em; }
+  .card-label, .card-subtext { font-size: 1.3em; }
+
+  #grid-container { padding: 32px 48px; gap: 28px; }
 }

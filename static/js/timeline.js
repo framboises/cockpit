@@ -98,7 +98,7 @@ function renderTodoSticky(item) {
   const tasks = splitTodo(item.todo || "");
   if (tasks.length === 0) return "";
 
-  // ⬇️ si prêt -> on force l’affichage comme coché
+  // ⬇️ si prêt -> on force l'affichage comme coché
   const finalTasks = forceReady ? tasks.map(t => ({...t, done:true})) : tasks;
 
   const lis = finalTasks.map((t, idx) => `
@@ -148,7 +148,7 @@ function groupByClusters(items) {
     if (!type) { rest.push(it); return; }
 
     const kind = getOpenCloseKind(it); // 'open'|'close'|null
-    if (!kind) { // si on ne sait pas si c’est une ouverture ou une fermeture, on n’agrège pas
+    if (!kind) { // si on ne sait pas si c'est une ouverture ou une fermeture, on n'agrège pas
       rest.push(it);
       return;
     }
@@ -261,7 +261,7 @@ function removeRedundantOpenClosePairs(byDate, { mode = 'midnight' } = {}) {
     });
   });
 
-  // 2) Cross-day: ça n’a de sens qu’à minuit
+  // 2) Cross-day: ça n'a de sens qu'à minuit
   if (mode === 'midnight') {
     for (let i = 0; i < dates.length - 1; i++) {
       const d0 = dates[i], d1 = dates[i+1];
@@ -404,7 +404,7 @@ function getRuntimeDisplayStatus(baseStatus, item, cardDateStr, nowYMD, nowMin){
   return baseStatus || 'none';
 }
 
-// Statut agrégé *runtime* d’un cluster (pire des statuts de ses enfants)
+// Statut agrégé *runtime* d'un cluster (pire des statuts de ses enfants)
 function getClusterDisplayStatus(cluster, dateStr, nowYMD, nowMin) {
   if (!cluster?.items?.length) return null;
   let worst = null, worstScore = -1;
@@ -536,7 +536,7 @@ function createEventItem(date, item) {
     // gardien local pour le recalcul des statuts “live”
     eventItem.__itemData = item;
     eventItem.dataset.date = date;                         // YYYY-MM-DD
-    eventItem.setAttribute('data-minute', getItemSortMinute(item)); // pour l’auto-scroll
+    eventItem.setAttribute('data-minute', getItemSortMinute(item)); // pour l'auto-scroll
     eventItem.classList.add("event-item");
 
     // Définir une icône selon la catégorie
@@ -662,7 +662,7 @@ function createEventItem(date, item) {
             return;
           }
 
-          // a) prêt → passe par /set_preparation_ready si tu l’as
+          // a) prêt → passe par /set_preparation_ready si tu l'as
           if (allDone) {
             fetch('/set_preparation_ready', {
               method: 'POST',
@@ -795,7 +795,7 @@ function createClusterItem(date, cluster) {
     toggleDetails(e, e.currentTarget);
   });
 
-  // clic sur une sous-ligne -> ouvrir le drawer de l’item
+  // clic sur une sous-ligne -> ouvrir le drawer de l'item
   el.querySelectorAll('.cluster-line').forEach(li=>{
     li.addEventListener('click', ()=>{
       const id = li.getAttribute('data-child-id');
@@ -968,24 +968,12 @@ function openTimetableItemModal(date, item) {
         return;
     }
     // Fallback simple si le drawer n'est pas chargé
-    alert("Détails événement indisponibles (drawer non chargé).");
+    if (typeof showToast === "function") showToast("warning", "Details evenement indisponibles.");
 }
 
-// Écouteur sur le bouton HUD pour lancer fetchTimetable()
-document.addEventListener('DOMContentLoaded', function() {
-  const hudButton = document.getElementById("hud-button");
-  if (hudButton) {
-    hudButton.addEventListener("click", function() {
-      // ⚠️ d’abord le paramétrage, ensuite la timeline (pour avoir publicDatesMap prêt)
-      fetchParametrage().then(() => {
-        fetchTimetable();
-        updateGlobalCounter();
-      });
-    });
-  } else {
-    console.error("Le bouton avec l'ID 'hud-button' n'a pas été trouvé.");
-  }
-});
+// Expose fetchTimetable et fetchParametrage globalement pour main.js
+window.fetchTimetable = fetchTimetable;
+window.fetchParametrage = fetchParametrage;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 // FONCTION AJOUT
@@ -1076,7 +1064,7 @@ document.addEventListener('DOMContentLoaded', function(){
           const err = document.createElement('div');
           err.className = 'form-error';
           err.textContent = 'Saisir au moins une heure de début ou de fin.';
-          // on affiche l’erreur sous le champ "Heure de début"
+          // on affiche l'erreur sous le champ "Heure de début"
           document.getElementById('start-time').closest('.form-group').appendChild(err);
           document.getElementById('start-time').focus();
           return; // stop submit
@@ -1109,7 +1097,7 @@ document.addEventListener('DOMContentLoaded', function(){
           if (editId)      payload._id = editId;
         }
 
-        // Sécuriser l’endpoint : si on est en "edit" mais qu'on n'a ni _id ni param_id, on bascule en création
+        // Sécuriser l'endpoint : si on est en "edit" mais qu'on n'a ni _id ni param_id, on bascule en création
         let finalEndpoint = endpoint;
         if (isEdit && !editId) {
           console.warn('[Timetable] Edit sans _id/param_id -> fallback création');
@@ -1182,7 +1170,7 @@ function openEventDrawer(date, item) {
 
   _drawerCurrent = { date, item: safe };
 
-  // 🆕 garde-fou global: l’ID est accessible même si l’objet est re-cloné
+  // 🆕 garde-fou global: l'ID est accessible même si l'objet est re-cloné
   if (drawerEl) drawerEl.dataset.eventId = safe._id || safe.id || '';
 
   renderDrawerView();
@@ -1463,7 +1451,7 @@ function saveUpdate(dateStr, item, closeAfter = false) {
       showDynamicFlashMessage("Mise à jour réussie", "success");
       fetchTimetable(); // rafraîchir la liste
       closeAfter && closeEventDrawer();
-      // recharger la vue lecture avec l’objet mis à jour
+      // recharger la vue lecture avec l'objet mis à jour
       !_drawerCurrent || renderDrawerView();
     } else {
       showDynamicFlashMessage("Erreur lors de l'enregistrement", "error");
@@ -1472,11 +1460,14 @@ function saveUpdate(dateStr, item, closeAfter = false) {
   .catch(()=> showDynamicFlashMessage("Erreur réseau", "error"));
 }
 
-function deleteCurrent() {
+async function deleteCurrent() {
   const it = _drawerCurrent.item;
   if (!requireIdOrWarn(it)) return;
   if (!it || !it._id) return;
-  if (!confirm("Supprimer définitivement cet événement ?")) return;
+  if (typeof showConfirmToast === "function") {
+    const ok = await showConfirmToast("Supprimer definitivement cet evenement ?", { type: "error", okLabel: "Supprimer" });
+    if (!ok) return;
+  }
 
   const payload = {
     event: window.selectedEvent,
@@ -1635,7 +1626,7 @@ async function openEditModalFromDrawer(dateStr, item) {
   }
   prepHidden.value = (item.preparation_checked ?? '').toString().toLowerCase();
 
-  // 7) fermer le drawer AVANT d’ouvrir la modale (évite le warning ARIA)
+  // 7) fermer le drawer AVANT d'ouvrir la modale (évite le warning ARIA)
   closeEventDrawer();
   // enlever le focus actuel pour ne pas "cacher" un élément focusable
   document.activeElement && document.activeElement.blur?.();
@@ -1682,7 +1673,7 @@ async function openEditModalFromDrawer(dateStr, item) {
           if ([Y,Mo,D,H,Mi].some(n => !Number.isFinite(n))) {
             console.warn('[Clock] setSim: composant non numérique'); return;
           }
-          // Date en FUSEAU LOCAL (important pour éviter l’effet UTC)
+          // Date en FUSEAU LOCAL (important pour éviter l'effet UTC)
           dt = new Date(Y, Mo - 1, D, H, Mi, 0, 0);
         } else {
           // Fallback natif (toujours local si string sans Z)
@@ -1709,7 +1700,7 @@ async function openEditModalFromDrawer(dateStr, item) {
       console.info('[Clock] speed =', this._speed, 'min/s');
     },
     play(){
-      if (this._mode !== 'sim') { console.warn('[Clock] play: passe d’abord en mode simulé avec setSim'); return; }
+      if (this._mode !== 'sim') { console.warn("[Clock] play: passe d'abord en mode simule avec setSim"); return; }
       if (this._playing) return;
       this._playing = true;
       this._lastTs = performance.now();
@@ -1756,7 +1747,7 @@ async function openEditModalFromDrawer(dateStr, item) {
     }
     if (!raw.length) return [];
 
-    // Regroupement par minute identique → moyenne de y (stabilise l’interpolation)
+    // Regroupement par minute identique → moyenne de y (stabilise l'interpolation)
     const byMin = new Map();
     for (const r of raw) {
       const arr = byMin.get(r.minute) || [];
@@ -1822,7 +1813,7 @@ async function openEditModalFromDrawer(dateStr, item) {
     _lineEl: null,
 
     init(){
-      // s’assure que la ligne existe bien DANS #timeline-main
+      // s'assure que la ligne existe bien DANS #timeline-main
       const main = document.getElementById('timeline-main');
       let el = document.getElementById('now-line');
 
@@ -1898,13 +1889,45 @@ async function openEditModalFromDrawer(dateStr, item) {
       const labelEl = this._lineEl.querySelector('.now-badge') || this._lineEl.querySelector('.now-line-label');
       if (labelEl) labelEl.textContent = `${hh}:${mm}`;
 
-      // --- Section cible : aujourd’hui > dernière passée > première future ---
+      // --- Section cible : aujourd'hui > sinon fixer en haut/bas ---
       let target = map.find(x => x.iso === nowYMD);
-      if (!target) {
-        const past = map.filter(x => x.iso < nowYMD);
-        if (past.length) target = past[past.length - 1];
+      const todayFound = !!target;
+      this._lineEl.style.display = '';
+
+      if (!todayFound) {
+        const allBefore = map.every(x => x.iso < nowYMD);
+        const allAfter  = map.every(x => x.iso > nowYMD);
+
+        if (allBefore) {
+          // Aujourd'hui est apres tous les jours affiches -> ligne en bas
+          const lastSection = map[map.length - 1].el;
+          const lastCards = Array.from(lastSection.querySelectorAll('.event-item'));
+          const lastEl = lastCards.length ? lastCards[lastCards.length - 1] : lastSection;
+          const contRect = container.getBoundingClientRect();
+          const elRect = lastEl.getBoundingClientRect();
+          const y = elRect.bottom - contRect.top + container.scrollTop + 4;
+          this._lineEl.style.top = y + 'px';
+          container.scrollTo({ top: Math.max(0, y - container.clientHeight + 40), behavior: 'smooth' });
+        } else if (allAfter) {
+          // Aujourd'hui est avant tous les jours affiches -> ligne juste au-dessus du premier jour
+          const firstSection = map[0].el;
+          const contRect = container.getBoundingClientRect();
+          const secRect = firstSection.getBoundingClientRect();
+          const y = secRect.top - contRect.top + container.scrollTop - 16;
+          this._lineEl.style.top = Math.max(4, y) + 'px';
+          container.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+          // Aujourd'hui est entre deux jours -> fixer entre les sections
+          const past = map.filter(x => x.iso < nowYMD);
+          const lastPast = past[past.length - 1].el;
+          const contRect = container.getBoundingClientRect();
+          const secRect = lastPast.getBoundingClientRect();
+          const y = secRect.bottom - contRect.top + container.scrollTop + 4;
+          this._lineEl.style.top = y + 'px';
+          container.scrollTo({ top: Math.max(0, y - this._lineTopPx), behavior: 'smooth' });
+        }
+        return;
       }
-      if (!target) target = map[0];
 
       const targetSection = target.el;
       const targetISO     = target.iso;
@@ -2149,7 +2172,7 @@ async function openEditModalFromDrawer(dateStr, item) {
     ul.innerHTML = '';
     if (!list.length) { ul.classList.remove('show'); return; }
 
-    // Limite d’affichage
+    // Limite d'affichage
     const MAX = 30;
     const sliced = list.slice(0, MAX);
 
@@ -2258,7 +2281,7 @@ async function openEditModalFromDrawer(dateStr, item) {
     });
   }
 
-  // --- Hook d’indexation : on “patche” fetchTimetable pour remplir l’index après rendu
+  // --- Hook d'indexation : on “patche” fetchTimetable pour remplir l'index après rendu
   const _origFetchTT = window.fetchTimetable;
   window.fetchTimetable = function(){
     const p = _origFetchTT.apply(this, arguments);
@@ -2316,7 +2339,7 @@ async function openEditModalFromDrawer(dateStr, item) {
           });
         });
 
-        // Initialiser l’UI au premier rendu
+        // Initialiser l'UI au premier rendu
         initTimelineSearchUI();
         populateDeptFilter();
         applyDeptFilter(document.getElementById('timeline-dept-filter')?.value || '');

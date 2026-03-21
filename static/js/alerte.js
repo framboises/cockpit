@@ -63,11 +63,7 @@ function updateJamCounter(count) {
 function setTrafficColor(spanId, count) {
   const span = $(spanId); if (!span) return;
   const container = span.closest('.traffic-counter'); if (!container) return;
-  const labelEl = container.querySelector('.label');
-  const counterEl = container.querySelector('.counter');
-  const isAlert = count > 0;
-  labelEl?.classList.toggle('red', isAlert);
-  counterEl?.classList.toggle('red', isAlert);
+  container.classList.toggle('has-alerts', count > 0);
 }
 
 // ---------- Rendu liste optionnelle ----------

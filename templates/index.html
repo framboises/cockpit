@@ -1,310 +1,510 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>COCKPIT</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
 
-    <!-- Bibliothèques CSS externes -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css" />
+    <!-- Fonts -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+    <!-- Libs CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/photoswipe@5.4.4/dist/photoswipe.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/photoswipe-dynamic-caption-plugin@1.2.7/photoswipe-dynamic-caption-plugin.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 
-    <!-- Chart.js (si widgets graphiques) -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-    <!-- Styles personnalisés -->
+    <!-- App CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 
-    <!-- Utils externes -->
+    <!-- Libs JS -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
     <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
 </head>
 
-<body class="body-without-sidebar">
+<body>
+<div class="app-layout">
 
-    <!-- Topbar -->
-    <div id="search-box">
-        <button id="hamburger-button"><i class="material-icons">menu</i></button>
-
-        <button class="icon-button" id="hud-button" title="Rechercher">
-            <i class="material-symbols-outlined">guardian</i>
-        </button>
-        <button class="icon-button" id="nowline-toggle" title="Auto-scroll Maintenant">
-            <i class="material-symbols-outlined">lock_clock</i>
-        </button>
-        <button class="icon-button" id="add-event-button" title="Ajouter un événement">
-            <i class="material-symbols-outlined">add</i>
-        </button>
-        <button class="icon-button" id="stats-page-button" title="Statistiques Générales">
-            <i class="material-symbols-outlined">insert_chart</i>
-        </button>
-        <button class="icon-button" id="parkings-page-button" title="Parkings et Aires d'Accueil">
-            <i class="material-symbols-outlined">local_parking</i>
-        </button>
-        <button class="icon-button" id="doors-page-button" title="Portes">
-            <i class="material-symbols-outlined">door_front</i>
-        </button>
-
-        <div id="left-section"></div>
-        <div id="right-section">
-            <div id="meteo-previsions" class="meteo-container"></div>
-            <img id="logo" src="{{ url_for('static', filename='img/ACO-logo-monochrome-universel-blanc.png') }}" alt="Logo ACO">
+    <!-- ===== SIDEBAR ===== -->
+    <aside id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+            <img class="sidebar-logo" src="{{ url_for('static', filename='img/ACO-logo-monochrome-universel-blanc.png') }}" alt="ACO">
+            <span class="sidebar-brand">COCKPIT</span>
+            <button id="sidebarToggle" class="sidebar-toggle" aria-label="Toggle sidebar">
+                <span class="material-symbols-outlined">menu</span>
+            </button>
         </div>
-    </div>
 
-    <!-- Sidebar -->
-    <div id="sidebar">
-        <ul>
-            <li>
-                <a href="http://safe.lemans.org/home">
-                    <i class="fa fa-tachometer-alt"></i> Tableaux de bord
-                </a>
-            </li>
-            <li>
-                <a href="/config/todos">
-                    <i class="fa fa-cogs"></i> Configuration
-                </a>
-            </li>
-            <li>
-                <label for="event-select" style="color:#ccc;font-size:16px;">Événement</label>
-                <select id="event-select" style="width:90%;margin-top:5px;"></select>
-            </li>
-            <li>
-                <label for="year-select" style="color:#ccc;font-size:16px;">Année</label>
-                <select id="year-select" style="width:90%;margin-top:5px;"></select>
-            </li>
-            <li>
-                <a href="/logout_redirect" style="color:red;">
-                    <i class="fa fa-sign-out-alt"></i> Se déconnecter
-                </a>
-            </li>
-        </ul>
-    </div>
+        <nav class="sidebar-nav">
+            <a href="/" class="nav-btn is-active">
+                <span class="material-symbols-outlined">dashboard</span>
+                <span class="label">Cockpit</span>
+            </a>
+            <button class="nav-btn" id="doors-page-button">
+                <span class="material-symbols-outlined">door_front</span>
+                <span class="label">Portes</span>
+            </button>
+            <button class="nav-btn" id="parkings-page-button">
+                <span class="material-symbols-outlined">local_parking</span>
+                <span class="label">Parkings</span>
+            </button>
+            <button class="nav-btn" id="stats-page-button">
+                <span class="material-symbols-outlined">insert_chart</span>
+                <span class="label">Statistiques</span>
+            </button>
+            {% if "admin" in user_roles %}
+            <a href="/config/todos" class="nav-btn">
+                <span class="material-symbols-outlined">settings</span>
+                <span class="label">Configuration</span>
+            </a>
+            {% endif %}
+        </nav>
 
-    <!-- MAIN GRID: Widgets (gauche) + Timeline (centre) -->
-    <div id="main-content">
-
-        <!-- Panneau Widgets -->
-        <aside id="widgets-panel" aria-label="Widgets opérationnels">
-
-            <!-- Trafic & Alertes -->
-            <section class="widget-card" id="widget-traffic">
-                <header class="widget-header">
-                    <h3>Trafic</h3>
-                </header>
-                <div class="widget-body">
-                    <div class="traffic-counters">
-                        <div class="traffic-counter">
-                            <div class="label">Accident</div>
-                            <div class="counter"><span id="accident-number">0</span></div>
-                        </div>
-                        <div class="traffic-counter">
-                            <div class="label">Ralentissement</div>
-                            <div class="counter"><span id="jam-number">0</span></div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Compteurs -->
-            <section class="widget-card" id="widget-counters">
-                <header class="widget-header">
-                    <h3>Compteurs</h3>
-                </header>
-                <div class="widget-body two-cols">
-                    <div class="stat-block">
-                        <div id="counter_now" class="counter-number">—</div>
-                        <div class="counter-label">Présents actuellement</div>
-                    </div>
-                    <div class="stat-block">
-                        <div id="counter_max" class="counter-number">—</div>
-                        <div class="counter-label">Présents maximum</div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Parkings & Aires -->
-            <section class="widget-card" id="widget-parkings">
-                <header class="widget-header">
-                    <h3>Temps d'accès</h3>
-                </header>
-                <div class="widget-body" id="parking-indicators-list">
-                    <!-- Items injectés via JS : .parking-row -->
-                </div>
-            </section>
-        </aside>
-
-        <!-- Barre de recherche Timeline et filtre -->
-        <section id="timeline-searchbar" aria-label="Recherche timeline">
-        <div class="ts-input-wrap">
-            <i class="material-icons">search</i>
-            <input id="timeline-search-input" type="search" placeholder="Rechercher (activité, catégorie, lieu, remarque)…" autocomplete="off" />
-            <select id="timeline-dept-filter" title="Filtrer par département">
-            <option value="">Tous départements</option>
-            </select>
-            <button id="timeline-search-clear" title="Effacer"><span class="material-icons">close</span></button>
-        </div>
-        <ul id="timeline-search-results" role="listbox" aria-label="Résultats de recherche"></ul>
-        </section>
-
-        <!-- Timeline au centre -->
-        <main id="timeline-main">
-            <div id="now-line" hidden>
-                <span class="now-badge">--:--</span>
+        <div class="sidebar-panel">
+            <div>
+                <label for="event-select">Evenement</label>
+                <select id="event-select"></select>
             </div>
-            <div id="event-list" class="timeline-container">
-                <!-- Événements injectés par timeline.js -->
+            <div>
+                <label for="year-select">Annee</label>
+                <select id="year-select"></select>
             </div>
-        </main>
-
-    </div>
-
-    <!-- Modales (inchangées) -->
-    <div id="modal-flipcard-container"></div>
-    <div id="flipcards-container"></div>
-
-    <div id="meteoModal" class="modal">
-        <div class="modal-content">
-            <div id="meteo-details"></div>
         </div>
+
+        <!-- AI Assistant teaser -->
+        <div class="sidebar-ai" title="Assistant IA (bientot)">
+            <span class="material-symbols-outlined">smart_toy</span>
+            <span>Assistant IA</span>
+        </div>
+
+        {% if "admin" in user_roles %}
+        <!-- Simulation horloge (admin only) -->
+        <div class="sidebar-sim" id="sidebar-sim">
+            <div class="sidebar-sim-header" id="sidebar-sim-toggle">
+                <span class="material-symbols-outlined" style="font-size:18px;">schedule</span>
+                <span class="label">Simulation</span>
+                <span class="sim-live-badge" id="sim-badge" style="display:none;">SIM</span>
+            </div>
+            <div class="sidebar-sim-body" id="sidebar-sim-body" style="display:none;">
+                <div class="sim-clock" id="sim-clock-display">--:--</div>
+                <div class="sim-date" id="sim-date-display">--/--/----</div>
+                <div class="sim-controls">
+                    <label class="sim-label">Date & heure</label>
+                    <input type="datetime-local" id="sim-datetime" class="sim-input" />
+                </div>
+                <div class="sim-speed-row">
+                    <label class="sim-label">Vitesse</label>
+                    <select id="sim-speed" class="sim-input">
+                        <option value="0.0167">x1 (temps reel)</option>
+                        <option value="0.0833">x5</option>
+                        <option value="0.25">x15</option>
+                        <option value="0.5">x30</option>
+                        <option value="1">x60 (1min/s)</option>
+                        <option value="5">x300 (5min/s)</option>
+                        <option value="15">x900 (15min/s)</option>
+                    </select>
+                </div>
+                <div class="sim-actions">
+                    <button class="sim-btn sim-btn-start" id="sim-start" title="Demarrer">
+                        <span class="material-symbols-outlined">play_arrow</span>
+                    </button>
+                    <button class="sim-btn" id="sim-pause" title="Pause" disabled>
+                        <span class="material-symbols-outlined">pause</span>
+                    </button>
+                    <button class="sim-btn sim-btn-stop" id="sim-reset" title="Revenir a l'heure reelle">
+                        <span class="material-symbols-outlined">stop</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="sidebar-footer">
+            <div class="sidebar-user-info">
+                <span class="material-symbols-outlined sidebar-user-avatar">account_circle</span>
+                <div class="sidebar-user-details">
+                    <span class="sidebar-user-name">{{ user_firstname }} {{ user_lastname }}</span>
+                    <span class="sidebar-user-email">{{ user_email }}</span>
+                </div>
+            </div>
+            <a href="/logout_redirect" class="nav-btn nav-btn-danger">
+                <span class="material-symbols-outlined">logout</span>
+                <span class="label">Deconnexion</span>
+            </a>
+        </div>
+    </aside>
+
+    <!-- ===== MAIN ===== -->
+    <div class="app-main">
+
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-event-info">
+                <span class="header-event-name" id="header-event-name">---</span>
+                <span class="header-event-year" id="header-event-year"></span>
+            </div>
+            <div class="header-separator"></div>
+            <div class="header-upcoming-wrap">
+                <div class="header-upcoming-track" id="header-upcoming">
+                    <span class="header-upcoming-empty">
+                        <span class="material-symbols-outlined" style="font-size:16px;">event_busy</span>
+                        Aucun evenement a venir
+                    </span>
+                </div>
+            </div>
+            <div class="header-spacer"></div>
+            <div class="header-actions">
+                <div class="view-toggle" role="group" aria-label="Vue">
+                    <button class="view-toggle-btn active" id="view-timeline-btn" title="Timeline">
+                        <span class="material-symbols-outlined">view_agenda</span>
+                    </button>
+                    <button class="view-toggle-btn" id="view-map-btn" title="Carte">
+                        <span class="material-symbols-outlined">map</span>
+                    </button>
+                </div>
+                <button class="icon-button" id="nowline-toggle" title="Auto-scroll Maintenant">
+                    <span class="material-symbols-outlined">lock_clock</span>
+                </button>
+                <button class="icon-button" id="add-event-button" title="Ajouter un evenement">
+                    <span class="material-symbols-outlined">add</span>
+                </button>
+            </div>
+            <div id="right-section">
+                <div id="meteo-previsions" class="meteo-container"></div>
+            </div>
+        </header>
+
+        <!-- Content grid -->
+        <div id="main-content">
+            <!-- Logo watermark -->
+            <div class="hero-watermark" id="heroWatermark">
+                <img src="{{ url_for('static', filename='img/ACO-logo-monochrome-universel-blanc.png') }}" alt="ACO">
+            </div>
+
+            <!-- Widgets panel -->
+            <aside id="widgets-panel" aria-label="Widgets operationnels">
+
+                <!-- Trafic -->
+                <section class="widget-card" id="widget-traffic">
+                    <header class="widget-header">
+                        <h3>Trafic</h3>
+                    </header>
+                    <div class="widget-body">
+                        <div class="traffic-counters">
+                            <div class="traffic-counter">
+                                <div class="label">Accident</div>
+                                <div class="counter"><span id="accident-number">0</span></div>
+                            </div>
+                            <div class="traffic-counter">
+                                <div class="label">Ralentissement</div>
+                                <div class="counter"><span id="jam-number">0</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Compteurs -->
+                <section class="widget-card" id="widget-counters">
+                    <header class="widget-header">
+                        <h3>Compteurs</h3>
+                    </header>
+                    <div class="widget-body two-cols">
+                        <div class="stat-block">
+                            <div id="counter_now" class="counter-number">&mdash;</div>
+                            <div class="counter-label">Presents actuellement</div>
+                        </div>
+                        <div class="stat-block">
+                            <div id="counter_max" class="counter-number">&mdash;</div>
+                            <div class="counter-label">Presents maximum</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Parkings -->
+                <section class="widget-card" id="widget-parkings">
+                    <header class="widget-header">
+                        <h3>Temps d'acces</h3>
+                    </header>
+                    <div class="widget-body" id="parking-indicators-list">
+                        <!-- Items injectes via JS -->
+                    </div>
+                </section>
+
+                <!-- Communications -->
+                <section class="widget-card" id="widget-comms">
+                    <header class="widget-header">
+                        <h3>Communications</h3>
+                    </header>
+                    <div class="widget-body" id="widget-comms-body">
+                        <div class="widget-placeholder">
+                            <span class="material-symbols-outlined">forum</span>
+                            <span>Messages operationnels</span>
+                        </div>
+                    </div>
+                </section>
+
+            </aside>
+
+            <!-- Search bar -->
+            <section id="timeline-searchbar" aria-label="Recherche timeline">
+                <div class="ts-input-wrap">
+                    <i class="material-icons">search</i>
+                    <input id="timeline-search-input" type="search" placeholder="Rechercher (activite, categorie, lieu, remarque)..." autocomplete="off" />
+                    <!-- Filtre: departement (timeline) OU categories (carte) -->
+                    <div class="search-filter-slot">
+                        <select id="timeline-dept-filter" title="Filtrer par departement">
+                            <option value="">Tous departements</option>
+                        </select>
+                        <div id="map-category-filter" class="map-cat-filter" style="display:none;">
+                            <button type="button" class="map-cat-toggle" id="map-cat-toggle">
+                                <span class="material-symbols-outlined" style="font-size:16px;">filter_list</span>
+                                <span id="map-cat-toggle-label">Categories</span>
+                                <span class="material-symbols-outlined" style="font-size:16px;">expand_more</span>
+                            </button>
+                            <div id="map-cat-dropdown" class="map-cat-dropdown"></div>
+                        </div>
+                    </div>
+                    <button id="timeline-search-clear" title="Effacer"><span class="material-icons">close</span></button>
+                </div>
+                <ul id="timeline-search-results" role="listbox" aria-label="Resultats de recherche"></ul>
+            </section>
+
+            <!-- Timeline -->
+            <main id="timeline-main">
+                <div id="now-line" hidden>
+                    <span class="now-badge">--:--</span>
+                </div>
+                <div id="event-list" class="timeline-container">
+                    <!-- Evenements injectes par timeline.js -->
+                </div>
+            </main>
+
+            <!-- Carte (meme emplacement, alternance avec timeline) -->
+            <div id="map-main" class="map-main" style="display:none;">
+                <div id="cockpit-map"></div>
+            </div>
+
+            <!-- Widgets droite -->
+            <aside id="widgets-panel-right" aria-label="Widgets droite">
+
+                <!-- Statut evenement -->
+                <section class="status-card" id="status-card">
+                    <div class="status-indicator" id="status-indicator">
+                        <span class="material-symbols-outlined status-icon" id="status-icon">hourglass_empty</span>
+                        <div class="status-text">
+                            <span class="status-label" id="status-label">Chargement...</span>
+                            <span class="status-detail" id="status-detail"></span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Widget libre 1 -->
+                <section class="widget-card" id="widget-right-1">
+                    <header class="widget-header">
+                        <h3>Meteo</h3>
+                    </header>
+                    <div class="widget-body" id="widget-right-1-body">
+                        <div class="widget-placeholder">
+                            <span class="material-symbols-outlined">cloud</span>
+                            <span>Donnees meteo</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Widget libre 2 -->
+                <section class="widget-card" id="widget-right-2">
+                    <header class="widget-header">
+                        <h3>Affluence</h3>
+                        <div class="widget-tabs">
+                            <button class="widget-tab active" data-tab="affluence-jours">Jours</button>
+                            <button class="widget-tab" data-tab="affluence-tab2">Tab 2</button>
+                            <button class="widget-tab" data-tab="affluence-tab3">Tab 3</button>
+                        </div>
+                    </header>
+                    <div class="widget-body widget-tab-content active" id="widget-right-2-body" data-tab="affluence-jours">
+                        <div class="widget-placeholder">
+                            <span class="material-symbols-outlined">groups</span>
+                            <span>Suivi affluence</span>
+                        </div>
+                    </div>
+                    <div class="widget-body widget-tab-content" data-tab="affluence-tab2"></div>
+                    <div class="widget-body widget-tab-content" data-tab="affluence-tab3"></div>
+                </section>
+
+                <!-- Widget libre 3 -->
+                <section class="widget-card" id="widget-right-3">
+                    <header class="widget-header">
+                        <h3>Alertes</h3>
+                    </header>
+                    <div class="widget-body" id="widget-right-3-body">
+                        <div class="widget-placeholder">
+                            <span class="material-symbols-outlined">notifications_active</span>
+                            <span>Fil d'alertes</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Widget libre 4 -->
+                <section class="widget-card" id="widget-right-4">
+                    <header class="widget-header">
+                        <h3>Ressources</h3>
+                    </header>
+                    <div class="widget-body" id="widget-right-4-body">
+                        <div class="widget-placeholder">
+                            <span class="material-symbols-outlined">engineering</span>
+                            <span>Suivi ressources</span>
+                        </div>
+                    </div>
+                </section>
+
+            </aside>
+
+        </div>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            TITAN &mdash; Techniques d'Integration Topographique avec Navigation
+        </footer>
+
     </div>
 
-    <div id="addEventModal" class="modal">
-        <div class="modal-content">
-            <span class="close" id="closeAddEvent">&times;</span>
-            <h3>Ajouter un événement à la Timetable</h3>
-            <form id="addEventForm" novalidate>
+</div>
+
+<!-- ===== MODALES ===== -->
+<div id="modal-flipcard-container"></div>
+<div id="flipcards-container"></div>
+
+<!-- Meteo -->
+<div id="meteoModal" class="modal">
+    <div class="modal-content">
+        <div id="meteo-details"></div>
+    </div>
+</div>
+
+<!-- Ajout evenement -->
+<div id="addEventModal" class="modal">
+    <div class="modal-content">
+        <span class="close" id="closeAddEvent"></span>
+        <h3>Ajouter un evenement a la Timetable</h3>
+        <form id="addEventForm" novalidate>
             <div class="form-group">
                 <label for="event-date">Date (YYYY-MM-DD) <span class="req">*</span></label>
                 <input type="date" id="event-date" name="date" required class="form-input">
             </div>
-
             <div class="form-group">
                 <label for="start-time">
-                Heure de début <span class="req">*</span>
-                <small class="hint">au moins un des deux (début ou fin)</small>
+                    Heure de debut <span class="req">*</span>
+                    <small class="hint">au moins un des deux (debut ou fin)</small>
                 </label>
                 <input type="text" id="start-time" name="start" placeholder="ex: 07:00 ou TBC" class="form-input">
             </div>
-
             <div class="form-group">
                 <label for="end-time">
-                Heure de fin <span class="req">*</span>
-                <small class="hint">au moins un des deux (début ou fin)</small>
+                    Heure de fin <span class="req">*</span>
+                    <small class="hint">au moins un des deux (debut ou fin)</small>
                 </label>
                 <input type="text" id="end-time" name="end" placeholder="ex: 20:00 ou TBC" class="form-input">
             </div>
-
             <div class="form-group">
-                <label for="duration">Durée:</label>
+                <label for="duration">Duree:</label>
                 <input type="text" id="duration" name="duration" placeholder="ex: 13:00" class="form-input">
             </div>
-
             <div class="form-group">
-                <label for="category">Catégorie <span class="req">*</span></label>
+                <label for="category">Categorie <span class="req">*</span></label>
                 <select id="category" name="category" required class="form-input"></select>
             </div>
-
             <div class="form-group">
-                <label for="activity">Activité <span class="req">*</span></label>
+                <label for="activity">Activite <span class="req">*</span></label>
                 <input type="text" id="activity" name="activity" required class="form-input">
             </div>
-
             <div class="form-group">
                 <label for="place">Lieu:</label>
                 <input type="text" id="place" name="place" class="form-input">
             </div>
-
             <div class="form-group">
-                <label for="department">Département:</label>
+                <label for="department">Departement:</label>
                 <input type="text" id="department" name="department" class="form-input">
             </div>
-
             <div class="form-group">
                 <label for="remark">Remarques:</label>
                 <textarea id="remark" name="remark" class="form-input"></textarea>
             </div>
-
             <div class="modal-buttons">
                 <button type="button" class="cancel-btn" id="cancelAddEvent">Annuler</button>
                 <button type="submit" class="upload-btn">Enregistrer</button>
             </div>
-            </form>
-        </div>
+        </form>
     </div>
+</div>
 
-    <!-- === Event Drawer (panneau droit) === -->
-    <div id="event-drawer-overlay" class="drawer-overlay"></div>
-
-    <aside id="event-drawer" class="event-drawer" aria-hidden="true" aria-label="Détails événement">
+<!-- Drawer evenement -->
+<div id="event-drawer-overlay" class="drawer-overlay"></div>
+<aside id="event-drawer" class="event-drawer" aria-hidden="true" aria-label="Details evenement">
     <header class="drawer-header">
-        <h3 id="drawer-title">Événement</h3>
+        <h3 id="drawer-title">Evenement</h3>
         <button id="drawer-close" class="drawer-close" aria-label="Fermer">
-        <span class="material-icons">close</span>
+            <span class="material-icons">close</span>
         </button>
     </header>
-
     <div id="event-drawer-body" class="drawer-body">
-        <!-- Contenu injecté dynamiquement -->
+        <!-- Contenu injecte dynamiquement -->
     </div>
-
     <footer class="drawer-footer">
         <button id="drawer-edit" class="btn btn-primary">Modifier</button>
         <button id="drawer-duplicate" class="btn btn-secondary">Dupliquer</button>
         <button id="drawer-delete" class="btn btn-danger">Supprimer</button>
     </footer>
-    </aside>
+</aside>
 
-    <!-- Flash messages -->
-    <div id="flash-container">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="flash-popup {{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-    </div>
+<!-- Flash messages -->
+<div id="flash-container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="flash-popup {{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+</div>
 
-    <!-- Overlays -->
-    <div id="modalOverlay" class="modal-overlay"></div>
+<!-- Toast container -->
+<div id="toast-container"></div>
 
-    <!-- Popup accident -->
-    <div id="trafficMapModal" class="modal">
-        <div class="modal-content">
-          <div id="trafficModalHeader">
+<!-- Overlay -->
+<div id="modalOverlay" class="modal-overlay"></div>
+
+<!-- Traffic map modal -->
+<div id="trafficMapModal" class="modal">
+    <div class="modal-content">
+        <div id="trafficModalHeader">
             <h3 id="trafficMapTitle">Carte des alertes</h3>
-            <button id="trafficPrev" class="btn" title="Précédent">◀</button>
-            <div id="trafficPager" style="min-width:80px;text-align:center;opacity:.8;">— / —</div>
-            <button id="trafficNext" class="btn" title="Suivant">▶</button>
-            <button id="closeTrafficMap" aria-label="Fermer">×</button>
-          </div>
-          <div id="trafficSummary"></div>
-          <div id="trafficMap"></div>
+            <button id="trafficPrev" class="btn btn-secondary" title="Precedent">&#9664;</button>
+            <div id="trafficPager" style="min-width:80px;text-align:center;color:var(--muted);">&mdash; / &mdash;</div>
+            <button id="trafficNext" class="btn btn-secondary" title="Suivant">&#9654;</button>
+            <button id="closeTrafficMap" class="drawer-close" aria-label="Fermer"><span class="material-icons">close</span></button>
         </div>
-    </div>     
+        <div id="trafficSummary"></div>
+        <div id="trafficMap"></div>
+    </div>
+</div>
 
-    <!-- Footer -->
-    <footer>
-        TITAN - Techniques d'Intégration Topographique avec Navigation
-    </footer>
-
-    <!-- Scripts appli -->
-    <script nonce="{{ nonce }}">var satelliteIconUrl = "{{ url_for('static', filename='img/satellite.png') }}";</script>
-    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/alerte.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/traffic.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/meteo.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/timeline.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/controle_access.js') }}"></script>
+<!-- Scripts -->
+<script nonce="{{ nonce }}">var satelliteIconUrl = "{{ url_for('static', filename='img/satellite.png') }}";</script>
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script src="{{ url_for('static', filename='js/alerte.js') }}"></script>
+<script src="{{ url_for('static', filename='js/traffic.js') }}"></script>
+<script src="{{ url_for('static', filename='js/meteo.js') }}"></script>
+<script src="{{ url_for('static', filename='js/timeline.js') }}"></script>
+<script src="{{ url_for('static', filename='js/map_view.js') }}"></script>
+<script src="{{ url_for('static', filename='js/controle_access.js') }}"></script>
+<script src="{{ url_for('static', filename='js/affluence.js') }}"></script>
 </body>
 </html>

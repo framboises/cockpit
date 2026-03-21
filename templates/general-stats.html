@@ -2,18 +2,22 @@
 <html lang="fr">
 <head>
     <meta charset="utf-8">
-    <title>Statistiques Générales</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Statistiques Generales</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/common.css') }}">
 </head>
 <body>
     <div id="grid-container" class="general-stats">
-        <!-- Zone principale : Présents Actuels avec jauge -->
+        <!-- Zone principale -->
         <div class="card primary" id="current-present">
             <div class="card-number">{{ stats.current_present }}</div>
-            <div class="card-label">Présents Actuels</div>
-            <div class="gauge">Gauge: {{ stats.current_present_gauge }}</div>
+            <div class="card-label">Presents Actuels</div>
+            <div class="gauge">{{ stats.current_present_gauge }}</div>
         </div>
-        <!-- Zone secondaire regroupant plusieurs infos -->
+        <!-- Zone secondaire -->
         <div class="secondary-container">
             <div class="card secondary" id="max-present-day">
                 <div class="card-number">{{ stats.max_present_day }}</div>
@@ -21,14 +25,14 @@
             </div>
             <div class="card secondary" id="max-present-event">
                 <div class="card-number">{{ stats.max_present_event }}</div>
-                <div class="card-label">Max de l'événement</div>
+                <div class="card-label">Max de l'evenement</div>
             </div>
         </div>
-        <!-- Zone pour les autres infos -->
+        <!-- Autres -->
         <div class="others-container">
             <div class="card" id="total-entries">
                 <div class="card-number">{{ stats.total_entries }}</div>
-                <div class="card-label">Entrées Totales</div>
+                <div class="card-label">Entrees Totales</div>
             </div>
             <div class="card" id="unique-visitors">
                 <div class="card-number">{{ stats.unique_visitors }}</div>
@@ -36,14 +40,14 @@
             </div>
             <div class="card" id="previous-year-max">
                 <div class="card-number">{{ stats.previous_year_max }}</div>
-                <div class="card-label">Max Année Préc.</div>
+                <div class="card-label">Max Annee Prec.</div>
             </div>
             <div class="card" id="previous-year-current">
                 <div class="card-number">{{ stats.previous_year_current }}</div>
-                <div class="card-label">Même Jour Année Préc.</div>
+                <div class="card-label">Meme Jour Annee Prec.</div>
             </div>
         </div>
-    </div>    
+    </div>
     <script src="{{ url_for('static', filename='js/stats1.js') }}"></script>
 </body>
 </html>

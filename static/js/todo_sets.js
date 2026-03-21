@@ -105,11 +105,11 @@
   btnSave.addEventListener('click', async ()=>{
     const payload = formToPayload();
     const id = form.elements._id.value;
-    if(!payload.type){ alert('Le type est requis.'); return; }
+    if(!payload.type){ showToast("warning", "Le type est requis."); return; }
     if(id){ await API.update(id, payload); }
     else {
       const exists = current.some(x=> (x.type||'').toLowerCase() === payload.type.toLowerCase());
-      if(exists && !confirm('Ce type existe déjà. Continuer quand même ?')) return;
+      if(exists && !(await showConfirmToast("Ce type existe deja. Continuer quand meme ?"))) return;
       await API.create(payload);
     }
     closeModal();
@@ -126,7 +126,7 @@
       openModal();
     }
     if(act==='delete'){
-      if(confirm('Supprimer cette catégorie et ses tâches ?')){ await API.remove(id); await refresh(); }
+      if(await showConfirmToast("Supprimer cette categorie et ses taches ?", { type: "error", okLabel: "Supprimer" })){ await API.remove(id); await refresh(); }
     }
   });
 
@@ -136,8 +136,8 @@
 
   btnDeleteSel.addEventListener('click', async ()=>{
     const ids = $$('.row-check:checked', tbody).map(cb=> cb.closest('tr').dataset.id);
-    if(ids.length===0) return alert('Aucun élément sélectionné.');
-    if(confirm(`Supprimer ${ids.length} catégorie(s) ?`)){
+    if(ids.length===0) { showToast("warning", "Aucun element selectionne."); return; }
+    if(await showConfirmToast("Supprimer " + ids.length + " categorie(s) ?", { type: "error", okLabel: "Supprimer" })){
       await API.bulkRemove(ids);
       await refresh();
       checkAll.checked = false;

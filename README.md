@@ -5,6 +5,16 @@ Elle centralise toutes les activités (ouvertures/fermetures de portes, parkings
 
 ajouter la lecture des rapports de fréquentation et la lecture des rapports pc org
 
+Outils cockpit 
+
+Traffic
+
+Fréquentation
+
+Contrôle d'accès
+
+Caméras
+
 ---
 
 ## 🚀 Fonctionnalités principales

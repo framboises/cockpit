@@ -2,7 +2,11 @@
 <html lang="fr">
 <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Parkings et Aires d'Accueil</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/common.css') }}">
 </head>
 <body>
@@ -12,7 +16,7 @@
             <div class="card-header">{{ terrain.name }}</div>
             <div class="card-number">{{ terrain.scans }}</div>
             <div class="card-subtext">Scans / Billets</div>
-            <div class="gauge">Gauge: {{ terrain.gauge }}</div>
+            <div class="gauge">{{ terrain.gauge }}</div>
         </div>
         {% endfor %}
     </div>
