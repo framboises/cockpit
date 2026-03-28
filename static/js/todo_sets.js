@@ -75,9 +75,9 @@
         <td><input type="checkbox" class="row-check"></td>
         <td><strong>${escapeHtml(d.type||'')}</strong></td>
         <td>${preview}${more}</td>
-        <td>
-          <button class="btn btn-xs" data-action="edit">Éditer</button>
-          <button class="btn btn-xs btn-danger" data-action="delete">Supprimer</button>
+        <td class="group-actions">
+          <button class="btn-icon" data-action="edit" title="Editer"><span class="material-symbols-outlined">edit</span></button>
+          <button class="btn-icon btn-icon-danger" data-action="delete" title="Supprimer"><span class="material-symbols-outlined">delete</span></button>
         </td>
       </tr>`;
   }

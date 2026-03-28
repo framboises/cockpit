@@ -1,7 +1,8 @@
 # traffic.py — collecte trafic avec fallback MongoDB -> Waze API
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 from datetime import datetime, timezone
 from pymongo import MongoClient
+from functools import wraps
 import logging
 import os
 import re
@@ -10,6 +11,75 @@ import time
 import requests
 
 traffic_bp = Blueprint('traffic', __name__)
+
+# Map route -> block_id pour la protection par bloc
+_ROUTE_BLOCK_MAP = {
+    'get_trafic_data': 'widget-traffic',
+    'get_all_routes': 'widget-traffic',
+    'alerts': 'widget-traffic',
+    'get_trafic_data_parking_structured': 'widget-parkings',
+}
+
+@traffic_bp.before_request
+def _check_block_permission():
+    """Verifie l'auth et les permissions de bloc pour toutes les routes traffic."""
+    from app import role_required, get_user_allowed_blocks
+    # L'auth est geree par role_required applique via before_app_request ou directement
+    # On fait un import tardif pour eviter le circulaire
+    import jwt as pyjwt
+    from app import JWT_SECRET, JWT_ALGORITHM, CODING, ROLE_HIERARCHY, ROLE_ORDER, APP_KEY, SUPER_ADMIN_ROLE, BASE_URL
+
+    if CODING:
+        from app import ROLE_HIERARCHY, ROLE_ORDER
+        sim_role = request.args.get("as", "admin")
+        if sim_role not in ROLE_HIERARCHY:
+            sim_role = "admin"
+        sim_level = ROLE_HIERARCHY[sim_role]
+        sim_roles = [r for r in ROLE_ORDER if ROLE_HIERARCHY[r] <= sim_level]
+        request.user_payload = {
+            "apps": ["looker", "shiftsolver", "tagger"],
+            "roles_by_app": {"cockpit": sim_role},
+            "global_roles": [],
+            "roles": sim_roles,
+            "app_role": sim_role,
+            "is_super_admin": False,
+            "firstname": "Bruce",
+            "lastname": "WAYNE",
+            "email": "bruce@wayneenterprise.com",
+        }
+    else:
+        from flask import redirect
+        token = request.cookies.get("access_token")
+        if not token:
+            return jsonify({"error": "Authentification requise"}), 401
+        try:
+            payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+            return jsonify({"error": "Token invalide ou expire"}), 401
+
+        global_roles = payload.get("global_roles", []) or []
+        is_super_admin = SUPER_ADMIN_ROLE in global_roles
+        roles_by_app = payload.get("roles_by_app", {}) or {}
+        if not isinstance(roles_by_app, dict):
+            roles_by_app = {}
+        app_role = roles_by_app.get(APP_KEY)
+        if not is_super_admin and not app_role:
+            return jsonify({"error": "Acces non autorise"}), 403
+        effective_role = "admin" if is_super_admin else app_role
+        if effective_role in ROLE_HIERARCHY:
+            payload["roles"] = [r for r in ROLE_ORDER if ROLE_HIERARCHY[r] <= ROLE_HIERARCHY[effective_role]]
+        else:
+            payload["roles"] = []
+        payload["app_role"] = effective_role
+        payload["is_super_admin"] = is_super_admin
+        request.user_payload = payload
+
+    # Verifier la permission de bloc
+    block_id = _ROUTE_BLOCK_MAP.get(request.endpoint)
+    if block_id:
+        allowed = get_user_allowed_blocks(request.user_payload)
+        if allowed is not None and block_id not in allowed:
+            return jsonify({"error": "Acces non autorise a ce widget"}), 403
 
 # --- Logging (actif en dev/coding uniquement) ---
 _TITAN_ENV = os.getenv("TITAN_ENV", "dev")
@@ -202,27 +272,44 @@ def get_trafic_data():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Balises acceptées : ##, #I#, #O#, #I1#, #O2#, ...
-TAG_RE = re.compile(r'^\s*(#([IO])(\d+)?#|##)\s*(.+?)\s*$')
+# Balises acceptees : ##, #I#, #O#, #P#, #I1#, #O2#, #P1#, ...
+TAG_RE = re.compile(r'^\s*(#([IOP])(\d+)?#|##)\s*(.+?)\s*$')
+SECURITY_RE = re.compile(r'^\s*\*\*\s*(.+?)\s*$')
 
 def parse_route_name(name: str):
     """
+    Retourne (direction, terrain, tag, variant).
+    Le variant (chiffre du tag) est utilise pour distinguer les itineraires P.
+    Pour I/O, les variants sont des troncons du meme itineraire (on les fusionne).
     Exemples:
-      "## Ouest"      -> (None, "Ouest")
-      "#I# Ouest"     -> ("in",  "Ouest")
-      "#I2# Ouest"    -> ("in",  "Ouest")
-      "#O1# Panorama" -> ("out", "Panorama")
+      "## Ouest"      -> (None, "Ouest", "neutral", None)
+      "#I# Ouest"     -> ("in",  "Ouest", "I", None)
+      "#I2# Ouest"    -> ("in",  "Ouest", "I", None)    # troncon, meme terrain
+      "#O1# Panorama" -> ("out", "Panorama", "O", None) # troncon, meme terrain
+      "#P# A11"       -> (None,  "A11", "P", None)
+      "#P1# A28"      -> (None,  "A28", "P", "1")       # itineraire distinct
+      "#P2# A28"      -> (None,  "A28", "P", "2")       # itineraire distinct
+      "** SDIS -> X"  -> (None,  "SDIS -> X", "security", None)
+      "Route libre"   -> (None,  "Route libre", "free", None)
     """
     m = TAG_RE.match(name or "")
-    if not m:
-        return None, (name or "").strip()
-    io = m.group(2)          # 'I' ou 'O' ou None
-    terrain = m.group(4).strip()
-    if io == 'I':
-        return "in", terrain
-    if io == 'O':
-        return "out", terrain
-    return None, terrain     # cas "##"
+    if m:
+        io = m.group(2)          # 'I', 'O', 'P' ou None
+        num = m.group(3)         # chiffre optionnel
+        terrain = m.group(4).strip()
+        if io == 'I':
+            return "in", terrain, "I", None
+        if io == 'O':
+            return "out", terrain, "O", None
+        if io == 'P':
+            return None, terrain, "P", num  # num distingue les itineraires P
+        return None, terrain, "neutral", None  # cas "##"
+
+    ms = SECURITY_RE.match(name or "")
+    if ms:
+        return None, ms.group(1).strip(), "security", None
+
+    return None, (name or "").strip(), "free", None
 
 def classify_congestion(current_time, historic_time):
     # (ta logique d’origine)
@@ -258,7 +345,7 @@ def get_trafic_data_parking_structured():
             if not (raw_name.startswith("##") or raw_name.startswith("#I") or raw_name.startswith("#O")):
                 continue
 
-            direction, terrain = parse_route_name(raw_name)
+            direction, terrain, _tag, _variant = parse_route_name(raw_name)
             cur  = int(route.get("time", 0) or 0)
             hist = int(route.get("historicTime", 0) or 0)
 
@@ -311,6 +398,51 @@ def get_trafic_data_parking_structured():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     
+@traffic_bp.route('/trafic/all_routes')
+def get_all_routes():
+    """Toutes les routes individuelles, sans fusion."""
+    try:
+        trafic_data, cache_status = _get_waze_trafic_payload()
+        routes = trafic_data.get("routes", [])
+        result = []
+
+        for route in routes:
+            if not isinstance(route, dict):
+                continue
+            raw_name = route.get("name", "")
+            direction, terrain, tag, _variant = parse_route_name(raw_name)
+            cur = int(route.get("time", 0) or 0)
+            hist = int(route.get("historicTime", 0) or 0)
+            line = route.get("line", [])
+
+            ratio_val = (cur / hist) if hist > 0 else None
+            status, severity = classify_congestion(cur, hist)
+            category = "pkg_aa" if tag in ("I", "O", "neutral", "P") else tag
+
+            result.append({
+                "terrain": terrain,
+                "rawName": raw_name,
+                "direction": direction,
+                "tag": tag,
+                "category": category,
+                "currentTime": cur,
+                "historicTime": hist,
+                "ratio": round(ratio_val, 2) if ratio_val else None,
+                "deltaSeconds": max(0, cur - hist) if hist > 0 else None,
+                "status": status,
+                "severity": severity,
+                "line": line,
+            })
+
+        result.sort(key=lambda t: (-1 if t["ratio"] is None else t["ratio"]), reverse=True)
+
+        return _jsonify_with_cache({
+            "routes": result,
+            "updateTime": trafic_data.get("updateTime")
+        }, cache_status)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @traffic_bp.route('/alerts')
 def alerts():
     try:

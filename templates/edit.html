@@ -38,6 +38,10 @@
         <span class="material-symbols-outlined">settings</span>
         <span class="label">Configuration</span>
       </a>
+      <a href="/analyse-ops" class="nav-btn">
+        <span class="material-symbols-outlined">biotech</span>
+        <span class="label">Analyse Ops</span>
+      </a>
     </nav>
 
     <div class="sidebar-panel">
@@ -80,18 +84,18 @@
       <section class="widget-card">
         <header class="widget-header" data-collapsible data-section="todos">
           <h3>Taches automatiques par categorie</h3>
+          <div style="display:flex; gap:4px; align-items:center; margin-left:auto; margin-right:8px;" onclick="event.stopPropagation()">
+            <input id="filter-type" type="search" placeholder="Filtrer..." class="form-input" style="width:140px; height:28px; font-size:0.78rem;" />
+            <button id="btn-add" class="btn-icon" title="Nouveau type">
+              <span class="material-symbols-outlined">add</span>
+            </button>
+            <button id="btn-delete-selected" class="btn-icon btn-icon-danger" title="Supprimer la selection">
+              <span class="material-symbols-outlined">delete_sweep</span>
+            </button>
+          </div>
           <span class="material-symbols-outlined collapse-icon">expand_more</span>
         </header>
         <div class="widget-body collapsible" id="todos-body">
-          <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
-            <button id="btn-add" class="btn btn-primary">+ Nouveau type</button>
-            <button id="btn-delete-selected" class="btn btn-danger">Supprimer la selection</button>
-            <label style="margin-left:auto; display:flex; align-items:center; gap:6px; font-size:0.84rem; color:var(--muted);">
-              Filtrer
-              <input id="filter-type" type="search" placeholder="portes, terrains, tribunes..." class="form-input" style="width:200px;" />
-            </label>
-          </div>
-
           <div class="table-responsive">
             <table id="todo-sets-table" class="table table-striped table-hover">
               <thead>
@@ -99,7 +103,7 @@
                   <th style="width:36px"><input type="checkbox" id="check-all"></th>
                   <th>Type</th>
                   <th>Taches (apercu)</th>
-                  <th style="width:140px">Actions</th>
+                  <th style="width:72px">Actions</th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -112,12 +116,12 @@
       <section class="widget-card" style="margin-top:16px;">
         <header class="widget-header" data-collapsible data-section="groups">
           <h3>Groupes</h3>
+          <button id="btn-add-group" class="btn-icon" title="Nouveau groupe" style="margin-left:auto; margin-right:8px;" onclick="event.stopPropagation()">
+            <span class="material-symbols-outlined">add</span>
+          </button>
           <span class="material-symbols-outlined collapse-icon">expand_more</span>
         </header>
         <div class="widget-body collapsible" id="groups-body">
-          <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
-            <button id="btn-add-group" class="btn btn-primary">+ Nouveau groupe</button>
-          </div>
           <div class="table-responsive">
             <table id="groups-table" class="table table-striped table-hover">
               <thead>
@@ -126,7 +130,8 @@
                   <th>Nom</th>
                   <th>Description</th>
                   <th>Membres</th>
-                  <th style="width:140px">Actions</th>
+                  <th>Blocs</th>
+                  <th style="width:72px">Actions</th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -139,21 +144,15 @@
       <section class="widget-card" style="margin-top:16px;">
         <header class="widget-header" data-collapsible data-section="merge">
           <h3>Categories timeline (merge)</h3>
+          <div style="display:flex; gap:6px; align-items:center; margin-left:auto; margin-right:8px;" onclick="event.stopPropagation()">
+            <span id="merge-status" style="font-size:0.78rem; color:var(--muted);"></span>
+            <button id="btn-run-merge" class="btn-icon" title="Lancer le merge">
+              <span class="material-symbols-outlined">sync</span>
+            </button>
+          </div>
           <span class="material-symbols-outlined collapse-icon">expand_more</span>
         </header>
         <div class="widget-body collapsible" id="merge-body">
-          <p style="font-size:0.84rem; color:var(--muted); margin-bottom:12px;">
-            Configure comment chaque categorie groundmaster genere des vignettes sur la timeline.
-            Les categories non configurees apparaissent en bas.
-          </p>
-          <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
-            <button id="btn-run-merge" class="btn btn-primary">
-              <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">sync</span>
-              Lancer le merge
-            </button>
-            <span id="merge-status" style="font-size:0.84rem; color:var(--muted);"></span>
-          </div>
-
           <div class="table-responsive">
             <table id="merge-config-table" class="table table-striped table-hover">
               <thead>
@@ -165,18 +164,128 @@
                   <th>Types acces</th>
                   <th>Todos</th>
                   <th>Champs</th>
+                  <th style="width:80px">Fusion</th>
+                  <th style="width:80px">Cluster</th>
                   <th style="width:80px">Actif</th>
-                  <th style="width:100px">Actions</th>
+                  <th style="width:72px">Actions</th>
                 </tr>
               </thead>
               <tbody></tbody>
             </table>
           </div>
 
-          <div id="unconfigured-section" style="margin-top:16px;" hidden>
-            <h4 style="font-size:0.9rem; color:var(--warning);">Categories non configurees</h4>
-            <div id="unconfigured-list" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;"></div>
+          <div id="unconfigured-section" style="margin-top:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;" hidden>
+            <span style="font-size:0.78rem; color:var(--warning); font-weight:600; white-space:nowrap;">Non configurees :</span>
+            <div id="unconfigured-list" style="display:flex; gap:4px; flex-wrap:wrap;"></div>
           </div>
+        </div>
+      </section>
+
+      <!-- Section carte — affichage par defaut -->
+      <section class="widget-card" style="margin-top:16px;">
+        <header class="widget-header" data-collapsible data-section="map-defaults">
+          <h3>Carte — Affichage par defaut</h3>
+          <div style="display:flex; gap:6px; align-items:center; margin-left:auto; margin-right:8px;" onclick="event.stopPropagation()">
+            <span id="map-defaults-status" style="font-size:0.78rem; color:var(--muted);"></span>
+            <button id="btn-save-map-defaults" class="btn-icon" title="Sauvegarder les defauts">
+              <span class="material-symbols-outlined">save</span>
+            </button>
+          </div>
+          <span class="material-symbols-outlined collapse-icon">expand_more</span>
+        </header>
+        <div class="widget-body collapsible" id="map-defaults-body">
+          <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+            <label style="font-size:0.84rem; font-weight:600; white-space:nowrap;">Fond</label>
+            <select id="map-default-tile" class="form-input" style="width:180px; height:30px; font-size:0.8rem;">
+              <option value="osm">OpenStreetMap</option>
+              <option value="sat-egis">Satellite (Esri)</option>
+              <option value="sat-aco">Satellite (ACO)</option>
+            </select>
+            <span style="width:1px; height:20px; background:rgba(148,163,184,0.2);"></span>
+            <label style="font-size:0.84rem; font-weight:600; white-space:nowrap;">Categories</label>
+            <div id="map-defaults-cats" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+            <button id="map-defaults-all" class="btn-icon" title="Tout cocher" style="width:26px; height:26px;">
+              <span class="material-symbols-outlined" style="font-size:16px;">select_all</span>
+            </button>
+            <button id="map-defaults-none" class="btn-icon" title="Tout decocher" style="width:26px; height:26px;">
+              <span class="material-symbols-outlined" style="font-size:16px;">deselect</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section Anoloc GPS -->
+      <section class="widget-card" style="margin-top:16px;">
+        <header class="widget-header" data-collapsible data-section="anoloc">
+          <h3>Balises GPS (Anoloc)</h3>
+          <span class="material-symbols-outlined collapse-icon">expand_more</span>
+        </header>
+        <div class="widget-body collapsible" id="anoloc-body">
+
+          <!-- A) Credentials -->
+          <h4 style="margin:0 0 8px; font-size:13px; color:var(--muted);">Connexion Anoloc</h4>
+          <div class="anoloc-admin-creds">
+            <div class="form-group" style="flex:2; min-width:280px;">
+              <label>URL API</label>
+              <input id="anoloc-api-base" class="form-input" placeholder="https://app.lemans.anoloc.io/api/v3" />
+            </div>
+            <div class="form-group">
+              <label>Login</label>
+              <input id="anoloc-login" class="form-input" placeholder="email ou identifiant" />
+            </div>
+            <div class="form-group">
+              <label>Mot de passe</label>
+              <input id="anoloc-password" type="password" class="form-input" placeholder="********" />
+            </div>
+            <div style="display:flex; gap:6px; align-items:flex-end;">
+              <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
+                <input id="anoloc-enabled" type="checkbox" /> Active
+              </label>
+              <button id="anoloc-test-btn" class="btn btn-xs">Tester</button>
+              <button id="anoloc-save-creds" class="btn btn-xs btn-primary">Sauvegarder</button>
+            </div>
+          </div>
+          <div id="anoloc-test-result" style="font-size:12px; margin-bottom:12px;"></div>
+
+          <!-- B) Groupes de balises -->
+          <h4 style="margin:12px 0 8px; font-size:13px; color:var(--muted);">Groupes de balises</h4>
+          <div style="margin-bottom:8px;">
+            <button id="anoloc-add-group" class="btn btn-xs btn-primary">
+              <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">add</span> Ajouter un groupe
+            </button>
+            <button id="anoloc-fetch-devices" class="btn btn-xs" title="Charger les devices depuis Anoloc">
+              <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">cloud_download</span> Charger devices
+            </button>
+          </div>
+          <div class="table-responsive">
+            <table id="anoloc-groups-table" class="table table-striped table-hover" style="font-size:12px;">
+              <thead>
+                <tr>
+                  <th style="width:40px;">Couleur</th>
+                  <th style="width:40px;">Icone</th>
+                  <th>Label</th>
+                  <th>Devices</th>
+                  <th style="width:50px;">Actif</th>
+                  <th style="width:60px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <!-- C) Visibilite par groupe cockpit -->
+          <h4 style="margin:16px 0 8px; font-size:13px; color:var(--muted);">Visibilite par groupe cockpit</h4>
+          <p style="font-size:11px; color:var(--muted); margin-bottom:8px;">
+            Cochez les groupes de balises que chaque groupe d'utilisateurs peut voir. Si aucun n'est coche, le groupe voit tout.
+          </p>
+          <div class="table-responsive">
+            <table id="anoloc-vis-table" class="table anoloc-vis-table" style="font-size:12px;">
+              <thead><tr id="anoloc-vis-header"><th>Groupe cockpit</th></tr></thead>
+              <tbody id="anoloc-vis-body"></tbody>
+            </table>
+          </div>
+          <button id="anoloc-save-vis" class="btn btn-xs btn-primary" style="margin-top:6px;">Sauvegarder visibilite</button>
+
         </div>
       </section>
 
@@ -278,6 +387,24 @@
             <input name="color" type="color" value="#6366f1" class="form-input" style="width:60px; height:36px; padding:2px; cursor:pointer;" />
           </label>
         </div>
+        <div class="form-row">
+          <label>Blocs visibles</label>
+          <p style="font-size:0.78rem; color:var(--muted); margin:4px 0 8px;">
+            Cochez les blocs que les membres de ce groupe peuvent voir. Si aucun bloc n'est coche, le groupe n'impose aucune restriction.
+          </p>
+          <div class="blocks-toggle-bar">
+            <button type="button" id="blocks-check-all" class="btn btn-xs">Tout cocher</button>
+            <button type="button" id="blocks-uncheck-all" class="btn btn-xs">Tout decocher</button>
+          </div>
+          <div id="group-blocks-checkboxes" class="blocks-checklist"></div>
+        </div>
+        <div class="form-row">
+          <label>Alertes plein ecran</label>
+          <p style="font-size:0.78rem; color:var(--muted); margin:4px 0 8px;">
+            Cochez les alertes plein ecran que ce groupe recoit. Si rien n'est coche, aucune alerte ne s'affichera en plein ecran (elles resteront dans le fil d'alertes).
+          </p>
+          <div id="group-alert-checkboxes" class="blocks-checklist"></div>
+        </div>
       </form>
     </div>
     <div class="crud-modal-footer">
@@ -344,6 +471,21 @@
         </div>
         <div class="form-row">
           <label style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" name="merge_access_types" />
+            Fusionner les types d'acces si memes horaires
+          </label>
+        </div>
+        <div class="form-row" style="display:grid; grid-template-columns:1fr auto; gap:12px; align-items:end;">
+          <label style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" name="cluster_enabled" />
+            Regrouper sur la timeline (clustering)
+          </label>
+          <label>Icone cluster
+            <input name="cluster_icon" class="form-input" placeholder="ex. local_parking" style="width:160px;" />
+          </label>
+        </div>
+        <div class="form-row">
+          <label style="display:flex; align-items:center; gap:8px;">
             <input type="checkbox" name="enabled" checked />
             Actif (genere des vignettes)
           </label>
@@ -357,6 +499,54 @@
   </div>
 </div>
 
+<!-- CRUD Modal — Anoloc beacon group -->
+<div id="anoloc-group-modal" class="crud-modal" hidden>
+  <div class="crud-modal-dialog">
+    <div class="crud-modal-header">
+      <h3 id="anoloc-group-modal-title">Nouveau groupe de balises</h3>
+      <button class="crud-modal-close" data-close>&times;</button>
+    </div>
+    <div class="crud-modal-body">
+      <form id="anoloc-group-form">
+        <input type="hidden" name="id" />
+        <div class="form-row">
+          <label>Label
+            <input name="label" required placeholder="ex. Securite" class="form-input" />
+          </label>
+        </div>
+        <div class="form-row" style="display:flex; gap:12px; align-items:flex-end;">
+          <label style="flex:1;">Icone Material
+            <input name="icon" placeholder="ex. security" class="form-input" value="location_on" />
+          </label>
+          <span class="material-symbols-outlined" id="anoloc-icon-preview" style="font-size:28px; color:var(--brand);">location_on</span>
+        </div>
+        <div class="form-row">
+          <label>Couleur
+            <input name="color" type="color" value="#6366f1" class="form-input" style="width:60px; height:36px; padding:2px; cursor:pointer;" />
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Devices Anoloc</label>
+          <p style="font-size:11px; color:var(--muted); margin:2px 0 6px;">
+            Selectionnez les devices a inclure dans ce groupe. Cliquez "Charger devices" si la liste est vide.
+          </p>
+          <div id="anoloc-devices-checkboxes" style="max-height:200px; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius-sm); padding:6px;"></div>
+        </div>
+        <div class="form-row">
+          <label style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" name="enabled" checked />
+            Actif
+          </label>
+        </div>
+      </form>
+    </div>
+    <div class="crud-modal-footer">
+      <button class="btn btn-secondary" data-close>Annuler</button>
+      <button id="anoloc-group-modal-save" class="btn btn-primary">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast container -->
 <div id="toast-container"></div>
 
@@ -365,6 +555,8 @@
 <script src="/static/js/todo_sets.js"></script>
 <script src="/static/js/groups.js"></script>
 <script src="/static/js/merge_config.js"></script>
+<script src="/static/js/map_defaults.js"></script>
+<script src="/static/js/anoloc_admin.js"></script>
 <script src="/static/js/main.js"></script>
 </body>
 </html>

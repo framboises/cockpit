@@ -1,6 +1,7 @@
 // meteo.js
 // Fonction pour récupérer les prévisions pour les 6 prochaines heures et les afficher dans la navbar
 function fetchMeteoPrevisions6h() {
+    if (!window.isBlockAllowed("meteo-previsions")) return;
     fetch('/meteo_previsions_6h')
         .then(response => response.json())
         .then(data => {
@@ -48,7 +49,8 @@ setTimeout(fetchSunTimes, 50); // 🌞 Ajouter le soleil après un court délai
 
 // Ouvre la modale Météo (pilotage par classes uniquement)
 function openMeteoModal(date) {
-  console.log("📅 Ouverture de la modale météo pour le :", date);
+  if (!window.isBlockAllowed("widget-right-1")) return;
+  console.log("Ouverture de la modale meteo pour le :", date);
 
   const modal        = document.getElementById('meteoModal');
   const overlay      = document.getElementById('modalOverlay');

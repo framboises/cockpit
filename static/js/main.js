@@ -13,6 +13,81 @@ const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content ?? 
 window.selectedEvent = null;
 window.selectedYear = null;
 
+// --- Block permissions ---
+window.isBlockAllowed = function(id) {
+    return !window.__allowedBlocks || window.__allowedBlocks.indexOf(id) >= 0;
+};
+(function() {
+    if (!window.__allowedBlocks) return;
+    var ids = [
+        "widget-traffic","widget-counters","widget-parkings","widget-comms",
+        "meteo-previsions","timeline-main","map-main","status-card",
+        "widget-right-1","widget-right-2","widget-right-3","widget-right-4"
+    ];
+    ids.forEach(function(id) {
+        if (!window.isBlockAllowed(id)) {
+            var el = document.getElementById(id);
+            if (el) el.style.display = "none";
+        }
+    });
+    // Gerer timeline/carte selon les permissions
+    var tlOk = window.isBlockAllowed("timeline-main");
+    var mapOk = window.isBlockAllowed("map-main");
+    if (!tlOk && mapOk) {
+        // Forcer l'affichage carte immediatement (avant que map_view.js charge)
+        var tlEl = document.getElementById("timeline-main");
+        var mapEl = document.getElementById("map-main");
+        if (tlEl) tlEl.style.display = "none";
+        if (mapEl) mapEl.style.display = "block";
+        // Signaler a map_view.js de demarrer en mode carte
+        window.__forceMapView = true;
+    }
+    // Masquer le toggle si une seule vue autorisee
+    if (!tlOk || !mapOk) {
+        var toggle = document.querySelector(".view-toggle");
+        if (toggle) toggle.style.display = "none";
+    }
+    // Masquer les elements lies a la timeline si elle n'est pas autorisee
+    if (!tlOk) {
+        var nowBtn = document.getElementById("nowline-toggle");
+        var addBtn = document.getElementById("add-event-button");
+        var upcoming = document.querySelector(".header-upcoming-wrap") || document.getElementById("header-upcoming");
+        if (nowBtn) nowBtn.style.display = "none";
+        if (addBtn) addBtn.style.display = "none";
+        if (upcoming) upcoming.style.display = "none";
+    }
+})();
+
+// --- Widgets pliables ---
+(function() {
+    document.querySelectorAll(".collapsible-widget-header").forEach(function(header) {
+        var body = header.nextElementSibling;
+        var card = header.closest(".widget-card");
+        if (!body) return;
+        header.style.cursor = "pointer";
+        header.addEventListener("click", function(e) {
+            if (e.target.closest("button")) return;
+            var collapsed = body.classList.toggle("widget-body-collapsed");
+            header.classList.toggle("collapsed", collapsed);
+            if (card) card.classList.toggle("widget-card-collapsed", collapsed);
+        });
+    });
+})();
+
+// --- Group pills in header ---
+(function() {
+    var groups = window.__userGroups;
+    var container = document.getElementById("user-group-pills");
+    if (!container || !groups || !groups.length) return;
+    groups.forEach(function(g) {
+        var pill = document.createElement("span");
+        pill.className = "user-group-pill";
+        pill.textContent = g.name;
+        pill.style.background = g.color || "#6366f1";
+        container.appendChild(pill);
+    });
+})();
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 // UTILITAIRE
 /////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -280,9 +355,19 @@ function loadCockpitData() {
         }).catch(function () {});
     }
 
+    // Pre-charger les donnees carte (meme si on est en timeline)
+    if (window.CockpitMapView && window.CockpitMapView.preload) {
+        window.CockpitMapView.preload();
+    }
+
     // Load map markers if map view active
-    if (window.CockpitMapView) {
+    if (window.CockpitMapView && window.CockpitMapView.currentView() === "map") {
         window.CockpitMapView.reload();
+    }
+
+    // Refresh main courante PCO
+    if (typeof window.pcorgRefresh === "function") {
+        window.pcorgRefresh();
     }
 
     // Update upcoming events + status after timeline loads
@@ -838,8 +923,371 @@ function checkCriticalAlerts(paramData) {
     }
 }
 
-function showCriticalAlert(type, timeStr, message) {
-    // type: "opening" | "closing" | "opened" | "closed"
+// ---------- Historique d'alertes (widget droite) ----------
+var _alertIconMap = { opening: "door_open", opened: "lock_open", closing: "door_front", closed: "lock", "traffic-cluster": "emergency" };
+var _alertColorMap = {
+    "opening": "#f59e0b", "closing": "#f59e0b",
+    "opened": "#22c55e", "closed": "#ef4444",
+    "traffic-cluster": "#f97316"
+};
+var _alertTypeColors = {ACCIDENT: "#e53935", JAM: "#f59e0b", HAZARD: "#f97316", ROAD_CLOSED: "#8b5cf6"};
+var _alertTypeLabels = {ACCIDENT: "accident", JAM: "ralentissement", HAZARD: "danger", ROAD_CLOSED: "route fermee"};
+
+function _buildMapAction(pins) {
+    return function() {
+        window._allAlertPinsData = pins;
+        if (window.CockpitMapView && window.CockpitMapView.switchView) {
+            window.CockpitMapView.switchView('map');
+            setTimeout(function() {
+                document.dispatchEvent(new CustomEvent('showAllAlertPins'));
+            }, 400);
+        }
+    };
+}
+
+function _renderAlertEntry(container, type, iconName, title, timeStr, message, onAction, dateStr, actionData) {
+    var color = _alertColorMap[type] || "#6366f1";
+
+    var entry = document.createElement("div");
+    entry.className = "alert-history-entry";
+    entry.style.borderLeftColor = color;
+
+    // --- Header row (toujours visible) ---
+    var headerRow = document.createElement("div");
+    headerRow.className = "alert-history-header";
+
+    var ico = document.createElement("span");
+    ico.className = "material-symbols-outlined";
+    ico.style.cssText = "font-size:14px;color:" + color + ";";
+    ico.textContent = iconName;
+
+    var titleEl = document.createElement("span");
+    titleEl.className = "alert-history-title";
+    titleEl.textContent = title;
+
+    // Preview: extract street/location from message
+    var preview = "";
+    if (message) {
+        var dashIdx = message.indexOf(" \u2014 ");
+        if (dashIdx < 0) dashIdx = message.indexOf(" - ");
+        if (dashIdx >= 0) {
+            preview = message.substring(dashIdx + 3).trim();
+        } else {
+            preview = message.length > 35 ? message.substring(0, 35) + "\u2026" : message;
+        }
+    } else if (timeStr) {
+        preview = timeStr;
+    }
+
+    headerRow.appendChild(ico);
+    headerRow.appendChild(titleEl);
+    if (preview) {
+        var previewEl = document.createElement("span");
+        previewEl.className = "alert-history-preview";
+        previewEl.textContent = preview;
+        headerRow.appendChild(previewEl);
+    }
+    var timeEl = document.createElement("span");
+    timeEl.className = "alert-history-time";
+    timeEl.textContent = dateStr || "";
+    headerRow.appendChild(timeEl);
+    entry.appendChild(headerRow);
+
+    // --- Detail section (visible au depliage) ---
+    var detail = document.createElement("div");
+    detail.className = "alert-history-detail";
+
+    if (type === "traffic-cluster" && actionData && actionData.pins && actionData.pins.length) {
+        // Ventilation par type avec pastilles colorees
+        var typeCounts = {};
+        var streetSet = {};
+        actionData.pins.forEach(function(p) {
+            var t = p.type || "UNKNOWN";
+            typeCounts[t] = (typeCounts[t] || 0) + 1;
+            if (p.street) streetSet[p.street] = true;
+        });
+
+        var grid = document.createElement("div");
+        grid.className = "alert-detail-grid";
+        Object.keys(typeCounts).forEach(function(t) {
+            var item = document.createElement("div");
+            item.className = "alert-detail-item";
+            var dot = document.createElement("span");
+            dot.className = "alert-detail-dot";
+            dot.style.background = _alertTypeColors[t] || "#6366f1";
+            item.appendChild(dot);
+            var n = typeCounts[t];
+            var lbl = _alertTypeLabels[t] || t;
+            if (n > 1) lbl += "s";
+            item.appendChild(document.createTextNode(n + " " + lbl));
+            grid.appendChild(item);
+        });
+        detail.appendChild(grid);
+
+        // Rues concernees
+        var streets = Object.keys(streetSet);
+        if (streets.length) {
+            var streetsDiv = document.createElement("div");
+            streetsDiv.className = "alert-detail-meta";
+            var locIco = document.createElement("span");
+            locIco.className = "material-symbols-outlined";
+            locIco.textContent = "location_on";
+            streetsDiv.appendChild(locIco);
+            streetsDiv.appendChild(document.createTextNode(streets.slice(0, 4).join(", ")));
+            if (streets.length > 4) {
+                var more = document.createElement("span");
+                more.className = "alert-detail-more";
+                more.textContent = " +" + (streets.length - 4);
+                streetsDiv.appendChild(more);
+            }
+            detail.appendChild(streetsDiv);
+        }
+
+        // Rayon / nb alertes
+        if (timeStr) {
+            var infoDiv = document.createElement("div");
+            infoDiv.className = "alert-detail-meta";
+            var radarIco = document.createElement("span");
+            radarIco.className = "material-symbols-outlined";
+            radarIco.textContent = "radar";
+            infoDiv.appendChild(radarIco);
+            infoDiv.appendChild(document.createTextNode(timeStr));
+            detail.appendChild(infoDiv);
+        }
+
+    } else if (type === "opening" || type === "closing" || type === "opened" || type === "closed") {
+        // Alertes site : heure + message
+        if (timeStr) {
+            var timeBig = document.createElement("div");
+            timeBig.className = "alert-detail-time-big";
+            var clockIco = document.createElement("span");
+            clockIco.className = "material-symbols-outlined";
+            clockIco.textContent = "schedule";
+            timeBig.appendChild(clockIco);
+            timeBig.appendChild(document.createTextNode(" " + timeStr));
+            detail.appendChild(timeBig);
+        }
+        if (message) {
+            var msgDiv = document.createElement("div");
+            msgDiv.className = "alert-detail-msg";
+            msgDiv.textContent = message;
+            detail.appendChild(msgDiv);
+        }
+
+    } else {
+        // Fallback generique
+        if (message) {
+            var fallbackMsg = document.createElement("div");
+            fallbackMsg.className = "alert-detail-msg";
+            fallbackMsg.textContent = message;
+            detail.appendChild(fallbackMsg);
+        }
+    }
+
+    // Bouton "Voir sur la carte"
+    if (onAction) {
+        var btn = document.createElement("button");
+        btn.className = "alert-history-action";
+        btn.style.color = color;
+        var btnIco = document.createElement("span");
+        btnIco.className = "material-symbols-outlined";
+        btnIco.textContent = "map";
+        btn.appendChild(btnIco);
+        btn.appendChild(document.createTextNode(" Voir sur la carte"));
+        btn.addEventListener("click", function(e) { e.stopPropagation(); onAction(); });
+        detail.appendChild(btn);
+    }
+
+    entry.appendChild(detail);
+
+    // Toggle expand
+    entry.addEventListener("click", function() {
+        var wasExpanded = entry.classList.contains("expanded");
+        var all = container.querySelectorAll(".alert-history-entry.expanded");
+        for (var k = 0; k < all.length; k++) all[k].classList.remove("expanded");
+        if (!wasExpanded) entry.classList.add("expanded");
+    });
+
+    return entry;
+}
+
+function _pushAlertHistory(type, iconName, title, timeStr, message, onAction) {
+    var container = document.getElementById("widget-right-3-body");
+    if (!container) return;
+
+    // Retirer le placeholder
+    var placeholder = container.querySelector(".widget-placeholder");
+    if (placeholder) placeholder.remove();
+
+    var now = new Date();
+    var dateStr = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+
+    // Extraire actionData depuis le callback (attache par alerte.js)
+    var actionData = onAction && onAction._actionData ? onAction._actionData : null;
+
+    var entry = _renderAlertEntry(container, type, iconName, title, timeStr, message, onAction, dateStr, actionData);
+    container.insertBefore(entry, container.firstChild);
+
+    while (container.children.length > 50) {
+        container.removeChild(container.lastChild);
+    }
+
+    // Persister en base (avec actionData pour reconstruire le bouton carte au reload)
+    var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    var headers = {"Content-Type": "application/json"};
+    if (csrfMeta) headers["X-CSRFToken"] = csrfMeta.getAttribute("content");
+    fetch("/api/alert-history", {
+        method: "POST",
+        headers: headers,
+        body: JSON.stringify({
+            type: type,
+            title: title,
+            timeStr: timeStr,
+            message: message,
+            hasAction: !!onAction,
+            actionData: actionData
+        })
+    }).catch(function() {});
+}
+
+// Charger l'historique depuis MongoDB au demarrage
+function _loadAlertHistory() {
+    var container = document.getElementById("widget-right-3-body");
+    if (!container) return;
+
+    fetch("/api/alert-history?limit=30")
+        .then(function(r) { return r.json(); })
+        .then(function(alerts) {
+            if (!alerts || !alerts.length) return;
+            var placeholder = container.querySelector(".widget-placeholder");
+            if (placeholder) placeholder.remove();
+
+            // alerts sont du plus recent au plus ancien, on les ajoute dans l'ordre inverse
+            // pour que insertBefore mette le plus recent en haut
+            for (var i = alerts.length - 1; i >= 0; i--) {
+                var a = alerts[i];
+                var iconName = _alertIconMap[a.type] || "info";
+                var d = new Date(a.createdAt);
+                var dateStr = isNaN(d.getTime()) ? "" :
+                    String(d.getDate()).padStart(2, "0") + "/" +
+                    String(d.getMonth() + 1).padStart(2, "0") + " " +
+                    String(d.getHours()).padStart(2, "0") + ":" +
+                    String(d.getMinutes()).padStart(2, "0");
+
+                // Reconstruire le callback "Voir sur la carte" depuis actionData
+                var actionData = a.actionData || null;
+                var onAction = null;
+                if (a.hasAction && actionData && actionData.pins && actionData.pins.length) {
+                    onAction = _buildMapAction(actionData.pins);
+                }
+
+                var entry = _renderAlertEntry(container, a.type, iconName, a.title, a.timeStr, a.message, onAction, dateStr, actionData);
+                container.insertBefore(entry, container.firstChild);
+            }
+        })
+        .catch(function() {});
+}
+
+document.addEventListener("DOMContentLoaded", _loadAlertHistory);
+
+// ---------- Preferences alertes personnelles ----------
+var ALERT_PREF_TYPES = [
+    {id: "opening", label: "Ouverture imminente"},
+    {id: "opened", label: "Site ouvert"},
+    {id: "closing", label: "Fermeture imminente"},
+    {id: "closed", label: "Site ferme"},
+    {id: "traffic-cluster", label: "Alerte trafic (cluster)"}
+];
+
+function _getAlertPrefs() {
+    try {
+        var stored = localStorage.getItem("cockpit-alert-prefs");
+        if (stored) return JSON.parse(stored);
+    } catch(e) {}
+    return null; // null = tout actif
+}
+
+function _setAlertPrefs(prefs) {
+    localStorage.setItem("cockpit-alert-prefs", JSON.stringify(prefs));
+}
+
+function isAlertMuted(type) {
+    var prefs = _getAlertPrefs();
+    if (!prefs) return false; // pas de prefs = tout actif
+    return prefs.indexOf(type) < 0; // pas dans la liste = mute
+}
+
+(function initAlertPrefsUI() {
+    document.addEventListener("DOMContentLoaded", function() {
+        var btn = document.getElementById("alert-prefs-btn");
+        var dropdown = document.getElementById("alert-prefs-dropdown");
+        if (!btn || !dropdown) return;
+
+        btn.addEventListener("click", function(e) {
+            e.stopPropagation();
+            var isHidden = dropdown.hasAttribute("hidden");
+            if (isHidden) {
+                _renderAlertPrefs(dropdown);
+                dropdown.removeAttribute("hidden");
+                // Position fixed sous le bouton
+                var rect = btn.getBoundingClientRect();
+                dropdown.style.top = (rect.bottom + 4) + "px";
+                dropdown.style.right = (window.innerWidth - rect.right) + "px";
+            } else {
+                dropdown.setAttribute("hidden", "");
+            }
+        });
+
+        document.addEventListener("click", function() {
+            dropdown.setAttribute("hidden", "");
+        });
+        dropdown.addEventListener("click", function(e) { e.stopPropagation(); });
+    });
+})();
+
+function _renderAlertPrefs(dropdown) {
+    dropdown.textContent = "";
+    var prefs = _getAlertPrefs();
+    // Si null, tout est actif -> initialiser avec tout
+    var activeIds = prefs || ALERT_PREF_TYPES.map(function(t) { return t.id; });
+
+    ALERT_PREF_TYPES.forEach(function(t) {
+        var label = document.createElement("label");
+        label.className = "alert-pref-item";
+        var cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = activeIds.indexOf(t.id) >= 0;
+        cb.addEventListener("change", function() {
+            var current = _getAlertPrefs() || ALERT_PREF_TYPES.map(function(x) { return x.id; });
+            if (cb.checked) {
+                if (current.indexOf(t.id) < 0) current.push(t.id);
+            } else {
+                current = current.filter(function(x) { return x !== t.id; });
+            }
+            _setAlertPrefs(current);
+        });
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(" " + t.label));
+        dropdown.appendChild(label);
+    });
+}
+
+function showCriticalAlert(type, timeStr, message, onView) {
+    var iconMap = { opening: "door_open", opened: "lock_open", closing: "door_front", closed: "lock", "traffic-cluster": "emergency" };
+    var titleMap = { opening: "OUVERTURE IMMINENTE", opened: "SITE OUVERT", closing: "FERMETURE IMMINENTE", closed: "SITE FERME", "traffic-cluster": "ALERTE TRAFIC" };
+
+    // Toujours historiser dans le widget droite
+    _pushAlertHistory(type, iconMap[type] || "info", titleMap[type] || type, timeStr, message, onView);
+
+    // Verifier permissions groupe (window.__trafficAlerts)
+    var groupAlerts = window.__trafficAlerts;
+    if (groupAlerts !== null && groupAlerts !== undefined) {
+        if (Array.isArray(groupAlerts) && groupAlerts.indexOf(type) < 0) return;
+    }
+
+    // Si mutee par les prefs perso, ne pas afficher le fullscreen
+    if (isAlertMuted(type)) return;
+
     var overlay = document.createElement("div");
     overlay.className = "critical-alert-overlay";
 
@@ -848,9 +1296,6 @@ function showCriticalAlert(type, timeStr, message) {
 
     var header = document.createElement("div");
     header.className = "critical-alert-header";
-
-    var iconMap = { opening: "door_open", opened: "lock_open", closing: "door_front", closed: "lock" };
-    var titleMap = { opening: "OUVERTURE IMMINENTE", opened: "SITE OUVERT", closing: "FERMETURE IMMINENTE", closed: "SITE FERME" };
 
     var icon = document.createElement("span");
     icon.className = "material-symbols-outlined critical-alert-icon";
@@ -874,24 +1319,50 @@ function showCriticalAlert(type, timeStr, message) {
     sub.className = "critical-alert-sub";
     sub.textContent = message;
 
-    var btn = document.createElement("button");
-    btn.className = "critical-alert-btn";
-    btn.textContent = "Compris";
-    btn.addEventListener("click", function () {
-        overlay.style.opacity = "0";
-        setTimeout(function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 300);
-    });
+    var btnRow = document.createElement("div");
+    btnRow.className = "critical-alert-btns";
+
+    if (onView) {
+        var btnIgnore = document.createElement("button");
+        btnIgnore.className = "critical-alert-btn critical-alert-btn-secondary";
+        btnIgnore.textContent = "Ignorer";
+        btnIgnore.addEventListener("click", function () {
+            overlay.style.opacity = "0";
+            setTimeout(function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 300);
+        });
+        btnRow.appendChild(btnIgnore);
+
+        var btnView = document.createElement("button");
+        btnView.className = "critical-alert-btn";
+        btnView.textContent = "Voir sur la carte";
+        btnView.addEventListener("click", function () {
+            overlay.style.opacity = "0";
+            setTimeout(function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 300);
+            onView();
+        });
+        btnRow.appendChild(btnView);
+    } else {
+        var btn = document.createElement("button");
+        btn.className = "critical-alert-btn";
+        btn.textContent = "Compris";
+        btn.addEventListener("click", function () {
+            overlay.style.opacity = "0";
+            setTimeout(function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 300);
+        });
+        btnRow.appendChild(btn);
+    }
 
     body.appendChild(timeEl);
     body.appendChild(sub);
-    body.appendChild(btn);
+    body.appendChild(btnRow);
     box.appendChild(header);
     box.appendChild(body);
     overlay.appendChild(box);
     document.body.appendChild(overlay);
 
     // Auto-focus button
-    setTimeout(function () { btn.focus(); }, 100);
+    var focusBtn = overlay.querySelector(".critical-alert-btn:last-child");
+    if (focusBtn) setTimeout(function () { focusBtn.focus(); }, 100);
 }
 
 var DAY_NAMES_SHORT = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
@@ -940,7 +1411,8 @@ function updateUpcomingEvents() {
                 name: titleEl.textContent.trim(),
                 time: timeEl ? timeEl.textContent.trim() : "",
                 date: secDate,
-                sortKey: secDate + "-" + String(minute).padStart(5, "0")
+                sortKey: secDate + "-" + String(minute).padStart(5, "0"),
+                cardEl: card
             });
         });
     });
@@ -999,6 +1471,20 @@ function updateUpcomingEvents() {
 
             card.appendChild(timeSpan);
             card.appendChild(nameSpan);
+            card.style.cursor = "pointer";
+            card.addEventListener("click", function () {
+                var srcCard = ev.cardEl;
+                if (!srcCard) return;
+                // Scroller vers la carte dans la timeline
+                srcCard.scrollIntoView({ behavior: "smooth", block: "center" });
+                // Flash visuel
+                srcCard.classList.add("highlight-flash");
+                setTimeout(function () { srcCard.classList.remove("highlight-flash"); }, 1500);
+                // Ouvrir le drawer si c'est un item (pas un cluster)
+                if (srcCard.__itemData && typeof window.openEventDrawer === "function") {
+                    window.openEventDrawer(ev.date, srcCard.__itemData);
+                }
+            });
             frag.appendChild(card);
         });
         return frag;

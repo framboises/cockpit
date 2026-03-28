@@ -64,6 +64,10 @@
                 <span class="material-symbols-outlined">settings</span>
                 <span class="label">Configuration</span>
             </a>
+            <a href="/analyse-ops" class="nav-btn">
+                <span class="material-symbols-outlined">biotech</span>
+                <span class="label">Analyse Ops</span>
+            </a>
             {% endif %}
         </nav>
 
@@ -96,11 +100,11 @@
                 <div class="sim-clock" id="sim-clock-display">--:--</div>
                 <div class="sim-date" id="sim-date-display">--/--/----</div>
                 <div class="sim-controls">
-                    <label class="sim-label">Date & heure</label>
+                    <label class="sim-label" for="sim-datetime">Date & heure</label>
                     <input type="datetime-local" id="sim-datetime" class="sim-input" />
                 </div>
                 <div class="sim-speed-row">
-                    <label class="sim-label">Vitesse</label>
+                    <label class="sim-label" for="sim-speed">Vitesse</label>
                     <select id="sim-speed" class="sim-input">
                         <option value="0.0167">x1 (temps reel)</option>
                         <option value="0.0833">x5</option>
@@ -161,6 +165,7 @@
             </div>
             <div class="header-spacer"></div>
             <div class="header-actions">
+                <div id="user-group-pills"></div>
                 <div class="view-toggle" role="group" aria-label="Vue">
                     <button class="view-toggle-btn active" id="view-timeline-btn" title="Timeline">
                         <span class="material-symbols-outlined">view_agenda</span>
@@ -195,16 +200,35 @@
                 <section class="widget-card" id="widget-traffic">
                     <header class="widget-header">
                         <h3>Trafic</h3>
+                        <button class="trafic-sort-btn" id="btn-show-all-alerts" title="Voir toutes les alertes sur la carte">
+                            <span class="material-symbols-outlined">map</span>
+                        </button>
                     </header>
                     <div class="widget-body">
                         <div class="traffic-counters">
-                            <div class="traffic-counter">
-                                <div class="label">Accident</div>
-                                <div class="counter"><span id="accident-number">0</span></div>
+                            <div class="traffic-counter" data-alert-type="ACCIDENT">
+                                <span class="material-symbols-outlined tc-icon">car_crash</span>
+                                <span class="tc-value" id="accident-number">0</span>
+                                <span class="tc-label">Accidents</span>
+                                <div class="tc-tooltip" id="tooltip-accident"></div>
                             </div>
-                            <div class="traffic-counter">
-                                <div class="label">Ralentissement</div>
-                                <div class="counter"><span id="jam-number">0</span></div>
+                            <div class="traffic-counter" data-alert-type="JAM">
+                                <span class="material-symbols-outlined tc-icon">traffic_jam</span>
+                                <span class="tc-value" id="jam-number">0</span>
+                                <span class="tc-label">Bouchons</span>
+                                <div class="tc-tooltip" id="tooltip-jam"></div>
+                            </div>
+                            <div class="traffic-counter" data-alert-type="HAZARD">
+                                <span class="material-symbols-outlined tc-icon">warning</span>
+                                <span class="tc-value" id="hazard-number">0</span>
+                                <span class="tc-label">Dangers</span>
+                                <div class="tc-tooltip" id="tooltip-hazard"></div>
+                            </div>
+                            <div class="traffic-counter" data-alert-type="ROAD_CLOSED">
+                                <span class="material-symbols-outlined tc-icon">block</span>
+                                <span class="tc-value" id="closed-number">0</span>
+                                <span class="tc-label">Fermees</span>
+                                <div class="tc-tooltip" id="tooltip-closed"></div>
                             </div>
                         </div>
                     </div>
@@ -227,27 +251,52 @@
                     </div>
                 </section>
 
-                <!-- Parkings -->
-                <section class="widget-card" id="widget-parkings">
+                <!-- Main courante PCO -->
+                <section class="widget-card" id="widget-comms">
                     <header class="widget-header">
-                        <h3>Temps d'acces</h3>
+                        <h3>Main courante</h3>
+                        <div class="widget-tabs">
+                            <button class="widget-tab active" data-tab="pcorg-stats" title="Synthese"><span class="material-symbols-outlined">dashboard</span></button>
+                            <button class="widget-tab" data-tab="pcorg-open" title="En cours"><span class="material-symbols-outlined">pending</span><span id="pcorg-badge" class="pcorg-badge" style="display:none"></span></button>
+                            <button class="widget-tab" data-tab="pcorg-closed" title="Terminees"><span class="material-symbols-outlined">task_alt</span></button>
+                        </div>
+                        <button class="trafic-sort-btn" id="pcorg-add-btn" title="Nouvelle intervention">
+                            <span class="material-symbols-outlined">add_circle</span>
+                        </button>
                     </header>
-                    <div class="widget-body" id="parking-indicators-list">
-                        <!-- Items injectes via JS -->
+                    <div class="widget-body widget-tab-content active pcorg-scroll" data-tab="pcorg-stats" id="pcorg-stats"></div>
+                    <div class="widget-body widget-tab-content pcorg-scroll" data-tab="pcorg-open" id="pcorg-list-open">
+                        <div class="widget-placeholder" id="pcorg-placeholder-open">
+                            <span class="material-symbols-outlined">forum</span>
+                            <span>Aucune intervention en cours</span>
+                        </div>
+                    </div>
+                    <div class="widget-body widget-tab-content pcorg-scroll" data-tab="pcorg-closed" id="pcorg-list-closed">
+                        <div class="widget-placeholder" id="pcorg-placeholder-closed">
+                            <span class="material-symbols-outlined">forum</span>
+                            <span>Aucune intervention terminee</span>
+                        </div>
                     </div>
                 </section>
 
-                <!-- Communications -->
-                <section class="widget-card" id="widget-comms">
+                <!-- Temps d'acces -->
+                <section class="widget-card trafic-widget" id="widget-parkings">
                     <header class="widget-header">
-                        <h3>Communications</h3>
-                    </header>
-                    <div class="widget-body" id="widget-comms-body">
-                        <div class="widget-placeholder">
-                            <span class="material-symbols-outlined">forum</span>
-                            <span>Messages operationnels</span>
+                        <h3>Temps d'acces</h3>
+                        <div class="widget-tabs">
+                            <button class="widget-tab active" data-tab="trafic-complet" title="Complet"><span class="material-symbols-outlined">list</span></button>
+                            <button class="widget-tab" data-tab="trafic-pkg" title="Parkings / Aires d'accueil"><span class="material-symbols-outlined">local_parking</span></button>
+                            <button class="widget-tab" data-tab="trafic-autoroute" title="Autoroutes"><span class="material-symbols-outlined">fork_right</span></button>
+                            <button class="widget-tab" data-tab="trafic-secu" title="Securite / Secours"><span class="material-symbols-outlined">emergency</span></button>
                         </div>
+                    </header>
+                    <div class="trafic-filter">
+                        <input type="search" id="trafic-filter-input" placeholder="Filtrer par nom..." class="form-input" />
                     </div>
+                    <div class="widget-body widget-tab-content active trafic-scroll" data-tab="trafic-complet" id="trafic-list-complet"></div>
+                    <div class="widget-body widget-tab-content trafic-scroll" data-tab="trafic-pkg" id="trafic-list-pkg"></div>
+                    <div class="widget-body widget-tab-content trafic-scroll" data-tab="trafic-autoroute" id="trafic-list-autoroute"></div>
+                    <div class="widget-body widget-tab-content trafic-scroll" data-tab="trafic-secu" id="trafic-list-secu"></div>
                 </section>
 
             </aside>
@@ -278,6 +327,7 @@
 
             <!-- Timeline -->
             <main id="timeline-main">
+                <div id="day-nav-bar" class="day-nav-bar" hidden></div>
                 <div id="now-line" hidden>
                     <span class="now-badge">--:--</span>
                 </div>
@@ -324,8 +374,8 @@
                         <h3>Affluence</h3>
                         <div class="widget-tabs">
                             <button class="widget-tab active" data-tab="affluence-jours">Jours</button>
-                            <button class="widget-tab" data-tab="affluence-tab2">Tab 2</button>
-                            <button class="widget-tab" data-tab="affluence-tab3">Tab 3</button>
+                            <button class="widget-tab" data-tab="affluence-tab2">Ventes</button>
+                            <button class="widget-tab" data-tab="affluence-tab3">Sites</button>
                         </div>
                     </header>
                     <div class="widget-body widget-tab-content active" id="widget-right-2-body" data-tab="affluence-jours">
@@ -340,10 +390,17 @@
 
                 <!-- Widget libre 3 -->
                 <section class="widget-card" id="widget-right-3">
-                    <header class="widget-header">
+                    <header class="widget-header collapsible-widget-header" id="alert-widget-toggle">
                         <h3>Alertes</h3>
+                        <div class="alert-prefs-wrap">
+                            <button class="trafic-sort-btn" id="alert-prefs-btn" title="Configurer mes alertes">
+                                <span class="material-symbols-outlined">tune</span>
+                            </button>
+                            <div class="alert-prefs-dropdown" id="alert-prefs-dropdown" hidden></div>
+                        </div>
+                        <span class="material-symbols-outlined collapse-icon">expand_more</span>
                     </header>
-                    <div class="widget-body" id="widget-right-3-body">
+                    <div class="widget-body alert-history-scroll" id="widget-right-3-body">
                         <div class="widget-placeholder">
                             <span class="material-symbols-outlined">notifications_active</span>
                             <span>Fil d'alertes</span>
@@ -351,15 +408,20 @@
                     </div>
                 </section>
 
-                <!-- Widget libre 4 -->
+                <!-- Widget Suivi GPS -->
                 <section class="widget-card" id="widget-right-4">
-                    <header class="widget-header">
-                        <h3>Ressources</h3>
+                    <header class="widget-header collapsible-widget-header">
+                        <h3>Suivi GPS</h3>
+                        <div class="anoloc-header-badge" id="anoloc-header-badge">
+                            <span class="anoloc-status-dot" id="anoloc-header-dot"></span>
+                            <span id="anoloc-header-count">-</span>
+                        </div>
+                        <span class="material-symbols-outlined collapse-icon">expand_more</span>
                     </header>
                     <div class="widget-body" id="widget-right-4-body">
                         <div class="widget-placeholder">
-                            <span class="material-symbols-outlined">engineering</span>
-                            <span>Suivi ressources</span>
+                            <span class="material-symbols-outlined">satellite_alt</span>
+                            <span>Suivi GPS</span>
                         </div>
                     </div>
                 </section>
@@ -495,8 +557,84 @@
     </div>
 </div>
 
+<!-- Modale creation intervention PCO -->
+<div id="pcorgCreateModal" class="modal">
+    <div class="modal-content">
+        <button class="drawer-close" id="pcorgCreateClose" aria-label="Fermer"><span class="material-icons">close</span></button>
+        <h3>Nouvelle intervention</h3>
+        <form id="pcorgCreateForm" novalidate>
+            <div class="form-group">
+                <label for="pcorg-cat">Categorie</label>
+                <select id="pcorg-cat" class="form-input" required>
+                    <option value="">-- Choisir --</option>
+                    <option value="PCO.Secours">PCO.Secours</option>
+                    <option value="PCO.Securite">PCO.Securite</option>
+                    <option value="PCO.Technique">PCO.Technique</option>
+                    <option value="PCO.Flux">PCO.Flux</option>
+                    <option value="PCO.Fourriere">PCO.Fourriere</option>
+                    <option value="PCO.Information">PCO.Information</option>
+                    <option value="PCO.MainCourante">PCO.MainCourante</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="pcorg-sous">Sous-classification (optionnel)</label>
+                <input type="text" id="pcorg-sous" class="form-input" placeholder="Ex: Secours a victime" />
+            </div>
+            <div class="form-group">
+                <label for="pcorg-text">Description</label>
+                <textarea id="pcorg-text" class="form-input" rows="3" required placeholder="Description de l'intervention..."></textarea>
+            </div>
+            <div class="form-group">
+                <label for="pcorg-area">Zone (optionnel)</label>
+                <input type="text" id="pcorg-area" class="form-input" placeholder="Ex: Zone Sud" />
+            </div>
+            <div class="form-group">
+                <label>Position GPS (optionnel)</label>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <input type="number" step="any" id="pcorg-lat" class="form-input" placeholder="Latitude" style="flex:1" />
+                    <input type="number" step="any" id="pcorg-lon" class="form-input" placeholder="Longitude" style="flex:1" />
+                    <button type="button" class="btn btn-secondary" id="pcorg-pick-gps" title="Pointer sur la carte">
+                        <span class="material-symbols-outlined">my_location</span>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-buttons">
+                <button type="button" class="btn btn-secondary" id="pcorgCreateCancel">Annuler</button>
+                <button type="submit" class="btn btn-primary">Enregistrer</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modale ajout GPS sur intervention existante -->
+<div id="pcorgGpsModal" class="modal">
+    <div class="modal-content">
+        <button class="drawer-close" id="pcorgGpsClose" aria-label="Fermer"><span class="material-icons">close</span></button>
+        <h3>Ajouter une position GPS</h3>
+        <input type="hidden" id="pcorg-gps-id" />
+        <div class="form-group">
+            <div style="display:flex;gap:8px;align-items:center;">
+                <input type="number" step="any" id="pcorg-gps-lat" class="form-input" placeholder="Latitude" style="flex:1" />
+                <input type="number" step="any" id="pcorg-gps-lon" class="form-input" placeholder="Longitude" style="flex:1" />
+                <button type="button" class="btn btn-secondary" id="pcorg-gps-pick" title="Pointer sur la carte">
+                    <span class="material-symbols-outlined">my_location</span>
+                </button>
+            </div>
+        </div>
+        <div class="modal-buttons">
+            <button type="button" class="btn btn-secondary" id="pcorgGpsCancel">Annuler</button>
+            <button type="button" class="btn btn-primary" id="pcorgGpsSave">Enregistrer</button>
+        </div>
+    </div>
+</div>
+
 <!-- Scripts -->
-<script nonce="{{ nonce }}">var satelliteIconUrl = "{{ url_for('static', filename='img/satellite.png') }}";</script>
+<script nonce="{{ nonce }}">
+var satelliteIconUrl = "{{ url_for('static', filename='img/satellite.png') }}";
+window.__allowedBlocks = {{ allowed_blocks_json|safe }};
+window.__userGroups = {{ user_groups_json|safe }};
+window.__trafficAlerts = {{ traffic_alerts_json|safe }};
+</script>
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 <script src="{{ url_for('static', filename='js/alerte.js') }}"></script>
@@ -506,5 +644,7 @@
 <script src="{{ url_for('static', filename='js/map_view.js') }}"></script>
 <script src="{{ url_for('static', filename='js/controle_access.js') }}"></script>
 <script src="{{ url_for('static', filename='js/affluence.js') }}"></script>
+<script src="{{ url_for('static', filename='js/anoloc.js') }}"></script>
+<script src="{{ url_for('static', filename='js/pcorg.js') }}"></script>
 </body>
 </html>

@@ -3,6 +3,7 @@ import os
 import re
 import json
 import logging
+import uuid
 import jwt
 from datetime import datetime, timedelta, timezone
 
@@ -25,6 +26,8 @@ from waitress import serve
 # Local application imports
 from traffic import traffic_bp
 from merge import run_merge
+from analyse_ops import analyse_ops_bp
+from anoloc import anoloc_bp
 
 ################################################################################
 # Configuration
@@ -88,8 +91,42 @@ CORS(app)  # Activer CORS pour toutes les routes
 # Collections cockpit groupes/user-groups
 COL_GROUPS = db['cockpit_groups']
 COL_USER_GROUPS = db['cockpit_user_groups']
+COL_ALERT_HISTORY = db['cockpit_alert_history']
 COL_GROUPS.create_index("name", unique=True)
 COL_USER_GROUPS.create_index("user_id", unique=True)
+COL_ALERT_HISTORY.create_index("createdAt", expireAfterSeconds=7*24*3600)  # TTL 7 jours
+
+# Groupes systeme (non supprimables)
+DEFAULT_GROUP_NAME = "__default__"
+ADMIN_GROUP_NAME = "__admin__"
+SYSTEM_GROUP_NAMES = {DEFAULT_GROUP_NAME, ADMIN_GROUP_NAME}
+
+COL_GROUPS.update_one(
+    {"name": DEFAULT_GROUP_NAME},
+    {"$setOnInsert": {
+        "name": DEFAULT_GROUP_NAME,
+        "description": "Blocs visibles par defaut pour les utilisateurs sans groupe",
+        "color": "#94a3b8",
+        "allowed_blocks": None,
+        "is_default": True,
+        "createdAt": datetime.now(timezone.utc),
+        "updatedAt": datetime.now(timezone.utc),
+    }},
+    upsert=True
+)
+COL_GROUPS.update_one(
+    {"name": ADMIN_GROUP_NAME},
+    {"$setOnInsert": {
+        "name": ADMIN_GROUP_NAME,
+        "description": "Apparence de la pillule Admin dans le header",
+        "color": "#ef4444",
+        "allowed_blocks": None,
+        "is_default": True,
+        "createdAt": datetime.now(timezone.utc),
+        "updatedAt": datetime.now(timezone.utc),
+    }},
+    upsert=True
+)
 
 # Seed fake users en mode CODING pour tester la gestion des groupes
 if CODING:
@@ -132,17 +169,28 @@ def role_required(required_role):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             if CODING:
-                # En mode développement, on simule un utilisateur avec des permissions maximales
-                logger.info(f"[DEV_MODE] Bypassing authentication for role '{required_role}'")
+                # En mode développement, on simule un utilisateur
+                # ?as=user ou ?as=manager pour simuler un role non-admin
+                sim_role = request.args.get("as", "admin")
+                if sim_role not in ROLE_HIERARCHY:
+                    sim_role = "admin"
+                sim_level = ROLE_HIERARCHY[sim_role]
+                sim_roles = [r for r in ROLE_ORDER if ROLE_HIERARCHY[r] <= sim_level]
+                logger.info(f"[DEV_MODE] Bypassing authentication for role '{required_role}' (simulated: {sim_role})")
                 request.user_payload = {
                     "apps": ["looker", "shiftsolver", "tagger"],
-                    "roles_by_app": {"cockpit": "admin"},
+                    "roles_by_app": {"cockpit": sim_role},
                     "global_roles": [],
-                    "roles": ["user", "manager", "admin"],
+                    "roles": sim_roles,
+                    "app_role": sim_role,
+                    "is_super_admin": False,
                     "firstname": "Bruce",
                     "lastname": "WAYNE",
                     "email": "bruce@wayneenterprise.com"
                 }
+                if sim_level < ROLE_HIERARCHY.get(required_role, 0):
+                    flash(f"Acces interdit : cette fonctionnalite requiert un role '{required_role}'.", "error")
+                    return redirect(request.referrer or "/")
                 return f(*args, **kwargs)
 
             token = request.cookies.get("access_token")
@@ -194,6 +242,101 @@ def role_required(required_role):
     return decorator
 
 ################################################################################
+# BLOCK PERMISSIONS (visibilite des widgets par groupe)
+################################################################################
+
+BLOCK_REGISTRY = {
+    "widget-traffic":   {"label": "Trafic"},
+    "widget-counters":  {"label": "Compteurs"},
+    "widget-parkings":  {"label": "Temps d'acces"},
+    "widget-comms":     {"label": "Communications"},
+    "meteo-previsions": {"label": "Meteo bandeau"},
+    "timeline-main":    {"label": "Timeline"},
+    "map-main":         {"label": "Carte"},
+    "status-card":      {"label": "Statut evenement"},
+    "widget-right-1":   {"label": "Meteo detail"},
+    "widget-right-2":   {"label": "Affluence"},
+    "widget-right-3":   {"label": "Alertes"},
+    "widget-right-4":   {"label": "Ressources"},
+}
+ALL_BLOCK_IDS = list(BLOCK_REGISTRY.keys())
+
+def get_user_allowed_blocks(payload):
+    """Retourne set() de block IDs autorises, ou None si aucune restriction."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return None
+    email = payload.get("email", "")
+    user_doc = db['users'].find_one({"email": email}, {"_id": 1})
+    if not user_doc:
+        return _get_default_blocks()
+    uid = user_doc["_id"]
+    ug = COL_USER_GROUPS.find_one({"user_id": uid})
+    group_ids = (ug.get("groups") or []) if ug else []
+    if not group_ids:
+        return _get_default_blocks()
+    groups = list(COL_GROUPS.find({"_id": {"$in": group_ids}}))
+    allowed = set()
+    for g in groups:
+        ab = g.get("allowed_blocks")
+        if ab is None:
+            return None
+        allowed.update(ab)
+    return allowed
+
+def _get_default_blocks():
+    """Retourne les blocs du groupe __default__, ou None si pas de restriction."""
+    default_group = COL_GROUPS.find_one({"name": DEFAULT_GROUP_NAME})
+    if not default_group:
+        return None
+    ab = default_group.get("allowed_blocks")
+    if ab is None:
+        return None
+    return set(ab)
+
+def get_user_traffic_alerts(payload):
+    """Retourne la liste des types d'alertes trafic autorises, ou None si aucune restriction."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return None  # admin voit tout
+    email = payload.get("email", "")
+    user_doc = db['users'].find_one({"email": email}, {"_id": 1})
+    if not user_doc:
+        return _get_default_traffic_alerts()
+    uid = user_doc["_id"]
+    ug = COL_USER_GROUPS.find_one({"user_id": uid})
+    group_ids = (ug.get("groups") or []) if ug else []
+    if not group_ids:
+        return _get_default_traffic_alerts()
+    groups = list(COL_GROUPS.find({"_id": {"$in": group_ids}}))
+    alerts = set()
+    for g in groups:
+        ta = g.get("traffic_alerts")
+        if ta is None:
+            return None  # un groupe sans restriction = tout autorise
+        alerts.update(ta)
+    return list(alerts) if alerts else []
+
+def _get_default_traffic_alerts():
+    """Retourne les alertes trafic du groupe __default__, ou None."""
+    default_group = COL_GROUPS.find_one({"name": DEFAULT_GROUP_NAME})
+    if not default_group:
+        return None
+    ta = default_group.get("traffic_alerts")
+    return list(ta) if ta else None
+
+def block_required(block_id):
+    """Decorateur: retourne 403 si le user n'a pas acces a ce bloc."""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            payload = getattr(request, 'user_payload', {})
+            allowed = get_user_allowed_blocks(payload)
+            if allowed is not None and block_id not in allowed:
+                return jsonify({"error": "Acces non autorise a ce widget"}), 403
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+################################################################################
 # GENERAL
 ################################################################################
 
@@ -216,9 +359,32 @@ def index():
     user_firstname = payload.get("firstname", "")
     user_lastname = payload.get("lastname", "")
     user_email = payload.get("email", "")
+    allowed = get_user_allowed_blocks(payload)
+    allowed_blocks_json = json.dumps(list(allowed) if allowed is not None else None)
+    # Recuperer les groupes (nom + couleur) de l'utilisateur pour les pillules header
+    user_group_pills = []
+    effective_role = payload.get("app_role", "user")
+    if effective_role == "admin" or payload.get("is_super_admin"):
+        admin_grp = COL_GROUPS.find_one({"name": ADMIN_GROUP_NAME})
+        admin_color = admin_grp["color"] if admin_grp else "#ef4444"
+        user_group_pills = [{"name": "Admin", "color": admin_color}]
+    else:
+        user_doc = db['users'].find_one({"email": user_email}, {"_id": 1})
+        if user_doc:
+            ug = COL_USER_GROUPS.find_one({"user_id": user_doc["_id"]})
+            gids = (ug.get("groups") or []) if ug else []
+            if gids:
+                groups = list(COL_GROUPS.find({"_id": {"$in": gids}, "name": {"$nin": list(SYSTEM_GROUP_NAMES)}}))
+                user_group_pills = [{"name": g["name"], "color": g.get("color", "#6366f1")} for g in groups]
+    user_groups_json = json.dumps(user_group_pills)
+    traffic_alerts = get_user_traffic_alerts(payload)
+    traffic_alerts_json = json.dumps(traffic_alerts)
     return render_template("index.html", user_roles=user_roles, user_apps=user_apps,
                            user_firstname=user_firstname, user_lastname=user_lastname,
-                           user_email=user_email)
+                           user_email=user_email,
+                           allowed_blocks_json=allowed_blocks_json,
+                           user_groups_json=user_groups_json,
+                           traffic_alerts_json=traffic_alerts_json)
 
 @app.errorhandler(404)
 def page_not_found(e):
@@ -258,6 +424,7 @@ def serve_tiles(z, x, y):
 
 @app.route('/timetable', methods=['GET'])
 @role_required("user")
+@block_required("timeline-main")
 def get_timetable():
     # Récupère les paramètres d'URL pour l'événement et l'année
     event = request.args.get('event')
@@ -288,6 +455,68 @@ def get_parametrage():
 # -------------------------------------------------------------------------------
 # Routes pour la carte (event view)
 # -------------------------------------------------------------------------------
+
+@app.route('/api/grid-ref', methods=['GET'])
+@role_required("user")
+def get_grid_ref():
+    """Retourne le carroyage tactique (lignes depuis QGIS)."""
+    lines_doc = db.grid_ref_qgis.find_one({"type": "grid_lines"}, {"_id": 0})
+    lines_25 = db.grid_ref_qgis.find_one({"type": "grid_lines_25"}, {"_id": 0})
+    if not lines_doc:
+        return jsonify({"lines": None}), 200
+    return jsonify({"lines": lines_doc, "lines_25": lines_25})
+
+
+@app.route('/api/3p', methods=['GET'])
+@role_required("user")
+def get_3p():
+    """Retourne les portes/portails/portillons (collection 3p) dans le viewport."""
+    doc = db["3p"].find_one({}, {"_id": 0})
+    if not doc or "features" not in doc:
+        return jsonify({"features": []})
+
+    south = request.args.get("south", type=float)
+    west = request.args.get("west", type=float)
+    north = request.args.get("north", type=float)
+    east = request.args.get("east", type=float)
+
+    features = doc["features"]
+    if south is not None and west is not None and north is not None and east is not None:
+        filtered = []
+        for f in features:
+            coords = f.get("geometry", {}).get("coordinates", [])
+            if len(coords) >= 2:
+                lng, lat = coords[0], coords[1]
+                if south <= lat <= north and west <= lng <= east:
+                    filtered.append(f)
+        features = filtered
+
+    return jsonify({"features": features})
+
+
+# Photos 3P (servies depuis le dossier looker/static/img/media)
+LOOKER_MEDIA = os.path.join(os.path.dirname(__file__), '..', 'looker', 'static', 'img', 'media')
+
+
+@app.route('/api/3p/photo/thumb/<filename>')
+@role_required("user")
+def get_3p_thumb(filename):
+    """Sert la miniature d'une photo 3P."""
+    safe = os.path.basename(filename)
+    return send_from_directory(os.path.join(LOOKER_MEDIA, 'thumbnails'), safe)
+
+
+@app.route('/api/3p/photo/original/<filename>')
+@role_required("user")
+def get_3p_original(filename):
+    """Sert la photo originale 3P (fallback sur thumbnail si pas d'original)."""
+    safe = os.path.basename(filename)
+    orig_path = os.path.join(LOOKER_MEDIA, 'original', safe)
+    if os.path.isfile(orig_path):
+        return send_from_directory(os.path.join(LOOKER_MEDIA, 'original'), safe)
+    return send_from_directory(os.path.join(LOOKER_MEDIA, 'thumbnails'), safe)
+
+
 @app.route('/get_gm_categories', methods=['GET'])
 @role_required("user")
 def get_gm_categories():
@@ -673,6 +902,7 @@ def set_preparation_ready():
 
 @app.route('/meteo_previsions/<date>', methods=['GET'])
 @role_required("user")
+@block_required("widget-right-1")
 def get_meteo_details(date):
     try:
         day_data = db.meteo_previsions.find_one({'Date': date})
@@ -687,6 +917,7 @@ def get_meteo_details(date):
 
 @app.route('/meteo_previsions', methods=['GET'])
 @role_required("user")
+@block_required("meteo-previsions")
 def get_meteo_previsions():
     today = datetime.now().strftime('%Y-%m-%d')
     three_days_from_now = (datetime.now() + timedelta(days=3)).strftime('%Y-%m-%d')
@@ -733,6 +964,7 @@ def get_meteo_previsions():
 
 @app.route('/historique_meteo/<date>', methods=['GET'])
 @role_required("user")
+@block_required("widget-right-1")
 def get_historique_meteo(date):
     try:
         selected_date = datetime.strptime(date, '%Y-%m-%d')
@@ -811,6 +1043,7 @@ def get_historique_meteo(date):
     
 @app.route('/meteo_previsions_6h', methods=['GET'])
 @role_required("user")
+@block_required("meteo-previsions")
 def get_meteo_previsions_6h():
     now = datetime.now()
     six_hours_from_now = now + timedelta(hours=6)
@@ -864,7 +1097,8 @@ def get_meteo_previsions_6h():
     return jsonify(results)
 
 @app.route('/sun_times', methods=['GET'])
-@role_required("user")  # 🔥 Accessible à tous les utilisateurs authentifiés
+@role_required("user")
+@block_required("meteo-previsions")
 def get_sun_times():
     """
     Retourne les heures de lever et de coucher du soleil en fonction de l'heure actuelle.
@@ -921,6 +1155,8 @@ def get_sun_times():
 ################################################################################
 
 app.register_blueprint(traffic_bp)
+app.register_blueprint(analyse_ops_bp)
+app.register_blueprint(anoloc_bp)
 # app.register_blueprint(meteo_bp)
 
 ################################################################################
@@ -929,6 +1165,7 @@ app.register_blueprint(traffic_bp)
 
 @app.route('/get_counter', methods=['GET'])
 @role_required("user")
+@block_required("widget-counters")
 def get_counter():
     event = request.args.get('event')
     year = request.args.get('year')  # Ex. "2025"
@@ -961,6 +1198,7 @@ def get_counter():
     
 @app.route('/get_counter_max', methods=['GET'])
 @role_required("user")
+@block_required("widget-counters")
 def get_counter_max():
     event = request.args.get('event')
     year = request.args.get('year')  # Ex. "2025"
@@ -999,6 +1237,7 @@ def get_counter_max():
 
 @app.route('/get_affluence', methods=['GET'])
 @role_required("user")
+@block_required("widget-right-2")
 def get_affluence():
     event = request.args.get("event")
     year = request.args.get("year")
@@ -1073,51 +1312,126 @@ def get_affluence():
                 prev_race_date = None
 
     # ── Charger historique_controle N-1 (pic presents) ──
-    prev_hist_doc = None
     prev_hist_race_date = None
     prev_data_by_day = {}
-    if race_date:
+    if race_date and current_year_int:
         prev_hist_candidates = list(db['historique_controle'].find(
             {'type': 'frequentation', 'event': event},
             sort=[('year', -1)]
         ))
         for cand in prev_hist_candidates:
             cand_year = cand.get('year')
-            if current_year_int and isinstance(cand_year, (int, float)) and int(cand_year) < current_year_int:
-                prev_hist_doc = cand
+            if isinstance(cand_year, (int, float)) and int(cand_year) < current_year_int:
+                prev_hist_year = cand_year
+                prev_hist_race_raw = cand.get('race')
+                if not prev_hist_race_raw:
+                    portes_doc = db['historique_controle'].find_one(
+                        {'type': 'portes', 'event': event, 'year': prev_hist_year},
+                        {'_id': 0, 'race': 1}
+                    )
+                    if portes_doc:
+                        prev_hist_race_raw = portes_doc.get('race')
+                try:
+                    if isinstance(prev_hist_race_raw, str):
+                        prev_hist_race_date = datetime.fromisoformat(prev_hist_race_raw.replace('Z', '+00:00')).date()
+                    else:
+                        prev_hist_race_date = prev_hist_race_raw.date() if hasattr(prev_hist_race_raw, 'date') else None
+                except Exception:
+                    pass
+                if prev_hist_race_date and cand.get('data'):
+                    from collections import defaultdict
+                    day_records = defaultdict(list)
+                    for rec in cand['data']:
+                        rec_date = rec.get('date')
+                        if isinstance(rec_date, str):
+                            day_key = rec_date[:10]
+                        elif hasattr(rec_date, 'strftime'):
+                            day_key = rec_date.strftime('%Y-%m-%d')
+                        else:
+                            continue
+                        day_records[day_key].append(rec)
+                    prev_data_by_day = dict(day_records)
                 break
 
-        if prev_hist_doc:
-            prev_hist_year = prev_hist_doc.get('year')
-            prev_hist_race_raw = prev_hist_doc.get('race')
-            if not prev_hist_race_raw:
-                portes_doc = db['historique_controle'].find_one(
-                    {'type': 'portes', 'event': event, 'year': prev_hist_year},
-                    {'_id': 0, 'race': 1}
-                )
-                if portes_doc:
-                    prev_hist_race_raw = portes_doc.get('race')
-            try:
-                if isinstance(prev_hist_race_raw, str):
-                    prev_hist_race_date = datetime.fromisoformat(prev_hist_race_raw.replace('Z', '+00:00')).date()
-                else:
-                    prev_hist_race_date = prev_hist_race_raw.date() if hasattr(prev_hist_race_raw, 'date') else None
-            except Exception:
-                prev_hist_race_date = None
+    # ── Calculer la projection basee sur les courbes N-1 et N-2 ──
+    def _parse_race(raw):
+        try:
+            if isinstance(raw, str):
+                return datetime.fromisoformat(raw.replace('Z', '+00:00')).date()
+            return raw.date() if hasattr(raw, 'date') else None
+        except Exception:
+            return None
 
-            if prev_hist_race_date and prev_hist_doc.get('data'):
-                from collections import defaultdict
-                day_records = defaultdict(list)
-                for rec in prev_hist_doc['data']:
-                    rec_date = rec.get('date')
-                    if isinstance(rec_date, str):
-                        day_key = rec_date[:10]
-                    elif hasattr(rec_date, 'strftime'):
-                        day_key = rec_date.strftime('%Y-%m-%d')
-                    else:
-                        continue
-                    day_records[day_key].append(rec)
-                prev_data_by_day = dict(day_records)
+    def _fill_curve(param_doc):
+        """Retourne [(days_before_race, total_ventes)] tries, et le total final."""
+        rd = _parse_race(param_doc.get('data', {}).get('race'))
+        if not rd:
+            return [], 0, None
+        prods = param_doc.get('tickets', {}).get('products', {})
+        snaps = {}
+        for p in prods.values():
+            for h in p.get('history', []):
+                d = h['date']
+                if d not in snaps:
+                    snaps[d] = 0
+                snaps[d] += h.get('ventes', 0)
+        if not snaps:
+            return [], 0, None
+        points = []
+        for d, v in snaps.items():
+            dt = datetime.strptime(d, '%Y-%m-%d').date()
+            points.append(((rd - dt).days, v))
+        points.sort(key=lambda x: x[0], reverse=True)
+        final = max(v for _, v in points)
+        return points, final, rd
+
+    def _interpolate_pct(points, final, target_days_before):
+        """Interpole le % atteint a target_days_before jours de la course."""
+        if not points or final <= 0:
+            return None
+        for i in range(len(points) - 1):
+            d1, v1 = points[i]
+            d2, v2 = points[i + 1]
+            if d1 >= target_days_before >= d2:
+                ratio = (d1 - target_days_before) / (d1 - d2) if d1 != d2 else 0
+                pct = (v1 + ratio * (v2 - v1)) / final * 100
+                return pct
+        if target_days_before >= points[0][0]:
+            return points[0][1] / final * 100
+        return points[-1][1] / final * 100
+
+    # Calculer le ratio de projection
+    projection_ratio = None  # ventes_actuelles / projection = ce ratio
+    if race_date and last_update:
+        last_dt = datetime.strptime(last_update, '%Y-%m-%d').date()
+        days_before = (race_date - last_dt).days
+
+        fill_pcts = []
+        # Courbe N-1
+        if prev_param:
+            pts, final, _ = _fill_curve(prev_param)
+            pct = _interpolate_pct(pts, final, days_before)
+            if pct:
+                fill_pcts.append(pct)
+
+        # Courbe N-2
+        if current_year_int:
+            for cand in sorted(prev_candidates, key=lambda c: str(c.get('year', '')), reverse=True):
+                try:
+                    cy = int(cand.get('year', ''))
+                except (ValueError, TypeError):
+                    continue
+                if cy < current_year_int and cand.get('year') != prev_year_str:
+                    pts2, final2, _ = _fill_curve(cand)
+                    pct2 = _interpolate_pct(pts2, final2, days_before)
+                    if pct2:
+                        fill_pcts.append(pct2)
+                    break
+
+        if fill_pcts:
+            avg_pct = sum(fill_pcts) / len(fill_pcts)
+            if avg_pct > 0:
+                projection_ratio = avg_pct / 100  # ex: 0.55 = on est a 55% du final
 
     # ── Construire la reponse par jour ──
     result_days = []
@@ -1182,8 +1496,14 @@ def get_affluence():
                 ventes_prev = day_ventes_prev
                 total_ventes_prev += day_ventes_prev
 
-        # Pic N-1 depuis historique_controle
+        # Projection ventes pour ce jour
+        day_projection = None
+        if projection_ratio and projection_ratio > 0:
+            day_projection = round(day_ventes / projection_ratio)
+
+        # Pic N-1 et Pic projete depuis historique_controle
         pic_prev = None
+        pic_projection = None
         if race_date and prev_hist_race_date:
             offset_days = (day_date - race_date).days
             target_prev_date = prev_hist_race_date + timedelta(days=offset_days)
@@ -1191,6 +1511,11 @@ def get_affluence():
             if target_key in prev_data_by_day:
                 records = prev_data_by_day[target_key]
                 pic_prev = max((r.get('present', 0) for r in records), default=0)
+                # Pic projete = pic_prev * (projection_ventes_N / ventes_finales_N-1)
+                # Le ratio pic/ventes de N-1 capture les enfants gratuits + accredites
+                if pic_prev and ventes_prev and ventes_prev > 0 and day_projection:
+                    pic_ratio = pic_prev / ventes_prev
+                    pic_projection = round(day_projection * pic_ratio)
 
         result_days.append({
             "date": day_str,
@@ -1198,17 +1523,60 @@ def get_affluence():
             "ventes": day_ventes,
             "delta": day_delta,
             "ventes_prev": ventes_prev,
+            "projection": day_projection,
             "pic_prev": pic_prev,
+            "pic_projection": pic_projection,
             "prev_year": prev_year_str
         })
+
+    total_projection = round(total_ventes / projection_ratio) if projection_ratio else None
+
+    # ── Sites (parkings + campings avec ticketing) ──
+    # Charger aussi les sites N-1 pour comparer par nom de site
+    prev_sites_by_name = {}
+    if prev_param:
+        prev_data = prev_param.get('data', {})
+        prev_prods = prev_param.get('tickets', {}).get('products', {})
+        for sk in ('parkingsHoraires', 'campingsHoraires'):
+            for ps in prev_data.get(sk, []):
+                ptk = ps.get('ticketing', [])
+                if not ptk:
+                    continue
+                sv = sum(prev_prods.get(t.get('product', ''), {}).get('ventes', 0) for t in ptk)
+                prev_sites_by_name[ps.get('name', '')] = sv
+
+    sites = []
+    for source_key in ('parkingsHoraires', 'campingsHoraires'):
+        for site in doc['data'].get(source_key, []):
+            tk = site.get('ticketing', [])
+            if not tk:
+                continue
+            site_ventes = 0
+            for t in tk:
+                pname = t.get('product', '')
+                pdata = products_data.get(pname)
+                if pdata:
+                    site_ventes += pdata.get('ventes', 0)
+            site_name = site.get('name', '?')
+            site_ventes_prev = prev_sites_by_name.get(site_name)
+            site_projection = round(site_ventes / projection_ratio) if projection_ratio else None
+            sites.append({
+                'name': site_name,
+                'capacite': site.get('capacite') or site.get('capacite_theorique') or 0,
+                'ventes': site_ventes,
+                'ventes_prev': site_ventes_prev,
+                'projection': site_projection,
+            })
 
     return jsonify({
         "days": result_days,
         "total_ventes": total_ventes,
         "total_delta": total_delta,
         "total_ventes_prev": total_ventes_prev if total_ventes_prev else None,
+        "total_projection": total_projection,
         "last_update": last_update,
-        "prev_year": prev_year_str
+        "prev_year": prev_year_str,
+        "sites": sites
     })
 
 
@@ -1451,6 +1819,80 @@ def edit_todo_sets_page():
                            user_email=user_email)
 
 ################################################################################
+# Block permissions API
+################################################################################
+
+@app.route('/api/my-permissions', methods=['GET'])
+@role_required("user")
+def get_my_permissions():
+    allowed = get_user_allowed_blocks(request.user_payload)
+    return jsonify({
+        "allowed_blocks": list(allowed) if allowed is not None else None,
+        "all_blocks": ALL_BLOCK_IDS
+    })
+
+@app.route('/api/block-registry', methods=['GET'])
+@role_required("admin")
+def get_block_registry():
+    return jsonify([
+        {"id": bid, "label": info["label"]}
+        for bid, info in BLOCK_REGISTRY.items()
+    ])
+
+################################################################################
+################################################################################
+# Historique des alertes cockpit
+################################################################################
+
+@app.route('/api/alert-history', methods=['GET'])
+@role_required("user")
+def get_alert_history():
+    limit = int(request.args.get('limit', 50))
+    alerts = list(COL_ALERT_HISTORY.find().sort('createdAt', -1).limit(limit))
+    return jsonify([_pub(a) for a in alerts])
+
+@app.route('/api/alert-history', methods=['POST'])
+@role_required("user")
+@csrf.exempt
+def post_alert_history():
+    data = request.get_json(force=True) or {}
+    alert_type = data.get('type', '')
+    message = data.get('message', '')
+    now = datetime.now(timezone.utc)
+
+    # Deduplication adaptative selon le type d'alerte
+    # traffic-cluster : meme zone pendant 30 min (match sur type + lieu extrait du message)
+    # autres : meme type + message exact dans les 60 dernieres secondes
+    if alert_type == 'traffic-cluster':
+        dedup_query = {'type': alert_type, 'createdAt': {'$gte': now - timedelta(minutes=30)}}
+        # Affiner par lieu si present (texte apres " — " dans le message)
+        if '\u2014' in message:
+            zone = message.split('\u2014')[-1].strip()
+            if zone:
+                dedup_query['message'] = {'$regex': zone.replace('(', '\\(').replace(')', '\\)')}
+    else:
+        dedup_query = {
+            'type': alert_type,
+            'message': message,
+            'createdAt': {'$gte': now - timedelta(seconds=60)}
+        }
+    existing = COL_ALERT_HISTORY.find_one(dedup_query)
+    if existing:
+        return jsonify(_pub(existing)), 200
+
+    doc = {
+        'type': alert_type,
+        'title': data.get('title', ''),
+        'timeStr': data.get('timeStr', ''),
+        'message': message,
+        'hasAction': bool(data.get('hasAction')),
+        'actionData': data.get('actionData'),
+        'createdAt': now,
+    }
+    ins = COL_ALERT_HISTORY.insert_one(doc)
+    doc['_id'] = str(ins.inserted_id)
+    return jsonify(doc), 201
+
 # Gestion des groupes et utilisateurs cockpit
 ################################################################################
 
@@ -1521,10 +1963,24 @@ def create_group():
     # Verifier unicite
     if COL_GROUPS.find_one({"name": name}):
         return jsonify({"error": "Un groupe avec ce nom existe deja"}), 409
+    raw_blocks = data.get('allowed_blocks')
+    allowed_blocks = None
+    if isinstance(raw_blocks, list):
+        allowed_blocks = [b for b in raw_blocks if b in BLOCK_REGISTRY]
+        if not allowed_blocks:
+            allowed_blocks = None
+    raw_alerts = data.get('traffic_alerts')
+    traffic_alerts = None
+    if isinstance(raw_alerts, list):
+        traffic_alerts = [a for a in raw_alerts if isinstance(a, str)]
+        if not traffic_alerts:
+            traffic_alerts = None
     doc = {
         'name': name,
         'description': (data.get('description') or '').strip(),
         'color': (data.get('color') or '#6366f1').strip(),
+        'allowed_blocks': allowed_blocks,
+        'traffic_alerts': traffic_alerts,
         'createdAt': datetime.now(timezone.utc),
         'updatedAt': datetime.now(timezone.utc),
     }
@@ -1537,13 +1993,31 @@ def create_group():
 @csrf.exempt
 def update_group(gid):
     data = request.get_json(force=True) or {}
+    # Verifier si c'est un groupe systeme
+    existing = COL_GROUPS.find_one({"_id": ObjectId(gid)})
+    group_name = existing.get("name") if existing else None
+    is_system = group_name in SYSTEM_GROUP_NAMES
+    is_admin_grp = group_name == ADMIN_GROUP_NAME
     patch = {}
-    if 'name' in data:
+    if 'name' in data and not is_system:
         patch['name'] = (data['name'] or '').strip()
-    if 'description' in data:
+    if 'description' in data and not is_system:
         patch['description'] = (data['description'] or '').strip()
     if 'color' in data:
         patch['color'] = (data['color'] or '').strip()
+    if 'allowed_blocks' in data and not is_admin_grp:
+        raw_blocks = data['allowed_blocks']
+        if isinstance(raw_blocks, list):
+            filtered = [b for b in raw_blocks if b in BLOCK_REGISTRY]
+            patch['allowed_blocks'] = filtered if filtered else None
+        else:
+            patch['allowed_blocks'] = None
+    if 'traffic_alerts' in data:
+        raw_alerts = data['traffic_alerts']
+        if isinstance(raw_alerts, list):
+            patch['traffic_alerts'] = [a for a in raw_alerts if isinstance(a, str)] or None
+        else:
+            patch['traffic_alerts'] = None
     if not patch:
         return jsonify({"error": "Rien a modifier"}), 400
     patch['updatedAt'] = datetime.now(timezone.utc)
@@ -1559,6 +2033,10 @@ def update_group(gid):
 @csrf.exempt
 def delete_group(gid):
     oid = ObjectId(gid)
+    # Interdire la suppression du groupe par defaut
+    g = COL_GROUPS.find_one({"_id": oid})
+    if g and g.get("name") in SYSTEM_GROUP_NAMES:
+        return jsonify({"error": "Les groupes systeme ne peuvent pas etre supprimes"}), 400
     r = COL_GROUPS.delete_one({"_id": oid})
     if r.deleted_count == 0:
         return jsonify({"error": "Groupe introuvable"}), 404
@@ -1597,6 +2075,18 @@ def webhook_parametrage_updated():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/cluster-config', methods=['GET'])
+@role_required("user")
+def get_cluster_config():
+    """Retourne la config de clustering pour la timeline (accessible a tous)."""
+    configs = list(db.merge_config.find(
+        {"cluster_enabled": True},
+        {"_id": 0, "data_key": 1, "label": 1, "cluster_icon": 1,
+         "timeline_category": 1, "activity_label": 1}
+    ))
+    return jsonify(configs)
+
+
 @app.route('/api/merge-config', methods=['GET'])
 @role_required("admin")
 def list_merge_configs():
@@ -1631,7 +2121,9 @@ def update_merge_config(data_key):
     allowed_fields = {
         "data_key", "label", "enabled", "mode",
         "activity_label", "timeline_category", "timeline_type",
-        "department", "access_types", "todos_type", "vignette_fields",
+        "department", "access_types", "merge_access_types",
+        "todos_type", "vignette_fields",
+        "cluster_enabled", "cluster_icon",
     }
     clean = {k: v for k, v in data.items() if k in allowed_fields}
 
@@ -1649,6 +2141,94 @@ def update_merge_config(data_key):
 def delete_merge_config(data_key):
     """Supprime la config de merge pour une categorie."""
     db.merge_config.delete_one({"data_key": data_key})
+    return jsonify({"ok": True})
+
+
+################################################################################
+# Carte — Defauts globaux & preferences utilisateur
+################################################################################
+
+@app.route('/api/map-defaults', methods=['GET'])
+@role_required("user")
+def get_map_defaults():
+    """Retourne les defauts globaux d'affichage de la carte."""
+    doc = db.merge_config.find_one({"data_key": "__map_defaults__"}, {"_id": 0})
+    if not doc:
+        return jsonify({"hidden_categories": [], "default_tile": "osm", "hidden_route_colors": {}})
+    return jsonify({
+        "hidden_categories": doc.get("hidden_categories", []),
+        "default_tile": doc.get("default_tile", "osm"),
+        "hidden_route_colors": doc.get("hidden_route_colors", {})
+    })
+
+
+@app.route('/api/map-defaults', methods=['PUT'])
+@role_required("admin")
+@csrf.exempt
+def set_map_defaults():
+    """Sauvegarde les defauts globaux d'affichage carte (admin)."""
+    data = request.get_json(force=True) or {}
+    hidden = data.get("hidden_categories", [])
+    tile = data.get("default_tile", "osm")
+    if tile not in ("osm", "sat-egis", "sat-aco"):
+        tile = "osm"
+    hidden_colors = data.get("hidden_route_colors", {})
+    db.merge_config.update_one(
+        {"data_key": "__map_defaults__"},
+        {"$set": {
+            "data_key": "__map_defaults__",
+            "hidden_categories": hidden,
+            "default_tile": tile,
+            "hidden_route_colors": hidden_colors
+        }},
+        upsert=True
+    )
+    return jsonify({"ok": True})
+
+
+@app.route('/api/map-preferences', methods=['GET'])
+@role_required("user")
+def get_map_preferences():
+    """Retourne les preferences carte de l'utilisateur courant."""
+    payload = getattr(request, 'user_payload', {})
+    email = payload.get("email", "")
+    if not email:
+        return jsonify({}), 200
+    user = db.users.find_one({"email": email}, {"_id": 1})
+    if not user:
+        return jsonify({}), 200
+    ug = COL_USER_GROUPS.find_one({"user_id": user["_id"]}, {"map_prefs": 1, "_id": 0})
+    if not ug or "map_prefs" not in ug:
+        return jsonify({}), 200
+    return jsonify(ug["map_prefs"])
+
+
+@app.route('/api/map-preferences', methods=['PUT'])
+@role_required("user")
+@csrf.exempt
+def set_map_preferences():
+    """Sauvegarde les preferences carte de l'utilisateur courant."""
+    payload = getattr(request, 'user_payload', {})
+    email = payload.get("email", "")
+    if not email:
+        return jsonify({"error": "Utilisateur non identifie"}), 400
+    user = db.users.find_one({"email": email}, {"_id": 1})
+    if not user:
+        return jsonify({"error": "Utilisateur introuvable"}), 404
+    data = request.get_json(force=True) or {}
+    prefs = {}
+    if "hidden_categories" in data:
+        prefs["hidden_categories"] = data["hidden_categories"]
+    if "default_tile" in data:
+        tile = data["default_tile"]
+        prefs["default_tile"] = tile if tile in ("osm", "sat-egis", "sat-aco") else "osm"
+    if "hidden_route_colors" in data:
+        prefs["hidden_route_colors"] = data["hidden_route_colors"]
+    COL_USER_GROUPS.update_one(
+        {"user_id": user["_id"]},
+        {"$set": {"user_id": user["_id"], "map_prefs": prefs}},
+        upsert=True
+    )
     return jsonify({"ok": True})
 
 
@@ -1671,6 +2251,266 @@ def run_merge_manual():
 
 
 ################################################################################
+# API Main courante (pcorg) — interventions PCO uniquement
+################################################################################
+
+_COMMENT_RE = re.compile(
+    r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})\s*,\s*(.+?)\s*\n(.*?)(?=\d{2}/\d{2}/\d{4}|\Z)',
+    re.DOTALL,
+)
+
+def _parse_comment_history(comment):
+    if not comment:
+        return []
+    entries = []
+    for m in _COMMENT_RE.finditer(comment):
+        ts_raw, operator, text = m.group(1), m.group(2).strip(), m.group(3).strip()
+        try:
+            dt = datetime.strptime(ts_raw, "%d/%m/%Y %H:%M:%S")
+            dt = dt.replace(tzinfo=ZoneInfo("Europe/Paris"))
+            ts_iso = dt.isoformat()
+        except ValueError:
+            ts_iso = ts_raw
+        entries.append({"ts": ts_iso, "operator": operator, "text": text})
+    return entries
+
+
+PCO_PROJECTION = {
+    "_id": 1, "ts": 1, "close_ts": 1, "category": 1, "text": 1,
+    "area": 1, "operator": 1, "severity": 1, "is_incident": 1,
+    "gps": 1, "status_code": 1,
+    "content_category.sous_classification": 1,
+}
+
+def _pcorg_serialise(doc):
+    """Aplatit un document pcorg pour le JSON frontend."""
+    gps = doc.get("gps")
+    coords = gps.get("coordinates") if gps and isinstance(gps, dict) else None
+    cc = doc.get("content_category") or {}
+    area = doc.get("area") or {}
+    ts = doc.get("ts")
+    close_ts = doc.get("close_ts")
+    return {
+        "id": str(doc["_id"]),
+        "ts": ts.isoformat() if isinstance(ts, datetime) else ts,
+        "close_ts": close_ts.isoformat() if isinstance(close_ts, datetime) else close_ts,
+        "category": doc.get("category"),
+        "text": doc.get("text") or "",
+        "area_id": area.get("id"),
+        "area_desc": area.get("desc") or "",
+        "operator": doc.get("operator") or "",
+        "severity": doc.get("severity", 0),
+        "is_incident": doc.get("is_incident", False),
+        "status_code": doc.get("status_code", 0),
+        "sous_classification": cc.get("sous_classification") or "",
+        "lat": coords[1] if coords and len(coords) >= 2 else None,
+        "lon": coords[0] if coords and len(coords) >= 2 else None,
+    }
+
+
+@app.route('/api/pcorg/live', methods=['GET'])
+@role_required("user")
+def pcorg_live():
+    event = request.args.get("event", "")
+    year = request.args.get("year", "")
+    if not event or not year:
+        return jsonify({"error": "event et year requis"}), 400
+    try:
+        year = int(year)
+    except ValueError:
+        return jsonify({"error": "year invalide"}), 400
+
+    base = {"event": event, "year": year, "category": {"$regex": "^PCO"}}
+    col = db["pcorg"]
+
+    open_docs = list(col.find(
+        {**base, "status_code": {"$nin": [10]}},
+        PCO_PROJECTION
+    ).sort("ts", -1))
+
+    closed_docs = list(col.find(
+        {**base, "status_code": 10},
+        PCO_PROJECTION
+    ).sort("close_ts", -1).limit(100))
+
+    return jsonify({
+        "open": [_pcorg_serialise(d) for d in open_docs],
+        "closed": [_pcorg_serialise(d) for d in closed_docs],
+        "counts": {"open": len(open_docs), "closed": len(closed_docs)},
+    })
+
+
+@app.route('/api/pcorg/detail/<doc_id>', methods=['GET'])
+@role_required("user")
+def pcorg_detail(doc_id):
+    doc = db["pcorg"].find_one({"_id": doc_id})
+    if not doc:
+        return jsonify({"error": "introuvable"}), 404
+    gps = doc.get("gps")
+    coords = gps.get("coordinates") if gps and isinstance(gps, dict) else None
+    cc = doc.get("content_category") or {}
+    area = doc.get("area") or {}
+    ts = doc.get("ts")
+    close_ts = doc.get("close_ts")
+    # comment_history : utiliser le champ stocke, sinon parser a la volee
+    comment_history = doc.get("comment_history")
+    if comment_history is None:
+        comment_history = _parse_comment_history(doc.get("comment"))
+
+    return jsonify({
+        "id": str(doc["_id"]),
+        "sql_id": doc.get("sql_id"),
+        "ts": ts.isoformat() if isinstance(ts, datetime) else ts,
+        "close_ts": close_ts.isoformat() if isinstance(close_ts, datetime) else close_ts,
+        "category": doc.get("category"),
+        "text": doc.get("text") or "",
+        "text_full": doc.get("text_full") or "",
+        "comment": doc.get("comment") or "",
+        "comment_history": comment_history or [],
+        "area_id": area.get("id"),
+        "area_desc": area.get("desc") or "",
+        "operator": doc.get("operator") or "",
+        "operator_close": doc.get("operator_close") or "",
+        "severity": doc.get("severity", 0),
+        "is_incident": doc.get("is_incident", False),
+        "status_code": doc.get("status_code", 0),
+        "content_category": cc,
+        "group_desc": (doc.get("group") or {}).get("desc") or "",
+        "phones": (doc.get("extracted") or {}).get("phones"),
+        "plates": (doc.get("extracted") or {}).get("plates"),
+        "lat": coords[1] if coords and len(coords) >= 2 else None,
+        "lon": coords[0] if coords and len(coords) >= 2 else None,
+    })
+
+
+def _pcorg_mk_uuid(event, year, ts_str, category, text, area_id, user_id):
+    seed = (
+        f"{event}|{year}|{ts_str.strip()}"
+        f"|{(category or '').strip()}|{(text or '').strip()}"
+        f"|{str(area_id or '').strip()}|{str(user_id or '').strip()}"
+    )
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, seed))
+
+
+@app.route('/api/pcorg/create', methods=['POST'])
+@role_required("user")
+def pcorg_create():
+    data = request.get_json(force=True)
+    event = data.get("event", "")
+    year = data.get("year", "")
+    category = data.get("category", "")
+    text = data.get("text", "").strip()
+    if not event or not year or not category or not text:
+        return jsonify({"error": "event, year, category et text requis"}), 400
+    if not category.startswith("PCO."):
+        return jsonify({"error": "categorie invalide (doit commencer par PCO.)"}), 400
+    try:
+        year = int(year)
+    except ValueError:
+        return jsonify({"error": "year invalide"}), 400
+
+    now = datetime.now(timezone.utc)
+    ts_str = now.isoformat()
+    user = request.user_payload
+    operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
+
+    lat = data.get("lat")
+    lon = data.get("lon")
+    gps = None
+    if lat is not None and lon is not None:
+        try:
+            gps = {"type": "Point", "coordinates": [float(lon), float(lat)]}
+        except (ValueError, TypeError):
+            pass
+
+    area_desc = data.get("area_desc", "")
+    sous_classif = data.get("sous_classification", "")
+
+    doc_id = _pcorg_mk_uuid(event, year, ts_str, category, text, "", str(user.get("email", "")))
+
+    doc = {
+        "_id": doc_id,
+        "event": event,
+        "year": year,
+        "ts": now,
+        "timestamp_iso": ts_str,
+        "close_ts": None,
+        "close_iso": None,
+        "category": category,
+        "source": category,
+        "text": text,
+        "text_full": text,
+        "comment": "",
+        "comment_history": [],
+        "operator": operator_name,
+        "operator_id_create": user.get("email", ""),
+        "operator_close": None,
+        "operator_id_close": None,
+        "status_code": 0,
+        "severity": 0,
+        "is_incident": False,
+        "area": {"id": None, "desc": area_desc} if area_desc else None,
+        "gps": gps,
+        "group": None,
+        "content_category": {"sous_classification": sous_classif} if sous_classif else {},
+        "extracted": {"phones": None, "plates": None},
+        "tags": [],
+        "synced_at": None,
+        "sql_id": None,
+        "guid": None,
+        "server": "COCKPIT",
+    }
+
+    db["pcorg"].insert_one(doc)
+    return jsonify({"ok": True, "id": doc_id})
+
+
+@app.route('/api/pcorg/update-gps/<doc_id>', methods=['POST'])
+@role_required("user")
+def pcorg_update_gps(doc_id):
+    data = request.get_json(force=True)
+    lat = data.get("lat")
+    lon = data.get("lon")
+    if lat is None or lon is None:
+        return jsonify({"error": "lat et lon requis"}), 400
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except (ValueError, TypeError):
+        return jsonify({"error": "lat/lon invalides"}), 400
+
+    result = db["pcorg"].update_one(
+        {"_id": doc_id},
+        {"$set": {"gps": {"type": "Point", "coordinates": [lon, lat]}}}
+    )
+    if result.matched_count == 0:
+        return jsonify({"error": "introuvable"}), 404
+    return jsonify({"ok": True})
+
+
+@app.route('/api/pcorg/close/<doc_id>', methods=['POST'])
+@role_required("user")
+def pcorg_close(doc_id):
+    user = request.user_payload
+    operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
+    now = datetime.now(timezone.utc)
+
+    result = db["pcorg"].update_one(
+        {"_id": doc_id, "status_code": {"$ne": 10}},
+        {"$set": {
+            "close_ts": now,
+            "close_iso": now.isoformat(),
+            "status_code": 10,
+            "operator_close": operator_name,
+            "operator_id_close": user.get("email", ""),
+        }}
+    )
+    if result.matched_count == 0:
+        return jsonify({"error": "introuvable ou deja clos"}), 404
+    return jsonify({"ok": True})
+
+
+################################################################################
 # Exécution
 ################################################################################
 
@@ -1682,7 +2522,7 @@ if __name__ == "__main__":
     # Lancement de l'application
     if DEV_MODE:
         logger.info(f"[DEV] Running TITAN Home in development mode on port {PORT}")
-        app.run(debug=True, use_reloader=True, host="0.0.0.0", port=PORT)
+        app.run(debug=True, use_reloader=True, host="127.0.0.1", port=PORT)
     else:
         logger.warning(f"[PROD] Running TITAN Home on port {PORT}")
         serve(app, host="0.0.0.0", port=PORT)

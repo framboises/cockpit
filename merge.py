@@ -556,6 +556,7 @@ def _process_dynamic_schedule(items, config, id_prefix, db=None):
 
     # Determiner les access_types a traiter depuis la config ou auto-detect
     access_types = config.get("access_types", ["public", "organisation"])
+    merge_access = config.get("merge_access_types", False)
 
     for item in items:
         item_name = item.get("name", "")
@@ -601,9 +602,9 @@ def _process_dynamic_schedule(items, config, id_prefix, db=None):
             if not access_hours:
                 continue
 
-            # Verifier si tous les types ont les memes horaires -> fusion
+            # Verifier si tous les types ont les memes horaires -> fusion (si active)
             unique_hours = set(access_hours.values())
-            if len(unique_hours) == 1 and len(access_hours) > 1:
+            if merge_access and len(unique_hours) == 1 and len(access_hours) > 1:
                 # Fusionne
                 open_h, close_h = list(access_hours.values())[0]
                 _emit_schedule_vignettes(

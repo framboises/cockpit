@@ -114,37 +114,64 @@ function renderTodoSticky(item) {
     </div>`;
 }
 
-// --- Helpers clustering ---
+// --- Helpers clustering (dynamique via /api/cluster-config) ---
 function norm(s){ return (s||'').toString().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,''); }
-function isParkingItem(it) {
-  const c = norm(it.category), a = norm(it.activity), p = norm(it.place);
-  return /parking/.test(c) || /parking/.test(a) || /parking/.test(p);
-}
-function isAccueilItem(it) {
-  const c = norm(it.category), a = norm(it.activity), p = norm(it.place);
-  // "aire d'accueil", "aires accueil", "accueil camping", etc.
-  return /aire.*accueil|accueil.*aire|camping|caravane|camp-car|camping-car/.test(c+a+p);
+
+// CLUSTER_CONFIG est construit dynamiquement depuis la DB.
+// Chaque entree: { label, icon, match(item)->bool }
+// Le matching se fait par activity_label (pattern du merge_config).
+let CLUSTER_CONFIG = {};
+let _clusterConfigLoaded = false;
+
+function _buildMatcherFromLabel(activityLabel) {
+  // activity_label = "Parking {name}" -> on matche si activity contient "Parking "
+  // ou "Ouverture Parking " ou "Fermeture Parking "
+  const prefix = (activityLabel || "").replace(/\s*\{name\}\s*$/, "").trim();
+  if (!prefix) return () => false;
+  const prefixNorm = norm(prefix);
+  return function(it) {
+    const a = norm(it.activity || "");
+    return a.includes(prefixNorm);
+  };
 }
 
-const CLUSTER_CONFIG = {
-  parking: { label: 'Parkings',        match: isParkingItem,  icon: 'local_parking' },
-  accueil: { label: "Aires d'accueil", match: isAccueilItem,  icon: 'rv_hookup' },
-  portes:  { label: 'Portes',          match: isDoorItem,     icon: 'meeting_room' } // ou 'door_front'
-};
+async function loadClusterConfig() {
+  try {
+    const res = await fetch("/api/cluster-config");
+    if (!res.ok) return;
+    const configs = await res.json();
+    const built = {};
+    configs.forEach(cfg => {
+      const key = cfg.data_key;
+      built[key] = {
+        label: cfg.label || key,
+        icon: cfg.cluster_icon || "category",
+        match: _buildMatcherFromLabel(cfg.activity_label),
+      };
+    });
+    CLUSTER_CONFIG = built;
+    _clusterConfigLoaded = true;
+  } catch (e) {
+    console.warn("Impossible de charger cluster-config:", e);
+  }
+}
+
+// Charger au demarrage (la promesse est reutilisee par fetchTimetable si besoin)
+const _clusterConfigReady = loadClusterConfig();
+
+function detectClusterType(it) {
+  for (const [key, cfg] of Object.entries(CLUSTER_CONFIG)) {
+    if (cfg.match(it)) return key;
+  }
+  return null;
+}
 
 function groupByClusters(items) {
   const rest = [];
   const buckets = {}; // key: `${type}|${kind}|${timeKey}` -> []
 
-  function detectType(it) {
-    if (CLUSTER_CONFIG.parking.match(it)) return 'parking';
-    if (CLUSTER_CONFIG.accueil.match(it)) return 'accueil';
-    if (CLUSTER_CONFIG.portes.match(it))  return 'portes';
-    return null;
-  }
-
   items.forEach(it => {
-    const type = detectType(it);
+    const type = detectClusterType(it);
     if (!type) { rest.push(it); return; }
 
     const kind = getOpenCloseKind(it); // 'open'|'close'|null
@@ -187,12 +214,6 @@ function clusterTimeWindow(items){
   return txt;
 }
 
-function isDoorItem(it) {
-  const s = norm(`${it.category||''} ${it.activity||''} ${it.place||''}`);
-  // tolérant : porte/portes, gate, portail, entrée/entree
-  return /\bporte?s?\b|\bgate\b|portail|entr[ée]e/.test(s);
-}
-
 function validTimeStr(s){ return !!(s && s.trim() && s.toUpperCase() !== 'TBC'); }
 
 function getOpenCloseKind(it){
@@ -224,12 +245,6 @@ function removeRedundantOpenClosePairs(byDate, { mode = 'midnight' } = {}) {
 
   const dates = Object.keys(byDate).sort();
   const normPlace = s => norm(s || '').replace(/\s+/g, ' ').trim();
-  const detectType = it => {
-    if (CLUSTER_CONFIG.parking.match(it)) return 'parking';
-    if (CLUSTER_CONFIG.accueil.match(it)) return 'accueil';
-    if (CLUSTER_CONFIG.portes.match(it))  return 'portes';
-    return null;
-  };
 
   if (mode === 'off') return;
 
@@ -244,7 +259,7 @@ function removeRedundantOpenClosePairs(byDate, { mode = 'midnight' } = {}) {
     const arr = byDate[date] || [];
     const bucket = {};
     arr.forEach(it => {
-      const type = detectType(it);
+      const type = detectClusterType(it);
       const kind = getOpenCloseKind(it);
       if (!type || !kind) return;
       const timeKey = getClusterTimeKey(it, kind);
@@ -272,13 +287,13 @@ function removeRedundantOpenClosePairs(byDate, { mode = 'midnight' } = {}) {
 
       const mapOpen = new Map();
       a1.forEach(it => {
-        const type = detectType(it); if (!type) return;
+        const type = detectClusterType(it); if (!type) return;
         const key = `${type}|${normPlace(it.place||'')}`;
         (mapOpen.get(key) || mapOpen.set(key, [])).push(it);
       });
 
       a0.forEach(itClose => {
-        const type = detectType(itClose); if (!type) return;
+        const type = detectClusterType(itClose); if (!type) return;
         const key = `${type}|${normPlace(itClose.place||'')}`;
         const matches = mapOpen.get(key);
         if (matches?.length) {
@@ -829,14 +844,218 @@ function toggleDetails(e, button) {
     }
 }
 
-// Fonction pour récupérer et afficher le timetable dans la timeline
-function fetchTimetable() {
+// ---------------------------------------------------------------------------
+// Day navigation bar
+// ---------------------------------------------------------------------------
+let _dayNavObserver = null;
+let _dayNavTooltip = null;
+
+const _DAY_NAMES_SHORT = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+
+function _getDayNavTooltip() {
+  if (!_dayNavTooltip) {
+    _dayNavTooltip = document.createElement('div');
+    _dayNavTooltip.className = 'day-nav-tooltip';
+    document.body.appendChild(_dayNavTooltip);
+  }
+  return _dayNavTooltip;
+}
+
+function _showDayNavTooltip(pill, lines) {
+  const tip = _getDayNavTooltip();
+  tip.textContent = '';
+  lines.forEach(function(line) {
+    var row = document.createElement('span');
+    row.className = 'tt-row';
+    var dot = document.createElement('span');
+    dot.className = 'tt-dot ' + line.type;
+    row.appendChild(dot);
+    var txt = document.createElement('span');
+    txt.textContent = line.text;
+    row.appendChild(txt);
+    tip.appendChild(row);
+  });
+
+  var rect = pill.getBoundingClientRect();
+  tip.style.left = (rect.left + rect.width / 2) + 'px';
+  tip.style.top = (rect.bottom + 6) + 'px';
+  tip.style.transform = 'translateX(-50%) translateY(4px)';
+  tip.classList.add('visible');
+  tip.style.transform = 'translateX(-50%) translateY(0)';
+}
+
+function _hideDayNavTooltip() {
+  if (_dayNavTooltip) {
+    _dayNavTooltip.classList.remove('visible');
+  }
+}
+
+function _buildDayNav(dates, sectionsByDate) {
+  const bar = document.getElementById('day-nav-bar');
+  if (!bar) return;
+  bar.textContent = '';
+
+  if (!dates.length) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+
+  const pills = {};
+  dates.forEach(dateStr => {
+    const d = new Date(dateStr + 'T00:00:00');
+    const pill = document.createElement('button');
+    pill.className = 'day-nav-pill';
+    pill.dataset.date = dateStr;
+
+    const dayName = document.createElement('span');
+    dayName.className = 'day-name';
+    dayName.textContent = _DAY_NAMES_SHORT[d.getDay()];
+
+    const dayNum = document.createElement('span');
+    dayNum.className = 'day-num';
+    dayNum.textContent = d.getDate();
+
+    pill.appendChild(dayName);
+    pill.appendChild(dayNum);
+
+    // Indicateurs (points cote a cote)
+    const raceRaw = window.parametrage?.race || window.parametrage?.data?.race || "";
+    const raceDate = typeof raceRaw === 'string' ? raceRaw.slice(0, 10) : "";
+    const isRace = raceDate === dateStr;
+    const isPublic = !!window.publicDatesMap?.[dateStr];
+
+    if (isRace || isPublic) {
+      const tooltipLines = [];
+      const dotsRow = document.createElement('span');
+      dotsRow.className = 'day-indicators';
+      if (isPublic) {
+        pill.classList.add('day-public');
+        const dot = document.createElement('span');
+        dot.className = 'day-indicator public';
+        dotsRow.appendChild(dot);
+        const entry = window.publicDatesMap[dateStr];
+        // Detecter continuite 24h avec les jours voisins
+        const prevDate = new Date(d); prevDate.setDate(prevDate.getDate() - 1);
+        const nextDate = new Date(d); nextDate.setDate(nextDate.getDate() + 1);
+        const prevKey = prevDate.toISOString().slice(0, 10);
+        const nextKey = nextDate.toISOString().slice(0, 10);
+        const prevEntry = window.publicDatesMap?.[prevKey];
+        const nextEntry = window.publicDatesMap?.[nextKey];
+
+        const openIs00 = entry.openTime === '00:00';
+        const closeIs2359 = entry.closeTime === '23:59' || entry.closeTime === '24:00';
+
+        if (entry.is24h || (openIs00 && closeIs2359)) {
+          tooltipLines.push({type: 'public', text: 'Ouvert au public 24/24'});
+        } else if (openIs00 && prevEntry) {
+          tooltipLines.push({type: 'public', text: 'Fermeture au public ' + entry.closeTime});
+        } else if (closeIs2359 && nextEntry) {
+          tooltipLines.push({type: 'public', text: 'Ouverture au public ' + entry.openTime});
+        } else {
+          tooltipLines.push({type: 'public', text: 'Public ' + entry.openTime + ' - ' + entry.closeTime});
+        }
+      }
+      if (isRace) {
+        pill.classList.add('day-race');
+        const dot = document.createElement('span');
+        dot.className = 'day-indicator race';
+        dotsRow.appendChild(dot);
+        tooltipLines.push({type: 'race', text: 'Jour de course'});
+      }
+      pill.appendChild(dotsRow);
+      pill.addEventListener('mouseenter', function() { _showDayNavTooltip(pill, tooltipLines); });
+      pill.addEventListener('mouseleave', _hideDayNavTooltip);
+    }
+
+    pill.addEventListener('click', () => {
+      const section = sectionsByDate[dateStr];
+      if (section) {
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+
+    bar.appendChild(pill);
+    pills[dateStr] = pill;
+  });
+
+  // Observer les sections visibles pour mettre a jour la pill active
+  _setupDayNavObserver(sectionsByDate, pills);
+}
+
+function _setupDayNavObserver(sectionsByDate, pills) {
+  // Nettoyer l'ancien observer
+  if (_dayNavObserver) {
+    _dayNavObserver.disconnect();
+    _dayNavObserver = null;
+  }
+
+  const container = document.getElementById('event-list');
+  if (!container) return;
+
+  // Stocker les ratios de visibilite par date
+  const visibleRatios = {};
+
+  _dayNavObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      const date = entry.target.dataset.date;
+      if (date) {
+        visibleRatios[date] = entry.intersectionRatio;
+      }
+    });
+
+    // Trouver la date la plus visible
+    let bestDate = null;
+    let bestRatio = 0;
+    for (const [date, ratio] of Object.entries(visibleRatios)) {
+      if (ratio > bestRatio) {
+        bestRatio = ratio;
+        bestDate = date;
+      }
+    }
+
+    // Si aucune section n'est assez visible, prendre la premiere qui intersecte
+    if (!bestDate || bestRatio < 0.01) {
+      for (const [date, ratio] of Object.entries(visibleRatios)) {
+        if (ratio > 0) {
+          bestDate = date;
+          break;
+        }
+      }
+    }
+
+    // Mettre a jour les pills
+    Object.entries(pills).forEach(([date, pill]) => {
+      pill.classList.toggle('active', date === bestDate);
+    });
+
+    // Scroller la pill active dans la barre si necessaire
+    if (bestDate && pills[bestDate]) {
+      pills[bestDate].scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+  }, {
+    root: container,
+    threshold: [0, 0.1, 0.25, 0.5, 0.75, 1.0],
+  });
+
+  // Observer toutes les sections
+  Object.values(sectionsByDate).forEach(section => {
+    _dayNavObserver.observe(section);
+  });
+}
+
+// Fonction pour recuperer et afficher le timetable dans la timeline
+async function fetchTimetable() {
+    if (!window.isBlockAllowed("timeline-main")) return;
     if (!window.selectedEvent || !window.selectedYear) {
         console.error("Les variables globales 'selectedEvent' et 'selectedYear' doivent être définies.");
         return;
     }
+    // S'assurer que la config de clustering est chargee avant le rendu
+    await _clusterConfigReady;
+
     const url = '/timetable?event=' + encodeURIComponent(window.selectedEvent) + '&year=' + encodeURIComponent(window.selectedYear);
-    
+
     return fetch(url)
         .then(response => response.json())
         .then(data => {
@@ -916,10 +1135,16 @@ function fetchTimetable() {
                     eventList.appendChild(dateSection);
                 });
             } else {
-                eventList.innerHTML += "<p>Aucune donnée de timetable disponible.</p>";
+                eventList.textContent = "";
+                const p = document.createElement("p");
+                p.textContent = "Aucune donnee de timetable disponible.";
+                eventList.appendChild(p);
             }
+
+            // Construire la barre de navigation par jour
+            _buildDayNav(Object.keys(sectionsByDate).sort(), sectionsByDate);
         })
-        .catch(error => console.error("Erreur lors de la récupération du timetable :", error));
+        .catch(error => console.error("Erreur lors de la recuperation du timetable :", error));
 }
 
 /**
@@ -971,9 +1196,10 @@ function openTimetableItemModal(date, item) {
     if (typeof showToast === "function") showToast("warning", "Details evenement indisponibles.");
 }
 
-// Expose fetchTimetable et fetchParametrage globalement pour main.js
+// Expose fetchTimetable, fetchParametrage et openEventDrawer globalement pour main.js
 window.fetchTimetable = fetchTimetable;
 window.fetchParametrage = fetchParametrage;
+window.openEventDrawer = openEventDrawer;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 // FONCTION AJOUT
@@ -1823,12 +2049,14 @@ async function openEditModalFromDrawer(dateStr, item) {
         el = document.createElement('div');
         el.id = 'now-line';
         el.hidden = true;
-        el.innerHTML = '<span class="now-line-label">--:--</span>';
-        main.prepend(el);
+        const label = document.createElement('span');
+        label.className = 'now-line-label';
+        label.textContent = '--:--';
+        el.appendChild(label);
+        main.appendChild(el);
       } else if (el.parentElement !== main) {
-        // si la ligne était ailleurs, on la déplace
         el.remove();
-        main.prepend(el);
+        main.appendChild(el);
       }
 
       this._lineEl = el;
@@ -1869,6 +2097,10 @@ async function openEditModalFromDrawer(dateStr, item) {
       const container = document.querySelector('.timeline-container');
       if (!container || !this._lineEl) return;
 
+      // Offset du container par rapport a #timeline-main (hauteur day-nav-bar)
+      const _mainEl = document.getElementById('timeline-main');
+      const _contOff = _mainEl ? (container.getBoundingClientRect().top - _mainEl.getBoundingClientRect().top) : 0;
+
       // --- Sections triées avec leur date ISO ---
       const sections = Array.from(container.querySelectorAll('.timetable-date-section'));
       if (!sections.length) return;
@@ -1899,31 +2131,28 @@ async function openEditModalFromDrawer(dateStr, item) {
         const allAfter  = map.every(x => x.iso > nowYMD);
 
         if (allBefore) {
-          // Aujourd'hui est apres tous les jours affiches -> ligne en bas
           const lastSection = map[map.length - 1].el;
           const lastCards = Array.from(lastSection.querySelectorAll('.event-item'));
           const lastEl = lastCards.length ? lastCards[lastCards.length - 1] : lastSection;
           const contRect = container.getBoundingClientRect();
           const elRect = lastEl.getBoundingClientRect();
           const y = elRect.bottom - contRect.top + container.scrollTop + 4;
-          this._lineEl.style.top = y + 'px';
+          this._lineEl.style.top = (y + _contOff) + 'px';
           container.scrollTo({ top: Math.max(0, y - container.clientHeight + 40), behavior: 'smooth' });
         } else if (allAfter) {
-          // Aujourd'hui est avant tous les jours affiches -> ligne juste au-dessus du premier jour
           const firstSection = map[0].el;
           const contRect = container.getBoundingClientRect();
           const secRect = firstSection.getBoundingClientRect();
           const y = secRect.top - contRect.top + container.scrollTop - 16;
-          this._lineEl.style.top = Math.max(4, y) + 'px';
+          this._lineEl.style.top = Math.max(_contOff, y + _contOff) + 'px';
           container.scrollTo({ top: 0, behavior: 'smooth' });
         } else {
-          // Aujourd'hui est entre deux jours -> fixer entre les sections
           const past = map.filter(x => x.iso < nowYMD);
           const lastPast = past[past.length - 1].el;
           const contRect = container.getBoundingClientRect();
           const secRect = lastPast.getBoundingClientRect();
           const y = secRect.bottom - contRect.top + container.scrollTop + 4;
-          this._lineEl.style.top = y + 'px';
+          this._lineEl.style.top = (y + _contOff) + 'px';
           container.scrollTo({ top: Math.max(0, y - this._lineTopPx), behavior: 'smooth' });
         }
         return;
@@ -1945,7 +2174,7 @@ async function openEditModalFromDrawer(dateStr, item) {
 
       // util: poser la ligne à une position Y *dans le viewport du container*
       const placeLineViewportY = (y) => {
-        let lineTop = Math.max(0, Math.min(container.clientHeight - 2, y));
+        let lineTop = Math.max(_contOff, Math.min(_contOff + container.clientHeight - 2, y + _contOff));
         this._lineEl.style.top = `${lineTop}px`;
       };
 
@@ -2235,6 +2464,7 @@ async function openEditModalFromDrawer(dateStr, item) {
     if (!input || !clear || !list) return;
 
     const doSearch = debounce(()=>{
+      if (window.CockpitMapView && window.CockpitMapView.currentView && window.CockpitMapView.currentView() === "map") return;
       const q = input.value || '';
       const res = searchIndex(q);
       renderResults(res);
@@ -2242,20 +2472,40 @@ async function openEditModalFromDrawer(dateStr, item) {
 
     input.addEventListener('input', doSearch);
     input.addEventListener('keydown', (e)=>{
-      if (e.key === 'Escape') {
+      if (window.CockpitMapView && window.CockpitMapView.currentView && window.CockpitMapView.currentView() === "map") return;
+      const items = list.querySelectorAll('li');
+      const active = list.querySelector('li.active');
+      let idx = -1;
+      if (active) { items.forEach((li, i) => { if (li === active) idx = i; }); }
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (active) active.classList.remove('active');
+        idx = (idx + 1) % items.length;
+        if (items[idx]) { items[idx].classList.add('active'); items[idx].scrollIntoView({ block: 'nearest' }); }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (active) active.classList.remove('active');
+        idx = idx <= 0 ? items.length - 1 : idx - 1;
+        if (items[idx]) { items[idx].classList.add('active'); items[idx].scrollIntoView({ block: 'nearest' }); }
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (active) {
+          active.click();
+        } else {
+          const res = searchIndex(input.value || '');
+          if (res.length) {
+            list.classList.remove('show');
+            scrollToTimelineTarget(res[0]);
+          }
+        }
+      } else if (e.key === 'Escape') {
         input.value = '';
         list.classList.remove('show');
       }
-      if (e.key === 'Enter') {
-        // si un premier résultat, on y va direct
-        const res = searchIndex(input.value || '');
-        if (res.length) {
-          list.classList.remove('show');
-          scrollToTimelineTarget(res[0]);
-        }
-      }
     });
     clear.addEventListener('click', ()=>{
+      if (window.CockpitMapView && window.CockpitMapView.currentView && window.CockpitMapView.currentView() === "map") return;
       input.value = '';
       list.classList.remove('show');
       input.focus();

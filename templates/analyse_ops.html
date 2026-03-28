@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>COCKPIT — Analyse Ops</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+
+    <!-- Fonts -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+
+    <!-- Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+
+    <!-- App CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+    <!-- Libs JS -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-sankey@0.14.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@3"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.1.0"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.0.1/wordcloud2.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/simple-statistics@7"></script>
+</head>
+
+<body>
+<div class="app-layout">
+
+    <!-- ===== SIDEBAR ===== -->
+    <aside id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+            <img class="sidebar-logo" src="{{ url_for('static', filename='img/ACO-logo-monochrome-universel-blanc.png') }}" alt="ACO">
+            <span class="sidebar-brand">COCKPIT</span>
+            <button id="sidebarToggle" class="sidebar-toggle" aria-label="Toggle sidebar">
+                <span class="material-symbols-outlined">menu</span>
+            </button>
+        </div>
+
+        <nav class="sidebar-nav">
+            <a href="/" class="nav-btn">
+                <span class="material-symbols-outlined">dashboard</span>
+                <span class="label">Cockpit</span>
+            </a>
+            {% if "admin" in user_roles %}
+            <a href="/config/todos" class="nav-btn">
+                <span class="material-symbols-outlined">settings</span>
+                <span class="label">Configuration</span>
+            </a>
+            <a href="/analyse-ops" class="nav-btn is-active">
+                <span class="material-symbols-outlined">biotech</span>
+                <span class="label">Analyse Ops</span>
+            </a>
+            {% endif %}
+        </nav>
+
+        <div class="sidebar-panel">
+            <div>
+                <label for="event-select">Evenement</label>
+                <select id="event-select"></select>
+            </div>
+            <div>
+                <label for="year-select">Annee</label>
+                <select id="year-select"></select>
+            </div>
+        </div>
+
+        <!-- AI Assistant teaser -->
+        <div class="sidebar-ai" title="Assistant IA (bientot)">
+            <span class="material-symbols-outlined">smart_toy</span>
+            <span>Assistant IA</span>
+        </div>
+
+        <div class="sidebar-footer">
+            <div class="sidebar-user-info">
+                <span class="material-symbols-outlined sidebar-user-avatar">account_circle</span>
+                <div class="sidebar-user-details">
+                    <span class="sidebar-user-name">{{ user_firstname }} {{ user_lastname }}</span>
+                    <span class="sidebar-user-email">{{ user_email }}</span>
+                </div>
+            </div>
+            <a href="/logout_redirect" class="nav-btn nav-btn-danger">
+                <span class="material-symbols-outlined">logout</span>
+                <span class="label">Deconnexion</span>
+            </a>
+        </div>
+    </aside>
+
+    <!-- ===== MAIN ===== -->
+    <div class="app-main">
+
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-event-info">
+                <span class="material-symbols-outlined" style="font-size:22px;color:var(--brand);">biotech</span>
+                <span class="header-event-name">Analyse Ops</span>
+                <span class="header-event-year" id="lab-event-label">---</span>
+            </div>
+            <div class="header-spacer"></div>
+            <div class="header-actions" style="gap:12px;">
+                <div class="lab-status" id="lab-status" style="display:none;">
+                    <div class="lab-progress-ring"></div>
+                    <span id="lab-status-text">Calcul en cours...</span>
+                </div>
+                <button class="btn btn-primary" id="lab-compute-btn" style="display:flex;align-items:center;gap:6px;">
+                    <span class="material-symbols-outlined" style="font-size:18px;">play_arrow</span>
+                    Analyser
+                </button>
+            </div>
+        </header>
+
+        <!-- Main content: 3 columns -->
+        <div id="main-content" class="lab-grid">
+
+            <!-- ========== PANEL GAUCHE ========== -->
+            <aside id="lab-panel-left" class="lab-panel" data-panel="left">
+
+                <!-- KPIs -->
+                <section class="widget-card lab-widget" id="lab-kpis">
+                    <div class="widget-header">
+                        <h3><span class="material-symbols-outlined">monitoring</span> KPIs globaux</h3>
+                        <button class="lab-expand-btn" data-expand="left" title="Agrandir">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
+                    </div>
+                    <div class="widget-body">
+                        <div class="lab-kpi-grid" id="lab-kpis-grid">
+                            <div class="lab-skeleton" style="height:120px;"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Performance -->
+                <section class="widget-card lab-widget" id="lab-performance">
+                    <div class="widget-header">
+                        <h3><span class="material-symbols-outlined">speed</span> Performance</h3>
+                        <button class="lab-expand-btn" data-expand="left" title="Agrandir">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
+                    </div>
+                    <div class="widget-body">
+                        <div class="widget-tabs">
+                            <button class="widget-tab active" data-tab="perf-fcr">FCR</button>
+                            <button class="widget-tab" data-tab="perf-sla">SLA</button>
+                            <button class="widget-tab" data-tab="perf-delay">Delais</button>
+                        </div>
+                        <div class="widget-tab-content active" data-tab="perf-fcr">
+                            <div class="lab-chart-container"><canvas id="chart-fcr"></canvas></div>
+                        </div>
+                        <div class="widget-tab-content" data-tab="perf-sla">
+                            <div class="lab-chart-container"><canvas id="chart-sla"></canvas></div>
+                        </div>
+                        <div class="widget-tab-content" data-tab="perf-delay">
+                            <div class="lab-chart-container"><canvas id="chart-delay-dist"></canvas></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Qualite -->
+                <section class="widget-card lab-widget" id="lab-quality">
+                    <div class="widget-header">
+                        <h3><span class="material-symbols-outlined">verified</span> Qualite</h3>
+                        <button class="lab-expand-btn" data-expand="left" title="Agrandir">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
+                    </div>
+                    <div class="widget-body" id="lab-quality-body">
+                        <div class="lab-skeleton" style="height:80px;"></div>
+                    </div>
+                </section>
+
+                <!-- Meteo cross -->
+                <section class="widget-card lab-widget" id="lab-meteo-cross">
+                    <div class="widget-header">
+                        <h3><span class="material-symbols-outlined">thermostat</span> Meteo x Incidents</h3>
+                        <button class="lab-expand-btn" data-expand="left" title="Agrandir">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
+                    </div>
+                    <div class="widget-body">
+                        <div class="lab-chart-container"><canvas id="chart-meteo-cross"></canvas></div>
+                        <div id="lab-meteo-pearson" style="margin-top:8px;"></div>
+                    </div>
+                </section>
+
+                <!-- Effectifs cross -->
+                <section class="widget-card lab-widget" id="lab-effectifs-cross">
+                    <div class="widget-header">
+                        <h3><span class="material-symbols-outlined">groups</span> Effectifs x Incidents</h3>
+                        <button class="lab-expand-btn" data-expand="left" title="Agrandir">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
+                    </div>
+                    <div class="widget-body" id="lab-effectifs-body">
+                        <div class="lab-skeleton" style="height:80px;"></div>
+                    </div>
+                </section>
+
+                <!-- Appelants -->
+                <section class="widget-card lab-widget" id="lab-appelants">
+                    <div class="widget-header">
+                        <h3><span class="material-symbols-outlined">call</span> Appelants</h3>
+                        <button class="lab-expand-btn" data-expand="left" title="Agrandir">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
+                    </div>
+                    <div class="widget-body">
+                        <div class="lab-chart-container"><canvas id="chart-appelants"></canvas></div>
+                    </div>
+                </section>
+
+                <!-- Zones vulnerables -->
+                <section class="widget-card lab-widget" id="lab-zones-vuln">
+                    <div class="widget-header">
+                        <h3><span class="material-symbols-outlined">warning</span> Zones vulnerables</h3>
+                        <button class="lab-expand-btn" data-expand="left" title="Agrandir">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
+                    </div>
+                    <div class="widget-body">
+                        <div class="lab-chart-container"><canvas id="chart-zones-vuln"></canvas></div>
+                    </div>
+                </section>
+
+            </aside>
+
+            <!-- ========== CENTRE ========== -->
+            <main id="lab-center" class="lab-panel" data-panel="center">
+                <div class="lab-center-tabs">
+                    <button class="lab-tab active" data-view="temporal">Temporel</button>
+                    <button class="lab-tab" data-view="chrono">Chrono</button>
+                    <button class="lab-tab" data-view="fiches">Fiches</button>
+                    <button class="lab-tab" data-view="carte">Carte</button>
+                    <button class="lab-tab" data-view="croisements">Croisements</button>
+                    <button class="lab-tab" data-view="convergence">Convergence</button>
+                    <button class="lab-tab" data-view="comparatif">Comparatif</button>
+                    <button class="lab-tab" data-view="reseau">Reseau</button>
+                </div>
+
+                <!-- Vue Temporel -->
+                <div class="lab-view active" data-view="temporal" style="gap:16px;">
+                    <div class="lab-chart-container" style="height:330px;">
+                        <div class="lab-chart-title">Chronologie des creations (par heure)</div>
+                        <div class="lab-chart-helper">Volume d'incidents par tranche horaire. Les barres rouges signalent les pics anormaux (z-score > 2).</div>
+                        <canvas id="chart-timeline-hourly"></canvas>
+                    </div>
+                    <div class="lab-chart-container" style="height:350px;">
+                        <div class="lab-chart-title">Carte de chaleur jour x heure</div>
+                        <div class="lab-chart-helper">Intensite de l'activite par jour de la semaine et heure. Plus la couleur est foncee, plus le volume est eleve.</div>
+                        <canvas id="chart-heatmap-matrix"></canvas>
+                    </div>
+                    <div class="lab-chart-container" style="height:270px;">
+                        <div class="lab-chart-title">Backlog (fiches ouvertes non closes)</div>
+                        <div class="lab-chart-helper">Evolution du nombre de fiches en cours de traitement. Un backlog croissant indique une surcharge operationnelle.</div>
+                        <canvas id="chart-backlog"></canvas>
+                    </div>
+                </div>
+
+                <!-- Vue Chrono (frise alternee haut/bas) -->
+                <div class="lab-view" data-view="chrono">
+                    <div class="lab-chrono-toolbar">
+                        <div class="lab-chrono-days" id="lab-chrono-days"></div>
+                        <div style="flex:1;"></div>
+                        <span id="lab-chrono-range" class="lab-replay-time" style="font-size:0.75rem;"></span>
+                        <button class="lab-replay-btn" id="lab-chrono-fs" title="Plein ecran"><span class="material-symbols-outlined">fullscreen</span></button>
+                    </div>
+                    <div class="lab-chrono-toolbar" style="margin-top:-4px;">
+                        <button class="lab-replay-btn" id="lab-chrono-zout" title="Dezoomer"><span class="material-symbols-outlined">zoom_out</span></button>
+                        <input type="range" id="lab-chrono-zoom" min="1" max="100" value="10" style="flex:1;">
+                        <button class="lab-replay-btn" id="lab-chrono-zin" title="Zoomer"><span class="material-symbols-outlined">zoom_in</span></button>
+                        <span class="lab-chart-helper" style="margin:0;white-space:nowrap;">Ctrl + molette pour zoomer</span>
+                    </div>
+                    <div class="lab-chrono-scroll" id="lab-chrono-scroll"></div>
+                </div>
+
+                <!-- Vue Fiches -->
+                <div class="lab-view" data-view="fiches">
+                    <div class="lab-fiches-toolbar">
+                        <div class="lab-fiches-search-wrap">
+                            <span class="material-symbols-outlined">search</span>
+                            <input type="text" id="lab-fiches-search" placeholder="Rechercher dans toutes les fiches..." autocomplete="off">
+                        </div>
+                        <span id="lab-fiches-count" class="lab-fiches-count"></span>
+                    </div>
+                    <div class="lab-fiches-list" id="lab-fiches-list"></div>
+                    <div class="lab-fiches-pager" id="lab-fiches-pager"></div>
+                </div>
+
+                <!-- Vue Carte -->
+                <div class="lab-view" data-view="carte">
+                    <div class="lab-map-controls">
+                        <div class="lab-map-layers" id="lab-map-layers">
+                            <span class="lab-map-layers-label">Calques :</span>
+                            <label class="lab-layer-toggle"><input type="checkbox" id="layer-carroyes" checked><span>Carroyes</span></label>
+                            <label class="lab-layer-toggle"><input type="checkbox" id="layer-gps-points" checked><span>Points GPS</span></label>
+                            <label class="lab-layer-toggle"><input type="checkbox" id="layer-hotspots"><span>Hotspots</span></label>
+                            <label class="lab-layer-toggle"><input type="checkbox" id="layer-heatmap"><span>Carte de chaleur</span></label>
+                            <label class="lab-layer-toggle"><input type="checkbox" id="layer-waze"><span>Alertes Waze</span></label>
+                        </div>
+                        <div class="lab-replay-controls" id="lab-replay-controls">
+                            <button class="lab-replay-btn" id="lab-replay-btn" title="Replay chronologique">
+                                <span class="material-symbols-outlined">play_arrow</span>
+                                <span>Replay</span>
+                            </button>
+                            <input type="range" id="lab-replay-speed" min="1" max="10" value="5" title="Vitesse" style="width:80px;">
+                            <span id="lab-replay-time" class="lab-replay-time"></span>
+                            <button class="lab-replay-btn" id="lab-replay-stop" title="Stop" style="display:none;">
+                                <span class="material-symbols-outlined">stop</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="lab-map-carroye" style="height:calc(100% - 72px);min-height:500px;border-radius:var(--radius-md);"></div>
+                </div>
+
+                <!-- Vue Croisements -->
+                <div class="lab-view" data-view="croisements" style="gap:16px;">
+                    <div class="lab-chart-container" style="height:340px;">
+                        <div class="lab-chart-title">Correlation meteo / incidents</div>
+                        <div class="lab-chart-helper">Relation entre temperature, precipitations et volume d'incidents. Chaque point = 1 jour.</div>
+                        <canvas id="chart-scatter-meteo"></canvas>
+                    </div>
+                    <div class="lab-chart-container" style="height:340px;">
+                        <div class="lab-chart-title">Jauge de frequentation (Skidata)</div>
+                        <div class="lab-chart-helper">Evolution du nombre de personnes presentes sur le site. A croiser avec les pics d'incidents.</div>
+                        <canvas id="chart-affluence-ratio"></canvas>
+                    </div>
+                </div>
+
+                <!-- Vue Convergence -->
+                <div class="lab-view" data-view="convergence" style="gap:16px;">
+                    <div id="lab-map-convergence" style="height:70%;min-height:350px;border-radius:var(--radius-md);"></div>
+                    <div class="lab-chart-container" style="height:25%;min-height:180px;">
+                        <div class="lab-chart-title">Clusters detectes</div>
+                        <div class="lab-chart-helper">Regroupements spatiaux d'incidents (rayon 300m, minimum 3 fiches). Chaque cluster = une zone de concentration.</div>
+                        <canvas id="chart-cluster-timeline"></canvas>
+                    </div>
+                </div>
+
+                <!-- Vue Comparatif -->
+                <div class="lab-view" data-view="comparatif" style="gap:16px;">
+                    <div id="lab-comparative-kpis" class="lab-kpi-grid" style="margin-bottom:4px;"></div>
+                    <div class="lab-chart-container" style="height:320px;">
+                        <div class="lab-chart-title">Superposition horaire N / N-1</div>
+                        <div class="lab-chart-helper">Comparaison des volumes par heure entre les deux editions. Permet d'identifier les changements de tendance.</div>
+                        <canvas id="chart-comparative-hourly"></canvas>
+                    </div>
+                    <div class="lab-chart-container" style="height:320px;">
+                        <div class="lab-chart-title">Evolution des categories</div>
+                        <div class="lab-chart-helper">Comparaison du nombre de fiches par categorie entre les deux editions.</div>
+                        <canvas id="chart-comparative-categories"></canvas>
+                    </div>
+                </div>
+
+                <!-- Vue Reseau -->
+                <div class="lab-view" data-view="reseau">
+                    <div id="lab-network" style="height:100%;min-height:500px;"></div>
+                </div>
+
+                <!-- Vue Detail (widget expanded into center) -->
+                <div class="lab-view" data-view="detail" id="lab-detail-view"></div>
+            </main>
+
+            <!-- ========== PANEL DROIT ========== -->
+            <aside id="lab-panel-right" class="lab-panel" data-panel="right">
+
+                <!-- Categories -->
+                <section class="widget-card lab-widget" id="lab-categories">
+                    <div class="widget-header">
+                        <h3><span class="material-symbols-outlined">category</span> Categories</h3>
+                        <button class="lab-expand-btn" data-expand="right" title="Agrandir">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
+                    </div>
+                    <div class="widget-body">
+                        <div class="widget-tabs">
+                            <button class="widget-tab active" data-tab="cat-sources">Sources</button>
+                            <button class="widget-tab" data-tab="cat-sous">Sous-class.</button>
+                            <button class="widget-tab" data-tab="cat-canaux">Canaux</button>
+                        </div>
+                        <div class="widget-tab-content active" data-tab="cat-sources">
+                            <div class="lab-chart-container"><canvas id="chart-sources"></canvas></div>
+                        </div>
+                        <div class="widget-tab-content" data-tab="cat-sous">
+                            <div class="lab-chart-container" style="max-height:400px;overflow-y:auto;"><canvas id="chart-sous-class"></canvas></div>
+                        </div>
+                        <div class="widget-tab-content" data-tab="cat-canaux">
+                            <div class="lab-chart-container"><canvas id="chart-channels"></canvas></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Services -->
+                <section class="widget-card lab-widget" id="lab-services">
+                    <div class="widget-header">
+                        <h3><span class="material-symbols-outlined">support_agent</span> Services</h3>
+                        <button class="lab-expand-btn" data-expand="right" title="Agrandir">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
+                    </div>
+                    <div class="widget-body">
+                        <div class="lab-chart-container"><canvas id="chart-services-split"></canvas></div>
+                        <div class="lab-chart-container"><canvas id="chart-services-p90"></canvas></div>
+                    </div>
+                </section>
+
+                <!-- Intervenants -->
+                <section class="widget-card lab-widget" id="lab-intervenants">
+                    <div class="widget-header">
+                        <h3><span class="material-symbols-outlined">engineering</span> Intervenants</h3>
+                        <button class="lab-expand-btn" data-expand="right" title="Agrandir">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
+                    </div>
+                    <div class="widget-body">
+                        <div class="lab-chart-container"><canvas id="chart-intervenants-top"></canvas></div>
+                        <div class="lab-chart-container"><canvas id="chart-intervenants-levels"></canvas></div>
+                    </div>
+                </section>
+
+                <!-- Chaine de traitement -->
+                <section class="widget-card lab-widget" id="lab-escalation">
+                    <div class="widget-header">
+                        <h3><span class="material-symbols-outlined">account_tree</span> Chaine de traitement</h3>
+                        <button class="lab-expand-btn" data-expand="right" title="Agrandir">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
+                    </div>
+                    <div class="widget-body" id="lab-escalation-body">
+                        <div class="lab-skeleton" style="height:80px;"></div>
+                    </div>
+                </section>
+
+                <!-- Texte / Wordcloud -->
+                <section class="widget-card lab-widget" id="lab-text">
+                    <div class="widget-header">
+                        <h3><span class="material-symbols-outlined">text_fields</span> Analyse textuelle</h3>
+                        <button class="lab-expand-btn" data-expand="right" title="Agrandir">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
+                    </div>
+                    <div class="widget-body">
+                        <canvas id="lab-wordcloud" width="320" height="200" style="width:100%;"></canvas>
+                        <div class="lab-chart-container" style="margin-top:8px;"><canvas id="chart-treemap"></canvas></div>
+                    </div>
+                </section>
+
+                <!-- ANPR -->
+                <section class="widget-card lab-widget" id="lab-anpr" style="display:none;">
+                    <div class="widget-header">
+                        <h3><span class="material-symbols-outlined">directions_car</span> ANPR</h3>
+                        <button class="lab-expand-btn" data-expand="right" title="Agrandir">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
+                    </div>
+                    <div class="widget-body" id="lab-anpr-body">
+                        <div class="lab-skeleton" style="height:60px;"></div>
+                    </div>
+                </section>
+
+            </aside>
+        </div>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            TITAN &mdash; Techniques d'Integration Topographique avec Navigation
+        </footer>
+    </div>
+</div>
+
+<!-- Chart fullscreen modal -->
+<div class="lab-chart-modal-overlay" id="lab-chart-modal-overlay"></div>
+<div class="lab-chart-modal" id="lab-chart-modal">
+    <div class="lab-chart-modal-header">
+        <span id="lab-chart-modal-title"></span>
+        <button class="lab-detail-close" id="lab-chart-modal-close">
+            <span class="material-symbols-outlined">close</span>
+        </button>
+    </div>
+    <div class="lab-chart-modal-body">
+        <canvas id="lab-chart-modal-canvas"></canvas>
+    </div>
+</div>
+
+<!-- Scripts -->
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script src="{{ url_for('static', filename='js/analyse_ops.js') }}"></script>
+</body>
+</html>

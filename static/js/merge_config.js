@@ -85,14 +85,27 @@
         el("td", null, cfg.todos_type || "-"),
         el("td", null, (cfg.vignette_fields || []).join(", ") || "-"),
         el("td", null,
+          cfg.merge_access_types
+            ? el("span", {style: {color: "var(--success)"}}, "Oui")
+            : el("span", {style: {color: "var(--muted)"}}, "Non")
+        ),
+        el("td", null,
+          cfg.cluster_enabled
+            ? el("span", {style: {color: "var(--success)"}}, cfg.cluster_icon || "Oui")
+            : el("span", {style: {color: "var(--muted)"}}, "Non")
+        ),
+        el("td", null,
           cfg.enabled
             ? el("span", {style: {color: "var(--success)"}}, "Oui")
             : el("span", {style: {color: "var(--muted)"}}, "Non")
         ),
-        el("td", null, [
-          el("button", {"class": "btn btn-sm btn-secondary", onclick: () => editConfig(cfg)}, "Editer"),
-          document.createTextNode(" "),
-          el("button", {"class": "btn btn-sm btn-danger", onclick: () => deleteConfig(cfg.data_key)}, "X"),
+        el("td", {"class": "group-actions"}, [
+          el("button", {"class": "btn-icon", onclick: () => editConfig(cfg), title: "Editer"}, [
+            el("span", {"class": "material-symbols-outlined"}, "edit"),
+          ]),
+          el("button", {"class": "btn-icon btn-icon-danger", onclick: () => deleteConfig(cfg.data_key), title: "Supprimer"}, [
+            el("span", {"class": "material-symbols-outlined"}, "delete"),
+          ]),
         ]),
       ]);
       tbody.appendChild(tr);
@@ -108,7 +121,8 @@
     unconfiguredList.textContent = "";
     list.forEach(u => {
       const btn = el("button", {
-        "class": "btn btn-sm btn-warning",
+        "class": "btn btn-xs",
+        style: "font-size:0.72rem; padding:2px 8px;",
         onclick: () => {
           form.reset();
           form.data_key.value = u.data_key;
@@ -146,6 +160,9 @@
     form.todos_type.value = cfg.todos_type || "";
     form.access_types.value = (cfg.access_types || []).join(", ");
     form.vignette_fields.value = (cfg.vignette_fields || []).join(", ");
+    form.merge_access_types.checked = !!cfg.merge_access_types;
+    form.cluster_enabled.checked = !!cfg.cluster_enabled;
+    form.cluster_icon.value = cfg.cluster_icon || "";
     form.enabled.checked = !!cfg.enabled;
     document.getElementById("merge-modal-title").textContent = "Editer: " + (cfg.label || cfg.data_key);
     openModal();
@@ -166,6 +183,9 @@
       todos_type: form.todos_type.value.trim() || null,
       access_types: form.access_types.value.split(",").map(s => s.trim()).filter(Boolean),
       vignette_fields: form.vignette_fields.value.split(",").map(s => s.trim()).filter(Boolean),
+      merge_access_types: form.merge_access_types.checked,
+      cluster_enabled: form.cluster_enabled.checked,
+      cluster_icon: form.cluster_icon.value.trim() || null,
       enabled: form.enabled.checked,
     };
 

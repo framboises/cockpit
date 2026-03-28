@@ -4,14 +4,21 @@
 
 let accidentCount = 0;
 let jamCount = 0;
+let hazardCount = 0;
+let closedCount = 0;
 let currentAlertIndex = 0;
 let accidentAlerts = [];
 let jamAlerts = [];
+let hazardAlerts = [];
+let closedAlerts = [];
 
 // Modale & Leaflet
 let trafficMap = null;
 let trafficLayerGroup = null;
-let trafficModalType = null;   // 'ACCIDENT' | 'JAM'
+let trafficModalType = null;   // 'ACCIDENT' | 'JAM' | 'HAZARD' | 'ROAD_CLOSED'
+
+// Navigation state per type for map pin cycling
+let _alertNavState = {}; // {type: {index: 0}}
 
 // Debug flag
 const DEBUG_TRAFFIC = false;
@@ -37,34 +44,322 @@ function sortAlertsByTime(alerts) {
 
 // ---------- Traductions ----------
 function getSubtypeFr(subtype) {
-  const map = {
+  var map = {
     'ACCIDENT_MINOR': 'Accident mineur',
     'ACCIDENT_MAJOR': 'Accident majeur',
-    'NO_SUBTYPE': 'Sans sous-type',
-    'HAZARD_ON_ROAD_CONSTRUCTION': 'Travaux',
-    'HAZARD_ON_ROAD_TRAFFIC_LIGHT_FAULT': 'Feu de circulation en panne',
+    'JAM_LIGHT_TRAFFIC': 'Trafic leger',
+    'JAM_MODERATE_TRAFFIC': 'Trafic modere',
+    'JAM_HEAVY_TRAFFIC': 'Trafic dense',
+    'JAM_STAND_STILL_TRAFFIC': 'Trafic arrete',
+    'HAZARD_ON_ROAD': 'Danger sur la route',
+    'HAZARD_ON_SHOULDER': 'Danger bas-cote',
+    'HAZARD_WEATHER': 'Danger meteo',
+    'HAZARD_ON_ROAD_OBJECT': 'Objet sur la route',
     'HAZARD_ON_ROAD_POT_HOLE': 'Nid-de-poule',
-    'ROAD_CLOSED_EVENT': 'Route fermée',
-    'JAM_LIGHT_TRAFFIC': 'Circulation légère',
-    'JAM_MODERATE_TRAFFIC': 'Circulation modérée',
-    'JAM_HEAVY_TRAFFIC': 'Circulation dense',
-    'JAM_STAND_STILL_TRAFFIC': 'Circulation arrêtée'
+    'HAZARD_ON_ROAD_ROAD_KILL': 'Animal sur la route',
+    'HAZARD_ON_SHOULDER_CAR_STOPPED': 'Vehicule arrete bas-cote',
+    'HAZARD_ON_SHOULDER_ANIMALS': 'Animaux bas-cote',
+    'HAZARD_ON_SHOULDER_MISSING_SIGN': 'Panneau manquant',
+    'HAZARD_WEATHER_FOG': 'Brouillard',
+    'HAZARD_WEATHER_HAIL': 'Grele',
+    'HAZARD_WEATHER_HEAVY_RAIN': 'Forte pluie',
+    'HAZARD_WEATHER_HEAVY_SNOW': 'Forte neige',
+    'HAZARD_WEATHER_FLOOD': 'Inondation',
+    'HAZARD_WEATHER_FREEZING_RAIN': 'Pluie verglacante',
+    'HAZARD_WEATHER_HEAT_WAVE': 'Canicule',
+    'HAZARD_ON_ROAD_LANE_CLOSED': 'Voie fermee',
+    'HAZARD_ON_ROAD_OIL': 'Huile sur la route',
+    'HAZARD_ON_ROAD_ICE': 'Verglas',
+    'HAZARD_ON_ROAD_CONSTRUCTION': 'Travaux',
+    'HAZARD_ON_ROAD_CAR_STOPPED': 'Vehicule arrete',
+    'HAZARD_ON_ROAD_TRAFFIC_LIGHT_FAULT': 'Feu en panne',
+    'HAZARD_ON_ROAD_EMERGENCY_VEHICLE': 'Vehicule d\'urgence',
+    'HAZARD_ON_ROAD_PEDESTRIAN': 'Pieton sur la route',
+    'HAZARD_ON_SHOULDER_EMERGENCY_VEHICLE': 'Vehicule d\'urgence bas-cote',
+    'HAZARD_WEATHER_MONSOON': 'Mousson',
+    'HAZARD_WEATHER_TORNADO': 'Tornade',
+    'HAZARD_WEATHER_HURRICANE': 'Ouragan',
+    'ROAD_CLOSED_HAZARD': 'Fermee - danger',
+    'ROAD_CLOSED_CONSTRUCTION': 'Fermee - travaux',
+    'ROAD_CLOSED_EVENT': 'Fermee - evenement',
+    'NO_SUBTYPE': ''
   };
-  return map[subtype] || subtype || '—';
+  return map[subtype] || subtype || '';
+}
+
+function getTypeFr(type) {
+  var m = {
+    'ACCIDENT': 'Accident',
+    'JAM': 'Ralentissement',
+    'HAZARD': 'Danger',
+    'WEATHERHAZARD': 'Danger meteo',
+    'ROAD_CLOSED': 'Route fermee',
+    'CONSTRUCTION': 'Travaux'
+  };
+  return m[type] || type || '';
+}
+
+// ---------- Detection de clusters d'alertes ----------
+var _lastClusterKey = null; // fingerprint geo du dernier cluster signale
+var CLUSTER_COOLDOWN_MS = 30 * 60 * 1000; // 30 min avant de re-signaler la meme zone
+
+function haversineDistance(lat1, lon1, lat2, lon2) {
+  var R = 6371000; // metres
+  var dLat = (lat2 - lat1) * Math.PI / 180;
+  var dLon = (lon2 - lon1) * Math.PI / 180;
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+          Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function alertWeight(type) {
+  if (type === 'ACCIDENT') return 5;
+  if (type === 'HAZARD' || type === 'WEATHERHAZARD') return 3;
+  if (type === 'JAM') return 2;
+  return 0; // ROAD_CLOSED et autres ne comptent pas dans le cluster
+}
+
+function detectAlertClusters(alerts) {
+  var RADIUS = 500; // metres
+  var THRESHOLD = 12; // score minimum (ex: 3 accidents, ou 2 accidents+1 danger, ou 4 dangers)
+
+  // Filtrer les alertes avec coordonnees (exclure ROAD_CLOSED du clustering)
+  var located = [];
+  for (var i = 0; i < alerts.length; i++) {
+    var a = alerts[i];
+    if (!a || !a.location || a.location.y == null || a.location.x == null) continue;
+    var t = String(a.type || '').toUpperCase();
+    if (t === 'ROAD_CLOSED' || t === 'CONSTRUCTION') continue;
+    located.push(a);
+  }
+  if (located.length < 2) { _lastClusterKey = null; return; }
+
+  // Simple clustering: pour chaque alerte, trouver ses voisins dans le rayon
+  var bestCluster = null;
+  var bestScore = 0;
+
+  for (var c = 0; c < located.length; c++) {
+    var center = located[c];
+    var cluster = [center];
+    var score = alertWeight(center.type);
+
+    for (var n = 0; n < located.length; n++) {
+      if (n === c) continue;
+      var dist = haversineDistance(
+        center.location.y, center.location.x,
+        located[n].location.y, located[n].location.x
+      );
+      if (dist <= RADIUS) {
+        cluster.push(located[n]);
+        score += alertWeight(located[n].type);
+      }
+    }
+
+    if (score > bestScore && cluster.length >= 2) {
+      bestScore = score;
+      bestCluster = cluster;
+    }
+  }
+
+  if (!bestCluster || bestScore < THRESHOLD) {
+    return;
+  }
+
+  // Calculer le centre du cluster pour le fingerprint geo
+  var _fpLat = 0, _fpLon = 0;
+  for (var f = 0; f < bestCluster.length; f++) {
+    _fpLat += bestCluster[f].location.y;
+    _fpLon += bestCluster[f].location.x;
+  }
+  _fpLat /= bestCluster.length;
+  _fpLon /= bestCluster.length;
+
+  // Fingerprint stable : lat/lon arrondis a ~110m de precision
+  var geoKey = Math.round(_fpLat * 1000) + ',' + Math.round(_fpLon * 1000);
+
+  // Check en memoire (meme session, meme onglet)
+  if (geoKey === _lastClusterKey) return;
+
+  // Check sessionStorage (survit au reload, partage entre onglets meme origine)
+  try {
+    var stored = JSON.parse(sessionStorage.getItem('cockpit-cluster-state'));
+    if (stored && stored.key === geoKey && (Date.now() - stored.ts) < CLUSTER_COOLDOWN_MS) return;
+  } catch(e) {}
+
+  _lastClusterKey = geoKey;
+  sessionStorage.setItem('cockpit-cluster-state', JSON.stringify({key: geoKey, ts: Date.now()}));
+
+  // Compter par type
+  var counts = {};
+  bestCluster.forEach(function(a) {
+    var t = a.type || 'UNKNOWN';
+    counts[t] = (counts[t] || 0) + 1;
+  });
+
+  // Trouver la rue la plus frequente
+  var streets = {};
+  bestCluster.forEach(function(a) {
+    if (a.street) streets[a.street] = (streets[a.street] || 0) + 1;
+  });
+  var mainStreet = '';
+  var maxSt = 0;
+  Object.keys(streets).forEach(function(s) {
+    if (streets[s] > maxSt) { maxSt = streets[s]; mainStreet = s; }
+  });
+
+  // Construire le message
+  var parts = [];
+  if (counts['ACCIDENT']) parts.push(counts['ACCIDENT'] + ' accident' + (counts['ACCIDENT'] > 1 ? 's' : ''));
+  if (counts['HAZARD'] || counts['WEATHERHAZARD']) {
+    var h = (counts['HAZARD'] || 0) + (counts['WEATHERHAZARD'] || 0);
+    parts.push(h + ' danger' + (h > 1 ? 's' : ''));
+  }
+  if (counts['JAM']) parts.push(counts['JAM'] + ' bouchon' + (counts['JAM'] > 1 ? 's' : ''));
+  if (counts['ROAD_CLOSED']) parts.push(counts['ROAD_CLOSED'] + ' route' + (counts['ROAD_CLOSED'] > 1 ? 's' : '') + ' fermee' + (counts['ROAD_CLOSED'] > 1 ? 's' : ''));
+
+  var message = 'Zone critique : ' + parts.join(', ');
+  if (mainStreet) message += ' — ' + mainStreet;
+
+  // Calculer le centre du cluster
+  var centerLat = 0, centerLon = 0;
+  bestCluster.forEach(function(a) {
+    centerLat += a.location.y;
+    centerLon += a.location.x;
+  });
+  centerLat /= bestCluster.length;
+  centerLon /= bestCluster.length;
+
+  // Preparer les pins pour la carte
+  var clusterPins = bestCluster.map(function(a) {
+    var stFr = getSubtypeFr(a.subtype);
+    return {
+      lat: a.location.y,
+      lon: a.location.x,
+      type: a.type,
+      typeFr: stFr || getTypeFr(a.type),
+      street: a.street || '',
+      date: formatTimestamp(a.pubMillis)
+    };
+  });
+
+  // Declencher l'alerte critique avec callback "Voir sur la carte"
+  var scoreText = bestCluster.length + ' alertes dans un rayon de 500m';
+  if (typeof showCriticalAlert === 'function') {
+    var viewFn = function() {
+      window._allAlertPinsData = clusterPins;
+      if (window.CockpitMapView && window.CockpitMapView.switchView) {
+        window.CockpitMapView.switchView('map');
+        setTimeout(function() {
+          document.dispatchEvent(new CustomEvent('showAllAlertPins'));
+        }, 400);
+      }
+    };
+    // Attacher les donnees pour persistance en base (permet de reconstruire le bouton au reload)
+    viewFn._actionData = { pins: clusterPins };
+    showCriticalAlert('traffic-cluster', scoreText, message, viewFn);
+  }
+}
+
+// ---------- Affichage alerte sur la carte principale ----------
+function showAlertOnMap(type) {
+  var list = getAlertsList(type);
+  if (!list.length) return;
+
+  // Init or advance index
+  if (!_alertNavState[type]) _alertNavState[type] = {index: 0};
+  else _alertNavState[type].index = (_alertNavState[type].index + 1) % list.length;
+
+  var idx = _alertNavState[type].index;
+  var a = list[idx];
+  if (!a) return;
+
+  var lat = null, lon = null;
+  if (a.location) { lat = a.location.y; lon = a.location.x; }
+  if (lat == null || lon == null) return;
+
+  var stFr = getSubtypeFr(a.subtype);
+  // Pour le titre: utiliser le subtype traduit s'il est plus precis que le type
+  var titleFr = stFr || getTypeFr(type);
+
+  window._alertPinData = {
+    lat: lat,
+    lon: lon,
+    type: type,
+    typeFr: titleFr,
+    subtypeFr: (stFr && stFr !== titleFr) ? stFr : '',
+    street: a.street || '',
+    city: a.city || '',
+    date: formatTimestamp(a.pubMillis),
+    description: a.reportDescription || '',
+    index: idx,
+    total: list.length
+  };
+
+  if (window.CockpitMapView && window.CockpitMapView.switchView) {
+    window.CockpitMapView.switchView('map');
+    setTimeout(function() {
+      document.dispatchEvent(new CustomEvent('showAlertPin'));
+    }, 400);
+  }
 }
 
 // ---------- Couleurs widget ----------
-function updateAccidentCounter(count) {
-  const num = $('accident-number'); if (num) num.textContent = count;
+function updateAlertCounter(id, count) {
+  var num = document.getElementById(id);
+  if (num) num.textContent = count;
+  var container = num ? num.closest('.traffic-counter') : null;
+  if (container) container.classList.toggle('has-alerts', count > 0);
 }
-function updateJamCounter(count) {
-  const num = $('jam-number'); if (num) num.textContent = count;
+
+function updateTooltip(tooltipId, alerts) {
+  var el = $(tooltipId);
+  if (!el) return;
+  el.textContent = '';
+  if (!alerts.length) return;
+  // Group by subtype
+  var groups = {};
+  alerts.forEach(function(a) {
+    var st = getSubtypeFr(a.subtype) || a.type;
+    groups[st] = (groups[st] || 0) + 1;
+  });
+  // Count by street
+  var streets = {};
+  alerts.forEach(function(a) {
+    var s = a.street || a.city || '';
+    if (s) streets[s] = (streets[s] || 0) + 1;
+  });
+  // Render subtypes
+  Object.keys(groups).forEach(function(label) {
+    if (!label) return;
+    var line = document.createElement('div');
+    line.className = 'tc-tooltip-line';
+    line.textContent = groups[label] + 'x ' + label;
+    el.appendChild(line);
+  });
+  // Render top streets (max 3)
+  var streetList = Object.keys(streets).sort(function(a, b) { return streets[b] - streets[a]; }).slice(0, 3);
+  if (streetList.length) {
+    var sep = document.createElement('div');
+    sep.style.cssText = 'border-top:1px solid rgba(148,163,184,0.15);margin:3px 0;';
+    el.appendChild(sep);
+    streetList.forEach(function(s) {
+      var line = document.createElement('div');
+      line.className = 'tc-tooltip-line';
+      var ico = document.createElement('span');
+      ico.className = 'material-symbols-outlined';
+      ico.textContent = 'location_on';
+      line.appendChild(ico);
+      line.appendChild(document.createTextNode(s));
+      el.appendChild(line);
+    });
+  }
 }
-function setTrafficColor(spanId, count) {
-  const span = $(spanId); if (!span) return;
-  const container = span.closest('.traffic-counter'); if (!container) return;
-  container.classList.toggle('has-alerts', count > 0);
-}
+
+// Backward compat
+function updateAccidentCounter(count) { updateAlertCounter('accident-number', count); }
+function updateJamCounter(count) { updateAlertCounter('jam-number', count); }
+function setTrafficColor() {} // no-op, handled by updateCounter now
 
 // ---------- Rendu liste optionnelle ----------
 function renderTrafficList(alerts) {
@@ -179,7 +474,7 @@ function setHeaderTitle(type, total) {
   else title.textContent = `Alertes (${total})`;
 }
 
-// Force l’ouverture de la modale même si CSS attend une classe
+// Force l'ouverture de la modale même si CSS attend une classe
 function ensureOpenModal() {
     const modal   = document.getElementById('trafficMapModal');
     const overlay = document.getElementById('modalOverlay');
@@ -212,11 +507,28 @@ function ensureOpenModal() {
     return !!(modal && modal.classList.contains('show'));
   }
 
-// ---------- Rendu d’UNE alerte ----------
+// ---------- Helper: liste d'alertes par type ----------
+function getAlertsList(type) {
+  if (type === 'ACCIDENT') return accidentAlerts;
+  if (type === 'JAM') return jamAlerts;
+  if (type === 'HAZARD') return hazardAlerts;
+  if (type === 'ROAD_CLOSED') return closedAlerts;
+  return [];
+}
+
+function getAlertColor(type) {
+  if (type === 'ACCIDENT') return '#e53935';
+  if (type === 'JAM') return '#f59e0b';
+  if (type === 'HAZARD') return '#f97316';
+  if (type === 'ROAD_CLOSED') return '#8b5cf6';
+  return '#e53935';
+}
+
+// ---------- Rendu d'UNE alerte ----------
 function renderCurrentAlertOnMap() {
   if (!trafficMap || !trafficLayerGroup || !trafficModalType) return;
 
-  const list = (trafficModalType === 'ACCIDENT') ? accidentAlerts : jamAlerts;
+  const list = getAlertsList(trafficModalType);
   if (!list.length) return;
 
   trafficLayerGroup.clearLayers();
@@ -228,9 +540,8 @@ function renderCurrentAlertOnMap() {
     return;
   }
 
-  const iconHtml = (trafficModalType === 'ACCIDENT')
-    ? `<div style="width:22px;height:22px;border-radius:50%;background:#e53935;border:2px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,.25)"></div>`
-    : `<div style="width:22px;height:22px;border-radius:50%;background:${getJamColor(a.subtype)};border:2px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,.25)"></div>`;
+  const markerColor = getAlertColor(trafficModalType);
+  const iconHtml = `<div style="width:22px;height:22px;border-radius:50%;background:${markerColor};border:2px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,.25)"></div>`;
 
   const icon = L.divIcon({
     className: 'traffic-marker',
@@ -263,18 +574,18 @@ function openTrafficModal(type, startIndex = 0) {
       ensureOpenModal();
       setHeaderTitle(type, 0);
 
-      // Message d’état vide
+      // Message d'état vide
       const sum = $('trafficSummary');
       if (sum) sum.textContent = 'Aucune alerte à afficher.';
 
-      // Ne crée pas la carte si elle n’existe pas ; si elle existe, vide juste les couches
+      // Ne crée pas la carte si elle n'existe pas ; si elle existe, vide juste les couches
       if (trafficLayerGroup) trafficLayerGroup.clearLayers();
 
       // On ne va PAS plus loin (pas de renderCurrentAlertOnMap)
       return;
     } else {
       console.log(`[traffic] openTrafficModal(${type}) ignoré : 0 alerte`);
-      return; // pas d’ouverture en mode normal
+      return; // pas d'ouverture en mode normal
     }
   }
 
@@ -304,13 +615,13 @@ function openTrafficModal(type, startIndex = 0) {
 
 // ---------- Navigation ----------
 function gotoNextAlert() {
-  const list = (trafficModalType === 'ACCIDENT') ? accidentAlerts : jamAlerts;
+  const list = getAlertsList(trafficModalType);
   if (!list.length) return;
   currentAlertIndex = (currentAlertIndex + 1) % list.length;
   renderCurrentAlertOnMap();
 }
 function gotoPrevAlert() {
-  const list = (trafficModalType === 'ACCIDENT') ? accidentAlerts : jamAlerts;
+  const list = getAlertsList(trafficModalType);
   if (!list.length) return;
   currentAlertIndex = (currentAlertIndex - 1 + list.length) % list.length;
   renderCurrentAlertOnMap();
@@ -321,30 +632,42 @@ function updateAlerts() {
   fetch('/alerts')
     .then(r => r.json())
     .then(data => {
-      accidentCount = 0; jamCount = 0;
-      accidentAlerts = []; jamAlerts = [];
+      accidentCount = 0; jamCount = 0; hazardCount = 0; closedCount = 0;
+      accidentAlerts = []; jamAlerts = []; hazardAlerts = []; closedAlerts = [];
 
       (Array.isArray(data) ? data : []).forEach(alert => {
         if (!alert) return;
         const t = String(alert.type || '').toUpperCase();
         if (t === 'ACCIDENT') { accidentCount++; accidentAlerts.push(alert); }
         else if (t === 'JAM' || t === 'TRAFFIC_JAM') { jamCount++; jamAlerts.push(alert); }
+        else if (t === 'HAZARD' || t === 'WEATHERHAZARD') { hazardCount++; hazardAlerts.push(alert); }
+        else if (t === 'ROAD_CLOSED') { closedCount++; closedAlerts.push(alert); }
       });
 
       accidentAlerts = sortAlertsByTime(accidentAlerts);
       jamAlerts = sortAlertsByTime(jamAlerts);
+      hazardAlerts = sortAlertsByTime(hazardAlerts);
+      closedAlerts = sortAlertsByTime(closedAlerts);
 
-      updateAccidentCounter(accidentCount);
-      updateJamCounter(jamCount);
-      setTrafficColor('accident-number', accidentCount);
-      setTrafficColor('jam-number', jamCount);
+      updateAlertCounter('accident-number', accidentCount);
+      updateAlertCounter('jam-number', jamCount);
+      updateAlertCounter('hazard-number', hazardCount);
+      updateAlertCounter('closed-number', closedCount);
+
+      updateTooltip('tooltip-accident', accidentAlerts);
+      updateTooltip('tooltip-jam', jamAlerts);
+      updateTooltip('tooltip-hazard', hazardAlerts);
+      updateTooltip('tooltip-closed', closedAlerts);
 
       const merged = sortAlertsByTime([...(Array.isArray(data) ? data : [])]);
       renderTrafficList(merged);
 
+      // Detection de clusters d'alertes
+      detectAlertClusters(merged);
+
       // Resync modale ouverte
       if (isModalOpen() && trafficModalType) {
-        const list = (trafficModalType === 'ACCIDENT') ? accidentAlerts : jamAlerts;
+        const list = getAlertsList(trafficModalType);
         if (list.length) {
           if (currentAlertIndex >= list.length) currentAlertIndex = list.length - 1;
           setHeaderTitle(trafficModalType, list.length);
@@ -359,20 +682,82 @@ function updateAlerts() {
 
 // ---------- Bind après DOM prêt ----------
 document.addEventListener('DOMContentLoaded', function() {
-  // Bind clic sur toute la zone du compteur (plus tolérant que le <span> seul)
-  const counters = $('widget-traffic')?.querySelectorAll('.traffic-counter') || [];
-  const accContainer = counters[0];
-  const jamContainer = counters[1];
+  if (!window.isBlockAllowed("widget-traffic")) return;
+  // Bind clic + hover sur chaque compteur
+  var widgetEl = $('widget-traffic');
+  if (widgetEl) {
+    var allCounters = widgetEl.querySelectorAll('.traffic-counter[data-alert-type]');
+    allCounters.forEach(function(ctr) {
+      var alertType = ctr.getAttribute('data-alert-type');
+      var tooltip = ctr.querySelector('.tc-tooltip');
 
-  // Fallback sur les <span> si jamais
-  const accSpan = $('accident-number');
-  const jamSpan = $('jam-number');
+      // Click -> show on map
+      ctr.addEventListener('click', function() {
+        if (DEBUG_TRAFFIC) console.log('[traffic] click ' + alertType);
+        showAlertOnMap(alertType);
+      });
 
-  if (accContainer) accContainer.addEventListener('click', () => { if (DEBUG_TRAFFIC) console.log('[traffic] click Accident'); openTrafficModal('ACCIDENT', 0); });
-  else if (accSpan) accSpan.addEventListener('click', () => { if (DEBUG_TRAFFIC) console.log('[traffic] click Accident (span)'); openTrafficModal('ACCIDENT', 0); });
+      // Hover -> position tooltip fixed
+      if (tooltip) {
+        ctr.addEventListener('mouseenter', function() {
+          if (!tooltip.hasChildNodes()) return;
+          var rect = ctr.getBoundingClientRect();
+          tooltip.style.display = 'block';
+          var tw = tooltip.offsetWidth;
+          var th = tooltip.offsetHeight;
+          var left = rect.left + rect.width / 2 - tw / 2;
+          if (left < 4) left = 4;
+          if (left + tw > window.innerWidth - 4) left = window.innerWidth - 4 - tw;
+          tooltip.style.left = left + 'px';
+          // Au-dessus si ca tient, sinon en dessous
+          var topPos = rect.top - th - 8;
+          if (topPos < 4) {
+            tooltip.style.top = (rect.bottom + 8) + 'px';
+            tooltip.classList.add('below');
+            tooltip.classList.remove('above');
+          } else {
+            tooltip.style.top = topPos + 'px';
+            tooltip.classList.add('above');
+            tooltip.classList.remove('below');
+          }
+        });
+        ctr.addEventListener('mouseleave', function() {
+          tooltip.style.display = 'none';
+        });
+      }
+    });
+  }
 
-  if (jamContainer) jamContainer.addEventListener('click', () => { if (DEBUG_TRAFFIC) console.log('[traffic] click Jam'); openTrafficModal('JAM', 0); });
-  else if (jamSpan) jamSpan.addEventListener('click', () => { if (DEBUG_TRAFFIC) console.log('[traffic] click Jam (span)'); openTrafficModal('JAM', 0); });
+  // Bouton "toutes les alertes sur la carte"
+  var btnAllAlerts = document.getElementById('btn-show-all-alerts');
+  if (btnAllAlerts) {
+    btnAllAlerts.addEventListener('click', function() {
+      var all = [].concat(accidentAlerts, jamAlerts, hazardAlerts, closedAlerts);
+      if (!all.length) return;
+      var pins = [];
+      for (var i = 0; i < all.length; i++) {
+        var a = all[i];
+        if (!a.location) continue;
+        var stFr = getSubtypeFr(a.subtype);
+        pins.push({
+          lat: a.location.y,
+          lon: a.location.x,
+          type: a.type,
+          typeFr: stFr || getTypeFr(a.type),
+          street: a.street || '',
+          date: formatTimestamp(a.pubMillis)
+        });
+      }
+      if (!pins.length) return;
+      window._allAlertPinsData = pins;
+      if (window.CockpitMapView && window.CockpitMapView.switchView) {
+        window.CockpitMapView.switchView('map');
+        setTimeout(function() {
+          document.dispatchEvent(new CustomEvent('showAllAlertPins'));
+        }, 400);
+      }
+    });
+  }
 
   // Boutons modale & clavier
   onSafe('trafficNext', 'click', (e) => { e.stopPropagation(); gotoNextAlert(); });

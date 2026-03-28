@@ -17,6 +17,7 @@
 
 // Fonction qui récupère la valeur du compteur et la met à jour dans le DOM
 function updateCounter() {
+    if (!window.isBlockAllowed("widget-counters")) return;
     const eventParam = encodeURIComponent(window.selectedEvent || '');
     const yearParam = encodeURIComponent(window.selectedYear || '');
     fetch('/get_counter?event=' + eventParam + '&year=' + yearParam)
@@ -29,6 +30,7 @@ function updateCounter() {
 
 // Fonction qui récupère la valeur du compteur maximum et la met à jour dans le DOM
 function updateCounterMax() {
+    if (!window.isBlockAllowed("widget-counters")) return;
     const eventParam = encodeURIComponent(window.selectedEvent || '');
     const yearParam = encodeURIComponent(window.selectedYear || '');
     fetch('/get_counter_max?event=' + eventParam + '&year=' + yearParam)
