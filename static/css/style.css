@@ -6394,6 +6394,110 @@ th span { font-size: 0.88rem; font-weight: 700; }
   align-items: baseline;
 }
 
+/* ===== Fiche intervention modale ===== */
+.pcorg-fiche-modal { width: 720px; max-width: calc(100vw - 32px); }
+.pcorg-fiche { max-width: none; padding: 0; border-radius: var(--radius-lg, 10px); overflow: hidden; }
+.pcorg-fiche-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; color: #fff; gap: 12px;
+}
+.pcorg-fiche-header-left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.pcorg-fiche-icon { font-size: 28px; flex-shrink: 0; }
+.pcorg-fiche-header-text { min-width: 0; }
+.pcorg-fiche-cat { font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+.pcorg-fiche-subcat { font-size: 0.72rem; opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcorg-fiche-header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.pcorg-fiche-num { font-size: 0.68rem; opacity: 0.7; font-family: monospace; }
+.pcorg-fiche-status {
+  font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 10px; letter-spacing: 0.3px;
+}
+.pcorg-fiche-status.open { background: rgba(255,255,255,0.25); }
+.pcorg-fiche-status.closed { background: rgba(0,0,0,0.2); }
+.pcorg-fiche-header .drawer-close { color: #fff; opacity: 0.7; background: none; border: none; cursor: pointer; }
+.pcorg-fiche-header .drawer-close:hover { opacity: 1; }
+
+.pcorg-fiche-body { padding: 16px 18px; overflow-y: auto; max-height: 70vh; }
+
+/* Description */
+.pcorg-fiche-desc {
+  background: var(--bg); border-radius: var(--radius-sm, 6px);
+  padding: 10px 14px; font-size: 0.82rem; line-height: 1.5;
+  color: var(--text); margin-bottom: 14px; border-left: 4px solid;
+}
+
+/* Section titles */
+.pcorg-fiche-section {
+  font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.8px; color: var(--muted); margin: 14px 0 6px; padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Info grid + mini map side by side */
+.pcorg-fiche-info-row { display: flex; gap: 14px; margin-bottom: 4px; }
+.pcorg-fiche-fields { flex: 1; min-width: 0; }
+.pcorg-fiche-minimap {
+  width: 200px; height: 170px; flex-shrink: 0;
+  border-radius: var(--radius-sm, 6px); border: 1px solid var(--line);
+  overflow: hidden; background: var(--bg);
+}
+.pcorg-fiche-minimap.empty {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 11px;
+}
+
+/* Field rows */
+.pcorg-fiche-field {
+  display: flex; gap: 6px; padding: 3px 0; font-size: 0.78rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
+}
+.pcorg-fiche-field:last-child { border-bottom: none; }
+.pcorg-fiche-label {
+  font-size: 0.68rem; font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.3px;
+  min-width: 90px; flex-shrink: 0; padding-top: 1px;
+}
+.pcorg-fiche-value { color: var(--text); word-break: break-word; }
+.pcorg-fiche-value.highlight { font-weight: 600; }
+
+/* Chronologie */
+.pcorg-fiche-timeline { position: relative; padding-left: 18px; }
+.pcorg-fiche-timeline::before {
+  content: ""; position: absolute; left: 5px; top: 4px; bottom: 4px;
+  width: 2px; background: var(--line);
+}
+.pcorg-chrono-entry { position: relative; padding: 4px 0 10px; }
+.pcorg-chrono-entry::before {
+  content: ""; position: absolute; left: -18px; top: 8px;
+  width: 8px; height: 8px; border-radius: 50%; border: 2px solid;
+  background: var(--card); border-color: var(--dot-color, var(--brand));
+}
+.pcorg-chrono-entry.status-change::before { background: #94a3b8; border-color: #94a3b8; }
+.pcorg-chrono-head {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 0.72rem; margin-bottom: 2px;
+}
+.pcorg-chrono-ts { font-weight: 700; font-family: monospace; font-size: 0.7rem; }
+.pcorg-chrono-op { color: var(--muted); font-size: 0.68rem; }
+.pcorg-chrono-text { font-size: 0.78rem; color: var(--text); line-height: 1.4; }
+.pcorg-chrono-entry.status-change .pcorg-chrono-text {
+  font-style: italic; color: var(--muted); font-size: 0.72rem;
+}
+
+/* Actions bar */
+.pcorg-fiche-actions {
+  display: flex; gap: 8px; margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--line); flex-wrap: wrap;
+}
+.pcorg-fiche-actions button {
+  font-size: 0.72rem; padding: 5px 14px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--card); color: var(--text);
+  display: inline-flex; align-items: center; gap: 5px; font-family: inherit;
+  transition: background 0.15s;
+}
+.pcorg-fiche-actions button:hover { background: var(--bg); }
+.pcorg-fiche-actions .pcorg-btn-danger { color: #ef4444; border-color: #ef4444; }
+
 /* Pick GPS mode */
 .pcorg-pick-active { cursor: crosshair !important; }
 .pcorg-pick-active .leaflet-container { cursor: crosshair !important; }

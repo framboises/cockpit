@@ -253,18 +253,21 @@ def charger_plages_evenements(mongo_client):
     return plages
 
 
-def trouver_evenement(dt, plages):
-    """Pour un datetime donné, cherche dans quelle plage il tombe.
-    Retourne (event, year). Si hors plage → ("SAISON", année du message).
+def trouver_evenements(dt, plages):
+    """Pour un datetime donne, cherche dans quelles plages il tombe.
+    Retourne une liste de (event, year). Si hors plage -> [("SAISON", annee)].
+    Gere les chevauchements : un message peut appartenir a plusieurs evenements.
     """
     if dt is None:
-        return "SAISON", None
+        return [("SAISON", None)]
+    matches = []
     for p in plages:
         if p["start"] <= dt <= p["end"]:
-            return p["event"], p["year"]
-    # Hors plage événement → attribuer "SAISON" avec l'année du message
-    dt_local = dt.astimezone(PARIS_TZ) if dt.tzinfo else dt.replace(tzinfo=PARIS_TZ)
-    return "SAISON", dt_local.year
+            matches.append((p["event"], p["year"]))
+    if not matches:
+        dt_local = dt.astimezone(PARIS_TZ) if dt.tzinfo else dt.replace(tzinfo=PARIS_TZ)
+        return [("SAISON", dt_local.year)]
+    return matches
 
 
 # ─── Helpers parsing (repris de import_pcorg_csv_to_mongo.py) ────────────────
@@ -868,23 +871,23 @@ def main():
         batch_max_dw = None
 
         for row in batch:
-            # Déterminer l'événement à partir de la date de création
+            # Determiner le(s) evenement(s) a partir de la date de creation
             ts_dt, _ = to_iso_dt(row.get("UserMessageDateCreate"))
-            evt, yr = trouver_evenement(ts_dt, plages)
+            evts = trouver_evenements(ts_dt, plages)
 
-            doc = transform_row(row, evt, yr)
-            cat_counts[doc.get("category", "?")] += 1
+            for evt, yr in evts:
+                doc = transform_row(row, evt, yr)
+                cat_counts[doc.get("category", "?")] += 1
+                event_counts[f"{evt} {yr}"] += 1
 
-            event_counts[f"{evt} {yr}"] += 1
+                if not args.dry_run:
+                    ops.append(UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True))
+                else:
+                    total_upserted += 1
 
             dw = row.get("DateWrite")
             if dw and (batch_max_dw is None or dw > batch_max_dw):
                 batch_max_dw = dw
-
-            if not args.dry_run:
-                ops.append(UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True))
-            else:
-                total_upserted += 1
 
         # Upsert le lot
         if not args.dry_run and ops:

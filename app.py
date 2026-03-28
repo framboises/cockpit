@@ -2282,6 +2282,11 @@ PCO_PROJECTION = {
     "content_category.sous_classification": 1,
 }
 
+def _clean_operator(name):
+    if not name:
+        return ""
+    return re.sub(r'\s*\[.*?\]\s*$', '', name).strip()
+
 def _pcorg_serialise(doc):
     """Aplatit un document pcorg pour le JSON frontend."""
     gps = doc.get("gps")
@@ -2298,7 +2303,7 @@ def _pcorg_serialise(doc):
         "text": doc.get("text") or "",
         "area_id": area.get("id"),
         "area_desc": area.get("desc") or "",
-        "operator": doc.get("operator") or "",
+        "operator": _clean_operator(doc.get("operator")),
         "severity": doc.get("severity", 0),
         "is_incident": doc.get("is_incident", False),
         "status_code": doc.get("status_code", 0),
@@ -2369,8 +2374,8 @@ def pcorg_detail(doc_id):
         "comment_history": comment_history or [],
         "area_id": area.get("id"),
         "area_desc": area.get("desc") or "",
-        "operator": doc.get("operator") or "",
-        "operator_close": doc.get("operator_close") or "",
+        "operator": _clean_operator(doc.get("operator")),
+        "operator_close": _clean_operator(doc.get("operator_close")),
         "severity": doc.get("severity", 0),
         "is_incident": doc.get("is_incident", False),
         "status_code": doc.get("status_code", 0),

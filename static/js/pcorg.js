@@ -209,15 +209,11 @@
       right.appendChild(gpsIcon);
       row.appendChild(right);
 
-      var detail = mkEl("div", "pcorg-detail");
-      detail.setAttribute("data-id", item.id);
-
-      row.addEventListener("click", (function (id, det, closed) {
-        return function () { toggleDetail(id, det, closed); };
-      })(item.id, detail, isClosed));
+      row.addEventListener("click", (function (id, closed) {
+        return function () { openDetailModal(id, closed); };
+      })(item.id, isClosed));
 
       container.appendChild(row);
-      container.appendChild(detail);
     });
   }
 
@@ -294,116 +290,261 @@
     statsContainer.appendChild(grid);
   }
 
-  // ── Detail expand ──────────────────────────────────────────────────────────
-  function toggleDetail(id, detailEl, isClosed) {
-    if (detailEl.classList.contains("open")) {
-      detailEl.classList.remove("open");
-      expandedId = null;
-      return;
-    }
-    document.querySelectorAll(".pcorg-detail.open").forEach(function (d) {
-      d.classList.remove("open");
-    });
-    expandedId = id;
-    detailEl.textContent = "";
-    var loadingMsg = mkEl("em", "");
-    loadingMsg.textContent = "Chargement...";
-    detailEl.appendChild(loadingMsg);
-    detailEl.classList.add("open");
+  // ── Detail modal ────────────────────────────────────────────────────────────
+  var detailModal = null;
+  var detailOverlay = null;
+  var detailMiniMap = null;
+
+  function showFiche() {
+    detailModal.classList.add("show");
+    detailOverlay.classList.add("show");
+  }
+  function hideFiche() {
+    detailModal.classList.remove("show");
+    detailOverlay.classList.remove("show");
+    destroyMiniMap();
+  }
+
+  function openDetailModal(id, isClosed) {
+    detailModal = detailModal || document.getElementById("pcorgDetailModal");
+    detailOverlay = detailOverlay || document.getElementById("pcorgDetailOverlay");
+    if (!detailModal) return;
+    var body = document.getElementById("pcorg-fiche-body");
+    body.textContent = "";
+    var loading = mkEl("div", "widget-placeholder");
+    loading.appendChild(matIcon("hourglass_top"));
+    var lt = mkEl("span", ""); lt.textContent = "Chargement..."; loading.appendChild(lt);
+    body.appendChild(loading);
+    showFiche();
+
+    // Wire close
+    var closeBtn = document.getElementById("pcorgDetailClose");
+    closeBtn.onclick = function () { hideFiche(); };
+    detailOverlay.onclick = function () { hideFiche(); };
 
     fetch("/api/pcorg/detail/" + encodeURIComponent(id))
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        detailEl.textContent = "";
-        if (d.error) {
-          var errEl = mkEl("em", "");
-          errEl.textContent = d.error;
-          detailEl.appendChild(errEl);
-          return;
-        }
-        buildDetailContent(detailEl, d, isClosed);
+        if (d.error) { body.textContent = d.error; return; }
+        renderFiche(d, isClosed);
       })
-      .catch(function () {
-        detailEl.textContent = "";
-        var errEl = mkEl("em", "");
-        errEl.textContent = "Erreur de chargement";
-        detailEl.appendChild(errEl);
-      });
+      .catch(function () { body.textContent = "Erreur de chargement"; });
   }
 
-  function addDetailField(parent, label, value) {
-    if (!value) return;
-    var lbl = mkEl("div", "pcorg-detail-label");
-    lbl.textContent = label;
-    parent.appendChild(lbl);
-    var val = mkEl("div", "");
-    val.textContent = value;
-    parent.appendChild(val);
+  function destroyMiniMap() {
+    if (detailMiniMap) { detailMiniMap.remove(); detailMiniMap = null; }
   }
 
-  function buildDetailContent(container, d, isClosed) {
-    if (d.text_full && d.text_full !== d.text) {
-      addDetailField(container, "Description complete", d.text_full);
+  function renderFiche(d, isClosed) {
+    var st = catStyle(d.category);
+    var cc = d.content_category || {};
+
+    // Header
+    var header = document.getElementById("pcorg-fiche-header");
+    header.style.background = st.color;
+    header.querySelector(".pcorg-fiche-icon").textContent = st.icon;
+    header.querySelector(".pcorg-fiche-cat").textContent = d.category || "";
+    header.querySelector(".pcorg-fiche-subcat").textContent = cc.sous_classification || cc.classification || cc.typedemande || "";
+    header.querySelector(".pcorg-fiche-num").textContent = d.sql_id ? "N\u00b0 " + d.sql_id : "";
+    var statusEl = header.querySelector(".pcorg-fiche-status");
+    statusEl.textContent = d.status_code === 10 ? "TERMINE" : "EN COURS";
+    statusEl.className = "pcorg-fiche-status " + (d.status_code === 10 ? "closed" : "open");
+
+    // Body
+    var body = document.getElementById("pcorg-fiche-body");
+    body.textContent = "";
+
+    // Description
+    var descText = d.text_full || d.text;
+    if (descText) {
+      var desc = mkEl("div", "pcorg-fiche-desc");
+      desc.style.borderLeftColor = st.color;
+      desc.textContent = descText;
+      body.appendChild(desc);
     }
-    if (d.comment) {
-      var lbl = mkEl("div", "pcorg-detail-label");
-      lbl.textContent = "Commentaire";
-      container.appendChild(lbl);
-      var val = mkEl("div", "");
-      // Comment may have newlines
-      d.comment.split("\n").forEach(function (line, i) {
-        if (i > 0) container.appendChild(document.createElement("br"));
-        var t = document.createTextNode(line);
-        val.appendChild(t);
+
+    // Info row (fields + mini map)
+    var infoRow = mkEl("div", "pcorg-fiche-info-row");
+
+    // Fields
+    var fields = mkEl("div", "pcorg-fiche-fields");
+    addField(fields, "Operateur", d.operator);
+    if (d.ts) addField(fields, "Ouverture", new Date(d.ts).toLocaleString("fr-FR"));
+    if (d.close_ts && d.status_code === 10) addField(fields, "Cloture", new Date(d.close_ts).toLocaleString("fr-FR"));
+    if (d.operator_close && d.operator_close !== d.operator) addField(fields, "Clos par", d.operator_close);
+    addField(fields, "Zone", truncZone(d.area_desc));
+    addField(fields, "Appelant", cc.appelant);
+    var contact = [];
+    if (cc.telephone) contact.push(typeof cc.telephone === "string" ? cc.telephone : "Telephone");
+    if (cc.radio) contact.push(typeof cc.radio === "string" ? cc.radio : "Radio");
+    if (contact.length) addField(fields, "Via", contact.join(" / "));
+    addField(fields, "Carroye", cc.carroye);
+    addField(fields, "Groupe", d.group_desc);
+    infoRow.appendChild(fields);
+
+    // Mini map
+    var mapDiv = mkEl("div", "pcorg-fiche-minimap");
+    if (d.lat != null && d.lon != null) {
+      mapDiv.id = "pcorg-minimap-container";
+      infoRow.appendChild(mapDiv);
+      body.appendChild(infoRow);
+      setTimeout(function () { initMiniMap(d.lat, d.lon, st); }, 100);
+    } else {
+      mapDiv.classList.add("empty");
+      mapDiv.textContent = "Pas de position";
+      infoRow.appendChild(mapDiv);
+      body.appendChild(infoRow);
+    }
+
+    // Category-specific details
+    var specific = buildSpecificFields(d.category, cc);
+    if (specific.length > 0) {
+      var secTitle = mkEl("div", "pcorg-fiche-section");
+      secTitle.textContent = "Details";
+      body.appendChild(secTitle);
+      var specFields = mkEl("div", "pcorg-fiche-fields");
+      specific.forEach(function (f) { addField(specFields, f[0], f[1]); });
+      body.appendChild(specFields);
+    }
+
+    // Extracted entities
+    if ((d.phones && d.phones.length) || (d.plates && d.plates.length)) {
+      var entSec = mkEl("div", "pcorg-fiche-section");
+      entSec.textContent = "Extractions";
+      body.appendChild(entSec);
+      var entFields = mkEl("div", "pcorg-fiche-fields");
+      if (d.phones && d.phones.length) addField(entFields, "Telephones", d.phones.join(", "));
+      if (d.plates && d.plates.length) addField(entFields, "Plaques", d.plates.join(", "));
+      body.appendChild(entFields);
+    }
+
+    // Chronology
+    var history = d.comment_history || [];
+    if (history.length > 0) {
+      var chronoSec = mkEl("div", "pcorg-fiche-section");
+      chronoSec.textContent = "Chronologie";
+      body.appendChild(chronoSec);
+      var timeline = mkEl("div", "pcorg-fiche-timeline");
+      history.forEach(function (entry) {
+        var isStatus = entry.text && entry.text.indexOf("Statut:") === 0;
+        var ent = mkEl("div", "pcorg-chrono-entry" + (isStatus ? " status-change" : ""));
+        ent.style.setProperty("--dot-color", isStatus ? "var(--muted)" : st.color);
+        ent.querySelector || null; // noop
+        // dot color via border-color
+        var dotStyle = "border-color:" + (isStatus ? "var(--muted)" : st.color);
+        ent.setAttribute("style", "--dot-color:" + (isStatus ? "#94a3b8" : st.color));
+
+        var head = mkEl("div", "pcorg-chrono-head");
+        var tsEl = mkEl("span", "pcorg-chrono-ts");
+        try {
+          var dt = new Date(entry.ts);
+          tsEl.textContent = String(dt.getHours()).padStart(2, "0") + ":" +
+            String(dt.getMinutes()).padStart(2, "0");
+        } catch (e) { tsEl.textContent = entry.ts || ""; }
+        head.appendChild(tsEl);
+        var opEl = mkEl("span", "pcorg-chrono-op");
+        opEl.textContent = entry.operator || "";
+        head.appendChild(opEl);
+        ent.appendChild(head);
+
+        if (entry.text) {
+          var txt = mkEl("div", "pcorg-chrono-text");
+          txt.textContent = entry.text;
+          ent.appendChild(txt);
+        }
+        timeline.appendChild(ent);
       });
-      container.appendChild(val);
-    }
-    addDetailField(container, "Classification", d.sous_classification);
-    addDetailField(container, "Appelant", d.appelant);
-    if (d.intervenants && d.intervenants.length) {
-      addDetailField(container, "Intervenants", d.intervenants.join(", "));
-    }
-    addDetailField(container, "Groupe", d.group_desc);
-
-    var opStr = d.operator || "?";
-    if (d.operator_close && d.operator_close !== d.operator) {
-      opStr += " / clos par " + d.operator_close;
-    }
-    addDetailField(container, "Operateur", opStr);
-
-    if (d.ts) {
-      addDetailField(container, "Ouverture", new Date(d.ts).toLocaleString("fr-FR"));
-    }
-    if (d.close_ts) {
-      addDetailField(container, "Cloture", new Date(d.close_ts).toLocaleString("fr-FR"));
+      body.appendChild(timeline);
     }
 
-    // Action buttons
-    var actions = mkEl("div", "pcorg-detail-actions");
-
+    // Actions
+    var actions = mkEl("div", "pcorg-fiche-actions");
     if (d.lat != null) {
       var btnMap = mkEl("button", "");
       btnMap.appendChild(matIcon("map"));
       btnMap.appendChild(document.createTextNode(" Voir sur carte"));
-      btnMap.addEventListener("click", function () { flyToPin(d.lat, d.lon); });
+      btnMap.addEventListener("click", function () {
+        hideFiche(); flyToPin(d.lat, d.lon);
+      });
       actions.appendChild(btnMap);
     } else {
       var btnGps = mkEl("button", "");
       btnGps.appendChild(matIcon("add_location"));
       btnGps.appendChild(document.createTextNode(" Ajouter position"));
-      btnGps.addEventListener("click", function () { openGpsModal(d.id); });
+      btnGps.addEventListener("click", function () {
+        hideFiche(); openGpsModal(d.id);
+      });
       actions.appendChild(btnGps);
     }
-
     if (!isClosed && d.status_code !== 10) {
       var btnClose = mkEl("button", "pcorg-btn-danger");
       btnClose.appendChild(matIcon("check_circle"));
       btnClose.appendChild(document.createTextNode(" Clore"));
-      btnClose.addEventListener("click", function () { closeIntervention(d.id); });
+      btnClose.addEventListener("click", function () {
+        hideFiche(); closeIntervention(d.id);
+      });
       actions.appendChild(btnClose);
     }
+    body.appendChild(actions);
+  }
 
-    container.appendChild(actions);
+  function addField(parent, label, value) {
+    if (!value) return;
+    var row = mkEl("div", "pcorg-fiche-field");
+    var lbl = mkEl("span", "pcorg-fiche-label");
+    lbl.textContent = label;
+    row.appendChild(lbl);
+    var val = mkEl("span", "pcorg-fiche-value");
+    val.textContent = value;
+    row.appendChild(val);
+    parent.appendChild(row);
+  }
+
+  function buildSpecificFields(category, cc) {
+    var fields = [];
+    var cat = category || "";
+    if (cat === "PCO.Fourriere") {
+      if (cc.detailsvl) fields.push(["Vehicule", cc.detailsvl]);
+      if (cc.immat) fields.push(["Immatriculation", cc.immat]);
+      if (cc.lieu) fields.push(["Lieu", cc.lieu]);
+      if (cc.typedemande) fields.push(["Type demande", cc.typedemande]);
+      if (cc.decision) fields.push(["Decision", cc.decision]);
+      if (cc.dhenlevement) fields.push(["Enlevement", cc.dhenlevement]);
+      if (cc.paiement) fields.push(["Paiement", cc.paiement]);
+      if (cc.precurseur) fields.push(["Precurseur", cc.precurseur]);
+    } else if (cat === "PCO.Flux") {
+      if (cc.moyens_engages_niveau_1) fields.push(["Moyens Niv.1", cc.moyens_engages_niveau_1]);
+      if (cc.moyens_engages_niveau_2) fields.push(["Moyens Niv.2", cc.moyens_engages_niveau_2]);
+    } else if (cat === "PCO.Secours" || cat === "PCO.Securite" || cat === "PCO.Technique") {
+      var intervs = [];
+      for (var i = 1; i <= 5; i++) { if (cc["intervenant" + i]) intervs.push(cc["intervenant" + i]); }
+      if (intervs.length) fields.push(["Intervenants", intervs.join(", ")]);
+      if (cc.service_contacte) fields.push(["Service contacte", cc.service_contacte]);
+    } else if (cat === "PCO.Information" || cat === "PCO.MainCourante") {
+      if (cc.texte) fields.push(["Texte", cc.texte]);
+      if (cc.alerte) fields.push(["Alerte", "Oui"]);
+    }
+    return fields;
+  }
+
+  function initMiniMap(lat, lon, st) {
+    destroyMiniMap();
+    var container = document.getElementById("pcorg-minimap-container");
+    if (!container) return;
+    detailMiniMap = L.map(container, {
+      center: [lat, lon], zoom: 16, zoomControl: false,
+      attributionControl: false, dragging: false, scrollWheelZoom: false,
+      doubleClickZoom: false, touchZoom: false
+    });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19
+    }).addTo(detailMiniMap);
+    var pinHtml = "<div class='pcorg-pin' style='background:" + st.color + "'>" +
+      "<span class='material-symbols-outlined'>" + st.icon + "</span></div>";
+    L.marker([lat, lon], {
+      icon: L.divIcon({ className: "", html: pinHtml, iconSize: [28, 28], iconAnchor: [14, 28] })
+    }).addTo(detailMiniMap);
+    setTimeout(function () { detailMiniMap.invalidateSize(); }, 150);
   }
 
   // ── Close intervention ─────────────────────────────────────────────────────
@@ -534,19 +675,19 @@
 
     if (!modal || !btn) return;
 
-    btn.addEventListener("click", function () { modal.classList.add("active"); });
-    closeBtn.addEventListener("click", function () { modal.classList.remove("active"); });
-    cancelBtn.addEventListener("click", function () { modal.classList.remove("active"); });
+    btn.addEventListener("click", function () { modal.classList.add("show"); });
+    closeBtn.addEventListener("click", function () { modal.classList.remove("show"); });
+    cancelBtn.addEventListener("click", function () { modal.classList.remove("show"); });
     modal.addEventListener("click", function (e) {
-      if (e.target === modal) modal.classList.remove("active");
+      if (e.target === modal) modal.classList.remove("show");
     });
 
     pickBtn.addEventListener("click", function () {
-      modal.classList.remove("active");
+      modal.classList.remove("show");
       startGpsPick(function (lat, lon) {
         document.getElementById("pcorg-lat").value = lat.toFixed(6);
         document.getElementById("pcorg-lon").value = lon.toFixed(6);
-        modal.classList.add("active");
+        modal.classList.add("show");
       });
     });
 
@@ -574,7 +715,7 @@
       apiPost("/api/pcorg/create", payload)
         .then(function (r) {
           if (r.ok) {
-            modal.classList.remove("active");
+            modal.classList.remove("show");
             form.reset();
             refresh();
           } else {
@@ -594,18 +735,18 @@
 
     if (!modal) return;
 
-    closeBtn.addEventListener("click", function () { modal.classList.remove("active"); });
-    cancelBtn.addEventListener("click", function () { modal.classList.remove("active"); });
+    closeBtn.addEventListener("click", function () { modal.classList.remove("show"); });
+    cancelBtn.addEventListener("click", function () { modal.classList.remove("show"); });
     modal.addEventListener("click", function (e) {
-      if (e.target === modal) modal.classList.remove("active");
+      if (e.target === modal) modal.classList.remove("show");
     });
 
     pickBtn.addEventListener("click", function () {
-      modal.classList.remove("active");
+      modal.classList.remove("show");
       startGpsPick(function (lat, lon) {
         document.getElementById("pcorg-gps-lat").value = lat.toFixed(6);
         document.getElementById("pcorg-gps-lon").value = lon.toFixed(6);
-        modal.classList.add("active");
+        modal.classList.add("show");
       });
     });
 
@@ -622,7 +763,7 @@
         lon: parseFloat(lon)
       }).then(function (r) {
         if (r.ok) {
-          modal.classList.remove("active");
+          modal.classList.remove("show");
           refresh();
         } else {
           alert(r.error || "Erreur");
@@ -637,7 +778,7 @@
     document.getElementById("pcorg-gps-id").value = id;
     document.getElementById("pcorg-gps-lat").value = "";
     document.getElementById("pcorg-gps-lon").value = "";
-    modal.classList.add("active");
+    modal.classList.add("show");
   }
 
   // ── GPS pick on map ────────────────────────────────────────────────────────
