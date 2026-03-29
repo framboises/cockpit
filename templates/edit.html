@@ -247,6 +247,29 @@
             </label>
           </div>
 
+          <!-- 0b) Logging -->
+          <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; padding:10px; border:1px solid var(--line); border-radius:var(--radius-sm);">
+            <span class="material-symbols-outlined" id="anoloc-log-icon" style="font-size:22px; color:var(--muted);">description</span>
+            <div style="flex:1;">
+              <div style="font-size:13px; font-weight:600;">Logs detailles</div>
+              <div style="font-size:11px; color:var(--muted);">Enregistre chaque collecte avec le detail par balise</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="anoloc-log-toggle" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <!-- 0c) Consultation logs -->
+          <div style="margin-bottom:16px;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+              <h4 style="margin:0; font-size:13px; color:var(--muted);">Journal de collecte</h4>
+              <button id="anoloc-refresh-logs" class="btn btn-xs">Rafraichir</button>
+              <button id="anoloc-clear-logs" class="btn btn-xs">Vider</button>
+            </div>
+            <div id="anoloc-logs-container" style="max-height:300px; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius-sm); padding:6px; font-size:11px; font-family:monospace; background:var(--bg);"></div>
+          </div>
+
           <!-- A) Credentials -->
           <h4 style="margin:0 0 8px; font-size:13px; color:var(--muted);">Connexion Anoloc</h4>
           <div class="anoloc-admin-creds">

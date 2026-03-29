@@ -18,7 +18,20 @@ import sys
 import time
 import logging
 import signal
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+
+# Fuseau horaire Paris (UTC+1 / UTC+2 selon DST)
+try:
+    from zoneinfo import ZoneInfo
+    TZ_LOCAL = ZoneInfo("Europe/Paris")
+except ImportError:
+    # Python < 3.9 fallback
+    import dateutil.tz
+    TZ_LOCAL = dateutil.tz.gettz("Europe/Paris")
+
+
+def now_local():
+    return datetime.now(TZ_LOCAL)
 
 import requests
 from pymongo import MongoClient
@@ -74,6 +87,7 @@ def ensure_indexes(db):
         [("device_id", 1), ("collected_at", -1)]
     )
     db["anoloc_positions"].create_index("collected_at")
+    db["anoloc_logs"].create_index("ts", expireAfterSeconds=7 * 24 * 3600)  # TTL 7 jours
 
 
 # ---------------------------------------------------------------------------
@@ -82,19 +96,28 @@ def ensure_indexes(db):
 
 LIVE_CONTROL_ID = "live-control"
 
+def get_live_control(db):
+    """Retourne le document live-control."""
+    return db["anoloc_config"].find_one({"_id": LIVE_CONTROL_ID}) or {}
+
+
 def is_collecting_enabled(db):
     """Verifie si la collecte est activee via le document live-control."""
-    doc = db["anoloc_config"].find_one({"_id": LIVE_CONTROL_ID})
-    if not doc:
-        return False
+    doc = get_live_control(db)
     return bool(doc.get("collecting", False))
+
+
+def is_logging_enabled(db):
+    """Verifie si le logging detaille est active."""
+    doc = get_live_control(db)
+    return bool(doc.get("logging", False))
 
 
 def set_collecting_status(db, running, error=None):
     """Met a jour le statut du collecteur dans live-control."""
     update = {
         "running": running,
-        "last_run": datetime.now(timezone.utc),
+        "last_run": now_local(),
     }
     if error:
         update["last_error"] = error
@@ -187,23 +210,57 @@ def build_device_to_group_map(config):
     return mapping
 
 
-def collect_once(token, device_group_map, devices_info, db):
+def db_log(db, level, message, details=None):
+    """Insere un log dans la collection anoloc_logs."""
+    doc = {
+        "ts": now_local(),
+        "level": level,
+        "message": message,
+    }
+    if details:
+        doc["details"] = details
+    try:
+        db["anoloc_logs"].insert_one(doc)
+    except Exception:
+        pass
+
+
+def collect_once(token, device_group_map, devices_info, db, logging_enabled=False):
     """Une iteration de collecte: GET /live, insert positions, upsert latest."""
-    now = datetime.now(timezone.utc)
+    now = now_local()
     live_data = get_live(token)
 
     inserted = 0
+    device_details = []
+
     for device_id, frame in live_data.items():
+        dev_info = devices_info.get(device_id, {})
+        dev_label = dev_info.get("label", device_id)
+        in_group = device_id in device_group_map
+
         if not isinstance(frame, dict):
+            if logging_enabled and in_group:
+                device_details.append({
+                    "id": device_id,
+                    "label": dev_label,
+                    "status": "offline",
+                    "reason": "pas de frame (liste vide)",
+                })
             continue
         grp = device_group_map.get(device_id)
         if not grp:
             continue
 
-        dev_info = devices_info.get(device_id, {})
         lat = frame.get("latitude")
         lng = frame.get("longitude")
         if lat is None or lng is None:
+            if logging_enabled:
+                device_details.append({
+                    "id": device_id,
+                    "label": dev_label,
+                    "status": frame.get("status", "?"),
+                    "reason": "pas de coordonnees GPS",
+                })
             continue
 
         sent_at_str = frame.get("sent_at")
@@ -247,6 +304,28 @@ def collect_once(token, device_group_map, devices_info, db):
             upsert=True,
         )
         inserted += 1
+
+        if logging_enabled:
+            device_details.append({
+                "id": device_id,
+                "label": dev_label,
+                "status": frame.get("status", "?"),
+                "lat": lat,
+                "lng": lng,
+                "speed": frame.get("speed", 0),
+                "battery": battery_pct,
+                "collected": True,
+            })
+
+    # Log du cycle
+    if logging_enabled:
+        online = len([d for d in device_details if d.get("collected")])
+        offline = len([d for d in device_details if not d.get("collected")])
+        db_log(db, "info", f"Collecte: {online} en ligne, {offline} hors ligne, {inserted} positions enregistrees", {
+            "devices": device_details,
+            "live_keys": list(live_data.keys())[:20],
+            "configured_ids": list(device_group_map.keys()),
+        })
 
     return inserted
 
@@ -311,6 +390,9 @@ def main():
 
     # Signaler le demarrage
     set_collecting_status(db, True)
+    _logging = is_logging_enabled(db)
+    if _logging:
+        db_log(db, "info", f"Demarrage collecteur: {len(device_group_map)} devices, {len([g for g in config.get('beacon_groups', []) if g.get('enabled', True)])} groupes")
 
     # --- 2 collectes espacees de 30 secondes ---
     for cycle in range(1, NB_CYCLES + 1):
@@ -319,7 +401,7 @@ def main():
 
         try:
             devices_info = get_devices(_token)
-            count = collect_once(_token, device_group_map, devices_info, db)
+            count = collect_once(_token, device_group_map, devices_info, db, logging_enabled=_logging)
             log.info("Cycle %d/%d: %d positions collectees", cycle, NB_CYCLES, count)
         except requests.exceptions.HTTPError as e:
             if e.response is not None and e.response.status_code == 401:

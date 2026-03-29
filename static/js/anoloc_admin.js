@@ -80,10 +80,37 @@
     var collectToggle = $("#anoloc-collect-toggle");
     if (collectToggle) {
       collectToggle.addEventListener("change", function () {
-        toggleCollecting(collectToggle.checked);
+        apiPost("/anoloc/live-control", { collecting: collectToggle.checked }).then(function (data) {
+          if (data.ok) showToast(collectToggle.checked ? "Collecte activee" : "Collecte desactivee", "success");
+          loadLiveControl();
+        });
       });
     }
+
+    // Logging toggle
+    var logToggle = $("#anoloc-log-toggle");
+    if (logToggle) {
+      logToggle.addEventListener("change", function () {
+        apiPost("/anoloc/live-control", { logging: logToggle.checked }).then(function (data) {
+          if (data.ok) showToast(logToggle.checked ? "Logging active" : "Logging desactive", "success");
+          loadLiveControl();
+        });
+      });
+    }
+
+    // Log buttons
+    var refreshLogsBtn = $("#anoloc-refresh-logs");
+    if (refreshLogsBtn) refreshLogsBtn.addEventListener("click", loadLogs);
+    var clearLogsBtn = $("#anoloc-clear-logs");
+    if (clearLogsBtn) clearLogsBtn.addEventListener("click", function () {
+      if (!confirm("Vider tous les logs ?")) return;
+      fetch("/anoloc/logs", { method: "DELETE", headers: jsonHeaders() })
+        .then(function (r) { return r.json(); })
+        .then(function () { loadLogs(); showToast("Logs vides", "success"); });
+    });
+
     loadLiveControl();
+    loadLogs();
   }
 
   // ============================================================
@@ -584,41 +611,86 @@
       var toggle = $("#anoloc-collect-toggle");
       var status = $("#anoloc-collect-status");
       var icon = $("#anoloc-collect-icon");
+      var logToggle = $("#anoloc-log-toggle");
+      var logIcon = $("#anoloc-log-icon");
 
       var collecting = !!data.collecting;
       if (toggle) toggle.checked = collecting;
       if (icon) icon.style.color = collecting ? "#22c55e" : "var(--muted)";
+      if (logToggle) logToggle.checked = !!data.logging;
+      if (logIcon) logIcon.style.color = data.logging ? "#3b82f6" : "var(--muted)";
 
       if (status) {
         var parts = [];
-        if (collecting) {
-          parts.push("Collecte active");
-        } else {
-          parts.push("Collecte arretee");
-        }
+        parts.push(collecting ? "Collecte active" : "Collecte arretee");
         if (data.last_run) {
           try {
             var d = new Date(data.last_run);
             parts.push("- derniere exec: " + d.toLocaleString("fr-FR"));
           } catch (e) {}
         }
-        if (data.last_error) {
-          parts.push("- " + data.last_error);
-        }
-        if (data.running) {
-          parts.push("(en cours)");
-        }
+        if (data.last_error) parts.push("- " + data.last_error);
+        if (data.running) parts.push("(en cours)");
         status.textContent = parts.join(" ");
       }
     });
   }
 
-  function toggleCollecting(enabled) {
-    apiPost("/anoloc/live-control", { collecting: enabled }).then(function (data) {
-      if (data.ok) {
-        showToast(enabled ? "Collecte activee" : "Collecte desactivee", "success");
-        loadLiveControl();
+  function loadLogs() {
+    var container = $("#anoloc-logs-container");
+    if (!container) return;
+
+    apiGet("/anoloc/logs?limit=50").then(function (data) {
+      container.textContent = "";
+      var logs = data.logs || [];
+      if (logs.length === 0) {
+        container.textContent = "Aucun log disponible.";
+        return;
       }
+      logs.forEach(function (entry) {
+        var line = document.createElement("div");
+        line.style.cssText = "padding:3px 0; border-bottom:1px solid var(--line-light, rgba(255,255,255,0.04));";
+
+        // Timestamp
+        var tsStr = "";
+        if (entry.ts) {
+          try {
+            var d = new Date(entry.ts);
+            tsStr = d.toLocaleString("fr-FR") + " ";
+          } catch (e) {}
+        }
+
+        var levelColor = entry.level === "error" ? "#ef4444" : entry.level === "warning" ? "#f59e0b" : "#22c55e";
+        var header = document.createElement("span");
+        header.style.color = levelColor;
+        header.textContent = tsStr + "[" + (entry.level || "info").toUpperCase() + "] ";
+        line.appendChild(header);
+
+        var msg = document.createElement("span");
+        msg.textContent = entry.message || "";
+        line.appendChild(msg);
+
+        // Details (devices)
+        if (entry.details && entry.details.devices) {
+          var details = document.createElement("div");
+          details.style.cssText = "margin-left:16px; color:var(--muted);";
+          entry.details.devices.forEach(function (dev) {
+            var devLine = document.createElement("div");
+            var icon = dev.collected ? "check_circle" : "cancel";
+            var color = dev.collected ? "#22c55e" : "#9ca3af";
+            var text = dev.label || dev.id;
+            if (dev.reason) text += " - " + dev.reason;
+            if (dev.collected) text += " [" + dev.status + ", " + dev.speed + " km/h]";
+            if (dev.battery != null) text += " bat:" + dev.battery + "%";
+            devLine.textContent = "  " + text;
+            devLine.style.color = color;
+            details.appendChild(devLine);
+          });
+          line.appendChild(details);
+        }
+
+        container.appendChild(line);
+      });
     });
   }
 

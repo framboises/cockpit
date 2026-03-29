@@ -4,6 +4,17 @@
 
 from flask import Blueprint, jsonify, request
 from datetime import datetime, timezone
+
+try:
+    from zoneinfo import ZoneInfo
+    TZ_LOCAL = ZoneInfo("Europe/Paris")
+except ImportError:
+    import dateutil.tz
+    TZ_LOCAL = dateutil.tz.gettz("Europe/Paris")
+
+
+def _now():
+    return datetime.now(TZ_LOCAL)
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 import logging
@@ -184,7 +195,7 @@ def anoloc_live():
         g["id"]: g for g in config.get("beacon_groups", []) if g.get("enabled")
     }
 
-    now = datetime.now(timezone.utc)
+    now = _now()
     groups = {}
 
     for grp_id, grp_cfg in beacon_groups_map.items():
@@ -206,7 +217,7 @@ def anoloc_live():
                 online = False
                 if collected_at:
                     if collected_at.tzinfo is None:
-                        collected_at = collected_at.replace(tzinfo=timezone.utc)
+                        collected_at = collected_at.replace(tzinfo=TZ_LOCAL)
                     online = (now - collected_at).total_seconds() < 300
 
                 groups[grp_id]["devices"].append({
@@ -257,7 +268,7 @@ def anoloc_status():
     }
 
     groups = {}
-    now = datetime.now(timezone.utc)
+    now = _now()
     for doc in docs:
         grp_id = doc.get("beacon_group")
         if not grp_id or grp_id not in beacon_groups_map:
@@ -279,7 +290,7 @@ def anoloc_status():
         collected_at = doc.get("collected_at")
         if collected_at:
             if collected_at.tzinfo is None:
-                collected_at = collected_at.replace(tzinfo=timezone.utc)
+                collected_at = collected_at.replace(tzinfo=TZ_LOCAL)
             age = (now - collected_at).total_seconds()
             if age < 300:
                 groups[grp_id]["online"] += 1
@@ -316,19 +327,52 @@ def anoloc_live_control_get():
 
 @anoloc_bp.route("/anoloc/live-control", methods=["POST"])
 def anoloc_live_control_set():
-    """Active ou desactive la collecte."""
+    """Active ou desactive la collecte et/ou le logging."""
     err = _require_admin()
     if err:
         return err
     db = _get_mongo_db()
     data = request.get_json(force=True)
-    collecting = bool(data.get("collecting", False))
+    update = {"updatedAt": _now()}
+    if "collecting" in data:
+        update["collecting"] = bool(data["collecting"])
+    if "logging" in data:
+        update["logging"] = bool(data["logging"])
     db["anoloc_config"].update_one(
         {"_id": LIVE_CONTROL_ID},
-        {"$set": {"collecting": collecting, "updatedAt": datetime.now(timezone.utc)}},
+        {"$set": update},
         upsert=True,
     )
-    return jsonify({"ok": True, "collecting": collecting})
+    return jsonify({"ok": True})
+
+
+@anoloc_bp.route("/anoloc/logs", methods=["GET"])
+def anoloc_logs_get():
+    """Retourne les derniers logs du collecteur."""
+    err = _require_admin()
+    if err:
+        return err
+    db = _get_mongo_db()
+    limit = min(int(request.args.get("limit", 50)), 200)
+    docs = list(db["anoloc_logs"].find().sort("ts", -1).limit(limit))
+    logs = []
+    for doc in docs:
+        doc.pop("_id", None)
+        if isinstance(doc.get("ts"), datetime):
+            doc["ts"] = doc["ts"].isoformat()
+        logs.append(doc)
+    return jsonify({"logs": logs})
+
+
+@anoloc_bp.route("/anoloc/logs", methods=["DELETE"])
+def anoloc_logs_clear():
+    """Vide les logs."""
+    err = _require_admin()
+    if err:
+        return err
+    db = _get_mongo_db()
+    db["anoloc_logs"].delete_many({})
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------
@@ -367,7 +411,7 @@ def anoloc_config_save():
         "enabled": bool(data.get("enabled", False)),
         "beacon_groups": data.get("beacon_groups", existing.get("beacon_groups", [])),
         "group_visibility": data.get("group_visibility", existing.get("group_visibility", {})),
-        "updatedAt": datetime.now(timezone.utc),
+        "updatedAt": _now(),
     }
 
     # Ne pas ecraser le password si "********" ou absent
@@ -396,7 +440,7 @@ def anoloc_visibility_save():
     # data = { "<cockpit_group_id>": ["grp-id1", "grp-id2"] | null, ... }
     db["anoloc_config"].update_one(
         {"_id": "global"},
-        {"$set": {"group_visibility": data, "updatedAt": datetime.now(timezone.utc)}},
+        {"$set": {"group_visibility": data, "updatedAt": _now()}},
         upsert=True,
     )
     return jsonify({"ok": True})
