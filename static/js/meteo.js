@@ -1,5 +1,456 @@
 // meteo.js
-// Fonction pour récupérer les prévisions pour les 6 prochaines heures et les afficher dans la navbar
+
+// ==========================================================================
+// WIDGET METEO OPERATIONNEL (sidebar droite)
+// ==========================================================================
+
+var _meteoPanelChart = null;
+var _meteoYoyChart = null;
+var _meteoPreviousView = "timeline";
+
+function fetchMeteoWidgetSummary() {
+  if (!window.isBlockAllowed("widget-right-1")) return;
+  fetch('/meteo_widget_summary')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) return;
+      renderMeteoWidget(data);
+    })
+    .catch(function(err) { console.error("Erreur widget meteo:", err); });
+}
+
+function renderMeteoWidget(data) {
+  // Jauge de risque
+  var gauge = document.getElementById('meteo-risk-gauge');
+  if (gauge) {
+    gauge.setAttribute('data-level', data.risk_level);
+    var icon = gauge.querySelector('.meteo-risk-icon');
+    if (icon) {
+      if (data.risk_level === 'green') icon.textContent = 'shield';
+      else if (data.risk_level === 'orange') icon.textContent = 'warning';
+      else icon.textContent = 'crisis_alert';
+    }
+    var label = document.getElementById('meteo-risk-label');
+    if (label) label.textContent = data.risk_label;
+  }
+
+  // Snapshot conditions actuelles
+  var c = data.current;
+  var snapTemp = document.getElementById('meteo-snap-temp');
+  var snapWind = document.getElementById('meteo-snap-wind');
+  var snapRain = document.getElementById('meteo-snap-rain');
+  if (snapTemp) snapTemp.textContent = c.temp + 'C';
+  if (snapWind) snapWind.textContent = c.gust + ' km/h';
+  if (snapRain) snapRain.textContent = c.rain + ' mm';
+
+  // Alertes - les donnees viennent du serveur (source de confiance interne)
+  var alertsDiv = document.getElementById('meteo-alerts');
+  if (alertsDiv) {
+    if (data.alerts.length === 0) {
+      alertsDiv.innerHTML = '<span class="meteo-no-alert">Aucune alerte meteo</span>';
+    } else {
+      alertsDiv.innerHTML = '';
+      data.alerts.forEach(function(a) {
+        var el = document.createElement('div');
+        el.className = 'meteo-alert-item';
+        el.setAttribute('data-severity', a.severity);
+        var iconSpan = document.createElement('span');
+        iconSpan.className = 'material-symbols-outlined';
+        iconSpan.textContent = a.icon;
+        var msgSpan = document.createElement('span');
+        msgSpan.textContent = a.message;
+        el.appendChild(iconSpan);
+        el.appendChild(msgSpan);
+        alertsDiv.appendChild(el);
+      });
+    }
+  }
+}
+
+// Init widget au chargement
+document.addEventListener('DOMContentLoaded', function() {
+  fetchMeteoWidgetSummary();
+
+  var expandBtn = document.getElementById('meteo-expand-btn');
+  if (expandBtn) {
+    expandBtn.addEventListener('click', function() {
+      expandMeteoPanel();
+    });
+  }
+
+  var closeBtn = document.getElementById('meteo-panel-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', function() {
+      collapseMeteoPanel();
+    });
+  }
+});
+
+// Refresh widget toutes les 5 minutes
+setInterval(fetchMeteoWidgetSummary, 5 * 60 * 1000);
+
+// ==========================================================================
+// PANEL ANALYSE METEO (zone centrale)
+// ==========================================================================
+
+function expandMeteoPanel(targetDate) {
+  var timeline = document.getElementById('timeline-main');
+  var mapMain = document.getElementById('map-main');
+  var panel = document.getElementById('meteo-panel');
+  if (!panel) return;
+
+  // Sauvegarder la vue precedente
+  if (window.CockpitMapView) {
+    _meteoPreviousView = window.CockpitMapView.currentView();
+  }
+
+  if (timeline) timeline.style.display = 'none';
+  if (mapMain) mapMain.style.display = 'none';
+  panel.style.display = 'flex';
+
+  var today = new Date();
+  var date = targetDate || today.toISOString().split('T')[0];
+  buildMeteoPanelTabs(date);
+  loadMeteoPanelData(date);
+}
+
+function collapseMeteoPanel() {
+  var panel = document.getElementById('meteo-panel');
+  if (panel) panel.style.display = 'none';
+
+  // Detruire les charts pour eviter les fuites memoire
+  if (_meteoPanelChart) { _meteoPanelChart.destroy(); _meteoPanelChart = null; }
+  if (_meteoYoyChart) { _meteoYoyChart.destroy(); _meteoYoyChart = null; }
+
+  // Restaurer la vue precedente (timeline ou carte)
+  var timeline = document.getElementById('timeline-main');
+  var mapMain = document.getElementById('map-main');
+
+  if (_meteoPreviousView === 'map') {
+    if (timeline) timeline.style.display = 'none';
+    if (mapMain) mapMain.style.display = 'block';
+  } else {
+    if (timeline) timeline.style.display = '';
+    if (mapMain) mapMain.style.display = 'none';
+  }
+}
+
+function buildMeteoPanelTabs(activeDate) {
+  var tabsDiv = document.getElementById('meteo-panel-tabs');
+  if (!tabsDiv) return;
+  tabsDiv.innerHTML = '';
+
+  var today = new Date();
+  for (var i = 0; i < 4; i++) {
+    var d = new Date(today);
+    d.setDate(d.getDate() + i);
+    var dateStr = d.toISOString().split('T')[0];
+    var label = i === 0 ? "Aujourd'hui" : d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' });
+
+    var btn = document.createElement('button');
+    btn.className = 'meteo-panel-tab' + (dateStr === activeDate ? ' active' : '');
+    btn.textContent = label;
+    btn.setAttribute('data-date', dateStr);
+    btn.addEventListener('click', function() {
+      var dd = this.getAttribute('data-date');
+      tabsDiv.querySelectorAll('.meteo-panel-tab').forEach(function(t) { t.classList.remove('active'); });
+      this.classList.add('active');
+      loadMeteoPanelData(dd);
+    });
+    tabsDiv.appendChild(btn);
+  }
+}
+
+function loadMeteoPanelData(date) {
+  // Charger previsions horaires + historique en parallele
+  var fetchPrev = fetch('/meteo_previsions/' + encodeURIComponent(date)).then(function(r) { return r.json(); });
+  var fetchHist = fetch('/historique_meteo/' + encodeURIComponent(date)).then(function(r) { return r.json(); });
+
+  Promise.all([fetchPrev, fetchHist])
+    .then(function(results) {
+      var dayData = results[0];
+      var histData = results[1];
+
+      if (!dayData.error) {
+        renderMeteoPanelChart(dayData);
+      }
+      renderMeteoPanelHistory(histData);
+      renderMeteoYoyChart(histData);
+    })
+    .catch(function(err) {
+      console.error('Erreur chargement panel meteo:', err);
+    });
+}
+
+function renderMeteoPanelChart(dayData) {
+  if (_meteoPanelChart) { _meteoPanelChart.destroy(); _meteoPanelChart = null; }
+
+  var canvas = document.getElementById('meteo-panel-chart');
+  if (!canvas || !dayData.Heures) return;
+  var ctx = canvas.getContext('2d');
+
+  var labels = dayData.Heures.map(function(h) { return h.Heure; });
+  var temps = dayData.Heures.map(function(h) {
+    return parseFloat(h['Temperature (°C)'] || h['Temp\u00e9rature (\u00b0C)'] || 0);
+  });
+  var rain = dayData.Heures.map(function(h) {
+    return parseFloat(h['Pluviometrie (mm)'] || h['Pluviom\u00e9trie (mm)'] || 0);
+  });
+  var gusts = dayData.Heures.map(function(h) {
+    return parseFloat(h['Vent rafale (km/h)'] || 0);
+  });
+
+  _meteoPanelChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          type: 'line',
+          label: 'Temperature (C)',
+          data: temps,
+          borderColor: '#ef5350',
+          backgroundColor: 'rgba(239,83,80,0.1)',
+          borderWidth: 2,
+          pointRadius: 3,
+          fill: true,
+          yAxisID: 'y1',
+          tension: 0.3,
+          order: 1
+        },
+        {
+          type: 'bar',
+          label: 'Pluie (mm)',
+          data: rain,
+          backgroundColor: 'rgba(66,165,245,0.5)',
+          borderColor: '#42a5f5',
+          borderWidth: 1,
+          yAxisID: 'y2',
+          order: 2
+        },
+        {
+          type: 'line',
+          label: 'Rafales (km/h)',
+          data: gusts,
+          borderColor: '#78909c',
+          borderWidth: 1.5,
+          borderDash: [5, 3],
+          pointRadius: 0,
+          fill: false,
+          yAxisID: 'y1',
+          tension: 0.3,
+          order: 0
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+        tooltip: { callbacks: {
+          label: function(tooltipCtx) {
+            var lbl = tooltipCtx.dataset.label || '';
+            var val = tooltipCtx.parsed.y;
+            if (lbl.indexOf('Temperature') >= 0) return lbl + ': ' + val + 'C';
+            if (lbl.indexOf('Pluie') >= 0) return lbl + ': ' + val + ' mm';
+            if (lbl.indexOf('Rafales') >= 0) return lbl + ': ' + val + ' km/h';
+            return lbl + ': ' + val;
+          }
+        }}
+      },
+      scales: {
+        x: {
+          ticks: { maxRotation: 45, font: { size: 10 } },
+          grid: { display: false }
+        },
+        y1: {
+          type: 'linear',
+          position: 'left',
+          title: { display: true, text: 'Temperature (C) / Rafales (km/h)', font: { size: 10 } },
+          grid: { color: 'rgba(255,255,255,0.05)' }
+        },
+        y2: {
+          type: 'linear',
+          position: 'right',
+          title: { display: true, text: 'Pluie (mm)', font: { size: 10 } },
+          grid: { display: false },
+          beginAtZero: true
+        }
+      }
+    }
+  });
+}
+
+function renderMeteoPanelHistory(histData) {
+  var container = document.getElementById('meteo-panel-history');
+  if (!container) return;
+  container.innerHTML = '';
+
+  var table = document.createElement('table');
+  table.className = 'meteo-history-table';
+
+  // Thead
+  var thead = document.createElement('thead');
+  var headerRow = document.createElement('tr');
+  ['Annee', 'Precip. mois (mm)', 'Min mois', 'Max mois', 'Moy. mois', 'Jour', 'Precip. jour'].forEach(function(txt) {
+    var th = document.createElement('th');
+    th.textContent = txt;
+    headerRow.appendChild(th);
+  });
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  // Tbody
+  var tbody = document.createElement('tbody');
+  var currentYear = new Date().getFullYear();
+
+  for (var year in histData) {
+    var d = histData[year];
+    var tr = document.createElement('tr');
+
+    var tdYear = document.createElement('td');
+    tdYear.textContent = year;
+    tr.appendChild(tdYear);
+
+    var precip = d['Precipitations Totales Mois (mm)'] || d['Pr\u00e9cipitations Totales Mois (mm)'] || '-';
+    var tdPrecip = document.createElement('td');
+    tdPrecip.textContent = precip + ' mm';
+    tr.appendChild(tdPrecip);
+
+    var tMin = d['Temperature Min Mois (°C)'] || d['Temp\u00e9rature Min Mois (\u00b0C)'] || '-';
+    var tdMin = document.createElement('td');
+    tdMin.textContent = tMin + 'C';
+    tr.appendChild(tdMin);
+
+    var tMax = d['Temperature Max Mois (°C)'] || d['Temp\u00e9rature Max Mois (\u00b0C)'] || '-';
+    var tdMax = document.createElement('td');
+    tdMax.textContent = tMax + 'C';
+    tr.appendChild(tdMax);
+
+    var tMoy = d['Temperature Moyenne Mois (°C)'] || d['Temp\u00e9rature Moyenne Mois (\u00b0C)'] || '-';
+    var tdMoy = document.createElement('td');
+    tdMoy.textContent = tMoy + 'C';
+    tr.appendChild(tdMoy);
+
+    if (d.message) {
+      var tdMsg = document.createElement('td');
+      tdMsg.setAttribute('colspan', '2');
+      tdMsg.textContent = d.message;
+      tr.appendChild(tdMsg);
+    } else if (parseInt(year) === currentYear || !d['Temperature Jour (°C)']) {
+      var tdJ1 = document.createElement('td');
+      tdJ1.textContent = '-';
+      tr.appendChild(tdJ1);
+      var tdJ2 = document.createElement('td');
+      tdJ2.textContent = '-';
+      tr.appendChild(tdJ2);
+    } else {
+      var tj = d['Temperature Jour (°C)'] || d['Temp\u00e9rature Jour (\u00b0C)'];
+      var pj = d['Precipitations Jour (mm)'] || d['Pr\u00e9cipitations Jour (mm)'];
+      var tdJour = document.createElement('td');
+      tdJour.textContent = tj ? tj.max + 'C / ' + tj.min + 'C' : '-';
+      tr.appendChild(tdJour);
+      var tdPJ = document.createElement('td');
+      tdPJ.textContent = pj != null ? pj + ' mm' : '-';
+      tr.appendChild(tdPJ);
+    }
+
+    tbody.appendChild(tr);
+  }
+
+  table.appendChild(tbody);
+  container.appendChild(table);
+}
+
+function renderMeteoYoyChart(histData) {
+  if (_meteoYoyChart) { _meteoYoyChart.destroy(); _meteoYoyChart = null; }
+
+  var canvas = document.getElementById('meteo-panel-yoy-chart');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+
+  var years = [];
+  var precips = [];
+  var tempMoys = [];
+
+  for (var year in histData) {
+    var d = histData[year];
+    years.push(year);
+    var p = parseFloat(d['Precipitations Totales Mois (mm)'] || d['Pr\u00e9cipitations Totales Mois (mm)'] || 0);
+    var t = parseFloat(d['Temperature Moyenne Mois (°C)'] || d['Temp\u00e9rature Moyenne Mois (\u00b0C)'] || 0);
+    precips.push(p);
+    tempMoys.push(t);
+  }
+
+  _meteoYoyChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: years,
+      datasets: [
+        {
+          label: 'Precip. mois (mm)',
+          data: precips,
+          backgroundColor: 'rgba(66,165,245,0.6)',
+          borderColor: '#42a5f5',
+          borderWidth: 1,
+          yAxisID: 'y1'
+        },
+        {
+          type: 'line',
+          label: 'Temp. moyenne (C)',
+          data: tempMoys,
+          borderColor: '#ef5350',
+          backgroundColor: 'rgba(239,83,80,0.1)',
+          borderWidth: 2,
+          pointRadius: 4,
+          fill: false,
+          yAxisID: 'y2'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } }
+      },
+      scales: {
+        x: { grid: { display: false } },
+        y1: {
+          type: 'linear',
+          position: 'left',
+          title: { display: true, text: 'Precip. (mm)', font: { size: 10 } },
+          beginAtZero: true,
+          grid: { color: 'rgba(255,255,255,0.05)' }
+        },
+        y2: {
+          type: 'linear',
+          position: 'right',
+          title: { display: true, text: 'Temp. (C)', font: { size: 10 } },
+          grid: { display: false }
+        }
+      }
+    }
+  });
+}
+
+// Expose pour map_view.js
+window.MeteoPanel = {
+  expand: expandMeteoPanel,
+  collapse: collapseMeteoPanel,
+  isOpen: function() {
+    var p = document.getElementById('meteo-panel');
+    return p && p.style.display !== 'none';
+  }
+};
+
+// ==========================================================================
+// HEADER METEO (6h previsions)
+// ==========================================================================
+
+// Fonction pour recuperer les previsions pour les 6 prochaines heures et les afficher dans la navbar
 function fetchMeteoPrevisions6h() {
     if (!window.isBlockAllowed("meteo-previsions")) return;
     fetch('/meteo_previsions_6h')

@@ -774,6 +774,115 @@ def transform_row(row, event_label, year):
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 
+def _gen_id():
+    return uuid.uuid4().hex[:8]
+
+
+def enrich_pcorg_config(mongo_db, pcorg_col):
+    """Decouvre les nouvelles sous-classifications, intervenants et services
+    dans pcorg et les ajoute automatiquement a pcorg_config."""
+    config_col = mongo_db["pcorg_config"]
+    doc = config_col.find_one({"_id": "pcorg_lists"})
+    if not doc:
+        doc = {"_id": "pcorg_lists", "sous_classifications": {},
+               "intervenants": [], "services": []}
+
+    sc = doc.get("sous_classifications") or {}
+    interv = doc.get("intervenants") or []
+    services = doc.get("services") or []
+
+    # Extraire les labels existants pour comparaison rapide
+    def existing_labels(items):
+        return {(it["label"] if isinstance(it, dict) else it) for it in items}
+
+    interv_set = existing_labels(interv)
+    service_set = existing_labels(services)
+    sc_sets = {cat: existing_labels(items) for cat, items in sc.items()}
+
+    added = 0
+
+    # Scanner les sous-classifications par categorie
+    pipeline_sc = [
+        {"$match": {"category": {"$regex": "^PCO"},
+                     "content_category.sous_classification": {"$ne": None, "$ne": ""}}},
+        {"$group": {"_id": {"cat": "$category",
+                            "sc": "$content_category.sous_classification"}}},
+    ]
+    for row in pcorg_col.aggregate(pipeline_sc):
+        cat = row["_id"].get("cat")
+        val = row["_id"].get("sc")
+        if not cat or not val:
+            continue
+        if cat not in sc:
+            sc[cat] = []
+            sc_sets[cat] = set()
+        if val not in sc_sets[cat]:
+            sc[cat].append({"id": _gen_id(), "label": val})
+            sc_sets[cat].add(val)
+            added += 1
+
+    # Scanner les intervenants (intervenant1-5)
+    for i in range(1, 6):
+        field = f"content_category.intervenant{i}"
+        pipeline_int = [
+            {"$match": {"category": {"$regex": "^PCO"}, field: {"$ne": None, "$ne": ""}}},
+            {"$group": {"_id": f"${field}"}},
+        ]
+        for row in pcorg_col.aggregate(pipeline_int):
+            val = row["_id"]
+            if val and val not in interv_set:
+                interv.append({"id": _gen_id(), "label": val})
+                interv_set.add(val)
+                added += 1
+
+    # Scanner les moyens engages (niveau 1 et 2, meme liste)
+    for field_name in ["content_category.moyens_engages_niveau_1",
+                       "content_category.moyens_engages_niveau_2"]:
+        pipeline_m = [
+            {"$match": {"category": {"$regex": "^PCO"}, field_name: {"$ne": None, "$ne": ""}}},
+            {"$group": {"_id": f"${field_name}"}},
+        ]
+        for row in pcorg_col.aggregate(pipeline_m):
+            val = row["_id"]
+            if val and val not in interv_set:
+                interv.append({"id": _gen_id(), "label": val})
+                interv_set.add(val)
+                added += 1
+
+    # Scanner les services contactes
+    pipeline_svc = [
+        {"$match": {"category": {"$regex": "^PCO"},
+                     "content_category.service_contacte": {"$ne": None, "$ne": ""}}},
+        {"$group": {"_id": "$content_category.service_contacte"}},
+    ]
+    for row in pcorg_col.aggregate(pipeline_svc):
+        val = row["_id"]
+        if val and val not in service_set:
+            services.append({"id": _gen_id(), "label": val})
+            service_set.add(val)
+            added += 1
+
+    if added > 0:
+        # Trier par label
+        for cat in sc:
+            sc[cat].sort(key=lambda x: (x["label"] if isinstance(x, dict) else x))
+        interv.sort(key=lambda x: (x["label"] if isinstance(x, dict) else x))
+        services.sort(key=lambda x: (x["label"] if isinstance(x, dict) else x))
+
+        config_col.update_one(
+            {"_id": "pcorg_lists"},
+            {"$set": {
+                "sous_classifications": sc,
+                "intervenants": interv,
+                "services": services,
+            }},
+            upsert=True,
+        )
+        print(f"  Config pcorg enrichie : {added} nouvelle(s) valeur(s) ajoutee(s)")
+    else:
+        print(f"  Config pcorg : aucune nouvelle valeur")
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Sync PC Organisation : SQL Server → MongoDB (auto-attribution événement)"
@@ -949,6 +1058,10 @@ def main():
         if saison_to_delete:
             res = pcorg_col.delete_many({"_id": {"$in": saison_to_delete}})
             print(f"  Doublons SAISON purges : {res.deleted_count}")
+
+    # Enrichir la config pcorg avec les nouvelles valeurs decouvertes
+    if not args.dry_run:
+        enrich_pcorg_config(mongo_db, pcorg_col)
 
     # Comptage total en base
     if not args.dry_run:

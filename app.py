@@ -28,6 +28,7 @@ from traffic import traffic_bp
 from merge import run_merge
 from analyse_ops import analyse_ops_bp
 from anoloc import anoloc_bp
+from anpr import anpr_bp
 
 ################################################################################
 # Configuration
@@ -1096,6 +1097,114 @@ def get_meteo_previsions_6h():
 
     return jsonify(results)
 
+
+# ── Seuils operationnels meteo ──
+METEO_THRESHOLDS = {
+    "wind_warn": 40,   # km/h vigilance
+    "wind_alert": 60,  # km/h action
+    "rain_warn": 5,    # mm vigilance
+    "rain_alert": 15,  # mm alerte
+    "temp_hot": 35,    # C canicule
+    "temp_cold": 2,    # C gel
+}
+
+
+@app.route('/meteo_widget_summary', methods=['GET'])
+@role_required("user")
+@block_required("widget-right-1")
+def get_meteo_widget_summary():
+    """Retourne un resume meteo operationnel : conditions actuelles, risque, alertes."""
+    now = datetime.now()
+    today_str = now.strftime('%Y-%m-%d')
+    current_hour = now.strftime('%H:00')
+
+    previsions = db.meteo_previsions.find_one({'Date': today_str})
+    if not previsions or 'Heures' not in previsions:
+        return jsonify({'error': 'Aucune donnee meteo disponible'}), 404
+
+    heures = previsions['Heures']
+    th = METEO_THRESHOLDS
+
+    # ── Conditions actuelles (heure la plus proche) ──
+    current = None
+    for h in heures:
+        if h['Heure'] >= current_hour:
+            current = h
+            break
+    if not current:
+        current = heures[-1] if heures else {}
+
+    current_data = {
+        'temp': int(current.get('Temperature (°C)', current.get('Temp\u00e9rature (\u00b0C)', 0))),
+        'gust': int(current.get('Vent rafale (km/h)', 0)),
+        'rain': float(current.get('Pluviometrie (mm)', current.get('Pluviom\u00e9trie (mm)', 0))),
+        'wind_avg': int(current.get('Vent moyen (km/h)', 0)),
+        'hour': current.get('Heure', current_hour)
+    }
+
+    # ── Filtrer les heures restantes de la journee ──
+    upcoming = [h for h in heures if h['Heure'] >= current_hour]
+
+    # ── Calcul du risque et des alertes ──
+    alerts = []
+    max_severity = 'green'
+
+    for h in upcoming:
+        heure = h['Heure']
+        gust = int(h.get('Vent rafale (km/h)', 0))
+        rain = float(h.get('Pluviometrie (mm)', h.get('Pluviom\u00e9trie (mm)', 0)))
+        temp = int(h.get('Temperature (°C)', h.get('Temp\u00e9rature (\u00b0C)', 0)))
+
+        if gust >= th['wind_alert']:
+            alerts.append({'type': 'wind', 'icon': 'air', 'severity': 'red',
+                           'message': f'Rafales {gust} km/h a {heure}'})
+            max_severity = 'red'
+        elif gust >= th['wind_warn']:
+            alerts.append({'type': 'wind', 'icon': 'air', 'severity': 'orange',
+                           'message': f'Rafales {gust} km/h a {heure}'})
+            if max_severity != 'red':
+                max_severity = 'orange'
+
+        if rain >= th['rain_alert']:
+            alerts.append({'type': 'rain', 'icon': 'umbrella', 'severity': 'red',
+                           'message': f'Pluie forte {rain} mm a {heure}'})
+            max_severity = 'red'
+        elif rain >= th['rain_warn']:
+            alerts.append({'type': 'rain', 'icon': 'umbrella', 'severity': 'orange',
+                           'message': f'Pluie {rain} mm a {heure}'})
+            if max_severity != 'red':
+                max_severity = 'orange'
+
+        if temp >= th['temp_hot']:
+            alerts.append({'type': 'heat', 'icon': 'thermostat', 'severity': 'orange',
+                           'message': f'Canicule {temp}C a {heure}'})
+            if max_severity == 'green':
+                max_severity = 'orange'
+        elif temp <= th['temp_cold']:
+            alerts.append({'type': 'cold', 'icon': 'ac_unit', 'severity': 'orange',
+                           'message': f'Gel {temp}C a {heure}'})
+            if max_severity == 'green':
+                max_severity = 'orange'
+
+    # Deduplication : garder la pire alerte par type
+    seen_types = {}
+    deduped_alerts = []
+    for a in alerts:
+        key = a['type']
+        if key not in seen_types or a['severity'] == 'red':
+            seen_types[key] = a
+    deduped_alerts = list(seen_types.values())
+
+    risk_labels = {'green': 'RAS', 'orange': 'Vigilance', 'red': 'Alerte'}
+
+    return jsonify({
+        'current': current_data,
+        'alerts': deduped_alerts,
+        'risk_level': max_severity,
+        'risk_label': risk_labels[max_severity]
+    })
+
+
 @app.route('/sun_times', methods=['GET'])
 @role_required("user")
 @block_required("meteo-previsions")
@@ -1157,6 +1266,7 @@ def get_sun_times():
 app.register_blueprint(traffic_bp)
 app.register_blueprint(analyse_ops_bp)
 app.register_blueprint(anoloc_bp)
+app.register_blueprint(anpr_bp)
 # app.register_blueprint(meteo_bp)
 
 ################################################################################
@@ -2429,7 +2539,7 @@ def pcorg_create():
             pass
 
     area_desc = data.get("area_desc", "")
-    sous_classif = data.get("sous_classification", "")
+    content_cat = data.get("content_category") or {}
 
     doc_id = _pcorg_mk_uuid(event, year, ts_str, category, text, "", str(user.get("email", "")))
 
@@ -2457,7 +2567,7 @@ def pcorg_create():
         "area": {"id": None, "desc": area_desc} if area_desc else None,
         "gps": gps,
         "group": None,
-        "content_category": {"sous_classification": sous_classif} if sous_classif else {},
+        "content_category": content_cat,
         "extracted": {"phones": None, "plates": None},
         "tags": [],
         "synced_at": None,
@@ -2499,20 +2609,373 @@ def pcorg_close(doc_id):
     user = request.user_payload
     operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
     now = datetime.now(timezone.utc)
+    now_paris = now.astimezone(ZoneInfo("Europe/Paris"))
+    ts_str = now_paris.strftime("%d/%m/%Y %H:%M:%S")
 
-    result = db["pcorg"].update_one(
+    comment_line = f"{ts_str} , {operator_name} \n Statut: En cours -> Termine\n"
+    history_entry = {
+        "ts": now_paris.isoformat(),
+        "operator": operator_name,
+        "text": "Statut: En cours -> Termine",
+    }
+
+    # Lire le comment existant pour le concatener
+    doc = db["pcorg"].find_one(
         {"_id": doc_id, "status_code": {"$ne": 10}},
-        {"$set": {
-            "close_ts": now,
-            "close_iso": now.isoformat(),
-            "status_code": 10,
-            "operator_close": operator_name,
-            "operator_id_close": user.get("email", ""),
-        }}
+        {"comment": 1}
     )
-    if result.matched_count == 0:
+    if not doc:
         return jsonify({"error": "introuvable ou deja clos"}), 404
+
+    old_comment = doc.get("comment") or ""
+    new_comment = old_comment + comment_line if old_comment else comment_line
+
+    db["pcorg"].update_one(
+        {"_id": doc_id},
+        {
+            "$set": {
+                "close_ts": now,
+                "close_iso": now.isoformat(),
+                "status_code": 10,
+                "operator_close": operator_name,
+                "operator_id_close": user.get("email", ""),
+                "comment": new_comment,
+            },
+            "$push": {"comment_history": history_entry},
+        }
+    )
     return jsonify({"ok": True})
+
+
+################################################################################
+# Configuration Main courante (listes de reference PCO)
+################################################################################
+
+COL_PCORG_CONFIG = db['pcorg_config']
+
+
+def _make_item(label):
+    """Cree un item {id, label} avec un id court unique."""
+    return {"id": uuid.uuid4().hex[:8], "label": label}
+
+
+def _migrate_pcorg_config():
+    """Migre les anciennes listes de strings vers des objets {id, label}."""
+    doc = COL_PCORG_CONFIG.find_one({"_id": "pcorg_lists"})
+    if not doc:
+        return False
+    changed = False
+    # Migrer sous_classifications
+    sc = doc.get("sous_classifications") or {}
+    for cat, items in sc.items():
+        if items and isinstance(items[0], str):
+            sc[cat] = [_make_item(s) for s in items]
+            changed = True
+    # Migrer intervenants
+    interv = doc.get("intervenants") or []
+    if interv and isinstance(interv[0], str):
+        doc["intervenants"] = [_make_item(s) for s in interv]
+        changed = True
+    # Migrer services
+    svcs = doc.get("services") or []
+    if svcs and isinstance(svcs[0], str):
+        doc["services"] = [_make_item(s) for s in svcs]
+        changed = True
+    if changed:
+        COL_PCORG_CONFIG.replace_one({"_id": "pcorg_lists"}, doc)
+    return changed
+
+
+# Seed initial si collection vide
+if COL_PCORG_CONFIG.count_documents({}) == 0:
+    _seed = {
+        "sous_classifications": {
+            "PCO.Secours": [_make_item(s) for s in [
+                "Secours a victime", "Accident de circulation", "Depart de feux", "Incendie", "Malaise"]],
+            "PCO.Securite": [_make_item(s) for s in [
+                "Intrusion", "Altercation-Rixe", "Vol", "Gene a la circulation",
+                "Acte de malveillance", "Stationnement genant", "Colis ou objet suspect",
+                "Enfant perdu", "Degradation", "Agression", "Fraude accreditation-billet",
+                "Nuisances sonores", "Drone non autorise", "Ivresse manifeste", "Stupefiants"]],
+            "PCO.Technique": [_make_item(s) for s in [
+                "Logistique", "Electricite", "Sanitaire", "Informatique",
+                "Barrierage", "Signaletique", "Cloture", "Fluide", "Controle Acces",
+                "Serrurerie", "Portail - Portillon"]],
+            "PCO.Flux": [_make_item(s) for s in [
+                "Congestion vehicules", "Congestion pietons", "Renfort controle acces",
+                "Passage pieton a securiser", "Voie secours encombree",
+                "Balisage-Barrierage a poser", "Regulation manuelle demandee",
+                "Parking complet-Sorties saturees", "Evacuation de foule"]],
+        },
+        "intervenants": [_make_item(s) for s in [
+            "Appui Flux Moto", "Equipe securite", "Equipe technique",
+            "CMS", "SDIS", "Gendarmerie", "Police municipale",
+            "Ambulance", "SAMU", "DPS", "PC Securite"]],
+        "services": [_make_item(s) for s in [
+            "CMS", "SDIS 72", "SAMU 72", "Gendarmerie", "Police municipale",
+            "DPS", "PC Securite", "PC Course", "Direction technique",
+            "Direction securite", "Accueil", "Billetterie"]],
+    }
+    COL_PCORG_CONFIG.insert_one({"_id": "pcorg_lists", **_seed})
+else:
+    _migrate_pcorg_config()
+
+
+@app.route('/api/pcorg-config', methods=['GET'])
+@role_required("user")
+def get_pcorg_config():
+    doc = COL_PCORG_CONFIG.find_one({"_id": "pcorg_lists"}, {"_id": 0})
+    return jsonify(doc or {})
+
+
+@app.route('/api/pcorg-config', methods=['PUT'])
+@role_required("admin")
+def update_pcorg_config():
+    data = request.get_json(force=True)
+    allowed = {"sous_classifications", "intervenants", "services"}
+    update = {k: v for k, v in data.items() if k in allowed}
+    if not update:
+        return jsonify({"error": "rien a mettre a jour"}), 400
+    COL_PCORG_CONFIG.update_one(
+        {"_id": "pcorg_lists"},
+        {"$set": update},
+        upsert=True,
+    )
+    return jsonify({"ok": True})
+
+
+################################################################################
+# CONTROLE D'ACCES (HANDSHAKE)
+################################################################################
+
+COL_HSH_STRUCTURE = db['hsh_structure']
+COL_HSH_ERREURS = db['hsh_erreurs']
+HSH_GLOBAL_ID = "___GLOBAL___"
+
+
+@app.route('/live-controle')
+@role_required("admin")
+def live_controle_page():
+    payload = getattr(request, 'user_payload', {})
+    user_roles = payload.get("roles", [])
+    user_name = payload.get("firstname", "") + " " + payload.get("lastname", "")
+    return render_template('live_controle.html',
+                           user_name=user_name.strip(),
+                           user_roles=user_roles)
+
+
+def _hsh_read_global():
+    doc = db.data_access.find_one({"_id": HSH_GLOBAL_ID})
+    if doc is None:
+        defaults = {
+            "_id": HSH_GLOBAL_ID,
+            "live_controle_actif": False,
+            "activation_timestamp": None,
+            "evenement": "",
+            "evenement_clean": "",
+            "locations_selectionnees": [],
+            "dernier_inventaire": None,
+            "dernier_transaction_id": None,
+            "dernier_cycle": None,
+        }
+        db.data_access.insert_one(defaults)
+        doc = defaults
+    return doc
+
+
+@app.route('/api/live-controle/config', methods=['GET'])
+@role_required("user")
+def hsh_get_config():
+    doc = _hsh_read_global()
+    doc.pop("_id", None)
+    # Serialiser les datetimes
+    for k in ("activation_timestamp", "dernier_inventaire", "dernier_cycle"):
+        v = doc.get(k)
+        if hasattr(v, "isoformat"):
+            doc[k] = v.isoformat()
+    return jsonify(doc)
+
+
+@app.route('/api/live-controle/config', methods=['PUT'])
+@role_required("admin")
+def hsh_update_config():
+    data = request.get_json(force=True)
+    allowed = {
+        "live_controle_actif", "evenement", "evenement_clean",
+        "locations_selectionnees",
+    }
+    update = {k: v for k, v in data.items() if k in allowed}
+    if not update:
+        return jsonify({"error": "rien a mettre a jour"}), 400
+    # Si on active, enregistrer le timestamp
+    if update.get("live_controle_actif") is True:
+        update["activation_timestamp"] = datetime.now(timezone.utc)
+    db.data_access.update_one(
+        {"_id": HSH_GLOBAL_ID},
+        {"$set": update},
+        upsert=True,
+    )
+    return jsonify({"ok": True})
+
+
+@app.route('/api/live-controle/force-inventory', methods=['POST'])
+@role_required("admin")
+def hsh_force_inventory():
+    db.data_access.update_one(
+        {"_id": HSH_GLOBAL_ID},
+        {"$set": {"dernier_inventaire": None}},
+        upsert=True,
+    )
+    return jsonify({"ok": True})
+
+
+@app.route('/api/live-controle/structure', methods=['GET'])
+@role_required("user")
+def hsh_get_structure():
+    filtre = {}
+    evenement = request.args.get("evenement")
+    if evenement:
+        filtre["evenement"] = evenement
+    docs = list(COL_HSH_STRUCTURE.find(filtre))
+    for d in docs:
+        d["_id"] = str(d["_id"])
+        for k, v in d.items():
+            if hasattr(v, "isoformat"):
+                d[k] = v.isoformat()
+            elif isinstance(v, dict):
+                for kk, vv in v.items():
+                    if hasattr(vv, "isoformat"):
+                        v[kk] = vv.isoformat()
+    return jsonify(docs)
+
+
+@app.route('/api/live-controle/structure/assign', methods=['POST'])
+@role_required("admin")
+def hsh_assign_parent():
+    """Reassigner un noeud a un parent dans hsh_structure.
+    Body: {node_id, node_type, parent_id, parent_type, parent_name}
+    parent_id=null pour detacher."""
+    data = request.get_json(force=True)
+    node_id = data.get("node_id")
+    node_type = data.get("node_type")
+    parent_id = data.get("parent_id")
+    parent_type = data.get("parent_type")
+    parent_name = data.get("parent_name", "")
+
+    if not node_id or not node_type:
+        return jsonify({"error": "node_id et node_type requis"}), 400
+
+    doc_id = f"{node_type}_{node_id}"
+
+    # Determiner le champ parent a mettre a jour
+    parent_field_map = {
+        "Gate": "parent_area",
+        "Checkpoint": "parent_gate",
+        "Area": "parent_venue",
+    }
+    parent_field = parent_field_map.get(node_type)
+    if not parent_field:
+        return jsonify({"error": "Type non reassignable: " + node_type}), 400
+
+    if parent_id:
+        COL_HSH_STRUCTURE.update_one(
+            {"_id": doc_id},
+            {"$set": {parent_field: {"id": str(parent_id), "name": parent_name}}},
+        )
+        # Ajouter aussi l'enfant dans le parent
+        parent_doc_id = f"{parent_type}_{parent_id}"
+        COL_HSH_STRUCTURE.update_one(
+            {"_id": parent_doc_id},
+            {"$addToSet": {"enfants": {"id": str(node_id), "type": node_type, "name": data.get("node_name", "")}}},
+        )
+    else:
+        COL_HSH_STRUCTURE.update_one(
+            {"_id": doc_id},
+            {"$unset": {parent_field: ""}},
+        )
+
+    return jsonify({"ok": True})
+
+
+@app.route('/api/live-controle/counters', methods=['GET'])
+@role_required("user")
+@block_required("widget-counters")
+def hsh_get_counters():
+    doc = _hsh_read_global()
+    locations = doc.get("locations_selectionnees", [])
+    result = []
+    for loc in locations:
+        loc_id = loc.get("id")
+        loc_type = loc.get("type")
+        if not loc_id:
+            continue
+        counter = db.data_access.find_one(
+            {"requested_location_id": str(loc_id), "requested_location_type": loc_type},
+            sort=[("timestamp", -1)],
+        )
+        if counter:
+            result.append({
+                "location_id": loc_id,
+                "location_type": loc_type,
+                "location_name": loc.get("name", counter.get("location_name", "")),
+                "counter_name": counter.get("counter_name", ""),
+                "entries": counter.get("entries"),
+                "exits": counter.get("exits"),
+                "current": counter.get("current"),
+                "upper_limit": counter.get("upper_limit"),
+                "lower_limit": counter.get("lower_limit"),
+                "locked": counter.get("locked"),
+                "locked_status": counter.get("locked_status"),
+                "first_entries": counter.get("first_entries"),
+                "first_entries_day": counter.get("first_entries_day"),
+                "timestamp": counter["timestamp"].isoformat() if hasattr(counter.get("timestamp"), "isoformat") else counter.get("timestamp"),
+            })
+    return jsonify(result)
+
+
+@app.route('/api/live-controle/errors', methods=['GET'])
+@role_required("user")
+def hsh_get_errors():
+    filtre = {}
+    evenement = request.args.get("evenement")
+    if evenement:
+        filtre["evenement"] = evenement
+    docs = list(COL_HSH_ERREURS.find(filtre).sort("date_paris", -1).limit(50))
+    for d in docs:
+        d["_id"] = str(d["_id"])
+        for k, v in d.items():
+            if hasattr(v, "isoformat"):
+                d[k] = v.isoformat()
+            elif isinstance(v, ObjectId):
+                d[k] = str(v)
+    return jsonify(docs)
+
+
+@app.route('/api/live-controle/status', methods=['GET'])
+@role_required("user")
+def hsh_get_status():
+    doc = _hsh_read_global()
+    dernier_cycle = doc.get("dernier_cycle")
+    health = "unknown"
+    age_seconds = None
+    if dernier_cycle and hasattr(dernier_cycle, "year"):
+        # Gerer les datetimes naives (sans tz) stockes par live_controle.py
+        if dernier_cycle.tzinfo is None:
+            dernier_cycle = dernier_cycle.replace(tzinfo=timezone.utc)
+        age_seconds = (datetime.now(timezone.utc) - dernier_cycle).total_seconds()
+        health = "ok" if age_seconds < 300 else "warning"
+    elif doc.get("live_controle_actif"):
+        health = "waiting"
+    return jsonify({
+        "live_controle_actif": doc.get("live_controle_actif", False),
+        "evenement": doc.get("evenement", ""),
+        "dernier_cycle": dernier_cycle.isoformat() if hasattr(dernier_cycle, "isoformat") else dernier_cycle,
+        "dernier_inventaire": doc.get("dernier_inventaire").isoformat() if hasattr(doc.get("dernier_inventaire"), "isoformat") else doc.get("dernier_inventaire"),
+        "dernier_transaction_id": doc.get("dernier_transaction_id"),
+        "nb_locations": len(doc.get("locations_selectionnees", [])),
+        "health": health,
+        "age_seconds": int(age_seconds) if age_seconds is not None else None,
+    })
 
 
 ################################################################################

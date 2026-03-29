@@ -124,12 +124,18 @@ document.addEventListener("DOMContentLoaded", function () {
     const toggleBtn = document.getElementById("sidebarToggle");
     const hamburgerButton = document.getElementById("hamburger-button");
 
-    // Start collapsed
-    if (sidebar) sidebar.classList.add("collapsed");
+    // Restaurer l'etat sidebar depuis localStorage (defaut: collapsed)
+    if (sidebar) {
+        var stored = localStorage.getItem("sidebar-collapsed");
+        if (stored === null || stored === "true") {
+            sidebar.classList.add("collapsed");
+        }
+    }
 
     function toggleSidebar() {
         if (!sidebar) return;
         sidebar.classList.toggle("collapsed");
+        localStorage.setItem("sidebar-collapsed", sidebar.classList.contains("collapsed"));
     }
 
     if (toggleBtn) toggleBtn.addEventListener("click", toggleSidebar);
@@ -348,10 +354,23 @@ function loadCockpitData() {
     // Load timeline (parametrage then timetable)
     if (typeof fetchParametrage === "function" && typeof fetchTimetable === "function") {
         fetchParametrage().then(function () {
-            fetchTimetable();
+            var ttPromise = fetchTimetable();
             if (typeof updateGlobalCounter === "function") updateGlobalCounter();
             if (typeof loadAffluence === "function") loadAffluence();
             setTimeout(updateUpcomingEvents, 800);
+
+            // Si la timeline est vide, basculer sur la carte
+            if (ttPromise && ttPromise.then) {
+                ttPromise.then(function () {
+                    setTimeout(function () {
+                        var eventList = document.getElementById("event-list");
+                        var hasDays = eventList && eventList.querySelector(".timetable-date-section");
+                        if (!hasDays && window.CockpitMapView && window.CockpitMapView.currentView() !== "map") {
+                            window.CockpitMapView.switchView("map");
+                        }
+                    }, 300);
+                });
+            }
         }).catch(function () {});
     }
 

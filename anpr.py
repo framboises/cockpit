@@ -1,0 +1,547 @@
+# anpr.py -- Blueprint LAPI / ANPR (Lecture Automatique de Plaques)
+import os
+import logging
+from datetime import datetime, timezone, timedelta
+from flask import Blueprint, jsonify, request, render_template, Response
+from pymongo import MongoClient, DESCENDING, ASCENDING
+from bson.objectid import ObjectId
+import gridfs
+
+anpr_bp = Blueprint("anpr", __name__)
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Auth helper (import from app at request time to avoid circular import)
+# ---------------------------------------------------------------------------
+def _check_admin():
+    from app import (CODING, JWT_SECRET, JWT_ALGORITHM,
+                     ROLE_HIERARCHY, ROLE_ORDER, APP_KEY)
+    import jwt as pyjwt
+    if CODING:
+        sim_role = request.args.get("as", "admin")
+        if sim_role not in ROLE_HIERARCHY:
+            sim_role = "admin"
+        sim_level = ROLE_HIERARCHY[sim_role]
+        sim_roles = [r for r in ROLE_ORDER if ROLE_HIERARCHY[r] <= sim_level]
+        request.user_payload = {
+            "apps": ["cockpit"],
+            "roles_by_app": {"cockpit": sim_role},
+            "global_roles": [],
+            "roles": sim_roles,
+            "app_role": sim_role,
+            "is_super_admin": False,
+            "firstname": "Bruce",
+            "lastname": "WAYNE",
+            "email": "bruce@wayneenterprise.com",
+        }
+        return None
+    token = request.cookies.get("access_token")
+    if not token:
+        return jsonify({"error": "Not authenticated"}), 401
+    try:
+        payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except Exception:
+        return jsonify({"error": "Invalid token"}), 401
+    roles = payload.get("roles_by_app", {}).get(APP_KEY, "")
+    if isinstance(roles, str):
+        roles = [roles]
+    max_level = max((ROLE_HIERARCHY.get(r, 0) for r in roles), default=0)
+    if max_level < ROLE_HIERARCHY.get("admin", 3):
+        return jsonify({"error": "Admin required"}), 403
+    request.user_payload = payload
+    return None
+
+
+@anpr_bp.before_request
+def _before():
+    err = _check_admin()
+    if err:
+        return err
+
+# ---------------------------------------------------------------------------
+# Hikvision vehicle_logo -> marque
+# ---------------------------------------------------------------------------
+BRAND_MAP = {
+    1026: "Audi", 1028: "BMW", 1030: "Buick", 1031: "Cadillac",
+    1036: "Chevrolet", 1037: "Chrysler", 1038: "Citroen", 1043: "Dacia",
+    1044: "Daewoo", 1045: "Daihatsu", 1048: "Dodge", 1050: "Fiat",
+    1051: "Ford", 1053: "Geely", 1056: "Great Wall", 1060: "Honda",
+    1063: "Hyundai", 1064: "Infiniti", 1067: "Isuzu", 1071: "Jeep",
+    1078: "Kia", 1081: "Lamborghini", 1083: "Land Rover", 1084: "Lexus",
+    1085: "Lincoln", 1088: "Maserati", 1089: "Mazda", 1093: "Mercedes",
+    1094: "MG", 1096: "Mini", 1100: "Mitsubishi", 1105: "Nissan",
+    1108: "Opel", 1110: "Peugeot", 1116: "Porsche", 1120: "Renault",
+    1126: "Saab", 1128: "Samsung", 1130: "Seat", 1131: "Skoda",
+    1133: "Smart", 1135: "SsangYong", 1137: "Subaru", 1139: "Suzuki",
+    1142: "Tesla", 1144: "Toyota", 1147: "Vauxhall", 1149: "Volkswagen",
+    1152: "Volvo", 1155: "Alfa Romeo", 1158: "DS", 1160: "Ferrari",
+    1162: "Jaguar", 1165: "Lancia", 1170: "Bentley", 1175: "Aston Martin",
+    1180: "Rolls Royce", 1185: "Cupra", 1190: "BYD",
+    1614: "Autre", 1849: "Autre",
+}
+
+VEHICLE_TYPE_LABELS = {
+    "vehicle": "Voiture",
+    "SUVMPV": "SUV/Monospace",
+    "truck": "Camion",
+    "bus": "Bus",
+    "van": "Utilitaire",
+    "pickupTruck": "Pick-up",
+    "buggy": "Buggy",
+}
+
+COLOR_HEX = {
+    "white": "#f0f0f0", "black": "#1a1a2e", "gray": "#6b7280",
+    "blue": "#3b82f6", "red": "#ef4444", "green": "#22c55e",
+    "yellow": "#eab308", "brown": "#92400e", "pink": "#ec4899",
+    "cyan": "#06b6d4",
+}
+
+# ---------------------------------------------------------------------------
+# MongoDB (lazy init)
+# ---------------------------------------------------------------------------
+_db = None
+_col_anpr = None
+_fs = None
+_col_camera_config = None
+
+
+def _ensure_db():
+    global _db, _col_anpr, _fs, _col_camera_config
+    if _db is not None:
+        return
+    uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+    client = MongoClient(uri)
+    _db = client["titan"]
+    _col_anpr = _db["hik_anpr"]
+    _fs = gridfs.GridFS(_db, collection="hik_images")
+    _col_camera_config = _db["anpr_camera_config"]
+
+    # Index
+    _col_anpr.create_index([("event_dt", DESCENDING)])
+    _col_anpr.create_index([("license_plate", 1)])
+    _col_anpr.create_index([("camera_path", 1), ("event_dt", DESCENDING)])
+    _col_camera_config.create_index("camera_path", unique=True)
+
+
+def _brand(logo_id):
+    return BRAND_MAP.get(logo_id, "Autre")
+
+
+def _serialize(doc):
+    """Serialize a single ANPR document for JSON."""
+    return {
+        "id": str(doc["_id"]),
+        "plate": doc.get("license_plate", ""),
+        "original_plate": doc.get("original_plate", ""),
+        "confidence": doc.get("confidence", 0),
+        "color": doc.get("vehicle_color", ""),
+        "color_hex": COLOR_HEX.get(doc.get("vehicle_color", ""), "#888"),
+        "type": doc.get("vehicle_type", ""),
+        "type_label": VEHICLE_TYPE_LABELS.get(doc.get("vehicle_type", ""), doc.get("vehicle_type", "")),
+        "brand": _brand(doc.get("vehicle_logo", 0)),
+        "brand_id": doc.get("vehicle_logo", 0),
+        "camera": doc.get("camera_path", ""),
+        "direction": doc.get("direction", ""),
+        "event_dt": doc.get("event_dt", "").isoformat() if isinstance(doc.get("event_dt"), datetime) else str(doc.get("event_dt", "")),
+        "plate_image_id": str(doc["plate_image_id"]) if doc.get("plate_image_id") else None,
+        "vehicle_image_id": str(doc["vehicle_image_id"]) if doc.get("vehicle_image_id") else None,
+        "list_name": doc.get("vehicle_list_name", ""),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+@anpr_bp.route("/anpr")
+def anpr_page():
+    payload = getattr(request, "user_payload", {})
+    user_roles = payload.get("roles", [])
+    return render_template(
+        "anpr.html",
+        user_roles=user_roles,
+        user_firstname=payload.get("firstname", ""),
+        user_lastname=payload.get("lastname", ""),
+        user_email=payload.get("email", ""),
+    )
+
+
+@anpr_bp.route("/api/anpr/search")
+def anpr_search():
+    """Search ANPR records with filters, pagination."""
+    _ensure_db()
+    query = {}
+
+    # Plate search (partial match)
+    plate = request.args.get("plate", "").strip().upper()
+    if plate:
+        query["license_plate"] = {"$regex": plate, "$options": "i"}
+
+    # Exclude UNKNOWN plates unless explicitly searching
+    if not plate:
+        query["license_plate"] = {"$ne": "UNKNOWN"}
+
+    # Color filter
+    color = request.args.get("color", "").strip()
+    if color:
+        query["vehicle_color"] = color
+
+    # Type filter
+    vtype = request.args.get("type", "").strip()
+    if vtype:
+        query["vehicle_type"] = vtype
+
+    # Brand filter
+    brand = request.args.get("brand", "").strip()
+    if brand:
+        # Reverse lookup brand -> logo IDs
+        logo_ids = [k for k, v in BRAND_MAP.items() if v == brand]
+        if logo_ids:
+            query["vehicle_logo"] = {"$in": logo_ids}
+
+    # Camera filter
+    camera = request.args.get("camera", "").strip()
+    if camera:
+        query["camera_path"] = camera
+
+    # Direction filter (resolved with camera config)
+    direction = request.args.get("direction", "").strip()
+    if direction in ("entry", "exit"):
+        # Get camera configs
+        configs = {c["camera_path"]: c for c in _col_camera_config.find()}
+        entry_cameras = []
+        exit_cameras = []
+        for path, cfg in configs.items():
+            fwd = cfg.get("forward_role", "entry")
+            if fwd == "entry":
+                entry_cameras.append(path)
+                # backward = exit (implicit)
+            else:
+                exit_cameras.append(path)
+
+        if direction == "entry":
+            # forward on entry cameras OR reverse on exit cameras
+            dir_conds = []
+            if entry_cameras:
+                dir_conds.append({"camera_path": {"$in": entry_cameras}, "direction": "forward"})
+                dir_conds.append({"camera_path": {"$in": entry_cameras}, "direction": {"$ne": "forward"}})
+            if exit_cameras:
+                dir_conds.append({"camera_path": {"$in": exit_cameras}, "direction": {"$ne": "forward"}})
+            # Simplify: entry = forward on entry_cams + reverse on exit_cams
+            dir_conds = []
+            if entry_cameras:
+                dir_conds.append({"camera_path": {"$in": entry_cameras}, "direction": "forward"})
+            if exit_cameras:
+                dir_conds.append({"camera_path": {"$in": exit_cameras}, "direction": "reverse"})
+            if dir_conds:
+                query["$or"] = dir_conds
+        elif direction == "exit":
+            dir_conds = []
+            if entry_cameras:
+                dir_conds.append({"camera_path": {"$in": entry_cameras}, "direction": "reverse"})
+            if exit_cameras:
+                dir_conds.append({"camera_path": {"$in": exit_cameras}, "direction": "forward"})
+            if dir_conds:
+                query["$or"] = dir_conds
+
+    # Date range
+    date_from = request.args.get("from", "").strip()
+    date_to = request.args.get("to", "").strip()
+    if date_from or date_to:
+        dt_filter = {}
+        if date_from:
+            try:
+                dt_filter["$gte"] = datetime.fromisoformat(date_from)
+            except ValueError:
+                pass
+        if date_to:
+            try:
+                dt_filter["$lte"] = datetime.fromisoformat(date_to)
+            except ValueError:
+                pass
+        if dt_filter:
+            query["event_dt"] = dt_filter
+
+    # Confidence min
+    conf_min = request.args.get("conf_min", "").strip()
+    if conf_min:
+        try:
+            query["confidence"] = {"$gte": int(conf_min)}
+        except ValueError:
+            pass
+
+    # Pagination
+    page = max(1, int(request.args.get("page", 1)))
+    per_page = min(100, int(request.args.get("per_page", 50)))
+    skip = (page - 1) * per_page
+
+    total = _col_anpr.count_documents(query)
+    docs = list(_col_anpr.find(query).sort("event_dt", DESCENDING).skip(skip).limit(per_page))
+
+    return jsonify({
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": max(1, (total + per_page - 1) // per_page),
+        "results": [_serialize(d) for d in docs],
+    })
+
+
+@anpr_bp.route("/api/anpr/stats")
+def anpr_stats():
+    """Aggregate statistics for the dashboard."""
+    _ensure_db()
+
+    # Base query (exclude unknowns for stats)
+    base_match = {"license_plate": {"$ne": "UNKNOWN"}}
+
+    date_from = request.args.get("from", "").strip()
+    date_to = request.args.get("to", "").strip()
+    if date_from or date_to:
+        dt_filter = {}
+        if date_from:
+            try:
+                dt_filter["$gte"] = datetime.fromisoformat(date_from)
+            except ValueError:
+                pass
+        if date_to:
+            try:
+                dt_filter["$lte"] = datetime.fromisoformat(date_to)
+            except ValueError:
+                pass
+        if dt_filter:
+            base_match["event_dt"] = dt_filter
+
+    pipeline_total = [{"$match": base_match}, {"$count": "n"}]
+    total_res = list(_col_anpr.aggregate(pipeline_total))
+    total = total_res[0]["n"] if total_res else 0
+
+    pipeline_unique = [
+        {"$match": base_match},
+        {"$group": {"_id": "$license_plate"}},
+        {"$count": "n"},
+    ]
+    unique_res = list(_col_anpr.aggregate(pipeline_unique))
+    unique_plates = unique_res[0]["n"] if unique_res else 0
+
+    # By color
+    pipeline_color = [
+        {"$match": base_match},
+        {"$group": {"_id": "$vehicle_color", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    by_color = {d["_id"]: d["count"] for d in _col_anpr.aggregate(pipeline_color) if d["_id"]}
+
+    # By brand (top 15)
+    pipeline_brand = [
+        {"$match": base_match},
+        {"$group": {"_id": "$vehicle_logo", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 15},
+    ]
+    by_brand = [{"brand": _brand(d["_id"]), "count": d["count"]}
+                for d in _col_anpr.aggregate(pipeline_brand)]
+
+    # By type
+    pipeline_type = [
+        {"$match": base_match},
+        {"$group": {"_id": "$vehicle_type", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    by_type = [{"type": d["_id"], "label": VEHICLE_TYPE_LABELS.get(d["_id"], d["_id"]), "count": d["count"]}
+               for d in _col_anpr.aggregate(pipeline_type) if d["_id"]]
+
+    # By camera
+    pipeline_camera = [
+        {"$match": base_match},
+        {"$group": {"_id": "$camera_path", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    by_camera = {d["_id"]: d["count"] for d in _col_anpr.aggregate(pipeline_camera) if d["_id"]}
+
+    # Hourly distribution
+    pipeline_hourly = [
+        {"$match": base_match},
+        {"$group": {"_id": {"$hour": "$event_dt"}, "count": {"$sum": 1}}},
+        {"$sort": {"_id": 1}},
+    ]
+    by_hour = {d["_id"]: d["count"] for d in _col_anpr.aggregate(pipeline_hourly)}
+
+    # Allowlist count
+    pipeline_allow = [
+        {"$match": {**base_match, "vehicle_list_name": "allowList"}},
+        {"$count": "n"},
+    ]
+    allow_res = list(_col_anpr.aggregate(pipeline_allow))
+    allowlist_count = allow_res[0]["n"] if allow_res else 0
+
+    # Avg confidence
+    pipeline_conf = [
+        {"$match": {**base_match, "confidence": {"$gt": 0}}},
+        {"$group": {"_id": None, "avg": {"$avg": "$confidence"}}},
+    ]
+    conf_res = list(_col_anpr.aggregate(pipeline_conf))
+    avg_confidence = round(conf_res[0]["avg"], 1) if conf_res else 0
+
+    return jsonify({
+        "total": total,
+        "unique_plates": unique_plates,
+        "allowlist_count": allowlist_count,
+        "avg_confidence": avg_confidence,
+        "by_color": by_color,
+        "by_brand": by_brand,
+        "by_type": by_type,
+        "by_camera": by_camera,
+        "by_hour": by_hour,
+        "color_hex": COLOR_HEX,
+    })
+
+
+@anpr_bp.route("/api/anpr/live")
+def anpr_live():
+    """Last N detections for live feed."""
+    _ensure_db()
+    n = min(20, int(request.args.get("n", 10)))
+    docs = list(_col_anpr.find({"license_plate": {"$ne": "UNKNOWN"}}).sort("event_dt", DESCENDING).limit(n))
+    return jsonify([_serialize(d) for d in docs])
+
+
+@anpr_bp.route("/api/anpr/plate/<plate>")
+def anpr_plate_history(plate):
+    """All detections for a given plate."""
+    _ensure_db()
+    plate = plate.strip().upper()
+    docs = list(_col_anpr.find({"license_plate": plate}).sort("event_dt", DESCENDING).limit(200))
+    return jsonify({
+        "plate": plate,
+        "count": len(docs),
+        "records": [_serialize(d) for d in docs],
+    })
+
+
+@anpr_bp.route("/api/anpr/image/<image_id>")
+def anpr_image(image_id):
+    """Serve an image from GridFS."""
+    _ensure_db()
+    try:
+        oid = ObjectId(image_id)
+        grid_file = _fs.get(oid)
+        return Response(
+            grid_file.read(),
+            mimetype="image/jpeg",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+    except Exception:
+        # Return a 1x1 transparent pixel as fallback
+        return Response(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00"
+            b"\x01\x00\x00\x05\x00\x01\r\n\xb4\x00\x00\x00\x00IEND\xaeB`\x82",
+            mimetype="image/png",
+            status=404,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Camera config
+# ---------------------------------------------------------------------------
+
+@anpr_bp.route("/api/anpr/cameras")
+def anpr_cameras():
+    """Get camera list with config."""
+    _ensure_db()
+    # Get distinct cameras from data
+    cameras = _col_anpr.distinct("camera_path")
+    configs = {c["camera_path"]: c for c in _col_camera_config.find()}
+
+    result = []
+    for cam in sorted(cameras):
+        cfg = configs.get(cam, {})
+        result.append({
+            "camera_path": cam,
+            "label": cfg.get("label", cam.replace("/", "").replace("lapi", "LAPI ")),
+            "forward_role": cfg.get("forward_role", "entry"),
+            "enabled": cfg.get("enabled", True),
+        })
+    return jsonify(result)
+
+
+@anpr_bp.route("/api/anpr/cameras/config", methods=["POST"])
+def anpr_cameras_config():
+    """Update camera configuration."""
+    _ensure_db()
+    data = request.get_json()
+    if not data or "camera_path" not in data:
+        return jsonify({"error": "camera_path required"}), 400
+
+    _col_camera_config.update_one(
+        {"camera_path": data["camera_path"]},
+        {"$set": {
+            "camera_path": data["camera_path"],
+            "label": data.get("label", ""),
+            "forward_role": data.get("forward_role", "entry"),
+            "enabled": data.get("enabled", True),
+        }},
+        upsert=True,
+    )
+    return jsonify({"ok": True})
+
+
+@anpr_bp.route("/api/anpr/flow")
+def anpr_flow():
+    """Entries vs exits over time (15-min buckets)."""
+    _ensure_db()
+
+    base_match = {"license_plate": {"$ne": "UNKNOWN"}}
+    date_from = request.args.get("from", "").strip()
+    date_to = request.args.get("to", "").strip()
+    if date_from:
+        try:
+            base_match.setdefault("event_dt", {})["$gte"] = datetime.fromisoformat(date_from)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            base_match.setdefault("event_dt", {})["$lte"] = datetime.fromisoformat(date_to)
+        except ValueError:
+            pass
+
+    # Get camera configs for entry/exit resolution
+    configs = {c["camera_path"]: c for c in _col_camera_config.find()}
+
+    # Build per-camera direction classification
+    entry_match = []
+    exit_match = []
+    for cam in _col_anpr.distinct("camera_path"):
+        cfg = configs.get(cam, {})
+        fwd_role = cfg.get("forward_role", "entry")
+        if fwd_role == "entry":
+            entry_match.append({"camera_path": cam, "direction": "forward"})
+            exit_match.append({"camera_path": cam, "direction": "reverse"})
+        else:
+            exit_match.append({"camera_path": cam, "direction": "forward"})
+            entry_match.append({"camera_path": cam, "direction": "reverse"})
+
+    def bucket_pipeline(dir_conditions):
+        if not dir_conditions:
+            return []
+        return list(_col_anpr.aggregate([
+            {"$match": {**base_match, "$or": dir_conditions}},
+            {"$group": {
+                "_id": {
+                    "$dateTrunc": {"date": "$event_dt", "unit": "minute", "binSize": 15}
+                },
+                "count": {"$sum": 1},
+            }},
+            {"$sort": {"_id": 1}},
+        ]))
+
+    entries = bucket_pipeline(entry_match)
+    exits = bucket_pipeline(exit_match)
+
+    return jsonify({
+        "entries": [{"t": d["_id"].isoformat(), "n": d["count"]} for d in entries],
+        "exits": [{"t": d["_id"].isoformat(), "n": d["count"]} for d in exits],
+    })

@@ -60,6 +60,10 @@
                 <span class="label">Statistiques</span>
             </button>
             {% if "admin" in user_roles %}
+            <a href="/live-controle" class="nav-btn">
+                <span class="material-symbols-outlined">sensors</span>
+                <span class="label">Controle acces</span>
+            </a>
             <a href="/config/todos" class="nav-btn">
                 <span class="material-symbols-outlined">settings</span>
                 <span class="label">Configuration</span>
@@ -67,6 +71,10 @@
             <a href="/analyse-ops" class="nav-btn">
                 <span class="material-symbols-outlined">biotech</span>
                 <span class="label">Analyse Ops</span>
+            </a>
+            <a href="/anpr" class="nav-btn">
+                <span class="material-symbols-outlined">directions_car</span>
+                <span class="label">LAPI</span>
             </a>
             {% endif %}
         </nav>
@@ -234,23 +242,6 @@
                     </div>
                 </section>
 
-                <!-- Compteurs -->
-                <section class="widget-card" id="widget-counters">
-                    <header class="widget-header">
-                        <h3>Compteurs</h3>
-                    </header>
-                    <div class="widget-body two-cols">
-                        <div class="stat-block">
-                            <div id="counter_now" class="counter-number">&mdash;</div>
-                            <div class="counter-label">Presents actuellement</div>
-                        </div>
-                        <div class="stat-block">
-                            <div id="counter_max" class="counter-number">&mdash;</div>
-                            <div class="counter-label">Presents maximum</div>
-                        </div>
-                    </div>
-                </section>
-
                 <!-- Main courante PCO -->
                 <section class="widget-card" id="widget-comms">
                     <header class="widget-header">
@@ -341,6 +332,56 @@
                 <div id="cockpit-map"></div>
             </div>
 
+            <!-- Panel Analyse Meteo (meme emplacement, alternance avec timeline/carte) -->
+            <div id="meteo-panel" class="meteo-panel" style="display:none;">
+                <div class="meteo-panel-header">
+                    <h3>Analyse Meteo</h3>
+                    <div class="meteo-panel-tabs" id="meteo-panel-tabs"></div>
+                    <button class="meteo-panel-close" id="meteo-panel-close" title="Fermer">
+                        <span class="material-symbols-outlined">close_fullscreen</span>
+                    </button>
+                </div>
+                <div class="meteo-panel-body" id="meteo-panel-body">
+                    <!-- Section graphique 24h -->
+                    <section class="meteo-section">
+                        <h4>Previsions horaires</h4>
+                        <div class="meteo-chart-wrap">
+                            <canvas id="meteo-panel-chart"></canvas>
+                        </div>
+                    </section>
+                    <!-- Section historique -->
+                    <section class="meteo-section">
+                        <h4>Historique (5 ans)</h4>
+                        <div id="meteo-panel-history"></div>
+                    </section>
+                    <!-- Section comparaison inter-annuelle -->
+                    <section class="meteo-section">
+                        <h4>Comparaison inter-annuelle</h4>
+                        <div class="meteo-chart-wrap meteo-chart-small">
+                            <canvas id="meteo-panel-yoy-chart"></canvas>
+                        </div>
+                    </section>
+                    <!-- Seuils operationnels -->
+                    <section class="meteo-section meteo-thresholds-card">
+                        <h4>Seuils operationnels</h4>
+                        <div class="meteo-thresholds">
+                            <div class="meteo-threshold-row">
+                                <span class="material-symbols-outlined">air</span>
+                                <span>Vent : &gt;40 vigilance, &gt;60 action, &gt;80 evacuation</span>
+                            </div>
+                            <div class="meteo-threshold-row">
+                                <span class="material-symbols-outlined">umbrella</span>
+                                <span>Pluie : &gt;5 mm/h modere, &gt;15 mm/h fort</span>
+                            </div>
+                            <div class="meteo-threshold-row">
+                                <span class="material-symbols-outlined">thermostat</span>
+                                <span>Temp : &gt;35C canicule, &lt;2C gel</span>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
             <!-- Widgets droite -->
             <aside id="widgets-panel-right" aria-label="Widgets droite">
 
@@ -355,15 +396,62 @@
                     </div>
                 </section>
 
-                <!-- Widget libre 1 -->
+                <!-- Compteurs / Controle d'acces -->
+                <section class="widget-card" id="widget-counters">
+                    <header class="widget-header hsh-widget-header">
+                        <h3>Controle d'acces</h3>
+                        <span id="hsh-health-dot" class="status-dot" title=""></span>
+                        <span id="hsh-last-update" class="hsh-last-update"></span>
+                    </header>
+                    <div class="widget-body">
+                        <div class="hsh-summary" id="hsh-summary">
+                            <div>
+                                <div class="hsh-summary-value" id="hsh-total-current">&mdash;</div>
+                                <div class="hsh-summary-label">Presents actuellement</div>
+                            </div>
+                            <div>
+                                <div class="hsh-summary-value" id="hsh-total-capacity">&mdash;</div>
+                                <div class="hsh-summary-label">Capacite totale</div>
+                            </div>
+                        </div>
+                        <div id="hsh-counters-body">
+                            <div class="hsh-no-data" id="hsh-no-data">Aucun compteur configure</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Widget Meteo Operationnel -->
                 <section class="widget-card" id="widget-right-1">
                     <header class="widget-header">
                         <h3>Meteo</h3>
+                        <button class="meteo-header-expand" id="meteo-expand-btn" title="Analyse detaillee">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
                     </header>
                     <div class="widget-body" id="widget-right-1-body">
-                        <div class="widget-placeholder">
-                            <span class="material-symbols-outlined">cloud</span>
-                            <span>Donnees meteo</span>
+                        <!-- Jauge risque -->
+                        <div class="meteo-risk-gauge" id="meteo-risk-gauge">
+                            <span class="material-symbols-outlined meteo-risk-icon">shield</span>
+                            <span class="meteo-risk-label" id="meteo-risk-label">Chargement...</span>
+                        </div>
+                        <!-- Snapshot conditions actuelles -->
+                        <div class="meteo-snapshot" id="meteo-snapshot">
+                            <div class="meteo-snap-item">
+                                <span class="material-symbols-outlined">thermostat</span>
+                                <span id="meteo-snap-temp">--</span>
+                            </div>
+                            <div class="meteo-snap-item">
+                                <span class="material-symbols-outlined">air</span>
+                                <span id="meteo-snap-wind">--</span>
+                            </div>
+                            <div class="meteo-snap-item">
+                                <span class="material-symbols-outlined">water_drop</span>
+                                <span id="meteo-snap-rain">--</span>
+                            </div>
+                        </div>
+                        <!-- Alertes operationnelles -->
+                        <div class="meteo-alerts" id="meteo-alerts">
+                            <span class="meteo-no-alert">Aucune alerte meteo</span>
                         </div>
                     </div>
                 </section>
@@ -408,9 +496,9 @@
                     </div>
                 </section>
 
-                <!-- Widget Suivi GPS -->
-                <section class="widget-card" id="widget-right-4">
-                    <header class="widget-header collapsible-widget-header">
+                <!-- Widget Suivi GPS (replie par defaut) -->
+                <section class="widget-card widget-card-collapsed" id="widget-right-4">
+                    <header class="widget-header collapsible-widget-header collapsed">
                         <h3>Suivi GPS</h3>
                         <div class="anoloc-header-badge" id="anoloc-header-badge">
                             <span class="anoloc-status-dot" id="anoloc-header-dot"></span>
@@ -418,7 +506,7 @@
                         </div>
                         <span class="material-symbols-outlined collapse-icon">expand_more</span>
                     </header>
-                    <div class="widget-body" id="widget-right-4-body">
+                    <div class="widget-body widget-body-collapsed" id="widget-right-4-body">
                         <div class="widget-placeholder">
                             <span class="material-symbols-outlined">satellite_alt</span>
                             <span>Suivi GPS</span>
@@ -580,51 +668,77 @@
 </div>
 
 <!-- Modale creation intervention PCO -->
-<div id="pcorgCreateModal" class="modal">
-    <div class="modal-content">
-        <button class="drawer-close" id="pcorgCreateClose" aria-label="Fermer"><span class="material-icons">close</span></button>
-        <h3>Nouvelle intervention</h3>
-        <form id="pcorgCreateForm" novalidate>
-            <div class="form-group">
-                <label for="pcorg-cat">Categorie</label>
-                <select id="pcorg-cat" class="form-input" required>
-                    <option value="">-- Choisir --</option>
-                    <option value="PCO.Secours">PCO.Secours</option>
-                    <option value="PCO.Securite">PCO.Securite</option>
-                    <option value="PCO.Technique">PCO.Technique</option>
-                    <option value="PCO.Flux">PCO.Flux</option>
-                    <option value="PCO.Fourriere">PCO.Fourriere</option>
-                    <option value="PCO.Information">PCO.Information</option>
-                    <option value="PCO.MainCourante">PCO.MainCourante</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="pcorg-sous">Sous-classification (optionnel)</label>
-                <input type="text" id="pcorg-sous" class="form-input" placeholder="Ex: Secours a victime" />
-            </div>
-            <div class="form-group">
-                <label for="pcorg-text">Description</label>
-                <textarea id="pcorg-text" class="form-input" rows="3" required placeholder="Description de l'intervention..."></textarea>
-            </div>
-            <div class="form-group">
-                <label for="pcorg-area">Zone (optionnel)</label>
-                <input type="text" id="pcorg-area" class="form-input" placeholder="Ex: Zone Sud" />
-            </div>
-            <div class="form-group">
-                <label>Position GPS (optionnel)</label>
-                <div style="display:flex;gap:8px;align-items:center;">
-                    <input type="number" step="any" id="pcorg-lat" class="form-input" placeholder="Latitude" style="flex:1" />
-                    <input type="number" step="any" id="pcorg-lon" class="form-input" placeholder="Longitude" style="flex:1" />
-                    <button type="button" class="btn btn-secondary" id="pcorg-pick-gps" title="Pointer sur la carte">
-                        <span class="material-symbols-outlined">my_location</span>
-                    </button>
+<div id="pcorgCreateOverlay" class="modal-overlay"></div>
+<div id="pcorgCreateModal" class="modal pcorg-fiche-modal">
+    <div class="modal-content pcorg-fiche">
+        <div id="pcorg-create-header" class="pcorg-fiche-header" style="background:var(--brand)">
+            <div class="pcorg-fiche-header-left">
+                <span class="material-symbols-outlined pcorg-fiche-icon">add_circle</span>
+                <div class="pcorg-fiche-header-text">
+                    <div class="pcorg-fiche-cat">Nouvelle intervention</div>
+                    <div class="pcorg-fiche-subcat" id="pcorg-create-pos-label">Selectionnez un emplacement sur la carte</div>
                 </div>
             </div>
-            <div class="modal-buttons">
-                <button type="button" class="btn btn-secondary" id="pcorgCreateCancel">Annuler</button>
-                <button type="submit" class="btn btn-primary">Enregistrer</button>
+            <div class="pcorg-fiche-header-right">
+                <button class="drawer-close" id="pcorgCreateClose" aria-label="Fermer"><span class="material-icons">close</span></button>
             </div>
-        </form>
+        </div>
+        <div class="pcorg-fiche-body" id="pcorg-create-body">
+            <form id="pcorgCreateForm" novalidate>
+                <!-- Etape 1 : position (mini carte) -->
+                <div class="pcorg-fiche-section">Position</div>
+                <div class="pcorg-fiche-info-row">
+                    <div class="pcorg-fiche-fields" id="pcorg-create-gps-fields">
+                        <div class="pcorg-fiche-field">
+                            <span class="pcorg-fiche-label">Latitude</span>
+                            <span class="pcorg-fiche-value" id="pcorg-create-lat-display">--</span>
+                        </div>
+                        <div class="pcorg-fiche-field">
+                            <span class="pcorg-fiche-label">Longitude</span>
+                            <span class="pcorg-fiche-value" id="pcorg-create-lon-display">--</span>
+                        </div>
+                        <button type="button" class="pcorg-popup-btn" id="pcorg-create-repick" style="margin-top:6px">
+                            <span class="material-symbols-outlined">my_location</span> Repositionner
+                        </button>
+                    </div>
+                    <div class="pcorg-fiche-minimap" id="pcorg-create-minimap"></div>
+                </div>
+                <!-- Etape 2 : categorie -->
+                <div class="pcorg-fiche-section">Categorie</div>
+                <div class="pcorg-create-cats" id="pcorg-create-cats"></div>
+                <!-- Etape 3 : informations -->
+                <div class="pcorg-fiche-section">Informations</div>
+                <div class="form-group">
+                    <label for="pcorg-c-text">Description</label>
+                    <textarea id="pcorg-c-text" class="form-input" rows="2" required placeholder="Description de l'intervention..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="pcorg-c-area">Zone</label>
+                    <input type="text" id="pcorg-c-area" class="form-input" placeholder="Ex: Zone Sud" />
+                </div>
+                <div class="form-group">
+                    <label for="pcorg-c-appelant">Appelant</label>
+                    <input type="text" id="pcorg-c-appelant" class="form-input" placeholder="Nom de l'appelant" />
+                </div>
+                <div class="form-group" id="pcorg-c-contact-group">
+                    <label>Contact via</label>
+                    <div style="display:flex;gap:8px;">
+                        <label style="font-size:0.78rem;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pcorg-c-tel"> Telephone</label>
+                        <label style="font-size:0.78rem;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pcorg-c-radio"> Radio</label>
+                        <input type="text" id="pcorg-c-radio-canal" class="form-input" placeholder="Canal..." style="flex:1;display:none" />
+                    </div>
+                </div>
+                <!-- Champs dynamiques selon categorie -->
+                <div id="pcorg-create-specific"></div>
+                <!-- Actions -->
+                <div class="pcorg-fiche-actions" style="margin-top:16px">
+                    <button type="button" class="pcorg-popup-btn" id="pcorgCreateCancel">Annuler</button>
+                    <button type="submit" class="pcorg-popup-btn" style="background:var(--brand);color:#fff;border-color:var(--brand)">
+                        <span class="material-symbols-outlined">save</span> Enregistrer
+                    </button>
+                </div>
+            </form>
+        </div>
     </div>
 </div>
 

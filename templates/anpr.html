@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>COCKPIT — LAPI</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+
+<body>
+<div class="app-layout">
+
+    <!-- ===== SIDEBAR ===== -->
+    <aside id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+            <img class="sidebar-logo" src="{{ url_for('static', filename='img/ACO-logo-monochrome-universel-blanc.png') }}" alt="ACO">
+            <span class="sidebar-brand">COCKPIT</span>
+            <button id="sidebarToggle" class="sidebar-toggle" aria-label="Toggle sidebar">
+                <span class="material-symbols-outlined">menu</span>
+            </button>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="/" class="nav-btn">
+                <span class="material-symbols-outlined">dashboard</span>
+                <span class="label">Cockpit</span>
+            </a>
+            {% if "admin" in user_roles %}
+            <a href="/config/todos" class="nav-btn">
+                <span class="material-symbols-outlined">settings</span>
+                <span class="label">Configuration</span>
+            </a>
+            <a href="/analyse-ops" class="nav-btn">
+                <span class="material-symbols-outlined">biotech</span>
+                <span class="label">Analyse Ops</span>
+            </a>
+            <a href="/anpr" class="nav-btn is-active">
+                <span class="material-symbols-outlined">directions_car</span>
+                <span class="label">LAPI</span>
+            </a>
+            {% endif %}
+        </nav>
+        <div class="sidebar-panel">
+            <div><label for="event-select">Evenement</label><select id="event-select"></select></div>
+            <div><label for="year-select">Annee</label><select id="year-select"></select></div>
+        </div>
+        <div class="sidebar-ai" title="Assistant IA (bientot)">
+            <span class="material-symbols-outlined">smart_toy</span>
+            <span>Assistant IA</span>
+        </div>
+        <div class="sidebar-footer">
+            <div class="sidebar-user-info">
+                <span class="material-symbols-outlined sidebar-user-avatar">account_circle</span>
+                <div class="sidebar-user-details">
+                    <span class="sidebar-user-name">{{ user_firstname }} {{ user_lastname }}</span>
+                    <span class="sidebar-user-email">{{ user_email }}</span>
+                </div>
+            </div>
+            <a href="/logout_redirect" class="nav-btn nav-btn-danger">
+                <span class="material-symbols-outlined">logout</span>
+                <span class="label">Deconnexion</span>
+            </a>
+        </div>
+    </aside>
+
+    <!-- ===== MAIN ===== -->
+    <div class="app-main">
+
+        <header class="app-header">
+            <div class="header-event-info">
+                <span class="material-symbols-outlined" style="font-size:22px;color:var(--brand);">directions_car</span>
+                <span class="header-event-name">LAPI</span>
+                <span class="header-event-year" style="opacity:.6;">Surveillance vehicules</span>
+            </div>
+            <div class="header-spacer"></div>
+            <div class="header-actions" style="gap:10px;">
+                <div class="anpr-live-badge"><span class="anpr-pulse"></span> LIVE</div>
+                <button class="btn btn-primary" id="anpr-refresh-btn" style="display:flex;align-items:center;gap:5px;">
+                    <span class="material-symbols-outlined" style="font-size:17px;">refresh</span> Actualiser
+                </button>
+                <button class="btn" id="anpr-config-btn" style="display:flex;align-items:center;gap:5px;">
+                    <span class="material-symbols-outlined" style="font-size:17px;">videocam</span> Cameras
+                </button>
+            </div>
+        </header>
+
+        <!-- Scrollable content -->
+        <div id="main-content" class="anpr-page">
+
+            <!-- KPIs -->
+            <div class="anpr-kpis">
+                <div class="anpr-kpi"><span class="anpr-kpi-n" id="kpi-total">--</span><span class="anpr-kpi-l">Detections</span></div>
+                <div class="anpr-kpi"><span class="anpr-kpi-n" id="kpi-unique">--</span><span class="anpr-kpi-l">Plaques uniques</span></div>
+                <div class="anpr-kpi"><span class="anpr-kpi-n" id="kpi-allowlist">--</span><span class="anpr-kpi-l">Liste autorisee</span></div>
+                <div class="anpr-kpi"><span class="anpr-kpi-n" id="kpi-confidence">--%</span><span class="anpr-kpi-l">Confiance moy.</span></div>
+            </div>
+
+            <!-- 2-column body -->
+            <div class="anpr-body">
+
+                <!-- LEFT: Live feed -->
+                <section class="widget-card anpr-col-left">
+                    <div class="widget-header">
+                        <h3><span class="material-symbols-outlined">stream</span> Derniers passages</h3>
+                        <span class="anpr-pulse-sm"></span>
+                    </div>
+                    <div class="widget-body anpr-feed-scroll" id="anpr-live-feed"></div>
+                </section>
+
+                <!-- RIGHT: Tabs (Recherche / Statistiques) -->
+                <section class="widget-card anpr-col-right">
+                    <div class="widget-header">
+                        <h3><span class="material-symbols-outlined">manage_search</span> Analyse</h3>
+                        <div class="widget-tabs">
+                            <button class="widget-tab active" data-anpr-tab="search">Recherche</button>
+                            <button class="widget-tab" data-anpr-tab="stats">Statistiques</button>
+                        </div>
+                    </div>
+
+                    <!-- Tab: Recherche -->
+                    <div class="anpr-tab-pane active" id="pane-search">
+                        <div class="anpr-search-bar">
+                            <span class="material-symbols-outlined">search</span>
+                            <input type="text" id="anpr-filter-plate" placeholder="Rechercher une plaque..." autocomplete="off" spellcheck="false">
+                        </div>
+                        <div class="anpr-filters">
+                            <div class="anpr-color-chips" id="anpr-color-chips"></div>
+                            <select id="anpr-filter-type"><option value="">Type</option></select>
+                            <select id="anpr-filter-brand"><option value="">Marque</option></select>
+                            <select id="anpr-filter-camera"><option value="">Camera</option></select>
+                            <input type="datetime-local" id="anpr-filter-from" title="Du">
+                            <input type="datetime-local" id="anpr-filter-to" title="Au">
+                            <button class="anpr-filter-reset" id="anpr-filter-reset" title="Reset filtres">
+                                <span class="material-symbols-outlined">filter_alt_off</span>
+                            </button>
+                        </div>
+                        <div class="anpr-results-head">
+                            <span class="anpr-results-count" id="anpr-result-count">--</span>
+                            <div class="anpr-pagination" id="anpr-pagination"></div>
+                        </div>
+                        <div class="anpr-table-scroll">
+                            <table class="anpr-table" id="anpr-table">
+                                <thead>
+                                    <tr>
+                                        <th></th>
+                                        <th>Plaque</th>
+                                        <th>%</th>
+                                        <th>Couleur</th>
+                                        <th>Marque</th>
+                                        <th>Type</th>
+                                        <th>Camera</th>
+                                        <th>Dir</th>
+                                        <th>Date</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="anpr-table-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Tab: Statistiques -->
+                    <div class="anpr-tab-pane" id="pane-stats">
+                        <div class="anpr-stats-grid">
+                            <div class="anpr-stat-box anpr-stat-wide">
+                                <div class="anpr-stat-title">Distribution horaire</div>
+                                <div class="anpr-stat-chart"><canvas id="chart-hourly"></canvas></div>
+                            </div>
+                            <div class="anpr-stat-box">
+                                <div class="anpr-stat-title">Couleurs</div>
+                                <div class="anpr-stat-chart"><canvas id="chart-colors"></canvas></div>
+                            </div>
+                            <div class="anpr-stat-box">
+                                <div class="anpr-stat-title">Top marques</div>
+                                <div class="anpr-stat-chart"><canvas id="chart-brands"></canvas></div>
+                            </div>
+                            <div class="anpr-stat-box">
+                                <div class="anpr-stat-title">Types</div>
+                                <div class="anpr-stat-chart"><canvas id="chart-types"></canvas></div>
+                            </div>
+                            <div class="anpr-stat-box">
+                                <div class="anpr-stat-title">Cameras</div>
+                                <div class="anpr-stat-chart"><canvas id="chart-cameras"></canvas></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Detail modal -->
+<div class="anpr-modal-overlay" id="anpr-modal" style="display:none;">
+    <div class="anpr-modal">
+        <button class="anpr-modal-close" id="anpr-modal-close"><span class="material-symbols-outlined">close</span></button>
+        <div class="anpr-modal-body">
+            <div class="anpr-modal-image" id="anpr-modal-image"></div>
+            <div class="anpr-modal-info" id="anpr-modal-info"></div>
+        </div>
+        <div class="anpr-modal-history" id="anpr-modal-history"></div>
+    </div>
+</div>
+
+<!-- Camera config modal -->
+<div class="anpr-modal-overlay" id="anpr-config-modal" style="display:none;">
+    <div class="anpr-modal anpr-modal-sm">
+        <button class="anpr-modal-close" id="anpr-config-modal-close"><span class="material-symbols-outlined">close</span></button>
+        <h3 style="margin:0 0 16px;display:flex;align-items:center;gap:8px;">
+            <span class="material-symbols-outlined">videocam</span> Configuration des cameras
+        </h3>
+        <div id="anpr-config-body"></div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/anpr.js') }}"></script>
+</body>
+</html>
