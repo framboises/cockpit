@@ -101,25 +101,58 @@ def alert_weight(alert_type):
 def load_enabled_definitions(db):
     return list(db["cockpit_alert_definitions"].find({"enabled": True}))
 
-def build_context(db):
+def build_context(db, sim_time=None):
     """Construit le contexte partage : event/year actif, horaires, etc."""
-    ctx = {"now": datetime.now(timezone.utc)}
+    now = sim_time or datetime.now(timezone.utc)
+    ctx = {"now": now}
 
-    # Trouver l'evenement/annee actif depuis parametrages
-    # On cherche le parametrage le plus recent
+    # Determiner la date du jour (heure Paris)
+    try:
+        from zoneinfo import ZoneInfo
+        today_str = now.astimezone(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d")
+    except Exception:
+        today_str = now.strftime("%Y-%m-%d")
+
+    # Chercher le parametrage dont les dates couvrent aujourd'hui
     params = list(db["parametrages"].find(
-        {},
+        {"data.globalHoraires.dates": {"$exists": True}},
         {"event": 1, "year": 1, "data.globalHoraires": 1}
-    ).sort([("_id", -1)]).limit(5))
+    ))
 
-    # Prendre le premier qui a des horaires
+    best = None
     for p in params:
         gh = (p.get("data") or {}).get("globalHoraires")
-        if gh and gh.get("dates"):
-            ctx["event"] = p.get("event", "")
-            ctx["year"] = str(p.get("year", ""))
-            ctx["globalHoraires"] = gh
+        if not gh or not gh.get("dates"):
+            continue
+        dates = [d.get("date") for d in gh["dates"] if d.get("date")]
+        if today_str in dates:
+            best = p
             break
+
+    # Fallback : prendre le parametrage dont les dates sont les plus proches
+    if not best:
+        for p in params:
+            gh = (p.get("data") or {}).get("globalHoraires")
+            if not gh or not gh.get("dates"):
+                continue
+            dates = [d.get("date") for d in gh["dates"] if d.get("date")]
+            if not dates:
+                continue
+            # Si les dates sont dans le futur proche ou passe recent (7 jours)
+            min_d = min(dates)
+            max_d = max(dates)
+            if min_d <= today_str <= max_d:
+                best = p
+                break
+
+    if best:
+        gh = (best.get("data") or {}).get("globalHoraires", {})
+        ctx["event"] = best.get("event", "")
+        ctx["year"] = str(best.get("year", ""))
+        ctx["globalHoraires"] = gh
+        log.info("  Evenement actif: %s %s (dates couvrent %s)", ctx["event"], ctx["year"], today_str)
+    else:
+        log.info("  Aucun evenement actif pour la date %s", today_str)
 
     return ctx
 
@@ -611,14 +644,14 @@ def upsert_active_alert(db, alert_doc):
 # Cycle principal
 # ---------------------------------------------------------------------------
 
-def run_cycle():
+def run_cycle(sim_time=None):
     db = get_db()
     defs = load_enabled_definitions(db)
     if not defs:
         log.info("Aucune definition d'alerte active")
         return
 
-    context = build_context(db)
+    context = build_context(db, sim_time=sim_time)
     log.info("Cycle: %d definitions, event=%s, year=%s",
              len(defs), context.get("event", "?"), context.get("year", "?"))
 
@@ -655,9 +688,26 @@ def run_cycle():
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Moteur de detection d'alertes TITAN Cockpit")
+    parser.add_argument("--sim-time", type=str, default=None,
+                        help="Simuler une heure (ex: '2026-06-14 13:35'). Utilise le fuseau Europe/Paris.")
+    args = parser.parse_args()
+
+    sim_time = None
+    if args.sim_time:
+        try:
+            from zoneinfo import ZoneInfo
+            naive = datetime.strptime(args.sim_time, "%Y-%m-%d %H:%M")
+            sim_time = naive.replace(tzinfo=ZoneInfo("Europe/Paris")).astimezone(timezone.utc)
+            log.info("=== MODE SIMULATION : %s (Paris) ===", args.sim_time)
+        except Exception as e:
+            log.error("Format sim-time invalide (attendu: 'YYYY-MM-DD HH:MM'): %s", e)
+            sys.exit(1)
+
     log.info("=== Demarrage alert_engine ===")
     try:
-        run_cycle()
+        run_cycle(sim_time=sim_time)
     except Exception as e:
         log.error("Erreur fatale: %s", e, exc_info=True)
         sys.exit(1)

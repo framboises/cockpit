@@ -2405,6 +2405,48 @@ img { max-width: 100%; }
 
 .alert-traffic-cluster .critical-alert-btn:hover { background: #c2410c; }
 
+.critical-alert-box.alert-anpr-watchlist {
+  border: 3px solid #dc2626;
+}
+
+.alert-anpr-watchlist .critical-alert-header {
+  background: linear-gradient(135deg, #991b1b, #dc2626);
+}
+
+.alert-anpr-watchlist .critical-alert-btn {
+  background: #dc2626;
+}
+
+.alert-anpr-watchlist .critical-alert-btn:hover { background: #991b1b; }
+
+.critical-alert-box.alert-meteo-vent {
+  border: 3px solid #f97316;
+}
+
+.alert-meteo-vent .critical-alert-header {
+  background: linear-gradient(135deg, #9a3412, #f97316);
+}
+
+.alert-meteo-vent .critical-alert-btn {
+  background: #ea580c;
+}
+
+.alert-meteo-vent .critical-alert-btn:hover { background: #9a3412; }
+
+.critical-alert-box.alert-meteo-pluie {
+  border: 3px solid #42a5f5;
+}
+
+.alert-meteo-pluie .critical-alert-header {
+  background: linear-gradient(135deg, #1565c0, #42a5f5);
+}
+
+.alert-meteo-pluie .critical-alert-btn {
+  background: #1e88e5;
+}
+
+.alert-meteo-pluie .critical-alert-btn:hover { background: #1565c0; }
+
 /* ---------- Alert history widget (right panel) ---------- */
 /* Compact alert entries — collapsed by default, expand on click */
 .alert-history-entry {

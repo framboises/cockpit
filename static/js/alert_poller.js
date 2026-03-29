@@ -2,12 +2,18 @@
  * alert_poller.js - Polling et affichage des alertes fullscreen.
  * Script autonome, sans dependance a main.js.
  * Inclus sur TOUTES les pages de l'application.
+ *
+ * Logique : au premier poll (chargement de page), on note les alertes
+ * deja existantes sans les afficher. Seules les alertes qui arrivent
+ * APRES le chargement declenchent le fullscreen.
+ * Les alertes passees restent dans le fil d'alertes (widget droite sur index).
  */
 (function() {
     "use strict";
 
     var POLL_INTERVAL = 10000;
     var _seenAlertIds = {};
+    var _firstPollDone = false;
 
     var ICON_MAP = {
         opening: "door_open", opened: "lock_open",
@@ -135,12 +141,27 @@
             .then(function(r) { return r.json(); })
             .then(function(alerts) {
                 if (!Array.isArray(alerts)) return;
+
+                if (!_firstPollDone) {
+                    // Premier poll : noter les alertes existantes sans les afficher
+                    _firstPollDone = true;
+                    alerts.forEach(function(a) { _seenAlertIds[a._id] = true; });
+                    // Injecter dans le fil d'alertes (widget droite) sans fullscreen
+                    if (typeof window._pushAlertHistory === "function") {
+                        alerts.forEach(function(a) {
+                            var slug = a.definition_slug || "";
+                            window._pushAlertHistory(slug, ICON_MAP[slug] || "info", TITLE_MAP[slug] || slug, a.timeStr || "", a.message || "", null);
+                        });
+                    }
+                    return;
+                }
+
+                // Polls suivants : afficher en fullscreen uniquement les nouvelles
                 alerts.forEach(function(a) {
                     if (_seenAlertIds[a._id]) return;
                     _seenAlertIds[a._id] = true;
                     var slug = a.definition_slug || "";
                     var onView = null;
-                    // Cluster trafic : bouton "Voir sur la carte"
                     if (slug === "traffic-cluster" && a.actionData && a.actionData.pins) {
                         onView = function() {
                             window._allAlertPinsData = a.actionData.pins;
@@ -152,7 +173,6 @@
                             }
                         };
                     }
-                    // ANPR watchlist : bouton "Voir sur LAPI"
                     if (slug === "anpr-watchlist" && a.actionData && a.actionData.plate) {
                         onView = function() {
                             window.open("/anpr?plate=" + encodeURIComponent(a.actionData.plate), "_blank");
