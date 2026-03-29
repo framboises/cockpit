@@ -305,6 +305,10 @@ def collect_once(token, device_group_map, devices_info, db, logging_enabled=Fals
         )
         inserted += 1
 
+        # Verifier si la position est reellement recente (sent_at < 5 min)
+        sent_age = (now - (sent_at or now)).total_seconds() if sent_at else 9999
+        really_online = abs(sent_age) < 300
+
         if logging_enabled:
             device_details.append({
                 "id": device_id,
@@ -315,12 +319,14 @@ def collect_once(token, device_group_map, devices_info, db, logging_enabled=Fals
                 "speed": frame.get("speed", 0),
                 "battery": battery_pct,
                 "collected": True,
+                "online": really_online,
+                "sent_age_s": int(abs(sent_age)),
             })
 
     # Log du cycle
     if logging_enabled:
-        online = len([d for d in device_details if d.get("collected")])
-        offline = len([d for d in device_details if not d.get("collected")])
+        online = len([d for d in device_details if d.get("online")])
+        offline = len([d for d in device_details if not d.get("online")])
         db_log(db, "info", f"Collecte: {online} en ligne, {offline} hors ligne, {inserted} positions enregistrees", {
             "devices": device_details,
             "live_keys": list(live_data.keys())[:20],
