@@ -214,8 +214,15 @@ def anoloc_live():
                 # Device avec position connue
                 collected_at = doc.get("collected_at")
                 online = False
-                # Anoloc fournit le statut directement (offline, stopped, running, waiting...)
-                online = doc.get("status", "offline") != "offline"
+                # Online = status Anoloc != offline ET derniere vraie frame < 30 min
+                status = doc.get("status", "offline")
+                online = status != "offline"
+                last_real = doc.get("last_real_at")
+                if online and last_real:
+                    if last_real.tzinfo is None:
+                        last_real = last_real.replace(tzinfo=timezone.utc)
+                    if (datetime.now(timezone.utc) - last_real).total_seconds() > 1800:
+                        online = False  # pas de vraie frame depuis 30 min
 
                 groups[grp_id]["devices"].append({
                     "id": dev_id,
@@ -226,7 +233,9 @@ def anoloc_live():
                     "heading": doc.get("heading", 0),
                     "status": doc.get("status", "offline"),
                     "battery_pct": doc.get("battery_pct"),
+                    "gps_fix": doc.get("gps_fix", 0),
                     "sent_at": doc.get("sent_at", "").isoformat() if isinstance(doc.get("sent_at"), datetime) else str(doc.get("sent_at", "")),
+                    "last_real_at": doc.get("last_real_at", "").isoformat() if isinstance(doc.get("last_real_at"), datetime) else "",
                     "collected_at": doc.get("collected_at", "").isoformat() if isinstance(doc.get("collected_at"), datetime) else "",
                     "online": online,
                 })
@@ -283,7 +292,15 @@ def anoloc_status():
                 "total": 0,
             }
 
-        if doc.get("status", "offline") != "offline":
+        status = doc.get("status", "offline")
+        is_online = status != "offline"
+        last_real = doc.get("last_real_at")
+        if is_online and last_real:
+            if last_real.tzinfo is None:
+                last_real = last_real.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - last_real).total_seconds() > 1800:
+                is_online = False
+        if is_online:
             groups[grp_id]["online"] += 1
         else:
             groups[grp_id]["offline"] += 1

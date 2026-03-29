@@ -220,12 +220,13 @@
 
       devices.forEach(function (dev, idx) {
         var statusClass = dev.online ? "online" : "offline";
-        var statusLabel = "offline";
+        var statusLabel = "hors ligne";
         if (dev.online) {
           if (dev.status === "running") statusLabel = "en mouvement";
           else if (dev.status === "waiting") statusLabel = "en attente";
           else if (dev.status === "stopped") statusLabel = "a l'arret";
           else statusLabel = "en ligne";
+          if (dev.gps_fix === 0) statusLabel += " (sans GPS)";
         }
 
         var devDot = el("span", {className: "anoloc-dev-dot " + statusClass});
@@ -386,12 +387,19 @@
     popup.appendChild(title);
 
     // Status
+    var statusText = dev.status || "inconnu";
+    var statusMap = {running: "en mouvement", stopped: "a l'arret", waiting: "en attente", offline: "hors ligne", towing: "remorquage"};
     popup.appendChild(el("div", {className: "anoloc-popup-row"}, [
-      "Statut: ", el("strong", {textContent: dev.status || "inconnu"}),
+      "Statut: ", el("strong", {textContent: statusMap[statusText] || statusText}),
+    ]));
+
+    // GPS
+    popup.appendChild(el("div", {className: "anoloc-popup-row"}, [
+      "GPS: ", el("strong", {textContent: dev.gps_fix ? "OK" : "pas de signal"}),
     ]));
 
     // Speed
-    if (dev.speed != null) {
+    if (dev.speed != null && dev.gps_fix) {
       popup.appendChild(el("div", {className: "anoloc-popup-row"}, [
         "Vitesse: ", el("strong", {textContent: dev.speed + " km/h"}),
       ]));
@@ -402,6 +410,16 @@
       popup.appendChild(el("div", {className: "anoloc-popup-row"}, [
         "Batterie: ", el("strong", {textContent: dev.battery_pct + "%"}),
       ]));
+    }
+
+    // Last real position
+    if (dev.last_real_at) {
+      try {
+        var lr = new Date(dev.last_real_at);
+        popup.appendChild(el("div", {className: "anoloc-popup-row anoloc-popup-time"}, [
+          "Derniere position: " + lr.toLocaleString("fr-FR"),
+        ]));
+      } catch (e) {}
     }
 
     // Last update

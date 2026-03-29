@@ -115,9 +115,11 @@ def is_logging_enabled(db):
 
 def set_collecting_status(db, running, error=None):
     """Met a jour le statut du collecteur dans live-control."""
+    now = now_local()
     update = {
         "running": running,
-        "last_run": now_local(),
+        "last_run": now,
+        "last_run_display": now.strftime("%d/%m/%Y %H:%M:%S"),
     }
     if error:
         update["last_error"] = error
@@ -210,10 +212,24 @@ def build_device_to_group_map(config):
     return mapping
 
 
+def fmt_local(dt):
+    """Formate une datetime en heure Paris lisible."""
+    if not dt:
+        return "-"
+    try:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=TZ_LOCAL)
+        return dt.astimezone(TZ_LOCAL).strftime("%d/%m %H:%M:%S")
+    except Exception:
+        return str(dt)
+
+
 def db_log(db, level, message, details=None):
     """Insere un log dans la collection anoloc_logs."""
+    now = now_local()
     doc = {
-        "ts": now_local(),
+        "ts": now,
+        "ts_display": now.strftime("%d/%m/%Y %H:%M:%S"),
         "level": level,
         "message": message,
     }
@@ -267,12 +283,23 @@ def collect_once(token, device_group_map, devices_info, db, logging_enabled=Fals
         sent_at = None
         if sent_at_str:
             try:
-                sent_at = datetime.fromisoformat(sent_at_str.replace("Z", "+00:00"))
+                sent_at = datetime.fromisoformat(sent_at_str.replace("Z", "+00:00")).astimezone(TZ_LOCAL)
             except (ValueError, TypeError):
                 sent_at = now
 
         power = frame.get("power_supply") or {}
         battery_pct = power.get("battery_percentage")
+
+        # last_real_frame_sent_at = derniere vraie frame (pas heartbeat)
+        last_real_str = frame.get("last_real_frame_sent_at")
+        last_real = None
+        if last_real_str:
+            try:
+                last_real = datetime.fromisoformat(last_real_str.replace("Z", "+00:00")).astimezone(TZ_LOCAL)
+            except (ValueError, TypeError):
+                pass
+
+        gps_fix = frame.get("gps_fix", 0)
 
         doc = {
             "device_id": device_id,
@@ -284,7 +311,9 @@ def collect_once(token, device_group_map, devices_info, db, logging_enabled=Fals
             "heading": frame.get("heading", 0),
             "status": frame.get("status", "offline"),
             "battery_pct": battery_pct,
+            "gps_fix": gps_fix,
             "sent_at": sent_at or now,
+            "last_real_at": last_real,
             "collected_at": now,
         }
 
@@ -305,30 +334,45 @@ def collect_once(token, device_group_map, devices_info, db, logging_enabled=Fals
         )
         inserted += 1
 
-        really_online = frame.get("status", "offline") != "offline"
+        # Determiner le vrai statut
+        anoloc_status = frame.get("status", "offline")
+        has_gps = gps_fix > 0
+        last_real_age = None
+        if last_real:
+            try:
+                last_real_age = abs((now - last_real).total_seconds())
+            except Exception:
+                pass
+        really_online = anoloc_status != "offline" and (last_real_age is None or last_real_age < 1800)
 
         if logging_enabled:
+            status_label = anoloc_status
+            if not has_gps:
+                status_label += " (sans GPS)"
+            if last_real_age is not None and last_real_age > 1800:
+                status_label += f" (derniere frame il y a {int(last_real_age/60)}min)"
+
             device_details.append({
                 "id": device_id,
                 "label": dev_label,
-                "status": frame.get("status", "?"),
-                "lat": lat,
-                "lng": lng,
-                "speed": frame.get("speed", 0),
+                "status": status_label,
+                "gps": "OK" if has_gps else "NON",
+                "speed": frame.get("speed", 0) if has_gps else "-",
                 "battery": battery_pct,
                 "collected": True,
                 "online": really_online,
+                "last_real": fmt_local(last_real) if last_real else "-",
+                "sent_at": fmt_local(sent_at) if sent_at else "-",
             })
 
     # Log du cycle
     if logging_enabled:
         online = len([d for d in device_details if d.get("online")])
         offline = len([d for d in device_details if not d.get("online")])
-        db_log(db, "info", f"Collecte: {online} en ligne, {offline} hors ligne, {inserted} positions enregistrees", {
-            "devices": device_details,
-            "live_keys": list(live_data.keys())[:20],
-            "configured_ids": list(device_group_map.keys()),
-        })
+        gps_ok = len([d for d in device_details if d.get("gps") == "OK"])
+        db_log(db, "info",
+               f"Collecte: {online} en ligne, {offline} hors ligne, {gps_ok} avec GPS, {inserted} positions",
+               {"devices": device_details})
 
     return inserted
 
