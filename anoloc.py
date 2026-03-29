@@ -293,6 +293,45 @@ def anoloc_status():
 
 
 # ---------------------------------------------------------------------------
+# Routes: live-control (activation collecte)
+# ---------------------------------------------------------------------------
+
+LIVE_CONTROL_ID = "live-control"
+
+@anoloc_bp.route("/anoloc/live-control", methods=["GET"])
+def anoloc_live_control_get():
+    """Retourne l'etat du live-control."""
+    err = _require_admin()
+    if err:
+        return err
+    db = _get_mongo_db()
+    doc = db["anoloc_config"].find_one({"_id": LIVE_CONTROL_ID}) or {}
+    doc.pop("_id", None)
+    # Convertir les dates en string
+    for k in ("last_run",):
+        if isinstance(doc.get(k), datetime):
+            doc[k] = doc[k].isoformat()
+    return jsonify(doc)
+
+
+@anoloc_bp.route("/anoloc/live-control", methods=["POST"])
+def anoloc_live_control_set():
+    """Active ou desactive la collecte."""
+    err = _require_admin()
+    if err:
+        return err
+    db = _get_mongo_db()
+    data = request.get_json(force=True)
+    collecting = bool(data.get("collecting", False))
+    db["anoloc_config"].update_one(
+        {"_id": LIVE_CONTROL_ID},
+        {"$set": {"collecting": collecting, "updatedAt": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    return jsonify({"ok": True, "collecting": collecting})
+
+
+# ---------------------------------------------------------------------------
 # Routes: config admin
 # ---------------------------------------------------------------------------
 

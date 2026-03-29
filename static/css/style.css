@@ -2101,15 +2101,12 @@ img { max-width: 100%; }
   display: flex;
   flex-direction: column;
   min-height: 42px;
-  flex: 1 1 0;
+  flex: 0 0 auto;
   overflow: hidden;
 }
-#widgets-panel-right > #widget-counters {
-  flex: 0 0 auto;
-}
-#widgets-panel-right > #widget-counters > .widget-body {
-  flex: 0 0 auto;
-  overflow: visible;
+#widgets-panel-right > #widget-right-3 {
+  flex: 1 1 0;
+  min-height: 80px;
 }
 #widgets-panel-right > .widget-card > .widget-body {
   flex: 1 1 0;

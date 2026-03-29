@@ -2,9 +2,12 @@
 """
 anoloc_collector.py - Collecteur autonome de positions GPS Anoloc.
 
-Lance par tache planifiee Windows toutes les 5 minutes.
-Boucle pendant ~4min50 en collectant les positions toutes les 30 secondes,
-puis s'arrete proprement avant le prochain lancement.
+Lance par tache planifiee Windows toutes les minutes.
+Fait 2 collectes espacees de 30 secondes puis s'arrete.
+
+Prerequis:
+  - Document anoloc_config {_id: "global", enabled: true, ...} dans MongoDB
+  - Document anoloc_live_control {_id: "live-control", collecting: true} dans MongoDB
 
 Usage:
     python anoloc_collector.py
@@ -29,9 +32,9 @@ DB_NAME = "titan"
 ANOLOC_API_BASE_DEFAULT = "https://app.lemans.anoloc.io/api/v3"
 USER_AGENT = "COCKPIT-TITAN/1.0"
 
-COLLECT_INTERVAL = 30       # secondes entre chaque collecte
-RUN_DURATION = 290          # ~4min50, arret avant le prochain cron a 5min
+COLLECT_INTERVAL = 30       # secondes entre les 2 collectes
 DEVICES_CACHE_TTL = 300     # cache devices local 5 min
+NB_CYCLES = 2               # nombre de collectes par execution
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,7 +42,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("anoloc_collector")
-_DEBUG_LOG = True
 
 # Graceful shutdown
 _stop = False
@@ -72,6 +74,38 @@ def ensure_indexes(db):
         [("device_id", 1), ("collected_at", -1)]
     )
     db["anoloc_positions"].create_index("collected_at")
+
+
+# ---------------------------------------------------------------------------
+# Live control (activation/desactivation depuis l'admin)
+# ---------------------------------------------------------------------------
+
+LIVE_CONTROL_ID = "live-control"
+
+def is_collecting_enabled(db):
+    """Verifie si la collecte est activee via le document live-control."""
+    doc = db["anoloc_config"].find_one({"_id": LIVE_CONTROL_ID})
+    if not doc:
+        return False
+    return bool(doc.get("collecting", False))
+
+
+def set_collecting_status(db, running, error=None):
+    """Met a jour le statut du collecteur dans live-control."""
+    update = {
+        "running": running,
+        "last_run": datetime.now(timezone.utc),
+    }
+    if error:
+        update["last_error"] = error
+    elif running:
+        update["last_error"] = None
+    db["anoloc_config"].update_one(
+        {"_id": LIVE_CONTROL_ID},
+        {"$set": update},
+        upsert=True,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Anoloc API
@@ -119,7 +153,6 @@ def get_devices(token):
 
     result = anoloc_get("/devices", token)
     devices = result.get("data", [])
-    # Indexer par id
     _devices_cache = {d["id"]: d for d in devices}
     _devices_cache_ts = now
     return _devices_cache
@@ -129,18 +162,13 @@ def get_live(token):
     """Retourne les positions live de tous les devices sous forme de dict {device_id: frame}."""
     result = anoloc_get("/live", token)
     data = result.get("data") or result
-    if _DEBUG_LOG:
-        log.info("API /live type=%s keys=%s", type(data).__name__,
-                 list(data.keys())[:5] if isinstance(data, dict) else len(data) if isinstance(data, list) else "?")
     # L'API peut retourner un dict {id: frame} ou une liste [frame, ...]
     if isinstance(data, list):
-        # Convertir en dict indexe par device id
         out = {}
         for frame in data:
             did = frame.get("device_id") or frame.get("id") or frame.get("imei")
             if did:
                 out[str(did)] = frame
-        log.info("API /live a retourne une liste de %d frames", len(data))
         return out
     return data
 
@@ -167,7 +195,6 @@ def collect_once(token, device_group_map, devices_info, db):
     inserted = 0
     for device_id, frame in live_data.items():
         if not isinstance(frame, dict):
-            log.warning("Frame inattendue pour %s: type=%s val=%s", device_id, type(frame).__name__, str(frame)[:200])
             continue
         grp = device_group_map.get(device_id)
         if not grp:
@@ -233,29 +260,38 @@ def main():
     db = get_db()
     ensure_indexes(db)
 
-    # Lire la config
+    # --- Verifier le live-control ---
+    if not is_collecting_enabled(db):
+        log.info("Collecte desactivee (live-control.collecting = false)")
+        sys.exit(0)
+
+    # --- Lire la config ---
     config = db["anoloc_config"].find_one({"_id": "global"})
     if not config:
         log.warning("Pas de configuration Anoloc trouvee (anoloc_config.global)")
+        set_collecting_status(db, False, error="Config absente")
         sys.exit(0)
 
     if not config.get("enabled", False):
-        log.info("Collecteur Anoloc desactive dans la config")
+        log.info("Collecteur Anoloc desactive dans la config globale")
+        set_collecting_status(db, False, error="Config desactivee")
         sys.exit(0)
 
-    # URL de base (peut etre personnalisee par instance)
+    # URL de base
     api_base = config.get("api_base", "").rstrip("/") or ANOLOC_API_BASE_DEFAULT
 
     login = config.get("login", "")
     password = config.get("password", "")
     if not login or not password:
         log.error("Credentials Anoloc manquants dans la config")
+        set_collecting_status(db, False, error="Credentials manquants")
         sys.exit(1)
 
     # Construire le mapping device -> groupe
     device_group_map = build_device_to_group_map(config)
     if not device_group_map:
         log.warning("Aucun device configure dans les beacon_groups actifs")
+        set_collecting_status(db, False, error="Aucun device configure")
         sys.exit(0)
 
     log.info(
@@ -263,7 +299,6 @@ def main():
         len(device_group_map),
         len([g for g in config.get("beacon_groups", []) if g.get("enabled", True)]),
     )
-    log.info("Device IDs configures: %s", list(device_group_map.keys()))
 
     # Authentification
     try:
@@ -271,23 +306,21 @@ def main():
         log.info("Authentification Anoloc reussie")
     except Exception as e:
         log.error("Echec authentification Anoloc: %s", e)
+        set_collecting_status(db, False, error=f"Auth echouee: {e}")
         sys.exit(1)
 
-    # Boucle de collecte
-    start_time = time.time()
-    cycle = 0
+    # Signaler le demarrage
+    set_collecting_status(db, True)
 
-    while not _stop:
-        elapsed = time.time() - start_time
-        if elapsed >= RUN_DURATION:
-            log.info("Duree max atteinte (%.0fs), arret", elapsed)
+    # --- 2 collectes espacees de 30 secondes ---
+    for cycle in range(1, NB_CYCLES + 1):
+        if _stop:
             break
 
-        cycle += 1
         try:
             devices_info = get_devices(_token)
             count = collect_once(_token, device_group_map, devices_info, db)
-            log.info("Cycle %d: %d positions collectees", cycle, count)
+            log.info("Cycle %d/%d: %d positions collectees", cycle, NB_CYCLES, count)
         except requests.exceptions.HTTPError as e:
             if e.response is not None and e.response.status_code == 401:
                 log.warning("Token expire, re-authentification...")
@@ -296,18 +329,22 @@ def main():
                     log.info("Re-authentification reussie")
                 except Exception as e2:
                     log.error("Re-auth echouee: %s", e2)
+                    set_collecting_status(db, False, error=f"Re-auth echouee: {e2}")
                     break
             else:
                 log.error("Erreur API Anoloc: %s", e)
         except Exception as e:
             log.error("Erreur collecte: %s", e)
 
-        # Attendre le prochain cycle (interruptible)
-        wait_end = time.time() + COLLECT_INTERVAL
-        while not _stop and time.time() < wait_end:
-            time.sleep(1)
+        # Attendre 30s avant le prochain cycle (sauf apres le dernier)
+        if cycle < NB_CYCLES and not _stop:
+            wait_end = time.time() + COLLECT_INTERVAL
+            while not _stop and time.time() < wait_end:
+                time.sleep(1)
 
-    log.info("Collecteur arrete apres %d cycles", cycle)
+    # Mettre a jour le statut
+    set_collecting_status(db, False)
+    log.info("Collecteur termine")
 
     if _client:
         _client.close()

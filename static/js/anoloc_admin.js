@@ -75,6 +75,15 @@
     // Visibility save
     var saveVisBtn = $("#anoloc-save-vis");
     if (saveVisBtn) saveVisBtn.addEventListener("click", saveVisibility);
+
+    // Live control toggle
+    var collectToggle = $("#anoloc-collect-toggle");
+    if (collectToggle) {
+      collectToggle.addEventListener("change", function () {
+        toggleCollecting(collectToggle.checked);
+      });
+    }
+    loadLiveControl();
   }
 
   // ============================================================
@@ -564,6 +573,53 @@
     toast.textContent = msg;
     container.appendChild(toast);
     setTimeout(function () { toast.remove(); }, 3000);
+  }
+
+  // ============================================================
+  // Live control
+  // ============================================================
+
+  function loadLiveControl() {
+    apiGet("/anoloc/live-control").then(function (data) {
+      var toggle = $("#anoloc-collect-toggle");
+      var status = $("#anoloc-collect-status");
+      var icon = $("#anoloc-collect-icon");
+
+      var collecting = !!data.collecting;
+      if (toggle) toggle.checked = collecting;
+      if (icon) icon.style.color = collecting ? "#22c55e" : "var(--muted)";
+
+      if (status) {
+        var parts = [];
+        if (collecting) {
+          parts.push("Collecte active");
+        } else {
+          parts.push("Collecte arretee");
+        }
+        if (data.last_run) {
+          try {
+            var d = new Date(data.last_run);
+            parts.push("- derniere exec: " + d.toLocaleString("fr-FR"));
+          } catch (e) {}
+        }
+        if (data.last_error) {
+          parts.push("- " + data.last_error);
+        }
+        if (data.running) {
+          parts.push("(en cours)");
+        }
+        status.textContent = parts.join(" ");
+      }
+    });
+  }
+
+  function toggleCollecting(enabled) {
+    apiPost("/anoloc/live-control", { collecting: enabled }).then(function (data) {
+      if (data.ok) {
+        showToast(enabled ? "Collecte activee" : "Collecte desactivee", "success");
+        loadLiveControl();
+      }
+    });
   }
 
   // ============================================================

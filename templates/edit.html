@@ -234,6 +234,19 @@
         </header>
         <div class="widget-body collapsible" id="anoloc-body">
 
+          <!-- 0) Collecte live -->
+          <div class="anoloc-live-control" style="display:flex; align-items:center; gap:12px; margin-bottom:16px; padding:10px; border:1px solid var(--line); border-radius:var(--radius-sm);">
+            <span class="material-symbols-outlined" id="anoloc-collect-icon" style="font-size:22px; color:var(--muted);">cell_tower</span>
+            <div style="flex:1;">
+              <div style="font-size:13px; font-weight:600;">Collecte des positions GPS</div>
+              <div style="font-size:11px; color:var(--muted);" id="anoloc-collect-status">Chargement...</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="anoloc-collect-toggle" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
           <!-- A) Credentials -->
           <h4 style="margin:0 0 8px; font-size:13px; color:var(--muted);">Connexion Anoloc</h4>
           <div class="anoloc-admin-creds">
