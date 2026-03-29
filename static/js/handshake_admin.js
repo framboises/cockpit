@@ -28,6 +28,7 @@
   var errorsTbody = document.getElementById("hsh-errors-tbody");
   var liveCounters = document.getElementById("hsh-live-counters");
   var filterInput = document.getElementById("hsh-tree-filter");
+  var errorsFilterEvent = document.getElementById("hsh-errors-filter-event");
 
   var activeContainer = document.getElementById("hsh-active-checkpoints");
   var activeCountEl = document.getElementById("hsh-active-count");
@@ -116,7 +117,8 @@
 
   function loadErrors() {
     var url = "/api/live-controle/errors";
-    if (config.evenement) url += "?evenement=" + encodeURIComponent(config.evenement);
+    var filterByEvent = errorsFilterEvent && errorsFilterEvent.checked;
+    if (filterByEvent && config.evenement) url += "?evenement=" + encodeURIComponent(config.evenement);
     fetch(url)
       .then(function (r) { return r.json(); })
       .then(function (errors) {
@@ -656,6 +658,10 @@
         }
       });
   });
+
+  if (errorsFilterEvent) {
+    errorsFilterEvent.addEventListener("change", function () { loadErrors(); });
+  }
 
   saveLocBtn.addEventListener("click", function () {
     saveConfig({ locations_selectionnees: selectedLocations }).then(function () {

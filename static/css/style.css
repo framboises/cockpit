@@ -7223,6 +7223,16 @@ th span { font-size: 0.88rem; font-weight: 700; }
   font-weight: 400;
 }
 
+/* Filter toggle (erreurs) */
+.hsh-filter-toggle {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 0.75rem; color: var(--muted); cursor: pointer;
+  font-weight: 400;
+}
+.hsh-filter-toggle input {
+  width: 14px; height: 14px; accent-color: var(--brand); cursor: pointer;
+}
+
 
 /* =========================================================================
    ANPR / LAPI -- compact 2-column layout

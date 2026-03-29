@@ -198,8 +198,9 @@
   function populateGroupCheckboxes(selectedIds){
     var container = $("#alert-def-groups-checkboxes");
     container.textContent = "";
+    var SYSTEM_LABELS = {"__default__": "Defaut (sans groupe)", "__admin__": "Admin"};
     allGroups.forEach(function(g){
-      if(g.name === "__default__" || g.name === "__admin__") return;
+      var displayName = SYSTEM_LABELS[g.name] || g.name;
       var lbl = document.createElement("label");
       lbl.style.cssText = "display:flex; align-items:center; gap:6px; padding:4px 0; cursor:pointer;";
       var cb = document.createElement("input");
@@ -210,7 +211,7 @@
       dot.style.cssText = "width:10px; height:10px; border-radius:50%; background:" + escHtml(g.color || "#6366f1") + ";";
       lbl.appendChild(cb);
       lbl.appendChild(dot);
-      lbl.appendChild(document.createTextNode(" " + g.name));
+      lbl.appendChild(document.createTextNode(" " + displayName));
       container.appendChild(lbl);
     });
   }
