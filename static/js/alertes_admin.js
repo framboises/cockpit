@@ -96,6 +96,7 @@
       tr.appendChild(tdType);
       // Groupes
       var tdGroups = document.createElement("td");
+      var SYS_LABELS = {"__default__": "Defaut", "__admin__": "Admin"};
       if(d.groups && d.groups.length > 0){
         d.groups.forEach(function(gid){
           var g = allGroups.find(function(x){ return x._id === gid; });
@@ -104,7 +105,7 @@
             badge.className = "badge";
             var c = escHtml(g.color || "#6366f1");
             badge.style.cssText = "font-size:0.72rem; padding:2px 8px; border-radius:10px; margin-right:4px; background:" + c + "22; color:" + c + "; border:1px solid " + c + "44;";
-            badge.textContent = g.name;
+            badge.textContent = SYS_LABELS[g.name] || g.name;
             tdGroups.appendChild(badge);
           }
         });
