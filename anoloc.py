@@ -195,7 +195,6 @@ def anoloc_live():
         g["id"]: g for g in config.get("beacon_groups", []) if g.get("enabled")
     }
 
-    now_utc = datetime.now(timezone.utc)
     groups = {}
 
     for grp_id, grp_cfg in beacon_groups_map.items():
@@ -215,12 +214,8 @@ def anoloc_live():
                 # Device avec position connue
                 collected_at = doc.get("collected_at")
                 online = False
-                # Utiliser sent_at (timestamp reel de la position Anoloc) pour determiner online
-                sent_at = doc.get("sent_at")
-                if sent_at:
-                    if sent_at.tzinfo is None:
-                        sent_at = sent_at.replace(tzinfo=timezone.utc)
-                    online = (now_utc - sent_at).total_seconds() < 300
+                # Anoloc fournit le statut directement (offline, stopped, running, waiting...)
+                online = doc.get("status", "offline") != "offline"
 
                 groups[grp_id]["devices"].append({
                     "id": dev_id,
@@ -270,7 +265,6 @@ def anoloc_status():
     }
 
     groups = {}
-    now_utc = datetime.now(timezone.utc)
     for doc in docs:
         grp_id = doc.get("beacon_group")
         if not grp_id or grp_id not in beacon_groups_map:
@@ -289,15 +283,8 @@ def anoloc_status():
                 "total": 0,
             }
 
-        sent_at = doc.get("sent_at")
-        if sent_at:
-            if sent_at.tzinfo is None:
-                sent_at = sent_at.replace(tzinfo=timezone.utc)
-            age = (now_utc - sent_at).total_seconds()
-            if age < 300:
-                groups[grp_id]["online"] += 1
-            else:
-                groups[grp_id]["offline"] += 1
+        if doc.get("status", "offline") != "offline":
+            groups[grp_id]["online"] += 1
         else:
             groups[grp_id]["offline"] += 1
         groups[grp_id]["total"] += 1

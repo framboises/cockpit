@@ -305,9 +305,7 @@ def collect_once(token, device_group_map, devices_info, db, logging_enabled=Fals
         )
         inserted += 1
 
-        # Verifier si la position est reellement recente (sent_at < 5 min)
-        sent_age = (now - (sent_at or now)).total_seconds() if sent_at else 9999
-        really_online = abs(sent_age) < 300
+        really_online = frame.get("status", "offline") != "offline"
 
         if logging_enabled:
             device_details.append({
@@ -320,7 +318,6 @@ def collect_once(token, device_group_map, devices_info, db, logging_enabled=Fals
                 "battery": battery_pct,
                 "collected": True,
                 "online": really_online,
-                "sent_age_s": int(abs(sent_age)),
             })
 
     # Log du cycle
