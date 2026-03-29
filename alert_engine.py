@@ -160,6 +160,35 @@ def build_context(db, sim_time=None):
 # Handlers de detection
 # ---------------------------------------------------------------------------
 
+def _find_schedule(public_dates, now_local):
+    """Trouve le schedule applicable : aujourd'hui ou overnight d'hier.
+    Retourne (schedule_doc, is_from_yesterday)."""
+    today_iso = now_local.strftime("%Y-%m-%d")
+    yesterday_iso = (now_local - timedelta(days=1)).strftime("%Y-%m-%d")
+    now_minutes = now_local.hour * 60 + now_local.minute
+
+    dates_by_key = {}
+    for d in public_dates:
+        dates_by_key[d.get("date", "")] = d
+
+    # 1) Verifier si on est dans la queue overnight d'hier
+    yesterday_pub = dates_by_key.get(yesterday_iso)
+    if yesterday_pub and not yesterday_pub.get("is24h"):
+        yd_open = parse_time_to_min(yesterday_pub.get("openTime"))
+        yd_close = parse_time_to_min(yesterday_pub.get("closeTime"))
+        if yd_open is not None and yd_close is not None and yd_close < yd_open:
+            # Overnight : fermeture est apres minuit
+            if now_minutes < yd_close:
+                return yesterday_pub, True
+
+    # 2) Sinon, schedule d'aujourd'hui
+    today_pub = dates_by_key.get(today_iso)
+    if today_pub and not today_pub.get("is24h"):
+        return today_pub, False
+
+    return None, False
+
+
 def detect_schedule_proximity(definition, context):
     """Detecte la proximite d'une ouverture ou fermeture de site."""
     gh = context.get("globalHoraires")
@@ -171,61 +200,55 @@ def detect_schedule_proximity(definition, context):
     schedule_event = params.get("schedule_event", "open")  # "open" ou "close"
 
     now = context["now"]
-    # Convertir en heure locale Paris
     try:
         from zoneinfo import ZoneInfo
-        paris = ZoneInfo("Europe/Paris")
-        now_local = now.astimezone(paris)
+        now_local = now.astimezone(ZoneInfo("Europe/Paris"))
     except Exception:
         now_local = now
 
-    today_iso = now_local.strftime("%Y-%m-%d")
     now_minutes = now_local.hour * 60 + now_local.minute
+    today_iso = now_local.strftime("%Y-%m-%d")
 
-    public_dates = gh.get("dates", [])
-    today_pub = None
-    for d in public_dates:
-        if d.get("date") == today_iso:
-            today_pub = d
-            break
-
-    if not today_pub or today_pub.get("is24h"):
+    pub, is_yesterday = _find_schedule(gh.get("dates", []), now_local)
+    if not pub:
         return None
+
+    open_min = parse_time_to_min(pub.get("openTime"))
+    close_min = parse_time_to_min(pub.get("closeTime"))
+    if open_min is None or close_min is None:
+        return None
+
+    is_overnight = close_min < open_min
 
     if schedule_event == "open":
-        target_time = today_pub.get("openTime")
+        if is_yesterday:
+            # On est dans le overnight d'hier, l'ouverture d'hier est passee
+            return None
+        target_min = open_min
+        diff = target_min - now_minutes
     else:
-        target_time = today_pub.get("closeTime")
-
-    target_min = parse_time_to_min(target_time)
-    if target_min is None:
-        return None
-
-    # Gerer overnight pour fermeture
-    if schedule_event == "close":
-        open_min = parse_time_to_min(today_pub.get("openTime"))
-        if open_min is not None and target_min < open_min:
-            # Fermeture le lendemain - on est deja ouvert
-            target_min += 1440
-
-    diff = target_min - now_minutes
-    if diff < 0:
-        # Verifier overnight depuis hier
-        yesterday = (now_local - timedelta(days=1)).strftime("%Y-%m-%d")
-        for d in public_dates:
-            if d.get("date") == yesterday:
-                yd_open = parse_time_to_min(d.get("openTime"))
-                yd_close = parse_time_to_min(d.get("closeTime"))
-                if yd_open is not None and yd_close is not None and yd_close < yd_open:
-                    if schedule_event == "close" and now_minutes < yd_close:
-                        diff = yd_close - now_minutes
-                        target_time = d.get("closeTime")
-                break
+        # Fermeture
+        if is_yesterday:
+            # Overnight : on est avant close_min du schedule d'hier
+            diff = close_min - now_minutes
+        elif is_overnight:
+            # Meme jour overnight : fermeture apres minuit
+            # Si on est apres l'ouverture, la fermeture est dans (1440 - now + close)
+            if now_minutes >= open_min:
+                diff = (1440 - now_minutes) + close_min
+            else:
+                return None
+        else:
+            diff = close_min - now_minutes
 
     if diff < 0 or diff > minutes_before:
         return None
 
+    target_time = pub.get("openTime") if schedule_event == "open" else pub.get("closeTime")
     slug = definition["slug"]
+    # Dedup sur la date du schedule (pas today_iso pour overnight)
+    dedup_date = pub.get("date", today_iso)
+
     if schedule_event == "open":
         title = "OUVERTURE IMMINENTE"
         message = "Ouverture au public dans " + format_minutes_delta(diff)
@@ -240,7 +263,7 @@ def detect_schedule_proximity(definition, context):
         "title": title,
         "message": message,
         "timeStr": target_time or "",
-        "dedup_key": "%s-%s" % (slug, today_iso),
+        "dedup_key": "%s-%s" % (slug, dedup_date),
         "triggeredAt": now,
         "expiresAt": now + timedelta(minutes=minutes_before + 5),
     }
@@ -258,40 +281,33 @@ def detect_schedule_transition(definition, context):
     now = context["now"]
     try:
         from zoneinfo import ZoneInfo
-        paris = ZoneInfo("Europe/Paris")
-        now_local = now.astimezone(paris)
+        now_local = now.astimezone(ZoneInfo("Europe/Paris"))
     except Exception:
         now_local = now
 
-    today_iso = now_local.strftime("%Y-%m-%d")
     now_minutes = now_local.hour * 60 + now_local.minute
+    today_iso = now_local.strftime("%Y-%m-%d")
 
-    public_dates = gh.get("dates", [])
-    today_pub = None
-    for d in public_dates:
-        if d.get("date") == today_iso:
-            today_pub = d
-            break
-
-    if not today_pub or today_pub.get("is24h"):
+    pub, is_yesterday = _find_schedule(gh.get("dates", []), now_local)
+    if not pub:
         return None
 
-    open_min = parse_time_to_min(today_pub.get("openTime"))
-    close_min = parse_time_to_min(today_pub.get("closeTime"))
+    open_min = parse_time_to_min(pub.get("openTime"))
+    close_min = parse_time_to_min(pub.get("closeTime"))
     if open_min is None or close_min is None:
         return None
 
     db = get_db()
     state_col = db["cockpit_alert_engine_state"]
-    state_key = "transition-%s-%s" % (definition["slug"], today_iso)
+    dedup_date = pub.get("date", today_iso)
+    state_key = "transition-%s-%s" % (definition["slug"], dedup_date)
     existing = state_col.find_one({"_id": state_key})
     if existing:
-        return None  # Deja declenche aujourd'hui
-
-    is_overnight = close_min < open_min
+        return None  # Deja declenche pour ce schedule
 
     if transition == "open":
-        # Juste ouvert : on est entre open et open+5min
+        if is_yesterday:
+            return None  # L'ouverture d'hier est passee
         if now_minutes >= open_min and now_minutes <= open_min + 5:
             state_col.update_one(
                 {"_id": state_key},
@@ -304,19 +320,27 @@ def detect_schedule_transition(definition, context):
                 "year": context.get("year", ""),
                 "title": "SITE OUVERT",
                 "message": "Le site est maintenant ouvert au public",
-                "timeStr": today_pub.get("openTime", ""),
-                "dedup_key": "%s-%s" % (definition["slug"], today_iso),
+                "timeStr": pub.get("openTime", ""),
+                "dedup_key": "%s-%s" % (definition["slug"], dedup_date),
                 "triggeredAt": now,
                 "expiresAt": now + timedelta(minutes=30),
             }
+
     elif transition == "close":
-        effective_close = close_min if not is_overnight else close_min + 1440
-        # Verifier aussi minuit-passage pour overnight
-        check_min = now_minutes if not is_overnight else now_minutes
-        if is_overnight and now_minutes < open_min:
-            check_min = now_minutes
-            effective_close = close_min
-        if check_min >= effective_close and check_min <= effective_close + 5:
+        # Determiner si on est dans la fenetre de fermeture (close_min .. close_min+5)
+        if is_yesterday:
+            # Overnight : on est le lendemain, close_min est l'heure de fermeture
+            check = now_minutes
+            target = close_min
+        else:
+            is_overnight = close_min < open_min
+            if is_overnight:
+                # Fermeture apres minuit - ne se declenche pas le jour J mais le lendemain
+                return None
+            check = now_minutes
+            target = close_min
+
+        if check >= target and check <= target + 5:
             state_col.update_one(
                 {"_id": state_key},
                 {"$set": {"triggered": True, "at": now}},
@@ -328,8 +352,8 @@ def detect_schedule_transition(definition, context):
                 "year": context.get("year", ""),
                 "title": "SITE FERME",
                 "message": "Le site est maintenant ferme au public",
-                "timeStr": today_pub.get("closeTime", ""),
-                "dedup_key": "%s-%s" % (definition["slug"], today_iso),
+                "timeStr": pub.get("closeTime", ""),
+                "dedup_key": "%s-%s" % (definition["slug"], dedup_date),
                 "triggeredAt": now,
                 "expiresAt": now + timedelta(minutes=30),
             }

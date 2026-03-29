@@ -1490,14 +1490,14 @@
   // ==========================================================================
 
   function switchView(view) {
-    if (view === currentView && !(window.MeteoPanel && window.MeteoPanel.isOpen())) return;
+    // Fermer le panel meteo si ouvert (avant le guard pour que ca marche meme si deja en vue map)
+    var meteoPanel = document.getElementById("meteo-panel");
+    if (meteoPanel) meteoPanel.style.display = "none";
+
+    if (view === currentView) return;
     // Exit map fullscreen before switching views
     if (_mapFullscreen) toggleMapFullscreen();
     currentView = view;
-
-    // Fermer le panel meteo si ouvert
-    var meteoPanel = document.getElementById("meteo-panel");
-    if (meteoPanel) meteoPanel.style.display = "none";
 
     var timelineMain = document.getElementById("timeline-main");
     var mapMain = document.getElementById("map-main");
