@@ -3198,6 +3198,43 @@ def hsh_get_counters():
     return jsonify(result)
 
 
+@app.route('/api/live-controle/active-checkpoints', methods=['GET'])
+@role_required("user")
+def hsh_get_active_checkpoints():
+    """Checkpoints avec au moins 1 transaction dans les 10 dernieres minutes."""
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+    pipeline = [
+        {"$match": {"timestamp": {"$gte": cutoff}}},
+        {"$sort": {"timestamp": -1}},
+        {"$group": {
+            "_id": {"loc_id": "$requested_location_id", "loc_type": "$requested_location_type"},
+            "location_name": {"$first": "$location_name"},
+            "counter_name": {"$first": "$counter_name"},
+            "entries": {"$first": "$entries"},
+            "exits": {"$first": "$exits"},
+            "current": {"$first": "$current"},
+            "timestamp": {"$first": "$timestamp"},
+        }},
+    ]
+    docs = list(db.data_access.aggregate(pipeline))
+    result = []
+    for d in docs:
+        entries = int(d.get("entries") or 0)
+        exits = int(d.get("exits") or 0)
+        if entries > 0 or exits > 0:
+            result.append({
+                "location_id": d["_id"]["loc_id"],
+                "location_type": d["_id"]["loc_type"],
+                "location_name": d.get("location_name") or d.get("counter_name") or "",
+                "entries": entries,
+                "exits": exits,
+                "current": int(d.get("current") or 0),
+                "timestamp": d["timestamp"].isoformat() if hasattr(d.get("timestamp"), "isoformat") else d.get("timestamp"),
+            })
+    result.sort(key=lambda x: x.get("entries", 0), reverse=True)
+    return jsonify(result)
+
+
 @app.route('/api/live-controle/errors', methods=['GET'])
 @role_required("user")
 def hsh_get_errors():

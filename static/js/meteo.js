@@ -43,25 +43,24 @@ function renderMeteoWidget(data) {
   if (snapWind) snapWind.textContent = c.gust + ' km/h';
   if (snapRain) snapRain.textContent = c.rain + ' mm';
 
-  // Alertes - les donnees viennent du serveur (source de confiance interne)
-  var alertsDiv = document.getElementById('meteo-alerts');
-  if (alertsDiv) {
-    if (data.alerts.length === 0) {
-      alertsDiv.innerHTML = '<span class="meteo-no-alert">Aucune alerte meteo</span>';
-    } else {
-      alertsDiv.innerHTML = '';
+  // Alertes meteo -> injectees dans le widget Alertes (widget-right-3)
+  var container = document.getElementById('widget-right-3-body');
+  if (container) {
+    // Supprimer les anciennes alertes meteo
+    var oldMeteo = container.querySelectorAll('.alert-history-entry[data-type="meteo"]');
+    oldMeteo.forEach(function(el) { el.remove(); });
+
+    if (data.alerts.length > 0 && typeof _renderAlertEntry === 'function') {
+      // Retirer le placeholder si present
+      var placeholder = container.querySelector('.widget-placeholder');
+      if (placeholder) placeholder.remove();
+
+      var now = new Date();
+      var timeStr = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+
       data.alerts.forEach(function(a) {
-        var el = document.createElement('div');
-        el.className = 'meteo-alert-item';
-        el.setAttribute('data-severity', a.severity);
-        var iconSpan = document.createElement('span');
-        iconSpan.className = 'material-symbols-outlined';
-        iconSpan.textContent = a.icon;
-        var msgSpan = document.createElement('span');
-        msgSpan.textContent = a.message;
-        el.appendChild(iconSpan);
-        el.appendChild(msgSpan);
-        alertsDiv.appendChild(el);
+        var entry = _renderAlertEntry(container, 'meteo', a.icon, 'Meteo', '', a.message, null, timeStr, null);
+        container.insertBefore(entry, container.firstChild);
       });
     }
   }

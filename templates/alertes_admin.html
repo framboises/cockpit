@@ -29,6 +29,10 @@
         <span class="material-symbols-outlined">dashboard</span>
         <span class="label">Cockpit</span>
       </a>
+      <a href="/live-controle" class="nav-btn">
+        <span class="material-symbols-outlined">sensors</span>
+        <span class="label">Controle acces</span>
+      </a>
       <a href="/config/todos" class="nav-btn">
         <span class="material-symbols-outlined">settings</span>
         <span class="label">Configuration</span>
@@ -43,7 +47,7 @@
       </a>
       <a href="/admin/alertes" class="nav-btn is-active">
         <span class="material-symbols-outlined">notifications_active</span>
-        <span class="label">Centrale d'Alerte</span>
+        <span class="label">Alertes</span>
       </a>
     </nav>
 
@@ -59,13 +63,17 @@
   </aside>
 
   <!-- Main -->
-  <main class="main-content" style="padding:24px; overflow-y:auto;">
-    <div style="max-width:1100px; margin:0 auto;">
+  <div class="app-main single-col-page">
 
-      <h2 style="margin:0 0 24px; display:flex; align-items:center; gap:10px;">
-        <span class="material-symbols-outlined" style="font-size:28px;">notifications_active</span>
+    <header class="app-header">
+      <span class="header-title" style="display:flex; align-items:center; gap:8px;">
+        <span class="material-symbols-outlined" style="font-size:22px;">notifications_active</span>
         Centrale d'Alerte
-      </h2>
+      </span>
+      <div class="header-spacer"></div>
+    </header>
+
+    <div id="main-content">
 
       <!-- Section definitions d'alertes -->
       <section class="widget-card">
@@ -127,7 +135,7 @@
       </section>
 
     </div>
-  </main>
+  </div>
 </div>
 
 <!-- Modal definition d'alerte -->
@@ -238,6 +246,5 @@
 <!-- Scripts -->
 <script src="/static/js/toast.js"></script>
 <script src="/static/js/alertes_admin.js"></script>
-<script src="/static/js/main.js"></script>
 </body>
 </html>

@@ -31,6 +31,10 @@
                 <span class="label">Cockpit</span>
             </a>
             {% if "admin" in user_roles %}
+            <a href="/live-controle" class="nav-btn">
+                <span class="material-symbols-outlined">sensors</span>
+                <span class="label">Controle acces</span>
+            </a>
             <a href="/config/todos" class="nav-btn">
                 <span class="material-symbols-outlined">settings</span>
                 <span class="label">Configuration</span>
@@ -42,6 +46,10 @@
             <a href="/anpr" class="nav-btn is-active">
                 <span class="material-symbols-outlined">directions_car</span>
                 <span class="label">LAPI</span>
+            </a>
+            <a href="/admin/alertes" class="nav-btn">
+                <span class="material-symbols-outlined">notifications_active</span>
+                <span class="label">Alertes</span>
             </a>
             {% endif %}
         </nav>

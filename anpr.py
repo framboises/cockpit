@@ -62,23 +62,52 @@ def _before():
 # ---------------------------------------------------------------------------
 # Hikvision vehicle_logo -> marque
 # ---------------------------------------------------------------------------
+# Source: Hikvision ISAPI ANPR Main Vehicle Brand Reference
+# https://tpp.hikvision.com/wiki/isapi/anpr/GUID-552878C8-F295-4F1C-87F0-5467E9C9160A.html
 BRAND_MAP = {
-    1026: "Audi", 1028: "BMW", 1030: "Buick", 1031: "Cadillac",
-    1036: "Chevrolet", 1037: "Chrysler", 1038: "Citroen", 1043: "Dacia",
-    1044: "Daewoo", 1045: "Daihatsu", 1048: "Dodge", 1050: "Fiat",
-    1051: "Ford", 1053: "Geely", 1056: "Great Wall", 1060: "Honda",
-    1063: "Hyundai", 1064: "Infiniti", 1067: "Isuzu", 1071: "Jeep",
-    1078: "Kia", 1081: "Lamborghini", 1083: "Land Rover", 1084: "Lexus",
-    1085: "Lincoln", 1088: "Maserati", 1089: "Mazda", 1093: "Mercedes",
-    1094: "MG", 1096: "Mini", 1100: "Mitsubishi", 1105: "Nissan",
-    1108: "Opel", 1110: "Peugeot", 1116: "Porsche", 1120: "Renault",
-    1126: "Saab", 1128: "Samsung", 1130: "Seat", 1131: "Skoda",
-    1133: "Smart", 1135: "SsangYong", 1137: "Subaru", 1139: "Suzuki",
-    1142: "Tesla", 1144: "Toyota", 1147: "Vauxhall", 1149: "Volkswagen",
-    1152: "Volvo", 1155: "Alfa Romeo", 1158: "DS", 1160: "Ferrari",
-    1162: "Jaguar", 1165: "Lancia", 1170: "Bentley", 1175: "Aston Martin",
-    1180: "Rolls Royce", 1185: "Cupra", 1190: "BYD",
-    1614: "Autre", 1849: "Autre",
+    # --- Confirmed from Hikvision official docs ---
+    1026: "Alfa Romeo",   1027: "Aston Martin", 1028: "Audi",
+    1030: "Porsche",      1031: "Buick",        1036: "Mercedes",
+    1037: "BMW",          1038: "Baojun",       1043: "Changan",
+    1044: "Chevrolet",    1045: "Changfeng",    1048: "Dongfeng",
+    1050: "Dongnan",      1051: "Dazhong",      1053: "Ford",
+    1056: "GAC Trumpchi", 1060: "Honda",        1063: "Haima",
+    1064: "Haval",        1067: "Huanghai",     1071: "Jianghuai (JAC)",
+    1078: "Karry",        1081: "Lamborghini",  1083: "Leopaard",
+    1084: "Lexus",        1085: "Lifan",        1088: "Maserati",
+    1089: "Mazda",        1093: "MG",           1094: "MG",
+    1096: "Mini",
+    1100: "Lotus",        1101: "Land Rover",   1102: "Suzuki",
+    1103: "Lufeng",       1104: "Luxgen",       1105: "Renault",
+    1107: "Mini",         1108: "Maserati",     1112: "Mazda",
+    1114: "Luxgen",       1116: "Opel",         1117: "Acura",
+    1119: "Venucia",      1120: "Chery",        1121: "Kia",
+    1123: "Nissan",       1125: "Roewe",        1127: "Smart",
+    1128: "Mitsubishi",   1130: "ShuangHuan",   1131: "ShuangLong",
+    1132: "SsangYong",    1133: "Subaru",       1134: "Skoda",
+    1135: "Saab",         1139: "Tesla",        1141: "Denza",
+    1144: "Volvo",        1149: "Hyundai",      1150: "Seat",
+    1151: "Chevrolet",    1152: "Citroen",      1156: "Infiniti",
+    1159: "Yujie",        1160: "Ferrari",      1161: "Fiat",
+    1163: "Geely",        1169: "Peugeot",
+
+    # --- Marques chinoises (codes > 1500) ---
+    1552: "BYD",          1559: "Baic Senova",  1561: "Bestune",
+    1566: "Borgward",     1571: "Changan",      1576: "Cowin",
+    1579: "DS",           1581: "Foton",        1584: "GAC",
+    1588: "Geely",        1599: "Great Wall",   1614: "Haval",
+    1621: "JAC",          1629: "JMC",          1631: "Jetour",
+    1633: "Jinbei",       1639: "Kaiyi",
+    1691: "Lynk & Co",    1709: "NIO",          1715: "ORA",
+    1737: "Qoros",        1745: "Roewe",        1747: "SAIC Maxus",
+    1763: "SWM",
+    1806: "Trumpchi",     1807: "VGV",          1808: "Voyah",
+    1834: "Wuling",       1843: "XPeng",        1849: "Yudo",
+    1855: "Zeekr",        1857: "Zhidou",       1869: "Zotye",
+    1870: "Wey",          1877: "Dongfeng",
+    1887: "Lancia",       1890: "Cupra",
+    1938: "Dacia",        1944: "Toyota",       1948: "Volkswagen",
+    1951: "Jeep",
 }
 
 VEHICLE_TYPE_LABELS = {

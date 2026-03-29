@@ -29,6 +29,9 @@
   var liveCounters = document.getElementById("hsh-live-counters");
   var filterInput = document.getElementById("hsh-tree-filter");
 
+  var activeContainer = document.getElementById("hsh-active-checkpoints");
+  var activeCountEl = document.getElementById("hsh-active-count");
+
   var config = {};
   var structure = [];
   var selectedLocations = [];
@@ -70,6 +73,7 @@
         loadStructure();
         loadErrors();
         loadLiveCounters();
+        loadActiveCheckpoints();
       });
   }
 
@@ -139,6 +143,37 @@
           errorsTbody.appendChild(tr);
         });
       });
+  }
+
+  function loadActiveCheckpoints() {
+    if (!activeContainer) return;
+    fetch("/api/live-controle/active-checkpoints")
+      .then(function (r) { return r.json(); })
+      .then(function (cps) {
+        activeContainer.textContent = "";
+        if (!cps || cps.length === 0) {
+          var nd = el("div", "hsh-no-data");
+          nd.textContent = "Aucune activite dans les 10 dernieres minutes";
+          activeContainer.appendChild(nd);
+          if (activeCountEl) activeCountEl.textContent = "";
+          return;
+        }
+        if (activeCountEl) activeCountEl.textContent = cps.length + " actif" + (cps.length > 1 ? "s" : "");
+        var wrap = el("div", "hsh-active-chips");
+        cps.forEach(function (cp) {
+          var chip = el("span", "hsh-active-chip");
+          var dot = el("span", "hsh-active-chip-dot");
+          chip.appendChild(dot);
+          var name = document.createTextNode(cp.location_name || ("ID " + cp.location_id));
+          chip.appendChild(name);
+          var count = el("span", "hsh-active-chip-count");
+          count.textContent = "E:" + cp.entries + " S:" + cp.exits;
+          chip.appendChild(count);
+          wrap.appendChild(chip);
+        });
+        activeContainer.appendChild(wrap);
+      })
+      .catch(function () {});
   }
 
   function loadLiveCounters() {
@@ -634,6 +669,6 @@
 
   loadEvents();
   loadConfig();
-  setInterval(function () { loadStatus(); loadLiveCounters(); }, 30000);
+  setInterval(function () { loadStatus(); loadLiveCounters(); loadActiveCheckpoints(); }, 30000);
 
 })();

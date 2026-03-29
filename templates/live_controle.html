@@ -37,13 +37,17 @@
         <span class="material-symbols-outlined">settings</span>
         <span class="label">Configuration</span>
       </a>
+      <a href="/analyse-ops" class="nav-btn">
+        <span class="material-symbols-outlined">biotech</span>
+        <span class="label">Analyse Ops</span>
+      </a>
       <a href="/anpr" class="nav-btn">
         <span class="material-symbols-outlined">directions_car</span>
         <span class="label">LAPI</span>
       </a>
-      <a href="/analyse-ops" class="nav-btn">
-        <span class="material-symbols-outlined">biotech</span>
-        <span class="label">Analyse Ops</span>
+      <a href="/admin/alertes" class="nav-btn">
+        <span class="material-symbols-outlined">notifications_active</span>
+        <span class="label">Alertes</span>
       </a>
     </nav>
 
@@ -71,10 +75,10 @@
       <div class="header-spacer"></div>
     </header>
 
-    <div id="main-content" style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+    <div id="main-content" class="hsh-page-grid">
 
       <!-- Colonne gauche : activation + arbre -->
-      <div style="display:flex; flex-direction:column; gap:16px;">
+      <div class="hsh-page-col">
 
         <!-- Activation -->
         <section class="widget-card">
@@ -100,25 +104,36 @@
         </section>
 
         <!-- Arbre des locations -->
-        <section class="widget-card" style="flex:1; min-height:0;">
+        <section class="widget-card hsh-stretch-card">
           <header class="widget-header">
             <h3>Arbre des locations</h3>
             <button id="hsh-save-locations" class="btn btn-xs btn-primary" disabled style="margin-left:auto;">Sauvegarder</button>
           </header>
-          <div class="widget-body" style="padding:0;">
+          <div class="widget-body" style="padding:0; display:flex; flex-direction:column; min-height:0; flex:1;">
             <div class="hsh-tree-search-bar">
               <span class="material-symbols-outlined hsh-tree-search-icon">search</span>
               <input type="search" id="hsh-tree-filter" class="hsh-tree-search-input" placeholder="Filtrer par nom ou type (venue, area, gate, checkpoint)...">
             </div>
-            <div id="hsh-tree" class="hsh-tree-container">
+            <div id="hsh-tree" class="hsh-tree-container" style="max-height:none; flex:1;">
               <div class="hsh-no-data">Aucune structure disponible. Activez le controle et attendez le premier cycle.</div>
             </div>
           </div>
         </section>
       </div>
 
-      <!-- Colonne droite : compteurs live + erreurs -->
-      <div style="display:flex; flex-direction:column; gap:16px;">
+      <!-- Colonne droite : checkpoints actifs + compteurs + erreurs -->
+      <div class="hsh-page-col">
+
+        <!-- Checkpoints actifs -->
+        <section class="widget-card">
+          <header class="widget-header">
+            <h3>Checkpoints actifs</h3>
+            <span id="hsh-active-count" class="hsh-active-count"></span>
+          </header>
+          <div class="widget-body" id="hsh-active-checkpoints" style="padding:6px 10px;">
+            <div class="hsh-no-data">Aucune activite</div>
+          </div>
+        </section>
 
         <!-- Compteurs live -->
         <section class="widget-card">
@@ -131,11 +146,11 @@
         </section>
 
         <!-- Erreurs recentes -->
-        <section class="widget-card" style="flex:1; min-height:0;">
+        <section class="widget-card hsh-stretch-card">
           <header class="widget-header">
             <h3>Erreurs recentes</h3>
           </header>
-          <div class="widget-body" style="padding:0; overflow-y:auto; max-height:400px;">
+          <div class="widget-body" style="padding:0; overflow-y:auto; flex:1; min-height:0;">
             <table class="table table-striped table-hover" style="font-size:0.82rem; margin:0;">
               <thead>
                 <tr>

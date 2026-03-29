@@ -847,7 +847,8 @@ var _alertColorMap = {
     "opening": "#f59e0b", "closing": "#f59e0b",
     "opened": "#22c55e", "closed": "#ef4444",
     "traffic-cluster": "#f97316",
-    "anpr-watchlist": "#dc2626"
+    "anpr-watchlist": "#dc2626",
+    "meteo": "#42a5f5"
 };
 var _alertTypeColors = {ACCIDENT: "#e53935", JAM: "#f59e0b", HAZARD: "#f97316", ROAD_CLOSED: "#8b5cf6"};
 var _alertTypeLabels = {ACCIDENT: "accident", JAM: "ralentissement", HAZARD: "danger", ROAD_CLOSED: "route fermee"};
@@ -869,6 +870,7 @@ function _renderAlertEntry(container, type, iconName, title, timeStr, message, o
 
     var entry = document.createElement("div");
     entry.className = "alert-history-entry";
+    entry.setAttribute("data-type", type);
     entry.style.borderLeftColor = color;
 
     // --- Header row (toujours visible) ---
@@ -1067,6 +1069,8 @@ function _pushAlertHistory(type, iconName, title, timeStr, message, onAction) {
             actionData: actionData
         })
     }).catch(function() {});
+
+    return entry;
 }
 
 // Charger l'historique depuis MongoDB au demarrage
