@@ -162,7 +162,8 @@ def build_context(db, sim_time=None):
 
 def _find_schedule(public_dates, now_local):
     """Trouve le schedule applicable : aujourd'hui ou overnight d'hier.
-    Retourne (schedule_doc, is_from_yesterday)."""
+    Retourne (schedule_doc, is_from_yesterday).
+    Inclut une marge de 5 min apres la fermeture pour la detection de transition."""
     today_iso = now_local.strftime("%Y-%m-%d")
     yesterday_iso = (now_local - timedelta(days=1)).strftime("%Y-%m-%d")
     now_minutes = now_local.hour * 60 + now_local.minute
@@ -172,13 +173,14 @@ def _find_schedule(public_dates, now_local):
         dates_by_key[d.get("date", "")] = d
 
     # 1) Verifier si on est dans la queue overnight d'hier
+    #    (avant fermeture + 5 min de marge pour la transition "site ferme")
     yesterday_pub = dates_by_key.get(yesterday_iso)
     if yesterday_pub and not yesterday_pub.get("is24h"):
         yd_open = parse_time_to_min(yesterday_pub.get("openTime"))
         yd_close = parse_time_to_min(yesterday_pub.get("closeTime"))
         if yd_open is not None and yd_close is not None and yd_close < yd_open:
             # Overnight : fermeture est apres minuit
-            if now_minutes < yd_close:
+            if now_minutes <= yd_close + 5:
                 return yesterday_pub, True
 
     # 2) Sinon, schedule d'aujourd'hui
