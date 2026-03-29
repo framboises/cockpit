@@ -28,6 +28,8 @@
   var errorsTbody = document.getElementById("hsh-errors-tbody");
   var liveCounters = document.getElementById("hsh-live-counters");
   var filterInput = document.getElementById("hsh-tree-filter");
+  var forceTxBtn = document.getElementById("hsh-force-tx");
+  var forceTxDays = document.getElementById("hsh-force-tx-days");
   var errorsFilterEvent = document.getElementById("hsh-errors-filter-event");
 
   var activeContainer = document.getElementById("hsh-active-checkpoints");
@@ -155,12 +157,12 @@
         activeContainer.textContent = "";
         if (!cps || cps.length === 0) {
           var nd = el("div", "hsh-no-data");
-          nd.textContent = "Aucune activite dans les 10 dernieres minutes";
+          nd.textContent = "Aucun checkpoint actif (0 scan dans les 10 dernieres min)";
           activeContainer.appendChild(nd);
           if (activeCountEl) activeCountEl.textContent = "";
           return;
         }
-        if (activeCountEl) activeCountEl.textContent = cps.length + " actif" + (cps.length > 1 ? "s" : "");
+        if (activeCountEl) activeCountEl.textContent = cps.length + " checkpoint" + (cps.length > 1 ? "s" : "");
         var wrap = el("div", "hsh-active-chips");
         cps.forEach(function (cp) {
           var chip = el("span", "hsh-active-chip");
@@ -168,9 +170,11 @@
           chip.appendChild(dot);
           var name = document.createTextNode(cp.location_name || ("ID " + cp.location_id));
           chip.appendChild(name);
-          var count = el("span", "hsh-active-chip-count");
-          count.textContent = "E:" + cp.entries + " S:" + cp.exits;
-          chip.appendChild(count);
+          if (cp.parent_gate) {
+            var gate = el("span", "hsh-active-chip-count");
+            gate.textContent = cp.parent_gate;
+            chip.appendChild(gate);
+          }
           wrap.appendChild(chip);
         });
         activeContainer.appendChild(wrap);
@@ -658,6 +662,27 @@
         }
       });
   });
+
+  if (forceTxBtn) {
+    forceTxBtn.addEventListener("click", function () {
+      var jours = forceTxDays ? parseInt(forceTxDays.value, 10) : 1;
+      if (!confirm("Forcer la collecte des transactions sur " + jours + " jour(s) ?\nCela sera execute au prochain cycle (max 2 min).")) return;
+      fetch("/api/live-controle/force-transactions", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ jours: jours }),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (r) {
+          if (r.ok) {
+            if (typeof showToast === "function") showToast("success", "Collecte forcee sur " + jours + " jour(s) au prochain cycle");
+            loadStatus();
+          } else {
+            if (typeof showToast === "function") showToast("error", r.error || "Erreur");
+          }
+        });
+    });
+  }
 
   if (errorsFilterEvent) {
     errorsFilterEvent.addEventListener("change", function () { loadErrors(); });

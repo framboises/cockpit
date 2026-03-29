@@ -7178,14 +7178,23 @@ th span { font-size: 0.88rem; font-weight: 700; }
   font-family: inherit;
 }
 
-/* Live-controle page — full-height grid */
-.hsh-page-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
-  flex: 1; min-height: 0;
+/* Live-controle page — isolated layout */
+.app-main.hsh-page {
+  overflow-y: hidden;
+  height: 100vh;
+}
+.hsh-page #main-content.hsh-page-grid {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 16px 20px;
 }
 .hsh-page-col {
   display: flex; flex-direction: column; gap: 16px;
-  min-height: 0;
+  min-height: 0; overflow: hidden;
 }
 .hsh-stretch-card {
   flex: 1; min-height: 0;
@@ -7193,6 +7202,11 @@ th span { font-size: 0.88rem; font-weight: 700; }
 }
 .hsh-stretch-card > .widget-body {
   flex: 1; min-height: 0; overflow-y: auto;
+}
+@media (max-width: 900px) {
+  .hsh-page #main-content.hsh-page-grid {
+    grid-template-columns: 1fr !important;
+  }
 }
 
 /* Checkpoints actifs — chips */
@@ -7264,6 +7278,18 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .anpr-kpi-l {
   font-size: 0.68rem; color: var(--muted); white-space: nowrap;
 }
+.anpr-kpi-onsite {
+  border-color: var(--brand); background: rgba(37,99,235,0.04);
+  align-items: center;
+}
+.anpr-kpi-onsite .anpr-kpi-n { font-size: 1.3rem; color: var(--brand); }
+.anpr-reset-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid var(--line); background: #fff; cursor: pointer;
+  color: var(--muted); transition: all 0.15s; margin-left: 2px;
+}
+.anpr-reset-btn:hover { border-color: var(--danger); color: var(--danger); }
 
 /* 2-column body: narrow feed left, wide analysis right */
 .anpr-body {
@@ -7461,11 +7487,12 @@ th span { font-size: 0.88rem; font-weight: 700; }
   border: 1px solid rgba(0,0,0,0.1); vertical-align: middle; flex-shrink: 0;
 }
 .anpr-dir {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 50%;
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 2px 8px; border-radius: 10px;
+  font-size: 0.7rem; font-weight: 600; white-space: nowrap;
 }
-.anpr-dir-forward { background: rgba(37,99,235,0.1); color: var(--brand); }
-.anpr-dir-reverse { background: rgba(245,158,11,0.1); color: var(--warning); }
+.anpr-dir-entry { background: rgba(22,163,74,0.1); color: var(--success); }
+.anpr-dir-exit  { background: rgba(220,38,38,0.1); color: var(--danger); }
 .anpr-dir-unknown { background: var(--bg); color: var(--muted); }
 
 /* Pagination */

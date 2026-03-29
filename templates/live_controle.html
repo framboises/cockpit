@@ -66,7 +66,7 @@
   </aside>
 
   <!-- Main -->
-  <div class="app-main single-col-page">
+  <div class="app-main single-col-page hsh-page">
 
     <header class="app-header">
       <span class="header-title">Controle d'acces</span>
@@ -99,6 +99,18 @@
             <button id="hsh-force-inventory" class="btn btn-xs btn-secondary" title="Relance l'inventaire complet au prochain cycle">
               <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">refresh</span>
               Forcer inventaire
+            </button>
+
+            <span style="border-left:1px solid var(--line); height:20px;"></span>
+
+            <select id="hsh-force-tx-days" class="hsh-select" style="width:auto;">
+              <option value="1">1 jour</option>
+              <option value="2">2 jours</option>
+              <option value="3">3 jours</option>
+            </select>
+            <button id="hsh-force-tx" class="btn btn-xs btn-secondary" title="Relance la collecte des transactions sur la periode choisie">
+              <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">history</span>
+              Forcer collecte
             </button>
           </div>
         </section>

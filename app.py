@@ -3094,6 +3094,28 @@ def hsh_force_inventory():
     return jsonify({"ok": True})
 
 
+@app.route('/api/live-controle/force-transactions', methods=['POST'])
+@role_required("admin")
+def hsh_force_transactions():
+    data = request.get_json(force=True)
+    jours = data.get("jours", 1)
+    try:
+        jours = int(jours)
+    except (ValueError, TypeError):
+        return jsonify({"ok": False, "error": "Valeur invalide"}), 400
+    if jours < 1 or jours > 3:
+        return jsonify({"ok": False, "error": "1 a 3 jours maximum"}), 400
+    db.data_access.update_one(
+        {"_id": HSH_GLOBAL_ID},
+        {"$set": {
+            "force_collecte_jours": jours,
+            "dernier_transaction_id": None,
+        }},
+        upsert=True,
+    )
+    return jsonify({"ok": True, "jours": jours})
+
+
 @app.route('/api/live-controle/structure', methods=['GET'])
 @role_required("user")
 def hsh_get_structure():
@@ -3201,37 +3223,22 @@ def hsh_get_counters():
 @app.route('/api/live-controle/active-checkpoints', methods=['GET'])
 @role_required("user")
 def hsh_get_active_checkpoints():
-    """Checkpoints avec au moins 1 transaction dans les 10 dernieres minutes."""
+    """Checkpoints ayant scanne au moins 1 transaction dans les 10 dernieres minutes."""
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
-    pipeline = [
-        {"$match": {"timestamp": {"$gte": cutoff}}},
-        {"$sort": {"timestamp": -1}},
-        {"$group": {
-            "_id": {"loc_id": "$requested_location_id", "loc_type": "$requested_location_type"},
-            "location_name": {"$first": "$location_name"},
-            "counter_name": {"$first": "$counter_name"},
-            "entries": {"$first": "$entries"},
-            "exits": {"$first": "$exits"},
-            "current": {"$first": "$current"},
-            "timestamp": {"$first": "$timestamp"},
-        }},
-    ]
-    docs = list(db.data_access.aggregate(pipeline))
+    docs = list(COL_HSH_STRUCTURE.find({
+        "location_type": "Checkpoint",
+        "derniere_transaction": {"$gte": cutoff},
+    }))
     result = []
     for d in docs:
-        entries = int(d.get("entries") or 0)
-        exits = int(d.get("exits") or 0)
-        if entries > 0 or exits > 0:
-            result.append({
-                "location_id": d["_id"]["loc_id"],
-                "location_type": d["_id"]["loc_type"],
-                "location_name": d.get("location_name") or d.get("counter_name") or "",
-                "entries": entries,
-                "exits": exits,
-                "current": int(d.get("current") or 0),
-                "timestamp": d["timestamp"].isoformat() if hasattr(d.get("timestamp"), "isoformat") else d.get("timestamp"),
-            })
-    result.sort(key=lambda x: x.get("entries", 0), reverse=True)
+        dt = d.get("derniere_transaction")
+        result.append({
+            "location_id": d.get("location_id"),
+            "location_name": d.get("location_name", ""),
+            "parent_gate": d.get("parent_gate", {}).get("name", ""),
+            "derniere_transaction": dt.isoformat() if hasattr(dt, "isoformat") else dt,
+        })
+    result.sort(key=lambda x: x.get("derniere_transaction", ""), reverse=True)
     return jsonify(result)
 
 

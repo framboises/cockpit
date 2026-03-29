@@ -726,12 +726,23 @@ def mettre_a_jour_arbre(txs, evenement):
         # Checkpoint → parents: Gate, Area, Venue
         if _id(cp):
             cp_doc_id = f"Checkpoint_{_id(cp)}"
+            # Extraire le timestamp de la transaction pour traquer l'activite
+            tx_date_str = tx.get("date_utc")
+            tx_ts = None
+            if tx_date_str:
+                try:
+                    tx_ts = datetime.datetime.strptime(
+                        tx_date_str, "%Y-%m-%dT%H:%M:%S"
+                    ).replace(tzinfo=datetime.timezone.utc)
+                except Exception:
+                    pass
             update_set = {
                 "location_id": _id(cp),
                 "location_name": _name(cp),
                 "location_type": "Checkpoint",
                 "evenement": evenement,
                 "derniere_maj": ts,
+                "derniere_transaction": tx_ts or ts,
             }
             if _id(gate):
                 update_set["parent_gate"] = {"id": _id(gate), "name": _name(gate)}
@@ -859,10 +870,30 @@ def executer_transactions(sock, doc_global):
     evenement_clean = doc_global.get("evenement_clean", "")
     last_tx_id = doc_global.get("dernier_transaction_id")
 
+    # Forçage de période depuis l'admin (1-3 jours)
+    force_jours = doc_global.get("force_collecte_jours")
+    if force_jours:
+        try:
+            force_jours = min(int(force_jours), 3)
+        except (ValueError, TypeError):
+            force_jours = None
+
     # Déterminer la fenêtre ou le curseur
     from_dt = None
     to_dt = None
-    if last_tx_id is None:
+    if force_jours:
+        # Forçage admin : remonter de N jours, ignorer le curseur
+        last_tx_id = None
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        from_utc = now_utc - datetime.timedelta(days=force_jours)
+        from_dt = from_utc.strftime("%Y-%m-%dT%H:%M:%S")
+        to_dt = now_utc.strftime("%Y-%m-%dT%H:%M:%S")
+        from_paris = from_utc.astimezone(TZ_PARIS).strftime("%d/%m %H:%M")
+        to_paris = now_utc.astimezone(TZ_PARIS).strftime("%d/%m %H:%M")
+        print(f"  Transactions: FORCE {force_jours}j — {from_paris} -> {to_paris} (heure Paris)")
+        # Nettoyer le flag immediatement
+        maj_global({"force_collecte_jours": None})
+    elif last_tx_id is None:
         now_utc = datetime.datetime.now(datetime.timezone.utc)
         if DEV_MODE:
             # Mode dev : toute la journée en cours (heure Paris)

@@ -13,6 +13,8 @@
         image:   "/api/anpr/image/",
         cameras: "/api/anpr/cameras",
         camCfg:  "/api/anpr/cameras/config",
+        onsite:  "/api/anpr/onsite",
+        onsiteReset: "/api/anpr/onsite/reset",
     };
 
     function qs(s, r) { return (r || document).querySelector(s); }
@@ -99,11 +101,13 @@
         loadWatchlist();
         buildChips();
         loadKPIs();
+        loadOnsite();
         loadLive();
         loadSearch();
         searchLoaded = true;
         bind();
         setInterval(loadLive, 5000);
+        setInterval(loadOnsite, 15000);
     }
 
     /* ---- color chips (circles) ---- */
@@ -143,6 +147,14 @@
         if (ts.options.length <= 1) (d.by_type || []).forEach(function (t) { ts.appendChild(new Option(t.label, t.type)); });
         if (bs.options.length <= 1) (d.by_brand || []).forEach(function (b) { bs.appendChild(new Option(b.brand, b.brand)); });
         if (cs.options.length <= 1) Object.keys(d.by_camera || {}).sort().forEach(function (c) { cs.appendChild(new Option(c, c)); });
+    }
+
+    /* ---- on-site counter ---- */
+    async function loadOnsite() {
+        try {
+            var d = await get(API.onsite);
+            animVal(qs("#kpi-onsite"), d.on_site);
+        } catch (e) { console.error("Onsite", e); }
     }
 
     /* ---- tabs ---- */
@@ -220,7 +232,13 @@
         tr.appendChild(mk("td", "", r.type_label));
         tr.appendChild(mk("td", "", r.camera));
         // dir
-        var tdd = document.createElement("td"); var ds = mk("span", "anpr-dir anpr-dir-" + r.direction); var di = mk("span", "material-symbols-outlined"); di.style.fontSize = "14px"; di.textContent = r.direction === "forward" ? "arrow_forward" : r.direction === "reverse" ? "arrow_back" : "help"; ds.appendChild(di); tdd.appendChild(ds); tr.appendChild(tdd);
+        var tdd = document.createElement("td"); var rd = r.resolved_dir || "unknown";
+        var ds = mk("span", "anpr-dir anpr-dir-" + rd);
+        var di = mk("span", "material-symbols-outlined"); di.style.fontSize = "14px";
+        di.textContent = rd === "entry" ? "login" : rd === "exit" ? "logout" : "help";
+        ds.appendChild(di);
+        ds.appendChild(document.createTextNode(rd === "entry" ? " Entree" : rd === "exit" ? " Sortie" : " ?"));
+        tdd.appendChild(ds); tr.appendChild(tdd);
         tr.appendChild(mk("td", "", fmtDt(r.event_dt)));
         tr.addEventListener("click", function () { openDetail(r); });
         return tr;
@@ -337,7 +355,10 @@
                 data.records.forEach(function (h) {
                     var it = mk("div", "anpr-history-item"); var dt = mk("span", "anpr-color-dot"); dt.style.background = h.color_hex; it.appendChild(dt);
                     it.appendChild(mk("span", "", fmtDt(h.event_dt))); it.appendChild(mk("span", "anpr-feed-cam", h.camera));
-                    var ds = mk("span", "anpr-dir anpr-dir-" + h.direction); var di = mk("span", "material-symbols-outlined"); di.style.fontSize = "14px"; di.textContent = h.direction === "forward" ? "arrow_forward" : "arrow_back"; ds.appendChild(di); it.appendChild(ds);
+                    var hrd = h.resolved_dir || "unknown";
+                    var ds = mk("span", "anpr-dir anpr-dir-" + hrd); var di = mk("span", "material-symbols-outlined"); di.style.fontSize = "14px";
+                    di.textContent = hrd === "entry" ? "login" : hrd === "exit" ? "logout" : "help";
+                    ds.appendChild(di); ds.appendChild(document.createTextNode(hrd === "entry" ? " E" : hrd === "exit" ? " S" : "")); it.appendChild(ds);
                     list.appendChild(it);
                 }); hist.appendChild(list);
             }).catch(function () { hist.textContent = ""; hist.appendChild(mk("div", "anpr-history-empty", "Erreur")); });
@@ -378,8 +399,13 @@
         qsa("[data-anpr-tab]").forEach(function (b) { b.addEventListener("click", function () { switchTab(b.dataset.anprTab); }); });
         // Default: activate search tab on first click (lazy)
         // Refresh
-        qs("#anpr-refresh-btn")?.addEventListener("click", function () { window._anprStats = null; statsLoaded = false; searchLoaded = false; loadKPIs(); loadLive(); switchTab(qs("[data-anpr-tab].active")?.dataset.anprTab || "search"); });
+        qs("#anpr-refresh-btn")?.addEventListener("click", function () { window._anprStats = null; statsLoaded = false; searchLoaded = false; loadKPIs(); loadOnsite(); loadLive(); switchTab(qs("[data-anpr-tab].active")?.dataset.anprTab || "search"); });
         qs("#anpr-config-btn")?.addEventListener("click", openCamCfg);
+        // On-site reset
+        qs("#anpr-reset-onsite")?.addEventListener("click", function () {
+            if (!confirm("Remettre le compteur de vehicules sur site a zero ?")) return;
+            post(API.onsiteReset, {}).then(function () { loadOnsite(); });
+        });
         // Search
         var pt; qs("#anpr-filter-plate")?.addEventListener("input", function () { clearTimeout(pt); pt = setTimeout(function () { page = 1; loadSearch(); }, 350); });
         ["#anpr-filter-type","#anpr-filter-brand","#anpr-filter-camera","#anpr-filter-from","#anpr-filter-to"].forEach(function (s) { qs(s)?.addEventListener("change", function () { page = 1; loadSearch(); }); });

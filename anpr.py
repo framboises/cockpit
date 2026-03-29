@@ -134,10 +134,11 @@ _db = None
 _col_anpr = None
 _fs = None
 _col_camera_config = None
+_col_site_counter = None
 
 
 def _ensure_db():
-    global _db, _col_anpr, _fs, _col_camera_config
+    global _db, _col_anpr, _fs, _col_camera_config, _col_site_counter
     if _db is not None:
         return
     uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
@@ -146,6 +147,7 @@ def _ensure_db():
     _col_anpr = _db["hik_anpr"]
     _fs = gridfs.GridFS(_db, collection="hik_images")
     _col_camera_config = _db["anpr_camera_config"]
+    _col_site_counter = _db["anpr_site_counter"]
 
     # Index
     _col_anpr.create_index([("event_dt", DESCENDING)])
@@ -158,8 +160,28 @@ def _brand(logo_id):
     return BRAND_MAP.get(logo_id, "Autre")
 
 
-def _serialize(doc):
+def _get_cam_configs():
+    """Return {camera_path: config_doc} dict, cached per-request."""
+    return {c["camera_path"]: c for c in _col_camera_config.find()}
+
+
+def _resolve_direction(raw_direction, camera_path, cam_configs):
+    """Resolve raw forward/reverse into entry/exit using camera config."""
+    cfg = cam_configs.get(camera_path, {})
+    fwd_role = cfg.get("forward_role", "entry")  # default: forward = entry
+    if raw_direction == "forward":
+        return "entry" if fwd_role == "entry" else "exit"
+    elif raw_direction == "reverse":
+        return "exit" if fwd_role == "entry" else "entry"
+    return "unknown"
+
+
+def _serialize(doc, cam_configs=None):
     """Serialize a single ANPR document for JSON."""
+    if cam_configs is None:
+        cam_configs = _get_cam_configs()
+    raw_dir = doc.get("direction", "")
+    camera = doc.get("camera_path", "")
     return {
         "id": str(doc["_id"]),
         "plate": doc.get("license_plate", ""),
@@ -171,8 +193,9 @@ def _serialize(doc):
         "type_label": VEHICLE_TYPE_LABELS.get(doc.get("vehicle_type", ""), doc.get("vehicle_type", "")),
         "brand": _brand(doc.get("vehicle_logo", 0)),
         "brand_id": doc.get("vehicle_logo", 0),
-        "camera": doc.get("camera_path", ""),
-        "direction": doc.get("direction", ""),
+        "camera": camera,
+        "direction": raw_dir,
+        "resolved_dir": _resolve_direction(raw_dir, camera, cam_configs),
         "event_dt": doc.get("event_dt", "").isoformat() if isinstance(doc.get("event_dt"), datetime) else str(doc.get("event_dt", "")),
         "plate_image_id": str(doc["plate_image_id"]) if doc.get("plate_image_id") else None,
         "vehicle_image_id": str(doc["vehicle_image_id"]) if doc.get("vehicle_image_id") else None,
@@ -201,6 +224,7 @@ def anpr_page():
 def anpr_search():
     """Search ANPR records with filters, pagination."""
     _ensure_db()
+    cam_cfgs = _get_cam_configs()
     query = {}
 
     # Plate search (partial match)
@@ -314,7 +338,7 @@ def anpr_search():
         "page": page,
         "per_page": per_page,
         "pages": max(1, (total + per_page - 1) // per_page),
-        "results": [_serialize(d) for d in docs],
+        "results": [_serialize(d, cam_cfgs) for d in docs],
     })
 
 
@@ -432,21 +456,23 @@ def anpr_stats():
 def anpr_live():
     """Last N detections for live feed."""
     _ensure_db()
-    n = min(20, int(request.args.get("n", 10)))
+    cam_cfgs = _get_cam_configs()
+    n = min(25, int(request.args.get("n", 10)))
     docs = list(_col_anpr.find({"license_plate": {"$ne": "UNKNOWN"}}).sort("event_dt", DESCENDING).limit(n))
-    return jsonify([_serialize(d) for d in docs])
+    return jsonify([_serialize(d, cam_cfgs) for d in docs])
 
 
 @anpr_bp.route("/api/anpr/plate/<plate>")
 def anpr_plate_history(plate):
     """All detections for a given plate."""
     _ensure_db()
+    cam_cfgs = _get_cam_configs()
     plate = plate.strip().upper()
     docs = list(_col_anpr.find({"license_plate": plate}).sort("event_dt", DESCENDING).limit(200))
     return jsonify({
         "plate": plate,
         "count": len(docs),
-        "records": [_serialize(d) for d in docs],
+        "records": [_serialize(d, cam_cfgs) for d in docs],
     })
 
 
@@ -574,3 +600,72 @@ def anpr_flow():
         "entries": [{"t": d["_id"].isoformat(), "n": d["count"]} for d in entries],
         "exits": [{"t": d["_id"].isoformat(), "n": d["count"]} for d in exits],
     })
+
+
+# ---------------------------------------------------------------------------
+# On-site vehicle counter (entries - exits since last reset)
+# ---------------------------------------------------------------------------
+
+def _count_direction(cam_configs, since, target_dir):
+    """Count detections resolved as 'entry' or 'exit' since a given datetime."""
+    match_conds = []
+    for cam_path, cfg in cam_configs.items():
+        fwd_role = cfg.get("forward_role", "entry")
+        if target_dir == "entry":
+            raw = "forward" if fwd_role == "entry" else "reverse"
+        else:
+            raw = "reverse" if fwd_role == "entry" else "forward"
+        match_conds.append({"camera_path": cam_path, "direction": raw})
+
+    # Also include cameras with no config (default forward=entry)
+    all_cams = _col_anpr.distinct("camera_path")
+    for cam in all_cams:
+        if cam not in cam_configs:
+            raw = "forward" if target_dir == "entry" else "reverse"
+            match_conds.append({"camera_path": cam, "direction": raw})
+
+    if not match_conds:
+        return 0
+
+    base = {"license_plate": {"$ne": "UNKNOWN"}, "event_dt": {"$gte": since}}
+    pipeline = [
+        {"$match": {**base, "$or": match_conds}},
+        {"$count": "n"},
+    ]
+    res = list(_col_anpr.aggregate(pipeline))
+    return res[0]["n"] if res else 0
+
+
+@anpr_bp.route("/api/anpr/onsite")
+def anpr_onsite():
+    """Vehicles currently on site = entries - exits since last reset."""
+    _ensure_db()
+    cam_configs = _get_cam_configs()
+
+    # Get reset timestamp (or epoch if never reset)
+    doc = _col_site_counter.find_one({"_id": "reset"})
+    reset_at = doc["reset_at"] if doc else datetime(2000, 1, 1)
+
+    entries = _count_direction(cam_configs, reset_at, "entry")
+    exits = _count_direction(cam_configs, reset_at, "exit")
+    on_site = max(0, entries - exits)
+
+    return jsonify({
+        "on_site": on_site,
+        "entries": entries,
+        "exits": exits,
+        "reset_at": reset_at.isoformat() if isinstance(reset_at, datetime) else str(reset_at),
+    })
+
+
+@anpr_bp.route("/api/anpr/onsite/reset", methods=["POST"])
+def anpr_onsite_reset():
+    """Reset the on-site counter to 0 (stores current timestamp)."""
+    _ensure_db()
+    now = datetime.now(timezone.utc)
+    _col_site_counter.update_one(
+        {"_id": "reset"},
+        {"$set": {"reset_at": now}},
+        upsert=True,
+    )
+    return jsonify({"ok": True, "reset_at": now.isoformat()})
