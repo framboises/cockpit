@@ -41,7 +41,8 @@
     "schedule_proximity": "Horaire - proximite",
     "schedule_transition": "Horaire - transition",
     "traffic_cluster": "Trafic - cluster",
-    "anpr_watchlist": "LAPI - plaque"
+    "anpr_watchlist": "LAPI - plaque",
+    "meteo_threshold": "Meteo - seuil"
   };
 
   var allGroups = [];

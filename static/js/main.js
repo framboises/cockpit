@@ -799,13 +799,15 @@ function findNextPublicDate(dates, afterISO) {
 // _pushAlertHistory est expose sur window pour que alert_poller.js puisse l'appeler
 
 // ---------- Historique d'alertes (widget droite) ----------
-var _alertIconMap = { opening: "door_open", opened: "lock_open", closing: "door_front", closed: "lock", "traffic-cluster": "emergency", "anpr-watchlist": "local_police" };
+var _alertIconMap = { opening: "door_open", opened: "lock_open", closing: "door_front", closed: "lock", "traffic-cluster": "emergency", "anpr-watchlist": "local_police", "meteo-vent": "air", "meteo-pluie": "umbrella", "meteo": "cloud" };
 var _alertColorMap = {
     "opening": "#f59e0b", "closing": "#f59e0b",
     "opened": "#22c55e", "closed": "#ef4444",
     "traffic-cluster": "#f97316",
     "anpr-watchlist": "#dc2626",
-    "meteo": "#42a5f5"
+    "meteo": "#42a5f5",
+    "meteo-vent": "#f97316",
+    "meteo-pluie": "#42a5f5"
 };
 var _alertTypeColors = {ACCIDENT: "#e53935", JAM: "#f59e0b", HAZARD: "#f97316", ROAD_CLOSED: "#8b5cf6"};
 var _alertTypeLabels = {ACCIDENT: "accident", JAM: "ralentissement", HAZARD: "danger", ROAD_CLOSED: "route fermee"};
@@ -1077,7 +1079,9 @@ var ALERT_PREF_TYPES = [
     {id: "closing", label: "Fermeture imminente"},
     {id: "closed", label: "Site ferme"},
     {id: "traffic-cluster", label: "Alerte trafic (cluster)"},
-    {id: "anpr-watchlist", label: "Plaque surveillee (LAPI)"}
+    {id: "anpr-watchlist", label: "Plaque surveillee (LAPI)"},
+    {id: "meteo-vent", label: "Alerte vent fort"},
+    {id: "meteo-pluie", label: "Alerte pluie forte"}
 ];
 
 function _getAlertPrefs() {

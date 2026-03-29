@@ -211,6 +211,30 @@ _ALERT_SEEDS = [
         "groups": [],
         "priority": 6,
     },
+    {
+        "slug": "meteo-vent",
+        "name": "Alerte vent fort",
+        "description": "Rafales de vent depassant le seuil d'alerte",
+        "icon": "air",
+        "color": "#f97316",
+        "detection_type": "meteo_threshold",
+        "params": {"field": "vent_rafale", "warn": 40, "alert": 60, "unit": "km/h"},
+        "enabled": True,
+        "groups": [],
+        "priority": 7,
+    },
+    {
+        "slug": "meteo-pluie",
+        "name": "Alerte pluie forte",
+        "description": "Precipitations depassant le seuil d'alerte",
+        "icon": "umbrella",
+        "color": "#42a5f5",
+        "detection_type": "meteo_threshold",
+        "params": {"field": "pluviometrie", "warn": 5, "alert": 15, "unit": "mm"},
+        "enabled": True,
+        "groups": [],
+        "priority": 8,
+    },
 ]
 for _seed in _ALERT_SEEDS:
     COL_ALERT_DEFS.update_one(
@@ -2228,7 +2252,7 @@ def delete_group(gid):
 # Types de detection disponibles (pour validation)
 DETECTION_TYPES = {
     "schedule_proximity", "schedule_transition",
-    "traffic_cluster", "anpr_watchlist",
+    "traffic_cluster", "anpr_watchlist", "meteo_threshold",
 }
 
 @app.route('/admin/alertes')

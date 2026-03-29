@@ -13,13 +13,17 @@
         opening: "door_open", opened: "lock_open",
         closing: "door_front", closed: "lock",
         "traffic-cluster": "emergency",
-        "anpr-watchlist": "local_police"
+        "anpr-watchlist": "local_police",
+        "meteo-vent": "air",
+        "meteo-pluie": "umbrella"
     };
     var TITLE_MAP = {
         opening: "OUVERTURE IMMINENTE", opened: "SITE OUVERT",
         closing: "FERMETURE IMMINENTE", closed: "SITE FERME",
         "traffic-cluster": "ALERTE TRAFIC",
-        "anpr-watchlist": "PLAQUE SURVEILLEE DETECTEE"
+        "anpr-watchlist": "PLAQUE SURVEILLEE DETECTEE",
+        "meteo-vent": "ALERTE VENT",
+        "meteo-pluie": "ALERTE PLUIE"
     };
 
     // --- Preferences alertes (localStorage) ---

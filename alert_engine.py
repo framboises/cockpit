@@ -487,6 +487,95 @@ def detect_anpr_watchlist(definition, context):
     return results if results else None
 
 
+def detect_meteo_threshold(definition, context):
+    """Detecte les depassements de seuils meteo (vent, pluie)."""
+    db = get_db()
+    now = context["now"]
+
+    params = definition.get("params") or {}
+    field = params.get("field", "")  # "vent_rafale" ou "pluviometrie"
+    warn_threshold = params.get("warn", 0)
+    alert_threshold = params.get("alert", 0)
+    unit = params.get("unit", "")
+
+    try:
+        from zoneinfo import ZoneInfo
+        paris = ZoneInfo("Europe/Paris")
+        now_local = now.astimezone(paris)
+    except Exception:
+        now_local = now
+
+    today_str = now_local.strftime("%Y-%m-%d")
+    current_hour = now_local.strftime("%H:00")
+
+    previsions = db["meteo_previsions"].find_one({"Date": today_str})
+    if not previsions or "Heures" not in previsions:
+        return None
+
+    heures = previsions["Heures"]
+    # Heures restantes de la journee
+    upcoming = [h for h in heures if h.get("Heure", "") >= current_hour]
+    if not upcoming:
+        return None
+
+    # Mapping champ -> cles MongoDB possibles
+    FIELD_KEYS = {
+        "vent_rafale": ["Vent rafale (km/h)"],
+        "pluviometrie": ["Pluviometrie (mm)", "Pluviom\u00e9trie (mm)"],
+    }
+    keys = FIELD_KEYS.get(field, [])
+    if not keys:
+        return None
+
+    # Trouver la valeur max dans les heures a venir
+    max_val = 0
+    max_hour = ""
+    for h in upcoming:
+        val = 0
+        for k in keys:
+            v = h.get(k)
+            if v is not None:
+                val = float(v)
+                break
+        if val > max_val:
+            max_val = val
+            max_hour = h.get("Heure", "")
+
+    if max_val < warn_threshold:
+        return None
+
+    severity = "alerte" if max_val >= alert_threshold else "vigilance"
+    slug = definition["slug"]
+    dedup = "%s-%s" % (slug, today_str)
+
+    # Ne pas re-declencher si deja envoye aujourd'hui avec meme severite ou pire
+    existing = db["cockpit_active_alerts"].find_one({"dedup_key": dedup})
+    if existing:
+        return None
+
+    if field == "vent_rafale":
+        title = "ALERTE VENT" if severity == "alerte" else "VIGILANCE VENT"
+        message = "Rafales de %d %s prevues a %s" % (int(max_val), unit, max_hour)
+    elif field == "pluviometrie":
+        title = "ALERTE PLUIE" if severity == "alerte" else "VIGILANCE PLUIE"
+        message = "Precipitations de %.1f %s prevues a %s" % (max_val, unit, max_hour)
+    else:
+        title = "ALERTE METEO"
+        message = "%s : %.1f %s a %s" % (field, max_val, unit, max_hour)
+
+    return {
+        "definition_slug": slug,
+        "event": context.get("event", ""),
+        "year": context.get("year", ""),
+        "title": title,
+        "message": message,
+        "timeStr": max_hour,
+        "dedup_key": dedup,
+        "triggeredAt": now,
+        "expiresAt": now + timedelta(hours=3),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Registre des handlers
 # ---------------------------------------------------------------------------
@@ -496,6 +585,7 @@ HANDLERS = {
     "schedule_transition": detect_schedule_transition,
     "traffic_cluster": detect_traffic_cluster,
     "anpr_watchlist": detect_anpr_watchlist,
+    "meteo_threshold": detect_meteo_threshold,
 }
 
 # ---------------------------------------------------------------------------
