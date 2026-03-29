@@ -1878,7 +1878,13 @@ COL_TODOS = db['todos']  # schema: { type:str, todos:[str], createdAt, updatedAt
 def _pub(doc):
     if not doc: return None
     d = dict(doc)
-    d['_id'] = str(d['_id'])
+    for k, v in d.items():
+        if isinstance(v, ObjectId):
+            d[k] = str(v)
+        elif isinstance(v, list):
+            d[k] = [str(x) if isinstance(x, ObjectId) else x for x in v]
+        elif hasattr(v, 'isoformat'):
+            d[k] = v.isoformat()
     return d
 
 @app.route('/api/todo-sets', methods=['GET'])
