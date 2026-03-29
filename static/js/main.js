@@ -398,7 +398,6 @@ function loadCockpitData() {
         updateUpcomingEvents();
         if (window._statusParamData) {
             computeAndRenderStatus(window._statusParamData);
-            checkCriticalAlerts(window._statusParamData);
         }
     }, 30000);
 
@@ -436,14 +435,12 @@ function updateEventStatus() {
             // Store for live updates
             window._statusParamData = data;
             computeAndRenderStatus(data);
-            checkCriticalAlerts(data);
 
             // Live update every 5s
             if (_statusTimer) clearInterval(_statusTimer);
             _statusTimer = setInterval(function () {
                 if (window._statusParamData) {
                     computeAndRenderStatus(window._statusParamData);
-                    checkCriticalAlerts(window._statusParamData);
                 }
             }, 5000);
         })
@@ -799,155 +796,58 @@ function findNextPublicDate(dates, afterISO) {
 }
 
 // ==========================================================================
-// CRITICAL ALERTS (30 min avant ouverture/fermeture)
+// POLLING ALERTES SERVEUR (remplace la detection client)
 // ==========================================================================
 
-var _alertShown = {};  // track shown alerts to avoid repeats
+var _seenAlertIds = {};
 
-var _lastAlertStatus = null; // track previous status to detect transitions
-
-function checkCriticalAlerts(paramData) {
-    var gh = paramData.globalHoraires;
-    if (!gh || !gh.dates) return;
-
-    var now = (window.TimelineClock && typeof window.TimelineClock.get === "function")
-        ? window.TimelineClock.get() : new Date();
-    var todayISO = now.getFullYear() + "-" +
-        String(now.getMonth() + 1).padStart(2, "0") + "-" +
-        String(now.getDate()).padStart(2, "0");
-    var nowMinutes = now.getHours() * 60 + now.getMinutes();
-
-    var publicDates = gh.dates || [];
-    var todayPublic = publicDates.find(function (d) { return d.date === todayISO; });
-
-    // Also check yesterday for overnight closings
-    var yesterdayDate = new Date(now.getTime() - 86400000);
-    var yesterdayISO = yesterdayDate.getFullYear() + "-" +
-        String(yesterdayDate.getMonth() + 1).padStart(2, "0") + "-" +
-        String(yesterdayDate.getDate()).padStart(2, "0");
-    var yesterdayPublic = publicDates.find(function (d) { return d.date === yesterdayISO; });
-
-    // Determine current status: "before-open" | "open" | "closing-soon" | "closed"
-    var currentStatus = "none";
-    var alertTime = null;
-    var alertMsg = null;
-
-    // Check overnight tail from yesterday
-    if (yesterdayPublic && !yesterdayPublic.is24h) {
-        var ydOpenMin = parseTimeToMin(yesterdayPublic.openTime);
-        var ydCloseMin = parseTimeToMin(yesterdayPublic.closeTime);
-        if (ydOpenMin !== null && ydCloseMin !== null && ydCloseMin < ydOpenMin) {
-            // Overnight: still open from yesterday
-            if (nowMinutes < ydCloseMin) {
-                var untilClose = ydCloseMin - nowMinutes;
-                if (untilClose <= 30) {
-                    currentStatus = "closing-soon";
-                    alertTime = yesterdayPublic.closeTime;
-                    alertMsg = "Fermeture au public dans " + formatMinutesDelta(untilClose);
-                } else {
-                    currentStatus = "open";
+function pollActiveAlerts() {
+    fetch("/api/active-alerts")
+        .then(function(r) { return r.json(); })
+        .then(function(alerts) {
+            if (!Array.isArray(alerts)) return;
+            alerts.forEach(function(a) {
+                if (_seenAlertIds[a._id]) return;
+                _seenAlertIds[a._id] = true;
+                var slug = a.definition_slug || "";
+                var onView = null;
+                // Cluster trafic : bouton "Voir sur la carte"
+                if (slug === "traffic-cluster" && a.actionData && a.actionData.pins) {
+                    onView = function() {
+                        window._allAlertPinsData = a.actionData.pins;
+                        if (window.CockpitMapView && window.CockpitMapView.switchView) {
+                            window.CockpitMapView.switchView("map");
+                            setTimeout(function() {
+                                document.dispatchEvent(new CustomEvent("showAllAlertPins"));
+                            }, 400);
+                        }
+                    };
                 }
-            } else if (nowMinutes >= ydCloseMin && (!todayPublic || nowMinutes < parseTimeToMin(todayPublic.openTime))) {
-                currentStatus = "closed";
-                alertTime = yesterdayPublic.closeTime;
-                alertMsg = "Le site est maintenant ferme au public";
-            }
-        }
-    }
-
-    // Today's schedule takes priority if we haven't resolved a status from overnight
-    if (currentStatus === "none" && todayPublic && !todayPublic.is24h) {
-        var openMin = parseTimeToMin(todayPublic.openTime);
-        var closeMin = parseTimeToMin(todayPublic.closeTime);
-        if (openMin !== null && closeMin !== null) {
-            var isOvernight = closeMin < openMin;
-
-            if (nowMinutes < openMin) {
-                // Before opening
-                var untilOpen = openMin - nowMinutes;
-                if (untilOpen <= 30) {
-                    currentStatus = "opening-soon";
-                    alertTime = todayPublic.openTime;
-                    alertMsg = "Ouverture au public dans " + formatMinutesDelta(untilOpen);
-                } else {
-                    currentStatus = "before-open";
+                // ANPR watchlist : bouton "Voir sur LAPI"
+                if (slug === "anpr-watchlist" && a.actionData && a.actionData.plate) {
+                    onView = function() {
+                        window.open("/anpr?plate=" + encodeURIComponent(a.actionData.plate), "_blank");
+                    };
                 }
-            } else if (isOvernight || nowMinutes < closeMin) {
-                // Currently open
-                var effectiveClose = isOvernight ? (1440 + closeMin) : closeMin;
-                var untilClose = effectiveClose - nowMinutes;
-                if (untilClose <= 30) {
-                    currentStatus = "closing-soon";
-                    alertTime = todayPublic.closeTime;
-                    alertMsg = "Fermeture au public dans " + formatMinutesDelta(untilClose);
-                } else {
-                    currentStatus = "open";
-                }
-            } else {
-                // After close (same day, not overnight)
-                currentStatus = "closed";
-                alertTime = todayPublic.closeTime;
-                alertMsg = "Le site est maintenant ferme au public";
-            }
-        }
-    }
-
-    if (currentStatus === "none") {
-        _lastAlertStatus = null;
-        return;
-    }
-
-    // Detect transitions and fire alerts
-    var prev = _lastAlertStatus;
-    _lastAlertStatus = currentStatus;
-
-    if (!prev) return; // first check, just record state
-
-    // Transition: was not open -> now open
-    if (currentStatus === "open" && prev !== "open" && prev !== "closing-soon") {
-        var td = todayPublic || yesterdayPublic;
-        var alertKeyOpened = "opened-" + todayISO;
-        if (!_alertShown[alertKeyOpened]) {
-            _alertShown[alertKeyOpened] = true;
-            showCriticalAlert("opened", td ? td.openTime : "",
-                "Le site est maintenant ouvert au public");
-        }
-    }
-
-    // Transition: entering opening-soon zone
-    if (currentStatus === "opening-soon" && prev !== "opening-soon") {
-        var alertKeyOpening = "opening-" + todayISO;
-        if (!_alertShown[alertKeyOpening]) {
-            _alertShown[alertKeyOpening] = true;
-            showCriticalAlert("opening", alertTime, alertMsg);
-        }
-    }
-
-    // Transition: entering closing-soon zone
-    if (currentStatus === "closing-soon" && prev !== "closing-soon") {
-        var alertKeyClosing = "closing-" + todayISO;
-        if (!_alertShown[alertKeyClosing]) {
-            _alertShown[alertKeyClosing] = true;
-            showCriticalAlert("closing", alertTime, alertMsg);
-        }
-    }
-
-    // Transition: was open/closing-soon -> now closed
-    if (currentStatus === "closed" && (prev === "open" || prev === "closing-soon")) {
-        var alertKeyClosed = "closed-" + todayISO;
-        if (!_alertShown[alertKeyClosed]) {
-            _alertShown[alertKeyClosed] = true;
-            showCriticalAlert("closed", alertTime, alertMsg);
-        }
-    }
+                showCriticalAlert(slug, a.timeStr || "", a.message || "", onView);
+            });
+        })
+        .catch(function() {});
 }
 
+// Demarrage du polling toutes les 10s
+document.addEventListener("DOMContentLoaded", function() {
+    pollActiveAlerts();
+    setInterval(pollActiveAlerts, 10000);
+});
+
 // ---------- Historique d'alertes (widget droite) ----------
-var _alertIconMap = { opening: "door_open", opened: "lock_open", closing: "door_front", closed: "lock", "traffic-cluster": "emergency" };
+var _alertIconMap = { opening: "door_open", opened: "lock_open", closing: "door_front", closed: "lock", "traffic-cluster": "emergency", "anpr-watchlist": "local_police" };
 var _alertColorMap = {
     "opening": "#f59e0b", "closing": "#f59e0b",
     "opened": "#22c55e", "closed": "#ef4444",
-    "traffic-cluster": "#f97316"
+    "traffic-cluster": "#f97316",
+    "anpr-watchlist": "#dc2626"
 };
 var _alertTypeColors = {ACCIDENT: "#e53935", JAM: "#f59e0b", HAZARD: "#f97316", ROAD_CLOSED: "#8b5cf6"};
 var _alertTypeLabels = {ACCIDENT: "accident", JAM: "ralentissement", HAZARD: "danger", ROAD_CLOSED: "route fermee"};
@@ -1215,7 +1115,8 @@ var ALERT_PREF_TYPES = [
     {id: "opened", label: "Site ouvert"},
     {id: "closing", label: "Fermeture imminente"},
     {id: "closed", label: "Site ferme"},
-    {id: "traffic-cluster", label: "Alerte trafic (cluster)"}
+    {id: "traffic-cluster", label: "Alerte trafic (cluster)"},
+    {id: "anpr-watchlist", label: "Plaque surveillee (LAPI)"}
 ];
 
 function _getAlertPrefs() {
@@ -1292,17 +1193,21 @@ function _renderAlertPrefs(dropdown) {
 }
 
 function showCriticalAlert(type, timeStr, message, onView) {
-    var iconMap = { opening: "door_open", opened: "lock_open", closing: "door_front", closed: "lock", "traffic-cluster": "emergency" };
-    var titleMap = { opening: "OUVERTURE IMMINENTE", opened: "SITE OUVERT", closing: "FERMETURE IMMINENTE", closed: "SITE FERME", "traffic-cluster": "ALERTE TRAFIC" };
+    var iconMap = {
+        opening: "door_open", opened: "lock_open",
+        closing: "door_front", closed: "lock",
+        "traffic-cluster": "emergency",
+        "anpr-watchlist": "local_police"
+    };
+    var titleMap = {
+        opening: "OUVERTURE IMMINENTE", opened: "SITE OUVERT",
+        closing: "FERMETURE IMMINENTE", closed: "SITE FERME",
+        "traffic-cluster": "ALERTE TRAFIC",
+        "anpr-watchlist": "PLAQUE SURVEILLEE DETECTEE"
+    };
 
     // Toujours historiser dans le widget droite
     _pushAlertHistory(type, iconMap[type] || "info", titleMap[type] || type, timeStr, message, onView);
-
-    // Verifier permissions groupe (window.__trafficAlerts)
-    var groupAlerts = window.__trafficAlerts;
-    if (groupAlerts !== null && groupAlerts !== undefined) {
-        if (Array.isArray(groupAlerts) && groupAlerts.indexOf(type) < 0) return;
-    }
 
     // Si mutee par les prefs perso, ne pas afficher le fullscreen
     if (isAlertMuted(type)) return;

@@ -93,9 +93,17 @@ CORS(app)  # Activer CORS pour toutes les routes
 COL_GROUPS = db['cockpit_groups']
 COL_USER_GROUPS = db['cockpit_user_groups']
 COL_ALERT_HISTORY = db['cockpit_alert_history']
+COL_ALERT_DEFS = db['cockpit_alert_definitions']
+COL_ACTIVE_ALERTS = db['cockpit_active_alerts']
+COL_ANPR_WATCHLIST = db['cockpit_anpr_watchlist']
 COL_GROUPS.create_index("name", unique=True)
 COL_USER_GROUPS.create_index("user_id", unique=True)
 COL_ALERT_HISTORY.create_index("createdAt", expireAfterSeconds=7*24*3600)  # TTL 7 jours
+COL_ALERT_DEFS.create_index("slug", unique=True)
+COL_ACTIVE_ALERTS.create_index("expiresAt", expireAfterSeconds=0)  # TTL
+COL_ACTIVE_ALERTS.create_index("dedup_key", unique=True, sparse=True)
+COL_ACTIVE_ALERTS.create_index("definition_slug")
+COL_ANPR_WATCHLIST.create_index("plate", unique=True)
 
 # Groupes systeme (non supprimables)
 DEFAULT_GROUP_NAME = "__default__"
@@ -128,6 +136,92 @@ COL_GROUPS.update_one(
     }},
     upsert=True
 )
+
+# Seed des definitions d'alertes
+_ALERT_SEEDS = [
+    {
+        "slug": "opening",
+        "name": "Ouverture imminente",
+        "description": "Alerte 30 min avant l'ouverture au public",
+        "icon": "door_open",
+        "color": "#f59e0b",
+        "detection_type": "schedule_proximity",
+        "params": {"minutes_before": 30, "schedule_event": "open"},
+        "enabled": True,
+        "groups": [],
+        "priority": 1,
+    },
+    {
+        "slug": "opened",
+        "name": "Site ouvert",
+        "description": "Le site est ouvert au public",
+        "icon": "door_front",
+        "color": "#22c55e",
+        "detection_type": "schedule_transition",
+        "params": {"transition": "open"},
+        "enabled": True,
+        "groups": [],
+        "priority": 2,
+    },
+    {
+        "slug": "closing",
+        "name": "Fermeture imminente",
+        "description": "Alerte 30 min avant la fermeture au public",
+        "icon": "door_back",
+        "color": "#f59e0b",
+        "detection_type": "schedule_proximity",
+        "params": {"minutes_before": 30, "schedule_event": "close"},
+        "enabled": True,
+        "groups": [],
+        "priority": 3,
+    },
+    {
+        "slug": "closed",
+        "name": "Site ferme",
+        "description": "Le site est ferme au public",
+        "icon": "door_sliding",
+        "color": "#ef4444",
+        "detection_type": "schedule_transition",
+        "params": {"transition": "close"},
+        "enabled": True,
+        "groups": [],
+        "priority": 4,
+    },
+    {
+        "slug": "traffic-cluster",
+        "name": "Zone critique trafic",
+        "description": "Cluster d'incidents trafic dans un rayon restreint",
+        "icon": "traffic",
+        "color": "#f97316",
+        "detection_type": "traffic_cluster",
+        "params": {"radius_m": 500, "threshold": 12},
+        "enabled": True,
+        "groups": [],
+        "priority": 5,
+    },
+    {
+        "slug": "anpr-watchlist",
+        "name": "Plaque surveillee detectee",
+        "description": "Une plaque d'immatriculation surveillee a ete detectee par le systeme LAPI",
+        "icon": "local_police",
+        "color": "#dc2626",
+        "detection_type": "anpr_watchlist",
+        "params": {},
+        "enabled": True,
+        "groups": [],
+        "priority": 6,
+    },
+]
+for _seed in _ALERT_SEEDS:
+    COL_ALERT_DEFS.update_one(
+        {"slug": _seed["slug"]},
+        {"$setOnInsert": {
+            **_seed,
+            "createdAt": datetime.now(timezone.utc),
+            "updatedAt": datetime.now(timezone.utc),
+        }},
+        upsert=True
+    )
 
 # Seed fake users en mode CODING pour tester la gestion des groupes
 if CODING:
@@ -294,36 +388,6 @@ def _get_default_blocks():
         return None
     return set(ab)
 
-def get_user_traffic_alerts(payload):
-    """Retourne la liste des types d'alertes trafic autorises, ou None si aucune restriction."""
-    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
-        return None  # admin voit tout
-    email = payload.get("email", "")
-    user_doc = db['users'].find_one({"email": email}, {"_id": 1})
-    if not user_doc:
-        return _get_default_traffic_alerts()
-    uid = user_doc["_id"]
-    ug = COL_USER_GROUPS.find_one({"user_id": uid})
-    group_ids = (ug.get("groups") or []) if ug else []
-    if not group_ids:
-        return _get_default_traffic_alerts()
-    groups = list(COL_GROUPS.find({"_id": {"$in": group_ids}}))
-    alerts = set()
-    for g in groups:
-        ta = g.get("traffic_alerts")
-        if ta is None:
-            return None  # un groupe sans restriction = tout autorise
-        alerts.update(ta)
-    return list(alerts) if alerts else []
-
-def _get_default_traffic_alerts():
-    """Retourne les alertes trafic du groupe __default__, ou None."""
-    default_group = COL_GROUPS.find_one({"name": DEFAULT_GROUP_NAME})
-    if not default_group:
-        return None
-    ta = default_group.get("traffic_alerts")
-    return list(ta) if ta else None
-
 def block_required(block_id):
     """Decorateur: retourne 403 si le user n'a pas acces a ce bloc."""
     def decorator(f):
@@ -378,14 +442,11 @@ def index():
                 groups = list(COL_GROUPS.find({"_id": {"$in": gids}, "name": {"$nin": list(SYSTEM_GROUP_NAMES)}}))
                 user_group_pills = [{"name": g["name"], "color": g.get("color", "#6366f1")} for g in groups]
     user_groups_json = json.dumps(user_group_pills)
-    traffic_alerts = get_user_traffic_alerts(payload)
-    traffic_alerts_json = json.dumps(traffic_alerts)
     return render_template("index.html", user_roles=user_roles, user_apps=user_apps,
                            user_firstname=user_firstname, user_lastname=user_lastname,
                            user_email=user_email,
                            allowed_blocks_json=allowed_blocks_json,
-                           user_groups_json=user_groups_json,
-                           traffic_alerts_json=traffic_alerts_json)
+                           user_groups_json=user_groups_json)
 
 @app.errorhandler(404)
 def page_not_found(e):
@@ -2153,6 +2214,210 @@ def delete_group(gid):
     # Retirer ce groupe de tous les user_groups
     COL_USER_GROUPS.update_many({}, {"$pull": {"groups": oid}})
     return jsonify({"ok": True})
+
+################################################################################
+# Centrale d'Alerte - Definitions & Watchlist ANPR
+################################################################################
+
+# Types de detection disponibles (pour validation)
+DETECTION_TYPES = {
+    "schedule_proximity", "schedule_transition",
+    "traffic_cluster", "anpr_watchlist",
+}
+
+@app.route('/admin/alertes')
+@role_required("admin")
+def alertes_admin():
+    payload = getattr(request, 'user_payload', {})
+    return render_template('alertes_admin.html',
+                           user_firstname=payload.get("firstname", ""),
+                           user_lastname=payload.get("lastname", ""),
+                           user_email=payload.get("email", ""),
+                           app_role=payload.get("app_role", "user"))
+
+# --- CRUD definitions d'alertes ---
+
+@app.route('/api/alert-definitions', methods=['GET'])
+@role_required("admin")
+def list_alert_definitions():
+    docs = list(COL_ALERT_DEFS.find().sort([('priority', 1)]))
+    return jsonify([_pub(d) for d in docs])
+
+@app.route('/api/alert-definitions', methods=['POST'])
+@role_required("admin")
+def create_alert_definition():
+    data = request.get_json(force=True) or {}
+    slug = (data.get('slug') or '').strip()
+    name = (data.get('name') or '').strip()
+    if not slug or not name:
+        return jsonify({"error": "slug et name sont requis"}), 400
+    if COL_ALERT_DEFS.find_one({"slug": slug}):
+        return jsonify({"error": "Une alerte avec ce slug existe deja"}), 409
+    detection_type = data.get('detection_type', '')
+    if detection_type not in DETECTION_TYPES:
+        return jsonify({"error": "Type de detection invalide"}), 400
+    raw_groups = data.get('groups') or []
+    group_oids = [ObjectId(g) for g in raw_groups if g]
+    doc = {
+        'slug': slug,
+        'name': name,
+        'description': (data.get('description') or '').strip(),
+        'icon': (data.get('icon') or 'notifications').strip(),
+        'color': (data.get('color') or '#6366f1').strip(),
+        'detection_type': detection_type,
+        'params': data.get('params') or {},
+        'enabled': bool(data.get('enabled', True)),
+        'groups': group_oids,
+        'priority': data.get('priority', 99),
+        'createdAt': datetime.now(timezone.utc),
+        'updatedAt': datetime.now(timezone.utc),
+    }
+    ins = COL_ALERT_DEFS.insert_one(doc)
+    doc['_id'] = ins.inserted_id
+    return jsonify(_pub(doc)), 201
+
+@app.route('/api/alert-definitions/<did>', methods=['PUT'])
+@role_required("admin")
+def update_alert_definition(did):
+    data = request.get_json(force=True) or {}
+    patch = {}
+    if 'name' in data:
+        patch['name'] = (data['name'] or '').strip()
+    if 'description' in data:
+        patch['description'] = (data['description'] or '').strip()
+    if 'icon' in data:
+        patch['icon'] = (data['icon'] or '').strip()
+    if 'color' in data:
+        patch['color'] = (data['color'] or '').strip()
+    if 'enabled' in data:
+        patch['enabled'] = bool(data['enabled'])
+    if 'params' in data:
+        patch['params'] = data['params'] or {}
+    if 'priority' in data:
+        patch['priority'] = int(data.get('priority', 99))
+    if 'groups' in data:
+        raw_groups = data['groups'] or []
+        patch['groups'] = [ObjectId(g) for g in raw_groups if g]
+    if not patch:
+        return jsonify({"error": "Rien a modifier"}), 400
+    patch['updatedAt'] = datetime.now(timezone.utc)
+    res = COL_ALERT_DEFS.find_one_and_update(
+        {"_id": ObjectId(did)}, {"$set": patch}, return_document=True
+    )
+    if not res:
+        return jsonify({"error": "Definition introuvable"}), 404
+    return jsonify(_pub(res))
+
+@app.route('/api/alert-definitions/<did>', methods=['DELETE'])
+@role_required("admin")
+def delete_alert_definition(did):
+    r = COL_ALERT_DEFS.delete_one({"_id": ObjectId(did)})
+    if r.deleted_count == 0:
+        return jsonify({"error": "Definition introuvable"}), 404
+    return jsonify({"ok": True})
+
+# --- Watchlist ANPR ---
+
+@app.route('/api/anpr-watchlist', methods=['GET'])
+@role_required("admin")
+def list_anpr_watchlist():
+    docs = list(COL_ANPR_WATCHLIST.find().sort([('createdAt', -1)]))
+    return jsonify([_pub(d) for d in docs])
+
+@app.route('/api/anpr-watchlist', methods=['POST'])
+@role_required("admin")
+def add_anpr_watchlist():
+    data = request.get_json(force=True) or {}
+    plate = (data.get('plate') or '').strip().upper().replace(' ', '-')
+    if not plate:
+        return jsonify({"error": "La plaque est requise"}), 400
+    if COL_ANPR_WATCHLIST.find_one({"plate": plate}):
+        return jsonify({"error": "Cette plaque est deja dans la watchlist"}), 409
+    # Trouver l'ID de la definition anpr-watchlist
+    anpr_def = COL_ALERT_DEFS.find_one({"slug": "anpr-watchlist"})
+    doc = {
+        'plate': plate,
+        'label': (data.get('label') or '').strip(),
+        'alert_definition_id': anpr_def['_id'] if anpr_def else None,
+        'enabled': bool(data.get('enabled', True)),
+        'createdAt': datetime.now(timezone.utc),
+        'updatedAt': datetime.now(timezone.utc),
+    }
+    ins = COL_ANPR_WATCHLIST.insert_one(doc)
+    doc['_id'] = ins.inserted_id
+    return jsonify(_pub(doc)), 201
+
+@app.route('/api/anpr-watchlist/<wid>', methods=['PUT'])
+@role_required("admin")
+def update_anpr_watchlist(wid):
+    data = request.get_json(force=True) or {}
+    patch = {}
+    if 'label' in data:
+        patch['label'] = (data['label'] or '').strip()
+    if 'enabled' in data:
+        patch['enabled'] = bool(data['enabled'])
+    if not patch:
+        return jsonify({"error": "Rien a modifier"}), 400
+    patch['updatedAt'] = datetime.now(timezone.utc)
+    res = COL_ANPR_WATCHLIST.find_one_and_update(
+        {"_id": ObjectId(wid)}, {"$set": patch}, return_document=True
+    )
+    if not res:
+        return jsonify({"error": "Plaque introuvable"}), 404
+    return jsonify(_pub(res))
+
+@app.route('/api/anpr-watchlist/<wid>', methods=['DELETE'])
+@role_required("admin")
+def delete_anpr_watchlist(wid):
+    r = COL_ANPR_WATCHLIST.delete_one({"_id": ObjectId(wid)})
+    if r.deleted_count == 0:
+        return jsonify({"error": "Plaque introuvable"}), 404
+    return jsonify({"ok": True})
+
+# --- Alertes actives (polling par le client) ---
+
+def _get_user_alert_slugs(payload):
+    """Retourne les slugs d'alertes autorisees pour l'utilisateur, ou None si tout est autorise."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return None  # admin voit tout
+    email = payload.get("email", "")
+    user_doc = db['users'].find_one({"email": email}, {"_id": 1})
+    if not user_doc:
+        user_group_ids = []
+    else:
+        ug = COL_USER_GROUPS.find_one({"user_id": user_doc["_id"]})
+        user_group_ids = (ug.get("groups") or []) if ug else []
+    # Charger toutes les definitions activees
+    all_defs = list(COL_ALERT_DEFS.find({"enabled": True}))
+    allowed_slugs = []
+    for d in all_defs:
+        def_groups = d.get("groups") or []
+        if not def_groups:
+            # Pas de restriction de groupe -> tout le monde la recoit
+            allowed_slugs.append(d["slug"])
+        elif user_group_ids and any(gid in def_groups for gid in user_group_ids):
+            allowed_slugs.append(d["slug"])
+    return allowed_slugs
+
+@app.route('/api/active-alerts', methods=['GET'])
+@role_required("user")
+def get_active_alerts():
+    payload = getattr(request, 'user_payload', {})
+    allowed_slugs = _get_user_alert_slugs(payload)
+    query = {"expiresAt": {"$gt": datetime.now(timezone.utc)}}
+    if allowed_slugs is not None:
+        query["definition_slug"] = {"$in": allowed_slugs}
+    docs = list(COL_ACTIVE_ALERTS.find(query).sort([('triggeredAt', -1)]).limit(50))
+    result = []
+    for d in docs:
+        d['_id'] = str(d['_id'])
+        for k, v in d.items():
+            if hasattr(v, 'isoformat'):
+                d[k] = v.isoformat()
+            elif isinstance(v, ObjectId):
+                d[k] = str(v)
+        result.append(d)
+    return jsonify(result)
 
 ################################################################################
 # Webhook & Merge Config

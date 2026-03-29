@@ -90,39 +90,6 @@
     return checks.map(function(cb){ return cb.value; });
   }
 
-  // --- Traffic alerts UI ---
-  var TRAFFIC_ALERT_TYPES = [
-    {id: "traffic-cluster", label: "Alerte zone critique (cluster d'incidents)"},
-    {id: "opening", label: "Ouverture imminente (30 min)"},
-    {id: "opened", label: "Site ouvert au public"},
-    {id: "closing", label: "Fermeture imminente (30 min)"},
-    {id: "closed", label: "Site ferme au public"}
-  ];
-
-  function populateAlertCheckboxes(selectedAlerts){
-    var container = $("#group-alert-checkboxes");
-    if(!container) return;
-    container.textContent = "";
-    TRAFFIC_ALERT_TYPES.forEach(function(t){
-      var label = document.createElement("label");
-      label.className = "block-checkbox-label";
-      var cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.value = t.id;
-      cb.name = "traffic_alerts";
-      if(selectedAlerts && selectedAlerts.indexOf(t.id) >= 0) cb.checked = true;
-      label.appendChild(cb);
-      label.appendChild(document.createTextNode(" " + t.label));
-      container.appendChild(label);
-    });
-  }
-
-  function getSelectedAlerts(){
-    var checks = $$('input[name="traffic_alerts"]:checked', $("#group-form"));
-    if(!checks.length) return null;
-    return checks.map(function(cb){ return cb.value; });
-  }
-
   function openGroupModal(){ groupModal.removeAttribute("hidden"); }
   function closeGroupModal(){ groupModal.setAttribute("hidden", ""); }
   $$("[data-close]", groupModal).forEach(function(b){ b.addEventListener("click", closeGroupModal); });
@@ -362,7 +329,6 @@
       formRows[i].style.display = "";
     }
     populateBlockCheckboxes(null);
-    populateAlertCheckboxes(null);
     openGroupModal();
   });
 
@@ -375,8 +341,7 @@
     if(!name){ showToast("warning", "Le nom est requis."); return; }
 
     var allowed = getSelectedBlocks();
-    var trafficAlerts = getSelectedAlerts();
-    var payload = {name: name, description: description, color: color, allowed_blocks: allowed, traffic_alerts: trafficAlerts};
+    var payload = {name: name, description: description, color: color, allowed_blocks: allowed};
     var promise = id ? GroupAPI.update(id, payload) : GroupAPI.create(payload);
     promise.then(function(res){
       if(res.error){
@@ -414,7 +379,6 @@
       if(formRows[2]) formRows[2].style.display = isAdm ? "" : (isDef ? "none" : ""); // Couleur: visible pour admin et normal
       if(formRows[3]) formRows[3].style.display = isAdm ? "none" : "";       // Blocs: cache pour admin
       populateBlockCheckboxes(g.allowed_blocks || null);
-      populateAlertCheckboxes(g.traffic_alerts || null);
       openGroupModal();
     }
 

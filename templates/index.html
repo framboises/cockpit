@@ -76,6 +76,10 @@
                 <span class="material-symbols-outlined">directions_car</span>
                 <span class="label">LAPI</span>
             </a>
+            <a href="/admin/alertes" class="nav-btn">
+                <span class="material-symbols-outlined">notifications_active</span>
+                <span class="label">Alertes</span>
+            </a>
             {% endif %}
         </nav>
 
@@ -769,7 +773,6 @@
 var satelliteIconUrl = "{{ url_for('static', filename='img/satellite.png') }}";
 window.__allowedBlocks = {{ allowed_blocks_json|safe }};
 window.__userGroups = {{ user_groups_json|safe }};
-window.__trafficAlerts = {{ traffic_alerts_json|safe }};
 </script>
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>

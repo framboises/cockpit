@@ -48,15 +48,62 @@
     Chart.defaults.plugins.legend.display = false;
     Chart.defaults.animation.duration = 500;
 
-    var charts = {}, page = 1, statsLoaded = false, searchLoaded = false;
+    var charts = {}, page = 1, statsLoaded = false, searchLoaded = false, lastLiveTop = null;
+    var _watchlistPlates = {};  // plate -> {_id, label, enabled}
+
+    function loadWatchlist() {
+        fetch("/api/anpr-watchlist").then(function(r){ return r.json(); }).then(function(list){
+            _watchlistPlates = {};
+            (list || []).forEach(function(w){
+                _watchlistPlates[w.plate] = w;
+            });
+        }).catch(function(){});
+    }
+
+    function isWatched(plate) {
+        return !!_watchlistPlates[(plate || "").toUpperCase().replace(/\s+/g, "-")];
+    }
+
+    function addToWatchlist(plate, label) {
+        var normalPlate = (plate || "").toUpperCase().replace(/\s+/g, "-");
+        return fetch("/api/anpr-watchlist", {
+            method: "POST",
+            headers: {"Content-Type": "application/json", "X-CSRFToken": CSRF},
+            body: JSON.stringify({plate: normalPlate, label: label || ""})
+        }).then(function(r){ return r.json(); }).then(function(res){
+            if(!res.error){
+                _watchlistPlates[normalPlate] = res;
+                if(typeof showToast === "function") showToast("Plaque " + normalPlate + " ajoutee a la watchlist", "success");
+            } else {
+                if(typeof showToast === "function") showToast(res.error, "warning");
+            }
+            return res;
+        });
+    }
+
+    function removeFromWatchlist(plate) {
+        var normalPlate = (plate || "").toUpperCase().replace(/\s+/g, "-");
+        var w = _watchlistPlates[normalPlate];
+        if(!w) return Promise.resolve();
+        return fetch("/api/anpr-watchlist/" + w._id, {
+            method: "DELETE",
+            headers: {"X-CSRFToken": CSRF}
+        }).then(function(r){ return r.json(); }).then(function(){
+            delete _watchlistPlates[normalPlate];
+            if(typeof showToast === "function") showToast("Plaque " + normalPlate + " retiree de la watchlist", "success");
+        });
+    }
 
     /* ---- init ---- */
     function init() {
+        loadWatchlist();
         buildChips();
         loadKPIs();
         loadLive();
+        loadSearch();
+        searchLoaded = true;
         bind();
-        setInterval(loadLive, 15000);
+        setInterval(loadLive, 5000);
     }
 
     /* ---- color chips (circles) ---- */
@@ -162,7 +209,9 @@
         else { var ne = mk("div", "anpr-thumb-empty"); ne.appendChild(mk("span", "material-symbols-outlined", "no_photography")); tdi.appendChild(ne); }
         tr.appendChild(tdi);
         // plate
-        var tdp = document.createElement("td"); tdp.appendChild(mk("span", "anpr-plate-badge" + (r.list_name === "allowList" ? " anpr-plate-allow" : ""), r.plate)); tr.appendChild(tdp);
+        var tdp = document.createElement("td"); tdp.appendChild(mk("span", "anpr-plate-badge" + (r.list_name === "allowList" ? " anpr-plate-allow" : ""), r.plate));
+        if(isWatched(r.plate)){ var wi = mk("span","material-symbols-outlined"); wi.style.cssText="font-size:13px;color:#dc2626;margin-left:4px;vertical-align:middle;"; wi.textContent="visibility"; wi.title="Plaque surveillee"; tdp.appendChild(wi); }
+        tr.appendChild(tdp);
         // conf
         tr.appendChild(mk("td", "anpr-conf anpr-conf-" + (r.confidence >= 90 ? "high" : r.confidence >= 60 ? "med" : "low"), r.confidence + "%"));
         // color
@@ -195,15 +244,31 @@
     }
 
     function renderFeed(rows) {
+        if (!rows || !rows.length) return;
+        // Skip rebuild if nothing changed
+        var topId = rows[0].id;
+        if (topId === lastLiveTop) return;
+        var prevTop = lastLiveTop;
+        lastLiveTop = topId;
         var c = qs("#anpr-live-feed"); c.textContent = "";
         (rows || []).forEach(function (r, i) {
-            var item = mk("div", "anpr-feed-item" + (i === 0 ? " anpr-feed-new" : ""));
+            // Only animate truly new items (not seen before)
+            var isNew = prevTop !== null && r.id === topId;
+            var item = mk("div", "anpr-feed-item" + (isNew ? " anpr-feed-new" : ""));
             var th = mk("div", "anpr-feed-thumb");
             if (r.vehicle_image_id) { var im = document.createElement("img"); im.src = API.image + encodeURIComponent(r.vehicle_image_id); im.loading = "lazy"; th.appendChild(im); }
             else th.appendChild(mk("span", "material-symbols-outlined", "directions_car"));
             item.appendChild(th);
             var info = mk("div", "anpr-feed-info");
-            info.appendChild(mk("span", "anpr-plate-badge anpr-plate-sm" + (r.list_name === "allowList" ? " anpr-plate-allow" : ""), r.plate));
+            var plateBadge = mk("span", "anpr-plate-badge anpr-plate-sm" + (r.list_name === "allowList" ? " anpr-plate-allow" : ""), r.plate);
+            info.appendChild(plateBadge);
+            if(isWatched(r.plate)){
+                var wIcon = mk("span", "material-symbols-outlined");
+                wIcon.style.cssText = "font-size:14px; color:#dc2626; margin-left:4px; vertical-align:middle;";
+                wIcon.textContent = "visibility";
+                wIcon.title = "Plaque surveillee";
+                info.appendChild(wIcon);
+            }
             var meta = mk("span", "anpr-feed-meta");
             var dot = mk("span", "anpr-color-dot"); dot.style.background = r.color_hex; dot.style.width = "7px"; dot.style.height = "7px"; meta.appendChild(dot);
             meta.appendChild(document.createTextNode(" " + r.brand + " \u00b7 " + r.type_label));
@@ -238,6 +303,26 @@
             d.appendChild(document.createTextNode(row.t)); det.appendChild(d);
         });
         info.appendChild(det);
+
+        // Bouton watchlist
+        if(r.plate && r.plate !== "UNKNOWN"){
+            var watchBtn = mk("button", "anpr-watchlist-btn");
+            var watched = isWatched(r.plate);
+            var wbi = mk("span", "material-symbols-outlined");
+            wbi.textContent = watched ? "visibility_off" : "visibility";
+            wbi.style.fontSize = "16px";
+            watchBtn.appendChild(wbi);
+            watchBtn.appendChild(document.createTextNode(watched ? " Retirer de la watchlist" : " Surveiller cette plaque"));
+            watchBtn.style.cssText = "margin-top:12px; display:flex; align-items:center; gap:6px; padding:8px 14px; border-radius:8px; border:1px solid " + (watched ? "#ef444444" : "#3b82f644") + "; background:" + (watched ? "#ef444411" : "#3b82f611") + "; color:" + (watched ? "#ef4444" : "#3b82f6") + "; cursor:pointer; font-size:0.85rem; font-weight:500;";
+            watchBtn.addEventListener("click", function(){
+                if(isWatched(r.plate)){
+                    removeFromWatchlist(r.plate).then(function(){ openDetail(r); });
+                } else {
+                    addToWatchlist(r.plate).then(function(){ openDetail(r); });
+                }
+            });
+            info.appendChild(watchBtn);
+        }
 
         var hist = qs("#anpr-modal-history"); hist.textContent = "";
         var ld = mk("div", "anpr-history-loading"); ld.appendChild(mk("div", "anpr-spinner")); ld.appendChild(document.createTextNode(" Chargement...")); hist.appendChild(ld);
