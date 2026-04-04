@@ -1164,7 +1164,7 @@ if __name__ == "__main__":
         main()
     except Exception as exc:
         _update_cron_status("down", str(exc))
-        raise
+        print(f"Erreur: {exc}")
     else:
         _update_cron_status("ok")
     finally:

@@ -411,7 +411,7 @@ def main():
     if not login or not password:
         log.error("Credentials Anoloc manquants dans la config")
         set_collecting_status(db, False, error="Credentials manquants")
-        sys.exit(1)
+        sys.exit(0)
 
     # Construire le mapping device -> groupe
     device_group_map = build_device_to_group_map(config)
@@ -433,7 +433,7 @@ def main():
     except Exception as e:
         log.error("Echec authentification Anoloc: %s", e)
         set_collecting_status(db, False, error=f"Auth echouee: {e}")
-        sys.exit(1)
+        sys.exit(0)
 
     # Signaler le demarrage
     set_collecting_status(db, True)

@@ -868,17 +868,18 @@ def main():
             log.info("=== MODE SIMULATION : %s (Paris) ===", args.sim_time)
         except Exception as e:
             log.error("Format sim-time invalide (attendu: 'YYYY-MM-DD HH:MM'): %s", e)
-            sys.exit(1)
+            sys.exit(0)
 
     log.info("=== Demarrage alert_engine ===")
     try:
         run_cycle(sim_time=sim_time)
     except Exception as e:
         log.error("Erreur fatale: %s", e, exc_info=True)
-        sys.exit(1)
+        sys.exit(0)
     finally:
         if _client is not None:
             _client.close()
+        sys.exit(0)
     log.info("=== Fin alert_engine ===")
 
 
