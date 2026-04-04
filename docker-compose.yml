@@ -1,0 +1,23 @@
+version: "3.8"
+services:
+  waha:
+    image: devlikeapro/waha:arm
+    container_name: cockpit-waha
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - WHATSAPP_DEFAULT_ENGINE=WEBJS
+      - WHATSAPP_RESTART_ALL_SESSIONS=True
+      - WAHA_SESSION=default
+      - WAHA_DASHBOARD_ENABLED=true
+      - WAHA_DASHBOARD_USERNAME=admin
+      - WAHA_DASHBOARD_PASSWORD=${WAHA_DASHBOARD_PASSWORD:-changeme}
+      - WAHA_API_KEY=cockpitwaha2026devkey
+    volumes:
+      - waha_sessions:/app/.sessions
+      - waha_data:/app/.media
+
+volumes:
+  waha_sessions:
+  waha_data:

@@ -6,7 +6,10 @@
 function timeToMinutes(timeStr) {
     if (!timeStr || timeStr.toUpperCase() === "TBC") return Infinity;
     const parts = timeStr.split(':');
-    return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+    const h = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    if (isNaN(h) || isNaN(m)) return Infinity;
+    return h * 60 + m;
 }
 
 // Fonction pour tronquer une chaîne à un nombre max de caractères
@@ -214,7 +217,7 @@ function clusterTimeWindow(items){
   return txt;
 }
 
-function validTimeStr(s){ return !!(s && s.trim() && s.toUpperCase() !== 'TBC'); }
+function validTimeStr(s){ return !!(s && /^\d{1,2}:\d{2}$/.test(s.trim())); }
 
 function getOpenCloseKind(it){
   const s = norm(`${it.activity||''} ${it.category||''} ${it.place||''}`);
@@ -312,7 +315,7 @@ function removeRedundantOpenClosePairs(byDate, { mode = 'midnight' } = {}) {
 }
 
 // Heures invalides -> Infinity (en fin)
-function isValidHHMM(s){ return !!(s && s.trim() && s.toUpperCase() !== 'TBC'); }
+function isValidHHMM(s){ return !!(s && /^\d{1,2}:\d{2}$/.test(s.trim())); }
 
 // minute "primaire" par item, en respectant open/close quand on peut
 function getItemSortMinute(it){
@@ -353,7 +356,7 @@ function labelForItem(it){
 function hasNoTodos(item) {
   return splitTodo(item?.todo || "").length === 0;
 }
-function validHHMM(s) { return !!(s && s.trim() && s.toUpperCase() !== 'TBC'); } // déjà présent plus bas, OK
+function validHHMM(s) { return !!(s && /^\d{1,2}:\d{2}$/.test(s.trim())); }
 
 // Renvoie 'ready' | 'progress' | 'none' | null (null => pas d'affichage)
 function getPrepStatus(item) {

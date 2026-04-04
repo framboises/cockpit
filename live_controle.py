@@ -222,6 +222,7 @@ db = mongo_client[DB_NAME]
 col_data_access = db["data_access"]
 col_structure = db["hsh_structure"]
 col_erreurs = db["hsh_erreurs"]
+col_tx_agg = db["hsh_transactions_agg"]
 
 GLOBAL_ID = "___GLOBAL___"
 
@@ -264,6 +265,8 @@ def assurer_index():
     col_erreurs.create_index([("checkpoint.id", 1), ("date_paris", -1)])
     col_erreurs.create_index([("evenement", 1), ("date_paris", -1)])
     col_structure.create_index([("location_type", 1)])
+    col_tx_agg.create_index([("evenement", 1), ("checkpoint_id", 1), ("tranche", -1)])
+    col_tx_agg.create_index("tranche", expireAfterSeconds=30 * 24 * 3600)  # TTL 30 jours
     col_structure.create_index([("evenement", 1)])
 
 
@@ -864,6 +867,86 @@ def stocker_erreurs(txs, evenement, evenement_clean):
         print(f"  {len(ops)} transactions en erreur upsertees dans hsh_erreurs.")
 
 
+def agreger_transactions(txs, evenement):
+    """Agrege les transactions par checkpoint + tranche de 5 minutes."""
+    buckets = {}
+    for tx in txs:
+        cp = tx.get("checkpoint")
+        if not cp:
+            continue
+        cp_id = cp.get("ID") or cp.get("Id") or cp.get("id")
+        cp_name = cp.get("Name") or cp.get("name") or ""
+        if not cp_id:
+            continue
+
+        # Calculer la tranche de 5 min a partir de date_utc
+        date_str = tx.get("date_utc")
+        if not date_str:
+            continue
+        try:
+            dt = datetime.datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S").replace(
+                tzinfo=datetime.timezone.utc
+            )
+        except Exception:
+            continue
+        # Arrondir aux 5 min inferieures
+        minute = (dt.minute // 5) * 5
+        tranche = dt.replace(minute=minute, second=0, microsecond=0)
+
+        key = (cp_id, tranche.isoformat())
+        if key not in buckets:
+            gate = tx.get("gate")
+            gate_name = ""
+            if gate:
+                gate_name = gate.get("Name") or gate.get("name") or ""
+            buckets[key] = {
+                "cp_id": cp_id, "cp_name": cp_name,
+                "gate_name": gate_name,
+                "tranche": tranche,
+                "ok": 0, "erreurs": 0, "entrees": 0, "sorties": 0,
+            }
+
+        b = buckets[key]
+        if tx.get("status") == "0":
+            b["ok"] += 1
+        else:
+            b["erreurs"] += 1
+        direction = tx.get("direction", "")
+        if direction == "Entree":
+            b["entrees"] += 1
+        elif direction == "Sortie":
+            b["sorties"] += 1
+
+    if not buckets:
+        return
+
+    ops = []
+    for b in buckets.values():
+        doc_id = f"{evenement}_{b['cp_id']}_{b['tranche'].strftime('%Y%m%dT%H%M')}"
+        ops.append(UpdateOne(
+            {"_id": doc_id},
+            {
+                "$inc": {
+                    "ok": b["ok"],
+                    "erreurs": b["erreurs"],
+                    "entrees": b["entrees"],
+                    "sorties": b["sorties"],
+                },
+                "$set": {
+                    "checkpoint_id": b["cp_id"],
+                    "checkpoint_name": b["cp_name"],
+                    "gate_name": b["gate_name"],
+                    "evenement": evenement,
+                    "tranche": b["tranche"],
+                },
+            },
+            upsert=True,
+        ))
+    if ops:
+        col_tx_agg.bulk_write(ops, ordered=False)
+        print(f"  {len(ops)} tranches agregees dans hsh_transactions_agg.")
+
+
 def executer_transactions(sock, doc_global):
     """Collecte paginée des transactions → erreurs + arbre."""
     evenement = doc_global.get("evenement", "")
@@ -941,6 +1024,7 @@ def executer_transactions(sock, doc_global):
         if txs:
             stocker_erreurs(txs, evenement, evenement_clean)
             mettre_a_jour_arbre(txs, evenement)
+            agreger_transactions(txs, evenement)
 
         print(f"  Page {page:03d}: {nb} transactions ({nb_erreurs} erreurs) | NotComplete={'1' if not_complete else '0'}")
 
@@ -1083,3 +1167,5 @@ if __name__ == "__main__":
         raise
     else:
         _update_cron_status("ok")
+    finally:
+        mongo_client.close()

@@ -258,6 +258,9 @@
                         <button class="trafic-sort-btn" id="pcorg-add-btn" title="Nouvelle intervention">
                             <span class="material-symbols-outlined">add_circle</span>
                         </button>
+                        <button class="trafic-sort-btn" id="app-fullscreen-btn" title="Plein ecran">
+                            <span class="material-symbols-outlined">fullscreen</span>
+                        </button>
                     </header>
                     <div class="widget-body widget-tab-content active pcorg-scroll" data-tab="pcorg-stats" id="pcorg-stats"></div>
                     <div class="widget-body widget-tab-content pcorg-scroll" data-tab="pcorg-open" id="pcorg-list-open">
@@ -415,8 +418,19 @@
                             </div>
                             <div>
                                 <div class="hsh-summary-value" id="hsh-total-capacity">&mdash;</div>
-                                <div class="hsh-summary-label">Capacite totale</div>
+                                <div class="hsh-summary-label" id="hsh-capacity-label">Capacite totale</div>
                             </div>
+                        </div>
+                        <div id="hsh-projection-block" style="display:none; padding:6px 12px 10px;">
+                            <div class="hsh-progress-bar">
+                                <div class="hsh-progress-fill" id="hsh-progress-fill"></div>
+                                <div class="hsh-progress-mark" id="hsh-progress-mark" title="100% du pic projete"></div>
+                            </div>
+                            <div class="hsh-progress-info">
+                                <span id="hsh-progress-pct"></span>
+                                <span id="hsh-progress-pic"></span>
+                            </div>
+                            <div class="hsh-n1-text" id="hsh-n1-text"></div>
                         </div>
                         <div id="hsh-counters-body">
                             <div class="hsh-no-data" id="hsh-no-data">Aucun compteur configure</div>
@@ -669,73 +683,115 @@
 
 <!-- Modale creation intervention PCO -->
 <div id="pcorgCreateOverlay" class="modal-overlay"></div>
-<div id="pcorgCreateModal" class="modal pcorg-fiche-modal">
+<div id="pcorgCreateModal" class="modal pcorg-fiche-modal pcorg-create-wide">
     <div class="modal-content pcorg-fiche">
         <div id="pcorg-create-header" class="pcorg-fiche-header" style="background:var(--brand)">
             <div class="pcorg-fiche-header-left">
                 <span class="material-symbols-outlined pcorg-fiche-icon">add_circle</span>
                 <div class="pcorg-fiche-header-text">
                     <div class="pcorg-fiche-cat">Nouvelle intervention</div>
-                    <div class="pcorg-fiche-subcat" id="pcorg-create-pos-label">Selectionnez un emplacement sur la carte</div>
+                    <div class="pcorg-fiche-subcat" id="pcorg-create-pos-label"></div>
                 </div>
             </div>
             <div class="pcorg-fiche-header-right">
                 <button class="drawer-close" id="pcorgCreateClose" aria-label="Fermer"><span class="material-icons">close</span></button>
             </div>
         </div>
+        <!-- Stepper timeline -->
+        <div class="pcorg-stepper" id="pcorg-stepper">
+            <div class="pcorg-step active" data-step="1">
+                <span class="pcorg-step-num">1</span><span class="pcorg-step-label">Position</span>
+            </div>
+            <div class="pcorg-step-line"></div>
+            <div class="pcorg-step" data-step="2">
+                <span class="pcorg-step-num">2</span><span class="pcorg-step-label">Categorie</span>
+            </div>
+            <div class="pcorg-step-line"></div>
+            <div class="pcorg-step" data-step="3">
+                <span class="pcorg-step-num">3</span><span class="pcorg-step-label">Details</span>
+            </div>
+        </div>
         <div class="pcorg-fiche-body" id="pcorg-create-body">
             <form id="pcorgCreateForm" novalidate>
-                <!-- Etape 1 : position (mini carte) -->
-                <div class="pcorg-fiche-section">Position</div>
-                <div class="pcorg-fiche-info-row">
-                    <div class="pcorg-fiche-fields" id="pcorg-create-gps-fields">
-                        <div class="pcorg-fiche-field">
+                <!-- Etape 1 : position GPS -->
+                <div class="pcorg-create-step active" data-step="1">
+                    <div class="pcorg-create-map-wrap">
+                        <div id="pcorg-create-minimap" class="pcorg-create-map"></div>
+                        <div class="pcorg-create-map-tools">
+                            <button type="button" class="pcorg-map-tool-btn" id="pcorg-create-tile" title="Changer de fond de carte">
+                                <span class="material-symbols-outlined">satellite_alt</span>
+                            </button>
+                            <button type="button" class="pcorg-map-tool-btn" id="pcorg-create-grid100" title="Carroyage 100m">
+                                <span class="material-symbols-outlined">grid_3x3</span>
+                            </button>
+                            <button type="button" class="pcorg-map-tool-btn" id="pcorg-create-grid25" title="Carroyage 25m" style="display:none">
+                                <span class="material-symbols-outlined">grid_4x4</span>
+                            </button>
+                        </div>
+                        <div class="pcorg-create-map-info" id="pcorg-create-map-info">
+                            <span class="material-symbols-outlined">touch_app</span> Cliquez sur la carte pour positionner l'intervention
+                        </div>
+                    </div>
+                    <div class="pcorg-create-pos-row" id="pcorg-create-pos-row" style="display:none">
+                        <div class="pcorg-create-pos-item">
                             <span class="pcorg-fiche-label">Latitude</span>
                             <span class="pcorg-fiche-value" id="pcorg-create-lat-display">--</span>
                         </div>
-                        <div class="pcorg-fiche-field">
+                        <div class="pcorg-create-pos-item">
                             <span class="pcorg-fiche-label">Longitude</span>
                             <span class="pcorg-fiche-value" id="pcorg-create-lon-display">--</span>
                         </div>
-                        <button type="button" class="pcorg-popup-btn" id="pcorg-create-repick" style="margin-top:6px">
-                            <span class="material-symbols-outlined">my_location</span> Repositionner
+                        <div class="pcorg-create-pos-item">
+                            <span class="pcorg-fiche-label">Carroyage</span>
+                            <span class="pcorg-fiche-value" id="pcorg-create-carroye-display">--</span>
+                        </div>
+                    </div>
+                </div>
+                <!-- Etape 2 : categorie + infos de base -->
+                <div class="pcorg-create-step" data-step="2">
+                    <div class="pcorg-fiche-section">Categorie</div>
+                    <div class="pcorg-create-cats" id="pcorg-create-cats"></div>
+                    <div class="pcorg-fiche-section">Informations</div>
+                    <div class="form-group">
+                        <label for="pcorg-c-text">Description</label>
+                        <textarea id="pcorg-c-text" class="form-input" rows="2" required placeholder="Description de l'intervention..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="pcorg-c-appelant">Appelant</label>
+                        <input type="text" id="pcorg-c-appelant" class="form-input" placeholder="Nom de l'appelant" />
+                    </div>
+                    <div class="form-group" id="pcorg-c-contact-group">
+                        <label>Contact via</label>
+                        <div style="display:flex;gap:8px;">
+                            <label style="font-size:0.78rem;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pcorg-c-tel"> Telephone</label>
+                            <label style="font-size:0.78rem;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pcorg-c-radio"> Radio</label>
+                            <input type="text" id="pcorg-c-radio-canal" class="form-input" placeholder="Canal..." style="flex:1;display:none" />
+                        </div>
+                    </div>
+                </div>
+                <!-- Etape 3 : action prise + champs specifiques -->
+                <div class="pcorg-create-step" data-step="3">
+                    <div class="pcorg-fiche-section">Action prise</div>
+                    <div class="form-group">
+                        <label for="pcorg-c-comment">Consignez l'action ou l'observation</label>
+                        <textarea id="pcorg-c-comment" class="form-input" rows="3" required placeholder="Action realisee, observation, consigne..."></textarea>
+                    </div>
+                    <div id="pcorg-create-specific"></div>
+                </div>
+                <!-- Navigation -->
+                <div class="pcorg-create-nav">
+                    <button type="button" class="pcorg-popup-btn" id="pcorgCreateCancel">Annuler</button>
+                    <div class="pcorg-create-nav-right">
+                        <button type="button" class="pcorg-popup-btn" id="pcorgCreatePrev" style="display:none">
+                            <span class="material-symbols-outlined">arrow_back</span> Precedent
+                        </button>
+                        <button type="button" class="pcorg-popup-btn pcorg-btn-primary" id="pcorgCreateNext">
+                            Suivant <span class="material-symbols-outlined">arrow_forward</span>
+                        </button>
+                        <button type="submit" class="pcorg-popup-btn pcorg-btn-primary" id="pcorgCreateSubmit" style="display:none">
+                            <span class="material-symbols-outlined">save</span> Enregistrer
                         </button>
                     </div>
-                    <div class="pcorg-fiche-minimap" id="pcorg-create-minimap"></div>
-                </div>
-                <!-- Etape 2 : categorie -->
-                <div class="pcorg-fiche-section">Categorie</div>
-                <div class="pcorg-create-cats" id="pcorg-create-cats"></div>
-                <!-- Etape 3 : informations -->
-                <div class="pcorg-fiche-section">Informations</div>
-                <div class="form-group">
-                    <label for="pcorg-c-text">Description</label>
-                    <textarea id="pcorg-c-text" class="form-input" rows="2" required placeholder="Description de l'intervention..."></textarea>
-                </div>
-                <div class="form-group">
-                    <label for="pcorg-c-area">Zone</label>
-                    <input type="text" id="pcorg-c-area" class="form-input" placeholder="Ex: Zone Sud" />
-                </div>
-                <div class="form-group">
-                    <label for="pcorg-c-appelant">Appelant</label>
-                    <input type="text" id="pcorg-c-appelant" class="form-input" placeholder="Nom de l'appelant" />
-                </div>
-                <div class="form-group" id="pcorg-c-contact-group">
-                    <label>Contact via</label>
-                    <div style="display:flex;gap:8px;">
-                        <label style="font-size:0.78rem;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pcorg-c-tel"> Telephone</label>
-                        <label style="font-size:0.78rem;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pcorg-c-radio"> Radio</label>
-                        <input type="text" id="pcorg-c-radio-canal" class="form-input" placeholder="Canal..." style="flex:1;display:none" />
-                    </div>
-                </div>
-                <!-- Champs dynamiques selon categorie -->
-                <div id="pcorg-create-specific"></div>
-                <!-- Actions -->
-                <div class="pcorg-fiche-actions" style="margin-top:16px">
-                    <button type="button" class="pcorg-popup-btn" id="pcorgCreateCancel">Annuler</button>
-                    <button type="submit" class="pcorg-popup-btn" style="background:var(--brand);color:#fff;border-color:var(--brand)">
-                        <span class="material-symbols-outlined">save</span> Enregistrer
-                    </button>
                 </div>
             </form>
         </div>

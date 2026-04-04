@@ -102,6 +102,112 @@
       if (!pendingPins) { clearInterval(pinRetry); return; }
       if (getMap()) { updateMapPins(pendingPins); clearInterval(pinRetry); }
     }, 2000);
+
+    // Context menu on map
+    buildContextMenu();
+    var ctxRetry = setInterval(function () {
+      var m = getMap();
+      if (!m) return;
+      clearInterval(ctxRetry);
+      m.on("contextmenu", onMapContextMenu);
+    }, 2000);
+  }
+
+  // ── Context menu ──────────────────────────────────────────────────────────
+  var ctxMenu = null;
+  var ctxLat = null, ctxLon = null;
+
+  function buildContextMenu() {
+    ctxMenu = mkEl("div", "pcorg-ctx-menu");
+    ctxMenu.id = "pcorg-ctx-menu";
+
+    var title = mkEl("div", "pcorg-ctx-title");
+    title.appendChild(matIcon("add_circle"));
+    var titleTxt = mkEl("span", ""); titleTxt.textContent = "Nouvelle intervention";
+    title.appendChild(titleTxt);
+    ctxMenu.appendChild(title);
+
+    var sep = mkEl("div", "pcorg-ctx-sep");
+    ctxMenu.appendChild(sep);
+
+    CATEGORY_ORDER.forEach(function (cat) {
+      var st = catStyle(cat);
+      var item = mkEl("div", "pcorg-ctx-item");
+      item.setAttribute("data-cat", cat);
+
+      var dot = mkEl("span", "pcorg-ctx-dot");
+      dot.style.background = st.color;
+      item.appendChild(dot);
+
+      var ico = matIcon(st.icon, "pcorg-ctx-icon");
+      ico.style.color = st.color;
+      item.appendChild(ico);
+
+      var label = mkEl("span", "pcorg-ctx-label");
+      label.textContent = shortCat(cat);
+      item.appendChild(label);
+
+      item.addEventListener("click", function () {
+        hideContextMenu();
+        openCreateFromContext(ctxLat, ctxLon, cat);
+      });
+      ctxMenu.appendChild(item);
+    });
+
+    document.body.appendChild(ctxMenu);
+
+    // Close on click anywhere
+    document.addEventListener("click", function () { hideContextMenu(); });
+    document.addEventListener("contextmenu", function (e) {
+      // Hide if clicking outside map
+      if (ctxMenu.classList.contains("show") && !e.target.closest(".leaflet-container")) {
+        hideContextMenu();
+      }
+    });
+  }
+
+  function onMapContextMenu(e) {
+    L.DomEvent.preventDefault(e);
+    ctxLat = e.latlng.lat;
+    ctxLon = e.latlng.lng;
+
+    var map = getMap();
+    if (!map) return;
+    var pt = map.latLngToContainerPoint(e.latlng);
+    var mapEl = map.getContainer();
+    var rect = mapEl.getBoundingClientRect();
+
+    ctxMenu.style.left = (rect.left + pt.x) + "px";
+    ctxMenu.style.top = (rect.top + pt.y) + "px";
+    ctxMenu.classList.add("show");
+
+    // Adjust if overflows viewport
+    requestAnimationFrame(function () {
+      var menuRect = ctxMenu.getBoundingClientRect();
+      if (menuRect.right > window.innerWidth) {
+        ctxMenu.style.left = (rect.left + pt.x - menuRect.width) + "px";
+      }
+      if (menuRect.bottom > window.innerHeight) {
+        ctxMenu.style.top = (rect.top + pt.y - menuRect.height) + "px";
+      }
+    });
+  }
+
+  function hideContextMenu() {
+    if (ctxMenu) ctxMenu.classList.remove("show");
+  }
+
+  function openCreateFromContext(lat, lon, cat) {
+    resetCreateWizard();
+    showCreate();
+    initCreateMap();
+
+    // Wait for map init, then set position + category and jump to step 2
+    setTimeout(function () {
+      setCreatePosition(lat, lon);
+      selectCategory(cat);
+      goToStep(2);
+    }, 400);
   }
 
   // ── Tabs ───────────────────────────────────────────────────────────────────
@@ -513,6 +619,42 @@
       body.appendChild(timeline);
     }
 
+    // Add comment form (only if not closed)
+    if (!isClosed && d.status_code !== 10) {
+      var commentSec = mkEl("div", "pcorg-fiche-section");
+      commentSec.textContent = "Consigner une action";
+      body.appendChild(commentSec);
+
+      var commentForm = mkEl("div", "pcorg-comment-form");
+      var commentInput = mkEl("textarea", "form-input pcorg-comment-input");
+      commentInput.rows = 2;
+      commentInput.placeholder = "Action realisee, observation, consigne...";
+      commentForm.appendChild(commentInput);
+
+      var commentBtn = mkEl("button", "pcorg-comment-send");
+      commentBtn.appendChild(matIcon("send"));
+      commentBtn.title = "Envoyer";
+      commentBtn.addEventListener("click", function () {
+        var txt = commentInput.value.trim();
+        if (!txt) return;
+        commentBtn.disabled = true;
+        apiPost("/api/pcorg/comment/" + encodeURIComponent(d.id), { text: txt })
+          .then(function (r) {
+            commentBtn.disabled = false;
+            if (r.ok) {
+              commentInput.value = "";
+              showToast("success", "Commentaire ajoute");
+              // Re-open detail to refresh chronology
+              openDetailModal(d.id, false);
+            } else {
+              showToast("error", r.error || "Erreur");
+            }
+          });
+      });
+      commentForm.appendChild(commentBtn);
+      body.appendChild(commentForm);
+    }
+
     // Actions
     var actions = mkEl("div", "pcorg-fiche-actions");
     if (d.lat != null) {
@@ -532,6 +674,16 @@
       });
       actions.appendChild(btnGps);
     }
+    // Edit button (not closed)
+    if (!isClosed && d.status_code !== 10) {
+      var btnEdit = mkEl("button", "");
+      btnEdit.appendChild(matIcon("edit"));
+      btnEdit.appendChild(document.createTextNode(" Editer"));
+      btnEdit.addEventListener("click", function () {
+        renderFicheEdit(d);
+      });
+      actions.appendChild(btnEdit);
+    }
     if (!isClosed && d.status_code !== 10) {
       var btnClose = mkEl("button", "pcorg-btn-danger");
       btnClose.appendChild(matIcon("check_circle"));
@@ -542,6 +694,280 @@
       actions.appendChild(btnClose);
     }
     body.appendChild(actions);
+  }
+
+  // ── Edit mode on fiche ────────────────────────────────────────────────────
+  function renderFicheEdit(d) {
+    var st = catStyle(d.category);
+    var cc = d.content_category || {};
+    var body = document.getElementById("pcorg-fiche-body");
+    body.textContent = "";
+
+    // Description
+    var descSec = mkEl("div", "pcorg-fiche-section"); descSec.textContent = "Description"; body.appendChild(descSec);
+    var descInput = mkEl("textarea", "form-input");
+    descInput.id = "pcorg-edit-text"; descInput.rows = 2;
+    descInput.value = d.text_full || d.text || "";
+    body.appendChild(descInput);
+
+    // Category
+    var catSec = mkEl("div", "pcorg-fiche-section"); catSec.textContent = "Categorie"; body.appendChild(catSec);
+    var catContainer = mkEl("div", "pcorg-create-cats");
+    var editCat = d.category;
+    CATEGORY_ORDER.forEach(function (cat) {
+      var s = catStyle(cat);
+      var btn = mkEl("button", "pcorg-create-cat-btn" + (cat === editCat ? " selected" : ""));
+      btn.type = "button";
+      btn.setAttribute("data-cat", cat);
+      if (cat === editCat) { btn.style.borderColor = s.color; btn.style.background = s.color; }
+      var ico = matIcon(s.icon);
+      ico.style.color = cat === editCat ? "#fff" : s.color;
+      btn.appendChild(ico);
+      var label = mkEl("span", ""); label.textContent = shortCat(cat); btn.appendChild(label);
+      btn.addEventListener("click", function () {
+        editCat = cat;
+        var ns = catStyle(cat);
+        catContainer.querySelectorAll(".pcorg-create-cat-btn").forEach(function (b) {
+          var sel = b.getAttribute("data-cat") === cat;
+          b.classList.toggle("selected", sel);
+          b.style.borderColor = sel ? ns.color : "";
+          b.style.background = sel ? ns.color : "";
+          var bico = b.querySelector(".material-symbols-outlined");
+          if (bico) bico.style.color = sel ? "#fff" : catStyle(b.getAttribute("data-cat")).color;
+        });
+        var hdr = document.getElementById("pcorg-fiche-header");
+        hdr.style.background = ns.color;
+        hdr.querySelector(".pcorg-fiche-icon").textContent = ns.icon;
+        hdr.querySelector(".pcorg-fiche-cat").textContent = cat;
+        // Rebuild specific fields
+        buildEditSpecificFields(editSpecContainer, cat, cc);
+      });
+      catContainer.appendChild(btn);
+    });
+    body.appendChild(catContainer);
+
+    // Appelant + contact
+    var infoSec = mkEl("div", "pcorg-fiche-section"); infoSec.textContent = "Informations"; body.appendChild(infoSec);
+    var grpApp = mkEl("div", "form-group");
+    var lblApp = mkEl("label", ""); lblApp.textContent = "Appelant"; lblApp.setAttribute("for", "pcorg-edit-appelant");
+    grpApp.appendChild(lblApp);
+    var inpApp = mkEl("input", "form-input"); inpApp.type = "text"; inpApp.id = "pcorg-edit-appelant";
+    inpApp.value = cc.appelant || "";
+    grpApp.appendChild(inpApp);
+    body.appendChild(grpApp);
+
+    var grpContact = mkEl("div", "form-group");
+    var lblCo = mkEl("label", ""); lblCo.textContent = "Contact via"; grpContact.appendChild(lblCo);
+    var coRow = mkEl("div", ""); coRow.style.cssText = "display:flex;gap:8px;";
+    var lblTel = mkEl("label", ""); lblTel.style.cssText = "font-size:0.78rem;display:flex;align-items:center;gap:4px";
+    var chkTel = mkEl("input", ""); chkTel.type = "checkbox"; chkTel.id = "pcorg-edit-tel";
+    chkTel.checked = !!cc.telephone;
+    lblTel.appendChild(chkTel); lblTel.appendChild(document.createTextNode("Telephone"));
+    coRow.appendChild(lblTel);
+    var lblRad = mkEl("label", ""); lblRad.style.cssText = "font-size:0.78rem;display:flex;align-items:center;gap:4px";
+    var chkRad = mkEl("input", ""); chkRad.type = "checkbox"; chkRad.id = "pcorg-edit-radio";
+    chkRad.checked = !!cc.radio;
+    lblRad.appendChild(chkRad); lblRad.appendChild(document.createTextNode("Radio"));
+    coRow.appendChild(lblRad);
+    var inpCanal = mkEl("input", "form-input"); inpCanal.type = "text"; inpCanal.id = "pcorg-edit-radio-canal";
+    inpCanal.placeholder = "Canal..."; inpCanal.style.cssText = "flex:1;display:" + (cc.radio ? "" : "none");
+    inpCanal.value = (typeof cc.radio === "string") ? cc.radio : "";
+    chkRad.addEventListener("change", function () { inpCanal.style.display = chkRad.checked ? "" : "none"; });
+    coRow.appendChild(inpCanal);
+    grpContact.appendChild(coRow);
+    body.appendChild(grpContact);
+
+    // Action prise (comment obligatoire)
+    var actionSec = mkEl("div", "pcorg-fiche-section"); actionSec.textContent = "Action prise"; body.appendChild(actionSec);
+    var grpAction = mkEl("div", "form-group");
+    var lblAction = mkEl("label", ""); lblAction.textContent = "Consignez l'action ou la modification"; lblAction.setAttribute("for", "pcorg-edit-comment");
+    grpAction.appendChild(lblAction);
+    var inpAction = mkEl("textarea", "form-input");
+    inpAction.id = "pcorg-edit-comment"; inpAction.rows = 2;
+    inpAction.placeholder = "Action realisee, modification apportee...";
+    grpAction.appendChild(inpAction);
+    body.appendChild(grpAction);
+
+    // Category-specific fields
+    var specSec = mkEl("div", "pcorg-fiche-section"); specSec.textContent = "Details specifiques"; body.appendChild(specSec);
+    var editSpecContainer = mkEl("div", "");
+    body.appendChild(editSpecContainer);
+    buildEditSpecificFields(editSpecContainer, editCat, cc);
+
+    // Save / Cancel
+    var editActions = mkEl("div", "pcorg-fiche-actions");
+    var btnCancel = mkEl("button", "");
+    btnCancel.appendChild(matIcon("close"));
+    btnCancel.appendChild(document.createTextNode(" Annuler"));
+    btnCancel.addEventListener("click", function () { openDetailModal(d.id, false); });
+    editActions.appendChild(btnCancel);
+
+    var btnSave = mkEl("button", "pcorg-btn-primary");
+    btnSave.style.cssText = "background:var(--brand);color:#fff;border-color:var(--brand)";
+    btnSave.appendChild(matIcon("save"));
+    btnSave.appendChild(document.createTextNode(" Enregistrer"));
+    btnSave.addEventListener("click", function () {
+      submitFicheEdit(d.id, editCat, cc);
+    });
+    editActions.appendChild(btnSave);
+    body.appendChild(editActions);
+  }
+
+  function buildEditSpecificFields(container, cat, cc) {
+    container.textContent = "";
+    var subs = extractLabels((pcorgConfig.sous_classifications || {})[cat]);
+    if (subs.length > 0) {
+      addEditSelect(container, "pcorg-edit-sous", "Sous-classification", subs, cc.sous_classification || "");
+    }
+    var intervList = extractLabels(pcorgConfig.intervenants);
+    var serviceList = extractLabels(pcorgConfig.services);
+
+    if (cat === "PCO.Secours" || cat === "PCO.Securite" || cat === "PCO.Technique") {
+      if (intervList.length) {
+        addEditSelect(container, "pcorg-edit-interv1", "Intervenant 1", intervList, cc.intervenant1 || "");
+        addEditSelect(container, "pcorg-edit-interv2", "Intervenant 2", intervList, cc.intervenant2 || "");
+      } else {
+        addEditField(container, "pcorg-edit-interv1", "Intervenant 1", cc.intervenant1 || "");
+        addEditField(container, "pcorg-edit-interv2", "Intervenant 2", cc.intervenant2 || "");
+      }
+      if (serviceList.length) {
+        addEditSelect(container, "pcorg-edit-service", "Service contacte", serviceList, cc.service_contacte || "");
+      } else {
+        addEditField(container, "pcorg-edit-service", "Service contacte", cc.service_contacte || "");
+      }
+      addEditField(container, "pcorg-edit-carroye", "Carroye", cc.carroye || "");
+    } else if (cat === "PCO.Information" || cat === "PCO.MainCourante") {
+      addEditField(container, "pcorg-edit-texte", "Texte complementaire", cc.texte || "");
+      if (cat === "PCO.MainCourante") {
+        var grpAlerte = mkEl("div", "form-group");
+        var lblAl = mkEl("label", ""); lblAl.style.cssText = "font-size:0.78rem;display:flex;align-items:center;gap:4px";
+        var chkAl = mkEl("input", ""); chkAl.type = "checkbox"; chkAl.id = "pcorg-edit-alerte";
+        chkAl.checked = !!cc.alerte;
+        lblAl.appendChild(chkAl); lblAl.appendChild(document.createTextNode("Alerte"));
+        grpAlerte.appendChild(lblAl);
+        container.appendChild(grpAlerte);
+      }
+    } else if (cat === "PCO.Fourriere") {
+      addEditField(container, "pcorg-edit-lieu", "Lieu", cc.lieu || "");
+      addEditField(container, "pcorg-edit-detailsvl", "Vehicule", cc.detailsvl || "");
+      addEditField(container, "pcorg-edit-immat", "Immatriculation", cc.immat || "");
+      addEditSelect(container, "pcorg-edit-typedemande", "Type de demande",
+        ["Parking sauvage", "Pas de titre", "Mauvais titre (sticker ou badge)", "Stationnement genant", "Autre"],
+        cc.typedemande || "");
+      addEditSelect(container, "pcorg-edit-decision", "Decision",
+        ["Remorquage demande", "Sabot pose", "Avertissement", "Annule"],
+        cc.decision || "");
+    } else if (cat === "PCO.Flux") {
+      if (intervList.length) {
+        addEditSelect(container, "pcorg-edit-moyens1", "Moyens Niv.1", intervList, cc.moyens_engages_niveau_1 || "");
+        addEditSelect(container, "pcorg-edit-moyens2", "Moyens Niv.2", intervList, cc.moyens_engages_niveau_2 || "");
+      } else {
+        addEditField(container, "pcorg-edit-moyens1", "Moyens Niv.1", cc.moyens_engages_niveau_1 || "");
+        addEditField(container, "pcorg-edit-moyens2", "Moyens Niv.2", cc.moyens_engages_niveau_2 || "");
+      }
+    }
+  }
+
+  function addEditField(container, id, label, value) {
+    var grp = mkEl("div", "form-group");
+    var lbl = mkEl("label", ""); lbl.textContent = label; lbl.setAttribute("for", id);
+    grp.appendChild(lbl);
+    var inp = mkEl("input", "form-input"); inp.type = "text"; inp.id = id;
+    inp.placeholder = label; inp.value = value || "";
+    grp.appendChild(inp);
+    container.appendChild(grp);
+  }
+
+  function addEditSelect(container, id, label, options, current) {
+    var grp = mkEl("div", "form-group");
+    var lbl = mkEl("label", ""); lbl.textContent = label; lbl.setAttribute("for", id);
+    grp.appendChild(lbl);
+    var sel = mkEl("select", "form-input"); sel.id = id;
+    var opt0 = mkEl("option", ""); opt0.value = ""; opt0.textContent = "-- Choisir --";
+    sel.appendChild(opt0);
+    options.forEach(function (o) {
+      var opt = mkEl("option", ""); opt.value = o; opt.textContent = o;
+      if (o === current) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    // If current value not in list, add it
+    if (current && options.indexOf(current) === -1) {
+      var optC = mkEl("option", ""); optC.value = current; optC.textContent = current; optC.selected = true;
+      sel.appendChild(optC);
+    }
+    grp.appendChild(sel);
+    container.appendChild(grp);
+  }
+
+  function submitFicheEdit(id, editCat, origCc) {
+    var comment = (document.getElementById("pcorg-edit-comment").value || "").trim();
+    if (!comment) { showToast("warning", "L'action prise est obligatoire"); return; }
+
+    var text = (document.getElementById("pcorg-edit-text").value || "").trim();
+    if (!text) { showToast("warning", "La description est obligatoire"); return; }
+
+    var ccUpdate = {};
+    var appelant = (document.getElementById("pcorg-edit-appelant").value || "").trim();
+    ccUpdate.appelant = appelant;
+    var telChecked = document.getElementById("pcorg-edit-tel").checked;
+    ccUpdate.telephone = telChecked || false;
+    var radChecked = document.getElementById("pcorg-edit-radio").checked;
+    ccUpdate.radio = radChecked ? ((document.getElementById("pcorg-edit-radio-canal").value || "").trim() || true) : false;
+
+    var sousEl = document.getElementById("pcorg-edit-sous");
+    if (sousEl) ccUpdate.sous_classification = sousEl.value;
+
+    function eVal(eid) { var e = document.getElementById(eid); return e ? e.value.trim() : ""; }
+
+    if (editCat === "PCO.Secours" || editCat === "PCO.Securite" || editCat === "PCO.Technique") {
+      ccUpdate.intervenant1 = eVal("pcorg-edit-interv1");
+      ccUpdate.intervenant2 = eVal("pcorg-edit-interv2");
+      ccUpdate.service_contacte = eVal("pcorg-edit-service");
+      ccUpdate.carroye = eVal("pcorg-edit-carroye");
+    } else if (editCat === "PCO.Information" || editCat === "PCO.MainCourante") {
+      ccUpdate.texte = eVal("pcorg-edit-texte");
+      if (editCat === "PCO.MainCourante") {
+        var alerteEl = document.getElementById("pcorg-edit-alerte");
+        ccUpdate.alerte = alerteEl ? alerteEl.checked : false;
+      }
+    } else if (editCat === "PCO.Fourriere") {
+      ccUpdate.lieu = eVal("pcorg-edit-lieu");
+      ccUpdate.detailsvl = eVal("pcorg-edit-detailsvl");
+      ccUpdate.immat = eVal("pcorg-edit-immat");
+      ccUpdate.typedemande = eVal("pcorg-edit-typedemande");
+      ccUpdate.decision = eVal("pcorg-edit-decision");
+    } else if (editCat === "PCO.Flux") {
+      ccUpdate.moyens_engages_niveau_1 = eVal("pcorg-edit-moyens1");
+      ccUpdate.moyens_engages_niveau_2 = eVal("pcorg-edit-moyens2");
+    }
+
+    var payload = { text: text, category: editCat, content_category: ccUpdate };
+
+    // 1) Save fields, then 2) post comment
+    fetch("/api/pcorg/update/" + encodeURIComponent(id), {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": (document.querySelector('meta[name="csrf-token"]') || {}).content || ""
+      },
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        if (!r.ok) { showToast("error", r.error || "Erreur"); return; }
+        // Post the action prise as comment
+        return apiPost("/api/pcorg/comment/" + encodeURIComponent(id), { text: comment });
+      })
+      .then(function (r) {
+        if (!r) return;
+        if (r.ok) {
+          showToast("success", "Intervention mise a jour");
+          refresh();
+          openDetailModal(id, false);
+        } else {
+          showToast("error", r.error || "Erreur commentaire");
+        }
+      });
   }
 
   function addField(parent, label, value) {
@@ -838,8 +1264,8 @@
       popBody.appendChild(popBtns);
       popupDiv.appendChild(popBody);
 
-      // Bounce animation for interventions > 1h (unless ignored)
-      var shouldBounce = isOld && !ignoredPins[item.id];
+      // Bounce animation for interventions > 1h (unless ignored or created from cockpit)
+      var shouldBounce = isOld && !ignoredPins[item.id] && item.server !== "COCKPIT";
 
       var marker = L.marker([item.lat, item.lon], {
         icon: icon,
@@ -930,10 +1356,19 @@
     }, 300);
   }
 
-  // ── Create modal ───────────────────────────────────────────────────────────
+  // ── Create modal (wizard 3 etapes) ─────────────────────────────────────────
   var createModal, createOverlay, createMiniMap;
   var createLat = null, createLon = null;
   var createSelectedCat = "";
+  var createStep = 1;
+  var createMarker = null;
+  var createGridLayer = null;
+  var createGrid25Layer = null;
+  var createGridData = null;
+  var createGridMeta = null;
+  var createGrid100On = false;
+  var createGrid25On = false;
+  var createCarroye = "";
 
   // Listes de reference chargees depuis la config
   var pcorgConfig = { sous_classifications: {}, intervenants: [], services: [] };
@@ -953,7 +1388,22 @@
   function showCreate() { createModal.classList.add("show"); createOverlay.classList.add("show"); }
   function hideCreate() {
     createModal.classList.remove("show"); createOverlay.classList.remove("show");
+    destroyCreateMap();
+    createStep = 1;
+    createLat = null;
+    createLon = null;
+    createSelectedCat = "";
+    createCarroye = "";
+    createGrid100On = false;
+    createGrid25On = false;
+  }
+
+  function destroyCreateMap() {
     if (createMiniMap) { createMiniMap.remove(); createMiniMap = null; }
+    createMarker = null;
+    createGridLayer = null;
+    createGrid25Layer = null;
+    createGridMeta = null;
   }
 
   function initCreateModal() {
@@ -962,88 +1412,402 @@
     var btn = document.getElementById("pcorg-add-btn");
     var closeBtn = document.getElementById("pcorgCreateClose");
     var cancelBtn = document.getElementById("pcorgCreateCancel");
+    var nextBtn = document.getElementById("pcorgCreateNext");
+    var prevBtn = document.getElementById("pcorgCreatePrev");
     var form = document.getElementById("pcorgCreateForm");
-    var repickBtn = document.getElementById("pcorg-create-repick");
     var radioCheck = document.getElementById("pcorg-c-radio");
     var radioCanal = document.getElementById("pcorg-c-radio-canal");
 
     if (!createModal || !btn) return;
 
-    // Close
     closeBtn.addEventListener("click", hideCreate);
     cancelBtn.addEventListener("click", hideCreate);
     createOverlay.addEventListener("click", hideCreate);
 
-    // Radio canal toggle
     radioCheck.addEventListener("change", function () {
       radioCanal.style.display = radioCheck.checked ? "" : "none";
     });
 
-    // Step 1: click "+" -> pick on map first
+    // Click "+" -> ouvrir la modale directement a l'etape 1
     btn.addEventListener("click", function () {
-      showToast("info", "Cliquez sur la carte pour positionner l'intervention");
-      if (window.CockpitMapView && window.CockpitMapView.currentView() !== "map") {
-        window.CockpitMapView.switchView("map");
+      resetCreateWizard();
+      showCreate();
+      goToStep(1);
+      initCreateMap();
+    });
+
+    // Navigation
+    nextBtn.addEventListener("click", function () {
+      if (createStep === 1) {
+        if (createLat === null) {
+          showToast("warning", "Positionnez l'intervention sur la carte");
+          return;
+        }
+        goToStep(2);
+      } else if (createStep === 2) {
+        if (!createSelectedCat) {
+          showToast("warning", "Selectionnez une categorie");
+          return;
+        }
+        var text = document.getElementById("pcorg-c-text").value.trim();
+        if (!text) {
+          showToast("warning", "La description est obligatoire");
+          return;
+        }
+        var appelant = document.getElementById("pcorg-c-appelant").value.trim();
+        if (!appelant) {
+          showToast("warning", "L'appelant est obligatoire");
+          return;
+        }
+        var telOk = document.getElementById("pcorg-c-tel").checked;
+        var radioOk = document.getElementById("pcorg-c-radio").checked;
+        if (!telOk && !radioOk) {
+          showToast("warning", "Selectionnez un mode de contact (telephone ou radio)");
+          return;
+        }
+        goToStep(3);
       }
-      startGpsPick(function (lat, lon) {
-        createLat = lat;
-        createLon = lon;
-        openCreateWithPosition(lat, lon);
-      });
     });
 
-    // Repick
-    repickBtn.addEventListener("click", function () {
-      hideCreate();
-      startGpsPick(function (lat, lon) {
-        createLat = lat;
-        createLon = lon;
-        openCreateWithPosition(lat, lon);
-      });
+    prevBtn.addEventListener("click", function () {
+      if (createStep > 1) goToStep(createStep - 1);
     });
 
-    // Build category buttons
+    // Tile switcher
+    document.getElementById("pcorg-create-tile").addEventListener("click", function () {
+      if (!createMiniMap) return;
+      if (createTileCurrent === "osm") {
+        createMiniMap.removeLayer(createTileOSM);
+        createTileSatEGIS.addTo(createMiniMap);
+        createTileCurrent = "sat-egis";
+      } else if (createTileCurrent === "sat-egis") {
+        createMiniMap.removeLayer(createTileSatEGIS);
+        createTileSatACO.addTo(createMiniMap);
+        createTileCurrent = "sat-aco";
+      } else {
+        createMiniMap.removeLayer(createTileSatACO);
+        createTileOSM.addTo(createMiniMap);
+        createTileCurrent = "osm";
+      }
+    });
+
+    // Grid toggles
+    document.getElementById("pcorg-create-grid100").addEventListener("click", function () {
+      toggleCreateGrid100();
+    });
+    document.getElementById("pcorg-create-grid25").addEventListener("click", function () {
+      toggleCreateGrid25();
+    });
+
     buildCatButtons();
 
-    // Submit
     form.addEventListener("submit", function (e) {
       e.preventDefault();
       submitCreate();
     });
   }
 
-  function openCreateWithPosition(lat, lon) {
-    // Update header
+  function resetCreateWizard() {
+    createLat = null;
+    createLon = null;
+    createSelectedCat = "";
+    createCarroye = "";
+    createGrid100On = false;
+    createGrid25On = false;
+    createStep = 1;
+    // Reset header
     var header = document.getElementById("pcorg-create-header");
-    var st = createSelectedCat ? catStyle(createSelectedCat) : { color: "var(--brand)", icon: "add_circle" };
-    header.style.background = st.color;
-    document.getElementById("pcorg-create-pos-label").textContent =
-      lat.toFixed(5) + ", " + lon.toFixed(5);
+    header.style.background = "var(--brand)";
+    header.querySelector(".pcorg-fiche-icon").textContent = "add_circle";
+    header.querySelector(".pcorg-fiche-cat").textContent = "Nouvelle intervention";
+    document.getElementById("pcorg-create-pos-label").textContent = "";
+    // Reset form
+    document.getElementById("pcorgCreateForm").reset();
+    document.querySelectorAll(".pcorg-create-cat-btn").forEach(function (b) {
+      b.classList.remove("selected"); b.style.borderColor = ""; b.style.background = "";
+    });
+    document.getElementById("pcorg-create-specific").textContent = "";
+    document.getElementById("pcorg-create-pos-row").style.display = "none";
+    document.getElementById("pcorg-create-map-info").style.display = "";
+    document.getElementById("pcorg-create-grid25").style.display = "none";
+    document.getElementById("pcorg-create-grid100").classList.remove("active");
+    document.getElementById("pcorg-create-grid25").classList.remove("active");
+  }
 
-    // Update GPS display
-    document.getElementById("pcorg-create-lat-display").textContent = lat.toFixed(6);
-    document.getElementById("pcorg-create-lon-display").textContent = lon.toFixed(6);
+  function goToStep(step) {
+    createStep = step;
+    // Update step visibility
+    document.querySelectorAll(".pcorg-create-step").forEach(function (el) {
+      el.classList.toggle("active", el.getAttribute("data-step") === String(step));
+    });
+    // Update stepper
+    document.querySelectorAll(".pcorg-step").forEach(function (el) {
+      var s = parseInt(el.getAttribute("data-step"), 10);
+      el.classList.toggle("active", s === step);
+      el.classList.toggle("done", s < step);
+    });
+    // Update step lines
+    var lines = document.querySelectorAll(".pcorg-step-line");
+    if (lines[0]) lines[0].classList.toggle("done", step > 1);
+    if (lines[1]) lines[1].classList.toggle("done", step > 2);
+    // Update nav buttons
+    document.getElementById("pcorgCreatePrev").style.display = step > 1 ? "" : "none";
+    document.getElementById("pcorgCreateNext").style.display = step < 3 ? "" : "none";
+    document.getElementById("pcorgCreateSubmit").style.display = step === 3 ? "" : "none";
+    // Resize map if going back to step 1
+    if (step === 1 && createMiniMap) {
+      setTimeout(function () { createMiniMap.invalidateSize(); }, 100);
+    }
+  }
 
-    // Mini map
+  var createTileOSM = null, createTileSatEGIS = null, createTileSatACO = null;
+  var createTileCurrent = "osm";
+
+  function initCreateMap() {
     var mapDiv = document.getElementById("pcorg-create-minimap");
-    if (createMiniMap) { createMiniMap.remove(); createMiniMap = null; }
-    showCreate();
+    destroyCreateMap();
+    createTileCurrent = "osm";
     setTimeout(function () {
+      var mainMap = getMap();
+      var center = mainMap ? mainMap.getCenter() : L.latLng(47.95, 0.22);
+      var zoom = mainMap ? Math.max(mainMap.getZoom(), 15) : 16;
+
       createMiniMap = L.map(mapDiv, {
-        center: [lat, lon], zoom: 17, zoomControl: false,
-        attributionControl: false, dragging: false, scrollWheelZoom: false,
-        doubleClickZoom: false, touchZoom: false
+        center: center, zoom: zoom,
+        zoomControl: true, attributionControl: false,
+        dragging: true, scrollWheelZoom: true,
+        doubleClickZoom: false, touchZoom: true
       });
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(createMiniMap);
-      L.marker([lat, lon], {
+      createTileOSM = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxNativeZoom: 19, maxZoom: 22
+      }).addTo(createMiniMap);
+      createTileSatEGIS = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+        maxNativeZoom: 19, maxZoom: 22
+      });
+      createTileSatACO = L.tileLayer("/tiles/{z}/{x}/{y}.png", {
+        tms: true, maxZoom: 22
+      });
+      createMiniMap.invalidateSize();
+
+      // Click to position
+      createMiniMap.on("click", function (e) {
+        setCreatePosition(e.latlng.lat, e.latlng.lng);
+      });
+
+      // Zoom change: show/hide 25m button
+      createMiniMap.on("zoomend", function () {
+        var btn25 = document.getElementById("pcorg-create-grid25");
+        if (createGrid100On && createMiniMap.getZoom() >= 18) {
+          btn25.style.display = "";
+        } else {
+          btn25.style.display = "none";
+          if (createGrid25On) { clearCreateGrid25(); createGrid25On = false; btn25.classList.remove("active"); }
+        }
+      });
+
+      // Auto-load grid silently for carroyage resolution
+      loadCreateGridSilent();
+    }, 150);
+  }
+
+  function loadCreateGridSilent() {
+    var doLoad = function (data) {
+      createGridData = data;
+      if (!data || !data.lines) return;
+      var lines = data.lines;
+      var numCols = lines.num_cols || (lines.v_lines || []).length - 1;
+      var numRows = lines.num_rows || (lines.h_lines || []).length - 1;
+      var colOffset = lines.col_offset || 0;
+      var rowOffset = lines.row_offset || 0;
+      var cols = [];
+      for (var ci = 0; ci < numCols; ci++) {
+        var adj = ci - colOffset;
+        cols.push(adj >= 0 ? colLabel(adj) : null);
+      }
+      var rows = [];
+      for (var ri = 0; ri < numRows; ri++) {
+        var rn = ri + 1 - rowOffset;
+        rows.push(rn >= 1 ? rn : null);
+      }
+      createGridMeta = {
+        cols: cols, rows: rows,
+        hLines: lines.h_lines || [], vLines: lines.v_lines || [],
+        numCols: numCols, numRows: numRows,
+        colOffset: colOffset, rowOffset: rowOffset
+      };
+    };
+    if (window.CockpitMapView && window.CockpitMapView.getGridData && window.CockpitMapView.getGridData()) {
+      doLoad(window.CockpitMapView.getGridData());
+    } else {
+      fetch("/api/grid-ref")
+        .then(function (r) { return r.json(); })
+        .then(doLoad)
+        .catch(function () {});
+    }
+  }
+
+  function setCreatePosition(lat, lon) {
+    createLat = lat;
+    createLon = lon;
+
+    // Update or create marker
+    if (createMarker) {
+      createMarker.setLatLng([lat, lon]);
+    } else {
+      createMarker = L.marker([lat, lon], {
         icon: L.divIcon({
           className: "",
           html: "<div class='pcorg-pin' style='background:var(--brand)'><span class='material-symbols-outlined'>add_location</span></div>",
           iconSize: [36, 36], iconAnchor: [18, 36]
         })
       }).addTo(createMiniMap);
-      createMiniMap.invalidateSize();
-    }, 150);
+    }
+
+    // Display coordinates
+    document.getElementById("pcorg-create-lat-display").textContent = lat.toFixed(6);
+    document.getElementById("pcorg-create-lon-display").textContent = lon.toFixed(6);
+    document.getElementById("pcorg-create-pos-row").style.display = "";
+    document.getElementById("pcorg-create-map-info").style.display = "none";
+
+    // Resolve carroyage
+    createCarroye = "";
+    var carrEl = document.getElementById("pcorg-create-carroye-display");
+    if (createGridMeta) {
+      var label = resolveCreateGridCell(lat, lon);
+      if (label) {
+        createCarroye = label;
+        carrEl.textContent = label;
+      } else {
+        carrEl.textContent = "Hors zone";
+      }
+    } else if (window.CockpitMapView && window.CockpitMapView.getCellLabel) {
+      var mainLabel = window.CockpitMapView.getCellLabel(lat, lon);
+      if (mainLabel) {
+        createCarroye = mainLabel;
+        carrEl.textContent = mainLabel;
+      } else {
+        carrEl.textContent = "--";
+      }
+    } else {
+      carrEl.textContent = "--";
+    }
+
+    // Update header
+    document.getElementById("pcorg-create-pos-label").textContent =
+      (createCarroye ? createCarroye + " - " : "") + lat.toFixed(5) + ", " + lon.toFixed(5);
+  }
+
+  function resolveCreateGridCell(lat, lon) {
+    if (!createGridMeta) return null;
+    var m = createGridMeta;
+    var col = null, row = null;
+    for (var ci = 0; ci < m.numCols; ci++) {
+      if (lon >= m.vLines[ci].lng && lon < m.vLines[ci + 1].lng) { col = ci; break; }
+    }
+    for (var ri = 0; ri < m.numRows; ri++) {
+      if (lat <= m.hLines[ri].lat && lat > m.hLines[ri + 1].lat) { row = ri; break; }
+    }
+    if (col === null || row === null) return null;
+    var colLbl = m.cols[col];
+    var rowLbl = m.rows[row];
+    if (!colLbl || !rowLbl) return null;
+    return colLbl + "" + rowLbl;
+  }
+
+  // ── Grid on create map ──────────────────────────────────────────────────────
+  function colLabel(idx) {
+    if (idx < 26) return String.fromCharCode(65 + idx);
+    return String.fromCharCode(65 + Math.floor(idx / 26) - 1) + String.fromCharCode(65 + (idx % 26));
+  }
+
+  function toggleCreateGrid100() {
+    createGrid100On = !createGrid100On;
+    document.getElementById("pcorg-create-grid100").classList.toggle("active", createGrid100On);
+    if (createGrid100On) {
+      renderCreateGrid100();
+    } else {
+      clearCreateGrid100();
+      clearCreateGrid25();
+      createGrid25On = false;
+      document.getElementById("pcorg-create-grid25").classList.remove("active");
+      document.getElementById("pcorg-create-grid25").style.display = "none";
+    }
+  }
+
+  function renderCreateGrid100() {
+    if (!createMiniMap || !createGridData || !createGridData.lines) return;
+    var lines = createGridData.lines;
+    var hLines = lines.h_lines || [];
+    var vLines = lines.v_lines || [];
+
+    createGridLayer = L.layerGroup().addTo(createMiniMap);
+    hLines.forEach(function (l) {
+      L.polyline([[l.lat, l.lng_start], [l.lat, l.lng_end]],
+        { color: "#f59e0b", weight: 1, opacity: 0.6, interactive: false }
+      ).addTo(createGridLayer);
+    });
+    vLines.forEach(function (l) {
+      L.polyline([[l.lat_start, l.lng], [l.lat_end, l.lng]],
+        { color: "#f59e0b", weight: 1, opacity: 0.6, interactive: false }
+      ).addTo(createGridLayer);
+    });
+
+    var numCols = createGridMeta ? createGridMeta.numCols : (lines.num_cols || vLines.length - 1);
+    var numRows = createGridMeta ? createGridMeta.numRows : (lines.num_rows || hLines.length - 1);
+    var colOff = lines.col_offset || 0;
+    var rowOff = lines.row_offset || 0;
+    var labeledBounds = L.latLngBounds(
+      [hLines[numRows].lat, vLines[colOff > 0 ? colOff : 0].lng],
+      [hLines[rowOff > 0 ? rowOff : 0].lat, vLines[numCols].lng]
+    );
+    createMiniMap.fitBounds(labeledBounds, { padding: [20, 20] });
+
+    if (createMiniMap.getZoom() >= 18) {
+      document.getElementById("pcorg-create-grid25").style.display = "";
+    }
+  }
+
+  function clearCreateGrid100() {
+    if (createGridLayer && createMiniMap) {
+      createMiniMap.removeLayer(createGridLayer);
+      createGridLayer = null;
+    }
+    createGridMeta = null;
+  }
+
+  function toggleCreateGrid25() {
+    createGrid25On = !createGrid25On;
+    document.getElementById("pcorg-create-grid25").classList.toggle("active", createGrid25On);
+    if (createGrid25On) {
+      renderCreateGrid25();
+    } else {
+      clearCreateGrid25();
+    }
+  }
+
+  function renderCreateGrid25() {
+    if (!createMiniMap || !createGridData || !createGridData.lines) return;
+    var lines25 = createGridData.lines_25;
+    if (!lines25) return;
+    clearCreateGrid25();
+    createGrid25Layer = L.layerGroup().addTo(createMiniMap);
+    (lines25.h_lines || []).forEach(function (l) {
+      L.polyline([[l.lat, l.lng_start], [l.lat, l.lng_end]],
+        { color: "#fb923c", weight: 1, opacity: 0.7, dashArray: "6 4", interactive: false }
+      ).addTo(createGrid25Layer);
+    });
+    (lines25.v_lines || []).forEach(function (l) {
+      L.polyline([[l.lat_start, l.lng], [l.lat_end, l.lng]],
+        { color: "#fb923c", weight: 1, opacity: 0.7, dashArray: "6 4", interactive: false }
+      ).addTo(createGrid25Layer);
+    });
+  }
+
+  function clearCreateGrid25() {
+    if (createGrid25Layer && createMiniMap) {
+      createMiniMap.removeLayer(createGrid25Layer);
+      createGrid25Layer = null;
+    }
   }
 
   function buildCatButtons() {
@@ -1070,7 +1834,6 @@
   function selectCategory(cat) {
     createSelectedCat = cat;
     var st = catStyle(cat);
-    // Update buttons
     document.querySelectorAll(".pcorg-create-cat-btn").forEach(function (b) {
       var isSel = b.getAttribute("data-cat") === cat;
       b.classList.toggle("selected", isSel);
@@ -1082,7 +1845,15 @@
     header.style.background = st.color;
     header.querySelector(".pcorg-fiche-icon").textContent = st.icon;
     header.querySelector(".pcorg-fiche-cat").textContent = "Nouvelle " + shortCat(cat);
-    // Build specific fields
+    // Update pin color on map
+    if (createMarker && createMiniMap) {
+      createMarker.setIcon(L.divIcon({
+        className: "",
+        html: "<div class='pcorg-pin' style='background:" + st.color + "'><span class='material-symbols-outlined'>" + st.icon + "</span></div>",
+        iconSize: [36, 36], iconAnchor: [18, 36]
+      }));
+    }
+    // Build specific fields for step 3
     buildSpecificCreateFields(cat);
   }
 
@@ -1113,7 +1884,6 @@
       } else {
         addCreateField(container, "pcorg-c-service", "Service contacte");
       }
-      addCreateField(container, "pcorg-c-carroye", "Carroye");
     } else if (cat === "PCO.Fourriere") {
       addCreateField(container, "pcorg-c-lieu", "Lieu");
       addCreateField(container, "pcorg-c-detailsvl", "Vehicule (marque, couleur, modele)");
@@ -1158,15 +1928,19 @@
   }
 
   function submitCreate() {
-    if (!createSelectedCat) {
-      showToast("warning", "Selectionnez une categorie");
+    // Validate action prise
+    var comment = getVal("pcorg-c-comment");
+    if (!comment) {
+      showToast("warning", "L'action prise est obligatoire");
+      return;
+    }
+    // Validate sous-classification
+    var sousEl = document.getElementById("pcorg-c-sous");
+    if (sousEl && !sousEl.value) {
+      showToast("warning", "La sous-classification est obligatoire");
       return;
     }
     var text = document.getElementById("pcorg-c-text").value.trim();
-    if (!text) {
-      showToast("warning", "La description est obligatoire");
-      return;
-    }
     var ey = (typeof getCurrentEventYear === "function") ? getCurrentEventYear() : {};
 
     // Build content_category
@@ -1181,6 +1955,9 @@
       cc.radio = radioCanal.value.trim() || true;
     }
 
+    // Carroyage from step 1
+    if (createCarroye) cc.carroye = createCarroye;
+
     // Sous-classification
     var sousEl = document.getElementById("pcorg-c-sous");
     if (sousEl && sousEl.value) cc.sous_classification = sousEl.value;
@@ -1191,7 +1968,6 @@
       var i1 = getVal("pcorg-c-interv1"); if (i1) cc.intervenant1 = i1;
       var i2 = getVal("pcorg-c-interv2"); if (i2) cc.intervenant2 = i2;
       var svc = getVal("pcorg-c-service"); if (svc) cc.service_contacte = svc;
-      var carr = getVal("pcorg-c-carroye"); if (carr) cc.carroye = carr;
     } else if (cat === "PCO.Fourriere") {
       var lieu = getVal("pcorg-c-lieu"); if (lieu) cc.lieu = lieu;
       var vl = getVal("pcorg-c-detailsvl"); if (vl) cc.detailsvl = vl;
@@ -1208,8 +1984,9 @@
       year: ey.year,
       category: cat,
       text: text,
-      area_desc: document.getElementById("pcorg-c-area").value.trim(),
+      area_desc: "",
       content_category: cc,
+      comment: getVal("pcorg-c-comment"),
       lat: createLat,
       lon: createLon
     };
@@ -1218,12 +1995,6 @@
       .then(function (r) {
         if (r.ok) {
           hideCreate();
-          document.getElementById("pcorgCreateForm").reset();
-          createSelectedCat = "";
-          document.querySelectorAll(".pcorg-create-cat-btn").forEach(function (b) {
-            b.classList.remove("selected"); b.style.borderColor = ""; b.style.background = "";
-          });
-          document.getElementById("pcorg-create-specific").textContent = "";
           showToast("success", "Intervention creee");
           refresh();
         } else {

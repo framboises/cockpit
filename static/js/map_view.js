@@ -3017,13 +3017,20 @@
     if (!map) return;
 
     var colors = {0: "#22c55e", 1: "#22c55e", 2: "#eab308", 3: "#f97316", 4: "#ef4444"};
+    var weightMap = {0: 3, 1: 3, 2: 4, 3: 5, 4: 6};
+    var glowMap   = {0: 10, 1: 10, 2: 12, 3: 14, 4: 16};
     var speedMap = {0: 0.6, 1: 0.5, 2: 0.35, 3: 0.2, 4: 0.1};
     _allRoutesLayer = L.layerGroup();
     _allRoutesDashLines = [];
     var bounds = L.latLngBounds([]);
 
-    for (var i = 0; i < routes.length; i++) {
-      var r = routes[i];
+    // Trier par severite croissante : vert d'abord (dessous), rouge en dernier (dessus)
+    var sorted = routes.slice().sort(function(a, b){
+      return (a.severity || 0) - (b.severity || 0);
+    });
+
+    for (var i = 0; i < sorted.length; i++) {
+      var r = sorted[i];
       if (!r.line || !r.line.length) continue;
 
       var latlngs = [];
@@ -3043,15 +3050,18 @@
       var deltaStr = deltaM > 0 ? "+" + deltaM + "m " + deltaS + "s" : "+" + deltaS + "s";
       var tooltip = r.terrain + " \u2014 " + curM + "m" + (curS < 10 ? "0" : "") + curS + "s (" + deltaStr + ")";
 
+      var w = weightMap[sev] || 4;
+      var gw = glowMap[sev] || 12;
+
       // Glow
       _allRoutesLayer.addLayer(L.polyline(latlngs, {
-        color: color, weight: 12, opacity: 0.15,
+        color: color, weight: gw, opacity: 0.15,
         lineCap: "round", lineJoin: "round", interactive: false
       }));
 
       // Base line
       var baseLine = L.polyline(latlngs, {
-        color: color, weight: 4, opacity: 0.85,
+        color: color, weight: w, opacity: 0.85,
         lineCap: "round", lineJoin: "round"
       });
       baseLine.bindTooltip(tooltip, {sticky: true, className: "traffic-overlay-tooltip"});
@@ -3900,7 +3910,26 @@
     clearAlertPin: clearAlertPin,
     showAllAlertPins: showAllAlertPins,
     clearAllAlertPins: clearAllAlertPins,
-    preload: preloadMapData
+    preload: preloadMapData,
+    getGridData: function () { return _gridData; },
+    getGridMeta: function () { return _gridMeta; },
+    getCellLabel: function (lat, lng) {
+      var meta = _gridMeta;
+      if (!meta) return null;
+      var col = null, row = null;
+      for (var ci = 0; ci < meta.numCols; ci++) {
+        if (lng >= meta.vLines[ci].lng && lng < meta.vLines[ci + 1].lng) { col = ci; break; }
+      }
+      for (var ri = 0; ri < meta.numRows; ri++) {
+        if (lat <= meta.hLines[ri].lat && lat > meta.hLines[ri + 1].lat) { row = ri; break; }
+      }
+      if (col === null || row === null) return null;
+      var colLbl = meta.cols[col];
+      var rowLbl = meta.rows[row];
+      if (!colLbl || !rowLbl) return null;
+      return colLbl + rowLbl;
+    },
+    colLabel: colLabel
   };
 
   // ==========================================================================

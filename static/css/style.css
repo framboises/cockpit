@@ -2331,6 +2331,13 @@ img { max-width: 100%; }
 }
 
 .critical-alert-btn:active { transform: translateY(1px); }
+.critical-alert-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.critical-alert-btn-secondary:focus-visible {
+  outline-color: #94a3b8;
+}
 
 .critical-alert-btns {
   display: flex;
@@ -2339,6 +2346,15 @@ img { max-width: 100%; }
 
 .critical-alert-btns .critical-alert-btn {
   flex: 1;
+}
+
+.critical-alert-counter {
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--muted);
+  padding: 6px 0 2px;
+  letter-spacing: 0.3px;
+  font-weight: 500;
 }
 
 .critical-alert-btn-secondary {
@@ -2446,6 +2462,32 @@ img { max-width: 100%; }
 }
 
 .alert-meteo-pluie .critical-alert-btn:hover { background: #1565c0; }
+
+.critical-alert-box.alert-checkpoint-reassign {
+  border: 3px solid #8b5cf6;
+}
+
+.alert-checkpoint-reassign .critical-alert-header {
+  background: linear-gradient(135deg, #6d28d9, #8b5cf6);
+}
+
+.alert-checkpoint-reassign .critical-alert-btn {
+  background: #7c3aed;
+}
+
+.alert-checkpoint-reassign .critical-alert-btn:hover { background: #6d28d9; }
+
+/* ---------- Critical alert responsive ---------- */
+@media (max-width: 480px) {
+  .critical-alert-icon { font-size: 36px; }
+  .critical-alert-title { font-size: 1.1rem; letter-spacing: 0.5px; }
+  .critical-alert-header { padding: 14px 16px 12px; }
+  .critical-alert-body { padding: 14px 16px; }
+  .critical-alert-time { font-size: 1.6rem; }
+  .critical-alert-sub { font-size: 0.82rem; }
+  .critical-alert-btn { padding: 12px; font-size: 0.9rem; }
+  .critical-alert-btns { flex-direction: column; }
+}
 
 /* ---------- Alert history widget (right panel) ---------- */
 /* Compact alert entries — collapsed by default, expand on click */
@@ -6702,7 +6744,7 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .pcorg-fiche-header .drawer-close { color: #fff; opacity: 0.7; background: none; border: none; cursor: pointer; }
 .pcorg-fiche-header .drawer-close:hover { opacity: 1; }
 
-.pcorg-fiche-body { padding: 16px 18px; overflow-y: auto; max-height: 70vh; }
+.pcorg-fiche-body { padding: 16px 18px; overflow-y: auto; max-height: 85vh; }
 
 /* Description */
 .pcorg-fiche-desc {
@@ -6768,6 +6810,23 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .pcorg-chrono-entry.status-change .pcorg-chrono-text {
   font-style: italic; color: var(--muted); font-size: 0.72rem;
 }
+
+/* Comment form */
+.pcorg-comment-form {
+  display: flex; gap: 8px; align-items: flex-start;
+}
+.pcorg-comment-input {
+  flex: 1; font-size: 0.78rem; resize: vertical; min-height: 40px;
+}
+.pcorg-comment-send {
+  width: 38px; height: 38px; border-radius: 8px; border: none;
+  background: var(--brand); color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: opacity 0.15s;
+}
+.pcorg-comment-send:hover { opacity: 0.85; }
+.pcorg-comment-send:disabled { opacity: 0.4; cursor: default; }
+.pcorg-comment-send .material-symbols-outlined { font-size: 18px; }
 
 /* Actions bar */
 .pcorg-fiche-actions {
@@ -6921,7 +6980,108 @@ th span { font-size: 0.88rem; font-weight: 700; }
   box-shadow: 0 2px 10px rgba(0,0,0,0.3);
 }
 
-/* Create modal category selector */
+/* Create modal - wider */
+.pcorg-create-wide { width: 780px; max-width: calc(100vw - 32px); }
+
+/* Stepper timeline */
+.pcorg-stepper {
+  display: flex; align-items: center; justify-content: center;
+  padding: 12px 24px; gap: 0; background: var(--card);
+  border-bottom: 1px solid var(--line);
+}
+.pcorg-step {
+  display: flex; align-items: center; gap: 6px; cursor: default;
+}
+.pcorg-step-num {
+  width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.72rem; font-weight: 700;
+  background: var(--bg); color: var(--muted);
+  border: 2px solid var(--line); transition: all 0.2s;
+}
+.pcorg-step-label {
+  font-size: 0.72rem; font-weight: 600; color: var(--muted);
+  transition: color 0.2s;
+}
+.pcorg-step-line {
+  flex: 1; max-width: 60px; height: 2px;
+  background: var(--line); margin: 0 8px;
+  transition: background 0.2s;
+}
+.pcorg-step.active .pcorg-step-num {
+  background: var(--brand); color: #fff; border-color: var(--brand);
+}
+.pcorg-step.active .pcorg-step-label { color: var(--text); }
+.pcorg-step.done .pcorg-step-num {
+  background: var(--brand); color: #fff; border-color: var(--brand);
+}
+.pcorg-step.done .pcorg-step-label { color: var(--brand); }
+.pcorg-step.done + .pcorg-step-line { background: var(--brand); }
+.pcorg-step-line.done { background: var(--brand); }
+
+/* Steps visibility */
+.pcorg-create-step { display: none; }
+.pcorg-create-step.active { display: block; }
+
+/* Step 1: map */
+.pcorg-create-map-wrap {
+  position: relative; border-radius: var(--radius-sm, 6px);
+  overflow: hidden; border: 1px solid var(--line);
+}
+.pcorg-create-map {
+  width: 100%; height: 440px;
+}
+.pcorg-create-map-tools {
+  position: absolute; top: 10px; right: 10px; z-index: 1000;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.pcorg-map-tool-btn {
+  width: 32px; height: 32px; border-radius: 4px;
+  border: none; background: #fff; color: #333; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 1px 5px rgba(0,0,0,0.3); transition: all 0.15s;
+}
+.pcorg-map-tool-btn .material-symbols-outlined { font-size: 18px; }
+.pcorg-map-tool-btn:hover { background: #f0f0f0; }
+.pcorg-map-tool-btn.active { background: #f59e0b; color: #fff; }
+.pcorg-create-map-info {
+  position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+  z-index: 1000; background: rgba(0,0,0,0.7); color: #fff;
+  padding: 6px 14px; border-radius: 20px;
+  font-size: 0.72rem; display: flex; align-items: center; gap: 6px;
+  pointer-events: none; white-space: nowrap;
+}
+.pcorg-create-map-info .material-symbols-outlined { font-size: 16px; }
+.pcorg-create-pos-row {
+  display: flex; gap: 16px; margin-top: 10px; padding: 8px 12px;
+  background: var(--bg); border-radius: var(--radius-sm, 6px);
+}
+.pcorg-create-pos-item {
+  display: flex; gap: 6px; align-items: baseline; font-size: 0.78rem;
+}
+
+/* Navigation bar */
+.pcorg-create-nav {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 16px; padding: 14px 0 0; border-top: 1px solid var(--line);
+}
+.pcorg-create-nav .pcorg-popup-btn {
+  width: auto; font-size: 0.82rem; padding: 8px 20px; border-radius: 8px;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-weight: 600; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--line); background: var(--card); color: var(--text);
+  transition: all 0.15s;
+}
+.pcorg-create-nav .pcorg-popup-btn:hover { background: var(--bg); }
+.pcorg-create-nav .pcorg-popup-btn .material-symbols-outlined { font-size: 18px; }
+.pcorg-create-nav-right { display: flex; gap: 8px; margin-left: auto; }
+.pcorg-btn-primary {
+  background: var(--brand) !important; color: #fff !important;
+  border-color: var(--brand) !important;
+}
+.pcorg-btn-primary:hover { opacity: 0.9; }
+
+/* Category selector */
 .pcorg-create-cats {
   display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;
 }
@@ -6934,7 +7094,50 @@ th span { font-size: 0.88rem; font-weight: 700; }
 }
 .pcorg-create-cat-btn:hover { border-color: var(--text); color: var(--text); }
 .pcorg-create-cat-btn.selected { color: #fff; }
+.pcorg-create-cat-btn.selected .material-symbols-outlined { color: #fff !important; }
 .pcorg-create-cat-btn .material-symbols-outlined { font-size: 16px; }
+
+/* Context menu */
+.pcorg-ctx-menu {
+  position: fixed; z-index: 10000;
+  display: none; min-width: 220px;
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 10px; padding: 6px 0;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.28), 0 2px 8px rgba(0,0,0,0.12);
+  backdrop-filter: blur(12px);
+  animation: pcorg-ctx-in 0.15s ease-out;
+}
+.pcorg-ctx-menu.show { display: block; }
+@keyframes pcorg-ctx-in {
+  from { opacity: 0; transform: scale(0.92) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.pcorg-ctx-title {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; font-size: 0.7rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.6px;
+  color: var(--muted);
+}
+.pcorg-ctx-title .material-symbols-outlined { font-size: 16px; }
+.pcorg-ctx-sep {
+  height: 1px; background: var(--line); margin: 2px 10px;
+}
+.pcorg-ctx-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; cursor: pointer;
+  transition: background 0.12s;
+  border-radius: 0;
+}
+.pcorg-ctx-item:hover { background: var(--bg); }
+.pcorg-ctx-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.pcorg-ctx-icon.material-symbols-outlined { font-size: 18px; }
+.pcorg-ctx-label {
+  font-size: 0.8rem; font-weight: 500; color: var(--text);
+}
+.pcorg-ctx-item:first-of-type { border-radius: 0; }
+.pcorg-ctx-item:last-child { border-radius: 0 0 10px 10px; }
 
 /* PCOrg config admin */
 .pcorg-cfg-save-bar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
@@ -7019,6 +7222,29 @@ th span { font-size: 0.88rem; font-weight: 700; }
 }
 .hsh-summary-label {
   font-size: 0.72rem; color: var(--muted); margin-top: 2px;
+}
+
+/* Barre de progression pic projete */
+.hsh-progress-bar {
+  position: relative; height: 10px; border-radius: 5px;
+  background: var(--line); overflow: visible;
+}
+.hsh-progress-fill {
+  height: 100%; border-radius: 5px;
+  transition: width 0.6s ease, background 0.3s;
+  max-width: 100%;
+}
+.hsh-progress-mark {
+  position: absolute; top: -3px; height: 16px; width: 2px;
+  background: var(--text); border-radius: 1px;
+  display: none;
+}
+.hsh-progress-info {
+  display: flex; justify-content: space-between;
+  font-size: 0.72rem; color: var(--muted); margin-top: 3px;
+}
+.hsh-n1-text {
+  font-size: 0.75rem; color: var(--muted); margin-top: 2px;
 }
 
 .hsh-counter-card {
@@ -7219,6 +7445,43 @@ th span { font-size: 0.88rem; font-weight: 700; }
   border: 1px solid var(--line); background: var(--card);
   color: var(--text); font-size: 0.82rem;
   font-family: inherit;
+}
+
+/* Modal archivage */
+.hsh-modal-overlay {
+  position: fixed; inset: 0; z-index: 2000;
+  background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center;
+}
+.hsh-modal {
+  background: var(--card); border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+  padding: 24px 28px; width: 440px; max-width: 90vw;
+}
+.hsh-modal-title {
+  margin: 0 0 8px; font-size: 1rem; font-weight: 600;
+}
+.hsh-modal-text {
+  font-size: 0.84rem; color: var(--muted); margin: 0 0 16px; line-height: 1.5;
+}
+.hsh-modal-field {
+  margin-bottom: 16px;
+}
+.hsh-modal-field label {
+  display: block; font-size: 0.75rem; font-weight: 600;
+  color: var(--muted); margin-bottom: 4px; text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.hsh-modal-input {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: 6px; font-size: 0.88rem; font-family: inherit;
+  color: var(--text); background: var(--card); box-sizing: border-box;
+}
+.hsh-modal-input[readonly] {
+  background: color-mix(in srgb, var(--line) 30%, transparent);
+}
+.hsh-modal-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
 }
 
 /* Live-controle page — isolated layout */

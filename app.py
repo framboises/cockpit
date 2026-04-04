@@ -13,7 +13,7 @@ from flask import (
     redirect, url_for, flash, session, abort, make_response
 )
 from flask_cors import CORS
-from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFProtect, CSRFError
 from functools import wraps
 from zoneinfo import ZoneInfo
 from astral import LocationInfo
@@ -73,6 +73,12 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 csrf = CSRFProtect(app)
 
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    if request.path.startswith('/api/'):
+        return jsonify({"error": "CSRF token manquant ou invalide"}), 400
+    return e.get_body(), 400
+
 # Validation stricte pour la clé secrète en production
 if not DEV_MODE and app.config['SECRET_KEY'] == 'HacB6vFEPpU3M04zMIIcuNtebrAvRME9T2vyqcYjGrQ':
     raise ValueError("SECRET_KEY must be set securely in production!")
@@ -104,6 +110,17 @@ COL_ACTIVE_ALERTS.create_index("expiresAt", expireAfterSeconds=0)  # TTL
 COL_ACTIVE_ALERTS.create_index("dedup_key", unique=True, sparse=True)
 COL_ACTIVE_ALERTS.create_index("definition_slug")
 COL_ANPR_WATCHLIST.create_index("plate", unique=True)
+
+# Collections WhatsApp (WAHA)
+COL_WA_GROUPS = db['cockpit_wa_groups']
+COL_WA_CONTACTS = db['cockpit_wa_contacts']
+COL_WA_HISTORY = db['cockpit_wa_send_history']
+COL_WA_CONFIG = db['cockpit_wa_config']
+COL_WA_GROUPS.create_index("group_id", unique=True)
+COL_WA_CONTACTS.create_index("phone", unique=True)
+COL_WA_HISTORY.create_index("createdAt", expireAfterSeconds=30*24*3600)
+COL_WA_HISTORY.create_index("alert_dedup_key")
+COL_WA_HISTORY.create_index("sentAt", background=True)
 
 # Groupes systeme (non supprimables)
 DEFAULT_GROUP_NAME = "__default__"
@@ -234,6 +251,18 @@ _ALERT_SEEDS = [
         "enabled": True,
         "groups": [],
         "priority": 8,
+    },
+    {
+        "slug": "checkpoint-reassign",
+        "name": "Changement d'affectation checkpoint",
+        "description": "Un checkpoint a change de gate entre deux cycles de detection",
+        "icon": "swap_horiz",
+        "color": "#8b5cf6",
+        "detection_type": "checkpoint_reassign",
+        "params": {},
+        "enabled": True,
+        "groups": [],
+        "priority": 9,
     },
 ]
 for _seed in _ALERT_SEEDS:
@@ -1430,6 +1459,76 @@ def get_counter_max():
 # AFFLUENCE PREVISIONNELLE
 ################################################################################
 
+
+def _parse_race_date(raw):
+    """Parse une date de course (string ISO ou datetime) en date."""
+    if not raw:
+        return None
+    try:
+        if isinstance(raw, str):
+            return datetime.fromisoformat(raw.replace('Z', '+00:00')).date()
+        return raw.date() if hasattr(raw, 'date') else None
+    except Exception:
+        return None
+
+
+def _parse_race_datetime(raw):
+    """Parse une date de course en datetime complet (avec heure si disponible)."""
+    if not raw:
+        return None
+    try:
+        if isinstance(raw, str):
+            return datetime.fromisoformat(raw.replace('Z', '+00:00'))
+        if hasattr(raw, 'hour'):
+            return raw
+        if hasattr(raw, 'date'):
+            # datetime sans tz
+            return raw
+        return None
+    except Exception:
+        return None
+
+
+def _fill_curve(param_doc):
+    """Retourne [(days_before_race, total_ventes)] tries, et le total final."""
+    rd = _parse_race_date(param_doc.get('data', {}).get('race'))
+    if not rd:
+        return [], 0, None
+    prods = param_doc.get('tickets', {}).get('products', {})
+    snaps = {}
+    for p in prods.values():
+        for h in p.get('history', []):
+            d = h['date']
+            if d not in snaps:
+                snaps[d] = 0
+            snaps[d] += h.get('ventes', 0)
+    if not snaps:
+        return [], 0, None
+    points = []
+    for d, v in snaps.items():
+        dt = datetime.strptime(d, '%Y-%m-%d').date()
+        points.append(((rd - dt).days, v))
+    points.sort(key=lambda x: x[0], reverse=True)
+    final = max(v for _, v in points)
+    return points, final, rd
+
+
+def _interpolate_pct(points, final, target_days_before):
+    """Interpole le % atteint a target_days_before jours de la course."""
+    if not points or final <= 0:
+        return None
+    for i in range(len(points) - 1):
+        d1, v1 = points[i]
+        d2, v2 = points[i + 1]
+        if d1 >= target_days_before >= d2:
+            ratio = (d1 - target_days_before) / (d1 - d2) if d1 != d2 else 0
+            pct = (v1 + ratio * (v2 - v1)) / final * 100
+            return pct
+    if target_days_before >= points[0][0]:
+        return points[0][1] / final * 100
+    return points[-1][1] / final * 100
+
+
 @app.route('/get_affluence', methods=['GET'])
 @role_required("user")
 @block_required("widget-right-2")
@@ -1456,15 +1555,7 @@ def get_affluence():
         return jsonify({"days": [], "total_ventes": None, "last_update": last_update})
 
     # Parser la date de course courante
-    race_date = None
-    if race_raw:
-        try:
-            if isinstance(race_raw, str):
-                race_date = datetime.fromisoformat(race_raw.replace('Z', '+00:00')).date()
-            else:
-                race_date = race_raw.date() if hasattr(race_raw, 'date') else None
-        except Exception:
-            race_date = None
+    race_date = _parse_race_date(race_raw)
 
     # ── Charger parametrages N-1 (ventes precedentes) ──
     prev_year_str = None
@@ -1497,14 +1588,7 @@ def get_affluence():
         prev_public_days = prev_gh.get('dates', [])
         prev_products_data = prev_param.get('tickets', {}).get('products', {})
         prev_race_raw = prev_param.get('data', {}).get('race') or prev_gh.get('race')
-        if prev_race_raw:
-            try:
-                if isinstance(prev_race_raw, str):
-                    prev_race_date = datetime.fromisoformat(prev_race_raw.replace('Z', '+00:00')).date()
-                else:
-                    prev_race_date = prev_race_raw.date() if hasattr(prev_race_raw, 'date') else None
-            except Exception:
-                prev_race_date = None
+        prev_race_date = _parse_race_date(prev_race_raw)
 
     # ── Charger historique_controle N-1 (pic presents) ──
     prev_hist_race_date = None
@@ -1526,13 +1610,7 @@ def get_affluence():
                     )
                     if portes_doc:
                         prev_hist_race_raw = portes_doc.get('race')
-                try:
-                    if isinstance(prev_hist_race_raw, str):
-                        prev_hist_race_date = datetime.fromisoformat(prev_hist_race_raw.replace('Z', '+00:00')).date()
-                    else:
-                        prev_hist_race_date = prev_hist_race_raw.date() if hasattr(prev_hist_race_raw, 'date') else None
-                except Exception:
-                    pass
+                prev_hist_race_date = _parse_race_date(prev_hist_race_raw)
                 if prev_hist_race_date and cand.get('data'):
                     from collections import defaultdict
                     day_records = defaultdict(list)
@@ -1549,52 +1627,6 @@ def get_affluence():
                 break
 
     # ── Calculer la projection basee sur les courbes N-1 et N-2 ──
-    def _parse_race(raw):
-        try:
-            if isinstance(raw, str):
-                return datetime.fromisoformat(raw.replace('Z', '+00:00')).date()
-            return raw.date() if hasattr(raw, 'date') else None
-        except Exception:
-            return None
-
-    def _fill_curve(param_doc):
-        """Retourne [(days_before_race, total_ventes)] tries, et le total final."""
-        rd = _parse_race(param_doc.get('data', {}).get('race'))
-        if not rd:
-            return [], 0, None
-        prods = param_doc.get('tickets', {}).get('products', {})
-        snaps = {}
-        for p in prods.values():
-            for h in p.get('history', []):
-                d = h['date']
-                if d not in snaps:
-                    snaps[d] = 0
-                snaps[d] += h.get('ventes', 0)
-        if not snaps:
-            return [], 0, None
-        points = []
-        for d, v in snaps.items():
-            dt = datetime.strptime(d, '%Y-%m-%d').date()
-            points.append(((rd - dt).days, v))
-        points.sort(key=lambda x: x[0], reverse=True)
-        final = max(v for _, v in points)
-        return points, final, rd
-
-    def _interpolate_pct(points, final, target_days_before):
-        """Interpole le % atteint a target_days_before jours de la course."""
-        if not points or final <= 0:
-            return None
-        for i in range(len(points) - 1):
-            d1, v1 = points[i]
-            d2, v2 = points[i + 1]
-            if d1 >= target_days_before >= d2:
-                ratio = (d1 - target_days_before) / (d1 - d2) if d1 != d2 else 0
-                pct = (v1 + ratio * (v2 - v1)) / final * 100
-                return pct
-        if target_days_before >= points[0][0]:
-            return points[0][1] / final * 100
-        return points[-1][1] / final * 100
-
     # Calculer le ratio de projection
     projection_ratio = None  # ventes_actuelles / projection = ce ratio
     if race_date and last_update:
@@ -2253,6 +2285,7 @@ def delete_group(gid):
 DETECTION_TYPES = {
     "schedule_proximity", "schedule_transition",
     "traffic_cluster", "anpr_watchlist", "meteo_threshold",
+    "checkpoint_reassign",
 }
 
 @app.route('/admin/alertes')
@@ -2298,7 +2331,7 @@ def create_alert_definition():
         'params': data.get('params') or {},
         'enabled': bool(data.get('enabled', True)),
         'groups': group_oids,
-        'priority': data.get('priority', 99),
+        'priority': int(data.get('priority', 99)),
         'createdAt': datetime.now(timezone.utc),
         'updatedAt': datetime.now(timezone.utc),
     }
@@ -2309,6 +2342,10 @@ def create_alert_definition():
 @app.route('/api/alert-definitions/<did>', methods=['PUT'])
 @role_required("admin")
 def update_alert_definition(did):
+    try:
+        oid = ObjectId(did)
+    except Exception:
+        return jsonify({"error": "ID invalide"}), 400
     data = request.get_json(force=True) or {}
     patch = {}
     if 'name' in data:
@@ -2327,12 +2364,24 @@ def update_alert_definition(did):
         patch['priority'] = int(data.get('priority', 99))
     if 'groups' in data:
         raw_groups = data['groups'] or []
-        patch['groups'] = [ObjectId(g) for g in raw_groups if g]
+        try:
+            patch['groups'] = [ObjectId(g) for g in raw_groups if g]
+        except Exception:
+            return jsonify({"error": "ID de groupe invalide"}), 400
+    if 'whatsapp' in data:
+        wa = data['whatsapp'] or {}
+        patch['whatsapp'] = {
+            'enabled': bool(wa.get('enabled', False)),
+            'groups': [str(g) for g in (wa.get('groups') or [])],
+            'dm_on_critical': bool(wa.get('dm_on_critical', False)),
+            'dm_recipients': [str(p) for p in (wa.get('dm_recipients') or [])],
+            'cooldown_minutes': int(wa.get('cooldown_minutes', 15)),
+        }
     if not patch:
         return jsonify({"error": "Rien a modifier"}), 400
     patch['updatedAt'] = datetime.now(timezone.utc)
     res = COL_ALERT_DEFS.find_one_and_update(
-        {"_id": ObjectId(did)}, {"$set": patch}, return_document=True
+        {"_id": oid}, {"$set": patch}, return_document=True
     )
     if not res:
         return jsonify({"error": "Definition introuvable"}), 404
@@ -2341,7 +2390,11 @@ def update_alert_definition(did):
 @app.route('/api/alert-definitions/<did>', methods=['DELETE'])
 @role_required("admin")
 def delete_alert_definition(did):
-    r = COL_ALERT_DEFS.delete_one({"_id": ObjectId(did)})
+    try:
+        oid = ObjectId(did)
+    except Exception:
+        return jsonify({"error": "ID invalide"}), 400
+    r = COL_ALERT_DEFS.delete_one({"_id": oid})
     if r.deleted_count == 0:
         return jsonify({"error": "Definition introuvable"}), 404
     return jsonify({"ok": True})
@@ -2380,6 +2433,10 @@ def add_anpr_watchlist():
 @app.route('/api/anpr-watchlist/<wid>', methods=['PUT'])
 @role_required("admin")
 def update_anpr_watchlist(wid):
+    try:
+        oid = ObjectId(wid)
+    except Exception:
+        return jsonify({"error": "ID invalide"}), 400
     data = request.get_json(force=True) or {}
     patch = {}
     if 'label' in data:
@@ -2390,7 +2447,7 @@ def update_anpr_watchlist(wid):
         return jsonify({"error": "Rien a modifier"}), 400
     patch['updatedAt'] = datetime.now(timezone.utc)
     res = COL_ANPR_WATCHLIST.find_one_and_update(
-        {"_id": ObjectId(wid)}, {"$set": patch}, return_document=True
+        {"_id": oid}, {"$set": patch}, return_document=True
     )
     if not res:
         return jsonify({"error": "Plaque introuvable"}), 404
@@ -2399,7 +2456,11 @@ def update_anpr_watchlist(wid):
 @app.route('/api/anpr-watchlist/<wid>', methods=['DELETE'])
 @role_required("admin")
 def delete_anpr_watchlist(wid):
-    r = COL_ANPR_WATCHLIST.delete_one({"_id": ObjectId(wid)})
+    try:
+        oid = ObjectId(wid)
+    except Exception:
+        return jsonify({"error": "ID invalide"}), 400
+    r = COL_ANPR_WATCHLIST.delete_one({"_id": oid})
     if r.deleted_count == 0:
         return jsonify({"error": "Plaque introuvable"}), 404
     return jsonify({"ok": True})
@@ -2715,6 +2776,7 @@ def _pcorg_serialise(doc):
         "sous_classification": cc.get("sous_classification") or "",
         "lat": coords[1] if coords and len(coords) >= 2 else None,
         "lon": coords[0] if coords and len(coords) >= 2 else None,
+        "server": doc.get("server"),
     }
 
 
@@ -2790,6 +2852,7 @@ def pcorg_detail(doc_id):
         "plates": (doc.get("extracted") or {}).get("plates"),
         "lat": coords[1] if coords and len(coords) >= 2 else None,
         "lon": coords[0] if coords and len(coords) >= 2 else None,
+        "server": doc.get("server"),
     })
 
 
@@ -2819,7 +2882,7 @@ def pcorg_create():
     except ValueError:
         return jsonify({"error": "year invalide"}), 400
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(ZoneInfo("Europe/Paris"))
     ts_str = now.isoformat()
     user = request.user_payload
     operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
@@ -2835,8 +2898,21 @@ def pcorg_create():
 
     area_desc = data.get("area_desc", "")
     content_cat = data.get("content_category") or {}
+    initial_comment = (data.get("comment") or "").strip()
 
     doc_id = _pcorg_mk_uuid(event, year, ts_str, category, text, "", str(user.get("email", "")))
+
+    # Build initial comment / comment_history
+    comment_raw = ""
+    comment_history = []
+    if initial_comment:
+        ts_fmt = now.strftime("%d/%m/%Y %H:%M:%S")
+        comment_raw = f"{ts_fmt} , {operator_name}\n {initial_comment}\n"
+        comment_history.append({
+            "ts": now.isoformat(),
+            "operator": operator_name,
+            "text": initial_comment,
+        })
 
     doc = {
         "_id": doc_id,
@@ -2850,8 +2926,8 @@ def pcorg_create():
         "source": category,
         "text": text,
         "text_full": text,
-        "comment": "",
-        "comment_history": [],
+        "comment": comment_raw,
+        "comment_history": comment_history,
         "operator": operator_name,
         "operator_id_create": user.get("email", ""),
         "operator_close": None,
@@ -2873,6 +2949,90 @@ def pcorg_create():
 
     db["pcorg"].insert_one(doc)
     return jsonify({"ok": True, "id": doc_id})
+
+
+@app.route('/api/pcorg/update/<doc_id>', methods=['PUT'])
+@role_required("user")
+def pcorg_update(doc_id):
+    """Met a jour les champs d'une intervention (SQL ou COCKPIT)."""
+    doc = db["pcorg"].find_one({"_id": doc_id}, {"status_code": 1})
+    if not doc:
+        return jsonify({"error": "introuvable"}), 404
+    if doc.get("status_code") == 10:
+        return jsonify({"error": "intervention close, non editable"}), 403
+
+    data = request.get_json(force=True)
+
+    sets = {}
+    # Champs de base
+    if "text" in data:
+        txt = (data["text"] or "").strip()
+        if txt:
+            sets["text"] = txt
+            sets["text_full"] = txt
+    if "category" in data and data["category"]:
+        sets["category"] = data["category"]
+        sets["source"] = data["category"]
+    if "area_desc" in data:
+        sets["area.desc"] = data["area_desc"]
+
+    # GPS
+    lat = data.get("lat")
+    lon = data.get("lon")
+    if lat is not None and lon is not None:
+        try:
+            sets["gps"] = {"type": "Point", "coordinates": [float(lon), float(lat)]}
+        except (ValueError, TypeError):
+            pass
+
+    # content_category : merge
+    cc_update = data.get("content_category")
+    if cc_update and isinstance(cc_update, dict):
+        for k, v in cc_update.items():
+            sets[f"content_category.{k}"] = v
+
+    if not sets:
+        return jsonify({"error": "rien a mettre a jour"}), 400
+
+    db["pcorg"].update_one({"_id": doc_id}, {"$set": sets})
+    return jsonify({"ok": True})
+
+
+@app.route('/api/pcorg/comment/<doc_id>', methods=['POST'])
+@role_required("user")
+def pcorg_add_comment(doc_id):
+    data = request.get_json(force=True)
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text requis"}), 400
+
+    user = request.user_payload
+    operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
+    now = datetime.now(ZoneInfo("Europe/Paris"))
+    ts_fmt = now.strftime("%d/%m/%Y %H:%M:%S")
+
+    comment_line = f"{ts_fmt} , {operator_name}\n {text}\n"
+    history_entry = {
+        "ts": now.isoformat(),
+        "operator": operator_name,
+        "text": text,
+    }
+
+    doc = db["pcorg"].find_one({"_id": doc_id}, {"comment": 1})
+    if not doc:
+        return jsonify({"error": "introuvable"}), 404
+
+    old_comment = doc.get("comment") or ""
+    new_comment = old_comment + comment_line if old_comment else comment_line
+
+    db["pcorg"].update_one(
+        {"_id": doc_id},
+        {
+            "$set": {"comment": new_comment},
+            "$push": {"comment_history": history_entry},
+        }
+    )
+    return jsonify({"ok": True, "entry": history_entry})
 
 
 @app.route('/api/pcorg/update-gps/<doc_id>', methods=['POST'])
@@ -2903,13 +3063,12 @@ def pcorg_update_gps(doc_id):
 def pcorg_close(doc_id):
     user = request.user_payload
     operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
-    now = datetime.now(timezone.utc)
-    now_paris = now.astimezone(ZoneInfo("Europe/Paris"))
-    ts_str = now_paris.strftime("%d/%m/%Y %H:%M:%S")
+    now = datetime.now(ZoneInfo("Europe/Paris"))
+    ts_str = now.strftime("%d/%m/%Y %H:%M:%S")
 
     comment_line = f"{ts_str} , {operator_name} \n Statut: En cours -> Termine\n"
     history_entry = {
-        "ts": now_paris.isoformat(),
+        "ts": now.isoformat(),
         "operator": operator_name,
         "text": "Statut: En cours -> Termine",
     }
@@ -3045,6 +3204,7 @@ def update_pcorg_config():
 
 COL_HSH_STRUCTURE = db['hsh_structure']
 COL_HSH_ERREURS = db['hsh_erreurs']
+COL_HSH_TX_AGG = db['hsh_transactions_agg']
 HSH_GLOBAL_ID = "___GLOBAL___"
 
 
@@ -3146,6 +3306,56 @@ def hsh_force_transactions():
     return jsonify({"ok": True, "jours": jours})
 
 
+@app.route('/api/live-controle/archive', methods=['POST'])
+@role_required("admin")
+def hsh_archive_and_purge():
+    """Archive les donnees HSH dans des collections dediees puis purge les collections de travail."""
+    data = request.get_json(force=True)
+    evenement = data.get("evenement", "").strip()
+    if not evenement:
+        return jsonify({"ok": False, "error": "Evenement requis"}), 400
+
+    import re
+    suffix = re.sub(r'[^a-zA-Z0-9_-]', '_', evenement)
+    year = datetime.now().year
+    archive_tag = f"{suffix}_{year}"
+
+    counts = {}
+    # 1. Archiver hsh_transactions_agg
+    src_col = COL_HSH_TX_AGG
+    docs = list(src_col.find({"evenement": evenement}))
+    if docs:
+        dest = db[f"hsh_archive_tx_{archive_tag}"]
+        dest.insert_many(docs)
+        counts["transactions_agg"] = len(docs)
+        src_col.delete_many({"evenement": evenement})
+
+    # 2. Archiver hsh_erreurs
+    docs = list(COL_HSH_ERREURS.find({"evenement": evenement}))
+    if docs:
+        dest = db[f"hsh_archive_erreurs_{archive_tag}"]
+        dest.insert_many(docs)
+        counts["erreurs"] = len(docs)
+        COL_HSH_ERREURS.delete_many({"evenement": evenement})
+
+    # 3. Archiver hsh_structure
+    docs = list(COL_HSH_STRUCTURE.find({"evenement": evenement}))
+    if docs:
+        dest = db[f"hsh_archive_structure_{archive_tag}"]
+        dest.insert_many(docs)
+        counts["structure"] = len(docs)
+        COL_HSH_STRUCTURE.delete_many({"evenement": evenement})
+
+    # 4. Purger data_access (compteurs) de cet evenement
+    result = db.data_access.delete_many({
+        "requested_event": evenement,
+        "_id": {"$ne": HSH_GLOBAL_ID},
+    })
+    counts["compteurs"] = result.deleted_count
+
+    return jsonify({"ok": True, "archive": archive_tag, "counts": counts})
+
+
 @app.route('/api/live-controle/structure', methods=['GET'])
 @role_required("user")
 def hsh_get_structure():
@@ -3212,6 +3422,238 @@ def hsh_assign_parent():
         )
 
     return jsonify({"ok": True})
+
+
+@app.route('/api/live-controle/counters-context', methods=['GET'])
+@role_required("user")
+def hsh_get_counters_context():
+    """Contexte de projection pour le widget compteurs :
+    pic projete du jour + presents N-1 projetes au meme offset horaire."""
+    event = request.args.get("event")
+    year = request.args.get("year")
+    if not event or not year:
+        return jsonify({})
+
+    # --- Charger parametrages N ---
+    doc = db['parametrages'].find_one({'event': event, 'year': year}, {'_id': 0})
+    if not doc or 'data' not in doc:
+        return jsonify({})
+
+    gh = doc['data'].get('globalHoraires', {})
+    public_days = gh.get('dates', [])
+    ticketing_config = gh.get('ticketing', [])
+    race_raw = doc['data'].get('race') or gh.get('race')
+    tickets = doc.get('tickets', {})
+    products_data = tickets.get('products', {})
+    last_update = tickets.get('lastUpdate')
+
+    race_date = _parse_race_date(race_raw)
+    race_dt = _parse_race_datetime(race_raw)
+    if not race_date:
+        return jsonify({})
+
+    current_year_int = int(year) if str(year).isdigit() else None
+    if not current_year_int:
+        return jsonify({})
+
+    # --- Charger parametrages N-1 ---
+    prev_year_str = None
+    prev_param = None
+    prev_race_date = None
+    prev_products_data = {}
+    prev_ticketing_config = []
+    prev_candidates = list(db['parametrages'].find(
+        {'event': event, 'tickets': {'$exists': True}},
+        {'year': 1, 'data.globalHoraires': 1, 'data.race': 1, 'tickets': 1, '_id': 0}
+    ))
+    for cand in sorted(prev_candidates, key=lambda c: str(c.get('year', '')), reverse=True):
+        try:
+            if int(cand.get('year', '')) < current_year_int:
+                prev_param = cand
+                prev_year_str = cand.get('year')
+                break
+        except (ValueError, TypeError):
+            continue
+
+    if prev_param:
+        prev_gh = prev_param.get('data', {}).get('globalHoraires', {})
+        prev_ticketing_config = prev_gh.get('ticketing', [])
+        prev_products_data = prev_param.get('tickets', {}).get('products', {})
+        prev_race_raw = prev_param.get('data', {}).get('race') or prev_gh.get('race')
+        prev_race_date = _parse_race_date(prev_race_raw)
+
+    # --- Charger historique_controle N-1 ---
+    prev_hist_race_date = None
+    prev_hist_race_dt = None
+    prev_data_by_day = {}
+    prev_hist_candidates = list(db['historique_controle'].find(
+        {'type': 'frequentation', 'event': event},
+        sort=[('year', -1)]
+    ))
+    for cand in prev_hist_candidates:
+        cand_year = cand.get('year')
+        if isinstance(cand_year, (int, float)) and int(cand_year) < current_year_int:
+            prev_hist_race_raw = cand.get('race')
+            if not prev_hist_race_raw:
+                portes_doc = db['historique_controle'].find_one(
+                    {'type': 'portes', 'event': event, 'year': cand_year},
+                    {'_id': 0, 'race': 1}
+                )
+                if portes_doc:
+                    prev_hist_race_raw = portes_doc.get('race')
+            prev_hist_race_date = _parse_race_date(prev_hist_race_raw)
+            prev_hist_race_dt = _parse_race_datetime(prev_hist_race_raw)
+            if prev_hist_race_date and cand.get('data'):
+                from collections import defaultdict
+                day_records = defaultdict(list)
+                for rec in cand['data']:
+                    rec_date = rec.get('date')
+                    if isinstance(rec_date, str):
+                        day_key = rec_date[:10]
+                    elif hasattr(rec_date, 'strftime'):
+                        day_key = rec_date.strftime('%Y-%m-%d')
+                    else:
+                        continue
+                    day_records[day_key].append(rec)
+                prev_data_by_day = dict(day_records)
+            break
+
+    if not prev_hist_race_date:
+        return jsonify({})
+
+    # --- Calculer projection_ratio ---
+    projection_ratio = None
+    if last_update:
+        last_dt = datetime.strptime(last_update, '%Y-%m-%d').date()
+        days_before = (race_date - last_dt).days
+        fill_pcts = []
+        if prev_param:
+            pts, final, _ = _fill_curve(prev_param)
+            pct = _interpolate_pct(pts, final, days_before)
+            if pct:
+                fill_pcts.append(pct)
+        for cand in sorted(prev_candidates, key=lambda c: str(c.get('year', '')), reverse=True):
+            try:
+                cy = int(cand.get('year', ''))
+            except (ValueError, TypeError):
+                continue
+            if cy < current_year_int and str(cand.get('year')) != str(prev_year_str):
+                pts2, final2, _ = _fill_curve(cand)
+                pct2 = _interpolate_pct(pts2, final2, days_before)
+                if pct2:
+                    fill_pcts.append(pct2)
+                break
+        if fill_pcts:
+            avg_pct = sum(fill_pcts) / len(fill_pcts)
+            if avg_pct > 0:
+                projection_ratio = avg_pct / 100
+
+    # --- Identifier le jour courant par offset depuis la course ---
+    today = datetime.now(timezone.utc).date()
+    offset_days = (today - race_date).days
+    target_prev_date = prev_hist_race_date + timedelta(days=offset_days)
+    target_key = target_prev_date.strftime('%Y-%m-%d')
+
+    # Pic N-1 du jour equivalent
+    records = prev_data_by_day.get(target_key, [])
+    if not records:
+        # Pas de donnees historiques pour cette date (hors periode evenement)
+        hist_days = sorted(prev_data_by_day.keys())
+        return jsonify({
+            "no_data": True,
+            "message": "Pas de donnees N-1 pour cette date (J" + ("%+d" % offset_days) + " vs course)",
+            "hint": "Historique N-1 disponible du " + hist_days[0] + " au " + hist_days[-1] if hist_days else "",
+            "prev_year": prev_year_str,
+        })
+    pic_prev = max((r.get('present', 0) for r in records), default=0)
+    if not pic_prev:
+        return jsonify({"no_data": True, "message": "Pic N-1 = 0 pour cette date"})
+
+    # Ventes N du jour courant
+    today_str = today.strftime('%Y-%m-%d')
+    day_ventes = 0
+    for tc in ticketing_config:
+        days_scope = tc.get('days', [])
+        applies = (days_scope == 'all') or (today_str in days_scope)
+        if not applies:
+            continue
+        for pname in tc.get('products', []):
+            pdata = products_data.get(pname)
+            if pdata:
+                day_ventes += pdata.get('ventes', 0)
+
+    # Ventes N-1 du jour equivalent
+    ventes_prev = 0
+    if prev_race_date and prev_ticketing_config:
+        target_prev_str = (prev_race_date + timedelta(days=offset_days)).strftime('%Y-%m-%d')
+        for tc in prev_ticketing_config:
+            days_scope = tc.get('days', [])
+            applies = (days_scope == 'all') or (target_prev_str in days_scope)
+            if not applies:
+                continue
+            for pname in tc.get('products', []):
+                pdata = prev_products_data.get(pname)
+                if pdata:
+                    ventes_prev += pdata.get('ventes', 0)
+
+    # Ratio de projection (ventes N / ventes N-1)
+    has_sales = ventes_prev and ventes_prev > 0 and day_ventes > 0
+    if has_sales:
+        day_projection = round(day_ventes / projection_ratio) if projection_ratio and projection_ratio > 0 else day_ventes
+        sales_ratio = day_projection / ventes_prev
+        pic_projection = round(pic_prev * sales_ratio)
+        mode = "projected"
+    else:
+        # Fallback : pas de donnees de ventes, utiliser le pic N-1 brut
+        sales_ratio = None
+        pic_projection = pic_prev
+        mode = "raw_n1"
+
+    # --- N-1 meme heure ---
+    present_n1 = None
+    if race_dt and prev_hist_race_dt:
+        now_utc = datetime.now(timezone.utc)
+        if race_dt.tzinfo is None:
+            race_dt = race_dt.replace(tzinfo=timezone.utc)
+        if prev_hist_race_dt.tzinfo is None:
+            prev_hist_race_dt = prev_hist_race_dt.replace(tzinfo=timezone.utc)
+        offset_seconds = (now_utc - race_dt).total_seconds()
+        target_dt = prev_hist_race_dt + timedelta(seconds=offset_seconds)
+        target_day_key = target_dt.strftime('%Y-%m-%d')
+        day_records = prev_data_by_day.get(target_day_key, [])
+        if day_records:
+            best = None
+            best_diff = None
+            for rec in day_records:
+                rec_date = rec.get('date')
+                if isinstance(rec_date, str):
+                    try:
+                        rec_dt = datetime.fromisoformat(rec_date.replace('Z', '+00:00'))
+                    except Exception:
+                        continue
+                elif hasattr(rec_date, 'timestamp'):
+                    rec_dt = rec_date
+                    if rec_dt.tzinfo is None:
+                        rec_dt = rec_dt.replace(tzinfo=timezone.utc)
+                else:
+                    continue
+                diff = abs((rec_dt - target_dt).total_seconds())
+                if best_diff is None or diff < best_diff:
+                    best_diff = diff
+                    best = rec
+            if best:
+                raw_present = best.get('present', 0)
+                if sales_ratio:
+                    present_n1 = round(raw_present * sales_ratio)
+                else:
+                    present_n1 = raw_present
+
+    return jsonify({
+        "pic_projection": pic_projection,
+        "present_n1": present_n1,
+        "prev_year": prev_year_str,
+        "mode": mode,
+    })
 
 
 @app.route('/api/live-controle/counters', methods=['GET'])
@@ -3316,6 +3758,246 @@ def hsh_get_status():
         "age_seconds": int(age_seconds) if age_seconds is not None else None,
     })
 
+
+################################################################################
+# WhatsApp (WAHA) - API admin
+################################################################################
+
+from whatsapp import WhatsAppService
+_wa_service = WhatsAppService(db)
+
+@app.route('/api/whatsapp/config', methods=['GET'])
+@role_required("admin")
+def wa_get_config():
+    cfg = _wa_service.get_config()
+    out = dict(cfg)
+    out.pop('_id', None)
+    return jsonify(out)
+
+@app.route('/api/whatsapp/config', methods=['PUT'])
+@role_required("admin")
+def wa_update_config():
+    data = request.get_json(force=True) or {}
+    patch = {}
+    if 'enabled' in data:
+        patch['enabled'] = bool(data['enabled'])
+    if 'waha_url' in data:
+        patch['waha_url'] = (data['waha_url'] or '').strip()
+    if 'session_name' in data:
+        patch['session_name'] = (data['session_name'] or '').strip()
+    if 'rate_limit_per_hour' in data:
+        patch['rate_limit_per_hour'] = max(1, int(data['rate_limit_per_hour']))
+    if 'rate_limit_per_day' in data:
+        patch['rate_limit_per_day'] = max(1, int(data['rate_limit_per_day']))
+    if 'global_cooldown_minutes' in data:
+        patch['global_cooldown_minutes'] = max(1, int(data['global_cooldown_minutes']))
+    if 'type_cooldown_minutes' in data:
+        patch['type_cooldown_minutes'] = max(1, int(data['type_cooldown_minutes']))
+    if 'quiet_hours' in data:
+        qh = data['quiet_hours'] or {}
+        patch['quiet_hours'] = {
+            'enabled': bool(qh.get('enabled', False)),
+            'start': str(qh.get('start', '23:00')),
+            'end': str(qh.get('end', '06:00')),
+        }
+    if 'api_key' in data:
+        patch['api_key'] = (data['api_key'] or '').strip()
+    if not patch:
+        return jsonify({"error": "Rien a modifier"}), 400
+    patch['updatedAt'] = datetime.now(timezone.utc)
+    COL_WA_CONFIG.update_one(
+        {"_id": "wa_config"},
+        {"$set": patch},
+        upsert=True,
+    )
+    _wa_service._config_cache = None
+    return jsonify({"ok": True})
+
+@app.route('/api/whatsapp/status', methods=['GET'])
+@role_required("admin")
+def wa_status():
+    session = _wa_service.check_session()
+    stats = _wa_service.get_stats()
+    return jsonify({"session": session, "stats": stats})
+
+@app.route('/api/whatsapp/test', methods=['POST'])
+@role_required("admin")
+def wa_send_test():
+    data = request.get_json(force=True) or {}
+    chat_id = (data.get('chat_id') or '').strip()
+    if not chat_id:
+        return jsonify({"error": "chat_id requis"}), 400
+    ok, detail = _wa_service.send_test(chat_id)
+    return jsonify({"ok": ok, "detail": detail}), 200 if ok else 500
+
+# --- Groupes WhatsApp ---
+
+@app.route('/api/whatsapp/groups', methods=['GET'])
+@role_required("admin")
+def wa_list_groups():
+    groups = list(COL_WA_GROUPS.find().sort("name", 1))
+    for g in groups:
+        g['_id'] = str(g['_id'])
+    return jsonify(groups)
+
+@app.route('/api/whatsapp/groups/sync', methods=['POST'])
+@role_required("admin")
+def wa_sync_groups():
+    remote = _wa_service.get_groups()
+    synced = 0
+    for g in remote:
+        gid = g.get("_chat_id", "")
+        if not gid:
+            continue
+        meta = g.get("groupMetadata") or {}
+        participant_count = len(meta.get("participants") or [])
+        COL_WA_GROUPS.update_one(
+            {"group_id": gid},
+            {"$set": {
+                "group_id": gid,
+                "name": g.get("name") or meta.get("subject") or gid,
+                "participants_count": participant_count,
+                "last_synced": datetime.now(timezone.utc),
+            }, "$setOnInsert": {
+                "enabled": False,
+                "createdAt": datetime.now(timezone.utc),
+            }},
+            upsert=True,
+        )
+        synced += 1
+    return jsonify({"synced": synced})
+
+@app.route('/api/whatsapp/groups/clear', methods=['DELETE'])
+@role_required("admin")
+def wa_clear_groups():
+    result = COL_WA_GROUPS.delete_many({})
+    return jsonify({"ok": True, "deleted": result.deleted_count})
+
+@app.route('/api/whatsapp/groups/<gid>', methods=['PUT'])
+@role_required("admin")
+def wa_update_group(gid):
+    try:
+        oid = ObjectId(gid)
+    except Exception:
+        return jsonify({"error": "ID invalide"}), 400
+    data = request.get_json(force=True) or {}
+    patch = {}
+    if 'enabled' in data:
+        patch['enabled'] = bool(data['enabled'])
+    if 'description' in data:
+        patch['description'] = (data['description'] or '').strip()
+    if not patch:
+        return jsonify({"error": "Rien a modifier"}), 400
+    COL_WA_GROUPS.update_one({"_id": oid}, {"$set": patch})
+    return jsonify({"ok": True})
+
+@app.route('/api/whatsapp/groups/<gid>', methods=['DELETE'])
+@role_required("admin")
+def wa_delete_group(gid):
+    try:
+        oid = ObjectId(gid)
+    except Exception:
+        return jsonify({"error": "ID invalide"}), 400
+    COL_WA_GROUPS.delete_one({"_id": oid})
+    return jsonify({"ok": True})
+
+# --- Contacts DM ---
+
+@app.route('/api/whatsapp/contacts', methods=['GET'])
+@role_required("admin")
+def wa_list_contacts():
+    contacts = list(COL_WA_CONTACTS.find().sort("name", 1))
+    for c in contacts:
+        c['_id'] = str(c['_id'])
+    return jsonify(contacts)
+
+@app.route('/api/whatsapp/contacts', methods=['POST'])
+@role_required("admin")
+def wa_create_contact():
+    data = request.get_json(force=True) or {}
+    phone = (data.get('phone') or '').strip()
+    name = (data.get('name') or '').strip()
+    if not phone or not name:
+        return jsonify({"error": "phone et name requis"}), 400
+    # Nettoyer le numero : garder uniquement les chiffres
+    phone = ''.join(c for c in phone if c.isdigit())
+    doc = {
+        "phone": phone,
+        "name": name,
+        "role": (data.get('role') or '').strip(),
+        "enabled": True,
+        "createdAt": datetime.now(timezone.utc),
+    }
+    try:
+        COL_WA_CONTACTS.insert_one(doc)
+    except Exception:
+        return jsonify({"error": "Ce numero existe deja"}), 409
+    doc['_id'] = str(doc['_id'])
+    return jsonify(doc), 201
+
+@app.route('/api/whatsapp/contacts/<cid>', methods=['PUT'])
+@role_required("admin")
+def wa_update_contact(cid):
+    try:
+        oid = ObjectId(cid)
+    except Exception:
+        return jsonify({"error": "ID invalide"}), 400
+    data = request.get_json(force=True) or {}
+    patch = {}
+    if 'name' in data:
+        patch['name'] = (data['name'] or '').strip()
+    if 'role' in data:
+        patch['role'] = (data['role'] or '').strip()
+    if 'enabled' in data:
+        patch['enabled'] = bool(data['enabled'])
+    if 'phone' in data:
+        phone = (data['phone'] or '').strip()
+        patch['phone'] = ''.join(c for c in phone if c.isdigit())
+    if not patch:
+        return jsonify({"error": "Rien a modifier"}), 400
+    COL_WA_CONTACTS.update_one({"_id": oid}, {"$set": patch})
+    return jsonify({"ok": True})
+
+@app.route('/api/whatsapp/contacts/<cid>', methods=['DELETE'])
+@role_required("admin")
+def wa_delete_contact(cid):
+    try:
+        oid = ObjectId(cid)
+    except Exception:
+        return jsonify({"error": "ID invalide"}), 400
+    COL_WA_CONTACTS.delete_one({"_id": oid})
+    return jsonify({"ok": True})
+
+# --- Historique envoi ---
+
+@app.route('/api/whatsapp/history', methods=['GET'])
+@role_required("admin")
+def wa_history():
+    page = max(1, int(request.args.get('page', 1)))
+    limit = min(100, max(1, int(request.args.get('limit', 20))))
+    slug = request.args.get('slug', '').strip()
+    query = {}
+    if slug:
+        query['alert_slug'] = {"$regex": slug}
+    total = COL_WA_HISTORY.count_documents(query)
+    docs = list(
+        COL_WA_HISTORY.find(query)
+        .sort("sentAt", -1)
+        .skip((page - 1) * limit)
+        .limit(limit)
+    )
+    for d in docs:
+        d['_id'] = str(d['_id'])
+        if d.get('sentAt'):
+            d['sentAt'] = d['sentAt'].isoformat()
+        if d.get('createdAt'):
+            d['createdAt'] = d['createdAt'].isoformat()
+    return jsonify({
+        "items": docs,
+        "total": total,
+        "page": page,
+        "limit": limit,
+    })
 
 ################################################################################
 # Exécution

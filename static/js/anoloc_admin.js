@@ -103,10 +103,12 @@
     if (refreshLogsBtn) refreshLogsBtn.addEventListener("click", loadLogs);
     var clearLogsBtn = $("#anoloc-clear-logs");
     if (clearLogsBtn) clearLogsBtn.addEventListener("click", function () {
-      if (!confirm("Vider tous les logs ?")) return;
-      fetch("/anoloc/logs", { method: "DELETE", headers: jsonHeaders() })
-        .then(function (r) { return r.json(); })
-        .then(function () { loadLogs(); showToast("Logs vides", "success"); });
+      showConfirmToast("Vider tous les logs ?").then(function(ok){
+        if(!ok) return;
+        fetch("/anoloc/logs", { method: "DELETE", headers: jsonHeaders() })
+          .then(function (r) { return r.json(); })
+          .then(function () { loadLogs(); showToast("success", "Logs vides"); });
+      });
     });
 
     loadLiveControl();
@@ -462,23 +464,25 @@
   }
 
   function deleteBeaconGroup(idx) {
-    if (!confirm("Supprimer ce groupe de balises ?")) return;
-    if (!config.beacon_groups) return;
-    config.beacon_groups.splice(idx, 1);
+    showConfirmToast("Supprimer ce groupe de balises ?").then(function(ok){
+      if(!ok) return;
+      if (!config.beacon_groups) return;
+      config.beacon_groups.splice(idx, 1);
 
-    var payload = {
-      login: config.login || "",
-      password: "********",
-      enabled: config.enabled || false,
-      beacon_groups: config.beacon_groups,
-      group_visibility: config.group_visibility || {},
-    };
+      var payload = {
+        login: config.login || "",
+        password: "********",
+        enabled: config.enabled || false,
+        beacon_groups: config.beacon_groups,
+        group_visibility: config.group_visibility || {},
+      };
 
-    apiPost("/anoloc/config", payload).then(function (data) {
-      if (data.ok) {
-        showToast("Groupe supprime", "success");
-        loadConfig();
-      }
+      apiPost("/anoloc/config", payload).then(function (data) {
+        if (data.ok) {
+          showToast("success", "Groupe supprime");
+          loadConfig();
+        }
+      });
     });
   }
 

@@ -42,7 +42,8 @@
     "schedule_transition": "Horaire - transition",
     "traffic_cluster": "Trafic - cluster",
     "anpr_watchlist": "LAPI - plaque",
-    "meteo_threshold": "Meteo - seuil"
+    "meteo_threshold": "Meteo - seuil",
+    "checkpoint_reassign": "Controle acces - reaffectation"
   };
 
   var allGroups = [];
@@ -94,6 +95,14 @@
       typeBadge.style.cssText = "font-size:0.72rem; padding:2px 8px; border-radius:10px; background:var(--surface-2); color:var(--text-secondary);";
       typeBadge.textContent = DETECTION_TYPE_LABELS[d.detection_type] || d.detection_type;
       tdType.appendChild(typeBadge);
+      if(d.whatsapp && d.whatsapp.enabled){
+        var waBadge = document.createElement("span");
+        waBadge.className = "badge";
+        waBadge.style.cssText = "font-size:0.68rem; padding:1px 6px; border-radius:8px; margin-left:4px; background:#25D36622; color:#25D366;";
+        waBadge.textContent = "WA";
+        waBadge.title = "Notification WhatsApp active";
+        tdType.appendChild(waBadge);
+      }
       tr.appendChild(tdType);
       // Groupes
       var tdGroups = document.createElement("td");
@@ -119,7 +128,7 @@
       tr.appendChild(tdGroups);
       // Toggle actif
       var tdEnabled = document.createElement("td");
-      tdEnabled.style.textAlign = "center";
+      tdEnabled.className = "col-shrink";
       var toggle = document.createElement("button");
       toggle.className = "btn-icon";
       toggle.title = d.enabled ? "Desactiver" : "Activer";
@@ -135,6 +144,7 @@
       tr.appendChild(tdEnabled);
       // Actions
       var tdAct = document.createElement("td");
+      tdAct.className = "col-shrink col-actions";
       var btnEdit = document.createElement("button");
       btnEdit.className = "btn-icon";
       btnEdit.title = "Modifier";
@@ -153,9 +163,9 @@
       delIcon.textContent = "delete";
       btnDel.appendChild(delIcon);
       btnDel.addEventListener("click", function(){
-        if(confirm("Supprimer l'alerte '" + d.name + "' ?")){
-          DefAPI.remove(d._id).then(loadAll);
-        }
+        showConfirmToast("Supprimer l'alerte '" + d.name + "' ?").then(function(ok){
+          if(ok) DefAPI.remove(d._id).then(loadAll);
+        });
       });
       tdAct.appendChild(btnEdit);
       tdAct.appendChild(btnDel);
@@ -186,6 +196,7 @@
       form.querySelector('[name="priority"]').value = def.priority || 99;
       form.querySelector('[name="enabled"]').checked = !!def.enabled;
       populateGroupCheckboxes(def.groups || []);
+      if(window.WaAdmin) WaAdmin.setDefValues(def.whatsapp || {});
     } else {
       $("#alert-def-modal-title").textContent = "Nouvelle alerte";
       form.querySelector('[name="_id"]').value = "";
@@ -193,6 +204,7 @@
       form.querySelector('[name="params"]').value = "{}";
       form.querySelector('[name="enabled"]').checked = true;
       populateGroupCheckboxes([]);
+      if(window.WaAdmin) WaAdmin.setDefValues({});
     }
     modal.hidden = false;
   }
@@ -249,7 +261,8 @@
       params: params,
       priority: parseInt(form.querySelector('[name="priority"]').value) || 99,
       enabled: form.querySelector('[name="enabled"]').checked,
-      groups: selectedGroups
+      groups: selectedGroups,
+      whatsapp: (window.WaAdmin) ? WaAdmin.getDefValues() : null
     };
     if(!payload.slug || !payload.name){
       if(typeof showToast === "function") showToast("Slug et nom sont requis", "error");
@@ -311,7 +324,7 @@
       tr.appendChild(tdLabel);
       // Toggle
       var tdEnabled = document.createElement("td");
-      tdEnabled.style.textAlign = "center";
+      tdEnabled.className = "col-shrink";
       var toggle = document.createElement("button");
       toggle.className = "btn-icon";
       toggle.title = w.enabled ? "Desactiver" : "Activer";
@@ -327,6 +340,7 @@
       tr.appendChild(tdEnabled);
       // Actions
       var tdAct = document.createElement("td");
+      tdAct.className = "col-shrink";
       var btnDel = document.createElement("button");
       btnDel.className = "btn-icon";
       btnDel.title = "Retirer";
@@ -336,9 +350,9 @@
       delIcon.textContent = "delete";
       btnDel.appendChild(delIcon);
       btnDel.addEventListener("click", function(){
-        if(confirm("Retirer la plaque " + w.plate + " de la watchlist ?")){
-          WatchAPI.remove(w._id).then(loadAll);
-        }
+        showConfirmToast("Retirer la plaque " + w.plate + " de la watchlist ?").then(function(ok){
+          if(ok) WatchAPI.remove(w._id).then(loadAll);
+        });
       });
       tdAct.appendChild(btnDel);
       tr.appendChild(tdAct);

@@ -324,6 +324,9 @@
     return bar;
   }
 
+  // Bouton carte actif en cours (pour desactiver l'ancien au clic d'un autre)
+  var _activeMapBtn = null;
+
   function createMapOverlayBtn(routes){
     var btn = document.createElement("button");
     btn.className = "trafic-sort-btn";
@@ -334,8 +337,30 @@
     btn.appendChild(ico);
     on(btn, "click", function(e){
       e.stopPropagation();
+
+      // Toggle : si ce bouton est deja actif, on efface et on desactive
+      if(btn.classList.contains("active")){
+        btn.classList.remove("active");
+        _activeMapBtn = null;
+        if(window.CockpitMapView && window.CockpitMapView.clearAllRoutes){
+          window.CockpitMapView.clearAllRoutes();
+        } else {
+          document.dispatchEvent(new CustomEvent("clearAllRoutes"));
+        }
+        return;
+      }
+
       var withLines = routes.filter(function(r){ return r.line && r.line.length > 0; });
       if(!withLines.length) return;
+
+      // Desactiver l'ancien bouton actif s'il existe
+      if(_activeMapBtn && _activeMapBtn !== btn){
+        _activeMapBtn.classList.remove("active");
+      }
+
+      btn.classList.add("active");
+      _activeMapBtn = btn;
+
       window._allRoutesData = withLines;
       if(window.CockpitMapView && window.CockpitMapView.switchView){
         window.CockpitMapView.switchView("map");
@@ -411,6 +436,9 @@
   }
 
   function renderAll(){
+    // Le re-render detruit les boutons DOM, on reset la ref
+    _activeMapBtn = null;
+
     var tabs = [
       {id: "trafic-list-complet", tab: "trafic-complet"},
       {id: "trafic-list-pkg", tab: "trafic-pkg"},

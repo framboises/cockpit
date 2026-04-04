@@ -12,13 +12,23 @@
   }
 
   var countersBody = document.getElementById("hsh-counters-body");
-  var noData = document.getElementById("hsh-no-data");
   var totalCurrentEl = document.getElementById("hsh-total-current");
   var totalCapacityEl = document.getElementById("hsh-total-capacity");
+  var capacityLabel = document.getElementById("hsh-capacity-label");
   var healthDot = document.getElementById("hsh-health-dot");
   var lastUpdateEl = document.getElementById("hsh-last-update");
 
+  // Projection elements
+  var projBlock = document.getElementById("hsh-projection-block");
+  var progressFill = document.getElementById("hsh-progress-fill");
+  var progressMark = document.getElementById("hsh-progress-mark");
+  var progressPct = document.getElementById("hsh-progress-pct");
+  var progressPic = document.getElementById("hsh-progress-pic");
+  var n1Text = document.getElementById("hsh-n1-text");
+
   if (!countersBody) return;
+
+  var latestTotalCurrent = 0;
 
   function gaugeColor(pct) {
     if (pct >= 90) return "#ef4444";
@@ -33,7 +43,6 @@
   }
 
   function renderCounters(counters) {
-    // Vider le container
     while (countersBody.firstChild) {
       countersBody.removeChild(countersBody.firstChild);
     }
@@ -43,25 +52,20 @@
       nd.textContent = "Aucun compteur configure";
       countersBody.appendChild(nd);
       totalCurrentEl.textContent = "--";
-      totalCapacityEl.textContent = "--";
+      latestTotalCurrent = 0;
       return;
     }
 
     var totalCurrent = 0;
-    var totalCapacity = 0;
 
     counters.forEach(function (c) {
       var current = parseInt(c.current, 10) || 0;
-      var upper = parseInt(c.upper_limit, 10) || 0;
       var entries = parseInt(c.entries, 10) || 0;
       var exits = parseInt(c.exits, 10) || 0;
       var locked = c.locked && c.locked !== "0";
-      var pct = upper > 0 ? Math.round((current / upper) * 100) : 0;
 
       totalCurrent += current;
-      totalCapacity += upper;
 
-      // Card
       var card = el("div", "hsh-counter-card");
 
       // Header : nom + verrou
@@ -80,53 +84,21 @@
 
       // Stats : E / S / P
       var stats = el("div", "hsh-counter-stats");
-      var se = el("span");
-      se.textContent = "E: ";
-      var seB = el("strong");
-      seB.textContent = formatNum(entries);
-      se.appendChild(seB);
-      stats.appendChild(se);
-
-      var ss = el("span");
-      ss.textContent = "S: ";
-      var ssB = el("strong");
-      ssB.textContent = formatNum(exits);
-      ss.appendChild(ssB);
-      stats.appendChild(ss);
-
-      var sp = el("span");
-      sp.textContent = "P: ";
-      var spB = el("strong");
-      spB.textContent = formatNum(current);
-      sp.appendChild(spB);
-      stats.appendChild(sp);
-
+      [["E", entries], ["S", exits], ["P", current]].forEach(function (pair) {
+        var sp = el("span");
+        sp.textContent = pair[0] + ": ";
+        var b = el("strong");
+        b.textContent = formatNum(pair[1]);
+        sp.appendChild(b);
+        stats.appendChild(sp);
+      });
       card.appendChild(stats);
-
-      // Gauge
-      if (upper > 0) {
-        var gauge = el("div", "hsh-gauge");
-        var fill = el("div", "hsh-gauge-fill");
-        fill.style.width = Math.min(pct, 100) + "%";
-        fill.style.background = gaugeColor(pct);
-        gauge.appendChild(fill);
-        card.appendChild(gauge);
-
-        var info = el("div", "hsh-gauge-info");
-        var pctSpan = el("span");
-        pctSpan.textContent = pct + "%";
-        info.appendChild(pctSpan);
-        var capSpan = el("span");
-        capSpan.textContent = formatNum(upper);
-        info.appendChild(capSpan);
-        card.appendChild(info);
-      }
 
       countersBody.appendChild(card);
     });
 
     totalCurrentEl.textContent = formatNum(totalCurrent);
-    totalCapacityEl.textContent = formatNum(totalCapacity);
+    latestTotalCurrent = totalCurrent;
   }
 
   function loadCounters() {
@@ -136,9 +108,85 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         renderCounters(data);
+        loadCountersContext();
+      })
+      .catch(function () {});
+  }
+
+  function loadCountersContext() {
+    if (!projBlock) return;
+    var ev = window.selectedEvent;
+    var yr = window.selectedYear;
+    if (!ev || !yr) {
+      projBlock.style.display = "none";
+      // Fallback : afficher capacite totale si pas de contexte
+      if (capacityLabel) capacityLabel.textContent = "Capacite totale";
+      totalCapacityEl.textContent = "--";
+      return;
+    }
+
+    fetch("/api/live-controle/counters-context?event=" + encodeURIComponent(ev) + "&year=" + encodeURIComponent(yr))
+      .then(function (r) { return r.json(); })
+      .then(function (ctx) {
+        if (!ctx || (!ctx.pic_projection && !ctx.no_data)) {
+          projBlock.style.display = "none";
+          if (capacityLabel) capacityLabel.textContent = "Capacite totale";
+          totalCapacityEl.textContent = "--";
+          return;
+        }
+
+        // Pas de donnees historiques pour cette date
+        if (ctx.no_data) {
+          projBlock.style.display = "";
+          progressFill.style.width = "0%";
+          if (progressMark) progressMark.style.display = "none";
+          progressPct.textContent = ctx.message || "Pas de donnees N-1";
+          progressPic.textContent = "";
+          n1Text.textContent = ctx.hint || "";
+          if (capacityLabel) capacityLabel.textContent = "Pic projete";
+          totalCapacityEl.textContent = "--";
+          return;
+        }
+
+        // Mettre a jour le chiffre de droite : pic projete
+        totalCapacityEl.textContent = formatNum(ctx.pic_projection);
+        if (capacityLabel) {
+          capacityLabel.textContent = ctx.mode === "projected" ? "Pic projete" : "Pic N-1";
+        }
+
+        // Barre de progression
+        projBlock.style.display = "";
+        var pct = ctx.pic_projection > 0 ? Math.round(latestTotalCurrent / ctx.pic_projection * 100) : 0;
+        var color = gaugeColor(pct);
+
+        if (pct > 100 && progressMark) {
+          // Depassement : barre pleine, marqueur a la position 100%
+          progressFill.style.width = "100%";
+          progressFill.style.background = color;
+          var markPos = Math.round(100 / pct * 100);
+          progressMark.style.display = "";
+          progressMark.style.left = markPos + "%";
+        } else {
+          progressFill.style.width = Math.max(pct, 0) + "%";
+          progressFill.style.background = color;
+          if (progressMark) progressMark.style.display = "none";
+        }
+
+        var picLabel = ctx.mode === "projected" ? "Pic proj. " : "Pic N-1 : ";
+        progressPct.textContent = pct + "% du pic " + (ctx.mode === "projected" ? "projete" : "N-1");
+        progressPic.textContent = picLabel + formatNum(ctx.pic_projection);
+
+        // N-1 meme heure
+        if (ctx.present_n1 != null) {
+          var yearLabel = ctx.prev_year || "N-1";
+          var suffix = ctx.mode === "projected" ? " (proj.)" : "";
+          n1Text.textContent = yearLabel + " meme heure" + suffix + " : " + formatNum(ctx.present_n1);
+        } else {
+          n1Text.textContent = "";
+        }
       })
       .catch(function () {
-        // Fallback silencieux
+        projBlock.style.display = "none";
       });
   }
 
@@ -146,7 +194,6 @@
     fetch("/api/live-controle/status")
       .then(function (r) { return r.json(); })
       .then(function (s) {
-        // Health dot
         var color = "#999";
         var title = "Inactif";
         if (s.health === "ok") { color = "#4caf50"; title = "OK"; }
@@ -155,7 +202,6 @@
         healthDot.style.background = color;
         healthDot.title = title;
 
-        // Last update
         if (s.dernier_cycle && s.age_seconds !== null && s.age_seconds !== undefined) {
           var min = Math.floor(s.age_seconds / 60);
           lastUpdateEl.textContent = "maj il y a " + min + " min";
@@ -168,17 +214,14 @@
       .catch(function () {});
   }
 
-  // Fonction globale pour compatibilite avec main.js
   window.updateGlobalCounter = function () {
     loadCounters();
     loadStatus();
   };
 
-  // Init
   loadCounters();
   loadStatus();
 
-  // Auto-refresh toutes les 2 minutes
   setInterval(function () {
     loadCounters();
     loadStatus();

@@ -634,8 +634,88 @@
   //  EVENTS
   // =========================================================
 
+  // --- Modale archivage ---
+  var archiveOverlay = document.getElementById("hsh-archive-overlay");
+  var archiveEventInput = document.getElementById("hsh-archive-event");
+  var archiveCancelBtn = document.getElementById("hsh-archive-cancel");
+  var archiveSkipBtn = document.getElementById("hsh-archive-skip");
+  var archiveConfirmBtn = document.getElementById("hsh-archive-confirm");
+
+  function doDeactivate() {
+    saveConfig({ live_controle_actif: false }).then(function () { loadConfig(); });
+  }
+
+  function showArchiveModal() {
+    archiveEventInput.value = config.evenement || "";
+    archiveOverlay.style.display = "";
+  }
+
+  function hideArchiveModal() {
+    archiveOverlay.style.display = "none";
+  }
+
+  if (archiveCancelBtn) {
+    archiveCancelBtn.addEventListener("click", function () {
+      hideArchiveModal();
+      toggleEl.checked = true;  // annuler : remettre le toggle ON
+    });
+  }
+
+  if (archiveSkipBtn) {
+    archiveSkipBtn.addEventListener("click", function () {
+      hideArchiveModal();
+      doDeactivate();
+    });
+  }
+
+  if (archiveConfirmBtn) {
+    archiveConfirmBtn.addEventListener("click", function () {
+      var evt = archiveEventInput.value.trim();
+      if (!evt) {
+        if (typeof showToast === "function") showToast("error", "Evenement requis");
+        return;
+      }
+      archiveConfirmBtn.disabled = true;
+      archiveConfirmBtn.textContent = "Archivage...";
+      fetch("/api/live-controle/archive", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ evenement: evt }),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (r) {
+          archiveConfirmBtn.disabled = false;
+          archiveConfirmBtn.textContent = "Archiver et desactiver";
+          if (r.ok) {
+            var c = r.counts || {};
+            var parts = [];
+            if (c.transactions_agg) parts.push(c.transactions_agg + " tranches tx");
+            if (c.erreurs) parts.push(c.erreurs + " erreurs");
+            if (c.structure) parts.push(c.structure + " locations");
+            if (c.compteurs) parts.push(c.compteurs + " compteurs");
+            var msg = "Archive " + r.archive + " : " + (parts.length ? parts.join(", ") : "aucune donnee");
+            if (typeof showToast === "function") showToast("success", msg);
+            hideArchiveModal();
+            doDeactivate();
+          } else {
+            if (typeof showToast === "function") showToast("error", r.error || "Erreur archivage");
+          }
+        })
+        .catch(function () {
+          archiveConfirmBtn.disabled = false;
+          archiveConfirmBtn.textContent = "Archiver et desactiver";
+          if (typeof showToast === "function") showToast("error", "Erreur reseau");
+        });
+    });
+  }
+
   toggleEl.addEventListener("change", function () {
     var actif = toggleEl.checked;
+    if (!actif && config.live_controle_actif) {
+      // Desactivation → proposer l'archivage
+      showArchiveModal();
+      return;
+    }
     var fields = { live_controle_actif: actif };
     if (actif && eventSelect.value) {
       fields.evenement = eventSelect.value;
@@ -666,21 +746,23 @@
   if (forceTxBtn) {
     forceTxBtn.addEventListener("click", function () {
       var jours = forceTxDays ? parseInt(forceTxDays.value, 10) : 1;
-      if (!confirm("Forcer la collecte des transactions sur " + jours + " jour(s) ?\nCela sera execute au prochain cycle (max 2 min).")) return;
-      fetch("/api/live-controle/force-transactions", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify({ jours: jours }),
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (r) {
-          if (r.ok) {
-            if (typeof showToast === "function") showToast("success", "Collecte forcee sur " + jours + " jour(s) au prochain cycle");
-            loadStatus();
-          } else {
-            if (typeof showToast === "function") showToast("error", r.error || "Erreur");
-          }
-        });
+      showConfirmToast("Forcer la collecte des transactions sur " + jours + " jour(s) ? Cela sera execute au prochain cycle (max 2 min).").then(function(ok){
+        if(!ok) return;
+        fetch("/api/live-controle/force-transactions", {
+          method: "POST",
+          headers: jsonHeaders(),
+          body: JSON.stringify({ jours: jours }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (r) {
+            if (r.ok) {
+              showToast("success", "Collecte forcee sur " + jours + " jour(s) au prochain cycle");
+              loadStatus();
+            } else {
+              showToast("error", r.error || "Erreur");
+            }
+          });
+      });
     });
   }
 

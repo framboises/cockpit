@@ -97,6 +97,24 @@ function on(elOrId, event, handler) {
     if (el) el.addEventListener(event, handler, false);
 }
 
+// Fullscreen toggle
+(function () {
+    var btn = document.getElementById("app-fullscreen-btn");
+    if (!btn) return;
+    var ico = btn.querySelector(".material-symbols-outlined");
+    btn.addEventListener("click", function () {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(function () {});
+        } else {
+            document.exitFullscreen();
+        }
+    });
+    document.addEventListener("fullscreenchange", function () {
+        ico.textContent = document.fullscreenElement ? "fullscreen_exit" : "fullscreen";
+        btn.title = document.fullscreenElement ? "Quitter plein ecran" : "Plein ecran";
+    });
+})();
+
 function apiPost(url, payload){
     return fetch(url, {
         method: 'POST',
@@ -799,7 +817,7 @@ function findNextPublicDate(dates, afterISO) {
 // _pushAlertHistory est expose sur window pour que alert_poller.js puisse l'appeler
 
 // ---------- Historique d'alertes (widget droite) ----------
-var _alertIconMap = { opening: "door_open", opened: "lock_open", closing: "door_front", closed: "lock", "traffic-cluster": "emergency", "anpr-watchlist": "local_police", "meteo-vent": "air", "meteo-pluie": "umbrella", "meteo": "cloud" };
+var _alertIconMap = { opening: "door_open", opened: "lock_open", closing: "door_front", closed: "lock", "traffic-cluster": "emergency", "anpr-watchlist": "local_police", "meteo-vent": "air", "meteo-pluie": "umbrella", "meteo": "cloud", "checkpoint-reassign": "swap_horiz" };
 var _alertColorMap = {
     "opening": "#f59e0b", "closing": "#f59e0b",
     "opened": "#22c55e", "closed": "#ef4444",
@@ -807,7 +825,8 @@ var _alertColorMap = {
     "anpr-watchlist": "#dc2626",
     "meteo": "#42a5f5",
     "meteo-vent": "#f97316",
-    "meteo-pluie": "#42a5f5"
+    "meteo-pluie": "#42a5f5",
+    "checkpoint-reassign": "#8b5cf6"
 };
 var _alertTypeColors = {ACCIDENT: "#e53935", JAM: "#f59e0b", HAZARD: "#f97316", ROAD_CLOSED: "#8b5cf6"};
 var _alertTypeLabels = {ACCIDENT: "accident", JAM: "ralentissement", HAZARD: "danger", ROAD_CLOSED: "route fermee"};
@@ -1081,7 +1100,8 @@ var ALERT_PREF_TYPES = [
     {id: "traffic-cluster", label: "Alerte trafic (cluster)"},
     {id: "anpr-watchlist", label: "Plaque surveillee (LAPI)"},
     {id: "meteo-vent", label: "Alerte vent fort"},
-    {id: "meteo-pluie", label: "Alerte pluie forte"}
+    {id: "meteo-pluie", label: "Alerte pluie forte"},
+    {id: "checkpoint-reassign", label: "Changement affectation checkpoint"}
 ];
 
 function _getAlertPrefs() {

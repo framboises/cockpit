@@ -19,6 +19,8 @@ from datetime import datetime, timezone, timedelta
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 
+from whatsapp import WhatsAppService
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -172,22 +174,32 @@ def _find_schedule(public_dates, now_local):
     for d in public_dates:
         dates_by_key[d.get("date", "")] = d
 
+    log.debug("  _find_schedule: today=%s yesterday=%s now_min=%d, dates_available=%s",
+              today_iso, yesterday_iso, now_minutes, list(dates_by_key.keys()))
+
     # 1) Verifier si on est dans la queue overnight d'hier
     #    (avant fermeture + 5 min de marge pour la transition "site ferme")
     yesterday_pub = dates_by_key.get(yesterday_iso)
     if yesterday_pub and not yesterday_pub.get("is24h"):
         yd_open = parse_time_to_min(yesterday_pub.get("openTime"))
         yd_close = parse_time_to_min(yesterday_pub.get("closeTime"))
+        log.debug("  yesterday schedule: open=%s(%s) close=%s(%s)", yesterday_pub.get("openTime"), yd_open, yesterday_pub.get("closeTime"), yd_close)
         if yd_open is not None and yd_close is not None and yd_close < yd_open:
-            # Overnight : fermeture est apres minuit
+            log.debug("  overnight detected, now_min=%d <= close+5=%d ? %s", now_minutes, yd_close + 5, now_minutes <= yd_close + 5)
             if now_minutes <= yd_close + 5:
                 return yesterday_pub, True
+        else:
+            log.debug("  not overnight (close >= open)")
+    else:
+        log.debug("  no yesterday schedule for %s", yesterday_iso)
 
     # 2) Sinon, schedule d'aujourd'hui
     today_pub = dates_by_key.get(today_iso)
     if today_pub and not today_pub.get("is24h"):
+        log.debug("  using today schedule: open=%s close=%s", today_pub.get("openTime"), today_pub.get("closeTime"))
         return today_pub, False
 
+    log.debug("  no schedule found")
     return None, False
 
 
@@ -445,7 +457,7 @@ def detect_traffic_cluster(definition, context):
         s = a.get("street")
         if s:
             streets[s] = streets.get(s, 0) + 1
-    main_street = max(streets, key=streets.get) if streets else ""
+    main_street = max(streets, key=streets.get) if streets else "zone non identifiee"
 
     # Message
     parts = []
@@ -521,7 +533,7 @@ def detect_anpr_watchlist(definition, context):
         camera = det.get("camera_path", "")
         # Extraire un label camera lisible
         camera_cfg = db["anpr_camera_config"].find_one({"camera_path": camera})
-        camera_label = camera_cfg.get("label", camera) if camera_cfg else camera
+        camera_label = camera_cfg.get("label", camera) if camera_cfg and isinstance(camera_cfg, dict) else camera
 
         time_str = event_dt.strftime("%H:%M:%S") if event_dt else ""
         label = w.get("label", "")
@@ -594,7 +606,10 @@ def detect_meteo_threshold(definition, context):
         for k in keys:
             v = h.get(k)
             if v is not None:
-                val = float(v)
+                try:
+                    val = float(v)
+                except (ValueError, TypeError):
+                    continue
                 break
         if val > max_val:
             max_val = val
@@ -636,6 +651,117 @@ def detect_meteo_threshold(definition, context):
 
 
 # ---------------------------------------------------------------------------
+# Handler : checkpoint_reassign
+# ---------------------------------------------------------------------------
+
+def detect_checkpoint_reassign(definition, context):
+    """Detecte les checkpoints dont le parent_gate a change depuis le dernier cycle."""
+    db = get_db()
+    now = context["now"]
+
+    # Charger tous les checkpoints avec un parent_gate
+    checkpoints = list(db["hsh_structure"].find({
+        "location_type": "Checkpoint",
+        "parent_gate.id": {"$exists": True},
+    }, {
+        "_id": 1,
+        "location_id": 1,
+        "location_name": 1,
+        "parent_gate": 1,
+        "parent_area": 1,
+        "evenement": 1,
+    }))
+
+    if not checkpoints:
+        return None
+
+    # Charger l'etat precedent (snapshot des affectations checkpoint -> gate)
+    state_key = "cp-gate-snapshot"
+    state_doc = db["cockpit_alert_engine_state"].find_one({"_id": state_key})
+    prev_map = state_doc.get("assignments", {}) if state_doc else {}
+
+    # Construire le snapshot actuel : { checkpoint_id: gate_id }
+    current_map = {}
+    for cp in checkpoints:
+        cp_id = str(cp.get("location_id", ""))
+        gate_id = cp.get("parent_gate", {}).get("id", "")
+        if cp_id and gate_id:
+            current_map[cp_id] = gate_id
+
+    # Sauvegarder le snapshot pour le prochain cycle
+    db["cockpit_alert_engine_state"].update_one(
+        {"_id": state_key},
+        {"$set": {"assignments": current_map, "at": now}},
+        upsert=True
+    )
+
+    # Premier cycle : pas de comparaison possible
+    if not prev_map:
+        log.debug("checkpoint_reassign: premier snapshot (%d checkpoints)", len(current_map))
+        return None
+
+    # Comparer : chercher les changements de gate
+    results = []
+    for cp in checkpoints:
+        cp_id = str(cp.get("location_id", ""))
+        new_gate_id = cp.get("parent_gate", {}).get("id", "")
+        old_gate_id = prev_map.get(cp_id, "")
+
+        if not old_gate_id or not new_gate_id:
+            continue
+        if old_gate_id == new_gate_id:
+            continue
+
+        # Changement detecte !
+        cp_name = cp.get("location_name", cp_id)
+        new_gate_name = cp.get("parent_gate", {}).get("name", new_gate_id)
+
+        # Chercher le nom de l'ancienne gate
+        old_gate_doc = db["hsh_structure"].find_one(
+            {"location_type": "Gate", "location_id": old_gate_id},
+            {"location_name": 1}
+        )
+        old_gate_name = old_gate_doc.get("location_name", old_gate_id) if old_gate_doc else old_gate_id
+
+        try:
+            now_local = now.astimezone(__import__("zoneinfo").ZoneInfo("Europe/Paris"))
+        except Exception:
+            now_local = now
+        time_str = now_local.strftime("%H:%M")
+
+        dedup = "cp-reassign-%s-%s" % (cp_id, now.strftime("%Y%m%d%H%M"))
+        if db["cockpit_active_alerts"].find_one({"dedup_key": dedup}):
+            continue
+
+        msg = "%s : %s -> %s" % (cp_name, old_gate_name, new_gate_name)
+        area_name = cp.get("parent_area", {}).get("name", "")
+        if area_name:
+            msg += " (area: %s)" % area_name
+
+        log.info("  checkpoint_reassign: %s", msg)
+
+        results.append({
+            "definition_slug": definition["slug"],
+            "event": context.get("event", ""),
+            "year": context.get("year", ""),
+            "title": "CHANGEMENT AFFECTATION CHECKPOINT",
+            "message": msg,
+            "timeStr": time_str,
+            "actionData": {
+                "checkpoint_id": cp_id,
+                "checkpoint_name": cp_name,
+                "old_gate": old_gate_name,
+                "new_gate": new_gate_name,
+            },
+            "dedup_key": dedup,
+            "triggeredAt": now,
+            "expiresAt": now + timedelta(minutes=30),
+        })
+
+    return results if results else None
+
+
+# ---------------------------------------------------------------------------
 # Registre des handlers
 # ---------------------------------------------------------------------------
 
@@ -645,6 +771,7 @@ HANDLERS = {
     "traffic_cluster": detect_traffic_cluster,
     "anpr_watchlist": detect_anpr_watchlist,
     "meteo_threshold": detect_meteo_threshold,
+    "checkpoint_reassign": detect_checkpoint_reassign,
 }
 
 # ---------------------------------------------------------------------------
@@ -682,6 +809,7 @@ def run_cycle(sim_time=None):
              len(defs), context.get("event", "?"), context.get("year", "?"))
 
     alerts_created = 0
+    wa_batch = []  # (alert_doc, definition) pour notification WhatsApp
     for d in defs:
         handler = HANDLERS.get(d.get("detection_type"))
         if not handler:
@@ -695,12 +823,22 @@ def run_cycle(sim_time=None):
                 for r in result:
                     upsert_active_alert(db, r)
                     alerts_created += 1
+                    wa_batch.append((r, d))
             else:
                 upsert_active_alert(db, result)
                 alerts_created += 1
+                wa_batch.append((result, d))
         except Exception as e:
             log.error("Erreur handler '%s' (slug=%s): %s",
                       d.get("detection_type"), d.get("slug"), e, exc_info=True)
+
+    # Notification WhatsApp en batch (agregation anti-ban)
+    if wa_batch:
+        try:
+            wa_service = WhatsAppService(db)
+            wa_service.notify_batch(wa_batch)
+        except Exception as e:
+            log.warning("Erreur notification WhatsApp: %s", e)
 
     # Nettoyage des etats de transition anciens (> 2 jours)
     cutoff = datetime.now(timezone.utc) - timedelta(days=2)
@@ -726,6 +864,7 @@ def main():
             from zoneinfo import ZoneInfo
             naive = datetime.strptime(args.sim_time, "%Y-%m-%d %H:%M")
             sim_time = naive.replace(tzinfo=ZoneInfo("Europe/Paris")).astimezone(timezone.utc)
+            log.setLevel(logging.DEBUG)
             log.info("=== MODE SIMULATION : %s (Paris) ===", args.sim_time)
         except Exception as e:
             log.error("Format sim-time invalide (attendu: 'YYYY-MM-DD HH:MM'): %s", e)
@@ -737,6 +876,9 @@ def main():
     except Exception as e:
         log.error("Erreur fatale: %s", e, exc_info=True)
         sys.exit(1)
+    finally:
+        if _client is not None:
+            _client.close()
     log.info("=== Fin alert_engine ===")
 
 
