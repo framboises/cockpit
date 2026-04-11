@@ -110,6 +110,11 @@
                 <div class="anpr-kpi"><span class="anpr-kpi-n" id="kpi-unique">--</span><span class="anpr-kpi-l">Plaques uniques</span></div>
                 <div class="anpr-kpi"><span class="anpr-kpi-n" id="kpi-allowlist">--</span><span class="anpr-kpi-l">Liste autorisee</span></div>
                 <div class="anpr-kpi"><span class="anpr-kpi-n" id="kpi-confidence">--%</span><span class="anpr-kpi-l">Confiance moy.</span></div>
+                <div class="anpr-kpi anpr-kpi-vision">
+                    <span class="material-symbols-outlined" style="font-size:18px;color:#f59e0b;">confirmation_number</span>
+                    <span class="anpr-kpi-n" id="kpi-vision-matched">--</span>
+                    <span class="anpr-kpi-l">Vision croisees</span>
+                </div>
             </div>
 
             <!-- 2-column body -->
@@ -147,6 +152,10 @@
                             <select id="anpr-filter-camera"><option value="">Camera</option></select>
                             <input type="datetime-local" id="anpr-filter-from" title="Du">
                             <input type="datetime-local" id="anpr-filter-to" title="Au">
+                            <button class="anpr-filter-vision" id="anpr-filter-vision" title="Filtrer par source (clic: Vision / ANPR / Tout)">
+                                <span class="material-symbols-outlined" style="font-size:16px;">confirmation_number</span>
+                                <span id="anpr-filter-vision-label">Source</span>
+                            </button>
                             <button class="anpr-filter-reset" id="anpr-filter-reset" title="Reset filtres">
                                 <span class="material-symbols-outlined">filter_alt_off</span>
                             </button>
@@ -161,6 +170,7 @@
                                     <tr>
                                         <th></th>
                                         <th>Plaque</th>
+                                        <th>Source</th>
                                         <th>%</th>
                                         <th>Couleur</th>
                                         <th>Marque</th>
@@ -168,6 +178,7 @@
                                         <th>Camera</th>
                                         <th>Dir</th>
                                         <th>Date</th>
+                                        <th>Divers</th>
                                     </tr>
                                 </thead>
                                 <tbody id="anpr-table-body"></tbody>
@@ -177,26 +188,75 @@
 
                     <!-- Tab: Statistiques -->
                     <div class="anpr-tab-pane" id="pane-stats">
-                        <div class="anpr-stats-grid">
-                            <div class="anpr-stat-box anpr-stat-wide">
-                                <div class="anpr-stat-title">Distribution horaire</div>
-                                <div class="anpr-stat-chart"><canvas id="chart-hourly"></canvas></div>
+                        <div class="anpr-stats-subtabs">
+                            <button class="anpr-stats-subtab active" data-stats-sub="anpr">ANPR</button>
+                            <button class="anpr-stats-subtab" data-stats-sub="vision">Vision</button>
+                        </div>
+
+                        <!-- Sub-tab: ANPR stats (existing) -->
+                        <div class="anpr-stats-subpane active" id="stats-sub-anpr">
+                            <div class="anpr-stats-grid">
+                                <div class="anpr-stat-box anpr-stat-wide">
+                                    <div class="anpr-stat-title">Distribution horaire</div>
+                                    <div class="anpr-stat-chart"><canvas id="chart-hourly"></canvas></div>
+                                </div>
+                                <div class="anpr-stat-box">
+                                    <div class="anpr-stat-title">Couleurs</div>
+                                    <div class="anpr-stat-chart"><canvas id="chart-colors"></canvas></div>
+                                </div>
+                                <div class="anpr-stat-box">
+                                    <div class="anpr-stat-title">Top marques</div>
+                                    <div class="anpr-stat-chart"><canvas id="chart-brands"></canvas></div>
+                                </div>
+                                <div class="anpr-stat-box">
+                                    <div class="anpr-stat-title">Types</div>
+                                    <div class="anpr-stat-chart"><canvas id="chart-types"></canvas></div>
+                                </div>
+                                <div class="anpr-stat-box">
+                                    <div class="anpr-stat-title">Cameras</div>
+                                    <div class="anpr-stat-chart"><canvas id="chart-cameras"></canvas></div>
+                                </div>
                             </div>
-                            <div class="anpr-stat-box">
-                                <div class="anpr-stat-title">Couleurs</div>
-                                <div class="anpr-stat-chart"><canvas id="chart-colors"></canvas></div>
+                        </div>
+
+                        <!-- Sub-tab: Vision stats (new) -->
+                        <div class="anpr-stats-subpane" id="stats-sub-vision">
+                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+                                <select id="vision-event-filter" style="padding:5px 10px;border-radius:6px;border:1px solid var(--line);font-family:inherit;font-size:0.8rem;">
+                                    <option value="">Tous les evenements</option>
+                                </select>
                             </div>
-                            <div class="anpr-stat-box">
-                                <div class="anpr-stat-title">Top marques</div>
-                                <div class="anpr-stat-chart"><canvas id="chart-brands"></canvas></div>
+                            <div class="anpr-kpis" style="margin-bottom:16px;">
+                                <div class="anpr-kpi"><span class="anpr-kpi-n" id="kpi-v-total">--</span><span class="anpr-kpi-l">Fiches Vision</span></div>
+                                <div class="anpr-kpi" style="border-left:3px solid #22c55e;"><span class="anpr-kpi-n" id="kpi-v-matched">--</span><span class="anpr-kpi-l">Croisees ANPR</span></div>
+                                <div class="anpr-kpi" style="border-left:3px solid #ef4444;"><span class="anpr-kpi-n" id="kpi-v-unmatched">--</span><span class="anpr-kpi-l">Non detectees</span></div>
                             </div>
-                            <div class="anpr-stat-box">
-                                <div class="anpr-stat-title">Types</div>
-                                <div class="anpr-stat-chart"><canvas id="chart-types"></canvas></div>
+                            <div class="anpr-stats-grid">
+                                <div class="anpr-stat-box">
+                                    <div class="anpr-stat-title">Repartition par lieu (tous)</div>
+                                    <div class="anpr-stat-chart"><canvas id="chart-vision-lieux-all"></canvas></div>
+                                </div>
+                                <div class="anpr-stat-box">
+                                    <div class="anpr-stat-title">Croisement par lieu</div>
+                                    <div class="anpr-stat-chart"><canvas id="chart-vision-cross"></canvas></div>
+                                </div>
                             </div>
-                            <div class="anpr-stat-box">
-                                <div class="anpr-stat-title">Cameras</div>
-                                <div class="anpr-stat-chart"><canvas id="chart-cameras"></canvas></div>
+                            <div class="anpr-results-head" style="margin-top:12px;">
+                                <span class="anpr-results-count" id="vision-result-count">--</span>
+                            </div>
+                            <div class="anpr-table-scroll">
+                                <table class="anpr-table" id="vision-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Plaque</th>
+                                            <th>Lieu</th>
+                                            <th>Billets</th>
+                                            <th>Date</th>
+                                            <th>Detections ANPR</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="vision-table-body"></tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
@@ -221,6 +281,7 @@
             <div class="anpr-modal-image" id="anpr-modal-image"></div>
             <div class="anpr-modal-info" id="anpr-modal-info"></div>
         </div>
+        <div class="anpr-vision-section" id="anpr-modal-vision" style="display:none;"></div>
         <div class="anpr-modal-history" id="anpr-modal-history"></div>
     </div>
 </div>

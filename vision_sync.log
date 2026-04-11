@@ -1,0 +1,14 @@
+2026-04-11 17:17:09 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-04-11 17:17:10 [VisionSync] ERROR Fichier credentials Firebase introuvable: /Users/framboises/Dropbox/ACO/TITAN/cockpit/firebase-service-account.json
+2026-04-11 17:19:02 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-04-11 17:19:02 [VisionSync] INFO Config syncee: 24H MOTOS 2026
+2026-04-11 17:19:02 [VisionSync] INFO Collection vision_immatriculations vide, bascule en mode COMPLET
+2026-04-11 17:19:17 [VisionSync] INFO Immatriculations: 5551 upsert
+2026-04-11 17:19:17 [VisionSync] INFO Blacklist: 0 entrees syncees
+2026-04-11 17:19:17 [VisionSync] INFO Sync terminee: 5551 immat, 0 blacklist
+2026-04-11 17:45:50 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-04-11 17:45:51 [VisionSync] INFO Config syncee: 24H MOTOS 2026
+2026-04-11 17:45:51 [VisionSync] INFO Collection vision_immatriculations vide, bascule en mode COMPLET
+2026-04-11 17:46:06 [VisionSync] INFO Immatriculations: 5551 upsert
+2026-04-11 17:46:06 [VisionSync] INFO Blacklist: 0 entrees syncees
+2026-04-11 17:46:06 [VisionSync] INFO Sync terminee: 5551 immat, 0 blacklist

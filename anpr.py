@@ -1,5 +1,6 @@
 # anpr.py -- Blueprint LAPI / ANPR (Lecture Automatique de Plaques)
 import os
+import re
 import logging
 from datetime import datetime, timezone, timedelta
 from flask import Blueprint, jsonify, request, render_template, Response, send_file, abort
@@ -65,52 +66,201 @@ def _before():
 # ---------------------------------------------------------------------------
 # Hikvision vehicle_logo -> marque
 # ---------------------------------------------------------------------------
-# Source: Hikvision ISAPI ANPR Main Vehicle Brand Reference
-# https://tpp.hikvision.com/wiki/isapi/anpr/GUID-552878C8-F295-4F1C-87F0-5467E9C9160A.html
+# Source: Hikvision Vehicle Brand Dictionary v2 (579 brands)
 BRAND_MAP = {
-    # --- Confirmed from Hikvision official docs ---
-    1026: "Alfa Romeo",   1027: "Aston Martin", 1028: "Audi",
-    1030: "Porsche",      1031: "Buick",        1036: "Mercedes",
-    1037: "BMW",          1038: "Baojun",       1043: "Changan",
-    1044: "Chevrolet",    1045: "Changfeng",    1048: "Dongfeng",
-    1050: "Dongnan",      1051: "Dazhong",      1053: "Ford",
-    1056: "GAC Trumpchi", 1060: "Honda",        1063: "Haima",
-    1064: "Haval",        1067: "Huanghai",     1071: "Jianghuai (JAC)",
-    1078: "Karry",        1081: "Lamborghini",  1083: "Leopaard",
-    1084: "Lexus",        1085: "Lifan",        1088: "Maserati",
-    1089: "Mazda",        1093: "MG",           1094: "MG",
-    1096: "Mini",
-    1100: "Lotus",        1101: "Land Rover",   1102: "Suzuki",
-    1103: "Lufeng",       1104: "Luxgen",       1105: "Renault",
-    1107: "Mini",         1108: "Maserati",     1112: "Mazda",
-    1114: "Luxgen",       1116: "Opel",         1117: "Acura",
-    1119: "Venucia",      1120: "Chery",        1121: "Kia",
-    1123: "Nissan",       1125: "Roewe",        1127: "Smart",
-    1128: "Mitsubishi",   1130: "ShuangHuan",   1131: "ShuangLong",
-    1132: "SsangYong",    1133: "Subaru",       1134: "Skoda",
-    1135: "Saab",         1139: "Tesla",        1141: "Denza",
-    1144: "Volvo",        1149: "Hyundai",      1150: "Seat",
-    1151: "Chevrolet",    1152: "Citroen",      1156: "Infiniti",
-    1159: "Yujie",        1160: "Ferrari",      1161: "Fiat",
-    1163: "Geely",        1169: "Peugeot",
-
-    # --- Marques chinoises (codes > 1500) ---
-    1552: "BYD",          1559: "Baic Senova",  1561: "Bestune",
-    1566: "Borgward",     1571: "Changan",      1576: "Cowin",
-    1579: "DS",           1581: "Foton",        1584: "GAC",
-    1588: "Geely",        1599: "Great Wall",   1614: "Haval",
-    1621: "JAC",          1629: "JMC",          1631: "Jetour",
-    1633: "Jinbei",       1639: "Kaiyi",
-    1691: "Lynk & Co",    1709: "NIO",          1715: "ORA",
-    1737: "Qoros",        1745: "Roewe",        1747: "SAIC Maxus",
-    1763: "SWM",
-    1806: "Trumpchi",     1807: "VGV",          1808: "Voyah",
-    1834: "Wuling",       1843: "XPeng",        1849: "Yudo",
-    1855: "Zeekr",        1857: "Zhidou",       1869: "Zotye",
-    1870: "Wey",          1877: "Dongfeng",
-    1887: "Lancia",       1890: "Cupra",
-    1938: "Dacia",        1944: "Toyota",       1948: "Volkswagen",
-    1951: "Jeep",
+    1024: "Others", 1025: "AC Schnitzer", 1026: "Alfa Romeo",
+    1027: "Aston Martin", 1028: "Audi", 1029: "La Joya",
+    1030: "Porsche", 1031: "Buick", 1032: "BAIC",
+    1033: "BAW", 1034: "BAIC Weiwang", 1035: "BAIC Yinxiang",
+    1036: "Mercedes", 1037: "BMW", 1038: "Baojun",
+    1039: "Baolong", 1040: "Bentley", 1041: "Brabus",
+    1042: "Bugatti", 1043: "Honda", 1044: "Peugeot",
+    1045: "BYD", 1046: "Changhe", 1047: "Changfeng Leopaard",
+    1048: "Changcheng", 1049: "Changan Saloon", 1050: "DS",
+    1051: "Southeast", 1053: "Volkswagen", 1054: "Dadi",
+    1055: "Detroit Electric", 1056: "Dodge", 1057: "Dadi",
+    1059: "Dafa", 1060: "Toyota", 1061: "Fuqi",
+    1062: "Formasari", 1063: "Ferrari", 1064: "Ford",
+    1066: "Foday", 1067: "Fiat", 1068: "Fisker",
+    1069: "Mitsuoka", 1070: "Mercury", 1071: "Trumpchi",
+    1073: "Guangsheng", 1074: "Qoros", 1075: "Huabei",
+    1076: "Huapu", 1077: "Huatai", 1078: "Huafei",
+    1079: "Hummer", 1080: "Haima", 1081: "Hongqi",
+    1083: "Geely", 1084: "Jeep", 1085: "Jaguar",
+    1086: "Jiangnan", 1088: "Chrysler", 1089: "Cadillac",
+    1090: "Carlsson", 1091: "Kandi", 1092: "Koenigsegg",
+    1093: "Lamborghini", 1094: "Lifan", 1095: "Rolls-Royce",
+    1096: "Lincoln", 1097: "Linian", 1098: "Lotus",
+    1099: "Lancia", 1100: "Lotus", 1101: "Land Rover",
+    1102: "Suzuki", 1103: "Land Wind", 1104: "Lexus",
+    1105: "Renault", 1106: "MG", 1107: "Mini",
+    1108: "Maserati", 1109: "Meiya", 1110: "McLaren",
+    1111: "Maybach", 1112: "Mazda", 1113: "Morgan",
+    1114: "Luxgen", 1115: "Nanjing Jinlong", 1116: "Opel",
+    1117: "Acura", 1118: "PGO", 1119: "Venucia",
+    1120: "Chery", 1121: "Kia", 1122: "Qiantu",
+    1123: "Nissan", 1124: "Riich", 1125: "Roewe",
+    1126: "RUF", 1127: "Smart", 1128: "Mitsubishi",
+    1129: "Maxus", 1130: "Spyker", 1131: "Shuanghuan",
+    1132: "Shuanglong", 1133: "Subaru", 1134: "Skoda",
+    1135: "Saab", 1136: "Ciimo", 1137: "Startech",
+    1138: "Tianma", 1139: "Tesla", 1140: "TechArt",
+    1141: "Denza", 1142: "Wiesmann", 1143: "Rely",
+    1144: "Volvo", 1145: "Weichai Enranger", 1146: "Xinkai",
+    1147: "Xin Da Di", 1148: "Soyat", 1149: "Hyundai",
+    1150: "Seat", 1151: "Chevrolet", 1152: "Citroen",
+    1154: "Jonway", 1155: "Eterniti", 1156: "Infiniti",
+    1157: "Mustang", 1158: "Youxia", 1159: "Yogomo",
+    1160: "Zhongxing", 1161: "Zhonghua", 1162: "ZK Huabei",
+    1163: "Zotye", 1164: "Zhidou", 1165: "Kaiyi",
+    1166: "Huasong", 1167: "Isuzu", 1168: "Borgward",
+    1169: "Tongjia", 1170: "Hanjiang", 1171: "Zhinuo",
+    1172: "GreenWheel", 1173: "Hanteng", 1174: "Levdeo",
+    1175: "Changjiang", 1176: "SWM", 1177: "FQT Motor",
+    1178: "Qoros", 1179: "JMC", 1180: "Bisu",
+    1181: "Caky", 1182: "Haima", 1183: "Ourui",
+    1537: "Ankai", 1538: "Ayvip", 1539: "Beijing Nongyong",
+    1540: "Beiben", 1541: "North Bus", 1544: "Balong",
+    1546: "Succeeded", 1547: "Changlong", 1548: "Chunlan Motor",
+    1549: "Changan Commercial", 1552: "Dongfeng", 1554: "Daewoo",
+    1555: "Dayun", 1556: "Dima", 1557: "Dongwo",
+    1559: "Foton", 1561: "GMC", 1562: "GAC Gonow",
+    1563: "Hino Light Truck", 1564: "Hino Heavy Truck", 1566: "CAMC",
+    1568: "CHTC", 1569: "Hentong Bus", 1570: "Huizhong",
+    1571: "Higer", 1573: "Haiou", 1574: "Hangtian Yuantong",
+    1575: "Space Auto", 1576: "Huanghai", 1577: "Heibao",
+    1578: "Jiulong", 1579: "JAC", 1580: "Jianghuan",
+    1581: "JMC", 1582: "JMC", 1583: "Golden Dragon",
+    1584: "Jinbei", 1585: "King Long", 1586: "Kama",
+    1587: "Kawei", 1588: "Karry", 1590: "UAES",
+    1592: "MAN", 1594: "Agricultural Vehicle", 1595: "Naveco",
+    1596: "Nanjun", 1597: "Isuzu", 1598: "Youngman Bus",
+    1599: "Sany Heavy Industry", 1600: "Tri-Ring Shitong", 1602: "Tricycle",
+    1603: "Hongyan", 1604: "Shangrao Bus", 1605: "Shili Bus",
+    1606: "Shaolin Bus", 1607: "Forland", 1608: "Shifeng",
+    1609: "Sunwin", 1610: "Shenlong", 1611: "Shenye",
+    1612: "Shuchi Bus", 1613: "Shaanxi Auto", 1614: "Scania",
+    1615: "Tangjun", 1616: "Taihu Bus", 1618: "Tongxin Bus",
+    1619: "Wanfeng", 1620: "Wuzheng", 1621: "SGMW",
+    1622: "Wuyi", 1624: "Wuhuan", 1626: "Xugong",
+    1629: "FAW", 1630: "Yaxing", 1631: "Iveco",
+    1632: "Youyi Bus", 1633: "Yutong", 1634: "Yangzi",
+    1635: "Yantai", 1636: "Yuejin", 1637: "Yingtian",
+    1639: "CNHTC", 1641: "Zhongtong Bus", 1642: "Polarsun Motor",
+    1643: "CDW", 1644: "Zonda", 1645: "Zonda",
+    1646: "Jinggong Heavy Truck", 1647: "Wu Zhou Long", 1648: "Bus",
+    1649: "Light Truck", 1650: "Heavy Truck", 1651: "Pickup Truck",
+    1652: "Mudan", 1653: "Chufeng Motor", 1654: "Jijiang",
+    1655: "SAIC Yizheng", 1656: "Yuexi", 1657: "Shenma",
+    1658: "Jiangxi Xiaofang", 1659: "Shunfeng", 1660: "Hengshan",
+    1674: "Dong Fang Hong Motor", 1675: "Neoplan", 1676: "Qingqi",
+    1677: "Truck", 1678: "Special Vehicle", 1679: "Trailer",
+    1681: "Wanda Bus", 1682: "Chang'an Suzuki", 1683: "Guilin",
+    1684: "Sichuan Hyundai", 1685: "Aochi", 1686: "Denway Bus",
+    1687: "FAW-Liut", 1688: "Wanxiang", 1690: "Sojen",
+    1691: "Changan", 1692: "Zoomlion", 1693: "Yinlong",
+    1694: "Jiachuan Auto", 1695: "Yixing", 1696: "Xi'an Silver Bus",
+    1697: "Yangtse", 1698: "Suitong", 1701: "Qingdao Jiefang",
+    1702: "ZTRV", 1703: "Wanda", 1704: "Shangrao",
+    1705: "ZEV", 1706: "EVCRRC", 1707: "Zhongtong",
+    1708: "Gonglu Bus", 1709: "BAIC", 1710: "Beifang",
+    1711: "Neoplan", 1712: "Huachuan", 1713: "Youyi",
+    1714: "Tongxin", 1715: "MG", 1716: "Jiachuan",
+    1717: "Nvshen", 1718: "Shili", 1719: "Shaolin",
+    1720: "Chuanjiao", 1721: "Chuanma", 1722: "GAC",
+    1723: "Hino", 1724: "Kandi", 1725: "CHTC",
+    1726: "Hentong", 1727: "Forta", 1728: "NLM",
+    1729: "Chunlan", 1730: "Chufeng", 1731: "JMMC",
+    1732: "JMC", 1733: "Seagull", 1734: "Mudan",
+    1735: "Liebao", 1736: "Shenlong", 1737: "Forland",
+    1738: "Hongxing", 1739: "Shuchi", 1740: "Shudu",
+    1741: "Hengshan", 1742: "Yuexi", 1743: "Yuancheng",
+    1744: "Golden Dragon", 1745: "Changan Oushang", 1746: "Youngman",
+    1747: "Lynk & Co", 1748: "Feidie", 1749: "Feichi",
+    1750: "Lishan", 1751: "Denway", 1752: "Nanjing Auto",
+    1753: "Dahan", 1754: "Chunzhou", 1755: "Dearcc",
+    1756: "Wanshan", 1757: "Central Europe Benz RV", 1758: "Yudo",
+    1759: "Junma", 1760: "Guojin", 1761: "Weltmeister",
+    1762: "Ora", 1763: "NIO", 1764: "Lada",
+    1765: "Jetour", 1766: "Foro", 1767: "Hicom",
+    1768: "JAC", 1769: "Jeep", 1770: "Jeep",
+    1771: "Perodua", 1772: "UD", 1773: "Toyota",
+    1774: "Toyota", 1775: "Isuzu", 1776: "Rohens",
+    1777: "Beiben Heavy Truck", 1778: "SsangYong", 1779: "SsangYong",
+    1780: "Haval", 1781: "Daihatsu", 1782: "Daewoo",
+    1783: "Proton", 1784: "Proton", 1785: "Proton",
+    1786: "Emgrand", 1787: "Hino", 1788: "Unknown",
+    1789: "Kia", 1790: "Kia", 1791: "Kia Borrego",
+    1792: "Alfa Romeo", 1793: "Equus", 1794: "Renault Samsung",
+    1795: "Unknown", 1796: "Oushang", 1797: "Bonluck",
+    1798: "Qiling", 1799: "Wanxiang", 1800: "Sate",
+    1801: "FLM", 1802: "SRM Xinyuan", 1803: "Geometry",
+    1804: "New Baojun", 1805: "Neta", 1806: "XPeng",
+    1807: "Jetta", 1808: "Leading Ideal", 1809: "Baic Yunnan Ruili",
+    1810: "R Marvel", 1811: "GAC Group", 1812: "SOL",
+    1813: "Maple", 1814: "Celis", 1815: "Expedition",
+    1816: "Leapmotor", 1817: "HiPhi", 1818: "Nissan",
+    1819: "Novat", 1820: "Exeed", 1821: "Aiways",
+    1822: "Fuda", 1823: "Hongqi", 1824: "Skyworth",
+    1825: "Beijing Hyundai", 1826: "Zedriv", 1827: "Guangzhou Honda",
+    1828: "Ouling", 1829: "Zhengzhou Nissan", 1830: "Changan Lincoln",
+    1831: "Changan Auto", 1832: "FAW Linghe", 1833: "SGMW",
+    1834: "Fxauto", 1835: "BAIC Off-Road", 1836: "Huachen Xinri",
+    1837: "Hycan", 1838: "Dorcen", 1839: "Dayun Motor",
+    1840: "Isuzu", 1841: "Sitech Dev", 1842: "JAC",
+    1843: "Changan Kaicheng", 1844: "Artega", 1845: "Faralli Mazzanti",
+    1846: "GTA", 1847: "KTM", 1848: "Lumma",
+    1849: "Mini Coupe", 1850: "Noble", 1851: "Wey",
+    1852: "Yamaha", 1853: "Beijing", 1854: "FAW Xiali",
+    1855: "Besturn", 1856: "SAIC Tangshan Bus", 1857: "SAIC Maxus",
+    1858: "SAIC Hongyan", 1859: "CNHTC Wangpai", 1860: "Toyota Crown",
+    1861: "Leshi", 1862: "PGO", 1863: "Lingbao",
+    1864: "Lifan Junma", 1865: "Lorinser", 1866: "BAIC Ruixiang",
+    1867: "NAC Changda", 1868: "Geely Gleagle", 1869: "Geely Emgrand",
+    1870: "Geely Englon", 1871: "Taihu", 1872: "Lantu",
+    1873: "Pagani", 1874: "Guangma", 1875: "Hengrui Auto",
+    1876: "Genesis", 1877: "Man", 1878: "Ranz",
+    1879: "Songsan", 1880: "Polestar", 1881: "Zeekr",
+    1882: "Arcfox", 1883: "BYD Yuan", 1884: "BYD Tang",
+    1885: "BYD Song", 1886: "BYD Han", 1887: "BYD Qin",
+    1888: "Bike", 1889: "Weichai", 1890: "Ford Mustang",
+    1891: "Koenigsegg", 1892: "Yulu", 1893: "Saleen",
+    1894: "Mansory", 1895: "Suda", 1896: "Mustang EV",
+    1897: "GWM Huaguan", 1898: "LongRiver EV", 1899: "IAT",
+    1900: "Feifan", 1901: "LinkTour", 1902: "Feishen",
+    1903: "Qilu", 1904: "Apollo", 1905: "Caterham",
+    1906: "Conquest", 1907: "Dacia", 1908: "Zenvo",
+    1909: "BAIC Lite", 1910: "AUX", 1911: "Proton",
+    1912: "Seat", 1913: "Bluecar", 1914: "Noma",
+    1915: "Suzuki", 1916: "Tankar", 1917: "Valle",
+    1918: "Veiculo Longo", 1919: "Tata", 1920: "Ashok Leyland",
+    1921: "Mahindra", 1922: "Eicher", 1923: "BharatBenz",
+    1924: "Force Motors", 1925: "SML Isuzu", 1926: "MAN Trucks",
+    1927: "Pocco", 1928: "Aston Martin", 1929: "Yogomo",
+    1930: "BAIC Huansu", 1931: "Dongfeng Huashen", 1932: "DMC",
+    1933: "Dongfeng Fengshen", 1934: "CNHTC Haoman", 1935: "Dorcen",
+    1936: "Nanjun Bus", 1937: "Hyundai Truck & Bus", 1938: "Shacman Commercial",
+    1939: "Shacman Light Truck", 1940: "C&C Trucks", 1941: "Horki",
+    1942: "Oulang", 1943: "Aston Martin", 1944: "GWM Haval",
+    1945: "Shacman Heavy Truck", 1946: "Diandongwu", 1947: "Dongfeng Chenglong",
+    1948: "GWM Wey", 1950: "GAC Aion", 1951: "FAW Jiefang",
+    1953: "Skyworth", 1954: "Xinyuan", 1956: "Feifan",
+    1957: "Dongfeng Fukang", 1958: "Geely Jialong", 1959: "Dongfeng Ruitaite",
+    1960: "AC Schnitzer", 1961: "Hennessey", 1962: "FAW Jilin",
+    1963: "CNHTC Shandeka", 1964: "FAW Hongta", 1965: "Dongfeng Xiaokang",
+    1966: "FAW General Motors", 1967: "Dongfeng Fengguang", 1968: "Foton Rowor",
+    1969: "Dongfeng Fengdu", 1970: "FAW Jiefang Light Truck", 1971: "Scion",
+    1972: "Jijiang Bus", 1973: "Smart", 1974: "Beijing",
+    1975: "Aito", 1976: "Neta", 1977: "Radar",
+    1978: "Weltmeister", 1979: "Dark Blue", 1980: "IM",
+    1981: "New Gonow", 1982: "Ruilan", 1983: "Radar",
+    1984: "DFPV", 1985: "Tank", 1986: "Modern",
+    1987: "Gleagle", 1988: "Ruichi EV", 1989: "Avatr",
+    1990: "Fuso", 1991: "Bedford", 1992: "Sojen",
+    1993: "Honda", 1994: "BAIC BJEV", 1995: "Hino",
+    1996: "Mitsubishi", 1997: "Lexus", 1998: "Chery New Energy",
+    1999: "Mazda", 2000: "BMW", 2001: "Tesla",
+    2002: "Toyota", 2003: "Mercedes", 2004: "Geely Yinhe",
 }
 
 VEHICLE_TYPE_LABELS = {
@@ -138,19 +288,27 @@ _col_anpr = None
 _fs = None
 _col_camera_config = None
 _col_site_counter = None
+_col_vision_imm = None
+_col_vision_bl = None
+_col_vision_cfg = None
 
 
 def _ensure_db():
     global _db, _col_anpr, _fs, _col_camera_config, _col_site_counter
+    global _col_vision_imm, _col_vision_bl, _col_vision_cfg
     if _db is not None:
         return
     uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
     client = MongoClient(uri)
-    _db = client["titan"]
+    dev_mode = os.getenv("TITAN_ENV", "dev") != "prod"
+    _db = client["titan_dev" if dev_mode else "titan"]
     _col_anpr = _db["hik_anpr"]
     _fs = gridfs.GridFS(_db, collection="hik_images")
     _col_camera_config = _db["anpr_camera_config"]
     _col_site_counter = _db["anpr_site_counter"]
+    _col_vision_imm = _db["vision_immatriculations"]
+    _col_vision_bl = _db["vision_blacklist"]
+    _col_vision_cfg = _db["vision_config"]
 
     # Index
     _col_anpr.create_index([("event_dt", DESCENDING)])
@@ -330,20 +488,112 @@ def anpr_search():
         except ValueError:
             pass
 
+    # If ANPR-specific filters are active, skip Vision results
+    has_anpr_filter = any([color, vtype, brand, camera, direction, conf_min])
+
+    # Source filter: "", "anpr", "vision", "cross"
+    source_filter = request.args.get("source", "").strip()
+    if has_anpr_filter and source_filter == "":
+        source_filter = "anpr"
+
+    # For "cross" mode: find plates present in both ANPR and Vision
+    cross_plates = None
+    if source_filter == "cross":
+        # Get all distinct normalized ANPR plates
+        anpr_plates_raw = _col_anpr.distinct("license_plate", query)
+        anpr_norms = set(_normalize_plate(p) for p in anpr_plates_raw if p and p != "UNKNOWN")
+        # Get all Vision normalized plates
+        vision_norms = set(d["plaque_norm"] for d in _col_vision_imm.find({}, {"plaque_norm": 1}) if d.get("plaque_norm"))
+        # Intersection
+        cross_norms = anpr_norms & vision_norms
+        cross_plates = cross_norms
+
     # Pagination
     page = max(1, int(request.args.get("page", 1)))
     per_page = min(100, int(request.args.get("per_page", 50)))
-    skip = (page - 1) * per_page
 
-    total = _col_anpr.count_documents(query)
-    docs = list(_col_anpr.find(query).sort("event_dt", DESCENDING).skip(skip).limit(per_page))
+    # Collect ANPR results
+    anpr_results = []
+    anpr_total = 0
+    if source_filter not in ("vision",):
+        if cross_plates is not None:
+            # Only ANPR records matching cross plates
+            if cross_plates:
+                query["license_plate"] = {"$in": [re.compile(n, re.IGNORECASE) for n in cross_plates]}
+            else:
+                query["license_plate"] = {"$in": []}
+        anpr_total = _col_anpr.count_documents(query)
+        docs = list(_col_anpr.find(query).sort("event_dt", DESCENDING).limit(500))
+        for d in docs:
+            r = _serialize(d, cam_cfgs)
+            r["source"] = "anpr"
+            anpr_results.append(r)
+
+    # Collect Vision results
+    vision_results = []
+    vision_total = 0
+    if source_filter not in ("anpr",):
+        vq = {}
+        if plate:
+            vq["plaque_norm"] = {"$regex": _normalize_plate(plate), "$options": "i"}
+        if cross_plates is not None:
+            if cross_plates:
+                vq["plaque_norm"] = {"$in": list(cross_plates)}
+            else:
+                vq["plaque_norm"] = {"$in": []}
+        # Apply date filter on Vision date field (ISO string)
+        if date_from:
+            vq.setdefault("date", {})
+            vq["date"]["$gte"] = date_from
+        if date_to:
+            vq.setdefault("date", {})
+            vq["date"]["$lte"] = date_to
+
+        vision_total = _col_vision_imm.count_documents(vq)
+        vdocs = list(_col_vision_imm.find(vq).sort("date", -1).limit(500))
+        for vd in vdocs:
+            vision_results.append({
+                "id": str(vd["_id"]),
+                "source": "vision",
+                "plate": vd.get("plaque", ""),
+                "original_plate": vd.get("plaque", ""),
+                "confidence": 0,
+                "color": "",
+                "color_hex": "",
+                "type": "",
+                "type_label": "",
+                "brand": "",
+                "brand_id": 0,
+                "camera": "",
+                "direction": "",
+                "resolved_dir": "",
+                "event_dt": vd.get("date", ""),
+                "plate_image_id": None,
+                "vehicle_image_id": None,
+                "plate_image_path": None,
+                "vehicle_image_path": None,
+                "list_name": "",
+                "lieu": vd.get("lieu", ""),
+                "billets": vd.get("billets", []),
+                "billets_count": len(vd.get("billets", [])),
+                "commentaire": vd.get("commentaire", ""),
+                "photo_vehicule": vd.get("photo_vehicule", ""),
+            })
+
+    # Merge and sort by date descending
+    merged = anpr_results + vision_results
+    merged.sort(key=lambda r: r.get("event_dt", "") or "", reverse=True)
+
+    total = anpr_total + vision_total
+    skip = (page - 1) * per_page
+    page_results = merged[skip:skip + per_page]
 
     return jsonify({
         "total": total,
         "page": page,
         "per_page": per_page,
         "pages": max(1, (total + per_page - 1) // per_page),
-        "results": [_serialize(d, cam_cfgs) for d in docs],
+        "results": page_results,
     })
 
 
@@ -469,15 +719,44 @@ def anpr_live():
 
 @anpr_bp.route("/api/anpr/plate/<plate>")
 def anpr_plate_history(plate):
-    """All detections for a given plate."""
+    """All detections for a given plate (ANPR + Vision)."""
     _ensure_db()
     cam_cfgs = _get_cam_configs()
     plate = plate.strip().upper()
+    norm = _normalize_plate(plate)
+
+    records = []
+
+    # ANPR detections
     docs = list(_col_anpr.find({"license_plate": plate}).sort("event_dt", DESCENDING).limit(200))
+    for d in docs:
+        r = _serialize(d, cam_cfgs)
+        r["source"] = "anpr"
+        records.append(r)
+
+    # Vision entries (matching normalized plate)
+    if norm:
+        vdocs = list(_col_vision_imm.find({"plaque_norm": norm}))
+        for vd in vdocs:
+            records.append({
+                "source": "vision",
+                "event_dt": vd.get("date", ""),
+                "camera": "",
+                "color_hex": "",
+                "resolved_dir": "",
+                "lieu": vd.get("lieu", ""),
+                "billets_count": len(vd.get("billets", [])),
+                "evenement": vd.get("evenement", ""),
+                "annee": vd.get("annee", 0),
+            })
+
+    # Sort all by date descending
+    records.sort(key=lambda r: r.get("event_dt", "") or "", reverse=True)
+
     return jsonify({
         "plate": plate,
-        "count": len(docs),
-        "records": [_serialize(d, cam_cfgs) for d in docs],
+        "count": len(records),
+        "records": records,
     })
 
 
@@ -545,6 +824,7 @@ def anpr_cameras():
             "label": cfg.get("label", cam.replace("/", "").replace("lapi", "LAPI ")),
             "forward_role": cfg.get("forward_role", "entry"),
             "enabled": cfg.get("enabled", True),
+            "lieu": cfg.get("lieu", ""),
         })
     return jsonify(result)
 
@@ -564,6 +844,7 @@ def anpr_cameras_config():
             "label": data.get("label", ""),
             "forward_role": data.get("forward_role", "entry"),
             "enabled": data.get("enabled", True),
+            "lieu": data.get("lieu", ""),
         }},
         upsert=True,
     )
@@ -695,3 +976,194 @@ def anpr_onsite_reset():
         upsert=True,
     )
     return jsonify({"ok": True, "reset_at": now.isoformat()})
+
+
+# ---------------------------------------------------------------------------
+# Vision cross-reference (reads from MongoDB synced by vision_sync.py)
+# ---------------------------------------------------------------------------
+
+def _normalize_plate(plate):
+    """Normalize plate: uppercase, alphanumeric only."""
+    return re.sub(r"[^A-Z0-9]", "", (plate or "").strip().upper())
+
+
+def _vision_active_filter():
+    """Return the event/year filter for the active Vision event, or None."""
+    cfg = _col_vision_cfg.find_one({"_id": "current"})
+    if not cfg or not cfg.get("evenement"):
+        return None
+    return {"evenement": cfg["evenement"], "annee": cfg["annee"]}
+
+
+@anpr_bp.route("/api/anpr/vision/lookup/<plate>")
+def anpr_vision_lookup(plate):
+    """Look up a single plate in Vision synced data."""
+    _ensure_db()
+    norm = _normalize_plate(plate)
+    if not norm:
+        return jsonify({"found": False})
+
+    vf = _vision_active_filter()
+    if not vf:
+        return jsonify({"found": False, "reason": "no_config"})
+
+    doc = _col_vision_imm.find_one({"plaque_norm": norm, **vf})
+    if doc:
+        return jsonify({
+            "found": True,
+            "plaque": doc.get("plaque", ""),
+            "lieu": doc.get("lieu", ""),
+            "billets": doc.get("billets", []),
+            "commentaire": doc.get("commentaire", ""),
+            "date": doc.get("date", ""),
+            "evenement": doc.get("evenement", ""),
+            "annee": doc.get("annee", 0),
+            "photo_vehicule": doc.get("photo_vehicule", ""),
+        })
+
+    # Check blacklist
+    bl = _col_vision_bl.find_one({"plaque_norm": norm})
+    blacklisted = None
+    if bl:
+        blacklisted = {"raison": bl.get("raison", ""), "date_ajout": bl.get("date_ajout", "")}
+
+    return jsonify({"found": False, "blacklisted": blacklisted})
+
+
+@anpr_bp.route("/api/anpr/vision/batch")
+def anpr_vision_batch():
+    """Batch lookup of plates in Vision. Returns {plate: info} for matches."""
+    _ensure_db()
+    plates_raw = request.args.get("plates", "").split(",")
+    plates_raw = [p.strip() for p in plates_raw if p.strip()][:100]
+    if not plates_raw:
+        return jsonify({})
+
+    vf = _vision_active_filter()
+    if not vf:
+        return jsonify({})
+
+    # Build norm -> original plate mapping
+    norm_map = {}
+    for p in plates_raw:
+        norm = _normalize_plate(p)
+        if norm:
+            norm_map.setdefault(norm, p)
+
+    if not norm_map:
+        return jsonify({})
+
+    # Single query for all norms
+    docs = _col_vision_imm.find({"plaque_norm": {"$in": list(norm_map.keys())}, **vf})
+    results = {}
+    for doc in docs:
+        orig = norm_map.get(doc["plaque_norm"])
+        if orig:
+            results[orig] = {
+                "lieu": doc.get("lieu", ""),
+                "billets_count": len(doc.get("billets", [])),
+                "commentaire": doc.get("commentaire", ""),
+            }
+
+    return jsonify(results)
+
+
+@anpr_bp.route("/api/anpr/vision/search")
+def anpr_vision_search():
+    """Search Vision plates and cross-reference with ANPR detections."""
+    _ensure_db()
+
+    query = {}
+    evt = request.args.get("evenement", "").strip()
+    annee = request.args.get("annee", "").strip()
+    if evt:
+        query["evenement"] = evt
+    if annee:
+        try:
+            query["annee"] = int(annee)
+        except ValueError:
+            pass
+
+    lieu = request.args.get("lieu", "").strip()
+    if lieu:
+        query["lieu"] = lieu
+    search_plate = request.args.get("plate", "").strip().upper()
+    if search_plate:
+        query["plaque_norm"] = {"$regex": _normalize_plate(search_plate)}
+
+    docs = list(_col_vision_imm.find(query).sort("date", -1))
+
+    results = []
+    for doc in docs:
+        norm = doc.get("plaque_norm", "")
+        # Count ANPR detections for this plate (using regex to match normalized)
+        anpr_count = _col_anpr.count_documents(
+            {"license_plate": {"$regex": norm, "$options": "i"}}
+        ) if norm else 0
+
+        results.append({
+            "plaque": doc.get("plaque", ""),
+            "lieu": doc.get("lieu", ""),
+            "billets": doc.get("billets", []),
+            "commentaire": doc.get("commentaire", ""),
+            "date": doc.get("date", ""),
+            "photo_vehicule": doc.get("photo_vehicule", ""),
+            "anpr_detections": anpr_count,
+        })
+
+    # Sort: matched first
+    results.sort(key=lambda x: x["anpr_detections"], reverse=True)
+    return jsonify({"results": results, "total": len(results)})
+
+
+@anpr_bp.route("/api/anpr/vision/stats")
+def anpr_vision_stats():
+    """Cross-reference statistics between Vision and ANPR.
+    Optional query params: evenement, annee (filter by event/year).
+    """
+    _ensure_db()
+
+    # Optional event/year filter
+    filt = {}
+    evt = request.args.get("evenement", "").strip()
+    annee = request.args.get("annee", "").strip()
+    if evt:
+        filt["evenement"] = evt
+    if annee:
+        try:
+            filt["annee"] = int(annee)
+        except ValueError:
+            pass
+
+    docs = list(_col_vision_imm.find(filt, {"plaque_norm": 1, "lieu": 1}))
+    vision_total = len(docs)
+    matched = 0
+    by_lieu = {}
+    by_lieu_all = {}
+
+    # Get all distinct ANPR normalized plates for fast lookup
+    anpr_norms = set(_normalize_plate(p) for p in _col_anpr.distinct("license_plate") if p and p != "UNKNOWN")
+
+    for doc in docs:
+        norm = doc.get("plaque_norm", "")
+        lieu = doc.get("lieu", "")
+        by_lieu_all[lieu] = by_lieu_all.get(lieu, 0) + 1
+        if norm and norm in anpr_norms:
+            matched += 1
+            by_lieu[lieu] = by_lieu.get(lieu, 0) + 1
+
+    # List of available events
+    events = list(_col_vision_imm.aggregate([
+        {"$group": {"_id": {"evenement": "$evenement", "annee": "$annee"}, "count": {"$sum": 1}}},
+        {"$sort": {"_id.annee": -1, "_id.evenement": 1}},
+    ]))
+    events_list = [{"evenement": e["_id"]["evenement"], "annee": e["_id"]["annee"], "count": e["count"]} for e in events]
+
+    return jsonify({
+        "vision_total": vision_total,
+        "matched": matched,
+        "unmatched": vision_total - matched,
+        "by_lieu": by_lieu,
+        "by_lieu_all": by_lieu_all,
+        "events": events_list,
+    })

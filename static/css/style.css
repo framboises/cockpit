@@ -8642,12 +8642,12 @@ th span { font-size: 0.88rem; font-weight: 700; }
 }
 .anpr-modal {
   background: var(--card); border-radius: var(--radius-lg);
-  width: 90vw; max-width: 760px; max-height: 82vh;
+  width: 92vw; max-width: 900px; max-height: 90vh;
   overflow-y: auto; position: relative;
   box-shadow: 0 16px 48px rgba(0,0,0,0.2);
   animation: anprUp 0.25s ease;
 }
-.anpr-modal-sm { max-width: 500px; padding: 22px; }
+.anpr-modal-sm { max-width: 640px; padding: 22px; }
 @keyframes anprUp {
   from { transform: translateY(16px); opacity: 0; }
   to   { transform: translateY(0); opacity: 1; }
@@ -8661,7 +8661,7 @@ th span { font-size: 0.88rem; font-weight: 700; }
 }
 .anpr-modal-close:hover { background: rgba(0,0,0,0.12); }
 .anpr-modal-close .material-symbols-outlined { font-size: 18px; }
-.anpr-modal-body { display: grid; grid-template-columns: 1fr 260px; }
+.anpr-modal-body { display: grid; grid-template-columns: 1fr 320px; }
 .anpr-modal-image {
   padding: 20px; background: var(--bg); display: flex;
   flex-direction: column; align-items: center; justify-content: center;
@@ -8675,7 +8675,7 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .anpr-modal-no-image .material-symbols-outlined { font-size: 40px; opacity: 0.3; }
 .anpr-modal-plate-img { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
 .anpr-modal-plate-img img { max-height: 50px; display: block; }
-.anpr-modal-info { padding: 20px; }
+.anpr-modal-info { padding: 20px; word-break: break-word; }
 .anpr-modal-plate {
   font-family: 'JetBrains Mono', monospace;
   font-weight: 700; font-size: 1.3rem; letter-spacing: 2px;
@@ -8717,25 +8717,29 @@ th span { font-size: 0.88rem; font-weight: 700; }
 
 /* Camera config */
 .anpr-cam-config-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 0; border-bottom: 1px solid var(--line);
+  display: grid; grid-template-columns: 1fr auto; gap: 12px;
+  padding: 12px 0; border-bottom: 1px solid var(--line);
+  align-items: center;
 }
 .anpr-cam-config-row:last-of-type { border-bottom: none; }
-.anpr-cam-config-name { display: flex; align-items: center; gap: 8px; flex: 1; }
-.anpr-cam-config-name .material-symbols-outlined { font-size: 18px; color: var(--brand); }
+.anpr-cam-config-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.anpr-cam-config-name .material-symbols-outlined { font-size: 18px; color: var(--brand); flex-shrink: 0; }
 .anpr-cam-label {
   border: 1px solid var(--line); border-radius: 5px;
-  padding: 4px 8px; font-size: 0.8rem; font-family: inherit;
-  width: 130px; outline: none;
+  padding: 5px 8px; font-size: 0.8rem; font-family: inherit;
+  width: 140px; outline: none;
 }
 .anpr-cam-label:focus { border-color: var(--brand); }
-.anpr-cam-path { font-size: 0.7rem; color: var(--muted); }
-.anpr-cam-config-role { display: flex; align-items: center; gap: 6px; }
-.anpr-cam-config-role label { font-size: 0.75rem; color: var(--muted); }
-.anpr-cam-role {
+.anpr-cam-path { font-size: 0.65rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+.anpr-cam-config-role { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.anpr-cam-config-role label { font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
+.anpr-cam-role, .anpr-cam-lieu {
   border: 1px solid var(--line); border-radius: 5px;
-  padding: 4px 8px; font-size: 0.8rem; font-family: inherit; cursor: pointer;
+  padding: 5px 8px; font-size: 0.8rem; font-family: inherit; cursor: pointer;
+  background: var(--card, #fff);
 }
+.anpr-cam-lieu { border-color: rgba(245,158,11,0.3); }
+.anpr-cam-lieu:focus { border-color: #f59e0b; outline: none; }
 
 /* Responsive */
 @media (max-width: 1000px) {
@@ -8749,3 +8753,24 @@ th span { font-size: 0.88rem; font-weight: 700; }
   .anpr-modal-body { grid-template-columns: 1fr; }
   .anpr-stats-grid { grid-template-columns: 1fr; }
 }
+
+/* Vision cross-reference */
+.anpr-kpi-vision { border-left: 3px solid #f59e0b; }
+.anpr-lieu-pill { font-size: 0.65rem; padding: 1px 6px; border-radius: 9px; font-weight: 600; margin-left: 5px; color: #fff; display: inline-block; vertical-align: middle; }
+.anpr-vision-section { margin: 0 20px 12px; padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(245,158,11,0.25); background: rgba(245,158,11,0.04); }
+.anpr-vision-title { font-weight: 600; display: flex; align-items: center; gap: 6px; color: #f59e0b; margin-bottom: 8px; font-size: 0.9rem; }
+.anpr-vision-title .material-symbols-outlined { font-size: 18px; }
+.anpr-vision-blacklist { color: #ef4444; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.anpr-vision-blacklist .material-symbols-outlined { font-size: 18px; }
+.anpr-stats-subtabs { display: flex; gap: 4px; margin-bottom: 12px; padding: 3px; background: var(--bg-subtle, #f1f5f9); border-radius: 8px; width: fit-content; }
+.anpr-stats-subtab { padding: 5px 14px; border: none; background: transparent; border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-weight: 500; color: #607286; font-family: inherit; }
+.anpr-stats-subtab.active { background: #fff; color: var(--brand, #2563eb); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.anpr-stats-subpane { display: none; }
+.anpr-stats-subpane.active { display: block; }
+.anpr-filter-vision { display: flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 8px; border: 1px solid rgba(245,158,11,0.3); background: transparent; color: #f59e0b; cursor: pointer; font-size: 0.75rem; font-weight: 600; font-family: inherit; transition: all 0.15s; }
+.anpr-filter-vision:hover { background: rgba(245,158,11,0.08); }
+.anpr-filter-vision.active { background: #f59e0b; color: #fff; border-color: #f59e0b; }
+.anpr-source-badge { font-size: 0.6rem; padding: 1px 6px; border-radius: 9px; font-weight: 600; display: inline-block; letter-spacing: 0.02em; line-height: 1.4; }
+.anpr-source-anpr { background: rgba(37,99,235,0.12); color: #2563eb; }
+.anpr-source-vision { background: rgba(245,158,11,0.15); color: #d97706; }
+.anpr-row-vision { background: rgba(245,158,11,0.03); }
