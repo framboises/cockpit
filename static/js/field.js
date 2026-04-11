@@ -27,6 +27,10 @@
     followMe: true,
     gridOn: false,
     gridLayer: null,
+    gridData: null,
+    threePOn: true,
+    threePLayer: null,
+    threePLoaded: false,
     inbox: [],
     seenIds: new Set(),
     watchId: null,
@@ -88,7 +92,7 @@
       { attribution: "&copy; Esri", maxNativeZoom: 19, maxZoom: 22 }
     );
     state.tileLayers.sat_aco = L.tileLayer(
-      "/tiles/{z}/{x}/{y}.png",
+      "/field/resources/tiles/{z}/{x}/{y}.png",
       { tms: true, maxZoom: 22, attribution: "ACO" }
     );
 
@@ -271,6 +275,118 @@
   }
 
   // ---------------------------------------------------------------------
+  // Ressources carte : carroyage + 3P
+  // ---------------------------------------------------------------------
+  function loadGrid() {
+    if (state.gridData) {
+      renderGrid();
+      return;
+    }
+    fetch("/field/resources/grid-ref", { headers: { "Accept": "application/json" } })
+      .then(function (r) {
+        if (r.status === 401) { window.location.href = "/field/pair"; return null; }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data || !data.lines) {
+          toast("Carroyage indisponible", "warn");
+          return;
+        }
+        state.gridData = data;
+        renderGrid();
+      })
+      .catch(function () { toast("Echec chargement carroyage", "err"); });
+  }
+
+  function renderGrid() {
+    if (!state.gridData || !state.gridData.lines) return;
+    if (state.gridLayer) {
+      state.map.removeLayer(state.gridLayer);
+      state.gridLayer = null;
+    }
+    var lines = state.gridData.lines;
+    var hLines = lines.h_lines || [];
+    var vLines = lines.v_lines || [];
+    var group = L.layerGroup();
+    hLines.forEach(function (l) {
+      L.polyline(
+        [[l.lat, l.lng_start], [l.lat, l.lng_end]],
+        { color: "#f59e0b", weight: 1.4, opacity: 0.75, interactive: false }
+      ).addTo(group);
+    });
+    vLines.forEach(function (l) {
+      L.polyline(
+        [[l.lat_start, l.lng], [l.lat_end, l.lng]],
+        { color: "#f59e0b", weight: 1.4, opacity: 0.75, interactive: false }
+      ).addTo(group);
+    });
+    group.addTo(state.map);
+    state.gridLayer = group;
+  }
+
+  function toggleGrid() {
+    if (state.gridOn) {
+      if (state.gridLayer) {
+        state.map.removeLayer(state.gridLayer);
+        state.gridLayer = null;
+      }
+      state.gridOn = false;
+      toast("Carroyage : off");
+    } else {
+      state.gridOn = true;
+      loadGrid();
+      toast("Carroyage : on");
+    }
+  }
+
+  function load3P() {
+    if (state.threePLoaded) return;
+    state.threePLoaded = true;
+    fetch("/field/resources/3p", { headers: { "Accept": "application/json" } })
+      .then(function (r) {
+        if (r.status === 401) { window.location.href = "/field/pair"; return null; }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data || !data.features) return;
+        render3P(data.features);
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function render3P(features) {
+    if (state.threePLayer) {
+      state.map.removeLayer(state.threePLayer);
+      state.threePLayer = null;
+    }
+    var group = L.layerGroup();
+    features.forEach(function (f) {
+      var coords = (f.geometry || {}).coordinates || [];
+      if (coords.length < 2) return;
+      var lat = coords[1], lng = coords[0];
+      var props = f.properties || {};
+      var name = props.Nom || props.Name || props.name || "3P";
+      var cm = L.circleMarker([lat, lng], {
+        radius: 5,
+        color: "#0ea5e9",
+        weight: 2,
+        fillColor: "#bae6fd",
+        fillOpacity: 0.9,
+      });
+      cm.bindPopup("<b>" + escapeHtml(name) + "</b>");
+      cm.addTo(group);
+    });
+    group.addTo(state.map);
+    state.threePLayer = group;
+  }
+
+  function escapeHtml(s) {
+    return String(s || "").replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  // ---------------------------------------------------------------------
   // Inbox
   // ---------------------------------------------------------------------
   function startInboxPoll() {
@@ -383,10 +499,7 @@
   function wireUi() {
     $("btn-recenter").addEventListener("click", recenter);
     $("btn-layers").addEventListener("click", cycleLayer);
-    $("btn-grid").addEventListener("click", function () {
-      toast("Carroyage : a venir", "warn");
-      // wire-up complet dans commit 6
-    });
+    $("btn-grid").addEventListener("click", toggleGrid);
     $("btn-inbox").addEventListener("click", function () {
       var p = $("inbox-panel");
       p.hidden = !p.hidden;
@@ -410,6 +523,8 @@
     initBattery();
     startGeolocation();
     startInboxPoll();
+    // Ressources carte : 3P visible par defaut, carroyage sur demande
+    load3P();
 
     // Empecher le zoom double-tap / pinch natif
     document.addEventListener("gesturestart", function (e) { e.preventDefault(); });
@@ -425,5 +540,7 @@
     recenter: recenter,
     cycleLayer: cycleLayer,
     pollInbox: pollInbox,
+    toggleGrid: toggleGrid,
+    load3P: load3P,
   };
 })();

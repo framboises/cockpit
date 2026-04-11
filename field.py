@@ -12,7 +12,8 @@
 #   - field_devices   : tablettes enrolees (une ligne par tablette active)
 #   - field_messages  : messages/instructions envoyes aux tablettes (inbox)
 
-from flask import Blueprint, jsonify, request, render_template, make_response, redirect
+from flask import Blueprint, jsonify, request, render_template, make_response, redirect, send_from_directory, abort
+from werkzeug.utils import safe_join
 from datetime import datetime, timezone, timedelta
 from pymongo import MongoClient
 from bson.objectid import ObjectId
@@ -967,3 +968,140 @@ def field_admin_message_delete(msg_id):
     if res.deleted_count == 0:
         return jsonify({"ok": False, "error": "not_found"}), 404
     return jsonify({"ok": True})
+
+
+# =============================================================================
+# RESSOURCES CARTE : routes /field/resources/*
+# =============================================================================
+#
+# Ces routes servent les memes donnees geographiques que les routes /api/*
+# utilisees par la carte cockpit, mais sans l'auth TITAN :
+# elles exigent simplement un field_token valide (la tablette appartient a
+# un event/year connu).
+
+# Repertoires ou peuvent se trouver les tuiles satellites ACO
+TILE_DIRECTORIES = [
+    r"E:\TITAN\shared\satellite",
+    r"C:\Users\l.arnault\satellite",
+    "/Users/ludovic/Dropbox/ACO/TITAN/archives/looker/static/img/sat",
+    "/Users/ludovicarnault/Dropbox/ACO/TITAN/looker/static/img/sat",
+]
+
+
+@field_bp.route("/field/resources/grid-ref", methods=["GET"])
+@field_token_required
+def field_resources_grid_ref():
+    """Retourne le carroyage tactique (lignes depuis QGIS). Memes donnees que
+    /api/grid-ref cote cockpit."""
+    db = _get_mongo_db()
+    lines_doc = db["grid_ref_qgis"].find_one({"type": "grid_lines"}, {"_id": 0})
+    lines_25 = db["grid_ref_qgis"].find_one({"type": "grid_lines_25"}, {"_id": 0})
+    if not lines_doc:
+        return jsonify({"lines": None})
+    return jsonify({"lines": lines_doc, "lines_25": lines_25})
+
+
+@field_bp.route("/field/resources/3p", methods=["GET"])
+@field_token_required
+def field_resources_3p():
+    """Retourne les portes/portails/portillons (collection 3p). Filtrage bbox
+    optionnel via south/west/north/east."""
+    db = _get_mongo_db()
+    doc = db["3p"].find_one({}, {"_id": 0})
+    if not doc or "features" not in doc:
+        return jsonify({"features": []})
+
+    try:
+        south = request.args.get("south", type=float)
+        west = request.args.get("west", type=float)
+        north = request.args.get("north", type=float)
+        east = request.args.get("east", type=float)
+    except Exception:
+        south = west = north = east = None
+
+    features = doc["features"]
+    if south is not None and west is not None and north is not None and east is not None:
+        filtered = []
+        for f in features:
+            coords = (f.get("geometry") or {}).get("coordinates") or []
+            if len(coords) >= 2:
+                lng, lat = coords[0], coords[1]
+                if south <= lat <= north and west <= lng <= east:
+                    filtered.append(f)
+        features = filtered
+
+    return jsonify({"features": features})
+
+
+@field_bp.route("/field/resources/gm-categories", methods=["GET"])
+@field_token_required
+def field_resources_gm_categories():
+    """Liste des categories groundmaster actives (parkings, POI, etc.)."""
+    db = _get_mongo_db()
+    cats = list(db["groundmaster_categories"].find(
+        {"enabled": True},
+        {"_id": 0, "label": 1, "icon": 1, "dataKey": 1, "collection": 1,
+         "mode": 1, "sourceFormat": 1, "storageType": 1, "source": 1},
+    ))
+    # On retire les categories qui sont explicitement "hors carte" (mode != map)
+    # ainsi que celles masquees par defaut dans map_defaults
+    defaults = db["merge_config"].find_one({"data_key": "__map_defaults__"}, {"_id": 0}) or {}
+    hidden = set(defaults.get("hidden_categories") or [])
+    out = []
+    for c in cats:
+        if c.get("dataKey") in hidden:
+            continue
+        out.append(c)
+    return jsonify({"categories": out})
+
+
+@field_bp.route("/field/resources/gm-collection/<collection_name>", methods=["GET"])
+@field_token_required
+def field_resources_gm_collection(collection_name):
+    """Retourne les features GeoJSON d'une collection groundmaster."""
+    # Validation : la collection doit etre referencee dans groundmaster_categories
+    if not re.fullmatch(r"[a-zA-Z0-9_\-]{1,64}", collection_name or ""):
+        return jsonify({"error": "invalid_collection"}), 400
+
+    db = _get_mongo_db()
+    valid = db["groundmaster_categories"].find_one(
+        {"collection": collection_name, "enabled": True}, {"_id": 1}
+    )
+    if not valid:
+        return jsonify({"features": []}), 200  # collection desactivee ou inconnue
+
+    doc = db[collection_name].find_one(
+        {"type": "FeatureCollection"} if collection_name == "terrains" else {},
+        {"features": 1, "_id": 0},
+    )
+    features = []
+    if doc and "features" in doc:
+        features = doc["features"]
+    if not features:
+        docs = list(db[collection_name].find(
+            {"type": "FeatureCollection"}, {"features": 1, "_id": 0}
+        ))
+        for d in docs:
+            features.extend(d.get("features") or [])
+    return jsonify({"features": features})
+
+
+@field_bp.route("/field/resources/tiles/<z>/<x>/<y>.png", methods=["GET"])
+@field_token_required
+def field_resources_tiles(z, x, y):
+    """Proxy vers les tuiles satellite ACO (mirror de /tiles/<z>/<x>/<y>.png
+    mais sans l'auth cockpit)."""
+    # Validation numerique stricte
+    if not (z.isdigit() and x.isdigit() and y.isdigit()):
+        return abort(400)
+    for tile_directory in TILE_DIRECTORIES:
+        try:
+            tile_path = safe_join(tile_directory, z, x)
+            if not tile_path:
+                continue
+            image_path = safe_join(tile_path, f"{y}.png")
+            if image_path and os.path.exists(image_path):
+                return send_from_directory(tile_path, f"{y}.png")
+        except Exception:
+            continue
+    return abort(404)
