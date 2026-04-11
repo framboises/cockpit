@@ -470,3 +470,318 @@ def field_ack(msg_id):
     if res.matched_count == 0:
         return jsonify({"ok": False, "error": "not_found"}), 404
     return jsonify({"ok": True})
+
+
+# =============================================================================
+# PARTIE ADMIN : routes /field/admin/*
+# =============================================================================
+#
+# Ces routes sont consommees depuis le panneau admin cockpit (edit.html).
+# Elles utilisent l'auth cockpit (JWT) et exigent le role admin.
+# Les routes field tablette (au-dessus) utilisent l'auth field_token.
+
+
+def admin_required(f):
+    """Decorateur : exige un JWT cockpit avec role admin."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        from app import (
+            JWT_SECRET, JWT_ALGORITHM, CODING, APP_KEY,
+            SUPER_ADMIN_ROLE, ROLE_HIERARCHY,
+        )
+        import jwt as pyjwt
+
+        if CODING:
+            # Simulation : role admin par defaut
+            request.admin_user = {
+                "email": "dev@cockpit",
+                "app_role": "admin",
+                "is_super_admin": False,
+            }
+            return f(*args, **kwargs)
+
+        token = request.cookies.get("access_token")
+        if not token:
+            return jsonify({"error": "auth_required"}), 401
+        try:
+            payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+            return jsonify({"error": "invalid_token"}), 401
+
+        is_super_admin = SUPER_ADMIN_ROLE in (payload.get("global_roles") or [])
+        app_role = (payload.get("roles_by_app") or {}).get(APP_KEY)
+        if not is_super_admin and app_role != "admin":
+            return jsonify({"error": "admin_required"}), 403
+
+        payload["app_role"] = "admin" if is_super_admin else app_role
+        payload["is_super_admin"] = is_super_admin
+        request.admin_user = payload
+        return f(*args, **kwargs)
+    return wrapper
+
+
+def _pub_pairing(p):
+    if not p:
+        return None
+    return {
+        "code": p.get("code"),
+        "name": p.get("name"),
+        "event": p.get("event"),
+        "year": p.get("year"),
+        "beacon_group_id": p.get("beacon_group_id"),
+        "notes": p.get("notes", ""),
+        "createdAt": _iso(p.get("createdAt")),
+        "expiresAt": _iso(p.get("expiresAt")),
+        "created_by": p.get("created_by"),
+    }
+
+
+def _pub_device_admin(d):
+    """Version admin : inclut last_position et derniers meta."""
+    if not d:
+        return None
+    base = _pub_device(d)
+    base.update({
+        "last_position": _pub_position(d.get("last_position")),
+        "last_ip": d.get("last_ip"),
+        "last_ua": d.get("last_ua"),
+        "notes": d.get("notes", ""),
+    })
+    return base
+
+
+def _pub_position(pos):
+    if not pos:
+        return None
+    return {
+        "lat": pos.get("lat"),
+        "lng": pos.get("lng"),
+        "accuracy": pos.get("accuracy"),
+        "speed": pos.get("speed"),
+        "heading": pos.get("heading"),
+        "battery": pos.get("battery"),
+        "ts": _iso(pos.get("ts")),
+    }
+
+
+def _label_conflict(db, name, event, year, exclude_device_id=None):
+    """True si le nom collisionne avec une balise anoloc (device_labels) ou une tablette
+    existante dans le meme event/year. Requis : les fiches PCORG matchent sur cc.patrouille
+    (label) et l'unicite evite les ambiguites."""
+    if not name:
+        return False
+    # Collision avec une balise Anoloc (device_labels.*)
+    config = db["anoloc_config"].find_one({"_id": "global"}) or {}
+    for grp in config.get("beacon_groups", []) or []:
+        dev_labels = grp.get("device_labels") or {}
+        for v in dev_labels.values():
+            if str(v).strip() == name.strip():
+                return True
+    # Collision avec une autre tablette
+    query = {"name": name, "event": event, "year": year, "revoked": {"$ne": True}}
+    if exclude_device_id is not None:
+        query["_id"] = {"$ne": exclude_device_id}
+    if db["field_devices"].count_documents(query) > 0:
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Admin : beacon groups (helper pour dropdown)
+# ---------------------------------------------------------------------------
+
+@field_bp.route("/field/admin/beacon-groups", methods=["GET"])
+@admin_required
+def field_admin_beacon_groups():
+    """Retourne la liste des beacon_groups pour remplir un dropdown admin."""
+    db = _get_mongo_db()
+    config = db["anoloc_config"].find_one({"_id": "global"}) or {}
+    groups = []
+    for g in config.get("beacon_groups", []) or []:
+        if not g.get("enabled"):
+            continue
+        groups.append({
+            "id": g.get("id"),
+            "label": g.get("label") or g.get("id"),
+            "color": g.get("color") or "#6366f1",
+            "icon": g.get("icon") or "location_on",
+            "pco_category": g.get("pco_category"),
+        })
+    return jsonify({"groups": groups})
+
+
+# ---------------------------------------------------------------------------
+# Admin : pairings (codes en cours)
+# ---------------------------------------------------------------------------
+
+@field_bp.route("/field/admin/pairings", methods=["GET"])
+@admin_required
+def field_admin_pairings_list():
+    """Liste les codes de pairing actifs (filtre optionnel par event/year)."""
+    db = _get_mongo_db()
+    query = {}
+    event = request.args.get("event")
+    year = request.args.get("year")
+    if event:
+        query["event"] = event
+    if year:
+        query["year"] = str(year)
+    pairings = [_pub_pairing(p) for p in db["field_pairings"].find(query).sort("createdAt", -1)]
+    return jsonify({"pairings": pairings})
+
+
+@field_bp.route("/field/admin/pairings", methods=["POST"])
+@admin_required
+def field_admin_pairings_create():
+    """Cree un nouveau code de pairing (unique). Payload : name, event, year,
+    beacon_group_id, notes?"""
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    event = (data.get("event") or "").strip()
+    year = str(data.get("year") or "").strip()
+    beacon_group_id = (data.get("beacon_group_id") or "").strip()
+    notes = (data.get("notes") or "").strip()
+
+    if not name:
+        return jsonify({"ok": False, "error": "missing_name"}), 400
+    if not event or not year:
+        return jsonify({"ok": False, "error": "missing_event_year"}), 400
+    if not beacon_group_id:
+        return jsonify({"ok": False, "error": "missing_beacon_group"}), 400
+
+    db = _get_mongo_db()
+
+    # Le beacon_group doit exister et etre actif
+    config = db["anoloc_config"].find_one({"_id": "global"}) or {}
+    grp = next((g for g in config.get("beacon_groups", []) or [] if g.get("id") == beacon_group_id), None)
+    if not grp:
+        return jsonify({"ok": False, "error": "unknown_beacon_group"}), 400
+    if not grp.get("enabled"):
+        return jsonify({"ok": False, "error": "beacon_group_disabled"}), 400
+
+    # Le nom ne doit pas collisionner avec une balise anoloc ou une autre tablette
+    if _label_conflict(db, name, event, year):
+        return jsonify({"ok": False, "error": "name_conflict"}), 409
+
+    # Generer un code unique (retry jusqu'a 5 fois)
+    code = None
+    for _ in range(5):
+        candidate = _generate_pairing_code()
+        if db["field_pairings"].find_one({"code": candidate}) is None:
+            code = candidate
+            break
+    if code is None:
+        return jsonify({"ok": False, "error": "code_generation_failed"}), 500
+
+    doc = {
+        "code": code,
+        "name": name,
+        "event": event,
+        "year": year,
+        "beacon_group_id": beacon_group_id,
+        "notes": notes,
+        "createdAt": _now(),
+        "expiresAt": _now() + timedelta(seconds=PAIRING_CODE_TTL_SECONDS),
+        "created_by": (request.admin_user or {}).get("email", "?"),
+    }
+    db["field_pairings"].insert_one(doc)
+    return jsonify({"ok": True, "pairing": _pub_pairing(doc)}), 201
+
+
+@field_bp.route("/field/admin/pairings/<code>", methods=["DELETE"])
+@admin_required
+def field_admin_pairings_delete(code):
+    """Supprime un code de pairing (non utilise)."""
+    db = _get_mongo_db()
+    res = db["field_pairings"].delete_one({"code": code})
+    if res.deleted_count == 0:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Admin : devices (tablettes enrolees)
+# ---------------------------------------------------------------------------
+
+@field_bp.route("/field/admin/devices", methods=["GET"])
+@admin_required
+def field_admin_devices_list():
+    """Liste les tablettes enrolees (filtre event/year/beacon_group)."""
+    db = _get_mongo_db()
+    query = {}
+    event = request.args.get("event")
+    year = request.args.get("year")
+    group = request.args.get("beacon_group_id")
+    include_revoked = request.args.get("include_revoked", "false").lower() in ("1", "true", "yes")
+    if event:
+        query["event"] = event
+    if year:
+        query["year"] = str(year)
+    if group:
+        query["beacon_group_id"] = group
+    if not include_revoked:
+        query["revoked"] = {"$ne": True}
+    devices = [
+        _pub_device_admin(d)
+        for d in db["field_devices"].find(query).sort("createdAt", -1)
+    ]
+    return jsonify({"devices": devices})
+
+
+@field_bp.route("/field/admin/devices/<device_id>/revoke", methods=["POST"])
+@admin_required
+def field_admin_device_revoke(device_id):
+    """Revoque une tablette (le cookie deviendra invalide au prochain appel)."""
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    db = _get_mongo_db()
+    res = db["field_devices"].update_one(
+        {"_id": oid},
+        {"$set": {"revoked": True, "revokedAt": _now()}},
+    )
+    if res.matched_count == 0:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    return jsonify({"ok": True})
+
+
+@field_bp.route("/field/admin/devices/<device_id>/rename", methods=["POST"])
+@admin_required
+def field_admin_device_rename(device_id):
+    """Renomme une tablette (verifie la non-collision)."""
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    data = request.get_json(silent=True) or {}
+    new_name = (data.get("name") or "").strip()
+    if not new_name:
+        return jsonify({"ok": False, "error": "missing_name"}), 400
+
+    db = _get_mongo_db()
+    device = db["field_devices"].find_one({"_id": oid})
+    if not device:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    if _label_conflict(db, new_name, device.get("event"), device.get("year"), exclude_device_id=oid):
+        return jsonify({"ok": False, "error": "name_conflict"}), 409
+
+    db["field_devices"].update_one({"_id": oid}, {"$set": {"name": new_name}})
+    return jsonify({"ok": True})
+
+
+@field_bp.route("/field/admin/devices/<device_id>", methods=["DELETE"])
+@admin_required
+def field_admin_device_delete(device_id):
+    """Supprime definitivement une tablette enrolee."""
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    db = _get_mongo_db()
+    res = db["field_devices"].delete_one({"_id": oid})
+    if res.deleted_count == 0:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    # On purge aussi les messages associes
+    db["field_messages"].delete_many({"device_id": oid})
+    return jsonify({"ok": True})
