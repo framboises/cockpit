@@ -262,18 +262,7 @@ def field_index():
         resp = make_response(redirect("/field/pair"))
         resp.delete_cookie(FIELD_COOKIE_NAME, path=FIELD_COOKIE_PATH)
         return resp
-    # Template sera cree dans le commit 2
-    try:
-        return render_template("field.html", device=_pub_device(device))
-    except Exception:
-        # Fallback temporaire : template pas encore cree
-        return (
-            "<!doctype html><meta charset='utf-8'><title>Field</title>"
-            "<h1>Field patrol</h1>"
-            f"<p>Tablette : <b>{device.get('name', '?')}</b></p>"
-            f"<p>Evenement : {device.get('event', '?')} / {device.get('year', '?')}</p>"
-            "<p>Template field.html pas encore cree (commit 2).</p>"
-        )
+    return render_template("field.html", device=_pub_device(device))
 
 
 @field_bp.route("/field/pair", methods=["GET"])

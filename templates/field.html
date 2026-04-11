@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <title>COCKPIT Field</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/field.css') }}">
+  <link rel="icon" href="data:,">
+</head>
+<body>
+  <!-- BARRE SUPERIEURE -->
+  <header class="field-topbar">
+    <div class="topbar-left">
+      <div class="logo">FIELD</div>
+      <div class="device">
+        <span class="device-name" id="field-device-name">{{ device.name or '-' }}</span>
+        <span class="device-event">{{ device.event or '' }}{% if device.year %} / {{ device.year }}{% endif %}</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="status-pill" id="gps-status" title="GPS">
+        <span class="material-symbols-outlined">location_searching</span>
+        <span class="status-label">GPS</span>
+      </div>
+      <div class="status-pill" id="net-status" title="Reseau">
+        <span class="material-symbols-outlined">signal_wifi_4_bar</span>
+      </div>
+      <div class="status-pill" id="battery-status" title="Batterie">
+        <span class="material-symbols-outlined">battery_full</span>
+        <span class="status-label" id="battery-pct">--</span>
+      </div>
+      <div class="clock" id="field-clock">--:--</div>
+    </div>
+  </header>
+
+  <!-- CARTE -->
+  <main class="field-map-wrap">
+    <div id="field-map"></div>
+
+    <!-- Panneau latéral (inbox) -->
+    <aside class="inbox-panel" id="inbox-panel" hidden>
+      <div class="inbox-header">
+        <h2>Messages</h2>
+        <button class="icon-btn" id="inbox-close" title="Fermer">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="inbox-list" id="inbox-list">
+        <div class="inbox-empty">Aucun message.</div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- BARRE D'ACTIONS -->
+  <nav class="field-actions">
+    <button class="action-btn" id="btn-recenter" title="Me recentrer">
+      <span class="material-symbols-outlined">my_location</span>
+      <span class="label">Moi</span>
+    </button>
+    <button class="action-btn" id="btn-layers" title="Fond de carte">
+      <span class="material-symbols-outlined">layers</span>
+      <span class="label">Fond</span>
+    </button>
+    <button class="action-btn" id="btn-grid" title="Carroyage">
+      <span class="material-symbols-outlined">grid_3x3</span>
+      <span class="label">Carroyage</span>
+    </button>
+    <button class="action-btn" id="btn-inbox" title="Messages">
+      <span class="material-symbols-outlined">inbox</span>
+      <span class="badge" id="inbox-badge" hidden>0</span>
+      <span class="label">Messages</span>
+    </button>
+    <button class="action-btn action-sos" id="btn-sos" title="SOS">
+      <span class="material-symbols-outlined">emergency</span>
+      <span class="label">SOS</span>
+    </button>
+  </nav>
+
+  <!-- Modal message -->
+  <div class="field-modal" id="msg-modal" hidden>
+    <div class="field-modal-box">
+      <div class="field-modal-header">
+        <h2 id="msg-modal-title">Message</h2>
+        <button class="icon-btn" id="msg-modal-close" title="Fermer">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="field-modal-body" id="msg-modal-body">-</div>
+      <div class="field-modal-actions">
+        <button class="btn-primary" id="msg-modal-ack">J'ai compris</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="field-toast" id="field-toast" hidden></div>
+
+  <!-- Données serveur -->
+  <script>
+    window.FIELD_DEVICE = {{ device | tojson }};
+  </script>
+  <!-- Material Symbols -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Symbols+Outlined">
+  <!-- Leaflet -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Field app -->
+  <script src="{{ url_for('static', filename='js/field.js') }}"></script>
+</body>
+</html>

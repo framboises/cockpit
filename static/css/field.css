@@ -1,0 +1,360 @@
+/* =====================================================================
+   COCKPIT Field - Styles tablettes terrain (responsive)
+   Cibles:
+     - Crosscall T5 portrait (800x1280)
+     - iPhone portrait (402x873)
+     - iPhone landscape (873x402)
+   ===================================================================== */
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+  height: 100%; width: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+body {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* =====================================================================
+   TOPBAR
+   ===================================================================== */
+.field-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+  z-index: 900;
+  min-height: 52px;
+  gap: 12px;
+}
+.topbar-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.topbar-left .logo {
+  font-weight: 800; font-size: 13px; letter-spacing: 2px;
+  color: #3b82f6; background: #1e3a8a;
+  padding: 4px 8px; border-radius: 6px;
+}
+.topbar-left .device { display: flex; flex-direction: column; min-width: 0; }
+.device-name { font-size: 14px; font-weight: 700; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.device-event { font-size: 11px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar-right { display: flex; align-items: center; gap: 8px; }
+.status-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 8px; border-radius: 8px;
+  background: #1e293b; border: 1px solid #334155;
+  font-size: 11px; color: #cbd5e1;
+}
+.status-pill .material-symbols-outlined { font-size: 16px; }
+.status-pill.ok { color: #4ade80; border-color: #166534; }
+.status-pill.warn { color: #facc15; border-color: #854d0e; }
+.status-pill.err { color: #f87171; border-color: #991b1b; }
+.clock {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 14px; font-weight: 700; color: #e2e8f0;
+  padding: 4px 8px; background: #1e293b; border-radius: 8px;
+  border: 1px solid #334155;
+}
+
+/* =====================================================================
+   MAP
+   ===================================================================== */
+.field-map-wrap { position: relative; min-height: 0; }
+#field-map { width: 100%; height: 100%; background: #0a0f1c; }
+
+/* Marqueur "moi" */
+.me-marker {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: #3b82f6; border: 3px solid #fff;
+  box-shadow: 0 0 0 4px rgba(59,130,246,0.3), 0 0 0 10px rgba(59,130,246,0.15);
+  animation: mePulse 2s infinite;
+}
+@keyframes mePulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(59,130,246,0.3), 0 0 0 10px rgba(59,130,246,0.15); }
+  50%      { box-shadow: 0 0 0 6px rgba(59,130,246,0.35), 0 0 0 14px rgba(59,130,246,0.2); }
+}
+.me-accuracy {
+  stroke: #3b82f6; stroke-width: 1; stroke-opacity: 0.6;
+  fill: #3b82f6; fill-opacity: 0.08;
+}
+
+/* Leaflet UI simplifie */
+.leaflet-control-attribution { font-size: 9px; }
+.leaflet-control-zoom a {
+  background: #1e293b !important;
+  color: #f1f5f9 !important;
+  border-color: #334155 !important;
+  width: 36px !important; height: 36px !important;
+  line-height: 36px !important; font-size: 20px !important;
+}
+.leaflet-control-zoom a:hover { background: #334155 !important; }
+
+/* =====================================================================
+   INBOX PANEL (drawer droit)
+   ===================================================================== */
+.inbox-panel {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: min(380px, 90%);
+  background: #0f172a;
+  border-left: 1px solid #1e293b;
+  display: flex;
+  flex-direction: column;
+  z-index: 1000;
+  box-shadow: -4px 0 20px rgba(0,0,0,0.4);
+  transform: translateX(0);
+  transition: transform 0.22s;
+}
+.inbox-panel[hidden] { display: flex !important; transform: translateX(110%); }
+.inbox-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid #1e293b;
+}
+.inbox-header h2 { margin: 0; font-size: 16px; font-weight: 700; color: #f8fafc; }
+.inbox-list { flex: 1; overflow-y: auto; padding: 8px; }
+.inbox-empty { text-align: center; color: #64748b; padding: 24px 12px; font-size: 13px; }
+.inbox-item {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.inbox-item:active { background: #334155; }
+.inbox-item.unread { border-left: 3px solid #3b82f6; }
+.inbox-item.priority-high { border-left: 3px solid #ef4444; background: #450a0a; }
+.inbox-item .item-title { font-weight: 700; font-size: 13px; color: #f8fafc; margin-bottom: 2px; }
+.inbox-item .item-body { font-size: 12px; color: #cbd5e1; line-height: 1.3; }
+.inbox-item .item-time { font-size: 10px; color: #94a3b8; margin-top: 4px; }
+
+/* =====================================================================
+   ACTIONS (bottom bar)
+   ===================================================================== */
+.field-actions {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+  padding: 6px 8px;
+  background: #0f172a;
+  border-top: 1px solid #1e293b;
+  z-index: 900;
+  min-height: 64px;
+  padding-bottom: max(6px, env(safe-area-inset-bottom));
+}
+.action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  font-family: inherit;
+  border-radius: 10px;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.1s, transform 0.05s;
+  min-height: 52px;
+  padding: 4px;
+}
+.action-btn:active { transform: scale(0.96); background: #334155; }
+.action-btn .material-symbols-outlined { font-size: 26px; }
+.action-btn .label { font-size: 10px; font-weight: 600; color: #cbd5e1; }
+.action-btn.active { background: #1e3a8a; border-color: #3b82f6; }
+.action-btn.active .label { color: #f8fafc; }
+.action-sos {
+  background: #7f1d1d;
+  border-color: #b91c1c;
+}
+.action-sos .label { color: #fecaca; }
+.action-sos:active { background: #991b1b; }
+.action-btn .badge {
+  position: absolute; top: 4px; right: 4px;
+  background: #ef4444; color: #fff;
+  font-size: 10px; font-weight: 800;
+  min-width: 18px; height: 18px;
+  border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 4px;
+}
+
+/* =====================================================================
+   MODALES
+   ===================================================================== */
+.field-modal {
+  position: fixed; inset: 0;
+  background: rgba(15,23,42,0.85);
+  z-index: 2000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.field-modal[hidden] { display: none !important; }
+.field-modal-box {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 500px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.field-modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid #1e293b;
+}
+.field-modal-header h2 { margin: 0; font-size: 16px; color: #f8fafc; }
+.field-modal-body {
+  padding: 14px;
+  overflow-y: auto;
+  flex: 1;
+  font-size: 14px; color: #e2e8f0; line-height: 1.4;
+  white-space: pre-wrap;
+}
+.field-modal-actions {
+  display: flex; gap: 8px; padding: 12px 14px;
+  border-top: 1px solid #1e293b;
+  justify-content: flex-end;
+}
+.btn-primary {
+  background: #2563eb; color: #f8fafc;
+  border: none; border-radius: 8px;
+  padding: 10px 18px;
+  font-size: 14px; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+}
+.btn-primary:active { background: #1d4ed8; }
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: #cbd5e1;
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.icon-btn:active { background: #1e293b; }
+
+/* =====================================================================
+   TOAST
+   ===================================================================== */
+.field-toast {
+  position: fixed;
+  top: 70px; left: 50%; transform: translateX(-50%);
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #f1f5f9;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 13px; font-weight: 600;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  z-index: 3000;
+  max-width: 90%;
+  text-align: center;
+}
+.field-toast[hidden] { display: none !important; }
+.field-toast.err { border-color: #b91c1c; color: #fecaca; }
+.field-toast.ok { border-color: #166534; color: #bbf7d0; }
+
+/* =====================================================================
+   BREAKPOINTS
+   ===================================================================== */
+
+/* iPhone portrait (width < 500) */
+@media (max-width: 500px) {
+  .status-pill .status-label { display: none; }
+  .clock { font-size: 12px; padding: 3px 6px; }
+  .device-event { display: none; }
+  .topbar-left .logo { font-size: 11px; padding: 3px 6px; }
+  .action-btn .label { display: none; }
+  .action-btn { min-height: 48px; }
+  .action-btn .material-symbols-outlined { font-size: 24px; }
+  .field-actions { grid-template-columns: repeat(5, 1fr); min-height: 56px; }
+  .field-topbar { min-height: 46px; padding: 6px 10px; }
+}
+
+/* iPhone landscape (tres peu de hauteur) */
+@media (orientation: landscape) and (max-height: 500px) {
+  body { grid-template-columns: auto 1fr; grid-template-rows: 1fr; }
+  .field-topbar {
+    grid-column: 1 / 2;
+    flex-direction: column;
+    min-height: unset;
+    min-width: 56px;
+    border-bottom: none;
+    border-right: 1px solid #1e293b;
+    padding: 6px 4px;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+  .topbar-left { flex-direction: column; gap: 4px; align-items: center; }
+  .topbar-left .device { display: none; }
+  .topbar-right { flex-direction: column; gap: 4px; }
+  .clock { font-size: 11px; padding: 2px 4px; }
+  .status-pill { padding: 3px 5px; }
+  .status-pill .status-label { display: none; }
+  .field-map-wrap { grid-column: 2 / 3; }
+  .field-actions {
+    position: absolute;
+    bottom: 8px; left: 50%;
+    transform: translateX(-50%);
+    grid-template-columns: repeat(5, 56px);
+    min-height: unset;
+    padding: 4px;
+    background: rgba(15,23,42,0.92);
+    border: 1px solid #1e293b;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  }
+  .action-btn { min-height: 48px; }
+  .action-btn .label { display: none; }
+}
+
+/* Crosscall T5 portrait (800x1280) : plus de place, boutons plus gros */
+@media (min-width: 700px) and (orientation: portrait) {
+  .field-topbar { min-height: 64px; padding: 12px 16px; }
+  .topbar-left .logo { font-size: 15px; padding: 6px 10px; }
+  .device-name { font-size: 17px; }
+  .device-event { font-size: 13px; }
+  .status-pill { padding: 6px 10px; font-size: 13px; }
+  .status-pill .material-symbols-outlined { font-size: 20px; }
+  .clock { font-size: 17px; padding: 6px 12px; }
+
+  .field-actions {
+    min-height: 88px;
+    gap: 8px;
+    padding: 10px 12px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+  .action-btn { min-height: 72px; border-radius: 14px; }
+  .action-btn .material-symbols-outlined { font-size: 32px; }
+  .action-btn .label { font-size: 13px; }
+
+  .inbox-panel { width: min(440px, 85%); }
+  .inbox-header h2 { font-size: 18px; }
+  .inbox-item .item-title { font-size: 15px; }
+  .inbox-item .item-body { font-size: 13px; }
+
+  .leaflet-control-zoom a {
+    width: 48px !important; height: 48px !important;
+    line-height: 48px !important; font-size: 24px !important;
+  }
+}
