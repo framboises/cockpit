@@ -206,7 +206,8 @@
 
   // ----- delete -----
   async function deleteConfig(dataKey) {
-    if (!confirm("Supprimer la config pour \"" + dataKey + "\" ?")) return;
+    const ok = await showConfirmToast("Supprimer la config pour \"" + dataKey + "\" ?", { okLabel: "Supprimer", type: "warning" });
+    if (!ok) return;
     try {
       const res = await fetch("/api/merge-config/" + encodeURIComponent(dataKey), {
         method: "DELETE",

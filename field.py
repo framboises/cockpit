@@ -179,12 +179,19 @@ def field_token_required(f):
 
         db = _get_mongo_db()
         device = db["field_devices"].find_one({"token_hash": _hash_token(token)})
-        if not device or device.get("revoked"):
+        if not device:
+            # Token inconnu : on purge et on renvoie sur le pairing
             if _wants_json():
                 return jsonify({"error": "device_revoked"}), 401
             resp = make_response(redirect("/field/pair"))
             resp.delete_cookie(FIELD_COOKIE_NAME, path=FIELD_COOKIE_PATH)
             return resp
+        if device.get("revoked"):
+            # Tablette explicitement revoquee : on garde le cookie pour
+            # qu'elle puisse etre re-autorisee sans nouveau code de pairing.
+            if _wants_json():
+                return jsonify({"error": "device_revoked"}), 401
+            return redirect("/field/denied")
 
         # Mettre a jour last_seen (best-effort)
         try:
@@ -302,11 +309,50 @@ def field_index():
         return redirect("/field/pair")
     db = _get_mongo_db()
     device = db["field_devices"].find_one({"token_hash": _hash_token(token)})
-    if not device or device.get("revoked"):
+    if not device:
+        # Token inconnu : on purge et on renvoie au pairing
         resp = make_response(redirect("/field/pair"))
         resp.delete_cookie(FIELD_COOKIE_NAME, path=FIELD_COOKIE_PATH)
         return resp
+    if device.get("revoked"):
+        return redirect("/field/denied")
     return render_template("field.html", device=_pub_device(device))
+
+
+@field_bp.route("/field/denied", methods=["GET"])
+def field_denied_view():
+    """Page affichee quand la tablette a ete revoquee. Le cookie est conserve
+    afin qu'une re-autorisation cote admin permette de recuperer la session
+    sans nouveau pairing. La page se rafraichit periodiquement pour detecter
+    automatiquement la restauration."""
+    token = request.cookies.get(FIELD_COOKIE_NAME)
+    if not token:
+        return redirect("/field/pair")
+    db = _get_mongo_db()
+    device = db["field_devices"].find_one({"token_hash": _hash_token(token)})
+    if not device:
+        resp = make_response(redirect("/field/pair"))
+        resp.delete_cookie(FIELD_COOKIE_NAME, path=FIELD_COOKIE_PATH)
+        return resp
+    if not device.get("revoked"):
+        # Plus revoquee, retour direct
+        return redirect("/field")
+    return render_template("field_denied.html", device=_pub_device(device))
+
+
+@field_bp.route("/field/denied/check", methods=["GET"])
+def field_denied_check():
+    """Endpoint JSON utilise par la page denied pour detecter une restauration."""
+    token = request.cookies.get(FIELD_COOKIE_NAME)
+    if not token:
+        return jsonify({"status": "no_token"}), 401
+    db = _get_mongo_db()
+    device = db["field_devices"].find_one({"token_hash": _hash_token(token)})
+    if not device:
+        return jsonify({"status": "unknown"}), 401
+    if device.get("revoked"):
+        return jsonify({"status": "revoked"})
+    return jsonify({"status": "active"})
 
 
 @field_bp.route("/field/pair", methods=["GET"])
@@ -642,7 +688,10 @@ def field_admin_beacon_groups():
     config = db["anoloc_config"].find_one({"_id": "global"}) or {}
     groups = []
     for g in config.get("beacon_groups", []) or []:
-        if not g.get("enabled"):
+        # On garde tout sauf si explicitement desactive (enabled == False)
+        if g.get("enabled") is False:
+            continue
+        if not g.get("id"):
             continue
         groups.append({
             "id": g.get("id"),
@@ -700,7 +749,7 @@ def field_admin_pairings_create():
     grp = next((g for g in config.get("beacon_groups", []) or [] if g.get("id") == beacon_group_id), None)
     if not grp:
         return jsonify({"ok": False, "error": "unknown_beacon_group"}), 400
-    if not grp.get("enabled"):
+    if grp.get("enabled") is False:
         return jsonify({"ok": False, "error": "beacon_group_disabled"}), 400
 
     # Le nom ne doit pas collisionner avec une balise anoloc ou une autre tablette
@@ -756,7 +805,9 @@ def field_admin_devices_list():
     event = request.args.get("event")
     year = request.args.get("year")
     group = request.args.get("beacon_group_id")
-    include_revoked = request.args.get("include_revoked", "false").lower() in ("1", "true", "yes")
+    # Par defaut on inclut les tablettes revoquees pour pouvoir les
+    # re-autoriser. Le client peut filtrer avec include_revoked=false.
+    include_revoked = request.args.get("include_revoked", "true").lower() in ("1", "true", "yes")
     if event:
         query["event"] = event
     if year:
@@ -784,6 +835,29 @@ def field_admin_device_revoke(device_id):
     res = db["field_devices"].update_one(
         {"_id": oid},
         {"$set": {"revoked": True, "revokedAt": _now()}},
+    )
+    if res.matched_count == 0:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    return jsonify({"ok": True})
+
+
+@field_bp.route("/field/admin/devices/<device_id>/restore", methods=["POST"])
+@admin_required
+def field_admin_device_restore(device_id):
+    """Re-autorise une tablette precedemment revoquee. Le token existant
+    redevient valide et la tablette retrouvera sa session sans avoir besoin
+    d'un nouveau code de pairing."""
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    db = _get_mongo_db()
+    res = db["field_devices"].update_one(
+        {"_id": oid},
+        {
+            "$set": {"revoked": False, "restoredAt": _now()},
+            "$unset": {"revokedAt": ""},
+        },
     )
     if res.matched_count == 0:
         return jsonify({"ok": False, "error": "not_found"}), 404
@@ -1250,7 +1324,8 @@ def field_my_fiche_comment(fiche_id):
 def field_sos():
     """Declenche une alerte SOS dans cockpit_active_alerts. Le poller cockpit
     (alert_poller.js) affichera l'alerte en plein ecran sur les postes
-    operateurs."""
+    operateurs. Cree egalement automatiquement une fiche PCO de type Secours
+    en niveau d urgence absolue (UA) pour suivi operationnel."""
     device = request.device
     name = device.get("name") or "?"
     event = device.get("event")
@@ -1269,16 +1344,81 @@ def field_sos():
     note = (data.get("note") or "").strip()
 
     now = _now()
+    now_local = _now_local()
     expires = now + timedelta(minutes=30)
+
+    db = _get_mongo_db()
+
+    # 1) Creer une fiche PCO automatique (categorie PCO.Secours, niveau UA)
+    fiche_id = None
+    try:
+        import uuid as _uuid
+        ts_str = now_local.isoformat()
+        text_lines = ["SOS tablette : " + name]
+        if note:
+            text_lines.append(note)
+        if lat is not None and lng is not None:
+            text_lines.append("Position : {:.5f}, {:.5f}".format(lat, lng))
+        text = " \u2014 ".join(text_lines)
+        seed = "{}|{}|{}|PCO.Secours|{}|{}|field-sos:{}".format(
+            event or "", year or "", ts_str, text, "", str(device.get("_id"))
+        )
+        fiche_id = str(_uuid.uuid5(_uuid.NAMESPACE_URL, seed))
+        gps = None
+        if lat is not None and lng is not None:
+            gps = {"type": "Point", "coordinates": [lng, lat]}
+        try:
+            year_int = int(year) if year is not None else None
+        except (TypeError, ValueError):
+            year_int = year
+        fiche_doc = {
+            "_id": fiche_id,
+            "event": event,
+            "year": year_int,
+            "ts": now,
+            "timestamp_iso": ts_str,
+            "close_ts": None,
+            "close_iso": None,
+            "category": "PCO.Secours",
+            "source": "PCO.Secours",
+            "text": text,
+            "text_full": text,
+            "comment": "",
+            "comment_history": [],
+            "operator": "Tablette " + name,
+            "operator_id_create": "field:" + str(device.get("_id")),
+            "operator_close": None,
+            "operator_id_close": None,
+            "status_code": 0,
+            "severity": 0,
+            "niveau_urgence": "UA",
+            "is_incident": False,
+            "area": None,
+            "gps": gps,
+            "group": None,
+            "content_category": {
+                "patrouille": name,
+                "field_sos": True,
+            },
+            "extracted": {"phones": None, "plates": None},
+            "tags": ["field-sos"],
+            "synced_at": None,
+            "sql_id": None,
+            "guid": None,
+            "server": "COCKPIT",
+            "bounce_rev": 1,
+        }
+        db["pcorg"].insert_one(fiche_doc)
+    except Exception as exc:
+        logger.warning("[field_sos] auto-fiche failed: %s", exc)
+        fiche_id = None
 
     alert = {
         "definition_slug": "field_sos",
         "event": event,
         "year": str(year) if year is not None else None,
-        "title": "SOS TABLETTE : " + name,
-        "message": ("Position : {:.5f}, {:.5f}".format(lat, lng)
-                    if (lat is not None and lng is not None)
-                    else "Position inconnue") + (" - " + note if note else ""),
+        "title": "SOS - " + name,
+        "message": note or "Demande d assistance immediate",
         "timeStr": now.strftime("%H:%M"),
         "dedup_key": "field-sos-" + str(device.get("_id")),
         "triggeredAt": now,
@@ -1292,10 +1432,10 @@ def field_sos():
             "lng": lng,
             "battery": battery,
             "note": note,
+            "pcorg_id": fiche_id,
         },
     }
 
-    db = _get_mongo_db()
     # Upsert par dedup_key pour eviter le spam si la tablette rappuie
     db["cockpit_active_alerts"].update_one(
         {"dedup_key": alert["dedup_key"]},
@@ -1317,7 +1457,7 @@ def field_sos():
         "expiresAt": now + timedelta(seconds=INBOX_MESSAGE_TTL_SECONDS),
         "ack_at": None,
     })
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "pcorg_id": fiche_id})
 
 
 @field_bp.route("/field/resources/tiles/<z>/<x>/<y>.png", methods=["GET"])

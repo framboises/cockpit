@@ -29,9 +29,17 @@
     gridOn: false,
     gridLayer: null,
     gridData: null,
-    threePOn: true,
+    gridMeta: null,            // {cols, rows, hLines, vLines, ...}
+    grid25On: false,
+    grid25Layer: null,
+    grid25Meta: null,
+    gridStickyEl: null,        // wrap DOM
+    gridPolylines: [],         // current 100m polylines (for weight tweak)
+    threePOn: false,
     threePLayer: null,
     threePLoaded: false,
+    poiCategories: [],         // [{label, dataKey, collection, icon, ...}]
+    poiLayers: {},             // dataKey -> {layer, loaded}
     routeLayer: null,
     routeDestination: null,  // [lat, lng]
     fichesLayer: null,
@@ -45,6 +53,15 @@
     watchId: null,
     clockTimer: null,
     inboxTimer: null,
+    // Outils de mesure
+    measureMode: null,
+    measureLayer: null,
+    measurePoints: [],
+    measureGuide: null,
+    measureLabels: [],
+    measureFinalized: false,
+    // Crosshair grille (touch)
+    crosshairTimer: null,
   };
 
   // ---------------------------------------------------------------------
@@ -76,6 +93,86 @@
     el.hidden = false;
     clearTimeout(toast._t);
     toast._t = setTimeout(function () { el.hidden = true; }, 2500);
+  }
+
+  // ---- Mini modal confirm/prompt (remplace window.confirm/prompt) ----
+  function fieldConfirm(message, opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      var overlay = document.createElement("div");
+      overlay.className = "field-modal field-mini-modal";
+      var box = document.createElement("div");
+      box.className = "field-modal-box";
+      var body = document.createElement("div");
+      body.className = "field-modal-body";
+      body.textContent = message;
+      var actions = document.createElement("div");
+      actions.className = "field-modal-actions";
+      var btnNo = document.createElement("button");
+      btnNo.className = "btn-primary btn-cancel";
+      btnNo.textContent = opts.cancelLabel || "Annuler";
+      var btnOk = document.createElement("button");
+      btnOk.className = "btn-primary";
+      btnOk.textContent = opts.okLabel || "Confirmer";
+      actions.appendChild(btnNo);
+      actions.appendChild(btnOk);
+      box.appendChild(body);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      function done(result) {
+        try { document.body.removeChild(overlay); } catch (e) {}
+        resolve(result);
+      }
+      btnNo.addEventListener("click", function () { done(false); });
+      btnOk.addEventListener("click", function () { done(true); });
+    });
+  }
+
+  function fieldPrompt(message, opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      var overlay = document.createElement("div");
+      overlay.className = "field-modal field-mini-modal";
+      var box = document.createElement("div");
+      box.className = "field-modal-box";
+      var body = document.createElement("div");
+      body.className = "field-modal-body";
+      var p = document.createElement("div");
+      p.textContent = message;
+      p.style.marginBottom = "10px";
+      body.appendChild(p);
+      var input = document.createElement("input");
+      input.type = "text";
+      input.value = opts.defaultValue || "";
+      input.style.cssText = "width:100%; padding:10px 12px; font-size:15px; border-radius:8px; background:#1e293b; border:1px solid #334155; color:#f1f5f9; font-family:inherit;";
+      body.appendChild(input);
+      var actions = document.createElement("div");
+      actions.className = "field-modal-actions";
+      var btnNo = document.createElement("button");
+      btnNo.className = "btn-primary btn-cancel";
+      btnNo.textContent = opts.cancelLabel || "Annuler";
+      var btnOk = document.createElement("button");
+      btnOk.className = "btn-primary";
+      btnOk.textContent = opts.okLabel || "OK";
+      actions.appendChild(btnNo);
+      actions.appendChild(btnOk);
+      box.appendChild(body);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      setTimeout(function () { try { input.focus(); } catch (e) {} }, 30);
+      function done(result) {
+        try { document.body.removeChild(overlay); } catch (e) {}
+        resolve(result);
+      }
+      btnNo.addEventListener("click", function () { done(null); });
+      btnOk.addEventListener("click", function () { done(input.value); });
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); done(input.value); }
+        if (e.key === "Escape") { e.preventDefault(); done(null); }
+      });
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -295,6 +392,12 @@
   // ---------------------------------------------------------------------
   // Ressources carte : carroyage + 3P
   // ---------------------------------------------------------------------
+  // Helper colonne A..Z, AA..
+  function colLabel(idx) {
+    if (idx < 26) return String.fromCharCode(65 + idx);
+    return String.fromCharCode(65 + Math.floor(idx / 26) - 1) + String.fromCharCode(65 + (idx % 26));
+  }
+
   function loadGrid() {
     if (state.gridData) {
       renderGrid();
@@ -325,40 +428,399 @@
     var lines = state.gridData.lines;
     var hLines = lines.h_lines || [];
     var vLines = lines.v_lines || [];
+    var numCols = lines.num_cols || (vLines.length - 1);
+    var numRows = lines.num_rows || (hLines.length - 1);
+    var colOffset = lines.col_offset || 0;
+    var rowOffset = lines.row_offset || 0;
+
     var group = L.layerGroup();
+    var polylines = [];
     hLines.forEach(function (l) {
-      L.polyline(
+      var pl = L.polyline(
         [[l.lat, l.lng_start], [l.lat, l.lng_end]],
         { color: "#f59e0b", weight: 1.4, opacity: 0.75, interactive: false }
-      ).addTo(group);
+      );
+      pl.addTo(group);
+      polylines.push(pl);
     });
     vLines.forEach(function (l) {
-      L.polyline(
+      var pl = L.polyline(
         [[l.lat_start, l.lng], [l.lat_end, l.lng]],
         { color: "#f59e0b", weight: 1.4, opacity: 0.75, interactive: false }
-      ).addTo(group);
+      );
+      pl.addTo(group);
+      polylines.push(pl);
     });
     group.addTo(state.map);
     state.gridLayer = group;
+    state.gridPolylines = polylines;
+
+    // Compute meta (col labels, row numbers, centers)
+    var cols = [];
+    for (var ci = 0; ci < numCols; ci++) {
+      var adj = ci - colOffset;
+      cols.push(adj >= 0 ? colLabel(adj) : null);
+    }
+    var rows = [];
+    for (var ri = 0; ri < numRows; ri++) {
+      var rn = ri + 1 - rowOffset;
+      rows.push(rn >= 1 ? rn : null);
+    }
+    var colCenters = [];
+    for (var c = 0; c < numCols; c++) {
+      colCenters.push((vLines[c].lng + vLines[c + 1].lng) / 2);
+    }
+    var rowCenters = [];
+    for (var r = 0; r < numRows; r++) {
+      rowCenters.push((hLines[r].lat + hLines[r + 1].lat) / 2);
+    }
+    state.gridMeta = {
+      cols: cols, rows: rows,
+      colCenters: colCenters, rowCenters: rowCenters,
+      hLines: hLines, vLines: vLines,
+      numCols: numCols, numRows: numRows,
+    };
+
+    buildStickyHeaders();
+    state.map.on("move zoom", updateStickyHeaders);
+
+    // Bouton sous-grille (visible si zoom >= 18)
+    updateGrid25ButtonVisibility();
+    state.map.on("zoomend", updateGrid25ButtonVisibility);
   }
 
-  function toggleGrid() {
-    if (state.gridOn) {
-      if (state.gridLayer) {
-        state.map.removeLayer(state.gridLayer);
-        state.gridLayer = null;
-      }
-      state.gridOn = false;
-      toast("Carroyage : off");
-    } else {
-      state.gridOn = true;
+  function clearGrid() {
+    if (state.gridLayer) {
+      state.map.removeLayer(state.gridLayer);
+      state.gridLayer = null;
+    }
+    state.gridPolylines = [];
+    if (state.gridStickyEl) {
+      state.gridStickyEl.remove();
+      state.gridStickyEl = null;
+    }
+    state.gridMeta = null;
+    state.map.off("move zoom", updateStickyHeaders);
+    state.map.off("zoomend", updateGrid25ButtonVisibility);
+    clearGrid25();
+    var row = $("lyr-grid-25-row");
+    if (row) row.hidden = true;
+  }
+
+  function toggleGrid(on) {
+    var want = (on === undefined) ? !state.gridOn : !!on;
+    if (want === state.gridOn) return;
+    state.gridOn = want;
+    var cb = $("lyr-grid-100");
+    if (cb) cb.checked = want;
+    if (want) {
       loadGrid();
       toast("Carroyage : on");
+    } else {
+      clearGrid();
+      toast("Carroyage : off");
+    }
+  }
+
+  // ----- Sticky headers -----
+  function buildStickyHeaders() {
+    if (state.gridStickyEl) {
+      state.gridStickyEl.remove();
+      state.gridStickyEl = null;
+    }
+    if (!state.gridMeta) return;
+    var info = activeGridInfo();
+    var container = $("field-map");
+    if (!container) return;
+
+    var wrap = document.createElement("div");
+    wrap.className = "grid-sticky-wrap";
+
+    var top = document.createElement("div");
+    top.className = "grid-sticky-top";
+    info.cols.forEach(function (lbl, idx) {
+      if (!lbl) return;
+      var el = document.createElement("span");
+      el.className = "grid-sticky-col";
+      el.textContent = lbl;
+      el.dataset.idx = idx;
+      top.appendChild(el);
+    });
+    wrap.appendChild(top);
+
+    var left = document.createElement("div");
+    left.className = "grid-sticky-left";
+    info.rows.forEach(function (lbl, idx) {
+      if (!lbl) return;
+      var el = document.createElement("span");
+      el.className = "grid-sticky-row";
+      el.textContent = String(lbl);
+      el.dataset.idx = idx;
+      left.appendChild(el);
+    });
+    wrap.appendChild(left);
+
+    var corner = document.createElement("div");
+    corner.className = "grid-sticky-corner";
+    var ico = document.createElement("span");
+    ico.className = "material-symbols-outlined";
+    ico.textContent = state.grid25On ? "grid_4x4" : "grid_3x3";
+    corner.appendChild(ico);
+    wrap.appendChild(corner);
+
+    container.appendChild(wrap);
+    state.gridStickyEl = wrap;
+    updateStickyHeaders();
+  }
+
+  function activeGridInfo() {
+    if (state.grid25On && state.grid25Meta) {
+      return {
+        cols: state.grid25Meta.cols,
+        rows: state.grid25Meta.rows,
+        colCenters: state.grid25Meta.colCenters,
+        rowCenters: state.grid25Meta.rowCenters,
+        hLines: state.grid25Meta.hLines,
+        vLines: state.grid25Meta.vLines,
+        numCols: state.grid25Meta.numCols,
+        numRows: state.grid25Meta.numRows,
+      };
+    }
+    return state.gridMeta;
+  }
+
+  function updateStickyHeaders() {
+    if (!state.gridStickyEl || !state.gridMeta || !state.map) return;
+    var info = activeGridInfo();
+    var bounds = state.map.getBounds();
+
+    var topEls = state.gridStickyEl.querySelectorAll(".grid-sticky-col");
+    topEls.forEach(function (el) {
+      var idx = parseInt(el.dataset.idx, 10);
+      var lng = info.colCenters[idx];
+      if (lng < bounds.getWest() || lng > bounds.getEast()) {
+        el.style.display = "none";
+        return;
+      }
+      var pt = state.map.latLngToContainerPoint([info.rowCenters[0] || 0, lng]);
+      el.style.left = pt.x + "px";
+      el.style.display = "";
+    });
+
+    var leftEls = state.gridStickyEl.querySelectorAll(".grid-sticky-row");
+    leftEls.forEach(function (el) {
+      var idx = parseInt(el.dataset.idx, 10);
+      var lat = info.rowCenters[idx];
+      if (lat < bounds.getSouth() || lat > bounds.getNorth()) {
+        el.style.display = "none";
+        return;
+      }
+      var pt = state.map.latLngToContainerPoint([lat, info.colCenters[0] || 0]);
+      el.style.top = pt.y + "px";
+      el.style.display = "";
+    });
+  }
+
+  // ----- 25m sub-grid -----
+  function updateGrid25ButtonVisibility() {
+    var row = $("lyr-grid-25-row");
+    if (!row) return;
+    var canShow = state.gridOn && state.map.getZoom() >= 18 && state.gridData && state.gridData.lines_25;
+    row.hidden = !canShow;
+    if (!canShow && state.grid25On) {
+      // Auto-hide sub-grid si on dezoome
+      toggleGrid25(false);
+    }
+  }
+
+  function toggleGrid25(on) {
+    var want = (on === undefined) ? !state.grid25On : !!on;
+    if (want === state.grid25On) return;
+    state.grid25On = want;
+    var cb = $("lyr-grid-25");
+    if (cb) cb.checked = want;
+    if (want) {
+      renderGrid25();
+    } else {
+      clearGrid25();
+      buildStickyHeaders();
+    }
+  }
+
+  function clearGrid25() {
+    if (state.grid25Layer) {
+      state.map.removeLayer(state.grid25Layer);
+      state.grid25Layer = null;
+    }
+    state.grid25Meta = null;
+  }
+
+  function renderGrid25() {
+    clearGrid25();
+    if (!state.gridData || !state.gridData.lines_25 || !state.gridMeta) return;
+    var lines25 = state.gridData.lines_25;
+    var hL = lines25.h_lines || [];
+    var vL = lines25.v_lines || [];
+    var nC = lines25.num_cols || (vL.length - 1);
+    var nR = lines25.num_rows || (hL.length - 1);
+
+    var group = L.layerGroup();
+    hL.forEach(function (l) {
+      L.polyline(
+        [[l.lat, l.lng_start], [l.lat, l.lng_end]],
+        { color: "#fb923c", weight: 1, opacity: 0.7, dashArray: "6 4", interactive: false }
+      ).addTo(group);
+    });
+    vL.forEach(function (l) {
+      L.polyline(
+        [[l.lat_start, l.lng], [l.lat_end, l.lng]],
+        { color: "#fb923c", weight: 1, opacity: 0.7, dashArray: "6 4", interactive: false }
+      ).addTo(group);
+    });
+    group.addTo(state.map);
+    state.grid25Layer = group;
+
+    var colCenters25 = [];
+    for (var c = 0; c < nC; c++) {
+      colCenters25.push((vL[c].lng + vL[c + 1].lng) / 2);
+    }
+    var rowCenters25 = [];
+    for (var r = 0; r < nR; r++) {
+      rowCenters25.push((hL[r].lat + hL[r + 1].lat) / 2);
+    }
+
+    var meta100 = state.gridMeta;
+    var colLabels25 = [];
+    for (var ci = 0; ci < nC; ci++) {
+      var lng = colCenters25[ci];
+      var pCol = null;
+      for (var pi = 0; pi < meta100.numCols; pi++) {
+        if (lng >= meta100.vLines[pi].lng && lng < meta100.vLines[pi + 1].lng) {
+          pCol = pi; break;
+        }
+      }
+      if (pCol === null || !meta100.cols[pCol]) {
+        colLabels25.push(null);
+        continue;
+      }
+      var subIdx = 0;
+      for (var si = ci - 1; si >= 0; si--) {
+        if (colCenters25[si] < meta100.vLines[pCol].lng) break;
+        subIdx++;
+      }
+      colLabels25.push(meta100.cols[pCol] + String.fromCharCode(65 + Math.min(subIdx, 3)));
+    }
+
+    var rowLabels25 = [];
+    for (var ri = 0; ri < nR; ri++) {
+      var lat = rowCenters25[ri];
+      var pRow = null;
+      for (var pri = 0; pri < meta100.numRows; pri++) {
+        if (lat <= meta100.hLines[pri].lat && lat > meta100.hLines[pri + 1].lat) {
+          pRow = pri; break;
+        }
+      }
+      if (pRow === null || !meta100.rows[pRow]) {
+        rowLabels25.push(null);
+        continue;
+      }
+      var subRow = 0;
+      for (var sri = ri - 1; sri >= 0; sri--) {
+        if (rowCenters25[sri] > meta100.hLines[pRow].lat) break;
+        subRow++;
+      }
+      rowLabels25.push(String(meta100.rows[pRow]) + (Math.min(subRow, 3) + 1));
+    }
+
+    state.grid25Meta = {
+      cols: colLabels25, rows: rowLabels25,
+      colCenters: colCenters25, rowCenters: rowCenters25,
+      hLines: hL, vLines: vL,
+      numCols: nC, numRows: nR,
+    };
+    buildStickyHeaders();
+  }
+
+  // Crosshair : retourne label de la cellule contenant lat/lng
+  function getCellLabelAt(lat, lng) {
+    var info = activeGridInfo();
+    if (!info) return { col: null, row: null };
+    var col = null, row = null;
+    for (var ci = 0; ci < info.numCols; ci++) {
+      if (lng >= info.vLines[ci].lng && lng < info.vLines[ci + 1].lng) { col = ci; break; }
+    }
+    for (var ri = 0; ri < info.numRows; ri++) {
+      if (lat <= info.hLines[ri].lat && lat > info.hLines[ri + 1].lat) { row = ri; break; }
+    }
+    if (col === null || row === null) return { col: null, row: null };
+    return {
+      col: col, row: row,
+      colLabel: info.cols[col],
+      rowLabel: info.rows[row],
+    };
+  }
+
+  function showCrosshair(latlng) {
+    if (!state.gridOn || !state.gridMeta) return;
+    var info = activeGridInfo();
+    var cell = getCellLabelAt(latlng.lat, latlng.lng);
+    if (cell.col === null || cell.row === null) return;
+    var ch = $("grid-crosshair");
+    var lblEl = $("grid-crosshair-label");
+    if (!ch || !lblEl) return;
+    // Position des lignes de croix au centre de la cellule cliquee
+    var cLng = info.colCenters[cell.col];
+    var cLat = info.rowCenters[cell.row];
+    var pt = state.map.latLngToContainerPoint([cLat, cLng]);
+    var v = ch.querySelector(".gx-line-v");
+    var h = ch.querySelector(".gx-line-h");
+    if (v) v.style.left = pt.x + "px";
+    if (h) h.style.top = pt.y + "px";
+    lblEl.textContent = (cell.colLabel || "") + (cell.rowLabel || "");
+    lblEl.style.left = pt.x + "px";
+    lblEl.style.top = pt.y + "px";
+    ch.hidden = false;
+    // Highlight des entetes
+    var topEl = state.gridStickyEl && state.gridStickyEl.querySelector('.grid-sticky-col[data-idx="' + cell.col + '"]');
+    var leftEl = state.gridStickyEl && state.gridStickyEl.querySelector('.grid-sticky-row[data-idx="' + cell.row + '"]');
+    if (state.gridStickyEl) {
+      state.gridStickyEl.querySelectorAll(".grid-highlight").forEach(function (e) { e.classList.remove("grid-highlight"); });
+    }
+    if (topEl) topEl.classList.add("grid-highlight");
+    if (leftEl) leftEl.classList.add("grid-highlight");
+    if (state.crosshairTimer) clearTimeout(state.crosshairTimer);
+    state.crosshairTimer = setTimeout(function () {
+      if (ch) ch.hidden = true;
+      if (state.gridStickyEl) {
+        state.gridStickyEl.querySelectorAll(".grid-highlight").forEach(function (e) { e.classList.remove("grid-highlight"); });
+      }
+    }, 4000);
+  }
+
+  // ----- 3P (toggle) -----
+  function toggle3P(on) {
+    var want = (on === undefined) ? !state.threePOn : !!on;
+    if (want === state.threePOn) return;
+    state.threePOn = want;
+    var cb = $("lyr-3p");
+    if (cb) cb.checked = want;
+    if (want) {
+      load3P();
+    } else {
+      if (state.threePLayer) {
+        state.map.removeLayer(state.threePLayer);
+        state.threePLayer = null;
+      }
+      state.threePLoaded = false;
     }
   }
 
   function load3P() {
-    if (state.threePLoaded) return;
+    if (state.threePLoaded && state.threePLayer) {
+      // Deja charge : juste reattacher
+      state.map.addLayer(state.threePLayer);
+      return;
+    }
     state.threePLoaded = true;
     fetch("/field/resources/3p", { headers: { "Accept": "application/json" } })
       .then(function (r) {
@@ -394,8 +856,126 @@
       cm.bindPopup("<b>" + escapeHtml(name) + "</b>");
       cm.addTo(group);
     });
-    group.addTo(state.map);
+    if (state.threePOn) group.addTo(state.map);
     state.threePLayer = group;
+  }
+
+  // ----- POI (groundmaster categories) -----
+  function loadPoiCategories() {
+    fetch("/field/resources/gm-categories", { headers: { "Accept": "application/json" } })
+      .then(function (r) {
+        if (r.status === 401) { window.location.href = "/field/pair"; return null; }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data || !data.categories) return;
+        state.poiCategories = data.categories;
+        renderPoiList();
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function renderPoiList() {
+    var list = $("lyr-poi-list");
+    if (!list) return;
+    list.innerHTML = "";
+    if (!state.poiCategories.length) {
+      list.innerHTML = "<div class='layers-empty'>Aucun POI disponible.</div>";
+      return;
+    }
+    state.poiCategories.forEach(function (cat) {
+      var key = cat.dataKey || cat.collection;
+      if (!key) return;
+      var label = cat.label || key;
+      var icon = cat.icon || "place";
+      var row = document.createElement("label");
+      row.className = "layer-row";
+      var input = document.createElement("input");
+      input.type = "checkbox";
+      input.dataset.poi = key;
+      var st = state.poiLayers[key];
+      input.checked = !!(st && st.visible);
+      input.addEventListener("change", function () {
+        togglePoi(key, input.checked, cat);
+      });
+      var name = document.createElement("span");
+      name.className = "layer-name";
+      name.innerHTML = "<span class='material-symbols-outlined'>" + escapeHtml(icon) + "</span> " + escapeHtml(label);
+      row.appendChild(input);
+      row.appendChild(name);
+      list.appendChild(row);
+    });
+  }
+
+  function togglePoi(key, on, cat) {
+    var st = state.poiLayers[key];
+    if (on) {
+      if (st && st.layer) {
+        st.layer.addTo(state.map);
+        st.visible = true;
+        return;
+      }
+      // Charger
+      var collection = (cat && cat.collection) || key;
+      fetch("/field/resources/gm-collection/" + encodeURIComponent(collection), { headers: { "Accept": "application/json" } })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          var features = (data && data.features) || [];
+          var layer = renderPoiFeatures(features, cat);
+          state.poiLayers[key] = { layer: layer, visible: true, collection: collection };
+        })
+        .catch(function () { toast("Echec POI " + (cat && cat.label || key), "err"); });
+    } else {
+      if (st && st.layer) {
+        state.map.removeLayer(st.layer);
+        st.visible = false;
+      }
+    }
+  }
+
+  function renderPoiFeatures(features, cat) {
+    var group = L.layerGroup();
+    var color = "#10b981";
+    var icon = (cat && cat.icon) || "place";
+    features.forEach(function (f) {
+      var geom = f.geometry || {};
+      var props = f.properties || {};
+      var name = props.Nom || props.Name || props.name || (cat && cat.label) || "";
+      var type = (geom.type || "").toLowerCase();
+      if (type === "point") {
+        var c = geom.coordinates || [];
+        if (c.length < 2) return;
+        var divIcon = L.divIcon({
+          className: "",
+          html: "<div class='poi-marker'><span class='material-symbols-outlined'>" + escapeHtml(icon) + "</span></div>",
+          iconSize: [28, 28],
+          iconAnchor: [14, 14],
+        });
+        var m = L.marker([c[1], c[0]], { icon: divIcon });
+        if (name) m.bindPopup("<b>" + escapeHtml(name) + "</b>");
+        m.addTo(group);
+      } else if (type === "polygon" || type === "multipolygon") {
+        try {
+          L.geoJSON(f, {
+            style: { color: color, weight: 2, opacity: 0.9, fillOpacity: 0.18 },
+            onEachFeature: function (feat, layer) {
+              if (name) layer.bindPopup("<b>" + escapeHtml(name) + "</b>");
+            },
+          }).addTo(group);
+        } catch (e) { /* ignore */ }
+      } else if (type === "linestring" || type === "multilinestring") {
+        try {
+          L.geoJSON(f, {
+            style: { color: color, weight: 3, opacity: 0.9 },
+            onEachFeature: function (feat, layer) {
+              if (name) layer.bindPopup("<b>" + escapeHtml(name) + "</b>");
+            },
+          }).addTo(group);
+        } catch (e) { /* ignore */ }
+      }
+    });
+    group.addTo(state.map);
+    return group;
   }
 
   function escapeHtml(s) {
@@ -599,28 +1179,31 @@
   }
 
   function openFicheCommentDialog(f) {
-    var comment = window.prompt("Commentaire sur la fiche :\n" + (f.text || "").slice(0, 80), "");
-    if (comment == null) return;
-    comment = comment.trim();
-    if (!comment) return;
-    fetch("/field/my-fiches/" + encodeURIComponent(f.id) + "/comment", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ comment: comment }),
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        if (data && data.ok) {
-          toast("Commentaire envoye");
-          $("msg-modal").hidden = true;
-          // Reset du bouton ack pour le prochain message
-          $("msg-modal-ack").textContent = "J'ai compris";
-          pollFiches();
-        } else {
-          toast("Echec : " + ((data && data.error) || "?"), "err");
-        }
+    fieldPrompt("Commentaire sur la fiche :\n" + (f.text || "").slice(0, 80), {
+      okLabel: "Envoyer",
+    }).then(function (comment) {
+      if (comment == null) return;
+      comment = comment.trim();
+      if (!comment) return;
+      fetch("/field/my-fiches/" + encodeURIComponent(f.id) + "/comment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: comment }),
       })
-      .catch(function () { toast("Erreur reseau", "err"); });
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data && data.ok) {
+            toast("Commentaire envoye");
+            $("msg-modal").hidden = true;
+            // Reset du bouton ack pour le prochain message
+            $("msg-modal-ack").textContent = "J'ai compris";
+            pollFiches();
+          } else {
+            toast("Echec : " + ((data && data.error) || "?"), "err");
+          }
+        })
+        .catch(function () { toast("Erreur reseau", "err"); });
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -628,40 +1211,47 @@
   // ---------------------------------------------------------------------
   function triggerSos() {
     if (state.sosInFlight) return;
-    var ok = window.confirm("Declencher un SOS ?\n\nLe cockpit sera immediatement prevenu avec ta position GPS.");
-    if (!ok) return;
-    state.sosInFlight = true;
-    var note = window.prompt("Note courte (optionnelle) :", "") || "";
+    fieldConfirm("Declencher un SOS ? Le cockpit sera immediatement prevenu avec ta position GPS.", {
+      okLabel: "Declencher",
+      cancelLabel: "Annuler",
+    }).then(function (ok) {
+      if (!ok) return;
+      fieldPrompt("Note courte (optionnelle) :", { okLabel: "Envoyer SOS" }).then(function (rawNote) {
+        if (rawNote == null) return; // utilisateur a annule
+        state.sosInFlight = true;
+        var note = (rawNote || "").trim();
 
-    var lat = null, lng = null;
-    if (state.meMarker) {
-      var ll = state.meMarker.getLatLng();
-      lat = ll.lat;
-      lng = ll.lng;
-    }
-    fetch("/field/sos", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        lat: lat,
-        lng: lng,
-        battery: state.batteryPct || null,
-        note: note.trim(),
-      }),
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        state.sosInFlight = false;
-        if (data && data.ok) {
-          toast("SOS envoye au cockpit", "warn");
-        } else {
-          toast("Echec SOS", "err");
+        var lat = null, lng = null;
+        if (state.meMarker) {
+          var ll = state.meMarker.getLatLng();
+          lat = ll.lat;
+          lng = ll.lng;
         }
-      })
-      .catch(function () {
-        state.sosInFlight = false;
-        toast("Erreur reseau (SOS)", "err");
+        fetch("/field/sos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            lat: lat,
+            lng: lng,
+            battery: state.batteryPct || null,
+            note: note,
+          }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            state.sosInFlight = false;
+            if (data && data.ok) {
+              toast("SOS envoye au cockpit", "warn");
+            } else {
+              toast("Echec SOS", "err");
+            }
+          })
+          .catch(function () {
+            state.sosInFlight = false;
+            toast("Erreur reseau (SOS)", "err");
+          });
       });
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -804,7 +1394,7 @@
   function wireUi() {
     $("btn-recenter").addEventListener("click", recenter);
     $("btn-layers").addEventListener("click", cycleLayer);
-    $("btn-grid").addEventListener("click", toggleGrid);
+    $("btn-grid").addEventListener("click", openLayersPanel);
     $("btn-inbox").addEventListener("click", function () {
       var p = $("inbox-panel");
       p.hidden = !p.hidden;
@@ -812,6 +1402,380 @@
     $("inbox-close").addEventListener("click", function () { $("inbox-panel").hidden = true; });
     $("btn-sos").addEventListener("click", triggerSos);
     $("msg-modal-close").addEventListener("click", function () { $("msg-modal").hidden = true; });
+
+    // Panneau Calques (close + checkboxes)
+    var lyClose = $("layers-close");
+    if (lyClose) lyClose.addEventListener("click", function () { $("layers-panel").hidden = true; });
+    var cbGrid = $("lyr-grid-100");
+    if (cbGrid) cbGrid.addEventListener("change", function () { toggleGrid(cbGrid.checked); });
+    var cbGrid25 = $("lyr-grid-25");
+    if (cbGrid25) cbGrid25.addEventListener("change", function () { toggleGrid25(cbGrid25.checked); });
+    var cb3p = $("lyr-3p");
+    if (cb3p) cb3p.addEventListener("change", function () { toggle3P(cb3p.checked); });
+
+    // Plein ecran
+    var btnFs = $("btn-fullscreen");
+    if (btnFs) btnFs.addEventListener("click", toggleFullscreen);
+    document.addEventListener("fullscreenchange", updateFullscreenIcon);
+
+    // Outils de mesure
+    var measureIds = ["measure-line", "measure-area", "measure-circle", "measure-clear"];
+    measureIds.forEach(function (id) {
+      var b = $(id);
+      if (!b) return;
+      b.addEventListener("click", function () { toggleMeasureTool(b.dataset.mode); });
+    });
+
+    // Click sur la carte : si grille active, afficher le crosshair
+    if (state.map) {
+      state.map.on("click", function (e) {
+        if (state.measureMode) return; // les outils de mesure prennent la main
+        if (state.gridOn) showCrosshair(e.latlng);
+      });
+    }
+  }
+
+  function openLayersPanel() {
+    var p = $("layers-panel");
+    if (!p) return;
+    // Sync checkboxes avec l'etat
+    var cbGrid = $("lyr-grid-100");
+    if (cbGrid) cbGrid.checked = !!state.gridOn;
+    var cbGrid25 = $("lyr-grid-25");
+    if (cbGrid25) cbGrid25.checked = !!state.grid25On;
+    var cb3p = $("lyr-3p");
+    if (cb3p) cb3p.checked = !!state.threePOn;
+    updateGrid25ButtonVisibility();
+    p.hidden = !p.hidden;
+  }
+
+  // ---------------------------------------------------------------------
+  // Plein ecran
+  // ---------------------------------------------------------------------
+  function toggleFullscreen() {
+    var doc = document;
+    var elem = document.documentElement;
+    var isFs = !!(doc.fullscreenElement || doc.webkitFullscreenElement);
+    if (!isFs) {
+      var req = elem.requestFullscreen || elem.webkitRequestFullscreen;
+      if (req) {
+        try { req.call(elem); } catch (e) { /* ignore */ }
+      }
+    } else {
+      var exit = doc.exitFullscreen || doc.webkitExitFullscreen;
+      if (exit) {
+        try { exit.call(doc); } catch (e) { /* ignore */ }
+      }
+    }
+  }
+
+  function updateFullscreenIcon() {
+    var btn = $("btn-fullscreen");
+    if (!btn) return;
+    var icon = btn.querySelector(".material-symbols-outlined");
+    if (!icon) return;
+    var isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    icon.textContent = isFs ? "fullscreen_exit" : "fullscreen";
+  }
+
+  // ---------------------------------------------------------------------
+  // Outils de mesure (port simplifie de map_view.js)
+  // ---------------------------------------------------------------------
+  var SNAP_PX = 14;
+  var MEASURE_IDS = ["measure-line", "measure-area", "measure-circle"];
+
+  function toggleMeasureTool(mode) {
+    if (mode === "clear") {
+      clearMeasure();
+      return;
+    }
+    if (state.measureMode === mode) {
+      clearMeasure();
+      return;
+    }
+    clearMeasure();
+    state.measureMode = mode;
+    state.measureFinalized = false;
+
+    MEASURE_IDS.forEach(function (id) {
+      var btn = $(id);
+      if (btn) btn.classList.toggle("active", btn.dataset.mode === mode);
+    });
+
+    state.measureLayer = L.layerGroup().addTo(state.map);
+    state.measurePoints = [];
+    state.measureLabels = [];
+
+    state.map.getContainer().style.cursor = "crosshair";
+    state.map.on("click", onMeasureClick);
+    state.map.on("mousemove", onMeasureMouseMove);
+    state.map.on("dblclick", onMeasureDblClick);
+    if (state.map.doubleClickZoom) state.map.doubleClickZoom.disable();
+
+    showMeasureTooltip(
+      mode === "line" ? "Touchez pour tracer"
+      : mode === "area" ? "Touchez les sommets"
+      : "Touchez le centre"
+    );
+  }
+
+  function clearMeasure() {
+    state.measureMode = null;
+    state.measurePoints = [];
+    state.measureFinalized = false;
+    state.measureGuide = null;
+    state.measureLabels = [];
+    if (state.measureLayer) {
+      try { state.map.removeLayer(state.measureLayer); } catch (e) {}
+      state.measureLayer = null;
+    }
+    hideMeasureTooltip();
+    MEASURE_IDS.forEach(function (id) {
+      var btn = $(id);
+      if (btn) btn.classList.remove("active");
+    });
+    if (state.map) {
+      state.map.off("click", onMeasureClick);
+      state.map.off("mousemove", onMeasureMouseMove);
+      state.map.off("dblclick", onMeasureDblClick);
+      if (state.map.doubleClickZoom) state.map.doubleClickZoom.enable();
+      state.map.getContainer().style.cursor = "";
+    }
+  }
+
+  function addMeasureVertex(latlng) {
+    if (!state.measureLayer) return;
+    var marker = L.circleMarker(latlng, {
+      radius: 5, color: "#6366f1", fillColor: "#fff",
+      fillOpacity: 1, weight: 2, interactive: false,
+    });
+    state.measureLayer.addLayer(marker);
+  }
+
+  function onMeasureClick(e) {
+    if (!state.measureMode || !state.measureLayer || state.measureFinalized) return;
+    var latlng = e.latlng;
+
+    if (state.measureMode === "circle") {
+      if (state.measurePoints.length === 0) {
+        state.measurePoints.push(latlng);
+        addMeasureVertex(latlng);
+        showMeasureTooltip("Touchez pour definir le rayon");
+      } else {
+        finalizeMeasureCircle(latlng);
+      }
+      return;
+    }
+
+    if (state.measurePoints.length > 0) {
+      var lastPt = state.measurePoints[state.measurePoints.length - 1];
+      if (lastPt.distanceTo(latlng) < 1) return;
+    }
+
+    if (state.measureMode === "area" && state.measurePoints.length >= 3) {
+      var firstPt = state.map.latLngToContainerPoint(state.measurePoints[0]);
+      var clickPt = state.map.latLngToContainerPoint(latlng);
+      if (firstPt.distanceTo(clickPt) < SNAP_PX) {
+        finalizeMeasureArea();
+        return;
+      }
+    }
+
+    state.measurePoints.push(latlng);
+    addMeasureVertex(latlng);
+
+    if (state.measureMode === "line") {
+      showMeasureTooltip("Touchez pour continuer, double-tap pour terminer");
+    } else {
+      showMeasureTooltip(state.measurePoints.length < 3
+        ? "Touchez les sommets (min. 3)"
+        : "Touchez le 1er point pour fermer");
+    }
+  }
+
+  function onMeasureMouseMove(e) {
+    if (!state.measureMode || !state.measureLayer || !state.measurePoints.length || state.measureFinalized) return;
+    var latlng = e.latlng;
+
+    if (state.measureMode === "circle" && state.measurePoints.length === 1) {
+      if (state.measureGuide) state.measureLayer.removeLayer(state.measureGuide);
+      var radius = state.measurePoints[0].distanceTo(latlng);
+      state.measureGuide = L.circle(state.measurePoints[0], {
+        radius: radius, color: "#6366f1", weight: 2, opacity: 0.7,
+        fillColor: "#6366f1", fillOpacity: 0.1, dashArray: "6 4", interactive: false,
+      });
+      state.measureLayer.addLayer(state.measureGuide);
+      showMeasureTooltip("Rayon: " + formatDist(radius));
+      return;
+    }
+
+    if (state.measureMode === "line" || state.measureMode === "area") {
+      if (state.measureGuide) state.measureLayer.removeLayer(state.measureGuide);
+      var pts = state.measurePoints.concat([latlng]);
+      if (state.measureMode === "area" && pts.length >= 3) {
+        state.measureGuide = L.polygon(pts, {
+          color: "#6366f1", weight: 2, opacity: 0.5,
+          fillColor: "#6366f1", fillOpacity: 0.08, dashArray: "6 4", interactive: false,
+        });
+      } else {
+        state.measureGuide = L.polyline(pts, {
+          color: "#6366f1", weight: 2, opacity: 0.5, dashArray: "6 4", interactive: false,
+        });
+      }
+      state.measureLayer.addLayer(state.measureGuide);
+
+      var totalDist = computeTotalDistance(pts);
+      var tip = "Distance: " + formatDist(totalDist);
+      if (state.measureMode === "area" && pts.length >= 3) {
+        tip += " | Aire: " + formatArea(computeArea(pts));
+      }
+      showMeasureTooltip(tip);
+    }
+  }
+
+  function onMeasureDblClick(e) {
+    if (!state.measureMode || state.measureFinalized) return;
+    L.DomEvent.stop(e);
+    if (state.measureMode === "line" && state.measurePoints.length >= 2) finalizeMeasureLine();
+    else if (state.measureMode === "area" && state.measurePoints.length >= 3) finalizeMeasureArea();
+  }
+
+  function finalizeMeasureLine() {
+    if (state.measureGuide) { state.measureLayer.removeLayer(state.measureGuide); state.measureGuide = null; }
+    while (state.measurePoints.length > 1 &&
+           state.measurePoints[state.measurePoints.length - 1].distanceTo(state.measurePoints[state.measurePoints.length - 2]) < 1) {
+      state.measurePoints.pop();
+    }
+    if (state.measurePoints.length < 2) return;
+    state.measureFinalized = true;
+
+    L.polyline(state.measurePoints, {
+      color: "#6366f1", weight: 3, opacity: 0.9, interactive: false,
+    }).addTo(state.measureLayer);
+
+    var totalDist = computeTotalDistance(state.measurePoints);
+    if (state.measurePoints.length > 2) {
+      for (var i = 1; i < state.measurePoints.length; i++) {
+        var segDist = state.measurePoints[i - 1].distanceTo(state.measurePoints[i]);
+        if (segDist < 1) continue;
+        var segMid = L.latLng(
+          (state.measurePoints[i - 1].lat + state.measurePoints[i].lat) / 2,
+          (state.measurePoints[i - 1].lng + state.measurePoints[i].lng) / 2
+        );
+        addMeasureSegLabel(segMid, formatDist(segDist));
+      }
+    }
+    addMeasureLabel(state.measurePoints[state.measurePoints.length - 1], formatDist(totalDist));
+    showMeasureTooltip("Total: " + formatDist(totalDist));
+    unbindMeasureEvents();
+  }
+
+  function finalizeMeasureArea() {
+    if (state.measureGuide) { state.measureLayer.removeLayer(state.measureGuide); state.measureGuide = null; }
+    state.measureFinalized = true;
+
+    var polygon = L.polygon(state.measurePoints, {
+      color: "#6366f1", weight: 3, opacity: 0.9,
+      fillColor: "#6366f1", fillOpacity: 0.15, interactive: false,
+    });
+    state.measureLayer.addLayer(polygon);
+    var area = computeArea(state.measurePoints);
+    var perimeter = computeTotalDistance(state.measurePoints.concat([state.measurePoints[0]]));
+    var center = polygon.getBounds().getCenter();
+    addMeasureLabel(center, formatArea(area) + "\nPerimetre: " + formatDist(perimeter));
+    showMeasureTooltip("Aire: " + formatArea(area) + " | Perimetre: " + formatDist(perimeter));
+    unbindMeasureEvents();
+  }
+
+  function finalizeMeasureCircle(edgePoint) {
+    if (state.measureGuide) { state.measureLayer.removeLayer(state.measureGuide); state.measureGuide = null; }
+    state.measureFinalized = true;
+
+    var center = state.measurePoints[0];
+    var radius = center.distanceTo(edgePoint);
+
+    L.circle(center, {
+      radius: radius, color: "#6366f1", weight: 3, opacity: 0.9,
+      fillColor: "#6366f1", fillOpacity: 0.1, interactive: false,
+    }).addTo(state.measureLayer);
+
+    L.polyline([center, edgePoint], {
+      color: "#6366f1", weight: 2, opacity: 0.6, dashArray: "4 4", interactive: false,
+    }).addTo(state.measureLayer);
+    addMeasureVertex(edgePoint);
+
+    var area = Math.PI * radius * radius;
+    addMeasureLabel(center, "R: " + formatDist(radius) + "\nD: " + formatDist(radius * 2) + "\nAire: " + formatArea(area));
+    showMeasureTooltip("Rayon: " + formatDist(radius) + " | D: " + formatDist(radius * 2) + " | Aire: " + formatArea(area));
+    unbindMeasureEvents();
+  }
+
+  function unbindMeasureEvents() {
+    state.map.off("click", onMeasureClick);
+    state.map.off("mousemove", onMeasureMouseMove);
+    state.map.off("dblclick", onMeasureDblClick);
+    if (state.map.doubleClickZoom) state.map.doubleClickZoom.enable();
+    state.map.getContainer().style.cursor = "";
+  }
+
+  function addMeasureLabel(latlng, text) {
+    if (!state.measureLayer) return;
+    var html = '<div class="measure-label">' + escapeHtml(text).replace(/\n/g, "<br>") + '</div>';
+    var icon = L.divIcon({ html: html, className: "measure-label-icon", iconSize: null });
+    var marker = L.marker(latlng, { icon: icon, interactive: false });
+    state.measureLayer.addLayer(marker);
+    state.measureLabels.push(marker);
+  }
+
+  function addMeasureSegLabel(latlng, text) {
+    if (!state.measureLayer) return;
+    var html = '<div class="measure-seg-label">' + escapeHtml(text) + '</div>';
+    var icon = L.divIcon({ html: html, className: "measure-label-icon", iconSize: null });
+    var marker = L.marker(latlng, { icon: icon, interactive: false });
+    state.measureLayer.addLayer(marker);
+    state.measureLabels.push(marker);
+  }
+
+  function computeTotalDistance(points) {
+    var d = 0;
+    for (var i = 1; i < points.length; i++) d += points[i - 1].distanceTo(points[i]);
+    return d;
+  }
+
+  function computeArea(points) {
+    if (points.length < 3) return 0;
+    if (typeof turf !== "undefined") {
+      var coords = points.map(function (p) { return [p.lng, p.lat]; });
+      coords.push(coords[0]);
+      try { return turf.area(turf.polygon([coords])); } catch (e) { return 0; }
+    }
+    return 0;
+  }
+
+  function formatDist(meters) {
+    if (meters >= 1000) return (meters / 1000).toFixed(2) + " km";
+    return Math.round(meters) + " m";
+  }
+
+  function formatArea(sqm) {
+    if (sqm >= 10000) return (sqm / 10000).toFixed(2) + " ha";
+    return Math.round(sqm) + " m\u00B2";
+  }
+
+  var _measureTooltip = null;
+  function showMeasureTooltip(text) {
+    if (!_measureTooltip) {
+      _measureTooltip = document.createElement("div");
+      _measureTooltip.className = "measure-tooltip";
+      var mapContainer = $("field-map");
+      if (mapContainer) mapContainer.appendChild(_measureTooltip);
+    }
+    _measureTooltip.textContent = text;
+    _measureTooltip.style.display = "";
+  }
+
+  function hideMeasureTooltip() {
+    if (_measureTooltip) _measureTooltip.style.display = "none";
   }
 
   // ---------------------------------------------------------------------
@@ -826,8 +1790,9 @@
     startGeolocation();
     startInboxPoll();
     startFichesPoll();
-    // Ressources carte : 3P visible par defaut, carroyage sur demande
-    load3P();
+    // Ressources carte : 3P et carroyage sont desactives par defaut.
+    // Categories POI chargees pour le panneau Calques.
+    loadPoiCategories();
     // PWA : service worker, wake lock, buffer de positions
     registerServiceWorker();
     acquireWakeLock();
@@ -948,7 +1913,13 @@
     cycleLayer: cycleLayer,
     pollInbox: pollInbox,
     toggleGrid: toggleGrid,
+    toggleGrid25: toggleGrid25,
+    toggle3P: toggle3P,
+    togglePoi: togglePoi,
+    toggleFullscreen: toggleFullscreen,
+    toggleMeasureTool: toggleMeasureTool,
     load3P: load3P,
+    loadPoiCategories: loadPoiCategories,
     setRouteDestination: setRouteDestination,
     openInGoogleMaps: openInGoogleMaps,
     pollFiches: pollFiches,

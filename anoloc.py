@@ -338,47 +338,48 @@ def anoloc_live():
 
 @anoloc_bp.route("/anoloc/vehicles-by-category")
 def anoloc_vehicles_by_category():
-    """Retourne {category: [{id, label}, ...]} pour les groupes avec pco_category."""
+    """Retourne {category: [{id, label}, ...]} pour les groupes avec pco_category.
+    Inclut aussi les tablettes Field, meme si l integration anoloc est desactivee."""
     db = _get_mongo_db()
-    config = db["anoloc_config"].find_one({"_id": "global"})
-    if not config or not config.get("enabled"):
-        return jsonify({})
+    config = db["anoloc_config"].find_one({"_id": "global"}) or {}
+    anoloc_enabled = bool(config.get("enabled"))
 
-    visible_groups = _get_user_visible_groups(config)
+    visible_groups = _get_user_visible_groups(config) if config else None
     result = {}
     seen = {}  # category -> set of device ids (deduplicate)
 
-    for grp in config.get("beacon_groups", []):
-        if not grp.get("enabled"):
-            continue
-        cat = grp.get("pco_category")
-        if not cat:
-            continue
-        if visible_groups is not None and grp["id"] not in visible_groups:
-            continue
-
-        dev_labels = grp.get("device_labels") or {}
-        if cat not in result:
-            result[cat] = []
-            seen[cat] = set()
-
-        for dev_id in grp.get("anoloc_device_ids", []):
-            if dev_id in seen[cat]:
+    if anoloc_enabled:
+        for grp in config.get("beacon_groups", []):
+            if not grp.get("enabled"):
                 continue
-            seen[cat].add(dev_id)
-            result[cat].append({
-                "id": dev_id,
-                "label": dev_labels.get(dev_id, dev_id),
-            })
+            cat = grp.get("pco_category")
+            if not cat:
+                continue
+            if visible_groups is not None and grp["id"] not in visible_groups:
+                continue
 
-    # Fusion tablettes Field (pour event/year donnes)
+            dev_labels = grp.get("device_labels") or {}
+            if cat not in result:
+                result[cat] = []
+                seen[cat] = set()
+
+            for dev_id in grp.get("anoloc_device_ids", []):
+                if dev_id in seen[cat]:
+                    continue
+                seen[cat].add(dev_id)
+                result[cat].append({
+                    "id": dev_id,
+                    "label": dev_labels.get(dev_id, dev_id),
+                })
+
+    # Fusion tablettes Field (pour event/year donnes) - independante d anoloc enabled
     event = request.args.get("event")
     year = request.args.get("year")
     tablets_by_group = _get_field_tablets_by_group(db, event, year)
     cat_by_group = {
         g["id"]: g.get("pco_category")
-        for g in config.get("beacon_groups", [])
-        if g.get("enabled") and g.get("pco_category")
+        for g in (config.get("beacon_groups", []) or [])
+        if g.get("enabled") is not False and g.get("pco_category")
     }
     for gid, tablets in tablets_by_group.items():
         cat = cat_by_group.get(gid)

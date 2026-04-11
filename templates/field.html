@@ -46,6 +46,34 @@
   <main class="field-map-wrap">
     <div id="field-map"></div>
 
+    <!-- Bouton plein ecran (haut droite) -->
+    <button class="map-fab map-fab-tr" id="btn-fullscreen" title="Plein ecran">
+      <span class="material-symbols-outlined">fullscreen</span>
+    </button>
+
+    <!-- Outils de mesure (bas droite) -->
+    <div class="map-measure-tools" id="measure-tools">
+      <button class="tile-btn" id="measure-line" title="Mesurer une distance" data-mode="line">
+        <span class="material-symbols-outlined">straighten</span>
+      </button>
+      <button class="tile-btn" id="measure-area" title="Mesurer une aire" data-mode="area">
+        <span class="material-symbols-outlined">square_foot</span>
+      </button>
+      <button class="tile-btn" id="measure-circle" title="Rayon / Diametre" data-mode="circle">
+        <span class="material-symbols-outlined">radio_button_unchecked</span>
+      </button>
+      <button class="tile-btn" id="measure-clear" title="Effacer" data-mode="clear">
+        <span class="material-symbols-outlined">delete_outline</span>
+      </button>
+    </div>
+
+    <!-- Crosshair grille (cellule courante) -->
+    <div class="grid-crosshair" id="grid-crosshair" hidden>
+      <div class="gx-line gx-line-v"></div>
+      <div class="gx-line gx-line-h"></div>
+      <div class="gx-label" id="grid-crosshair-label">-</div>
+    </div>
+
     <!-- Panneau latéral (inbox) -->
     <aside class="inbox-panel" id="inbox-panel" hidden>
       <div class="inbox-header">
@@ -58,6 +86,36 @@
         <div class="inbox-empty">Aucun message.</div>
       </div>
     </aside>
+
+    <!-- Panneau Calques -->
+    <aside class="layers-panel" id="layers-panel" hidden>
+      <div class="layers-header">
+        <h2>Calques</h2>
+        <button class="icon-btn" id="layers-close" title="Fermer">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="layers-list" id="layers-list">
+        <div class="layers-section-title">Carroyage</div>
+        <label class="layer-row">
+          <input type="checkbox" id="lyr-grid-100" />
+          <span class="layer-name"><span class="material-symbols-outlined">grid_3x3</span> Carroyage 100m</span>
+        </label>
+        <label class="layer-row" id="lyr-grid-25-row" hidden>
+          <input type="checkbox" id="lyr-grid-25" />
+          <span class="layer-name"><span class="material-symbols-outlined">grid_4x4</span> Sous-grille 25m</span>
+        </label>
+        <div class="layers-section-title">Infrastructures</div>
+        <label class="layer-row">
+          <input type="checkbox" id="lyr-3p" />
+          <span class="layer-name"><span class="material-symbols-outlined">door_front</span> Portes / Portails</span>
+        </label>
+        <div class="layers-section-title">POI evenement</div>
+        <div id="lyr-poi-list">
+          <div class="layers-empty">Chargement&hellip;</div>
+        </div>
+      </div>
+    </aside>
   </main>
 
   <!-- BARRE D'ACTIONS -->
@@ -67,12 +125,12 @@
       <span class="label">Moi</span>
     </button>
     <button class="action-btn" id="btn-layers" title="Fond de carte">
-      <span class="material-symbols-outlined">layers</span>
+      <span class="material-symbols-outlined">map</span>
       <span class="label">Fond</span>
     </button>
-    <button class="action-btn" id="btn-grid" title="Carroyage">
-      <span class="material-symbols-outlined">grid_3x3</span>
-      <span class="label">Carroyage</span>
+    <button class="action-btn" id="btn-grid" title="Calques">
+      <span class="material-symbols-outlined">layers</span>
+      <span class="label">Calques</span>
     </button>
     <button class="action-btn" id="btn-inbox" title="Messages">
       <span class="material-symbols-outlined">inbox</span>
@@ -116,6 +174,8 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Symbols+Outlined">
   <!-- Leaflet -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Turf.js (calcul d aire pour outils mesure) -->
+  <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
   <!-- Field app -->
   <script src="{{ url_for('static', filename='js/field.js') }}"></script>
 </body>

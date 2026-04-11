@@ -667,6 +667,11 @@
   function refresh() {
     var ey = (typeof getCurrentEventYear === "function") ? getCurrentEventYear() : {};
     if (!ey.event || !ey.year) return;
+    // Recharge la liste des vehicules engageables (inclut les tablettes Field) une fois sur 4
+    if (!refresh._vbcCounter || refresh._vbcCounter % 4 === 0) {
+      loadVehiclesByCategory();
+    }
+    refresh._vbcCounter = (refresh._vbcCounter || 0) + 1;
     fetch("/api/pcorg/live?event=" + encodeURIComponent(ey.event) + "&year=" + encodeURIComponent(ey.year))
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -2011,7 +2016,12 @@
   }
 
   function loadVehiclesByCategory() {
-    fetch("/anoloc/vehicles-by-category")
+    var ev = window.selectedEvent, yr = window.selectedYear;
+    var url = "/anoloc/vehicles-by-category";
+    if (ev && yr) {
+      url += "?event=" + encodeURIComponent(ev) + "&year=" + encodeURIComponent(yr);
+    }
+    fetch(url)
       .then(function (r) { return r.json(); })
       .then(function (d) { if (d) vehiclesByCategory = d; })
       .catch(function () {});

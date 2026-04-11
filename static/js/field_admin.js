@@ -282,12 +282,21 @@
       tr.appendChild(tdBat);
 
       var tdAct = document.createElement("td");
-      var btnRevoke = document.createElement("button");
-      btnRevoke.className = "btn btn-xs";
-      btnRevoke.title = "Revoquer (la tablette sera deconnectee)";
-      btnRevoke.innerHTML = "<span class='material-symbols-outlined' style='font-size:14px;'>block</span>";
-      btnRevoke.addEventListener("click", function () { revokeDevice(d); });
-      tdAct.appendChild(btnRevoke);
+      if (d.revoked) {
+        var btnRestore = document.createElement("button");
+        btnRestore.className = "btn btn-xs btn-success";
+        btnRestore.title = "Re-autoriser cette tablette (sans nouveau code)";
+        btnRestore.innerHTML = "<span class='material-symbols-outlined' style='font-size:14px;'>lock_open</span>";
+        btnRestore.addEventListener("click", function () { restoreDevice(d); });
+        tdAct.appendChild(btnRestore);
+      } else {
+        var btnRevoke = document.createElement("button");
+        btnRevoke.className = "btn btn-xs";
+        btnRevoke.title = "Revoquer (la tablette sera deconnectee)";
+        btnRevoke.innerHTML = "<span class='material-symbols-outlined' style='font-size:14px;'>block</span>";
+        btnRevoke.addEventListener("click", function () { revokeDevice(d); });
+        tdAct.appendChild(btnRevoke);
+      }
 
       var btnDel = document.createElement("button");
       btnDel.className = "btn btn-xs";
@@ -297,6 +306,16 @@
       btnDel.addEventListener("click", function () { deleteDevice(d); });
       tdAct.appendChild(btnDel);
       tr.appendChild(tdAct);
+
+      if (d.revoked) {
+        tr.style.opacity = "0.55";
+        tr.style.background = "rgba(127, 29, 29, 0.12)";
+        nameSpan.style.textDecoration = "line-through";
+        var badge = document.createElement("span");
+        badge.textContent = "REVOQUEE";
+        badge.style.cssText = "margin-left:6px; font-size:9px; font-weight:800; background:#7f1d1d; color:#fee2e2; padding:1px 5px; border-radius:4px; vertical-align:middle;";
+        tdName.appendChild(badge);
+      }
 
       tb.appendChild(tr);
     });
@@ -314,31 +333,60 @@
   }
 
   function revokeDevice(d) {
-    if (!confirm("Revoquer la tablette " + (d.name || "?") + " ?\nLa tablette sera deconnectee et devra etre re-appairee.")) return;
-    apiPost("/field/admin/devices/" + d.id + "/revoke")
-      .then(function (res) {
-        if (res.body && res.body.ok) {
-          _toast("success", "Tablette revoquee");
-          loadDevices();
-        } else {
-          _toast("error", "Erreur : " + ((res.body && res.body.error) || "inconnue"));
-        }
-      })
-      .catch(function () { _toast("error", "Erreur reseau"); });
+    showConfirmToast(
+      "Revoquer la tablette " + (d.name || "?") + " ? La tablette sera deconnectee mais conservee dans la liste : tu pourras la re-autoriser.",
+      { okLabel: "Revoquer", cancelLabel: "Annuler", type: "warning" }
+    ).then(function (ok) {
+      if (!ok) return;
+      apiPost("/field/admin/devices/" + d.id + "/revoke")
+        .then(function (res) {
+          if (res.body && res.body.ok) {
+            _toast("success", "Tablette revoquee");
+            loadDevices();
+          } else {
+            _toast("error", "Erreur : " + ((res.body && res.body.error) || "inconnue"));
+          }
+        })
+        .catch(function () { _toast("error", "Erreur reseau"); });
+    });
+  }
+
+  function restoreDevice(d) {
+    showConfirmToast(
+      "Re-autoriser la tablette " + (d.name || "?") + " ? Elle retrouvera automatiquement son acces sans nouveau code de pairing.",
+      { okLabel: "Re-autoriser", cancelLabel: "Annuler", type: "info" }
+    ).then(function (ok) {
+      if (!ok) return;
+      apiPost("/field/admin/devices/" + d.id + "/restore")
+        .then(function (res) {
+          if (res.body && res.body.ok) {
+            _toast("success", "Tablette re-autorisee");
+            loadDevices();
+          } else {
+            _toast("error", "Erreur : " + ((res.body && res.body.error) || "inconnue"));
+          }
+        })
+        .catch(function () { _toast("error", "Erreur reseau"); });
+    });
   }
 
   function deleteDevice(d) {
-    if (!confirm("Supprimer definitivement la tablette " + (d.name || "?") + " ?\nLes messages associes seront egalement purges.")) return;
-    apiDelete("/field/admin/devices/" + d.id)
-      .then(function (res) {
-        if (res.body && res.body.ok) {
-          _toast("success", "Tablette supprimee");
-          loadDevices();
-        } else {
-          _toast("error", "Erreur : " + ((res.body && res.body.error) || "inconnue"));
-        }
-      })
-      .catch(function () { _toast("error", "Erreur reseau"); });
+    showConfirmToast(
+      "Supprimer definitivement la tablette " + (d.name || "?") + " ? Les messages associes seront egalement purges.",
+      { okLabel: "Supprimer", cancelLabel: "Annuler", type: "error" }
+    ).then(function (ok) {
+      if (!ok) return;
+      apiDelete("/field/admin/devices/" + d.id)
+        .then(function (res) {
+          if (res.body && res.body.ok) {
+            _toast("success", "Tablette supprimee");
+            loadDevices();
+          } else {
+            _toast("error", "Erreur : " + ((res.body && res.body.error) || "inconnue"));
+          }
+        })
+        .catch(function () { _toast("error", "Erreur reseau"); });
+    });
   }
 
   // ------------------------------------------------------------------
@@ -636,16 +684,21 @@
   }
 
   function deleteMessage(m) {
-    if (!confirm("Supprimer ce message ? (la tablette l'a peut-etre deja recu)")) return;
-    apiDelete("/field/admin/messages/" + encodeURIComponent(m.id))
-      .then(function (res) {
-        if (res.body && res.body.ok) {
-          _toast("success", "Message supprime");
-          loadMessages();
-        } else {
-          _toast("error", "Erreur");
-        }
-      });
+    showConfirmToast(
+      "Supprimer ce message ? (la tablette l'a peut-etre deja recu)",
+      { okLabel: "Supprimer", cancelLabel: "Annuler", type: "warning" }
+    ).then(function (ok) {
+      if (!ok) return;
+      apiDelete("/field/admin/messages/" + encodeURIComponent(m.id))
+        .then(function (res) {
+          if (res.body && res.body.ok) {
+            _toast("success", "Message supprime");
+            loadMessages();
+          } else {
+            _toast("error", "Erreur");
+          }
+        });
+    });
   }
 
   function openMsgModal(prefill) {

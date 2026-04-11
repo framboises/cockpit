@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#7f1d1d">
+  <title>COCKPIT Field - Acces revoque</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Symbols+Outlined">
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a; color: #e2e8f0;
+      height: 100%; width: 100%;
+      overflow: hidden; overscroll-behavior: none;
+      user-select: none; -webkit-user-select: none;
+    }
+    .wrap {
+      min-height: 100%;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 24px;
+      gap: 18px;
+      text-align: center;
+    }
+    .logo {
+      font-weight: 800; font-size: 13px; letter-spacing: 2px;
+      color: #f87171; text-transform: uppercase;
+    }
+    .icon-circle {
+      width: 110px; height: 110px;
+      border-radius: 50%;
+      background: #7f1d1d;
+      border: 3px solid #ef4444;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6);
+      animation: deniedPulse 1.8s infinite;
+    }
+    .icon-circle .material-symbols-outlined {
+      font-size: 64px;
+      color: #fee2e2;
+    }
+    @keyframes deniedPulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55); }
+      50%      { box-shadow: 0 0 0 18px rgba(239, 68, 68, 0); }
+    }
+    h1 {
+      font-size: 24px; font-weight: 800; margin: 0;
+      color: #fef2f2;
+      letter-spacing: 0.5px;
+    }
+    .device {
+      font-size: 14px; color: #f8fafc;
+      background: #1e293b;
+      border: 1px solid #334155;
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+    .subtitle {
+      font-size: 14px; color: #94a3b8; margin: 0;
+      max-width: 420px; line-height: 1.45;
+    }
+    .status {
+      margin-top: 8px;
+      font-size: 13px;
+      color: #fbbf24;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .status .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #fbbf24;
+      animation: blink 1s infinite;
+    }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .actions {
+      display: flex; gap: 10px; margin-top: 8px;
+    }
+    button {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #e2e8f0;
+      padding: 10px 18px;
+      border-radius: 10px;
+      font-size: 14px; font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    button:active { background: #334155; }
+    button.primary { background: #2563eb; border-color: #1d4ed8; color: #fff; }
+    button.primary:active { background: #1d4ed8; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="logo">COCKPIT FIELD</div>
+    <div class="icon-circle">
+      <span class="material-symbols-outlined">block</span>
+    </div>
+    <h1>Acces revoque</h1>
+    <div class="device">{{ device.name or 'Tablette' }}{% if device.event %} &middot; {{ device.event }}{% if device.year %} / {{ device.year }}{% endif %}{% endif %}</div>
+    <p class="subtitle">
+      Les droits de cette tablette ont ete retires par le PCOA.<br>
+      Contacte-le pour faire reactiver l'acces. La tablette se reconnectera
+      automatiquement des qu'elle sera re-autorisee.
+    </p>
+    <div class="status">
+      <span class="dot"></span>
+      <span id="statusText">En attente de re-autorisation&hellip;</span>
+    </div>
+    <div class="actions">
+      <button onclick="checkNow()">Verifier maintenant</button>
+    </div>
+  </div>
+
+  <script>
+    var POLL_MS = 5000;
+
+    function checkNow() {
+      fetch("/field/denied/check", { headers: { "Accept": "application/json" } })
+        .then(function (r) {
+          if (r.status === 401) {
+            window.location.href = "/field/pair";
+            return null;
+          }
+          return r.json();
+        })
+        .then(function (data) {
+          if (!data) return;
+          if (data.status === "active") {
+            document.getElementById("statusText").textContent = "Acces retabli, redirection...";
+            setTimeout(function () { window.location.href = "/field"; }, 600);
+          }
+        })
+        .catch(function () { /* silent */ });
+    }
+
+    setInterval(checkNow, POLL_MS);
+    checkNow();
+  </script>
+</body>
+</html>

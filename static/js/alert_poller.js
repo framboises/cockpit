@@ -43,7 +43,9 @@
         "checkpoint-reassign": "swap_horiz",
         "checkpoint-error-burst": "error",
         "pcorg-securite-ua": "shield",
-        "pcorg-secours-ua": "local_hospital"
+        "pcorg-secours-ua": "local_hospital",
+        "field_sos": "sos",
+        "field-sos": "sos"
     };
     var TITLE_MAP = {
         opening: "OUVERTURE IMMINENTE", opened: "SITE OUVERT",
@@ -56,7 +58,9 @@
         "checkpoint-error-burst": "RAFALE ERREURS CHECKPOINT",
         "checkpoint-reassign": "CHANGEMENT AFFECTATION CHECKPOINT",
         "pcorg-securite-ua": "ALERTE S\u00c9CURIT\u00c9",
-        "pcorg-secours-ua": "ALERTE SECOURS"
+        "pcorg-secours-ua": "ALERTE SECOURS",
+        "field_sos": "SOS TABLETTE",
+        "field-sos": "SOS TABLETTE"
     };
 
     // Labels urgence par type de categorie
@@ -185,7 +189,12 @@
 
         var title = document.createElement("div");
         title.className = "critical-alert-title";
-        title.textContent = TITLE_MAP[type] || type.toUpperCase();
+        var actionDataPre = item.actionData || {};
+        if ((type === "field_sos" || type === "field-sos") && actionDataPre.device_name) {
+            title.textContent = "SOS - " + actionDataPre.device_name;
+        } else {
+            title.textContent = TITLE_MAP[type] || type.toUpperCase();
+        }
 
         header.appendChild(icon);
         header.appendChild(title);
@@ -195,9 +204,31 @@
 
         // Contenu specifique PCO : enrichi avec urgence + engagement + operateur
         var isPco = type.indexOf("pcorg-") === 0;
+        var isFieldSos = (type === "field_sos" || type === "field-sos");
         var actionData = item.actionData || {};
 
-        if (isPco && actionData.niveau_urgence && actionData.category) {
+        if (isFieldSos) {
+            // Gros message envoye par la tablette ("ahhhh" en grand)
+            var bigMsg = document.createElement("div");
+            bigMsg.className = "critical-alert-sos-big";
+            bigMsg.textContent = (actionData.note && String(actionData.note).trim()) || (item.message || "");
+            if (!bigMsg.textContent.trim()) bigMsg.textContent = "Demande d assistance immediate";
+            body.appendChild(bigMsg);
+
+            // Bloc info : groupe / batterie / heure
+            var info = document.createElement("div");
+            info.className = "critical-alert-sos-info";
+            var hasPos = (typeof actionData.lat === "number" && typeof actionData.lng === "number");
+            var posTxt = hasPos
+                ? actionData.lat.toFixed(5) + ", " + actionData.lng.toFixed(5)
+                : "Position inconnue";
+            var batTxt = (typeof actionData.battery === "number") ? (Math.round(actionData.battery) + "%") : "?";
+            info.innerHTML =
+                "<div><span class='material-symbols-outlined'>place</span> " + posTxt + "</div>" +
+                "<div><span class='material-symbols-outlined'>battery_5_bar</span> " + batTxt + "</div>" +
+                "<div><span class='material-symbols-outlined'>schedule</span> " + timeStr + "</div>";
+            body.appendChild(info);
+        } else if (isPco && actionData.niveau_urgence && actionData.category) {
             var urgLabel = _urgencyLabel(actionData.category, actionData.niveau_urgence);
             var engageDesc = URGENCY_ENGAGE[actionData.niveau_urgence] || "";
 
@@ -346,6 +377,30 @@
             };
             fn._actionData = a.actionData;
         }
+        if ((slug === "field_sos" || slug === "field-sos") && a.actionData) {
+            var ad = a.actionData;
+            fn = function() {
+                // Priorite : ouvrir la fiche PCO auto-creee si dispo, sinon centrer la carte
+                if (ad.pcorg_id && window.PcorgUI && window.PcorgUI.openFiche) {
+                    window.PcorgUI.openFiche(ad.pcorg_id);
+                    return;
+                }
+                if (typeof ad.lat === "number" && typeof ad.lng === "number") {
+                    if (window.CockpitMapView && window.CockpitMapView.switchView) {
+                        window.CockpitMapView.switchView("map");
+                    }
+                    setTimeout(function() {
+                        if (window.CockpitMapView && window.CockpitMapView.flyTo) {
+                            window.CockpitMapView.flyTo(ad.lat, ad.lng, 19);
+                        } else if (window.CockpitMapView && window.CockpitMapView.getMap) {
+                            var m = window.CockpitMapView.getMap();
+                            if (m) m.setView([ad.lat, ad.lng], 19);
+                        }
+                    }, 400);
+                }
+            };
+            fn._actionData = a.actionData;
+        }
         return fn;
     }
 
@@ -412,7 +467,7 @@
                     _markSeen(a._id);
                     var slug = a.definition_slug || "";
                     var onView = _buildOnView(slug, a);
-                    enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView);
+                    enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, a.actionData);
                 });
             })
             .catch(function(err) {

@@ -403,9 +403,9 @@
   }
   if (forceFullBtn) {
     forceFullBtn.addEventListener("click", function () {
-      if (confirm("Resynchronisation complete depuis SQL Server ?\nCela peut prendre plusieurs minutes.")) {
-        triggerSync(true);
-      }
+      showConfirmToast("Resynchronisation complete depuis SQL Server ? Cela peut prendre plusieurs minutes.", { okLabel: "Lancer", type: "warning" }).then(function (ok) {
+        if (ok) triggerSync(true);
+      });
     });
   }
 
