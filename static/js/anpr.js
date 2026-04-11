@@ -278,12 +278,12 @@
         tr.appendChild(tds);
         // conf
         tr.appendChild(mk("td", "anpr-conf anpr-conf-" + (r.confidence >= 90 ? "high" : r.confidence >= 60 ? "med" : "low"), isVision ? "" : r.confidence + "%"));
-        // color
+        // color (ANPR english or Vision french)
         var tdc = document.createElement("td");
-        if (!isVision && r.color_hex) { var dot = mk("span", "anpr-color-dot"); dot.style.background = r.color_hex; tdc.appendChild(dot); tdc.appendChild(document.createTextNode(" " + (COLOR_FR[r.color] || r.color))); }
+        if (r.color_hex) { var dot = mk("span", "anpr-color-dot"); dot.style.background = r.color_hex; tdc.appendChild(dot); tdc.appendChild(document.createTextNode(" " + (COLOR_FR[r.color] || r.color || ""))); }
         tr.appendChild(tdc);
-        tr.appendChild(mk("td", "", isVision ? "" : r.brand));
-        tr.appendChild(mk("td", "", isVision ? "" : r.type_label));
+        tr.appendChild(mk("td", "", r.brand || ""));
+        tr.appendChild(mk("td", "", r.type_label || ""));
         tr.appendChild(mk("td", "", isVision ? "" : r.camera));
         // dir
         var tdd = document.createElement("td");
@@ -436,8 +436,10 @@
         if (isVision) {
             // Vision-specific details
             var billetsTxt = (r.billets && r.billets.length) ? r.billets.length + " billet(s): " + r.billets.join(", ") : "Aucun billet";
+            var vehTxt = [r.color, r.brand, r.type_label].filter(function(v){ return v; }).join(" ");
             [
                 { i: "confirmation_number", t: "Source: Vision" },
+                vehTxt ? { i: "directions_car", t: vehTxt, c: r.color_hex } : null,
                 r.lieu ? { i: "location_on", t: "Parking: " + r.lieu } : null,
                 { i: "receipt_long", t: billetsTxt },
                 r.commentaire ? { i: "chat", t: r.commentaire } : null,
@@ -446,6 +448,7 @@
                 if (!row) return;
                 var d = mk("div", "anpr-detail-row");
                 d.appendChild(mk("span", "material-symbols-outlined", row.i));
+                if (row.c) { var dt = mk("span", "anpr-color-dot"); dt.style.background = row.c; d.appendChild(dt); }
                 d.appendChild(document.createTextNode(row.t)); det.appendChild(d);
             });
         } else {
@@ -501,7 +504,9 @@
                     title.appendChild(mk("span", "material-symbols-outlined", "confirmation_number"));
                     title.appendChild(document.createTextNode(" Vision \u2014 " + v.evenement + " " + v.annee));
                     visionDiv.appendChild(title);
+                    var vVehTxt = [v.couleur, v.marque, v.modele].filter(function(x){ return x; }).join(" ");
                     var vrows = [
+                        vVehTxt ? { i: "directions_car", t: vVehTxt } : null,
                         { i: "location_on", t: "Parking: " + v.lieu },
                         { i: "receipt_long", t: v.billets.length + " billet(s)" + (v.billets.length ? ": " + v.billets.join(", ") : "") },
                         { i: "event", t: "Enregistre le " + fmtDt(v.date) },
@@ -543,8 +548,11 @@
                         // Vision entry
                         var vBadge = mk("span", "anpr-source-badge anpr-source-vision", "Vision");
                         it.appendChild(vBadge);
+                        if (h.color_hex) { var vdt = mk("span", "anpr-color-dot"); vdt.style.background = h.color_hex; it.appendChild(vdt); }
                         it.appendChild(mk("span", "", fmtDt(h.event_dt)));
                         if (h.lieu) it.appendChild(mk("span", "anpr-feed-cam", h.lieu));
+                        var vInfo = [h.marque, h.modele].filter(function(x){ return x; }).join(" ");
+                        if (vInfo) it.appendChild(mk("span", "", vInfo));
                         if (h.billets_count) it.appendChild(mk("span", "", h.billets_count + " billet(s)"));
                     } else {
                         // ANPR detection

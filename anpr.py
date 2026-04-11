@@ -278,6 +278,12 @@ COLOR_HEX = {
     "blue": "#3b82f6", "red": "#ef4444", "green": "#22c55e",
     "yellow": "#eab308", "brown": "#92400e", "pink": "#ec4899",
     "cyan": "#06b6d4",
+    # Couleurs francaises (Gemini Vision)
+    "blanc": "#f0f0f0", "noir": "#1a1a2e", "gris": "#6b7280",
+    "bleu": "#3b82f6", "rouge": "#ef4444", "vert": "#22c55e",
+    "jaune": "#eab308", "marron": "#92400e", "rose": "#ec4899",
+    "orange": "#f97316", "beige": "#d4a76a", "bordeaux": "#800020",
+    "argent": "#c0c0c0",
 }
 
 # ---------------------------------------------------------------------------
@@ -552,17 +558,18 @@ def anpr_search():
         vision_total = _col_vision_imm.count_documents(vq)
         vdocs = list(_col_vision_imm.find(vq).sort("date", -1).limit(500))
         for vd in vdocs:
+            v_couleur = vd.get("couleur", "")
             vision_results.append({
                 "id": str(vd["_id"]),
                 "source": "vision",
                 "plate": vd.get("plaque", ""),
                 "original_plate": vd.get("plaque", ""),
                 "confidence": 0,
-                "color": "",
-                "color_hex": "",
+                "color": v_couleur,
+                "color_hex": COLOR_HEX.get(v_couleur, "") if v_couleur else "",
                 "type": "",
-                "type_label": "",
-                "brand": "",
+                "type_label": vd.get("modele", ""),
+                "brand": vd.get("marque", ""),
                 "brand_id": 0,
                 "camera": "",
                 "direction": "",
@@ -738,14 +745,18 @@ def anpr_plate_history(plate):
     if norm:
         vdocs = list(_col_vision_imm.find({"plaque_norm": norm}))
         for vd in vdocs:
+            v_couleur = vd.get("couleur", "")
             records.append({
                 "source": "vision",
                 "event_dt": vd.get("date", ""),
                 "camera": "",
-                "color_hex": "",
+                "color": v_couleur,
+                "color_hex": COLOR_HEX.get(v_couleur, "") if v_couleur else "",
                 "resolved_dir": "",
                 "lieu": vd.get("lieu", ""),
                 "billets_count": len(vd.get("billets", [])),
+                "marque": vd.get("marque", ""),
+                "modele": vd.get("modele", ""),
                 "evenement": vd.get("evenement", ""),
                 "annee": vd.get("annee", 0),
             })
@@ -1019,6 +1030,9 @@ def anpr_vision_lookup(plate):
             "evenement": doc.get("evenement", ""),
             "annee": doc.get("annee", 0),
             "photo_vehicule": doc.get("photo_vehicule", ""),
+            "couleur": doc.get("couleur", ""),
+            "marque": doc.get("marque", ""),
+            "modele": doc.get("modele", ""),
         })
 
     # Check blacklist

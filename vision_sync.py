@@ -216,6 +216,9 @@ def sync_immatriculations(fs_db, mongo_db, evenement=None, annee=None, full=Fals
                 "annee": data.get("annee", 0),
                 "photo_vehicule": data.get("photoVehicule", ""),
                 "photo_plaque": data.get("photoPlaque", ""),
+                "couleur": data.get("couleur", ""),
+                "marque": data.get("marque", ""),
+                "modele": data.get("modele", ""),
                 "firestore_doc_id": doc.id,
                 "synced_at": datetime.utcnow(),
             }
