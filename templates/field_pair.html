@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
   <meta name="theme-color" content="#0f172a">
   <title>COCKPIT Field - Appairage</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='favicon.ico') }}">
   <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body {
@@ -19,15 +21,25 @@
       min-height: 100%;
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
-      padding: 24px;
-      gap: 24px;
+      padding: 32px 24px;
+      gap: 36px;
+    }
+    .left {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+      text-align: center;
     }
     h1 {
       font-size: 22px; font-weight: 700; letter-spacing: 0.5px;
       margin: 0; color: #f8fafc;
+      line-height: 1.3;
     }
     .subtitle {
       font-size: 14px; color: #94a3b8; margin: 0; text-align: center;
+      max-width: 360px;
+      line-height: 1.55;
     }
     .code-display {
       display: flex; gap: 10px;
@@ -36,6 +48,7 @@
       letter-spacing: 4px;
       min-height: 60px;
       align-items: center;
+      margin-top: 6px;
     }
     .code-digit {
       width: 48px; height: 60px;
@@ -72,17 +85,22 @@
       min-height: 22px;
       font-size: 14px;
       text-align: center;
+      margin-top: 4px;
     }
     .msg.error { color: #f87171; }
     .msg.ok { color: #4ade80; }
     .logo {
       font-weight: 800; font-size: 13px; letter-spacing: 2px;
       color: #3b82f6; text-transform: uppercase;
+      padding: 4px 10px;
+      background: #1e3a8a;
+      border-radius: 6px;
+      margin-bottom: 6px;
     }
 
     @media (orientation: landscape) and (max-height: 500px) {
-      .wrap { flex-direction: row; gap: 48px; }
-      .left { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+      .wrap { flex-direction: row; gap: 48px; padding: 16px 24px; }
+      .left { gap: 14px; }
       .numpad { max-width: 300px; }
     }
   </style>
@@ -92,7 +110,7 @@
     <div class="left">
       <div class="logo">COCKPIT FIELD</div>
       <h1>Appairage de la tablette</h1>
-      <p class="subtitle">Saisis le code a 6 chiffres fourni par le PCOA.</p>
+      <p class="subtitle">Saisis le code a 6 chiffres fourni par le PC Organisation.</p>
       <div class="code-display" id="codeDisplay">
         <div class="code-digit"></div>
         <div class="code-digit"></div>
