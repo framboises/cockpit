@@ -95,6 +95,114 @@
     toast._t = setTimeout(function () { el.hidden = true; }, 2500);
   }
 
+  // ---------------------------------------------------------------------
+  // Session perdue (tablette revoquee/supprimee cote admin)
+  // Plutot que de naviguer brutalement vers /field/pair (qui declenche
+  // ERR_FAILED si le service worker n'a pas pu cacher la page), on affiche
+  // un overlay plein ecran. Toutes les requetes 401 passent par ici.
+  // ---------------------------------------------------------------------
+  var _sessionLost = false;
+  var _sessionLostPoll = null;
+
+  function stopAllPolling() {
+    try {
+      if (state.fichesTimer) { clearInterval(state.fichesTimer); state.fichesTimer = null; }
+      if (state.inboxTimer) { clearInterval(state.inboxTimer); state.inboxTimer = null; }
+      if (state.clockTimer) { clearInterval(state.clockTimer); state.clockTimer = null; }
+      if (state.crosshairTimer) { clearTimeout(state.crosshairTimer); state.crosshairTimer = null; }
+      if (state.watchId != null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(state.watchId);
+        state.watchId = null;
+      }
+    } catch (e) { /* noop */ }
+  }
+
+  function handleSessionLost() {
+    if (_sessionLost) return null;
+    _sessionLost = true;
+    stopAllPolling();
+
+    var overlay = document.createElement("div");
+    overlay.className = "field-session-lost";
+    overlay.id = "field-session-lost";
+
+    var box = document.createElement("div");
+    box.className = "field-session-lost-box";
+
+    var icon = document.createElement("div");
+    icon.className = "field-session-lost-icon material-symbols-outlined";
+    icon.textContent = "block";
+    box.appendChild(icon);
+
+    var title = document.createElement("div");
+    title.className = "field-session-lost-title";
+    title.textContent = "Session terminee";
+    box.appendChild(title);
+
+    var sub = document.createElement("div");
+    sub.className = "field-session-lost-sub";
+    sub.textContent = "Cette tablette n'est plus autorisee. Contactez le PC pour reactiver l'acces.";
+    box.appendChild(sub);
+
+    var status = document.createElement("div");
+    status.className = "field-session-lost-status";
+    status.id = "field-session-lost-status";
+    status.textContent = "Verification automatique...";
+    box.appendChild(status);
+
+    var actions = document.createElement("div");
+    actions.className = "field-session-lost-actions";
+
+    var btnRetry = document.createElement("button");
+    btnRetry.className = "btn-primary";
+    btnRetry.textContent = "Verifier maintenant";
+    btnRetry.addEventListener("click", function () { checkSessionRestored(true); });
+    actions.appendChild(btnRetry);
+
+    var btnRePair = document.createElement("button");
+    btnRePair.className = "btn-primary btn-cancel";
+    btnRePair.textContent = "Re-appairer la tablette";
+    btnRePair.addEventListener("click", function () {
+      // Navigation manuelle - ici l'utilisateur l'a explicitement demandee
+      // donc le ERR_FAILED eventuel est attendu / acceptable.
+      try { window.location.href = "/field/pair"; } catch (e) {}
+    });
+    actions.appendChild(btnRePair);
+
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    // Polling automatique pour reprendre la session des qu'elle est restauree.
+    _sessionLostPoll = setInterval(function () { checkSessionRestored(false); }, 6000);
+    // Premiere verification rapide
+    setTimeout(function () { checkSessionRestored(false); }, 1500);
+
+    return null;
+  }
+
+  function checkSessionRestored(manual) {
+    var status = document.getElementById("field-session-lost-status");
+    if (manual && status) status.textContent = "Verification...";
+    fetch("/field/denied/check", { headers: { "Accept": "application/json" }, cache: "no-store" })
+      .then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (d) {
+        if (d && d.status === "active") {
+          if (status) status.textContent = "Session restauree, rechargement...";
+          if (_sessionLostPoll) { clearInterval(_sessionLostPoll); _sessionLostPoll = null; }
+          // Reload doux : on recharge la page d'application qui repartira sur
+          // une session valide. Pas de ERR_FAILED car /field est cachee par
+          // le service worker.
+          setTimeout(function () { window.location.reload(); }, 600);
+        } else if (manual && status) {
+          status.textContent = "Toujours non autorisee.";
+        }
+      })
+      .catch(function () {
+        if (manual && status) status.textContent = "Reseau indisponible.";
+      });
+  }
+
   // ---- Mini modal confirm/prompt (remplace window.confirm/prompt) ----
   function fieldConfirm(message, opts) {
     opts = opts || {};
@@ -405,7 +513,7 @@
     }
     fetch("/field/resources/grid-ref", { headers: { "Accept": "application/json" } })
       .then(function (r) {
-        if (r.status === 401) { window.location.href = "/field/pair"; return null; }
+        if (r.status === 401) { return handleSessionLost(); }
         return r.json();
       })
       .then(function (data) {
@@ -824,7 +932,7 @@
     state.threePLoaded = true;
     fetch("/field/resources/3p", { headers: { "Accept": "application/json" } })
       .then(function (r) {
-        if (r.status === 401) { window.location.href = "/field/pair"; return null; }
+        if (r.status === 401) { return handleSessionLost(); }
         return r.json();
       })
       .then(function (data) {
@@ -864,7 +972,7 @@
   function loadPoiCategories() {
     fetch("/field/resources/gm-categories", { headers: { "Accept": "application/json" } })
       .then(function (r) {
-        if (r.status === 401) { window.location.href = "/field/pair"; return null; }
+        if (r.status === 401) { return handleSessionLost(); }
         return r.json();
       })
       .then(function (data) {
@@ -1075,7 +1183,7 @@
   function pollFiches() {
     fetch("/field/my-fiches", { headers: { "Accept": "application/json" } })
       .then(function (r) {
-        if (r.status === 401) { window.location.href = "/field/pair"; return null; }
+        if (r.status === 401) { return handleSessionLost(); }
         return r.json();
       })
       .then(function (data) {
@@ -1265,10 +1373,7 @@
   function pollInbox() {
     fetch("/field/inbox", { headers: { "Accept": "application/json" } })
       .then(function (r) {
-        if (r.status === 401) {
-          window.location.href = "/field/pair";
-          return null;
-        }
+        if (r.status === 401) { return handleSessionLost(); }
         return r.json();
       })
       .then(function (data) {

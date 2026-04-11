@@ -683,24 +683,30 @@ def _label_conflict(db, name, event, year, exclude_device_id=None):
 @field_bp.route("/field/admin/beacon-groups", methods=["GET"])
 @admin_required
 def field_admin_beacon_groups():
-    """Retourne la liste des beacon_groups pour remplir un dropdown admin."""
+    """Retourne TOUS les beacon_groups (meme inactifs) pour remplir un dropdown
+    admin. Le drapeau `disabled` permet a l'UI de marquer visuellement les
+    groupes desactives, sans les masquer (sinon l'admin ne comprend pas
+    pourquoi son groupe n'apparait pas)."""
     db = _get_mongo_db()
     config = db["anoloc_config"].find_one({"_id": "global"}) or {}
     groups = []
     for g in config.get("beacon_groups", []) or []:
-        # On garde tout sauf si explicitement desactive (enabled == False)
-        if g.get("enabled") is False:
-            continue
-        if not g.get("id"):
+        gid = g.get("id")
+        if not gid:
             continue
         groups.append({
-            "id": g.get("id"),
-            "label": g.get("label") or g.get("id"),
+            "id": gid,
+            "label": g.get("label") or gid,
             "color": g.get("color") or "#6366f1",
             "icon": g.get("icon") or "location_on",
             "pco_category": g.get("pco_category"),
+            "disabled": g.get("enabled") is False,
         })
-    return jsonify({"groups": groups})
+    resp = jsonify({"groups": groups})
+    # Eviter le cache HTTP cote navigateur (sinon une mise a jour des groupes
+    # n'apparait pas tant qu'on n'a pas hard-refresh).
+    resp.headers["Cache-Control"] = "no-store, max-age=0"
+    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -744,13 +750,13 @@ def field_admin_pairings_create():
 
     db = _get_mongo_db()
 
-    # Le beacon_group doit exister et etre actif
+    # Le beacon_group doit exister (l'admin peut associer une tablette a un
+    # groupe meme inactif - le drapeau "enabled" cote anoloc concerne
+    # l'affichage carte/widgets, pas l'eligibilite des tablettes).
     config = db["anoloc_config"].find_one({"_id": "global"}) or {}
     grp = next((g for g in config.get("beacon_groups", []) or [] if g.get("id") == beacon_group_id), None)
     if not grp:
         return jsonify({"ok": False, "error": "unknown_beacon_group"}), 400
-    if grp.get("enabled") is False:
-        return jsonify({"ok": False, "error": "beacon_group_disabled"}), 400
 
     # Le nom ne doit pas collisionner avec une balise anoloc ou une autre tablette
     if _label_conflict(db, name, event, year):

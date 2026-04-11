@@ -174,7 +174,9 @@
   // Beacon groups (dropdown)
   // ------------------------------------------------------------------
   function loadBeaconGroups() {
-    apiGet("/field/admin/beacon-groups")
+    // Cache-busting via timestamp pour eviter qu'un proxy/navigateur ne nous
+    // serve une reponse perimee.
+    apiGet("/field/admin/beacon-groups?_=" + Date.now())
       .then(function (data) {
         state.beaconGroups = (data && data.groups) || [];
         renderBeaconGroupSelect();
@@ -190,10 +192,20 @@
       opt0.value = "";
       opt0.textContent = placeholder;
       sel.appendChild(opt0);
+      if (!state.beaconGroups.length) {
+        var optEmpty = document.createElement("option");
+        optEmpty.value = "";
+        optEmpty.disabled = true;
+        optEmpty.textContent = "(aucun groupe configure)";
+        sel.appendChild(optEmpty);
+        return;
+      }
       state.beaconGroups.forEach(function (g) {
         var opt = document.createElement("option");
         opt.value = g.id;
-        opt.textContent = g.label + (g.pco_category ? " (" + g.pco_category + ")" : "");
+        var label = g.label + (g.pco_category ? " (" + g.pco_category + ")" : "");
+        if (g.disabled) label += " [inactif]";
+        opt.textContent = label;
         sel.appendChild(opt);
       });
     }

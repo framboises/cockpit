@@ -7,15 +7,19 @@
      - API (/field/*) : network-first, fallback silencieux offline
    ===================================================================== */
 
-const SW_VERSION = "field-sw-v1";
+const SW_VERSION = "field-sw-v2";
 const APP_SHELL_CACHE = "field-shell-" + SW_VERSION;
 const TILE_CACHE = "field-tiles-" + SW_VERSION;
 const API_CACHE = "field-api-" + SW_VERSION;
 
 const TILE_CACHE_MAX = 600; // ~3 Mo a ~5 Ko/tuile
+// On NE met PAS /field/pair ni /field/denied dans le shell : ces routes
+// repondent par redirect quand la tablette est paire (ou non revoquee), donc
+// cache.add() echoue silencieusement et le navigateur se retrouve avec une
+// requete non gerable -> ERR_FAILED. Pour les navigations, on utilise
+// network-first avec fallback cache (voir handler fetch ci-dessous).
 const APP_SHELL_URLS = [
   "/field",
-  "/field/pair",
   "/static/css/field.css",
   "/static/js/field.js",
   "/static/img/field-icon.svg",
@@ -62,8 +66,13 @@ function isApiRequest(url) {
 }
 
 function isShellRequest(url, request) {
-  if (request.mode === "navigate") return true;
+  // Les navigations sont traitees a part (network-first dans le handler).
   return APP_SHELL_URLS.some(function (u) { return url.indexOf(u) !== -1; });
+}
+
+function isNavigationRequest(request) {
+  return request.mode === "navigate"
+      || (request.method === "GET" && (request.headers.get("accept") || "").indexOf("text/html") !== -1);
 }
 
 async function trimCache(cacheName, max) {
@@ -129,7 +138,43 @@ self.addEventListener("fetch", function (event) {
     return;
   }
 
-  // App shell : cache-first
+  // Navigations (HTML) : network-first avec fallback cache.
+  // C'est crucial pour /field, /field/pair, /field/denied dont la reponse
+  // depend de l'etat de la session - on ne peut pas servir une reponse
+  // potentiellement perimee.
+  if (isNavigationRequest(req)) {
+    event.respondWith(
+      fetch(req).then(function (resp) {
+        // Cache la reponse seulement si succes plein 200 et meme origin.
+        if (resp && resp.status === 200 && resp.type === "basic") {
+          const clone = resp.clone();
+          caches.open(APP_SHELL_CACHE).then(function (cache) { cache.put(req, clone); });
+        }
+        return resp;
+      }).catch(function () {
+        // Hors-ligne : on tente le cache exact puis /field, puis une page
+        // synthetique pour ne JAMAIS renvoyer undefined (sinon ERR_FAILED).
+        return caches.match(req).then(function (m) {
+          if (m) return m;
+          return caches.match("/field").then(function (m2) {
+            if (m2) return m2;
+            return new Response(
+              "<!doctype html><meta charset=\"utf-8\"><title>Hors ligne</title>"
+              + "<body style=\"font-family:sans-serif;background:#0f172a;color:#e2e8f0;"
+              + "display:flex;align-items:center;justify-content:center;height:100vh;"
+              + "margin:0;text-align:center;padding:24px\">"
+              + "<div><h1 style=\"color:#ef4444\">Hors ligne</h1>"
+              + "<p>Reconnectez-vous au reseau pour continuer.</p></div></body>",
+              { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } }
+            );
+          });
+        });
+      })
+    );
+    return;
+  }
+
+  // App shell statique (CSS/JS/images) : cache-first
   if (isShellRequest(url, req)) {
     event.respondWith(
       caches.match(req).then(function (cached) {
@@ -139,10 +184,7 @@ self.addEventListener("fetch", function (event) {
             caches.open(APP_SHELL_CACHE).then(function (cache) { cache.put(req, clone); });
           }
           return resp;
-        }).catch(function () {
-          // Pour une navigation offline, renvoyer la home
-          if (req.mode === "navigate") return caches.match("/field");
-        });
+        }).catch(function () { /* ignore */ });
       })
     );
     return;

@@ -690,3 +690,85 @@ body {
     line-height: 48px !important; font-size: 24px !important;
   }
 }
+
+/* =====================================================================
+   SESSION LOST OVERLAY (tablette revoquee/supprimee cote admin)
+   ===================================================================== */
+.field-session-lost {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(15, 23, 42, 0.96);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: field-session-lost-fade 0.25s ease-out;
+}
+@keyframes field-session-lost-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.field-session-lost-box {
+  background: #1e293b;
+  border: 1px solid #ef4444;
+  border-radius: 18px;
+  padding: 32px 28px 24px;
+  max-width: 420px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(239, 68, 68, 0.25);
+}
+.field-session-lost-icon {
+  font-size: 72px !important;
+  color: #ef4444;
+  display: block;
+  margin: 0 auto 14px;
+  animation: field-session-lost-pulse 1.6s ease-in-out infinite;
+}
+@keyframes field-session-lost-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.08); opacity: 0.7; }
+}
+.field-session-lost-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: #f8fafc;
+  margin-bottom: 8px;
+  letter-spacing: 0.5px;
+}
+.field-session-lost-sub {
+  font-size: 14px;
+  color: #cbd5e1;
+  line-height: 1.5;
+  margin-bottom: 18px;
+}
+.field-session-lost-status {
+  font-size: 12px;
+  color: #94a3b8;
+  font-style: italic;
+  margin-bottom: 18px;
+  min-height: 16px;
+}
+.field-session-lost-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.field-session-lost-actions .btn-primary {
+  width: 100%;
+  padding: 14px 18px;
+  border-radius: 12px;
+  border: none;
+  background: #3b82f6;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.field-session-lost-actions .btn-primary.btn-cancel {
+  background: transparent;
+  border: 1px solid #475569;
+  color: #cbd5e1;
+}
+.field-session-lost-actions .btn-primary:active { transform: scale(0.98); }
