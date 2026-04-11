@@ -241,6 +241,42 @@ body {
   cursor: pointer; font-family: inherit;
 }
 .btn-primary:active { background: #1d4ed8; }
+.btn-primary[hidden] { display: none !important; }
+
+/* Accents par type de message */
+.field-modal.type-alert .field-modal-box { border-color: #dc2626; }
+.field-modal.type-alert .field-modal-header {
+  background: linear-gradient(90deg, rgba(220,38,38,0.35), transparent);
+}
+.field-modal.type-route .field-modal-box { border-color: #0ea5e9; }
+.field-modal.type-route .field-modal-header {
+  background: linear-gradient(90deg, rgba(14,165,233,0.35), transparent);
+}
+.field-modal.type-instruction .field-modal-box { border-color: #f59e0b; }
+.field-modal.priority-high .field-modal-box {
+  box-shadow: 0 0 0 3px rgba(220,38,38,0.5);
+}
+
+/* Marker destination itineraire */
+.route-dest-marker {
+  width: 36px; height: 36px;
+  background: #dc2626;
+  border: 2px solid #fff;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+  animation: route-dest-pulse 1.8s infinite;
+}
+.route-dest-marker .material-symbols-outlined {
+  color: #fff;
+  font-size: 20px;
+  transform: rotate(45deg);
+}
+@keyframes route-dest-pulse {
+  0%, 100% { box-shadow: 0 4px 10px rgba(0,0,0,0.4), 0 0 0 0 rgba(220,38,38,0.6); }
+  50%      { box-shadow: 0 4px 10px rgba(0,0,0,0.4), 0 0 0 12px rgba(220,38,38,0); }
+}
 .icon-btn {
   background: transparent;
   border: none;

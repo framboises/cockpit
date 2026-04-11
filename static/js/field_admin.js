@@ -131,6 +131,8 @@
     if (msgSubmit) msgSubmit.addEventListener("click", submitMessage);
     var msgTargetMode = $("#field-msg-target-mode");
     if (msgTargetMode) msgTargetMode.addEventListener("change", updateMsgTargetRows);
+    var msgType = $("#field-msg-type");
+    if (msgType) msgType.addEventListener("change", updateMsgTypeRows);
 
     // Modal history
     var histModal = $("#field-msg-history-modal");
@@ -680,6 +682,7 @@
       if (modeSel2) modeSel2.value = "all";
     }
     updateMsgTargetRows();
+    updateMsgTypeRows();
 
     var modal = $("#field-msg-modal");
     if (modal) modal.hidden = false;
@@ -696,6 +699,24 @@
     var devRow = $("#field-msg-devices-row");
     if (groupRow) groupRow.hidden = (mode !== "beacon_group");
     if (devRow) devRow.hidden = (mode !== "devices");
+  }
+
+  function updateMsgTypeRows() {
+    var type = ($("#field-msg-type") || {}).value || "info";
+    var routeRow = $("#field-msg-route-row");
+    if (routeRow) routeRow.hidden = (type !== "route");
+  }
+
+  function parseLatLng(raw) {
+    if (!raw) return null;
+    // Accepte "lat, lng", "lat lng", "lat;lng"
+    var parts = String(raw).trim().split(/[\s,;]+/);
+    if (parts.length < 2) return null;
+    var lat = parseFloat(parts[0]);
+    var lng = parseFloat(parts[1]);
+    if (isNaN(lat) || isNaN(lng)) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    return [lat, lng];
   }
 
   function submitMessage() {
@@ -738,6 +759,18 @@
       body: body.trim(),
       priority: priority,
     };
+
+    if (type === "route") {
+      var dest = ($("#field-msg-destination") || {}).value || "";
+      var parsed = parseLatLng(dest);
+      if (!parsed) {
+        _toast("error", "Destination invalide. Format attendu : lat, lng");
+        return;
+      }
+      payload.payload = { waypoints: [parsed] };
+      if (!payload.title) payload.title = "Itineraire";
+      if (!payload.body) payload.body = "Destination : " + parsed[0].toFixed(5) + ", " + parsed[1].toFixed(5);
+    }
 
     apiPost("/field/admin/send", payload)
       .then(function (res) {

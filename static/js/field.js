@@ -31,6 +31,8 @@
     threePOn: true,
     threePLayer: null,
     threePLoaded: false,
+    routeLayer: null,
+    routeDestination: null,  // [lat, lng]
     inbox: [],
     seenIds: new Set(),
     watchId: null,
@@ -387,6 +389,86 @@
   }
 
   // ---------------------------------------------------------------------
+  // Itineraires
+  // ---------------------------------------------------------------------
+  function setRouteDestination(latlng) {
+    if (state.routeLayer) {
+      state.map.removeLayer(state.routeLayer);
+      state.routeLayer = null;
+    }
+    state.routeDestination = latlng;
+    if (!latlng) return;
+
+    var group = L.layerGroup();
+    // Destination : gros marker rouge
+    var destIcon = L.divIcon({
+      className: "",
+      html: "<div class='route-dest-marker'><span class='material-symbols-outlined'>place</span></div>",
+      iconSize: [36, 36],
+      iconAnchor: [18, 34],
+    });
+    L.marker(latlng, { icon: destIcon }).addTo(group);
+
+    // Trait pointille depuis "moi" si dispo
+    if (state.meMarker) {
+      var mePos = state.meMarker.getLatLng();
+      L.polyline(
+        [[mePos.lat, mePos.lng], latlng],
+        { color: "#dc2626", weight: 3, opacity: 0.7, dashArray: "6 8", interactive: false }
+      ).addTo(group);
+    }
+    group.addTo(state.map);
+    state.routeLayer = group;
+
+    // Ajuste le zoom pour englober "moi" + destination si possible
+    try {
+      if (state.meMarker) {
+        var b = L.latLngBounds([state.meMarker.getLatLng(), latlng]);
+        state.map.fitBounds(b, { padding: [80, 80], maxZoom: 18 });
+        state.followMe = false;
+      } else {
+        state.map.setView(latlng, 17);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function openInGoogleMaps(latlng) {
+    if (!latlng || latlng.length < 2) return;
+    var lat = latlng[0], lng = latlng[1];
+    // Intent Android natif : ouvre directement Google Maps en mode navigation
+    var intent = "google.navigation:q=" + lat + "," + lng;
+    var webFallback = "https://www.google.com/maps/dir/?api=1&destination=" + lat + "," + lng + "&travelmode=driving";
+
+    // Tenter l'intent Android, retomber sur le web
+    var opened = false;
+    try {
+      // Sur Android Chrome, window.location vers google.navigation: ouvre Maps.
+      // Sur iOS/Desktop cela echouera silencieusement -> on bascule sur l'URL web.
+      window.location.href = intent;
+      opened = true;
+    } catch (e) {
+      opened = false;
+    }
+    // Retomber au web apres un petit delai si l'intent n'a rien fait
+    setTimeout(function () {
+      if (document.hasFocus && document.hasFocus()) {
+        window.open(webFallback, "_blank");
+      }
+    }, 800);
+  }
+
+  function handleRouteMessage(m) {
+    var wp = (m.payload && m.payload.waypoints) || [];
+    if (!wp.length) return;
+    var first = wp[0];
+    if (!Array.isArray(first) || first.length < 2) return;
+    var lat = parseFloat(first[0]);
+    var lng = parseFloat(first[1]);
+    if (isNaN(lat) || isNaN(lng)) return;
+    setRouteDestination([lat, lng]);
+  }
+
+  // ---------------------------------------------------------------------
   // Inbox
   // ---------------------------------------------------------------------
   function startInboxPoll() {
@@ -423,7 +505,11 @@
     // Afficher la premiere priorite haute, sinon un toast
     var high = newOnes.find(function (m) { return m.priority === "high"; });
     var first = high || newOnes[0];
-    newOnes.forEach(function (m) { state.seenIds.add(m.id); });
+    newOnes.forEach(function (m) {
+      state.seenIds.add(m.id);
+      // Les itineraires sont dessines sur la carte meme sans ouvrir le modal
+      if (m.type === "route") handleRouteMessage(m);
+    });
     showMessageModal(first);
     if (newOnes.length > 1) {
       toast("+" + (newOnes.length - 1) + " autre(s) message(s)");
@@ -479,9 +565,32 @@
     var title = $("msg-modal-title");
     var body = $("msg-modal-body");
     var ack = $("msg-modal-ack");
+    var routeBtn = $("msg-modal-route");
     if (!modal) return;
     title.textContent = m.title || "Message";
     body.textContent = m.body || "";
+
+    // Accent visuel selon type/priority
+    modal.classList.remove("priority-high", "type-alert", "type-route", "type-instruction");
+    if (m.priority === "high") modal.classList.add("priority-high");
+    if (m.type === "alert") modal.classList.add("type-alert");
+    if (m.type === "route") modal.classList.add("type-route");
+    if (m.type === "instruction") modal.classList.add("type-instruction");
+
+    // Bouton "Demarrer l'itineraire" pour les messages de type route
+    var waypoints = (m.payload && m.payload.waypoints) || null;
+    var hasRoute = (m.type === "route" && waypoints && waypoints.length);
+    if (routeBtn) {
+      routeBtn.hidden = !hasRoute;
+      if (hasRoute) {
+        routeBtn.onclick = function () {
+          openInGoogleMaps(waypoints[0]);
+        };
+      } else {
+        routeBtn.onclick = null;
+      }
+    }
+
     modal.hidden = false;
     ack.onclick = function () {
       fetch("/field/ack/" + encodeURIComponent(m.id), { method: "POST" })
@@ -542,5 +651,7 @@
     pollInbox: pollInbox,
     toggleGrid: toggleGrid,
     load3P: load3P,
+    setRouteDestination: setRouteDestination,
+    openInGoogleMaps: openInGoogleMaps,
   };
 })();

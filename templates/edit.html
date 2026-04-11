@@ -852,8 +852,18 @@
               <option value="info">Info</option>
               <option value="instruction">Instruction</option>
               <option value="alert">Alerte (rouge)</option>
+              <option value="route">Itineraire (Google Maps)</option>
             </select>
           </label>
+        </div>
+        <div class="form-row" id="field-msg-route-row" hidden>
+          <label>Destination (lat, lng)
+            <input name="destination" id="field-msg-destination" class="form-input"
+                   placeholder="ex. 47.9538, 0.2267" />
+          </label>
+          <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
+            La tablette pourra ouvrir cette destination dans Google Maps d'un seul geste.
+          </p>
         </div>
         <div class="form-row">
           <label>Priorite
