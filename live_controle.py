@@ -31,8 +31,9 @@ HSH_IP = "192.168.2.10"
 HSH_PORT = 5205
 TELEGRAM_ID = (1234).to_bytes(4, "big")
 
-MONGO_URI = "mongodb://localhost:27017/"
-DB_NAME = "titan"
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+_TITAN_ENV = os.getenv("TITAN_ENV", "dev").strip().lower()
+DB_NAME = "titan" if _TITAN_ENV in {"prod", "production"} else "titan_dev"
 
 CONNECT_TIMEOUT = 5
 READ_TIMEOUT_COUNTER = 5

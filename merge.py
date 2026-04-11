@@ -994,6 +994,7 @@ def _prompt_event() -> str:
 
 
 if __name__ == "__main__":
+    import os as _os
     import pymongo
 
     # Config logging standalone
@@ -1004,8 +1005,10 @@ if __name__ == "__main__":
         format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    client = pymongo.MongoClient("mongodb://localhost:27017")
-    db = client["titan"]
+    _titan_env = _os.getenv("TITAN_ENV", "dev").strip().lower()
+    _db_name = "titan" if _titan_env in {"prod", "production"} else "titan_dev"
+    client = pymongo.MongoClient(_os.getenv("MONGO_URI", "mongodb://localhost:27017"))
+    db = client[_db_name]
 
     try:
         year_value = _prompt_year()

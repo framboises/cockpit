@@ -24,7 +24,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(SCRIPT_DIR, "pcorg_sync.log")
 LOG_RETENTION_DAYS = 3
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
-DB_NAME = "titan"
+_TITAN_ENV = os.getenv("TITAN_ENV", "dev").strip().lower()
+DB_NAME = "titan" if _TITAN_ENV in {"prod", "production"} else "titan_dev"
 CONTROL_ID = "pcorg_sync_control"
 
 logging.basicConfig(

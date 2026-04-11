@@ -5,10 +5,13 @@ Reproduit le comportement actuel de merge.py pour les categories existantes.
 Usage : python seed_merge_config.py
 """
 
+import os
 import pymongo
 
-client = pymongo.MongoClient("mongodb://localhost:27017")
-db = client["titan"]
+_TITAN_ENV = os.getenv("TITAN_ENV", "dev").strip().lower()
+_DB_NAME = "titan" if _TITAN_ENV in {"prod", "production"} else "titan_dev"
+client = pymongo.MongoClient(os.getenv("MONGO_URI", "mongodb://localhost:27017"))
+db = client[_DB_NAME]
 
 CONFIGS = [
     {

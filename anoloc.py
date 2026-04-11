@@ -33,6 +33,8 @@ _ROUTE_BLOCK_MAP = {
 }
 
 _TITAN_ENV = os.getenv("TITAN_ENV", "dev")
+_IS_PROD = _TITAN_ENV.strip().lower() in {"prod", "production"}
+_DB_NAME = "titan" if _IS_PROD else "titan_dev"
 _CODING = os.getenv("CODING", "").lower() == "true"
 _DEBUG_LOG = _TITAN_ENV == "dev" or _CODING
 logger = logging.getLogger("anoloc")
@@ -47,7 +49,7 @@ def _get_mongo_db():
     global _mongo_client, _mongo_db
     if _mongo_db is None:
         _mongo_client = MongoClient(MONGO_URI)
-        _mongo_db = _mongo_client["titan"]
+        _mongo_db = _mongo_client[_DB_NAME]
     return _mongo_db
 
 
