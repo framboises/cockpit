@@ -251,6 +251,49 @@ def _iso(value):
 # Routes tablette : UI
 # ---------------------------------------------------------------------------
 
+@field_bp.route("/field/manifest.webmanifest", methods=["GET"])
+def field_manifest():
+    """PWA manifest. Pas d'auth : le navigateur le charge avant le login."""
+    manifest = {
+        "name": "COCKPIT Field",
+        "short_name": "Field",
+        "description": "Application terrain pour tablettes patrouille",
+        "start_url": "/field",
+        "scope": "/field",
+        "display": "standalone",
+        "orientation": "any",
+        "background_color": "#0f172a",
+        "theme_color": "#0f172a",
+        "lang": "fr-FR",
+        "icons": [
+            {
+                "src": "/static/img/field-icon.svg",
+                "sizes": "192x192 512x512 any",
+                "type": "image/svg+xml",
+                "purpose": "any maskable",
+            },
+        ],
+    }
+    resp = jsonify(manifest)
+    resp.headers["Content-Type"] = "application/manifest+json"
+    return resp
+
+
+@field_bp.route("/field/sw.js", methods=["GET"])
+def field_service_worker():
+    """Service worker : sert le fichier statique avec le bon scope. On pourrait
+    pointer /static/js/field-sw.js directement, mais pour garder Service-Worker-Allowed
+    = /field on passe par la route (sinon le navigateur restreint le scope au path
+    du fichier statique)."""
+    from flask import current_app, send_from_directory
+    static_dir = os.path.join(current_app.root_path, "static", "js")
+    resp = make_response(send_from_directory(static_dir, "field-sw.js"))
+    resp.headers["Content-Type"] = "application/javascript"
+    resp.headers["Service-Worker-Allowed"] = "/field"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 @field_bp.route("/field", methods=["GET"])
 def field_index():
     """Page principale de l'app terrain. Redirige vers /field/pair si pas de token."""

@@ -211,18 +211,27 @@
     if (elapsed < POSITION_PUSH_MS && moved < POSITION_MIN_MOVE_M) return;
     state.lastPushedAt = now;
     state.lastPushedPos = latlng;
+    var body = {
+      lat: latlng[0],
+      lng: latlng[1],
+      accuracy: pos.coords.accuracy,
+      speed: pos.coords.speed,
+      heading: pos.coords.heading,
+      battery: state.batteryPct || null,
+      ts: now,
+    };
+    if (!navigator.onLine) {
+      bufferPosition(body);
+      return;
+    }
     fetch("/field/position", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        lat: latlng[0],
-        lng: latlng[1],
-        accuracy: pos.coords.accuracy,
-        speed: pos.coords.speed,
-        heading: pos.coords.heading,
-        battery: state.batteryPct || null,
-      }),
-    }).catch(function () { /* ignore, on buffer plus tard */ });
+      body: JSON.stringify(body),
+    }).catch(function () {
+      // Si l'envoi echoue, on stocke pour plus tard
+      bufferPosition(body);
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -819,9 +828,113 @@
     startFichesPoll();
     // Ressources carte : 3P visible par defaut, carroyage sur demande
     load3P();
+    // PWA : service worker, wake lock, buffer de positions
+    registerServiceWorker();
+    acquireWakeLock();
+    initPositionBuffer();
 
     // Empecher le zoom double-tap / pinch natif
     document.addEventListener("gesturestart", function (e) { e.preventDefault(); });
+
+    // Re-acquerir le wake lock quand l'ecran revient
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") acquireWakeLock();
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // PWA : service worker, wake lock, IndexedDB
+  // ---------------------------------------------------------------------
+  function registerServiceWorker() {
+    if (!("serviceWorker" in navigator)) return;
+    try {
+      navigator.serviceWorker.register("/field/sw.js", { scope: "/field" })
+        .then(function (reg) {
+          // Forcer la mise a jour si un nouveau SW est dispo
+          if (reg && reg.update) reg.update();
+        })
+        .catch(function (err) {
+          console.warn("[field] SW registration failed:", err);
+        });
+    } catch (e) { /* ignore */ }
+  }
+
+  var _wakeLock = null;
+  function acquireWakeLock() {
+    if (!("wakeLock" in navigator)) return;
+    if (_wakeLock) return;
+    try {
+      navigator.wakeLock.request("screen").then(function (lock) {
+        _wakeLock = lock;
+        lock.addEventListener("release", function () { _wakeLock = null; });
+      }).catch(function () { _wakeLock = null; });
+    } catch (e) { /* ignore */ }
+  }
+
+  // ---------------------------------------------------------------------
+  // IndexedDB : buffer des positions GPS quand offline
+  // ---------------------------------------------------------------------
+  var IDB_NAME = "cockpit-field";
+  var IDB_STORE = "position-buffer";
+  var _idb = null;
+
+  function openIdb() {
+    if (_idb) return Promise.resolve(_idb);
+    return new Promise(function (resolve, reject) {
+      if (!("indexedDB" in window)) { reject("no_idb"); return; }
+      var req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = function () {
+        var db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) {
+          db.createObjectStore(IDB_STORE, { keyPath: "id", autoIncrement: true });
+        }
+      };
+      req.onsuccess = function () { _idb = req.result; resolve(_idb); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+
+  function bufferPosition(pos) {
+    openIdb().then(function (db) {
+      var tx = db.transaction(IDB_STORE, "readwrite");
+      tx.objectStore(IDB_STORE).add({
+        lat: pos.lat, lng: pos.lng, accuracy: pos.accuracy,
+        speed: pos.speed, heading: pos.heading, battery: pos.battery,
+        ts: pos.ts || Date.now(),
+      });
+    }).catch(function () { /* ignore */ });
+  }
+
+  function flushPositionBuffer() {
+    if (!navigator.onLine) return;
+    openIdb().then(function (db) {
+      var tx = db.transaction(IDB_STORE, "readwrite");
+      var store = tx.objectStore(IDB_STORE);
+      var req = store.getAll();
+      req.onsuccess = function () {
+        var items = req.result || [];
+        if (items.length === 0) return;
+        // Envoyer le dernier point seulement (optimisation : on ne rejoue
+        // pas tout l'historique, on veut juste la position a jour)
+        var last = items[items.length - 1];
+        fetch("/field/position", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(last),
+        }).then(function (r) {
+          if (r && r.ok) {
+            var txDel = db.transaction(IDB_STORE, "readwrite");
+            txDel.objectStore(IDB_STORE).clear();
+          }
+        }).catch(function () { /* retry au prochain online */ });
+      };
+    }).catch(function () { /* ignore */ });
+  }
+
+  function initPositionBuffer() {
+    window.addEventListener("online", flushPositionBuffer);
+    // Flush periodique au cas ou
+    setInterval(flushPositionBuffer, 30000);
   }
 
   if (document.readyState === "loading") {

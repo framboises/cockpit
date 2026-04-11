@@ -4,11 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
   <meta name="theme-color" content="#0f172a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Field">
   <title>COCKPIT Field</title>
 
+  <link rel="manifest" href="/field/manifest.webmanifest">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/field.css') }}">
-  <link rel="icon" href="data:,">
+  <link rel="icon" href="/static/img/field-icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/img/field-icon.svg">
 </head>
 <body>
   <!-- BARRE SUPERIEURE -->
