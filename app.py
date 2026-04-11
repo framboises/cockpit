@@ -53,14 +53,14 @@ BASE_URL = DEV_URL if DEV_MODE else PROD_URL
 ################################################################################
 
 app = Flask(__name__, template_folder='templates')
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'HacB6vFEPpU3M04zMIIcuNtebrAvRME9T2vyqcYjGrQ')
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'CHANGE_ME_IN_DEV')
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SECURE=not DEV_MODE,
     SESSION_COOKIE_SAMESITE="Lax",
 )
 
-JWT_SECRET = os.getenv('JWT_SECRET', 'qXyKGSrVz2wVNhOep4tALcRzCzbkgaVFVfNqtKJk0YY')
+JWT_SECRET = os.getenv('JWT_SECRET', 'CHANGE_ME_IN_DEV')
 JWT_ALGORITHM = 'HS256'
 
 if IS_PROD and CODING:
@@ -81,17 +81,17 @@ def handle_csrf_error(e):
     return e.get_body(), 400
 
 # Validation stricte pour la clé secrète en production
-if not DEV_MODE and app.config['SECRET_KEY'] == 'HacB6vFEPpU3M04zMIIcuNtebrAvRME9T2vyqcYjGrQ':
-    raise ValueError("SECRET_KEY must be set securely in production!")
-if not DEV_MODE and JWT_SECRET == 'qXyKGSrVz2wVNhOep4tALcRzCzbkgaVFVfNqtKJk0YY':
-    raise ValueError("JWT_SECRET must be set securely in production!")
+if not DEV_MODE and not os.getenv('SECRET_KEY'):
+    raise ValueError("SECRET_KEY must be set via environment variable in production!")
+if not DEV_MODE and not os.getenv('JWT_SECRET'):
+    raise ValueError("JWT_SECRET must be set via environment variable in production!")
 
 # Connexion à MongoDB
 MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
 client = MongoClient(MONGO_URI)
 
 # Sélection dynamique de la base de données
-db_name = 'titan' if DEV_MODE else 'titan'
+db_name = 'titan_dev' if DEV_MODE else 'titan'
 db = client[db_name]
 
 CORS(app)  # Activer CORS pour toutes les routes
