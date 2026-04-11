@@ -6,3 +6,4 @@ static/css/.DS_Store
 static/js/.DS_Store
 static/ressources/.DS_Store
 .claude/
+firebase-service-account.json
