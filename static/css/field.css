@@ -257,6 +257,32 @@ body {
   box-shadow: 0 0 0 3px rgba(220,38,38,0.5);
 }
 
+/* Marker fiche PCORG assignee */
+.fiche-marker {
+  width: 32px; height: 38px;
+  background: #dc2626;
+  border: 2px solid #fff;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+  animation: fiche-blink 1.2s infinite;
+}
+.fiche-marker .material-symbols-outlined {
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  transform: rotate(45deg);
+}
+.fiche-marker.urgency-EU { background: #7f1d1d; }
+.fiche-marker.urgency-UA { background: #dc2626; }
+.fiche-marker.urgency-UR { background: #ea580c; }
+.fiche-marker.urgency-IMP { background: #6366f1; animation: none; }
+@keyframes fiche-blink {
+  0%, 100% { opacity: 1; box-shadow: 0 4px 8px rgba(0,0,0,0.5), 0 0 0 0 rgba(220,38,38,0.7); }
+  50%      { opacity: 0.85; box-shadow: 0 4px 8px rgba(0,0,0,0.5), 0 0 0 10px rgba(220,38,38,0); }
+}
+
 /* Marker destination itineraire */
 .route-dest-marker {
   width: 36px; height: 36px;

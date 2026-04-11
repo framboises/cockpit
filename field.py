@@ -1086,6 +1086,197 @@ def field_resources_gm_collection(collection_name):
     return jsonify({"features": features})
 
 
+@field_bp.route("/field/my-fiches", methods=["GET"])
+@field_token_required
+def field_my_fiches():
+    """Retourne les fiches PCORG assignees a la tablette courante.
+    Match : event + year + content_category.patrouille == device.name."""
+    device = request.device
+    event = device.get("event")
+    year = device.get("year")
+    name = device.get("name")
+    if not event or not year or not name:
+        return jsonify({"open": [], "closed": []})
+
+    db = _get_mongo_db()
+
+    # Le champ year en base est un int dans la collection pcorg
+    try:
+        year_val = int(year)
+    except (TypeError, ValueError):
+        year_val = year
+
+    base_query = {
+        "event": event,
+        "year": year_val,
+        "content_category.patrouille": name,
+        "category": {"$regex": "^PCO"},
+    }
+
+    # Ouvertes : status_code != 10 et (close_ts null ou absent)
+    open_query = dict(base_query)
+    open_query["$or"] = [
+        {"status_code": {"$ne": 10}},
+        {"close_ts": None},
+        {"close_ts": {"$exists": False}},
+    ]
+    closed_query = dict(base_query)
+    closed_query["status_code"] = 10
+
+    def pub(f):
+        gps = f.get("gps") or {}
+        coords = gps.get("coordinates") if isinstance(gps, dict) else None
+        lng = lat = None
+        if isinstance(coords, list) and len(coords) >= 2:
+            try:
+                lng = float(coords[0])
+                lat = float(coords[1])
+            except (TypeError, ValueError):
+                lng = lat = None
+        return {
+            "id": str(f.get("_id")),
+            "category": f.get("category"),
+            "text": f.get("text") or f.get("text_full"),
+            "comment": f.get("comment") or "",
+            "niveau_urgence": f.get("niveau_urgence"),
+            "ts": _iso(f.get("ts")),
+            "close_ts": _iso(f.get("close_ts")),
+            "operator": f.get("operator"),
+            "area": (f.get("area") or {}).get("desc") if isinstance(f.get("area"), dict) else None,
+            "content_category": f.get("content_category") or {},
+            "status_code": f.get("status_code"),
+            "lat": lat,
+            "lng": lng,
+        }
+
+    open_list = [pub(f) for f in db["pcorg"].find(open_query).sort("ts", -1).limit(200)]
+    closed_list = [pub(f) for f in db["pcorg"].find(closed_query).sort("close_ts", -1).limit(50)]
+    return jsonify({
+        "open": open_list,
+        "closed": closed_list,
+        "device_name": name,
+        "now": _iso(_now()),
+    })
+
+
+@field_bp.route("/field/my-fiches/<fiche_id>/comment", methods=["POST"])
+@field_token_required
+def field_my_fiche_comment(fiche_id):
+    """Ajoute un commentaire sur une fiche PCORG assignee a la tablette.
+    L'auteur est le nom de la tablette ; la tablette ne peut commenter que
+    les fiches qui lui sont assignees."""
+    data = request.get_json(silent=True) or {}
+    comment = (data.get("comment") or "").strip()
+    if not comment:
+        return jsonify({"ok": False, "error": "empty_comment"}), 400
+    if len(comment) > 2000:
+        return jsonify({"ok": False, "error": "comment_too_long"}), 400
+
+    device = request.device
+    name = device.get("name")
+    if not name:
+        return jsonify({"ok": False, "error": "unnamed_device"}), 400
+
+    db = _get_mongo_db()
+    # L'_id dans pcorg est une chaine (UUID), pas ObjectId -> on cherche par _id brut
+    fiche = db["pcorg"].find_one({"_id": fiche_id})
+    if not fiche:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+
+    cc = fiche.get("content_category") or {}
+    if (cc.get("patrouille") or "") != name:
+        return jsonify({"ok": False, "error": "not_assigned"}), 403
+
+    entry = {
+        "ts": _now(),
+        "comment": comment,
+        "operator": "field:" + name,
+    }
+    db["pcorg"].update_one(
+        {"_id": fiche_id},
+        {
+            "$set": {"comment": comment},
+            "$push": {"comment_history": entry},
+        },
+    )
+    return jsonify({"ok": True})
+
+
+@field_bp.route("/field/sos", methods=["POST"])
+@field_token_required
+def field_sos():
+    """Declenche une alerte SOS dans cockpit_active_alerts. Le poller cockpit
+    (alert_poller.js) affichera l'alerte en plein ecran sur les postes
+    operateurs."""
+    device = request.device
+    name = device.get("name") or "?"
+    event = device.get("event")
+    year = device.get("year")
+
+    data = request.get_json(silent=True) or {}
+    try:
+        lat = float(data.get("lat")) if data.get("lat") is not None else None
+    except (TypeError, ValueError):
+        lat = None
+    try:
+        lng = float(data.get("lng")) if data.get("lng") is not None else None
+    except (TypeError, ValueError):
+        lng = None
+    battery = data.get("battery")
+    note = (data.get("note") or "").strip()
+
+    now = _now()
+    expires = now + timedelta(minutes=30)
+
+    alert = {
+        "definition_slug": "field_sos",
+        "event": event,
+        "year": str(year) if year is not None else None,
+        "title": "SOS TABLETTE : " + name,
+        "message": ("Position : {:.5f}, {:.5f}".format(lat, lng)
+                    if (lat is not None and lng is not None)
+                    else "Position inconnue") + (" - " + note if note else ""),
+        "timeStr": now.strftime("%H:%M"),
+        "dedup_key": "field-sos-" + str(device.get("_id")),
+        "triggeredAt": now,
+        "expiresAt": expires,
+        "status": "active",
+        "actionData": {
+            "device_id": str(device.get("_id")),
+            "device_name": name,
+            "beacon_group_id": device.get("beacon_group_id"),
+            "lat": lat,
+            "lng": lng,
+            "battery": battery,
+            "note": note,
+        },
+    }
+
+    db = _get_mongo_db()
+    # Upsert par dedup_key pour eviter le spam si la tablette rappuie
+    db["cockpit_active_alerts"].update_one(
+        {"dedup_key": alert["dedup_key"]},
+        {"$set": alert},
+        upsert=True,
+    )
+    # Historiser egalement dans field_messages pour avoir trace cote tablette
+    db["field_messages"].insert_one({
+        "device_id": device["_id"],
+        "device_name": name,
+        "event": event,
+        "year": str(year) if year is not None else None,
+        "type": "alert",
+        "title": "SOS envoye",
+        "body": "Le cockpit a ete prevenu." + (" (" + note + ")" if note else ""),
+        "priority": "high",
+        "from": "field",
+        "createdAt": now,
+        "expiresAt": now + timedelta(seconds=INBOX_MESSAGE_TTL_SECONDS),
+        "ack_at": None,
+    })
+    return jsonify({"ok": True})
+
+
 @field_bp.route("/field/resources/tiles/<z>/<x>/<y>.png", methods=["GET"])
 @field_token_required
 def field_resources_tiles(z, x, y):

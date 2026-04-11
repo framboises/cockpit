@@ -9,6 +9,7 @@
   var DEFAULT_ZOOM = 14;
 
   var POLL_INBOX_MS = 3000;
+  var POLL_FICHES_MS = 15000;       // fiches PCORG assignees : toutes les 15s
   var POSITION_PUSH_MS = 5000;     // push GPS toutes les 5s max
   var POSITION_MIN_MOVE_M = 5;     // ou si on bouge de plus de 5m
 
@@ -33,6 +34,12 @@
     threePLoaded: false,
     routeLayer: null,
     routeDestination: null,  // [lat, lng]
+    fichesLayer: null,
+    fichesMarkers: {},       // id -> marker
+    fiches: [],
+    fichesTimer: null,
+    seenFicheIds: new Set(),
+    sosInFlight: false,
     inbox: [],
     seenIds: new Set(),
     watchId: null,
@@ -469,6 +476,186 @@
   }
 
   // ---------------------------------------------------------------------
+  // Fiches PCORG assignees a cette tablette
+  // ---------------------------------------------------------------------
+  function startFichesPoll() {
+    pollFiches();
+    state.fichesTimer = setInterval(pollFiches, POLL_FICHES_MS);
+  }
+
+  function pollFiches() {
+    fetch("/field/my-fiches", { headers: { "Accept": "application/json" } })
+      .then(function (r) {
+        if (r.status === 401) { window.location.href = "/field/pair"; return null; }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        var open = data.open || [];
+        state.fiches = open;
+        renderFiches();
+        detectNewFiches(open);
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function detectNewFiches(open) {
+    var newOnes = [];
+    open.forEach(function (f) {
+      if (!state.seenFicheIds.has(f.id)) {
+        state.seenFicheIds.add(f.id);
+        newOnes.push(f);
+      }
+    });
+    if (newOnes.length === 0) return;
+    // Premier poll : ne pas toaster, juste enregistrer
+    if (!state.fichesFirstPolled) {
+      state.fichesFirstPolled = true;
+      return;
+    }
+    var first = newOnes[0];
+    toast("Nouvelle fiche : " + (first.text || "(sans texte)").slice(0, 60), "warn");
+  }
+
+  function renderFiches() {
+    if (!state.fichesLayer) {
+      state.fichesLayer = L.layerGroup().addTo(state.map);
+      state.fichesMarkers = {};
+    }
+    var seen = {};
+    state.fiches.forEach(function (f) {
+      seen[f.id] = true;
+      if (f.lat == null || f.lng == null) return;
+      var existing = state.fichesMarkers[f.id];
+      if (existing) {
+        existing.setLatLng([f.lat, f.lng]);
+      } else {
+        var icon = L.divIcon({
+          className: "",
+          html: "<div class='fiche-marker urgency-" + (f.niveau_urgence || "norm") + "'>"
+              + "<span class='material-symbols-outlined'>priority_high</span></div>",
+          iconSize: [32, 38],
+          iconAnchor: [16, 36],
+        });
+        var marker = L.marker([f.lat, f.lng], { icon: icon });
+        marker.on("click", function () { showFicheModal(f); });
+        marker.addTo(state.fichesLayer);
+        state.fichesMarkers[f.id] = marker;
+      }
+    });
+    // Retirer les markers des fiches disparues (cloturees/reassignees)
+    Object.keys(state.fichesMarkers).forEach(function (id) {
+      if (!seen[id]) {
+        state.fichesLayer.removeLayer(state.fichesMarkers[id]);
+        delete state.fichesMarkers[id];
+      }
+    });
+  }
+
+  function showFicheModal(f) {
+    // Reutilise le modal msg-modal avec un bouton "Commentaire"
+    var modal = $("msg-modal");
+    var title = $("msg-modal-title");
+    var body = $("msg-modal-body");
+    var ack = $("msg-modal-ack");
+    var routeBtn = $("msg-modal-route");
+    if (!modal) return;
+
+    modal.classList.remove("priority-high", "type-alert", "type-route", "type-instruction");
+    modal.classList.add("type-instruction");
+    if (f.niveau_urgence && f.niveau_urgence !== "IMP") modal.classList.add("priority-high");
+
+    title.textContent = (f.niveau_urgence ? "[" + f.niveau_urgence + "] " : "")
+      + (f.category || "Fiche PCORG");
+    var lines = [];
+    if (f.text) lines.push(f.text);
+    if (f.area) lines.push("\nZone : " + f.area);
+    if (f.comment) lines.push("\nCommentaire : " + f.comment);
+    if (f.operator) lines.push("\nCreee par : " + f.operator);
+    body.textContent = lines.join("");
+
+    // Bouton itineraire si coordonnees dispo
+    if (routeBtn) {
+      if (f.lat != null && f.lng != null) {
+        routeBtn.hidden = false;
+        routeBtn.onclick = function () { openInGoogleMaps([f.lat, f.lng]); };
+      } else {
+        routeBtn.hidden = true;
+      }
+    }
+
+    ack.textContent = "Ajouter un commentaire";
+    ack.onclick = function () { openFicheCommentDialog(f); };
+    modal.hidden = false;
+  }
+
+  function openFicheCommentDialog(f) {
+    var comment = window.prompt("Commentaire sur la fiche :\n" + (f.text || "").slice(0, 80), "");
+    if (comment == null) return;
+    comment = comment.trim();
+    if (!comment) return;
+    fetch("/field/my-fiches/" + encodeURIComponent(f.id) + "/comment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ comment: comment }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data && data.ok) {
+          toast("Commentaire envoye");
+          $("msg-modal").hidden = true;
+          // Reset du bouton ack pour le prochain message
+          $("msg-modal-ack").textContent = "J'ai compris";
+          pollFiches();
+        } else {
+          toast("Echec : " + ((data && data.error) || "?"), "err");
+        }
+      })
+      .catch(function () { toast("Erreur reseau", "err"); });
+  }
+
+  // ---------------------------------------------------------------------
+  // SOS
+  // ---------------------------------------------------------------------
+  function triggerSos() {
+    if (state.sosInFlight) return;
+    var ok = window.confirm("Declencher un SOS ?\n\nLe cockpit sera immediatement prevenu avec ta position GPS.");
+    if (!ok) return;
+    state.sosInFlight = true;
+    var note = window.prompt("Note courte (optionnelle) :", "") || "";
+
+    var lat = null, lng = null;
+    if (state.meMarker) {
+      var ll = state.meMarker.getLatLng();
+      lat = ll.lat;
+      lng = ll.lng;
+    }
+    fetch("/field/sos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        lat: lat,
+        lng: lng,
+        battery: state.batteryPct || null,
+        note: note.trim(),
+      }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        state.sosInFlight = false;
+        if (data && data.ok) {
+          toast("SOS envoye au cockpit", "warn");
+        } else {
+          toast("Echec SOS", "err");
+        }
+      })
+      .catch(function () {
+        state.sosInFlight = false;
+        toast("Erreur reseau (SOS)", "err");
+      });
+  }
+
+  // ---------------------------------------------------------------------
   // Inbox
   // ---------------------------------------------------------------------
   function startInboxPoll() {
@@ -614,10 +801,7 @@
       p.hidden = !p.hidden;
     });
     $("inbox-close").addEventListener("click", function () { $("inbox-panel").hidden = true; });
-    $("btn-sos").addEventListener("click", function () {
-      toast("SOS : a venir", "warn");
-      // wire-up complet dans commit 8
-    });
+    $("btn-sos").addEventListener("click", triggerSos);
     $("msg-modal-close").addEventListener("click", function () { $("msg-modal").hidden = true; });
   }
 
@@ -632,6 +816,7 @@
     initBattery();
     startGeolocation();
     startInboxPoll();
+    startFichesPoll();
     // Ressources carte : 3P visible par defaut, carroyage sur demande
     load3P();
 
@@ -653,5 +838,7 @@
     load3P: load3P,
     setRouteDestination: setRouteDestination,
     openInGoogleMaps: openInGoogleMaps,
+    pollFiches: pollFiches,
+    triggerSos: triggerSos,
   };
 })();
