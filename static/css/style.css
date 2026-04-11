@@ -6744,6 +6744,19 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .anoloc-marker-icon { font-size: 14px !important; line-height: 1; }
 .anoloc-marker-num { font-size: 11px; line-height: 1; }
 
+/* Tablette terrain : style identique mais avec une petite "dashed ring" */
+.anoloc-marker.tablet {
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3), 0 0 0 2px rgba(255,255,255,0.6);
+}
+.anoloc-marker-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 13px; height: 13px; border-radius: 50%;
+  background: #fff; color: #0f172a;
+  font-size: 9px; font-weight: 800;
+  margin-left: 2px;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.15);
+}
+
 /* Popup */
 .anoloc-popup { font-size: 12px; line-height: 1.5; }
 .anoloc-popup-title { font-weight: 600; font-size: 13px; margin-bottom: 6px; display: flex; align-items: center; }

@@ -174,6 +174,67 @@ def _get_user_visible_groups(config):
 
 
 # ---------------------------------------------------------------------------
+# Helper: tablettes Field (field_devices) filtrees par event/year
+# ---------------------------------------------------------------------------
+
+def _get_field_tablets_by_group(db, event, year):
+    """Retourne un dict {beacon_group_id: [tablet_doc, ...]} pour event/year donnes.
+    Les tablettes revoquees sont exclues. Un event/year vide retourne {}."""
+    if not event or not year:
+        return {}
+    by_group = {}
+    try:
+        cursor = db["field_devices"].find({
+            "event": event,
+            "year": str(year),
+            "revoked": {"$ne": True},
+        })
+    except Exception:
+        return {}
+    for t in cursor:
+        gid = t.get("beacon_group_id")
+        if not gid:
+            continue
+        by_group.setdefault(gid, []).append(t)
+    return by_group
+
+
+def _tablet_to_device(tablet):
+    """Convertit un field_devices doc en structure compatible anoloc devices."""
+    last_pos = tablet.get("last_position") or {}
+    last_seen = tablet.get("last_seen")
+    if isinstance(last_seen, datetime):
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+    online = False
+    if last_seen:
+        age = (datetime.now(timezone.utc) - last_seen).total_seconds()
+        if age < 120:  # 2 min => online
+            online = True
+    bat = last_pos.get("battery")
+    try:
+        bat_int = int(round(float(bat))) if bat is not None else None
+    except (TypeError, ValueError):
+        bat_int = None
+    return {
+        "id": "field:" + str(tablet.get("_id")),
+        "label": tablet.get("name") or "?",
+        "lat": last_pos.get("lat"),
+        "lng": last_pos.get("lng"),
+        "speed": last_pos.get("speed") or 0,
+        "heading": last_pos.get("heading") or 0,
+        "status": "running" if online else "offline",
+        "battery_pct": bat_int,
+        "gps_fix": 1 if online and last_pos.get("lat") is not None else 0,
+        "sent_at": last_seen.isoformat() if last_seen else "",
+        "last_real_at": last_seen.isoformat() if last_seen else "",
+        "collected_at": last_seen.isoformat() if last_seen else "",
+        "online": online,
+        "kind": "tablet",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Routes: lecture MongoDB
 # ---------------------------------------------------------------------------
 
@@ -262,6 +323,16 @@ def anoloc_live():
                     "online": False,
                 })
 
+    # Fusion des tablettes Field filtrees par event/year (rendering mixte)
+    event = request.args.get("event")
+    year = request.args.get("year")
+    tablets_by_group = _get_field_tablets_by_group(db, event, year)
+    for gid, tablets in tablets_by_group.items():
+        if gid not in groups:
+            continue  # groupe pas visible ou desactive
+        for t in tablets:
+            groups[gid]["devices"].append(_tablet_to_device(t))
+
     return jsonify({"groups": groups, "enabled": True})
 
 
@@ -298,6 +369,34 @@ def anoloc_vehicles_by_category():
             result[cat].append({
                 "id": dev_id,
                 "label": dev_labels.get(dev_id, dev_id),
+            })
+
+    # Fusion tablettes Field (pour event/year donnes)
+    event = request.args.get("event")
+    year = request.args.get("year")
+    tablets_by_group = _get_field_tablets_by_group(db, event, year)
+    cat_by_group = {
+        g["id"]: g.get("pco_category")
+        for g in config.get("beacon_groups", [])
+        if g.get("enabled") and g.get("pco_category")
+    }
+    for gid, tablets in tablets_by_group.items():
+        cat = cat_by_group.get(gid)
+        if not cat:
+            continue
+        if visible_groups is not None and gid not in visible_groups:
+            continue
+        if cat not in result:
+            result[cat] = []
+            seen[cat] = set()
+        for t in tablets:
+            label = t.get("name") or "?"
+            if label in seen[cat]:
+                continue
+            seen[cat].add(label)
+            result[cat].append({
+                "id": "field:" + str(t.get("_id")),
+                "label": label,
             })
 
     return jsonify(result)
@@ -349,6 +448,33 @@ def anoloc_status():
         else:
             groups[grp_id]["offline"] += 1
         groups[grp_id]["total"] += 1
+
+    # Fusion tablettes Field
+    event = request.args.get("event")
+    year = request.args.get("year")
+    tablets_by_group = _get_field_tablets_by_group(db, event, year)
+    for gid, tablets in tablets_by_group.items():
+        if gid not in beacon_groups_map:
+            continue
+        if visible_groups is not None and gid not in visible_groups:
+            continue
+        if gid not in groups:
+            grp_cfg = beacon_groups_map[gid]
+            groups[gid] = {
+                "label": grp_cfg.get("label", gid),
+                "icon": grp_cfg.get("icon", "location_on"),
+                "color": grp_cfg.get("color", "#6366f1"),
+                "online": 0,
+                "offline": 0,
+                "total": 0,
+            }
+        for t in tablets:
+            dev = _tablet_to_device(t)
+            if dev["online"]:
+                groups[gid]["online"] += 1
+            else:
+                groups[gid]["offline"] += 1
+            groups[gid]["total"] += 1
 
     return jsonify({"enabled": True, "groups": groups})
 

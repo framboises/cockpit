@@ -117,9 +117,13 @@
     });
   }
 
-  // --- Refresh: fetch /anoloc/live ---
+  // --- Refresh: fetch /anoloc/live (avec scope event/year pour inclure tablettes) ---
   function refresh() {
-    fetch("/anoloc/live")
+    var qs = new URLSearchParams();
+    if (window.selectedEvent) qs.set("event", window.selectedEvent);
+    if (window.selectedYear) qs.set("year", String(window.selectedYear));
+    var url = "/anoloc/live" + (qs.toString() ? ("?" + qs.toString()) : "");
+    fetch(url)
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (!data.enabled) {
@@ -232,6 +236,12 @@
         var devDot = el("span", {className: "anoloc-dev-dot " + statusClass});
         var devNum = el("span", {className: "anoloc-dev-num", textContent: String(idx + 1)});
         var devName = el("span", {className: "anoloc-dev-name", textContent: dev.label || dev.id});
+        // Icone type tablette a afficher a gauche du nom
+        var devKindIcon = null;
+        if (dev.kind === "tablet") {
+          devKindIcon = materialIcon("tablet_android", "font-size:13px;margin-right:4px;vertical-align:middle;");
+          devKindIcon.title = "Tablette terrain";
+        }
         var devStatus = el("span", {className: "anoloc-dev-status " + statusClass, textContent: statusLabel});
 
         var devRight = el("div", {className: "anoloc-dev-right"});
@@ -249,8 +259,11 @@
         }
         devRight.appendChild(devStatus);
 
+        var leftChildren = [devDot, devNum];
+        if (devKindIcon) leftChildren.push(devKindIcon);
+        leftChildren.push(devName);
         var devRow = el("div", {className: "anoloc-dev-row"}, [
-          el("div", {className: "anoloc-dev-left"}, [devDot, devNum, devName]),
+          el("div", {className: "anoloc-dev-left"}, leftChildren),
           devRight,
         ]);
         devRow.style.cursor = "pointer";
@@ -390,15 +403,25 @@
       else statusClass = "online";
     }
 
-    var container = el("div", {className: "anoloc-marker " + statusClass});
+    var isTablet = dev.kind === "tablet";
+    var container = el("div", {className: "anoloc-marker " + statusClass + (isTablet ? " tablet" : "")});
     container.style.background = grp.color || "#6366f1";
 
-    var iconEl = materialIcon(grp.icon || "location_on");
+    // Icone : tablette forcee pour les tablettes, sinon l'icone du groupe
+    var iconEl = materialIcon(isTablet ? "tablet_android" : (grp.icon || "location_on"));
     iconEl.classList.add("anoloc-marker-icon");
     container.appendChild(iconEl);
 
     var numEl = el("span", {className: "anoloc-marker-num", textContent: String(num)});
     container.appendChild(numEl);
+
+    // Badge tablette (petit rond a droite)
+    if (isTablet) {
+      var badge = el("span", {className: "anoloc-marker-badge"});
+      badge.textContent = "T";
+      badge.title = "Tablette terrain";
+      container.appendChild(badge);
+    }
 
     return L.divIcon({
       html: container.outerHTML,
