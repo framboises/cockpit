@@ -299,6 +299,9 @@ def _check_admin():
     max_level = max((ROLE_HIERARCHY.get(r, 0) for r in roles), default=0)
     if max_level < ROLE_HIERARCHY.get("admin", 3):
         return jsonify({"error": "Admin required"}), 403
+    effective_role = "admin" if max_level >= ROLE_HIERARCHY.get("admin", 3) else roles[0] if roles else "user"
+    payload["roles"] = [r for r in ROLE_ORDER if ROLE_HIERARCHY.get(r, 0) <= ROLE_HIERARCHY.get(effective_role, 0)]
+    payload["app_role"] = effective_role
     request.user_payload = payload
     return None
 

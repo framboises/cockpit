@@ -73,7 +73,12 @@ document.addEventListener('DOMContentLoaded', function() {
   var expandBtn = document.getElementById('meteo-expand-btn');
   if (expandBtn) {
     expandBtn.addEventListener('click', function() {
-      expandMeteoPanel();
+      var panel = document.getElementById('meteo-panel');
+      if (panel && panel.style.display !== 'none') {
+        collapseMeteoPanel();
+      } else {
+        expandMeteoPanel();
+      }
     });
   }
 
@@ -103,9 +108,20 @@ function expandMeteoPanel(targetDate) {
     _meteoPreviousView = window.CockpitMapView.currentView();
   }
 
+  // Fermer le panel pcorg s'il est ouvert
+  var pcorgPanel = document.getElementById('pcorg-expanded-panel');
+  if (pcorgPanel && pcorgPanel.style.display !== 'none') {
+    pcorgPanel.style.display = 'none';
+    var pcorgBtn = document.getElementById('pcorg-expand-btn');
+    if (pcorgBtn) pcorgBtn.querySelector('.material-symbols-outlined').textContent = 'open_in_full';
+  }
+
   if (timeline) timeline.style.display = 'none';
   if (mapMain) mapMain.style.display = 'none';
   panel.style.display = 'flex';
+
+  var expandBtn = document.getElementById('meteo-expand-btn');
+  if (expandBtn) expandBtn.querySelector('.material-symbols-outlined').textContent = 'close_fullscreen';
 
   var today = new Date();
   var date = targetDate || today.toISOString().split('T')[0];
@@ -124,6 +140,9 @@ function collapseMeteoPanel() {
   // Restaurer la vue precedente (timeline ou carte)
   var timeline = document.getElementById('timeline-main');
   var mapMain = document.getElementById('map-main');
+
+  var expandBtn = document.getElementById('meteo-expand-btn');
+  if (expandBtn) expandBtn.querySelector('.material-symbols-outlined').textContent = 'open_in_full';
 
   if (_meteoPreviousView === 'map') {
     if (timeline) timeline.style.display = 'none';

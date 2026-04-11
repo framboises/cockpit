@@ -14,7 +14,7 @@
     "PCO.Flux", "PCO.Fourriere", "PCO.Information", "PCO.MainCourante"
   ];
 
-  var data = { sous_classifications: {}, intervenants: [], services: [] };
+  var data = { sous_classifications: {}, intervenants: [], services: [], fiche_simplifiee: {} };
   var dirty = false;
 
   function load() {
@@ -74,6 +74,34 @@
       });
       container.appendChild(section);
     });
+
+    // Section: Fiche simplifiee (clic droit rapide)
+    var hFS = el("div", "pcorg-cfg-title");
+    hFS.textContent = "Fiche simplifiee (creation rapide par clic droit)";
+    container.appendChild(hFS);
+
+    var fsDesc = el("div", "");
+    fsDesc.style.cssText = "font-size:0.78rem; color:var(--muted); margin:-4px 0 4px;";
+    fsDesc.textContent = "Les categories cochees proposent un sous-menu avec les niveaux d'urgence au clic droit sur la carte.";
+    container.appendChild(fsDesc);
+
+    var fsSection = el("div", "pcorg-cfg-fs-section");
+    CATEGORIES.forEach(function (cat) {
+      var enabled = (data.fiche_simplifiee || {})[cat] || false;
+      var lbl = el("label", "pcorg-cfg-fs-label");
+      var cb = el("input", "");
+      cb.type = "checkbox";
+      cb.checked = enabled;
+      cb.addEventListener("change", function () {
+        if (!data.fiche_simplifiee) data.fiche_simplifiee = {};
+        data.fiche_simplifiee[cat] = cb.checked;
+        markDirty();
+      });
+      lbl.appendChild(cb);
+      lbl.appendChild(document.createTextNode(" " + cat.replace("PCO.", "")));
+      fsSection.appendChild(lbl);
+    });
+    container.appendChild(fsSection);
 
     // Section 2: Intervenants / Moyens engages
     var h2 = el("div", "pcorg-cfg-title");
@@ -239,4 +267,147 @@
   }
 
   load();
+
+  // ---------------------------------------------------------------------------
+  // Sync SQL control (toggle + force sync)
+  // ---------------------------------------------------------------------------
+
+  var syncToggle = document.getElementById("pcorg-sync-toggle");
+  var syncStatus = document.getElementById("pcorg-sync-status");
+  var syncIcon = document.getElementById("pcorg-sync-icon");
+  var syncDot = document.getElementById("pcorg-sync-dot");
+  var syncHeaderText = document.getElementById("pcorg-sync-header-text");
+  var forceSyncBtn = document.getElementById("pcorg-force-sync-btn");
+  var forceFullBtn = document.getElementById("pcorg-force-full-btn");
+
+  function formatAge(isoStr) {
+    if (!isoStr) return "";
+    var d = new Date(isoStr);
+    if (isNaN(d.getTime())) return "";
+    var sec = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (sec < 60) return "il y a " + sec + "s";
+    var min = Math.floor(sec / 60);
+    if (min < 60) return "il y a " + min + " min";
+    var h = Math.floor(min / 60);
+    if (h < 24) return "il y a " + h + "h" + (min % 60 ? String(min % 60).padStart(2, "0") : "");
+    return d.toLocaleDateString("fr-FR") + " " + d.toLocaleTimeString("fr-FR", {hour: "2-digit", minute: "2-digit"});
+  }
+
+  function loadSyncControl() {
+    fetch("/api/pcorg/sync-control")
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (syncToggle) syncToggle.checked = !!d.actif;
+        updateSyncDisplay(d);
+      })
+      .catch(function () {
+        if (syncStatus) syncStatus.textContent = "Erreur de chargement";
+      });
+  }
+
+  function updateSyncDisplay(d) {
+    var dotColor = "var(--muted)";
+    var dotTitle = "";
+    var headerText = "";
+
+    if (d.running) {
+      if (syncStatus) syncStatus.textContent = "Sync en cours...";
+      if (syncIcon) syncIcon.style.color = "var(--accent, #6366f1)";
+      dotColor = "var(--accent, #6366f1)";
+      dotTitle = "Sync en cours";
+      headerText = "sync en cours...";
+    } else if (d.last_error) {
+      if (syncStatus) syncStatus.textContent = "Erreur : " + d.last_error;
+      if (syncIcon) syncIcon.style.color = "var(--danger, #ef4444)";
+      dotColor = "var(--danger, #ef4444)";
+      dotTitle = "Erreur : " + d.last_error;
+      headerText = "erreur" + (d.last_run ? " - " + formatAge(d.last_run) : "");
+    } else if (d.last_success) {
+      if (syncStatus) syncStatus.textContent = "OK" + (d.last_summary ? " - " + d.last_summary : "");
+      if (syncIcon) syncIcon.style.color = "var(--success, #22c55e)";
+      dotColor = "var(--success, #22c55e)";
+      dotTitle = "Derniere sync reussie";
+      headerText = "ok - " + formatAge(d.last_success);
+    } else if (d.actif) {
+      if (syncStatus) syncStatus.textContent = "Active, en attente du prochain cycle";
+      if (syncIcon) syncIcon.style.color = "var(--muted)";
+      dotTitle = "En attente";
+      headerText = "en attente...";
+    } else {
+      if (syncStatus) syncStatus.textContent = "Desactivee";
+      if (syncIcon) syncIcon.style.color = "var(--muted)";
+      headerText = "";
+    }
+
+    if (syncDot) {
+      syncDot.style.background = dotColor;
+      syncDot.title = dotTitle;
+    }
+    if (syncHeaderText) syncHeaderText.textContent = headerText;
+  }
+
+  if (syncToggle) {
+    syncToggle.addEventListener("change", function () {
+      fetch("/api/pcorg/sync-control", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken() },
+        body: JSON.stringify({ actif: syncToggle.checked })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (r) {
+          if (r.ok) {
+            var msg = syncToggle.checked ? "Sync SQL activee" : "Sync SQL desactivee";
+            if (typeof showToast === "function") showToast("success", msg);
+            loadSyncControl();
+          }
+        })
+        .catch(function () {
+          syncToggle.checked = !syncToggle.checked;
+          if (typeof showToast === "function") showToast("error", "Erreur reseau");
+        });
+    });
+  }
+
+  function triggerSync(full) {
+    var btn = full ? forceFullBtn : forceSyncBtn;
+    if (btn) btn.disabled = true;
+    fetch("/api/pcorg/force-sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken() },
+      body: JSON.stringify({ full: !!full })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        if (r.ok) {
+          if (typeof showToast === "function") showToast("success", r.message || "Sync lancee");
+          if (syncStatus) syncStatus.textContent = "Sync en cours...";
+          if (syncIcon) syncIcon.style.color = "var(--accent, #6366f1)";
+          // Rafraichir le statut apres quelques secondes
+          setTimeout(loadSyncControl, 5000);
+          setTimeout(loadSyncControl, 15000);
+          setTimeout(loadSyncControl, 30000);
+        } else {
+          if (typeof showToast === "function") showToast("error", r.error || "Erreur");
+        }
+      })
+      .catch(function () {
+        if (typeof showToast === "function") showToast("error", "Erreur reseau");
+      })
+      .finally(function () {
+        if (btn) btn.disabled = false;
+      });
+  }
+
+  if (forceSyncBtn) {
+    forceSyncBtn.addEventListener("click", function () { triggerSync(false); });
+  }
+  if (forceFullBtn) {
+    forceFullBtn.addEventListener("click", function () {
+      if (confirm("Resynchronisation complete depuis SQL Server ?\nCela peut prendre plusieurs minutes.")) {
+        triggerSync(true);
+      }
+    });
+  }
+
+  loadSyncControl();
 })();

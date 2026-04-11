@@ -85,6 +85,7 @@ def _reset_todos_cache():
 
 
 def _get_todos_cache(db) -> dict:
+    """Charge les todos. Retourne {type: [{text, phase}, ...]}."""
     global _TODOS_CACHE
     if _TODOS_CACHE is not None:
         return _TODOS_CACHE
@@ -92,8 +93,20 @@ def _get_todos_cache(db) -> dict:
         _TODOS_CACHE = {}
         for doc in db.todos.find({}, {"type": 1, "todos": 1}):
             t = doc.get("type")
-            v = doc.get("todos") or []
-            _TODOS_CACHE[t] = [str(x) for x in v] if isinstance(v, list) else []
+            raw = doc.get("todos") or []
+            items = []
+            for x in raw:
+                if isinstance(x, str):
+                    if x.strip():
+                        items.append({"text": x.strip(), "phase": "open"})
+                elif isinstance(x, dict):
+                    text = str(x.get("text", "")).strip()
+                    phase = x.get("phase", "both")
+                    if phase not in ("open", "close", "both"):
+                        phase = "both"
+                    if text:
+                        items.append({"text": text, "phase": phase})
+            _TODOS_CACHE[t] = items
     except Exception as e:
         logger.error(f"Impossible de charger la collection 'todos': {e}")
         _TODOS_CACHE = {}
@@ -144,18 +157,29 @@ def _build_todo_string(todo_items: list) -> str:
     return "\n".join(f"- [ ] {t}" for t in todo_items)
 
 
+def _filter_todos_by_phase(todos_items: list, phase: str) -> list:
+    """Filtre les todos par phase. phase='open' ou 'close'."""
+    return [t["text"] for t in todos_items
+            if t.get("phase") == phase or t.get("phase") == "both"]
+
+
 def _attach_todos_str(vignette: dict, base_activity: str, category: str,
-                      place: str, db=None, config_todos_type: str = None) -> dict:
-    """Attache les todos sous forme de string markdown sur la vignette."""
+                      place: str, db=None, config_todos_type: str = None,
+                      phase: str = "open") -> dict:
+    """Attache les todos sous forme de string markdown sur la vignette.
+    phase: 'open' pour vignette ouverture, 'close' pour fermeture."""
     try:
         todo_type = config_todos_type or _resolve_todo_type(base_activity, category, place)
         if not todo_type:
             return vignette
         cache = _get_todos_cache(db) if db is not None else {}
-        todos_list = cache.get(todo_type) or []
-        if not todos_list:
+        todos_items = cache.get(todo_type) or []
+        if not todos_items:
             return vignette
-        vignette["todo"] = _build_todo_string(todos_list)
+        filtered = _filter_todos_by_phase(todos_items, phase)
+        if not filtered:
+            return vignette
+        vignette["todo"] = _build_todo_string(filtered)
         vignette["todos_type"] = todo_type
     except Exception as e:
         logger.error(f"_attach_todos_str ({base_activity}/{category}/{place}): {e}")
@@ -186,7 +210,7 @@ def generate_vignettes_for_entry(date_str, open_time, close_time,
     open_activity = f"Ouverture {base_activity}"
     close_activity = f"Fermeture {base_activity}"
     open_id = _mk_id(f"{id_source}|{date_str}|{open_activity}")
-    close_id = _mk_id(f"{id_source}|{closing_date}|{close_activity}")
+    close_id = _mk_id(f"{id_source}|{date_str}|{closing_date}|{close_activity}")
 
     remark = ""
     if merge_remark and open_time != close_time and closing_date != date_str:
@@ -289,7 +313,11 @@ def _process_schedule_list(entries, base_activity, category, place,
                 {}, id_source, v_type
             )
             open_v = _attach_todos_str(open_v, base_activity, category, place,
-                                       db=db, config_todos_type=todos_type)
+                                       db=db, config_todos_type=todos_type,
+                                       phase="open")
+            close_v = _attach_todos_str(close_v, base_activity, category, place,
+                                        db=db, config_todos_type=todos_type,
+                                        phase="close")
 
             if not skip_open:
                 vignettes.append(open_v)
@@ -312,7 +340,8 @@ def _process_iso_single(iso_str, activity, category, place, id_source,
         activity, category, place, id_source, v_type
     )
     v = _attach_todos_str(v, activity, category, place,
-                          db=db, config_todos_type=todos_type)
+                          db=db, config_todos_type=todos_type,
+                          phase="open")
     return [v]
 
 
@@ -333,7 +362,8 @@ def _process_iso_range(start_iso, end_iso, open_activity, close_activity,
                                                    end_dt.strftime("%H:%M"))}
     )
     open_v = _attach_todos_str(open_v, open_activity, category, place,
-                               db=db, config_todos_type=todos_type)
+                               db=db, config_todos_type=todos_type,
+                               phase="open")
 
     close_v = generate_single_vignette(
         end_dt.strftime("%Y-%m-%d"), end_dt.strftime("%H:%M"),
@@ -341,6 +371,9 @@ def _process_iso_range(start_iso, end_iso, open_activity, close_activity,
     )
     close_v["start"] = ""
     close_v["end"] = end_dt.strftime("%H:%M")
+    close_v = _attach_todos_str(close_v, close_activity, category, place,
+                                db=db, config_todos_type=todos_type,
+                                phase="close")
 
     return [open_v, close_v]
 
@@ -401,7 +434,11 @@ def process_global_horaires(global_data, event, year, db=None):
                     {}, "helpDesk", "Organization"
                 )
                 pair[0] = _attach_todos_str(pair[0], "Help Desk",
-                                            "Accreditations", "Help Desk", db=db)
+                                            "Accreditations", "Help Desk",
+                                            db=db, phase="open")
+                pair[1] = _attach_todos_str(pair[1], "Help Desk",
+                                            "Accreditations", "Help Desk",
+                                            db=db, phase="close")
                 vignettes.extend(pair)
 
     # montage
@@ -659,7 +696,11 @@ def _emit_schedule_vignettes(vignettes, dates_list, idx, date_str,
     close_v["department"] = department
 
     open_v = _attach_todos_str(open_v, activity_base, category, place,
-                               db=db, config_todos_type=todos_type)
+                               db=db, config_todos_type=todos_type,
+                               phase="open")
+    close_v = _attach_todos_str(close_v, activity_base, category, place,
+                                db=db, config_todos_type=todos_type,
+                                phase="close")
 
     # Fermeture a 00:00 qui deborde sur jour+1 en 24h -> on jette
     drop_midnight = (
@@ -848,10 +889,11 @@ def update_timetable_document(event, year, vignettes, db=None):
             # Patch partiel
             items[idx] = _patch_vignette(items[idx], v)
         else:
-            # Fallback : chercher par (param_id, activity)
+            # Fallback : chercher par (param_id, activity) parmi les anciennes vignettes
             idx2 = next((i for i, x in enumerate(items)
                          if x.get("param_id") == v.get("param_id")
-                         and x.get("activity") == v.get("activity")), None)
+                         and x.get("activity") == v.get("activity")
+                         and x.get("_id") not in generated_ids), None)
             if idx2 is not None:
                 items[idx2] = _patch_vignette(items[idx2], v)
             else:

@@ -192,6 +192,9 @@
                 <button class="icon-button" id="add-event-button" title="Ajouter un evenement">
                     <span class="material-symbols-outlined">add</span>
                 </button>
+                <button class="icon-button" id="app-fullscreen-btn" title="Plein ecran">
+                    <span class="material-symbols-outlined">fullscreen</span>
+                </button>
             </div>
             <div id="right-section">
                 <div id="meteo-previsions" class="meteo-container"></div>
@@ -255,11 +258,11 @@
                             <button class="widget-tab" data-tab="pcorg-open" title="En cours"><span class="material-symbols-outlined">pending</span><span id="pcorg-badge" class="pcorg-badge" style="display:none"></span></button>
                             <button class="widget-tab" data-tab="pcorg-closed" title="Terminees"><span class="material-symbols-outlined">task_alt</span></button>
                         </div>
+                        <button class="trafic-sort-btn" id="pcorg-expand-btn" title="Vue liste elargie">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
                         <button class="trafic-sort-btn" id="pcorg-add-btn" title="Nouvelle intervention">
                             <span class="material-symbols-outlined">add_circle</span>
-                        </button>
-                        <button class="trafic-sort-btn" id="app-fullscreen-btn" title="Plein ecran">
-                            <span class="material-symbols-outlined">fullscreen</span>
                         </button>
                     </header>
                     <div class="widget-body widget-tab-content active pcorg-scroll" data-tab="pcorg-stats" id="pcorg-stats"></div>
@@ -387,6 +390,29 @@
                         </div>
                     </section>
                 </div>
+            </div>
+
+            <!-- Panel Main courante elargi (meme emplacement, alternance avec timeline/carte) -->
+            <div id="pcorg-expanded-panel" class="pcorg-expanded-panel" style="display:none;">
+                <div class="pcorg-expanded-header">
+                    <h3 class="pcorg-expanded-title">
+                        <span class="material-symbols-outlined" style="font-size:22px; vertical-align:middle;">forum</span>
+                        Main courante
+                    </h3>
+                    <div class="pcorg-expanded-filters">
+                        <div class="pcorg-expanded-tabs">
+                            <button class="pcorg-exp-tab active" data-filter="all">Toutes</button>
+                            <button class="pcorg-exp-tab" data-filter="open">En cours</button>
+                            <button class="pcorg-exp-tab" data-filter="closed">Terminees</button>
+                        </div>
+                        <input type="text" id="pcorg-expanded-search" class="pcorg-expanded-search" placeholder="Rechercher..." />
+                    </div>
+                    <span id="pcorg-expanded-count" class="pcorg-expanded-count-badge"></span>
+                    <button class="meteo-panel-close" id="pcorg-expanded-close" title="Fermer">
+                        <span class="material-symbols-outlined">close_fullscreen</span>
+                    </button>
+                </div>
+                <div id="pcorg-expanded-body" class="pcorg-expanded-body"></div>
             </div>
 
             <!-- Widgets droite -->
@@ -534,7 +560,24 @@
 
         <!-- Footer -->
         <footer class="app-footer">
-            TITAN &mdash; Techniques d'Integration Topographique avec Navigation
+            <div class="footer-quick-actions" id="footer-quick-actions">
+                <button class="sq-btn" id="sq-timeline" title="Timeline">
+                    <span class="material-symbols-outlined">view_agenda</span>
+                </button>
+                <button class="sq-btn" id="sq-map" title="Carte">
+                    <span class="material-symbols-outlined">map</span>
+                </button>
+                <button class="sq-btn" id="sq-nowline" title="Auto-scroll Maintenant">
+                    <span class="material-symbols-outlined">lock_clock</span>
+                </button>
+                <button class="sq-btn" id="sq-fullscreen" title="Plein ecran">
+                    <span class="material-symbols-outlined">fullscreen</span>
+                </button>
+                <button class="sq-btn" id="sq-add" title="Ajouter un evenement">
+                    <span class="material-symbols-outlined">add</span>
+                </button>
+            </div>
+            <span class="footer-text">TITAN &mdash; Techniques d'Integration Topographique avec Navigation</span>
         </footer>
 
     </div>
@@ -672,6 +715,7 @@
                 </div>
             </div>
             <div class="pcorg-fiche-header-right">
+                <span class="pcorg-fiche-urgency" style="display:none"></span>
                 <span class="pcorg-fiche-num"></span>
                 <span class="pcorg-fiche-status"></span>
                 <button class="drawer-close" id="pcorgDetailClose" aria-label="Fermer"><span class="material-icons">close</span></button>
@@ -824,7 +868,12 @@
 <script nonce="{{ nonce }}">
 var satelliteIconUrl = "{{ url_for('static', filename='img/satellite.png') }}";
 window.__allowedBlocks = {{ allowed_blocks_json|safe }};
+window.__blockLayout = {{ block_layout_json|safe }};
 window.__userGroups = {{ user_groups_json|safe }};
+window.__userFicheSimplifiee = {{ user_fiche_simplifiee_json|safe }};
+window.__userIsAdmin = {{ "true" if "admin" in user_roles else "false" }};
+window.__userAllowedCategories = {{ user_allowed_categories_json|safe }};
+window.__userCanCloseFiche = {{ user_can_close_fiche_json|safe }};
 </script>
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
 <script src="{{ url_for('static', filename='js/alert_poller.js') }}"></script>

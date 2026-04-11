@@ -29,6 +29,7 @@
         <span class="material-symbols-outlined">dashboard</span>
         <span class="label">Cockpit</span>
       </a>
+      {% if "admin" in user_roles %}
       <a href="/live-controle" class="nav-btn is-active">
         <span class="material-symbols-outlined">sensors</span>
         <span class="label">Controle acces</span>
@@ -49,13 +50,21 @@
         <span class="material-symbols-outlined">notifications_active</span>
         <span class="label">Alertes</span>
       </a>
+      {% endif %}
     </nav>
+
+    <!-- AI Assistant teaser -->
+    <div class="sidebar-ai" title="Assistant IA (bientot)">
+        <span class="material-symbols-outlined">smart_toy</span>
+        <span>Assistant IA</span>
+    </div>
 
     <div class="sidebar-footer">
       <div class="sidebar-user-info">
         <span class="material-symbols-outlined sidebar-user-avatar">account_circle</span>
         <div class="sidebar-user-details">
-          <span class="sidebar-user-name">{{ user_name }}</span>
+          <span class="sidebar-user-name">{{ user_firstname }} {{ user_lastname }}</span>
+          <span class="sidebar-user-email">{{ user_email }}</span>
         </div>
       </div>
       <a href="/logout_redirect" class="nav-btn nav-btn-danger">
@@ -183,6 +192,12 @@
       </div>
 
     </div>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+        <span class="footer-text">TITAN &mdash; Techniques d'Integration Topographique avec Navigation</span>
+    </footer>
+
   </div>
 </div>
 

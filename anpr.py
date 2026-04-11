@@ -2,7 +2,7 @@
 import os
 import logging
 from datetime import datetime, timezone, timedelta
-from flask import Blueprint, jsonify, request, render_template, Response
+from flask import Blueprint, jsonify, request, render_template, Response, send_file, abort
 from pymongo import MongoClient, DESCENDING, ASCENDING
 from bson.objectid import ObjectId
 import gridfs
@@ -49,6 +49,9 @@ def _check_admin():
     max_level = max((ROLE_HIERARCHY.get(r, 0) for r in roles), default=0)
     if max_level < ROLE_HIERARCHY.get("admin", 3):
         return jsonify({"error": "Admin required"}), 403
+    effective_role = "admin" if max_level >= ROLE_HIERARCHY.get("admin", 3) else roles[0] if roles else "user"
+    payload["roles"] = [r for r in ROLE_ORDER if ROLE_HIERARCHY.get(r, 0) <= ROLE_HIERARCHY.get(effective_role, 0)]
+    payload["app_role"] = effective_role
     request.user_payload = payload
     return None
 
@@ -196,9 +199,11 @@ def _serialize(doc, cam_configs=None):
         "camera": camera,
         "direction": raw_dir,
         "resolved_dir": _resolve_direction(raw_dir, camera, cam_configs),
-        "event_dt": doc.get("event_dt", "").isoformat() if isinstance(doc.get("event_dt"), datetime) else str(doc.get("event_dt", "")),
+        "event_dt": (doc["event_dt"].replace(tzinfo=timezone.utc).isoformat() if doc["event_dt"].tzinfo is None else doc["event_dt"].isoformat()) if isinstance(doc.get("event_dt"), datetime) else str(doc.get("event_dt", "")),
         "plate_image_id": str(doc["plate_image_id"]) if doc.get("plate_image_id") else None,
         "vehicle_image_id": str(doc["vehicle_image_id"]) if doc.get("vehicle_image_id") else None,
+        "plate_image_path": doc.get("plate_image_path"),
+        "vehicle_image_path": doc.get("vehicle_image_path"),
         "list_name": doc.get("vehicle_list_name", ""),
     }
 
@@ -476,27 +481,48 @@ def anpr_plate_history(plate):
     })
 
 
-@anpr_bp.route("/api/anpr/image/<image_id>")
-def anpr_image(image_id):
-    """Serve an image from GridFS."""
+HIK_IMAGE_DIR = "E:/TITAN/production/hik_images"
+
+
+@anpr_bp.route("/api/anpr/image/<path:image_ref>")
+def anpr_image(image_ref):
+    """Sert une image : chemin disque (nouveau) ou ObjectId GridFS (ancien)."""
     _ensure_db()
-    try:
-        oid = ObjectId(image_id)
-        grid_file = _fs.get(oid)
-        return Response(
-            grid_file.read(),
-            mimetype="image/jpeg",
-            headers={"Cache-Control": "public, max-age=86400"},
-        )
-    except Exception:
-        # Return a 1x1 transparent pixel as fallback
-        return Response(
-            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00"
-            b"\x01\x00\x00\x05\x00\x01\r\n\xb4\x00\x00\x00\x00IEND\xaeB`\x82",
-            mimetype="image/png",
-            status=404,
-        )
+
+    # Nouveau format : chemin relatif sur disque
+    if "/" in image_ref:
+        safe = os.path.normpath(image_ref)
+        if ".." in safe:
+            abort(400)
+        full_path = os.path.join(HIK_IMAGE_DIR, safe)
+        if not os.path.abspath(full_path).startswith(os.path.abspath(HIK_IMAGE_DIR)):
+            abort(400)
+        if os.path.isfile(full_path):
+            resp = send_file(full_path, mimetype="image/jpeg")
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
+
+    # Ancien format : ObjectId GridFS
+    else:
+        try:
+            oid = ObjectId(image_ref)
+            grid_file = _fs.get(oid)
+            return Response(
+                grid_file.read(),
+                mimetype="image/jpeg",
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+        except Exception:
+            pass
+
+    # Fallback : pixel transparent 1x1
+    return Response(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00"
+        b"\x01\x00\x00\x05\x00\x01\r\n\xb4\x00\x00\x00\x00IEND\xaeB`\x82",
+        mimetype="image/png",
+        status=404,
+    )
 
 
 # ---------------------------------------------------------------------------

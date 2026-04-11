@@ -58,6 +58,26 @@ window.isBlockAllowed = function(id) {
     }
 })();
 
+// --- Block layout relocation (gauche/droite par groupe) ---
+(function() {
+    var layout = window.__blockLayout;
+    if (!layout) return;
+    var leftPanel = document.getElementById("widgets-panel");
+    var rightPanel = document.getElementById("widgets-panel-right");
+    if (!leftPanel || !rightPanel) return;
+    var leftIds = layout.left || [];
+    var rightIds = layout.right || [];
+    // Deplacer dans l'ordre configure
+    leftIds.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) leftPanel.appendChild(el);
+    });
+    rightIds.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) rightPanel.appendChild(el);
+    });
+})();
+
 // --- Widgets pliables ---
 (function() {
     document.querySelectorAll(".collapsible-widget-header").forEach(function(header) {
@@ -113,6 +133,66 @@ function on(elOrId, event, handler) {
         ico.textContent = document.fullscreenElement ? "fullscreen_exit" : "fullscreen";
         btn.title = document.fullscreenElement ? "Quitter plein ecran" : "Plein ecran";
     });
+})();
+
+// ---------------------------------------------------------------------------
+// Footer quick-action twins (synced with header buttons)
+// ---------------------------------------------------------------------------
+(function () {
+    var pairs = [
+        { sq: "sq-timeline",   hdr: "view-timeline-btn" },
+        { sq: "sq-map",        hdr: "view-map-btn" },
+        { sq: "sq-nowline",    hdr: "nowline-toggle" },
+        { sq: "sq-fullscreen", hdr: "app-fullscreen-btn" },
+        { sq: "sq-add",        hdr: "add-event-button" },
+    ];
+
+    pairs.forEach(function (p) {
+        var sq  = document.getElementById(p.sq);
+        var hdr = document.getElementById(p.hdr);
+        if (!sq || !hdr) return;
+
+        // Click on twin -> click header original
+        sq.addEventListener("click", function () { hdr.click(); });
+
+        // Sync visual state: observe class changes + icon text on header btn
+        function sync() {
+            var isActive = hdr.classList.contains("active");
+            sq.classList.toggle("active", isActive);
+            // Mirror icon text
+            var hdrIco = hdr.querySelector(".material-symbols-outlined");
+            var sqIco  = sq.querySelector(".material-symbols-outlined");
+            if (hdrIco && sqIco && sqIco.textContent !== hdrIco.textContent) {
+                sqIco.textContent = hdrIco.textContent;
+            }
+        }
+
+        // Observe header button for class / child text changes
+        var mo = new MutationObserver(sync);
+        mo.observe(hdr, { attributes: true, attributeFilter: ["class"] });
+        // Also observe the icon span for text changes (nowline, fullscreen)
+        var hdrIco = hdr.querySelector(".material-symbols-outlined");
+        if (hdrIco) mo.observe(hdrIco, { childList: true, characterData: true, subtree: true });
+
+        // Initial sync
+        sync();
+    });
+
+    // Respect same visibility rules as header (hidden if permission-blocked)
+    var sqTimeline = document.getElementById("sq-timeline");
+    var sqMap      = document.getElementById("sq-map");
+    var sqNowline  = document.getElementById("sq-nowline");
+    var sqAdd      = document.getElementById("sq-add");
+    var toggle     = document.querySelector(".view-toggle");
+
+    if (toggle && toggle.style.display === "none") {
+        if (sqTimeline) sqTimeline.style.display = "none";
+        if (sqMap) sqMap.style.display = "none";
+    }
+    var nowBtn = document.getElementById("nowline-toggle");
+    if (nowBtn && nowBtn.style.display === "none" && sqNowline) sqNowline.style.display = "none";
+    var addBtn = document.getElementById("add-event-button");
+    if (addBtn && addBtn.style.display === "none" && sqAdd) sqAdd.style.display = "none";
 })();
 
 function apiPost(url, payload){
@@ -817,7 +897,7 @@ function findNextPublicDate(dates, afterISO) {
 // _pushAlertHistory est expose sur window pour que alert_poller.js puisse l'appeler
 
 // ---------- Historique d'alertes (widget droite) ----------
-var _alertIconMap = { opening: "door_open", opened: "lock_open", closing: "door_front", closed: "lock", "traffic-cluster": "emergency", "anpr-watchlist": "local_police", "meteo-vent": "air", "meteo-pluie": "umbrella", "meteo": "cloud", "checkpoint-reassign": "swap_horiz" };
+var _alertIconMap = { opening: "door_open", opened: "lock_open", closing: "door_front", closed: "lock", "traffic-cluster": "emergency", "anpr-watchlist": "local_police", "meteo-vent": "air", "meteo-pluie": "umbrella", "meteo-pluie-imminente": "rainy", "meteo": "cloud", "checkpoint-reassign": "swap_horiz", "checkpoint-error-burst": "error" };
 var _alertColorMap = {
     "opening": "#f59e0b", "closing": "#f59e0b",
     "opened": "#22c55e", "closed": "#ef4444",
@@ -826,7 +906,9 @@ var _alertColorMap = {
     "meteo": "#42a5f5",
     "meteo-vent": "#f97316",
     "meteo-pluie": "#42a5f5",
-    "checkpoint-reassign": "#8b5cf6"
+    "meteo-pluie-imminente": "#42a5f5",
+    "checkpoint-reassign": "#8b5cf6",
+    "checkpoint-error-burst": "#dc2626"
 };
 var _alertTypeColors = {ACCIDENT: "#e53935", JAM: "#f59e0b", HAZARD: "#f97316", ROAD_CLOSED: "#8b5cf6"};
 var _alertTypeLabels = {ACCIDENT: "accident", JAM: "ralentissement", HAZARD: "danger", ROAD_CLOSED: "route fermee"};
@@ -1069,11 +1151,19 @@ function _loadAlertHistory() {
                 var a = alerts[i];
                 var iconName = _alertIconMap[a.type] || "info";
                 var d = new Date(a.createdAt);
-                var dateStr = isNaN(d.getTime()) ? "" :
-                    String(d.getDate()).padStart(2, "0") + "/" +
-                    String(d.getMonth() + 1).padStart(2, "0") + " " +
-                    String(d.getHours()).padStart(2, "0") + ":" +
-                    String(d.getMinutes()).padStart(2, "0");
+                var dateStr = "";
+                if (!isNaN(d.getTime())) {
+                    var parts = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(d);
+                    var p = {};
+                    parts.forEach(function(x) { p[x.type] = x.value; });
+                    var nowParts = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit" }).formatToParts(new Date());
+                    var np = {};
+                    nowParts.forEach(function(x) { np[x.type] = x.value; });
+                    var isToday = p.day === np.day && p.month === np.month;
+                    dateStr = isToday
+                        ? (p.hour || "") + ":" + (p.minute || "")
+                        : (p.day || "") + "/" + (p.month || "") + " " + (p.hour || "") + ":" + (p.minute || "");
+                }
 
                 // Reconstruire le callback "Voir sur la carte" depuis actionData
                 var actionData = a.actionData || null;

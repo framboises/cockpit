@@ -4,6 +4,7 @@ import re
 import json
 import logging
 import uuid
+import subprocess
 import jwt
 from datetime import datetime, timedelta, timezone
 
@@ -94,6 +95,9 @@ db_name = 'titan' if DEV_MODE else 'titan'
 db = client[db_name]
 
 CORS(app)  # Activer CORS pour toutes les routes
+
+# Cache noms utilisateurs (email -> {firstname, lastname}), evite un find par requete
+_user_name_cache = {}
 
 # Collections cockpit groupes/user-groups
 COL_GROUPS = db['cockpit_groups']
@@ -264,6 +268,30 @@ _ALERT_SEEDS = [
         "groups": [],
         "priority": 9,
     },
+    {
+        "slug": "pcorg-securite-ua",
+        "name": "Main courante Securite (UA+)",
+        "description": "Fiche securite avec urgence absolue ou detresse vitale",
+        "icon": "shield",
+        "color": "#dc2626",
+        "detection_type": "pcorg_urgency",
+        "params": {"category": "PCO.Securite", "min_level": "UA"},
+        "enabled": False,
+        "groups": [],
+        "priority": 10,
+    },
+    {
+        "slug": "pcorg-secours-ua",
+        "name": "Main courante Secours (UA+)",
+        "description": "Fiche secours avec urgence absolue ou detresse vitale",
+        "icon": "local_hospital",
+        "color": "#dc2626",
+        "detection_type": "pcorg_urgency",
+        "params": {"category": "PCO.Secours", "min_level": "UA"},
+        "enabled": False,
+        "groups": [],
+        "priority": 11,
+    },
 ]
 for _seed in _ALERT_SEEDS:
     COL_ALERT_DEFS.update_one(
@@ -384,6 +412,27 @@ def role_required(required_role):
                 payload["roles"] = []
             payload["app_role"] = effective_role
             payload["is_super_admin"] = is_super_admin
+
+            # Enrichir avec prenom/nom depuis MongoDB si absents du JWT
+            if not payload.get("firstname"):
+                email = payload.get("email", "")
+                if email:
+                    if email in _user_name_cache:
+                        payload["firstname"] = _user_name_cache[email]["firstname"]
+                        payload["lastname"] = _user_name_cache[email]["lastname"]
+                    else:
+                        user_doc = db["users"].find_one(
+                            {"email": email},
+                            {"prenom": 1, "nom": 1},
+                        )
+                        if user_doc:
+                            payload["firstname"] = user_doc.get("prenom", "")
+                            payload["lastname"] = user_doc.get("nom", "")
+                            _user_name_cache[email] = {
+                                "firstname": payload["firstname"],
+                                "lastname": payload["lastname"],
+                            }
+
             request.user_payload = payload
             return f(*args, **kwargs)
         return decorated_function
@@ -394,20 +443,26 @@ def role_required(required_role):
 ################################################################################
 
 BLOCK_REGISTRY = {
-    "widget-traffic":   {"label": "Trafic"},
-    "widget-counters":  {"label": "Compteurs"},
-    "widget-parkings":  {"label": "Temps d'acces"},
-    "widget-comms":     {"label": "Communications"},
-    "meteo-previsions": {"label": "Meteo bandeau"},
-    "timeline-main":    {"label": "Timeline"},
-    "map-main":         {"label": "Carte"},
-    "status-card":      {"label": "Statut evenement"},
-    "widget-right-1":   {"label": "Meteo detail"},
-    "widget-right-2":   {"label": "Affluence"},
-    "widget-right-3":   {"label": "Alertes"},
-    "widget-right-4":   {"label": "Ressources"},
+    "widget-traffic":   {"label": "Trafic",            "default_column": "left"},
+    "widget-comms":     {"label": "Communications",    "default_column": "left"},
+    "widget-parkings":  {"label": "Temps d'acces",     "default_column": "left"},
+    "status-card":      {"label": "Statut evenement",  "default_column": None},
+    "widget-counters":  {"label": "Compteurs",         "default_column": "right"},
+    "widget-right-1":   {"label": "Meteo detail",      "default_column": "right"},
+    "widget-right-2":   {"label": "Affluence",         "default_column": "right"},
+    "widget-right-3":   {"label": "Alertes",           "default_column": "right"},
+    "widget-right-4":   {"label": "Ressources",        "default_column": "right"},
+    "meteo-previsions": {"label": "Meteo bandeau",     "default_column": None},
+    "timeline-main":    {"label": "Timeline",          "default_column": None},
+    "map-main":         {"label": "Carte",             "default_column": None},
 }
 ALL_BLOCK_IDS = list(BLOCK_REGISTRY.keys())
+MOVABLE_BLOCK_IDS = [bid for bid, info in BLOCK_REGISTRY.items() if info.get("default_column")]
+
+DEFAULT_LAYOUT = {
+    "left":  [bid for bid, info in BLOCK_REGISTRY.items() if info.get("default_column") == "left"],
+    "right": [bid for bid, info in BLOCK_REGISTRY.items() if info.get("default_column") == "right"],
+}
 
 def get_user_allowed_blocks(payload):
     """Retourne set() de block IDs autorises, ou None si aucune restriction."""
@@ -440,6 +495,107 @@ def _get_default_blocks():
     if ab is None:
         return None
     return set(ab)
+
+def get_user_block_layout(payload):
+    """Retourne dict {left: [...], right: [...]} ou None (= layout par defaut)."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return None
+    email = payload.get("email", "")
+    user_doc = db['users'].find_one({"email": email}, {"_id": 1})
+    if not user_doc:
+        return _get_default_layout()
+    uid = user_doc["_id"]
+    ug = COL_USER_GROUPS.find_one({"user_id": uid})
+    group_ids = (ug.get("groups") or []) if ug else []
+    if not group_ids:
+        return _get_default_layout()
+    groups = list(COL_GROUPS.find({"_id": {"$in": group_ids}}))
+    for g in groups:
+        bl = g.get("block_layout")
+        if bl and isinstance(bl, dict) and ("left" in bl or "right" in bl):
+            return bl
+    return None
+
+def _get_default_layout():
+    """Retourne le block_layout du groupe __default__, ou None."""
+    default_group = COL_GROUPS.find_one({"name": DEFAULT_GROUP_NAME})
+    if not default_group:
+        return None
+    bl = default_group.get("block_layout")
+    if bl and isinstance(bl, dict) and ("left" in bl or "right" in bl):
+        return bl
+    return None
+
+def _user_can_fiche_simplifiee(payload):
+    """Verifie si l'utilisateur a le droit fiche_simplifiee via ses groupes."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return True
+    email = payload.get("email", "")
+    user_doc = db['users'].find_one({"email": email}, {"_id": 1})
+    if not user_doc:
+        return False
+    ug = COL_USER_GROUPS.find_one({"user_id": user_doc["_id"]})
+    group_ids = (ug.get("groups") or []) if ug else []
+    if not group_ids:
+        return False
+    return COL_GROUPS.count_documents({"_id": {"$in": group_ids}, "fiche_simplifiee": True}) > 0
+
+def _user_can_close_fiche(payload):
+    """Verifie si l'utilisateur a le droit de cloturer des fiches via ses groupes."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return True
+    email = payload.get("email", "")
+    user_doc = db['users'].find_one({"email": email}, {"_id": 1})
+    if not user_doc:
+        return False
+    ug = COL_USER_GROUPS.find_one({"user_id": user_doc["_id"]})
+    group_ids = (ug.get("groups") or []) if ug else []
+    if not group_ids:
+        return False
+    return COL_GROUPS.count_documents({"_id": {"$in": group_ids}, "can_close_fiche": True}) > 0
+
+def _parse_allowed_categories(raw):
+    if not isinstance(raw, list):
+        return None
+    filtered = [c for c in raw if c in ALL_PCO_CATEGORIES]
+    return filtered if filtered else None
+
+ALL_PCO_CATEGORIES = [
+    "PCO.Secours", "PCO.Securite", "PCO.Technique",
+    "PCO.Flux", "PCO.Information", "PCO.MainCourante", "PCO.Fourriere"
+]
+
+def get_user_allowed_categories(payload):
+    """Retourne liste de categories PCO autorisees, ou None si aucune restriction."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return None
+    email = payload.get("email", "")
+    user_doc = db['users'].find_one({"email": email}, {"_id": 1})
+    if not user_doc:
+        return _get_default_categories()
+    uid = user_doc["_id"]
+    ug = COL_USER_GROUPS.find_one({"user_id": uid})
+    group_ids = (ug.get("groups") or []) if ug else []
+    if not group_ids:
+        return _get_default_categories()
+    groups = list(COL_GROUPS.find({"_id": {"$in": group_ids}}))
+    allowed = set()
+    for g in groups:
+        ac = g.get("allowed_categories")
+        if ac is None:
+            return None  # pas de restriction
+        allowed.update(ac)
+    return list(allowed) if allowed else None
+
+def _get_default_categories():
+    """Retourne les categories du groupe __default__, ou None si pas de restriction."""
+    default_group = COL_GROUPS.find_one({"name": DEFAULT_GROUP_NAME})
+    if not default_group:
+        return None
+    ac = default_group.get("allowed_categories")
+    if ac is None:
+        return None
+    return list(ac)
 
 def block_required(block_id):
     """Decorateur: retourne 403 si le user n'a pas acces a ce bloc."""
@@ -495,11 +651,18 @@ def index():
                 groups = list(COL_GROUPS.find({"_id": {"$in": gids}, "name": {"$nin": list(SYSTEM_GROUP_NAMES)}}))
                 user_group_pills = [{"name": g["name"], "color": g.get("color", "#6366f1")} for g in groups]
     user_groups_json = json.dumps(user_group_pills)
+    user_fiche_simplifiee = _user_can_fiche_simplifiee(payload)
+    block_layout = get_user_block_layout(payload)
+    block_layout_json = json.dumps(block_layout)
     return render_template("index.html", user_roles=user_roles, user_apps=user_apps,
                            user_firstname=user_firstname, user_lastname=user_lastname,
                            user_email=user_email,
                            allowed_blocks_json=allowed_blocks_json,
-                           user_groups_json=user_groups_json)
+                           block_layout_json=block_layout_json,
+                           user_groups_json=user_groups_json,
+                           user_fiche_simplifiee_json=json.dumps(user_fiche_simplifiee),
+                           user_allowed_categories_json=json.dumps(get_user_allowed_categories(payload)),
+                           user_can_close_fiche_json=json.dumps(_user_can_close_fiche(payload)))
 
 @app.errorhandler(404)
 def page_not_found(e):
@@ -1927,9 +2090,28 @@ def update_doors():
 # Gestion de la configuration des tâches automatiques cockpit
 ################################################################################
 
-COL_TODOS = db['todos']  # schema: { type:str, todos:[str], createdAt, updatedAt }
+COL_TODOS = db['todos']  # schema: { type:str, todos:[{text:str, phase:str}], createdAt, updatedAt }
 
 # Helpers
+
+_VALID_PHASES = {"open", "close", "both"}
+
+def _normalize_todos(raw_todos):
+    """Normalise les todos en [{text, phase}]. Accepte l'ancien format [str]."""
+    result = []
+    for item in (raw_todos or []):
+        if isinstance(item, str):
+            text = item.strip()
+            if text:
+                result.append({"text": text, "phase": "open"})
+        elif isinstance(item, dict):
+            text = str(item.get("text", "")).strip()
+            phase = item.get("phase", "both")
+            if phase not in _VALID_PHASES:
+                phase = "both"
+            if text:
+                result.append({"text": text, "phase": phase})
+    return result
 
 def _pub(doc):
     if not doc: return None
@@ -1940,6 +2122,8 @@ def _pub(doc):
         elif isinstance(v, list):
             d[k] = [str(x) if isinstance(x, ObjectId) else x for x in v]
         elif hasattr(v, 'isoformat'):
+            if v.tzinfo is None:
+                v = v.replace(tzinfo=timezone.utc)
             d[k] = v.isoformat()
     return d
 
@@ -1968,11 +2152,9 @@ def get_todo_set(id):
 def create_todo_set():
     data = request.get_json(force=True) or {}
     typ = (data.get('type') or '').strip()
-    todos = data.get('todos') or []
     if not typ:
         return jsonify({'error':'type is required'}), 400
-    # ensure list of strings
-    todos = [str(x).strip() for x in todos if str(x).strip()]
+    todos = _normalize_todos(data.get('todos'))
     doc = {
         'type': typ,
         'todos': todos,
@@ -1993,8 +2175,7 @@ def update_todo_set(id):
     if 'type' in data:
         patch['type'] = (data.get('type') or '').strip()
     if 'todos' in data:
-        todos = data.get('todos') or []
-        patch['todos'] = [str(x).strip() for x in todos if str(x).strip()]
+        patch['todos'] = _normalize_todos(data.get('todos'))
     if not patch: return jsonify({'error':'Empty update'}), 400
     patch['updatedAt'] = datetime.now(timezone.utc)
     res = COL_TODOS.find_one_and_update({'_id': ObjectId(id)}, {'$set': patch}, return_document=True)
@@ -2068,9 +2249,19 @@ def get_my_permissions():
 @role_required("admin")
 def get_block_registry():
     return jsonify([
-        {"id": bid, "label": info["label"]}
+        {"id": bid, "label": info["label"], "default_column": info.get("default_column")}
         for bid, info in BLOCK_REGISTRY.items()
     ])
+
+@app.route('/api/pco-category-registry', methods=['GET'])
+@role_required("admin")
+def get_pco_category_registry():
+    labels = {
+        "PCO.Secours": "Secours", "PCO.Securite": "Securite", "PCO.Technique": "Technique",
+        "PCO.Flux": "Flux", "PCO.Fourriere": "Fourriere", "PCO.Information": "Information",
+        "PCO.MainCourante": "Main courante"
+    }
+    return jsonify([{"id": c, "label": labels.get(c, c)} for c in ALL_PCO_CATEGORIES])
 
 ################################################################################
 ################################################################################
@@ -2081,7 +2272,12 @@ def get_block_registry():
 @role_required("user")
 def get_alert_history():
     limit = int(request.args.get('limit', 50))
-    alerts = list(COL_ALERT_HISTORY.find().sort('createdAt', -1).limit(limit))
+    payload = getattr(request, 'user_payload', {})
+    allowed_slugs = _get_user_alert_slugs(payload)
+    query = {}
+    if allowed_slugs is not None:
+        query["type"] = {"$in": allowed_slugs}
+    alerts = list(COL_ALERT_HISTORY.find(query).sort('createdAt', -1).limit(limit))
     return jsonify([_pub(a) for a in alerts])
 
 @app.route('/api/alert-history', methods=['POST'])
@@ -2091,6 +2287,12 @@ def post_alert_history():
     data = request.get_json(force=True) or {}
     alert_type = data.get('type', '')
     message = data.get('message', '')
+
+    # Verifier que l'utilisateur a le droit de voir ce type d'alerte
+    payload = getattr(request, 'user_payload', {})
+    allowed_slugs = _get_user_alert_slugs(payload)
+    if allowed_slugs is not None and alert_type not in allowed_slugs:
+        return jsonify({"ok": True, "filtered": True}), 200
     now = datetime.now(timezone.utc)
 
     # Deduplication adaptative selon le type d'alerte
@@ -2107,7 +2309,7 @@ def post_alert_history():
         dedup_query = {
             'type': alert_type,
             'message': message,
-            'createdAt': {'$gte': now - timedelta(seconds=60)}
+            'createdAt': {'$gte': now - timedelta(hours=1)}
         }
     existing = COL_ALERT_HISTORY.find_one(dedup_query)
     if existing:
@@ -2133,7 +2335,7 @@ def post_alert_history():
 @role_required("admin")
 def list_cockpit_users():
     users = list(db['users'].find(
-        {"applications": "Cockpit"},
+        {"roles_by_app.cockpit": {"$exists": True}},
         {"prenom": 1, "nom": 1, "email": 1, "titre": 1, "service": 1, "roles_by_app.cockpit": 1}
     ))
     # Joindre les groupes
@@ -2185,6 +2387,25 @@ def list_groups():
         g['member_count'] = count
     return jsonify([_pub(g) for g in groups])
 
+@app.route('/api/groups/sql-default', methods=['GET'])
+@role_required("admin")
+def get_sql_default_group():
+    doc = db["cockpit_settings"].find_one({"_id": "sql_default_group"})
+    return jsonify({"group_id": doc.get("group_id", "") if doc else ""})
+
+@app.route('/api/groups/sql-default', methods=['PUT'])
+@role_required("admin")
+@csrf.exempt
+def set_sql_default_group():
+    data = request.get_json(force=True)
+    group_id = (data.get("group_id") or "").strip()
+    db["cockpit_settings"].update_one(
+        {"_id": "sql_default_group"},
+        {"$set": {"group_id": group_id}},
+        upsert=True
+    )
+    return jsonify({"ok": True})
+
 @app.route('/api/groups', methods=['POST'])
 @role_required("admin")
 @csrf.exempt
@@ -2208,12 +2429,25 @@ def create_group():
         traffic_alerts = [a for a in raw_alerts if isinstance(a, str)]
         if not traffic_alerts:
             traffic_alerts = None
+    raw_layout = data.get('block_layout')
+    block_layout = None
+    if isinstance(raw_layout, dict):
+        bl = {
+            "left":  [b for b in (raw_layout.get("left") or []) if b in MOVABLE_BLOCK_IDS],
+            "right": [b for b in (raw_layout.get("right") or []) if b in MOVABLE_BLOCK_IDS],
+        }
+        if bl["left"] or bl["right"]:
+            block_layout = bl
     doc = {
         'name': name,
         'description': (data.get('description') or '').strip(),
         'color': (data.get('color') or '#6366f1').strip(),
         'allowed_blocks': allowed_blocks,
         'traffic_alerts': traffic_alerts,
+        'block_layout': block_layout,
+        'fiche_simplifiee': bool(data.get('fiche_simplifiee', False)),
+        'can_close_fiche': bool(data.get('can_close_fiche', False)),
+        'allowed_categories': _parse_allowed_categories(data.get('allowed_categories')),
         'createdAt': datetime.now(timezone.utc),
         'updatedAt': datetime.now(timezone.utc),
     }
@@ -2251,6 +2485,22 @@ def update_group(gid):
             patch['traffic_alerts'] = [a for a in raw_alerts if isinstance(a, str)] or None
         else:
             patch['traffic_alerts'] = None
+    if 'block_layout' in data and not is_admin_grp:
+        raw_layout = data['block_layout']
+        if isinstance(raw_layout, dict):
+            bl = {
+                "left":  [b for b in (raw_layout.get("left") or []) if b in MOVABLE_BLOCK_IDS],
+                "right": [b for b in (raw_layout.get("right") or []) if b in MOVABLE_BLOCK_IDS],
+            }
+            patch['block_layout'] = bl if (bl["left"] or bl["right"]) else None
+        else:
+            patch['block_layout'] = None
+    if 'fiche_simplifiee' in data:
+        patch['fiche_simplifiee'] = bool(data.get('fiche_simplifiee', False))
+    if 'allowed_categories' in data:
+        patch['allowed_categories'] = _parse_allowed_categories(data.get('allowed_categories'))
+    if 'can_close_fiche' in data:
+        patch['can_close_fiche'] = bool(data.get('can_close_fiche', False))
     if not patch:
         return jsonify({"error": "Rien a modifier"}), 400
     patch['updatedAt'] = datetime.now(timezone.utc)
@@ -2285,7 +2535,8 @@ def delete_group(gid):
 DETECTION_TYPES = {
     "schedule_proximity", "schedule_transition",
     "traffic_cluster", "anpr_watchlist", "meteo_threshold",
-    "checkpoint_reassign",
+    "checkpoint_reassign", "checkpoint_error_burst",
+    "meteo_rain_onset", "pcorg_urgency",
 }
 
 @app.route('/admin/alertes')
@@ -2293,6 +2544,7 @@ DETECTION_TYPES = {
 def alertes_admin():
     payload = getattr(request, 'user_payload', {})
     return render_template('alertes_admin.html',
+                           user_roles=payload.get("roles", []),
                            user_firstname=payload.get("firstname", ""),
                            user_lastname=payload.get("lastname", ""),
                            user_email=payload.get("email", ""),
@@ -2478,6 +2730,11 @@ def _get_user_alert_slugs(payload):
     else:
         ug = COL_USER_GROUPS.find_one({"user_id": user_doc["_id"]})
         user_group_ids = (ug.get("groups") or []) if ug else []
+    # Utilisateurs sans groupe explicite -> inclure le groupe __default__
+    if not user_group_ids:
+        default_grp = db['cockpit_groups'].find_one({"is_default": True, "name": "__default__"})
+        if default_grp:
+            user_group_ids = [default_grp["_id"]]
     # Charger toutes les definitions activees
     all_defs = list(COL_ALERT_DEFS.find({"enabled": True}))
     allowed_slugs = []
@@ -2486,7 +2743,7 @@ def _get_user_alert_slugs(payload):
         if not def_groups:
             # Pas de restriction de groupe -> tout le monde la recoit
             allowed_slugs.append(d["slug"])
-        elif user_group_ids and any(gid in def_groups for gid in user_group_ids):
+        elif any(gid in def_groups for gid in user_group_ids):
             allowed_slugs.append(d["slug"])
     return allowed_slugs
 
@@ -2504,6 +2761,10 @@ def get_active_alerts():
         d['_id'] = str(d['_id'])
         for k, v in d.items():
             if hasattr(v, 'isoformat'):
+                # MongoDB stocke en UTC ; forcer le suffixe +00:00
+                # pour que le navigateur interprete correctement
+                if v.tzinfo is None:
+                    v = v.replace(tzinfo=timezone.utc)
                 d[k] = v.isoformat()
             elif isinstance(v, ObjectId):
                 d[k] = str(v)
@@ -2741,10 +3002,34 @@ def _parse_comment_history(comment):
     return entries
 
 
+VALID_URGENCY_LEVELS = {"EU", "UA", "UR", "IMP"}
+
+URGENCY_LABELS = {
+    "SECOURS": {
+        "EU": "D\u00e9tresse vitale", "UA": "Urgence absolue",
+        "UR": "Urgence relative", "IMP": "Impliqu\u00e9 m\u00e9dical"
+    },
+    "SECURITE": {
+        "EU": "Danger imm\u00e9diat", "UA": "Incident grave",
+        "UR": "Incident en cours", "IMP": "T\u00e9moin / impliqu\u00e9"
+    },
+    "MIXTE": {
+        "EU": "Urgence extr\u00eame", "UA": "Urgence prioritaire",
+        "UR": "Situation stable", "IMP": "Impliqu\u00e9"
+    }
+}
+
+def _urgency_type(category):
+    if category == "PCO.Secours":
+        return "SECOURS"
+    if category == "PCO.Securite":
+        return "SECURITE"
+    return "MIXTE"
+
 PCO_PROJECTION = {
     "_id": 1, "ts": 1, "close_ts": 1, "category": 1, "text": 1,
     "area": 1, "operator": 1, "severity": 1, "is_incident": 1,
-    "gps": 1, "status_code": 1,
+    "gps": 1, "status_code": 1, "niveau_urgence": 1, "bounce_rev": 1,
     "content_category.sous_classification": 1,
 }
 
@@ -2777,6 +3062,8 @@ def _pcorg_serialise(doc):
         "lat": coords[1] if coords and len(coords) >= 2 else None,
         "lon": coords[0] if coords and len(coords) >= 2 else None,
         "server": doc.get("server"),
+        "niveau_urgence": doc.get("niveau_urgence"),
+        "bounce_rev": doc.get("bounce_rev", 0),
     }
 
 
@@ -2829,6 +3116,32 @@ def pcorg_detail(doc_id):
     if comment_history is None:
         comment_history = _parse_comment_history(doc.get("comment"))
 
+    # Resoudre le groupe cockpit de l'operateur
+    operator_group = ""
+    server = doc.get("server") or ""
+    op_email = doc.get("operator_id_create") or ""
+    if op_email and server != "SQL":
+        op_user = db['users'].find_one({"email": op_email}, {"_id": 1})
+        if op_user:
+            op_ug = COL_USER_GROUPS.find_one({"user_id": op_user["_id"]})
+            op_gids = (op_ug.get("groups") or []) if op_ug else []
+            if op_gids:
+                op_groups = list(COL_GROUPS.find(
+                    {"_id": {"$in": op_gids}, "name": {"$nin": list(SYSTEM_GROUP_NAMES)}},
+                    {"name": 1}
+                ))
+                operator_group = ", ".join(g["name"] for g in op_groups)
+    # Fiches SQL : utiliser le groupe par defaut configure
+    if not operator_group:
+        sql_setting = db["cockpit_settings"].find_one({"_id": "sql_default_group"})
+        if sql_setting and sql_setting.get("group_id"):
+            try:
+                sql_grp = COL_GROUPS.find_one({"_id": ObjectId(sql_setting["group_id"])}, {"name": 1})
+                if sql_grp and sql_grp.get("name") not in SYSTEM_GROUP_NAMES:
+                    operator_group = sql_grp["name"]
+            except Exception:
+                pass
+
     return jsonify({
         "id": str(doc["_id"]),
         "sql_id": doc.get("sql_id"),
@@ -2842,6 +3155,7 @@ def pcorg_detail(doc_id):
         "area_id": area.get("id"),
         "area_desc": area.get("desc") or "",
         "operator": _clean_operator(doc.get("operator")),
+        "operator_group": operator_group,
         "operator_close": _clean_operator(doc.get("operator_close")),
         "severity": doc.get("severity", 0),
         "is_incident": doc.get("is_incident", False),
@@ -2853,6 +3167,8 @@ def pcorg_detail(doc_id):
         "lat": coords[1] if coords and len(coords) >= 2 else None,
         "lon": coords[0] if coords and len(coords) >= 2 else None,
         "server": doc.get("server"),
+        "niveau_urgence": doc.get("niveau_urgence"),
+        "bounce_rev": doc.get("bounce_rev", 0),
     })
 
 
@@ -2896,6 +3212,10 @@ def pcorg_create():
         except (ValueError, TypeError):
             pass
 
+    niveau_urgence = data.get("niveau_urgence")
+    if niveau_urgence and niveau_urgence not in VALID_URGENCY_LEVELS:
+        return jsonify({"error": "niveau_urgence invalide"}), 400
+
     area_desc = data.get("area_desc", "")
     content_cat = data.get("content_category") or {}
     initial_comment = (data.get("comment") or "").strip()
@@ -2934,6 +3254,7 @@ def pcorg_create():
         "operator_id_close": None,
         "status_code": 0,
         "severity": 0,
+        "niveau_urgence": niveau_urgence,
         "is_incident": False,
         "area": {"id": None, "desc": area_desc} if area_desc else None,
         "gps": gps,
@@ -2945,6 +3266,123 @@ def pcorg_create():
         "sql_id": None,
         "guid": None,
         "server": "COCKPIT",
+        "bounce_rev": 1,
+    }
+
+    db["pcorg"].insert_one(doc)
+    return jsonify({"ok": True, "id": doc_id})
+
+
+@app.route('/api/pcorg/quick-create', methods=['POST'])
+@role_required("user")
+def pcorg_quick_create():
+    """Creation rapide d'une fiche simplifiee (clic droit carte)."""
+    data = request.get_json(force=True)
+    event = data.get("event", "")
+    year = data.get("year", "")
+    category = data.get("category", "")
+    niveau_urgence = data.get("niveau_urgence", "")
+    if not event or not year or not category or not niveau_urgence:
+        return jsonify({"error": "event, year, category et niveau_urgence requis"}), 400
+    if not category.startswith("PCO."):
+        return jsonify({"error": "categorie invalide"}), 400
+    if niveau_urgence not in VALID_URGENCY_LEVELS:
+        return jsonify({"error": "niveau_urgence invalide"}), 400
+    try:
+        year = int(year)
+    except ValueError:
+        return jsonify({"error": "year invalide"}), 400
+
+    # Verifier permissions : categorie + groupe
+    config = COL_PCORG_CONFIG.find_one({"_id": "pcorg_lists"})
+    cat_fs = (config or {}).get("fiche_simplifiee", {})
+    if not cat_fs.get(category):
+        return jsonify({"error": "Fiche simplifiee non activee pour cette categorie"}), 403
+    if not _user_can_fiche_simplifiee(request.user_payload):
+        return jsonify({"error": "Votre groupe n'autorise pas les fiches simplifiees"}), 403
+
+    now = datetime.now(ZoneInfo("Europe/Paris"))
+    ts_str = now.isoformat()
+    user = request.user_payload
+    operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
+
+    lat = data.get("lat")
+    lon = data.get("lon")
+    carroye = (data.get("carroye") or "").strip()
+    gps = None
+    if lat is not None and lon is not None:
+        try:
+            gps = {"type": "Point", "coordinates": [float(lon), float(lat)]}
+        except (ValueError, TypeError):
+            pass
+
+    # Recuperer le(s) nom(s) de groupe de l'utilisateur
+    group_name = ""
+    email = user.get("email", "")
+    user_doc = db['users'].find_one({"email": email}, {"_id": 1})
+    if user_doc:
+        ug = COL_USER_GROUPS.find_one({"user_id": user_doc["_id"]})
+        gids = (ug.get("groups") or []) if ug else []
+        if gids:
+            groups = list(COL_GROUPS.find(
+                {"_id": {"$in": gids}, "name": {"$nin": list(SYSTEM_GROUP_NAMES)}},
+                {"name": 1}
+            ))
+            group_name = ", ".join(g["name"] for g in groups)
+    if not group_name:
+        app_role = user.get("app_role", "user")
+        if app_role == "admin" or user.get("is_super_admin"):
+            group_name = "Admin"
+
+    # Generer la description automatique
+    utype = _urgency_type(category)
+    label = URGENCY_LABELS.get(utype, URGENCY_LABELS["MIXTE"]).get(niveau_urgence, niveau_urgence)
+    text = f"Cette fiche a ete generee en procedure d'urgence par {operator_name}"
+    if group_name:
+        text += f" du {group_name}"
+
+    doc_id = _pcorg_mk_uuid(event, year, ts_str, category, text, "", str(user.get("email", "")))
+
+    patrouille = (data.get("patrouille") or "").strip()
+    content_category = {}
+    if carroye:
+        content_category["carroye"] = carroye
+    if patrouille:
+        content_category["patrouille"] = patrouille
+
+    doc = {
+        "_id": doc_id,
+        "event": event,
+        "year": year,
+        "ts": now,
+        "timestamp_iso": ts_str,
+        "close_ts": None,
+        "close_iso": None,
+        "category": category,
+        "source": category,
+        "text": text,
+        "text_full": text,
+        "comment": "",
+        "comment_history": [],
+        "operator": operator_name,
+        "operator_id_create": user.get("email", ""),
+        "operator_close": None,
+        "operator_id_close": None,
+        "status_code": 0,
+        "severity": 0,
+        "niveau_urgence": niveau_urgence,
+        "is_incident": False,
+        "area": None,
+        "gps": gps,
+        "group": None,
+        "content_category": content_category,
+        "extracted": {"phones": None, "plates": None},
+        "tags": [],
+        "synced_at": None,
+        "sql_id": None,
+        "guid": None,
+        "server": "COCKPIT",
+        "bounce_rev": 1,
     }
 
     db["pcorg"].insert_one(doc)
@@ -2975,6 +3413,11 @@ def pcorg_update(doc_id):
         sets["source"] = data["category"]
     if "area_desc" in data:
         sets["area.desc"] = data["area_desc"]
+    if "niveau_urgence" in data:
+        nu = data["niveau_urgence"]
+        if nu and nu not in VALID_URGENCY_LEVELS:
+            return jsonify({"error": "niveau_urgence invalide"}), 400
+        sets["niveau_urgence"] = nu or None
 
     # GPS
     lat = data.get("lat")
@@ -3030,6 +3473,7 @@ def pcorg_add_comment(doc_id):
         {
             "$set": {"comment": new_comment},
             "$push": {"comment_history": history_entry},
+            "$inc": {"bounce_rev": 1},
         }
     )
     return jsonify({"ok": True, "entry": history_entry})
@@ -3058,9 +3502,61 @@ def pcorg_update_gps(doc_id):
     return jsonify({"ok": True})
 
 
+@app.route('/api/pcorg/set-urgency/<doc_id>', methods=['POST'])
+@role_required("user")
+def pcorg_set_urgency(doc_id):
+    """Change le niveau d'urgence et consigne l'action dans la chronologie."""
+    data = request.get_json(force=True)
+    niveau = data.get("niveau_urgence")
+    if niveau and niveau not in VALID_URGENCY_LEVELS:
+        return jsonify({"error": "niveau_urgence invalide"}), 400
+
+    doc = db["pcorg"].find_one({"_id": doc_id}, {"niveau_urgence": 1, "category": 1})
+    if not doc:
+        return jsonify({"error": "introuvable"}), 404
+
+    old_niveau = doc.get("niveau_urgence")
+    if old_niveau == niveau:
+        return jsonify({"ok": True, "unchanged": True})
+
+    user = request.user_payload
+    operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
+    now = datetime.now(ZoneInfo("Europe/Paris"))
+    ts_fmt = now.strftime("%d/%m/%Y %H:%M:%S")
+
+    cat = doc.get("category", "")
+    utype = _urgency_type(cat)
+    labels = URGENCY_LABELS.get(utype, URGENCY_LABELS["MIXTE"])
+    old_label = labels.get(old_niveau, old_niveau or "Aucun")
+    new_label = labels.get(niveau, niveau or "Aucun") if niveau else "Aucun"
+    action_text = f"Niveau d'urgence : {old_label} \u2192 {new_label}"
+
+    comment_line = f"{ts_fmt} , {operator_name}\n {action_text}\n"
+    history_entry = {
+        "ts": now.isoformat(),
+        "operator": operator_name,
+        "text": action_text,
+    }
+
+    old_comment = (db["pcorg"].find_one({"_id": doc_id}, {"comment": 1}) or {}).get("comment") or ""
+    new_comment = old_comment + comment_line if old_comment else comment_line
+
+    db["pcorg"].update_one(
+        {"_id": doc_id},
+        {
+            "$set": {"niveau_urgence": niveau, "comment": new_comment},
+            "$push": {"comment_history": history_entry},
+            "$inc": {"bounce_rev": 1},
+        }
+    )
+    return jsonify({"ok": True, "entry": history_entry})
+
+
 @app.route('/api/pcorg/close/<doc_id>', methods=['POST'])
 @role_required("user")
 def pcorg_close(doc_id):
+    if not _user_can_close_fiche(request.user_payload):
+        return jsonify({"error": "Votre groupe n'autorise pas la cloture de fiches"}), 403
     user = request.user_payload
     operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
     now = datetime.now(ZoneInfo("Europe/Paris"))
@@ -3098,6 +3594,16 @@ def pcorg_close(doc_id):
             "$push": {"comment_history": history_entry},
         }
     )
+    return jsonify({"ok": True})
+
+
+@app.route('/api/pcorg/delete/<doc_id>', methods=['DELETE'])
+@role_required("admin")
+def pcorg_delete(doc_id):
+    """Supprime une fiche d'intervention (admin uniquement)."""
+    result = db["pcorg"].delete_one({"_id": doc_id})
+    if result.deleted_count == 0:
+        return jsonify({"error": "introuvable"}), 404
     return jsonify({"ok": True})
 
 
@@ -3186,7 +3692,7 @@ def get_pcorg_config():
 @role_required("admin")
 def update_pcorg_config():
     data = request.get_json(force=True)
-    allowed = {"sous_classifications", "intervenants", "services"}
+    allowed = {"sous_classifications", "intervenants", "services", "fiche_simplifiee"}
     update = {k: v for k, v in data.items() if k in allowed}
     if not update:
         return jsonify({"error": "rien a mettre a jour"}), 400
@@ -3196,6 +3702,60 @@ def update_pcorg_config():
         upsert=True,
     )
     return jsonify({"ok": True})
+
+
+PCORG_SYNC_CONTROL_ID = "pcorg_sync_control"
+
+@app.route('/api/pcorg/sync-control', methods=['GET'])
+@role_required("user")
+def pcorg_sync_control_get():
+    """Retourne l'etat du controle de sync PC Organisation."""
+    doc = db["pcorg_sync_config"].find_one({"_id": PCORG_SYNC_CONTROL_ID}) or {}
+    doc.pop("_id", None)
+    for k in ("last_run", "last_success"):
+        if hasattr(doc.get(k), "isoformat"):
+            doc[k] = doc[k].isoformat()
+    return jsonify(doc)
+
+
+@app.route('/api/pcorg/sync-control', methods=['PUT'])
+@role_required("admin")
+def pcorg_sync_control_set():
+    """Active ou desactive la sync automatique PC Organisation."""
+    data = request.get_json(force=True)
+    update = {}
+    if "actif" in data:
+        update["actif"] = bool(data["actif"])
+    if not update:
+        return jsonify({"error": "rien a mettre a jour"}), 400
+    db["pcorg_sync_config"].update_one(
+        {"_id": PCORG_SYNC_CONTROL_ID},
+        {"$set": update},
+        upsert=True,
+    )
+    return jsonify({"ok": True})
+
+
+@app.route('/api/pcorg/force-sync', methods=['POST'])
+@role_required("admin")
+def pcorg_force_sync():
+    """Lance une synchronisation PC Organisation SQL -> MongoDB a la demande."""
+    script = os.path.join(os.path.dirname(__file__), "pcorg_sync.py")
+    python_exe = "E:\\TITAN\\production\\titan_prod\\Scripts\\python.exe"
+    data = request.get_json(force=True) if request.is_json else {}
+    cmd = [python_exe, "-X", "utf8", script, "--force"]
+    if data.get("full"):
+        cmd.append("--full")
+    try:
+        subprocess.Popen(
+            cmd,
+            cwd=os.path.dirname(__file__),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return jsonify({"ok": True, "message": "Sync lancee en arriere-plan"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 ################################################################################
@@ -3213,10 +3773,11 @@ HSH_GLOBAL_ID = "___GLOBAL___"
 def live_controle_page():
     payload = getattr(request, 'user_payload', {})
     user_roles = payload.get("roles", [])
-    user_name = payload.get("firstname", "") + " " + payload.get("lastname", "")
     return render_template('live_controle.html',
-                           user_name=user_name.strip(),
-                           user_roles=user_roles)
+                           user_roles=user_roles,
+                           user_firstname=payload.get("firstname", ""),
+                           user_lastname=payload.get("lastname", ""),
+                           user_email=payload.get("email", ""))
 
 
 def _hsh_read_global():

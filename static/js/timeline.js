@@ -2082,8 +2082,8 @@ async function openEditModalFromDrawer(dateStr, item) {
       if (this._enabled) return;
       this._enabled = true;
       this._lineEl.hidden = false;
-      this._tick(); // immédiat
-      this._timer = setInterval(()=>this._tick(), this._intervalMs);
+      this._tick(true); // immediat, sans smooth
+      this._timer = setInterval(()=>this._tick(false), this._intervalMs);
       console.info('[NowLine] auto-scroll ON');
     },
     stop(){
@@ -2096,9 +2096,10 @@ async function openEditModalFromDrawer(dateStr, item) {
     },
     toggle(){ this._enabled ? this.stop() : this.start(); },
 
-    _tick(){
+    _tick(instant){
       const container = document.querySelector('.timeline-container');
       if (!container || !this._lineEl) return;
+      const scrollBehavior = instant ? 'instant' : 'smooth';
 
       // Offset du container par rapport a #timeline-main (hauteur day-nav-bar)
       const _mainEl = document.getElementById('timeline-main');
@@ -2141,14 +2142,14 @@ async function openEditModalFromDrawer(dateStr, item) {
           const elRect = lastEl.getBoundingClientRect();
           const y = elRect.bottom - contRect.top + container.scrollTop + 4;
           this._lineEl.style.top = (y + _contOff) + 'px';
-          container.scrollTo({ top: Math.max(0, y - container.clientHeight + 40), behavior: 'smooth' });
+          container.scrollTo({ top: Math.max(0, y - container.clientHeight + 40), behavior: scrollBehavior });
         } else if (allAfter) {
           const firstSection = map[0].el;
           const contRect = container.getBoundingClientRect();
           const secRect = firstSection.getBoundingClientRect();
           const y = secRect.top - contRect.top + container.scrollTop - 16;
           this._lineEl.style.top = Math.max(_contOff, y + _contOff) + 'px';
-          container.scrollTo({ top: 0, behavior: 'smooth' });
+          container.scrollTo({ top: 0, behavior: scrollBehavior });
         } else {
           const past = map.filter(x => x.iso < nowYMD);
           const lastPast = past[past.length - 1].el;
@@ -2156,7 +2157,7 @@ async function openEditModalFromDrawer(dateStr, item) {
           const secRect = lastPast.getBoundingClientRect();
           const y = secRect.bottom - contRect.top + container.scrollTop + 4;
           this._lineEl.style.top = (y + _contOff) + 'px';
-          container.scrollTo({ top: Math.max(0, y - this._lineTopPx), behavior: 'smooth' });
+          container.scrollTo({ top: Math.max(0, y - this._lineTopPx), behavior: scrollBehavior });
         }
         return;
       }
@@ -2188,10 +2189,9 @@ async function openEditModalFromDrawer(dateStr, item) {
 
         const desiredScrollTop = Math.max(0, sectionAbsTop - this._lineTopPx);
         const clamped = Math.max(0, Math.min(desiredScrollTop, maxScroll));
-        container.scrollTo({ top: clamped, behavior: 'smooth' });
+        container.scrollTo({ top: clamped, behavior: scrollBehavior });
 
         if (clamped !== desiredScrollTop) {
-          // butée → place la ligne sur le haut de section visible
           const sectionTopViewportY = secRect.top - contRect.top;
           placeLineViewportY(sectionTopViewportY);
         } else {
@@ -2205,59 +2205,71 @@ async function openEditModalFromDrawer(dateStr, item) {
       // --- Minute cible dans la section ---
       let minuteTarget;
       if (targetISO === nowYMD) {
+        // Chercher la premiere carte APRES maintenant
         const next = cards.find(c => c.minute >= nowMin);
-        minuteTarget = next ? next.minute : cards[cards.length-1].minute;
+        if (next) {
+          minuteTarget = next.minute;
+        } else {
+          // Toutes les cartes sont dans le passe -> derniere carte
+          minuteTarget = cards[cards.length-1].minute;
+        }
       } else if (targetISO < nowYMD) {
-        minuteTarget = cards[cards.length-1].minute; // fin de journée passée
+        minuteTarget = cards[cards.length-1].minute;
       } else {
-        minuteTarget = cards[0].minute;              // début de journée future
+        minuteTarget = cards[0].minute;
       }
 
-      // --- Carte pivot ---
+      // --- Carte pivot = prochaine carte future ---
       const pivot = cards.find(c => c.minute >= minuteTarget) || cards[cards.length-1];
+
+      // --- Aujourd'hui : positionner la ligne AU-DESSUS de la carte pivot ---
+      // avec un offset proportionnel au temps restant (max 60px)
+      let pivotOffset = 0;
+      if (targetISO === nowYMD && pivot.minute > nowMin) {
+        // Plus on est loin du prochain evenement, plus l'offset est grand (cap 60px)
+        const gap = pivot.minute - nowMin;
+        pivotOffset = Math.min(60, Math.max(20, gap * 0.3));
+      }
 
       // --- Position absolue du top de la carte pivot ---
       const cardRect = pivot.el.getBoundingClientRect();
-      const pivotAbsTop = currentScroll + (cardRect.top - contRect.top);
+      const pivotAbsTop = currentScroll + (cardRect.top - contRect.top) - pivotOffset;
 
-      // On veut mettre le top de la carte à _lineTopPx
+      // On veut mettre la ligne a _lineTopPx
       const desiredScrollTop = Math.max(0, pivotAbsTop - this._lineTopPx);
       const clamped = Math.max(0, Math.min(desiredScrollTop, maxScroll));
-      container.scrollTo({ top: clamped, behavior: 'smooth' });
+      container.scrollTo({ top: clamped, behavior: scrollBehavior });
 
-      // --- Gestion des butées ---
+      // --- Gestion des butees ---
       if (clamped !== desiredScrollTop) {
-        const bottomSafe = 8;   // marge au-dessus du bas visible
-        const topSafe    = 8;   // marge sous le haut visible
+        const bottomSafe = 8;
+        const topSafe    = 8;
 
         if (clamped === maxScroll) {
-          // ➜ Butée BAS : ligne au bas de la DERNIÈRE carte
-          const lastCard = cards[cards.length - 1].el;
-          const lastRect = lastCard.getBoundingClientRect();
-          const lastBottomViewportY = lastRect.bottom - contRect.top;
-          const y = Math.min(container.clientHeight - bottomSafe, lastBottomViewportY);
+          // Butee BAS : placer la ligne au-dessus de la carte pivot
+          const pivotTopViewportY = cardRect.top - contRect.top - pivotOffset;
+          const y = Math.min(container.clientHeight - bottomSafe, pivotTopViewportY);
           placeLineViewportY(y);
         } else if (clamped === 0) {
-          // ➜ Butée HAUT : ligne au haut de la PREMIÈRE carte
           const firstCard = cards[0].el;
           const firstRect = firstCard.getBoundingClientRect();
-          const firstTopViewportY = firstRect.top - contRect.top;
+          const firstTopViewportY = firstRect.top - contRect.top - pivotOffset;
           const y = Math.max(topSafe, firstTopViewportY);
           placeLineViewportY(y);
         } else {
-          // Sécurité : coller à la carte pivot
-          const pivotTopViewportY = cardRect.top - contRect.top;
+          const pivotTopViewportY = cardRect.top - contRect.top - pivotOffset;
           placeLineViewportY(pivotTopViewportY);
         }
       } else {
-        // Pas de butée → position standard
         placeLineViewportY(this._lineTopPx);
       }
 
       console.info('[NowLine] tick', {
         section: targetISO,
+        nowMin,
         minuteTarget,
         pivotMinute: pivot.minute,
+        pivotOffset,
         clampedTo: clamped,
         maxScroll
       });

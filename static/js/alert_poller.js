@@ -17,6 +17,15 @@
     var _seenAlertIds = {};
     var _seenAlertCount = 0;
     var _firstPollDone = false;
+
+    // Restaurer les IDs vus depuis sessionStorage (survit aux changements de page)
+    try {
+        var stored = sessionStorage.getItem("cockpit-seen-alerts");
+        if (stored) {
+            _seenAlertIds = JSON.parse(stored);
+            _seenAlertCount = Object.keys(_seenAlertIds).length;
+        }
+    } catch(e) {}
     var _consecutiveErrors = 0;
 
     // --- File d'attente d'alertes ---
@@ -30,7 +39,11 @@
         "anpr-watchlist": "local_police",
         "meteo-vent": "air",
         "meteo-pluie": "umbrella",
-        "checkpoint-reassign": "swap_horiz"
+        "meteo-pluie-imminente": "rainy",
+        "checkpoint-reassign": "swap_horiz",
+        "checkpoint-error-burst": "error",
+        "pcorg-securite-ua": "shield",
+        "pcorg-secours-ua": "local_hospital"
     };
     var TITLE_MAP = {
         opening: "OUVERTURE IMMINENTE", opened: "SITE OUVERT",
@@ -39,8 +52,34 @@
         "anpr-watchlist": "PLAQUE SURVEILLEE DETECTEE",
         "meteo-vent": "ALERTE VENT",
         "meteo-pluie": "ALERTE PLUIE",
-        "checkpoint-reassign": "CHANGEMENT AFFECTATION CHECKPOINT"
+        "meteo-pluie-imminente": "PLUIE IMMINENTE",
+        "checkpoint-error-burst": "RAFALE ERREURS CHECKPOINT",
+        "checkpoint-reassign": "CHANGEMENT AFFECTATION CHECKPOINT",
+        "pcorg-securite-ua": "ALERTE S\u00c9CURIT\u00c9",
+        "pcorg-secours-ua": "ALERTE SECOURS"
     };
+
+    // Labels urgence par type de categorie
+    var URGENCY_LABELS_ALERT = {
+        SECOURS:  { EU: "D\u00e9tresse vitale", UA: "Urgence absolue", UR: "Urgence relative", IMP: "Impliqu\u00e9 m\u00e9dical" },
+        SECURITE: { EU: "Danger imm\u00e9diat", UA: "Incident grave", UR: "Incident en cours", IMP: "T\u00e9moin / impliqu\u00e9" },
+        MIXTE:    { EU: "Urgence extr\u00eame", UA: "Urgence prioritaire", UR: "Situation stable", IMP: "Impliqu\u00e9" }
+    };
+    var URGENCY_ENGAGE = {
+        EU: "Engagement imm\u00e9diat toutes ressources",
+        UA: "Engagement prioritaire",
+        UR: "Engagement planifi\u00e9 selon ressources disponibles",
+        IMP: "Suivi en main courante, aucun engagement d'urgence"
+    };
+    function _urgencyType(cat) {
+        if (cat === "PCO.Secours") return "SECOURS";
+        if (cat === "PCO.Securite") return "SECURITE";
+        return "MIXTE";
+    }
+    function _urgencyLabel(cat, level) {
+        var t = _urgencyType(cat);
+        return (URGENCY_LABELS_ALERT[t] || URGENCY_LABELS_ALERT.MIXTE)[level] || level;
+    }
 
     // --- Preferences alertes (localStorage) ---
     function _getAlertPrefs() {
@@ -63,16 +102,22 @@
         try {
             var d = new Date(isoStr);
             if (isNaN(d.getTime())) return "";
-            var day = String(d.getDate()).padStart(2, "0");
-            var month = String(d.getMonth() + 1).padStart(2, "0");
-            var hours = String(d.getHours()).padStart(2, "0");
-            var mins = String(d.getMinutes()).padStart(2, "0");
-            return day + "/" + month + " a " + hours + ":" + mins;
+            var opts = { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false };
+            var parts = new Intl.DateTimeFormat("fr-FR", opts).formatToParts(d);
+            var p = {};
+            parts.forEach(function(x) { p[x.type] = x.value; });
+            var nowParts = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit" }).formatToParts(new Date());
+            var np = {};
+            nowParts.forEach(function(x) { np[x.type] = x.value; });
+            var isToday = p.day === np.day && p.month === np.month;
+            return isToday
+                ? (p.hour || "00") + ":" + (p.minute || "00")
+                : (p.day || "00") + "/" + (p.month || "00") + " a " + (p.hour || "00") + ":" + (p.minute || "00");
         } catch(e) { return ""; }
     }
 
     // --- File d'attente : empiler et afficher une par une ---
-    function enqueueAlert(type, triggeredAt, message, onView) {
+    function enqueueAlert(type, triggeredAt, message, onView, actionData) {
         // Historiser si la fonction existe (page index avec widget alertes)
         var timeStr = fmtAlertDateTime(triggeredAt);
         if (typeof window._pushAlertHistory === "function") {
@@ -81,7 +126,7 @@
 
         if (isAlertMuted(type)) return;
 
-        _alertQueue.push({ type: type, triggeredAt: triggeredAt, message: message, onView: onView });
+        _alertQueue.push({ type: type, triggeredAt: triggeredAt, message: message, onView: onView, actionData: actionData || {} });
 
         // Si pas d'overlay active, afficher la premiere
         if (!_alertOverlay) {
@@ -148,14 +193,68 @@
         var body = document.createElement("div");
         body.className = "critical-alert-body";
 
-        // Date et heure
-        var timeEl = document.createElement("div");
-        timeEl.className = "critical-alert-time";
-        timeEl.textContent = timeStr;
+        // Contenu specifique PCO : enrichi avec urgence + engagement + operateur
+        var isPco = type.indexOf("pcorg-") === 0;
+        var actionData = item.actionData || {};
 
-        var sub = document.createElement("div");
-        sub.className = "critical-alert-sub";
-        sub.textContent = item.message;
+        if (isPco && actionData.niveau_urgence && actionData.category) {
+            var urgLabel = _urgencyLabel(actionData.category, actionData.niveau_urgence);
+            var engageDesc = URGENCY_ENGAGE[actionData.niveau_urgence] || "";
+
+            // Badge urgence
+            var urgBadge = document.createElement("div");
+            urgBadge.className = "critical-alert-urgency-badge critical-alert-urgency-" + actionData.niveau_urgence;
+            urgBadge.textContent = actionData.niveau_urgence + " \u2014 " + urgLabel;
+            body.appendChild(urgBadge);
+
+            // Description intervention
+            var sub = document.createElement("div");
+            sub.className = "critical-alert-message";
+            // Extraire juste le texte (avant " — Zone" ou " — Operateur")
+            var msgText = (item.message || "").split(" \u2014 ")[0];
+            sub.textContent = msgText;
+            body.appendChild(sub);
+
+            // Engagement
+            if (engageDesc) {
+                var engEl = document.createElement("div");
+                engEl.className = "critical-alert-engage";
+                engEl.textContent = engageDesc;
+                body.appendChild(engEl);
+            }
+
+            // Operateur + heure en petite ligne
+            var metaLine = document.createElement("div");
+            metaLine.className = "critical-alert-meta";
+            var opParts = (item.message || "").split(" \u2014 ");
+            var opName = "";
+            for (var pi = 0; pi < opParts.length; pi++) {
+                if (opParts[pi].indexOf("Operateur") === 0) {
+                    opName = opParts[pi].replace("Operateur : ", "");
+                }
+            }
+            var metaText = timeStr;
+            if (opName) metaText += " \u2014 " + opName;
+            // Ajouter le groupe si disponible
+            var userGroups = window.__userGroups;
+            if (userGroups && userGroups.length) {
+                var groupNames = userGroups.map(function(g) { return g.name; }).join(", ");
+                if (groupNames && opName) metaText += " (" + groupNames + ")";
+            }
+            metaLine.textContent = metaText;
+            body.appendChild(metaLine);
+        } else {
+            // Message standard (non PCO)
+            var sub = document.createElement("div");
+            sub.className = "critical-alert-message";
+            sub.textContent = item.message;
+            body.appendChild(sub);
+
+            var timeEl = document.createElement("div");
+            timeEl.className = "critical-alert-time";
+            timeEl.textContent = timeStr;
+            body.appendChild(timeEl);
+        }
 
         // Compteur d'alertes restantes
         var counter = document.createElement("div");
@@ -181,6 +280,7 @@
             var viewLabel = "Voir sur la carte";
             if (type === "anpr-watchlist") viewLabel = "Voir sur LAPI";
             else if (type === "checkpoint-reassign") viewLabel = "Voir Controle acces";
+            else if (isPco) viewLabel = "Ouvrir la fiche";
             btnView.textContent = viewLabel;
             btnView.addEventListener("click", function() {
                 var cb = item.onView;
@@ -195,8 +295,8 @@
             btnRow.appendChild(btn);
         }
 
-        body.appendChild(timeEl);
         body.appendChild(sub);
+        body.appendChild(timeEl);
         body.appendChild(counter);
         body.appendChild(btnRow);
         box.appendChild(header);
@@ -209,7 +309,7 @@
     }
 
     // Exposer globalement
-    window.showCriticalAlert = enqueueAlert;
+    window.showCriticalAlert = enqueueAlert; // (type, triggeredAt, message, onView, actionData)
 
     // --- Construction du callback "Voir" ---
     function _buildOnView(slug, a) {
@@ -238,14 +338,27 @@
             };
             fn._actionData = a.actionData || {};
         }
+        if (slug.indexOf("pcorg-") === 0 && a.actionData && a.actionData.pcorg_id) {
+            fn = function() {
+                if (window.PcorgUI && window.PcorgUI.openFiche) {
+                    window.PcorgUI.openFiche(a.actionData.pcorg_id);
+                }
+            };
+            fn._actionData = a.actionData;
+        }
         return fn;
     }
 
     // --- Purge memoire des IDs vus ---
+    function _persistSeen() {
+        try { sessionStorage.setItem("cockpit-seen-alerts", JSON.stringify(_seenAlertIds)); } catch(e) {}
+    }
+
     function _markSeen(id) {
         if (_seenAlertIds[id]) return;
         _seenAlertIds[id] = true;
         _seenAlertCount++;
+        _persistSeen();
         if (_seenAlertCount > MAX_SEEN_IDS) {
             // Purger la moitie la plus ancienne
             var keys = Object.keys(_seenAlertIds);
@@ -254,6 +367,7 @@
                 delete _seenAlertIds[keys[i]];
             }
             _seenAlertCount = Object.keys(_seenAlertIds).length;
+            _persistSeen();
         }
     }
 
@@ -287,7 +401,7 @@
                     recentAlerts.forEach(function(a) {
                         var slug = a.definition_slug || "";
                         var onView = _buildOnView(slug, a);
-                        enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView);
+                        enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, a.actionData);
                     });
                     return;
                 }

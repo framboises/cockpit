@@ -495,7 +495,12 @@
 
       // Save current view, lock map to grid bounds, center
       _gridPrevBounds = map.getBounds();
-      map.fitBounds(gridBounds, { padding: [30, 30], animate: true });
+      // Zoom avant seulement si on est trop dezoome pour voir le carroyage ;
+      // si on est deja plus zoome, on garde le niveau actuel.
+      var fitZoom = map.getBoundsZoom(gridBounds, false, [30, 30]);
+      if (map.getZoom() < fitZoom) {
+        map.fitBounds(gridBounds, { padding: [30, 30], animate: true });
+      }
       setTimeout(function () {
         map.setMaxBounds(gridBounds.pad(0.02));
         map.setMinZoom(15);
@@ -833,6 +838,11 @@
 
   function buildStickyHeaders() {
     if (_gridHeadersEl) _gridHeadersEl.remove();
+    // Reset highlight state (old DOM elements are now detached)
+    _gridColBand = null;
+    _gridRowBand = null;
+    _gridHighlightCol = null;
+    _gridHighlightRow = null;
     if (!_gridMeta) return;
 
     var container = document.getElementById("cockpit-map");

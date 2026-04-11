@@ -19,6 +19,9 @@
     .alertes-admin-table td.col-actions { display:flex; gap:2px; align-items:center; justify-content:center; }
     .alertes-admin-table .col-desc { max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .alertes-admin-table .col-id { max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .pcorg-level-btn { border:1px solid var(--lc); color:var(--lc); background:transparent; padding:4px 10px; border-radius:6px; font-size:0.78rem; cursor:pointer; transition:all 0.15s; }
+    .pcorg-level-btn:hover { background:color-mix(in srgb, var(--lc) 12%, transparent); }
+    .pcorg-level-btn.selected { background:var(--lc); color:#fff; }
   </style>
 </head>
 
@@ -40,6 +43,7 @@
         <span class="material-symbols-outlined">dashboard</span>
         <span class="label">Cockpit</span>
       </a>
+      {% if "admin" in user_roles %}
       <a href="/live-controle" class="nav-btn">
         <span class="material-symbols-outlined">sensors</span>
         <span class="label">Controle acces</span>
@@ -60,7 +64,14 @@
         <span class="material-symbols-outlined">notifications_active</span>
         <span class="label">Alertes</span>
       </a>
+      {% endif %}
     </nav>
+
+    <!-- AI Assistant teaser -->
+    <div class="sidebar-ai" title="Assistant IA (bientot)">
+        <span class="material-symbols-outlined">smart_toy</span>
+        <span>Assistant IA</span>
+    </div>
 
     <div class="sidebar-footer">
       <div class="sidebar-user-info">
@@ -70,6 +81,10 @@
           <span class="sidebar-user-email">{{ user_email }}</span>
         </div>
       </div>
+      <a href="/logout_redirect" class="nav-btn nav-btn-danger">
+        <span class="material-symbols-outlined">logout</span>
+        <span class="label">Deconnexion</span>
+      </a>
     </div>
   </aside>
 
@@ -300,6 +315,12 @@
       </section>
 
     </div>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+        <span class="footer-text">TITAN &mdash; Techniques d'Integration Topographique avec Navigation</span>
+    </footer>
+
   </div>
 </div>
 
@@ -344,12 +365,36 @@
               <option value="traffic_cluster">Trafic - cluster d'incidents</option>
               <option value="anpr_watchlist">LAPI - plaque surveillee</option>
               <option value="meteo_threshold">Meteo - seuil depassement</option>
+              <option value="meteo_rain_onset">Meteo - pluie imminente</option>
+              <option value="checkpoint_reassign">Controle acces - reaffectation</option>
+              <option value="checkpoint_error_burst">Controle acces - rafale erreurs</option>
+              <option value="pcorg_urgency">Main courante - niveau urgence</option>
             </select>
           </label>
         </div>
-        <div class="form-row">
+        <div class="form-row" id="params-raw-row">
           <label>Parametres (JSON)</label>
           <textarea name="params" class="form-input" rows="3" placeholder='{"minutes_before": 30}'></textarea>
+        </div>
+        <div class="form-row" id="params-pcorg-row" style="display:none;">
+          <label>Categorie main courante</label>
+          <select id="pcorg-param-category" class="form-input">
+            <option value="PCO.">Toutes (PCO.*)</option>
+            <option value="PCO.Securite">PCO.Securite</option>
+            <option value="PCO.Secours">PCO.Secours</option>
+            <option value="PCO.Flux">PCO.Flux</option>
+            <option value="PCO.Technique">PCO.Technique</option>
+            <option value="PCO.Information">PCO.Information</option>
+            <option value="PCS.Information">PCS.Information</option>
+            <option value="PCS.Surete">PCS.Surete</option>
+          </select>
+          <label style="margin-top:8px;">Niveau d'urgence minimum</label>
+          <div id="pcorg-param-levels" style="display:flex; gap:6px; margin-top:4px;">
+            <button type="button" class="btn btn-sm pcorg-level-btn" data-level="IMP" style="--lc:#6b7280;">IMP - Implique</button>
+            <button type="button" class="btn btn-sm pcorg-level-btn" data-level="UR" style="--lc:#eab308;">UR - Urgence relative</button>
+            <button type="button" class="btn btn-sm pcorg-level-btn selected" data-level="UA" style="--lc:#f97316;">UA - Urgence absolue</button>
+            <button type="button" class="btn btn-sm pcorg-level-btn" data-level="EU" style="--lc:#dc2626;">EU - Detresse vitale</button>
+          </div>
         </div>
         <div class="form-row">
           <label>Priorite (ordre d'affichage)

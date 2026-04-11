@@ -34,6 +34,7 @@
         <span class="material-symbols-outlined">dashboard</span>
         <span class="label">Cockpit</span>
       </a>
+      {% if "admin" in user_roles %}
       <a href="/live-controle" class="nav-btn">
         <span class="material-symbols-outlined">sensors</span>
         <span class="label">Controle acces</span>
@@ -54,6 +55,7 @@
         <span class="material-symbols-outlined">notifications_active</span>
         <span class="label">Alertes</span>
       </a>
+      {% endif %}
     </nav>
 
     <div class="sidebar-panel">
@@ -65,6 +67,12 @@
         <label for="year-select">Annee</label>
         <select id="year-select"></select>
       </div>
+    </div>
+
+    <!-- AI Assistant teaser -->
+    <div class="sidebar-ai" title="Assistant IA (bientot)">
+        <span class="material-symbols-outlined">smart_toy</span>
+        <span>Assistant IA</span>
     </div>
 
     <div class="sidebar-footer">
@@ -134,7 +142,14 @@
           <span class="material-symbols-outlined collapse-icon">expand_more</span>
         </header>
         <div class="widget-body collapsible" id="groups-body">
-          <div class="table-responsive">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px; font-size:0.82rem;">
+          <label style="display:flex; align-items:center; gap:6px; white-space:nowrap; color:var(--muted);">
+            <span class="material-symbols-outlined" style="font-size:16px;">database</span>
+            Groupe fiches SQL :
+          </label>
+          <select id="sql-default-group" class="form-input" style="width:auto; min-width:160px; font-size:0.82rem; padding:4px 8px;"></select>
+        </div>
+        <div class="table-responsive">
             <table id="groups-table" class="table table-striped table-hover">
               <thead>
                 <tr>
@@ -143,7 +158,7 @@
                   <th>Description</th>
                   <th>Membres</th>
                   <th>Blocs</th>
-                  <th style="width:72px">Actions</th>
+                  <th style="white-space:nowrap">Actions</th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -341,9 +356,33 @@
       <section class="widget-card" style="margin-top:16px;">
         <header class="widget-header" data-collapsible data-section="pcorg-config">
           <h3>Main courante (PCO)</h3>
+          <span id="pcorg-sync-dot" class="status-dot" style="margin-left:10px;" title=""></span>
+          <span id="pcorg-sync-header-text" style="font-size:0.78rem; color:var(--muted); margin-left:8px;"></span>
           <span class="material-symbols-outlined collapse-icon">expand_more</span>
         </header>
         <div class="widget-body collapsible" id="pcorg-config-body">
+
+          <!-- Sync SQL -> MongoDB -->
+          <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; padding:10px; border:1px solid var(--line); border-radius:var(--radius-sm);">
+            <span class="material-symbols-outlined" id="pcorg-sync-icon" style="font-size:22px; color:var(--muted);">sync</span>
+            <div style="flex:1;">
+              <div style="font-size:13px; font-weight:600;">Synchronisation SQL</div>
+              <div style="font-size:11px; color:var(--muted);" id="pcorg-sync-status">Chargement...</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="pcorg-sync-toggle" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div style="display:flex; gap:8px; margin-bottom:16px;">
+            <button class="btn btn-sm" id="pcorg-force-sync-btn" title="Lancer une sync maintenant">
+              <span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">play_arrow</span> Sync maintenant
+            </button>
+            <button class="btn btn-sm" id="pcorg-force-full-btn" title="Resynchronisation complete depuis SQL">
+              <span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">restart_alt</span> Resync complet
+            </button>
+          </div>
+
           <div id="pcorg-config-container"></div>
         </div>
       </section>
@@ -409,9 +448,36 @@
             <input name="type" required placeholder="ex. tribunes" class="form-input" />
           </label>
         </div>
-        <label>Taches (1 par ligne)
-          <textarea name="todos" rows="10" placeholder="Verifier presence du personnel&#10;Verifier fonctionnement des PDA" class="form-input"></textarea>
-        </label>
+        <div class="todo-phase-section" data-phase="open">
+          <div class="todo-phase-header">
+            <span class="material-symbols-outlined" style="font-size:16px; color:var(--success);">lock_open</span>
+            <span>Ouverture</span>
+          </div>
+          <div class="todo-items-list" id="todo-list-open"></div>
+          <button type="button" class="todo-add-btn" data-phase="open">
+            <span class="material-symbols-outlined" style="font-size:16px;">add</span> Ajouter
+          </button>
+        </div>
+        <div class="todo-phase-section" data-phase="close">
+          <div class="todo-phase-header">
+            <span class="material-symbols-outlined" style="font-size:16px; color:var(--danger);">lock</span>
+            <span>Fermeture</span>
+          </div>
+          <div class="todo-items-list" id="todo-list-close"></div>
+          <button type="button" class="todo-add-btn" data-phase="close">
+            <span class="material-symbols-outlined" style="font-size:16px;">add</span> Ajouter
+          </button>
+        </div>
+        <div class="todo-phase-section" data-phase="both">
+          <div class="todo-phase-header">
+            <span class="material-symbols-outlined" style="font-size:16px; color:var(--accent);">sync</span>
+            <span>Ouverture et fermeture</span>
+          </div>
+          <div class="todo-items-list" id="todo-list-both"></div>
+          <button type="button" class="todo-add-btn" data-phase="both">
+            <span class="material-symbols-outlined" style="font-size:16px;">add</span> Ajouter
+          </button>
+        </div>
       </form>
     </div>
     <div class="crud-modal-footer">
@@ -446,16 +512,37 @@
             <input name="color" type="color" value="#6366f1" class="form-input" style="width:60px; height:36px; padding:2px; cursor:pointer;" />
           </label>
         </div>
-        <div class="form-row">
-          <label>Blocs visibles</label>
+        <div class="form-row" id="group-blocks-row">
+          <label>Blocs visibles &amp; disposition</label>
           <p style="font-size:0.78rem; color:var(--muted); margin:4px 0 8px;">
-            Cochez les blocs que les membres de ce groupe peuvent voir. Si aucun bloc n'est coche, le groupe n'impose aucune restriction.
+            Cochez les blocs visibles. Utilisez les fleches pour deplacer et reordonner les blocs entre colonnes gauche/droite.
           </p>
           <div class="blocks-toggle-bar">
             <button type="button" id="blocks-check-all" class="btn btn-xs">Tout cocher</button>
             <button type="button" id="blocks-uncheck-all" class="btn btn-xs">Tout decocher</button>
           </div>
-          <div id="group-blocks-checkboxes" class="blocks-checklist"></div>
+          <div id="group-blocks-checkboxes" class="block-layout-grid"></div>
+          <div id="group-blocks-fixed" class="block-fixed-row"></div>
+        </div>
+        <div class="form-row" id="group-cat-row">
+          <label style="margin-bottom:4px">Categories main courante
+            <span style="font-size:0.72rem; color:var(--muted); font-weight:400; margin-left:6px;">aucune = toutes</span>
+          </label>
+          <div id="group-cats-checkboxes" style="display:flex; flex-wrap:wrap; gap:4px 12px;"></div>
+        </div>
+        <div class="form-row" id="group-fs-row" style="padding-top:0;">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.82rem;">
+            <input type="checkbox" name="fiche_simplifiee" style="accent-color:var(--accent);" />
+            Fiches simplifiees
+            <span style="font-size:0.72rem; color:var(--muted); font-weight:400;">(creation rapide clic droit)</span>
+          </label>
+        </div>
+        <div class="form-row" id="group-close-row" style="padding-top:0;">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.82rem;">
+            <input type="checkbox" name="can_close_fiche" style="accent-color:var(--accent);" />
+            Cloturer des fiches
+            <span style="font-size:0.72rem; color:var(--muted); font-weight:400;">(permet de clore une intervention)</span>
+          </label>
         </div>
       </form>
     </div>
@@ -583,6 +670,23 @@
             Selectionnez les devices a inclure dans ce groupe. Cliquez "Charger devices" si la liste est vide.
           </p>
           <div id="anoloc-devices-checkboxes" style="max-height:200px; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius-sm); padding:6px;"></div>
+        </div>
+        <div class="form-row">
+          <label>Categorie PCO associee
+            <select name="pco_category" class="form-input">
+              <option value="">-- Aucune --</option>
+              <option value="PCO.Secours">Secours</option>
+              <option value="PCO.Securite">Securite</option>
+              <option value="PCO.Technique">Technique</option>
+              <option value="PCO.Flux">Flux</option>
+              <option value="PCO.Fourriere">Fourriere</option>
+              <option value="PCO.Information">Information</option>
+              <option value="PCO.MainCourante">Main Courante</option>
+            </select>
+          </label>
+          <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
+            Les vehicules de ce groupe seront proposes lors de la creation d'interventions de cette categorie.
+          </p>
         </div>
         <div class="form-row">
           <label style="display:flex; align-items:center; gap:8px;">

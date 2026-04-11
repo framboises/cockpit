@@ -338,8 +338,12 @@
       $('input[name="icon"]', form).value = grp.icon || "location_on";
       $('input[name="color"]', form).value = grp.color || "#6366f1";
       $('input[name="enabled"]', form).checked = grp.enabled !== false;
+      var pcoCatSel = $('select[name="pco_category"]', form);
+      if (pcoCatSel) pcoCatSel.value = grp.pco_category || "";
     } else {
       title.textContent = "Nouveau groupe de balises";
+      var pcoCatSel = $('select[name="pco_category"]', form);
+      if (pcoCatSel) pcoCatSel.value = "";
     }
 
     // Update icon preview
@@ -421,9 +425,18 @@
       }
     });
 
-    // Generate slug id
+    // Generate slug id (normalise les accents pour eviter les collisions)
     var existingId = $('input[name="id"]', form).value;
-    var id = existingId || "grp-" + label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+$/, "");
+    var slug = label.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+$/, "");
+    var id = existingId || "grp-" + slug;
+    // Verifier l'unicite
+    if (!existingId && config.beacon_groups) {
+      var usedIds = config.beacon_groups.map(function(g) { return g.id; });
+      while (usedIds.indexOf(id) !== -1) { id += "-" + Math.random().toString(36).substr(2, 4); }
+    }
+
+    var pcoCatEl = $('select[name="pco_category"]', form);
+    var pcoCategory = pcoCatEl ? pcoCatEl.value : "";
 
     var grpData = {
       id: id,
@@ -433,6 +446,7 @@
       anoloc_device_ids: deviceIds,
       device_labels: deviceLabels,
       enabled: enabled,
+      pco_category: pcoCategory,
     };
 
     if (!config.beacon_groups) config.beacon_groups = [];
@@ -492,7 +506,8 @@
 
   function loadCockpitGroups() {
     apiGet("/api/groups").then(function (data) {
-      cockpitGroups = (data.groups || []).filter(function (g) {
+      var groups = Array.isArray(data) ? data : (data.groups || []);
+      cockpitGroups = groups.filter(function (g) {
         return g.name !== "__default__" && g.name !== "__admin__";
       });
       populateVisibilityTable();

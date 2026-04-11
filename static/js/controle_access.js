@@ -190,10 +190,15 @@
       });
   }
 
+  var widget = document.getElementById("widget-counters");
+
   function loadStatus() {
     fetch("/api/live-controle/status")
       .then(function (r) { return r.json(); })
       .then(function (s) {
+        // Masquer le widget si le live controle n'est pas active
+        if (widget) widget.style.display = s.live_controle_actif ? "" : "none";
+
         var color = "#999";
         var title = "Inactif";
         if (s.health === "ok") { color = "#4caf50"; title = "OK"; }

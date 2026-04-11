@@ -253,6 +253,38 @@
           el("div", {className: "anoloc-dev-left"}, [devDot, devNum, devName]),
           devRight,
         ]);
+        devRow.style.cursor = "pointer";
+        (function(deviceId, groupId) {
+          devRow.addEventListener("click", function (e) {
+            e.stopPropagation();
+            var marker = anolocMarkers[deviceId];
+            if (!marker) return;
+            // Activer la visibilite du groupe si necessaire
+            if (!anolocVisible) {
+              anolocVisible = true;
+              var mainBtn = document.getElementById("anoloc-toggle");
+              if (mainBtn) mainBtn.classList.add("active");
+            }
+            if (groupToggles[groupId] === false) {
+              groupToggles[groupId] = true;
+              applyVisibility();
+            }
+            // Basculer vers la carte
+            if (window.CockpitMapView && window.CockpitMapView.switchView) {
+              window.CockpitMapView.switchView("map");
+            }
+            // Zoom et centre
+            var mapObj = window.CockpitMapView && window.CockpitMapView.getMap
+              ? window.CockpitMapView.getMap() : null;
+            if (mapObj) {
+              mapObj.setView(marker.getLatLng(), 18, {animate: true});
+              // Ouvrir le popup
+              setTimeout(function () {
+                marker.fire("click");
+              }, 400);
+            }
+          });
+        })(dev.id, gid);
         devContainer.appendChild(devRow);
       });
       groupList.appendChild(devContainer);

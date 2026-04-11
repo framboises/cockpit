@@ -526,12 +526,17 @@ def extract_entities(text):
 
 
 def mk_uuid(event_label, year, datecreate, category, description, area_id,
-             user_id_create):
-    seed = (
-        f"{event_label}|{year}|{(datecreate or '').strip()}"
-        f"|{(category or '').strip()}|{(description or '').strip()}"
-        f"|{(area_id or '').strip()}|{(user_id_create or '').strip()}"
-    )
+             user_id_create, sql_id=None):
+    # Privilegier sql_id (cle primaire SQL stable) pour eviter les doublons
+    # quand le texte est modifie cote SQL
+    if sql_id:
+        seed = f"sql|{sql_id}"
+    else:
+        seed = (
+            f"{event_label}|{year}|{(datecreate or '').strip()}"
+            f"|{(category or '').strip()}|{(description or '').strip()}"
+            f"|{(area_id or '').strip()}|{(user_id_create or '').strip()}"
+        )
     return str(uuid.uuid5(uuid.NAMESPACE_URL, seed))
 
 
@@ -615,6 +620,28 @@ def fetch_messages_batch(conn, last_date_write=None, offset=0, batch_size=SQL_BA
 
 
 # ─── Transformation ─────────────────────────────────────────────────────────
+
+_STADE_TO_URGENCE = {
+    "1": "IMP",   # Stade 1 = Implique
+    "2": "UR",    # Stade 2 = Urgence relative
+    "3": "UA",    # Stade 3 = Urgence absolue
+    "4": "EU",    # Stade 4 = Urgence extreme / Detresse vitale
+}
+
+def _map_niveau_urgence(group_desc):
+    """Mappe group.desc (ex: 'PCO/Stade 2') vers un code niveau_urgence."""
+    if not group_desc:
+        return None
+    # Prendre le stade le plus eleve si plusieurs (ex: "PCO/Stade 1,PCO/Stade 2")
+    best = None
+    for part in group_desc.split(","):
+        part = part.strip()
+        for stade, code in _STADE_TO_URGENCE.items():
+            if f"Stade {stade}" in part:
+                if best is None or int(stade) > int(best):
+                    best = stade
+    return _STADE_TO_URGENCE.get(best) if best else None
+
 
 def transform_row(row, event_label, year):
     """Transforme une ligne SQL en document MongoDB (même format que l'import CSV)."""
@@ -701,12 +728,13 @@ def transform_row(row, event_label, year):
         (text_full or "") + "\n" + (comment or "")
     )
 
-    # ID stable
+    # ID stable (base sur sql_id quand disponible)
     datecreate_str = ts_iso or str(datecreate_raw or "")
     _id = mk_uuid(
         event_label or "SAISON", year or 0, datecreate_str,
         category or "", description or "",
         str(area_id) if area_id else "", str(user_id_create) if user_id_create else "",
+        sql_id=msg_id,
     )
 
     doc = {
@@ -737,6 +765,7 @@ def transform_row(row, event_label, year):
         "comment": comment,
         "comment_history": parse_comment_history(comment),
         "severity": severity_i,
+        "niveau_urgence": _map_niveau_urgence(group_desc),
         "status_code": status_i,
         "is_incident": is_incident,
         "alarm_id": int(alarm_id) if alarm_id and str(alarm_id).isdigit() else None,

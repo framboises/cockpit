@@ -299,7 +299,21 @@ def collect_once(token, device_group_map, devices_info, db, logging_enabled=Fals
             except (ValueError, TypeError):
                 pass
 
-        gps_fix = frame.get("gps_fix", 0)
+        # gps_fix de l'API n'est pas fiable (toujours 0/None).
+        # On derive le signal GPS depuis last_real_frame_sent_at :
+        # si la derniere vraie frame est recente (< 5 min), le GPS est actif.
+        # gps_fix de l'API = nombre de satellites (souvent 0/None selon les trackers).
+        # On derive le signal GPS depuis last_real_frame_sent_at :
+        # si la derniere vraie frame GPS date de < 5 min, le GPS est actif.
+        gps_fix_raw = frame.get("gps_fix") or 0
+        has_recent_real = False
+        if last_real:
+            try:
+                real_age = abs((now - last_real).total_seconds())
+                has_recent_real = real_age < 300  # 5 minutes
+            except Exception:
+                pass
+        gps_fix = gps_fix_raw if gps_fix_raw > 0 else (1 if has_recent_real else 0)
 
         doc = {
             "device_id": device_id,
@@ -312,6 +326,9 @@ def collect_once(token, device_group_map, devices_info, db, logging_enabled=Fals
             "status": frame.get("status", "offline"),
             "battery_pct": battery_pct,
             "gps_fix": gps_fix,
+            "gps_view": frame.get("gps_view"),
+            "gnss_status": frame.get("gnss_status"),
+            "gsm_level": frame.get("gsm_level"),
             "sent_at": sent_at or now,
             "last_real_at": last_real,
             "collected_at": now,

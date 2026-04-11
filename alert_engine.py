@@ -650,6 +650,102 @@ def detect_meteo_threshold(definition, context):
     }
 
 
+def detect_meteo_rain_onset(definition, context):
+    """Detecte la transition sec -> pluie dans les previsions horaires.
+    Declenche X minutes avant le debut prevu de la pluie."""
+    db = get_db()
+    now = context["now"]
+    params = definition.get("params") or {}
+    lead_minutes = params.get("lead_minutes", 30)
+    rain_min = params.get("rain_threshold", 0.1)  # mm, seuil pour considerer "pluvieux"
+
+    try:
+        from zoneinfo import ZoneInfo
+        now_local = now.astimezone(ZoneInfo("Europe/Paris"))
+    except Exception:
+        now_local = now
+
+    today_str = now_local.strftime("%Y-%m-%d")
+    now_minutes = now_local.hour * 60 + now_local.minute
+
+    previsions = db["meteo_previsions"].find_one({"Date": today_str})
+    if not previsions or "Heures" not in previsions:
+        return None
+
+    heures = previsions["Heures"]
+    RAIN_KEYS = ["Pluviometrie (mm)", "Pluviom\u00e9trie (mm)"]
+
+    def get_rain(h):
+        for k in RAIN_KEYS:
+            v = h.get(k)
+            if v is not None:
+                try:
+                    return float(v)
+                except (ValueError, TypeError):
+                    pass
+        return 0.0
+
+    # Trier les heures et trouver la premiere transition sec -> pluvieux
+    sorted_h = sorted(heures, key=lambda h: h.get("Heure", ""))
+    rain_start_hour = None
+    rain_val = 0.0
+
+    for i, h in enumerate(sorted_h):
+        heure_str = h.get("Heure", "")
+        try:
+            h_minutes = int(heure_str.split(":")[0]) * 60
+        except (ValueError, IndexError):
+            continue
+
+        # Ignorer les heures deja passees (avec marge pour le lead time)
+        if h_minutes < now_minutes - lead_minutes:
+            continue
+
+        val = get_rain(h)
+        if val >= rain_min:
+            # Verifier que l'heure precedente est seche
+            prev_val = get_rain(sorted_h[i - 1]) if i > 0 else 0.0
+            if prev_val < rain_min:
+                rain_start_hour = heure_str
+                rain_val = val
+                break
+
+    if not rain_start_hour:
+        return None
+
+    # Calculer si on est dans la fenetre d'alerte (lead_minutes avant le debut)
+    try:
+        rain_minutes = int(rain_start_hour.split(":")[0]) * 60
+    except (ValueError, IndexError):
+        return None
+
+    diff = rain_minutes - now_minutes
+    if diff < 0 or diff > lead_minutes:
+        return None
+
+    slug = definition["slug"]
+    dedup = "%s-%s-%s" % (slug, today_str, rain_start_hour.replace(":", ""))
+
+    existing = db["cockpit_active_alerts"].find_one({"dedup_key": dedup})
+    if existing:
+        return None
+
+    time_str = now_local.strftime("%H:%M")
+    message = "Pluie prevue a %s (%.1f mm) - actuellement sec" % (rain_start_hour, rain_val)
+
+    return {
+        "definition_slug": slug,
+        "event": context.get("event", ""),
+        "year": context.get("year", ""),
+        "title": "PLUIE IMMINENTE",
+        "message": message,
+        "timeStr": time_str,
+        "dedup_key": dedup,
+        "triggeredAt": now,
+        "expiresAt": now + timedelta(hours=1),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Handler : checkpoint_reassign
 # ---------------------------------------------------------------------------
@@ -761,6 +857,218 @@ def detect_checkpoint_reassign(definition, context):
     return results if results else None
 
 
+def detect_checkpoint_error_burst(definition, context):
+    """Detecte les rafales d'erreurs HSH sur un meme checkpoint.
+    Params:
+        threshold: nombre d'erreurs min (defaut 3)
+        window_seconds: fenetre temporelle en secondes (defaut 30)
+    """
+    db = get_db()
+    now = context["now"]
+    params = definition.get("params") or {}
+    threshold = params.get("threshold", 3)
+    window_sec = params.get("window_seconds", 30)
+
+    try:
+        from zoneinfo import ZoneInfo
+        now_local = now.astimezone(ZoneInfo("Europe/Paris"))
+    except Exception:
+        now_local = now
+
+    # Fenetre de recherche : derniere minute (couvre largement la fenetre)
+    lookback = now_local - timedelta(minutes=2)
+    lookback_str = lookback.strftime("%Y-%m-%d %H:%M:%S")
+    now_str = now_local.strftime("%Y-%m-%d %H:%M:%S")
+
+    recent = list(db["hsh_erreurs"].find(
+        {"date_paris": {"$gte": lookback_str, "$lte": now_str}},
+        {"checkpoint": 1, "date_paris": 1, "status_label": 1, "direction": 1,
+         "gate": 1, "area": 1}
+    ).sort("date_paris", -1))
+
+    if not recent:
+        return None
+
+    # Grouper par checkpoint
+    by_cp = {}
+    for doc in recent:
+        cp_name = doc.get("checkpoint", {}).get("Name", "")
+        if not cp_name:
+            continue
+        by_cp.setdefault(cp_name, []).append(doc)
+
+    results = []
+    slug = definition["slug"]
+
+    for cp_name, errors in by_cp.items():
+        # Trier par date desc
+        errors.sort(key=lambda d: d.get("date_paris", ""), reverse=True)
+
+        # Fenetre glissante : compter les erreurs dans window_sec depuis la plus recente
+        if len(errors) < threshold:
+            continue
+
+        newest_str = errors[0].get("date_paris", "")
+        try:
+            newest_dt = datetime.strptime(newest_str, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            continue
+
+        burst_count = 0
+        for e in errors:
+            try:
+                e_dt = datetime.strptime(e.get("date_paris", ""), "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                continue
+            if (newest_dt - e_dt).total_seconds() <= window_sec:
+                burst_count += 1
+
+        if burst_count < threshold:
+            continue
+
+        # Dedup sur checkpoint + minute (eviter re-declenchement)
+        dedup = "hsh-burst-%s-%s" % (cp_name, newest_dt.strftime("%Y%m%d%H%M"))
+        if db["cockpit_active_alerts"].find_one({"dedup_key": dedup}):
+            continue
+
+        time_str = now_local.strftime("%H:%M")
+        last_error = errors[0]
+        gate_name = last_error.get("gate", {}).get("Name", "")
+        area_name = last_error.get("area", {}).get("Name", "")
+        status = last_error.get("status_label", "")
+
+        msg = "%d erreurs en %ds sur %s" % (burst_count, window_sec, cp_name)
+        if gate_name:
+            msg += " (%s)" % gate_name
+        msg += " - %s" % status
+
+        log.info("  checkpoint_error_burst: %s", msg)
+
+        results.append({
+            "definition_slug": slug,
+            "event": context.get("event", ""),
+            "year": context.get("year", ""),
+            "title": "RAFALE ERREURS CHECKPOINT",
+            "message": msg,
+            "timeStr": time_str,
+            "actionData": {
+                "checkpoint": cp_name,
+                "gate": gate_name,
+                "area": area_name,
+                "count": burst_count,
+                "last_error": status,
+            },
+            "dedup_key": dedup,
+            "triggeredAt": now,
+            "expiresAt": now + timedelta(minutes=10),
+        })
+
+    return results if results else None
+
+
+# ---------------------------------------------------------------------------
+# Main courante (pcorg) — alerte sur niveau d'urgence par categorie
+# ---------------------------------------------------------------------------
+
+# Ordre de gravite croissant
+_URGENCY_RANK = {"IMP": 1, "UR": 2, "UA": 3, "EU": 4}
+
+_URGENCY_LABELS = {
+    "EU": "Detresse vitale / Danger immediat",
+    "UA": "Urgence absolue / Incident grave",
+    "UR": "Urgence relative / Incident en cours",
+    "IMP": "Implique / temoin",
+}
+
+_URGENCY_ICON = {"EU": "crisis_alert", "UA": "warning", "UR": "info", "IMP": "person"}
+
+
+def detect_pcorg_urgency(definition, context):
+    """Detecte les nouvelles fiches main courante correspondant a une
+    categorie et un niveau d'urgence minimum.
+
+    Params attendus :
+      category  : prefixe categorie a surveiller (ex: "PCO.Securite", "PCO." pour toutes)
+      min_level : niveau minimum declencheur ("EU", "UA", "UR" ou "IMP")
+      lookback_s: secondes de recul pour les fiches recentes (defaut 90)
+    """
+    db = get_db()
+    now = context["now"]
+    params = definition.get("params") or {}
+
+    category_prefix = params.get("category", "PCO.")
+    min_level = params.get("min_level", "UA")
+    lookback = params.get("lookback_s", 90)
+
+    min_rank = _URGENCY_RANK.get(min_level, 3)
+
+    # Fiches recentes ouvertes avec un niveau d'urgence
+    cutoff = now - timedelta(seconds=lookback)
+    query = {
+        "category": {"$regex": "^" + category_prefix},
+        "niveau_urgence": {"$in": [k for k, v in _URGENCY_RANK.items() if v >= min_rank]},
+        "status_code": {"$ne": 10},
+        "$or": [
+            {"ts": {"$gte": cutoff}},
+            {"synced_at": {"$gte": cutoff}},
+        ],
+    }
+
+    fiches = list(db["pcorg"].find(query).sort("ts", -1).limit(20))
+    if not fiches:
+        return None
+
+    results = []
+    for f in fiches:
+        sql_id = f.get("sql_id") or str(f.get("_id", ""))
+        niveau = f.get("niveau_urgence", "")
+        dedup = "pcorg-urg-%s-%s" % (definition["slug"], sql_id)
+
+        if db["cockpit_active_alerts"].find_one({"dedup_key": dedup}):
+            continue
+
+        cat = f.get("category", "")
+        text = f.get("text") or f.get("text_full") or ""
+        operator = f.get("operator") or ""
+        area_desc = ""
+        area = f.get("area")
+        if isinstance(area, dict):
+            area_desc = area.get("desc") or ""
+        time_str = ""
+        if f.get("time_local"):
+            time_str = f["time_local"][:5]
+
+        title = "MAIN COURANTE %s" % niveau
+        msg_parts = []
+        if text:
+            msg_parts.append(text[:200])
+        if area_desc:
+            msg_parts.append("Zone : %s" % area_desc)
+        if operator:
+            msg_parts.append("Operateur : %s" % operator)
+        msg = " — ".join(msg_parts) if msg_parts else "Nouvelle fiche %s" % cat
+
+        results.append({
+            "definition_slug": definition["slug"],
+            "event": context.get("event", ""),
+            "year": context.get("year", ""),
+            "title": title,
+            "message": msg,
+            "timeStr": time_str,
+            "actionData": {
+                "pcorg_id": str(f.get("_id", "")),
+                "sql_id": sql_id,
+                "category": cat,
+                "niveau_urgence": niveau,
+            },
+            "dedup_key": dedup,
+            "triggeredAt": now,
+            "expiresAt": now + timedelta(minutes=15),
+        })
+
+    return results if results else None
+
+
 # ---------------------------------------------------------------------------
 # Registre des handlers
 # ---------------------------------------------------------------------------
@@ -772,6 +1080,9 @@ HANDLERS = {
     "anpr_watchlist": detect_anpr_watchlist,
     "meteo_threshold": detect_meteo_threshold,
     "checkpoint_reassign": detect_checkpoint_reassign,
+    "checkpoint_error_burst": detect_checkpoint_error_burst,
+    "meteo_rain_onset": detect_meteo_rain_onset,
+    "pcorg_urgency": detect_pcorg_urgency,
 }
 
 # ---------------------------------------------------------------------------

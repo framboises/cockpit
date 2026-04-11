@@ -17,6 +17,14 @@
         onsiteReset: "/api/anpr/onsite/reset",
     };
 
+    function imgUrl(r, type) {
+        var path = r[type + "_image_path"];
+        var id   = r[type + "_image_id"];
+        if (path) return API.image + encodeURIComponent(path);
+        if (id)   return API.image + encodeURIComponent(id);
+        return null;
+    }
+
     function qs(s, r) { return (r || document).querySelector(s); }
     function qsa(s, r) { return (r || document).querySelectorAll(s); }
     function mk(tag, cls, txt) {
@@ -217,7 +225,8 @@
         var tr = document.createElement("tr"); tr.className = "anpr-row";
         // img
         var tdi = document.createElement("td"); tdi.className = "anpr-td-img";
-        if (r.vehicle_image_id) { var im = document.createElement("img"); im.className = "anpr-thumb"; im.src = API.image + encodeURIComponent(r.vehicle_image_id); im.loading = "lazy"; tdi.appendChild(im); }
+        var vehicleUrl = imgUrl(r, "vehicle");
+        if (vehicleUrl) { var im = document.createElement("img"); im.className = "anpr-thumb"; im.src = vehicleUrl; im.loading = "lazy"; tdi.appendChild(im); }
         else { var ne = mk("div", "anpr-thumb-empty"); ne.appendChild(mk("span", "material-symbols-outlined", "no_photography")); tdi.appendChild(ne); }
         tr.appendChild(tdi);
         // plate
@@ -274,7 +283,8 @@
             var isNew = prevTop !== null && r.id === topId;
             var item = mk("div", "anpr-feed-item" + (isNew ? " anpr-feed-new" : ""));
             var th = mk("div", "anpr-feed-thumb");
-            if (r.vehicle_image_id) { var im = document.createElement("img"); im.src = API.image + encodeURIComponent(r.vehicle_image_id); im.loading = "lazy"; th.appendChild(im); }
+            var feedVehicleUrl = imgUrl(r, "vehicle");
+            if (feedVehicleUrl) { var im = document.createElement("img"); im.src = feedVehicleUrl; im.loading = "lazy"; th.appendChild(im); }
             else th.appendChild(mk("span", "material-symbols-outlined", "directions_car"));
             item.appendChild(th);
             var info = mk("div", "anpr-feed-info");
@@ -304,9 +314,11 @@
     /* ---- detail modal ---- */
     function openDetail(r) {
         var imgDiv = qs("#anpr-modal-image"); imgDiv.textContent = "";
-        if (r.vehicle_image_id) { var im = document.createElement("img"); im.src = API.image + encodeURIComponent(r.vehicle_image_id); imgDiv.appendChild(im); }
+        var modalVehicleUrl = imgUrl(r, "vehicle");
+        if (modalVehicleUrl) { var im = document.createElement("img"); im.src = modalVehicleUrl; imgDiv.appendChild(im); }
         else { var nd = mk("div", "anpr-modal-no-image"); nd.appendChild(mk("span", "material-symbols-outlined", "no_photography")); var p = document.createElement("p"); p.textContent = "Image non disponible"; nd.appendChild(p); imgDiv.appendChild(nd); }
-        if (r.plate_image_id) { var pd = mk("div", "anpr-modal-plate-img"); var pi = document.createElement("img"); pi.src = API.image + encodeURIComponent(r.plate_image_id); pd.appendChild(pi); imgDiv.appendChild(pd); }
+        var modalPlateUrl = imgUrl(r, "plate");
+        if (modalPlateUrl) { var pd = mk("div", "anpr-modal-plate-img"); var pi = document.createElement("img"); pi.src = modalPlateUrl; pd.appendChild(pi); imgDiv.appendChild(pd); }
 
         var info = qs("#anpr-modal-info"); info.textContent = "";
         info.appendChild(mk("div", "anpr-modal-plate" + (r.list_name === "allowList" ? " anpr-plate-allow" : ""), r.plate));
@@ -419,8 +431,17 @@
         qs("#anpr-modal")?.addEventListener("click", function (e) { if (e.target === this) closeModal("anpr-modal"); });
         qs("#anpr-config-modal")?.addEventListener("click", function (e) { if (e.target === this) closeModal("anpr-config-modal"); });
         document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closeModal("anpr-modal"); closeModal("anpr-config-modal"); } });
-        // Sidebar
-        qs("#sidebarToggle")?.addEventListener("click", function () { qs("#sidebar")?.classList.toggle("collapsed"); });
+        // Sidebar (restore + toggle with memory)
+        var sidebar = qs("#sidebar");
+        if (sidebar) {
+            var stored = localStorage.getItem("sidebar-collapsed");
+            if (stored === null || stored === "true") sidebar.classList.add("collapsed");
+        }
+        qs("#sidebarToggle")?.addEventListener("click", function () {
+            if (!sidebar) return;
+            sidebar.classList.toggle("collapsed");
+            localStorage.setItem("sidebar-collapsed", sidebar.classList.contains("collapsed"));
+        });
     }
 
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();

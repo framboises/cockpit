@@ -36,7 +36,7 @@ function onSafe(id, evt, fn){
 // ---------- Formatage & tri ----------
 function formatTimestamp(pubMillis) {
   const d = new Date(pubMillis);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleString('fr-FR');
+  return isNaN(d.getTime()) ? '—' : d.toLocaleString('fr-FR', { timeZone: 'Europe/Paris' });
 }
 function sortAlertsByTime(alerts) {
   return (alerts || []).sort((a, b) => (b.pubMillis || 0) - (a.pubMillis || 0));
@@ -500,6 +500,11 @@ function updateAlerts() {
       const merged = sortAlertsByTime([...(Array.isArray(data) ? data : [])]);
       renderTrafficList(merged);
 
+      // Auto-refresh des pins carte si le toggle est actif
+      if (window._alertPinsActive && typeof window._refreshAlertPins === "function") {
+        window._refreshAlertPins();
+      }
+
       // Resync modale ouverte
       if (isModalOpen() && trafficModalType) {
         const list = getAlertsList(trafficModalType);
@@ -563,36 +568,52 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 
-  // Bouton "toutes les alertes sur la carte"
+  // Bouton "toutes les alertes sur la carte" (toggle)
   var btnAllAlerts = document.getElementById('btn-show-all-alerts');
   if (btnAllAlerts) {
     btnAllAlerts.addEventListener('click', function() {
-      var all = [].concat(accidentAlerts, jamAlerts, hazardAlerts, closedAlerts);
-      if (!all.length) return;
-      var pins = [];
-      for (var i = 0; i < all.length; i++) {
-        var a = all[i];
-        if (!a.location) continue;
-        var stFr = getSubtypeFr(a.subtype);
-        pins.push({
-          lat: a.location.y,
-          lon: a.location.x,
-          type: a.type,
-          typeFr: stFr || getTypeFr(a.type),
-          street: a.street || '',
-          date: formatTimestamp(a.pubMillis)
-        });
+      // Toggle off
+      if (btnAllAlerts.classList.contains('active')) {
+        btnAllAlerts.classList.remove('active');
+        window._alertPinsActive = false;
+        window._allAlertPinsData = null;
+        if (window.CockpitMapView && window.CockpitMapView.clearAllAlertPins) {
+          window.CockpitMapView.clearAllAlertPins();
+        }
+        return;
       }
-      if (!pins.length) return;
-      window._allAlertPinsData = pins;
-      if (window.CockpitMapView && window.CockpitMapView.switchView) {
-        window.CockpitMapView.switchView('map');
-        setTimeout(function() {
-          document.dispatchEvent(new CustomEvent('showAllAlertPins'));
-        }, 400);
-      }
+      // Toggle on
+      btnAllAlerts.classList.add('active');
+      window._alertPinsActive = true;
+      window._refreshAlertPins();
     });
   }
+
+  // Construit les pins a partir des alertes courantes et les affiche sur la carte
+  window._refreshAlertPins = function() {
+    var all = [].concat(accidentAlerts, jamAlerts, hazardAlerts, closedAlerts);
+    var pins = [];
+    for (var i = 0; i < all.length; i++) {
+      var a = all[i];
+      if (!a.location) continue;
+      var stFr = getSubtypeFr(a.subtype);
+      pins.push({
+        lat: a.location.y,
+        lon: a.location.x,
+        type: a.type,
+        typeFr: stFr || getTypeFr(a.type),
+        street: a.street || '',
+        date: formatTimestamp(a.pubMillis)
+      });
+    }
+    window._allAlertPinsData = pins;
+    if (pins.length && window.CockpitMapView && window.CockpitMapView.switchView) {
+      window.CockpitMapView.switchView('map');
+      setTimeout(function() {
+        document.dispatchEvent(new CustomEvent('showAllAlertPins'));
+      }, 400);
+    }
+  };
 
   // Boutons modale & clavier
   onSafe('trafficNext', 'click', (e) => { e.stopPropagation(); gotoNextAlert(); });

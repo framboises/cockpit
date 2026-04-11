@@ -14,6 +14,27 @@
   };
   var FALLBACK_STYLE = { color: "#94a3b8", icon: "description" };
 
+  // ── Urgency levels ────────────────────────────────────────────────────────
+  var URGENCY_LEVELS = ["EU", "UA", "UR", "IMP"];
+  var URGENCY_COLORS = {
+    EU: "#dc2626", UA: "#f97316", UR: "#eab308", IMP: "#6b7280"
+  };
+  var URGENCY_LABELS = {
+    SECOURS:  { EU: "D\u00e9tresse vitale", UA: "Urgence absolue", UR: "Urgence relative", IMP: "Impliqu\u00e9 m\u00e9dical" },
+    SECURITE: { EU: "Danger imm\u00e9diat", UA: "Incident grave", UR: "Incident en cours", IMP: "T\u00e9moin / impliqu\u00e9" },
+    MIXTE:    { EU: "Urgence extr\u00eame", UA: "Urgence prioritaire", UR: "Situation stable", IMP: "Impliqu\u00e9" }
+  };
+
+  function urgencyType(cat) {
+    if (cat === "PCO.Secours") return "SECOURS";
+    if (cat === "PCO.Securite") return "SECURITE";
+    return "MIXTE";
+  }
+
+  function urgencyLabel(cat, level) {
+    return (URGENCY_LABELS[urgencyType(cat)] || URGENCY_LABELS.MIXTE)[level] || level;
+  }
+
   // ── State ──────────────────────────────────────────────────────────────────
   var refreshTimer = null;
   var lastData = null;
@@ -21,7 +42,31 @@
   var pcorgMapLayer = null;
   var pcorgMarkers = {}; // {id: L.marker} pour ouvrir les popups programmatiquement
   var pickCallback = null;
-  var ignoredPins = {}; // IDs des interventions dont le bounce est ignore
+  // Bounce acknowledgement (localStorage per user)
+  var ACK_STORAGE_KEY = "pcorg-pin-ack";
+  function _loadAck() {
+    try { return JSON.parse(localStorage.getItem(ACK_STORAGE_KEY)) || {}; } catch (e) { return {}; }
+  }
+  function _saveAck(ack) {
+    try { localStorage.setItem(ACK_STORAGE_KEY, JSON.stringify(ack)); } catch (e) {}
+  }
+  function ackPin(id, rev) {
+    var ack = _loadAck();
+    ack[id] = rev;
+    _saveAck(ack);
+  }
+  function ackAllPins(items) {
+    var ack = _loadAck();
+    items.forEach(function (item) { ack[item.id] = item.bounce_rev || 0; });
+    _saveAck(ack);
+  }
+  function shouldBounce(item) {
+    var rev = item.bounce_rev || 0;
+    if (rev === 0) return false;
+    var ack = _loadAck();
+    var seen = ack[item.id];
+    return seen === undefined || seen < rev;
+  }
 
   // ── DOM refs ───────────────────────────────────────────────────────────────
   var listOpen, listClosed, statsContainer, badge, placeholderOpen, placeholderClosed;
@@ -56,6 +101,18 @@
   function truncZone(desc) {
     if (!desc) return "";
     return desc.replace(/_MC PCO\/?/g, "").replace(/^\//, "");
+  }
+
+  var _STADE_TO_URGENCY = { "1": "IMP", "2": "UR", "3": "UA", "4": "EU" };
+
+  function formatGroupDesc(groupDesc, category) {
+    if (!groupDesc) return "";
+    // Remplacer chaque "PCO/Stade N" ou "PCS/Stade N" par le label d'urgence
+    return groupDesc.replace(/(?:PCO|PCS)\/Stade\s*(\d)/g, function (match, num) {
+      var code = _STADE_TO_URGENCY[num];
+      if (code) return urgencyLabel(category, code);
+      return match;
+    });
   }
 
   function mkEl(tag, cls) {
@@ -93,6 +150,7 @@
 
     window.pcorgRefresh = refresh;
     loadPcorgConfig();
+    loadVehiclesByCategory();
 
     setTimeout(refresh, 800);
     refreshTimer = setInterval(refresh, REFRESH_MS);
@@ -110,56 +168,202 @@
       if (!m) return;
       clearInterval(ctxRetry);
       m.on("contextmenu", onMapContextMenu);
+
+      // Long-press tactile (600ms) pour ecrans tactiles (Huawei IdeaHub, etc.)
+      var lpTimer = null, lpStart = null;
+      var mapContainer = m.getContainer();
+      mapContainer.addEventListener("touchstart", function (e) {
+        if (e.touches.length !== 1) { clearTimeout(lpTimer); return; }
+        lpStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        lpTimer = setTimeout(function () {
+          // Convertir le point touch en latlng Leaflet
+          var touch = lpStart;
+          var rect = mapContainer.getBoundingClientRect();
+          var pt = L.point(touch.x - rect.left, touch.y - rect.top);
+          var latlng = m.containerPointToLatLng(pt);
+          onMapContextMenu({
+            latlng: latlng,
+            originalEvent: { preventDefault: function () {} },
+            _touch: true
+          });
+          L.DomEvent.preventDefault(e);
+        }, 600);
+      }, { passive: false });
+      mapContainer.addEventListener("touchmove", function (e) {
+        if (!lpStart || !lpTimer) return;
+        var dx = e.touches[0].clientX - lpStart.x;
+        var dy = e.touches[0].clientY - lpStart.y;
+        if (dx * dx + dy * dy > 100) { clearTimeout(lpTimer); lpTimer = null; }
+      });
+      mapContainer.addEventListener("touchend", function () {
+        clearTimeout(lpTimer); lpTimer = null;
+      });
+      mapContainer.addEventListener("touchcancel", function () {
+        clearTimeout(lpTimer); lpTimer = null;
+      });
     }, 2000);
   }
 
   // ── Context menu ──────────────────────────────────────────────────────────
   var ctxMenu = null;
   var ctxLat = null, ctxLon = null;
+  var _ctxIsTouch = false;
+
+  var CTX_DESCRIPTIONS = {
+    "PCO.Secours":       "Victime, malaise, blessure",
+    "PCO.Securite":      "Incident, intrusion, vol",
+    "PCO.Technique":     "Panne, infrastructure, materiel",
+    "PCO.Flux":          "Circulation, acces, jauge",
+    "PCO.Fourriere":     "Vehicule, stationnement",
+    "PCO.Information":   "Signalement, observation",
+    "PCO.MainCourante":  "Note, consigne, suivi"
+  };
 
   function buildContextMenu() {
     ctxMenu = mkEl("div", "pcorg-ctx-menu");
     ctxMenu.id = "pcorg-ctx-menu";
 
-    var title = mkEl("div", "pcorg-ctx-title");
-    title.appendChild(matIcon("add_circle"));
-    var titleTxt = mkEl("span", ""); titleTxt.textContent = "Nouvelle intervention";
-    title.appendChild(titleTxt);
-    ctxMenu.appendChild(title);
+    // Header with coordinates
+    var header = mkEl("div", "pcorg-ctx-header");
+    var headerLeft = mkEl("div", "pcorg-ctx-header-left");
+    var headerIco = matIcon("add_location_alt", "pcorg-ctx-header-icon");
+    headerLeft.appendChild(headerIco);
+    var headerTxt = mkEl("div", "pcorg-ctx-header-text");
+    var headerTitle = mkEl("div", "pcorg-ctx-title");
+    headerTitle.textContent = "Nouvelle intervention";
+    headerTxt.appendChild(headerTitle);
+    var headerCoords = mkEl("div", "pcorg-ctx-coords");
+    headerCoords.id = "pcorg-ctx-coords";
+    headerTxt.appendChild(headerCoords);
+    headerLeft.appendChild(headerTxt);
+    header.appendChild(headerLeft);
+    ctxMenu.appendChild(header);
 
-    var sep = mkEl("div", "pcorg-ctx-sep");
-    ctxMenu.appendChild(sep);
-
-    CATEGORY_ORDER.forEach(function (cat) {
+    // Category items
+    var list = mkEl("div", "pcorg-ctx-list");
+    CATEGORY_ORDER.forEach(function (cat, idx) {
       var st = catStyle(cat);
       var item = mkEl("div", "pcorg-ctx-item");
       item.setAttribute("data-cat", cat);
+      item.style.setProperty("--cat-color", st.color);
+      item.style.animationDelay = (idx * 30) + "ms";
 
-      var dot = mkEl("span", "pcorg-ctx-dot");
-      dot.style.background = st.color;
-      item.appendChild(dot);
+      var iconWrap = mkEl("div", "pcorg-ctx-icon-wrap");
+      iconWrap.style.background = st.color + "18";
+      iconWrap.style.color = st.color;
+      var ico = matIcon(st.icon);
+      iconWrap.appendChild(ico);
+      item.appendChild(iconWrap);
 
-      var ico = matIcon(st.icon, "pcorg-ctx-icon");
-      ico.style.color = st.color;
-      item.appendChild(ico);
-
-      var label = mkEl("span", "pcorg-ctx-label");
+      var content = mkEl("div", "pcorg-ctx-content");
+      var label = mkEl("div", "pcorg-ctx-label");
       label.textContent = shortCat(cat);
-      item.appendChild(label);
+      content.appendChild(label);
+      var desc = mkEl("div", "pcorg-ctx-desc");
+      desc.textContent = CTX_DESCRIPTIONS[cat] || "";
+      content.appendChild(desc);
+      item.appendChild(content);
 
-      item.addEventListener("click", function () {
+      var arrow = matIcon("chevron_right", "pcorg-ctx-arrow");
+      item.appendChild(arrow);
+
+      // Build urgency sub-menu (populated dynamically based on config)
+      var submenu = mkEl("div", "pcorg-ctx-submenu");
+      submenu.setAttribute("data-cat-sub", cat);
+      var uType = urgencyType(cat);
+      URGENCY_LEVELS.forEach(function (level) {
+        var subItem = mkEl("div", "pcorg-ctx-sub-item");
+        subItem.style.setProperty("--sub-color", URGENCY_COLORS[level]);
+        var dot = mkEl("span", "pcorg-ctx-sub-dot");
+        dot.style.background = URGENCY_COLORS[level];
+        subItem.appendChild(dot);
+        var subContent = mkEl("div", "pcorg-ctx-sub-content");
+        var subLabel = mkEl("div", "pcorg-ctx-sub-label");
+        subLabel.textContent = URGENCY_LABELS[uType][level];
+        subContent.appendChild(subLabel);
+        var subCode = mkEl("div", "pcorg-ctx-sub-code");
+        subCode.textContent = level;
+        subContent.appendChild(subCode);
+        subItem.appendChild(subContent);
+        function onSubItemAction(e) {
+          e.stopPropagation();
+          e.preventDefault();
+          // Save menu position before hiding (for vehicle picker placement)
+          var menuPos = ctxMenu ? ctxMenu.getBoundingClientRect() : null;
+          hideContextMenu();
+          var userCanFS = !!window.__userFicheSimplifiee;
+          var catFS = (pcorgConfig && pcorgConfig.fiche_simplifiee) || {};
+          var vehicles = vehiclesByCategory[cat];
+          var isQuick = userCanFS && catFS[cat];
+          if (vehicles && vehicles.length > 0) {
+            showVehiclePicker(ctxLat, ctxLon, cat, level, vehicles, isQuick, menuPos);
+          } else if (isQuick) {
+            quickCreate(ctxLat, ctxLon, cat, level);
+          } else {
+            openCreateFromContext(ctxLat, ctxLon, cat, level);
+          }
+        }
+        // Vehicle sub-sub-menu (built once, shown/hidden dynamically via CSS hover)
+        var vehSubmenu = mkEl("div", "pcorg-ctx-veh-submenu");
+        vehSubmenu.setAttribute("data-cat-veh", cat);
+        vehSubmenu.setAttribute("data-level-veh", level);
+        subItem.appendChild(vehSubmenu);
+
+        subItem.addEventListener("touchend", function (e) {
+          // Touch: show vehicle picker as separate overlay
+          onSubItemAction(e);
+        });
+        subItem.addEventListener("click", function (e) {
+          if (_ctxIsTouch) return;
+          // If vehicle submenu is visible, don't fire (user clicks vehicle inside)
+          if (e.target.closest(".pcorg-ctx-veh-submenu")) return;
+          onSubItemAction(e);
+        });
+        submenu.appendChild(subItem);
+      });
+      item.appendChild(submenu);
+
+      // Touch: tap toggles sub-menu, second tap opens wizard
+      item.addEventListener("touchend", function (e) {
+        if (e.target.closest(".pcorg-ctx-submenu")) return;
+        e.preventDefault(); // empeche le click synthetise
+        if (item.classList.contains("has-submenu")) {
+          var wasOpen = submenu.classList.contains("touch-open");
+          ctxMenu.querySelectorAll(".pcorg-ctx-submenu.touch-open").forEach(function (s) {
+            s.classList.remove("touch-open");
+          });
+          if (!wasOpen) {
+            submenu.classList.add("touch-open");
+            return;
+          }
+        }
         hideContextMenu();
         openCreateFromContext(ctxLat, ctxLon, cat);
       });
-      ctxMenu.appendChild(item);
+      // Mouse: click opens wizard directly (hover handles sub-menu via CSS)
+      item.addEventListener("click", function (e) {
+        if (e.target.closest(".pcorg-ctx-submenu")) return;
+        if (_ctxIsTouch) return; // deja gere par touchend
+        hideContextMenu();
+        openCreateFromContext(ctxLat, ctxLon, cat);
+      });
+      list.appendChild(item);
     });
+    ctxMenu.appendChild(list);
 
     document.body.appendChild(ctxMenu);
 
-    // Close on click anywhere
+    // Close on click/touch anywhere or Escape
     document.addEventListener("click", function () { hideContextMenu(); });
+    document.addEventListener("touchstart", function (e) {
+      if (ctxMenu.classList.contains("show") && !e.target.closest("#pcorg-ctx-menu")) {
+        hideContextMenu();
+      }
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") hideContextMenu();
+    });
     document.addEventListener("contextmenu", function (e) {
-      // Hide if clicking outside map
       if (ctxMenu.classList.contains("show") && !e.target.closest(".leaflet-container")) {
         hideContextMenu();
       }
@@ -167,9 +371,93 @@
   }
 
   function onMapContextMenu(e) {
-    L.DomEvent.preventDefault(e);
+    if (e.originalEvent && e.originalEvent.preventDefault) e.originalEvent.preventDefault();
+    _ctxIsTouch = !!(e._touch);
     ctxLat = e.latlng.lat;
     ctxLon = e.latlng.lng;
+
+    // Update coordinates display
+    var coordsEl = document.getElementById("pcorg-ctx-coords");
+    if (coordsEl) {
+      coordsEl.textContent = ctxLat.toFixed(5) + ", " + ctxLon.toFixed(5);
+    }
+
+    // Sub-menus always visible on all categories
+    ctxMenu.querySelectorAll(".pcorg-ctx-submenu").forEach(function (sub) {
+      sub.style.display = "";
+      sub.parentElement.classList.add("has-submenu");
+    });
+
+    // Populate vehicle sub-sub-menus
+    ctxMenu.querySelectorAll(".pcorg-ctx-veh-submenu").forEach(function (vSub) {
+      vSub.textContent = "";
+      var vCat = vSub.getAttribute("data-cat-veh");
+      var vLevel = vSub.getAttribute("data-level-veh");
+      var vehicles = vehiclesByCategory[vCat];
+      if (!vehicles || !vehicles.length) {
+        vSub.style.display = "none";
+        vSub.parentElement.classList.remove("has-veh-submenu");
+        return;
+      }
+      vSub.style.display = "";
+      vSub.parentElement.classList.add("has-veh-submenu");
+      var catSt = catStyle(vCat);
+      vSub.style.setProperty("--cat-color", catSt.color);
+      var userCanFS = !!window.__userFicheSimplifiee;
+      var catFS = (pcorgConfig && pcorgConfig.fiche_simplifiee) || {};
+      var isQuick = userCanFS && !!catFS[vCat];
+      vehicles.forEach(function (v) {
+        var vBtn = mkEl("div", "pcorg-ctx-veh-item");
+        vBtn.textContent = v.label;
+        function onVehPick(ev) {
+          ev.stopPropagation(); ev.preventDefault();
+          hideContextMenu();
+          if (isQuick) {
+            quickCreate(ctxLat, ctxLon, vCat, vLevel, v.label);
+          } else {
+            createPendingPatrouille = v.label;
+            openCreateFromContext(ctxLat, ctxLon, vCat, vLevel);
+          }
+        }
+        vBtn.addEventListener("click", function (ev) { if (!_ctxIsTouch) onVehPick(ev); });
+        vBtn.addEventListener("touchend", onVehPick);
+        vSub.appendChild(vBtn);
+      });
+      // "Sans vehicule" option
+      var noneBtn = mkEl("div", "pcorg-ctx-veh-none");
+      noneBtn.textContent = "Sans v\u00e9hicule";
+      function onNone(ev) {
+        ev.stopPropagation(); ev.preventDefault();
+        hideContextMenu();
+        if (isQuick) {
+          quickCreate(ctxLat, ctxLon, vCat, vLevel);
+        } else {
+          openCreateFromContext(ctxLat, ctxLon, vCat, vLevel);
+        }
+      }
+      noneBtn.addEventListener("click", function (ev) { if (!_ctxIsTouch) onNone(ev); });
+      noneBtn.addEventListener("touchend", onNone);
+      vSub.appendChild(noneBtn);
+
+      // Reposition on hover: flip up if overflows bottom
+      vSub.parentElement.addEventListener("mouseenter", function () {
+        if (vSub.style.display === "none") return;
+        // Reset position
+        vSub.style.top = "-6px";
+        vSub.style.bottom = "";
+        requestAnimationFrame(function () {
+          var rect = vSub.getBoundingClientRect();
+          if (rect.bottom > window.innerHeight - 8) {
+            vSub.style.top = "";
+            vSub.style.bottom = "-6px";
+          }
+        });
+      });
+    });
+
+    // Reset item animations
+    var items = ctxMenu.querySelectorAll(".pcorg-ctx-item");
+    items.forEach(function (it) { it.classList.remove("pcorg-ctx-animate"); });
 
     var map = getMap();
     if (!map) return;
@@ -181,6 +469,11 @@
     ctxMenu.style.top = (rect.top + pt.y) + "px";
     ctxMenu.classList.add("show");
 
+    // Trigger stagger animation
+    requestAnimationFrame(function () {
+      items.forEach(function (it) { it.classList.add("pcorg-ctx-animate"); });
+    });
+
     // Adjust if overflows viewport
     requestAnimationFrame(function () {
       var menuRect = ctxMenu.getBoundingClientRect();
@@ -190,24 +483,166 @@
       if (menuRect.bottom > window.innerHeight) {
         ctxMenu.style.top = (rect.top + pt.y - menuRect.height) + "px";
       }
+      // Flip sub-menus if main menu is near right edge
+      ctxMenu.classList.toggle("flip-sub", menuRect.right + 240 > window.innerWidth);
     });
   }
 
   function hideContextMenu() {
-    if (ctxMenu) ctxMenu.classList.remove("show");
+    if (ctxMenu) {
+      ctxMenu.classList.remove("show");
+      ctxMenu.querySelectorAll(".touch-open").forEach(function (s) { s.classList.remove("touch-open"); });
+    }
   }
 
-  function openCreateFromContext(lat, lon, cat) {
+  function openCreateFromContext(lat, lon, cat, urgency) {
     resetCreateWizard();
+    if (urgency) createSelectedUrgency = urgency;
     showCreate();
     initCreateMap();
 
-    // Wait for map init, then set position + category and jump to step 2
+    // Wait for map init, then set position + category and stay on step 1
+    // so the user can see/adjust the pin on the mini-map before proceeding
     setTimeout(function () {
-      setCreatePosition(lat, lon);
+      // Pre-select category (updates header color + pin icon)
       selectCategory(cat);
-      goToStep(2);
+      // Place pin and center mini-map on the clicked location
+      setCreatePosition(lat, lon);
+      if (createMiniMap) {
+        createMiniMap.setView([lat, lon], Math.max(createMiniMap.getZoom(), 16));
+      }
+      goToStep(1);
     }, 400);
+  }
+
+  // ── Vehicle picker (after urgency selection) ───────────────────────────────
+  var vehiclePicker = null;
+
+  function showVehiclePicker(lat, lon, cat, level, vehicles, isQuick, menuPos) {
+    hideVehiclePicker();
+    var st = catStyle(cat);
+    vehiclePicker = mkEl("div", "pcorg-vehicle-picker");
+
+    var header = mkEl("div", "pcorg-vp-header");
+    header.style.borderColor = st.color;
+    var ico = matIcon("directions_car");
+    ico.style.color = st.color;
+    header.appendChild(ico);
+    var title = mkEl("span", "");
+    title.textContent = "V\u00e9hicule engag\u00e9";
+    header.appendChild(title);
+    vehiclePicker.appendChild(header);
+
+    var list = mkEl("div", "pcorg-vp-list");
+    vehicles.forEach(function (v) {
+      var btn = mkEl("button", "pcorg-vp-btn");
+      btn.textContent = v.label;
+      function onPick(e) {
+        e.stopPropagation();
+        e.preventDefault();
+        hideVehiclePicker();
+        if (isQuick) {
+          quickCreate(lat, lon, cat, level, v.label);
+        } else {
+          createPendingPatrouille = v.label;
+          openCreateFromContext(lat, lon, cat, level);
+        }
+      }
+      btn.addEventListener("click", function (e) { if (!_ctxIsTouch) onPick(e); });
+      btn.addEventListener("touchend", onPick);
+      list.appendChild(btn);
+    });
+    vehiclePicker.appendChild(list);
+
+    var noneBtn = mkEl("button", "pcorg-vp-none");
+    noneBtn.textContent = "Sans vehicule";
+    function onNone(e) {
+      e.stopPropagation();
+      e.preventDefault();
+      hideVehiclePicker();
+      if (isQuick) {
+        quickCreate(lat, lon, cat, level);
+      } else {
+        openCreateFromContext(lat, lon, cat, level);
+      }
+    }
+    noneBtn.addEventListener("click", function (e) { if (!_ctxIsTouch) onNone(e); });
+    noneBtn.addEventListener("touchend", onNone);
+    vehiclePicker.appendChild(noneBtn);
+
+    document.body.appendChild(vehiclePicker);
+
+    // Position near last context menu
+    if (menuPos) {
+      vehiclePicker.style.left = menuPos.left + "px";
+      vehiclePicker.style.top = menuPos.top + "px";
+    } else {
+      // Fallback: center of screen
+      vehiclePicker.style.left = "50%";
+      vehiclePicker.style.top = "50%";
+      vehiclePicker.style.transform = "translate(-50%, -50%)";
+    }
+
+    requestAnimationFrame(function () {
+      var rect = vehiclePicker.getBoundingClientRect();
+      if (rect.right > window.innerWidth) vehiclePicker.style.left = (window.innerWidth - rect.width - 12) + "px";
+      if (rect.bottom > window.innerHeight) vehiclePicker.style.top = (window.innerHeight - rect.height - 12) + "px";
+    });
+
+    setTimeout(function () {
+      document.addEventListener("click", _vpOutside);
+      document.addEventListener("touchstart", _vpOutside);
+    }, 50);
+    document.addEventListener("keydown", _vpEscape);
+  }
+
+  function _vpOutside(e) {
+    if (vehiclePicker && !e.target.closest(".pcorg-vehicle-picker")) hideVehiclePicker();
+  }
+  function _vpEscape(e) {
+    if (e.key === "Escape") hideVehiclePicker();
+  }
+
+  function hideVehiclePicker() {
+    if (vehiclePicker) { vehiclePicker.remove(); vehiclePicker = null; }
+    document.removeEventListener("click", _vpOutside);
+    document.removeEventListener("touchstart", _vpOutside);
+    document.removeEventListener("keydown", _vpEscape);
+  }
+
+  var quickCreatePending = false;
+  function quickCreate(lat, lon, cat, level, patrouille) {
+    if (quickCreatePending) return;
+    var ev = window.selectedEvent, yr = window.selectedYear;
+    if (!ev || !yr) {
+      if (typeof showToast === "function") showToast("warning", "Evenement/annee non selectionnes");
+      return;
+    }
+    // Resolve carroyage from map grid data
+    var carroye = "";
+    if (window.CockpitMapView && window.CockpitMapView.getCellLabel) {
+      carroye = window.CockpitMapView.getCellLabel(lat, lon) || "";
+    }
+    quickCreatePending = true;
+    var payload = {
+      event: ev, year: yr,
+      category: cat, niveau_urgence: level,
+      lat: lat, lon: lon,
+      carroye: carroye
+    };
+    if (patrouille) payload.patrouille = patrouille;
+    apiPost("/api/pcorg/quick-create", payload).then(function (r) {
+      quickCreatePending = false;
+      if (r.ok) {
+        if (typeof showToast === "function") showToast("success", urgencyLabel(cat, level) + " - fiche creee");
+        refresh();
+      } else {
+        if (typeof showToast === "function") showToast("error", r.error || "Erreur");
+      }
+    }).catch(function () {
+      quickCreatePending = false;
+      if (typeof showToast === "function") showToast("error", "Erreur reseau");
+    });
   }
 
   // ── Tabs ───────────────────────────────────────────────────────────────────
@@ -236,12 +671,18 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         lastData = data;
-        renderList(listOpen, data.open || [], false, placeholderOpen);
-        renderList(listClosed, data.closed || [], true, placeholderClosed);
-        renderStats(data.open || [], data.closed || []);
+        // Filtrer par categories autorisees
+        var ac = window.__userAllowedCategories;
+        var filterCat = ac ? function (it) { return ac.indexOf(it.category) !== -1; } : function () { return true; };
+        var openFiltered = (data.open || []).filter(filterCat);
+        var closedFiltered = (data.closed || []).filter(filterCat);
+        renderList(listOpen, openFiltered, false, placeholderOpen);
+        renderList(listClosed, closedFiltered, true, placeholderClosed);
+        renderStats(openFiltered, closedFiltered);
         syncTabHeights();
-        updateBadge(data.counts ? data.counts.open : 0);
-        updateMapPins(data.open || []);
+        updateBadge(openFiltered.length);
+        updateMapPins(openFiltered);
+        if (expPanel && expPanel.style.display !== "none") renderExpanded();
       })
       .catch(function (err) { console.error("[pcorg] refresh error", err); });
   }
@@ -286,6 +727,11 @@
         var scSpan = mkEl("span", "");
         scSpan.textContent = item.sous_classification;
         meta.appendChild(scSpan);
+      }
+      if (item.niveau_urgence) {
+        var urgBadge = mkEl("span", "pcorg-urgency-badge pcorg-urgency-" + item.niveau_urgence);
+        urgBadge.textContent = urgencyLabel(item.category, item.niveau_urgence);
+        meta.appendChild(urgBadge);
       }
       var zone = truncZone(item.area_desc);
       if (zone) {
@@ -340,10 +786,18 @@
   }
 
   // ── Stats dashboard ─────────────────────────────────────────────────────────
-  var CATEGORY_ORDER = [
+  var ALL_CATEGORIES = [
     "PCO.Secours", "PCO.Securite", "PCO.Technique",
     "PCO.Flux", "PCO.Information", "PCO.MainCourante", "PCO.Fourriere"
   ];
+
+  function getAllowedCategories() {
+    var ac = window.__userAllowedCategories;
+    if (!ac) return ALL_CATEGORIES; // null = pas de restriction
+    return ALL_CATEGORIES.filter(function (c) { return ac.indexOf(c) !== -1; });
+  }
+
+  var CATEGORY_ORDER = getAllowedCategories();
 
   function renderStats(openItems, closedItems) {
     if (!statsContainer) return;
@@ -488,6 +942,8 @@
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (d.error) { body.textContent = d.error; return; }
+        // Ack bounce for this user
+        ackPin(id, d.bounce_rev || 0);
         renderFiche(d, isClosed);
       })
       .catch(function () { body.textContent = "Erreur de chargement"; });
@@ -512,6 +968,18 @@
     statusEl.textContent = d.status_code === 10 ? "TERMINE" : "EN COURS";
     statusEl.className = "pcorg-fiche-status " + (d.status_code === 10 ? "closed" : "open");
 
+    // Urgency badge in header
+    var urgEl = header.querySelector(".pcorg-fiche-urgency");
+    if (urgEl) {
+      if (d.niveau_urgence) {
+        urgEl.textContent = urgencyLabel(d.category, d.niveau_urgence);
+        urgEl.className = "pcorg-fiche-urgency pcorg-urgency-" + d.niveau_urgence;
+        urgEl.style.display = "";
+      } else {
+        urgEl.style.display = "none";
+      }
+    }
+
     // Body
     var body = document.getElementById("pcorg-fiche-body");
     body.textContent = "";
@@ -525,12 +993,22 @@
       body.appendChild(desc);
     }
 
+    // Urgency level selector (only if not closed)
+    if (!isClosed && d.status_code !== 10) {
+      var urgSec = mkEl("div", "pcorg-fiche-section");
+      urgSec.textContent = "Niveau d'urgence";
+      body.appendChild(urgSec);
+      body.appendChild(buildUrgencyButtons(d.niveau_urgence, d.category, d.id, false));
+    }
+
     // Info row (fields + mini map)
     var infoRow = mkEl("div", "pcorg-fiche-info-row");
 
     // Fields
     var fields = mkEl("div", "pcorg-fiche-fields");
-    addField(fields, "Operateur", d.operator);
+    var opDisplay = d.operator || "";
+    if (d.operator_group) opDisplay += " (" + d.operator_group + ")";
+    addField(fields, "Operateur", opDisplay);
     if (d.ts) addField(fields, "Ouverture", new Date(d.ts).toLocaleString("fr-FR"));
     if (d.close_ts && d.status_code === 10) addField(fields, "Cloture", new Date(d.close_ts).toLocaleString("fr-FR"));
     if (d.operator_close && d.operator_close !== d.operator) addField(fields, "Clos par", d.operator_close);
@@ -541,7 +1019,8 @@
     if (cc.radio) contact.push(typeof cc.radio === "string" ? cc.radio : "Radio");
     if (contact.length) addField(fields, "Via", contact.join(" / "));
     addField(fields, "Carroye", cc.carroye);
-    addField(fields, "Groupe", d.group_desc);
+    addField(fields, "V\u00e9hicule engag\u00e9", cc.patrouille);
+    addField(fields, "Groupe", formatGroupDesc(d.group_desc, d.category));
     infoRow.appendChild(fields);
 
     // Mini map
@@ -587,6 +1066,7 @@
       chronoSec.textContent = "Chronologie";
       body.appendChild(chronoSec);
       var timeline = mkEl("div", "pcorg-fiche-timeline");
+      timeline.style.setProperty("--cat-color", st.color);
       history.forEach(function (entry) {
         var isStatus = entry.text && entry.text.indexOf("Statut:") === 0;
         var ent = mkEl("div", "pcorg-chrono-entry" + (isStatus ? " status-change" : ""));
@@ -684,7 +1164,7 @@
       });
       actions.appendChild(btnEdit);
     }
-    if (!isClosed && d.status_code !== 10) {
+    if (!isClosed && d.status_code !== 10 && (window.__userCanCloseFiche || window.__userIsAdmin)) {
       var btnClose = mkEl("button", "pcorg-btn-danger");
       btnClose.appendChild(matIcon("check_circle"));
       btnClose.appendChild(document.createTextNode(" Clore"));
@@ -692,6 +1172,19 @@
         closeIntervention(d.id);
       });
       actions.appendChild(btnClose);
+    }
+    // Delete button (admin only)
+    if (window.__userIsAdmin) {
+      var btnDel = mkEl("button", "pcorg-btn-delete");
+      btnDel.appendChild(matIcon("delete"));
+      btnDel.appendChild(document.createTextNode(" Supprimer"));
+      btnDel.addEventListener("click", function () {
+        showConfirmToast("Supprimer definitivement cette intervention ?", { type: "error", okLabel: "Supprimer" }).then(function (ok) {
+          if (!ok) return;
+          deleteIntervention(d.id);
+        });
+      });
+      actions.appendChild(btnDel);
     }
     body.appendChild(actions);
   }
@@ -745,6 +1238,43 @@
       catContainer.appendChild(btn);
     });
     body.appendChild(catContainer);
+
+    // Niveau d'urgence
+    var urgSec = mkEl("div", "pcorg-fiche-section"); urgSec.textContent = "Niveau d'urgence"; body.appendChild(urgSec);
+    var urgContainer = mkEl("div", "pcorg-create-cats");
+    urgContainer.id = "pcorg-edit-urgency-container";
+    var editUrgency = d.niveau_urgence || "";
+    function renderUrgencyBtns(cat) {
+      urgContainer.textContent = "";
+      var uType = urgencyType(cat);
+      var noneBtnU = mkEl("button", "pcorg-create-cat-btn" + (!editUrgency ? " selected" : ""));
+      noneBtnU.type = "button";
+      noneBtnU.style.cssText = !editUrgency ? "border-color:var(--muted);background:var(--muted);font-size:0.75rem" : "font-size:0.75rem";
+      noneBtnU.textContent = "Aucun";
+      noneBtnU.addEventListener("click", function () {
+        editUrgency = "";
+        renderUrgencyBtns(editCat);
+      });
+      urgContainer.appendChild(noneBtnU);
+      URGENCY_LEVELS.forEach(function (lvl) {
+        var c = URGENCY_COLORS[lvl];
+        var btnU = mkEl("button", "pcorg-create-cat-btn" + (editUrgency === lvl ? " selected" : ""));
+        btnU.type = "button";
+        if (editUrgency === lvl) { btnU.style.borderColor = c; btnU.style.background = c; }
+        var dotU = mkEl("span", ""); dotU.style.cssText = "width:8px;height:8px;border-radius:50%;background:" + c;
+        btnU.appendChild(dotU);
+        var lblU = mkEl("span", ""); lblU.style.fontSize = "0.72rem";
+        lblU.textContent = URGENCY_LABELS[uType][lvl];
+        btnU.appendChild(lblU);
+        btnU.addEventListener("click", function () {
+          editUrgency = lvl;
+          renderUrgencyBtns(editCat);
+        });
+        urgContainer.appendChild(btnU);
+      });
+    }
+    renderUrgencyBtns(editCat);
+    body.appendChild(urgContainer);
 
     // Appelant + contact
     var infoSec = mkEl("div", "pcorg-fiche-section"); infoSec.textContent = "Informations"; body.appendChild(infoSec);
@@ -807,7 +1337,7 @@
     btnSave.appendChild(matIcon("save"));
     btnSave.appendChild(document.createTextNode(" Enregistrer"));
     btnSave.addEventListener("click", function () {
-      submitFicheEdit(d.id, editCat, cc);
+      submitFicheEdit(d.id, editCat, cc, editUrgency);
     });
     editActions.appendChild(btnSave);
     body.appendChild(editActions);
@@ -866,6 +1396,13 @@
         addEditField(container, "pcorg-edit-moyens2", "Moyens Niv.2", cc.moyens_engages_niveau_2 || "");
       }
     }
+
+    // Patrouille
+    var vehicles = vehiclesByCategory[cat];
+    if (vehicles && vehicles.length > 0) {
+      var vehNames = vehicles.map(function (v) { return v.label; });
+      addEditSelect(container, "pcorg-edit-patrouille", "V\u00e9hicule engag\u00e9", vehNames, cc.patrouille || "");
+    }
   }
 
   function addEditField(container, id, label, value) {
@@ -899,7 +1436,7 @@
     container.appendChild(grp);
   }
 
-  function submitFicheEdit(id, editCat, origCc) {
+  function submitFicheEdit(id, editCat, origCc, editUrgency) {
     var comment = (document.getElementById("pcorg-edit-comment").value || "").trim();
     if (!comment) { showToast("warning", "L'action prise est obligatoire"); return; }
 
@@ -941,7 +1478,11 @@
       ccUpdate.moyens_engages_niveau_2 = eVal("pcorg-edit-moyens2");
     }
 
-    var payload = { text: text, category: editCat, content_category: ccUpdate };
+    // Patrouille
+    var patrEl = document.getElementById("pcorg-edit-patrouille");
+    if (patrEl) ccUpdate.patrouille = patrEl.value;
+
+    var payload = { text: text, category: editCat, content_category: ccUpdate, niveau_urgence: editUrgency || null };
 
     // 1) Save fields, then 2) post comment
     fetch("/api/pcorg/update/" + encodeURIComponent(id), {
@@ -1006,6 +1547,7 @@
       if (cc.texte) fields.push(["Texte", cc.texte]);
       if (cc.alerte) fields.push(["Alerte", "Oui"]);
     }
+    if (cc.patrouille) fields.push(["V\u00e9hicule engag\u00e9", cc.patrouille]);
     return fields;
   }
 
@@ -1029,6 +1571,52 @@
     setTimeout(function () { detailMiniMap.invalidateSize(); }, 150);
   }
 
+  // ── Change urgency level ────────────────────────────────────────────────────
+  function setUrgencyLevel(id, level, category) {
+    apiPost("/api/pcorg/set-urgency/" + encodeURIComponent(id), { niveau_urgence: level || null })
+      .then(function (r) {
+        if (r.ok) {
+          var label = level ? urgencyLabel(category, level) : "Aucun";
+          showToast("success", "Urgence \u2192 " + label);
+          refresh();
+          // Re-open detail modal to refresh
+          openDetailModal(id, false);
+        } else {
+          showToast("error", r.error || "Erreur");
+        }
+      });
+  }
+
+  function buildUrgencyButtons(currentLevel, category, ficheId, compact) {
+    var container = mkEl("div", "pcorg-urgency-selector" + (compact ? " compact" : ""));
+    var levels = [
+      { code: "EU", color: URGENCY_COLORS.EU },
+      { code: "UA", color: URGENCY_COLORS.UA },
+      { code: "UR", color: URGENCY_COLORS.UR },
+      { code: "IMP", color: URGENCY_COLORS.IMP },
+      { code: null, color: "#94a3b8" }
+    ];
+    levels.forEach(function (lvl) {
+      var isActive = (currentLevel || null) === lvl.code;
+      var btn = mkEl("button", "pcorg-urg-btn" + (isActive ? " active" : ""));
+      btn.type = "button";
+      btn.style.setProperty("--urg-color", lvl.color);
+      if (isActive) { btn.style.background = lvl.color; btn.style.color = "#fff"; btn.style.borderColor = lvl.color; }
+      var dot = mkEl("span", "pcorg-urg-dot");
+      dot.style.background = lvl.color;
+      btn.appendChild(dot);
+      var text = mkEl("span", "");
+      text.textContent = lvl.code ? (compact ? lvl.code : urgencyLabel(category, lvl.code)) : (compact ? "\u2013" : "Aucun");
+      btn.appendChild(text);
+      btn.addEventListener("click", function () {
+        if (isActive) return;
+        setUrgencyLevel(ficheId, lvl.code, category);
+      });
+      container.appendChild(btn);
+    });
+    return container;
+  }
+
   // ── Close intervention ─────────────────────────────────────────────────────
   function closeIntervention(id) {
     showConfirmToast("Clore cette intervention ?").then(function (ok) {
@@ -1047,6 +1635,26 @@
           }
         });
     });
+  }
+
+  function deleteIntervention(id) {
+    var csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
+    fetch("/api/pcorg/delete/" + encodeURIComponent(id), {
+      method: "DELETE",
+      headers: { "X-CSRFToken": csrf }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        if (r.ok) {
+          hideFiche();
+          var map = getMap();
+          if (map) map.closePopup();
+          showToast("success", "Intervention supprimee");
+          refresh();
+        } else {
+          showToast("error", r.error || "Erreur");
+        }
+      });
   }
 
   // ── Badge ──────────────────────────────────────────────────────────────────
@@ -1084,7 +1692,7 @@
         L.DomEvent.on(btn, "click", function (e) {
           L.DomEvent.preventDefault(e);
           if (lastData && lastData.open) {
-            lastData.open.forEach(function (item) { ignoredPins[item.id] = true; });
+            ackAllPins(lastData.open);
           }
           refresh();
           showToast("info", "Toutes les alertes ignorees");
@@ -1159,6 +1767,11 @@
         popStatus.textContent = "EN COURS";
         popHeader.appendChild(popStatus);
       }
+      if (item.niveau_urgence) {
+        var popUrg = mkEl("span", "pcorg-popup-urgency");
+        popUrg.textContent = urgencyLabel(item.category, item.niveau_urgence);
+        popHeader.appendChild(popUrg);
+      }
       popupDiv.appendChild(popHeader);
 
       var popBody = mkEl("div", "pcorg-popup-body");
@@ -1191,7 +1804,7 @@
       }
       var opField = mkEl("div", "pcorg-popup-field");
       opField.appendChild(matIcon("person", "pcorg-popup-fi"));
-      var opVal = mkEl("span", ""); opVal.textContent = item.operator || "?";
+      var opVal = mkEl("span", "pcorg-popup-op-val"); opVal.textContent = item.operator || "?";
       opField.appendChild(opVal);
       popFields.appendChild(opField);
 
@@ -1219,10 +1832,16 @@
 
       // Chronology placeholder (loaded on popup open)
       var chronoDiv = mkEl("div", "pcorg-popup-chrono");
+      chronoDiv.style.setProperty("--cat-color", st.color);
       var chronoLoading = mkEl("div", "pcorg-popup-chrono-loading");
       chronoLoading.textContent = "...";
       chronoDiv.appendChild(chronoLoading);
       popBody.appendChild(chronoDiv);
+
+      // Urgency selector in popup (compact, only if open)
+      if (item.status_code !== 10) {
+        popBody.appendChild(buildUrgencyButtons(item.niveau_urgence, item.category, item.id, true));
+      }
 
       // Buttons row
       var popBtns = mkEl("div", "pcorg-popup-btns");
@@ -1236,7 +1855,7 @@
       popBtns.appendChild(popBtn);
 
       // Close intervention button
-      if (item.status_code !== 10) {
+      if (item.status_code !== 10 && (window.__userCanCloseFiche || window.__userIsAdmin)) {
         var closePopBtn = mkEl("button", "pcorg-popup-btn pcorg-popup-btn-danger");
         closePopBtn.appendChild(matIcon("check_circle"));
         closePopBtn.appendChild(document.createTextNode(" Clore"));
@@ -1246,26 +1865,11 @@
         popBtns.appendChild(closePopBtn);
       }
 
-      // Ignore bounce button (only if bouncing)
-      if (isOld && !ignoredPins[item.id]) {
-        var ignoreBtn = mkEl("button", "pcorg-popup-btn pcorg-popup-btn-muted");
-        ignoreBtn.appendChild(matIcon("notifications_off"));
-        ignoreBtn.appendChild(document.createTextNode(" Ignorer"));
-        ignoreBtn.addEventListener("click", (function (id) {
-          return function () {
-            ignoredPins[id] = true;
-            refresh();
-            showToast("info", "Alerte ignoree");
-          };
-        })(item.id));
-        popBtns.appendChild(ignoreBtn);
-      }
-
       popBody.appendChild(popBtns);
       popupDiv.appendChild(popBody);
 
-      // Bounce animation for interventions > 1h (unless ignored or created from cockpit)
-      var shouldBounce = isOld && !ignoredPins[item.id] && item.server !== "COCKPIT";
+      // Bounce animation based on bounce_rev vs user ack
+      var doBounce = shouldBounce(item);
 
       var marker = L.marker([item.lat, item.lon], {
         icon: icon,
@@ -1275,18 +1879,37 @@
 
       pcorgMarkers[item.id] = marker;
 
-      if (shouldBounce) {
+      if (doBounce) {
         marker.getElement().classList.add("pcorg-pin-bounce");
       }
 
-      // Lazy load details + chronology on popup open
-      marker.on("popupopen", (function (itemId, sDiv, cDiv, color, cat) {
+      // Pan map to center pin slightly below middle (room for popup above)
+      marker.on("click", function () {
+        var map = getMap();
+        if (!map) return;
+        var latlng = marker.getLatLng();
+        var px = map.latLngToContainerPoint(latlng);
+        var offsetY = map.getSize().y * 0.25; // shift pin 25% below center
+        var target = map.containerPointToLatLng([px.x, px.y - offsetY]);
+        map.panTo(target, { animate: true, duration: 0.3 });
+      });
+
+      // Lazy load details + chronology on popup open + ack bounce
+      marker.on("popupopen", (function (itemId, sDiv, cDiv, color, cat, itemRef, markerRef, opValEl) {
         return function () {
+          // Ack: stop bounce for this user
+          ackPin(itemId, itemRef.bounce_rev || 0);
+          var el = markerRef.getElement();
+          if (el) el.classList.remove("pcorg-pin-bounce");
           if (cDiv._loaded) return;
           cDiv._loaded = true;
           fetch("/api/pcorg/detail/" + encodeURIComponent(itemId))
             .then(function (r) { return r.json(); })
             .then(function (d) {
+              // Update operator with group
+              if (d.operator_group && opValEl) {
+                opValEl.textContent = (d.operator || "?") + " (" + d.operator_group + ")";
+              }
               // Specific fields (fourriere etc.)
               var cc = d.content_category || {};
               var specs = [];
@@ -1338,7 +1961,7 @@
             })
             .catch(function () { cDiv.textContent = ""; });
         };
-      })(item.id, specDiv, chronoDiv, st.color, item.category));
+      })(item.id, specDiv, chronoDiv, st.color, item.category, item, marker, opVal));
     });
   }
 
@@ -1371,7 +1994,9 @@
   var createCarroye = "";
 
   // Listes de reference chargees depuis la config
-  var pcorgConfig = { sous_classifications: {}, intervenants: [], services: [] };
+  var pcorgConfig = { sous_classifications: {}, intervenants: [], services: [], fiche_simplifiee: {} };
+  var vehiclesByCategory = {};
+  var createPendingPatrouille = "";
 
   function extractLabels(items) {
     if (!items || !items.length) return [];
@@ -1382,6 +2007,13 @@
     fetch("/api/pcorg-config")
       .then(function (r) { return r.json(); })
       .then(function (d) { if (d) pcorgConfig = d; })
+      .catch(function () {});
+  }
+
+  function loadVehiclesByCategory() {
+    fetch("/anoloc/vehicles-by-category")
+      .then(function (r) { return r.json(); })
+      .then(function (d) { if (d) vehiclesByCategory = d; })
       .catch(function () {});
   }
 
@@ -1511,6 +2143,8 @@
     createLat = null;
     createLon = null;
     createSelectedCat = "";
+    createSelectedUrgency = "";
+    createPendingPatrouille = "";
     createCarroye = "";
     createGrid100On = false;
     createGrid25On = false;
@@ -1857,9 +2491,65 @@
     buildSpecificCreateFields(cat);
   }
 
+  var createSelectedUrgency = "";
+
   function buildSpecificCreateFields(cat) {
     var container = document.getElementById("pcorg-create-specific");
     container.textContent = "";
+
+    // Niveau d'urgence (preserve pre-selected value from context menu)
+    var presetUrgency = createSelectedUrgency || "";
+    var urgGrp = mkEl("div", "form-group");
+    var urgLbl = mkEl("label", ""); urgLbl.textContent = "Niveau d'urgence";
+    urgGrp.appendChild(urgLbl);
+    var urgRow = mkEl("div", "pcorg-create-cats");
+    urgRow.id = "pcorg-create-urgency-btns";
+    var uType = urgencyType(cat);
+    var noneBtnC = mkEl("button", "pcorg-create-cat-btn" + (!presetUrgency ? " selected" : ""));
+    noneBtnC.type = "button";
+    noneBtnC.style.cssText = !presetUrgency ? "border-color:var(--muted);background:var(--muted);font-size:0.75rem" : "font-size:0.75rem";
+    noneBtnC.setAttribute("data-urgency", "");
+    noneBtnC.textContent = "Aucun";
+    noneBtnC.addEventListener("click", function () {
+      createSelectedUrgency = "";
+      updateUrgencyCreateBtns();
+    });
+    urgRow.appendChild(noneBtnC);
+    URGENCY_LEVELS.forEach(function (lvl) {
+      var c = URGENCY_COLORS[lvl];
+      var isSel = presetUrgency === lvl;
+      var btnU = mkEl("button", "pcorg-create-cat-btn" + (isSel ? " selected" : ""));
+      btnU.type = "button";
+      btnU.setAttribute("data-urgency", lvl);
+      if (isSel) { btnU.style.borderColor = c; btnU.style.background = c; }
+      var dotU = mkEl("span", ""); dotU.style.cssText = "width:8px;height:8px;border-radius:50%;background:" + c;
+      btnU.appendChild(dotU);
+      var lblU = mkEl("span", ""); lblU.style.fontSize = "0.72rem";
+      lblU.textContent = URGENCY_LABELS[uType][lvl];
+      btnU.appendChild(lblU);
+      btnU.addEventListener("click", function () {
+        createSelectedUrgency = lvl;
+        updateUrgencyCreateBtns();
+      });
+      urgRow.appendChild(btnU);
+    });
+    urgGrp.appendChild(urgRow);
+    container.appendChild(urgGrp);
+
+    function updateUrgencyCreateBtns() {
+      urgRow.querySelectorAll(".pcorg-create-cat-btn").forEach(function (b) {
+        var val = b.getAttribute("data-urgency");
+        var sel = val === createSelectedUrgency;
+        b.classList.toggle("selected", sel);
+        if (val) {
+          b.style.borderColor = sel ? URGENCY_COLORS[val] : "";
+          b.style.background = sel ? URGENCY_COLORS[val] : "";
+        } else {
+          b.style.borderColor = sel ? "var(--muted)" : "";
+          b.style.background = sel ? "var(--muted)" : "";
+        }
+      });
+    }
 
     // Sous-classification from config
     var subs = extractLabels((pcorgConfig.sous_classifications || {})[cat]);
@@ -1899,6 +2589,18 @@
       } else {
         addCreateField(container, "pcorg-c-moyens1", "Moyens engages Niv.1");
         addCreateField(container, "pcorg-c-moyens2", "Moyens engages Niv.2");
+      }
+    }
+
+    // V\u00e9hicule engag\u00e9 (from linked beacon groups)
+    var vehicles = vehiclesByCategory[cat];
+    if (vehicles && vehicles.length > 0) {
+      var vehNames = vehicles.map(function (v) { return v.label; });
+      addCreateSelect(container, "pcorg-c-patrouille", "V\u00e9hicule engag\u00e9", vehNames);
+      if (createPendingPatrouille) {
+        var selEl = document.getElementById("pcorg-c-patrouille");
+        if (selEl) selEl.value = createPendingPatrouille;
+        createPendingPatrouille = "";
       }
     }
   }
@@ -1979,6 +2681,10 @@
       var m2 = getVal("pcorg-c-moyens2"); if (m2) cc.moyens_engages_niveau_2 = m2;
     }
 
+    // Patrouille
+    var patr = getVal("pcorg-c-patrouille");
+    if (patr) cc.patrouille = patr;
+
     var payload = {
       event: ey.event,
       year: ey.year,
@@ -1987,6 +2693,7 @@
       area_desc: "",
       content_category: cc,
       comment: getVal("pcorg-c-comment"),
+      niveau_urgence: createSelectedUrgency || null,
       lat: createLat,
       lon: createLon
     };
@@ -2103,6 +2810,258 @@
     map.on("keydown", onEsc);
   }
 
+  // ── Expanded list panel (zone centrale, meme pattern que meteo) ──────────
+
+  var expPanel, expBody, expSearch, expCount;
+  var expFilter = "all";
+  var _expPreviousView = null;
+
+  function initExpandedPanel() {
+    expPanel = document.getElementById("pcorg-expanded-panel");
+    expBody = document.getElementById("pcorg-expanded-body");
+    expSearch = document.getElementById("pcorg-expanded-search");
+    expCount = document.getElementById("pcorg-expanded-count");
+    if (!expPanel) return;
+
+    var expandBtn = document.getElementById("pcorg-expand-btn");
+    var closeBtn = document.getElementById("pcorg-expanded-close");
+
+    if (expandBtn) expandBtn.addEventListener("click", toggleExpanded);
+    if (closeBtn) closeBtn.addEventListener("click", closeExpanded);
+
+    // Filter tabs
+    var tabs = expPanel.querySelectorAll(".pcorg-exp-tab");
+    tabs.forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        tabs.forEach(function (t) { t.classList.remove("active"); });
+        tab.classList.add("active");
+        expFilter = tab.getAttribute("data-filter");
+        renderExpanded();
+      });
+    });
+
+    // Search
+    if (expSearch) {
+      expSearch.addEventListener("input", function () { renderExpanded(); });
+    }
+  }
+
+  function toggleExpanded() {
+    if (expPanel && expPanel.style.display !== "none") {
+      closeExpanded();
+      return;
+    }
+    openExpanded();
+  }
+
+  function openExpanded() {
+    if (!expPanel || !lastData) return;
+    var timeline = document.getElementById("timeline-main");
+    var mapMain = document.getElementById("map-main");
+    var meteoPanel = document.getElementById("meteo-panel");
+
+    // Sauvegarder la vue precedente
+    if (window.CockpitMapView) {
+      _expPreviousView = window.CockpitMapView.currentView();
+    } else {
+      _expPreviousView = (mapMain && mapMain.style.display !== "none") ? "map" : "timeline";
+    }
+
+    // Fermer le panel meteo s'il est ouvert
+    if (meteoPanel && meteoPanel.style.display !== "none" && window.MeteoPanel) {
+      window.MeteoPanel.collapse();
+    }
+
+    if (timeline) timeline.style.display = "none";
+    if (mapMain) mapMain.style.display = "none";
+    expPanel.style.display = "flex";
+
+    var expandBtn = document.getElementById("pcorg-expand-btn");
+    if (expandBtn) expandBtn.querySelector(".material-symbols-outlined").textContent = "close_fullscreen";
+
+    if (expSearch) expSearch.value = "";
+    expFilter = "all";
+    var tabs = expPanel.querySelectorAll(".pcorg-exp-tab");
+    tabs.forEach(function (t) { t.classList.toggle("active", t.getAttribute("data-filter") === "all"); });
+    renderExpanded();
+    setTimeout(function () { if (expSearch) expSearch.focus(); }, 100);
+  }
+
+  function closeExpanded() {
+    if (expPanel) expPanel.style.display = "none";
+    var expandBtn = document.getElementById("pcorg-expand-btn");
+    if (expandBtn) expandBtn.querySelector(".material-symbols-outlined").textContent = "open_in_full";
+    var timeline = document.getElementById("timeline-main");
+    var mapMain = document.getElementById("map-main");
+
+    if (_expPreviousView === "map") {
+      if (timeline) timeline.style.display = "none";
+      if (mapMain) mapMain.style.display = "block";
+    } else {
+      if (timeline) timeline.style.display = "";
+      if (mapMain) mapMain.style.display = "none";
+    }
+  }
+
+  function renderExpanded() {
+    if (!expBody || !lastData) return;
+    var openItems = (lastData.open || []).map(function (it) { it._open = true; return it; });
+    var closedItems = (lastData.closed || []).map(function (it) { it._open = false; return it; });
+
+    var items;
+    if (expFilter === "open") items = openItems;
+    else if (expFilter === "closed") items = closedItems;
+    else items = openItems.concat(closedItems);
+
+    // Search filter
+    var q = (expSearch ? expSearch.value : "").toLowerCase().trim();
+    if (q) {
+      items = items.filter(function (it) {
+        return (it.text || "").toLowerCase().indexOf(q) !== -1
+          || (it.category || "").toLowerCase().indexOf(q) !== -1
+          || (it.area_desc || "").toLowerCase().indexOf(q) !== -1
+          || (it.operator || "").toLowerCase().indexOf(q) !== -1
+          || (it.sous_classification || "").toLowerCase().indexOf(q) !== -1;
+      });
+    }
+
+    expBody.textContent = "";
+
+    if (items.length === 0) {
+      var empty = mkEl("div", "widget-placeholder");
+      empty.style.padding = "60px 0";
+      var emptyIco = matIcon("search_off", "");
+      emptyIco.style.fontSize = "40px";
+      empty.appendChild(emptyIco);
+      var emptyTxt = mkEl("span", "");
+      emptyTxt.textContent = q ? "Aucun resultat pour \"" + q + "\"" : "Aucune intervention";
+      empty.appendChild(emptyTxt);
+      expBody.appendChild(empty);
+      if (expCount) expCount.textContent = "";
+      return;
+    }
+
+    var table = mkEl("table", "pcorg-exp-table");
+    var thead = document.createElement("thead");
+    var headRow = document.createElement("tr");
+    ["Statut", "Categorie", "Description", "Operateur", "Ouverture", "Cloture"].forEach(function (h) {
+      var th = document.createElement("th");
+      th.textContent = h;
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    var tbody = document.createElement("tbody");
+    items.forEach(function (item) {
+      var st = catStyle(item.category);
+      var tr = document.createElement("tr");
+
+      // Statut
+      var tdStatus = document.createElement("td");
+      var statusBadge = mkEl("span", "pcorg-exp-status " + (item._open ? "open" : "closed"));
+      statusBadge.textContent = item._open ? "En cours" : "Termin\u00e9e";
+      tdStatus.appendChild(statusBadge);
+      tr.appendChild(tdStatus);
+
+      // Categorie
+      var tdCat = document.createElement("td");
+      var catEl = mkEl("span", "pcorg-exp-cat");
+      catEl.style.color = st.color;
+      var catIco = matIcon(st.icon, "");
+      catIco.style.color = st.color;
+      catEl.appendChild(catIco);
+      var catTxt = document.createTextNode(shortCat(item.category));
+      catEl.appendChild(catTxt);
+      tdCat.appendChild(catEl);
+      if (item.sous_classification) {
+        var scEl = mkEl("div", "");
+        scEl.style.fontSize = "0.65rem";
+        scEl.style.color = "var(--muted)";
+        scEl.textContent = item.sous_classification;
+        tdCat.appendChild(scEl);
+      }
+      if (item.niveau_urgence) {
+        var urgWrapExp = mkEl("div", "");
+        urgWrapExp.style.marginTop = "2px";
+        var urgBadgeExp = mkEl("span", "pcorg-urgency-badge pcorg-urgency-" + item.niveau_urgence);
+        urgBadgeExp.style.marginLeft = "0";
+        urgBadgeExp.textContent = urgencyLabel(item.category, item.niveau_urgence);
+        urgWrapExp.appendChild(urgBadgeExp);
+        tdCat.appendChild(urgWrapExp);
+      }
+      tr.appendChild(tdCat);
+
+      // Description
+      var tdDesc = document.createElement("td");
+      var descEl = mkEl("span", "pcorg-exp-desc");
+      descEl.textContent = item.text || "(sans description)";
+      descEl.title = item.text || "";
+      tdDesc.appendChild(descEl);
+      tr.appendChild(tdDesc);
+
+      // Operateur
+      var tdOp = document.createElement("td");
+      var opEl = mkEl("span", "pcorg-exp-operator");
+      opEl.textContent = item.operator || "";
+      tdOp.appendChild(opEl);
+      tr.appendChild(tdOp);
+
+      // Ouverture
+      var tdOpen = document.createElement("td");
+      var openEl = mkEl("span", "pcorg-exp-time");
+      if (item.ts) {
+        var dOpen = new Date(item.ts);
+        openEl.textContent = String(dOpen.getDate()).padStart(2, "0") + "/" +
+          String(dOpen.getMonth() + 1).padStart(2, "0") + " " +
+          String(dOpen.getHours()).padStart(2, "0") + ":" +
+          String(dOpen.getMinutes()).padStart(2, "0");
+      }
+      tdOpen.appendChild(openEl);
+      tr.appendChild(tdOpen);
+
+      // Cloture
+      var tdClose = document.createElement("td");
+      var closeEl = mkEl("span", "pcorg-exp-time");
+      if (item.close_ts) {
+        var dClose = new Date(item.close_ts);
+        closeEl.textContent = String(dClose.getDate()).padStart(2, "0") + "/" +
+          String(dClose.getMonth() + 1).padStart(2, "0") + " " +
+          String(dClose.getHours()).padStart(2, "0") + ":" +
+          String(dClose.getMinutes()).padStart(2, "0");
+      } else {
+        closeEl.textContent = "-";
+        closeEl.style.color = "var(--muted)";
+      }
+      tdClose.appendChild(closeEl);
+      tr.appendChild(tdClose);
+
+      // Click -> open detail
+      tr.addEventListener("click", (function (id, closed) {
+        return function () { openDetailModal(id, closed); };
+      })(item.id, !item._open));
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    expBody.appendChild(table);
+
+    // Count
+    var openCount = items.filter(function (it) { return it._open; }).length;
+    var closedCount = items.filter(function (it) { return !it._open; }).length;
+    if (expCount) {
+      expCount.textContent = items.length + " intervention" + (items.length > 1 ? "s" : "") +
+        " - " + openCount + " en cours, " + closedCount + " terminee" + (closedCount > 1 ? "s" : "");
+    }
+  }
+
+  // ── Public API (pour alert_poller) ──────────────────────────────────────────
+  window.PcorgUI = { openFiche: function(id) { openDetailModal(id, false); } };
+
   // ── Bootstrap ──────────────────────────────────────────────────────────────
-  document.addEventListener("DOMContentLoaded", init);
+  document.addEventListener("DOMContentLoaded", function () {
+    init();
+    initExpandedPanel();
+  });
 })();

@@ -224,6 +224,12 @@ def anoloc_live():
                     if (datetime.now(timezone.utc) - last_real).total_seconds() > 1800:
                         online = False  # pas de vraie frame depuis 30 min
 
+                # Deriver gps_fix depuis last_real_at (< 5 min = signal GPS)
+                gps_fix = doc.get("gps_fix", 0)
+                if last_real and online:
+                    real_age = (datetime.now(timezone.utc) - last_real).total_seconds()
+                    gps_fix = 1 if real_age < 300 else 0
+
                 groups[grp_id]["devices"].append({
                     "id": dev_id,
                     "label": doc.get("label", dev_id),
@@ -233,7 +239,7 @@ def anoloc_live():
                     "heading": doc.get("heading", 0),
                     "status": doc.get("status", "offline"),
                     "battery_pct": doc.get("battery_pct"),
-                    "gps_fix": doc.get("gps_fix", 0),
+                    "gps_fix": gps_fix,
                     "sent_at": doc.get("sent_at", "").isoformat() if isinstance(doc.get("sent_at"), datetime) else str(doc.get("sent_at", "")),
                     "last_real_at": doc.get("last_real_at", "").isoformat() if isinstance(doc.get("last_real_at"), datetime) else "",
                     "collected_at": doc.get("collected_at", "").isoformat() if isinstance(doc.get("collected_at"), datetime) else "",
@@ -257,6 +263,44 @@ def anoloc_live():
                 })
 
     return jsonify({"groups": groups, "enabled": True})
+
+
+@anoloc_bp.route("/anoloc/vehicles-by-category")
+def anoloc_vehicles_by_category():
+    """Retourne {category: [{id, label}, ...]} pour les groupes avec pco_category."""
+    db = _get_mongo_db()
+    config = db["anoloc_config"].find_one({"_id": "global"})
+    if not config or not config.get("enabled"):
+        return jsonify({})
+
+    visible_groups = _get_user_visible_groups(config)
+    result = {}
+    seen = {}  # category -> set of device ids (deduplicate)
+
+    for grp in config.get("beacon_groups", []):
+        if not grp.get("enabled"):
+            continue
+        cat = grp.get("pco_category")
+        if not cat:
+            continue
+        if visible_groups is not None and grp["id"] not in visible_groups:
+            continue
+
+        dev_labels = grp.get("device_labels") or {}
+        if cat not in result:
+            result[cat] = []
+            seen[cat] = set()
+
+        for dev_id in grp.get("anoloc_device_ids", []):
+            if dev_id in seen[cat]:
+                continue
+            seen[cat].add(dev_id)
+            result[cat].append({
+                "id": dev_id,
+                "label": dev_labels.get(dev_id, dev_id),
+            })
+
+    return jsonify(result)
 
 
 @anoloc_bp.route("/anoloc/status")

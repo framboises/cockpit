@@ -43,7 +43,10 @@
     "traffic_cluster": "Trafic - cluster",
     "anpr_watchlist": "LAPI - plaque",
     "meteo_threshold": "Meteo - seuil",
-    "checkpoint_reassign": "Controle acces - reaffectation"
+    "meteo_rain_onset": "Meteo - pluie imminente",
+    "checkpoint_reassign": "Controle acces - reaffectation",
+    "checkpoint_error_burst": "Controle acces - erreurs",
+    "pcorg_urgency": "Main courante - urgence"
   };
 
   var allGroups = [];
@@ -197,6 +200,7 @@
       form.querySelector('[name="enabled"]').checked = !!def.enabled;
       populateGroupCheckboxes(def.groups || []);
       if(window.WaAdmin) WaAdmin.setDefValues(def.whatsapp || {});
+      _syncParamsUI(def.detection_type || "", def.params || {});
     } else {
       $("#alert-def-modal-title").textContent = "Nouvelle alerte";
       form.querySelector('[name="_id"]').value = "";
@@ -205,6 +209,7 @@
       form.querySelector('[name="enabled"]').checked = true;
       populateGroupCheckboxes([]);
       if(window.WaAdmin) WaAdmin.setDefValues({});
+      _syncParamsUI("", {});
     }
     modal.hidden = false;
   }
@@ -230,6 +235,62 @@
     });
   }
 
+  // ── Params visuels pcorg_urgency ──
+
+  var _pcorgSelectedLevel = "UA";
+
+  function _syncParamsUI(detectionType, params) {
+    var rawRow = $("#params-raw-row");
+    var pcorgRow = $("#params-pcorg-row");
+    if (!rawRow || !pcorgRow) return;
+
+    if (detectionType === "pcorg_urgency") {
+      rawRow.style.display = "none";
+      pcorgRow.style.display = "";
+      var p = params || {};
+      var catSelect = $("#pcorg-param-category");
+      if (catSelect) catSelect.value = p.category || "PCO.";
+      _pcorgSelectedLevel = p.min_level || "UA";
+      _renderLevelBtns();
+    } else {
+      rawRow.style.display = "";
+      pcorgRow.style.display = "none";
+    }
+  }
+
+  function _renderLevelBtns() {
+    $$("#pcorg-param-levels .pcorg-level-btn").forEach(function(btn) {
+      btn.classList.toggle("selected", btn.dataset.level === _pcorgSelectedLevel);
+    });
+  }
+
+  // Click on level buttons
+  document.addEventListener("click", function(e) {
+    var btn = e.target.closest(".pcorg-level-btn");
+    if (!btn) return;
+    e.preventDefault();
+    _pcorgSelectedLevel = btn.dataset.level;
+    _renderLevelBtns();
+  });
+
+  // Toggle when detection_type changes
+  var dtSelect = $('[name="detection_type"]', $("#alert-def-form"));
+  if (dtSelect) {
+    dtSelect.addEventListener("change", function() {
+      var current;
+      try { current = JSON.parse($('[name="params"]', $("#alert-def-form")).value || "{}"); } catch(e) { current = {}; }
+      _syncParamsUI(this.value, current);
+    });
+  }
+
+  function _collectPcorgParams() {
+    var catSelect = $("#pcorg-param-category");
+    return {
+      category: catSelect ? catSelect.value : "PCO.",
+      min_level: _pcorgSelectedLevel || "UA"
+    };
+  }
+
   function closeDefModal(){
     var modal = $("#alert-def-modal");
     modal.hidden = true;
@@ -240,12 +301,17 @@
   $("#alert-def-modal-save").addEventListener("click", function(){
     var form = $("#alert-def-form");
     var id = form.querySelector('[name="_id"]').value;
+    var detType = form.querySelector('[name="detection_type"]').value;
     var params;
-    try {
-      params = JSON.parse(form.querySelector('[name="params"]').value || "{}");
-    } catch(e){
-      if(typeof showToast === "function") showToast("JSON des parametres invalide", "error");
-      return;
+    if (detType === "pcorg_urgency") {
+      params = _collectPcorgParams();
+    } else {
+      try {
+        params = JSON.parse(form.querySelector('[name="params"]').value || "{}");
+      } catch(e){
+        if(typeof showToast === "function") showToast("JSON des parametres invalide", "error");
+        return;
+      }
     }
     var selectedGroups = [];
     $$("#alert-def-groups-checkboxes input[type=checkbox]:checked").forEach(function(cb){
@@ -399,4 +465,19 @@
   }
 
   loadAll();
+
+  // Sidebar (restore + toggle with memory)
+  var sidebar = $("#sidebar");
+  if (sidebar) {
+    var stored = localStorage.getItem("sidebar-collapsed");
+    if (stored === null || stored === "true") sidebar.classList.add("collapsed");
+  }
+  var toggleBtn = $("#sidebarToggle");
+  if (toggleBtn) {
+    toggleBtn.addEventListener("click", function () {
+      if (!sidebar) return;
+      sidebar.classList.toggle("collapsed");
+      localStorage.setItem("sidebar-collapsed", sidebar.classList.contains("collapsed"));
+    });
+  }
 })();

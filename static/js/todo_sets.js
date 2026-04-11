@@ -40,23 +40,100 @@
   $$("[data-close]", modal).forEach(b=> b.addEventListener('click', closeModal));
   modal.addEventListener('click', (e)=>{ if(e.target===modal) closeModal(); });
 
+  // ----- dynamic todo items -----
+
+  function _addItemRow(listEl, text) {
+    const row = document.createElement('div');
+    row.className = 'todo-item-row';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = text || '';
+    input.placeholder = 'Nouvelle tache...';
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        // Ajouter une ligne apres celle-ci si l'input n'est pas vide
+        if (input.value.trim()) {
+          const newRow = _addItemRow(listEl, '');
+          row.after(newRow);
+          newRow.querySelector('input').focus();
+        }
+      }
+    });
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'todo-item-remove';
+    removeBtn.title = 'Supprimer';
+    removeBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size:16px;">close</span>';
+    removeBtn.addEventListener('click', () => {
+      row.remove();
+    });
+
+    row.appendChild(input);
+    row.appendChild(removeBtn);
+    listEl.appendChild(row);
+    return row;
+  }
+
+  function _fillPhaseList(phase, items) {
+    const listEl = $('#todo-list-' + phase);
+    listEl.innerHTML = '';
+    items.forEach(text => _addItemRow(listEl, text));
+  }
+
+  function _collectPhaseItems(phase) {
+    const listEl = $('#todo-list-' + phase);
+    if (!listEl) return [];
+    return $$('input[type="text"]', listEl)
+      .map(i => i.value.trim())
+      .filter(Boolean)
+      .map(text => ({ text, phase }));
+  }
+
+  // boutons "+ Ajouter"
+  $$('.todo-add-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const phase = btn.dataset.phase;
+      const listEl = $('#todo-list-' + phase);
+      const row = _addItemRow(listEl, '');
+      row.querySelector('input').focus();
+    });
+  });
+
+  // ----- form <-> payload -----
+
   function formToPayload(){
-    const fd = new FormData(form);
-    // ✅ Corrigé: regexp sur une seule ligne
-    const lines = (fd.get('todos')||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
     return {
-      type: (fd.get('type')||'').trim(),
-      todos: lines
+      type: (form.elements.type.value || '').trim(),
+      todos: [
+        ..._collectPhaseItems('open'),
+        ..._collectPhaseItems('close'),
+        ..._collectPhaseItems('both'),
+      ]
     };
+  }
+
+  function _itemsByPhase(todos, phase) {
+    return (todos || [])
+      .filter(t => {
+        if (typeof t === 'string') return phase === 'open';
+        return (t.phase || 'open') === phase;
+      })
+      .map(t => typeof t === 'string' ? t : t.text);
   }
 
   function payloadToForm(doc){
     form.reset();
     form.elements._id.value = doc._id || '';
     form.elements.type.value = doc.type || '';
-    // ✅ Corrigé: string '\n' sur une seule ligne
-    form.elements.todos.value = (doc.todos||[]).join('\n');
+    _fillPhaseList('open', _itemsByPhase(doc.todos, 'open'));
+    _fillPhaseList('close', _itemsByPhase(doc.todos, 'close'));
+    _fillPhaseList('both', _itemsByPhase(doc.todos, 'both'));
   }
+
+  // ----- table rendering -----
 
   function renderRows(list){
     const q = (filterType.value||'').toLowerCase();
@@ -64,22 +141,39 @@
       .filter(x=> !q || (x.type||'').toLowerCase().includes(q))
       .map(renderRow)
       .join('');
-    tbody.innerHTML = rows || `<tr><td colspan="4" class="muted">Aucun résultat</td></tr>`;
+    tbody.innerHTML = rows || '<tr><td colspan="4" class="muted">Aucun resultat</td></tr>';
+  }
+
+  const _phaseIcon = { open: 'lock_open', close: 'lock', both: 'sync' };
+  const _phaseColor = { open: 'var(--success)', close: 'var(--danger)', both: 'var(--accent)' };
+
+  function _todoText(t) {
+    return typeof t === 'string' ? t : (t.text || '');
+  }
+  function _todoPhase(t) {
+    return typeof t === 'string' ? 'open' : (t.phase || 'open');
   }
 
   function renderRow(d){
-    const preview = (d.todos||[]).slice(0,3).map(escapeHtml).join(' • ');
-    const more = (d.todos||[]).length>3 ? ` <span class="muted">(+${(d.todos.length-3)})</span>` : '';
-    return `
-      <tr data-id="${d._id}">
-        <td><input type="checkbox" class="row-check"></td>
-        <td><strong>${escapeHtml(d.type||'')}</strong></td>
-        <td>${preview}${more}</td>
-        <td class="group-actions">
-          <button class="btn-icon" data-action="edit" title="Editer"><span class="material-symbols-outlined">edit</span></button>
-          <button class="btn-icon btn-icon-danger" data-action="delete" title="Supprimer"><span class="material-symbols-outlined">delete</span></button>
-        </td>
-      </tr>`;
+    const items = (d.todos || []).slice(0, 4);
+    const preview = items.map(t => {
+      const ph = _todoPhase(t);
+      const icon = _phaseIcon[ph] || 'sync';
+      const color = _phaseColor[ph] || 'var(--muted)';
+      return '<span style="display:inline-flex;align-items:center;gap:2px;">'
+        + '<span class="material-symbols-outlined" style="font-size:13px;color:' + color + ';">' + icon + '</span>'
+        + escapeHtml(_todoText(t))
+        + '</span>';
+    }).join(' <span style="color:var(--muted);">&#8226;</span> ');
+    const more = (d.todos||[]).length > 4 ? ' <span class="muted">(+' + ((d.todos.length - 4)) + ')</span>' : '';
+    return '<tr data-id="' + d._id + '">'
+      + '<td><input type="checkbox" class="row-check"></td>'
+      + '<td><strong>' + escapeHtml(d.type||'') + '</strong></td>'
+      + '<td>' + preview + more + '</td>'
+      + '<td class="group-actions">'
+      +   '<button class="btn-icon" data-action="edit" title="Editer"><span class="material-symbols-outlined">edit</span></button>'
+      +   '<button class="btn-icon btn-icon-danger" data-action="delete" title="Supprimer"><span class="material-symbols-outlined">delete</span></button>'
+      + '</td></tr>';
   }
 
   function escapeHtml(s){
@@ -102,6 +196,24 @@
     openModal();
   });
 
+  function _autoMerge() {
+    const event = window.selectedEvent;
+    const year = window.selectedYear;
+    if (!event || !year) return;
+    fetch('/api/run-merge', {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ event: event, year: year }),
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        showToast("success", "Vignettes regenerees (" + data.vignettes_count + ")");
+      }
+    })
+    .catch(() => {});
+  }
+
   btnSave.addEventListener('click', async ()=>{
     const payload = formToPayload();
     const id = form.elements._id.value;
@@ -114,6 +226,7 @@
     }
     closeModal();
     await refresh();
+    _autoMerge();
   });
 
   tbody.addEventListener('click', async (e)=>{
@@ -121,7 +234,7 @@
     const tr = e.target.closest('tr'); const id = tr?.dataset?.id; const act = btn.dataset.action;
     if(act==='edit'){
       const doc = current.find(x=>x._id===id) || await API.get(id);
-      modalTitle.textContent = 'Éditer la catégorie';
+      modalTitle.textContent = 'Editer la categorie';
       payloadToForm(doc);
       openModal();
     }
