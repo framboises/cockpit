@@ -9,7 +9,7 @@
   var DEFAULT_ZOOM = 14;
 
   var POLL_INBOX_MS = 3000;
-  var POLL_FICHES_MS = 15000;       // fiches PCORG assignees : toutes les 15s
+  var POLL_FICHES_MS = 5000;        // fiches PCORG assignees : toutes les 5s
   var POSITION_PUSH_MS = 5000;     // push GPS toutes les 5s max
   var POSITION_MIN_MOVE_M = 5;     // ou si on bouge de plus de 5m
 
@@ -39,7 +39,9 @@
     threePLayer: null,
     threePLoaded: false,
     poiCategories: [],         // [{label, dataKey, collection, icon, ...}]
-    poiLayers: {},             // dataKey -> {layer, loaded}
+    poiLayers: {},             // dataKey -> {layer, loaded, visible, geojson}
+    poiBundle: null,           // {parametrage, parking_colors, default_colors}
+    poiAutoColorIdx: 0,
     routeLayer: null,
     routeDestination: null,  // [lat, lng]
     fichesLayer: null,
@@ -969,18 +971,58 @@
   }
 
   // ----- POI (groundmaster categories) -----
+  // Couleurs auto pour categories sans icone connue (mirror map_view.js)
+  var POI_AUTO_COLORS = [
+    "#E6194B", "#3CB44B", "#FFE119", "#4363D8", "#F58231",
+    "#911EB4", "#42D4F4", "#F032E6", "#BFEF45", "#FABED4",
+    "#469990", "#DCBEFF", "#9A6324", "#FFFAC8", "#800000",
+    "#AAFFC3", "#808000", "#FFD8B1", "#000075", "#A9A9A9",
+  ];
+
+  function poiGetColor(icon) {
+    var defaults = (state.poiBundle && state.poiBundle.default_colors) || {};
+    if (defaults[icon]) return defaults[icon];
+    var idx = state.poiAutoColorIdx++;
+    return POI_AUTO_COLORS[idx % POI_AUTO_COLORS.length];
+  }
+
+  function poiResolveRouteColor(name) {
+    if (!name) return null;
+    var pc = (state.poiBundle && state.poiBundle.parking_colors) || {};
+    return pc[String(name).toLowerCase()] || null;
+  }
+
   function loadPoiCategories() {
-    fetch("/field/resources/gm-categories", { headers: { "Accept": "application/json" } })
+    fetch("/field/resources/map-bundle", { headers: { "Accept": "application/json" } })
       .then(function (r) {
         if (r.status === 401) { return handleSessionLost(); }
         return r.json();
       })
       .then(function (data) {
-        if (!data || !data.categories) return;
-        state.poiCategories = data.categories;
+        if (!data) return;
+        state.poiBundle = {
+          parametrage: data.parametrage || {},
+          parking_colors: data.parking_colors || {},
+          default_colors: data.default_colors || {},
+        };
+        // Ne garder que les categories qui ont au moins un item actif dans le parametrage
+        var allCats = data.categories || [];
+        state.poiCategories = allCats.filter(function (cat) {
+          var items = poiItemArray(cat);
+          return items.some(function (it) { return it.active !== false; });
+        });
         renderPoiList();
       })
       .catch(function () { /* silent */ });
+  }
+
+  function poiItemArray(cat) {
+    var dataKey = cat.dataKey || cat.collection;
+    var raw = (state.poiBundle && state.poiBundle.parametrage) ? state.poiBundle.parametrage[dataKey] : null;
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === "object") return Object.values(raw);
+    return [];
   }
 
   function renderPoiList() {
@@ -996,6 +1038,7 @@
       if (!key) return;
       var label = cat.label || key;
       var icon = cat.icon || "place";
+      var color = poiGetColor(icon);
       var row = document.createElement("label");
       row.className = "layer-row";
       var input = document.createElement("input");
@@ -1008,7 +1051,8 @@
       });
       var name = document.createElement("span");
       name.className = "layer-name";
-      name.innerHTML = "<span class='material-symbols-outlined'>" + escapeHtml(icon) + "</span> " + escapeHtml(label);
+      name.innerHTML = "<span class='material-symbols-outlined' style='color:" + color + "'>"
+        + escapeHtml(icon) + "</span> " + escapeHtml(label);
       row.appendChild(input);
       row.appendChild(name);
       list.appendChild(row);
@@ -1023,7 +1067,6 @@
         st.visible = true;
         return;
       }
-      // Charger
       var collection = (cat && cat.collection) || key;
       fetch("/field/resources/gm-collection/" + encodeURIComponent(collection), { headers: { "Accept": "application/json" } })
         .then(function (r) { return r.json(); })
@@ -1043,47 +1086,278 @@
 
   function renderPoiFeatures(features, cat) {
     var group = L.layerGroup();
-    var color = "#10b981";
     var icon = (cat && cat.icon) || "place";
+    var defaultColor = poiGetColor(icon);
+    var label = (cat && cat.label) || "";
+    var sc = (cat && cat.scheduleConfig) || {};
+    var hasRouteColors = !!sc.hasRouteColor;
+
+    var items = poiItemArray(cat).filter(function (it) { return it.active !== false; });
+    if (!items.length) { return group; }
+
+    var mapping = (cat && cat.mapping) || {};
+    var nameMapping = mapping.name || "";
+    var namePropKey = nameMapping.indexOf("properties.") === 0 ? nameMapping.slice(11) : null;
+
     features.forEach(function (f) {
-      var geom = f.geometry || {};
+      var geom = f.geometry;
+      if (!geom) return;
       var props = f.properties || {};
-      var name = props.Nom || props.Name || props.name || (cat && cat.label) || "";
-      var type = (geom.type || "").toLowerCase();
-      if (type === "point") {
-        var c = geom.coordinates || [];
-        if (c.length < 2) return;
-        var divIcon = L.divIcon({
-          className: "",
-          html: "<div class='poi-marker'><span class='material-symbols-outlined'>" + escapeHtml(icon) + "</span></div>",
-          iconSize: [28, 28],
-          iconAnchor: [14, 14],
-        });
-        var m = L.marker([c[1], c[0]], { icon: divIcon });
-        if (name) m.bindPopup("<b>" + escapeHtml(name) + "</b>");
-        m.addTo(group);
-      } else if (type === "polygon" || type === "multipolygon") {
-        try {
-          L.geoJSON(f, {
-            style: { color: color, weight: 2, opacity: 0.9, fillOpacity: 0.18 },
-            onEachFeature: function (feat, layer) {
-              if (name) layer.bindPopup("<b>" + escapeHtml(name) + "</b>");
-            },
-          }).addTo(group);
-        } catch (e) { /* ignore */ }
-      } else if (type === "linestring" || type === "multilinestring") {
-        try {
-          L.geoJSON(f, {
-            style: { color: color, weight: 3, opacity: 0.9 },
-            onEachFeature: function (feat, layer) {
-              if (name) layer.bindPopup("<b>" + escapeHtml(name) + "</b>");
-            },
-          }).addTo(group);
-        } catch (e) { /* ignore */ }
+
+      var featureId = props._id_feature || props._id;
+      var featureName = "";
+      if (namePropKey) featureName = props[namePropKey] || "";
+      if (!featureName) {
+        featureName = props.Name || props.name || props.Nom || props.NOM || props.nom || "";
+      }
+
+      var item = null;
+      for (var i = 0; i < items.length; i++) {
+        var it = items[i];
+        if (it.id === featureId || it._id === featureId || it.name === featureName) {
+          item = it;
+          break;
+        }
+      }
+      if (!item) return;
+
+      var displayName = item.name || featureName || label;
+      var color = defaultColor;
+      var routeColorName = null;
+      if (hasRouteColors && item.routeColor) {
+        var hex = poiResolveRouteColor(item.routeColor);
+        if (hex) { color = hex; routeColorName = item.routeColor; }
+      }
+
+      var geomType = (geom.type || "").toLowerCase();
+      if (geomType === "point" || geomType === "multipoint") {
+        renderPoiPoint(group, geom, item, cat, displayName, icon, color);
+      } else if (geomType === "polygon" || geomType === "multipolygon") {
+        renderPoiPolygon(group, geom, item, cat, displayName, icon, color, f);
+      } else if (geomType === "linestring" || geomType === "multilinestring") {
+        renderPoiLine(group, f, item, cat, displayName, icon, color);
       }
     });
+
     group.addTo(state.map);
     return group;
+  }
+
+  function renderPoiPoint(group, geom, item, cat, displayName, icon, color) {
+    var coords = geom.coordinates || [];
+    if (coords.length < 2) return;
+    var lat = coords[1];
+    var lng = coords[0];
+
+    var html = "<div class='poi-label' style='background:" + color + "'>"
+      + "<span class='material-symbols-outlined poi-label-icon'>" + escapeHtml(icon) + "</span>"
+      + escapeHtml(displayName) + "</div>";
+    var divIcon = L.divIcon({ html: html, className: "poi-label-wrap", iconSize: null });
+    var m = L.marker([lat, lng], { icon: divIcon });
+    m.on("click", function () {
+      m.unbindPopup();
+      m.bindPopup(buildPoiPopup(item, cat, displayName, icon, color), { maxWidth: 320 }).openPopup();
+    });
+    m.addTo(group);
+  }
+
+  function renderPoiPolygon(group, geom, item, cat, displayName, icon, color, feature) {
+    var rings;
+    if (geom.type === "Polygon") {
+      rings = geom.coordinates[0].map(function (c) { return [c[1], c[0]]; });
+    } else {
+      rings = geom.coordinates[0][0].map(function (c) { return [c[1], c[0]]; });
+    }
+    var poly = L.polygon(rings, { color: color, fillColor: color, fillOpacity: 0.3, weight: 2 }).addTo(group);
+
+    var centroid = poiCentroid(rings);
+    var html = "<div class='poi-label' style='background:" + color + "'>"
+      + "<span class='material-symbols-outlined poi-label-icon'>" + escapeHtml(icon) + "</span>"
+      + escapeHtml(displayName) + "</div>";
+    var labelIcon = L.divIcon({ html: html, className: "poi-label-wrap", iconSize: null });
+    var labelMarker = L.marker(centroid, { icon: labelIcon }).addTo(group);
+
+    var click = function () {
+      labelMarker.unbindPopup();
+      labelMarker.bindPopup(buildPoiPopup(item, cat, displayName, icon, color), { maxWidth: 320 }).openPopup();
+    };
+    poly.on("click", click);
+    labelMarker.on("click", click);
+  }
+
+  function renderPoiLine(group, feature, item, cat, displayName, icon, color) {
+    try {
+      L.geoJSON(feature, {
+        style: { color: color, weight: 4, opacity: 0.9 },
+        onEachFeature: function (feat, layer) {
+          layer.on("click", function () {
+            layer.unbindPopup();
+            layer.bindPopup(buildPoiPopup(item, cat, displayName, icon, color), { maxWidth: 320 }).openPopup();
+          });
+        },
+      }).addTo(group);
+    } catch (e) { /* ignore */ }
+  }
+
+  function poiCentroid(latlngs) {
+    var lat = 0, lng = 0, n = 0;
+    latlngs.forEach(function (p) { lat += p[0]; lng += p[1]; n++; });
+    if (!n) return [0, 0];
+    return [lat / n, lng / n];
+  }
+
+  // ----- Popup builder (simplified port from map_view.js generatePopup) -----
+  function buildPoiPopup(item, cat, displayName, icon, color) {
+    var html = "<div class='poi-popup'>";
+    html += "<div class='poi-popup-head' style='background:" + color + "'>"
+      + "<span class='material-symbols-outlined'>" + escapeHtml(icon) + "</span>"
+      + "<span class='poi-popup-name'>" + escapeHtml(displayName) + "</span></div>";
+    html += "<div class='poi-popup-body'>";
+
+    // Acces
+    if (item.access) {
+      var badges = [];
+      if (item.access.public) badges.push("Public");
+      if (item.access.orga || item.access.organisation) badges.push("Organisation");
+      if (item.access.vip) badges.push("VIP");
+      if (badges.length) {
+        html += "<div class='poi-popup-row'><span class='poi-popup-label'>Acces</span>"
+          + "<span class='poi-popup-val'>" + escapeHtml(badges.join(", ")) + "</span></div>";
+      }
+    }
+
+    // Controle
+    if (item.controle && item.controle.visible) {
+      var ct = item.controle.type || "Visuel";
+      var ctText = ct;
+      if (ct === "PDA" && item.controle.number) ctText = item.controle.number + " PDA";
+      else if (ct === "TRIPODE" && item.controle.number) ctText = item.controle.number + " Tripodes";
+      else if (ct === "VISUEL") ctText = "Visuel";
+      html += "<div class='poi-popup-row'><span class='poi-popup-label'>Controle</span>"
+        + "<span class='poi-popup-val'>" + escapeHtml(ctText) + "</span></div>";
+    }
+
+    // Capacite / Jauge
+    if (item.jauge && item.jauge.visible) {
+      var cap = (item.capacite_pratique && item.capacite_pratique !== "" && item.capacite_pratique !== "0")
+        ? item.capacite_pratique : item.capacite;
+      if (cap) {
+        html += "<div class='poi-popup-row'><span class='poi-popup-label'>Capacite</span>"
+          + "<span class='poi-popup-val'>" + escapeHtml(String(cap)) + "</span></div>";
+      }
+      if (item.vente) {
+        html += "<div class='poi-popup-row'><span class='poi-popup-label'>Vente</span>"
+          + "<span class='poi-popup-val'>" + escapeHtml(String(item.vente)) + "</span></div>";
+      }
+      if (item.ticket) {
+        var tix = [];
+        if (item.ticket.digital) tix.push("Digital");
+        if (item.ticket.mobile) tix.push("Mobile");
+        if (item.ticket.sticker) tix.push("Sticker");
+        if (item.ticket.thermique) tix.push("Thermique");
+        if (item.ticket.voucher) tix.push("Voucher");
+        if (tix.length) {
+          html += "<div class='poi-popup-row'><span class='poi-popup-label'>Tickets</span>"
+            + "<span class='poi-popup-val'>" + escapeHtml(tix.join(", ")) + "</span></div>";
+        }
+      }
+    } else if (item.capacite) {
+      html += "<div class='poi-popup-row'><span class='poi-popup-label'>Capacite</span>"
+        + "<span class='poi-popup-val'>" + escapeHtml(String(item.capacite)) + "</span></div>";
+    } else if (item.capacity) {
+      html += "<div class='poi-popup-row'><span class='poi-popup-label'>Capacite</span>"
+        + "<span class='poi-popup-val'>" + escapeHtml(String(item.capacity)) + "</span></div>";
+    }
+
+    // cardFields
+    if (cat && cat.cardFields && cat.cardFields.length) {
+      cat.cardFields.forEach(function (cf) {
+        var val = item[cf.key];
+        if (val == null || val === "" || String(val) === "0") return;
+        var display = String(val);
+        if (cf.decimals != null) {
+          var num = parseFloat(display);
+          if (!isNaN(num)) display = num.toFixed(cf.decimals);
+        }
+        if (cf.suffix) display += " " + cf.suffix;
+        var lab = cf.label || cf.key;
+        html += "<div class='poi-popup-row'><span class='poi-popup-label'>" + escapeHtml(lab) + "</span>"
+          + "<span class='poi-popup-val'>" + escapeHtml(display) + "</span></div>";
+      });
+    }
+
+    // Horaires
+    if (item.dates && item.dates.length) {
+      var sc = (cat && cat.scheduleConfig) || {};
+      var accessTypes = (sc.accessTypes && sc.accessTypes.length) ? sc.accessTypes : null;
+      html += buildScheduleHtml(item.dates, accessTypes);
+    }
+
+    // Description
+    if (item.description && String(item.description).trim()) {
+      html += "<div class='poi-popup-desc'>" + escapeHtml(String(item.description)) + "</div>";
+    }
+
+    // Commentaires
+    if (item.comments) {
+      var cmts = [];
+      if (Array.isArray(item.comments)) cmts = item.comments.filter(Boolean);
+      else if (typeof item.comments === "string" && item.comments.trim()) cmts = [item.comments];
+      if (cmts.length) {
+        html += "<div class='poi-popup-comments'><strong>Commentaires</strong><ul>";
+        cmts.forEach(function (c) { html += "<li>" + escapeHtml(String(c)) + "</li>"; });
+        html += "</ul></div>";
+      }
+    }
+
+    html += "</div></div>";
+    return html;
+  }
+
+  function buildScheduleHtml(dates, accessTypes) {
+    if (!dates || !dates.length) return "";
+    var DAY_NAMES = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
+    function fmtDate(iso) {
+      if (!iso || iso.length < 10) return iso || "";
+      var p = iso.split("-");
+      var d = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+      return DAY_NAMES[d.getDay()] + " " + p[2] + "/" + p[1];
+    }
+    function fmtSlot(slot) {
+      if (!slot || slot.closed) return "<span class='poi-sched-closed'>Ferme</span>";
+      if (slot.is24h) return "<span class='poi-sched-24h'>24h</span>";
+      var o = slot.open || slot.openTime || "-";
+      var c = slot.close || slot.closeTime || "-";
+      return "<span class='poi-sched-open'>" + escapeHtml(o + " - " + c) + "</span>";
+    }
+    var hasAccess = accessTypes && dates[0] && (dates[0].public || dates[0].organisation || dates[0].vip);
+    var html = "<div class='poi-popup-sched'>";
+    html += "<div class='poi-popup-sched-title'><span class='material-symbols-outlined'>schedule</span> Horaires</div>";
+    html += "<table class='poi-popup-sched-table'><thead><tr><th>Date</th>";
+    if (hasAccess) {
+      accessTypes.forEach(function (at) {
+        var lab = at === "public" ? "Public" : at === "organisation" ? "Orga" : at === "vip" ? "VIP" : at;
+        html += "<th>" + escapeHtml(lab) + "</th>";
+      });
+    } else {
+      html += "<th>Horaires</th>";
+    }
+    html += "</tr></thead><tbody>";
+    dates.forEach(function (d) {
+      html += "<tr><td>" + escapeHtml(fmtDate(d.date)) + "</td>";
+      if (hasAccess) {
+        accessTypes.forEach(function (at) { html += "<td>" + fmtSlot(d[at]) + "</td>"; });
+      } else {
+        if (d.is24h) html += "<td><span class='poi-sched-24h'>24h</span></td>";
+        else {
+          var slot = { open: d.openTime, close: d.closeTime };
+          html += "<td>" + fmtSlot(slot) + "</td>";
+        }
+      }
+      html += "</tr>";
+    });
+    html += "</tbody></table></div>";
+    return html;
   }
 
   function escapeHtml(s) {
@@ -1205,13 +1479,32 @@
       }
     });
     if (newOnes.length === 0) return;
-    // Premier poll : ne pas toaster, juste enregistrer
+    // Premier poll : ne pas alerter, juste enregistrer
     if (!state.fichesFirstPolled) {
       state.fichesFirstPolled = true;
       return;
     }
     var first = newOnes[0];
     toast("Nouvelle fiche : " + (first.text || "(sans texte)").slice(0, 60), "warn");
+    // Vibration pour alerter le porteur de la tablette
+    try {
+      if (navigator.vibrate) {
+        navigator.vibrate([200, 100, 200, 100, 400]);
+      }
+    } catch (e) { /* ignore */ }
+    // Auto-centrer sur la fiche si elle a des coordonnees
+    if (first.lat != null && first.lng != null && state.map) {
+      try {
+        state.followMe = false;
+        var followBtn = $("btn-follow");
+        if (followBtn) followBtn.classList.remove("active");
+        state.map.setView([first.lat, first.lng], Math.max(state.map.getZoom(), 17), {
+          animate: true,
+        });
+      } catch (e) { /* ignore */ }
+    }
+    // Ouvrir le modal pour forcer l'acquittement
+    showFicheModal(first);
   }
 
   function renderFiches() {

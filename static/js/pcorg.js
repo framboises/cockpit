@@ -1094,9 +1094,10 @@
         head.appendChild(opEl);
         ent.appendChild(head);
 
-        if (entry.text) {
+        var entryText = entry.text || entry.comment || "";
+        if (entryText) {
           var txt = mkEl("div", "pcorg-chrono-text");
-          txt.textContent = entry.text;
+          txt.textContent = entryText;
           ent.appendChild(txt);
         }
         timeline.appendChild(ent);

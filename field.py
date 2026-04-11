@@ -1163,8 +1163,9 @@ def field_resources_gm_categories():
     db = _get_mongo_db()
     cats = list(db["groundmaster_categories"].find(
         {"enabled": True},
-        {"_id": 0, "label": 1, "icon": 1, "dataKey": 1, "collection": 1,
-         "mode": 1, "sourceFormat": 1, "storageType": 1, "source": 1},
+        {"label": 1, "icon": 1, "dataKey": 1, "collection": 1,
+         "mode": 1, "sourceFormat": 1, "storageType": 1, "source": 1,
+         "scheduleConfig": 1, "mapping": 1, "cardFields": 1},
     ))
     # On retire les categories qui sont explicitement "hors carte" (mode != map)
     # ainsi que celles masquees par defaut dans map_defaults
@@ -1174,8 +1175,88 @@ def field_resources_gm_categories():
     for c in cats:
         if c.get("dataKey") in hidden:
             continue
+        c["_id"] = str(c["_id"])
         out.append(c)
     return jsonify({"categories": out})
+
+
+@field_bp.route("/field/resources/map-bundle", methods=["GET"])
+@field_token_required
+def field_resources_map_bundle():
+    """Bundle complet pour la carte field : categories + parametrage de l'event
+    + couleurs d'itineraire (parking_colors) + couleurs par defaut par icone.
+    Permet a la tablette de rendre les POI exactement comme la carte cockpit
+    en un seul aller-retour reseau."""
+    device = request.device
+    event = device.get("event")
+    year = device.get("year")
+    db = _get_mongo_db()
+
+    # 1) Categories groundmaster avec config complete
+    cats = list(db["groundmaster_categories"].find(
+        {"enabled": True},
+        {"label": 1, "icon": 1, "dataKey": 1, "collection": 1,
+         "mode": 1, "sourceFormat": 1, "storageType": 1, "source": 1,
+         "scheduleConfig": 1, "mapping": 1, "cardFields": 1},
+    ))
+    defaults = db["merge_config"].find_one({"data_key": "__map_defaults__"}, {"_id": 0}) or {}
+    hidden = set(defaults.get("hidden_categories") or [])
+    categories = []
+    for c in cats:
+        if c.get("dataKey") in hidden:
+            continue
+        c["_id"] = str(c["_id"])
+        categories.append(c)
+
+    # 2) Parametrage event/year (ce qui est actif)
+    parametrage = {}
+    if event and year:
+        param_doc = db["parametrages"].find_one(
+            {"event": event, "year": str(year)}, {"_id": 0, "data": 1}
+        )
+        if not param_doc:
+            param_doc = db["parametrages"].find_one(
+                {"event": event, "year": year}, {"_id": 0, "data": 1}
+            )
+        if param_doc and isinstance(param_doc.get("data"), dict):
+            parametrage = param_doc["data"]
+
+    # 3) Couleurs d'itineraire (signmanager)
+    parking_colors = {}
+    sm = db["signmanager_settings"].find_one({}, {"_id": 0, "itineraire.couleurs": 1})
+    if sm and isinstance(sm.get("itineraire"), dict):
+        for col in (sm["itineraire"].get("couleurs") or []):
+            nom = (col.get("nom") or "").strip()
+            hexa = (col.get("hexa") or "").strip()
+            if nom and hexa:
+                parking_colors[nom.lower()] = hexa
+
+    # 4) Couleurs par defaut par icone (mirror du looker)
+    default_colors = {
+        "door_front": "#132646",
+        "local_parking": "#3B82F6",
+        "camping": "#2E7D32",
+        "hotel": "#FFD700",
+        "event_seat": "#FA8072",
+        "wc": "#b47272",
+        "campground": "#B46300",
+        "badge": "#FF00FF",
+        "build": "#FF8C00",
+        "rv_hookup": "#0D9488",
+        "restaurant": "#E11D48",
+        "medical_services": "#DC2626",
+        "security": "#7C3AED",
+        "directions_car": "#2563EB",
+    }
+
+    return jsonify({
+        "categories": categories,
+        "parametrage": parametrage,
+        "parking_colors": parking_colors,
+        "default_colors": default_colors,
+        "event": event,
+        "year": year,
+    })
 
 
 @field_bp.route("/field/resources/gm-collection/<collection_name>", methods=["GET"])
@@ -1312,7 +1393,7 @@ def field_my_fiche_comment(fiche_id):
 
     entry = {
         "ts": _now(),
-        "comment": comment,
+        "text": comment,
         "operator": "field:" + name,
     }
     db["pcorg"].update_one(

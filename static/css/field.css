@@ -497,20 +497,96 @@ body {
 .layer-row .layer-name .material-symbols-outlined { font-size: 18px; color: #94a3b8; }
 
 /* =====================================================================
-   MARKER POI (groundmaster)
+   MARKER POI (groundmaster) - labels avec icone et nom (style cockpit)
    ===================================================================== */
-.poi-marker {
-  width: 28px; height: 28px;
-  background: #10b981;
-  border: 2px solid #fff;
-  border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-}
-.poi-marker .material-symbols-outlined {
+.poi-label-wrap { background: transparent !important; border: none !important; }
+.poi-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   color: #fff;
-  font-size: 16px;
+  padding: 4px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.18);
 }
+.poi-label .poi-label-icon {
+  font-size: 14px;
+  vertical-align: middle;
+  font-family: "Material Symbols Outlined";
+}
+
+/* Popup POI : look cockpit-friendly */
+.leaflet-popup-content-wrapper { padding: 0 !important; border-radius: 8px; }
+.leaflet-popup-content { margin: 0 !important; min-width: 220px; }
+.poi-popup { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; min-width: 220px; max-width: 320px; }
+.poi-popup-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+  padding: 10px 14px;
+  font-weight: 700;
+  font-size: 14px;
+  border-radius: 8px 8px 0 0;
+}
+.poi-popup-head .material-symbols-outlined { font-size: 18px; }
+.poi-popup-body { font-size: 12px; color: #1e293b; padding: 10px 14px; }
+.poi-popup-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px dashed #e2e8f0;
+}
+.poi-popup-row:last-child { border-bottom: none; }
+.poi-popup-label { color: #64748b; font-weight: 500; }
+.poi-popup-val { color: #0f172a; font-weight: 600; text-align: right; }
+.poi-popup-desc {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: #f1f5f9;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #475569;
+  font-style: italic;
+}
+.poi-popup-comments { margin-top: 8px; font-size: 11px; }
+.poi-popup-comments ul { margin: 4px 0 0 16px; padding: 0; }
+.poi-popup-comments li { margin: 2px 0; }
+
+.poi-popup-sched { margin-top: 10px; }
+.poi-popup-sched-title {
+  display: flex; align-items: center; gap: 4px;
+  font-weight: 700;
+  font-size: 12px;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+.poi-popup-sched-title .material-symbols-outlined { font-size: 14px; color: #2563eb; }
+.poi-popup-sched-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.poi-popup-sched-table th,
+.poi-popup-sched-table td {
+  padding: 3px 6px;
+  border: 1px solid #e2e8f0;
+  text-align: center;
+}
+.poi-popup-sched-table th {
+  background: #f1f5f9;
+  font-weight: 600;
+  color: #475569;
+}
+.poi-sched-open { color: #16a34a; font-weight: 600; }
+.poi-sched-closed { color: #ef4444; font-weight: 600; }
+.poi-sched-24h { color: #2563eb; font-weight: 700; }
 
 /* =====================================================================
    CARROYAGE : entetes sticky + crosshair
