@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <title>COCKPIT Field - Appairage</title>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a; color: #e2e8f0;
+      height: 100%; width: 100%;
+      overflow: hidden; overscroll-behavior: none;
+      user-select: none; -webkit-user-select: none;
+    }
+    .wrap {
+      min-height: 100%;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 24px;
+      gap: 24px;
+    }
+    h1 {
+      font-size: 22px; font-weight: 700; letter-spacing: 0.5px;
+      margin: 0; color: #f8fafc;
+    }
+    .subtitle {
+      font-size: 14px; color: #94a3b8; margin: 0; text-align: center;
+    }
+    .code-display {
+      display: flex; gap: 10px;
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      font-size: 36px; font-weight: 700;
+      letter-spacing: 4px;
+      min-height: 60px;
+      align-items: center;
+    }
+    .code-digit {
+      width: 48px; height: 60px;
+      background: #1e293b;
+      border: 2px solid #334155;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      color: #f1f5f9;
+    }
+    .code-digit.filled { border-color: #3b82f6; background: #1e3a8a; }
+    .numpad {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      width: 100%;
+      max-width: 320px;
+    }
+    .numpad button {
+      aspect-ratio: 1.4;
+      font-size: 28px; font-weight: 600;
+      background: #1e293b;
+      color: #f1f5f9;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: transform 0.05s, background 0.1s;
+      font-family: inherit;
+    }
+    .numpad button:active { transform: scale(0.95); background: #334155; }
+    .numpad button.action { background: #334155; font-size: 18px; }
+    .numpad button.submit { background: #2563eb; }
+    .numpad button.submit:disabled { background: #475569; color: #94a3b8; }
+    .msg {
+      min-height: 22px;
+      font-size: 14px;
+      text-align: center;
+    }
+    .msg.error { color: #f87171; }
+    .msg.ok { color: #4ade80; }
+    .logo {
+      font-weight: 800; font-size: 13px; letter-spacing: 2px;
+      color: #3b82f6; text-transform: uppercase;
+    }
+
+    @media (orientation: landscape) and (max-height: 500px) {
+      .wrap { flex-direction: row; gap: 48px; }
+      .left { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+      .numpad { max-width: 300px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="left">
+      <div class="logo">COCKPIT FIELD</div>
+      <h1>Appairage de la tablette</h1>
+      <p class="subtitle">Saisis le code a 6 chiffres fourni par le PCOA.</p>
+      <div class="code-display" id="codeDisplay">
+        <div class="code-digit"></div>
+        <div class="code-digit"></div>
+        <div class="code-digit"></div>
+        <div class="code-digit"></div>
+        <div class="code-digit"></div>
+        <div class="code-digit"></div>
+      </div>
+      <div class="msg" id="msg"></div>
+    </div>
+    <div class="numpad">
+      <button data-k="1">1</button>
+      <button data-k="2">2</button>
+      <button data-k="3">3</button>
+      <button data-k="4">4</button>
+      <button data-k="5">5</button>
+      <button data-k="6">6</button>
+      <button data-k="7">7</button>
+      <button data-k="8">8</button>
+      <button data-k="9">9</button>
+      <button class="action" data-action="clear">C</button>
+      <button data-k="0">0</button>
+      <button class="submit" data-action="submit" id="btnSubmit" disabled>OK</button>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var code = "";
+      var digits = document.querySelectorAll("#codeDisplay .code-digit");
+      var msgEl = document.getElementById("msg");
+      var btnSubmit = document.getElementById("btnSubmit");
+
+      function render() {
+        for (var i = 0; i < 6; i++) {
+          digits[i].textContent = code[i] || "";
+          digits[i].classList.toggle("filled", !!code[i]);
+        }
+        btnSubmit.disabled = code.length !== 6;
+      }
+
+      function setMsg(text, type) {
+        msgEl.textContent = text || "";
+        msgEl.className = "msg" + (type ? " " + type : "");
+      }
+
+      document.querySelectorAll(".numpad button").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var k = btn.getAttribute("data-k");
+          var action = btn.getAttribute("data-action");
+          if (k != null) {
+            if (code.length < 6) { code += k; render(); setMsg(""); }
+          } else if (action === "clear") {
+            code = ""; render(); setMsg("");
+          } else if (action === "submit") {
+            submit();
+          }
+        });
+      });
+
+      document.addEventListener("keydown", function (e) {
+        if (e.key >= "0" && e.key <= "9" && code.length < 6) {
+          code += e.key; render(); setMsg("");
+        } else if (e.key === "Backspace") {
+          code = code.slice(0, -1); render();
+        } else if (e.key === "Enter" && code.length === 6) {
+          submit();
+        }
+      });
+
+      function submit() {
+        if (code.length !== 6) return;
+        btnSubmit.disabled = true;
+        setMsg("Verification...", "");
+        fetch("/field/pair", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify({ code: code }),
+        })
+          .then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }); })
+          .then(function (res) {
+            if (res.body && res.body.ok) {
+              setMsg("Tablette appairee.", "ok");
+              setTimeout(function () { window.location.href = res.body.redirect || "/field"; }, 400);
+            } else {
+              var errMap = {
+                invalid_code_format: "Format invalide.",
+                unknown_code: "Code inconnu.",
+                expired_code: "Code expire.",
+                code_already_used: "Code deja utilise.",
+                rate_limited: "Trop de tentatives, patiente.",
+              };
+              var err = (res.body && res.body.error) || "error";
+              setMsg(errMap[err] || "Erreur : " + err, "error");
+              code = ""; render();
+            }
+          })
+          .catch(function () {
+            setMsg("Erreur reseau.", "error");
+            code = ""; render();
+          });
+      }
+
+      render();
+    })();
+  </script>
+</body>
+</html>
