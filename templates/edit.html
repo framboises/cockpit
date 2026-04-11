@@ -374,7 +374,7 @@
           </div>
 
           <!-- A) Nouvelle tablette (pairing) -->
-          <div style="display:flex; gap:8px; margin-bottom:12px;">
+          <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
             <button id="field-pair-new" class="btn btn-xs btn-primary">
               <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">tablet_android</span>
               Appairer une tablette
@@ -382,6 +382,14 @@
             <button id="field-pair-show-codes" class="btn btn-xs" title="Afficher les codes en cours">
               <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">pin</span>
               Codes actifs (<span id="field-pair-count">0</span>)
+            </button>
+            <button id="field-msg-new" class="btn btn-xs" title="Envoyer un message aux tablettes">
+              <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">send</span>
+              Envoyer un message
+            </button>
+            <button id="field-msg-show-history" class="btn btn-xs" title="Historique des messages envoyes">
+              <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">history</span>
+              Historique (<span id="field-msg-count">0</span>)
             </button>
           </div>
 
@@ -804,6 +812,113 @@
     <div class="crud-modal-footer">
       <button class="btn btn-secondary" data-close>Fermer</button>
       <button id="field-pair-submit" class="btn btn-primary">Generer le code</button>
+    </div>
+  </div>
+</div>
+
+<!-- CRUD Modal — Field send message -->
+<div id="field-msg-modal" class="crud-modal" hidden>
+  <div class="crud-modal-dialog">
+    <div class="crud-modal-header">
+      <h3>Envoyer un message aux tablettes</h3>
+      <button class="crud-modal-close" data-close>&times;</button>
+    </div>
+    <div class="crud-modal-body">
+      <form id="field-msg-form">
+        <div class="form-row">
+          <label>Destinataires
+            <select name="target_mode" id="field-msg-target-mode" class="form-input">
+              <option value="all">Toutes les tablettes (evenement courant)</option>
+              <option value="beacon_group">Toutes les tablettes d'un groupe</option>
+              <option value="devices">Tablettes selectionnees</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-row" id="field-msg-group-row" hidden>
+          <label>Groupe
+            <select name="beacon_group_id" id="field-msg-group-select" class="form-input">
+              <option value="">-- Choisir --</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-row" id="field-msg-devices-row" hidden>
+          <label>Tablettes (Ctrl/Cmd + clic pour selection multiple)
+            <select name="device_ids" id="field-msg-devices-select" class="form-input" multiple size="6"></select>
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Type
+            <select name="type" id="field-msg-type" class="form-input">
+              <option value="info">Info</option>
+              <option value="instruction">Instruction</option>
+              <option value="alert">Alerte (rouge)</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Priorite
+            <select name="priority" id="field-msg-priority" class="form-input">
+              <option value="normal">Normale</option>
+              <option value="high">Haute (force l'ouverture du modal)</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Titre
+            <input name="title" id="field-msg-title" class="form-input" maxlength="120" placeholder="ex. Deplacement en Z13" />
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Message
+            <textarea name="body" id="field-msg-body" class="form-input" rows="4" maxlength="4000" placeholder="Contenu detaille..."></textarea>
+          </label>
+        </div>
+        <div class="form-row" id="field-msg-event-row">
+          <p style="font-size:12px; color:var(--muted); margin:0;">
+            Evenement : <b id="field-msg-event-label">-</b>
+          </p>
+        </div>
+      </form>
+      <div id="field-msg-result" style="margin-top:12px;"></div>
+    </div>
+    <div class="crud-modal-footer">
+      <button class="btn btn-secondary" data-close>Fermer</button>
+      <button id="field-msg-submit" class="btn btn-primary">Envoyer</button>
+    </div>
+  </div>
+</div>
+
+<!-- CRUD Modal — Field messages history -->
+<div id="field-msg-history-modal" class="crud-modal" hidden>
+  <div class="crud-modal-dialog" style="max-width:820px;">
+    <div class="crud-modal-header">
+      <h3>Historique des messages envoyes</h3>
+      <button class="crud-modal-close" data-close>&times;</button>
+    </div>
+    <div class="crud-modal-body">
+      <p style="font-size:12px; color:var(--muted); margin-top:0;">
+        Les messages sont conserves 7 jours puis automatiquement purges.
+      </p>
+      <div class="table-responsive">
+        <table class="table table-striped" style="font-size:12px;">
+          <thead>
+            <tr>
+              <th>Heure</th>
+              <th>Tablette</th>
+              <th>Type</th>
+              <th>Titre</th>
+              <th>Statut</th>
+              <th style="width:40px;"></th>
+            </tr>
+          </thead>
+          <tbody id="field-msg-history-tbody">
+            <tr><td colspan="6" style="text-align:center; color:var(--muted);">Chargement...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="crud-modal-footer">
+      <button class="btn btn-secondary" data-close>Fermer</button>
     </div>
   </div>
 </div>

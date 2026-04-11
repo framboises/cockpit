@@ -373,6 +373,21 @@
             }).openPopup();
           });
 
+          // Clic droit sur une tablette : ouvrir le composer de message
+          marker.on("contextmenu", function (e) {
+            var d = marker._anolocData;
+            if (d && d.kind === "tablet" && window.FieldAdmin && window.FieldAdmin.openCompose) {
+              if (e.originalEvent) {
+                e.originalEvent.preventDefault();
+                e.originalEvent.stopPropagation();
+              }
+              // id au format "field:<objectId>" -> on extrait l'ObjectId
+              var rawId = String(d.id || "");
+              var deviceId = rawId.indexOf("field:") === 0 ? rawId.slice(6) : rawId;
+              window.FieldAdmin.openCompose({ device_id: deviceId, device_name: d.name });
+            }
+          });
+
           marker.addTo(anolocLayers[gid]);
           anolocMarkers[dev.id] = marker;
         }

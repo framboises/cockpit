@@ -39,6 +39,7 @@
     beaconGroups: [],  // [{id, label, color, icon, pco_category}, ...]
     pairings: [],
     devices: [],
+    messages: [],
     pollTimer: null,
   };
 
@@ -63,6 +64,8 @@
     if (el) el.textContent = scopeLabel();
     var lbl = $("#field-pair-event-label");
     if (lbl) lbl.textContent = scopeLabel();
+    var lbl2 = $("#field-msg-event-label");
+    if (lbl2) lbl2.textContent = scopeLabel();
   }
 
   // ------------------------------------------------------------------
@@ -83,6 +86,7 @@
       loadBeaconGroups();
       loadDevices();
       loadPairings();
+      loadMessages();
     });
 
     // Modal pairing
@@ -109,18 +113,50 @@
       });
     }
 
+    // Modal message compose
+    var msgBtn = $("#field-msg-new");
+    if (msgBtn) msgBtn.addEventListener("click", openMsgModal);
+    var msgHistoryBtn = $("#field-msg-show-history");
+    if (msgHistoryBtn) msgHistoryBtn.addEventListener("click", openMsgHistoryModal);
+    var msgModal = $("#field-msg-modal");
+    if (msgModal) {
+      $$("[data-close]", msgModal).forEach(function (b) {
+        b.addEventListener("click", closeMsgModal);
+      });
+      msgModal.addEventListener("click", function (e) {
+        if (e.target === msgModal) closeMsgModal();
+      });
+    }
+    var msgSubmit = $("#field-msg-submit");
+    if (msgSubmit) msgSubmit.addEventListener("click", submitMessage);
+    var msgTargetMode = $("#field-msg-target-mode");
+    if (msgTargetMode) msgTargetMode.addEventListener("change", updateMsgTargetRows);
+
+    // Modal history
+    var histModal = $("#field-msg-history-modal");
+    if (histModal) {
+      $$("[data-close]", histModal).forEach(function (b) {
+        b.addEventListener("click", closeMsgHistoryModal);
+      });
+      histModal.addEventListener("click", function (e) {
+        if (e.target === histModal) closeMsgHistoryModal();
+      });
+    }
+
     // Initial load : attendre que window.selectedEvent/Year soient dispos
     setTimeout(function () {
       refreshScopeUi();
       loadBeaconGroups();
       loadDevices();
       loadPairings();
+      loadMessages();
     }, 800);
 
     // Poll periodique (toutes les 30s) pour maj la liste des tablettes
     state.pollTimer = setInterval(function () {
       loadDevices();
       loadPairings();
+      loadMessages();
     }, 30000);
 
     // Reagir aux changements globaux event/year
@@ -128,6 +164,7 @@
       refreshScopeUi();
       loadDevices();
       loadPairings();
+      loadMessages();
     });
   }
 
@@ -144,19 +181,22 @@
   }
 
   function renderBeaconGroupSelect() {
-    var sel = $('select[name="beacon_group_id"]', $("#field-pair-form"));
-    if (!sel) return;
-    sel.innerHTML = "";
-    var opt0 = document.createElement("option");
-    opt0.value = "";
-    opt0.textContent = "-- Choisir un groupe --";
-    sel.appendChild(opt0);
-    state.beaconGroups.forEach(function (g) {
-      var opt = document.createElement("option");
-      opt.value = g.id;
-      opt.textContent = g.label + (g.pco_category ? " (" + g.pco_category + ")" : "");
-      sel.appendChild(opt);
-    });
+    function fill(sel, placeholder) {
+      if (!sel) return;
+      sel.innerHTML = "";
+      var opt0 = document.createElement("option");
+      opt0.value = "";
+      opt0.textContent = placeholder;
+      sel.appendChild(opt0);
+      state.beaconGroups.forEach(function (g) {
+        var opt = document.createElement("option");
+        opt.value = g.id;
+        opt.textContent = g.label + (g.pco_category ? " (" + g.pco_category + ")" : "");
+        sel.appendChild(opt);
+      });
+    }
+    fill($('select[name="beacon_group_id"]', $("#field-pair-form")), "-- Choisir un groupe --");
+    fill($("#field-msg-group-select"), "-- Choisir un groupe --");
   }
 
   function beaconGroupLabel(id) {
@@ -479,6 +519,277 @@
     if (modal) modal.hidden = true;
   }
 
+  // ------------------------------------------------------------------
+  // Messages : envoi et historique
+  // ------------------------------------------------------------------
+  function loadMessages() {
+    var s = currentScope();
+    if (!s.event || !s.year) {
+      state.messages = [];
+      renderMessagesCount();
+      renderMessagesTable();
+      return;
+    }
+    var qs = new URLSearchParams();
+    qs.set("event", s.event);
+    qs.set("year", s.year);
+    qs.set("limit", "100");
+    apiGet("/field/admin/messages?" + qs.toString())
+      .then(function (data) {
+        state.messages = (data && data.messages) || [];
+        renderMessagesCount();
+        renderMessagesTable();
+      })
+      .catch(function () {
+        state.messages = [];
+        renderMessagesCount();
+        renderMessagesTable();
+      });
+  }
+
+  function renderMessagesCount() {
+    var el = $("#field-msg-count");
+    if (el) el.textContent = String(state.messages.length);
+  }
+
+  function renderMessagesTable() {
+    var tb = $("#field-msg-history-tbody");
+    if (!tb) return;
+    if (state.messages.length === 0) {
+      tb.innerHTML = "<tr><td colspan='6' style='text-align:center; color:var(--muted); padding:16px;'>Aucun message envoye.</td></tr>";
+      return;
+    }
+    tb.innerHTML = "";
+    state.messages.forEach(function (m) {
+      var tr = document.createElement("tr");
+
+      var tdTs = document.createElement("td");
+      tdTs.textContent = m.created_at ? formatRelative(m.created_at) : "-";
+      tdTs.title = m.created_at || "";
+      tr.appendChild(tdTs);
+
+      var tdDev = document.createElement("td");
+      tdDev.innerHTML = "<span class='material-symbols-outlined' style='font-size:12px; vertical-align:middle; color:var(--muted); margin-right:2px;'>tablet_android</span>";
+      tdDev.appendChild(document.createTextNode(m.device_name || "-"));
+      tr.appendChild(tdDev);
+
+      var tdType = document.createElement("td");
+      var typeLabel = { info: "Info", instruction: "Instruction", alert: "Alerte", route: "Itineraire" }[m.type] || m.type;
+      var badge = document.createElement("span");
+      badge.textContent = typeLabel;
+      badge.style.fontSize = "10px";
+      badge.style.padding = "1px 6px";
+      badge.style.borderRadius = "4px";
+      if (m.type === "alert") {
+        badge.style.background = "#fee2e2";
+        badge.style.color = "#991b1b";
+      } else if (m.type === "instruction") {
+        badge.style.background = "#fef3c7";
+        badge.style.color = "#92400e";
+      } else if (m.type === "route") {
+        badge.style.background = "#dbeafe";
+        badge.style.color = "#1e40af";
+      } else {
+        badge.style.background = "#e5e7eb";
+        badge.style.color = "#374151";
+      }
+      tdType.appendChild(badge);
+      if (m.priority === "high") {
+        var prio = document.createElement("span");
+        prio.textContent = " !";
+        prio.style.color = "#dc2626";
+        prio.style.fontWeight = "700";
+        tdType.appendChild(prio);
+      }
+      tr.appendChild(tdType);
+
+      var tdTitle = document.createElement("td");
+      tdTitle.textContent = m.title || "(sans titre)";
+      tdTitle.title = m.body || "";
+      tdTitle.style.maxWidth = "240px";
+      tdTitle.style.overflow = "hidden";
+      tdTitle.style.textOverflow = "ellipsis";
+      tdTitle.style.whiteSpace = "nowrap";
+      tr.appendChild(tdTitle);
+
+      var tdStatus = document.createElement("td");
+      if (m.status === "read") {
+        tdStatus.innerHTML = "<span style='color:#059669;'><span class='material-symbols-outlined' style='font-size:14px; vertical-align:middle;'>done_all</span> Lu " + (m.ack_at ? formatRelative(m.ack_at) : "") + "</span>";
+      } else {
+        tdStatus.innerHTML = "<span style='color:var(--muted);'><span class='material-symbols-outlined' style='font-size:14px; vertical-align:middle;'>schedule</span> Non lu</span>";
+      }
+      tr.appendChild(tdStatus);
+
+      var tdAct = document.createElement("td");
+      var btnDel = document.createElement("button");
+      btnDel.className = "btn btn-xs";
+      btnDel.title = "Supprimer ce message";
+      btnDel.innerHTML = "<span class='material-symbols-outlined' style='font-size:14px;'>delete</span>";
+      btnDel.addEventListener("click", function () { deleteMessage(m); });
+      tdAct.appendChild(btnDel);
+      tr.appendChild(tdAct);
+
+      tb.appendChild(tr);
+    });
+  }
+
+  function deleteMessage(m) {
+    if (!confirm("Supprimer ce message ? (la tablette l'a peut-etre deja recu)")) return;
+    apiDelete("/field/admin/messages/" + encodeURIComponent(m.id))
+      .then(function (res) {
+        if (res.body && res.body.ok) {
+          _toast("success", "Message supprime");
+          loadMessages();
+        } else {
+          _toast("error", "Erreur");
+        }
+      });
+  }
+
+  function openMsgModal(prefill) {
+    refreshScopeUi();
+    loadBeaconGroups();
+    var form = $("#field-msg-form");
+    if (form) form.reset();
+    var result = $("#field-msg-result");
+    if (result) result.innerHTML = "";
+
+    // Remplir la liste des tablettes disponibles (scope courant)
+    var sel = $("#field-msg-devices-select");
+    if (sel) {
+      sel.innerHTML = "";
+      state.devices.forEach(function (d) {
+        var opt = document.createElement("option");
+        opt.value = d.id;
+        opt.textContent = d.name + " (" + beaconGroupLabel(d.beacon_group_id) + ")";
+        sel.appendChild(opt);
+      });
+    }
+
+    // Preselection eventuelle (appel depuis la carte operateur / clic droit)
+    if (prefill && prefill.device_id) {
+      var modeSel = $("#field-msg-target-mode");
+      if (modeSel) modeSel.value = "devices";
+      if (sel) {
+        Array.from(sel.options).forEach(function (o) {
+          o.selected = (o.value === prefill.device_id);
+        });
+      }
+    } else {
+      var modeSel2 = $("#field-msg-target-mode");
+      if (modeSel2) modeSel2.value = "all";
+    }
+    updateMsgTargetRows();
+
+    var modal = $("#field-msg-modal");
+    if (modal) modal.hidden = false;
+  }
+
+  function closeMsgModal() {
+    var modal = $("#field-msg-modal");
+    if (modal) modal.hidden = true;
+  }
+
+  function updateMsgTargetRows() {
+    var mode = ($("#field-msg-target-mode") || {}).value || "all";
+    var groupRow = $("#field-msg-group-row");
+    var devRow = $("#field-msg-devices-row");
+    if (groupRow) groupRow.hidden = (mode !== "beacon_group");
+    if (devRow) devRow.hidden = (mode !== "devices");
+  }
+
+  function submitMessage() {
+    var scope = currentScope();
+    if (!scope.event || !scope.year) {
+      _toast("error", "Selectionne un evenement dans le header cockpit");
+      return;
+    }
+    var mode = ($("#field-msg-target-mode") || {}).value || "all";
+    var title = ($("#field-msg-title") || {}).value || "";
+    var body = ($("#field-msg-body") || {}).value || "";
+    var type = ($("#field-msg-type") || {}).value || "info";
+    var priority = ($("#field-msg-priority") || {}).value || "normal";
+
+    if (!title.trim() && !body.trim()) {
+      _toast("error", "Saisis un titre ou un message");
+      return;
+    }
+
+    var target = {};
+    if (mode === "all") {
+      target.all = true;
+    } else if (mode === "beacon_group") {
+      var gid = ($("#field-msg-group-select") || {}).value || "";
+      if (!gid) { _toast("error", "Choisis un groupe"); return; }
+      target.beacon_group_id = gid;
+    } else if (mode === "devices") {
+      var sel = $("#field-msg-devices-select");
+      var ids = sel ? Array.from(sel.selectedOptions).map(function (o) { return o.value; }) : [];
+      if (ids.length === 0) { _toast("error", "Selectionne au moins une tablette"); return; }
+      target.device_ids = ids;
+    }
+
+    var payload = {
+      event: scope.event,
+      year: scope.year,
+      target: target,
+      type: type,
+      title: title.trim(),
+      body: body.trim(),
+      priority: priority,
+    };
+
+    apiPost("/field/admin/send", payload)
+      .then(function (res) {
+        if (res.body && res.body.ok) {
+          _toast("success", "Message envoye a " + res.body.sent_count + " tablette(s)");
+          var result = $("#field-msg-result");
+          if (result) {
+            result.innerHTML = "";
+            var box = document.createElement("div");
+            box.style.padding = "10px";
+            box.style.border = "1px solid var(--line)";
+            box.style.borderRadius = "var(--radius-sm)";
+            box.style.background = "var(--bg)";
+            box.style.fontSize = "12px";
+            box.innerHTML = "<b>" + res.body.sent_count + " tablette(s) destinataire(s) :</b> "
+              + (res.body.targets || []).map(function (t) { return t.name; }).join(", ");
+            result.appendChild(box);
+          }
+          loadMessages();
+          // Fermer le modal apres 1.5s si succes
+          setTimeout(closeMsgModal, 1500);
+        } else {
+          var err = (res.body && res.body.error) || "unknown_error";
+          var map = {
+            missing_event_year: "Evenement/annee manquants.",
+            invalid_type: "Type de message invalide.",
+            empty_message: "Le titre ou le contenu est requis.",
+            title_too_long: "Titre trop long (max 120).",
+            body_too_long: "Message trop long (max 4000).",
+            invalid_target: "Cible invalide.",
+            missing_target: "Cible manquante.",
+            invalid_device_id: "Identifiant de tablette invalide.",
+            empty_device_ids: "Aucune tablette selectionnee.",
+            no_target_matched: "Aucune tablette ne correspond a cette cible.",
+          };
+          _toast("error", map[err] || ("Erreur : " + err));
+        }
+      })
+      .catch(function () { _toast("error", "Erreur reseau"); });
+  }
+
+  function openMsgHistoryModal() {
+    loadMessages();
+    var modal = $("#field-msg-history-modal");
+    if (modal) modal.hidden = false;
+  }
+
+  function closeMsgHistoryModal() {
+    var modal = $("#field-msg-history-modal");
+    if (modal) modal.hidden = true;
+  }
+
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
   } else {
@@ -490,6 +801,8 @@
       loadBeaconGroups();
       loadDevices();
       loadPairings();
+      loadMessages();
     },
+    openCompose: function (prefill) { openMsgModal(prefill); },
   };
 })();

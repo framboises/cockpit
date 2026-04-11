@@ -785,3 +785,185 @@ def field_admin_device_delete(device_id):
     # On purge aussi les messages associes
     db["field_messages"].delete_many({"device_id": oid})
     return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Admin : messages (envoi + historique)
+# ---------------------------------------------------------------------------
+
+# Types de messages autorises. "info" et "instruction" : contenu libre.
+# "route" : payload = {"waypoints": [[lat, lng], ...]} (commit 7).
+# "alert" : niveau eleve (rouge).
+ALLOWED_MESSAGE_TYPES = {"info", "instruction", "alert", "route"}
+ALLOWED_PRIORITIES = {"normal", "high"}
+
+
+def _resolve_targets(db, event, year, target):
+    """Resout une specification de cible vers une liste de field_devices.
+    target = {"device_ids": [...] } OR {"beacon_group_id": "..."} OR
+             {"name": "..."} OR {"all": true}."""
+    query = {"event": event, "year": str(year), "revoked": {"$ne": True}}
+
+    if not isinstance(target, dict):
+        return [], "invalid_target"
+
+    if target.get("device_ids"):
+        ids = []
+        for s in target.get("device_ids") or []:
+            try:
+                ids.append(ObjectId(s))
+            except Exception:
+                return [], "invalid_device_id"
+        if not ids:
+            return [], "empty_device_ids"
+        query["_id"] = {"$in": ids}
+    elif target.get("beacon_group_id"):
+        query["beacon_group_id"] = target.get("beacon_group_id")
+    elif target.get("name"):
+        query["name"] = target.get("name")
+    elif target.get("all"):
+        pass  # tout event/year
+    else:
+        return [], "missing_target"
+
+    return list(db["field_devices"].find(query)), None
+
+
+@field_bp.route("/field/admin/send", methods=["POST"])
+@admin_required
+def field_admin_send():
+    """Envoie un message vers une ou plusieurs tablettes.
+
+    Body JSON :
+      {
+        "event": "...", "year": "...",
+        "target": {"device_ids": [...]} | {"beacon_group_id": "..."}
+                  | {"name": "..."} | {"all": true},
+        "type": "info"|"instruction"|"alert"|"route",
+        "title": "...", "body": "...",
+        "priority": "normal"|"high",
+        "payload": { ... }   # optionnel (route waypoints, coordonnees, etc.)
+      }
+    """
+    data = request.get_json(silent=True) or {}
+    event = (data.get("event") or "").strip()
+    year = str(data.get("year") or "").strip()
+    if not event or not year:
+        return jsonify({"ok": False, "error": "missing_event_year"}), 400
+
+    mtype = (data.get("type") or "info").strip()
+    if mtype not in ALLOWED_MESSAGE_TYPES:
+        return jsonify({"ok": False, "error": "invalid_type"}), 400
+
+    priority = (data.get("priority") or "normal").strip()
+    if priority not in ALLOWED_PRIORITIES:
+        priority = "normal"
+
+    title = (data.get("title") or "").strip()
+    body = (data.get("body") or "").strip()
+    if not title and not body:
+        return jsonify({"ok": False, "error": "empty_message"}), 400
+    if len(title) > 120:
+        return jsonify({"ok": False, "error": "title_too_long"}), 400
+    if len(body) > 4000:
+        return jsonify({"ok": False, "error": "body_too_long"}), 400
+
+    payload = data.get("payload") or {}
+    if not isinstance(payload, dict):
+        return jsonify({"ok": False, "error": "invalid_payload"}), 400
+
+    db = _get_mongo_db()
+    targets, err = _resolve_targets(db, event, year, data.get("target") or {})
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+    if not targets:
+        return jsonify({"ok": False, "error": "no_target_matched"}), 404
+
+    now = _now()
+    expires = now + timedelta(seconds=INBOX_MESSAGE_TTL_SECONDS)
+    sender_email = (getattr(request, "admin_user", None) or {}).get("email", "?")
+
+    docs = []
+    for d in targets:
+        docs.append({
+            "device_id": d["_id"],
+            "device_name": d.get("name"),
+            "event": event,
+            "year": year,
+            "type": mtype,
+            "title": title,
+            "body": body,
+            "payload": payload,
+            "priority": priority,
+            "from": sender_email,
+            "createdAt": now,
+            "expiresAt": expires,
+            "ack_at": None,
+        })
+    if docs:
+        db["field_messages"].insert_many(docs)
+
+    return jsonify({
+        "ok": True,
+        "sent_count": len(docs),
+        "targets": [
+            {"id": str(d["_id"]), "name": d.get("name")} for d in targets
+        ],
+    })
+
+
+def _pub_message_admin(msg):
+    """Variante admin : inclut device_id, device_name, event/year et status."""
+    if not msg:
+        return None
+    base = _pub_message(msg)
+    base.update({
+        "device_id": str(msg.get("device_id")) if msg.get("device_id") else None,
+        "device_name": msg.get("device_name"),
+        "event": msg.get("event"),
+        "year": msg.get("year"),
+        "status": "read" if msg.get("ack_at") else "sent",
+    })
+    return base
+
+
+@field_bp.route("/field/admin/messages", methods=["GET"])
+@admin_required
+def field_admin_messages_list():
+    """Liste les messages envoyes (filtre event/year/device_id/limit)."""
+    db = _get_mongo_db()
+    query = {}
+    event = request.args.get("event")
+    year = request.args.get("year")
+    device_id = request.args.get("device_id")
+    if event:
+        query["event"] = event
+    if year:
+        query["year"] = str(year)
+    if device_id:
+        try:
+            query["device_id"] = ObjectId(device_id)
+        except Exception:
+            return jsonify({"ok": False, "error": "invalid_device_id"}), 400
+    try:
+        limit = max(1, min(500, int(request.args.get("limit", 100))))
+    except (TypeError, ValueError):
+        limit = 100
+    cursor = db["field_messages"].find(query).sort("createdAt", -1).limit(limit)
+    messages = [_pub_message_admin(m) for m in cursor]
+    return jsonify({"ok": True, "messages": messages})
+
+
+@field_bp.route("/field/admin/messages/<msg_id>", methods=["DELETE"])
+@admin_required
+def field_admin_message_delete(msg_id):
+    """Supprime un message (rappel cote cockpit, mais la tablette l'a peut-etre deja vu)."""
+    try:
+        oid = ObjectId(msg_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    db = _get_mongo_db()
+    res = db["field_messages"].delete_one({"_id": oid})
+    if res.deleted_count == 0:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    return jsonify({"ok": True})
