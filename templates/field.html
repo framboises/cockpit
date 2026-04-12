@@ -46,10 +46,27 @@
   <main class="field-map-wrap">
     <div id="field-map"></div>
 
-    <!-- Bouton plein ecran (haut droite) -->
-    <button class="map-fab map-fab-tr" id="btn-fullscreen" title="Plein ecran">
-      <span class="material-symbols-outlined">fullscreen</span>
-    </button>
+    <!-- Boutons haut droite -->
+    <div class="map-fab-group-tr">
+      <button class="map-fab" id="btn-poi-search" title="Rechercher un POI">
+        <span class="material-symbols-outlined">search</span>
+      </button>
+      <button class="map-fab" id="btn-fullscreen" title="Plein ecran">
+        <span class="material-symbols-outlined">fullscreen</span>
+      </button>
+    </div>
+
+    <!-- Panneau recherche POI -->
+    <div class="poi-search-panel" id="poi-search-panel" hidden>
+      <div class="poi-search-header">
+        <input type="text" id="poi-search-input" class="poi-search-input"
+          placeholder="Rechercher un lieu..." autocomplete="off">
+        <button class="icon-btn" id="poi-search-close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="poi-search-results" id="poi-search-results"></div>
+    </div>
 
     <!-- Outils de mesure (bas droite) -->
     <div class="map-measure-tools" id="measure-tools">
@@ -169,7 +186,7 @@
         </button>
         <button class="status-option" data-status="intervention">
           <span class="status-dot s-intervention"></span>
-          <span class="status-opt-label">Debut d'intervention</span>
+          <span class="status-opt-label">Intervention</span>
           <span class="status-opt-desc">Engagement sur le terrain</span>
         </button>
         <button class="status-option" data-status="sur_place">

@@ -1163,6 +1163,7 @@
     var divIcon = L.divIcon({ html: html, className: "poi-label-wrap", iconSize: null });
     var m = L.marker([lat, lng], { icon: divIcon });
     m.on("click", function () {
+      if (state.gridOn) return; // carroyage actif = pas de popup POI
       m.unbindPopup();
       m.bindPopup(buildPoiPopup(item, cat, displayName, icon, color), { maxWidth: 320 }).openPopup();
     });
@@ -1186,6 +1187,7 @@
     var labelMarker = L.marker(centroid, { icon: labelIcon }).addTo(group);
 
     var click = function () {
+      if (state.gridOn) return;
       labelMarker.unbindPopup();
       labelMarker.bindPopup(buildPoiPopup(item, cat, displayName, icon, color), { maxWidth: 320 }).openPopup();
     };
@@ -1199,12 +1201,214 @@
         style: { color: color, weight: 4, opacity: 0.9 },
         onEachFeature: function (feat, layer) {
           layer.on("click", function () {
+            if (state.gridOn) return;
             layer.unbindPopup();
             layer.bindPopup(buildPoiPopup(item, cat, displayName, icon, color), { maxWidth: 320 }).openPopup();
           });
         },
       }).addTo(group);
     } catch (e) { /* ignore */ }
+  }
+
+  // --- POI Search ---
+  var _poiSearchIndex = []; // [{name, cat, icon, color, lat, lng, geomType, feature, catObj, collection}]
+  var _poiSearchHighlight = null; // temporary layer for highlighting search result
+
+  function buildPoiSearchIndex() {
+    _poiSearchIndex = [];
+    if (!state.poiCategories.length || !state.poiBundle) return;
+    // We need to fetch and index all POI features from all categories
+    var remaining = state.poiCategories.length;
+    state.poiCategories.forEach(function (cat) {
+      var key = cat.dataKey || cat.collection;
+      var collection = cat.collection || key;
+      var icon = cat.icon || "place";
+      var color = poiGetColor(icon);
+      var items = poiItemArray(cat).filter(function (it) { return it.active !== false; });
+      if (!items.length) { remaining--; return; }
+
+      var mapping = (cat && cat.mapping) || {};
+      var nameMapping = mapping.name || "";
+      var namePropKey = nameMapping.indexOf("properties.") === 0 ? nameMapping.slice(11) : null;
+
+      // Check if already loaded
+      var cached = state.poiLayers[key];
+      if (cached && cached._searchFeatures) {
+        cached._searchFeatures.forEach(function (sf) { _poiSearchIndex.push(sf); });
+        remaining--;
+        return;
+      }
+
+      fetch("/field/resources/gm-collection/" + encodeURIComponent(collection), { headers: { "Accept": "application/json" } })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          var features = (data && data.features) || [];
+          var searchFeatures = [];
+          features.forEach(function (f) {
+            var geom = f.geometry;
+            if (!geom) return;
+            var props = f.properties || {};
+            var featureId = props._id_feature || props._id;
+            var featureName = "";
+            if (namePropKey) featureName = props[namePropKey] || "";
+            if (!featureName) featureName = props.Name || props.name || props.Nom || props.NOM || props.nom || "";
+
+            var item = null;
+            for (var i = 0; i < items.length; i++) {
+              if (items[i].id === featureId || items[i]._id === featureId || items[i].name === featureName) {
+                item = items[i]; break;
+              }
+            }
+            if (!item) return;
+
+            var displayName = item.name || featureName || (cat.label || "");
+            var coords = geom.coordinates || [];
+            var geomType = (geom.type || "").toLowerCase();
+            var lat, lng;
+
+            if (geomType === "point" || geomType === "multipoint") {
+              if (coords.length >= 2) { lat = coords[1]; lng = coords[0]; }
+            } else if (geomType === "polygon" || geomType === "multipolygon") {
+              var ring = geomType === "polygon" ? coords[0] : (coords[0] && coords[0][0]);
+              if (ring && ring.length) {
+                var s = { la: 0, lo: 0, n: 0 };
+                ring.forEach(function (c) { s.la += c[1]; s.lo += c[0]; s.n++; });
+                if (s.n) { lat = s.la / s.n; lng = s.lo / s.n; }
+              }
+            } else if (geomType === "linestring" || geomType === "multilinestring") {
+              var pts = geomType === "linestring" ? coords : (coords[0] || []);
+              if (pts.length) { var mid = pts[Math.floor(pts.length / 2)]; lat = mid[1]; lng = mid[0]; }
+            }
+
+            if (lat != null && lng != null) {
+              var entry = {
+                name: displayName,
+                catLabel: cat.label || "",
+                icon: icon,
+                color: color,
+                lat: lat, lng: lng,
+                geomType: geomType,
+                feature: f,
+                catObj: cat,
+                collection: collection,
+                dataKey: key,
+              };
+              _poiSearchIndex.push(entry);
+              searchFeatures.push(entry);
+            }
+          });
+          // Cache for next search
+          if (!state.poiLayers[key]) state.poiLayers[key] = {};
+          state.poiLayers[key]._searchFeatures = searchFeatures;
+        })
+        .catch(function () {})
+        .finally(function () { remaining--; });
+    });
+  }
+
+  function openPoiSearch() {
+    var panel = $("poi-search-panel");
+    var input = $("poi-search-input");
+    if (!panel) return;
+    panel.hidden = false;
+    if (input) { input.value = ""; input.focus(); }
+    renderPoiSearchResults("");
+    // Build index if needed
+    if (!_poiSearchIndex.length) buildPoiSearchIndex();
+  }
+
+  function closePoiSearch() {
+    var panel = $("poi-search-panel");
+    if (panel) panel.hidden = true;
+  }
+
+  function renderPoiSearchResults(query) {
+    var results = $("poi-search-results");
+    if (!results) return;
+    results.innerHTML = "";
+
+    if (!query.trim()) {
+      results.innerHTML = "<div class='poi-search-empty'>Tape un nom pour chercher...</div>";
+      return;
+    }
+
+    var q = query.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    var matches = _poiSearchIndex.filter(function (p) {
+      var n = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return n.indexOf(q) !== -1;
+    }).slice(0, 20);
+
+    if (!matches.length) {
+      results.innerHTML = "<div class='poi-search-empty'>Aucun resultat</div>";
+      return;
+    }
+
+    matches.forEach(function (p) {
+      var item = document.createElement("div");
+      item.className = "poi-search-item";
+      var iconWrap = document.createElement("div");
+      iconWrap.className = "poi-search-item-icon";
+      iconWrap.style.background = p.color;
+      iconWrap.innerHTML = "<span class='material-symbols-outlined'>" + escapeHtml(p.icon) + "</span>";
+      var nameEl = document.createElement("div");
+      nameEl.className = "poi-search-item-name";
+      nameEl.textContent = p.name;
+      var catEl = document.createElement("div");
+      catEl.className = "poi-search-item-cat";
+      catEl.textContent = p.catLabel;
+      var right = document.createElement("div");
+      right.appendChild(nameEl);
+      right.appendChild(catEl);
+      right.style.flex = "1";
+      item.appendChild(iconWrap);
+      item.appendChild(right);
+      item.addEventListener("click", function () {
+        flyToPoiResult(p);
+        closePoiSearch();
+      });
+      results.appendChild(item);
+    });
+  }
+
+  function flyToPoiResult(p) {
+    // Remove previous highlight
+    if (_poiSearchHighlight) {
+      state.map.removeLayer(_poiSearchHighlight);
+      _poiSearchHighlight = null;
+    }
+
+    // Ensure the POI layer is loaded and visible
+    var key = p.dataKey;
+    var st = state.poiLayers[key];
+    if (!st || !st.visible) {
+      // Load and show the layer
+      togglePoi(key, true, p.catObj);
+      // Update checkbox in layers panel
+      var cb = document.querySelector("[data-poi='" + key + "']");
+      if (cb) cb.checked = true;
+    }
+
+    // Fly to the POI
+    state.followMe = false;
+    var followBtn = $("btn-follow");
+    if (followBtn) followBtn.classList.remove("active");
+
+    var zoom = 19;
+    if (p.geomType === "polygon" || p.geomType === "multipolygon") zoom = 18;
+    state.map.setView([p.lat, p.lng], zoom, { animate: true });
+
+    // Temporary highlight marker
+    var html = "<div class='poi-search-highlight' style='border-color:" + p.color + "'>"
+      + "<span class='material-symbols-outlined' style='color:" + p.color + "'>" + escapeHtml(p.icon) + "</span></div>";
+    var icon = L.divIcon({ html: html, className: "poi-search-highlight-wrap", iconSize: [48, 48], iconAnchor: [24, 24] });
+    _poiSearchHighlight = L.marker([p.lat, p.lng], { icon: icon, zIndexOffset: 8000 }).addTo(state.map);
+    // Auto-remove after 8 seconds
+    setTimeout(function () {
+      if (_poiSearchHighlight) {
+        try { state.map.removeLayer(_poiSearchHighlight); } catch (e) {}
+        _poiSearchHighlight = null;
+      }
+    }, 8000);
   }
 
   function poiCentroid(latlngs) {
@@ -1379,7 +1583,7 @@
   // ---------------------------------------------------------------------
   var STATUS_META = {
     patrouille:   { label: "Patrouille",            color: "#22c55e", icon: "directions_walk" },
-    intervention: { label: "Debut d'intervention",  color: "#f59e0b", icon: "warning" },
+    intervention: { label: "Intervention",           color: "#f59e0b", icon: "warning" },
     sur_place:    { label: "Arrivee sur les lieux",  color: "#3b82f6", icon: "location_on" },
     pause:        { label: "Pause",                  color: "#94a3b8", icon: "pause_circle" },
   };
@@ -2517,6 +2721,16 @@
     if (cbGrid25) cbGrid25.addEventListener("change", function () { toggleGrid25(cbGrid25.checked); });
     var cb3p = $("lyr-3p");
     if (cb3p) cb3p.addEventListener("change", function () { toggle3P(cb3p.checked); });
+
+    // Recherche POI
+    var btnSearch = $("btn-poi-search");
+    if (btnSearch) btnSearch.addEventListener("click", openPoiSearch);
+    var searchClose = $("poi-search-close");
+    if (searchClose) searchClose.addEventListener("click", closePoiSearch);
+    var searchInput = $("poi-search-input");
+    if (searchInput) searchInput.addEventListener("input", function () {
+      renderPoiSearchResults(searchInput.value);
+    });
 
     // Plein ecran
     var btnFs = $("btn-fullscreen");

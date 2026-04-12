@@ -1613,7 +1613,7 @@ def field_resources_map_bundle():
 
     # 4) Couleurs par defaut par icone (mirror du looker)
     default_colors = {
-        "door_front": "#132646",
+        "door_front": "#60a5fa",
         "local_parking": "#3B82F6",
         "camping": "#2E7D32",
         "hotel": "#FFD700",

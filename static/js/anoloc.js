@@ -403,6 +403,18 @@
         var lng = dev.lng;
         if (lat == null || lng == null) return;
 
+        // Masquer les balises arretees ET hors ligne (pas de signal GPS)
+        var isStoppedOffline = (dev.status === "stopped" && !dev.online);
+        if (isStoppedOffline) {
+          // Retirer le marker s'il existait
+          var old = anolocMarkers[dev.id];
+          if (old) {
+            if (anolocLayers[gid]) anolocLayers[gid].removeLayer(old);
+            delete anolocMarkers[dev.id];
+          }
+          return;
+        }
+
         var existing = anolocMarkers[dev.id];
         if (existing) {
           // Update position (smooth)
@@ -482,8 +494,8 @@
     var container = el("div", {className: "anoloc-marker " + statusClass + (isTablet ? " tablet" : "")});
     container.style.background = grp.color || "#6366f1";
 
-    // Icone : tablette forcee pour les tablettes, sinon l'icone du groupe
-    var iconEl = materialIcon(isTablet ? "tablet_android" : (grp.icon || "location_on"));
+    // Icone : toujours l'icone du groupe (tablettes et balises)
+    var iconEl = materialIcon(grp.icon || "location_on");
     iconEl.classList.add("anoloc-marker-icon");
     container.appendChild(iconEl);
 
