@@ -783,7 +783,7 @@
     var trailBtn = el("button", {
       className: "anoloc-trail-btn" + (isActive ? " active" : ""),
     }, [
-      materialIcon(isActive ? "timeline_off" : "timeline", "font-size:16px;vertical-align:middle;margin-right:4px;"),
+      materialIcon(isActive ? "close" : "timeline", "font-size:16px;vertical-align:middle;margin-right:4px;"),
       isActive ? "Masquer" : "Trace",
     ]);
     trailBtn.style.borderColor = trailColor;
@@ -795,7 +795,7 @@
       trailBtn.className = "anoloc-trail-btn" + (nowActive ? " active" : "");
       trailBtn.style.background = nowActive ? trailColor : "";
       trailBtn.textContent = "";
-      trailBtn.appendChild(materialIcon(nowActive ? "timeline_off" : "timeline", "font-size:16px;vertical-align:middle;margin-right:4px;"));
+      trailBtn.appendChild(materialIcon(nowActive ? "close" : "timeline", "font-size:16px;vertical-align:middle;margin-right:4px;"));
       trailBtn.appendChild(document.createTextNode(nowActive ? "Masquer" : "Trace"));
       if (nowActive) {
         activeTrails[dev.id].minutes = mins;
