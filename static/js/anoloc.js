@@ -750,10 +750,16 @@
       ]));
     }
 
-    // Battery
+    // Battery (with icon + color)
     if (dev.battery_pct != null) {
+      var batPct = dev.battery_pct;
+      var batIconName = batPct > 60 ? "battery_full" : batPct > 20 ? "battery_3_bar" : "battery_1_bar";
+      var batColor = batPct > 60 ? "#22c55e" : batPct > 20 ? "#eab308" : "#ef4444";
+      var batStrong = el("strong", {textContent: batPct + "%"});
+      batStrong.style.color = batColor;
       popup.appendChild(el("div", {className: "anoloc-popup-row"}, [
-        "Batterie: ", el("strong", {textContent: dev.battery_pct + "%"}),
+        materialIcon(batIconName, "font-size:16px;vertical-align:middle;margin-right:4px;color:" + batColor),
+        "Batterie: ", batStrong,
       ]));
     }
 

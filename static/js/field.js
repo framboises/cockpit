@@ -1931,10 +1931,16 @@
         existing.setLatLng([f.lat, f.lng]);
       } else {
         var catStyle = ficheStyle(f.category);
+        var fcc = f.content_category || {};
+        var vehicleChip = fcc.patrouille
+          ? "<div class='fiche-marker-vehicle'><span class='material-symbols-outlined' style='font-size:11px;vertical-align:middle;margin-right:2px'>directions_car</span>" + fcc.patrouille + "</div>"
+          : "";
         var icon = L.divIcon({
           className: "",
-          html: "<div class='fiche-marker urgency-" + (f.niveau_urgence || "norm") + "' style='background:" + catStyle.color + "'>"
-              + "<span class='material-symbols-outlined'>" + catStyle.icon + "</span></div>",
+          html: "<div class='fiche-marker-wrap'>"
+              + "<div class='fiche-marker urgency-" + (f.niveau_urgence || "norm") + "' style='background:" + catStyle.color + "'>"
+              + "<span class='material-symbols-outlined'>" + catStyle.icon + "</span></div>"
+              + vehicleChip + "</div>",
           iconSize: [32, 38],
           iconAnchor: [16, 36],
         });
@@ -2038,6 +2044,29 @@
       body.appendChild(desc);
     }
 
+    // Vehicule engage (banner prominent)
+    var cc = d.content_category || {};
+    if (cc.patrouille) {
+      var vehBanner = document.createElement("div");
+      vehBanner.className = "fd-vehicle-banner";
+      var vehIco = document.createElement("span");
+      vehIco.className = "material-symbols-outlined fd-vehicle-icon";
+      vehIco.textContent = "directions_car";
+      vehBanner.appendChild(vehIco);
+      var vehInfo = document.createElement("div");
+      vehInfo.className = "fd-vehicle-info";
+      var vehLbl = document.createElement("span");
+      vehLbl.className = "fd-vehicle-lbl";
+      vehLbl.textContent = "Element engage";
+      vehInfo.appendChild(vehLbl);
+      var vehName = document.createElement("strong");
+      vehName.className = "fd-vehicle-name";
+      vehName.textContent = cc.patrouille;
+      vehInfo.appendChild(vehName);
+      vehBanner.appendChild(vehInfo);
+      body.appendChild(vehBanner);
+    }
+
     // Info fields
     var fields = document.createElement("div");
     fields.className = "fd-fields";
@@ -2064,9 +2093,7 @@
     }
     if (d.operator_close) addF("Clos par", d.operator_close);
     addF("Zone", d.area);
-    var cc = d.content_category || {};
     addF("Carroyage", cc.carroye);
-    addF("Patrouille", cc.patrouille);
     addF("Appelant", cc.appelant);
     if (d.status_code === 10) addF("Statut", "TERMINE");
     if (fields.childNodes.length) body.appendChild(fields);

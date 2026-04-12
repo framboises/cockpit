@@ -3048,6 +3048,7 @@ PCO_PROJECTION = {
     "area": 1, "operator": 1, "severity": 1, "is_incident": 1,
     "gps": 1, "status_code": 1, "niveau_urgence": 1, "bounce_rev": 1,
     "content_category.sous_classification": 1,
+    "content_category.patrouille": 1,
 }
 
 def _clean_operator(name):
@@ -3076,6 +3077,7 @@ def _pcorg_serialise(doc):
         "is_incident": doc.get("is_incident", False),
         "status_code": doc.get("status_code", 0),
         "sous_classification": cc.get("sous_classification") or "",
+        "patrouille": cc.get("patrouille") or "",
         "lat": coords[1] if coords and len(coords) >= 2 else None,
         "lon": coords[0] if coords and len(coords) >= 2 else None,
         "server": doc.get("server"),

@@ -1024,9 +1024,23 @@
     if (cc.radio) contact.push(typeof cc.radio === "string" ? cc.radio : "Radio");
     if (contact.length) addField(fields, "Via", contact.join(" / "));
     addField(fields, "Carroye", cc.carroye);
-    addField(fields, "V\u00e9hicule engag\u00e9", cc.patrouille);
     addField(fields, "Groupe", formatGroupDesc(d.group_desc, d.category));
     infoRow.appendChild(fields);
+
+    // Vehicle engagement banner (prominent, before minimap)
+    if (cc.patrouille) {
+      var vBanner = mkEl("div", "pcorg-fiche-vehicle");
+      vBanner.appendChild(matIcon("directions_car", "pcorg-fiche-vehicle-ico"));
+      var vInfo = mkEl("div", "pcorg-fiche-vehicle-info");
+      var vLbl = mkEl("span", "pcorg-fiche-vehicle-lbl");
+      vLbl.textContent = "Element engage";
+      vInfo.appendChild(vLbl);
+      var vName = mkEl("strong", "pcorg-fiche-vehicle-name");
+      vName.textContent = cc.patrouille;
+      vInfo.appendChild(vName);
+      vBanner.appendChild(vInfo);
+      body.appendChild(vBanner);
+    }
 
     // Mini map
     var mapDiv = mkEl("div", "pcorg-fiche-minimap");
@@ -1562,7 +1576,6 @@
       if (cc.texte) fields.push(["Texte", cc.texte]);
       if (cc.alerte) fields.push(["Alerte", "Oui"]);
     }
-    if (cc.patrouille) fields.push(["V\u00e9hicule engag\u00e9", cc.patrouille]);
     return fields;
   }
 
@@ -1758,6 +1771,15 @@
       pin.appendChild(matIcon(st.icon));
       pinOuter.appendChild(pin);
 
+      // Badge vehicule engage sur le pin
+      if (item.patrouille) {
+        var vehChip = mkEl("div", "pcorg-pin-vehicle");
+        var vehIcon = matIcon("directions_car", "font-size:11px;vertical-align:middle;margin-right:2px;");
+        vehChip.appendChild(vehIcon);
+        vehChip.appendChild(document.createTextNode(item.patrouille));
+        pinOuter.appendChild(vehChip);
+      }
+
       var icon = L.divIcon({
         className: "",
         html: pinOuter.outerHTML,
@@ -1803,6 +1825,19 @@
         var descLine = mkEl("div", "pcorg-popup-desc");
         descLine.textContent = item.text;
         popBody.appendChild(descLine);
+      }
+
+      // Vehicule engage (badge prominent)
+      if (item.patrouille) {
+        var vehBanner = mkEl("div", "pcorg-popup-vehicle");
+        vehBanner.appendChild(matIcon("directions_car", "pcorg-popup-vehicle-icon"));
+        var vehLabel = mkEl("span", "pcorg-popup-vehicle-label");
+        vehLabel.textContent = "Engage : ";
+        vehBanner.appendChild(vehLabel);
+        var vehName = mkEl("strong", "pcorg-popup-vehicle-name");
+        vehName.textContent = item.patrouille;
+        vehBanner.appendChild(vehName);
+        popBody.appendChild(vehBanner);
       }
 
       // Info fields

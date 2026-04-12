@@ -431,6 +431,19 @@ body {
   0%, 100% { opacity: 1; box-shadow: 0 4px 8px rgba(0,0,0,0.5), 0 0 0 0 rgba(220,38,38,0.7); }
   50%      { opacity: 0.85; box-shadow: 0 4px 8px rgba(0,0,0,0.5), 0 0 0 10px rgba(220,38,38,0); }
 }
+/* Fiche pin wrap (for vehicle chip positioning) */
+.fiche-marker-wrap { position: relative; display: inline-block; }
+/* Vehicle chip on field fiche pin */
+.fiche-marker-vehicle {
+  position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  margin-top: 2px; white-space: nowrap;
+  background: #1e293bee; color: #e2e8f0;
+  font-size: 9px; font-weight: 700; line-height: 1;
+  padding: 3px 6px; border-radius: 4px;
+  border: 1px solid #6366f180;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  display: flex; align-items: center;
+}
 
 /* Marker destination itineraire */
 .route-dest-marker {
@@ -1130,6 +1143,32 @@ body {
   color: #f1f5f9;
   margin-bottom: 12px;
   white-space: pre-wrap;
+}
+
+/* Vehicle engagement banner (field fiche detail) */
+.fd-vehicle-banner {
+  display: flex; align-items: center; gap: 10px;
+  background: linear-gradient(135deg, #6366f118, #8b5cf618);
+  border: 1px solid #6366f150;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+.fd-vehicle-icon {
+  font-size: 24px; color: #818cf8;
+  background: #6366f125;
+  border-radius: 8px;
+  padding: 6px;
+}
+.fd-vehicle-info {
+  display: flex; flex-direction: column; gap: 2px;
+}
+.fd-vehicle-lbl {
+  font-size: 11px; color: #94a3b8; text-transform: uppercase;
+  letter-spacing: 0.5px; font-weight: 600;
+}
+.fd-vehicle-name {
+  font-size: 15px; color: #a5b4fc; font-weight: 700;
 }
 
 /* Info fields */
