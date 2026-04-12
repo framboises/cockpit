@@ -527,6 +527,24 @@ def field_position():
             "last_seen": _now(),
         }},
     )
+
+    # -- Historique des positions (meme collection que les balises anoloc)
+    try:
+        db["anoloc_positions"].insert_one({
+            "device_id": "field:" + str(request.device["_id"]),
+            "beacon_group": request.device.get("beacon_group_id", ""),
+            "label": request.device.get("name", "?"),
+            "lat": lat,
+            "lng": lng,
+            "speed": speed or 0,
+            "heading": heading or 0,
+            "status": "running",
+            "battery_pct": int(round(battery)) if battery is not None else None,
+            "gps_fix": 1,
+            "collected_at": _now(),
+        })
+    except Exception:
+        pass  # non-bloquant
     # -- Auto-detection de proximite : si la tablette a une fiche assignee
     #    avec GPS et qu'on est a <10m, passer le statut a "sur_place"
     try:

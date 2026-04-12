@@ -3,7 +3,7 @@
 # Seules exceptions: test-login et anoloc-devices appellent l'API Anoloc directement
 
 from flask import Blueprint, jsonify, request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 try:
     from zoneinfo import ZoneInfo
@@ -347,6 +347,45 @@ def anoloc_live():
             groups[gid]["devices"].append(_tablet_to_device(t))
 
     return jsonify({"groups": groups, "enabled": True})
+
+
+@anoloc_bp.route("/anoloc/trail")
+def anoloc_trail():
+    """Retourne l'historique des positions d'un device (balise ou tablette).
+    Params: device_id (requis), minutes (defaut 60, max 1440 = 24h)."""
+    device_id = request.args.get("device_id", "").strip()
+    if not device_id:
+        return jsonify({"ok": False, "error": "missing_device_id"}), 400
+
+    try:
+        minutes = int(request.args.get("minutes", 60))
+    except (TypeError, ValueError):
+        minutes = 60
+    minutes = max(5, min(minutes, 1440))
+
+    db = _get_mongo_db()
+    since = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+
+    cursor = db["anoloc_positions"].find(
+        {"device_id": device_id, "collected_at": {"$gte": since}},
+        {"lat": 1, "lng": 1, "speed": 1, "collected_at": 1, "_id": 0},
+    ).sort("collected_at", 1)
+
+    points = []
+    for doc in cursor:
+        lat = doc.get("lat")
+        lng = doc.get("lng")
+        if lat is None or lng is None:
+            continue
+        ts = doc.get("collected_at")
+        points.append({
+            "lat": lat,
+            "lng": lng,
+            "speed": doc.get("speed", 0),
+            "ts": ts.isoformat() if isinstance(ts, datetime) else str(ts or ""),
+        })
+
+    return jsonify({"ok": True, "device_id": device_id, "minutes": minutes, "points": points})
 
 
 @anoloc_bp.route("/anoloc/vehicles-by-category")

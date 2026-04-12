@@ -15,6 +15,18 @@
   var REFRESH_MS = 15000;     // 15s
   var lastData = null;
 
+  // --- Trail state ---
+  var trailPolylines = {};    // deviceId -> L.polyline
+  var trailDecorators = {};   // deviceId -> [L.circleMarker] (time dots)
+  var activeTrails = {};      // deviceId -> {minutes, color, groupId}
+  var TRAIL_DURATIONS = [
+    { label: "30 min", value: 30 },
+    { label: "1h", value: 60 },
+    { label: "2h", value: 120 },
+    { label: "4h", value: 240 },
+    { label: "Journee", value: 1440 },
+  ];
+
   // --- DOM helpers ---
   function el(tag, attrs, children) {
     var e = document.createElement(tag);
@@ -133,6 +145,7 @@
         lastData = data;
         updatePanel(data);
         updateMarkers(data);
+        refreshActiveTrails();
       })
       .catch(function (err) {
         console.error("[Anoloc] refresh error:", err);
@@ -360,6 +373,7 @@
       }
 
       devices.forEach(function (dev, idx) {
+        dev._groupId = gid; // store for trail functions
         seenDevices[dev.id] = true;
         var lat = dev.lat;
         var lng = dev.lng;
@@ -420,6 +434,9 @@
           anolocLayers[m._anolocGroup].removeLayer(m);
         }
         delete anolocMarkers[devId];
+        // Also remove trail if device disappeared
+        removeTrail(devId);
+        delete activeTrails[devId];
       }
     });
 
@@ -461,6 +478,105 @@
       className: "anoloc-marker-wrapper",
       iconSize: null,
       iconAnchor: [18, 18],
+    });
+  }
+
+  // --- Trail functions ---
+  function fetchTrail(deviceId, minutes, color, groupId) {
+    fetch("/anoloc/trail?device_id=" + encodeURIComponent(deviceId) + "&minutes=" + minutes)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data || !data.ok) return;
+        renderTrail(deviceId, data.points, color, groupId);
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function renderTrail(deviceId, points, color, groupId) {
+    removeTrail(deviceId);
+    if (!points || points.length < 2) return;
+
+    var mapObj = window.CockpitMapView && window.CockpitMapView.getMap
+      ? window.CockpitMapView.getMap() : null;
+    if (!mapObj) return;
+
+    var latlngs = points.map(function (p) { return [p.lat, p.lng]; });
+
+    // Main polyline
+    var line = L.polyline(latlngs, {
+      color: color || "#6366f1",
+      weight: 3,
+      opacity: 0.7,
+      dashArray: "8,6",
+      lineJoin: "round",
+    });
+
+    // Layer group: use the device's group layer or add directly to map
+    var layer = anolocLayers[groupId];
+    if (layer) {
+      line.addTo(layer);
+    } else {
+      line.addTo(mapObj);
+    }
+    trailPolylines[deviceId] = line;
+
+    // Time dots every ~10 points (or at least 5 dots)
+    var dots = [];
+    var step = Math.max(1, Math.floor(points.length / 12));
+    for (var i = 0; i < points.length; i += step) {
+      var p = points[i];
+      var progress = i / (points.length - 1); // 0..1
+      var opacity = 0.3 + progress * 0.7;     // older = faded
+      var radius = 2.5 + progress * 1.5;
+      var dot = L.circleMarker([p.lat, p.lng], {
+        radius: radius,
+        color: color || "#6366f1",
+        fillColor: color || "#6366f1",
+        fillOpacity: opacity,
+        weight: 1,
+        opacity: opacity,
+      });
+      // Tooltip with time
+      if (p.ts) {
+        try {
+          var dt = new Date(p.ts);
+          var ts = String(dt.getHours()).padStart(2, "0") + ":" + String(dt.getMinutes()).padStart(2, "0");
+          dot.bindTooltip(ts, { direction: "top", className: "anoloc-trail-tooltip" });
+        } catch (e) { /* ignore */ }
+      }
+      if (layer) dot.addTo(layer);
+      else dot.addTo(mapObj);
+      dots.push(dot);
+    }
+    trailDecorators[deviceId] = dots;
+  }
+
+  function removeTrail(deviceId) {
+    if (trailPolylines[deviceId]) {
+      trailPolylines[deviceId].remove();
+      delete trailPolylines[deviceId];
+    }
+    if (trailDecorators[deviceId]) {
+      trailDecorators[deviceId].forEach(function (d) { d.remove(); });
+      delete trailDecorators[deviceId];
+    }
+  }
+
+  function toggleTrail(deviceId, minutes, color, groupId) {
+    if (activeTrails[deviceId]) {
+      removeTrail(deviceId);
+      delete activeTrails[deviceId];
+      return false;
+    }
+    activeTrails[deviceId] = { minutes: minutes, color: color, groupId: groupId };
+    fetchTrail(deviceId, minutes, color, groupId);
+    return true;
+  }
+
+  function refreshActiveTrails() {
+    Object.keys(activeTrails).forEach(function (deviceId) {
+      var t = activeTrails[deviceId];
+      fetchTrail(deviceId, t.minutes, t.color, t.groupId);
     });
   }
 
@@ -535,6 +651,56 @@
         ]));
       } catch (e) { /* ignore */ }
     }
+
+    // Trail controls
+    var trailSection = el("div", {className: "anoloc-trail-controls"});
+    var isActive = !!activeTrails[dev.id];
+    var currentMinutes = isActive ? activeTrails[dev.id].minutes : 60;
+    var trailColor = grp.color || "#6366f1";
+
+    // Duration select
+    var durationSelect = el("select", {className: "anoloc-trail-select"});
+    TRAIL_DURATIONS.forEach(function (dur) {
+      var opt = el("option", {value: dur.value, textContent: dur.label});
+      if (dur.value === currentMinutes) opt.selected = true;
+      durationSelect.appendChild(opt);
+    });
+
+    // Toggle button
+    var trailBtn = el("button", {
+      className: "anoloc-trail-btn" + (isActive ? " active" : ""),
+    }, [
+      materialIcon(isActive ? "timeline_off" : "timeline", "font-size:16px;vertical-align:middle;margin-right:4px;"),
+      isActive ? "Masquer" : "Trace",
+    ]);
+    trailBtn.style.borderColor = trailColor;
+    if (isActive) trailBtn.style.background = trailColor;
+
+    trailBtn.addEventListener("click", function () {
+      var mins = parseInt(durationSelect.value, 10) || 60;
+      var nowActive = toggleTrail(dev.id, mins, trailColor, dev._groupId || "");
+      trailBtn.className = "anoloc-trail-btn" + (nowActive ? " active" : "");
+      trailBtn.style.background = nowActive ? trailColor : "";
+      trailBtn.textContent = "";
+      trailBtn.appendChild(materialIcon(nowActive ? "timeline_off" : "timeline", "font-size:16px;vertical-align:middle;margin-right:4px;"));
+      trailBtn.appendChild(document.createTextNode(nowActive ? "Masquer" : "Trace"));
+      if (nowActive) {
+        activeTrails[dev.id].minutes = mins;
+      }
+    });
+
+    // Re-fetch on duration change while active
+    durationSelect.addEventListener("change", function () {
+      if (activeTrails[dev.id]) {
+        var mins = parseInt(durationSelect.value, 10) || 60;
+        activeTrails[dev.id].minutes = mins;
+        fetchTrail(dev.id, mins, trailColor, activeTrails[dev.id].groupId);
+      }
+    });
+
+    trailSection.appendChild(durationSelect);
+    trailSection.appendChild(trailBtn);
+    popup.appendChild(trailSection);
 
     return popup;
   }
