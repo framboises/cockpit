@@ -218,6 +218,14 @@ def _tablet_to_device(tablet):
         bat_int = int(round(float(bat))) if bat is not None else None
     except (TypeError, ValueError):
         bat_int = None
+    patrol_status = tablet.get("status") or "patrouille"
+    status_since = tablet.get("status_since")
+    if isinstance(status_since, datetime):
+        if status_since.tzinfo is None:
+            status_since = status_since.replace(tzinfo=timezone.utc)
+        status_since_iso = status_since.isoformat()
+    else:
+        status_since_iso = ""
     return {
         "id": "field:" + str(tablet.get("_id")),
         "label": tablet.get("name") or "?",
@@ -233,6 +241,9 @@ def _tablet_to_device(tablet):
         "collected_at": last_seen.isoformat() if last_seen else "",
         "online": online,
         "kind": "tablet",
+        "patrol_status": patrol_status,
+        "patrol_status_since": status_since_iso,
+        "active_fiche_id": tablet.get("active_fiche_id"),
     }
 
 

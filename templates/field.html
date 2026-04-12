@@ -118,6 +118,15 @@
     </aside>
   </main>
 
+  <!-- BARRE DE STATUT PATROUILLE -->
+  <div class="field-status-bar" id="status-bar">
+    <button class="status-current" id="status-btn" title="Changer le statut">
+      <span class="status-dot" id="status-dot"></span>
+      <span class="status-text" id="status-text">Patrouille</span>
+      <span class="material-symbols-outlined status-chevron">expand_more</span>
+    </button>
+  </div>
+
   <!-- BARRE D'ACTIONS -->
   <nav class="field-actions">
     <button class="action-btn" id="btn-recenter" title="Me recentrer">
@@ -142,6 +151,71 @@
       <span class="label">SOS</span>
     </button>
   </nav>
+
+  <!-- Panneau choix de statut -->
+  <div class="field-modal" id="status-modal" hidden>
+    <div class="field-modal-box status-modal-box">
+      <div class="field-modal-header">
+        <h2>Statut de la patrouille</h2>
+        <button class="icon-btn" id="status-modal-close" title="Fermer">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="status-options" id="status-options">
+        <button class="status-option" data-status="patrouille">
+          <span class="status-dot s-patrouille"></span>
+          <span class="status-opt-label">Patrouille</span>
+          <span class="status-opt-desc">En ronde, disponible</span>
+        </button>
+        <button class="status-option" data-status="intervention">
+          <span class="status-dot s-intervention"></span>
+          <span class="status-opt-label">Debut d'intervention</span>
+          <span class="status-opt-desc">Engagement sur le terrain</span>
+        </button>
+        <button class="status-option" data-status="sur_place">
+          <span class="status-dot s-sur_place"></span>
+          <span class="status-opt-label">Arrivee sur les lieux</span>
+          <span class="status-opt-desc">Sur place</span>
+        </button>
+        <button class="status-option" data-status="pause">
+          <span class="status-dot s-pause"></span>
+          <span class="status-opt-label">Pause</span>
+          <span class="status-opt-desc">Indisponible temporairement</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal creation de fiche terrain -->
+  <div class="field-modal" id="fiche-create-modal" hidden>
+    <div class="field-modal-box fiche-create-box">
+      <div class="field-modal-header">
+        <h2>Nouvelle intervention</h2>
+        <button class="icon-btn" id="fiche-create-close" title="Fermer">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="fiche-create-body">
+        <label class="fiche-create-label">Categorie</label>
+        <div class="fiche-create-cats" id="fiche-create-cats"></div>
+        <label class="fiche-create-label">Niveau d'urgence</label>
+        <div class="fiche-create-urgency" id="fiche-create-urgency">
+          <button class="urgency-btn" data-val="IMP">IMP</button>
+          <button class="urgency-btn selected" data-val="UR">UR</button>
+          <button class="urgency-btn" data-val="UA">UA</button>
+          <button class="urgency-btn" data-val="EU">EU</button>
+        </div>
+        <label class="fiche-create-label">Description</label>
+        <textarea class="fiche-create-text" id="fiche-create-text" rows="3"
+          placeholder="Description courte de l'intervention..."></textarea>
+        <div class="fiche-create-msg" id="fiche-create-msg"></div>
+        <button class="btn-primary fiche-create-submit" id="fiche-create-submit">
+          <span class="material-symbols-outlined">add_circle</span>
+          Creer la fiche
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- Modal message -->
   <div class="field-modal" id="msg-modal" hidden>

@@ -233,6 +233,23 @@
           if (dev.gps_fix === 0) statusLabel += " (sans GPS)";
         }
 
+        // Statut patrouille pour les tablettes
+        var patrolBadge = null;
+        if (dev.kind === "tablet" && dev.patrol_status) {
+          var pMeta = {
+            patrouille: { label: "Patrouille", color: "#22c55e" },
+            intervention: { label: "Intervention", color: "#f59e0b" },
+            sur_place: { label: "Sur place", color: "#3b82f6" },
+            pause: { label: "Pause", color: "#94a3b8" },
+          };
+          var pm = pMeta[dev.patrol_status] || pMeta.patrouille;
+          patrolBadge = el("span", {
+            className: "anoloc-patrol-badge",
+            textContent: pm.label,
+          });
+          patrolBadge.style.cssText = "background:" + pm.color + ";color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;margin-left:6px;white-space:nowrap;";
+        }
+
         var devDot = el("span", {className: "anoloc-dev-dot " + statusClass});
         var devNum = el("span", {className: "anoloc-dev-num", textContent: String(idx + 1)});
         var devName = el("span", {className: "anoloc-dev-name", textContent: dev.label || dev.id});
@@ -262,6 +279,7 @@
         var leftChildren = [devDot, devNum];
         if (devKindIcon) leftChildren.push(devKindIcon);
         leftChildren.push(devName);
+        if (patrolBadge) leftChildren.push(patrolBadge);
         var devRow = el("div", {className: "anoloc-dev-row"}, [
           el("div", {className: "anoloc-dev-left"}, leftChildren),
           devRight,
@@ -467,6 +485,22 @@
     popup.appendChild(el("div", {className: "anoloc-popup-row"}, [
       "GPS: ", el("strong", {textContent: dev.gps_fix ? "OK" : "pas de signal"}),
     ]));
+
+    // Patrol status (tablets only)
+    if (dev.kind === "tablet" && dev.patrol_status) {
+      var psMeta = {
+        patrouille: { label: "Patrouille", color: "#22c55e" },
+        intervention: { label: "Intervention", color: "#f59e0b" },
+        sur_place: { label: "Sur place", color: "#3b82f6" },
+        pause: { label: "Pause", color: "#94a3b8" },
+      };
+      var psm = psMeta[dev.patrol_status] || psMeta.patrouille;
+      var psBadge = el("strong", {textContent: psm.label});
+      psBadge.style.color = psm.color;
+      popup.appendChild(el("div", {className: "anoloc-popup-row"}, [
+        "Activite: ", psBadge,
+      ]));
+    }
 
     // Speed
     if (dev.speed != null && dev.gps_fix) {

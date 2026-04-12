@@ -42,6 +42,12 @@
     poiLayers: {},             // dataKey -> {layer, loaded, visible, geojson}
     poiBundle: null,           // {parametrage, parking_colors, default_colors}
     poiAutoColorIdx: 0,
+    // Statut patrouille
+    patrolStatus: "patrouille",
+    patrolStatusSince: null,
+    activeFicheId: null,
+    ficheCreateCat: null,
+    ficheCreateUrgency: "UR",
     routeLayer: null,
     routeDestination: null,  // [lat, lng]
     fichesLayer: null,
@@ -1367,6 +1373,192 @@
   }
 
   // ---------------------------------------------------------------------
+  // Statut patrouille
+  // ---------------------------------------------------------------------
+  var STATUS_META = {
+    patrouille:   { label: "Patrouille",            color: "#22c55e", icon: "directions_walk" },
+    intervention: { label: "Debut d'intervention",  color: "#f59e0b", icon: "warning" },
+    sur_place:    { label: "Arrivee sur les lieux",  color: "#3b82f6", icon: "location_on" },
+    pause:        { label: "Pause",                  color: "#94a3b8", icon: "pause_circle" },
+  };
+
+  function updateStatusBar() {
+    var meta = STATUS_META[state.patrolStatus] || STATUS_META.patrouille;
+    var dot = $("status-dot");
+    var text = $("status-text");
+    var bar = $("status-bar");
+    if (dot) dot.style.background = meta.color;
+    if (text) text.textContent = meta.label;
+    if (bar) bar.style.borderColor = meta.color;
+  }
+
+  function openStatusModal() {
+    var modal = $("status-modal");
+    if (!modal) return;
+    // Highlight current status
+    var btns = modal.querySelectorAll(".status-option");
+    btns.forEach(function (b) {
+      b.classList.toggle("active", b.dataset.status === state.patrolStatus);
+    });
+    modal.hidden = false;
+  }
+
+  function wireStatusOptions() {
+    var options = document.querySelectorAll("#status-options .status-option");
+    options.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var newStatus = btn.dataset.status;
+        $("status-modal").hidden = true;
+        if (newStatus === "intervention") {
+          // Ouvrir le formulaire de creation de fiche
+          openCreateFicheModal();
+          return;
+        }
+        setPatrolStatus(newStatus);
+      });
+    });
+  }
+
+  function setPatrolStatus(newStatus) {
+    fetch("/field/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: newStatus }),
+    })
+      .then(function (r) {
+        if (r.status === 401) { return handleSessionLost(); }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        if (data.ok) {
+          state.patrolStatus = newStatus;
+          state.patrolStatusSince = new Date().toISOString();
+          if (newStatus === "patrouille") state.activeFicheId = null;
+          updateStatusBar();
+          toast(STATUS_META[newStatus].label, "ok");
+        } else {
+          toast("Erreur : " + (data.error || "?"), "err");
+        }
+      })
+      .catch(function () { toast("Erreur reseau", "err"); });
+  }
+
+  // ----- Creation de fiche terrain -----
+  function openCreateFicheModal() {
+    var modal = $("fiche-create-modal");
+    if (!modal) return;
+    var cats = $("fiche-create-cats");
+    if (cats && !cats.children.length) {
+      var pcoCategories = [
+        { id: "PCO.Secours", label: "Secours", icon: "medical_services", color: "#DC2626" },
+        { id: "PCO.Securite", label: "Securite", icon: "security", color: "#7C3AED" },
+        { id: "PCO.Technique", label: "Technique", icon: "build", color: "#FF8C00" },
+        { id: "PCO.Flux", label: "Flux", icon: "directions_car", color: "#2563EB" },
+      ];
+      pcoCategories.forEach(function (c) {
+        var btn = document.createElement("button");
+        btn.className = "fiche-cat-btn";
+        btn.dataset.cat = c.id;
+        btn.innerHTML = "<span class='material-symbols-outlined' style='color:" + c.color + "'>"
+          + c.icon + "</span>" + c.label;
+        btn.addEventListener("click", function () {
+          state.ficheCreateCat = c.id;
+          cats.querySelectorAll(".fiche-cat-btn").forEach(function (b) {
+            b.classList.toggle("selected", b.dataset.cat === c.id);
+          });
+        });
+        cats.appendChild(btn);
+      });
+    }
+    // Wire urgency buttons
+    var urgBtns = $("fiche-create-urgency");
+    if (urgBtns) {
+      urgBtns.querySelectorAll(".urgency-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          state.ficheCreateUrgency = btn.dataset.val;
+          urgBtns.querySelectorAll(".urgency-btn").forEach(function (b) {
+            b.classList.toggle("selected", b.dataset.val === state.ficheCreateUrgency);
+          });
+        });
+      });
+    }
+    // Reset form
+    state.ficheCreateCat = null;
+    if (cats) cats.querySelectorAll(".fiche-cat-btn").forEach(function (b) { b.classList.remove("selected"); });
+    var txt = $("fiche-create-text");
+    if (txt) txt.value = "";
+    var msg = $("fiche-create-msg");
+    if (msg) { msg.textContent = ""; msg.className = "fiche-create-msg"; }
+    modal.hidden = false;
+  }
+
+  function submitCreateFiche() {
+    if (!state.ficheCreateCat) {
+      var msg = $("fiche-create-msg");
+      if (msg) { msg.textContent = "Choisis une categorie."; msg.className = "fiche-create-msg error"; }
+      return;
+    }
+    var txt = ($("fiche-create-text") || {}).value || "";
+    txt = txt.trim();
+    if (!txt) {
+      var msg2 = $("fiche-create-msg");
+      if (msg2) { msg2.textContent = "Saisis une description."; msg2.className = "fiche-create-msg error"; }
+      return;
+    }
+
+    var btn = $("fiche-create-submit");
+    if (btn) btn.disabled = true;
+
+    var payload = {
+      category: state.ficheCreateCat,
+      text: txt,
+      niveau_urgence: state.ficheCreateUrgency || "UR",
+    };
+    // Ajouter GPS si dispo
+    if (state.meMarker) {
+      var ll = state.meMarker.getLatLng();
+      payload.lat = ll.lat;
+      payload.lng = ll.lng;
+    }
+    // Carroyage si grille active et position connue
+    if (state.gridOn && state.meMarker && state.gridMeta) {
+      var gridLabel = $("grid-crosshair-label");
+      if (gridLabel) payload.carroye = gridLabel.textContent;
+    }
+
+    fetch("/field/create-fiche", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then(function (r) {
+        if (r.status === 401) { return handleSessionLost(); }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        if (btn) btn.disabled = false;
+        if (data.ok) {
+          $("fiche-create-modal").hidden = true;
+          state.patrolStatus = "intervention";
+          state.activeFicheId = data.id;
+          updateStatusBar();
+          toast("Fiche creee - Intervention demarree", "ok");
+          pollFiches(); // Rafraichir les fiches immediatement
+        } else {
+          var msg3 = $("fiche-create-msg");
+          if (msg3) { msg3.textContent = "Erreur : " + (data.error || "?"); msg3.className = "fiche-create-msg error"; }
+        }
+      })
+      .catch(function () {
+        if (btn) btn.disabled = false;
+        var msg4 = $("fiche-create-msg");
+        if (msg4) { msg4.textContent = "Erreur reseau."; msg4.className = "fiche-create-msg error"; }
+      });
+  }
+
+  // ---------------------------------------------------------------------
   // Itineraires
   // ---------------------------------------------------------------------
   function setRouteDestination(latlng) {
@@ -1466,6 +1658,12 @@
         state.fiches = open;
         renderFiches();
         detectNewFiches(open);
+        // Sync statut depuis le serveur (auto-proximite peut l'avoir change)
+        if (data.device_status && data.device_status !== state.patrolStatus) {
+          state.patrolStatus = data.device_status;
+          state.activeFicheId = data.active_fiche_id || null;
+          updateStatusBar();
+        }
       })
       .catch(function () { /* silent */ });
   }
@@ -1576,7 +1774,47 @@
 
     ack.textContent = "Ajouter un commentaire";
     ack.onclick = function () { openFicheCommentDialog(f); };
+
+    // Bouton cloturer pour les fiches creees par la tablette
+    var cc = f.content_category || {};
+    var closable = !!(cc.field_created || cc.field_sos);
+    var closeBtn = $("msg-modal-close-fiche");
+    if (!closeBtn) {
+      closeBtn = document.createElement("button");
+      closeBtn.id = "msg-modal-close-fiche";
+      closeBtn.className = "btn-danger";
+      closeBtn.innerHTML = "<span class='material-symbols-outlined' style='vertical-align:middle'>check_circle</span> Cloturer";
+      ack.parentNode.insertBefore(closeBtn, ack);
+    }
+    if (closable) {
+      closeBtn.hidden = false;
+      closeBtn.onclick = function () { closeFicheFromField(f); };
+    } else {
+      closeBtn.hidden = true;
+    }
+
     modal.hidden = false;
+  }
+
+  function closeFicheFromField(f) {
+    fetch("/field/my-fiches/" + encodeURIComponent(f.id) + "/close", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data && data.ok) {
+          toast("Fiche cloturee", "ok");
+          $("msg-modal").hidden = true;
+          state.patrolStatus = "patrouille";
+          state.activeFicheId = null;
+          updateStatusBar();
+          pollFiches();
+        } else {
+          toast("Erreur : " + ((data && data.error) || "?"), "err");
+        }
+      })
+      .catch(function () { toast("Erreur reseau", "err"); });
   }
 
   function openFicheCommentDialog(f) {
@@ -1800,6 +2038,18 @@
     $("inbox-close").addEventListener("click", function () { $("inbox-panel").hidden = true; });
     $("btn-sos").addEventListener("click", triggerSos);
     $("msg-modal-close").addEventListener("click", function () { $("msg-modal").hidden = true; });
+
+    // Statut patrouille
+    var statusBtn = $("status-btn");
+    if (statusBtn) statusBtn.addEventListener("click", openStatusModal);
+    var statusClose = $("status-modal-close");
+    if (statusClose) statusClose.addEventListener("click", function () { $("status-modal").hidden = true; });
+    wireStatusOptions();
+    // Fiche creation
+    var ficheClose = $("fiche-create-close");
+    if (ficheClose) ficheClose.addEventListener("click", function () { $("fiche-create-modal").hidden = true; });
+    var ficheSubmit = $("fiche-create-submit");
+    if (ficheSubmit) ficheSubmit.addEventListener("click", submitCreateFiche);
 
     // Panneau Calques (close + checkboxes)
     var lyClose = $("layers-close");
@@ -2188,6 +2438,11 @@
     startGeolocation();
     startInboxPoll();
     startFichesPoll();
+    // Init statut depuis les donnees serveur ou defaut
+    var dev = window.FIELD_DEVICE || {};
+    state.patrolStatus = dev.status || "patrouille";
+    state.activeFicheId = dev.active_fiche_id || null;
+    updateStatusBar();
     // Ressources carte : 3P et carroyage sont desactives par defaut.
     // Categories POI chargees pour le panneau Calques.
     loadPoiCategories();

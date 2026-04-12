@@ -227,6 +227,9 @@ def _pub_device(device):
         "created_at": _iso(device.get("createdAt")),
         "last_seen": _iso(device.get("last_seen")),
         "revoked": bool(device.get("revoked")),
+        "status": device.get("status") or "patrouille",
+        "status_since": _iso(device.get("status_since")),
+        "active_fiche_id": device.get("active_fiche_id"),
     }
 
 
@@ -518,7 +521,311 @@ def field_position():
             "last_seen": _now(),
         }},
     )
+    # -- Auto-detection de proximite : si la tablette a une fiche assignee
+    #    avec GPS et qu'on est a <10m, passer le statut a "sur_place"
+    try:
+        device_fresh = db["field_devices"].find_one({"_id": request.device["_id"]})
+        cur_status = (device_fresh or {}).get("status") or "patrouille"
+        fiche_id = (device_fresh or {}).get("active_fiche_id")
+        if fiche_id and cur_status in ("intervention", "patrouille"):
+            fiche = db["pcorg"].find_one({"_id": fiche_id}, {"gps": 1, "status_code": 1})
+            if fiche and fiche.get("status_code") != 10:
+                fiche_gps = fiche.get("gps") or {}
+                fcoords = fiche_gps.get("coordinates") or []
+                if len(fcoords) >= 2:
+                    from math import radians, sin, cos, asin, sqrt
+                    def _hav(a_lat, a_lng, b_lat, b_lng):
+                        R = 6371000
+                        dl = radians(b_lat - a_lat)
+                        do = radians(b_lng - a_lng)
+                        s = sin(dl / 2) ** 2 + cos(radians(a_lat)) * cos(radians(b_lat)) * sin(do / 2) ** 2
+                        return 2 * R * asin(min(1, sqrt(s)))
+                    dist = _hav(lat, lng, fcoords[1], fcoords[0])
+                    if dist <= 10:
+                        db["field_devices"].update_one(
+                            {"_id": request.device["_id"], "status": {"$in": ["intervention", "patrouille"]}},
+                            {
+                                "$set": {"status": "sur_place", "status_since": _now()},
+                                "$push": {"status_history": {
+                                    "status": "sur_place", "ts": _now(),
+                                    "trigger": "auto_proximity",
+                                    "fiche_id": fiche_id,
+                                }},
+                            },
+                        )
+    except Exception:
+        pass  # non-bloquant
+
     return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Statut de la patrouille
+# ---------------------------------------------------------------------------
+
+VALID_STATUSES = {"patrouille", "intervention", "sur_place", "pause"}
+
+
+@field_bp.route("/field/status", methods=["GET"])
+@field_token_required
+def field_status_get():
+    """Retourne le statut courant de la tablette."""
+    db = _get_mongo_db()
+    device = db["field_devices"].find_one({"_id": request.device["_id"]})
+    return jsonify({
+        "ok": True,
+        "status": (device or {}).get("status") or "patrouille",
+        "status_since": _iso((device or {}).get("status_since")),
+        "active_fiche_id": (device or {}).get("active_fiche_id"),
+    })
+
+
+@field_bp.route("/field/status", methods=["POST"])
+@field_token_required
+def field_status_set():
+    """Met a jour le statut de la tablette.
+    Statuts : patrouille | intervention | sur_place | pause
+    Si statut == 'patrouille' et qu'il y avait une active_fiche_id auto-creee,
+    on peut optionnellement la cloturer via close_active_fiche=true."""
+    data = request.get_json(silent=True) or {}
+    new_status = (data.get("status") or "").strip().lower()
+    if new_status not in VALID_STATUSES:
+        return jsonify({"ok": False, "error": "invalid_status"}), 400
+
+    device = request.device
+    db = _get_mongo_db()
+    now = _now()
+
+    update = {
+        "$set": {
+            "status": new_status,
+            "status_since": now,
+        },
+        "$push": {
+            "status_history": {
+                "status": new_status,
+                "ts": now,
+                "trigger": "manual",
+            },
+        },
+    }
+
+    # Si retour a patrouille, on desassocie la fiche active
+    if new_status == "patrouille":
+        update["$set"]["active_fiche_id"] = None
+
+    db["field_devices"].update_one({"_id": device["_id"]}, update)
+    return jsonify({"ok": True, "status": new_status})
+
+
+@field_bp.route("/field/create-fiche", methods=["POST"])
+@field_token_required
+def field_create_fiche():
+    """Cree une fiche d'intervention PCO depuis la tablette.
+    La tablette passe automatiquement en statut 'intervention'.
+    Champs : category (obligatoire), text (obligatoire), niveau_urgence (optionnel)."""
+    import uuid as _uuid
+
+    data = request.get_json(silent=True) or {}
+    category = (data.get("category") or "").strip()
+    text = (data.get("text") or "").strip()
+    niveau_urgence = (data.get("niveau_urgence") or "").strip() or None
+
+    if not category or not category.startswith("PCO."):
+        return jsonify({"ok": False, "error": "invalid_category"}), 400
+    if not text:
+        return jsonify({"ok": False, "error": "empty_text"}), 400
+    if niveau_urgence and niveau_urgence not in {"EU", "UA", "UR", "IMP"}:
+        return jsonify({"ok": False, "error": "invalid_urgency"}), 400
+
+    device = request.device
+    name = device.get("name") or "?"
+    event = device.get("event")
+    year = device.get("year")
+
+    db = _get_mongo_db()
+    now = _now()
+    now_local = _now_local()
+    ts_str = now_local.isoformat()
+
+    # GPS courant
+    lat = data.get("lat")
+    lng = data.get("lng")
+    gps = None
+    if lat is not None and lng is not None:
+        try:
+            gps = {"type": "Point", "coordinates": [float(lng), float(lat)]}
+        except (ValueError, TypeError):
+            pass
+
+    # Carroyage optionnel
+    carroye = (data.get("carroye") or "").strip()
+
+    try:
+        year_int = int(year) if year is not None else None
+    except (TypeError, ValueError):
+        year_int = year
+
+    seed = "{}|{}|{}|{}|{}|field:{}".format(
+        event or "", year or "", ts_str, category, text, str(device.get("_id"))
+    )
+    fiche_id = str(_uuid.uuid5(_uuid.NAMESPACE_URL, seed))
+
+    content_category = {"patrouille": name, "field_created": True}
+    if carroye:
+        content_category["carroye"] = carroye
+
+    fiche_doc = {
+        "_id": fiche_id,
+        "event": event,
+        "year": year_int,
+        "ts": now,
+        "timestamp_iso": ts_str,
+        "close_ts": None,
+        "close_iso": None,
+        "category": category,
+        "source": category,
+        "text": text,
+        "text_full": text,
+        "comment": "",
+        "comment_history": [],
+        "operator": "Tablette " + name,
+        "operator_id_create": "field:" + str(device.get("_id")),
+        "operator_close": None,
+        "operator_id_close": None,
+        "status_code": 0,
+        "severity": 0,
+        "niveau_urgence": niveau_urgence,
+        "is_incident": False,
+        "area": None,
+        "gps": gps,
+        "group": None,
+        "content_category": content_category,
+        "extracted": {"phones": None, "plates": None},
+        "tags": ["field-created"],
+        "synced_at": None,
+        "sql_id": None,
+        "guid": None,
+        "server": "COCKPIT",
+        "bounce_rev": 1,
+    }
+
+    db["pcorg"].insert_one(fiche_doc)
+
+    # Passer la tablette en statut 'intervention' et lier la fiche
+    db["field_devices"].update_one(
+        {"_id": device["_id"]},
+        {
+            "$set": {
+                "status": "intervention",
+                "status_since": now,
+                "active_fiche_id": fiche_id,
+            },
+            "$push": {
+                "status_history": {
+                    "status": "intervention",
+                    "ts": now,
+                    "trigger": "create_fiche",
+                    "fiche_id": fiche_id,
+                },
+            },
+        },
+    )
+
+    return jsonify({"ok": True, "id": fiche_id})
+
+
+@field_bp.route("/field/my-fiches/<fiche_id>/close", methods=["POST"])
+@field_token_required
+def field_my_fiche_close(fiche_id):
+    """Cloture une fiche creee par la tablette (field_created=true).
+    Les fiches creees par cockpit ne peuvent PAS etre cloturees depuis field."""
+    device = request.device
+    name = device.get("name")
+    if not name:
+        return jsonify({"ok": False, "error": "unnamed_device"}), 400
+
+    db = _get_mongo_db()
+    fiche = db["pcorg"].find_one({"_id": fiche_id})
+    if not fiche:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+
+    cc = fiche.get("content_category") or {}
+    if (cc.get("patrouille") or "") != name:
+        return jsonify({"ok": False, "error": "not_assigned"}), 403
+    if not cc.get("field_created") and not cc.get("field_sos"):
+        return jsonify({"ok": False, "error": "cannot_close_cockpit_fiche"}), 403
+    if fiche.get("status_code") == 10:
+        return jsonify({"ok": False, "error": "already_closed"}), 400
+
+    now = _now()
+    now_local = _now_local()
+    ts_fmt = now_local.strftime("%d/%m/%Y %H:%M:%S")
+    operator = "field:" + name
+
+    comment_line = "{} , {}\n Statut: En cours -> Termine\n".format(ts_fmt, operator)
+    history_entry = {
+        "ts": now.isoformat(),
+        "operator": operator,
+        "text": "Statut: En cours -> Termine",
+    }
+
+    old_comment = fiche.get("comment") or ""
+    new_comment = old_comment + comment_line if old_comment else comment_line
+
+    db["pcorg"].update_one(
+        {"_id": fiche_id},
+        {
+            "$set": {
+                "status_code": 10,
+                "close_ts": now,
+                "close_iso": now_local.isoformat(),
+                "operator_close": operator,
+                "operator_id_close": "field:" + str(device.get("_id")),
+                "comment": new_comment,
+            },
+            "$push": {"comment_history": history_entry},
+            "$inc": {"bounce_rev": 1},
+        },
+    )
+
+    # Retour en patrouille si c'etait la fiche active
+    cur = db["field_devices"].find_one({"_id": device["_id"]})
+    if cur and cur.get("active_fiche_id") == fiche_id:
+        db["field_devices"].update_one(
+            {"_id": device["_id"]},
+            {
+                "$set": {
+                    "status": "patrouille",
+                    "status_since": now,
+                    "active_fiche_id": None,
+                },
+                "$push": {
+                    "status_history": {
+                        "status": "patrouille",
+                        "ts": now,
+                        "trigger": "close_fiche",
+                        "fiche_id": fiche_id,
+                    },
+                },
+            },
+        )
+
+    return jsonify({"ok": True})
+
+
+@field_bp.route("/field/pco-categories", methods=["GET"])
+@field_token_required
+def field_pco_categories():
+    """Liste les categories PCO disponibles pour la creation de fiches terrain."""
+    return jsonify({
+        "categories": [
+            {"id": "PCO.Secours", "label": "Secours", "icon": "medical_services"},
+            {"id": "PCO.Securite", "label": "Securite", "icon": "security"},
+            {"id": "PCO.Technique", "label": "Technique", "icon": "build"},
+            {"id": "PCO.Flux", "label": "Flux", "icon": "directions_car"},
+        ]
+    })
 
 
 @field_bp.route("/field/inbox", methods=["GET"])
@@ -1355,10 +1662,14 @@ def field_my_fiches():
 
     open_list = [pub(f) for f in db["pcorg"].find(open_query).sort("ts", -1).limit(200)]
     closed_list = [pub(f) for f in db["pcorg"].find(closed_query).sort("close_ts", -1).limit(50)]
+    # Relire le device pour avoir le statut frais
+    dev_fresh = db["field_devices"].find_one({"_id": device["_id"]}) or device
     return jsonify({
         "open": open_list,
         "closed": closed_list,
         "device_name": name,
+        "device_status": dev_fresh.get("status") or "patrouille",
+        "active_fiche_id": dev_fresh.get("active_fiche_id"),
         "now": _iso(_now()),
     })
 
