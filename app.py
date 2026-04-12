@@ -2788,27 +2788,6 @@ def get_active_alerts():
         result.append(d)
     return jsonify(result)
 
-
-@app.route('/api/active-alerts/<alert_id>/acknowledge', methods=['POST'])
-@role_required("user")
-def acknowledge_alert(alert_id):
-    """Acquitter une alerte SOS (ou autre). Enregistre qui a acquitte et quand."""
-    try:
-        oid = ObjectId(alert_id)
-    except Exception:
-        return jsonify({"ok": False, "error": "invalid_id"}), 400
-    payload = getattr(request, 'user_payload', {})
-    user_name = (payload.get("prenom", "") + " " + payload.get("nom", "")).strip() or payload.get("email", "?")
-    now = datetime.now(timezone.utc)
-    res = COL_ACTIVE_ALERTS.update_one(
-        {"_id": oid},
-        {"$set": {"status": "acknowledged", "acknowledgedAt": now, "acknowledgedBy": user_name}},
-    )
-    if res.matched_count == 0:
-        return jsonify({"ok": False, "error": "not_found"}), 404
-    return jsonify({"ok": True})
-
-
 ################################################################################
 # Webhook & Merge Config
 ################################################################################

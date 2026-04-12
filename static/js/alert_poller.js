@@ -130,7 +130,7 @@
 
         if (isAlertMuted(type)) return;
 
-        _alertQueue.push({ type: type, triggeredAt: triggeredAt, message: message, onView: onView, actionData: actionData || {}, _mongoId: (actionData && actionData._mongoId) || null });
+        _alertQueue.push({ type: type, triggeredAt: triggeredAt, message: message, onView: onView, actionData: actionData || {} });
 
         // Si pas d'overlay active, afficher la premiere
         if (!_alertOverlay) {
@@ -338,52 +338,29 @@
         var btnRow = document.createElement("div");
         btnRow.className = "critical-alert-btns";
 
-        // Store alert _id for acknowledge
-        var alertMongoId = item._mongoId || null;
-
         if (item.onView) {
-            if (isFieldSos) {
-                // SOS : "Acquitter" + "Ouvrir la fiche"
-                var btnAck = document.createElement("button");
-                btnAck.className = "critical-alert-btn critical-alert-btn-secondary";
-                btnAck.textContent = "Acquitter";
-                btnAck.addEventListener("click", function() {
-                    _stopSosAlarm();
-                    if (alertMongoId) _acknowledgeAlert(alertMongoId);
-                    _dismissCurrent(null);
-                });
-                btnRow.appendChild(btnAck);
+            var btnIgnore = document.createElement("button");
+            btnIgnore.className = "critical-alert-btn critical-alert-btn-secondary";
+            btnIgnore.textContent = "Ignorer";
+            btnIgnore.addEventListener("click", function() {
+                if (isFieldSos) _stopSosAlarm();
+                _dismissCurrent(null);
+            });
+            btnRow.appendChild(btnIgnore);
 
-                var btnView = document.createElement("button");
-                btnView.className = "critical-alert-btn";
-                btnView.textContent = "Ouvrir la fiche";
-                btnView.addEventListener("click", function() {
-                    _stopSosAlarm();
-                    if (alertMongoId) _acknowledgeAlert(alertMongoId);
-                    var cb = item.onView;
-                    _dismissCurrent(cb);
-                });
-                btnRow.appendChild(btnView);
-            } else {
-                var btnIgnore = document.createElement("button");
-                btnIgnore.className = "critical-alert-btn critical-alert-btn-secondary";
-                btnIgnore.textContent = "Ignorer";
-                btnIgnore.addEventListener("click", function() { _dismissCurrent(null); });
-                btnRow.appendChild(btnIgnore);
-
-                var btnView2 = document.createElement("button");
-                btnView2.className = "critical-alert-btn";
-                var viewLabel = "Voir sur la carte";
-                if (type === "anpr-watchlist") viewLabel = "Voir sur LAPI";
-                else if (type === "checkpoint-reassign") viewLabel = "Voir Controle acces";
-                else if (isPco) viewLabel = "Ouvrir la fiche";
-                btnView2.textContent = viewLabel;
-                btnView2.addEventListener("click", function() {
-                    var cb = item.onView;
-                    _dismissCurrent(cb);
-                });
-                btnRow.appendChild(btnView2);
-            }
+            var btnView = document.createElement("button");
+            btnView.className = "critical-alert-btn";
+            var viewLabel = "Voir sur la carte";
+            if (type === "anpr-watchlist") viewLabel = "Voir sur LAPI";
+            else if (type === "checkpoint-reassign") viewLabel = "Voir Controle acces";
+            else if (isPco || isFieldSos) viewLabel = "Ouvrir la fiche";
+            btnView.textContent = viewLabel;
+            btnView.addEventListener("click", function() {
+                if (isFieldSos) _stopSosAlarm();
+                var cb = item.onView;
+                _dismissCurrent(cb);
+            });
+            btnRow.appendChild(btnView);
         } else {
             var btn = document.createElement("button");
             btn.className = "critical-alert-btn";
@@ -404,15 +381,6 @@
 
         var focusBtn = overlay.querySelector(".critical-alert-btn:last-child");
         if (focusBtn) setTimeout(function() { focusBtn.focus(); }, 100);
-    }
-
-    function _acknowledgeAlert(alertId) {
-        fetch("/api/active-alerts/" + encodeURIComponent(alertId) + "/acknowledge", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-        }).catch(function(e) {
-            console.warn("[alert_poller] acknowledge failed:", e);
-        });
     }
 
     // Exposer globalement
@@ -532,9 +500,7 @@
                     recentAlerts.forEach(function(a) {
                         var slug = a.definition_slug || "";
                         var onView = _buildOnView(slug, a);
-                        var ad = a.actionData || {};
-                        ad._mongoId = a._id;
-                        enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, ad);
+                        enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, a.actionData);
                     });
                     return;
                 }
@@ -545,9 +511,7 @@
                     _markSeen(a._id);
                     var slug = a.definition_slug || "";
                     var onView = _buildOnView(slug, a);
-                    var ad = a.actionData || {};
-                    ad._mongoId = a._id;
-                    enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, ad);
+                    enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, a.actionData);
                 });
             })
             .catch(function(err) {
