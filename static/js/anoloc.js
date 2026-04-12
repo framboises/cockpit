@@ -28,7 +28,9 @@
   ];
 
   // --- Lock/follow state ---
-  var lockedDeviceId = null;       // deviceId currently locked (only one at a time)
+  var lockedDeviceId = null;       // deviceId currently locked (only one at a time per tab)
+  var watcherId = "w-" + Math.random().toString(36).slice(2, 10) + "-" + Date.now();
+  var lockKeepAliveTimer = null;
 
   // --- DOM helpers ---
   function el(tag, attrs, children) {
@@ -63,6 +65,24 @@
     buildPanel();
     refresh();
     refreshTimer = setInterval(refresh, REFRESH_MS);
+
+    // Unlock device when tab closes (best-effort via sendBeacon)
+    window.addEventListener("beforeunload", function () {
+      if (lockedDeviceId) {
+        var mongoId = tabletMongoId(lockedDeviceId);
+        if (mongoId) {
+          var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+          var csrf = csrfMeta ? csrfMeta.content : "";
+          var payload = JSON.stringify({ mode: "normal", watcher_id: watcherId });
+          try {
+            navigator.sendBeacon(
+              "/field/admin/device/" + encodeURIComponent(mongoId) + "/tracking",
+              new Blob([payload], { type: "application/json" })
+            );
+          } catch (e) { /* fallback: TTL will expire in 90s */ }
+        }
+      }
+    });
 
     // Observer le switch vers la carte pour injecter les markers
     var mapMain = document.getElementById("map-main");
@@ -494,11 +514,13 @@
     }
     lockedDeviceId = deviceId;
 
-    // If it's a tablet, tell it to switch to high_freq
+    // If it's a tablet, tell it to switch to high_freq + start keep-alive
     if (isTablet) {
-      var rawId = String(deviceId);
-      var mongoId = rawId.indexOf("field:") === 0 ? rawId.slice(6) : rawId;
-      setTabletTrackingMode(mongoId, "high_freq");
+      var mongoId = tabletMongoId(deviceId);
+      if (mongoId) {
+        setTabletTrackingMode(mongoId, "high_freq");
+        startLockKeepAlive(mongoId);
+      }
     }
 
     // Immediately pan to the device
@@ -514,15 +536,20 @@
 
   function unlockDevice(deviceId) {
     if (!deviceId) return;
+    stopLockKeepAlive();
     // If it was a tablet, revert to normal
-    var rawId = String(deviceId);
-    if (rawId.indexOf("field:") === 0) {
-      var mongoId = rawId.slice(6);
+    var mongoId = tabletMongoId(deviceId);
+    if (mongoId) {
       setTabletTrackingMode(mongoId, "normal");
     }
     if (lockedDeviceId === deviceId) {
       lockedDeviceId = null;
     }
+  }
+
+  function tabletMongoId(deviceId) {
+    var raw = String(deviceId);
+    return raw.indexOf("field:") === 0 ? raw.slice(6) : null;
   }
 
   function setTabletTrackingMode(mongoId, mode) {
@@ -534,8 +561,23 @@
         "Content-Type": "application/json",
         "X-CSRFToken": csrf,
       },
-      body: JSON.stringify({ mode: mode }),
+      body: JSON.stringify({ mode: mode, watcher_id: watcherId }),
     }).catch(function () { /* silent */ });
+  }
+
+  function startLockKeepAlive(mongoId) {
+    stopLockKeepAlive();
+    // Ping every 60s to keep the TTL alive (server TTL = 90s)
+    lockKeepAliveTimer = setInterval(function () {
+      setTabletTrackingMode(mongoId, "high_freq");
+    }, 60000);
+  }
+
+  function stopLockKeepAlive() {
+    if (lockKeepAliveTimer) {
+      clearInterval(lockKeepAliveTimer);
+      lockKeepAliveTimer = null;
+    }
   }
 
   function followLockedDevice() {

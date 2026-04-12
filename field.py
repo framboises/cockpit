@@ -1246,23 +1246,49 @@ def field_admin_device_delete(device_id):
 @admin_required
 def field_admin_device_tracking(device_id):
     """Active/desactive le mode tracking haute frequence sur une tablette.
-    Body : {"mode": "high_freq"} ou {"mode": "normal"}."""
+    Body : {"mode": "high_freq"} ou {"mode": "normal"}.
+    Chaque operateur cockpit qui suit un device peut agir independamment.
+    On stocke un set de watcher_id + un TTL pour auto-expiration si
+    l'operateur ferme son navigateur sans deverrouiller."""
     try:
         oid = ObjectId(device_id)
     except Exception:
         return jsonify({"ok": False, "error": "invalid_id"}), 400
     data = request.get_json(silent=True) or {}
     mode = data.get("mode", "normal")
+    watcher_id = data.get("watcher_id", "")
     if mode not in ("normal", "high_freq"):
         return jsonify({"ok": False, "error": "invalid_mode"}), 400
+    if not watcher_id:
+        return jsonify({"ok": False, "error": "missing_watcher_id"}), 400
+
     db = _get_mongo_db()
-    res = db["field_devices"].update_one(
-        {"_id": oid},
-        {"$set": {"tracking_mode": mode}},
-    )
-    if res.matched_count == 0:
+    dev = db["field_devices"].find_one({"_id": oid})
+    if not dev:
         return jsonify({"ok": False, "error": "not_found"}), 404
-    return jsonify({"ok": True, "mode": mode})
+
+    # Watchers = dict {watcher_id: expiry_iso}
+    watchers = dev.get("tracking_watchers") or {}
+    if not isinstance(watchers, dict):
+        watchers = {}
+    now = _now()
+    # Purge expired watchers (TTL 90s)
+    watchers = {k: v for k, v in watchers.items()
+                if isinstance(v, str) and v > now.isoformat()}
+
+    if mode == "high_freq":
+        # Set expiry 90s from now — cockpit must ping to keep alive
+        expiry = (now + timedelta(seconds=90)).isoformat()
+        watchers[watcher_id] = expiry
+    else:
+        watchers.pop(watcher_id, None)
+
+    effective_mode = "high_freq" if len(watchers) > 0 else "normal"
+    db["field_devices"].update_one(
+        {"_id": oid},
+        {"$set": {"tracking_mode": effective_mode, "tracking_watchers": watchers}},
+    )
+    return jsonify({"ok": True, "mode": effective_mode, "watchers": len(watchers)})
 
 
 # ---------------------------------------------------------------------------
@@ -1711,13 +1737,32 @@ def field_my_fiches():
     closed_list = [pub(f) for f in db["pcorg"].find(closed_query).sort("close_ts", -1).limit(50)]
     # Relire le device pour avoir le statut frais
     dev_fresh = db["field_devices"].find_one({"_id": device["_id"]}) or device
+
+    # Determiner le tracking_mode effectif (purge watchers expires)
+    tracking_mode = "normal"
+    watchers = dev_fresh.get("tracking_watchers")
+    if isinstance(watchers, dict) and watchers:
+        now_iso = _now().isoformat()
+        active = {k: v for k, v in watchers.items()
+                  if isinstance(v, str) and v > now_iso}
+        if active:
+            tracking_mode = "high_freq"
+        elif dev_fresh.get("tracking_mode") == "high_freq":
+            # Tous les watchers ont expire, remettre a normal
+            db["field_devices"].update_one(
+                {"_id": device["_id"]},
+                {"$set": {"tracking_mode": "normal", "tracking_watchers": {}}},
+            )
+    else:
+        tracking_mode = dev_fresh.get("tracking_mode") or "normal"
+
     return jsonify({
         "open": open_list,
         "closed": closed_list,
         "device_name": name,
         "device_status": dev_fresh.get("status") or "patrouille",
         "active_fiche_id": dev_fresh.get("active_fiche_id"),
-        "tracking_mode": dev_fresh.get("tracking_mode") or "normal",
+        "tracking_mode": tracking_mode,
         "now": _iso(_now()),
     })
 
