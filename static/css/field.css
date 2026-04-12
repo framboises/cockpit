@@ -144,6 +144,68 @@ body {
 /* =====================================================================
    STATUS BAR (barre de statut patrouille, au-dessus de la bottom bar)
    ===================================================================== */
+/* =====================================================================
+   BANDEAU ENGAGEMENT INTERVENTION
+   ===================================================================== */
+.field-engage-banner {
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  border-top: 2px solid #f59e0b;
+  border-bottom: 1px solid #334155;
+  padding: 0;
+  z-index: 500;
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  animation: engage-pulse 2s ease-in-out infinite;
+}
+.field-engage-banner[hidden] { display: none !important; }
+@keyframes engage-pulse {
+  0%, 100% { background: linear-gradient(135deg, #1e293b, #0f172a); }
+  50%      { background: linear-gradient(135deg, #1e293b, #1a1a2e); }
+}
+.engage-banner-left {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  border-left: 4px solid #f59e0b;
+  cursor: pointer;
+}
+.engage-banner-left:active { background: #1e293b44; }
+.engage-banner-icon {
+  font-size: 22px; color: #fff;
+  background: #f59e0b;
+  border-radius: 8px;
+  padding: 5px;
+  flex-shrink: 0;
+}
+.engage-banner-info {
+  display: flex; flex-direction: column; gap: 1px;
+  min-width: 0;
+}
+.engage-banner-cat {
+  font-size: 12px; font-weight: 800;
+  color: #f1f5f9;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.engage-banner-desc {
+  font-size: 12px; color: #94a3b8;
+  overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.engage-banner-goto {
+  display: flex; align-items: center; justify-content: center;
+  width: 56px; flex-shrink: 0;
+  background: transparent;
+  border: none;
+  border-left: 1px solid #334155;
+  color: #60a5fa;
+  font-size: 24px;
+  cursor: pointer;
+}
+.engage-banner-goto:active { background: #1e293b; }
+.engage-banner-goto .material-symbols-outlined { font-size: 26px; }
+
 .field-status-bar {
   background: #0f172a;
   border-top: 2px solid #22c55e;

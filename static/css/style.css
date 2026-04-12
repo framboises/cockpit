@@ -7668,14 +7668,16 @@ th span { font-size: 0.88rem; font-weight: 700; }
 }
 .veh-tip-name {
   display: block; font-weight: 700; font-size: 11px;
+  margin-bottom: 2px;
 }
 .veh-tip-status {
-  display: flex; align-items: center; gap: 4px;
-  font-size: 10px; font-weight: 600;
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 700;
 }
 .veh-tip-dot {
-  display: inline-block; width: 7px; height: 7px;
+  display: inline-block; width: 9px; height: 9px;
   border-radius: 50%;
+  box-shadow: 0 0 4px currentColor;
 }
 .pcorg-popup-fields { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
 .pcorg-popup-field {

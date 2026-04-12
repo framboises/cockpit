@@ -73,9 +73,9 @@
 
   // ── Device status resolution (anoloc cross-reference) ────────────────────
   var DEVICE_STATUS_META = {
-    patrouille:   { label: "Patrouille",   color: "#22c55e" },
+    patrouille:   { label: "Disponible",   color: "#22c55e" },
     intervention: { label: "Intervention", color: "#f59e0b" },
-    sur_place:    { label: "Sur place",    color: "#3b82f6" },
+    sur_place:    { label: "ASL",          color: "#3b82f6" },
     pause:        { label: "Pause",        color: "#94a3b8" },
     running:      { label: "En mouvement", color: "#22c55e" },
     stopped:      { label: "A l'arret",    color: "#f59e0b" },

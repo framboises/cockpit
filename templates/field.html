@@ -135,6 +135,20 @@
     </aside>
   </main>
 
+  <!-- BANDEAU ENGAGEMENT INTERVENTION -->
+  <div class="field-engage-banner" id="engage-banner" hidden>
+    <div class="engage-banner-left" id="engage-banner-left">
+      <span class="material-symbols-outlined engage-banner-icon" id="engage-banner-icon">warning</span>
+      <div class="engage-banner-info">
+        <span class="engage-banner-cat" id="engage-banner-cat">-</span>
+        <span class="engage-banner-desc" id="engage-banner-desc">-</span>
+      </div>
+    </div>
+    <button class="engage-banner-goto" id="engage-banner-goto" title="Voir sur la carte">
+      <span class="material-symbols-outlined">near_me</span>
+    </button>
+  </div>
+
   <!-- BARRE DE STATUT PATROUILLE -->
   <div class="field-status-bar" id="status-bar">
     <button class="status-current" id="status-btn" title="Changer le statut">
@@ -181,7 +195,7 @@
       <div class="status-options" id="status-options">
         <button class="status-option" data-status="patrouille">
           <span class="status-dot s-patrouille"></span>
-          <span class="status-opt-label">Patrouille</span>
+          <span class="status-opt-label">Disponible</span>
           <span class="status-opt-desc">En ronde, disponible</span>
         </button>
         <button class="status-option" data-status="intervention">
@@ -191,8 +205,8 @@
         </button>
         <button class="status-option" data-status="sur_place">
           <span class="status-dot s-sur_place"></span>
-          <span class="status-opt-label">Arrivee sur les lieux</span>
-          <span class="status-opt-desc">Sur place</span>
+          <span class="status-opt-label">ASL - Arrivee sur les lieux</span>
+          <span class="status-opt-desc">Sur place, en attente</span>
         </button>
         <button class="status-option" data-status="pause">
           <span class="status-dot s-pause"></span>

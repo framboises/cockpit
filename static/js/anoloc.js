@@ -274,9 +274,9 @@
         var patrolBadge = null;
         if (dev.kind === "tablet" && dev.patrol_status) {
           var pMeta = {
-            patrouille: { label: "Patrouille", color: "#22c55e" },
+            patrouille: { label: "Disponible", color: "#22c55e" },
             intervention: { label: "Intervention", color: "#f59e0b" },
-            sur_place: { label: "Sur place", color: "#3b82f6" },
+            sur_place: { label: "ASL", color: "#3b82f6" },
             pause: { label: "Pause", color: "#94a3b8" },
           };
           var pm = pMeta[dev.patrol_status] || pMeta.patrouille;
@@ -730,9 +730,9 @@
     // Patrol status (tablets only)
     if (dev.kind === "tablet" && dev.patrol_status) {
       var psMeta = {
-        patrouille: { label: "Patrouille", color: "#22c55e" },
+        patrouille: { label: "Disponible", color: "#22c55e" },
         intervention: { label: "Intervention", color: "#f59e0b" },
-        sur_place: { label: "Sur place", color: "#3b82f6" },
+        sur_place: { label: "ASL", color: "#3b82f6" },
         pause: { label: "Pause", color: "#94a3b8" },
       };
       var psm = psMeta[dev.patrol_status] || psMeta.patrouille;

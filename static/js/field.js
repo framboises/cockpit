@@ -1582,9 +1582,9 @@
   // Statut patrouille
   // ---------------------------------------------------------------------
   var STATUS_META = {
-    patrouille:   { label: "Patrouille",            color: "#22c55e", icon: "directions_walk" },
+    patrouille:   { label: "Disponible",             color: "#22c55e", icon: "directions_walk" },
     intervention: { label: "Intervention",           color: "#f59e0b", icon: "warning" },
-    sur_place:    { label: "Arrivee sur les lieux",  color: "#3b82f6", icon: "location_on" },
+    sur_place:    { label: "ASL",                    color: "#3b82f6", icon: "location_on" },
     pause:        { label: "Pause",                  color: "#94a3b8", icon: "pause_circle" },
   };
 
@@ -1596,6 +1596,73 @@
     if (dot) dot.style.background = meta.color;
     if (text) text.textContent = meta.label;
     if (bar) bar.style.borderColor = meta.color;
+    updateEngageBanner();
+  }
+
+  function updateEngageBanner() {
+    var banner = $("engage-banner");
+    if (!banner) return;
+
+    // Trouver la fiche active
+    var activeFiche = null;
+    if (state.activeFicheId && state.fiches) {
+      for (var i = 0; i < state.fiches.length; i++) {
+        if (state.fiches[i].id === state.activeFicheId) {
+          activeFiche = state.fiches[i];
+          break;
+        }
+      }
+    }
+
+    // Masquer si pas en intervention ou pas de fiche active
+    if (!activeFiche || state.patrolStatus === "patrouille") {
+      banner.hidden = true;
+      return;
+    }
+
+    var st = ficheStyle(activeFiche.category);
+    var catLabel = (activeFiche.category || "").replace("PCO.", "");
+    var desc = activeFiche.text || "";
+    var urgency = activeFiche.niveau_urgence;
+    var urgColor = FICHE_URGENCY_COLORS[urgency] || "";
+
+    // Icone et couleur categorie
+    var iconEl = $("engage-banner-icon");
+    if (iconEl) {
+      iconEl.textContent = st.icon;
+      iconEl.style.background = st.color;
+    }
+
+    // Categorie + urgence
+    var catEl = $("engage-banner-cat");
+    if (catEl) {
+      catEl.textContent = catLabel + (urgency ? " \u2014 " + urgency : "");
+      if (urgColor) catEl.style.color = urgColor;
+      else catEl.style.color = "";
+    }
+
+    // Description
+    var descEl = $("engage-banner-desc");
+    if (descEl) descEl.textContent = desc || "Intervention en cours";
+
+    // Couleur du bandeau
+    banner.style.borderColor = st.color;
+    var left = $("engage-banner-left");
+    if (left) left.style.borderLeftColor = st.color;
+
+    banner.hidden = false;
+  }
+
+  function flyToActiveFiche() {
+    if (!state.activeFicheId || !state.fiches) return;
+    for (var i = 0; i < state.fiches.length; i++) {
+      var f = state.fiches[i];
+      if (f.id === state.activeFicheId && f.lat != null && f.lng != null) {
+        state.map.setView([f.lat, f.lng], Math.max(state.map.getZoom(), 17), { animate: true });
+        return;
+      }
+    }
+    toast("Position de l'intervention non disponible", "warn");
   }
 
   function openStatusModal() {
@@ -1868,7 +1935,10 @@
         if (data.device_status && data.device_status !== state.patrolStatus) {
           state.patrolStatus = data.device_status;
           state.activeFicheId = data.active_fiche_id || null;
-          updateStatusBar();
+          updateStatusBar(); // calls updateEngageBanner() internally
+        } else {
+          // Meme statut mais les fiches ont pu changer -> MAJ bandeau
+          updateEngageBanner();
         }
         // Tracking mode : haute frequence quand cockpit suit la tablette
         var tMode = data.tracking_mode || "normal";
@@ -2731,6 +2801,21 @@
     });
     $("inbox-close").addEventListener("click", function () { $("inbox-panel").hidden = true; });
     $("btn-sos").addEventListener("click", triggerSos);
+
+    // Bandeau engagement : fly-to button
+    var engageGoto = $("engage-banner-goto");
+    if (engageGoto) engageGoto.addEventListener("click", flyToActiveFiche);
+    // Click sur le bandeau ouvre la fiche
+    var engageLeft = $("engage-banner-left");
+    if (engageLeft) engageLeft.addEventListener("click", function () {
+      if (!state.activeFicheId || !state.fiches) return;
+      for (var i = 0; i < state.fiches.length; i++) {
+        if (state.fiches[i].id === state.activeFicheId) {
+          showFicheModal(state.fiches[i]);
+          return;
+        }
+      }
+    });
     $("msg-modal-close").addEventListener("click", function () { $("msg-modal").hidden = true; });
 
     // Fiche detail modal close
