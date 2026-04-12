@@ -528,7 +528,7 @@ body {
 
 /* POI search panel (compact, between zoom and loupe) */
 .poi-search-panel {
-  position: absolute; top: 12px; left: 56px; right: 60px;
+  position: absolute; top: 12px; left: 65px; right: 60px;
   z-index: 960;
   background: rgba(15, 23, 42, 0.96);
   border: 1px solid #334155;
