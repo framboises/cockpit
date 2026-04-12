@@ -1923,10 +1923,11 @@ def field_photo_serve(photo_path):
 @field_bp.route("/field/sos", methods=["POST"])
 @field_token_required
 def field_sos():
-    """Declenche une alerte SOS dans cockpit_active_alerts. Le poller cockpit
-    (alert_poller.js) affichera l'alerte en plein ecran sur les postes
-    operateurs. Cree egalement automatiquement une fiche PCO de type Secours
-    en niveau d urgence absolue (UA) pour suivi operationnel."""
+    """Declenche une alerte SOS.
+    - Cree une fiche PCO Secours/UA
+    - Insere une alerte cockpit (cockpit_active_alerts) avec dedup unique par SOS
+    - Broadcast un message SOS a toutes les autres tablettes connectees
+    Pas de note : le SOS doit etre le plus rapide possible (un tap + confirm)."""
     device = request.device
     name = device.get("name") or "?"
     event = device.get("event")
@@ -1942,11 +1943,11 @@ def field_sos():
     except (TypeError, ValueError):
         lng = None
     battery = data.get("battery")
-    note = (data.get("note") or "").strip()
 
     now = _now()
     now_local = _now_local()
-    expires = now + timedelta(minutes=30)
+    # Expiration longue : 24h (l'alerte reste jusqu'a acquittement ou expiry)
+    expires = now + timedelta(hours=24)
 
     db = _get_mongo_db()
 
@@ -1956,13 +1957,12 @@ def field_sos():
         import uuid as _uuid
         ts_str = now_local.isoformat()
         text_lines = ["SOS tablette : " + name]
-        if note:
-            text_lines.append(note)
         if lat is not None and lng is not None:
             text_lines.append("Position : {:.5f}, {:.5f}".format(lat, lng))
         text = " \u2014 ".join(text_lines)
-        seed = "{}|{}|{}|PCO.Secours|{}|{}|field-sos:{}".format(
-            event or "", year or "", ts_str, text, "", str(device.get("_id"))
+        # ID unique par SOS (inclut le timestamp pour ne pas dedup)
+        seed = "field-sos|{}|{}|{}|{}".format(
+            str(device.get("_id")), ts_str, lat or 0, lng or 0
         )
         fiche_id = str(_uuid.uuid5(_uuid.NAMESPACE_URL, seed))
         gps = None
@@ -2014,14 +2014,17 @@ def field_sos():
         logger.warning("[field_sos] auto-fiche failed: %s", exc)
         fiche_id = None
 
+    # 2) Dedup unique par SOS (pas par device) pour permettre plusieurs SOS
+    dedup_key = "field-sos-{}-{}".format(str(device.get("_id")), now.strftime("%Y%m%d%H%M%S%f"))
+
     alert = {
         "definition_slug": "field_sos",
         "event": event,
         "year": str(year) if year is not None else None,
         "title": "SOS - " + name,
-        "message": note or "Demande d assistance immediate",
+        "message": "Demande d assistance immediate",
         "timeStr": now.strftime("%H:%M"),
-        "dedup_key": "field-sos-" + str(device.get("_id")),
+        "dedup_key": dedup_key,
         "triggeredAt": now,
         "expiresAt": expires,
         "status": "active",
@@ -2032,18 +2035,13 @@ def field_sos():
             "lat": lat,
             "lng": lng,
             "battery": battery,
-            "note": note,
             "pcorg_id": fiche_id,
         },
     }
 
-    # Upsert par dedup_key pour eviter le spam si la tablette rappuie
-    db["cockpit_active_alerts"].update_one(
-        {"dedup_key": alert["dedup_key"]},
-        {"$set": alert},
-        upsert=True,
-    )
-    # Historiser egalement dans field_messages pour avoir trace cote tablette
+    db["cockpit_active_alerts"].insert_one(alert)
+
+    # 3) Confirmer a la tablette emettrice
     db["field_messages"].insert_one({
         "device_id": device["_id"],
         "device_name": name,
@@ -2051,13 +2049,47 @@ def field_sos():
         "year": str(year) if year is not None else None,
         "type": "alert",
         "title": "SOS envoye",
-        "body": "Le cockpit a ete prevenu." + (" (" + note + ")" if note else ""),
+        "body": "Le cockpit a ete prevenu.",
         "priority": "high",
         "from": "field",
         "createdAt": now,
         "expiresAt": now + timedelta(seconds=INBOX_MESSAGE_TTL_SECONDS),
         "ack_at": None,
     })
+
+    # 4) Broadcast SOS a toutes les autres tablettes du meme event/year
+    other_devices = db["field_devices"].find({
+        "event": event,
+        "year": year,
+        "_id": {"$ne": device["_id"]},
+    }, {"_id": 1, "name": 1})
+    sos_messages = []
+    for other in other_devices:
+        sos_messages.append({
+            "device_id": other["_id"],
+            "device_name": other.get("name") or "?",
+            "event": event,
+            "year": str(year) if year is not None else None,
+            "type": "sos_broadcast",
+            "title": "SOS - " + name,
+            "body": "Demande d assistance immediate",
+            "priority": "critical",
+            "from": "field",
+            "payload": {
+                "source_device_id": str(device.get("_id")),
+                "source_device_name": name,
+                "lat": lat,
+                "lng": lng,
+                "battery": battery,
+                "pcorg_id": fiche_id,
+            },
+            "createdAt": now,
+            "expiresAt": now + timedelta(hours=1),
+            "ack_at": None,
+        })
+    if sos_messages:
+        db["field_messages"].insert_many(sos_messages)
+
     return jsonify({"ok": True, "pcorg_id": fiche_id})
 
 

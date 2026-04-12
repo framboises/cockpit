@@ -1216,3 +1216,137 @@ body {
   font-size: 28px;
 }
 .field-session-lost-actions .btn-primary:active { transform: scale(0.98); }
+
+/* =====================================================================
+   SOS Confirm Dialog (tablette emettrice)
+   ===================================================================== */
+.sos-confirm-overlay {
+  position: fixed; inset: 0;
+  background: rgba(127, 29, 29, 0.92);
+  z-index: 99999;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  animation: sos-pulse-bg 1s ease-in-out infinite alternate;
+}
+@keyframes sos-pulse-bg {
+  from { background: rgba(127, 29, 29, 0.92); }
+  to   { background: rgba(153, 27, 27, 0.96); }
+}
+.sos-confirm-box {
+  background: #1e293b; border: 3px solid #ef4444;
+  border-radius: 20px; padding: 32px 24px;
+  text-align: center; max-width: 380px; width: 100%;
+}
+.sos-confirm-icon {
+  font-size: 72px; color: #ef4444;
+  display: block; margin-bottom: 12px;
+  animation: sos-icon-pulse 0.8s ease-in-out infinite alternate;
+}
+@keyframes sos-icon-pulse {
+  from { transform: scale(1); }
+  to   { transform: scale(1.15); }
+}
+.sos-confirm-msg {
+  font-size: 24px; font-weight: 800; color: #fecaca;
+  margin-bottom: 8px;
+}
+.sos-confirm-sub {
+  font-size: 14px; color: #94a3b8;
+  margin-bottom: 28px; line-height: 1.4;
+}
+.sos-confirm-btn {
+  display: block; width: 100%;
+  padding: 20px; margin-bottom: 12px;
+  font-size: 22px; font-weight: 900;
+  color: #fff; background: #dc2626;
+  border: 3px solid #fca5a5;
+  border-radius: 16px; cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  min-height: 70px;
+  animation: sos-btn-glow 1.2s ease-in-out infinite alternate;
+}
+@keyframes sos-btn-glow {
+  from { box-shadow: 0 0 12px rgba(220, 38, 38, 0.4); }
+  to   { box-shadow: 0 0 30px rgba(220, 38, 38, 0.8); }
+}
+.sos-confirm-btn:active { transform: scale(0.96); background: #b91c1c; }
+.sos-cancel-btn {
+  display: block; width: 100%;
+  padding: 14px;
+  font-size: 16px; font-weight: 600;
+  color: #94a3b8; background: transparent;
+  border: 1px solid #334155;
+  border-radius: 12px; cursor: pointer;
+}
+.sos-cancel-btn:active { background: #1e293b; }
+
+/* =====================================================================
+   SOS Alert received on OTHER tablets
+   ===================================================================== */
+.sos-alert-overlay {
+  position: fixed; inset: 0;
+  background: rgba(127, 29, 29, 0.95);
+  z-index: 99998;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  animation: sos-pulse-bg 1s ease-in-out infinite alternate;
+}
+.sos-alert-box {
+  background: #1e293b; border: 3px solid #ef4444;
+  border-radius: 20px; padding: 28px 24px;
+  text-align: center; max-width: 380px; width: 100%;
+}
+.sos-alert-icon {
+  font-size: 64px; color: #ef4444;
+  display: block; margin-bottom: 8px;
+  animation: sos-icon-pulse 0.8s ease-in-out infinite alternate;
+}
+.sos-alert-title {
+  font-size: 22px; font-weight: 800; color: #fecaca;
+  margin-bottom: 6px;
+}
+.sos-alert-body {
+  font-size: 15px; color: #cbd5e1;
+  margin-bottom: 12px;
+}
+.sos-alert-pos {
+  font-size: 13px; color: #94a3b8;
+  margin-bottom: 16px;
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+}
+.sos-alert-pos .material-symbols-outlined { font-size: 18px; }
+.sos-alert-btn {
+  display: block; width: 100%;
+  padding: 16px;
+  font-size: 18px; font-weight: 700;
+  color: #fff; background: #334155;
+  border: 1px solid #475569;
+  border-radius: 12px; cursor: pointer;
+}
+.sos-alert-btn:active { background: #475569; }
+
+/* =====================================================================
+   SOS map pin on receiving tablets
+   ===================================================================== */
+.sos-map-pin {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: none; border: none;
+}
+.sos-map-pin .material-symbols-outlined {
+  font-size: 36px; color: #ef4444;
+  filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.7));
+  animation: sos-pin-blink 0.7s ease-in-out infinite alternate;
+}
+@keyframes sos-pin-blink {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0.6; transform: scale(1.2); }
+}
+.sos-pin-label {
+  font-size: 11px; font-weight: 800;
+  color: #fff; background: #dc2626;
+  padding: 2px 6px; border-radius: 4px;
+  margin-top: 2px; white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}

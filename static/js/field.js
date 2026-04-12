@@ -2130,48 +2130,188 @@
   // ---------------------------------------------------------------------
   // SOS
   // ---------------------------------------------------------------------
+  // --- SOS markers from other tablets ---
+  var _sosMarkers = {}; // id -> L.marker
+
+  function addSosPin(id, lat, lng, deviceName) {
+    if (!state.map || _sosMarkers[id]) return;
+    var icon = L.divIcon({
+      className: "sos-map-pin",
+      html: "<span class='material-symbols-outlined'>sos</span><span class='sos-pin-label'>" + (deviceName || "SOS") + "</span>",
+      iconSize: [48, 48],
+      iconAnchor: [24, 24],
+    });
+    var m = L.marker([lat, lng], { icon: icon, zIndexOffset: 9999 }).addTo(state.map);
+    _sosMarkers[id] = m;
+  }
+
+  function removeSosPin(id) {
+    if (_sosMarkers[id]) {
+      state.map.removeLayer(_sosMarkers[id]);
+      delete _sosMarkers[id];
+    }
+  }
+
+  function clearSosPins() {
+    Object.keys(_sosMarkers).forEach(removeSosPin);
+  }
+
   function triggerSos() {
     if (state.sosInFlight) return;
-    fieldConfirm("Declencher un SOS ? Le cockpit sera immediatement prevenu avec ta position GPS.", {
-      okLabel: "Declencher",
-      cancelLabel: "Annuler",
-    }).then(function (ok) {
-      if (!ok) return;
-      fieldPrompt("Note courte (optionnelle) :", { okLabel: "Envoyer SOS" }).then(function (rawNote) {
-        if (rawNote == null) return; // utilisateur a annule
-        state.sosInFlight = true;
-        var note = (rawNote || "").trim();
-
-        var lat = null, lng = null;
-        if (state.meMarker) {
-          var ll = state.meMarker.getLatLng();
-          lat = ll.lat;
-          lng = ll.lng;
-        }
-        fetch("/field/sos", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            lat: lat,
-            lng: lng,
-            battery: state.batteryPct || null,
-            note: note,
-          }),
+    // Big single-button SOS confirmation — no note, no text input
+    showSosConfirm(function (confirmed) {
+      if (!confirmed) return;
+      state.sosInFlight = true;
+      var lat = null, lng = null;
+      if (state.meMarker) {
+        var ll = state.meMarker.getLatLng();
+        lat = ll.lat;
+        lng = ll.lng;
+      }
+      fetch("/field/sos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lat: lat,
+          lng: lng,
+          battery: state.batteryPct || null,
+        }),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          state.sosInFlight = false;
+          if (data && data.ok) {
+            toast("SOS envoye au cockpit et a toutes les patrouilles", "warn");
+            // Vibration confirmation
+            try { if (navigator.vibrate) navigator.vibrate([300, 150, 300]); } catch (e) {}
+          } else {
+            toast("Echec SOS", "err");
+          }
         })
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            state.sosInFlight = false;
-            if (data && data.ok) {
-              toast("SOS envoye au cockpit", "warn");
-            } else {
-              toast("Echec SOS", "err");
-            }
-          })
-          .catch(function () {
-            state.sosInFlight = false;
-            toast("Erreur reseau (SOS)", "err");
-          });
-      });
+        .catch(function () {
+          state.sosInFlight = false;
+          toast("Erreur reseau (SOS)", "err");
+        });
+    });
+  }
+
+  function showSosConfirm(callback) {
+    var overlay = document.createElement("div");
+    overlay.className = "sos-confirm-overlay";
+    var box = document.createElement("div");
+    box.className = "sos-confirm-box";
+    var icon = document.createElement("span");
+    icon.className = "material-symbols-outlined sos-confirm-icon";
+    icon.textContent = "sos";
+    var msg = document.createElement("div");
+    msg.className = "sos-confirm-msg";
+    msg.textContent = "Declencher un SOS ?";
+    var sub = document.createElement("div");
+    sub.className = "sos-confirm-sub";
+    sub.textContent = "Le cockpit et toutes les patrouilles seront alertes avec ta position GPS.";
+    var btnConfirm = document.createElement("button");
+    btnConfirm.className = "sos-confirm-btn";
+    btnConfirm.textContent = "CONFIRMER SOS";
+    var btnCancel = document.createElement("button");
+    btnCancel.className = "sos-cancel-btn";
+    btnCancel.textContent = "Annuler";
+    box.appendChild(icon);
+    box.appendChild(msg);
+    box.appendChild(sub);
+    box.appendChild(btnConfirm);
+    box.appendChild(btnCancel);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    function done(result) {
+      try { document.body.removeChild(overlay); } catch (e) {}
+      callback(result);
+    }
+    btnConfirm.addEventListener("click", function () { done(true); });
+    btnCancel.addEventListener("click", function () { done(false); });
+  }
+
+  function handleSosBroadcast(m) {
+    // Show SOS alert from another tablet + pin on map + sound + vibration
+    var payload = m.payload || {};
+    var lat = payload.lat;
+    var lng = payload.lng;
+    var sourceName = payload.source_device_name || "?";
+    // Pin on map
+    if (lat != null && lng != null) {
+      addSosPin(m.id, lat, lng, sourceName);
+      // Center map on SOS location
+      if (state.map) {
+        state.followMe = false;
+        var followBtn = $("btn-follow");
+        if (followBtn) followBtn.classList.remove("active");
+        state.map.setView([lat, lng], Math.max(state.map.getZoom(), 17), { animate: true });
+      }
+    }
+    // Full-screen alert on tablet
+    showSosAlert(m);
+    // Vibrate aggressively
+    try { if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500, 200, 500]); } catch (e) {}
+    // Play alarm sound
+    playSosAlarm();
+  }
+
+  function playSosAlarm() {
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var t = ctx.currentTime;
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.type = "square";
+      osc.frequency.setValueAtTime(880, t);
+      osc.frequency.setValueAtTime(660, t + 0.25);
+      osc.frequency.setValueAtTime(880, t + 0.5);
+      osc.frequency.setValueAtTime(660, t + 0.75);
+      osc.frequency.setValueAtTime(880, t + 1.0);
+      osc.frequency.setValueAtTime(660, t + 1.25);
+      gain.gain.setValueAtTime(0.6, t);
+      gain.gain.linearRampToValueAtTime(0, t + 1.5);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 1.5);
+    } catch (e) { /* ignore audio errors */ }
+  }
+
+  function showSosAlert(m) {
+    var payload = m.payload || {};
+    var sourceName = payload.source_device_name || "?";
+    var overlay = document.createElement("div");
+    overlay.className = "sos-alert-overlay";
+    var box = document.createElement("div");
+    box.className = "sos-alert-box";
+    var icon = document.createElement("span");
+    icon.className = "material-symbols-outlined sos-alert-icon";
+    icon.textContent = "sos";
+    var title = document.createElement("div");
+    title.className = "sos-alert-title";
+    title.textContent = "SOS - " + sourceName;
+    var bodyEl = document.createElement("div");
+    bodyEl.className = "sos-alert-body";
+    bodyEl.textContent = "Demande d assistance immediate";
+    box.appendChild(icon);
+    box.appendChild(title);
+    box.appendChild(bodyEl);
+    if (payload.lat != null && payload.lng != null) {
+      var pos = document.createElement("div");
+      pos.className = "sos-alert-pos";
+      pos.innerHTML = "<span class='material-symbols-outlined'>place</span> " +
+        Number(payload.lat).toFixed(5) + ", " + Number(payload.lng).toFixed(5);
+      box.appendChild(pos);
+    }
+    var btnOk = document.createElement("button");
+    btnOk.className = "sos-alert-btn";
+    btnOk.textContent = "Compris";
+    box.appendChild(btnOk);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    btnOk.addEventListener("click", function () {
+      try { document.body.removeChild(overlay); } catch (e) {}
+      fetch("/field/ack/" + encodeURIComponent(m.id), { method: "POST" }).catch(function () {});
     });
   }
 
@@ -2206,17 +2346,30 @@
       }
     });
     if (newOnes.length === 0) return;
-    // Afficher la premiere priorite haute, sinon un toast
-    var high = newOnes.find(function (m) { return m.priority === "high"; });
-    var first = high || newOnes[0];
+    // SOS broadcasts : handled separately with full-screen alert + sound
+    var sosBroadcasts = [];
+    var normalOnes = [];
     newOnes.forEach(function (m) {
       state.seenIds.add(m.id);
-      // Les itineraires sont dessines sur la carte meme sans ouvrir le modal
-      if (m.type === "route") handleRouteMessage(m);
+      if (m.type === "sos_broadcast") {
+        sosBroadcasts.push(m);
+      } else {
+        normalOnes.push(m);
+        if (m.type === "route") handleRouteMessage(m);
+      }
     });
-    showMessageModal(first);
-    if (newOnes.length > 1) {
-      toast("+" + (newOnes.length - 1) + " autre(s) message(s)");
+    // Handle SOS broadcasts first (with alarm)
+    sosBroadcasts.forEach(function (m) {
+      handleSosBroadcast(m);
+    });
+    // Normal messages
+    if (normalOnes.length > 0) {
+      var high = normalOnes.find(function (m) { return m.priority === "high"; });
+      var first = high || normalOnes[0];
+      showMessageModal(first);
+      if (normalOnes.length > 1) {
+        toast("+" + (normalOnes.length - 1) + " autre(s) message(s)");
+      }
     }
   }
 

@@ -293,6 +293,18 @@ _ALERT_SEEDS = [
         "groups": [],
         "priority": 11,
     },
+    {
+        "slug": "field_sos",
+        "name": "SOS Tablette terrain",
+        "description": "Alerte SOS declenchee par une tablette de patrouille terrain",
+        "icon": "sos",
+        "color": "#dc2626",
+        "detection_type": "field_sos",
+        "params": {},
+        "enabled": True,
+        "groups": [],
+        "priority": 0,
+    },
 ]
 for _seed in _ALERT_SEEDS:
     COL_ALERT_DEFS.update_one(
@@ -2775,6 +2787,27 @@ def get_active_alerts():
                 d[k] = str(v)
         result.append(d)
     return jsonify(result)
+
+
+@app.route('/api/active-alerts/<alert_id>/acknowledge', methods=['POST'])
+@role_required("user")
+def acknowledge_alert(alert_id):
+    """Acquitter une alerte SOS (ou autre). Enregistre qui a acquitte et quand."""
+    try:
+        oid = ObjectId(alert_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    payload = getattr(request, 'user_payload', {})
+    user_name = (payload.get("prenom", "") + " " + payload.get("nom", "")).strip() or payload.get("email", "?")
+    now = datetime.now(timezone.utc)
+    res = COL_ACTIVE_ALERTS.update_one(
+        {"_id": oid},
+        {"$set": {"status": "acknowledged", "acknowledgedAt": now, "acknowledgedBy": user_name}},
+    )
+    if res.matched_count == 0:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    return jsonify({"ok": True})
+
 
 ################################################################################
 # Webhook & Merge Config

@@ -130,7 +130,7 @@
 
         if (isAlertMuted(type)) return;
 
-        _alertQueue.push({ type: type, triggeredAt: triggeredAt, message: message, onView: onView, actionData: actionData || {} });
+        _alertQueue.push({ type: type, triggeredAt: triggeredAt, message: message, onView: onView, actionData: actionData || {}, _mongoId: (actionData && actionData._mongoId) || null });
 
         // Si pas d'overlay active, afficher la premiere
         if (!_alertOverlay) {
@@ -164,6 +164,45 @@
         } else if (badge) {
             badge.style.display = "none";
         }
+    }
+
+    // --- Alarm sound via Web Audio API ---
+    var _sosAlarmTimer = null;
+    function _playSosAlarm() {
+        _stopSosAlarm();
+        var playOnce = function() {
+            try {
+                var ctx = new (window.AudioContext || window.webkitAudioContext)();
+                var t = ctx.currentTime;
+                // Two-tone siren pattern
+                var osc = ctx.createOscillator();
+                var gain = ctx.createGain();
+                osc.type = "square";
+                osc.frequency.setValueAtTime(880, t);
+                osc.frequency.setValueAtTime(660, t + 0.25);
+                osc.frequency.setValueAtTime(880, t + 0.5);
+                osc.frequency.setValueAtTime(660, t + 0.75);
+                osc.frequency.setValueAtTime(880, t + 1.0);
+                osc.frequency.setValueAtTime(660, t + 1.25);
+                gain.gain.setValueAtTime(0.6, t);
+                gain.gain.linearRampToValueAtTime(0, t + 1.5);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(t);
+                osc.stop(t + 1.5);
+            } catch(e) {}
+        };
+        playOnce();
+        // Repeat every 2s for 10s
+        var count = 0;
+        _sosAlarmTimer = setInterval(function() {
+            count++;
+            if (count >= 5) { _stopSosAlarm(); return; }
+            playOnce();
+        }, 2000);
+    }
+    function _stopSosAlarm() {
+        if (_sosAlarmTimer) { clearInterval(_sosAlarmTimer); _sosAlarmTimer = null; }
     }
 
     function _showNextAlert() {
@@ -208,14 +247,16 @@
         var actionData = item.actionData || {};
 
         if (isFieldSos) {
-            // Gros message envoye par la tablette ("ahhhh" en grand)
+            // Play alarm sound for SOS
+            _playSosAlarm();
+
+            // Gros message
             var bigMsg = document.createElement("div");
             bigMsg.className = "critical-alert-sos-big";
-            bigMsg.textContent = (actionData.note && String(actionData.note).trim()) || (item.message || "");
-            if (!bigMsg.textContent.trim()) bigMsg.textContent = "Demande d assistance immediate";
+            bigMsg.textContent = "Demande d assistance immediate";
             body.appendChild(bigMsg);
 
-            // Bloc info : groupe / batterie / heure
+            // Bloc info : position / batterie / heure
             var info = document.createElement("div");
             info.className = "critical-alert-sos-info";
             var hasPos = (typeof actionData.lat === "number" && typeof actionData.lng === "number");
@@ -239,12 +280,11 @@
             body.appendChild(urgBadge);
 
             // Description intervention
-            var sub = document.createElement("div");
-            sub.className = "critical-alert-message";
-            // Extraire juste le texte (avant " — Zone" ou " — Operateur")
+            var pcoSub = document.createElement("div");
+            pcoSub.className = "critical-alert-message";
             var msgText = (item.message || "").split(" \u2014 ")[0];
-            sub.textContent = msgText;
-            body.appendChild(sub);
+            pcoSub.textContent = msgText;
+            body.appendChild(pcoSub);
 
             // Engagement
             if (engageDesc) {
@@ -266,7 +306,6 @@
             }
             var metaText = timeStr;
             if (opName) metaText += " \u2014 " + opName;
-            // Ajouter le groupe si disponible
             var userGroups = window.__userGroups;
             if (userGroups && userGroups.length) {
                 var groupNames = userGroups.map(function(g) { return g.name; }).join(", ");
@@ -276,15 +315,15 @@
             body.appendChild(metaLine);
         } else {
             // Message standard (non PCO)
-            var sub = document.createElement("div");
-            sub.className = "critical-alert-message";
-            sub.textContent = item.message;
-            body.appendChild(sub);
+            var stdSub = document.createElement("div");
+            stdSub.className = "critical-alert-message";
+            stdSub.textContent = item.message;
+            body.appendChild(stdSub);
 
-            var timeEl = document.createElement("div");
-            timeEl.className = "critical-alert-time";
-            timeEl.textContent = timeStr;
-            body.appendChild(timeEl);
+            var stdTime = document.createElement("div");
+            stdTime.className = "critical-alert-time";
+            stdTime.textContent = timeStr;
+            body.appendChild(stdTime);
         }
 
         // Compteur d'alertes restantes
@@ -299,35 +338,63 @@
         var btnRow = document.createElement("div");
         btnRow.className = "critical-alert-btns";
 
-        if (item.onView) {
-            var btnIgnore = document.createElement("button");
-            btnIgnore.className = "critical-alert-btn critical-alert-btn-secondary";
-            btnIgnore.textContent = "Ignorer";
-            btnIgnore.addEventListener("click", function() { _dismissCurrent(null); });
-            btnRow.appendChild(btnIgnore);
+        // Store alert _id for acknowledge
+        var alertMongoId = item._mongoId || null;
 
-            var btnView = document.createElement("button");
-            btnView.className = "critical-alert-btn";
-            var viewLabel = "Voir sur la carte";
-            if (type === "anpr-watchlist") viewLabel = "Voir sur LAPI";
-            else if (type === "checkpoint-reassign") viewLabel = "Voir Controle acces";
-            else if (isPco) viewLabel = "Ouvrir la fiche";
-            btnView.textContent = viewLabel;
-            btnView.addEventListener("click", function() {
-                var cb = item.onView;
-                _dismissCurrent(cb);
-            });
-            btnRow.appendChild(btnView);
+        if (item.onView) {
+            if (isFieldSos) {
+                // SOS : "Acquitter" + "Ouvrir la fiche"
+                var btnAck = document.createElement("button");
+                btnAck.className = "critical-alert-btn critical-alert-btn-secondary";
+                btnAck.textContent = "Acquitter";
+                btnAck.addEventListener("click", function() {
+                    _stopSosAlarm();
+                    if (alertMongoId) _acknowledgeAlert(alertMongoId);
+                    _dismissCurrent(null);
+                });
+                btnRow.appendChild(btnAck);
+
+                var btnView = document.createElement("button");
+                btnView.className = "critical-alert-btn";
+                btnView.textContent = "Ouvrir la fiche";
+                btnView.addEventListener("click", function() {
+                    _stopSosAlarm();
+                    if (alertMongoId) _acknowledgeAlert(alertMongoId);
+                    var cb = item.onView;
+                    _dismissCurrent(cb);
+                });
+                btnRow.appendChild(btnView);
+            } else {
+                var btnIgnore = document.createElement("button");
+                btnIgnore.className = "critical-alert-btn critical-alert-btn-secondary";
+                btnIgnore.textContent = "Ignorer";
+                btnIgnore.addEventListener("click", function() { _dismissCurrent(null); });
+                btnRow.appendChild(btnIgnore);
+
+                var btnView2 = document.createElement("button");
+                btnView2.className = "critical-alert-btn";
+                var viewLabel = "Voir sur la carte";
+                if (type === "anpr-watchlist") viewLabel = "Voir sur LAPI";
+                else if (type === "checkpoint-reassign") viewLabel = "Voir Controle acces";
+                else if (isPco) viewLabel = "Ouvrir la fiche";
+                btnView2.textContent = viewLabel;
+                btnView2.addEventListener("click", function() {
+                    var cb = item.onView;
+                    _dismissCurrent(cb);
+                });
+                btnRow.appendChild(btnView2);
+            }
         } else {
             var btn = document.createElement("button");
             btn.className = "critical-alert-btn";
             btn.textContent = "Compris";
-            btn.addEventListener("click", function() { _dismissCurrent(null); });
+            btn.addEventListener("click", function() {
+                if (isFieldSos) _stopSosAlarm();
+                _dismissCurrent(null);
+            });
             btnRow.appendChild(btn);
         }
 
-        body.appendChild(sub);
-        body.appendChild(timeEl);
         body.appendChild(counter);
         body.appendChild(btnRow);
         box.appendChild(header);
@@ -337,6 +404,15 @@
 
         var focusBtn = overlay.querySelector(".critical-alert-btn:last-child");
         if (focusBtn) setTimeout(function() { focusBtn.focus(); }, 100);
+    }
+
+    function _acknowledgeAlert(alertId) {
+        fetch("/api/active-alerts/" + encodeURIComponent(alertId) + "/acknowledge", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+        }).catch(function(e) {
+            console.warn("[alert_poller] acknowledge failed:", e);
+        });
     }
 
     // Exposer globalement
@@ -456,7 +532,9 @@
                     recentAlerts.forEach(function(a) {
                         var slug = a.definition_slug || "";
                         var onView = _buildOnView(slug, a);
-                        enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, a.actionData);
+                        var ad = a.actionData || {};
+                        ad._mongoId = a._id;
+                        enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, ad);
                     });
                     return;
                 }
@@ -467,7 +545,9 @@
                     _markSeen(a._id);
                     var slug = a.definition_slug || "";
                     var onView = _buildOnView(slug, a);
-                    enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, a.actionData);
+                    var ad = a.actionData || {};
+                    ad._mongoId = a._id;
+                    enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, ad);
                 });
             })
             .catch(function(err) {

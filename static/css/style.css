@@ -2570,7 +2570,15 @@ img { max-width: 100%; }
   background: #b91c1c;
 }
 
-/* Field SOS alert (alarmant - rouge intense, anim sirene) */
+/* Field SOS alert (alarmant - rouge intense, anim sirene + son) */
+.critical-alert-overlay:has(.alert-field_sos),
+.critical-alert-overlay:has(.alert-field-sos) {
+  animation: sos-overlay-flash 0.8s ease-in-out infinite alternate;
+}
+@keyframes sos-overlay-flash {
+  from { background: rgba(0, 0, 0, 0.82); }
+  to   { background: rgba(127, 29, 29, 0.85); }
+}
 .critical-alert-box.alert-field_sos,
 .critical-alert-box.alert-field-sos {
   border: 4px solid #ef4444;
