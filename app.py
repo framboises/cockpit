@@ -3191,6 +3191,38 @@ def pcorg_detail(doc_id):
     })
 
 
+def _engage_field_device(patrouille_name, fiche_id, event, year):
+    """Si patrouille_name correspond a une tablette terrain, passe-la en intervention."""
+    if not patrouille_name or not fiche_id:
+        return
+    device = db["field_devices"].find_one({
+        "name": patrouille_name,
+        "event": str(event),
+        "year": str(year),
+    })
+    if not device:
+        return
+    now = datetime.now(timezone.utc)
+    db["field_devices"].update_one(
+        {"_id": device["_id"]},
+        {
+            "$set": {
+                "status": "intervention",
+                "status_since": now,
+                "active_fiche_id": fiche_id,
+            },
+            "$push": {
+                "status_history": {
+                    "status": "intervention",
+                    "ts": now,
+                    "trigger": "cockpit_dispatch",
+                    "fiche_id": fiche_id,
+                },
+            },
+        },
+    )
+
+
 def _pcorg_mk_uuid(event, year, ts_str, category, text, area_id, user_id):
     seed = (
         f"{event}|{year}|{ts_str.strip()}"
@@ -3289,6 +3321,12 @@ def pcorg_create():
     }
 
     db["pcorg"].insert_one(doc)
+
+    # Engager la tablette terrain si patrouille correspond
+    patr = content_cat.get("patrouille", "")
+    if patr:
+        _engage_field_device(patr, doc_id, event, year)
+
     return jsonify({"ok": True, "id": doc_id})
 
 
@@ -3405,6 +3443,11 @@ def pcorg_quick_create():
     }
 
     db["pcorg"].insert_one(doc)
+
+    # Engager la tablette terrain si patrouille correspond
+    if patrouille:
+        _engage_field_device(patrouille, doc_id, event, year)
+
     return jsonify({"ok": True, "id": doc_id})
 
 
@@ -3412,7 +3455,7 @@ def pcorg_quick_create():
 @role_required("user")
 def pcorg_update(doc_id):
     """Met a jour les champs d'une intervention (SQL ou COCKPIT)."""
-    doc = db["pcorg"].find_one({"_id": doc_id}, {"status_code": 1})
+    doc = db["pcorg"].find_one({"_id": doc_id}, {"status_code": 1, "event": 1, "year": 1})
     if not doc:
         return jsonify({"error": "introuvable"}), 404
     if doc.get("status_code") == 10:
@@ -3457,6 +3500,12 @@ def pcorg_update(doc_id):
         return jsonify({"error": "rien a mettre a jour"}), 400
 
     db["pcorg"].update_one({"_id": doc_id}, {"$set": sets})
+
+    # Si patrouille a ete modifie, engager la tablette terrain
+    new_patr = (cc_update or {}).get("patrouille", "")
+    if new_patr:
+        _engage_field_device(new_patr, doc_id, doc.get("event", ""), doc.get("year", ""))
+
     return jsonify({"ok": True})
 
 
