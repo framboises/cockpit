@@ -1932,26 +1932,27 @@
       } else {
         var catStyle = ficheStyle(f.category);
         var fcc = f.content_category || {};
-        var vehicleChip = "";
-        if (fcc.patrouille) {
-          var fStMeta = STATUS_META[state.patrolStatus] || STATUS_META.patrouille;
-          vehicleChip = "<div class='fiche-marker-vehicle'>"
-            + "<span class='fiche-marker-vehicle-dot' style='background:" + fStMeta.color + "'></span>"
-            + "<span class='fiche-marker-vehicle-name'>" + fcc.patrouille + "</span>"
-            + "<span class='fiche-marker-vehicle-st' style='color:" + fStMeta.color + "'>" + fStMeta.label + "</span>"
-            + "</div>";
-        }
         var icon = L.divIcon({
           className: "",
-          html: "<div class='fiche-marker-wrap'>"
-              + "<div class='fiche-marker urgency-" + (f.niveau_urgence || "norm") + "' style='background:" + catStyle.color + "'>"
-              + "<span class='material-symbols-outlined'>" + catStyle.icon + "</span></div>"
-              + vehicleChip + "</div>",
+          html: "<div class='fiche-marker urgency-" + (f.niveau_urgence || "norm") + "' style='background:" + catStyle.color + "'>"
+              + "<span class='material-symbols-outlined'>" + catStyle.icon + "</span></div>",
           iconSize: [32, 38],
           iconAnchor: [16, 36],
         });
         var marker = L.marker([f.lat, f.lng], { icon: icon });
         marker.on("click", function () { showFicheModal(f); });
+        // Tooltip vehicule engage
+        if (fcc.patrouille) {
+          var fStMeta = STATUS_META[state.patrolStatus] || STATUS_META.patrouille;
+          var fTipHtml = "<span class='veh-tip-name'>" + fcc.patrouille + "</span>"
+            + "<span class='veh-tip-status' style='color:" + fStMeta.color + "'><span class='veh-tip-dot' style='background:" + fStMeta.color + "'></span>" + fStMeta.label + "</span>";
+          marker.bindTooltip(fTipHtml, {
+            permanent: true,
+            direction: "right",
+            offset: [8, -18],
+            className: "field-vehicle-tooltip",
+          });
+        }
         marker.addTo(state.fichesLayer);
         state.fichesMarkers[f.id] = marker;
       }

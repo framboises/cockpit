@@ -1804,26 +1804,6 @@
       pin.appendChild(matIcon(st.icon));
       pinOuter.appendChild(pin);
 
-      // Badge vehicule engage sur le pin (a droite)
-      if (item.patrouille) {
-        var devInfo = window.getAnolocDeviceByLabel ? window.getAnolocDeviceByLabel(item.patrouille) : null;
-        var devStatus = devInfo ? _resolveDeviceStatus(devInfo.device) : null;
-        var vehChip = mkEl("div", "pcorg-pin-vehicle");
-        var vehDot = mkEl("span", "pcorg-pin-vehicle-dot");
-        vehDot.style.background = devStatus ? devStatus.color : "#94a3b8";
-        vehChip.appendChild(vehDot);
-        var vehNameEl = mkEl("span", "pcorg-pin-vehicle-name");
-        vehNameEl.textContent = item.patrouille;
-        vehChip.appendChild(vehNameEl);
-        if (devStatus) {
-          var vehSt = mkEl("span", "pcorg-pin-vehicle-status");
-          vehSt.textContent = devStatus.label;
-          vehSt.style.color = devStatus.color;
-          vehChip.appendChild(vehSt);
-        }
-        pinOuter.appendChild(vehChip);
-      }
-
       var icon = L.divIcon({
         className: "",
         html: pinOuter.outerHTML,
@@ -1984,6 +1964,22 @@
         bounceOnAdd: false
       }).bindPopup(popupDiv, { className: "pcorg-popup-wrap", maxWidth: 440, minWidth: 380 })
         .addTo(pcorgMapLayer);
+
+      // Tooltip vehicule engage (permanent, a droite du pin)
+      if (item.patrouille) {
+        var tipDevInfo = window.getAnolocDeviceByLabel ? window.getAnolocDeviceByLabel(item.patrouille) : null;
+        var tipDevSt = tipDevInfo ? _resolveDeviceStatus(tipDevInfo.device) : null;
+        var tipColor = tipDevSt ? tipDevSt.color : "#94a3b8";
+        var tipLabel = tipDevSt ? tipDevSt.label : "";
+        var tipHtml = "<span class='veh-tip-name'>" + item.patrouille + "</span>"
+          + (tipLabel ? "<span class='veh-tip-status' style='color:" + tipColor + "'><span class='veh-tip-dot' style='background:" + tipColor + "'></span>" + tipLabel + "</span>" : "");
+        marker.bindTooltip(tipHtml, {
+          permanent: true,
+          direction: "right",
+          offset: [12, -18],
+          className: "pcorg-vehicle-tooltip",
+        });
+      }
 
       pcorgMarkers[item.id] = marker;
 
