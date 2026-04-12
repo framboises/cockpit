@@ -433,15 +433,25 @@ body {
 }
 /* Fiche pin wrap (for vehicle chip positioning) */
 .fiche-marker-wrap { position: relative; display: inline-block; }
-/* Vehicle chip on field fiche pin */
+/* Vehicle chip on field fiche pin (right side) */
 .fiche-marker-vehicle {
-  position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
-  margin-top: 2px; white-space: nowrap;
+  position: absolute; top: -4px; left: 100%;
+  margin-left: 4px; white-space: nowrap;
   background: #1e293bee; color: #e2e8f0;
-  font-size: 9px; font-weight: 700; line-height: 1;
-  padding: 3px 6px; border-radius: 4px;
-  border: 1px solid #6366f180;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  font-size: 10px; line-height: 1;
+  padding: 4px 8px; border-radius: 6px;
+  border: 1px solid #334155;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+  display: flex; flex-direction: column; gap: 2px;
+  pointer-events: none;
+}
+.fiche-marker-vehicle-dot {
+  display: inline-block; width: 6px; height: 6px;
+  border-radius: 50%; margin-right: 3px; flex-shrink: 0;
+}
+.fiche-marker-vehicle-name { font-weight: 700; }
+.fiche-marker-vehicle-st {
+  font-size: 9px; font-weight: 600;
   display: flex; align-items: center;
 }
 
@@ -524,9 +534,9 @@ body {
 }
 .map-fab-group-tr .map-fab { position: static; }
 
-/* POI search panel */
+/* POI search panel (compact, between zoom and loupe) */
 .poi-search-panel {
-  position: absolute; top: 12px; left: 12px; right: 12px;
+  position: absolute; top: 12px; left: 56px; right: 60px;
   z-index: 960;
   background: rgba(15, 23, 42, 0.96);
   border: 1px solid #334155;
@@ -1161,7 +1171,7 @@ body {
   padding: 6px;
 }
 .fd-vehicle-info {
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: 2px; flex: 1;
 }
 .fd-vehicle-lbl {
   font-size: 11px; color: #94a3b8; text-transform: uppercase;
@@ -1169,6 +1179,14 @@ body {
 }
 .fd-vehicle-name {
   font-size: 15px; color: #a5b4fc; font-weight: 700;
+}
+.fd-vehicle-status {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+}
+.fd-vehicle-dot {
+  display: inline-block; width: 8px; height: 8px;
+  border-radius: 50%; flex-shrink: 0;
 }
 
 /* Info fields */

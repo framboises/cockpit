@@ -7415,9 +7415,17 @@ th span { font-size: 0.88rem; font-weight: 700; }
   border-radius: 8px; padding: 8px 14px; margin-bottom: 10px;
 }
 .pcorg-fiche-vehicle-ico { font-size: 22px; color: #818cf8; }
-.pcorg-fiche-vehicle-info { display: flex; flex-direction: column; gap: 1px; }
+.pcorg-fiche-vehicle-info { display: flex; flex-direction: column; gap: 1px; flex: 1; }
 .pcorg-fiche-vehicle-lbl { font-size: 0.62rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
 .pcorg-fiche-vehicle-name { font-size: 0.82rem; color: #a5b4fc; }
+.pcorg-fiche-vehicle-status {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 0.72rem; font-weight: 600; white-space: nowrap;
+}
+.pcorg-fiche-vehicle-dot {
+  display: inline-block; width: 8px; height: 8px;
+  border-radius: 50%; flex-shrink: 0;
+}
 /* Info grid + mini map side by side */
 .pcorg-fiche-info-row { display: flex; gap: 14px; margin-bottom: 4px; }
 .pcorg-fiche-fields { flex: 1; min-width: 0; }
@@ -7623,24 +7631,47 @@ th span { font-size: 0.88rem; font-weight: 700; }
 }
 /* Vehicule engage - banner popup */
 .pcorg-popup-vehicle {
-  display: flex; align-items: center; gap: 4px;
+  display: flex; align-items: center; justify-content: space-between;
   background: linear-gradient(135deg, #6366f115, #8b5cf615);
   border: 1px solid #6366f140;
   border-radius: 6px; padding: 5px 10px; margin-bottom: 8px;
   font-size: 0.72rem;
 }
+.pcorg-popup-vehicle-left {
+  display: flex; align-items: center; gap: 6px;
+}
 .pcorg-popup-vehicle-icon { font-size: 16px; color: #6366f1; }
-.pcorg-popup-vehicle-label { color: var(--muted); }
-.pcorg-popup-vehicle-name { color: #6366f1; }
-/* Pin vehicle chip */
+.pcorg-popup-vehicle-label { display: block; font-size: 0.58rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; font-weight: 600; }
+.pcorg-popup-vehicle-name { display: block; color: #818cf8; font-size: 0.76rem; }
+.pcorg-popup-vehicle-status {
+  display: flex; align-items: center; gap: 3px;
+  font-size: 0.66rem; font-weight: 600;
+}
+.pcorg-popup-vehicle-dot {
+  display: inline-block; width: 7px; height: 7px;
+  border-radius: 50%; flex-shrink: 0;
+}
+/* Pin vehicle chip (right side) */
 .pcorg-pin-vehicle {
-  position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
-  margin-top: 2px; white-space: nowrap;
-  background: #1e293bee; color: #e2e8f0;
-  font-size: 9px; font-weight: 700; line-height: 1;
-  padding: 3px 6px; border-radius: 4px;
-  border: 1px solid #6366f180;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  position: absolute; top: -4px; left: 100%;
+  margin-left: 4px; white-space: nowrap;
+  background: var(--card, #1e293b); color: var(--text, #e2e8f0);
+  font-size: 10px; line-height: 1;
+  padding: 4px 8px; border-radius: 6px;
+  border: 1px solid var(--line, #334155);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+  display: flex; flex-direction: column; gap: 2px;
+  pointer-events: none;
+}
+.pcorg-pin-vehicle-dot {
+  display: inline-block; width: 6px; height: 6px;
+  border-radius: 50%; margin-right: 3px; flex-shrink: 0;
+}
+.pcorg-pin-vehicle-name {
+  font-weight: 700; color: var(--text, #e2e8f0);
+}
+.pcorg-pin-vehicle-status {
+  font-size: 9px; font-weight: 600;
   display: flex; align-items: center;
 }
 .pcorg-popup-fields { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }

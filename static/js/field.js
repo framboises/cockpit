@@ -1932,9 +1932,15 @@
       } else {
         var catStyle = ficheStyle(f.category);
         var fcc = f.content_category || {};
-        var vehicleChip = fcc.patrouille
-          ? "<div class='fiche-marker-vehicle'><span class='material-symbols-outlined' style='font-size:11px;vertical-align:middle;margin-right:2px'>directions_car</span>" + fcc.patrouille + "</div>"
-          : "";
+        var vehicleChip = "";
+        if (fcc.patrouille) {
+          var fStMeta = STATUS_META[state.patrolStatus] || STATUS_META.patrouille;
+          vehicleChip = "<div class='fiche-marker-vehicle'>"
+            + "<span class='fiche-marker-vehicle-dot' style='background:" + fStMeta.color + "'></span>"
+            + "<span class='fiche-marker-vehicle-name'>" + fcc.patrouille + "</span>"
+            + "<span class='fiche-marker-vehicle-st' style='color:" + fStMeta.color + "'>" + fStMeta.label + "</span>"
+            + "</div>";
+        }
         var icon = L.divIcon({
           className: "",
           html: "<div class='fiche-marker-wrap'>"
@@ -2044,9 +2050,10 @@
       body.appendChild(desc);
     }
 
-    // Vehicule engage (banner prominent)
+    // Vehicule engage (banner prominent with status)
     var cc = d.content_category || {};
     if (cc.patrouille) {
+      var vehStatusMeta = STATUS_META[state.patrolStatus] || STATUS_META.patrouille;
       var vehBanner = document.createElement("div");
       vehBanner.className = "fd-vehicle-banner";
       var vehIco = document.createElement("span");
@@ -2064,6 +2071,16 @@
       vehName.textContent = cc.patrouille;
       vehInfo.appendChild(vehName);
       vehBanner.appendChild(vehInfo);
+      // Status badge
+      var vehStBadge = document.createElement("span");
+      vehStBadge.className = "fd-vehicle-status";
+      var vehStDot = document.createElement("span");
+      vehStDot.className = "fd-vehicle-dot";
+      vehStDot.style.background = vehStatusMeta.color;
+      vehStBadge.appendChild(vehStDot);
+      vehStBadge.appendChild(document.createTextNode(vehStatusMeta.label));
+      vehStBadge.style.color = vehStatusMeta.color;
+      vehBanner.appendChild(vehStBadge);
       body.appendChild(vehBanner);
     }
 

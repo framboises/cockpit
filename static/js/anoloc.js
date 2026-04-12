@@ -894,6 +894,22 @@
     });
   }
 
+  // --- Public API: lookup device by label (for pcorg.js cross-reference) ---
+  window.getAnolocDeviceByLabel = function (name) {
+    if (!lastData || !lastData.groups || !name) return null;
+    var groups = lastData.groups;
+    for (var gid in groups) {
+      var grp = groups[gid];
+      var devs = grp.devices || [];
+      for (var i = 0; i < devs.length; i++) {
+        if (devs[i].label === name) {
+          return { device: devs[i], group: grp };
+        }
+      }
+    }
+    return null;
+  };
+
   // --- Boot ---
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);

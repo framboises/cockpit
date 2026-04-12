@@ -71,6 +71,28 @@
   // ── DOM refs ───────────────────────────────────────────────────────────────
   var listOpen, listClosed, statsContainer, badge, placeholderOpen, placeholderClosed;
 
+  // ── Device status resolution (anoloc cross-reference) ────────────────────
+  var DEVICE_STATUS_META = {
+    patrouille:   { label: "Patrouille",   color: "#22c55e" },
+    intervention: { label: "Intervention", color: "#f59e0b" },
+    sur_place:    { label: "Sur place",    color: "#3b82f6" },
+    pause:        { label: "Pause",        color: "#94a3b8" },
+    running:      { label: "En mouvement", color: "#22c55e" },
+    stopped:      { label: "A l'arret",    color: "#f59e0b" },
+    waiting:      { label: "En attente",   color: "#eab308" },
+    offline:      { label: "Hors ligne",   color: "#ef4444" },
+  };
+  function _resolveDeviceStatus(dev) {
+    if (!dev) return null;
+    // Tablets: use patrol_status first
+    if (dev.kind === "tablet" && dev.patrol_status) {
+      return DEVICE_STATUS_META[dev.patrol_status] || DEVICE_STATUS_META.patrouille;
+    }
+    // Beacons / other
+    if (!dev.online) return DEVICE_STATUS_META.offline;
+    return DEVICE_STATUS_META[dev.status] || DEVICE_STATUS_META.running;
+  }
+
   // ── Helpers ────────────────────────────────────────────────────────────────
   function catStyle(cat) {
     return CATEGORY_STYLES[cat] || FALLBACK_STYLE;
@@ -1029,6 +1051,8 @@
 
     // Vehicle engagement banner (prominent, before minimap)
     if (cc.patrouille) {
+      var ficheDevInfo = window.getAnolocDeviceByLabel ? window.getAnolocDeviceByLabel(cc.patrouille) : null;
+      var ficheDevSt = ficheDevInfo ? _resolveDeviceStatus(ficheDevInfo.device) : null;
       var vBanner = mkEl("div", "pcorg-fiche-vehicle");
       vBanner.appendChild(matIcon("directions_car", "pcorg-fiche-vehicle-ico"));
       var vInfo = mkEl("div", "pcorg-fiche-vehicle-info");
@@ -1039,6 +1063,15 @@
       vName.textContent = cc.patrouille;
       vInfo.appendChild(vName);
       vBanner.appendChild(vInfo);
+      if (ficheDevSt) {
+        var fvStatusBadge = mkEl("span", "pcorg-fiche-vehicle-status");
+        var fvDot = mkEl("span", "pcorg-fiche-vehicle-dot");
+        fvDot.style.background = ficheDevSt.color;
+        fvStatusBadge.appendChild(fvDot);
+        fvStatusBadge.appendChild(document.createTextNode(ficheDevSt.label));
+        fvStatusBadge.style.color = ficheDevSt.color;
+        vBanner.appendChild(fvStatusBadge);
+      }
       body.appendChild(vBanner);
     }
 
@@ -1771,12 +1804,23 @@
       pin.appendChild(matIcon(st.icon));
       pinOuter.appendChild(pin);
 
-      // Badge vehicule engage sur le pin
+      // Badge vehicule engage sur le pin (a droite)
       if (item.patrouille) {
+        var devInfo = window.getAnolocDeviceByLabel ? window.getAnolocDeviceByLabel(item.patrouille) : null;
+        var devStatus = devInfo ? _resolveDeviceStatus(devInfo.device) : null;
         var vehChip = mkEl("div", "pcorg-pin-vehicle");
-        var vehIcon = matIcon("directions_car", "font-size:11px;vertical-align:middle;margin-right:2px;");
-        vehChip.appendChild(vehIcon);
-        vehChip.appendChild(document.createTextNode(item.patrouille));
+        var vehDot = mkEl("span", "pcorg-pin-vehicle-dot");
+        vehDot.style.background = devStatus ? devStatus.color : "#94a3b8";
+        vehChip.appendChild(vehDot);
+        var vehNameEl = mkEl("span", "pcorg-pin-vehicle-name");
+        vehNameEl.textContent = item.patrouille;
+        vehChip.appendChild(vehNameEl);
+        if (devStatus) {
+          var vehSt = mkEl("span", "pcorg-pin-vehicle-status");
+          vehSt.textContent = devStatus.label;
+          vehSt.style.color = devStatus.color;
+          vehChip.appendChild(vehSt);
+        }
         pinOuter.appendChild(vehChip);
       }
 
@@ -1827,16 +1871,30 @@
         popBody.appendChild(descLine);
       }
 
-      // Vehicule engage (badge prominent)
+      // Vehicule engage (badge prominent with status)
       if (item.patrouille) {
+        var popDevInfo = window.getAnolocDeviceByLabel ? window.getAnolocDeviceByLabel(item.patrouille) : null;
+        var popDevSt = popDevInfo ? _resolveDeviceStatus(popDevInfo.device) : null;
         var vehBanner = mkEl("div", "pcorg-popup-vehicle");
-        vehBanner.appendChild(matIcon("directions_car", "pcorg-popup-vehicle-icon"));
+        var vehLeft = mkEl("div", "pcorg-popup-vehicle-left");
+        vehLeft.appendChild(matIcon("directions_car", "pcorg-popup-vehicle-icon"));
+        var vehNameWrap = mkEl("div", "");
         var vehLabel = mkEl("span", "pcorg-popup-vehicle-label");
-        vehLabel.textContent = "Engage : ";
-        vehBanner.appendChild(vehLabel);
+        vehLabel.textContent = "Element engage";
+        vehNameWrap.appendChild(vehLabel);
         var vehName = mkEl("strong", "pcorg-popup-vehicle-name");
         vehName.textContent = item.patrouille;
-        vehBanner.appendChild(vehName);
+        vehNameWrap.appendChild(vehName);
+        vehLeft.appendChild(vehNameWrap);
+        vehBanner.appendChild(vehLeft);
+        if (popDevSt) {
+          var vehStatusBadge = mkEl("span", "pcorg-popup-vehicle-status");
+          var vehStDot = mkEl("span", "pcorg-popup-vehicle-dot");
+          vehStDot.style.background = popDevSt.color;
+          vehStatusBadge.appendChild(vehStDot);
+          vehStatusBadge.appendChild(document.createTextNode(popDevSt.label));
+          vehBanner.appendChild(vehStatusBadge);
+        }
         popBody.appendChild(vehBanner);
       }
 
