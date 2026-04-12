@@ -1726,10 +1726,11 @@
       if (existing) {
         existing.setLatLng([f.lat, f.lng]);
       } else {
+        var catStyle = ficheStyle(f.category);
         var icon = L.divIcon({
           className: "",
-          html: "<div class='fiche-marker urgency-" + (f.niveau_urgence || "norm") + "'>"
-              + "<span class='material-symbols-outlined'>priority_high</span></div>",
+          html: "<div class='fiche-marker urgency-" + (f.niveau_urgence || "norm") + "' style='background:" + catStyle.color + "'>"
+              + "<span class='material-symbols-outlined'>" + catStyle.icon + "</span></div>",
           iconSize: [32, 38],
           iconAnchor: [16, 36],
         });
@@ -1759,6 +1760,12 @@
     "PCO.MainCourante": { color: "#8b5cf6", icon: "edit_note" },
   };
   var FICHE_URGENCY_COLORS = { EU: "#dc2626", UA: "#f97316", UR: "#eab308", IMP: "#6b7280" };
+  var FICHE_URGENCY_LABELS = {
+    EU: "Detresse vitale, toutes ressources",
+    UA: "Urgence absolue, engagement prioritaire",
+    UR: "Urgence relative, situation stable",
+    IMP: "Implique, pas de blessure / temoin",
+  };
 
   function ficheStyle(cat) {
     return FICHE_CAT_STYLES[cat] || { color: "#94a3b8", icon: "description" };
@@ -1778,7 +1785,7 @@
     $("fiche-detail-cat").textContent = f.category || "Fiche";
     var urgEl = $("fiche-detail-urgency");
     if (f.niveau_urgence) {
-      urgEl.textContent = f.niveau_urgence;
+      urgEl.textContent = f.niveau_urgence + " \u2014 " + (FICHE_URGENCY_LABELS[f.niveau_urgence] || "");
       urgEl.style.background = FICHE_URGENCY_COLORS[f.niveau_urgence] || "#6b7280";
       urgEl.hidden = false;
     } else {
@@ -1934,26 +1941,22 @@
       textarea.placeholder = "Commentaire, observation...";
       form.appendChild(textarea);
 
-      var photoRow = document.createElement("div");
-      photoRow.className = "fd-photo-row";
-
       var fileInput = document.createElement("input");
       fileInput.type = "file";
       fileInput.accept = "image/*";
-      fileInput.capture = "environment";
       fileInput.style.display = "none";
       fileInput.id = "fd-photo-input";
-
-      var photoBtn = document.createElement("button");
-      photoBtn.className = "fd-photo-btn";
-      photoBtn.innerHTML = "<span class='material-symbols-outlined'>photo_camera</span>";
-      photoBtn.title = "Prendre une photo";
-      photoBtn.onclick = function () { fileInput.click(); };
 
       var preview = document.createElement("div");
       preview.className = "fd-photo-preview";
       preview.id = "fd-photo-preview";
       preview.hidden = true;
+
+      var photoBtn = document.createElement("button");
+      photoBtn.className = "fd-photo-btn";
+      photoBtn.innerHTML = "<span class='material-symbols-outlined'>photo_camera</span>";
+      photoBtn.title = "Photo ou image";
+      photoBtn.onclick = function () { fileInput.click(); };
 
       fileInput.onchange = function () {
         if (fileInput.files && fileInput.files[0]) {
@@ -1978,10 +1981,6 @@
         }
       };
 
-      photoRow.appendChild(fileInput);
-      photoRow.appendChild(photoBtn);
-      photoRow.appendChild(preview);
-
       var sendBtn = document.createElement("button");
       sendBtn.className = "btn-primary fd-send-btn";
       sendBtn.innerHTML = "<span class='material-symbols-outlined'>send</span> Envoyer";
@@ -1989,8 +1988,15 @@
         submitFicheComment(d.id, textarea, fileInput, preview, sendBtn);
       };
 
-      form.appendChild(photoRow);
-      form.appendChild(sendBtn);
+      // Photo + Send on same row
+      var actionRow = document.createElement("div");
+      actionRow.className = "fd-action-row";
+      actionRow.appendChild(fileInput);
+      actionRow.appendChild(photoBtn);
+      actionRow.appendChild(sendBtn);
+
+      form.appendChild(actionRow);
+      form.appendChild(preview);
       body.appendChild(form);
     }
 
@@ -2032,20 +2038,24 @@
     var actionsEl = $("fiche-detail-actions");
     actionsEl.textContent = "";
 
-    // Route button
-    var lat = d.lat != null ? d.lat : f.lat;
-    var lng = d.lng != null ? d.lng : f.lng;
-    if (lat != null && lng != null) {
-      var routeBtn = document.createElement("button");
-      routeBtn.className = "btn-primary";
-      routeBtn.innerHTML = "<span class='material-symbols-outlined' style='vertical-align:middle'>navigation</span> Itineraire";
-      routeBtn.onclick = function () { openInGoogleMaps([lat, lng]); };
-      actionsEl.appendChild(routeBtn);
+    var cc = d.content_category || {};
+    var isFieldCreated = cc.field_created || cc.field_sos;
+
+    // Route button only for fiches NOT created by this tablet (dispatched from cockpit)
+    if (!isFieldCreated) {
+      var lat = d.lat != null ? d.lat : f.lat;
+      var lng = d.lng != null ? d.lng : f.lng;
+      if (lat != null && lng != null) {
+        var routeBtn = document.createElement("button");
+        routeBtn.className = "btn-primary";
+        routeBtn.innerHTML = "<span class='material-symbols-outlined' style='vertical-align:middle'>navigation</span> Itineraire";
+        routeBtn.onclick = function () { openInGoogleMaps([lat, lng]); };
+        actionsEl.appendChild(routeBtn);
+      }
     }
 
     // Close button for field-created fiches
-    var cc = d.content_category || {};
-    if (cc.field_created || cc.field_sos) {
+    if (isFieldCreated) {
       if (d.status_code !== 10) {
         var closeBtn = document.createElement("button");
         closeBtn.className = "btn-danger";

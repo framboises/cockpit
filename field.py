@@ -1793,7 +1793,13 @@ def field_my_fiche_detail(fiche_id):
 
     ts = fiche.get("ts")
     close_ts = fiche.get("close_ts")
-    comment_history = fiche.get("comment_history") or []
+    raw_history = fiche.get("comment_history") or []
+    comment_history = []
+    for h in raw_history:
+        entry = dict(h)
+        if isinstance(entry.get("ts"), datetime):
+            entry["ts"] = _iso(entry["ts"])
+        comment_history.append(entry)
 
     return jsonify({
         "ok": True,
@@ -1804,8 +1810,8 @@ def field_my_fiche_detail(fiche_id):
         "comment": fiche.get("comment") or "",
         "comment_history": comment_history,
         "niveau_urgence": fiche.get("niveau_urgence"),
-        "ts": ts.isoformat() if isinstance(ts, datetime) else ts,
-        "close_ts": close_ts.isoformat() if isinstance(close_ts, datetime) else close_ts,
+        "ts": _iso(ts),
+        "close_ts": _iso(close_ts),
         "operator": fiche.get("operator"),
         "operator_close": fiche.get("operator_close"),
         "area": (fiche.get("area") or {}).get("desc") if isinstance(fiche.get("area"), dict) else None,

@@ -200,10 +200,22 @@
         <div class="fiche-create-cats" id="fiche-create-cats"></div>
         <label class="fiche-create-label">Niveau d'urgence</label>
         <div class="fiche-create-urgency" id="fiche-create-urgency">
-          <button class="urgency-btn" data-val="IMP">IMP</button>
-          <button class="urgency-btn selected" data-val="UR">UR</button>
-          <button class="urgency-btn" data-val="UA">UA</button>
-          <button class="urgency-btn" data-val="EU">EU</button>
+          <button class="urgency-btn" data-val="IMP">
+            <span class="urgency-btn-code" style="background:#6b7280">IMP</span>
+            <span class="urgency-btn-desc">Implique, pas de blessure / temoin</span>
+          </button>
+          <button class="urgency-btn selected" data-val="UR">
+            <span class="urgency-btn-code" style="background:#eab308">UR</span>
+            <span class="urgency-btn-desc">Urgence relative, situation stable</span>
+          </button>
+          <button class="urgency-btn" data-val="UA">
+            <span class="urgency-btn-code" style="background:#f97316">UA</span>
+            <span class="urgency-btn-desc">Urgence absolue, engagement prioritaire</span>
+          </button>
+          <button class="urgency-btn" data-val="EU">
+            <span class="urgency-btn-code" style="background:#dc2626">EU</span>
+            <span class="urgency-btn-desc">Detresse vitale, toutes ressources</span>
+          </button>
         </div>
         <label class="fiche-create-label">Description</label>
         <textarea class="fiche-create-text" id="fiche-create-text" rows="3"
