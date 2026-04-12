@@ -1242,6 +1242,29 @@ def field_admin_device_delete(device_id):
     return jsonify({"ok": True})
 
 
+@field_bp.route("/field/admin/device/<device_id>/tracking", methods=["POST"])
+@admin_required
+def field_admin_device_tracking(device_id):
+    """Active/desactive le mode tracking haute frequence sur une tablette.
+    Body : {"mode": "high_freq"} ou {"mode": "normal"}."""
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    data = request.get_json(silent=True) or {}
+    mode = data.get("mode", "normal")
+    if mode not in ("normal", "high_freq"):
+        return jsonify({"ok": False, "error": "invalid_mode"}), 400
+    db = _get_mongo_db()
+    res = db["field_devices"].update_one(
+        {"_id": oid},
+        {"$set": {"tracking_mode": mode}},
+    )
+    if res.matched_count == 0:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    return jsonify({"ok": True, "mode": mode})
+
+
 # ---------------------------------------------------------------------------
 # Admin : messages (envoi + historique)
 # ---------------------------------------------------------------------------
@@ -1694,6 +1717,7 @@ def field_my_fiches():
         "device_name": name,
         "device_status": dev_fresh.get("status") or "patrouille",
         "active_fiche_id": dev_fresh.get("active_fiche_id"),
+        "tracking_mode": dev_fresh.get("tracking_mode") or "normal",
         "now": _iso(_now()),
     })
 

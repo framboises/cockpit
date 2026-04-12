@@ -10,7 +10,9 @@
 
   var POLL_INBOX_MS = 3000;
   var POLL_FICHES_MS = 5000;        // fiches PCORG assignees : toutes les 5s
-  var POSITION_PUSH_MS = 5000;     // push GPS toutes les 5s max
+  var POSITION_PUSH_NORMAL_MS = 60000;  // push GPS toutes les 60s (economie batterie)
+  var POSITION_PUSH_HIGH_MS = 5000;    // push GPS toutes les 5s (mode suivi cockpit)
+  var POSITION_PUSH_MS = POSITION_PUSH_NORMAL_MS;
   var POSITION_MIN_MOVE_M = 5;     // ou si on bouge de plus de 5m
 
   // ---------------------------------------------------------------------
@@ -1663,6 +1665,12 @@
           state.patrolStatus = data.device_status;
           state.activeFicheId = data.active_fiche_id || null;
           updateStatusBar();
+        }
+        // Tracking mode : haute frequence quand cockpit suit la tablette
+        var tMode = data.tracking_mode || "normal";
+        var newInterval = tMode === "high_freq" ? POSITION_PUSH_HIGH_MS : POSITION_PUSH_NORMAL_MS;
+        if (newInterval !== POSITION_PUSH_MS) {
+          POSITION_PUSH_MS = newInterval;
         }
       })
       .catch(function () { /* silent */ });

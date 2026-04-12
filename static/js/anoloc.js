@@ -27,6 +27,9 @@
     { label: "Journee", value: 1440 },
   ];
 
+  // --- Lock/follow state ---
+  var lockedDeviceId = null;       // deviceId currently locked (only one at a time)
+
   // --- DOM helpers ---
   function el(tag, attrs, children) {
     var e = document.createElement(tag);
@@ -146,6 +149,7 @@
         updatePanel(data);
         updateMarkers(data);
         refreshActiveTrails();
+        followLockedDevice();
       })
       .catch(function (err) {
         console.error("[Anoloc] refresh error:", err);
@@ -434,9 +438,10 @@
           anolocLayers[m._anolocGroup].removeLayer(m);
         }
         delete anolocMarkers[devId];
-        // Also remove trail if device disappeared
+        // Also remove trail and lock if device disappeared
         removeTrail(devId);
         delete activeTrails[devId];
+        if (lockedDeviceId === devId) unlockDevice(devId);
       }
     });
 
@@ -479,6 +484,72 @@
       iconSize: null,
       iconAnchor: [18, 18],
     });
+  }
+
+  // --- Lock/follow functions ---
+  function lockDevice(deviceId, isTablet) {
+    // If already locked on another device, unlock it first
+    if (lockedDeviceId && lockedDeviceId !== deviceId) {
+      unlockDevice(lockedDeviceId);
+    }
+    lockedDeviceId = deviceId;
+
+    // If it's a tablet, tell it to switch to high_freq
+    if (isTablet) {
+      var rawId = String(deviceId);
+      var mongoId = rawId.indexOf("field:") === 0 ? rawId.slice(6) : rawId;
+      setTabletTrackingMode(mongoId, "high_freq");
+    }
+
+    // Immediately pan to the device
+    var marker = anolocMarkers[deviceId];
+    if (marker) {
+      var mapObj = window.CockpitMapView && window.CockpitMapView.getMap
+        ? window.CockpitMapView.getMap() : null;
+      if (mapObj) {
+        mapObj.setView(marker.getLatLng(), Math.max(mapObj.getZoom(), 17), { animate: true });
+      }
+    }
+  }
+
+  function unlockDevice(deviceId) {
+    if (!deviceId) return;
+    // If it was a tablet, revert to normal
+    var rawId = String(deviceId);
+    if (rawId.indexOf("field:") === 0) {
+      var mongoId = rawId.slice(6);
+      setTabletTrackingMode(mongoId, "normal");
+    }
+    if (lockedDeviceId === deviceId) {
+      lockedDeviceId = null;
+    }
+  }
+
+  function setTabletTrackingMode(mongoId, mode) {
+    var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    var csrf = csrfMeta ? csrfMeta.content : "";
+    fetch("/field/admin/device/" + encodeURIComponent(mongoId) + "/tracking", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": csrf,
+      },
+      body: JSON.stringify({ mode: mode }),
+    }).catch(function () { /* silent */ });
+  }
+
+  function followLockedDevice() {
+    if (!lockedDeviceId) return;
+    var marker = anolocMarkers[lockedDeviceId];
+    if (!marker) {
+      // Device disappeared, unlock
+      unlockDevice(lockedDeviceId);
+      return;
+    }
+    var mapObj = window.CockpitMapView && window.CockpitMapView.getMap
+      ? window.CockpitMapView.getMap() : null;
+    if (!mapObj) return;
+    mapObj.panTo(marker.getLatLng(), { animate: true, duration: 0.5 });
   }
 
   // --- Trail functions ---
@@ -701,6 +772,40 @@
     trailSection.appendChild(durationSelect);
     trailSection.appendChild(trailBtn);
     popup.appendChild(trailSection);
+
+    // Lock/follow button
+    var isLocked = lockedDeviceId === dev.id;
+    var lockBtn = el("button", {
+      className: "anoloc-lock-btn" + (isLocked ? " active" : ""),
+    }, [
+      materialIcon(isLocked ? "lock_open" : "gps_fixed", "font-size:16px;vertical-align:middle;margin-right:4px;"),
+      isLocked ? "Deverrouiller" : "Suivre",
+    ]);
+    if (isLocked) {
+      lockBtn.style.background = grp.color || "#6366f1";
+      lockBtn.style.borderColor = "transparent";
+    }
+
+    lockBtn.addEventListener("click", function () {
+      if (lockedDeviceId === dev.id) {
+        unlockDevice(dev.id);
+        lockBtn.className = "anoloc-lock-btn";
+        lockBtn.style.background = "";
+        lockBtn.style.borderColor = "";
+        lockBtn.textContent = "";
+        lockBtn.appendChild(materialIcon("gps_fixed", "font-size:16px;vertical-align:middle;margin-right:4px;"));
+        lockBtn.appendChild(document.createTextNode("Suivre"));
+      } else {
+        lockDevice(dev.id, dev.kind === "tablet");
+        lockBtn.className = "anoloc-lock-btn active";
+        lockBtn.style.background = grp.color || "#6366f1";
+        lockBtn.style.borderColor = "transparent";
+        lockBtn.textContent = "";
+        lockBtn.appendChild(materialIcon("lock_open", "font-size:16px;vertical-align:middle;margin-right:4px;"));
+        lockBtn.appendChild(document.createTextNode("Deverrouiller"));
+      }
+    });
+    popup.appendChild(lockBtn);
 
     return popup;
   }
