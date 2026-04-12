@@ -13,7 +13,7 @@
 #   - field_messages  : messages/instructions envoyes aux tablettes (inbox)
 
 from flask import Blueprint, jsonify, request, render_template, make_response, redirect, send_from_directory, abort
-from werkzeug.utils import safe_join
+from werkzeug.utils import safe_join, secure_filename
 from datetime import datetime, timezone, timedelta
 from pymongo import MongoClient
 from bson.objectid import ObjectId
@@ -47,6 +47,12 @@ PAIR_RATE_LIMIT_MAX = 10                     # max 10 tentatives / ip / fenetre
 
 FIELD_COOKIE_NAME = "field_token"
 FIELD_COOKIE_PATH = "/field"
+
+# Photos
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+FIELD_PHOTOS_DIR = os.path.join(SCRIPT_DIR, "uploads", "field_photos")
+FIELD_PHOTO_MAX_SIZE = 10 * 1024 * 1024   # 10 Mo par photo
+FIELD_PHOTO_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "heic"}
 
 
 def _now():
@@ -1674,26 +1680,84 @@ def field_my_fiches():
     })
 
 
+@field_bp.route("/field/my-fiches/<fiche_id>/detail", methods=["GET"])
+@field_token_required
+def field_my_fiche_detail(fiche_id):
+    """Retourne le detail complet d'une fiche (comme pcorg_detail cote cockpit)
+    incluant la chronologie, les champs de contenu, et les coordonnees."""
+    device = request.device
+    name = device.get("name")
+    db = _get_mongo_db()
+
+    fiche = db["pcorg"].find_one({"_id": fiche_id})
+    if not fiche:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+
+    cc = fiche.get("content_category") or {}
+    gps = fiche.get("gps") or {}
+    coords = gps.get("coordinates") if isinstance(gps, dict) else None
+    lat = lng = None
+    if isinstance(coords, list) and len(coords) >= 2:
+        try:
+            lat = float(coords[1])
+            lng = float(coords[0])
+        except (TypeError, ValueError):
+            pass
+
+    ts = fiche.get("ts")
+    close_ts = fiche.get("close_ts")
+    comment_history = fiche.get("comment_history") or []
+
+    return jsonify({
+        "ok": True,
+        "id": str(fiche["_id"]),
+        "category": fiche.get("category"),
+        "text": fiche.get("text") or "",
+        "text_full": fiche.get("text_full") or "",
+        "comment": fiche.get("comment") or "",
+        "comment_history": comment_history,
+        "niveau_urgence": fiche.get("niveau_urgence"),
+        "ts": ts.isoformat() if isinstance(ts, datetime) else ts,
+        "close_ts": close_ts.isoformat() if isinstance(close_ts, datetime) else close_ts,
+        "operator": fiche.get("operator"),
+        "operator_close": fiche.get("operator_close"),
+        "area": (fiche.get("area") or {}).get("desc") if isinstance(fiche.get("area"), dict) else None,
+        "content_category": cc,
+        "status_code": fiche.get("status_code"),
+        "lat": lat,
+        "lng": lng,
+        "server": fiche.get("server"),
+    })
+
+
 @field_bp.route("/field/my-fiches/<fiche_id>/comment", methods=["POST"])
 @field_token_required
-def field_my_fiche_comment(fiche_id):
-    """Ajoute un commentaire sur une fiche PCORG assignee a la tablette.
-    L'auteur est le nom de la tablette ; la tablette ne peut commenter que
-    les fiches qui lui sont assignees."""
-    data = request.get_json(silent=True) or {}
-    comment = (data.get("comment") or "").strip()
-    if not comment:
-        return jsonify({"ok": False, "error": "empty_comment"}), 400
-    if len(comment) > 2000:
-        return jsonify({"ok": False, "error": "comment_too_long"}), 400
-
+def field_my_fiche_comment_with_photo(fiche_id):
+    """Ajoute un commentaire avec photo optionnelle sur une fiche.
+    Accept multipart/form-data ou application/json.
+    multipart : champ 'comment' + fichier 'photo' optionnel.
+    json : champ 'comment'."""
     device = request.device
     name = device.get("name")
     if not name:
         return jsonify({"ok": False, "error": "unnamed_device"}), 400
 
+    # Detect content type
+    is_multipart = request.content_type and "multipart" in request.content_type
+    if is_multipart:
+        comment = (request.form.get("comment") or "").strip()
+        photo_file = request.files.get("photo")
+    else:
+        data = request.get_json(silent=True) or {}
+        comment = (data.get("comment") or "").strip()
+        photo_file = None
+
+    if not comment and not photo_file:
+        return jsonify({"ok": False, "error": "empty_comment"}), 400
+    if comment and len(comment) > 2000:
+        return jsonify({"ok": False, "error": "comment_too_long"}), 400
+
     db = _get_mongo_db()
-    # L'_id dans pcorg est une chaine (UUID), pas ObjectId -> on cherche par _id brut
     fiche = db["pcorg"].find_one({"_id": fiche_id})
     if not fiche:
         return jsonify({"ok": False, "error": "not_found"}), 404
@@ -1702,19 +1766,71 @@ def field_my_fiche_comment(fiche_id):
     if (cc.get("patrouille") or "") != name:
         return jsonify({"ok": False, "error": "not_assigned"}), 403
 
+    # Handle photo upload
+    photo_url = None
+    if photo_file and photo_file.filename:
+        ext = (photo_file.filename.rsplit(".", 1)[-1] if "." in photo_file.filename else "").lower()
+        if ext not in FIELD_PHOTO_EXTENSIONS:
+            return jsonify({"ok": False, "error": "invalid_photo_format"}), 400
+
+        # Read and check size
+        photo_data = photo_file.read()
+        if len(photo_data) > FIELD_PHOTO_MAX_SIZE:
+            return jsonify({"ok": False, "error": "photo_too_large"}), 400
+
+        import uuid as _uuid
+        photo_id = str(_uuid.uuid4())
+        event = device.get("event") or "unknown"
+        year = device.get("year") or "unknown"
+        sub_dir = os.path.join(event, str(year))
+        full_dir = os.path.join(FIELD_PHOTOS_DIR, sub_dir)
+        os.makedirs(full_dir, exist_ok=True)
+
+        safe_name = secure_filename(photo_file.filename) or "photo.jpg"
+        filename = "{}_{}.{}".format(photo_id[:8], safe_name.rsplit(".", 1)[0][:20], ext)
+        filepath = os.path.join(full_dir, filename)
+        with open(filepath, "wb") as fp:
+            fp.write(photo_data)
+
+        photo_url = "/field/photos/{}/{}".format(sub_dir, filename)
+
     entry = {
         "ts": _now(),
-        "text": comment,
+        "text": comment or "",
         "operator": "field:" + name,
     }
+    if photo_url:
+        entry["photo"] = photo_url
+
+    update_sets = {}
+    if comment:
+        update_sets["comment"] = comment
+
     db["pcorg"].update_one(
         {"_id": fiche_id},
         {
-            "$set": {"comment": comment},
+            "$set": update_sets,
             "$push": {"comment_history": entry},
         },
     )
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "photo": photo_url})
+
+
+@field_bp.route("/field/photos/<path:photo_path>", methods=["GET"])
+def field_photo_serve(photo_path):
+    """Sert une photo uploadee depuis une tablette.
+    Pas d'auth field_token : les photos sont visibles par les operateurs cockpit."""
+    safe_path = os.path.normpath(photo_path)
+    if ".." in safe_path or safe_path.startswith("/"):
+        abort(404)
+    full = os.path.join(FIELD_PHOTOS_DIR, safe_path)
+    if not os.path.isfile(full):
+        abort(404)
+    directory = os.path.dirname(full)
+    filename = os.path.basename(full)
+    resp = send_from_directory(directory, filename)
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
 
 
 @field_bp.route("/field/sos", methods=["POST"])

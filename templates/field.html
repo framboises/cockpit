@@ -217,7 +217,7 @@
     </div>
   </div>
 
-  <!-- Modal message -->
+  <!-- Modal message (inbox) -->
   <div class="field-modal" id="msg-modal" hidden>
     <div class="field-modal-box">
       <div class="field-modal-header">
@@ -235,6 +235,36 @@
         <button class="btn-primary" id="msg-modal-ack">J'ai compris</button>
       </div>
     </div>
+  </div>
+
+  <!-- Modal detail fiche d'intervention -->
+  <div class="field-modal" id="fiche-detail-modal" hidden>
+    <div class="field-modal-box fiche-detail-box">
+      <div class="fiche-detail-header" id="fiche-detail-header">
+        <div class="fiche-detail-head-left">
+          <span class="material-symbols-outlined fiche-detail-icon" id="fiche-detail-icon">description</span>
+          <div>
+            <div class="fiche-detail-cat" id="fiche-detail-cat">-</div>
+            <div class="fiche-detail-urgency" id="fiche-detail-urgency"></div>
+          </div>
+        </div>
+        <button class="icon-btn" id="fiche-detail-close" title="Fermer">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="fiche-detail-body" id="fiche-detail-body">
+        <div class="fiche-detail-loading">Chargement...</div>
+      </div>
+      <div class="fiche-detail-actions" id="fiche-detail-actions"></div>
+    </div>
+  </div>
+
+  <!-- Lightbox photo plein ecran -->
+  <div class="field-lightbox" id="field-lightbox" hidden>
+    <img id="field-lightbox-img" src="" alt="">
+    <button class="field-lightbox-close" id="field-lightbox-close">
+      <span class="material-symbols-outlined">close</span>
+    </button>
   </div>
 
   <!-- Toast -->

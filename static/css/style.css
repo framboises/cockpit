@@ -7392,6 +7392,61 @@ th span { font-size: 0.88rem; font-weight: 700; }
   font-style: italic; color: var(--muted); font-size: 0.72rem;
 }
 
+/* Photo thumbnails in chronology (WhatsApp-style) */
+.pcorg-chrono-photo-wrap {
+  margin-top: 4px;
+}
+.pcorg-chrono-photo {
+  max-width: 200px; max-height: 160px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  object-fit: cover;
+  transition: opacity 0.15s;
+}
+.pcorg-chrono-photo:hover { opacity: 0.85; }
+.pcorg-popup-chrono-photo {
+  display: block;
+  max-width: 120px; max-height: 80px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  object-fit: cover;
+  margin-top: 3px;
+}
+.pcorg-popup-chrono-photo:hover { opacity: 0.8; }
+
+/* Photo lightbox overlay */
+.pcorg-lightbox {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.88);
+  z-index: 99999;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  animation: pcorg-lb-fade 0.15s ease-out;
+}
+@keyframes pcorg-lb-fade { from { opacity: 0; } to { opacity: 1; } }
+.pcorg-lightbox img {
+  max-width: 92%; max-height: 92%;
+  object-fit: contain;
+  border-radius: 6px;
+  cursor: default;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+}
+.pcorg-lightbox-close {
+  position: absolute;
+  top: 16px; right: 16px;
+  background: rgba(255,255,255,0.15);
+  backdrop-filter: blur(4px);
+  border: none; color: #fff;
+  border-radius: 50%;
+  width: 40px; height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.pcorg-lightbox-close:hover { background: rgba(255,255,255,0.25); }
+
 /* Comment form */
 .pcorg-comment-form {
   display: flex; gap: 8px; align-items: flex-start;

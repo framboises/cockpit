@@ -1740,60 +1740,362 @@
     });
   }
 
+  // -- Category styles (mirrors pcorg.js)
+  var FICHE_CAT_STYLES = {
+    "PCO.Secours":      { color: "#dc2626", icon: "local_hospital" },
+    "PCO.Securite":     { color: "#ef4444", icon: "shield" },
+    "PCO.Technique":    { color: "#f59e0b", icon: "build" },
+    "PCO.Flux":         { color: "#0d9488", icon: "swap_calls" },
+    "PCO.Fourriere":    { color: "#6b7280", icon: "directions_car" },
+    "PCO.Information":  { color: "#2563eb", icon: "info" },
+    "PCO.MainCourante": { color: "#8b5cf6", icon: "edit_note" },
+  };
+  var FICHE_URGENCY_COLORS = { EU: "#dc2626", UA: "#f97316", UR: "#eab308", IMP: "#6b7280" };
+
+  function ficheStyle(cat) {
+    return FICHE_CAT_STYLES[cat] || { color: "#94a3b8", icon: "description" };
+  }
+
+  function _pad2(n) { return (n < 10 ? "0" : "") + n; }
+
   function showFicheModal(f) {
-    // Reutilise le modal msg-modal avec un bouton "Commentaire"
-    var modal = $("msg-modal");
-    var title = $("msg-modal-title");
-    var body = $("msg-modal-body");
-    var ack = $("msg-modal-ack");
-    var routeBtn = $("msg-modal-route");
+    var modal = $("fiche-detail-modal");
     if (!modal) return;
+    var st = ficheStyle(f.category);
 
-    modal.classList.remove("priority-high", "type-alert", "type-route", "type-instruction");
-    modal.classList.add("type-instruction");
-    if (f.niveau_urgence && f.niveau_urgence !== "IMP") modal.classList.add("priority-high");
-
-    title.textContent = (f.niveau_urgence ? "[" + f.niveau_urgence + "] " : "")
-      + (f.category || "Fiche PCORG");
-    var lines = [];
-    if (f.text) lines.push(f.text);
-    if (f.area) lines.push("\nZone : " + f.area);
-    if (f.comment) lines.push("\nCommentaire : " + f.comment);
-    if (f.operator) lines.push("\nCreee par : " + f.operator);
-    body.textContent = lines.join("");
-
-    // Bouton itineraire si coordonnees dispo
-    if (routeBtn) {
-      if (f.lat != null && f.lng != null) {
-        routeBtn.hidden = false;
-        routeBtn.onclick = function () { openInGoogleMaps([f.lat, f.lng]); };
-      } else {
-        routeBtn.hidden = true;
-      }
-    }
-
-    ack.textContent = "Ajouter un commentaire";
-    ack.onclick = function () { openFicheCommentDialog(f); };
-
-    // Bouton cloturer pour les fiches creees par la tablette
-    var cc = f.content_category || {};
-    var closable = !!(cc.field_created || cc.field_sos);
-    var closeBtn = $("msg-modal-close-fiche");
-    if (!closeBtn) {
-      closeBtn = document.createElement("button");
-      closeBtn.id = "msg-modal-close-fiche";
-      closeBtn.className = "btn-danger";
-      closeBtn.innerHTML = "<span class='material-symbols-outlined' style='vertical-align:middle'>check_circle</span> Cloturer";
-      ack.parentNode.insertBefore(closeBtn, ack);
-    }
-    if (closable) {
-      closeBtn.hidden = false;
-      closeBtn.onclick = function () { closeFicheFromField(f); };
+    // Header
+    var header = $("fiche-detail-header");
+    header.style.background = "linear-gradient(135deg, " + st.color + "cc, " + st.color + "88)";
+    $("fiche-detail-icon").textContent = st.icon;
+    $("fiche-detail-cat").textContent = f.category || "Fiche";
+    var urgEl = $("fiche-detail-urgency");
+    if (f.niveau_urgence) {
+      urgEl.textContent = f.niveau_urgence;
+      urgEl.style.background = FICHE_URGENCY_COLORS[f.niveau_urgence] || "#6b7280";
+      urgEl.hidden = false;
     } else {
-      closeBtn.hidden = true;
+      urgEl.hidden = true;
     }
+
+    // Body placeholder
+    var body = $("fiche-detail-body");
+    body.innerHTML = "<div class='fiche-detail-loading'>Chargement...</div>";
+
+    // Actions (built once detail loads)
+    var actionsEl = $("fiche-detail-actions");
+    actionsEl.textContent = "";
 
     modal.hidden = false;
+
+    // Fetch full detail
+    fetch("/field/my-fiches/" + encodeURIComponent(f.id) + "/detail", {
+      headers: { "Accept": "application/json" },
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.ok) {
+          body.innerHTML = "<div class='fiche-detail-loading'>Erreur chargement</div>";
+          return;
+        }
+        renderFicheDetail(d, f, st);
+      })
+      .catch(function () {
+        // Offline fallback: render from summary data
+        renderFicheDetailFallback(f, st);
+      });
+  }
+
+  function renderFicheDetail(d, f, st) {
+    var body = $("fiche-detail-body");
+    body.textContent = "";
+
+    // Description
+    var descText = d.text_full || d.text || "";
+    if (descText) {
+      var desc = document.createElement("div");
+      desc.className = "fd-desc";
+      desc.style.borderLeftColor = st.color;
+      desc.textContent = descText;
+      body.appendChild(desc);
+    }
+
+    // Info fields
+    var fields = document.createElement("div");
+    fields.className = "fd-fields";
+    function addF(label, val) {
+      if (!val) return;
+      var row = document.createElement("div");
+      row.className = "fd-field";
+      var lbl = document.createElement("span");
+      lbl.className = "fd-field-lbl";
+      lbl.textContent = label;
+      var v = document.createElement("span");
+      v.className = "fd-field-val";
+      v.textContent = val;
+      row.appendChild(lbl);
+      row.appendChild(v);
+      fields.appendChild(row);
+    }
+    addF("Operateur", d.operator);
+    if (d.ts) {
+      try { addF("Ouverture", new Date(d.ts).toLocaleString("fr-FR")); } catch (e) {}
+    }
+    if (d.close_ts) {
+      try { addF("Cloture", new Date(d.close_ts).toLocaleString("fr-FR")); } catch (e) {}
+    }
+    if (d.operator_close) addF("Clos par", d.operator_close);
+    addF("Zone", d.area);
+    var cc = d.content_category || {};
+    addF("Carroyage", cc.carroye);
+    addF("Patrouille", cc.patrouille);
+    addF("Appelant", cc.appelant);
+    if (d.status_code === 10) addF("Statut", "TERMINE");
+    if (fields.childNodes.length) body.appendChild(fields);
+
+    // Chronology
+    var history = d.comment_history || [];
+    if (history.length > 0) {
+      var secTitle = document.createElement("div");
+      secTitle.className = "fd-section";
+      secTitle.textContent = "Chronologie";
+      body.appendChild(secTitle);
+
+      var timeline = document.createElement("div");
+      timeline.className = "fd-timeline";
+      history.forEach(function (entry) {
+        var isStatus = entry.text && entry.text.indexOf("Statut:") === 0;
+        var ent = document.createElement("div");
+        ent.className = "fd-chrono-entry" + (isStatus ? " fd-status-change" : "");
+
+        var dot = document.createElement("span");
+        dot.className = "fd-chrono-dot";
+        dot.style.background = isStatus ? "#94a3b8" : st.color;
+        ent.appendChild(dot);
+
+        var head = document.createElement("div");
+        head.className = "fd-chrono-head";
+        var tsSpan = document.createElement("span");
+        tsSpan.className = "fd-chrono-ts";
+        try {
+          var dt = new Date(entry.ts);
+          tsSpan.textContent = _pad2(dt.getHours()) + ":" + _pad2(dt.getMinutes());
+        } catch (e) { tsSpan.textContent = ""; }
+        head.appendChild(tsSpan);
+        var opSpan = document.createElement("span");
+        opSpan.className = "fd-chrono-op";
+        opSpan.textContent = entry.operator || "";
+        head.appendChild(opSpan);
+        ent.appendChild(head);
+
+        var txt = entry.text || entry.comment || "";
+        if (txt) {
+          var txtEl = document.createElement("div");
+          txtEl.className = "fd-chrono-text";
+          txtEl.textContent = txt;
+          ent.appendChild(txtEl);
+        }
+
+        // Photo thumbnail
+        if (entry.photo) {
+          var thumb = document.createElement("img");
+          thumb.className = "fd-chrono-photo";
+          thumb.src = entry.photo;
+          thumb.alt = "Photo";
+          thumb.onclick = function () { openLightbox(entry.photo); };
+          ent.appendChild(thumb);
+        }
+
+        timeline.appendChild(ent);
+      });
+      body.appendChild(timeline);
+    }
+
+    // Comment form with photo attachment
+    if (d.status_code !== 10) {
+      var secComment = document.createElement("div");
+      secComment.className = "fd-section";
+      secComment.textContent = "Ajouter un commentaire";
+      body.appendChild(secComment);
+
+      var form = document.createElement("div");
+      form.className = "fd-comment-form";
+
+      var textarea = document.createElement("textarea");
+      textarea.className = "fd-comment-input";
+      textarea.rows = 2;
+      textarea.placeholder = "Commentaire, observation...";
+      form.appendChild(textarea);
+
+      var photoRow = document.createElement("div");
+      photoRow.className = "fd-photo-row";
+
+      var fileInput = document.createElement("input");
+      fileInput.type = "file";
+      fileInput.accept = "image/*";
+      fileInput.capture = "environment";
+      fileInput.style.display = "none";
+      fileInput.id = "fd-photo-input";
+
+      var photoBtn = document.createElement("button");
+      photoBtn.className = "fd-photo-btn";
+      photoBtn.innerHTML = "<span class='material-symbols-outlined'>photo_camera</span>";
+      photoBtn.title = "Prendre une photo";
+      photoBtn.onclick = function () { fileInput.click(); };
+
+      var preview = document.createElement("div");
+      preview.className = "fd-photo-preview";
+      preview.id = "fd-photo-preview";
+      preview.hidden = true;
+
+      fileInput.onchange = function () {
+        if (fileInput.files && fileInput.files[0]) {
+          var reader = new FileReader();
+          reader.onload = function (e) {
+            preview.innerHTML = "";
+            var img = document.createElement("img");
+            img.src = e.target.result;
+            preview.appendChild(img);
+            var removeBtn = document.createElement("button");
+            removeBtn.className = "fd-photo-remove";
+            removeBtn.innerHTML = "<span class='material-symbols-outlined'>close</span>";
+            removeBtn.onclick = function (ev) {
+              ev.stopPropagation();
+              fileInput.value = "";
+              preview.hidden = true;
+            };
+            preview.appendChild(removeBtn);
+            preview.hidden = false;
+          };
+          reader.readAsDataURL(fileInput.files[0]);
+        }
+      };
+
+      photoRow.appendChild(fileInput);
+      photoRow.appendChild(photoBtn);
+      photoRow.appendChild(preview);
+
+      var sendBtn = document.createElement("button");
+      sendBtn.className = "btn-primary fd-send-btn";
+      sendBtn.innerHTML = "<span class='material-symbols-outlined'>send</span> Envoyer";
+      sendBtn.onclick = function () {
+        submitFicheComment(d.id, textarea, fileInput, preview, sendBtn);
+      };
+
+      form.appendChild(photoRow);
+      form.appendChild(sendBtn);
+      body.appendChild(form);
+    }
+
+    // Action buttons
+    buildFicheActions(d, f);
+  }
+
+  function renderFicheDetailFallback(f, st) {
+    var body = $("fiche-detail-body");
+    body.textContent = "";
+    var desc = document.createElement("div");
+    desc.className = "fd-desc";
+    desc.style.borderLeftColor = st.color;
+    desc.textContent = f.text || "(pas de description)";
+    body.appendChild(desc);
+    var fields = document.createElement("div");
+    fields.className = "fd-fields";
+    if (f.area) {
+      var row = document.createElement("div"); row.className = "fd-field";
+      var lbl = document.createElement("span"); lbl.className = "fd-field-lbl"; lbl.textContent = "Zone";
+      var v = document.createElement("span"); v.className = "fd-field-val"; v.textContent = f.area;
+      row.appendChild(lbl); row.appendChild(v); fields.appendChild(row);
+    }
+    if (f.operator) {
+      var row2 = document.createElement("div"); row2.className = "fd-field";
+      var lbl2 = document.createElement("span"); lbl2.className = "fd-field-lbl"; lbl2.textContent = "Operateur";
+      var v2 = document.createElement("span"); v2.className = "fd-field-val"; v2.textContent = f.operator;
+      row2.appendChild(lbl2); row2.appendChild(v2); fields.appendChild(row2);
+    }
+    body.appendChild(fields);
+    var note = document.createElement("div");
+    note.className = "fd-offline-note";
+    note.textContent = "Details complets indisponibles hors ligne.";
+    body.appendChild(note);
+    buildFicheActions({ content_category: f.content_category || {}, status_code: 0, id: f.id, lat: f.lat, lng: f.lng }, f);
+  }
+
+  function buildFicheActions(d, f) {
+    var actionsEl = $("fiche-detail-actions");
+    actionsEl.textContent = "";
+
+    // Route button
+    var lat = d.lat != null ? d.lat : f.lat;
+    var lng = d.lng != null ? d.lng : f.lng;
+    if (lat != null && lng != null) {
+      var routeBtn = document.createElement("button");
+      routeBtn.className = "btn-primary";
+      routeBtn.innerHTML = "<span class='material-symbols-outlined' style='vertical-align:middle'>navigation</span> Itineraire";
+      routeBtn.onclick = function () { openInGoogleMaps([lat, lng]); };
+      actionsEl.appendChild(routeBtn);
+    }
+
+    // Close button for field-created fiches
+    var cc = d.content_category || {};
+    if (cc.field_created || cc.field_sos) {
+      if (d.status_code !== 10) {
+        var closeBtn = document.createElement("button");
+        closeBtn.className = "btn-danger";
+        closeBtn.innerHTML = "<span class='material-symbols-outlined' style='vertical-align:middle'>check_circle</span> Cloturer";
+        closeBtn.onclick = function () { closeFicheFromField(f); };
+        actionsEl.appendChild(closeBtn);
+      }
+    }
+  }
+
+  function submitFicheComment(ficheId, textarea, fileInput, preview, sendBtn) {
+    var comment = textarea.value.trim();
+    var hasPhoto = fileInput.files && fileInput.files.length > 0;
+    if (!comment && !hasPhoto) {
+      toast("Ecrivez un commentaire ou prenez une photo", "err");
+      return;
+    }
+    sendBtn.disabled = true;
+
+    var fd = new FormData();
+    fd.append("comment", comment);
+    if (hasPhoto) {
+      fd.append("photo", fileInput.files[0]);
+    }
+
+    fetch("/field/my-fiches/" + encodeURIComponent(ficheId) + "/comment", {
+      method: "POST",
+      body: fd,
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        sendBtn.disabled = false;
+        if (data && data.ok) {
+          toast("Commentaire envoye");
+          // Refresh the detail modal
+          var fiche = state.fiches.find(function (fi) { return fi.id === ficheId; });
+          if (fiche) {
+            showFicheModal(fiche);
+          } else {
+            $("fiche-detail-modal").hidden = true;
+          }
+          pollFiches();
+        } else {
+          toast("Echec : " + ((data && data.error) || "?"), "err");
+        }
+      })
+      .catch(function () {
+        sendBtn.disabled = false;
+        toast("Erreur reseau", "err");
+      });
+  }
+
+  function openLightbox(src) {
+    var lb = $("field-lightbox");
+    var img = $("field-lightbox-img");
+    if (!lb || !img) return;
+    img.src = src;
+    lb.hidden = false;
   }
 
   function closeFicheFromField(f) {
@@ -1805,7 +2107,7 @@
       .then(function (data) {
         if (data && data.ok) {
           toast("Fiche cloturee", "ok");
-          $("msg-modal").hidden = true;
+          $("fiche-detail-modal").hidden = true;
           state.patrolStatus = "patrouille";
           state.activeFicheId = null;
           updateStatusBar();
@@ -1815,34 +2117,6 @@
         }
       })
       .catch(function () { toast("Erreur reseau", "err"); });
-  }
-
-  function openFicheCommentDialog(f) {
-    fieldPrompt("Commentaire sur la fiche :\n" + (f.text || "").slice(0, 80), {
-      okLabel: "Envoyer",
-    }).then(function (comment) {
-      if (comment == null) return;
-      comment = comment.trim();
-      if (!comment) return;
-      fetch("/field/my-fiches/" + encodeURIComponent(f.id) + "/comment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ comment: comment }),
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          if (data && data.ok) {
-            toast("Commentaire envoye");
-            $("msg-modal").hidden = true;
-            // Reset du bouton ack pour le prochain message
-            $("msg-modal-ack").textContent = "J'ai compris";
-            pollFiches();
-          } else {
-            toast("Echec : " + ((data && data.error) || "?"), "err");
-          }
-        })
-        .catch(function () { toast("Erreur reseau", "err"); });
-    });
   }
 
   // ---------------------------------------------------------------------
@@ -2038,6 +2312,18 @@
     $("inbox-close").addEventListener("click", function () { $("inbox-panel").hidden = true; });
     $("btn-sos").addEventListener("click", triggerSos);
     $("msg-modal-close").addEventListener("click", function () { $("msg-modal").hidden = true; });
+
+    // Fiche detail modal close
+    var fdClose = $("fiche-detail-close");
+    if (fdClose) fdClose.addEventListener("click", function () { $("fiche-detail-modal").hidden = true; });
+
+    // Lightbox close
+    var lbClose = $("field-lightbox-close");
+    if (lbClose) lbClose.addEventListener("click", function () { $("field-lightbox").hidden = true; });
+    var lb = $("field-lightbox");
+    if (lb) lb.addEventListener("click", function (e) {
+      if (e.target === lb) lb.hidden = true;
+    });
 
     // Statut patrouille
     var statusBtn = $("status-btn");

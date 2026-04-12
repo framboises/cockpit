@@ -7,7 +7,7 @@
      - API (/field/*) : network-first, fallback silencieux offline
    ===================================================================== */
 
-const SW_VERSION = "field-sw-v4";
+const SW_VERSION = "field-sw-v5";
 const APP_SHELL_CACHE = "field-shell-" + SW_VERSION;
 const TILE_CACHE = "field-tiles-" + SW_VERSION;
 const API_CACHE = "field-api-" + SW_VERSION;
@@ -62,7 +62,7 @@ function isTileRequest(url) {
 }
 
 function isApiRequest(url) {
-  return /\/field\/(inbox|me|my-fiches|position|resources\/(grid-ref|3p|gm-))/.test(url);
+  return /\/field\/(inbox|me|my-fiches|position|photos\/|resources\/(grid-ref|3p|gm-))/.test(url);
 }
 
 function isShellRequest(url, request) {

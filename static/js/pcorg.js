@@ -1100,6 +1100,15 @@
           txt.textContent = entryText;
           ent.appendChild(txt);
         }
+        if (entry.photo) {
+          var photoWrap = mkEl("div", "pcorg-chrono-photo-wrap");
+          var img = mkEl("img", "pcorg-chrono-photo");
+          img.src = entry.photo;
+          img.alt = "Photo terrain";
+          img.addEventListener("click", function () { openPhotoLightbox(entry.photo); });
+          photoWrap.appendChild(img);
+          ent.appendChild(photoWrap);
+        }
         timeline.appendChild(ent);
       });
       body.appendChild(timeline);
@@ -1962,6 +1971,13 @@
                   txt.textContent = entry.text;
                   row.appendChild(txt);
                 }
+                if (entry.photo) {
+                  var pImg = mkEl("img", "pcorg-popup-chrono-photo");
+                  pImg.src = entry.photo;
+                  pImg.alt = "Photo";
+                  pImg.addEventListener("click", function () { openPhotoLightbox(entry.photo); });
+                  row.appendChild(pImg);
+                }
                 cDiv.appendChild(row);
               });
             })
@@ -1969,6 +1985,30 @@
         };
       })(item.id, specDiv, chronoDiv, st.color, item.category, item, marker, opVal));
     });
+  }
+
+  // ── Photo lightbox ─────────────────────────────────────────────────────
+  function openPhotoLightbox(src) {
+    var existing = document.getElementById("pcorg-photo-lightbox");
+    if (existing) existing.remove();
+    var overlay = document.createElement("div");
+    overlay.id = "pcorg-photo-lightbox";
+    overlay.className = "pcorg-lightbox";
+    overlay.addEventListener("click", function (e) {
+      if (e.target === overlay || e.target.classList.contains("pcorg-lightbox-close")) {
+        overlay.remove();
+      }
+    });
+    var img = document.createElement("img");
+    img.src = src;
+    img.alt = "Photo terrain";
+    overlay.appendChild(img);
+    var closeBtn = document.createElement("button");
+    closeBtn.className = "pcorg-lightbox-close";
+    closeBtn.innerHTML = "<span class='material-symbols-outlined'>close</span>";
+    closeBtn.addEventListener("click", function () { overlay.remove(); });
+    overlay.appendChild(closeBtn);
+    document.body.appendChild(overlay);
   }
 
   function flyToPin(lat, lon) {
