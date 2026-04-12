@@ -18,6 +18,24 @@ services:
       - waha_sessions:/app/.sessions
       - waha_data:/app/.media
 
+  valhalla:
+    image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+    container_name: cockpit-valhalla
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    volumes:
+      - valhalla_data:/custom_files
+    environment:
+      - tile_urls=https://download.geofabrik.de/europe/france/pays-de-la-loire-latest.osm.pbf
+      - server_threads=2
+      - use_tiles_ignore_pbf=True
+      - build_elevation=False
+      - build_admins=False
+      - build_time_zones=False
+      - force_rebuild=False
+
 volumes:
   waha_sessions:
   waha_data:
+  valhalla_data:
