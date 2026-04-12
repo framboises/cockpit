@@ -1966,6 +1966,8 @@
     }
     var first = newOnes[0];
     toast("Nouvelle fiche : " + (first.text || "(sans texte)").slice(0, 60), "warn");
+    // Son d'alerte pour signifier l'arrivee d'une fiche
+    playDispatchAlarm();
     // Vibration pour alerter le porteur de la tablette
     try {
       if (navigator.vibrate) {
@@ -2362,6 +2364,15 @@
 
     // Route button only for fiches NOT created by this tablet (dispatched from cockpit)
     if (!isFieldCreated) {
+      // "Confirmer la prise en compte" — only if not already in intervention/sur_place
+      if (d.status_code !== 10 && state.patrolStatus !== "intervention" && state.patrolStatus !== "sur_place") {
+        var ackBtn = document.createElement("button");
+        ackBtn.className = "btn-confirm-ack";
+        ackBtn.innerHTML = "<span class='material-symbols-outlined' style='vertical-align:middle'>check_circle</span> Confirmer la prise en compte";
+        ackBtn.onclick = function () { confirmFicheAck(f, ackBtn); };
+        actionsEl.appendChild(ackBtn);
+      }
+
       var lat = d.lat != null ? d.lat : f.lat;
       var lng = d.lng != null ? d.lng : f.lng;
       if (lat != null && lng != null) {
@@ -2383,6 +2394,49 @@
         actionsEl.appendChild(closeBtn);
       }
     }
+  }
+
+  function confirmFicheAck(f, btn) {
+    btn.disabled = true;
+    // 1) Change status to intervention
+    fetch("/field/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "intervention" }),
+    })
+      .then(function (r) {
+        if (r.status === 401) { return handleSessionLost(); }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data || !data.ok) {
+          toast("Erreur changement statut", "err");
+          btn.disabled = false;
+          return;
+        }
+        state.patrolStatus = "intervention";
+        state.activeFicheId = f.id;
+        updateStatusBar();
+        // 2) Add chronology entry
+        var fd = new FormData();
+        fd.append("comment", "Prise en compte de la fiche et deplacement vers le lieu de l'intervention");
+        return fetch("/field/my-fiches/" + encodeURIComponent(f.id) + "/comment", {
+          method: "POST",
+          body: fd,
+        });
+      })
+      .then(function (r) { if (r && r.json) return r.json(); })
+      .then(function (data) {
+        btn.disabled = false;
+        toast("Intervention confirmee", "ok");
+        // Refresh fiche detail
+        $("fiche-detail-modal").hidden = true;
+        pollFiches();
+      })
+      .catch(function () {
+        btn.disabled = false;
+        toast("Erreur reseau", "err");
+      });
   }
 
   function submitFicheComment(ficheId, textarea, fileInput, preview, sendBtn) {
@@ -2603,6 +2657,29 @@
       gain.connect(ctx.destination);
       osc.start(t);
       osc.stop(t + 1.5);
+    } catch (e) { /* ignore audio errors */ }
+  }
+
+  function playDispatchAlarm() {
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var t = ctx.currentTime;
+      // Two-tone rising alert (distinct from SOS)
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(523, t);       // C5
+      osc.frequency.setValueAtTime(659, t + 0.2);  // E5
+      osc.frequency.setValueAtTime(784, t + 0.4);  // G5
+      osc.frequency.setValueAtTime(659, t + 0.6);  // E5
+      osc.frequency.setValueAtTime(784, t + 0.8);  // G5
+      osc.frequency.setValueAtTime(1047, t + 1.0); // C6
+      gain.gain.setValueAtTime(0.5, t);
+      gain.gain.linearRampToValueAtTime(0, t + 1.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 1.3);
     } catch (e) { /* ignore audio errors */ }
   }
 

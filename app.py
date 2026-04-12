@@ -3223,6 +3223,46 @@ def _engage_field_device(patrouille_name, fiche_id, event, year):
     )
 
 
+def _disengage_field_device(doc, fiche_id):
+    """Quand une fiche est cloturee, remet la tablette associee en patrouille."""
+    try:
+        cc = (doc or {}).get("content_category") or {}
+        patrouille_name = cc.get("patrouille")
+        if not patrouille_name:
+            return
+        event = doc.get("event") or ""
+        year = doc.get("year") or ""
+        device = db["field_devices"].find_one({
+            "name": patrouille_name,
+            "event": str(event),
+            "year": str(year),
+            "active_fiche_id": fiche_id,
+        })
+        if not device:
+            return
+        now = datetime.now(timezone.utc)
+        db["field_devices"].update_one(
+            {"_id": device["_id"]},
+            {
+                "$set": {
+                    "status": "patrouille",
+                    "status_since": now,
+                    "active_fiche_id": None,
+                },
+                "$push": {
+                    "status_history": {
+                        "status": "patrouille",
+                        "ts": now,
+                        "trigger": "cockpit_close",
+                        "fiche_id": fiche_id,
+                    },
+                },
+            },
+        )
+    except Exception:
+        pass  # non-bloquant
+
+
 def _pcorg_mk_uuid(event, year, ts_str, category, text, area_id, user_id):
     seed = (
         f"{event}|{year}|{ts_str.strip()}"
@@ -3640,7 +3680,7 @@ def pcorg_close(doc_id):
     # Lire le comment existant pour le concatener
     doc = db["pcorg"].find_one(
         {"_id": doc_id, "status_code": {"$ne": 10}},
-        {"comment": 1}
+        {"comment": 1, "content_category": 1, "event": 1, "year": 1}
     )
     if not doc:
         return jsonify({"error": "introuvable ou deja clos"}), 404
@@ -3662,6 +3702,10 @@ def pcorg_close(doc_id):
             "$push": {"comment_history": history_entry},
         }
     )
+
+    # Auto-disengage: reset tablet to "patrouille" when cockpit closes fiche
+    _disengage_field_device(doc, doc_id)
+
     return jsonify({"ok": True})
 
 

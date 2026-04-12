@@ -8122,6 +8122,24 @@ th span { font-size: 0.88rem; font-weight: 700; }
 }
 .pcorg-ctx-veh-none:hover { color: var(--cat-color, var(--text)); }
 
+/* Vehicle context-menu status indicators */
+.pcorg-ctx-veh-item { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.pcorg-ctx-veh-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pcorg-ctx-veh-status {
+  display: flex; align-items: center; gap: 3px;
+  font-size: 0.62rem; font-weight: 600; color: var(--muted);
+  white-space: nowrap; flex-shrink: 0;
+}
+.pcorg-ctx-veh-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+}
+.pcorg-ctx-veh-disabled {
+  opacity: 0.4; pointer-events: none; cursor: default;
+}
+.pcorg-ctx-veh-disabled:hover {
+  background: none; border-left-color: transparent; transform: none;
+}
+
 /* Urgency badges (listes, popups, fiche) */
 .pcorg-urgency-badge {
   display: inline-flex; align-items: center;

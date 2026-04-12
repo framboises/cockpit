@@ -347,6 +347,21 @@ body {
 }
 .btn-danger:active { background: #991b1b; }
 
+/* Confirm acknowledge button */
+.btn-confirm-ack {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: #16a34a;
+  border: 1px solid #15803d;
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-size: 14px; font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btn-confirm-ack:active { background: #15803d; }
+.btn-confirm-ack:disabled { opacity: 0.5; pointer-events: none; }
+
 /* =====================================================================
    ACTIONS (bottom bar)
    ===================================================================== */
@@ -1193,7 +1208,7 @@ body {
 .fiche-detail-actions {
   display: flex; gap: 8px; padding: 12px 14px;
   border-top: 1px solid #1e293b;
-  justify-content: flex-end;
+  justify-content: space-between;
   flex-wrap: wrap;
 }
 

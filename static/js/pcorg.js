@@ -430,9 +430,31 @@
       var isQuick = userCanFS && !!catFS[vCat];
       vehicles.forEach(function (v) {
         var vBtn = mkEl("div", "pcorg-ctx-veh-item");
-        vBtn.textContent = v.label;
+        // Resolve device status via anoloc cross-reference
+        var anoRef = typeof window.getAnolocDeviceByLabel === "function"
+          ? window.getAnolocDeviceByLabel(v.label) : null;
+        var dev = anoRef ? anoRef.device : null;
+        var dsMeta = dev ? _resolveDeviceStatus(dev) : null;
+        var isAvailable = !dsMeta || dsMeta === DEVICE_STATUS_META.patrouille
+          || dsMeta === DEVICE_STATUS_META.running;
+        // Build label with status indicator
+        var nameSpan = mkEl("span", "pcorg-ctx-veh-name");
+        nameSpan.textContent = v.label;
+        vBtn.appendChild(nameSpan);
+        if (dsMeta) {
+          var stSpan = mkEl("span", "pcorg-ctx-veh-status");
+          var dot = mkEl("span", "pcorg-ctx-veh-dot");
+          dot.style.background = dsMeta.color;
+          stSpan.appendChild(dot);
+          stSpan.appendChild(document.createTextNode(dsMeta.label));
+          vBtn.appendChild(stSpan);
+        }
+        if (!isAvailable) {
+          vBtn.classList.add("pcorg-ctx-veh-disabled");
+        }
         function onVehPick(ev) {
           ev.stopPropagation(); ev.preventDefault();
+          if (!isAvailable) return;
           hideContextMenu();
           if (isQuick) {
             quickCreate(ctxLat, ctxLon, vCat, vLevel, v.label);
@@ -2691,6 +2713,18 @@
       });
     }
 
+    // V\u00e9hicule engag\u00e9 (from linked beacon groups) — placed first for dispatch flow
+    var vehicles = vehiclesByCategory[cat];
+    if (vehicles && vehicles.length > 0) {
+      var vehNames = vehicles.map(function (v) { return v.label; });
+      addCreateSelect(container, "pcorg-c-patrouille", "V\u00e9hicule engag\u00e9", vehNames);
+      if (createPendingPatrouille) {
+        var selEl = document.getElementById("pcorg-c-patrouille");
+        if (selEl) selEl.value = createPendingPatrouille;
+        createPendingPatrouille = "";
+      }
+    }
+
     // Sous-classification from config
     var subs = extractLabels((pcorgConfig.sous_classifications || {})[cat]);
     if (subs.length > 0) {
@@ -2729,18 +2763,6 @@
       } else {
         addCreateField(container, "pcorg-c-moyens1", "Moyens engages Niv.1");
         addCreateField(container, "pcorg-c-moyens2", "Moyens engages Niv.2");
-      }
-    }
-
-    // V\u00e9hicule engag\u00e9 (from linked beacon groups)
-    var vehicles = vehiclesByCategory[cat];
-    if (vehicles && vehicles.length > 0) {
-      var vehNames = vehicles.map(function (v) { return v.label; });
-      addCreateSelect(container, "pcorg-c-patrouille", "V\u00e9hicule engag\u00e9", vehNames);
-      if (createPendingPatrouille) {
-        var selEl = document.getElementById("pcorg-c-patrouille");
-        if (selEl) selEl.value = createPendingPatrouille;
-        createPendingPatrouille = "";
       }
     }
   }
