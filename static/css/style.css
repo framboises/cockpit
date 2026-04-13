@@ -8643,30 +8643,16 @@ th span { font-size: 0.88rem; font-weight: 700; }
 
 /* Live-controle page — isolated layout */
 .app-main.hsh-page {
-  overflow-y: hidden;
-  height: 100vh;
+  overflow-y: auto;
 }
 .hsh-page #main-content.hsh-page-grid {
   display: grid !important;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  min-height: 0;
-  overflow: hidden;
   padding: 16px 20px;
 }
 .hsh-page-col {
   display: flex; flex-direction: column; gap: 16px;
-  min-height: 0; overflow-y: auto;
-}
-.hsh-stretch-card {
-  flex: 1; min-height: 0;
-  display: flex; flex-direction: column;
-}
-.hsh-stretch-card > .widget-body {
-  flex: 1; min-height: 0; overflow-y: auto;
 }
 /* Sticky headers pour les tableaux scrollables de la page admin */
 .hsh-page .widget-body thead th {

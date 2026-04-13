@@ -133,7 +133,7 @@
         if (shown.length === 0) {
           var tr = el("tr");
           var td = el("td");
-          td.setAttribute("colspan", "4");
+          td.setAttribute("colspan", "5");
           td.style.cssText = "color:var(--muted);text-align:center;padding:16px;";
           td.textContent = "Aucune erreur";
           tr.appendChild(td);
@@ -143,7 +143,7 @@
         shown.forEach(function (e) {
           var tr = el("tr");
           var cpName = (e.checkpoint && (e.checkpoint.Name || e.checkpoint.name)) || "?";
-          var typeLabel = e.type_scan === "vehicule" ? "Veh." : e.type_scan === "enfant" ? "Enf." : "Pers.";
+          var typeLabel = e.type_scan === "vehicule" ? "Veh." : e.type_scan === "enfant" ? "Enf." : e.type_scan === "accredite" ? "Accred." : "Pers.";
           [e.date_paris || "", cpName, e.status_label || e.status || "", e.direction || "", typeLabel].forEach(function (txt) {
             var td = el("td");
             td.textContent = txt;
@@ -968,6 +968,6 @@
 
   loadEvents();
   loadConfig();
-  setInterval(function () { loadStatus(); loadLiveCounters(); loadActiveCheckpoints(); loadTitresLive(); loadDebitGates(); }, 30000);
+  setInterval(function () { loadStatus(); loadErrors(); loadLiveCounters(); loadActiveCheckpoints(); loadTitresLive(); loadDebitGates(); }, 30000);
 
 })();
