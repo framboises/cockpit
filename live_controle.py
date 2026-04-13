@@ -520,11 +520,10 @@ def parse_transactions(xml_str):
 
                 if date_str:
                     try:
-                        dt_utc = datetime.datetime.strptime(
+                        # Le HSH envoie l'heure locale (Paris), pas UTC
+                        date_paris = datetime.datetime.strptime(
                             date_str, "%Y-%m-%dT%H:%M:%S"
-                        ).replace(tzinfo=datetime.timezone.utc)
-                        dt_local = dt_utc.astimezone(TZ_PARIS)
-                        date_paris = dt_local.strftime("%Y-%m-%d %H:%M:%S")
+                        ).strftime("%Y-%m-%d %H:%M:%S")
                     except Exception:
                         pass
 
@@ -600,11 +599,10 @@ def parse_transactions(xml_str):
         date_paris = date_str
         if date_str:
             try:
-                dt_utc = datetime.datetime.strptime(
+                # Le HSH envoie l'heure locale (Paris), pas UTC
+                date_paris = datetime.datetime.strptime(
                     date_str, "%Y-%m-%dT%H:%M:%S"
-                ).replace(tzinfo=datetime.timezone.utc)
-                dt_local = dt_utc.astimezone(TZ_PARIS)
-                date_paris = dt_local.strftime("%Y-%m-%d %H:%M:%S")
+                ).strftime("%Y-%m-%d %H:%M:%S")
             except Exception:
                 pass
 

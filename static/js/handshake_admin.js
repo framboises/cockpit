@@ -387,7 +387,7 @@
       // Compteurs inline
       if (doc.derniers_compteurs && doc.derniers_compteurs.current) {
         var ctr = el("span", "hsh-tree-counter");
-        ctr.textContent = doc.derniers_compteurs.current + " pers.";
+        ctr.textContent = doc.derniers_compteurs.current + " scans";
         row.appendChild(ctr);
       }
 
