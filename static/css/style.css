@@ -8653,6 +8653,8 @@ th span { font-size: 0.88rem; font-weight: 700; }
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  min-height: 0;
+  overflow: hidden;
   padding: 16px 20px;
 }
 .hsh-page-col {
