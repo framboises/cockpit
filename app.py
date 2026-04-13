@@ -3191,8 +3191,9 @@ def pcorg_detail(doc_id):
     })
 
 
-def _engage_field_device(patrouille_name, fiche_id, event, year):
-    """Si patrouille_name correspond a une tablette terrain, passe-la en intervention."""
+def _engage_field_device(patrouille_name, fiche_id, event, year, category="", text=""):
+    """Si patrouille_name correspond a une tablette terrain, passe-la en intervention
+    et envoie une notification push."""
     if not patrouille_name or not fiche_id:
         return
     device = db["field_devices"].find_one({
@@ -3221,6 +3222,20 @@ def _engage_field_device(patrouille_name, fiche_id, event, year):
             },
         },
     )
+    # Notification push vers la tablette
+    try:
+        from field import send_push_to_device
+        cat_short = (category or "Intervention").replace("PCO.", "")
+        body = (text or "Nouvelle intervention")[:120]
+        send_push_to_device(
+            db, device["_id"],
+            title="Dispatch : " + cat_short,
+            body=body,
+            url="/field",
+            tag="dispatch-" + str(fiche_id),
+        )
+    except Exception:
+        pass  # non-bloquant
 
 
 def _disengage_field_device(doc, fiche_id):
@@ -3365,7 +3380,7 @@ def pcorg_create():
     # Engager la tablette terrain si patrouille correspond
     patr = content_cat.get("patrouille", "")
     if patr:
-        _engage_field_device(patr, doc_id, event, year)
+        _engage_field_device(patr, doc_id, event, year, category=category, text=text)
 
     return jsonify({"ok": True, "id": doc_id})
 
@@ -3486,7 +3501,7 @@ def pcorg_quick_create():
 
     # Engager la tablette terrain si patrouille correspond
     if patrouille:
-        _engage_field_device(patrouille, doc_id, event, year)
+        _engage_field_device(patrouille, doc_id, event, year, category=category, text=text)
 
     return jsonify({"ok": True, "id": doc_id})
 
@@ -3495,7 +3510,7 @@ def pcorg_quick_create():
 @role_required("user")
 def pcorg_update(doc_id):
     """Met a jour les champs d'une intervention (SQL ou COCKPIT)."""
-    doc = db["pcorg"].find_one({"_id": doc_id}, {"status_code": 1, "event": 1, "year": 1})
+    doc = db["pcorg"].find_one({"_id": doc_id}, {"status_code": 1, "event": 1, "year": 1, "category": 1, "text": 1})
     if not doc:
         return jsonify({"error": "introuvable"}), 404
     if doc.get("status_code") == 10:
@@ -3544,7 +3559,10 @@ def pcorg_update(doc_id):
     # Si patrouille a ete modifie, engager la tablette terrain
     new_patr = (cc_update or {}).get("patrouille", "")
     if new_patr:
-        _engage_field_device(new_patr, doc_id, doc.get("event", ""), doc.get("year", ""))
+        cat = sets.get("category") or doc.get("category", "")
+        txt = sets.get("text") or doc.get("text", "")
+        _engage_field_device(new_patr, doc_id, doc.get("event", ""), doc.get("year", ""),
+                             category=cat, text=txt)
 
     return jsonify({"ok": True})
 

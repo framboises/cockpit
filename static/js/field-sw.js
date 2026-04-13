@@ -7,7 +7,7 @@
      - API (/field/*) : network-first, fallback silencieux offline
    ===================================================================== */
 
-const SW_VERSION = "field-sw-v10";
+const SW_VERSION = "field-sw-v11";
 const APP_SHELL_CACHE = "field-shell-" + SW_VERSION;
 const TILE_CACHE = "field-tiles-" + SW_VERSION;
 const API_CACHE = "field-api-" + SW_VERSION;
@@ -189,6 +189,43 @@ self.addEventListener("fetch", function (event) {
     );
     return;
   }
+});
+
+// ---------------------------------------------------------------------------
+// Web Push : reception et affichage de notification
+// ---------------------------------------------------------------------------
+self.addEventListener("push", function (event) {
+  if (!event.data) return;
+  var payload;
+  try { payload = event.data.json(); } catch (e) { return; }
+  var title = payload.title || "COCKPIT Field";
+  var options = {
+    body: payload.body || "",
+    icon: "/static/img/field-icon.svg",
+    badge: "/static/img/field-icon.svg",
+    tag: payload.tag || "field-push",
+    renotify: true,
+    vibrate: [200, 100, 200, 100, 400],
+    data: { url: payload.url || "/field" },
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", function (event) {
+  event.notification.close();
+  var url = (event.notification.data && event.notification.data.url) || "/field";
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then(function (list) {
+      // Focus un onglet existant si possible
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].url.indexOf("/field") !== -1 && "focus" in list[i]) {
+          return list[i].focus();
+        }
+      }
+      // Sinon ouvrir un nouvel onglet
+      if (clients.openWindow) return clients.openWindow(url);
+    })
+  );
 });
 
 // Message channel : permet a l'app de demander un flush (rien pour l'instant)

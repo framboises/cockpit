@@ -7,3 +7,4 @@ static/js/.DS_Store
 static/ressources/.DS_Store
 .claude/
 firebase-service-account.json
+vapid_private.pem

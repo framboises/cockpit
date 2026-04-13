@@ -48,6 +48,16 @@ PAIR_RATE_LIMIT_MAX = 10                     # max 10 tentatives / ip / fenetre
 FIELD_COOKIE_NAME = "field_token"
 FIELD_COOKIE_PATH = "/field"
 
+# ---------------------------------------------------------------------------
+# Web Push (VAPID)
+# ---------------------------------------------------------------------------
+# En dev, on genere les cles automatiquement dans vapid_private.pem.
+# En prod, definir VAPID_PRIVATE_KEY (contenu PEM) et VAPID_CONTACT_EMAIL.
+
+VAPID_CONTACT_EMAIL = os.getenv("VAPID_CONTACT_EMAIL", "dev@cockpit.local")
+_VAPID_PRIVATE_KEY = None
+_VAPID_PUBLIC_KEY_B64 = None
+
 # Photos
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FIELD_PHOTOS_DIR = os.path.join(SCRIPT_DIR, "uploads", "field_photos")
@@ -61,6 +71,82 @@ def _now():
 
 def _now_local():
     return datetime.now(TZ_LOCAL)
+
+
+def _init_vapid():
+    global _VAPID_PRIVATE_KEY, _VAPID_PUBLIC_KEY_B64
+    if _VAPID_PRIVATE_KEY is not None:
+        return
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives import serialization
+    import base64
+
+    env_key = os.getenv("VAPID_PRIVATE_KEY", "").strip()
+    pem_path = os.path.join(SCRIPT_DIR, "vapid_private.pem")
+
+    if env_key:
+        pem_bytes = env_key.encode("utf-8")
+    elif os.path.exists(pem_path):
+        with open(pem_path, "rb") as f:
+            pem_bytes = f.read()
+    else:
+        key = ec.generate_private_key(ec.SECP256R1())
+        pem_bytes = key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        with open(pem_path, "wb") as f:
+            f.write(pem_bytes)
+        logger.info("field: generated new VAPID key pair -> %s", pem_path)
+
+    priv = serialization.load_pem_private_key(pem_bytes, password=None)
+    _VAPID_PRIVATE_KEY = pem_bytes.decode("utf-8")
+    pub_raw = priv.public_key().public_bytes(
+        serialization.Encoding.X962,
+        serialization.PublicFormat.UncompressedPoint,
+    )
+    _VAPID_PUBLIC_KEY_B64 = base64.urlsafe_b64encode(pub_raw).decode("ascii").rstrip("=")
+
+
+def get_vapid_public_key():
+    _init_vapid()
+    return _VAPID_PUBLIC_KEY_B64
+
+
+def send_push_notification(subscription_info, title, body, url=None, tag=None):
+    """Envoie une notification push a une souscription. Silencieux en cas d'erreur."""
+    _init_vapid()
+    if not _VAPID_PRIVATE_KEY or not subscription_info:
+        return False
+    try:
+        from pywebpush import webpush
+        import json as _json
+        payload = {"title": title, "body": body}
+        if url:
+            payload["url"] = url
+        if tag:
+            payload["tag"] = tag
+        webpush(
+            subscription_info=subscription_info,
+            data=_json.dumps(payload),
+            vapid_private_key=_VAPID_PRIVATE_KEY,
+            vapid_claims={"sub": "mailto:" + VAPID_CONTACT_EMAIL},
+            timeout=5,
+        )
+        return True
+    except Exception as e:
+        logger.debug("field: push failed: %s", e)
+        return False
+
+
+def send_push_to_device(db, device_id, title, body, url=None, tag=None):
+    """Envoie un push a toutes les souscriptions d'un device."""
+    subs = list(db["field_push_subs"].find({"device_id": device_id}))
+    for sub in subs:
+        info = sub.get("subscription")
+        if info:
+            send_push_notification(info, title, body, url=url, tag=tag)
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +190,10 @@ def _ensure_indexes(db):
         # field_messages : inbox par device_id + TTL 7 jours
         db["field_messages"].create_index([("device_id", 1), ("createdAt", -1)])
         db["field_messages"].create_index("expiresAt", expireAfterSeconds=0)
+
+        # field_push_subs : souscriptions Web Push par device
+        db["field_push_subs"].create_index("device_id")
+        db["field_push_subs"].create_index("endpoint", unique=True)
     except Exception as e:
         logger.warning("field: index creation failed: %s", e)
     _INDEXES_READY = True
@@ -469,6 +559,58 @@ def field_me():
         "ok": True,
         "device": _pub_device(request.device),
     })
+
+
+# ---------------------------------------------------------------------------
+# Web Push : souscription / cle publique
+# ---------------------------------------------------------------------------
+
+@field_bp.route("/field/push/vapid-public-key", methods=["GET"])
+@field_token_required
+def field_push_vapid_key():
+    """Retourne la cle publique VAPID pour le frontend."""
+    return jsonify({"ok": True, "key": get_vapid_public_key()})
+
+
+@field_bp.route("/field/push/subscribe", methods=["POST"])
+@field_token_required
+def field_push_subscribe():
+    """Enregistre (ou met a jour) une souscription push pour cette tablette."""
+    data = request.get_json(silent=True) or {}
+    sub = data.get("subscription")
+    if not sub or not sub.get("endpoint"):
+        return jsonify({"ok": False, "error": "missing_subscription"}), 400
+
+    db = _get_mongo_db()
+    device = request.device
+    endpoint = sub["endpoint"]
+
+    db["field_push_subs"].update_one(
+        {"endpoint": endpoint},
+        {"$set": {
+            "device_id": device["_id"],
+            "device_name": device.get("name", ""),
+            "subscription": sub,
+            "updatedAt": _now(),
+        },
+        "$setOnInsert": {"createdAt": _now()}},
+        upsert=True,
+    )
+    return jsonify({"ok": True})
+
+
+@field_bp.route("/field/push/unsubscribe", methods=["POST"])
+@field_token_required
+def field_push_unsubscribe():
+    """Supprime une souscription push."""
+    data = request.get_json(silent=True) or {}
+    endpoint = (data.get("endpoint") or "").strip()
+    if not endpoint:
+        return jsonify({"ok": False, "error": "missing_endpoint"}), 400
+
+    db = _get_mongo_db()
+    db["field_push_subs"].delete_one({"endpoint": endpoint})
+    return jsonify({"ok": True})
 
 
 @field_bp.route("/field/position", methods=["POST"])
