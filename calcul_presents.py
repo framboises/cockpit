@@ -121,33 +121,32 @@ def main():
         print(f"  {len(json_source):,} transactions chargees.")
     print()
 
-    # Demander la date/heure
-    print("Format attendu : YYYY-MM-DD HH:MM (heure de Paris)")
-    print("Exemple         : 2026-04-06 16:00")
+    # Demander la date/heure de debut
+    now_paris = datetime.datetime.now(TZ_PARIS)
+    print("Depuis quelle date/heure compter les transactions ?")
+    print("Format : YYYY-MM-DD HH:MM (heure de Paris)")
+    print("Exemple : 2026-04-13 06:00")
+    print(f"Vide    = debut de la journee ({now_paris.strftime('%Y-%m-%d')} 00:00)")
     print()
-    dt_input = input("Date et heure cible : ").strip()
+    dt_input = input("Depuis : ").strip()
+
     if not dt_input:
-        print("Aucune date saisie.")
-        return
+        debut_paris = now_paris.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        try:
+            debut_paris = datetime.datetime.strptime(dt_input, "%Y-%m-%d %H:%M")
+            debut_paris = debut_paris.replace(tzinfo=TZ_PARIS)
+        except ValueError:
+            print("Format invalide. Utilisez YYYY-MM-DD HH:MM")
+            return
 
-    try:
-        dt_paris = datetime.datetime.strptime(dt_input, "%Y-%m-%d %H:%M")
-        dt_paris = dt_paris.replace(tzinfo=TZ_PARIS)
-    except ValueError:
-        print("Format invalide. Utilisez YYYY-MM-DD HH:MM")
-        return
-
-    # Debut de la journee (00:00 Paris) pour rejouer toute la journee
-    debut_journee_paris = dt_paris.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    # Convertir en string pour comparer avec date_paris (stocke en "YYYY-MM-DD HH:MM:SS")
-    debut_str = debut_journee_paris.strftime("%Y-%m-%d %H:%M:%S")
-    cible_str = dt_paris.strftime("%Y-%m-%d %H:%M:%S")
+    debut_str = debut_paris.strftime("%Y-%m-%d %H:%M:%S")
+    cible_str = now_paris.strftime("%Y-%m-%d %H:%M:%S")
 
     print()
     print(f"Calcul des presents dans ENCEINTE GENERALE")
     print(f"  Du    : {debut_str} (Paris)")
-    print(f"  Au    : {cible_str} (Paris)")
+    print(f"  Au    : {cible_str} (Paris) — maintenant")
     print()
 
     # Charger le cache des titres

@@ -8657,7 +8657,7 @@ th span { font-size: 0.88rem; font-weight: 700; }
 }
 .hsh-page-col {
   display: flex; flex-direction: column; gap: 16px;
-  min-height: 0; overflow: hidden;
+  min-height: 0; overflow-y: auto;
 }
 .hsh-stretch-card {
   flex: 1; min-height: 0;
@@ -8665,6 +8665,11 @@ th span { font-size: 0.88rem; font-weight: 700; }
 }
 .hsh-stretch-card > .widget-body {
   flex: 1; min-height: 0; overflow-y: auto;
+}
+/* Sticky headers pour les tableaux scrollables de la page admin */
+.hsh-page .widget-body thead th {
+  position: sticky; top: 0; background: var(--bg-card, var(--bg));
+  z-index: 1;
 }
 @media (max-width: 900px) {
   .hsh-page #main-content.hsh-page-grid {
