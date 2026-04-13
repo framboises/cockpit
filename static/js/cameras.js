@@ -351,6 +351,19 @@
     // Add button
     $("#btn-add-cam").addEventListener("click", function(){ openModal(null); });
 
+    // Import from JSON button
+    $("#btn-import-json").addEventListener("click", function(){
+      if(!confirm("Importer les cameras depuis hik_cameras.json ?\nLes cameras deja presentes (meme IP+port) seront ignorees.")) return;
+      fetch("/api/cameras/import-json", {method:"POST", headers:{"X-CSRFToken": CSRF}})
+        .then(function(r){ return r.json(); })
+        .then(function(res){
+          if(res.error){ toast(res.error, "error"); return; }
+          toast(res.imported + " cameras importees, " + res.skipped + " ignorees", "success");
+          loadAll();
+        })
+        .catch(function(){ toast("Erreur import", "error"); });
+    });
+
     // Modal close
     $$("[data-close]", $("#cam-modal-backdrop")).forEach(function(el){
       el.addEventListener("click", function(e){ e.preventDefault(); closeModal(); });

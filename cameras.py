@@ -96,22 +96,28 @@ def _ensure_db():
 def _seed_from_json():
     """Import cameras from hik/hik_cameras.json into MongoDB if collection is empty."""
     if _col_cameras.count_documents({}, limit=1) > 0:
+        logger.info("cockpit_cameras already has data, skipping seed")
         return
     json_path = os.path.join(os.path.dirname(__file__), "hik", "hik_cameras.json")
+    logger.info("Seed: looking for %s", json_path)
     if not os.path.exists(json_path):
+        logger.info("Seed: file not found, skipping")
         return
     try:
         with open(json_path, "r", encoding="utf-8") as f:
             config = json.load(f)
-    except Exception:
-        logger.warning("Could not read %s for seed", json_path)
+    except Exception as e:
+        logger.warning("Could not read %s for seed: %s", json_path, e)
         return
 
     cred_groups = config.get("credential_groups", {})
+    cameras_list = config.get("cameras", [])
+    logger.info("Seed: found %d cameras in JSON, %d credential_groups",
+                len(cameras_list), len(cred_groups))
     now = datetime.now(timezone.utc)
     count = 0
 
-    for cam in config.get("cameras", []):
+    for cam in cameras_list:
         ip = cam.get("ip", "").strip()
         if not ip:
             continue
@@ -144,11 +150,11 @@ def _seed_from_json():
         try:
             _col_cameras.insert_one(doc)
             count += 1
-        except Exception:
-            pass  # duplicate ip+port, skip
+            logger.info("Seeded camera: %s (%s)", doc["name"], ip)
+        except Exception as e:
+            logger.warning("Seed skip %s: %s", ip, e)
 
-    if count:
-        logger.info("Seeded %d cameras from hik_cameras.json", count)
+    logger.info("Seed complete: %d cameras imported", count)
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +230,7 @@ def _get_cam_doc(cam_id):
 # ---------------------------------------------------------------------------
 @cameras_bp.route("/cameras")
 def cameras_page():
+    _ensure_db()
     payload = getattr(request, "user_payload", {})
     return render_template(
         "cameras.html",
@@ -232,6 +239,64 @@ def cameras_page():
         user_lastname=payload.get("lastname", ""),
         user_email=payload.get("email", ""),
     )
+
+
+# ---------------------------------------------------------------------------
+# Import from JSON (manual trigger)
+# ---------------------------------------------------------------------------
+@cameras_bp.route("/api/cameras/import-json", methods=["POST"])
+def import_from_json():
+    """Force import cameras from hik_cameras.json (merges: skips existing ip+port)."""
+    _ensure_db()
+    json_path = os.path.join(os.path.dirname(__file__), "hik", "hik_cameras.json")
+    if not os.path.exists(json_path):
+        return jsonify({"error": "hik/hik_cameras.json introuvable"}), 404
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+    except Exception as e:
+        return jsonify({"error": f"Erreur lecture JSON: {e}"}), 500
+
+    cred_groups = config.get("credential_groups", {})
+    cameras_list = config.get("cameras", [])
+    now = datetime.now(timezone.utc)
+    imported = 0
+    skipped = 0
+
+    for cam in cameras_list:
+        ip = cam.get("ip", "").strip()
+        if not ip:
+            continue
+        group_name = cam.get("credential_group")
+        user = cam.get("user", "admin")
+        password = cam.get("password", "")
+        if group_name and group_name in cred_groups:
+            group = cred_groups[group_name]
+            user = cam.get("user") or group.get("user", "admin")
+            if not password:
+                password = group.get("password", "")
+        doc = {
+            "name": cam.get("name", f"Camera {ip}"),
+            "ip": ip,
+            "port": cam.get("port", 80),
+            "user": user,
+            "password": password,
+            "channel": cam.get("channel", 1),
+            "protocol": cam.get("protocol", "http"),
+            "brand": cam.get("brand", "hikvision"),
+            "location": cam.get("location", ""),
+            "tags": cam.get("tags", []),
+            "enabled": True,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        try:
+            _col_cameras.insert_one(doc)
+            imported += 1
+        except Exception:
+            skipped += 1
+
+    return jsonify({"imported": imported, "skipped": skipped, "total_in_json": len(cameras_list)})
 
 
 # ---------------------------------------------------------------------------
