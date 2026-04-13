@@ -697,8 +697,10 @@
         qs("#anpr-config-btn")?.addEventListener("click", openCamCfg);
         // On-site reset
         qs("#anpr-reset-onsite")?.addEventListener("click", function () {
-            if (!confirm("Remettre le compteur de vehicules sur site a zero ?")) return;
-            post(API.onsiteReset, {}).then(function () { loadOnsite(); });
+            showConfirmToast("Remettre le compteur de vehicules sur site a zero ?", { okLabel: "Reinitialiser", type: "warning" }).then(function (ok) {
+                if (!ok) return;
+                post(API.onsiteReset, {}).then(function () { loadOnsite(); });
+            });
         });
         // Search
         var pt; qs("#anpr-filter-plate")?.addEventListener("input", function () { clearTimeout(pt); pt = setTimeout(function () { page = 1; loadSearch(); }, 350); });

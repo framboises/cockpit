@@ -71,6 +71,29 @@
   // ── DOM refs ───────────────────────────────────────────────────────────────
   var listOpen, listClosed, statsContainer, badge, placeholderOpen, placeholderClosed;
 
+  // ── Device status resolution (anoloc cross-reference) ────────────────────
+  var DEVICE_STATUS_META = {
+    patrouille:        { label: "Disponible",         color: "#22c55e" },
+    intervention:      { label: "Intervention",       color: "#f59e0b" },
+    sur_place:         { label: "ASL",                color: "#3b82f6" },
+    pause:             { label: "Pause",              color: "#94a3b8" },
+    fin_intervention:  { label: "Fin d'inter",        color: "#8b5cf6" },
+    running:           { label: "En mouvement",       color: "#22c55e" },
+    stopped:           { label: "A l'arret",          color: "#f59e0b" },
+    waiting:           { label: "En attente",         color: "#eab308" },
+    offline:           { label: "Hors ligne",         color: "#ef4444" },
+  };
+  function _resolveDeviceStatus(dev) {
+    if (!dev) return null;
+    // Tablets: use patrol_status first
+    if (dev.kind === "tablet" && dev.patrol_status) {
+      return DEVICE_STATUS_META[dev.patrol_status] || DEVICE_STATUS_META.patrouille;
+    }
+    // Beacons / other
+    if (!dev.online) return DEVICE_STATUS_META.offline;
+    return DEVICE_STATUS_META[dev.status] || DEVICE_STATUS_META.running;
+  }
+
   // ── Helpers ────────────────────────────────────────────────────────────────
   function catStyle(cat) {
     return CATEGORY_STYLES[cat] || FALLBACK_STYLE;
@@ -408,9 +431,31 @@
       var isQuick = userCanFS && !!catFS[vCat];
       vehicles.forEach(function (v) {
         var vBtn = mkEl("div", "pcorg-ctx-veh-item");
-        vBtn.textContent = v.label;
+        // Resolve device status via anoloc cross-reference
+        var anoRef = typeof window.getAnolocDeviceByLabel === "function"
+          ? window.getAnolocDeviceByLabel(v.label) : null;
+        var dev = anoRef ? anoRef.device : null;
+        var dsMeta = dev ? _resolveDeviceStatus(dev) : null;
+        var isAvailable = !dsMeta || dsMeta === DEVICE_STATUS_META.patrouille
+          || dsMeta === DEVICE_STATUS_META.running;
+        // Build label with status indicator
+        var nameSpan = mkEl("span", "pcorg-ctx-veh-name");
+        nameSpan.textContent = v.label;
+        vBtn.appendChild(nameSpan);
+        if (dsMeta) {
+          var stSpan = mkEl("span", "pcorg-ctx-veh-status");
+          var dot = mkEl("span", "pcorg-ctx-veh-dot");
+          dot.style.background = dsMeta.color;
+          stSpan.appendChild(dot);
+          stSpan.appendChild(document.createTextNode(dsMeta.label));
+          vBtn.appendChild(stSpan);
+        }
+        if (!isAvailable) {
+          vBtn.classList.add("pcorg-ctx-veh-disabled");
+        }
         function onVehPick(ev) {
           ev.stopPropagation(); ev.preventDefault();
+          if (!isAvailable) return;
           hideContextMenu();
           if (isQuick) {
             quickCreate(ctxLat, ctxLon, vCat, vLevel, v.label);
@@ -667,6 +712,11 @@
   function refresh() {
     var ey = (typeof getCurrentEventYear === "function") ? getCurrentEventYear() : {};
     if (!ey.event || !ey.year) return;
+    // Recharge la liste des vehicules engageables (inclut les tablettes Field) une fois sur 4
+    if (!refresh._vbcCounter || refresh._vbcCounter % 4 === 0) {
+      loadVehiclesByCategory();
+    }
+    refresh._vbcCounter = (refresh._vbcCounter || 0) + 1;
     fetch("/api/pcorg/live?event=" + encodeURIComponent(ey.event) + "&year=" + encodeURIComponent(ey.year))
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -1019,9 +1069,34 @@
     if (cc.radio) contact.push(typeof cc.radio === "string" ? cc.radio : "Radio");
     if (contact.length) addField(fields, "Via", contact.join(" / "));
     addField(fields, "Carroye", cc.carroye);
-    addField(fields, "V\u00e9hicule engag\u00e9", cc.patrouille);
     addField(fields, "Groupe", formatGroupDesc(d.group_desc, d.category));
     infoRow.appendChild(fields);
+
+    // Vehicle engagement banner (prominent, before minimap)
+    if (cc.patrouille) {
+      var ficheDevInfo = window.getAnolocDeviceByLabel ? window.getAnolocDeviceByLabel(cc.patrouille) : null;
+      var ficheDevSt = ficheDevInfo ? _resolveDeviceStatus(ficheDevInfo.device) : null;
+      var vBanner = mkEl("div", "pcorg-fiche-vehicle");
+      vBanner.appendChild(matIcon("directions_car", "pcorg-fiche-vehicle-ico"));
+      var vInfo = mkEl("div", "pcorg-fiche-vehicle-info");
+      var vLbl = mkEl("span", "pcorg-fiche-vehicle-lbl");
+      vLbl.textContent = "Element engage";
+      vInfo.appendChild(vLbl);
+      var vName = mkEl("strong", "pcorg-fiche-vehicle-name");
+      vName.textContent = cc.patrouille;
+      vInfo.appendChild(vName);
+      vBanner.appendChild(vInfo);
+      if (ficheDevSt) {
+        var fvStatusBadge = mkEl("span", "pcorg-fiche-vehicle-status");
+        var fvDot = mkEl("span", "pcorg-fiche-vehicle-dot");
+        fvDot.style.background = ficheDevSt.color;
+        fvStatusBadge.appendChild(fvDot);
+        fvStatusBadge.appendChild(document.createTextNode(ficheDevSt.label));
+        fvStatusBadge.style.color = ficheDevSt.color;
+        vBanner.appendChild(fvStatusBadge);
+      }
+      body.appendChild(vBanner);
+    }
 
     // Mini map
     var mapDiv = mkEl("div", "pcorg-fiche-minimap");
@@ -1089,10 +1164,20 @@
         head.appendChild(opEl);
         ent.appendChild(head);
 
-        if (entry.text) {
+        var entryText = entry.text || entry.comment || "";
+        if (entryText) {
           var txt = mkEl("div", "pcorg-chrono-text");
-          txt.textContent = entry.text;
+          txt.textContent = entryText;
           ent.appendChild(txt);
+        }
+        if (entry.photo) {
+          var photoWrap = mkEl("div", "pcorg-chrono-photo-wrap");
+          var img = mkEl("img", "pcorg-chrono-photo");
+          img.src = entry.photo;
+          img.alt = "Photo terrain";
+          img.addEventListener("click", function () { openPhotoLightbox(entry.photo); });
+          photoWrap.appendChild(img);
+          ent.appendChild(photoWrap);
         }
         timeline.appendChild(ent);
       });
@@ -1547,7 +1632,6 @@
       if (cc.texte) fields.push(["Texte", cc.texte]);
       if (cc.alerte) fields.push(["Alerte", "Oui"]);
     }
-    if (cc.patrouille) fields.push(["V\u00e9hicule engag\u00e9", cc.patrouille]);
     return fields;
   }
 
@@ -1790,6 +1874,33 @@
         popBody.appendChild(descLine);
       }
 
+      // Vehicule engage (badge prominent with status)
+      if (item.patrouille) {
+        var popDevInfo = window.getAnolocDeviceByLabel ? window.getAnolocDeviceByLabel(item.patrouille) : null;
+        var popDevSt = popDevInfo ? _resolveDeviceStatus(popDevInfo.device) : null;
+        var vehBanner = mkEl("div", "pcorg-popup-vehicle");
+        var vehLeft = mkEl("div", "pcorg-popup-vehicle-left");
+        vehLeft.appendChild(matIcon("directions_car", "pcorg-popup-vehicle-icon"));
+        var vehNameWrap = mkEl("div", "");
+        var vehLabel = mkEl("span", "pcorg-popup-vehicle-label");
+        vehLabel.textContent = "Element engage";
+        vehNameWrap.appendChild(vehLabel);
+        var vehName = mkEl("strong", "pcorg-popup-vehicle-name");
+        vehName.textContent = item.patrouille;
+        vehNameWrap.appendChild(vehName);
+        vehLeft.appendChild(vehNameWrap);
+        vehBanner.appendChild(vehLeft);
+        if (popDevSt) {
+          var vehStatusBadge = mkEl("span", "pcorg-popup-vehicle-status");
+          var vehStDot = mkEl("span", "pcorg-popup-vehicle-dot");
+          vehStDot.style.background = popDevSt.color;
+          vehStatusBadge.appendChild(vehStDot);
+          vehStatusBadge.appendChild(document.createTextNode(popDevSt.label));
+          vehBanner.appendChild(vehStatusBadge);
+        }
+        popBody.appendChild(vehBanner);
+      }
+
       // Info fields
       var elapsedMs = item.ts ? Date.now() - new Date(item.ts).getTime() : 0;
       var isOld = elapsedMs > 3600000; // > 1h
@@ -1877,6 +1988,22 @@
       }).bindPopup(popupDiv, { className: "pcorg-popup-wrap", maxWidth: 440, minWidth: 380 })
         .addTo(pcorgMapLayer);
 
+      // Tooltip vehicule engage (permanent, a droite du pin)
+      if (item.patrouille) {
+        var tipDevInfo = window.getAnolocDeviceByLabel ? window.getAnolocDeviceByLabel(item.patrouille) : null;
+        var tipDevSt = tipDevInfo ? _resolveDeviceStatus(tipDevInfo.device) : null;
+        var tipColor = tipDevSt ? tipDevSt.color : "#94a3b8";
+        var tipLabel = tipDevSt ? tipDevSt.label : "";
+        var tipHtml = "<span class='veh-tip-name'>" + item.patrouille + "</span>"
+          + (tipLabel ? "<span class='veh-tip-status' style='color:" + tipColor + "'><span class='veh-tip-dot' style='background:" + tipColor + "'></span>" + tipLabel + "</span>" : "");
+        marker.bindTooltip(tipHtml, {
+          permanent: true,
+          direction: "right",
+          offset: [12, -18],
+          className: "pcorg-vehicle-tooltip",
+        });
+      }
+
       pcorgMarkers[item.id] = marker;
 
       if (doBounce) {
@@ -1956,6 +2083,13 @@
                   txt.textContent = entry.text;
                   row.appendChild(txt);
                 }
+                if (entry.photo) {
+                  var pImg = mkEl("img", "pcorg-popup-chrono-photo");
+                  pImg.src = entry.photo;
+                  pImg.alt = "Photo";
+                  pImg.addEventListener("click", function () { openPhotoLightbox(entry.photo); });
+                  row.appendChild(pImg);
+                }
                 cDiv.appendChild(row);
               });
             })
@@ -1963,6 +2097,30 @@
         };
       })(item.id, specDiv, chronoDiv, st.color, item.category, item, marker, opVal));
     });
+  }
+
+  // ── Photo lightbox ─────────────────────────────────────────────────────
+  function openPhotoLightbox(src) {
+    var existing = document.getElementById("pcorg-photo-lightbox");
+    if (existing) existing.remove();
+    var overlay = document.createElement("div");
+    overlay.id = "pcorg-photo-lightbox";
+    overlay.className = "pcorg-lightbox";
+    overlay.addEventListener("click", function (e) {
+      if (e.target === overlay || e.target.classList.contains("pcorg-lightbox-close")) {
+        overlay.remove();
+      }
+    });
+    var img = document.createElement("img");
+    img.src = src;
+    img.alt = "Photo terrain";
+    overlay.appendChild(img);
+    var closeBtn = document.createElement("button");
+    closeBtn.className = "pcorg-lightbox-close";
+    closeBtn.innerHTML = "<span class='material-symbols-outlined'>close</span>";
+    closeBtn.addEventListener("click", function () { overlay.remove(); });
+    overlay.appendChild(closeBtn);
+    document.body.appendChild(overlay);
   }
 
   function flyToPin(lat, lon) {
@@ -2011,7 +2169,12 @@
   }
 
   function loadVehiclesByCategory() {
-    fetch("/anoloc/vehicles-by-category")
+    var ev = window.selectedEvent, yr = window.selectedYear;
+    var url = "/anoloc/vehicles-by-category";
+    if (ev && yr) {
+      url += "?event=" + encodeURIComponent(ev) + "&year=" + encodeURIComponent(yr);
+    }
+    fetch(url)
       .then(function (r) { return r.json(); })
       .then(function (d) { if (d) vehiclesByCategory = d; })
       .catch(function () {});
@@ -2551,6 +2714,18 @@
       });
     }
 
+    // V\u00e9hicule engag\u00e9 (from linked beacon groups) — placed first for dispatch flow
+    var vehicles = vehiclesByCategory[cat];
+    if (vehicles && vehicles.length > 0) {
+      var vehNames = vehicles.map(function (v) { return v.label; });
+      addCreateSelect(container, "pcorg-c-patrouille", "V\u00e9hicule engag\u00e9", vehNames);
+      if (createPendingPatrouille) {
+        var selEl = document.getElementById("pcorg-c-patrouille");
+        if (selEl) selEl.value = createPendingPatrouille;
+        createPendingPatrouille = "";
+      }
+    }
+
     // Sous-classification from config
     var subs = extractLabels((pcorgConfig.sous_classifications || {})[cat]);
     if (subs.length > 0) {
@@ -2589,18 +2764,6 @@
       } else {
         addCreateField(container, "pcorg-c-moyens1", "Moyens engages Niv.1");
         addCreateField(container, "pcorg-c-moyens2", "Moyens engages Niv.2");
-      }
-    }
-
-    // V\u00e9hicule engag\u00e9 (from linked beacon groups)
-    var vehicles = vehiclesByCategory[cat];
-    if (vehicles && vehicles.length > 0) {
-      var vehNames = vehicles.map(function (v) { return v.label; });
-      addCreateSelect(container, "pcorg-c-patrouille", "V\u00e9hicule engag\u00e9", vehNames);
-      if (createPendingPatrouille) {
-        var selEl = document.getElementById("pcorg-c-patrouille");
-        if (selEl) selEl.value = createPendingPatrouille;
-        createPendingPatrouille = "";
       }
     }
   }

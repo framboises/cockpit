@@ -305,6 +305,8 @@ def _ensure_db():
     if _db is not None:
         return
     uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+    titan_env = os.getenv("TITAN_ENV", "dev").strip().lower()
+    db_name = "titan" if titan_env in {"prod", "production"} else "titan_dev"
     client = MongoClient(uri)
     dev_mode = os.getenv("TITAN_ENV", "dev") != "prod"
     _db = client["titan_dev" if dev_mode else "titan"]

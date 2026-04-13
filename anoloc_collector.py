@@ -41,7 +41,8 @@ from pymongo import MongoClient
 # ---------------------------------------------------------------------------
 
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
-DB_NAME = "titan"
+_TITAN_ENV = os.getenv("TITAN_ENV", "dev").strip().lower()
+DB_NAME = "titan" if _TITAN_ENV in {"prod", "production"} else "titan_dev"
 ANOLOC_API_BASE_DEFAULT = "https://app.lemans.anoloc.io/api/v3"
 USER_AGENT = "COCKPIT-TITAN/1.0"
 

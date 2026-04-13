@@ -1584,22 +1584,24 @@ function renderDrawerView() {
 
   addLine?.addEventListener('click', () => {
     const list = splitTodo(_drawerCurrent.item.todo || "");
-    const txt = prompt('Nouvelle tâche :');
-    if (txt && txt.trim()) {
-      list.push({ text: txt.trim(), done: false });
-      _drawerCurrent.item.todo = serializeTodo(list);
-      renderDrawerView(); // re-render
-    }
+    showPromptToast('Nouvelle tache :', { okLabel: 'Ajouter' }).then((txt) => {
+      if (txt && txt.trim()) {
+        list.push({ text: txt.trim(), done: false });
+        _drawerCurrent.item.todo = serializeTodo(list);
+        renderDrawerView(); // re-render
+      }
+    });
   });
 
   addFirst?.addEventListener('click', () => {
     const list = splitTodo(_drawerCurrent.item.todo || "");
-    const txt = prompt('Nouvelle tâche :');
-    if (txt && txt.trim()) {
-      list.push({ text: txt.trim(), done: false });
-      _drawerCurrent.item.todo = serializeTodo(list);
-      renderDrawerView();
-    }
+    showPromptToast('Nouvelle tache :', { okLabel: 'Ajouter' }).then((txt) => {
+      if (txt && txt.trim()) {
+        list.push({ text: txt.trim(), done: false });
+        _drawerCurrent.item.todo = serializeTodo(list);
+        renderDrawerView();
+      }
+    });
   });
 
   clearDone?.addEventListener('click', () => {

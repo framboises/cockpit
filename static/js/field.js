@@ -1,0 +1,3594 @@
+/* =====================================================================
+   COCKPIT Field - App terrain pour tablettes patrouille
+   Expose en global : window.FieldApp
+   ===================================================================== */
+(function () {
+  "use strict";
+
+  var DEFAULT_CENTER = [47.938561591531936, 0.2243184111156285];
+  var DEFAULT_ZOOM = 14;
+
+  var POLL_INBOX_MS = 3000;
+  var POLL_FICHES_MS = 5000;        // fiches PCORG assignees : toutes les 5s
+  var POSITION_PUSH_NORMAL_MS = 60000;  // push GPS toutes les 60s (economie batterie)
+  var POSITION_PUSH_HIGH_MS = 5000;    // push GPS toutes les 5s (mode suivi cockpit)
+  var POSITION_PUSH_MS = POSITION_PUSH_NORMAL_MS;
+  var POSITION_MIN_MOVE_M = 5;     // ou si on bouge de plus de 5m
+
+  // ---------------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------------
+  var state = {
+    map: null,
+    tileLayers: {},
+    currentLayerKey: "plan",
+    layerOrder: ["plan", "sat_esri", "sat_aco"],
+    meMarker: null,
+    meCircle: null,
+    lastPushedAt: 0,
+    lastPushedPos: null,
+    followMe: true,
+    gridOn: false,
+    gridLayer: null,
+    gridData: null,
+    gridMeta: null,            // {cols, rows, hLines, vLines, ...}
+    grid25On: false,
+    grid25Layer: null,
+    grid25Meta: null,
+    gridStickyEl: null,        // wrap DOM
+    gridPolylines: [],         // current 100m polylines (for weight tweak)
+    threePOn: false,
+    threePLayer: null,
+    threePLoaded: false,
+    poiCategories: [],         // [{label, dataKey, collection, icon, ...}]
+    poiLayers: {},             // dataKey -> {layer, loaded, visible, geojson}
+    poiBundle: null,           // {parametrage, parking_colors, default_colors}
+    poiAutoColorIdx: 0,
+    // Statut patrouille
+    patrolStatus: "patrouille",
+    patrolStatusSince: null,
+    activeFicheId: null,
+    ficheCreateCat: null,
+    ficheCreateUrgency: "UR",
+    routeLayer: null,
+    routeDestination: null,  // [lat, lng]
+    fichesLayer: null,
+    fichesMarkers: {},       // id -> marker
+    fiches: [],
+    fichesTimer: null,
+    seenFicheIds: new Set(),
+    sosInFlight: false,
+    inbox: [],
+    seenIds: new Set(),
+    watchId: null,
+    clockTimer: null,
+    inboxTimer: null,
+    // Outils de mesure
+    measureMode: null,
+    measureLayer: null,
+    measurePoints: [],
+    measureGuide: null,
+    measureLabels: [],
+    measureFinalized: false,
+    // Crosshair grille (touch)
+    crosshairTimer: null,
+  };
+
+  // ---------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------
+  function $(id) { return document.getElementById(id); }
+
+  function haversine(a, b) {
+    if (!a || !b) return Infinity;
+    var R = 6371000;
+    var dLat = (b[0] - a[0]) * Math.PI / 180;
+    var dLng = (b[1] - a[1]) * Math.PI / 180;
+    var s = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+          + Math.cos(a[0] * Math.PI / 180) * Math.cos(b[0] * Math.PI / 180)
+          * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+  }
+
+  function formatClock(d) {
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  }
+
+  function toast(msg, type) {
+    var el = $("field-toast");
+    if (!el) return;
+    el.textContent = msg;
+    el.className = "field-toast" + (type ? " " + type : "");
+    el.hidden = false;
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { el.hidden = true; }, 2500);
+  }
+
+  // ---------------------------------------------------------------------
+  // Session perdue (tablette revoquee/supprimee cote admin)
+  // Plutot que de naviguer brutalement vers /field/pair (qui declenche
+  // ERR_FAILED si le service worker n'a pas pu cacher la page), on affiche
+  // un overlay plein ecran. Toutes les requetes 401 passent par ici.
+  // ---------------------------------------------------------------------
+  var _sessionLost = false;
+  var _sessionLostPoll = null;
+
+  function stopAllPolling() {
+    try {
+      if (state.fichesTimer) { clearInterval(state.fichesTimer); state.fichesTimer = null; }
+      if (state.inboxTimer) { clearInterval(state.inboxTimer); state.inboxTimer = null; }
+      if (state.clockTimer) { clearInterval(state.clockTimer); state.clockTimer = null; }
+      if (state.crosshairTimer) { clearTimeout(state.crosshairTimer); state.crosshairTimer = null; }
+      if (state.watchId != null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(state.watchId);
+        state.watchId = null;
+      }
+    } catch (e) { /* noop */ }
+  }
+
+  function handleSessionLost() {
+    if (_sessionLost) return null;
+    _sessionLost = true;
+    stopAllPolling();
+
+    var overlay = document.createElement("div");
+    overlay.className = "field-session-lost";
+    overlay.id = "field-session-lost";
+
+    var box = document.createElement("div");
+    box.className = "field-session-lost-box";
+
+    var icon = document.createElement("div");
+    icon.className = "field-session-lost-icon material-symbols-outlined";
+    icon.textContent = "block";
+    box.appendChild(icon);
+
+    var title = document.createElement("div");
+    title.className = "field-session-lost-title";
+    title.textContent = "Session terminee";
+    box.appendChild(title);
+
+    var sub = document.createElement("div");
+    sub.className = "field-session-lost-sub";
+    sub.textContent = "Cette tablette n'est plus autorisee. Contactez le PC pour reactiver l'acces.";
+    box.appendChild(sub);
+
+    var status = document.createElement("div");
+    status.className = "field-session-lost-status";
+    status.id = "field-session-lost-status";
+    status.textContent = "Verification automatique...";
+    box.appendChild(status);
+
+    var actions = document.createElement("div");
+    actions.className = "field-session-lost-actions";
+
+    var btnRetry = document.createElement("button");
+    btnRetry.className = "btn-primary";
+    btnRetry.textContent = "Verifier maintenant";
+    btnRetry.addEventListener("click", function () { checkSessionRestored(true); });
+    actions.appendChild(btnRetry);
+
+    var btnRePair = document.createElement("button");
+    btnRePair.className = "btn-primary btn-cancel";
+    btnRePair.textContent = "Re-appairer la tablette";
+    btnRePair.addEventListener("click", function () {
+      // Navigation manuelle - ici l'utilisateur l'a explicitement demandee
+      // donc le ERR_FAILED eventuel est attendu / acceptable.
+      try { window.location.href = "/field/pair"; } catch (e) {}
+    });
+    actions.appendChild(btnRePair);
+
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    // Polling automatique pour reprendre la session des qu'elle est restauree.
+    _sessionLostPoll = setInterval(function () { checkSessionRestored(false); }, 6000);
+    // Premiere verification rapide
+    setTimeout(function () { checkSessionRestored(false); }, 1500);
+
+    return null;
+  }
+
+  function checkSessionRestored(manual) {
+    var status = document.getElementById("field-session-lost-status");
+    if (manual && status) status.textContent = "Verification...";
+    fetch("/field/denied/check", { headers: { "Accept": "application/json" }, cache: "no-store" })
+      .then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (d) {
+        if (d && d.status === "active") {
+          if (status) status.textContent = "Session restauree, rechargement...";
+          if (_sessionLostPoll) { clearInterval(_sessionLostPoll); _sessionLostPoll = null; }
+          // Reload doux : on recharge la page d'application qui repartira sur
+          // une session valide. Pas de ERR_FAILED car /field est cachee par
+          // le service worker.
+          setTimeout(function () { window.location.reload(); }, 600);
+        } else if (manual && status) {
+          status.textContent = "Toujours non autorisee.";
+        }
+      })
+      .catch(function () {
+        if (manual && status) status.textContent = "Reseau indisponible.";
+      });
+  }
+
+  // ---- Mini modal confirm/prompt (remplace window.confirm/prompt) ----
+  function fieldConfirm(message, opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      var overlay = document.createElement("div");
+      overlay.className = "field-modal field-mini-modal";
+      var box = document.createElement("div");
+      box.className = "field-modal-box";
+      var body = document.createElement("div");
+      body.className = "field-modal-body";
+      body.textContent = message;
+      var actions = document.createElement("div");
+      actions.className = "field-modal-actions";
+      var btnNo = document.createElement("button");
+      btnNo.className = "btn-primary btn-cancel";
+      btnNo.textContent = opts.cancelLabel || "Annuler";
+      var btnOk = document.createElement("button");
+      btnOk.className = "btn-primary";
+      btnOk.textContent = opts.okLabel || "Confirmer";
+      actions.appendChild(btnNo);
+      actions.appendChild(btnOk);
+      box.appendChild(body);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      function done(result) {
+        try { document.body.removeChild(overlay); } catch (e) {}
+        resolve(result);
+      }
+      btnNo.addEventListener("click", function () { done(false); });
+      btnOk.addEventListener("click", function () { done(true); });
+    });
+  }
+
+  function fieldPrompt(message, opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      var overlay = document.createElement("div");
+      overlay.className = "field-modal field-mini-modal";
+      var box = document.createElement("div");
+      box.className = "field-modal-box";
+      var body = document.createElement("div");
+      body.className = "field-modal-body";
+      var p = document.createElement("div");
+      p.textContent = message;
+      p.style.marginBottom = "10px";
+      body.appendChild(p);
+      var input = document.createElement("input");
+      input.type = "text";
+      input.value = opts.defaultValue || "";
+      input.style.cssText = "width:100%; padding:10px 12px; font-size:15px; border-radius:8px; background:#1e293b; border:1px solid #334155; color:#f1f5f9; font-family:inherit;";
+      body.appendChild(input);
+      var actions = document.createElement("div");
+      actions.className = "field-modal-actions";
+      var btnNo = document.createElement("button");
+      btnNo.className = "btn-primary btn-cancel";
+      btnNo.textContent = opts.cancelLabel || "Annuler";
+      var btnOk = document.createElement("button");
+      btnOk.className = "btn-primary";
+      btnOk.textContent = opts.okLabel || "OK";
+      actions.appendChild(btnNo);
+      actions.appendChild(btnOk);
+      box.appendChild(body);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      setTimeout(function () { try { input.focus(); } catch (e) {} }, 30);
+      function done(result) {
+        try { document.body.removeChild(overlay); } catch (e) {}
+        resolve(result);
+      }
+      btnNo.addEventListener("click", function () { done(null); });
+      btnOk.addEventListener("click", function () { done(input.value); });
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); done(input.value); }
+        if (e.key === "Escape") { e.preventDefault(); done(null); }
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Map
+  // ---------------------------------------------------------------------
+  function initMap() {
+    state.map = L.map("field-map", {
+      center: DEFAULT_CENTER,
+      zoom: DEFAULT_ZOOM,
+      minZoom: 10,
+      maxZoom: 22,
+      zoomControl: true,
+      attributionControl: true,
+      doubleClickZoom: false,
+    });
+
+    state.tileLayers.plan = L.tileLayer(
+      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      { attribution: "&copy; OSM", maxNativeZoom: 19, maxZoom: 22 }
+    );
+    state.tileLayers.sat_esri = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { attribution: "&copy; Esri", maxNativeZoom: 19, maxZoom: 22 }
+    );
+    state.tileLayers.sat_aco = L.tileLayer(
+      "/field/resources/tiles/{z}/{x}/{y}.png",
+      { tms: true, maxZoom: 22, attribution: "ACO" }
+    );
+
+    state.tileLayers.plan.addTo(state.map);
+    state.currentLayerKey = "plan";
+
+    // Stop suivre "moi" des qu'on touche la carte manuellement
+    state.map.on("dragstart zoomstart", function (e) {
+      if (e.originalEvent) state.followMe = false;
+    });
+  }
+
+  function cycleLayer() {
+    var idx = state.layerOrder.indexOf(state.currentLayerKey);
+    var nextIdx = (idx + 1) % state.layerOrder.length;
+    var nextKey = state.layerOrder[nextIdx];
+    Object.keys(state.tileLayers).forEach(function (k) {
+      if (state.map.hasLayer(state.tileLayers[k])) {
+        state.map.removeLayer(state.tileLayers[k]);
+      }
+    });
+    state.tileLayers[nextKey].addTo(state.map);
+    state.currentLayerKey = nextKey;
+    var labelByKey = { plan: "Plan", sat_esri: "Satellite", sat_aco: "Satellite ACO" };
+    toast(labelByKey[nextKey] || nextKey);
+  }
+
+  // ---------------------------------------------------------------------
+  // GPS
+  // ---------------------------------------------------------------------
+  function setGpsStatus(status) {
+    var el = $("gps-status");
+    if (!el) return;
+    el.classList.remove("ok", "warn", "err");
+    if (status === "ok") el.classList.add("ok");
+    else if (status === "warn") el.classList.add("warn");
+    else if (status === "err") el.classList.add("err");
+  }
+
+  function startGeolocation() {
+    if (!navigator.geolocation) {
+      setGpsStatus("err");
+      toast("Geolocalisation non supportee", "err");
+      return;
+    }
+    setGpsStatus("warn");
+    try {
+      state.watchId = navigator.geolocation.watchPosition(
+        onGpsUpdate,
+        onGpsError,
+        { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 }
+      );
+    } catch (e) {
+      setGpsStatus("err");
+    }
+  }
+
+  function onGpsUpdate(pos) {
+    setGpsStatus("ok");
+    var latlng = [pos.coords.latitude, pos.coords.longitude];
+    renderMeMarker(latlng, pos.coords.accuracy);
+    maybePushPosition(pos);
+  }
+
+  function onGpsError(err) {
+    setGpsStatus("err");
+    if (err && err.code === 1) {
+      toast("Permission GPS refusee", "err");
+    }
+  }
+
+  function renderMeMarker(latlng, accuracy) {
+    if (!state.meMarker) {
+      var icon = L.divIcon({
+        className: "",
+        html: "<div class='me-marker'></div>",
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
+      });
+      state.meMarker = L.marker(latlng, { icon: icon, interactive: false }).addTo(state.map);
+      state.meCircle = L.circle(latlng, {
+        radius: accuracy || 20,
+        className: "me-accuracy",
+      }).addTo(state.map);
+      if (state.followMe) state.map.setView(latlng, Math.max(state.map.getZoom(), 17));
+    } else {
+      state.meMarker.setLatLng(latlng);
+      if (state.meCircle) state.meCircle.setLatLng(latlng).setRadius(accuracy || 20);
+      if (state.followMe) state.map.panTo(latlng, { animate: true, duration: 0.3 });
+    }
+  }
+
+  function recenter() {
+    state.followMe = true;
+    if (state.meMarker) {
+      state.map.setView(state.meMarker.getLatLng(), Math.max(state.map.getZoom(), 18));
+    } else {
+      state.map.setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+    }
+  }
+
+  function maybePushPosition(pos) {
+    var now = Date.now();
+    var latlng = [pos.coords.latitude, pos.coords.longitude];
+    var elapsed = now - state.lastPushedAt;
+    var moved = haversine(state.lastPushedPos, latlng);
+    if (elapsed < POSITION_PUSH_MS && moved < POSITION_MIN_MOVE_M) return;
+    state.lastPushedAt = now;
+    state.lastPushedPos = latlng;
+    var body = {
+      lat: latlng[0],
+      lng: latlng[1],
+      accuracy: pos.coords.accuracy,
+      speed: pos.coords.speed,
+      heading: pos.coords.heading,
+      battery: state.batteryPct || null,
+      ts: now,
+    };
+    if (!navigator.onLine) {
+      bufferPosition(body);
+      return;
+    }
+    fetch("/field/position", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).catch(function () {
+      // Si l'envoi echoue, on stocke pour plus tard
+      bufferPosition(body);
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Clock / battery / network
+  // ---------------------------------------------------------------------
+  function startClock() {
+    function tick() {
+      var el = $("field-clock");
+      if (el) el.textContent = formatClock(new Date());
+    }
+    tick();
+    state.clockTimer = setInterval(tick, 1000);
+  }
+
+  function setNetStatus(online) {
+    var el = $("net-status");
+    if (!el) return;
+    el.classList.remove("ok", "warn", "err");
+    if (online) el.classList.add("ok");
+    else el.classList.add("err");
+    var icon = el.querySelector(".material-symbols-outlined");
+    if (icon) icon.textContent = online ? "signal_wifi_4_bar" : "signal_wifi_off";
+  }
+
+  function initNetStatus() {
+    setNetStatus(navigator.onLine);
+    window.addEventListener("online", function () { setNetStatus(true); });
+    window.addEventListener("offline", function () { setNetStatus(false); });
+  }
+
+  function initBattery() {
+    if (!navigator.getBattery) return;
+    navigator.getBattery().then(function (bat) {
+      function update() {
+        var pct = Math.round((bat.level || 0) * 100);
+        state.batteryPct = pct;
+        var el = $("battery-pct");
+        if (el) el.textContent = pct + "%";
+        var pill = $("battery-status");
+        if (pill) {
+          pill.classList.remove("ok", "warn", "err");
+          if (pct <= 15) pill.classList.add("err");
+          else if (pct <= 30) pill.classList.add("warn");
+          else pill.classList.add("ok");
+          var icon = pill.querySelector(".material-symbols-outlined");
+          if (icon) {
+            if (pct >= 90) icon.textContent = "battery_full";
+            else if (pct >= 60) icon.textContent = "battery_5_bar";
+            else if (pct >= 40) icon.textContent = "battery_3_bar";
+            else if (pct >= 20) icon.textContent = "battery_2_bar";
+            else icon.textContent = "battery_alert";
+          }
+        }
+      }
+      update();
+      bat.addEventListener("levelchange", update);
+      bat.addEventListener("chargingchange", update);
+    }).catch(function () { /* api absente */ });
+  }
+
+  // ---------------------------------------------------------------------
+  // Ressources carte : carroyage + 3P
+  // ---------------------------------------------------------------------
+  // Helper colonne A..Z, AA..
+  function colLabel(idx) {
+    if (idx < 26) return String.fromCharCode(65 + idx);
+    return String.fromCharCode(65 + Math.floor(idx / 26) - 1) + String.fromCharCode(65 + (idx % 26));
+  }
+
+  function loadGrid() {
+    if (state.gridData) {
+      renderGrid();
+      return;
+    }
+    fetch("/field/resources/grid-ref", { headers: { "Accept": "application/json" } })
+      .then(function (r) {
+        if (r.status === 401) { return handleSessionLost(); }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data || !data.lines) {
+          toast("Carroyage indisponible", "warn");
+          return;
+        }
+        state.gridData = data;
+        renderGrid();
+      })
+      .catch(function () { toast("Echec chargement carroyage", "err"); });
+  }
+
+  function renderGrid() {
+    if (!state.gridData || !state.gridData.lines) return;
+    if (state.gridLayer) {
+      state.map.removeLayer(state.gridLayer);
+      state.gridLayer = null;
+    }
+    var lines = state.gridData.lines;
+    var hLines = lines.h_lines || [];
+    var vLines = lines.v_lines || [];
+    var numCols = lines.num_cols || (vLines.length - 1);
+    var numRows = lines.num_rows || (hLines.length - 1);
+    var colOffset = lines.col_offset || 0;
+    var rowOffset = lines.row_offset || 0;
+
+    var group = L.layerGroup();
+    var polylines = [];
+    hLines.forEach(function (l) {
+      var pl = L.polyline(
+        [[l.lat, l.lng_start], [l.lat, l.lng_end]],
+        { color: "#f59e0b", weight: 1.4, opacity: 0.75, interactive: false }
+      );
+      pl.addTo(group);
+      polylines.push(pl);
+    });
+    vLines.forEach(function (l) {
+      var pl = L.polyline(
+        [[l.lat_start, l.lng], [l.lat_end, l.lng]],
+        { color: "#f59e0b", weight: 1.4, opacity: 0.75, interactive: false }
+      );
+      pl.addTo(group);
+      polylines.push(pl);
+    });
+    group.addTo(state.map);
+    state.gridLayer = group;
+    state.gridPolylines = polylines;
+
+    // Compute meta (col labels, row numbers, centers)
+    var cols = [];
+    for (var ci = 0; ci < numCols; ci++) {
+      var adj = ci - colOffset;
+      cols.push(adj >= 0 ? colLabel(adj) : null);
+    }
+    var rows = [];
+    for (var ri = 0; ri < numRows; ri++) {
+      var rn = ri + 1 - rowOffset;
+      rows.push(rn >= 1 ? rn : null);
+    }
+    var colCenters = [];
+    for (var c = 0; c < numCols; c++) {
+      colCenters.push((vLines[c].lng + vLines[c + 1].lng) / 2);
+    }
+    var rowCenters = [];
+    for (var r = 0; r < numRows; r++) {
+      rowCenters.push((hLines[r].lat + hLines[r + 1].lat) / 2);
+    }
+    state.gridMeta = {
+      cols: cols, rows: rows,
+      colCenters: colCenters, rowCenters: rowCenters,
+      hLines: hLines, vLines: vLines,
+      numCols: numCols, numRows: numRows,
+    };
+
+    buildStickyHeaders();
+    state.map.on("move zoom", updateStickyHeaders);
+
+    // Bouton sous-grille (visible si zoom >= 18)
+    updateGrid25ButtonVisibility();
+    state.map.on("zoomend", updateGrid25ButtonVisibility);
+  }
+
+  function clearGrid() {
+    if (state.gridLayer) {
+      state.map.removeLayer(state.gridLayer);
+      state.gridLayer = null;
+    }
+    state.gridPolylines = [];
+    if (state.gridStickyEl) {
+      state.gridStickyEl.remove();
+      state.gridStickyEl = null;
+    }
+    state.gridMeta = null;
+    state.map.off("move zoom", updateStickyHeaders);
+    state.map.off("zoomend", updateGrid25ButtonVisibility);
+    clearGrid25();
+    var row = $("lyr-grid-25-row");
+    if (row) row.hidden = true;
+  }
+
+  function toggleGrid(on) {
+    var want = (on === undefined) ? !state.gridOn : !!on;
+    if (want === state.gridOn) return;
+    state.gridOn = want;
+    var cb = $("lyr-grid-100");
+    if (cb) cb.checked = want;
+    if (want) {
+      loadGrid();
+      toast("Carroyage : on");
+    } else {
+      clearGrid();
+      toast("Carroyage : off");
+    }
+  }
+
+  // ----- Sticky headers -----
+  function buildStickyHeaders() {
+    if (state.gridStickyEl) {
+      state.gridStickyEl.remove();
+      state.gridStickyEl = null;
+    }
+    if (!state.gridMeta) return;
+    var info = activeGridInfo();
+    var container = $("field-map");
+    if (!container) return;
+
+    var wrap = document.createElement("div");
+    wrap.className = "grid-sticky-wrap";
+
+    var top = document.createElement("div");
+    top.className = "grid-sticky-top";
+    info.cols.forEach(function (lbl, idx) {
+      if (!lbl) return;
+      var el = document.createElement("span");
+      el.className = "grid-sticky-col";
+      el.textContent = lbl;
+      el.dataset.idx = idx;
+      top.appendChild(el);
+    });
+    wrap.appendChild(top);
+
+    var left = document.createElement("div");
+    left.className = "grid-sticky-left";
+    info.rows.forEach(function (lbl, idx) {
+      if (!lbl) return;
+      var el = document.createElement("span");
+      el.className = "grid-sticky-row";
+      el.textContent = String(lbl);
+      el.dataset.idx = idx;
+      left.appendChild(el);
+    });
+    wrap.appendChild(left);
+
+    var corner = document.createElement("div");
+    corner.className = "grid-sticky-corner";
+    var ico = document.createElement("span");
+    ico.className = "material-symbols-outlined";
+    ico.textContent = state.grid25On ? "grid_4x4" : "grid_3x3";
+    corner.appendChild(ico);
+    wrap.appendChild(corner);
+
+    container.appendChild(wrap);
+    state.gridStickyEl = wrap;
+    updateStickyHeaders();
+  }
+
+  function activeGridInfo() {
+    if (state.grid25On && state.grid25Meta) {
+      return {
+        cols: state.grid25Meta.cols,
+        rows: state.grid25Meta.rows,
+        colCenters: state.grid25Meta.colCenters,
+        rowCenters: state.grid25Meta.rowCenters,
+        hLines: state.grid25Meta.hLines,
+        vLines: state.grid25Meta.vLines,
+        numCols: state.grid25Meta.numCols,
+        numRows: state.grid25Meta.numRows,
+      };
+    }
+    return state.gridMeta;
+  }
+
+  function updateStickyHeaders() {
+    if (!state.gridStickyEl || !state.gridMeta || !state.map) return;
+    var info = activeGridInfo();
+    var bounds = state.map.getBounds();
+
+    var topEls = state.gridStickyEl.querySelectorAll(".grid-sticky-col");
+    topEls.forEach(function (el) {
+      var idx = parseInt(el.dataset.idx, 10);
+      var lng = info.colCenters[idx];
+      if (lng < bounds.getWest() || lng > bounds.getEast()) {
+        el.style.display = "none";
+        return;
+      }
+      var pt = state.map.latLngToContainerPoint([info.rowCenters[0] || 0, lng]);
+      el.style.left = pt.x + "px";
+      el.style.display = "";
+    });
+
+    var leftEls = state.gridStickyEl.querySelectorAll(".grid-sticky-row");
+    leftEls.forEach(function (el) {
+      var idx = parseInt(el.dataset.idx, 10);
+      var lat = info.rowCenters[idx];
+      if (lat < bounds.getSouth() || lat > bounds.getNorth()) {
+        el.style.display = "none";
+        return;
+      }
+      var pt = state.map.latLngToContainerPoint([lat, info.colCenters[0] || 0]);
+      el.style.top = pt.y + "px";
+      el.style.display = "";
+    });
+  }
+
+  // ----- 25m sub-grid -----
+  function updateGrid25ButtonVisibility() {
+    var row = $("lyr-grid-25-row");
+    if (!row) return;
+    var canShow = state.gridOn && state.map.getZoom() >= 18 && state.gridData && state.gridData.lines_25;
+    row.hidden = !canShow;
+    if (!canShow && state.grid25On) {
+      // Auto-hide sub-grid si on dezoome
+      toggleGrid25(false);
+    }
+  }
+
+  function toggleGrid25(on) {
+    var want = (on === undefined) ? !state.grid25On : !!on;
+    if (want === state.grid25On) return;
+    state.grid25On = want;
+    var cb = $("lyr-grid-25");
+    if (cb) cb.checked = want;
+    if (want) {
+      renderGrid25();
+    } else {
+      clearGrid25();
+      buildStickyHeaders();
+    }
+  }
+
+  function clearGrid25() {
+    if (state.grid25Layer) {
+      state.map.removeLayer(state.grid25Layer);
+      state.grid25Layer = null;
+    }
+    state.grid25Meta = null;
+  }
+
+  function renderGrid25() {
+    clearGrid25();
+    if (!state.gridData || !state.gridData.lines_25 || !state.gridMeta) return;
+    var lines25 = state.gridData.lines_25;
+    var hL = lines25.h_lines || [];
+    var vL = lines25.v_lines || [];
+    var nC = lines25.num_cols || (vL.length - 1);
+    var nR = lines25.num_rows || (hL.length - 1);
+
+    var group = L.layerGroup();
+    hL.forEach(function (l) {
+      L.polyline(
+        [[l.lat, l.lng_start], [l.lat, l.lng_end]],
+        { color: "#fb923c", weight: 1, opacity: 0.7, dashArray: "6 4", interactive: false }
+      ).addTo(group);
+    });
+    vL.forEach(function (l) {
+      L.polyline(
+        [[l.lat_start, l.lng], [l.lat_end, l.lng]],
+        { color: "#fb923c", weight: 1, opacity: 0.7, dashArray: "6 4", interactive: false }
+      ).addTo(group);
+    });
+    group.addTo(state.map);
+    state.grid25Layer = group;
+
+    var colCenters25 = [];
+    for (var c = 0; c < nC; c++) {
+      colCenters25.push((vL[c].lng + vL[c + 1].lng) / 2);
+    }
+    var rowCenters25 = [];
+    for (var r = 0; r < nR; r++) {
+      rowCenters25.push((hL[r].lat + hL[r + 1].lat) / 2);
+    }
+
+    var meta100 = state.gridMeta;
+    var colLabels25 = [];
+    for (var ci = 0; ci < nC; ci++) {
+      var lng = colCenters25[ci];
+      var pCol = null;
+      for (var pi = 0; pi < meta100.numCols; pi++) {
+        if (lng >= meta100.vLines[pi].lng && lng < meta100.vLines[pi + 1].lng) {
+          pCol = pi; break;
+        }
+      }
+      if (pCol === null || !meta100.cols[pCol]) {
+        colLabels25.push(null);
+        continue;
+      }
+      var subIdx = 0;
+      for (var si = ci - 1; si >= 0; si--) {
+        if (colCenters25[si] < meta100.vLines[pCol].lng) break;
+        subIdx++;
+      }
+      colLabels25.push(meta100.cols[pCol] + String.fromCharCode(65 + Math.min(subIdx, 3)));
+    }
+
+    var rowLabels25 = [];
+    for (var ri = 0; ri < nR; ri++) {
+      var lat = rowCenters25[ri];
+      var pRow = null;
+      for (var pri = 0; pri < meta100.numRows; pri++) {
+        if (lat <= meta100.hLines[pri].lat && lat > meta100.hLines[pri + 1].lat) {
+          pRow = pri; break;
+        }
+      }
+      if (pRow === null || !meta100.rows[pRow]) {
+        rowLabels25.push(null);
+        continue;
+      }
+      var subRow = 0;
+      for (var sri = ri - 1; sri >= 0; sri--) {
+        if (rowCenters25[sri] > meta100.hLines[pRow].lat) break;
+        subRow++;
+      }
+      rowLabels25.push(String(meta100.rows[pRow]) + (Math.min(subRow, 3) + 1));
+    }
+
+    state.grid25Meta = {
+      cols: colLabels25, rows: rowLabels25,
+      colCenters: colCenters25, rowCenters: rowCenters25,
+      hLines: hL, vLines: vL,
+      numCols: nC, numRows: nR,
+    };
+    buildStickyHeaders();
+  }
+
+  // Crosshair : retourne label de la cellule contenant lat/lng
+  function getCellLabelAt(lat, lng) {
+    var info = activeGridInfo();
+    if (!info) return { col: null, row: null };
+    var col = null, row = null;
+    for (var ci = 0; ci < info.numCols; ci++) {
+      if (lng >= info.vLines[ci].lng && lng < info.vLines[ci + 1].lng) { col = ci; break; }
+    }
+    for (var ri = 0; ri < info.numRows; ri++) {
+      if (lat <= info.hLines[ri].lat && lat > info.hLines[ri + 1].lat) { row = ri; break; }
+    }
+    if (col === null || row === null) return { col: null, row: null };
+    return {
+      col: col, row: row,
+      colLabel: info.cols[col],
+      rowLabel: info.rows[row],
+    };
+  }
+
+  function showCrosshair(latlng) {
+    if (!state.gridOn || !state.gridMeta) return;
+    var info = activeGridInfo();
+    var cell = getCellLabelAt(latlng.lat, latlng.lng);
+    if (cell.col === null || cell.row === null) return;
+    var ch = $("grid-crosshair");
+    var lblEl = $("grid-crosshair-label");
+    if (!ch || !lblEl) return;
+    // Position des lignes de croix au centre de la cellule cliquee
+    var cLng = info.colCenters[cell.col];
+    var cLat = info.rowCenters[cell.row];
+    var pt = state.map.latLngToContainerPoint([cLat, cLng]);
+    var v = ch.querySelector(".gx-line-v");
+    var h = ch.querySelector(".gx-line-h");
+    if (v) v.style.left = pt.x + "px";
+    if (h) h.style.top = pt.y + "px";
+    lblEl.textContent = (cell.colLabel || "") + (cell.rowLabel || "");
+    lblEl.style.left = pt.x + "px";
+    lblEl.style.top = pt.y + "px";
+    ch.hidden = false;
+    // Highlight des entetes
+    var topEl = state.gridStickyEl && state.gridStickyEl.querySelector('.grid-sticky-col[data-idx="' + cell.col + '"]');
+    var leftEl = state.gridStickyEl && state.gridStickyEl.querySelector('.grid-sticky-row[data-idx="' + cell.row + '"]');
+    if (state.gridStickyEl) {
+      state.gridStickyEl.querySelectorAll(".grid-highlight").forEach(function (e) { e.classList.remove("grid-highlight"); });
+    }
+    if (topEl) topEl.classList.add("grid-highlight");
+    if (leftEl) leftEl.classList.add("grid-highlight");
+    if (state.crosshairTimer) clearTimeout(state.crosshairTimer);
+    state.crosshairTimer = setTimeout(function () {
+      if (ch) ch.hidden = true;
+      if (state.gridStickyEl) {
+        state.gridStickyEl.querySelectorAll(".grid-highlight").forEach(function (e) { e.classList.remove("grid-highlight"); });
+      }
+    }, 4000);
+  }
+
+  // ----- 3P (toggle) -----
+  function toggle3P(on) {
+    var want = (on === undefined) ? !state.threePOn : !!on;
+    if (want === state.threePOn) return;
+    state.threePOn = want;
+    var cb = $("lyr-3p");
+    if (cb) cb.checked = want;
+    if (want) {
+      load3P();
+    } else {
+      if (state.threePLayer) {
+        state.map.removeLayer(state.threePLayer);
+        state.threePLayer = null;
+      }
+      state.threePLoaded = false;
+    }
+  }
+
+  function load3P() {
+    if (state.threePLoaded && state.threePLayer) {
+      // Deja charge : juste reattacher
+      state.map.addLayer(state.threePLayer);
+      return;
+    }
+    state.threePLoaded = true;
+    fetch("/field/resources/3p", { headers: { "Accept": "application/json" } })
+      .then(function (r) {
+        if (r.status === 401) { return handleSessionLost(); }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data || !data.features) return;
+        render3P(data.features);
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function render3P(features) {
+    if (state.threePLayer) {
+      state.map.removeLayer(state.threePLayer);
+      state.threePLayer = null;
+    }
+    var group = L.layerGroup();
+    features.forEach(function (f) {
+      var coords = (f.geometry || {}).coordinates || [];
+      if (coords.length < 2) return;
+      var lat = coords[1], lng = coords[0];
+      var props = f.properties || {};
+      var name = props.Nom || props.Name || props.name || "3P";
+      var cm = L.circleMarker([lat, lng], {
+        radius: 5,
+        color: "#0ea5e9",
+        weight: 2,
+        fillColor: "#bae6fd",
+        fillOpacity: 0.9,
+      });
+      cm.bindPopup("<b>" + escapeHtml(name) + "</b>");
+      cm.addTo(group);
+    });
+    if (state.threePOn) group.addTo(state.map);
+    state.threePLayer = group;
+  }
+
+  // ----- POI (groundmaster categories) -----
+  // Couleurs auto pour categories sans icone connue (mirror map_view.js)
+  var POI_AUTO_COLORS = [
+    "#E6194B", "#3CB44B", "#FFE119", "#4363D8", "#F58231",
+    "#911EB4", "#42D4F4", "#F032E6", "#BFEF45", "#FABED4",
+    "#469990", "#DCBEFF", "#9A6324", "#FFFAC8", "#800000",
+    "#AAFFC3", "#808000", "#FFD8B1", "#000075", "#A9A9A9",
+  ];
+
+  function poiGetColor(icon) {
+    var defaults = (state.poiBundle && state.poiBundle.default_colors) || {};
+    if (defaults[icon]) return defaults[icon];
+    var idx = state.poiAutoColorIdx++;
+    return POI_AUTO_COLORS[idx % POI_AUTO_COLORS.length];
+  }
+
+  function poiResolveRouteColor(name) {
+    if (!name) return null;
+    var pc = (state.poiBundle && state.poiBundle.parking_colors) || {};
+    return pc[String(name).toLowerCase()] || null;
+  }
+
+  function loadPoiCategories() {
+    fetch("/field/resources/map-bundle", { headers: { "Accept": "application/json" } })
+      .then(function (r) {
+        if (r.status === 401) { return handleSessionLost(); }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        state.poiBundle = {
+          parametrage: data.parametrage || {},
+          parking_colors: data.parking_colors || {},
+          default_colors: data.default_colors || {},
+        };
+        // Ne garder que les categories qui ont au moins un item actif dans le parametrage
+        var allCats = data.categories || [];
+        state.poiCategories = allCats.filter(function (cat) {
+          var items = poiItemArray(cat);
+          return items.some(function (it) { return it.active !== false; });
+        });
+        renderPoiList();
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function poiItemArray(cat) {
+    var dataKey = cat.dataKey || cat.collection;
+    var raw = (state.poiBundle && state.poiBundle.parametrage) ? state.poiBundle.parametrage[dataKey] : null;
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === "object") return Object.values(raw);
+    return [];
+  }
+
+  function renderPoiList() {
+    var list = $("lyr-poi-list");
+    if (!list) return;
+    list.innerHTML = "";
+    if (!state.poiCategories.length) {
+      list.innerHTML = "<div class='layers-empty'>Aucun POI disponible.</div>";
+      return;
+    }
+    state.poiCategories.forEach(function (cat) {
+      var key = cat.dataKey || cat.collection;
+      if (!key) return;
+      var label = cat.label || key;
+      var icon = cat.icon || "place";
+      var color = poiGetColor(icon);
+      var row = document.createElement("label");
+      row.className = "layer-row";
+      var input = document.createElement("input");
+      input.type = "checkbox";
+      input.dataset.poi = key;
+      var st = state.poiLayers[key];
+      input.checked = !!(st && st.visible);
+      input.addEventListener("change", function () {
+        togglePoi(key, input.checked, cat);
+      });
+      var name = document.createElement("span");
+      name.className = "layer-name";
+      name.innerHTML = "<span class='material-symbols-outlined' style='color:" + color + "'>"
+        + escapeHtml(icon) + "</span> " + escapeHtml(label);
+      row.appendChild(input);
+      row.appendChild(name);
+      list.appendChild(row);
+    });
+  }
+
+  function togglePoi(key, on, cat) {
+    var st = state.poiLayers[key];
+    if (on) {
+      if (st && st.layer) {
+        st.layer.addTo(state.map);
+        st.visible = true;
+        return;
+      }
+      var collection = (cat && cat.collection) || key;
+      fetch("/field/resources/gm-collection/" + encodeURIComponent(collection), { headers: { "Accept": "application/json" } })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          var features = (data && data.features) || [];
+          var layer = renderPoiFeatures(features, cat);
+          state.poiLayers[key] = { layer: layer, visible: true, collection: collection };
+        })
+        .catch(function () { toast("Echec POI " + (cat && cat.label || key), "err"); });
+    } else {
+      if (st && st.layer) {
+        state.map.removeLayer(st.layer);
+        st.visible = false;
+      }
+    }
+  }
+
+  function renderPoiFeatures(features, cat) {
+    var group = L.layerGroup();
+    var icon = (cat && cat.icon) || "place";
+    var defaultColor = poiGetColor(icon);
+    var label = (cat && cat.label) || "";
+    var sc = (cat && cat.scheduleConfig) || {};
+    var hasRouteColors = !!sc.hasRouteColor;
+
+    var items = poiItemArray(cat).filter(function (it) { return it.active !== false; });
+    if (!items.length) { return group; }
+
+    var mapping = (cat && cat.mapping) || {};
+    var nameMapping = mapping.name || "";
+    var namePropKey = nameMapping.indexOf("properties.") === 0 ? nameMapping.slice(11) : null;
+
+    features.forEach(function (f) {
+      var geom = f.geometry;
+      if (!geom) return;
+      var props = f.properties || {};
+
+      var featureId = props._id_feature || props._id;
+      var featureName = "";
+      if (namePropKey) featureName = props[namePropKey] || "";
+      if (!featureName) {
+        featureName = props.Name || props.name || props.Nom || props.NOM || props.nom || "";
+      }
+
+      var item = null;
+      for (var i = 0; i < items.length; i++) {
+        var it = items[i];
+        if (it.id === featureId || it._id === featureId || it.name === featureName) {
+          item = it;
+          break;
+        }
+      }
+      if (!item) return;
+
+      var displayName = item.name || featureName || label;
+      var color = defaultColor;
+      var routeColorName = null;
+      if (hasRouteColors && item.routeColor) {
+        var hex = poiResolveRouteColor(item.routeColor);
+        if (hex) { color = hex; routeColorName = item.routeColor; }
+      }
+
+      var geomType = (geom.type || "").toLowerCase();
+      if (geomType === "point" || geomType === "multipoint") {
+        renderPoiPoint(group, geom, item, cat, displayName, icon, color);
+      } else if (geomType === "polygon" || geomType === "multipolygon") {
+        renderPoiPolygon(group, geom, item, cat, displayName, icon, color, f);
+      } else if (geomType === "linestring" || geomType === "multilinestring") {
+        renderPoiLine(group, f, item, cat, displayName, icon, color);
+      }
+    });
+
+    group.addTo(state.map);
+    return group;
+  }
+
+  function renderPoiPoint(group, geom, item, cat, displayName, icon, color) {
+    var coords = geom.coordinates || [];
+    if (coords.length < 2) return;
+    var lat = coords[1];
+    var lng = coords[0];
+
+    var html = "<div class='poi-label' style='background:" + color + "'>"
+      + "<span class='material-symbols-outlined poi-label-icon'>" + escapeHtml(icon) + "</span>"
+      + escapeHtml(displayName) + "</div>";
+    var divIcon = L.divIcon({ html: html, className: "poi-label-wrap", iconSize: null });
+    var m = L.marker([lat, lng], { icon: divIcon });
+    m.on("click", function () {
+      if (state.gridOn) return; // carroyage actif = pas de popup POI
+      m.unbindPopup();
+      m.bindPopup(buildPoiPopup(item, cat, displayName, icon, color), { maxWidth: 320 }).openPopup();
+    });
+    m.addTo(group);
+  }
+
+  function renderPoiPolygon(group, geom, item, cat, displayName, icon, color, feature) {
+    var rings;
+    if (geom.type === "Polygon") {
+      rings = geom.coordinates[0].map(function (c) { return [c[1], c[0]]; });
+    } else {
+      rings = geom.coordinates[0][0].map(function (c) { return [c[1], c[0]]; });
+    }
+    var poly = L.polygon(rings, { color: color, fillColor: color, fillOpacity: 0.3, weight: 2 }).addTo(group);
+
+    var centroid = poiCentroid(rings);
+    var html = "<div class='poi-label' style='background:" + color + "'>"
+      + "<span class='material-symbols-outlined poi-label-icon'>" + escapeHtml(icon) + "</span>"
+      + escapeHtml(displayName) + "</div>";
+    var labelIcon = L.divIcon({ html: html, className: "poi-label-wrap", iconSize: null });
+    var labelMarker = L.marker(centroid, { icon: labelIcon }).addTo(group);
+
+    var click = function () {
+      if (state.gridOn) return;
+      labelMarker.unbindPopup();
+      labelMarker.bindPopup(buildPoiPopup(item, cat, displayName, icon, color), { maxWidth: 320 }).openPopup();
+    };
+    poly.on("click", click);
+    labelMarker.on("click", click);
+  }
+
+  function renderPoiLine(group, feature, item, cat, displayName, icon, color) {
+    try {
+      L.geoJSON(feature, {
+        style: { color: color, weight: 4, opacity: 0.9 },
+        onEachFeature: function (feat, layer) {
+          layer.on("click", function () {
+            if (state.gridOn) return;
+            layer.unbindPopup();
+            layer.bindPopup(buildPoiPopup(item, cat, displayName, icon, color), { maxWidth: 320 }).openPopup();
+          });
+        },
+      }).addTo(group);
+    } catch (e) { /* ignore */ }
+  }
+
+  // --- POI Search ---
+  var _poiSearchIndex = []; // [{name, cat, icon, color, lat, lng, geomType, feature, catObj, collection}]
+  var _poiSearchHighlight = null; // temporary layer for highlighting search result
+
+  function buildPoiSearchIndex() {
+    _poiSearchIndex = [];
+    if (!state.poiCategories.length || !state.poiBundle) return;
+    // We need to fetch and index all POI features from all categories
+    var remaining = state.poiCategories.length;
+    state.poiCategories.forEach(function (cat) {
+      var key = cat.dataKey || cat.collection;
+      var collection = cat.collection || key;
+      var icon = cat.icon || "place";
+      var color = poiGetColor(icon);
+      var items = poiItemArray(cat).filter(function (it) { return it.active !== false; });
+      if (!items.length) { remaining--; return; }
+
+      var mapping = (cat && cat.mapping) || {};
+      var nameMapping = mapping.name || "";
+      var namePropKey = nameMapping.indexOf("properties.") === 0 ? nameMapping.slice(11) : null;
+
+      // Check if already loaded
+      var cached = state.poiLayers[key];
+      if (cached && cached._searchFeatures) {
+        cached._searchFeatures.forEach(function (sf) { _poiSearchIndex.push(sf); });
+        remaining--;
+        return;
+      }
+
+      fetch("/field/resources/gm-collection/" + encodeURIComponent(collection), { headers: { "Accept": "application/json" } })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          var features = (data && data.features) || [];
+          var searchFeatures = [];
+          features.forEach(function (f) {
+            var geom = f.geometry;
+            if (!geom) return;
+            var props = f.properties || {};
+            var featureId = props._id_feature || props._id;
+            var featureName = "";
+            if (namePropKey) featureName = props[namePropKey] || "";
+            if (!featureName) featureName = props.Name || props.name || props.Nom || props.NOM || props.nom || "";
+
+            var item = null;
+            for (var i = 0; i < items.length; i++) {
+              if (items[i].id === featureId || items[i]._id === featureId || items[i].name === featureName) {
+                item = items[i]; break;
+              }
+            }
+            if (!item) return;
+
+            var displayName = item.name || featureName || (cat.label || "");
+            var coords = geom.coordinates || [];
+            var geomType = (geom.type || "").toLowerCase();
+            var lat, lng;
+
+            if (geomType === "point" || geomType === "multipoint") {
+              if (coords.length >= 2) { lat = coords[1]; lng = coords[0]; }
+            } else if (geomType === "polygon" || geomType === "multipolygon") {
+              var ring = geomType === "polygon" ? coords[0] : (coords[0] && coords[0][0]);
+              if (ring && ring.length) {
+                var s = { la: 0, lo: 0, n: 0 };
+                ring.forEach(function (c) { s.la += c[1]; s.lo += c[0]; s.n++; });
+                if (s.n) { lat = s.la / s.n; lng = s.lo / s.n; }
+              }
+            } else if (geomType === "linestring" || geomType === "multilinestring") {
+              var pts = geomType === "linestring" ? coords : (coords[0] || []);
+              if (pts.length) { var mid = pts[Math.floor(pts.length / 2)]; lat = mid[1]; lng = mid[0]; }
+            }
+
+            if (lat != null && lng != null) {
+              var entry = {
+                name: displayName,
+                catLabel: cat.label || "",
+                icon: icon,
+                color: color,
+                lat: lat, lng: lng,
+                geomType: geomType,
+                feature: f,
+                catObj: cat,
+                collection: collection,
+                dataKey: key,
+              };
+              _poiSearchIndex.push(entry);
+              searchFeatures.push(entry);
+            }
+          });
+          // Cache for next search
+          if (!state.poiLayers[key]) state.poiLayers[key] = {};
+          state.poiLayers[key]._searchFeatures = searchFeatures;
+        })
+        .catch(function () {})
+        .finally(function () { remaining--; });
+    });
+  }
+
+  function openPoiSearch() {
+    var panel = $("poi-search-panel");
+    var input = $("poi-search-input");
+    if (!panel) return;
+    panel.hidden = false;
+    if (input) { input.value = ""; input.focus(); }
+    renderPoiSearchResults("");
+    // Build index if needed
+    if (!_poiSearchIndex.length) buildPoiSearchIndex();
+  }
+
+  function closePoiSearch() {
+    var panel = $("poi-search-panel");
+    if (panel) panel.hidden = true;
+  }
+
+  function renderPoiSearchResults(query) {
+    var results = $("poi-search-results");
+    if (!results) return;
+    results.innerHTML = "";
+
+    if (!query.trim()) {
+      results.innerHTML = "<div class='poi-search-empty'>Tape un nom pour chercher...</div>";
+      return;
+    }
+
+    var q = query.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    var matches = _poiSearchIndex.filter(function (p) {
+      var n = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return n.indexOf(q) !== -1;
+    }).slice(0, 20);
+
+    if (!matches.length) {
+      results.innerHTML = "<div class='poi-search-empty'>Aucun resultat</div>";
+      return;
+    }
+
+    matches.forEach(function (p) {
+      var item = document.createElement("div");
+      item.className = "poi-search-item";
+      var iconWrap = document.createElement("div");
+      iconWrap.className = "poi-search-item-icon";
+      iconWrap.style.background = p.color;
+      iconWrap.innerHTML = "<span class='material-symbols-outlined'>" + escapeHtml(p.icon) + "</span>";
+      var nameEl = document.createElement("div");
+      nameEl.className = "poi-search-item-name";
+      nameEl.textContent = p.name;
+      var catEl = document.createElement("div");
+      catEl.className = "poi-search-item-cat";
+      catEl.textContent = p.catLabel;
+      var right = document.createElement("div");
+      right.appendChild(nameEl);
+      right.appendChild(catEl);
+      right.style.flex = "1";
+      item.appendChild(iconWrap);
+      item.appendChild(right);
+      item.addEventListener("click", function () {
+        flyToPoiResult(p);
+        closePoiSearch();
+      });
+      results.appendChild(item);
+    });
+  }
+
+  function flyToPoiResult(p) {
+    // Remove previous highlight
+    if (_poiSearchHighlight) {
+      state.map.removeLayer(_poiSearchHighlight);
+      _poiSearchHighlight = null;
+    }
+
+    // Ensure the POI layer is loaded and visible
+    var key = p.dataKey;
+    var st = state.poiLayers[key];
+    if (!st || !st.visible) {
+      // Load and show the layer
+      togglePoi(key, true, p.catObj);
+      // Update checkbox in layers panel
+      var cb = document.querySelector("[data-poi='" + key + "']");
+      if (cb) cb.checked = true;
+    }
+
+    // Fly to the POI
+    state.followMe = false;
+    var followBtn = $("btn-follow");
+    if (followBtn) followBtn.classList.remove("active");
+
+    var zoom = 19;
+    if (p.geomType === "polygon" || p.geomType === "multipolygon") zoom = 18;
+    state.map.setView([p.lat, p.lng], zoom, { animate: true });
+
+    // Temporary highlight marker
+    var html = "<div class='poi-search-highlight' style='border-color:" + p.color + "'>"
+      + "<span class='material-symbols-outlined' style='color:" + p.color + "'>" + escapeHtml(p.icon) + "</span></div>";
+    var icon = L.divIcon({ html: html, className: "poi-search-highlight-wrap", iconSize: [48, 48], iconAnchor: [24, 24] });
+    _poiSearchHighlight = L.marker([p.lat, p.lng], { icon: icon, zIndexOffset: 8000 }).addTo(state.map);
+    // Auto-remove after 8 seconds
+    setTimeout(function () {
+      if (_poiSearchHighlight) {
+        try { state.map.removeLayer(_poiSearchHighlight); } catch (e) {}
+        _poiSearchHighlight = null;
+      }
+    }, 8000);
+  }
+
+  function poiCentroid(latlngs) {
+    var lat = 0, lng = 0, n = 0;
+    latlngs.forEach(function (p) { lat += p[0]; lng += p[1]; n++; });
+    if (!n) return [0, 0];
+    return [lat / n, lng / n];
+  }
+
+  // ----- Popup builder (simplified port from map_view.js generatePopup) -----
+  function buildPoiPopup(item, cat, displayName, icon, color) {
+    var html = "<div class='poi-popup'>";
+    html += "<div class='poi-popup-head' style='background:" + color + "'>"
+      + "<span class='material-symbols-outlined'>" + escapeHtml(icon) + "</span>"
+      + "<span class='poi-popup-name'>" + escapeHtml(displayName) + "</span></div>";
+    html += "<div class='poi-popup-body'>";
+
+    // Acces
+    if (item.access) {
+      var badges = [];
+      if (item.access.public) badges.push("Public");
+      if (item.access.orga || item.access.organisation) badges.push("Organisation");
+      if (item.access.vip) badges.push("VIP");
+      if (badges.length) {
+        html += "<div class='poi-popup-row'><span class='poi-popup-label'>Acces</span>"
+          + "<span class='poi-popup-val'>" + escapeHtml(badges.join(", ")) + "</span></div>";
+      }
+    }
+
+    // Controle
+    if (item.controle && item.controle.visible) {
+      var ct = item.controle.type || "Visuel";
+      var ctText = ct;
+      if (ct === "PDA" && item.controle.number) ctText = item.controle.number + " PDA";
+      else if (ct === "TRIPODE" && item.controle.number) ctText = item.controle.number + " Tripodes";
+      else if (ct === "VISUEL") ctText = "Visuel";
+      html += "<div class='poi-popup-row'><span class='poi-popup-label'>Controle</span>"
+        + "<span class='poi-popup-val'>" + escapeHtml(ctText) + "</span></div>";
+    }
+
+    // Capacite / Jauge
+    if (item.jauge && item.jauge.visible) {
+      var cap = (item.capacite_pratique && item.capacite_pratique !== "" && item.capacite_pratique !== "0")
+        ? item.capacite_pratique : item.capacite;
+      if (cap) {
+        html += "<div class='poi-popup-row'><span class='poi-popup-label'>Capacite</span>"
+          + "<span class='poi-popup-val'>" + escapeHtml(String(cap)) + "</span></div>";
+      }
+      if (item.vente) {
+        html += "<div class='poi-popup-row'><span class='poi-popup-label'>Vente</span>"
+          + "<span class='poi-popup-val'>" + escapeHtml(String(item.vente)) + "</span></div>";
+      }
+      if (item.ticket) {
+        var tix = [];
+        if (item.ticket.digital) tix.push("Digital");
+        if (item.ticket.mobile) tix.push("Mobile");
+        if (item.ticket.sticker) tix.push("Sticker");
+        if (item.ticket.thermique) tix.push("Thermique");
+        if (item.ticket.voucher) tix.push("Voucher");
+        if (tix.length) {
+          html += "<div class='poi-popup-row'><span class='poi-popup-label'>Tickets</span>"
+            + "<span class='poi-popup-val'>" + escapeHtml(tix.join(", ")) + "</span></div>";
+        }
+      }
+    } else if (item.capacite) {
+      html += "<div class='poi-popup-row'><span class='poi-popup-label'>Capacite</span>"
+        + "<span class='poi-popup-val'>" + escapeHtml(String(item.capacite)) + "</span></div>";
+    } else if (item.capacity) {
+      html += "<div class='poi-popup-row'><span class='poi-popup-label'>Capacite</span>"
+        + "<span class='poi-popup-val'>" + escapeHtml(String(item.capacity)) + "</span></div>";
+    }
+
+    // cardFields
+    if (cat && cat.cardFields && cat.cardFields.length) {
+      cat.cardFields.forEach(function (cf) {
+        var val = item[cf.key];
+        if (val == null || val === "" || String(val) === "0") return;
+        var display = String(val);
+        if (cf.decimals != null) {
+          var num = parseFloat(display);
+          if (!isNaN(num)) display = num.toFixed(cf.decimals);
+        }
+        if (cf.suffix) display += " " + cf.suffix;
+        var lab = cf.label || cf.key;
+        html += "<div class='poi-popup-row'><span class='poi-popup-label'>" + escapeHtml(lab) + "</span>"
+          + "<span class='poi-popup-val'>" + escapeHtml(display) + "</span></div>";
+      });
+    }
+
+    // Horaires
+    if (item.dates && item.dates.length) {
+      var sc = (cat && cat.scheduleConfig) || {};
+      var accessTypes = (sc.accessTypes && sc.accessTypes.length) ? sc.accessTypes : null;
+      html += buildScheduleHtml(item.dates, accessTypes);
+    }
+
+    // Description
+    if (item.description && String(item.description).trim()) {
+      html += "<div class='poi-popup-desc'>" + escapeHtml(String(item.description)) + "</div>";
+    }
+
+    // Commentaires
+    if (item.comments) {
+      var cmts = [];
+      if (Array.isArray(item.comments)) cmts = item.comments.filter(Boolean);
+      else if (typeof item.comments === "string" && item.comments.trim()) cmts = [item.comments];
+      if (cmts.length) {
+        html += "<div class='poi-popup-comments'><strong>Commentaires</strong><ul>";
+        cmts.forEach(function (c) { html += "<li>" + escapeHtml(String(c)) + "</li>"; });
+        html += "</ul></div>";
+      }
+    }
+
+    html += "</div></div>";
+    return html;
+  }
+
+  function buildScheduleHtml(dates, accessTypes) {
+    if (!dates || !dates.length) return "";
+    var DAY_NAMES = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
+    function fmtDate(iso) {
+      if (!iso || iso.length < 10) return iso || "";
+      var p = iso.split("-");
+      var d = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+      return DAY_NAMES[d.getDay()] + " " + p[2] + "/" + p[1];
+    }
+    function fmtSlot(slot) {
+      if (!slot || slot.closed) return "<span class='poi-sched-closed'>Ferme</span>";
+      if (slot.is24h) return "<span class='poi-sched-24h'>24h</span>";
+      var o = slot.open || slot.openTime || "-";
+      var c = slot.close || slot.closeTime || "-";
+      return "<span class='poi-sched-open'>" + escapeHtml(o + " - " + c) + "</span>";
+    }
+    var hasAccess = accessTypes && dates[0] && (dates[0].public || dates[0].organisation || dates[0].vip);
+    var html = "<div class='poi-popup-sched'>";
+    html += "<div class='poi-popup-sched-title'><span class='material-symbols-outlined'>schedule</span> Horaires</div>";
+    html += "<table class='poi-popup-sched-table'><thead><tr><th>Date</th>";
+    if (hasAccess) {
+      accessTypes.forEach(function (at) {
+        var lab = at === "public" ? "Public" : at === "organisation" ? "Orga" : at === "vip" ? "VIP" : at;
+        html += "<th>" + escapeHtml(lab) + "</th>";
+      });
+    } else {
+      html += "<th>Horaires</th>";
+    }
+    html += "</tr></thead><tbody>";
+    dates.forEach(function (d) {
+      html += "<tr><td>" + escapeHtml(fmtDate(d.date)) + "</td>";
+      if (hasAccess) {
+        accessTypes.forEach(function (at) { html += "<td>" + fmtSlot(d[at]) + "</td>"; });
+      } else {
+        if (d.is24h) html += "<td><span class='poi-sched-24h'>24h</span></td>";
+        else {
+          var slot = { open: d.openTime, close: d.closeTime };
+          html += "<td>" + fmtSlot(slot) + "</td>";
+        }
+      }
+      html += "</tr>";
+    });
+    html += "</tbody></table></div>";
+    return html;
+  }
+
+  function escapeHtml(s) {
+    return String(s || "").replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Statut patrouille
+  // ---------------------------------------------------------------------
+  var STATUS_META = {
+    patrouille:        { label: "Disponible",         color: "#22c55e", icon: "directions_walk" },
+    intervention:      { label: "Intervention",       color: "#f59e0b", icon: "warning" },
+    sur_place:         { label: "ASL",                color: "#3b82f6", icon: "location_on" },
+    pause:             { label: "Pause",              color: "#94a3b8", icon: "pause_circle" },
+    fin_intervention:  { label: "Fin d'intervention", color: "#8b5cf6", icon: "task_alt" },
+  };
+
+  function updateStatusBar() {
+    var meta = STATUS_META[state.patrolStatus] || STATUS_META.patrouille;
+    var dot = $("status-dot");
+    var text = $("status-text");
+    var bar = $("status-bar");
+    if (dot) dot.style.background = meta.color;
+    if (text) text.textContent = meta.label;
+    if (bar) bar.style.borderColor = meta.color;
+    updateEngageBanner();
+  }
+
+  function updateEngageBanner() {
+    var banner = $("engage-banner");
+    if (!banner) return;
+
+    // Trouver la fiche active
+    var activeFiche = null;
+    if (state.activeFicheId && state.fiches) {
+      for (var i = 0; i < state.fiches.length; i++) {
+        if (state.fiches[i].id === state.activeFicheId) {
+          activeFiche = state.fiches[i];
+          break;
+        }
+      }
+    }
+
+    // Masquer si pas de fiche active
+    if (!activeFiche) {
+      banner.hidden = true;
+      return;
+    }
+
+    var st = ficheStyle(activeFiche.category);
+    var catLabel = (activeFiche.category || "").replace("PCO.", "");
+    var desc = activeFiche.text || "";
+    var urgency = activeFiche.niveau_urgence;
+    var urgColor = FICHE_URGENCY_COLORS[urgency] || "";
+
+    // Icone et couleur categorie
+    var iconEl = $("engage-banner-icon");
+    if (iconEl) {
+      iconEl.textContent = st.icon;
+      iconEl.style.background = st.color;
+    }
+
+    // Categorie + urgence
+    var catEl = $("engage-banner-cat");
+    if (catEl) {
+      catEl.textContent = catLabel + (urgency ? " \u2014 " + urgency : "");
+      if (urgColor) catEl.style.color = urgColor;
+      else catEl.style.color = "";
+    }
+
+    // Description
+    var descEl = $("engage-banner-desc");
+    if (descEl) descEl.textContent = desc || "Intervention en cours";
+
+    // Couleur du bandeau
+    banner.style.borderColor = st.color;
+    var left = $("engage-banner-left");
+    if (left) left.style.borderLeftColor = st.color;
+
+    banner.hidden = false;
+  }
+
+  function flyToActiveFiche() {
+    if (!state.activeFicheId || !state.fiches) return;
+    for (var i = 0; i < state.fiches.length; i++) {
+      var f = state.fiches[i];
+      if (f.id === state.activeFicheId && f.lat != null && f.lng != null) {
+        state.map.setView([f.lat, f.lng], Math.max(state.map.getZoom(), 17), { animate: true });
+        return;
+      }
+    }
+    toast("Position de l'intervention non disponible", "warn");
+  }
+
+  // Definition des options de statut affichees dans le modal
+  var STATUS_OPTIONS = [
+    { status: "patrouille",       label: "Disponible",         desc: "En ronde, disponible",          dot: "s-patrouille" },
+    { status: "intervention",     label: "Intervention",       desc: "Engagement sur le terrain",     dot: "s-intervention" },
+    { status: "sur_place",        label: "ASL - Arrivee sur les lieux", desc: "Sur place, en attente", dot: "s-sur_place" },
+    { status: "pause",            label: "Pause",              desc: "Indisponible temporairement",   dot: "s-pause" },
+    { status: "fin_intervention", label: "Fin d'intervention", desc: "Demander la liberation",        dot: "s-fin_intervention" },
+  ];
+
+  function openStatusModal() {
+    var modal = $("status-modal");
+    if (!modal) return;
+    var container = $("status-options");
+    if (!container) return;
+    container.textContent = "";
+
+    var inEngagement = state.patrolStatus === "intervention" || state.patrolStatus === "sur_place";
+
+    STATUS_OPTIONS.forEach(function (opt) {
+      // En engagement : cacher "Disponible" (remplace par fin_intervention)
+      if (inEngagement && opt.status === "patrouille") return;
+      // Hors engagement : cacher "Fin d'intervention"
+      if (!inEngagement && opt.status === "fin_intervention") return;
+
+      var btn = document.createElement("button");
+      btn.className = "status-option";
+      if (opt.status === state.patrolStatus) btn.classList.add("active");
+      btn.dataset.status = opt.status;
+      btn.innerHTML = "<span class='status-dot " + opt.dot + "'></span>"
+        + "<span class='status-opt-label'>" + opt.label + "</span>"
+        + "<span class='status-opt-desc'>" + opt.desc + "</span>";
+      btn.addEventListener("click", function () {
+        modal.hidden = true;
+        if (opt.status === "intervention" && !inEngagement) {
+          openCreateFicheModal();
+          return;
+        }
+        if (opt.status === "fin_intervention") {
+          openFinInterventionModal();
+          return;
+        }
+        setPatrolStatus(opt.status);
+      });
+      container.appendChild(btn);
+    });
+    modal.hidden = false;
+  }
+
+  function wireStatusOptions() {
+    // Les options sont maintenant generees dynamiquement dans openStatusModal()
+  }
+
+  function openFinInterventionModal() {
+    // Creer un modal inline pour le commentaire de fin d'inter
+    var existing = $("fin-inter-modal");
+    if (existing) existing.remove();
+
+    var overlay = document.createElement("div");
+    overlay.className = "field-modal";
+    overlay.id = "fin-inter-modal";
+
+    var box = document.createElement("div");
+    box.className = "field-modal-box";
+
+    var header = document.createElement("div");
+    header.className = "field-modal-header";
+    header.innerHTML = "<h2>Fin d'intervention</h2>";
+    var closeBtn = document.createElement("button");
+    closeBtn.className = "icon-btn";
+    closeBtn.innerHTML = "<span class='material-symbols-outlined'>close</span>";
+    closeBtn.onclick = function () { overlay.remove(); };
+    header.appendChild(closeBtn);
+    box.appendChild(header);
+
+    var body = document.createElement("div");
+    body.className = "field-modal-body";
+    body.style.padding = "16px";
+
+    var hint = document.createElement("p");
+    hint.style.cssText = "color:#94a3b8;font-size:13px;margin:0 0 12px";
+    hint.textContent = "Commentaire optionnel (si vide, l'operateur cockpit devra en saisir un pour vous liberer).";
+    body.appendChild(hint);
+
+    var textarea = document.createElement("textarea");
+    textarea.className = "fiche-create-text";
+    textarea.rows = 3;
+    textarea.placeholder = "Compte-rendu de l'intervention...";
+    body.appendChild(textarea);
+    box.appendChild(body);
+
+    var actions = document.createElement("div");
+    actions.className = "field-modal-actions";
+    actions.style.padding = "12px 16px";
+    var submitBtn = document.createElement("button");
+    submitBtn.className = "btn-confirm-ack";
+    submitBtn.innerHTML = "<span class='material-symbols-outlined' style='vertical-align:middle'>task_alt</span> Confirmer fin d'intervention";
+    submitBtn.onclick = function () {
+      submitBtn.disabled = true;
+      var comment = textarea.value.trim();
+      setPatrolStatusFinInter(comment, function () {
+        overlay.remove();
+      }, function () {
+        submitBtn.disabled = false;
+      });
+    };
+    actions.appendChild(submitBtn);
+    box.appendChild(actions);
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+  }
+
+  function setPatrolStatusFinInter(comment, onSuccess, onError) {
+    var payload = { status: "fin_intervention" };
+    if (comment) payload.comment = comment;
+    fetch("/field/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then(function (r) {
+        if (r.status === 401) { return handleSessionLost(); }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        if (data.ok) {
+          state.patrolStatus = "fin_intervention";
+          state.patrolStatusSince = new Date().toISOString();
+          updateStatusBar();
+          toast("Fin d'intervention signalee", "ok");
+          // Poster le commentaire dans la chronologie de la fiche si fourni
+          if (comment && state.activeFicheId) {
+            var fd = new FormData();
+            fd.append("comment", "Fin d'intervention : " + comment);
+            fetch("/field/my-fiches/" + encodeURIComponent(state.activeFicheId) + "/comment", {
+              method: "POST", body: fd,
+            }).catch(function () {});
+          }
+          if (onSuccess) onSuccess();
+        } else {
+          toast("Erreur : " + (data.error || data.message || "?"), "err");
+          if (onError) onError();
+        }
+      })
+      .catch(function () {
+        toast("Erreur reseau", "err");
+        if (onError) onError();
+      });
+  }
+
+  function setPatrolStatus(newStatus) {
+    fetch("/field/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: newStatus }),
+    })
+      .then(function (r) {
+        if (r.status === 401) { return handleSessionLost(); }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        if (data.ok) {
+          state.patrolStatus = newStatus;
+          state.patrolStatusSince = new Date().toISOString();
+          if (newStatus === "patrouille") state.activeFicheId = null;
+          updateStatusBar();
+          toast(STATUS_META[newStatus].label, "ok");
+        } else {
+          toast("Erreur : " + (data.error || data.message || "?"), "err");
+        }
+      })
+      .catch(function () { toast("Erreur reseau", "err"); });
+  }
+
+  // ----- Creation de fiche terrain -----
+  function openCreateFicheModal() {
+    var modal = $("fiche-create-modal");
+    if (!modal) return;
+    var cats = $("fiche-create-cats");
+    if (cats && !cats.children.length) {
+      var pcoCategories = [
+        { id: "PCO.Secours", label: "Secours", icon: "medical_services", color: "#DC2626" },
+        { id: "PCO.Securite", label: "Securite", icon: "security", color: "#7C3AED" },
+        { id: "PCO.Technique", label: "Technique", icon: "build", color: "#FF8C00" },
+        { id: "PCO.Flux", label: "Flux", icon: "directions_car", color: "#2563EB" },
+      ];
+      pcoCategories.forEach(function (c) {
+        var btn = document.createElement("button");
+        btn.className = "fiche-cat-btn";
+        btn.dataset.cat = c.id;
+        btn.innerHTML = "<span class='material-symbols-outlined' style='color:" + c.color + "'>"
+          + c.icon + "</span>" + c.label;
+        btn.addEventListener("click", function () {
+          state.ficheCreateCat = c.id;
+          cats.querySelectorAll(".fiche-cat-btn").forEach(function (b) {
+            b.classList.toggle("selected", b.dataset.cat === c.id);
+          });
+        });
+        cats.appendChild(btn);
+      });
+    }
+    // Wire urgency buttons
+    var urgBtns = $("fiche-create-urgency");
+    if (urgBtns) {
+      urgBtns.querySelectorAll(".urgency-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          state.ficheCreateUrgency = btn.dataset.val;
+          urgBtns.querySelectorAll(".urgency-btn").forEach(function (b) {
+            b.classList.toggle("selected", b.dataset.val === state.ficheCreateUrgency);
+          });
+        });
+      });
+    }
+    // Reset form
+    state.ficheCreateCat = null;
+    if (cats) cats.querySelectorAll(".fiche-cat-btn").forEach(function (b) { b.classList.remove("selected"); });
+    var txt = $("fiche-create-text");
+    if (txt) txt.value = "";
+    var msg = $("fiche-create-msg");
+    if (msg) { msg.textContent = ""; msg.className = "fiche-create-msg"; }
+    modal.hidden = false;
+  }
+
+  function submitCreateFiche() {
+    if (!state.ficheCreateCat) {
+      var msg = $("fiche-create-msg");
+      if (msg) { msg.textContent = "Choisis une categorie."; msg.className = "fiche-create-msg error"; }
+      return;
+    }
+    var txt = ($("fiche-create-text") || {}).value || "";
+    txt = txt.trim();
+    if (!txt) {
+      var msg2 = $("fiche-create-msg");
+      if (msg2) { msg2.textContent = "Saisis une description."; msg2.className = "fiche-create-msg error"; }
+      return;
+    }
+
+    var btn = $("fiche-create-submit");
+    if (btn) btn.disabled = true;
+
+    var payload = {
+      category: state.ficheCreateCat,
+      text: txt,
+      niveau_urgence: state.ficheCreateUrgency || "UR",
+    };
+    // Ajouter GPS si dispo
+    if (state.meMarker) {
+      var ll = state.meMarker.getLatLng();
+      payload.lat = ll.lat;
+      payload.lng = ll.lng;
+    }
+    // Carroyage si grille active et position connue
+    if (state.gridOn && state.meMarker && state.gridMeta) {
+      var gridLabel = $("grid-crosshair-label");
+      if (gridLabel) payload.carroye = gridLabel.textContent;
+    }
+
+    fetch("/field/create-fiche", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then(function (r) {
+        if (r.status === 401) { return handleSessionLost(); }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        if (btn) btn.disabled = false;
+        if (data.ok) {
+          $("fiche-create-modal").hidden = true;
+          state.patrolStatus = "intervention";
+          state.activeFicheId = data.id;
+          updateStatusBar();
+          toast("Fiche creee - Intervention demarree", "ok");
+          pollFiches(); // Rafraichir les fiches immediatement
+        } else {
+          var msg3 = $("fiche-create-msg");
+          if (msg3) { msg3.textContent = "Erreur : " + (data.error || "?"); msg3.className = "fiche-create-msg error"; }
+        }
+      })
+      .catch(function () {
+        if (btn) btn.disabled = false;
+        var msg4 = $("fiche-create-msg");
+        if (msg4) { msg4.textContent = "Erreur reseau."; msg4.className = "fiche-create-msg error"; }
+      });
+  }
+
+  // ---------------------------------------------------------------------
+  // Itineraires
+  // ---------------------------------------------------------------------
+  function setRouteDestination(latlng) {
+    if (state.routeLayer) {
+      state.map.removeLayer(state.routeLayer);
+      state.routeLayer = null;
+    }
+    state.routeDestination = latlng;
+    if (!latlng) return;
+
+    var group = L.layerGroup();
+    // Destination : gros marker rouge
+    var destIcon = L.divIcon({
+      className: "",
+      html: "<div class='route-dest-marker'><span class='material-symbols-outlined'>place</span></div>",
+      iconSize: [36, 36],
+      iconAnchor: [18, 34],
+    });
+    L.marker(latlng, { icon: destIcon }).addTo(group);
+
+    // Trait pointille depuis "moi" si dispo
+    if (state.meMarker) {
+      var mePos = state.meMarker.getLatLng();
+      L.polyline(
+        [[mePos.lat, mePos.lng], latlng],
+        { color: "#dc2626", weight: 3, opacity: 0.7, dashArray: "6 8", interactive: false }
+      ).addTo(group);
+    }
+    group.addTo(state.map);
+    state.routeLayer = group;
+
+    // Ajuste le zoom pour englober "moi" + destination si possible
+    try {
+      if (state.meMarker) {
+        var b = L.latLngBounds([state.meMarker.getLatLng(), latlng]);
+        state.map.fitBounds(b, { padding: [80, 80], maxZoom: 18 });
+        state.followMe = false;
+      } else {
+        state.map.setView(latlng, 17);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function openInGoogleMaps(latlng) {
+    if (!latlng || latlng.length < 2) return;
+    var lat = latlng[0], lng = latlng[1];
+    // Intent Android natif : ouvre directement Google Maps en mode navigation
+    var intent = "google.navigation:q=" + lat + "," + lng;
+    var webFallback = "https://www.google.com/maps/dir/?api=1&destination=" + lat + "," + lng + "&travelmode=driving";
+
+    // Tenter l'intent Android, retomber sur le web
+    var opened = false;
+    try {
+      // Sur Android Chrome, window.location vers google.navigation: ouvre Maps.
+      // Sur iOS/Desktop cela echouera silencieusement -> on bascule sur l'URL web.
+      window.location.href = intent;
+      opened = true;
+    } catch (e) {
+      opened = false;
+    }
+    // Retomber au web apres un petit delai si l'intent n'a rien fait
+    setTimeout(function () {
+      if (document.hasFocus && document.hasFocus()) {
+        window.open(webFallback, "_blank");
+      }
+    }, 800);
+  }
+
+  function handleRouteMessage(m) {
+    var wp = (m.payload && m.payload.waypoints) || [];
+    if (!wp.length) return;
+    var first = wp[0];
+    if (!Array.isArray(first) || first.length < 2) return;
+    var lat = parseFloat(first[0]);
+    var lng = parseFloat(first[1]);
+    if (isNaN(lat) || isNaN(lng)) return;
+    setRouteDestination([lat, lng]);
+  }
+
+  // ---------------------------------------------------------------------
+  // Fiches PCORG assignees a cette tablette
+  // ---------------------------------------------------------------------
+  function startFichesPoll() {
+    pollFiches();
+    state.fichesTimer = setInterval(pollFiches, POLL_FICHES_MS);
+  }
+
+  function pollFiches() {
+    fetch("/field/my-fiches", { headers: { "Accept": "application/json" } })
+      .then(function (r) {
+        if (r.status === 401) { return handleSessionLost(); }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        var open = data.open || [];
+        state.fiches = open;
+        renderFiches();
+        detectNewFiches(open);
+        // Sync statut et fiche active depuis le serveur
+        var serverFicheId = data.active_fiche_id || null;
+        var statusChanged = data.device_status && data.device_status !== state.patrolStatus;
+        var ficheChanged = serverFicheId !== state.activeFicheId;
+        if (statusChanged) {
+          state.patrolStatus = data.device_status;
+        }
+        if (ficheChanged) {
+          state.activeFicheId = serverFicheId;
+        }
+        if (statusChanged) {
+          updateStatusBar(); // calls updateEngageBanner() internally
+        } else {
+          updateEngageBanner();
+        }
+        // Tracking mode : haute frequence quand cockpit suit la tablette
+        var tMode = data.tracking_mode || "normal";
+        var newInterval = tMode === "high_freq" ? POSITION_PUSH_HIGH_MS : POSITION_PUSH_NORMAL_MS;
+        if (newInterval !== POSITION_PUSH_MS) {
+          POSITION_PUSH_MS = newInterval;
+        }
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function detectNewFiches(open) {
+    var newOnes = [];
+    open.forEach(function (f) {
+      if (!state.seenFicheIds.has(f.id)) {
+        state.seenFicheIds.add(f.id);
+        newOnes.push(f);
+      }
+    });
+    if (newOnes.length === 0) return;
+    // Premier poll : ne pas alerter, juste enregistrer
+    if (!state.fichesFirstPolled) {
+      state.fichesFirstPolled = true;
+      return;
+    }
+    var first = newOnes[0];
+    toast("Nouvelle fiche : " + (first.text || "(sans texte)").slice(0, 60), "warn");
+    // Son d'alerte pour signifier l'arrivee d'une fiche
+    playDispatchAlarm();
+    // Vibration pour alerter le porteur de la tablette
+    try {
+      if (navigator.vibrate) {
+        navigator.vibrate([200, 100, 200, 100, 400]);
+      }
+    } catch (e) { /* ignore */ }
+    // Auto-centrer sur la fiche si elle a des coordonnees
+    if (first.lat != null && first.lng != null && state.map) {
+      try {
+        state.followMe = false;
+        var followBtn = $("btn-follow");
+        if (followBtn) followBtn.classList.remove("active");
+        state.map.setView([first.lat, first.lng], Math.max(state.map.getZoom(), 17), {
+          animate: true,
+        });
+      } catch (e) { /* ignore */ }
+    }
+    // Ouvrir le modal pour forcer l'acquittement
+    showFicheModal(first);
+  }
+
+  function renderFiches() {
+    if (!state.fichesLayer) {
+      state.fichesLayer = L.layerGroup().addTo(state.map);
+      state.fichesMarkers = {};
+    }
+    var seen = {};
+    state.fiches.forEach(function (f) {
+      seen[f.id] = true;
+      if (f.lat == null || f.lng == null) return;
+      var existing = state.fichesMarkers[f.id];
+      if (existing) {
+        existing.setLatLng([f.lat, f.lng]);
+      } else {
+        var catStyle = ficheStyle(f.category);
+        var fcc = f.content_category || {};
+        var icon = L.divIcon({
+          className: "",
+          html: "<div class='fiche-marker urgency-" + (f.niveau_urgence || "norm") + "' style='background:" + catStyle.color + "'>"
+              + "<span class='material-symbols-outlined'>" + catStyle.icon + "</span></div>",
+          iconSize: [32, 38],
+          iconAnchor: [16, 36],
+        });
+        var marker = L.marker([f.lat, f.lng], { icon: icon });
+        marker.on("click", function () { showFicheModal(f); });
+        marker.addTo(state.fichesLayer);
+        state.fichesMarkers[f.id] = marker;
+      }
+    });
+    // Retirer les markers des fiches disparues (cloturees/reassignees)
+    Object.keys(state.fichesMarkers).forEach(function (id) {
+      if (!seen[id]) {
+        state.fichesLayer.removeLayer(state.fichesMarkers[id]);
+        delete state.fichesMarkers[id];
+      }
+    });
+  }
+
+  // -- Category styles (mirrors pcorg.js)
+  var FICHE_CAT_STYLES = {
+    "PCO.Secours":      { color: "#dc2626", icon: "local_hospital" },
+    "PCO.Securite":     { color: "#ef4444", icon: "shield" },
+    "PCO.Technique":    { color: "#f59e0b", icon: "build" },
+    "PCO.Flux":         { color: "#0d9488", icon: "swap_calls" },
+    "PCO.Fourriere":    { color: "#6b7280", icon: "directions_car" },
+    "PCO.Information":  { color: "#2563eb", icon: "info" },
+    "PCO.MainCourante": { color: "#8b5cf6", icon: "edit_note" },
+  };
+  var FICHE_URGENCY_COLORS = { EU: "#dc2626", UA: "#f97316", UR: "#eab308", IMP: "#6b7280" };
+  var FICHE_URGENCY_LABELS = {
+    EU: "Detresse vitale, toutes ressources",
+    UA: "Urgence absolue, engagement prioritaire",
+    UR: "Urgence relative, situation stable",
+    IMP: "Implique, pas de blessure / temoin",
+  };
+
+  function ficheStyle(cat) {
+    return FICHE_CAT_STYLES[cat] || { color: "#94a3b8", icon: "description" };
+  }
+
+  function _pad2(n) { return (n < 10 ? "0" : "") + n; }
+
+  function showFicheModal(f) {
+    var modal = $("fiche-detail-modal");
+    if (!modal) return;
+    var st = ficheStyle(f.category);
+
+    // Header
+    var header = $("fiche-detail-header");
+    header.style.background = "linear-gradient(135deg, " + st.color + "cc, " + st.color + "88)";
+    $("fiche-detail-icon").textContent = st.icon;
+    $("fiche-detail-cat").textContent = f.category || "Fiche";
+    var urgEl = $("fiche-detail-urgency");
+    if (f.niveau_urgence) {
+      urgEl.textContent = f.niveau_urgence + " \u2014 " + (FICHE_URGENCY_LABELS[f.niveau_urgence] || "");
+      urgEl.style.background = FICHE_URGENCY_COLORS[f.niveau_urgence] || "#6b7280";
+      urgEl.hidden = false;
+    } else {
+      urgEl.hidden = true;
+    }
+
+    // Body placeholder
+    var body = $("fiche-detail-body");
+    body.innerHTML = "<div class='fiche-detail-loading'>Chargement...</div>";
+
+    // Actions (built once detail loads)
+    var actionsEl = $("fiche-detail-actions");
+    actionsEl.textContent = "";
+
+    modal.hidden = false;
+
+    // Fetch full detail
+    fetch("/field/my-fiches/" + encodeURIComponent(f.id) + "/detail", {
+      headers: { "Accept": "application/json" },
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.ok) {
+          body.innerHTML = "<div class='fiche-detail-loading'>Erreur chargement</div>";
+          return;
+        }
+        renderFicheDetail(d, f, st);
+      })
+      .catch(function () {
+        // Offline fallback: render from summary data
+        renderFicheDetailFallback(f, st);
+      });
+  }
+
+  function renderFicheDetail(d, f, st) {
+    var body = $("fiche-detail-body");
+    body.textContent = "";
+
+    // Description
+    var descText = d.text_full || d.text || "";
+    if (descText) {
+      var desc = document.createElement("div");
+      desc.className = "fd-desc";
+      desc.style.borderLeftColor = st.color;
+      desc.textContent = descText;
+      body.appendChild(desc);
+    }
+
+    // Info fields
+    var fields = document.createElement("div");
+    fields.className = "fd-fields";
+    function addF(label, val) {
+      if (!val) return;
+      var row = document.createElement("div");
+      row.className = "fd-field";
+      var lbl = document.createElement("span");
+      lbl.className = "fd-field-lbl";
+      lbl.textContent = label;
+      var v = document.createElement("span");
+      v.className = "fd-field-val";
+      v.textContent = val;
+      row.appendChild(lbl);
+      row.appendChild(v);
+      fields.appendChild(row);
+    }
+    addF("Operateur", d.operator);
+    if (d.ts) {
+      try { addF("Ouverture", new Date(d.ts).toLocaleString("fr-FR")); } catch (e) {}
+    }
+    if (d.close_ts) {
+      try { addF("Cloture", new Date(d.close_ts).toLocaleString("fr-FR")); } catch (e) {}
+    }
+    if (d.operator_close) addF("Clos par", d.operator_close);
+    addF("Zone", d.area);
+    addF("Carroyage", cc.carroye);
+    addF("Appelant", cc.appelant);
+    if (d.status_code === 10) addF("Statut", "TERMINE");
+    if (fields.childNodes.length) body.appendChild(fields);
+
+    // Chronology
+    var history = d.comment_history || [];
+    if (history.length > 0) {
+      var secTitle = document.createElement("div");
+      secTitle.className = "fd-section";
+      secTitle.textContent = "Chronologie";
+      body.appendChild(secTitle);
+
+      var timeline = document.createElement("div");
+      timeline.className = "fd-timeline";
+      history.forEach(function (entry) {
+        var isStatus = entry.text && entry.text.indexOf("Statut:") === 0;
+        var ent = document.createElement("div");
+        ent.className = "fd-chrono-entry" + (isStatus ? " fd-status-change" : "");
+
+        var dot = document.createElement("span");
+        dot.className = "fd-chrono-dot";
+        dot.style.background = isStatus ? "#94a3b8" : st.color;
+        ent.appendChild(dot);
+
+        var head = document.createElement("div");
+        head.className = "fd-chrono-head";
+        var tsSpan = document.createElement("span");
+        tsSpan.className = "fd-chrono-ts";
+        try {
+          var dt = new Date(entry.ts);
+          tsSpan.textContent = _pad2(dt.getHours()) + ":" + _pad2(dt.getMinutes());
+        } catch (e) { tsSpan.textContent = ""; }
+        head.appendChild(tsSpan);
+        var opSpan = document.createElement("span");
+        opSpan.className = "fd-chrono-op";
+        opSpan.textContent = entry.operator || "";
+        head.appendChild(opSpan);
+        ent.appendChild(head);
+
+        var txt = entry.text || entry.comment || "";
+        if (txt) {
+          var txtEl = document.createElement("div");
+          txtEl.className = "fd-chrono-text";
+          txtEl.textContent = txt;
+          ent.appendChild(txtEl);
+        }
+
+        // Photo thumbnail
+        if (entry.photo) {
+          var thumb = document.createElement("img");
+          thumb.className = "fd-chrono-photo";
+          thumb.src = entry.photo;
+          thumb.alt = "Photo";
+          thumb.onclick = function () { openLightbox(entry.photo); };
+          ent.appendChild(thumb);
+        }
+
+        timeline.appendChild(ent);
+      });
+      body.appendChild(timeline);
+    }
+
+    // Comment form with photo attachment
+    if (d.status_code !== 10) {
+      var secComment = document.createElement("div");
+      secComment.className = "fd-section";
+      secComment.textContent = "Ajouter un commentaire";
+      body.appendChild(secComment);
+
+      var form = document.createElement("div");
+      form.className = "fd-comment-form";
+
+      var textarea = document.createElement("textarea");
+      textarea.className = "fd-comment-input";
+      textarea.rows = 2;
+      textarea.placeholder = "Commentaire, observation...";
+      form.appendChild(textarea);
+
+      var fileInput = document.createElement("input");
+      fileInput.type = "file";
+      fileInput.accept = "image/*";
+      fileInput.style.display = "none";
+      fileInput.id = "fd-photo-input";
+
+      var preview = document.createElement("div");
+      preview.className = "fd-photo-preview";
+      preview.id = "fd-photo-preview";
+      preview.hidden = true;
+
+      var photoBtn = document.createElement("button");
+      photoBtn.className = "fd-photo-btn";
+      photoBtn.innerHTML = "<span class='material-symbols-outlined'>photo_camera</span>";
+      photoBtn.title = "Photo ou image";
+      photoBtn.onclick = function () { fileInput.click(); };
+
+      fileInput.onchange = function () {
+        if (fileInput.files && fileInput.files[0]) {
+          var reader = new FileReader();
+          reader.onload = function (e) {
+            preview.innerHTML = "";
+            var img = document.createElement("img");
+            img.src = e.target.result;
+            preview.appendChild(img);
+            var removeBtn = document.createElement("button");
+            removeBtn.className = "fd-photo-remove";
+            removeBtn.innerHTML = "<span class='material-symbols-outlined'>close</span>";
+            removeBtn.onclick = function (ev) {
+              ev.stopPropagation();
+              fileInput.value = "";
+              preview.hidden = true;
+            };
+            preview.appendChild(removeBtn);
+            preview.hidden = false;
+          };
+          reader.readAsDataURL(fileInput.files[0]);
+        }
+      };
+
+      var sendBtn = document.createElement("button");
+      sendBtn.className = "btn-primary fd-send-btn";
+      sendBtn.innerHTML = "<span class='material-symbols-outlined'>send</span> Envoyer";
+      sendBtn.onclick = function () {
+        submitFicheComment(d.id, textarea, fileInput, preview, sendBtn);
+      };
+
+      // Photo + Send on same row
+      var actionRow = document.createElement("div");
+      actionRow.className = "fd-action-row";
+      actionRow.appendChild(fileInput);
+      actionRow.appendChild(photoBtn);
+      actionRow.appendChild(sendBtn);
+
+      form.appendChild(actionRow);
+      form.appendChild(preview);
+      body.appendChild(form);
+    }
+
+    // Action buttons
+    buildFicheActions(d, f);
+  }
+
+  function renderFicheDetailFallback(f, st) {
+    var body = $("fiche-detail-body");
+    body.textContent = "";
+    var desc = document.createElement("div");
+    desc.className = "fd-desc";
+    desc.style.borderLeftColor = st.color;
+    desc.textContent = f.text || "(pas de description)";
+    body.appendChild(desc);
+    var fields = document.createElement("div");
+    fields.className = "fd-fields";
+    if (f.area) {
+      var row = document.createElement("div"); row.className = "fd-field";
+      var lbl = document.createElement("span"); lbl.className = "fd-field-lbl"; lbl.textContent = "Zone";
+      var v = document.createElement("span"); v.className = "fd-field-val"; v.textContent = f.area;
+      row.appendChild(lbl); row.appendChild(v); fields.appendChild(row);
+    }
+    if (f.operator) {
+      var row2 = document.createElement("div"); row2.className = "fd-field";
+      var lbl2 = document.createElement("span"); lbl2.className = "fd-field-lbl"; lbl2.textContent = "Operateur";
+      var v2 = document.createElement("span"); v2.className = "fd-field-val"; v2.textContent = f.operator;
+      row2.appendChild(lbl2); row2.appendChild(v2); fields.appendChild(row2);
+    }
+    body.appendChild(fields);
+    var note = document.createElement("div");
+    note.className = "fd-offline-note";
+    note.textContent = "Details complets indisponibles hors ligne.";
+    body.appendChild(note);
+    buildFicheActions({ content_category: f.content_category || {}, status_code: 0, id: f.id, lat: f.lat, lng: f.lng }, f);
+  }
+
+  function buildFicheActions(d, f) {
+    var actionsEl = $("fiche-detail-actions");
+    actionsEl.textContent = "";
+
+    var cc = d.content_category || {};
+    var isFieldCreated = cc.field_created || cc.field_sos;
+
+    // Route button only for fiches NOT created by this tablet (dispatched from cockpit)
+    if (!isFieldCreated) {
+      // Bouton "Engagement" — visible tant que l'operateur n'a pas confirme
+      if (d.status_code !== 10 && state.patrolStatus !== "intervention" && state.patrolStatus !== "sur_place") {
+        var ackBtn = document.createElement("button");
+        ackBtn.className = "btn-confirm-ack";
+        ackBtn.innerHTML = "<span class='material-symbols-outlined' style='vertical-align:middle'>check_circle</span> Engagement";
+        ackBtn.onclick = function () { confirmFicheAck(f, ackBtn); };
+        actionsEl.appendChild(ackBtn);
+      }
+
+      var lat = d.lat != null ? d.lat : f.lat;
+      var lng = d.lng != null ? d.lng : f.lng;
+      if (lat != null && lng != null) {
+        var routeBtn = document.createElement("button");
+        routeBtn.className = "btn-primary";
+        routeBtn.innerHTML = "<span class='material-symbols-outlined' style='vertical-align:middle'>navigation</span> Itineraire";
+        routeBtn.onclick = function () { openInGoogleMaps([lat, lng]); };
+        actionsEl.appendChild(routeBtn);
+      }
+    }
+
+    // Close button for field-created fiches
+    if (isFieldCreated) {
+      if (d.status_code !== 10) {
+        var closeBtn = document.createElement("button");
+        closeBtn.className = "btn-danger";
+        closeBtn.innerHTML = "<span class='material-symbols-outlined' style='vertical-align:middle'>check_circle</span> Cloturer";
+        closeBtn.onclick = function () { closeFicheFromField(f); };
+        actionsEl.appendChild(closeBtn);
+      }
+    }
+  }
+
+  function confirmFicheAck(f, btn) {
+    btn.disabled = true;
+    // 1) Change status to intervention
+    fetch("/field/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "intervention" }),
+    })
+      .then(function (r) {
+        if (r.status === 401) { return handleSessionLost(); }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data || !data.ok) {
+          toast("Erreur changement statut", "err");
+          btn.disabled = false;
+          return;
+        }
+        state.patrolStatus = "intervention";
+        state.activeFicheId = f.id;
+        updateStatusBar();
+        // 2) Add chronology entry
+        var fd = new FormData();
+        fd.append("comment", "Engagement confirme, deplacement vers le lieu de l'intervention");
+        return fetch("/field/my-fiches/" + encodeURIComponent(f.id) + "/comment", {
+          method: "POST",
+          body: fd,
+        });
+      })
+      .then(function (r) { if (r && r.json) return r.json(); })
+      .then(function (data) {
+        btn.disabled = false;
+        toast("Engagement confirme", "ok");
+        // Refresh fiche detail
+        $("fiche-detail-modal").hidden = true;
+        pollFiches();
+      })
+      .catch(function () {
+        btn.disabled = false;
+        toast("Erreur reseau", "err");
+      });
+  }
+
+  function submitFicheComment(ficheId, textarea, fileInput, preview, sendBtn) {
+    var comment = textarea.value.trim();
+    var hasPhoto = fileInput.files && fileInput.files.length > 0;
+    if (!comment && !hasPhoto) {
+      toast("Ecrivez un commentaire ou prenez une photo", "err");
+      return;
+    }
+    sendBtn.disabled = true;
+
+    var fd = new FormData();
+    fd.append("comment", comment);
+    if (hasPhoto) {
+      fd.append("photo", fileInput.files[0]);
+    }
+
+    fetch("/field/my-fiches/" + encodeURIComponent(ficheId) + "/comment", {
+      method: "POST",
+      body: fd,
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        sendBtn.disabled = false;
+        if (data && data.ok) {
+          toast("Commentaire envoye");
+          // Refresh the detail modal
+          var fiche = state.fiches.find(function (fi) { return fi.id === ficheId; });
+          if (fiche) {
+            showFicheModal(fiche);
+          } else {
+            $("fiche-detail-modal").hidden = true;
+          }
+          pollFiches();
+        } else {
+          toast("Echec : " + ((data && data.error) || "?"), "err");
+        }
+      })
+      .catch(function () {
+        sendBtn.disabled = false;
+        toast("Erreur reseau", "err");
+      });
+  }
+
+  function openLightbox(src) {
+    var lb = $("field-lightbox");
+    var img = $("field-lightbox-img");
+    if (!lb || !img) return;
+    img.src = src;
+    lb.hidden = false;
+  }
+
+  function closeFicheFromField(f) {
+    fetch("/field/my-fiches/" + encodeURIComponent(f.id) + "/close", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data && data.ok) {
+          toast("Fiche cloturee", "ok");
+          $("fiche-detail-modal").hidden = true;
+          state.patrolStatus = "patrouille";
+          state.activeFicheId = null;
+          updateStatusBar();
+          pollFiches();
+        } else {
+          toast("Erreur : " + ((data && data.error) || "?"), "err");
+        }
+      })
+      .catch(function () { toast("Erreur reseau", "err"); });
+  }
+
+  // ---------------------------------------------------------------------
+  // SOS
+  // ---------------------------------------------------------------------
+  // --- SOS markers from other tablets ---
+  var _sosMarkers = {}; // id -> L.marker
+
+  function addSosPin(id, lat, lng, deviceName) {
+    if (!state.map || _sosMarkers[id]) return;
+    var icon = L.divIcon({
+      className: "sos-map-pin",
+      html: "<span class='material-symbols-outlined'>sos</span><span class='sos-pin-label'>" + (deviceName || "SOS") + "</span>",
+      iconSize: [48, 48],
+      iconAnchor: [24, 24],
+    });
+    var m = L.marker([lat, lng], { icon: icon, zIndexOffset: 9999 }).addTo(state.map);
+    _sosMarkers[id] = m;
+  }
+
+  function removeSosPin(id) {
+    if (_sosMarkers[id]) {
+      state.map.removeLayer(_sosMarkers[id]);
+      delete _sosMarkers[id];
+    }
+  }
+
+  function clearSosPins() {
+    Object.keys(_sosMarkers).forEach(removeSosPin);
+  }
+
+  function triggerSos() {
+    if (state.sosInFlight) return;
+    // Big single-button SOS confirmation — no note, no text input
+    showSosConfirm(function (confirmed) {
+      if (!confirmed) return;
+      state.sosInFlight = true;
+      var lat = null, lng = null;
+      if (state.meMarker) {
+        var ll = state.meMarker.getLatLng();
+        lat = ll.lat;
+        lng = ll.lng;
+      }
+      fetch("/field/sos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lat: lat,
+          lng: lng,
+          battery: state.batteryPct || null,
+        }),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          state.sosInFlight = false;
+          if (data && data.ok) {
+            toast("SOS envoye au cockpit et a toutes les patrouilles", "warn");
+            // Vibration confirmation
+            try { if (navigator.vibrate) navigator.vibrate([300, 150, 300]); } catch (e) {}
+          } else {
+            toast("Echec SOS", "err");
+          }
+        })
+        .catch(function () {
+          state.sosInFlight = false;
+          toast("Erreur reseau (SOS)", "err");
+        });
+    });
+  }
+
+  function showSosConfirm(callback) {
+    var overlay = document.createElement("div");
+    overlay.className = "sos-confirm-overlay";
+    var box = document.createElement("div");
+    box.className = "sos-confirm-box";
+    var icon = document.createElement("span");
+    icon.className = "material-symbols-outlined sos-confirm-icon";
+    icon.textContent = "sos";
+    var msg = document.createElement("div");
+    msg.className = "sos-confirm-msg";
+    msg.textContent = "Declencher un SOS ?";
+    var sub = document.createElement("div");
+    sub.className = "sos-confirm-sub";
+    sub.textContent = "Le cockpit et toutes les patrouilles seront alertes avec ta position GPS.";
+    var btnConfirm = document.createElement("button");
+    btnConfirm.className = "sos-confirm-btn";
+    btnConfirm.textContent = "CONFIRMER SOS";
+    var btnCancel = document.createElement("button");
+    btnCancel.className = "sos-cancel-btn";
+    btnCancel.textContent = "Annuler";
+    box.appendChild(icon);
+    box.appendChild(msg);
+    box.appendChild(sub);
+    box.appendChild(btnConfirm);
+    box.appendChild(btnCancel);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    function done(result) {
+      try { document.body.removeChild(overlay); } catch (e) {}
+      callback(result);
+    }
+    btnConfirm.addEventListener("click", function () { done(true); });
+    btnCancel.addEventListener("click", function () { done(false); });
+  }
+
+  function handleSosBroadcast(m) {
+    // Show SOS alert from another tablet + pin on map + sound + vibration
+    var payload = m.payload || {};
+    var lat = payload.lat;
+    var lng = payload.lng;
+    var sourceName = payload.source_device_name || "?";
+    // Pin on map
+    if (lat != null && lng != null) {
+      addSosPin(m.id, lat, lng, sourceName);
+      // Center map on SOS location
+      if (state.map) {
+        state.followMe = false;
+        var followBtn = $("btn-follow");
+        if (followBtn) followBtn.classList.remove("active");
+        state.map.setView([lat, lng], Math.max(state.map.getZoom(), 17), { animate: true });
+      }
+    }
+    // Full-screen alert on tablet
+    showSosAlert(m);
+    // Vibrate aggressively
+    try { if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500, 200, 500]); } catch (e) {}
+    // Play alarm sound
+    playSosAlarm();
+  }
+
+  function playSosAlarm() {
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var t = ctx.currentTime;
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.type = "square";
+      osc.frequency.setValueAtTime(880, t);
+      osc.frequency.setValueAtTime(660, t + 0.25);
+      osc.frequency.setValueAtTime(880, t + 0.5);
+      osc.frequency.setValueAtTime(660, t + 0.75);
+      osc.frequency.setValueAtTime(880, t + 1.0);
+      osc.frequency.setValueAtTime(660, t + 1.25);
+      gain.gain.setValueAtTime(0.6, t);
+      gain.gain.linearRampToValueAtTime(0, t + 1.5);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 1.5);
+    } catch (e) { /* ignore audio errors */ }
+  }
+
+  function playDispatchAlarm() {
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var t = ctx.currentTime;
+      // Two-tone rising alert (distinct from SOS)
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(523, t);       // C5
+      osc.frequency.setValueAtTime(659, t + 0.2);  // E5
+      osc.frequency.setValueAtTime(784, t + 0.4);  // G5
+      osc.frequency.setValueAtTime(659, t + 0.6);  // E5
+      osc.frequency.setValueAtTime(784, t + 0.8);  // G5
+      osc.frequency.setValueAtTime(1047, t + 1.0); // C6
+      gain.gain.setValueAtTime(0.5, t);
+      gain.gain.linearRampToValueAtTime(0, t + 1.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 1.3);
+    } catch (e) { /* ignore audio errors */ }
+  }
+
+  function showSosAlert(m) {
+    var payload = m.payload || {};
+    var sourceName = payload.source_device_name || "?";
+    var overlay = document.createElement("div");
+    overlay.className = "sos-alert-overlay";
+    var box = document.createElement("div");
+    box.className = "sos-alert-box";
+    var icon = document.createElement("span");
+    icon.className = "material-symbols-outlined sos-alert-icon";
+    icon.textContent = "sos";
+    var title = document.createElement("div");
+    title.className = "sos-alert-title";
+    title.textContent = "SOS - " + sourceName;
+    var bodyEl = document.createElement("div");
+    bodyEl.className = "sos-alert-body";
+    bodyEl.textContent = "Demande d assistance immediate";
+    box.appendChild(icon);
+    box.appendChild(title);
+    box.appendChild(bodyEl);
+    if (payload.lat != null && payload.lng != null) {
+      var pos = document.createElement("div");
+      pos.className = "sos-alert-pos";
+      pos.innerHTML = "<span class='material-symbols-outlined'>place</span> " +
+        Number(payload.lat).toFixed(5) + ", " + Number(payload.lng).toFixed(5);
+      box.appendChild(pos);
+    }
+    var btnOk = document.createElement("button");
+    btnOk.className = "sos-alert-btn";
+    btnOk.textContent = "Compris";
+    box.appendChild(btnOk);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    btnOk.addEventListener("click", function () {
+      try { document.body.removeChild(overlay); } catch (e) {}
+      fetch("/field/ack/" + encodeURIComponent(m.id), { method: "POST" }).catch(function () {});
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Inbox
+  // ---------------------------------------------------------------------
+  function startInboxPoll() {
+    pollInbox();
+    state.inboxTimer = setInterval(pollInbox, POLL_INBOX_MS);
+  }
+
+  function pollInbox() {
+    fetch("/field/inbox", { headers: { "Accept": "application/json" } })
+      .then(function (r) {
+        if (r.status === 401) { return handleSessionLost(); }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data || !data.ok) return;
+        state.inbox = data.messages || [];
+        renderInbox();
+        detectNew();
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function detectNew() {
+    var newOnes = [];
+    state.inbox.forEach(function (m) {
+      if (!state.seenIds.has(m.id) && !m.ack_at) {
+        newOnes.push(m);
+      }
+    });
+    if (newOnes.length === 0) return;
+    // SOS broadcasts : handled separately with full-screen alert + sound
+    var sosBroadcasts = [];
+    var normalOnes = [];
+    newOnes.forEach(function (m) {
+      state.seenIds.add(m.id);
+      if (m.type === "sos_broadcast") {
+        sosBroadcasts.push(m);
+      } else {
+        normalOnes.push(m);
+        if (m.type === "route") handleRouteMessage(m);
+      }
+    });
+    // Handle SOS broadcasts first (with alarm)
+    sosBroadcasts.forEach(function (m) {
+      handleSosBroadcast(m);
+    });
+    // Normal messages
+    if (normalOnes.length > 0) {
+      var high = normalOnes.find(function (m) { return m.priority === "high"; });
+      var first = high || normalOnes[0];
+      showMessageModal(first);
+      if (normalOnes.length > 1) {
+        toast("+" + (normalOnes.length - 1) + " autre(s) message(s)");
+      }
+    }
+  }
+
+  function renderInbox() {
+    var list = $("inbox-list");
+    var badge = $("inbox-badge");
+    if (!list) return;
+    var unread = state.inbox.filter(function (m) { return !m.ack_at; });
+    if (badge) {
+      if (unread.length > 0) {
+        badge.hidden = false;
+        badge.textContent = unread.length > 9 ? "9+" : String(unread.length);
+      } else {
+        badge.hidden = true;
+      }
+    }
+    if (state.inbox.length === 0) {
+      list.innerHTML = "<div class='inbox-empty'>Aucun message.</div>";
+      return;
+    }
+    // Ordre antichronologique
+    var sorted = state.inbox.slice().sort(function (a, b) {
+      return (b.created_at || "").localeCompare(a.created_at || "");
+    });
+    list.innerHTML = "";
+    sorted.forEach(function (m) {
+      var div = document.createElement("div");
+      div.className = "inbox-item";
+      if (!m.ack_at) div.classList.add("unread");
+      if (m.priority === "high") div.classList.add("priority-high");
+      var t = document.createElement("div");
+      t.className = "item-title";
+      t.textContent = m.title || "(sans titre)";
+      var b = document.createElement("div");
+      b.className = "item-body";
+      b.textContent = (m.body || "").slice(0, 120);
+      var ts = document.createElement("div");
+      ts.className = "item-time";
+      ts.textContent = m.created_at ? new Date(m.created_at).toLocaleString() : "";
+      div.appendChild(t);
+      div.appendChild(b);
+      div.appendChild(ts);
+      div.addEventListener("click", function () { showMessageModal(m); });
+      list.appendChild(div);
+    });
+  }
+
+  function showMessageModal(m) {
+    var modal = $("msg-modal");
+    var title = $("msg-modal-title");
+    var body = $("msg-modal-body");
+    var ack = $("msg-modal-ack");
+    var routeBtn = $("msg-modal-route");
+    if (!modal) return;
+    title.textContent = m.title || "Message";
+    body.textContent = m.body || "";
+
+    // Accent visuel selon type/priority
+    modal.classList.remove("priority-high", "type-alert", "type-route", "type-instruction");
+    if (m.priority === "high") modal.classList.add("priority-high");
+    if (m.type === "alert") modal.classList.add("type-alert");
+    if (m.type === "route") modal.classList.add("type-route");
+    if (m.type === "instruction") modal.classList.add("type-instruction");
+
+    // Bouton "Demarrer l'itineraire" pour les messages de type route
+    var waypoints = (m.payload && m.payload.waypoints) || null;
+    var hasRoute = (m.type === "route" && waypoints && waypoints.length);
+    if (routeBtn) {
+      routeBtn.hidden = !hasRoute;
+      if (hasRoute) {
+        routeBtn.onclick = function () {
+          openInGoogleMaps(waypoints[0]);
+        };
+      } else {
+        routeBtn.onclick = null;
+      }
+    }
+
+    modal.hidden = false;
+    ack.onclick = function () {
+      fetch("/field/ack/" + encodeURIComponent(m.id), { method: "POST" })
+        .then(function () {
+          modal.hidden = true;
+          pollInbox();
+        })
+        .catch(function () { toast("Echec ack", "err"); });
+    };
+  }
+
+  // ---------------------------------------------------------------------
+  // UI wiring
+  // ---------------------------------------------------------------------
+  function wireUi() {
+    $("btn-recenter").addEventListener("click", recenter);
+    $("btn-layers").addEventListener("click", cycleLayer);
+    $("btn-grid").addEventListener("click", openLayersPanel);
+    $("btn-inbox").addEventListener("click", function () {
+      var p = $("inbox-panel");
+      p.hidden = !p.hidden;
+    });
+    $("inbox-close").addEventListener("click", function () { $("inbox-panel").hidden = true; });
+    $("btn-sos").addEventListener("click", triggerSos);
+
+    // Bandeau engagement : fly-to button
+    var engageGoto = $("engage-banner-goto");
+    if (engageGoto) engageGoto.addEventListener("click", flyToActiveFiche);
+    // Click sur le bandeau ouvre la fiche
+    var engageLeft = $("engage-banner-left");
+    if (engageLeft) engageLeft.addEventListener("click", function () {
+      if (!state.activeFicheId || !state.fiches) return;
+      for (var i = 0; i < state.fiches.length; i++) {
+        if (state.fiches[i].id === state.activeFicheId) {
+          showFicheModal(state.fiches[i]);
+          return;
+        }
+      }
+    });
+    $("msg-modal-close").addEventListener("click", function () { $("msg-modal").hidden = true; });
+
+    // Fiche detail modal close
+    var fdClose = $("fiche-detail-close");
+    if (fdClose) fdClose.addEventListener("click", function () { $("fiche-detail-modal").hidden = true; });
+
+    // Lightbox close
+    var lbClose = $("field-lightbox-close");
+    if (lbClose) lbClose.addEventListener("click", function () { $("field-lightbox").hidden = true; });
+    var lb = $("field-lightbox");
+    if (lb) lb.addEventListener("click", function (e) {
+      if (e.target === lb) lb.hidden = true;
+    });
+
+    // Statut patrouille
+    var statusBtn = $("status-btn");
+    if (statusBtn) statusBtn.addEventListener("click", openStatusModal);
+    var statusClose = $("status-modal-close");
+    if (statusClose) statusClose.addEventListener("click", function () { $("status-modal").hidden = true; });
+    wireStatusOptions();
+    // Fiche creation
+    var ficheClose = $("fiche-create-close");
+    if (ficheClose) ficheClose.addEventListener("click", function () { $("fiche-create-modal").hidden = true; });
+    var ficheSubmit = $("fiche-create-submit");
+    if (ficheSubmit) ficheSubmit.addEventListener("click", submitCreateFiche);
+
+    // Panneau Calques (close + checkboxes)
+    var lyClose = $("layers-close");
+    if (lyClose) lyClose.addEventListener("click", function () { $("layers-panel").hidden = true; });
+    var cbGrid = $("lyr-grid-100");
+    if (cbGrid) cbGrid.addEventListener("change", function () { toggleGrid(cbGrid.checked); });
+    var cbGrid25 = $("lyr-grid-25");
+    if (cbGrid25) cbGrid25.addEventListener("change", function () { toggleGrid25(cbGrid25.checked); });
+    var cb3p = $("lyr-3p");
+    if (cb3p) cb3p.addEventListener("change", function () { toggle3P(cb3p.checked); });
+
+    // Recherche POI
+    var btnSearch = $("btn-poi-search");
+    if (btnSearch) btnSearch.addEventListener("click", openPoiSearch);
+    var searchClose = $("poi-search-close");
+    if (searchClose) searchClose.addEventListener("click", closePoiSearch);
+    var searchInput = $("poi-search-input");
+    if (searchInput) searchInput.addEventListener("input", function () {
+      renderPoiSearchResults(searchInput.value);
+    });
+
+    // Plein ecran
+    var btnFs = $("btn-fullscreen");
+    if (btnFs) btnFs.addEventListener("click", toggleFullscreen);
+    document.addEventListener("fullscreenchange", updateFullscreenIcon);
+
+    // Outils de mesure
+    var measureIds = ["measure-line", "measure-area", "measure-circle", "measure-clear"];
+    measureIds.forEach(function (id) {
+      var b = $(id);
+      if (!b) return;
+      b.addEventListener("click", function () { toggleMeasureTool(b.dataset.mode); });
+    });
+
+    // Click sur la carte : si grille active, afficher le crosshair
+    if (state.map) {
+      state.map.on("click", function (e) {
+        if (state.measureMode) return; // les outils de mesure prennent la main
+        if (state.gridOn) showCrosshair(e.latlng);
+      });
+    }
+  }
+
+  function openLayersPanel() {
+    var p = $("layers-panel");
+    if (!p) return;
+    // Sync checkboxes avec l'etat
+    var cbGrid = $("lyr-grid-100");
+    if (cbGrid) cbGrid.checked = !!state.gridOn;
+    var cbGrid25 = $("lyr-grid-25");
+    if (cbGrid25) cbGrid25.checked = !!state.grid25On;
+    var cb3p = $("lyr-3p");
+    if (cb3p) cb3p.checked = !!state.threePOn;
+    updateGrid25ButtonVisibility();
+    p.hidden = !p.hidden;
+  }
+
+  // ---------------------------------------------------------------------
+  // Plein ecran
+  // ---------------------------------------------------------------------
+  function toggleFullscreen() {
+    var doc = document;
+    var elem = document.documentElement;
+    var isFs = !!(doc.fullscreenElement || doc.webkitFullscreenElement);
+    if (!isFs) {
+      var req = elem.requestFullscreen || elem.webkitRequestFullscreen;
+      if (req) {
+        try { req.call(elem); } catch (e) { /* ignore */ }
+      }
+    } else {
+      var exit = doc.exitFullscreen || doc.webkitExitFullscreen;
+      if (exit) {
+        try { exit.call(doc); } catch (e) { /* ignore */ }
+      }
+    }
+  }
+
+  function updateFullscreenIcon() {
+    var btn = $("btn-fullscreen");
+    if (!btn) return;
+    var icon = btn.querySelector(".material-symbols-outlined");
+    if (!icon) return;
+    var isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    icon.textContent = isFs ? "fullscreen_exit" : "fullscreen";
+  }
+
+  // ---------------------------------------------------------------------
+  // Outils de mesure (port simplifie de map_view.js)
+  // ---------------------------------------------------------------------
+  var SNAP_PX = 14;
+  var MEASURE_IDS = ["measure-line", "measure-area", "measure-circle"];
+
+  function toggleMeasureTool(mode) {
+    if (mode === "clear") {
+      clearMeasure();
+      return;
+    }
+    if (state.measureMode === mode) {
+      clearMeasure();
+      return;
+    }
+    clearMeasure();
+    state.measureMode = mode;
+    state.measureFinalized = false;
+
+    MEASURE_IDS.forEach(function (id) {
+      var btn = $(id);
+      if (btn) btn.classList.toggle("active", btn.dataset.mode === mode);
+    });
+
+    state.measureLayer = L.layerGroup().addTo(state.map);
+    state.measurePoints = [];
+    state.measureLabels = [];
+
+    state.map.getContainer().style.cursor = "crosshair";
+    state.map.on("click", onMeasureClick);
+    state.map.on("mousemove", onMeasureMouseMove);
+    state.map.on("dblclick", onMeasureDblClick);
+    if (state.map.doubleClickZoom) state.map.doubleClickZoom.disable();
+
+    showMeasureTooltip(
+      mode === "line" ? "Touchez pour tracer"
+      : mode === "area" ? "Touchez les sommets"
+      : "Touchez le centre"
+    );
+  }
+
+  function clearMeasure() {
+    state.measureMode = null;
+    state.measurePoints = [];
+    state.measureFinalized = false;
+    state.measureGuide = null;
+    state.measureLabels = [];
+    if (state.measureLayer) {
+      try { state.map.removeLayer(state.measureLayer); } catch (e) {}
+      state.measureLayer = null;
+    }
+    hideMeasureTooltip();
+    MEASURE_IDS.forEach(function (id) {
+      var btn = $(id);
+      if (btn) btn.classList.remove("active");
+    });
+    if (state.map) {
+      state.map.off("click", onMeasureClick);
+      state.map.off("mousemove", onMeasureMouseMove);
+      state.map.off("dblclick", onMeasureDblClick);
+      if (state.map.doubleClickZoom) state.map.doubleClickZoom.enable();
+      state.map.getContainer().style.cursor = "";
+    }
+  }
+
+  function addMeasureVertex(latlng) {
+    if (!state.measureLayer) return;
+    var marker = L.circleMarker(latlng, {
+      radius: 5, color: "#6366f1", fillColor: "#fff",
+      fillOpacity: 1, weight: 2, interactive: false,
+    });
+    state.measureLayer.addLayer(marker);
+  }
+
+  function onMeasureClick(e) {
+    if (!state.measureMode || !state.measureLayer || state.measureFinalized) return;
+    var latlng = e.latlng;
+
+    if (state.measureMode === "circle") {
+      if (state.measurePoints.length === 0) {
+        state.measurePoints.push(latlng);
+        addMeasureVertex(latlng);
+        showMeasureTooltip("Touchez pour definir le rayon");
+      } else {
+        finalizeMeasureCircle(latlng);
+      }
+      return;
+    }
+
+    if (state.measurePoints.length > 0) {
+      var lastPt = state.measurePoints[state.measurePoints.length - 1];
+      if (lastPt.distanceTo(latlng) < 1) return;
+    }
+
+    if (state.measureMode === "area" && state.measurePoints.length >= 3) {
+      var firstPt = state.map.latLngToContainerPoint(state.measurePoints[0]);
+      var clickPt = state.map.latLngToContainerPoint(latlng);
+      if (firstPt.distanceTo(clickPt) < SNAP_PX) {
+        finalizeMeasureArea();
+        return;
+      }
+    }
+
+    state.measurePoints.push(latlng);
+    addMeasureVertex(latlng);
+
+    if (state.measureMode === "line") {
+      showMeasureTooltip("Touchez pour continuer, double-tap pour terminer");
+    } else {
+      showMeasureTooltip(state.measurePoints.length < 3
+        ? "Touchez les sommets (min. 3)"
+        : "Touchez le 1er point pour fermer");
+    }
+  }
+
+  function onMeasureMouseMove(e) {
+    if (!state.measureMode || !state.measureLayer || !state.measurePoints.length || state.measureFinalized) return;
+    var latlng = e.latlng;
+
+    if (state.measureMode === "circle" && state.measurePoints.length === 1) {
+      if (state.measureGuide) state.measureLayer.removeLayer(state.measureGuide);
+      var radius = state.measurePoints[0].distanceTo(latlng);
+      state.measureGuide = L.circle(state.measurePoints[0], {
+        radius: radius, color: "#6366f1", weight: 2, opacity: 0.7,
+        fillColor: "#6366f1", fillOpacity: 0.1, dashArray: "6 4", interactive: false,
+      });
+      state.measureLayer.addLayer(state.measureGuide);
+      showMeasureTooltip("Rayon: " + formatDist(radius));
+      return;
+    }
+
+    if (state.measureMode === "line" || state.measureMode === "area") {
+      if (state.measureGuide) state.measureLayer.removeLayer(state.measureGuide);
+      var pts = state.measurePoints.concat([latlng]);
+      if (state.measureMode === "area" && pts.length >= 3) {
+        state.measureGuide = L.polygon(pts, {
+          color: "#6366f1", weight: 2, opacity: 0.5,
+          fillColor: "#6366f1", fillOpacity: 0.08, dashArray: "6 4", interactive: false,
+        });
+      } else {
+        state.measureGuide = L.polyline(pts, {
+          color: "#6366f1", weight: 2, opacity: 0.5, dashArray: "6 4", interactive: false,
+        });
+      }
+      state.measureLayer.addLayer(state.measureGuide);
+
+      var totalDist = computeTotalDistance(pts);
+      var tip = "Distance: " + formatDist(totalDist);
+      if (state.measureMode === "area" && pts.length >= 3) {
+        tip += " | Aire: " + formatArea(computeArea(pts));
+      }
+      showMeasureTooltip(tip);
+    }
+  }
+
+  function onMeasureDblClick(e) {
+    if (!state.measureMode || state.measureFinalized) return;
+    L.DomEvent.stop(e);
+    if (state.measureMode === "line" && state.measurePoints.length >= 2) finalizeMeasureLine();
+    else if (state.measureMode === "area" && state.measurePoints.length >= 3) finalizeMeasureArea();
+  }
+
+  function finalizeMeasureLine() {
+    if (state.measureGuide) { state.measureLayer.removeLayer(state.measureGuide); state.measureGuide = null; }
+    while (state.measurePoints.length > 1 &&
+           state.measurePoints[state.measurePoints.length - 1].distanceTo(state.measurePoints[state.measurePoints.length - 2]) < 1) {
+      state.measurePoints.pop();
+    }
+    if (state.measurePoints.length < 2) return;
+    state.measureFinalized = true;
+
+    L.polyline(state.measurePoints, {
+      color: "#6366f1", weight: 3, opacity: 0.9, interactive: false,
+    }).addTo(state.measureLayer);
+
+    var totalDist = computeTotalDistance(state.measurePoints);
+    if (state.measurePoints.length > 2) {
+      for (var i = 1; i < state.measurePoints.length; i++) {
+        var segDist = state.measurePoints[i - 1].distanceTo(state.measurePoints[i]);
+        if (segDist < 1) continue;
+        var segMid = L.latLng(
+          (state.measurePoints[i - 1].lat + state.measurePoints[i].lat) / 2,
+          (state.measurePoints[i - 1].lng + state.measurePoints[i].lng) / 2
+        );
+        addMeasureSegLabel(segMid, formatDist(segDist));
+      }
+    }
+    addMeasureLabel(state.measurePoints[state.measurePoints.length - 1], formatDist(totalDist));
+    showMeasureTooltip("Total: " + formatDist(totalDist));
+    unbindMeasureEvents();
+  }
+
+  function finalizeMeasureArea() {
+    if (state.measureGuide) { state.measureLayer.removeLayer(state.measureGuide); state.measureGuide = null; }
+    state.measureFinalized = true;
+
+    var polygon = L.polygon(state.measurePoints, {
+      color: "#6366f1", weight: 3, opacity: 0.9,
+      fillColor: "#6366f1", fillOpacity: 0.15, interactive: false,
+    });
+    state.measureLayer.addLayer(polygon);
+    var area = computeArea(state.measurePoints);
+    var perimeter = computeTotalDistance(state.measurePoints.concat([state.measurePoints[0]]));
+    var center = polygon.getBounds().getCenter();
+    addMeasureLabel(center, formatArea(area) + "\nPerimetre: " + formatDist(perimeter));
+    showMeasureTooltip("Aire: " + formatArea(area) + " | Perimetre: " + formatDist(perimeter));
+    unbindMeasureEvents();
+  }
+
+  function finalizeMeasureCircle(edgePoint) {
+    if (state.measureGuide) { state.measureLayer.removeLayer(state.measureGuide); state.measureGuide = null; }
+    state.measureFinalized = true;
+
+    var center = state.measurePoints[0];
+    var radius = center.distanceTo(edgePoint);
+
+    L.circle(center, {
+      radius: radius, color: "#6366f1", weight: 3, opacity: 0.9,
+      fillColor: "#6366f1", fillOpacity: 0.1, interactive: false,
+    }).addTo(state.measureLayer);
+
+    L.polyline([center, edgePoint], {
+      color: "#6366f1", weight: 2, opacity: 0.6, dashArray: "4 4", interactive: false,
+    }).addTo(state.measureLayer);
+    addMeasureVertex(edgePoint);
+
+    var area = Math.PI * radius * radius;
+    addMeasureLabel(center, "R: " + formatDist(radius) + "\nD: " + formatDist(radius * 2) + "\nAire: " + formatArea(area));
+    showMeasureTooltip("Rayon: " + formatDist(radius) + " | D: " + formatDist(radius * 2) + " | Aire: " + formatArea(area));
+    unbindMeasureEvents();
+  }
+
+  function unbindMeasureEvents() {
+    state.map.off("click", onMeasureClick);
+    state.map.off("mousemove", onMeasureMouseMove);
+    state.map.off("dblclick", onMeasureDblClick);
+    if (state.map.doubleClickZoom) state.map.doubleClickZoom.enable();
+    state.map.getContainer().style.cursor = "";
+  }
+
+  function addMeasureLabel(latlng, text) {
+    if (!state.measureLayer) return;
+    var html = '<div class="measure-label">' + escapeHtml(text).replace(/\n/g, "<br>") + '</div>';
+    var icon = L.divIcon({ html: html, className: "measure-label-icon", iconSize: null });
+    var marker = L.marker(latlng, { icon: icon, interactive: false });
+    state.measureLayer.addLayer(marker);
+    state.measureLabels.push(marker);
+  }
+
+  function addMeasureSegLabel(latlng, text) {
+    if (!state.measureLayer) return;
+    var html = '<div class="measure-seg-label">' + escapeHtml(text) + '</div>';
+    var icon = L.divIcon({ html: html, className: "measure-label-icon", iconSize: null });
+    var marker = L.marker(latlng, { icon: icon, interactive: false });
+    state.measureLayer.addLayer(marker);
+    state.measureLabels.push(marker);
+  }
+
+  function computeTotalDistance(points) {
+    var d = 0;
+    for (var i = 1; i < points.length; i++) d += points[i - 1].distanceTo(points[i]);
+    return d;
+  }
+
+  function computeArea(points) {
+    if (points.length < 3) return 0;
+    if (typeof turf !== "undefined") {
+      var coords = points.map(function (p) { return [p.lng, p.lat]; });
+      coords.push(coords[0]);
+      try { return turf.area(turf.polygon([coords])); } catch (e) { return 0; }
+    }
+    return 0;
+  }
+
+  function formatDist(meters) {
+    if (meters >= 1000) return (meters / 1000).toFixed(2) + " km";
+    return Math.round(meters) + " m";
+  }
+
+  function formatArea(sqm) {
+    if (sqm >= 10000) return (sqm / 10000).toFixed(2) + " ha";
+    return Math.round(sqm) + " m\u00B2";
+  }
+
+  var _measureTooltip = null;
+  function showMeasureTooltip(text) {
+    if (!_measureTooltip) {
+      _measureTooltip = document.createElement("div");
+      _measureTooltip.className = "measure-tooltip";
+      var mapContainer = $("field-map");
+      if (mapContainer) mapContainer.appendChild(_measureTooltip);
+    }
+    _measureTooltip.textContent = text;
+    _measureTooltip.style.display = "";
+  }
+
+  function hideMeasureTooltip() {
+    if (_measureTooltip) _measureTooltip.style.display = "none";
+  }
+
+  // ---------------------------------------------------------------------
+  // Boot
+  // ---------------------------------------------------------------------
+  function boot() {
+    initMap();
+    wireUi();
+    startClock();
+    initNetStatus();
+    initBattery();
+    startGeolocation();
+    startInboxPoll();
+    startFichesPoll();
+    // Init statut depuis les donnees serveur ou defaut
+    var dev = window.FIELD_DEVICE || {};
+    state.patrolStatus = dev.status || "patrouille";
+    state.activeFicheId = dev.active_fiche_id || null;
+    updateStatusBar();
+    // Ressources carte : 3P et carroyage sont desactives par defaut.
+    // Categories POI chargees pour le panneau Calques.
+    loadPoiCategories();
+    // PWA : service worker, wake lock, buffer de positions
+    registerServiceWorker();
+    acquireWakeLock();
+    initPositionBuffer();
+
+    // Empecher le zoom double-tap / pinch natif
+    document.addEventListener("gesturestart", function (e) { e.preventDefault(); });
+
+    // Re-acquerir le wake lock quand l'ecran revient
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") acquireWakeLock();
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // PWA : service worker, wake lock, IndexedDB
+  // ---------------------------------------------------------------------
+  function registerServiceWorker() {
+    if (!("serviceWorker" in navigator)) return;
+    try {
+      navigator.serviceWorker.register("/field/sw.js", { scope: "/field" })
+        .then(function (reg) {
+          // Forcer la mise a jour si un nouveau SW est dispo
+          if (reg && reg.update) reg.update();
+          // Souscrire aux push notifications
+          initPushSubscription(reg);
+        })
+        .catch(function (err) {
+          console.warn("[field] SW registration failed:", err);
+        });
+    } catch (e) { /* ignore */ }
+  }
+
+  function initPushSubscription(swReg) {
+    if (!("PushManager" in window) || !swReg) return;
+    // Verifier si deja souscrit
+    swReg.pushManager.getSubscription().then(function (existing) {
+      if (existing) {
+        // Re-envoyer au serveur (au cas ou le device a change)
+        sendSubscriptionToServer(existing);
+        return;
+      }
+      // Demander la cle VAPID au serveur
+      fetch("/field/push/vapid-public-key")
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data || !data.key) return;
+          var rawKey = urlBase64ToUint8Array(data.key);
+          return swReg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: rawKey,
+          });
+        })
+        .then(function (sub) {
+          if (sub) sendSubscriptionToServer(sub);
+        })
+        .catch(function (err) {
+          console.warn("[field] Push subscription failed:", err);
+        });
+    });
+  }
+
+  function sendSubscriptionToServer(sub) {
+    fetch("/field/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subscription: sub.toJSON() }),
+    }).catch(function () { /* silent */ });
+  }
+
+  function urlBase64ToUint8Array(base64String) {
+    var padding = "=".repeat((4 - base64String.length % 4) % 4);
+    var base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    var rawData = atob(base64);
+    var outputArray = new Uint8Array(rawData.length);
+    for (var i = 0; i < rawData.length; i++) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  }
+
+  var _wakeLock = null;
+  function acquireWakeLock() {
+    if (!("wakeLock" in navigator)) return;
+    if (_wakeLock) return;
+    try {
+      navigator.wakeLock.request("screen").then(function (lock) {
+        _wakeLock = lock;
+        lock.addEventListener("release", function () { _wakeLock = null; });
+      }).catch(function () { _wakeLock = null; });
+    } catch (e) { /* ignore */ }
+  }
+
+  // ---------------------------------------------------------------------
+  // IndexedDB : buffer des positions GPS quand offline
+  // ---------------------------------------------------------------------
+  var IDB_NAME = "cockpit-field";
+  var IDB_STORE = "position-buffer";
+  var _idb = null;
+
+  function openIdb() {
+    if (_idb) return Promise.resolve(_idb);
+    return new Promise(function (resolve, reject) {
+      if (!("indexedDB" in window)) { reject("no_idb"); return; }
+      var req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = function () {
+        var db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) {
+          db.createObjectStore(IDB_STORE, { keyPath: "id", autoIncrement: true });
+        }
+      };
+      req.onsuccess = function () { _idb = req.result; resolve(_idb); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+
+  function bufferPosition(pos) {
+    openIdb().then(function (db) {
+      var tx = db.transaction(IDB_STORE, "readwrite");
+      tx.objectStore(IDB_STORE).add({
+        lat: pos.lat, lng: pos.lng, accuracy: pos.accuracy,
+        speed: pos.speed, heading: pos.heading, battery: pos.battery,
+        ts: pos.ts || Date.now(),
+      });
+    }).catch(function () { /* ignore */ });
+  }
+
+  function flushPositionBuffer() {
+    if (!navigator.onLine) return;
+    openIdb().then(function (db) {
+      var tx = db.transaction(IDB_STORE, "readwrite");
+      var store = tx.objectStore(IDB_STORE);
+      var req = store.getAll();
+      req.onsuccess = function () {
+        var items = req.result || [];
+        if (items.length === 0) return;
+        // Envoyer le dernier point seulement (optimisation : on ne rejoue
+        // pas tout l'historique, on veut juste la position a jour)
+        var last = items[items.length - 1];
+        fetch("/field/position", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(last),
+        }).then(function (r) {
+          if (r && r.ok) {
+            var txDel = db.transaction(IDB_STORE, "readwrite");
+            txDel.objectStore(IDB_STORE).clear();
+          }
+        }).catch(function () { /* retry au prochain online */ });
+      };
+    }).catch(function () { /* ignore */ });
+  }
+
+  function initPositionBuffer() {
+    window.addEventListener("online", flushPositionBuffer);
+    // Flush periodique au cas ou
+    setInterval(flushPositionBuffer, 30000);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot);
+  } else {
+    boot();
+  }
+
+  window.FieldApp = {
+    recenter: recenter,
+    cycleLayer: cycleLayer,
+    pollInbox: pollInbox,
+    toggleGrid: toggleGrid,
+    toggleGrid25: toggleGrid25,
+    toggle3P: toggle3P,
+    togglePoi: togglePoi,
+    toggleFullscreen: toggleFullscreen,
+    toggleMeasureTool: toggleMeasureTool,
+    load3P: load3P,
+    loadPoiCategories: loadPoiCategories,
+    setRouteDestination: setRouteDestination,
+    openInGoogleMaps: openInGoogleMaps,
+    pollFiches: pollFiches,
+    triggerSos: triggerSos,
+  };
+})();

@@ -7,3 +7,7 @@ static/js/.DS_Store
 static/ressources/.DS_Store
 .claude/
 firebase-service-account.json
+<<<<<<< HEAD
+=======
+vapid_private.pem
+>>>>>>> claude/mobile-field-patrol-app-WHlEI

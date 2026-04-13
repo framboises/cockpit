@@ -30,6 +30,7 @@ from merge import run_merge
 from analyse_ops import analyse_ops_bp
 from anoloc import anoloc_bp
 from anpr import anpr_bp
+from field import field_bp
 
 ################################################################################
 # Configuration
@@ -291,6 +292,18 @@ _ALERT_SEEDS = [
         "enabled": False,
         "groups": [],
         "priority": 11,
+    },
+    {
+        "slug": "field_sos",
+        "name": "SOS Tablette terrain",
+        "description": "Alerte SOS declenchee par une tablette de patrouille terrain",
+        "icon": "sos",
+        "color": "#dc2626",
+        "detection_type": "field_sos",
+        "params": {},
+        "enabled": True,
+        "groups": [],
+        "priority": 0,
     },
 ]
 for _seed in _ALERT_SEEDS:
@@ -1544,6 +1557,10 @@ app.register_blueprint(traffic_bp)
 app.register_blueprint(analyse_ops_bp)
 app.register_blueprint(anoloc_bp)
 app.register_blueprint(anpr_bp)
+app.register_blueprint(field_bp)
+# Le blueprint field utilise son propre systeme d'auth (cookie field_token) et
+# doit etre exempte de CSRF puisque les tablettes n'ont pas de token CSRF cockpit.
+csrf.exempt(field_bp)
 # app.register_blueprint(meteo_bp)
 
 ################################################################################
@@ -3031,6 +3048,7 @@ PCO_PROJECTION = {
     "area": 1, "operator": 1, "severity": 1, "is_incident": 1,
     "gps": 1, "status_code": 1, "niveau_urgence": 1, "bounce_rev": 1,
     "content_category.sous_classification": 1,
+    "content_category.patrouille": 1,
 }
 
 def _clean_operator(name):
@@ -3059,6 +3077,7 @@ def _pcorg_serialise(doc):
         "is_incident": doc.get("is_incident", False),
         "status_code": doc.get("status_code", 0),
         "sous_classification": cc.get("sous_classification") or "",
+        "patrouille": cc.get("patrouille") or "",
         "lat": coords[1] if coords and len(coords) >= 2 else None,
         "lon": coords[0] if coords and len(coords) >= 2 else None,
         "server": doc.get("server"),
@@ -3172,6 +3191,92 @@ def pcorg_detail(doc_id):
     })
 
 
+def _engage_field_device(patrouille_name, fiche_id, event, year, category="", text=""):
+    """Assigne une fiche a une tablette terrain (pose active_fiche_id)
+    sans changer le statut : c'est l'operateur tablette qui confirmera
+    son engagement via le bouton 'Engagement'."""
+    if not patrouille_name or not fiche_id:
+        return
+    device = db["field_devices"].find_one({
+        "name": patrouille_name,
+        "event": str(event),
+        "year": str(year),
+    })
+    if not device:
+        return
+    now = datetime.now(timezone.utc)
+    db["field_devices"].update_one(
+        {"_id": device["_id"]},
+        {
+            "$set": {
+                "active_fiche_id": fiche_id,
+            },
+            "$push": {
+                "status_history": {
+                    "status": "dispatch",
+                    "ts": now,
+                    "trigger": "cockpit_dispatch",
+                    "fiche_id": fiche_id,
+                },
+            },
+        },
+    )
+    # Notification push vers la tablette
+    try:
+        from field import send_push_to_device
+        cat_short = (category or "Intervention").replace("PCO.", "")
+        body = (text or "Nouvelle intervention")[:120]
+        send_push_to_device(
+            db, device["_id"],
+            title="Dispatch : " + cat_short,
+            body=body,
+            url="/field",
+            tag="dispatch-" + str(fiche_id),
+        )
+    except Exception:
+        pass  # non-bloquant
+
+
+def _disengage_field_device(doc, fiche_id):
+    """Quand une fiche est cloturee, remet la tablette associee en patrouille."""
+    try:
+        cc = (doc or {}).get("content_category") or {}
+        patrouille_name = cc.get("patrouille")
+        if not patrouille_name:
+            return
+        event = doc.get("event") or ""
+        year = doc.get("year") or ""
+        device = db["field_devices"].find_one({
+            "name": patrouille_name,
+            "event": str(event),
+            "year": str(year),
+            "active_fiche_id": fiche_id,
+        })
+        if not device:
+            return
+        now = datetime.now(timezone.utc)
+        db["field_devices"].update_one(
+            {"_id": device["_id"]},
+            {
+                "$set": {
+                    "status": "patrouille",
+                    "status_since": now,
+                    "active_fiche_id": None,
+                },
+                "$push": {
+                    "status_history": {
+                        "status": "patrouille",
+                        "ts": now,
+                        "trigger": "cockpit_close",
+                        "fiche_id": fiche_id,
+                    },
+                },
+            },
+        )
+    except Exception:
+        pass  # non-bloquant
+
+
 def _pcorg_mk_uuid(event, year, ts_str, category, text, area_id, user_id):
     seed = (
         f"{event}|{year}|{ts_str.strip()}"
@@ -3270,6 +3375,12 @@ def pcorg_create():
     }
 
     db["pcorg"].insert_one(doc)
+
+    # Engager la tablette terrain si patrouille correspond
+    patr = content_cat.get("patrouille", "")
+    if patr:
+        _engage_field_device(patr, doc_id, event, year, category=category, text=text)
+
     return jsonify({"ok": True, "id": doc_id})
 
 
@@ -3386,6 +3497,11 @@ def pcorg_quick_create():
     }
 
     db["pcorg"].insert_one(doc)
+
+    # Engager la tablette terrain si patrouille correspond
+    if patrouille:
+        _engage_field_device(patrouille, doc_id, event, year, category=category, text=text)
+
     return jsonify({"ok": True, "id": doc_id})
 
 
@@ -3393,7 +3509,7 @@ def pcorg_quick_create():
 @role_required("user")
 def pcorg_update(doc_id):
     """Met a jour les champs d'une intervention (SQL ou COCKPIT)."""
-    doc = db["pcorg"].find_one({"_id": doc_id}, {"status_code": 1})
+    doc = db["pcorg"].find_one({"_id": doc_id}, {"status_code": 1, "event": 1, "year": 1, "category": 1, "text": 1})
     if not doc:
         return jsonify({"error": "introuvable"}), 404
     if doc.get("status_code") == 10:
@@ -3438,6 +3554,15 @@ def pcorg_update(doc_id):
         return jsonify({"error": "rien a mettre a jour"}), 400
 
     db["pcorg"].update_one({"_id": doc_id}, {"$set": sets})
+
+    # Si patrouille a ete modifie, engager la tablette terrain
+    new_patr = (cc_update or {}).get("patrouille", "")
+    if new_patr:
+        cat = sets.get("category") or doc.get("category", "")
+        txt = sets.get("text") or doc.get("text", "")
+        _engage_field_device(new_patr, doc_id, doc.get("event", ""), doc.get("year", ""),
+                             category=cat, text=txt)
+
     return jsonify({"ok": True})
 
 
@@ -3572,7 +3697,7 @@ def pcorg_close(doc_id):
     # Lire le comment existant pour le concatener
     doc = db["pcorg"].find_one(
         {"_id": doc_id, "status_code": {"$ne": 10}},
-        {"comment": 1}
+        {"comment": 1, "content_category": 1, "event": 1, "year": 1}
     )
     if not doc:
         return jsonify({"error": "introuvable ou deja clos"}), 404
@@ -3594,7 +3719,97 @@ def pcorg_close(doc_id):
             "$push": {"comment_history": history_entry},
         }
     )
+
+    # Auto-disengage: reset tablet to "patrouille" when cockpit closes fiche
+    _disengage_field_device(doc, doc_id)
+
     return jsonify({"ok": True})
+
+
+@app.route('/api/field-device/release', methods=['POST'])
+@role_required("user")
+def field_device_release():
+    """Libere un vehicule/tablette en fin d'intervention.
+    Passe le device en patrouille, vide active_fiche_id, ajoute l'historique.
+    Si le device n'a pas laisse de commentaire de fin, le cockpit doit en fournir un."""
+    data = request.get_json(force=True)
+    device_name = (data.get("device_name") or "").strip()
+    event = data.get("event", "")
+    year = data.get("year", "")
+    cockpit_comment = (data.get("comment") or "").strip()
+
+    if not device_name or not event:
+        return jsonify({"error": "device_name et event requis"}), 400
+
+    device = db["field_devices"].find_one({
+        "name": device_name,
+        "event": str(event),
+        "year": str(year),
+    })
+    if not device:
+        return jsonify({"error": "device introuvable"}), 404
+
+    if device.get("status") != "fin_intervention":
+        return jsonify({"error": "Le device n'est pas en fin d'intervention"}), 400
+
+    # Si pas de commentaire tablette, le cockpit doit en fournir un
+    fin_comment = device.get("fin_comment") or ""
+    if not fin_comment and not cockpit_comment:
+        return jsonify({"error": "comment_required",
+                        "message": "L'operateur n'a pas laisse de commentaire, vous devez en saisir un"}), 400
+
+    user = request.user_payload
+    operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
+    now = datetime.now(timezone.utc)
+    now_local = datetime.now(ZoneInfo("Europe/Paris"))
+
+    # Remettre le device en patrouille
+    db["field_devices"].update_one(
+        {"_id": device["_id"]},
+        {
+            "$set": {
+                "status": "patrouille",
+                "status_since": now,
+                "active_fiche_id": None,
+                "fin_comment": None,
+            },
+            "$push": {
+                "status_history": {
+                    "status": "patrouille",
+                    "ts": now,
+                    "trigger": "cockpit_release",
+                    "operator": operator_name,
+                },
+            },
+        },
+    )
+
+    # Ajouter un commentaire dans la fiche si active
+    fiche_id = device.get("active_fiche_id")
+    if fiche_id:
+        ts_fmt = now_local.strftime("%d/%m/%Y %H:%M:%S")
+        release_text = f"Liberation de {device_name} par {operator_name}"
+        if cockpit_comment:
+            release_text += f" : {cockpit_comment}"
+        comment_line = f"{ts_fmt} , {operator_name}\n {release_text}\n"
+        history_entry = {
+            "ts": now_local.isoformat(),
+            "operator": operator_name,
+            "text": release_text,
+        }
+        old_doc = db["pcorg"].find_one({"_id": fiche_id}, {"comment": 1})
+        if old_doc:
+            old_comment = old_doc.get("comment") or ""
+            new_comment = old_comment + comment_line if old_comment else comment_line
+            db["pcorg"].update_one(
+                {"_id": fiche_id},
+                {
+                    "$set": {"comment": new_comment, "content_category.patrouille": ""},
+                    "$push": {"comment_history": history_entry},
+                },
+            )
+
+    return jsonify({"ok": True, "device_name": device_name})
 
 
 @app.route('/api/pcorg/delete/<doc_id>', methods=['DELETE'])

@@ -26,7 +26,8 @@ from whatsapp import WhatsAppService
 # ---------------------------------------------------------------------------
 
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
-DB_NAME = "titan"
+_TITAN_ENV = os.getenv("TITAN_ENV", "dev").strip().lower()
+DB_NAME = "titan" if _TITAN_ENV in {"prod", "production"} else "titan_dev"
 
 logging.basicConfig(
     level=logging.INFO,

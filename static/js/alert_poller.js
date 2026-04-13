@@ -43,7 +43,9 @@
         "checkpoint-reassign": "swap_horiz",
         "checkpoint-error-burst": "error",
         "pcorg-securite-ua": "shield",
-        "pcorg-secours-ua": "local_hospital"
+        "pcorg-secours-ua": "local_hospital",
+        "field_sos": "sos",
+        "field-sos": "sos"
     };
     var TITLE_MAP = {
         opening: "OUVERTURE IMMINENTE", opened: "SITE OUVERT",
@@ -56,7 +58,9 @@
         "checkpoint-error-burst": "RAFALE ERREURS CHECKPOINT",
         "checkpoint-reassign": "CHANGEMENT AFFECTATION CHECKPOINT",
         "pcorg-securite-ua": "ALERTE S\u00c9CURIT\u00c9",
-        "pcorg-secours-ua": "ALERTE SECOURS"
+        "pcorg-secours-ua": "ALERTE SECOURS",
+        "field_sos": "SOS TABLETTE",
+        "field-sos": "SOS TABLETTE"
     };
 
     // Labels urgence par type de categorie
@@ -162,6 +166,45 @@
         }
     }
 
+    // --- Alarm sound via Web Audio API ---
+    var _sosAlarmTimer = null;
+    function _playSosAlarm() {
+        _stopSosAlarm();
+        var playOnce = function() {
+            try {
+                var ctx = new (window.AudioContext || window.webkitAudioContext)();
+                var t = ctx.currentTime;
+                // Two-tone siren pattern
+                var osc = ctx.createOscillator();
+                var gain = ctx.createGain();
+                osc.type = "square";
+                osc.frequency.setValueAtTime(880, t);
+                osc.frequency.setValueAtTime(660, t + 0.25);
+                osc.frequency.setValueAtTime(880, t + 0.5);
+                osc.frequency.setValueAtTime(660, t + 0.75);
+                osc.frequency.setValueAtTime(880, t + 1.0);
+                osc.frequency.setValueAtTime(660, t + 1.25);
+                gain.gain.setValueAtTime(0.6, t);
+                gain.gain.linearRampToValueAtTime(0, t + 1.5);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(t);
+                osc.stop(t + 1.5);
+            } catch(e) {}
+        };
+        playOnce();
+        // Repeat every 2s for 10s
+        var count = 0;
+        _sosAlarmTimer = setInterval(function() {
+            count++;
+            if (count >= 5) { _stopSosAlarm(); return; }
+            playOnce();
+        }, 2000);
+    }
+    function _stopSosAlarm() {
+        if (_sosAlarmTimer) { clearInterval(_sosAlarmTimer); _sosAlarmTimer = null; }
+    }
+
     function _showNextAlert() {
         if (_alertQueue.length === 0) return;
 
@@ -185,7 +228,12 @@
 
         var title = document.createElement("div");
         title.className = "critical-alert-title";
-        title.textContent = TITLE_MAP[type] || type.toUpperCase();
+        var actionDataPre = item.actionData || {};
+        if ((type === "field_sos" || type === "field-sos") && actionDataPre.device_name) {
+            title.textContent = "SOS - " + actionDataPre.device_name;
+        } else {
+            title.textContent = TITLE_MAP[type] || type.toUpperCase();
+        }
 
         header.appendChild(icon);
         header.appendChild(title);
@@ -195,9 +243,33 @@
 
         // Contenu specifique PCO : enrichi avec urgence + engagement + operateur
         var isPco = type.indexOf("pcorg-") === 0;
+        var isFieldSos = (type === "field_sos" || type === "field-sos");
         var actionData = item.actionData || {};
 
-        if (isPco && actionData.niveau_urgence && actionData.category) {
+        if (isFieldSos) {
+            // Play alarm sound for SOS
+            _playSosAlarm();
+
+            // Gros message
+            var bigMsg = document.createElement("div");
+            bigMsg.className = "critical-alert-sos-big";
+            bigMsg.textContent = "Demande d assistance immediate";
+            body.appendChild(bigMsg);
+
+            // Bloc info : position / batterie / heure
+            var info = document.createElement("div");
+            info.className = "critical-alert-sos-info";
+            var hasPos = (typeof actionData.lat === "number" && typeof actionData.lng === "number");
+            var posTxt = hasPos
+                ? actionData.lat.toFixed(5) + ", " + actionData.lng.toFixed(5)
+                : "Position inconnue";
+            var batTxt = (typeof actionData.battery === "number") ? (Math.round(actionData.battery) + "%") : "?";
+            info.innerHTML =
+                "<div><span class='material-symbols-outlined'>place</span> " + posTxt + "</div>" +
+                "<div><span class='material-symbols-outlined'>battery_5_bar</span> " + batTxt + "</div>" +
+                "<div><span class='material-symbols-outlined'>schedule</span> " + timeStr + "</div>";
+            body.appendChild(info);
+        } else if (isPco && actionData.niveau_urgence && actionData.category) {
             var urgLabel = _urgencyLabel(actionData.category, actionData.niveau_urgence);
             var engageDesc = URGENCY_ENGAGE[actionData.niveau_urgence] || "";
 
@@ -208,12 +280,11 @@
             body.appendChild(urgBadge);
 
             // Description intervention
-            var sub = document.createElement("div");
-            sub.className = "critical-alert-message";
-            // Extraire juste le texte (avant " — Zone" ou " — Operateur")
+            var pcoSub = document.createElement("div");
+            pcoSub.className = "critical-alert-message";
             var msgText = (item.message || "").split(" \u2014 ")[0];
-            sub.textContent = msgText;
-            body.appendChild(sub);
+            pcoSub.textContent = msgText;
+            body.appendChild(pcoSub);
 
             // Engagement
             if (engageDesc) {
@@ -235,7 +306,6 @@
             }
             var metaText = timeStr;
             if (opName) metaText += " \u2014 " + opName;
-            // Ajouter le groupe si disponible
             var userGroups = window.__userGroups;
             if (userGroups && userGroups.length) {
                 var groupNames = userGroups.map(function(g) { return g.name; }).join(", ");
@@ -245,15 +315,15 @@
             body.appendChild(metaLine);
         } else {
             // Message standard (non PCO)
-            var sub = document.createElement("div");
-            sub.className = "critical-alert-message";
-            sub.textContent = item.message;
-            body.appendChild(sub);
+            var stdSub = document.createElement("div");
+            stdSub.className = "critical-alert-message";
+            stdSub.textContent = item.message;
+            body.appendChild(stdSub);
 
-            var timeEl = document.createElement("div");
-            timeEl.className = "critical-alert-time";
-            timeEl.textContent = timeStr;
-            body.appendChild(timeEl);
+            var stdTime = document.createElement("div");
+            stdTime.className = "critical-alert-time";
+            stdTime.textContent = timeStr;
+            body.appendChild(stdTime);
         }
 
         // Compteur d'alertes restantes
@@ -272,7 +342,10 @@
             var btnIgnore = document.createElement("button");
             btnIgnore.className = "critical-alert-btn critical-alert-btn-secondary";
             btnIgnore.textContent = "Ignorer";
-            btnIgnore.addEventListener("click", function() { _dismissCurrent(null); });
+            btnIgnore.addEventListener("click", function() {
+                if (isFieldSos) _stopSosAlarm();
+                _dismissCurrent(null);
+            });
             btnRow.appendChild(btnIgnore);
 
             var btnView = document.createElement("button");
@@ -280,9 +353,10 @@
             var viewLabel = "Voir sur la carte";
             if (type === "anpr-watchlist") viewLabel = "Voir sur LAPI";
             else if (type === "checkpoint-reassign") viewLabel = "Voir Controle acces";
-            else if (isPco) viewLabel = "Ouvrir la fiche";
+            else if (isPco || isFieldSos) viewLabel = "Ouvrir la fiche";
             btnView.textContent = viewLabel;
             btnView.addEventListener("click", function() {
+                if (isFieldSos) _stopSosAlarm();
                 var cb = item.onView;
                 _dismissCurrent(cb);
             });
@@ -291,12 +365,13 @@
             var btn = document.createElement("button");
             btn.className = "critical-alert-btn";
             btn.textContent = "Compris";
-            btn.addEventListener("click", function() { _dismissCurrent(null); });
+            btn.addEventListener("click", function() {
+                if (isFieldSos) _stopSosAlarm();
+                _dismissCurrent(null);
+            });
             btnRow.appendChild(btn);
         }
 
-        body.appendChild(sub);
-        body.appendChild(timeEl);
         body.appendChild(counter);
         body.appendChild(btnRow);
         box.appendChild(header);
@@ -342,6 +417,30 @@
             fn = function() {
                 if (window.PcorgUI && window.PcorgUI.openFiche) {
                     window.PcorgUI.openFiche(a.actionData.pcorg_id);
+                }
+            };
+            fn._actionData = a.actionData;
+        }
+        if ((slug === "field_sos" || slug === "field-sos") && a.actionData) {
+            var ad = a.actionData;
+            fn = function() {
+                // Priorite : ouvrir la fiche PCO auto-creee si dispo, sinon centrer la carte
+                if (ad.pcorg_id && window.PcorgUI && window.PcorgUI.openFiche) {
+                    window.PcorgUI.openFiche(ad.pcorg_id);
+                    return;
+                }
+                if (typeof ad.lat === "number" && typeof ad.lng === "number") {
+                    if (window.CockpitMapView && window.CockpitMapView.switchView) {
+                        window.CockpitMapView.switchView("map");
+                    }
+                    setTimeout(function() {
+                        if (window.CockpitMapView && window.CockpitMapView.flyTo) {
+                            window.CockpitMapView.flyTo(ad.lat, ad.lng, 19);
+                        } else if (window.CockpitMapView && window.CockpitMapView.getMap) {
+                            var m = window.CockpitMapView.getMap();
+                            if (m) m.setView([ad.lat, ad.lng], 19);
+                        }
+                    }, 400);
                 }
             };
             fn._actionData = a.actionData;
@@ -412,7 +511,7 @@
                     _markSeen(a._id);
                     var slug = a.definition_slug || "";
                     var onView = _buildOnView(slug, a);
-                    enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView);
+                    enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, a.actionData);
                 });
             })
             .catch(function(err) {

@@ -15,6 +15,23 @@
   var REFRESH_MS = 15000;     // 15s
   var lastData = null;
 
+  // --- Trail state ---
+  var trailPolylines = {};    // deviceId -> L.polyline
+  var trailDecorators = {};   // deviceId -> [L.circleMarker] (time dots)
+  var activeTrails = {};      // deviceId -> {minutes, color, groupId}
+  var TRAIL_DURATIONS = [
+    { label: "30 min", value: 30 },
+    { label: "1h", value: 60 },
+    { label: "2h", value: 120 },
+    { label: "4h", value: 240 },
+    { label: "Journee", value: 1440 },
+  ];
+
+  // --- Lock/follow state ---
+  var lockedDeviceId = null;       // deviceId currently locked (only one at a time per tab)
+  var watcherId = "w-" + Math.random().toString(36).slice(2, 10) + "-" + Date.now();
+  var lockKeepAliveTimer = null;
+
   // --- DOM helpers ---
   function el(tag, attrs, children) {
     var e = document.createElement(tag);
@@ -48,6 +65,24 @@
     buildPanel();
     refresh();
     refreshTimer = setInterval(refresh, REFRESH_MS);
+
+    // Unlock device when tab closes (best-effort via sendBeacon)
+    window.addEventListener("beforeunload", function () {
+      if (lockedDeviceId) {
+        var mongoId = tabletMongoId(lockedDeviceId);
+        if (mongoId) {
+          var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+          var csrf = csrfMeta ? csrfMeta.content : "";
+          var payload = JSON.stringify({ mode: "normal", watcher_id: watcherId });
+          try {
+            navigator.sendBeacon(
+              "/field/admin/device/" + encodeURIComponent(mongoId) + "/tracking",
+              new Blob([payload], { type: "application/json" })
+            );
+          } catch (e) { /* fallback: TTL will expire in 90s */ }
+        }
+      }
+    });
 
     // Observer le switch vers la carte pour injecter les markers
     var mapMain = document.getElementById("map-main");
@@ -117,9 +152,13 @@
     });
   }
 
-  // --- Refresh: fetch /anoloc/live ---
+  // --- Refresh: fetch /anoloc/live (avec scope event/year pour inclure tablettes) ---
   function refresh() {
-    fetch("/anoloc/live")
+    var qs = new URLSearchParams();
+    if (window.selectedEvent) qs.set("event", window.selectedEvent);
+    if (window.selectedYear) qs.set("year", String(window.selectedYear));
+    var url = "/anoloc/live" + (qs.toString() ? ("?" + qs.toString()) : "");
+    fetch(url)
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (!data.enabled) {
@@ -129,6 +168,8 @@
         lastData = data;
         updatePanel(data);
         updateMarkers(data);
+        refreshActiveTrails();
+        followLockedDevice();
       })
       .catch(function (err) {
         console.error("[Anoloc] refresh error:", err);
@@ -229,9 +270,33 @@
           if (dev.gps_fix === 0) statusLabel += " (sans GPS)";
         }
 
+        // Statut patrouille pour les tablettes
+        var patrolBadge = null;
+        if (dev.kind === "tablet" && dev.patrol_status) {
+          var pMeta = {
+            patrouille: { label: "Disponible", color: "#22c55e" },
+            intervention: { label: "Intervention", color: "#f59e0b" },
+            sur_place: { label: "ASL", color: "#3b82f6" },
+            pause: { label: "Pause", color: "#94a3b8" },
+            fin_intervention: { label: "Fin d'inter", color: "#8b5cf6" },
+          };
+          var pm = pMeta[dev.patrol_status] || pMeta.patrouille;
+          patrolBadge = el("span", {
+            className: "anoloc-patrol-badge",
+            textContent: pm.label,
+          });
+          patrolBadge.style.cssText = "background:" + pm.color + ";color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;margin-left:6px;white-space:nowrap;";
+        }
+
         var devDot = el("span", {className: "anoloc-dev-dot " + statusClass});
         var devNum = el("span", {className: "anoloc-dev-num", textContent: String(idx + 1)});
         var devName = el("span", {className: "anoloc-dev-name", textContent: dev.label || dev.id});
+        // Icone type tablette a afficher a gauche du nom
+        var devKindIcon = null;
+        if (dev.kind === "tablet") {
+          devKindIcon = materialIcon("tablet_android", "font-size:13px;margin-right:4px;vertical-align:middle;");
+          devKindIcon.title = "Tablette terrain";
+        }
         var devStatus = el("span", {className: "anoloc-dev-status " + statusClass, textContent: statusLabel});
 
         var devRight = el("div", {className: "anoloc-dev-right"});
@@ -249,8 +314,12 @@
         }
         devRight.appendChild(devStatus);
 
+        var leftChildren = [devDot, devNum];
+        if (devKindIcon) leftChildren.push(devKindIcon);
+        leftChildren.push(devName);
+        if (patrolBadge) leftChildren.push(patrolBadge);
         var devRow = el("div", {className: "anoloc-dev-row"}, [
-          el("div", {className: "anoloc-dev-left"}, [devDot, devNum, devName]),
+          el("div", {className: "anoloc-dev-left"}, leftChildren),
           devRight,
         ]);
         devRow.style.cursor = "pointer";
@@ -329,10 +398,23 @@
       }
 
       devices.forEach(function (dev, idx) {
+        dev._groupId = gid; // store for trail functions
         seenDevices[dev.id] = true;
         var lat = dev.lat;
         var lng = dev.lng;
         if (lat == null || lng == null) return;
+
+        // Masquer les balises arretees ET hors ligne (pas de signal GPS)
+        var isStoppedOffline = (dev.status === "stopped" && !dev.online);
+        if (isStoppedOffline) {
+          // Retirer le marker s'il existait
+          var old = anolocMarkers[dev.id];
+          if (old) {
+            if (anolocLayers[gid]) anolocLayers[gid].removeLayer(old);
+            delete anolocMarkers[dev.id];
+          }
+          return;
+        }
 
         var existing = anolocMarkers[dev.id];
         if (existing) {
@@ -360,6 +442,21 @@
             }).openPopup();
           });
 
+          // Clic droit sur une tablette : ouvrir le composer de message
+          marker.on("contextmenu", function (e) {
+            var d = marker._anolocData;
+            if (d && d.kind === "tablet" && window.FieldAdmin && window.FieldAdmin.openCompose) {
+              if (e.originalEvent) {
+                e.originalEvent.preventDefault();
+                e.originalEvent.stopPropagation();
+              }
+              // id au format "field:<objectId>" -> on extrait l'ObjectId
+              var rawId = String(d.id || "");
+              var deviceId = rawId.indexOf("field:") === 0 ? rawId.slice(6) : rawId;
+              window.FieldAdmin.openCompose({ device_id: deviceId, device_name: d.name });
+            }
+          });
+
           marker.addTo(anolocLayers[gid]);
           anolocMarkers[dev.id] = marker;
         }
@@ -374,6 +471,10 @@
           anolocLayers[m._anolocGroup].removeLayer(m);
         }
         delete anolocMarkers[devId];
+        // Also remove trail and lock if device disappeared
+        removeTrail(devId);
+        delete activeTrails[devId];
+        if (lockedDeviceId === devId) unlockDevice(devId);
       }
     });
 
@@ -390,9 +491,11 @@
       else statusClass = "online";
     }
 
-    var container = el("div", {className: "anoloc-marker " + statusClass});
+    var isTablet = dev.kind === "tablet";
+    var container = el("div", {className: "anoloc-marker " + statusClass + (isTablet ? " tablet" : "")});
     container.style.background = grp.color || "#6366f1";
 
+    // Icone : toujours l'icone du groupe (tablettes et balises)
     var iconEl = materialIcon(grp.icon || "location_on");
     iconEl.classList.add("anoloc-marker-icon");
     container.appendChild(iconEl);
@@ -400,11 +503,206 @@
     var numEl = el("span", {className: "anoloc-marker-num", textContent: String(num)});
     container.appendChild(numEl);
 
+    // Badge tablette (petit rond a droite)
+    if (isTablet) {
+      var badge = el("span", {className: "anoloc-marker-badge"});
+      badge.textContent = "T";
+      badge.title = "Tablette terrain";
+      container.appendChild(badge);
+    }
+
     return L.divIcon({
       html: container.outerHTML,
       className: "anoloc-marker-wrapper",
       iconSize: null,
       iconAnchor: [18, 18],
+    });
+  }
+
+  // --- Lock/follow functions ---
+  function lockDevice(deviceId, isTablet) {
+    // If already locked on another device, unlock it first
+    if (lockedDeviceId && lockedDeviceId !== deviceId) {
+      unlockDevice(lockedDeviceId);
+    }
+    lockedDeviceId = deviceId;
+
+    // If it's a tablet, tell it to switch to high_freq + start keep-alive
+    if (isTablet) {
+      var mongoId = tabletMongoId(deviceId);
+      if (mongoId) {
+        setTabletTrackingMode(mongoId, "high_freq");
+        startLockKeepAlive(mongoId);
+      }
+    }
+
+    // Immediately pan to the device
+    var marker = anolocMarkers[deviceId];
+    if (marker) {
+      var mapObj = window.CockpitMapView && window.CockpitMapView.getMap
+        ? window.CockpitMapView.getMap() : null;
+      if (mapObj) {
+        mapObj.setView(marker.getLatLng(), Math.max(mapObj.getZoom(), 17), { animate: true });
+      }
+    }
+  }
+
+  function unlockDevice(deviceId) {
+    if (!deviceId) return;
+    stopLockKeepAlive();
+    // If it was a tablet, revert to normal
+    var mongoId = tabletMongoId(deviceId);
+    if (mongoId) {
+      setTabletTrackingMode(mongoId, "normal");
+    }
+    if (lockedDeviceId === deviceId) {
+      lockedDeviceId = null;
+    }
+  }
+
+  function tabletMongoId(deviceId) {
+    var raw = String(deviceId);
+    return raw.indexOf("field:") === 0 ? raw.slice(6) : null;
+  }
+
+  function setTabletTrackingMode(mongoId, mode) {
+    var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    var csrf = csrfMeta ? csrfMeta.content : "";
+    fetch("/field/admin/device/" + encodeURIComponent(mongoId) + "/tracking", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": csrf,
+      },
+      body: JSON.stringify({ mode: mode, watcher_id: watcherId }),
+    }).catch(function () { /* silent */ });
+  }
+
+  function startLockKeepAlive(mongoId) {
+    stopLockKeepAlive();
+    // Ping every 60s to keep the TTL alive (server TTL = 90s)
+    lockKeepAliveTimer = setInterval(function () {
+      setTabletTrackingMode(mongoId, "high_freq");
+    }, 60000);
+  }
+
+  function stopLockKeepAlive() {
+    if (lockKeepAliveTimer) {
+      clearInterval(lockKeepAliveTimer);
+      lockKeepAliveTimer = null;
+    }
+  }
+
+  function followLockedDevice() {
+    if (!lockedDeviceId) return;
+    var marker = anolocMarkers[lockedDeviceId];
+    if (!marker) {
+      // Device disappeared, unlock
+      unlockDevice(lockedDeviceId);
+      return;
+    }
+    var mapObj = window.CockpitMapView && window.CockpitMapView.getMap
+      ? window.CockpitMapView.getMap() : null;
+    if (!mapObj) return;
+    mapObj.panTo(marker.getLatLng(), { animate: true, duration: 0.5 });
+  }
+
+  // --- Trail functions ---
+  function fetchTrail(deviceId, minutes, color, groupId) {
+    fetch("/anoloc/trail?device_id=" + encodeURIComponent(deviceId) + "&minutes=" + minutes)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data || !data.ok) return;
+        renderTrail(deviceId, data.points, color, groupId);
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function renderTrail(deviceId, points, color, groupId) {
+    removeTrail(deviceId);
+    if (!points || points.length < 2) return;
+
+    var mapObj = window.CockpitMapView && window.CockpitMapView.getMap
+      ? window.CockpitMapView.getMap() : null;
+    if (!mapObj) return;
+
+    var latlngs = points.map(function (p) { return [p.lat, p.lng]; });
+
+    // Main polyline
+    var line = L.polyline(latlngs, {
+      color: color || "#6366f1",
+      weight: 3,
+      opacity: 0.7,
+      dashArray: "8,6",
+      lineJoin: "round",
+    });
+
+    // Layer group: use the device's group layer or add directly to map
+    var layer = anolocLayers[groupId];
+    if (layer) {
+      line.addTo(layer);
+    } else {
+      line.addTo(mapObj);
+    }
+    trailPolylines[deviceId] = line;
+
+    // Time dots every ~10 points (or at least 5 dots)
+    var dots = [];
+    var step = Math.max(1, Math.floor(points.length / 12));
+    for (var i = 0; i < points.length; i += step) {
+      var p = points[i];
+      var progress = i / (points.length - 1); // 0..1
+      var opacity = 0.3 + progress * 0.7;     // older = faded
+      var radius = 2.5 + progress * 1.5;
+      var dot = L.circleMarker([p.lat, p.lng], {
+        radius: radius,
+        color: color || "#6366f1",
+        fillColor: color || "#6366f1",
+        fillOpacity: opacity,
+        weight: 1,
+        opacity: opacity,
+      });
+      // Tooltip with time
+      if (p.ts) {
+        try {
+          var dt = new Date(p.ts);
+          var ts = String(dt.getHours()).padStart(2, "0") + ":" + String(dt.getMinutes()).padStart(2, "0");
+          dot.bindTooltip(ts, { direction: "top", className: "anoloc-trail-tooltip" });
+        } catch (e) { /* ignore */ }
+      }
+      if (layer) dot.addTo(layer);
+      else dot.addTo(mapObj);
+      dots.push(dot);
+    }
+    trailDecorators[deviceId] = dots;
+  }
+
+  function removeTrail(deviceId) {
+    if (trailPolylines[deviceId]) {
+      trailPolylines[deviceId].remove();
+      delete trailPolylines[deviceId];
+    }
+    if (trailDecorators[deviceId]) {
+      trailDecorators[deviceId].forEach(function (d) { d.remove(); });
+      delete trailDecorators[deviceId];
+    }
+  }
+
+  function toggleTrail(deviceId, minutes, color, groupId) {
+    if (activeTrails[deviceId]) {
+      removeTrail(deviceId);
+      delete activeTrails[deviceId];
+      return false;
+    }
+    activeTrails[deviceId] = { minutes: minutes, color: color, groupId: groupId };
+    fetchTrail(deviceId, minutes, color, groupId);
+    return true;
+  }
+
+  function refreshActiveTrails() {
+    Object.keys(activeTrails).forEach(function (deviceId) {
+      var t = activeTrails[deviceId];
+      fetchTrail(deviceId, t.minutes, t.color, t.groupId);
     });
   }
 
@@ -430,6 +728,74 @@
       "GPS: ", el("strong", {textContent: dev.gps_fix ? "OK" : "pas de signal"}),
     ]));
 
+    // Patrol status (tablets only)
+    if (dev.kind === "tablet" && dev.patrol_status) {
+      var psMeta = {
+        patrouille: { label: "Disponible", color: "#22c55e" },
+        intervention: { label: "Intervention", color: "#f59e0b" },
+        sur_place: { label: "ASL", color: "#3b82f6" },
+        pause: { label: "Pause", color: "#94a3b8" },
+        fin_intervention: { label: "Fin d'intervention", color: "#8b5cf6" },
+      };
+      var psm = psMeta[dev.patrol_status] || psMeta.patrouille;
+      var psBadge = el("strong", {textContent: psm.label});
+      psBadge.style.color = psm.color;
+      popup.appendChild(el("div", {className: "anoloc-popup-row"}, [
+        "Activite: ", psBadge,
+      ]));
+
+      // Bouton liberation si fin_intervention
+      if (dev.patrol_status === "fin_intervention") {
+        var releaseRow = el("div", {className: "anoloc-release-row"});
+        var releaseInput = el("input", {
+          type: "text",
+          className: "anoloc-release-input",
+          placeholder: dev.fin_comment ? "Commentaire (optionnel)" : "Commentaire (obligatoire)",
+        });
+        var releaseBtn = el("button", {className: "anoloc-release-btn"}, [
+          materialIcon("check_circle", "font-size:16px;vertical-align:middle;margin-right:4px;"),
+          "Liberer",
+        ]);
+        releaseBtn.addEventListener("click", function () {
+          var comment = releaseInput.value.trim();
+          releaseBtn.disabled = true;
+          releaseBtn.textContent = "...";
+          var ey = (typeof getCurrentEventYear === "function") ? getCurrentEventYear() : {};
+          apiPost("/api/field-device/release", {
+            device_name: dev.label,
+            event: ey.event || "",
+            year: ey.year || "",
+            comment: comment,
+          }).then(function (r) { return r.json(); })
+            .then(function (resp) {
+              if (resp && resp.ok) {
+                if (marker && marker.getPopup()) marker.closePopup();
+              } else {
+                releaseBtn.disabled = false;
+                releaseBtn.textContent = "Liberer";
+                var errMsg = (resp && resp.message) || (resp && resp.error) || "Erreur";
+                releaseInput.value = "";
+                releaseInput.placeholder = errMsg;
+                releaseInput.style.borderColor = "#ef4444";
+              }
+            })
+            .catch(function () {
+              releaseBtn.disabled = false;
+              releaseBtn.textContent = "Liberer";
+            });
+        });
+        releaseRow.appendChild(releaseInput);
+        releaseRow.appendChild(releaseBtn);
+        popup.appendChild(releaseRow);
+        if (dev.fin_comment) {
+          var fcRow = el("div", {className: "anoloc-popup-row"});
+          fcRow.style.cssText = "font-size:11px;color:#94a3b8;font-style:italic;";
+          fcRow.textContent = "Commentaire tablette: " + dev.fin_comment;
+          popup.appendChild(fcRow);
+        }
+      }
+    }
+
     // Speed
     if (dev.speed != null && dev.gps_fix) {
       popup.appendChild(el("div", {className: "anoloc-popup-row"}, [
@@ -437,10 +803,16 @@
       ]));
     }
 
-    // Battery
+    // Battery (with icon + color)
     if (dev.battery_pct != null) {
+      var batPct = dev.battery_pct;
+      var batIconName = batPct > 60 ? "battery_full" : batPct > 20 ? "battery_3_bar" : "battery_1_bar";
+      var batColor = batPct > 60 ? "#22c55e" : batPct > 20 ? "#eab308" : "#ef4444";
+      var batStrong = el("strong", {textContent: batPct + "%"});
+      batStrong.style.color = batColor;
       popup.appendChild(el("div", {className: "anoloc-popup-row"}, [
-        "Batterie: ", el("strong", {textContent: dev.battery_pct + "%"}),
+        materialIcon(batIconName, "font-size:16px;vertical-align:middle;margin-right:4px;color:" + batColor),
+        "Batterie: ", batStrong,
       ]));
     }
 
@@ -463,6 +835,90 @@
         ]));
       } catch (e) { /* ignore */ }
     }
+
+    // Trail controls
+    var trailSection = el("div", {className: "anoloc-trail-controls"});
+    var isActive = !!activeTrails[dev.id];
+    var currentMinutes = isActive ? activeTrails[dev.id].minutes : 60;
+    var trailColor = grp.color || "#6366f1";
+
+    // Duration select
+    var durationSelect = el("select", {className: "anoloc-trail-select"});
+    TRAIL_DURATIONS.forEach(function (dur) {
+      var opt = el("option", {value: dur.value, textContent: dur.label});
+      if (dur.value === currentMinutes) opt.selected = true;
+      durationSelect.appendChild(opt);
+    });
+
+    // Toggle button
+    var trailBtn = el("button", {
+      className: "anoloc-trail-btn" + (isActive ? " active" : ""),
+    }, [
+      materialIcon(isActive ? "close" : "timeline", "font-size:16px;vertical-align:middle;margin-right:4px;"),
+      isActive ? "Masquer" : "Trace",
+    ]);
+    trailBtn.style.borderColor = trailColor;
+    if (isActive) trailBtn.style.background = trailColor;
+
+    trailBtn.addEventListener("click", function () {
+      var mins = parseInt(durationSelect.value, 10) || 60;
+      var nowActive = toggleTrail(dev.id, mins, trailColor, dev._groupId || "");
+      trailBtn.className = "anoloc-trail-btn" + (nowActive ? " active" : "");
+      trailBtn.style.background = nowActive ? trailColor : "";
+      trailBtn.textContent = "";
+      trailBtn.appendChild(materialIcon(nowActive ? "close" : "timeline", "font-size:16px;vertical-align:middle;margin-right:4px;"));
+      trailBtn.appendChild(document.createTextNode(nowActive ? "Masquer" : "Trace"));
+      if (nowActive) {
+        activeTrails[dev.id].minutes = mins;
+      }
+    });
+
+    // Re-fetch on duration change while active
+    durationSelect.addEventListener("change", function () {
+      if (activeTrails[dev.id]) {
+        var mins = parseInt(durationSelect.value, 10) || 60;
+        activeTrails[dev.id].minutes = mins;
+        fetchTrail(dev.id, mins, trailColor, activeTrails[dev.id].groupId);
+      }
+    });
+
+    trailSection.appendChild(durationSelect);
+    trailSection.appendChild(trailBtn);
+    popup.appendChild(trailSection);
+
+    // Lock/follow button
+    var isLocked = lockedDeviceId === dev.id;
+    var lockBtn = el("button", {
+      className: "anoloc-lock-btn" + (isLocked ? " active" : ""),
+    }, [
+      materialIcon(isLocked ? "lock_open" : "gps_fixed", "font-size:16px;vertical-align:middle;margin-right:4px;"),
+      isLocked ? "Deverrouiller" : "Suivre",
+    ]);
+    if (isLocked) {
+      lockBtn.style.background = grp.color || "#6366f1";
+      lockBtn.style.borderColor = "transparent";
+    }
+
+    lockBtn.addEventListener("click", function () {
+      if (lockedDeviceId === dev.id) {
+        unlockDevice(dev.id);
+        lockBtn.className = "anoloc-lock-btn";
+        lockBtn.style.background = "";
+        lockBtn.style.borderColor = "";
+        lockBtn.textContent = "";
+        lockBtn.appendChild(materialIcon("gps_fixed", "font-size:16px;vertical-align:middle;margin-right:4px;"));
+        lockBtn.appendChild(document.createTextNode("Suivre"));
+      } else {
+        lockDevice(dev.id, dev.kind === "tablet");
+        lockBtn.className = "anoloc-lock-btn active";
+        lockBtn.style.background = grp.color || "#6366f1";
+        lockBtn.style.borderColor = "transparent";
+        lockBtn.textContent = "";
+        lockBtn.appendChild(materialIcon("lock_open", "font-size:16px;vertical-align:middle;margin-right:4px;"));
+        lockBtn.appendChild(document.createTextNode("Deverrouiller"));
+      }
+    });
+    popup.appendChild(lockBtn);
 
     return popup;
   }
@@ -490,6 +946,22 @@
       }
     });
   }
+
+  // --- Public API: lookup device by label (for pcorg.js cross-reference) ---
+  window.getAnolocDeviceByLabel = function (name) {
+    if (!lastData || !lastData.groups || !name) return null;
+    var groups = lastData.groups;
+    for (var gid in groups) {
+      var grp = groups[gid];
+      var devs = grp.devices || [];
+      for (var i = 0; i < devs.length; i++) {
+        if (devs[i].label === name) {
+          return { device: devs[i], group: grp };
+        }
+      }
+    }
+    return null;
+  };
 
   // --- Boot ---
   if (document.readyState === "loading") {
