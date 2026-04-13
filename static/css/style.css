@@ -8368,6 +8368,9 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .hsh-summary-label {
   font-size: 0.72rem; color: var(--muted); margin-top: 2px;
 }
+.hsh-summary-sub {
+  font-size: 0.70rem; color: var(--muted); font-style: italic; margin-top: 1px;
+}
 
 /* Barre de progression pic projete */
 .hsh-progress-bar {
@@ -8427,6 +8430,15 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .hsh-gauge-info {
   display: flex; justify-content: space-between;
   font-size: 0.7rem; color: var(--muted); margin-top: 2px;
+}
+.hsh-correction-row {
+  margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line);
+}
+.hsh-correction-input {
+  width: 70px; padding: 2px 6px; font-size: 0.75rem;
+  border: 1px solid var(--line); border-radius: 4px;
+  background: var(--bg); color: var(--text);
+  margin-left: 4px;
 }
 
 .hsh-widget-header {

@@ -34,6 +34,8 @@
 
   var activeContainer = document.getElementById("hsh-active-checkpoints");
   var activeCountEl = document.getElementById("hsh-active-count");
+  var titresTbody = document.getElementById("hsh-titres-tbody");
+  var debitTbody = document.getElementById("hsh-debit-tbody");
 
   var config = {};
   var structure = [];
@@ -77,6 +79,8 @@
         loadErrors();
         loadLiveCounters();
         loadActiveCheckpoints();
+        loadTitresLive();
+        loadDebitGates();
       });
   }
 
@@ -182,12 +186,81 @@
             if (cp.entrees_pers) parts.push(cp.entrees_pers + " pers.");
             if (cp.entrees_veh) parts.push(cp.entrees_veh + " veh.");
             if (cp.entrees_enf) parts.push(cp.entrees_enf + " enf.");
+            if (cp.entrees_acc) parts.push(cp.entrees_acc + " accred.");
             counts.textContent = parts.length ? parts.join(" / ") : cp.entrees + " E";
             chip.appendChild(counts);
           }
           wrap.appendChild(chip);
         });
         activeContainer.appendChild(wrap);
+      })
+      .catch(function () {});
+  }
+
+  function loadDebitGates() {
+    if (!debitTbody) return;
+    fetch("/api/live-controle/debit-gates")
+      .then(function (r) { return r.json(); })
+      .then(function (gates) {
+        debitTbody.textContent = "";
+        if (!gates || gates.length === 0) {
+          var tr = el("tr");
+          var td = el("td");
+          td.colSpan = 4;
+          td.textContent = "Aucune donnee";
+          td.style.textAlign = "center";
+          td.style.color = "var(--muted)";
+          tr.appendChild(td);
+          debitTbody.appendChild(tr);
+          return;
+        }
+        gates.forEach(function (g) {
+          var tr = el("tr");
+          var tdGate = el("td");
+          tdGate.textContent = g.gate;
+          tr.appendChild(tdGate);
+          [g.entrees_h, g.sorties_h, g.total_h].forEach(function (val) {
+            var td = el("td");
+            td.textContent = val;
+            td.style.textAlign = "right";
+            tr.appendChild(td);
+          });
+          debitTbody.appendChild(tr);
+        });
+      })
+      .catch(function () {});
+  }
+
+  function loadTitresLive() {
+    if (!titresTbody) return;
+    fetch("/api/live-controle/titres-live")
+      .then(function (r) { return r.json(); })
+      .then(function (titres) {
+        titresTbody.textContent = "";
+        if (!titres || titres.length === 0) {
+          var tr = el("tr");
+          var td = el("td");
+          td.colSpan = 4;
+          td.textContent = "Aucune donnee";
+          td.style.textAlign = "center";
+          td.style.color = "var(--muted)";
+          tr.appendChild(td);
+          titresTbody.appendChild(tr);
+          return;
+        }
+        titres.forEach(function (t) {
+          var tr = el("tr");
+          var tdTitre = el("td");
+          tdTitre.textContent = t.titre;
+          tr.appendChild(tdTitre);
+          [t.entrees, t.sorties, t.presents].forEach(function (val) {
+            var td = el("td");
+            td.textContent = val;
+            td.style.textAlign = "right";
+            tr.appendChild(td);
+          });
+          titresTbody.appendChild(tr);
+        });
       })
       .catch(function () {});
   }
@@ -206,8 +279,10 @@
         }
         counters.forEach(function (c) {
           var current = parseInt(c.current, 10) || 0;
+          var correction = parseInt(c.correction, 10) || 0;
+          var corrected = current - correction;
           var upper = parseInt(c.upper_limit, 10) || 0;
-          var pct = upper > 0 ? Math.round((current / upper) * 100) : 0;
+          var pct = upper > 0 ? Math.round((corrected / upper) * 100) : 0;
           var locked = c.locked && c.locked !== "0";
 
           var card = el("div", "hsh-counter-card");
@@ -223,26 +298,43 @@
           card.appendChild(header);
 
           var stats = el("div", "hsh-counter-stats");
-          [["E", c.entries], ["S", c.exits], ["P", c.current]].forEach(function (pair) {
-            var sp = el("span");
-            sp.textContent = pair[0] + ": ";
-            var b = el("strong");
-            b.textContent = pair[1] || "--";
-            sp.appendChild(b);
+          if (correction) {
+            // Afficher la correction clairement : brut - correction = corrige
+            var sp = el("span", "hsh-counter-corrected");
+            sp.innerHTML = "P: <strong>" + corrected + "</strong> <span style=\"font-size:0.7rem;opacity:0.7;\">(" + current + " - " + correction + ")</span>";
             stats.appendChild(sp);
-          });
+            [["E", c.entries], ["S", c.exits]].forEach(function (pair) {
+              var s = el("span");
+              s.textContent = pair[0] + ": ";
+              var b = el("strong");
+              b.textContent = pair[1] || "--";
+              s.appendChild(b);
+              stats.appendChild(s);
+            });
+          } else {
+            [["E", c.entries], ["S", c.exits], ["P", c.current]].forEach(function (pair) {
+              var s = el("span");
+              s.textContent = pair[0] + ": ";
+              var b = el("strong");
+              b.textContent = pair[1] || "--";
+              s.appendChild(b);
+              stats.appendChild(s);
+            });
+          }
           card.appendChild(stats);
 
-          // Detail par categorie (personnes / vehicules / enfants)
+          // Detail par categorie (personnes / vehicules / enfants / accredites)
           var eVeh = c.entrees_veh || 0;
           var sVeh = c.sorties_veh || 0;
           var eEnf = c.entrees_enf || 0;
           var sEnf = c.sorties_enf || 0;
-          if (eVeh || sVeh || eEnf || sEnf) {
+          var eAcc = c.entrees_acc || 0;
+          var sAcc = c.sorties_acc || 0;
+          if (eVeh || sVeh || eEnf || sEnf || eAcc || sAcc) {
             var eTotal = parseInt(c.entries, 10) || 0;
             var sTotal = parseInt(c.exits, 10) || 0;
-            var ePers = eTotal - eVeh - eEnf;
-            var sPers = sTotal - sVeh - sEnf;
+            var ePers = eTotal - eVeh - eEnf - eAcc;
+            var sPers = sTotal - sVeh - sEnf - sAcc;
             var detail = el("div", "hsh-counter-detail");
             detail.style.fontSize = "0.75rem";
             detail.style.opacity = "0.8";
@@ -251,6 +343,7 @@
             lines.push("Pers: E " + ePers + " / S " + sPers + " / P " + (ePers - sPers));
             if (eVeh || sVeh) lines.push("Veh: E " + eVeh + " / S " + sVeh + " / P " + (eVeh - sVeh));
             if (eEnf || sEnf) lines.push("Enf: E " + eEnf + " / S " + sEnf + " / P " + (eEnf - sEnf));
+            if (eAcc || sAcc) lines.push("Accred: E " + eAcc + " / S " + sAcc + " / P " + (eAcc - sAcc));
             lines.forEach(function (line) {
               var lineEl = el("div");
               lineEl.textContent = line;
@@ -258,6 +351,33 @@
             });
             card.appendChild(detail);
           }
+
+          // Input correction
+          var corrRow = el("div", "hsh-correction-row");
+          var corrLabel = el("label");
+          corrLabel.textContent = "Correction : ";
+          corrLabel.style.fontSize = "0.72rem";
+          var corrInput = el("input", "hsh-correction-input");
+          corrInput.type = "number";
+          corrInput.value = correction || "";
+          corrInput.placeholder = "0";
+          corrInput.dataset.locationId = c.location_id;
+          corrInput.addEventListener("change", function () {
+            var val = parseInt(this.value, 10) || 0;
+            var corrs = config.corrections_compteurs || {};
+            if (val === 0) {
+              delete corrs[String(c.location_id)];
+            } else {
+              corrs[String(c.location_id)] = val;
+            }
+            saveConfig({ corrections_compteurs: corrs }).then(function () {
+              config.corrections_compteurs = corrs;
+              loadLiveCounters();
+            });
+          });
+          corrLabel.appendChild(corrInput);
+          corrRow.appendChild(corrLabel);
+          card.appendChild(corrRow);
 
           if (upper > 0) {
             var gauge = el("div", "hsh-gauge");
@@ -323,7 +443,7 @@
 
     // Remonter les compteurs du jour des checkpoints vers les parents
     function sumCounts(node) {
-      var c = node.counts_jour || {entrees: 0, sorties: 0, entrees_veh: 0, sorties_veh: 0, entrees_enf: 0, sorties_enf: 0};
+      var c = node.counts_jour || {entrees: 0, sorties: 0, entrees_veh: 0, sorties_veh: 0, entrees_enf: 0, sorties_enf: 0, entrees_acc: 0, sorties_acc: 0};
       var kids = node._children || [];
       kids.forEach(function (child) {
         var cc = sumCounts(child);
@@ -333,6 +453,8 @@
         c.sorties_veh = (c.sorties_veh || 0) + (cc.sorties_veh || 0);
         c.entrees_enf = (c.entrees_enf || 0) + (cc.entrees_enf || 0);
         c.sorties_enf = (c.sorties_enf || 0) + (cc.sorties_enf || 0);
+        c.entrees_acc = (c.entrees_acc || 0) + (cc.entrees_acc || 0);
+        c.sorties_acc = (c.sorties_acc || 0) + (cc.sorties_acc || 0);
       });
       node.counts_jour = c;
       return c;
@@ -445,11 +567,12 @@
       var cj = doc.counts_jour;
       if (cj && cj.entrees) {
         var ctr = el("span", "hsh-tree-counter");
-        var ePers = (cj.entrees || 0) - (cj.entrees_veh || 0) - (cj.entrees_enf || 0);
+        var ePers = (cj.entrees || 0) - (cj.entrees_veh || 0) - (cj.entrees_enf || 0) - (cj.entrees_acc || 0);
         var parts = [];
         if (ePers > 0) parts.push(ePers + " pers.");
         if (cj.entrees_veh > 0) parts.push(cj.entrees_veh + " veh.");
         if (cj.entrees_enf > 0) parts.push(cj.entrees_enf + " enf.");
+        if (cj.entrees_acc > 0) parts.push(cj.entrees_acc + " accred.");
         ctr.textContent = parts.length ? parts.join(" / ") : cj.entrees + " E";
         row.appendChild(ctr);
       }
@@ -845,6 +968,6 @@
 
   loadEvents();
   loadConfig();
-  setInterval(function () { loadStatus(); loadLiveCounters(); loadActiveCheckpoints(); }, 30000);
+  setInterval(function () { loadStatus(); loadLiveCounters(); loadActiveCheckpoints(); loadTitresLive(); loadDebitGates(); }, 30000);
 
 })();

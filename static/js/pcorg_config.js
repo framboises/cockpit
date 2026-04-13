@@ -14,7 +14,7 @@
     "PCO.Flux", "PCO.Fourriere", "PCO.Information", "PCO.MainCourante"
   ];
 
-  var data = { sous_classifications: {}, intervenants: [], services: [], fiche_simplifiee: {} };
+  var data = { sous_classifications: {}, intervenants: [], services: [], fiche_simplifiee: {}, urgence_categories: {} };
   var dirty = false;
 
   function load() {
@@ -75,14 +75,42 @@
       container.appendChild(section);
     });
 
-    // Section: Fiche simplifiee (clic droit rapide)
+    // Section: Niveaux d'urgence par categorie
+    var hUrg = el("div", "pcorg-cfg-title");
+    hUrg.textContent = "Niveaux d'urgence par categorie";
+    container.appendChild(hUrg);
+
+    var urgDesc = el("div", "");
+    urgDesc.style.cssText = "font-size:0.78rem; color:var(--muted); margin:-4px 0 4px;";
+    urgDesc.textContent = "Les categories cochees proposent les niveaux d'urgence au clic droit sur la carte et dans le formulaire de creation.";
+    container.appendChild(urgDesc);
+
+    var urgSection = el("div", "pcorg-cfg-fs-section");
+    CATEGORIES.forEach(function (cat) {
+      var enabled = (data.urgence_categories || {})[cat] || false;
+      var lbl = el("label", "pcorg-cfg-fs-label");
+      var cb = el("input", "");
+      cb.type = "checkbox";
+      cb.checked = enabled;
+      cb.addEventListener("change", function () {
+        if (!data.urgence_categories) data.urgence_categories = {};
+        data.urgence_categories[cat] = cb.checked;
+        markDirty();
+      });
+      lbl.appendChild(cb);
+      lbl.appendChild(document.createTextNode(" " + cat.replace("PCO.", "")));
+      urgSection.appendChild(lbl);
+    });
+    container.appendChild(urgSection);
+
+    // Section: Fiche simplifiee (quick create)
     var hFS = el("div", "pcorg-cfg-title");
     hFS.textContent = "Fiche simplifiee (creation rapide par clic droit)";
     container.appendChild(hFS);
 
     var fsDesc = el("div", "");
     fsDesc.style.cssText = "font-size:0.78rem; color:var(--muted); margin:-4px 0 4px;";
-    fsDesc.textContent = "Les categories cochees proposent un sous-menu avec les niveaux d'urgence au clic droit sur la carte.";
+    fsDesc.textContent = "Les categories cochees permettent la creation instantanee sans formulaire depuis le menu contextuel. L'utilisateur doit aussi appartenir a un groupe autorise.";
     container.appendChild(fsDesc);
 
     var fsSection = el("div", "pcorg-cfg-fs-section");

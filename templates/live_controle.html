@@ -166,6 +166,47 @@
           </div>
         </section>
 
+        <!-- Repartition par titre -->
+        <section class="widget-card">
+          <header class="widget-header">
+            <h3>Repartition vehicules</h3>
+          </header>
+          <div class="widget-body" style="padding:0; overflow-y:auto; max-height:280px;">
+            <table class="table table-striped table-hover" style="font-size:0.82rem; margin:0;">
+              <thead>
+                <tr>
+                  <th>Titre</th>
+                  <th style="text-align:right;">E</th>
+                  <th style="text-align:right;">S</th>
+                  <th style="text-align:right;">P</th>
+                </tr>
+              </thead>
+              <tbody id="hsh-titres-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Debit par porte -->
+        <section class="widget-card">
+          <header class="widget-header">
+            <h3>Debit par porte</h3>
+            <span style="font-size:0.72rem; color:var(--muted); margin-left:auto;">derniere heure</span>
+          </header>
+          <div class="widget-body" style="padding:0; overflow-y:auto; max-height:220px;">
+            <table class="table table-striped table-hover" style="font-size:0.82rem; margin:0;">
+              <thead>
+                <tr>
+                  <th>Porte</th>
+                  <th style="text-align:right;">E/h</th>
+                  <th style="text-align:right;">S/h</th>
+                  <th style="text-align:right;">Total/h</th>
+                </tr>
+              </thead>
+              <tbody id="hsh-debit-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+
         <!-- Erreurs recentes -->
         <section class="widget-card hsh-stretch-card">
           <header class="widget-header">

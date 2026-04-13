@@ -224,6 +224,7 @@ col_data_access = db["data_access"]
 col_structure = db["hsh_structure"]
 col_erreurs = db["hsh_erreurs"]
 col_tx_agg = db["hsh_transactions_agg"]
+col_agg_titres = db["hsh_agg_titres"]
 col_barcodes_utids = db["access_barcodes_utids"]
 
 GLOBAL_ID = "___GLOBAL___"
@@ -251,8 +252,10 @@ def charger_cache_titres():
     return cache
 
 
-def categoriser_scan(utid, cache_titres):
-    """Retourne 'enfant', 'vehicule' ou 'personne' selon le titre du billet."""
+def categoriser_scan(utid, cache_titres, upid=None):
+    """Retourne 'enfant', 'vehicule', 'accredite' ou 'personne'."""
+    if upid and upid.endswith("-ACCRED"):
+        return "accredite"
     if utid and utid in cache_titres:
         title = cache_titres[utid]
         if "Bracelet Enfant" in title:
@@ -289,6 +292,8 @@ def assurer_index():
     col_structure.create_index([("location_type", 1)])
     col_tx_agg.create_index([("evenement", 1), ("checkpoint_id", 1), ("tranche", -1)])
     col_tx_agg.create_index("tranche", expireAfterSeconds=30 * 24 * 3600)  # TTL 30 jours
+    col_agg_titres.create_index([("evenement", 1), ("titre", 1), ("tranche", -1)])
+    col_agg_titres.create_index("tranche", expireAfterSeconds=30 * 24 * 3600)
     col_structure.create_index([("evenement", 1)])
 
 
@@ -881,7 +886,7 @@ def stocker_erreurs(txs, evenement, evenement_clean, cache_titres=None):
         doc["status_label"] = _label_status(tx["status"])
         doc["coding_label"] = _label_coding(tx.get("coding"))
         doc["validated_label"] = _label_validated(tx.get("validated"))
-        doc["type_scan"] = categoriser_scan(tx.get("utid"), cache_titres)
+        doc["type_scan"] = categoriser_scan(tx.get("utid"), cache_titres, tx.get("upid"))
 
         ops.append(UpdateOne({"_id": doc_id}, {"$set": doc}, upsert=True))
 
@@ -931,6 +936,7 @@ def agreger_transactions(txs, evenement, cache_titres=None):
                 "ok": 0, "erreurs": 0, "entrees": 0, "sorties": 0,
                 "entrees_vehicules": 0, "sorties_vehicules": 0,
                 "entrees_enfants": 0, "sorties_enfants": 0,
+                "entrees_accredites": 0, "sorties_accredites": 0,
             }
 
         b = buckets[key]
@@ -945,7 +951,7 @@ def agreger_transactions(txs, evenement, cache_titres=None):
             b["sorties"] += 1
 
         # Compteurs par type de scan
-        cat = categoriser_scan(tx.get("utid"), cache_titres)
+        cat = categoriser_scan(tx.get("utid"), cache_titres, tx.get("upid"))
         if cat == "vehicule":
             if direction == "Entree":
                 b["entrees_vehicules"] += 1
@@ -956,6 +962,11 @@ def agreger_transactions(txs, evenement, cache_titres=None):
                 b["entrees_enfants"] += 1
             elif direction == "Sortie":
                 b["sorties_enfants"] += 1
+        elif cat == "accredite":
+            if direction == "Entree":
+                b["entrees_accredites"] += 1
+            elif direction == "Sortie":
+                b["sorties_accredites"] += 1
 
     if not buckets:
         return
@@ -975,6 +986,8 @@ def agreger_transactions(txs, evenement, cache_titres=None):
                     "sorties_vehicules": b["sorties_vehicules"],
                     "entrees_enfants": b["entrees_enfants"],
                     "sorties_enfants": b["sorties_enfants"],
+                    "entrees_accredites": b["entrees_accredites"],
+                    "sorties_accredites": b["sorties_accredites"],
                 },
                 "$set": {
                     "checkpoint_id": b["cp_id"],
@@ -989,6 +1002,66 @@ def agreger_transactions(txs, evenement, cache_titres=None):
     if ops:
         col_tx_agg.bulk_write(ops, ordered=False)
         print(f"  {len(ops)} tranches agregees dans hsh_transactions_agg.")
+
+
+def agreger_par_titre(txs, evenement, cache_titres=None):
+    """Agrege les transactions par titre de billet + tranche de 5 minutes."""
+    if cache_titres is None:
+        cache_titres = {}
+    buckets = {}
+    for tx in txs:
+        if tx.get("status") != "0":
+            continue
+        utid = tx.get("utid")
+        if not utid or utid not in cache_titres:
+            continue
+        titre = cache_titres[utid]
+        if not titre:
+            continue
+
+        date_str = tx.get("date_utc")
+        if not date_str:
+            continue
+        try:
+            dt = datetime.datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S").replace(
+                tzinfo=datetime.timezone.utc
+            )
+        except Exception:
+            continue
+        minute = (dt.minute // 5) * 5
+        tranche = dt.replace(minute=minute, second=0, microsecond=0)
+
+        key = (titre, tranche.isoformat())
+        if key not in buckets:
+            buckets[key] = {"titre": titre, "tranche": tranche, "entrees": 0, "sorties": 0}
+
+        direction = tx.get("direction", "")
+        if direction == "Entree":
+            buckets[key]["entrees"] += 1
+        elif direction == "Sortie":
+            buckets[key]["sorties"] += 1
+
+    if not buckets:
+        return
+
+    ops = []
+    for b in buckets.values():
+        doc_id = f"{evenement}_{b['titre']}_{b['tranche'].strftime('%Y%m%dT%H%M')}"
+        ops.append(UpdateOne(
+            {"_id": doc_id},
+            {
+                "$inc": {"entrees": b["entrees"], "sorties": b["sorties"]},
+                "$set": {
+                    "titre": b["titre"],
+                    "evenement": evenement,
+                    "tranche": b["tranche"],
+                },
+            },
+            upsert=True,
+        ))
+    if ops:
+        col_agg_titres.bulk_write(ops, ordered=False)
+        print(f"  {len(ops)} tranches agregees dans hsh_agg_titres.")
 
 
 def executer_transactions(sock, doc_global, cache_titres=None):
@@ -1071,6 +1144,7 @@ def executer_transactions(sock, doc_global, cache_titres=None):
             stocker_erreurs(txs, evenement, evenement_clean, cache_titres)
             mettre_a_jour_arbre(txs, evenement)
             agreger_transactions(txs, evenement, cache_titres)
+            agreger_par_titre(txs, evenement, cache_titres)
 
         print(f"  Page {page:03d}: {nb} transactions ({nb_erreurs} erreurs) | NotComplete={'1' if not_complete else '0'}")
 

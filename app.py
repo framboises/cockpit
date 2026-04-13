@@ -3420,6 +3420,7 @@ def pcorg_quick_create():
     lat = data.get("lat")
     lon = data.get("lon")
     carroye = (data.get("carroye") or "").strip()
+    area_desc = (data.get("area_desc") or "").strip()
     gps = None
     if lat is not None and lon is not None:
         try:
@@ -3483,7 +3484,7 @@ def pcorg_quick_create():
         "severity": 0,
         "niveau_urgence": niveau_urgence,
         "is_incident": False,
-        "area": None,
+        "area": {"id": None, "desc": area_desc} if area_desc else None,
         "gps": gps,
         "group": None,
         "content_category": content_category,
@@ -3907,7 +3908,7 @@ def get_pcorg_config():
 @role_required("admin")
 def update_pcorg_config():
     data = request.get_json(force=True)
-    allowed = {"sous_classifications", "intervenants", "services", "fiche_simplifiee"}
+    allowed = {"sous_classifications", "intervenants", "services", "fiche_simplifiee", "urgence_categories"}
     update = {k: v for k, v in data.items() if k in allowed}
     if not update:
         return jsonify({"error": "rien a mettre a jour"}), 400
@@ -3980,6 +3981,7 @@ def pcorg_force_sync():
 COL_HSH_STRUCTURE = db['hsh_structure']
 COL_HSH_ERREURS = db['hsh_erreurs']
 COL_HSH_TX_AGG = db['hsh_transactions_agg']
+COL_HSH_AGG_TITRES = db['hsh_agg_titres']
 HSH_GLOBAL_ID = "___GLOBAL___"
 
 
@@ -4033,7 +4035,7 @@ def hsh_update_config():
     data = request.get_json(force=True)
     allowed = {
         "live_controle_actif", "evenement", "evenement_clean",
-        "locations_selectionnees",
+        "locations_selectionnees", "corrections_compteurs",
     }
     update = {k: v for k, v in data.items() if k in allowed}
     if not update:
@@ -4105,6 +4107,15 @@ def hsh_archive_and_purge():
         dest.insert_many(docs)
         counts["transactions_agg"] = len(docs)
         src_col.delete_many({"evenement": evenement})
+
+    # 1b. Archiver hsh_agg_titres
+    src_titres = db["hsh_agg_titres"]
+    docs = list(src_titres.find({"evenement": evenement}))
+    if docs:
+        dest = db[f"hsh_archive_titres_{archive_tag}"]
+        dest.insert_many(docs)
+        counts["titres_agg"] = len(docs)
+        src_titres.delete_many({"evenement": evenement})
 
     # 2. Archiver hsh_erreurs
     docs = list(COL_HSH_ERREURS.find({"evenement": evenement}))
@@ -4471,6 +4482,7 @@ def hsh_get_counters_context():
 def hsh_get_counters():
     doc = _hsh_read_global()
     locations = doc.get("locations_selectionnees", [])
+    corrections = doc.get("corrections_compteurs", {})
 
     # Agreger vehicules/enfants du jour depuis hsh_transactions_agg
     # Les compteurs live sont par location (Area, Venue...), les transactions sont par checkpoint.
@@ -4484,13 +4496,15 @@ def hsh_get_counters():
             "sorties_veh": {"$sum": {"$ifNull": ["$sorties_vehicules", 0]}},
             "entrees_enf": {"$sum": {"$ifNull": ["$entrees_enfants", 0]}},
             "sorties_enf": {"$sum": {"$ifNull": ["$sorties_enfants", 0]}},
+            "entrees_acc": {"$sum": {"$ifNull": ["$entrees_accredites", 0]}},
+            "sorties_acc": {"$sum": {"$ifNull": ["$sorties_accredites", 0]}},
         }},
     ]
     veh_enf_by_cp = {}
     for agg in COL_HSH_TX_AGG.aggregate(pipeline):
         veh_enf_by_cp[agg["_id"]] = agg
 
-    # Construire le mapping location_id -> totaux vehicules/enfants en remontant la hierarchie
+    # Construire le mapping location_id -> totaux vehicules/enfants/accredites en remontant la hierarchie
     # Un checkpoint appartient a une area (parent_area.id) et une venue (parent_venue.id)
     veh_enf_by_loc = {}
     for cp_doc in COL_HSH_STRUCTURE.find({"location_type": "Checkpoint"}):
@@ -4504,11 +4518,13 @@ def hsh_get_counters():
             pid = parent.get("id") if parent else None
             if pid:
                 if pid not in veh_enf_by_loc:
-                    veh_enf_by_loc[pid] = {"entrees_veh": 0, "sorties_veh": 0, "entrees_enf": 0, "sorties_enf": 0}
+                    veh_enf_by_loc[pid] = {"entrees_veh": 0, "sorties_veh": 0, "entrees_enf": 0, "sorties_enf": 0, "entrees_acc": 0, "sorties_acc": 0}
                 veh_enf_by_loc[pid]["entrees_veh"] += cp_counts.get("entrees_veh", 0)
                 veh_enf_by_loc[pid]["sorties_veh"] += cp_counts.get("sorties_veh", 0)
                 veh_enf_by_loc[pid]["entrees_enf"] += cp_counts.get("entrees_enf", 0)
                 veh_enf_by_loc[pid]["sorties_enf"] += cp_counts.get("sorties_enf", 0)
+                veh_enf_by_loc[pid]["entrees_acc"] += cp_counts.get("entrees_acc", 0)
+                veh_enf_by_loc[pid]["sorties_acc"] += cp_counts.get("sorties_acc", 0)
 
     result = []
     for loc in locations:
@@ -4541,7 +4557,65 @@ def hsh_get_counters():
                 "sorties_veh": ve.get("sorties_veh", 0),
                 "entrees_enf": ve.get("entrees_enf", 0),
                 "sorties_enf": ve.get("sorties_enf", 0),
+                "entrees_acc": ve.get("entrees_acc", 0),
+                "sorties_acc": ve.get("sorties_acc", 0),
+                "correction": corrections.get(str(loc_id), 0),
             })
+    return jsonify(result)
+
+
+@app.route('/api/live-controle/titres-live', methods=['GET'])
+@role_required("admin")
+def hsh_get_titres_live():
+    """Repartition des entrees/sorties/presents par titre de billet (jour en cours)."""
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    pipeline = [
+        {"$match": {"tranche": {"$gte": today_start}}},
+        {"$group": {
+            "_id": "$titre",
+            "entrees": {"$sum": "$entrees"},
+            "sorties": {"$sum": "$sorties"},
+        }},
+        {"$sort": {"entrees": -1}},
+    ]
+    result = []
+    for agg in COL_HSH_AGG_TITRES.aggregate(pipeline):
+        e = agg.get("entrees", 0)
+        s = agg.get("sorties", 0)
+        result.append({
+            "titre": agg["_id"],
+            "entrees": e,
+            "sorties": s,
+            "presents": e - s,
+        })
+    return jsonify(result)
+
+
+@app.route('/api/live-controle/debit-gates', methods=['GET'])
+@role_required("admin")
+def hsh_get_debit_gates():
+    """Debit par gate sur la derniere heure glissante."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    pipeline = [
+        {"$match": {"tranche": {"$gte": cutoff}}},
+        {"$group": {
+            "_id": "$gate_name",
+            "entrees": {"$sum": "$entrees"},
+            "sorties": {"$sum": "$sorties"},
+        }},
+        {"$sort": {"entrees": -1}},
+    ]
+    result = []
+    for agg in COL_HSH_TX_AGG.aggregate(pipeline):
+        gate = agg["_id"] or "Inconnu"
+        e = agg.get("entrees", 0)
+        s = agg.get("sorties", 0)
+        result.append({
+            "gate": gate,
+            "entrees_h": e,
+            "sorties_h": s,
+            "total_h": e + s,
+        })
     return jsonify(result)
 
 
@@ -4570,6 +4644,8 @@ def hsh_get_active_checkpoints():
                 "sorties_vehicules": {"$sum": {"$ifNull": ["$sorties_vehicules", 0]}},
                 "entrees_enfants": {"$sum": {"$ifNull": ["$entrees_enfants", 0]}},
                 "sorties_enfants": {"$sum": {"$ifNull": ["$sorties_enfants", 0]}},
+                "entrees_accredites": {"$sum": {"$ifNull": ["$entrees_accredites", 0]}},
+                "sorties_accredites": {"$sum": {"$ifNull": ["$sorties_accredites", 0]}},
             }},
         ]
         for agg in COL_HSH_TX_AGG.aggregate(pipeline):
@@ -4583,7 +4659,8 @@ def hsh_get_active_checkpoints():
         entrees = c.get("entrees", 0)
         entrees_veh = c.get("entrees_vehicules", 0)
         entrees_enf = c.get("entrees_enfants", 0)
-        entrees_pers = entrees - entrees_veh - entrees_enf
+        entrees_acc = c.get("entrees_accredites", 0)
+        entrees_pers = entrees - entrees_veh - entrees_enf - entrees_acc
         result.append({
             "location_id": loc_id,
             "location_name": d.get("location_name", ""),
@@ -4593,6 +4670,7 @@ def hsh_get_active_checkpoints():
             "entrees_pers": entrees_pers,
             "entrees_veh": entrees_veh,
             "entrees_enf": entrees_enf,
+            "entrees_acc": entrees_acc,
         })
     result.sort(key=lambda x: x.get("derniere_transaction", ""), reverse=True)
     return jsonify(result)

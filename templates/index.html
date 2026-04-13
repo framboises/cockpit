@@ -441,6 +441,7 @@
                             <div>
                                 <div class="hsh-summary-value" id="hsh-total-current">&mdash;</div>
                                 <div class="hsh-summary-label">Presents actuellement</div>
+                                <div class="hsh-summary-sub" id="hsh-dont-enfants" style="display:none;"></div>
                             </div>
                             <div>
                                 <div class="hsh-summary-value" id="hsh-total-capacity">&mdash;</div>
@@ -789,37 +790,36 @@
                             <span class="pcorg-fiche-label">Carroyage</span>
                             <span class="pcorg-fiche-value" id="pcorg-create-carroye-display">--</span>
                         </div>
+                        <div class="pcorg-create-pos-item" id="pcorg-create-zone-item" style="display:none">
+                            <span class="pcorg-fiche-label">Zone</span>
+                            <span class="pcorg-fiche-value" id="pcorg-create-zone-display">--</span>
+                        </div>
                     </div>
                 </div>
                 <!-- Etape 2 : categorie + infos de base -->
                 <div class="pcorg-create-step" data-step="2">
-                    <div class="pcorg-fiche-section">Categorie</div>
+                    <div class="pcorg-fiche-section">Categorie <span style="color:var(--danger,#ef4444)">*</span></div>
                     <div class="pcorg-create-cats" id="pcorg-create-cats"></div>
                     <div class="pcorg-fiche-section">Informations</div>
                     <div class="form-group">
-                        <label for="pcorg-c-text">Description</label>
+                        <label for="pcorg-c-text">Description <span style="color:var(--danger,#ef4444)">*</span></label>
                         <textarea id="pcorg-c-text" class="form-input" rows="2" required placeholder="Description de l'intervention..."></textarea>
                     </div>
-                    <div class="form-group">
-                        <label for="pcorg-c-appelant">Appelant</label>
+                    <div class="form-group" id="pcorg-c-appelant-group">
+                        <label for="pcorg-c-appelant">Appelant <span class="pcorg-required-star" style="color:var(--danger,#ef4444)">*</span></label>
                         <input type="text" id="pcorg-c-appelant" class="form-input" placeholder="Nom de l'appelant" />
                     </div>
                     <div class="form-group" id="pcorg-c-contact-group">
-                        <label>Contact via</label>
+                        <label>Contact via <span class="pcorg-required-star" style="color:var(--danger,#ef4444)">*</span></label>
                         <div style="display:flex;gap:8px;">
-                            <label style="font-size:0.78rem;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pcorg-c-tel"> Telephone</label>
-                            <label style="font-size:0.78rem;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pcorg-c-radio"> Radio</label>
+                            <label style="font-size:0.78rem;display:flex;align-items:center;gap:4px"><input type="radio" name="pcorg-c-contact" id="pcorg-c-tel" value="telephone"> Telephone</label>
+                            <label style="font-size:0.78rem;display:flex;align-items:center;gap:4px"><input type="radio" name="pcorg-c-contact" id="pcorg-c-radio" value="radio"> Radio</label>
                             <input type="text" id="pcorg-c-radio-canal" class="form-input" placeholder="Canal..." style="flex:1;display:none" />
                         </div>
                     </div>
                 </div>
-                <!-- Etape 3 : action prise + champs specifiques -->
+                <!-- Etape 3 : champs specifiques + action prise (ordre dynamique) -->
                 <div class="pcorg-create-step" data-step="3">
-                    <div class="pcorg-fiche-section">Action prise</div>
-                    <div class="form-group">
-                        <label for="pcorg-c-comment">Consignez l'action ou l'observation</label>
-                        <textarea id="pcorg-c-comment" class="form-input" rows="3" required placeholder="Action realisee, observation, consigne..."></textarea>
-                    </div>
                     <div id="pcorg-create-specific"></div>
                 </div>
                 <!-- Navigation -->

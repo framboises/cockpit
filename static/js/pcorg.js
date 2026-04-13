@@ -399,16 +399,29 @@
     ctxLat = e.latlng.lat;
     ctxLon = e.latlng.lng;
 
+    // Resolve zone from POI polygons
+    var ctxZone = "";
+    if (window.CockpitMapView && window.CockpitMapView.findZoneAtPoint) {
+      ctxZone = window.CockpitMapView.findZoneAtPoint(ctxLat, ctxLon) || "";
+    }
+
     // Update coordinates display
     var coordsEl = document.getElementById("pcorg-ctx-coords");
     if (coordsEl) {
-      coordsEl.textContent = ctxLat.toFixed(5) + ", " + ctxLon.toFixed(5);
+      coordsEl.textContent = (ctxZone ? ctxZone + " - " : "") + ctxLat.toFixed(5) + ", " + ctxLon.toFixed(5);
     }
 
-    // Sub-menus always visible on all categories
+    // Show urgency sub-menus only for categories enabled in config
+    var urgCats = (pcorgConfig && pcorgConfig.urgence_categories) || {};
     ctxMenu.querySelectorAll(".pcorg-ctx-submenu").forEach(function (sub) {
-      sub.style.display = "";
-      sub.parentElement.classList.add("has-submenu");
+      var cat = sub.getAttribute("data-cat-sub");
+      if (urgCats[cat]) {
+        sub.style.display = "";
+        sub.parentElement.classList.add("has-submenu");
+      } else {
+        sub.style.display = "none";
+        sub.parentElement.classList.remove("has-submenu");
+      }
     });
 
     // Populate vehicle sub-sub-menus
@@ -668,12 +681,18 @@
     if (window.CockpitMapView && window.CockpitMapView.getCellLabel) {
       carroye = window.CockpitMapView.getCellLabel(lat, lon) || "";
     }
+    // Resolve zone from POI polygons
+    var areaDesc = "";
+    if (window.CockpitMapView && window.CockpitMapView.findZoneAtPoint) {
+      areaDesc = window.CockpitMapView.findZoneAtPoint(lat, lon) || "";
+    }
     quickCreatePending = true;
     var payload = {
       event: ev, year: yr,
       category: cat, niveau_urgence: level,
       lat: lat, lon: lon,
-      carroye: carroye
+      carroye: carroye,
+      area_desc: areaDesc
     };
     if (patrouille) payload.patrouille = patrouille;
     apiPost("/api/pcorg/quick-create", payload).then(function (r) {
@@ -1318,50 +1337,14 @@
         hdr.querySelector(".pcorg-fiche-icon").textContent = ns.icon;
         hdr.querySelector(".pcorg-fiche-cat").textContent = cat;
         // Rebuild specific fields
-        buildEditSpecificFields(editSpecContainer, cat, cc);
+        buildEditSpecificFields(editSpecContainer, cat, cc, editUrgency);
       });
       catContainer.appendChild(btn);
     });
     body.appendChild(catContainer);
 
-    // Niveau d'urgence
-    var urgSec = mkEl("div", "pcorg-fiche-section"); urgSec.textContent = "Niveau d'urgence"; body.appendChild(urgSec);
-    var urgContainer = mkEl("div", "pcorg-create-cats");
-    urgContainer.id = "pcorg-edit-urgency-container";
-    var editUrgency = d.niveau_urgence || "";
-    function renderUrgencyBtns(cat) {
-      urgContainer.textContent = "";
-      var uType = urgencyType(cat);
-      var noneBtnU = mkEl("button", "pcorg-create-cat-btn" + (!editUrgency ? " selected" : ""));
-      noneBtnU.type = "button";
-      noneBtnU.style.cssText = !editUrgency ? "border-color:var(--muted);background:var(--muted);font-size:0.75rem" : "font-size:0.75rem";
-      noneBtnU.textContent = "Aucun";
-      noneBtnU.addEventListener("click", function () {
-        editUrgency = "";
-        renderUrgencyBtns(editCat);
-      });
-      urgContainer.appendChild(noneBtnU);
-      URGENCY_LEVELS.forEach(function (lvl) {
-        var c = URGENCY_COLORS[lvl];
-        var btnU = mkEl("button", "pcorg-create-cat-btn" + (editUrgency === lvl ? " selected" : ""));
-        btnU.type = "button";
-        if (editUrgency === lvl) { btnU.style.borderColor = c; btnU.style.background = c; }
-        var dotU = mkEl("span", ""); dotU.style.cssText = "width:8px;height:8px;border-radius:50%;background:" + c;
-        btnU.appendChild(dotU);
-        var lblU = mkEl("span", ""); lblU.style.fontSize = "0.72rem";
-        lblU.textContent = URGENCY_LABELS[uType][lvl];
-        btnU.appendChild(lblU);
-        btnU.addEventListener("click", function () {
-          editUrgency = lvl;
-          renderUrgencyBtns(editCat);
-        });
-        urgContainer.appendChild(btnU);
-      });
-    }
-    renderUrgencyBtns(editCat);
-    body.appendChild(urgContainer);
-
     // Appelant + contact
+    var editUrgency = d.niveau_urgence || "";
     var infoSec = mkEl("div", "pcorg-fiche-section"); infoSec.textContent = "Informations"; body.appendChild(infoSec);
     var grpApp = mkEl("div", "form-group");
     var lblApp = mkEl("label", ""); lblApp.textContent = "Appelant"; lblApp.setAttribute("for", "pcorg-edit-appelant");
@@ -1375,39 +1358,28 @@
     var lblCo = mkEl("label", ""); lblCo.textContent = "Contact via"; grpContact.appendChild(lblCo);
     var coRow = mkEl("div", ""); coRow.style.cssText = "display:flex;gap:8px;";
     var lblTel = mkEl("label", ""); lblTel.style.cssText = "font-size:0.78rem;display:flex;align-items:center;gap:4px";
-    var chkTel = mkEl("input", ""); chkTel.type = "checkbox"; chkTel.id = "pcorg-edit-tel";
-    chkTel.checked = !!cc.telephone;
-    lblTel.appendChild(chkTel); lblTel.appendChild(document.createTextNode("Telephone"));
+    var rdTel = mkEl("input", ""); rdTel.type = "radio"; rdTel.name = "pcorg-edit-contact"; rdTel.id = "pcorg-edit-tel"; rdTel.value = "telephone";
+    rdTel.checked = !!cc.telephone;
+    lblTel.appendChild(rdTel); lblTel.appendChild(document.createTextNode("Telephone"));
     coRow.appendChild(lblTel);
     var lblRad = mkEl("label", ""); lblRad.style.cssText = "font-size:0.78rem;display:flex;align-items:center;gap:4px";
-    var chkRad = mkEl("input", ""); chkRad.type = "checkbox"; chkRad.id = "pcorg-edit-radio";
-    chkRad.checked = !!cc.radio;
-    lblRad.appendChild(chkRad); lblRad.appendChild(document.createTextNode("Radio"));
+    var rdRad = mkEl("input", ""); rdRad.type = "radio"; rdRad.name = "pcorg-edit-contact"; rdRad.id = "pcorg-edit-radio"; rdRad.value = "radio";
+    rdRad.checked = !!cc.radio;
+    lblRad.appendChild(rdRad); lblRad.appendChild(document.createTextNode("Radio"));
     coRow.appendChild(lblRad);
     var inpCanal = mkEl("input", "form-input"); inpCanal.type = "text"; inpCanal.id = "pcorg-edit-radio-canal";
     inpCanal.placeholder = "Canal..."; inpCanal.style.cssText = "flex:1;display:" + (cc.radio ? "" : "none");
     inpCanal.value = (typeof cc.radio === "string") ? cc.radio : "";
-    chkRad.addEventListener("change", function () { inpCanal.style.display = chkRad.checked ? "" : "none"; });
+    rdRad.addEventListener("change", function () { inpCanal.style.display = rdRad.checked ? "" : "none"; });
+    rdTel.addEventListener("change", function () { if (rdTel.checked) inpCanal.style.display = "none"; });
     coRow.appendChild(inpCanal);
     grpContact.appendChild(coRow);
     body.appendChild(grpContact);
 
-    // Action prise (comment obligatoire)
-    var actionSec = mkEl("div", "pcorg-fiche-section"); actionSec.textContent = "Action prise"; body.appendChild(actionSec);
-    var grpAction = mkEl("div", "form-group");
-    var lblAction = mkEl("label", ""); lblAction.textContent = "Consignez l'action ou la modification"; lblAction.setAttribute("for", "pcorg-edit-comment");
-    grpAction.appendChild(lblAction);
-    var inpAction = mkEl("textarea", "form-input");
-    inpAction.id = "pcorg-edit-comment"; inpAction.rows = 2;
-    inpAction.placeholder = "Action realisee, modification apportee...";
-    grpAction.appendChild(inpAction);
-    body.appendChild(grpAction);
-
-    // Category-specific fields
-    var specSec = mkEl("div", "pcorg-fiche-section"); specSec.textContent = "Details specifiques"; body.appendChild(specSec);
+    // Category-specific fields (includes urgency, action, vehicle in correct order)
     var editSpecContainer = mkEl("div", "");
     body.appendChild(editSpecContainer);
-    buildEditSpecificFields(editSpecContainer, editCat, cc);
+    buildEditSpecificFields(editSpecContainer, editCat, cc, editUrgency);
 
     // Save / Cancel
     var editActions = mkEl("div", "pcorg-fiche-actions");
@@ -1428,16 +1400,82 @@
     body.appendChild(editActions);
   }
 
-  function buildEditSpecificFields(container, cat, cc) {
+  function buildEditSpecificFields(container, cat, cc, editUrgency) {
     container.textContent = "";
+    var urgCats = (pcorgConfig && pcorgConfig.urgence_categories) || {};
     var subs = extractLabels((pcorgConfig.sous_classifications || {})[cat]);
-    if (subs.length > 0) {
-      addEditSelect(container, "pcorg-edit-sous", "Sous-classification", subs, cc.sous_classification || "");
-    }
     var intervList = extractLabels(pcorgConfig.intervenants);
     var serviceList = extractLabels(pcorgConfig.services);
+    var vehicles = vehiclesByCategory[cat];
+
+    function appendEditUrgency() {
+      if (!urgCats[cat]) return;
+      var urgSec = mkEl("div", "pcorg-fiche-section"); urgSec.textContent = "Niveau d'urgence";
+      container.appendChild(urgSec);
+      var urgContainer = mkEl("div", "pcorg-create-cats");
+      urgContainer.id = "pcorg-edit-urgency-container";
+      function renderBtns() {
+        urgContainer.textContent = "";
+        var uType = urgencyType(cat);
+        var noneBtnU = mkEl("button", "pcorg-create-cat-btn" + (!editUrgency ? " selected" : ""));
+        noneBtnU.type = "button";
+        noneBtnU.style.cssText = !editUrgency ? "border-color:var(--muted);background:var(--muted);font-size:0.75rem" : "font-size:0.75rem";
+        noneBtnU.textContent = "Aucun";
+        noneBtnU.addEventListener("click", function () { editUrgency = ""; renderBtns(); });
+        urgContainer.appendChild(noneBtnU);
+        URGENCY_LEVELS.forEach(function (lvl) {
+          var c = URGENCY_COLORS[lvl];
+          var btnU = mkEl("button", "pcorg-create-cat-btn" + (editUrgency === lvl ? " selected" : ""));
+          btnU.type = "button";
+          if (editUrgency === lvl) { btnU.style.borderColor = c; btnU.style.background = c; }
+          var dotU = mkEl("span", ""); dotU.style.cssText = "width:8px;height:8px;border-radius:50%;background:" + c;
+          btnU.appendChild(dotU);
+          var lblU = mkEl("span", ""); lblU.style.fontSize = "0.72rem";
+          lblU.textContent = URGENCY_LABELS[uType][lvl];
+          btnU.appendChild(lblU);
+          btnU.addEventListener("click", function () { editUrgency = lvl; renderBtns(); });
+          urgContainer.appendChild(btnU);
+        });
+      }
+      renderBtns();
+      container.appendChild(urgContainer);
+    }
+
+    function appendEditComment() {
+      var actionSec = mkEl("div", "pcorg-fiche-section"); actionSec.textContent = "Action prise";
+      container.appendChild(actionSec);
+      var grpAction = mkEl("div", "form-group");
+      var lblAction = mkEl("label", "");
+      lblAction.textContent = "Consignez l'action ou la modification ";
+      var star = mkEl("span", ""); star.style.color = "var(--danger,#ef4444)"; star.textContent = "*";
+      lblAction.appendChild(star);
+      lblAction.setAttribute("for", "pcorg-edit-comment");
+      grpAction.appendChild(lblAction);
+      var inpAction = mkEl("textarea", "form-input");
+      inpAction.id = "pcorg-edit-comment"; inpAction.rows = 2;
+      inpAction.placeholder = "Action realisee, modification apportee...";
+      grpAction.appendChild(inpAction);
+      container.appendChild(grpAction);
+    }
+
+    function appendEditSousClassification() {
+      if (subs.length > 0) {
+        addEditSelect(container, "pcorg-edit-sous", "Sous-classification", subs, cc.sous_classification || "");
+      }
+    }
+
+    function appendEditVehicle() {
+      if (vehicles && vehicles.length > 0) {
+        var vehNames = vehicles.map(function (v) { return v.label; });
+        addEditSelect(container, "pcorg-edit-patrouille", "Vehicule engage", vehNames, cc.patrouille || "");
+      }
+    }
 
     if (cat === "PCO.Secours" || cat === "PCO.Securite" || cat === "PCO.Technique") {
+      appendEditSousClassification();
+      appendEditUrgency();
+      appendEditComment();
+      appendEditVehicle();
       if (intervList.length) {
         addEditSelect(container, "pcorg-edit-interv1", "Intervenant 1", intervList, cc.intervenant1 || "");
         addEditSelect(container, "pcorg-edit-interv2", "Intervenant 2", intervList, cc.intervenant2 || "");
@@ -1450,29 +1488,11 @@
       } else {
         addEditField(container, "pcorg-edit-service", "Service contacte", cc.service_contacte || "");
       }
-      addEditField(container, "pcorg-edit-carroye", "Carroye", cc.carroye || "");
-    } else if (cat === "PCO.Information" || cat === "PCO.MainCourante") {
-      addEditField(container, "pcorg-edit-texte", "Texte complementaire", cc.texte || "");
-      if (cat === "PCO.MainCourante") {
-        var grpAlerte = mkEl("div", "form-group");
-        var lblAl = mkEl("label", ""); lblAl.style.cssText = "font-size:0.78rem;display:flex;align-items:center;gap:4px";
-        var chkAl = mkEl("input", ""); chkAl.type = "checkbox"; chkAl.id = "pcorg-edit-alerte";
-        chkAl.checked = !!cc.alerte;
-        lblAl.appendChild(chkAl); lblAl.appendChild(document.createTextNode("Alerte"));
-        grpAlerte.appendChild(lblAl);
-        container.appendChild(grpAlerte);
-      }
-    } else if (cat === "PCO.Fourriere") {
-      addEditField(container, "pcorg-edit-lieu", "Lieu", cc.lieu || "");
-      addEditField(container, "pcorg-edit-detailsvl", "Vehicule", cc.detailsvl || "");
-      addEditField(container, "pcorg-edit-immat", "Immatriculation", cc.immat || "");
-      addEditSelect(container, "pcorg-edit-typedemande", "Type de demande",
-        ["Parking sauvage", "Pas de titre", "Mauvais titre (sticker ou badge)", "Stationnement genant", "Autre"],
-        cc.typedemande || "");
-      addEditSelect(container, "pcorg-edit-decision", "Decision",
-        ["Remorquage demande", "Sabot pose", "Avertissement", "Annule"],
-        cc.decision || "");
     } else if (cat === "PCO.Flux") {
+      appendEditSousClassification();
+      appendEditUrgency();
+      appendEditComment();
+      appendEditVehicle();
       if (intervList.length) {
         addEditSelect(container, "pcorg-edit-moyens1", "Moyens Niv.1", intervList, cc.moyens_engages_niveau_1 || "");
         addEditSelect(container, "pcorg-edit-moyens2", "Moyens Niv.2", intervList, cc.moyens_engages_niveau_2 || "");
@@ -1480,13 +1500,24 @@
         addEditField(container, "pcorg-edit-moyens1", "Moyens Niv.1", cc.moyens_engages_niveau_1 || "");
         addEditField(container, "pcorg-edit-moyens2", "Moyens Niv.2", cc.moyens_engages_niveau_2 || "");
       }
-    }
-
-    // Patrouille
-    var vehicles = vehiclesByCategory[cat];
-    if (vehicles && vehicles.length > 0) {
-      var vehNames = vehicles.map(function (v) { return v.label; });
-      addEditSelect(container, "pcorg-edit-patrouille", "V\u00e9hicule engag\u00e9", vehNames, cc.patrouille || "");
+    } else if (cat === "PCO.Fourriere") {
+      addEditSelect(container, "pcorg-edit-typedemande", "Type de demande",
+        ["Parking sauvage", "Pas de titre", "Mauvais titre (sticker ou badge)", "Stationnement genant", "Autre"],
+        cc.typedemande || "");
+      addEditField(container, "pcorg-edit-lieu", "Lieu", cc.lieu || "");
+      addEditField(container, "pcorg-edit-detailsvl", "Vehicule", cc.detailsvl || "");
+      addEditField(container, "pcorg-edit-immat", "Immatriculation", cc.immat || "");
+      addEditSelect(container, "pcorg-edit-decision", "Decision",
+        ["Remorquage demande", "Sabot pose", "Avertissement", "Annule"],
+        cc.decision || "");
+      appendEditComment();
+      appendEditVehicle();
+    } else {
+      // Information, MainCourante, autres
+      appendEditSousClassification();
+      appendEditUrgency();
+      appendEditComment();
+      appendEditVehicle();
     }
   }
 
@@ -1531,10 +1562,11 @@
     var ccUpdate = {};
     var appelant = (document.getElementById("pcorg-edit-appelant").value || "").trim();
     ccUpdate.appelant = appelant;
-    var telChecked = document.getElementById("pcorg-edit-tel").checked;
-    ccUpdate.telephone = telChecked || false;
-    var radChecked = document.getElementById("pcorg-edit-radio").checked;
-    ccUpdate.radio = radChecked ? ((document.getElementById("pcorg-edit-radio-canal").value || "").trim() || true) : false;
+    var contactSel = document.querySelector('input[name="pcorg-edit-contact"]:checked');
+    ccUpdate.telephone = (contactSel && contactSel.value === "telephone") || false;
+    ccUpdate.radio = (contactSel && contactSel.value === "radio")
+      ? ((document.getElementById("pcorg-edit-radio-canal").value || "").trim() || true)
+      : false;
 
     var sousEl = document.getElementById("pcorg-edit-sous");
     if (sousEl) ccUpdate.sous_classification = sousEl.value;
@@ -2147,12 +2179,13 @@
   var createGrid25Layer = null;
   var createGridData = null;
   var createGridMeta = null;
+  var createAreaDesc = "";
   var createGrid100On = false;
   var createGrid25On = false;
   var createCarroye = "";
 
   // Listes de reference chargees depuis la config
-  var pcorgConfig = { sous_classifications: {}, intervenants: [], services: [], fiche_simplifiee: {} };
+  var pcorgConfig = { sous_classifications: {}, intervenants: [], services: [], fiche_simplifiee: {}, urgence_categories: {} };
   var vehiclesByCategory = {};
   var createPendingPatrouille = "";
 
@@ -2211,6 +2244,7 @@
     var prevBtn = document.getElementById("pcorgCreatePrev");
     var form = document.getElementById("pcorgCreateForm");
     var radioCheck = document.getElementById("pcorg-c-radio");
+    var telCheck = document.getElementById("pcorg-c-tel");
     var radioCanal = document.getElementById("pcorg-c-radio-canal");
 
     if (!createModal || !btn) return;
@@ -2221,6 +2255,9 @@
 
     radioCheck.addEventListener("change", function () {
       radioCanal.style.display = radioCheck.checked ? "" : "none";
+    });
+    telCheck.addEventListener("change", function () {
+      if (telCheck.checked) radioCanal.style.display = "none";
     });
 
     // Click "+" -> ouvrir la modale directement a l'etape 1
@@ -2249,16 +2286,19 @@
           showToast("warning", "La description est obligatoire");
           return;
         }
-        var appelant = document.getElementById("pcorg-c-appelant").value.trim();
-        if (!appelant) {
-          showToast("warning", "L'appelant est obligatoire");
-          return;
-        }
-        var telOk = document.getElementById("pcorg-c-tel").checked;
-        var radioOk = document.getElementById("pcorg-c-radio").checked;
-        if (!telOk && !radioOk) {
-          showToast("warning", "Selectionnez un mode de contact (telephone ou radio)");
-          return;
+        var isInfoOrMC = createSelectedCat === "PCO.Information" || createSelectedCat === "PCO.MainCourante";
+        if (!isInfoOrMC) {
+          var appelant = document.getElementById("pcorg-c-appelant").value.trim();
+          if (!appelant) {
+            showToast("warning", "L'appelant est obligatoire");
+            return;
+          }
+          var telOk = document.getElementById("pcorg-c-tel").checked;
+          var radioOk = document.getElementById("pcorg-c-radio").checked;
+          if (!telOk && !radioOk) {
+            showToast("warning", "Selectionnez un mode de contact (telephone ou radio)");
+            return;
+          }
         }
         goToStep(3);
       }
@@ -2309,6 +2349,7 @@
     createSelectedUrgency = "";
     createPendingPatrouille = "";
     createCarroye = "";
+    createAreaDesc = "";
     createGrid100On = false;
     createGrid25On = false;
     createStep = 1;
@@ -2324,6 +2365,9 @@
       b.classList.remove("selected"); b.style.borderColor = ""; b.style.background = "";
     });
     document.getElementById("pcorg-create-specific").textContent = "";
+    document.getElementById("pcorg-c-radio-canal").style.display = "none";
+    // Reset required stars to visible
+    document.querySelectorAll(".pcorg-required-star").forEach(function (s) { s.style.display = ""; });
     document.getElementById("pcorg-create-pos-row").style.display = "none";
     document.getElementById("pcorg-create-map-info").style.display = "";
     document.getElementById("pcorg-create-grid25").style.display = "none";
@@ -2489,9 +2533,29 @@
       carrEl.textContent = "--";
     }
 
+    // Resolve zone from POI polygons
+    createAreaDesc = "";
+    var zoneItem = document.getElementById("pcorg-create-zone-item");
+    var zoneDisp = document.getElementById("pcorg-create-zone-display");
+    if (window.CockpitMapView && window.CockpitMapView.findZoneAtPoint) {
+      var zoneName = window.CockpitMapView.findZoneAtPoint(lat, lon);
+      if (zoneName) createAreaDesc = zoneName;
+    }
+    if (zoneItem && zoneDisp) {
+      if (createAreaDesc) {
+        zoneDisp.textContent = createAreaDesc;
+        zoneItem.style.display = "";
+      } else {
+        zoneItem.style.display = "none";
+      }
+    }
+
     // Update header
-    document.getElementById("pcorg-create-pos-label").textContent =
-      (createCarroye ? createCarroye + " - " : "") + lat.toFixed(5) + ", " + lon.toFixed(5);
+    var posParts = [];
+    if (createAreaDesc) posParts.push(createAreaDesc);
+    if (createCarroye) posParts.push(createCarroye);
+    posParts.push(lat.toFixed(5) + ", " + lon.toFixed(5));
+    document.getElementById("pcorg-create-pos-label").textContent = posParts.join(" - ");
   }
 
   function resolveCreateGridCell(lat, lon) {
@@ -2637,6 +2701,18 @@
       b.style.borderColor = isSel ? st.color : "";
       b.style.background = isSel ? st.color : "";
     });
+    // Show/hide appelant & contact required stars for Information / MainCourante
+    var isInfoOrMC = cat === "PCO.Information" || cat === "PCO.MainCourante";
+    var appelantGroup = document.getElementById("pcorg-c-appelant-group");
+    var contactGroup = document.getElementById("pcorg-c-contact-group");
+    if (appelantGroup) {
+      var star = appelantGroup.querySelector(".pcorg-required-star");
+      if (star) star.style.display = isInfoOrMC ? "none" : "";
+    }
+    if (contactGroup) {
+      var star2 = contactGroup.querySelector(".pcorg-required-star");
+      if (star2) star2.style.display = isInfoOrMC ? "none" : "";
+    }
     // Update header color
     var header = document.getElementById("pcorg-create-header");
     header.style.background = st.color;
@@ -2660,83 +2736,107 @@
     var container = document.getElementById("pcorg-create-specific");
     container.textContent = "";
 
-    // Niveau d'urgence (preserve pre-selected value from context menu)
-    var presetUrgency = createSelectedUrgency || "";
-    var urgGrp = mkEl("div", "form-group");
-    var urgLbl = mkEl("label", ""); urgLbl.textContent = "Niveau d'urgence";
-    urgGrp.appendChild(urgLbl);
-    var urgRow = mkEl("div", "pcorg-create-cats");
-    urgRow.id = "pcorg-create-urgency-btns";
-    var uType = urgencyType(cat);
-    var noneBtnC = mkEl("button", "pcorg-create-cat-btn" + (!presetUrgency ? " selected" : ""));
-    noneBtnC.type = "button";
-    noneBtnC.style.cssText = !presetUrgency ? "border-color:var(--muted);background:var(--muted);font-size:0.75rem" : "font-size:0.75rem";
-    noneBtnC.setAttribute("data-urgency", "");
-    noneBtnC.textContent = "Aucun";
-    noneBtnC.addEventListener("click", function () {
-      createSelectedUrgency = "";
-      updateUrgencyCreateBtns();
-    });
-    urgRow.appendChild(noneBtnC);
-    URGENCY_LEVELS.forEach(function (lvl) {
-      var c = URGENCY_COLORS[lvl];
-      var isSel = presetUrgency === lvl;
-      var btnU = mkEl("button", "pcorg-create-cat-btn" + (isSel ? " selected" : ""));
-      btnU.type = "button";
-      btnU.setAttribute("data-urgency", lvl);
-      if (isSel) { btnU.style.borderColor = c; btnU.style.background = c; }
-      var dotU = mkEl("span", ""); dotU.style.cssText = "width:8px;height:8px;border-radius:50%;background:" + c;
-      btnU.appendChild(dotU);
-      var lblU = mkEl("span", ""); lblU.style.fontSize = "0.72rem";
-      lblU.textContent = URGENCY_LABELS[uType][lvl];
-      btnU.appendChild(lblU);
-      btnU.addEventListener("click", function () {
-        createSelectedUrgency = lvl;
-        updateUrgencyCreateBtns();
-      });
-      urgRow.appendChild(btnU);
-    });
-    urgGrp.appendChild(urgRow);
-    container.appendChild(urgGrp);
-
-    function updateUrgencyCreateBtns() {
-      urgRow.querySelectorAll(".pcorg-create-cat-btn").forEach(function (b) {
-        var val = b.getAttribute("data-urgency");
-        var sel = val === createSelectedUrgency;
-        b.classList.toggle("selected", sel);
-        if (val) {
-          b.style.borderColor = sel ? URGENCY_COLORS[val] : "";
-          b.style.background = sel ? URGENCY_COLORS[val] : "";
-        } else {
-          b.style.borderColor = sel ? "var(--muted)" : "";
-          b.style.background = sel ? "var(--muted)" : "";
-        }
-      });
-    }
-
-    // V\u00e9hicule engag\u00e9 (from linked beacon groups) — placed first for dispatch flow
+    var urgCats = (pcorgConfig && pcorgConfig.urgence_categories) || {};
+    var subs = extractLabels((pcorgConfig.sous_classifications || {})[cat]);
+    var intervList = extractLabels(pcorgConfig.intervenants);
+    var serviceList = extractLabels(pcorgConfig.services);
     var vehicles = vehiclesByCategory[cat];
-    if (vehicles && vehicles.length > 0) {
-      var vehNames = vehicles.map(function (v) { return v.label; });
-      addCreateSelect(container, "pcorg-c-patrouille", "V\u00e9hicule engag\u00e9", vehNames);
-      if (createPendingPatrouille) {
-        var selEl = document.getElementById("pcorg-c-patrouille");
-        if (selEl) selEl.value = createPendingPatrouille;
-        createPendingPatrouille = "";
+    var urgRow; // shared by appendUrgency / updateUrgencyCreateBtns
+
+    function appendUrgency() {
+      if (!urgCats[cat]) { createSelectedUrgency = ""; return; }
+      var presetUrgency = createSelectedUrgency || "";
+      var urgGrp = mkEl("div", "form-group");
+      var urgLbl = mkEl("label", ""); urgLbl.textContent = "Niveau d'urgence";
+      urgGrp.appendChild(urgLbl);
+      urgRow = mkEl("div", "pcorg-create-cats");
+      urgRow.id = "pcorg-create-urgency-btns";
+      var uType = urgencyType(cat);
+      var noneBtnC = mkEl("button", "pcorg-create-cat-btn" + (!presetUrgency ? " selected" : ""));
+      noneBtnC.type = "button";
+      noneBtnC.style.cssText = !presetUrgency ? "border-color:var(--muted);background:var(--muted);font-size:0.75rem" : "font-size:0.75rem";
+      noneBtnC.setAttribute("data-urgency", "");
+      noneBtnC.textContent = "Aucun";
+      noneBtnC.addEventListener("click", function () {
+        createSelectedUrgency = "";
+        updateUrgBtns();
+      });
+      urgRow.appendChild(noneBtnC);
+      URGENCY_LEVELS.forEach(function (lvl) {
+        var c = URGENCY_COLORS[lvl];
+        var isSel = presetUrgency === lvl;
+        var btnU = mkEl("button", "pcorg-create-cat-btn" + (isSel ? " selected" : ""));
+        btnU.type = "button";
+        btnU.setAttribute("data-urgency", lvl);
+        if (isSel) { btnU.style.borderColor = c; btnU.style.background = c; }
+        var dotU = mkEl("span", ""); dotU.style.cssText = "width:8px;height:8px;border-radius:50%;background:" + c;
+        btnU.appendChild(dotU);
+        var lblU = mkEl("span", ""); lblU.style.fontSize = "0.72rem";
+        lblU.textContent = URGENCY_LABELS[uType][lvl];
+        btnU.appendChild(lblU);
+        btnU.addEventListener("click", function () {
+          createSelectedUrgency = lvl;
+          updateUrgBtns();
+        });
+        urgRow.appendChild(btnU);
+      });
+      urgGrp.appendChild(urgRow);
+      container.appendChild(urgGrp);
+      function updateUrgBtns() {
+        urgRow.querySelectorAll(".pcorg-create-cat-btn").forEach(function (b) {
+          var val = b.getAttribute("data-urgency");
+          var sel = val === createSelectedUrgency;
+          b.classList.toggle("selected", sel);
+          if (val) {
+            b.style.borderColor = sel ? URGENCY_COLORS[val] : "";
+            b.style.background = sel ? URGENCY_COLORS[val] : "";
+          } else {
+            b.style.borderColor = sel ? "var(--muted)" : "";
+            b.style.background = sel ? "var(--muted)" : "";
+          }
+        });
       }
     }
 
-    // Sous-classification from config
-    var subs = extractLabels((pcorgConfig.sous_classifications || {})[cat]);
-    if (subs.length > 0) {
-      addCreateSelect(container, "pcorg-c-sous", "Sous-classification", subs);
+    function appendComment() {
+      var sec = mkEl("div", "pcorg-fiche-section"); sec.textContent = "Action prise";
+      container.appendChild(sec);
+      var grp = mkEl("div", "form-group");
+      var lbl = mkEl("label", ""); lbl.setAttribute("for", "pcorg-c-comment");
+      lbl.textContent = "Consignez l'action ou l'observation ";
+      var star = mkEl("span", ""); star.style.color = "var(--danger,#ef4444)"; star.textContent = "*";
+      lbl.appendChild(star);
+      grp.appendChild(lbl);
+      var ta = mkEl("textarea", "form-input"); ta.id = "pcorg-c-comment"; ta.rows = 3;
+      ta.required = true; ta.placeholder = "Action realisee, observation, consigne...";
+      grp.appendChild(ta);
+      container.appendChild(grp);
     }
 
-    var intervList = extractLabels(pcorgConfig.intervenants);
-    var serviceList = extractLabels(pcorgConfig.services);
+    function appendSousClassification() {
+      if (subs.length > 0) {
+        addCreateSelect(container, "pcorg-c-sous", "Sous-classification", subs);
+      }
+    }
 
-    // Category-specific fields
+    function appendVehicle() {
+      if (vehicles && vehicles.length > 0) {
+        var vehNames = vehicles.map(function (v) { return v.label; });
+        addCreateSelect(container, "pcorg-c-patrouille", "Vehicule engage", vehNames);
+        if (createPendingPatrouille) {
+          var selEl = document.getElementById("pcorg-c-patrouille");
+          if (selEl) selEl.value = createPendingPatrouille;
+          createPendingPatrouille = "";
+        }
+      }
+    }
+
+    // === Build fields in category-specific order ===
     if (cat === "PCO.Secours" || cat === "PCO.Securite" || cat === "PCO.Technique") {
+      appendSousClassification();
+      appendUrgency();
+      appendComment();
+      appendVehicle();
       if (intervList.length) {
         addCreateSelect(container, "pcorg-c-interv1", "Intervenant 1", intervList);
         addCreateSelect(container, "pcorg-c-interv2", "Intervenant 2", intervList);
@@ -2749,15 +2849,11 @@
       } else {
         addCreateField(container, "pcorg-c-service", "Service contacte");
       }
-    } else if (cat === "PCO.Fourriere") {
-      addCreateField(container, "pcorg-c-lieu", "Lieu");
-      addCreateField(container, "pcorg-c-detailsvl", "Vehicule (marque, couleur, modele)");
-      addCreateField(container, "pcorg-c-immat", "Immatriculation");
-      addCreateSelect(container, "pcorg-c-typedemande", "Type de demande",
-        ["Parking sauvage", "Pas de titre", "Mauvais titre (sticker ou badge)", "Stationnement genant", "Autre"]);
-      addCreateSelect(container, "pcorg-c-decision", "Decision",
-        ["Remorquage demande", "Sabot pose", "Avertissement", "Annule"]);
     } else if (cat === "PCO.Flux") {
+      appendSousClassification();
+      appendUrgency();
+      appendComment();
+      appendVehicle();
       if (intervList.length) {
         addCreateSelect(container, "pcorg-c-moyens1", "Moyens engages Niv.1", intervList);
         addCreateSelect(container, "pcorg-c-moyens2", "Moyens engages Niv.2", intervList);
@@ -2765,6 +2861,21 @@
         addCreateField(container, "pcorg-c-moyens1", "Moyens engages Niv.1");
         addCreateField(container, "pcorg-c-moyens2", "Moyens engages Niv.2");
       }
+    } else if (cat === "PCO.Fourriere") {
+      addCreateSelect(container, "pcorg-c-typedemande", "Type de demande",
+        ["Parking sauvage", "Pas de titre", "Mauvais titre (sticker ou badge)", "Stationnement genant", "Autre"]);
+      addCreateField(container, "pcorg-c-lieu", "Lieu");
+      addCreateField(container, "pcorg-c-detailsvl", "Vehicule (marque, couleur, modele)");
+      addCreateField(container, "pcorg-c-immat", "Immatriculation");
+      addCreateSelect(container, "pcorg-c-decision", "Decision",
+        ["Remorquage demande", "Sabot pose", "Avertissement", "Annule"]);
+      appendComment();
+      appendVehicle();
+    } else {
+      appendSousClassification();
+      appendUrgency();
+      appendComment();
+      appendVehicle();
     }
   }
 
@@ -2812,11 +2923,11 @@
     var cc = {};
     var appelant = document.getElementById("pcorg-c-appelant").value.trim();
     if (appelant) cc.appelant = appelant;
-    var telCheck = document.getElementById("pcorg-c-tel");
-    if (telCheck && telCheck.checked) cc.telephone = true;
-    var radioCheck = document.getElementById("pcorg-c-radio");
-    var radioCanal = document.getElementById("pcorg-c-radio-canal");
-    if (radioCheck && radioCheck.checked) {
+    var contactSel = document.querySelector('input[name="pcorg-c-contact"]:checked');
+    if (contactSel && contactSel.value === "telephone") {
+      cc.telephone = true;
+    } else if (contactSel && contactSel.value === "radio") {
+      var radioCanal = document.getElementById("pcorg-c-radio-canal");
       cc.radio = radioCanal.value.trim() || true;
     }
 
@@ -2853,7 +2964,7 @@
       year: ey.year,
       category: cat,
       text: text,
-      area_desc: "",
+      area_desc: createAreaDesc,
       content_category: cc,
       comment: getVal("pcorg-c-comment"),
       niveau_urgence: createSelectedUrgency || null,

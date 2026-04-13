@@ -3939,7 +3939,35 @@
       if (!colLbl || !rowLbl) return null;
       return colLbl + rowLbl;
     },
-    colLabel: colLabel
+    colLabel: colLabel,
+    findZoneAtPoint: function (lat, lng) {
+      var pt = turf.point([lng, lat]);
+      var catIds = Object.keys(categoryLayers);
+      for (var ci = 0; ci < catIds.length; ci++) {
+        var group = categoryLayers[catIds[ci]].group;
+        var found = null;
+        group.eachLayer(function (layer) {
+          if (found) return;
+          if (!(layer instanceof L.Polygon)) return;
+          if (!layer._cockpitData) return;
+          var latlngs = layer.getLatLngs();
+          var ring = latlngs[0] || latlngs;
+          if (!ring || !ring.length) return;
+          var coords = ring.map(function (ll) { return [ll.lng, ll.lat]; });
+          // Close ring if needed
+          var first = coords[0], last = coords[coords.length - 1];
+          if (first[0] !== last[0] || first[1] !== last[1]) coords.push(first);
+          try {
+            var poly = turf.polygon([coords]);
+            if (turf.booleanPointInPolygon(pt, poly)) {
+              found = layer._cockpitData.name;
+            }
+          } catch (e) {}
+        });
+        if (found) return found;
+      }
+      return null;
+    }
   };
 
   // ==========================================================================

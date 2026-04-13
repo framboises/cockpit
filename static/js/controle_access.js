@@ -57,14 +57,25 @@
     }
 
     var totalCurrent = 0;
+    var totalVehPresents = 0;
+    var totalEnfPresents = 0;
+    var totalAccPresents = 0;
 
     counters.forEach(function (c) {
       var current = parseInt(c.current, 10) || 0;
+      var correction = parseInt(c.correction, 10) || 0;
+      current -= correction;
       var entries = parseInt(c.entries, 10) || 0;
       var exits = parseInt(c.exits, 10) || 0;
       var locked = c.locked && c.locked !== "0";
 
+      var vehPresents = (c.entrees_veh || 0) - (c.sorties_veh || 0);
+      var enfPresents = (c.entrees_enf || 0) - (c.sorties_enf || 0);
+      var accPresents = (c.entrees_acc || 0) - (c.sorties_acc || 0);
       totalCurrent += current;
+      totalVehPresents += Math.max(vehPresents, 0);
+      totalEnfPresents += Math.max(enfPresents, 0);
+      totalAccPresents += Math.max(accPresents, 0);
 
       var card = el("div", "hsh-counter-card");
 
@@ -97,8 +108,24 @@
       countersBody.appendChild(card);
     });
 
-    totalCurrentEl.textContent = formatNum(totalCurrent);
-    latestTotalCurrent = totalCurrent;
+    // Presents = total Skidata - vehicules presents
+    var presentPersonnes = totalCurrent - totalVehPresents;
+    totalCurrentEl.textContent = formatNum(presentPersonnes);
+    latestTotalCurrent = presentPersonnes;
+
+    // "dont X enfants" / "dont X accredites"
+    var enfLabel = document.getElementById("hsh-dont-enfants");
+    if (enfLabel) {
+      var parts = [];
+      if (totalAccPresents > 0) parts.push(formatNum(totalAccPresents) + " accredites");
+      if (totalEnfPresents > 0) parts.push(formatNum(totalEnfPresents) + " enfants");
+      if (parts.length) {
+        enfLabel.textContent = "dont " + parts.join(", ");
+        enfLabel.style.display = "";
+      } else {
+        enfLabel.style.display = "none";
+      }
+    }
   }
 
   function loadCounters() {
