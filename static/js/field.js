@@ -2019,18 +2019,6 @@
         });
         var marker = L.marker([f.lat, f.lng], { icon: icon });
         marker.on("click", function () { showFicheModal(f); });
-        // Tooltip vehicule engage
-        if (fcc.patrouille) {
-          var fStMeta = STATUS_META[state.patrolStatus] || STATUS_META.patrouille;
-          var fTipHtml = "<span class='veh-tip-name'>" + fcc.patrouille + "</span>"
-            + "<span class='veh-tip-status' style='color:" + fStMeta.color + "'><span class='veh-tip-dot' style='background:" + fStMeta.color + "'></span>" + fStMeta.label + "</span>";
-          marker.bindTooltip(fTipHtml, {
-            permanent: true,
-            direction: "right",
-            offset: [8, -18],
-            className: "field-vehicle-tooltip",
-          });
-        }
         marker.addTo(state.fichesLayer);
         state.fichesMarkers[f.id] = marker;
       }
@@ -2127,40 +2115,6 @@
       desc.style.borderLeftColor = st.color;
       desc.textContent = descText;
       body.appendChild(desc);
-    }
-
-    // Vehicule engage (banner prominent with status)
-    var cc = d.content_category || {};
-    if (cc.patrouille) {
-      var vehStatusMeta = STATUS_META[state.patrolStatus] || STATUS_META.patrouille;
-      var vehBanner = document.createElement("div");
-      vehBanner.className = "fd-vehicle-banner";
-      var vehIco = document.createElement("span");
-      vehIco.className = "material-symbols-outlined fd-vehicle-icon";
-      vehIco.textContent = "directions_car";
-      vehBanner.appendChild(vehIco);
-      var vehInfo = document.createElement("div");
-      vehInfo.className = "fd-vehicle-info";
-      var vehLbl = document.createElement("span");
-      vehLbl.className = "fd-vehicle-lbl";
-      vehLbl.textContent = "Element engage";
-      vehInfo.appendChild(vehLbl);
-      var vehName = document.createElement("strong");
-      vehName.className = "fd-vehicle-name";
-      vehName.textContent = cc.patrouille;
-      vehInfo.appendChild(vehName);
-      vehBanner.appendChild(vehInfo);
-      // Status badge
-      var vehStBadge = document.createElement("span");
-      vehStBadge.className = "fd-vehicle-status";
-      var vehStDot = document.createElement("span");
-      vehStDot.className = "fd-vehicle-dot";
-      vehStDot.style.background = vehStatusMeta.color;
-      vehStBadge.appendChild(vehStDot);
-      vehStBadge.appendChild(document.createTextNode(vehStatusMeta.label));
-      vehStBadge.style.color = vehStatusMeta.color;
-      vehBanner.appendChild(vehStBadge);
-      body.appendChild(vehBanner);
     }
 
     // Info fields
