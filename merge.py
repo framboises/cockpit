@@ -633,7 +633,7 @@ def _process_dynamic_schedule(items, config, id_prefix, db=None):
                     continue
                 if _is_24h(date_entry, at):
                     continue
-                if "open" in sub and "close" in sub:
+                if "open" in sub and "close" in sub and sub["open"] and sub["close"]:
                     access_hours[at] = (sub["open"], sub["close"])
 
             if not access_hours:
