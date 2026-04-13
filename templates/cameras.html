@@ -197,81 +197,6 @@
     }
     .cam-detail-section h3 .material-symbols-outlined { font-size: 16px; }
 
-    /* PTZ controls */
-    .ptz-wrapper { display: flex; align-items: center; gap: 24px; justify-content: center; }
-    .ptz-grid {
-      display: grid; grid-template-columns: repeat(3, 48px);
-      gap: 4px;
-    }
-    .ptz-btn {
-      width: 48px; height: 48px; border-radius: 50%;
-      border: 1px solid var(--line); background: var(--bg);
-      cursor: pointer; display: flex; align-items: center; justify-content: center;
-      transition: all .15s; color: var(--text);
-    }
-    .ptz-btn:hover { background: var(--brand-light); border-color: var(--brand); color: var(--brand); }
-    .ptz-btn:active { background: var(--brand); color: #fff; }
-    .ptz-btn .material-symbols-outlined { font-size: 22px; pointer-events: none; }
-    .ptz-btn.ptz-center {
-      background: var(--brand-light); border-color: var(--brand);
-    }
-    .ptz-placeholder { width: 48px; height: 48px; }
-
-    /* Zoom control */
-    .zoom-control {
-      display: flex; flex-direction: column; align-items: center; gap: 6px;
-      height: 150px;
-    }
-    .zoom-control .material-symbols-outlined { font-size: 18px; color: var(--muted); }
-    .zoom-slider {
-      writing-mode: vertical-lr;
-      direction: rtl;
-      width: 28px; flex: 1;
-      accent-color: var(--brand);
-    }
-
-    /* Presets */
-    .preset-list {
-      display: flex; flex-wrap: wrap; gap: 6px;
-    }
-    .preset-chip {
-      padding: 6px 12px; border-radius: 8px;
-      border: 1px solid var(--line); background: var(--bg);
-      cursor: pointer; font-size: .8rem; font-weight: 500;
-      transition: all .15s; display: flex; align-items: center; gap: 4px;
-    }
-    .preset-chip:hover { background: var(--brand-light); border-color: var(--brand); color: var(--brand); }
-    .preset-chip:active { background: var(--brand); color: #fff; }
-    .preset-chip .material-symbols-outlined { font-size: 14px; }
-
-    /* Day/night buttons */
-    .daynight-btns { display: flex; gap: 6px; }
-    .daynight-btn {
-      flex: 1; padding: 8px; border-radius: 8px;
-      border: 1px solid var(--line); background: var(--bg);
-      cursor: pointer; text-align: center; font-size: .8rem; font-weight: 600;
-      transition: all .15s; display: flex; align-items: center; justify-content: center; gap: 4px;
-    }
-    .daynight-btn:hover { border-color: var(--brand); color: var(--brand); }
-    .daynight-btn.active { background: var(--brand); color: #fff; border-color: var(--brand); }
-    .daynight-btn .material-symbols-outlined { font-size: 16px; }
-
-    /* Actions grid */
-    .actions-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-      gap: 6px;
-    }
-    .action-btn {
-      padding: 10px 8px; border-radius: 8px;
-      border: 1px solid var(--line); background: var(--bg);
-      cursor: pointer; text-align: center; font-size: .76rem; font-weight: 600;
-      transition: all .15s; display: flex; flex-direction: column;
-      align-items: center; gap: 4px; color: var(--text);
-    }
-    .action-btn:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-light); }
-    .action-btn .material-symbols-outlined { font-size: 20px; }
-    .action-btn.danger:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-light); }
-
     /* Device info */
     .device-info-grid {
       display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
@@ -659,101 +584,11 @@
       <span class="material-symbols-outlined cam-snap-placeholder" id="detail-snap-ph">videocam</span>
       <img id="detail-snap-img" style="display:none;" alt="Snapshot" />
       <div class="cam-snapshot-actions">
-        <button id="detail-capture-btn">
-          <span class="material-symbols-outlined">photo_camera</span> Capturer
-        </button>
-      </div>
-    </div>
-
-    <!-- PTZ Controls -->
-    <div class="cam-detail-section" id="section-ptz">
-      <h3><span class="material-symbols-outlined">open_with</span> Controle PTZ</h3>
-      <div class="ptz-wrapper">
-        <div class="ptz-grid">
-          <div class="ptz-placeholder"></div>
-          <button class="ptz-btn" data-pan="0" data-tilt="50" data-zoom="0" title="Haut">
-            <span class="material-symbols-outlined">arrow_upward</span>
-          </button>
-          <div class="ptz-placeholder"></div>
-
-          <button class="ptz-btn" data-pan="-50" data-tilt="0" data-zoom="0" title="Gauche">
-            <span class="material-symbols-outlined">arrow_back</span>
-          </button>
-          <button class="ptz-btn ptz-center" id="ptz-stop" title="Stop">
-            <span class="material-symbols-outlined">stop_circle</span>
-          </button>
-          <button class="ptz-btn" data-pan="50" data-tilt="0" data-zoom="0" title="Droite">
-            <span class="material-symbols-outlined">arrow_forward</span>
-          </button>
-
-          <div class="ptz-placeholder"></div>
-          <button class="ptz-btn" data-pan="0" data-tilt="-50" data-zoom="0" title="Bas">
-            <span class="material-symbols-outlined">arrow_downward</span>
-          </button>
-          <div class="ptz-placeholder"></div>
-        </div>
-
-        <div class="zoom-control">
-          <span class="material-symbols-outlined">zoom_in</span>
-          <input type="range" class="zoom-slider" id="ptz-zoom" min="-80" max="80" value="0" orient="vertical" />
-          <span class="material-symbols-outlined">zoom_out</span>
-        </div>
-      </div>
-
-      <!-- PTZ Position -->
-      <div style="text-align:center;margin-top:12px;font-size:.76rem;color:var(--muted);" id="ptz-position">
-        Pan: -- | Tilt: -- | Zoom: --
-      </div>
-    </div>
-
-    <!-- Presets -->
-    <div class="cam-detail-section" id="section-presets">
-      <h3><span class="material-symbols-outlined">bookmark</span> Presets</h3>
-      <div class="preset-list" id="detail-presets">
-        <span style="font-size:.82rem;color:var(--muted);">Chargement...</span>
-      </div>
-    </div>
-
-    <!-- Day/Night -->
-    <div class="cam-detail-section" id="section-daynight">
-      <h3><span class="material-symbols-outlined">dark_mode</span> Mode Jour / Nuit</h3>
-      <div class="daynight-btns">
-        <button class="daynight-btn" data-mode="day">
-          <span class="material-symbols-outlined">light_mode</span> Jour
-        </button>
-        <button class="daynight-btn" data-mode="auto">
-          <span class="material-symbols-outlined">brightness_auto</span> Auto
-        </button>
-        <button class="daynight-btn" data-mode="night">
-          <span class="material-symbols-outlined">dark_mode</span> Nuit
-        </button>
-      </div>
-    </div>
-
-    <!-- Actions -->
-    <div class="cam-detail-section" id="section-actions">
-      <h3><span class="material-symbols-outlined">build</span> Actions</h3>
-      <div class="actions-grid">
-        <button class="action-btn" data-action="wiper">
+        <button id="detail-wiper-btn" title="Activer l'essuie-glace">
           <span class="material-symbols-outlined">water_drop</span> Wiper
         </button>
-        <button class="action-btn" data-action="light_on">
-          <span class="material-symbols-outlined">flashlight_on</span> Lumiere ON
-        </button>
-        <button class="action-btn" data-action="light_off">
-          <span class="material-symbols-outlined">flashlight_off</span> Lumiere OFF
-        </button>
-        <button class="action-btn" data-action="autofocus">
-          <span class="material-symbols-outlined">center_focus_strong</span> Autofocus
-        </button>
-        <button class="action-btn" data-action="goto_home">
-          <span class="material-symbols-outlined">home</span> Home
-        </button>
-        <button class="action-btn" data-action="set_home">
-          <span class="material-symbols-outlined">add_home</span> Set Home
-        </button>
-        <button class="action-btn danger" data-action="reboot">
-          <span class="material-symbols-outlined">restart_alt</span> Reboot
+        <button id="detail-capture-btn">
+          <span class="material-symbols-outlined">photo_camera</span> Capturer
         </button>
       </div>
     </div>

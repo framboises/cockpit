@@ -39,9 +39,6 @@
     remove:     function(id){ return fetch("/api/cameras/"+id, {method:"DELETE", headers:jsonHeaders()}).then(function(r){ return r.json(); }); },
     status:     function(id){ return fetch("/api/cameras/"+id+"/status").then(function(r){ return r.json(); }); },
     capture:    function(id){ return fetch("/api/cameras/"+id+"/capture", {method:"POST", headers:{"X-CSRFToken": CSRF}}); },
-    presets:    function(id){ return fetch("/api/cameras/"+id+"/presets").then(function(r){ return r.json(); }); },
-    ptz:        function(id,d){ return fetch("/api/cameras/"+id+"/ptz", {method:"POST", headers:jsonHeaders(), body:JSON.stringify(d)}).then(function(r){ return r.json(); }); },
-    gotoPreset: function(id,d){ return fetch("/api/cameras/"+id+"/preset", {method:"POST", headers:jsonHeaders(), body:JSON.stringify(d)}).then(function(r){ return r.json(); }); },
     action:     function(id,d){ return fetch("/api/cameras/"+id+"/action", {method:"POST", headers:jsonHeaders(), body:JSON.stringify(d)}).then(function(r){ return r.json(); }); },
     testConn:   function(id){ return fetch("/api/cameras/"+id+"/test", {method:"POST", headers:{"X-CSRFToken": CSRF}}).then(function(r){ return r.json(); }); },
     testNew:    function(d){ return fetch("/api/cameras/test-connection", {method:"POST", headers:jsonHeaders(), body:JSON.stringify(d)}).then(function(r){ return r.json(); }); }
@@ -96,8 +93,7 @@
         + '</div>'
         + '<div class="cam-card-actions">'
         +   '<button class="btn-icon" data-quick="capture" title="Capturer"><span class="material-symbols-outlined">photo_camera</span></button>'
-        +   '<button class="btn-icon" data-quick="goto_home" title="Position Home"><span class="material-symbols-outlined">home</span></button>'
-        +   '<button class="btn-icon" data-quick="wiper" title="Wiper"><span class="material-symbols-outlined">water_drop</span></button>'
+        +   '<button class="btn-icon" data-quick="wiper" title="Essuie-glace"><span class="material-symbols-outlined">water_drop</span></button>'
         +   '<div style="flex:1;"></div>'
         +   '<button class="btn-icon" data-quick="edit" title="Modifier"><span class="material-symbols-outlined">edit</span></button>'
         +   '<button class="btn-icon" data-quick="delete" title="Supprimer" style="color:var(--danger);"><span class="material-symbols-outlined">delete</span></button>'
@@ -128,18 +124,19 @@
               if(r.ok) return r.blob();
               throw new Error("Capture failed");
             }).then(function(blob){
-              // Open snapshot in new tab
               var url = URL.createObjectURL(blob);
               window.open(url, "_blank");
               toast("Capture reussie", "success");
             }).catch(function(){ toast("Echec de la capture", "error"); });
             return;
           }
-          // Generic quick action
-          API.action(id, {action: action}).then(function(res){
-            if(res.error) toast(res.error, "error");
-            else toast(action + " OK", "success");
-          }).catch(function(){ toast("Erreur", "error"); });
+          if(action === "wiper"){
+            API.action(id, {action: "wiper"}).then(function(res){
+              if(res.error) toast(res.error, "error");
+              else toast("Essuie-glace active", "success");
+            }).catch(function(){ toast("Erreur", "error"); });
+            return;
+          }
         });
       });
     });
@@ -280,8 +277,7 @@
 
     var overlay = $("#cam-detail-overlay");
     overlay.style.display = "block";
-    // Force reflow for animation
-    overlay.offsetHeight;
+    overlay.offsetHeight; // force reflow for animation
     overlay.classList.add("show");
 
     // Header
@@ -292,32 +288,17 @@
     $("#detail-snap-img").style.display = "none";
     $("#detail-snap-ph").style.display = "";
 
-    // Load status
+    // Load status + device info
     API.status(id).then(function(res){
       _statusCache[id] = res;
       var dot = $("#detail-status");
       dot.className = "cam-status " + (res.online ? "online" : "offline");
       updateStatusDots(id, res.online);
-
-      // PTZ position
-      if(res.ptz){
-        $("#ptz-position").textContent = "Pan: "+res.ptz.azimuth.toFixed(1)
-          +" | Tilt: "+res.ptz.elevation.toFixed(1)
-          +" | Zoom: "+res.ptz.zoom.toFixed(1)+"x";
-      }
-
-      // Device info
       renderDeviceInfo(res.device_info || {});
     }).catch(function(){
       $("#detail-status").className = "cam-status offline";
       renderDeviceInfo({});
     });
-
-    // Load presets
-    renderPresets([]);
-    API.presets(id).then(function(presets){
-      renderPresets(presets || []);
-    }).catch(function(){});
 
     // Try initial capture
     captureForDetail(id);
@@ -344,42 +325,13 @@
     });
   }
 
-  function renderPresets(presets){
-    var container = $("#detail-presets");
-    if(!presets.length){
-      container.innerHTML = '<span style="font-size:.82rem;color:var(--muted);">Aucun preset configure</span>';
-      return;
-    }
-    container.innerHTML = presets.map(function(p){
-      return '<button class="preset-chip" data-preset="'+p.id+'">'
-        + '<span class="material-symbols-outlined">bookmark</span> '
-        + escHtml(p.name || ("Preset "+p.id))
-        + '</button>';
-    }).join("");
-
-    $$(".preset-chip", container).forEach(function(chip){
-      chip.addEventListener("click", function(){
-        if(!_currentDetail) return;
-        var pid = parseInt(chip.dataset.preset);
-        API.gotoPreset(_currentDetail, {preset_id: pid}).then(function(res){
-          if(res.error) toast(res.error, "error");
-          else toast("Preset "+pid+" OK", "success");
-          // Refresh snapshot after 2s (time for camera to move)
-          setTimeout(function(){ captureForDetail(_currentDetail); }, 2000);
-        });
-      });
-    });
-  }
-
   function renderDeviceInfo(info){
     var container = $("#detail-device-info");
-    // Filter out internal keys
     var keys = Object.keys(info).filter(function(k){ return k[0] !== "_"; });
     if(!keys.length){
       container.innerHTML = '<span style="font-size:.82rem;color:var(--muted);">Informations indisponibles</span>';
       return;
     }
-    // Show the most relevant keys
     var priority = ["deviceName","model","Model","serialNumber","SerialNumber","firmwareVersion","FirmwareVersion","macAddress","deviceType","Manufacturer"];
     var sorted = priority.filter(function(k){ return info[k]; })
       .concat(keys.filter(function(k){ return priority.indexOf(k)===-1; }));
@@ -393,107 +345,6 @@
   }
 
   /* ================================================================
-     PTZ Controls
-     ================================================================ */
-  function initPTZ(){
-    // Direction buttons - continuous move on pointerdown, stop on pointerup
-    $$(".ptz-btn[data-pan]").forEach(function(btn){
-      function startMove(e){
-        e.preventDefault();
-        if(!_currentDetail) return;
-        var pan = parseInt(btn.dataset.pan);
-        var tilt = parseInt(btn.dataset.tilt);
-        var zoom = parseInt(btn.dataset.zoom);
-        API.ptz(_currentDetail, {action:"move", pan:pan, tilt:tilt, zoom:zoom});
-      }
-      function stopMove(e){
-        e.preventDefault();
-        if(!_currentDetail) return;
-        API.ptz(_currentDetail, {action:"stop"});
-      }
-      btn.addEventListener("pointerdown", startMove);
-      btn.addEventListener("pointerup", stopMove);
-      btn.addEventListener("pointerleave", stopMove);
-    });
-
-    // Stop button
-    var stopBtn = $("#ptz-stop");
-    if(stopBtn){
-      stopBtn.addEventListener("click", function(){
-        if(!_currentDetail) return;
-        API.ptz(_currentDetail, {action:"stop"});
-      });
-    }
-
-    // Zoom slider
-    var zoomSlider = $("#ptz-zoom");
-    if(zoomSlider){
-      var zoomTimer = null;
-      zoomSlider.addEventListener("input", function(){
-        if(!_currentDetail) return;
-        var val = parseInt(zoomSlider.value);
-        if(val === 0) {
-          API.ptz(_currentDetail, {action:"stop"});
-          return;
-        }
-        API.ptz(_currentDetail, {action:"move", pan:0, tilt:0, zoom:val});
-      });
-      zoomSlider.addEventListener("pointerup", function(){
-        zoomSlider.value = 0;
-        if(_currentDetail) API.ptz(_currentDetail, {action:"stop"});
-      });
-      zoomSlider.addEventListener("pointerleave", function(){
-        zoomSlider.value = 0;
-        if(_currentDetail) API.ptz(_currentDetail, {action:"stop"});
-      });
-    }
-  }
-
-  /* ================================================================
-     Day/Night
-     ================================================================ */
-  function initDayNight(){
-    $$(".daynight-btn").forEach(function(btn){
-      btn.addEventListener("click", function(){
-        if(!_currentDetail) return;
-        var mode = btn.dataset.mode;
-        $$(".daynight-btn").forEach(function(b){ b.classList.remove("active"); });
-        btn.classList.add("active");
-        API.action(_currentDetail, {action:"daynight", params:{mode:mode}}).then(function(res){
-          if(res.error) toast(res.error, "error");
-          else toast("Mode "+mode, "success");
-        });
-      });
-    });
-  }
-
-  /* ================================================================
-     Actions
-     ================================================================ */
-  function initActions(){
-    $$(".action-btn[data-action]").forEach(function(btn){
-      btn.addEventListener("click", function(){
-        if(!_currentDetail) return;
-        var action = btn.dataset.action;
-
-        if(action === "reboot"){
-          if(!confirm("Rebooter cette camera ?")) return;
-          API.action(_currentDetail, {action:"reboot", confirm:true}).then(function(res){
-            if(res.error) toast(res.error, "error");
-            else toast("Reboot envoye", "success");
-          });
-          return;
-        }
-
-        API.action(_currentDetail, {action:action}).then(function(res){
-          if(res.error) toast(res.error, "error");
-          else toast(action.replace(/_/g," ") + " OK", "success");
-        }).catch(function(){ toast("Erreur", "error"); });
-      });
-    });
-  }
-
-  /* ================================================================
      Event bindings
      ================================================================ */
   function initEvents(){
@@ -504,7 +355,6 @@
     $$("[data-close]", $("#cam-modal-backdrop")).forEach(function(el){
       el.addEventListener("click", function(e){ e.preventDefault(); closeModal(); });
     });
-    // Backdrop click closes modal
     $("#cam-modal-backdrop").addEventListener("click", function(e){
       if(e.target === this) closeModal();
     });
@@ -536,7 +386,6 @@
       result.className = "cam-test-result ok";
       result.style.display = "block";
 
-      // If editing and no password entered, use existing camera's test endpoint
       if(_editId && !data.password){
         API.testConn(_editId).then(function(res){
           if(res.ok){
@@ -594,6 +443,15 @@
       if(_currentDetail) captureForDetail(_currentDetail);
     });
 
+    // Detail - wiper button
+    $("#detail-wiper-btn").addEventListener("click", function(){
+      if(!_currentDetail) return;
+      API.action(_currentDetail, {action: "wiper"}).then(function(res){
+        if(res.error) toast(res.error, "error");
+        else toast("Essuie-glace active", "success");
+      }).catch(function(){ toast("Erreur", "error"); });
+    });
+
     // Detail - edit button
     $("#detail-edit-btn").addEventListener("click", function(){
       if(_currentDetail){
@@ -628,9 +486,6 @@
   }
 
   initEvents();
-  initPTZ();
-  initDayNight();
-  initActions();
   loadAll();
 
 })();
