@@ -1582,10 +1582,11 @@
   // Statut patrouille
   // ---------------------------------------------------------------------
   var STATUS_META = {
-    patrouille:   { label: "Disponible",             color: "#22c55e", icon: "directions_walk" },
-    intervention: { label: "Intervention",           color: "#f59e0b", icon: "warning" },
-    sur_place:    { label: "ASL",                    color: "#3b82f6", icon: "location_on" },
-    pause:        { label: "Pause",                  color: "#94a3b8", icon: "pause_circle" },
+    patrouille:        { label: "Disponible",         color: "#22c55e", icon: "directions_walk" },
+    intervention:      { label: "Intervention",       color: "#f59e0b", icon: "warning" },
+    sur_place:         { label: "ASL",                color: "#3b82f6", icon: "location_on" },
+    pause:             { label: "Pause",              color: "#94a3b8", icon: "pause_circle" },
+    fin_intervention:  { label: "Fin d'intervention", color: "#8b5cf6", icon: "task_alt" },
   };
 
   function updateStatusBar() {
@@ -1665,31 +1666,155 @@
     toast("Position de l'intervention non disponible", "warn");
   }
 
+  // Definition des options de statut affichees dans le modal
+  var STATUS_OPTIONS = [
+    { status: "patrouille",       label: "Disponible",         desc: "En ronde, disponible",          dot: "s-patrouille" },
+    { status: "intervention",     label: "Intervention",       desc: "Engagement sur le terrain",     dot: "s-intervention" },
+    { status: "sur_place",        label: "ASL - Arrivee sur les lieux", desc: "Sur place, en attente", dot: "s-sur_place" },
+    { status: "pause",            label: "Pause",              desc: "Indisponible temporairement",   dot: "s-pause" },
+    { status: "fin_intervention", label: "Fin d'intervention", desc: "Demander la liberation",        dot: "s-fin_intervention" },
+  ];
+
   function openStatusModal() {
     var modal = $("status-modal");
     if (!modal) return;
-    // Highlight current status
-    var btns = modal.querySelectorAll(".status-option");
-    btns.forEach(function (b) {
-      b.classList.toggle("active", b.dataset.status === state.patrolStatus);
+    var container = $("status-options");
+    if (!container) return;
+    container.textContent = "";
+
+    var inEngagement = state.patrolStatus === "intervention" || state.patrolStatus === "sur_place";
+
+    STATUS_OPTIONS.forEach(function (opt) {
+      // En engagement : cacher "Disponible" (remplace par fin_intervention)
+      if (inEngagement && opt.status === "patrouille") return;
+      // Hors engagement : cacher "Fin d'intervention"
+      if (!inEngagement && opt.status === "fin_intervention") return;
+
+      var btn = document.createElement("button");
+      btn.className = "status-option";
+      if (opt.status === state.patrolStatus) btn.classList.add("active");
+      btn.dataset.status = opt.status;
+      btn.innerHTML = "<span class='status-dot " + opt.dot + "'></span>"
+        + "<span class='status-opt-label'>" + opt.label + "</span>"
+        + "<span class='status-opt-desc'>" + opt.desc + "</span>";
+      btn.addEventListener("click", function () {
+        modal.hidden = true;
+        if (opt.status === "intervention" && !inEngagement) {
+          openCreateFicheModal();
+          return;
+        }
+        if (opt.status === "fin_intervention") {
+          openFinInterventionModal();
+          return;
+        }
+        setPatrolStatus(opt.status);
+      });
+      container.appendChild(btn);
     });
     modal.hidden = false;
   }
 
   function wireStatusOptions() {
-    var options = document.querySelectorAll("#status-options .status-option");
-    options.forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        var newStatus = btn.dataset.status;
-        $("status-modal").hidden = true;
-        if (newStatus === "intervention") {
-          // Ouvrir le formulaire de creation de fiche
-          openCreateFicheModal();
-          return;
-        }
-        setPatrolStatus(newStatus);
+    // Les options sont maintenant generees dynamiquement dans openStatusModal()
+  }
+
+  function openFinInterventionModal() {
+    // Creer un modal inline pour le commentaire de fin d'inter
+    var existing = $("fin-inter-modal");
+    if (existing) existing.remove();
+
+    var overlay = document.createElement("div");
+    overlay.className = "field-modal";
+    overlay.id = "fin-inter-modal";
+
+    var box = document.createElement("div");
+    box.className = "field-modal-box";
+
+    var header = document.createElement("div");
+    header.className = "field-modal-header";
+    header.innerHTML = "<h2>Fin d'intervention</h2>";
+    var closeBtn = document.createElement("button");
+    closeBtn.className = "icon-btn";
+    closeBtn.innerHTML = "<span class='material-symbols-outlined'>close</span>";
+    closeBtn.onclick = function () { overlay.remove(); };
+    header.appendChild(closeBtn);
+    box.appendChild(header);
+
+    var body = document.createElement("div");
+    body.className = "field-modal-body";
+    body.style.padding = "16px";
+
+    var hint = document.createElement("p");
+    hint.style.cssText = "color:#94a3b8;font-size:13px;margin:0 0 12px";
+    hint.textContent = "Commentaire optionnel (si vide, l'operateur cockpit devra en saisir un pour vous liberer).";
+    body.appendChild(hint);
+
+    var textarea = document.createElement("textarea");
+    textarea.className = "fiche-create-text";
+    textarea.rows = 3;
+    textarea.placeholder = "Compte-rendu de l'intervention...";
+    body.appendChild(textarea);
+    box.appendChild(body);
+
+    var actions = document.createElement("div");
+    actions.className = "field-modal-actions";
+    actions.style.padding = "12px 16px";
+    var submitBtn = document.createElement("button");
+    submitBtn.className = "btn-confirm-ack";
+    submitBtn.innerHTML = "<span class='material-symbols-outlined' style='vertical-align:middle'>task_alt</span> Confirmer fin d'intervention";
+    submitBtn.onclick = function () {
+      submitBtn.disabled = true;
+      var comment = textarea.value.trim();
+      setPatrolStatusFinInter(comment, function () {
+        overlay.remove();
+      }, function () {
+        submitBtn.disabled = false;
       });
-    });
+    };
+    actions.appendChild(submitBtn);
+    box.appendChild(actions);
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+  }
+
+  function setPatrolStatusFinInter(comment, onSuccess, onError) {
+    var payload = { status: "fin_intervention" };
+    if (comment) payload.comment = comment;
+    fetch("/field/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then(function (r) {
+        if (r.status === 401) { return handleSessionLost(); }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        if (data.ok) {
+          state.patrolStatus = "fin_intervention";
+          state.patrolStatusSince = new Date().toISOString();
+          updateStatusBar();
+          toast("Fin d'intervention signalee", "ok");
+          // Poster le commentaire dans la chronologie de la fiche si fourni
+          if (comment && state.activeFicheId) {
+            var fd = new FormData();
+            fd.append("comment", "Fin d'intervention : " + comment);
+            fetch("/field/my-fiches/" + encodeURIComponent(state.activeFicheId) + "/comment", {
+              method: "POST", body: fd,
+            }).catch(function () {});
+          }
+          if (onSuccess) onSuccess();
+        } else {
+          toast("Erreur : " + (data.error || data.message || "?"), "err");
+          if (onError) onError();
+        }
+      })
+      .catch(function () {
+        toast("Erreur reseau", "err");
+        if (onError) onError();
+      });
   }
 
   function setPatrolStatus(newStatus) {
@@ -1711,7 +1836,7 @@
           updateStatusBar();
           toast(STATUS_META[newStatus].label, "ok");
         } else {
-          toast("Erreur : " + (data.error || "?"), "err");
+          toast("Erreur : " + (data.error || data.message || "?"), "err");
         }
       })
       .catch(function () { toast("Erreur reseau", "err"); });

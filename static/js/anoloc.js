@@ -278,6 +278,7 @@
             intervention: { label: "Intervention", color: "#f59e0b" },
             sur_place: { label: "ASL", color: "#3b82f6" },
             pause: { label: "Pause", color: "#94a3b8" },
+            fin_intervention: { label: "Fin d'inter", color: "#8b5cf6" },
           };
           var pm = pMeta[dev.patrol_status] || pMeta.patrouille;
           patrolBadge = el("span", {
@@ -734,6 +735,7 @@
         intervention: { label: "Intervention", color: "#f59e0b" },
         sur_place: { label: "ASL", color: "#3b82f6" },
         pause: { label: "Pause", color: "#94a3b8" },
+        fin_intervention: { label: "Fin d'intervention", color: "#8b5cf6" },
       };
       var psm = psMeta[dev.patrol_status] || psMeta.patrouille;
       var psBadge = el("strong", {textContent: psm.label});
@@ -741,6 +743,57 @@
       popup.appendChild(el("div", {className: "anoloc-popup-row"}, [
         "Activite: ", psBadge,
       ]));
+
+      // Bouton liberation si fin_intervention
+      if (dev.patrol_status === "fin_intervention") {
+        var releaseRow = el("div", {className: "anoloc-release-row"});
+        var releaseInput = el("input", {
+          type: "text",
+          className: "anoloc-release-input",
+          placeholder: dev.fin_comment ? "Commentaire (optionnel)" : "Commentaire (obligatoire)",
+        });
+        var releaseBtn = el("button", {className: "anoloc-release-btn"}, [
+          materialIcon("check_circle", "font-size:16px;vertical-align:middle;margin-right:4px;"),
+          "Liberer",
+        ]);
+        releaseBtn.addEventListener("click", function () {
+          var comment = releaseInput.value.trim();
+          releaseBtn.disabled = true;
+          releaseBtn.textContent = "...";
+          var ey = (typeof getCurrentEventYear === "function") ? getCurrentEventYear() : {};
+          apiPost("/api/field-device/release", {
+            device_name: dev.label,
+            event: ey.event || "",
+            year: ey.year || "",
+            comment: comment,
+          }).then(function (r) { return r.json(); })
+            .then(function (resp) {
+              if (resp && resp.ok) {
+                if (marker && marker.getPopup()) marker.closePopup();
+              } else {
+                releaseBtn.disabled = false;
+                releaseBtn.textContent = "Liberer";
+                var errMsg = (resp && resp.message) || (resp && resp.error) || "Erreur";
+                releaseInput.value = "";
+                releaseInput.placeholder = errMsg;
+                releaseInput.style.borderColor = "#ef4444";
+              }
+            })
+            .catch(function () {
+              releaseBtn.disabled = false;
+              releaseBtn.textContent = "Liberer";
+            });
+        });
+        releaseRow.appendChild(releaseInput);
+        releaseRow.appendChild(releaseBtn);
+        popup.appendChild(releaseRow);
+        if (dev.fin_comment) {
+          var fcRow = el("div", {className: "anoloc-popup-row"});
+          fcRow.style.cssText = "font-size:11px;color:#94a3b8;font-style:italic;";
+          fcRow.textContent = "Commentaire tablette: " + dev.fin_comment;
+          popup.appendChild(fcRow);
+        }
+      }
     }
 
     // Speed

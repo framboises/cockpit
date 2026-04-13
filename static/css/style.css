@@ -6870,6 +6870,29 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .anoloc-popup-row { margin-bottom: 2px; }
 .anoloc-popup-time { color: var(--muted); font-size: 11px; margin-top: 4px; }
 
+/* Release controls for fin_intervention */
+.anoloc-release-row {
+  display: flex; gap: 6px; align-items: center;
+  margin-top: 8px; padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.anoloc-release-input {
+  flex: 1; min-width: 0;
+  background: var(--surface); border: 1px solid var(--line);
+  color: var(--text); padding: 5px 8px; border-radius: 6px;
+  font-size: 12px; font-family: inherit;
+}
+.anoloc-release-input::placeholder { color: var(--muted); }
+.anoloc-release-btn {
+  display: inline-flex; align-items: center;
+  background: #8b5cf6; border: 1px solid #7c3aed; color: #fff;
+  padding: 5px 10px; border-radius: 6px;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  font-family: inherit; white-space: nowrap;
+}
+.anoloc-release-btn:hover { background: #7c3aed; }
+.anoloc-release-btn:disabled { opacity: 0.5; pointer-events: none; }
+
 /* Trail controls in popup */
 .anoloc-trail-controls {
   display: flex; gap: 6px; align-items: center;

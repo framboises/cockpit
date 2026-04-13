@@ -73,14 +73,15 @@
 
   // ── Device status resolution (anoloc cross-reference) ────────────────────
   var DEVICE_STATUS_META = {
-    patrouille:   { label: "Disponible",   color: "#22c55e" },
-    intervention: { label: "Intervention", color: "#f59e0b" },
-    sur_place:    { label: "ASL",          color: "#3b82f6" },
-    pause:        { label: "Pause",        color: "#94a3b8" },
-    running:      { label: "En mouvement", color: "#22c55e" },
-    stopped:      { label: "A l'arret",    color: "#f59e0b" },
-    waiting:      { label: "En attente",   color: "#eab308" },
-    offline:      { label: "Hors ligne",   color: "#ef4444" },
+    patrouille:        { label: "Disponible",         color: "#22c55e" },
+    intervention:      { label: "Intervention",       color: "#f59e0b" },
+    sur_place:         { label: "ASL",                color: "#3b82f6" },
+    pause:             { label: "Pause",              color: "#94a3b8" },
+    fin_intervention:  { label: "Fin d'inter",        color: "#8b5cf6" },
+    running:           { label: "En mouvement",       color: "#22c55e" },
+    stopped:           { label: "A l'arret",          color: "#f59e0b" },
+    waiting:           { label: "En attente",         color: "#eab308" },
+    offline:           { label: "Hors ligne",         color: "#ef4444" },
   };
   function _resolveDeviceStatus(dev) {
     if (!dev) return null;

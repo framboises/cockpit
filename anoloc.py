@@ -244,6 +244,7 @@ def _tablet_to_device(tablet):
         "patrol_status": patrol_status,
         "patrol_status_since": status_since_iso,
         "active_fiche_id": tablet.get("active_fiche_id"),
+        "fin_comment": tablet.get("fin_comment") or "",
     }
 
 

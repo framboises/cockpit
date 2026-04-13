@@ -235,10 +235,11 @@ body {
   flex-shrink: 0;
   box-shadow: 0 0 6px currentColor;
 }
-.status-dot.s-patrouille   { background: #22c55e; }
-.status-dot.s-intervention { background: #f59e0b; }
-.status-dot.s-sur_place    { background: #3b82f6; }
-.status-dot.s-pause        { background: #94a3b8; }
+.status-dot.s-patrouille        { background: #22c55e; }
+.status-dot.s-intervention      { background: #f59e0b; }
+.status-dot.s-sur_place         { background: #3b82f6; }
+.status-dot.s-pause             { background: #94a3b8; }
+.status-dot.s-fin_intervention  { background: #8b5cf6; }
 .status-text { flex: 1; text-align: left; }
 .status-chevron { font-size: 20px; color: #64748b; }
 

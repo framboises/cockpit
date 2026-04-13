@@ -729,7 +729,7 @@ def field_position():
 # Statut de la patrouille
 # ---------------------------------------------------------------------------
 
-VALID_STATUSES = {"patrouille", "intervention", "sur_place", "pause"}
+VALID_STATUSES = {"patrouille", "intervention", "sur_place", "pause", "fin_intervention"}
 
 
 @field_bp.route("/field/status", methods=["GET"])
@@ -750,9 +750,9 @@ def field_status_get():
 @field_token_required
 def field_status_set():
     """Met a jour le statut de la tablette.
-    Statuts : patrouille | intervention | sur_place | pause
-    Si statut == 'patrouille' et qu'il y avait une active_fiche_id auto-creee,
-    on peut optionnellement la cloturer via close_active_fiche=true."""
+    Statuts : patrouille | intervention | sur_place | pause | fin_intervention
+    Pour fin_intervention : on accepte un 'comment' optionnel (stocke sur le device).
+    Transition directe intervention/sur_place -> patrouille interdite (doit passer par fin_intervention)."""
     data = request.get_json(silent=True) or {}
     new_status = (data.get("status") or "").strip().lower()
     if new_status not in VALID_STATUSES:
@@ -761,6 +761,13 @@ def field_status_set():
     device = request.device
     db = _get_mongo_db()
     now = _now()
+
+    cur_status = device.get("status") or "patrouille"
+
+    # Interdire passage direct intervention/sur_place -> patrouille
+    if new_status == "patrouille" and cur_status in ("intervention", "sur_place"):
+        return jsonify({"ok": False, "error": "transition_interdite",
+                        "message": "Utilisez 'Fin d intervention' avant de revenir en disponible"}), 400
 
     update = {
         "$set": {
@@ -775,6 +782,11 @@ def field_status_set():
             },
         },
     }
+
+    # Fin d'intervention : stocker le commentaire optionnel
+    if new_status == "fin_intervention":
+        fin_comment = (data.get("comment") or "").strip()
+        update["$set"]["fin_comment"] = fin_comment or None
 
     # Si retour a patrouille, on desassocie la fiche active
     if new_status == "patrouille":
