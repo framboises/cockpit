@@ -4324,10 +4324,10 @@ def hsh_get_counters_context():
                         continue
                 elif hasattr(rec_date, 'timestamp'):
                     rec_dt = rec_date
-                    if rec_dt.tzinfo is None:
-                        rec_dt = rec_dt.replace(tzinfo=timezone.utc)
                 else:
                     continue
+                if rec_dt.tzinfo is None:
+                    rec_dt = rec_dt.replace(tzinfo=timezone.utc)
                 diff = abs((rec_dt - target_dt).total_seconds())
                 if best_diff is None or diff < best_diff:
                     best_diff = diff
