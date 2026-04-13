@@ -1,255 +1,3 @@
-2026-04-10 11:46:32 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 11:46:33 [PcorgSync] INFO     Messages SQL récupérés : 1
-2026-04-10 11:46:33 [PcorgSync] INFO     Documents upsertés : 1
-2026-04-10 11:46:33 [PcorgSync] INFO     Répartition par événement :
-2026-04-10 11:46:33 [PcorgSync] INFO       24H MOTOS 2026: 1
-2026-04-10 11:46:33 [PcorgSync] INFO     Répartition par catégorie :
-2026-04-10 11:46:33 [PcorgSync] INFO       PCS.Information: 1
-2026-04-10 11:46:33 [PcorgSync] INFO     Curseur DateWrite : 2026-04-10 09:22:44.293000
-2026-04-10 11:46:33 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
-2026-04-10 11:46:33 [PcorgSync] INFO     Total en base : 23361 docs (23361 attribués, 614 avec GPS)
-2026-04-10 11:46:33 [PcorgSync] INFO   ============================================================
-2026-04-10 11:46:33 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 11:51:40 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 11:51:41 [PcorgSync] INFO     Messages SQL récupérés : 1
-2026-04-10 11:51:41 [PcorgSync] INFO     Documents upsertés : 1
-2026-04-10 11:51:41 [PcorgSync] INFO     Répartition par événement :
-2026-04-10 11:51:41 [PcorgSync] INFO       24H MOTOS 2026: 1
-2026-04-10 11:51:41 [PcorgSync] INFO     Répartition par catégorie :
-2026-04-10 11:51:41 [PcorgSync] INFO       PCS.Information: 1
-2026-04-10 11:51:41 [PcorgSync] INFO     Curseur DateWrite : 2026-04-10 09:22:44.293000
-2026-04-10 11:51:41 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
-2026-04-10 11:51:41 [PcorgSync] INFO     Total en base : 23361 docs (23361 attribués, 614 avec GPS)
-2026-04-10 11:51:41 [PcorgSync] INFO   ============================================================
-2026-04-10 11:51:41 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 11:56:38 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 11:56:39 [PcorgSync] INFO     Messages SQL récupérés : 1
-2026-04-10 11:56:39 [PcorgSync] INFO     Documents upsertés : 1
-2026-04-10 11:56:39 [PcorgSync] INFO     Répartition par événement :
-2026-04-10 11:56:39 [PcorgSync] INFO       24H MOTOS 2026: 1
-2026-04-10 11:56:39 [PcorgSync] INFO     Répartition par catégorie :
-2026-04-10 11:56:39 [PcorgSync] INFO       PCS.Information: 1
-2026-04-10 11:56:39 [PcorgSync] INFO     Curseur DateWrite : 2026-04-10 09:22:44.293000
-2026-04-10 11:56:39 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
-2026-04-10 11:56:39 [PcorgSync] INFO     Total en base : 23361 docs (23361 attribués, 614 avec GPS)
-2026-04-10 11:56:39 [PcorgSync] INFO   ============================================================
-2026-04-10 11:56:39 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 12:01:34 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 12:01:35 [PcorgSync] INFO     Messages SQL récupérés : 1
-2026-04-10 12:01:35 [PcorgSync] INFO     Documents upsertés : 1
-2026-04-10 12:01:35 [PcorgSync] INFO     Répartition par événement :
-2026-04-10 12:01:35 [PcorgSync] INFO       24H MOTOS 2026: 1
-2026-04-10 12:01:35 [PcorgSync] INFO     Répartition par catégorie :
-2026-04-10 12:01:35 [PcorgSync] INFO       PCS.Information: 1
-2026-04-10 12:01:35 [PcorgSync] INFO     Curseur DateWrite : 2026-04-10 09:22:44.293000
-2026-04-10 12:01:35 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
-2026-04-10 12:01:35 [PcorgSync] INFO     Total en base : 23361 docs (23361 attribués, 614 avec GPS)
-2026-04-10 12:01:35 [PcorgSync] INFO   ============================================================
-2026-04-10 12:01:35 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 12:06:40 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 12:06:41 [PcorgSync] INFO     Messages SQL récupérés : 1
-2026-04-10 12:06:41 [PcorgSync] INFO     Documents upsertés : 1
-2026-04-10 12:06:41 [PcorgSync] INFO     Répartition par événement :
-2026-04-10 12:06:41 [PcorgSync] INFO       24H MOTOS 2026: 1
-2026-04-10 12:06:41 [PcorgSync] INFO     Répartition par catégorie :
-2026-04-10 12:06:41 [PcorgSync] INFO       PCS.Information: 1
-2026-04-10 12:06:41 [PcorgSync] INFO     Curseur DateWrite : 2026-04-10 09:22:44.293000
-2026-04-10 12:06:41 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
-2026-04-10 12:06:41 [PcorgSync] INFO     Total en base : 23361 docs (23361 attribués, 614 avec GPS)
-2026-04-10 12:06:41 [PcorgSync] INFO   ============================================================
-2026-04-10 12:06:41 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 12:11:38 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 12:11:40 [PcorgSync] INFO     Messages SQL récupérés : 1
-2026-04-10 12:11:40 [PcorgSync] INFO     Documents upsertés : 1
-2026-04-10 12:11:40 [PcorgSync] INFO     Répartition par événement :
-2026-04-10 12:11:40 [PcorgSync] INFO       24H MOTOS 2026: 1
-2026-04-10 12:11:40 [PcorgSync] INFO     Répartition par catégorie :
-2026-04-10 12:11:40 [PcorgSync] INFO       PCS.Information: 1
-2026-04-10 12:11:40 [PcorgSync] INFO     Curseur DateWrite : 2026-04-10 09:22:44.293000
-2026-04-10 12:11:40 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
-2026-04-10 12:11:40 [PcorgSync] INFO     Total en base : 23361 docs (23361 attribués, 614 avec GPS)
-2026-04-10 12:11:40 [PcorgSync] INFO   ============================================================
-2026-04-10 12:11:40 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 12:16:32 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 12:16:33 [PcorgSync] INFO     Messages SQL récupérés : 1
-2026-04-10 12:16:33 [PcorgSync] INFO     Documents upsertés : 1
-2026-04-10 12:16:33 [PcorgSync] INFO     Répartition par événement :
-2026-04-10 12:16:33 [PcorgSync] INFO       24H MOTOS 2026: 1
-2026-04-10 12:16:33 [PcorgSync] INFO     Répartition par catégorie :
-2026-04-10 12:16:33 [PcorgSync] INFO       PCS.Information: 1
-2026-04-10 12:16:33 [PcorgSync] INFO     Curseur DateWrite : 2026-04-10 09:22:44.293000
-2026-04-10 12:16:33 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
-2026-04-10 12:16:33 [PcorgSync] INFO     Total en base : 23361 docs (23361 attribués, 614 avec GPS)
-2026-04-10 12:16:33 [PcorgSync] INFO   ============================================================
-2026-04-10 12:16:33 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 12:21:40 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 12:21:41 [PcorgSync] INFO     Documents upsertés : 2
-2026-04-10 12:21:41 [PcorgSync] INFO     Répartition par événement :
-2026-04-10 12:21:41 [PcorgSync] INFO       24H MOTOS 2026: 2
-2026-04-10 12:21:41 [PcorgSync] INFO     Répartition par catégorie :
-2026-04-10 12:21:41 [PcorgSync] INFO       PCS.Information: 1
-2026-04-10 12:21:41 [PcorgSync] INFO       PCS.Surete: 1
-2026-04-10 12:21:41 [PcorgSync] INFO     Curseur DateWrite : 2026-04-10 10:17:26.723000
-2026-04-10 12:21:41 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
-2026-04-10 12:21:41 [PcorgSync] INFO     Total en base : 23362 docs (23362 attribués, 614 avec GPS)
-2026-04-10 12:21:41 [PcorgSync] INFO   ============================================================
-2026-04-10 12:21:41 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 12:26:38 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 12:26:39 [PcorgSync] INFO     Messages SQL récupérés : 1
-2026-04-10 12:26:39 [PcorgSync] INFO     Documents upsertés : 1
-2026-04-10 12:26:39 [PcorgSync] INFO     Répartition par événement :
-2026-04-10 12:26:39 [PcorgSync] INFO       24H MOTOS 2026: 1
-2026-04-10 12:26:39 [PcorgSync] INFO     Répartition par catégorie :
-2026-04-10 12:26:39 [PcorgSync] INFO       PCS.Surete: 1
-2026-04-10 12:26:39 [PcorgSync] INFO     Curseur DateWrite : 2026-04-10 10:17:26.723000
-2026-04-10 12:26:39 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
-2026-04-10 12:26:39 [PcorgSync] INFO     Total en base : 23362 docs (23362 attribués, 614 avec GPS)
-2026-04-10 12:26:39 [PcorgSync] INFO   ============================================================
-2026-04-10 12:26:39 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 12:31:34 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 12:31:35 [PcorgSync] INFO     Messages SQL récupérés : 1
-2026-04-10 12:31:35 [PcorgSync] INFO     Documents upsertés : 1
-2026-04-10 12:31:35 [PcorgSync] INFO     Répartition par événement :
-2026-04-10 12:31:35 [PcorgSync] INFO       24H MOTOS 2026: 1
-2026-04-10 12:31:35 [PcorgSync] INFO     Répartition par catégorie :
-2026-04-10 12:31:35 [PcorgSync] INFO       PCS.Surete: 1
-2026-04-10 12:31:35 [PcorgSync] INFO     Curseur DateWrite : 2026-04-10 10:17:26.723000
-2026-04-10 12:31:35 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
-2026-04-10 12:31:35 [PcorgSync] INFO     Total en base : 23362 docs (23362 attribués, 614 avec GPS)
-2026-04-10 12:31:35 [PcorgSync] INFO   ============================================================
-2026-04-10 12:31:35 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 12:36:40 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 12:36:41 [PcorgSync] INFO     Messages SQL récupérés : 1
-2026-04-10 12:36:41 [PcorgSync] INFO     Documents upsertés : 1
-2026-04-10 12:36:41 [PcorgSync] INFO     Répartition par événement :
-2026-04-10 12:36:41 [PcorgSync] INFO       24H MOTOS 2026: 1
-2026-04-10 12:36:41 [PcorgSync] INFO     Répartition par catégorie :
-2026-04-10 12:36:41 [PcorgSync] INFO       PCS.Surete: 1
-2026-04-10 12:36:41 [PcorgSync] INFO     Curseur DateWrite : 2026-04-10 10:17:26.723000
-2026-04-10 12:36:41 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
-2026-04-10 12:36:41 [PcorgSync] INFO     Total en base : 23362 docs (23362 attribués, 614 avec GPS)
-2026-04-10 12:36:41 [PcorgSync] INFO   ============================================================
-2026-04-10 12:36:41 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 12:41:38 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 12:41:39 [PcorgSync] INFO     Messages SQL récupérés : 2
-2026-04-10 12:41:39 [PcorgSync] INFO     Documents upsertés : 2
-2026-04-10 12:41:39 [PcorgSync] INFO     Répartition par événement :
-2026-04-10 12:41:39 [PcorgSync] INFO       24H MOTOS 2026: 2
-2026-04-10 12:41:39 [PcorgSync] INFO     Répartition par catégorie :
-2026-04-10 12:41:39 [PcorgSync] INFO       PCS.Surete: 2
-2026-04-10 12:41:39 [PcorgSync] INFO     Curseur DateWrite : 2026-04-10 10:39:13.130000
-2026-04-10 12:41:39 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
-2026-04-10 12:41:39 [PcorgSync] INFO     Total en base : 23363 docs (23363 attribués, 614 avec GPS)
-2026-04-10 12:41:39 [PcorgSync] INFO   ============================================================
-2026-04-10 12:41:39 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 12:46:32 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 12:46:33 [PcorgSync] INFO   ============================================================
-2026-04-10 12:46:33 [PcorgSync] INFO   
-2026-04-10 12:46:33 [PcorgSync] INFO   Dernier sync : 2026-04-10 10:39:13.130000
-2026-04-10 12:46:33 [PcorgSync] INFO   Connexion SQL Server...
-2026-04-10 12:46:33 [PcorgSync] INFO     Driver ODBC : ODBC Driver 18 for SQL Server
-2026-04-10 12:46:33 [PcorgSync] INFO     Port résolu via SQL Browser : 65422
-2026-04-10 12:46:33 [PcorgSync] INFO     Connecté à 10.34.0.4,65422
-2026-04-10 12:46:33 [PcorgSync] INFO   Récupération par lots de 1000...
-2026-04-10 12:46:33 [PcorgSync] INFO   
-2026-04-10 12:46:33 [PcorgSync] INFO   Aucun nouveau message. Rien à synchroniser.
-2026-04-10 12:46:33 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 12:51:40 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 12:51:41 [PcorgSync] INFO   ============================================================
-2026-04-10 12:51:41 [PcorgSync] INFO   
-2026-04-10 12:51:41 [PcorgSync] INFO   Dernier sync : 2026-04-10 10:39:13.130000
-2026-04-10 12:51:41 [PcorgSync] INFO   Connexion SQL Server...
-2026-04-10 12:51:41 [PcorgSync] INFO     Driver ODBC : ODBC Driver 18 for SQL Server
-2026-04-10 12:51:41 [PcorgSync] INFO     Port résolu via SQL Browser : 65422
-2026-04-10 12:51:41 [PcorgSync] INFO     Connecté à 10.34.0.4,65422
-2026-04-10 12:51:41 [PcorgSync] INFO   Récupération par lots de 1000...
-2026-04-10 12:51:41 [PcorgSync] INFO   
-2026-04-10 12:51:41 [PcorgSync] INFO   Aucun nouveau message. Rien à synchroniser.
-2026-04-10 12:51:41 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 12:56:38 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 12:56:39 [PcorgSync] INFO   ============================================================
-2026-04-10 12:56:39 [PcorgSync] INFO   
-2026-04-10 12:56:39 [PcorgSync] INFO   Dernier sync : 2026-04-10 10:39:13.130000
-2026-04-10 12:56:39 [PcorgSync] INFO   Connexion SQL Server...
-2026-04-10 12:56:39 [PcorgSync] INFO     Driver ODBC : ODBC Driver 18 for SQL Server
-2026-04-10 12:56:39 [PcorgSync] INFO     Port résolu via SQL Browser : 65422
-2026-04-10 12:56:39 [PcorgSync] INFO     Connecté à 10.34.0.4,65422
-2026-04-10 12:56:39 [PcorgSync] INFO   Récupération par lots de 1000...
-2026-04-10 12:56:39 [PcorgSync] INFO   
-2026-04-10 12:56:39 [PcorgSync] INFO   Aucun nouveau message. Rien à synchroniser.
-2026-04-10 12:56:39 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 13:01:34 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 13:01:35 [PcorgSync] INFO   ============================================================
-2026-04-10 13:01:35 [PcorgSync] INFO   
-2026-04-10 13:01:35 [PcorgSync] INFO   Dernier sync : 2026-04-10 10:39:13.130000
-2026-04-10 13:01:35 [PcorgSync] INFO   Connexion SQL Server...
-2026-04-10 13:01:35 [PcorgSync] INFO     Driver ODBC : ODBC Driver 18 for SQL Server
-2026-04-10 13:01:35 [PcorgSync] INFO     Port résolu via SQL Browser : 65422
-2026-04-10 13:01:35 [PcorgSync] INFO     Connecté à 10.34.0.4,65422
-2026-04-10 13:01:35 [PcorgSync] INFO   Récupération par lots de 1000...
-2026-04-10 13:01:35 [PcorgSync] INFO   
-2026-04-10 13:01:35 [PcorgSync] INFO   Aucun nouveau message. Rien à synchroniser.
-2026-04-10 13:01:35 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 13:06:40 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 13:06:41 [PcorgSync] INFO   ============================================================
-2026-04-10 13:06:41 [PcorgSync] INFO   
-2026-04-10 13:06:41 [PcorgSync] INFO   Dernier sync : 2026-04-10 10:39:13.130000
-2026-04-10 13:06:41 [PcorgSync] INFO   Connexion SQL Server...
-2026-04-10 13:06:41 [PcorgSync] INFO     Driver ODBC : ODBC Driver 18 for SQL Server
-2026-04-10 13:06:41 [PcorgSync] INFO     Port résolu via SQL Browser : 65422
-2026-04-10 13:06:41 [PcorgSync] INFO     Connecté à 10.34.0.4,65422
-2026-04-10 13:06:41 [PcorgSync] INFO   Récupération par lots de 1000...
-2026-04-10 13:06:41 [PcorgSync] INFO   
-2026-04-10 13:06:41 [PcorgSync] INFO   Aucun nouveau message. Rien à synchroniser.
-2026-04-10 13:06:41 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 13:11:38 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 13:11:39 [PcorgSync] INFO   ============================================================
-2026-04-10 13:11:39 [PcorgSync] INFO   
-2026-04-10 13:11:39 [PcorgSync] INFO   Dernier sync : 2026-04-10 10:39:13.130000
-2026-04-10 13:11:39 [PcorgSync] INFO   Connexion SQL Server...
-2026-04-10 13:11:39 [PcorgSync] INFO     Driver ODBC : ODBC Driver 18 for SQL Server
-2026-04-10 13:11:39 [PcorgSync] INFO     Port résolu via SQL Browser : 65422
-2026-04-10 13:11:39 [PcorgSync] INFO     Connecté à 10.34.0.4,65422
-2026-04-10 13:11:39 [PcorgSync] INFO   Récupération par lots de 1000...
-2026-04-10 13:11:39 [PcorgSync] INFO   
-2026-04-10 13:11:39 [PcorgSync] INFO   Aucun nouveau message. Rien à synchroniser.
-2026-04-10 13:11:39 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 13:16:32 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 13:16:33 [PcorgSync] INFO   ============================================================
-2026-04-10 13:16:33 [PcorgSync] INFO   
-2026-04-10 13:16:33 [PcorgSync] INFO   Dernier sync : 2026-04-10 10:39:13.130000
-2026-04-10 13:16:33 [PcorgSync] INFO   Connexion SQL Server...
-2026-04-10 13:16:33 [PcorgSync] INFO     Driver ODBC : ODBC Driver 18 for SQL Server
-2026-04-10 13:16:33 [PcorgSync] INFO     Port résolu via SQL Browser : 65422
-2026-04-10 13:16:33 [PcorgSync] INFO     Connecté à 10.34.0.4,65422
-2026-04-10 13:16:33 [PcorgSync] INFO   Récupération par lots de 1000...
-2026-04-10 13:16:33 [PcorgSync] INFO   
-2026-04-10 13:16:33 [PcorgSync] INFO   Aucun nouveau message. Rien à synchroniser.
-2026-04-10 13:16:33 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 13:21:40 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 13:21:41 [PcorgSync] INFO   ============================================================
-2026-04-10 13:21:41 [PcorgSync] INFO   
-2026-04-10 13:21:41 [PcorgSync] INFO   Dernier sync : 2026-04-10 10:39:13.130000
-2026-04-10 13:21:41 [PcorgSync] INFO   Connexion SQL Server...
-2026-04-10 13:21:41 [PcorgSync] INFO     Driver ODBC : ODBC Driver 18 for SQL Server
-2026-04-10 13:21:41 [PcorgSync] INFO     Port résolu via SQL Browser : 65422
-2026-04-10 13:21:41 [PcorgSync] INFO     Connecté à 10.34.0.4,65422
-2026-04-10 13:21:41 [PcorgSync] INFO   Récupération par lots de 1000...
-2026-04-10 13:21:41 [PcorgSync] INFO   
-2026-04-10 13:21:41 [PcorgSync] INFO   Aucun nouveau message. Rien à synchroniser.
-2026-04-10 13:21:41 [PcorgSync] INFO Sync terminee avec succes
-2026-04-10 13:26:38 [PcorgSync] INFO Lancement sync incremental
-2026-04-10 13:26:39 [PcorgSync] INFO   ============================================================
-2026-04-10 13:26:39 [PcorgSync] INFO   
-2026-04-10 13:26:39 [PcorgSync] INFO   Dernier sync : 2026-04-10 10:39:13.130000
-2026-04-10 13:26:39 [PcorgSync] INFO   Connexion SQL Server...
-2026-04-10 13:26:39 [PcorgSync] INFO     Driver ODBC : ODBC Driver 18 for SQL Server
-2026-04-10 13:26:39 [PcorgSync] INFO     Port résolu via SQL Browser : 65422
-2026-04-10 13:26:39 [PcorgSync] INFO     Connecté à 10.34.0.4,65422
-2026-04-10 13:26:39 [PcorgSync] INFO   Récupération par lots de 1000...
-2026-04-10 13:26:39 [PcorgSync] INFO   
-2026-04-10 13:26:39 [PcorgSync] INFO   Aucun nouveau message. Rien à synchroniser.
-2026-04-10 13:26:39 [PcorgSync] INFO Sync terminee avec succes
 2026-04-10 13:31:35 [PcorgSync] INFO Lancement sync incremental
 2026-04-10 13:31:35 [PcorgSync] INFO   ============================================================
 2026-04-10 13:31:35 [PcorgSync] INFO   
@@ -3670,3 +3418,255 @@
 2026-04-13 11:46:32 [PcorgSync] INFO     Total en base : 23447 docs (23447 attribués, 618 avec GPS)
 2026-04-13 11:46:32 [PcorgSync] INFO   ============================================================
 2026-04-13 11:46:32 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 11:51:40 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 11:51:41 [PcorgSync] INFO     Messages SQL récupérés : 1
+2026-04-13 11:51:41 [PcorgSync] INFO     Documents upsertés : 1
+2026-04-13 11:51:41 [PcorgSync] INFO     Répartition par événement :
+2026-04-13 11:51:41 [PcorgSync] INFO       24H MOTOS 2026: 1
+2026-04-13 11:51:41 [PcorgSync] INFO     Répartition par catégorie :
+2026-04-13 11:51:41 [PcorgSync] INFO       PCO.Securite: 1
+2026-04-13 11:51:41 [PcorgSync] INFO     Curseur DateWrite : 2026-04-13 08:24:31.163000
+2026-04-13 11:51:41 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-04-13 11:51:41 [PcorgSync] INFO     Total en base : 23447 docs (23447 attribués, 618 avec GPS)
+2026-04-13 11:51:41 [PcorgSync] INFO   ============================================================
+2026-04-13 11:51:41 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 11:56:38 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 11:56:39 [PcorgSync] INFO     Messages SQL récupérés : 1
+2026-04-13 11:56:39 [PcorgSync] INFO     Documents upsertés : 1
+2026-04-13 11:56:39 [PcorgSync] INFO     Répartition par événement :
+2026-04-13 11:56:39 [PcorgSync] INFO       24H MOTOS 2026: 1
+2026-04-13 11:56:39 [PcorgSync] INFO     Répartition par catégorie :
+2026-04-13 11:56:39 [PcorgSync] INFO       PCO.Securite: 1
+2026-04-13 11:56:39 [PcorgSync] INFO     Curseur DateWrite : 2026-04-13 08:24:31.163000
+2026-04-13 11:56:39 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-04-13 11:56:39 [PcorgSync] INFO     Total en base : 23447 docs (23447 attribués, 618 avec GPS)
+2026-04-13 11:56:39 [PcorgSync] INFO   ============================================================
+2026-04-13 11:56:39 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 12:01:34 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 12:01:35 [PcorgSync] INFO     Documents upsertés : 2
+2026-04-13 12:01:35 [PcorgSync] INFO     Répartition par événement :
+2026-04-13 12:01:35 [PcorgSync] INFO       24H MOTOS 2026: 2
+2026-04-13 12:01:35 [PcorgSync] INFO     Répartition par catégorie :
+2026-04-13 12:01:35 [PcorgSync] INFO       PCO.Securite: 1
+2026-04-13 12:01:35 [PcorgSync] INFO       PCO.Technique: 1
+2026-04-13 12:01:35 [PcorgSync] INFO     Curseur DateWrite : 2026-04-13 09:57:54.077000
+2026-04-13 12:01:35 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-04-13 12:01:35 [PcorgSync] INFO     Total en base : 23448 docs (23448 attribués, 619 avec GPS)
+2026-04-13 12:01:35 [PcorgSync] INFO   ============================================================
+2026-04-13 12:01:35 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 12:06:40 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 12:06:41 [PcorgSync] INFO   ============================================================
+2026-04-13 12:06:41 [PcorgSync] INFO   
+2026-04-13 12:06:41 [PcorgSync] INFO   Dernier sync : 2026-04-13 09:57:54.077000
+2026-04-13 12:06:41 [PcorgSync] INFO   Connexion SQL Server...
+2026-04-13 12:06:41 [PcorgSync] INFO     Driver ODBC : ODBC Driver 18 for SQL Server
+2026-04-13 12:06:41 [PcorgSync] INFO     Port résolu via SQL Browser : 65422
+2026-04-13 12:06:41 [PcorgSync] INFO     Connecté à 10.34.0.4,65422
+2026-04-13 12:06:41 [PcorgSync] INFO   Récupération par lots de 1000...
+2026-04-13 12:06:41 [PcorgSync] INFO   
+2026-04-13 12:06:41 [PcorgSync] INFO   Aucun nouveau message. Rien à synchroniser.
+2026-04-13 12:06:41 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 12:11:38 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 12:11:39 [PcorgSync] INFO     Messages SQL récupérés : 1
+2026-04-13 12:11:39 [PcorgSync] INFO     Documents upsertés : 1
+2026-04-13 12:11:39 [PcorgSync] INFO     Répartition par événement :
+2026-04-13 12:11:39 [PcorgSync] INFO       24H MOTOS 2026: 1
+2026-04-13 12:11:39 [PcorgSync] INFO     Répartition par catégorie :
+2026-04-13 12:11:39 [PcorgSync] INFO       PCO.Technique: 1
+2026-04-13 12:11:39 [PcorgSync] INFO     Curseur DateWrite : 2026-04-13 10:08:13.703000
+2026-04-13 12:11:39 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-04-13 12:11:39 [PcorgSync] INFO     Total en base : 23448 docs (23448 attribués, 619 avec GPS)
+2026-04-13 12:11:39 [PcorgSync] INFO   ============================================================
+2026-04-13 12:11:39 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 12:16:32 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 12:16:33 [PcorgSync] INFO     Messages SQL récupérés : 2
+2026-04-13 12:16:33 [PcorgSync] INFO     Documents upsertés : 2
+2026-04-13 12:16:33 [PcorgSync] INFO     Répartition par événement :
+2026-04-13 12:16:33 [PcorgSync] INFO       24H MOTOS 2026: 2
+2026-04-13 12:16:33 [PcorgSync] INFO     Répartition par catégorie :
+2026-04-13 12:16:33 [PcorgSync] INFO       PCO.Technique: 2
+2026-04-13 12:16:33 [PcorgSync] INFO     Curseur DateWrite : 2026-04-13 10:12:28.380000
+2026-04-13 12:16:33 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-04-13 12:16:33 [PcorgSync] INFO     Total en base : 23449 docs (23449 attribués, 620 avec GPS)
+2026-04-13 12:16:33 [PcorgSync] INFO   ============================================================
+2026-04-13 12:16:33 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 12:21:40 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 12:21:41 [PcorgSync] INFO     Messages SQL récupérés : 1
+2026-04-13 12:21:41 [PcorgSync] INFO     Documents upsertés : 1
+2026-04-13 12:21:41 [PcorgSync] INFO     Répartition par événement :
+2026-04-13 12:21:41 [PcorgSync] INFO       24H MOTOS 2026: 1
+2026-04-13 12:21:41 [PcorgSync] INFO     Répartition par catégorie :
+2026-04-13 12:21:41 [PcorgSync] INFO       PCO.Technique: 1
+2026-04-13 12:21:41 [PcorgSync] INFO     Curseur DateWrite : 2026-04-13 10:17:28.187000
+2026-04-13 12:21:41 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-04-13 12:21:41 [PcorgSync] INFO     Total en base : 23449 docs (23449 attribués, 620 avec GPS)
+2026-04-13 12:21:41 [PcorgSync] INFO   ============================================================
+2026-04-13 12:21:41 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 12:26:38 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 12:26:39 [PcorgSync] INFO     Messages SQL récupérés : 1
+2026-04-13 12:26:39 [PcorgSync] INFO     Documents upsertés : 1
+2026-04-13 12:26:39 [PcorgSync] INFO     Répartition par événement :
+2026-04-13 12:26:39 [PcorgSync] INFO       24H MOTOS 2026: 1
+2026-04-13 12:26:39 [PcorgSync] INFO     Répartition par catégorie :
+2026-04-13 12:26:39 [PcorgSync] INFO       PCO.Securite: 1
+2026-04-13 12:26:39 [PcorgSync] INFO     Curseur DateWrite : 2026-04-13 10:24:30.203000
+2026-04-13 12:26:39 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-04-13 12:26:39 [PcorgSync] INFO     Total en base : 23450 docs (23450 attribués, 621 avec GPS)
+2026-04-13 12:26:39 [PcorgSync] INFO   ============================================================
+2026-04-13 12:26:39 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 12:31:34 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 12:31:35 [PcorgSync] INFO     Messages SQL récupérés : 1
+2026-04-13 12:31:35 [PcorgSync] INFO     Documents upsertés : 1
+2026-04-13 12:31:35 [PcorgSync] INFO     Répartition par événement :
+2026-04-13 12:31:35 [PcorgSync] INFO       24H MOTOS 2026: 1
+2026-04-13 12:31:35 [PcorgSync] INFO     Répartition par catégorie :
+2026-04-13 12:31:35 [PcorgSync] INFO       PCO.Securite: 1
+2026-04-13 12:31:35 [PcorgSync] INFO     Curseur DateWrite : 2026-04-13 10:24:30.203000
+2026-04-13 12:31:35 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-04-13 12:31:35 [PcorgSync] INFO     Total en base : 23450 docs (23450 attribués, 621 avec GPS)
+2026-04-13 12:31:35 [PcorgSync] INFO   ============================================================
+2026-04-13 12:31:35 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 12:36:40 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 12:36:41 [PcorgSync] INFO     Messages SQL récupérés : 1
+2026-04-13 12:36:41 [PcorgSync] INFO     Documents upsertés : 1
+2026-04-13 12:36:41 [PcorgSync] INFO     Répartition par événement :
+2026-04-13 12:36:41 [PcorgSync] INFO       24H MOTOS 2026: 1
+2026-04-13 12:36:41 [PcorgSync] INFO     Répartition par catégorie :
+2026-04-13 12:36:41 [PcorgSync] INFO       PCO.Securite: 1
+2026-04-13 12:36:41 [PcorgSync] INFO     Curseur DateWrite : 2026-04-13 10:24:30.203000
+2026-04-13 12:36:41 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-04-13 12:36:41 [PcorgSync] INFO     Total en base : 23450 docs (23450 attribués, 621 avec GPS)
+2026-04-13 12:36:41 [PcorgSync] INFO   ============================================================
+2026-04-13 12:36:41 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 12:41:38 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 12:41:39 [PcorgSync] INFO     Documents upsertés : 2
+2026-04-13 12:41:39 [PcorgSync] INFO     Répartition par événement :
+2026-04-13 12:41:39 [PcorgSync] INFO       24H MOTOS 2026: 2
+2026-04-13 12:41:39 [PcorgSync] INFO     Répartition par catégorie :
+2026-04-13 12:41:39 [PcorgSync] INFO       PCO.Securite: 1
+2026-04-13 12:41:39 [PcorgSync] INFO       PCO.Technique: 1
+2026-04-13 12:41:39 [PcorgSync] INFO     Curseur DateWrite : 2026-04-13 10:41:07.933000
+2026-04-13 12:41:39 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-04-13 12:41:39 [PcorgSync] INFO     Total en base : 23450 docs (23450 attribués, 621 avec GPS)
+2026-04-13 12:41:39 [PcorgSync] INFO   ============================================================
+2026-04-13 12:41:39 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 12:46:32 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 12:46:32 [PcorgSync] INFO     Documents upsertés : 3
+2026-04-13 12:46:32 [PcorgSync] INFO     Répartition par événement :
+2026-04-13 12:46:32 [PcorgSync] INFO       24H MOTOS 2026: 3
+2026-04-13 12:46:32 [PcorgSync] INFO     Répartition par catégorie :
+2026-04-13 12:46:32 [PcorgSync] INFO       PCO.Securite: 2
+2026-04-13 12:46:32 [PcorgSync] INFO       PCO.Technique: 1
+2026-04-13 12:46:32 [PcorgSync] INFO     Curseur DateWrite : 2026-04-13 10:44:19.307000
+2026-04-13 12:46:32 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-04-13 12:46:32 [PcorgSync] INFO     Total en base : 23450 docs (23450 attribués, 621 avec GPS)
+2026-04-13 12:46:32 [PcorgSync] INFO   ============================================================
+2026-04-13 12:46:32 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 12:51:40 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 12:51:41 [PcorgSync] INFO   ============================================================
+2026-04-13 12:51:41 [PcorgSync] INFO   
+2026-04-13 12:51:41 [PcorgSync] INFO   Dernier sync : 2026-04-13 10:44:19.307000
+2026-04-13 12:51:41 [PcorgSync] INFO   Connexion SQL Server...
+2026-04-13 12:51:41 [PcorgSync] INFO     Driver ODBC : ODBC Driver 18 for SQL Server
+2026-04-13 12:51:41 [PcorgSync] INFO     Port résolu via SQL Browser : 65422
+2026-04-13 12:51:41 [PcorgSync] INFO     Connecté à 10.34.0.4,65422
+2026-04-13 12:51:41 [PcorgSync] INFO   Récupération par lots de 1000...
+2026-04-13 12:51:41 [PcorgSync] INFO   
+2026-04-13 12:51:41 [PcorgSync] INFO   Aucun nouveau message. Rien à synchroniser.
+2026-04-13 12:51:41 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 12:56:38 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 12:56:39 [PcorgSync] INFO   ============================================================
+2026-04-13 12:56:39 [PcorgSync] INFO   
+2026-04-13 12:56:39 [PcorgSync] INFO   Dernier sync : 2026-04-13 10:44:19.307000
+2026-04-13 12:56:39 [PcorgSync] INFO   Connexion SQL Server...
+2026-04-13 12:56:39 [PcorgSync] INFO     Driver ODBC : ODBC Driver 18 for SQL Server
+2026-04-13 12:56:39 [PcorgSync] INFO     Port résolu via SQL Browser : 65422
+2026-04-13 12:56:39 [PcorgSync] INFO     Connecté à 10.34.0.4,65422
+2026-04-13 12:56:39 [PcorgSync] INFO   Récupération par lots de 1000...
+2026-04-13 12:56:39 [PcorgSync] INFO   
+2026-04-13 12:56:39 [PcorgSync] INFO   Aucun nouveau message. Rien à synchroniser.
+2026-04-13 12:56:39 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 13:01:34 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 13:01:35 [PcorgSync] INFO   ============================================================
+2026-04-13 13:01:35 [PcorgSync] INFO   
+2026-04-13 13:01:35 [PcorgSync] INFO   Dernier sync : 2026-04-13 10:44:19.307000
+2026-04-13 13:01:35 [PcorgSync] INFO   Connexion SQL Server...
+2026-04-13 13:01:35 [PcorgSync] INFO     Driver ODBC : ODBC Driver 18 for SQL Server
+2026-04-13 13:01:35 [PcorgSync] INFO     Port résolu via SQL Browser : 65422
+2026-04-13 13:01:35 [PcorgSync] INFO     Connecté à 10.34.0.4,65422
+2026-04-13 13:01:35 [PcorgSync] INFO   Récupération par lots de 1000...
+2026-04-13 13:01:35 [PcorgSync] INFO   
+2026-04-13 13:01:35 [PcorgSync] INFO   Aucun nouveau message. Rien à synchroniser.
+2026-04-13 13:01:35 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 13:06:40 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 13:06:42 [PcorgSync] INFO     Messages SQL récupérés : 1
+2026-04-13 13:06:42 [PcorgSync] INFO     Documents upsertés : 1
+2026-04-13 13:06:42 [PcorgSync] INFO     Répartition par événement :
+2026-04-13 13:06:42 [PcorgSync] INFO       24H MOTOS 2026: 1
+2026-04-13 13:06:42 [PcorgSync] INFO     Répartition par catégorie :
+2026-04-13 13:06:42 [PcorgSync] INFO       PCO.Securite: 1
+2026-04-13 13:06:42 [PcorgSync] INFO     Curseur DateWrite : 2026-04-13 11:03:45.560000
+2026-04-13 13:06:42 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-04-13 13:06:42 [PcorgSync] INFO     Total en base : 23451 docs (23451 attribués, 622 avec GPS)
+2026-04-13 13:06:42 [PcorgSync] INFO   ============================================================
+2026-04-13 13:06:42 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 13:11:38 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 13:11:39 [PcorgSync] INFO     Messages SQL récupérés : 1
+2026-04-13 13:11:39 [PcorgSync] INFO     Documents upsertés : 1
+2026-04-13 13:11:39 [PcorgSync] INFO     Répartition par événement :
+2026-04-13 13:11:39 [PcorgSync] INFO       24H MOTOS 2026: 1
+2026-04-13 13:11:39 [PcorgSync] INFO     Répartition par catégorie :
+2026-04-13 13:11:39 [PcorgSync] INFO       PCO.Technique: 1
+2026-04-13 13:11:39 [PcorgSync] INFO     Curseur DateWrite : 2026-04-13 11:06:59.783000
+2026-04-13 13:11:39 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-04-13 13:11:39 [PcorgSync] INFO     Total en base : 23451 docs (23451 attribués, 622 avec GPS)
+2026-04-13 13:11:39 [PcorgSync] INFO   ============================================================
+2026-04-13 13:11:39 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 13:16:25 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 13:16:26 [PcorgSync] INFO     Messages SQL récupérés : 1
+2026-04-13 13:16:26 [PcorgSync] INFO     Documents upsertés : 1
+2026-04-13 13:16:26 [PcorgSync] INFO     Répartition par événement :
+2026-04-13 13:16:26 [PcorgSync] INFO       24H MOTOS 2026: 1
+2026-04-13 13:16:26 [PcorgSync] INFO     Répartition par catégorie :
+2026-04-13 13:16:26 [PcorgSync] INFO       PCO.Technique: 1
+2026-04-13 13:16:26 [PcorgSync] INFO     Curseur DateWrite : 2026-04-13 11:06:59.783000
+2026-04-13 13:16:26 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-04-13 13:16:26 [PcorgSync] INFO     Total en base : 23451 docs (23451 attribués, 622 avec GPS)
+2026-04-13 13:16:26 [PcorgSync] INFO   ============================================================
+2026-04-13 13:16:26 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 13:21:40 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 13:21:41 [PcorgSync] INFO     Documents upsertés : 2
+2026-04-13 13:21:41 [PcorgSync] INFO     Répartition par événement :
+2026-04-13 13:21:41 [PcorgSync] INFO       24H MOTOS 2026: 2
+2026-04-13 13:21:41 [PcorgSync] INFO     Répartition par catégorie :
+2026-04-13 13:21:41 [PcorgSync] INFO       PCO.Technique: 1
+2026-04-13 13:21:41 [PcorgSync] INFO       PCO.Securite: 1
+2026-04-13 13:21:41 [PcorgSync] INFO     Curseur DateWrite : 2026-04-13 11:18:38.617000
+2026-04-13 13:21:41 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-04-13 13:21:41 [PcorgSync] INFO     Total en base : 23452 docs (23452 attribués, 623 avec GPS)
+2026-04-13 13:21:41 [PcorgSync] INFO   ============================================================
+2026-04-13 13:21:41 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 13:26:38 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 13:26:39 [PcorgSync] INFO   ============================================================
+2026-04-13 13:26:39 [PcorgSync] INFO   
+2026-04-13 13:26:39 [PcorgSync] INFO   Dernier sync : 2026-04-13 11:18:38.617000
+2026-04-13 13:26:39 [PcorgSync] INFO   Connexion SQL Server...
+2026-04-13 13:26:39 [PcorgSync] INFO     Driver ODBC : ODBC Driver 18 for SQL Server
+2026-04-13 13:26:39 [PcorgSync] INFO     Port résolu via SQL Browser : 65422
+2026-04-13 13:26:39 [PcorgSync] INFO     Connecté à 10.34.0.4,65422
+2026-04-13 13:26:39 [PcorgSync] INFO   Récupération par lots de 1000...
+2026-04-13 13:26:39 [PcorgSync] INFO   
+2026-04-13 13:26:39 [PcorgSync] INFO   Aucun nouveau message. Rien à synchroniser.
+2026-04-13 13:26:39 [PcorgSync] INFO Sync terminee avec succes
+2026-04-13 13:31:25 [PcorgSync] INFO Lancement sync incremental
+2026-04-13 13:31:26 [PcorgSync] INFO   ============================================================
+2026-04-13 13:31:26 [PcorgSync] INFO   
+2026-04-13 13:31:26 [PcorgSync] INFO   Dernier sync : 2026-04-13 11:18:38.617000
+2026-04-13 13:31:26 [PcorgSync] INFO   Connexion SQL Server...
+2026-04-13 13:31:26 [PcorgSync] INFO     Driver ODBC : ODBC Driver 18 for SQL Server
+2026-04-13 13:31:26 [PcorgSync] INFO     Port résolu via SQL Browser : 65422
+2026-04-13 13:31:26 [PcorgSync] INFO     Connecté à 10.34.0.4,65422
+2026-04-13 13:31:26 [PcorgSync] INFO   Récupération par lots de 1000...
+2026-04-13 13:31:26 [PcorgSync] INFO   
+2026-04-13 13:31:26 [PcorgSync] INFO   Aucun nouveau message. Rien à synchroniser.
+2026-04-13 13:31:26 [PcorgSync] INFO Sync terminee avec succes
