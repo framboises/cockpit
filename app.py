@@ -4583,7 +4583,7 @@ def hsh_get_titres_live():
             "entrees": {"$sum": "$entrees"},
             "sorties": {"$sum": "$sorties"},
         }},
-        {"$sort": {"entrees": -1}},
+        {"$sort": {"_id": 1}},
     ]
     result = []
     for agg in COL_HSH_AGG_TITRES.aggregate(pipeline):

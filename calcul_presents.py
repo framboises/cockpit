@@ -43,6 +43,8 @@ def charger_cache_titres():
 def categoriser_scan(utid, cache_titres, upid=None):
     if upid and upid.endswith("-ACCRED"):
         return "accredite"
+    if utid and utid.startswith("EWC"):
+        return "accredite"
     if utid and utid in cache_titres:
         title = cache_titres[utid]
         if "Bracelet Enfant" in title:
