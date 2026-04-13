@@ -2,6 +2,7 @@
 import os
 import re
 import io
+import json
 import time
 import logging
 from datetime import datetime, timezone
@@ -87,6 +88,67 @@ def _ensure_db():
     # Index
     _col_cameras.create_index([("ip", 1), ("port", 1)], unique=True)
     _col_cameras.create_index("enabled")
+
+    # Seed: import from hik_cameras.json if collection is empty
+    _seed_from_json()
+
+
+def _seed_from_json():
+    """Import cameras from hik/hik_cameras.json into MongoDB if collection is empty."""
+    if _col_cameras.count_documents({}, limit=1) > 0:
+        return
+    json_path = os.path.join(os.path.dirname(__file__), "hik", "hik_cameras.json")
+    if not os.path.exists(json_path):
+        return
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+    except Exception:
+        logger.warning("Could not read %s for seed", json_path)
+        return
+
+    cred_groups = config.get("credential_groups", {})
+    now = datetime.now(timezone.utc)
+    count = 0
+
+    for cam in config.get("cameras", []):
+        ip = cam.get("ip", "").strip()
+        if not ip:
+            continue
+
+        # Resolve credentials
+        group_name = cam.get("credential_group")
+        user = cam.get("user", "admin")
+        password = cam.get("password", "")
+        if group_name and group_name in cred_groups:
+            group = cred_groups[group_name]
+            user = cam.get("user") or group.get("user", "admin")
+            if not password:
+                password = group.get("password", "")
+
+        doc = {
+            "name": cam.get("name", f"Camera {ip}"),
+            "ip": ip,
+            "port": cam.get("port", 80),
+            "user": user,
+            "password": password,
+            "channel": cam.get("channel", 1),
+            "protocol": cam.get("protocol", "http"),
+            "brand": cam.get("brand", "hikvision"),
+            "location": cam.get("location", ""),
+            "tags": cam.get("tags", []),
+            "enabled": True,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        try:
+            _col_cameras.insert_one(doc)
+            count += 1
+        except Exception:
+            pass  # duplicate ip+port, skip
+
+    if count:
+        logger.info("Seeded %d cameras from hik_cameras.json", count)
 
 
 # ---------------------------------------------------------------------------
