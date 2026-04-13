@@ -101,7 +101,7 @@ def main():
     parser = argparse.ArgumentParser(description="Collecte de transactions HSH pour analyse")
     parser.add_argument("--heures", type=int, default=6, help="Heures a remonter (defaut: 6)")
     parser.add_argument("--max", type=int, default=200, help="Nombre max de transactions (defaut: 200)")
-    parser.add_argument("--checkpoint", type=str, default="PDA 67", help="Filtre nom checkpoint (defaut: PDA 67)")
+    parser.add_argument("--checkpoint", type=str, default="PDA.67", help="Filtre nom checkpoint (defaut: PDA.67)")
     args = parser.parse_args()
 
     # Verifier que le live controle est configure
