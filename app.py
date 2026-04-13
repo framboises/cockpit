@@ -3192,8 +3192,9 @@ def pcorg_detail(doc_id):
 
 
 def _engage_field_device(patrouille_name, fiche_id, event, year, category="", text=""):
-    """Si patrouille_name correspond a une tablette terrain, passe-la en intervention
-    et envoie une notification push."""
+    """Assigne une fiche a une tablette terrain (pose active_fiche_id)
+    sans changer le statut : c'est l'operateur tablette qui confirmera
+    son engagement via le bouton 'Engagement'."""
     if not patrouille_name or not fiche_id:
         return
     device = db["field_devices"].find_one({
@@ -3208,13 +3209,11 @@ def _engage_field_device(patrouille_name, fiche_id, event, year, category="", te
         {"_id": device["_id"]},
         {
             "$set": {
-                "status": "intervention",
-                "status_since": now,
                 "active_fiche_id": fiche_id,
             },
             "$push": {
                 "status_history": {
-                    "status": "intervention",
+                    "status": "dispatch",
                     "ts": now,
                     "trigger": "cockpit_dispatch",
                     "fiche_id": fiche_id,

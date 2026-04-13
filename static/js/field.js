@@ -1614,8 +1614,8 @@
       }
     }
 
-    // Masquer si pas en intervention ou pas de fiche active
-    if (!activeFiche || state.patrolStatus === "patrouille") {
+    // Masquer si pas de fiche active
+    if (!activeFiche) {
       banner.hidden = true;
       return;
     }
@@ -1931,13 +1931,19 @@
         state.fiches = open;
         renderFiches();
         detectNewFiches(open);
-        // Sync statut depuis le serveur (auto-proximite peut l'avoir change)
-        if (data.device_status && data.device_status !== state.patrolStatus) {
+        // Sync statut et fiche active depuis le serveur
+        var serverFicheId = data.active_fiche_id || null;
+        var statusChanged = data.device_status && data.device_status !== state.patrolStatus;
+        var ficheChanged = serverFicheId !== state.activeFicheId;
+        if (statusChanged) {
           state.patrolStatus = data.device_status;
-          state.activeFicheId = data.active_fiche_id || null;
+        }
+        if (ficheChanged) {
+          state.activeFicheId = serverFicheId;
+        }
+        if (statusChanged) {
           updateStatusBar(); // calls updateEngageBanner() internally
         } else {
-          // Meme statut mais les fiches ont pu changer -> MAJ bandeau
           updateEngageBanner();
         }
         // Tracking mode : haute frequence quand cockpit suit la tablette
@@ -2364,11 +2370,11 @@
 
     // Route button only for fiches NOT created by this tablet (dispatched from cockpit)
     if (!isFieldCreated) {
-      // "Confirmer la prise en compte" — only if not already in intervention/sur_place
+      // Bouton "Engagement" — visible tant que l'operateur n'a pas confirme
       if (d.status_code !== 10 && state.patrolStatus !== "intervention" && state.patrolStatus !== "sur_place") {
         var ackBtn = document.createElement("button");
         ackBtn.className = "btn-confirm-ack";
-        ackBtn.innerHTML = "<span class='material-symbols-outlined' style='vertical-align:middle'>check_circle</span> Confirmer la prise en compte";
+        ackBtn.innerHTML = "<span class='material-symbols-outlined' style='vertical-align:middle'>check_circle</span> Engagement";
         ackBtn.onclick = function () { confirmFicheAck(f, ackBtn); };
         actionsEl.appendChild(ackBtn);
       }
@@ -2419,7 +2425,7 @@
         updateStatusBar();
         // 2) Add chronology entry
         var fd = new FormData();
-        fd.append("comment", "Prise en compte de la fiche et deplacement vers le lieu de l'intervention");
+        fd.append("comment", "Engagement confirme, deplacement vers le lieu de l'intervention");
         return fetch("/field/my-fiches/" + encodeURIComponent(f.id) + "/comment", {
           method: "POST",
           body: fd,
@@ -2428,7 +2434,7 @@
       .then(function (r) { if (r && r.json) return r.json(); })
       .then(function (data) {
         btn.disabled = false;
-        toast("Intervention confirmee", "ok");
+        toast("Engagement confirme", "ok");
         // Refresh fiche detail
         $("fiche-detail-modal").hidden = true;
         pollFiches();
