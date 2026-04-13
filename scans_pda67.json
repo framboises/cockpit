@@ -1,0 +1,7966 @@
+[
+  {
+    "utid": "6000860900304701",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33689799,
+    "date_utc": "2026-04-13T07:05:31",
+    "date_paris": "2026-04-13 07:05:31",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000861400165201",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "0",
+    "permission_blocked": null,
+    "transaction_id": 33689803,
+    "date_utc": "2026-04-13T07:08:21",
+    "date_paris": "2026-04-13 07:08:21",
+    "status": "106",
+    "validated": "0",
+    "releases": "0",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000866300652201",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33689843,
+    "date_utc": "2026-04-13T07:37:24",
+    "date_paris": "2026-04-13 07:37:24",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000868400714701",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33689861,
+    "date_utc": "2026-04-13T07:52:15",
+    "date_paris": "2026-04-13 07:52:15",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01547",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01547",
+    "permission_blocked": null,
+    "transaction_id": 33689932,
+    "date_utc": "2026-04-13T08:16:34",
+    "date_paris": "2026-04-13 08:16:34",
+    "status": "133",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01547",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01547",
+    "permission_blocked": null,
+    "transaction_id": 33689933,
+    "date_utc": "2026-04-13T08:16:34",
+    "date_paris": "2026-04-13 08:16:34",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02659",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02659",
+    "permission_blocked": null,
+    "transaction_id": 33689946,
+    "date_utc": "2026-04-13T08:20:42",
+    "date_paris": "2026-04-13 08:20:42",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02661",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02661",
+    "permission_blocked": null,
+    "transaction_id": 33689948,
+    "date_utc": "2026-04-13T08:20:44",
+    "date_paris": "2026-04-13 08:20:44",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02668",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02668",
+    "permission_blocked": null,
+    "transaction_id": 33689935,
+    "date_utc": "2026-04-13T08:16:51",
+    "date_paris": "2026-04-13 08:16:51",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02685",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02685",
+    "permission_blocked": null,
+    "transaction_id": 33689949,
+    "date_utc": "2026-04-13T08:20:46",
+    "date_paris": "2026-04-13 08:20:46",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02101",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02101",
+    "permission_blocked": null,
+    "transaction_id": 33690098,
+    "date_utc": "2026-04-13T08:39:34",
+    "date_paris": "2026-04-13 08:39:34",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02659",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02659",
+    "permission_blocked": null,
+    "transaction_id": 33690023,
+    "date_utc": "2026-04-13T08:32:03",
+    "date_paris": "2026-04-13 08:32:03",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02661",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02661",
+    "permission_blocked": null,
+    "transaction_id": 33690089,
+    "date_utc": "2026-04-13T08:39:15",
+    "date_paris": "2026-04-13 08:39:15",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02685",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02685",
+    "permission_blocked": null,
+    "transaction_id": 33690092,
+    "date_utc": "2026-04-13T08:39:19",
+    "date_paris": "2026-04-13 08:39:19",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01934",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01934",
+    "permission_blocked": null,
+    "transaction_id": 33690115,
+    "date_utc": "2026-04-13T08:41:51",
+    "date_paris": "2026-04-13 08:41:51",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01934",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01934",
+    "permission_blocked": null,
+    "transaction_id": 33690197,
+    "date_utc": "2026-04-13T08:49:52",
+    "date_paris": "2026-04-13 08:49:52",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02667",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02667",
+    "permission_blocked": null,
+    "transaction_id": 33690134,
+    "date_utc": "2026-04-13T08:42:25",
+    "date_paris": "2026-04-13 08:42:25",
+    "status": "133",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02667",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02667",
+    "permission_blocked": null,
+    "transaction_id": 33690135,
+    "date_utc": "2026-04-13T08:42:25",
+    "date_paris": "2026-04-13 08:42:25",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02668",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02668",
+    "permission_blocked": null,
+    "transaction_id": 33690180,
+    "date_utc": "2026-04-13T08:46:48",
+    "date_paris": "2026-04-13 08:46:48",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02109",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02109",
+    "permission_blocked": null,
+    "transaction_id": 33690212,
+    "date_utc": "2026-04-13T08:51:46",
+    "date_paris": "2026-04-13 08:51:46",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02324",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02324",
+    "permission_blocked": null,
+    "transaction_id": 33690290,
+    "date_utc": "2026-04-13T08:58:16",
+    "date_paris": "2026-04-13 08:58:16",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02461",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02461",
+    "permission_blocked": null,
+    "transaction_id": 33690284,
+    "date_utc": "2026-04-13T08:57:59",
+    "date_paris": "2026-04-13 08:57:59",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02483",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02483",
+    "permission_blocked": null,
+    "transaction_id": 33690300,
+    "date_utc": "2026-04-13T08:59:25",
+    "date_paris": "2026-04-13 08:59:25",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02705",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02705",
+    "permission_blocked": null,
+    "transaction_id": 33690241,
+    "date_utc": "2026-04-13T08:54:48",
+    "date_paris": "2026-04-13 08:54:48",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP05664",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP05664",
+    "permission_blocked": null,
+    "transaction_id": 33690245,
+    "date_utc": "2026-04-13T08:55:17",
+    "date_paris": "2026-04-13 08:55:17",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP05665",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP05665",
+    "permission_blocked": null,
+    "transaction_id": 33690246,
+    "date_utc": "2026-04-13T08:55:19",
+    "date_paris": "2026-04-13 08:55:19",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP05666",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP05666",
+    "permission_blocked": null,
+    "transaction_id": 33690244,
+    "date_utc": "2026-04-13T08:55:15",
+    "date_paris": "2026-04-13 08:55:15",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000869200429001",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "0",
+    "permission_blocked": null,
+    "transaction_id": 33690375,
+    "date_utc": "2026-04-13T09:06:15",
+    "date_paris": "2026-04-13 09:06:15",
+    "status": "106",
+    "validated": "0",
+    "releases": "0",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000869200429001",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "0",
+    "permission_blocked": null,
+    "transaction_id": 33690382,
+    "date_utc": "2026-04-13T09:07:03",
+    "date_paris": "2026-04-13 09:07:03",
+    "status": "106",
+    "validated": "0",
+    "releases": "0",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP00401",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP00401",
+    "permission_blocked": null,
+    "transaction_id": 33690342,
+    "date_utc": "2026-04-13T09:03:55",
+    "date_paris": "2026-04-13 09:03:55",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP00401",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP00401",
+    "permission_blocked": null,
+    "transaction_id": 33690365,
+    "date_utc": "2026-04-13T09:05:18",
+    "date_paris": "2026-04-13 09:05:18",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01143",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01143",
+    "permission_blocked": null,
+    "transaction_id": 33690326,
+    "date_utc": "2026-04-13T09:03:09",
+    "date_paris": "2026-04-13 09:03:09",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01145",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01145",
+    "permission_blocked": null,
+    "transaction_id": 33690325,
+    "date_utc": "2026-04-13T09:03:07",
+    "date_paris": "2026-04-13 09:03:07",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01163",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01163",
+    "permission_blocked": null,
+    "transaction_id": 33690328,
+    "date_utc": "2026-04-13T09:03:14",
+    "date_paris": "2026-04-13 09:03:14",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01166",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01166",
+    "permission_blocked": null,
+    "transaction_id": 33690327,
+    "date_utc": "2026-04-13T09:03:11",
+    "date_paris": "2026-04-13 09:03:11",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01248",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01248",
+    "permission_blocked": null,
+    "transaction_id": 33690330,
+    "date_utc": "2026-04-13T09:03:15",
+    "date_paris": "2026-04-13 09:03:15",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01248",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01248",
+    "permission_blocked": null,
+    "transaction_id": 33690355,
+    "date_utc": "2026-04-13T09:04:45",
+    "date_paris": "2026-04-13 09:04:45",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01524",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01524",
+    "permission_blocked": null,
+    "transaction_id": 33690343,
+    "date_utc": "2026-04-13T09:03:57",
+    "date_paris": "2026-04-13 09:03:57",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01547",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01547",
+    "permission_blocked": null,
+    "transaction_id": 33690322,
+    "date_utc": "2026-04-13T09:02:01",
+    "date_paris": "2026-04-13 09:02:01",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02454",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02454",
+    "permission_blocked": null,
+    "transaction_id": 33690338,
+    "date_utc": "2026-04-13T09:03:47",
+    "date_paris": "2026-04-13 09:03:47",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02461",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02461",
+    "permission_blocked": null,
+    "transaction_id": 33690341,
+    "date_utc": "2026-04-13T09:03:54",
+    "date_paris": "2026-04-13 09:03:54",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02469",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02469",
+    "permission_blocked": null,
+    "transaction_id": 33690339,
+    "date_utc": "2026-04-13T09:03:52",
+    "date_paris": "2026-04-13 09:03:52",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02483",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02483",
+    "permission_blocked": null,
+    "transaction_id": 33690388,
+    "date_utc": "2026-04-13T09:07:22",
+    "date_paris": "2026-04-13 09:07:22",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "3539581857101704143100262421",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "3539581857101704143100262421",
+    "permission_blocked": null,
+    "transaction_id": 33690502,
+    "date_utc": "2026-04-13T09:17:22",
+    "date_paris": "2026-04-13 09:17:22",
+    "status": "145",
+    "validated": "0",
+    "releases": "0",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000866300715901",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33690444,
+    "date_utc": "2026-04-13T09:12:50",
+    "date_paris": "2026-04-13 09:12:50",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "ACO_2026_24M_hRHaTuD",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "ACO_2026_24M_hRHaTuD",
+    "permission_blocked": null,
+    "transaction_id": 33690506,
+    "date_utc": "2026-04-13T09:18:35",
+    "date_paris": "2026-04-13 09:18:35",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "ACO_2026_24M_SZSJ5Xx",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "ACO_2026_24M_SZSJ5Xx",
+    "permission_blocked": null,
+    "transaction_id": 33690497,
+    "date_utc": "2026-04-13T09:16:42",
+    "date_paris": "2026-04-13 09:16:42",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01127",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01127",
+    "permission_blocked": null,
+    "transaction_id": 33690484,
+    "date_utc": "2026-04-13T09:16:18",
+    "date_paris": "2026-04-13 09:16:18",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01137",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01137",
+    "permission_blocked": null,
+    "transaction_id": 33690486,
+    "date_utc": "2026-04-13T09:16:21",
+    "date_paris": "2026-04-13 09:16:21",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01483",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01483",
+    "permission_blocked": null,
+    "transaction_id": 33690507,
+    "date_utc": "2026-04-13T09:18:42",
+    "date_paris": "2026-04-13 09:18:42",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01489",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01489",
+    "permission_blocked": null,
+    "transaction_id": 33690498,
+    "date_utc": "2026-04-13T09:16:47",
+    "date_paris": "2026-04-13 09:16:47",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01495",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01495",
+    "permission_blocked": null,
+    "transaction_id": 33690499,
+    "date_utc": "2026-04-13T09:16:49",
+    "date_paris": "2026-04-13 09:16:49",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01500",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01500",
+    "permission_blocked": null,
+    "transaction_id": 33690508,
+    "date_utc": "2026-04-13T09:18:46",
+    "date_paris": "2026-04-13 09:18:46",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02333",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02333",
+    "permission_blocked": null,
+    "transaction_id": 33690450,
+    "date_utc": "2026-04-13T09:13:35",
+    "date_paris": "2026-04-13 09:13:35",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02334",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02334",
+    "permission_blocked": null,
+    "transaction_id": 33690455,
+    "date_utc": "2026-04-13T09:14:11",
+    "date_paris": "2026-04-13 09:14:11",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02335",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02335",
+    "permission_blocked": null,
+    "transaction_id": 33690451,
+    "date_utc": "2026-04-13T09:13:41",
+    "date_paris": "2026-04-13 09:13:41",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02337",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02337",
+    "permission_blocked": null,
+    "transaction_id": 33690501,
+    "date_utc": "2026-04-13T09:16:58",
+    "date_paris": "2026-04-13 09:16:58",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02833",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02833",
+    "permission_blocked": null,
+    "transaction_id": 33690439,
+    "date_utc": "2026-04-13T09:12:36",
+    "date_paris": "2026-04-13 09:12:36",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "ACO_2026_24M_qGeg67",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "ACO_2026_24M_qGeg67",
+    "permission_blocked": null,
+    "transaction_id": 33690588,
+    "date_utc": "2026-04-13T09:25:42",
+    "date_paris": "2026-04-13 09:25:42",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01125",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01125",
+    "permission_blocked": null,
+    "transaction_id": 33690594,
+    "date_utc": "2026-04-13T09:25:57",
+    "date_paris": "2026-04-13 09:25:57",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01126",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01126",
+    "permission_blocked": null,
+    "transaction_id": 33690563,
+    "date_utc": "2026-04-13T09:23:14",
+    "date_paris": "2026-04-13 09:23:14",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01136",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01136",
+    "permission_blocked": null,
+    "transaction_id": 33690603,
+    "date_utc": "2026-04-13T09:26:37",
+    "date_paris": "2026-04-13 09:26:37",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01164",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01164",
+    "permission_blocked": null,
+    "transaction_id": 33690592,
+    "date_utc": "2026-04-13T09:25:54",
+    "date_paris": "2026-04-13 09:25:54",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01165",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01165",
+    "permission_blocked": null,
+    "transaction_id": 33690565,
+    "date_utc": "2026-04-13T09:23:17",
+    "date_paris": "2026-04-13 09:23:17",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01640",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01640",
+    "permission_blocked": null,
+    "transaction_id": 33690549,
+    "date_utc": "2026-04-13T09:22:48",
+    "date_paris": "2026-04-13 09:22:48",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02173",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02173",
+    "permission_blocked": null,
+    "transaction_id": 33690606,
+    "date_utc": "2026-04-13T09:26:56",
+    "date_paris": "2026-04-13 09:26:56",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02248",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02248",
+    "permission_blocked": null,
+    "transaction_id": 33690586,
+    "date_utc": "2026-04-13T09:25:36",
+    "date_paris": "2026-04-13 09:25:36",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02264",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02264",
+    "permission_blocked": null,
+    "transaction_id": 33690583,
+    "date_utc": "2026-04-13T09:25:32",
+    "date_paris": "2026-04-13 09:25:32",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02265",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02265",
+    "permission_blocked": null,
+    "transaction_id": 33690585,
+    "date_utc": "2026-04-13T09:25:34",
+    "date_paris": "2026-04-13 09:25:34",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000861500603001",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "0",
+    "permission_blocked": null,
+    "transaction_id": 33690708,
+    "date_utc": "2026-04-13T09:35:31",
+    "date_paris": "2026-04-13 09:35:31",
+    "status": "106",
+    "validated": "0",
+    "releases": "0",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000865200150001",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "0",
+    "permission_blocked": null,
+    "transaction_id": 33690691,
+    "date_utc": "2026-04-13T09:33:23",
+    "date_paris": "2026-04-13 09:33:23",
+    "status": "106",
+    "validated": "0",
+    "releases": "0",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000865200150001",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "0",
+    "permission_blocked": null,
+    "transaction_id": 33690694,
+    "date_utc": "2026-04-13T09:33:40",
+    "date_paris": "2026-04-13 09:33:40",
+    "status": "106",
+    "validated": "0",
+    "releases": "0",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "ACO_2026_24M_NH0Trmb",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "ACO_2026_24M_NH0Trmb",
+    "permission_blocked": null,
+    "transaction_id": 33690654,
+    "date_utc": "2026-04-13T09:30:31",
+    "date_paris": "2026-04-13 09:30:31",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "ACO_2026_24M_w66PV0f",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "ACO_2026_24M_w66PV0f",
+    "permission_blocked": null,
+    "transaction_id": 33690662,
+    "date_utc": "2026-04-13T09:30:53",
+    "date_paris": "2026-04-13 09:30:53",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "ACO_2026_24M_WSoDxQH",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "ACO_2026_24M_WSoDxQH",
+    "permission_blocked": null,
+    "transaction_id": 33690635,
+    "date_utc": "2026-04-13T09:29:39",
+    "date_paris": "2026-04-13 09:29:39",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01485",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01485",
+    "permission_blocked": null,
+    "transaction_id": 33690659,
+    "date_utc": "2026-04-13T09:30:42",
+    "date_paris": "2026-04-13 09:30:42",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01486",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01486",
+    "permission_blocked": null,
+    "transaction_id": 33690657,
+    "date_utc": "2026-04-13T09:30:41",
+    "date_paris": "2026-04-13 09:30:41",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01490",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01490",
+    "permission_blocked": null,
+    "transaction_id": 33690636,
+    "date_utc": "2026-04-13T09:29:46",
+    "date_paris": "2026-04-13 09:29:46",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01494",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01494",
+    "permission_blocked": null,
+    "transaction_id": 33690637,
+    "date_utc": "2026-04-13T09:29:48",
+    "date_paris": "2026-04-13 09:29:48",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01502",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01502",
+    "permission_blocked": null,
+    "transaction_id": 33690665,
+    "date_utc": "2026-04-13T09:31:01",
+    "date_paris": "2026-04-13 09:31:01",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02169",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02169",
+    "permission_blocked": null,
+    "transaction_id": 33690712,
+    "date_utc": "2026-04-13T09:36:22",
+    "date_paris": "2026-04-13 09:36:22",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02170",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02170",
+    "permission_blocked": null,
+    "transaction_id": 33690713,
+    "date_utc": "2026-04-13T09:36:24",
+    "date_paris": "2026-04-13 09:36:24",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02171",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02171",
+    "permission_blocked": null,
+    "transaction_id": 33690715,
+    "date_utc": "2026-04-13T09:36:42",
+    "date_paris": "2026-04-13 09:36:42",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02174",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02174",
+    "permission_blocked": null,
+    "transaction_id": 33690711,
+    "date_utc": "2026-04-13T09:36:20",
+    "date_paris": "2026-04-13 09:36:20",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02248",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02248",
+    "permission_blocked": null,
+    "transaction_id": 33690716,
+    "date_utc": "2026-04-13T09:36:57",
+    "date_paris": "2026-04-13 09:36:57",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000861500603001",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33690756,
+    "date_utc": "2026-04-13T09:45:43",
+    "date_paris": "2026-04-13 09:45:43",
+    "status": "133",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000861500603001",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33690757,
+    "date_utc": "2026-04-13T09:45:43",
+    "date_paris": "2026-04-13 09:45:43",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000861500603001",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33690764,
+    "date_utc": "2026-04-13T09:46:19",
+    "date_paris": "2026-04-13 09:46:19",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000865200150001",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33690758,
+    "date_utc": "2026-04-13T09:45:50",
+    "date_paris": "2026-04-13 09:45:50",
+    "status": "133",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000865200150001",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33690759,
+    "date_utc": "2026-04-13T09:45:50",
+    "date_paris": "2026-04-13 09:45:50",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000867200448401",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33690821,
+    "date_utc": "2026-04-13T09:51:56",
+    "date_paris": "2026-04-13 09:51:56",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP00261",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP00261",
+    "permission_blocked": null,
+    "transaction_id": 33690817,
+    "date_utc": "2026-04-13T09:51:06",
+    "date_paris": "2026-04-13 09:51:06",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP00262",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP00262",
+    "permission_blocked": null,
+    "transaction_id": 33690816,
+    "date_utc": "2026-04-13T09:51:03",
+    "date_paris": "2026-04-13 09:51:03",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP00265",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP00265",
+    "permission_blocked": null,
+    "transaction_id": 33690815,
+    "date_utc": "2026-04-13T09:51:01",
+    "date_paris": "2026-04-13 09:51:01",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP00266",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP00266",
+    "permission_blocked": null,
+    "transaction_id": 33690807,
+    "date_utc": "2026-04-13T09:50:02",
+    "date_paris": "2026-04-13 09:50:02",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP00270",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP00270",
+    "permission_blocked": null,
+    "transaction_id": 33690805,
+    "date_utc": "2026-04-13T09:49:58",
+    "date_paris": "2026-04-13 09:49:58",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP00274",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP00274",
+    "permission_blocked": null,
+    "transaction_id": 33690806,
+    "date_utc": "2026-04-13T09:50:00",
+    "date_paris": "2026-04-13 09:50:00",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP00275",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP00275",
+    "permission_blocked": null,
+    "transaction_id": 33690808,
+    "date_utc": "2026-04-13T09:50:09",
+    "date_paris": "2026-04-13 09:50:09",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01062",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01062",
+    "permission_blocked": null,
+    "transaction_id": 33690750,
+    "date_utc": "2026-04-13T09:45:12",
+    "date_paris": "2026-04-13 09:45:12",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01073",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01073",
+    "permission_blocked": null,
+    "transaction_id": 33690749,
+    "date_utc": "2026-04-13T09:45:10",
+    "date_paris": "2026-04-13 09:45:10",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01523",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01523",
+    "permission_blocked": null,
+    "transaction_id": 33690733,
+    "date_utc": "2026-04-13T09:42:18",
+    "date_paris": "2026-04-13 09:42:18",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01525",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01525",
+    "permission_blocked": null,
+    "transaction_id": 33690735,
+    "date_utc": "2026-04-13T09:42:26",
+    "date_paris": "2026-04-13 09:42:26",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01534",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01534",
+    "permission_blocked": null,
+    "transaction_id": 33690734,
+    "date_utc": "2026-04-13T09:42:20",
+    "date_paris": "2026-04-13 09:42:20",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01551",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01551",
+    "permission_blocked": null,
+    "transaction_id": 33690737,
+    "date_utc": "2026-04-13T09:42:28",
+    "date_paris": "2026-04-13 09:42:28",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02096",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02096",
+    "permission_blocked": null,
+    "transaction_id": 33690772,
+    "date_utc": "2026-04-13T09:46:30",
+    "date_paris": "2026-04-13 09:46:30",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02248",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02248",
+    "permission_blocked": null,
+    "transaction_id": 33690726,
+    "date_utc": "2026-04-13T09:40:36",
+    "date_paris": "2026-04-13 09:40:36",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02249",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02249",
+    "permission_blocked": null,
+    "transaction_id": 33690809,
+    "date_utc": "2026-04-13T09:50:18",
+    "date_paris": "2026-04-13 09:50:18",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02341",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02341",
+    "permission_blocked": null,
+    "transaction_id": 33690724,
+    "date_utc": "2026-04-13T09:40:24",
+    "date_paris": "2026-04-13 09:40:24",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02341",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02341",
+    "permission_blocked": null,
+    "transaction_id": 33690728,
+    "date_utc": "2026-04-13T09:41:33",
+    "date_paris": "2026-04-13 09:41:33",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02699",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02699",
+    "permission_blocked": null,
+    "transaction_id": 33690791,
+    "date_utc": "2026-04-13T09:48:09",
+    "date_paris": "2026-04-13 09:48:09",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02700",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02700",
+    "permission_blocked": null,
+    "transaction_id": 33690790,
+    "date_utc": "2026-04-13T09:48:06",
+    "date_paris": "2026-04-13 09:48:06",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02701",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02701",
+    "permission_blocked": null,
+    "transaction_id": 33690787,
+    "date_utc": "2026-04-13T09:48:01",
+    "date_paris": "2026-04-13 09:48:01",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02704",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02704",
+    "permission_blocked": null,
+    "transaction_id": 33690784,
+    "date_utc": "2026-04-13T09:47:56",
+    "date_paris": "2026-04-13 09:47:56",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02705",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02705",
+    "permission_blocked": null,
+    "transaction_id": 33690786,
+    "date_utc": "2026-04-13T09:47:58",
+    "date_paris": "2026-04-13 09:47:58",
+    "status": "117",
+    "validated": "0",
+    "releases": "0",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02706",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02706",
+    "permission_blocked": null,
+    "transaction_id": 33690785,
+    "date_utc": "2026-04-13T09:47:57",
+    "date_paris": "2026-04-13 09:47:57",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02784",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02784",
+    "permission_blocked": null,
+    "transaction_id": 33690802,
+    "date_utc": "2026-04-13T09:49:08",
+    "date_paris": "2026-04-13 09:49:08",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02793",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02793",
+    "permission_blocked": null,
+    "transaction_id": 33690798,
+    "date_utc": "2026-04-13T09:48:59",
+    "date_paris": "2026-04-13 09:48:59",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02794",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02794",
+    "permission_blocked": null,
+    "transaction_id": 33690801,
+    "date_utc": "2026-04-13T09:49:06",
+    "date_paris": "2026-04-13 09:49:06",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02813",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02813",
+    "permission_blocked": null,
+    "transaction_id": 33690800,
+    "date_utc": "2026-04-13T09:49:01",
+    "date_paris": "2026-04-13 09:49:01",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000860800251701",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33690865,
+    "date_utc": "2026-04-13T09:56:33",
+    "date_paris": "2026-04-13 09:56:33",
+    "status": "133",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000860800251701",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33690866,
+    "date_utc": "2026-04-13T09:56:33",
+    "date_paris": "2026-04-13 09:56:33",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000860800251701",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33690874,
+    "date_utc": "2026-04-13T09:56:55",
+    "date_paris": "2026-04-13 09:56:55",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000864200121901",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33690871,
+    "date_utc": "2026-04-13T09:56:45",
+    "date_paris": "2026-04-13 09:56:45",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000866200326901",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33690905,
+    "date_utc": "2026-04-13T09:59:19",
+    "date_paris": "2026-04-13 09:59:19",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01399",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01399",
+    "permission_blocked": null,
+    "transaction_id": 33690906,
+    "date_utc": "2026-04-13T09:59:25",
+    "date_paris": "2026-04-13 09:59:25",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01640",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01640",
+    "permission_blocked": null,
+    "transaction_id": 33690835,
+    "date_utc": "2026-04-13T09:53:24",
+    "date_paris": "2026-04-13 09:53:24",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02455",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02455",
+    "permission_blocked": null,
+    "transaction_id": 33690921,
+    "date_utc": "2026-04-13T10:01:05",
+    "date_paris": "2026-04-13 10:01:05",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000860000158601",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33690959,
+    "date_utc": "2026-04-13T10:05:19",
+    "date_paris": "2026-04-13 10:05:19",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000861600605501",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33690962,
+    "date_utc": "2026-04-13T10:05:24",
+    "date_paris": "2026-04-13 10:05:24",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000868900609301",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33690960,
+    "date_utc": "2026-04-13T10:05:23",
+    "date_paris": "2026-04-13 10:05:23",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01639",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01639",
+    "permission_blocked": null,
+    "transaction_id": 33690987,
+    "date_utc": "2026-04-13T10:06:40",
+    "date_paris": "2026-04-13 10:06:40",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01645",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01645",
+    "permission_blocked": null,
+    "transaction_id": 33690981,
+    "date_utc": "2026-04-13T10:06:31",
+    "date_paris": "2026-04-13 10:06:31",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01646",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01646",
+    "permission_blocked": null,
+    "transaction_id": 33690977,
+    "date_utc": "2026-04-13T10:06:24",
+    "date_paris": "2026-04-13 10:06:24",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01647",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01647",
+    "permission_blocked": null,
+    "transaction_id": 33690985,
+    "date_utc": "2026-04-13T10:06:37",
+    "date_paris": "2026-04-13 10:06:37",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01649",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01649",
+    "permission_blocked": null,
+    "transaction_id": 33690988,
+    "date_utc": "2026-04-13T10:06:43",
+    "date_paris": "2026-04-13 10:06:43",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01650",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01650",
+    "permission_blocked": null,
+    "transaction_id": 33690983,
+    "date_utc": "2026-04-13T10:06:36",
+    "date_paris": "2026-04-13 10:06:36",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01651",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01651",
+    "permission_blocked": null,
+    "transaction_id": 33690980,
+    "date_utc": "2026-04-13T10:06:29",
+    "date_paris": "2026-04-13 10:06:29",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01654",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01654",
+    "permission_blocked": null,
+    "transaction_id": 33690978,
+    "date_utc": "2026-04-13T10:06:27",
+    "date_paris": "2026-04-13 10:06:27",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01655",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01655",
+    "permission_blocked": null,
+    "transaction_id": 33690982,
+    "date_utc": "2026-04-13T10:06:32",
+    "date_paris": "2026-04-13 10:06:32",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02163",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02163",
+    "permission_blocked": null,
+    "transaction_id": 33690976,
+    "date_utc": "2026-04-13T10:05:59",
+    "date_paris": "2026-04-13 10:05:59",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02526",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02526",
+    "permission_blocked": null,
+    "transaction_id": 33690991,
+    "date_utc": "2026-04-13T10:07:38",
+    "date_paris": "2026-04-13 10:07:38",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02526",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02526",
+    "permission_blocked": null,
+    "transaction_id": 33691018,
+    "date_utc": "2026-04-13T10:10:48",
+    "date_paris": "2026-04-13 10:10:48",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02825",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02825",
+    "permission_blocked": null,
+    "transaction_id": 33691040,
+    "date_utc": "2026-04-13T10:11:46",
+    "date_paris": "2026-04-13 10:11:46",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02827",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02827",
+    "permission_blocked": null,
+    "transaction_id": 33691039,
+    "date_utc": "2026-04-13T10:11:44",
+    "date_paris": "2026-04-13 10:11:44",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02831",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02831",
+    "permission_blocked": null,
+    "transaction_id": 33691038,
+    "date_utc": "2026-04-13T10:11:42",
+    "date_paris": "2026-04-13 10:11:42",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP05665",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP05665",
+    "permission_blocked": null,
+    "transaction_id": 33691007,
+    "date_utc": "2026-04-13T10:10:16",
+    "date_paris": "2026-04-13 10:10:16",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "33130",
+    "coding": "270",
+    "ticket_blocked": null,
+    "upid": "0",
+    "permission_blocked": null,
+    "transaction_id": 33691087,
+    "date_utc": "2026-04-13T10:14:04",
+    "date_paris": "2026-04-13 10:14:04",
+    "status": "106",
+    "validated": "0",
+    "releases": "0",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000860200494501",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691084,
+    "date_utc": "2026-04-13T10:14:00",
+    "date_paris": "2026-04-13 10:14:00",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000861800556401",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691059,
+    "date_utc": "2026-04-13T10:12:47",
+    "date_paris": "2026-04-13 10:12:47",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000862500494901",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691086,
+    "date_utc": "2026-04-13T10:14:03",
+    "date_paris": "2026-04-13 10:14:03",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000862600494401",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691092,
+    "date_utc": "2026-04-13T10:14:20",
+    "date_paris": "2026-04-13 10:14:20",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000862900268401",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691088,
+    "date_utc": "2026-04-13T10:14:11",
+    "date_paris": "2026-04-13 10:14:11",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000863500525801",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691041,
+    "date_utc": "2026-04-13T10:11:49",
+    "date_paris": "2026-04-13 10:11:49",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000864400493001",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691093,
+    "date_utc": "2026-04-13T10:14:21",
+    "date_paris": "2026-04-13 10:14:21",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000865300493201",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691091,
+    "date_utc": "2026-04-13T10:14:16",
+    "date_paris": "2026-04-13 10:14:16",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000866200326901",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691094,
+    "date_utc": "2026-04-13T10:14:33",
+    "date_paris": "2026-04-13 10:14:33",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000868300243501",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691072,
+    "date_utc": "2026-04-13T10:13:28",
+    "date_paris": "2026-04-13 10:13:28",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01550",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01550",
+    "permission_blocked": null,
+    "transaction_id": 33691043,
+    "date_utc": "2026-04-13T10:11:51",
+    "date_paris": "2026-04-13 10:11:51",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "33978",
+    "coding": "270",
+    "ticket_blocked": null,
+    "upid": "0",
+    "permission_blocked": null,
+    "transaction_id": 33691171,
+    "date_utc": "2026-04-13T10:20:42",
+    "date_paris": "2026-04-13 10:20:42",
+    "status": "106",
+    "validated": "0",
+    "releases": "0",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000861700157401",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691248,
+    "date_utc": "2026-04-13T10:24:17",
+    "date_paris": "2026-04-13 10:24:17",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000862600526101",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691243,
+    "date_utc": "2026-04-13T10:24:07",
+    "date_paris": "2026-04-13 10:24:07",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000862900607901",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691241,
+    "date_utc": "2026-04-13T10:23:52",
+    "date_paris": "2026-04-13 10:23:52",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000863100005701",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691221,
+    "date_utc": "2026-04-13T10:22:57",
+    "date_paris": "2026-04-13 10:22:57",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000863600157601",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691214,
+    "date_utc": "2026-04-13T10:22:35",
+    "date_paris": "2026-04-13 10:22:35",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000864700650001",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691172,
+    "date_utc": "2026-04-13T10:20:45",
+    "date_paris": "2026-04-13 10:20:45",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000864900251301",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691232,
+    "date_utc": "2026-04-13T10:23:16",
+    "date_paris": "2026-04-13 10:23:16",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000866800564101",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691233,
+    "date_utc": "2026-04-13T10:23:19",
+    "date_paris": "2026-04-13 10:23:19",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000867100415201",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691148,
+    "date_utc": "2026-04-13T10:19:47",
+    "date_paris": "2026-04-13 10:19:47",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000868100526601",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691244,
+    "date_utc": "2026-04-13T10:24:09",
+    "date_paris": "2026-04-13 10:24:09",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000868200362101",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691231,
+    "date_utc": "2026-04-13T10:23:14",
+    "date_paris": "2026-04-13 10:23:14",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000868600273401",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691234,
+    "date_utc": "2026-04-13T10:23:20",
+    "date_paris": "2026-04-13 10:23:20",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000869000526801",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691239,
+    "date_utc": "2026-04-13T10:23:47",
+    "date_paris": "2026-04-13 10:23:47",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000869100605401",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691249,
+    "date_utc": "2026-04-13T10:24:19",
+    "date_paris": "2026-04-13 10:24:19",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "ACO_2026_24M_6PzjTK0",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "ACO_2026_24M_6PzjTK0",
+    "permission_blocked": null,
+    "transaction_id": 33691183,
+    "date_utc": "2026-04-13T10:21:23",
+    "date_paris": "2026-04-13 10:21:23",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "ACO_2026_24M_ag5LU6J",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "ACO_2026_24M_ag5LU6J",
+    "permission_blocked": null,
+    "transaction_id": 33691213,
+    "date_utc": "2026-04-13T10:22:33",
+    "date_paris": "2026-04-13 10:22:33",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "ACO_2026_24M_B4eM2Ia",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "ACO_2026_24M_B4eM2Ia",
+    "permission_blocked": null,
+    "transaction_id": 33691218,
+    "date_utc": "2026-04-13T10:22:52",
+    "date_paris": "2026-04-13 10:22:52",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "ACO_2026_24M_pwnUdIX",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "ACO_2026_24M_pwnUdIX",
+    "permission_blocked": null,
+    "transaction_id": 33691228,
+    "date_utc": "2026-04-13T10:23:11",
+    "date_paris": "2026-04-13 10:23:11",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "ACO_2026_24M_rJ6SYhJ",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "ACO_2026_24M_rJ6SYhJ",
+    "permission_blocked": null,
+    "transaction_id": 33691247,
+    "date_utc": "2026-04-13T10:24:15",
+    "date_paris": "2026-04-13 10:24:15",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "ACO_2026_24M_vs2Z8Cu",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "ACO_2026_24M_vs2Z8Cu",
+    "permission_blocked": null,
+    "transaction_id": 33691242,
+    "date_utc": "2026-04-13T10:24:03",
+    "date_paris": "2026-04-13 10:24:03",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP00482",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP00482",
+    "permission_blocked": null,
+    "transaction_id": 33691150,
+    "date_utc": "2026-04-13T10:19:49",
+    "date_paris": "2026-04-13 10:19:49",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01515",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01515",
+    "permission_blocked": null,
+    "transaction_id": 33691222,
+    "date_utc": "2026-04-13T10:22:59",
+    "date_paris": "2026-04-13 10:22:59",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01724",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01724",
+    "permission_blocked": null,
+    "transaction_id": 33691188,
+    "date_utc": "2026-04-13T10:21:38",
+    "date_paris": "2026-04-13 10:21:38",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01725",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01725",
+    "permission_blocked": null,
+    "transaction_id": 33691185,
+    "date_utc": "2026-04-13T10:21:32",
+    "date_paris": "2026-04-13 10:21:32",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01726",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01726",
+    "permission_blocked": null,
+    "transaction_id": 33691187,
+    "date_utc": "2026-04-13T10:21:36",
+    "date_paris": "2026-04-13 10:21:36",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01727",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01727",
+    "permission_blocked": null,
+    "transaction_id": 33691193,
+    "date_utc": "2026-04-13T10:21:44",
+    "date_paris": "2026-04-13 10:21:44",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01728",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01728",
+    "permission_blocked": null,
+    "transaction_id": 33691195,
+    "date_utc": "2026-04-13T10:21:47",
+    "date_paris": "2026-04-13 10:21:47",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01733",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01733",
+    "permission_blocked": null,
+    "transaction_id": 33691190,
+    "date_utc": "2026-04-13T10:21:40",
+    "date_paris": "2026-04-13 10:21:40",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP01737",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP01737",
+    "permission_blocked": null,
+    "transaction_id": 33691186,
+    "date_utc": "2026-04-13T10:21:34",
+    "date_paris": "2026-04-13 10:21:34",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "EWC2026EMP02101",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "EWC2026EMP02101",
+    "permission_blocked": null,
+    "transaction_id": 33691204,
+    "date_utc": "2026-04-13T10:22:15",
+    "date_paris": "2026-04-13 10:22:15",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Sortie",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "area": {
+      "Type": "0",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "0",
+      "Exit": "1",
+      "FE": "0",
+      "FDE": "0"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000860100125201",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691278,
+    "date_utc": "2026-04-13T10:26:06",
+    "date_paris": "2026-04-13 10:26:06",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000861400121601",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691279,
+    "date_utc": "2026-04-13T10:26:09",
+    "date_paris": "2026-04-13 10:26:09",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000863300605701",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691328,
+    "date_utc": "2026-04-13T10:28:58",
+    "date_paris": "2026-04-13 10:28:58",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000863900682001",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691350,
+    "date_utc": "2026-04-13T10:30:37",
+    "date_paris": "2026-04-13 10:30:37",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000865800477801",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691269,
+    "date_utc": "2026-04-13T10:25:39",
+    "date_paris": "2026-04-13 10:25:39",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000866400422901",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691319,
+    "date_utc": "2026-04-13T10:28:17",
+    "date_paris": "2026-04-13 10:28:17",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000866800250901",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691332,
+    "date_utc": "2026-04-13T10:29:14",
+    "date_paris": "2026-04-13 10:29:14",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "6000867900308901",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "2026-24HM-ACCRED",
+    "permission_blocked": null,
+    "transaction_id": 33691336,
+    "date_utc": "2026-04-13T10:29:27",
+    "date_paris": "2026-04-13 10:29:27",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "ACO_2026_24M_5h8IAOf",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "ACO_2026_24M_5h8IAOf",
+    "permission_blocked": null,
+    "transaction_id": 33691311,
+    "date_utc": "2026-04-13T10:27:47",
+    "date_paris": "2026-04-13 10:27:47",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "ACO_2026_24M_62m1wq9",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "ACO_2026_24M_62m1wq9",
+    "permission_blocked": null,
+    "transaction_id": 33691323,
+    "date_utc": "2026-04-13T10:28:31",
+    "date_paris": "2026-04-13 10:28:31",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  },
+  {
+    "utid": "ACO_2026_24M_6FS5BEn",
+    "coding": "262",
+    "ticket_blocked": null,
+    "upid": "ACO_2026_24M_6FS5BEn",
+    "permission_blocked": null,
+    "transaction_id": 33691317,
+    "date_utc": "2026-04-13T10:28:14",
+    "date_paris": "2026-04-13 10:28:14",
+    "status": "0",
+    "validated": "0",
+    "releases": "1",
+    "test_mode": "0",
+    "direction": "Entree",
+    "venue": {
+      "ID": "2",
+      "Name": "ACO",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "area": {
+      "Type": "1",
+      "ID": "628",
+      "Name": "ENCEINTE GENERALE",
+      "Entry": "1",
+      "Exit": "0",
+      "FE": "1",
+      "FDE": "1"
+    },
+    "gate": {
+      "ID": "801",
+      "Name": "PORTE CIK"
+    },
+    "checkpoint": {
+      "ID": "894",
+      "Name": "PDA.67"
+    }
+  }
+]
