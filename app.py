@@ -30,6 +30,7 @@ from merge import run_merge
 from analyse_ops import analyse_ops_bp
 from anoloc import anoloc_bp
 from anpr import anpr_bp
+from cameras import cameras_bp
 
 ################################################################################
 # Configuration
@@ -1544,6 +1545,7 @@ app.register_blueprint(traffic_bp)
 app.register_blueprint(analyse_ops_bp)
 app.register_blueprint(anoloc_bp)
 app.register_blueprint(anpr_bp)
+app.register_blueprint(cameras_bp)
 # app.register_blueprint(meteo_bp)
 
 ################################################################################
