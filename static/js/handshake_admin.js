@@ -139,7 +139,8 @@
         shown.forEach(function (e) {
           var tr = el("tr");
           var cpName = (e.checkpoint && (e.checkpoint.Name || e.checkpoint.name)) || "?";
-          [e.date_paris || "", cpName, e.status_label || e.status || "", e.direction || ""].forEach(function (txt) {
+          var typeLabel = e.type_scan === "vehicule" ? "Veh." : e.type_scan === "enfant" ? "Enf." : "Pers.";
+          [e.date_paris || "", cpName, e.status_label || e.status || "", e.direction || "", typeLabel].forEach(function (txt) {
             var td = el("td");
             td.textContent = txt;
             tr.appendChild(td);
@@ -174,6 +175,15 @@
             var gate = el("span", "hsh-active-chip-count");
             gate.textContent = cp.parent_gate;
             chip.appendChild(gate);
+          }
+          if (cp.entrees) {
+            var counts = el("span", "hsh-active-chip-count");
+            var parts = [];
+            if (cp.entrees_pers) parts.push(cp.entrees_pers + " pers.");
+            if (cp.entrees_veh) parts.push(cp.entrees_veh + " veh.");
+            if (cp.entrees_enf) parts.push(cp.entrees_enf + " enf.");
+            counts.textContent = parts.length ? parts.join(" / ") : cp.entrees + " E";
+            chip.appendChild(counts);
           }
           wrap.appendChild(chip);
         });
@@ -222,6 +232,32 @@
             stats.appendChild(sp);
           });
           card.appendChild(stats);
+
+          // Detail par categorie (personnes / vehicules / enfants)
+          var eVeh = c.entrees_veh || 0;
+          var sVeh = c.sorties_veh || 0;
+          var eEnf = c.entrees_enf || 0;
+          var sEnf = c.sorties_enf || 0;
+          if (eVeh || sVeh || eEnf || sEnf) {
+            var eTotal = parseInt(c.entries, 10) || 0;
+            var sTotal = parseInt(c.exits, 10) || 0;
+            var ePers = eTotal - eVeh - eEnf;
+            var sPers = sTotal - sVeh - sEnf;
+            var detail = el("div", "hsh-counter-detail");
+            detail.style.fontSize = "0.75rem";
+            detail.style.opacity = "0.8";
+            detail.style.marginTop = "4px";
+            var lines = [];
+            lines.push("Pers: E " + ePers + " / S " + sPers + " / P " + (ePers - sPers));
+            if (eVeh || sVeh) lines.push("Veh: E " + eVeh + " / S " + sVeh + " / P " + (eVeh - sVeh));
+            if (eEnf || sEnf) lines.push("Enf: E " + eEnf + " / S " + sEnf + " / P " + (eEnf - sEnf));
+            lines.forEach(function (line) {
+              var lineEl = el("div");
+              lineEl.textContent = line;
+              detail.appendChild(lineEl);
+            });
+            card.appendChild(detail);
+          }
 
           if (upper > 0) {
             var gauge = el("div", "hsh-gauge");
@@ -285,14 +321,35 @@
       });
     });
 
+    // Remonter les compteurs du jour des checkpoints vers les parents
+    function sumCounts(node) {
+      var c = node.counts_jour || {entrees: 0, sorties: 0, entrees_veh: 0, sorties_veh: 0, entrees_enf: 0, sorties_enf: 0};
+      var kids = node._children || [];
+      kids.forEach(function (child) {
+        var cc = sumCounts(child);
+        c.entrees = (c.entrees || 0) + (cc.entrees || 0);
+        c.sorties = (c.sorties || 0) + (cc.sorties || 0);
+        c.entrees_veh = (c.entrees_veh || 0) + (cc.entrees_veh || 0);
+        c.sorties_veh = (c.sorties_veh || 0) + (cc.sorties_veh || 0);
+        c.entrees_enf = (c.entrees_enf || 0) + (cc.entrees_enf || 0);
+        c.sorties_enf = (c.sorties_enf || 0) + (cc.sorties_enf || 0);
+      });
+      node.counts_jour = c;
+      return c;
+    }
+
     var attachedIds = new Set();
     venues.forEach(function (v) { (v._children || []).forEach(function (a) { attachedIds.add(a._id); }); });
     areas.forEach(function (a) { (a._children || []).forEach(function (g) { attachedIds.add(g._id); }); });
     gates.forEach(function (g) { (g._children || []).forEach(function (c) { attachedIds.add(c._id); }); });
 
+    // Calculer les totaux en remontant depuis les feuilles
+    venues.forEach(sumCounts);
+
     var orphans = docs.filter(function (d) {
       return !attachedIds.has(d._id) && (d.location_type || "").toLowerCase() !== "venue";
     });
+    orphans.forEach(sumCounts);
 
     return { roots: venues, orphans: orphans };
   }
@@ -384,10 +441,16 @@
       badge.style.borderColor = meta.color;
       row.appendChild(badge);
 
-      // Compteurs inline
-      if (doc.derniers_compteurs && doc.derniers_compteurs.current) {
+      // Compteurs inline (jour, par categorie)
+      var cj = doc.counts_jour;
+      if (cj && cj.entrees) {
         var ctr = el("span", "hsh-tree-counter");
-        ctr.textContent = doc.derniers_compteurs.current + " scans";
+        var ePers = (cj.entrees || 0) - (cj.entrees_veh || 0) - (cj.entrees_enf || 0);
+        var parts = [];
+        if (ePers > 0) parts.push(ePers + " pers.");
+        if (cj.entrees_veh > 0) parts.push(cj.entrees_veh + " veh.");
+        if (cj.entrees_enf > 0) parts.push(cj.entrees_enf + " enf.");
+        ctr.textContent = parts.length ? parts.join(" / ") : cj.entrees + " E";
         row.appendChild(ctr);
       }
 

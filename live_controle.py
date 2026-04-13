@@ -223,6 +223,7 @@ col_data_access = db["data_access"]
 col_structure = db["hsh_structure"]
 col_erreurs = db["hsh_erreurs"]
 col_tx_agg = db["hsh_transactions_agg"]
+col_barcodes_utids = db["access_barcodes_utids"]
 
 GLOBAL_ID = "___GLOBAL___"
 
@@ -237,6 +238,26 @@ GLOBAL_DEFAULTS = {
     "dernier_transaction_id": None,
     "dernier_cycle": None,
 }
+
+
+def charger_cache_titres():
+    """Charge le mapping utid -> title depuis access_barcodes_utids."""
+    cache = {}
+    for doc in col_barcodes_utids.find({}, {"utid": 1, "title": 1}):
+        utid = doc.get("utid")
+        if utid:
+            cache[utid] = doc.get("title", "")
+    return cache
+
+
+def categoriser_scan(utid, cache_titres):
+    """Retourne 'enfant', 'vehicule' ou 'personne' selon le titre du billet."""
+    if utid and utid in cache_titres:
+        title = cache_titres[utid]
+        if "Bracelet Enfant" in title:
+            return "enfant"
+        return "vehicule"
+    return "personne"
 
 
 def lire_global():
@@ -831,10 +852,12 @@ def mettre_a_jour_arbre(txs, evenement):
             print(f"    Area {a_name} ({a_id}) -> Venue {v_name} ({v_id})")
 
 
-def stocker_erreurs(txs, evenement, evenement_clean):
+def stocker_erreurs(txs, evenement, evenement_clean, cache_titres=None):
     """Insère les transactions en erreur (Status != '0') dans hsh_erreurs.
     Stocke l'intégralité des données de la transaction."""
     ts = datetime.datetime.now(datetime.timezone.utc)
+    if cache_titres is None:
+        cache_titres = {}
     ops = []
     for tx in txs:
         if tx["status"] == "0":
@@ -857,6 +880,7 @@ def stocker_erreurs(txs, evenement, evenement_clean):
         doc["status_label"] = _label_status(tx["status"])
         doc["coding_label"] = _label_coding(tx.get("coding"))
         doc["validated_label"] = _label_validated(tx.get("validated"))
+        doc["type_scan"] = categoriser_scan(tx.get("utid"), cache_titres)
 
         ops.append(UpdateOne({"_id": doc_id}, {"$set": doc}, upsert=True))
 
@@ -865,8 +889,10 @@ def stocker_erreurs(txs, evenement, evenement_clean):
         print(f"  {len(ops)} transactions en erreur upsertees dans hsh_erreurs.")
 
 
-def agreger_transactions(txs, evenement):
+def agreger_transactions(txs, evenement, cache_titres=None):
     """Agrege les transactions par checkpoint + tranche de 5 minutes."""
+    if cache_titres is None:
+        cache_titres = {}
     buckets = {}
     for tx in txs:
         cp = tx.get("checkpoint")
@@ -902,6 +928,8 @@ def agreger_transactions(txs, evenement):
                 "gate_name": gate_name,
                 "tranche": tranche,
                 "ok": 0, "erreurs": 0, "entrees": 0, "sorties": 0,
+                "entrees_vehicules": 0, "sorties_vehicules": 0,
+                "entrees_enfants": 0, "sorties_enfants": 0,
             }
 
         b = buckets[key]
@@ -914,6 +942,19 @@ def agreger_transactions(txs, evenement):
             b["entrees"] += 1
         elif direction == "Sortie":
             b["sorties"] += 1
+
+        # Compteurs par type de scan
+        cat = categoriser_scan(tx.get("utid"), cache_titres)
+        if cat == "vehicule":
+            if direction == "Entree":
+                b["entrees_vehicules"] += 1
+            elif direction == "Sortie":
+                b["sorties_vehicules"] += 1
+        elif cat == "enfant":
+            if direction == "Entree":
+                b["entrees_enfants"] += 1
+            elif direction == "Sortie":
+                b["sorties_enfants"] += 1
 
     if not buckets:
         return
@@ -929,6 +970,10 @@ def agreger_transactions(txs, evenement):
                     "erreurs": b["erreurs"],
                     "entrees": b["entrees"],
                     "sorties": b["sorties"],
+                    "entrees_vehicules": b["entrees_vehicules"],
+                    "sorties_vehicules": b["sorties_vehicules"],
+                    "entrees_enfants": b["entrees_enfants"],
+                    "sorties_enfants": b["sorties_enfants"],
                 },
                 "$set": {
                     "checkpoint_id": b["cp_id"],
@@ -945,8 +990,10 @@ def agreger_transactions(txs, evenement):
         print(f"  {len(ops)} tranches agregees dans hsh_transactions_agg.")
 
 
-def executer_transactions(sock, doc_global):
+def executer_transactions(sock, doc_global, cache_titres=None):
     """Collecte paginée des transactions → erreurs + arbre."""
+    if cache_titres is None:
+        cache_titres = {}
     evenement = doc_global.get("evenement", "")
     evenement_clean = doc_global.get("evenement_clean", "")
     last_tx_id = doc_global.get("dernier_transaction_id")
@@ -1020,9 +1067,9 @@ def executer_transactions(sock, doc_global):
         nb_erreurs = sum(1 for tx in txs if tx["status"] != "0")
         total_erreurs += nb_erreurs
         if txs:
-            stocker_erreurs(txs, evenement, evenement_clean)
+            stocker_erreurs(txs, evenement, evenement_clean, cache_titres)
             mettre_a_jour_arbre(txs, evenement)
-            agreger_transactions(txs, evenement)
+            agreger_transactions(txs, evenement, cache_titres)
 
         print(f"  Page {page:03d}: {nb} transactions ({nb_erreurs} erreurs) | NotComplete={'1' if not_complete else '0'}")
 
@@ -1135,11 +1182,15 @@ def main():
         else:
             print("[ETAPE 1] Inventaire deja fait — skip")
 
-        # 4. Collecte des transactions
-        print("[ETAPE 2] Collecte des transactions")
-        executer_transactions(sock, doc)
+        # 4. Charger le cache des titres pour catégoriser les scans
+        cache_titres = charger_cache_titres()
+        print(f"  Cache titres: {len(cache_titres)} UTID charges")
 
-        # 5. Collecte des compteurs
+        # 5. Collecte des transactions
+        print("[ETAPE 2] Collecte des transactions")
+        executer_transactions(sock, doc, cache_titres)
+
+        # 6. Collecte des compteurs
         print("[ETAPE 3] Collecte des compteurs selectionnes")
         executer_compteurs(sock, evenement, evenement_clean)
 

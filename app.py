@@ -3925,6 +3925,28 @@ def hsh_get_structure():
     if evenement:
         filtre["evenement"] = evenement
     docs = list(COL_HSH_STRUCTURE.find(filtre))
+
+    # Agreger les compteurs du jour par checkpoint depuis hsh_transactions_agg
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    agg_filtre = {"tranche": {"$gte": today_start}}
+    if evenement:
+        agg_filtre["evenement"] = evenement
+    pipeline = [
+        {"$match": agg_filtre},
+        {"$group": {
+            "_id": "$checkpoint_id",
+            "entrees": {"$sum": "$entrees"},
+            "sorties": {"$sum": "$sorties"},
+            "entrees_vehicules": {"$sum": {"$ifNull": ["$entrees_vehicules", 0]}},
+            "sorties_vehicules": {"$sum": {"$ifNull": ["$sorties_vehicules", 0]}},
+            "entrees_enfants": {"$sum": {"$ifNull": ["$entrees_enfants", 0]}},
+            "sorties_enfants": {"$sum": {"$ifNull": ["$sorties_enfants", 0]}},
+        }},
+    ]
+    counts_by_cp = {}
+    for agg in COL_HSH_TX_AGG.aggregate(pipeline):
+        counts_by_cp[agg["_id"]] = agg
+
     for d in docs:
         d["_id"] = str(d["_id"])
         for k, v in d.items():
@@ -3934,6 +3956,17 @@ def hsh_get_structure():
                 for kk, vv in v.items():
                     if hasattr(vv, "isoformat"):
                         v[kk] = vv.isoformat()
+        # Attacher les compteurs du jour aux checkpoints
+        if d.get("location_type") == "Checkpoint":
+            c = counts_by_cp.get(d.get("location_id"), {})
+            d["counts_jour"] = {
+                "entrees": c.get("entrees", 0),
+                "sorties": c.get("sorties", 0),
+                "entrees_veh": c.get("entrees_vehicules", 0),
+                "sorties_veh": c.get("sorties_vehicules", 0),
+                "entrees_enf": c.get("entrees_enfants", 0),
+                "sorties_enf": c.get("sorties_enfants", 0),
+            }
     return jsonify(docs)
 
 
@@ -4223,6 +4256,45 @@ def hsh_get_counters_context():
 def hsh_get_counters():
     doc = _hsh_read_global()
     locations = doc.get("locations_selectionnees", [])
+
+    # Agreger vehicules/enfants du jour depuis hsh_transactions_agg
+    # Les compteurs live sont par location (Area, Venue...), les transactions sont par checkpoint.
+    # On doit remonter : checkpoint -> parent_area/parent_venue via hsh_structure.
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    pipeline = [
+        {"$match": {"tranche": {"$gte": today_start}}},
+        {"$group": {
+            "_id": "$checkpoint_id",
+            "entrees_veh": {"$sum": {"$ifNull": ["$entrees_vehicules", 0]}},
+            "sorties_veh": {"$sum": {"$ifNull": ["$sorties_vehicules", 0]}},
+            "entrees_enf": {"$sum": {"$ifNull": ["$entrees_enfants", 0]}},
+            "sorties_enf": {"$sum": {"$ifNull": ["$sorties_enfants", 0]}},
+        }},
+    ]
+    veh_enf_by_cp = {}
+    for agg in COL_HSH_TX_AGG.aggregate(pipeline):
+        veh_enf_by_cp[agg["_id"]] = agg
+
+    # Construire le mapping location_id -> totaux vehicules/enfants en remontant la hierarchie
+    # Un checkpoint appartient a une area (parent_area.id) et une venue (parent_venue.id)
+    veh_enf_by_loc = {}
+    for cp_doc in COL_HSH_STRUCTURE.find({"location_type": "Checkpoint"}):
+        cp_id = cp_doc.get("location_id")
+        cp_counts = veh_enf_by_cp.get(cp_id)
+        if not cp_counts:
+            continue
+        # Remonter vers les parents
+        for parent_key in ("parent_area", "parent_venue"):
+            parent = cp_doc.get(parent_key, {})
+            pid = parent.get("id") if parent else None
+            if pid:
+                if pid not in veh_enf_by_loc:
+                    veh_enf_by_loc[pid] = {"entrees_veh": 0, "sorties_veh": 0, "entrees_enf": 0, "sorties_enf": 0}
+                veh_enf_by_loc[pid]["entrees_veh"] += cp_counts.get("entrees_veh", 0)
+                veh_enf_by_loc[pid]["sorties_veh"] += cp_counts.get("sorties_veh", 0)
+                veh_enf_by_loc[pid]["entrees_enf"] += cp_counts.get("entrees_enf", 0)
+                veh_enf_by_loc[pid]["sorties_enf"] += cp_counts.get("sorties_enf", 0)
+
     result = []
     for loc in locations:
         loc_id = loc.get("id")
@@ -4234,6 +4306,7 @@ def hsh_get_counters():
             sort=[("timestamp", -1)],
         )
         if counter:
+            ve = veh_enf_by_loc.get(str(loc_id), {})
             result.append({
                 "location_id": loc_id,
                 "location_type": loc_type,
@@ -4249,6 +4322,10 @@ def hsh_get_counters():
                 "first_entries": counter.get("first_entries"),
                 "first_entries_day": counter.get("first_entries_day"),
                 "timestamp": counter["timestamp"].isoformat() if hasattr(counter.get("timestamp"), "isoformat") else counter.get("timestamp"),
+                "entrees_veh": ve.get("entrees_veh", 0),
+                "sorties_veh": ve.get("sorties_veh", 0),
+                "entrees_enf": ve.get("entrees_enf", 0),
+                "sorties_enf": ve.get("sorties_enf", 0),
             })
     return jsonify(result)
 
@@ -4262,14 +4339,45 @@ def hsh_get_active_checkpoints():
         "location_type": "Checkpoint",
         "derniere_transaction": {"$gte": cutoff},
     }))
+
+    # Agreger les compteurs du jour par checkpoint
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    cp_ids = [d.get("location_id") for d in docs if d.get("location_id")]
+    counts_by_cp = {}
+    if cp_ids:
+        pipeline = [
+            {"$match": {"checkpoint_id": {"$in": cp_ids}, "tranche": {"$gte": today_start}}},
+            {"$group": {
+                "_id": "$checkpoint_id",
+                "entrees": {"$sum": "$entrees"},
+                "sorties": {"$sum": "$sorties"},
+                "entrees_vehicules": {"$sum": {"$ifNull": ["$entrees_vehicules", 0]}},
+                "sorties_vehicules": {"$sum": {"$ifNull": ["$sorties_vehicules", 0]}},
+                "entrees_enfants": {"$sum": {"$ifNull": ["$entrees_enfants", 0]}},
+                "sorties_enfants": {"$sum": {"$ifNull": ["$sorties_enfants", 0]}},
+            }},
+        ]
+        for agg in COL_HSH_TX_AGG.aggregate(pipeline):
+            counts_by_cp[agg["_id"]] = agg
+
     result = []
     for d in docs:
         dt = d.get("derniere_transaction")
+        loc_id = d.get("location_id")
+        c = counts_by_cp.get(loc_id, {})
+        entrees = c.get("entrees", 0)
+        entrees_veh = c.get("entrees_vehicules", 0)
+        entrees_enf = c.get("entrees_enfants", 0)
+        entrees_pers = entrees - entrees_veh - entrees_enf
         result.append({
-            "location_id": d.get("location_id"),
+            "location_id": loc_id,
             "location_name": d.get("location_name", ""),
             "parent_gate": d.get("parent_gate", {}).get("name", ""),
             "derniere_transaction": dt.isoformat() if hasattr(dt, "isoformat") else dt,
+            "entrees": entrees,
+            "entrees_pers": entrees_pers,
+            "entrees_veh": entrees_veh,
+            "entrees_enf": entrees_enf,
         })
     result.sort(key=lambda x: x.get("derniere_transaction", ""), reverse=True)
     return jsonify(result)
