@@ -98,19 +98,64 @@ def collecter_et_stocker(sock, from_utc, to_utc):
     return total
 
 
+def collecter_depuis_curseur(sock, last_tx_id):
+    """Collecte toutes les transactions apres last_tx_id, stocke dans handshake_forensic."""
+    print(f"Reprise depuis LastTransactionId={last_tx_id}")
+
+    sock.settimeout(READ_TIMEOUT_TRANSACTIONS)
+
+    page = 0
+    total = 0
+    cursor = str(last_tx_id)
+
+    while True:
+        page += 1
+        xml_req = build_transactions_xml(last_tx_id=cursor)
+        frame = encapsuler_transactions(xml_req)
+        resp = envoyer_et_recevoir(sock, frame)
+        if not resp:
+            print(f"  Page {page}: pas de reponse.")
+            break
+
+        not_complete, txs, max_txid = parse_transactions(resp)
+        nb = len(txs)
+        total += nb
+
+        if txs:
+            ops = []
+            for tx in txs:
+                tx_id = tx.get("transaction_id")
+                if tx_id is None:
+                    continue
+                ops.append(UpdateOne(
+                    {"_id": tx_id},
+                    {"$set": tx},
+                    upsert=True,
+                ))
+            if ops:
+                col_forensic.bulk_write(ops, ordered=False)
+
+        print(f"  Page {page:03d}: {nb} transactions | Total: {total} | NotComplete={int(not_complete)}")
+
+        if not_complete and max_txid is not None:
+            cursor = str(max_txid)
+            import time
+            time.sleep(0.1)
+        else:
+            break
+
+    return total
+
+
 def main():
     parser = argparse.ArgumentParser(description="Collecte forensic des transactions HSH")
     parser.add_argument("--from", dest="from_dt", type=str, default="2026-04-13 06:00",
                         help="Debut heure Paris (defaut: 2026-04-13 06:00)")
     parser.add_argument("--to", dest="to_dt", type=str, default=None,
                         help="Fin heure Paris (defaut: maintenant)")
+    parser.add_argument("--continue", dest="resume", action="store_true",
+                        help="Reprendre depuis le dernier transaction_id en base")
     args = parser.parse_args()
-
-    from_utc = paris_to_utc(args.from_dt)
-    if args.to_dt:
-        to_utc = paris_to_utc(args.to_dt)
-    else:
-        to_utc = datetime.datetime.now(datetime.timezone.utc)
 
     doc = lire_global()
     evenement = doc.get("evenement", "")
@@ -123,23 +168,51 @@ def main():
     print(f"Collection cible: handshake_forensic")
     print()
 
-    try:
-        with socket.create_connection((HSH_IP, HSH_PORT), timeout=CONNECT_TIMEOUT) as sock:
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    if args.resume:
+        # Trouver le max _id dans la collection
+        last = col_forensic.find_one(sort=[("_id", -1)], projection={"_id": 1})
+        if not last:
+            print("Collection vide, impossible de reprendre. Utilisez --from a la place.")
+            return
+        last_tx_id = last["_id"]
+        print(f"Dernier transaction_id en base: {last_tx_id}")
+        print()
 
-            total = collecter_et_stocker(sock, from_utc, to_utc)
+        try:
+            with socket.create_connection((HSH_IP, HSH_PORT), timeout=CONNECT_TIMEOUT) as sock:
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                total = collecter_depuis_curseur(sock, last_tx_id)
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+        except ConnectionRefusedError:
+            print(f"Connexion refusee sur {HSH_IP}:{HSH_PORT}.")
+            return
+        except socket.timeout:
+            print(f"Timeout de connexion vers {HSH_IP}:{HSH_PORT}.")
+            return
+    else:
+        from_utc = paris_to_utc(args.from_dt)
+        if args.to_dt:
+            to_utc = paris_to_utc(args.to_dt)
+        else:
+            to_utc = datetime.datetime.now(datetime.timezone.utc)
 
-            try:
-                sock.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-
-    except ConnectionRefusedError:
-        print(f"Connexion refusee sur {HSH_IP}:{HSH_PORT}.")
-        return
-    except socket.timeout:
-        print(f"Timeout de connexion vers {HSH_IP}:{HSH_PORT}.")
-        return
+        try:
+            with socket.create_connection((HSH_IP, HSH_PORT), timeout=CONNECT_TIMEOUT) as sock:
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                total = collecter_et_stocker(sock, from_utc, to_utc)
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+        except ConnectionRefusedError:
+            print(f"Connexion refusee sur {HSH_IP}:{HSH_PORT}.")
+            return
+        except socket.timeout:
+            print(f"Timeout de connexion vers {HSH_IP}:{HSH_PORT}.")
+            return
 
     print(f"\n{'='*60}")
     print(f"{total} transactions stockees dans handshake_forensic")

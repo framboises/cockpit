@@ -4133,12 +4133,19 @@ def hsh_archive_and_purge():
         counts["structure"] = len(docs)
         COL_HSH_STRUCTURE.delete_many({"evenement": evenement})
 
-    # 4. Purger data_access (compteurs) de cet evenement
-    result = db.data_access.delete_many({
+    # 4. Archiver et purger data_access (compteurs) de cet evenement
+    docs = list(db.data_access.find({
         "requested_event": evenement,
         "_id": {"$ne": HSH_GLOBAL_ID},
-    })
-    counts["compteurs"] = result.deleted_count
+    }))
+    if docs:
+        dest = db[f"hsh_archive_compteurs_{archive_tag}"]
+        dest.insert_many(docs)
+        counts["compteurs"] = len(docs)
+        db.data_access.delete_many({
+            "requested_event": evenement,
+            "_id": {"$ne": HSH_GLOBAL_ID},
+        })
 
     return jsonify({"ok": True, "archive": archive_tag, "counts": counts})
 
