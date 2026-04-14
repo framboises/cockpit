@@ -2080,6 +2080,7 @@
         var serverFicheId = data.active_fiche_id || null;
         var statusChanged = data.device_status && data.device_status !== state.patrolStatus;
         var ficheChanged = serverFicheId !== state.activeFicheId;
+        var newDispatch = ficheChanged && serverFicheId && !state.activeFicheId;
         if (statusChanged) {
           state.patrolStatus = data.device_status;
         }
@@ -2090,6 +2091,14 @@
           updateStatusBar(); // calls updateEngageBanner() internally
         } else {
           updateEngageBanner();
+        }
+        // Alerte plein ecran si une fiche vient d'etre assignee par le cockpit
+        if (newDispatch && state.fichesFirstPolled) {
+          var dispatchFiche = null;
+          for (var i = 0; i < open.length; i++) {
+            if (open[i].id === serverFicheId) { dispatchFiche = open[i]; break; }
+          }
+          if (dispatchFiche) showDispatchAlert(dispatchFiche);
         }
         // Tracking mode : haute frequence quand cockpit suit la tablette
         var tMode = data.tracking_mode || "normal";
@@ -2418,23 +2427,6 @@
       desc.style.borderLeftColor = st.color;
       desc.textContent = descText;
       body.appendChild(desc);
-    }
-
-    // Commentaire operateur (si different de la description)
-    var commentText = d.comment || "";
-    if (commentText && commentText !== descText) {
-      var commentDiv = document.createElement("div");
-      commentDiv.className = "fd-desc fd-comment";
-      commentDiv.style.borderLeftColor = "#f59e0b";
-      var commentLabel = document.createElement("div");
-      commentLabel.className = "fd-field-lbl";
-      commentLabel.style.marginBottom = "4px";
-      commentLabel.textContent = "Commentaire";
-      commentDiv.appendChild(commentLabel);
-      var commentVal = document.createElement("div");
-      commentVal.textContent = commentText;
-      commentDiv.appendChild(commentVal);
-      body.appendChild(commentDiv);
     }
 
     // Localisation GPS (lien cliquable)

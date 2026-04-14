@@ -172,6 +172,7 @@
     initGpsModal();
 
     window.pcorgRefresh = refresh;
+    window.pcorgUpdateTooltips = updateVehicleTooltips;
     loadPcorgConfig();
     loadVehiclesByCategory();
 
@@ -1827,6 +1828,25 @@
     return null;
   }
 
+  function updateVehicleTooltips() {
+    // Met a jour les tooltips des pins pcorg avec les statuts anoloc frais
+    if (!pcorgMarkers) return;
+    Object.keys(pcorgMarkers).forEach(function (id) {
+      var marker = pcorgMarkers[id];
+      if (!marker || !marker._pcorgPatrouille) return;
+      var patrouille = marker._pcorgPatrouille;
+      var devInfo = window.getAnolocDeviceByLabel ? window.getAnolocDeviceByLabel(patrouille) : null;
+      var devSt = devInfo ? _resolveDeviceStatus(devInfo.device) : null;
+      var color = devSt ? devSt.color : "#94a3b8";
+      var label = devSt ? devSt.label : "";
+      var tipHtml = "<span class='veh-tip-name'>" + patrouille + "</span>"
+        + (label ? "<span class='veh-tip-status' style='color:" + color + "'><span class='veh-tip-dot' style='background:" + color + "'></span>" + label + "</span>" : "");
+      if (marker.getTooltip()) {
+        marker.getTooltip().setContent(tipHtml);
+      }
+    });
+  }
+
   function updateMapPins(openItems) {
     var map = getMap();
     if (!map) {
@@ -2021,6 +2041,7 @@
         .addTo(pcorgMapLayer);
 
       // Tooltip vehicule engage (permanent, a droite du pin)
+      marker._pcorgPatrouille = item.patrouille || null;
       if (item.patrouille) {
         var tipDevInfo = window.getAnolocDeviceByLabel ? window.getAnolocDeviceByLabel(item.patrouille) : null;
         var tipDevSt = tipDevInfo ? _resolveDeviceStatus(tipDevInfo.device) : null;

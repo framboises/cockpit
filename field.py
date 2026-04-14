@@ -796,6 +796,24 @@ def field_status_set():
         update["$set"]["active_fiche_id"] = None
 
     db["field_devices"].update_one({"_id": device["_id"]}, update)
+
+    # Ajouter une entree dans la chronologie de la fiche active pour ASL et engagement
+    fiche_id = device.get("active_fiche_id")
+    if fiche_id and new_status in ("sur_place", "intervention"):
+        status_labels = {
+            "sur_place": "Arrivee sur les lieux (ASL)",
+            "intervention": "Engagement confirme",
+        }
+        chrono_entry = {
+            "ts": now,
+            "text": "Statut: " + status_labels.get(new_status, new_status),
+            "operator": "field:" + (device.get("name") or "?"),
+        }
+        db["pcorg"].update_one(
+            {"_id": fiche_id},
+            {"$push": {"comment_history": chrono_entry}},
+        )
+
     return jsonify({"ok": True, "status": new_status})
 
 

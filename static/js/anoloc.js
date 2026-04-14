@@ -168,6 +168,10 @@
         updateMarkers(data);
         refreshActiveTrails();
         followLockedDevice();
+        // Mettre a jour les tooltips des pins PCORG avec les statuts frais
+        if (typeof window.pcorgUpdateTooltips === "function") {
+          window.pcorgUpdateTooltips();
+        }
       })
       .catch(function (err) {
         console.error("[Anoloc] refresh error:", err);
