@@ -450,6 +450,110 @@ body {
   font-size: 14px; color: #e2e8f0; line-height: 1.4;
   white-space: pre-wrap;
 }
+/* Thread / conversation bubbles */
+.msg-thread {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 50vh; overflow-y: auto;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+.msg-bubble {
+  max-width: 85%;
+  padding: 10px 12px;
+  border-radius: 14px;
+  font-size: 14px; line-height: 1.4;
+  word-wrap: break-word;
+}
+.msg-theirs {
+  align-self: flex-start;
+  background: #1e293b;
+  color: #f1f5f9;
+  border-bottom-left-radius: 4px;
+}
+.msg-mine {
+  align-self: flex-end;
+  background: #1d4ed8;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.msg-bubble-text {
+  white-space: pre-wrap;
+}
+.msg-bubble-photo {
+  display: block;
+  max-width: 100%;
+  border-radius: 8px;
+  margin-top: 6px;
+  cursor: pointer;
+}
+.msg-bubble-meta {
+  font-size: 11px;
+  margin-top: 4px;
+  opacity: 0.6;
+}
+
+/* Reply form */
+.msg-reply-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #1e293b;
+}
+.msg-reply-row {
+  display: flex; gap: 6px; align-items: center;
+}
+.msg-reply-input {
+  flex: 1; min-width: 0;
+  background: #1e293b; border: 1px solid #334155;
+  color: #f1f5f9; padding: 10px 12px;
+  border-radius: 20px; font-size: 14px;
+  font-family: inherit;
+}
+.msg-reply-input:focus {
+  outline: none; border-color: #3b82f6;
+}
+.msg-reply-input::placeholder { color: #64748b; }
+.msg-reply-photo-btn {
+  background: none; border: none;
+  color: #94a3b8; padding: 6px;
+  cursor: pointer; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+}
+.msg-reply-photo-btn:active { background: #1e293b; }
+.msg-reply-send {
+  background: #2563eb; border: none;
+  color: #fff; padding: 8px;
+  border-radius: 50%; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.msg-reply-send:active { background: #1d4ed8; }
+.msg-reply-send:disabled { opacity: 0.5; }
+.msg-reply-preview {
+  position: relative;
+  max-width: 120px;
+  margin-bottom: 6px;
+}
+.msg-reply-preview img {
+  display: block; width: 100%;
+  border-radius: 8px;
+}
+.msg-reply-preview-rm {
+  position: absolute; top: 2px; right: 2px;
+  background: rgba(0,0,0,0.7); border: none;
+  color: #fff; border-radius: 50%;
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.msg-reply-preview-rm .material-symbols-outlined { font-size: 14px; }
+
+/* Reply count badge in inbox */
+.item-replies {
+  display: inline-block;
+  font-size: 11px; color: #60a5fa;
+  margin-top: 2px;
+}
+
 .field-modal-actions {
   display: flex; gap: 8px; padding: 12px 14px;
   border-top: 1px solid #1e293b;
@@ -1541,6 +1645,131 @@ body {
   border-radius: 12px; cursor: pointer;
 }
 .sos-alert-btn:active { background: #475569; }
+
+/* =====================================================================
+   Dispatch alert (full-screen intervention notification)
+   ===================================================================== */
+.dispatch-alert-overlay {
+  position: fixed; inset: 0;
+  background: rgba(15, 23, 42, 0.97);
+  z-index: 99997;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  animation: dispatch-fade-in 0.3s ease-out;
+}
+@keyframes dispatch-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.dispatch-alert-box {
+  background: #1e293b;
+  border: 3px solid #f59e0b;
+  border-radius: 20px;
+  max-width: 400px; width: 100%;
+  overflow: hidden;
+  animation: dispatch-slide-up 0.35s ease-out;
+}
+@keyframes dispatch-slide-up {
+  from { transform: translateY(40px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+.dispatch-alert-header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 18px;
+}
+.dispatch-alert-icon {
+  font-size: 44px !important; color: #fff;
+}
+.dispatch-alert-title {
+  font-size: 20px; font-weight: 800; color: #fff;
+}
+.dispatch-alert-urgency {
+  display: inline-block;
+  font-size: 12px; font-weight: 700; color: #fff;
+  padding: 3px 10px; border-radius: 6px;
+  margin-top: 4px;
+}
+.dispatch-alert-body {
+  padding: 16px 18px;
+}
+.dispatch-alert-desc {
+  font-size: 16px; line-height: 1.5; color: #f1f5f9;
+  background: #0f172a;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  white-space: pre-wrap;
+}
+.dispatch-alert-infos {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-bottom: 12px;
+}
+.dispatch-alert-info-row {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 14px; color: #cbd5e1;
+}
+.dispatch-alert-info-row .material-symbols-outlined {
+  font-size: 18px; color: #94a3b8;
+}
+.dispatch-alert-pos {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 13px; color: #94a3b8;
+  margin-bottom: 4px;
+}
+.dispatch-alert-pos .material-symbols-outlined { font-size: 16px; }
+.dispatch-alert-actions {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px 18px 18px;
+}
+.dispatch-alert-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; padding: 14px;
+  font-size: 16px; font-weight: 700;
+  color: #fff; border: none;
+  border-radius: 12px; cursor: pointer;
+}
+.dispatch-alert-btn .material-symbols-outlined { font-size: 22px; }
+.dispatch-btn-engage {
+  background: #f59e0b;
+}
+.dispatch-btn-engage:active { filter: brightness(0.85); }
+.dispatch-btn-route {
+  background: #334155;
+  border: 1px solid #475569;
+}
+.dispatch-btn-route:active { background: #475569; }
+.dispatch-btn-detail {
+  background: transparent;
+  border: 1px solid #475569;
+  color: #94a3b8;
+  font-size: 14px; font-weight: 500;
+  padding: 10px;
+}
+.dispatch-btn-detail:active { background: #1e293b; }
+
+/* Location link in fiche detail */
+.fd-location {
+  display: flex; align-items: center; gap: 6px;
+  background: #0f172a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.fd-location .material-symbols-outlined {
+  font-size: 20px; color: #60a5fa;
+}
+.fd-location-link {
+  color: #60a5fa; font-size: 14px; font-weight: 500;
+  text-decoration: none;
+}
+.fd-location-link:active {
+  text-decoration: underline;
+}
+
+/* Comment block in fiche detail */
+.fd-comment {
+  border-left-color: #f59e0b !important;
+}
 
 /* =====================================================================
    SOS map pin on receiving tablets

@@ -9,7 +9,7 @@
   // --- State ---
   var anolocLayers = {};      // beaconGroupId -> L.layerGroup
   var anolocMarkers = {};     // deviceId -> L.marker
-  var anolocVisible = false;
+  var anolocVisible = true;
   var groupToggles = {};      // beaconGroupId -> boolean (visible on map)
   var refreshTimer = null;
   var REFRESH_MS = 15000;     // 15s
@@ -90,12 +90,7 @@
       var observer = new MutationObserver(function () {
         var mapVisible = mapMain.style.display !== "none";
         if (mapVisible && lastData && anolocVisible) {
-          setTimeout(function () { updateMarkers(lastData); }, 200);
-        }
-        // Desactiver le bouton carte quand on quitte la vue carte
-        if (!mapVisible && anolocVisible) {
-          anolocVisible = false;
-          updateToggleBtnState();
+          setTimeout(function () { updateMarkers(lastData); applyVisibility(); }, 200);
         }
       });
       observer.observe(mapMain, { attributes: true, attributeFilter: ["style"] });
@@ -126,6 +121,9 @@
     // Container groupes
     var groupList = el("div", {id: "anoloc-group-list"});
     body.appendChild(groupList);
+
+    // Etat initial : visible sur la carte
+    toggleBtn.classList.add("active");
 
     // Events
     toggleBtn.addEventListener("click", function () {
@@ -301,7 +299,7 @@
 
         var devRight = el("div", {className: "anoloc-dev-right"});
         if (dev.online && dev.speed != null) {
-          var speedEl = el("span", {className: "anoloc-dev-speed", textContent: dev.speed + " km/h"});
+          var speedEl = el("span", {className: "anoloc-dev-speed", textContent: Math.round(dev.speed) + " km/h"});
           devRight.appendChild(speedEl);
         }
         if (dev.online && dev.battery_pct != null) {
@@ -799,7 +797,7 @@
     // Speed
     if (dev.speed != null && dev.gps_fix) {
       popup.appendChild(el("div", {className: "anoloc-popup-row"}, [
-        "Vitesse: ", el("strong", {textContent: dev.speed + " km/h"}),
+        "Vitesse: ", el("strong", {textContent: Math.round(dev.speed) + " km/h"}),
       ]));
     }
 
@@ -920,6 +918,24 @@
     });
     popup.appendChild(lockBtn);
 
+    // Quick message button (tablets only)
+    if (dev.kind === "tablet") {
+      var msgBtn = el("button", {
+        className: "anoloc-lock-btn",
+      }, [
+        materialIcon("send", "font-size:16px;vertical-align:middle;margin-right:4px;"),
+        "Envoyer un message",
+      ]);
+      msgBtn.style.marginTop = "4px";
+      msgBtn.style.background = "#3b82f6";
+      msgBtn.style.borderColor = "transparent";
+      msgBtn.style.color = "#fff";
+      msgBtn.addEventListener("click", function () {
+        openSendMessageModal(dev);
+      });
+      popup.appendChild(msgBtn);
+    }
+
     return popup;
   }
 
@@ -962,6 +978,392 @@
     }
     return null;
   };
+
+  // --- Send message modal ---
+  function _csrfToken() {
+    var m = document.querySelector("meta[name='csrf-token']");
+    return m ? m.content : "";
+  }
+
+  function openSendMessageModal(dev) {
+    var old = document.getElementById("anoloc-send-msg-modal");
+    if (old) old.remove();
+
+    var rawId = String(dev.id || "");
+    var deviceId = rawId.indexOf("field:") === 0 ? rawId.slice(6) : rawId;
+
+    var overlay = el("div", {className: "anoloc-msg-overlay", id: "anoloc-send-msg-modal"});
+    var box = el("div", {className: "anoloc-msg-box"});
+
+    // Header
+    var header = el("div", {className: "anoloc-msg-header"});
+    var headerLeft = el("div", {className: "anoloc-msg-header-left"}, [
+      materialIcon("chat", "font-size:20px;color:#3b82f6;"),
+      el("span", {textContent: dev.label || dev.id}),
+    ]);
+    var closeBtn = el("button", {className: "icon-btn anoloc-msg-close"}, [
+      materialIcon("close"),
+    ]);
+    closeBtn.addEventListener("click", function () { overlay.remove(); });
+    header.appendChild(headerLeft);
+    header.appendChild(closeBtn);
+    box.appendChild(header);
+
+    // Tabs
+    var tabs = el("div", {className: "anoloc-msg-tabs"});
+    var tabNew = el("button", {className: "anoloc-msg-tab active", textContent: "Nouveau"});
+    var tabHistory = el("button", {className: "anoloc-msg-tab", textContent: "Conversations"});
+    tabs.appendChild(tabNew);
+    tabs.appendChild(tabHistory);
+    box.appendChild(tabs);
+
+    // Panel containers
+    var panelNew = el("div", {className: "anoloc-msg-panel"});
+    var panelHistory = el("div", {className: "anoloc-msg-panel"});
+    panelHistory.hidden = true;
+
+    tabNew.addEventListener("click", function () {
+      tabNew.classList.add("active"); tabHistory.classList.remove("active");
+      panelNew.hidden = false; panelHistory.hidden = true;
+    });
+    tabHistory.addEventListener("click", function () {
+      tabHistory.classList.add("active"); tabNew.classList.remove("active");
+      panelHistory.hidden = false; panelNew.hidden = true;
+      loadConversations(deviceId, panelHistory, overlay);
+    });
+
+    // === Panel NEW MESSAGE ===
+    buildNewMessagePanel(panelNew, deviceId, overlay);
+
+    // === Panel HISTORY ===
+    panelHistory.appendChild(el("div", {className: "anoloc-msg-loading", textContent: "Chargement..."}));
+
+    box.appendChild(panelNew);
+    box.appendChild(panelHistory);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener("click", function (e) {
+      if (e.target === overlay) overlay.remove();
+    });
+  }
+
+  function buildNewMessagePanel(panel, deviceId, overlay) {
+    var body = el("div", {className: "anoloc-msg-body"});
+
+    var typeRow = el("div", {className: "anoloc-msg-row"});
+    typeRow.appendChild(el("label", {className: "anoloc-msg-label", textContent: "Type"}));
+    var typeSelect = el("select", {className: "anoloc-msg-select"});
+    [{v: "info", l: "Info"}, {v: "instruction", l: "Instruction"}, {v: "alert", l: "Alerte"}].forEach(function (t) {
+      typeSelect.appendChild(el("option", {value: t.v, textContent: t.l}));
+    });
+    typeRow.appendChild(typeSelect);
+    body.appendChild(typeRow);
+
+    var titleRow = el("div", {className: "anoloc-msg-row"});
+    titleRow.appendChild(el("label", {className: "anoloc-msg-label", textContent: "Titre"}));
+    var titleInput = el("input", {type: "text", className: "anoloc-msg-input", placeholder: "Titre du message (max 120 car.)"});
+    titleInput.maxLength = 120;
+    titleRow.appendChild(titleInput);
+    body.appendChild(titleRow);
+
+    var bodyRow = el("div", {className: "anoloc-msg-row"});
+    bodyRow.appendChild(el("label", {className: "anoloc-msg-label", textContent: "Message"}));
+    var bodyTextarea = el("textarea", {className: "anoloc-msg-textarea", placeholder: "Contenu du message (optionnel)"});
+    bodyTextarea.rows = 3;
+    bodyRow.appendChild(bodyTextarea);
+    body.appendChild(bodyRow);
+
+    // Photo
+    var photoRow = el("div", {className: "anoloc-msg-row"});
+    photoRow.appendChild(el("label", {className: "anoloc-msg-label", textContent: "Photo"}));
+    var photoWrap = el("div", {className: "anoloc-msg-photo-wrap"});
+    var fileInput = el("input", {type: "file"});
+    fileInput.accept = "image/*";
+    fileInput.style.display = "none";
+    var photoBtn = el("button", {className: "anoloc-msg-photo-btn"}, [
+      materialIcon("add_photo_alternate", "font-size:18px;vertical-align:middle;margin-right:4px;"),
+      "Ajouter une image",
+    ]);
+    photoBtn.addEventListener("click", function () { fileInput.click(); });
+    var preview = el("div", {className: "anoloc-msg-photo-preview"});
+    preview.hidden = true;
+    fileInput.addEventListener("change", function () {
+      if (!fileInput.files || !fileInput.files[0]) return;
+      var reader = new FileReader();
+      reader.onload = function (ev) {
+        preview.textContent = "";
+        var img = el("img"); img.src = ev.target.result;
+        preview.appendChild(img);
+        var removeBtn = el("button", {className: "anoloc-msg-photo-remove"}, [materialIcon("close", "font-size:16px;")]);
+        removeBtn.addEventListener("click", function (e) { e.stopPropagation(); fileInput.value = ""; preview.hidden = true; photoBtn.hidden = false; });
+        preview.appendChild(removeBtn);
+        preview.hidden = false; photoBtn.hidden = true;
+      };
+      reader.readAsDataURL(fileInput.files[0]);
+    });
+    photoWrap.appendChild(fileInput);
+    photoWrap.appendChild(photoBtn);
+    photoWrap.appendChild(preview);
+    photoRow.appendChild(photoWrap);
+    body.appendChild(photoRow);
+
+    panel.appendChild(body);
+
+    // Footer
+    var footer = el("div", {className: "anoloc-msg-footer"});
+    var statusEl = el("span", {className: "anoloc-msg-status"});
+    var sendBtn = el("button", {className: "anoloc-msg-send"}, [
+      materialIcon("send", "font-size:18px;vertical-align:middle;margin-right:6px;"),
+      "Envoyer",
+    ]);
+    sendBtn.addEventListener("click", function () {
+      var title = titleInput.value.trim();
+      var bodyText = bodyTextarea.value.trim();
+      if (!title && !bodyText) { statusEl.textContent = "Titre ou message requis"; statusEl.style.color = "#ef4444"; return; }
+      sendBtn.disabled = true;
+      statusEl.textContent = "Envoi..."; statusEl.style.color = "var(--muted)";
+
+      var ey = (typeof getCurrentEventYear === "function") ? getCurrentEventYear() : {};
+      var formData = new FormData();
+      formData.append("event", ey.event || "");
+      formData.append("year", ey.year || "");
+      formData.append("target", JSON.stringify({ device_ids: [deviceId] }));
+      formData.append("type", typeSelect.value);
+      formData.append("priority", typeSelect.value === "alert" ? "high" : "normal");
+      formData.append("title", title);
+      formData.append("body", bodyText);
+      if (fileInput.files && fileInput.files[0]) formData.append("photo", fileInput.files[0]);
+
+      fetch("/field/admin/send-with-photo", {
+        method: "POST",
+        headers: { "X-CSRFToken": _csrfToken() },
+        body: formData,
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (resp) {
+          sendBtn.disabled = false;
+          if (resp && resp.ok) {
+            statusEl.textContent = "Envoye !"; statusEl.style.color = "#22c55e";
+            titleInput.value = ""; bodyTextarea.value = ""; fileInput.value = "";
+            preview.hidden = true; photoBtn.hidden = false;
+            setTimeout(function () { statusEl.textContent = ""; }, 3000);
+          } else {
+            statusEl.textContent = resp.error || "Erreur"; statusEl.style.color = "#ef4444";
+          }
+        })
+        .catch(function () { sendBtn.disabled = false; statusEl.textContent = "Erreur reseau"; statusEl.style.color = "#ef4444"; });
+    });
+    footer.appendChild(statusEl);
+    footer.appendChild(sendBtn);
+    panel.appendChild(footer);
+
+    setTimeout(function () { titleInput.focus(); }, 100);
+  }
+
+  // === Conversations panel ===
+  function loadConversations(deviceId, panel, overlay) {
+    panel.textContent = "";
+    panel.appendChild(el("div", {className: "anoloc-msg-loading", textContent: "Chargement..."}));
+
+    var ey = (typeof getCurrentEventYear === "function") ? getCurrentEventYear() : {};
+    var qs = "?device_id=" + encodeURIComponent(deviceId);
+    if (ey.event) qs += "&event=" + encodeURIComponent(ey.event);
+    if (ey.year) qs += "&year=" + encodeURIComponent(ey.year);
+
+    fetch("/field/admin/messages" + qs, { headers: { "X-CSRFToken": _csrfToken() } })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        panel.textContent = "";
+        if (!data || !data.ok || !data.messages || data.messages.length === 0) {
+          panel.appendChild(el("div", {className: "anoloc-msg-empty", textContent: "Aucun message echange."}));
+          return;
+        }
+        // Grouper par thread : afficher les messages racines (sans thread_id)
+        var roots = [];
+        var replyMap = {};
+        data.messages.forEach(function (m) {
+          if (!m.thread_id) {
+            roots.push(m);
+          } else {
+            if (!replyMap[m.thread_id]) replyMap[m.thread_id] = 0;
+            replyMap[m.thread_id]++;
+          }
+        });
+        if (roots.length === 0) {
+          // All are replies? Show all messages as flat list
+          roots = data.messages;
+        }
+        var list = el("div", {className: "anoloc-conv-list"});
+        roots.forEach(function (m) {
+          var replies = m.reply_count || replyMap[m.id] || 0;
+          var row = el("div", {className: "anoloc-conv-item"});
+          var titleEl = el("div", {className: "anoloc-conv-title", textContent: m.title || m.body || "(sans titre)"});
+          var meta = el("div", {className: "anoloc-conv-meta"});
+          var when = "";
+          try { when = new Date(m.created_at).toLocaleString("fr-FR"); } catch (e) {}
+          meta.textContent = when;
+          if (replies > 0) {
+            var badge = el("span", {className: "anoloc-conv-replies", textContent: replies + " rep."});
+            meta.appendChild(badge);
+          }
+          // Unread indicator if field replied
+          var hasFieldReply = (data.messages || []).some(function (r) {
+            return (r.thread_id === m.id) && r.direction === "field_to_cockpit" && r.status === "sent";
+          });
+          if (hasFieldReply) {
+            row.classList.add("has-new-reply");
+          }
+          row.appendChild(titleEl);
+          row.appendChild(meta);
+          row.addEventListener("click", function () {
+            openThreadView(m.id, panel, overlay);
+          });
+          list.appendChild(row);
+        });
+        panel.appendChild(list);
+      })
+      .catch(function () {
+        panel.textContent = "";
+        panel.appendChild(el("div", {className: "anoloc-msg-empty", textContent: "Erreur de chargement."}));
+      });
+  }
+
+  function openThreadView(threadId, panel, overlay) {
+    panel.textContent = "";
+    panel.appendChild(el("div", {className: "anoloc-msg-loading", textContent: "Chargement..."}));
+
+    fetch("/field/admin/thread/" + encodeURIComponent(threadId), {
+      headers: { "X-CSRFToken": _csrfToken() },
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        panel.textContent = "";
+        if (!data || !data.ok) {
+          panel.appendChild(el("div", {className: "anoloc-msg-empty", textContent: "Erreur."}));
+          return;
+        }
+        // Back button
+        var backBtn = el("button", {className: "anoloc-conv-back"}, [
+          materialIcon("arrow_back", "font-size:18px;vertical-align:middle;margin-right:4px;"),
+          "Retour",
+        ]);
+        backBtn.addEventListener("click", function () {
+          // Re-extract deviceId from first message
+          var firstMsg = (data.messages && data.messages[0]) || {};
+          var devId = firstMsg.device_id || "";
+          loadConversations(devId, panel, overlay);
+        });
+        panel.appendChild(backBtn);
+
+        // Thread bubbles
+        var thread = el("div", {className: "anoloc-thread-bubbles"});
+        (data.messages || []).forEach(function (m) {
+          var isField = m.direction === "field_to_cockpit";
+          var bubble = el("div", {className: "anoloc-thread-bubble" + (isField ? " from-field" : " from-cockpit")});
+
+          if (m.title) {
+            var t = el("div", {className: "anoloc-thread-title", textContent: m.title});
+            bubble.appendChild(t);
+          }
+          if (m.body) {
+            var b = el("div", {className: "anoloc-thread-text", textContent: m.body});
+            bubble.appendChild(b);
+          }
+          var photoUrl = m.payload && m.payload.photo;
+          if (photoUrl) {
+            var img = el("img", {className: "anoloc-thread-photo"});
+            img.src = photoUrl;
+            bubble.appendChild(img);
+          }
+          var metaEl = el("div", {className: "anoloc-thread-meta"});
+          var who = isField ? (m.device_name || "Tablette") : (m.from || "Cockpit");
+          var when = "";
+          try { when = new Date(m.created_at).toLocaleTimeString("fr-FR", {hour: "2-digit", minute: "2-digit"}); } catch (e) {}
+          metaEl.textContent = who + (when ? " - " + when : "");
+          bubble.appendChild(metaEl);
+          thread.appendChild(bubble);
+        });
+        panel.appendChild(thread);
+        thread.scrollTop = thread.scrollHeight;
+
+        // Reply form
+        var replySection = el("div", {className: "anoloc-thread-reply"});
+        var replyInput = el("input", {type: "text", className: "anoloc-thread-reply-input", placeholder: "Repondre..."});
+        var replyFileInput = el("input", {type: "file"});
+        replyFileInput.accept = "image/*";
+        replyFileInput.style.display = "none";
+        var replyPhotoBtn = el("button", {className: "anoloc-thread-reply-photo"}, [
+          materialIcon("photo_camera", "font-size:18px;"),
+        ]);
+        replyPhotoBtn.addEventListener("click", function () { replyFileInput.click(); });
+
+        var replyPreview = el("div", {className: "anoloc-thread-reply-preview"});
+        replyPreview.hidden = true;
+        replyFileInput.addEventListener("change", function () {
+          if (!replyFileInput.files || !replyFileInput.files[0]) return;
+          var reader = new FileReader();
+          reader.onload = function (ev) {
+            replyPreview.textContent = "";
+            var img = el("img"); img.src = ev.target.result;
+            replyPreview.appendChild(img);
+            var rm = el("button", {className: "anoloc-msg-photo-remove"}, [materialIcon("close", "font-size:14px;")]);
+            rm.addEventListener("click", function (e) { e.stopPropagation(); replyFileInput.value = ""; replyPreview.hidden = true; });
+            replyPreview.appendChild(rm);
+            replyPreview.hidden = false;
+          };
+          reader.readAsDataURL(replyFileInput.files[0]);
+        });
+
+        var replySendBtn = el("button", {className: "anoloc-thread-reply-send"}, [
+          materialIcon("send", "font-size:18px;"),
+        ]);
+
+        replySendBtn.addEventListener("click", function () {
+          var text = replyInput.value.trim();
+          var hasPhoto = replyFileInput.files && replyFileInput.files[0];
+          if (!text && !hasPhoto) { replyInput.focus(); return; }
+          replySendBtn.disabled = true;
+
+          var fd = new FormData();
+          fd.append("body", text);
+          if (hasPhoto) fd.append("photo", replyFileInput.files[0]);
+
+          fetch("/field/admin/reply/" + encodeURIComponent(threadId), {
+            method: "POST",
+            headers: { "X-CSRFToken": _csrfToken() },
+            body: fd,
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (resp) {
+              replySendBtn.disabled = false;
+              if (resp && resp.ok) {
+                replyInput.value = "";
+                replyFileInput.value = "";
+                replyPreview.hidden = true;
+                openThreadView(threadId, panel, overlay);
+              }
+            })
+            .catch(function () { replySendBtn.disabled = false; });
+        });
+        replyInput.addEventListener("keydown", function (e) {
+          if (e.key === "Enter") { e.preventDefault(); replySendBtn.click(); }
+        });
+
+        var replyRow = el("div", {className: "anoloc-thread-reply-row"});
+        replyRow.appendChild(replyFileInput);
+        replyRow.appendChild(replyPhotoBtn);
+        replyRow.appendChild(replyInput);
+        replyRow.appendChild(replySendBtn);
+        replySection.appendChild(replyPreview);
+        replySection.appendChild(replyRow);
+        panel.appendChild(replySection);
+      })
+      .catch(function () {
+        panel.textContent = "";
+        panel.appendChild(el("div", {className: "anoloc-msg-empty", textContent: "Erreur de chargement."}));
+      });
+  }
 
   // --- Boot ---
   if (document.readyState === "loading") {

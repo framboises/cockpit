@@ -27,7 +27,7 @@
     meCircle: null,
     lastPushedAt: 0,
     lastPushedPos: null,
-    followMe: true,
+    followMe: false,
     gridOn: false,
     gridLayer: null,
     gridData: null,
@@ -325,7 +325,10 @@
 
     // Stop suivre "moi" des qu'on touche la carte manuellement
     state.map.on("dragstart zoomstart", function (e) {
-      if (e.originalEvent) state.followMe = false;
+      if (e.originalEvent && state.followMe) {
+        state.followMe = false;
+        updateFollowBtn();
+      }
     });
   }
 
@@ -401,7 +404,8 @@
         radius: accuracy || 20,
         className: "me-accuracy",
       }).addTo(state.map);
-      if (state.followMe) state.map.setView(latlng, Math.max(state.map.getZoom(), 17));
+      // Centrage unique sur la premiere position GPS obtenue
+      state.map.setView(latlng, Math.max(state.map.getZoom(), 17));
     } else {
       state.meMarker.setLatLng(latlng);
       if (state.meCircle) state.meCircle.setLatLng(latlng).setRadius(accuracy || 20);
@@ -410,11 +414,28 @@
   }
 
   function recenter() {
-    state.followMe = true;
-    if (state.meMarker) {
+    state.followMe = !state.followMe;
+    updateFollowBtn();
+    if (state.followMe && state.meMarker) {
       state.map.setView(state.meMarker.getLatLng(), Math.max(state.map.getZoom(), 18));
-    } else {
+    } else if (state.followMe) {
       state.map.setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+    }
+  }
+
+  function updateFollowBtn() {
+    var btn = $("btn-recenter");
+    if (!btn) return;
+    var iconEl = btn.querySelector(".material-symbols-outlined");
+    var labelEl = btn.querySelector(".label");
+    if (state.followMe) {
+      btn.classList.add("active");
+      if (iconEl) iconEl.textContent = "my_location";
+      if (labelEl) labelEl.textContent = "Suivi";
+    } else {
+      btn.classList.remove("active");
+      if (iconEl) iconEl.textContent = "location_searching";
+      if (labelEl) labelEl.textContent = "Moi";
     }
   }
 
@@ -1390,8 +1411,7 @@
 
     // Fly to the POI
     state.followMe = false;
-    var followBtn = $("btn-follow");
-    if (followBtn) followBtn.classList.remove("active");
+    updateFollowBtn();
 
     var zoom = 19;
     if (p.geomType === "polygon" || p.geomType === "multipolygon") zoom = 18;
@@ -2090,34 +2110,191 @@
       }
     });
     if (newOnes.length === 0) return;
-    // Premier poll : ne pas alerter, juste enregistrer
+    // Premier poll : si une fiche active existe deja, afficher l'alerte
     if (!state.fichesFirstPolled) {
       state.fichesFirstPolled = true;
+      if (state.activeFicheId) {
+        var activeFiche = null;
+        for (var i = 0; i < newOnes.length; i++) {
+          if (newOnes[i].id === state.activeFicheId) { activeFiche = newOnes[i]; break; }
+        }
+        if (activeFiche) showDispatchAlert(activeFiche);
+      }
       return;
     }
     var first = newOnes[0];
-    toast("Nouvelle fiche : " + (first.text || "(sans texte)").slice(0, 60), "warn");
-    // Son d'alerte pour signifier l'arrivee d'une fiche
+    // Son + vibration + alerte plein ecran
     playDispatchAlarm();
-    // Vibration pour alerter le porteur de la tablette
     try {
-      if (navigator.vibrate) {
-        navigator.vibrate([200, 100, 200, 100, 400]);
-      }
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 400]);
     } catch (e) { /* ignore */ }
     // Auto-centrer sur la fiche si elle a des coordonnees
     if (first.lat != null && first.lng != null && state.map) {
       try {
         state.followMe = false;
-        var followBtn = $("btn-follow");
-        if (followBtn) followBtn.classList.remove("active");
+        updateFollowBtn();
         state.map.setView([first.lat, first.lng], Math.max(state.map.getZoom(), 17), {
           animate: true,
         });
       } catch (e) { /* ignore */ }
     }
-    // Ouvrir le modal pour forcer l'acquittement
-    showFicheModal(first);
+    showDispatchAlert(first);
+  }
+
+  function _mkIcon(name) {
+    var el = document.createElement("span");
+    el.className = "material-symbols-outlined";
+    el.textContent = name;
+    return el;
+  }
+
+  function _mkInfoRow(iconName, text) {
+    var row = document.createElement("div");
+    row.className = "dispatch-alert-info-row";
+    row.appendChild(_mkIcon(iconName));
+    var span = document.createElement("span");
+    span.textContent = " " + text;
+    row.appendChild(span);
+    return row;
+  }
+
+  function showDispatchAlert(f) {
+    var existing = document.querySelector(".dispatch-alert-overlay");
+    if (existing) { try { document.body.removeChild(existing); } catch (e) {} }
+
+    var st = ficheStyle(f.category);
+    var catLabel = (f.category || "Intervention").replace("PCO.", "");
+    var urgency = f.niveau_urgence || "";
+    var urgLabel = FICHE_URGENCY_LABELS[urgency] || "";
+    var urgColor = FICHE_URGENCY_COLORS[urgency] || "#f59e0b";
+    var desc = f.text || "(sans description)";
+    var cc = f.content_category || {};
+
+    var overlay = document.createElement("div");
+    overlay.className = "dispatch-alert-overlay";
+
+    var box = document.createElement("div");
+    box.className = "dispatch-alert-box";
+    box.style.borderColor = st.color;
+
+    // Header
+    var header = document.createElement("div");
+    header.className = "dispatch-alert-header";
+    header.style.background = "linear-gradient(135deg, " + st.color + "cc, " + st.color + "88)";
+    var icon = _mkIcon(st.icon);
+    icon.classList.add("dispatch-alert-icon");
+    header.appendChild(icon);
+    var titleWrap = document.createElement("div");
+    var title = document.createElement("div");
+    title.className = "dispatch-alert-title";
+    title.textContent = catLabel;
+    titleWrap.appendChild(title);
+    if (urgency) {
+      var urgBadge = document.createElement("span");
+      urgBadge.className = "dispatch-alert-urgency";
+      urgBadge.style.background = urgColor;
+      urgBadge.textContent = urgency + (urgLabel ? " - " + urgLabel : "");
+      titleWrap.appendChild(urgBadge);
+    }
+    header.appendChild(titleWrap);
+    box.appendChild(header);
+
+    // Corps
+    var bodyEl = document.createElement("div");
+    bodyEl.className = "dispatch-alert-body";
+    var descEl = document.createElement("div");
+    descEl.className = "dispatch-alert-desc";
+    descEl.textContent = desc;
+    bodyEl.appendChild(descEl);
+
+    // Infos : lieu, appelant, carroyage
+    var area = f.area || "";
+    var appelant = cc.appelant || "";
+    var carroye = cc.carroye || "";
+    if (area || appelant || carroye) {
+      var infos = document.createElement("div");
+      infos.className = "dispatch-alert-infos";
+      if (area) infos.appendChild(_mkInfoRow("place", area));
+      if (carroye) infos.appendChild(_mkInfoRow("grid_on", carroye));
+      if (appelant) infos.appendChild(_mkInfoRow("person", appelant));
+      bodyEl.appendChild(infos);
+    }
+
+    // Position GPS
+    if (f.lat != null && f.lng != null) {
+      var pos = document.createElement("div");
+      pos.className = "dispatch-alert-pos";
+      pos.appendChild(_mkIcon("navigation"));
+      var coordSpan = document.createElement("span");
+      coordSpan.textContent = " " + Number(f.lat).toFixed(5) + ", " + Number(f.lng).toFixed(5);
+      pos.appendChild(coordSpan);
+      bodyEl.appendChild(pos);
+    }
+    box.appendChild(bodyEl);
+
+    // Boutons
+    var actions = document.createElement("div");
+    actions.className = "dispatch-alert-actions";
+
+    var btnEngage = document.createElement("button");
+    btnEngage.className = "dispatch-alert-btn dispatch-btn-engage";
+    btnEngage.style.background = st.color;
+    btnEngage.appendChild(_mkIcon("check_circle"));
+    var engTxt = document.createTextNode(" Prendre en charge");
+    btnEngage.appendChild(engTxt);
+    actions.appendChild(btnEngage);
+
+    if (f.lat != null && f.lng != null) {
+      var btnRoute = document.createElement("button");
+      btnRoute.className = "dispatch-alert-btn dispatch-btn-route";
+      btnRoute.appendChild(_mkIcon("navigation"));
+      var rtTxt = document.createTextNode(" Itineraire");
+      btnRoute.appendChild(rtTxt);
+      actions.appendChild(btnRoute);
+      btnRoute.addEventListener("click", function () {
+        openInGoogleMaps([f.lat, f.lng]);
+      });
+    }
+
+    var btnDetail = document.createElement("button");
+    btnDetail.className = "dispatch-alert-btn dispatch-btn-detail";
+    btnDetail.appendChild(_mkIcon("description"));
+    var dtTxt = document.createTextNode(" Voir la fiche");
+    btnDetail.appendChild(dtTxt);
+    actions.appendChild(btnDetail);
+
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    // Son et vibration
+    playDispatchAlarm();
+    try {
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 400]);
+    } catch (e) {}
+
+    btnEngage.addEventListener("click", function () {
+      try { document.body.removeChild(overlay); } catch (e) {}
+      confirmFicheAckDirect(f);
+    });
+    btnDetail.addEventListener("click", function () {
+      try { document.body.removeChild(overlay); } catch (e) {}
+      showFicheModal(f);
+    });
+  }
+
+  function confirmFicheAckDirect(f) {
+    fetch("/field/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "intervention" }),
+    })
+      .then(function () {
+        state.patrolStatus = "intervention";
+        updateStatusBar();
+        toast("Engagement confirme", "ok");
+      })
+      .catch(function () { toast("Erreur engagement", "error"); });
   }
 
   function renderFiches() {
@@ -2231,6 +2408,7 @@
   function renderFicheDetail(d, f, st) {
     var body = $("fiche-detail-body");
     body.textContent = "";
+    var cc = d.content_category || {};
 
     // Description
     var descText = d.text_full || d.text || "";
@@ -2240,6 +2418,47 @@
       desc.style.borderLeftColor = st.color;
       desc.textContent = descText;
       body.appendChild(desc);
+    }
+
+    // Commentaire operateur (si different de la description)
+    var commentText = d.comment || "";
+    if (commentText && commentText !== descText) {
+      var commentDiv = document.createElement("div");
+      commentDiv.className = "fd-desc fd-comment";
+      commentDiv.style.borderLeftColor = "#f59e0b";
+      var commentLabel = document.createElement("div");
+      commentLabel.className = "fd-field-lbl";
+      commentLabel.style.marginBottom = "4px";
+      commentLabel.textContent = "Commentaire";
+      commentDiv.appendChild(commentLabel);
+      var commentVal = document.createElement("div");
+      commentVal.textContent = commentText;
+      commentDiv.appendChild(commentVal);
+      body.appendChild(commentDiv);
+    }
+
+    // Localisation GPS (lien cliquable)
+    if (d.lat != null && d.lng != null) {
+      var locDiv = document.createElement("div");
+      locDiv.className = "fd-location";
+      var locIcon = document.createElement("span");
+      locIcon.className = "material-symbols-outlined";
+      locIcon.textContent = "place";
+      locDiv.appendChild(locIcon);
+      var locLink = document.createElement("a");
+      locLink.className = "fd-location-link";
+      locLink.textContent = Number(d.lat).toFixed(5) + ", " + Number(d.lng).toFixed(5);
+      locLink.href = "#";
+      locLink.addEventListener("click", function (e) {
+        e.preventDefault();
+        if (state.map) {
+          state.followMe = false;
+          updateFollowBtn();
+          state.map.setView([d.lat, d.lng], Math.max(state.map.getZoom(), 17), { animate: true });
+        }
+      });
+      locDiv.appendChild(locLink);
+      body.appendChild(locDiv);
     }
 
     // Info fields
@@ -2259,6 +2478,16 @@
       row.appendChild(v);
       fields.appendChild(row);
     }
+    addF("Zone", d.area);
+    addF("Carroyage", cc.carroye);
+    addF("Appelant", cc.appelant);
+    addF("Victime", cc.victime);
+    addF("Age", cc.age);
+    addF("Sexe", cc.sexe);
+    addF("Bilan", cc.bilan);
+    addF("Moyen", cc.moyen);
+    addF("Destination", cc.destination);
+    addF("Patrouille", cc.patrouille);
     addF("Operateur", d.operator);
     if (d.ts) {
       try { addF("Ouverture", new Date(d.ts).toLocaleString("fr-FR")); } catch (e) {}
@@ -2267,9 +2496,7 @@
       try { addF("Cloture", new Date(d.close_ts).toLocaleString("fr-FR")); } catch (e) {}
     }
     if (d.operator_close) addF("Clos par", d.operator_close);
-    addF("Zone", d.area);
-    addF("Carroyage", cc.carroye);
-    addF("Appelant", cc.appelant);
+    if (d.server) addF("Serveur", d.server);
     if (d.status_code === 10) addF("Statut", "TERMINE");
     if (fields.childNodes.length) body.appendChild(fields);
 
@@ -2710,8 +2937,7 @@
       // Center map on SOS location
       if (state.map) {
         state.followMe = false;
-        var followBtn = $("btn-follow");
-        if (followBtn) followBtn.classList.remove("active");
+        updateFollowBtn();
         state.map.setView([lat, lng], Math.max(state.map.getZoom(), 17), { animate: true });
       }
     }
@@ -2868,7 +3094,7 @@
     var list = $("inbox-list");
     var badge = $("inbox-badge");
     if (!list) return;
-    var unread = state.inbox.filter(function (m) { return !m.ack_at; });
+    var unread = state.inbox.filter(function (m) { return !m.ack_at && !m.thread_id && m.direction !== "field_to_cockpit"; });
     if (badge) {
       if (unread.length > 0) {
         badge.hidden = false;
@@ -2881,8 +3107,13 @@
       list.innerHTML = "<div class='inbox-empty'>Aucun message.</div>";
       return;
     }
+    // Filtrer : n'afficher que les messages racines (pas les reponses dans un thread)
+    // et pas les messages envoyes par la tablette elle-meme
+    var roots = state.inbox.filter(function (m) {
+      return !m.thread_id && m.direction !== "field_to_cockpit";
+    });
     // Ordre antichronologique
-    var sorted = state.inbox.slice().sort(function (a, b) {
+    var sorted = roots.slice().sort(function (a, b) {
       return (b.created_at || "").localeCompare(a.created_at || "");
     });
     list.innerHTML = "";
@@ -2903,6 +3134,12 @@
       div.appendChild(t);
       div.appendChild(b);
       div.appendChild(ts);
+      if (m.reply_count > 0) {
+        var rc = document.createElement("span");
+        rc.className = "item-replies";
+        rc.textContent = m.reply_count + " reponse" + (m.reply_count > 1 ? "s" : "");
+        div.appendChild(rc);
+      }
       div.addEventListener("click", function () { showMessageModal(m); });
       list.appendChild(div);
     });
@@ -2916,7 +3153,6 @@
     var routeBtn = $("msg-modal-route");
     if (!modal) return;
     title.textContent = m.title || "Message";
-    body.textContent = m.body || "";
 
     // Accent visuel selon type/priority
     modal.classList.remove("priority-high", "type-alert", "type-route", "type-instruction");
@@ -2931,12 +3167,32 @@
     if (routeBtn) {
       routeBtn.hidden = !hasRoute;
       if (hasRoute) {
-        routeBtn.onclick = function () {
-          openInGoogleMaps(waypoints[0]);
-        };
+        routeBtn.onclick = function () { openInGoogleMaps(waypoints[0]); };
       } else {
         routeBtn.onclick = null;
       }
+    }
+
+    // Construire le corps avec le thread complet
+    body.textContent = "";
+    var threadWrap = document.createElement("div");
+    threadWrap.className = "msg-thread";
+
+    // Afficher le message initial
+    threadWrap.appendChild(renderMsgBubble(m));
+
+    body.appendChild(threadWrap);
+
+    // Zone de reponse (toujours visible sauf SOS)
+    if (m.type !== "sos_broadcast") {
+      var replySection = buildReplyForm(m, threadWrap);
+      body.appendChild(replySection);
+    }
+
+    // Charger le thread complet si des reponses existent
+    var threadMsgId = m.thread_id || m.id;
+    if (m.reply_count > 0 || m.thread_id) {
+      loadThread(threadMsgId, threadWrap, m.id);
     }
 
     modal.hidden = false;
@@ -2948,6 +3204,173 @@
         })
         .catch(function () { toast("Echec ack", "err"); });
     };
+  }
+
+  function renderMsgBubble(m) {
+    var isField = m.direction === "field_to_cockpit";
+    var bubble = document.createElement("div");
+    bubble.className = "msg-bubble" + (isField ? " msg-mine" : " msg-theirs");
+    bubble.dataset.id = m.id;
+
+    // Texte
+    if (m.body) {
+      var txt = document.createElement("div");
+      txt.className = "msg-bubble-text";
+      txt.textContent = m.body;
+      bubble.appendChild(txt);
+    }
+
+    // Photo
+    var photoUrl = m.payload && m.payload.photo;
+    if (photoUrl) {
+      var img = document.createElement("img");
+      img.className = "msg-bubble-photo";
+      img.src = photoUrl;
+      img.alt = "Photo";
+      img.addEventListener("click", function () { openLightbox(photoUrl); });
+      bubble.appendChild(img);
+    }
+
+    // Meta (expediteur + heure)
+    var meta = document.createElement("div");
+    meta.className = "msg-bubble-meta";
+    var who = isField ? "Moi" : (m.from || "Cockpit");
+    var when = "";
+    if (m.created_at) {
+      try { when = new Date(m.created_at).toLocaleTimeString("fr-FR", {hour: "2-digit", minute: "2-digit"}); }
+      catch (e) {}
+    }
+    meta.textContent = who + (when ? " - " + when : "");
+    bubble.appendChild(meta);
+
+    return bubble;
+  }
+
+  function loadThread(threadMsgId, threadWrap, currentMsgId) {
+    fetch("/field/thread/" + encodeURIComponent(threadMsgId), {
+      headers: { "Accept": "application/json" },
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data || !data.ok) return;
+        var msgs = data.messages || [];
+        // Vider et reconstruire le thread complet
+        threadWrap.textContent = "";
+        msgs.forEach(function (msg) {
+          threadWrap.appendChild(renderMsgBubble(msg));
+        });
+        // Scroller vers le bas
+        threadWrap.scrollTop = threadWrap.scrollHeight;
+      })
+      .catch(function () { /* keep the single message displayed */ });
+  }
+
+  function buildReplyForm(m, threadWrap) {
+    var section = document.createElement("div");
+    section.className = "msg-reply-section";
+
+    var row = document.createElement("div");
+    row.className = "msg-reply-row";
+
+    var input = document.createElement("input");
+    input.type = "text";
+    input.className = "msg-reply-input";
+    input.placeholder = "Repondre...";
+
+    var photoInput = document.createElement("input");
+    photoInput.type = "file";
+    photoInput.accept = "image/*";
+    photoInput.style.display = "none";
+
+    var photoBtn = document.createElement("button");
+    photoBtn.className = "msg-reply-photo-btn";
+    var camIcon = document.createElement("span");
+    camIcon.className = "material-symbols-outlined";
+    camIcon.textContent = "photo_camera";
+    photoBtn.appendChild(camIcon);
+    photoBtn.addEventListener("click", function () { photoInput.click(); });
+
+    var preview = document.createElement("div");
+    preview.className = "msg-reply-preview";
+    preview.hidden = true;
+
+    photoInput.addEventListener("change", function () {
+      if (!photoInput.files || !photoInput.files[0]) return;
+      var reader = new FileReader();
+      reader.onload = function (ev) {
+        preview.textContent = "";
+        var img = document.createElement("img");
+        img.src = ev.target.result;
+        preview.appendChild(img);
+        var rm = document.createElement("button");
+        rm.className = "msg-reply-preview-rm";
+        var rmIcon = document.createElement("span");
+        rmIcon.className = "material-symbols-outlined";
+        rmIcon.textContent = "close";
+        rm.appendChild(rmIcon);
+        rm.addEventListener("click", function (e) {
+          e.stopPropagation();
+          photoInput.value = "";
+          preview.hidden = true;
+        });
+        preview.appendChild(rm);
+        preview.hidden = false;
+      };
+      reader.readAsDataURL(photoInput.files[0]);
+    });
+
+    var sendBtn = document.createElement("button");
+    sendBtn.className = "msg-reply-send";
+    var sendIcon = document.createElement("span");
+    sendIcon.className = "material-symbols-outlined";
+    sendIcon.textContent = "send";
+    sendBtn.appendChild(sendIcon);
+
+    sendBtn.addEventListener("click", function () {
+      var text = input.value.trim();
+      var hasPhoto = photoInput.files && photoInput.files[0];
+      if (!text && !hasPhoto) { input.focus(); return; }
+      sendBtn.disabled = true;
+
+      var threadMsgId = m.thread_id || m.id;
+      var formData = new FormData();
+      formData.append("body", text);
+      if (hasPhoto) formData.append("photo", photoInput.files[0]);
+
+      fetch("/field/reply/" + encodeURIComponent(threadMsgId), {
+        method: "POST",
+        body: formData,
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (resp) {
+          sendBtn.disabled = false;
+          if (resp && resp.ok) {
+            input.value = "";
+            photoInput.value = "";
+            preview.hidden = true;
+            toast("Reponse envoyee", "ok");
+            loadThread(threadMsgId, threadWrap, m.id);
+          } else {
+            toast(resp.error || "Erreur", "err");
+          }
+        })
+        .catch(function () {
+          sendBtn.disabled = false;
+          toast("Erreur reseau", "err");
+        });
+    });
+
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); sendBtn.click(); }
+    });
+
+    row.appendChild(photoInput);
+    row.appendChild(photoBtn);
+    row.appendChild(input);
+    row.appendChild(sendBtn);
+    section.appendChild(preview);
+    section.appendChild(row);
+    return section;
   }
 
   // ---------------------------------------------------------------------

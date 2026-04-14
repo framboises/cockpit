@@ -340,6 +340,9 @@ def _pub_message(msg):
         "payload": msg.get("payload") or {},
         "priority": msg.get("priority", "normal"),
         "from": msg.get("from"),
+        "direction": msg.get("direction", "cockpit_to_field"),
+        "thread_id": str(msg["thread_id"]) if msg.get("thread_id") else None,
+        "reply_count": msg.get("reply_count", 0),
         "created_at": _iso(msg.get("createdAt")),
         "ack_at": _iso(msg.get("ack_at")),
     }
@@ -1047,6 +1050,135 @@ def field_ack(msg_id):
     return jsonify({"ok": True})
 
 
+@field_bp.route("/field/thread/<msg_id>", methods=["GET"])
+@field_token_required
+def field_thread(msg_id):
+    """Retourne tous les messages d'un thread (message initial + reponses)."""
+    try:
+        oid = ObjectId(msg_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+
+    db = _get_mongo_db()
+    device_id = request.device["_id"]
+
+    # Le msg_id peut etre le thread_id ou un message du thread
+    original = db["field_messages"].find_one({"_id": oid})
+    if not original:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+
+    # Determiner le thread_id : si le message a un thread_id, c'est une reponse
+    thread_id = original.get("thread_id") or oid
+
+    # Recuperer tous les messages du thread
+    cursor = db["field_messages"].find({
+        "$or": [
+            {"_id": thread_id},
+            {"thread_id": thread_id},
+        ],
+    }).sort("createdAt", 1)
+
+    messages = []
+    for m in cursor:
+        msg = _pub_message(m)
+        messages.append(msg)
+
+    return jsonify({"ok": True, "thread_id": str(thread_id), "messages": messages})
+
+
+@field_bp.route("/field/reply/<msg_id>", methods=["POST"])
+@field_token_required
+def field_reply(msg_id):
+    """Reponse de la tablette a un message cockpit. Cree un message dans le thread.
+    Accept multipart/form-data (body + photo) ou JSON (body)."""
+    try:
+        oid = ObjectId(msg_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+
+    db = _get_mongo_db()
+    device = request.device
+    device_id = device["_id"]
+
+    # Trouver le message original pour determiner le thread_id
+    original = db["field_messages"].find_one({"_id": oid})
+    if not original:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+
+    thread_id = original.get("thread_id") or oid
+
+    # Parse body
+    is_multipart = request.content_type and "multipart" in request.content_type
+    if is_multipart:
+        body_text = (request.form.get("body") or "").strip()
+        photo_file = request.files.get("photo")
+    else:
+        data = request.get_json(silent=True) or {}
+        body_text = (data.get("body") or "").strip()
+        photo_file = None
+
+    if not body_text and not photo_file:
+        return jsonify({"ok": False, "error": "empty_reply"}), 400
+    if body_text and len(body_text) > 4000:
+        return jsonify({"ok": False, "error": "body_too_long"}), 400
+
+    # Handle photo
+    photo_url = None
+    if photo_file and photo_file.filename:
+        ext = (photo_file.filename.rsplit(".", 1)[-1] if "." in photo_file.filename else "").lower()
+        if ext not in FIELD_PHOTO_EXTENSIONS:
+            return jsonify({"ok": False, "error": "invalid_photo_format"}), 400
+        photo_data = photo_file.read()
+        if len(photo_data) > FIELD_PHOTO_MAX_SIZE:
+            return jsonify({"ok": False, "error": "photo_too_large"}), 400
+
+        import uuid as _uuid
+        photo_id = str(_uuid.uuid4())
+        event = device.get("event") or "unknown"
+        year = device.get("year") or "unknown"
+        sub_dir = os.path.join(event, str(year))
+        full_dir = os.path.join(FIELD_PHOTOS_DIR, sub_dir)
+        os.makedirs(full_dir, exist_ok=True)
+        safe_name = secure_filename(photo_file.filename) or "photo.jpg"
+        filename = "{}_{}.{}".format(photo_id[:8], safe_name.rsplit(".", 1)[0][:20], ext)
+        filepath = os.path.join(full_dir, filename)
+        with open(filepath, "wb") as fp:
+            fp.write(photo_data)
+        photo_url = "/field/photos/{}/{}".format(sub_dir, filename)
+
+    payload = {}
+    if photo_url:
+        payload["photo"] = photo_url
+
+    now = _now()
+    reply_doc = {
+        "device_id": device_id,
+        "device_name": device.get("name"),
+        "event": device.get("event"),
+        "year": device.get("year"),
+        "type": original.get("type", "info"),
+        "title": "",
+        "body": body_text,
+        "payload": payload,
+        "priority": "normal",
+        "from": "field:" + (device.get("name") or "?"),
+        "direction": "field_to_cockpit",
+        "thread_id": thread_id,
+        "createdAt": now,
+        "expiresAt": now + timedelta(seconds=INBOX_MESSAGE_TTL_SECONDS),
+        "ack_at": None,
+    }
+    db["field_messages"].insert_one(reply_doc)
+
+    # Incrementer le reply_count sur le message racine du thread
+    db["field_messages"].update_one(
+        {"_id": thread_id},
+        {"$inc": {"reply_count": 1}},
+    )
+
+    return jsonify({"ok": True, "id": str(reply_doc["_id"])})
+
+
 # =============================================================================
 # PARTIE ADMIN : routes /field/admin/*
 # =============================================================================
@@ -1570,6 +1702,109 @@ def field_admin_send():
     })
 
 
+@field_bp.route("/field/admin/send-with-photo", methods=["POST"])
+@admin_required
+def field_admin_send_with_photo():
+    """Envoie un message avec photo optionnelle vers une ou plusieurs tablettes.
+    Accept multipart/form-data : champs texte + fichier 'photo' optionnel.
+    Les champs JSON sont passes individuellement dans le form."""
+    event = (request.form.get("event") or "").strip()
+    year = (request.form.get("year") or "").strip()
+    if not event or not year:
+        return jsonify({"ok": False, "error": "missing_event_year"}), 400
+
+    mtype = (request.form.get("type") or "info").strip()
+    if mtype not in ALLOWED_MESSAGE_TYPES:
+        return jsonify({"ok": False, "error": "invalid_type"}), 400
+
+    priority = (request.form.get("priority") or "normal").strip()
+    if priority not in ALLOWED_PRIORITIES:
+        priority = "normal"
+
+    title = (request.form.get("title") or "").strip()
+    body = (request.form.get("body") or "").strip()
+    if not title and not body:
+        return jsonify({"ok": False, "error": "empty_message"}), 400
+    if len(title) > 120:
+        return jsonify({"ok": False, "error": "title_too_long"}), 400
+    if len(body) > 4000:
+        return jsonify({"ok": False, "error": "body_too_long"}), 400
+
+    # Resolve target
+    import json as _json
+    target_raw = request.form.get("target") or "{}"
+    try:
+        target = _json.loads(target_raw)
+    except (ValueError, TypeError):
+        return jsonify({"ok": False, "error": "invalid_target"}), 400
+
+    db = _get_mongo_db()
+    targets, err = _resolve_targets(db, event, year, target)
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+    if not targets:
+        return jsonify({"ok": False, "error": "no_target_matched"}), 404
+
+    # Handle photo upload
+    photo_url = None
+    photo_file = request.files.get("photo")
+    if photo_file and photo_file.filename:
+        ext = (photo_file.filename.rsplit(".", 1)[-1] if "." in photo_file.filename else "").lower()
+        if ext not in FIELD_PHOTO_EXTENSIONS:
+            return jsonify({"ok": False, "error": "invalid_photo_format"}), 400
+        photo_data = photo_file.read()
+        if len(photo_data) > FIELD_PHOTO_MAX_SIZE:
+            return jsonify({"ok": False, "error": "photo_too_large"}), 400
+
+        import uuid as _uuid
+        photo_id = str(_uuid.uuid4())
+        sub_dir = os.path.join(event, str(year))
+        full_dir = os.path.join(FIELD_PHOTOS_DIR, sub_dir)
+        os.makedirs(full_dir, exist_ok=True)
+        safe_name = secure_filename(photo_file.filename) or "photo.jpg"
+        filename = "{}_{}.{}".format(photo_id[:8], safe_name.rsplit(".", 1)[0][:20], ext)
+        filepath = os.path.join(full_dir, filename)
+        with open(filepath, "wb") as fp:
+            fp.write(photo_data)
+        photo_url = "/field/photos/{}/{}".format(sub_dir, filename)
+
+    payload = {}
+    if photo_url:
+        payload["photo"] = photo_url
+
+    now = _now()
+    expires = now + timedelta(seconds=INBOX_MESSAGE_TTL_SECONDS)
+    sender_email = (getattr(request, "admin_user", None) or {}).get("email", "?")
+
+    docs = []
+    for d in targets:
+        docs.append({
+            "device_id": d["_id"],
+            "device_name": d.get("name"),
+            "event": event,
+            "year": year,
+            "type": mtype,
+            "title": title,
+            "body": body,
+            "payload": payload,
+            "priority": priority,
+            "from": sender_email,
+            "createdAt": now,
+            "expiresAt": expires,
+            "ack_at": None,
+        })
+    if docs:
+        db["field_messages"].insert_many(docs)
+
+    return jsonify({
+        "ok": True,
+        "sent_count": len(docs),
+        "targets": [
+            {"id": str(d["_id"]), "name": d.get("name")} for d in targets
+        ],
+    })
+
+
 def _pub_message_admin(msg):
     """Variante admin : inclut device_id, device_name, event/year et status."""
     if not msg:
@@ -1625,6 +1860,126 @@ def field_admin_message_delete(msg_id):
     if res.deleted_count == 0:
         return jsonify({"ok": False, "error": "not_found"}), 404
     return jsonify({"ok": True})
+
+
+@field_bp.route("/field/admin/thread/<msg_id>", methods=["GET"])
+@admin_required
+def field_admin_thread(msg_id):
+    """Retourne tous les messages d'un thread pour le cockpit."""
+    try:
+        oid = ObjectId(msg_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+
+    db = _get_mongo_db()
+    original = db["field_messages"].find_one({"_id": oid})
+    if not original:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+
+    thread_id = original.get("thread_id") or oid
+    cursor = db["field_messages"].find({
+        "$or": [
+            {"_id": thread_id},
+            {"thread_id": thread_id},
+        ],
+    }).sort("createdAt", 1)
+
+    messages = [_pub_message_admin(m) for m in cursor]
+    return jsonify({"ok": True, "thread_id": str(thread_id), "messages": messages})
+
+
+@field_bp.route("/field/admin/reply/<msg_id>", methods=["POST"])
+@admin_required
+def field_admin_reply(msg_id):
+    """Reponse du cockpit dans un thread existant. Multipart (body + photo)."""
+    try:
+        oid = ObjectId(msg_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+
+    db = _get_mongo_db()
+    original = db["field_messages"].find_one({"_id": oid})
+    if not original:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+
+    thread_id = original.get("thread_id") or oid
+
+    # Le device cible est celui du message original
+    device_id = original.get("device_id")
+    device_name = original.get("device_name")
+    event = original.get("event", "")
+    year = original.get("year", "")
+    if not device_id:
+        return jsonify({"ok": False, "error": "no_target"}), 400
+
+    is_multipart = request.content_type and "multipart" in request.content_type
+    if is_multipart:
+        body_text = (request.form.get("body") or "").strip()
+        photo_file = request.files.get("photo")
+    else:
+        data = request.get_json(silent=True) or {}
+        body_text = (data.get("body") or "").strip()
+        photo_file = None
+
+    if not body_text and not (photo_file and photo_file.filename):
+        return jsonify({"ok": False, "error": "empty_reply"}), 400
+    if body_text and len(body_text) > 4000:
+        return jsonify({"ok": False, "error": "body_too_long"}), 400
+
+    # Handle photo
+    photo_url = None
+    if photo_file and photo_file.filename:
+        ext = (photo_file.filename.rsplit(".", 1)[-1] if "." in photo_file.filename else "").lower()
+        if ext not in FIELD_PHOTO_EXTENSIONS:
+            return jsonify({"ok": False, "error": "invalid_photo_format"}), 400
+        photo_data = photo_file.read()
+        if len(photo_data) > FIELD_PHOTO_MAX_SIZE:
+            return jsonify({"ok": False, "error": "photo_too_large"}), 400
+
+        import uuid as _uuid
+        photo_id = str(_uuid.uuid4())
+        sub_dir = os.path.join(event, str(year))
+        full_dir = os.path.join(FIELD_PHOTOS_DIR, sub_dir)
+        os.makedirs(full_dir, exist_ok=True)
+        safe_name = secure_filename(photo_file.filename) or "photo.jpg"
+        filename = "{}_{}.{}".format(photo_id[:8], safe_name.rsplit(".", 1)[0][:20], ext)
+        filepath = os.path.join(full_dir, filename)
+        with open(filepath, "wb") as fp:
+            fp.write(photo_data)
+        photo_url = "/field/photos/{}/{}".format(sub_dir, filename)
+
+    payload = {}
+    if photo_url:
+        payload["photo"] = photo_url
+
+    now = _now()
+    sender_email = (getattr(request, "admin_user", None) or {}).get("email", "?")
+    reply_doc = {
+        "device_id": device_id,
+        "device_name": device_name,
+        "event": event,
+        "year": year,
+        "type": original.get("type", "info"),
+        "title": "",
+        "body": body_text,
+        "payload": payload,
+        "priority": "normal",
+        "from": sender_email,
+        "direction": "cockpit_to_field",
+        "thread_id": thread_id,
+        "createdAt": now,
+        "expiresAt": now + timedelta(seconds=INBOX_MESSAGE_TTL_SECONDS),
+        "ack_at": None,
+    }
+    db["field_messages"].insert_one(reply_doc)
+
+    # Incrementer le reply_count sur le message racine
+    db["field_messages"].update_one(
+        {"_id": thread_id},
+        {"$inc": {"reply_count": 1}},
+    )
+
+    return jsonify({"ok": True, "id": str(reply_doc["_id"])})
 
 
 # =============================================================================
