@@ -329,7 +329,7 @@
     /* ---- live feed ---- */
     async function loadLive() {
         try {
-            var rows = await get(API.live + "?n=20");
+            var rows = await get(API.live + "?n=50");
             renderFeed(rows);
             // Enrich ANPR items with Vision lieu pills only if feed was rebuilt
             if (_feedRebuilt) enrichFeedWithVision(rows);
