@@ -426,14 +426,15 @@
     }
 
     function enrichFeedWithVision(rows) {
-        var plates = (rows || []).map(function (r) { return r.plate; }).filter(function (p) { return p && p !== "UNKNOWN"; });
-        if (!plates.length) return;
-        var unique = plates.filter(function (v, i, a) { return a.indexOf(v) === i; });
+        // Only enrich ANPR items -- Vision items already have their lieu pill
+        var anprPlates = (rows || []).filter(function (r) { return r.source !== "vision"; }).map(function (r) { return r.plate; }).filter(function (p) { return p && p !== "UNKNOWN"; });
+        if (!anprPlates.length) return;
+        var unique = anprPlates.filter(function (v, i, a) { return a.indexOf(v) === i; });
         get(API.visionBatch + "?plates=" + unique.join(",")).then(function (visionData) {
             if (!visionData || !Object.keys(visionData).length) return;
             qsa(".anpr-feed-item", qs("#anpr-live-feed")).forEach(function (item, i) {
                 var r = rows[i];
-                if (!r || !visionData[r.plate]) return;
+                if (!r || r.source === "vision" || !visionData[r.plate]) return;
                 var badge = item.querySelector(".anpr-plate-badge");
                 if (!badge) return;
                 var pill = mkLieuPill(visionData[r.plate].lieu);

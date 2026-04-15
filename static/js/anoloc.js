@@ -159,6 +159,8 @@
     fetch(url)
       .then(function (r) { return r.json(); })
       .then(function (data) {
+        console.log("[Anoloc] /anoloc/live response:", JSON.stringify(data).substring(0, 500));
+        console.log("[Anoloc] groups count:", Object.keys(data.groups || {}).length, "enabled:", data.enabled);
         if (!data.enabled) {
           showDisabled();
           return;
@@ -372,6 +374,8 @@
     if (headerCount) headerCount.textContent = totalOnline + "/" + totalAll;
     var headerDot = document.getElementById("anoloc-header-dot");
     if (headerDot) headerDot.className = "anoloc-status-dot " + (totalOnline > 0 ? "online" : "offline");
+
+    console.log("[Anoloc] updatePanel done: " + groupIds.length + " groups rendered, " + totalOnline + "/" + totalAll + " devices, groupList children:", groupList ? groupList.children.length : "NO groupList", "body classes:", document.getElementById("widget-right-4-body") ? document.getElementById("widget-right-4-body").className : "NO body");
   }
 
   // --- Update markers on the map ---
