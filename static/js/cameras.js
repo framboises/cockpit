@@ -241,12 +241,16 @@
             toast("Capture en cours...", "info");
             API.capture(cam._id).then(function(r){
               if(r.ok) return r.blob();
-              throw new Error("Capture failed");
+              return r.json().then(function(j){ throw new Error(j.error || "Capture echouee"); });
             }).then(function(blob){
               var url = URL.createObjectURL(blob);
               updateCardThumb(cam._id, url);
               toast("Capture reussie", "success");
-            }).catch(function(){ toast("Echec de la capture", "error"); });
+            }).catch(function(err){
+              var msg = (err && err.message) ? err.message : "Camera injoignable";
+              if(msg.indexOf("timed out") !== -1 || msg.indexOf("Timeout") !== -1) msg = "Camera injoignable (timeout)";
+              toast(msg, "error");
+            });
             return;
           }
           if(action === "wiper"){

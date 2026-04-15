@@ -1239,6 +1239,10 @@
               } else {
                 showToast("error", r.error || "Erreur capture");
               }
+            })
+            .catch(function () {
+              camBtn.disabled = false;
+              showToast("error", "Camera injoignable ou erreur reseau");
             });
         });
       });
@@ -2918,6 +2922,13 @@
                 camBtn.appendChild(document.createTextNode(" Joindre une capture camera"));
                 showToast("error", r.error || "Erreur capture");
               }
+            })
+            .catch(function () {
+              camBtn.disabled = false;
+              camBtn.textContent = "";
+              camBtn.appendChild(matIcon("videocam"));
+              camBtn.appendChild(document.createTextNode(" Joindre une capture camera"));
+              showToast("error", "Camera injoignable ou erreur reseau");
             });
         });
       });
@@ -3543,8 +3554,9 @@
         item.appendChild(arrow);
 
         item.addEventListener("click", function () {
+          var cb = _camPickerCallback;
           closeCameraPicker();
-          if (_camPickerCallback) _camPickerCallback(cam._id, cam.name);
+          if (cb) cb(cam._id, cam.name);
         });
 
         list.appendChild(item);
