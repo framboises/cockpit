@@ -3660,10 +3660,10 @@ def pcorg_camera_capture():
         fiche_doc = db["pcorg"].find_one({"_id": fiche_id}, {"event": 1, "year": 1})
     event_name = (fiche_doc or {}).get("event", "cockpit")
     year_val = str((fiche_doc or {}).get("year", ts.year))
-    sub_dir = os.path.join(event_name, year_val)
+    sub_dir = f"{event_name}/{year_val}"
 
     photos_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "uploads", "field_photos", sub_dir)
+                              "uploads", "field_photos", event_name, year_val)
     os.makedirs(photos_dir, exist_ok=True)
 
     safe_cam_name = cam_doc["name"].replace(" ", "_")[:20]
