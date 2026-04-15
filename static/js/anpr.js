@@ -331,19 +331,21 @@
         try {
             var rows = await get(API.live + "?n=20");
             renderFeed(rows);
-            // Enrich ANPR items with Vision lieu pills
-            var anprRows = (rows || []).filter(function (r) { return r.source !== "vision"; });
-            if (anprRows.length) enrichFeedWithVision(rows);
+            // Enrich ANPR items with Vision lieu pills only if feed was rebuilt
+            if (_feedRebuilt) enrichFeedWithVision(rows);
         } catch (e) { console.error("Live", e); }
     }
 
+    var _feedRebuilt = false;
     function renderFeed(rows) {
+        _feedRebuilt = false;
         if (!rows || !rows.length) return;
         // Skip rebuild if nothing changed
         var topId = rows[0].id;
         if (topId === lastLiveTop) return;
         var prevTop = lastLiveTop;
         lastLiveTop = topId;
+        _feedRebuilt = true;
         var c = qs("#anpr-live-feed"); c.textContent = "";
         (rows || []).forEach(function (r, i) {
             var isVision = r.source === "vision";
