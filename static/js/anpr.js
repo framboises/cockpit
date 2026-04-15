@@ -62,7 +62,7 @@
     Chart.defaults.plugins.legend.display = false;
     Chart.defaults.animation.duration = 500;
 
-    var LIEU_COLORS = { "Ouest": "#3b82f6", "Panorama": "#22c55e", "Houx": "#f59e0b" };
+    var LIEU_COLORS = { "Ouest": "#f97316", "Panorama": "#dc2626", "Houx": "#166534" };
     function mkLieuPill(lieu) {
         if (!lieu) return null;
         var pill = mk("span", "anpr-lieu-pill");

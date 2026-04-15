@@ -66,6 +66,13 @@ body {
   padding: 4px 8px; background: #1e293b; border-radius: 8px;
   border: 1px solid #334155;
 }
+.topbar-reload {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border: 1px solid #334155; border-radius: 8px;
+  background: #1e293b; color: #cbd5e1; cursor: pointer; padding: 0;
+}
+.topbar-reload .material-symbols-outlined { font-size: 18px; }
+.topbar-reload:active { background: #334155; }
 
 /* =====================================================================
    MAP

@@ -11,6 +11,7 @@
   var anolocMarkers = {};     // deviceId -> L.marker
   var anolocVisible = true;
   var groupToggles = {};      // beaconGroupId -> boolean (visible on map)
+  var groupExpanded = {};     // beaconGroupId -> boolean (panel expanded)
   var refreshTimer = null;
   var REFRESH_MS = 15000;     // 15s
   var lastData = null;
@@ -231,24 +232,27 @@
         className: "btn-icon anoloc-group-toggle" + (groupToggles[gid] ? " active" : ""),
         title: "Afficher/masquer",
       }, [visIcon]);
+      var expanded = !!groupExpanded[gid];
       var chevron = materialIcon("expand_more", "font-size:18px;transition:transform 0.2s;");
-      chevron.style.transform = "rotate(-90deg)"; // replie par defaut
+      chevron.style.transform = expanded ? "" : "rotate(-90deg)";
       var meta = el("div", {className: "anoloc-group-meta"}, [toggleBtnGrp, chevron]);
 
       var row = el("div", {className: "anoloc-group-row"}, [info, meta]);
       groupList.appendChild(row);
 
-      // Device container (collapsible, replie par defaut)
-      var devContainer = el("div", {className: "anoloc-dev-container anoloc-collapsed"});
+      // Device container (collapsible, restaurer etat ouvert/ferme)
+      var devContainer = el("div", {className: "anoloc-dev-container" + (expanded ? "" : " anoloc-collapsed")});
 
       // Click group header to collapse/expand device list
       row.style.cursor = "pointer";
-      row.addEventListener("click", function (e) {
-        // Ne pas replier si on clique sur le bouton visibilite
-        if (e.target.closest(".anoloc-group-toggle")) return;
-        var collapsed = devContainer.classList.toggle("anoloc-collapsed");
-        chevron.style.transform = collapsed ? "rotate(-90deg)" : "";
-      });
+      (function (groupId) {
+        row.addEventListener("click", function (e) {
+          if (e.target.closest(".anoloc-group-toggle")) return;
+          var collapsed = devContainer.classList.toggle("anoloc-collapsed");
+          chevron.style.transform = collapsed ? "rotate(-90deg)" : "";
+          groupExpanded[groupId] = !collapsed;
+        });
+      })(gid);
 
       toggleBtnGrp.addEventListener("click", function (e) {
         e.stopPropagation();

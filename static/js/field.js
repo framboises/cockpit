@@ -2119,16 +2119,19 @@
       }
     });
     if (newOnes.length === 0) return;
-    // Premier poll : si une fiche active existe deja, afficher l'alerte
+    // Premier poll : afficher l'alerte pour la fiche active ou la premiere fiche non prise en charge
     if (!state.fichesFirstPolled) {
       state.fichesFirstPolled = true;
+      var toShow = null;
       if (state.activeFicheId) {
-        var activeFiche = null;
         for (var i = 0; i < newOnes.length; i++) {
-          if (newOnes[i].id === state.activeFicheId) { activeFiche = newOnes[i]; break; }
+          if (newOnes[i].id === state.activeFicheId) { toShow = newOnes[i]; break; }
         }
-        if (activeFiche) showDispatchAlert(activeFiche);
       }
+      if (!toShow && newOnes.length > 0) {
+        toShow = newOnes[0];
+      }
+      if (toShow) showDispatchAlert(toShow);
       return;
     }
     var first = newOnes[0];
@@ -3188,13 +3191,14 @@
     }
 
     modal.hidden = false;
-    ack.onclick = function () {
+    // Marquer comme lu des l'ouverture du modal
+    if (!m.ack_at) {
       fetch("/field/ack/" + encodeURIComponent(m.id), { method: "POST" })
-        .then(function () {
-          modal.hidden = true;
-          pollInbox();
-        })
-        .catch(function () { toast("Echec ack", "err"); });
+        .then(function () { pollInbox(); })
+        .catch(function () {});
+    }
+    ack.onclick = function () {
+      modal.hidden = true;
     };
   }
 
@@ -3372,6 +3376,8 @@
     $("btn-recenter").addEventListener("click", recenter);
     $("btn-layers").addEventListener("click", cycleLayer);
     $("btn-grid").addEventListener("click", openLayersPanel);
+    var reloadBtn = $("btn-reload");
+    if (reloadBtn) reloadBtn.addEventListener("click", function () { location.reload(); });
     $("btn-inbox").addEventListener("click", function () {
       var p = $("inbox-panel");
       p.hidden = !p.hidden;
