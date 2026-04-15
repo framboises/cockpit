@@ -2242,6 +2242,38 @@
       pos.appendChild(coordSpan);
       bodyEl.appendChild(pos);
     }
+    // Photo camera (chargee depuis le detail)
+    var photoArea = document.createElement("div");
+    photoArea.className = "dispatch-alert-photo";
+    photoArea.style.display = "none";
+    bodyEl.appendChild(photoArea);
+
+    fetch("/field/my-fiches/" + encodeURIComponent(f.id) + "/detail",
+          { headers: { "Accept": "application/json" } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.ok) return;
+        var history = d.comment_history || [];
+        var photoEntry = null;
+        for (var i = 0; i < history.length; i++) {
+          if (history[i].photo) { photoEntry = history[i]; break; }
+        }
+        if (photoEntry) {
+          var img = document.createElement("img");
+          img.src = photoEntry.photo;
+          img.alt = photoEntry.text || "Capture camera";
+          img.className = "dispatch-alert-photo-img";
+          var label = document.createElement("div");
+          label.className = "dispatch-alert-photo-label";
+          label.appendChild(_mkIcon("videocam"));
+          label.appendChild(document.createTextNode(" " + (photoEntry.text || "Capture camera")));
+          photoArea.appendChild(img);
+          photoArea.appendChild(label);
+          photoArea.style.display = "";
+        }
+      })
+      .catch(function () { /* silent */ });
+
     box.appendChild(bodyEl);
 
     // Boutons
