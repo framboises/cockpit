@@ -288,20 +288,8 @@
     $("#detail-snap-img").style.display = "none";
     $("#detail-snap-ph").style.display = "";
 
-    // Load status + device info
-    API.status(id).then(function(res){
-      _statusCache[id] = res;
-      var dot = $("#detail-status");
-      dot.className = "cam-status " + (res.online ? "online" : "offline");
-      updateStatusDots(id, res.online);
-      renderDeviceInfo(res.device_info || {});
-    }).catch(function(){
-      $("#detail-status").className = "cam-status offline";
-      renderDeviceInfo({});
-    });
-
-    // Try initial capture
-    captureForDetail(id);
+    // Status polling et capture desactives pour le moment
+    renderDeviceInfo({});
   }
 
   function closeDetail(){
@@ -491,7 +479,6 @@
   function loadAll(){
     API.list().then(function(cameras){
       renderGrid(cameras);
-      startStatusPolling();
     }).catch(function(err){
       console.error("Failed to load cameras", err);
       toast("Erreur de chargement", "error");
