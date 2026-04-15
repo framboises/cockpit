@@ -14,6 +14,16 @@
        CAMERAS ADMIN - page-specific styles
        ================================================================ */
 
+    /* Override cockpit 3-column grid + enable scroll */
+    .cam-page-layout .app-main {
+      overflow-y: auto;
+    }
+    .cam-page-layout #main-content {
+      display: block;
+      flex: 1 0 auto;
+      min-height: 0;
+    }
+
     /* Grid */
     .cam-grid {
       display: grid;
@@ -354,7 +364,7 @@
 </head>
 
 <body>
-<div class="app-layout">
+<div class="app-layout cam-page-layout">
 
   <!-- ===== SIDEBAR ===== -->
   <aside id="sidebar" class="sidebar">

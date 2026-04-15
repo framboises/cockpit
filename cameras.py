@@ -305,7 +305,7 @@ def import_from_json():
 @cameras_bp.route("/api/cameras", methods=["GET"])
 def list_cameras():
     _ensure_db()
-    docs = list(_col_cameras.find().sort([("name", 1)]))
+    docs = list(_col_cameras.find({"brand": "hikvision"}).sort([("name", 1)]))
     return jsonify([_pub_safe(d) for d in docs])
 
 
