@@ -718,12 +718,58 @@ def anpr_stats():
 
 @anpr_bp.route("/api/anpr/live")
 def anpr_live():
-    """Last N detections for live feed."""
+    """Last N detections for live feed (ANPR + Vision merged)."""
     _ensure_db()
     cam_cfgs = _get_cam_configs()
-    n = min(25, int(request.args.get("n", 10)))
-    docs = list(_col_anpr.find({"license_plate": {"$ne": "UNKNOWN"}}).sort("event_dt", DESCENDING).limit(n))
-    return jsonify([_serialize(d, cam_cfgs) for d in docs])
+    n = min(50, int(request.args.get("n", 20)))
+
+    # ANPR detections
+    anpr_docs = list(_col_anpr.find({"license_plate": {"$ne": "UNKNOWN"}}).sort("event_dt", DESCENDING).limit(n))
+    results = []
+    for d in anpr_docs:
+        r = _serialize(d, cam_cfgs)
+        r["source"] = "anpr"
+        results.append(r)
+
+    # Vision detections (recent, same window)
+    vq = {}
+    vf = _vision_active_filter()
+    if vf:
+        vq.update(vf)
+    vdocs = list(_col_vision_imm.find(vq).sort("date", -1).limit(n))
+    for vd in vdocs:
+        v_couleur = vd.get("couleur", "")
+        results.append({
+            "id": str(vd["_id"]),
+            "source": "vision",
+            "plate": vd.get("plaque", ""),
+            "original_plate": vd.get("plaque", ""),
+            "confidence": 0,
+            "color": v_couleur,
+            "color_hex": COLOR_HEX.get(v_couleur, "") if v_couleur else "",
+            "type": "",
+            "type_label": vd.get("modele", ""),
+            "brand": vd.get("marque", ""),
+            "brand_id": 0,
+            "camera": "",
+            "direction": "",
+            "resolved_dir": "",
+            "event_dt": vd.get("date", ""),
+            "plate_image_id": None,
+            "vehicle_image_id": None,
+            "plate_image_path": None,
+            "vehicle_image_path": None,
+            "list_name": "",
+            "lieu": vd.get("lieu", ""),
+            "billets": vd.get("billets", []),
+            "billets_count": len(vd.get("billets", [])),
+            "commentaire": vd.get("commentaire", ""),
+            "photo_vehicule": vd.get("photo_vehicule", ""),
+        })
+
+    # Sort all by date descending, take top N
+    results.sort(key=lambda r: r.get("event_dt", "") or "", reverse=True)
+    return jsonify(results[:n])
 
 
 @anpr_bp.route("/api/anpr/plate/<plate>")

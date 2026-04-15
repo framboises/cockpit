@@ -2155,7 +2155,7 @@ img { max-width: 100%; }
 
 /* Ressources : hauteur max */
 #widget-right-4 > .widget-body {
-  max-height: 320px;
+  max-height: 50vh;
   overflow-y: auto;
 }
 
@@ -9002,15 +9002,23 @@ th span { font-size: 0.88rem; font-weight: 700; }
 }
 .anpr-reset-btn:hover { border-color: var(--danger); color: var(--danger); }
 
-/* 2-column body: narrow feed left, wide analysis right */
+/* 2-column body: 50/50 live + analysis */
 .anpr-body {
   display: grid;
-  grid-template-columns: 300px 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 12px;
   height: calc(100vh - var(--header-h) - 80px);
 }
+.anpr-body.anpr-expand-right {
+  grid-template-columns: 0fr 1fr;
+}
+.anpr-body.anpr-expand-right .anpr-col-left {
+  overflow: hidden; min-width: 0; opacity: 0; pointer-events: none;
+  border: none; box-shadow: none;
+}
 .anpr-col-left {
   overflow: hidden; display: flex; flex-direction: column;
+  transition: opacity 0.25s ease;
 }
 .anpr-col-right {
   overflow: hidden; display: flex; flex-direction: column;
@@ -9021,8 +9029,8 @@ th span { font-size: 0.88rem; font-weight: 700; }
   overflow-y: auto; flex: 1; padding: 0 !important;
 }
 .anpr-feed-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 12px; border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-bottom: 1px solid var(--line);
   cursor: pointer; transition: background 0.12s;
 }
 .anpr-feed-item:last-child { border-bottom: none; }
@@ -9036,29 +9044,38 @@ th span { font-size: 0.88rem; font-weight: 700; }
   to   { opacity: 1; transform: translateY(0); }
 }
 .anpr-feed-thumb {
-  width: 52px; height: 36px; border-radius: 5px; overflow: hidden;
+  width: 80px; height: 54px; border-radius: 6px; overflow: hidden;
   background: var(--bg); display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
 .anpr-feed-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.anpr-feed-thumb .material-symbols-outlined { font-size: 18px; color: var(--muted); }
-.anpr-feed-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.anpr-feed-thumb .material-symbols-outlined { font-size: 22px; color: var(--muted); }
+.anpr-feed-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .anpr-feed-meta {
-  font-size: 0.7rem; color: var(--muted);
-  display: flex; align-items: center; gap: 4px;
+  font-size: 0.75rem; color: var(--muted);
+  display: flex; align-items: center; gap: 5px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .anpr-feed-right {
-  display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 3px;
   flex-shrink: 0;
 }
 .anpr-feed-cam {
-  font-size: 0.65rem; color: var(--muted); background: var(--bg);
-  padding: 1px 5px; border-radius: 3px;
+  font-size: 0.68rem; color: var(--muted); background: var(--bg);
+  padding: 2px 7px; border-radius: 4px;
 }
 .anpr-feed-time {
-  font-size: 0.7rem; color: var(--muted); font-variant-numeric: tabular-nums;
+  font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums;
 }
+/* Source badge in live feed */
+.anpr-feed-source {
+  font-size: 0.58rem; padding: 1px 6px; border-radius: 9px; font-weight: 700;
+  letter-spacing: 0.03em; display: inline-block; line-height: 1.4;
+}
+.anpr-feed-source-anpr { background: rgba(37,99,235,0.10); color: #2563eb; }
+.anpr-feed-source-vision { background: rgba(245,158,11,0.14); color: #d97706; }
+/* Vision-specific feed item accent */
+.anpr-feed-item-vision { border-left: 3px solid rgba(245,158,11,0.4); }
 
 /* Tab panes inside the right widget-card */
 .anpr-tab-pane { display: none; padding: 10px 14px; overflow-y: auto; flex: 1; min-height: 0; }
@@ -9353,6 +9370,18 @@ th span { font-size: 0.88rem; font-weight: 700; }
 }
 .anpr-cam-lieu { border-color: rgba(245,158,11,0.3); }
 .anpr-cam-lieu:focus { border-color: #f59e0b; outline: none; }
+
+/* Toggle expand button */
+.anpr-expand-toggle {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 6px;
+  border: 1px solid var(--line); background: transparent;
+  cursor: pointer; color: var(--muted); transition: all 0.15s;
+  margin-left: auto;
+}
+.anpr-expand-toggle:hover { border-color: var(--brand); color: var(--brand); }
+.anpr-expand-toggle.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+.anpr-expand-toggle .material-symbols-outlined { font-size: 16px; }
 
 /* Responsive */
 @media (max-width: 1000px) {

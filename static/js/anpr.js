@@ -328,7 +328,13 @@
 
     /* ---- live feed ---- */
     async function loadLive() {
-        try { var rows = await get(API.live + "?n=25"); renderFeed(rows); enrichFeedWithVision(rows); } catch (e) { console.error("Live", e); }
+        try {
+            var rows = await get(API.live + "?n=20");
+            renderFeed(rows);
+            // Enrich ANPR items with Vision lieu pills
+            var anprRows = (rows || []).filter(function (r) { return r.source !== "vision"; });
+            if (anprRows.length) enrichFeedWithVision(rows);
+        } catch (e) { console.error("Live", e); }
     }
 
     function renderFeed(rows) {
@@ -340,31 +346,57 @@
         lastLiveTop = topId;
         var c = qs("#anpr-live-feed"); c.textContent = "";
         (rows || []).forEach(function (r, i) {
+            var isVision = r.source === "vision";
             // Only animate truly new items (not seen before)
             var isNew = prevTop !== null && r.id === topId;
-            var item = mk("div", "anpr-feed-item" + (isNew ? " anpr-feed-new" : ""));
+            var itemCls = "anpr-feed-item" + (isNew ? " anpr-feed-new" : "") + (isVision ? " anpr-feed-item-vision" : "");
+            var item = mk("div", itemCls);
             var th = mk("div", "anpr-feed-thumb");
-            var feedVehicleUrl = imgUrl(r, "vehicle");
-            if (feedVehicleUrl) { var im = document.createElement("img"); im.src = feedVehicleUrl; im.loading = "lazy"; th.appendChild(im); }
-            else th.appendChild(mk("span", "material-symbols-outlined", "directions_car"));
+            if (isVision && r.photo_vehicule) {
+                var im = document.createElement("img"); im.src = r.photo_vehicule; im.loading = "lazy"; th.appendChild(im);
+            } else {
+                var feedVehicleUrl = imgUrl(r, "vehicle");
+                if (feedVehicleUrl) { var im2 = document.createElement("img"); im2.src = feedVehicleUrl; im2.loading = "lazy"; th.appendChild(im2); }
+                else th.appendChild(mk("span", "material-symbols-outlined", isVision ? "confirmation_number" : "directions_car"));
+            }
             item.appendChild(th);
             var info = mk("div", "anpr-feed-info");
+            // Source badge + plate on same line
+            var plateRow = mk("div", "", "");
+            plateRow.style.cssText = "display:flex;align-items:center;gap:5px;";
+            var srcBadge = mk("span", "anpr-feed-source " + (isVision ? "anpr-feed-source-vision" : "anpr-feed-source-anpr"), isVision ? "VISION" : "LAPI");
+            plateRow.appendChild(srcBadge);
             var plateBadge = mk("span", "anpr-plate-badge anpr-plate-sm" + (r.list_name === "allowList" ? " anpr-plate-allow" : ""), r.plate);
-            info.appendChild(plateBadge);
+            plateRow.appendChild(plateBadge);
             if(isWatched(r.plate)){
                 var wIcon = mk("span", "material-symbols-outlined");
                 wIcon.style.cssText = "font-size:14px; color:#dc2626; margin-left:4px; vertical-align:middle;";
                 wIcon.textContent = "visibility";
                 wIcon.title = "Plaque surveillee";
-                info.appendChild(wIcon);
+                plateRow.appendChild(wIcon);
             }
+            info.appendChild(plateRow);
             var meta = mk("span", "anpr-feed-meta");
-            var dot = mk("span", "anpr-color-dot"); dot.style.background = r.color_hex; dot.style.width = "7px"; dot.style.height = "7px"; meta.appendChild(dot);
-            meta.appendChild(document.createTextNode(" " + r.brand + " \u00b7 " + r.type_label));
+            if (r.color_hex) {
+                var dot = mk("span", "anpr-color-dot"); dot.style.background = r.color_hex; dot.style.width = "7px"; dot.style.height = "7px"; meta.appendChild(dot);
+            }
+            if (isVision) {
+                var desc = [r.brand, r.type_label].filter(Boolean).join(" ");
+                if (r.lieu) desc += (desc ? " \u00b7 " : "") + r.lieu;
+                if (r.billets_count) desc += " \u00b7 " + r.billets_count + " billet" + (r.billets_count > 1 ? "s" : "");
+                meta.appendChild(document.createTextNode(" " + desc));
+            } else {
+                meta.appendChild(document.createTextNode(" " + r.brand + " \u00b7 " + r.type_label));
+            }
             info.appendChild(meta);
             item.appendChild(info);
             var right = mk("div", "anpr-feed-right");
-            right.appendChild(mk("span", "anpr-feed-cam", r.camera));
+            if (isVision && r.lieu) {
+                var lieuPill = mkLieuPill(r.lieu);
+                if (lieuPill) right.appendChild(lieuPill);
+            } else if (r.camera) {
+                right.appendChild(mk("span", "anpr-feed-cam", r.camera));
+            }
             right.appendChild(mk("span", "anpr-feed-time", fmtTm(r.event_dt)));
             item.appendChild(right);
             item.addEventListener("click", function () { openDetail(r); });
@@ -695,6 +727,16 @@
         // Refresh
         qs("#anpr-refresh-btn")?.addEventListener("click", function () { window._anprStats = null; statsLoaded = false; searchLoaded = false; loadKPIs(); loadOnsite(); loadLive(); switchTab(qs("[data-anpr-tab].active")?.dataset.anprTab || "search"); });
         qs("#anpr-config-btn")?.addEventListener("click", openCamCfg);
+        // Expand toggle (right panel full width)
+        qs("#anpr-expand-toggle")?.addEventListener("click", function () {
+            var body = qs(".anpr-body");
+            var btn = this;
+            body.classList.toggle("anpr-expand-right");
+            var expanded = body.classList.contains("anpr-expand-right");
+            btn.classList.toggle("active", expanded);
+            btn.querySelector(".material-symbols-outlined").textContent = expanded ? "fullscreen_exit" : "fullscreen";
+            btn.title = expanded ? "Reduire" : "Plein ecran";
+        });
         // On-site reset
         qs("#anpr-reset-onsite")?.addEventListener("click", function () {
             showConfirmToast("Remettre le compteur de vehicules sur site a zero ?", { okLabel: "Reinitialiser", type: "warning" }).then(function (ok) {
