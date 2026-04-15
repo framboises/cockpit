@@ -1221,6 +1221,29 @@
       commentInput.placeholder = "Action realisee, observation, consigne...";
       commentForm.appendChild(commentInput);
 
+      var commentBtns = mkEl("div", "pcorg-comment-btns");
+
+      var camBtn = mkEl("button", "pcorg-comment-cam");
+      camBtn.appendChild(matIcon("videocam"));
+      camBtn.title = "Joindre une capture camera";
+      camBtn.addEventListener("click", function () {
+        openCameraPicker(function (camId, camName) {
+          camBtn.disabled = true;
+          showToast("info", "Capture " + camName + " en cours...");
+          apiPost("/api/pcorg/camera-capture", { cam_id: camId, fiche_id: d.id })
+            .then(function (r) {
+              camBtn.disabled = false;
+              if (r.ok) {
+                showToast("success", "Photo " + camName + " ajoutee");
+                openDetailModal(d.id, false);
+              } else {
+                showToast("error", r.error || "Erreur capture");
+              }
+            });
+        });
+      });
+      commentBtns.appendChild(camBtn);
+
       var commentBtn = mkEl("button", "pcorg-comment-send");
       commentBtn.appendChild(matIcon("send"));
       commentBtn.title = "Envoyer";
@@ -1234,14 +1257,14 @@
             if (r.ok) {
               commentInput.value = "";
               showToast("success", "Commentaire ajoute");
-              // Re-open detail to refresh chronology
               openDetailModal(d.id, false);
             } else {
               showToast("error", r.error || "Erreur");
             }
           });
       });
-      commentForm.appendChild(commentBtn);
+      commentBtns.appendChild(commentBtn);
+      commentForm.appendChild(commentBtns);
       body.appendChild(commentForm);
     }
 
@@ -2217,6 +2240,7 @@
   var createGrid100On = false;
   var createGrid25On = false;
   var createCarroye = "";
+  var _createCameraPhoto = null; // {url, cam_name} si une capture camera est jointe
 
   // Listes de reference chargees depuis la config
   var pcorgConfig = { sous_classifications: {}, intervenants: [], services: [], fiche_simplifiee: {}, urgence_categories: {} };
@@ -2258,6 +2282,7 @@
     createCarroye = "";
     createGrid100On = false;
     createGrid25On = false;
+    _createCameraPhoto = null;
   }
 
   function destroyCreateMap() {
@@ -2844,6 +2869,60 @@
       var ta = mkEl("textarea", "form-input"); ta.id = "pcorg-c-comment"; ta.rows = 3;
       ta.required = true; ta.placeholder = "Action realisee, observation, consigne...";
       grp.appendChild(ta);
+
+      // Bouton capture camera
+      var camRow = mkEl("div", "pcorg-create-cam-row");
+      var camBtn = mkEl("button", "pcorg-create-cam-btn");
+      camBtn.type = "button";
+      camBtn.appendChild(matIcon("videocam"));
+      camBtn.appendChild(document.createTextNode(" Joindre une capture camera"));
+      camBtn.addEventListener("click", function () {
+        openCameraPicker(function (camId, camName) {
+          camBtn.disabled = true;
+          camBtn.textContent = "";
+          camBtn.appendChild(matIcon("hourglass_top"));
+          camBtn.appendChild(document.createTextNode(" Capture " + camName + "..."));
+          // Capture sans fiche (pas encore creee)
+          apiPost("/api/pcorg/camera-capture", { cam_id: camId })
+            .then(function (r) {
+              camBtn.disabled = false;
+              if (r.ok) {
+                _createCameraPhoto = { url: r.photo, cam_name: r.cam_name };
+                camBtn.textContent = "";
+                camBtn.appendChild(matIcon("check_circle"));
+                camBtn.appendChild(document.createTextNode(" " + r.cam_name));
+                // Afficher preview
+                var existingPreview = container.querySelector(".pcorg-create-cam-preview");
+                if (existingPreview) existingPreview.remove();
+                var preview = mkEl("div", "pcorg-create-cam-preview");
+                var img = mkEl("img", "");
+                img.src = r.photo;
+                img.alt = "Capture " + r.cam_name;
+                preview.appendChild(img);
+                var removeBtn = mkEl("button", "pcorg-create-cam-remove");
+                removeBtn.type = "button";
+                removeBtn.appendChild(matIcon("close"));
+                removeBtn.addEventListener("click", function () {
+                  _createCameraPhoto = null;
+                  preview.remove();
+                  camBtn.textContent = "";
+                  camBtn.appendChild(matIcon("videocam"));
+                  camBtn.appendChild(document.createTextNode(" Joindre une capture camera"));
+                });
+                preview.appendChild(removeBtn);
+                grp.appendChild(preview);
+                showToast("success", "Capture " + r.cam_name + " jointe");
+              } else {
+                camBtn.textContent = "";
+                camBtn.appendChild(matIcon("videocam"));
+                camBtn.appendChild(document.createTextNode(" Joindre une capture camera"));
+                showToast("error", r.error || "Erreur capture");
+              }
+            });
+        });
+      });
+      camRow.appendChild(camBtn);
+      grp.appendChild(camRow);
       container.appendChild(grp);
     }
 
@@ -3006,9 +3085,18 @@
       lon: createLon
     };
 
+    var pendingPhoto = _createCameraPhoto;
+
     apiPost("/api/pcorg/create", payload)
       .then(function (r) {
         if (r.ok) {
+          // Si une photo camera etait jointe, l'attacher a la fiche creee
+          if (pendingPhoto && r.id) {
+            apiPost("/api/pcorg/comment/" + encodeURIComponent(r.id), {
+              text: "Capture camera " + pendingPhoto.cam_name,
+              photo: pendingPhoto.url
+            });
+          }
           hideCreate();
           showToast("success", "Intervention creee");
           refresh();
@@ -3361,6 +3449,122 @@
     if (expCount) {
       expCount.textContent = items.length + " intervention" + (items.length > 1 ? "s" : "") +
         " - " + openCount + " en cours, " + closedCount + " terminee" + (closedCount > 1 ? "s" : "");
+    }
+  }
+
+  // ── Camera picker ──────────────────────────────────────────────────────────
+  var _camPickerOverlay = null;
+  var _camPickerCallback = null;
+  var _camPickerCache = null;
+
+  function openCameraPicker(callback) {
+    _camPickerCallback = callback;
+
+    if (!_camPickerOverlay) {
+      var overlay = mkEl("div", "pcorg-cam-picker-overlay");
+      overlay.addEventListener("click", function (e) {
+        if (e.target === overlay) closeCameraPicker();
+      });
+
+      var panel = mkEl("div", "pcorg-cam-picker");
+      var header = mkEl("div", "pcorg-cam-picker-header");
+      var title = mkEl("span", ""); title.textContent = "Choisir une camera";
+      var closeBtn = mkEl("button", "pcorg-cam-picker-close");
+      closeBtn.appendChild(matIcon("close"));
+      closeBtn.addEventListener("click", closeCameraPicker);
+      header.appendChild(title);
+      header.appendChild(closeBtn);
+      panel.appendChild(header);
+
+      var list = mkEl("div", "pcorg-cam-picker-list");
+      list.id = "pcorg-cam-picker-list";
+      panel.appendChild(list);
+
+      overlay.appendChild(panel);
+      document.body.appendChild(overlay);
+      _camPickerOverlay = overlay;
+    }
+
+    _camPickerOverlay.classList.add("show");
+    loadCameraList();
+  }
+
+  function closeCameraPicker() {
+    if (_camPickerOverlay) _camPickerOverlay.classList.remove("show");
+    _camPickerCallback = null;
+  }
+
+  function loadCameraList() {
+    var list = document.getElementById("pcorg-cam-picker-list");
+    list.textContent = "";
+    var loading = mkEl("div", "pcorg-cam-picker-loading");
+    loading.textContent = "Chargement...";
+    list.appendChild(loading);
+
+    var doRender = function (cameras) {
+      list.textContent = "";
+      if (!cameras || !cameras.length) {
+        var empty = mkEl("div", "pcorg-cam-picker-empty");
+        empty.textContent = "Aucune camera disponible";
+        list.appendChild(empty);
+        return;
+      }
+      cameras.forEach(function (cam) {
+        if (!cam.enabled) return;
+        var item = mkEl("div", "pcorg-cam-picker-item");
+        item.dataset.id = cam._id;
+
+        var thumb = mkEl("div", "pcorg-cam-picker-thumb");
+        var img = mkEl("img", "");
+        img.src = "/api/cameras/" + encodeURIComponent(cam._id) + "/snapshot";
+        img.alt = "";
+        img.addEventListener("error", function () { img.style.display = "none"; placeholder.style.display = ""; });
+        img.addEventListener("load", function () { img.style.display = "block"; placeholder.style.display = "none"; });
+        img.style.display = "none";
+        var placeholder = mkEl("span", "material-symbols-outlined");
+        placeholder.textContent = "videocam";
+        placeholder.style.cssText = "font-size:28px;color:rgba(148,163,184,.4);";
+        thumb.appendChild(img);
+        thumb.appendChild(placeholder);
+
+        var info = mkEl("div", "pcorg-cam-picker-info");
+        var name = mkEl("div", "pcorg-cam-picker-name");
+        name.textContent = cam.name;
+        var meta = mkEl("div", "pcorg-cam-picker-meta");
+        meta.textContent = cam.ip + (cam.location ? " - " + cam.location : "");
+        info.appendChild(name);
+        info.appendChild(meta);
+
+        var arrow = matIcon("chevron_right");
+        arrow.style.cssText = "color:var(--muted);font-size:20px;";
+
+        item.appendChild(thumb);
+        item.appendChild(info);
+        item.appendChild(arrow);
+
+        item.addEventListener("click", function () {
+          closeCameraPicker();
+          if (_camPickerCallback) _camPickerCallback(cam._id, cam.name);
+        });
+
+        list.appendChild(item);
+      });
+    };
+
+    if (_camPickerCache) {
+      doRender(_camPickerCache);
+    } else {
+      fetch("/api/cameras").then(function (r) { return r.json(); })
+        .then(function (cameras) {
+          _camPickerCache = cameras;
+          doRender(cameras);
+        })
+        .catch(function () {
+          list.textContent = "";
+          var err = mkEl("div", "pcorg-cam-picker-empty");
+          err.textContent = "Erreur de chargement";
+          list.appendChild(err);
+        });
     }
   }
 

@@ -3582,12 +3582,16 @@ def pcorg_add_comment(doc_id):
     now = datetime.now(ZoneInfo("Europe/Paris"))
     ts_fmt = now.strftime("%d/%m/%Y %H:%M:%S")
 
+    photo_url = (data.get("photo") or "").strip() or None
+
     comment_line = f"{ts_fmt} , {operator_name}\n {text}\n"
     history_entry = {
         "ts": now.isoformat(),
         "operator": operator_name,
         "text": text,
     }
+    if photo_url:
+        history_entry["photo"] = photo_url
 
     doc = db["pcorg"].find_one({"_id": doc_id}, {"comment": 1})
     if not doc:
@@ -3605,6 +3609,108 @@ def pcorg_add_comment(doc_id):
         }
     )
     return jsonify({"ok": True, "entry": history_entry})
+
+
+@app.route('/api/pcorg/camera-capture', methods=['POST'])
+@role_required("user")
+def pcorg_camera_capture():
+    """Capture une image depuis une camera HIK et l'attache a une fiche."""
+    import shutil
+    data = request.get_json(force=True)
+    cam_id = (data.get("cam_id") or "").strip()
+    fiche_id = (data.get("fiche_id") or "").strip()
+    if not cam_id:
+        return jsonify({"error": "cam_id requis"}), 400
+
+    # Charger la camera depuis MongoDB
+    from bson.objectid import ObjectId
+    from cameras import HIK_PASSWORD
+    try:
+        oid = ObjectId(cam_id)
+    except Exception:
+        return jsonify({"error": "cam_id invalide"}), 400
+    cam_doc = db["cockpit_cameras"].find_one({"_id": oid})
+    if not cam_doc:
+        return jsonify({"error": "Camera introuvable"}), 404
+
+    # Instancier et capturer
+    from hik.hik_control import HikCamera
+    password = cam_doc.get("password", "") or HIK_PASSWORD
+    cam = HikCamera(
+        name=cam_doc["name"],
+        ip=cam_doc["ip"],
+        port=cam_doc.get("port", 80),
+        user=cam_doc.get("user", "admin"),
+        password=password,
+        channel=cam_doc.get("channel", 1),
+        protocol=cam_doc.get("protocol", "http"),
+        brand=cam_doc.get("brand", "hikvision"),
+    )
+
+    import uuid as _uuid
+    photo_id = str(_uuid.uuid4())[:8]
+    ts = datetime.now(ZoneInfo("Europe/Paris"))
+    ts_fmt = ts.strftime("%d/%m/%Y %H:%M:%S")
+    ts_file = ts.strftime("%Y%m%d_%H%M%S")
+
+    # Si fiche fournie, on stocke avec event/year dans field_photos
+    # Sinon on stocke dans un dossier generique
+    fiche_doc = None
+    if fiche_id:
+        fiche_doc = db["pcorg"].find_one({"_id": fiche_id}, {"event": 1, "year": 1})
+    event_name = (fiche_doc or {}).get("event", "cockpit")
+    year_val = str((fiche_doc or {}).get("year", ts.year))
+    sub_dir = os.path.join(event_name, year_val)
+
+    photos_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "uploads", "field_photos", sub_dir)
+    os.makedirs(photos_dir, exist_ok=True)
+
+    safe_cam_name = cam_doc["name"].replace(" ", "_")[:20]
+    filename = f"{photo_id}_cam_{safe_cam_name}_{ts_file}.jpg"
+    save_path = os.path.join(photos_dir, filename)
+
+    try:
+        cam.capture_image(save_path)
+    except Exception as e:
+        logger.exception("Camera capture failed for fiche %s, cam %s", fiche_id, cam_id)
+        return jsonify({"error": f"Capture echouee: {e}"}), 500
+
+    photo_url = f"/field/photos/{sub_dir}/{filename}"
+
+    # Mettre a jour aussi le latest de la camera (pour les vignettes)
+    cam_snap_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "uploads", "camera_snapshots")
+    os.makedirs(cam_snap_dir, exist_ok=True)
+    latest_path = os.path.join(cam_snap_dir, f"{cam_id}_latest.jpg")
+    shutil.copy2(save_path, latest_path)
+
+    # Si fiche_id fourni, ajouter en commentaire
+    result = {"ok": True, "photo": photo_url, "cam_name": cam_doc["name"]}
+    if fiche_id and fiche_doc:
+        user = request.user_payload
+        operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
+        comment_text = f"Capture camera {cam_doc['name']}"
+        comment_line = f"{ts_fmt} , {operator_name}\n {comment_text}\n"
+        history_entry = {
+            "ts": ts.isoformat(),
+            "operator": operator_name,
+            "text": comment_text,
+            "photo": photo_url,
+        }
+        old = (db["pcorg"].find_one({"_id": fiche_id}, {"comment": 1}) or {}).get("comment", "")
+        new_comment = (old + comment_line) if old else comment_line
+        db["pcorg"].update_one(
+            {"_id": fiche_id},
+            {
+                "$set": {"comment": new_comment},
+                "$push": {"comment_history": history_entry},
+                "$inc": {"bounce_rev": 1},
+            }
+        )
+        result["entry"] = history_entry
+
+    return jsonify(result)
 
 
 @app.route('/api/pcorg/update-gps/<doc_id>', methods=['POST'])

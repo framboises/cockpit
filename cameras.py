@@ -459,12 +459,25 @@ def capture_snapshot(cam_id):
         os.makedirs(UPLOAD_DIR, exist_ok=True)
         save_path = os.path.join(UPLOAD_DIR, f"{cam_id}_{ts}.jpg")
         cam.capture_image(save_path)
+        # Copier en tant que latest pour servir la vignette
+        import shutil
+        latest_path = os.path.join(UPLOAD_DIR, f"{cam_id}_latest.jpg")
+        shutil.copy2(save_path, latest_path)
         with open(save_path, "rb") as f:
             img_bytes = f.read()
         return Response(img_bytes, mimetype="image/jpeg")
     except Exception as e:
         logger.exception("Capture failed for camera %s", cam_id)
         return jsonify({"error": str(e)}), 500
+
+
+@cameras_bp.route("/api/cameras/<cam_id>/snapshot", methods=["GET"])
+def get_snapshot(cam_id):
+    """Sert la derniere capture (vignette)."""
+    latest_path = os.path.join(UPLOAD_DIR, f"{cam_id}_latest.jpg")
+    if not os.path.isfile(latest_path):
+        return "", 204
+    return send_file(latest_path, mimetype="image/jpeg")
 
 
 @cameras_bp.route("/api/cameras/<cam_id>/presets", methods=["GET"])
