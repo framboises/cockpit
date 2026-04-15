@@ -349,11 +349,14 @@
         var c = qs("#anpr-live-feed"); c.textContent = "";
         (rows || []).forEach(function (r, i) {
             var isVision = r.source === "vision";
-            // Only animate truly new items (not seen before)
             var isNew = prevTop !== null && r.id === topId;
             var itemCls = "anpr-feed-item" + (isNew ? " anpr-feed-new" : "") + (isVision ? " anpr-feed-item-vision" : "");
             var item = mk("div", itemCls);
+
+            // Thumbnail with source badge overlay
             var th = mk("div", "anpr-feed-thumb");
+            var srcBadge = mk("span", "anpr-feed-source " + (isVision ? "anpr-feed-source-vision" : "anpr-feed-source-anpr"), isVision ? "VISION" : "LAPI");
+            th.appendChild(srcBadge);
             if (isVision && r.photo_vehicule) {
                 var im = document.createElement("img"); im.src = r.photo_vehicule; im.loading = "lazy"; th.appendChild(im);
             } else {
@@ -362,36 +365,33 @@
                 else th.appendChild(mk("span", "material-symbols-outlined", isVision ? "confirmation_number" : "directions_car"));
             }
             item.appendChild(th);
+
+            // Info: plate + meta
             var info = mk("div", "anpr-feed-info");
-            // Source badge + plate on same line
-            var plateRow = mk("div", "", "");
-            plateRow.style.cssText = "display:flex;align-items:center;gap:5px;";
-            var srcBadge = mk("span", "anpr-feed-source " + (isVision ? "anpr-feed-source-vision" : "anpr-feed-source-anpr"), isVision ? "VISION" : "LAPI");
-            plateRow.appendChild(srcBadge);
             var plateBadge = mk("span", "anpr-plate-badge anpr-plate-sm" + (r.list_name === "allowList" ? " anpr-plate-allow" : ""), r.plate);
-            plateRow.appendChild(plateBadge);
-            if(isWatched(r.plate)){
+            info.appendChild(plateBadge);
+            if (isWatched(r.plate)) {
                 var wIcon = mk("span", "material-symbols-outlined");
-                wIcon.style.cssText = "font-size:14px; color:#dc2626; margin-left:4px; vertical-align:middle;";
+                wIcon.style.cssText = "font-size:12px; color:#dc2626; margin-top:2px;";
                 wIcon.textContent = "visibility";
                 wIcon.title = "Plaque surveillee";
-                plateRow.appendChild(wIcon);
+                info.appendChild(wIcon);
             }
-            info.appendChild(plateRow);
             var meta = mk("span", "anpr-feed-meta");
             if (r.color_hex) {
-                var dot = mk("span", "anpr-color-dot"); dot.style.background = r.color_hex; dot.style.width = "7px"; dot.style.height = "7px"; meta.appendChild(dot);
+                var dot = mk("span", "anpr-color-dot"); dot.style.background = r.color_hex; dot.style.width = "6px"; dot.style.height = "6px"; meta.appendChild(dot);
             }
             if (isVision) {
                 var desc = [r.brand, r.type_label].filter(Boolean).join(" ");
                 if (r.lieu) desc += (desc ? " \u00b7 " : "") + r.lieu;
-                if (r.billets_count) desc += " \u00b7 " + r.billets_count + " billet" + (r.billets_count > 1 ? "s" : "");
                 meta.appendChild(document.createTextNode(" " + desc));
             } else {
-                meta.appendChild(document.createTextNode(" " + r.brand + " \u00b7 " + r.type_label));
+                meta.appendChild(document.createTextNode(" " + r.brand));
             }
             info.appendChild(meta);
             item.appendChild(info);
+
+            // Footer: camera/lieu + time
             var right = mk("div", "anpr-feed-right");
             if (isVision && r.lieu) {
                 var lieuPill = mkLieuPill(r.lieu);
@@ -401,6 +401,7 @@
             }
             right.appendChild(mk("span", "anpr-feed-time", fmtTm(r.event_dt)));
             item.appendChild(right);
+
             item.addEventListener("click", function () { openDetail(r); });
             c.appendChild(item);
         });

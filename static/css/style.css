@@ -8966,11 +8966,11 @@ th span { font-size: 0.88rem; font-weight: 700; }
 
 /* Override #main-content grid (needs ID specificity to win) */
 #main-content.anpr-page {
-  display: block;
-  grid-template-columns: none;
+  display: flex;
+  flex-direction: column;
   padding: 12px;
-  overflow-y: auto;
-  height: calc(100vh - var(--header-h));
+  overflow: hidden;
+  height: calc(100vh - var(--header-h) - var(--footer-h));
 }
 
 /* KPI strip -- inline, not stretched */
@@ -9007,7 +9007,8 @@ th span { font-size: 0.88rem; font-weight: 700; }
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-  height: calc(100vh - var(--header-h) - 80px);
+  flex: 1;
+  min-height: 0;
 }
 .anpr-body.anpr-expand-right {
   grid-template-columns: 0fr 1fr;
@@ -9018,68 +9019,77 @@ th span { font-size: 0.88rem; font-weight: 700; }
 }
 .anpr-col-left {
   overflow: hidden; display: flex; flex-direction: column;
-  transition: opacity 0.25s ease;
+  min-height: 0; transition: opacity 0.25s ease;
 }
 .anpr-col-right {
   overflow: hidden; display: flex; flex-direction: column;
+  min-height: 0;
 }
 
-/* Feed scroll */
+/* Feed scroll -- tile grid */
 .anpr-feed-scroll {
-  overflow-y: auto; flex: 1; padding: 0 !important;
+  overflow-y: auto; flex: 1; padding: 8px !important;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  align-content: start;
 }
 .anpr-feed-item {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 14px; border-bottom: 1px solid var(--line);
-  cursor: pointer; transition: background 0.12s;
+  display: flex; flex-direction: column;
+  border-radius: 8px; overflow: hidden;
+  border: 1px solid var(--line); background: var(--card);
+  cursor: pointer; transition: transform 0.15s, box-shadow 0.15s;
 }
-.anpr-feed-item:last-child { border-bottom: none; }
-.anpr-feed-item:hover { background: var(--brand-light); }
+.anpr-feed-item:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
 .anpr-feed-new {
-  animation: anprSlide 0.4s ease;
-  background: rgba(37,99,235,0.03);
+  animation: anprTileIn 0.4s ease;
 }
-@keyframes anprSlide {
-  from { opacity: 0; transform: translateY(-6px); }
-  to   { opacity: 1; transform: translateY(0); }
+@keyframes anprTileIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
 }
 .anpr-feed-thumb {
-  width: 80px; height: 54px; border-radius: 6px; overflow: hidden;
+  width: 100%; height: 90px; overflow: hidden;
   background: var(--bg); display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
+  position: relative;
 }
 .anpr-feed-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.anpr-feed-thumb .material-symbols-outlined { font-size: 22px; color: var(--muted); }
-.anpr-feed-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.anpr-feed-thumb .material-symbols-outlined { font-size: 28px; color: var(--muted); }
+.anpr-feed-info {
+  padding: 6px 8px 4px; display: flex; flex-direction: column; gap: 2px; min-width: 0;
+}
 .anpr-feed-meta {
-  font-size: 0.75rem; color: var(--muted);
-  display: flex; align-items: center; gap: 5px;
+  font-size: 0.65rem; color: var(--muted);
+  display: flex; align-items: center; gap: 4px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .anpr-feed-right {
-  display: flex; flex-direction: column; align-items: flex-end; gap: 3px;
-  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 8px 6px; gap: 4px;
 }
 .anpr-feed-cam {
-  font-size: 0.68rem; color: var(--muted); background: var(--bg);
-  padding: 2px 7px; border-radius: 4px;
+  font-size: 0.6rem; color: var(--muted); background: var(--bg);
+  padding: 1px 5px; border-radius: 3px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 80px;
 }
 .anpr-feed-time {
-  font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums;
+  font-size: 0.65rem; color: var(--muted); font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 /* Source badge in live feed */
 .anpr-feed-source {
-  font-size: 0.58rem; padding: 1px 6px; border-radius: 9px; font-weight: 700;
+  font-size: 0.52rem; padding: 1px 5px; border-radius: 9px; font-weight: 700;
   letter-spacing: 0.03em; display: inline-block; line-height: 1.4;
+  position: absolute; top: 4px; left: 4px; z-index: 1;
 }
-.anpr-feed-source-anpr { background: rgba(37,99,235,0.10); color: #2563eb; }
-.anpr-feed-source-vision { background: rgba(245,158,11,0.14); color: #d97706; }
+.anpr-feed-source-anpr { background: rgba(37,99,235,0.85); color: #fff; }
+.anpr-feed-source-vision { background: rgba(245,158,11,0.9); color: #fff; }
 /* Vision-specific feed item accent */
-.anpr-feed-item-vision { border-left: 3px solid rgba(245,158,11,0.4); }
+.anpr-feed-item-vision { border-color: rgba(245,158,11,0.35); }
 
 /* Tab panes inside the right widget-card */
 .anpr-tab-pane { display: none; padding: 10px 14px; overflow-y: auto; flex: 1; min-height: 0; }
-.anpr-tab-pane.active { display: flex; flex-direction: column; }
+.anpr-tab-pane.active { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 
 /* Search bar */
 .anpr-search-bar {
@@ -9148,7 +9158,7 @@ th span { font-size: 0.88rem; font-weight: 700; }
 }
 
 /* Table */
-.anpr-table-scroll { overflow: auto; flex: 1; }
+.anpr-table-scroll { overflow: auto; flex: 1; min-height: 0; }
 .anpr-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
 .anpr-table thead th {
   padding: 6px 8px; text-align: left; font-weight: 600;
