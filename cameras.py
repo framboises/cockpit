@@ -13,6 +13,8 @@ from bson.objectid import ObjectId
 cameras_bp = Blueprint("cameras", __name__)
 logger = logging.getLogger(__name__)
 
+HIK_PASSWORD = os.getenv("HIK_PASSWORD", "")
+
 
 # ---------------------------------------------------------------------------
 # Auth helper (import from app at request time to avoid circular import)
@@ -200,12 +202,13 @@ def _pub_safe(doc):
 def _make_cam(doc):
     """Instantiate a HikCamera from a MongoDB document."""
     from hik.hik_control import HikCamera
+    password = doc.get("password", "") or HIK_PASSWORD
     return HikCamera(
         name=doc["name"],
         ip=doc["ip"],
         port=doc.get("port", 80),
         user=doc.get("user", "admin"),
-        password=doc.get("password", ""),
+        password=password,
         channel=doc.get("channel", 1),
         protocol=doc.get("protocol", "http"),
         brand=doc.get("brand", "hikvision"),
