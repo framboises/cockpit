@@ -342,6 +342,7 @@
       if (pcoCatSel) pcoCatSel.value = grp.pco_category || "";
     } else {
       title.textContent = "Nouveau groupe de balises";
+      $('input[name="id"]', form).value = "";  // forcer id vide pour nouveau groupe
       var pcoCatSel = $('select[name="pco_category"]', form);
       if (pcoCatSel) pcoCatSel.value = "";
     }

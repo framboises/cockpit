@@ -19,7 +19,11 @@ from pymongo import MongoClient
 from bson.objectid import ObjectId
 import logging
 import os
+import random
+import re
 import requests
+import string
+import unicodedata
 
 anoloc_bp = Blueprint("anoloc", __name__)
 
@@ -267,17 +271,29 @@ def anoloc_live():
 
     # Construire les groupes a partir de la config (pas seulement anoloc_latest)
     # enabled par defaut si le champ est absent (retrocompatibilite)
-    beacon_groups_map = {
-        g["id"]: g for g in config.get("beacon_groups", []) if g.get("enabled") is not False
-    }
+    # Utiliser enumerate + index comme cle pour gerer les IDs dupliques
+    active_groups = [
+        g for g in config.get("beacon_groups", []) if g.get("enabled") is not False
+    ]
 
     groups = {}
 
-    for grp_id, grp_cfg in beacon_groups_map.items():
+    for idx, grp_cfg in enumerate(active_groups):
+        grp_id = grp_cfg["id"]
+        # Si ID duplique, utiliser label slugifie comme cle de sortie
+        out_key = grp_id
+        if out_key in groups:
+            slug = unicodedata.normalize("NFD", grp_cfg.get("label", "")).encode("ascii", "ignore").decode()
+            out_key = "grp-" + re.sub(r"[^a-z0-9]+", "-", slug.lower()).strip("-")
+            suffix = 2
+            while out_key in groups:
+                out_key = out_key + "-" + str(suffix)
+                suffix += 1
+
         if visible_groups is not None and grp_id not in visible_groups:
             continue
 
-        groups[grp_id] = {
+        groups[out_key] = {
             "label": grp_cfg.get("label", grp_id),
             "icon": grp_cfg.get("icon", "location_on"),
             "color": grp_cfg.get("color", "#6366f1"),
@@ -306,7 +322,7 @@ def anoloc_live():
                     real_age = (datetime.now(timezone.utc) - last_real).total_seconds()
                     gps_fix = 1 if real_age < 300 else 0
 
-                groups[grp_id]["devices"].append({
+                groups[out_key]["devices"].append({
                     "id": dev_id,
                     "label": doc.get("label", dev_id),
                     "lat": doc.get("lat"),
@@ -324,7 +340,7 @@ def anoloc_live():
             else:
                 # Device configure mais jamais collecte — utiliser le label sauvegarde
                 dev_labels = grp_cfg.get("device_labels") or {}
-                groups[grp_id]["devices"].append({
+                groups[out_key]["devices"].append({
                     "id": dev_id,
                     "label": dev_labels.get(dev_id, dev_id),
                     "lat": None,
@@ -618,6 +634,31 @@ def anoloc_config_get():
         return err
     db = _get_mongo_db()
     config = db["anoloc_config"].find_one({"_id": "global"}) or {}
+
+    # Auto-correction des IDs dupliques dans beacon_groups
+    raw_groups = config.get("beacon_groups", [])
+    seen_ids = set()
+    has_dupes = False
+    fixed_groups = []
+    for g in raw_groups:
+        gid = g.get("id", "")
+        if gid in seen_ids:
+            has_dupes = True
+            slug = unicodedata.normalize("NFD", g.get("label", "")).encode("ascii", "ignore").decode()
+            new_id = "grp-" + re.sub(r"[^a-z0-9]+", "-", slug.lower()).strip("-")
+            while new_id in seen_ids:
+                new_id += "-" + "".join(random.choices(string.ascii_lowercase + string.digits, k=4))
+            g = {**g, "id": new_id}
+            gid = new_id
+        seen_ids.add(gid)
+        fixed_groups.append(g)
+    if has_dupes:
+        db["anoloc_config"].update_one(
+            {"_id": "global"},
+            {"$set": {"beacon_groups": fixed_groups, "updatedAt": _now()}},
+        )
+        config["beacon_groups"] = fixed_groups
+
     config.pop("_id", None)
     # Masquer le password
     if config.get("password"):
@@ -636,11 +677,29 @@ def anoloc_config_save():
 
     existing = db["anoloc_config"].find_one({"_id": "global"}) or {}
 
+    # Dedupliquer les IDs de beacon_groups (corrige les doublons existants)
+    raw_groups = data.get("beacon_groups", existing.get("beacon_groups", []))
+    seen_ids = set()
+    deduped_groups = []
+    for g in raw_groups:
+        gid = g.get("id", "")
+        if gid in seen_ids:
+            # Generer un nouvel ID unique a partir du label
+            slug = unicodedata.normalize("NFD", g.get("label", "")).encode("ascii", "ignore").decode()
+            slug = re.sub(r"[^a-z0-9]+", "-", slug.lower()).strip("-")
+            new_id = "grp-" + slug
+            while new_id in seen_ids:
+                new_id += "-" + "".join(random.choices(string.ascii_lowercase + string.digits, k=4))
+            g = {**g, "id": new_id}
+            gid = new_id
+        seen_ids.add(gid)
+        deduped_groups.append(g)
+
     update = {
         "api_base": data.get("api_base", existing.get("api_base", "")),
         "login": data.get("login", existing.get("login", "")),
         "enabled": bool(data.get("enabled", False)),
-        "beacon_groups": data.get("beacon_groups", existing.get("beacon_groups", [])),
+        "beacon_groups": deduped_groups,
         "group_visibility": data.get("group_visibility", existing.get("group_visibility", {})),
         "updatedAt": _now(),
     }
