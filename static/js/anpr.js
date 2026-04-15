@@ -383,8 +383,7 @@
             }
             if (isVision) {
                 var desc = [r.brand, r.type_label].filter(Boolean).join(" ");
-                if (r.lieu) desc += (desc ? " \u00b7 " : "") + r.lieu;
-                meta.appendChild(document.createTextNode(" " + desc));
+                meta.appendChild(document.createTextNode(" " + (desc || "Vision")));
             } else {
                 meta.appendChild(document.createTextNode(" " + r.brand));
             }
