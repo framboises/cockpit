@@ -266,8 +266,9 @@ def anoloc_live():
     latest_docs = {doc["_id"]: doc for doc in db["anoloc_latest"].find()}
 
     # Construire les groupes a partir de la config (pas seulement anoloc_latest)
+    # enabled par defaut si le champ est absent (retrocompatibilite)
     beacon_groups_map = {
-        g["id"]: g for g in config.get("beacon_groups", []) if g.get("enabled")
+        g["id"]: g for g in config.get("beacon_groups", []) if g.get("enabled") is not False
     }
 
     groups = {}
@@ -403,7 +404,7 @@ def anoloc_vehicles_by_category():
 
     if anoloc_enabled:
         for grp in config.get("beacon_groups", []):
-            if not grp.get("enabled"):
+            if grp.get("enabled") is False:
                 continue
             cat = grp.get("pco_category")
             if not cat:
@@ -467,7 +468,7 @@ def anoloc_status():
     visible_groups = _get_user_visible_groups(config)
     docs = list(db["anoloc_latest"].find())
     beacon_groups_map = {
-        g["id"]: g for g in config.get("beacon_groups", []) if g.get("enabled")
+        g["id"]: g for g in config.get("beacon_groups", []) if g.get("enabled") is not False
     }
 
     groups = {}

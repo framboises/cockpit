@@ -2153,7 +2153,10 @@ img { max-width: 100%; }
   min-height: 0;
 }
 
-/* Ressources : hauteur max */
+/* Suivi GPS : hauteur max + scroll */
+#widget-right-4 {
+  overflow: visible;
+}
 #widget-right-4 > .widget-body {
   max-height: 50vh;
   overflow-y: auto;
