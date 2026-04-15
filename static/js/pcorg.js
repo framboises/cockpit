@@ -742,7 +742,7 @@
       loadVehiclesByCategory();
     }
     refresh._vbcCounter = (refresh._vbcCounter || 0) + 1;
-    fetch("/api/pcorg/live?event=" + encodeURIComponent(ey.event) + "&year=" + encodeURIComponent(ey.year))
+    fetch("/api/pcorg/live?event=" + encodeURIComponent(ey.event) + "&year=" + encodeURIComponent(ey.year), { cache: "no-store" })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         lastData = data;
@@ -1747,9 +1747,13 @@
         .then(function (r) {
           if (r.ok) {
             hideFiche();
-            // Fermer les popups ouverts sur la carte
+            // Retirer immediatement le pin de la carte
             var map = getMap();
             if (map) map.closePopup();
+            if (pcorgMarkers[id] && pcorgMapLayer) {
+              pcorgMapLayer.removeLayer(pcorgMarkers[id]);
+              delete pcorgMarkers[id];
+            }
             showToast("success", "Intervention cloturee");
             refresh();
           } else {
@@ -1771,6 +1775,10 @@
           hideFiche();
           var map = getMap();
           if (map) map.closePopup();
+          if (pcorgMarkers[id] && pcorgMapLayer) {
+            pcorgMapLayer.removeLayer(pcorgMarkers[id]);
+            delete pcorgMarkers[id];
+          }
           showToast("success", "Intervention supprimee");
           refresh();
         } else {
