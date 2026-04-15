@@ -450,8 +450,13 @@
           ? window.getAnolocDeviceByLabel(v.label) : null;
         var dev = anoRef ? anoRef.device : null;
         var dsMeta = dev ? _resolveDeviceStatus(dev) : null;
-        var isAvailable = !dsMeta || dsMeta === DEVICE_STATUS_META.patrouille
-          || dsMeta === DEVICE_STATUS_META.running;
+        // Seules les tablettes ont un statut d'engagement (patrouille/intervention/etc.)
+        // Les balises GPS sont toujours engageables
+        var isAvailable = true;
+        if (dev && dev.kind === "tablet" && dsMeta) {
+          isAvailable = dsMeta === DEVICE_STATUS_META.patrouille
+            || dsMeta === DEVICE_STATUS_META.running;
+        }
         // Build label with status indicator
         var nameSpan = mkEl("span", "pcorg-ctx-veh-name");
         nameSpan.textContent = v.label;
