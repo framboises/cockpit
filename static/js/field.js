@@ -2075,12 +2075,17 @@
         var open = data.open || [];
         state.fiches = open;
         renderFiches();
+        // Memoriser si c'etait le tout premier poll avant de laisser detectNewFiches le flag
+        var wasFirstPoll = !state.fichesFirstPolled;
         detectNewFiches(open);
+        // Sceller le premier poll meme si aucune fiche n'etait presente
+        state.fichesFirstPolled = true;
         // Sync statut et fiche active depuis le serveur
         var serverFicheId = data.active_fiche_id || null;
         var statusChanged = data.device_status && data.device_status !== state.patrolStatus;
         var ficheChanged = serverFicheId !== state.activeFicheId;
-        var newDispatch = ficheChanged && serverFicheId && !state.activeFicheId;
+        // Dispatch : active_fiche_id a change vers une valeur non-null, apres le 1er poll
+        var newDispatch = !wasFirstPoll && ficheChanged && serverFicheId;
         if (statusChanged) {
           state.patrolStatus = data.device_status;
         }
@@ -2093,7 +2098,7 @@
           updateEngageBanner();
         }
         // Alerte plein ecran si une fiche vient d'etre assignee par le cockpit
-        if (newDispatch && state.fichesFirstPolled) {
+        if (newDispatch) {
           var dispatchFiche = null;
           for (var i = 0; i < open.length; i++) {
             if (open[i].id === serverFicheId) { dispatchFiche = open[i]; break; }

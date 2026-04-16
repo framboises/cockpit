@@ -15,12 +15,19 @@
        ================================================================ */
 
     /* Override cockpit 3-column grid + enable scroll */
+    .cam-page-layout.app-layout {
+      height: 100vh;
+      height: 100dvh;
+    }
     .cam-page-layout .app-main {
       overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      height: 100vh;
+      height: 100dvh;
     }
     .cam-page-layout #main-content {
       display: block;
-      flex: 1 0 auto;
+      flex: 1 1 auto;
       min-height: 0;
     }
 
@@ -30,6 +37,26 @@
       grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
       gap: 16px;
       padding: 16px;
+    }
+
+    /* Mobile portrait: single column + dynamic viewport + bottom safe area */
+    @media (max-width: 640px) {
+      .cam-page-layout {
+        height: 100vh;
+        height: 100dvh;
+      }
+      .cam-page-layout .app-main {
+        height: 100vh;
+        height: 100dvh;
+      }
+      .cam-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+        padding: 12px;
+        padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+      }
+      .cam-card-preview { height: 180px; }
+      .cam-detail-panel { width: 100%; max-width: 100%; }
     }
 
     /* Card */
