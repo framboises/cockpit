@@ -352,31 +352,67 @@
             card.appendChild(detail);
           }
 
-          // Input correction
+          // Inputs corrections (global + enfants + vehicules + accredites) + radio principal
           var corrRow = el("div", "hsh-correction-row");
-          var corrLabel = el("label");
-          corrLabel.textContent = "Correction : ";
-          corrLabel.style.fontSize = "0.72rem";
-          var corrInput = el("input", "hsh-correction-input");
-          corrInput.type = "number";
-          corrInput.value = correction || "";
-          corrInput.placeholder = "0";
-          corrInput.dataset.locationId = c.location_id;
-          corrInput.addEventListener("change", function () {
-            var val = parseInt(this.value, 10) || 0;
-            var corrs = config.corrections_compteurs || {};
-            if (val === 0) {
-              delete corrs[String(c.location_id)];
-            } else {
-              corrs[String(c.location_id)] = val;
-            }
-            saveConfig({ corrections_compteurs: corrs }).then(function () {
-              config.corrections_compteurs = corrs;
-              loadLiveCounters();
+          corrRow.style.flexWrap = "wrap";
+          corrRow.style.gap = "8px";
+
+          var makeCorrInput = function (label, value, configKey) {
+            var lbl = el("label", "hsh-corr-cell");
+            lbl.style.fontSize = "0.7rem";
+            lbl.style.display = "inline-flex";
+            lbl.style.alignItems = "center";
+            lbl.style.gap = "3px";
+            lbl.appendChild(document.createTextNode(label + " "));
+            var inp = el("input", "hsh-correction-input");
+            inp.type = "number";
+            inp.value = value || "";
+            inp.placeholder = "0";
+            inp.style.width = "56px";
+            inp.dataset.locationId = c.location_id;
+            inp.addEventListener("change", function () {
+              var val = parseInt(this.value, 10) || 0;
+              var corrs = config[configKey] || {};
+              if (val === 0) {
+                delete corrs[String(c.location_id)];
+              } else {
+                corrs[String(c.location_id)] = val;
+              }
+              var payload = {};
+              payload[configKey] = corrs;
+              saveConfig(payload).then(function () {
+                config[configKey] = corrs;
+                loadLiveCounters();
+              });
             });
+            lbl.appendChild(inp);
+            return lbl;
+          };
+
+          corrRow.appendChild(makeCorrInput("Corr. global", correction, "corrections_compteurs"));
+          corrRow.appendChild(makeCorrInput("Corr. enf", c.correction_enf, "corrections_enfants"));
+          corrRow.appendChild(makeCorrInput("Corr. veh", c.correction_veh, "corrections_vehicules"));
+          corrRow.appendChild(makeCorrInput("Corr. acc", c.correction_acc, "corrections_accredites"));
+
+          var principalLabel = el("label", "hsh-principal-label");
+          principalLabel.style.fontSize = "0.72rem";
+          principalLabel.style.marginLeft = "8px";
+          var principalRadio = el("input");
+          principalRadio.type = "radio";
+          principalRadio.name = "hsh-principal-counter";
+          principalRadio.checked = !!c.is_principal;
+          principalRadio.addEventListener("change", function () {
+            if (this.checked) {
+              saveConfig({ compteur_principal_id: String(c.location_id) }).then(function () {
+                config.compteur_principal_id = String(c.location_id);
+                loadLiveCounters();
+              });
+            }
           });
-          corrLabel.appendChild(corrInput);
-          corrRow.appendChild(corrLabel);
+          principalLabel.appendChild(principalRadio);
+          principalLabel.appendChild(document.createTextNode(" Principal"));
+          corrRow.appendChild(principalLabel);
+
           card.appendChild(corrRow);
 
           if (upper > 0) {

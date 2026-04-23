@@ -1386,6 +1386,7 @@ def get_meteo_previsions_6h():
                     'Vent rafale (km/h)': int(heure['Vent rafale (km/h)'])
                 })
 
+    results.sort(key=lambda r: (r['Date'], r['Heure']))
     return jsonify(results)
 
 
@@ -1671,27 +1672,66 @@ def _parse_race_datetime(raw):
         return None
 
 
-def _fill_curve(param_doc):
-    """Retourne [(days_before_race, total_ventes)] tries, et le total final."""
-    rd = _parse_race_date(param_doc.get('data', {}).get('race'))
+def _fill_curve(param_doc, race_date_override=None):
+    """Retourne [(days_before_race, total_ventes)] tries descending, final, race_date.
+    Filtre la fenetre saisonniere autour de la course pour eviter de melanger les
+    historiques de plusieurs editions. Applique un forward-fill par produit avant
+    aggregation pour combler les trous de snapshots non synchronises.
+    race_date_override permet de forcer la date de reference (ex: portes plus fiable
+    que parametrages) pour un calcul des days_before coherent.
+    """
+    rd = race_date_override or _parse_race_date(param_doc.get('data', {}).get('race'))
     if not rd:
         return [], 0, None
     prods = param_doc.get('tickets', {}).get('products', {})
-    snaps = {}
-    for p in prods.values():
+
+    season_start = rd - timedelta(days=300)
+    season_end = rd + timedelta(days=30)
+
+    product_series = {}
+    all_dates = set()
+    for pname, p in prods.items():
+        series = {}
         for h in p.get('history', []):
-            d = h['date']
-            if d not in snaps:
-                snaps[d] = 0
-            snaps[d] += h.get('ventes', 0)
-    if not snaps:
+            try:
+                d = datetime.strptime(h['date'], '%Y-%m-%d').date()
+            except Exception:
+                continue
+            if season_start <= d <= season_end:
+                series[h['date']] = h.get('ventes', 0)
+                all_dates.add(h['date'])
+        if series:
+            product_series[pname] = series
+
+    if not all_dates:
         return [], 0, None
+
+    sorted_dates = sorted(all_dates)
+    sorted_series = {pn: sorted(s.items()) for pn, s in product_series.items()}
+
+    snaps = {}
+    for date_key in sorted_dates:
+        total = 0
+        for items in sorted_series.values():
+            last_val = 0
+            for sd, sv in items:
+                if sd <= date_key:
+                    last_val = sv
+                else:
+                    break
+            total += last_val
+        snaps[date_key] = total
+
     points = []
     for d, v in snaps.items():
         dt = datetime.strptime(d, '%Y-%m-%d').date()
         points.append(((rd - dt).days, v))
     points.sort(key=lambda x: x[0], reverse=True)
-    final = max(v for _, v in points)
+
+    final_from_curve = snaps[sorted_dates[-1]]
+    final_actual = sum(p.get('ventes', 0) for p in prods.values())
+    final = max(final_from_curve, final_actual)
+
     return points, final, rd
 
 
@@ -1808,6 +1848,10 @@ def get_affluence():
                     prev_data_by_day = dict(day_records)
                 break
 
+    # Reference unifiee de la date de course N-1 : privilegier historique_controle
+    # (via doc portes, fiable) sur parametrages.data.race (parfois errone).
+    prev_race_ref = prev_hist_race_date or prev_race_date
+
     # ── Calculer la projection basee sur les courbes N-1 et N-2 ──
     # Calculer le ratio de projection
     projection_ratio = None  # ventes_actuelles / projection = ce ratio
@@ -1818,7 +1862,7 @@ def get_affluence():
         fill_pcts = []
         # Courbe N-1
         if prev_param:
-            pts, final, _ = _fill_curve(prev_param)
+            pts, final, _ = _fill_curve(prev_param, race_date_override=prev_race_ref)
             pct = _interpolate_pct(pts, final, days_before)
             if pct:
                 fill_pcts.append(pct)
@@ -1842,11 +1886,41 @@ def get_affluence():
             if avg_pct > 0:
                 projection_ratio = avg_pct / 100  # ex: 0.55 = on est a 55% du final
 
+    # ── Totaux sur l'ensemble unique des produits references ──
+    # day_ventes est multi-compte (billet 4J compte 4 fois) pour refleter la
+    # presence attendue par jour ; les totaux ne doivent PAS agreger cela.
+    referenced_products = set()
+    for tc in ticketing_config:
+        for pname in tc.get('products', []):
+            referenced_products.add(pname)
+    total_ventes = sum(
+        products_data.get(p, {}).get('ventes', 0) for p in referenced_products
+    )
+    total_delta = 0
+    for pname in referenced_products:
+        pdata = products_data.get(pname, {})
+        hist = pdata.get('history', [])
+        if len(hist) >= 2:
+            total_delta += pdata.get('ventes', 0) - hist[-2].get('ventes', 0)
+
+    prev_referenced = set()
+    for tc in prev_ticketing_config:
+        for pname in tc.get('products', []):
+            prev_referenced.add(pname)
+    total_ventes_prev = sum(
+        prev_products_data.get(p, {}).get('ventes', 0) for p in prev_referenced
+    )
+
+    # Delta de croissance N vs N-1 : sert de borne basse a la projection.
+    # La projection "courbe" peut s'emballer si la saison N a pris son avance tot
+    # et aplatit en fin ; la projection "delta" applique simplement la croissance
+    # observee au final N-1 et borne le haut.
+    delta_n_vs_n1 = None
+    if total_ventes_prev and total_ventes_prev > 0:
+        delta_n_vs_n1 = total_ventes / total_ventes_prev
+
     # ── Construire la reponse par jour ──
     result_days = []
-    total_ventes = 0
-    total_delta = 0
-    total_ventes_prev = 0
     JOURS_FR = {0: 'Lun', 1: 'Mar', 2: 'Mer', 3: 'Jeu', 4: 'Ven', 5: 'Sam', 6: 'Dim'}
 
     for day_info in public_days:
@@ -1876,14 +1950,11 @@ def get_affluence():
                 if len(hist) >= 2:
                     day_delta += pdata.get('ventes', 0) - hist[-2].get('ventes', 0)
 
-        total_ventes += day_ventes
-        total_delta += day_delta
-
         # Ventes N-1 pour le jour equivalent (meme offset depuis la course)
         ventes_prev = None
-        if race_date and prev_race_date and prev_ticketing_config:
+        if race_date and prev_race_ref and prev_ticketing_config:
             offset_days = (day_date - race_date).days
-            target_prev_date = prev_race_date + timedelta(days=offset_days)
+            target_prev_date = prev_race_ref + timedelta(days=offset_days)
             target_prev_str = target_prev_date.strftime('%Y-%m-%d')
 
             day_ventes_prev = 0
@@ -1903,28 +1974,36 @@ def get_affluence():
 
             if found_prev:
                 ventes_prev = day_ventes_prev
-                total_ventes_prev += day_ventes_prev
 
-        # Projection ventes pour ce jour
-        day_projection = None
+        # Projection ventes pour ce jour : fourchette low (delta) -> high (courbe)
+        day_projection = None       # borne haute (courbe N-1)
+        day_projection_low = None   # borne basse (delta de croissance actuel)
         if projection_ratio and projection_ratio > 0:
             day_projection = round(day_ventes / projection_ratio)
+        if ventes_prev and ventes_prev > 0 and delta_n_vs_n1:
+            # borne basse = ventes finales N-1 du meme jour * croissance globale N/N-1 observee
+            # plafonnee a au moins les ventes actuelles N (on ne redescend pas)
+            day_projection_low = max(day_ventes, round(ventes_prev * delta_n_vs_n1))
 
-        # Pic N-1 et Pic projete depuis historique_controle
+        # Pic N-1 et Pic projete depuis historique_controle (fourchette aussi)
         pic_prev = None
         pic_projection = None
-        if race_date and prev_hist_race_date:
+        pic_projection_low = None
+        if race_date and prev_race_ref:
             offset_days = (day_date - race_date).days
-            target_prev_date = prev_hist_race_date + timedelta(days=offset_days)
+            target_prev_date = prev_race_ref + timedelta(days=offset_days)
             target_key = target_prev_date.strftime('%Y-%m-%d')
             if target_key in prev_data_by_day:
                 records = prev_data_by_day[target_key]
                 pic_prev = max((r.get('present', 0) for r in records), default=0)
-                # Pic projete = pic_prev * (projection_ventes_N / ventes_finales_N-1)
+                # Pic projete = projection_ventes * (pic_prev / ventes_prev)
                 # Le ratio pic/ventes de N-1 capture les enfants gratuits + accredites
-                if pic_prev and ventes_prev and ventes_prev > 0 and day_projection:
+                if pic_prev and ventes_prev and ventes_prev > 0:
                     pic_ratio = pic_prev / ventes_prev
-                    pic_projection = round(day_projection * pic_ratio)
+                    if day_projection:
+                        pic_projection = round(day_projection * pic_ratio)
+                    if day_projection_low:
+                        pic_projection_low = round(day_projection_low * pic_ratio)
 
         result_days.append({
             "date": day_str,
@@ -1933,12 +2012,17 @@ def get_affluence():
             "delta": day_delta,
             "ventes_prev": ventes_prev,
             "projection": day_projection,
+            "projection_low": day_projection_low,
             "pic_prev": pic_prev,
             "pic_projection": pic_projection,
+            "pic_projection_low": pic_projection_low,
             "prev_year": prev_year_str
         })
 
     total_projection = round(total_ventes / projection_ratio) if projection_ratio else None
+    total_projection_low = None
+    if total_ventes_prev and delta_n_vs_n1:
+        total_projection_low = max(total_ventes, round(total_ventes_prev * delta_n_vs_n1))
 
     # ── Sites (parkings + campings avec ticketing) ──
     # Charger aussi les sites N-1 pour comparer par nom de site
@@ -1983,6 +2067,7 @@ def get_affluence():
         "total_delta": total_delta,
         "total_ventes_prev": total_ventes_prev if total_ventes_prev else None,
         "total_projection": total_projection,
+        "total_projection_low": total_projection_low,
         "last_update": last_update,
         "prev_year": prev_year_str,
         "sites": sites
@@ -4144,6 +4229,8 @@ def hsh_update_config():
     allowed = {
         "live_controle_actif", "evenement", "evenement_clean",
         "locations_selectionnees", "corrections_compteurs",
+        "corrections_enfants", "corrections_vehicules", "corrections_accredites",
+        "compteur_principal_id",
     }
     update = {k: v for k, v in data.items() if k in allowed}
     if not update:
@@ -4598,6 +4685,11 @@ def hsh_get_counters():
     doc = _hsh_read_global()
     locations = doc.get("locations_selectionnees", [])
     corrections = doc.get("corrections_compteurs", {})
+    corrections_enf = doc.get("corrections_enfants", {})
+    corrections_veh = doc.get("corrections_vehicules", {})
+    corrections_acc = doc.get("corrections_accredites", {})
+    principal_id = doc.get("compteur_principal_id")
+    principal_id_str = str(principal_id) if principal_id else None
 
     # Agreger vehicules/enfants du jour depuis hsh_transactions_agg
     # Les compteurs live sont par location (Area, Venue...), les transactions sont par checkpoint.
@@ -4675,8 +4767,242 @@ def hsh_get_counters():
                 "entrees_acc": ve.get("entrees_acc", 0),
                 "sorties_acc": ve.get("sorties_acc", 0),
                 "correction": corrections.get(str(loc_id), 0),
+                "correction_enf": corrections_enf.get(str(loc_id), 0),
+                "correction_veh": corrections_veh.get(str(loc_id), 0),
+                "correction_acc": corrections_acc.get(str(loc_id), 0),
+                "is_principal": (principal_id_str is not None and str(loc_id) == principal_id_str),
             })
     return jsonify(result)
+
+
+@app.route('/api/live-controle/dashboard', methods=['GET'])
+@role_required("user")
+@block_required("widget-counters")
+def hsh_get_dashboard():
+    """Dashboard contexte pour le plein-ecran : series temporelles par zone,
+    pics jour, comparaison N-1. Param optionnel ?date=YYYY-MM-DD pour choisir
+    le jour de reference du graphique principal (defaut: aujourd'hui)."""
+    event = request.args.get('event')
+    year = request.args.get('year')
+    target_date_param = request.args.get('date')
+
+    global_doc = _hsh_read_global()
+    locations = global_doc.get('locations_selectionnees', []) or []
+    corrections = global_doc.get('corrections_compteurs', {}) or {}
+    principal_id = global_doc.get('compteur_principal_id')
+    principal_id_str = str(principal_id) if principal_id else None
+
+    # Reference N-1 via parametrages + fallback portes
+    race_n = None
+    prev_race_ref = None
+    prev_year_str = None
+    event_days = []
+    doc_n = None
+    if event and year:
+        doc_n = db['parametrages'].find_one({'event': event, 'year': year}) or {}
+        gh = (doc_n.get('data') or {}).get('globalHoraires', {})
+        event_days = [d.get('date') for d in gh.get('dates', []) if d.get('date')]
+        race_n = _parse_race_date((doc_n.get('data') or {}).get('race') or gh.get('race'))
+        try:
+            cy = int(year)
+            for cand in db['parametrages'].find(
+                {'event': event, 'tickets': {'$exists': True}},
+                {'year': 1, 'data.race': 1, '_id': 0}
+            ).sort('year', -1):
+                try:
+                    cyn = int(cand.get('year', ''))
+                except (ValueError, TypeError):
+                    continue
+                if cyn < cy:
+                    prev_year_str = str(cyn)
+                    portes = db['historique_controle'].find_one(
+                        {'type': 'portes', 'event': event, 'year': cyn},
+                        {'_id': 0, 'race': 1}
+                    )
+                    prev_race_ref = _parse_race_date((portes or {}).get('race')) or \
+                                    _parse_race_date((cand.get('data') or {}).get('race'))
+                    break
+        except (ValueError, TypeError):
+            pass
+
+    # Historique N-1 par jour
+    prev_hist_by_day = {}
+    if prev_year_str:
+        try:
+            hist = db['historique_controle'].find_one(
+                {'type': 'frequentation', 'event': event, 'year': int(prev_year_str)}
+            )
+            if hist:
+                for rec in hist.get('data', []):
+                    rd = rec.get('date')
+                    if isinstance(rd, str):
+                        day_key = rd[:10]
+                        hour = rd[11:16] if len(rd) >= 16 else None
+                    elif hasattr(rd, 'strftime'):
+                        day_key = rd.strftime('%Y-%m-%d')
+                        hour = rd.strftime('%H:%M')
+                    else:
+                        continue
+                    prev_hist_by_day.setdefault(day_key, []).append({
+                        'hour': hour,
+                        'present': rec.get('present', 0),
+                    })
+        except (ValueError, TypeError):
+            pass
+
+    # data_access.timestamp est stocke en datetime naif (en UTC).
+    today_local = datetime.now().date()
+    # Jour de reference du graphique principal (par defaut aujourd'hui)
+    try:
+        target_date = datetime.strptime(target_date_param, '%Y-%m-%d').date() if target_date_param else today_local
+    except Exception:
+        target_date = today_local
+    target_day_start = datetime(target_date.year, target_date.month, target_date.day)
+    target_day_end = target_day_start + timedelta(days=1)
+
+    # Plage "totale collecte" = depuis le premier jour public (ou 4j avant today) jusqu'a maintenant
+    if event_days:
+        try:
+            first_event_day = min(datetime.strptime(d, '%Y-%m-%d').date() for d in event_days)
+            full_start = datetime(first_event_day.year, first_event_day.month, first_event_day.day)
+        except Exception:
+            full_start = target_day_start - timedelta(days=3)
+    else:
+        full_start = target_day_start - timedelta(days=3)
+    full_end = datetime.now() + timedelta(hours=1)
+
+    # historique_controle ne contient qu'une serie globale (zone principale d'enceinte).
+    # On ne l'expose donc que pour la zone principale ou, a defaut, la premiere zone.
+    pic_n1_principal = None
+    max_n1_principal = None
+    if prev_race_ref and race_n:
+        offset = (target_date - race_n).days
+        n1_day = (prev_race_ref + timedelta(days=offset)).strftime('%Y-%m-%d')
+        recs = prev_hist_by_day.get(n1_day)
+        if recs:
+            pic_n1_principal = max(r['present'] for r in recs)
+    if prev_hist_by_day:
+        max_n1_principal = max(
+            (max(r['present'] for r in recs) for recs in prev_hist_by_day.values()),
+            default=None
+        )
+
+    # Series + stats par zone
+    zones = []
+    has_principal = any(str(l.get('id')) == principal_id_str for l in locations) if principal_id_str else False
+    for idx, loc in enumerate(locations):
+        lid = str(loc.get('id'))
+        ltype = loc.get('type')
+        name = loc.get('name', f'Loc {lid}')
+        correction = int(corrections.get(lid, 0) or 0)
+
+        is_principal = (principal_id_str == lid) if principal_id_str else (idx == 0 and not has_principal)
+
+        # Pour la zone principale : serie detaillee (15 min) du jour CIBLE (pour le gros chart).
+        # Pour les autres zones : serie longue (bucket 30 min) sur toute la periode event_days.
+        if is_principal:
+            query_start, query_end, bucket_minutes = target_day_start, target_day_end, 15
+        else:
+            query_start, query_end, bucket_minutes = full_start, full_end, 30
+
+        snaps = list(db['data_access'].find(
+            {'requested_location_id': lid, 'requested_location_type': ltype,
+             'timestamp': {'$gte': query_start, '$lt': query_end}},
+            {'_id': 0, 'timestamp': 1, 'current': 1}
+        ).sort('timestamp', 1))
+
+        series = []
+        last_bucket_key = None
+        for s in snaps:
+            ts = s['timestamp']
+            bucket = ts.replace(minute=(ts.minute // bucket_minutes) * bucket_minutes,
+                                second=0, microsecond=0)
+            key = bucket.isoformat() + 'Z'
+            present = max(int(s.get('current', 0) or 0) - correction, 0)
+            if key != last_bucket_key:
+                series.append({'ts': key, 'present': present})
+                last_bucket_key = key
+            else:
+                series[-1]['present'] = present
+
+        pic_today = max((p['present'] for p in series), default=0)
+        # "current" = valeur la plus recente tout court (pas specifique au jour cible)
+        latest = db['data_access'].find_one(
+            {'requested_location_id': lid, 'requested_location_type': ltype},
+            sort=[('timestamp', -1)],
+            projection={'_id': 0, 'current': 1}
+        )
+        current = max(int((latest or {}).get('current', 0) or 0) - correction, 0) if latest else 0
+
+        zones.append({
+            'location_id': lid,
+            'location_type': ltype,
+            'name': name,
+            'is_principal': is_principal,
+            'correction': correction,
+            'current': current,
+            'pic_today': pic_today,
+            'pic_n1_same_day': pic_n1_principal if is_principal else None,
+            'max_n1_season': max_n1_principal if is_principal else None,
+            'series': series,
+        })
+
+    # Resume par jour public (base sur la zone principale effective)
+    principal_zone = next((z for z in zones if z.get('is_principal')), None)
+    principal_effective_id = principal_zone['location_id'] if principal_zone else None
+    days_summary = []
+    for dstr in event_days:
+        try:
+            dd = datetime.strptime(dstr, '%Y-%m-%d').date()
+        except Exception:
+            continue
+        pic_n = None
+        if principal_effective_id:
+            day_start = datetime(dd.year, dd.month, dd.day)
+            day_end = day_start + timedelta(days=1)
+            if dd <= today_local:
+                p_corr = int(corrections.get(principal_effective_id, 0) or 0)
+                top = db['data_access'].find_one(
+                    {'requested_location_id': principal_effective_id,
+                     'timestamp': {'$gte': day_start, '$lt': day_end}},
+                    sort=[('current', -1)]
+                )
+                if top:
+                    pic_n = max(int(top.get('current', 0) or 0) - p_corr, 0)
+        pic_n1 = None
+        if prev_race_ref and race_n:
+            offset = (dd - race_n).days
+            n1_key = (prev_race_ref + timedelta(days=offset)).strftime('%Y-%m-%d')
+            recs = prev_hist_by_day.get(n1_key)
+            if recs:
+                pic_n1 = max(r['present'] for r in recs)
+        JOURS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
+        days_summary.append({
+            'date': dstr,
+            'label': JOURS[dd.weekday()] + ' ' + dd.strftime('%d/%m'),
+            'pic_n': pic_n,
+            'pic_n1': pic_n1,
+            'is_today': dd == today_local,
+            'is_past': dd < today_local,
+        })
+
+    # Serie N-1 du jour equivalent au jour CIBLE selectionne, pour comparaison
+    n1_series_today = []
+    if prev_race_ref and race_n:
+        offset_target = (target_date - race_n).days
+        n1_day_equiv = (prev_race_ref + timedelta(days=offset_target)).strftime('%Y-%m-%d')
+        recs = prev_hist_by_day.get(n1_day_equiv)
+        if recs:
+            for r in sorted(recs, key=lambda x: x.get('hour') or ''):
+                n1_series_today.append({'hour': r.get('hour'), 'present': r.get('present')})
+
+    return jsonify({
+        'zones': zones,
+        'days_summary': days_summary,
+        'prev_year': prev_year_str,
+        'n1_series_today': n1_series_today,
+        'target_date': target_date.strftime('%Y-%m-%d'),
+    })
 
 
 @app.route('/api/live-controle/titres-live', methods=['GET'])

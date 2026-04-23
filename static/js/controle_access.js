@@ -60,22 +60,40 @@
     var totalVehPresents = 0;
     var totalEnfPresents = 0;
     var totalAccPresents = 0;
+    var totalCorrection = 0;
+    var principalPresent = null;         // valeur du compteur principal (corrigee)
+    var principalCorrection = 0;
+    var principalVeh = 0;
+    var principalEnf = 0;
+    var principalAcc = 0;
 
     counters.forEach(function (c) {
-      var current = parseInt(c.current, 10) || 0;
+      var rawCurrent = parseInt(c.current, 10) || 0;
       var correction = parseInt(c.correction, 10) || 0;
-      current -= correction;
+      var corrEnf = parseInt(c.correction_enf, 10) || 0;
+      var corrVeh = parseInt(c.correction_veh, 10) || 0;
+      var corrAcc = parseInt(c.correction_acc, 10) || 0;
+      var current = rawCurrent - correction;
       var entries = parseInt(c.entries, 10) || 0;
       var exits = parseInt(c.exits, 10) || 0;
       var locked = c.locked && c.locked !== "0";
 
-      var vehPresents = (c.entrees_veh || 0) - (c.sorties_veh || 0);
-      var enfPresents = (c.entrees_enf || 0) - (c.sorties_enf || 0);
-      var accPresents = (c.entrees_acc || 0) - (c.sorties_acc || 0);
+      var vehPresents = Math.max((c.entrees_veh || 0) - (c.sorties_veh || 0) - corrVeh, 0);
+      var enfPresents = Math.max((c.entrees_enf || 0) - (c.sorties_enf || 0) - corrEnf, 0);
+      var accPresents = Math.max((c.entrees_acc || 0) - (c.sorties_acc || 0) - corrAcc, 0);
       totalCurrent += current;
-      totalVehPresents += Math.max(vehPresents, 0);
-      totalEnfPresents += Math.max(enfPresents, 0);
-      totalAccPresents += Math.max(accPresents, 0);
+      totalCorrection += correction;
+      totalVehPresents += vehPresents;
+      totalEnfPresents += enfPresents;
+      totalAccPresents += accPresents;
+
+      if (c.is_principal) {
+        principalPresent = current;
+        principalCorrection = correction;
+        principalVeh = vehPresents;
+        principalEnf = enfPresents;
+        principalAcc = accPresents;
+      }
 
       var card = el("div", "hsh-counter-card");
 
@@ -93,32 +111,57 @@
       }
       card.appendChild(header);
 
-      // Stats : E / S / P
+      // Stats : E / S / P (avec detail correction si appliquee)
       var stats = el("div", "hsh-counter-stats");
-      [["E", entries], ["S", exits], ["P", current]].forEach(function (pair) {
-        var sp = el("span");
-        sp.textContent = pair[0] + ": ";
-        var b = el("strong");
-        b.textContent = formatNum(pair[1]);
-        sp.appendChild(b);
-        stats.appendChild(sp);
-      });
+      var eSpan = el("span"); eSpan.textContent = "E: ";
+      var eB = el("strong"); eB.textContent = formatNum(entries); eSpan.appendChild(eB);
+      stats.appendChild(eSpan);
+
+      var sSpan = el("span"); sSpan.textContent = "S: ";
+      var sB = el("strong"); sB.textContent = formatNum(exits); sSpan.appendChild(sB);
+      stats.appendChild(sSpan);
+
+      var pSpan = el("span");
+      pSpan.textContent = "P: ";
+      var pB = el("strong"); pB.textContent = formatNum(current); pSpan.appendChild(pB);
+      if (correction) {
+        var corr = el("span", "hsh-counter-corr-detail");
+        corr.textContent = " (" + formatNum(rawCurrent) + " " + (correction >= 0 ? "-" : "+") + " " + formatNum(Math.abs(correction)) + ")";
+        pSpan.appendChild(corr);
+      }
+      stats.appendChild(pSpan);
       card.appendChild(stats);
 
       countersBody.appendChild(card);
     });
 
-    // Presents = total Skidata - vehicules presents
-    var presentPersonnes = totalCurrent - totalVehPresents;
+    // Si un compteur principal est choisi, afficher sa valeur corrigee ; sinon,
+    // fallback sur la somme de tous les compteurs moins les vehicules.
+    var presentPersonnes;
+    if (principalPresent != null) {
+      presentPersonnes = principalPresent;
+    } else {
+      presentPersonnes = totalCurrent - totalVehPresents;
+    }
     totalCurrentEl.textContent = formatNum(presentPersonnes);
     latestTotalCurrent = presentPersonnes;
 
-    // "dont X enfants" / "dont X accredites"
+    // "dont X accredites, Y enfants, Z vehicules, corr. W"
     var enfLabel = document.getElementById("hsh-dont-enfants");
     if (enfLabel) {
+      var useprincipal = principalPresent != null;
+      var accShow = useprincipal ? principalAcc : totalAccPresents;
+      var enfShow = useprincipal ? principalEnf : totalEnfPresents;
+      var vehShow = useprincipal ? principalVeh : totalVehPresents;
+      var corrShow = useprincipal ? principalCorrection : totalCorrection;
       var parts = [];
-      if (totalAccPresents > 0) parts.push(formatNum(totalAccPresents) + " accredites");
-      if (totalEnfPresents > 0) parts.push(formatNum(totalEnfPresents) + " enfants");
+      if (accShow > 0) parts.push(formatNum(accShow) + " accredites");
+      if (enfShow > 0) parts.push(formatNum(enfShow) + " enfants");
+      if (vehShow > 0) parts.push(formatNum(vehShow) + " vehicules");
+      if (corrShow) {
+        var sign = corrShow > 0 ? "-" : "+";
+        parts.push("corr. " + sign + formatNum(Math.abs(corrShow)));
+      }
       if (parts.length) {
         enfLabel.textContent = "dont " + parts.join(", ");
         enfLabel.style.display = "";

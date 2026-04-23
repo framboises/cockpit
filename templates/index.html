@@ -419,6 +419,41 @@
                 <div id="pcorg-expanded-body" class="pcorg-expanded-body"></div>
             </div>
 
+            <!-- Panel Dashboard Controle d'acces -->
+            <div id="counters-panel" class="meteo-panel counters-panel" style="display:none;">
+                <div class="meteo-panel-header">
+                    <h3>Tableau de bord - Controle d'acces</h3>
+                    <span id="counters-panel-prev-year" class="hsh-last-update"></span>
+                    <button class="meteo-panel-close" id="counters-panel-close" title="Fermer">
+                        <span class="material-symbols-outlined">close_fullscreen</span>
+                    </button>
+                </div>
+                <div class="meteo-panel-body counters-dashboard-body">
+                    <!-- Zone principale : gros graphique + stats -->
+                    <section class="counters-dash-section">
+                        <div class="counters-dash-head">
+                            <h4 id="counters-dash-principal-name">Zone principale</h4>
+                            <div class="counters-dash-kpis" id="counters-dash-principal-kpis"></div>
+                        </div>
+                        <div class="counters-dash-chart">
+                            <canvas id="counters-main-chart"></canvas>
+                        </div>
+                    </section>
+
+                    <!-- Resume par jour -->
+                    <section class="counters-dash-section">
+                        <h4>Pics journaliers</h4>
+                        <div class="counters-days-grid" id="counters-days-grid"></div>
+                    </section>
+
+                    <!-- Autres zones : scroll horizontal de mini-cards -->
+                    <section class="counters-dash-section">
+                        <h4>Autres zones</h4>
+                        <div class="counters-zones-scroll" id="counters-zones-scroll"></div>
+                    </section>
+                </div>
+            </div>
+
             <!-- Widgets droite -->
             <aside id="widgets-panel-right" aria-label="Widgets droite">
 
@@ -439,6 +474,9 @@
                         <h3>Controle d'acces</h3>
                         <span id="hsh-health-dot" class="status-dot" title=""></span>
                         <span id="hsh-last-update" class="hsh-last-update"></span>
+                        <button class="meteo-header-expand" id="counters-expand-btn" title="Tableau de bord">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
                     </header>
                     <div class="widget-body">
                         <div class="hsh-summary" id="hsh-summary">
@@ -888,6 +926,7 @@ window.__userCanCloseFiche = {{ user_can_close_fiche_json|safe }};
 <script src="{{ url_for('static', filename='js/timeline.js') }}"></script>
 <script src="{{ url_for('static', filename='js/map_view.js') }}"></script>
 <script src="{{ url_for('static', filename='js/controle_access.js') }}"></script>
+<script src="{{ url_for('static', filename='js/controle_dashboard.js') }}"></script>
 <script src="{{ url_for('static', filename='js/affluence.js') }}"></script>
 <script src="{{ url_for('static', filename='js/anoloc.js') }}"></script>
 <script src="{{ url_for('static', filename='js/pcorg.js') }}"></script>

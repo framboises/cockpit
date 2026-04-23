@@ -7,6 +7,20 @@ function formatNumber(n) {
     return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 }
 
+function formatShort(n) {
+    if (n == null) return "--";
+    if (n >= 10000) return (n / 1000).toFixed(1).replace(".", ",") + "k";
+    if (n >= 1000) return (n / 1000).toFixed(2).replace(".", ",") + "k";
+    return String(n);
+}
+
+function formatRange(low, high) {
+    if (low == null && high == null) return "--";
+    if (low == null || low === high) return formatNumber(high);
+    if (high == null) return formatNumber(low);
+    return formatShort(low) + "-" + formatShort(high);
+}
+
 // ── Tab 1 : Affluence ──────────────────────────────────────────────────
 
 function renderAffluenceTab(data) {
@@ -58,12 +72,12 @@ function renderAffluenceTab(data) {
         dayLabel.textContent = d.label;
         row.appendChild(dayLabel);
 
-        // Projection ventes
+        // Projection ventes (fourchette low - high compact)
         var projCell = document.createElement("div");
         projCell.className = "affluence-metric";
         var projVal = document.createElement("span");
         projVal.className = "affluence-value";
-        projVal.textContent = formatNumber(d.projection);
+        projVal.textContent = formatRange(d.projection_low, d.projection);
         projCell.appendChild(projVal);
         row.appendChild(projCell);
 
@@ -76,15 +90,16 @@ function renderAffluenceTab(data) {
         picCell.appendChild(picVal);
         row.appendChild(picCell);
 
-        // Pic projete
+        // Pic projete : fourchette low - high compact
         var picProjCell = document.createElement("div");
         picProjCell.className = "affluence-metric";
         var picProjVal = document.createElement("span");
         picProjVal.className = "affluence-value";
-        picProjVal.textContent = formatNumber(d.pic_projection);
+        picProjVal.textContent = formatRange(d.pic_projection_low, d.pic_projection);
         picProjCell.appendChild(picProjVal);
         if (d.pic_projection != null && d.pic_prev != null && d.pic_prev > 0) {
-            var pct = ((d.pic_projection - d.pic_prev) / d.pic_prev * 100).toFixed(0);
+            var midPic = d.pic_projection_low != null ? Math.round((d.pic_projection_low + d.pic_projection) / 2) : d.pic_projection;
+            var pct = ((midPic - d.pic_prev) / d.pic_prev * 100).toFixed(0);
             var pill = document.createElement("span");
             pill.className = "affluence-pill " + (pct >= 0 ? "positive" : "negative");
             pill.textContent = (pct >= 0 ? "+" : "") + pct + "%";
@@ -103,7 +118,7 @@ function renderAffluenceTab(data) {
 
     if (data.total_projection) {
         var projSpan = document.createElement("span");
-        projSpan.textContent = "Proj. " + formatNumber(data.total_projection);
+        projSpan.textContent = "Proj. " + formatRange(data.total_projection_low, data.total_projection);
         footer.appendChild(projSpan);
     }
 
@@ -189,15 +204,16 @@ function renderVentesTab(data) {
         }
         row.appendChild(vprevCell);
 
-        // Projection + pill delta vs N-1
+        // Projection + pill delta vs N-1 (fourchette low - high compact)
         var projCell = document.createElement("div");
         projCell.className = "affluence-metric";
         var projVal = document.createElement("span");
         projVal.className = "affluence-value";
-        projVal.textContent = formatNumber(d.projection);
+        projVal.textContent = formatRange(d.projection_low, d.projection);
         projCell.appendChild(projVal);
         if (d.projection != null && d.ventes_prev != null && d.ventes_prev > 0) {
-            var projDiff = ((d.projection - d.ventes_prev) / d.ventes_prev * 100).toFixed(0);
+            var midProj = d.projection_low != null ? Math.round((d.projection_low + d.projection) / 2) : d.projection;
+            var projDiff = ((midProj - d.ventes_prev) / d.ventes_prev * 100).toFixed(0);
             var projPill = document.createElement("span");
             projPill.className = "affluence-pill " + (projDiff >= 0 ? "positive" : "negative");
             projPill.textContent = (projDiff >= 0 ? "+" : "") + projDiff + "%";
@@ -228,7 +244,7 @@ function renderVentesTab(data) {
     if (data.total_projection) {
         var projFooter = document.createElement("span");
         projFooter.className = "affluence-update";
-        projFooter.textContent = "Proj. " + formatNumber(data.total_projection);
+        projFooter.textContent = "Proj. " + formatRange(data.total_projection_low, data.total_projection);
         footer.appendChild(projFooter);
     }
 
