@@ -598,7 +598,10 @@ def _process_dynamic_schedule(items, config, id_prefix, db=None):
     for item in items:
         item_name = item.get("name", "")
         item_id = item.get("id", item_name)
-        activity_base = label.replace("{name}", item_name)
+        try:
+            activity_base = label.format(**item)
+        except (KeyError, IndexError, ValueError):
+            activity_base = label.replace("{name}", item_name)
 
         # Champs supplementaires a inclure dans la vignette
         extra = {}
