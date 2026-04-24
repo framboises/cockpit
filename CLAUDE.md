@@ -87,36 +87,49 @@ static/libs/    → Bibliothèques tierces (Leaflet)
 
 ## Intégration Vision (app externe `vision-a0f55.web.app`)
 
-L'app Vision (scan billets véhicule, repo voisin `../vision`) est **JWT-gated par Cockpit** : la tablette ouvre Vision directement par URL (pas via Field), Vision affiche un écran de pairing au premier accès, l'opérateur saisit un code généré dans Cockpit Admin, et Cockpit retourne un JWT RS256.
+L'app Vision (scan billets véhicule, repo voisin `../vision`) est **JWT-gated par Cockpit** mais **totalement dissociée de Field** : module Python séparé, collections MongoDB séparées, JS séparé, modales séparées. La page admin Cockpit (`field_dispatch.html`) regroupe les deux UIs (section Field + section Vision) pour la commodité opérationnelle, mais aucun code n'est partagé entre les deux apps.
 
-### Modèle pairing (un code = une app)
+### Architecture
 
-- `field_pairings.app` : `"field"` (default) ou `"vision"`. Un code Field ne peut pas servir à Vision (et inversement) — message d'erreur explicite (`code_for_vision` / `code_for_field`).
-- **Form admin** (`field_dispatch.html`) : radio Field/Vision en haut, champs conditionnels (beacon_group requis pour Field, vision_lieu requis pour Vision). Badges `FIELD`/`VISION` dans la liste des codes actifs et la table devices.
-- **Cas particulier** : un code Field peut activer Vision en bonus (`vision_enabled=true` + `vision_lieu`) pour ouvrir Vision via la route legacy `/field/vision/launch` depuis Field.
+- **Module Python** : `cockpit/vision_admin.py` (blueprint `vision_admin_bp` enregistré dans `app.py` à côté de `field_bp`, exempté de CSRF). Réutilise uniquement les helpers génériques de `field.py` (`admin_required`, `_get_mongo_db`, `_client_ip`, `_rate_limit_pair`, `_generate_pairing_code`, `_now`, `_iso`, `_event_end_datetime`) — aucun accès aux collections `field_*`.
+- **Collections MongoDB** : `vision_pairings` (codes 6 chiffres, TTL 15 min) et `vision_devices` (tablettes Vision enrôlées). Indexes créés lazy au premier accès.
+- **JS** : `static/js/vision_admin.js` (IIFE autonome avec ses propres helpers HTTP, son state, ses modales). Chargé après `field_admin.js` dans `field_dispatch.html`.
+- **UI** : section "Tablettes Vision" dans `field_dispatch.html` sous la section Field, avec bouton dédié "Appairer une tablette Vision", table dédiée (`#vision-devices-table`), modales dédiées (`#vision-pair-modal`, `#vision-codes-modal`).
+
+### Flux opérationnel
+
+1. **Admin** ouvre Field Dispatch → section "Tablettes Vision" → bouton "Appairer une tablette Vision" → saisit nom + lieu (Ouest/Panorama/Houx) → un code 6 chiffres est généré.
+2. **Opérateur** ouvre `https://vision-a0f55.web.app` directement sur la tablette (URL bookmarkée ou PWA, **pas via Field**) → écran bleu de pairing → saisit le code → Vision appelle `POST https://cockpit.lemans.org/field/api/vision/pair` (CORS depuis `vision-a0f55.web.app`).
+3. **Cockpit** vérifie le code dans `vision_pairings`, génère un JWT RS256 (`exp = fin événement + 1 jour`, fallback 24 h), consomme le code, crée un doc `vision_devices` pour l'inventaire admin, retourne le JWT.
+4. **Vision** stocke le JWT en `localStorage.vision_jwt`, recharge la page, l'app démarre.
 
 ### Routes
 
-- `POST /field/admin/pairings` (admin) — création de code, payload `{app, name, event, year, [beacon_group_id|vision_lieu], notes?}`.
-- `POST /field/admin/devices/<id>/vision` (admin) — modifier `vision_enabled`/`vision_lieu` à la volée. UI : bouton `qr_code_scanner` dans la table devices, prompt JS dans `field_admin.js`.
-- `POST /field/api/vision/pair` (**public + CORS** depuis `vision-a0f55.web.app`) — endpoint principal appelé par Vision. Accepte `{code}`, vérifie `app="vision"`, génère le JWT, consomme le code (suppression + insertion d'un doc `field_devices` avec `app="vision"` pour traçabilité).
-- `GET /field/vision/launch` (legacy, optionnel, auth `@field_token_required`) — génère un JWT et redirige `302` vers `VISION_APP_URL?t=<JWT>`. Conservé pour les tablettes Field qui veulent ouvrir Vision sans repairer ; bouton retiré de `field.html` par défaut.
+Toutes sous `/field/*` pour profiter de la whitelist d'auth Cockpit (`/field/*` est public sans portail) :
+
+- `POST /field/api/vision/pair` (**public + CORS** depuis `vision-a0f55.web.app`) — échange code → JWT.
+- `GET /field/admin/vision/pairings` (admin) — liste codes actifs.
+- `POST /field/admin/vision/pairings` (admin) — créer un code (`{name, lieu, event, year, notes?}`).
+- `DELETE /field/admin/vision/pairings/<code>` (admin) — annuler un code.
+- `GET /field/admin/vision/devices` (admin) — liste devices Vision enrôlés.
+- `POST /field/admin/vision/devices/<id>/lieu` (admin) — changer le lieu (`{lieu}`).
+- `POST /field/admin/vision/devices/<id>/revoke` (admin) — révoquer (le JWT existant reste valide jusqu'à `exp`, limitation JWT stateless).
+- `DELETE /field/admin/vision/devices/<id>` (admin) — supprimer définitivement.
 
 ### JWT
 
-- Algo RS256, `iss="cockpit-field"`, `exp = parametrages.data.globalHoraires.demontage.end + 1 jour` (fallback 24 h).
-- Clés RSA générées via `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048` dans `cockpit/keys/vision_jwt_{private,public}.pem`. Privée dans `.gitignore` (`keys/*_private.pem`). Publique embarquée en dur dans `vision/associer.html` (`VISION_JWT_PUBKEY_PEM`). Validation côté Vision en local (`crypto.subtle.verify`) — pas d'appel réseau pour valider, mode hors ligne préservé.
-- Variables d'env : `VISION_JWT_PRIVATE_KEY` (path override, default `cockpit/keys/vision_jwt_private.pem`), `VISION_APP_URL` (default `https://vision-a0f55.web.app/associer.html`).
+- Algo RS256, `iss="cockpit-vision"`, `exp = parametrages.data.globalHoraires.demontage.end + 1 jour` (fallback 24 h).
+- Clés RSA dans `cockpit/keys/vision_jwt_{private,public}.pem`. Privée dans `.gitignore` (`keys/*_private.pem`). Publique embarquée en dur dans `vision/associer.html` (`VISION_JWT_PUBKEY_PEM`). Validation côté Vision en local (`crypto.subtle.verify`) — pas d'appel réseau pour valider, mode hors ligne préservé.
+- Variables d'env : `VISION_JWT_PRIVATE_KEY` (path override), `VISION_APP_URL` (default `https://vision-a0f55.web.app/associer.html`).
 
 ### CORS
 
-- Whitelist `VISION_ALLOWED_ORIGINS` dans `field.py` : `["https://vision-a0f55.web.app", "https://vision-a0f55.firebaseapp.com"]`. Helper `_vision_cors_response()` ajoute les headers `Access-Control-Allow-Origin` / `Vary: Origin`. Preflight OPTIONS géré explicitement sur `/field/api/vision/pair`.
-- Toutes les routes `/field/*` sont accessibles sans portail d'auth Cockpit (la route `/field/api/vision/pair` en hérite).
+- Whitelist `VISION_ALLOWED_ORIGINS` dans `vision_admin.py` : `["https://vision-a0f55.web.app", "https://vision-a0f55.firebaseapp.com"]`. Helper `_cors_response()` + preflight OPTIONS géré explicitement sur `/field/api/vision/pair`.
 
 ### Sync MongoDB
 
-- `vision_sync.py` propage `device_id` et `device_name` des docs `immatriculations` Firestore vers la collection MongoDB `vision_immatriculations` (index `device_id` ajouté).
+- `vision_sync.py` propage `device_id` et `device_name` des docs `immatriculations` Firestore vers `vision_immatriculations` (index `device_id` ajouté).
 
 ### Constantes
 
-- `VISION_LIEUX = ["Ouest", "Panorama", "Houx"]` dans `field.py` — à mettre à jour si on ajoute des lieux Vision (et synchroniser les options du dropdown dans `field_dispatch.html`).
+- `VISION_LIEUX = ["Ouest", "Panorama", "Houx"]` dans `vision_admin.py` — à mettre à jour si on ajoute des lieux Vision (et synchroniser les options du dropdown dans `field_dispatch.html` + le validator côté Vision).

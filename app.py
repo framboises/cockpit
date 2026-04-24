@@ -31,6 +31,7 @@ from analyse_ops import analyse_ops_bp
 from anoloc import anoloc_bp
 from anpr import anpr_bp
 from field import field_bp
+from vision_admin import vision_admin_bp
 from cameras import cameras_bp
 
 ################################################################################
@@ -1563,6 +1564,10 @@ app.register_blueprint(field_bp)
 # Le blueprint field utilise son propre systeme d'auth (cookie field_token) et
 # doit etre exempte de CSRF puisque les tablettes n'ont pas de token CSRF cockpit.
 csrf.exempt(field_bp)
+# Vision admin : autonome, partage uniquement la whitelist d'auth /field/* via
+# les URL /field/api/vision/pair (public CORS) et /field/admin/vision/* (admin).
+app.register_blueprint(vision_admin_bp)
+csrf.exempt(vision_admin_bp)
 app.register_blueprint(cameras_bp)
 # app.register_blueprint(meteo_bp)
 

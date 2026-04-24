@@ -173,6 +173,121 @@
                 </div>
             </section>
 
+            <!-- ===================================================== -->
+            <!-- Section Vision : autonome, dissociee de Field          -->
+            <!-- ===================================================== -->
+
+            <section class="widget-card" style="margin-top:24px; border-top:3px solid #003b5c;">
+                <header class="widget-header">
+                    <h3><span class="material-symbols-outlined" style="vertical-align:middle; color:#003b5c;">qr_code_scanner</span> Tablettes Vision (scan billets vehicule)</h3>
+                    <div id="vision-admin-count" style="font-size:12px; color:var(--muted); margin-left:auto;"></div>
+                </header>
+                <div class="widget-body">
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+                        <button id="vision-pair-new" class="btn btn-primary" style="background:#003b5c;">
+                            <span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">qr_code_scanner</span>
+                            Appairer une tablette Vision
+                        </button>
+                        <button id="vision-pair-show-codes" class="btn" title="Afficher les codes Vision en cours">
+                            <span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">pin</span>
+                            Codes Vision actifs (<span id="vision-pair-count">0</span>)
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table id="vision-devices-table" class="table table-striped table-hover" style="font-size:13px; width:100%;">
+                            <thead>
+                                <tr>
+                                    <th style="min-width:160px;">Nom</th>
+                                    <th style="min-width:140px;">Evenement</th>
+                                    <th style="min-width:100px;">Lieu</th>
+                                    <th style="min-width:120px;">Derniere activite</th>
+                                    <th style="width:160px; white-space:nowrap; text-align:right;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="vision-devices-tbody">
+                                <tr><td colspan="5" style="text-align:center; color:var(--muted); padding:16px;">Chargement...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+    </div>
+</div>
+
+<!-- CRUD Modal — Vision new pairing -->
+<div id="vision-pair-modal" class="crud-modal" hidden>
+    <div class="crud-modal-dialog">
+        <div class="crud-modal-header">
+            <h3>Appairer une tablette Vision</h3>
+            <button class="crud-modal-close" data-close>&times;</button>
+        </div>
+        <div class="crud-modal-body">
+            <form id="vision-pair-form">
+                <div class="form-row">
+                    <label>Nom de la tablette
+                        <input name="name" required placeholder="ex. Vision Ouest 1" class="form-input" />
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label>Lieu
+                        <select name="lieu" required class="form-input">
+                            <option value="">-- Choisir --</option>
+                            <option value="Ouest">Ouest</option>
+                            <option value="Panorama">Panorama</option>
+                            <option value="Houx">Houx</option>
+                        </select>
+                    </label>
+                    <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
+                        Modifiable a tout moment depuis la fiche de la tablette.
+                    </p>
+                </div>
+                <div class="form-row">
+                    <label>Notes (optionnel)
+                        <input name="notes" placeholder="ex. operateur referent..." class="form-input" />
+                    </label>
+                </div>
+                <div class="form-row">
+                    <p style="font-size:12px; color:var(--muted); margin:0;">
+                        Evenement : <b id="vision-pair-event-label">-</b>
+                    </p>
+                </div>
+            </form>
+            <div id="vision-pair-result" style="margin-top:12px;"></div>
+        </div>
+        <div class="crud-modal-footer">
+            <button class="btn btn-secondary" data-close>Fermer</button>
+            <button id="vision-pair-submit" class="btn btn-primary" style="background:#003b5c;">Generer le code</button>
+        </div>
+    </div>
+</div>
+
+<!-- CRUD Modal — Vision codes en cours -->
+<div id="vision-codes-modal" class="crud-modal" hidden>
+    <div class="crud-modal-dialog">
+        <div class="crud-modal-header">
+            <h3>Codes Vision en cours</h3>
+            <button class="crud-modal-close" data-close>&times;</button>
+        </div>
+        <div class="crud-modal-body">
+            <p style="font-size:12px; color:var(--muted); margin:0 0 10px;">
+                Codes generes mais pas encore utilises. Validite : 15 minutes.
+            </p>
+            <table style="width:100%; font-size:13px; border-collapse:collapse;">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--border, #ccc);">
+                        <th style="text-align:left; padding:6px;">Code</th>
+                        <th style="text-align:left; padding:6px;">Nom</th>
+                        <th style="text-align:left; padding:6px;">Lieu</th>
+                        <th style="text-align:left; padding:6px;">Expire</th>
+                        <th style="width:32px;"></th>
+                    </tr>
+                </thead>
+                <tbody id="vision-codes-tbody">
+                    <tr><td colspan="5" style="text-align:center; color:var(--muted); padding:16px;">Chargement...</td></tr>
+                </tbody>
+            </table>
         </div>
     </div>
 </div>
@@ -187,35 +302,17 @@
         <div class="crud-modal-body">
             <form id="field-pair-form">
                 <div class="form-row">
-                    <label style="display:block; margin-bottom:6px; font-weight:600;">Pour quelle app ?</label>
-                    <div style="display:flex; gap:10px;">
-                        <label style="flex:1; display:flex; align-items:center; gap:6px; padding:10px 12px; border:2px solid var(--border, #ccc); border-radius:8px; cursor:pointer;" id="field-pair-app-field-wrap">
-                            <input type="radio" name="app" value="field" id="field-pair-app-field" checked />
-                            <span style="font-weight:600;">Field</span>
-                            <span style="font-size:11px; color:var(--muted); margin-left:auto;">Patrouille / fiches</span>
-                        </label>
-                        <label style="flex:1; display:flex; align-items:center; gap:6px; padding:10px 12px; border:2px solid var(--border, #ccc); border-radius:8px; cursor:pointer;" id="field-pair-app-vision-wrap">
-                            <input type="radio" name="app" value="vision" id="field-pair-app-vision" />
-                            <span style="font-weight:600;">Vision</span>
-                            <span style="font-size:11px; color:var(--muted); margin-left:auto;">Scan billets</span>
-                        </label>
-                    </div>
-                    <p style="font-size:11px; color:var(--muted); margin:6px 0 0;">
-                        Un code = une app. Si tu veux les deux apps sur la meme tablette, genere deux codes.
-                    </p>
-                </div>
-                <div class="form-row">
-                    <label>Nom de la tablette
+                    <label>Nom de la tablette (affiche sur la carte et recu dans les fiches)
                         <input name="name" required placeholder="ex. Patrouille Secu 1" class="form-input" />
                     </label>
-                    <p style="font-size:11px; color:var(--muted); margin:2px 0 0;" id="field-pair-name-help">
+                    <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
                         Doit etre unique dans l'evenement. Ne doit pas collisionner avec un label
                         de balise Anoloc deja existant.
                     </p>
                 </div>
-                <div class="form-row" id="field-pair-beacon-row">
+                <div class="form-row">
                     <label>Groupe (associe aux balises Anoloc)
-                        <select name="beacon_group_id" class="form-input">
+                        <select name="beacon_group_id" required class="form-input">
                             <option value="">-- Choisir --</option>
                         </select>
                     </label>
@@ -228,29 +325,6 @@
                     <label>Notes (optionnel)
                         <input name="notes" placeholder="ex. operateur referent, modele..." class="form-input" />
                     </label>
-                </div>
-                <div class="form-row" id="field-pair-vision-bonus-row">
-                    <label style="display:flex; align-items:center; gap:8px;">
-                        <input type="checkbox" name="vision_enabled" id="field-pair-vision-enabled" />
-                        <span>Activer Vision en bonus (rare)</span>
-                    </label>
-                    <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
-                        Permet d'utiliser Vision via le bouton dans Field. Generalement on prefere
-                        un code Vision dedie pour les operateurs Vision-only.
-                    </p>
-                </div>
-                <div class="form-row" id="field-pair-vision-lieu-row" hidden>
-                    <label>Lieu Vision
-                        <select name="vision_lieu" id="field-pair-vision-lieu" class="form-input">
-                            <option value="">-- Choisir --</option>
-                            <option value="Ouest">Ouest</option>
-                            <option value="Panorama">Panorama</option>
-                            <option value="Houx">Houx</option>
-                        </select>
-                    </label>
-                    <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
-                        Modifiable a tout moment depuis la fiche de la tablette.
-                    </p>
                 </div>
                 <div class="form-row" id="field-pair-event-row">
                     <p style="font-size:12px; color:var(--muted); margin:0;">
@@ -498,6 +572,7 @@
 </script>
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
 <script src="{{ url_for('static', filename='js/field_admin.js') }}"></script>
+<script src="{{ url_for('static', filename='js/vision_admin.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 
 <script>
