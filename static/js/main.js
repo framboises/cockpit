@@ -547,6 +547,57 @@ function updateEventStatus() {
         });
 }
 
+function shiftDateISO(iso, days) {
+    var parts = iso.split("-");
+    var d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    d.setDate(d.getDate() + days);
+    return d.getFullYear() + "-" +
+        String(d.getMonth() + 1).padStart(2, "0") + "-" +
+        String(d.getDate()).padStart(2, "0");
+}
+
+// Calcule le segment public continu autour de todayISO :
+// des jours adjacents sont considérés continus si l'un ferme à 23:59/24:00
+// (ou is24h) et l'autre ouvre à 00:00 (ou is24h).
+function getContinuousSegmentFor(todayISO, publicDates) {
+    var byDate = {};
+    for (var i = 0; i < publicDates.length; i++) {
+        if (publicDates[i] && publicDates[i].date) {
+            byDate[publicDates[i].date] = publicDates[i];
+        }
+    }
+    if (!byDate[todayISO]) return null;
+    var closesAtEOD = function (d) {
+        return !!d.is24h || d.closeTime === "23:59" || d.closeTime === "24:00" || d.closeTime === "00:00";
+    };
+    var opensAtSOD = function (d) {
+        return !!d.is24h || d.openTime === "00:00";
+    };
+    var startDate = todayISO;
+    while (byDate[startDate] && opensAtSOD(byDate[startDate])) {
+        var prevISO = shiftDateISO(startDate, -1);
+        var prev = byDate[prevISO];
+        if (!prev || !closesAtEOD(prev)) break;
+        startDate = prevISO;
+    }
+    var endDate = todayISO;
+    while (byDate[endDate] && closesAtEOD(byDate[endDate])) {
+        var nextISO = shiftDateISO(endDate, 1);
+        var next = byDate[nextISO];
+        if (!next || !opensAtSOD(next)) break;
+        endDate = nextISO;
+    }
+    var startDay = byDate[startDate];
+    var endDay = byDate[endDate];
+    return {
+        startDate: startDate,
+        startTime: startDay.is24h ? "00:00" : (startDay.openTime || "00:00"),
+        endDate: endDate,
+        endTime: endDay.is24h ? "23:59" : (endDay.closeTime || "23:59"),
+        isSingleDay: startDate === endDate
+    };
+}
+
 function computeAndRenderStatus(paramData) {
     var gh = paramData.globalHoraires;
     if (!gh) {
@@ -660,8 +711,23 @@ function computeAndRenderStatus(paramData) {
 
             // Currently open
             if (nowMinutes >= openMin) {
+                // Détection d'un segment public continu inter-jours (ex. sam 08:00 -> dim 18:00)
+                var segment = getContinuousSegmentFor(todayISO, publicDates);
+                var multiDaySegment = segment && !segment.isSingleDay;
+
                 var remaining;
-                if (isOvernight) {
+                if (multiDaySegment && segment.endDate !== todayISO) {
+                    var eParts = segment.endDate.split("-");
+                    var eCloseMin = parseTimeToMin(segment.endTime);
+                    var closeTs = new Date(
+                        parseInt(eParts[0], 10),
+                        parseInt(eParts[1], 10) - 1,
+                        parseInt(eParts[2], 10),
+                        Math.floor(eCloseMin / 60),
+                        eCloseMin % 60
+                    ).getTime();
+                    remaining = Math.round((closeTs - now.getTime()) / 60000);
+                } else if (isOvernight) {
                     remaining = (1440 - nowMinutes) + closeMin;
                 } else if (nowMinutes < closeMin) {
                     remaining = closeMin - nowMinutes;
@@ -690,8 +756,20 @@ function computeAndRenderStatus(paramData) {
 
                 // Open with remaining time
                 var state = remaining <= 60 ? "closing-soon" : "open";
+                var hOpenDate = multiDaySegment ? segment.startDate : todayISO;
+                var hCloseDate = multiDaySegment ? segment.endDate : todayISO;
+                var hOpenTime = multiDaySegment ? segment.startTime : todayPublic.openTime;
+                var hCloseTime = multiDaySegment ? segment.endTime : todayPublic.closeTime;
+                var hoursStr;
+                if (hOpenDate === hCloseDate) {
+                    hoursStr = hOpenTime + " \u2013 " + hCloseTime;
+                } else {
+                    var openLbl = (hOpenDate === todayISO) ? hOpenTime : formatDateShort(hOpenDate).split(" ")[0] + " " + hOpenTime;
+                    var closeLbl = (hCloseDate === todayISO) ? hCloseTime : formatDateShort(hCloseDate).split(" ")[0] + " " + hCloseTime;
+                    hoursStr = openLbl + " \u2013 " + closeLbl;
+                }
                 renderStatus(state, "lock_open", "OUVERT AU PUBLIC", null, {
-                    hours: todayPublic.openTime + " \u2013 " + todayPublic.closeTime,
+                    hours: hoursStr,
                     countdown: "Fermeture dans " + formatMinutesDelta(remaining)
                 });
                 return;

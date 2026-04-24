@@ -7,7 +7,7 @@
      - API (/field/*) : network-first, fallback silencieux offline
    ===================================================================== */
 
-const SW_VERSION = "field-sw-v15";
+const SW_VERSION = "field-sw-v16";
 const APP_SHELL_CACHE = "field-shell-" + SW_VERSION;
 const TILE_CACHE = "field-tiles-" + SW_VERSION;
 const API_CACHE = "field-api-" + SW_VERSION;
@@ -199,14 +199,19 @@ self.addEventListener("push", function (event) {
   var payload;
   try { payload = event.data.json(); } catch (e) { return; }
   var title = payload.title || "COCKPIT Field";
+  var isSos = payload.type === "sos";
   var options = {
     body: payload.body || "",
     icon: "/static/img/field-icon.svg",
     badge: "/static/img/field-icon.svg",
     tag: payload.tag || "field-push",
     renotify: true,
-    vibrate: [200, 100, 200, 100, 400],
-    data: { url: payload.url || "/field" },
+    silent: false,
+    vibrate: isSos
+      ? [500, 200, 500, 200, 500, 200, 500, 200, 500]
+      : [200, 100, 200, 100, 400],
+    requireInteraction: !!isSos,
+    data: { url: payload.url || "/field", type: payload.type || null },
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });

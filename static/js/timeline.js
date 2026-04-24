@@ -24,7 +24,7 @@ function buildPublicDatesMap(parametrage) {
   dates.forEach(d => {
     if (d?.date) {
       map[d.date] = {
-        is24h: !!d.is24h || (d.openTime === "00:00" && (d.closeTime === "23:59" || d.closeTime === "24:00")),
+        is24h: !!d.is24h || (d.openTime === "00:00" && (d.closeTime === "23:59" || d.closeTime === "24:00" || d.closeTime === "00:00")),
         openTime: d.openTime || "00:00",
         closeTime: d.closeTime || "23:59"
       };
@@ -41,6 +41,30 @@ function getPublicBannerForDateStr(dateStr) {
   }
   if (entry.is24h) {
     return { text: "OUVERT AU PUBLIC — 24/24", className: "banner-open" };
+  }
+  // Détection de continuité avec un voisin :
+  // si J ouvre à 00:00 ET J-1 ferme à 23:59/24:00 → continuité nocturne, le 00:00 est artificiel
+  // si J ferme à 23:59/24:00 ET J+1 ouvre à 00:00 → continuité nocturne, la fermeture est artificielle
+  const d = new Date(dateStr + 'T00:00:00');
+  const prev = new Date(d); prev.setDate(prev.getDate() - 1);
+  const next = new Date(d); next.setDate(next.getDate() + 1);
+  const prevEntry = window.publicDatesMap?.[prev.toISOString().slice(0, 10)];
+  const nextEntry = window.publicDatesMap?.[next.toISOString().slice(0, 10)];
+  const openIs00 = entry.openTime === "00:00";
+  const closeIs2359 = entry.closeTime === "23:59" || entry.closeTime === "24:00" || entry.closeTime === "00:00";
+  const prevCloseIs2359 = prevEntry && (prevEntry.closeTime === "23:59" || prevEntry.closeTime === "24:00" || prevEntry.closeTime === "00:00");
+  const nextOpenIs00 = nextEntry && nextEntry.openTime === "00:00";
+  const continuesFromPrev = openIs00 && prevCloseIs2359;
+  const continuesToNext = closeIs2359 && nextOpenIs00;
+
+  if (continuesFromPrev && continuesToNext) {
+    return { text: "OUVERT AU PUBLIC — 24/24", className: "banner-open" };
+  }
+  if (continuesFromPrev) {
+    return { text: `OUVERT AU PUBLIC — jusqu'à ${entry.closeTime}`, className: "banner-open" };
+  }
+  if (continuesToNext) {
+    return { text: `OUVERT AU PUBLIC — à partir de ${entry.openTime}`, className: "banner-open" };
   }
   return {
     text: `OUVERT AU PUBLIC — ${entry.openTime} – ${entry.closeTime}`,
@@ -129,7 +153,7 @@ let _clusterConfigLoaded = false;
 function _buildMatcherFromLabel(activityLabel) {
   // activity_label = "Parking {name}" -> on matche si activity contient "Parking "
   // ou "Ouverture Parking " ou "Fermeture Parking "
-  const prefix = (activityLabel || "").replace(/\s*\{name\}\s*$/, "").trim();
+  const prefix = (activityLabel || "").split(/\s*\{[^}]+\}/)[0].trim();
   if (!prefix) return () => false;
   const prefixNorm = norm(prefix);
   return function(it) {
@@ -947,13 +971,19 @@ function _buildDayNav(dates, sectionsByDate) {
         const nextEntry = window.publicDatesMap?.[nextKey];
 
         const openIs00 = entry.openTime === '00:00';
-        const closeIs2359 = entry.closeTime === '23:59' || entry.closeTime === '24:00';
+        const closeIs2359 = entry.closeTime === '23:59' || entry.closeTime === '24:00' || entry.closeTime === '00:00';
 
+        const prevCloseIs2359 = prevEntry && (prevEntry.closeTime === '23:59' || prevEntry.closeTime === '24:00' || prevEntry.closeTime === '00:00');
+        const nextOpenIs00 = nextEntry && nextEntry.openTime === '00:00';
+        const continuesFromPrev = openIs00 && prevCloseIs2359;
+        const continuesToNext = closeIs2359 && nextOpenIs00;
         if (entry.is24h || (openIs00 && closeIs2359)) {
           tooltipLines.push({type: 'public', text: 'Ouvert au public 24/24'});
-        } else if (openIs00 && prevEntry) {
+        } else if (continuesFromPrev && continuesToNext) {
+          tooltipLines.push({type: 'public', text: 'Ouvert au public 24/24'});
+        } else if (continuesFromPrev) {
           tooltipLines.push({type: 'public', text: 'Fermeture au public ' + entry.closeTime});
-        } else if (closeIs2359 && nextEntry) {
+        } else if (continuesToNext) {
           tooltipLines.push({type: 'public', text: 'Ouverture au public ' + entry.openTime});
         } else {
           tooltipLines.push({type: 'public', text: 'Public ' + entry.openTime + ' - ' + entry.closeTime});

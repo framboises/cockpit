@@ -10,10 +10,26 @@
 
   var POLL_INBOX_MS = 3000;
   var POLL_FICHES_MS = 5000;        // fiches PCORG assignees : toutes les 5s
+  // Cadences adaptatives (divisees si agent idle ou statut pause)
+  var POLL_INBOX_IDLE_MS = 15000;
+  var POLL_FICHES_IDLE_MS = 20000;
+  var POLL_PAUSE_MS = 30000;
+  var IDLE_THRESHOLD_MS = 2 * 60 * 1000; // 2 min sans interaction = idle
   var POSITION_PUSH_NORMAL_MS = 60000;  // push GPS toutes les 60s (economie batterie)
   var POSITION_PUSH_HIGH_MS = 5000;    // push GPS toutes les 5s (mode suivi cockpit)
   var POSITION_PUSH_MS = POSITION_PUSH_NORMAL_MS;
   var POSITION_MIN_MOVE_M = 5;     // ou si on bouge de plus de 5m
+
+  // Profils GPS : compromis precision / consommation batterie
+  // high  : intervention/ASL/SOS ou suivi cockpit => puce GPS continue haute precision
+  // normal: patrouille active visible              => puce GPS continue, fix +ancien toleres
+  // low   : pause / fin_intervention               => cell+wifi seuls, fix peu frequent
+  // paused: app en background sans statut critique => watch suspendu (reprise a visibilite)
+  var GPS_PROFILES = {
+    high:   { enableHighAccuracy: true,  maximumAge: 2000,  timeout: 20000 },
+    normal: { enableHighAccuracy: true,  maximumAge: 5000,  timeout: 20000 },
+    low:    { enableHighAccuracy: false, maximumAge: 30000, timeout: 30000 },
+  };
 
   // ---------------------------------------------------------------------
   // State
@@ -92,7 +108,7 @@
 
   function formatClock(d) {
     function p(n) { return (n < 10 ? "0" : "") + n; }
-    return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+    return p(d.getHours()) + ":" + p(d.getMinutes());
   }
 
   function toast(msg, type) {
@@ -100,9 +116,249 @@
     if (!el) return;
     el.textContent = msg;
     el.className = "field-toast" + (type ? " " + type : "");
+    el.setAttribute("aria-live", type === "err" ? "assertive" : "polite");
     el.hidden = false;
     clearTimeout(toast._t);
     toast._t = setTimeout(function () { el.hidden = true; }, 2500);
+  }
+
+  // Redimensionne et recompresse les photos avant upload (4G terrain).
+  // Garantit: max 1600px sur le plus grand cote, JPEG qualite 0.8.
+  // Renvoie la Promise du Blob compresse (ou le File d origine si < 500KB,
+  // si non-image, ou en cas d echec canvas).
+  var IMG_MAX_DIM = 1600;
+  var IMG_SKIP_THRESHOLD = 500 * 1024;
+  var IMG_QUALITY = 0.8;
+  function compressImageIfNeeded(file) {
+    if (!file || !file.type || file.type.indexOf("image/") !== 0) {
+      return Promise.resolve(file);
+    }
+    if (file.size && file.size < IMG_SKIP_THRESHOLD) {
+      return Promise.resolve(file);
+    }
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var w = img.naturalWidth || img.width;
+          var h = img.naturalHeight || img.height;
+          var scale = Math.min(1, IMG_MAX_DIM / Math.max(w, h));
+          var tw = Math.round(w * scale);
+          var th = Math.round(h * scale);
+          var canvas = document.createElement("canvas");
+          canvas.width = tw; canvas.height = th;
+          var ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, tw, th);
+          canvas.toBlob(function (blob) {
+            URL.revokeObjectURL(url);
+            if (!blob) { resolve(file); return; }
+            // Garde l original s il etait deja plus petit que la version compressee
+            if (blob.size >= file.size) { resolve(file); return; }
+            var outName = (file.name || "photo").replace(/\.[^.]+$/, "") + ".jpg";
+            try {
+              resolve(new File([blob], outName, { type: "image/jpeg" }));
+            } catch (e) {
+              // Safari < 14 : pas de constructeur File
+              blob.name = outName;
+              resolve(blob);
+            }
+          }, "image/jpeg", IMG_QUALITY);
+        } catch (e) {
+          URL.revokeObjectURL(url);
+          resolve(file);
+        }
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // OfflineQueue : file d'attente persistante (IndexedDB) pour POST JSON
+  // metier (statut patrouille, ack message, creation fiche) quand le reseau
+  // est coupe. Flushe automatiquement au retour online + periodiquement.
+  // ---------------------------------------------------------------------
+  var OfflineQueue = (function () {
+    var DB_NAME = "field-offline-v1";
+    var STORE = "queue";
+    var _db = null;
+    var _count = 0;
+    var _listeners = [];
+    var _flushing = false;
+    var _flushTimer = null;
+
+    function open() {
+      return new Promise(function (resolve, reject) {
+        if (_db) return resolve(_db);
+        if (!("indexedDB" in window)) return reject(new Error("no-idb"));
+        var req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = function () {
+          var db = req.result;
+          if (!db.objectStoreNames.contains(STORE)) {
+            db.createObjectStore(STORE, { keyPath: "id", autoIncrement: true });
+          }
+        };
+        req.onsuccess = function () { _db = req.result; resolve(_db); };
+        req.onerror = function () { reject(req.error); };
+      });
+    }
+
+    function tx(mode) {
+      return open().then(function (db) {
+        return db.transaction(STORE, mode).objectStore(STORE);
+      });
+    }
+
+    function refreshCount() {
+      return tx("readonly").then(function (store) {
+        return new Promise(function (resolve) {
+          var req = store.count();
+          req.onsuccess = function () {
+            _count = req.result || 0;
+            _listeners.forEach(function (fn) { try { fn(_count); } catch (e) {} });
+            resolve(_count);
+          };
+          req.onerror = function () { resolve(_count); };
+        });
+      }).catch(function () { return _count; });
+    }
+
+    function enqueue(entry) {
+      // entry: {url, method, jsonBody, label}
+      var record = {
+        createdAt: Date.now(),
+        url: entry.url,
+        method: entry.method || "POST",
+        jsonBody: entry.jsonBody || null,
+        label: entry.label || "",
+      };
+      return tx("readwrite").then(function (store) {
+        return new Promise(function (resolve, reject) {
+          var req = store.add(record);
+          req.onsuccess = function () { resolve(req.result); };
+          req.onerror = function () { reject(req.error); };
+        });
+      }).then(function (id) {
+        refreshCount();
+        return id;
+      });
+    }
+
+    function all() {
+      return tx("readonly").then(function (store) {
+        return new Promise(function (resolve) {
+          var req = store.getAll();
+          req.onsuccess = function () { resolve(req.result || []); };
+          req.onerror = function () { resolve([]); };
+        });
+      }).catch(function () { return []; });
+    }
+
+    function remove(id) {
+      return tx("readwrite").then(function (store) {
+        return new Promise(function (resolve) {
+          var req = store.delete(id);
+          req.onsuccess = function () { resolve(); };
+          req.onerror = function () { resolve(); };
+        });
+      });
+    }
+
+    function flush() {
+      if (_flushing) return Promise.resolve();
+      if (!navigator.onLine) return Promise.resolve();
+      _flushing = true;
+      return all().then(function (records) {
+        records.sort(function (a, b) { return a.id - b.id; });
+        var chain = Promise.resolve();
+        records.forEach(function (rec) {
+          chain = chain.then(function () {
+            if (!navigator.onLine) throw new Error("offline");
+            return fetch(rec.url, {
+              method: rec.method,
+              headers: { "Content-Type": "application/json" },
+              body: rec.jsonBody ? JSON.stringify(rec.jsonBody) : null,
+            }).then(function (r) {
+              // 4xx (hors 401) : action rejetee par le serveur, on l abandonne
+              if (r.status >= 400 && r.status < 500 && r.status !== 401) {
+                return remove(rec.id).then(function () {
+                  toast("Action abandonnee (" + (rec.label || "?") + " : " + r.status + ")", "err");
+                });
+              }
+              if (r.status === 401) { throw new Error("auth"); }
+              if (!r.ok) throw new Error("server");
+              return remove(rec.id);
+            });
+          });
+        });
+        return chain;
+      }).catch(function () { /* stop silencieusement */ })
+        .then(function () {
+          _flushing = false;
+          return refreshCount();
+        });
+    }
+
+    function count() { return _count; }
+    function addListener(fn) { _listeners.push(fn); fn(_count); }
+
+    function start() {
+      refreshCount();
+      window.addEventListener("online", function () { flush(); });
+      _flushTimer = setInterval(function () {
+        if (navigator.onLine && _count > 0) flush();
+      }, 30000);
+    }
+
+    return {
+      enqueue: enqueue,
+      flush: flush,
+      count: count,
+      addListener: addListener,
+      start: start,
+    };
+  })();
+
+  // Helper: POST JSON avec fallback queue en cas d'echec reseau.
+  // Renvoie Promise({ok:true, queued?:true, data?:{...}}) ou rejette si 401.
+  function queuedJsonPost(url, body, label) {
+    var payload = body || {};
+    function attemptFetch() {
+      return fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then(function (r) {
+        if (r.status === 401) { handleSessionLost(); return { ok: false, auth: true }; }
+        return r.json().then(function (data) {
+          return Object.assign({ _status: r.status }, data || {});
+        }).catch(function () {
+          return { ok: r.ok, _status: r.status };
+        });
+      });
+    }
+    if (!navigator.onLine) {
+      return OfflineQueue.enqueue({ url: url, method: "POST", jsonBody: payload, label: label })
+        .then(function () { return { ok: true, queued: true }; });
+    }
+    return attemptFetch().catch(function () {
+      return OfflineQueue.enqueue({ url: url, method: "POST", jsonBody: payload, label: label })
+        .then(function () { return { ok: true, queued: true }; });
+    });
+  }
+
+  function updateOfflineBadge() {
+    var pill = $("offline-queue-status");
+    var counter = $("offline-queue-count");
+    if (!pill || !counter) return;
+    var n = OfflineQueue.count();
+    if (n > 0) {
+      pill.hidden = false;
+      counter.textContent = String(n);
+    } else {
+      pill.hidden = true;
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -116,8 +372,8 @@
 
   function stopAllPolling() {
     try {
-      if (state.fichesTimer) { clearInterval(state.fichesTimer); state.fichesTimer = null; }
-      if (state.inboxTimer) { clearInterval(state.inboxTimer); state.inboxTimer = null; }
+      if (state.fichesTimer) { clearTimeout(state.fichesTimer); state.fichesTimer = null; }
+      if (state.inboxTimer) { clearTimeout(state.inboxTimer); state.inboxTimer = null; }
       if (state.clockTimer) { clearInterval(state.clockTimer); state.clockTimer = null; }
       if (state.crosshairTimer) { clearTimeout(state.crosshairTimer); state.crosshairTimer = null; }
       if (state.watchId != null && navigator.geolocation) {
@@ -135,6 +391,10 @@
     var overlay = document.createElement("div");
     overlay.className = "field-session-lost";
     overlay.id = "field-session-lost";
+    overlay.setAttribute("role", "alertdialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-live", "assertive");
+    overlay.setAttribute("aria-label", "Session perdue");
 
     var box = document.createElement("div");
     box.className = "field-session-lost-box";
@@ -366,15 +626,54 @@
       return;
     }
     setGpsStatus("warn");
+    applyGpsProfile(selectGpsProfile());
+  }
+
+  // Selectionne le profil GPS adapte au contexte.
+  // Retourne "paused" = pas de watch du tout.
+  function selectGpsProfile() {
+    // Cockpit suit la tablette en temps reel : precision maximale, meme en bg
+    if (POSITION_PUSH_MS === POSITION_PUSH_HIGH_MS) return "high";
+    var status = state.patrolStatus || "patrouille";
+    var critical = status === "intervention" || status === "sur_place" || state.sosInFlight;
+    if (critical) return "high";
+    // App en background sans statut critique : pas besoin de GPS continu
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return "paused";
+    if (status === "pause" || status === "fin_intervention") return "low";
+    return "normal";
+  }
+
+  function applyGpsProfile(profile) {
+    if (!navigator.geolocation) return;
+    if (state.gpsProfile === profile) return;
+    state.gpsProfile = profile;
+    // Stop le watch courant
+    if (state.watchId != null) {
+      try { navigator.geolocation.clearWatch(state.watchId); } catch (e) {}
+      state.watchId = null;
+    }
+    if (profile === "paused") return;
+    var opts = GPS_PROFILES[profile] || GPS_PROFILES.normal;
     try {
-      state.watchId = navigator.geolocation.watchPosition(
-        onGpsUpdate,
-        onGpsError,
-        { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 }
-      );
+      state.watchId = navigator.geolocation.watchPosition(onGpsUpdate, onGpsError, opts);
     } catch (e) {
       setGpsStatus("err");
     }
+  }
+
+  // Reevalue le profil GPS sur changement de statut / visibilite / suivi cockpit.
+  function refreshGpsProfile() {
+    applyGpsProfile(selectGpsProfile());
+  }
+
+  // Force un fix GPS unique a la demande (avant SOS, creation fiche, etc.)
+  // pour garantir une position fraiche meme si le watch est suspendu ou bas debit.
+  function forceOneShotPosition() {
+    if (!navigator.geolocation) return;
+    try {
+      navigator.geolocation.getCurrentPosition(onGpsUpdate, onGpsError,
+        GPS_PROFILES.high);
+    } catch (e) {}
   }
 
   function onGpsUpdate(pos) {
@@ -479,7 +778,13 @@
       if (el) el.textContent = formatClock(new Date());
     }
     tick();
-    state.clockTimer = setInterval(tick, 1000);
+    // Aligner sur le debut de la minute suivante pour eviter la derive,
+    // puis tiquer toutes les 60s (60x moins de reveils CPU que 1s).
+    var msToNextMin = 60000 - (Date.now() % 60000);
+    setTimeout(function () {
+      tick();
+      state.clockTimer = setInterval(tick, 60000);
+    }, msToNextMin);
   }
 
   function setNetStatus(online) {
@@ -973,6 +1278,18 @@
       .catch(function () { /* silent */ });
   }
 
+  var _3P_ICONS = {
+    "Porte": "door_front",
+    "Portail": "garage",
+    "Portillon": "fence",
+  };
+  function get3pIcon(nature) {
+    if (!nature) return "door_front";
+    return _3P_ICONS[nature]
+      || _3P_ICONS[String(nature).replace(/[eEéèêë]/g, "e")]
+      || "door_front";
+  }
+
   function render3P(features) {
     if (state.threePLayer) {
       state.map.removeLayer(state.threePLayer);
@@ -983,20 +1300,78 @@
       var coords = (f.geometry || {}).coordinates || [];
       if (coords.length < 2) return;
       var lat = coords[1], lng = coords[0];
-      var props = f.properties || {};
-      var name = props.Nom || props.Name || props.name || "3P";
-      var cm = L.circleMarker([lat, lng], {
-        radius: 5,
-        color: "#0ea5e9",
-        weight: 2,
-        fillColor: "#bae6fd",
-        fillOpacity: 0.9,
+      var p = f.properties || {};
+      var nom = p.Nom || p.Name || p.name || "3P";
+      var nature = p.Nature || "";
+      var iconName = get3pIcon(nature);
+      var marker = L.marker([lat, lng], {
+        icon: L.divIcon({
+          className: "portes-pin",
+          html: "<span class='material-symbols-outlined'>" + iconName + "</span>",
+          iconSize: [30, 30],
+          iconAnchor: [15, 15],
+        }),
       });
-      cm.bindPopup("<b>" + escapeHtml(name) + "</b>");
-      cm.addTo(group);
+      marker.bindPopup(function () { return build3pPopup(p, nom, nature); }, {
+        maxWidth: 280,
+        className: "portes-popup-wrap",
+      });
+      marker.addTo(group);
     });
     if (state.threePOn) group.addTo(state.map);
     state.threePLayer = group;
+  }
+
+  function build3pPopup(p, nom, nature) {
+    var wrap = document.createElement("div");
+    wrap.className = "portes-popup";
+
+    var title = document.createElement("div");
+    title.className = "portes-popup-title";
+    title.textContent = nom;
+    wrap.appendChild(title);
+
+    if (nature) {
+      var nat = document.createElement("div");
+      nat.className = "portes-popup-nature";
+      nat.textContent = nature;
+      wrap.appendChild(nat);
+    }
+
+    var details = [];
+    if (p["Accès"]) details.push(p["Accès"]);
+    if (p.Zone) details.push(p.Zone);
+    if (p["Largeur (cm)"]) details.push("L: " + p["Largeur (cm)"] + " cm");
+    if (p["Hauteur (cm)"]) details.push("H: " + p["Hauteur (cm)"] + " cm");
+    if (p.Verrous) details.push(p.Verrous);
+    if (details.length) {
+      var d = document.createElement("div");
+      d.className = "portes-popup-details";
+      d.textContent = details.join(" • ");
+      wrap.appendChild(d);
+    }
+
+    if (p.Commentaires) {
+      var c = document.createElement("div");
+      c.className = "portes-popup-comments";
+      c.textContent = p.Commentaires;
+      wrap.appendChild(c);
+    }
+
+    if (p.Photos) {
+      var thumbUrl = "/field/resources/3p/photo/thumb/" + encodeURIComponent(p.Photos);
+      var origUrl = "/field/resources/3p/photo/original/" + encodeURIComponent(p.Photos);
+      var img = document.createElement("img");
+      img.className = "portes-thumb";
+      img.src = thumbUrl;
+      img.alt = nom;
+      img.loading = "lazy";
+      img.addEventListener("click", function () { openLightbox(origUrl); });
+      img.addEventListener("error", function () { img.style.display = "none"; });
+      wrap.appendChild(img);
+    }
+
+    return wrap;
   }
 
   // ----- POI (groundmaster categories) -----
@@ -1838,28 +2213,32 @@
   }
 
   function setPatrolStatus(newStatus) {
-    fetch("/field/status", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: newStatus }),
-    })
-      .then(function (r) {
-        if (r.status === 401) { return handleSessionLost(); }
-        return r.json();
-      })
+    queuedJsonPost("/field/status", { status: newStatus }, "statut " + newStatus)
       .then(function (data) {
         if (!data) return;
+        if (data.queued) {
+          // Optimiste : on applique le statut localement, le serveur sera sync au flush
+          state.patrolStatus = newStatus;
+          state.patrolStatusSince = new Date().toISOString();
+          if (newStatus === "patrouille") state.activeFicheId = null;
+          updateStatusBar();
+          refreshGpsProfile();
+          syncWakeLockWithStatus();
+          toast("Hors ligne : statut en attente", "warn");
+          return;
+        }
         if (data.ok) {
           state.patrolStatus = newStatus;
           state.patrolStatusSince = new Date().toISOString();
           if (newStatus === "patrouille") state.activeFicheId = null;
           updateStatusBar();
+          refreshGpsProfile();
+          syncWakeLockWithStatus();
           toast(STATUS_META[newStatus].label, "ok");
-        } else {
+        } else if (!data.auth) {
           toast("Erreur : " + (data.error || data.message || "?"), "err");
         }
-      })
-      .catch(function () { toast("Erreur reseau", "err"); });
+      });
   }
 
   // ----- Creation de fiche terrain -----
@@ -1909,6 +2288,10 @@
     var msg = $("fiche-create-msg");
     if (msg) { msg.textContent = ""; msg.className = "fiche-create-msg"; }
     modal.hidden = false;
+    // Fix GPS one-shot pour s'assurer d'une position fraiche sur la fiche
+    forceOneShotPosition();
+    // Autofocus sur la description pour declencher immediatement le clavier
+    if (txt) setTimeout(function () { try { txt.focus(); } catch (e) {} }, 120);
   }
 
   function submitCreateFiche() {
@@ -1945,34 +2328,26 @@
       if (gridLabel) payload.carroye = gridLabel.textContent;
     }
 
-    fetch("/field/create-fiche", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then(function (r) {
-        if (r.status === 401) { return handleSessionLost(); }
-        return r.json();
-      })
+    queuedJsonPost("/field/create-fiche", payload, "creation fiche")
       .then(function (data) {
         if (!data) return;
         if (btn) btn.disabled = false;
+        if (data.queued) {
+          $("fiche-create-modal").hidden = true;
+          toast("Hors ligne : fiche en attente de synchronisation", "warn");
+          return;
+        }
         if (data.ok) {
           $("fiche-create-modal").hidden = true;
           state.patrolStatus = "intervention";
           state.activeFicheId = data.id;
           updateStatusBar();
           toast("Fiche creee - Intervention demarree", "ok");
-          pollFiches(); // Rafraichir les fiches immediatement
-        } else {
+          pollFiches();
+        } else if (!data.auth) {
           var msg3 = $("fiche-create-msg");
           if (msg3) { msg3.textContent = "Erreur : " + (data.error || "?"); msg3.className = "fiche-create-msg error"; }
         }
-      })
-      .catch(function () {
-        if (btn) btn.disabled = false;
-        var msg4 = $("fiche-create-msg");
-        if (msg4) { msg4.textContent = "Erreur reseau."; msg4.className = "fiche-create-msg error"; }
       });
   }
 
@@ -2061,7 +2436,14 @@
   // ---------------------------------------------------------------------
   function startFichesPoll() {
     pollFiches();
-    state.fichesTimer = setInterval(pollFiches, POLL_FICHES_MS);
+    scheduleFichesPoll();
+  }
+  function scheduleFichesPoll() {
+    if (state.fichesTimer) clearTimeout(state.fichesTimer);
+    state.fichesTimer = setTimeout(function () {
+      pollFiches();
+      scheduleFichesPoll();
+    }, computePollInterval("fiches"));
   }
 
   function pollFiches() {
@@ -2075,6 +2457,9 @@
         var open = data.open || [];
         state.fiches = open;
         renderFiches();
+        updateMissionsBadge();
+        var mPanel = $("missions-panel");
+        if (mPanel && !mPanel.hidden) renderMissionsList();
         // Memoriser si c'etait le tout premier poll avant de laisser detectNewFiches le flag
         var wasFirstPoll = !state.fichesFirstPolled;
         detectNewFiches(open);
@@ -2110,7 +2495,9 @@
         var newInterval = tMode === "high_freq" ? POSITION_PUSH_HIGH_MS : POSITION_PUSH_NORMAL_MS;
         if (newInterval !== POSITION_PUSH_MS) {
           POSITION_PUSH_MS = newInterval;
+          refreshGpsProfile();
         }
+        if (statusChanged) { refreshGpsProfile(); syncWakeLockWithStatus(); }
       })
       .catch(function () { /* silent */ });
   }
@@ -2189,6 +2576,10 @@
 
     var overlay = document.createElement("div");
     overlay.className = "dispatch-alert-overlay";
+    overlay.setAttribute("role", "alertdialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-live", "assertive");
+    overlay.setAttribute("aria-label", "Nouvelle intervention dispatchee");
 
     var box = document.createElement("div");
     box.className = "dispatch-alert-box";
@@ -2350,6 +2741,9 @@
     if (!state.fichesLayer) {
       state.fichesLayer = L.layerGroup().addTo(state.map);
       state.fichesMarkers = {};
+      // Fenetrer les markers sur le viewport visible a chaque mouvement
+      // (throttled pour ne pas recalculer a chaque pixel de pan)
+      state.map.on("moveend zoomend", scheduleBboxWindowing);
     }
     var seen = {};
     state.fiches.forEach(function (f) {
@@ -2361,17 +2755,18 @@
       } else {
         var catStyle = ficheStyle(f.category);
         var fcc = f.content_category || {};
+        var activeClass = (f.id === state.activeFicheId) ? " active" : "";
         var icon = L.divIcon({
           className: "",
-          html: "<div class='fiche-marker urgency-" + (f.niveau_urgence || "norm") + "' style='background:" + catStyle.color + "'>"
+          html: "<div class='fiche-marker urgency-" + (f.niveau_urgence || "norm") + activeClass + "' style='background:" + catStyle.color + "'>"
               + "<span class='material-symbols-outlined'>" + catStyle.icon + "</span></div>",
           iconSize: [32, 38],
           iconAnchor: [16, 36],
         });
         var marker = L.marker([f.lat, f.lng], { icon: icon });
         marker.on("click", function () { showFicheModal(f); });
-        marker.addTo(state.fichesLayer);
         state.fichesMarkers[f.id] = marker;
+        // addTo conditionne par le fenetrage (applique plus bas)
       }
     });
     // Retirer les markers des fiches disparues (cloturees/reassignees)
@@ -2380,6 +2775,156 @@
         state.fichesLayer.removeLayer(state.fichesMarkers[id]);
         delete state.fichesMarkers[id];
       }
+    });
+    syncFicheActiveClass();
+    applyFichesBboxWindowing();
+  }
+
+  // Applique/retire la classe .active sur les markers existants quand la
+  // fiche active change entre deux polls (sans recreer les markers).
+  function syncFicheActiveClass() {
+    Object.keys(state.fichesMarkers).forEach(function (id) {
+      var m = state.fichesMarkers[id];
+      var el = m.getElement && m.getElement();
+      if (!el) return;
+      var inner = el.querySelector && el.querySelector(".fiche-marker");
+      if (!inner) return;
+      inner.classList.toggle("active", id === String(state.activeFicheId));
+    });
+  }
+
+  var _bboxTimer = null;
+  function scheduleBboxWindowing() {
+    if (_bboxTimer) return;
+    _bboxTimer = setTimeout(function () {
+      _bboxTimer = null;
+      applyFichesBboxWindowing();
+    }, 200);
+  }
+
+  // Ajoute/retire les markers du layer selon qu'ils sont dans la bbox visible.
+  // La fiche active reste toujours visible (on veut la voir meme au loin).
+  function applyFichesBboxWindowing() {
+    if (!state.fichesLayer || !state.map) return;
+    var bounds = state.map.getBounds().pad(0.15);
+    (state.fiches || []).forEach(function (f) {
+      var m = state.fichesMarkers[f.id];
+      if (!m) return;
+      var isActive = f.id === state.activeFicheId;
+      var visible = isActive || bounds.contains(m.getLatLng());
+      var inLayer = state.fichesLayer.hasLayer(m);
+      if (visible && !inLayer) state.fichesLayer.addLayer(m);
+      else if (!visible && inLayer) state.fichesLayer.removeLayer(m);
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Panneau Missions : liste des fiches assignees/creees, triees par
+  // urgence puis distance. Tap = centre la carte + ouvre le detail.
+  // ---------------------------------------------------------------------
+  var URG_ORDER = { EU: 0, UA: 1, UR: 2, IMP: 3 };
+  function sortMissions(list) {
+    var mePos = state.meMarker ? state.meMarker.getLatLng() : null;
+    return list.slice().sort(function (a, b) {
+      if (a.id === state.activeFicheId) return -1;
+      if (b.id === state.activeFicheId) return 1;
+      var ua = URG_ORDER[a.niveau_urgence]; if (ua == null) ua = 4;
+      var ub = URG_ORDER[b.niveau_urgence]; if (ub == null) ub = 4;
+      if (ua !== ub) return ua - ub;
+      if (mePos && a.lat != null && b.lat != null && a.lng != null && b.lng != null) {
+        var da = (a.lat - mePos.lat) * (a.lat - mePos.lat) + (a.lng - mePos.lng) * (a.lng - mePos.lng);
+        var db = (b.lat - mePos.lat) * (b.lat - mePos.lat) + (b.lng - mePos.lng) * (b.lng - mePos.lng);
+        return da - db;
+      }
+      return 0;
+    });
+  }
+
+  function haversineM(lat1, lon1, lat2, lon2) {
+    var R = 6371000;
+    var dLat = (lat2 - lat1) * Math.PI / 180;
+    var dLon = (lon2 - lon1) * Math.PI / 180;
+    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
+  function updateMissionsBadge() {
+    var badge = $("missions-badge");
+    if (!badge) return;
+    var n = (state.fiches && state.fiches.length) || 0;
+    if (n > 0) {
+      badge.textContent = String(n);
+      badge.hidden = false;
+    } else {
+      badge.hidden = true;
+    }
+  }
+
+  function renderMissionsList() {
+    var list = $("missions-list");
+    if (!list) return;
+    while (list.firstChild) list.removeChild(list.firstChild);
+    var items = sortMissions(state.fiches || []);
+    if (items.length === 0) {
+      var empty = document.createElement("div");
+      empty.className = "inbox-empty";
+      empty.textContent = "Aucune mission.";
+      list.appendChild(empty);
+      return;
+    }
+    var mePos = state.meMarker ? state.meMarker.getLatLng() : null;
+    items.forEach(function (f) {
+      var item = document.createElement("div");
+      item.className = "inbox-item mission-item";
+      if (f.id === state.activeFicheId) item.classList.add("active");
+
+      var badge = document.createElement("div");
+      badge.className = "urgency-badge";
+      var urg = f.niveau_urgence || "?";
+      badge.textContent = urg;
+      badge.style.background = FICHE_URGENCY_COLORS[urg] || "#6b7280";
+      item.appendChild(badge);
+
+      var body = document.createElement("div");
+      body.className = "mission-body";
+
+      var cat = document.createElement("div");
+      cat.className = "mission-cat";
+      cat.textContent = (f.category || "Intervention").replace("PCO.", "");
+      body.appendChild(cat);
+
+      var desc = document.createElement("div");
+      desc.className = "mission-desc";
+      desc.textContent = f.text || "(sans description)";
+      body.appendChild(desc);
+
+      var meta = document.createElement("div");
+      meta.className = "mission-meta";
+      if (mePos && f.lat != null && f.lng != null) {
+        var d = haversineM(mePos.lat, mePos.lng, f.lat, f.lng);
+        var dStr = d < 1000 ? Math.round(d) + " m" : (d / 1000).toFixed(1) + " km";
+        var dEl = document.createElement("span");
+        dEl.textContent = dStr;
+        meta.appendChild(dEl);
+      }
+      if (f.carroye) {
+        var g = document.createElement("span");
+        g.textContent = f.carroye;
+        meta.appendChild(g);
+      }
+      if (meta.children.length) body.appendChild(meta);
+
+      item.appendChild(body);
+      item.addEventListener("click", function () {
+        $("missions-panel").hidden = true;
+        if (f.lat != null && f.lng != null) {
+          state.map.setView([f.lat, f.lng], Math.max(state.map.getZoom(), 17), { animate: true });
+        }
+        showFicheModal(f);
+      });
+      list.appendChild(item);
     });
   }
 
@@ -2604,13 +3149,17 @@
       textarea.className = "fd-comment-input";
       textarea.rows = 2;
       textarea.placeholder = "Commentaire, observation...";
+      textarea.setAttribute("autocapitalize", "sentences");
+      textarea.setAttribute("aria-label", "Commentaire ou observation");
       form.appendChild(textarea);
 
       var fileInput = document.createElement("input");
       fileInput.type = "file";
       fileInput.accept = "image/*";
+      fileInput.capture = "environment";
       fileInput.style.display = "none";
       fileInput.id = "fd-photo-input";
+      fileInput.setAttribute("aria-hidden", "true");
 
       var preview = document.createElement("div");
       preview.className = "fd-photo-preview";
@@ -2619,8 +3168,9 @@
 
       var photoBtn = document.createElement("button");
       photoBtn.className = "fd-photo-btn";
-      photoBtn.innerHTML = "<span class='material-symbols-outlined'>photo_camera</span>";
+      photoBtn.innerHTML = "<span class='material-symbols-outlined' aria-hidden='true'>photo_camera</span>";
       photoBtn.title = "Photo ou image";
+      photoBtn.setAttribute("aria-label", "Prendre ou ajouter une photo");
       photoBtn.onclick = function () { fileInput.click(); };
 
       fileInput.onchange = function () {
@@ -2792,16 +3342,21 @@
     }
     sendBtn.disabled = true;
 
-    var fd = new FormData();
-    fd.append("comment", comment);
-    if (hasPhoto) {
-      fd.append("photo", fileInput.files[0]);
-    }
+    var photoPromise = hasPhoto
+      ? compressImageIfNeeded(fileInput.files[0])
+      : Promise.resolve(null);
 
-    fetch("/field/my-fiches/" + encodeURIComponent(ficheId) + "/comment", {
-      method: "POST",
-      body: fd,
-    })
+    photoPromise.then(function (photo) {
+      var fd = new FormData();
+      fd.append("comment", comment);
+      if (photo) {
+        fd.append("photo", photo, photo.name || "photo.jpg");
+      }
+
+      fetch("/field/my-fiches/" + encodeURIComponent(ficheId) + "/comment", {
+        method: "POST",
+        body: fd,
+      })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         sendBtn.disabled = false;
@@ -2823,6 +3378,7 @@
         sendBtn.disabled = false;
         toast("Erreur reseau", "err");
       });
+    });
   }
 
   function openLightbox(src) {
@@ -2889,6 +3445,8 @@
     showSosConfirm(function (confirmed) {
       if (!confirmed) return;
       state.sosInFlight = true;
+      refreshGpsProfile();      // force GPS haute precision pour la duree du SOS
+      forceOneShotPosition();   // fix immediat au cas ou le watch est en basse precision
       var lat = null, lng = null;
       if (state.meMarker) {
         var ll = state.meMarker.getLatLng();
@@ -2907,6 +3465,7 @@
         .then(function (r) { return r.json(); })
         .then(function (data) {
           state.sosInFlight = false;
+          refreshGpsProfile();
           if (data && data.ok) {
             toast("SOS envoye au cockpit et a toutes les patrouilles", "warn");
             // Vibration confirmation
@@ -2917,6 +3476,7 @@
         })
         .catch(function () {
           state.sosInFlight = false;
+          refreshGpsProfile();
           toast("Erreur reseau (SOS)", "err");
         });
     });
@@ -2998,6 +3558,7 @@
       gain.gain.linearRampToValueAtTime(0, t + 1.5);
       osc.connect(gain);
       gain.connect(ctx.destination);
+      osc.onended = function () { try { ctx.close(); } catch (e) {} };
       osc.start(t);
       osc.stop(t + 1.5);
     } catch (e) { /* ignore audio errors */ }
@@ -3021,6 +3582,7 @@
       gain.gain.linearRampToValueAtTime(0, t + 1.3);
       osc.connect(gain);
       gain.connect(ctx.destination);
+      osc.onended = function () { try { ctx.close(); } catch (e) {} };
       osc.start(t);
       osc.stop(t + 1.3);
     } catch (e) { /* ignore audio errors */ }
@@ -3031,6 +3593,10 @@
     var sourceName = payload.source_device_name || "?";
     var overlay = document.createElement("div");
     overlay.className = "sos-alert-overlay";
+    overlay.setAttribute("role", "alertdialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-live", "assertive");
+    overlay.setAttribute("aria-label", "Alerte SOS recue");
     var box = document.createElement("div");
     box.className = "sos-alert-box";
     var icon = document.createElement("span");
@@ -3060,7 +3626,7 @@
     document.body.appendChild(overlay);
     btnOk.addEventListener("click", function () {
       try { document.body.removeChild(overlay); } catch (e) {}
-      fetch("/field/ack/" + encodeURIComponent(m.id), { method: "POST" }).catch(function () {});
+      queuedJsonPost("/field/ack/" + encodeURIComponent(m.id), {}, "ack SOS");
     });
   }
 
@@ -3069,7 +3635,27 @@
   // ---------------------------------------------------------------------
   function startInboxPoll() {
     pollInbox();
-    state.inboxTimer = setInterval(pollInbox, POLL_INBOX_MS);
+    scheduleInboxPoll();
+  }
+  function scheduleInboxPoll() {
+    if (state.inboxTimer) clearTimeout(state.inboxTimer);
+    state.inboxTimer = setTimeout(function () {
+      pollInbox();
+      scheduleInboxPoll();
+    }, computePollInterval("inbox"));
+  }
+
+  // Cadencement adaptatif : rapide quand l'agent est actif (interaction < 2 min)
+  // et en statut actif ; ralenti sinon pour economiser la batterie et la data.
+  function computePollInterval(kind) {
+    var status = state.patrolStatus || "patrouille";
+    if (status === "pause" || status === "fin_intervention") return POLL_PAUSE_MS;
+    var lastAct = state.lastInteractionAt || 0;
+    var idle = Date.now() - lastAct > IDLE_THRESHOLD_MS;
+    if (idle) {
+      return kind === "inbox" ? POLL_INBOX_IDLE_MS : POLL_FICHES_IDLE_MS;
+    }
+    return kind === "inbox" ? POLL_INBOX_MS : POLL_FICHES_MS;
   }
 
   function pollInbox() {
@@ -3082,6 +3668,15 @@
         if (!data || !data.ok) return;
         state.inbox = data.messages || [];
         renderInbox();
+        // Au tout premier poll, on marque tous les messages deja presents
+        // comme "vus" sans rejouer leur UI (overlays SOS, modale message,
+        // alarme sonore) : ils ne sont nouveaux que cote serveur, pas cote
+        // agent qui vient de rouvrir son app.
+        if (!state.inboxFirstPolled) {
+          state.inbox.forEach(function (m) { state.seenIds.add(m.id); });
+          state.inboxFirstPolled = true;
+          return;
+        }
         detectNew();
       })
       .catch(function () { /* silent */ });
@@ -3122,6 +3717,8 @@
     }
   }
 
+  var INBOX_PAGE_SIZE = 30;
+
   function renderInbox() {
     var list = $("inbox-list");
     var badge = $("inbox-badge");
@@ -3135,8 +3732,12 @@
         badge.hidden = true;
       }
     }
+    while (list.firstChild) list.removeChild(list.firstChild);
     if (state.inbox.length === 0) {
-      list.innerHTML = "<div class='inbox-empty'>Aucun message.</div>";
+      var empty = document.createElement("div");
+      empty.className = "inbox-empty";
+      empty.textContent = "Aucun message.";
+      list.appendChild(empty);
       return;
     }
     // Filtrer : n'afficher que les messages racines (pas les reponses dans un thread)
@@ -3148,33 +3749,48 @@
     var sorted = roots.slice().sort(function (a, b) {
       return (b.created_at || "").localeCompare(a.created_at || "");
     });
-    list.innerHTML = "";
-    sorted.forEach(function (m) {
-      var div = document.createElement("div");
-      div.className = "inbox-item";
-      if (!m.ack_at) div.classList.add("unread");
-      if (m.priority === "high") div.classList.add("priority-high");
-      var t = document.createElement("div");
-      t.className = "item-title";
-      t.textContent = m.title || "(sans titre)";
-      var b = document.createElement("div");
-      b.className = "item-body";
-      b.textContent = (m.body || "").slice(0, 120);
-      var ts = document.createElement("div");
-      ts.className = "item-time";
-      ts.textContent = m.created_at ? new Date(m.created_at).toLocaleString() : "";
-      div.appendChild(t);
-      div.appendChild(b);
-      div.appendChild(ts);
-      if (m.reply_count > 0) {
-        var rc = document.createElement("span");
-        rc.className = "item-replies";
-        rc.textContent = m.reply_count + " reponse" + (m.reply_count > 1 ? "s" : "");
-        div.appendChild(rc);
-      }
-      div.addEventListener("click", function () { showMessageModal(m); });
-      list.appendChild(div);
-    });
+    // Virtualisation simple : n'afficher que N items, bouton voir plus
+    var shown = Math.min(state.inboxVisibleCount || INBOX_PAGE_SIZE, sorted.length);
+    for (var i = 0; i < shown; i++) {
+      list.appendChild(renderInboxItem(sorted[i]));
+    }
+    if (sorted.length > shown) {
+      var more = document.createElement("button");
+      more.className = "inbox-show-more";
+      more.textContent = "Afficher " + Math.min(INBOX_PAGE_SIZE, sorted.length - shown) + " message(s) de plus";
+      more.addEventListener("click", function () {
+        state.inboxVisibleCount = shown + INBOX_PAGE_SIZE;
+        renderInbox();
+      });
+      list.appendChild(more);
+    }
+  }
+
+  function renderInboxItem(m) {
+    var div = document.createElement("div");
+    div.className = "inbox-item";
+    if (!m.ack_at) div.classList.add("unread");
+    if (m.priority === "high") div.classList.add("priority-high");
+    var t = document.createElement("div");
+    t.className = "item-title";
+    t.textContent = m.title || "(sans titre)";
+    var b = document.createElement("div");
+    b.className = "item-body";
+    b.textContent = (m.body || "").slice(0, 120);
+    var ts = document.createElement("div");
+    ts.className = "item-time";
+    ts.textContent = m.created_at ? new Date(m.created_at).toLocaleString() : "";
+    div.appendChild(t);
+    div.appendChild(b);
+    div.appendChild(ts);
+    if (m.reply_count > 0) {
+      var rc = document.createElement("span");
+      rc.className = "item-replies";
+      rc.textContent = m.reply_count + " reponse" + (m.reply_count > 1 ? "s" : "");
+      div.appendChild(rc);
+    }
+    div.addEventListener("click", function () { showMessageModal(m); });
+    return div;
   }
 
   function showMessageModal(m) {
@@ -3230,9 +3846,8 @@
     modal.hidden = false;
     // Marquer comme lu des l'ouverture du modal
     if (!m.ack_at) {
-      fetch("/field/ack/" + encodeURIComponent(m.id), { method: "POST" })
-        .then(function () { pollInbox(); })
-        .catch(function () {});
+      queuedJsonPost("/field/ack/" + encodeURIComponent(m.id), {}, "ack message")
+        .then(function (data) { if (data && !data.queued) pollInbox(); });
     }
     ack.onclick = function () {
       modal.hidden = true;
@@ -3309,14 +3924,20 @@
     input.type = "text";
     input.className = "msg-reply-input";
     input.placeholder = "Repondre...";
+    input.setAttribute("inputmode", "text");
+    input.setAttribute("autocapitalize", "sentences");
+    input.setAttribute("aria-label", "Reponse au message");
 
     var photoInput = document.createElement("input");
     photoInput.type = "file";
     photoInput.accept = "image/*";
+    photoInput.capture = "environment";
     photoInput.style.display = "none";
+    photoInput.setAttribute("aria-hidden", "true");
 
     var photoBtn = document.createElement("button");
     photoBtn.className = "msg-reply-photo-btn";
+    photoBtn.setAttribute("aria-label", "Ajouter une photo");
     var camIcon = document.createElement("span");
     camIcon.className = "material-symbols-outlined";
     camIcon.textContent = "photo_camera";
@@ -3366,31 +3987,37 @@
       sendBtn.disabled = true;
 
       var threadMsgId = m.thread_id || m.id;
-      var formData = new FormData();
-      formData.append("body", text);
-      if (hasPhoto) formData.append("photo", photoInput.files[0]);
+      var photoPromise = hasPhoto
+        ? compressImageIfNeeded(photoInput.files[0])
+        : Promise.resolve(null);
 
-      fetch("/field/reply/" + encodeURIComponent(threadMsgId), {
-        method: "POST",
-        body: formData,
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (resp) {
-          sendBtn.disabled = false;
-          if (resp && resp.ok) {
-            input.value = "";
-            photoInput.value = "";
-            preview.hidden = true;
-            toast("Reponse envoyee", "ok");
-            loadThread(threadMsgId, threadWrap, m.id);
-          } else {
-            toast(resp.error || "Erreur", "err");
-          }
+      photoPromise.then(function (photo) {
+        var formData = new FormData();
+        formData.append("body", text);
+        if (photo) formData.append("photo", photo, photo.name || "photo.jpg");
+
+        fetch("/field/reply/" + encodeURIComponent(threadMsgId), {
+          method: "POST",
+          body: formData,
         })
-        .catch(function () {
-          sendBtn.disabled = false;
-          toast("Erreur reseau", "err");
-        });
+          .then(function (r) { return r.json(); })
+          .then(function (resp) {
+            sendBtn.disabled = false;
+            if (resp && resp.ok) {
+              input.value = "";
+              photoInput.value = "";
+              preview.hidden = true;
+              toast("Reponse envoyee", "ok");
+              loadThread(threadMsgId, threadWrap, m.id);
+            } else {
+              toast(resp.error || "Erreur", "err");
+            }
+          })
+          .catch(function () {
+            sendBtn.disabled = false;
+            toast("Erreur reseau", "err");
+          });
+      });
     });
 
     input.addEventListener("keydown", function (e) {
@@ -3417,9 +4044,20 @@
     if (reloadBtn) reloadBtn.addEventListener("click", function () { location.reload(); });
     $("btn-inbox").addEventListener("click", function () {
       var p = $("inbox-panel");
+      $("missions-panel").hidden = true;
       p.hidden = !p.hidden;
     });
-    $("inbox-close").addEventListener("click", function () { $("inbox-panel").hidden = true; });
+    $("inbox-close").addEventListener("click", function () {
+      $("inbox-panel").hidden = true;
+      state.inboxVisibleCount = INBOX_PAGE_SIZE;
+    });
+    $("btn-missions").addEventListener("click", function () {
+      var p = $("missions-panel");
+      $("inbox-panel").hidden = true;
+      p.hidden = !p.hidden;
+      if (!p.hidden) renderMissionsList();
+    });
+    $("missions-close").addEventListener("click", function () { $("missions-panel").hidden = true; });
     $("btn-sos").addEventListener("click", triggerSos);
 
     // Bandeau engagement : fly-to button
@@ -3851,6 +4489,9 @@
   // Boot
   // ---------------------------------------------------------------------
   function boot() {
+    // L'ouverture de l'app compte comme une interaction : evite que les
+    // pollers demarrent en rythme "idle" (2 min) avant le premier tap.
+    state.lastInteractionAt = Date.now();
     initMap();
     wireUi();
     startClock();
@@ -3870,15 +4511,36 @@
     // PWA : service worker, wake lock, buffer de positions
     registerServiceWorker();
     acquireWakeLock();
+    initWakeLockActivityTracking();
     initPositionBuffer();
+    initOfflineQueue();
 
     // Empecher le zoom double-tap / pinch natif
     document.addEventListener("gesturestart", function (e) { e.preventDefault(); });
 
-    // Re-acquerir le wake lock quand l'ecran revient
-    document.addEventListener("visibilitychange", function () {
-      if (document.visibilityState === "visible") acquireWakeLock();
-    });
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+  }
+
+  // Suspension / reprise des consommateurs de batterie selon visibilite.
+  // Hidden : stopper clock, polls, watch GPS (sauf si statut critique) et
+  // liberer le wake lock. Visible : tout reprendre + rattrapage immediat.
+  function handleVisibilityChange() {
+    if (document.visibilityState === "hidden") {
+      document.body.setAttribute("data-app-hidden", "true");
+      if (state.clockTimer) { clearInterval(state.clockTimer); state.clockTimer = null; }
+      if (state.inboxTimer) { clearTimeout(state.inboxTimer); state.inboxTimer = null; }
+      if (state.fichesTimer) { clearTimeout(state.fichesTimer); state.fichesTimer = null; }
+      refreshGpsProfile();      // peut passer en "paused" si pas critique
+      releaseWakeLock();
+      return;
+    }
+    // Retour visible
+    document.body.removeAttribute("data-app-hidden");
+    acquireWakeLock();
+    refreshGpsProfile();
+    if (!state.clockTimer) startClock();
+    if (!state.inboxTimer) startInboxPoll();        // declenche un poll immediat
+    if (!state.fichesTimer) startFichesPoll();      // declenche un poll immediat
   }
 
   // ---------------------------------------------------------------------
@@ -3948,16 +4610,63 @@
     return outputArray;
   }
 
+  // ---------------------------------------------------------------------
+  // Wake lock conditionnel :
+  // - relache sur statuts pause / fin_intervention
+  // - relache apres IDLE_RELEASE_MS sans interaction utilisateur
+  // - reacquis au moindre tap ou au retour en statut actif
+  // ---------------------------------------------------------------------
   var _wakeLock = null;
+  var _wakeLockIdleTimer = null;
+  var WAKE_LOCK_IDLE_MS = 10 * 60 * 1000; // 10 minutes
+
+  function wakeLockAllowedByStatus() {
+    var s = state.patrolStatus;
+    return s !== "pause" && s !== "fin_intervention";
+  }
+
   function acquireWakeLock() {
     if (!("wakeLock" in navigator)) return;
-    if (_wakeLock) return;
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    if (!wakeLockAllowedByStatus()) return;
+    if (_wakeLock) { scheduleWakeLockRelease(); return; }
     try {
       navigator.wakeLock.request("screen").then(function (lock) {
         _wakeLock = lock;
         lock.addEventListener("release", function () { _wakeLock = null; });
+        scheduleWakeLockRelease();
       }).catch(function () { _wakeLock = null; });
     } catch (e) { /* ignore */ }
+  }
+
+  function releaseWakeLock() {
+    if (_wakeLockIdleTimer) { clearTimeout(_wakeLockIdleTimer); _wakeLockIdleTimer = null; }
+    if (!_wakeLock) return;
+    try { _wakeLock.release(); } catch (e) {}
+    _wakeLock = null;
+  }
+
+  function scheduleWakeLockRelease() {
+    if (_wakeLockIdleTimer) clearTimeout(_wakeLockIdleTimer);
+    _wakeLockIdleTimer = setTimeout(releaseWakeLock, WAKE_LOCK_IDLE_MS);
+  }
+
+  function bumpActivity() {
+    // Interaction utilisateur : reset le timer et reacquiert si relache
+    state.lastInteractionAt = Date.now();
+    if (_wakeLock) { scheduleWakeLockRelease(); }
+    else { acquireWakeLock(); }
+  }
+
+  function initWakeLockActivityTracking() {
+    ["pointerdown", "touchstart", "keydown"].forEach(function (ev) {
+      document.addEventListener(ev, bumpActivity, { passive: true });
+    });
+  }
+
+  function syncWakeLockWithStatus() {
+    if (wakeLockAllowedByStatus()) acquireWakeLock();
+    else releaseWakeLock();
   }
 
   // ---------------------------------------------------------------------
@@ -4024,6 +4733,22 @@
     window.addEventListener("online", flushPositionBuffer);
     // Flush periodique au cas ou
     setInterval(flushPositionBuffer, 30000);
+  }
+
+  function initOfflineQueue() {
+    OfflineQueue.start();
+    OfflineQueue.addListener(updateOfflineBadge);
+    var pill = $("offline-queue-status");
+    if (pill) {
+      pill.addEventListener("click", function () {
+        if (!navigator.onLine) {
+          toast("Hors ligne : les actions seront envoyees au retour du reseau", "warn");
+          return;
+        }
+        toast("Synchronisation en cours...", "ok");
+        OfflineQueue.flush();
+      });
+    }
   }
 
   if (document.readyState === "loading") {

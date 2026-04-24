@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0f172a">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -11,6 +11,8 @@
   <title>COCKPIT Field</title>
 
   <link rel="manifest" href="/field/manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Symbols+Outlined">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/field.css') }}">
   <link rel="icon" href="/static/img/field-icon.svg" type="image/svg+xml">
@@ -27,19 +29,23 @@
       </div>
     </div>
     <div class="topbar-right">
-      <div class="status-pill" id="gps-status" title="GPS">
-        <span class="material-symbols-outlined">location_searching</span>
+      <div class="status-pill" id="gps-status" role="status" aria-live="polite" aria-label="Etat GPS" title="GPS">
+        <span class="material-symbols-outlined" aria-hidden="true">location_searching</span>
         <span class="status-label">GPS</span>
       </div>
-      <div class="status-pill" id="net-status" title="Reseau">
-        <span class="material-symbols-outlined">signal_wifi_4_bar</span>
+      <div class="status-pill" id="net-status" role="status" aria-live="polite" aria-label="Etat reseau" title="Reseau">
+        <span class="material-symbols-outlined" aria-hidden="true">signal_wifi_4_bar</span>
       </div>
-      <div class="status-pill" id="battery-status" title="Batterie">
-        <span class="material-symbols-outlined">battery_full</span>
+      <div class="status-pill" id="battery-status" role="status" aria-live="polite" aria-label="Niveau batterie" title="Batterie">
+        <span class="material-symbols-outlined" aria-hidden="true">battery_full</span>
         <span class="status-label" id="battery-pct">--</span>
       </div>
-      <div class="clock" id="field-clock">--:--</div>
-      <button class="topbar-reload" id="btn-reload" title="Recharger"><span class="material-symbols-outlined">refresh</span></button>
+      <button class="status-pill offline-queue-pill" id="offline-queue-status" aria-label="Actions en attente" title="Actions en attente" hidden>
+        <span class="material-symbols-outlined" aria-hidden="true">sync_problem</span>
+        <span class="status-label" id="offline-queue-count">0</span>
+      </button>
+      <div class="clock" id="field-clock" aria-hidden="true">--:--</div>
+      <button class="topbar-reload" id="btn-reload" aria-label="Recharger l'application" title="Recharger"><span class="material-symbols-outlined" aria-hidden="true">refresh</span></button>
     </div>
   </header>
 
@@ -49,39 +55,40 @@
 
     <!-- Boutons haut droite -->
     <div class="map-fab-group-tr">
-      <button class="map-fab" id="btn-poi-search" title="Rechercher un POI">
-        <span class="material-symbols-outlined">search</span>
+      <button class="map-fab" id="btn-poi-search" aria-label="Rechercher un POI" title="Rechercher un POI">
+        <span class="material-symbols-outlined" aria-hidden="true">search</span>
       </button>
-      <button class="map-fab" id="btn-fullscreen" title="Plein ecran">
-        <span class="material-symbols-outlined">fullscreen</span>
+      <button class="map-fab" id="btn-fullscreen" aria-label="Plein ecran" title="Plein ecran">
+        <span class="material-symbols-outlined" aria-hidden="true">fullscreen</span>
       </button>
     </div>
 
     <!-- Panneau recherche POI -->
     <div class="poi-search-panel" id="poi-search-panel" hidden>
       <div class="poi-search-header">
-        <input type="text" id="poi-search-input" class="poi-search-input"
-          placeholder="Rechercher un lieu..." autocomplete="off">
-        <button class="icon-btn" id="poi-search-close">
-          <span class="material-symbols-outlined">close</span>
+        <input type="search" id="poi-search-input" class="poi-search-input"
+          placeholder="Rechercher un lieu..." autocomplete="off"
+          inputmode="search" aria-label="Rechercher un lieu">
+        <button class="icon-btn" id="poi-search-close" aria-label="Fermer la recherche">
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
         </button>
       </div>
-      <div class="poi-search-results" id="poi-search-results"></div>
+      <div class="poi-search-results" id="poi-search-results" role="listbox"></div>
     </div>
 
     <!-- Outils de mesure (bas droite) -->
-    <div class="map-measure-tools" id="measure-tools">
-      <button class="tile-btn" id="measure-line" title="Mesurer une distance" data-mode="line">
-        <span class="material-symbols-outlined">straighten</span>
+    <div class="map-measure-tools" id="measure-tools" role="toolbar" aria-label="Outils de mesure">
+      <button class="tile-btn" id="measure-line" aria-label="Mesurer une distance" title="Mesurer une distance" data-mode="line">
+        <span class="material-symbols-outlined" aria-hidden="true">straighten</span>
       </button>
-      <button class="tile-btn" id="measure-area" title="Mesurer une aire" data-mode="area">
-        <span class="material-symbols-outlined">square_foot</span>
+      <button class="tile-btn" id="measure-area" aria-label="Mesurer une aire" title="Mesurer une aire" data-mode="area">
+        <span class="material-symbols-outlined" aria-hidden="true">square_foot</span>
       </button>
-      <button class="tile-btn" id="measure-circle" title="Rayon / Diametre" data-mode="circle">
-        <span class="material-symbols-outlined">radio_button_unchecked</span>
+      <button class="tile-btn" id="measure-circle" aria-label="Mesurer un rayon" title="Rayon / Diametre" data-mode="circle">
+        <span class="material-symbols-outlined" aria-hidden="true">radio_button_unchecked</span>
       </button>
-      <button class="tile-btn" id="measure-clear" title="Effacer" data-mode="clear">
-        <span class="material-symbols-outlined">delete_outline</span>
+      <button class="tile-btn" id="measure-clear" aria-label="Effacer les mesures" title="Effacer" data-mode="clear">
+        <span class="material-symbols-outlined" aria-hidden="true">delete_outline</span>
       </button>
     </div>
 
@@ -93,11 +100,11 @@
     </div>
 
     <!-- Panneau latéral (inbox) -->
-    <aside class="inbox-panel" id="inbox-panel" hidden>
+    <aside class="inbox-panel" id="inbox-panel" aria-label="Messages" hidden>
       <div class="inbox-header">
-        <h2>Messages</h2>
-        <button class="icon-btn" id="inbox-close" title="Fermer">
-          <span class="material-symbols-outlined">close</span>
+        <h2 id="inbox-panel-title">Messages</h2>
+        <button class="icon-btn" id="inbox-close" aria-label="Fermer les messages" title="Fermer">
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
         </button>
       </div>
       <div class="inbox-list" id="inbox-list">
@@ -105,12 +112,25 @@
       </div>
     </aside>
 
+    <!-- Panneau latéral (missions) -->
+    <aside class="inbox-panel missions-panel" id="missions-panel" aria-label="Missions en cours" hidden>
+      <div class="inbox-header">
+        <h2 id="missions-panel-title">Missions en cours</h2>
+        <button class="icon-btn" id="missions-close" aria-label="Fermer les missions" title="Fermer">
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
+        </button>
+      </div>
+      <div class="inbox-list" id="missions-list">
+        <div class="inbox-empty">Aucune mission.</div>
+      </div>
+    </aside>
+
     <!-- Panneau Calques -->
-    <aside class="layers-panel" id="layers-panel" hidden>
+    <aside class="layers-panel" id="layers-panel" aria-label="Calques" hidden>
       <div class="layers-header">
-        <h2>Calques</h2>
-        <button class="icon-btn" id="layers-close" title="Fermer">
-          <span class="material-symbols-outlined">close</span>
+        <h2 id="layers-panel-title">Calques</h2>
+        <button class="icon-btn" id="layers-close" aria-label="Fermer les calques" title="Fermer">
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
         </button>
       </div>
       <div class="layers-list" id="layers-list">
@@ -137,80 +157,85 @@
   </main>
 
   <!-- BANDEAU ENGAGEMENT INTERVENTION -->
-  <div class="field-engage-banner" id="engage-banner" hidden>
-    <div class="engage-banner-left" id="engage-banner-left">
-      <span class="material-symbols-outlined engage-banner-icon" id="engage-banner-icon">warning</span>
+  <div class="field-engage-banner" id="engage-banner" role="alert" aria-live="assertive" aria-atomic="true" hidden>
+    <div class="engage-banner-left" id="engage-banner-left" role="button" tabindex="0" aria-label="Voir la fiche d'intervention">
+      <span class="material-symbols-outlined engage-banner-icon" id="engage-banner-icon" aria-hidden="true">warning</span>
       <div class="engage-banner-info">
         <span class="engage-banner-cat" id="engage-banner-cat">-</span>
         <span class="engage-banner-desc" id="engage-banner-desc">-</span>
       </div>
     </div>
-    <button class="engage-banner-goto" id="engage-banner-goto" title="Voir sur la carte">
-      <span class="material-symbols-outlined">near_me</span>
+    <button class="engage-banner-goto" id="engage-banner-goto" aria-label="Voir sur la carte" title="Voir sur la carte">
+      <span class="material-symbols-outlined" aria-hidden="true">near_me</span>
     </button>
   </div>
 
   <!-- BARRE DE STATUT PATROUILLE -->
   <div class="field-status-bar" id="status-bar">
-    <button class="status-current" id="status-btn" title="Changer le statut">
-      <span class="status-dot" id="status-dot"></span>
+    <button class="status-current" id="status-btn" aria-label="Changer le statut de patrouille" aria-haspopup="dialog" title="Changer le statut">
+      <span class="status-dot" id="status-dot" aria-hidden="true"></span>
       <span class="status-text" id="status-text">Patrouille</span>
-      <span class="material-symbols-outlined status-chevron">expand_more</span>
+      <span class="material-symbols-outlined status-chevron" aria-hidden="true">expand_more</span>
     </button>
   </div>
 
   <!-- BARRE D'ACTIONS -->
-  <nav class="field-actions">
-    <button class="action-btn" id="btn-recenter" title="Me recentrer">
-      <span class="material-symbols-outlined">my_location</span>
+  <nav class="field-actions" aria-label="Actions principales">
+    <button class="action-btn" id="btn-recenter" aria-label="Me recentrer sur la carte" title="Me recentrer">
+      <span class="material-symbols-outlined" aria-hidden="true">my_location</span>
       <span class="label">Moi</span>
     </button>
-    <button class="action-btn" id="btn-layers" title="Fond de carte">
-      <span class="material-symbols-outlined">map</span>
+    <button class="action-btn" id="btn-layers" aria-label="Changer le fond de carte" title="Fond de carte">
+      <span class="material-symbols-outlined" aria-hidden="true">map</span>
       <span class="label">Fond</span>
     </button>
-    <button class="action-btn" id="btn-grid" title="Calques">
-      <span class="material-symbols-outlined">layers</span>
+    <button class="action-btn" id="btn-grid" aria-label="Calques de la carte" aria-haspopup="dialog" title="Calques">
+      <span class="material-symbols-outlined" aria-hidden="true">layers</span>
       <span class="label">Calques</span>
     </button>
-    <button class="action-btn" id="btn-inbox" title="Messages">
-      <span class="material-symbols-outlined">inbox</span>
-      <span class="badge" id="inbox-badge" hidden>0</span>
+    <button class="action-btn" id="btn-missions" aria-label="Missions en cours" aria-haspopup="dialog" title="Missions">
+      <span class="material-symbols-outlined" aria-hidden="true">assignment</span>
+      <span class="badge" id="missions-badge" aria-label="missions en attente" hidden>0</span>
+      <span class="label">Missions</span>
+    </button>
+    <button class="action-btn" id="btn-inbox" aria-label="Messages" aria-haspopup="dialog" title="Messages">
+      <span class="material-symbols-outlined" aria-hidden="true">inbox</span>
+      <span class="badge" id="inbox-badge" aria-label="messages non lus" hidden>0</span>
       <span class="label">Messages</span>
     </button>
-    <button class="action-btn action-sos" id="btn-sos" title="SOS">
-      <span class="material-symbols-outlined">emergency</span>
+    <button class="action-btn action-sos" id="btn-sos" aria-label="Declencher un SOS" title="SOS">
+      <span class="material-symbols-outlined" aria-hidden="true">emergency</span>
       <span class="label">SOS</span>
     </button>
   </nav>
 
   <!-- Panneau choix de statut -->
-  <div class="field-modal" id="status-modal" hidden>
+  <div class="field-modal" id="status-modal" role="dialog" aria-modal="true" aria-labelledby="status-modal-title" hidden>
     <div class="field-modal-box status-modal-box">
       <div class="field-modal-header">
-        <h2>Statut de la patrouille</h2>
-        <button class="icon-btn" id="status-modal-close" title="Fermer">
-          <span class="material-symbols-outlined">close</span>
+        <h2 id="status-modal-title">Statut de la patrouille</h2>
+        <button class="icon-btn" id="status-modal-close" aria-label="Fermer" title="Fermer">
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
         </button>
       </div>
-      <div class="status-options" id="status-options">
-        <button class="status-option" data-status="patrouille">
-          <span class="status-dot s-patrouille"></span>
+      <div class="status-options" id="status-options" role="radiogroup" aria-labelledby="status-modal-title">
+        <button class="status-option" data-status="patrouille" role="radio" aria-checked="false">
+          <span class="status-dot s-patrouille" aria-hidden="true"></span>
           <span class="status-opt-label">Disponible</span>
           <span class="status-opt-desc">En ronde, disponible</span>
         </button>
-        <button class="status-option" data-status="intervention">
-          <span class="status-dot s-intervention"></span>
+        <button class="status-option" data-status="intervention" role="radio" aria-checked="false">
+          <span class="status-dot s-intervention" aria-hidden="true"></span>
           <span class="status-opt-label">Intervention</span>
           <span class="status-opt-desc">Engagement sur le terrain</span>
         </button>
-        <button class="status-option" data-status="sur_place">
-          <span class="status-dot s-sur_place"></span>
+        <button class="status-option" data-status="sur_place" role="radio" aria-checked="false">
+          <span class="status-dot s-sur_place" aria-hidden="true"></span>
           <span class="status-opt-label">ASL - Arrivee sur les lieux</span>
           <span class="status-opt-desc">Sur place, en attente</span>
         </button>
-        <button class="status-option" data-status="pause">
-          <span class="status-dot s-pause"></span>
+        <button class="status-option" data-status="pause" role="radio" aria-checked="false">
+          <span class="status-dot s-pause" aria-hidden="true"></span>
           <span class="status-opt-label">Pause</span>
           <span class="status-opt-desc">Indisponible temporairement</span>
         </button>
@@ -219,42 +244,43 @@
   </div>
 
   <!-- Modal creation de fiche terrain -->
-  <div class="field-modal" id="fiche-create-modal" hidden>
+  <div class="field-modal" id="fiche-create-modal" role="dialog" aria-modal="true" aria-labelledby="fiche-create-title" hidden>
     <div class="field-modal-box fiche-create-box">
       <div class="field-modal-header">
-        <h2>Nouvelle intervention</h2>
-        <button class="icon-btn" id="fiche-create-close" title="Fermer">
-          <span class="material-symbols-outlined">close</span>
+        <h2 id="fiche-create-title">Nouvelle intervention</h2>
+        <button class="icon-btn" id="fiche-create-close" aria-label="Fermer" title="Fermer">
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
         </button>
       </div>
       <div class="fiche-create-body">
-        <label class="fiche-create-label">Categorie</label>
-        <div class="fiche-create-cats" id="fiche-create-cats"></div>
-        <label class="fiche-create-label">Niveau d'urgence</label>
-        <div class="fiche-create-urgency" id="fiche-create-urgency">
-          <button class="urgency-btn" data-val="IMP">
-            <span class="urgency-btn-code" style="background:#6b7280">IMP</span>
+        <label class="fiche-create-label" id="fiche-create-cat-label">Categorie</label>
+        <div class="fiche-create-cats" id="fiche-create-cats" role="radiogroup" aria-labelledby="fiche-create-cat-label"></div>
+        <label class="fiche-create-label" id="fiche-create-urg-label">Niveau d'urgence</label>
+        <div class="fiche-create-urgency" id="fiche-create-urgency" role="radiogroup" aria-labelledby="fiche-create-urg-label">
+          <button class="urgency-btn" data-val="IMP" role="radio" aria-checked="false" aria-label="IMP - Implique, pas de blessure ni temoin">
+            <span class="urgency-btn-code" style="background:#6b7280" aria-hidden="true">IMP</span>
             <span class="urgency-btn-desc">Implique, pas de blessure / temoin</span>
           </button>
-          <button class="urgency-btn selected" data-val="UR">
-            <span class="urgency-btn-code" style="background:#eab308">UR</span>
+          <button class="urgency-btn selected" data-val="UR" role="radio" aria-checked="true" aria-label="UR - Urgence relative, situation stable">
+            <span class="urgency-btn-code" style="background:#eab308" aria-hidden="true">UR</span>
             <span class="urgency-btn-desc">Urgence relative, situation stable</span>
           </button>
-          <button class="urgency-btn" data-val="UA">
-            <span class="urgency-btn-code" style="background:#f97316">UA</span>
+          <button class="urgency-btn" data-val="UA" role="radio" aria-checked="false" aria-label="UA - Urgence absolue, engagement prioritaire">
+            <span class="urgency-btn-code" style="background:#f97316" aria-hidden="true">UA</span>
             <span class="urgency-btn-desc">Urgence absolue, engagement prioritaire</span>
           </button>
-          <button class="urgency-btn" data-val="EU">
-            <span class="urgency-btn-code" style="background:#dc2626">EU</span>
+          <button class="urgency-btn" data-val="EU" role="radio" aria-checked="false" aria-label="EU - Detresse vitale, toutes ressources">
+            <span class="urgency-btn-code" style="background:#dc2626" aria-hidden="true">EU</span>
             <span class="urgency-btn-desc">Detresse vitale, toutes ressources</span>
           </button>
         </div>
-        <label class="fiche-create-label">Description</label>
+        <label class="fiche-create-label" for="fiche-create-text">Description</label>
         <textarea class="fiche-create-text" id="fiche-create-text" rows="3"
-          placeholder="Description courte de l'intervention..."></textarea>
-        <div class="fiche-create-msg" id="fiche-create-msg"></div>
+          placeholder="Description courte de l'intervention..."
+          autocapitalize="sentences"></textarea>
+        <div class="fiche-create-msg" id="fiche-create-msg" role="status" aria-live="polite"></div>
         <button class="btn-primary fiche-create-submit" id="fiche-create-submit">
-          <span class="material-symbols-outlined">add_circle</span>
+          <span class="material-symbols-outlined" aria-hidden="true">add_circle</span>
           Creer la fiche
         </button>
       </div>
@@ -262,18 +288,18 @@
   </div>
 
   <!-- Modal message (inbox) -->
-  <div class="field-modal" id="msg-modal" hidden>
+  <div class="field-modal" id="msg-modal" role="dialog" aria-modal="true" aria-labelledby="msg-modal-title" hidden>
     <div class="field-modal-box">
       <div class="field-modal-header">
         <h2 id="msg-modal-title">Message</h2>
-        <button class="icon-btn" id="msg-modal-close" title="Fermer">
-          <span class="material-symbols-outlined">close</span>
+        <button class="icon-btn" id="msg-modal-close" aria-label="Fermer" title="Fermer">
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
         </button>
       </div>
       <div class="field-modal-body" id="msg-modal-body">-</div>
       <div class="field-modal-actions">
         <button class="btn-primary" id="msg-modal-route" hidden>
-          <span class="material-symbols-outlined" style="vertical-align:middle;">navigation</span>
+          <span class="material-symbols-outlined" style="vertical-align:middle;" aria-hidden="true">navigation</span>
           Demarrer l'itineraire
         </button>
         <button class="btn-primary" id="msg-modal-ack">J'ai compris</button>
@@ -282,18 +308,18 @@
   </div>
 
   <!-- Modal detail fiche d'intervention -->
-  <div class="field-modal" id="fiche-detail-modal" hidden>
+  <div class="field-modal" id="fiche-detail-modal" role="dialog" aria-modal="true" aria-labelledby="fiche-detail-cat" hidden>
     <div class="field-modal-box fiche-detail-box">
       <div class="fiche-detail-header" id="fiche-detail-header">
         <div class="fiche-detail-head-left">
-          <span class="material-symbols-outlined fiche-detail-icon" id="fiche-detail-icon">description</span>
+          <span class="material-symbols-outlined fiche-detail-icon" id="fiche-detail-icon" aria-hidden="true">description</span>
           <div>
             <div class="fiche-detail-cat" id="fiche-detail-cat">-</div>
             <div class="fiche-detail-urgency" id="fiche-detail-urgency"></div>
           </div>
         </div>
-        <button class="icon-btn" id="fiche-detail-close" title="Fermer">
-          <span class="material-symbols-outlined">close</span>
+        <button class="icon-btn" id="fiche-detail-close" aria-label="Fermer" title="Fermer">
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
         </button>
       </div>
       <div class="fiche-detail-body" id="fiche-detail-body">
@@ -304,22 +330,20 @@
   </div>
 
   <!-- Lightbox photo plein ecran -->
-  <div class="field-lightbox" id="field-lightbox" hidden>
+  <div class="field-lightbox" id="field-lightbox" role="dialog" aria-modal="true" aria-label="Photo en plein ecran" hidden>
     <img id="field-lightbox-img" src="" alt="">
-    <button class="field-lightbox-close" id="field-lightbox-close">
-      <span class="material-symbols-outlined">close</span>
+    <button class="field-lightbox-close" id="field-lightbox-close" aria-label="Fermer la photo">
+      <span class="material-symbols-outlined" aria-hidden="true">close</span>
     </button>
   </div>
 
   <!-- Toast -->
-  <div class="field-toast" id="field-toast" hidden></div>
+  <div class="field-toast" id="field-toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
 
   <!-- Données serveur -->
   <script>
     window.FIELD_DEVICE = {{ device | tojson }};
   </script>
-  <!-- Material Symbols -->
-  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Symbols+Outlined">
   <!-- Leaflet -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <!-- Turf.js (calcul d aire pour outils mesure) -->

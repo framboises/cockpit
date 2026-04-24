@@ -64,6 +64,9 @@ FIELD_PHOTOS_DIR = os.path.join(SCRIPT_DIR, "uploads", "field_photos")
 FIELD_PHOTO_MAX_SIZE = 10 * 1024 * 1024   # 10 Mo par photo
 FIELD_PHOTO_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "heic"}
 
+# Photos 3P (portes/portails) partagees avec l'app looker
+LOOKER_3P_MEDIA_DIR = os.path.join(SCRIPT_DIR, "..", "looker", "static", "img", "media")
+
 
 def _now():
     return datetime.now(timezone.utc)
@@ -114,8 +117,9 @@ def get_vapid_public_key():
     return _VAPID_PUBLIC_KEY_B64
 
 
-def send_push_notification(subscription_info, title, body, url=None, tag=None):
-    """Envoie une notification push a une souscription. Silencieux en cas d'erreur."""
+def send_push_notification(subscription_info, title, body, url=None, tag=None, push_type=None):
+    """Envoie une notification push a une souscription. Silencieux en cas d'erreur.
+    push_type="sos" declenche un rendu renforce cote SW (vibration longue, persistance)."""
     _init_vapid()
     if not _VAPID_PRIVATE_KEY or not subscription_info:
         return False
@@ -127,6 +131,8 @@ def send_push_notification(subscription_info, title, body, url=None, tag=None):
             payload["url"] = url
         if tag:
             payload["tag"] = tag
+        if push_type:
+            payload["type"] = push_type
         webpush(
             subscription_info=subscription_info,
             data=_json.dumps(payload),
@@ -140,13 +146,13 @@ def send_push_notification(subscription_info, title, body, url=None, tag=None):
         return False
 
 
-def send_push_to_device(db, device_id, title, body, url=None, tag=None):
+def send_push_to_device(db, device_id, title, body, url=None, tag=None, push_type=None):
     """Envoie un push a toutes les souscriptions d'un device."""
     subs = list(db["field_push_subs"].find({"device_id": device_id}))
     for sub in subs:
         info = sub.get("subscription")
         if info:
-            send_push_notification(info, title, body, url=url, tag=tag)
+            send_push_notification(info, title, body, url=url, tag=tag, push_type=push_type)
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +360,22 @@ def _iso(value):
             value = value.replace(tzinfo=timezone.utc)
         return value.isoformat()
     return None
+
+
+def _load_thread_root(db, msg_oid):
+    """Retourne (root, thread_id) pour un msg_id donne (racine ou reponse).
+    Retourne (None, None) si introuvable."""
+    original = db["field_messages"].find_one({"_id": msg_oid})
+    if not original:
+        return None, None
+    thread_id = original.get("thread_id") or msg_oid
+    if thread_id == msg_oid:
+        root = original
+    else:
+        root = db["field_messages"].find_one({"_id": thread_id})
+        if not root:
+            return None, None
+    return root, thread_id
 
 
 # ---------------------------------------------------------------------------
@@ -1080,15 +1102,13 @@ def field_thread(msg_id):
     db = _get_mongo_db()
     device_id = request.device["_id"]
 
-    # Le msg_id peut etre le thread_id ou un message du thread
-    original = db["field_messages"].find_one({"_id": oid})
-    if not original:
+    root, thread_id = _load_thread_root(db, oid)
+    if root is None:
         return jsonify({"ok": False, "error": "not_found"}), 404
+    # Seul le device destinataire de la racine du thread peut le consulter
+    if root.get("device_id") != device_id:
+        return jsonify({"ok": False, "error": "forbidden"}), 403
 
-    # Determiner le thread_id : si le message a un thread_id, c'est une reponse
-    thread_id = original.get("thread_id") or oid
-
-    # Recuperer tous les messages du thread
     cursor = db["field_messages"].find({
         "$or": [
             {"_id": thread_id},
@@ -1096,11 +1116,7 @@ def field_thread(msg_id):
         ],
     }).sort("createdAt", 1)
 
-    messages = []
-    for m in cursor:
-        msg = _pub_message(m)
-        messages.append(msg)
-
+    messages = [_pub_message(m) for m in cursor]
     return jsonify({"ok": True, "thread_id": str(thread_id), "messages": messages})
 
 
@@ -1118,12 +1134,14 @@ def field_reply(msg_id):
     device = request.device
     device_id = device["_id"]
 
-    # Trouver le message original pour determiner le thread_id
-    original = db["field_messages"].find_one({"_id": oid})
-    if not original:
+    root, thread_id = _load_thread_root(db, oid)
+    if root is None:
         return jsonify({"ok": False, "error": "not_found"}), 404
+    # Seul le device destinataire de la racine peut repondre dans ce thread
+    if root.get("device_id") != device_id:
+        return jsonify({"ok": False, "error": "forbidden"}), 403
 
-    thread_id = original.get("thread_id") or oid
+    original = root
 
     # Parse body
     is_multipart = request.content_type and "multipart" in request.content_type
@@ -2063,6 +2081,36 @@ def field_resources_3p():
     return jsonify({"features": features})
 
 
+@field_bp.route("/field/resources/3p/photo/thumb/<filename>", methods=["GET"])
+@field_token_required
+def field_3p_photo_thumb(filename):
+    """Miniature d'une photo 3P. Miroir de /api/3p/photo/thumb cote tablette."""
+    safe = os.path.basename(filename)
+    thumb_dir = os.path.join(LOOKER_3P_MEDIA_DIR, "thumbnails")
+    if not os.path.isfile(os.path.join(thumb_dir, safe)):
+        abort(404)
+    resp = send_from_directory(thumb_dir, safe)
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
+
+
+@field_bp.route("/field/resources/3p/photo/original/<filename>", methods=["GET"])
+@field_token_required
+def field_3p_photo_original(filename):
+    """Photo originale 3P avec fallback sur miniature si absente."""
+    safe = os.path.basename(filename)
+    orig_dir = os.path.join(LOOKER_3P_MEDIA_DIR, "original")
+    thumb_dir = os.path.join(LOOKER_3P_MEDIA_DIR, "thumbnails")
+    if os.path.isfile(os.path.join(orig_dir, safe)):
+        resp = send_from_directory(orig_dir, safe)
+    elif os.path.isfile(os.path.join(thumb_dir, safe)):
+        resp = send_from_directory(thumb_dir, safe)
+    else:
+        abort(404)
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
+
+
 @field_bp.route("/field/resources/gm-categories", methods=["GET"])
 @field_token_required
 def field_resources_gm_categories():
@@ -2622,6 +2670,20 @@ def field_sos():
         })
     if sos_messages:
         db["field_messages"].insert_many(sos_messages)
+        # Push urgent a toutes les autres tablettes (son systeme + vibration renforcee cote SW)
+        for m in sos_messages:
+            try:
+                send_push_to_device(
+                    db,
+                    m["device_id"],
+                    m["title"],
+                    m["body"],
+                    url="/field",
+                    tag="field-sos-" + str(fiche_id),
+                    push_type="sos",
+                )
+            except Exception as e:
+                logger.debug("field: sos push failed for device %s: %s", m["device_id"], e)
 
     return jsonify({"ok": True, "pcorg_id": fiche_id})
 

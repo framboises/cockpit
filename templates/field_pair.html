@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0f172a">
   <title>COCKPIT Field - Appairage</title>
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
@@ -131,7 +131,7 @@
       <button data-k="7">7</button>
       <button data-k="8">8</button>
       <button data-k="9">9</button>
-      <button class="action" data-action="clear">C</button>
+      <button class="action" data-action="backspace" aria-label="Effacer le dernier chiffre">&#x232B;</button>
       <button data-k="0">0</button>
       <button class="submit" data-action="submit" id="btnSubmit" disabled>OK</button>
     </div>
@@ -163,8 +163,8 @@
           var action = btn.getAttribute("data-action");
           if (k != null) {
             if (code.length < 6) { code += k; render(); setMsg(""); }
-          } else if (action === "clear") {
-            code = ""; render(); setMsg("");
+          } else if (action === "backspace") {
+            code = code.slice(0, -1); render(); setMsg("");
           } else if (action === "submit") {
             submit();
           }
