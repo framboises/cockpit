@@ -227,10 +227,15 @@
   // Tablettes enrolees
   // ------------------------------------------------------------------
   function loadDevices() {
-    var s = currentScope();
     var qs = new URLSearchParams();
-    if (s.event) qs.set("event", s.event);
-    if (s.year) qs.set("year", s.year);
+    // Si window.FIELD_ADMIN_ALL_SCOPES est vrai (mode console dispatch), on
+    // charge TOUTES les tablettes sans filtre event/year pour que l'operateur
+    // PCO voie le parc complet d'un coup d'oeil.
+    if (!window.FIELD_ADMIN_ALL_SCOPES) {
+      var s = currentScope();
+      if (s.event) qs.set("event", s.event);
+      if (s.year) qs.set("year", s.year);
+    }
     apiGet("/field/admin/devices?" + qs.toString())
       .then(function (data) {
         state.devices = (data && data.devices) || [];
@@ -245,21 +250,57 @@
   function renderDevices() {
     var tb = $("#field-devices-tbody");
     if (!tb) return;
+    var firstHeader = document.querySelector("#field-devices-table thead th:nth-child(2)");
+    var hasEventCol = !!(firstHeader && /evenement/i.test(firstHeader.textContent));
+    var colspan = hasEventCol ? 7 : 6;
+    var countEl = $("#field-admin-count");
+    if (countEl) {
+      countEl.textContent = state.devices.length
+        ? (state.devices.length + " tablette" + (state.devices.length > 1 ? "s" : ""))
+        : "";
+    }
+    while (tb.firstChild) tb.removeChild(tb.firstChild);
     if (state.devices.length === 0) {
-      tb.innerHTML = "<tr><td colspan='6' style='text-align:center; color:var(--muted); padding:16px;'>Aucune tablette enrolee dans cet evenement.</td></tr>";
+      var emptyTr = document.createElement("tr");
+      var emptyTd = document.createElement("td");
+      emptyTd.colSpan = colspan;
+      emptyTd.style.cssText = "text-align:center; color:var(--muted); padding:16px;";
+      emptyTd.textContent = window.FIELD_ADMIN_ALL_SCOPES
+        ? "Aucune tablette enrolee."
+        : "Aucune tablette enrolee dans cet evenement.";
+      emptyTr.appendChild(emptyTd);
+      tb.appendChild(emptyTr);
       return;
     }
-    tb.innerHTML = "";
-    state.devices.forEach(function (d) {
+    var sorted = state.devices.slice().sort(function (a, b) {
+      var ea = (a.event || "") + "/" + (a.year || "");
+      var eb = (b.event || "") + "/" + (b.year || "");
+      if (ea !== eb) return ea.localeCompare(eb);
+      return (a.name || "").localeCompare(b.name || "");
+    });
+    sorted.forEach(function (d) {
       var tr = document.createElement("tr");
 
       var tdName = document.createElement("td");
-      tdName.innerHTML = "<span class='material-symbols-outlined' style='font-size:14px; vertical-align:middle; color:var(--muted); margin-right:3px;'>tablet_android</span>";
+      var tabletIcon = document.createElement("span");
+      tabletIcon.className = "material-symbols-outlined";
+      tabletIcon.style.cssText = "font-size:14px; vertical-align:middle; color:var(--muted); margin-right:3px;";
+      tabletIcon.textContent = "tablet_android";
+      tdName.appendChild(tabletIcon);
       var nameSpan = document.createElement("span");
       nameSpan.textContent = d.name || "-";
       nameSpan.style.fontWeight = "600";
       tdName.appendChild(nameSpan);
       tr.appendChild(tdName);
+
+      if (hasEventCol) {
+        var tdEvent = document.createElement("td");
+        tdEvent.style.whiteSpace = "nowrap";
+        tdEvent.style.color = "var(--muted)";
+        tdEvent.style.fontSize = "12px";
+        tdEvent.textContent = (d.event || "-") + (d.year ? " / " + d.year : "");
+        tr.appendChild(tdEvent);
+      }
 
       var tdGroup = document.createElement("td");
       var dot = document.createElement("span");

@@ -94,7 +94,7 @@
     </aside>
 
     <!-- ===== MAIN ===== -->
-    <div class="app-main">
+    <div class="app-main single-col-page">
 
         <header class="app-header">
             <div class="header-event-info">
@@ -104,6 +104,10 @@
             </div>
             <div class="header-spacer"></div>
             <div class="header-actions" style="gap:10px;">
+                <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted); cursor:pointer;">
+                    <input type="checkbox" id="field-scope-filter" style="cursor:pointer;">
+                    Filtrer sur l'evenement courant
+                </label>
                 <button class="btn btn-primary" id="field-admin-refresh" style="display:flex;align-items:center;gap:5px;">
                     <span class="material-symbols-outlined" style="font-size:17px;">refresh</span> Actualiser
                 </button>
@@ -111,21 +115,13 @@
         </header>
 
         <!-- Scrollable content -->
-        <div id="main-content" style="padding:18px 20px 40px; overflow:auto;">
-
-            <!-- Scope event/year : reprend la selection globale -->
-            <div style="display:flex; gap:12px; align-items:center; margin-bottom:16px; padding:12px 14px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--bg);">
-                <span class="material-symbols-outlined" style="color:var(--muted); font-size:22px;">event</span>
-                <div style="flex:1;">
-                    <div style="font-size:12px; color:var(--muted);">Contexte :</div>
-                    <div id="field-admin-scope" style="font-size:14px; font-weight:600;">-</div>
-                </div>
-            </div>
+        <div id="main-content">
 
             <!-- Actions rapides -->
             <section class="widget-card">
                 <header class="widget-header">
                     <h3><span class="material-symbols-outlined" style="vertical-align:middle;">bolt</span> Actions</h3>
+                    <div id="field-admin-scope" style="font-size:12px; color:var(--muted); font-weight:500; margin-left:auto;">-</div>
                 </header>
                 <div class="widget-body">
                     <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -153,6 +149,7 @@
             <section class="widget-card" style="margin-top:16px;">
                 <header class="widget-header">
                     <h3><span class="material-symbols-outlined" style="vertical-align:middle;">tablet</span> Tablettes enrolees</h3>
+                    <div id="field-admin-count" style="font-size:12px; color:var(--muted); margin-left:auto;"></div>
                 </header>
                 <div class="widget-body" id="field-admin-body">
                     <div class="table-responsive">
@@ -160,6 +157,7 @@
                             <thead>
                                 <tr>
                                     <th>Nom</th>
+                                    <th>Evenement</th>
                                     <th>Groupe</th>
                                     <th>Derniere position</th>
                                     <th>Derniere activite</th>
@@ -168,7 +166,7 @@
                                 </tr>
                             </thead>
                             <tbody id="field-devices-tbody">
-                                <tr><td colspan="6" style="text-align:center; color:var(--muted); padding:16px;">Chargement...</td></tr>
+                                <tr><td colspan="7" style="text-align:center; color:var(--muted); padding:16px;">Chargement...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -383,40 +381,50 @@
 <!-- Toast container -->
 <div id="toast-container"></div>
 
-<!-- Scripts -->
+<!-- Par defaut la console affiche TOUTES les tablettes de tous les evenements
+     (parc complet). L'operateur peut ensuite filtrer sur l'evenement courant
+     via la case a cocher dans le header. -->
+<script>
+  window.FIELD_ADMIN_ALL_SCOPES = true;
+</script>
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
 <script src="{{ url_for('static', filename='js/field_admin.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 
-<!-- main.js popule window.selectedEvent/Year via fetch /get_events : on
-     attend que le scope soit disponible avant de charger les tablettes,
-     puis on ecoute les changements de selection pour rafraichir en vif. -->
 <script>
 (function () {
-  var ready = false;
-  function tryBootstrap() {
-    if (ready) return;
-    if (window.selectedEvent && window.selectedYear && window.FieldAdmin) {
-      ready = true;
-      var scope = document.getElementById("field-admin-scope");
-      if (scope) scope.textContent = window.selectedEvent + " / " + window.selectedYear;
-      window.FieldAdmin.reload();
-      return;
+  function updateScopeLabel() {
+    var scope = document.getElementById("field-admin-scope");
+    if (!scope) return;
+    if (window.FIELD_ADMIN_ALL_SCOPES) {
+      scope.textContent = "Parc complet (tous evenements)";
+    } else if (window.selectedEvent && window.selectedYear) {
+      scope.textContent = "Filtre : " + window.selectedEvent + " / " + window.selectedYear;
+    } else {
+      scope.textContent = "Filtre actif (selection en cours)";
     }
-    setTimeout(tryBootstrap, 200);
   }
-  document.addEventListener("DOMContentLoaded", tryBootstrap);
 
-  // Rafraichir quand l'utilisateur change d'evenement ou d'annee dans la sidebar
   document.addEventListener("DOMContentLoaded", function () {
+    updateScopeLabel();
+    // Premier chargement : on tente tout de suite (plus besoin d'attendre le scope)
+    if (window.FieldAdmin) window.FieldAdmin.reload();
+    else setTimeout(function () { if (window.FieldAdmin) window.FieldAdmin.reload(); }, 300);
+
+    // Toggle filtrage scope
+    var cb = document.getElementById("field-scope-filter");
+    if (cb) cb.addEventListener("change", function () {
+      window.FIELD_ADMIN_ALL_SCOPES = !cb.checked;
+      updateScopeLabel();
+      if (window.FieldAdmin) window.FieldAdmin.reload();
+    });
+
+    // Rafraichir quand l'utilisateur change d'evenement ou d'annee dans la sidebar
     var es = document.getElementById("event-select");
     var ys = document.getElementById("year-select");
     function onScopeChange() {
-      var scope = document.getElementById("field-admin-scope");
-      if (scope && window.selectedEvent && window.selectedYear) {
-        scope.textContent = window.selectedEvent + " / " + window.selectedYear;
-      }
-      if (window.FieldAdmin) window.FieldAdmin.reload();
+      updateScopeLabel();
+      if (!window.FIELD_ADMIN_ALL_SCOPES && window.FieldAdmin) window.FieldAdmin.reload();
     }
     if (es) es.addEventListener("change", function () { setTimeout(onScopeChange, 50); });
     if (ys) ys.addEventListener("change", function () { setTimeout(onScopeChange, 50); });
