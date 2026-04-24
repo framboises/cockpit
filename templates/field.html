@@ -45,7 +45,6 @@
         <span class="status-label" id="offline-queue-count">0</span>
       </button>
       <div class="clock" id="field-clock" aria-hidden="true">--:--</div>
-      <button class="topbar-reload" id="btn-reload" aria-label="Recharger l'application" title="Recharger"><span class="material-symbols-outlined" aria-hidden="true">refresh</span></button>
     </div>
   </header>
 
@@ -61,6 +60,9 @@
       <button class="map-fab" id="btn-fullscreen" aria-label="Plein ecran" title="Plein ecran">
         <span class="material-symbols-outlined" aria-hidden="true">fullscreen</span>
       </button>
+      <button class="map-fab" id="btn-layers" aria-label="Changer le fond de carte" title="Fond de carte">
+        <span class="material-symbols-outlined" aria-hidden="true">map</span>
+      </button>
     </div>
 
     <!-- Panneau recherche POI -->
@@ -75,6 +77,11 @@
       </div>
       <div class="poi-search-results" id="poi-search-results" role="listbox"></div>
     </div>
+
+    <!-- Ma position (FAB bas gauche, symetrique aux outils de mesure) -->
+    <button class="map-fab map-fab-bl" id="btn-recenter" aria-label="Me recentrer sur la carte" title="Me recentrer">
+      <span class="material-symbols-outlined" aria-hidden="true">my_location</span>
+    </button>
 
     <!-- Outils de mesure (bas droite) -->
     <div class="map-measure-tools" id="measure-tools" role="toolbar" aria-label="Outils de mesure">
@@ -181,14 +188,6 @@
 
   <!-- BARRE D'ACTIONS -->
   <nav class="field-actions" aria-label="Actions principales">
-    <button class="action-btn" id="btn-recenter" aria-label="Me recentrer sur la carte" title="Me recentrer">
-      <span class="material-symbols-outlined" aria-hidden="true">my_location</span>
-      <span class="label">Moi</span>
-    </button>
-    <button class="action-btn" id="btn-layers" aria-label="Changer le fond de carte" title="Fond de carte">
-      <span class="material-symbols-outlined" aria-hidden="true">map</span>
-      <span class="label">Fond</span>
-    </button>
     <button class="action-btn" id="btn-grid" aria-label="Calques de la carte" aria-haspopup="dialog" title="Calques">
       <span class="material-symbols-outlined" aria-hidden="true">layers</span>
       <span class="label">Calques</span>
@@ -197,6 +196,10 @@
       <span class="material-symbols-outlined" aria-hidden="true">assignment</span>
       <span class="badge" id="missions-badge" aria-label="missions en attente" hidden>0</span>
       <span class="label">Missions</span>
+    </button>
+    <button class="action-btn" id="btn-camera" aria-label="Prendre une photo" title="Photo">
+      <span class="material-symbols-outlined" aria-hidden="true">photo_camera</span>
+      <span class="label">Photo</span>
     </button>
     <button class="action-btn" id="btn-inbox" aria-label="Messages" aria-haspopup="dialog" title="Messages">
       <span class="material-symbols-outlined" aria-hidden="true">inbox</span>

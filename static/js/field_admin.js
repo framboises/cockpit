@@ -324,8 +324,11 @@
         tr.style.background = "rgba(127, 29, 29, 0.12)";
         nameSpan.style.textDecoration = "line-through";
         var badge = document.createElement("span");
-        badge.textContent = "REVOQUEE";
-        badge.style.cssText = "margin-left:6px; font-size:9px; font-weight:800; background:#7f1d1d; color:#fee2e2; padding:1px 5px; border-radius:4px; vertical-align:middle;";
+        var isEventEnded = d.revoke_reason === "event_ended";
+        badge.textContent = isEventEnded ? "EVT TERMINE" : "REVOQUEE";
+        var badgeColor = isEventEnded ? "#78350f" : "#7f1d1d";
+        var badgeBg = isEventEnded ? "#fde68a" : "#fee2e2";
+        badge.style.cssText = "margin-left:6px; font-size:9px; font-weight:800; background:" + badgeColor + "; color:" + badgeBg + "; padding:1px 5px; border-radius:4px; vertical-align:middle;";
         tdName.appendChild(badge);
       }
 

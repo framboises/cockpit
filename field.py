@@ -226,6 +226,80 @@ def _generate_pairing_code():
 
 
 # ---------------------------------------------------------------------------
+# Auto-revocation : quand un evenement est termine (date de fin de demontage
+# depassee), on revoke automatiquement toutes ses tablettes. Check paresseux
+# avec cache 5 min pour eviter les reads inutiles a chaque poll tablette.
+# ---------------------------------------------------------------------------
+
+_EVENT_ENDED_TTL = 300  # secondes
+_event_ended_cache = {}  # (event, year_str) -> (checked_at_ts, is_ended, swept)
+
+
+def _event_demontage_ended(db, event, year):
+    """True si l'evenement a une date de fin de demontage passee.
+    False si pas de demontage defini (evenement reste actif indefiniment)."""
+    if not event or not year:
+        return False
+    key = (str(event), str(year))
+    now_ts = _now().timestamp()
+    cached = _event_ended_cache.get(key)
+    if cached and now_ts - cached[0] < _EVENT_ENDED_TTL:
+        return cached[1]
+    try:
+        doc = db["parametrages"].find_one(
+            {"event": event, "year": str(year)}, {"_id": 0, "data.globalHoraires.demontage": 1}
+        )
+        if not doc:
+            doc = db["parametrages"].find_one(
+                {"event": event, "year": year}, {"_id": 0, "data.globalHoraires.demontage": 1}
+            )
+        gh = ((doc or {}).get("data") or {}).get("globalHoraires") or {}
+        demontage = gh.get("demontage") or {}
+        end_str = (demontage.get("end") or "").strip()
+    except Exception:
+        end_str = ""
+
+    is_ended = False
+    if end_str:
+        # Format attendu : ISO YYYY-MM-DD (ou avec heure). On prend la date locale.
+        try:
+            end_date = end_str[:10]  # YYYY-MM-DD
+            today = _now_local().strftime("%Y-%m-%d")
+            is_ended = today > end_date
+        except Exception:
+            is_ended = False
+
+    _event_ended_cache[key] = (now_ts, is_ended, cached[2] if cached else False)
+    return is_ended
+
+
+def _sweep_event_if_ended(db, event, year):
+    """Si l'evenement est termine, revoke en bloc toutes ses tablettes
+    encore actives et retourne True. Idempotent via un flag cache."""
+    if not _event_demontage_ended(db, event, year):
+        return False
+    key = (str(event), str(year))
+    cached = _event_ended_cache.get(key)
+    # Deja sweep pour cet (event, year) ? On saute le update_many.
+    if cached and cached[2]:
+        return True
+    try:
+        db["field_devices"].update_many(
+            {"event": event, "year": str(year), "revoked": {"$ne": True}},
+            {"$set": {
+                "revoked": True,
+                "revoke_reason": "event_ended",
+                "revoke_ts": _now(),
+            }},
+        )
+    except Exception as e:
+        logger.debug("field: sweep_event_if_ended failed: %s", e)
+        return True
+    _event_ended_cache[key] = (cached[0] if cached else _now().timestamp(), True, True)
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Rate limit en memoire pour /field/pair
 # ---------------------------------------------------------------------------
 
@@ -295,6 +369,13 @@ def field_token_required(f):
                 return jsonify({"error": "device_revoked"}), 401
             return redirect("/field/denied")
 
+        # Auto-revocation si l'evenement est termine (demontage passe).
+        # Le sweep se fait une seule fois par (event, year) grace au cache.
+        if _sweep_event_if_ended(db, device.get("event"), device.get("year")):
+            if _wants_json():
+                return jsonify({"error": "event_ended"}), 401
+            return redirect("/field/denied")
+
         # Mettre a jour last_seen (best-effort)
         try:
             db["field_devices"].update_one(
@@ -329,6 +410,7 @@ def _pub_device(device):
         "created_at": _iso(device.get("createdAt")),
         "last_seen": _iso(device.get("last_seen")),
         "revoked": bool(device.get("revoked")),
+        "revoke_reason": device.get("revoke_reason"),
         "status": device.get("status") or "patrouille",
         "status_since": _iso(device.get("status_since")),
         "active_fiche_id": device.get("active_fiche_id"),
@@ -1455,6 +1537,39 @@ def field_admin_pairings_delete(code):
 # Admin : devices (tablettes enrolees)
 # ---------------------------------------------------------------------------
 
+@field_bp.route("/field/admin/sweep-ended-events", methods=["POST"])
+@admin_required
+def field_admin_sweep_ended_events():
+    """Parcourt tous les (event, year) des tablettes encore actives et
+    revoque celles dont l'evenement a une date de fin de demontage passee.
+    Utile pour declencher le nettoyage hors du check paresseux en cas de
+    doute ou en dehors des heures de connexion des tablettes."""
+    db = _get_mongo_db()
+    pairs = db["field_devices"].distinct("event", {"revoked": {"$ne": True}})
+    total_swept = 0
+    scanned = 0
+    for ev in pairs:
+        if not ev:
+            continue
+        years = db["field_devices"].distinct(
+            "year", {"event": ev, "revoked": {"$ne": True}}
+        )
+        for yr in years:
+            scanned += 1
+            # Vide le cache de la paire pour forcer un re-check frais
+            key = (str(ev), str(yr))
+            _event_ended_cache.pop(key, None)
+            before = db["field_devices"].count_documents(
+                {"event": ev, "year": yr, "revoked": {"$ne": True}}
+            )
+            if _sweep_event_if_ended(db, ev, yr):
+                after = db["field_devices"].count_documents(
+                    {"event": ev, "year": yr, "revoked": {"$ne": True}}
+                )
+                total_swept += max(0, before - after)
+    return jsonify({"ok": True, "scanned_pairs": scanned, "devices_revoked": total_swept})
+
+
 @field_bp.route("/field/admin/devices", methods=["GET"])
 @admin_required
 def field_admin_devices_list():
@@ -1515,7 +1630,7 @@ def field_admin_device_restore(device_id):
         {"_id": oid},
         {
             "$set": {"revoked": False, "restoredAt": _now()},
-            "$unset": {"revokedAt": ""},
+            "$unset": {"revokedAt": "", "revoke_reason": "", "revoke_ts": ""},
         },
     )
     if res.matched_count == 0:

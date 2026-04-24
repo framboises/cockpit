@@ -93,14 +93,6 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
   padding: 4px 8px; background: #1e293b; border-radius: 8px;
   border: 1px solid #334155;
 }
-.topbar-reload {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px; border: 1px solid #334155; border-radius: 8px;
-  background: #1e293b; color: #cbd5e1; cursor: pointer; padding: 0;
-}
-.topbar-reload .material-symbols-outlined { font-size: 18px; }
-.topbar-reload:active { background: #334155; }
-
 /* =====================================================================
    MAP
    ===================================================================== */
@@ -208,6 +200,38 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
   cursor: pointer;
 }
 .inbox-show-more:active { background: #334155; }
+
+/* Banner de mise a jour PWA : s'affiche quand un nouveau service worker
+   est pret. Tap = location.reload(). Reste jusqu'au tap. */
+.field-update-banner {
+  position: fixed;
+  bottom: calc(80px + env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5000;
+  background: #1e3a8a;
+  border: 1px solid #3b82f6;
+  color: #f8fafc;
+  padding: 12px 18px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+  max-width: calc(100% - 32px);
+  animation: field-update-banner-in 0.28s ease-out;
+}
+.field-update-banner .material-symbols-outlined { font-size: 22px; }
+.field-update-banner:active { background: #1d4ed8; }
+.field-update-banner:disabled { opacity: 0.6; }
+@keyframes field-update-banner-in {
+  from { transform: translate(-50%, 24px); opacity: 0; }
+  to   { transform: translate(-50%, 0); opacity: 1; }
+}
 
 /* =====================================================================
    STATUS BAR (barre de statut patrouille, au-dessus de la bottom bar)
@@ -436,7 +460,7 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
    ===================================================================== */
 .field-actions {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 4px;
   padding: 6px 8px;
   background: #0f172a;
@@ -804,6 +828,18 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
 .map-fab .material-symbols-outlined { font-size: 24px; }
 .map-fab-tr { top: 12px; right: 12px; }
 .map-fab-tl { top: 12px; left: 12px; }
+.map-fab-bl {
+  bottom: 12px; left: 12px;
+  width: 54px; height: 54px;
+  border-radius: 14px;
+}
+.map-fab-bl .material-symbols-outlined { font-size: 28px; }
+.map-fab-bl.active {
+  background: #1e3a8a;
+  border-color: #3b82f6;
+  color: #f8fafc;
+  box-shadow: 0 0 0 2px rgba(59,130,246,0.35), 0 4px 14px rgba(0,0,0,0.35);
+}
 .map-fab-group-tr {
   position: absolute; top: 12px; right: 12px; z-index: 950;
   display: flex; flex-direction: column; gap: 8px;
@@ -1259,7 +1295,7 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
   .action-btn .label { display: none; }
   .action-btn { min-height: 48px; }
   .action-btn .material-symbols-outlined { font-size: 24px; }
-  .field-actions { grid-template-columns: repeat(6, 1fr); min-height: 56px; }
+  .field-actions { grid-template-columns: repeat(5, 1fr); min-height: 56px; }
   .field-topbar { min-height: 46px; padding: 6px 10px; }
 }
 
@@ -1289,7 +1325,7 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
     position: absolute;
     bottom: 8px; left: 50%;
     transform: translateX(-50%);
-    grid-template-columns: repeat(6, 56px);
+    grid-template-columns: repeat(5, 56px);
     min-height: unset;
     padding: 4px;
     background: rgba(15,23,42,0.92);

@@ -38,7 +38,7 @@
     map: null,
     tileLayers: {},
     currentLayerKey: "plan",
-    layerOrder: ["plan", "sat_esri", "sat_aco"],
+    layerOrder: ["plan", "sat_aco", "sat_esri"],
     meMarker: null,
     meCircle: null,
     lastPushedAt: 0,
@@ -603,7 +603,7 @@
     });
     state.tileLayers[nextKey].addTo(state.map);
     state.currentLayerKey = nextKey;
-    var labelByKey = { plan: "Plan", sat_esri: "Satellite", sat_aco: "Satellite ACO" };
+    var labelByKey = { plan: "Plan (OSM)", sat_aco: "Satellite ACO", sat_esri: "Satellite Egis" };
     toast(labelByKey[nextKey] || nextKey);
   }
 
@@ -4040,8 +4040,10 @@
     $("btn-recenter").addEventListener("click", recenter);
     $("btn-layers").addEventListener("click", cycleLayer);
     $("btn-grid").addEventListener("click", openLayersPanel);
-    var reloadBtn = $("btn-reload");
-    if (reloadBtn) reloadBtn.addEventListener("click", function () { location.reload(); });
+    var cameraBtn = $("btn-camera");
+    if (cameraBtn) cameraBtn.addEventListener("click", function () {
+      toast("Appareil photo : bientot disponible");
+    });
     $("btn-inbox").addEventListener("click", function () {
       var p = $("inbox-panel");
       $("missions-panel").hidden = true;
@@ -4548,18 +4550,61 @@
   // ---------------------------------------------------------------------
   function registerServiceWorker() {
     if (!("serviceWorker" in navigator)) return;
+    // Au premier register d'une PWA vierge, controller est null. Memoriser
+    // pour distinguer un vrai update d'un premier takeover.
+    var hadControllerAtBoot = !!navigator.serviceWorker.controller;
     try {
       navigator.serviceWorker.register("/field/sw.js", { scope: "/field" })
         .then(function (reg) {
-          // Forcer la mise a jour si un nouveau SW est dispo
           if (reg && reg.update) reg.update();
-          // Souscrire aux push notifications
           initPushSubscription(reg);
+          // Nouveau SW detecte en tache de fond : un worker arrive en "installed"
+          // pendant qu'un controller existe deja => vraie mise a jour a prompter.
+          reg.addEventListener("updatefound", function () {
+            var nw = reg.installing;
+            if (!nw) return;
+            nw.addEventListener("statechange", function () {
+              if (nw.state === "installed" && navigator.serviceWorker.controller) {
+                showUpdateAvailable();
+              }
+            });
+          });
         })
         .catch(function (err) {
           console.warn("[field] SW registration failed:", err);
         });
     } catch (e) { /* ignore */ }
+    // Filet de secours : si le SW passe le controle a une nouvelle version
+    // (skipWaiting + clients.claim), proposer le reload a l'utilisateur.
+    navigator.serviceWorker.addEventListener("controllerchange", function () {
+      if (!hadControllerAtBoot) { hadControllerAtBoot = true; return; }
+      showUpdateAvailable();
+    });
+  }
+
+  var _updateBannerShown = false;
+  function showUpdateAvailable() {
+    if (_updateBannerShown) return;
+    _updateBannerShown = true;
+    var banner = document.createElement("button");
+    banner.id = "field-update-banner";
+    banner.className = "field-update-banner";
+    banner.type = "button";
+    banner.setAttribute("aria-label", "Mise a jour disponible, taper pour recharger");
+    var icon = document.createElement("span");
+    icon.className = "material-symbols-outlined";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = "system_update";
+    var text = document.createElement("span");
+    text.textContent = "Mise a jour disponible - taper pour recharger";
+    banner.appendChild(icon);
+    banner.appendChild(text);
+    banner.addEventListener("click", function () {
+      banner.disabled = true;
+      text.textContent = "Rechargement...";
+      location.reload();
+    });
+    document.body.appendChild(banner);
   }
 
   function initPushSubscription(swReg) {

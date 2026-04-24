@@ -2336,6 +2336,22 @@ def edit_todo_sets_page():
                            user_firstname=user_firstname, user_lastname=user_lastname,
                            user_email=user_email)
 
+
+@app.route('/field-dispatch')
+@role_required("admin")
+def field_dispatch_page():
+    """Console operationnelle PCO pour piloter les tablettes terrain :
+    appairage, envoi de messages, suivi/revocation. Consomme les endpoints
+    /field/admin/* exposes par le blueprint field."""
+    payload = getattr(request, 'user_payload', {})
+    return render_template(
+        'field_dispatch.html',
+        user_roles=payload.get("roles", []),
+        user_firstname=payload.get("firstname", ""),
+        user_lastname=payload.get("lastname", ""),
+        user_email=payload.get("email", ""),
+    )
+
 ################################################################################
 # Block permissions API
 ################################################################################

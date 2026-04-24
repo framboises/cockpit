@@ -100,6 +100,16 @@
     <div class="icon-circle">
       <span class="material-symbols-outlined">block</span>
     </div>
+    {% if device.revoke_reason == 'event_ended' %}
+    <h1>Evenement termine</h1>
+    <div class="device">{{ device.name or 'Tablette' }}{% if device.event %} &middot; {{ device.event }}{% if device.year %} / {{ device.year }}{% endif %}{% endif %}</div>
+    <p class="subtitle">
+      Le demontage de cet evenement est termine : cette tablette a ete
+      automatiquement desappairee.<br>
+      Pour reutiliser la tablette, contacte le PC Organisation afin d'obtenir
+      un nouveau code de pairing lie a un evenement en cours.
+    </p>
+    {% else %}
     <h1>Acces revoque</h1>
     <div class="device">{{ device.name or 'Tablette' }}{% if device.event %} &middot; {{ device.event }}{% if device.year %} / {{ device.year }}{% endif %}{% endif %}</div>
     <p class="subtitle">
@@ -107,6 +117,7 @@
       Contacte-le pour faire reactiver l'acces. La tablette se reconnectera
       automatiquement des qu'elle sera re-autorisee.
     </p>
+    {% endif %}
     <div class="status">
       <span class="dot"></span>
       <span id="statusText">En attente de re-autorisation&hellip;</span>
