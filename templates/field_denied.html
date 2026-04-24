@@ -92,6 +92,21 @@
     button:active { background: #334155; }
     button.primary { background: #2563eb; border-color: #1d4ed8; color: #fff; }
     button.primary:active { background: #1d4ed8; }
+    .btn-link {
+      display: inline-block;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #e2e8f0;
+      padding: 10px 18px;
+      border-radius: 10px;
+      font-size: 14px; font-weight: 600;
+      text-decoration: none;
+      font-family: inherit;
+    }
+    .btn-link:active { background: #334155; }
+    .btn-link.primary { background: #2563eb; border-color: #1d4ed8; color: #fff; }
+    .btn-link.primary:active { background: #1d4ed8; }
+    .actions { flex-wrap: wrap; justify-content: center; }
   </style>
 </head>
 <body>
@@ -106,9 +121,12 @@
     <p class="subtitle">
       Le demontage de cet evenement est termine : cette tablette a ete
       automatiquement desappairee.<br>
-      Pour reutiliser la tablette, contacte le PC Organisation afin d'obtenir
-      un nouveau code de pairing lie a un evenement en cours.
+      Entre un nouveau code de pairing pour continuer a utiliser la tablette
+      sur un evenement en cours.
     </p>
+    <div class="actions">
+      <button class="primary" onclick="goToPairing()">Appairer sur un autre evenement</button>
+    </div>
     {% else %}
     <h1>Acces revoque</h1>
     <div class="device">{{ device.name or 'Tablette' }}{% if device.event %} &middot; {{ device.event }}{% if device.year %} / {{ device.year }}{% endif %}{% endif %}</div>
@@ -117,14 +135,15 @@
       Contacte-le pour faire reactiver l'acces. La tablette se reconnectera
       automatiquement des qu'elle sera re-autorisee.
     </p>
-    {% endif %}
     <div class="status">
       <span class="dot"></span>
       <span id="statusText">En attente de re-autorisation&hellip;</span>
     </div>
     <div class="actions">
       <button onclick="checkNow()">Verifier maintenant</button>
+      <button onclick="goToPairing()">Nouveau pairing</button>
     </div>
+    {% endif %}
   </div>
 
   <script>
@@ -147,6 +166,15 @@
           }
         })
         .catch(function () { /* silent */ });
+    }
+
+    // Efface le cookie cote serveur (logout) puis navigue explicitement vers
+    // /field/pair. On force l'ecran meme si le logout echoue reseau : le
+    // serveur va re-afficher /field/denied si le cookie est toujours valide.
+    function goToPairing() {
+      fetch("/field/logout", { method: "POST", credentials: "same-origin" })
+        .catch(function () { /* silent */ })
+        .then(function () { window.location.href = "/field/pair"; });
     }
 
     setInterval(checkNow, POLL_MS);
