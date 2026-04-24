@@ -3389,6 +3389,267 @@
     lb.hidden = false;
   }
 
+  // ---------------------------------------------------------------------
+  // APPAREIL PHOTO : viewfinder plein ecran, capture, envoi au PC Org
+  // ---------------------------------------------------------------------
+  var _cam = {
+    root: null,
+    stream: null,
+    video: null,
+    canvas: null,
+    preview: null,
+    shutterBtn: null,
+    sendBtn: null,
+    retakeBtn: null,
+    switchBtn: null,
+    commentEl: null,
+    capturedBlob: null,
+    facing: "environment",
+  };
+
+  function openCameraModal() {
+    bumpActivity();
+    if (!_cam.root) buildCameraModal();
+    _cam.root.hidden = false;
+    resetCameraPreview();
+    startCameraStream();
+  }
+
+  function closeCameraModal() {
+    stopCameraStream();
+    if (_cam.root) _cam.root.hidden = true;
+    resetCameraPreview();
+  }
+
+  function stopCameraStream() {
+    if (_cam.stream) {
+      try { _cam.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+      _cam.stream = null;
+    }
+    if (_cam.video) _cam.video.srcObject = null;
+  }
+
+  function startCameraStream() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast("Camera non supportee sur cet appareil", "err");
+      closeCameraModal();
+      return;
+    }
+    stopCameraStream();
+    var constraints = {
+      video: { facingMode: { ideal: _cam.facing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false,
+    };
+    navigator.mediaDevices.getUserMedia(constraints)
+      .then(function (stream) {
+        _cam.stream = stream;
+        _cam.video.srcObject = stream;
+        _cam.video.play().catch(function () {});
+      })
+      .catch(function (err) {
+        var msg = "Acces camera refuse";
+        if (err && err.name === "NotFoundError") msg = "Aucune camera detectee";
+        else if (err && err.name === "NotAllowedError") msg = "Permission camera refusee";
+        toast(msg, "err");
+        closeCameraModal();
+      });
+  }
+
+  function resetCameraPreview() {
+    _cam.capturedBlob = null;
+    if (_cam.preview) { _cam.preview.hidden = true; _cam.preview.src = ""; }
+    if (_cam.video) _cam.video.hidden = false;
+    if (_cam.commentEl) _cam.commentEl.value = "";
+    if (_cam.root) _cam.root.dataset.state = "viewfinder";
+  }
+
+  function captureFrame() {
+    if (!_cam.video || !_cam.stream) return;
+    var vw = _cam.video.videoWidth || 1280;
+    var vh = _cam.video.videoHeight || 720;
+    _cam.canvas.width = vw;
+    _cam.canvas.height = vh;
+    var ctx = _cam.canvas.getContext("2d");
+    ctx.drawImage(_cam.video, 0, 0, vw, vh);
+    _cam.canvas.toBlob(function (blob) {
+      if (!blob) { toast("Echec capture", "err"); return; }
+      _cam.capturedBlob = blob;
+      _cam.preview.src = URL.createObjectURL(blob);
+      _cam.preview.hidden = false;
+      _cam.video.hidden = true;
+      _cam.root.dataset.state = "preview";
+      // Libere la camera pendant la preview (on reprendra au "Retaper")
+      stopCameraStream();
+    }, "image/jpeg", 0.92);
+  }
+
+  function switchCamera() {
+    _cam.facing = _cam.facing === "environment" ? "user" : "environment";
+    startCameraStream();
+  }
+
+  function sendCapturedPhoto() {
+    if (!_cam.capturedBlob) return;
+    _cam.sendBtn.disabled = true;
+    _cam.retakeBtn.disabled = true;
+    // Compression au besoin (canvas -> jpeg ~0.8) avant upload 4G
+    var fileForUpload = new File([_cam.capturedBlob], "photo.jpg", { type: "image/jpeg" });
+    var commentVal = (_cam.commentEl.value || "").trim();
+    compressImageIfNeeded(fileForUpload).then(function (out) {
+      var fd = new FormData();
+      fd.append("photo", out, out.name || "photo.jpg");
+      if (commentVal) fd.append("comment", commentVal);
+      // Metadata utile aux operateurs
+      if (state.meMarker) {
+        var ll = state.meMarker.getLatLng();
+        fd.append("lat", String(ll.lat));
+        fd.append("lng", String(ll.lng));
+      }
+      if (state.batteryPct != null) fd.append("battery", String(state.batteryPct));
+      return fetch("/field/photo/send", { method: "POST", body: fd });
+    }).then(function (r) {
+      if (!r) return;
+      if (r.status === 401) { handleSessionLost(); return; }
+      return r.json();
+    }).then(function (data) {
+      _cam.sendBtn.disabled = false;
+      _cam.retakeBtn.disabled = false;
+      if (data && data.ok) {
+        toast("Photo envoyee au PC Org", "ok");
+        closeCameraModal();
+      } else {
+        toast("Echec envoi : " + ((data && data.error) || "?"), "err");
+      }
+    }).catch(function () {
+      _cam.sendBtn.disabled = false;
+      _cam.retakeBtn.disabled = false;
+      toast("Erreur reseau", "err");
+    });
+  }
+
+  function buildCameraModal() {
+    var root = document.createElement("div");
+    root.className = "field-camera";
+    root.id = "field-camera";
+    root.dataset.state = "viewfinder";
+    root.hidden = true;
+    root.setAttribute("role", "dialog");
+    root.setAttribute("aria-modal", "true");
+    root.setAttribute("aria-label", "Appareil photo");
+
+    var stage = document.createElement("div");
+    stage.className = "field-camera-stage";
+
+    var video = document.createElement("video");
+    video.playsInline = true;
+    video.setAttribute("playsinline", "");
+    video.muted = true;
+    video.autoplay = true;
+
+    var preview = document.createElement("img");
+    preview.className = "field-camera-preview-img";
+    preview.hidden = true;
+    preview.alt = "Apercu";
+
+    var canvas = document.createElement("canvas");
+    canvas.hidden = true;
+
+    stage.appendChild(video);
+    stage.appendChild(preview);
+    stage.appendChild(canvas);
+
+    // Bouton fermer
+    var closeBtn = document.createElement("button");
+    closeBtn.className = "field-camera-close";
+    closeBtn.setAttribute("aria-label", "Fermer l'appareil photo");
+    var closeIcon = document.createElement("span");
+    closeIcon.className = "material-symbols-outlined";
+    closeIcon.setAttribute("aria-hidden", "true");
+    closeIcon.textContent = "close";
+    closeBtn.appendChild(closeIcon);
+    closeBtn.addEventListener("click", closeCameraModal);
+
+    // Bouton switch camera
+    var switchBtn = document.createElement("button");
+    switchBtn.className = "field-camera-switch";
+    switchBtn.setAttribute("aria-label", "Inverser la camera");
+    var switchIcon = document.createElement("span");
+    switchIcon.className = "material-symbols-outlined";
+    switchIcon.setAttribute("aria-hidden", "true");
+    switchIcon.textContent = "cameraswitch";
+    switchBtn.appendChild(switchIcon);
+    switchBtn.addEventListener("click", switchCamera);
+
+    // Bouton shutter (viewfinder)
+    var shutterWrap = document.createElement("div");
+    shutterWrap.className = "field-camera-shutter-wrap";
+    var shutterBtn = document.createElement("button");
+    shutterBtn.className = "field-camera-shutter";
+    shutterBtn.setAttribute("aria-label", "Capturer");
+    shutterBtn.addEventListener("click", captureFrame);
+    shutterWrap.appendChild(shutterBtn);
+
+    // Zone commentaire + envoi (preview)
+    var previewActions = document.createElement("div");
+    previewActions.className = "field-camera-preview-actions";
+
+    var commentEl = document.createElement("textarea");
+    commentEl.className = "field-camera-comment";
+    commentEl.placeholder = "Commentaire (optionnel)";
+    commentEl.rows = 2;
+    commentEl.maxLength = 1000;
+    commentEl.setAttribute("autocapitalize", "sentences");
+    commentEl.setAttribute("aria-label", "Commentaire");
+
+    var btnRow = document.createElement("div");
+    btnRow.className = "field-camera-preview-btns";
+
+    var retakeBtn = document.createElement("button");
+    retakeBtn.className = "field-camera-btn field-camera-btn-secondary";
+    var retakeIcon = document.createElement("span");
+    retakeIcon.className = "material-symbols-outlined";
+    retakeIcon.setAttribute("aria-hidden", "true");
+    retakeIcon.textContent = "replay";
+    retakeBtn.appendChild(retakeIcon);
+    retakeBtn.appendChild(document.createTextNode(" Retaper"));
+    retakeBtn.addEventListener("click", function () {
+      resetCameraPreview();
+      startCameraStream();
+    });
+
+    var sendBtn = document.createElement("button");
+    sendBtn.className = "field-camera-btn field-camera-btn-primary";
+    var sendIcon = document.createElement("span");
+    sendIcon.className = "material-symbols-outlined";
+    sendIcon.setAttribute("aria-hidden", "true");
+    sendIcon.textContent = "send";
+    sendBtn.appendChild(sendIcon);
+    sendBtn.appendChild(document.createTextNode(" Envoyer au PC Org"));
+    sendBtn.addEventListener("click", sendCapturedPhoto);
+
+    btnRow.appendChild(retakeBtn);
+    btnRow.appendChild(sendBtn);
+    previewActions.appendChild(commentEl);
+    previewActions.appendChild(btnRow);
+
+    root.appendChild(stage);
+    root.appendChild(closeBtn);
+    root.appendChild(switchBtn);
+    root.appendChild(shutterWrap);
+    root.appendChild(previewActions);
+
+    document.body.appendChild(root);
+    _cam.root = root;
+    _cam.video = video;
+    _cam.canvas = canvas;
+    _cam.preview = preview;
+    _cam.shutterBtn = shutterBtn;
+    _cam.sendBtn = sendBtn;
+    _cam.retakeBtn = retakeBtn;
+    _cam.switchBtn = switchBtn;
+    _cam.commentEl = commentEl;
+  }
+
   function closeFicheFromField(f) {
     fetch("/field/my-fiches/" + encodeURIComponent(f.id) + "/close", {
       method: "POST",
@@ -4041,9 +4302,7 @@
     $("btn-layers").addEventListener("click", cycleLayer);
     $("btn-grid").addEventListener("click", openLayersPanel);
     var cameraBtn = $("btn-camera");
-    if (cameraBtn) cameraBtn.addEventListener("click", function () {
-      toast("Appareil photo : bientot disponible");
-    });
+    if (cameraBtn) cameraBtn.addEventListener("click", openCameraModal);
     $("btn-inbox").addEventListener("click", function () {
       var p = $("inbox-panel");
       $("missions-panel").hidden = true;
@@ -4532,6 +4791,8 @@
       if (state.clockTimer) { clearInterval(state.clockTimer); state.clockTimer = null; }
       if (state.inboxTimer) { clearTimeout(state.inboxTimer); state.inboxTimer = null; }
       if (state.fichesTimer) { clearTimeout(state.fichesTimer); state.fichesTimer = null; }
+      // Liberer la camera quand l'app passe en arriere-plan (batterie + LED)
+      stopCameraStream();
       refreshGpsProfile();      // peut passer en "paused" si pas critique
       releaseWakeLock();
       return;

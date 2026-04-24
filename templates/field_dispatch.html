@@ -153,16 +153,16 @@
                 </header>
                 <div class="widget-body" id="field-admin-body">
                     <div class="table-responsive">
-                        <table id="field-devices-table" class="table table-striped table-hover" style="font-size:13px;">
+                        <table id="field-devices-table" class="table table-striped table-hover" style="font-size:13px; width:100%;">
                             <thead>
                                 <tr>
-                                    <th>Nom</th>
-                                    <th>Evenement</th>
-                                    <th>Groupe</th>
-                                    <th>Derniere position</th>
-                                    <th>Derniere activite</th>
-                                    <th>Batterie</th>
-                                    <th style="width:110px;">Actions</th>
+                                    <th style="min-width:160px;">Nom</th>
+                                    <th style="min-width:140px;">Evenement</th>
+                                    <th style="min-width:120px;">Groupe</th>
+                                    <th style="min-width:150px;">Derniere position</th>
+                                    <th style="min-width:120px;">Derniere activite</th>
+                                    <th style="width:70px; text-align:center;">Batterie</th>
+                                    <th style="width:120px; white-space:nowrap; text-align:right;">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="field-devices-tbody">
@@ -210,6 +210,25 @@
                     <label>Notes (optionnel)
                         <input name="notes" placeholder="ex. operateur referent, modele..." class="form-input" />
                     </label>
+                </div>
+                <div class="form-row">
+                    <label style="display:flex; align-items:center; gap:8px;">
+                        <input type="checkbox" name="vision_enabled" id="field-pair-vision-enabled" />
+                        <span>Activer Vision (scan billets vehicule)</span>
+                    </label>
+                </div>
+                <div class="form-row" id="field-pair-vision-lieu-row" hidden>
+                    <label>Lieu Vision
+                        <select name="vision_lieu" id="field-pair-vision-lieu" class="form-input">
+                            <option value="">-- Choisir --</option>
+                            <option value="Ouest">Ouest</option>
+                            <option value="Panorama">Panorama</option>
+                            <option value="Houx">Houx</option>
+                        </select>
+                    </label>
+                    <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
+                        Modifiable a tout moment depuis la fiche de la tablette.
+                    </p>
                 </div>
                 <div class="form-row" id="field-pair-event-row">
                     <p style="font-size:12px; color:var(--muted); margin:0;">
@@ -339,6 +358,74 @@
         </div>
         <div class="crud-modal-footer">
             <button class="btn btn-secondary" data-close>Fermer</button>
+        </div>
+    </div>
+</div>
+
+<!-- CRUD Modal — Conversation avec une tablette (liste de fils + fil detail) -->
+<div id="field-conv-modal" class="crud-modal" hidden>
+    <div class="crud-modal-dialog" style="max-width:720px; display:flex; flex-direction:column; max-height:85vh;">
+        <div class="crud-modal-header" style="display:flex; align-items:center; gap:8px;">
+            <button id="field-conv-back" class="btn btn-xs" title="Retour" hidden style="padding:2px 8px;">
+                <span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">arrow_back</span>
+            </button>
+            <h3 id="field-conv-title" style="flex:1; margin:0;">Conversation</h3>
+            <button class="crud-modal-close" data-close>&times;</button>
+        </div>
+
+        <!-- VUE LISTE DES FILS -->
+        <div id="field-conv-list-view" style="display:flex; flex-direction:column; flex:1; min-height:0;">
+            <div style="padding:10px 14px; border-bottom:1px solid var(--line); background:var(--card);">
+                <button id="field-conv-new-thread" class="btn btn-primary" style="display:inline-flex; align-items:center; gap:4px;">
+                    <span class="material-symbols-outlined" style="font-size:16px;">add</span>
+                    Nouveau fil
+                </button>
+            </div>
+            <div id="field-conv-threads" style="flex:1; overflow-y:auto; padding:6px 0; background:var(--bg);"></div>
+        </div>
+
+        <!-- VUE FIL DETAIL (chat) -->
+        <div id="field-conv-thread-view" style="display:none; flex-direction:column; flex:1; min-height:0;">
+            <div id="field-conv-thread-body" style="flex:1; overflow-y:auto; background:var(--bg); padding:14px;">
+                <div id="field-conv-thread-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+            </div>
+            <div style="padding:10px 14px; border-top:1px solid var(--line); background:var(--card);">
+                <div style="display:flex; gap:8px; align-items:flex-end;">
+                    <textarea id="field-conv-input" class="form-input" rows="2"
+                              placeholder="Ecrire une reponse..." maxlength="4000"
+                              style="flex:1; resize:none;"></textarea>
+                    <button id="field-conv-send" class="btn btn-primary" title="Envoyer (Entree)" style="height:44px; padding:0 16px; display:inline-flex; align-items:center; gap:4px;">
+                        <span class="material-symbols-outlined" style="font-size:18px;">send</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- VUE NOUVEAU FIL -->
+        <div id="field-conv-new-view" style="display:none; flex-direction:column; flex:1; padding:14px; background:var(--bg); gap:10px;">
+            <label style="display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted);">
+                Sujet du fil (titre)
+                <input type="text" id="field-conv-new-title" class="form-input" maxlength="120" placeholder="ex. Briefing matin, Deplacement Z13...">
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); flex:1;">
+                Message
+                <textarea id="field-conv-new-body" class="form-input" rows="6" maxlength="4000" placeholder="Contenu du premier message..." style="resize:none; flex:1;"></textarea>
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted);">
+                Type
+                <select id="field-conv-new-type" class="form-input">
+                    <option value="info">Info</option>
+                    <option value="instruction">Instruction</option>
+                    <option value="alert">Alerte (rouge)</option>
+                </select>
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted);">
+                <input type="checkbox" id="field-conv-new-priority"> Priorite haute (force l'ouverture sur la tablette)
+            </label>
+            <div style="display:flex; gap:8px; justify-content:flex-end;">
+                <button id="field-conv-new-cancel" class="btn btn-secondary">Annuler</button>
+                <button id="field-conv-new-submit" class="btn btn-primary">Creer le fil</button>
+            </div>
         </div>
     </div>
 </div>

@@ -190,6 +190,7 @@ def sync_immatriculations(fs_db, mongo_db, evenement=None, annee=None, full=Fals
     col.create_index("plaque_norm")
     col.create_index([("evenement", 1), ("annee", 1)])
     col.create_index("lieu")
+    col.create_index("device_id")
 
     query = fs_db.collection("immatriculations")
     if not full and evenement and annee:
@@ -219,6 +220,8 @@ def sync_immatriculations(fs_db, mongo_db, evenement=None, annee=None, full=Fals
                 "couleur": data.get("couleur", ""),
                 "marque": data.get("marque", ""),
                 "modele": data.get("modele", ""),
+                "device_id": data.get("device_id", ""),
+                "device_name": data.get("device_name", ""),
                 "firestore_doc_id": doc.id,
                 "synced_at": datetime.utcnow(),
             }

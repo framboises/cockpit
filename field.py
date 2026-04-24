@@ -226,6 +226,105 @@ def _generate_pairing_code():
 
 
 # ---------------------------------------------------------------------------
+# Vision JWT : delivrance d'un token signe RS256 pour autoriser la tablette
+# a utiliser l'app Vision (https://vision-a0f55.web.app/associer.html).
+# Vision verifie la signature en local (cle pub embarquee), pas d'aller-retour
+# reseau pour la validation : compatible mode hors ligne.
+# ---------------------------------------------------------------------------
+
+VISION_LIEUX = ["Ouest", "Panorama", "Houx"]
+VISION_APP_URL = os.getenv("VISION_APP_URL", "https://vision-a0f55.web.app/associer.html")
+VISION_JWT_ISSUER = "cockpit-field"
+VISION_JWT_KEY_PATH = os.getenv(
+    "VISION_JWT_PRIVATE_KEY",
+    os.path.join(SCRIPT_DIR, "keys", "vision_jwt_private.pem"),
+)
+VISION_JWT_END_MARGIN_DAYS = 1  # marge apres la date de demontage
+
+_vision_priv_key_pem = None
+
+
+def _load_vision_priv_key():
+    """Charge la cle privee RSA depuis disque, mise en cache."""
+    global _vision_priv_key_pem
+    if _vision_priv_key_pem is not None:
+        return _vision_priv_key_pem
+    if not os.path.exists(VISION_JWT_KEY_PATH):
+        logger.error("field: cle privee Vision JWT introuvable: %s", VISION_JWT_KEY_PATH)
+        return None
+    try:
+        with open(VISION_JWT_KEY_PATH, "rb") as f:
+            _vision_priv_key_pem = f.read()
+        return _vision_priv_key_pem
+    except Exception as exc:
+        logger.error("field: lecture cle privee Vision JWT echouee: %s", exc)
+        return None
+
+
+def _event_end_datetime(db, event, year):
+    """Retourne la date/heure de fin d'evenement (apres demontage) en UTC,
+    ou None si non defini. Utilise pour calculer l'exp du JWT Vision."""
+    if not event or not year:
+        return None
+    try:
+        doc = db["parametrages"].find_one(
+            {"event": event, "year": str(year)},
+            {"_id": 0, "data.globalHoraires.demontage": 1},
+        )
+        if not doc:
+            doc = db["parametrages"].find_one(
+                {"event": event, "year": year},
+                {"_id": 0, "data.globalHoraires.demontage": 1},
+            )
+        gh = ((doc or {}).get("data") or {}).get("globalHoraires") or {}
+        end_str = (gh.get("demontage") or {}).get("end") or ""
+        end_str = end_str.strip()
+    except Exception:
+        end_str = ""
+    if not end_str:
+        return None
+    # Format YYYY-MM-DD ou YYYY-MM-DDTHH:MM
+    try:
+        if "T" in end_str:
+            dt = datetime.fromisoformat(end_str)
+        else:
+            dt = datetime.fromisoformat(end_str[:10] + "T23:59:59")
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=TZ_LOCAL)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _generate_vision_jwt(device, end_dt):
+    """Genere un JWT RS256 pour autoriser le device a utiliser Vision.
+    end_dt : datetime UTC (fin d'evenement) ou None (=> 24 h par defaut)."""
+    import jwt as _pyjwt  # PyJWT
+    priv_pem = _load_vision_priv_key()
+    if priv_pem is None:
+        raise RuntimeError("vision_jwt_key_missing")
+
+    now = _now()
+    if end_dt is not None:
+        exp = end_dt + timedelta(days=VISION_JWT_END_MARGIN_DAYS)
+    else:
+        # Fallback : 24 h si pas de date de fin definie
+        exp = now + timedelta(hours=24)
+
+    payload = {
+        "iss": VISION_JWT_ISSUER,
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+        "device_id": str(device.get("_id")),
+        "device_name": device.get("name") or "",
+        "evenement": device.get("event") or "",
+        "annee": int(device.get("year")) if str(device.get("year") or "").isdigit() else device.get("year"),
+        "lieu": device.get("vision_lieu") or "",
+    }
+    return _pyjwt.encode(payload, priv_pem, algorithm="RS256")
+
+
+# ---------------------------------------------------------------------------
 # Auto-revocation : quand un evenement est termine (date de fin de demontage
 # depassee), on revoke automatiquement toutes ses tablettes. Check paresseux
 # avec cache 5 min pour eviter les reads inutiles a chaque poll tablette.
@@ -414,6 +513,8 @@ def _pub_device(device):
         "status": device.get("status") or "patrouille",
         "status_since": _iso(device.get("status_since")),
         "active_fiche_id": device.get("active_fiche_id"),
+        "vision_enabled": bool(device.get("vision_enabled")),
+        "vision_lieu": device.get("vision_lieu") or "",
     }
 
 
@@ -620,6 +721,8 @@ def field_pair_submit():
         "last_ip": ip,
         "revoked": False,
         "notes": pairing.get("notes", ""),
+        "vision_enabled": bool(pairing.get("vision_enabled")),
+        "vision_lieu": pairing.get("vision_lieu") or "",
     }
     ins = db["field_devices"].insert_one(device_doc)
     device_doc["_id"] = ins.inserted_id
@@ -652,6 +755,33 @@ def field_logout():
     resp = make_response(redirect("/field/pair"))
     resp.delete_cookie(FIELD_COOKIE_NAME, path=FIELD_COOKIE_PATH)
     return resp
+
+
+@field_bp.route("/field/vision/launch", methods=["GET"])
+@field_token_required
+def field_vision_launch():
+    """Genere un JWT signe et redirige la tablette vers Vision avec le token
+    en query param. Vision valide la signature en local (cle pub embarquee).
+    Echec si la tablette n'a pas vision_enabled, ou si la cle privee est absente."""
+    device = request.device
+    if not device.get("vision_enabled"):
+        return jsonify({"ok": False, "error": "vision_not_enabled"}), 403
+    if not (device.get("vision_lieu") or "") in VISION_LIEUX:
+        return jsonify({"ok": False, "error": "vision_lieu_missing"}), 400
+
+    db = _get_mongo_db()
+    end_dt = _event_end_datetime(db, device.get("event"), device.get("year"))
+    try:
+        token = _generate_vision_jwt(device, end_dt)
+    except RuntimeError as exc:
+        logger.error("field: generation JWT Vision impossible: %s", exc)
+        return jsonify({"ok": False, "error": "vision_jwt_unavailable"}), 500
+
+    # Si JSON demande, renvoyer l'URL ; sinon redirect direct
+    target = VISION_APP_URL + ("&" if "?" in VISION_APP_URL else "?") + "t=" + token
+    if _wants_json():
+        return jsonify({"ok": True, "url": target, "exp": int(end_dt.timestamp()) if end_dt else None})
+    return redirect(target)
 
 
 # ---------------------------------------------------------------------------
@@ -1297,6 +1427,92 @@ def field_reply(msg_id):
     return jsonify({"ok": True, "id": str(reply_doc["_id"])})
 
 
+@field_bp.route("/field/photo/send", methods=["POST"])
+@field_token_required
+def field_photo_send():
+    """Envoi d'une photo spontanee depuis la tablette vers les operateurs PC Org.
+    Cree un message field_messages direction=field_to_cockpit, type=photo_report.
+    Visible dans la console Field dispatch (historique des messages)."""
+    device = request.device
+
+    if not request.content_type or "multipart" not in request.content_type:
+        return jsonify({"ok": False, "error": "multipart_required"}), 400
+
+    photo_file = request.files.get("photo")
+    if not photo_file or not photo_file.filename:
+        return jsonify({"ok": False, "error": "missing_photo"}), 400
+
+    comment = (request.form.get("comment") or "").strip()
+    if len(comment) > 1000:
+        return jsonify({"ok": False, "error": "comment_too_long"}), 400
+
+    ext = (photo_file.filename.rsplit(".", 1)[-1] if "." in photo_file.filename else "").lower()
+    if ext not in FIELD_PHOTO_EXTENSIONS:
+        return jsonify({"ok": False, "error": "invalid_photo_format"}), 400
+    photo_data = photo_file.read()
+    if len(photo_data) > FIELD_PHOTO_MAX_SIZE:
+        return jsonify({"ok": False, "error": "photo_too_large"}), 400
+
+    import uuid as _uuid
+    photo_id = str(_uuid.uuid4())
+    event = device.get("event") or "unknown"
+    year = device.get("year") or "unknown"
+    sub_dir = os.path.join(str(event), str(year))
+    full_dir = os.path.join(FIELD_PHOTOS_DIR, sub_dir)
+    os.makedirs(full_dir, exist_ok=True)
+    safe_name = secure_filename(photo_file.filename) or "photo.jpg"
+    filename = "{}_{}.{}".format(photo_id[:8], safe_name.rsplit(".", 1)[0][:20], ext)
+    filepath = os.path.join(full_dir, filename)
+    with open(filepath, "wb") as fp:
+        fp.write(photo_data)
+    photo_url = "/field/photos/{}/{}".format(sub_dir.replace(os.sep, "/"), filename)
+
+    # Metadata optionnelles
+    try:
+        lat = float(request.form.get("lat")) if request.form.get("lat") else None
+    except (TypeError, ValueError):
+        lat = None
+    try:
+        lng = float(request.form.get("lng")) if request.form.get("lng") else None
+    except (TypeError, ValueError):
+        lng = None
+    try:
+        battery = int(request.form.get("battery")) if request.form.get("battery") else None
+    except (TypeError, ValueError):
+        battery = None
+
+    db = _get_mongo_db()
+    now = _now()
+    now_local = _now_local()
+    name = device.get("name") or "?"
+    # Titre auto : "Photo HH:MM" (fil different a chaque envoi spontane)
+    hh_mm = now_local.strftime("%H:%M")
+    title = "Photo " + hh_mm
+    doc = {
+        "device_id": device["_id"],
+        "device_name": name,
+        "event": device.get("event"),
+        "year": device.get("year"),
+        "type": "photo_report",
+        "title": title,
+        "body": comment,
+        "payload": {
+            "photo": photo_url,
+            "lat": lat,
+            "lng": lng,
+            "battery": battery,
+        },
+        "priority": "normal",
+        "from": "field:" + name,
+        "direction": "field_to_cockpit",
+        "createdAt": now,
+        "expiresAt": now + timedelta(seconds=INBOX_MESSAGE_TTL_SECONDS),
+        "ack_at": None,
+    }
+    res = db["field_messages"].insert_one(doc)
+    return jsonify({"ok": True, "id": str(res.inserted_id), "photo_url": photo_url})
+
+
 # =============================================================================
 # PARTIE ADMIN : routes /field/admin/*
 # =============================================================================
@@ -1355,6 +1571,8 @@ def _pub_pairing(p):
         "year": p.get("year"),
         "beacon_group_id": p.get("beacon_group_id"),
         "notes": p.get("notes", ""),
+        "vision_enabled": bool(p.get("vision_enabled")),
+        "vision_lieu": p.get("vision_lieu") or "",
         "createdAt": _iso(p.get("createdAt")),
         "expiresAt": _iso(p.get("expiresAt")),
         "created_by": p.get("created_by"),
@@ -1468,13 +1686,15 @@ def field_admin_pairings_list():
 @admin_required
 def field_admin_pairings_create():
     """Cree un nouveau code de pairing (unique). Payload : name, event, year,
-    beacon_group_id, notes?"""
+    beacon_group_id, notes?, vision_enabled?, vision_lieu?"""
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     event = (data.get("event") or "").strip()
     year = str(data.get("year") or "").strip()
     beacon_group_id = (data.get("beacon_group_id") or "").strip()
     notes = (data.get("notes") or "").strip()
+    vision_enabled = bool(data.get("vision_enabled"))
+    vision_lieu = (data.get("vision_lieu") or "").strip()
 
     if not name:
         return jsonify({"ok": False, "error": "missing_name"}), 400
@@ -1482,6 +1702,8 @@ def field_admin_pairings_create():
         return jsonify({"ok": False, "error": "missing_event_year"}), 400
     if not beacon_group_id:
         return jsonify({"ok": False, "error": "missing_beacon_group"}), 400
+    if vision_enabled and vision_lieu not in VISION_LIEUX:
+        return jsonify({"ok": False, "error": "invalid_vision_lieu"}), 400
 
     db = _get_mongo_db()
 
@@ -1514,6 +1736,8 @@ def field_admin_pairings_create():
         "year": year,
         "beacon_group_id": beacon_group_id,
         "notes": notes,
+        "vision_enabled": vision_enabled,
+        "vision_lieu": vision_lieu if vision_enabled else "",
         "createdAt": _now(),
         "expiresAt": _now() + timedelta(seconds=PAIRING_CODE_TTL_SECONDS),
         "created_by": (request.admin_user or {}).get("email", "?"),
@@ -1636,6 +1860,35 @@ def field_admin_device_restore(device_id):
     if res.matched_count == 0:
         return jsonify({"ok": False, "error": "not_found"}), 404
     return jsonify({"ok": True})
+
+
+@field_bp.route("/field/admin/devices/<device_id>/vision", methods=["POST"])
+@admin_required
+def field_admin_device_vision(device_id):
+    """Modifie la config Vision d'une tablette (vision_enabled, vision_lieu).
+    Au prochain launch, le JWT sera regenere avec ces nouvelles valeurs."""
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get("vision_enabled"))
+    lieu = (data.get("vision_lieu") or "").strip()
+    if enabled and lieu not in VISION_LIEUX:
+        return jsonify({"ok": False, "error": "invalid_vision_lieu"}), 400
+    db = _get_mongo_db()
+    res = db["field_devices"].update_one(
+        {"_id": oid},
+        {"$set": {
+            "vision_enabled": enabled,
+            "vision_lieu": lieu if enabled else "",
+            "vision_updated_at": _now(),
+        }},
+    )
+    if res.matched_count == 0:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    device = db["field_devices"].find_one({"_id": oid})
+    return jsonify({"ok": True, "device": _pub_device(device)})
 
 
 @field_bp.route("/field/admin/devices/<device_id>/rename", methods=["POST"])
@@ -2011,6 +2264,157 @@ def field_admin_message_delete(msg_id):
     if res.deleted_count == 0:
         return jsonify({"ok": False, "error": "not_found"}), 404
     return jsonify({"ok": True})
+
+
+@field_bp.route("/field/admin/threads/<device_id>", methods=["GET"])
+@admin_required
+def field_admin_threads(device_id):
+    """Liste des fils de conversation pour une tablette. Un fil = un message
+    racine (thread_id = null) + toutes ses reponses. On renvoie les racines
+    avec un resume : dernier message, compteur non lus admin, photo si
+    presente dans le fil."""
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_device_id"}), 400
+    db = _get_mongo_db()
+
+    # Toutes les racines (pas de thread_id) pour ce device
+    roots_cursor = db["field_messages"].find({
+        "device_id": oid,
+        "$or": [{"thread_id": None}, {"thread_id": {"$exists": False}}],
+    }).sort("createdAt", -1).limit(200)
+    roots = list(roots_cursor)
+
+    threads = []
+    for root in roots:
+        root_id = root["_id"]
+        # Tous les messages du fil (racine + replies)
+        msgs = list(db["field_messages"].find({
+            "$or": [{"_id": root_id}, {"thread_id": root_id}],
+        }).sort("createdAt", 1))
+        if not msgs:
+            continue
+        last = msgs[-1]
+        unread = sum(
+            1 for m in msgs
+            if m.get("direction") == "field_to_cockpit"
+            and not m.get("admin_read_at")
+        )
+        # Premiere photo trouvee dans le fil (pour thumbnail)
+        photo = None
+        for m in msgs:
+            p = (m.get("payload") or {}).get("photo")
+            if p:
+                photo = p
+                break
+        threads.append({
+            "root_id": str(root_id),
+            "title": root.get("title") or "(sans titre)",
+            "type": root.get("type"),
+            "direction": root.get("direction", "cockpit_to_field"),
+            "priority": root.get("priority", "normal"),
+            "created_at": _iso(root.get("createdAt")),
+            "last_at": _iso(last.get("createdAt")),
+            "last_preview": (last.get("body") or last.get("title") or "")[:140],
+            "last_direction": last.get("direction", "cockpit_to_field"),
+            "reply_count": max(0, len(msgs) - 1),
+            "unread": unread,
+            "photo": photo,
+        })
+    # Tri : non-lus d'abord, puis par dernier message (plus recent en haut)
+    threads.sort(key=lambda t: (0 if t["unread"] else 1, t["last_at"] or ""), reverse=False)
+    # reverse sur last_at : on veut recent en haut, donc on trie avec une cle custom
+    threads.sort(key=lambda t: t["last_at"] or "", reverse=True)
+    threads.sort(key=lambda t: 0 if t["unread"] else 1)
+    return jsonify({"ok": True, "threads": threads})
+
+
+@field_bp.route("/field/admin/conversation/<device_id>", methods=["GET"])
+@admin_required
+def field_admin_conversation(device_id):
+    """Deprecated : conserve pour compat (fil unique tous messages confondus).
+    La console dispatch utilise maintenant /field/admin/threads."""
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_device_id"}), 400
+    db = _get_mongo_db()
+    cursor = db["field_messages"].find({"device_id": oid}).sort("createdAt", 1).limit(500)
+    messages = [_pub_message_admin(m) for m in cursor]
+    unread = db["field_messages"].count_documents({
+        "device_id": oid,
+        "direction": "field_to_cockpit",
+        "$or": [{"admin_read_at": None}, {"admin_read_at": {"$exists": False}}],
+    })
+    return jsonify({"ok": True, "messages": messages, "unread_inbound": unread})
+
+
+@field_bp.route("/field/admin/thread/<msg_id>/mark-read", methods=["POST"])
+@admin_required
+def field_admin_thread_mark_read(msg_id):
+    """Marque les messages inbound d'un fil comme lus par l'admin."""
+    try:
+        oid = ObjectId(msg_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    db = _get_mongo_db()
+    original = db["field_messages"].find_one({"_id": oid})
+    if not original:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    thread_id = original.get("thread_id") or oid
+    res = db["field_messages"].update_many(
+        {
+            "$and": [
+                {"$or": [{"_id": thread_id}, {"thread_id": thread_id}]},
+                {"direction": "field_to_cockpit"},
+                {"$or": [{"admin_read_at": None}, {"admin_read_at": {"$exists": False}}]},
+            ],
+        },
+        {"$set": {"admin_read_at": _now()}},
+    )
+    return jsonify({"ok": True, "updated": res.modified_count})
+
+
+@field_bp.route("/field/admin/conversation/<device_id>/mark-read", methods=["POST"])
+@admin_required
+def field_admin_conversation_mark_read(device_id):
+    """Marque tous les messages entrants (field->cockpit) comme lus par un admin.
+    N'affecte pas le champ ack_at cote tablette (qui sert au ack cote device)."""
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_device_id"}), 400
+    db = _get_mongo_db()
+    res = db["field_messages"].update_many(
+        {
+            "device_id": oid,
+            "direction": "field_to_cockpit",
+            "$or": [{"admin_read_at": None}, {"admin_read_at": {"$exists": False}}],
+        },
+        {"$set": {"admin_read_at": _now()}},
+    )
+    return jsonify({"ok": True, "updated": res.modified_count})
+
+
+@field_bp.route("/field/admin/unread-by-device", methods=["GET"])
+@admin_required
+def field_admin_unread_by_device():
+    """Retourne le nombre de messages entrants non lus par admin, groupe par
+    device_id. Utilise pour afficher les badges dans la table des tablettes."""
+    db = _get_mongo_db()
+    pipeline = [
+        {"$match": {
+            "direction": "field_to_cockpit",
+            "$or": [{"admin_read_at": None}, {"admin_read_at": {"$exists": False}}],
+        }},
+        {"$group": {"_id": "$device_id", "count": {"$sum": 1}}},
+    ]
+    out = {}
+    for row in db["field_messages"].aggregate(pipeline):
+        if row.get("_id"):
+            out[str(row["_id"])] = row.get("count", 0)
+    return jsonify({"ok": True, "unread": out})
 
 
 @field_bp.route("/field/admin/thread/<msg_id>", methods=["GET"])

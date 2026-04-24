@@ -206,6 +206,12 @@
       <span class="badge" id="inbox-badge" aria-label="messages non lus" hidden>0</span>
       <span class="label">Messages</span>
     </button>
+    {% if device.vision_enabled %}
+    <a class="action-btn" id="btn-vision" href="/field/vision/launch" target="_blank" rel="noopener" aria-label="Scanner billets vehicule (Vision)" title="Vision">
+      <span class="material-symbols-outlined" aria-hidden="true">qr_code_scanner</span>
+      <span class="label">Vision</span>
+    </a>
+    {% endif %}
     <button class="action-btn action-sos" id="btn-sos" aria-label="Declencher un SOS" title="SOS">
       <span class="material-symbols-outlined" aria-hidden="true">emergency</span>
       <span class="label">SOS</span>

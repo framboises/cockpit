@@ -84,3 +84,15 @@ static/libs/    → Bibliothèques tierces (Leaflet)
 ## Règles strictes
 
 - **JAMAIS de guillemets typographiques** dans le code JS/CSS/Python. Utiliser uniquement les apostrophes droites `'` et guillemets droits `"`. Les curly quotes `'`, `'`, `"`, `"` provoquent des SyntaxError silencieuses.
+
+## Intégration Vision (app externe `vision-a0f55.web.app`)
+
+L'app Vision (scan billets véhicule, repo voisin `../vision`) est **JWT-gated par Field** : une tablette ne peut utiliser `associer.html` que si elle a été enrôlée dans Cockpit avec `vision_enabled = true`.
+
+- **Pairing admin** (`POST /field/admin/pairings`) accepte `vision_enabled` (bool) + `vision_lieu` (`Ouest`|`Panorama`|`Houx`). Stocké dans `field_pairings` puis copié dans `field_devices` au pair.
+- **Modification post-pairing** : `POST /field/admin/devices/<id>/vision` avec `{vision_enabled, vision_lieu}`. UI : bouton `qr_code_scanner` dans la table devices de `field_dispatch.html`, prompt JS dans `field_admin.js`.
+- **Launcher tablette** : `GET /field/vision/launch` (auth `@field_token_required`) → génère un JWT RS256 `{device_id, device_name, evenement, annee, lieu, exp, iss="cockpit-field"}` avec `exp = fin événement (parametrages.data.globalHoraires.demontage.end) + 1 jour de marge`, fallback 24 h si pas de demontage défini. Redirige vers `VISION_APP_URL?t=<JWT>` (target `_blank` depuis le bouton "Vision" de `field.html`).
+- **Clés RSA** : générées via `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048` dans `cockpit/keys/vision_jwt_{private,public}.pem`. La privée est dans `.gitignore` (`keys/*_private.pem`). La publique est embarquée en dur dans `vision/associer.html` (constante `VISION_JWT_PUBKEY_PEM`) — Vision valide le JWT en local sans appel réseau, mode hors ligne préservé.
+- **Variable d'env** : `VISION_APP_URL` (default `https://vision-a0f55.web.app/associer.html`), `VISION_JWT_PRIVATE_KEY` (override path).
+- **Sync Firestore → MongoDB** : `vision_sync.py` propage les nouveaux champs `device_id` et `device_name` des docs `immatriculations` Firestore vers la collection MongoDB `vision_immatriculations` (index `device_id` ajouté).
+- **Constante** `VISION_LIEUX = ["Ouest", "Panorama", "Houx"]` dans `field.py` — à mettre à jour si on ajoute des lieux Vision.

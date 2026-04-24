@@ -161,6 +161,9 @@
       loadMessages();
     }, 30000);
 
+    // Poll leger des compteurs non-lus : plus frequent pour reactivite
+    setInterval(loadUnreadByDevice, 8000);
+
     // Reagir aux changements globaux event/year
     document.addEventListener("cockpit:scope-changed", function () {
       refreshScopeUi();
@@ -240,6 +243,7 @@
       .then(function (data) {
         state.devices = (data && data.devices) || [];
         renderDevices();
+        loadUnreadByDevice();
       })
       .catch(function () {
         state.devices = [];
@@ -280,6 +284,7 @@
     });
     sorted.forEach(function (d) {
       var tr = document.createElement("tr");
+      tr.setAttribute("data-device-id", d.id);
 
       var tdName = document.createElement("td");
       var tabletIcon = document.createElement("span");
@@ -291,6 +296,12 @@
       nameSpan.textContent = d.name || "-";
       nameSpan.style.fontWeight = "600";
       tdName.appendChild(nameSpan);
+      if (d.vision_enabled) {
+        var visionBadge = document.createElement("span");
+        visionBadge.textContent = "Vision: " + (d.vision_lieu || "?");
+        visionBadge.style.cssText = "margin-left:6px; font-size:9px; font-weight:700; background:#003b5c; color:#fff; padding:1px 5px; border-radius:4px; vertical-align:middle;";
+        tdName.appendChild(visionBadge);
+      }
       tr.appendChild(tdName);
 
       if (hasEventCol) {
@@ -335,29 +346,66 @@
       tr.appendChild(tdBat);
 
       var tdAct = document.createElement("td");
-      if (d.revoked) {
-        var btnRestore = document.createElement("button");
-        btnRestore.className = "btn btn-xs btn-success";
-        btnRestore.title = "Re-autoriser cette tablette (sans nouveau code)";
-        btnRestore.innerHTML = "<span class='material-symbols-outlined' style='font-size:14px;'>lock_open</span>";
-        btnRestore.addEventListener("click", function () { restoreDevice(d); });
-        tdAct.appendChild(btnRestore);
-      } else {
-        var btnRevoke = document.createElement("button");
-        btnRevoke.className = "btn btn-xs";
-        btnRevoke.title = "Revoquer (la tablette sera deconnectee)";
-        btnRevoke.innerHTML = "<span class='material-symbols-outlined' style='font-size:14px;'>block</span>";
-        btnRevoke.addEventListener("click", function () { revokeDevice(d); });
-        tdAct.appendChild(btnRevoke);
+      tdAct.style.whiteSpace = "nowrap";
+      tdAct.style.textAlign = "right";
+      var actWrap = document.createElement("div");
+      actWrap.style.cssText = "display:inline-flex; gap:4px; align-items:center;";
+      tdAct.appendChild(actWrap);
+
+      function mkActionBtn(icon, title, extraClass, onClick) {
+        var b = document.createElement("button");
+        b.className = "btn btn-xs" + (extraClass ? " " + extraClass : "");
+        b.title = title;
+        b.style.cssText = "width:32px; height:28px; padding:0; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto;";
+        var ic = document.createElement("span");
+        ic.className = "material-symbols-outlined";
+        ic.style.fontSize = "16px";
+        ic.textContent = icon;
+        b.appendChild(ic);
+        b.addEventListener("click", onClick);
+        return b;
       }
 
-      var btnDel = document.createElement("button");
-      btnDel.className = "btn btn-xs";
-      btnDel.title = "Supprimer definitivement";
-      btnDel.style.marginLeft = "3px";
-      btnDel.innerHTML = "<span class='material-symbols-outlined' style='font-size:14px;'>delete</span>";
-      btnDel.addEventListener("click", function () { deleteDevice(d); });
-      tdAct.appendChild(btnDel);
+      if (!d.revoked) {
+        actWrap.appendChild(mkActionBtn(
+          "chat",
+          "Ouvrir la conversation avec cette tablette",
+          "btn-primary",
+          function () { openConversationModal(d); }
+        ));
+      }
+
+      if (d.revoked) {
+        actWrap.appendChild(mkActionBtn(
+          "lock_open",
+          "Re-autoriser cette tablette (sans nouveau code)",
+          "btn-success",
+          function () { restoreDevice(d); }
+        ));
+      } else {
+        actWrap.appendChild(mkActionBtn(
+          "block",
+          "Revoquer (la tablette sera deconnectee)",
+          null,
+          function () { revokeDevice(d); }
+        ));
+      }
+
+      actWrap.appendChild(mkActionBtn(
+        "qr_code_scanner",
+        d.vision_enabled
+          ? "Vision activee (lieu : " + (d.vision_lieu || "?") + ") - cliquer pour modifier"
+          : "Activer Vision sur cette tablette",
+        d.vision_enabled ? "btn-info" : null,
+        function () { configureVision(d); }
+      ));
+
+      actWrap.appendChild(mkActionBtn(
+        "delete",
+        "Supprimer definitivement",
+        null,
+        function () { deleteDevice(d); }
+      ));
       tr.appendChild(tdAct);
 
       if (d.revoked) {
@@ -424,6 +472,35 @@
         })
         .catch(function () { _toast("error", "Erreur reseau"); });
     });
+  }
+
+  function configureVision(d) {
+    var current = d.vision_enabled ? (d.vision_lieu || "") : "";
+    var msg = "Lieu Vision pour " + (d.name || "?")
+      + " : Ouest, Panorama ou Houx.\n\nLaisser vide pour desactiver Vision sur cette tablette.";
+    var input = window.prompt(msg, current);
+    if (input === null) return;
+    input = (input || "").trim();
+    var enabled = !!input;
+    if (enabled && ["Ouest", "Panorama", "Houx"].indexOf(input) < 0) {
+      _toast("error", "Lieu invalide. Choix : Ouest, Panorama, Houx.");
+      return;
+    }
+    apiPost("/field/admin/devices/" + d.id + "/vision", {
+      vision_enabled: enabled,
+      vision_lieu: input,
+    })
+      .then(function (res) {
+        if (res.body && res.body.ok) {
+          _toast("success", enabled ? ("Vision activee : " + input) : "Vision desactivee");
+          loadDevices();
+        } else {
+          var err = (res.body && res.body.error) || "inconnue";
+          var map = { invalid_vision_lieu: "Lieu invalide.", not_found: "Tablette introuvable." };
+          _toast("error", "Erreur : " + (map[err] || err));
+        }
+      })
+      .catch(function () { _toast("error", "Erreur reseau"); });
   }
 
   function deleteDevice(d) {
@@ -528,7 +605,14 @@
     var form = $("#field-pair-form");
     if (form) form.reset();
     var result = $("#field-pair-result");
-    if (result) result.innerHTML = "";
+    if (result) result.textContent = "";
+    // Toggle Vision lieu row selon checkbox
+    var visionChk = $("#field-pair-vision-enabled");
+    var visionRow = $("#field-pair-vision-lieu-row");
+    if (visionChk && visionRow) {
+      visionRow.hidden = !visionChk.checked;
+      visionChk.onchange = function () { visionRow.hidden = !visionChk.checked; };
+    }
     var modal = $("#field-pair-modal");
     if (modal) modal.hidden = false;
   }
@@ -547,15 +631,19 @@
       _toast("error", "Selectionne un evenement dans le header cockpit");
       return;
     }
+    var visionEnabled = !!(fd.get("vision_enabled"));
     var payload = {
       name: (fd.get("name") || "").toString().trim(),
       beacon_group_id: (fd.get("beacon_group_id") || "").toString(),
       notes: (fd.get("notes") || "").toString().trim(),
+      vision_enabled: visionEnabled,
+      vision_lieu: visionEnabled ? (fd.get("vision_lieu") || "").toString() : "",
       event: scope.event,
       year: scope.year,
     };
     if (!payload.name) { _toast("error", "Nom requis"); return; }
     if (!payload.beacon_group_id) { _toast("error", "Groupe requis"); return; }
+    if (visionEnabled && !payload.vision_lieu) { _toast("error", "Lieu Vision requis"); return; }
 
     apiPost("/field/admin/pairings", payload)
       .then(function (res) {
@@ -571,6 +659,7 @@
             unknown_beacon_group: "Groupe introuvable.",
             beacon_group_disabled: "Groupe desactive.",
             name_conflict: "Ce nom est deja utilise par une balise Anoloc ou une tablette.",
+            invalid_vision_lieu: "Lieu Vision invalide (Ouest, Panorama ou Houx).",
           };
           _toast("error", map[err] || ("Erreur : " + err));
         }
@@ -628,6 +717,23 @@
   // ------------------------------------------------------------------
   // Messages : envoi et historique
   // ------------------------------------------------------------------
+  function openPhotoLightbox(url) {
+    var existing = document.getElementById("field-admin-lightbox");
+    if (existing) { try { existing.remove(); } catch (e) {} }
+    var lb = document.createElement("div");
+    lb.id = "field-admin-lightbox";
+    lb.style.cssText = "position:fixed; inset:0; background:rgba(0,0,0,0.88); z-index:6000; display:flex; align-items:center; justify-content:center; cursor:zoom-out; padding:20px;";
+    var img = document.createElement("img");
+    img.src = url;
+    img.style.cssText = "max-width:100%; max-height:100%; border-radius:4px; box-shadow:0 8px 30px rgba(0,0,0,0.5);";
+    lb.appendChild(img);
+    lb.addEventListener("click", function () { lb.remove(); });
+    document.addEventListener("keydown", function esc(e) {
+      if (e.key === "Escape") { lb.remove(); document.removeEventListener("keydown", esc); }
+    });
+    document.body.appendChild(lb);
+  }
+
   function loadMessages() {
     var s = currentScope();
     if (!s.event || !s.year) {
@@ -680,13 +786,25 @@
       tr.appendChild(tdDev);
 
       var tdType = document.createElement("td");
-      var typeLabel = { info: "Info", instruction: "Instruction", alert: "Alerte", route: "Itineraire" }[m.type] || m.type;
+      var isInbound = m.direction === "field_to_cockpit";
+      if (isInbound) {
+        var dirIcon = document.createElement("span");
+        dirIcon.className = "material-symbols-outlined";
+        dirIcon.style.cssText = "font-size:14px; vertical-align:middle; color:#0369a1; margin-right:4px;";
+        dirIcon.textContent = "call_received";
+        dirIcon.title = "Message recu de la tablette";
+        tdType.appendChild(dirIcon);
+      }
+      var typeLabel = {
+        info: "Info", instruction: "Instruction", alert: "Alerte", route: "Itineraire",
+        photo_report: "Photo", sos_broadcast: "SOS"
+      }[m.type] || m.type;
       var badge = document.createElement("span");
       badge.textContent = typeLabel;
       badge.style.fontSize = "10px";
       badge.style.padding = "1px 6px";
       badge.style.borderRadius = "4px";
-      if (m.type === "alert") {
+      if (m.type === "alert" || m.type === "sos_broadcast") {
         badge.style.background = "#fee2e2";
         badge.style.color = "#991b1b";
       } else if (m.type === "instruction") {
@@ -695,6 +813,9 @@
       } else if (m.type === "route") {
         badge.style.background = "#dbeafe";
         badge.style.color = "#1e40af";
+      } else if (m.type === "photo_report") {
+        badge.style.background = "#dcfce7";
+        badge.style.color = "#166534";
       } else {
         badge.style.background = "#e5e7eb";
         badge.style.color = "#374151";
@@ -710,12 +831,25 @@
       tr.appendChild(tdType);
 
       var tdTitle = document.createElement("td");
-      tdTitle.textContent = m.title || "(sans titre)";
+      tdTitle.style.maxWidth = "260px";
+      // Miniature photo si le message en contient une
+      var photoUrl = m.payload && m.payload.photo;
+      if (photoUrl) {
+        var thumb = document.createElement("img");
+        thumb.src = photoUrl;
+        thumb.alt = "Photo";
+        thumb.style.cssText = "width:40px; height:40px; object-fit:cover; border-radius:4px; margin-right:8px; vertical-align:middle; cursor:zoom-in; border:1px solid var(--line);";
+        thumb.addEventListener("click", function (e) {
+          e.stopPropagation();
+          openPhotoLightbox(photoUrl);
+        });
+        tdTitle.appendChild(thumb);
+      }
+      var titleText = document.createElement("span");
+      titleText.textContent = m.title || (isInbound ? (m.body || "(photo)") : "(sans titre)");
+      titleText.style.cssText = "overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle;";
+      tdTitle.appendChild(titleText);
       tdTitle.title = m.body || "";
-      tdTitle.style.maxWidth = "240px";
-      tdTitle.style.overflow = "hidden";
-      tdTitle.style.textOverflow = "ellipsis";
-      tdTitle.style.whiteSpace = "nowrap";
       tr.appendChild(tdTitle);
 
       var tdStatus = document.createElement("td");
@@ -757,6 +891,392 @@
     });
   }
 
+  // ------------------------------------------------------------------
+  // Conversations : une tablette a plusieurs fils (threads). L'UI a 3 vues :
+  //   - liste : tous les fils de la tablette avec preview + unread
+  //   - thread : les messages d'un fil + zone de reply
+  //   - new : formulaire pour creer un nouveau fil
+  // ------------------------------------------------------------------
+  var convState = { device: null, view: "list", activeThreadId: null, pollTimer: null };
+
+  function openConversationModal(device) {
+    convState.device = device;
+    convState.view = "list";
+    convState.activeThreadId = null;
+    var modal = $("#field-conv-modal");
+    if (!modal) return;
+    wireConversationModalOnce(modal);
+    updateConvTitle();
+    switchConvView("list");
+    loadThreads();
+    modal.hidden = false;
+    if (convState.pollTimer) clearInterval(convState.pollTimer);
+    convState.pollTimer = setInterval(function () {
+      if (modal.hidden) return;
+      if (convState.view === "list") loadThreads(true);
+      else if (convState.view === "thread") loadThreadMessages(true);
+    }, 4000);
+  }
+
+  function closeConversationModal() {
+    var modal = $("#field-conv-modal");
+    if (modal) modal.hidden = true;
+    if (convState.pollTimer) { clearInterval(convState.pollTimer); convState.pollTimer = null; }
+    convState.device = null;
+    convState.activeThreadId = null;
+    loadUnreadByDevice();
+  }
+
+  function wireConversationModalOnce(modal) {
+    if (modal._wired) return;
+    modal._wired = true;
+    Array.prototype.forEach.call(modal.querySelectorAll("[data-close]"), function (b) {
+      b.addEventListener("click", closeConversationModal);
+    });
+    modal.addEventListener("click", function (e) {
+      if (e.target === modal) closeConversationModal();
+    });
+    $("#field-conv-back").addEventListener("click", function () {
+      switchConvView("list");
+      loadThreads();
+    });
+    $("#field-conv-new-thread").addEventListener("click", function () {
+      switchConvView("new");
+      var t = $("#field-conv-new-title"); if (t) { t.value = ""; setTimeout(function () { t.focus(); }, 80); }
+      var b = $("#field-conv-new-body"); if (b) b.value = "";
+      var ty = $("#field-conv-new-type"); if (ty) ty.value = "info";
+      var pr = $("#field-conv-new-priority"); if (pr) pr.checked = false;
+    });
+    $("#field-conv-new-cancel").addEventListener("click", function () { switchConvView("list"); });
+    $("#field-conv-new-submit").addEventListener("click", submitNewThread);
+    $("#field-conv-send").addEventListener("click", sendReplyInThread);
+    var input = $("#field-conv-input");
+    if (input) input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendReplyInThread(); }
+    });
+  }
+
+  function switchConvView(view) {
+    convState.view = view;
+    var listView = $("#field-conv-list-view");
+    var threadView = $("#field-conv-thread-view");
+    var newView = $("#field-conv-new-view");
+    var backBtn = $("#field-conv-back");
+    if (listView) listView.style.display = (view === "list") ? "flex" : "none";
+    if (threadView) threadView.style.display = (view === "thread") ? "flex" : "none";
+    if (newView) newView.style.display = (view === "new") ? "flex" : "none";
+    if (backBtn) backBtn.hidden = (view === "list");
+    updateConvTitle();
+  }
+
+  function updateConvTitle() {
+    var title = $("#field-conv-title");
+    if (!title || !convState.device) return;
+    var d = convState.device;
+    var prefix = d.name + (d.event ? " (" + d.event + (d.year ? " / " + d.year : "") + ")" : "");
+    if (convState.view === "thread" && state.currentThread && state.currentThread.title) {
+      title.textContent = state.currentThread.title;
+      title.title = prefix;
+    } else if (convState.view === "new") {
+      title.textContent = "Nouveau fil - " + prefix;
+    } else {
+      title.textContent = "Conversations - " + prefix;
+    }
+  }
+
+  // --- Liste des fils -------------------------------------------------
+  function loadThreads(silent) {
+    if (!convState.device) return;
+    var box = $("#field-conv-threads");
+    if (!box) return;
+    if (!silent) {
+      while (box.firstChild) box.removeChild(box.firstChild);
+      var ph = document.createElement("div");
+      ph.style.cssText = "text-align:center; color:var(--muted); padding:20px;";
+      ph.textContent = "Chargement...";
+      box.appendChild(ph);
+    }
+    apiGet("/field/admin/threads/" + encodeURIComponent(convState.device.id))
+      .then(function (data) {
+        if (!data || !data.ok) return;
+        renderThreadsList(data.threads || []);
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function renderThreadsList(threads) {
+    var box = $("#field-conv-threads");
+    if (!box) return;
+    while (box.firstChild) box.removeChild(box.firstChild);
+    if (threads.length === 0) {
+      var empty = document.createElement("div");
+      empty.style.cssText = "text-align:center; color:var(--muted); padding:30px 20px;";
+      empty.textContent = "Aucun fil. Cree-en un avec 'Nouveau fil' ou attends qu'une photo arrive de la tablette.";
+      box.appendChild(empty);
+      return;
+    }
+    threads.forEach(function (t) {
+      var row = document.createElement("div");
+      row.style.cssText = "display:flex; gap:10px; padding:10px 14px; border-bottom:1px solid var(--line); cursor:pointer; align-items:flex-start;";
+      row.addEventListener("mouseenter", function () { row.style.background = "var(--card)"; });
+      row.addEventListener("mouseleave", function () { row.style.background = ""; });
+
+      // Thumbnail photo ou icone type
+      var thumb = document.createElement("div");
+      thumb.style.cssText = "flex:0 0 auto; width:46px; height:46px; border-radius:6px; background:var(--card); display:flex; align-items:center; justify-content:center; overflow:hidden;";
+      if (t.photo) {
+        var img = document.createElement("img");
+        img.src = t.photo;
+        img.alt = "";
+        img.style.cssText = "width:100%; height:100%; object-fit:cover;";
+        thumb.appendChild(img);
+      } else {
+        var icon = document.createElement("span");
+        icon.className = "material-symbols-outlined";
+        icon.style.cssText = "font-size:22px; color:var(--muted);";
+        icon.textContent = t.type === "alert" ? "warning"
+          : t.type === "instruction" ? "rule"
+          : t.type === "route" ? "navigation"
+          : t.type === "sos_broadcast" ? "emergency"
+          : "chat";
+        thumb.appendChild(icon);
+      }
+      row.appendChild(thumb);
+
+      var main = document.createElement("div");
+      main.style.cssText = "flex:1; min-width:0;";
+      var topRow = document.createElement("div");
+      topRow.style.cssText = "display:flex; gap:8px; align-items:baseline;";
+      var ttl = document.createElement("div");
+      ttl.style.cssText = "flex:1; font-size:14px; font-weight:700; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
+      ttl.textContent = t.title;
+      topRow.appendChild(ttl);
+      var when = document.createElement("div");
+      when.style.cssText = "flex:0 0 auto; font-size:11px; color:var(--muted);";
+      when.textContent = t.last_at ? formatRelative(t.last_at) : "";
+      topRow.appendChild(when);
+      main.appendChild(topRow);
+
+      var sub = document.createElement("div");
+      sub.style.cssText = "display:flex; gap:6px; align-items:center; margin-top:2px;";
+      var previewEl = document.createElement("div");
+      previewEl.style.cssText = "flex:1; font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
+      var arrow = (t.last_direction === "field_to_cockpit" ? "⬅  " : "➡  ");
+      previewEl.textContent = (arrow + (t.last_preview || "")).trim();
+      sub.appendChild(previewEl);
+      if (t.reply_count > 0) {
+        var rc = document.createElement("span");
+        rc.style.cssText = "font-size:10px; color:var(--muted);";
+        rc.textContent = t.reply_count + " rep.";
+        sub.appendChild(rc);
+      }
+      if (t.unread > 0) {
+        var badge = document.createElement("span");
+        badge.style.cssText = "min-width:18px; height:18px; padding:0 5px; background:#dc2626; color:#fff; font-size:10px; font-weight:800; border-radius:9px; line-height:18px; text-align:center;";
+        badge.textContent = t.unread > 9 ? "9+" : String(t.unread);
+        sub.appendChild(badge);
+      }
+      main.appendChild(sub);
+
+      row.appendChild(main);
+      row.addEventListener("click", function () { openThread(t); });
+      box.appendChild(row);
+    });
+  }
+
+  // --- Vue fil detail -------------------------------------------------
+  function openThread(thread) {
+    convState.activeThreadId = thread.root_id;
+    state.currentThread = thread;
+    switchConvView("thread");
+    loadThreadMessages();
+    markThreadRead(thread.root_id);
+    var input = $("#field-conv-input");
+    if (input) input.value = "";
+  }
+
+  function loadThreadMessages(silent) {
+    if (!convState.activeThreadId) return;
+    var list = $("#field-conv-thread-list");
+    if (!list) return;
+    if (!silent) {
+      while (list.firstChild) list.removeChild(list.firstChild);
+      var ph = document.createElement("div");
+      ph.style.cssText = "text-align:center; color:var(--muted); padding:20px;";
+      ph.textContent = "Chargement...";
+      list.appendChild(ph);
+    }
+    apiGet("/field/admin/thread/" + encodeURIComponent(convState.activeThreadId))
+      .then(function (data) {
+        if (!data || !data.ok) return;
+        renderThreadMessages(data.messages || []);
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function renderThreadMessages(messages) {
+    var list = $("#field-conv-thread-list");
+    if (!list) return;
+    while (list.firstChild) list.removeChild(list.firstChild);
+    if (messages.length === 0) {
+      var empty = document.createElement("div");
+      empty.style.cssText = "text-align:center; color:var(--muted); padding:30px 20px;";
+      empty.textContent = "Fil vide.";
+      list.appendChild(empty);
+      return;
+    }
+    messages.forEach(function (m) {
+      var isInbound = m.direction === "field_to_cockpit";
+      var bubble = document.createElement("div");
+      bubble.style.cssText = "max-width:78%; padding:8px 12px; border-radius:12px; "
+        + "font-size:13px; line-height:1.4; word-wrap:break-word; box-shadow:0 1px 2px rgba(0,0,0,0.08);"
+        + (isInbound
+           ? "align-self:flex-start; background:#fff; border:1px solid var(--line); color:#0f172a;"
+           : "align-self:flex-end; background:#2563eb; color:#fff;");
+      if (m.type === "alert" || m.type === "sos_broadcast") {
+        bubble.style.borderLeft = "3px solid #dc2626";
+      }
+      if (m.title) {
+        var t = document.createElement("div");
+        t.style.cssText = "font-weight:700; font-size:12px; margin-bottom:3px; opacity:0.9;";
+        t.textContent = m.title;
+        bubble.appendChild(t);
+      }
+      var photoUrl = m.payload && m.payload.photo;
+      if (photoUrl) {
+        var img = document.createElement("img");
+        img.src = photoUrl;
+        img.alt = "Photo";
+        img.style.cssText = "display:block; max-width:100%; max-height:220px; border-radius:6px; margin:4px 0; cursor:zoom-in; background:#000;";
+        img.addEventListener("click", function () { openPhotoLightbox(photoUrl); });
+        bubble.appendChild(img);
+      }
+      if (m.body) {
+        var b = document.createElement("div");
+        b.textContent = m.body;
+        bubble.appendChild(b);
+      }
+      var meta = document.createElement("div");
+      meta.style.cssText = "font-size:10px; opacity:0.7; margin-top:4px; text-align:right;";
+      meta.textContent = m.created_at ? formatRelative(m.created_at) : "";
+      bubble.appendChild(meta);
+      list.appendChild(bubble);
+    });
+    var body = $("#field-conv-thread-body");
+    if (body) body.scrollTop = body.scrollHeight;
+  }
+
+  function sendReplyInThread() {
+    if (!convState.activeThreadId) return;
+    var input = $("#field-conv-input");
+    var sendBtn = $("#field-conv-send");
+    if (!input || !sendBtn) return;
+    var body = (input.value || "").trim();
+    if (!body) { input.focus(); return; }
+    sendBtn.disabled = true;
+    var fd = new FormData();
+    fd.append("body", body);
+    fetch("/field/admin/reply/" + encodeURIComponent(convState.activeThreadId), {
+      method: "POST",
+      headers: (function () { var h = {}; var m = document.querySelector('meta[name="csrf-token"]'); if (m) h["X-CSRFToken"] = m.getAttribute("content"); return h; })(),
+      body: fd,
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        sendBtn.disabled = false;
+        if (data && data.ok) {
+          input.value = "";
+          loadThreadMessages();
+        } else {
+          _toast("error", "Echec envoi : " + ((data && data.error) || "?"));
+        }
+      })
+      .catch(function () {
+        sendBtn.disabled = false;
+        _toast("error", "Erreur reseau");
+      });
+  }
+
+  function markThreadRead(rootId) {
+    apiPost("/field/admin/thread/" + encodeURIComponent(rootId) + "/mark-read", {})
+      .catch(function () { /* silent */ });
+  }
+
+  // --- Nouveau fil ----------------------------------------------------
+  function submitNewThread() {
+    if (!convState.device) return;
+    var titleEl = $("#field-conv-new-title");
+    var bodyEl = $("#field-conv-new-body");
+    var typeEl = $("#field-conv-new-type");
+    var prioEl = $("#field-conv-new-priority");
+    var submitBtn = $("#field-conv-new-submit");
+    var title = (titleEl ? titleEl.value : "").trim();
+    var body = (bodyEl ? bodyEl.value : "").trim();
+    if (!title) { _toast("error", "Donne un sujet au fil"); if (titleEl) titleEl.focus(); return; }
+    if (!body) { _toast("error", "Ecris un message"); if (bodyEl) bodyEl.focus(); return; }
+    submitBtn.disabled = true;
+    var dev = convState.device;
+    var payload = {
+      event: dev.event,
+      year: String(dev.year || ""),
+      target: { device_ids: [dev.id] },
+      type: typeEl ? typeEl.value : "info",
+      title: title,
+      body: body,
+      priority: prioEl && prioEl.checked ? "high" : "normal",
+    };
+    apiPost("/field/admin/send", payload)
+      .then(function (res) {
+        submitBtn.disabled = false;
+        if (res.body && res.body.ok) {
+          _toast("success", "Fil cree");
+          switchConvView("list");
+          loadThreads();
+        } else {
+          _toast("error", "Echec : " + ((res.body && res.body.error) || "?"));
+        }
+      })
+      .catch(function () {
+        submitBtn.disabled = false;
+        _toast("error", "Erreur reseau");
+      });
+  }
+
+  // Charge le nombre de messages non lus par tablette (pour badge dans la table)
+  function loadUnreadByDevice() {
+    apiGet("/field/admin/unread-by-device")
+      .then(function (data) {
+        if (!data || !data.ok) return;
+        state.unreadByDevice = data.unread || {};
+        // Rafraichir juste les badges sans recreer toute la table
+        updateUnreadBadges();
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function updateUnreadBadges() {
+    var rows = document.querySelectorAll("#field-devices-tbody tr[data-device-id]");
+    Array.prototype.forEach.call(rows, function (tr) {
+      var did = tr.getAttribute("data-device-id");
+      var n = (state.unreadByDevice || {})[did] || 0;
+      var badge = tr.querySelector(".field-unread-badge");
+      if (n > 0) {
+        if (!badge) {
+          badge = document.createElement("span");
+          badge.className = "field-unread-badge";
+          badge.style.cssText = "display:inline-block; margin-left:6px; min-width:18px; height:18px; "
+            + "padding:0 5px; background:#dc2626; color:#fff; font-size:10px; font-weight:800; "
+            + "border-radius:9px; line-height:18px; text-align:center; vertical-align:middle;";
+          var nameCell = tr.querySelector("td:first-child");
+          if (nameCell) nameCell.appendChild(badge);
+        }
+        badge.textContent = n > 9 ? "9+" : String(n);
+      } else if (badge) {
+        badge.remove();
+      }
+    });
+  }
+
   function openMsgModal(prefill) {
     refreshScopeUi();
     loadBeaconGroups();
@@ -777,7 +1297,11 @@
       });
     }
 
-    // Preselection eventuelle (appel depuis la carte operateur / clic droit)
+    // Preselection eventuelle (appel depuis la carte operateur / clic droit
+    // / bouton "envoyer message" dans la table devices). Si un scope event/year
+    // est passe, on l'utilise comme override au submit pour que ca marche
+    // meme en mode "parc complet" ou sans scope sidebar selectionne.
+    state.msgScopeOverride = null;
     if (prefill && prefill.device_id) {
       var modeSel = $("#field-msg-target-mode");
       if (modeSel) modeSel.value = "devices";
@@ -785,6 +1309,9 @@
         Array.from(sel.options).forEach(function (o) {
           o.selected = (o.value === prefill.device_id);
         });
+      }
+      if (prefill.event && prefill.year) {
+        state.msgScopeOverride = { event: prefill.event, year: String(prefill.year) };
       }
     } else {
       var modeSel2 = $("#field-msg-target-mode");
@@ -829,9 +1356,11 @@
   }
 
   function submitMessage() {
-    var scope = currentScope();
+    // Priorite a l'override passe au moment de l'ouverture du modal (envoi
+    // cible depuis la table devices) ; fallback sur le scope sidebar.
+    var scope = state.msgScopeOverride || currentScope();
     if (!scope.event || !scope.year) {
-      _toast("error", "Selectionne un evenement dans le header cockpit");
+      _toast("error", "Selectionne un evenement dans le header cockpit ou utilise le bouton 'Envoyer message' directement sur une tablette");
       return;
     }
     var mode = ($("#field-msg-target-mode") || {}).value || "all";
