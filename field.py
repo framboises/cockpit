@@ -502,6 +502,7 @@ def _pub_device(device):
         return None
     return {
         "id": str(device.get("_id")),
+        "app": device.get("app") or "field",
         "name": device.get("name"),
         "event": device.get("event"),
         "year": device.get("year"),
@@ -692,6 +693,10 @@ def field_pair_submit():
     if not pairing:
         return jsonify({"ok": False, "error": "unknown_code"}), 404
 
+    # Refuser les codes destines a Vision (un code = une app)
+    if (pairing.get("app") or "field") == "vision":
+        return jsonify({"ok": False, "error": "code_for_vision"}), 409
+
     exp = pairing.get("expiresAt")
     if isinstance(exp, datetime):
         if exp.tzinfo is None:
@@ -760,9 +765,9 @@ def field_logout():
 @field_bp.route("/field/vision/launch", methods=["GET"])
 @field_token_required
 def field_vision_launch():
-    """Genere un JWT signe et redirige la tablette vers Vision avec le token
-    en query param. Vision valide la signature en local (cle pub embarquee).
-    Echec si la tablette n'a pas vision_enabled, ou si la cle privee est absente."""
+    """[Optionnel] Genere un JWT signe et redirige la tablette vers Vision.
+    Conserve pour les tablettes qui ouvrent Vision depuis l'app Field. Pour le
+    cas standard (Vision ouverte directement par URL), voir /field/api/vision/pair."""
     device = request.device
     if not device.get("vision_enabled"):
         return jsonify({"ok": False, "error": "vision_not_enabled"}), 403
@@ -782,6 +787,134 @@ def field_vision_launch():
     if _wants_json():
         return jsonify({"ok": True, "url": target, "exp": int(end_dt.timestamp()) if end_dt else None})
     return redirect(target)
+
+
+# ---------------------------------------------------------------------------
+# Endpoint public : pairing depuis l'app Vision (vision-a0f55.web.app)
+# ---------------------------------------------------------------------------
+
+VISION_ALLOWED_ORIGINS = [
+    "https://vision-a0f55.web.app",
+    "https://vision-a0f55.firebaseapp.com",
+]
+
+
+def _vision_cors_origin():
+    """Retourne l'Origin de la requete si dans la whitelist, sinon None."""
+    origin = request.headers.get("Origin", "").strip()
+    return origin if origin in VISION_ALLOWED_ORIGINS else None
+
+
+def _vision_cors_response(payload, status=200):
+    """Wrap une reponse JSON avec les headers CORS appropries."""
+    resp = make_response(jsonify(payload), status)
+    origin = _vision_cors_origin()
+    if origin:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Vary"] = "Origin"
+    return resp
+
+
+@field_bp.route("/field/api/vision/pair", methods=["POST", "OPTIONS"])
+def field_api_vision_pair():
+    """Echange un code de pairing (genere par l'admin Cockpit avec app=vision)
+    contre un JWT RS256. Appele par l'app Vision en CORS depuis vision-a0f55.web.app.
+    Le code est consomme (suppression) quel que soit le resultat de la generation
+    du JWT pour eviter le replay."""
+    if request.method == "OPTIONS":
+        # Preflight CORS
+        resp = make_response("", 204)
+        origin = _vision_cors_origin()
+        if origin:
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+            resp.headers["Access-Control-Max-Age"] = "3600"
+            resp.headers["Vary"] = "Origin"
+        return resp
+
+    ip = _client_ip()
+    if not _rate_limit_pair(ip):
+        return _vision_cors_response({"ok": False, "error": "rate_limited"}, 429)
+
+    data = request.get_json(silent=True) or {}
+    code = str(data.get("code") or "").strip()
+    if not re.fullmatch(r"\d{6}", code):
+        return _vision_cors_response({"ok": False, "error": "invalid_code_format"}, 400)
+
+    db = _get_mongo_db()
+    pairing = db["field_pairings"].find_one({"code": code})
+    if not pairing:
+        return _vision_cors_response({"ok": False, "error": "unknown_code"}, 404)
+
+    # Refuser les codes destines a Field
+    if (pairing.get("app") or "field") != "vision":
+        return _vision_cors_response({"ok": False, "error": "code_for_field"}, 409)
+
+    exp_at = pairing.get("expiresAt")
+    if isinstance(exp_at, datetime):
+        if exp_at.tzinfo is None:
+            exp_at = exp_at.replace(tzinfo=timezone.utc)
+        if exp_at < _now():
+            db["field_pairings"].delete_one({"_id": pairing["_id"]})
+            return _vision_cors_response({"ok": False, "error": "expired_code"}, 410)
+
+    if pairing.get("used"):
+        return _vision_cors_response({"ok": False, "error": "code_already_used"}, 409)
+
+    # Construire un device synthetique pour _generate_vision_jwt (l'_id est
+    # celui du pairing : stable et unique, sert de device_id pour la tracabilite)
+    device_view = {
+        "_id": pairing["_id"],
+        "name": pairing.get("name") or "",
+        "event": pairing.get("event") or "",
+        "year": pairing.get("year") or "",
+        "vision_lieu": pairing.get("vision_lieu") or "",
+    }
+
+    end_dt = _event_end_datetime(db, device_view["event"], device_view["year"])
+    try:
+        token = _generate_vision_jwt(device_view, end_dt)
+    except RuntimeError as exc:
+        logger.error("field: generation JWT Vision impossible: %s", exc)
+        return _vision_cors_response({"ok": False, "error": "vision_jwt_unavailable"}, 500)
+
+    # Consommer le code (suppression). On enregistre une trace lecture seule
+    # dans field_devices pour permettre a l'admin de voir les enrollements Vision
+    # actifs sans pourrir l'inventaire des tablettes Field.
+    db["field_pairings"].delete_one({"_id": pairing["_id"]})
+    try:
+        db["field_devices"].insert_one({
+            "_id": pairing["_id"],
+            "app": "vision",
+            "name": pairing.get("name") or "",
+            "event": pairing.get("event") or "",
+            "year": pairing.get("year") or "",
+            "beacon_group_id": "",
+            "vision_enabled": True,
+            "vision_lieu": pairing.get("vision_lieu") or "",
+            "createdAt": _now(),
+            "paired_at": _now(),
+            "paired_ip": ip,
+            "paired_ua": (request.headers.get("User-Agent") or "")[:200],
+            "last_seen": _now(),
+            "last_ip": ip,
+            "revoked": False,
+            "notes": pairing.get("notes", ""),
+        })
+    except Exception as exc:
+        # Pas bloquant : la tracabilite est best-effort, le JWT a deja ete genere
+        logger.warning("field: insert vision device echoue: %s", exc)
+
+    return _vision_cors_response({
+        "ok": True,
+        "jwt": token,
+        "exp": int(end_dt.timestamp()) if end_dt else None,
+        "device_name": device_view["name"],
+        "evenement": device_view["event"],
+        "annee": device_view["year"],
+        "lieu": device_view["vision_lieu"],
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -1566,6 +1699,7 @@ def _pub_pairing(p):
         return None
     return {
         "code": p.get("code"),
+        "app": p.get("app") or "field",
         "name": p.get("name"),
         "event": p.get("event"),
         "year": p.get("year"),
@@ -1685,39 +1819,54 @@ def field_admin_pairings_list():
 @field_bp.route("/field/admin/pairings", methods=["POST"])
 @admin_required
 def field_admin_pairings_create():
-    """Cree un nouveau code de pairing (unique). Payload : name, event, year,
-    beacon_group_id, notes?, vision_enabled?, vision_lieu?"""
+    """Cree un nouveau code de pairing pour UNE app (Field OU Vision).
+    Payload commun : name, event, year, notes?
+    - app="field" (default) : beacon_group_id requis. Code consommable uniquement
+      par /field/pair. Active Vision en bonus si vision_enabled=true (rare).
+    - app="vision" : vision_lieu requis (Ouest/Panorama/Houx). Code consommable
+      uniquement par /field/api/vision/pair (depuis l'app Vision)."""
     data = request.get_json(silent=True) or {}
+    app = (data.get("app") or "field").strip().lower()
+    if app not in ("field", "vision"):
+        return jsonify({"ok": False, "error": "invalid_app"}), 400
+
     name = (data.get("name") or "").strip()
     event = (data.get("event") or "").strip()
     year = str(data.get("year") or "").strip()
-    beacon_group_id = (data.get("beacon_group_id") or "").strip()
     notes = (data.get("notes") or "").strip()
-    vision_enabled = bool(data.get("vision_enabled"))
+    beacon_group_id = (data.get("beacon_group_id") or "").strip()
     vision_lieu = (data.get("vision_lieu") or "").strip()
 
     if not name:
         return jsonify({"ok": False, "error": "missing_name"}), 400
     if not event or not year:
         return jsonify({"ok": False, "error": "missing_event_year"}), 400
-    if not beacon_group_id:
-        return jsonify({"ok": False, "error": "missing_beacon_group"}), 400
-    if vision_enabled and vision_lieu not in VISION_LIEUX:
-        return jsonify({"ok": False, "error": "invalid_vision_lieu"}), 400
+
+    if app == "field":
+        if not beacon_group_id:
+            return jsonify({"ok": False, "error": "missing_beacon_group"}), 400
+        vision_enabled = bool(data.get("vision_enabled"))
+        if vision_enabled and vision_lieu not in VISION_LIEUX:
+            return jsonify({"ok": False, "error": "invalid_vision_lieu"}), 400
+    else:  # vision
+        if vision_lieu not in VISION_LIEUX:
+            return jsonify({"ok": False, "error": "invalid_vision_lieu"}), 400
+        vision_enabled = True
 
     db = _get_mongo_db()
 
-    # Le beacon_group doit exister (l'admin peut associer une tablette a un
-    # groupe meme inactif - le drapeau "enabled" cote anoloc concerne
-    # l'affichage carte/widgets, pas l'eligibilite des tablettes).
-    config = db["anoloc_config"].find_one({"_id": "global"}) or {}
-    grp = next((g for g in config.get("beacon_groups", []) or [] if g.get("id") == beacon_group_id), None)
-    if not grp:
-        return jsonify({"ok": False, "error": "unknown_beacon_group"}), 400
+    if app == "field":
+        # Le beacon_group doit exister (l'admin peut associer une tablette a un
+        # groupe meme inactif - le drapeau "enabled" cote anoloc concerne
+        # l'affichage carte/widgets, pas l'eligibilite des tablettes).
+        config = db["anoloc_config"].find_one({"_id": "global"}) or {}
+        grp = next((g for g in config.get("beacon_groups", []) or [] if g.get("id") == beacon_group_id), None)
+        if not grp:
+            return jsonify({"ok": False, "error": "unknown_beacon_group"}), 400
 
-    # Le nom ne doit pas collisionner avec une balise anoloc ou une autre tablette
-    if _label_conflict(db, name, event, year):
-        return jsonify({"ok": False, "error": "name_conflict"}), 409
+        # Le nom ne doit pas collisionner avec une balise anoloc ou une autre tablette
+        if _label_conflict(db, name, event, year):
+            return jsonify({"ok": False, "error": "name_conflict"}), 409
 
     # Generer un code unique (retry jusqu'a 5 fois)
     code = None
@@ -1731,10 +1880,11 @@ def field_admin_pairings_create():
 
     doc = {
         "code": code,
+        "app": app,
         "name": name,
         "event": event,
         "year": year,
-        "beacon_group_id": beacon_group_id,
+        "beacon_group_id": beacon_group_id if app == "field" else "",
         "notes": notes,
         "vision_enabled": vision_enabled,
         "vision_lieu": vision_lieu if vision_enabled else "",

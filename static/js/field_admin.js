@@ -287,20 +287,26 @@
       tr.setAttribute("data-device-id", d.id);
 
       var tdName = document.createElement("td");
+      var isVisionApp = (d.app || "field") === "vision";
       var tabletIcon = document.createElement("span");
       tabletIcon.className = "material-symbols-outlined";
       tabletIcon.style.cssText = "font-size:14px; vertical-align:middle; color:var(--muted); margin-right:3px;";
-      tabletIcon.textContent = "tablet_android";
+      tabletIcon.textContent = isVisionApp ? "qr_code_scanner" : "tablet_android";
       tdName.appendChild(tabletIcon);
       var nameSpan = document.createElement("span");
       nameSpan.textContent = d.name || "-";
       nameSpan.style.fontWeight = "600";
       tdName.appendChild(nameSpan);
-      if (d.vision_enabled) {
-        var visionBadge = document.createElement("span");
-        visionBadge.textContent = "Vision: " + (d.vision_lieu || "?");
-        visionBadge.style.cssText = "margin-left:6px; font-size:9px; font-weight:700; background:#003b5c; color:#fff; padding:1px 5px; border-radius:4px; vertical-align:middle;";
-        tdName.appendChild(visionBadge);
+      var appBadge = document.createElement("span");
+      appBadge.textContent = isVisionApp ? "VISION" : "FIELD";
+      appBadge.style.cssText = "margin-left:6px; font-size:9px; font-weight:800; padding:1px 5px; border-radius:4px; vertical-align:middle; "
+        + (isVisionApp ? "background:#003b5c; color:#fff;" : "background:#28a745; color:#fff;");
+      tdName.appendChild(appBadge);
+      if (isVisionApp || d.vision_enabled) {
+        var lieuBadge = document.createElement("span");
+        lieuBadge.textContent = "Lieu: " + (d.vision_lieu || "?");
+        lieuBadge.style.cssText = "margin-left:4px; font-size:9px; font-weight:700; background:#e9ecef; color:#003b5c; padding:1px 5px; border-radius:4px; vertical-align:middle;";
+        tdName.appendChild(lieuBadge);
       }
       tr.appendChild(tdName);
 
@@ -314,15 +320,20 @@
       }
 
       var tdGroup = document.createElement("td");
-      var dot = document.createElement("span");
-      dot.style.display = "inline-block";
-      dot.style.width = "10px";
-      dot.style.height = "10px";
-      dot.style.borderRadius = "50%";
-      dot.style.background = beaconGroupColor(d.beacon_group_id);
-      dot.style.marginRight = "5px";
-      tdGroup.appendChild(dot);
-      tdGroup.appendChild(document.createTextNode(beaconGroupLabel(d.beacon_group_id)));
+      if (isVisionApp) {
+        tdGroup.textContent = "-";
+        tdGroup.style.color = "var(--muted)";
+      } else {
+        var dot = document.createElement("span");
+        dot.style.display = "inline-block";
+        dot.style.width = "10px";
+        dot.style.height = "10px";
+        dot.style.borderRadius = "50%";
+        dot.style.background = beaconGroupColor(d.beacon_group_id);
+        dot.style.marginRight = "5px";
+        tdGroup.appendChild(dot);
+        tdGroup.appendChild(document.createTextNode(beaconGroupLabel(d.beacon_group_id)));
+      }
       tr.appendChild(tdGroup);
 
       var tdPos = document.createElement("td");
@@ -552,11 +563,19 @@
       var tr = document.createElement("tr");
 
       var tdCode = document.createElement("td");
-      tdCode.style.fontFamily = "monospace";
-      tdCode.style.fontWeight = "700";
-      tdCode.style.fontSize = "14px";
-      tdCode.style.letterSpacing = "2px";
-      tdCode.textContent = p.code;
+      var codeWrap = document.createElement("div");
+      codeWrap.style.cssText = "display:flex; align-items:center; gap:8px;";
+      var codeText = document.createElement("span");
+      codeText.style.cssText = "font-family:monospace; font-weight:700; font-size:14px; letter-spacing:2px;";
+      codeText.textContent = p.code;
+      codeWrap.appendChild(codeText);
+      var appBadge = document.createElement("span");
+      var isVision = (p.app || "field") === "vision";
+      appBadge.textContent = isVision ? "VISION" : "FIELD";
+      appBadge.style.cssText = "font-size:9px; font-weight:800; padding:2px 6px; border-radius:4px; "
+        + (isVision ? "background:#003b5c; color:#fff;" : "background:#28a745; color:#fff;");
+      codeWrap.appendChild(appBadge);
+      tdCode.appendChild(codeWrap);
       tr.appendChild(tdCode);
 
       var tdName = document.createElement("td");
@@ -564,7 +583,19 @@
       tr.appendChild(tdName);
 
       var tdGroup = document.createElement("td");
-      tdGroup.textContent = beaconGroupLabel(p.beacon_group_id);
+      if (isVision) {
+        tdGroup.textContent = "Lieu : " + (p.vision_lieu || "?");
+        tdGroup.style.color = "#003b5c";
+        tdGroup.style.fontWeight = "600";
+      } else {
+        tdGroup.textContent = beaconGroupLabel(p.beacon_group_id);
+        if (p.vision_enabled) {
+          var bonus = document.createElement("span");
+          bonus.textContent = " + Vision: " + (p.vision_lieu || "?");
+          bonus.style.cssText = "font-size:10px; color:#003b5c; font-weight:600;";
+          tdGroup.appendChild(bonus);
+        }
+      }
       tr.appendChild(tdGroup);
 
       var tdExp = document.createElement("td");
@@ -606,13 +637,34 @@
     if (form) form.reset();
     var result = $("#field-pair-result");
     if (result) result.textContent = "";
-    // Toggle Vision lieu row selon checkbox
-    var visionChk = $("#field-pair-vision-enabled");
-    var visionRow = $("#field-pair-vision-lieu-row");
-    if (visionChk && visionRow) {
-      visionRow.hidden = !visionChk.checked;
-      visionChk.onchange = function () { visionRow.hidden = !visionChk.checked; };
+
+    var rField = $("#field-pair-app-field");
+    var rVision = $("#field-pair-app-vision");
+    var beaconRow = $("#field-pair-beacon-row");
+    var bonusRow = $("#field-pair-vision-bonus-row");
+    var lieuRow = $("#field-pair-vision-lieu-row");
+    var bonusChk = $("#field-pair-vision-enabled");
+    var beaconSelect = beaconRow ? beaconRow.querySelector('select[name="beacon_group_id"]') : null;
+    var lieuSelect = $("#field-pair-vision-lieu");
+
+    function updateAppMode() {
+      var isVision = rVision && rVision.checked;
+      // Field : montrer beacon + bonus Vision optionnel ; cacher lieu sauf si bonus coche
+      // Vision : cacher beacon + bonus ; montrer lieu (obligatoire)
+      if (beaconRow) beaconRow.hidden = isVision;
+      if (beaconSelect) beaconSelect.required = !isVision;
+      if (bonusRow) bonusRow.hidden = isVision;
+      if (lieuRow) {
+        var showLieu = isVision || (bonusChk && bonusChk.checked);
+        lieuRow.hidden = !showLieu;
+        if (lieuSelect) lieuSelect.required = showLieu;
+      }
     }
+    if (rField) rField.onchange = updateAppMode;
+    if (rVision) rVision.onchange = updateAppMode;
+    if (bonusChk) bonusChk.onchange = updateAppMode;
+    updateAppMode();
+
     var modal = $("#field-pair-modal");
     if (modal) modal.hidden = false;
   }
@@ -631,19 +683,26 @@
       _toast("error", "Selectionne un evenement dans le header cockpit");
       return;
     }
+    var app = (fd.get("app") || "field").toString();
     var visionEnabled = !!(fd.get("vision_enabled"));
     var payload = {
+      app: app,
       name: (fd.get("name") || "").toString().trim(),
-      beacon_group_id: (fd.get("beacon_group_id") || "").toString(),
       notes: (fd.get("notes") || "").toString().trim(),
-      vision_enabled: visionEnabled,
-      vision_lieu: visionEnabled ? (fd.get("vision_lieu") || "").toString() : "",
       event: scope.event,
       year: scope.year,
     };
+    if (app === "field") {
+      payload.beacon_group_id = (fd.get("beacon_group_id") || "").toString();
+      payload.vision_enabled = visionEnabled;
+      payload.vision_lieu = visionEnabled ? (fd.get("vision_lieu") || "").toString() : "";
+      if (!payload.beacon_group_id) { _toast("error", "Groupe requis"); return; }
+      if (visionEnabled && !payload.vision_lieu) { _toast("error", "Lieu Vision requis"); return; }
+    } else {
+      payload.vision_lieu = (fd.get("vision_lieu") || "").toString();
+      if (!payload.vision_lieu) { _toast("error", "Lieu Vision requis"); return; }
+    }
     if (!payload.name) { _toast("error", "Nom requis"); return; }
-    if (!payload.beacon_group_id) { _toast("error", "Groupe requis"); return; }
-    if (visionEnabled && !payload.vision_lieu) { _toast("error", "Lieu Vision requis"); return; }
 
     apiPost("/field/admin/pairings", payload)
       .then(function (res) {
@@ -660,6 +719,7 @@
             beacon_group_disabled: "Groupe desactive.",
             name_conflict: "Ce nom est deja utilise par une balise Anoloc ou une tablette.",
             invalid_vision_lieu: "Lieu Vision invalide (Ouest, Panorama ou Houx).",
+            invalid_app: "Type d'app invalide.",
           };
           _toast("error", map[err] || ("Erreur : " + err));
         }

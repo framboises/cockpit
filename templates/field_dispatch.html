@@ -187,17 +187,35 @@
         <div class="crud-modal-body">
             <form id="field-pair-form">
                 <div class="form-row">
-                    <label>Nom de la tablette (affiche sur la carte et recu dans les fiches)
+                    <label style="display:block; margin-bottom:6px; font-weight:600;">Pour quelle app ?</label>
+                    <div style="display:flex; gap:10px;">
+                        <label style="flex:1; display:flex; align-items:center; gap:6px; padding:10px 12px; border:2px solid var(--border, #ccc); border-radius:8px; cursor:pointer;" id="field-pair-app-field-wrap">
+                            <input type="radio" name="app" value="field" id="field-pair-app-field" checked />
+                            <span style="font-weight:600;">Field</span>
+                            <span style="font-size:11px; color:var(--muted); margin-left:auto;">Patrouille / fiches</span>
+                        </label>
+                        <label style="flex:1; display:flex; align-items:center; gap:6px; padding:10px 12px; border:2px solid var(--border, #ccc); border-radius:8px; cursor:pointer;" id="field-pair-app-vision-wrap">
+                            <input type="radio" name="app" value="vision" id="field-pair-app-vision" />
+                            <span style="font-weight:600;">Vision</span>
+                            <span style="font-size:11px; color:var(--muted); margin-left:auto;">Scan billets</span>
+                        </label>
+                    </div>
+                    <p style="font-size:11px; color:var(--muted); margin:6px 0 0;">
+                        Un code = une app. Si tu veux les deux apps sur la meme tablette, genere deux codes.
+                    </p>
+                </div>
+                <div class="form-row">
+                    <label>Nom de la tablette
                         <input name="name" required placeholder="ex. Patrouille Secu 1" class="form-input" />
                     </label>
-                    <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
+                    <p style="font-size:11px; color:var(--muted); margin:2px 0 0;" id="field-pair-name-help">
                         Doit etre unique dans l'evenement. Ne doit pas collisionner avec un label
                         de balise Anoloc deja existant.
                     </p>
                 </div>
-                <div class="form-row">
+                <div class="form-row" id="field-pair-beacon-row">
                     <label>Groupe (associe aux balises Anoloc)
-                        <select name="beacon_group_id" required class="form-input">
+                        <select name="beacon_group_id" class="form-input">
                             <option value="">-- Choisir --</option>
                         </select>
                     </label>
@@ -211,11 +229,15 @@
                         <input name="notes" placeholder="ex. operateur referent, modele..." class="form-input" />
                     </label>
                 </div>
-                <div class="form-row">
+                <div class="form-row" id="field-pair-vision-bonus-row">
                     <label style="display:flex; align-items:center; gap:8px;">
                         <input type="checkbox" name="vision_enabled" id="field-pair-vision-enabled" />
-                        <span>Activer Vision (scan billets vehicule)</span>
+                        <span>Activer Vision en bonus (rare)</span>
                     </label>
+                    <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
+                        Permet d'utiliser Vision via le bouton dans Field. Generalement on prefere
+                        un code Vision dedie pour les operateurs Vision-only.
+                    </p>
                 </div>
                 <div class="form-row" id="field-pair-vision-lieu-row" hidden>
                     <label>Lieu Vision
