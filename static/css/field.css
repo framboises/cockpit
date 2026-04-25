@@ -177,6 +177,55 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
 .inbox-item .item-title { font-weight: 700; font-size: 13px; color: #f8fafc; margin-bottom: 2px; }
 .inbox-item .item-body { font-size: 12px; color: #cbd5e1; line-height: 1.3; }
 .inbox-item .item-time { font-size: 10px; color: #94a3b8; margin-top: 4px; }
+.inbox-item .item-head {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 2px;
+}
+.inbox-item .item-head .item-title { margin-bottom: 0; flex: 1; min-width: 0; }
+
+/* Conversation sortante : photo / scan envoye par la tablette elle-meme.
+   Distinction visuelle (bordure + accent bleu) sans peser sur l'unread. */
+.inbox-item.inbox-item-outbound {
+  background: #1e293b;
+  border-left: 3px solid #2563eb;
+}
+.inbox-item.inbox-item-outbound .item-sent-chip {
+  flex: 0 0 auto;
+  font-size: 9px; font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #bfdbfe;
+  background: rgba(37, 99, 235, 0.18);
+  border: 1px solid rgba(37, 99, 235, 0.4);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.inbox-item.inbox-item-outbound .item-thumb {
+  display: block;
+  margin-top: 6px;
+  max-width: 140px; max-height: 100px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  object-fit: cover;
+}
+.inbox-item.inbox-item-outbound .item-photo-count {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11px; font-weight: 700;
+  color: #bfdbfe;
+}
+.inbox-item.inbox-item-outbound .item-scan-line {
+  display: inline-flex; align-items: center; gap: 2px;
+  margin-top: 4px;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px; font-weight: 700;
+  color: #c7d2fe;
+}
+.inbox-item.inbox-item-outbound .item-scan-line .material-symbols-outlined {
+  font-size: 14px;
+}
 
 /* Liste missions (reutilise .inbox-panel / .inbox-item) */
 .mission-item { display: flex; gap: 10px; align-items: flex-start; }

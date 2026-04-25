@@ -5548,9 +5548,17 @@
   function detectNew() {
     var newOnes = [];
     state.inbox.forEach(function (m) {
-      if (!state.seenIds.has(m.id) && !m.ack_at) {
-        newOnes.push(m);
+      if (state.seenIds.has(m.id)) return;
+      if (m.ack_at) return;
+      // Les messages "envoyes par la tablette elle-meme" (photo_report,
+      // scan_report) sont visibles dans l'inbox cote agent comme conversations,
+      // mais ne doivent PAS faire popper la modale "nouveau message" : c'est
+      // l'agent qui vient de les envoyer, il les connait deja.
+      if (m.direction === "field_to_cockpit") {
+        state.seenIds.add(m.id);
+        return;
       }
+      newOnes.push(m);
     });
     if (newOnes.length === 0) return;
     // SOS broadcasts : handled separately with full-screen alert + sound
@@ -5603,11 +5611,10 @@
       list.appendChild(empty);
       return;
     }
-    // Filtrer : n'afficher que les messages racines (pas les reponses dans un thread)
-    // et pas les messages envoyes par la tablette elle-meme
-    var roots = state.inbox.filter(function (m) {
-      return !m.thread_id && m.direction !== "field_to_cockpit";
-    });
+    // Afficher tous les fils racines : entrants ET sortants (photo_report,
+    // scan_report). Les sortants sont stylises differemment dans
+    // renderInboxItem mais font partie integrante de l'historique de conv.
+    var roots = state.inbox.filter(function (m) { return !m.thread_id; });
     // Ordre antichronologique
     var sorted = roots.slice().sort(function (a, b) {
       return (b.created_at || "").localeCompare(a.created_at || "");
@@ -5632,20 +5639,75 @@
   function renderInboxItem(m) {
     var div = document.createElement("div");
     div.className = "inbox-item";
-    if (!m.ack_at) div.classList.add("unread");
+    var isOutbound = m.direction === "field_to_cockpit";
+    if (isOutbound) {
+      div.classList.add("inbox-item-outbound");
+    } else if (!m.ack_at) {
+      // La pastille "non lu" n'a de sens que pour les entrants
+      div.classList.add("unread");
+    }
     if (m.priority === "high") div.classList.add("priority-high");
+
+    var head = document.createElement("div");
+    head.className = "item-head";
     var t = document.createElement("div");
     t.className = "item-title";
     t.textContent = m.title || "(sans titre)";
+    head.appendChild(t);
+    if (isOutbound) {
+      var sentChip = document.createElement("span");
+      sentChip.className = "item-sent-chip";
+      sentChip.textContent = "Envoye";
+      head.appendChild(sentChip);
+    }
+    div.appendChild(head);
+
+    // Indicateur visuel selon le type pour les sortants : miniature
+    // photo (photo_report) ou icone QR + comptage (scan_report).
+    if (isOutbound && m.type === "photo_report" && m.payload) {
+      var thumbUrl = m.payload.thumb || m.payload.photo;
+      var photos = m.payload.photos;
+      if (!thumbUrl && photos && photos.length) {
+        thumbUrl = photos[0].thumb || photos[0].photo;
+      }
+      if (thumbUrl) {
+        var img = document.createElement("img");
+        img.className = "item-thumb";
+        img.src = thumbUrl;
+        img.alt = "Photo envoyee";
+        img.loading = "lazy";
+        div.appendChild(img);
+      }
+      if (photos && photos.length > 1) {
+        var multi = document.createElement("span");
+        multi.className = "item-photo-count";
+        multi.textContent = "x" + photos.length;
+        div.appendChild(multi);
+      }
+    } else if (isOutbound && m.type === "scan_report" && m.payload && Array.isArray(m.payload.codes)) {
+      var scanLine = document.createElement("div");
+      scanLine.className = "item-scan-line";
+      var scanIc = document.createElement("span");
+      scanIc.className = "material-symbols-outlined";
+      scanIc.setAttribute("aria-hidden", "true");
+      scanIc.textContent = "qr_code_scanner";
+      scanLine.appendChild(scanIc);
+      var scanLbl = document.createElement("span");
+      scanLbl.textContent = " " + m.payload.codes.length + " code" + (m.payload.codes.length > 1 ? "s" : "");
+      scanLine.appendChild(scanLbl);
+      div.appendChild(scanLine);
+    }
+
     var b = document.createElement("div");
     b.className = "item-body";
     b.textContent = (m.body || "").slice(0, 120);
+    if (b.textContent) div.appendChild(b);
+
     var ts = document.createElement("div");
     ts.className = "item-time";
     ts.textContent = m.created_at ? new Date(m.created_at).toLocaleString() : "";
-    div.appendChild(t);
-    div.appendChild(b);
     div.appendChild(ts);
+
     if (m.reply_count > 0) {
       var rc = document.createElement("span");
       rc.className = "item-replies";

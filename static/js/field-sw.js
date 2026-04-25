@@ -7,7 +7,7 @@
      - API (/field/*) : network-first, fallback silencieux offline
    ===================================================================== */
 
-const SW_VERSION = "field-sw-v30";
+const SW_VERSION = "field-sw-v31";
 const APP_SHELL_CACHE = "field-shell-" + SW_VERSION;
 const TILE_CACHE = "field-tiles-" + SW_VERSION;
 const API_CACHE = "field-api-" + SW_VERSION;
