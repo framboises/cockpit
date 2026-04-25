@@ -15,7 +15,7 @@
 from flask import Blueprint, jsonify, request, render_template, make_response, redirect, send_from_directory, abort
 from werkzeug.utils import safe_join, secure_filename
 from datetime import datetime, timezone, timedelta
-from pymongo import MongoClient
+from pymongo import MongoClient, ReturnDocument
 from bson.objectid import ObjectId
 from io import BytesIO
 import os
@@ -77,6 +77,55 @@ FIELD_PHOTO_THUMB_DIM = 256
 FIELD_PHOTO_THUMB_QUALITY = 78
 FIELD_PHOTO_FILE_TTL_DAYS = 30            # purge fichiers physiques apres 30 jours
 FIELD_PHOTO_MAX_PER_BATCH = 5             # limite multi-photos par envoi
+
+# Codes (QR / barcode) scannes depuis la tablette : longueur unitaire + lot
+FIELD_SCAN_MAX_PER_BATCH = 20             # limite codes par envoi
+FIELD_SCAN_VALUE_MAX_LEN = 512            # taille brute d'un code (ascii / utf-8)
+FIELD_SCAN_FORMATS = {
+    "qr_code", "data_matrix", "aztec", "pdf417",
+    "code_128", "code_39", "code_93", "codabar", "itf",
+    "ean_13", "ean_8", "upc_a", "upc_e",
+    "manual",  # saisie clavier (fallback)
+}
+
+# -----------------------------------------------------------------------------
+# Streaming live tablette -> PC org -> VMS Qonify (via mediamtx)
+# -----------------------------------------------------------------------------
+# Architecture : pool de N slots fixes (paths mediamtx field-1, field-2, ...).
+# Qonify est configure UNE FOIS avec les N URLs RTSP. Cockpit alloue dynamiquement
+# un slot a chaque demande de stream, evitant toute reconfiguration VMS.
+#
+# RGPD : pas d'enregistrement, pas d'audio, auto-stop a 5 min, consentement
+# explicite cote tablette a chaque demande.
+FIELD_STREAM_SLOTS = int(os.getenv("FIELD_STREAM_SLOTS", "3"))
+FIELD_STREAM_MAX_DURATION_S = int(os.getenv("FIELD_STREAM_MAX_DURATION_S", "300"))
+FIELD_STREAM_REQUEST_TTL_S = int(os.getenv("FIELD_STREAM_REQUEST_TTL_S", "60"))
+FIELD_STREAM_STALE_GRACE_S = 30           # libere un slot dont le stream
+                                          # n'a pas ping mediamtx depuis 30s
+
+# View tokens stables (1 par slot, jamais changes en cours d'evenement). Ils
+# sont integres dans les URLs RTSP/WHEP configurees une fois pour toutes dans
+# Qonify et le PC org. En prod : definir FIELD_STREAM_VIEW_TOKENS=tok1,tok2,tok3
+# (taille recommandee : 32 hex chars chacun). En dev, fallback derive secret.
+def _load_field_stream_view_tokens():
+    raw = os.getenv("FIELD_STREAM_VIEW_TOKENS", "").strip()
+    if raw:
+        toks = [t.strip() for t in raw.split(",") if t.strip()]
+        if len(toks) >= FIELD_STREAM_SLOTS:
+            return toks[:FIELD_STREAM_SLOTS]
+    # Dev fallback : tokens deterministes derives du SECRET_KEY si dispo,
+    # sinon tokens fixes ("dev-view-token-N") pour faciliter le test.
+    base = os.getenv("SECRET_KEY", "cockpit-dev-secret")
+    return [
+        hashlib.sha256(("vstream:" + base + ":slot:" + str(i)).encode()).hexdigest()[:32]
+        for i in range(FIELD_STREAM_SLOTS)
+    ]
+
+
+FIELD_STREAM_VIEW_TOKENS = _load_field_stream_view_tokens()
+MEDIAMTX_BASE_URL = os.getenv("MEDIAMTX_BASE_URL", "https://media.cockpit.lemans.org").rstrip("/")
+MEDIAMTX_RTSP_BASE = os.getenv("MEDIAMTX_RTSP_BASE", "rtsp://media.cockpit.lemans.org:8554").rstrip("/")
+MEDIAMTX_AUTH_HMAC_KEY = os.getenv("MEDIAMTX_AUTH_HMAC_KEY", "dev-mediamtx-shared-key")
 
 # Photos 3P (portes/portails) partagees avec l'app looker
 LOOKER_3P_MEDIA_DIR = os.path.join(SCRIPT_DIR, "..", "looker", "static", "img", "media")
@@ -217,9 +266,44 @@ def _ensure_indexes(db):
         # field_push_subs : souscriptions Web Push par device
         db["field_push_subs"].create_index("device_id")
         db["field_push_subs"].create_index("endpoint", unique=True)
+
+        # field_stream_slots : 1 doc par slot fixe, allocate via findOneAndUpdate
+        db["field_stream_slots"].create_index("slot_index", unique=True)
+        db["field_stream_slots"].create_index("current_stream_id")
+
+        # field_streams : audit + TTL Mongo via expires_at (auto-delete apres 90j)
+        db["field_streams"].create_index("device_id")
+        db["field_streams"].create_index("status")
+        db["field_streams"].create_index("expires_at", expireAfterSeconds=0)
+
+        # Seed les N slots si la collection est vide (idempotent)
+        _seed_stream_slots(db)
     except Exception as e:
         logger.warning("field: index creation failed: %s", e)
     _INDEXES_READY = True
+
+
+def _seed_stream_slots(db):
+    """Cree les N docs field_stream_slots si la collection est vide.
+    Idempotent : si la collection a deja N docs, on ne touche rien.
+    Si on a moins de N docs (FIELD_STREAM_SLOTS augmente), on complete."""
+    try:
+        existing = list(db["field_stream_slots"].find(
+            {}, {"_id": 1, "slot_index": 1, "view_token": 1}
+        ))
+        existing_idx = {d.get("slot_index") for d in existing}
+        for i in range(FIELD_STREAM_SLOTS):
+            if i in existing_idx:
+                continue
+            db["field_stream_slots"].insert_one({
+                "slot_index": i,
+                "path": "field-{}".format(i + 1),
+                "view_token": FIELD_STREAM_VIEW_TOKENS[i],
+                "current_stream_id": None,
+                "last_assigned_at": None,
+            })
+    except Exception as e:
+        logger.warning("field: stream slots seed failed: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -1522,6 +1606,418 @@ def field_photo_send():
     })
 
 
+def _normalize_scan_codes(raw):
+    """Valide et normalise une liste de codes scannes.
+    Accepte une liste de chaines (back-compat) OU une liste de dicts
+    {value, format}. Renvoie une liste de dicts {value, format} prets a
+    persister, ou leve ValueError(code_erreur) en cas de probleme.
+    """
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("missing_codes")
+    if len(raw) > FIELD_SCAN_MAX_PER_BATCH:
+        raise ValueError("too_many_codes")
+    out = []
+    for item in raw:
+        if isinstance(item, str):
+            value = item.strip()
+            fmt = "manual"
+        elif isinstance(item, dict):
+            value = (item.get("value") or "").strip() if isinstance(item.get("value"), str) else ""
+            fmt = (item.get("format") or "manual").strip().lower()
+        else:
+            raise ValueError("invalid_code")
+        if not value:
+            raise ValueError("empty_code")
+        if len(value) > FIELD_SCAN_VALUE_MAX_LEN:
+            raise ValueError("code_too_long")
+        if fmt not in FIELD_SCAN_FORMATS:
+            fmt = "manual"
+        out.append({"value": value, "format": fmt})
+    return out
+
+
+@field_bp.route("/field/scan/send", methods=["POST"])
+@field_token_required
+def field_scan_send():
+    """Envoi d'un lot de codes (QR/barcode) spontane vers le PC Org.
+    Cree un field_messages direction=field_to_cockpit, type=scan_report.
+    Body JSON : {codes: [{value, format}, ...], category, niveau_urgence,
+    comment, lat, lng, battery}."""
+    device = request.device
+    data = request.get_json(silent=True) or {}
+
+    try:
+        codes = _normalize_scan_codes(data.get("codes"))
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+    comment = (data.get("comment") or "").strip()
+    if len(comment) > 1000:
+        return jsonify({"ok": False, "error": "comment_too_long"}), 400
+
+    category = (data.get("category") or "").strip() or None
+    urgency = (data.get("niveau_urgence") or "").strip() or None
+    if category and not category.startswith("PCO."):
+        return jsonify({"ok": False, "error": "invalid_category"}), 400
+    if urgency and urgency not in {"IMP", "UR", "UA", "EU"}:
+        return jsonify({"ok": False, "error": "invalid_urgency"}), 400
+    # En envoi spontane (pas dans une fiche), categorie obligatoire pour
+    # router le message cote PC org.
+    if not category:
+        return jsonify({"ok": False, "error": "missing_category"}), 400
+
+    def _opt_float(k):
+        try:
+            v = data.get(k)
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    lat = _opt_float("lat")
+    lng = _opt_float("lng")
+    try:
+        battery = int(data.get("battery")) if data.get("battery") is not None else None
+    except (TypeError, ValueError):
+        battery = None
+
+    db = _get_mongo_db()
+    now = _now()
+    now_local = _now_local()
+    name = device.get("name") or "?"
+    hh_mm = now_local.strftime("%H:%M")
+    title = "Scan {} (x{})".format(hh_mm, len(codes)) if len(codes) > 1 else "Scan " + hh_mm
+
+    payload = {
+        "codes": codes,
+        "lat": lat,
+        "lng": lng,
+        "battery": battery,
+        "category": category,
+    }
+    if urgency:
+        payload["niveau_urgence"] = urgency
+
+    doc = {
+        "device_id": device["_id"],
+        "device_name": name,
+        "event": device.get("event"),
+        "year": device.get("year"),
+        "type": "scan_report",
+        "title": title,
+        "body": comment,
+        "payload": payload,
+        "priority": "normal",
+        "from": "field:" + name,
+        "direction": "field_to_cockpit",
+        "createdAt": now,
+        "expiresAt": now + timedelta(seconds=INBOX_MESSAGE_TTL_SECONDS),
+        "ack_at": None,
+    }
+    res = db["field_messages"].insert_one(doc)
+    return jsonify({"ok": True, "id": str(res.inserted_id), "codes": codes})
+
+
+# =============================================================================
+# STREAMING : flux video tablette -> mediamtx -> PC org / VMS Qonify
+# =============================================================================
+# Pool de N slots fixes : Qonify est configure une seule fois avec N URLs RTSP
+# stables, Cockpit alloue dynamiquement un slot a chaque demande.
+#
+# Flux : PC org demande -> tablette accepte -> publie WHIP -> PC org consomme
+# WHEP, Qonify consomme RTSP, le tout sur le meme path field-N.
+
+import hmac as _hmac
+
+
+def _slot_label(slot_index):
+    """Label humain affiche dans l'UI : 'Camera terrain N'."""
+    return "Camera terrain {}".format(int(slot_index) + 1)
+
+
+def _stream_status_active(status):
+    return status in ("requested", "accepted")
+
+
+def _release_stream_slot(db, stream_id):
+    """Libere le slot occupe par stream_id (idempotent). Retire aussi
+    pending_stream_request du device si pose."""
+    try:
+        sid = stream_id if isinstance(stream_id, ObjectId) else ObjectId(stream_id)
+    except Exception:
+        return
+    db["field_stream_slots"].update_many(
+        {"current_stream_id": sid},
+        {"$set": {"current_stream_id": None}},
+    )
+    s = db["field_streams"].find_one({"_id": sid}, {"device_id": 1})
+    if s and s.get("device_id"):
+        db["field_devices"].update_one(
+            {"_id": s["device_id"], "pending_stream_request": sid},
+            {"$set": {"pending_stream_request": None}},
+        )
+
+
+def _gc_stale_slots(db):
+    """Libere les slots dont le stream est dans un etat stale (expired,
+    fini, ou plus de last_publish_at depuis FIELD_STREAM_STALE_GRACE_S).
+    Appele de facon lazy a chaque allocation."""
+    now = _now()
+    stale_publish_before = now - timedelta(seconds=FIELD_STREAM_STALE_GRACE_S)
+    occupied = list(db["field_stream_slots"].find(
+        {"current_stream_id": {"$ne": None}}
+    ))
+    for slot in occupied:
+        sid = slot.get("current_stream_id")
+        if not sid:
+            continue
+        s = db["field_streams"].find_one({"_id": sid})
+        if not s:
+            # Stream supprime (TTL Mongo) -> liberation
+            db["field_stream_slots"].update_one(
+                {"_id": slot["_id"]}, {"$set": {"current_stream_id": None}}
+            )
+            continue
+        status = s.get("status")
+        accepted_at = s.get("accepted_at")
+        last_pub = s.get("last_publish_at")
+        max_dur = s.get("max_duration_s") or FIELD_STREAM_MAX_DURATION_S
+        is_stale = False
+        if status in ("ended", "expired", "declined"):
+            is_stale = True
+        elif status == "requested":
+            # Demande non acceptee dans les FIELD_STREAM_REQUEST_TTL_S
+            if s.get("expires_at") and s["expires_at"] < now:
+                is_stale = True
+                db["field_streams"].update_one(
+                    {"_id": s["_id"]},
+                    {"$set": {"status": "expired", "ended_at": now}},
+                )
+        elif status == "accepted":
+            # Depasse la duree max -> expired
+            if accepted_at and accepted_at + timedelta(seconds=max_dur) < now:
+                is_stale = True
+                db["field_streams"].update_one(
+                    {"_id": s["_id"]},
+                    {"$set": {"status": "expired", "ended_at": now}},
+                )
+            # Pas de publish vu depuis grace period -> tablette deconnectee
+            elif last_pub and last_pub < stale_publish_before:
+                is_stale = True
+                db["field_streams"].update_one(
+                    {"_id": s["_id"]},
+                    {"$set": {"status": "ended", "ended_at": now}},
+                )
+        if is_stale:
+            db["field_stream_slots"].update_one(
+                {"_id": slot["_id"]}, {"$set": {"current_stream_id": None}}
+            )
+            if s.get("device_id"):
+                db["field_devices"].update_one(
+                    {"_id": s["device_id"], "pending_stream_request": s["_id"]},
+                    {"$set": {"pending_stream_request": None}},
+                )
+
+
+def _allocate_stream_slot(db, stream_id):
+    """Trouve un slot libre et l'attribue atomiquement au stream_id.
+    Renvoie le slot doc apres update, ou None si pool plein."""
+    _gc_stale_slots(db)
+    return db["field_stream_slots"].find_one_and_update(
+        {"current_stream_id": None},
+        {"$set": {"current_stream_id": stream_id, "last_assigned_at": _now()}},
+        sort=[("slot_index", 1)],
+        return_document=ReturnDocument.AFTER,
+    )
+
+
+def _verify_mediamtx_signature(req):
+    """Verifie le header X-Mediamtx-Auth contre MEDIAMTX_AUTH_HMAC_KEY.
+    En dev simple : comparaison directe (cle partagee). En prod, on peut
+    upgrader vers HMAC sur le body."""
+    sent = req.headers.get("X-Mediamtx-Auth", "")
+    expected = MEDIAMTX_AUTH_HMAC_KEY or ""
+    if not sent or not expected:
+        return False
+    return _hmac.compare_digest(sent, expected)
+
+
+def _stream_view_urls(slot):
+    """Construit les URLs publiques pour un slot (vue PC org + VMS)."""
+    path = slot["path"]
+    view_token = slot["view_token"]
+    base_https = MEDIAMTX_BASE_URL.rstrip("/")
+    base_rtsp = MEDIAMTX_RTSP_BASE.rstrip("/")
+    return {
+        "whep_url": "{}/{}/whep?token={}".format(base_https, path, view_token),
+        "hls_url": "{}/{}/index.m3u8?token={}".format(base_https.replace(":8889", ":8888"), path, view_token),
+        "rtsp_url": "{}/{}?token={}".format(base_rtsp, path, view_token),
+    }
+
+
+@field_bp.route("/field/stream/<stream_id>/accept", methods=["POST"])
+@field_token_required
+def field_stream_accept(stream_id):
+    """La tablette accepte une demande de flux. On retourne au client le
+    whip_url (ou pousser le flux WebRTC) et un publish_token jetable."""
+    device = request.device
+    try:
+        sid = ObjectId(stream_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    db = _get_mongo_db()
+    s = db["field_streams"].find_one({"_id": sid})
+    if not s:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    if s.get("device_id") != device["_id"]:
+        return jsonify({"ok": False, "error": "not_yours"}), 403
+    now = _now()
+    if s.get("status") != "requested":
+        return jsonify({"ok": False, "error": "invalid_state", "status": s.get("status")}), 409
+    if s.get("expires_at") and s["expires_at"] < now:
+        # Expire en silence : libere le slot
+        db["field_streams"].update_one({"_id": sid}, {"$set": {"status": "expired", "ended_at": now}})
+        _release_stream_slot(db, sid)
+        return jsonify({"ok": False, "error": "expired"}), 410
+
+    slot = db["field_stream_slots"].find_one({"current_stream_id": sid})
+    if not slot:
+        return jsonify({"ok": False, "error": "slot_lost"}), 410
+
+    db["field_streams"].update_one(
+        {"_id": sid},
+        {"$set": {"status": "accepted", "accepted_at": now, "last_publish_at": None}},
+    )
+    whip_url = "{}/{}/whip?token={}".format(
+        MEDIAMTX_BASE_URL.rstrip("/"), slot["path"], s["publish_token"]
+    )
+    return jsonify({
+        "ok": True,
+        "whip_url": whip_url,
+        "publish_token": s["publish_token"],
+        "max_duration_s": s.get("max_duration_s") or FIELD_STREAM_MAX_DURATION_S,
+        "slot_index": slot["slot_index"],
+        "slot_label": _slot_label(slot["slot_index"]),
+    })
+
+
+@field_bp.route("/field/stream/<stream_id>/decline", methods=["POST"])
+@field_token_required
+def field_stream_decline(stream_id):
+    """La tablette refuse la demande de flux."""
+    device = request.device
+    try:
+        sid = ObjectId(stream_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    db = _get_mongo_db()
+    s = db["field_streams"].find_one({"_id": sid})
+    if not s:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    if s.get("device_id") != device["_id"]:
+        return jsonify({"ok": False, "error": "not_yours"}), 403
+    db["field_streams"].update_one(
+        {"_id": sid},
+        {"$set": {"status": "declined", "ended_at": _now()}},
+    )
+    _release_stream_slot(db, sid)
+    return jsonify({"ok": True})
+
+
+@field_bp.route("/field/stream/<stream_id>/end", methods=["POST"])
+@field_token_required
+def field_stream_end_tablet(stream_id):
+    """La tablette met fin au stream (bouton Arreter ou auto-stop)."""
+    device = request.device
+    try:
+        sid = ObjectId(stream_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    db = _get_mongo_db()
+    s = db["field_streams"].find_one({"_id": sid})
+    if not s:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    if s.get("device_id") != device["_id"]:
+        return jsonify({"ok": False, "error": "not_yours"}), 403
+    if s.get("status") in ("ended", "expired", "declined"):
+        _release_stream_slot(db, sid)
+        return jsonify({"ok": True, "already_ended": True})
+    db["field_streams"].update_one(
+        {"_id": sid},
+        {"$set": {"status": "ended", "ended_at": _now()}},
+    )
+    _release_stream_slot(db, sid)
+    return jsonify({"ok": True})
+
+
+@field_bp.route("/field/api/stream/auth", methods=["POST"])
+def field_stream_auth_webhook():
+    """Webhook appele par mediamtx (runOnPublish/Read/Unpublish).
+    Valide les tokens et met a jour l'etat des slots/streams.
+    Auth : header X-Mediamtx-Auth = MEDIAMTX_AUTH_HMAC_KEY (cle partagee)."""
+    if not _verify_mediamtx_signature(request):
+        return jsonify({"ok": False, "error": "bad_signature"}), 403
+
+    data = request.get_json(silent=True) or {}
+    action = (data.get("action") or "").lower()
+    path = (data.get("path") or "").strip()
+    query = (data.get("query") or "").strip()
+
+    if not path or not action:
+        return jsonify({"ok": False, "error": "missing_fields"}), 400
+
+    # Extraire le token de la query string. mediamtx passe la query sous forme
+    # "token=xxx" (sans le "?"). On parse a la main pour eviter une dep.
+    token = None
+    for pair in query.split("&"):
+        if pair.startswith("token="):
+            token = pair[6:]
+            break
+
+    db = _get_mongo_db()
+    slot = db["field_stream_slots"].find_one({"path": path})
+    if not slot:
+        return jsonify({"ok": False, "error": "unknown_path"}), 404
+
+    now = _now()
+
+    if action == "publish":
+        if not token:
+            return jsonify({"ok": False, "error": "missing_token"}), 403
+        sid = slot.get("current_stream_id")
+        if not sid:
+            return jsonify({"ok": False, "error": "slot_idle"}), 403
+        s = db["field_streams"].find_one({"_id": sid})
+        if not s or s.get("status") != "accepted":
+            return jsonify({"ok": False, "error": "stream_not_active"}), 403
+        if not _hmac.compare_digest(s.get("publish_token") or "", token):
+            return jsonify({"ok": False, "error": "bad_publish_token"}), 403
+        db["field_streams"].update_one(
+            {"_id": sid}, {"$set": {"last_publish_at": now}}
+        )
+        return jsonify({"ok": True})
+
+    if action == "read":
+        if not token:
+            return jsonify({"ok": False, "error": "missing_token"}), 403
+        # View token est stable pour le slot
+        if not _hmac.compare_digest(slot.get("view_token") or "", token):
+            return jsonify({"ok": False, "error": "bad_view_token"}), 403
+        return jsonify({"ok": True})
+
+    if action == "unpublish":
+        # Liberation du slot quand la tablette ferme la peer connection.
+        sid = slot.get("current_stream_id")
+        if sid:
+            db["field_streams"].update_one(
+                {"_id": sid, "status": {"$in": ["accepted", "requested"]}},
+                {"$set": {"status": "ended", "ended_at": now}},
+            )
+            _release_stream_slot(db, sid)
+        return jsonify({"ok": True})
+
+    return jsonify({"ok": False, "error": "unknown_action"}), 400
+
+
 # =============================================================================
 # PARTIE ADMIN : routes /field/admin/*
 # =============================================================================
@@ -2006,6 +2502,221 @@ def field_admin_device_tracking(device_id):
         {"$set": {"tracking_mode": effective_mode, "tracking_watchers": watchers}},
     )
     return jsonify({"ok": True, "mode": effective_mode, "watchers": len(watchers)})
+
+
+# ---------------------------------------------------------------------------
+# Admin : streaming live (allocation slots, viewer URLs, etat du pool)
+# ---------------------------------------------------------------------------
+
+@field_bp.route("/field/admin/device/<device_id>/stream-request", methods=["POST"])
+@admin_required
+def field_admin_stream_request(device_id):
+    """Cree une demande de flux video pour la tablette device_id.
+    Allocation atomique d'un slot dans le pool. Si pool plein -> 409 + liste
+    des streams actifs (pour permettre a l'admin de couper)."""
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    db = _get_mongo_db()
+    dev = db["field_devices"].find_one({"_id": oid})
+    if not dev:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    if dev.get("revoked"):
+        return jsonify({"ok": False, "error": "device_revoked"}), 403
+
+    # Si une demande en cours, refuser plutot que doubler.
+    existing_id = dev.get("pending_stream_request")
+    if existing_id:
+        existing = db["field_streams"].find_one({"_id": existing_id})
+        if existing and _stream_status_active(existing.get("status")):
+            return jsonify({
+                "ok": False, "error": "device_busy",
+                "stream_id": str(existing["_id"]),
+                "status": existing.get("status"),
+            }), 409
+
+    operator = (getattr(request, "admin_user", None) or {}).get("email") or "operator"
+    now = _now()
+    expires_at = now + timedelta(seconds=FIELD_STREAM_REQUEST_TTL_S)
+    publish_token = secrets.token_urlsafe(24)
+
+    # On insert d'abord le stream pour obtenir son _id, puis on alloue le slot.
+    stream_doc = {
+        "device_id": dev["_id"],
+        "device_name": dev.get("name") or "?",
+        "event": dev.get("event"),
+        "year": dev.get("year"),
+        "slot_id": None,
+        "slot_path": None,
+        "publish_token": publish_token,
+        "status": "requested",
+        "requested_by": operator,
+        "requested_at": now,
+        "accepted_at": None,
+        "ended_at": None,
+        "expires_at": expires_at,
+        "max_duration_s": FIELD_STREAM_MAX_DURATION_S,
+        "last_publish_at": None,
+    }
+    res = db["field_streams"].insert_one(stream_doc)
+    sid = res.inserted_id
+
+    slot = _allocate_stream_slot(db, sid)
+    if not slot:
+        # Pool plein : on supprime le stream qu'on vient de creer + on
+        # renvoie la liste des slots actifs.
+        db["field_streams"].delete_one({"_id": sid})
+        active = []
+        for s in db["field_stream_slots"].find().sort("slot_index", 1):
+            cur = s.get("current_stream_id")
+            if not cur:
+                continue
+            cs = db["field_streams"].find_one({"_id": cur})
+            if not cs:
+                continue
+            active.append({
+                "slot_index": s["slot_index"],
+                "slot_label": _slot_label(s["slot_index"]),
+                "stream_id": str(cur),
+                "device_id": str(cs.get("device_id")) if cs.get("device_id") else None,
+                "device_name": cs.get("device_name"),
+                "status": cs.get("status"),
+                "accepted_at": _iso(cs.get("accepted_at")) if cs.get("accepted_at") else None,
+            })
+        return jsonify({"ok": False, "error": "pool_full", "active_slots": active}), 409
+
+    db["field_streams"].update_one(
+        {"_id": sid},
+        {"$set": {"slot_id": slot["_id"], "slot_path": slot["path"]}},
+    )
+    db["field_devices"].update_one(
+        {"_id": oid},
+        {"$set": {"pending_stream_request": sid}},
+    )
+    return jsonify({
+        "ok": True,
+        "stream_id": str(sid),
+        "slot_index": slot["slot_index"],
+        "slot_label": _slot_label(slot["slot_index"]),
+        "slot_path": slot["path"],
+        "expires_at": _iso(expires_at),
+        "status": "requested",
+    })
+
+
+@field_bp.route("/field/admin/device/<device_id>/stream-request", methods=["DELETE"])
+@admin_required
+def field_admin_stream_request_cancel(device_id):
+    """Annule une demande de flux en cours (avant ou apres acceptation)."""
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    db = _get_mongo_db()
+    dev = db["field_devices"].find_one({"_id": oid}, {"pending_stream_request": 1})
+    sid = dev.get("pending_stream_request") if dev else None
+    if not sid:
+        return jsonify({"ok": True, "no_active": True})
+    db["field_streams"].update_one(
+        {"_id": sid, "status": {"$in": ["requested", "accepted"]}},
+        {"$set": {"status": "ended", "ended_at": _now()}},
+    )
+    _release_stream_slot(db, sid)
+    return jsonify({"ok": True, "stream_id": str(sid)})
+
+
+@field_bp.route("/field/admin/stream/<stream_id>/view", methods=["GET"])
+@admin_required
+def field_admin_stream_view(stream_id):
+    """Retourne les URLs WHEP/RTSP/HLS + etat du stream pour la modale viewer."""
+    try:
+        sid = ObjectId(stream_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    db = _get_mongo_db()
+    s = db["field_streams"].find_one({"_id": sid})
+    if not s:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+
+    slot = None
+    if s.get("slot_id"):
+        slot = db["field_stream_slots"].find_one({"_id": s["slot_id"]})
+    if not slot and s.get("slot_path"):
+        slot = db["field_stream_slots"].find_one({"path": s["slot_path"]})
+
+    body = {
+        "ok": True,
+        "stream_id": str(sid),
+        "status": s.get("status"),
+        "device_id": str(s.get("device_id")) if s.get("device_id") else None,
+        "device_name": s.get("device_name"),
+        "requested_by": s.get("requested_by"),
+        "requested_at": _iso(s.get("requested_at")) if s.get("requested_at") else None,
+        "accepted_at": _iso(s.get("accepted_at")) if s.get("accepted_at") else None,
+        "ended_at": _iso(s.get("ended_at")) if s.get("ended_at") else None,
+        "expires_at": _iso(s.get("expires_at")) if s.get("expires_at") else None,
+        "max_duration_s": s.get("max_duration_s") or FIELD_STREAM_MAX_DURATION_S,
+        "slot_index": slot["slot_index"] if slot else None,
+        "slot_label": _slot_label(slot["slot_index"]) if slot else None,
+    }
+    if slot:
+        body.update(_stream_view_urls(slot))
+    return jsonify(body)
+
+
+@field_bp.route("/field/admin/streams/active", methods=["GET"])
+@admin_required
+def field_admin_streams_active():
+    """Liste l'etat des N slots du pool (pour la barre d'info Field Dispatch)."""
+    db = _get_mongo_db()
+    _gc_stale_slots(db)
+    out = []
+    for slot in db["field_stream_slots"].find().sort("slot_index", 1):
+        entry = {
+            "slot_index": slot["slot_index"],
+            "slot_label": _slot_label(slot["slot_index"]),
+            "path": slot["path"],
+            "free": slot.get("current_stream_id") is None,
+            "stream": None,
+        }
+        sid = slot.get("current_stream_id")
+        if sid:
+            s = db["field_streams"].find_one({"_id": sid})
+            if s:
+                entry["stream"] = {
+                    "stream_id": str(s["_id"]),
+                    "device_id": str(s.get("device_id")) if s.get("device_id") else None,
+                    "device_name": s.get("device_name"),
+                    "status": s.get("status"),
+                    "requested_by": s.get("requested_by"),
+                    "accepted_at": _iso(s.get("accepted_at")) if s.get("accepted_at") else None,
+                    "expires_at": _iso(s.get("expires_at")) if s.get("expires_at") else None,
+                    "max_duration_s": s.get("max_duration_s") or FIELD_STREAM_MAX_DURATION_S,
+                }
+        out.append(entry)
+    return jsonify({"ok": True, "slots": out})
+
+
+@field_bp.route("/field/admin/stream/<stream_id>/end", methods=["POST"])
+@admin_required
+def field_admin_stream_end(stream_id):
+    """Force l'arret d'un stream cote PC org (bouton Couper dans la modale
+    ou dans la liste des slots actifs)."""
+    try:
+        sid = ObjectId(stream_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    db = _get_mongo_db()
+    s = db["field_streams"].find_one({"_id": sid})
+    if not s:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    db["field_streams"].update_one(
+        {"_id": sid, "status": {"$in": ["requested", "accepted"]}},
+        {"$set": {"status": "ended", "ended_at": _now()}},
+    )
+    _release_stream_slot(db, sid)
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------
@@ -2855,6 +3566,32 @@ def field_my_fiches():
     else:
         tracking_mode = dev_fresh.get("tracking_mode") or "normal"
 
+    # Demande de flux video en attente : si un operateur PC org a demande
+    # un stream, on remonte l'info pour que la tablette affiche la modale
+    # de consentement. Meme pattern que tracking_mode.
+    pending_stream = None
+    psr_id = dev_fresh.get("pending_stream_request")
+    if psr_id:
+        s = db["field_streams"].find_one({"_id": psr_id})
+        if s and _stream_status_active(s.get("status")):
+            slot = None
+            if s.get("slot_id"):
+                slot = db["field_stream_slots"].find_one({"_id": s["slot_id"]})
+            pending_stream = {
+                "stream_id": str(s["_id"]),
+                "status": s.get("status"),
+                "requested_by": s.get("requested_by"),
+                "requested_at": _iso(s.get("requested_at")) if s.get("requested_at") else None,
+                "expires_at": _iso(s.get("expires_at")) if s.get("expires_at") else None,
+                "max_duration_s": s.get("max_duration_s") or FIELD_STREAM_MAX_DURATION_S,
+                "slot_label": _slot_label(slot["slot_index"]) if slot else None,
+            }
+        else:
+            # Stream stale -> nettoyer le champ device
+            db["field_devices"].update_one(
+                {"_id": device["_id"]}, {"$set": {"pending_stream_request": None}}
+            )
+
     return jsonify({
         "open": open_list,
         "closed": closed_list,
@@ -2862,6 +3599,7 @@ def field_my_fiches():
         "device_status": dev_fresh.get("status") or "patrouille",
         "active_fiche_id": dev_fresh.get("active_fiche_id"),
         "tracking_mode": tracking_mode,
+        "pending_stream_request": pending_stream,
         "now": _iso(_now()),
     })
 
@@ -2936,6 +3674,7 @@ def field_my_fiche_comment_with_photo(fiche_id):
 
     # Detect content type
     is_multipart = request.content_type and "multipart" in request.content_type
+    codes = []
     if is_multipart:
         comment = (request.form.get("comment") or "").strip()
         # Multi-photos : "photos" en getlist, fallback "photo" pour compat
@@ -2948,8 +3687,14 @@ def field_my_fiche_comment_with_photo(fiche_id):
         data = request.get_json(silent=True) or {}
         comment = (data.get("comment") or "").strip()
         photo_files = []
+        # Codes scannes optionnels : meme structure que /field/scan/send.
+        if data.get("codes"):
+            try:
+                codes = _normalize_scan_codes(data.get("codes"))
+            except ValueError as e:
+                return jsonify({"ok": False, "error": str(e)}), 400
 
-    if not comment and not photo_files:
+    if not comment and not photo_files and not codes:
         return jsonify({"ok": False, "error": "empty_comment"}), 400
     if comment and len(comment) > 2000:
         return jsonify({"ok": False, "error": "comment_too_long"}), 400
@@ -2988,6 +3733,8 @@ def field_my_fiche_comment_with_photo(fiche_id):
         # Back-compat : 1ere photo aussi en champs plats
         entry["photo"] = photos_meta[0]["photo"]
         entry["thumb"] = photos_meta[0]["thumb"]
+    if codes:
+        entry["codes"] = codes
 
     update_sets = {}
     if comment:
@@ -3005,6 +3752,7 @@ def field_my_fiche_comment_with_photo(fiche_id):
         "photos": photos_meta,
         "photo": photos_meta[0]["photo"] if photos_meta else None,
         "thumb": photos_meta[0]["thumb"] if photos_meta else None,
+        "codes": codes,
     })
 
 

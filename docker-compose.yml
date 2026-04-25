@@ -18,6 +18,18 @@ services:
       - waha_sessions:/app/.sessions
       - waha_data:/app/.media
 
+  # Media server pour le streaming live tablette Field -> PC org -> VMS Qonify.
+  # Architecture : 3 paths fixes (field-1/2/3) avec view tokens stables, tablette
+  # publie via WHIP avec un publish_token jetable. Les hooks runOnPublish/Read/
+  # Unpublish appellent /field/api/stream/auth pour valider et liberer les slots.
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: cockpit-mediamtx
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+
 volumes:
   waha_sessions:
   waha_data:

@@ -1207,6 +1207,20 @@
           photoWrap.appendChild(img);
           ent.appendChild(photoWrap);
         }
+        if (entry.codes && entry.codes.length) {
+          var codesWrap = mkEl("div", "pcorg-chrono-codes");
+          entry.codes.forEach(function (c) {
+            var chip = mkEl("div", "pcorg-chrono-code");
+            var fmtEl = mkEl("span", "pcorg-chrono-code-fmt");
+            fmtEl.textContent = (c.format || "manual").toUpperCase();
+            var valEl = mkEl("span", "pcorg-chrono-code-val");
+            valEl.textContent = c.value || "";
+            chip.appendChild(fmtEl);
+            chip.appendChild(valEl);
+            codesWrap.appendChild(chip);
+          });
+          ent.appendChild(codesWrap);
+        }
         timeline.appendChild(ent);
       });
       body.appendChild(timeline);
@@ -2188,6 +2202,16 @@
                     return function () { openPhotoLightbox(full); };
                   })(entry.photo));
                   row.appendChild(pImg);
+                }
+                if (entry.codes && entry.codes.length) {
+                  var codesEl = mkEl("span", "pcorg-popup-chrono-codes");
+                  entry.codes.forEach(function (c) {
+                    var chip = mkEl("span", "pcorg-popup-chrono-code");
+                    chip.textContent = (c.format || "manual").toUpperCase() + " " + (c.value || "");
+                    chip.title = c.value || "";
+                    codesEl.appendChild(chip);
+                  });
+                  row.appendChild(codesEl);
                 }
                 cDiv.appendChild(row);
               });

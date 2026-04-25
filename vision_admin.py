@@ -304,6 +304,8 @@ def _pub_device(d):
         "tablet_uid": d.get("tablet_uid"),
         "current_user": ({
             "employee_number": cu.get("employee_number"),
+            "person_id_external": cu.get("person_id_external"),
+            "id_source": cu.get("id_source"),
             "firstname": cu.get("firstname"),
             "lastname": cu.get("lastname"),
             "started_at": _iso(cu.get("started_at")),
@@ -324,6 +326,9 @@ def _pub_session(s):
         "year": s.get("year"),
         "lieu": s.get("lieu"),
         "employee_number": s.get("employee_number"),
+        "person_id_external": s.get("person_id_external"),
+        "scanned_code": s.get("scanned_code"),
+        "id_source": s.get("id_source"),
         "firstname": s.get("firstname"),
         "lastname": s.get("lastname"),
         "started_at": _iso(s.get("started_at")),
@@ -534,15 +539,28 @@ def vision_api_identify():
         return err
 
     data = request.get_json(silent=True) or {}
-    employee_number = str(data.get("employee_number") or "").strip()
+    # `employee_number` est le nom du champ historique cote API, mais le scan
+    # peut tres bien remonter un PersonID Adecco. On essaie donc dans l'ordre :
+    #   1) person_id_external (PersonID Adecco, index unique sparse)
+    #   2) employee_number (fallback historique)
+    scanned_code = str(data.get("employee_number") or "").strip()
     tablet_uid = (data.get("tablet_uid") or "").strip() or None
-    if not employee_number:
+    if not scanned_code:
         return _cors_response({"ok": False, "error": "missing_employee_number"}, 400)
 
-    person = db["planbition_people"].find_one({"employee_number": employee_number})
+    person = db["planbition_people"].find_one({"person_id_external": scanned_code})
+    id_source = "person_id_external" if person else None
+    if not person:
+        person = db["planbition_people"].find_one({"employee_number": scanned_code})
+        id_source = "employee_number" if person else None
     if not person:
         return _cors_response({"ok": False, "error": "unknown_employee"}, 404)
 
+    # Champ canonique : employee_number reel de la personne (peut differer du
+    # code scanne si match via PersonID, et fallback sur le code scanne si
+    # absent en base — rare mais possible).
+    employee_number = (person.get("employee_number") or "").strip() or scanned_code
+    person_id_external = (person.get("person_id_external") or "").strip() or None
     firstname = (person.get("firstname") or "").strip()
     lastname = (person.get("lastname") or "").strip()
 
@@ -564,6 +582,9 @@ def vision_api_identify():
         "year": device.get("year") or "",
         "lieu": device.get("lieu") or "",
         "employee_number": employee_number,
+        "person_id_external": person_id_external,
+        "scanned_code": scanned_code,
+        "id_source": id_source,
         "firstname": firstname,
         "lastname": lastname,
         "started_at": now,
@@ -582,6 +603,8 @@ def vision_api_identify():
         "last_seen": now,
         "current_user": {
             "employee_number": employee_number,
+            "person_id_external": person_id_external,
+            "id_source": id_source,
             "firstname": firstname,
             "lastname": lastname,
             "started_at": now,
@@ -598,6 +621,8 @@ def vision_api_identify():
     return _cors_response({
         "ok": True,
         "employee_number": employee_number,
+        "person_id_external": person_id_external,
+        "id_source": id_source,
         "firstname": firstname,
         "lastname": lastname,
         "started_at": _iso(now),

@@ -946,9 +946,244 @@
         openSendMessageModal(dev);
       });
       popup.appendChild(msgBtn);
+
+      // Bouton "Voir flux video" : demande un stream a la tablette via le pool
+      // de slots fixes. La modale viewer s'ouvre apres allocation reussie.
+      var streamBtn = el("button", {
+        className: "anoloc-lock-btn",
+      }, [
+        materialIcon("videocam", "font-size:16px;vertical-align:middle;margin-right:4px;"),
+        "Voir flux video",
+      ]);
+      streamBtn.style.marginTop = "4px";
+      streamBtn.style.background = "#dc2626";
+      streamBtn.style.borderColor = "transparent";
+      streamBtn.style.color = "#fff";
+      streamBtn.addEventListener("click", function () {
+        requestStreamForDevice(dev);
+      });
+      popup.appendChild(streamBtn);
     }
 
     return popup;
+  }
+
+  // === Demande de flux video (bouton popup carte) ===
+  function requestStreamForDevice(dev) {
+    var rawId = String(dev.id || "");
+    var deviceId = rawId.indexOf("field:") === 0 ? rawId.slice(6) : rawId;
+
+    fetch("/field/admin/device/" + encodeURIComponent(deviceId) + "/stream-request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": _csrfToken() },
+    }).then(function (r) {
+      return r.json().then(function (d) { return { status: r.status, data: d }; });
+    }).then(function (resp) {
+      if (resp.status >= 200 && resp.status < 300 && resp.data && resp.data.ok) {
+        openStreamViewerModal(resp.data.stream_id, dev.label || dev.id);
+      } else if (resp.status === 409 && resp.data && resp.data.error === "pool_full") {
+        showStreamPoolFullModal(resp.data.active_slots || []);
+      } else if (resp.status === 409 && resp.data && resp.data.error === "device_busy") {
+        // Une demande deja en cours pour cette tablette : reouvrir la modale.
+        openStreamViewerModal(resp.data.stream_id, dev.label || dev.id);
+      } else {
+        alert("Echec demande flux : " + ((resp.data && resp.data.error) || resp.status));
+      }
+    }).catch(function () {
+      alert("Erreur reseau (demande flux)");
+    });
+  }
+
+  function showStreamPoolFullModal(activeSlots) {
+    var existing = document.getElementById("anoloc-stream-pool-full");
+    if (existing) existing.remove();
+    var overlay = el("div", { className: "anoloc-msg-overlay", id: "anoloc-stream-pool-full" });
+    var box = el("div", { className: "anoloc-msg-box", style: "max-width:520px" });
+    var hdr = el("div", { className: "anoloc-msg-header" });
+    hdr.appendChild(el("div", { className: "anoloc-msg-header-left" }, [
+      materialIcon("warning", "font-size:20px;color:#f59e0b;"),
+      el("span", { textContent: "Tous les flux sont occupes" }),
+    ]));
+    var closeB = el("button", { className: "icon-btn anoloc-msg-close" }, [materialIcon("close")]);
+    closeB.addEventListener("click", function () { overlay.remove(); });
+    hdr.appendChild(closeB);
+    box.appendChild(hdr);
+    var body = el("div", { className: "anoloc-msg-body" });
+    body.appendChild(el("p", { textContent: "Tous les slots du pool sont en cours d'utilisation. Coupez-en un pour liberer une place :" }));
+    activeSlots.forEach(function (s) {
+      var row = el("div", {
+        style: "display:flex;align-items:center;gap:10px;padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:6px;",
+      });
+      row.appendChild(el("strong", { textContent: s.slot_label || ("Slot " + s.slot_index) }));
+      row.appendChild(el("span", { textContent: s.device_name || "?", style: "flex:1;color:var(--muted);" }));
+      var killBtn = el("button", { className: "btn-primary", style: "background:#dc2626;color:#fff;padding:6px 10px;border-radius:6px;border:none;font-size:12px;cursor:pointer;" }, ["Couper"]);
+      killBtn.addEventListener("click", function () {
+        fetch("/field/admin/stream/" + encodeURIComponent(s.stream_id) + "/end", {
+          method: "POST",
+          headers: { "X-CSRFToken": _csrfToken() },
+        }).then(function () { row.style.opacity = "0.4"; killBtn.disabled = true; killBtn.textContent = "Coupe"; });
+      });
+      row.appendChild(killBtn);
+      body.appendChild(row);
+    });
+    box.appendChild(body);
+    overlay.appendChild(box);
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+  }
+
+  // === Modale viewer WHEP (PC org) ===
+  // Expose en global pour que field_admin.js (page Field Dispatch admin)
+  // puisse la reutiliser sans dupliquer la logique WHEP.
+  window.openFieldStreamViewer = function (streamId, deviceLabel) {
+    return openStreamViewerModal(streamId, deviceLabel);
+  };
+  window.requestFieldStreamForDevice = function (deviceId, deviceLabel) {
+    return requestStreamForDevice({ id: deviceId, label: deviceLabel });
+  };
+
+  function openStreamViewerModal(streamId, deviceLabel) {
+    var existing = document.getElementById("anoloc-stream-viewer");
+    if (existing) existing.remove();
+
+    var overlay = el("div", { className: "anoloc-msg-overlay", id: "anoloc-stream-viewer" });
+    var box = el("div", { className: "anoloc-msg-box anoloc-stream-viewer-box" });
+
+    var header = el("div", { className: "anoloc-msg-header" });
+    var headerLeft = el("div", { className: "anoloc-msg-header-left" }, [
+      materialIcon("videocam", "font-size:20px;color:#dc2626;"),
+      el("span", { id: "anoloc-stream-header-label", textContent: deviceLabel || "Flux video" }),
+    ]);
+    var closeBtn = el("button", { className: "icon-btn anoloc-msg-close" }, [materialIcon("close")]);
+    var pc = null;
+    var poller = null;
+    var ended = false;
+    function teardown() {
+      if (poller) { clearInterval(poller); poller = null; }
+      if (pc) { try { pc.close(); } catch (e) {} pc = null; }
+    }
+    closeBtn.addEventListener("click", function () {
+      teardown();
+      // Demande explicite d'arret cote backend (libere le slot)
+      fetch("/field/admin/stream/" + encodeURIComponent(streamId) + "/end", {
+        method: "POST",
+        headers: { "X-CSRFToken": _csrfToken() },
+      }).catch(function () {});
+      overlay.remove();
+    });
+    header.appendChild(headerLeft);
+    header.appendChild(closeBtn);
+    box.appendChild(header);
+
+    var body = el("div", { className: "anoloc-stream-body" });
+    var statusEl = el("div", { className: "anoloc-stream-status" }, [
+      materialIcon("hourglass_top", "font-size:32px;color:#94a3b8;"),
+      el("div", { textContent: "Demande envoyee, en attente d'acceptation par l'agent..." }),
+    ]);
+    var videoEl = el("video", { className: "anoloc-stream-video" });
+    videoEl.autoplay = true;
+    videoEl.muted = true;
+    videoEl.playsInline = true;
+    videoEl.setAttribute("playsinline", "");
+    videoEl.hidden = true;
+    body.appendChild(statusEl);
+    body.appendChild(videoEl);
+    box.appendChild(body);
+
+    var footer = el("div", { className: "anoloc-stream-footer" });
+    var rtspWrap = el("div", { className: "anoloc-stream-rtsp", style: "display:none" });
+    rtspWrap.appendChild(el("span", { className: "anoloc-stream-rtsp-label", textContent: "Visible aussi dans Qonify : " }));
+    var rtspSlot = el("strong", { className: "anoloc-stream-rtsp-slot", textContent: "" });
+    rtspWrap.appendChild(rtspSlot);
+    footer.appendChild(rtspWrap);
+    var stopBtn = el("button", { className: "anoloc-stream-stop" }, [
+      materialIcon("stop_circle", "font-size:18px;vertical-align:middle;"),
+      el("span", { textContent: " Arreter" }),
+    ]);
+    stopBtn.addEventListener("click", function () { closeBtn.click(); });
+    footer.appendChild(stopBtn);
+    box.appendChild(footer);
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    var playbackStarted = false;
+    function poll() {
+      fetch("/field/admin/stream/" + encodeURIComponent(streamId) + "/view", {
+        headers: { "X-CSRFToken": _csrfToken() },
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.ok || ended) return;
+          var lab = document.getElementById("anoloc-stream-header-label");
+          if (lab) {
+            var parts = [];
+            if (d.slot_label) parts.push(d.slot_label);
+            if (d.device_name) parts.push(d.device_name);
+            if (parts.length) lab.textContent = parts.join(" - ");
+          }
+          if (d.status === "requested") {
+            // toujours en attente
+          } else if (d.status === "accepted" && !playbackStarted) {
+            playbackStarted = true;
+            statusEl.style.display = "none";
+            videoEl.hidden = false;
+            rtspSlot.textContent = d.slot_label || "";
+            rtspWrap.style.display = "";
+            startWhepPlayback(d.whep_url, videoEl).catch(function (e) {
+              statusEl.style.display = "";
+              statusEl.textContent = "Erreur lecture flux : " + (e && e.message || "?");
+              videoEl.hidden = true;
+            });
+          } else if (d.status === "declined") {
+            ended = true; teardown();
+            statusEl.style.display = "";
+            statusEl.textContent = "Refuse par l'agent terrain.";
+            setTimeout(function () { overlay.remove(); }, 2000);
+          } else if (d.status === "ended" || d.status === "expired") {
+            ended = true; teardown();
+            statusEl.style.display = "";
+            statusEl.textContent = "Flux termine.";
+            videoEl.hidden = true;
+            setTimeout(function () { overlay.remove(); }, 1500);
+          }
+        }).catch(function () { /* silent */ });
+    }
+    poll();
+    poller = setInterval(poll, 1000);
+
+    function startWhepPlayback(whepUrl, video) {
+      pc = new RTCPeerConnection({ iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }] });
+      pc.addTransceiver("video", { direction: "recvonly" });
+      pc.ontrack = function (ev) { video.srcObject = ev.streams[0]; };
+      return pc.createOffer().then(function (offer) {
+        return pc.setLocalDescription(offer).then(function () {
+          // Wait ICE complete (no trickle, simpler with mediamtx WHEP)
+          return new Promise(function (resolve) {
+            if (pc.iceGatheringState === "complete") return resolve();
+            var check = function () {
+              if (pc.iceGatheringState === "complete") {
+                pc.removeEventListener("icegatheringstatechange", check);
+                resolve();
+              }
+            };
+            pc.addEventListener("icegatheringstatechange", check);
+            setTimeout(resolve, 3000);
+          });
+        });
+      }).then(function () {
+        return fetch(whepUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/sdp" },
+          body: pc.localDescription.sdp,
+        });
+      }).then(function (r) {
+        if (!r.ok) throw new Error("WHEP " + r.status);
+        return r.text();
+      }).then(function (answer) {
+        return pc.setRemoteDescription({ type: "answer", sdp: answer });
+      });
+    }
   }
 
   // --- Toggle button state ---
@@ -1320,6 +1555,19 @@
             var img = el("img", {className: "anoloc-thread-photo"});
             img.src = photoUrl;
             bubble.appendChild(img);
+          }
+          var bubbleCodes = (m.payload && Array.isArray(m.payload.codes)) ? m.payload.codes : null;
+          if (bubbleCodes && bubbleCodes.length) {
+            var codesWrap = el("div", {className: "anoloc-thread-codes"});
+            bubbleCodes.forEach(function (c) {
+              var chipEl = el("div", {className: "anoloc-thread-code"});
+              var fmtSpan = el("span", {className: "anoloc-thread-code-fmt", textContent: (c.format || "manual").toUpperCase()});
+              var valSpan = el("span", {className: "anoloc-thread-code-val", textContent: c.value || ""});
+              chipEl.appendChild(fmtSpan);
+              chipEl.appendChild(valSpan);
+              codesWrap.appendChild(chipEl);
+            });
+            bubble.appendChild(codesWrap);
           }
           var metaEl = el("div", {className: "anoloc-thread-meta"});
           var who = isField ? (m.device_name || "Tablette") : (m.from || "Cockpit");

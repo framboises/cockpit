@@ -308,8 +308,12 @@
               if (r.status === 401) { throw new Error("auth"); }
               if (!r.ok) throw new Error("server");
               return remove(rec.id).then(function () {
-                if (rec.kind === "multipart" && rec.label) {
-                  toast(rec.label + " envoyee (differe)", "ok");
+                // Toast de confirmation au flush (multipart photo, json scan).
+                // Pour les changements de statut, pas de label donc pas de toast.
+                if (rec.label && (rec.kind === "multipart"
+                                  || rec.url && rec.url.indexOf("/scan/") !== -1
+                                  || rec.url && rec.url.indexOf("/comment") !== -1)) {
+                  toast(rec.label + " envoye (differe)", "ok");
                 }
               });
             });
@@ -2525,6 +2529,14 @@
           refreshGpsProfile();
         }
         if (statusChanged) { refreshGpsProfile(); syncWakeLockWithStatus(); }
+
+        // Demande de flux video par le PC org : detection + reconciliation.
+        // - status="requested" : afficher la modale de consentement.
+        // - status="accepted" : la tablette doit etre en train de publier ;
+        //   si publishing actif et pending_stream_request null cote serveur,
+        //   c'est que l'admin a coupe -> on stoppe.
+        var psr = data.pending_stream_request;
+        handleStreamRequestPoll(psr);
       })
       .catch(function () { /* silent */ });
   }
@@ -3161,12 +3173,33 @@
           ent.appendChild(thumb);
         }
 
+        // Codes scannes
+        if (entry.codes && entry.codes.length) {
+          var codesWrap = document.createElement("div");
+          codesWrap.className = "fd-chrono-codes";
+          entry.codes.forEach(function (c) {
+            var chip = document.createElement("div");
+            chip.className = "fd-chrono-code";
+            var fmtEl = document.createElement("span");
+            fmtEl.className = "fd-chrono-code-fmt";
+            fmtEl.textContent = _scnFormatLabel(c.format || "manual");
+            var valEl = document.createElement("span");
+            valEl.className = "fd-chrono-code-val";
+            valEl.textContent = c.value || "";
+            chip.appendChild(fmtEl);
+            chip.appendChild(valEl);
+            codesWrap.appendChild(chip);
+          });
+          ent.appendChild(codesWrap);
+        }
+
         timeline.appendChild(ent);
       });
       body.appendChild(timeline);
     }
 
-    // Comment form with photo attachment
+    // Formulaire commentaire : texte rapide + bouton photo qui ouvre la
+    // camera complete (meme workflow que le bouton du menu en bas).
     if (d.status_code !== 10) {
       var secComment = document.createElement("div");
       secComment.className = "fd-section";
@@ -3184,65 +3217,27 @@
       textarea.setAttribute("aria-label", "Commentaire ou observation");
       form.appendChild(textarea);
 
-      var fileInput = document.createElement("input");
-      fileInput.type = "file";
-      fileInput.accept = "image/*";
-      fileInput.capture = "environment";
-      fileInput.style.display = "none";
-      fileInput.id = "fd-photo-input";
-      fileInput.setAttribute("aria-hidden", "true");
-
-      var preview = document.createElement("div");
-      preview.className = "fd-photo-preview";
-      preview.id = "fd-photo-preview";
-      preview.hidden = true;
-
       var photoBtn = document.createElement("button");
       photoBtn.className = "fd-photo-btn";
-      photoBtn.innerHTML = "<span class='material-symbols-outlined' aria-hidden='true'>photo_camera</span>";
-      photoBtn.title = "Photo ou image";
-      photoBtn.setAttribute("aria-label", "Prendre ou ajouter une photo");
-      photoBtn.onclick = function () { fileInput.click(); };
-
-      fileInput.onchange = function () {
-        if (fileInput.files && fileInput.files[0]) {
-          var reader = new FileReader();
-          reader.onload = function (e) {
-            preview.innerHTML = "";
-            var img = document.createElement("img");
-            img.src = e.target.result;
-            preview.appendChild(img);
-            var removeBtn = document.createElement("button");
-            removeBtn.className = "fd-photo-remove";
-            removeBtn.innerHTML = "<span class='material-symbols-outlined'>close</span>";
-            removeBtn.onclick = function (ev) {
-              ev.stopPropagation();
-              fileInput.value = "";
-              preview.hidden = true;
-            };
-            preview.appendChild(removeBtn);
-            preview.hidden = false;
-          };
-          reader.readAsDataURL(fileInput.files[0]);
-        }
-      };
+      photoBtn.appendChild(_camIcon("photo_camera"));
+      photoBtn.title = "Camera : photo ou scan a joindre a la fiche";
+      photoBtn.setAttribute("aria-label", "Camera : photo ou scan a joindre a la fiche");
+      photoBtn.onclick = function () { openCaptureChooser({ ficheId: d.id }); };
 
       var sendBtn = document.createElement("button");
       sendBtn.className = "btn-primary fd-send-btn";
-      sendBtn.innerHTML = "<span class='material-symbols-outlined'>send</span> Envoyer";
+      sendBtn.appendChild(_camIcon("send"));
+      sendBtn.appendChild(document.createTextNode(" Envoyer"));
       sendBtn.onclick = function () {
-        submitFicheComment(d.id, textarea, fileInput, preview, sendBtn);
+        submitFicheComment(d.id, textarea, sendBtn);
       };
 
-      // Photo + Send on same row
       var actionRow = document.createElement("div");
       actionRow.className = "fd-action-row";
-      actionRow.appendChild(fileInput);
       actionRow.appendChild(photoBtn);
       actionRow.appendChild(sendBtn);
 
       form.appendChild(actionRow);
-      form.appendChild(preview);
       body.appendChild(form);
     }
 
@@ -3364,36 +3359,27 @@
       });
   }
 
-  function submitFicheComment(ficheId, textarea, fileInput, preview, sendBtn) {
+  // Envoi d'un commentaire texte seul (les photos passent par le modal
+  // camera et son flux non-bloquant). Le bouton "Photo" ouvre la camera.
+  function submitFicheComment(ficheId, textarea, sendBtn) {
     var comment = textarea.value.trim();
-    var hasPhoto = fileInput.files && fileInput.files.length > 0;
-    if (!comment && !hasPhoto) {
-      toast("Ecrivez un commentaire ou prenez une photo", "err");
+    if (!comment) {
+      toast("Ecrivez un commentaire", "err");
       return;
     }
     sendBtn.disabled = true;
 
-    var photoPromise = hasPhoto
-      ? compressImageIfNeeded(fileInput.files[0])
-      : Promise.resolve(null);
-
-    photoPromise.then(function (photo) {
-      var fd = new FormData();
-      fd.append("comment", comment);
-      if (photo) {
-        fd.append("photo", photo, photo.name || "photo.jpg");
-      }
-
-      fetch("/field/my-fiches/" + encodeURIComponent(ficheId) + "/comment", {
-        method: "POST",
-        body: fd,
-      })
+    var fd = new FormData();
+    fd.append("comment", comment);
+    fetch("/field/my-fiches/" + encodeURIComponent(ficheId) + "/comment", {
+      method: "POST",
+      body: fd,
+    })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         sendBtn.disabled = false;
         if (data && data.ok) {
           toast("Commentaire envoye");
-          // Refresh the detail modal
           var fiche = state.fiches.find(function (fi) { return fi.id === ficheId; });
           if (fiche) {
             showFicheModal(fiche);
@@ -3409,7 +3395,6 @@
         sendBtn.disabled = false;
         toast("Erreur reseau", "err");
       });
-    });
   }
 
   function openLightbox(src) {
@@ -3458,6 +3443,11 @@
     selectedCategory: null,
     selectedUrgency: "UR",
     attachToFiche: false,
+    // Fiche cible quand on ouvre la camera depuis le detail d'une fiche.
+    // Si null, on retombe sur state.activeFicheId (= la fiche en cours
+    // d'intervention). Permet d'ajouter des photos a une fiche affichee
+    // sans qu'elle soit l'active.
+    targetFicheId: null,
 
     closeBtn: null, switchBtn: null, torchBtn: null,
     shutterBtn: null, nextBtn: null,
@@ -3477,14 +3467,85 @@
     return s;
   }
 
-  function openCameraModal() {
+  // Chooser : un seul bouton "Camera" dans la barre d'actions ouvre une
+  // petite modale 2 tiles (Photo / Scan) avant de plonger dans le bon
+  // modal. Garde le menu du bas tres minimal.
+  function openCaptureChooser(opts) {
+    bumpActivity();
+    var existing = document.getElementById("capture-chooser");
+    if (existing) try { existing.remove(); } catch (e) {}
+
+    var overlay = document.createElement("div");
+    overlay.id = "capture-chooser";
+    overlay.className = "capture-chooser";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-label", "Choisir : photo ou scan");
+
+    var box = document.createElement("div");
+    box.className = "capture-chooser-box";
+
+    var title = document.createElement("div");
+    title.className = "capture-chooser-title";
+    title.textContent = "Camera";
+    box.appendChild(title);
+
+    function tile(icon, label, sub, onclick) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "capture-tile";
+      var iconEl = _camIcon(icon);
+      iconEl.classList.add("capture-tile-icon");
+      var lbl = document.createElement("span");
+      lbl.className = "capture-tile-label";
+      lbl.textContent = label;
+      var subEl = document.createElement("span");
+      subEl.className = "capture-tile-sub";
+      subEl.textContent = sub;
+      b.appendChild(iconEl);
+      b.appendChild(lbl);
+      b.appendChild(subEl);
+      b.addEventListener("click", function () {
+        try { overlay.remove(); } catch (e) {}
+        onclick();
+      });
+      return b;
+    }
+
+    var tiles = document.createElement("div");
+    tiles.className = "capture-chooser-tiles";
+    tiles.appendChild(tile("photo_camera", "Photo", "1 a 5 photos", function () { openCameraModal(opts); }));
+    tiles.appendChild(tile("qr_code_scanner", "Scan", "QR / code-barres", function () { openScanModal(opts); }));
+    box.appendChild(tiles);
+
+    var cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "capture-chooser-cancel";
+    cancel.textContent = "Annuler";
+    cancel.addEventListener("click", function () { try { overlay.remove(); } catch (e) {} });
+    box.appendChild(cancel);
+
+    overlay.appendChild(box);
+    overlay.addEventListener("click", function (e) {
+      if (e.target === overlay) try { overlay.remove(); } catch (_) {}
+    });
+    document.body.appendChild(overlay);
+  }
+
+  // openCameraModal(opts?) — opts.ficheId : fiche cible explicite
+  // (depuis le detail d'une fiche). Sinon retombe sur state.activeFicheId.
+  function openCameraModal(opts) {
     bumpActivity();
     if (!_cam.root) buildCameraModal();
     _cam.photos = [];
     _cam.selectedIdx = 0;
     _cam.selectedCategory = null;
     _cam.selectedUrgency = "UR";
-    _cam.attachToFiche = !!state.activeFicheId;
+    var explicitFiche = (opts && opts.ficheId) ? opts.ficheId : null;
+    _cam.targetFicheId = explicitFiche || state.activeFicheId || null;
+    // Si fiche explicite : attache pre-cochee. Sinon : pre-cochee si
+    // l'agent a une intervention en cours.
+    _cam.attachToFiche = !!_cam.targetFicheId;
     refreshAttachBar();
     refreshComposeChips();
     refreshThumbStrip();
@@ -3688,11 +3749,12 @@
 
   function refreshAttachBar() {
     if (!_cam.attachBar) return;
-    var hasFiche = !!state.activeFicheId;
+    var ficheId = _cam.targetFicheId || state.activeFicheId;
+    var hasFiche = !!ficheId;
     _cam.attachBar.hidden = !hasFiche;
     if (hasFiche) {
       _cam.attachCb.checked = !!_cam.attachToFiche;
-      var shortId = String(state.activeFicheId).slice(0, 8);
+      var shortId = String(ficheId).slice(0, 8);
       _cam.attachLabel.textContent = "Joindre a la fiche " + shortId;
     }
   }
@@ -3752,7 +3814,8 @@
   function sendCapturedPhotos() {
     if (_cam.photos.length === 0) return;
 
-    var attach = _cam.attachToFiche && state.activeFicheId;
+    var ficheTarget = _cam.targetFicheId || state.activeFicheId;
+    var attach = _cam.attachToFiche && ficheTarget;
     var commentVal = (_cam.commentEl.value || "").trim();
     if (!attach && !_cam.selectedCategory) {
       toast("Choisis une categorie", "err");
@@ -3761,7 +3824,7 @@
 
     var url, label;
     if (attach) {
-      url = "/field/my-fiches/" + encodeURIComponent(state.activeFicheId) + "/comment";
+      url = "/field/my-fiches/" + encodeURIComponent(ficheTarget) + "/comment";
       label = "Photo fiche";
     } else {
       url = "/field/photo/send";
@@ -3846,6 +3909,16 @@
       if (resp.status >= 200 && resp.status < 300 && data.ok) {
         toast((n > 1 ? n + " photos envoyees" : "Photo envoyee") + (attach ? " (fiche)" : " au PC Org"), "ok");
         release();
+        // Si la modale de detail d'une fiche etait ouverte sur la fiche
+        // recue, on rafraichit pour faire apparaitre la nouvelle entree.
+        if (attach && ficheTarget) {
+          var detailModal = $("fiche-detail-modal");
+          if (detailModal && !detailModal.hidden) {
+            var fiche = state.fiches.find(function (fi) { return fi.id === ficheTarget; });
+            if (fiche) showFicheModal(fiche);
+          }
+          pollFiches();
+        }
       } else if (resp.status >= 400 && resp.status < 500) {
         // Erreur applicative (categorie invalide, photo refusee...) : pas de
         // file d'attente, c'est l'envoi lui-meme qui est rejete.
@@ -4074,6 +4147,913 @@
     _cam.attachLabel = attachLabel;
     _cam.sendBtn = sendBtn;
     _cam.recaptureBtn = recaptureBtn;
+  }
+
+  // =====================================================================
+  // SCAN modal (QR / barcodes) - alternative au modal camera. Meme flux :
+  // viewfinder live, accumulation de codes, compose pane (categorie /
+  // urgence / commentaire + joindre fiche), envoi non-bloquant avec
+  // OfflineQueue. Detection native via BarcodeDetector (Android Chrome).
+  // Fallback : saisie manuelle si l'API n'est pas dispo.
+  // =====================================================================
+  var SCN_MAX_CODES = 20;
+  var SCN_DETECT_COOLDOWN_MS = 1500;
+  var SCN_FORMATS = [
+    "qr_code", "code_128", "code_39", "code_93", "codabar", "itf",
+    "ean_13", "ean_8", "upc_a", "upc_e", "data_matrix", "aztec", "pdf417",
+  ];
+  var _scn = {
+    root: null,
+    video: null,
+    stream: null,
+    track: null,
+    facing: "environment",
+    torchSupported: false,
+    torchOn: false,
+    detector: null,
+    detectTimer: null,
+    scanning: false,
+
+    codes: [],          // [{value, format}]
+    recentValues: {},   // value -> ts (dedupe cooldown)
+
+    selectedCategory: null,
+    selectedUrgency: "UR",
+    attachToFiche: false,
+    targetFicheId: null,
+
+    closeBtn: null, switchBtn: null, torchBtn: null,
+    attachBar: null, attachCb: null, attachLabel: null,
+    codesListEl: null, countLabel: null, manualBtn: null, nextBtn: null,
+    composeEl: null, commentEl: null,
+    catChipsEl: null, urgChipsEl: null, catRowEl: null, urgRowEl: null,
+    sendBtn: null, recaptureBtn: null,
+    unsupportedEl: null,
+  };
+
+  function _scnFormatLabel(fmt) {
+    var map = {
+      qr_code: "QR", code_128: "C128", code_39: "C39", code_93: "C93",
+      codabar: "CODA", itf: "ITF",
+      ean_13: "EAN13", ean_8: "EAN8", upc_a: "UPCA", upc_e: "UPCE",
+      data_matrix: "DM", aztec: "AZ", pdf417: "PDF417",
+      manual: "Saisi",
+    };
+    return map[fmt] || fmt.toUpperCase();
+  }
+
+  function openScanModal(opts) {
+    bumpActivity();
+    if (!_scn.root) buildScanModal();
+    _scn.codes = [];
+    _scn.recentValues = {};
+    _scn.selectedCategory = null;
+    _scn.selectedUrgency = "UR";
+    var explicitFiche = (opts && opts.ficheId) ? opts.ficheId : null;
+    _scn.targetFicheId = explicitFiche || state.activeFicheId || null;
+    _scn.attachToFiche = !!_scn.targetFicheId;
+    refreshScanAttachBar();
+    refreshScanCompose();
+    refreshScanCodesList();
+    refreshScanCount();
+    refreshScanNext();
+    refreshScanSend();
+    setScanMode("viewfinder");
+    if (_scn.commentEl) _scn.commentEl.value = "";
+    _scn.root.hidden = false;
+    startScanStream();
+  }
+
+  function closeScanModal() {
+    stopScanStream();
+    if (_scn.root) _scn.root.hidden = true;
+    _scn.codes = [];
+    _scn.recentValues = {};
+    setScanMode("viewfinder");
+  }
+
+  function setScanMode(mode) {
+    if (!_scn.root) return;
+    _scn.root.dataset.state = mode;
+  }
+
+  function startScanStream() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast("Camera indisponible", "err");
+      return;
+    }
+    var constraints = { video: { facingMode: { ideal: _scn.facing } }, audio: false };
+    navigator.mediaDevices.getUserMedia(constraints).then(function (s) {
+      _scn.stream = s;
+      var tracks = s.getVideoTracks();
+      _scn.track = tracks[0] || null;
+      _scn.video.srcObject = s;
+      // Detecter le support de la torche
+      var caps = _scn.track && _scn.track.getCapabilities ? _scn.track.getCapabilities() : null;
+      _scn.torchSupported = !!(caps && caps.torch);
+      if (_scn.torchBtn) _scn.torchBtn.hidden = !_scn.torchSupported;
+      _scn.torchOn = false;
+      // Init du detecteur (lazy)
+      if (!_scn.detector && "BarcodeDetector" in window) {
+        try {
+          _scn.detector = new window.BarcodeDetector({ formats: SCN_FORMATS });
+        } catch (e) {
+          _scn.detector = null;
+        }
+      }
+      if (_scn.unsupportedEl) {
+        _scn.unsupportedEl.hidden = !!_scn.detector;
+      }
+      _scn.scanning = true;
+      detectLoop();
+    }).catch(function () {
+      toast("Acces camera refuse", "err");
+      closeScanModal();
+    });
+  }
+
+  function stopScanStream() {
+    _scn.scanning = false;
+    if (_scn.detectTimer) { clearTimeout(_scn.detectTimer); _scn.detectTimer = null; }
+    if (_scn.stream) {
+      try { _scn.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+    }
+    _scn.stream = null;
+    _scn.track = null;
+    if (_scn.video) _scn.video.srcObject = null;
+  }
+
+  function switchScanCamera() {
+    _scn.facing = _scn.facing === "environment" ? "user" : "environment";
+    stopScanStream();
+    startScanStream();
+  }
+
+  function toggleScanTorch() {
+    if (!_scn.track || !_scn.torchSupported) return;
+    var newState = !_scn.torchOn;
+    _scn.track.applyConstraints({ advanced: [{ torch: newState }] }).then(function () {
+      _scn.torchOn = newState;
+      _scn.torchBtn.classList.toggle("is-on", newState);
+      var iconEl = _scn.torchBtn.querySelector(".material-symbols-outlined");
+      if (iconEl) iconEl.textContent = newState ? "flashlight_on" : "flashlight_off";
+    }).catch(function () { /* certains devices refusent : silent */ });
+  }
+
+  function detectLoop() {
+    if (!_scn.scanning) return;
+    if (!_scn.detector || !_scn.video || _scn.video.readyState < 2) {
+      _scn.detectTimer = setTimeout(detectLoop, 250);
+      return;
+    }
+    _scn.detector.detect(_scn.video).then(function (results) {
+      if (results && results.length) {
+        results.forEach(function (r) {
+          var v = (r && r.rawValue) ? String(r.rawValue) : "";
+          var fmt = (r && r.format) ? String(r.format) : "qr_code";
+          if (v) addScannedCode(v, fmt);
+        });
+      }
+    }).catch(function () { /* swallow */ }).then(function () {
+      if (_scn.scanning) _scn.detectTimer = setTimeout(detectLoop, 250);
+    });
+  }
+
+  function addScannedCode(value, format) {
+    if (!value) return;
+    if (_scn.codes.length >= SCN_MAX_CODES) {
+      toast("Maximum " + SCN_MAX_CODES + " codes par envoi", "warn");
+      return;
+    }
+    var now = Date.now();
+    var last = _scn.recentValues[value] || 0;
+    if (now - last < SCN_DETECT_COOLDOWN_MS) return; // dedupe
+    _scn.recentValues[value] = now;
+    _scn.codes.push({ value: value, format: format || "qr_code" });
+    refreshScanCodesList();
+    refreshScanCount();
+    refreshScanNext();
+    refreshScanSend();
+    try { if (navigator.vibrate) navigator.vibrate(40); } catch (e) {}
+  }
+
+  function removeScannedCode(idx) {
+    if (idx < 0 || idx >= _scn.codes.length) return;
+    var removed = _scn.codes.splice(idx, 1)[0];
+    if (removed && removed.value) delete _scn.recentValues[removed.value];
+    refreshScanCodesList();
+    refreshScanCount();
+    refreshScanNext();
+    refreshScanSend();
+  }
+
+  function openManualEntry() {
+    var v = window.prompt("Saisir un code (QR / barcode)");
+    if (v == null) return;
+    v = String(v).trim();
+    if (!v) return;
+    if (v.length > 512) { toast("Code trop long", "err"); return; }
+    addScannedCode(v, "manual");
+  }
+
+  function refreshScanAttachBar() {
+    if (!_scn.attachBar) return;
+    var ficheId = _scn.targetFicheId || state.activeFicheId;
+    var hasFiche = !!ficheId;
+    _scn.attachBar.hidden = !hasFiche;
+    if (hasFiche) {
+      _scn.attachCb.checked = !!_scn.attachToFiche;
+      _scn.attachLabel.textContent = "Joindre a la fiche " + String(ficheId).slice(0, 8);
+    }
+  }
+
+  function refreshScanCompose() {
+    var showChips = !_scn.attachToFiche;
+    if (_scn.catRowEl) _scn.catRowEl.hidden = !showChips;
+    if (_scn.urgRowEl) _scn.urgRowEl.hidden = !showChips;
+    if (_scn.catChipsEl) {
+      Array.prototype.forEach.call(_scn.catChipsEl.children, function (c) {
+        c.classList.toggle("is-selected", c.dataset.cat === _scn.selectedCategory);
+      });
+    }
+    if (_scn.urgChipsEl) {
+      Array.prototype.forEach.call(_scn.urgChipsEl.children, function (c) {
+        c.classList.toggle("is-selected", c.dataset.urg === _scn.selectedUrgency);
+      });
+    }
+    refreshScanSend();
+  }
+
+  function refreshScanCodesList() {
+    if (!_scn.codesListEl) return;
+    _scn.codesListEl.textContent = "";
+    if (_scn.codes.length === 0) {
+      _scn.codesListEl.hidden = true;
+      return;
+    }
+    _scn.codesListEl.hidden = false;
+    _scn.codes.forEach(function (c, i) {
+      var chip = document.createElement("div");
+      chip.className = "scan-code-chip";
+      var fmtEl = document.createElement("span");
+      fmtEl.className = "scan-code-fmt";
+      fmtEl.textContent = _scnFormatLabel(c.format);
+      var valEl = document.createElement("span");
+      valEl.className = "scan-code-val";
+      valEl.textContent = c.value.length > 32 ? c.value.slice(0, 30) + "..." : c.value;
+      valEl.title = c.value;
+      var rmBtn = document.createElement("button");
+      rmBtn.className = "scan-code-remove";
+      rmBtn.setAttribute("aria-label", "Retirer ce code");
+      rmBtn.appendChild(_camIcon("close"));
+      rmBtn.addEventListener("click", function () { removeScannedCode(i); });
+      chip.appendChild(fmtEl);
+      chip.appendChild(valEl);
+      chip.appendChild(rmBtn);
+      _scn.codesListEl.appendChild(chip);
+    });
+  }
+
+  function refreshScanCount() {
+    if (_scn.countLabel) _scn.countLabel.textContent = _scn.codes.length + "/" + SCN_MAX_CODES;
+  }
+
+  function refreshScanNext() {
+    if (_scn.nextBtn) _scn.nextBtn.hidden = _scn.codes.length === 0;
+  }
+
+  function refreshScanSend() {
+    if (!_scn.sendBtn) return;
+    var ok = _scn.codes.length > 0;
+    if (!_scn.attachToFiche && !_scn.selectedCategory) ok = false;
+    _scn.sendBtn.disabled = !ok;
+  }
+
+  function sendScannedCodes() {
+    if (_scn.codes.length === 0) return;
+
+    var ficheTarget = _scn.targetFicheId || state.activeFicheId;
+    var attach = _scn.attachToFiche && ficheTarget;
+    var commentVal = (_scn.commentEl.value || "").trim();
+    if (!attach && !_scn.selectedCategory) {
+      toast("Choisis une categorie", "err");
+      return;
+    }
+
+    var url, label, payload;
+    var n = _scn.codes.length;
+    var codesCopy = _scn.codes.slice();
+    if (attach) {
+      url = "/field/my-fiches/" + encodeURIComponent(ficheTarget) + "/comment";
+      label = "Scan fiche";
+      payload = { comment: commentVal, codes: codesCopy };
+    } else {
+      url = "/field/scan/send";
+      label = "Scan PC Org";
+      payload = {
+        codes: codesCopy,
+        category: _scn.selectedCategory,
+        comment: commentVal,
+      };
+      if (_scn.selectedUrgency) payload.niveau_urgence = _scn.selectedUrgency;
+    }
+    if (state.meMarker) {
+      var ll = state.meMarker.getLatLng();
+      payload.lat = ll.lat;
+      payload.lng = ll.lng;
+    }
+    if (state.batteryPct != null) payload.battery = state.batteryPct;
+
+    closeScanModal();
+    bumpPhotoUploadPill(+1);
+    toast("Envoi " + (n > 1 ? n + " codes..." : "code...") , "ok");
+
+    function release() { bumpPhotoUploadPill(-1); }
+
+    function fallbackQueue() {
+      OfflineQueue.enqueue({ url: url, method: "POST", jsonBody: payload, label: label })
+        .then(function () { toast("Pas de reseau : envoi differe (" + n + " code" + (n > 1 ? "s" : "") + ")", "warn"); })
+        .catch(function () { toast("Echec envoi", "err"); })
+        .then(release);
+    }
+
+    if (!navigator.onLine) { fallbackQueue(); return; }
+
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then(function (r) {
+      if (r.status === 401) { release(); handleSessionLost(); return null; }
+      return r.json().catch(function () { return null; }).then(function (d) {
+        return { status: r.status, data: d };
+      });
+    }).then(function (resp) {
+      if (!resp) return;
+      var status = resp.status;
+      var data = resp.data || {};
+      if (status >= 200 && status < 300 && data.ok) {
+        toast((n > 1 ? n + " codes envoyes" : "Code envoye") + (attach ? " (fiche)" : " au PC Org"), "ok");
+        release();
+        if (attach && ficheTarget) {
+          var detailModal = $("fiche-detail-modal");
+          if (detailModal && !detailModal.hidden) {
+            var fiche = state.fiches.find(function (fi) { return fi.id === ficheTarget; });
+            if (fiche) showFicheModal(fiche);
+          }
+          pollFiches();
+        }
+      } else if (status >= 400 && status < 500) {
+        toast("Refuse : " + (data.error || status), "err");
+        release();
+      } else {
+        fallbackQueue();
+      }
+    }).catch(function () {
+      fallbackQueue();
+    });
+  }
+
+  function buildScanModal() {
+    var root = document.createElement("div");
+    root.className = "field-scan";
+    root.id = "field-scan";
+    root.dataset.state = "viewfinder";
+    root.hidden = true;
+    root.setAttribute("role", "dialog");
+    root.setAttribute("aria-modal", "true");
+    root.setAttribute("aria-label", "Scanner QR / code-barres");
+
+    var stage = document.createElement("div");
+    stage.className = "field-scan-stage";
+    var video = document.createElement("video");
+    video.playsInline = true;
+    video.setAttribute("playsinline", "");
+    video.muted = true;
+    video.autoplay = true;
+    var target = document.createElement("div");
+    target.className = "scan-target-frame";
+    var hint = document.createElement("div");
+    hint.className = "scan-hint";
+    hint.textContent = "Cadrer le code dans le rectangle";
+    stage.appendChild(video);
+    stage.appendChild(target);
+    stage.appendChild(hint);
+
+    var unsupported = document.createElement("div");
+    unsupported.className = "scan-unsupported";
+    unsupported.hidden = true;
+    unsupported.textContent = "Detection automatique non supportee. Utilise \"Saisir manuellement\".";
+
+    var closeBtn = document.createElement("button");
+    closeBtn.className = "field-scan-close";
+    closeBtn.setAttribute("aria-label", "Fermer le scan");
+    closeBtn.appendChild(_camIcon("close"));
+    closeBtn.addEventListener("click", closeScanModal);
+
+    var switchBtn = document.createElement("button");
+    switchBtn.className = "field-scan-switch";
+    switchBtn.setAttribute("aria-label", "Inverser la camera");
+    switchBtn.appendChild(_camIcon("cameraswitch"));
+    switchBtn.addEventListener("click", switchScanCamera);
+
+    var torchBtn = document.createElement("button");
+    torchBtn.className = "field-scan-torch";
+    torchBtn.setAttribute("aria-label", "Torche");
+    torchBtn.title = "Torche";
+    torchBtn.hidden = true;
+    torchBtn.appendChild(_camIcon("flashlight_off"));
+    torchBtn.addEventListener("click", toggleScanTorch);
+
+    // Barre attache fiche
+    var attachBar = document.createElement("div");
+    attachBar.className = "scan-attach-bar";
+    attachBar.hidden = true;
+    var attachCb = document.createElement("input");
+    attachCb.type = "checkbox";
+    attachCb.id = "scan-attach-cb";
+    attachCb.checked = false;
+    attachCb.addEventListener("change", function () {
+      _scn.attachToFiche = attachCb.checked;
+      refreshScanCompose();
+    });
+    var attachLabel = document.createElement("label");
+    attachLabel.setAttribute("for", "scan-attach-cb");
+    attachLabel.textContent = "Joindre a la fiche";
+    attachBar.appendChild(attachCb);
+    attachBar.appendChild(attachLabel);
+
+    // Liste des codes detectes
+    var codesList = document.createElement("div");
+    codesList.className = "scan-codes-list";
+    codesList.hidden = true;
+
+    // Controles bas (viewfinder)
+    var ctrls = document.createElement("div");
+    ctrls.className = "scan-viewfinder-ctrls";
+
+    var countLabel = document.createElement("span");
+    countLabel.className = "scan-count";
+    countLabel.textContent = "0/" + SCN_MAX_CODES;
+
+    var manualBtn = document.createElement("button");
+    manualBtn.className = "scan-manual-btn";
+    manualBtn.setAttribute("aria-label", "Saisir un code manuellement");
+    manualBtn.appendChild(_camIcon("keyboard"));
+    manualBtn.appendChild(document.createTextNode(" Saisir"));
+    manualBtn.addEventListener("click", openManualEntry);
+
+    var nextBtn = document.createElement("button");
+    nextBtn.className = "scan-next";
+    nextBtn.hidden = true;
+    nextBtn.setAttribute("aria-label", "Passer a la composition");
+    nextBtn.appendChild(document.createTextNode("Suivant "));
+    nextBtn.appendChild(_camIcon("arrow_forward"));
+    nextBtn.addEventListener("click", function () {
+      if (_scn.codes.length === 0) return;
+      setScanMode("compose");
+    });
+
+    ctrls.appendChild(countLabel);
+    ctrls.appendChild(manualBtn);
+    ctrls.appendChild(nextBtn);
+
+    // Pane compose
+    var compose = document.createElement("div");
+    compose.className = "scan-compose";
+
+    var catRow = document.createElement("div");
+    catRow.className = "cam-chip-row scan-cat-row";
+    var catLabel = document.createElement("div");
+    catLabel.className = "cam-chip-label";
+    catLabel.textContent = "Categorie";
+    var catChips = document.createElement("div");
+    catChips.className = "cam-cat-chips";
+    CAM_CATEGORIES.forEach(function (c) {
+      var chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "cam-chip";
+      chip.dataset.cat = c.id;
+      chip.appendChild(_camIcon(c.icon));
+      chip.appendChild(document.createTextNode(" " + c.label));
+      chip.addEventListener("click", function () {
+        _scn.selectedCategory = c.id;
+        refreshScanCompose();
+      });
+      catChips.appendChild(chip);
+    });
+    catRow.appendChild(catLabel);
+    catRow.appendChild(catChips);
+
+    var urgRow = document.createElement("div");
+    urgRow.className = "cam-chip-row scan-urg-row";
+    var urgLabel = document.createElement("div");
+    urgLabel.className = "cam-chip-label";
+    urgLabel.textContent = "Urgence";
+    var urgChips = document.createElement("div");
+    urgChips.className = "cam-urg-chips";
+    CAM_URGENCIES.forEach(function (u) {
+      var chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "cam-chip cam-urg-chip";
+      chip.dataset.urg = u.id;
+      chip.style.setProperty("--urg-color", u.color);
+      chip.textContent = u.label;
+      chip.addEventListener("click", function () {
+        _scn.selectedUrgency = u.id;
+        refreshScanCompose();
+      });
+      urgChips.appendChild(chip);
+    });
+    urgRow.appendChild(urgLabel);
+    urgRow.appendChild(urgChips);
+
+    var commentEl = document.createElement("textarea");
+    commentEl.className = "field-camera-comment";
+    commentEl.placeholder = "Commentaire (optionnel)";
+    commentEl.rows = 2;
+    commentEl.maxLength = 1000;
+    commentEl.setAttribute("autocapitalize", "sentences");
+    commentEl.setAttribute("aria-label", "Commentaire");
+
+    var btnRow = document.createElement("div");
+    btnRow.className = "field-camera-preview-btns";
+
+    var recaptureBtn = document.createElement("button");
+    recaptureBtn.className = "field-camera-btn field-camera-btn-secondary";
+    recaptureBtn.appendChild(_camIcon("qr_code_scanner"));
+    recaptureBtn.appendChild(document.createTextNode(" Reprendre"));
+    recaptureBtn.addEventListener("click", function () { setScanMode("viewfinder"); });
+
+    var sendBtn = document.createElement("button");
+    sendBtn.className = "field-camera-btn field-camera-btn-primary";
+    sendBtn.appendChild(_camIcon("send"));
+    sendBtn.appendChild(document.createTextNode(" Envoyer"));
+    sendBtn.addEventListener("click", sendScannedCodes);
+
+    btnRow.appendChild(recaptureBtn);
+    btnRow.appendChild(sendBtn);
+
+    compose.appendChild(catRow);
+    compose.appendChild(urgRow);
+    compose.appendChild(commentEl);
+    compose.appendChild(btnRow);
+
+    root.appendChild(stage);
+    root.appendChild(unsupported);
+    root.appendChild(closeBtn);
+    root.appendChild(switchBtn);
+    root.appendChild(torchBtn);
+    root.appendChild(attachBar);
+    root.appendChild(codesList);
+    root.appendChild(ctrls);
+    root.appendChild(compose);
+    document.body.appendChild(root);
+
+    _scn.root = root;
+    _scn.video = video;
+    _scn.unsupportedEl = unsupported;
+    _scn.closeBtn = closeBtn;
+    _scn.switchBtn = switchBtn;
+    _scn.torchBtn = torchBtn;
+    _scn.attachBar = attachBar;
+    _scn.attachCb = attachCb;
+    _scn.attachLabel = attachLabel;
+    _scn.codesListEl = codesList;
+    _scn.countLabel = countLabel;
+    _scn.manualBtn = manualBtn;
+    _scn.nextBtn = nextBtn;
+    _scn.composeEl = compose;
+    _scn.commentEl = commentEl;
+    _scn.catChipsEl = catChips;
+    _scn.urgChipsEl = urgChips;
+    _scn.catRowEl = catRow;
+    _scn.urgRowEl = urgRow;
+    _scn.sendBtn = sendBtn;
+    _scn.recaptureBtn = recaptureBtn;
+  }
+
+  // =====================================================================
+  // STREAM live (publication WHIP vers mediamtx, a la demande PC org)
+  // =====================================================================
+  // Etats :
+  //  - idle : rien en cours
+  //  - prompting : modale de demande affichee a l'agent
+  //  - publishing : peer connection active, video qui sort
+  //
+  // RGPD : video uniquement (audio: false), 5 min max, consentement explicite
+  // a chaque demande, voyant LIVE rouge persistant pendant publication.
+  var _stream = {
+    state: "idle",
+    streamId: null,
+    promptModal: null,
+    overlay: null,
+    overlayChrono: null,
+    overlayStopBtn: null,
+    overlayPreview: null,
+    pc: null,
+    localStream: null,
+    chronoTimer: null,
+    deadline: 0,
+    slotLabel: null,
+  };
+
+  function handleStreamRequestPoll(psr) {
+    if (!psr) {
+      // Pas de demande active. Si on etait en publishing, c'est que l'admin
+      // a coupe -> on arrete proprement.
+      if (_stream.state === "publishing") {
+        stopStreamPublish("admin_stopped");
+      }
+      // Si on etait en prompting et que la demande a expire / annulee
+      if (_stream.state === "prompting") {
+        closeStreamPrompt();
+      }
+      return;
+    }
+    var status = psr.status || "requested";
+    if (status === "requested") {
+      if (_stream.state === "idle" || _stream.streamId !== psr.stream_id) {
+        showStreamRequestModal(psr);
+      }
+    }
+    // status="accepted" cote serveur : on est cense publier ; si on n'est
+    // pas en publishing localement, c'est qu'on a perdu le contexte (rechargement
+    // page) -> on n'essaie pas de re-publier automatiquement par securite.
+  }
+
+  function showStreamRequestModal(psr) {
+    closeStreamPrompt();
+    _stream.state = "prompting";
+    _stream.streamId = psr.stream_id;
+    _stream.slotLabel = psr.slot_label || null;
+
+    var overlay = document.createElement("div");
+    overlay.className = "field-modal field-stream-prompt";
+    overlay.id = "field-stream-prompt";
+    overlay.setAttribute("role", "alertdialog");
+    overlay.setAttribute("aria-modal", "true");
+
+    var box = document.createElement("div");
+    box.className = "field-modal-box";
+
+    var header = document.createElement("div");
+    header.className = "field-modal-header";
+    var h2 = document.createElement("h2");
+    h2.appendChild(_camIcon("videocam"));
+    h2.appendChild(document.createTextNode(" Flux video demande"));
+    header.appendChild(h2);
+    box.appendChild(header);
+
+    var body = document.createElement("div");
+    body.className = "field-modal-body";
+
+    var p1 = document.createElement("p");
+    p1.style.cssText = "margin:0 0 8px;font-size:15px;font-weight:600;color:#f1f5f9;";
+    p1.textContent = "Le PC org demande a voir votre camera en direct.";
+    body.appendChild(p1);
+
+    var info = document.createElement("ul");
+    info.className = "field-stream-prompt-info";
+    [
+      { ic: "person", txt: "Demande par : " + (psr.requested_by || "operateur PC org") },
+      { ic: "schedule", txt: "Duree maximale : " + Math.round((psr.max_duration_s || 300) / 60) + " minutes" },
+      { ic: "mic_off", txt: "Sans audio (video seule)" },
+      { ic: "videocam_off", txt: "Aucun enregistrement serveur" },
+    ].forEach(function (it) {
+      var li = document.createElement("li");
+      li.appendChild(_camIcon(it.ic));
+      li.appendChild(document.createTextNode(" " + it.txt));
+      info.appendChild(li);
+    });
+    body.appendChild(info);
+    box.appendChild(body);
+
+    var actions = document.createElement("div");
+    actions.className = "field-modal-actions";
+    var btnDecline = document.createElement("button");
+    btnDecline.className = "btn-primary btn-cancel";
+    btnDecline.textContent = "Refuser";
+    btnDecline.addEventListener("click", function () { declineStreamRequest(psr.stream_id); });
+    var btnAccept = document.createElement("button");
+    btnAccept.className = "btn-primary";
+    btnAccept.appendChild(_camIcon("videocam"));
+    btnAccept.appendChild(document.createTextNode(" Accepter et diffuser"));
+    btnAccept.addEventListener("click", function () { acceptStreamRequest(psr.stream_id); });
+    actions.appendChild(btnDecline);
+    actions.appendChild(btnAccept);
+    box.appendChild(actions);
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    _stream.promptModal = overlay;
+    try { if (navigator.vibrate) navigator.vibrate([100, 60, 100]); } catch (e) {}
+    try { playDispatchAlarm(); } catch (e) {}
+  }
+
+  function closeStreamPrompt() {
+    if (_stream.promptModal) {
+      try { _stream.promptModal.remove(); } catch (e) {}
+      _stream.promptModal = null;
+    }
+    if (_stream.state === "prompting") {
+      _stream.state = "idle";
+      _stream.streamId = null;
+    }
+  }
+
+  function declineStreamRequest(streamId) {
+    closeStreamPrompt();
+    fetch("/field/stream/" + encodeURIComponent(streamId) + "/decline", {
+      method: "POST",
+    }).catch(function () {});
+    toast("Flux refuse", "ok");
+  }
+
+  function acceptStreamRequest(streamId) {
+    closeStreamPrompt();
+    _stream.state = "publishing";
+    _stream.streamId = streamId;
+
+    fetch("/field/stream/" + encodeURIComponent(streamId) + "/accept", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    })
+      .then(function (r) {
+        if (r.status === 401) { handleSessionLost(); throw new Error("auth"); }
+        return r.json().then(function (d) { return { status: r.status, data: d }; });
+      })
+      .then(function (resp) {
+        if (resp.status >= 400 || !resp.data || !resp.data.ok) {
+          throw new Error(resp.data && resp.data.error ? resp.data.error : "accept_failed");
+        }
+        _stream.slotLabel = resp.data.slot_label || _stream.slotLabel;
+        return startStreamPublish(resp.data);
+      })
+      .catch(function (err) {
+        _stream.state = "idle";
+        _stream.streamId = null;
+        toast("Flux impossible : " + (err.message || "?"), "err");
+        try {
+          fetch("/field/stream/" + encodeURIComponent(streamId) + "/end", { method: "POST" });
+        } catch (e) {}
+      });
+  }
+
+  function startStreamPublish(info) {
+    var maxSec = info.max_duration_s || 300;
+    return navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 854 },
+        height: { ideal: 480 },
+        frameRate: { ideal: 24 },
+      },
+      audio: false,  // RGPD : pas de captation audio jamais
+    }).then(function (mediaStream) {
+      _stream.localStream = mediaStream;
+      var pc = new RTCPeerConnection({
+        iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
+      });
+      _stream.pc = pc;
+      mediaStream.getTracks().forEach(function (t) { pc.addTrack(t, mediaStream); });
+      pc.oniceconnectionstatechange = function () {
+        var st = pc.iceConnectionState;
+        if (st === "failed" || st === "disconnected") {
+          // Laisse 5s de marge pour reconnexion automatique
+          setTimeout(function () {
+            if (_stream.pc === pc && (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected")) {
+              stopStreamPublish("ice_failed");
+            }
+          }, 5000);
+        }
+      };
+      return pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false })
+        .then(function (offer) { return pc.setLocalDescription(offer); })
+        .then(function () { return _whipPublish(info.whip_url, pc); });
+    }).then(function () {
+      showStreamOverlay(maxSec);
+    });
+  }
+
+  // WHIP minimal : POST application/sdp, recoit application/sdp en reponse.
+  function _whipPublish(whipUrl, pc) {
+    return new Promise(function (resolve, reject) {
+      // Attendre la fin de l'ICE gathering (pour eviter trickle qui n'est
+      // pas requis par WHIP cote mediamtx, plus simple).
+      function onGather() {
+        if (pc.iceGatheringState === "complete") {
+          pc.removeEventListener("icegatheringstatechange", onGather);
+          fetch(whipUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/sdp" },
+            body: pc.localDescription.sdp,
+          }).then(function (r) {
+            if (!r.ok) return r.text().then(function (txt) { throw new Error("whip_" + r.status + ":" + txt); });
+            return r.text();
+          }).then(function (answerSdp) {
+            return pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+          }).then(resolve).catch(reject);
+        }
+      }
+      if (pc.iceGatheringState === "complete") onGather();
+      else pc.addEventListener("icegatheringstatechange", onGather);
+      // Failsafe : forcer apres 3s meme si gathering incomplete
+      setTimeout(onGather, 3000);
+    });
+  }
+
+  function showStreamOverlay(maxSec) {
+    if (_stream.overlay) return;
+    var overlay = document.createElement("div");
+    overlay.className = "field-stream-overlay";
+    overlay.id = "field-stream-overlay";
+
+    var top = document.createElement("div");
+    top.className = "field-stream-top";
+    var dot = document.createElement("span");
+    dot.className = "field-stream-led";
+    var live = document.createElement("span");
+    live.className = "field-stream-live-label";
+    live.textContent = "EN DIRECT";
+    var slot = document.createElement("span");
+    slot.className = "field-stream-slot";
+    slot.textContent = _stream.slotLabel || "";
+    var chrono = document.createElement("span");
+    chrono.className = "field-stream-chrono";
+    top.appendChild(dot);
+    top.appendChild(live);
+    top.appendChild(slot);
+    top.appendChild(chrono);
+    overlay.appendChild(top);
+
+    // Preview locale (coin haut droit)
+    var preview = document.createElement("video");
+    preview.className = "field-stream-preview";
+    preview.autoplay = true;
+    preview.muted = true;
+    preview.playsInline = true;
+    preview.setAttribute("playsinline", "");
+    if (_stream.localStream) preview.srcObject = _stream.localStream;
+    overlay.appendChild(preview);
+
+    var stopBtn = document.createElement("button");
+    stopBtn.className = "field-stream-stop";
+    stopBtn.appendChild(_camIcon("stop_circle"));
+    stopBtn.appendChild(document.createTextNode(" Arreter le flux"));
+    stopBtn.addEventListener("click", function () { stopStreamPublish("user_stopped"); });
+    overlay.appendChild(stopBtn);
+
+    document.body.appendChild(overlay);
+    _stream.overlay = overlay;
+    _stream.overlayChrono = chrono;
+    _stream.overlayStopBtn = stopBtn;
+    _stream.overlayPreview = preview;
+    _stream.deadline = Date.now() + (maxSec * 1000);
+    tickStreamChrono();
+    _stream.chronoTimer = setInterval(tickStreamChrono, 1000);
+  }
+
+  function tickStreamChrono() {
+    if (!_stream.overlayChrono) return;
+    var remaining = Math.max(0, Math.round((_stream.deadline - Date.now()) / 1000));
+    var m = Math.floor(remaining / 60);
+    var s = remaining % 60;
+    _stream.overlayChrono.textContent = m + ":" + (s < 10 ? "0" + s : s);
+    if (remaining <= 0) {
+      stopStreamPublish("auto_timeout");
+    }
+  }
+
+  function stopStreamPublish(reason) {
+    if (_stream.state !== "publishing") return;
+    var sid = _stream.streamId;
+    _stream.state = "idle";
+    if (_stream.chronoTimer) { clearInterval(_stream.chronoTimer); _stream.chronoTimer = null; }
+    if (_stream.pc) {
+      try { _stream.pc.close(); } catch (e) {}
+      _stream.pc = null;
+    }
+    if (_stream.localStream) {
+      try { _stream.localStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+      _stream.localStream = null;
+    }
+    if (_stream.overlay) {
+      try { _stream.overlay.remove(); } catch (e) {}
+    }
+    _stream.overlay = null;
+    _stream.overlayChrono = null;
+    _stream.overlayStopBtn = null;
+    _stream.overlayPreview = null;
+    _stream.streamId = null;
+    _stream.slotLabel = null;
+    if (sid) {
+      fetch("/field/stream/" + encodeURIComponent(sid) + "/end", { method: "POST" })
+        .catch(function () {});
+    }
+    if (reason === "auto_timeout") toast("Flux termine (5 min)", "ok");
+    else if (reason === "admin_stopped") toast("Flux ferme par le PC org", "ok");
+    else if (reason === "ice_failed") toast("Flux interrompu (reseau)", "warn");
   }
 
   function closeFicheFromField(f) {
@@ -4730,7 +5710,7 @@
     $("btn-layers").addEventListener("click", cycleLayer);
     $("btn-grid").addEventListener("click", openLayersPanel);
     var cameraBtn = $("btn-camera");
-    if (cameraBtn) cameraBtn.addEventListener("click", openCameraModal);
+    if (cameraBtn) cameraBtn.addEventListener("click", function () { openCaptureChooser(); });
     $("btn-inbox").addEventListener("click", function () {
       var p = $("inbox-panel");
       $("missions-panel").hidden = true;

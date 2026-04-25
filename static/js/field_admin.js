@@ -87,7 +87,12 @@
       loadDevices();
       loadPairings();
       loadMessages();
+      loadStreamSlots();
     });
+
+    // Polling de l'etat des slots streaming (3 slots fixes du pool video)
+    loadStreamSlots();
+    setInterval(loadStreamSlots, 5000);
 
     // Modal pairing
     var pairModal = $("#field-pair-modal");
@@ -224,6 +229,102 @@
   function beaconGroupColor(id) {
     var g = state.beaconGroups.find(function (x) { return x.id === id; });
     return g ? g.color : "#6366f1";
+  }
+
+  // ------------------------------------------------------------------
+  // Pool streaming live (3 slots fixes)
+  // ------------------------------------------------------------------
+  function loadStreamSlots() {
+    var container = document.getElementById("field-stream-slots");
+    if (!container) return;
+    apiGet("/field/admin/streams/active")
+      .then(function (data) {
+        if (!data || !data.ok || !data.slots) {
+          container.textContent = "";
+          return;
+        }
+        renderStreamSlots(container, data.slots);
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function renderStreamSlots(container, slots) {
+    container.textContent = "";
+    slots.forEach(function (slot) {
+      var card = document.createElement("div");
+      card.className = "field-stream-slot" + (slot.free ? " is-free" : " is-busy");
+
+      var head = document.createElement("div");
+      head.className = "field-stream-slot-head";
+      var ic = document.createElement("span");
+      ic.className = "material-symbols-outlined";
+      ic.textContent = slot.free ? "videocam_off" : "videocam";
+      ic.style.cssText = "vertical-align:middle; font-size:18px; color:" + (slot.free ? "#94a3b8" : "#dc2626") + ";";
+      head.appendChild(ic);
+      var title = document.createElement("strong");
+      title.textContent = " " + (slot.slot_label || ("Slot " + slot.slot_index));
+      head.appendChild(title);
+      card.appendChild(head);
+
+      var info = document.createElement("div");
+      info.className = "field-stream-slot-info";
+      if (slot.free) {
+        info.textContent = "Libre";
+        info.style.color = "var(--muted)";
+      } else {
+        var s = slot.stream || {};
+        var line1 = document.createElement("div");
+        line1.style.cssText = "font-weight:600;";
+        line1.textContent = s.device_name || "?";
+        info.appendChild(line1);
+        var line2 = document.createElement("div");
+        line2.style.cssText = "font-size:11px;color:var(--muted);";
+        var status = s.status === "requested" ? "En attente acceptation" : "Diffusion en cours";
+        var dur = "";
+        if (s.accepted_at) {
+          try {
+            var elapsed = Math.max(0, Math.floor((Date.now() - new Date(s.accepted_at).getTime()) / 1000));
+            var mm = Math.floor(elapsed / 60);
+            var ss = elapsed % 60;
+            dur = " - " + mm + ":" + (ss < 10 ? "0" + ss : ss);
+          } catch (e) {}
+        }
+        line2.textContent = status + dur;
+        info.appendChild(line2);
+      }
+      card.appendChild(info);
+
+      var actions = document.createElement("div");
+      actions.className = "field-stream-slot-actions";
+      if (!slot.free && slot.stream) {
+        var viewBtn = document.createElement("button");
+        viewBtn.className = "btn btn-xs btn-primary";
+        viewBtn.style.cssText = "padding:4px 8px;font-size:11px;";
+        viewBtn.textContent = "Voir";
+        viewBtn.addEventListener("click", function () {
+          if (typeof window.openFieldStreamViewer === "function") {
+            window.openFieldStreamViewer(slot.stream.stream_id, slot.stream.device_name);
+          }
+        });
+        actions.appendChild(viewBtn);
+
+        var killBtn = document.createElement("button");
+        killBtn.className = "btn btn-xs";
+        killBtn.style.cssText = "padding:4px 8px;font-size:11px;background:#dc2626;color:#fff;border:none;";
+        killBtn.textContent = "Couper";
+        killBtn.addEventListener("click", function () {
+          if (!window.confirm("Couper ce flux ?")) return;
+          fetch("/field/admin/stream/" + encodeURIComponent(slot.stream.stream_id) + "/end", {
+            method: "POST",
+            headers: jsonHeaders(),
+          }).then(loadStreamSlots);
+        });
+        actions.appendChild(killBtn);
+      }
+      card.appendChild(actions);
+
+      container.appendChild(card);
+    });
   }
 
   // ------------------------------------------------------------------
@@ -366,6 +467,18 @@
           "Ouvrir la conversation avec cette tablette",
           "btn-primary",
           function () { openConversationModal(d); }
+        ));
+        actWrap.appendChild(mkActionBtn(
+          "videocam",
+          "Demander un flux video live",
+          null,
+          function () {
+            if (typeof window.requestFieldStreamForDevice === "function") {
+              window.requestFieldStreamForDevice(d._id, d.name);
+            } else {
+              _toast("error", "Module flux video non charge");
+            }
+          }
         ));
       }
 
@@ -786,7 +899,7 @@
       }
       var typeLabel = {
         info: "Info", instruction: "Instruction", alert: "Alerte", route: "Itineraire",
-        photo_report: "Photo", sos_broadcast: "SOS"
+        photo_report: "Photo", scan_report: "Scan", sos_broadcast: "SOS"
       }[m.type] || m.type;
       var badge = document.createElement("span");
       badge.textContent = typeLabel;
@@ -805,6 +918,9 @@
       } else if (m.type === "photo_report") {
         badge.style.background = "#dcfce7";
         badge.style.color = "#166534";
+      } else if (m.type === "scan_report") {
+        badge.style.background = "#e0e7ff";
+        badge.style.color = "#3730a3";
       } else {
         badge.style.background = "#e5e7eb";
         badge.style.color = "#374151";
@@ -836,11 +952,29 @@
         });
         tdTitle.appendChild(thumb);
       }
+      // Miniature scan_report : icone QR + nb codes
+      var msgCodes = (m.payload && Array.isArray(m.payload.codes)) ? m.payload.codes : null;
+      if (msgCodes && msgCodes.length) {
+        var scanBadge = document.createElement("span");
+        scanBadge.style.cssText = "display:inline-flex; align-items:center; gap:4px; background:#e0e7ff; color:#3730a3; padding:2px 6px; border-radius:4px; margin-right:8px; font-size:11px; font-weight:700;";
+        var scanIcon = document.createElement("span");
+        scanIcon.className = "material-symbols-outlined";
+        scanIcon.textContent = "qr_code_scanner";
+        scanIcon.style.cssText = "font-size:14px;";
+        scanBadge.appendChild(scanIcon);
+        scanBadge.appendChild(document.createTextNode("x" + msgCodes.length));
+        tdTitle.appendChild(scanBadge);
+      }
       var titleText = document.createElement("span");
-      titleText.textContent = m.title || (isInbound ? (m.body || "(photo)") : "(sans titre)");
+      var fallbackTxt = msgCodes && msgCodes.length
+        ? msgCodes.map(function (c) { return c.value || ""; }).join(", ")
+        : (m.body || "(photo)");
+      titleText.textContent = m.title || (isInbound ? fallbackTxt : "(sans titre)");
       titleText.style.cssText = "overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle;";
       tdTitle.appendChild(titleText);
-      tdTitle.title = m.body || "";
+      tdTitle.title = msgCodes && msgCodes.length
+        ? msgCodes.map(function (c) { return (c.format || "manual").toUpperCase() + " " + (c.value || ""); }).join("\n")
+        : (m.body || "");
       tr.appendChild(tdTitle);
 
       var tdStatus = document.createElement("td");
@@ -1143,6 +1277,25 @@
         img.style.cssText = "display:block; max-width:100%; max-height:220px; border-radius:6px; margin:4px 0; cursor:zoom-in; background:#000;";
         img.addEventListener("click", function () { openPhotoLightbox(photoUrl); });
         bubble.appendChild(img);
+      }
+      var bubbleCodes = (m.payload && Array.isArray(m.payload.codes)) ? m.payload.codes : null;
+      if (bubbleCodes && bubbleCodes.length) {
+        var codesWrap = document.createElement("div");
+        codesWrap.style.cssText = "display:flex; flex-direction:column; gap:3px; margin:4px 0;";
+        bubbleCodes.forEach(function (c) {
+          var chipEl = document.createElement("div");
+          chipEl.style.cssText = "display:flex; gap:6px; align-items:center; background:rgba(0,0,0,0.06); border-radius:4px; padding:3px 6px; font-size:11px; font-family:ui-monospace, Menlo, monospace;";
+          var fmtSpan = document.createElement("span");
+          fmtSpan.textContent = (c.format || "manual").toUpperCase();
+          fmtSpan.style.cssText = "background:#3730a3; color:#fff; padding:1px 4px; border-radius:3px; font-size:10px; font-weight:800; flex-shrink:0; font-family:inherit;";
+          var valSpan = document.createElement("span");
+          valSpan.textContent = c.value || "";
+          valSpan.style.cssText = "overflow-wrap:anywhere;";
+          chipEl.appendChild(fmtSpan);
+          chipEl.appendChild(valSpan);
+          codesWrap.appendChild(chipEl);
+        });
+        bubble.appendChild(codesWrap);
       }
       if (m.body) {
         var b = document.createElement("div");

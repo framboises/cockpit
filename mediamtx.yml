@@ -1,0 +1,109 @@
+# =============================================================================
+# Configuration mediamtx pour streaming Field -> PC org -> VMS Qonify
+# =============================================================================
+# Architecture pool de slots fixes :
+#   - 3 paths declares statiquement : field-1, field-2, field-3
+#   - Cockpit alloue dynamiquement un slot par stream request
+#   - Qonify est configure UNE FOIS avec les 3 URLs RTSP stables
+#   - Les hooks valident les tokens via le webhook /field/api/stream/auth
+#
+# RGPD :
+#   - record: no force partout (decision actee, pas d'enregistrement serveur)
+#   - audio coupe cote tablette via getUserMedia({audio: false})
+# =============================================================================
+
+# Niveau de logs (debug pendant la mise en place, info en prod)
+logLevel: info
+logDestinations: [stdout]
+
+# Pas de stockage de l'API mediamtx, pas de monitoring exterieur
+api: no
+metrics: no
+pprof: no
+
+# Recording GLOBAL desactive (decision RGPD, pas d'override par path possible)
+record: no
+
+# -----------------------------------------------------------------------------
+# RTSP : sortie consommee par Qonify et tout VMS classique (port 8554)
+# -----------------------------------------------------------------------------
+rtsp: yes
+rtspAddress: :8554
+rtspTransports: [tcp, udp]
+# Auth gere via runOnRead webhook ; pas d'auth interne mediamtx pour simplifier
+
+# -----------------------------------------------------------------------------
+# WebRTC : ingest WHIP depuis tablette, egress WHEP vers PC org (port 8889)
+# -----------------------------------------------------------------------------
+webrtc: yes
+webrtcAddress: :8889
+webrtcEncryption: no  # TLS termine en amont par le reverse proxy nginx
+webrtcAllowOrigin: '*'
+
+# CRITIQUE en production derriere un reverse proxy : annoncer le hostname
+# public dans les ICE candidates pour que la tablette (4G / Wi-Fi externe)
+# puisse joindre mediamtx en UDP. Sans ca, "no signal" en boucle cote PC org.
+# Ajuster la valeur au domaine reel.
+webrtcAdditionalHosts:
+  - cockpit.lemans.org
+
+# -----------------------------------------------------------------------------
+# RTMP : non utilise (tablette ne pousse pas en RTMP), garde au cas ou
+# -----------------------------------------------------------------------------
+rtmp: no
+
+# -----------------------------------------------------------------------------
+# HLS : optionnel, garde pour fallback PC org si WHEP ne marche pas
+# -----------------------------------------------------------------------------
+hls: yes
+hlsAddress: :8888
+hlsAllowOrigin: '*'
+hlsAlwaysRemux: no
+
+# -----------------------------------------------------------------------------
+# Defauts appliques a tous les paths
+# -----------------------------------------------------------------------------
+pathDefaults:
+  source: publisher              # ingest WebRTC dynamique
+  maxReaders: 10                 # PC org + Qonify + marge
+  sourceOnDemand: no             # path actif en permanence (slot ouvert)
+  record: no                     # double protection RGPD
+
+  # Webhook auth pour PUBLISH (tablette ouvre la session WebRTC)
+  # Cockpit valide le publish_token et met a jour last_publish_at
+  runOnPublish: >
+    sh -c 'curl -fsS -X POST
+    -H "Content-Type: application/json"
+    -H "X-Mediamtx-Auth: $$MEDIAMTX_AUTH_HMAC_KEY"
+    -d "{\"action\":\"publish\",\"path\":\"$MTX_PATH\",\"query\":\"$MTX_QUERY\"}"
+    https://cockpit.lemans.org/field/api/stream/auth || exit 1'
+  runOnPublishRestart: no
+
+  # Webhook quand la tablette ferme la peer connection : libere le slot
+  runOnUnpublish: >
+    sh -c 'curl -fsS -X POST
+    -H "Content-Type: application/json"
+    -H "X-Mediamtx-Auth: $$MEDIAMTX_AUTH_HMAC_KEY"
+    -d "{\"action\":\"unpublish\",\"path\":\"$MTX_PATH\",\"query\":\"$MTX_QUERY\"}"
+    https://cockpit.lemans.org/field/api/stream/auth || true'
+
+  # Webhook auth pour READ (PC org WHEP ou Qonify RTSP).
+  # Cockpit valide que view_token correspond bien au slot (path field-N).
+  runOnRead: >
+    sh -c 'curl -fsS -X POST
+    -H "Content-Type: application/json"
+    -H "X-Mediamtx-Auth: $$MEDIAMTX_AUTH_HMAC_KEY"
+    -d "{\"action\":\"read\",\"path\":\"$MTX_PATH\",\"query\":\"$MTX_QUERY\"}"
+    https://cockpit.lemans.org/field/api/stream/auth || exit 1'
+  runOnReadRestart: no
+
+# -----------------------------------------------------------------------------
+# 3 slots fixes : field-1, field-2, field-3
+# Les view_token (stables) seront connus de Qonify (config 1 fois) et passes
+# en query string. Les publish_token (jetables) sont remis a la tablette par
+# Cockpit a chaque acceptation de stream.
+# -----------------------------------------------------------------------------
+paths:
+  field-1:
+  field-2:
+  field-3:
