@@ -359,6 +359,21 @@ def vision_api_heartbeat():
     if not device_id:
         return _cors_response({"ok": False, "error": "no_device_id"}, 400)
 
+    db = _db()
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return _cors_response({"ok": False, "error": "invalid_device_id"}, 400)
+
+    # Verifie l'existence + statut de revocation : c'est ce qui materialise une
+    # revocation cote Cockpit pour un JWT non encore expire (sinon le JWT
+    # stateless reste valide jusqu'a son exp).
+    device = db["vision_devices"].find_one({"_id": oid})
+    if device is None:
+        return _cors_response({"ok": False, "error": "revoked"}, 403)
+    if device.get("revoked"):
+        return _cors_response({"ok": False, "error": "revoked"}, 403)
+
     data = request.get_json(silent=True) or {}
     update = {"last_seen": _now(), "last_ip": _client_ip()}
 
@@ -382,9 +397,7 @@ def vision_api_heartbeat():
         except (TypeError, ValueError):
             pass
 
-    db = _db()
     try:
-        oid = ObjectId(device_id)
         db["vision_devices"].update_one({"_id": oid}, {"$set": update})
     except Exception as exc:
         logger.warning("vision heartbeat: update mongo echoue: %s", exc)
