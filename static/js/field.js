@@ -2581,7 +2581,7 @@
   // ---------------------------------------------------------------------
   // Itineraires
   // ---------------------------------------------------------------------
-  function setRouteDestination(latlng) {
+  function setRouteDestination(latlng, polylineEncoded) {
     if (state.routeLayer) {
       state.map.removeLayer(state.routeLayer);
       state.routeLayer = null;
@@ -2599,8 +2599,15 @@
     });
     L.marker(latlng, { icon: destIcon }).addTo(group);
 
-    // Trait pointille depuis "moi" si dispo
-    if (state.meMarker) {
+    var routePts = polylineEncoded ? _decodePolyline6(polylineEncoded) : null;
+    if (routePts && routePts.length >= 2) {
+      // Vraie polyline d'itineraire (Valhalla / stub serveur)
+      L.polyline(routePts, {
+        color: "#dc2626", weight: 5, opacity: 0.85, interactive: false,
+        lineJoin: "round", lineCap: "round"
+      }).addTo(group);
+    } else if (state.meMarker) {
+      // Fallback : trait pointille direct (vol d'oiseau)
       var mePos = state.meMarker.getLatLng();
       L.polyline(
         [[mePos.lat, mePos.lng], latlng],
@@ -2610,9 +2617,12 @@
     group.addTo(state.map);
     state.routeLayer = group;
 
-    // Ajuste le zoom pour englober "moi" + destination si possible
+    // Ajuste le zoom : si on a une route reelle, on cadre dessus (guidage serre)
     try {
-      if (state.meMarker) {
+      if (routePts && routePts.length >= 2) {
+        state.map.fitBounds(L.latLngBounds(routePts), { padding: [60, 60], maxZoom: 18 });
+        state.followMe = false;
+      } else if (state.meMarker) {
         var b = L.latLngBounds([state.meMarker.getLatLng(), latlng]);
         state.map.fitBounds(b, { padding: [80, 80], maxZoom: 18 });
         state.followMe = false;
@@ -2622,29 +2632,193 @@
     } catch (e) { /* ignore */ }
   }
 
+  // Decode une polyline encoded6 (precision 1e-6, format natif Valhalla).
+  function _decodePolyline6(encoded) {
+    if (!encoded) return [];
+    var pts = [];
+    var idx = 0, lat = 0, lon = 0;
+    var n = encoded.length;
+    while (idx < n) {
+      for (var axis = 0; axis < 2; axis++) {
+        var shift = 0, result = 0, b;
+        while (true) {
+          if (idx >= n) return pts;
+          b = encoded.charCodeAt(idx) - 63;
+          idx++;
+          result |= (b & 0x1f) << shift;
+          shift += 5;
+          if (b < 0x20) break;
+        }
+        var d = (result & 1) ? ~(result >>> 1) : (result >>> 1);
+        if (axis === 0) lat += d; else lon += d;
+      }
+      pts.push([lat / 1e6, lon / 1e6]);
+    }
+    return pts;
+  }
+
   function openInGoogleMaps(latlng) {
     if (!latlng || latlng.length < 2) return;
     var lat = latlng[0], lng = latlng[1];
-    // Intent Android natif : ouvre directement Google Maps en mode navigation
     var intent = "google.navigation:q=" + lat + "," + lng;
     var webFallback = "https://www.google.com/maps/dir/?api=1&destination=" + lat + "," + lng + "&travelmode=driving";
-
-    // Tenter l'intent Android, retomber sur le web
-    var opened = false;
-    try {
-      // Sur Android Chrome, window.location vers google.navigation: ouvre Maps.
-      // Sur iOS/Desktop cela echouera silencieusement -> on bascule sur l'URL web.
-      window.location.href = intent;
-      opened = true;
-    } catch (e) {
-      opened = false;
-    }
-    // Retomber au web apres un petit delai si l'intent n'a rien fait
+    try { window.location.href = intent; } catch (e) { /* swallow */ }
     setTimeout(function () {
       if (document.hasFocus && document.hasFocus()) {
         window.open(webFallback, "_blank");
       }
     }, 800);
+  }
+
+  // Calcule un itineraire ACO (serveur Valhalla cote Cockpit) puis le trace.
+  // god=true => mode prioritaire (ignore sens interdits + bouchons).
+  function _computeAcoRoute(toLatLng, god, callback) {
+    if (!state.meMarker) {
+      callback("Position GPS inconnue");
+      return;
+    }
+    var me = state.meMarker.getLatLng();
+    fetch("/field/api/route", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        from: [me.lat, me.lng],
+        to: [toLatLng[0], toLatLng[1]],
+        god: !!god,
+      }),
+    })
+      .then(function (r) {
+        return r.json().then(function (j) { return { ok: r.ok, status: r.status, json: j }; });
+      })
+      .then(function (resp) {
+        if (!resp.ok || !resp.json || resp.json.ok === false) {
+          callback((resp.json && resp.json.error) || ("Erreur " + (resp.status || "inconnue")));
+          return;
+        }
+        callback(null, resp.json);
+      })
+      .catch(function (e) {
+        callback((e && e.message) || "Reseau indisponible");
+      });
+  }
+
+  // Construit le menu Itineraire (ACO / Google Maps) sans innerHTML.
+  function _buildItineraryMenuDom() {
+    var overlay = document.createElement("div");
+    overlay.id = "itinerary-menu-overlay";
+    overlay.className = "itinerary-menu-overlay";
+
+    var menu = document.createElement("div");
+    menu.className = "itinerary-menu";
+    menu.setAttribute("role", "dialog");
+    menu.setAttribute("aria-label", "Choix itineraire");
+
+    var header = document.createElement("div");
+    header.className = "itinerary-menu-header";
+    var hIcon = document.createElement("span");
+    hIcon.className = "material-symbols-outlined";
+    hIcon.textContent = "route";
+    header.appendChild(hIcon);
+    header.appendChild(document.createTextNode(" Itineraire"));
+    menu.appendChild(header);
+
+    var body = document.createElement("div");
+    body.className = "itinerary-menu-body";
+
+    function mkBtn(action, iconName, label, cls) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "itinerary-btn " + cls;
+      b.dataset.action = action;
+      var ic = document.createElement("span");
+      ic.className = "material-symbols-outlined";
+      ic.textContent = iconName;
+      b.appendChild(ic);
+      var lbl = document.createElement("span");
+      lbl.className = "itinerary-btn-label";
+      lbl.textContent = label;
+      b.appendChild(lbl);
+      return b;
+    }
+
+    var btnAco = mkBtn("aco", "route", "Itineraire ACO", "itinerary-btn-aco");
+    body.appendChild(btnAco);
+
+    var prio = document.createElement("label");
+    prio.className = "itinerary-priority";
+    var cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.id = "itinerary-priority-cb";
+    var prioIcon = document.createElement("span");
+    prioIcon.className = "material-symbols-outlined";
+    prioIcon.style.color = "#dc2626";
+    prioIcon.textContent = "emergency";
+    var prioTxt = document.createElement("span");
+    prioTxt.textContent = "Intervention prioritaire (gyrophare)";
+    prio.appendChild(cb);
+    prio.appendChild(prioIcon);
+    prio.appendChild(prioTxt);
+    body.appendChild(prio);
+
+    body.appendChild(mkBtn("gmaps", "map", "Google Maps", "itinerary-btn-gmaps"));
+
+    var btnCancel = document.createElement("button");
+    btnCancel.type = "button";
+    btnCancel.className = "itinerary-btn itinerary-btn-cancel";
+    btnCancel.dataset.action = "cancel";
+    btnCancel.textContent = "Annuler";
+    body.appendChild(btnCancel);
+
+    menu.appendChild(body);
+    overlay.appendChild(menu);
+    return overlay;
+  }
+
+  function openItineraryMenu(latlng) {
+    if (!latlng || latlng.length < 2) return;
+    var lat = latlng[0], lng = latlng[1];
+
+    var existing = document.getElementById("itinerary-menu-overlay");
+    if (existing) existing.remove();
+
+    var overlay = _buildItineraryMenuDom();
+    document.body.appendChild(overlay);
+
+    function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) close(); });
+
+    var btnAco = overlay.querySelector("[data-action='aco']");
+    var btnGmaps = overlay.querySelector("[data-action='gmaps']");
+    var btnCancel = overlay.querySelector("[data-action='cancel']");
+    var cbPriority = overlay.querySelector("#itinerary-priority-cb");
+    var btnAcoLabel = btnAco.querySelector(".itinerary-btn-label");
+
+    btnCancel.addEventListener("click", close);
+    btnGmaps.addEventListener("click", function () {
+      close();
+      openInGoogleMaps([lat, lng]);
+    });
+    btnAco.addEventListener("click", function () {
+      var god = !!(cbPriority && cbPriority.checked);
+      btnAco.disabled = true;
+      btnAco.classList.add("loading");
+      if (btnAcoLabel) btnAcoLabel.textContent = "Calcul en cours...";
+      _computeAcoRoute([lat, lng], god, function (err, resp) {
+        close();
+        if (err) {
+          toast("Itineraire indisponible: " + err);
+          setRouteDestination([lat, lng]);
+          return;
+        }
+        setRouteDestination([lat, lng], resp.polyline);
+        var minutes = Math.max(1, Math.round((resp.duration_s || 0) / 60));
+        var km = ((resp.distance_m || 0) / 1000).toFixed(1);
+        var prefix = (resp.engine === "stub") ? "Estime " : "";
+        var modeTag = (resp.mode === "god") ? " [prioritaire]" : "";
+        toast(prefix + km + " km - " + minutes + " min" + modeTag);
+      });
+    });
   }
 
   function handleRouteMessage(m) {
@@ -2655,7 +2829,8 @@
     var lat = parseFloat(first[0]);
     var lng = parseFloat(first[1]);
     if (isNaN(lat) || isNaN(lng)) return;
-    setRouteDestination([lat, lng]);
+    var polyline = m.payload && m.payload.polyline;
+    setRouteDestination([lat, lng], polyline);
   }
 
   // ---------------------------------------------------------------------
@@ -2928,7 +3103,7 @@
       btnRoute.appendChild(rtTxt);
       actions.appendChild(btnRoute);
       btnRoute.addEventListener("click", function () {
-        openInGoogleMaps([f.lat, f.lng]);
+        openItineraryMenu([f.lat, f.lng]);
       });
     }
 
@@ -3495,7 +3670,7 @@
         var routeBtn = document.createElement("button");
         routeBtn.className = "btn-primary";
         routeBtn.innerHTML = "<span class='material-symbols-outlined' style='vertical-align:middle'>navigation</span> Itineraire";
-        routeBtn.onclick = function () { openInGoogleMaps([lat, lng]); };
+        routeBtn.onclick = function () { openItineraryMenu([lat, lng]); };
         actionsEl.appendChild(routeBtn);
       }
     }
@@ -5740,7 +5915,7 @@
     if (routeBtn) {
       routeBtn.hidden = !hasRoute;
       if (hasRoute) {
-        routeBtn.onclick = function () { openInGoogleMaps(waypoints[0]); };
+        routeBtn.onclick = function () { openItineraryMenu(waypoints[0]); };
       } else {
         routeBtn.onclick = null;
       }
@@ -6079,7 +6254,7 @@
           e2.stopPropagation();
           var lat = parseFloat(btn.dataset.lat);
           var lng = parseFloat(btn.dataset.lng);
-          if (!isNaN(lat) && !isNaN(lng)) openInGoogleMaps([lat, lng]);
+          if (!isNaN(lat) && !isNaN(lng)) openItineraryMenu([lat, lng]);
         });
       });
     }
@@ -6790,6 +6965,7 @@
     loadPoiCategories: loadPoiCategories,
     setRouteDestination: setRouteDestination,
     openInGoogleMaps: openInGoogleMaps,
+    openItineraryMenu: openItineraryMenu,
     pollFiches: pollFiches,
     triggerSos: triggerSos,
   };

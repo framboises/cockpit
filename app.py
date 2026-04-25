@@ -32,6 +32,7 @@ from anoloc import anoloc_bp
 from anpr import anpr_bp
 from field import field_bp
 from vision_admin import vision_admin_bp
+from routing import routing_bp
 from cameras import cameras_bp
 
 ################################################################################
@@ -1568,6 +1569,12 @@ csrf.exempt(field_bp)
 # les URL /field/api/vision/pair (public CORS) et /field/admin/vision/* (admin).
 app.register_blueprint(vision_admin_bp)
 csrf.exempt(vision_admin_bp)
+# Routing : Valhalla auto-heberge, calcul d'itineraires Field + Cockpit. Seule
+# la route tablette /field/api/route est exemptee de CSRF (la tablette n'a pas
+# de token CSRF cockpit) ; les routes admin (/api/route, /api/route/forward)
+# conservent leur CSRF.
+app.register_blueprint(routing_bp)
+csrf.exempt(app.view_functions["routing.field_route"])
 app.register_blueprint(cameras_bp)
 # app.register_blueprint(meteo_bp)
 

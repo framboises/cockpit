@@ -30,6 +30,28 @@ services:
     volumes:
       - ./mediamtx.yml:/mediamtx.yml:ro
 
+  # Routing engine pour le calcul d'itineraires Field + Cockpit (blueprint
+  # routing.py). Tuiles construites a partir d'un PBF OSM clippe a la zone
+  # circuit + 5 km : preparer le PBF avec scripts/build_valhalla_tiles.sh
+  # puis demarrer ce service. Au premier lancement, gisops/valhalla detecte le
+  # *.osm.pbf dans /custom_files et construit les tuiles automatiquement.
+  # Bind 127.0.0.1 : service interne, jamais expose publiquement.
+  valhalla:
+    image: gisops/valhalla:latest
+    container_name: cockpit-valhalla
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8002:8002"
+    environment:
+      - tile_urls=
+      - server_threads=4
+      - use_tiles_ignore_pbf=False
+      - force_rebuild=False
+      - update_existing_config=True
+      - serve_tiles=True
+    volumes:
+      - ./valhalla/custom_files:/custom_files
+
 volumes:
   waha_sessions:
   waha_data:

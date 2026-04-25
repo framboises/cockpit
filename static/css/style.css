@@ -9786,3 +9786,180 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .counters-panel-close:hover { background: var(--line); color: var(--text); }
 .hsh-counter-corr-detail { font-size: 0.7rem; color: var(--muted); opacity: 0.8; margin-left: 2px; }
 .hsh-principal-label { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; color: var(--muted); }
+
+/* ---------------------------------------------------------------------- */
+/* Routing modal (Cockpit) - itineraire vehicule -> intervention          */
+/* ---------------------------------------------------------------------- */
+.routing-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9500;
+  padding: 24px;
+  animation: routing-fade-in 120ms ease-out;
+}
+@keyframes routing-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.routing-modal {
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  width: 100%;
+  max-width: 880px;
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.routing-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background: #1f2937;
+  color: #ffffff;
+}
+.routing-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 16px;
+}
+.routing-modal-title .material-symbols-outlined { font-size: 22px; }
+.routing-modal-close {
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+}
+.routing-modal-close:hover { background: rgba(255, 255, 255, 0.15); }
+.routing-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+.routing-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.routing-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  font-size: 13px;
+  background: #f9fafb;
+}
+.routing-stat-label { color: #6b7280; font-weight: 500; }
+.routing-stat-value { font-weight: 700; color: #111827; }
+.routing-map {
+  width: 100%;
+  height: 420px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  overflow: hidden;
+  background: #f3f4f6;
+}
+.routing-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.routing-priority {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  border-radius: 10px;
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+}
+.routing-priority input[type="checkbox"] { margin: 0; transform: scale(1.2); accent-color: #dc2626; }
+.routing-priority .material-symbols-outlined { font-size: 18px; }
+.routing-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.routing-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 120ms ease, background-color 120ms ease;
+}
+.routing-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.routing-btn .material-symbols-outlined { font-size: 18px; }
+.routing-btn-primary {
+  background: #2563eb;
+  color: #ffffff;
+  flex: 1;
+  justify-content: center;
+}
+.routing-btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+.routing-btn-secondary {
+  background: #ffffff;
+  color: #374151;
+  border-color: #d1d5db;
+}
+.routing-btn-secondary:hover:not(:disabled) { background: #f3f4f6; }
+.routing-btn.active {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  color: #92400e;
+}
+.routing-btn.loading { opacity: 0.7; cursor: progress; }
+.routing-dest-pin {
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  background: #dc2626;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  box-shadow: 0 2px 6px rgba(220, 38, 38, 0.5);
+}
+.routing-dest-pin .material-symbols-outlined {
+  color: #ffffff;
+  transform: rotate(45deg);
+  font-size: 18px;
+}
+
+/* Bouton "Calculer itineraire" dans le banner vehicule de la fiche */
+.pcorg-fiche-vehicle-route {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pcorg-fiche-vehicle-route:hover { background: #dbeafe; }
+.pcorg-fiche-vehicle-route-ico { font-size: 16px; }

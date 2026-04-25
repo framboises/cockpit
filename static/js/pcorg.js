@@ -1120,6 +1120,19 @@
         fvStatusBadge.style.color = ficheDevSt.color;
         vBanner.appendChild(fvStatusBadge);
       }
+      // Bouton "Calculer itineraire" : ouvre la modale Routing (vehicule -> fiche)
+      if (window.RoutingModal && typeof window.RoutingModal.openForFiche === "function") {
+        var rtBtn = mkEl("button", "pcorg-fiche-vehicle-route");
+        rtBtn.type = "button";
+        rtBtn.appendChild(matIcon("route", "pcorg-fiche-vehicle-route-ico"));
+        var rtTxt = document.createElement("span");
+        rtTxt.textContent = "Calculer itineraire";
+        rtBtn.appendChild(rtTxt);
+        rtBtn.addEventListener("click", function () {
+          window.RoutingModal.openForFiche(d.id, cc.patrouille);
+        });
+        vBanner.appendChild(rtBtn);
+      }
       body.appendChild(vBanner);
     }
 

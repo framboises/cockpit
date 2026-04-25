@@ -2738,3 +2738,87 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
   margin-top: 2px; white-space: nowrap;
   text-shadow: 0 1px 2px rgba(0,0,0,0.5);
 }
+
+/* ---------------------------------------------------------------------- */
+/* Menu Itineraire (ACO / Google Maps)                                    */
+/* ---------------------------------------------------------------------- */
+.itinerary-menu-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+  padding: 16px;
+  animation: itinerary-fade-in 120ms ease-out;
+}
+@keyframes itinerary-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.itinerary-menu {
+  background: #ffffff;
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  width: 100%;
+  max-width: 360px;
+  overflow: hidden;
+}
+.itinerary-menu-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 18px;
+  background: #1f2937;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 15px;
+}
+.itinerary-menu-header .material-symbols-outlined { font-size: 20px; }
+.itinerary-menu-body {
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.itinerary-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 14px 12px;
+  border: none;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #ffffff;
+  transition: filter 100ms ease;
+}
+.itinerary-btn:active { filter: brightness(0.9); }
+.itinerary-btn:disabled { opacity: 0.6; cursor: progress; }
+.itinerary-btn .material-symbols-outlined { font-size: 20px; }
+.itinerary-btn-aco { background: #2563eb; }
+.itinerary-btn-gmaps { background: #16a34a; }
+.itinerary-btn-cancel {
+  background: transparent;
+  color: #6b7280;
+  border: 1px solid #e5e7eb;
+}
+.itinerary-priority {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  border-radius: 10px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+.itinerary-priority input[type="checkbox"] { margin: 0; transform: scale(1.2); accent-color: #dc2626; }
+.itinerary-priority .material-symbols-outlined { font-size: 18px; }
