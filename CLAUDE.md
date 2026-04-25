@@ -92,7 +92,7 @@ L'app Vision (scan billets véhicule, repo voisin `../vision`) est **JWT-gated p
 ### Architecture
 
 - **Module Python** : `cockpit/vision_admin.py` (blueprint `vision_admin_bp` enregistré dans `app.py` à côté de `field_bp`, exempté de CSRF). Réutilise uniquement les helpers génériques de `field.py` (`admin_required`, `_get_mongo_db`, `_client_ip`, `_rate_limit_pair`, `_generate_pairing_code`, `_now`, `_iso`, `_event_end_datetime`) — aucun accès aux collections `field_*`.
-- **Collections MongoDB** : `vision_pairings` (codes 6 chiffres, TTL 15 min) et `vision_devices` (tablettes Vision enrôlées). Indexes créés lazy au premier accès.
+- **Collections MongoDB** : `vision_pairings` (codes 6 chiffres, TTL 15 min), `vision_devices` (tablettes Vision enrôlées, avec `tablet_uid` stable + `current_user`), `vision_sessions` (une entrée par identification opérateur, fermée à la déconnexion ou par sweep auto-logout 4 h). Indexes créés lazy au premier accès.
 - **JS** : `static/js/vision_admin.js` (IIFE autonome avec ses propres helpers HTTP, son state, ses modales). Chargé après `field_admin.js` dans `field_dispatch.html`.
 - **UI** : section "Tablettes Vision" dans `field_dispatch.html` sous la section Field, avec bouton dédié "Appairer une tablette Vision", table dédiée (`#vision-devices-table`), modales dédiées (`#vision-pair-modal`, `#vision-codes-modal`).
 
@@ -107,14 +107,18 @@ L'app Vision (scan billets véhicule, repo voisin `../vision`) est **JWT-gated p
 
 Toutes sous `/field/*` pour profiter de la whitelist d'auth Cockpit (`/field/*` est public sans portail) :
 
-- `POST /field/api/vision/pair` (**public + CORS** depuis `vision-a0f55.web.app`) — échange code → JWT.
+- `POST /field/api/vision/pair` (**public + CORS**) — échange code → JWT. Body : `{code, tablet_uid?}`.
+- `POST /field/api/vision/heartbeat` (**public + CORS**, JWT Bearer) — remontée batterie/GPS + matérialisation révocation. Si device introuvable ou `revoked`, retourne `403 {error: "revoked"}` → la tablette purge son JWT et retombe sur le pairing. Met à jour la session opérateur active si elle existe.
+- `POST /field/api/vision/identify` (**public + CORS**, JWT Bearer) — scan QR badge → lookup `planbition_people.find_one({employee_number})` → crée une entrée `vision_sessions`, met à jour `vision_devices.current_user`. Body : `{employee_number, tablet_uid?}`. Erreur `unknown_employee` (404) si non trouvé (blocage strict).
+- `POST /field/api/vision/logout` (**public + CORS**, JWT Bearer) — clôt la session opérateur active (`ended_reason: "logout"`), efface `current_user`. Le JWT reste valide.
 - `GET /field/admin/vision/pairings` (admin) — liste codes actifs.
 - `POST /field/admin/vision/pairings` (admin) — créer un code (`{name, lieu, event, year, notes?}`).
 - `DELETE /field/admin/vision/pairings/<code>` (admin) — annuler un code.
 - `GET /field/admin/vision/devices` (admin) — liste devices Vision enrôlés.
 - `POST /field/admin/vision/devices/<id>/lieu` (admin) — changer le lieu (`{lieu}`).
-- `POST /field/admin/vision/devices/<id>/revoke` (admin) — révoquer (le JWT existant reste valide jusqu'à `exp`, limitation JWT stateless).
+- `POST /field/admin/vision/devices/<id>/revoke` (admin) — révoquer ; effet effectif au prochain heartbeat de la tablette (sweep côté serveur).
 - `DELETE /field/admin/vision/devices/<id>` (admin) — supprimer définitivement.
+- `GET /field/admin/vision/sessions?tablet_uid=&event=&year=&employee_number=` (admin) — historique des sessions opérateur (modale "Historique" dans `vision_admin.js`).
 
 ### JWT
 

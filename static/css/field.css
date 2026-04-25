@@ -83,6 +83,17 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
   animation: offline-queue-pulse 2s ease-in-out infinite;
 }
 .offline-queue-pill .status-label { font-weight: 800; }
+.field-upload-pill {
+  background: #1e3a8a;
+  border-color: #2563eb;
+  color: #bfdbfe;
+  animation: field-upload-pulse 1.4s ease-in-out infinite;
+}
+.field-upload-pill .status-label { font-weight: 800; }
+@keyframes field-upload-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.45); }
+  50%      { box-shadow: 0 0 0 6px rgba(37, 99, 235, 0); }
+}
 @keyframes offline-queue-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.35); }
   50%      { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
@@ -414,31 +425,6 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
   color: #fff;
 }
 
-/* Progress overlay */
-.cam-progress {
-  position: absolute;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.78);
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 12px;
-  z-index: 20;
-}
-.cam-progress-bar {
-  width: min(70vw, 320px); height: 8px;
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.cam-progress-fill {
-  width: 0%; height: 100%;
-  background: #2563eb;
-  transition: width 0.15s linear;
-}
-.cam-progress-text {
-  color: #f1f5f9;
-  font-size: 14px;
-  font-weight: 600;
-}
 .field-camera-comment {
   width: 100%;
   background: rgba(15, 23, 42, 0.85);
@@ -635,7 +621,13 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
 
 /* Fiche creation modal */
 .fiche-create-box { max-width: 420px; }
-.fiche-create-body { padding: 8px 16px 16px; }
+.fiche-create-body {
+  padding: 8px 16px 16px;
+  /* Permet au contenu (textarea + bouton) de scroller dans la modale
+     quand le clavier virtuel reduit la hauteur visible. */
+  overflow-y: auto;
+  flex: 1; min-height: 0;
+}
 .fiche-create-label {
   display: block;
   font-size: 12px; font-weight: 700; color: #94a3b8;
@@ -821,7 +813,12 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
    MODALES
    ===================================================================== */
 .field-modal {
-  position: fixed; inset: 0;
+  position: fixed;
+  left: 0; top: 0;
+  width: 100vw;
+  /* --vvh suit le visualViewport (init JS): quand le clavier virtuel
+     apparait, la modale ne deborde plus sous le clavier. */
+  height: var(--vvh, 100vh);
   background: rgba(15,23,42,0.85);
   z-index: 2000;
   display: flex; align-items: center; justify-content: center;
@@ -834,7 +831,9 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
   border-radius: 12px;
   width: 100%;
   max-width: 500px;
-  max-height: 90vh;
+  /* Hauteur bornee a la hauteur visible. Le contenu scrolle dans
+     .field-modal-body / .fiche-create-body si le clavier ouvre. */
+  max-height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;

@@ -49,6 +49,7 @@ logger = logging.getLogger("vision_admin")
 # ---------------------------------------------------------------------------
 
 PAIRING_CODE_TTL_SECONDS = 15 * 60       # code valable 15 min
+SESSION_INACTIVE_TIMEOUT_HOURS = 4        # auto-logout si pas de heartbeat depuis 4h
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 VISION_LIEUX = ["Ouest", "Panorama", "Houx"]
@@ -119,6 +120,11 @@ def _ensure_vision_indexes(db):
         db["vision_pairings"].create_index("expiresAt", expireAfterSeconds=0)
         db["vision_devices"].create_index([("event", 1), ("year", 1)])
         db["vision_devices"].create_index([("event", 1), ("year", 1), ("name", 1)])
+        db["vision_devices"].create_index("tablet_uid")
+        db["vision_sessions"].create_index("tablet_uid")
+        db["vision_sessions"].create_index("device_id")
+        db["vision_sessions"].create_index([("started_at", -1)])
+        db["vision_sessions"].create_index([("ended_at", 1), ("last_seen", 1)])
     except Exception as e:
         logger.warning("vision: index creation failed: %s", e)
     _INDEXES_READY = True
@@ -178,6 +184,79 @@ def _cors_response(payload, status=200):
     return resp
 
 
+def _cors_preflight():
+    """Reponse standard pour les requetes OPTIONS des endpoints publics
+    avec Authorization (identify, logout, heartbeat)."""
+    resp = make_response("", 204)
+    origin = _cors_origin()
+    if origin:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        resp.headers["Access-Control-Max-Age"] = "3600"
+        resp.headers["Vary"] = "Origin"
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# Authentification JWT (commune a /heartbeat, /identify, /logout)
+# ---------------------------------------------------------------------------
+
+def _verify_request_jwt():
+    """Decode et valide le JWT Bearer. Retourne (payload, None) si OK,
+    (None, error_response) sinon. L'appelant doit checker error_response
+    et retourner directement si non-None."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return None, _cors_response({"ok": False, "error": "no_jwt"}, 401)
+    token = auth[7:].strip()
+
+    pub_pem = _get_pub_key()
+    if pub_pem is None:
+        return None, _cors_response({"ok": False, "error": "server_error"}, 500)
+
+    try:
+        import jwt as _pyjwt
+        payload = _pyjwt.decode(token, pub_pem, algorithms=["RS256"], issuer=VISION_JWT_ISSUER)
+    except Exception as exc:
+        logger.debug("vision: JWT invalide: %s", exc)
+        return None, _cors_response({"ok": False, "error": "invalid_jwt"}, 401)
+    return payload, None
+
+
+def _check_device_active(db, payload):
+    """Verifie que le device existe et n'est pas revoque. Retourne (oid, device, None)
+    ou (None, None, error_response)."""
+    device_id = payload.get("device_id")
+    if not device_id:
+        return None, None, _cors_response({"ok": False, "error": "no_device_id"}, 400)
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return None, None, _cors_response({"ok": False, "error": "invalid_device_id"}, 400)
+    device = db["vision_devices"].find_one({"_id": oid})
+    if device is None or device.get("revoked"):
+        return None, None, _cors_response({"ok": False, "error": "revoked"}, 403)
+    return oid, device, None
+
+
+# ---------------------------------------------------------------------------
+# Sweep auto-logout : ferme les sessions sans heartbeat depuis N heures
+# ---------------------------------------------------------------------------
+
+def _sweep_inactive_sessions(db):
+    """Cloture les sessions Vision orphelines (sans heartbeat depuis 4 h).
+    Appele opportunistiquement par /heartbeat, /identify, /logout, /sessions."""
+    cutoff = _now() - timedelta(hours=SESSION_INACTIVE_TIMEOUT_HOURS)
+    try:
+        db["vision_sessions"].update_many(
+            {"ended_at": None, "last_seen": {"$lt": cutoff}},
+            {"$set": {"ended_at": _now(), "ended_reason": "timeout"}},
+        )
+    except Exception as exc:
+        logger.warning("vision: sweep sessions echoue: %s", exc)
+
+
 # ---------------------------------------------------------------------------
 # Helpers de publication
 # ---------------------------------------------------------------------------
@@ -201,6 +280,7 @@ def _pub_pairing(p):
 def _pub_device(d):
     if not d:
         return None
+    cu = d.get("current_user") or {}
     return {
         "id": str(d.get("_id")),
         "name": d.get("name"),
@@ -221,6 +301,35 @@ def _pub_device(d):
         "last_lng": d.get("last_lng"),
         "last_accuracy": d.get("last_accuracy"),
         "last_position_ts": _iso(d.get("last_position_ts")),
+        "tablet_uid": d.get("tablet_uid"),
+        "current_user": ({
+            "employee_number": cu.get("employee_number"),
+            "firstname": cu.get("firstname"),
+            "lastname": cu.get("lastname"),
+            "started_at": _iso(cu.get("started_at")),
+            "session_id": str(cu.get("session_id")) if cu.get("session_id") else None,
+        } if cu.get("employee_number") else None),
+    }
+
+
+def _pub_session(s):
+    if not s:
+        return None
+    return {
+        "id": str(s.get("_id")),
+        "tablet_uid": s.get("tablet_uid"),
+        "device_id": str(s.get("device_id")) if s.get("device_id") else None,
+        "device_name": s.get("device_name"),
+        "event": s.get("event"),
+        "year": s.get("year"),
+        "lieu": s.get("lieu"),
+        "employee_number": s.get("employee_number"),
+        "firstname": s.get("firstname"),
+        "lastname": s.get("lastname"),
+        "started_at": _iso(s.get("started_at")),
+        "ended_at": _iso(s.get("ended_at")),
+        "ended_reason": s.get("ended_reason"),
+        "last_seen": _iso(s.get("last_seen")),
     }
 
 
@@ -259,6 +368,7 @@ def vision_api_pair():
 
     data = request.get_json(silent=True) or {}
     code = str(data.get("code") or "").strip()
+    tablet_uid = str(data.get("tablet_uid") or "").strip() or None
     if not re.fullmatch(r"\d{6}", code):
         return _cors_response({"ok": False, "error": "invalid_code_format"}, 400)
 
@@ -278,7 +388,8 @@ def vision_api_pair():
     if pairing.get("used"):
         return _cors_response({"ok": False, "error": "code_already_used"}, 409)
 
-    # Creer le device Vision (l'_id sert de device_id stable pour la tracabilite)
+    # Creer le device Vision (l'_id de pairing sert de device_id pour ce JWT).
+    # tablet_uid (genere cote tablette) reste stable a travers les ré-enrôlements.
     device_doc = {
         "_id": pairing["_id"],
         "name": pairing.get("name") or "",
@@ -293,6 +404,7 @@ def vision_api_pair():
         "last_seen": _now(),
         "last_ip": ip,
         "revoked": False,
+        "tablet_uid": tablet_uid,
     }
 
     end_dt = _event_end_datetime(db, device_doc["event"], device_doc["year"])
@@ -326,62 +438,39 @@ def vision_api_pair():
 
 @vision_admin_bp.route("/field/api/vision/heartbeat", methods=["POST", "OPTIONS"])
 def vision_api_heartbeat():
-    """Recoit la position GPS et le niveau de batterie d'une tablette Vision.
-    Authentifie via JWT Bearer (meme token que l'app utilise pour Firestore)."""
+    """Recoit position GPS + batterie d'une tablette Vision et materialise
+    la revocation. Met aussi a jour la session operateur active si elle existe."""
     if request.method == "OPTIONS":
-        resp = make_response("", 204)
-        origin = _cors_origin()
-        if origin:
-            resp.headers["Access-Control-Allow-Origin"] = origin
-            resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
-            resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-            resp.headers["Access-Control-Max-Age"] = "3600"
-            resp.headers["Vary"] = "Origin"
-        return resp
+        return _cors_preflight()
 
-    auth = request.headers.get("Authorization", "")
-    if not auth.startswith("Bearer "):
-        return _cors_response({"ok": False, "error": "no_jwt"}, 401)
-    token = auth[7:].strip()
-
-    pub_pem = _get_pub_key()
-    if pub_pem is None:
-        return _cors_response({"ok": False, "error": "server_error"}, 500)
-
-    try:
-        import jwt as _pyjwt
-        payload = _pyjwt.decode(token, pub_pem, algorithms=["RS256"], issuer=VISION_JWT_ISSUER)
-    except Exception as exc:
-        logger.debug("vision heartbeat: JWT invalide: %s", exc)
-        return _cors_response({"ok": False, "error": "invalid_jwt"}, 401)
-
-    device_id = payload.get("device_id")
-    if not device_id:
-        return _cors_response({"ok": False, "error": "no_device_id"}, 400)
+    payload, err = _verify_request_jwt()
+    if err is not None:
+        return err
 
     db = _db()
-    try:
-        oid = ObjectId(device_id)
-    except Exception:
-        return _cors_response({"ok": False, "error": "invalid_device_id"}, 400)
+    _sweep_inactive_sessions(db)
 
-    # Verifie l'existence + statut de revocation : c'est ce qui materialise une
-    # revocation cote Cockpit pour un JWT non encore expire (sinon le JWT
-    # stateless reste valide jusqu'a son exp).
-    device = db["vision_devices"].find_one({"_id": oid})
-    if device is None:
-        return _cors_response({"ok": False, "error": "revoked"}, 403)
-    if device.get("revoked"):
-        return _cors_response({"ok": False, "error": "revoked"}, 403)
+    oid, device, err = _check_device_active(db, payload)
+    if err is not None:
+        return err
 
     data = request.get_json(silent=True) or {}
+    tablet_uid = (data.get("tablet_uid") or "").strip() or None
+
     update = {"last_seen": _now(), "last_ip": _client_ip()}
+    if tablet_uid and not device.get("tablet_uid"):
+        update["tablet_uid"] = tablet_uid
+
+    session_update = {"last_seen": _now()}
 
     battery = data.get("battery")
     if battery is not None:
         try:
-            update["last_battery"] = float(battery)
+            bat_val = float(battery)
+            update["last_battery"] = bat_val
             update["last_charging"] = bool(data.get("charging"))
+            session_update["last_battery"] = bat_val
+            session_update["last_charging"] = bool(data.get("charging"))
         except (TypeError, ValueError):
             pass
 
@@ -389,18 +478,172 @@ def vision_api_heartbeat():
     lng = data.get("lng")
     if lat is not None and lng is not None:
         try:
-            update["last_lat"] = float(lat)
-            update["last_lng"] = float(lng)
+            lat_val = float(lat)
+            lng_val = float(lng)
             acc = data.get("accuracy")
-            update["last_accuracy"] = float(acc) if acc is not None else None
+            acc_val = float(acc) if acc is not None else None
+            update["last_lat"] = lat_val
+            update["last_lng"] = lng_val
+            update["last_accuracy"] = acc_val
             update["last_position_ts"] = _now()
+            session_update["last_lat"] = lat_val
+            session_update["last_lng"] = lng_val
+            session_update["last_accuracy"] = acc_val
         except (TypeError, ValueError):
             pass
 
     try:
         db["vision_devices"].update_one({"_id": oid}, {"$set": update})
     except Exception as exc:
-        logger.warning("vision heartbeat: update mongo echoue: %s", exc)
+        logger.warning("vision heartbeat: update device mongo echoue: %s", exc)
+        return _cors_response({"ok": False, "error": "db_error"}, 500)
+
+    # MAJ de la session operateur active s'il y en a une (ne crashe pas si aucune)
+    try:
+        db["vision_sessions"].update_one(
+            {"device_id": oid, "ended_at": None},
+            {"$set": session_update},
+        )
+    except Exception as exc:
+        logger.warning("vision heartbeat: update session mongo echoue: %s", exc)
+
+    return _cors_response({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Endpoint public : identify (scan QR badge -> session operateur)
+# ---------------------------------------------------------------------------
+
+@vision_admin_bp.route("/field/api/vision/identify", methods=["POST", "OPTIONS"])
+def vision_api_identify():
+    """Lie un employee_number (scanne via QR badge) au device JWT-authentifie.
+    Lookup planbition_people pour valider, cree une vision_sessions, met a
+    jour vision_devices.current_user. Renvoie firstname/lastname."""
+    if request.method == "OPTIONS":
+        return _cors_preflight()
+
+    payload, err = _verify_request_jwt()
+    if err is not None:
+        return err
+
+    db = _db()
+    _sweep_inactive_sessions(db)
+
+    oid, device, err = _check_device_active(db, payload)
+    if err is not None:
+        return err
+
+    data = request.get_json(silent=True) or {}
+    employee_number = str(data.get("employee_number") or "").strip()
+    tablet_uid = (data.get("tablet_uid") or "").strip() or None
+    if not employee_number:
+        return _cors_response({"ok": False, "error": "missing_employee_number"}, 400)
+
+    person = db["planbition_people"].find_one({"employee_number": employee_number})
+    if not person:
+        return _cors_response({"ok": False, "error": "unknown_employee"}, 404)
+
+    firstname = (person.get("firstname") or "").strip()
+    lastname = (person.get("lastname") or "").strip()
+
+    now = _now()
+    # Cloture toute session active sur ce device (changement d'operateur)
+    try:
+        db["vision_sessions"].update_many(
+            {"device_id": oid, "ended_at": None},
+            {"$set": {"ended_at": now, "ended_reason": "switched_user"}},
+        )
+    except Exception as exc:
+        logger.warning("vision identify: cloture sessions echoue: %s", exc)
+
+    session_doc = {
+        "tablet_uid": tablet_uid or device.get("tablet_uid"),
+        "device_id": oid,
+        "device_name": device.get("name") or "",
+        "event": device.get("event") or "",
+        "year": device.get("year") or "",
+        "lieu": device.get("lieu") or "",
+        "employee_number": employee_number,
+        "firstname": firstname,
+        "lastname": lastname,
+        "started_at": now,
+        "ended_at": None,
+        "last_seen": now,
+        "ip": _client_ip(),
+    }
+    try:
+        ins = db["vision_sessions"].insert_one(session_doc)
+        session_id = ins.inserted_id
+    except Exception as exc:
+        logger.error("vision identify: insert session echoue: %s", exc)
+        return _cors_response({"ok": False, "error": "db_error"}, 500)
+
+    device_update = {
+        "last_seen": now,
+        "current_user": {
+            "employee_number": employee_number,
+            "firstname": firstname,
+            "lastname": lastname,
+            "started_at": now,
+            "session_id": session_id,
+        },
+    }
+    if tablet_uid and not device.get("tablet_uid"):
+        device_update["tablet_uid"] = tablet_uid
+    try:
+        db["vision_devices"].update_one({"_id": oid}, {"$set": device_update})
+    except Exception as exc:
+        logger.warning("vision identify: update device echoue: %s", exc)
+
+    return _cors_response({
+        "ok": True,
+        "employee_number": employee_number,
+        "firstname": firstname,
+        "lastname": lastname,
+        "started_at": _iso(now),
+        "session_id": str(session_id),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Endpoint public : logout (cloture session, garde le pairing)
+# ---------------------------------------------------------------------------
+
+@vision_admin_bp.route("/field/api/vision/logout", methods=["POST", "OPTIONS"])
+def vision_api_logout():
+    """Cloture la session operateur active sans desenroler la tablette.
+    Le JWT reste valide ; la tablette retombe sur l'ecran d'identification
+    au reload cote client."""
+    if request.method == "OPTIONS":
+        return _cors_preflight()
+
+    payload, err = _verify_request_jwt()
+    if err is not None:
+        return err
+
+    db = _db()
+    _sweep_inactive_sessions(db)
+
+    device_id = payload.get("device_id")
+    if not device_id:
+        return _cors_response({"ok": False, "error": "no_device_id"}, 400)
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return _cors_response({"ok": False, "error": "invalid_device_id"}, 400)
+
+    now = _now()
+    try:
+        db["vision_sessions"].update_many(
+            {"device_id": oid, "ended_at": None},
+            {"$set": {"ended_at": now, "ended_reason": "logout"}},
+        )
+        db["vision_devices"].update_one(
+            {"_id": oid},
+            {"$set": {"last_seen": now}, "$unset": {"current_user": ""}},
+        )
+    except Exception as exc:
+        logger.warning("vision logout: mongo echoue: %s", exc)
         return _cors_response({"ok": False, "error": "db_error"}, 500)
 
     return _cors_response({"ok": True})
@@ -565,3 +808,41 @@ def vision_admin_device_delete(device_id):
     if res.deleted_count == 0:
         return jsonify({"ok": False, "error": "not_found"}), 404
     return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Admin : sessions operateur (historique tablette)
+# ---------------------------------------------------------------------------
+
+@vision_admin_bp.route("/field/admin/vision/sessions", methods=["GET"])
+@admin_required
+def vision_admin_sessions_list():
+    """Liste les sessions operateur Vision. Filtres : tablet_uid (historique
+    d'une tablette), event/year, employee_number. Tri par started_at desc."""
+    db = _db()
+    _sweep_inactive_sessions(db)
+
+    query = {}
+    tablet_uid = request.args.get("tablet_uid")
+    event = request.args.get("event")
+    year = request.args.get("year")
+    emp = request.args.get("employee_number")
+    if tablet_uid:
+        query["tablet_uid"] = tablet_uid
+    if event:
+        query["event"] = event
+    if year:
+        query["year"] = str(year)
+    if emp:
+        query["employee_number"] = emp
+
+    try:
+        limit = max(1, min(int(request.args.get("limit", "200")), 500))
+    except (TypeError, ValueError):
+        limit = 200
+
+    sessions = [
+        _pub_session(s)
+        for s in db["vision_sessions"].find(query).sort("started_at", -1).limit(limit)
+    ]
+    return jsonify({"sessions": sessions})

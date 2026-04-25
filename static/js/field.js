@@ -2364,6 +2364,10 @@
           $("fiche-create-modal").hidden = true;
           state.patrolStatus = "intervention";
           state.activeFicheId = data.id;
+          // Marquer la fiche comme deja vue : c'est l'agent lui-meme qui
+          // vient de la creer, detectNewFiches ne doit pas declencher
+          // l'alerte plein ecran "Nouvelle intervention dispatchee".
+          if (data.id) state.seenFicheIds.add(data.id);
           updateStatusBar();
           toast("Fiche creee - Intervention demarree", "ok");
           pollFiches();
@@ -3463,7 +3467,6 @@
     catRowEl: null, urgRowEl: null,
     attachBar: null, attachCb: null, attachLabel: null,
     sendBtn: null, recaptureBtn: null,
-    progressEl: null, progressFill: null, progressText: null,
   };
 
   function _camIcon(name) {
@@ -3490,7 +3493,6 @@
     refreshSendEnabled();
     setCameraMode("viewfinder");
     if (_cam.commentEl) _cam.commentEl.value = "";
-    hideUploadProgress();
     _cam.root.hidden = false;
     startCameraStream();
   }
@@ -3504,7 +3506,6 @@
     if (_cam.preview) { _cam.preview.hidden = true; _cam.preview.src = ""; }
     if (_cam.video) _cam.video.hidden = false;
     setCameraMode("viewfinder");
-    hideUploadProgress();
   }
 
   function setCameraMode(mode) {
@@ -3713,21 +3714,17 @@
     refreshSendEnabled();
   }
 
-  function showUploadProgress(text) {
-    if (!_cam.progressEl) return;
-    _cam.progressEl.hidden = false;
-    if (_cam.progressFill) _cam.progressFill.style.width = "0%";
-    if (_cam.progressText) _cam.progressText.textContent = text || "Envoi en cours...";
-  }
-
-  function setUploadProgress(pct, text) {
-    if (!_cam.progressFill) return;
-    _cam.progressFill.style.width = Math.max(0, Math.min(100, pct)) + "%";
-    if (text && _cam.progressText) _cam.progressText.textContent = text;
-  }
-
-  function hideUploadProgress() {
-    if (_cam.progressEl) _cam.progressEl.hidden = true;
+  // Compteur d'uploads photo en arriere-plan (modale fermee immediatement
+  // a l'envoi, l'upload tourne sans bloquer l'UI). Le pill en header donne
+  // un retour visuel discret jusqu'a la fin du dernier upload.
+  var _photoUploadInflight = 0;
+  function bumpPhotoUploadPill(delta) {
+    _photoUploadInflight = Math.max(0, _photoUploadInflight + delta);
+    var pill = $("field-upload-pill");
+    var counter = $("field-upload-pill-count");
+    if (!pill || !counter) return;
+    counter.textContent = String(_photoUploadInflight);
+    pill.hidden = _photoUploadInflight === 0;
   }
 
   // POST multipart avec progress (XHR car fetch ne donne pas l upload progress).
@@ -3762,10 +3759,6 @@
       return;
     }
 
-    _cam.sendBtn.disabled = true;
-    _cam.recaptureBtn.disabled = true;
-    showUploadProgress(_cam.photos.length > 1 ? ("Envoi de " + _cam.photos.length + " photos...") : "Envoi en cours...");
-
     var url, label;
     if (attach) {
       url = "/field/my-fiches/" + encodeURIComponent(state.activeFicheId) + "/comment";
@@ -3775,36 +3768,46 @@
       label = "Photo PC Org";
     }
 
-    var fd = new FormData();
-    _cam.photos.forEach(function (p, i) {
-      fd.append("photos", p.blob, "photo_" + (i + 1) + ".jpg");
-    });
-    if (commentVal) fd.append("comment", commentVal);
-    if (!attach) {
-      fd.append("category", _cam.selectedCategory);
-      if (_cam.selectedUrgency) fd.append("niveau_urgence", _cam.selectedUrgency);
+    // Snapshot de l'etat avant fermeture de la modale : on travaille
+    // ensuite sur des copies, plus rien ne depend de _cam.
+    var photos = _cam.photos.slice();
+    var n = photos.length;
+    var category = _cam.selectedCategory;
+    var urgency = _cam.selectedUrgency;
+    var meLatLng = state.meMarker ? state.meMarker.getLatLng() : null;
+    var batteryPct = state.batteryPct;
+
+    function buildFormData() {
+      var fd = new FormData();
+      photos.forEach(function (p, i) {
+        fd.append("photos", p.blob, "photo_" + (i + 1) + ".jpg");
+      });
+      if (commentVal) fd.append("comment", commentVal);
+      if (!attach) {
+        fd.append("category", category);
+        if (urgency) fd.append("niveau_urgence", urgency);
+      }
+      if (meLatLng) {
+        fd.append("lat", String(meLatLng.lat));
+        fd.append("lng", String(meLatLng.lng));
+      }
+      if (batteryPct != null) fd.append("battery", String(batteryPct));
+      return fd;
     }
-    if (state.meMarker) {
-      var ll = state.meMarker.getLatLng();
-      fd.append("lat", String(ll.lat));
-      fd.append("lng", String(ll.lng));
-    }
-    if (state.batteryPct != null) fd.append("battery", String(state.batteryPct));
 
     function queueOffline() {
       var fields = {};
       if (commentVal) fields["comment"] = commentVal;
       if (!attach) {
-        fields["category"] = _cam.selectedCategory;
-        if (_cam.selectedUrgency) fields["niveau_urgence"] = _cam.selectedUrgency;
+        fields["category"] = category;
+        if (urgency) fields["niveau_urgence"] = urgency;
       }
-      if (state.meMarker) {
-        var l = state.meMarker.getLatLng();
-        fields["lat"] = String(l.lat);
-        fields["lng"] = String(l.lng);
+      if (meLatLng) {
+        fields["lat"] = String(meLatLng.lat);
+        fields["lng"] = String(meLatLng.lng);
       }
-      if (state.batteryPct != null) fields["battery"] = String(state.batteryPct);
-      var files = _cam.photos.map(function (p, i) {
+      if (batteryPct != null) fields["battery"] = String(batteryPct);
+      var files = photos.map(function (p, i) {
         return { blob: p.blob, name: "photo_" + (i + 1) + ".jpg", fieldName: "photos" };
       });
       return OfflineQueue.enqueue({
@@ -3813,40 +3816,46 @@
       });
     }
 
-    function onError(reason) {
-      hideUploadProgress();
-      _cam.sendBtn.disabled = false;
-      _cam.recaptureBtn.disabled = false;
-      queueOffline().then(function () {
-        toast("Pas de reseau : envoi differe (" + _cam.photos.length + " photo" + (_cam.photos.length > 1 ? "s" : "") + ")", "ok");
-        closeCameraModal();
-      }).catch(function () {
-        toast("Echec envoi : " + (reason || "?"), "err");
-      });
+    // 1) On ferme tout de suite la modale : l'agent peut continuer a bosser.
+    //    Les blobs sont detenus par les references locales ci-dessus, on
+    //    retient les ObjectURL le temps de l'upload pour eviter les revokes.
+    var heldUrls = photos.map(function (p) { return p.objectUrl; });
+    _cam.photos = []; // empeche closeCameraModal() de revoke les blobs encore utilises
+    closeCameraModal();
+    bumpPhotoUploadPill(+1);
+    toast("Envoi " + (n > 1 ? n + " photos..." : "photo...") , "ok");
+
+    function release() {
+      bumpPhotoUploadPill(-1);
+      heldUrls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} });
     }
 
-    if (!navigator.onLine) { onError("offline"); return; }
+    function fallbackQueue(reason) {
+      queueOffline().then(function () {
+        toast("Pas de reseau : envoi differe (" + n + " photo" + (n > 1 ? "s" : "") + ")", "warn");
+      }).catch(function () {
+        toast("Echec envoi : " + (reason || "?"), "err");
+      }).then(release);
+    }
 
-    xhrUpload(url, fd, function (pct) {
-      setUploadProgress(pct, pct < 99 ? "Envoi : " + Math.round(pct) + "%" : "Finalisation...");
-    }).then(function (resp) {
-      if (resp.status === 401) { handleSessionLost(); return; }
+    if (!navigator.onLine) { fallbackQueue("offline"); return; }
+
+    xhrUpload(url, buildFormData(), null).then(function (resp) {
+      if (resp.status === 401) { release(); handleSessionLost(); return; }
       var data = resp.body || {};
       if (resp.status >= 200 && resp.status < 300 && data.ok) {
-        hideUploadProgress();
-        var n = _cam.photos.length;
-        toast("Photo" + (n > 1 ? "s" : "") + " envoyee" + (n > 1 ? "s" : "") + (attach ? " (fiche)" : " au PC Org"), "ok");
-        closeCameraModal();
+        toast((n > 1 ? n + " photos envoyees" : "Photo envoyee") + (attach ? " (fiche)" : " au PC Org"), "ok");
+        release();
       } else if (resp.status >= 400 && resp.status < 500) {
-        hideUploadProgress();
-        _cam.sendBtn.disabled = false;
-        _cam.recaptureBtn.disabled = false;
+        // Erreur applicative (categorie invalide, photo refusee...) : pas de
+        // file d'attente, c'est l'envoi lui-meme qui est rejete.
         toast("Refuse : " + (data.error || resp.status), "err");
+        release();
       } else {
-        onError("server " + resp.status);
+        fallbackQueue("server " + resp.status);
       }
     }).catch(function () {
-      onError("reseau");
+      fallbackQueue("reseau");
     });
   }
 
@@ -4033,21 +4042,6 @@
     compose.appendChild(commentEl);
     compose.appendChild(btnRow);
 
-    // Progress overlay
-    var progressEl = document.createElement("div");
-    progressEl.className = "cam-progress";
-    progressEl.hidden = true;
-    var progressBar = document.createElement("div");
-    progressBar.className = "cam-progress-bar";
-    var progressFill = document.createElement("div");
-    progressFill.className = "cam-progress-fill";
-    progressBar.appendChild(progressFill);
-    var progressText = document.createElement("div");
-    progressText.className = "cam-progress-text";
-    progressText.textContent = "Envoi en cours...";
-    progressEl.appendChild(progressBar);
-    progressEl.appendChild(progressText);
-
     root.appendChild(stage);
     root.appendChild(closeBtn);
     root.appendChild(switchBtn);
@@ -4056,7 +4050,6 @@
     root.appendChild(thumbStrip);
     root.appendChild(ctrls);
     root.appendChild(compose);
-    root.appendChild(progressEl);
     document.body.appendChild(root);
 
     _cam.root = root;
@@ -4081,9 +4074,6 @@
     _cam.attachLabel = attachLabel;
     _cam.sendBtn = sendBtn;
     _cam.recaptureBtn = recaptureBtn;
-    _cam.progressEl = progressEl;
-    _cam.progressFill = progressFill;
-    _cam.progressText = progressText;
   }
 
   function closeFicheFromField(f) {
@@ -5213,6 +5203,7 @@
     initWakeLockActivityTracking();
     initPositionBuffer();
     initOfflineQueue();
+    initVisualViewport();
 
     // Empecher le zoom double-tap / pinch natif
     document.addEventListener("gesturestart", function (e) { e.preventDefault(); });
@@ -5477,6 +5468,36 @@
     window.addEventListener("online", flushPositionBuffer);
     // Flush periodique au cas ou
     setInterval(flushPositionBuffer, 30000);
+  }
+
+  // Suit la hauteur du visualViewport pour que les modales tablette ne
+  // soient pas masquees par le clavier virtuel. Sans ca, .field-modal
+  // centrait sur le viewport layout (full ecran), donc la textarea de
+  // creation de fiche se retrouvait derriere le clavier.
+  function initVisualViewport() {
+    var root = document.documentElement;
+    function update() {
+      var h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+      root.style.setProperty("--vvh", h + "px");
+    }
+    update();
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", update);
+      window.visualViewport.addEventListener("scroll", update);
+    } else {
+      window.addEventListener("resize", update);
+    }
+    // Quand un input/textarea prend le focus dans une modale, on s'assure
+    // qu'il est visible au-dessus du clavier (delai pour laisser le clavier
+    // s'animer puis le visualViewport se mettre a jour).
+    document.addEventListener("focusin", function (e) {
+      var t = e.target;
+      if (!t || (t.tagName !== "TEXTAREA" && t.tagName !== "INPUT")) return;
+      if (!t.closest(".field-modal")) return;
+      setTimeout(function () {
+        try { t.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) {}
+      }, 320);
+    });
   }
 
   function initOfflineQueue() {

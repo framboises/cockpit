@@ -143,6 +143,24 @@
       tdName.appendChild(nameSpan);
       tr.appendChild(tdName);
 
+      var tdUser = document.createElement("td");
+      if (d.current_user && d.current_user.employee_number) {
+        var userBadge = document.createElement("span");
+        userBadge.style.cssText = "background:#28a745; color:white; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600;";
+        userBadge.textContent = (d.current_user.firstname || "") + " " + (d.current_user.lastname || "");
+        tdUser.appendChild(userBadge);
+        if (d.current_user.started_at) {
+          var since = document.createElement("div");
+          since.style.cssText = "font-size:10px; color:var(--muted); margin-top:2px;";
+          since.textContent = "depuis " + formatRelative(d.current_user.started_at).replace("il y a ", "");
+          tdUser.appendChild(since);
+        }
+      } else {
+        tdUser.textContent = "-";
+        tdUser.style.color = "var(--muted)";
+      }
+      tr.appendChild(tdUser);
+
       var tdEvent = document.createElement("td");
       tdEvent.style.cssText = "white-space:nowrap; color:var(--muted); font-size:12px;";
       tdEvent.textContent = (d.event || "-") + (d.year ? " / " + d.year : "");
@@ -229,6 +247,7 @@
         actWrap.appendChild(mkBtn("place", "Changer le lieu", null, function () { changeLieu(d); }));
         actWrap.appendChild(mkBtn("block", "Revoquer (la session JWT reste valide jusqu'a expiration)", null, function () { revokeDevice(d); }));
       }
+      actWrap.appendChild(mkBtn("history", "Historique des sessions operateurs sur cette tablette", null, function () { openSessionsModal(d); }));
       actWrap.appendChild(mkBtn("delete", "Supprimer definitivement", null, function () { deleteDevice(d); }));
       tr.appendChild(tdAct);
 
@@ -525,6 +544,126 @@
   }
 
   // ------------------------------------------------------------------
+  // Sessions modal (historique des operateurs sur une tablette)
+  // ------------------------------------------------------------------
+  function formatDuration(startIso, endIso) {
+    try {
+      var s = new Date(startIso).getTime();
+      var e = endIso ? new Date(endIso).getTime() : Date.now();
+      var diff = Math.max(0, Math.floor((e - s) / 1000));
+      var h = Math.floor(diff / 3600);
+      var m = Math.floor((diff % 3600) / 60);
+      if (h > 0) return h + "h " + m + "min";
+      return m + " min";
+    } catch (e) { return "-"; }
+  }
+
+  function loadSessions(d) {
+    var qs = new URLSearchParams();
+    if (d && d.tablet_uid) qs.set("tablet_uid", d.tablet_uid);
+    return apiGet("/field/admin/vision/sessions?" + qs.toString())
+      .then(function (data) {
+        renderSessions((data && data.sessions) || []);
+      })
+      .catch(function () { renderSessions([]); });
+  }
+
+  function renderSessions(sessions) {
+    var tb = $("#vision-sessions-tbody");
+    if (!tb) return;
+    while (tb.firstChild) tb.removeChild(tb.firstChild);
+    if (sessions.length === 0) {
+      var emptyTr = document.createElement("tr");
+      var emptyTd = document.createElement("td");
+      emptyTd.colSpan = 7;
+      emptyTd.style.cssText = "text-align:center; color:var(--muted); padding:16px;";
+      emptyTd.textContent = "Aucune session pour cette tablette.";
+      emptyTr.appendChild(emptyTd);
+      tb.appendChild(emptyTr);
+      return;
+    }
+    sessions.forEach(function (s) {
+      var tr = document.createElement("tr");
+      tr.style.borderBottom = "1px solid var(--border, #eee)";
+
+      var tdU = document.createElement("td");
+      tdU.style.padding = "6px";
+      var name = ((s.firstname || "") + " " + (s.lastname || "")).trim() || s.employee_number || "?";
+      tdU.textContent = name + " (" + (s.employee_number || "?") + ")";
+      tr.appendChild(tdU);
+
+      var tdEv = document.createElement("td");
+      tdEv.style.cssText = "padding:6px; font-size:12px; color:var(--muted);";
+      tdEv.textContent = (s.event || "-") + (s.year ? " / " + s.year : "");
+      tr.appendChild(tdEv);
+
+      var tdLi = document.createElement("td");
+      tdLi.style.padding = "6px";
+      tdLi.textContent = s.lieu || "-";
+      tr.appendChild(tdLi);
+
+      var tdSt = document.createElement("td");
+      tdSt.style.cssText = "padding:6px; font-size:12px;";
+      tdSt.textContent = s.started_at ? new Date(s.started_at).toLocaleString() : "-";
+      tr.appendChild(tdSt);
+
+      var tdEn = document.createElement("td");
+      tdEn.style.cssText = "padding:6px; font-size:12px;";
+      tdEn.textContent = s.ended_at ? new Date(s.ended_at).toLocaleString() : "-";
+      tr.appendChild(tdEn);
+
+      var tdDu = document.createElement("td");
+      tdDu.style.cssText = "padding:6px; font-size:12px;";
+      tdDu.textContent = formatDuration(s.started_at, s.ended_at);
+      tr.appendChild(tdDu);
+
+      var tdSta = document.createElement("td");
+      tdSta.style.padding = "6px";
+      var sta = document.createElement("span");
+      if (!s.ended_at) {
+        sta.style.cssText = "background:#28a745; color:white; padding:2px 8px; border-radius:4px; font-size:11px;";
+        sta.textContent = "ACTIVE";
+      } else {
+        var col = s.ended_reason === "logout" ? "#6c757d" : (s.ended_reason === "timeout" ? "#fd7e14" : "#003b5c");
+        sta.style.cssText = "background:" + col + "; color:white; padding:2px 8px; border-radius:4px; font-size:11px;";
+        sta.textContent = (s.ended_reason || "ended").toUpperCase();
+      }
+      tdSta.appendChild(sta);
+      tr.appendChild(tdSta);
+
+      tb.appendChild(tr);
+    });
+  }
+
+  function openSessionsModal(d) {
+    var modal = $("#vision-sessions-modal");
+    if (!modal) return;
+    var title = $("#vision-sessions-title");
+    var sub = $("#vision-sessions-sub");
+    if (title) title.textContent = "Historique des sessions — " + (d.name || "?");
+    if (sub) {
+      sub.textContent = "Tablette UID : " + (d.tablet_uid || "(non renseigne)") + " — " + (d.event || "?") + " " + (d.year || "");
+    }
+    var tb = $("#vision-sessions-tbody");
+    if (tb) {
+      while (tb.firstChild) tb.removeChild(tb.firstChild);
+      var loadingTr = document.createElement("tr");
+      var loadingTd = document.createElement("td");
+      loadingTd.colSpan = 7;
+      loadingTd.style.cssText = "text-align:center; color:var(--muted); padding:16px;";
+      loadingTd.textContent = "Chargement...";
+      loadingTr.appendChild(loadingTd);
+      tb.appendChild(loadingTr);
+    }
+    modal.hidden = false;
+    if (d.tablet_uid) {
+      loadSessions(d);
+    } else {
+      renderSessions([]);
+    }
+  }
+
+  // ------------------------------------------------------------------
   // Wiring
   // ------------------------------------------------------------------
   function init() {
@@ -536,7 +675,7 @@
     if (btnCodes) btnCodes.addEventListener("click", openCodesModal);
 
     // Fermeture des modales (data-close attribute, comme field_admin.js)
-    document.querySelectorAll("#vision-pair-modal [data-close], #vision-codes-modal [data-close]").forEach(function (el) {
+    document.querySelectorAll("#vision-pair-modal [data-close], #vision-codes-modal [data-close], #vision-sessions-modal [data-close]").forEach(function (el) {
       el.addEventListener("click", function () {
         var modal = el.closest(".crud-modal");
         if (modal && modal.id === "vision-pair-modal") {

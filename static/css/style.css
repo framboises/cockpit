@@ -6982,6 +6982,74 @@ th span { font-size: 0.88rem; font-weight: 700; }
   box-shadow: 0 8px 32px rgba(0,0,0,0.4);
   overflow: hidden;
 }
+/* Variante WhatsApp : modale plus large pour layout deux colonnes
+   (liste conv a gauche, conversation a droite). */
+.anoloc-msg-box-wide {
+  width: 920px; height: 640px;
+  max-width: 96vw; max-height: 88vh;
+}
+.anoloc-msg-split {
+  display: flex; flex: 1; min-height: 0;
+}
+.anoloc-msg-left {
+  width: 280px; flex-shrink: 0;
+  border-right: 1px solid var(--line);
+  display: flex; flex-direction: column;
+  min-height: 0;
+}
+.anoloc-msg-left-toolbar {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.anoloc-msg-new-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 100%;
+  background: #3b82f6; color: #fff;
+  border: none; border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px; font-weight: 600;
+  font-family: inherit; cursor: pointer;
+}
+.anoloc-msg-new-btn:hover { background: #2563eb; }
+.anoloc-msg-conv-list {
+  flex: 1; overflow-y: auto; min-height: 0;
+}
+.anoloc-msg-right {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column;
+}
+.anoloc-msg-empty-pane {
+  flex: 1;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  color: var(--muted); font-size: 14px;
+  padding: 24px; text-align: center;
+}
+.anoloc-msg-empty-hint {
+  font-size: 12px; color: var(--muted); margin-top: 6px;
+}
+.anoloc-msg-new-panel {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.anoloc-msg-thread-panel {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.anoloc-conv-item.is-active {
+  background: rgba(59, 130, 246, 0.12);
+  border-left: 3px solid #3b82f6;
+}
+@media (max-width: 720px) {
+  .anoloc-msg-box-wide {
+    width: 100%; height: 100%;
+    max-height: 100vh; border-radius: 0;
+  }
+  .anoloc-msg-split { flex-direction: column; }
+  .anoloc-msg-left { width: 100%; border-right: none; border-bottom: 1px solid var(--line); max-height: 40vh; }
+}
 .anoloc-msg-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 16px;

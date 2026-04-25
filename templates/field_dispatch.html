@@ -198,16 +198,17 @@
                             <thead>
                                 <tr>
                                     <th style="min-width:160px;">Nom</th>
+                                    <th style="min-width:140px;">Operateur</th>
                                     <th style="min-width:140px;">Evenement</th>
                                     <th style="min-width:100px;">Lieu</th>
                                     <th style="min-width:150px;">Derniere position</th>
                                     <th style="min-width:120px;">Derniere activite</th>
                                     <th style="width:70px; text-align:center;">Batterie</th>
-                                    <th style="width:160px; white-space:nowrap; text-align:right;">Actions</th>
+                                    <th style="width:200px; white-space:nowrap; text-align:right;">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="vision-devices-tbody">
-                                <tr><td colspan="7" style="text-align:center; color:var(--muted); padding:16px;">Chargement...</td></tr>
+                                <tr><td colspan="8" style="text-align:center; color:var(--muted); padding:16px;">Chargement...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -288,6 +289,35 @@
                 </thead>
                 <tbody id="vision-codes-tbody">
                     <tr><td colspan="5" style="text-align:center; color:var(--muted); padding:16px;">Chargement...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- CRUD Modal — Vision sessions history (historique d'une tablette) -->
+<div id="vision-sessions-modal" class="crud-modal" hidden>
+    <div class="crud-modal-dialog" style="max-width:780px;">
+        <div class="crud-modal-header">
+            <h3 id="vision-sessions-title">Historique des sessions</h3>
+            <button class="crud-modal-close" data-close>&times;</button>
+        </div>
+        <div class="crud-modal-body">
+            <p style="font-size:12px; color:var(--muted); margin:0 0 10px;" id="vision-sessions-sub"></p>
+            <table style="width:100%; font-size:13px; border-collapse:collapse;">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--border, #ccc);">
+                        <th style="text-align:left; padding:6px;">Operateur</th>
+                        <th style="text-align:left; padding:6px;">Evenement</th>
+                        <th style="text-align:left; padding:6px;">Lieu</th>
+                        <th style="text-align:left; padding:6px;">Debut</th>
+                        <th style="text-align:left; padding:6px;">Fin</th>
+                        <th style="text-align:left; padding:6px;">Duree</th>
+                        <th style="text-align:left; padding:6px;">Statut</th>
+                    </tr>
+                </thead>
+                <tbody id="vision-sessions-tbody">
+                    <tr><td colspan="7" style="text-align:center; color:var(--muted); padding:16px;">Chargement...</td></tr>
                 </tbody>
             </table>
         </div>

@@ -935,8 +935,8 @@
       var msgBtn = el("button", {
         className: "anoloc-lock-btn",
       }, [
-        materialIcon("send", "font-size:16px;vertical-align:middle;margin-right:4px;"),
-        "Envoyer un message",
+        materialIcon("chat", "font-size:16px;vertical-align:middle;margin-right:4px;"),
+        "Message",
       ]);
       msgBtn.style.marginTop = "4px";
       msgBtn.style.background = "#3b82f6";
@@ -1005,7 +1005,7 @@
     var deviceId = rawId.indexOf("field:") === 0 ? rawId.slice(6) : rawId;
 
     var overlay = el("div", {className: "anoloc-msg-overlay", id: "anoloc-send-msg-modal"});
-    var box = el("div", {className: "anoloc-msg-box"});
+    var box = el("div", {className: "anoloc-msg-box anoloc-msg-box-wide"});
 
     // Header
     var header = el("div", {className: "anoloc-msg-header"});
@@ -1021,46 +1021,87 @@
     header.appendChild(closeBtn);
     box.appendChild(header);
 
-    // Tabs
-    var tabs = el("div", {className: "anoloc-msg-tabs"});
-    var tabNew = el("button", {className: "anoloc-msg-tab active", textContent: "Nouveau"});
-    var tabHistory = el("button", {className: "anoloc-msg-tab", textContent: "Conversations"});
-    tabs.appendChild(tabNew);
-    tabs.appendChild(tabHistory);
-    box.appendChild(tabs);
+    // Layout deux colonnes : liste a gauche, conversation a droite (style WhatsApp).
+    var split = el("div", {className: "anoloc-msg-split"});
 
-    // Panel containers
-    var panelNew = el("div", {className: "anoloc-msg-panel"});
-    var panelHistory = el("div", {className: "anoloc-msg-panel"});
-    panelHistory.hidden = true;
+    // ----- Pane gauche : barre d'actions + liste des conversations -----
+    var leftPane = el("div", {className: "anoloc-msg-left"});
+    var leftToolbar = el("div", {className: "anoloc-msg-left-toolbar"});
+    var newBtn = el("button", {className: "anoloc-msg-new-btn"}, [
+      materialIcon("edit_square", "font-size:16px;vertical-align:middle;margin-right:6px;"),
+      "Nouveau",
+    ]);
+    leftToolbar.appendChild(newBtn);
+    leftPane.appendChild(leftToolbar);
 
-    tabNew.addEventListener("click", function () {
-      tabNew.classList.add("active"); tabHistory.classList.remove("active");
-      panelNew.hidden = false; panelHistory.hidden = true;
+    var convList = el("div", {className: "anoloc-msg-conv-list"});
+    leftPane.appendChild(convList);
+
+    // ----- Pane droit : conversation active OU formulaire nouveau -----
+    var rightPane = el("div", {className: "anoloc-msg-right"});
+
+    function showRight(content) {
+      rightPane.textContent = "";
+      if (content) rightPane.appendChild(content);
+    }
+
+    function showEmpty() {
+      var empty = el("div", {className: "anoloc-msg-empty-pane"}, [
+        materialIcon("forum", "font-size:42px;color:#475569;margin-bottom:8px;"),
+        el("div", {textContent: "Selectionne une conversation"}),
+        el("div", {className: "anoloc-msg-empty-hint", textContent: "ou clique sur \"Nouveau\" pour ecrire."}),
+      ]);
+      showRight(empty);
+    }
+
+    function showNew() {
+      var panel = el("div", {className: "anoloc-msg-new-panel"});
+      buildNewMessagePanel(panel, deviceId, overlay, function () {
+        // apres envoi reussi : refresh la liste et revenir a l'etat vide
+        loadConversations(deviceId, convList, function (id) { openThread(id); });
+      });
+      showRight(panel);
+    }
+
+    function openThread(threadId) {
+      // Marque l'item courant
+      Array.prototype.forEach.call(convList.querySelectorAll(".anoloc-conv-item"), function (it) {
+        it.classList.toggle("is-active", it.dataset.threadId === String(threadId));
+      });
+      var panel = el("div", {className: "anoloc-msg-thread-panel"});
+      openThreadView(threadId, panel, overlay, deviceId, function () {
+        // refresh liste sans rouvrir le thread
+        loadConversations(deviceId, convList, function (id) { openThread(id); });
+      });
+      showRight(panel);
+    }
+
+    newBtn.addEventListener("click", function () {
+      Array.prototype.forEach.call(convList.querySelectorAll(".anoloc-conv-item"), function (it) {
+        it.classList.remove("is-active");
+      });
+      showNew();
     });
-    tabHistory.addEventListener("click", function () {
-      tabHistory.classList.add("active"); tabNew.classList.remove("active");
-      panelHistory.hidden = false; panelNew.hidden = true;
-      loadConversations(deviceId, panelHistory, overlay);
-    });
 
-    // === Panel NEW MESSAGE ===
-    buildNewMessagePanel(panelNew, deviceId, overlay);
+    split.appendChild(leftPane);
+    split.appendChild(rightPane);
+    box.appendChild(split);
 
-    // === Panel HISTORY ===
-    panelHistory.appendChild(el("div", {className: "anoloc-msg-loading", textContent: "Chargement..."}));
-
-    box.appendChild(panelNew);
-    box.appendChild(panelHistory);
     overlay.appendChild(box);
     document.body.appendChild(overlay);
+
+    // Etat initial : liste chargee a gauche, pane droit vide. L'utilisateur
+    // choisit explicitement une conversation OU clique sur "Nouveau" : pas
+    // de pane droit qui clignote en "Chargement..." sans raison.
+    showEmpty();
+    loadConversations(deviceId, convList, function (id) { openThread(id); });
 
     overlay.addEventListener("click", function (e) {
       if (e.target === overlay) overlay.remove();
     });
   }
 
-  function buildNewMessagePanel(panel, deviceId, overlay) {
+  function buildNewMessagePanel(panel, deviceId, overlay, onSent) {
     var body = el("div", {className: "anoloc-msg-body"});
 
     var typeRow = el("div", {className: "anoloc-msg-row"});
@@ -1160,6 +1201,7 @@
             titleInput.value = ""; bodyTextarea.value = ""; fileInput.value = "";
             preview.hidden = true; photoBtn.hidden = false;
             setTimeout(function () { statusEl.textContent = ""; }, 3000);
+            if (typeof onSent === "function") onSent();
           } else {
             statusEl.textContent = resp.error || "Erreur"; statusEl.style.color = "#ef4444";
           }
@@ -1174,9 +1216,11 @@
   }
 
   // === Conversations panel ===
-  function loadConversations(deviceId, panel, overlay) {
-    panel.textContent = "";
-    panel.appendChild(el("div", {className: "anoloc-msg-loading", textContent: "Chargement..."}));
+  // Remplit "listEl" avec la liste des threads pour un device.
+  // onSelect(threadId) est appele quand l'utilisateur clique un thread.
+  function loadConversations(deviceId, listEl, onSelect) {
+    listEl.textContent = "";
+    listEl.appendChild(el("div", {className: "anoloc-msg-loading", textContent: "Chargement..."}));
 
     var ey = (typeof getCurrentEventYear === "function") ? getCurrentEventYear() : {};
     var qs = "?device_id=" + encodeURIComponent(deviceId);
@@ -1186,9 +1230,9 @@
     fetch("/field/admin/messages" + qs, { headers: { "X-CSRFToken": _csrfToken() } })
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        panel.textContent = "";
+        listEl.textContent = "";
         if (!data || !data.ok || !data.messages || data.messages.length === 0) {
-          panel.appendChild(el("div", {className: "anoloc-msg-empty", textContent: "Aucun message echange."}));
+          listEl.appendChild(el("div", {className: "anoloc-msg-empty", textContent: "Aucune conversation."}));
           return;
         }
         // Grouper par thread : afficher les messages racines (sans thread_id)
@@ -1203,45 +1247,46 @@
           }
         });
         if (roots.length === 0) {
-          // All are replies? Show all messages as flat list
           roots = data.messages;
         }
-        var list = el("div", {className: "anoloc-conv-list"});
+        // Tri : plus recent en premier
+        roots.sort(function (a, b) {
+          var ta = new Date(a.created_at || 0).getTime();
+          var tb = new Date(b.created_at || 0).getTime();
+          return tb - ta;
+        });
         roots.forEach(function (m) {
           var replies = m.reply_count || replyMap[m.id] || 0;
           var row = el("div", {className: "anoloc-conv-item"});
+          row.dataset.threadId = String(m.id);
           var titleEl = el("div", {className: "anoloc-conv-title", textContent: m.title || m.body || "(sans titre)"});
           var meta = el("div", {className: "anoloc-conv-meta"});
           var when = "";
-          try { when = new Date(m.created_at).toLocaleString("fr-FR"); } catch (e) {}
+          try { when = new Date(m.created_at).toLocaleString("fr-FR", {dateStyle: "short", timeStyle: "short"}); } catch (e) {}
           meta.textContent = when;
           if (replies > 0) {
             var badge = el("span", {className: "anoloc-conv-replies", textContent: replies + " rep."});
             meta.appendChild(badge);
           }
-          // Unread indicator if field replied
           var hasFieldReply = (data.messages || []).some(function (r) {
             return (r.thread_id === m.id) && r.direction === "field_to_cockpit" && r.status === "sent";
           });
-          if (hasFieldReply) {
-            row.classList.add("has-new-reply");
-          }
+          if (hasFieldReply) row.classList.add("has-new-reply");
           row.appendChild(titleEl);
           row.appendChild(meta);
           row.addEventListener("click", function () {
-            openThreadView(m.id, panel, overlay);
+            if (typeof onSelect === "function") onSelect(m.id);
           });
-          list.appendChild(row);
+          listEl.appendChild(row);
         });
-        panel.appendChild(list);
       })
       .catch(function () {
-        panel.textContent = "";
-        panel.appendChild(el("div", {className: "anoloc-msg-empty", textContent: "Erreur de chargement."}));
+        listEl.textContent = "";
+        listEl.appendChild(el("div", {className: "anoloc-msg-empty", textContent: "Erreur de chargement."}));
       });
   }
 
-  function openThreadView(threadId, panel, overlay) {
+  function openThreadView(threadId, panel, overlay, deviceId, onAfterReply) {
     panel.textContent = "";
     panel.appendChild(el("div", {className: "anoloc-msg-loading", textContent: "Chargement..."}));
 
@@ -1255,18 +1300,6 @@
           panel.appendChild(el("div", {className: "anoloc-msg-empty", textContent: "Erreur."}));
           return;
         }
-        // Back button
-        var backBtn = el("button", {className: "anoloc-conv-back"}, [
-          materialIcon("arrow_back", "font-size:18px;vertical-align:middle;margin-right:4px;"),
-          "Retour",
-        ]);
-        backBtn.addEventListener("click", function () {
-          // Re-extract deviceId from first message
-          var firstMsg = (data.messages && data.messages[0]) || {};
-          var devId = firstMsg.device_id || "";
-          loadConversations(devId, panel, overlay);
-        });
-        panel.appendChild(backBtn);
 
         // Thread bubbles
         var thread = el("div", {className: "anoloc-thread-bubbles"});
@@ -1353,7 +1386,8 @@
                 replyInput.value = "";
                 replyFileInput.value = "";
                 replyPreview.hidden = true;
-                openThreadView(threadId, panel, overlay);
+                openThreadView(threadId, panel, overlay, deviceId, onAfterReply);
+                if (typeof onAfterReply === "function") onAfterReply();
               }
             })
             .catch(function () { replySendBtn.disabled = false; });
