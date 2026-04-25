@@ -114,7 +114,7 @@
     if (state.devices.length === 0) {
       var emptyTr = document.createElement("tr");
       var emptyTd = document.createElement("td");
-      emptyTd.colSpan = 5;
+      emptyTd.colSpan = 7;
       emptyTd.style.cssText = "text-align:center; color:var(--muted); padding:16px;";
       emptyTd.textContent = "Aucune tablette Vision enrolee.";
       emptyTr.appendChild(emptyTd);
@@ -155,9 +155,55 @@
       tdLieu.appendChild(lieuBadge);
       tr.appendChild(tdLieu);
 
+      var tdPos = document.createElement("td");
+      tdPos.style.cssText = "font-size:11px; color:var(--muted);";
+      if (d.last_lat != null && d.last_lng != null) {
+        var posLink = document.createElement("a");
+        posLink.href = "https://www.google.com/maps?q=" + d.last_lat.toFixed(6) + "," + d.last_lng.toFixed(6);
+        posLink.target = "_blank";
+        posLink.rel = "noopener";
+        posLink.style.cssText = "color:inherit; text-decoration:none;";
+        var acc = d.last_accuracy != null ? Math.round(d.last_accuracy) + "m" : "";
+        posLink.textContent = "GPS" + (acc ? " ±" + acc : "");
+        if (d.last_position_ts) {
+          var ageSpan = document.createElement("span");
+          ageSpan.style.cssText = "display:block; font-size:10px; opacity:0.7;";
+          ageSpan.textContent = formatRelative(d.last_position_ts);
+          tdPos.appendChild(posLink);
+          tdPos.appendChild(ageSpan);
+        } else {
+          tdPos.appendChild(posLink);
+        }
+      } else {
+        tdPos.textContent = "-";
+      }
+      tr.appendChild(tdPos);
+
       var tdSeen = document.createElement("td");
       tdSeen.textContent = d.last_seen ? formatRelative(d.last_seen) : "-";
       tr.appendChild(tdSeen);
+
+      var tdBat = document.createElement("td");
+      tdBat.style.cssText = "text-align:center;";
+      if (d.last_battery != null) {
+        var pct = Math.round(d.last_battery * 100);
+        var batColor = pct >= 50 ? "#28a745" : (pct >= 20 ? "#fd7e14" : "#dc3545");
+        var batSpan = document.createElement("span");
+        batSpan.style.cssText = "font-weight:600; color:" + batColor + "; font-size:12px;";
+        batSpan.textContent = pct + "%";
+        tdBat.appendChild(batSpan);
+        if (d.last_charging) {
+          var chgIcon = document.createElement("span");
+          chgIcon.className = "material-symbols-outlined";
+          chgIcon.style.cssText = "font-size:12px; vertical-align:middle; color:#28a745; margin-left:2px;";
+          chgIcon.textContent = "bolt";
+          tdBat.appendChild(chgIcon);
+        }
+      } else {
+        tdBat.textContent = "-";
+        tdBat.style.color = "var(--muted)";
+      }
+      tr.appendChild(tdBat);
 
       var tdAct = document.createElement("td");
       tdAct.style.cssText = "white-space:nowrap; text-align:right;";
@@ -343,6 +389,44 @@
   // ------------------------------------------------------------------
   // Modal pairing creation
   // ------------------------------------------------------------------
+  var pairPollHandle = null;
+
+  function stopPairPoll() {
+    if (pairPollHandle) {
+      clearInterval(pairPollHandle);
+      pairPollHandle = null;
+    }
+  }
+
+  // Surveille la disparition d'un code dans la liste des pairings actifs.
+  // Quand le code disparait avant son expiration : la tablette l'a consomme.
+  function startPairPoll(code, expiresAtIso) {
+    stopPairPoll();
+    var expMs = expiresAtIso ? new Date(expiresAtIso).getTime() : null;
+    pairPollHandle = setInterval(function () {
+      var s = currentScope();
+      var qs = new URLSearchParams();
+      if (s.event) qs.set("event", s.event);
+      if (s.year) qs.set("year", s.year);
+      apiGet("/field/admin/vision/pairings?" + qs.toString())
+        .then(function (data) {
+          var pairings = (data && data.pairings) || [];
+          var stillActive = pairings.some(function (p) { return p.code === code; });
+          if (stillActive) return;
+          stopPairPoll();
+          if (expMs && Date.now() < expMs) {
+            // Code consomme par la tablette
+            closePairModal();
+            _toast("success", "Tablette Vision appairee !");
+            loadDevices();
+            loadPairings();
+          }
+          // Sinon : code expire, on laisse la modale ouverte (l'utilisateur verra que rien ne se passe)
+        })
+        .catch(function () {});
+    }, 2000);
+  }
+
   function openPairModal() {
     var scope = currentScope();
     var lbl = $("#vision-pair-event-label");
@@ -355,10 +439,12 @@
     if (form) form.reset();
     var result = $("#vision-pair-result");
     if (result) result.textContent = "";
+    stopPairPoll();
     var modal = $("#vision-pair-modal");
     if (modal) modal.hidden = false;
   }
   function closePairModal() {
+    stopPairPoll();
     var modal = $("#vision-pair-modal");
     if (modal) modal.hidden = true;
   }
@@ -419,7 +505,14 @@
     hint.style.cssText = "font-size:12px; opacity:0.85;";
     hint.textContent = "A saisir sur https://vision-a0f55.web.app dans les 15 minutes — Lieu : " + (p.lieu || "?");
     wrap.appendChild(hint);
+    var waiting = document.createElement("div");
+    waiting.style.cssText = "margin-top:10px; font-size:11px; opacity:0.75; font-style:italic;";
+    waiting.textContent = "En attente de saisie sur la tablette...";
+    wrap.appendChild(waiting);
     box.appendChild(wrap);
+
+    // Lance le polling : la modale se fermera automatiquement quand la tablette saisit le code
+    if (p.code) startPairPoll(p.code, p.expiresAt);
   }
 
   // ------------------------------------------------------------------
@@ -446,7 +539,11 @@
     document.querySelectorAll("#vision-pair-modal [data-close], #vision-codes-modal [data-close]").forEach(function (el) {
       el.addEventListener("click", function () {
         var modal = el.closest(".crud-modal");
-        if (modal) modal.hidden = true;
+        if (modal && modal.id === "vision-pair-modal") {
+          closePairModal();
+        } else if (modal) {
+          modal.hidden = true;
+        }
       });
     });
 

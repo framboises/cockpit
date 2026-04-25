@@ -1198,9 +1198,12 @@
         if (entry.photo) {
           var photoWrap = mkEl("div", "pcorg-chrono-photo-wrap");
           var img = mkEl("img", "pcorg-chrono-photo");
-          img.src = entry.photo;
+          img.src = entry.thumb || entry.photo;
           img.alt = "Photo terrain";
-          img.addEventListener("click", function () { openPhotoLightbox(entry.photo); });
+          img.loading = "lazy";
+          img.addEventListener("click", (function (full) {
+            return function () { openPhotoLightbox(full); };
+          })(entry.photo));
           photoWrap.appendChild(img);
           ent.appendChild(photoWrap);
         }
@@ -2178,9 +2181,12 @@
                 }
                 if (entry.photo) {
                   var pImg = mkEl("img", "pcorg-popup-chrono-photo");
-                  pImg.src = entry.photo;
+                  pImg.src = entry.thumb || entry.photo;
                   pImg.alt = "Photo";
-                  pImg.addEventListener("click", function () { openPhotoLightbox(entry.photo); });
+                  pImg.loading = "lazy";
+                  pImg.addEventListener("click", (function (full) {
+                    return function () { openPhotoLightbox(full); };
+                  })(entry.photo));
                   row.appendChild(pImg);
                 }
                 cDiv.appendChild(row);

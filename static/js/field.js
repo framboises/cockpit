@@ -225,12 +225,16 @@
     }
 
     function enqueue(entry) {
-      // entry: {url, method, jsonBody, label}
+      // entry JSON : {url, method, jsonBody, label}
+      // entry multipart : {url, method, kind:"multipart", fields:{}, files:[{blob, name}], label}
       var record = {
         createdAt: Date.now(),
         url: entry.url,
         method: entry.method || "POST",
         jsonBody: entry.jsonBody || null,
+        kind: entry.kind || "json",
+        fields: entry.fields || null,     // {key: string}
+        files: entry.files || null,       // [{blob: Blob, name: string, fieldName: string}]
         label: entry.label || "",
       };
       return tx("readwrite").then(function (store) {
@@ -275,11 +279,26 @@
         records.forEach(function (rec) {
           chain = chain.then(function () {
             if (!navigator.onLine) throw new Error("offline");
-            return fetch(rec.url, {
-              method: rec.method,
-              headers: { "Content-Type": "application/json" },
-              body: rec.jsonBody ? JSON.stringify(rec.jsonBody) : null,
-            }).then(function (r) {
+            var fetchPromise;
+            if (rec.kind === "multipart") {
+              var fd = new FormData();
+              if (rec.fields) {
+                Object.keys(rec.fields).forEach(function (k) { fd.append(k, rec.fields[k]); });
+              }
+              if (rec.files) {
+                rec.files.forEach(function (f) {
+                  fd.append(f.fieldName || "photo", f.blob, f.name || "photo.jpg");
+                });
+              }
+              fetchPromise = fetch(rec.url, { method: rec.method, body: fd });
+            } else {
+              fetchPromise = fetch(rec.url, {
+                method: rec.method,
+                headers: { "Content-Type": "application/json" },
+                body: rec.jsonBody ? JSON.stringify(rec.jsonBody) : null,
+              });
+            }
+            return fetchPromise.then(function (r) {
               // 4xx (hors 401) : action rejetee par le serveur, on l abandonne
               if (r.status >= 400 && r.status < 500 && r.status !== 401) {
                 return remove(rec.id).then(function () {
@@ -288,7 +307,11 @@
               }
               if (r.status === 401) { throw new Error("auth"); }
               if (!r.ok) throw new Error("server");
-              return remove(rec.id);
+              return remove(rec.id).then(function () {
+                if (rec.kind === "multipart" && rec.label) {
+                  toast(rec.label + " envoyee (differe)", "ok");
+                }
+              });
             });
           });
         });
@@ -2656,9 +2679,10 @@
         }
         if (photoEntry) {
           var img = document.createElement("img");
-          img.src = photoEntry.photo;
+          img.src = photoEntry.thumb || photoEntry.photo;
           img.alt = photoEntry.text || "Capture camera";
           img.className = "dispatch-alert-photo-img";
+          img.loading = "lazy";
           var label = document.createElement("div");
           label.className = "dispatch-alert-photo-label";
           label.appendChild(_mkIcon("videocam"));
@@ -3120,13 +3144,16 @@
           ent.appendChild(txtEl);
         }
 
-        // Photo thumbnail
+        // Photo thumbnail (vignette serveur si dispo, sinon original)
         if (entry.photo) {
           var thumb = document.createElement("img");
           thumb.className = "fd-chrono-photo";
-          thumb.src = entry.photo;
+          thumb.src = entry.thumb || entry.photo;
           thumb.alt = "Photo";
-          thumb.onclick = function () { openLightbox(entry.photo); };
+          thumb.loading = "lazy";
+          thumb.onclick = (function (full) {
+            return function () { openLightbox(full); };
+          })(entry.photo);
           ent.appendChild(thumb);
         }
 
@@ -3390,41 +3417,119 @@
   }
 
   // ---------------------------------------------------------------------
-  // APPAREIL PHOTO : viewfinder plein ecran, capture, envoi au PC Org
+  // APPAREIL PHOTO : multi-photos (max 5), categorisation, rattachement
+  // a la fiche en cours, torche, progress, fallback OfflineQueue
   // ---------------------------------------------------------------------
+  var CAM_MAX_PHOTOS = 5;
+  var CAM_JPEG_QUALITY = 0.85;          // capture canvas (le serveur reencode 85)
+  var CAM_CATEGORIES = [
+    { id: "PCO.Secours",      label: "Secours",      icon: "medical_services" },
+    { id: "PCO.Securite",     label: "Securite",     icon: "security" },
+    { id: "PCO.Technique",    label: "Technique",    icon: "build" },
+    { id: "PCO.Flux",         label: "Flux",         icon: "directions_car" },
+    { id: "PCO.Information",  label: "Information",  icon: "info" },
+    { id: "PCO.MainCourante", label: "Main courante", icon: "edit_note" },
+  ];
+  var CAM_URGENCIES = [
+    { id: "IMP", label: "IMP", color: "#6b7280" },
+    { id: "UR",  label: "UR",  color: "#eab308" },
+    { id: "UA",  label: "UA",  color: "#f97316" },
+    { id: "EU",  label: "EU",  color: "#dc2626" },
+  ];
+
   var _cam = {
     root: null,
     stream: null,
+    track: null,
     video: null,
     canvas: null,
     preview: null,
-    shutterBtn: null,
-    sendBtn: null,
-    retakeBtn: null,
-    switchBtn: null,
-    commentEl: null,
-    capturedBlob: null,
     facing: "environment",
+    torchSupported: false,
+    torchOn: false,
+
+    photos: [],          // [{blob, objectUrl}]
+    selectedIdx: 0,
+
+    selectedCategory: null,
+    selectedUrgency: "UR",
+    attachToFiche: false,
+
+    closeBtn: null, switchBtn: null, torchBtn: null,
+    shutterBtn: null, nextBtn: null,
+    thumbStrip: null, countLabel: null,
+    composeEl: null, commentEl: null,
+    catChipsEl: null, urgChipsEl: null,
+    catRowEl: null, urgRowEl: null,
+    attachBar: null, attachCb: null, attachLabel: null,
+    sendBtn: null, recaptureBtn: null,
+    progressEl: null, progressFill: null, progressText: null,
   };
+
+  function _camIcon(name) {
+    var s = document.createElement("span");
+    s.className = "material-symbols-outlined";
+    s.setAttribute("aria-hidden", "true");
+    s.textContent = name;
+    return s;
+  }
 
   function openCameraModal() {
     bumpActivity();
     if (!_cam.root) buildCameraModal();
+    _cam.photos = [];
+    _cam.selectedIdx = 0;
+    _cam.selectedCategory = null;
+    _cam.selectedUrgency = "UR";
+    _cam.attachToFiche = !!state.activeFicheId;
+    refreshAttachBar();
+    refreshComposeChips();
+    refreshThumbStrip();
+    refreshCountLabel();
+    refreshShutterEnabled();
+    refreshSendEnabled();
+    setCameraMode("viewfinder");
+    if (_cam.commentEl) _cam.commentEl.value = "";
+    hideUploadProgress();
     _cam.root.hidden = false;
-    resetCameraPreview();
     startCameraStream();
   }
 
   function closeCameraModal() {
     stopCameraStream();
     if (_cam.root) _cam.root.hidden = true;
-    resetCameraPreview();
+    _cam.photos.forEach(function (p) { try { URL.revokeObjectURL(p.objectUrl); } catch (e) {} });
+    _cam.photos = [];
+    _cam.selectedIdx = 0;
+    if (_cam.preview) { _cam.preview.hidden = true; _cam.preview.src = ""; }
+    if (_cam.video) _cam.video.hidden = false;
+    setCameraMode("viewfinder");
+    hideUploadProgress();
+  }
+
+  function setCameraMode(mode) {
+    if (!_cam.root) return;
+    _cam.root.dataset.state = mode;
+    if (mode === "compose") {
+      stopCameraStream();
+      if (_cam.video) _cam.video.hidden = true;
+      if (_cam.preview) _cam.preview.hidden = false;
+      renderSelectedPreview();
+    } else {
+      if (_cam.preview) _cam.preview.hidden = true;
+      if (_cam.video) _cam.video.hidden = false;
+      if (!_cam.stream) startCameraStream();
+    }
   }
 
   function stopCameraStream() {
     if (_cam.stream) {
       try { _cam.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
       _cam.stream = null;
+      _cam.track = null;
+      _cam.torchOn = false;
+      _cam.torchSupported = false;
+      refreshTorchBtn();
     }
     if (_cam.video) _cam.video.srcObject = null;
   }
@@ -3445,6 +3550,13 @@
         _cam.stream = stream;
         _cam.video.srcObject = stream;
         _cam.video.play().catch(function () {});
+        _cam.track = stream.getVideoTracks()[0] || null;
+        try {
+          var caps = _cam.track && _cam.track.getCapabilities ? _cam.track.getCapabilities() : null;
+          _cam.torchSupported = !!(caps && caps.torch);
+        } catch (e) { _cam.torchSupported = false; }
+        _cam.torchOn = false;
+        refreshTorchBtn();
       })
       .catch(function (err) {
         var msg = "Acces camera refuse";
@@ -3455,16 +3567,12 @@
       });
   }
 
-  function resetCameraPreview() {
-    _cam.capturedBlob = null;
-    if (_cam.preview) { _cam.preview.hidden = true; _cam.preview.src = ""; }
-    if (_cam.video) _cam.video.hidden = false;
-    if (_cam.commentEl) _cam.commentEl.value = "";
-    if (_cam.root) _cam.root.dataset.state = "viewfinder";
-  }
-
   function captureFrame() {
     if (!_cam.video || !_cam.stream) return;
+    if (_cam.photos.length >= CAM_MAX_PHOTOS) {
+      toast("Maximum " + CAM_MAX_PHOTOS + " photos par envoi", "err");
+      return;
+    }
     var vw = _cam.video.videoWidth || 1280;
     var vh = _cam.video.videoHeight || 720;
     _cam.canvas.width = vw;
@@ -3473,14 +3581,13 @@
     ctx.drawImage(_cam.video, 0, 0, vw, vh);
     _cam.canvas.toBlob(function (blob) {
       if (!blob) { toast("Echec capture", "err"); return; }
-      _cam.capturedBlob = blob;
-      _cam.preview.src = URL.createObjectURL(blob);
-      _cam.preview.hidden = false;
-      _cam.video.hidden = true;
-      _cam.root.dataset.state = "preview";
-      // Libere la camera pendant la preview (on reprendra au "Retaper")
-      stopCameraStream();
-    }, "image/jpeg", 0.92);
+      _cam.photos.push({ blob: blob, objectUrl: URL.createObjectURL(blob) });
+      _cam.selectedIdx = _cam.photos.length - 1;
+      refreshThumbStrip();
+      refreshCountLabel();
+      refreshShutterEnabled();
+      refreshSendEnabled();
+    }, "image/jpeg", CAM_JPEG_QUALITY);
   }
 
   function switchCamera() {
@@ -3488,42 +3595,258 @@
     startCameraStream();
   }
 
-  function sendCapturedPhoto() {
-    if (!_cam.capturedBlob) return;
-    _cam.sendBtn.disabled = true;
-    _cam.retakeBtn.disabled = true;
-    // Compression au besoin (canvas -> jpeg ~0.8) avant upload 4G
-    var fileForUpload = new File([_cam.capturedBlob], "photo.jpg", { type: "image/jpeg" });
-    var commentVal = (_cam.commentEl.value || "").trim();
-    compressImageIfNeeded(fileForUpload).then(function (out) {
-      var fd = new FormData();
-      fd.append("photo", out, out.name || "photo.jpg");
-      if (commentVal) fd.append("comment", commentVal);
-      // Metadata utile aux operateurs
-      if (state.meMarker) {
-        var ll = state.meMarker.getLatLng();
-        fd.append("lat", String(ll.lat));
-        fd.append("lng", String(ll.lng));
+  function toggleTorch() {
+    if (!_cam.track || !_cam.torchSupported) return;
+    var next = !_cam.torchOn;
+    _cam.track.applyConstraints({ advanced: [{ torch: next }] })
+      .then(function () { _cam.torchOn = next; refreshTorchBtn(); })
+      .catch(function () { toast("Torche indisponible", "err"); });
+  }
+
+  function refreshTorchBtn() {
+    if (!_cam.torchBtn) return;
+    _cam.torchBtn.hidden = !_cam.torchSupported;
+    _cam.torchBtn.classList.toggle("is-on", _cam.torchOn);
+    var icon = _cam.torchBtn.querySelector(".material-symbols-outlined");
+    if (icon) icon.textContent = _cam.torchOn ? "flashlight_on" : "flashlight_off";
+  }
+
+  function removePhotoAt(idx) {
+    if (idx < 0 || idx >= _cam.photos.length) return;
+    var p = _cam.photos[idx];
+    try { URL.revokeObjectURL(p.objectUrl); } catch (e) {}
+    _cam.photos.splice(idx, 1);
+    if (_cam.selectedIdx >= _cam.photos.length) _cam.selectedIdx = _cam.photos.length - 1;
+    if (_cam.selectedIdx < 0) _cam.selectedIdx = 0;
+    refreshThumbStrip();
+    refreshCountLabel();
+    refreshShutterEnabled();
+    refreshSendEnabled();
+    if (_cam.photos.length === 0 && _cam.root.dataset.state === "compose") {
+      setCameraMode("viewfinder");
+    } else if (_cam.root.dataset.state === "compose") {
+      renderSelectedPreview();
+    }
+  }
+
+  function renderSelectedPreview() {
+    if (!_cam.preview) return;
+    var p = _cam.photos[_cam.selectedIdx];
+    _cam.preview.src = p ? p.objectUrl : "";
+    _cam.preview.hidden = !p;
+  }
+
+  function refreshThumbStrip() {
+    if (!_cam.thumbStrip) return;
+    _cam.thumbStrip.innerHTML = "";
+    _cam.thumbStrip.hidden = _cam.photos.length === 0;
+    _cam.photos.forEach(function (p, i) {
+      var wrap = document.createElement("div");
+      wrap.className = "cam-thumb" + (i === _cam.selectedIdx ? " is-selected" : "");
+      var img = document.createElement("img");
+      img.src = p.objectUrl;
+      img.alt = "Photo " + (i + 1);
+      img.addEventListener("click", function () {
+        _cam.selectedIdx = i;
+        refreshThumbStrip();
+        if (_cam.root.dataset.state === "compose") renderSelectedPreview();
+      });
+      wrap.appendChild(img);
+      var rm = document.createElement("button");
+      rm.className = "cam-thumb-remove";
+      rm.setAttribute("aria-label", "Supprimer la photo " + (i + 1));
+      rm.appendChild(_camIcon("close"));
+      rm.addEventListener("click", function (e) {
+        e.stopPropagation();
+        removePhotoAt(i);
+      });
+      wrap.appendChild(rm);
+      _cam.thumbStrip.appendChild(wrap);
+    });
+  }
+
+  function refreshCountLabel() {
+    if (!_cam.countLabel) return;
+    _cam.countLabel.textContent = _cam.photos.length + "/" + CAM_MAX_PHOTOS;
+  }
+
+  function refreshShutterEnabled() {
+    if (!_cam.shutterBtn) return;
+    var disabled = _cam.photos.length >= CAM_MAX_PHOTOS;
+    _cam.shutterBtn.disabled = disabled;
+    _cam.shutterBtn.classList.toggle("is-disabled", disabled);
+    if (_cam.nextBtn) _cam.nextBtn.hidden = _cam.photos.length === 0;
+  }
+
+  function refreshSendEnabled() {
+    if (!_cam.sendBtn) return;
+    var ok = _cam.photos.length > 0;
+    if (!_cam.attachToFiche && !_cam.selectedCategory) ok = false;
+    _cam.sendBtn.disabled = !ok;
+  }
+
+  function refreshAttachBar() {
+    if (!_cam.attachBar) return;
+    var hasFiche = !!state.activeFicheId;
+    _cam.attachBar.hidden = !hasFiche;
+    if (hasFiche) {
+      _cam.attachCb.checked = !!_cam.attachToFiche;
+      var shortId = String(state.activeFicheId).slice(0, 8);
+      _cam.attachLabel.textContent = "Joindre a la fiche " + shortId;
+    }
+  }
+
+  function refreshComposeChips() {
+    var showChips = !_cam.attachToFiche;
+    if (_cam.catRowEl) _cam.catRowEl.hidden = !showChips;
+    if (_cam.urgRowEl) _cam.urgRowEl.hidden = !showChips;
+    if (_cam.catChipsEl) {
+      Array.prototype.forEach.call(_cam.catChipsEl.children, function (c) {
+        c.classList.toggle("is-selected", c.dataset.cat === _cam.selectedCategory);
+      });
+    }
+    if (_cam.urgChipsEl) {
+      Array.prototype.forEach.call(_cam.urgChipsEl.children, function (c) {
+        c.classList.toggle("is-selected", c.dataset.urg === _cam.selectedUrgency);
+      });
+    }
+    refreshSendEnabled();
+  }
+
+  function showUploadProgress(text) {
+    if (!_cam.progressEl) return;
+    _cam.progressEl.hidden = false;
+    if (_cam.progressFill) _cam.progressFill.style.width = "0%";
+    if (_cam.progressText) _cam.progressText.textContent = text || "Envoi en cours...";
+  }
+
+  function setUploadProgress(pct, text) {
+    if (!_cam.progressFill) return;
+    _cam.progressFill.style.width = Math.max(0, Math.min(100, pct)) + "%";
+    if (text && _cam.progressText) _cam.progressText.textContent = text;
+  }
+
+  function hideUploadProgress() {
+    if (_cam.progressEl) _cam.progressEl.hidden = true;
+  }
+
+  // POST multipart avec progress (XHR car fetch ne donne pas l upload progress).
+  // Renvoie Promise({status, body}) ou rejette pour abort/erreur reseau.
+  function xhrUpload(url, formData, onprogress) {
+    return new Promise(function (resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      xhr.open("POST", url, true);
+      if (xhr.upload && onprogress) {
+        xhr.upload.addEventListener("progress", function (e) {
+          if (e.lengthComputable) onprogress(e.loaded * 100 / e.total);
+        });
       }
-      if (state.batteryPct != null) fd.append("battery", String(state.batteryPct));
-      return fetch("/field/photo/send", { method: "POST", body: fd });
-    }).then(function (r) {
-      if (!r) return;
-      if (r.status === 401) { handleSessionLost(); return; }
-      return r.json();
-    }).then(function (data) {
+      xhr.onload = function () {
+        var data = null;
+        try { data = JSON.parse(xhr.responseText); } catch (e) { data = null; }
+        resolve({ status: xhr.status, body: data });
+      };
+      xhr.onerror = function () { reject(new Error("network")); };
+      xhr.onabort = function () { reject(new Error("abort")); };
+      xhr.send(formData);
+    });
+  }
+
+  function sendCapturedPhotos() {
+    if (_cam.photos.length === 0) return;
+
+    var attach = _cam.attachToFiche && state.activeFicheId;
+    var commentVal = (_cam.commentEl.value || "").trim();
+    if (!attach && !_cam.selectedCategory) {
+      toast("Choisis une categorie", "err");
+      return;
+    }
+
+    _cam.sendBtn.disabled = true;
+    _cam.recaptureBtn.disabled = true;
+    showUploadProgress(_cam.photos.length > 1 ? ("Envoi de " + _cam.photos.length + " photos...") : "Envoi en cours...");
+
+    var url, label;
+    if (attach) {
+      url = "/field/my-fiches/" + encodeURIComponent(state.activeFicheId) + "/comment";
+      label = "Photo fiche";
+    } else {
+      url = "/field/photo/send";
+      label = "Photo PC Org";
+    }
+
+    var fd = new FormData();
+    _cam.photos.forEach(function (p, i) {
+      fd.append("photos", p.blob, "photo_" + (i + 1) + ".jpg");
+    });
+    if (commentVal) fd.append("comment", commentVal);
+    if (!attach) {
+      fd.append("category", _cam.selectedCategory);
+      if (_cam.selectedUrgency) fd.append("niveau_urgence", _cam.selectedUrgency);
+    }
+    if (state.meMarker) {
+      var ll = state.meMarker.getLatLng();
+      fd.append("lat", String(ll.lat));
+      fd.append("lng", String(ll.lng));
+    }
+    if (state.batteryPct != null) fd.append("battery", String(state.batteryPct));
+
+    function queueOffline() {
+      var fields = {};
+      if (commentVal) fields["comment"] = commentVal;
+      if (!attach) {
+        fields["category"] = _cam.selectedCategory;
+        if (_cam.selectedUrgency) fields["niveau_urgence"] = _cam.selectedUrgency;
+      }
+      if (state.meMarker) {
+        var l = state.meMarker.getLatLng();
+        fields["lat"] = String(l.lat);
+        fields["lng"] = String(l.lng);
+      }
+      if (state.batteryPct != null) fields["battery"] = String(state.batteryPct);
+      var files = _cam.photos.map(function (p, i) {
+        return { blob: p.blob, name: "photo_" + (i + 1) + ".jpg", fieldName: "photos" };
+      });
+      return OfflineQueue.enqueue({
+        url: url, method: "POST", kind: "multipart",
+        fields: fields, files: files, label: label,
+      });
+    }
+
+    function onError(reason) {
+      hideUploadProgress();
       _cam.sendBtn.disabled = false;
-      _cam.retakeBtn.disabled = false;
-      if (data && data.ok) {
-        toast("Photo envoyee au PC Org", "ok");
+      _cam.recaptureBtn.disabled = false;
+      queueOffline().then(function () {
+        toast("Pas de reseau : envoi differe (" + _cam.photos.length + " photo" + (_cam.photos.length > 1 ? "s" : "") + ")", "ok");
         closeCameraModal();
+      }).catch(function () {
+        toast("Echec envoi : " + (reason || "?"), "err");
+      });
+    }
+
+    if (!navigator.onLine) { onError("offline"); return; }
+
+    xhrUpload(url, fd, function (pct) {
+      setUploadProgress(pct, pct < 99 ? "Envoi : " + Math.round(pct) + "%" : "Finalisation...");
+    }).then(function (resp) {
+      if (resp.status === 401) { handleSessionLost(); return; }
+      var data = resp.body || {};
+      if (resp.status >= 200 && resp.status < 300 && data.ok) {
+        hideUploadProgress();
+        var n = _cam.photos.length;
+        toast("Photo" + (n > 1 ? "s" : "") + " envoyee" + (n > 1 ? "s" : "") + (attach ? " (fiche)" : " au PC Org"), "ok");
+        closeCameraModal();
+      } else if (resp.status >= 400 && resp.status < 500) {
+        hideUploadProgress();
+        _cam.sendBtn.disabled = false;
+        _cam.recaptureBtn.disabled = false;
+        toast("Refuse : " + (data.error || resp.status), "err");
       } else {
-        toast("Echec envoi : " + ((data && data.error) || "?"), "err");
+        onError("server " + resp.status);
       }
     }).catch(function () {
-      _cam.sendBtn.disabled = false;
-      _cam.retakeBtn.disabled = false;
-      toast("Erreur reseau", "err");
+      onError("reseau");
     });
   }
 
@@ -3537,61 +3860,145 @@
     root.setAttribute("aria-modal", "true");
     root.setAttribute("aria-label", "Appareil photo");
 
+    // Stage
     var stage = document.createElement("div");
     stage.className = "field-camera-stage";
-
     var video = document.createElement("video");
     video.playsInline = true;
     video.setAttribute("playsinline", "");
     video.muted = true;
     video.autoplay = true;
-
     var preview = document.createElement("img");
     preview.className = "field-camera-preview-img";
     preview.hidden = true;
     preview.alt = "Apercu";
-
     var canvas = document.createElement("canvas");
     canvas.hidden = true;
-
     stage.appendChild(video);
     stage.appendChild(preview);
     stage.appendChild(canvas);
 
-    // Bouton fermer
+    // Boutons haut
     var closeBtn = document.createElement("button");
     closeBtn.className = "field-camera-close";
     closeBtn.setAttribute("aria-label", "Fermer l'appareil photo");
-    var closeIcon = document.createElement("span");
-    closeIcon.className = "material-symbols-outlined";
-    closeIcon.setAttribute("aria-hidden", "true");
-    closeIcon.textContent = "close";
-    closeBtn.appendChild(closeIcon);
+    closeBtn.appendChild(_camIcon("close"));
     closeBtn.addEventListener("click", closeCameraModal);
 
-    // Bouton switch camera
     var switchBtn = document.createElement("button");
     switchBtn.className = "field-camera-switch";
     switchBtn.setAttribute("aria-label", "Inverser la camera");
-    var switchIcon = document.createElement("span");
-    switchIcon.className = "material-symbols-outlined";
-    switchIcon.setAttribute("aria-hidden", "true");
-    switchIcon.textContent = "cameraswitch";
-    switchBtn.appendChild(switchIcon);
+    switchBtn.appendChild(_camIcon("cameraswitch"));
     switchBtn.addEventListener("click", switchCamera);
 
-    // Bouton shutter (viewfinder)
-    var shutterWrap = document.createElement("div");
-    shutterWrap.className = "field-camera-shutter-wrap";
+    var torchBtn = document.createElement("button");
+    torchBtn.className = "field-camera-torch";
+    torchBtn.setAttribute("aria-label", "Torche");
+    torchBtn.title = "Torche";
+    torchBtn.hidden = true;
+    torchBtn.appendChild(_camIcon("flashlight_off"));
+    torchBtn.addEventListener("click", toggleTorch);
+
+    // Barre attache fiche
+    var attachBar = document.createElement("div");
+    attachBar.className = "cam-attach-bar";
+    attachBar.hidden = true;
+    var attachCb = document.createElement("input");
+    attachCb.type = "checkbox";
+    attachCb.id = "cam-attach-cb";
+    attachCb.checked = false;
+    attachCb.addEventListener("change", function () {
+      _cam.attachToFiche = attachCb.checked;
+      refreshComposeChips();
+    });
+    var attachLabel = document.createElement("label");
+    attachLabel.setAttribute("for", "cam-attach-cb");
+    attachLabel.textContent = "Joindre a la fiche";
+    attachBar.appendChild(attachCb);
+    attachBar.appendChild(attachLabel);
+
+    // Strip miniatures
+    var thumbStrip = document.createElement("div");
+    thumbStrip.className = "cam-thumb-strip";
+    thumbStrip.hidden = true;
+
+    // Contrôles bas (viewfinder)
+    var ctrls = document.createElement("div");
+    ctrls.className = "cam-viewfinder-ctrls";
+
+    var countLabel = document.createElement("span");
+    countLabel.className = "cam-count";
+    countLabel.textContent = "0/" + CAM_MAX_PHOTOS;
+
     var shutterBtn = document.createElement("button");
     shutterBtn.className = "field-camera-shutter";
-    shutterBtn.setAttribute("aria-label", "Capturer");
+    shutterBtn.setAttribute("aria-label", "Capturer une photo");
     shutterBtn.addEventListener("click", captureFrame);
-    shutterWrap.appendChild(shutterBtn);
 
-    // Zone commentaire + envoi (preview)
-    var previewActions = document.createElement("div");
-    previewActions.className = "field-camera-preview-actions";
+    var nextBtn = document.createElement("button");
+    nextBtn.className = "cam-next";
+    nextBtn.hidden = true;
+    nextBtn.setAttribute("aria-label", "Passer a la composition");
+    nextBtn.appendChild(document.createTextNode("Suivant "));
+    nextBtn.appendChild(_camIcon("arrow_forward"));
+    nextBtn.addEventListener("click", function () {
+      if (_cam.photos.length === 0) return;
+      setCameraMode("compose");
+    });
+
+    ctrls.appendChild(countLabel);
+    ctrls.appendChild(shutterBtn);
+    ctrls.appendChild(nextBtn);
+
+    // Pane compose
+    var compose = document.createElement("div");
+    compose.className = "cam-compose";
+
+    var catRow = document.createElement("div");
+    catRow.className = "cam-chip-row cam-cat-row";
+    var catLabel = document.createElement("div");
+    catLabel.className = "cam-chip-label";
+    catLabel.textContent = "Categorie";
+    var catChips = document.createElement("div");
+    catChips.className = "cam-cat-chips";
+    CAM_CATEGORIES.forEach(function (c) {
+      var chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "cam-chip";
+      chip.dataset.cat = c.id;
+      chip.appendChild(_camIcon(c.icon));
+      chip.appendChild(document.createTextNode(" " + c.label));
+      chip.addEventListener("click", function () {
+        _cam.selectedCategory = c.id;
+        refreshComposeChips();
+      });
+      catChips.appendChild(chip);
+    });
+    catRow.appendChild(catLabel);
+    catRow.appendChild(catChips);
+
+    var urgRow = document.createElement("div");
+    urgRow.className = "cam-chip-row cam-urg-row";
+    var urgLabel = document.createElement("div");
+    urgLabel.className = "cam-chip-label";
+    urgLabel.textContent = "Urgence";
+    var urgChips = document.createElement("div");
+    urgChips.className = "cam-urg-chips";
+    CAM_URGENCIES.forEach(function (u) {
+      var chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "cam-chip cam-urg-chip";
+      chip.dataset.urg = u.id;
+      chip.style.setProperty("--urg-color", u.color);
+      chip.textContent = u.label;
+      chip.addEventListener("click", function () {
+        _cam.selectedUrgency = u.id;
+        refreshComposeChips();
+      });
+      urgChips.appendChild(chip);
+    });
+    urgRow.appendChild(urgLabel);
+    urgRow.appendChild(urgChips);
 
     var commentEl = document.createElement("textarea");
     commentEl.className = "field-camera-comment";
@@ -3604,50 +4011,79 @@
     var btnRow = document.createElement("div");
     btnRow.className = "field-camera-preview-btns";
 
-    var retakeBtn = document.createElement("button");
-    retakeBtn.className = "field-camera-btn field-camera-btn-secondary";
-    var retakeIcon = document.createElement("span");
-    retakeIcon.className = "material-symbols-outlined";
-    retakeIcon.setAttribute("aria-hidden", "true");
-    retakeIcon.textContent = "replay";
-    retakeBtn.appendChild(retakeIcon);
-    retakeBtn.appendChild(document.createTextNode(" Retaper"));
-    retakeBtn.addEventListener("click", function () {
-      resetCameraPreview();
-      startCameraStream();
+    var recaptureBtn = document.createElement("button");
+    recaptureBtn.className = "field-camera-btn field-camera-btn-secondary";
+    recaptureBtn.appendChild(_camIcon("add_a_photo"));
+    recaptureBtn.appendChild(document.createTextNode(" Reprendre"));
+    recaptureBtn.addEventListener("click", function () {
+      setCameraMode("viewfinder");
     });
 
     var sendBtn = document.createElement("button");
     sendBtn.className = "field-camera-btn field-camera-btn-primary";
-    var sendIcon = document.createElement("span");
-    sendIcon.className = "material-symbols-outlined";
-    sendIcon.setAttribute("aria-hidden", "true");
-    sendIcon.textContent = "send";
-    sendBtn.appendChild(sendIcon);
-    sendBtn.appendChild(document.createTextNode(" Envoyer au PC Org"));
-    sendBtn.addEventListener("click", sendCapturedPhoto);
+    sendBtn.appendChild(_camIcon("send"));
+    sendBtn.appendChild(document.createTextNode(" Envoyer"));
+    sendBtn.addEventListener("click", sendCapturedPhotos);
 
-    btnRow.appendChild(retakeBtn);
+    btnRow.appendChild(recaptureBtn);
     btnRow.appendChild(sendBtn);
-    previewActions.appendChild(commentEl);
-    previewActions.appendChild(btnRow);
+
+    compose.appendChild(catRow);
+    compose.appendChild(urgRow);
+    compose.appendChild(commentEl);
+    compose.appendChild(btnRow);
+
+    // Progress overlay
+    var progressEl = document.createElement("div");
+    progressEl.className = "cam-progress";
+    progressEl.hidden = true;
+    var progressBar = document.createElement("div");
+    progressBar.className = "cam-progress-bar";
+    var progressFill = document.createElement("div");
+    progressFill.className = "cam-progress-fill";
+    progressBar.appendChild(progressFill);
+    var progressText = document.createElement("div");
+    progressText.className = "cam-progress-text";
+    progressText.textContent = "Envoi en cours...";
+    progressEl.appendChild(progressBar);
+    progressEl.appendChild(progressText);
 
     root.appendChild(stage);
     root.appendChild(closeBtn);
     root.appendChild(switchBtn);
-    root.appendChild(shutterWrap);
-    root.appendChild(previewActions);
-
+    root.appendChild(torchBtn);
+    root.appendChild(attachBar);
+    root.appendChild(thumbStrip);
+    root.appendChild(ctrls);
+    root.appendChild(compose);
+    root.appendChild(progressEl);
     document.body.appendChild(root);
+
     _cam.root = root;
     _cam.video = video;
     _cam.canvas = canvas;
     _cam.preview = preview;
-    _cam.shutterBtn = shutterBtn;
-    _cam.sendBtn = sendBtn;
-    _cam.retakeBtn = retakeBtn;
+    _cam.closeBtn = closeBtn;
     _cam.switchBtn = switchBtn;
+    _cam.torchBtn = torchBtn;
+    _cam.shutterBtn = shutterBtn;
+    _cam.nextBtn = nextBtn;
+    _cam.thumbStrip = thumbStrip;
+    _cam.countLabel = countLabel;
+    _cam.composeEl = compose;
     _cam.commentEl = commentEl;
+    _cam.catChipsEl = catChips;
+    _cam.urgChipsEl = urgChips;
+    _cam.catRowEl = catRow;
+    _cam.urgRowEl = urgRow;
+    _cam.attachBar = attachBar;
+    _cam.attachCb = attachCb;
+    _cam.attachLabel = attachLabel;
+    _cam.sendBtn = sendBtn;
+    _cam.recaptureBtn = recaptureBtn;
+    _cam.progressEl = progressEl;
+    _cam.progressFill = progressFill;
+    _cam.progressText = progressText;
   }
 
   function closeFicheFromField(f) {
@@ -4129,12 +4565,14 @@
       bubble.appendChild(txt);
     }
 
-    // Photo
+    // Photo (vignette serveur si dispo, sinon original)
     var photoUrl = m.payload && m.payload.photo;
+    var thumbUrl = (m.payload && m.payload.thumb) || photoUrl;
     if (photoUrl) {
       var img = document.createElement("img");
       img.className = "msg-bubble-photo";
-      img.src = photoUrl;
+      img.src = thumbUrl;
+      img.loading = "lazy";
       img.alt = "Photo";
       img.addEventListener("click", function () { openLightbox(photoUrl); });
       bubble.appendChild(img);

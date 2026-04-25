@@ -71,6 +71,7 @@ VISION_ALLOWED_ORIGINS = [
 # ---------------------------------------------------------------------------
 
 _priv_key_pem = None
+_pub_key_pem = None
 _INDEXES_READY = False
 
 
@@ -87,6 +88,25 @@ def _load_priv_key():
         return _priv_key_pem
     except Exception as exc:
         logger.error("vision: lecture cle privee JWT echouee: %s", exc)
+        return None
+
+
+def _get_pub_key():
+    """Derive et met en cache la cle publique PEM depuis la cle privee."""
+    global _pub_key_pem
+    if _pub_key_pem is not None:
+        return _pub_key_pem
+    priv_pem = _load_priv_key()
+    if priv_pem is None:
+        return None
+    try:
+        from cryptography.hazmat.primitives.serialization import load_pem_private_key
+        from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+        priv_obj = load_pem_private_key(priv_pem, password=None)
+        _pub_key_pem = priv_obj.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
+        return _pub_key_pem
+    except Exception as exc:
+        logger.error("vision: derivation cle publique echouee: %s", exc)
         return None
 
 
@@ -195,6 +215,12 @@ def _pub_device(d):
         "last_ua": d.get("last_ua"),
         "revoked": bool(d.get("revoked")),
         "revoked_at": _iso(d.get("revokedAt")),
+        "last_battery": d.get("last_battery"),
+        "last_charging": d.get("last_charging"),
+        "last_lat": d.get("last_lat"),
+        "last_lng": d.get("last_lng"),
+        "last_accuracy": d.get("last_accuracy"),
+        "last_position_ts": _iso(d.get("last_position_ts")),
     }
 
 
@@ -292,6 +318,79 @@ def vision_api_pair():
         "annee": device_doc["year"],
         "lieu": device_doc["lieu"],
     })
+
+
+# ---------------------------------------------------------------------------
+# Endpoint public : heartbeat depuis l'app Vision (batterie + GPS)
+# ---------------------------------------------------------------------------
+
+@vision_admin_bp.route("/field/api/vision/heartbeat", methods=["POST", "OPTIONS"])
+def vision_api_heartbeat():
+    """Recoit la position GPS et le niveau de batterie d'une tablette Vision.
+    Authentifie via JWT Bearer (meme token que l'app utilise pour Firestore)."""
+    if request.method == "OPTIONS":
+        resp = make_response("", 204)
+        origin = _cors_origin()
+        if origin:
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+            resp.headers["Access-Control-Max-Age"] = "3600"
+            resp.headers["Vary"] = "Origin"
+        return resp
+
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return _cors_response({"ok": False, "error": "no_jwt"}, 401)
+    token = auth[7:].strip()
+
+    pub_pem = _get_pub_key()
+    if pub_pem is None:
+        return _cors_response({"ok": False, "error": "server_error"}, 500)
+
+    try:
+        import jwt as _pyjwt
+        payload = _pyjwt.decode(token, pub_pem, algorithms=["RS256"], issuer=VISION_JWT_ISSUER)
+    except Exception as exc:
+        logger.debug("vision heartbeat: JWT invalide: %s", exc)
+        return _cors_response({"ok": False, "error": "invalid_jwt"}, 401)
+
+    device_id = payload.get("device_id")
+    if not device_id:
+        return _cors_response({"ok": False, "error": "no_device_id"}, 400)
+
+    data = request.get_json(silent=True) or {}
+    update = {"last_seen": _now(), "last_ip": _client_ip()}
+
+    battery = data.get("battery")
+    if battery is not None:
+        try:
+            update["last_battery"] = float(battery)
+            update["last_charging"] = bool(data.get("charging"))
+        except (TypeError, ValueError):
+            pass
+
+    lat = data.get("lat")
+    lng = data.get("lng")
+    if lat is not None and lng is not None:
+        try:
+            update["last_lat"] = float(lat)
+            update["last_lng"] = float(lng)
+            acc = data.get("accuracy")
+            update["last_accuracy"] = float(acc) if acc is not None else None
+            update["last_position_ts"] = _now()
+        except (TypeError, ValueError):
+            pass
+
+    db = _db()
+    try:
+        oid = ObjectId(device_id)
+        db["vision_devices"].update_one({"_id": oid}, {"$set": update})
+    except Exception as exc:
+        logger.warning("vision heartbeat: update mongo echoue: %s", exc)
+        return _cors_response({"ok": False, "error": "db_error"}, 500)
+
+    return _cors_response({"ok": True})
 
 
 # ---------------------------------------------------------------------------

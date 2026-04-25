@@ -17,12 +17,20 @@ from werkzeug.utils import safe_join, secure_filename
 from datetime import datetime, timezone, timedelta
 from pymongo import MongoClient
 from bson.objectid import ObjectId
+from io import BytesIO
 import os
 import hashlib
 import secrets
 import logging
 import re
+import uuid as _uuid
 from functools import wraps
+
+try:
+    from PIL import Image, ImageOps
+    _PIL_AVAILABLE = True
+except ImportError:
+    _PIL_AVAILABLE = False
 
 try:
     from zoneinfo import ZoneInfo
@@ -61,8 +69,14 @@ _VAPID_PUBLIC_KEY_B64 = None
 # Photos
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FIELD_PHOTOS_DIR = os.path.join(SCRIPT_DIR, "uploads", "field_photos")
-FIELD_PHOTO_MAX_SIZE = 10 * 1024 * 1024   # 10 Mo par photo
-FIELD_PHOTO_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "heic"}
+FIELD_PHOTO_MAX_SIZE = 10 * 1024 * 1024   # 10 Mo par photo en upload brut
+FIELD_PHOTO_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
+FIELD_PHOTO_MAX_DIM = 1920                # downscale plus grand cote
+FIELD_PHOTO_JPEG_QUALITY = 85
+FIELD_PHOTO_THUMB_DIM = 256
+FIELD_PHOTO_THUMB_QUALITY = 78
+FIELD_PHOTO_FILE_TTL_DAYS = 30            # purge fichiers physiques apres 30 jours
+FIELD_PHOTO_MAX_PER_BATCH = 5             # limite multi-photos par envoi
 
 # Photos 3P (portes/portails) partagees avec l'app looker
 LOOKER_3P_MEDIA_DIR = os.path.join(SCRIPT_DIR, "..", "looker", "static", "img", "media")
@@ -196,6 +210,9 @@ def _ensure_indexes(db):
         # field_messages : inbox par device_id + TTL 7 jours
         db["field_messages"].create_index([("device_id", 1), ("createdAt", -1)])
         db["field_messages"].create_index("expiresAt", expireAfterSeconds=0)
+        # Filtres console admin (vue "Photos terrain", recherches event/type)
+        db["field_messages"].create_index([("type", 1), ("event", 1), ("year", 1), ("createdAt", -1)])
+        db["field_messages"].create_index([("event", 1), ("year", 1), ("createdAt", -1)])
 
         # field_push_subs : souscriptions Web Push par device
         db["field_push_subs"].create_index("device_id")
@@ -480,6 +497,79 @@ def _iso(value):
             value = value.replace(tzinfo=timezone.utc)
         return value.isoformat()
     return None
+
+
+class PhotoUploadError(Exception):
+    """Levee par _process_and_save_photo en cas d'upload invalide.
+    `code` est l'identifiant retourne au front, `status` le code HTTP."""
+    def __init__(self, code, status=400):
+        super().__init__(code)
+        self.code = code
+        self.status = status
+
+
+def _process_and_save_photo(photo_file, sub_dir):
+    """Lit une photo uploadee, valide son contenu (Pillow), strippe l'EXIF,
+    applique l'auto-rotation, downscale a FIELD_PHOTO_MAX_DIM, sauve l'original
+    JPEG q=85 + une miniature 256px. Retourne (photo_url, thumb_url).
+
+    `sub_dir` est relatif a FIELD_PHOTOS_DIR (ex. "{event}/{year}").
+
+    Leve PhotoUploadError(code) en cas d'invalidite (extension, taille, contenu).
+    """
+    if not _PIL_AVAILABLE:
+        raise PhotoUploadError("server_no_pillow", 500)
+    if not photo_file or not photo_file.filename:
+        raise PhotoUploadError("missing_photo")
+
+    ext = (photo_file.filename.rsplit(".", 1)[-1] if "." in photo_file.filename else "").lower()
+    if ext not in FIELD_PHOTO_EXTENSIONS:
+        raise PhotoUploadError("invalid_photo_format")
+
+    photo_data = photo_file.read()
+    if not photo_data:
+        raise PhotoUploadError("empty_photo")
+    if len(photo_data) > FIELD_PHOTO_MAX_SIZE:
+        raise PhotoUploadError("photo_too_large")
+
+    try:
+        Image.open(BytesIO(photo_data)).verify()
+    except Exception:
+        raise PhotoUploadError("invalid_photo_content")
+
+    try:
+        img = Image.open(BytesIO(photo_data))
+        img = ImageOps.exif_transpose(img)
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        if max(img.size) > FIELD_PHOTO_MAX_DIM:
+            img.thumbnail((FIELD_PHOTO_MAX_DIM, FIELD_PHOTO_MAX_DIM), Image.LANCZOS)
+    except Exception as e:
+        logger.warning("field: photo decode failed: %s", e)
+        raise PhotoUploadError("invalid_photo_content")
+
+    photo_id = str(_uuid.uuid4())
+    base_safe = secure_filename(photo_file.filename) or "photo.jpg"
+    stem = (base_safe.rsplit(".", 1)[0][:20] or "photo")
+    filename = "{}_{}.jpg".format(photo_id[:8], stem)
+
+    full_dir = os.path.join(FIELD_PHOTOS_DIR, sub_dir)
+    thumb_dir = os.path.join(full_dir, "thumbs")
+    os.makedirs(full_dir, exist_ok=True)
+    os.makedirs(thumb_dir, exist_ok=True)
+
+    filepath = os.path.join(full_dir, filename)
+    img.save(filepath, format="JPEG", quality=FIELD_PHOTO_JPEG_QUALITY, optimize=True)
+
+    thumb = img.copy()
+    thumb.thumbnail((FIELD_PHOTO_THUMB_DIM, FIELD_PHOTO_THUMB_DIM), Image.LANCZOS)
+    thumb_path = os.path.join(thumb_dir, filename)
+    thumb.save(thumb_path, format="JPEG", quality=FIELD_PHOTO_THUMB_QUALITY, optimize=True)
+
+    sub = sub_dir.replace(os.sep, "/")
+    photo_url = "/field/photos/{}/{}".format(sub, filename)
+    thumb_url = "/field/photos/{}/thumbs/{}".format(sub, filename)
+    return photo_url, thumb_url
 
 
 def _load_thread_root(db, msg_oid):
@@ -1280,31 +1370,20 @@ def field_reply(msg_id):
 
     # Handle photo
     photo_url = None
+    thumb_url = None
     if photo_file and photo_file.filename:
-        ext = (photo_file.filename.rsplit(".", 1)[-1] if "." in photo_file.filename else "").lower()
-        if ext not in FIELD_PHOTO_EXTENSIONS:
-            return jsonify({"ok": False, "error": "invalid_photo_format"}), 400
-        photo_data = photo_file.read()
-        if len(photo_data) > FIELD_PHOTO_MAX_SIZE:
-            return jsonify({"ok": False, "error": "photo_too_large"}), 400
-
-        import uuid as _uuid
-        photo_id = str(_uuid.uuid4())
         event = device.get("event") or "unknown"
         year = device.get("year") or "unknown"
-        sub_dir = os.path.join(event, str(year))
-        full_dir = os.path.join(FIELD_PHOTOS_DIR, sub_dir)
-        os.makedirs(full_dir, exist_ok=True)
-        safe_name = secure_filename(photo_file.filename) or "photo.jpg"
-        filename = "{}_{}.{}".format(photo_id[:8], safe_name.rsplit(".", 1)[0][:20], ext)
-        filepath = os.path.join(full_dir, filename)
-        with open(filepath, "wb") as fp:
-            fp.write(photo_data)
-        photo_url = "/field/photos/{}/{}".format(sub_dir, filename)
+        sub_dir = os.path.join(str(event), str(year))
+        try:
+            photo_url, thumb_url = _process_and_save_photo(photo_file, sub_dir)
+        except PhotoUploadError as e:
+            return jsonify({"ok": False, "error": e.code}), e.status
 
     payload = {}
     if photo_url:
         payload["photo"] = photo_url
+        payload["thumb"] = thumb_url
 
     now = _now()
     reply_doc = {
@@ -1346,34 +1425,41 @@ def field_photo_send():
     if not request.content_type or "multipart" not in request.content_type:
         return jsonify({"ok": False, "error": "multipart_required"}), 400
 
-    photo_file = request.files.get("photo")
-    if not photo_file or not photo_file.filename:
-        return jsonify({"ok": False, "error": "missing_photo"}), 400
-
     comment = (request.form.get("comment") or "").strip()
     if len(comment) > 1000:
         return jsonify({"ok": False, "error": "comment_too_long"}), 400
 
-    ext = (photo_file.filename.rsplit(".", 1)[-1] if "." in photo_file.filename else "").lower()
-    if ext not in FIELD_PHOTO_EXTENSIONS:
-        return jsonify({"ok": False, "error": "invalid_photo_format"}), 400
-    photo_data = photo_file.read()
-    if len(photo_data) > FIELD_PHOTO_MAX_SIZE:
-        return jsonify({"ok": False, "error": "photo_too_large"}), 400
+    # Categorie + urgence (photo spontanee uniquement). Categorie obligatoire,
+    # urgence optionnelle (defaut UR cote front).
+    category = (request.form.get("category") or "").strip() or None
+    urgency = (request.form.get("niveau_urgence") or "").strip() or None
+    if category and not category.startswith("PCO."):
+        return jsonify({"ok": False, "error": "invalid_category"}), 400
+    if urgency and urgency not in {"IMP", "UR", "UA", "EU"}:
+        return jsonify({"ok": False, "error": "invalid_urgency"}), 400
 
-    import uuid as _uuid
-    photo_id = str(_uuid.uuid4())
+    # Multi-photos : champ "photos" (getlist) prioritaire, fallback "photo" (compat).
+    photo_files = [pf for pf in request.files.getlist("photos") if pf and pf.filename]
+    if not photo_files:
+        single = request.files.get("photo")
+        if single and single.filename:
+            photo_files = [single]
+    if not photo_files:
+        return jsonify({"ok": False, "error": "missing_photo"}), 400
+    if len(photo_files) > FIELD_PHOTO_MAX_PER_BATCH:
+        return jsonify({"ok": False, "error": "too_many_photos"}), 400
+
     event = device.get("event") or "unknown"
     year = device.get("year") or "unknown"
     sub_dir = os.path.join(str(event), str(year))
-    full_dir = os.path.join(FIELD_PHOTOS_DIR, sub_dir)
-    os.makedirs(full_dir, exist_ok=True)
-    safe_name = secure_filename(photo_file.filename) or "photo.jpg"
-    filename = "{}_{}.{}".format(photo_id[:8], safe_name.rsplit(".", 1)[0][:20], ext)
-    filepath = os.path.join(full_dir, filename)
-    with open(filepath, "wb") as fp:
-        fp.write(photo_data)
-    photo_url = "/field/photos/{}/{}".format(sub_dir.replace(os.sep, "/"), filename)
+
+    photos_meta = []
+    for pf in photo_files:
+        try:
+            url, thumb = _process_and_save_photo(pf, sub_dir)
+        except PhotoUploadError as e:
+            return jsonify({"ok": False, "error": e.code, "uploaded": photos_meta}), e.status
+        photos_meta.append({"photo": url, "thumb": thumb})
 
     # Metadata optionnelles
     try:
@@ -1393,9 +1479,23 @@ def field_photo_send():
     now = _now()
     now_local = _now_local()
     name = device.get("name") or "?"
-    # Titre auto : "Photo HH:MM" (fil different a chaque envoi spontane)
+    # Titre : "Photo HH:MM" + nombre si multiple
     hh_mm = now_local.strftime("%H:%M")
-    title = "Photo " + hh_mm
+    title = "Photo " + hh_mm if len(photos_meta) == 1 else "Photos {} (x{})".format(hh_mm, len(photos_meta))
+    payload = {
+        "photos": photos_meta,
+        # Champs back-compat (1ere photo) pour les vieux clients
+        "photo": photos_meta[0]["photo"],
+        "thumb": photos_meta[0]["thumb"],
+        "lat": lat,
+        "lng": lng,
+        "battery": battery,
+    }
+    if category:
+        payload["category"] = category
+    if urgency:
+        payload["niveau_urgence"] = urgency
+
     doc = {
         "device_id": device["_id"],
         "device_name": name,
@@ -1404,12 +1504,7 @@ def field_photo_send():
         "type": "photo_report",
         "title": title,
         "body": comment,
-        "payload": {
-            "photo": photo_url,
-            "lat": lat,
-            "lng": lng,
-            "battery": battery,
-        },
+        "payload": payload,
         "priority": "normal",
         "from": "field:" + name,
         "direction": "field_to_cockpit",
@@ -1418,7 +1513,13 @@ def field_photo_send():
         "ack_at": None,
     }
     res = db["field_messages"].insert_one(doc)
-    return jsonify({"ok": True, "id": str(res.inserted_id), "photo_url": photo_url})
+    return jsonify({
+        "ok": True,
+        "id": str(res.inserted_id),
+        "photos": photos_meta,
+        "photo_url": photos_meta[0]["photo"],
+        "thumb_url": photos_meta[0]["thumb"],
+    })
 
 
 # =============================================================================
@@ -1692,6 +1793,61 @@ def field_admin_sweep_ended_events():
                 )
                 total_swept += max(0, before - after)
     return jsonify({"ok": True, "scanned_pairs": scanned, "devices_revoked": total_swept})
+
+
+def purge_old_photo_files(ttl_days=None):
+    """Supprime les fichiers photos plus vieux que `ttl_days` jours
+    (defaut FIELD_PHOTO_FILE_TTL_DAYS). Retourne un dict de stats.
+    Walk-only sur le disque, ne requiert pas Mongo : appelable depuis un cron
+    standalone (field_purge_photos.bat)."""
+    if ttl_days is None:
+        ttl_days = FIELD_PHOTO_FILE_TTL_DAYS
+    if not os.path.isdir(FIELD_PHOTOS_DIR):
+        return {"scanned": 0, "deleted": 0, "bytes_freed": 0, "ttl_days": ttl_days}
+
+    cutoff = _now().timestamp() - (ttl_days * 86400)
+    scanned = 0
+    deleted = 0
+    bytes_freed = 0
+    for root, dirs, files in os.walk(FIELD_PHOTOS_DIR):
+        for fname in files:
+            scanned += 1
+            full = os.path.join(root, fname)
+            try:
+                mtime = os.path.getmtime(full)
+                if mtime < cutoff:
+                    size = os.path.getsize(full)
+                    os.remove(full)
+                    deleted += 1
+                    bytes_freed += size
+            except OSError as e:
+                logger.debug("field: purge skip %s: %s", full, e)
+
+    # Nettoyage des dossiers vides residuels (thumbs/, year/, event/)
+    for root, dirs, files in os.walk(FIELD_PHOTOS_DIR, topdown=False):
+        if root == FIELD_PHOTOS_DIR:
+            continue
+        try:
+            if not os.listdir(root):
+                os.rmdir(root)
+        except OSError:
+            pass
+
+    return {
+        "scanned": scanned,
+        "deleted": deleted,
+        "bytes_freed": bytes_freed,
+        "ttl_days": ttl_days,
+    }
+
+
+@field_bp.route("/field/admin/photos/purge-orphans", methods=["POST"])
+@admin_required
+def field_admin_photos_purge_orphans():
+    """Supprime les fichiers photos plus vieux que FIELD_PHOTO_FILE_TTL_DAYS jours.
+    Les documents Mongo (field_messages, comment_history) ont leur propre TTL plus
+    court (7 j) ; on garde les fichiers physiques 30 j pour le debrief."""
+    return jsonify({"ok": True, **purge_old_photo_files()})
 
 
 @field_bp.route("/field/admin/devices", methods=["GET"])
@@ -2022,30 +2178,19 @@ def field_admin_send_with_photo():
 
     # Handle photo upload
     photo_url = None
+    thumb_url = None
     photo_file = request.files.get("photo")
     if photo_file and photo_file.filename:
-        ext = (photo_file.filename.rsplit(".", 1)[-1] if "." in photo_file.filename else "").lower()
-        if ext not in FIELD_PHOTO_EXTENSIONS:
-            return jsonify({"ok": False, "error": "invalid_photo_format"}), 400
-        photo_data = photo_file.read()
-        if len(photo_data) > FIELD_PHOTO_MAX_SIZE:
-            return jsonify({"ok": False, "error": "photo_too_large"}), 400
-
-        import uuid as _uuid
-        photo_id = str(_uuid.uuid4())
-        sub_dir = os.path.join(event, str(year))
-        full_dir = os.path.join(FIELD_PHOTOS_DIR, sub_dir)
-        os.makedirs(full_dir, exist_ok=True)
-        safe_name = secure_filename(photo_file.filename) or "photo.jpg"
-        filename = "{}_{}.{}".format(photo_id[:8], safe_name.rsplit(".", 1)[0][:20], ext)
-        filepath = os.path.join(full_dir, filename)
-        with open(filepath, "wb") as fp:
-            fp.write(photo_data)
-        photo_url = "/field/photos/{}/{}".format(sub_dir, filename)
+        sub_dir = os.path.join(str(event), str(year))
+        try:
+            photo_url, thumb_url = _process_and_save_photo(photo_file, sub_dir)
+        except PhotoUploadError as e:
+            return jsonify({"ok": False, "error": e.code}), e.status
 
     payload = {}
     if photo_url:
         payload["photo"] = photo_url
+        payload["thumb"] = thumb_url
 
     now = _now()
     expires = now + timedelta(seconds=INBOX_MESSAGE_TTL_SECONDS)
@@ -2354,29 +2499,18 @@ def field_admin_reply(msg_id):
 
     # Handle photo
     photo_url = None
+    thumb_url = None
     if photo_file and photo_file.filename:
-        ext = (photo_file.filename.rsplit(".", 1)[-1] if "." in photo_file.filename else "").lower()
-        if ext not in FIELD_PHOTO_EXTENSIONS:
-            return jsonify({"ok": False, "error": "invalid_photo_format"}), 400
-        photo_data = photo_file.read()
-        if len(photo_data) > FIELD_PHOTO_MAX_SIZE:
-            return jsonify({"ok": False, "error": "photo_too_large"}), 400
-
-        import uuid as _uuid
-        photo_id = str(_uuid.uuid4())
-        sub_dir = os.path.join(event, str(year))
-        full_dir = os.path.join(FIELD_PHOTOS_DIR, sub_dir)
-        os.makedirs(full_dir, exist_ok=True)
-        safe_name = secure_filename(photo_file.filename) or "photo.jpg"
-        filename = "{}_{}.{}".format(photo_id[:8], safe_name.rsplit(".", 1)[0][:20], ext)
-        filepath = os.path.join(full_dir, filename)
-        with open(filepath, "wb") as fp:
-            fp.write(photo_data)
-        photo_url = "/field/photos/{}/{}".format(sub_dir, filename)
+        sub_dir = os.path.join(str(event), str(year))
+        try:
+            photo_url, thumb_url = _process_and_save_photo(photo_file, sub_dir)
+        except PhotoUploadError as e:
+            return jsonify({"ok": False, "error": e.code}), e.status
 
     payload = {}
     if photo_url:
         payload["photo"] = photo_url
+        payload["thumb"] = thumb_url
 
     now = _now()
     sender_email = (getattr(request, "admin_user", None) or {}).get("email", "?")
@@ -2804,16 +2938,23 @@ def field_my_fiche_comment_with_photo(fiche_id):
     is_multipart = request.content_type and "multipart" in request.content_type
     if is_multipart:
         comment = (request.form.get("comment") or "").strip()
-        photo_file = request.files.get("photo")
+        # Multi-photos : "photos" en getlist, fallback "photo" pour compat
+        photo_files = [pf for pf in request.files.getlist("photos") if pf and pf.filename]
+        if not photo_files:
+            single = request.files.get("photo")
+            if single and single.filename:
+                photo_files = [single]
     else:
         data = request.get_json(silent=True) or {}
         comment = (data.get("comment") or "").strip()
-        photo_file = None
+        photo_files = []
 
-    if not comment and not photo_file:
+    if not comment and not photo_files:
         return jsonify({"ok": False, "error": "empty_comment"}), 400
     if comment and len(comment) > 2000:
         return jsonify({"ok": False, "error": "comment_too_long"}), 400
+    if len(photo_files) > FIELD_PHOTO_MAX_PER_BATCH:
+        return jsonify({"ok": False, "error": "too_many_photos"}), 400
 
     db = _get_mongo_db()
     fiche = db["pcorg"].find_one({"_id": fiche_id})
@@ -2824,41 +2965,29 @@ def field_my_fiche_comment_with_photo(fiche_id):
     if (cc.get("patrouille") or "") != name:
         return jsonify({"ok": False, "error": "not_assigned"}), 403
 
-    # Handle photo upload
-    photo_url = None
-    if photo_file and photo_file.filename:
-        ext = (photo_file.filename.rsplit(".", 1)[-1] if "." in photo_file.filename else "").lower()
-        if ext not in FIELD_PHOTO_EXTENSIONS:
-            return jsonify({"ok": False, "error": "invalid_photo_format"}), 400
-
-        # Read and check size
-        photo_data = photo_file.read()
-        if len(photo_data) > FIELD_PHOTO_MAX_SIZE:
-            return jsonify({"ok": False, "error": "photo_too_large"}), 400
-
-        import uuid as _uuid
-        photo_id = str(_uuid.uuid4())
+    # Handle photo uploads (multi)
+    photos_meta = []
+    if photo_files:
         event = device.get("event") or "unknown"
         year = device.get("year") or "unknown"
-        sub_dir = os.path.join(event, str(year))
-        full_dir = os.path.join(FIELD_PHOTOS_DIR, sub_dir)
-        os.makedirs(full_dir, exist_ok=True)
-
-        safe_name = secure_filename(photo_file.filename) or "photo.jpg"
-        filename = "{}_{}.{}".format(photo_id[:8], safe_name.rsplit(".", 1)[0][:20], ext)
-        filepath = os.path.join(full_dir, filename)
-        with open(filepath, "wb") as fp:
-            fp.write(photo_data)
-
-        photo_url = "/field/photos/{}/{}".format(sub_dir, filename)
+        sub_dir = os.path.join(str(event), str(year))
+        for pf in photo_files:
+            try:
+                url, thumb = _process_and_save_photo(pf, sub_dir)
+            except PhotoUploadError as e:
+                return jsonify({"ok": False, "error": e.code, "uploaded": photos_meta}), e.status
+            photos_meta.append({"photo": url, "thumb": thumb})
 
     entry = {
         "ts": _now(),
         "text": comment or "",
         "operator": "field:" + name,
     }
-    if photo_url:
-        entry["photo"] = photo_url
+    if photos_meta:
+        entry["photos"] = photos_meta
+        # Back-compat : 1ere photo aussi en champs plats
+        entry["photo"] = photos_meta[0]["photo"]
+        entry["thumb"] = photos_meta[0]["thumb"]
 
     update_sets = {}
     if comment:
@@ -2871,7 +3000,12 @@ def field_my_fiche_comment_with_photo(fiche_id):
             "$push": {"comment_history": entry},
         },
     )
-    return jsonify({"ok": True, "photo": photo_url})
+    return jsonify({
+        "ok": True,
+        "photos": photos_meta,
+        "photo": photos_meta[0]["photo"] if photos_meta else None,
+        "thumb": photos_meta[0]["thumb"] if photos_meta else None,
+    })
 
 
 @field_bp.route("/field/photos/<path:photo_path>", methods=["GET"])

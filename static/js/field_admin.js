@@ -555,6 +555,42 @@
   // ------------------------------------------------------------------
   // Modal pairing (creation)
   // ------------------------------------------------------------------
+  var pairPollHandle = null;
+
+  function stopPairPoll() {
+    if (pairPollHandle) {
+      clearInterval(pairPollHandle);
+      pairPollHandle = null;
+    }
+  }
+
+  // Surveille la disparition d'un code dans les pairings actifs : disparu avant
+  // expiration = consomme par la tablette -> ferme la modale + refresh.
+  function startPairPoll(code, expiresAtIso) {
+    stopPairPoll();
+    var expMs = expiresAtIso ? new Date(expiresAtIso).getTime() : null;
+    pairPollHandle = setInterval(function () {
+      var s = currentScope();
+      var qs = new URLSearchParams();
+      if (s.event) qs.set("event", s.event);
+      if (s.year) qs.set("year", s.year);
+      apiGet("/field/admin/pairings?" + qs.toString())
+        .then(function (data) {
+          var pairings = (data && data.pairings) || [];
+          var stillActive = pairings.some(function (p) { return p.code === code; });
+          if (stillActive) return;
+          stopPairPoll();
+          if (expMs && Date.now() < expMs) {
+            closePairModal();
+            _toast("success", "Tablette appairee !");
+            loadDevices();
+            loadPairings();
+          }
+        })
+        .catch(function () {});
+    }, 2000);
+  }
+
   function openPairModal() {
     refreshScopeUi();
     loadBeaconGroups();
@@ -562,11 +598,13 @@
     if (form) form.reset();
     var result = $("#field-pair-result");
     if (result) result.textContent = "";
+    stopPairPoll();
     var modal = $("#field-pair-modal");
     if (modal) modal.hidden = false;
   }
 
   function closePairModal() {
+    stopPairPoll();
     var modal = $("#field-pair-modal");
     if (modal) modal.hidden = true;
   }
@@ -641,7 +679,14 @@
     exp.style.marginTop = "4px";
     exp.textContent = "Expire dans 15 minutes. Saisis ce code sur la tablette apres avoir ouvert /field/pair.";
     box.appendChild(exp);
+    var waiting = document.createElement("div");
+    waiting.style.cssText = "margin-top:8px; font-size:11px; color:var(--muted); font-style:italic;";
+    waiting.textContent = "En attente de saisie sur la tablette...";
+    box.appendChild(waiting);
     el.appendChild(box);
+
+    // Fermeture auto + refresh quand la tablette consomme le code
+    if (p.code) startPairPoll(p.code, p.expiresAt);
   }
 
   // ------------------------------------------------------------------
@@ -778,10 +823,12 @@
       tdTitle.style.maxWidth = "260px";
       // Miniature photo si le message en contient une
       var photoUrl = m.payload && m.payload.photo;
+      var thumbUrl = (m.payload && m.payload.thumb) || photoUrl;
       if (photoUrl) {
         var thumb = document.createElement("img");
-        thumb.src = photoUrl;
+        thumb.src = thumbUrl;
         thumb.alt = "Photo";
+        thumb.loading = "lazy";
         thumb.style.cssText = "width:40px; height:40px; object-fit:cover; border-radius:4px; margin-right:8px; vertical-align:middle; cursor:zoom-in; border:1px solid var(--line);";
         thumb.addEventListener("click", function (e) {
           e.stopPropagation();
@@ -1087,10 +1134,12 @@
         bubble.appendChild(t);
       }
       var photoUrl = m.payload && m.payload.photo;
+      var thumbUrl = (m.payload && m.payload.thumb) || photoUrl;
       if (photoUrl) {
         var img = document.createElement("img");
-        img.src = photoUrl;
+        img.src = thumbUrl;
         img.alt = "Photo";
+        img.loading = "lazy";
         img.style.cssText = "display:block; max-width:100%; max-height:220px; border-radius:6px; margin:4px 0; cursor:zoom-in; background:#000;";
         img.addEventListener("click", function () { openPhotoLightbox(photoUrl); });
         bubble.appendChild(img);

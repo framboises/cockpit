@@ -222,7 +222,8 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
   object-fit: cover;
 }
 .field-camera-close,
-.field-camera-switch {
+.field-camera-switch,
+.field-camera-torch {
   position: absolute;
   top: calc(12px + env(safe-area-inset-top));
   width: 44px; height: 44px;
@@ -238,19 +239,116 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
 }
 .field-camera-close { left: 12px; }
 .field-camera-switch { right: 12px; }
+.field-camera-torch { right: 64px; }
+.field-camera-torch.is-on { background: rgba(250, 204, 21, 0.85); border-color: #facc15; color: #1f2937; }
 .field-camera-close .material-symbols-outlined,
-.field-camera-switch .material-symbols-outlined { font-size: 22px; color: #f8fafc; }
+.field-camera-switch .material-symbols-outlined,
+.field-camera-torch .material-symbols-outlined { font-size: 22px; }
 .field-camera-close:active,
-.field-camera-switch:active { background: rgba(15, 23, 42, 0.9); }
+.field-camera-switch:active,
+.field-camera-torch:active { background: rgba(15, 23, 42, 0.9); }
 
-/* Shutter au centre bas (mode viewfinder uniquement) */
-.field-camera-shutter-wrap {
+/* Barre "Joindre a la fiche" (top, sous les boutons) */
+.cam-attach-bar {
   position: absolute;
-  left: 0; right: 0;
-  bottom: calc(32px + env(safe-area-inset-bottom));
-  display: flex; justify-content: center;
+  left: 64px; right: 116px;
+  top: calc(20px + env(safe-area-inset-top));
+  height: 36px;
+  background: rgba(15, 23, 42, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 18px;
+  display: flex; align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  color: #f1f5f9;
+  font-size: 13px;
   z-index: 10;
 }
+.cam-attach-bar input[type="checkbox"] {
+  width: 18px; height: 18px;
+  accent-color: #2563eb;
+}
+.cam-attach-bar label { cursor: pointer; user-select: none; }
+
+/* Strip miniatures (au-dessus des controls bas) */
+.cam-thumb-strip {
+  position: absolute;
+  left: 12px; right: 12px;
+  bottom: calc(124px + env(safe-area-inset-bottom));
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  z-index: 10;
+  padding: 6px 2px;
+  scrollbar-width: thin;
+}
+.field-camera[data-state="compose"] .cam-thumb-strip {
+  bottom: auto;
+  top: calc(72px + env(safe-area-inset-top));
+}
+.cam-thumb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 64px; height: 64px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  background: #000;
+  cursor: pointer;
+}
+.cam-thumb.is-selected { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.4); }
+.cam-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-thumb-remove {
+  position: absolute;
+  top: 2px; right: 2px;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.85);
+  color: #fff;
+  border: none;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.cam-thumb-remove .material-symbols-outlined { font-size: 16px; }
+
+/* Controls bas (viewfinder) */
+.cam-viewfinder-ctrls {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: calc(28px + env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 0 16px;
+  gap: 12px;
+  z-index: 10;
+}
+.cam-count {
+  justify-self: start;
+  background: rgba(15, 23, 42, 0.78);
+  color: #f1f5f9;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 14px;
+  letter-spacing: 0.4px;
+}
+.cam-next {
+  justify-self: end;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 22px;
+  height: 44px;
+  padding: 0 14px;
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: inherit; font-weight: 600; font-size: 14px;
+  cursor: pointer;
+}
+.cam-next:active { background: #1d4ed8; }
+.cam-next .material-symbols-outlined { font-size: 18px; }
+
 .field-camera-shutter {
   width: 76px; height: 76px;
   border-radius: 50%;
@@ -260,22 +358,87 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
   cursor: pointer;
   padding: 0;
   font-family: inherit;
+  justify-self: center;
 }
 .field-camera-shutter:active { background: #e2e8f0; transform: scale(0.95); }
-.field-camera[data-state="preview"] .field-camera-shutter-wrap,
-.field-camera[data-state="preview"] .field-camera-switch { display: none; }
+.field-camera-shutter.is-disabled { opacity: 0.4; pointer-events: none; }
+.field-camera[data-state="compose"] .cam-viewfinder-ctrls,
+.field-camera[data-state="compose"] .field-camera-switch,
+.field-camera[data-state="compose"] .field-camera-torch { display: none; }
 
-/* Zone commentaire + actions (mode preview uniquement) */
-.field-camera-preview-actions {
+/* Pane compose (mode preview/compose) */
+.cam-compose {
   position: absolute;
   left: 0; right: 0;
   bottom: 0;
-  padding: 14px 14px calc(16px + env(safe-area-inset-bottom));
-  background: linear-gradient(to top, rgba(15, 23, 42, 0.95) 60%, rgba(15, 23, 42, 0));
+  padding: 12px 14px calc(16px + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, rgba(15, 23, 42, 0.96) 70%, rgba(15, 23, 42, 0));
   display: flex; flex-direction: column; gap: 10px;
   z-index: 10;
+  max-height: 60vh;
+  overflow-y: auto;
 }
-.field-camera[data-state="viewfinder"] .field-camera-preview-actions { display: none; }
+.field-camera[data-state="viewfinder"] .cam-compose { display: none; }
+.cam-chip-row[hidden] { display: none; }
+.cam-chip-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: #94a3b8;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.cam-cat-chips, .cam-urg-chips {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.cam-chip {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  border-radius: 18px;
+  padding: 6px 12px;
+  font-family: inherit; font-size: 13px;
+  display: inline-flex; align-items: center; gap: 4px;
+  cursor: pointer;
+}
+.cam-chip .material-symbols-outlined { font-size: 16px; }
+.cam-chip.is-selected {
+  background: #2563eb; border-color: #1d4ed8; color: #fff;
+}
+.cam-urg-chip {
+  font-weight: 700; min-width: 48px; justify-content: center;
+}
+.cam-urg-chip.is-selected {
+  background: var(--urg-color, #2563eb);
+  border-color: var(--urg-color, #1d4ed8);
+  color: #fff;
+}
+
+/* Progress overlay */
+.cam-progress {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.78);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px;
+  z-index: 20;
+}
+.cam-progress-bar {
+  width: min(70vw, 320px); height: 8px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.cam-progress-fill {
+  width: 0%; height: 100%;
+  background: #2563eb;
+  transition: width 0.15s linear;
+}
+.cam-progress-text {
+  color: #f1f5f9;
+  font-size: 14px;
+  font-weight: 600;
+}
 .field-camera-comment {
   width: 100%;
   background: rgba(15, 23, 42, 0.85);
