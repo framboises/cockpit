@@ -869,25 +869,33 @@
     return String.fromCharCode(65 + Math.floor(idx / 26) - 1) + String.fromCharCode(65 + (idx % 26));
   }
 
+  function ensureGridData() {
+    if (state.gridData) return Promise.resolve(state.gridData);
+    if (state._gridDataPromise) return state._gridDataPromise;
+    state._gridDataPromise = fetch("/field/resources/grid-ref", { headers: { "Accept": "application/json" } })
+      .then(function (r) {
+        if (r.status === 401) { handleSessionLost(); return null; }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data || !data.lines) return null;
+        state.gridData = data;
+        return data;
+      })
+      .catch(function () { return null; })
+      .finally(function () { state._gridDataPromise = null; });
+    return state._gridDataPromise;
+  }
+
   function loadGrid() {
     if (state.gridData) {
       renderGrid();
       return;
     }
-    fetch("/field/resources/grid-ref", { headers: { "Accept": "application/json" } })
-      .then(function (r) {
-        if (r.status === 401) { return handleSessionLost(); }
-        return r.json();
-      })
-      .then(function (data) {
-        if (!data || !data.lines) {
-          toast("Carroyage indisponible", "warn");
-          return;
-        }
-        state.gridData = data;
-        renderGrid();
-      })
-      .catch(function () { toast("Echec chargement carroyage", "err"); });
+    ensureGridData().then(function (data) {
+      if (!data) { toast("Carroyage indisponible", "warn"); return; }
+      renderGrid();
+    });
   }
 
   function renderGrid() {
@@ -1732,6 +1740,89 @@
         .catch(function () {})
         .finally(function () { remaining--; });
     });
+
+    // Index 3P (Portes / Portails / Portillons)
+    fetch("/field/resources/3p", { headers: { "Accept": "application/json" } })
+      .then(function (r) {
+        if (r.status === 401) { handleSessionLost(); return null; }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data || !data.features) return;
+        data.features.forEach(function (f) {
+          var coords = (f.geometry || {}).coordinates || [];
+          if (coords.length < 2) return;
+          var props = f.properties || {};
+          var nom = props.Nom || props.Name || props.name || "";
+          if (!nom) return;
+          var nature = props.Nature || "Portail";
+          _poiSearchIndex.push({
+            kind: "3p",
+            name: nom,
+            catLabel: nature,
+            icon: get3pIcon(nature),
+            color: "#0369a1",
+            lat: coords[1], lng: coords[0],
+            geomType: "point",
+            feature: f,
+          });
+        });
+      })
+      .catch(function () {});
+  }
+
+  // ----- Carroyage : recherche par label ------------------------------
+  function _colLabelToIdx(s) {
+    if (!s) return -1;
+    s = s.toUpperCase();
+    if (s.length === 1) return s.charCodeAt(0) - 65;
+    if (s.length === 2) return (s.charCodeAt(0) - 65 + 1) * 26 + (s.charCodeAt(1) - 65);
+    return -1;
+  }
+
+  function _gridCellLatLng(rawLabel) {
+    if (!state.gridData || !state.gridData.lines) return null;
+    var label = String(rawLabel || "").toUpperCase().replace(/\s+/g, "");
+    var lines = state.gridData.lines;
+    var colOffset = lines.col_offset || 0;
+    var rowOffset = lines.row_offset || 0;
+    var numCols = lines.num_cols || (lines.v_lines.length - 1);
+    var numRows = lines.num_rows || (lines.h_lines.length - 1);
+
+    // 25m : col(1-2 letters) + sublet(A-D) + row(digits) + subnum(1-4)
+    var m25 = label.match(/^([A-Z]{1,2})([A-D])(\d{1,3})([1-4])$/);
+    if (m25 && state.gridData.lines_25) {
+      var c100Idx = _colLabelToIdx(m25[1]) + colOffset;
+      var r100Idx = parseInt(m25[3], 10) - 1 + rowOffset;
+      if (c100Idx < 0 || c100Idx >= numCols) return null;
+      if (r100Idx < 0 || r100Idx >= numRows) return null;
+      var west = lines.v_lines[c100Idx].lng;
+      var east = lines.v_lines[c100Idx + 1].lng;
+      var north = lines.h_lines[r100Idx].lat;
+      var south = lines.h_lines[r100Idx + 1].lat;
+      var subC = m25[2].charCodeAt(0) - 65; // 0..3
+      var subR = parseInt(m25[4], 10) - 1;  // 0..3
+      return {
+        kind: "grid25", label: label,
+        lat: north + (south - north) * (subR + 0.5) / 4,
+        lng: west + (east - west) * (subC + 0.5) / 4,
+      };
+    }
+
+    // 100m : col(1-2 letters) + row(digits)
+    var m100 = label.match(/^([A-Z]{1,2})(\d{1,3})$/);
+    if (m100) {
+      var colIdx = _colLabelToIdx(m100[1]) + colOffset;
+      var rowIdx = parseInt(m100[2], 10) - 1 + rowOffset;
+      if (colIdx < 0 || colIdx >= numCols) return null;
+      if (rowIdx < 0 || rowIdx >= numRows) return null;
+      return {
+        kind: "grid100", label: label,
+        lat: (lines.h_lines[rowIdx].lat + lines.h_lines[rowIdx + 1].lat) / 2,
+        lng: (lines.v_lines[colIdx].lng + lines.v_lines[colIdx + 1].lng) / 2,
+      };
+    }
+    return null;
   }
 
   function openPoiSearch() {
@@ -1743,6 +1834,8 @@
     renderPoiSearchResults("");
     // Build index if needed
     if (!_poiSearchIndex.length) buildPoiSearchIndex();
+    // Pre-charger la grille pour la recherche par cellule (AI14, AIA141)
+    ensureGridData();
   }
 
   function closePoiSearch() {
@@ -1761,10 +1854,28 @@
     }
 
     var q = query.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    var matches = _poiSearchIndex.filter(function (p) {
+
+    // Match cellule de carroyage si la query a le format d'un label (AI14 ou AIA141)
+    var gridMatches = [];
+    var gridHit = _gridCellLatLng(query);
+    if (gridHit) {
+      gridMatches.push({
+        kind: gridHit.kind,
+        name: gridHit.label,
+        catLabel: gridHit.kind === "grid25" ? "Sous-grille 25 m" : "Carroyage 100 m",
+        icon: gridHit.kind === "grid25" ? "grid_4x4" : "grid_3x3",
+        color: gridHit.kind === "grid25" ? "#fb923c" : "#f59e0b",
+        lat: gridHit.lat, lng: gridHit.lng,
+        geomType: "point",
+      });
+    }
+
+    var poiMatches = _poiSearchIndex.filter(function (p) {
       var n = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       return n.indexOf(q) !== -1;
-    }).slice(0, 20);
+    });
+
+    var matches = gridMatches.concat(poiMatches).slice(0, 20);
 
     if (!matches.length) {
       results.innerHTML = "<div class='poi-search-empty'>Aucun resultat</div>";
@@ -1805,31 +1916,53 @@
       _poiSearchHighlight = null;
     }
 
-    // Ensure the POI layer is loaded and visible
+    state.followMe = false;
+    updateFollowBtn();
+
+    // Cas special : cellule de carroyage
+    if (p.kind === "grid100" || p.kind === "grid25") {
+      if (!state.gridOn) toggleGrid(true);
+      var gz = p.kind === "grid25" ? 19 : 18;
+      state.map.setView([p.lat, p.lng], gz, { animate: true });
+      setTimeout(function () {
+        if (p.kind === "grid25" && state.gridData && state.gridData.lines_25 && !state.grid25On) {
+          toggleGrid25(true);
+        }
+        try { showCrosshair(L.latLng(p.lat, p.lng)); } catch (e) {}
+      }, 650);
+      return;
+    }
+
+    // Cas special : 3P (porte/portail/portillon)
+    if (p.kind === "3p") {
+      if (!state.threePOn) toggle3P(true);
+      var cb3p = $("lyr-3p");
+      if (cb3p) cb3p.checked = true;
+      state.map.setView([p.lat, p.lng], 19, { animate: true });
+      _placeSearchHighlight(p);
+      return;
+    }
+
+    // POI standard : s'assurer que la couche est chargee et visible
     var key = p.dataKey;
     var st = state.poiLayers[key];
     if (!st || !st.visible) {
-      // Load and show the layer
       togglePoi(key, true, p.catObj);
-      // Update checkbox in layers panel
       var cb = document.querySelector("[data-poi='" + key + "']");
       if (cb) cb.checked = true;
     }
 
-    // Fly to the POI
-    state.followMe = false;
-    updateFollowBtn();
-
     var zoom = 19;
     if (p.geomType === "polygon" || p.geomType === "multipolygon") zoom = 18;
     state.map.setView([p.lat, p.lng], zoom, { animate: true });
+    _placeSearchHighlight(p);
+  }
 
-    // Temporary highlight marker
+  function _placeSearchHighlight(p) {
     var html = "<div class='poi-search-highlight' style='border-color:" + p.color + "'>"
       + "<span class='material-symbols-outlined' style='color:" + p.color + "'>" + escapeHtml(p.icon) + "</span></div>";
     var icon = L.divIcon({ html: html, className: "poi-search-highlight-wrap", iconSize: [48, 48], iconAnchor: [24, 24] });
     _poiSearchHighlight = L.marker([p.lat, p.lng], { icon: icon, zIndexOffset: 8000 }).addTo(state.map);
-    // Auto-remove after 8 seconds
     setTimeout(function () {
       if (_poiSearchHighlight) {
         try { state.map.removeLayer(_poiSearchHighlight); } catch (e) {}
