@@ -984,6 +984,11 @@
     state.gridOn = want;
     var cb = $("lyr-grid-100");
     if (cb) cb.checked = want;
+    var fab = $("btn-grid-fab");
+    if (fab) {
+      fab.classList.toggle("active", want);
+      fab.setAttribute("aria-pressed", want ? "true" : "false");
+    }
     if (want) {
       loadGrid();
       toast("Carroyage : on");
@@ -5709,6 +5714,8 @@
     $("btn-recenter").addEventListener("click", recenter);
     $("btn-layers").addEventListener("click", cycleLayer);
     $("btn-grid").addEventListener("click", openLayersPanel);
+    var btnGridFab = $("btn-grid-fab");
+    if (btnGridFab) btnGridFab.addEventListener("click", function () { toggleGrid(); });
     var cameraBtn = $("btn-camera");
     if (cameraBtn) cameraBtn.addEventListener("click", function () { openCaptureChooser(); });
     $("btn-inbox").addEventListener("click", function () {

@@ -123,8 +123,12 @@ def _load_field_stream_view_tokens():
 
 
 FIELD_STREAM_VIEW_TOKENS = _load_field_stream_view_tokens()
-MEDIAMTX_BASE_URL = os.getenv("MEDIAMTX_BASE_URL", "https://media.cockpit.lemans.org").rstrip("/")
-MEDIAMTX_RTSP_BASE = os.getenv("MEDIAMTX_RTSP_BASE", "rtsp://media.cockpit.lemans.org:8554").rstrip("/")
+# Defauts cales sur l'Option A (path-based proxy sous cockpit.lemans.org).
+# En prod : MEDIAMTX_BASE_URL doit pointer vers le sous-path proxifie qui
+# pointe vers mediamtx (ex: https://cockpit.lemans.org/webrtc).
+# RTSP n'utilise pas HTTPS donc reste sur le DNS Cockpit, port 8554 direct.
+MEDIAMTX_BASE_URL = os.getenv("MEDIAMTX_BASE_URL", "https://cockpit.lemans.org/webrtc").rstrip("/")
+MEDIAMTX_RTSP_BASE = os.getenv("MEDIAMTX_RTSP_BASE", "rtsp://cockpit.lemans.org:8554").rstrip("/")
 MEDIAMTX_AUTH_HMAC_KEY = os.getenv("MEDIAMTX_AUTH_HMAC_KEY", "dev-mediamtx-shared-key")
 
 # Photos 3P (portes/portails) partagees avec l'app looker
@@ -285,25 +289,29 @@ def _ensure_indexes(db):
 
 def _seed_stream_slots(db):
     """Cree les N docs field_stream_slots si la collection est vide.
-    Idempotent : si la collection a deja N docs, on ne touche rien.
-    Si on a moins de N docs (FIELD_STREAM_SLOTS augmente), on complete."""
-    try:
-        existing = list(db["field_stream_slots"].find(
-            {}, {"_id": 1, "slot_index": 1, "view_token": 1}
-        ))
-        existing_idx = {d.get("slot_index") for d in existing}
-        for i in range(FIELD_STREAM_SLOTS):
-            if i in existing_idx:
+    Utilise upsert + $setOnInsert : idempotent et safe sous concurrence
+    (plusieurs workers Waitress / gunicorn appellent cette fonction au boot
+    en parallele -- sans upsert on aurait des E11000 duplicate key)."""
+    for i in range(FIELD_STREAM_SLOTS):
+        try:
+            db["field_stream_slots"].update_one(
+                {"slot_index": i},
+                {"$setOnInsert": {
+                    "slot_index": i,
+                    "path": "field-{}".format(i + 1),
+                    "view_token": FIELD_STREAM_VIEW_TOKENS[i],
+                    "current_stream_id": None,
+                    "last_assigned_at": None,
+                }},
+                upsert=True,
+            )
+        except Exception as e:
+            # Course tres serree entre 2 upserts en parallele : on ignore
+            # le E11000 (le doc existe deja, c'est ce qu'on voulait).
+            msg = str(e)
+            if "E11000" in msg or "duplicate key" in msg:
                 continue
-            db["field_stream_slots"].insert_one({
-                "slot_index": i,
-                "path": "field-{}".format(i + 1),
-                "view_token": FIELD_STREAM_VIEW_TOKENS[i],
-                "current_stream_id": None,
-                "last_assigned_at": None,
-            })
-    except Exception as e:
-        logger.warning("field: stream slots seed failed: %s", e)
+            logger.warning("field: stream slots seed failed (slot=%d): %s", i, e)
 
 
 # ---------------------------------------------------------------------------

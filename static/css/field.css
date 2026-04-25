@@ -1492,6 +1492,12 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
   display: flex; flex-direction: column; gap: 8px;
 }
 .map-fab-group-tr .map-fab { position: static; }
+.map-fab.active {
+  background: #1e3a8a;
+  border-color: #3b82f6;
+  color: #f8fafc;
+  box-shadow: 0 0 0 2px rgba(59,130,246,0.35), 0 4px 14px rgba(0,0,0,0.35);
+}
 
 /* POI search panel (compact, between zoom and loupe) */
 .poi-search-panel {
