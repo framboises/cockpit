@@ -1352,7 +1352,7 @@
           iconAnchor: [15, 15],
         }),
       });
-      marker.bindPopup(function () { return build3pPopup(p, nom, nature); }, {
+      marker.bindPopup(function () { return build3pPopup(p, nom, nature, lat, lng); }, {
         maxWidth: 280,
         className: "portes-popup-wrap",
       });
@@ -1362,7 +1362,7 @@
     state.threePLayer = group;
   }
 
-  function build3pPopup(p, nom, nature) {
+  function build3pPopup(p, nom, nature, lat, lng) {
     var wrap = document.createElement("div");
     wrap.className = "portes-popup";
 
@@ -1409,6 +1409,21 @@
       img.addEventListener("click", function () { openLightbox(origUrl); });
       img.addEventListener("error", function () { img.style.display = "none"; });
       wrap.appendChild(img);
+    }
+
+    // Bouton Itineraire
+    if (lat != null && lng != null) {
+      var routeBtn = document.createElement("button");
+      routeBtn.type = "button";
+      routeBtn.className = "popup-route-btn";
+      routeBtn.dataset.lat = String(lat);
+      routeBtn.dataset.lng = String(lng);
+      var rIco = document.createElement("span");
+      rIco.className = "material-symbols-outlined";
+      rIco.textContent = "navigation";
+      routeBtn.appendChild(rIco);
+      routeBtn.appendChild(document.createTextNode(" Itineraire"));
+      wrap.appendChild(routeBtn);
     }
 
     return wrap;
@@ -1601,7 +1616,7 @@
     m.on("click", function () {
       if (state.gridOn) return; // carroyage actif = pas de popup POI
       m.unbindPopup();
-      m.bindPopup(buildPoiPopup(item, cat, displayName, icon, color), { maxWidth: 320 }).openPopup();
+      m.bindPopup(buildPoiPopup(item, cat, displayName, icon, color, lat, lng), { maxWidth: 320 }).openPopup();
     });
     m.addTo(group);
   }
@@ -1625,7 +1640,7 @@
     var click = function () {
       if (state.gridOn) return;
       labelMarker.unbindPopup();
-      labelMarker.bindPopup(buildPoiPopup(item, cat, displayName, icon, color), { maxWidth: 320 }).openPopup();
+      labelMarker.bindPopup(buildPoiPopup(item, cat, displayName, icon, color, centroid[0], centroid[1]), { maxWidth: 320 }).openPopup();
     };
     poly.on("click", click);
     labelMarker.on("click", click);
@@ -1636,10 +1651,11 @@
       L.geoJSON(feature, {
         style: { color: color, weight: 4, opacity: 0.9 },
         onEachFeature: function (feat, layer) {
-          layer.on("click", function () {
+          layer.on("click", function (e) {
             if (state.gridOn) return;
+            var ll = (e && e.latlng) ? e.latlng : layer.getBounds().getCenter();
             layer.unbindPopup();
-            layer.bindPopup(buildPoiPopup(item, cat, displayName, icon, color), { maxWidth: 320 }).openPopup();
+            layer.bindPopup(buildPoiPopup(item, cat, displayName, icon, color, ll.lat, ll.lng), { maxWidth: 320 }).openPopup();
           });
         },
       }).addTo(group);
@@ -1728,6 +1744,7 @@
                 catObj: cat,
                 collection: collection,
                 dataKey: key,
+                item: item,
               };
               _poiSearchIndex.push(entry);
               searchFeatures.push(entry);
@@ -1912,7 +1929,7 @@
   function flyToPoiResult(p) {
     // Remove previous highlight
     if (_poiSearchHighlight) {
-      state.map.removeLayer(_poiSearchHighlight);
+      try { state.map.removeLayer(_poiSearchHighlight); } catch (e) {}
       _poiSearchHighlight = null;
     }
 
@@ -1929,6 +1946,7 @@
           toggleGrid25(true);
         }
         try { showCrosshair(L.latLng(p.lat, p.lng)); } catch (e) {}
+        _placeSearchHighlight(p, buildGridPopup(p.name, p.lat, p.lng, p.kind));
       }, 650);
       return;
     }
@@ -1939,7 +1957,8 @@
       var cb3p = $("lyr-3p");
       if (cb3p) cb3p.checked = true;
       state.map.setView([p.lat, p.lng], 19, { animate: true });
-      _placeSearchHighlight(p);
+      var props3p = (p.feature && p.feature.properties) || {};
+      _placeSearchHighlight(p, function () { return build3pPopup(props3p, p.name, p.catLabel, p.lat, p.lng); });
       return;
     }
 
@@ -1955,20 +1974,32 @@
     var zoom = 19;
     if (p.geomType === "polygon" || p.geomType === "multipolygon") zoom = 18;
     state.map.setView([p.lat, p.lng], zoom, { animate: true });
-    _placeSearchHighlight(p);
+    var poiPopup = buildPoiPopup(p.item, p.catObj, p.name, p.icon, p.color, p.lat, p.lng);
+    _placeSearchHighlight(p, poiPopup);
   }
 
-  function _placeSearchHighlight(p) {
+  function _placeSearchHighlight(p, popupContent) {
     var html = "<div class='poi-search-highlight' style='border-color:" + p.color + "'>"
       + "<span class='material-symbols-outlined' style='color:" + p.color + "'>" + escapeHtml(p.icon) + "</span></div>";
     var icon = L.divIcon({ html: html, className: "poi-search-highlight-wrap", iconSize: [48, 48], iconAnchor: [24, 24] });
-    _poiSearchHighlight = L.marker([p.lat, p.lng], { icon: icon, zIndexOffset: 8000 }).addTo(state.map);
-    setTimeout(function () {
-      if (_poiSearchHighlight) {
-        try { state.map.removeLayer(_poiSearchHighlight); } catch (e) {}
-        _poiSearchHighlight = null;
-      }
-    }, 8000);
+    var marker = L.marker([p.lat, p.lng], { icon: icon, zIndexOffset: 8000 }).addTo(state.map);
+    _poiSearchHighlight = marker;
+    if (popupContent) {
+      marker.bindPopup(popupContent, { maxWidth: 320 });
+      // Disparait quand l'utilisateur ferme le popup
+      marker.on("popupclose", function () {
+        if (_poiSearchHighlight === marker) {
+          try { state.map.removeLayer(marker); } catch (e) {}
+          _poiSearchHighlight = null;
+        }
+      });
+      // Ouvre le popup apres l'animation de fly
+      setTimeout(function () {
+        if (_poiSearchHighlight === marker) {
+          try { marker.openPopup(); } catch (e) {}
+        }
+      }, 380);
+    }
   }
 
   function poiCentroid(latlngs) {
@@ -1979,7 +2010,31 @@
   }
 
   // ----- Popup builder (simplified port from map_view.js generatePopup) -----
-  function buildPoiPopup(item, cat, displayName, icon, color) {
+  function _routeBtnHtml(lat, lng) {
+    if (lat == null || lng == null) return "";
+    return "<button type='button' class='popup-route-btn' data-lat='" + lat + "' data-lng='" + lng + "'>"
+      + "<span class='material-symbols-outlined'>navigation</span> Itineraire</button>";
+  }
+
+  function buildGridPopup(label, lat, lng, kind) {
+    var color = kind === "grid25" ? "#fb923c" : "#f59e0b";
+    var icon = kind === "grid25" ? "grid_4x4" : "grid_3x3";
+    var subtitle = kind === "grid25" ? "Sous-grille 25 m" : "Carroyage 100 m";
+    var html = "<div class='poi-popup'>";
+    html += "<div class='poi-popup-head' style='background:" + color + "'>"
+      + "<span class='material-symbols-outlined'>" + icon + "</span>"
+      + "<span class='poi-popup-name'>" + escapeHtml(label) + "</span></div>";
+    html += "<div class='poi-popup-body'>";
+    html += "<div class='poi-popup-row'><span class='poi-popup-label'>Type</span>"
+      + "<span class='poi-popup-val'>" + escapeHtml(subtitle) + "</span></div>";
+    html += "<div class='poi-popup-row'><span class='poi-popup-label'>Coords</span>"
+      + "<span class='poi-popup-val'>" + lat.toFixed(5) + ", " + lng.toFixed(5) + "</span></div>";
+    html += _routeBtnHtml(lat, lng);
+    html += "</div></div>";
+    return html;
+  }
+
+  function buildPoiPopup(item, cat, displayName, icon, color, lat, lng) {
     var html = "<div class='poi-popup'>";
     html += "<div class='poi-popup-head' style='background:" + color + "'>"
       + "<span class='material-symbols-outlined'>" + escapeHtml(icon) + "</span>"
@@ -2081,6 +2136,9 @@
         html += "</ul></div>";
       }
     }
+
+    // Bouton Itineraire
+    html += _routeBtnHtml(lat, lng);
 
     html += "</div></div>";
     return html;
@@ -5947,6 +6005,20 @@
       state.map.on("click", function (e) {
         if (state.measureMode) return; // les outils de mesure prennent la main
         if (state.gridOn) showCrosshair(e.latlng);
+      });
+      // Bouton "Itineraire" generique dans les popups (POI / 3P / carroyage)
+      state.map.on("popupopen", function (ev) {
+        var node = ev.popup && ev.popup.getElement && ev.popup.getElement();
+        if (!node) return;
+        var btn = node.querySelector(".popup-route-btn");
+        if (!btn || btn._wired) return;
+        btn._wired = true;
+        btn.addEventListener("click", function (e2) {
+          e2.stopPropagation();
+          var lat = parseFloat(btn.dataset.lat);
+          var lng = parseFloat(btn.dataset.lng);
+          if (!isNaN(lat) && !isNaN(lng)) openInGoogleMaps([lat, lng]);
+        });
       });
     }
   }
