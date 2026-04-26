@@ -362,9 +362,14 @@ def compute_door_reinforcement(db, event, year, now_utc=None):
             is_pic = bucket_prev in top_buckets
             has_incidents = n_fiches >= MIN_FICHES_FOR_RECO
 
-            if not is_pic and not has_incidents:
+            # Une reco n'est emise QUE si on a effectivement constate des
+            # incidents l'an passe sur ce creneau pour cette porte. Le pic
+            # de trafic seul (sans incidents) n'est pas un signal pertinent
+            # — il est mecaniquement present sur 3 creneaux par porte et
+            # genererait beaucoup de bruit.
+            if not has_incidents:
                 continue
-            if is_pic and has_incidents:
+            if is_pic:
                 criticite = "forte"
             else:
                 criticite = "moderee"
