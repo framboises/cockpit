@@ -30,7 +30,7 @@ ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_API_VERSION = "2023-06-01"
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6").strip()
-CLAUDE_TIMEOUT_SECONDS = int(os.getenv("CLAUDE_TIMEOUT_SECONDS", "60"))
+CLAUDE_TIMEOUT_SECONDS = int(os.getenv("CLAUDE_TIMEOUT_SECONDS", "120"))
 CLAUDE_MAX_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "4096"))
 
 
@@ -1367,48 +1367,15 @@ def _build_retro_prompts(event, year_prev, ts_start, ts_end, kpis, fiches):
     return system, user
 
 
-def _call_claude_text(system_prompt, user_prompt):
-    """Variante de call_claude qui retourne juste le texte brut + usage,
-    sans tenter de parser un JSON. Leve ClaudeError si echec.
+def _call_claude_text(system_prompt, user_prompt, on_progress=None):
+    """Variante streaming de call_claude qui retourne juste le texte brut + usage.
+
+    Sert pour la retro N-1 (note synthetique courte, max_tokens=1024).
     """
-    if not ANTHROPIC_API_KEY:
-        raise ClaudeError("ANTHROPIC_API_KEY non configuree")
-    headers = {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": ANTHROPIC_API_VERSION,
-        "content-type": "application/json",
-    }
-    body = {
-        "model": CLAUDE_MODEL,
-        "max_tokens": 1024,
-        "system": system_prompt,
-        "messages": [{"role": "user", "content": user_prompt}],
-    }
-    try:
-        resp = requests.post(
-            ANTHROPIC_API_URL, headers=headers, json=body, timeout=CLAUDE_TIMEOUT_SECONDS,
-        )
-    except requests.exceptions.RequestException as e:
-        logger.warning("Claude API (retro) injoignable: %s", e)
-        raise ClaudeError("claude_unreachable")
-    if resp.status_code >= 400:
-        snippet = (resp.text or "")[:500]
-        logger.warning("Claude API (retro) HTTP %s : %s", resp.status_code, snippet)
-        raise ClaudeError("claude_http_" + str(resp.status_code))
-    try:
-        payload = resp.json()
-    except ValueError:
-        raise ClaudeError("claude_invalid_response")
-    parts = payload.get("content") or []
-    text = ""
-    for p in parts:
-        if isinstance(p, dict) and p.get("type") == "text":
-            text += p.get("text") or ""
-    usage = payload.get("usage") or {}
-    return text.strip(), {
-        "input_tokens": int(usage.get("input_tokens") or 0),
-        "output_tokens": int(usage.get("output_tokens") or 0),
-    }
+    raw_text, usage = _claude_stream_request(
+        system_prompt, user_prompt, max_tokens=1024, on_progress=on_progress,
+    )
+    return raw_text.strip(), usage
 
 
 def _retro_cache_key(event, year_prev, ts_start, ts_end):
@@ -1420,7 +1387,7 @@ def _retro_cache_key(event, year_prev, ts_start, ts_end):
     }
 
 
-def get_or_build_n1_retrospective(db, event, year_prev, ts_start_prev, ts_end_prev):
+def get_or_build_n1_retrospective(db, event, year_prev, ts_start_prev, ts_end_prev, on_progress=None):
     """Retourne la note retrospective N-1 (texte court) pour une fenetre alignee.
 
     1. Cherche un cache dans `pcorg_n1_retros` sur (event, year_prev, fenetre).
@@ -1466,7 +1433,7 @@ def get_or_build_n1_retrospective(db, event, year_prev, ts_start_prev, ts_end_pr
 
     system, user = _build_retro_prompts(event, int(year_prev), ts_start_prev, ts_end_prev, kpis, fiches)
     try:
-        text, usage = _call_claude_text(system, user)
+        text, usage = _call_claude_text(system, user, on_progress=on_progress)
     except ClaudeError as e:
         logger.warning("Retro N-1 echouee : %s", e)
         return None
@@ -1503,12 +1470,15 @@ class ClaudeError(Exception):
     """Erreur lors de l'appel a l'API Anthropic."""
 
 
-def call_claude(system_prompt, user_prompt):
-    """Appelle l'API Claude et retourne (sections_dict, raw_text, usage).
+def _claude_stream_request(system_prompt, user_prompt, max_tokens, on_progress=None):
+    """Effectue un appel streaming a l'API Anthropic et retourne (text, usage).
 
-    Si le retour n'est pas du JSON parsable, sections_dict est None et
-    raw_text contient la reponse brute (l'appelant decide comment l'afficher).
-    Leve ClaudeError pour les erreurs reseau / HTTP / config.
+    Le streaming evite les timeouts sur les reponses longues : tant que Claude
+    envoie des chunks, la connexion reste vivante. Le timeout
+    CLAUDE_TIMEOUT_SECONDS s'applique alors uniquement entre 2 chunks.
+
+    on_progress (optionnel) : callable(text_so_far, output_tokens_so_far)
+    appele a intervalles reguliers pour permettre un affichage en temps reel.
     """
     if not ANTHROPIC_API_KEY:
         raise ClaudeError("ANTHROPIC_API_KEY non configuree")
@@ -1520,46 +1490,103 @@ def call_claude(system_prompt, user_prompt):
     }
     body = {
         "model": CLAUDE_MODEL,
-        "max_tokens": CLAUDE_MAX_TOKENS,
+        "max_tokens": int(max_tokens),
         "system": system_prompt,
-        "messages": [
-            {"role": "user", "content": user_prompt},
-        ],
+        "messages": [{"role": "user", "content": user_prompt}],
+        "stream": True,
     }
+
     try:
         resp = requests.post(
             ANTHROPIC_API_URL,
             headers=headers,
             json=body,
             timeout=CLAUDE_TIMEOUT_SECONDS,
+            stream=True,
         )
     except requests.exceptions.RequestException as e:
         logger.warning("Claude API injoignable: %s", e)
         raise ClaudeError("claude_unreachable")
 
     if resp.status_code >= 400:
-        snippet = (resp.text or "")[:500]
+        try:
+            snippet = (resp.text or "")[:500]
+        except Exception:
+            snippet = ""
         logger.warning("Claude API HTTP %s : %s", resp.status_code, snippet)
         raise ClaudeError("claude_http_" + str(resp.status_code))
 
-    try:
-        payload = resp.json()
-    except ValueError as e:
-        logger.warning("Claude API : reponse non JSON : %s", e)
-        raise ClaudeError("claude_invalid_response")
-
-    parts = payload.get("content") or []
     raw_text = ""
-    for p in parts:
-        if isinstance(p, dict) and p.get("type") == "text":
-            raw_text += p.get("text") or ""
+    usage_in = 0
+    usage_out = 0
+    last_progress_len = 0
+    try:
+        for line in resp.iter_lines(decode_unicode=False):
+            if not line:
+                continue
+            try:
+                line_s = line.decode("utf-8", errors="replace")
+            except Exception:
+                continue
+            if not line_s.startswith("data:"):
+                continue
+            data_str = line_s[5:].strip()
+            if not data_str or data_str == "[DONE]":
+                continue
+            try:
+                evt = json.loads(data_str)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            etype = evt.get("type")
+            if etype == "content_block_delta":
+                delta = evt.get("delta") or {}
+                if delta.get("type") == "text_delta":
+                    raw_text += delta.get("text") or ""
+                    if on_progress and (len(raw_text) - last_progress_len >= 400):
+                        last_progress_len = len(raw_text)
+                        try:
+                            on_progress(raw_text, usage_out)
+                        except Exception:
+                            pass
+            elif etype == "message_start":
+                msg = evt.get("message") or {}
+                usage = msg.get("usage") or {}
+                usage_in = int(usage.get("input_tokens") or 0)
+                usage_out = int(usage.get("output_tokens") or 0)
+            elif etype == "message_delta":
+                usage = evt.get("usage") or {}
+                if usage.get("output_tokens"):
+                    usage_out = int(usage["output_tokens"])
+            elif etype == "error":
+                err = evt.get("error") or {}
+                raise ClaudeError(
+                    "claude_stream_error: " + str(err.get("type", "unknown"))
+                    + ": " + str(err.get("message", ""))[:200]
+                )
+    except requests.exceptions.RequestException as e:
+        logger.warning("Claude stream interrompu : %s", e)
+        if not raw_text:
+            raise ClaudeError("claude_stream_interrupted")
+        # Sinon, on garde le texte partiel et on continue.
 
-    usage = payload.get("usage") or {}
-    usage_clean = {
-        "input_tokens": int(usage.get("input_tokens") or 0),
-        "output_tokens": int(usage.get("output_tokens") or 0),
-    }
+    if on_progress and last_progress_len < len(raw_text):
+        try:
+            on_progress(raw_text, usage_out)
+        except Exception:
+            pass
 
+    return raw_text, {"input_tokens": usage_in, "output_tokens": usage_out}
+
+
+def call_claude(system_prompt, user_prompt, on_progress=None):
+    """Appelle l'API Claude en streaming, retourne (sections_dict, raw_text, usage).
+
+    Si le retour n'est pas du JSON parsable, sections_dict est None et
+    raw_text contient la reponse brute. Leve ClaudeError pour les erreurs.
+    """
+    raw_text, usage_clean = _claude_stream_request(
+        system_prompt, user_prompt, CLAUDE_MAX_TOKENS, on_progress=on_progress,
+    )
     sections = _parse_sections(raw_text)
     return sections, raw_text, usage_clean
 
@@ -1889,7 +1916,7 @@ def detect_active_event(db, now_utc=None):
 
 
 def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email, created_by_name,
-                             extra_focus_note=None, as_of_utc=None):
+                             extra_focus_note=None, as_of_utc=None, on_progress=None):
     """Calcule KPIs + comparaisons + prochaines 24h + billetterie + retro N-1, appelle Claude.
 
     extra_focus_note : consigne supplementaire a injecter dans le user prompt
@@ -1898,6 +1925,9 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
     pour les blocs upcoming / attendance / door_reinforcement. Permet de
     tester le rapport hors periode d'evenement en se placant virtuellement
     pendant une edition passee.
+    on_progress (optionnel) : callback(text_so_far, output_tokens_so_far)
+    appele a intervalles reguliers pendant le streaming Claude. Utile pour
+    afficher la progression cote CLI ou pour streamer vers une UI.
     """
     kpis = compute_kpis(db, event, year, ts_start, ts_end)
     comparisons = compute_comparisons(db, event, year, ts_start, ts_end)
@@ -1923,6 +1953,7 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
             ts_prev_end = datetime.fromisoformat(py["period_end"])
             n1_retro = get_or_build_n1_retrospective(
                 db, event, py.get("year_prev"), ts_prev_start, ts_prev_end,
+                on_progress=on_progress,
             )
         except Exception as e:
             logger.warning("Retro N-1 : preparation echouee : %s", e)
@@ -1947,7 +1978,7 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
             extra_focus_note=extra_focus_note,
             door_reinforcement=door_reinforcement,
         )
-        sections, raw_text, usage = call_claude(system, user)
+        sections, raw_text, usage = call_claude(system, user, on_progress=on_progress)
         if sections is None:
             sections = {k: "RAS" for k in SECTION_KEYS}
             sections["prochaines_24h"] = "Reponse Claude non parsable."

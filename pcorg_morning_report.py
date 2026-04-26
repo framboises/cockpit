@@ -139,8 +139,18 @@ def main(argv=None):
         event, year = pcorg_summary.detect_active_event(db, now_utc=as_of_utc)
         log.info("Evenement detecte : %s %s", event, year)
 
-        # 2. Generation du resume avec focus nuit
-        log.info("Generation du resume Claude (cela peut prendre 30 a 60s)...")
+        # 2. Generation du resume avec focus nuit (mode streaming pour eviter
+        # le timeout sur les reponses longues + voir la progression CLI).
+        log.info("Generation du resume Claude (streaming)...")
+
+        last_log_chars = [0]
+        def _on_progress(text_so_far, output_tokens):
+            # Log toutes les ~1500 chars pour ne pas spammer
+            if len(text_so_far) - last_log_chars[0] >= 1500:
+                last_log_chars[0] = len(text_so_far)
+                log.info("  ... %d chars recus (%d output tokens estime)",
+                         len(text_so_far), output_tokens)
+
         try:
             doc = pcorg_summary.generate_period_summary(
                 db,
@@ -152,6 +162,7 @@ def main(argv=None):
                 created_by_name="Rapport matinal automatique",
                 extra_focus_note=EXTRA_FOCUS_NOTE_NIGHT,
                 as_of_utc=as_of_utc,
+                on_progress=_on_progress,
             )
         except pcorg_summary.ClaudeError as e:
             log.error("Echec appel Claude : %s", e)
