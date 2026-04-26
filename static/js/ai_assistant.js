@@ -4,12 +4,14 @@
 (function () {
   "use strict";
 
-  var TAB_ORDER = ["overview", "secours", "securite", "technique", "recommandations"];
+  var TAB_ORDER = ["overview", "secours", "securite", "technique", "flux", "fourriere", "recommandations"];
   var TAB_TITLES = {
     overview:        "Vue d'ensemble",
     secours:         "Secours",
     securite:        "Sécurité",
     technique:       "Technique",
+    flux:            "Flux",
+    fourriere:       "Fourrière",
     recommandations: "Recommandations"
   };
   var TAB_ICONS = {
@@ -17,11 +19,30 @@
     secours:         "local_hospital",
     securite:        "shield",
     technique:       "build",
+    flux:            "swap_calls",
+    fourriere:       "directions_car",
     recommandations: "lightbulb"
+  };
+  // Mapping pour calculer le badge count par onglet a partir de kpis.by_category
+  var TAB_CATEGORIES = {
+    secours:   ["PCO.Secours"],
+    securite:  ["PCO.Securite", "PCS.Surete", "PCS.Information"],
+    technique: ["PCO.Technique", "PCO.MainCourante"],
+    flux:      ["PCO.Flux"],
+    fourriere: ["PCO.Fourriere"]
   };
   var URGENCY_LABELS = { EU: "Detresse vitale", UA: "Urgence absolue", UR: "Urgence relative", IMP: "Implique" };
 
-  var state = { busy: false, current: null, history: null, activeTab: "overview" };
+  var state = { busy: false, current: null, history: null, activeTab: "overview", controlsCollapsed: false, recipients: null };
+
+  function tabCount(kpis, key) {
+    if (key === "overview" || key === "recommandations") return null;
+    var cats = TAB_CATEGORIES[key] || [];
+    var by = (kpis && kpis.by_category) || {};
+    var n = 0;
+    cats.forEach(function (c) { if (by[c]) n += by[c]; });
+    return n;
+  }
 
   function csrfHeader() {
     var m = document.querySelector('meta[name="csrf-token"]');
@@ -203,6 +224,10 @@
         el("span", { class: "material-symbols-outlined" }, ["history"]),
         el("span", { text: "Historique" })
       ]),
+      el("button", { type: "button", class: "ai-btn ai-btn-ghost", id: "ai-btn-send-mail", disabled: "true" }, [
+        el("span", { class: "material-symbols-outlined" }, ["mail"]),
+        el("span", { text: "Envoyer par mail" })
+      ]),
       el("span", { class: "ai-status", id: "ai-status" })
     ]);
 
@@ -210,19 +235,62 @@
       el("div", { class: "ai-empty", id: "ai-empty", text: "Choisissez une période et cliquez sur Générer." })
     ]);
 
+    var controls = el("div", { class: "ai-controls", id: "ai-controls" }, [
+      presets, dateRow, actionRow
+    ]);
+
+    var collapsedBar = el("button", {
+      type: "button",
+      class: "ai-controls-collapsed",
+      id: "ai-controls-collapsed",
+      title: "Modifier la période",
+      "aria-label": "Modifier la période"
+    }, [
+      el("span", { class: "material-symbols-outlined" }, ["tune"]),
+      el("span", { class: "ai-controls-collapsed-label", id: "ai-controls-collapsed-label", text: "Modifier la période" }),
+      el("span", { class: "material-symbols-outlined ai-controls-collapsed-chevron" }, ["expand_more"])
+    ]);
+    collapsedBar.addEventListener("click", function () { setControlsCollapsed(false); });
+
     modal.appendChild(header);
-    modal.appendChild(presets);
-    modal.appendChild(dateRow);
-    modal.appendChild(actionRow);
+    modal.appendChild(controls);
+    modal.appendChild(collapsedBar);
     modal.appendChild(body);
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
     overlay.querySelector("#ai-btn-generate").addEventListener("click", onGenerate);
     overlay.querySelector("#ai-btn-history").addEventListener("click", onShowHistory);
+    overlay.querySelector("#ai-btn-send-mail").addEventListener("click", openSendMailModal);
 
     rootEl = overlay;
     return overlay;
+  }
+
+  function refreshSendMailButton() {
+    if (!rootEl) return;
+    var btn = rootEl.querySelector("#ai-btn-send-mail");
+    if (!btn) return;
+    btn.disabled = !state.current || !state.current.id;
+  }
+
+  function setControlsCollapsed(c) {
+    state.controlsCollapsed = !!c;
+    if (!rootEl) return;
+    rootEl.classList.toggle("ai-controls-hidden", state.controlsCollapsed);
+    var lbl = rootEl.querySelector("#ai-controls-collapsed-label");
+    if (lbl && state.current) {
+      var startStr = rootEl.querySelector("#ai-date-start").value;
+      var endStr = rootEl.querySelector("#ai-date-end").value;
+      var s = fromLocalInputValue(startStr);
+      var e = fromLocalInputValue(endStr);
+      if (s && e) {
+        var fmt = function (d) {
+          return pad2(d.getDate()) + "/" + pad2(d.getMonth() + 1) + " " + pad2(d.getHours()) + "h" + pad2(d.getMinutes());
+        };
+        lbl.textContent = "Période : " + fmt(s) + " → " + fmt(e) + " · Modifier";
+      }
+    }
   }
 
   function setStatus(msg, kind) {
@@ -268,6 +336,7 @@
   function renderSummary(summary) {
     state.current = summary;
     state.activeTab = "overview";
+    refreshSendMailButton();
     var body = rootEl.querySelector("#ai-modal-body");
     clearChildren(body);
 
@@ -292,16 +361,21 @@
     var tabsRow = el("div", { class: "ai-tabs", role: "tablist" });
     var panelHost = el("div", { class: "ai-tab-panel-host" });
     TAB_ORDER.forEach(function (key) {
+      var children = [
+        el("span", { class: "material-symbols-outlined" }, [TAB_ICONS[key]]),
+        el("span", { text: TAB_TITLES[key] })
+      ];
+      var n = tabCount(summary.kpis, key);
+      if (n != null && n > 0) {
+        children.push(el("span", { class: "ai-tab-badge", text: String(n) }));
+      }
       var btn = el("button", {
         type: "button",
         class: "ai-tab" + (state.activeTab === key ? " ai-tab-active" : ""),
         role: "tab",
         "data-tab": key,
         "aria-selected": state.activeTab === key ? "true" : "false"
-      }, [
-        el("span", { class: "material-symbols-outlined" }, [TAB_ICONS[key]]),
-        el("span", { text: TAB_TITLES[key] })
-      ]);
+      }, children);
       btn.addEventListener("click", function () { setActiveTab(key); });
       tabsRow.appendChild(btn);
     });
@@ -330,9 +404,27 @@
     var panel = el("div", { class: "ai-tab-panel ai-tab-" + state.activeTab, role: "tabpanel" });
 
     if (state.activeTab === "overview") {
-      panel.appendChild(buildKpiCard(summary.kpis || {}));
-      var faits = (summary.sections || {}).faits_marquants || "";
-      panel.appendChild(el("div", { class: "ai-section-card ai-section-faits_marquants" }, [
+      var upcomingCard = buildUpcomingCard(summary);
+      if (upcomingCard) panel.appendChild(upcomingCard);
+      var attendanceCard = buildAttendanceCard(summary);
+      if (attendanceCard) panel.appendChild(attendanceCard);
+      var doorsCard = buildDoorsCard(summary);
+      if (doorsCard) panel.appendChild(doorsCard);
+      panel.appendChild(buildKpiCard(summary.kpis || {}, summary.comparisons || null));
+      var sections = summary.sections || {};
+      var synth = sections.synthese || "";
+      var faits = sections.faits_marquants || "";
+      var textRow = el("div", { class: "ai-overview-text" });
+      textRow.appendChild(el("div", { class: "ai-section-card ai-section-synthese" }, [
+        el("div", { class: "ai-section-header" }, [
+          el("span", { class: "material-symbols-outlined" }, ["summarize"]),
+          el("span", { class: "ai-section-title", text: "Synthèse" })
+        ]),
+        el("div", { class: "ai-section-body" }, [
+          el("p", { text: synth || "RAS" })
+        ])
+      ]));
+      textRow.appendChild(el("div", { class: "ai-section-card ai-section-faits_marquants" }, [
         el("div", { class: "ai-section-header" }, [
           el("span", { class: "material-symbols-outlined" }, ["campaign"]),
           el("span", { class: "ai-section-title", text: "Faits marquants" })
@@ -341,6 +433,7 @@
           el("p", { text: faits || "RAS" })
         ])
       ]));
+      panel.appendChild(textRow);
     } else {
       var content = (summary.sections || {})[state.activeTab] || "";
       panel.appendChild(el("div", { class: "ai-section-card ai-section-" + state.activeTab }, [
@@ -356,10 +449,233 @@
     host.appendChild(panel);
   }
 
-  function buildKpiCard(kpis) {
+  var DOORS_CAT_COLORS = {
+    "PCO.Flux":         "#0d9488",
+    "PCO.Securite":     "#ef4444",
+    "PCO.Information":  "#2563eb",
+    "PCO.MainCourante": "#8b5cf6"
+  };
+  var DOORS_CAT_LABELS = {
+    "PCO.Flux":         "Flux",
+    "PCO.Securite":     "Sécurité",
+    "PCO.Information":  "Info",
+    "PCO.MainCourante": "Main courante"
+  };
+
+  function buildDoorsCard(summary) {
+    var dr = summary.door_reinforcement;
+    if (!dr || !dr.recommendations || !dr.recommendations.length) return null;
+
+    var card = el("div", { class: "ai-doors-card" });
+    card.appendChild(el("div", { class: "ai-doors-header" }, [
+      el("span", { class: "material-symbols-outlined" }, ["meeting_room"]),
+      el("span", { class: "ai-doors-title", text: "Renforts conseillés sur les portes (24h à venir)" }),
+      el("span", { class: "ai-doors-count", text: dr.recommendations.length + " reco(s)" })
+    ]));
+    card.appendChild(el("div", { class: "ai-doors-sub", text: "Aligné sur le jour-équivalent course de l'édition précédente (" + (dr.year_prev || "?") + ")" }));
+
+    var table = el("table", { class: "ai-doors-table" });
+    var thead = el("thead", null, [
+      el("tr", null, [
+        el("th", { text: "Porte" }),
+        el("th", { text: "Créneau" }),
+        el("th", { text: "Pic N-1" }),
+        el("th", { text: "Incidents N-1" }),
+        el("th", { text: "Criticité" })
+      ])
+    ]);
+    var tbody = el("tbody");
+    dr.recommendations.forEach(function (r) {
+      var tr = el("tr", { class: "ai-doors-row ai-doors-criticite-" + r.criticite });
+      tr.appendChild(el("td", { class: "ai-doors-porte" }, [
+        el("strong", { text: r.family_label || "?" }),
+        (r.doors && r.doors.length > 1)
+          ? el("div", { class: "ai-doors-sub-doors", text: r.doors.length + " portes" })
+          : null
+      ]));
+      tr.appendChild(el("td", { class: "ai-doors-creneau", text: r.slot_label_n }));
+      var picCell = el("td", { class: "ai-doors-pic" });
+      if (r.n1_scan_count) picCell.appendChild(el("span", { text: formatNumberFr(r.n1_scan_count) }));
+      else picCell.appendChild(el("span", { class: "ai-doors-dim", text: "—" }));
+      if (r.is_top3_pic) picCell.appendChild(el("span", { class: "ai-doors-pic-badge", text: "top 3" }));
+      tr.appendChild(picCell);
+      var incCell = el("td", { class: "ai-doors-inc" });
+      var byCat = r.n1_fiches_by_category || {};
+      Object.keys(byCat).forEach(function (cat) {
+        var color = DOORS_CAT_COLORS[cat] || "#64748b";
+        var label = DOORS_CAT_LABELS[cat] || cat;
+        incCell.appendChild(el("span", {
+          class: "ai-doors-cat-chip",
+          style: "background:" + color + ";",
+          text: label + " " + byCat[cat]
+        }));
+      });
+      if (!Object.keys(byCat).length) {
+        incCell.appendChild(el("span", { class: "ai-doors-dim", text: "—" }));
+      }
+      tr.appendChild(incCell);
+      tr.appendChild(el("td", { class: "ai-doors-criticite-cell" }, [
+        el("span", { class: "ai-doors-criticite-badge ai-doors-criticite-" + r.criticite + "-badge",
+                     text: r.criticite === "forte" ? "Forte" : "Modérée" })
+      ]));
+      tbody.appendChild(tr);
+    });
+    table.appendChild(thead);
+    table.appendChild(tbody);
+    card.appendChild(table);
+    return card;
+  }
+
+  function buildAttendanceCard(summary) {
+    var att = summary.attendance;
+    if (!att || !att.slots || !att.slots.length) return null;
+
+    var card = el("div", { class: "ai-attendance-card" });
+    card.appendChild(el("div", { class: "ai-attendance-header" }, [
+      el("span", { class: "material-symbols-outlined" }, ["confirmation_number"]),
+      el("span", { class: "ai-attendance-title", text: "Billetterie & fréquentation" }),
+      att.prev_year
+        ? el("span", { class: "ai-attendance-sub", text: "Comparé à " + att.prev_year })
+        : null
+    ]));
+
+    var grid = el("div", { class: "ai-attendance-grid" });
+    att.slots.forEach(function (s) {
+      grid.appendChild(buildAttendanceSlot(s));
+    });
+    card.appendChild(grid);
+    return card;
+  }
+
+  function buildAttendanceSlot(slot) {
+    var dateLabel = "";
+    var d = slot.date ? new Date(slot.date + "T12:00:00") : null;
+    if (d && !isNaN(d.getTime())) {
+      dateLabel = pad2(d.getDate()) + "/" + pad2(d.getMonth() + 1);
+    }
+    var col = el("div", { class: "ai-attendance-slot ai-attendance-slot-" + slot.slot });
+    col.appendChild(el("div", { class: "ai-attendance-slot-header" }, [
+      el("span", { class: "ai-attendance-slot-label", text: slot.label }),
+      dateLabel ? el("span", { class: "ai-attendance-slot-date", text: dateLabel }) : null
+    ]));
+
+    if (!slot.is_public) {
+      col.appendChild(el("div", { class: "ai-attendance-empty", text: "Pas d'ouverture publique" }));
+      return col;
+    }
+
+    // Pic principal : observe (jour passe / en cours) sinon projection (futur)
+    var mainPic = slot.pic_observed != null ? slot.pic_observed : slot.pic_projection;
+    var mainLabel = slot.pic_observed != null
+      ? (slot.slot === "today" ? "Pic en cours" : "Pic observé")
+      : "Pic projeté";
+
+    if (mainPic != null) {
+      col.appendChild(el("div", { class: "ai-attendance-main" }, [
+        el("div", { class: "ai-attendance-main-label", text: mainLabel }),
+        el("div", { class: "ai-attendance-main-value", text: formatNumberFr(mainPic) })
+      ]));
+    } else {
+      col.appendChild(el("div", { class: "ai-attendance-empty", text: "Pas de donnée" }));
+    }
+
+    // Comparaison N-1
+    if (slot.pic_prev != null) {
+      var deltaTxt = "";
+      var kind = "flat";
+      if (slot.delta_pct_vs_prev != null) {
+        var v = slot.delta_pct_vs_prev;
+        deltaTxt = (v >= 0 ? "+" : "") + v + "%";
+        if (Math.abs(v) >= 5) kind = v > 0 ? "up" : "down";
+      }
+      col.appendChild(el("div", { class: "ai-attendance-prev ai-kpi-delta-" + kind }, [
+        el("span", { class: "ai-attendance-prev-arrow", text: kind === "up" ? "↑" : (kind === "down" ? "↓" : "→") }),
+        el("span", { text: " " + deltaTxt + " " }),
+        el("span", { class: "ai-attendance-prev-value", text: "(" + formatNumberFr(slot.pic_prev) + ")" })
+      ]));
+    }
+
+    // Si on a un pic observe ET une projection, on montre la projection en complément
+    if (slot.pic_observed != null && slot.pic_projection != null && slot.slot !== "yesterday") {
+      col.appendChild(el("div", { class: "ai-attendance-extra", text: "Projeté : " + formatNumberFr(slot.pic_projection) }));
+    }
+
+    // Billets vendus
+    if (slot.billets_vendus != null) {
+      col.appendChild(el("div", { class: "ai-attendance-tickets" }, [
+        el("span", { class: "material-symbols-outlined" }, ["confirmation_number"]),
+        el("span", { class: "ai-attendance-tickets-value", text: formatNumberFr(slot.billets_vendus) }),
+        el("span", { class: "ai-attendance-tickets-label", text: "billet(s) vendu(s)" })
+      ]));
+    }
+
+    return col;
+  }
+
+  function formatNumberFr(n) {
+    if (n == null) return "—";
+    try { return Number(n).toLocaleString("fr-FR"); } catch (e) { return String(n); }
+  }
+
+  function buildUpcomingCard(summary) {
+    var sections = summary.sections || {};
+    var briefing = sections.prochaines_24h || "";
+    var items = summary.upcoming || [];
+    if (!briefing && !items.length) return null;
+    var card = el("div", { class: "ai-upcoming-card" });
+    card.appendChild(el("div", { class: "ai-upcoming-header" }, [
+      el("span", { class: "material-symbols-outlined" }, ["schedule"]),
+      el("span", { class: "ai-upcoming-title", text: "Prochaines 24 heures" }),
+      el("span", { class: "ai-upcoming-count", text: items.length ? String(items.length) + " jalon(s)" : "aucun jalon" })
+    ]));
+    if (briefing) {
+      card.appendChild(el("p", { class: "ai-upcoming-briefing", text: briefing }));
+    }
+    if (items.length) {
+      var list = el("div", { class: "ai-upcoming-list" });
+      items.forEach(function (it) {
+        var label = it.activity || "";
+        if (it.place) label += " — " + it.place;
+        var meta = [];
+        if (it.event) meta.push(it.event + (it.year ? " " + it.year : ""));
+        if (it.category) meta.push(it.category);
+        if (it.department) meta.push(it.department);
+        list.appendChild(el("div", { class: "ai-upcoming-row" }, [
+          el("span", { class: "ai-upcoming-time", text: formatUpcomingWhen(it) }),
+          el("div", { class: "ai-upcoming-text" }, [
+            el("div", { class: "ai-upcoming-label", text: label }),
+            meta.length ? el("div", { class: "ai-upcoming-meta", text: meta.join(" · ") }) : null
+          ])
+        ]));
+      });
+      card.appendChild(list);
+    }
+    return card;
+  }
+
+  function formatUpcomingWhen(it) {
+    var dt = it.datetime ? new Date(it.datetime) : null;
+    if (dt && !isNaN(dt.getTime())) {
+      var sameDay = isToday(dt);
+      var t = pad2(dt.getHours()) + "h" + pad2(dt.getMinutes());
+      if (sameDay) return "Aujourd'hui " + t;
+      var d = pad2(dt.getDate()) + "/" + pad2(dt.getMonth() + 1);
+      return d + " " + t;
+    }
+    return (it.date || "") + " " + (it.time || "");
+  }
+
+  function isToday(d) {
+    var n = new Date();
+    return d.getFullYear() === n.getFullYear()
+        && d.getMonth() === n.getMonth()
+        && d.getDate() === n.getDate();
+  }
+
+  function buildKpiCard(kpis, comparisons) {
     var box = el("div", { class: "ai-kpi-card" });
     var top = el("div", { class: "ai-kpi-top" }, [
-      kpiTile("Total", kpis.total || 0, "description"),
+      kpiTile("Total", kpis.total || 0, "description", deltasFor(kpis.total, comparisons)),
       kpiTile("Ouvertes", kpis.open || 0, "pending"),
       kpiTile("Clôturées", kpis.closed || 0, "task_alt"),
       kpiTile(
@@ -369,6 +685,11 @@
       )
     ]);
     box.appendChild(top);
+
+    if (comparisons) {
+      var compRow = buildComparisonsRow(kpis, comparisons);
+      if (compRow) box.appendChild(compRow);
+    }
 
     var cats = kpis.by_category || {};
     if (Object.keys(cats).length) {
@@ -404,20 +725,20 @@
     }
 
     var zones = kpis.top_zones || [];
+    var events = kpis.by_event || [];
+    var leftRight = el("div", { class: "ai-kpi-cols" });
     if (zones.length) {
       var zoneList = el("div", { class: "ai-kpi-list" }, [
         el("div", { class: "ai-kpi-bars-title", text: "Top zones" })
       ]);
-      zones.slice(0, 5).forEach(function (z) {
+      zones.slice(0, 8).forEach(function (z) {
         zoneList.appendChild(el("div", { class: "ai-kpi-list-row" }, [
           el("span", { text: z.desc }),
           el("span", { class: "ai-kpi-list-count", text: String(z.count) })
         ]));
       });
-      box.appendChild(zoneList);
+      leftRight.appendChild(zoneList);
     }
-
-    var events = kpis.by_event || [];
     if (events.length > 1) {
       var evList = el("div", { class: "ai-kpi-list" }, [
         el("div", { class: "ai-kpi-bars-title", text: "Par événement" })
@@ -429,19 +750,99 @@
           el("span", { class: "ai-kpi-list-count", text: String(ev.count) })
         ]));
       });
-      box.appendChild(evList);
+      leftRight.appendChild(evList);
     }
+    if (leftRight.childNodes.length) box.appendChild(leftRight);
 
     return box;
   }
 
-  function kpiTile(label, value, icon) {
-    return el("div", { class: "ai-kpi-tile" }, [
+  function kpiTile(label, value, icon, deltas) {
+    var children = [
       el("span", { class: "material-symbols-outlined" }, [icon]),
       el("div", { class: "ai-kpi-tile-text" }, [
         el("div", { class: "ai-kpi-tile-value", text: String(value) }),
         el("div", { class: "ai-kpi-tile-label", text: label })
       ])
+    ];
+    var tile = el("div", { class: "ai-kpi-tile" }, children);
+    if (deltas && deltas.length) {
+      var deltaRow = el("div", { class: "ai-kpi-tile-deltas" });
+      deltas.forEach(function (d) {
+        deltaRow.appendChild(el("span", {
+          class: "ai-kpi-delta ai-kpi-delta-" + d.kind,
+          title: d.title || ""
+        }, [
+          el("span", { text: d.label + " " }),
+          el("span", { class: "ai-kpi-delta-arrow", text: d.arrow }),
+          el("span", { text: " " + d.value })
+        ]));
+      });
+      tile.appendChild(deltaRow);
+    }
+    return tile;
+  }
+
+  function deltasFor(currentTotal, comparisons) {
+    if (!comparisons) return null;
+    var out = [];
+    var prev = comparisons.prev_period;
+    if (prev && prev.kpis && (prev.kpis.total || 0) > 0) {
+      out.push(formatDelta("Période précédente", currentTotal, prev.kpis.total, prev.label));
+    }
+    var py = comparisons.prev_year_aligned;
+    if (py && py.kpis && (py.kpis.total || 0) > 0) {
+      var label = "N-1" + (py.year_prev ? " (" + py.year_prev + ")" : "");
+      out.push(formatDelta(label, currentTotal, py.kpis.total, py.label));
+    }
+    return out;
+  }
+
+  function formatDelta(label, current, ref, title) {
+    var cur = Number(current) || 0;
+    var rf = Number(ref) || 0;
+    var diff = cur - rf;
+    var pct = rf > 0 ? Math.round(100 * diff / rf) : null;
+    var kind = "flat";
+    var arrow = "→";
+    if (pct !== null && Math.abs(pct) >= 5) {
+      if (diff > 0) { kind = "up"; arrow = "↑"; }
+      else if (diff < 0) { kind = "down"; arrow = "↓"; }
+    }
+    var value = (pct !== null ? (pct >= 0 ? "+" : "") + pct + "%" : (diff >= 0 ? "+" : "") + diff);
+    return { label: label, value: value, arrow: arrow, kind: kind, title: title || "" };
+  }
+
+  function buildComparisonsRow(kpis, comparisons) {
+    var prev = comparisons.prev_period;
+    var py = comparisons.prev_year_aligned;
+    if ((!prev || !(prev.kpis && prev.kpis.total)) && (!py || !(py.kpis && py.kpis.total))) return null;
+    var row = el("div", { class: "ai-comparisons" });
+    if (prev && prev.kpis) {
+      row.appendChild(comparisonChip(
+        "Période précédente",
+        prev.kpis.total || 0,
+        kpis.total || 0,
+        prev.period_start, prev.period_end
+      ));
+    }
+    if (py && py.kpis) {
+      row.appendChild(comparisonChip(
+        "Édition précédente" + (py.year_prev ? " (" + py.year_prev + ")" : ""),
+        py.kpis.total || 0,
+        kpis.total || 0,
+        py.period_start, py.period_end
+      ));
+    }
+    return row;
+  }
+
+  function comparisonChip(label, refValue, currentValue, startIso, endIso) {
+    var d = formatDelta(label, currentValue, refValue, "");
+    return el("div", { class: "ai-comparison-chip ai-kpi-delta-" + d.kind, title: formatPeriodHuman(startIso, endIso) }, [
+      el("span", { class: "ai-comparison-chip-label", text: label }),
+      el("span", { class: "ai-comparison-chip-value", text: String(refValue) + " fiche(s)" }),
+      el("span", { class: "ai-comparison-chip-delta", text: d.arrow + " " + d.value })
     ]);
   }
 
@@ -496,6 +897,7 @@
       }
       setStatus("Résumé généré.", "ok");
       renderSummary(res.summary);
+      setControlsCollapsed(true);
       state.history = null;
     });
   }
@@ -557,7 +959,240 @@
         return;
       }
       setStatus("");
+      // Pre-remplit les date pickers avec la periode du resume charge.
+      if (res.summary && res.summary.period_start && res.summary.period_end) {
+        try {
+          var s = new Date(res.summary.period_start);
+          var e = new Date(res.summary.period_end);
+          if (!isNaN(s.getTime()) && !isNaN(e.getTime())) {
+            rootEl.querySelector("#ai-date-start").value = toLocalInputValue(s);
+            rootEl.querySelector("#ai-date-end").value = toLocalInputValue(e);
+          }
+        } catch (e) {}
+      }
       renderSummary(res.summary);
+      setControlsCollapsed(true);
+    });
+  }
+
+  // ---------- Envoyer par mail ----------
+
+  var sendMailEl = null;
+  var sendMailState = { selectedUsers: {}, selectedGroups: {}, query: "", busy: false };
+
+  function openSendMailModal() {
+    if (!state.current || !state.current.id) {
+      toast("Aucun résumé chargé.", "error");
+      return;
+    }
+    sendMailState = { selectedUsers: {}, selectedGroups: {}, query: "", busy: false };
+    buildSendMailModal();
+    sendMailEl.classList.add("is-open");
+    sendMailEl.setAttribute("aria-hidden", "false");
+    loadRecipients();
+  }
+
+  function closeSendMailModal() {
+    if (!sendMailEl) return;
+    sendMailEl.classList.remove("is-open");
+    sendMailEl.setAttribute("aria-hidden", "true");
+  }
+
+  function buildSendMailModal() {
+    if (sendMailEl) return sendMailEl;
+    var overlay = el("div", { id: "ai-send-mail-modal", class: "ai-modal-overlay ai-send-modal-overlay", "aria-hidden": "true" });
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) closeSendMailModal(); });
+
+    var modal = el("div", { class: "ai-modal ai-send-modal", role: "dialog", "aria-modal": "true", "aria-label": "Envoyer le rapport" });
+
+    var header = el("div", { class: "ai-modal-header" }, [
+      el("span", { class: "material-symbols-outlined ai-modal-icon" }, ["mail"]),
+      el("div", { class: "ai-modal-titles" }, [
+        el("h2", { class: "ai-modal-title", text: "Envoyer le rapport par mail" }),
+        el("div", { class: "ai-modal-subtitle", text: "Choisissez les destinataires (utilisateurs et/ou groupes)." })
+      ]),
+      el("button", { type: "button", class: "ai-modal-close", title: "Fermer", onclick: closeSendMailModal }, [
+        el("span", { class: "material-symbols-outlined" }, ["close"])
+      ])
+    ]);
+
+    var search = el("div", { class: "ai-send-search" }, [
+      el("span", { class: "material-symbols-outlined" }, ["search"]),
+      el("input", { type: "text", id: "ai-send-search-input", placeholder: "Rechercher un utilisateur ou un groupe..." })
+    ]);
+
+    var lists = el("div", { class: "ai-send-lists" }, [
+      el("div", { class: "ai-send-pane" }, [
+        el("div", { class: "ai-send-pane-header", text: "Groupes" }),
+        el("div", { class: "ai-send-pane-body", id: "ai-send-groups-list" }, [
+          el("div", { class: "ai-send-loading", text: "Chargement..." })
+        ])
+      ]),
+      el("div", { class: "ai-send-pane" }, [
+        el("div", { class: "ai-send-pane-header", text: "Utilisateurs" }),
+        el("div", { class: "ai-send-pane-body", id: "ai-send-users-list" }, [
+          el("div", { class: "ai-send-loading", text: "Chargement..." })
+        ])
+      ])
+    ]);
+
+    var footer = el("div", { class: "ai-send-footer" }, [
+      el("div", { class: "ai-send-summary", id: "ai-send-summary", text: "Aucun destinataire sélectionné." }),
+      el("button", { type: "button", class: "ai-btn ai-btn-ghost", onclick: closeSendMailModal }, [
+        el("span", { text: "Annuler" })
+      ]),
+      el("button", { type: "button", class: "ai-btn ai-btn-primary", id: "ai-send-confirm" }, [
+        el("span", { class: "material-symbols-outlined" }, ["send"]),
+        el("span", { text: "Envoyer" })
+      ])
+    ]);
+
+    modal.appendChild(header);
+    modal.appendChild(search);
+    modal.appendChild(lists);
+    modal.appendChild(footer);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    overlay.querySelector("#ai-send-search-input").addEventListener("input", function (e) {
+      sendMailState.query = (e.target.value || "").toLowerCase();
+      renderRecipients();
+    });
+    overlay.querySelector("#ai-send-confirm").addEventListener("click", confirmSend);
+
+    sendMailEl = overlay;
+    return overlay;
+  }
+
+  function loadRecipients() {
+    if (state.recipients) {
+      renderRecipients();
+      return;
+    }
+    apiGetJson("/api/pcorg/summary/recipients").then(function (res) {
+      if (!res || !res.ok) {
+        var list = sendMailEl.querySelector("#ai-send-users-list");
+        clearChildren(list);
+        list.appendChild(el("div", { class: "ai-send-error", text: "Impossible de charger les destinataires : " + ((res && res.error) || "erreur") }));
+        return;
+      }
+      state.recipients = { users: res.users || [], groups: res.groups || [] };
+      renderRecipients();
+    });
+  }
+
+  function renderRecipients() {
+    if (!sendMailEl || !state.recipients) return;
+    var groupsHost = sendMailEl.querySelector("#ai-send-groups-list");
+    var usersHost = sendMailEl.querySelector("#ai-send-users-list");
+    clearChildren(groupsHost);
+    clearChildren(usersHost);
+    var q = sendMailState.query;
+
+    var groups = state.recipients.groups.filter(function (g) {
+      return !q || g.name.toLowerCase().indexOf(q) !== -1;
+    });
+    if (!groups.length) {
+      groupsHost.appendChild(el("div", { class: "ai-send-empty", text: "Aucun groupe." }));
+    } else {
+      groups.forEach(function (g) {
+        var checked = !!sendMailState.selectedGroups[g.id];
+        var row = el("label", { class: "ai-send-row" + (checked ? " is-checked" : "") }, [
+          el("input", { type: "checkbox", "data-id": g.id, "data-kind": "group" }),
+          el("div", { class: "ai-send-row-text" }, [
+            el("div", { class: "ai-send-row-name" }, [
+              el("span", { class: "material-symbols-outlined ai-send-row-icon" }, ["groups"]),
+              el("span", { text: g.name })
+            ]),
+            el("div", { class: "ai-send-row-meta", text: g.member_count + " membre(s)" })
+          ])
+        ]);
+        var cb = row.querySelector("input");
+        cb.checked = checked;
+        cb.addEventListener("change", function () {
+          if (cb.checked) sendMailState.selectedGroups[g.id] = g;
+          else delete sendMailState.selectedGroups[g.id];
+          row.classList.toggle("is-checked", cb.checked);
+          updateSendSummary();
+        });
+        groupsHost.appendChild(row);
+      });
+    }
+
+    var users = state.recipients.users.filter(function (u) {
+      if (!q) return true;
+      return (u.name + " " + u.email + " " + (u.service || "")).toLowerCase().indexOf(q) !== -1;
+    });
+    if (!users.length) {
+      usersHost.appendChild(el("div", { class: "ai-send-empty", text: "Aucun utilisateur." }));
+    } else {
+      users.forEach(function (u) {
+        var checked = !!sendMailState.selectedUsers[u.id];
+        var row = el("label", { class: "ai-send-row" + (checked ? " is-checked" : "") }, [
+          el("input", { type: "checkbox", "data-id": u.id, "data-kind": "user" }),
+          el("div", { class: "ai-send-row-text" }, [
+            el("div", { class: "ai-send-row-name" }, [
+              el("span", { class: "material-symbols-outlined ai-send-row-icon" }, ["person"]),
+              el("span", { text: u.name })
+            ]),
+            el("div", { class: "ai-send-row-meta", text: u.email + (u.service ? " · " + u.service : "") + " · " + u.role })
+          ])
+        ]);
+        var cb = row.querySelector("input");
+        cb.checked = checked;
+        cb.addEventListener("change", function () {
+          if (cb.checked) sendMailState.selectedUsers[u.id] = u;
+          else delete sendMailState.selectedUsers[u.id];
+          row.classList.toggle("is-checked", cb.checked);
+          updateSendSummary();
+        });
+        usersHost.appendChild(row);
+      });
+    }
+    updateSendSummary();
+  }
+
+  function updateSendSummary() {
+    if (!sendMailEl) return;
+    var nU = Object.keys(sendMailState.selectedUsers).length;
+    var nG = Object.keys(sendMailState.selectedGroups).length;
+    var sum = sendMailEl.querySelector("#ai-send-summary");
+    var btn = sendMailEl.querySelector("#ai-send-confirm");
+    if (!nU && !nG) {
+      sum.textContent = "Aucun destinataire sélectionné.";
+      btn.disabled = true;
+    } else {
+      sum.textContent = nG + " groupe(s), " + nU + " utilisateur(s) sélectionné(s).";
+      btn.disabled = sendMailState.busy;
+    }
+  }
+
+  function confirmSend() {
+    if (sendMailState.busy) return;
+    if (!state.current || !state.current.id) return;
+    var userIds = Object.keys(sendMailState.selectedUsers);
+    var groupIds = Object.keys(sendMailState.selectedGroups);
+    if (!userIds.length && !groupIds.length) return;
+
+    sendMailState.busy = true;
+    var btn = sendMailEl.querySelector("#ai-send-confirm");
+    btn.disabled = true;
+    var sum = sendMailEl.querySelector("#ai-send-summary");
+    sum.textContent = "Envoi en cours...";
+
+    apiPostJson("/api/pcorg/summary/" + encodeURIComponent(state.current.id) + "/send", {
+      user_ids: userIds,
+      group_ids: groupIds
+    }).then(function (res) {
+      sendMailState.busy = false;
+      if (!res || !res.ok) {
+        sum.textContent = "Échec : " + ((res && res.error) || "erreur inconnue");
+        btn.disabled = false;
+        toast("Envoi mail échoué : " + ((res && res.error) || "erreur"), "error");
+        return;
+      }
+      toast("Rapport envoyé à " + (res.sent_count || 0) + " destinataire(s).", "success");
+      closeSendMailModal();
     });
   }
 
@@ -571,6 +1206,7 @@
     buildModal();
     refreshContextLabel();
     if (!rootEl.querySelector("#ai-date-start").value) applyPreset("24h");
+    setControlsCollapsed(false);
     rootEl.classList.add("is-open");
     rootEl.setAttribute("aria-hidden", "false");
     setStatus("");

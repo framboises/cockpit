@@ -28,6 +28,10 @@
     list: function(){ return fetch("/api/cockpit-users").then(function(r){ return r.json(); }); },
     setGroups: function(uid, groups){ return fetch("/api/cockpit-users/"+uid+"/groups", {method:"PUT", headers:jsonHeaders(), body:JSON.stringify({groups:groups})}).then(function(r){ return r.json(); }); }
   };
+  var MorningReportAPI = {
+    get: function(){ return fetch("/api/pcorg/morning-report/prefs").then(function(r){ return r.json(); }); },
+    set: function(uid, enabled){ return fetch("/api/pcorg/morning-report/prefs", {method:"PUT", headers:jsonHeaders(), body:JSON.stringify({user_id: uid, enabled: !!enabled})}).then(function(r){ return r.json(); }); }
+  };
 
   // ============================================================
   // Collapsible sections
@@ -346,13 +350,15 @@
     });
   }
 
+  var morningReportEnabled = {};
+
   function renderUsers(users){
     currentUsers = users;
     var usersTbody = $("tbody", $("#users-table"));
     usersTbody.textContent = "";
 
     if(!users.length){
-      var tr = el("tr"); var td = el("td", {colspan:"5", "class":"muted"}, "Aucun utilisateur");
+      var tr = el("tr"); var td = el("td", {colspan:"6", "class":"muted"}, "Aucun utilisateur");
       tr.appendChild(td); usersTbody.appendChild(tr);
       return;
     }
@@ -444,11 +450,35 @@
       wrapper.appendChild(toggle);
       wrapper.appendChild(panel);
       tdGroups.appendChild(wrapper);
+
+      // Morning report opt-in checkbox
+      var tdMorning = el("td", {"class": "morning-report-cell", style: "text-align:center;"});
+      var morningCb = document.createElement("input");
+      morningCb.type = "checkbox";
+      morningCb.title = "Recevoir le rapport matinal automatique a 07h00";
+      morningCb.checked = !!morningReportEnabled[u._id];
+      morningCb.addEventListener("change", function(){
+        var on = morningCb.checked;
+        morningCb.disabled = true;
+        MorningReportAPI.set(u._id, on).then(function(res){
+          morningCb.disabled = false;
+          if(res && res.ok){
+            morningReportEnabled[u._id] = on;
+            showToast("success", on ? "Inscrit au rapport matinal" : "Desinscrit du rapport matinal");
+          } else {
+            morningCb.checked = !on;
+            showToast("error", (res && res.error) || "Erreur");
+          }
+        });
+      });
+      tdMorning.appendChild(morningCb);
+
       tr.appendChild(tdName);
       tr.appendChild(tdEmail);
       tr.appendChild(tdService);
       tr.appendChild(tdRole);
       tr.appendChild(tdGroups);
+      tr.appendChild(tdMorning);
       usersTbody.appendChild(tr);
     });
   }
@@ -461,8 +491,11 @@
   });
 
   function refreshAll(){
-    Promise.all([GroupAPI.list(), UserAPI.list()]).then(function(results){
+    Promise.all([GroupAPI.list(), UserAPI.list(), MorningReportAPI.get()]).then(function(results){
       renderGroups(results[0]);
+      var prefs = results[2] || {};
+      morningReportEnabled = {};
+      (prefs.enabled_user_ids || []).forEach(function(uid){ morningReportEnabled[uid] = true; });
       renderUsers(results[1]);
     });
   }

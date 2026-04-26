@@ -10,10 +10,13 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 from pymongo import ASCENDING, DESCENDING
+
+TZ_PARIS = ZoneInfo("Europe/Paris")
 
 
 logger = logging.getLogger(__name__)
@@ -33,6 +36,9 @@ CLAUDE_MAX_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "2048"))
 
 SUMMARIES_COLLECTION = "pcorg_summaries"
 PCORG_COLLECTION = "pcorg"
+N1_RETROS_COLLECTION = "pcorg_n1_retros"
+MORNING_REPORT_SETTINGS_ID = "morning_report"
+COCKPIT_SETTINGS_COLLECTION = "cockpit_settings"
 
 # Plafond du nombre de fiches transmises a Claude (apres priorisation).
 DEFAULT_MAX_FICHES = 80
@@ -41,11 +47,15 @@ COMMENTS_KEEP_LAST = 3
 
 # Cles de sortie attendues du modele.
 SECTION_KEYS = (
+    "synthese",
     "faits_marquants",
     "secours",
     "securite",
     "technique",
+    "flux",
+    "fourriere",
     "recommandations",
+    "prochaines_24h",
 )
 
 
@@ -65,6 +75,431 @@ def _ensure_indexes(db):
         _indexes_ensured = True
     except Exception as e:
         logger.warning("Impossible de creer l'index sur %s: %s", SUMMARIES_COLLECTION, e)
+
+
+# ----------------------------------------------------------------------------
+# Helpers : alignement par date de course (logique du bloc affluence)
+# ----------------------------------------------------------------------------
+
+def _parse_race_dt(raw):
+    """Parse une date de course (str ISO ou datetime) en datetime aware UTC.
+
+    Retourne None si non parsable.
+    """
+    if raw is None:
+        return None
+    try:
+        if isinstance(raw, datetime):
+            dt = raw
+        else:
+            s = str(raw).strip()
+            if not s:
+                return None
+            s = s.replace("Z", "+00:00")
+            # Date pure -> midi UTC pour eviter les bords de jour
+            if "T" not in s and " " not in s and len(s) <= 10:
+                dt = datetime.fromisoformat(s).replace(hour=12)
+            else:
+                dt = datetime.fromisoformat(s)
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _load_race_dt(db, event, year):
+    """Lit parametrages[event, year].data.race (fallback globalHoraires.race).
+
+    Retourne un datetime UTC ou None.
+    """
+    if not event or year is None:
+        return None
+    try:
+        doc = db["parametrages"].find_one(
+            {"event": event, "year": int(year)},
+            {"data.race": 1, "data.globalHoraires.race": 1},
+        )
+    except Exception:
+        return None
+    if not doc:
+        return None
+    data = doc.get("data") or {}
+    raw = data.get("race")
+    if not raw:
+        gh = data.get("globalHoraires") or {}
+        raw = gh.get("race")
+    return _parse_race_dt(raw)
+
+
+def _aligned_prev_year_window(ts_start, ts_end, race_dt_n, race_dt_prev):
+    """Retourne (start_prev, end_prev) alignes sur la date de course N-1.
+
+    offset = ts - race_n ; ts_prev = race_prev + offset (en secondes pour
+    une precision horaire identique au bloc hsh_get_counters_context).
+    """
+    if not race_dt_n or not race_dt_prev:
+        return None, None
+    off_start = (ts_start - race_dt_n).total_seconds()
+    off_end = (ts_end - race_dt_n).total_seconds()
+    return (
+        race_dt_prev + timedelta(seconds=off_start),
+        race_dt_prev + timedelta(seconds=off_end),
+    )
+
+
+# ----------------------------------------------------------------------------
+# Helpers : billetterie & frequentation
+# ----------------------------------------------------------------------------
+
+def _parse_yyyy_mm_dd(s):
+    if not s:
+        return None
+    try:
+        return datetime.strptime(str(s)[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _day_ventes(ticketing_config, products_data, day_str):
+    """Somme des billets vendus dont le produit donne acces a `day_str`.
+
+    Reproduit la logique de app.py:get_affluence pour day_ventes : un billet
+    multi-jours compte une fois par jour d'acces (presence attendue).
+    Couvre uniquement les billets references dans gh.ticketing (donc enceinte
+    publique), pas les parking/camping.
+    """
+    total = 0
+    for tc in ticketing_config or []:
+        days_scope = tc.get("days")
+        prods = tc.get("products") or []
+        applies = (days_scope == "all") or (isinstance(days_scope, list) and day_str in days_scope)
+        if not applies:
+            continue
+        for pname in prods:
+            pdata = (products_data or {}).get(pname) or {}
+            total += int(pdata.get("ventes") or 0)
+    return total
+
+
+def _index_freq_by_day(hist_doc):
+    """Indexe historique_controle.data par jour 'YYYY-MM-DD' -> [records]."""
+    out = {}
+    if not hist_doc:
+        return out
+    for rec in hist_doc.get("data") or []:
+        rd = rec.get("date")
+        if isinstance(rd, str):
+            key = rd[:10]
+        elif hasattr(rd, "strftime"):
+            key = rd.strftime("%Y-%m-%d")
+        else:
+            continue
+        out.setdefault(key, []).append(rec)
+    return out
+
+
+def _max_present(records):
+    if not records:
+        return None
+    vals = [int(r.get("present") or 0) for r in records if r.get("present") is not None]
+    return max(vals) if vals else None
+
+
+def _find_prev_param(db, event, year_int):
+    """Charge le parametrages N-1 (annee la plus recente < N) avec tickets."""
+    candidates = list(db["parametrages"].find(
+        {"event": event, "tickets": {"$exists": True}},
+        {"year": 1, "data.globalHoraires": 1, "data.race": 1, "tickets": 1, "_id": 0},
+    ))
+    for cand in sorted(candidates, key=lambda c: str(c.get("year", "")), reverse=True):
+        try:
+            if int(cand.get("year", "")) < year_int:
+                return cand
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def _find_hist_freq(db, event, year_int):
+    """Charge historique_controle (type=frequentation, event, year=N).
+    Pour year_int = annee precedente, on cherche le doc <= year_int (le plus
+    recent qui soit anterieur ou egal).
+    """
+    docs = list(db["historique_controle"].find(
+        {"type": "frequentation", "event": event},
+        sort=[("year", -1)],
+    ))
+    for d in docs:
+        try:
+            if int(d.get("year", -1)) == year_int:
+                return d
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def _find_hist_freq_prev(db, event, year_int):
+    """Pour comparaison N-1 : doc historique_controle frequentation < year_int
+    le plus recent. On retourne aussi sa race_date (depuis lui-meme ou portes).
+    """
+    docs = list(db["historique_controle"].find(
+        {"type": "frequentation", "event": event},
+        sort=[("year", -1)],
+    ))
+    for d in docs:
+        cy = d.get("year")
+        try:
+            if isinstance(cy, (int, float)) and int(cy) < year_int:
+                race_raw = d.get("race")
+                if not race_raw:
+                    portes = db["historique_controle"].find_one(
+                        {"type": "portes", "event": event, "year": cy},
+                        {"_id": 0, "race": 1},
+                    )
+                    if portes:
+                        race_raw = portes.get("race")
+                return d, _parse_yyyy_mm_dd(race_raw)
+        except (ValueError, TypeError):
+            continue
+    return None, None
+
+
+def compute_attendance_block(db, event, year):
+    """Calcule le bloc Billetterie & Frequentation pour les 3 jours
+    centres sur aujourd'hui : hier / aujourd'hui / demain.
+
+    Retourne None si l'event n'a pas de parametrages billetterie publique.
+    """
+    if not event or year is None:
+        return None
+    try:
+        year_int = int(year)
+    except (TypeError, ValueError):
+        return None
+
+    doc = db["parametrages"].find_one({"event": event, "year": str(year)}, {"_id": 0}) \
+        or db["parametrages"].find_one({"event": event, "year": year_int}, {"_id": 0})
+    if not doc or "data" not in doc:
+        return None
+    gh = (doc.get("data") or {}).get("globalHoraires") or {}
+    public_days_raw = gh.get("dates") or []
+    ticketing_config = gh.get("ticketing") or []
+    if not public_days_raw or not ticketing_config:
+        return None
+    public_dates = set()
+    for d in public_days_raw:
+        ds = d.get("date") if isinstance(d, dict) else d
+        pd = _parse_yyyy_mm_dd(ds)
+        if pd:
+            public_dates.add(pd)
+    if not public_dates:
+        return None
+
+    products_data = (doc.get("tickets") or {}).get("products") or {}
+    race_date = _parse_yyyy_mm_dd((doc.get("data") or {}).get("race") or gh.get("race"))
+
+    # N-1 parametrages + historique
+    prev_param = _find_prev_param(db, event, year_int)
+    prev_year_int = None
+    prev_ticketing_config = []
+    prev_products_data = {}
+    prev_param_race_date = None
+    if prev_param:
+        try:
+            prev_year_int = int(prev_param.get("year", ""))
+        except (TypeError, ValueError):
+            prev_year_int = None
+        pgh = (prev_param.get("data") or {}).get("globalHoraires") or {}
+        prev_ticketing_config = pgh.get("ticketing") or []
+        prev_products_data = (prev_param.get("tickets") or {}).get("products") or {}
+        prev_param_race_date = _parse_yyyy_mm_dd((prev_param.get("data") or {}).get("race") or pgh.get("race"))
+
+    hist_n = _find_hist_freq(db, event, year_int)
+    freq_n_by_day = _index_freq_by_day(hist_n)
+
+    hist_prev_doc, hist_prev_race_date = (None, None)
+    if prev_year_int:
+        hist_prev_doc, hist_prev_race_date = _find_hist_freq_prev(db, event, year_int)
+    freq_prev_by_day = _index_freq_by_day(hist_prev_doc)
+    prev_race_ref = hist_prev_race_date or prev_param_race_date
+
+    today = datetime.now(TZ_PARIS).date()
+    slots = []
+    for offset, key, label_fr in (
+        (-1, "yesterday", "Hier"),
+        (0, "today", "Aujourd'hui"),
+        (1, "tomorrow", "Demain"),
+    ):
+        d = today + timedelta(days=offset)
+        d_str = d.strftime("%Y-%m-%d")
+        is_public = d in public_dates
+
+        slot = {
+            "slot": key,
+            "label": label_fr,
+            "date": d_str,
+            "is_public": is_public,
+            "billets_vendus": None,
+            "pic_observed": None,
+            "pic_prev": None,
+            "pic_projection": None,
+            "delta_pct_vs_prev": None,
+            "prev_year": prev_year_int,
+            "prev_date": None,
+        }
+        if not is_public:
+            slots.append(slot)
+            continue
+
+        # Billets vendus N pour ce jour (somme produits qui appliquent a d)
+        slot["billets_vendus"] = _day_ventes(ticketing_config, products_data, d_str)
+
+        # Pic observe N (uniquement si on a deja des records pour ce jour)
+        slot["pic_observed"] = _max_present(freq_n_by_day.get(d_str))
+
+        # Alignement N-1 sur date de course
+        prev_aligned = None
+        if race_date and prev_race_ref:
+            prev_aligned = prev_race_ref + timedelta(days=(d - race_date).days)
+        if prev_aligned:
+            slot["prev_date"] = prev_aligned.strftime("%Y-%m-%d")
+
+        # Pic N-1 jour-equivalent
+        if prev_aligned:
+            slot["pic_prev"] = _max_present(freq_prev_by_day.get(prev_aligned.strftime("%Y-%m-%d")))
+
+        # Ventes N-1 jour-equivalent (utile pour la projection)
+        ventes_prev = None
+        if prev_aligned and prev_ticketing_config:
+            ventes_prev = _day_ventes(prev_ticketing_config, prev_products_data,
+                                      prev_aligned.strftime("%Y-%m-%d"))
+            if ventes_prev == 0:
+                ventes_prev = None
+
+        # Pic projete = pic_prev * (billets_vendus_N / ventes_prev)
+        if slot["pic_prev"] and ventes_prev and slot["billets_vendus"]:
+            ratio = slot["billets_vendus"] / float(ventes_prev)
+            slot["pic_projection"] = int(round(slot["pic_prev"] * ratio))
+
+        # Delta % (pic principal vs pic_prev)
+        ref = slot["pic_observed"] if slot["pic_observed"] else slot["pic_projection"]
+        if ref and slot["pic_prev"]:
+            slot["delta_pct_vs_prev"] = int(round(100 * (ref - slot["pic_prev"]) / slot["pic_prev"]))
+
+        slots.append(slot)
+
+    has_any_value = any(
+        s.get("billets_vendus") or s.get("pic_observed") or s.get("pic_prev") or s.get("pic_projection")
+        for s in slots
+    )
+    if not has_any_value:
+        return None
+
+    return {
+        "event": event,
+        "year": year_int,
+        "prev_year": prev_year_int,
+        "race_date": race_date.isoformat() if race_date else None,
+        "prev_race_date": prev_race_ref.isoformat() if prev_race_ref else None,
+        "slots": slots,
+    }
+
+
+# ----------------------------------------------------------------------------
+# Helpers : prochaines vignettes timetable
+# ----------------------------------------------------------------------------
+
+def _combine_timetable_dt(date_str, time_str):
+    """Combine date YYYY-MM-DD + heure HH:MM en datetime Europe/Paris aware.
+
+    Retourne None si time_str est vide, "TBC" ou non parsable.
+    """
+    if not date_str or not time_str:
+        return None
+    s = str(time_str).strip()
+    if not s or s.upper() == "TBC":
+        return None
+    try:
+        dt = datetime.strptime(str(date_str) + " " + s, "%Y-%m-%d %H:%M")
+    except ValueError:
+        return None
+    return dt.replace(tzinfo=TZ_PARIS)
+
+
+def _serialize_upcoming(item, dt_paris):
+    """Forme compacte d'une vignette pour le prompt + l'UI."""
+    activity = (item.get("activity") or "").strip()
+    place = (item.get("place") or "").strip()
+    return {
+        "event": item.get("__event"),
+        "year": item.get("__year"),
+        "datetime": dt_paris.isoformat(),
+        "date": dt_paris.strftime("%Y-%m-%d"),
+        "time": dt_paris.strftime("%H:%M"),
+        "activity": activity,
+        "place": place,
+        "category": item.get("category") or "",
+        "department": item.get("department") or "",
+        "preparation_checked": item.get("preparation_checked") or "",
+        "duration": item.get("duration") or "",
+        "remark": (item.get("remark") or "").strip()[:240],
+    }
+
+
+def _scan_timetable_doc(doc, now_paris, end_paris):
+    """Extrait les vignettes d'un doc timetable dans la fenetre [now, end]."""
+    out = []
+    data = (doc or {}).get("data") or {}
+    if not isinstance(data, dict):
+        return out
+    event = doc.get("event")
+    year = doc.get("year")
+    today_str = now_paris.strftime("%Y-%m-%d")
+    end_str = end_paris.strftime("%Y-%m-%d")
+    for date_str, items in data.items():
+        if not isinstance(items, list):
+            continue
+        # Court-circuit : on saute les jours hors fenetre [today, end]
+        if date_str < today_str or date_str > end_str:
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            dt = _combine_timetable_dt(date_str, item.get("start"))
+            if dt is None or dt < now_paris or dt > end_paris:
+                continue
+            tagged = dict(item)
+            tagged["__event"] = event
+            tagged["__year"] = year
+            out.append(_serialize_upcoming(tagged, dt))
+    return out
+
+
+def get_upcoming_timetable(db, event, year, hours=24):
+    """Retourne la liste des vignettes timetable dans les prochaines `hours`.
+
+    Si event/year sont fournis, filtre sur ce doc unique. Sinon, scanne
+    tous les docs timetable (mode "Tous evenements").
+    Trie par datetime croissant.
+    """
+    now_paris = datetime.now(TZ_PARIS)
+    end_paris = now_paris + timedelta(hours=hours)
+    upcoming = []
+    col = db["timetable"]
+    if event and year is not None:
+        # Le champ year est stocke en string dans timetable.
+        doc = col.find_one({"event": event, "year": str(year)})
+        if not doc:
+            doc = col.find_one({"event": event, "year": int(year)})
+        if doc:
+            upcoming.extend(_scan_timetable_doc(doc, now_paris, end_paris))
+    else:
+        for doc in col.find({}):
+            upcoming.extend(_scan_timetable_doc(doc, now_paris, end_paris))
+    upcoming.sort(key=lambda e: e.get("datetime") or "")
+    # Plafond defensif : on borne a 50 vignettes pour limiter le prompt.
+    return upcoming[:50]
 
 
 # ----------------------------------------------------------------------------
@@ -171,6 +606,95 @@ def compute_kpis(db, event, year, ts_start, ts_end):
     }
 
 
+def compute_compact_kpis(db, event, year, ts_start, ts_end):
+    """Version reduite des KPIs pour les fenetres comparatives.
+
+    Retourne juste {total, closed, by_category, by_urgency} pour limiter
+    la verbosite du prompt et le temps de calcul.
+    """
+    col = db[PCORG_COLLECTION]
+    base = {"ts": {"$gte": ts_start, "$lte": ts_end}}
+    if event:
+        base["event"] = event
+    if year is not None:
+        base["year"] = int(year)
+    total = col.count_documents(base)
+    if total == 0:
+        return {"total": 0, "closed": 0, "by_category": {}, "by_urgency": {}}
+    closed = col.count_documents({**base, "status_code": 10})
+
+    def _counts(field):
+        return list(col.aggregate([
+            {"$match": base},
+            {"$group": {"_id": "$" + field, "n": {"$sum": 1}}},
+            {"$sort": {"n": -1}},
+        ]))
+
+    by_category = {}
+    for r in _counts("category"):
+        key = r.get("_id") or "_none"
+        by_category[str(key)] = int(r["n"])
+    by_urgency = {}
+    for r in _counts("niveau_urgence"):
+        key = r.get("_id") or "_none"
+        by_urgency[str(key)] = int(r["n"])
+    return {"total": total, "closed": closed, "by_category": by_category, "by_urgency": by_urgency}
+
+
+def compute_comparisons(db, event, year, ts_start, ts_end):
+    """Calcule les KPIs comparatifs pour 2 fenetres de reference.
+
+    Retourne un dict :
+    {
+      "prev_period": {
+        "label": "Periode precedente (24h juste avant)",
+        "period_start": iso, "period_end": iso, "kpis": {...}
+      } ou None,
+      "prev_year_aligned": {
+        "label": "Annee N-1 jour-equivalent (course 4 mai 2025)",
+        "period_start": iso, "period_end": iso, "kpis": {...},
+        "race_dt_n": iso, "race_dt_prev": iso, "year_prev": int
+      } ou None
+    }
+    """
+    out = {"prev_period": None, "prev_year_aligned": None}
+
+    # Fenetre period precedente : decalage = duree de la fenetre.
+    duration = ts_end - ts_start
+    if duration.total_seconds() > 0:
+        prev_start = ts_start - duration
+        prev_end = ts_end - duration
+        kpis = compute_compact_kpis(db, event, year, prev_start, prev_end)
+        out["prev_period"] = {
+            "label": "Periode precedente (meme duree juste avant)",
+            "period_start": prev_start.isoformat(),
+            "period_end": prev_end.isoformat(),
+            "kpis": kpis,
+        }
+
+    # N-1 aligne sur date de course : necessite event + year + parametrages OK
+    # pour les deux annees.
+    if event and year is not None:
+        race_dt_n = _load_race_dt(db, event, int(year))
+        race_dt_prev = _load_race_dt(db, event, int(year) - 1)
+        if race_dt_n and race_dt_prev:
+            prev_start, prev_end = _aligned_prev_year_window(
+                ts_start, ts_end, race_dt_n, race_dt_prev,
+            )
+            if prev_start and prev_end:
+                kpis = compute_compact_kpis(db, event, int(year) - 1, prev_start, prev_end)
+                out["prev_year_aligned"] = {
+                    "label": "Annee precedente, meme position par rapport a la course",
+                    "period_start": prev_start.isoformat(),
+                    "period_end": prev_end.isoformat(),
+                    "kpis": kpis,
+                    "race_dt_n": race_dt_n.isoformat(),
+                    "race_dt_prev": race_dt_prev.isoformat(),
+                    "year_prev": int(year) - 1,
+                }
+    return out
+
+
 # ----------------------------------------------------------------------------
 # Selection des fiches a envoyer a Claude
 # ----------------------------------------------------------------------------
@@ -242,6 +766,62 @@ def _serialize_fiche(doc):
     }
 
 
+def _serialize_fiche_compact(doc):
+    """Forme tres compacte d'une fiche pour les comparaisons N-1.
+
+    Pas de comments, pas de operator, texte tronque court : on veut
+    essentiellement les categories, urgences, zones et nature des incidents
+    pour permettre a Claude de detecter des recurrences.
+    """
+    cc = doc.get("content_category") or {}
+    area = doc.get("area") or {}
+    return {
+        "ts": _iso(doc.get("ts")),
+        "category": doc.get("category"),
+        "sous_classification": cc.get("sous_classification"),
+        "urgence": doc.get("niveau_urgence"),
+        "is_incident": bool(doc.get("is_incident")),
+        "zone": area.get("desc"),
+        "text": _truncate(doc.get("text_full") or doc.get("text") or "", 280),
+    }
+
+
+def select_fiches_n_minus_1(db, event, year_prev, ts_start, ts_end, max_fiches=25):
+    """Echantillon compact des fiches N-1 (jour-equivalent) pour les
+    recommandations preventives.
+
+    Priorise les fiches majeures (urgence EU/UA, is_incident) puis complete
+    avec un echantillon des autres categories pour rester representatif.
+    Forme tres compacte (texte court, sans commentaires).
+    """
+    if not event or year_prev is None:
+        return []
+    col = db[PCORG_COLLECTION]
+    base = {
+        "event": event,
+        "year": int(year_prev),
+        "ts": {"$gte": ts_start, "$lte": ts_end},
+    }
+    majors = list(col.find({
+        **base,
+        "$or": [
+            {"niveau_urgence": {"$in": ["EU", "UA"]}},
+            {"is_incident": True},
+        ],
+    }).sort("ts", ASCENDING))
+    major_ids = {d["_id"] for d in majors}
+    quota = max(0, max_fiches - len(majors))
+    others = []
+    if quota > 0:
+        others = list(
+            col.find({**base, "_id": {"$nin": list(major_ids)}})
+               .sort("ts", DESCENDING)
+               .limit(quota)
+        )
+    selected = (majors + others)[:max_fiches]
+    return [_serialize_fiche_compact(d) for d in selected]
+
+
 def select_fiches_for_prompt(db, event, year, ts_start, ts_end, max_fiches=DEFAULT_MAX_FICHES):
     """Retourne (fiches_serialized, total_in_period, truncated_bool).
 
@@ -285,8 +865,19 @@ def select_fiches_for_prompt(db, event, year, ts_start, ts_end, max_fiches=DEFAU
 # Construction du prompt
 # ----------------------------------------------------------------------------
 
-def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated):
-    """Retourne (system_prompt, user_prompt) en francais."""
+def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
+                  comparisons=None, upcoming=None, n1_retro=None, extra_focus_note=None,
+                  door_reinforcement=None):
+    """Retourne (system_prompt, user_prompt) en francais.
+
+    comparisons (optionnel) : dict produit par compute_comparisons.
+    upcoming (optionnel) : liste produite par get_upcoming_timetable.
+    n1_retro (optionnel) : dict produit par get_or_build_n1_retrospective.
+    extra_focus_note (optionnel) : consigne supplementaire (par ex. focus nuit
+       pour le rapport matinal) ajoutee au user prompt.
+    door_reinforcement (optionnel) : dict produit par
+       pcorg_doors_analysis.compute_door_reinforcement.
+    """
     system = (
         "Tu es un analyste operationnel pour un PC Organisation d'evenement "
         "(festival, course automobile). On te fournit des KPIs agreges et un "
@@ -296,14 +887,74 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated):
         "Contraintes strictes :\n"
         "- Reponds UNIQUEMENT par un objet JSON valide, sans texte avant ou "
         "apres, sans bloc markdown.\n"
-        "- L'objet contient EXACTEMENT ces 5 cles : faits_marquants, secours, "
-        "securite, technique, recommandations.\n"
+        "- L'objet contient EXACTEMENT ces 9 cles : synthese, faits_marquants, "
+        "secours, securite, technique, flux, fourriere, recommandations, "
+        "prochaines_24h.\n"
+        "- synthese : 2 a 4 phrases qui resument la periode dans son ensemble "
+        "(volume d'activite, repartition globale, tonalite generale).\n"
+        "- faits_marquants : evenements vraiment notables uniquement (incident "
+        "reel, fait inhabituel, situation critique, anomalie identifiee). "
+        "PAS un resume general, PAS la liste exhaustive des fiches. "
+        "'RAS' si rien de notable.\n"
+        "- secours : synthese des fiches de la categorie PCO.Secours.\n"
+        "- securite : synthese des fiches PCO.Securite, PCS.Surete et "
+        "PCS.Information.\n"
+        "- technique : synthese des fiches PCO.Technique.\n"
+        "- flux : synthese des fiches PCO.Flux (gestion des flux pietons et "
+        "vehicules, regulation, parking).\n"
+        "- fourriere : synthese des fiches PCO.Fourriere (mises en fourriere "
+        "et recuperations de vehicules).\n"
+        "- recommandations : actions concretes a engager suite aux constats. "
+        "Si une 'Note retrospective de l'edition precedente' t'est fournie, "
+        "EXPLOITE-LA en priorite pour proposer des actions preventives qui "
+        "evitent de repeter les memes erreurs. Croise les lecons retenues "
+        "l'an passe avec les constats de la periode courante : si la meme "
+        "zone, le meme type d'incident ou la meme anomalie ressort, signale-"
+        "le explicitement (par ex. 'Deja note l'an passe sur la meme zone : "
+        "...', 'Recurrence d'une annee sur l'autre : ...'). Si une analyse "
+        "de 'Renforts conseilles sur les portes' t'est fournie, integre les "
+        "renforts a forte criticite dans tes recommandations en citant la "
+        "porte et le creneau (par ex. 'Renfort fortement conseille a la "
+        "Porte Nord 14h-16h - pic N-1 + 6 incidents flux a ce creneau l'an "
+        "passe'). Reste pragmatique : verifications, suivis, clarifications "
+        "de procedure issues uniquement de la periode courante. Ne pas "
+        "inventer de recurrences ni de portes hors des donnees fournies.\n"
+        "- flux : si une analyse de renforts portes t'est fournie, evoque "
+        "aussi les portes en pic prevu (top 3 N-1) avec leur creneau dans "
+        "cette section, qu'il y ait incidents ou non. Reste factuel.\n"
+        "- prochaines_24h : mini-briefing operationnel des jalons des "
+        "prochaines 24 heures (a partir des vignettes timetable fournies). "
+        "Mets en avant les jalons strategiques : depart de course, "
+        "ouvertures et fermetures au public, briefings, montages/demontages "
+        "majeurs. Donne les heures (format 24h, ex 14h30) et le nom de "
+        "l'evenement quand utile. 'Aucun jalon planifie dans les 24 "
+        "prochaines heures.' si la liste fournie est vide.\n"
+        "\n"
+        "Comparaisons :\n"
+        "- Si des KPIs comparatifs te sont fournis (periode precedente ou "
+        "annee precedente alignee sur la date de course), exploite-les dans "
+        "la synthese pour situer le volume d'activite (par exemple : "
+        "'volume comparable a la veille meme creneau', 'forte hausse par "
+        "rapport au meme creneau de l'edition precedente').\n"
+        "- Pour la comparaison annee precedente, utilise les mots 'edition "
+        "precedente' ou 'annee precedente' (jamais 'N-1', 'jour-equivalent' "
+        "ou autre jargon technique).\n"
+        "- Si la difference est minime (< 10%), parle de 'volume "
+        "comparable'. Si le comparatif vaut 0 ou n'est pas fourni, ne "
+        "compare pas.\n"
+        "\n"
+        "Style :\n"
         "- Chaque valeur est une chaine en texte clair (pas de markdown), "
         "2 a 6 phrases courtes maximum, ou 'RAS' si rien a signaler.\n"
+        "- Phrases redigees pour des operationnels qui ne connaissent pas "
+        "l'application : ne JAMAIS citer de nom de champ ou de variable "
+        "(par exemple n'ecris jamais is_incident, status_code, "
+        "niveau_urgence, content_category). Utilise des formulations "
+        "naturelles : 'incident', 'fiche cloturee', 'urgence absolue', etc.\n"
+        "- Ne cite pas non plus d'identifiants techniques (uuid, sql_id) "
+        "dans les phrases.\n"
         "- N'invente jamais de chiffres : appuie-toi uniquement sur les "
         "donnees fournies.\n"
-        "- Mentionne les fiches majeures (urgence EU/UA ou incidents) dans "
-        "faits_marquants.\n"
         "- N'utilise pas de guillemets typographiques courbes : uniquement "
         "des apostrophes droites et guillemets droits.\n"
     )
@@ -317,19 +968,275 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated):
         scope_label = str(event) + " (toutes annees)"
     elif year is not None:
         scope_label = "annee " + str(year) + " (tous evenements)"
-    user = (
+    parts = [
         "Contexte :\n"
         "- Perimetre : " + scope_label + "\n"
         "- Periode : " + period_iso_start + " --> " + period_iso_end + "\n"
         "- Echantillon tronque : " + ("oui" if truncated else "non") + "\n"
         "\n"
-        "KPIs :\n"
+        "KPIs (periode courante) :\n"
         + json.dumps(kpis, ensure_ascii=False, indent=2, default=_json_default)
-        + "\n\nFiches (" + str(len(fiches)) + " sur " + str(kpis.get("total", 0)) + " au total) :\n"
+    ]
+
+    if comparisons:
+        prev = comparisons.get("prev_period")
+        if prev and prev.get("kpis", {}).get("total", 0) > 0:
+            parts.append(
+                "\n\nKPIs comparatifs - " + prev["label"] + " :\n"
+                "- Fenetre : " + prev["period_start"] + " --> " + prev["period_end"] + "\n"
+                + json.dumps(prev["kpis"], ensure_ascii=False, indent=2, default=_json_default)
+            )
+        prev_year = comparisons.get("prev_year_aligned")
+        if prev_year and prev_year.get("kpis", {}).get("total", 0) > 0:
+            parts.append(
+                "\n\nKPIs comparatifs - " + prev_year["label"] + " :\n"
+                "- Fenetre annee precedente : " + prev_year["period_start"] + " --> " + prev_year["period_end"] + "\n"
+                "- Date course annee courante : " + prev_year["race_dt_n"] + "\n"
+                "- Date course annee precedente : " + prev_year["race_dt_prev"] + "\n"
+                + json.dumps(prev_year["kpis"], ensure_ascii=False, indent=2, default=_json_default)
+            )
+    if n1_retro and n1_retro.get("text"):
+        parts.append(
+            "\n\nNote retrospective de l'edition precedente (analyse "
+            "synthetique deja produite a partir des fiches N-1 du jour-"
+            "equivalent ; sert uniquement a alimenter la section "
+            "'recommandations') :\n---\n"
+            + n1_retro["text"]
+            + "\n---"
+        )
+
+    if door_reinforcement and door_reinforcement.get("recommendations"):
+        # Forme compacte pour le prompt : on garde l'essentiel.
+        compact = [
+            {
+                "porte": r["family_label"],
+                "creneau": r["slot_label_n"],
+                "criticite": r["criticite"],
+                "pic_n1_scans": r["n1_scan_count"],
+                "is_pic_top3": r["is_top3_pic"],
+                "incidents_n1": r["n1_fiches_count"],
+                "incidents_par_categorie": r["n1_fiches_by_category"],
+                "raison": r["reason"],
+            }
+            for r in door_reinforcement["recommendations"]
+        ]
+        parts.append(
+            "\n\nAnalyse 'Renforts conseilles sur les portes' (basee sur "
+            "le pic N-1 jour-equivalent et les fiches d'incident N-1 "
+            "mentionnant la porte). A exploiter dans 'flux' et "
+            "'recommandations' uniquement, sans inventer de portes :\n"
+            + json.dumps(compact, ensure_ascii=False, indent=2, default=_json_default)
+        )
+
+    if upcoming is not None:
+        if upcoming:
+            parts.append(
+                "\n\nVignettes timetable des prochaines 24 heures ("
+                + str(len(upcoming)) + " jalon(s)) :\n"
+                + json.dumps(upcoming, ensure_ascii=False, indent=2, default=_json_default)
+            )
+        else:
+            parts.append("\n\nVignettes timetable des prochaines 24 heures : aucune.")
+
+    parts.append(
+        "\n\nFiches (" + str(len(fiches)) + " sur " + str(kpis.get("total", 0)) + " au total) :\n"
         + json.dumps(fiches, ensure_ascii=False, indent=2, default=_json_default)
-        + "\n\nProduis le JSON demande."
+    )
+
+    if extra_focus_note:
+        parts.append(
+            "\n\nConsigne complementaire (a respecter en priorite) :\n"
+            + str(extra_focus_note).strip()
+        )
+
+    parts.append("\n\nProduis le JSON demande.")
+    return system, "".join(parts)
+
+
+# ----------------------------------------------------------------------------
+# Retrospective N-1 (premier appel Claude, mis en cache)
+# ----------------------------------------------------------------------------
+
+def _build_retro_prompts(event, year_prev, ts_start, ts_end, kpis, fiches):
+    """Prompts dedies a la retrospective N-1.
+
+    Sortie demandee : texte clair court (pas de JSON), 4 paragraphes
+    titres, exploitable comme contexte par le prompt principal.
+    """
+    system = (
+        "Tu es un analyste retrospectif d'evenements (festival, course "
+        "automobile). On te fournit les KPIs et un echantillon de fiches "
+        "d'incidents de l'edition precedente sur le meme creneau "
+        "operationnel (alignement par rapport a la date de course). "
+        "Ton objectif unique : produire une note retrospective qui aide "
+        "les operateurs de l'edition courante a NE PAS REPETER les "
+        "memes erreurs.\n"
+        "\n"
+        "Contraintes :\n"
+        "- Reponse en francais, texte clair (pas de markdown, pas de "
+        "JSON, pas de listes a puces).\n"
+        "- 4 paragraphes courts, dans l'ordre, chacun introduit par un "
+        "titre suivi de deux points :\n"
+        "  Volume et tonalite : (volume d'activite ressenti, repartition "
+        "globale)\n"
+        "  Incidents marquants : (les vrais evenements notables, pas "
+        "une liste exhaustive)\n"
+        "  Zones et recurrences : (zones et types d'incidents qui "
+        "ressortent, situations qui ont surpris l'equipe)\n"
+        "  Lecons a retenir : (3 a 5 points concrets a anticiper ou "
+        "verifier sur l'edition courante)\n"
+        "- Chaque paragraphe : 1 a 4 phrases courtes maximum.\n"
+        "- N'invente jamais de chiffres, ne cite pas de noms de variables "
+        "(is_incident, status_code, niveau_urgence, content_category, "
+        "uuid). Utilise un vocabulaire naturel : 'incident', 'urgence "
+        "absolue', 'fiche cloturee'.\n"
+        "- Pas de guillemets typographiques courbes : uniquement des "
+        "apostrophes et guillemets droits.\n"
+        "- Si le volume est faible ou les fiches peu parlantes, dis-le "
+        "honnetement, ne sur-interprete pas.\n"
+    )
+    user = (
+        "Contexte :\n"
+        "- Evenement : " + str(event) + "\n"
+        "- Annee analysee : " + str(year_prev) + "\n"
+        "- Fenetre alignee : " + ts_start.isoformat() + " --> " + ts_end.isoformat() + "\n"
+        "\n"
+        "KPIs (edition precedente, periode alignee) :\n"
+        + json.dumps(kpis, ensure_ascii=False, indent=2, default=_json_default)
+        + "\n\nEchantillon de fiches (" + str(len(fiches)) + " sur "
+        + str(kpis.get("total", 0)) + " au total) :\n"
+        + json.dumps(fiches, ensure_ascii=False, indent=2, default=_json_default)
+        + "\n\nProduis la note retrospective demandee."
     )
     return system, user
+
+
+def _call_claude_text(system_prompt, user_prompt):
+    """Variante de call_claude qui retourne juste le texte brut + usage,
+    sans tenter de parser un JSON. Leve ClaudeError si echec.
+    """
+    if not ANTHROPIC_API_KEY:
+        raise ClaudeError("ANTHROPIC_API_KEY non configuree")
+    headers = {
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": ANTHROPIC_API_VERSION,
+        "content-type": "application/json",
+    }
+    body = {
+        "model": CLAUDE_MODEL,
+        "max_tokens": 1024,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": user_prompt}],
+    }
+    try:
+        resp = requests.post(
+            ANTHROPIC_API_URL, headers=headers, json=body, timeout=CLAUDE_TIMEOUT_SECONDS,
+        )
+    except requests.exceptions.RequestException as e:
+        logger.warning("Claude API (retro) injoignable: %s", e)
+        raise ClaudeError("claude_unreachable")
+    if resp.status_code >= 400:
+        snippet = (resp.text or "")[:500]
+        logger.warning("Claude API (retro) HTTP %s : %s", resp.status_code, snippet)
+        raise ClaudeError("claude_http_" + str(resp.status_code))
+    try:
+        payload = resp.json()
+    except ValueError:
+        raise ClaudeError("claude_invalid_response")
+    parts = payload.get("content") or []
+    text = ""
+    for p in parts:
+        if isinstance(p, dict) and p.get("type") == "text":
+            text += p.get("text") or ""
+    usage = payload.get("usage") or {}
+    return text.strip(), {
+        "input_tokens": int(usage.get("input_tokens") or 0),
+        "output_tokens": int(usage.get("output_tokens") or 0),
+    }
+
+
+def _retro_cache_key(event, year_prev, ts_start, ts_end):
+    return {
+        "event": event,
+        "year_prev": int(year_prev),
+        "period_start": ts_start.isoformat() if hasattr(ts_start, "isoformat") else str(ts_start),
+        "period_end": ts_end.isoformat() if hasattr(ts_end, "isoformat") else str(ts_end),
+    }
+
+
+def get_or_build_n1_retrospective(db, event, year_prev, ts_start_prev, ts_end_prev):
+    """Retourne la note retrospective N-1 (texte court) pour une fenetre alignee.
+
+    1. Cherche un cache dans `pcorg_n1_retros` sur (event, year_prev, fenetre).
+    2. Sinon, calcule KPIs + selectionne un echantillon de ~80 fiches N-1, fait
+       un appel Claude dedie, sauve en cache et retourne.
+
+    Retourne None en cas d'echec silencieux (pas de fiches, ou echec API) :
+    le resume principal continue sans contexte N-1.
+    """
+    if not event or year_prev is None or not ts_start_prev or not ts_end_prev:
+        return None
+    key = _retro_cache_key(event, year_prev, ts_start_prev, ts_end_prev)
+
+    try:
+        db[N1_RETROS_COLLECTION].create_index(
+            [("event", ASCENDING), ("year_prev", ASCENDING), ("period_start", ASCENDING), ("period_end", ASCENDING)],
+            name="cache_key",
+            unique=True,
+        )
+    except Exception:
+        pass
+
+    cached = db[N1_RETROS_COLLECTION].find_one(key)
+    if cached and cached.get("text"):
+        return {
+            "text": cached["text"],
+            "kpis": cached.get("kpis") or {},
+            "fiches_count": cached.get("fiches_count") or 0,
+            "from_cache": True,
+            "cached_at": cached.get("created_at").isoformat() if hasattr(cached.get("created_at"), "isoformat") else None,
+            "model": cached.get("model"),
+            "usage": cached.get("usage") or {},
+        }
+
+    kpis = compute_compact_kpis(db, event, int(year_prev), ts_start_prev, ts_end_prev)
+    if kpis.get("total", 0) == 0:
+        return None
+    fiches, _, _ = select_fiches_for_prompt(
+        db, event, int(year_prev), ts_start_prev, ts_end_prev, max_fiches=80,
+    )
+    if not fiches:
+        return None
+
+    system, user = _build_retro_prompts(event, int(year_prev), ts_start_prev, ts_end_prev, kpis, fiches)
+    try:
+        text, usage = _call_claude_text(system, user)
+    except ClaudeError as e:
+        logger.warning("Retro N-1 echouee : %s", e)
+        return None
+    if not text:
+        return None
+
+    doc = dict(key)
+    doc["text"] = text
+    doc["kpis"] = kpis
+    doc["fiches_count"] = len(fiches)
+    doc["model"] = CLAUDE_MODEL
+    doc["usage"] = usage
+    doc["created_at"] = datetime.now(timezone.utc)
+    try:
+        db[N1_RETROS_COLLECTION].insert_one(doc)
+    except Exception as e:
+        logger.warning("Cache retro N-1 : insert_one a echoue : %s", e)
+    return {
+        "text": text,
+        "kpis": kpis,
+        "fiches_count": len(fiches),
+        "from_cache": False,
+        "cached_at": doc["created_at"].isoformat(),
+        "model": CLAUDE_MODEL,
+        "usage": usage,
+    }
 
 
 # ----------------------------------------------------------------------------
@@ -436,7 +1343,9 @@ def _parse_sections(raw_text):
 # ----------------------------------------------------------------------------
 
 def save_summary(db, event, year, ts_start, ts_end, created_by_email, created_by_name,
-                 kpis, fiches_count, truncated, sections, raw_text, usage):
+                 kpis, fiches_count, truncated, sections, raw_text, usage,
+                 comparisons=None, upcoming=None, attendance=None, n1_retro=None,
+                 door_reinforcement=None):
     """Insere un document de resume et retourne le doc complet.
 
     event/year peuvent etre None (resume "tous evenements").
@@ -454,6 +1363,11 @@ def save_summary(db, event, year, ts_start, ts_end, created_by_email, created_by
         "fiches_count": int(fiches_count),
         "truncated": bool(truncated),
         "kpis": kpis,
+        "comparisons": comparisons or {},
+        "upcoming": upcoming or [],
+        "attendance": attendance or None,
+        "n1_retro": n1_retro or None,
+        "door_reinforcement": door_reinforcement or None,
         "sections": sections,
         "raw_text": raw_text,
         "model": CLAUDE_MODEL,
@@ -515,6 +1429,11 @@ def _serialize_summary(doc, light=True):
     }
     if not light:
         out["kpis"] = doc.get("kpis") or {}
+        out["comparisons"] = doc.get("comparisons") or {}
+        out["upcoming"] = doc.get("upcoming") or []
+        out["attendance"] = doc.get("attendance") or None
+        out["n1_retro"] = doc.get("n1_retro") or None
+        out["door_reinforcement"] = doc.get("door_reinforcement") or None
         out["sections"] = doc.get("sections") or {}
         out["raw_text"] = doc.get("raw_text") or ""
         out["usage"] = doc.get("usage") or {}
@@ -525,19 +1444,269 @@ def _serialize_summary(doc, light=True):
 # Orchestration principale
 # ----------------------------------------------------------------------------
 
-def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email, created_by_name):
-    """Calcule KPIs, appelle Claude (si fiches > 0), sauve, retourne le doc."""
+# ----------------------------------------------------------------------------
+# Preferences "Rapport matinal" (opt-in par utilisateur)
+# ----------------------------------------------------------------------------
+
+def get_morning_report_prefs(db):
+    """Retourne {enabled_user_ids: [str], updated_at, updated_by}."""
+    doc = db[COCKPIT_SETTINGS_COLLECTION].find_one({"_id": MORNING_REPORT_SETTINGS_ID}) or {}
+    raw_ids = doc.get("enabled_user_ids") or []
+    ids = [str(x) for x in raw_ids]
+    return {
+        "enabled_user_ids": ids,
+        "updated_at": doc.get("updated_at"),
+        "updated_by": doc.get("updated_by"),
+    }
+
+
+def set_morning_report_recipient(db, user_id, enabled, updated_by_email=None):
+    """Active ou desactive l'inscription d'un utilisateur au rapport matinal."""
+    from bson.objectid import ObjectId
+    try:
+        oid = ObjectId(str(user_id))
+    except Exception:
+        raise ValueError("user_id invalide")
+    op = "$addToSet" if enabled else "$pull"
+    db[COCKPIT_SETTINGS_COLLECTION].update_one(
+        {"_id": MORNING_REPORT_SETTINGS_ID},
+        {
+            op: {"enabled_user_ids": oid},
+            "$set": {
+                "updated_at": datetime.now(timezone.utc),
+                "updated_by": updated_by_email or "",
+            },
+        },
+        upsert=True,
+    )
+
+
+def get_morning_report_emails(db):
+    """Resout les user_ids inscrits en liste d'emails uniques (cockpit-only)."""
+    from bson.objectid import ObjectId
+    prefs = get_morning_report_prefs(db)
+    if not prefs["enabled_user_ids"]:
+        return []
+    oids = []
+    for uid in prefs["enabled_user_ids"]:
+        try:
+            oids.append(ObjectId(uid))
+        except Exception:
+            continue
+    if not oids:
+        return []
+    cur = db["users"].find(
+        {
+            "_id": {"$in": oids},
+            "roles_by_app.cockpit": {"$exists": True},
+            "email": {"$exists": True, "$ne": ""},
+        },
+        {"email": 1},
+    )
+    out = []
+    seen = set()
+    for u in cur:
+        e = (u.get("email") or "").strip()
+        if e and e.lower() not in seen:
+            seen.add(e.lower())
+            out.append(e)
+    return out
+
+
+# ----------------------------------------------------------------------------
+# Detection automatique de l'event/year actif (pour le rapport matinal)
+# ----------------------------------------------------------------------------
+
+def _parse_iso_dt(raw):
+    if not raw:
+        return None
+    try:
+        if isinstance(raw, datetime):
+            dt = raw
+        else:
+            s = str(raw).strip().replace("Z", "+00:00")
+            if "T" not in s and " " not in s and len(s) <= 10:
+                dt = datetime.fromisoformat(s)
+            else:
+                dt = datetime.fromisoformat(s)
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=TZ_PARIS)
+    return dt.astimezone(timezone.utc)
+
+
+DEFAULT_FALLBACK_EVENT = "SAISON"
+
+
+def _saison_fallback(db, now_utc):
+    """Retourne (event='SAISON', year) avec l'annee courante si parametrages
+    existent, sinon le SAISON le plus recent dispo, sinon ('SAISON', annee
+    courante) sans verification.
+    """
+    current_year = now_utc.astimezone(TZ_PARIS).year
+    doc = db["parametrages"].find_one(
+        {"event": DEFAULT_FALLBACK_EVENT, "year": str(current_year)},
+        {"_id": 1},
+    )
+    if not doc:
+        doc = db["parametrages"].find_one(
+            {"event": DEFAULT_FALLBACK_EVENT, "year": current_year},
+            {"_id": 1},
+        )
+    if doc:
+        return (DEFAULT_FALLBACK_EVENT, current_year)
+    # Cherche le SAISON le plus recent dispo
+    candidates = list(db["parametrages"].find(
+        {"event": DEFAULT_FALLBACK_EVENT}, {"year": 1},
+    ))
+    years = []
+    for c in candidates:
+        try:
+            years.append(int(c.get("year")))
+        except (TypeError, ValueError):
+            continue
+    if years:
+        return (DEFAULT_FALLBACK_EVENT, max(years))
+    return (DEFAULT_FALLBACK_EVENT, current_year)
+
+
+def detect_active_event(db, now_utc=None):
+    """Devine l'evenement actuellement actif d'apres parametrages.
+
+    Logique alignee sur le bloc "live status" (static/js/main.js) :
+    un evenement est actif entre globalHoraires.montage.start et
+    globalHoraires.demontage.end.
+
+    - 1 seul candidat actif -> on le prend.
+    - Plusieurs candidats actifs (chevauchement) -> on prend celui dont
+      la date de course (globalHoraires.race) est la plus proche de now
+      (la course la plus "chaude").
+    - Aucun candidat actif -> fallback SAISON annee courante.
+    """
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+    candidates = []
+    for doc in db["parametrages"].find(
+        {},
+        {"event": 1, "year": 1,
+         "data.globalHoraires.montage": 1,
+         "data.globalHoraires.demontage": 1,
+         "data.globalHoraires.race": 1,
+         "data.race": 1},
+    ):
+        gh = (doc.get("data") or {}).get("globalHoraires") or {}
+        m_dt = _parse_iso_dt((gh.get("montage") or {}).get("start"))
+        d_dt = _parse_iso_dt((gh.get("demontage") or {}).get("end"))
+        if not m_dt or not d_dt:
+            continue
+        if not (m_dt <= now_utc <= d_dt):
+            continue
+        try:
+            yr = int(doc.get("year"))
+        except (TypeError, ValueError):
+            continue
+        ev = doc.get("event")
+        if not ev:
+            continue
+        race_dt = _parse_iso_dt((doc.get("data") or {}).get("race") or gh.get("race"))
+        candidates.append((ev, yr, race_dt))
+
+    if not candidates:
+        return _saison_fallback(db, now_utc)
+
+    if len(candidates) == 1:
+        ev, yr, _ = candidates[0]
+        return (ev, yr)
+
+    # Plusieurs candidats : on prend celui dont la course est la plus proche
+    # de now (en valeur absolue). Les candidats sans race connue sont penalises.
+    def _score(c):
+        _, _, race_dt = c
+        if race_dt is None:
+            return float("inf")
+        return abs((race_dt - now_utc).total_seconds())
+
+    candidates.sort(key=_score)
+    ev, yr, _ = candidates[0]
+    return (ev, yr)
+
+
+def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email, created_by_name,
+                             extra_focus_note=None):
+    """Calcule KPIs + comparaisons + prochaines 24h + billetterie + retro N-1, appelle Claude.
+
+    extra_focus_note : consigne supplementaire a injecter dans le user prompt
+    (par ex. focus nuit pour le rapport matinal).
+    """
     kpis = compute_kpis(db, event, year, ts_start, ts_end)
+    comparisons = compute_comparisons(db, event, year, ts_start, ts_end)
+    upcoming = get_upcoming_timetable(db, event, year, hours=24)
+    attendance = compute_attendance_block(db, event, year)
+    # Renforts portes : import lazy pour eviter dependance circulaire au boot.
+    door_reinforcement = None
+    try:
+        import pcorg_doors_analysis
+        door_reinforcement = pcorg_doors_analysis.compute_door_reinforcement(db, event, year)
+    except Exception as e:
+        logger.warning("Renforts portes : echec calcul (%s)", e)
+
+    # Premier appel Claude : retrospective N-1 sur la fenetre alignee.
+    # Cache en collection pcorg_n1_retros, echec silencieux.
+    n1_retro = None
+    py = (comparisons or {}).get("prev_year_aligned")
+    if py and py.get("kpis", {}).get("total", 0) > 0:
+        try:
+            ts_prev_start = datetime.fromisoformat(py["period_start"])
+            ts_prev_end = datetime.fromisoformat(py["period_end"])
+            n1_retro = get_or_build_n1_retrospective(
+                db, event, py.get("year_prev"), ts_prev_start, ts_prev_end,
+            )
+        except Exception as e:
+            logger.warning("Retro N-1 : preparation echouee : %s", e)
+            n1_retro = None
+
+    # Cas "aucune fiche" : on appelle quand meme Claude UNIQUEMENT pour
+    # produire le mini-briefing prochaines_24h s'il y a des jalons.
+    # Sinon on court-circuite tout.
     if kpis["total"] == 0:
-        # RAS : pas d'appel Claude, sections vides.
-        sections = {k: "RAS" for k in SECTION_KEYS}
+        if not upcoming:
+            sections = {k: "RAS" for k in SECTION_KEYS}
+            sections["prochaines_24h"] = "Aucun jalon planifie dans les 24 prochaines heures."
+            return save_summary(
+                db, event, year, ts_start, ts_end, created_by_email, created_by_name,
+                kpis, 0, False, sections, "", {"input_tokens": 0, "output_tokens": 0},
+                comparisons=comparisons, upcoming=upcoming, attendance=attendance, n1_retro=n1_retro,
+            )
+        # Sinon, appel Claude minimal pour la section prochaines_24h.
+        system, user = build_prompts(
+            event, year, ts_start, ts_end, kpis, [], False,
+            comparisons=comparisons, upcoming=upcoming, n1_retro=n1_retro,
+            extra_focus_note=extra_focus_note,
+            door_reinforcement=door_reinforcement,
+        )
+        sections, raw_text, usage = call_claude(system, user)
+        if sections is None:
+            sections = {k: "RAS" for k in SECTION_KEYS}
+            sections["prochaines_24h"] = "Reponse Claude non parsable."
+        # Force RAS pour les sections sans fiches.
+        for k in SECTION_KEYS:
+            if k != "prochaines_24h" and not sections.get(k):
+                sections[k] = "RAS"
         return save_summary(
             db, event, year, ts_start, ts_end, created_by_email, created_by_name,
-            kpis, 0, False, sections, "", {"input_tokens": 0, "output_tokens": 0},
+            kpis, 0, False, sections, raw_text, usage,
+            comparisons=comparisons, upcoming=upcoming, attendance=attendance, n1_retro=n1_retro,
+            door_reinforcement=door_reinforcement,
         )
 
     fiches, total, truncated = select_fiches_for_prompt(db, event, year, ts_start, ts_end)
-    system, user = build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated)
+    system, user = build_prompts(
+        event, year, ts_start, ts_end, kpis, fiches, truncated,
+        comparisons=comparisons, upcoming=upcoming, n1_retro=n1_retro,
+        extra_focus_note=extra_focus_note,
+        door_reinforcement=door_reinforcement,
+    )
     sections, raw_text, usage = call_claude(system, user)
     if sections is None:
         # JSON non parsable : on conserve le texte brut dans faits_marquants
@@ -548,4 +1717,5 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
     return save_summary(
         db, event, year, ts_start, ts_end, created_by_email, created_by_name,
         kpis, len(fiches), truncated, sections, raw_text, usage,
+        comparisons=comparisons, upcoming=upcoming, attendance=attendance, n1_retro=n1_retro,
     )

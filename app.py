@@ -35,6 +35,7 @@ from vision_admin import vision_admin_bp
 from routing import routing_bp
 from cameras import cameras_bp
 import pcorg_summary
+import pcorg_summary_mail
 
 ################################################################################
 # Configuration
@@ -4293,6 +4294,196 @@ def pcorg_summary_delete(summary_id):
     if not deleted:
         return jsonify({"ok": False, "error": "introuvable"}), 404
     return jsonify({"ok": True})
+
+
+@app.route('/api/pcorg/summary/recipients', methods=['GET'])
+@role_required("manager")
+def pcorg_summary_recipients():
+    """Liste les utilisateurs Cockpit + groupes pour le picker d'envoi mail.
+
+    On filtre les comptes sans email et on exclut les groupes systeme du
+    dropdown (ils restent disponibles via API si besoin futur).
+    """
+    users = []
+    cur = db['users'].find(
+        {"roles_by_app.cockpit": {"$exists": True}, "email": {"$exists": True, "$ne": ""}},
+        {"prenom": 1, "nom": 1, "email": 1, "service": 1, "roles_by_app.cockpit": 1},
+    )
+    for u in cur:
+        full = ((u.get("prenom") or "") + " " + (u.get("nom") or "")).strip()
+        if not full:
+            full = u.get("email", "")
+        users.append({
+            "id": str(u["_id"]),
+            "name": full,
+            "email": u.get("email", ""),
+            "service": u.get("service") or "",
+            "role": (u.get("roles_by_app") or {}).get("cockpit") or "user",
+        })
+    users.sort(key=lambda x: x["name"].lower())
+
+    groups = []
+    for g in COL_GROUPS.find({}, {"name": 1}):
+        name = g.get("name") or ""
+        if name in SYSTEM_GROUP_NAMES:
+            continue
+        member_ids = [
+            ug.get("user_id")
+            for ug in COL_USER_GROUPS.find({"groups": g["_id"]}, {"user_id": 1})
+        ]
+        # Compte uniquement les membres avec email cockpit valide
+        if member_ids:
+            n = db['users'].count_documents({
+                "_id": {"$in": member_ids},
+                "roles_by_app.cockpit": {"$exists": True},
+                "email": {"$exists": True, "$ne": ""},
+            })
+        else:
+            n = 0
+        groups.append({"id": str(g["_id"]), "name": name, "member_count": int(n)})
+    groups.sort(key=lambda x: x["name"].lower())
+
+    return jsonify({"ok": True, "users": users, "groups": groups})
+
+
+def _resolve_recipients(user_ids, group_ids):
+    """Resout (user_ids + group_ids) en une liste d'emails uniques.
+
+    Filtre : user.roles_by_app.cockpit existe ET email present.
+    """
+    emails = []
+    seen = set()
+
+    def _add(email):
+        if not email:
+            return
+        e = email.strip().lower()
+        if e and e not in seen:
+            seen.add(e)
+            emails.append(email.strip())
+
+    # Users directs
+    direct_oids = []
+    for uid in (user_ids or []):
+        try:
+            direct_oids.append(ObjectId(uid))
+        except Exception:
+            continue
+
+    # Groups -> user_ids supplementaires
+    group_oids = []
+    for gid in (group_ids or []):
+        try:
+            group_oids.append(ObjectId(gid))
+        except Exception:
+            continue
+    if group_oids:
+        for ug in COL_USER_GROUPS.find(
+            {"groups": {"$in": group_oids}}, {"user_id": 1}
+        ):
+            if ug.get("user_id"):
+                direct_oids.append(ug["user_id"])
+
+    if not direct_oids:
+        return []
+
+    cur = db['users'].find(
+        {
+            "_id": {"$in": direct_oids},
+            "roles_by_app.cockpit": {"$exists": True},
+            "email": {"$exists": True, "$ne": ""},
+        },
+        {"email": 1},
+    )
+    for u in cur:
+        _add(u.get("email"))
+    return emails
+
+
+@app.route('/api/pcorg/morning-report/prefs', methods=['GET'])
+@role_required("admin")
+def pcorg_morning_report_get_prefs():
+    prefs = pcorg_summary.get_morning_report_prefs(db)
+    if hasattr(prefs.get("updated_at"), "isoformat"):
+        prefs["updated_at"] = prefs["updated_at"].isoformat()
+    return jsonify({"ok": True, **prefs})
+
+
+@app.route('/api/pcorg/morning-report/prefs', methods=['PUT'])
+@role_required("admin")
+def pcorg_morning_report_set_pref():
+    data = request.get_json(silent=True) or {}
+    user_id = data.get("user_id")
+    enabled = bool(data.get("enabled"))
+    if not user_id:
+        return jsonify({"ok": False, "error": "user_id requis"}), 400
+    user = request.user_payload or {}
+    try:
+        pcorg_summary.set_morning_report_recipient(
+            db, user_id, enabled, updated_by_email=user.get("email") or "",
+        )
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.exception("pcorg_morning_report_set_pref: erreur inattendue")
+        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({"ok": True})
+
+
+@app.route('/api/pcorg/summary/<summary_id>/send', methods=['POST'])
+@role_required("manager")
+def pcorg_summary_send(summary_id):
+    data = request.get_json(silent=True) or {}
+    user_ids = data.get("user_ids") or []
+    group_ids = data.get("group_ids") or []
+    if not user_ids and not group_ids:
+        return jsonify({"ok": False, "error": "Aucun destinataire selectionne"}), 400
+
+    summary = pcorg_summary.get_summary(db, summary_id)
+    if not summary:
+        return jsonify({"ok": False, "error": "Resume introuvable"}), 404
+
+    emails = _resolve_recipients(user_ids, group_ids)
+    if not emails:
+        return jsonify({"ok": False, "error": "Aucun email exploitable parmi les selections"}), 400
+
+    user = request.user_payload or {}
+    sender_email = user.get("email", "") or ""
+    sender_name = (str(user.get("firstname", "") or "") + " " + str(user.get("lastname", "") or "")).strip()
+
+    try:
+        result = pcorg_summary_mail.send_summary_email(emails, summary)
+    except pcorg_summary_mail.SmtpError as e:
+        msg = str(e)
+        code = 503 if "non configure" in msg else 502
+        return jsonify({"ok": False, "error": msg}), code
+    except Exception as e:
+        logger.exception("pcorg_summary_send: erreur inattendue")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    # Trace l'envoi dans le doc summary (audit)
+    try:
+        db['pcorg_summaries'].update_one(
+            {"_id": summary_id},
+            {"$push": {"email_sends": {
+                "ts": datetime.now(timezone.utc),
+                "by_email": sender_email,
+                "by_name": sender_name,
+                "to": emails,
+                "user_ids": [str(u) for u in user_ids],
+                "group_ids": [str(g) for g in group_ids],
+                "ok": True,
+                "smtp_host": result.get("smtp_host"),
+            }}},
+        )
+    except Exception as e:
+        logger.warning("pcorg_summary_send: trace email_sends a echoue : %s", e)
+
+    return jsonify({
+        "ok": True,
+        "sent_count": result.get("sent_count"),
+        "to": emails,
+    })
 
 
 ################################################################################
