@@ -10872,8 +10872,8 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .ai-section-fourriere        { border-left-color: #6b7280; }
 .ai-section-recommandations  { border-left-color: #16a34a; }
 .ai-overview-text {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 12px;
 }
 .ai-kpi-cols {
