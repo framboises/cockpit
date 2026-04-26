@@ -4,16 +4,16 @@
 (function () {
   "use strict";
 
-  var SECTION_ORDER = ["faits_marquants", "secours", "securite", "technique", "recommandations"];
-  var SECTION_TITLES = {
-    faits_marquants: "Faits marquants",
+  var TAB_ORDER = ["overview", "secours", "securite", "technique", "recommandations"];
+  var TAB_TITLES = {
+    overview:        "Vue d'ensemble",
     secours:         "Secours",
     securite:        "Sécurité",
     technique:       "Technique",
     recommandations: "Recommandations"
   };
-  var SECTION_ICONS = {
-    faits_marquants: "campaign",
+  var TAB_ICONS = {
+    overview:        "dashboard",
     secours:         "local_hospital",
     securite:        "shield",
     technique:       "build",
@@ -21,7 +21,7 @@
   };
   var URGENCY_LABELS = { EU: "Detresse vitale", UA: "Urgence absolue", UR: "Urgence relative", IMP: "Implique" };
 
-  var state = { busy: false, current: null, history: null };
+  var state = { busy: false, current: null, history: null, activeTab: "overview" };
 
   function csrfHeader() {
     var m = document.querySelector('meta[name="csrf-token"]');
@@ -267,6 +267,7 @@
 
   function renderSummary(summary) {
     state.current = summary;
+    state.activeTab = "overview";
     var body = rootEl.querySelector("#ai-modal-body");
     clearChildren(body);
 
@@ -288,23 +289,71 @@
     ]);
     body.appendChild(meta);
 
-    body.appendChild(buildKpiCard(summary.kpis || {}));
+    var tabsRow = el("div", { class: "ai-tabs", role: "tablist" });
+    var panelHost = el("div", { class: "ai-tab-panel-host" });
+    TAB_ORDER.forEach(function (key) {
+      var btn = el("button", {
+        type: "button",
+        class: "ai-tab" + (state.activeTab === key ? " ai-tab-active" : ""),
+        role: "tab",
+        "data-tab": key,
+        "aria-selected": state.activeTab === key ? "true" : "false"
+      }, [
+        el("span", { class: "material-symbols-outlined" }, [TAB_ICONS[key]]),
+        el("span", { text: TAB_TITLES[key] })
+      ]);
+      btn.addEventListener("click", function () { setActiveTab(key); });
+      tabsRow.appendChild(btn);
+    });
+    body.appendChild(tabsRow);
+    body.appendChild(panelHost);
+    renderActivePanel();
+  }
 
-    var grid = el("div", { class: "ai-section-grid" });
-    SECTION_ORDER.forEach(function (key) {
-      var content = (summary.sections || {})[key] || "";
-      var card = el("div", { class: "ai-section-card ai-section-" + key }, [
+  function setActiveTab(key) {
+    state.activeTab = key;
+    if (!rootEl) return;
+    var btns = rootEl.querySelectorAll(".ai-tab");
+    btns.forEach(function (b) {
+      var on = b.getAttribute("data-tab") === key;
+      b.classList.toggle("ai-tab-active", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    renderActivePanel();
+  }
+
+  function renderActivePanel() {
+    var host = rootEl && rootEl.querySelector(".ai-tab-panel-host");
+    if (!host || !state.current) return;
+    clearChildren(host);
+    var summary = state.current;
+    var panel = el("div", { class: "ai-tab-panel ai-tab-" + state.activeTab, role: "tabpanel" });
+
+    if (state.activeTab === "overview") {
+      panel.appendChild(buildKpiCard(summary.kpis || {}));
+      var faits = (summary.sections || {}).faits_marquants || "";
+      panel.appendChild(el("div", { class: "ai-section-card ai-section-faits_marquants" }, [
         el("div", { class: "ai-section-header" }, [
-          el("span", { class: "material-symbols-outlined" }, [SECTION_ICONS[key]]),
-          el("span", { class: "ai-section-title", text: SECTION_TITLES[key] })
+          el("span", { class: "material-symbols-outlined" }, ["campaign"]),
+          el("span", { class: "ai-section-title", text: "Faits marquants" })
+        ]),
+        el("div", { class: "ai-section-body" }, [
+          el("p", { text: faits || "RAS" })
+        ])
+      ]));
+    } else {
+      var content = (summary.sections || {})[state.activeTab] || "";
+      panel.appendChild(el("div", { class: "ai-section-card ai-section-" + state.activeTab }, [
+        el("div", { class: "ai-section-header" }, [
+          el("span", { class: "material-symbols-outlined" }, [TAB_ICONS[state.activeTab]]),
+          el("span", { class: "ai-section-title", text: TAB_TITLES[state.activeTab] })
         ]),
         el("div", { class: "ai-section-body" }, [
           el("p", { text: content || "RAS" })
         ])
-      ]);
-      grid.appendChild(card);
-    });
-    body.appendChild(grid);
+      ]));
+    }
+    host.appendChild(panel);
   }
 
   function buildKpiCard(kpis) {
