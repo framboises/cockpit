@@ -10471,6 +10471,14 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .ai-upcoming-text { flex: 1; min-width: 0; }
 .ai-upcoming-label { color: #0f172a; font-weight: 500; }
 .ai-upcoming-meta { color: #64748b; font-size: 0.74rem; margin-top: 1px; }
+.ai-upcoming-row-factorized {
+  background: #f1f5f9;
+  border-radius: 6px;
+}
+.ai-upcoming-places {
+  color: #475569;
+  font-weight: 400;
+}
 
 /* Billetterie & frequentation */
 .ai-attendance-card {
@@ -10561,6 +10569,10 @@ th span { font-size: 0.88rem; font-weight: 700; }
   border-radius: 6px;
   width: fit-content;
 }
+/* Couleurs inversees pour billetterie/affluence : hausse=vert, baisse=rouge */
+.ai-attendance-delta-up   { background: #ecfdf5; color: #047857; }
+.ai-attendance-delta-down { background: #fef2f2; color: #b91c1c; }
+.ai-attendance-delta-flat { background: #f1f5f9; color: #475569; }
 .ai-attendance-prev-value { font-weight: 500; opacity: 0.8; }
 .ai-attendance-extra {
   font-size: 0.74rem;

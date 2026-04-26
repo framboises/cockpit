@@ -31,7 +31,7 @@ ANTHROPIC_API_VERSION = "2023-06-01"
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6").strip()
 CLAUDE_TIMEOUT_SECONDS = int(os.getenv("CLAUDE_TIMEOUT_SECONDS", "60"))
-CLAUDE_MAX_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "2048"))
+CLAUDE_MAX_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "4096"))
 
 
 SUMMARIES_COLLECTION = "pcorg_summaries"
@@ -109,27 +109,60 @@ def _parse_race_dt(raw):
 
 
 def _load_race_dt(db, event, year):
-    """Lit parametrages[event, year].data.race (fallback globalHoraires.race).
+    """Resout la date de course pour (event, year) avec chaine de fallback.
+
+    Priorite (du plus fiable au plus permissif) :
+      1. parametrages.data.globalHoraires.race  (source officielle moderne)
+      2. parametrages.data.race                  (vieux champ, parfois errone)
+      3. historique_controle{type:portes, event, year}.race    (audit terrain)
+      4. historique_controle{type:frequentation, event, year}.race
+
+    `year` peut etre stocke en string ou int : on tente les deux dans
+    parametrages (la prod stocke en string).
 
     Retourne un datetime UTC ou None.
     """
     if not event or year is None:
         return None
     try:
-        doc = db["parametrages"].find_one(
-            {"event": event, "year": int(year)},
-            {"data.race": 1, "data.globalHoraires.race": 1},
-        )
+        year_int = int(year)
+    except (TypeError, ValueError):
+        return None
+
+    proj = {"data.race": 1, "data.globalHoraires.race": 1}
+    doc = None
+    try:
+        doc = db["parametrages"].find_one({"event": event, "year": str(year_int)}, proj)
+        if not doc:
+            doc = db["parametrages"].find_one({"event": event, "year": year_int}, proj)
     except Exception:
-        return None
-    if not doc:
-        return None
-    data = doc.get("data") or {}
-    raw = data.get("race")
-    if not raw:
+        doc = None
+
+    if doc:
+        data = doc.get("data") or {}
         gh = data.get("globalHoraires") or {}
-        raw = gh.get("race")
-    return _parse_race_dt(raw)
+        # 1. globalHoraires.race en priorite
+        for raw in (gh.get("race"), data.get("race")):
+            if raw:
+                dt = _parse_race_dt(raw)
+                if dt:
+                    return dt
+
+    # 3-4. Fallback historique_controle (souvent plus fiable post-event)
+    for hc_type in ("portes", "frequentation"):
+        try:
+            for y in (year_int, str(year_int)):
+                hc = db["historique_controle"].find_one(
+                    {"type": hc_type, "event": event, "year": y},
+                    {"race": 1},
+                )
+                if hc and hc.get("race"):
+                    dt = _parse_race_dt(hc["race"])
+                    if dt:
+                        return dt
+        except Exception:
+            continue
+    return None
 
 
 def _aligned_prev_year_window(ts_start, ts_end, race_dt_n, race_dt_prev):
@@ -237,6 +270,111 @@ def _find_hist_freq(db, event, year_int):
         except (ValueError, TypeError):
             continue
     return None
+
+
+def _archive_tag(event, year_int):
+    """Reconstitue le suffixe utilise par hsh_archive_and_purge (app.py:4615)."""
+    import re as _re_local
+    suffix = _re_local.sub(r'[^a-zA-Z0-9_-]', '_', str(event).strip())
+    return suffix + "_" + str(int(year_int))
+
+
+def _get_main_counter_id(db):
+    """Retourne l'id du compteur principal (par defaut 'ENCEINTE GENERALE')
+    depuis data_access._id='___GLOBAL___'.compteur_principal_id.
+    Fallback : 1ere location selectionnee.
+    """
+    g = db["data_access"].find_one({"_id": "___GLOBAL___"})
+    if not g:
+        return None
+    cid = g.get("compteur_principal_id")
+    if cid:
+        return str(cid)
+    locs = g.get("locations_selectionnees") or []
+    if locs and locs[0].get("id") is not None:
+        return str(locs[0]["id"])
+    return None
+
+
+def _max_current_in_snapshots(db, coll_name, target_date_paris, location_id, event=None):
+    """Max(current) sur les snapshots d'une journee Paris pour un compteur donne.
+
+    Sert pour data_access (live) ou hsh_archive_compteurs_<tag> (archive).
+    Le champ `current` est stocke en string -> caste en int defensivement.
+    """
+    day_start_paris = datetime.combine(target_date_paris, datetime.min.time(), tzinfo=TZ_PARIS)
+    day_end_paris = day_start_paris + timedelta(days=1)
+    day_start_utc = day_start_paris.astimezone(timezone.utc)
+    day_end_utc = day_end_paris.astimezone(timezone.utc)
+    q = {
+        "timestamp": {"$gte": day_start_utc, "$lt": day_end_utc},
+        "_id": {"$ne": "___GLOBAL___"},
+    }
+    if location_id:
+        q["requested_location_id"] = str(location_id)
+    if event:
+        # Filtre par event si disponible (les vieux snapshots peuvent ne pas
+        # avoir le champ; on tolere via $or).
+        q["$or"] = [
+            {"requested_event": event},
+            {"requested_event": {"$exists": False}},
+        ]
+    max_v = None
+    try:
+        for s in db[coll_name].find(q, {"current": 1}):
+            v = s.get("current")
+            try:
+                vi = int(v) if v not in (None, "") else None
+            except (ValueError, TypeError):
+                continue
+            if vi is None:
+                continue
+            if max_v is None or vi > max_v:
+                max_v = vi
+    except Exception as e:
+        logger.warning("Lecture %s a echoue : %s", coll_name, e)
+    return max_v
+
+
+def _get_pic_observed_for_day(db, event, year_int, target_date):
+    """Chaine de fallback pour retrouver le pic constate d'un jour donne :
+
+    1. historique_controle.type=frequentation -> max(present) du jour
+       (post-archivage consolide via tools/controle/enbase_freq.py)
+    2. data_access live snapshots -> max(current) du jour sur le compteur
+       principal (event en cours OU termine mais pas encore archive)
+    3. hsh_archive_compteurs_<archive_tag> -> idem (archivage admin fait,
+       cf app.py:hsh_archive_and_purge)
+
+    Retourne (pic_int, source_str) ou (None, None).
+    """
+    # Tier 1 : historique_controle
+    hist = _find_hist_freq(db, event, year_int)
+    if hist:
+        freq = _index_freq_by_day(hist)
+        pic = _max_present(freq.get(target_date.strftime("%Y-%m-%d")))
+        if pic is not None and pic > 0:
+            return pic, "historique_controle"
+
+    main_loc_id = _get_main_counter_id(db)
+
+    # Tier 2 : data_access live
+    pic = _max_current_in_snapshots(db, "data_access", target_date, main_loc_id, event=event)
+    if pic is not None and pic > 0:
+        return pic, "data_access"
+
+    # Tier 3 : archive
+    archive_coll = "hsh_archive_compteurs_" + _archive_tag(event, year_int)
+    try:
+        existing = db.list_collection_names(filter={"name": archive_coll})
+    except Exception:
+        existing = []
+    if archive_coll in existing:
+        pic = _max_current_in_snapshots(db, archive_coll, target_date, main_loc_id, event=event)
+        if pic is not None and pic > 0:
+            return pic, "hsh_archive"
+
+    return None, None
 
 
 def _find_hist_freq_prev(db, event, year_int):
@@ -359,8 +497,16 @@ def compute_attendance_block(db, event, year, now_utc=None):
         # Billets vendus N pour ce jour (somme produits qui appliquent a d)
         slot["billets_vendus"] = _day_ventes(ticketing_config, products_data, d_str)
 
-        # Pic observe N (uniquement si on a deja des records pour ce jour)
-        slot["pic_observed"] = _max_present(freq_n_by_day.get(d_str))
+        # Pic observe N : chaine de fallback historique -> data_access -> archive.
+        # Pour le jour d'aujourd'hui ou de demain on ne cherche pas (pas encore
+        # de pic constate). Pour hier et avant, on tente de retrouver le pic.
+        if offset <= 0:
+            pic_val, pic_src = _get_pic_observed_for_day(db, event, year_int, d)
+            slot["pic_observed"] = pic_val
+            slot["pic_observed_source"] = pic_src  # debug : "historique_controle" / "data_access" / "hsh_archive"
+        else:
+            slot["pic_observed"] = None
+            slot["pic_observed_source"] = None
 
         # Alignement N-1 sur date de course
         prev_aligned = None
@@ -480,8 +626,109 @@ def _scan_timetable_doc(doc, now_paris, end_paris):
     return out
 
 
+# Patterns de regroupement pour la factorisation des prochaines 24h.
+# Chaque tuple : (regex sur activity, cle de groupement, libelle synthetique)
+import re as _re
+
+_UPCOMING_GROUP_PATTERNS = [
+    (_re.compile(r"^Ouverture\s+Parking\s+", _re.IGNORECASE), "parking", "Ouverture parkings"),
+    (_re.compile(r"^Ouverture\s+Porte\s+", _re.IGNORECASE), "porte", "Ouverture portes"),
+    (_re.compile(r"^Ouverture\s+Tribune\s+", _re.IGNORECASE), "tribune", "Ouverture tribunes"),
+    (_re.compile(r"^Ouverture\s+(Aire|AA)\s+", _re.IGNORECASE), "aire", "Ouverture aires d'accueil"),
+    (_re.compile(r"^Ouverture\s+Camping\s+", _re.IGNORECASE), "camping", "Ouverture campings"),
+    (_re.compile(r"^Fermeture\s+Parking\s+", _re.IGNORECASE), "fermeture_parking", "Fermeture parkings"),
+    (_re.compile(r"^Fermeture\s+Porte\s+", _re.IGNORECASE), "fermeture_porte", "Fermeture portes"),
+]
+
+
+def _upcoming_group_key(activity):
+    """Retourne (group_key, group_label) ou (None, None) si l'item ne se
+    groupe pas (ouverture publique, briefings, depart course, etc.)."""
+    if not activity:
+        return None, None
+    for rgx, key, label in _UPCOMING_GROUP_PATTERNS:
+        if rgx.match(activity):
+            return key, label
+    return None, None
+
+
+def _factorize_upcoming(items, min_to_factorize=2):
+    """Regroupe les vignettes du meme creneau (datetime exact) qui matchent
+    un meme pattern (parkings, portes, tribunes...). Quand au moins
+    `min_to_factorize` items sont regroupables, on les remplace par un item
+    synthetique avec le decompte et la liste compactee des lieux. Sinon on
+    conserve les items individuels.
+    """
+    if not items:
+        return items
+    # Indexe les items par (datetime, group_key) pour reperer les groupes
+    indexed = []
+    for it in items:
+        gk, gl = _upcoming_group_key(it.get("activity"))
+        indexed.append({"item": it, "gk": gk, "gl": gl, "consumed": False})
+
+    out = []
+    for i, entry in enumerate(indexed):
+        if entry["consumed"]:
+            continue
+        if entry["gk"] is None:
+            out.append(entry["item"])
+            entry["consumed"] = True
+            continue
+        # Cherche les frères (meme datetime + meme group_key)
+        siblings = [entry]
+        for j in range(i + 1, len(indexed)):
+            other = indexed[j]
+            if other["consumed"] or other["gk"] != entry["gk"]:
+                continue
+            if other["item"].get("datetime") == entry["item"].get("datetime"):
+                siblings.append(other)
+        if len(siblings) < min_to_factorize:
+            out.append(entry["item"])
+            entry["consumed"] = True
+            continue
+        # Factorisation
+        for s in siblings:
+            s["consumed"] = True
+        first = entry["item"]
+        # Recupere les noms de lieux (place ou suffix de l'activity)
+        places = []
+        for s in siblings:
+            it = s["item"]
+            place = it.get("place") or ""
+            if not place:
+                # extrait le suffixe apres "Ouverture Parking " etc.
+                act = it.get("activity") or ""
+                rgx = _UPCOMING_GROUP_PATTERNS[
+                    next(idx for idx, (_, key, _l) in enumerate(_UPCOMING_GROUP_PATTERNS) if key == entry["gk"])
+                ][0]
+                place = rgx.sub("", act).strip()
+            if place:
+                places.append(place)
+        # Dedupe en preservant ordre
+        seen = set()
+        unique_places = []
+        for p in places:
+            k = p.lower()
+            if k not in seen:
+                seen.add(k)
+                unique_places.append(p)
+        place_str = ", ".join(unique_places[:6])
+        if len(unique_places) > 6:
+            place_str += " (+" + str(len(unique_places) - 6) + ")"
+        synth = dict(first)
+        synth["activity"] = entry["gl"] + " (×" + str(len(siblings)) + ")"
+        synth["place"] = place_str
+        synth["is_factorized"] = True
+        synth["factor_count"] = len(siblings)
+        out.append(synth)
+    return out
+
+
 def get_upcoming_timetable(db, event, year, hours=24, now_utc=None):
-    """Retourne la liste des vignettes timetable dans les prochaines `hours`.
+    """Retourne la liste des vignettes timetable dans les prochaines `hours`,
+    avec factorisation des ouvertures/fermetures simultanees (parkings,
+    portes, tribunes...).
 
     Si event/year sont fournis, filtre sur ce doc unique. Sinon, scanne
     tous les docs timetable (mode "Tous evenements").
@@ -506,6 +753,7 @@ def get_upcoming_timetable(db, event, year, hours=24, now_utc=None):
         for doc in col.find({}):
             upcoming.extend(_scan_timetable_doc(doc, now_paris, end_paris))
     upcoming.sort(key=lambda e: e.get("datetime") or "")
+    upcoming = _factorize_upcoming(upcoming)
     # Plafond defensif : on borne a 50 vignettes pour limiter le prompt.
     return upcoming[:50]
 

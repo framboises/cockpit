@@ -556,11 +556,21 @@
       return col;
     }
 
-    // Pic principal : observe (jour passe / en cours) sinon projection (futur)
-    var mainPic = slot.pic_observed != null ? slot.pic_observed : slot.pic_projection;
-    var mainLabel = slot.pic_observed != null
-      ? (slot.slot === "today" ? "Pic en cours" : "Pic observé")
-      : "Pic projeté";
+    // Pic principal :
+    // - "yesterday" : UNIQUEMENT le pic constaté (pas de fallback projection)
+    // - "today"     : pic observé en cours (live), sinon projection
+    // - "tomorrow"  : projection
+    var mainPic, mainLabel;
+    if (slot.slot === "yesterday") {
+      mainPic = slot.pic_observed;
+      mainLabel = "Pic constaté";
+    } else if (slot.slot === "today") {
+      mainPic = slot.pic_observed != null ? slot.pic_observed : slot.pic_projection;
+      mainLabel = slot.pic_observed != null ? "Pic en cours" : "Pic projeté";
+    } else {
+      mainPic = slot.pic_projection;
+      mainLabel = "Pic projeté";
+    }
 
     if (mainPic != null) {
       col.appendChild(el("div", { class: "ai-attendance-main" }, [
@@ -568,27 +578,33 @@
         el("div", { class: "ai-attendance-main-value", text: formatNumberFr(mainPic) })
       ]));
     } else {
-      col.appendChild(el("div", { class: "ai-attendance-empty", text: "Pas de donnée" }));
+      col.appendChild(el("div", { class: "ai-attendance-empty",
+                                  text: slot.slot === "yesterday" ? "Pic non disponible" : "Pas de donnée" }));
     }
 
-    // Comparaison N-1
-    if (slot.pic_prev != null) {
+    // Comparaison N-1 : couleurs sémantiques metier (hausse de fréquentation = vert,
+    // baisse = rouge). Inverse de la sémantique fiches d'incident.
+    if (slot.pic_prev != null && mainPic != null) {
       var deltaTxt = "";
       var kind = "flat";
+      var arrow = "→";
       if (slot.delta_pct_vs_prev != null) {
         var v = slot.delta_pct_vs_prev;
         deltaTxt = (v >= 0 ? "+" : "") + v + "%";
-        if (Math.abs(v) >= 5) kind = v > 0 ? "up" : "down";
+        if (Math.abs(v) >= 5) {
+          kind = v > 0 ? "up" : "down";
+          arrow = v > 0 ? "↑" : "↓";
+        }
       }
-      col.appendChild(el("div", { class: "ai-attendance-prev ai-kpi-delta-" + kind }, [
-        el("span", { class: "ai-attendance-prev-arrow", text: kind === "up" ? "↑" : (kind === "down" ? "↓" : "→") }),
+      col.appendChild(el("div", { class: "ai-attendance-prev ai-attendance-delta-" + kind }, [
+        el("span", { class: "ai-attendance-prev-arrow", text: arrow }),
         el("span", { text: " " + deltaTxt + " " }),
         el("span", { class: "ai-attendance-prev-value", text: "(" + formatNumberFr(slot.pic_prev) + ")" })
       ]));
     }
 
-    // Si on a un pic observe ET une projection, on montre la projection en complément
-    if (slot.pic_observed != null && slot.pic_projection != null && slot.slot !== "yesterday") {
+    // Aujourd'hui : si observé ET projection dispo, affiche la projection en complément
+    if (slot.slot === "today" && slot.pic_observed != null && slot.pic_projection != null) {
       col.appendChild(el("div", { class: "ai-attendance-extra", text: "Projeté : " + formatNumberFr(slot.pic_projection) }));
     }
 
@@ -626,16 +642,27 @@
     if (items.length) {
       var list = el("div", { class: "ai-upcoming-list" });
       items.forEach(function (it) {
-        var label = it.activity || "";
-        if (it.place) label += " — " + it.place;
+        var labelChildren = [];
+        // Pour les items factorisés on met l'activité en gras et le place en regular
+        if (it.is_factorized) {
+          labelChildren.push(el("strong", { text: it.activity || "" }));
+          if (it.place) {
+            labelChildren.push(document.createTextNode(" — "));
+            labelChildren.push(el("span", { class: "ai-upcoming-places", text: it.place }));
+          }
+        } else {
+          var lbl = it.activity || "";
+          if (it.place) lbl += " — " + it.place;
+          labelChildren.push(document.createTextNode(lbl));
+        }
         var meta = [];
         if (it.event) meta.push(it.event + (it.year ? " " + it.year : ""));
         if (it.category) meta.push(it.category);
         if (it.department) meta.push(it.department);
-        list.appendChild(el("div", { class: "ai-upcoming-row" }, [
+        list.appendChild(el("div", { class: "ai-upcoming-row" + (it.is_factorized ? " ai-upcoming-row-factorized" : "") }, [
           el("span", { class: "ai-upcoming-time", text: formatUpcomingWhen(it) }),
           el("div", { class: "ai-upcoming-text" }, [
-            el("div", { class: "ai-upcoming-label", text: label }),
+            el("div", { class: "ai-upcoming-label" }, labelChildren),
             meta.length ? el("div", { class: "ai-upcoming-meta", text: meta.join(" · ") }) : null
           ])
         ]));

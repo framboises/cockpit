@@ -422,21 +422,37 @@ def _attendance_block(summary):
                 '<div style="font-size:12px;color:#94a3b8;margin-top:8px;font-style:italic;">'
                 'Pas d\'ouverture publique</div></div></td>'
             )
-        main_pic = slot.get("pic_observed") if slot.get("pic_observed") is not None else slot.get("pic_projection")
-        main_label = ("Pic observe" if slot.get("pic_observed") is not None else "Pic projete")
-        if is_today and slot.get("pic_observed") is not None:
-            main_label = "Pic en cours"
+        # Hier : pic constate uniquement (pas de fallback projection).
+        # Aujourd'hui : observe sinon projection. Demain : projection.
+        slot_kind = slot.get("slot")
+        if slot_kind == "yesterday":
+            main_pic = slot.get("pic_observed")
+            main_label = "Pic constate"
+        elif slot_kind == "today":
+            main_pic = slot.get("pic_observed") if slot.get("pic_observed") is not None else slot.get("pic_projection")
+            main_label = "Pic en cours" if slot.get("pic_observed") is not None else "Pic projete"
+        else:
+            main_pic = slot.get("pic_projection")
+            main_label = "Pic projete"
         delta_html = ""
-        if slot.get("pic_prev") is not None:
+        if slot.get("pic_prev") is not None and main_pic is not None:
             v = slot.get("delta_pct_vs_prev")
+            # Couleurs inversees : hausse de frequentation = vert, baisse = rouge.
             color, arrow = "#94a3b8", "&rarr;"
             if v is not None and abs(v) >= 5:
-                color, arrow = ("#dc2626", "&uarr;") if v > 0 else ("#16a34a", "&darr;")
+                color, arrow = ("#16a34a", "&uarr;") if v > 0 else ("#dc2626", "&darr;")
             delta_html = (
                 '<div style="font-size:12px;font-weight:700;color:' + color + ';margin-top:2px;">'
                 + arrow + ' ' + (("+" + str(v)) if v is not None and v >= 0 else str(v)) + '% '
                 '<span style="color:#666666;font-weight:500;">(' + _fmt_int(slot.get("pic_prev")) + ')</span>'
                 '</div>'
+            )
+        # Aujourd'hui : si observe ET projection dispo, ajout d'une ligne projetee
+        extra_html = ""
+        if slot_kind == "today" and slot.get("pic_observed") is not None and slot.get("pic_projection") is not None:
+            extra_html = (
+                '<div style="font-size:11px;color:#666666;font-style:italic;margin-top:2px;">'
+                'Projete : ' + _fmt_int(slot["pic_projection"]) + '</div>'
             )
         billets = ""
         if slot.get("billets_vendus") is not None:
@@ -445,6 +461,19 @@ def _attendance_block(summary):
                 'border-radius:6px;padding:6px 8px;font-size:12px;">'
                 '<span style="font-weight:700;">' + _fmt_int(slot["billets_vendus"]) + '</span>'
                 ' <span style="color:#666666;">billet(s) vendu(s)</span></div>'
+            )
+        if main_pic is None:
+            value_html = (
+                '<div style="font-size:12px;color:#94a3b8;margin-top:8px;font-style:italic;">'
+                + ('Pic non disponible' if slot_kind == 'yesterday' else 'Pas de donnee') + '</div>'
+            )
+        else:
+            value_html = (
+                '<div style="font-size:11px;color:#666666;text-transform:uppercase;'
+                'letter-spacing:0.04em;margin-top:8px;font-weight:600;">' + main_label + '</div>'
+                '<div style="font-size:22px;font-weight:800;color:#0b1024;line-height:1.1;">'
+                + _fmt_int(main_pic) + '</div>'
+                + delta_html + extra_html
             )
         return (
             '<td valign="top" width="33%" style="padding:6px;">'
@@ -456,11 +485,7 @@ def _attendance_block(summary):
             'text-transform:uppercase;letter-spacing:0.05em;">' + _h(slot.get("label", "")) + '</td>'
             '<td style="font-size:11px;color:#94a3b8;font-weight:600;text-align:right;">' + date_label + '</td>'
             '</tr></table>'
-            '<div style="font-size:11px;color:#666666;text-transform:uppercase;'
-            'letter-spacing:0.04em;margin-top:8px;font-weight:600;">' + main_label + '</div>'
-            '<div style="font-size:22px;font-weight:800;color:#0b1024;line-height:1.1;">'
-            + (_fmt_int(main_pic) if main_pic is not None else '&mdash;') + '</div>'
-            + delta_html + billets + '</div></td>'
+            + value_html + billets + '</div></td>'
         )
 
     cells = "".join(_slot_html(s) for s in att.get("slots", []))
