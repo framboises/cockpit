@@ -39,6 +39,10 @@ Pas de tests automatisés ni de linter configurés.
 | `JWT_SECRET` | Clé JWT | valeur dev (interdit en prod) |
 | `MONGO_URI` | URI MongoDB | `mongodb://localhost:27017/` |
 | `CODING` | `true` bypass l'auth en dev | `false` |
+| `ANTHROPIC_API_KEY` | Clé API Anthropic (Assistant IA — résumé pcorg) | — (route renvoie 503 si vide) |
+| `CLAUDE_MODEL` | Modèle Claude utilisé par l'Assistant IA | `claude-sonnet-4-6` |
+| `CLAUDE_TIMEOUT_SECONDS` | Timeout HTTP appel Claude | `60` |
+| `CLAUDE_MAX_TOKENS` | `max_tokens` envoyé à Claude | `2048` |
 
 ## Architecture
 
@@ -137,3 +141,44 @@ Toutes sous `/field/*` pour profiter de la whitelist d'auth Cockpit (`/field/*` 
 ### Constantes
 
 - `VISION_LIEUX = ["Ouest", "Panorama", "Houx"]` dans `vision_admin.py` — à mettre à jour si on ajoute des lieux Vision (et synchroniser les options du dropdown dans `field_dispatch.html` + le validator côté Vision).
+
+## Assistant IA — résumé de période des fiches PC Organisation
+
+Sur la sidebar de `index.html`, `edit.html`, `analyse_ops.html`, le bouton **« Assistant IA »** (classe `.sidebar-ai`) ouvre une modale qui génère un compte-rendu structuré d'une période sur la collection `pcorg`. Réservé au rôle **manager** (et au-dessus).
+
+### Architecture
+
+- **Module Python** : `pcorg_summary.py` — helpers purs (`compute_kpis`, `select_fiches_for_prompt`, `build_prompts`, `call_claude`, `save_summary`, `list_summaries`, `get_summary`, `delete_summary`, `generate_period_summary`). Appel HTTP direct à `https://api.anthropic.com/v1/messages` (pas de SDK `anthropic`), pattern calqué sur `traffic.py` (Waze).
+- **Routes** dans `app.py` (à côté des routes `/api/pcorg/*`) :
+  - `POST /api/pcorg/summary/generate` (`manager`) — body `{event, year, period_start, period_end}` (ISO, datetime-local accepté → interprété en Europe/Paris). Court-circuite l'appel Claude si `kpis.total == 0` (sections "RAS").
+  - `GET /api/pcorg/summary/list?event=&year=` (`manager`) — liste légère (sans `kpis`/`sections`).
+  - `GET /api/pcorg/summary/<id>` (`manager`) — détail complet.
+  - `DELETE /api/pcorg/summary/<id>` (`admin`).
+- **Frontend** : `static/js/ai_assistant.js` (IIFE autonome). Les templates exposent `window.__userIsManager` à côté de `window.__userIsAdmin` ; le JS bloque l'ouverture de la modale aux non-managers (en plus du backend).
+
+### Collection MongoDB `pcorg_summaries`
+
+```javascript
+{
+  _id, event, year,
+  period_start, period_end, created_at,
+  created_by, created_by_name,
+  fiches_count, truncated,
+  kpis: { total, open, closed, by_category, by_urgency,
+          top_zones, top_sous_classifications, top_operators, avg_duration_min },
+  sections: { faits_marquants, secours, securite, technique, recommandations },
+  raw_text, model, usage: { input_tokens, output_tokens }
+}
+```
+
+Index : `(event, 1), (year, 1), (period_start, -1)` créé lazy au premier accès.
+
+### Prompt Claude
+
+Le `system` impose un **JSON strict à 5 clés** (`faits_marquants`, `secours`, `securite`, `technique`, `recommandations`) en français. Si le retour n'est pas parsable, le texte brut est stocké dans `sections.faits_marquants` et conservé dans `raw_text` pour debug. Plafond de **80 fiches** envoyées à Claude (priorité aux fiches `niveau_urgence ∈ {EU, UA}` ou `is_incident: true` qui sont toutes incluses) ; flag `truncated` exposé dans la modale.
+
+### Erreurs
+
+- `ANTHROPIC_API_KEY` vide → **503** `{ok: false, error: "ANTHROPIC_API_KEY non configuree"}`.
+- Anthropic injoignable / timeout → **502** `{ok: false, error: "claude_unreachable"}`.
+- HTTP non-2xx Claude → **502** `{ok: false, error: "claude_http_<code>"}`.

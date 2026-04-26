@@ -34,6 +34,7 @@ from field import field_bp
 from vision_admin import vision_admin_bp
 from routing import routing_bp
 from cameras import cameras_bp
+import pcorg_summary
 
 ################################################################################
 # Configuration
@@ -4193,6 +4194,97 @@ def pcorg_force_sync():
         return jsonify({"ok": True, "message": "Sync lancee en arriere-plan"})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+################################################################################
+# Assistant IA : resume de periode des fiches PC Organisation
+################################################################################
+
+def _parse_period_dt(raw):
+    """Parse une date ISO 8601 (avec ou sans tz) en datetime aware UTC.
+
+    Accepte aussi le format datetime-local HTML (YYYY-MM-DDTHH:MM) interprete
+    en Europe/Paris.
+    """
+    if not raw:
+        return None
+    try:
+        s = str(raw).strip().replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("Europe/Paris"))
+    return dt.astimezone(timezone.utc)
+
+
+@app.route('/api/pcorg/summary/generate', methods=['POST'])
+@role_required("manager")
+def pcorg_summary_generate():
+    """Genere un resume de periode (KPIs + appel Claude) et le persiste."""
+    data = request.get_json(silent=True) or {}
+    event = (data.get("event") or "").strip()
+    year = data.get("year")
+    ts_start = _parse_period_dt(data.get("period_start"))
+    ts_end = _parse_period_dt(data.get("period_end"))
+    if not event or year in (None, ""):
+        return jsonify({"ok": False, "error": "event et year requis"}), 400
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "year invalide"}), 400
+    if not ts_start or not ts_end:
+        return jsonify({"ok": False, "error": "period_start et period_end requis (ISO 8601)"}), 400
+    if ts_end <= ts_start:
+        return jsonify({"ok": False, "error": "period_end doit etre apres period_start"}), 400
+
+    user = request.user_payload or {}
+    created_by_email = user.get("email", "") or ""
+    created_by_name = (str(user.get("firstname", "") or "") + " " + str(user.get("lastname", "") or "")).strip()
+
+    try:
+        doc = pcorg_summary.generate_period_summary(
+            db, event, year, ts_start, ts_end, created_by_email, created_by_name,
+        )
+    except pcorg_summary.ClaudeError as e:
+        msg = str(e)
+        if msg == "ANTHROPIC_API_KEY non configuree":
+            return jsonify({"ok": False, "error": msg}), 503
+        if msg == "claude_unreachable":
+            return jsonify({"ok": False, "error": msg}), 502
+        return jsonify({"ok": False, "error": msg}), 502
+    except Exception as e:
+        logger.exception("pcorg_summary_generate: erreur inattendue")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({"ok": True, "summary": pcorg_summary._serialize_summary(doc, light=False)})
+
+
+@app.route('/api/pcorg/summary/list', methods=['GET'])
+@role_required("manager")
+def pcorg_summary_list():
+    event = request.args.get("event") or None
+    year = request.args.get("year") or None
+    items = pcorg_summary.list_summaries(db, event=event, year=year, limit=50)
+    return jsonify({"ok": True, "items": items})
+
+
+@app.route('/api/pcorg/summary/<summary_id>', methods=['GET'])
+@role_required("manager")
+def pcorg_summary_get(summary_id):
+    doc = pcorg_summary.get_summary(db, summary_id)
+    if not doc:
+        return jsonify({"ok": False, "error": "introuvable"}), 404
+    return jsonify({"ok": True, "summary": doc})
+
+
+@app.route('/api/pcorg/summary/<summary_id>', methods=['DELETE'])
+@role_required("admin")
+def pcorg_summary_delete(summary_id):
+    deleted = pcorg_summary.delete_summary(db, summary_id)
+    if not deleted:
+        return jsonify({"ok": False, "error": "introuvable"}), 404
+    return jsonify({"ok": True})
 
 
 ################################################################################

@@ -918,6 +918,7 @@ window.__blockLayout = {{ block_layout_json|safe }};
 window.__userGroups = {{ user_groups_json|safe }};
 window.__userFicheSimplifiee = {{ user_fiche_simplifiee_json|safe }};
 window.__userIsAdmin = {{ "true" if "admin" in user_roles else "false" }};
+window.__userIsManager = {{ "true" if ("manager" in user_roles or "admin" in user_roles) else "false" }};
 window.__userAllowedCategories = {{ user_allowed_categories_json|safe }};
 window.__userCanCloseFiche = {{ user_can_close_fiche_json|safe }};
 </script>
@@ -935,5 +936,6 @@ window.__userCanCloseFiche = {{ user_can_close_fiche_json|safe }};
 <script src="{{ url_for('static', filename='js/anoloc.js') }}"></script>
 <script src="{{ url_for('static', filename='js/pcorg.js') }}"></script>
 <script src="{{ url_for('static', filename='js/routing.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
 </body>
 </html>
