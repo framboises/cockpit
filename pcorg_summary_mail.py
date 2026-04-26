@@ -54,6 +54,77 @@ def _h(s):
     return html.escape(s if isinstance(s, str) else str(s if s is not None else ""))
 
 
+def _md_inline(text):
+    """Convertit le markdown inline ECHAPPE en HTML : **gras** -> <strong>."""
+    import re as _re
+    if not text:
+        return ""
+    return _re.sub(r"\*\*([^*]+?)\*\*", r"<strong>\1</strong>", text)
+
+
+def _render_md(text):
+    """Mini-renderer markdown -> HTML pour le contenu des sections.
+
+    Supporte :
+    - lignes commencant par '- ' ou '* ' -> liste a puces
+    - paragraphes separes par lignes vides
+    - **gras** -> <strong>
+    - sauts de ligne dans un paragraphe -> <br>
+
+    Echappe d'abord le HTML pour eviter toute injection.
+    """
+    if not text:
+        return ""
+    text = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return ""
+    # Decoupage en blocs (paragraphes ou listes consecutives)
+    lines = text.split("\n")
+    out_html = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        stripped = line.strip()
+        if not stripped:
+            i += 1
+            continue
+        # Liste a puces : on consomme toutes les lignes consecutives '- '
+        if stripped.startswith("- ") or stripped.startswith("* "):
+            items = []
+            while i < n:
+                ls = lines[i].strip()
+                if ls.startswith("- ") or ls.startswith("* "):
+                    item_text = ls[2:].strip()
+                    items.append(item_text)
+                    i += 1
+                else:
+                    break
+            li_html = "".join(
+                "<li style=\"margin:4px 0;\">" + _md_inline(_h(it)) + "</li>"
+                for it in items
+            )
+            out_html.append(
+                "<ul style=\"margin:6px 0 8px 0;padding-left:20px;\">" + li_html + "</ul>"
+            )
+            continue
+        # Paragraphe : consomme les lignes jusqu'a une ligne vide ou debut de liste
+        para_lines = []
+        while i < n:
+            ls = lines[i].strip()
+            if not ls:
+                break
+            if ls.startswith("- ") or ls.startswith("* "):
+                break
+            para_lines.append(ls)
+            i += 1
+        para = "<br>".join(_md_inline(_h(p)) for p in para_lines)
+        out_html.append(
+            "<p style=\"margin:0 0 8px 0;line-height:1.55;\">" + para + "</p>"
+        )
+    return "".join(out_html)
+
+
 def _fmt_int(n):
     if n is None:
         return "-"
@@ -182,7 +253,9 @@ def _report_header(summary):
 def _section_card(title, body_text, accent="#2563eb"):
     if not body_text:
         body_text = "RAS"
-    body_html = _h(body_text).replace("\n", "<br>")
+    body_html = _render_md(body_text) if body_text != "RAS" else (
+        '<p style="margin:0;color:#94a3b8;font-style:italic;">RAS</p>'
+    )
     return (
         '<tr><td style="padding:0 24px;">'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
@@ -190,7 +263,7 @@ def _section_card(title, body_text, accent="#2563eb"):
         'border-left:4px solid ' + accent + ';border-radius:8px;">'
         '<tr><td style="padding:14px 16px;">'
         '<div style="font-size:13px;font-weight:700;color:#1a1a1a;'
-        'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">'
+        'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">'
         + _h(title) + '</div>'
         '<div style="font-size:14px;line-height:1.55;color:#333333;">' + body_html + '</div>'
         '</td></tr></table></td></tr>'
@@ -376,7 +449,7 @@ def _upcoming_block(summary):
         briefing_html = (
             '<div style="background:#ffffff;border-radius:6px;padding:10px 12px;'
             'font-size:13px;color:#333333;line-height:1.5;margin-bottom:10px;">'
-            + _h(briefing).replace("\n", "<br>") + '</div>'
+            + _render_md(briefing) + '</div>'
         )
     return (
         '<tr><td style="padding:8px 24px;">'
@@ -423,21 +496,27 @@ def _attendance_block(summary):
                 'Pas d\'ouverture publique</div></div></td>'
             )
         # Hier : pic constate uniquement (pas de fallback projection).
-        # Aujourd'hui : observe sinon projection. Demain : projection.
+        # Aujourd'hui : pic projete en valeur principale + pic en cours en complement.
+        # Demain : projection.
         slot_kind = slot.get("slot")
         if slot_kind == "yesterday":
             main_pic = slot.get("pic_observed")
             main_label = "Pic constate"
         elif slot_kind == "today":
-            main_pic = slot.get("pic_observed") if slot.get("pic_observed") is not None else slot.get("pic_projection")
-            main_label = "Pic en cours" if slot.get("pic_observed") is not None else "Pic projete"
+            # En production temps reel comme en simulation, on veut systematiquement
+            # afficher le pic projete (estimation finale) ; le pic en cours arrive
+            # en complement quand il existe (live actif ou archive consultable).
+            main_pic = slot.get("pic_projection")
+            main_label = "Pic projete"
+            if main_pic is None:
+                main_pic = slot.get("pic_observed")
+                main_label = "Pic en cours"
         else:
             main_pic = slot.get("pic_projection")
             main_label = "Pic projete"
         delta_html = ""
         if slot.get("pic_prev") is not None and main_pic is not None:
             v = slot.get("delta_pct_vs_prev")
-            # Couleurs inversees : hausse de frequentation = vert, baisse = rouge.
             color, arrow = "#94a3b8", "&rarr;"
             if v is not None and abs(v) >= 5:
                 color, arrow = ("#16a34a", "&uarr;") if v > 0 else ("#dc2626", "&darr;")
@@ -447,12 +526,13 @@ def _attendance_block(summary):
                 '<span style="color:#666666;font-weight:500;">(' + _fmt_int(slot.get("pic_prev")) + ')</span>'
                 '</div>'
             )
-        # Aujourd'hui : si observe ET projection dispo, ajout d'une ligne projetee
+        # Aujourd'hui : ligne complementaire "Pic en cours: X" si dispo
         extra_html = ""
         if slot_kind == "today" and slot.get("pic_observed") is not None and slot.get("pic_projection") is not None:
             extra_html = (
-                '<div style="font-size:11px;color:#666666;font-style:italic;margin-top:2px;">'
-                'Projete : ' + _fmt_int(slot["pic_projection"]) + '</div>'
+                '<div style="font-size:11px;color:#475569;margin-top:4px;'
+                'background:#f1f5f9;border-radius:4px;padding:3px 6px;display:inline-block;">'
+                'Pic en cours : <strong>' + _fmt_int(slot["pic_observed"]) + '</strong></div>'
             )
         billets = ""
         if slot.get("billets_vendus") is not None:
@@ -527,12 +607,20 @@ def _doors_block(summary):
     if not dr or not dr.get("recommendations"):
         return ""
 
-    rows = ""
-    for r in dr["recommendations"]:
+    # Limite : top 12 pour rester lisible
+    all_recos = list(dr.get("recommendations") or [])
+    fortes = [r for r in all_recos if r.get("criticite") == "forte"]
+    moderees = [r for r in all_recos if r.get("criticite") != "forte"]
+    # Tri par creneau croissant pour la lecture chronologique
+    fortes.sort(key=lambda r: r.get("slot_n_start") or "")
+    moderees.sort(key=lambda r: r.get("slot_n_start") or "")
+    shown_fortes = fortes
+    remaining_for_moderees = max(0, 12 - len(shown_fortes))
+    shown_moderees = moderees[:remaining_for_moderees]
+    nb_skipped = (len(fortes) - len(shown_fortes)) + (len(moderees) - len(shown_moderees))
+
+    def _row(r):
         crit = r.get("criticite") or ""
-        crit_bg = "#dc2626" if crit == "forte" else "#f59e0b"
-        crit_label = "Forte" if crit == "forte" else "Moderee"
-        # Chips incidents par categorie
         chips = ""
         for cat, n in (r.get("n1_fiches_by_category") or {}).items():
             color = _DOORS_CAT_COLORS.get(cat, "#64748b")
@@ -544,7 +632,6 @@ def _doors_block(summary):
             )
         if not chips:
             chips = '<span style="color:#cbd5e1;">&mdash;</span>'
-
         pic_badge = ""
         if r.get("is_top3_pic"):
             pic_badge = ('<span style="margin-left:6px;display:inline-block;font-size:9px;'
@@ -552,22 +639,57 @@ def _doors_block(summary):
                          'padding:1px 6px;border-radius:4px;text-transform:uppercase;'
                          'letter-spacing:0.04em;">top 3</span>')
         pic_value = _fmt_int(r.get("n1_scan_count")) if r.get("n1_scan_count") else "&mdash;"
-
-        bg = "rgba(254, 226, 226, 0.4)" if crit == "forte" else "#ffffff"
-        rows += (
+        bg = "#fff7ed" if crit == "forte" else "#ffffff"
+        return (
             '<tr style="background:' + bg + ';">'
-            '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;font-weight:600;'
-            'color:#0b1024;">' + _h(r.get("family_label", "?")) + '</td>'
-            '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;font-weight:600;'
-            'color:#1d4ed8;white-space:nowrap;">' + _h(r.get("slot_label_n", "")) + '</td>'
-            '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;white-space:nowrap;">'
+            '<td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;'
+            'font-weight:700;color:#0b1024;font-size:14px;">'
+            + _h(r.get("family_label", "?")) + '</td>'
+            '<td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;'
+            'font-weight:600;color:#1d4ed8;white-space:nowrap;font-size:13px;">'
+            + _h(r.get("slot_label_n", "")) + '</td>'
+            '<td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;'
+            'white-space:nowrap;font-size:13px;color:#0b1024;">'
             + pic_value + pic_badge + '</td>'
-            '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;">' + chips + '</td>'
-            '<td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;">'
-            '<span style="display:inline-block;background:' + crit_bg + ';color:#fff;'
-            'padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;">'
-            + crit_label + '</span></td>'
+            '<td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;">' + chips + '</td>'
             '</tr>'
+        )
+
+    def _section(title, color_bg, color_fg, recos, intro=""):
+        if not recos:
+            return ""
+        rows = "".join(_row(r) for r in recos)
+        intro_html = ""
+        if intro:
+            intro_html = (
+                '<div style="font-size:12px;color:#475569;margin:0 0 6px 4px;font-style:italic;">'
+                + _h(intro) + '</div>'
+            )
+        return (
+            '<div style="margin-top:12px;">'
+            '<div style="display:inline-block;background:' + color_bg + ';color:' + color_fg + ';'
+            'font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;'
+            'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">'
+            + _h(title) + ' &middot; ' + str(len(recos)) + ' reco(s)</div>'
+            + intro_html
+            + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            'style="background:#ffffff;border-radius:6px;font-size:13px;border:1px solid #fed7aa;">'
+            '<thead><tr style="background:#fff7ed;color:#7c2d12;text-transform:uppercase;'
+            'font-size:10px;letter-spacing:0.05em;">'
+            '<th align="left" style="padding:8px 12px;border-bottom:1px solid #fed7aa;">Porte</th>'
+            '<th align="left" style="padding:8px 12px;border-bottom:1px solid #fed7aa;">Creneau</th>'
+            '<th align="left" style="padding:8px 12px;border-bottom:1px solid #fed7aa;">Pic N-1</th>'
+            '<th align="left" style="padding:8px 12px;border-bottom:1px solid #fed7aa;">Incidents N-1</th>'
+            '</tr></thead>'
+            '<tbody>' + rows + '</tbody></table></div>'
+        )
+
+    skipped_html = ""
+    if nb_skipped > 0:
+        skipped_html = (
+            '<div style="font-size:11px;color:#9a3412;font-style:italic;margin-top:10px;">'
+            + str(nb_skipped) + ' reco(s) supplementaire(s) non affichee(s) (criticite '
+            'moderee, voir donnees completes en base si besoin).</div>'
         )
 
     return (
@@ -575,28 +697,20 @@ def _doors_block(summary):
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
         'style="background:#fff7ed;border:1px solid #fed7aa;border-left:4px solid #ea580c;'
         'border-radius:8px;">'
-        '<tr><td style="padding:14px 16px;">'
-        '<div style="font-size:13px;font-weight:700;color:#7c2d12;'
+        '<tr><td style="padding:16px 18px;">'
+        '<div style="font-size:14px;font-weight:700;color:#7c2d12;'
         'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">'
-        'Renforts conseilles sur les portes (24h a venir)'
-        '<span style="float:right;background:#fed7aa;color:#c2410c;font-size:10px;'
-        'padding:2px 8px;border-radius:999px;">' + _fmt_int(len(dr["recommendations"])) + ' reco(s)</span>'
-        '</div>'
-        '<div style="font-size:12px;color:#9a3412;font-style:italic;margin-bottom:10px;">'
-        'Aligne sur le jour-equivalent course de l\'edition precedente'
-        + (' (' + _h(str(dr.get("year_prev"))) + ')' if dr.get("year_prev") else '') + '</div>'
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'style="background:#ffffff;border-radius:6px;font-size:13px;">'
-        '<thead><tr style="background:#fff7ed;color:#7c2d12;text-transform:uppercase;'
-        'font-size:11px;letter-spacing:0.05em;">'
-        '<th align="left" style="padding:8px 10px;border-bottom:1px solid #fed7aa;">Porte</th>'
-        '<th align="left" style="padding:8px 10px;border-bottom:1px solid #fed7aa;">Creneau</th>'
-        '<th align="left" style="padding:8px 10px;border-bottom:1px solid #fed7aa;">Pic N-1</th>'
-        '<th align="left" style="padding:8px 10px;border-bottom:1px solid #fed7aa;">Incidents N-1</th>'
-        '<th align="left" style="padding:8px 10px;border-bottom:1px solid #fed7aa;">Criticite</th>'
-        '</tr></thead>'
-        '<tbody>' + rows + '</tbody>'
-        '</table></td></tr></table></td></tr>'
+        'Renforts conseilles sur les portes (24h a venir)</div>'
+        '<div style="font-size:12px;color:#9a3412;font-style:italic;margin-bottom:6px;">'
+        'Croisement pic de trafic et incidents de l\'edition precedente'
+        + (' (' + _h(str(dr.get("year_prev"))) + ')' if dr.get("year_prev") else '') + ', '
+        'aligne sur le jour-equivalent course.</div>'
+        + _section("Criticite forte", "#dc2626", "#ffffff", shown_fortes,
+                   "Pic eleve l'an passe ET incidents avere(s) sur le meme creneau.")
+        + _section("Criticite moderee", "#f59e0b", "#7c2d12", shown_moderees,
+                   "Pic ou incidents l'an passe (un seul des deux).")
+        + skipped_html
+        + '</td></tr></table></td></tr>'
     )
 
 
@@ -639,7 +753,9 @@ def render_summary_html(summary):
     sections = summary.get("sections") or {}
     for key, label, color in SECTION_LABELS:
         body += _section_card(label, sections.get(key, ""), accent=color)
-    body += _retro_block(summary)
+    # Note retrospective : conservee dans le doc Mongo (alimente Claude)
+    # mais ne s'affiche plus en bloc standalone — elle est integree dans
+    # les sections recommandations/flux directement par Claude.
     body += _spacer(12)
     return _wrap(body)
 

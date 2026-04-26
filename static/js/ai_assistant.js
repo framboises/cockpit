@@ -131,6 +131,71 @@
     while (node.firstChild) node.removeChild(node.firstChild);
   }
 
+  // ---------- Mini markdown renderer (DOM-safe, no innerHTML) ----------
+  // Supporte : - puces, paragraphes, **gras**.
+
+  function _mdInlineToNodes(line) {
+    // Découpe sur **xxx** et retourne une liste de noeuds (text + <strong>)
+    var nodes = [];
+    var rx = /\*\*([^*]+?)\*\*/g;
+    var lastIdx = 0;
+    var matches = String(line).matchAll(rx);
+    for (var m of matches) {
+      if (m.index > lastIdx) {
+        nodes.push(document.createTextNode(line.substring(lastIdx, m.index)));
+      }
+      nodes.push(el("strong", null, [m[1]]));
+      lastIdx = m.index + m[0].length;
+    }
+    if (lastIdx < line.length) {
+      nodes.push(document.createTextNode(line.substring(lastIdx)));
+    }
+    return nodes;
+  }
+
+  function renderMd(text, container) {
+    // Vide le container puis rend le markdown leger.
+    clearChildren(container);
+    if (!text) return;
+    var t = String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+    if (!t) return;
+    var lines = t.split("\n");
+    var i = 0;
+    while (i < lines.length) {
+      var stripped = lines[i].trim();
+      if (!stripped) { i++; continue; }
+      if (/^[-*]\s/.test(stripped)) {
+        var ul = el("ul", { class: "ai-md-ul" });
+        while (i < lines.length) {
+          var s = lines[i].trim();
+          if (/^[-*]\s/.test(s)) {
+            var liText = s.replace(/^[-*]\s+/, "");
+            var li = el("li", { class: "ai-md-li" });
+            _mdInlineToNodes(liText).forEach(function (n) { li.appendChild(n); });
+            ul.appendChild(li);
+            i++;
+          } else {
+            break;
+          }
+        }
+        container.appendChild(ul);
+      } else {
+        var p = el("p", { class: "ai-md-p" });
+        var first = true;
+        while (i < lines.length) {
+          var s2 = lines[i].trim();
+          if (!s2) break;
+          if (/^[-*]\s/.test(s2)) break;
+          if (!first) p.appendChild(el("br"));
+          _mdInlineToNodes(s2).forEach(function (n) { p.appendChild(n); });
+          first = false;
+          i++;
+        }
+        container.appendChild(p);
+      }
+    }
+  }
+
   // ---------- Date helpers ----------
 
   function pad2(n) { return (n < 10 ? "0" : "") + n; }
@@ -414,12 +479,12 @@
     if (state.activeTab === "overview") {
       // 1. Tuiles KPI (4 chiffres clés + chips comparatives)
       panel.appendChild(buildKpiTilesCard(summary.kpis || {}, summary.comparisons || null));
-      // 2. Synthèse + Faits marquants
-      panel.appendChild(buildSyntheseFaitsMarquants(summary));
-      // 3. Détails KPI (barres catégorie / urgence / top zones / par événement)
+      // 2. Faits marquants (la synthèse a été retirée car redondante)
+      panel.appendChild(buildFaitsMarquantsCard(summary));
+      // 3. Détails KPI
       var detailsCard = buildKpiDetailsCard(summary.kpis || {});
       if (detailsCard) panel.appendChild(detailsCard);
-      // 4. Cartes contextuelles (24h à venir / billetterie / portes)
+      // 4. Cartes contextuelles
       var upcomingCard = buildUpcomingCard(summary);
       if (upcomingCard) panel.appendChild(upcomingCard);
       var attendanceCard = buildAttendanceCard(summary);
@@ -428,15 +493,20 @@
       if (doorsCard) panel.appendChild(doorsCard);
     } else {
       var content = (summary.sections || {})[state.activeTab] || "";
-      panel.appendChild(el("div", { class: "ai-section-card ai-section-" + state.activeTab }, [
+      var card = el("div", { class: "ai-section-card ai-section-" + state.activeTab }, [
         el("div", { class: "ai-section-header" }, [
           el("span", { class: "material-symbols-outlined" }, [TAB_ICONS[state.activeTab]]),
           el("span", { class: "ai-section-title", text: TAB_TITLES[state.activeTab] })
-        ]),
-        el("div", { class: "ai-section-body" }, [
-          el("p", { text: content || "RAS" })
         ])
-      ]));
+      ]);
+      var body = el("div", { class: "ai-section-body" });
+      if (content) {
+        renderMd(content, body);
+      } else {
+        body.appendChild(el("p", { class: "ai-md-ras", text: "RAS" }));
+      }
+      card.appendChild(body);
+      panel.appendChild(card);
     }
     host.appendChild(panel);
   }
@@ -558,15 +628,15 @@
 
     // Pic principal :
     // - "yesterday" : UNIQUEMENT le pic constaté (pas de fallback projection)
-    // - "today"     : pic observé en cours (live), sinon projection
+    // - "today"     : pic projeté en valeur principale + pic en cours en complément
     // - "tomorrow"  : projection
     var mainPic, mainLabel;
     if (slot.slot === "yesterday") {
       mainPic = slot.pic_observed;
       mainLabel = "Pic constaté";
     } else if (slot.slot === "today") {
-      mainPic = slot.pic_observed != null ? slot.pic_observed : slot.pic_projection;
-      mainLabel = slot.pic_observed != null ? "Pic en cours" : "Pic projeté";
+      mainPic = slot.pic_projection != null ? slot.pic_projection : slot.pic_observed;
+      mainLabel = slot.pic_projection != null ? "Pic projeté" : "Pic en cours";
     } else {
       mainPic = slot.pic_projection;
       mainLabel = "Pic projeté";
@@ -603,9 +673,12 @@
       ]));
     }
 
-    // Aujourd'hui : si observé ET projection dispo, affiche la projection en complément
+    // Aujourd'hui : si projection ET observé dispo, affiche le "Pic en cours" en complément
     if (slot.slot === "today" && slot.pic_observed != null && slot.pic_projection != null) {
-      col.appendChild(el("div", { class: "ai-attendance-extra", text: "Projeté : " + formatNumberFr(slot.pic_projection) }));
+      col.appendChild(el("div", { class: "ai-attendance-extra ai-attendance-live" }, [
+        el("span", { text: "Pic en cours : " }),
+        el("strong", { text: formatNumberFr(slot.pic_observed) })
+      ]));
     }
 
     // Billets vendus
@@ -637,7 +710,9 @@
       el("span", { class: "ai-upcoming-count", text: items.length ? String(items.length) + " jalon(s)" : "aucun jalon" })
     ]));
     if (briefing) {
-      card.appendChild(el("p", { class: "ai-upcoming-briefing", text: briefing }));
+      var briefingEl = el("div", { class: "ai-upcoming-briefing" });
+      renderMd(briefing, briefingEl);
+      card.appendChild(briefingEl);
     }
     if (items.length) {
       var list = el("div", { class: "ai-upcoming-list" });
@@ -691,30 +766,19 @@
         && d.getDate() === n.getDate();
   }
 
-  function buildSyntheseFaitsMarquants(summary) {
-    var sections = summary.sections || {};
-    var synth = sections.synthese || "";
-    var faits = sections.faits_marquants || "";
-    var row = el("div", { class: "ai-overview-text" });
-    row.appendChild(el("div", { class: "ai-section-card ai-section-synthese" }, [
-      el("div", { class: "ai-section-header" }, [
-        el("span", { class: "material-symbols-outlined" }, ["summarize"]),
-        el("span", { class: "ai-section-title", text: "Synthèse" })
-      ]),
-      el("div", { class: "ai-section-body" }, [
-        el("p", { text: synth || "RAS" })
-      ])
-    ]));
-    row.appendChild(el("div", { class: "ai-section-card ai-section-faits_marquants" }, [
+  function buildFaitsMarquantsCard(summary) {
+    var faits = (summary.sections || {}).faits_marquants || "";
+    var card = el("div", { class: "ai-section-card ai-section-faits_marquants" }, [
       el("div", { class: "ai-section-header" }, [
         el("span", { class: "material-symbols-outlined" }, ["campaign"]),
         el("span", { class: "ai-section-title", text: "Faits marquants" })
-      ]),
-      el("div", { class: "ai-section-body" }, [
-        el("p", { text: faits || "RAS" })
       ])
-    ]));
-    return row;
+    ]);
+    var body = el("div", { class: "ai-section-body" });
+    if (faits) renderMd(faits, body);
+    else body.appendChild(el("p", { class: "ai-md-ras", text: "RAS" }));
+    card.appendChild(body);
+    return card;
   }
 
   function buildKpiTilesCard(kpis, comparisons) {
