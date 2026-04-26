@@ -404,36 +404,20 @@
     var panel = el("div", { class: "ai-tab-panel ai-tab-" + state.activeTab, role: "tabpanel" });
 
     if (state.activeTab === "overview") {
+      // 1. Tuiles KPI (4 chiffres clés + chips comparatives)
+      panel.appendChild(buildKpiTilesCard(summary.kpis || {}, summary.comparisons || null));
+      // 2. Synthèse + Faits marquants
+      panel.appendChild(buildSyntheseFaitsMarquants(summary));
+      // 3. Détails KPI (barres catégorie / urgence / top zones / par événement)
+      var detailsCard = buildKpiDetailsCard(summary.kpis || {});
+      if (detailsCard) panel.appendChild(detailsCard);
+      // 4. Cartes contextuelles (24h à venir / billetterie / portes)
       var upcomingCard = buildUpcomingCard(summary);
       if (upcomingCard) panel.appendChild(upcomingCard);
       var attendanceCard = buildAttendanceCard(summary);
       if (attendanceCard) panel.appendChild(attendanceCard);
       var doorsCard = buildDoorsCard(summary);
       if (doorsCard) panel.appendChild(doorsCard);
-      panel.appendChild(buildKpiCard(summary.kpis || {}, summary.comparisons || null));
-      var sections = summary.sections || {};
-      var synth = sections.synthese || "";
-      var faits = sections.faits_marquants || "";
-      var textRow = el("div", { class: "ai-overview-text" });
-      textRow.appendChild(el("div", { class: "ai-section-card ai-section-synthese" }, [
-        el("div", { class: "ai-section-header" }, [
-          el("span", { class: "material-symbols-outlined" }, ["summarize"]),
-          el("span", { class: "ai-section-title", text: "Synthèse" })
-        ]),
-        el("div", { class: "ai-section-body" }, [
-          el("p", { text: synth || "RAS" })
-        ])
-      ]));
-      textRow.appendChild(el("div", { class: "ai-section-card ai-section-faits_marquants" }, [
-        el("div", { class: "ai-section-header" }, [
-          el("span", { class: "material-symbols-outlined" }, ["campaign"]),
-          el("span", { class: "ai-section-title", text: "Faits marquants" })
-        ]),
-        el("div", { class: "ai-section-body" }, [
-          el("p", { text: faits || "RAS" })
-        ])
-      ]));
-      panel.appendChild(textRow);
     } else {
       var content = (summary.sections || {})[state.activeTab] || "";
       panel.appendChild(el("div", { class: "ai-section-card ai-section-" + state.activeTab }, [
@@ -672,7 +656,33 @@
         && d.getDate() === n.getDate();
   }
 
-  function buildKpiCard(kpis, comparisons) {
+  function buildSyntheseFaitsMarquants(summary) {
+    var sections = summary.sections || {};
+    var synth = sections.synthese || "";
+    var faits = sections.faits_marquants || "";
+    var row = el("div", { class: "ai-overview-text" });
+    row.appendChild(el("div", { class: "ai-section-card ai-section-synthese" }, [
+      el("div", { class: "ai-section-header" }, [
+        el("span", { class: "material-symbols-outlined" }, ["summarize"]),
+        el("span", { class: "ai-section-title", text: "Synthèse" })
+      ]),
+      el("div", { class: "ai-section-body" }, [
+        el("p", { text: synth || "RAS" })
+      ])
+    ]));
+    row.appendChild(el("div", { class: "ai-section-card ai-section-faits_marquants" }, [
+      el("div", { class: "ai-section-header" }, [
+        el("span", { class: "material-symbols-outlined" }, ["campaign"]),
+        el("span", { class: "ai-section-title", text: "Faits marquants" })
+      ]),
+      el("div", { class: "ai-section-body" }, [
+        el("p", { text: faits || "RAS" })
+      ])
+    ]));
+    return row;
+  }
+
+  function buildKpiTilesCard(kpis, comparisons) {
     var box = el("div", { class: "ai-kpi-card" });
     var top = el("div", { class: "ai-kpi-top" }, [
       kpiTile("Total", kpis.total || 0, "description", deltasFor(kpis.total, comparisons)),
@@ -685,11 +695,21 @@
       )
     ]);
     box.appendChild(top);
-
     if (comparisons) {
       var compRow = buildComparisonsRow(kpis, comparisons);
       if (compRow) box.appendChild(compRow);
     }
+    return box;
+  }
+
+  function buildKpiDetailsCard(kpis) {
+    if (!kpis) return null;
+    var hasContent = (kpis.by_category && Object.keys(kpis.by_category).length)
+      || (kpis.by_urgency && Object.keys(kpis.by_urgency).length)
+      || (kpis.top_zones && kpis.top_zones.length)
+      || (kpis.by_event && kpis.by_event.length > 1);
+    if (!hasContent) return null;
+    var box = el("div", { class: "ai-kpi-card" });
 
     var cats = kpis.by_category || {};
     if (Object.keys(cats).length) {
