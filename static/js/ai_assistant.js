@@ -479,12 +479,14 @@
     if (state.activeTab === "overview") {
       // 1. Tuiles KPI (4 chiffres clés + chips comparatives)
       panel.appendChild(buildKpiTilesCard(summary.kpis || {}, summary.comparisons || null));
-      // 2. Faits marquants (la synthèse a été retirée car redondante)
+      // 2. Synthèse de la période (vision macro + comparatifs)
+      panel.appendChild(buildSyntheseCard(summary));
+      // 3. Faits marquants
       panel.appendChild(buildFaitsMarquantsCard(summary));
-      // 3. Détails KPI
+      // 4. Détails KPI
       var detailsCard = buildKpiDetailsCard(summary.kpis || {});
       if (detailsCard) panel.appendChild(detailsCard);
-      // 4. Cartes contextuelles
+      // 5. Cartes contextuelles
       var upcomingCard = buildUpcomingCard(summary);
       if (upcomingCard) panel.appendChild(upcomingCard);
       var attendanceCard = buildAttendanceCard(summary);
@@ -764,6 +766,21 @@
     return d.getFullYear() === n.getFullYear()
         && d.getMonth() === n.getMonth()
         && d.getDate() === n.getDate();
+  }
+
+  function buildSyntheseCard(summary) {
+    var synth = (summary.sections || {}).synthese || "";
+    var card = el("div", { class: "ai-section-card ai-section-synthese" }, [
+      el("div", { class: "ai-section-header" }, [
+        el("span", { class: "material-symbols-outlined" }, ["summarize"]),
+        el("span", { class: "ai-section-title", text: "Synthèse" })
+      ])
+    ]);
+    var body = el("div", { class: "ai-section-body" });
+    if (synth) renderMd(synth, body);
+    else body.appendChild(el("p", { class: "ai-md-ras", text: "RAS" }));
+    card.appendChild(body);
+    return card;
   }
 
   function buildFaitsMarquantsCard(summary) {

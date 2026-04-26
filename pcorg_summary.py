@@ -47,6 +47,7 @@ COMMENTS_KEEP_LAST = 3
 
 # Cles de sortie attendues du modele.
 SECTION_KEYS = (
+    "synthese",
     "faits_marquants",
     "secours",
     "securite",
@@ -1142,8 +1143,9 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
         "Contraintes strictes :\n"
         "- Reponds UNIQUEMENT par un objet JSON valide, sans texte avant ou "
         "apres, sans bloc markdown encadrant le JSON.\n"
-        "- L'objet contient EXACTEMENT ces 8 cles : faits_marquants, secours, "
-        "securite, technique, flux, fourriere, recommandations, prochaines_24h.\n"
+        "- L'objet contient EXACTEMENT ces 9 cles : synthese, faits_marquants, "
+        "secours, securite, technique, flux, fourriere, recommandations, "
+        "prochaines_24h.\n"
         "\n"
         "Mise en forme du contenu de chaque cle (markdown leger autorise) :\n"
         "- Utilise des SAUTS DE LIGNE pour aerer : separe les paragraphes "
@@ -1158,6 +1160,14 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
         "code, pas d'images.\n"
         "\n"
         "Contenu attendu par cle :\n"
+        "- synthese : vision macro de la periode analysee en 3 a 5 phrases "
+        "courtes (1 paragraphe). Doit imperativement situer le volume "
+        "d'activite, la tonalite generale (calme / dense / critique) et "
+        "exploiter les KPIs comparatifs s'ils sont fournis (variation par "
+        "rapport a la veille meme creneau, et par rapport a l'edition "
+        "precedente). Quelques mots-cles peuvent etre en **gras** pour les "
+        "chiffres ou tendances importantes. PAS de liste a puces ici, "
+        "c'est un paragraphe synthetique.\n"
         "- faits_marquants : 3 a 6 puces qui mettent en avant les "
         "evenements vraiment notables uniquement (incident reel, fait "
         "inhabituel, situation critique, anomalie). PAS un resume general. "
@@ -2049,6 +2059,7 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
                 db, event, year, ts_start, ts_end, created_by_email, created_by_name,
                 kpis, 0, False, sections, "", {"input_tokens": 0, "output_tokens": 0},
                 comparisons=comparisons, upcoming=upcoming, attendance=attendance, n1_retro=n1_retro,
+                door_reinforcement=door_reinforcement,
             )
         # Sinon, appel Claude minimal pour la section prochaines_24h.
         system, user = build_prompts(
@@ -2079,7 +2090,7 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
         extra_focus_note=extra_focus_note,
         door_reinforcement=door_reinforcement,
     )
-    sections, raw_text, usage = call_claude(system, user)
+    sections, raw_text, usage = call_claude(system, user, on_progress=on_progress)
     if sections is None:
         # JSON non parsable : on conserve le texte brut dans faits_marquants
         # et on remplit les autres en RAS pour ne rien perdre.
@@ -2090,4 +2101,5 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
         db, event, year, ts_start, ts_end, created_by_email, created_by_name,
         kpis, len(fiches), truncated, sections, raw_text, usage,
         comparisons=comparisons, upcoming=upcoming, attendance=attendance, n1_retro=n1_retro,
+        door_reinforcement=door_reinforcement,
     )

@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------------------
 
 SECTION_LABELS = [
+    ("synthese", "Synthese", "#2563eb"),
     ("faits_marquants", "Faits marquants", "#f59e0b"),
     ("secours", "Secours", "#dc2626"),
     ("securite", "Securite", "#ef4444"),
@@ -717,20 +718,39 @@ def _spacer(h_px=12):
 # ----------------------------------------------------------------------------
 
 def render_summary_html(summary):
+    """Compose le HTML du mail dans l'ordre :
+
+    1. Header (event, periode, auteur)
+    2. KPI block (tuiles + categories + urgences + comparaisons)
+    3. Synthese + Faits marquants (cartes en tete pour donner la vue macro)
+    4. Prochaines 24h (briefing factorise)
+    5. Billetterie & frequentation (Hier / Aujourd'hui / Demain)
+    6. Renforts conseilles sur les portes
+    7. Sections thematiques detaillees (Secours / Securite / Technique /
+       Flux / Fourriere / Recommandations)
+    """
+    sections = summary.get("sections") or {}
+
+    # Decoupage des sections : les 2 premieres en haut (vue macro), les 6
+    # autres en bas (detail thematique).
+    head_keys = {"synthese", "faits_marquants"}
+    head_sections = [(k, l, c) for (k, l, c) in SECTION_LABELS if k in head_keys]
+    tail_sections = [(k, l, c) for (k, l, c) in SECTION_LABELS if k not in head_keys]
+
     body = (
         _report_header(summary)
         + _spacer(8)
-        + _upcoming_block(summary)
-        + _attendance_block(summary)
-        + _doors_block(summary)
         + _kpi_block(summary.get("kpis") or {}, summary.get("comparisons"))
     )
-    sections = summary.get("sections") or {}
-    for key, label, color in SECTION_LABELS:
+    for key, label, color in head_sections:
         body += _section_card(label, sections.get(key, ""), accent=color)
-    # Note retrospective : conservee dans le doc Mongo (alimente Claude)
-    # mais ne s'affiche plus en bloc standalone — elle est integree dans
-    # les sections recommandations/flux directement par Claude.
+    body += (
+        _upcoming_block(summary)
+        + _attendance_block(summary)
+        + _doors_block(summary)
+    )
+    for key, label, color in tail_sections:
+        body += _section_card(label, sections.get(key, ""), accent=color)
     body += _spacer(12)
     return _wrap(body)
 
