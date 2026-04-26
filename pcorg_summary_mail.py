@@ -37,7 +37,6 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------------------
 
 SECTION_LABELS = [
-    ("synthese", "Synthese", "#2563eb"),
     ("faits_marquants", "Faits marquants", "#f59e0b"),
     ("secours", "Secours", "#dc2626"),
     ("securite", "Securite", "#ef4444"),
@@ -409,47 +408,40 @@ def _comparisons_block(kpis, comparisons):
 
 
 def _upcoming_block(summary):
+    """Bloc 'Prochaines 24h' : briefing Claude factorise UNIQUEMENT.
+
+    La liste detaillee des vignettes timetable n'est plus rendue dans le
+    mail (Claude factorise deja les ouvertures multiples et met en avant les
+    jalons strategiques dans le briefing). Le compteur de jalons reste affiche
+    en chip a titre indicatif.
+    """
     sections = summary.get("sections") or {}
     items = summary.get("upcoming") or []
     briefing = sections.get("prochaines_24h") or ""
-    if not items and not briefing:
+    if not briefing and not items:
         return ""
-    rows = ""
-    for it in items[:30]:
-        when = ""
-        try:
-            dt = datetime.fromisoformat(str(it.get("datetime")).replace("Z", "+00:00")) if it.get("datetime") else None
-        except (ValueError, TypeError):
-            dt = None
-        if dt:
-            when = dt.strftime("%d/%m %Hh%M")
-        elif it.get("date") and it.get("time"):
-            when = _h(it["date"]) + " " + _h(it["time"])
-        label = _h(it.get("activity") or "")
-        if it.get("place"):
-            label += " &mdash; " + _h(it["place"])
-        meta = []
-        if it.get("event"):
-            meta.append(_h(it["event"]) + (" " + _h(it.get("year")) if it.get("year") else ""))
-        if it.get("category"):
-            meta.append(_h(it["category"]))
-        if it.get("department"):
-            meta.append(_h(it["department"]))
-        rows += (
-            '<tr><td style="padding:5px 0;border-bottom:1px solid #eef2f6;">'
-            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
-            '<td valign="top" width="110" style="font-size:12px;font-weight:700;color:#4338ca;">'
-            + when + '</td>'
-            '<td valign="top" style="font-size:13px;color:#1a1a1a;">' + label
-            + (('<div style="font-size:11px;color:#666666;margin-top:2px;">' + " &middot; ".join(meta) + '</div>') if meta else '')
-            + '</td></tr></table></td></tr>'
-        )
     briefing_html = ""
     if briefing:
         briefing_html = (
-            '<div style="background:#ffffff;border-radius:6px;padding:10px 12px;'
-            'font-size:13px;color:#333333;line-height:1.5;margin-bottom:10px;">'
+            '<div style="background:#ffffff;border-radius:6px;padding:12px 14px;'
+            'font-size:13px;color:#333333;line-height:1.55;">'
             + _render_md(briefing) + '</div>'
+        )
+    elif items:
+        # Cas tres rare : pas de briefing genere mais des vignettes existent.
+        # On affiche un message neutre.
+        briefing_html = (
+            '<div style="background:#ffffff;border-radius:6px;padding:10px 12px;'
+            'font-size:13px;color:#94a3b8;font-style:italic;">'
+            + _fmt_int(len(items)) + ' jalon(s) timetable enregistre(s) mais '
+            'briefing non genere.</div>'
+        )
+    count_chip = ""
+    if items:
+        count_chip = (
+            '<span style="float:right;background:#e0e7ff;color:#4338ca;font-size:10px;'
+            'padding:2px 8px;border-radius:999px;">'
+            + _fmt_int(len(items)) + ' jalon(s)</span>'
         )
     return (
         '<tr><td style="padding:8px 24px;">'
@@ -459,12 +451,8 @@ def _upcoming_block(summary):
         '<tr><td style="padding:14px 16px;">'
         '<div style="font-size:13px;font-weight:700;color:#1e1b4b;'
         'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">'
-        'Prochaines 24 heures'
-        + ('<span style="float:right;background:#e0e7ff;color:#4338ca;font-size:10px;'
-           'padding:2px 8px;border-radius:999px;">' + _fmt_int(len(items)) + ' jalon(s)</span>' if items else '')
-        + '</div>' + briefing_html
-        + (('<table role="presentation" width="100%" cellpadding="0" cellspacing="0">'
-            + rows + '</table>') if rows else '')
+        'Prochaines 24 heures' + count_chip + '</div>'
+        + briefing_html
         + '</td></tr></table></td></tr>'
     )
 
