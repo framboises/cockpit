@@ -4417,15 +4417,35 @@ def pcorg_morning_report_get_prefs():
 @app.route('/api/pcorg/morning-report/prefs', methods=['PUT'])
 @role_required("admin")
 def pcorg_morning_report_set_pref():
+    """Met a jour les preferences du rapport matinal.
+
+    Body accepte deux formes :
+      - {"global_enabled": true|false}  -> interrupteur global ON/OFF
+      - {"user_id": "<oid>", "enabled": true|false} -> opt-in par user
+    """
     data = request.get_json(silent=True) or {}
+    user = request.user_payload or {}
+    sender_email = user.get("email") or ""
+
+    # Forme 1 : interrupteur global
+    if "global_enabled" in data:
+        try:
+            pcorg_summary.set_morning_report_enabled(
+                db, bool(data["global_enabled"]), updated_by_email=sender_email,
+            )
+        except Exception as e:
+            logger.exception("pcorg_morning_report_set_pref (global): erreur")
+            return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": True})
+
+    # Forme 2 : opt-in par user
     user_id = data.get("user_id")
     enabled = bool(data.get("enabled"))
     if not user_id:
-        return jsonify({"ok": False, "error": "user_id requis"}), 400
-    user = request.user_payload or {}
+        return jsonify({"ok": False, "error": "user_id ou global_enabled requis"}), 400
     try:
         pcorg_summary.set_morning_report_recipient(
-            db, user_id, enabled, updated_by_email=user.get("email") or "",
+            db, user_id, enabled, updated_by_email=sender_email,
         )
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400

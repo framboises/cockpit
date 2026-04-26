@@ -421,6 +421,22 @@
           <span class="material-symbols-outlined collapse-icon">expand_more</span>
         </header>
         <div class="widget-body collapsible" id="users-body">
+
+          <div class="morning-report-master" id="morning-report-master">
+            <label class="morning-report-switch" title="Active ou desactive globalement le rapport matinal automatique a 07h00">
+              <input type="checkbox" id="morning-report-global">
+              <span class="morning-report-switch-track"></span>
+              <span class="morning-report-switch-label">
+                <strong>Rapport matinal automatique</strong>
+                <span class="morning-report-switch-sub" id="morning-report-global-state">Chargement...</span>
+              </span>
+            </label>
+            <div class="morning-report-warning" id="morning-report-warning" style="display:none;">
+              Rapport <strong>desactive</strong> : la tache planifiee de 7h ne fait rien (zero appel Claude, zero mail).
+              Les inscriptions individuelles ci-dessous restent enregistrees mais inactives tant que cette case n'est pas cochee.
+            </div>
+          </div>
+
           <div class="table-responsive">
             <table id="users-table" class="table table-striped table-hover">
               <thead>

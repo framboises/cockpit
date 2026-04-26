@@ -976,6 +976,32 @@ def _iso(v):
     return v
 
 
+def _iso_paris(v):
+    """Convertit datetime/string ISO en ISO localise sur Europe/Paris.
+
+    Pour les valeurs envoyees a Claude : on veut que tous les datetimes
+    apparaissent dans le fuseau Paris pour eviter que Claude prenne 05h UTC
+    et le rende litteralement comme '05h' au lieu de '07h' Paris.
+    """
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        dt = v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+        return dt.astimezone(TZ_PARIS).isoformat()
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return s
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(TZ_PARIS).isoformat()
+        except (ValueError, TypeError):
+            return s
+    return str(v)
+
+
 def _json_default(o):
     """Fallback de serialisation JSON pour les types non standards."""
     if isinstance(o, datetime):
@@ -1000,7 +1026,7 @@ def _serialize_fiche(doc):
         if not isinstance(h, dict):
             continue
         history_short.append({
-            "ts": _iso(h.get("ts")),
+            "ts": _iso_paris(h.get("ts")),
             "operator": h.get("operator"),
             "text": _truncate(h.get("text"), 300),
         })
@@ -1008,8 +1034,8 @@ def _serialize_fiche(doc):
         "id": str(doc.get("_id", "")),
         "event": doc.get("event"),
         "year": doc.get("year"),
-        "ts": _iso(doc.get("ts")),
-        "close_ts": _iso(doc.get("close_ts")),
+        "ts": _iso_paris(doc.get("ts")),
+        "close_ts": _iso_paris(doc.get("close_ts")),
         "category": doc.get("category"),
         "sous_classification": cc.get("sous_classification"),
         "urgence": doc.get("niveau_urgence"),
@@ -1032,7 +1058,7 @@ def _serialize_fiche_compact(doc):
     cc = doc.get("content_category") or {}
     area = doc.get("area") or {}
     return {
-        "ts": _iso(doc.get("ts")),
+        "ts": _iso_paris(doc.get("ts")),
         "category": doc.get("category"),
         "sous_classification": cc.get("sous_classification"),
         "urgence": doc.get("niveau_urgence"),
@@ -1190,9 +1216,18 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
         "EXPLICITEMENT les erreurs a ne pas reproduire dans les 24h qui "
         "arrivent : commence ces puces par par exemple **A ne pas "
         "reproduire** ou **L'an passe sur ce meme creneau** suivi du "
-        "constat puis de l'action. NE redetaille PAS les renforts portes "
-        "(le tableau dedie suffit), tu peux juste y faire reference d'une "
-        "phrase. Pas de numerotation '1.', '2.' ; uniquement des puces.\n"
+        "constat puis de l'action.\n"
+        "ATTENTION : la 'Note retrospective' est un contexte INTERNE qui "
+        "ne sera pas affiche au lecteur. NE FAIS JAMAIS reference a la "
+        "note ('en coherence avec la note retrospective', 'voir note "
+        "retrospective', 'cf note retrospective', 'comme indique dans la "
+        "note', etc.). Integre directement le constat de l'an passe dans "
+        "ta phrase comme un fait connu (par ex. : 'L'an passe a la meme "
+        "heure, plusieurs altercations ont eu lieu : prevoir une patrouille "
+        "dediee').\n"
+        "NE redetaille PAS les renforts portes (le tableau dedie suffit), "
+        "tu peux juste y faire reference d'une phrase generale. Pas de "
+        "numerotation '1.', '2.' ; uniquement des puces.\n"
         "- prochaines_24h : mini-briefing en 5 a 8 puces qui FACTORISE et "
         "MET EN AVANT les jalons strategiques pour un circuit automobile. "
         "Priorise dans l'ordre :\n"
@@ -1234,10 +1269,23 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
         "donnees fournies.\n"
         "- Pas de guillemets typographiques courbes : uniquement des "
         "apostrophes et guillemets droits.\n"
+        "\n"
+        "Fuseau horaire :\n"
+        "- TOUTES les heures et dates fournies dans les donnees (periode "
+        "analysee, fenetres comparatives, ts des fiches, ts des "
+        "commentaires, vignettes timetable) sont DEJA exprimees en heure "
+        "locale **Europe/Paris** (UTC+01:00 en hiver, UTC+02:00 en ete). "
+        "Quand tu cites une heure dans tes reponses, utilise toujours "
+        "cette heure locale au format compact 'HHhMM' (ex: 14h30, 22h00, "
+        "07h00). N'utilise JAMAIS le suffixe 'UTC', 'Z', '+00:00' ni "
+        "ne mentionne le decalage horaire dans les phrases.\n"
     )
 
-    period_iso_start = ts_start.isoformat()
-    period_iso_end = ts_end.isoformat()
+    # Toutes les heures envoyees a Claude doivent etre en local Paris pour
+    # eviter qu'il rende les ISO UTC litteralement (05h UTC -> '05h' au lieu
+    # de '07h' Paris).
+    period_iso_start = _iso_paris(ts_start)
+    period_iso_end = _iso_paris(ts_end)
     scope_label = "tous evenements confondus"
     if event and year is not None:
         scope_label = str(event) + " " + str(year)
@@ -1248,7 +1296,8 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
     parts = [
         "Contexte :\n"
         "- Perimetre : " + scope_label + "\n"
-        "- Periode : " + period_iso_start + " --> " + period_iso_end + "\n"
+        "- Periode (heures locales Europe/Paris) : "
+        + period_iso_start + " --> " + period_iso_end + "\n"
         "- Echantillon tronque : " + ("oui" if truncated else "non") + "\n"
         "\n"
         "KPIs (periode courante) :\n"
@@ -1260,16 +1309,22 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
         if prev and prev.get("kpis", {}).get("total", 0) > 0:
             parts.append(
                 "\n\nKPIs comparatifs - " + prev["label"] + " :\n"
-                "- Fenetre : " + prev["period_start"] + " --> " + prev["period_end"] + "\n"
+                "- Fenetre (Europe/Paris) : "
+                + _iso_paris(prev["period_start"]) + " --> "
+                + _iso_paris(prev["period_end"]) + "\n"
                 + json.dumps(prev["kpis"], ensure_ascii=False, indent=2, default=_json_default)
             )
         prev_year = comparisons.get("prev_year_aligned")
         if prev_year and prev_year.get("kpis", {}).get("total", 0) > 0:
             parts.append(
                 "\n\nKPIs comparatifs - " + prev_year["label"] + " :\n"
-                "- Fenetre annee precedente : " + prev_year["period_start"] + " --> " + prev_year["period_end"] + "\n"
-                "- Date course annee courante : " + prev_year["race_dt_n"] + "\n"
-                "- Date course annee precedente : " + prev_year["race_dt_prev"] + "\n"
+                "- Fenetre annee precedente (Europe/Paris) : "
+                + _iso_paris(prev_year["period_start"]) + " --> "
+                + _iso_paris(prev_year["period_end"]) + "\n"
+                "- Date course annee courante (Europe/Paris) : "
+                + _iso_paris(prev_year["race_dt_n"]) + "\n"
+                "- Date course annee precedente (Europe/Paris) : "
+                + _iso_paris(prev_year["race_dt_prev"]) + "\n"
                 + json.dumps(prev_year["kpis"], ensure_ascii=False, indent=2, default=_json_default)
             )
     if n1_retro and n1_retro.get("text"):
@@ -1371,12 +1426,18 @@ def _build_retro_prompts(event, year_prev, ts_start, ts_end, kpis, fiches):
         "apostrophes et guillemets droits.\n"
         "- Si le volume est faible ou les fiches peu parlantes, dis-le "
         "honnetement, ne sur-interprete pas.\n"
+        "- TOUTES les heures et dates fournies dans les donnees (fenetre, "
+        "ts des fiches, ts des commentaires) sont DEJA exprimees en heure "
+        "locale Europe/Paris. Quand tu cites une heure, utilise le format "
+        "compact 'HHhMM' (ex: 14h30, 22h00). N'utilise JAMAIS 'UTC', 'Z', "
+        "'+00:00' ni le decalage horaire dans tes phrases.\n"
     )
     user = (
         "Contexte :\n"
         "- Evenement : " + str(event) + "\n"
         "- Annee analysee : " + str(year_prev) + "\n"
-        "- Fenetre alignee : " + ts_start.isoformat() + " --> " + ts_end.isoformat() + "\n"
+        "- Fenetre alignee (heures locales Europe/Paris) : "
+        + _iso_paris(ts_start) + " --> " + _iso_paris(ts_end) + "\n"
         "\n"
         "KPIs (edition precedente, periode alignee) :\n"
         + json.dumps(kpis, ensure_ascii=False, indent=2, default=_json_default)
@@ -1821,15 +1882,35 @@ def _serialize_summary(doc, light=True):
 # ----------------------------------------------------------------------------
 
 def get_morning_report_prefs(db):
-    """Retourne {enabled_user_ids: [str], updated_at, updated_by}."""
+    """Retourne {enabled, enabled_user_ids: [str], updated_at, updated_by}.
+
+    `enabled` est l'interrupteur global : si False, la tache planifiee quitte
+    sans rien faire (zero appel Claude, zero mail). Defaut False (opt-in).
+    """
     doc = db[COCKPIT_SETTINGS_COLLECTION].find_one({"_id": MORNING_REPORT_SETTINGS_ID}) or {}
     raw_ids = doc.get("enabled_user_ids") or []
     ids = [str(x) for x in raw_ids]
     return {
+        "enabled": bool(doc.get("enabled", False)),
         "enabled_user_ids": ids,
         "updated_at": doc.get("updated_at"),
         "updated_by": doc.get("updated_by"),
     }
+
+
+def set_morning_report_enabled(db, enabled, updated_by_email=None):
+    """Active ou desactive globalement le rapport matinal automatique."""
+    db[COCKPIT_SETTINGS_COLLECTION].update_one(
+        {"_id": MORNING_REPORT_SETTINGS_ID},
+        {
+            "$set": {
+                "enabled": bool(enabled),
+                "updated_at": datetime.now(timezone.utc),
+                "updated_by": updated_by_email or "",
+            },
+        },
+        upsert=True,
+    )
 
 
 def set_morning_report_recipient(db, user_id, enabled, updated_by_email=None):

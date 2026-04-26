@@ -103,11 +103,23 @@ def main(argv=None):
     parser.add_argument("--no-mail", action="store_true", help="Genere et sauve mais n'envoie aucun mail")
     parser.add_argument("--as-of", default="", dest="as_of",
                         help="ISO datetime pour simuler le 'now' (test, ex: 2025-06-14T07:00)")
+    parser.add_argument("--force", action="store_true",
+                        help="Ignore l'interrupteur global (utile pour test admin)")
     args = parser.parse_args(argv)
 
     log = _setup_logging()
     db, client = _connect_mongo()
     try:
+        # Interrupteur global : si desactive, on quitte sans rien faire.
+        # --force permet aux admins de bypasser pour tester en CLI.
+        prefs = pcorg_summary.get_morning_report_prefs(db)
+        if not prefs.get("enabled") and not args.force:
+            log.info("Rapport matinal desactive globalement (cockpit_settings."
+                     "morning_report.enabled=false). Sortie.")
+            log.info("Pour activer : page Cockpit /edit -> 'Rapport matinal "
+                     "automatique'. Pour bypasser ce check en CLI : --force.")
+            return 0
+
         # Mode simulation : si --as-of fourni, on traite ce datetime comme le
         # "now" courant (en Europe/Paris si naif). Sert a tester en local hors
         # periode d'evenement.

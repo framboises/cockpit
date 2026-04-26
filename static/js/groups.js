@@ -30,7 +30,8 @@
   };
   var MorningReportAPI = {
     get: function(){ return fetch("/api/pcorg/morning-report/prefs").then(function(r){ return r.json(); }); },
-    set: function(uid, enabled){ return fetch("/api/pcorg/morning-report/prefs", {method:"PUT", headers:jsonHeaders(), body:JSON.stringify({user_id: uid, enabled: !!enabled})}).then(function(r){ return r.json(); }); }
+    set: function(uid, enabled){ return fetch("/api/pcorg/morning-report/prefs", {method:"PUT", headers:jsonHeaders(), body:JSON.stringify({user_id: uid, enabled: !!enabled})}).then(function(r){ return r.json(); }); },
+    setGlobal: function(enabled){ return fetch("/api/pcorg/morning-report/prefs", {method:"PUT", headers:jsonHeaders(), body:JSON.stringify({global_enabled: !!enabled})}).then(function(r){ return r.json(); }); }
   };
 
   // ============================================================
@@ -490,12 +491,44 @@
     }
   });
 
+  function applyMorningReportGlobalUi(globalEnabled){
+    var cb = document.getElementById("morning-report-global");
+    var stateLbl = document.getElementById("morning-report-global-state");
+    var warning = document.getElementById("morning-report-warning");
+    var master = document.getElementById("morning-report-master");
+    if (cb) cb.checked = !!globalEnabled;
+    if (stateLbl) stateLbl.textContent = globalEnabled
+      ? "Active : la tache planifiee de 7h envoie le rapport aux utilisateurs cochés ci-dessous."
+      : "Desactive : la tache de 7h ne fait rien.";
+    if (warning) warning.style.display = globalEnabled ? "none" : "block";
+    if (master) master.classList.toggle("is-disabled", !globalEnabled);
+  }
+
+  // Bind du toggle global (delegation pour eviter de rebinder a chaque refresh)
+  document.addEventListener("change", function(e){
+    if (e.target && e.target.id === "morning-report-global"){
+      var on = e.target.checked;
+      e.target.disabled = true;
+      MorningReportAPI.setGlobal(on).then(function(res){
+        e.target.disabled = false;
+        if (res && res.ok){
+          applyMorningReportGlobalUi(on);
+          showToast("success", on ? "Rapport matinal active" : "Rapport matinal desactive");
+        } else {
+          e.target.checked = !on;
+          showToast("error", (res && res.error) || "Erreur");
+        }
+      });
+    }
+  });
+
   function refreshAll(){
     Promise.all([GroupAPI.list(), UserAPI.list(), MorningReportAPI.get()]).then(function(results){
       renderGroups(results[0]);
       var prefs = results[2] || {};
       morningReportEnabled = {};
       (prefs.enabled_user_ids || []).forEach(function(uid){ morningReportEnabled[uid] = true; });
+      applyMorningReportGlobalUi(!!prefs.enabled);
       renderUsers(results[1]);
     });
   }
