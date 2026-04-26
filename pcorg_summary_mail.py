@@ -607,17 +607,13 @@ def _doors_block(summary):
     if not dr or not dr.get("recommendations"):
         return ""
 
-    # Limite : top 12 pour rester lisible
+    # On affiche TOUTES les recommandations (pas de limite).
     all_recos = list(dr.get("recommendations") or [])
     fortes = [r for r in all_recos if r.get("criticite") == "forte"]
     moderees = [r for r in all_recos if r.get("criticite") != "forte"]
     # Tri par creneau croissant pour la lecture chronologique
     fortes.sort(key=lambda r: r.get("slot_n_start") or "")
     moderees.sort(key=lambda r: r.get("slot_n_start") or "")
-    shown_fortes = fortes
-    remaining_for_moderees = max(0, 12 - len(shown_fortes))
-    shown_moderees = moderees[:remaining_for_moderees]
-    nb_skipped = (len(fortes) - len(shown_fortes)) + (len(moderees) - len(shown_moderees))
 
     def _row(r):
         crit = r.get("criticite") or ""
@@ -684,14 +680,6 @@ def _doors_block(summary):
             '<tbody>' + rows + '</tbody></table></div>'
         )
 
-    skipped_html = ""
-    if nb_skipped > 0:
-        skipped_html = (
-            '<div style="font-size:11px;color:#9a3412;font-style:italic;margin-top:10px;">'
-            + str(nb_skipped) + ' reco(s) supplementaire(s) non affichee(s) (criticite '
-            'moderee, voir donnees completes en base si besoin).</div>'
-        )
-
     return (
         '<tr><td style="padding:8px 24px;">'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
@@ -705,11 +693,10 @@ def _doors_block(summary):
         'Croisement pic de trafic et incidents de l\'edition precedente'
         + (' (' + _h(str(dr.get("year_prev"))) + ')' if dr.get("year_prev") else '') + ', '
         'aligne sur le jour-equivalent course.</div>'
-        + _section("Criticite forte", "#dc2626", "#ffffff", shown_fortes,
+        + _section("Criticite forte", "#dc2626", "#ffffff", fortes,
                    "Pic eleve l'an passe ET incidents avere(s) sur le meme creneau.")
-        + _section("Criticite moderee", "#f59e0b", "#7c2d12", shown_moderees,
+        + _section("Criticite moderee", "#f59e0b", "#7c2d12", moderees,
                    "Pic ou incidents l'an passe (un seul des deux).")
-        + skipped_html
         + '</td></tr></table></td></tr>'
     )
 
