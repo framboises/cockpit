@@ -9,6 +9,13 @@ import traceback
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+# Le script vit dans scripts/, on ajoute le parent (racine cockpit) au PYTHONPATH
+# pour pouvoir importer les modules pcorg_summary et pcorg_doors_analysis.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_HERE)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 from pymongo import MongoClient
 
 import pcorg_summary as ps
