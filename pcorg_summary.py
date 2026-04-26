@@ -75,13 +75,14 @@ def compute_kpis(db, event, year, ts_start, ts_end):
     """Aggrege les fiches pcorg pour la periode et retourne un dict de KPIs.
 
     ts_start / ts_end : datetime aware (UTC).
+    Si event/year sont None, l'agregation porte sur tous les evenements.
     """
     col = db[PCORG_COLLECTION]
-    base = {
-        "event": event,
-        "year": int(year),
-        "ts": {"$gte": ts_start, "$lte": ts_end},
-    }
+    base = {"ts": {"$gte": ts_start, "$lte": ts_end}}
+    if event:
+        base["event"] = event
+    if year is not None:
+        base["year"] = int(year)
     total = col.count_documents(base)
     closed = col.count_documents({**base, "status_code": 10})
     open_ = total - closed
@@ -98,6 +99,18 @@ def compute_kpis(db, event, year, ts_start, ts_end):
     for r in _counts("category"):
         key = r.get("_id") or "_none"
         by_category[str(key)] = int(r["n"])
+
+    by_event = []
+    pipe_event = [
+        {"$match": base},
+        {"$group": {"_id": {"event": "$event", "year": "$year"}, "n": {"$sum": 1}}},
+        {"$sort": {"n": -1}},
+    ]
+    for r in col.aggregate(pipe_event):
+        eid = r.get("_id") or {}
+        ev = eid.get("event") or "_none"
+        yr = eid.get("year")
+        by_event.append({"event": str(ev), "year": yr, "count": int(r["n"])})
 
     by_urgency = {}
     for r in _counts("niveau_urgence"):
@@ -150,6 +163,7 @@ def compute_kpis(db, event, year, ts_start, ts_end):
         "closed": closed,
         "by_category": by_category,
         "by_urgency": by_urgency,
+        "by_event": by_event,
         "top_zones": top_zones,
         "top_sous_classifications": top_sous,
         "top_operators": by_operator,
@@ -170,10 +184,32 @@ def _truncate(text, n=TEXT_TRUNCATE_CHARS):
     return s[:n] + " [...]"
 
 
+def _iso(v):
+    """Convertit datetime/date en ISO string ; passe through les autres types."""
+    if isinstance(v, datetime):
+        return v.isoformat()
+    if hasattr(v, "isoformat"):
+        try:
+            return v.isoformat()
+        except Exception:
+            return str(v)
+    return v
+
+
+def _json_default(o):
+    """Fallback de serialisation JSON pour les types non standards."""
+    if isinstance(o, datetime):
+        return o.isoformat()
+    if hasattr(o, "isoformat"):
+        try:
+            return o.isoformat()
+        except Exception:
+            return str(o)
+    return str(o)
+
+
 def _serialize_fiche(doc):
     """Forme compacte d'une fiche pour le prompt."""
-    ts = doc.get("ts")
-    close_ts = doc.get("close_ts")
     cc = doc.get("content_category") or {}
     area = doc.get("area") or {}
     history = doc.get("comment_history") or []
@@ -184,14 +220,16 @@ def _serialize_fiche(doc):
         if not isinstance(h, dict):
             continue
         history_short.append({
-            "ts": h.get("ts"),
+            "ts": _iso(h.get("ts")),
             "operator": h.get("operator"),
             "text": _truncate(h.get("text"), 300),
         })
     return {
         "id": str(doc.get("_id", "")),
-        "ts": ts.isoformat() if isinstance(ts, datetime) else ts,
-        "close_ts": close_ts.isoformat() if isinstance(close_ts, datetime) else close_ts,
+        "event": doc.get("event"),
+        "year": doc.get("year"),
+        "ts": _iso(doc.get("ts")),
+        "close_ts": _iso(doc.get("close_ts")),
         "category": doc.get("category"),
         "sous_classification": cc.get("sous_classification"),
         "urgence": doc.get("niveau_urgence"),
@@ -209,13 +247,14 @@ def select_fiches_for_prompt(db, event, year, ts_start, ts_end, max_fiches=DEFAU
 
     Priorise les fiches majeures (urgence EU/UA ou is_incident) qui sont
     toujours incluses ; complete avec les autres dans la limite max_fiches.
+    Si event/year sont None, la selection porte sur tous les evenements.
     """
     col = db[PCORG_COLLECTION]
-    base = {
-        "event": event,
-        "year": int(year),
-        "ts": {"$gte": ts_start, "$lte": ts_end},
-    }
+    base = {"ts": {"$gte": ts_start, "$lte": ts_end}}
+    if event:
+        base["event"] = event
+    if year is not None:
+        base["year"] = int(year)
     total = col.count_documents(base)
 
     major_filter = {
@@ -271,17 +310,23 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated):
 
     period_iso_start = ts_start.isoformat()
     period_iso_end = ts_end.isoformat()
+    scope_label = "tous evenements confondus"
+    if event and year is not None:
+        scope_label = str(event) + " " + str(year)
+    elif event:
+        scope_label = str(event) + " (toutes annees)"
+    elif year is not None:
+        scope_label = "annee " + str(year) + " (tous evenements)"
     user = (
         "Contexte :\n"
-        "- Evenement : " + str(event) + "\n"
-        "- Annee : " + str(year) + "\n"
+        "- Perimetre : " + scope_label + "\n"
         "- Periode : " + period_iso_start + " --> " + period_iso_end + "\n"
         "- Echantillon tronque : " + ("oui" if truncated else "non") + "\n"
         "\n"
         "KPIs :\n"
-        + json.dumps(kpis, ensure_ascii=False, indent=2)
+        + json.dumps(kpis, ensure_ascii=False, indent=2, default=_json_default)
         + "\n\nFiches (" + str(len(fiches)) + " sur " + str(kpis.get("total", 0)) + " au total) :\n"
-        + json.dumps(fiches, ensure_ascii=False, indent=2)
+        + json.dumps(fiches, ensure_ascii=False, indent=2, default=_json_default)
         + "\n\nProduis le JSON demande."
     )
     return system, user
@@ -392,12 +437,15 @@ def _parse_sections(raw_text):
 
 def save_summary(db, event, year, ts_start, ts_end, created_by_email, created_by_name,
                  kpis, fiches_count, truncated, sections, raw_text, usage):
-    """Insere un document de resume et retourne le doc complet."""
+    """Insere un document de resume et retourne le doc complet.
+
+    event/year peuvent etre None (resume "tous evenements").
+    """
     _ensure_indexes(db)
     doc = {
         "_id": uuid.uuid4().hex,
         "event": event,
-        "year": int(year),
+        "year": int(year) if year is not None else None,
         "period_start": ts_start,
         "period_end": ts_end,
         "created_at": datetime.now(timezone.utc),

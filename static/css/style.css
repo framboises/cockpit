@@ -10117,6 +10117,22 @@ th span { font-size: 0.88rem; font-weight: 700; }
   padding: 0 20px 12px 20px;
   border-bottom: 1px solid #e2e8f0;
 }
+.ai-all-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: #334155;
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  transition: background 0.15s, border-color 0.15s;
+}
+.ai-all-toggle:hover { background: #eff6ff; border-color: #93c5fd; }
+.ai-all-toggle input { margin: 0; cursor: pointer; }
 .ai-status {
   font-size: 0.82rem;
   color: #64748b;

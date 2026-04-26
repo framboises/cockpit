@@ -4221,18 +4221,26 @@ def _parse_period_dt(raw):
 @app.route('/api/pcorg/summary/generate', methods=['POST'])
 @role_required("manager")
 def pcorg_summary_generate():
-    """Genere un resume de periode (KPIs + appel Claude) et le persiste."""
+    """Genere un resume de periode (KPIs + appel Claude) et le persiste.
+
+    event et year sont optionnels : s'ils sont absents (ou si all_events=true),
+    le resume porte sur tous les evenements / toutes annees.
+    """
     data = request.get_json(silent=True) or {}
-    event = (data.get("event") or "").strip()
-    year = data.get("year")
+    all_events = bool(data.get("all_events"))
+    event_raw = data.get("event")
+    year_raw = data.get("year")
+    event = (event_raw or "").strip() if isinstance(event_raw, str) else None
+    if all_events or not event:
+        event = None
+    year = None
+    if not all_events and year_raw not in (None, ""):
+        try:
+            year = int(year_raw)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "year invalide"}), 400
     ts_start = _parse_period_dt(data.get("period_start"))
     ts_end = _parse_period_dt(data.get("period_end"))
-    if not event or year in (None, ""):
-        return jsonify({"ok": False, "error": "event et year requis"}), 400
-    try:
-        year = int(year)
-    except (TypeError, ValueError):
-        return jsonify({"ok": False, "error": "year invalide"}), 400
     if not ts_start or not ts_end:
         return jsonify({"ok": False, "error": "period_start et period_end requis (ISO 8601)"}), 400
     if ts_end <= ts_start:

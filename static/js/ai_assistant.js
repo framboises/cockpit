@@ -69,6 +69,22 @@
     };
   }
 
+  function isAllEvents() {
+    var cb = rootEl && rootEl.querySelector("#ai-all-events");
+    return !!(cb && cb.checked);
+  }
+
+  function refreshContextLabel() {
+    var ctx = rootEl && rootEl.querySelector("#ai-modal-context");
+    if (!ctx) return;
+    if (isAllEvents()) {
+      ctx.textContent = "Tous les événements";
+    } else {
+      var ey = selectedEventYear();
+      ctx.textContent = (ey.event || "?") + " · " + (ey.year || "?");
+    }
+  }
+
   // ---------- DOM helpers ----------
 
   function el(tag, attrs, children) {
@@ -174,7 +190,15 @@
       ])
     ]);
 
+    var allCheckbox = el("input", { type: "checkbox", id: "ai-all-events" });
+    var allLabel = el("label", { class: "ai-all-toggle", for: "ai-all-events" }, [
+      allCheckbox,
+      el("span", { text: "Tous les événements" })
+    ]);
+    allCheckbox.addEventListener("change", refreshContextLabel);
+
     var actionRow = el("div", { class: "ai-action-row" }, [
+      allLabel,
       el("button", { type: "button", class: "ai-btn ai-btn-ghost", id: "ai-btn-history" }, [
         el("span", { class: "material-symbols-outlined" }, ["history"]),
         el("span", { text: "Historique" })
@@ -246,8 +270,18 @@
     var body = rootEl.querySelector("#ai-modal-body");
     clearChildren(body);
 
+    var scopeLabel;
+    if (summary.event && summary.year) {
+      scopeLabel = summary.event + " " + summary.year;
+    } else if (summary.event) {
+      scopeLabel = summary.event + " (toutes années)";
+    } else if (summary.year) {
+      scopeLabel = "Année " + summary.year + " (tous événements)";
+    } else {
+      scopeLabel = "Tous événements";
+    }
     var meta = el("div", { class: "ai-summary-meta" }, [
-      el("span", { class: "ai-meta-chip", text: (summary.event || "?") + " " + (summary.year || "") }),
+      el("span", { class: "ai-meta-chip", text: scopeLabel }),
       el("span", { class: "ai-meta-chip", text: formatPeriodHuman(summary.period_start, summary.period_end) }),
       el("span", { class: "ai-meta-chip", text: (summary.fiches_count || 0) + " fiche(s) analysée(s)" + (summary.truncated ? " (échantillon)" : "") }),
       el("span", { class: "ai-meta-chip ai-meta-soft", text: "Modèle : " + (summary.model || "?") })
@@ -334,6 +368,21 @@
       box.appendChild(zoneList);
     }
 
+    var events = kpis.by_event || [];
+    if (events.length > 1) {
+      var evList = el("div", { class: "ai-kpi-list" }, [
+        el("div", { class: "ai-kpi-bars-title", text: "Par événement" })
+      ]);
+      events.forEach(function (ev) {
+        var label = (ev.event || "?") + (ev.year ? " " + ev.year : "");
+        evList.appendChild(el("div", { class: "ai-kpi-list-row" }, [
+          el("span", { text: label }),
+          el("span", { class: "ai-kpi-list-count", text: String(ev.count) })
+        ]));
+      });
+      box.appendChild(evList);
+    }
+
     return box;
   }
 
@@ -351,9 +400,10 @@
 
   function onGenerate() {
     if (state.busy) return;
+    var allEvents = isAllEvents();
     var ey = selectedEventYear();
-    if (!ey.event || !ey.year) {
-      toast("Selectionnez un evenement et une annee dans la sidebar.", "error");
+    if (!allEvents && (!ey.event || !ey.year)) {
+      toast("Selectionnez un evenement et une annee, ou cochez Tous les evenements.", "error");
       return;
     }
     var startStr = rootEl.querySelector("#ai-date-start").value;
@@ -378,12 +428,16 @@
       el("span", { text: "Calcul des KPIs et appel au modèle…" })
     ]));
 
-    apiPostJson("/api/pcorg/summary/generate", {
-      event: ey.event,
-      year: ey.year,
+    var payload = {
       period_start: startStr,
-      period_end: endStr
-    }).then(function (res) {
+      period_end: endStr,
+      all_events: allEvents
+    };
+    if (!allEvents) {
+      payload.event = ey.event;
+      payload.year = ey.year;
+    }
+    apiPostJson("/api/pcorg/summary/generate", payload).then(function (res) {
       setBusy(false);
       if (!res || !res.ok) {
         var err = (res && res.error) || "Erreur inconnue";
@@ -399,14 +453,15 @@
 
   function onShowHistory() {
     if (state.busy) return;
-    var ey = selectedEventYear();
-    if (!ey.event || !ey.year) {
-      toast("Selectionnez un evenement et une annee dans la sidebar.", "error");
-      return;
-    }
     setBusy(true);
     setStatus("Chargement de l'historique…", "info");
-    var url = "/api/pcorg/summary/list?event=" + encodeURIComponent(ey.event) + "&year=" + encodeURIComponent(ey.year);
+    var url = "/api/pcorg/summary/list";
+    if (!isAllEvents()) {
+      var ey = selectedEventYear();
+      if (ey.event && ey.year) {
+        url += "?event=" + encodeURIComponent(ey.event) + "&year=" + encodeURIComponent(ey.year);
+      }
+    }
     apiGetJson(url).then(function (res) {
       setBusy(false);
       if (!res || !res.ok) {
@@ -464,10 +519,8 @@
       toast("Assistant IA réservé aux managers.", "error");
       return;
     }
-    var ey = selectedEventYear();
     buildModal();
-    var ctx = rootEl.querySelector("#ai-modal-context");
-    if (ctx) ctx.textContent = (ey.event || "?") + " · " + (ey.year || "?");
+    refreshContextLabel();
     if (!rootEl.querySelector("#ai-date-start").value) applyPreset("24h");
     rootEl.classList.add("is-open");
     rootEl.setAttribute("aria-hidden", "false");
