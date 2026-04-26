@@ -10081,6 +10081,15 @@ th span { font-size: 0.88rem; font-weight: 700; }
   background: #fff;
 }
 .ai-date-input:focus { outline: 2px solid #2563eb; outline-offset: -1px; border-color: #2563eb; }
+.ai-date-field-test .ai-date-label { color: #b45309; }
+.ai-date-field-test .ai-date-input {
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+.ai-date-field-test .ai-date-input:focus {
+  outline-color: #d97706;
+  border-color: #d97706;
+}
 
 .ai-btn {
   display: inline-flex;

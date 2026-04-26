@@ -196,7 +196,7 @@
       applyPreset(b.getAttribute("data-preset"));
     });
 
-    var dateRow = el("div", { class: "ai-date-row" }, [
+    var dateRowChildren = [
       el("label", { class: "ai-date-field" }, [
         el("span", { class: "ai-date-label", text: "Début" }),
         el("input", { type: "datetime-local", id: "ai-date-start", class: "ai-date-input" })
@@ -204,12 +204,20 @@
       el("label", { class: "ai-date-field" }, [
         el("span", { class: "ai-date-label", text: "Fin" }),
         el("input", { type: "datetime-local", id: "ai-date-end", class: "ai-date-input" })
-      ]),
-      el("button", { type: "button", class: "ai-btn ai-btn-primary", id: "ai-btn-generate" }, [
-        el("span", { class: "material-symbols-outlined" }, ["auto_awesome"]),
-        el("span", { text: "Générer" })
       ])
-    ]);
+    ];
+    if (window.__userIsAdmin === true) {
+      dateRowChildren.push(el("label", { class: "ai-date-field ai-date-field-test" }, [
+        el("span", { class: "ai-date-label", text: "Simuler le « maintenant » (admin)" }),
+        el("input", { type: "datetime-local", id: "ai-date-asof", class: "ai-date-input",
+                      title: "Reserve admin : fixe le 'now' virtuel pour tester upcoming / billetterie / portes hors periode d'evenement" })
+      ]));
+    }
+    dateRowChildren.push(el("button", { type: "button", class: "ai-btn ai-btn-primary", id: "ai-btn-generate" }, [
+      el("span", { class: "material-symbols-outlined" }, ["auto_awesome"]),
+      el("span", { text: "Générer" })
+    ]));
+    var dateRow = el("div", { class: "ai-date-row" }, dateRowChildren);
 
     var allCheckbox = el("input", { type: "checkbox", id: "ai-all-events" });
     var allLabel = el("label", { class: "ai-all-toggle", for: "ai-all-events" }, [
@@ -906,6 +914,10 @@
     if (!allEvents) {
       payload.event = ey.event;
       payload.year = ey.year;
+    }
+    var asOfInput = rootEl.querySelector("#ai-date-asof");
+    if (asOfInput && asOfInput.value) {
+      payload.as_of = asOfInput.value;
     }
     apiPostJson("/api/pcorg/summary/generate", payload).then(function (res) {
       setBusy(false);

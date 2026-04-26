@@ -101,16 +101,42 @@ def main(argv=None):
     parser.add_argument("--dry-run", action="store_true", help="Genere sans envoyer le mail")
     parser.add_argument("--to", default="", help="Destinataires (csv) qui remplacent la liste opt-in (test)")
     parser.add_argument("--no-mail", action="store_true", help="Genere et sauve mais n'envoie aucun mail")
+    parser.add_argument("--as-of", default="", dest="as_of",
+                        help="ISO datetime pour simuler le 'now' (test, ex: 2025-06-14T07:00)")
     args = parser.parse_args(argv)
 
     log = _setup_logging()
     db, client = _connect_mongo()
     try:
-        ts_start, ts_end = _last_24h_window()
+        # Mode simulation : si --as-of fourni, on traite ce datetime comme le
+        # "now" courant (en Europe/Paris si naif). Sert a tester en local hors
+        # periode d'evenement.
+        as_of_utc = None
+        if args.as_of:
+            try:
+                s = args.as_of.strip().replace("Z", "+00:00")
+                dt = datetime.fromisoformat(s)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=TZ_PARIS)
+                as_of_utc = dt.astimezone(timezone.utc)
+                log.info("Mode simulation : as_of = %s (UTC)", as_of_utc.isoformat())
+            except (ValueError, TypeError) as e:
+                log.error("--as-of invalide : %s", e)
+                return 1
+
+        if as_of_utc is not None:
+            ts_end = as_of_utc.astimezone(TZ_PARIS).replace(hour=7, minute=0, second=0, microsecond=0)
+            if as_of_utc.astimezone(TZ_PARIS) < ts_end:
+                ts_end -= timedelta(days=1)
+            ts_start_paris = ts_end - timedelta(days=1)
+            ts_start = ts_start_paris.astimezone(timezone.utc)
+            ts_end = ts_end.astimezone(timezone.utc)
+        else:
+            ts_start, ts_end = _last_24h_window()
         log.info("Fenetre analysee : %s -> %s (UTC)", ts_start.isoformat(), ts_end.isoformat())
 
         # 1. Detection automatique de l'event actif (alignee sur live-status).
-        event, year = pcorg_summary.detect_active_event(db)
+        event, year = pcorg_summary.detect_active_event(db, now_utc=as_of_utc)
         log.info("Evenement detecte : %s %s", event, year)
 
         # 2. Generation du resume avec focus nuit
@@ -125,6 +151,7 @@ def main(argv=None):
                 created_by_email="morning-report@cockpit.lemans.org",
                 created_by_name="Rapport matinal automatique",
                 extra_focus_note=EXTRA_FOCUS_NOTE_NIGHT,
+                as_of_utc=as_of_utc,
             )
         except pcorg_summary.ClaudeError as e:
             log.error("Echec appel Claude : %s", e)

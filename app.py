@@ -4246,6 +4246,10 @@ def pcorg_summary_generate():
         return jsonify({"ok": False, "error": "period_start et period_end requis (ISO 8601)"}), 400
     if ts_end <= ts_start:
         return jsonify({"ok": False, "error": "period_end doit etre apres period_start"}), 400
+    # Mode test : as_of permet de simuler le 'now' pour upcoming / attendance / doors.
+    as_of_utc = None
+    if data.get("as_of"):
+        as_of_utc = _parse_period_dt(data.get("as_of"))
 
     user = request.user_payload or {}
     created_by_email = user.get("email", "") or ""
@@ -4254,6 +4258,7 @@ def pcorg_summary_generate():
     try:
         doc = pcorg_summary.generate_period_summary(
             db, event, year, ts_start, ts_end, created_by_email, created_by_name,
+            as_of_utc=as_of_utc,
         )
     except pcorg_summary.ClaudeError as e:
         msg = str(e)

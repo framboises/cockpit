@@ -265,10 +265,11 @@ def _find_hist_freq_prev(db, event, year_int):
     return None, None
 
 
-def compute_attendance_block(db, event, year):
+def compute_attendance_block(db, event, year, now_utc=None):
     """Calcule le bloc Billetterie & Frequentation pour les 3 jours
     centres sur aujourd'hui : hier / aujourd'hui / demain.
 
+    now_utc (optionnel, mode simulation) : datetime UTC aware. Defaut now().
     Retourne None si l'event n'a pas de parametrages billetterie publique.
     """
     if not event or year is None:
@@ -324,7 +325,10 @@ def compute_attendance_block(db, event, year):
     freq_prev_by_day = _index_freq_by_day(hist_prev_doc)
     prev_race_ref = hist_prev_race_date or prev_param_race_date
 
-    today = datetime.now(TZ_PARIS).date()
+    if now_utc is None:
+        today = datetime.now(TZ_PARIS).date()
+    else:
+        today = now_utc.astimezone(TZ_PARIS).date()
     slots = []
     for offset, key, label_fr in (
         (-1, "yesterday", "Hier"),
@@ -476,14 +480,18 @@ def _scan_timetable_doc(doc, now_paris, end_paris):
     return out
 
 
-def get_upcoming_timetable(db, event, year, hours=24):
+def get_upcoming_timetable(db, event, year, hours=24, now_utc=None):
     """Retourne la liste des vignettes timetable dans les prochaines `hours`.
 
     Si event/year sont fournis, filtre sur ce doc unique. Sinon, scanne
     tous les docs timetable (mode "Tous evenements").
     Trie par datetime croissant.
+    now_utc (optionnel, mode simulation) : datetime UTC aware. Defaut now().
     """
-    now_paris = datetime.now(TZ_PARIS)
+    if now_utc is None:
+        now_paris = datetime.now(TZ_PARIS)
+    else:
+        now_paris = now_utc.astimezone(TZ_PARIS)
     end_paris = now_paris + timedelta(hours=hours)
     upcoming = []
     col = db["timetable"]
@@ -1633,21 +1641,27 @@ def detect_active_event(db, now_utc=None):
 
 
 def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email, created_by_name,
-                             extra_focus_note=None):
+                             extra_focus_note=None, as_of_utc=None):
     """Calcule KPIs + comparaisons + prochaines 24h + billetterie + retro N-1, appelle Claude.
 
     extra_focus_note : consigne supplementaire a injecter dans le user prompt
     (par ex. focus nuit pour le rapport matinal).
+    as_of_utc (optionnel, mode test) : datetime UTC aware qui simule le 'now'
+    pour les blocs upcoming / attendance / door_reinforcement. Permet de
+    tester le rapport hors periode d'evenement en se placant virtuellement
+    pendant une edition passee.
     """
     kpis = compute_kpis(db, event, year, ts_start, ts_end)
     comparisons = compute_comparisons(db, event, year, ts_start, ts_end)
-    upcoming = get_upcoming_timetable(db, event, year, hours=24)
-    attendance = compute_attendance_block(db, event, year)
+    upcoming = get_upcoming_timetable(db, event, year, hours=24, now_utc=as_of_utc)
+    attendance = compute_attendance_block(db, event, year, now_utc=as_of_utc)
     # Renforts portes : import lazy pour eviter dependance circulaire au boot.
     door_reinforcement = None
     try:
         import pcorg_doors_analysis
-        door_reinforcement = pcorg_doors_analysis.compute_door_reinforcement(db, event, year)
+        door_reinforcement = pcorg_doors_analysis.compute_door_reinforcement(
+            db, event, year, now_utc=as_of_utc,
+        )
     except Exception as e:
         logger.warning("Renforts portes : echec calcul (%s)", e)
 

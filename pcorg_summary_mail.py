@@ -161,14 +161,19 @@ def _report_header(summary):
     author = _h((summary.get("created_by_name") or summary.get("created_by") or ""))
     created = _fmt_dt_human(summary.get("created_at"))
     fiches = _fmt_int(summary.get("fiches_count"))
+    # Fallbacks pour Outlook (qui ne supporte pas linear-gradient) :
+    # - bgcolor attribut HTML (lu en premier par Outlook)
+    # - background-color avant le gradient
     return (
-        '<tr><td style="background:linear-gradient(135deg,#2563eb,#7c3aed);'
+        '<tr><td bgcolor="#2563eb" '
+        'style="background-color:#2563eb;'
+        'background:linear-gradient(135deg,#2563eb,#7c3aed);'
         'padding:24px 28px;color:#ffffff;">'
         '<div style="font-size:12px;letter-spacing:0.08em;text-transform:uppercase;'
-        'opacity:0.85;font-weight:600;">Cockpit &mdash; Rapport PC Organisation</div>'
-        '<div style="font-size:22px;font-weight:700;margin-top:6px;">' + scope + '</div>'
-        '<div style="font-size:14px;opacity:0.92;margin-top:4px;">' + period + '</div>'
-        '<div style="font-size:12px;opacity:0.78;margin-top:10px;">'
+        'color:#dbeafe;font-weight:600;">Cockpit &mdash; Rapport PC Organisation</div>'
+        '<div style="font-size:22px;font-weight:700;margin-top:6px;color:#ffffff;">' + scope + '</div>'
+        '<div style="font-size:14px;color:#dbeafe;margin-top:4px;">' + period + '</div>'
+        '<div style="font-size:12px;color:#bfdbfe;margin-top:10px;">'
         'Genere le ' + created + ' par ' + author + ' &middot; ' + fiches + ' fiche(s) analysee(s)'
         '</div></td></tr>'
     )
