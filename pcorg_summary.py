@@ -31,7 +31,7 @@ ANTHROPIC_API_VERSION = "2023-06-01"
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6").strip()
 CLAUDE_TIMEOUT_SECONDS = int(os.getenv("CLAUDE_TIMEOUT_SECONDS", "120"))
-CLAUDE_MAX_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "4096"))
+CLAUDE_MAX_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "8192"))
 
 
 SUMMARIES_COLLECTION = "pcorg_summaries"
@@ -1517,7 +1517,9 @@ def _claude_stream_request(system_prompt, user_prompt, max_tokens, on_progress=N
     usage_out = 0
     last_progress_len = 0
     try:
-        for line in resp.iter_lines(decode_unicode=False):
+        # chunk_size=None pour ne pas bufferiser les chunks SSE plus que
+        # necessaire (chaque event SSE = quelques bytes a quelques centaines).
+        for line in resp.iter_lines(decode_unicode=False, chunk_size=None):
             if not line:
                 continue
             try:
@@ -1590,26 +1592,92 @@ def call_claude(system_prompt, user_prompt, on_progress=None):
 def _parse_sections(raw_text):
     """Tente de parser un JSON dans raw_text et de retourner un dict de sections.
 
-    Retourne None si le parsing echoue.
+    Robustesse :
+    - Tolere les blocs markdown encadrants ```json ... ```
+    - Si json.loads echoue (typiquement reponse Claude tronquee a max_tokens),
+      tente une recuperation par regex des paires "cle": "valeur" completes
+      + recuperation de la cle finale tronquee si possible.
+
+    Retourne un dict (potentiellement partiel) ou None si rien d'exploitable.
     """
     if not raw_text:
         return None
     txt = raw_text.strip()
     # Tolere un eventuel bloc markdown ```json ... ```
     if txt.startswith("```"):
-        # supprime la premiere ligne
         nl = txt.find("\n")
         if nl != -1:
             txt = txt[nl + 1:]
         if txt.endswith("```"):
             txt = txt[:-3]
         txt = txt.strip()
+
+    # Premier essai : JSON propre
     try:
         data = json.loads(txt)
+        if isinstance(data, dict):
+            return _normalize_sections(data)
     except (ValueError, TypeError):
+        pass
+
+    # Fallback : extraction par regex pour les reponses tronquees.
+    # Match "key": "value..." avec valeur complete (chaine fermee).
+    # NB: [a-z_0-9] (et non [a-z_]) pour matcher 'prochaines_24h'.
+    import re as _re_local
+    pattern = r'"([a-z_0-9]+)"\s*:\s*"((?:[^"\\]|\\.)*)"'
+    pairs = _re_local.findall(pattern, txt, _re_local.DOTALL)
+    recovered = {}
+    for k, v in pairs:
+        if k in SECTION_KEYS:
+            # Decode les escapes JSON dans la valeur.
+            try:
+                recovered[k] = json.loads('"' + v + '"')
+            except (ValueError, TypeError):
+                recovered[k] = v
+
+    # Tentative de recuperation de la cle finale tronquee :
+    # 1. Trouver TOUTES les positions de '"<key>": "' dans le texte
+    # 2. Prendre la derniere occurence
+    # 3. Lire la valeur a partir de la fin du match jusqu'a un " non
+    #    echappe ou la fin du texte
+    pat_key_open = r'"([a-z_0-9]+)"\s*:\s*"'
+    key_matches = list(_re_local.finditer(pat_key_open, txt))
+    if key_matches:
+        last_match = key_matches[-1]
+        last_key = last_match.group(1)
+        if last_key in SECTION_KEYS and last_key not in recovered:
+            start = last_match.end()
+            val_chars = []
+            i = start
+            closed = False
+            while i < len(txt):
+                c = txt[i]
+                if c == "\\" and i + 1 < len(txt):
+                    val_chars.append(c)
+                    val_chars.append(txt[i + 1])
+                    i += 2
+                    continue
+                if c == '"':
+                    closed = True
+                    break
+                val_chars.append(c)
+                i += 1
+            if not closed:
+                raw_val = "".join(val_chars)
+                try:
+                    clean_val = json.loads('"' + raw_val + '"')
+                except (ValueError, TypeError):
+                    clean_val = raw_val
+                recovered[last_key] = (clean_val.rstrip() + " [reponse tronquee]").strip()
+
+    if not recovered:
         return None
-    if not isinstance(data, dict):
-        return None
+    return _normalize_sections(recovered)
+
+
+def _normalize_sections(data):
+    """Convertit un dict brut en dict ne contenant que les SECTION_KEYS,
+    chaque valeur etant une chaine non vide ou ''."""
     out = {}
     for key in SECTION_KEYS:
         v = data.get(key)

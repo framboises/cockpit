@@ -145,10 +145,10 @@ def main(argv=None):
 
         last_log_chars = [0]
         def _on_progress(text_so_far, output_tokens):
-            # Log toutes les ~1500 chars pour ne pas spammer
-            if len(text_so_far) - last_log_chars[0] >= 1500:
+            # Log toutes les ~800 chars pour avoir une progression visible
+            if len(text_so_far) - last_log_chars[0] >= 800:
                 last_log_chars[0] = len(text_so_far)
-                log.info("  ... %d chars recus (%d output tokens estime)",
+                log.info("  ... %d chars recus (%d output tokens)",
                          len(text_so_far), output_tokens)
 
         try:
