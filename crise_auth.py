@@ -393,13 +393,27 @@ def serve_master(exercise_id):
     return resp
 
 
+# Allowlist : fiches accessibles SANS PIN (vues par les participants en mode
+# player.html). Toutes les autres fiches restent gated par le JWT animateur.
+PUBLIC_FILES_ALLOWLIST = frozenset({
+    "00_consignes_cellule.html",
+    "00_consignes_pcorg.html",
+    "00_consignes_pca.html",
+})
+
+
 @crise_auth_bp.route("/<exercise_id>/files/<path:filename>", methods=["GET"])
 def serve_files(exercise_id, filename):
-    blocked = _require_auth(exercise_id)
-    if blocked is not None:
-        return blocked
     if any(part.startswith(".") for part in filename.split("/") if part):
         return ("Not found", 404)
+    # Allowlist publique pour les consignes (mode participant)
+    if filename in PUBLIC_FILES_ALLOWLIST:
+        if not _validate_exercise_id(exercise_id):
+            return ("Not found", 404)
+    else:
+        blocked = _require_auth(exercise_id)
+        if blocked is not None:
+            return blocked
     folder = os.path.join(_exercise_dir(exercise_id), "files")
     candidate = safe_join(folder, filename)
     if not candidate or not os.path.isfile(candidate):
@@ -593,7 +607,8 @@ def _state_doc_to_response(doc, include_clients_for_admin=False):
             })
     return {
         "version": int(doc.get("version", 0)),
-        "server_ts": _iso_utc(doc.get("server_ts") or _now()),
+        "server_ts": _iso_utc(doc.get("server_ts") or _now()),  # instant de la derniere modif
+        "now_ts": _iso_utc(_now()),                              # instant de la requete (calibration client)
         "payload": payload,
         "tv_clients": clients,
     }

@@ -1613,6 +1613,16 @@ app.register_blueprint(crise_auth_bp)
 
 CRISE_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "crise")
 
+
+# /crise (sans slash final) -> redirect vers /crise/ avec Location *relatif*.
+# On ne laisse PAS Werkzeug strict_slashes generer un 308 absolu (qui exposerait
+# 127.0.0.1:4008 derriere le reverse proxy). Avec un Location relatif "/crise/",
+# le navigateur compose au host courant (cockpit.lemans.org).
+@app.route("/crise")
+def crise_root_no_slash():
+    return redirect("/crise/", code=308)
+
+
 crise_bp = Blueprint("crise", __name__, url_prefix="/crise")
 
 # Patterns proteges par crise_auth_bp (PIN). Filet defensif au cas ou la priorite

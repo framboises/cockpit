@@ -26,6 +26,20 @@
   var REGIE_LAST_VERSION = -1;
   var REGIE_LAST_PAYLOAD = null;
   var REGIE_TV_CLIENTS = [];
+  // Offset (ms) entre l'horloge serveur et l'horloge client. Mis a jour a
+  // chaque reponse contenant 'now_ts'. Compense la desync NTP (peut atteindre
+  // 10-15s en pratique). Utilise pour afficher le chrono "A l'antenne depuis".
+  var SERVER_TIME_OFFSET_MS = 0;
+
+  function calibrateClock(responseJson) {
+    if (!responseJson || !responseJson.now_ts) return;
+    var serverNowMs = Date.parse(responseJson.now_ts);
+    if (isNaN(serverNowMs)) return;
+    SERVER_TIME_OFFSET_MS = serverNowMs - Date.now();
+  }
+  function nowServer() {
+    return Date.now() + SERVER_TIME_OFFSET_MS;
+  }
 
   var DEFAULT_DURATION_S = 60;  // duree par defaut sur les cartes inputs
   var DEFAULT_ANNOUNCE = 'alert'; // 'alert' | 'notification' | 'none'
@@ -352,6 +366,7 @@
     };
     postJson('/state', payload).then(function(res) {
       if (res.status === 200 && res.json && res.json.ok) {
+        calibrateClock(res.json);
         REGIE_LAST_VERSION = res.json.version;
         REGIE_LAST_PAYLOAD = res.json.payload;
         renderOnAir(res.json.payload);
@@ -387,6 +402,7 @@
       announce: announce, duration_s: duration_s,
     }).then(function(res) {
       if (res.status === 200 && res.json && res.json.ok) {
+        calibrateClock(res.json);
         flashMessageStatus('ok', 'Message diffusé');
         REGIE_LAST_VERSION = res.json.version;
         REGIE_LAST_PAYLOAD = res.json.payload;
@@ -419,6 +435,7 @@
   function clearBroadcast() {
     postJson('/clear', {}).then(function(res) {
       if (res.status === 200 && res.json && res.json.ok) {
+        calibrateClock(res.json);
         REGIE_LAST_VERSION = res.json.version;
         REGIE_LAST_PAYLOAD = res.json.payload;
         renderOnAir(res.json.payload);
@@ -484,7 +501,9 @@
     if (payload.started_at) {
       var startedMs = Date.parse(payload.started_at);
       if (!isNaN(startedMs)) {
-        var ageS = Math.max(0, Math.round((Date.now() - startedMs) / 1000));
+        // Calcule l'age avec l'horloge serveur (calibree via 'now_ts') pour
+        // eviter le biais d'horloge regie vs serveur.
+        var ageS = Math.max(0, Math.round((nowServer() - startedMs) / 1000));
         var ageStr = Math.floor(ageS / 60) + ':' + (ageS % 60 < 10 ? '0' : '') + (ageS % 60);
         line2.appendChild(el('span', { text: 'À l\'antenne depuis ' + ageStr }));
       }
@@ -511,6 +530,7 @@
     // Pas de ?client= : la regie ne doit pas se compter comme une TV.
     getJson('/state').then(function(res) {
       if (res.status === 200 && res.json && res.json.ok) {
+        calibrateClock(res.json);
         REGIE_LAST_VERSION = res.json.version;
         REGIE_LAST_PAYLOAD = res.json.payload;
         REGIE_TV_CLIENTS = res.json.tv_clients || [];
