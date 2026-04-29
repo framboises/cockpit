@@ -1,0 +1,1774 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Station 01 — Participant — Exercice Crise GP Moto 2026</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #f5f5f7;
+  --panel: #ffffff;
+  --panel-soft: #f8fafc;
+  --hover: #f0f4f8;
+  --border: #d0d0d0;
+  --border-soft: #e5e7eb;
+  --aco-navy: #1a3a6c;
+  --aco-navy-soft: #e7f1ff;
+  --aco-red: #b91c1c;
+  --aco-red-soft: #fee2e2;
+  --aco-orange: #d97706;
+  --aco-orange-soft: #fef3c7;
+  --aco-green: #047857;
+  --aco-purple: #6b21a8;
+  --aco-cyan: #0891b2;
+  --aco-pink: #be185d;
+  --text: #111111;
+  --text-soft: #475569;
+  --text-muted: #666666;
+  --sidebar-w: 260px;
+  --header-h: 56px;
+}
+
+html { height: 100%; }
+body {
+  font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100%;
+  overflow: hidden;
+  line-height: 1.4;
+}
+
+/* Header */
+.header {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  height: var(--header-h);
+  background: var(--aco-navy);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 24px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.12);
+}
+.header-left { display: flex; align-items: center; gap: 16px; }
+.header-logo { display: inline-flex; align-items: center; }
+.header-logo img { height: 38px; width: auto; display: block; }
+.header-title {
+  font-size: 14px; font-weight: 600; letter-spacing: 0.5px;
+  color: white; text-transform: uppercase;
+}
+.header-title span { color: rgba(255,255,255,0.7); font-weight: 400; }
+.header-back {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: rgba(255,255,255,0.08); color: white;
+  border: 1px solid rgba(255,255,255,0.18);
+  padding: 6px 14px; border-radius: 4px;
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 1.5px; cursor: pointer; text-decoration: none;
+  font-family: inherit;
+  transition: background .15s ease, border-color .15s ease;
+}
+.header-back:hover { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.4); }
+.header-station {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: rgba(8, 145, 178, 0.18);
+  border: 1px solid rgba(8, 145, 178, 0.45);
+  color: #5fd1ff;
+  padding: 5px 12px; border-radius: 3px;
+  font-family: 'SF Mono', 'JetBrains Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 2px;
+}
+.header-badge {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--aco-red);
+  padding: 5px 14px; border-radius: 20px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1px; color: white;
+  cursor: pointer; border: none;
+  transition: background .2s ease, transform .1s ease;
+  font-family: inherit;
+}
+.header-badge:hover { transform: scale(1.04); }
+.header-badge:active { transform: scale(0.98); }
+.header-badge.state-prep { background: var(--aco-orange); }
+.header-badge.state-running { background: var(--aco-red); }
+.header-badge.state-done { background: var(--aco-green); }
+.pulse-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: white;
+}
+.header-badge.state-running .pulse-dot { animation: pulse 1.5s ease-in-out infinite; }
+.header-badge.state-prep .pulse-dot { opacity: 0.6; }
+.header-badge.state-done .pulse-dot { background: white; }
+.header-badge.state-done .pulse-dot::after {
+  content: ''; display: block; width: 4px; height: 7px;
+  border-right: 2px solid var(--aco-green);
+  border-bottom: 2px solid var(--aco-green);
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .4; }
+}
+.menu-btn {
+  display: none; background: none; border: none; color: white;
+  font-size: 24px; cursor: pointer; padding: 4px;
+}
+
+/* Sidebar */
+.sidebar {
+  position: fixed; top: var(--header-h); left: 0; bottom: 0;
+  width: var(--sidebar-w); background: var(--panel);
+  border-right: 1px solid var(--border);
+  overflow-y: auto; z-index: 90;
+  padding: 16px 0;
+  transition: transform .25s ease;
+}
+.sidebar-section { margin-bottom: 8px; }
+.sidebar-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1.2px; color: var(--text-muted);
+  padding: 8px 20px 4px;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 20px; cursor: pointer;
+  color: var(--text-soft); font-size: 13px;
+  border-left: 3px solid transparent;
+  transition: all .15s ease;
+  text-decoration: none;
+}
+.nav-item:hover { background: var(--hover); color: var(--text); }
+.nav-item.active {
+  background: var(--aco-navy-soft); color: var(--aco-navy);
+  border-left-color: var(--aco-navy);
+  font-weight: 600;
+}
+.nav-item .badge {
+  margin-left: auto; font-size: 11px; font-weight: 600;
+  background: var(--bg); color: var(--text-muted);
+  padding: 1px 7px; border-radius: 10px;
+}
+.nav-item.active .badge { background: var(--aco-navy); color: white; }
+.nav-item .icon { width: 18px; text-align: center; font-size: 14px; }
+.nav-item.nav-key { font-weight: 700; color: var(--aco-navy); }
+.nav-item.nav-key .icon { color: var(--aco-orange); }
+.nav-divider { height: 1px; background: var(--border-soft); margin: 8px 20px; }
+
+/* Main */
+.main {
+  margin-left: var(--sidebar-w); margin-top: var(--header-h);
+  height: calc(100vh - var(--header-h));
+  overflow-y: auto; padding: 32px;
+  background: var(--bg);
+}
+.view { display: none; }
+.view.active { display: block; }
+
+/* PCORG room layout */
+.pcorg-room {
+  background: #f0f4f8;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 22px;
+  margin-bottom: 24px;
+}
+.pcorg-screens-wall {
+  background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+  color: white;
+  padding: 14px 18px 10px;
+  border-radius: 6px;
+  margin: 0 auto 22px;
+  text-align: center;
+  border: 1px solid #334155;
+  width: 380px;
+  max-width: 100%;
+}
+.pcorg-screens-wall .screen-strip {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px;
+  margin-bottom: 8px;
+}
+.pcorg-screens-wall .screen-strip > div {
+  height: 30px;
+  background: linear-gradient(180deg, #475569 0%, #1e293b 100%);
+  border: 1px solid #64748b;
+  border-radius: 2px;
+  position: relative;
+  overflow: hidden;
+}
+.pcorg-screens-wall .screen-strip > div::after {
+  content: ''; position: absolute;
+  inset: 2px;
+  background: linear-gradient(135deg, rgba(148,163,184,0.25) 0%, rgba(30,41,59,0) 60%);
+}
+.pcorg-screens-wall .screen-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-weight: 700;
+  color: #cbd5e1;
+}
+
+.pcorg-floor {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+.pcorg-floor.pcorg-floor-full {
+  grid-template-columns: 1fr;
+}
+.pcorg-floor.pcorg-floor-right {
+  grid-template-columns: 470px 1fr 110px;
+  grid-template-rows: auto auto auto;
+  align-items: stretch;
+}
+.pcorg-floor-right .pca-left-cluster {
+  grid-row: 1 / 4;
+  grid-column: 1;
+  display: grid;
+  grid-template-columns: 110px 360px;
+  grid-template-rows: subgrid;
+  gap: 0;
+}
+.pcorg-floor-right .pca-left-cluster .pca-left-2 {
+  grid-row: 2; grid-column: 1;
+  margin: 12px 0;
+}
+.pcorg-floor-right .pca-left-cluster .pca-left-1 { grid-row: 1; grid-column: 2; }
+.pcorg-floor-right .pca-left-cluster .pca-left-3 { grid-row: 3; grid-column: 2; }
+
+.pcorg-floor-right .pcorg-screens-wall { grid-row: 1; grid-column: 2; }
+.pcorg-floor-right .pca-u-branches { grid-row: 2; grid-column: 2; }
+.pcorg-floor-right .pca-u-back { grid-row: 3; grid-column: 2; }
+.pcorg-floor-right .pcorg-side-right {
+  grid-row: 2; grid-column: 3;
+  align-self: stretch;
+}
+.pcorg-side-right .pcorg-mini-table {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.pcorg-side-right .pcorg-side-title { flex-shrink: 0; }
+
+/* Tables a gauche numerotees */
+.pca-left {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  padding: 12px 10px;
+}
+.pca-left .left-num {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: var(--aco-navy);
+  color: white;
+  font-weight: 800;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: ui-monospace, Monaco, monospace;
+  margin-bottom: 6px;
+  box-shadow: 0 2px 6px rgba(26,58,108,0.25);
+}
+.pca-left .seat-role {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--aco-navy);
+}
+.pca-left .seat-sub {
+  font-size: 10px;
+  color: var(--text-soft);
+  font-style: italic;
+  margin-top: 3px;
+  line-height: 1.3;
+  text-align: center;
+}
+.pcorg-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.pcorg-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-self: end;
+  margin-bottom: 0;
+}
+.pcorg-side-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 4px;
+  line-height: 1.3;
+}
+.pcorg-side-title span {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  font-style: italic;
+  font-size: 10px;
+}
+.pcorg-mini-table {
+  background: #cfe2f3;
+  border: 1.5px solid var(--aco-navy);
+  border-radius: 5px;
+  padding: 10px 12px;
+  text-align: center;
+  font-size: 12px;
+}
+.pcorg-mini-table .seat-role {
+  font-weight: 700;
+  color: var(--aco-navy);
+}
+.pcorg-mini-table .seat-sub {
+  font-size: 10px;
+  color: var(--text-soft);
+  font-style: italic;
+  margin-top: 2px;
+}
+
+.pcorg-u {
+  display: grid;
+  grid-template-columns: 220px 380px 220px;
+  grid-template-rows: auto auto auto auto auto auto;
+  column-gap: 6px;
+  row-gap: 0;
+  position: relative;
+  margin: 0 auto;
+}
+.seat-branch { margin-bottom: 6px; }
+.pcorg-u-arrows {
+  position: absolute;
+  top: -18px; left: 0; right: 0;
+  display: flex; justify-content: space-between;
+  pointer-events: none;
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 600;
+  padding: 0 8px;
+}
+
+.seat {
+  background: #cfe2f3;
+  border: 1.5px solid var(--aco-navy);
+  border-radius: 5px;
+  padding: 24px 14px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  transition: all .15s ease;
+  line-height: 1.25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.seat:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(26,58,108,0.15);
+}
+.seat-branch { border-style: solid; }
+
+/* Right branch (column 3) - top to bottom: Bil, Jal, SE, NO, Hyp */
+.r-bil { grid-row: 1; grid-column: 3; }
+.r-jal { grid-row: 2; grid-column: 3; }
+.r-se  { grid-row: 3; grid-column: 3; }
+.r-no  { grid-row: 4; grid-column: 3; }
+.r-hyp { grid-row: 5; grid-column: 3; }
+
+/* Left branch (column 1, rows 1-5 to align with right): 3817, [empty x2], Flux, Sec */
+.l-3817   { grid-row: 1; grid-column: 1; }
+.l-empty1 { grid-row: 2; grid-column: 1; }
+.l-empty2 { grid-row: 3; grid-column: 1; }
+.l-flux   { grid-row: 4; grid-column: 1; }
+.l-sec    { grid-row: 5; grid-column: 1; }
+.seat-empty {
+  background: transparent;
+  border-style: dashed;
+  border-color: #94a3b8;
+  color: #94a3b8;
+  font-weight: 400;
+  font-style: italic;
+}
+.seat-empty:hover { transform: none; box-shadow: none; }
+
+/* Bottom of U (row 6) - the 3 main seats span all columns */
+.b-opv { grid-row: 6; grid-column: 1; }
+.b-comm { grid-row: 6; grid-column: 2; }
+.b-cgo { grid-row: 6; grid-column: 3; }
+
+.seat-key {
+  padding: 18px 14px;
+  background: linear-gradient(180deg, #2c5599 0%, #1a3a6c 100%);
+  color: white;
+  border: 2px solid var(--aco-navy);
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.seat-key:hover {
+  transform: none;
+  box-shadow: 0 4px 12px rgba(26,58,108,0.3);
+}
+.seat-key .seat-role {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  line-height: 1.15;
+}
+.seat-key .seat-sub {
+  font-size: 11.5px;
+  opacity: 0.95;
+  margin-top: 5px;
+  font-style: italic;
+  line-height: 1.25;
+}
+.b-opv  { border-radius: 0 0 0 10px; border-right: none; }
+.b-comm {
+  background: linear-gradient(180deg, #c82626 0%, #7f1d1d 100%);
+  border-color: #7f1d1d;
+  border-left: none; border-right: none;
+  padding: 18px 14px;
+  box-shadow: 0 0 0 1px rgba(127,29,29,0.4) inset, 0 4px 16px rgba(185,28,28,0.25);
+}
+.b-comm .seat-role {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+}
+.b-comm .seat-sub {
+  font-size: 11.5px;
+  margin-top: 5px;
+  opacity: 0.95;
+  font-style: italic;
+}
+.b-cgo  { border-radius: 0 0 10px 0; border-left: none; }
+
+/* PCA — branches du U (rangees 1-5) */
+.pca-u-branches {
+  display: grid;
+  grid-template-columns: 220px 190px 190px 220px;
+  grid-template-rows: repeat(5, auto);
+  column-gap: 6px;
+  row-gap: 0;
+  margin: 0 auto;
+}
+.pca-u-branches .seat-branch { margin-bottom: 6px; }
+
+/* PCA — rangee du fond (commandement) */
+.pca-u-back {
+  display: grid;
+  grid-template-columns: 220px 190px 190px 220px;
+  column-gap: 6px;
+  margin: 16px auto 0;
+}
+
+/* Branche gauche (col 1, rows 1-5) — Police Municipale (haut) -> Waze (bas, corner) */
+.lpca-pmun { grid-row: 1; grid-column: 1; }
+.lpca-lmm  { grid-row: 2; grid-column: 1; }
+.lpca-samu { grid-row: 3; grid-column: 1; }
+.lpca-pn   { grid-row: 4; grid-column: 1; }
+.lpca-waze { grid-row: 5; grid-column: 1; }
+
+/* Branche droite (col 4, rows 1-5) — SDIS (haut) -> Departement (bas, corner) */
+.rpca-sdis  { grid-row: 1; grid-column: 4; }
+.rpca-gn    { grid-row: 2; grid-column: 4; }
+.rpca-dmd   { grid-row: 3; grid-column: 4; }
+.rpca-vinci { grid-row: 4; grid-column: 4; }
+.rpca-dept  { grid-row: 5; grid-column: 4; }
+
+/* Rangee du fond — placement dans la grille pca-u-back (1 rangee) */
+.bpca-oppca  { grid-column: 1; border-radius: 0 0 0 10px; border-right: none; }
+.bpca-aco    { grid-column: 2; }
+.bpca-prefet { grid-column: 3; }
+.bpca-bscgc  { grid-column: 4; }
+.bpca-aco    { border-left: none; border-right: none; }
+.bpca-prefet {
+  background: linear-gradient(180deg, #c82626 0%, #7f1d1d 100%);
+  border-color: #7f1d1d;
+  border-left: none; border-right: none;
+  box-shadow: 0 0 0 1px rgba(127,29,29,0.4) inset, 0 4px 16px rgba(185,28,28,0.25);
+}
+.bpca-prefet .seat-role { letter-spacing: 1.5px; }
+.bpca-bscgc  { border-radius: 0 0 10px 0; border-left: none; }
+
+.pca-screens-wall { width: 386px; }
+
+/* PCA — couleurs par famille de service */
+.fam-police       { background: #dbeafe; border-color: #2563eb; }
+.fam-gendarmerie  { background: #dde4ee; border-color: #27425D; }
+.fam-pompiers     { background: #fee2e2; border-color: #dc2626; }
+.fam-samu         { background: #ffe4e6; border-color: #e11d48; }
+.fam-prefecture   { background: #e0e7ff; border-color: #3730a3; }
+.fam-defense      { background: #ecfccb; border-color: #4d7c0f; }
+.fam-mobilite     { background: #fed7aa; border-color: #ea580c; }
+.fam-collectivite { background: #ede9fe; border-color: #7c3aed; }
+
+.seat.fam-police         { color: #1e3a8a; }
+.seat.fam-gendarmerie    { color: #27425D; }
+.seat.fam-pompiers       { color: #7f1d1d; }
+.seat.fam-samu           { color: #831843; }
+.seat.fam-prefecture     { color: #312e81; }
+.seat.fam-defense        { color: #365314; }
+.seat.fam-mobilite       { color: #7c2d12; }
+.seat.fam-collectivite   { color: #4c1d95; }
+
+.pcorg-mini-table.fam-police .seat-role         { color: #1e3a8a; }
+.pcorg-mini-table.fam-gendarmerie .seat-role    { color: #27425D; }
+.pcorg-mini-table.fam-defense .seat-role        { color: #365314; }
+.pcorg-mini-table.fam-prefecture .seat-role     { color: #312e81; }
+
+.pca-left.fam-prefecture .seat-role { color: #312e81; }
+.pca-left.fam-police .seat-role     { color: #1e3a8a; }
+.pca-left.fam-prefecture .left-num  { background: #3730a3; box-shadow: 0 2px 6px rgba(55,48,163,0.25); }
+.pca-left.fam-police .left-num      { background: #2563eb; box-shadow: 0 2px 6px rgba(37,99,235,0.25); }
+
+/* Table de travail au centre du mini-U gauche */
+.pca-worktable {
+  grid-row: 2;
+  grid-column: 2;
+  align-self: center;
+  justify-self: center;
+  width: 60%;
+  aspect-ratio: 1;
+  background: repeating-linear-gradient(45deg, #f8fafc, #f8fafc 6px, #eef2f7 6px, #eef2f7 12px);
+  border: 2px dashed #94a3b8;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  padding: 10px 8px;
+  line-height: 1.3;
+}
+
+@media (max-width: 1700px) {
+  .pcorg-floor.pcorg-floor-right { grid-template-columns: 380px 1fr 90px; }
+  .pcorg-floor-right .pca-left-cluster { grid-template-columns: 90px 290px; }
+  .pca-u-branches, .pca-u-back { grid-template-columns: 180px 160px 160px 180px; }
+  .pca-screens-wall { width: 326px; }
+}
+@media (max-width: 1400px) {
+  .pcorg-floor.pcorg-floor-right { grid-template-columns: 320px 1fr 75px; }
+  .pcorg-floor-right .pca-left-cluster { grid-template-columns: 75px 245px; }
+  .pca-u-branches, .pca-u-back { grid-template-columns: 150px 130px 130px 150px; }
+  .pca-screens-wall { width: 280px; }
+}
+@media (max-width: 1180px) {
+  .pcorg-floor.pcorg-floor-right { grid-template-columns: 260px 1fr 65px; }
+  .pcorg-floor-right .pca-left-cluster { grid-template-columns: 65px 195px; }
+  .pca-u-branches, .pca-u-back { grid-template-columns: 130px 110px 110px 130px; }
+  .pca-screens-wall { width: 240px; }
+}
+@media (max-width: 1000px) {
+  .pcorg-floor.pcorg-floor-right { grid-template-columns: 220px 1fr 55px; }
+  .pcorg-floor-right .pca-left-cluster { grid-template-columns: 55px 165px; }
+  .pca-u-branches, .pca-u-back { grid-template-columns: 110px 95px 95px 110px; }
+  .pca-u-branches .seat, .pca-u-back .seat { font-size: 11px; padding: 16px 6px; }
+  .pca-screens-wall { width: 220px; }
+}
+@media (max-width: 768px) {
+  .pcorg-floor.pcorg-floor-right { grid-template-columns: 180px 1fr 45px; }
+  .pcorg-floor-right .pca-left-cluster { grid-template-columns: 45px 135px; }
+  .pca-u-branches, .pca-u-back { grid-template-columns: 100px 80px 80px 100px; column-gap: 3px; }
+  .pca-u-branches .seat, .pca-u-back .seat { font-size: 9.5px; padding: 10px 4px; }
+  .pca-screens-wall { width: 200px; }
+}
+
+/* Gap entre les branches et la rangee OPV/COMMANDANT/CGO */
+.b-opv, .b-comm, .b-cgo { margin-top: 16px; }
+
+.pcorg-legend {
+  display: flex; gap: 18px; flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 22px; padding-top: 16px;
+  border-top: 1px dashed var(--border);
+  font-size: 11px; color: var(--text-soft);
+}
+.pcorg-legend .legend-dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid; }
+.pcorg-legend .legend-blue { background: #cfe2f3; border-color: var(--aco-navy); }
+.pcorg-legend .legend-navy { background: #1a3a6c; border-color: #1a3a6c; }
+.pcorg-legend .legend-red { background: #b91c1c; border-color: #7f1d1d; }
+.pcorg-legend .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+
+@media (max-width: 1180px) {
+  .pcorg-u { grid-template-columns: 180px 320px 180px; }
+  .pcorg-screens-wall { width: 320px; }
+  .b-comm .seat-role { font-size: 18px; }
+  .seat { padding: 20px 10px; font-size: 12px; }
+}
+@media (max-width: 920px) {
+  .pcorg-floor { grid-template-columns: 1fr; }
+  .pcorg-side { flex-direction: row; flex-wrap: wrap; gap: 8px; }
+  .pcorg-side-title { width: 100%; }
+  .pcorg-mini-table { flex: 1; min-width: 140px; }
+  .pcorg-u { grid-template-columns: 140px 260px 140px; }
+  .pcorg-screens-wall { width: 260px; }
+  .b-comm .seat-role { font-size: 16px; }
+  .seat { font-size: 11px; padding: 16px 6px; }
+}
+@media (max-width: 620px) {
+  .pcorg-u { grid-template-columns: 110px 200px 110px; }
+  .pcorg-screens-wall { width: 200px; }
+  .seat { font-size: 10px; padding: 12px 4px; }
+  .b-comm { padding: 18px 10px; }
+  .b-comm .seat-role { font-size: 14px; letter-spacing: 1px; }
+}
+
+/* Cellule de crise schema */
+.cellule-board {
+  background: #f0f4f8;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+.cell-top-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  margin-bottom: 16px;
+  align-items: start;
+}
+.cell-grid {
+  display: grid;
+  grid-template-columns: 1fr minmax(260px, 360px) 1fr;
+  gap: 12px;
+  align-items: start;
+}
+.cell-col { display: flex; flex-direction: column; gap: 10px; }
+.cell-card {
+  background: #cfe2f3;
+  border: 1.5px solid #1a3a6c;
+  border-radius: 6px;
+  padding: 8px 12px;
+  text-align: center;
+  font-size: 12px;
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.cell-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(26,58,108,.18);
+}
+.cell-card .cell-role,
+.cell-direction .cell-role,
+.cell-leader .cell-role,
+.cell-porteparole .cell-role,
+.cell-prepa .cell-role,
+.cell-liaison .cell-role {
+  font-weight: 700;
+  color: #1a3a6c;
+  font-size: 11.5px;
+  margin-bottom: 4px;
+  line-height: 1.2;
+}
+.cell-titulaire {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111;
+  line-height: 1.25;
+}
+.cell-titulaire-big {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.2;
+  margin-bottom: 2px;
+}
+.cell-suppleant {
+  font-size: 11px;
+  color: #475569;
+  font-style: italic;
+  margin-top: 1px;
+}
+
+/* Centre - bloc directeur */
+.cell-center {
+  display: flex; flex-direction: column; gap: 14px;
+}
+.cell-direction {
+  background: #cfe2f3;
+  border: 2px solid #1a3a6c;
+  border-radius: 6px;
+  padding: 10px 14px;
+  text-align: center;
+}
+.cell-direction .cell-titulaire { font-size: 16px; font-weight: 700; }
+.cell-leadership {
+  background: linear-gradient(180deg, #2c5599 0%, #1a3a6c 100%);
+  border-radius: 14px;
+  padding: 22px 18px;
+  text-align: center;
+  color: white;
+  box-shadow: 0 4px 14px rgba(26,58,108,.25);
+}
+.cell-leadership .cell-leader { margin-bottom: 16px; }
+.cell-leadership .cell-leader:last-of-type { margin-bottom: 18px; }
+.cell-leadership .cell-leader .cell-role {
+  color: #fbe392; opacity: 0.95;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  font-size: 10px; margin-bottom: 3px;
+}
+.cell-leadership .cell-leader .cell-suppleant {
+  color: rgba(255,255,255,0.75);
+  font-size: 11px;
+}
+.cell-porteparole {
+  background: #d9ead3;
+  border: 1.5px solid #38761d;
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+.cell-porteparole .cell-role { color: #38761d; }
+.cell-porteparole .cell-titulaire { font-size: 14px; }
+
+/* Communication card en vert */
+.cell-card-comm {
+  background: #d9ead3;
+  border-color: #38761d;
+}
+.cell-card-comm .cell-role { color: #38761d; }
+
+/* PHA card */
+.cell-card-pha {
+  background: #c9d8eb;
+  border-color: #1a3a6c;
+}
+
+/* Bottom row */
+.cell-bottom {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+  margin-top: 16px;
+}
+.cell-card-wide { padding: 10px 14px; }
+
+/* Boites externes */
+.cell-prepa {
+  background: #fde0c4;
+  border: 1.5px solid #c47730;
+  border-radius: 6px;
+  padding: 8px 14px;
+  text-align: center;
+  font-size: 12px;
+  min-width: 220px;
+}
+.cell-prepa .cell-role { color: #8b4513; font-size: 11px; }
+.cell-liaison {
+  background: #c47730;
+  border: 1.5px solid #8b4513;
+  border-radius: 6px;
+  padding: 7px 10px;
+  text-align: center;
+  font-size: 11px;
+  color: white;
+  box-shadow: 0 2px 6px rgba(0,0,0,.15);
+  align-self: center;
+  justify-self: end;
+  max-width: 240px;
+}
+.cell-liaison .cell-role { color: #fff; font-size: 10px; }
+.cell-liaison .cell-titulaire { color: #fff; font-size: 12px; }
+.cell-liaison-note {
+  font-size: 9.5px; color: rgba(255,255,255,0.9);
+  font-style: italic; margin-top: 4px; line-height: 1.25;
+}
+
+/* Legende */
+.cell-legend {
+  display: flex; gap: 18px; flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 24px; padding-top: 18px;
+  border-top: 1px dashed var(--border);
+  font-size: 11px; color: var(--text-soft);
+}
+.legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.legend-dot {
+  display: inline-block; width: 12px; height: 12px;
+  border-radius: 3px; border: 1.5px solid;
+}
+.legend-blue { background: #cfe2f3; border-color: #1a3a6c; }
+.legend-green { background: #d9ead3; border-color: #38761d; }
+.legend-orange { background: #fde0c4; border-color: #c47730; }
+.legend-rule {
+  display: inline-block; width: 18px; height: 1px;
+  background: var(--text-muted);
+  position: relative;
+}
+.cell-legend em { color: var(--text-muted); font-style: italic; }
+
+/* Responsive cellule */
+@media (max-width: 980px) {
+  .cell-grid { grid-template-columns: 1fr; }
+  .cell-bottom { grid-template-columns: 1fr; }
+  .cell-top-row { grid-template-columns: 1fr; }
+  .cell-prepa { min-width: 0; }
+}
+
+/* Doc viewer */
+.main:has(#view-doc.active) { padding: 0; overflow: hidden; }
+#view-doc.active { height: 100%; display: flex; flex-direction: column; }
+.doc-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 20px; background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.doc-toolbar-title {
+  font-size: 14px; font-weight: 700; color: var(--aco-navy);
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.doc-toolbar-actions { display: flex; gap: 8px; }
+.doc-btn {
+  background: white; color: var(--aco-navy);
+  border: 1px solid var(--border);
+  padding: 6px 14px; border-radius: 4px;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  font-family: inherit;
+  transition: all .15s ease;
+}
+.doc-btn:hover { background: var(--aco-navy-soft); border-color: var(--aco-navy); }
+.doc-frame-wrap { flex: 1; background: var(--bg); overflow: hidden; }
+.doc-frame { width: 100%; height: 100%; border: none; background: var(--bg); display: block; }
+
+/* Accueil */
+.hero {
+  text-align: center; padding: 36px 28px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-top: 4px solid var(--aco-navy);
+  border-radius: 6px;
+  margin-bottom: 24px;
+}
+.hero-overline {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 3px;
+  color: var(--aco-red); font-weight: 700; margin-bottom: 10px;
+}
+.hero h1 {
+  font-size: 32px; font-weight: 700; letter-spacing: -0.3px;
+  color: var(--aco-navy); margin-bottom: 6px;
+}
+.hero-sub {
+  font-size: 15px; color: var(--text-muted); margin-bottom: 28px;
+}
+
+/* Time convention */
+.time-conv {
+  background: linear-gradient(135deg, var(--aco-navy) 0%, #2c5599 100%);
+  color: white; border-radius: 6px;
+  padding: 18px 22px; margin: 0 auto 28px;
+  max-width: 720px;
+  box-shadow: 0 2px 10px rgba(26,58,108,0.25);
+}
+.time-conv-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 2px;
+  font-weight: 700; opacity: 0.85; margin-bottom: 14px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.time-conv-title::before, .time-conv-title::after {
+  content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.3);
+  max-width: 60px;
+}
+.time-conv-grid {
+  display: grid; grid-template-columns: 1fr auto 1fr;
+  gap: 12px; align-items: stretch;
+}
+.time-block {
+  background: rgba(255,255,255,0.12);
+  border-radius: 5px; padding: 14px 16px;
+  text-align: center;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.time-block.simulated {
+  background: rgba(255,255,255,0.95);
+  color: var(--aco-navy);
+  border-color: white;
+}
+.time-block-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px;
+  font-weight: 700; opacity: 0.85; margin-bottom: 4px;
+}
+.time-block.simulated .time-block-label {
+  color: var(--aco-red); opacity: 1;
+}
+.time-block-date {
+  font-size: 12px; font-weight: 600; margin-bottom: 6px;
+  text-transform: capitalize;
+}
+.time-block-clock {
+  font-size: 28px; font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+  letter-spacing: 1px;
+  line-height: 1;
+}
+.time-arrow {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; opacity: 0.6;
+  padding: 0 4px;
+}
+.time-conv-foot {
+  margin-top: 12px; font-size: 11px; text-align: center;
+  opacity: 0.8; letter-spacing: 0.3px;
+}
+.time-conv-foot strong { color: #fde68a; }
+
+/* Directeur d'exercice */
+.dir-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--aco-red);
+  border-radius: 5px;
+  padding: 14px 22px;
+  margin: 0 auto 28px;
+  max-width: 720px;
+  display: flex; align-items: center; gap: 18px;
+  text-align: left;
+}
+.dir-icon {
+  flex-shrink: 0;
+  width: 48px; height: 48px; border-radius: 50%;
+  background: var(--aco-red-soft);
+  color: var(--aco-red);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; font-weight: 800;
+  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+  border: 2px solid var(--aco-red);
+}
+.dir-info { flex: 1; }
+.dir-label {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1.5px;
+  color: var(--aco-red); margin-bottom: 2px;
+}
+.dir-name {
+  font-size: 18px; font-weight: 700; color: var(--text);
+  letter-spacing: 0.2px; line-height: 1.1;
+}
+.dir-role {
+  font-size: 11px; color: var(--text-muted);
+  font-style: italic; margin-top: 4px; line-height: 1.3;
+}
+.stats {
+  display: flex; justify-content: center; gap: 16px;
+  flex-wrap: wrap; margin-bottom: 32px;
+}
+.stat-card {
+  background: var(--panel-soft); border: 1px solid var(--border-soft);
+  border-radius: 6px; padding: 18px 28px; min-width: 140px;
+  text-align: center;
+}
+.stat-number {
+  font-size: 30px; font-weight: 800;
+  color: var(--aco-navy);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.stat-label {
+  font-size: 12px; color: var(--text-muted); margin-top: 6px;
+  text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+}
+.stat-sub {
+  font-size: 10px; color: var(--text-muted); margin-top: 3px;
+  font-style: italic; line-height: 1.2;
+}
+.stats-group { margin-bottom: 18px; }
+.stats-group-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px;
+  font-weight: 700; color: var(--text-soft);
+  margin-bottom: 10px; text-align: center;
+}
+.stats-group-hint {
+  text-transform: none; letter-spacing: 0; font-weight: 400;
+  color: var(--text-muted); font-style: italic; font-size: 11px;
+}
+.stat-card.stat-cellule { border-top: 3px solid var(--aco-navy); }
+.stat-card.stat-cellule .stat-number { color: var(--aco-navy); }
+.stat-card.stat-pcorg { border-top: 3px solid var(--aco-orange); }
+.stat-card.stat-pcorg .stat-number { color: var(--aco-orange); }
+.stat-card.stat-pca { border-top: 3px solid var(--aco-red); }
+.stat-card.stat-pca .stat-number { color: var(--aco-red); }
+.stat-card.stat-tous { border-top: 3px solid var(--text-muted); }
+.stat-card.stat-tous .stat-number { color: var(--text-soft); }
+.cta-row { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+.cta-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 11px 22px; border-radius: 5px; font-size: 14px;
+  font-weight: 600; cursor: pointer; border: none;
+  transition: all .15s ease; text-decoration: none;
+}
+.cta-primary { background: var(--aco-navy); color: white; }
+.cta-primary:hover { background: #142d54; }
+.cta-secondary {
+  background: white; color: var(--aco-navy);
+  border: 1px solid var(--aco-navy);
+}
+.cta-secondary:hover { background: var(--aco-navy-soft); }
+
+/* Section header */
+.section-header {
+  margin-bottom: 20px; padding-bottom: 12px;
+  border-bottom: 2px solid var(--aco-navy);
+}
+.section-header h2 { font-size: 20px; font-weight: 700; color: var(--aco-navy); }
+.section-header p { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+/* Fiches grid */
+.fiches-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+.fiche-card {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 5px; padding: 16px;
+  display: flex; gap: 14px; align-items: flex-start;
+  cursor: pointer; transition: all .15s ease;
+  text-decoration: none; color: inherit;
+}
+.fiche-card:hover {
+  border-color: var(--aco-navy);
+  box-shadow: 0 2px 8px rgba(26,58,108,0.12);
+  transform: translateY(-1px);
+}
+.fiche-num {
+  flex-shrink: 0; width: 40px; height: 40px;
+  background: var(--aco-navy); border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 800; color: white;
+  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+}
+.fiche-info { flex: 1; min-width: 0; }
+.fiche-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; color: var(--text); }
+.fiche-desc { font-size: 12px; color: var(--text-muted); line-height: 1.4; }
+.fiche-open {
+  font-size: 11px; color: var(--aco-navy); margin-top: 8px;
+  display: inline-flex; align-items: center; gap: 4px;
+  text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700;
+}
+.fiche-card[data-color="red"] { border-left: 4px solid var(--aco-red); }
+.fiche-card[data-color="red"] .fiche-num { background: var(--aco-red); }
+.fiche-card[data-color="navy"] { border-left: 4px solid var(--aco-navy); }
+.fiche-card[data-color="orange"] { border-left: 4px solid var(--aco-orange); }
+.fiche-card[data-color="orange"] .fiche-num { background: var(--aco-orange); }
+.fiche-card[data-color="teal"] { border-left: 4px solid #0d9488; }
+.fiche-card[data-color="teal"] .fiche-num { background: #0d9488; }
+.fiche-card[data-color="purple"] { border-left: 4px solid var(--aco-purple); }
+.fiche-card[data-color="purple"] .fiche-num { background: var(--aco-purple); }
+.fiche-card[data-color="blue"] { border-left: 4px solid var(--aco-cyan); }
+.fiche-card[data-color="blue"] .fiche-num { background: var(--aco-cyan); }
+
+/* Inputs gallery */
+.filter-bar {
+  display: flex; gap: 6px; margin-bottom: 20px; flex-wrap: wrap;
+}
+.filter-btn {
+  padding: 7px 16px; border-radius: 4px; font-size: 12px;
+  font-weight: 600; cursor: pointer;
+  background: var(--panel); color: var(--text-soft);
+  border: 1px solid var(--border);
+  transition: all .15s ease;
+}
+.filter-btn:hover { border-color: var(--aco-navy); color: var(--aco-navy); }
+.filter-btn.active {
+  background: var(--aco-navy); color: white;
+  border-color: var(--aco-navy);
+}
+.inputs-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.input-card {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 5px; overflow: hidden;
+  cursor: pointer; transition: all .15s ease;
+}
+.input-card:hover {
+  border-color: var(--aco-navy);
+  box-shadow: 0 2px 8px rgba(26,58,108,0.15);
+  transform: translateY(-1px);
+}
+.input-thumb {
+  position: relative; width: 100%; height: 150px;
+  background: var(--panel-soft);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border-soft);
+}
+.input-thumb img,
+.input-thumb video.thumb-video {
+  width: 100%; height: 100%; object-fit: cover;
+  pointer-events: none;
+  background: #000;
+}
+.input-thumb .thumb-icon {
+  font-size: 44px; color: var(--text-muted);
+}
+.input-thumb .play-overlay {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.25);
+  transition: background .2s ease;
+}
+.input-card:hover .input-thumb .play-overlay { background: rgba(0,0,0,0.15); }
+.play-circle {
+  width: 50px; height: 50px; border-radius: 50%;
+  background: white;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .2s;
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+}
+.input-card:hover .play-circle { transform: scale(1.1); }
+.play-circle::after {
+  content: ''; width: 0; height: 0;
+  border-left: 16px solid var(--aco-navy);
+  border-top: 10px solid transparent;
+  border-bottom: 10px solid transparent;
+  margin-left: 4px;
+}
+.inject-badge {
+  position: absolute; top: 8px; left: 8px;
+  background: var(--aco-navy);
+  color: white; font-size: 12px; font-weight: 800;
+  padding: 3px 8px; border-radius: 4px;
+  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+.type-badge {
+  position: absolute; top: 8px; right: 8px;
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.5px; padding: 3px 8px; border-radius: 3px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.15);
+}
+.type-badge.photo { background: var(--aco-cyan); color: white; }
+.type-badge.video { background: var(--aco-red); color: white; }
+.type-badge.pdf { background: var(--aco-purple); color: white; }
+.type-badge.data { background: var(--aco-green); color: white; }
+.input-meta { padding: 10px 14px; }
+.input-label { font-size: 13px; font-weight: 600; line-height: 1.3; color: var(--text); }
+
+/* Modal / Lightbox */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(15, 23, 42, 0.85);
+  display: none; align-items: center; justify-content: center;
+  flex-direction: column;
+}
+.modal-overlay.open { display: flex; }
+.modal-header {
+  position: absolute; top: 0; left: 0; right: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 20px; z-index: 210;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.5), transparent);
+}
+.modal-info { display: flex; align-items: center; gap: 12px; }
+.modal-inject {
+  font-size: 16px; font-weight: 800; color: white;
+  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+  background: var(--aco-navy); padding: 4px 10px; border-radius: 4px;
+}
+.modal-title { font-size: 15px; font-weight: 600; color: white; }
+.modal-close {
+  background: white; border: none;
+  color: var(--text); font-size: 18px; width: 36px; height: 36px;
+  border-radius: 4px; cursor: pointer; display: flex;
+  align-items: center; justify-content: center;
+  transition: background .15s;
+}
+.modal-close:hover { background: var(--hover); }
+.modal-content {
+  max-width: 92vw; max-height: 82vh;
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-content img,
+.modal-content video {
+  max-width: 92vw; max-height: 82vh; border-radius: 4px;
+  background: white;
+}
+.modal-content video { background: #000; }
+.modal-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  background: white; border: none;
+  color: var(--aco-navy); font-size: 22px; width: 44px; height: 44px;
+  border-radius: 50%; cursor: pointer; display: flex;
+  align-items: center; justify-content: center;
+  transition: background .15s;
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+}
+.modal-nav:hover { background: var(--hover); }
+.modal-nav.prev { left: 20px; }
+.modal-nav.next { right: 20px; }
+
+/* CSV Table */
+.csv-container {
+  max-width: 92vw; max-height: 82vh; overflow: auto;
+  background: white; border-radius: 5px;
+  border: 1px solid var(--border);
+}
+.csv-container table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+  white-space: nowrap;
+}
+.csv-container th {
+  background: var(--aco-navy); color: white;
+  font-weight: 700; text-transform: uppercase; font-size: 10px;
+  letter-spacing: 0.5px; padding: 9px 12px;
+  position: sticky; top: 0; z-index: 1;
+  text-align: left;
+}
+.csv-container td {
+  padding: 7px 12px; border-bottom: 1px solid var(--border-soft);
+  color: var(--text);
+}
+.csv-container tr:nth-child(even) td { background: var(--panel-soft); }
+.csv-container tr:hover td { background: var(--aco-navy-soft); }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .menu-btn { display: block; }
+  .sidebar { transform: translateX(-100%); }
+  .sidebar.open { transform: translateX(0); box-shadow: 4px 0 24px rgba(0,0,0,.2); }
+  .main { margin-left: 0; padding: 20px; }
+  .hero { padding: 28px 16px; }
+  .hero h1 { font-size: 24px; }
+  .stats { gap: 10px; }
+  .stat-card { min-width: 110px; padding: 14px 18px; }
+  .stat-number { font-size: 24px; }
+  .fiches-grid { grid-template-columns: 1fr; }
+  .inputs-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  .header-title span { display: none; }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* Print */
+@media print {
+  .header, .sidebar, .modal-overlay { display: none !important; }
+  .main { margin: 0; padding: 20px; overflow: visible; }
+  body { background: white; color: #111; }
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <div class="header-left">
+    <button class="menu-btn" onclick="toggleSidebar()" aria-label="Menu">&#9776;</button>
+    <div class="header-logo"><img src="../assets/aco-logo-white.png" alt="ACO"></div>
+    <div class="header-title">Exercice Crise <span>— GP Moto 2026</span></div>
+  </div>
+  <div style="display:flex; align-items:center; gap:14px;">
+    <span class="header-station">STATION 01 // PARTICIPANT</span>
+    <a class="header-back" href="index.html">&#9664;&#9664; Retour hub</a>
+  </div>
+</header>
+
+<!-- Sidebar -->
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-label">Accueil</div>
+    <a class="nav-item active" onclick="showView('accueil')" data-view="accueil">
+      <span class="icon">&#9673;</span> Salle de crise
+    </a>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="sidebar-section">
+    <div class="sidebar-label">Consignes</div>
+    <a class="nav-item" onclick="openDoc('00_consignes_cellule.html','Consignes cellule de crise')" data-doc="00_consignes_cellule.html">
+      <span class="icon">&#9888;</span> Cellule de crise
+    </a>
+    <a class="nav-item" onclick="openDoc('00_consignes_pcorg.html','Consignes PCORG')" data-doc="00_consignes_pcorg.html">
+      <span class="icon">&#9888;</span> PCORG
+    </a>
+    <a class="nav-item" onclick="openDoc('00_consignes_pca.html','Consignes PCA')" data-doc="00_consignes_pca.html">
+      <span class="icon">&#9888;</span> PCA
+    </a>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="sidebar-section">
+    <div class="sidebar-label">Dispositions</div>
+    <a class="nav-item" onclick="showView('cellule')" data-view="cellule">
+      <span class="icon">&#128101;</span> Cellule de crise
+    </a>
+    <a class="nav-item" onclick="showView('pcorg')" data-view="pcorg">
+      <span class="icon">&#128205;</span> Disposition PCORG
+    </a>
+    <a class="nav-item" onclick="showView('pca')" data-view="pca">
+      <span class="icon">&#127963;</span> Disposition PCA
+    </a>
+  </div>
+</nav>
+
+<!-- Main -->
+<div class="main">
+
+  <!-- View: Accueil -->
+  <div class="view active" id="view-accueil">
+    <div class="hero">
+      <div class="hero-overline">Exercice de gestion de crise</div>
+      <h1>Salle de crise &mdash; GP Moto 2026</h1>
+      <div class="hero-sub">Dimanche 10 mai 2026 &middot; Circuit Bugatti &middot; Le Mans</div>
+
+      <div class="time-conv">
+        <div class="time-conv-title">Convention horaire de l'exercice</div>
+        <div class="time-conv-grid">
+          <div class="time-block">
+            <div class="time-block-label">Heure reelle</div>
+            <div class="time-block-date" id="real-date">&mdash;</div>
+            <div class="time-block-clock" id="real-clock">--:--:--</div>
+          </div>
+          <div class="time-arrow">&rarr;</div>
+          <div class="time-block simulated">
+            <div class="time-block-label">Heure simulee</div>
+            <div class="time-block-date" id="sim-date">&mdash;</div>
+            <div class="time-block-clock" id="sim-clock">--:--:--</div>
+          </div>
+        </div>
+        <div class="time-conv-foot">
+          Le scenario se deroule a J+10 jours et 4h par rapport au temps reel &middot; les horloges defilent en parallele.
+        </div>
+      </div>
+
+      <div class="cta-row">
+        <button class="cta-btn cta-primary" onclick="openDoc('00_consignes_cellule.html','Consignes cellule de crise')">&#9888; Consignes cellule</button>
+        <button class="cta-btn cta-secondary" onclick="showView('cellule')">&#128101; Cellule de crise</button>
+        <button class="cta-btn cta-secondary" onclick="showView('pcorg')">&#128205; Disposition PCORG</button>
+        <button class="cta-btn cta-secondary" onclick="showView('pca')">&#127963; Disposition PCA</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- View: Disposition PCA -->
+  <div class="view" id="view-pca">
+    <div class="section-header">
+      <h2>Disposition - PC Autorites (PCA)</h2>
+      <p>Plan de la salle PCA (Prefecture). Tous les operateurs face au mur d'ecrans (cameras et flux).</p>
+    </div>
+
+    <div class="pcorg-room">
+      <div class="pcorg-floor pcorg-floor-right">
+
+        <!-- Cluster mini-U a gauche : spine vertical + bras horizontaux + Table de travail au centre -->
+        <div class="pca-left-cluster">
+          <div class="pcorg-mini-table pca-left pca-left-2 fam-prefecture">
+            <div class="seat-role">Service Prefecture</div>
+          </div>
+          <div class="pcorg-mini-table pca-left pca-left-1 fam-prefecture">
+            <div class="seat-role">Service Prefecture</div>
+          </div>
+          <div class="pca-worktable">Table de travail</div>
+          <div class="pcorg-mini-table pca-left pca-left-3 fam-police">
+            <div class="seat-role">Police Nationale</div>
+          </div>
+        </div>
+
+        <!-- Rangee 1 : mur d'ecrans -->
+        <div class="pcorg-screens-wall pca-screens-wall">
+          <div class="screen-strip">
+            <div></div><div></div><div></div><div></div><div></div>
+          </div>
+          <div class="screen-label">Mur d'ecrans &middot; Cameras et flux video</div>
+        </div>
+
+        <!-- Rangee 2 : branches du U + tables Gendarmerie/DMD a droite -->
+        <div class="pca-u-branches">
+          <div class="seat seat-branch fam-police lpca-pmun">Police Municipale du Mans</div>
+          <div class="seat seat-branch fam-collectivite lpca-lmm">Le Mans Metropole</div>
+          <div class="seat seat-branch fam-samu lpca-samu">SAMU</div>
+          <div class="seat seat-branch fam-police lpca-pn">Police Nationale</div>
+          <div class="seat seat-branch fam-mobilite lpca-waze">Waze</div>
+
+          <div class="seat seat-branch fam-pompiers rpca-sdis">SDIS</div>
+          <div class="seat seat-branch fam-gendarmerie rpca-gn">Gendarmerie Nationale</div>
+          <div class="seat seat-branch fam-defense rpca-dmd">DMD</div>
+          <div class="seat seat-branch fam-mobilite rpca-vinci">Vinci</div>
+          <div class="seat seat-branch fam-collectivite rpca-dept">Departement de la Sarthe</div>
+        </div>
+        <div class="pcorg-side pcorg-side-right">
+          <div class="pcorg-mini-table fam-gendarmerie">
+            <div class="seat-role">Table Gendarmerie</div>
+            <div class="seat-sub">face au mur, dos au U</div>
+          </div>
+          <div class="pcorg-mini-table fam-defense">
+            <div class="seat-role">Table DMD</div>
+            <div class="seat-sub">face au mur, dos au U</div>
+          </div>
+        </div>
+
+        <!-- Rangee 3 : rangee du fond du U (commandement) -->
+        <div class="pca-u-back">
+          <div class="seat seat-key bpca-oppca">
+            <div class="seat-role">OPERATEUR PCA</div>
+            <div class="seat-sub">Amandine CHAPERON ou Christophe LAUTIER</div>
+          </div>
+          <div class="seat seat-key bpca-aco">
+            <div class="seat-role">REPRESENTANT ACO</div>
+            <div class="seat-sub">Ludovic ARNAULT</div>
+          </div>
+          <div class="seat seat-key bpca-prefet">
+            <div class="seat-role">PREFET</div>
+            <div class="seat-sub">ou Directeur de cabinet</div>
+          </div>
+          <div class="seat seat-key bpca-bscgc">
+            <div class="seat-role">BSCGC</div>
+            <div class="seat-sub">ou representant Prefecture</div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="pcorg-legend">
+        <span class="legend-item"><span class="legend-dot fam-police"></span>Police</span>
+        <span class="legend-item"><span class="legend-dot fam-gendarmerie"></span>Gendarmerie</span>
+        <span class="legend-item"><span class="legend-dot fam-pompiers"></span>Pompiers (SDIS)</span>
+        <span class="legend-item"><span class="legend-dot fam-samu"></span>Secours (SAMU)</span>
+        <span class="legend-item"><span class="legend-dot fam-prefecture"></span>Prefecture / Etat</span>
+        <span class="legend-item"><span class="legend-dot fam-defense"></span>Defense (DMD)</span>
+        <span class="legend-item"><span class="legend-dot fam-mobilite"></span>Mobilite</span>
+        <span class="legend-item"><span class="legend-dot fam-collectivite"></span>Collectivites</span>
+        <span class="legend-item"><span class="legend-dot legend-red"></span>Autorite prefectorale</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- View: Disposition PCORG -->
+  <div class="view" id="view-pcorg">
+    <div class="section-header">
+      <h2>Disposition - PC Organisation (PCORG)</h2>
+      <p>Plan de la salle pendant l'exercice. Tous les operateurs font face au mur d'ecrans (cameras de videosurveillance).</p>
+    </div>
+
+    <div class="pcorg-room">
+      <div class="pcorg-floor">
+
+        <div class="pcorg-side">
+          <div class="pcorg-side-title">Tables separees<br><span>face au mur, dos au U</span></div>
+          <div class="pcorg-mini-table">
+            <div class="seat-role">Operateur Navette VIP</div>
+          </div>
+          <div class="pcorg-mini-table">
+            <div class="seat-role">Operateur Setram</div>
+            <div class="seat-sub">Transport en commun</div>
+          </div>
+        </div>
+
+      <div class="pcorg-main">
+      <div class="pcorg-screens-wall">
+        <div class="screen-strip">
+          <div></div><div></div><div></div><div></div><div></div>
+        </div>
+        <div class="screen-label">Mur d'ecrans &middot; Cameras</div>
+      </div>
+
+        <div class="pcorg-u">
+          <div class="pcorg-u-arrows" aria-hidden="true">
+            <div class="pcorg-arrow pcorg-arrow-left">&uarr; vers le mur</div>
+            <div class="pcorg-arrow pcorg-arrow-right">vers le mur &uarr;</div>
+          </div>
+
+          <div class="seat seat-branch r-bil">Operateur Billetterie</div>
+          <div class="seat seat-branch r-jal">Operateur Jalonnement</div>
+          <div class="seat seat-branch r-se">Operateur Sud-Est</div>
+          <div class="seat seat-branch r-no">Operateur Nord-Ouest</div>
+          <div class="seat seat-branch r-hyp">Operateur Hypercentre</div>
+
+          <div class="seat seat-branch l-3817">3817 / Appels entrants</div>
+          <div class="seat seat-branch seat-empty l-empty1">&mdash;</div>
+          <div class="seat seat-branch seat-empty l-empty2">&mdash;</div>
+          <div class="seat seat-branch l-flux">Operateur Flux</div>
+          <div class="seat seat-branch l-sec">Operateur Securite</div>
+
+          <div class="seat seat-key b-opv">
+            <div class="seat-role">OPV</div>
+            <div class="seat-sub">Operateur Video</div>
+          </div>
+          <div class="seat seat-key b-comm">
+            <div class="seat-role">COMMANDANT</div>
+            <div class="seat-sub">PC Organisation</div>
+          </div>
+          <div class="seat seat-key b-cgo">
+            <div class="seat-role">CGO</div>
+            <div class="seat-sub">Chef Groupe Operationnel</div>
+          </div>
+        </div>
+      </div>
+
+      </div>
+
+      <div class="pcorg-legend">
+        <span class="legend-item"><span class="legend-dot legend-blue"></span>Operateur PCORG</span>
+        <span class="legend-item"><span class="legend-dot legend-navy"></span>Encadrement</span>
+        <span class="legend-item"><span class="legend-dot legend-red"></span>Commandement</span>
+        <span class="legend-item">8 op. dans le U &middot; 2 op. tables separees &middot; 3 encadrants</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- View: Cellule de crise -->
+  <div class="view" id="view-cellule">
+    <div class="section-header">
+      <h2>Schema operationnel - Cellule de crise ACO GP Motos</h2>
+      <p>Composition et organisation des poles de la cellule de crise. Titulaire en haut, suppleant en bas.</p>
+    </div>
+
+    <div class="cellule-board">
+
+      <div class="cell-top-row">
+        <div class="cell-top-spacer"></div>
+        <div class="cell-prepa" title="Preparateurs salles de crise">
+          <div class="cell-role">Preparateurs Salles de crise ACO</div>
+          <div class="cell-titulaire">P. Tabardel</div>
+          <div class="cell-suppleant">T. Coelho</div>
+        </div>
+      </div>
+
+      <div class="cell-grid">
+
+        <!-- Colonne gauche -->
+        <div class="cell-col cell-col-left">
+          <div class="cell-card">
+            <div class="cell-role">Commerciale, TV, experience clients</div>
+            <div class="cell-titulaire">S. Andriolo</div>
+            <div class="cell-suppleant">E. Leboulleux</div>
+          </div>
+          <div class="cell-card">
+            <div class="cell-role">Billetterie</div>
+            <div class="cell-titulaire">E. Renaudin</div>
+            <div class="cell-suppleant">D. Tourancheau</div>
+          </div>
+          <div class="cell-card">
+            <div class="cell-role">Production Evenements</div>
+            <div class="cell-titulaire">C. Jarry</div>
+            <div class="cell-suppleant">P. Navarre</div>
+          </div>
+          <div class="cell-card">
+            <div class="cell-role">Institutionnels</div>
+            <div class="cell-titulaire">V. Girard</div>
+            <div class="cell-suppleant">A-F. Dupont</div>
+          </div>
+          <div class="cell-card">
+            <div class="cell-role">Finances &amp; Juridique</div>
+            <div class="cell-titulaire">P. Lucas</div>
+            <div class="cell-suppleant">J. Accolas</div>
+          </div>
+          <div class="cell-card cell-card-comm">
+            <div class="cell-role">Communication</div>
+            <div class="cell-titulaire">AL. Vigneron</div>
+            <div class="cell-suppleant">J-B. Schmidt</div>
+          </div>
+        </div>
+
+        <!-- Centre -->
+        <div class="cell-center">
+          <div class="cell-direction">
+            <div class="cell-role">Direction Generale</div>
+            <div class="cell-titulaire">Nicolas Le Man</div>
+          </div>
+
+          <div class="cell-leadership">
+            <div class="cell-leader">
+              <div class="cell-role">Directeur de crise</div>
+              <div class="cell-titulaire-big">Vincent Beaumesnil</div>
+              <div class="cell-suppleant">N. Le Man</div>
+            </div>
+            <div class="cell-leader">
+              <div class="cell-role">Assistant Directeur de crise</div>
+              <div class="cell-titulaire-big">A. Nadau</div>
+              <div class="cell-suppleant">J. Tireau</div>
+            </div>
+            <div class="cell-leader">
+              <div class="cell-role">Historien - Suivi des actions</div>
+              <div class="cell-titulaire-big">S. Picouleau</div>
+              <div class="cell-suppleant">S. Lechene</div>
+            </div>
+
+            <div class="cell-porteparole">
+              <div class="cell-role">Porte-parole</div>
+              <div class="cell-titulaire">P. Fillon</div>
+              <div class="cell-titulaire">N. Le Man</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Colonne droite -->
+        <div class="cell-col cell-col-right">
+          <div class="cell-card">
+            <div class="cell-role">Ressources humaines</div>
+            <div class="cell-titulaire">A. Lepesant</div>
+            <div class="cell-suppleant">C. Legay</div>
+          </div>
+          <div class="cell-card">
+            <div class="cell-role">Circuit</div>
+            <div class="cell-titulaire">S. Tessier</div>
+            <div class="cell-suppleant">S. Donnet</div>
+          </div>
+          <div class="cell-card">
+            <div class="cell-role">Infrastructures</div>
+            <div class="cell-titulaire">S. Galuret</div>
+            <div class="cell-suppleant">J. Papin</div>
+          </div>
+          <div class="cell-card">
+            <div class="cell-role">Securite / Surete</div>
+            <div class="cell-titulaire">J. Le Mene</div>
+            <div class="cell-suppleant">L. Feufeu</div>
+          </div>
+          <div class="cell-card">
+            <div class="cell-role">Medical</div>
+            <div class="cell-titulaire">F. Rocatcher</div>
+            <div class="cell-suppleant">M. Navarre</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Rangee du bas -->
+      <div class="cell-bottom">
+        <div class="cell-card cell-card-wide">
+          <div class="cell-role">Reseaux informatique / Electricite</div>
+          <div class="cell-titulaire">B. Guyard</div>
+          <div class="cell-suppleant">S. Chasseguet</div>
+        </div>
+        <div class="cell-card cell-card-wide cell-card-pha">
+          <div class="cell-role">PHA</div>
+          <div class="cell-titulaire">C. Michy</div>
+          <div class="cell-suppleant">P. Michy</div>
+        </div>
+        <div class="cell-liaison" title="Liaison PC Autorites">
+          <div class="cell-role">Liaison PC Autorites</div>
+          <div class="cell-titulaire">L. Arnault</div>
+          <div class="cell-liaison-note">Lien direct avec le PC Autorites de la Prefecture</div>
+        </div>
+      </div>
+
+      <div class="cell-legend">
+        <span class="legend-item"><span class="legend-dot legend-blue"></span>Pole metier</span>
+        <span class="legend-item"><span class="legend-dot legend-green"></span>Communication / Porte-parole</span>
+        <span class="legend-item"><span class="legend-dot legend-orange"></span>Externe / Liaison</span>
+        <span class="legend-item"><span class="legend-rule"></span>Titulaire <em>/ suppleant</em></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- View: Doc viewer (iframe) -->
+  <div class="view" id="view-doc">
+    <div class="doc-toolbar">
+      <div class="doc-toolbar-title" id="doc-title"></div>
+      <div class="doc-toolbar-actions">
+        <button class="doc-btn" onclick="openDocInTab()" title="Ouvrir dans un nouvel onglet">
+          &#8599; Nouvel onglet
+        </button>
+        <button class="doc-btn" onclick="printDoc()" title="Imprimer">
+          &#128424; Imprimer
+        </button>
+      </div>
+    </div>
+    <div class="doc-frame-wrap">
+      <iframe id="doc-frame" class="doc-frame" src="about:blank" title="Document"></iframe>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function showView(name) {
+  var views = document.querySelectorAll('.view');
+  for (var i = 0; i < views.length; i++) views[i].classList.remove('active');
+  var v = document.getElementById('view-' + name);
+  if (v) v.classList.add('active');
+  var navs = document.querySelectorAll('.nav-item');
+  for (var i = 0; i < navs.length; i++) navs[i].classList.remove('active');
+  var navItem = document.querySelector('.nav-item[data-view="' + name + '"]');
+  if (navItem) navItem.classList.add('active');
+  document.getElementById('sidebar').classList.remove('open');
+  // decharge l'iframe quand on quitte la vue document
+  if (name !== 'doc') {
+    var f = document.getElementById('doc-frame');
+    if (f && f.src && f.src.indexOf('about:blank') === -1) f.src = 'about:blank';
+  }
+}
+
+var currentDocFile = null;
+function openDoc(file, title) {
+  currentDocFile = file;
+  document.getElementById('doc-title').textContent = title;
+  document.getElementById('doc-frame').src = 'files/' + encodeURI(file);
+  showView('doc');
+  var navItem = document.querySelector('.nav-item[data-doc="' + file + '"]');
+  if (navItem) navItem.classList.add('active');
+}
+
+function openDocInTab() {
+  if (currentDocFile) window.open('files/' + encodeURI(currentDocFile), '_blank');
+}
+
+function printDoc() {
+  var f = document.getElementById('doc-frame');
+  if (f && f.contentWindow) {
+    f.contentWindow.focus();
+    f.contentWindow.print();
+  }
+}
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+}
+
+document.querySelector('.main').addEventListener('click', function() {
+  document.getElementById('sidebar').classList.remove('open');
+});
+
+// Live clocks (real time + simulated time, +10 days 4h offset)
+var SIM_OFFSET_MS = (10 * 24 + 4) * 3600 * 1000;
+var DAYS = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+var MONTHS = ['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre'];
+
+function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+function fmtDate(d) {
+  return DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear();
+}
+function fmtTime(d) {
+  return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+}
+function tickClocks() {
+  var now = new Date();
+  var sim = new Date(now.getTime() + SIM_OFFSET_MS);
+  document.getElementById('real-date').textContent = fmtDate(now);
+  document.getElementById('real-clock').textContent = fmtTime(now);
+  document.getElementById('sim-date').textContent = fmtDate(sim);
+  document.getElementById('sim-clock').textContent = fmtTime(sim);
+}
+tickClocks();
+setInterval(tickClocks, 1000);
+</script>
+</body>
+</html>

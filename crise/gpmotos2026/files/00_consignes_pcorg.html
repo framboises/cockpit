@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Consignes PCORG - Exercice GP Moto 2026</title>
+<style>
+  @media print {
+    @page { size: A4 portrait; margin: 10mm; }
+    body { font-size: 9.5pt; background: white; }
+    .no-print { display: none; }
+  }
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 780px; margin: 0 auto; padding: 14px; color: #111; background: #f5f5f7; line-height: 1.35; }
+  h1 { font-size: 18pt; margin: 0 0 2px 0; color: #d97706; text-align: center; }
+  .subtitle { color: #666; font-size: 9.5pt; text-align: center; margin-bottom: 12px; font-style: italic; }
+  .time-box { background: #1a3a6c; color: white; border-radius: 5px; padding: 8px 14px; margin-bottom: 12px; text-align: center; font-size: 10pt; }
+  .time-box strong { font-size: 11.5pt; display: block; margin-bottom: 2px; }
+  .rule-box { background: #fef3c7; border: 2.5px solid #d97706; border-radius: 5px; padding: 10px 16px; margin-bottom: 12px; }
+  .rule-box h2 { color: #9a3412; margin: 0 0 6px 0; font-size: 13pt; }
+  .rule-box p { margin: 4px 0; font-size: 10pt; }
+  .rule-box strong { color: #7f1d1d; }
+  .why-box { background: #e7f1ff; border-left: 3px solid #1a3a6c; padding: 8px 14px; margin-bottom: 12px; font-size: 9.5pt; }
+  .why-box h2 { color: #1a3a6c; margin: 0 0 4px 0; font-size: 11pt; }
+  .why-box p { margin: 3px 0; }
+  .channels-box { background: #fff; border: 2px solid #047857; border-radius: 5px; padding: 10px 14px; margin-bottom: 12px; }
+  .channels-box h2 { color: #047857; margin: 0 0 6px 0; font-size: 12pt; text-align: center; border-bottom: 1px solid #047857; padding-bottom: 4px; }
+  .channels-intro { text-align: center; font-weight: 600; margin-bottom: 8px; font-size: 9.5pt; }
+  .channels-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 6px 0; }
+  .channel-card { background: #d1fae5; border-left: 3px solid #047857; padding: 6px 10px; }
+  .channel-card .label { font-weight: 700; color: #047857; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.3px; }
+  .channel-card .desc { font-size: 8.5pt; color: #333; line-height: 1.3; margin-top: 2px; }
+  .cellule-box { background: #fff; border: 2px solid #b91c1c; border-radius: 5px; padding: 10px 14px; margin-bottom: 12px; }
+  .cellule-box h2 { color: #b91c1c; margin: 0 0 4px 0; font-size: 12pt; }
+  .cellule-box p { margin: 3px 0; font-size: 9.5pt; }
+  .examples-box { background: #fff; border: 1px solid #d0d0d0; border-radius: 5px; padding: 8px 14px; margin-bottom: 10px; font-size: 9pt; }
+  .examples-box h2 { color: #1a3a6c; margin: 0 0 5px 0; font-size: 11pt; }
+  .logigramme-box { background: #fff; border: 2px solid #d97706; border-radius: 5px; padding: 10px 14px; margin-bottom: 12px; }
+  .logigramme-box h2 { color: #d97706; margin: 0 0 6px 0; font-size: 12pt; text-align: center; border-bottom: 1px solid #d97706; padding-bottom: 4px; }
+  .logigramme-box svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+  .logigramme-caption { font-size: 8.5pt; color: #555; margin-top: 8px; font-style: italic; text-align: center; }
+  .ex-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 4px 0; }
+  .bad { background: #fee2e2; padding: 5px 8px; border-radius: 3px; font-size: 8.5pt; }
+  .good { background: #d1fae5; padding: 5px 8px; border-radius: 3px; font-size: 8.5pt; }
+  .bad .label, .good .label { font-weight: 700; font-size: 8pt; text-transform: uppercase; display: block; margin-bottom: 2px; }
+  .bad .label { color: #991b1b; }
+  .good .label { color: #047857; }
+  .footer { text-align: center; font-size: 9pt; color: #666; margin-top: 8px; padding-top: 6px; border-top: 1px solid #ccc; }
+  .print-btn { position: fixed; top: 12px; right: 12px; background: #d97706; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 10pt; }
+</style>
+</head>
+<body>
+
+<button class="no-print print-btn" onclick="window.print()">Imprimer</button>
+
+<h1>⚠️ CONSIGNES — PCORG</h1>
+<div class="subtitle">Exercice de crise GP Moto 2026 — À lire avant le démarrage</div>
+
+<div class="time-box">
+🕐 <strong>Convention horaire de l'exercice</strong>
+9h00 ce matin (heure réelle) = <strong>13h00 le dimanche 10 mai 2026</strong> dans le scénario. L'heure simulée s'écoule en temps réel à partir de là.
+</div>
+
+<div class="rule-box">
+<h2>📻 RÈGLE D'OR — Vous travaillez à la radio comme d'habitude</h2>
+<p>Pour toutes vos communications avec les agents de terrain, <strong>vous utilisez exclusivement vos canaux radio habituels</strong>. C'est l'animation qui joue tous les agents (accueil, SSIAP, patrouilles, technique, etc.) en répondant sur ces canaux.</p>
+<p><strong>Vous ne contactez aucun agent par un autre moyen.</strong> Pas de coup de fil direct, pas de SMS, pas de message WhatsApp à un collègue terrain. La radio, et seulement la radio.</p>
+</div>
+
+<div class="why-box">
+<h2>Pourquoi cette règle ?</h2>
+<p>L'objectif est que vous travailliez exactement comme en situation réelle, avec les mêmes outils. La radio laisse une trace, hiérarchise naturellement les remontées, et permet à l'animation de répondre selon le scénario. Si vous court-circuitez en appelant un collègue, vous "réglez" un sujet que nous voulons garder ouvert.</p>
+</div>
+
+<div class="channels-box">
+<h2>📻 Vos canaux radio</h2>
+<div class="channels-intro">Vous travaillez avec vos canaux habituels, comme tous les autres week-ends de course :</div>
+
+<div class="channels-grid">
+
+<div class="channel-card">
+<div class="label">🚪 Accueil — Hypercentre</div>
+<div class="desc">Agents accueil secteur Hypercentre, contrôle billets, portes principales, paddock club.</div>
+</div>
+
+<div class="channel-card">
+<div class="label">🚪 Accueil — Nord-Ouest</div>
+<div class="desc">Agents accueil secteur Nord-Ouest, portails Nord, tribunes secteur nord.</div>
+</div>
+
+<div class="channel-card">
+<div class="label">🚪 Accueil — Sud-Est</div>
+<div class="desc">Accueils secteur Sud-Ouest, portails Sud-Est, paddocks ouest, parkings VIP.</div>
+</div>
+
+<div class="channel-card">
+<div class="label">🛡️ Sûreté / Patrouille</div>
+<div class="desc">Chef SSIAP secteur Nord, chefs de tribune, chefs de patrouille, agents de sécurité, brigade équestre, patrouilles SSIAP.</div>
+</div>
+
+<div class="channel-card">
+<div class="label">🔧 Technique</div>
+<div class="desc">Astreintes électriques, écrans, sono, structure, barrières, signalétique, régisseurs podium.</div>
+</div>
+
+<div class="channel-card">
+<div class="label">📦 Logistique</div>
+<div class="desc">Régisseurs paddock, parkings (C, E, VIP), prestataires logistiques, ravitaillement, signalétique mobile.</div>
+</div>
+
+<div class="channel-card">
+<div class="label">💻 Informatique</div>
+<div class="desc">CCTV, réseau radio Orga, PABX, écrans géants, wifi, badges, système billetterie terrain.</div>
+</div>
+
+<div class="channel-card">
+<div class="label">🚑 Médical spectateurs</div>
+<div class="desc">Chef secouristes Croix Rouge ACO, médecin chef CMS, secouristes, Croix Blanche, équipes médicales terrain.</div>
+</div>
+
+</div>
+
+</div>
+
+<div class="cellule-box">
+<h2>🏛️ Comment communiquer avec la cellule de crise</h2>
+<p>La cellule de crise est dans une salle séparée. Vous communiquez avec elle <strong>exclusivement par l'intermédiaire du représentant Sécurité / Sûreté</strong> qui siège en cellule. Pour cet exercice, c'est <strong>Lisa Feufeu</strong> (Jacques Le Mené étant directeur de l'exercice). Vous ne joignez jamais directement le DG, un chef de pôle, ou un autre membre de la cellule.</p>
+<p>Vous remontez à Lisa par <strong>radio sur le canal cellule</strong> ou par <strong>téléphone PCORG</strong>. Elle relaie vos remontées en cellule et vous redescend les ordres. Elle peut vous appeler à tout moment.</p>
+<p>Vous remontez de manière synthétique, hiérarchisée, sans saturer. Vous proposez, vous alertez, vous transmettez, mais vous ne décidez pas seul des grandes orientations (évacuation, course, communication).</p>
+</div>
+
+<div class="logigramme-box">
+<h2>📊 Logigramme — circuit des informations</h2>
+
+<svg viewBox="0 0 700 480" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+
+<!-- Légende canaux -->
+<g font-size="10">
+  <line x1="20" y1="20" x2="40" y2="20" stroke="#047857" stroke-width="2.5"/>
+  <text x="46" y="24" fill="#047857">📻 Radio terrain (canaux habituels)</text>
+  <line x1="280" y1="20" x2="300" y2="20" stroke="#b91c1c" stroke-width="2.5"/>
+  <text x="306" y="24" fill="#b91c1c">📻 + 📞 vers Cellule de crise</text>
+  <line x1="490" y1="20" x2="510" y2="20" stroke="#6b21a8" stroke-width="2.5" stroke-dasharray="4,2"/>
+  <text x="516" y="24" fill="#6b21a8">📻 + 📞 PCA (occasionnel)</text>
+</g>
+
+<!-- Boîte centrale PCORG -->
+<rect x="260" y="200" width="180" height="100" rx="6" fill="#fef3c7" stroke="#d97706" stroke-width="3"/>
+<text x="350" y="230" text-anchor="middle" font-size="14" font-weight="700" fill="#9a3412">PCORG</text>
+<text x="350" y="248" text-anchor="middle" font-size="11" font-weight="600" fill="#7f1d1d">(vous)</text>
+<text x="350" y="268" text-anchor="middle" font-size="9" fill="#333">Chef PCORG · SSIAP</text>
+<text x="350" y="281" text-anchor="middle" font-size="9" fill="#333">Accueil · Sûreté terrain</text>
+
+<!-- 8 CANAUX RADIO TERRAIN (gauche en colonne) -->
+<g font-size="8.5">
+  <rect x="20" y="50" width="200" height="32" rx="4" fill="#d1fae5" stroke="#047857" stroke-width="1.5"/>
+  <text x="120" y="63" text-anchor="middle" font-weight="700" fill="#047857">🚪 Accueil — Hypercentre</text>
+  <text x="120" y="76" text-anchor="middle" fill="#333">contrôle billets · paddock club</text>
+
+  <rect x="20" y="92" width="200" height="32" rx="4" fill="#d1fae5" stroke="#047857" stroke-width="1.5"/>
+  <text x="120" y="105" text-anchor="middle" font-weight="700" fill="#047857">🚪 Accueil — Nord-Ouest</text>
+  <text x="120" y="118" text-anchor="middle" fill="#333">accueils Nord-Ouest, portails Nord</text>
+
+  <rect x="20" y="134" width="200" height="32" rx="4" fill="#d1fae5" stroke="#047857" stroke-width="1.5"/>
+  <text x="120" y="147" text-anchor="middle" font-weight="700" fill="#047857">🚪 Accueil — Sud-Est</text>
+  <text x="120" y="160" text-anchor="middle" fill="#333">portails Sud-Est, paddocks ouest</text>
+
+  <rect x="20" y="176" width="200" height="32" rx="4" fill="#d1fae5" stroke="#047857" stroke-width="1.5"/>
+  <text x="120" y="189" text-anchor="middle" font-weight="700" fill="#047857">🛡️ Sûreté / Patrouille</text>
+  <text x="120" y="202" text-anchor="middle" fill="#333">SSIAP, chefs tribune, patrouilles, brigade équestre</text>
+
+  <rect x="20" y="218" width="200" height="32" rx="4" fill="#d1fae5" stroke="#047857" stroke-width="1.5"/>
+  <text x="120" y="231" text-anchor="middle" font-weight="700" fill="#047857">🔧 Technique</text>
+  <text x="120" y="244" text-anchor="middle" fill="#333">astreintes, écrans, sono, structure</text>
+
+  <rect x="20" y="260" width="200" height="32" rx="4" fill="#d1fae5" stroke="#047857" stroke-width="1.5"/>
+  <text x="120" y="273" text-anchor="middle" font-weight="700" fill="#047857">📦 Logistique</text>
+  <text x="120" y="286" text-anchor="middle" fill="#333">paddock, parkings, ravitaillement</text>
+
+  <rect x="20" y="302" width="200" height="32" rx="4" fill="#d1fae5" stroke="#047857" stroke-width="1.5"/>
+  <text x="120" y="315" text-anchor="middle" font-weight="700" fill="#047857">💻 Informatique</text>
+  <text x="120" y="328" text-anchor="middle" fill="#333">CCTV, PABX, écrans géants, billetterie</text>
+
+  <rect x="20" y="344" width="200" height="32" rx="4" fill="#d1fae5" stroke="#047857" stroke-width="1.5"/>
+  <text x="120" y="357" text-anchor="middle" font-weight="700" fill="#047857">🚑 Médical spectateurs</text>
+  <text x="120" y="370" text-anchor="middle" fill="#333">Croix Rouge ACO, CMS, secouristes</text>
+</g>
+
+<!-- Flèche radio vers PCORG (1 flèche groupée) -->
+<line x1="220" y1="205" x2="260" y2="245" stroke="#047857" stroke-width="2.5" marker-end="url(#arrowgreen_p)"/>
+<line x1="260" y1="255" x2="220" y2="290" stroke="#047857" stroke-width="2.5" marker-end="url(#arrowgreen_p)"/>
+
+<!-- CELLULE DE CRISE (en haut à droite) -->
+<rect x="490" y="80" width="180" height="100" rx="6" fill="#fee2e2" stroke="#b91c1c" stroke-width="2.5"/>
+<text x="580" y="103" text-anchor="middle" font-size="12" font-weight="700" fill="#b91c1c">CELLULE DE CRISE</text>
+<text x="580" y="122" text-anchor="middle" font-size="10" font-weight="700" fill="#7f1d1d">via Lisa Feufeu</text>
+<text x="580" y="136" text-anchor="middle" font-size="9" fill="#333">(Sécurité / Sûreté)</text>
+<text x="580" y="155" text-anchor="middle" font-size="8.5" fill="#555" font-style="italic">point d'entrée unique</text>
+<text x="580" y="170" text-anchor="middle" font-size="8.5" fill="#555" font-style="italic">📻 canal cellule + 📞 PCORG</text>
+
+<!-- Flèches PCORG ↔ Cellule -->
+<line x1="440" y1="225" x2="490" y2="145" stroke="#b91c1c" stroke-width="2.5" marker-end="url(#arrowred_p)"/>
+<line x1="490" y1="160" x2="440" y2="240" stroke="#b91c1c" stroke-width="2.5" marker-end="url(#arrowred_p)"/>
+
+<!-- PCA / Officier de liaison (en bas à droite) -->
+<rect x="490" y="350" width="180" height="80" rx="6" fill="#faf5ff" stroke="#6b21a8" stroke-width="2.5"/>
+<text x="580" y="375" text-anchor="middle" font-size="11" font-weight="700" fill="#6b21a8">Officier de liaison PCA</text>
+<text x="580" y="392" text-anchor="middle" font-size="9" fill="#333">peut vous joindre directement</text>
+<text x="580" y="406" text-anchor="middle" font-size="9" fill="#333">pour sujets opérationnels</text>
+<text x="580" y="423" text-anchor="middle" font-size="8.5" fill="#555" font-style="italic">📻 + 📞</text>
+
+<!-- Flèche PCA → PCORG (occasionnelle, pointillé) -->
+<line x1="490" y1="380" x2="440" y2="280" stroke="#6b21a8" stroke-width="2" stroke-dasharray="4,2" marker-end="url(#arrowpurple_p)"/>
+<line x1="440" y1="290" x2="490" y2="395" stroke="#6b21a8" stroke-width="2" stroke-dasharray="4,2" marker-end="url(#arrowpurple_p)"/>
+
+<!-- Encart "INTERDIT" en bas -->
+<rect x="20" y="445" width="660" height="28" rx="4" fill="#fee2e2" stroke="#b91c1c" stroke-width="1"/>
+<text x="350" y="464" text-anchor="middle" font-size="9.5" font-weight="600" fill="#7f1d1d">❌ INTERDIT : SMS, WhatsApp ou appel téléphone direct à un agent terrain — radio uniquement</text>
+
+<!-- Marqueurs -->
+<defs>
+  <marker id="arrowgreen_p" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+    <path d="M0,0 L0,6 L9,3 z" fill="#047857"/>
+  </marker>
+  <marker id="arrowred_p" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+    <path d="M0,0 L0,6 L9,3 z" fill="#b91c1c"/>
+  </marker>
+  <marker id="arrowpurple_p" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+    <path d="M0,0 L0,6 L9,3 z" fill="#6b21a8"/>
+  </marker>
+</defs>
+
+</svg>
+
+<div class="logigramme-caption">
+Vous travaillez à la radio sur 8 canaux terrain habituels pour piloter les agents. Vous remontez à la cellule de crise <strong>uniquement via Lisa Feufeu (Sécurité/Sûreté)</strong> par radio canal cellule ou téléphone PCORG. L'officier de liaison PCA peut vous joindre directement pour des sujets opérationnels (voie ambulances, escorte, signalétique).
+</div>
+</div>
+
+<div class="examples-box">
+<h2>Exemples concrets</h2>
+
+<div class="ex-row">
+<div class="bad"><span class="label">❌ Ne faites pas</span>"Je vais texter cet agent d'accueil pour savoir où il en est."</div>
+<div class="good"><span class="label">✅ Faites</span>Vous appelez l'agent sur son canal d'accueil habituel à la radio.</div>
+</div>
+
+<div class="ex-row">
+<div class="bad"><span class="label">❌ Ne faites pas</span>"J'appelle Benjamin (cellule) sur son portable pour la sono."</div>
+<div class="good"><span class="label">✅ Faites</span>Vous remontez le besoin à la cellule par téléphone PCORG, ou vous interpellez l'astreinte technique sur le canal Technique.</div>
+</div>
+
+<div class="ex-row">
+<div class="bad"><span class="label">❌ Ne faites pas</span>"Le chef Croix Rouge ? Je l'appelle directement, j'ai son numéro."</div>
+<div class="good"><span class="label">✅ Faites</span>Vous l'appelez sur le canal Médical / Croix Rouge.</div>
+</div>
+
+<div class="ex-row">
+<div class="bad"><span class="label">❌ Ne faites pas</span>"J'appelle directement le DG ou un chef de pôle en cellule pour leur remonter l'info."</div>
+<div class="good"><span class="label">✅ Faites</span>Vous appelez Lisa Feufeu (Sécurité/Sûreté) sur le canal cellule ou par téléphone PCORG. C'est elle qui transmet en cellule.</div>
+</div>
+
+</div>
+
+<div class="footer">
+<strong>En cas de doute :</strong> "Quel est le canal habituel pour ce sujet ?" — La radio, toujours la radio. — <em>Bon exercice à toutes et à tous.</em>
+</div>
+
+</body>
+</html>

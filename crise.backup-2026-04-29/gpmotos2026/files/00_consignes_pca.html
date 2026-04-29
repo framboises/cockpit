@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Consignes PCA - Exercice GP Moto 2026</title>
+<style>
+  @media print {
+    @page { size: A4 portrait; margin: 10mm; }
+    body { font-size: 9.5pt; background: white; }
+    .no-print { display: none; }
+  }
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 780px; margin: 0 auto; padding: 14px; color: #111; background: #f5f5f7; line-height: 1.35; }
+  h1 { font-size: 18pt; margin: 0 0 2px 0; color: #6b21a8; text-align: center; }
+  .subtitle { color: #666; font-size: 9.5pt; text-align: center; margin-bottom: 12px; font-style: italic; }
+  .time-box { background: #1a3a6c; color: white; border-radius: 5px; padding: 8px 14px; margin-bottom: 12px; text-align: center; font-size: 10pt; }
+  .time-box strong { font-size: 11.5pt; display: block; margin-bottom: 2px; }
+  .rule-box { background: #faf5ff; border: 2.5px solid #6b21a8; border-radius: 5px; padding: 10px 16px; margin-bottom: 12px; }
+  .rule-box h2 { color: #6b21a8; margin: 0 0 6px 0; font-size: 13pt; }
+  .rule-box p { margin: 4px 0; font-size: 10pt; }
+  .rule-box strong { color: #581c87; }
+  .why-box { background: #fef3c7; border-left: 3px solid #d97706; padding: 8px 14px; margin-bottom: 12px; font-size: 9.5pt; }
+  .why-box h2 { color: #9a3412; margin: 0 0 4px 0; font-size: 11pt; }
+  .why-box p { margin: 3px 0; }
+  .schema-box { background: #fff; border: 2px solid #6b21a8; border-radius: 5px; padding: 10px 14px; margin-bottom: 12px; }
+  .schema-box h2 { color: #6b21a8; margin: 0 0 6px 0; font-size: 12pt; text-align: center; border-bottom: 1px solid #6b21a8; padding-bottom: 4px; }
+  .schema-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin: 6px 0; font-size: 8.5pt; }
+  .schema-cell { background: #f3e8ff; border-left: 3px solid #6b21a8; padding: 6px 10px; }
+  .schema-cell .label { font-weight: 700; color: #6b21a8; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 3px; }
+  .schema-cell .desc { font-size: 8pt; color: #333; line-height: 1.3; }
+  .channels-box { background: #fff; border: 2px solid #047857; border-radius: 5px; padding: 10px 14px; margin-bottom: 12px; }
+  .channels-box h2 { color: #047857; margin: 0 0 6px 0; font-size: 12pt; text-align: center; border-bottom: 1px solid #047857; padding-bottom: 4px; }
+  .channels-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 6px 0; }
+  .channel-card { background: #d1fae5; border-left: 3px solid #047857; padding: 6px 10px; }
+  .channel-card .label { font-weight: 700; color: #047857; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.3px; }
+  .channel-card .desc { font-size: 8.5pt; color: #333; line-height: 1.3; margin-top: 2px; }
+  .examples-box { background: #fff; border: 1px solid #d0d0d0; border-radius: 5px; padding: 8px 14px; margin-bottom: 10px; font-size: 9pt; }
+  .examples-box h2 { color: #1a3a6c; margin: 0 0 5px 0; font-size: 11pt; }
+  .logigramme-box { background: #fff; border: 2px solid #6b21a8; border-radius: 5px; padding: 10px 14px; margin-bottom: 12px; }
+  .logigramme-box h2 { color: #6b21a8; margin: 0 0 6px 0; font-size: 12pt; text-align: center; border-bottom: 1px solid #6b21a8; padding-bottom: 4px; }
+  .logigramme-box svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+  .logigramme-caption { font-size: 8.5pt; color: #555; margin-top: 8px; font-style: italic; text-align: center; }
+  .role-deciseur { background: #fef3c7; border-left: 3px solid #d97706; padding: 8px 12px; margin-bottom: 12px; font-size: 9.5pt; }
+  .role-deciseur h2 { color: #9a3412; margin: 0 0 4px 0; font-size: 11pt; }
+  .role-deciseur strong { color: #7f1d1d; }
+  .ex-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 4px 0; }
+  .bad { background: #fee2e2; padding: 5px 8px; border-radius: 3px; font-size: 8.5pt; }
+  .good { background: #d1fae5; padding: 5px 8px; border-radius: 3px; font-size: 8.5pt; }
+  .bad .label, .good .label { font-weight: 700; font-size: 8pt; text-transform: uppercase; display: block; margin-bottom: 2px; }
+  .bad .label { color: #991b1b; }
+  .good .label { color: #047857; }
+  .footer { text-align: center; font-size: 9pt; color: #666; margin-top: 8px; padding-top: 6px; border-top: 1px solid #ccc; }
+  .print-btn { position: fixed; top: 12px; right: 12px; background: #6b21a8; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 10pt; }
+</style>
+</head>
+<body>
+
+<button class="no-print print-btn" onclick="window.print()">Imprimer</button>
+
+<h1>⚠️ CONSIGNES — Représentant ACO au PCA</h1>
+<div class="subtitle">Exercice de crise GP Moto 2026 — À lire avant le démarrage</div>
+
+<div class="time-box">
+🕐 <strong>Convention horaire de l'exercice</strong>
+9h00 ce matin (heure réelle) = <strong>13h00 le dimanche 10 mai 2026</strong> dans le scénario. L'heure simulée s'écoule en temps réel à partir de là.
+</div>
+
+<div class="rule-box">
+<h2>🎯 TON RÔLE — Représentant ACO au PC Autorités</h2>
+<p>Tu représentes l'ACO au PC Autorités, en tant que <strong>liaison entre les services de l'État et la cellule de crise ACO/PHA</strong>. Tu es seul de l'ACO en exercice au PCA, assis à côté de la directrice de cabinet (siège vide en attendant le Préfet). Autour de toi, tous les sièges du U décisionnel sont vides : Gendarmerie, Police Nationale, SDIS, SAMU, gestionnaires voirie Métropole et Département, Police Municipale, DMD, Waze. Ils sont tous joués à distance par l'animation et te contactent par radio ou téléphone, comme s'ils étaient physiquement présents avec toi.</p>
+<p><strong>Ta mission :</strong> recevoir, hiérarchiser, faire l'interface avec la cellule de crise ACO/PHA (autre salle). Tu travailles comme tu le ferais en vraie crise.</p>
+</div>
+
+<div class="why-box">
+<h2>Pourquoi cette règle ?</h2>
+<p>L'objectif est de tester le fonctionnement en plan rouge où les services de l'État ne s'adressent <strong>jamais</strong> directement à la cellule ACO mais passent par toi. Cela force la cellule à passer par toi, à structurer ses messages, à tracer, et à comprendre la dépendance hiérarchique du dispositif préfectoral.</p>
+</div>
+
+<div class="schema-box">
+<h2>🗺️ Schéma des trois salles</h2>
+
+<div class="schema-grid">
+
+<div class="schema-cell">
+<div class="label">🏛️ PC Autorités</div>
+<div class="desc"><strong>Toi (Amandine)</strong> + représentants services de l'État joués par animation. C'est là que tu es assise.</div>
+</div>
+
+<div class="schema-cell">
+<div class="label">🚨 Cellule de crise</div>
+<div class="desc">DG ACO + DG PHA + chefs de pôles (Médical, Juridique, Com, RH, Infra, Sûreté, Billetterie, etc.). Salle séparée. Tu communiques avec eux <strong>uniquement par l'assistant du directeur de crise sur radio crise</strong>.</div>
+</div>
+
+<div class="schema-cell">
+<div class="label">📍 PCORG</div>
+<div class="desc">Chef PCORG + responsables accueil et sûreté terrain. Salle séparée. Tu peux le contacter directement par radio ou téléphone pour les sujets purement opérationnels qui n'ont pas besoin de remonter à la cellule.</div>
+</div>
+
+</div>
+</div>
+
+<div class="channels-box">
+<h2>📻 Tes canaux de communication</h2>
+
+<div class="channels-grid">
+
+<div class="channel-card">
+<div class="label">📻 + 📞 Services de l'État (entrants)</div>
+<div class="desc">Tous les représentants te contactent par radio ou téléphone : SDIS, SAMU, Police Nationale, Gendarmerie, Préfet, sous-préfète, Procureur, Inspection du travail, gestionnaires de voirie (Métropole et Département), Police Municipale, Délégation Militaire Départementale, Waze, Élysée, Cabinet du Premier Ministre, ambassades et autres autorités externes.</div>
+</div>
+
+<div class="channel-card">
+<div class="label">📻 Cellule de crise (interface principale)</div>
+<div class="desc"><strong>Exclusivement par radio sur le canal crise.</strong> Tu communiques <strong>uniquement avec l'assistant du directeur de crise</strong> qui fait le relai dans la cellule. Tu ne joins jamais directement le DG ou un chef de pôle. C'est par toi que passent toutes les remontées et descentes des services de l'État qui concernent les arbitrages stratégiques.</div>
+</div>
+
+<div class="channel-card">
+<div class="label">📻 + 📞 PCORG (raccourci opérationnel)</div>
+<div class="desc">Pour les sujets purement opérationnels qui ne nécessitent pas d'arbitrage de la cellule, tu peux appeler directement le PCORG par radio ou téléphone. Exemples : ouverture d'une porte secours, escorte d'un VSAV, voie réservée ambulances, mise en place d'un point de regroupement Sentinelle, blocage Waze d'un axe. Tu informes la cellule a posteriori si besoin.</div>
+</div>
+
+<div class="channel-card">
+<div class="label">👤 Si le Préfet est présent physiquement au PCA</div>
+<div class="desc">À partir du moment où le Préfet arrive physiquement avec son cortège (DDSP, Procureur), ils s'installent dans le U décisionnel à côté de toi. Tu restes le seul canal entre eux et la cellule de crise : tu prends leurs messages, tu les transmets à l'assistant du directeur de crise sur radio crise, tu redescends les réponses. Le Préfet ne parle jamais directement à la cellule.</div>
+</div>
+
+</div>
+</div>
+
+<div class="role-deciseur">
+<h2>⚠️ Important — qui décide quoi ?</h2>
+<p>Tu n'es <strong>pas décideur</strong>. C'est le <strong>directeur de crise</strong> qui décide de la suite à donner aux demandes des services de l'État (acceptation, refus, négociation, délai). Toi, tu transmets, tu attends la décision via l'assistant du directeur de crise, tu redescends la réponse. Si le directeur de crise ne répond pas dans le délai imparti par les services de l'État, tu le relances par radio crise mais tu ne tranches jamais à sa place.</p>
+</div>
+
+<div class="logigramme-box">
+<h2>📊 Logigramme — circuit des informations</h2>
+
+<svg viewBox="0 0 700 460" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+
+<!-- Légende canaux -->
+<g font-size="10">
+  <line x1="20" y1="20" x2="40" y2="20" stroke="#6b21a8" stroke-width="2.5"/>
+  <text x="46" y="24" fill="#6b21a8">📻 Radio crise</text>
+  <line x1="160" y1="20" x2="180" y2="20" stroke="#1a3a6c" stroke-width="2.5" stroke-dasharray="6,3"/>
+  <text x="186" y="24" fill="#1a3a6c">📞 Téléphone / radio terrain</text>
+  <line x1="380" y1="20" x2="400" y2="20" stroke="#047857" stroke-width="2.5"/>
+  <text x="406" y="24" fill="#047857">📻 Radio terrain (PCORG)</text>
+</g>
+
+<!-- Boîte Services de l'État -->
+<rect x="40" y="60" width="200" height="80" rx="6" fill="#f3e8ff" stroke="#6b21a8" stroke-width="2"/>
+<text x="140" y="85" text-anchor="middle" font-size="13" font-weight="700" fill="#6b21a8">Services de l'État</text>
+<text x="140" y="105" text-anchor="middle" font-size="9" fill="#333">SDIS · SAMU · Police · Gendarmerie</text>
+<text x="140" y="118" text-anchor="middle" font-size="9" fill="#333">Préfet · Procureur · Inspection</text>
+<text x="140" y="131" text-anchor="middle" font-size="9" fill="#333">Voirie · DMD · Waze · Préfecture</text>
+
+<!-- Flèche Services → Officier de liaison -->
+<line x1="240" y1="100" x2="320" y2="100" stroke="#1a3a6c" stroke-width="2.5" stroke-dasharray="6,3" marker-end="url(#arrowblue)"/>
+<text x="280" y="92" text-anchor="middle" font-size="9" fill="#1a3a6c">demande</text>
+
+<!-- Boîte Officier de liaison (toi) -->
+<rect x="320" y="60" width="200" height="80" rx="6" fill="#faf5ff" stroke="#6b21a8" stroke-width="3"/>
+<text x="420" y="85" text-anchor="middle" font-size="13" font-weight="700" fill="#6b21a8">Officier de liaison PCA</text>
+<text x="420" y="100" text-anchor="middle" font-size="11" font-weight="600" fill="#581c87">(toi)</text>
+<text x="420" y="118" text-anchor="middle" font-size="9" fill="#333">Reçoit · hiérarchise</text>
+<text x="420" y="131" text-anchor="middle" font-size="9" fill="#333">Transmet · trace</text>
+
+<!-- Flèche Officier → Assistant -->
+<line x1="420" y1="140" x2="420" y2="200" stroke="#6b21a8" stroke-width="2.5" marker-end="url(#arrowpurple)"/>
+<text x="430" y="175" font-size="9" fill="#6b21a8">radio crise</text>
+
+<!-- Boîte Assistant directeur de crise -->
+<rect x="320" y="200" width="200" height="60" rx="6" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+<text x="420" y="225" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">Assistant du directeur</text>
+<text x="420" y="240" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">de crise</text>
+<text x="420" y="253" text-anchor="middle" font-size="9" fill="#333">unique relai dans la cellule</text>
+
+<!-- Flèche Assistant → Directeur -->
+<line x1="420" y1="260" x2="420" y2="300" stroke="#1a3a6c" stroke-width="2" stroke-dasharray="4,2" marker-end="url(#arrowblue)"/>
+
+<!-- Boîte Directeur de crise -->
+<rect x="280" y="300" width="280" height="60" rx="6" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/>
+<text x="420" y="325" text-anchor="middle" font-size="13" font-weight="700" fill="#b91c1c">Directeur de crise</text>
+<text x="420" y="345" text-anchor="middle" font-size="9" fill="#333">décide · arbitre · répond</text>
+
+<!-- Flèche retour Directeur → Assistant -->
+<path d="M 530 330 Q 600 330 600 230 Q 600 220 530 220" fill="none" stroke="#1a3a6c" stroke-width="2" stroke-dasharray="4,2" marker-end="url(#arrowblue)"/>
+<text x="612" y="280" font-size="9" fill="#1a3a6c">décision</text>
+
+<!-- Flèche Assistant → Officier (retour) -->
+<path d="M 320 220 Q 280 220 280 140 Q 280 130 320 130" fill="none" stroke="#6b21a8" stroke-width="2.5" marker-end="url(#arrowpurple)"/>
+<text x="265" y="180" text-anchor="end" font-size="9" fill="#6b21a8">réponse radio crise</text>
+
+<!-- Flèche Officier → Services (retour) -->
+<line x1="320" y1="115" x2="240" y2="115" stroke="#1a3a6c" stroke-width="2.5" stroke-dasharray="6,3" marker-end="url(#arrowblue)"/>
+<text x="280" y="135" text-anchor="middle" font-size="9" fill="#1a3a6c">réponse</text>
+
+<!-- Cas particulier raccourci PCORG -->
+<rect x="40" y="380" width="200" height="60" rx="6" fill="#d1fae5" stroke="#047857" stroke-width="2"/>
+<text x="140" y="405" text-anchor="middle" font-size="12" font-weight="700" fill="#047857">PCORG</text>
+<text x="140" y="423" text-anchor="middle" font-size="9" fill="#333">accueil · sûreté terrain</text>
+
+<!-- Flèche Officier → PCORG (raccourci opérationnel) -->
+<path d="M 350 140 Q 250 280 200 380" fill="none" stroke="#047857" stroke-width="2" stroke-dasharray="3,3" marker-end="url(#arrowgreen)"/>
+<text x="160" y="280" text-anchor="middle" font-size="9" fill="#047857" font-style="italic">raccourci opérationnel</text>
+<text x="160" y="293" text-anchor="middle" font-size="9" fill="#047857" font-style="italic">(sujets non-stratégiques)</text>
+
+<!-- Définitions des marqueurs flèches -->
+<defs>
+  <marker id="arrowpurple" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+    <path d="M0,0 L0,6 L9,3 z" fill="#6b21a8"/>
+  </marker>
+  <marker id="arrowblue" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+    <path d="M0,0 L0,6 L9,3 z" fill="#1a3a6c"/>
+  </marker>
+  <marker id="arrowgreen" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+    <path d="M0,0 L0,6 L9,3 z" fill="#047857"/>
+  </marker>
+</defs>
+
+</svg>
+
+<div class="logigramme-caption">
+Une demande des services de l'État remonte par toi vers l'assistant du directeur de crise, qui la soumet au directeur de crise. La décision redescend par le même circuit. Pour les sujets purement opérationnels, tu peux court-circuiter vers le PCORG en informant l'assistant a posteriori.
+</div>
+</div>
+
+<div class="examples-box">
+<h2>Exemples concrets</h2>
+
+<div class="ex-row">
+<div class="bad"><span class="label">❌ Ne faites pas</span>"Un service de l'État me demande quelque chose pour le pôle infrastructures, je transfère directement au chef de pôle par téléphone."</div>
+<div class="good"><span class="label">✅ Faites</span>Vous appelez l'assistant du directeur de crise par radio sur le canal crise et lui passez la demande pour qu'il la transmette au pôle concerné.</div>
+</div>
+
+<div class="ex-row">
+<div class="bad"><span class="label">❌ Ne faites pas</span>"Le Préfet veut un bilan, je vais le chercher moi-même auprès du Médical."</div>
+<div class="good"><span class="label">✅ Faites</span>Vous transmettez la demande à l'assistant du directeur de crise par radio crise. Vous attendez la réponse consolidée. Vous remontez au Préfet.</div>
+</div>
+
+<div class="ex-row">
+<div class="bad"><span class="label">❌ Ne faites pas</span>"La cellule veut parler à un service de l'État, je leur passe directement l'interlocuteur."</div>
+<div class="good"><span class="label">✅ Faites</span>Vous prenez le message via l'assistant du directeur de crise, vous le transmettez au service concerné avec votre voix, et vous redescendez la réponse par radio crise.</div>
+</div>
+
+<div class="ex-row">
+<div class="bad"><span class="label">❌ Ne faites pas</span>"J'improvise une réponse au Préfet sans valider auprès de la cellule."</div>
+<div class="good"><span class="label">✅ Faites</span>Vous obtenez la position de la cellule via l'assistant avant de répondre. Si urgence, vous le précisez au Préfet.</div>
+</div>
+
+<div class="ex-row">
+<div class="bad"><span class="label">❌ Ne faites pas</span>"Le SDIS me demande une voie réservée ambulances, j'appelle l'assistant pour qu'il fasse remonter et redescendre au PCORG."</div>
+<div class="good"><span class="label">✅ Faites</span>Sujet purement opérationnel : vous appelez directement le PCORG par radio pour qu'il s'organise. Vous informez l'assistant du directeur de crise a posteriori.</div>
+</div>
+
+</div>
+
+<div class="footer">
+<strong>En cas de doute :</strong> "Cette information vient des services de l'État ? Elle doit transiter par moi vers l'assistant du directeur de crise sur radio crise. Cette demande vient de la cellule ? Je la formule à l'État avec ma voix." — <em>Bon exercice.</em>
+</div>
+
+</body>
+</html>

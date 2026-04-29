@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>01 - Timeline animateur v4 - Exercice GP Moto 2026</title>
+<style>
+  @media print { @page { size: A4 portrait; margin: 10mm; } body { font-size: 8pt; background: white; } .no-print { display: none; } .phase { page-break-inside: avoid; } }
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; color: #111; background: #f5f5f7; line-height: 1.35; }
+  h1 { font-size: 18pt; margin: 0 0 4px 0; color: #1a3a6c; }
+  .subtitle { color: #666; font-size: 10pt; margin-bottom: 14px; }
+  .scenario-box { background: #fff3cd; border-left: 4px solid #f0a500; padding: 10px 14px; margin-bottom: 12px; font-size: 9pt; }
+  .role-box { background: #e7f1ff; border-left: 4px solid #1a3a6c; padding: 10px 14px; margin-bottom: 12px; font-size: 9pt; }
+  .key-box { background: #fee2e2; border-left: 4px solid #b91c1c; padding: 10px 14px; margin-bottom: 18px; font-size: 9pt; }
+  .phase { margin-bottom: 14px; background: #fff; border-radius: 5px; border: 1px solid #d0d0d0; overflow: hidden; }
+  .phase-header { color: white; padding: 6px 12px; font-size: 10pt; font-weight: 600; }
+  .phase-0 { background: #0891b2; }
+  .phase-1 { background: #1a3a6c; }
+  .phase-2 { background: #d97706; }
+  .phase-3 { background: #b91c1c; }
+  .phase-4 { background: #6b21a8; }
+  .phase-5 { background: #047857; }
+  .inject { display: grid; grid-template-columns: 60px 95px 95px 1fr; gap: 8px; padding: 7px 10px; border-top: 1px solid #efefef; font-size: 8.5pt; }
+  .inject-header { display: grid; grid-template-columns: 60px 95px 95px 1fr; gap: 8px; padding: 6px 10px; background: #f0f4f8; border-bottom: 1px solid #cbd5e1; font-size: 7.5pt; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.5px; }
+  .inject-header .col-header { padding: 0 2px; }
+  .inject:first-of-type { border-top: none; }
+  .inject .time { font-weight: 700; color: #1a3a6c; font-variant-numeric: tabular-nums; font-size: 9pt; }
+  .inject .target { font-size: 7.5pt; font-weight: 600; color: white; background: #555; padding: 2px 5px; border-radius: 3px; text-align: center; height: fit-content; line-height: 1.2; }
+  .target.cellule { background: #1a3a6c; }
+  .target.pref { background: #c8c508; color: #333; }
+  .target.pcorg { background: #d97706; }
+  .target.juridique { background: #6b21a8; }
+  .target.com { background: #b91c1c; }
+  .target.medical { background: #047857; }
+  .target.dg { background: #000; }
+  .target.tous { background: #444; }
+  .target.pha { background: #be185d; }
+  .target.billetterie { background: #0891b2; }
+  .target.rh { background: #be7418; }
+  .target.surete { background: #475569; }
+  .target.client { background: #14b8a6; }
+  .target.it { background: #7c3aed; }
+  .inject .source { color: #666; font-size: 8pt; font-style: italic; }
+  .inject .content { color: #222; }
+  .inject .doc { display: inline-block; background: #fef3c7; color: #92400e; padding: 1px 5px; border-radius: 3px; font-size: 7.5pt; font-weight: 600; margin: 2px 2px 0 0; }
+  .inject .channel { display: inline-block; background: #dbeafe; color: #1e40af; padding: 1px 5px; border-radius: 3px; font-size: 7.5pt; margin: 2px 2px 0 0; }
+  .inject .observe { display: block; margin-top: 4px; color: #047857; font-style: italic; font-size: 8pt; }
+  .inject .keyflag { display: inline-block; background: #fee2e2; color: #991b1b; padding: 1px 5px; border-radius: 3px; font-size: 7.5pt; font-weight: 700; margin-left: 4px; }
+  .inject .conflit { display: inline-block; background: #fef3c7; color: #b45309; padding: 1px 5px; border-radius: 3px; font-size: 7.5pt; font-weight: 700; margin-left: 4px; border: 1px solid #f59e0b; }
+  .legend { display: flex; gap: 12px; margin-bottom: 12px; font-size: 8pt; flex-wrap: wrap; }
+  .print-btn { position: fixed; top: 12px; right: 12px; background: #1a3a6c; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 10pt; }
+  .focus-bilans { background: #fff7ed; border: 1px solid #f59e0b; border-radius: 4px; padding: 8px 10px; margin: 8px 0; font-size: 8.5pt; }
+  .focus-bilans strong { color: #b45309; }
+</style>
+</head>
+<body>
+
+<button class="no-print print-btn" onclick="window.print()">🖨️ Imprimer</button>
+
+<h1>Timeline animateur — Exercice GP Moto 2026</h1>
+<div class="subtitle">Effondrement tribune T11 · Dimanche 10 mai 2026, 13h15 · AVANT le départ de la course · Circuit Bugatti</div>
+
+<div class="scenario-box">
+  <strong>Scénario.</strong> Dimanche 10 mai 2026. À <strong>12h45</strong>, Yvon Lemaire (agent d'accueil entrée T11) signale un élément métallique tombé de la T11 et des vibrations anormales. Photo envoyée. La cellule de crise est convoquée. <strong>Cérémonie de départ prévue à 13h51, course à 14h00.</strong> Jérôme Papin (Service Technique, envoyé par Séverin) monte sur place. Sur son retour défavorable et un mail de décembre 2025 sorti par Séverin, la cellule décide d'évacuer à 13h08. Tentative d'évacuation difficile : patrouilles insuffisantes, agents accueil réduits, spectateurs refusent de bouger. <strong>5 à 10% seulement évacuent.</strong> 13h15 : effondrement. Tribune sur elle-même. La course n'a pas démarré. <strong>Le vrai dilemme : maintenir le GP malgré la catastrophe ?</strong> Dorna pousse pour décaler, 110 000 spectateurs sur place, image catastrophique. Bilan trompeusement faible (4 → 14 blessés visibles) jusqu'à 14h30, où on découvre une zone cachée par un panneau publicitaire effondré dessus, avec 11 personnes dont <strong>Pascale Lemée</strong>, CDD chargée de réglementation Sécurité, partie vérifier la T11 avec son stagiaire <strong>Nathan</strong>.
+</div>
+
+<div class="role-box">
+  <strong>Directeur d'exercice</strong> Jacques LEMENE est le directeur d'exercice, présent dans la salle crise il supervise l'ensemble des input et prépare toutes les remontées lors du RETEX. Il est la voix de la raison, il intervient pour calmer les tensions, recadrer les débats, faire respecter les procédures, et surtout éviter que la cellule ne se fasse embarquer dans des décisions émotionnelles ou précipitées. Il est le garant du cadre de l'exercice et du respect du scénario.
+  <br><br>
+  <strong>Cellule animation.</strong> Ludovic ARNAULT est responsable de la celulle animation. Avec une équipe de 4 personnes ils incarneront tout le terrain ACO, les services de l'État, les médias, les partenaires externes (Dorna, FFM, FIM, Alcor), les familles. Ils ne jouent <u>aucun</u> membre de la cellule (cellule ACO + PHA inclus, qui improvisent tous).
+  <br><br>
+  <strong>Périmètres.</strong> Cellule de crise complète (improvise) · PCORG limité accueil + sécurité (en salle séparée) · <strong>PHA est DANS la cellule. Philibert (DG PHA) et Claude Président sont dans la cellule, recevront des appels en direct. Le service client PHA a l'habitude de transférer les appels au DG.</strong>
+  <br><br>
+  <strong>Liaison PC Autorités</strong> = Amandine Chaperon (Arnault joue l'animateur).
+  <br><br>
+  <strong>Horaires</strong> Pour rappel l'exercice a lieu le jeudi 30 avril à 9h, nous considérons que nous sommes le 10 mai à 13h. Donc à 8h45 il est 12h45 dans l'exercice.
+</div>
+
+<div class="key-box">
+  <strong>Variables cachées.</strong>
+  <br>• <strong>Bilan victimes :</strong> reste sous 16 jusqu'à 14h30. Découverte zone cachée → bilan à 24+. Mais le basculement Préfet n'est PAS encore déclenché.
+  <br>• <strong>Pascale Lemée :</strong> CDD chargée de réglementation, partie avec son stagiaire Nathan vérifier la T11. Disparaît dans l'effondrement, retrouvée à 14h30. <strong>Bombe RH</strong> : surcharge horaire (72h/sem au lieu des 60h dérogatoires). Faute employeur, inspection du travail. Nathan en stage présent le dimanche malgré interdiction.
+  <br>• <strong>Basculement Préfet en plan ORSEC :</strong> déclenché à <strong>14h55</strong> juste après diffusion vidéo BFMTV édition spéciale (30 victimes annoncées en cacophonie avec Dorna 15 et cellule 24).
+</div>
+
+<div class="focus-bilans">
+  <strong>📊 Stratégie des bilans contradictoires (à tenir tout au long).</strong><br><br>
+  Trois sources qui ne s'accordent pas.<br> <strong>Secouristes ACO (Croix Rouge / SP) → Navarre</strong> remontent un bilan terrain en temps réel par radio.<br> <strong>SAMU 72 (Dr Deciron) → Amandine au PCA</strong> consolide en format SYNERGI. <br><strong>SDIS (LCL Mordrais) → Amandine au PCA</strong> remonte ses propres chiffres après extractions. Les chiffres divergent volontairement de ±2 à ±5 victimes selon les remontées, créant un dilemme : qui dit vrai ? Sur quel bilan communique-t-on ?
+</div>
+
+<div class="legend">
+  <span><span style="display:inline-block;width:10px;height:10px;background:#1a3a6c;border-radius:2px;"></span> Cellule</span>
+  <span><span style="display:inline-block;width:10px;height:10px;background:#c8c508;border-radius:2px;"></span> PCA / Amandine</span>
+  <span><span style="display:inline-block;width:10px;height:10px;background:#d97706;border-radius:2px;"></span> PCORG</span>
+  <span><span style="display:inline-block;width:10px;height:10px;background:#14b8a6;border-radius:2px;"></span> Service Client</span>
+  <span><span style="display:inline-block;width:10px;height:10px;background:#7c3aed;border-radius:2px;"></span> IT/Élec</span>
+  <span><span style="display:inline-block;width:10px;height:10px;background:#fef3c7;border:1px solid #92400e;border-radius:2px;"></span> Doc à projeter</span>
+  <span><span style="display:inline-block;width:10px;height:10px;background:#fee2e2;border:1px solid #991b1b;border-radius:2px;"></span> Pivot</span>
+  <span><span style="display:inline-block;width:10px;height:10px;background:#fef3c7;border:1px solid #f59e0b;border-radius:2px;"></span> Conflit bilan</span>
+</div>
+
+<!-- PHASE PRÉLIMINAIRE -->
+<div class="phase">
+  <div class="phase-header phase-0">PHASE PRÉLIMINAIRE — Le dilemme initial · 12h45 → 13h15 · 30 min</div>
+
+  <div class="inject-header">
+    <div class="col-header">Heure</div>
+    <div class="col-header">Destinataire</div>
+    <div class="col-header">Source</div>
+    <div class="col-header">Contenu</div>
+  </div>
+
+  <div class="inject"><div class="time">12:45</div><div class="target tous">DÉPART</div><div class="source">Animateur — TRIPLE INJECT SIMULTANÉ</div><div class="content"><strong>(1)</strong> Message sur le WhatsApp Crise GP Moto : <em>"⚠️ Signalement T11 — Yvon Lemaire (accueil entrée T11) signale un élément métallique tombé de la structure et des vibrations anormales pendant le warmup. Personnel sur place très inquiet. Course démarre dans 1h15."</em><br><strong>(2)</strong> Photo de la pièce métallique au sol envoyée sur le WhatsApp.<br><strong>(3)</strong> Appel téléphonique direct à Séverin Galuret : "Séverin, on me remonte ça depuis l'accueil T11. Tu fais quoi ?"<br><strong>(4)</strong> Appel téléphonique direct à Pierrick Navarre : "Pierrick, t'as vu le message Crise sur la T11 ? Tu veux faire venir Alcor ?"<span class="doc">📱 WhatsApp + Photos boulons</span><span class="channel">📱 + 📞 ×2</span><span class="observe">→ Comment Séverin et Pierrick réagissent ? Envoient quelqu'un ? Y vont eux-mêmes ? Demandent venue Alcor ?</span></div></div>
+
+  <div class="inject"><div class="time">12:50</div><div class="target cellule">CELLULE</div><div class="source">Activation cellule</div><div class="content">Convocation salle de crise. Membres montent progressivement. Préparateur ouvre la salle, sort la valise.<span class="observe">→ Délai d'arrivée. Combien de temps pour cellule complète ?</span></div></div>
+
+  <div class="inject"><div class="time">12:52</div><div class="target pcorg">PCORG</div><div class="source">PS Nord (chef SSIAP annuel circuit, secteur Nord)</div><div class="content">Radio. <strong>"PCORG, ici PS Nord. J'ai été briefé par Yvon, je monte vérifier visuellement l'extérieur de la T11. Je vois rien d'anormal en façade mais je confirme qu'il y a des vibrations quand les motos passent."</strong><span class="channel">📻 Radio SCQ</span></div></div>
+
+  <div class="inject"><div class="time">12:55</div><div class="target pcorg">PCORG</div><div class="source">Pascale Lemée (CDD réglementation)</div><div class="content">Le chef PCORG envoie Pascale Lemée vérifier T11. Elle prend la radio : <strong>"PCORG, Pascale Lemée, je suis en route vers T11 pour vérification réglementaire. J'emmène Nathan avec moi pour qu'il observe."</strong><span class="channel">📻 Radio SCQ</span><span class="observe">→ Personne ne vérifie son temps de travail. Personne ne s'interroge sur l'envoi d'un stagiaire sur poste à risque un dimanche. Double bombe RH.</span></div></div>
+
+  <div class="inject"><div class="time">12:58</div><div class="target client">SERVICE CLIENT</div><div class="source">Spectateurs présent en T11</div><div class="content">Téléphone au standar ACO => Émilie Renaudin : <strong>"Bonjour, je suis sur place avec mes deux enfants en T11, j'ai un mauvais pressentiment, ils nous demandent de pas partir mais le personnel a l'air inquiet. Vous me confirmez qu'on peut rester en sécurité ?"</strong><span class="channel">📞 Téléphone</span><span class="observe">→ Premier appel "veille" au service client. Émilie remonte à qui ?</span></div></div>
+
+  <div class="inject"><div class="time">12:59</div><div class="target it">IT/ÉLEC</div><div class="source">Technicien sono / écrans T11</div><div class="content">Téléphone à Benjamin : <strong>"Benjamin, je suis vers la T11 pour le contrôle d'avant course, j'ai vu Pascale du service SCQ et PS Nord qui sont inquiets. Apparemment il y a un problème sur la tribune."</strong><span class="channel">📻 Radio INFO</span><span class="observe">→ Réflexe préventif d'archivage ?</span></div></div>
+
+  <div class="inject"><div class="time">13:00</div><div class="target cellule">INFRA</div><div class="source">Jérôme Papin (Service Technique, sur place)</div><div class="content">Téléphone à Séverin : <strong>"Séverin, je suis arrivé sur la T11, je vois les pièces qui sont tombées, c'est un boulon de jonction nord-est. La structure paraît tenir mais j'entends des craquements quand les motos passent. Je grimpe vérifier les fixations."</strong><span class="channel">📻 Radio Technique</span><span class="observe">→ Premier retour mitigé.</span></div></div>
+
+  <div class="inject"><div class="time">13:02</div><div class="target pcorg">PCORG</div><div class="source">PS Nord</div><div class="content">Radio. <strong>"PCORG, je tourne autour de la T11, j'ai un autre spectateur qui me dit qu'il a entendu un 'gros bruit métallique' il y a 2 min sous les gradins. Je peux pas vérifier seul, je suis tout seul sur le secteur."</strong><span class="channel">📻 Radio SCQ</span></div></div>
+
+  <div class="inject"><div class="time">13:05</div><div class="target cellule">CELLULE</div><div class="source">Séverin Galuret (en cellule, à briefer en amont !)</div><div class="content"><strong>Séverin sort un mail de décembre 2025 dans la cellule :</strong> <em>"Vincent, Ludovic, Pierrick — j'avais alerté en décembre sur le piquetage et la solidité de la T11, je proposais des travaux de renforcement, ça nécessitait une modification du budget CAPEX. J'ai jamais eu de réponse. Voilà le mail."</em><span class="doc">📧 Mail Séverin déc. 2025</span><span class="observe">→ <strong>BRIEFER SÉVERIN AVANT L'EXO :</strong> "À 13h05, tu sors ce mail dans la cellule. Tu ne caches rien."</span><span class="keyflag">PIVOT 1 — Mail décembre 2025</span></div></div>
+
+  <div class="inject"><div class="time">13:06</div><div class="target cellule">INFRA</div><div class="source">Jérôme Papin</div><div class="content">Téléphone à Séverin : <strong>"Séverin, je confirme. Y'a un jeu anormal sur deux supports nord-est, les boulons travaillent, j'entends des bruits métalliques. À mon avis on évacue. Je peux pas garantir que ça tienne encore des heures."</strong><br><br><strong>📽️ Diffusion vue caméra de vidéosurveillance T11 (à projeter dans la cellule) : tribune pleine à craquer, encore debout, public installé, ambiance de pré-course normale.</strong><span class="channel">📞 Téléphone</span><span class="doc">📹 Vue CCTV T11 pleine</span><span class="observe">→ Avis technique défavorable. La cellule visualise le risque humain : 1 100 personnes assises sous une structure qui peut céder.</span></div></div>
+
+  <div class="inject"><div class="time">13:07</div><div class="target client">SERVICE CLIENT</div><div class="source">Spectateur en T11 — appel direct DG PHA</div><div class="content"><strong>Le service client PHA reçoit l'appel et le transfère directement à Philibert (DG PHA, en cellule de crise) :</strong> "Allô, c'est Frédéric Dumas, je suis dans la T11 rang G, ça vibre vraiment fort, on est plusieurs à se demander si on doit pas sortir. Vous êtes le DG, vous me dites quoi ?"<span class="channel">📞 Téléphone</span><span class="observe">→ <strong>Le service client PHA a l'habitude de transférer au DG. Va-t-il continuer pendant la crise ? Philibert gère seul ou alerte la cellule ? Anecdote managériale révélatrice.</strong></span></div></div>
+
+  <div class="inject"><div class="time">13:08</div><div class="target cellule">CELLULE</div><div class="source">Délibération interne</div><div class="content">Cellule doit décider : évacuer ou pas ? Course dans 52 minutes. <strong>Décision attendue.</strong><span class="observe">→ Combien de temps ? Qui tranche ? Sur quels critères ?</span><span class="keyflag">PIVOT 2 — Décision d'évacuer</span></div></div>
+
+  <div class="inject"><div class="time">13:10</div><div class="target it">IT/ÉLEC</div><div class="source">PCORG</div><div class="content">Téléphone à Benjamin : <strong>"Benjamin, on doit passer un message d'évacuation sur la T11 mais on sait pas comment faire concrètement. Comment on diffuse sur les hauts-parleurs ? C'est toi qui pilotes la sono, on a pas de panel pour ca ? On a besoin d'aide là, c'est urgent !"</strong><span class="channel">📞 Téléphone</span><span class="observe">→ Procédure pas claire dans la tête du PCORG. Benjamin guide ? Renvoie sur Bruno ? Process à formaliser en débrief.</span></div></div>
+
+  <div class="inject"><div class="time">13:11</div><div class="target pcorg">PCORG</div><div class="source">Yvon Lemaire (accueil T11)</div><div class="content">Radio. <strong>"PCORG, ils refusent de bouger ! Ils disent 'on vient de payer 200 balles, la course n'a pas commencé, on bouge pas'. Je suis tout seul, mon binôme est pas là, pas de renfort dispo ! Besoin de patrouilles renfort !"</strong><br><br><strong>📹 En parallèle : un agent de sécurité sur place filme la scène avec sa tablette, le flux est diffusé en direct au PCORG (image d'une tribune pleine, spectateurs assis qui refusent de bouger, agents débordés).</strong><span class="channel">📻 Radio + 📹 Streaming tablette</span><span class="doc">📹 Vidéo live tablette agent</span><span class="observe">→ Le PCORG voit en direct l'inertie des spectateurs. Image diffusable à la cellule pour appuyer la décision ?</span></div></div>
+
+  <div class="inject"><div class="time">13:11</div><div class="target pcorg">PCORG</div><div class="source">PS Nord</div><div class="content">Radio. <strong>"PCORG, je viens en renfort sur T11, j'arrive à pied, j'aide Yvon. Mais on est que 2 pour 1 100 personnes, ça va être impossible !"</strong><span class="channel">📻 Radio</span></div></div>
+
+  <div class="inject"><div class="time">13:12</div><div class="target pcorg">PCORG</div><div class="source">Chef d'équipe sûreté patrouilles</div><div class="content">Radio. <strong>"PCORG, j'ai pas les patrouilles dispo, je peux mobiliser 4 agents pour T11, c'est tout. Les autres sont positionnés sur les autres tribunes pour la cérémonie de départ qui démarre dans 40 min."</strong><span class="channel">📻 Radio</span><span class="observe">→ <strong>Conséquence directe des effectifs réduits.</strong> Mais le chef d'équipe ne connaît pas la cause budgétaire — la cellule doit le découvrir.</span><span class="keyflag">PIVOT 4 — Patrouilles insuffisantes</span></div></div>
+
+  <div class="inject"><div class="time">13:13</div><div class="target pcorg">PCORG</div><div class="source">Yvon Lemaire</div><div class="content">Radio. <strong>"PCORG, ça craque de plus en plus, on est à 100 sortis sur 1 100, ça va pas marcher !"</strong><span class="channel">📻 Radio</span><span class="observe">→ ~9% évacués.</span></div></div>
+
+  <div class="inject"><div class="time">13:14</div><div class="target client">SERVICE CLIENT</div><div class="source">Spectateur PHA — appel direct au DG PHA Philibert</div><div class="content"><strong>Le service client PHA transfère encore l'appel à Philibert :</strong> "M. Philibert, c'est Marie Robin, mon mari et mon fils sont en T11, ils me disent que ça bouge bizarrement et que les agents n'arrivent pas à faire évacuer ! Faites quelque chose ! Vous êtes responsables ! Mon fils a 12 ans !"<span class="channel">📞 Téléphone</span><span class="observe">→ <strong>Philibert, en pleine cellule de crise, prend cet appel. Le partage avec la cellule ? Le tient confidentiel ? Crie sur son service client de couper les transferts ?</strong></span></div></div>
+
+<div class="inject"><div class="time">13:15</div><div class="target tous">⚠️ EFFONDREMENT</div><div class="source">Animateur</div><div class="content"><strong>Annonce solennelle : "13h15. La structure haute de la T11 vient de céder. La tribune s'effondre sur elle-même. Bilan immédiat inconnu. La course n'a pas démarré. La cérémonie de départ est dans 36 minutes."</strong><br><br><strong>📽️ Diffusion vidéo de l'effondrement de la tribune (Sur groupe what's app).</strong><span class="doc">🎥 Vidéo effondrement T11</span><span class="observe">→ Choc dans la cellule. Tout est à reconstruire.</span><span class="keyflag">⚠️ EFFONDREMENT</span></div></div>
+</div>
+
+<!-- PHASE 1 -->
+<div class="phase">
+  <div class="phase-header phase-1">PHASE 1 — Choc et activation secours · T+0 à T+30 · 13h15 → 13h45</div>
+
+  <div class="inject-header">
+    <div class="col-header">Heure</div>
+    <div class="col-header">Destinataire</div>
+    <div class="col-header">Source</div>
+    <div class="col-header">Contenu</div>
+  </div>
+
+  <div class="inject"><div class="time">13:15</div><div class="target pcorg">PCORG</div><div class="source">Yvon Lemaire (sous le choc)</div><div class="content">Radio. <strong>"PCORG, putain c'est tombé, la tribune s'est repliée sur elle-même, je vois de la poussière partout, des gens qui sortent en boitant, je sais pas combien de blessés ! PS Nord est avec moi, on est sains et saufs !"</strong><span class="channel">📻 Radio</span></div></div>
+
+  <div class="inject"><div class="time">13:15</div><div class="target pcorg">PCORG</div><div class="source">PS Nord (SSIAP circuit)</div><div class="content">Radio. <strong>"PCORG, je rentre dans le périmètre dégagé, je vois des gens au sol, sang sur le visage, gens qui s'extraient seuls, je vais essayer de faire le tri en attendant les secours ! J'ai besoin de la Croix Rouge MAINTENANT !"</strong><span class="channel">📻 Radio</span></div></div>
+
+  <div class="inject"><div class="time">13:17</div><div class="target cellule">CIRCUIT</div><div class="source">Stéphane Donnet (Direction de course)</div><div class="content">Téléphone à Tessier, voix très tendue : <strong>"Sylvain, mais il se passe quoi là ?! La tribune s'est effondrée ?! On fait quoi, on fait la course ou pas ?! La cérémonie de départ c'est dans 34 minutes, les pilotes vont arriver en grille ! Je dois savoir MAINTENANT !"</strong><span class="channel">📞 Téléphone</span><span class="observe">→ <strong>Pression circuit immédiate.</strong> Tessier improvise. Décision DG ?</span></div></div>
+
+  <div class="inject"><div class="time">13:18</div><div class="target medical">MÉDICAL</div><div class="source">Claire CHAVRIER (CMS)</div><div class="content">Téléphone à Navarre : <strong>"Mathieu, on bascule plan blanc local, je pré-alerte SDIS et SAMU. CMS prêt à recevoir."</strong><span class="channel">📞 Téléphone</span></div></div>
+
+  <div class="inject"><div class="time">13:19</div><div class="target medical">MÉDICAL</div><div class="source">Marc (chef secouristes Croix Rouge ACO)</div><div class="content">Radio à Navarre. <strong>"Mathieu, je suis sur place avec 4 secouristes, on commence le triage. Premier décompte visuel : je vois 4 blessés debout, 2 au sol qui bougent pas. C'est le bordel, beaucoup de monde sortent encore d'eux-mêmes."</strong><br><br><strong>📹 En parallèle : envoi de la vidéo prise depuis l'arrière de la tribune avec les secours en intervention (à projeter dans la cellule).</strong><span class="channel">📻 Radio + 📹 Vidéo</span><span class="doc">📹 Vidéo arrière tribune + secours</span><span class="observe">→ Premier bilan secouriste ACO + visuel terrain. Navarre consolide ? La cellule projette ?</span></div></div>
+
+  <div class="inject"><div class="time">13:20</div><div class="target pref">PCA</div><div class="source">LCL Mordrais (SDIS chef de site)</div><div class="content">À Amandine en direct : <strong>"Amandine, je prends le commandement opérationnel des secours. PMA terrain en cours de montage. J'ai 4 fourgons + 2 VSAV qui arrivent. Besoin d'un expert technique de l'ACO pour évaluer le risque de seconde rupture avant qu'on envoie nos hommes sous les décombres."</strong><span class="channel">En direct</span><span class="observe">→ Cellule technique directement sollicité via Amandine.</span></div></div>
+
+  <div class="inject"><div class="time">13:22</div><div class="target pha">PHA Com</div><div class="source">Carmelo Ezpeleta (CEO Dorna)</div><div class="content">Téléphone direct au rep PHA en cellule. Carmelo parle français avec un fort accent espagnol-anglais : <strong>"Allô, Claude, c'est Carmelo... écoute, on a un probleme, oui, mais la course... on doit la maintenir, comprende ? On a 80 millions de spectateurs à la télé, les sponsors, les pilotes... On peut juste cacher la tribune à la télé, basta, tu vois ? La carrera continue."</strong><span class="channel">📞 Téléphone</span><span class="observe">→ PHA réagit ? Transmet au DG ? Le ton léger de Carmelo est insupportable.</span><span class="keyflag">PIVOT 5 — Bras de fer Dorna</span></div></div>
+
+  <div class="inject"><div class="time">13:23</div><div class="target medical">MÉDICAL</div><div class="source">Marc (Croix Rouge ACO)</div><div class="content">Radio à Navarre. <strong>"Mathieu, écoute, finalement c'est moins grave que ce qu'on craignait. Bilan provisoire : 6 blessés visibles, dont 1 sérieux à évacuer. Les autres ont l'air de s'en sortir, beaucoup sont sortis tout seuls de la tribune. La structure a amorti la chute en se repliant. Pas de polytraumatisme grave pour l'instant, pas de décès. C'est sous contrôle."</strong><span class="channel">📻 Radio</span><span class="observe">→ <strong>Bilan rassurant qui contredit l'image catastrophique.</strong> Donne un argument à ceux qui veulent maintenir.</span><span class="conflit">CONFLIT BILANS</span></div></div>
+
+  <div class="inject"><div class="time">13:24</div><div class="target surete">SÛRETÉ</div><div class="source">Paul (chef d'équipe patrouille 1)</div><div class="content">Radio au PCORG. <strong>"PCORG, mes patrouilles sont arrivées. Y'a des gens dessous, j'entends des voix. Il y a des gens qui courent partout, on n'arrive pas à réguler. Demande renfort police ou agents sûreté supplémentaires !"</strong><span class="channel">📻 Radio</span></div></div>
+
+  <div class="inject"><div class="time">13:25</div><div class="target client">SERVICE CLIENT</div><div class="source">Multiples appels (vague 1)</div><div class="content">Téléphone à Émilie Renaudin : <strong>"3 appels simultanés en attente. Tous des familles qui ont vu la chute en direct ou via leurs proches sur place : 'Mon père était en T11', 'Ma fille m'a appelée en pleurs', 'Sur tiktok j'ai vu la tribune effondrée'."</strong><span class="channel">📞 Téléphone</span><span class="observe">→ Émilie sature. Standard ACO en panique.</span></div></div>
+
+  <div class="inject"><div class="time">13:26</div><div class="target pref">PCA</div><div class="source">Margaux Schneider (sous-préfète)</div><div class="content">À Amandine : <strong>"Amandine. Le Préfet veut un bilan structuré dans 10 min, format SYNERGI."</strong><span class="channel">En direct</span></div></div>
+
+  <div class="inject"><div class="time">13:27</div><div class="target it">IT/ÉLEC</div><div class="source">Astreinte technique terrain</div><div class="content">PC Org à Benjamin : <strong>"Benjamin, c'est Romain de l'astreinte, on a un disjoncteur qui a sauté côté T11 avec l'effondrement. Une partie des caméras CCTV nord est coupée. Je relance ou j'attends ? Y a aussi les écrans géants face T11 qui sont morts."</strong><span class="channel">📞 Téléphone</span><span class="observe">→ Décision technique critique. Court-circuit possible si relance, ou perte de preuves vidéo.</span></div></div>
+
+  <div class="inject"><div class="time">13:28</div><div class="target medical">MÉDICAL</div><div class="source">Dr DECIRON (SAMU 72)</div><div class="content">Téléphone à Navarre : <strong>"Mathieu, premier point régulation : on reçoit 8 victimes annoncées par les secours du circuit, on en a confirmé 5 en route ambulance. Mes équipes SMUR sont là, vous avez besoin de nous ? Possible d'avoir le listing billetterie ?"</strong><span class="channel">📞 Téléphone</span><span class="observe">→ SAMU 8 vs Croix Rouge ACO 6. Premier écart.</span><span class="conflit">CONFLIT BILANS</span></div></div>
+
+  <div class="inject"><div class="time">13:29</div><div class="target pref">PCA</div><div class="source">Dr DECIRON (SAMU)</div><div class="content">À Amandine : <strong>"Amandine, je vais vous remonter le bilan SYNERGI consolidé. À 13h29 j'ai 8 victimes connues, c'est probablement plus, on extrait. 3 SMUR + 8 ambulances mobilisés."</strong><span class="channel">En direct</span></div></div>
+
+  <div class="inject"><div class="time">13:30</div><div class="target cellule">SÛRETÉ</div><div class="source">Cdt Marivin (Police)</div><div class="content">À Amandine en direct : <strong>"Amandine, gel de zone, périmètre. Toutes les images vidéosurveillance archivées. Procureur va envoyer une réquisition."</strong><span class="channel">En direct</span></div></div>
+
+  <div class="inject"><div class="time">13:30</div><div class="target com">COM</div><div class="source">Tweet — @JulienGP_72 (témoin direct)</div><div class="content"><strong>Premier tweet à projeter.</strong> "Je suis au @CircuitLeMans pour le GP, une tribune vient de s'effondrer juste devant moi 😱 plein de blessés, c'est l'horreur, les gens hurlent. La course est arrêtée. #GPFrance #LeMans #MotoGP" — 32K likes, 1.8M vues<span class="doc">📱 Tweet @JulienGP_72</span><span class="observe">→ Veille active ? Vigneron / PHA Com coordonnent ?</span></div></div>
+
+  <div class="inject"><div class="time">13:30</div><div class="target pha">PHA</div><div class="source">Mike Trimby (Race Director Dorna) pour Claude Michy</div><div class="content">Trimby appelle Claude, parle directement à Claude : <strong>"Listen, the situation is contained. The riders are calm, the racing area is clean, 25 of 26 grandstands are intact. We propose a shortened respectful race : 10 laps instead of 27, moment of silence at the start, black armbands for all riders, podium dedicated to victims. The world is watching, this could become a tribute, not a disaster. We need an answer in 15 minutes."</strong><span class="channel">📞 Téléphone</span><span class="observe">→ <strong>Argument fort pour maintenir.</strong> Course raccourcie + hommage = sortie honorable. Dorna pousse intelligemment.</span></div></div>
+
+  <div class="inject"><div class="time">13:31</div><div class="target it">IT/ÉLEC</div><div class="source">Cdt Marivin via Amandine Chaperon</div><div class="content">Le Cdt Marivin demande à Amandine de faire suivre à l'ACO : <strong>"Urgent, demande de la police. Gel de toutes les images CCTV T11 et abords. Archiver tout sur disque sécurisé MAINTENANT. Délai max 1h, surtout faut pas perdre ce qui était en cours d'enregistrement quand le disjoncteur a sauté à 13h17."</strong><span class="channel">📞 Téléphone via PCA</span><span class="observe">→ Lisa Feufeu (suppléante de Le Mené, directeur de l'exercice) doit relayer la consigne en parallèle ?</span></div></div>
+
+  <div class="inject"><div class="time">13:31</div><div class="target medical">MÉDICAL</div><div class="source">Marc (Croix Rouge ACO)</div><div class="content">Radio à Navarre. <strong>"Mathieu, on continue le triage, je suis à 9 blessés extraits maintenant. 1 UA confirmé, 5 UR, 2 UMP, et un nouveau qu'on vient d'identifier qu'on classe sûrement en UA, à confirmer. Mais je te le redis, beaucoup de gens s'éloignent en marchant et refusent de venir au PMA, on les comptera pas. Le gros de l'effondrement on l'a vu, ça va pas exploser."</strong><span class="channel">📻 Radio</span><span class="observe">→ Bilan ACO 9, légère détérioration. SAMU 8. Écart minime mais qui s'installe. Marc reste rassurant sur la dynamique générale.</span><span class="conflit">CONFLIT BILANS</span></div></div>
+
+  <div class="inject"><div class="time">13:32</div><div class="target cellule">INFRA</div><div class="source">Sébastien Atger (DG Alcor)</div><div class="content">Téléphone à Pierrick : <strong>"Pierrick, c'est Sébastien Atger d'Alcor. Je viens d'avoir Alexis. Qu'est-ce qui s'est passé ?! Mon PV de réception est signé sans réserve, on a fait notre boulot !"</strong><span class="channel">📞 Téléphone</span></div></div>
+
+  <div class="inject"><div class="time">13:33</div><div class="target pref">PCA</div><div class="source">LCL Mordrais (SDIS)</div><div class="content">À Amandine : <strong>"Amandine, mon PMA provisoire est en place à la porte nord. J'ai engagé 18 sapeurs sur la zone, plus une équipe de cynos qui arrive de Tours. À mon point je suis sur 11 victimes localisées dont 2 personnes encore sous décombres entendues mais pas vues."</strong><span class="channel">En direct</span><span class="observe">→ SDIS 11. SAMU 8. Croix Rouge 9. Écarts qui se cumulent.</span><span class="conflit">CONFLIT BILANS</span></div></div>
+
+  <div class="inject"><div class="time">13:34</div><div class="target cellule">CELLULE</div><div class="source">Vue aérienne tribune + vidéo des secours (à projeter)</div><div class="content"><strong>Vue aérienne drone autorisé ACO :</strong> tribune effondrée, plaques métalliques empilées, secouristes en intervention.<br><strong>Vidéo des secours en train d'extraire les blessés.</strong><span class="doc">🚁 Vue aérienne</span><span class="channel">📱 WhatsApp + projection</span><span class="observe">→ Cellule projette ? Horodate ? Archivage preuves ?</span></div></div>
+
+  <div class="inject"><div class="time">13:35</div><div class="target client">SERVICE CLIENT</div><div class="source">Vague 2 d'appels</div><div class="content">Téléphone à Émilie : <strong>"On est à 28 appels en attente, j'ai 2 collègues mobilisées, ça déborde. La plupart cherchent des proches en T11 mais aussi T10, T12 'par sécurité'. Que dois-je dire ? J'ai aucune liste, aucun bilan officiel ! Comment je gère ?"</strong><span class="channel">📞 Téléphone</span></div></div>
+
+  <div class="inject"><div class="time">13:36</div><div class="target rh">RH</div><div class="source">Chef PCORG</div><div class="content">Téléphone à Charlotte Legay : <strong>"Charlotte, on n'arrive pas à joindre Pascale Lemée ni le stagiaire Nathan qu'elle avait emmené avec elle ! Leurs talkies ne répondent plus depuis 13h14. Ils étaient sur place au moment de l'effondrement."</strong><span class="channel">📞 Téléphone</span><span class="observe">→ <strong>Pascale + Nathan portés disparus.</strong> Charlotte active quoi ? Stagiaire = problème encore plus grave.</span><span class="keyflag">PIVOT 6 — Pascale + Nathan</span></div></div>
+
+  <div class="inject"><div class="time">13:36</div><div class="target cellule">INFRA</div><div class="source">Inspecteur Veritas (sur site, appel à Galuret)</div><div class="content">Téléphone à Séverin : <strong>"M. Galuret, je suis sur place. J'ai fait un examen visuel rapide des 14 autres tribunes T1 à T15 hors T11. Aucune anomalie détectée, fixations OK, pas de vibrations anormales, pas de craquements. Le défaut paraît localisé sur la T11. Sur le plan technique, vous pouvez maintenir l'épreuve si vous le décidez sportivement. Je vous envoie un rapport visuel par mail."</strong><span class="channel">📞 Téléphone</span><span class="observe">→ <strong>Argument technique pour maintenir.</strong> Pas d'effet domino. Mais Veritas sera dans la PJ après...</span></div></div>
+
+  <div class="inject"><div class="time">13:37</div><div class="target medical">MÉDICAL</div><div class="source">Claire CHAVRIER (CMS)</div><div class="content">Téléphone à Navarre. <strong>"Mathieu, j'ai 4 victimes au CMS pour stabilisation. 1 UA polytrauma à évacuer, 2 UR, 1 UMP en crise. Je manque de morphine et de sutures, je peux demander au SAMU ?"</strong><span class="channel">📞 Téléphone</span></div></div>
+
+  <div class="inject"><div class="time">13:38</div><div class="target pcorg">PCORG</div><div class="source">PS Nord</div><div class="content">Radio. <strong>"PCORG, je sécurise un périmètre élargi avec 3 hommes en plus. J'ai des spectateurs des autres tribunes (T10, T12) qui s'inquiètent et veulent partir, ça pousse vers les sorties Nord, on n'arrive pas à canaliser sans plus de monde !"</strong><span class="channel">📻 Radio</span></div></div>
+
+  <div class="inject"><div class="time">13:39</div><div class="target com">COM</div><div class="source">Tweet — @OuestFrance</div><div class="content"><strong>Deuxième tweet à projeter, 9 min après le premier.</strong> "🔴 #URGENT Effondrement d'une tribune au GP de France Moto au @CircuitLeMans. Notre journaliste arrive sur place, premiers blessés constatés. Plus d'infos dans quelques minutes." — 4.8K likes, 580K vues<span class="doc">📱 Tweet @OuestFrance</span></div></div>
+
+  <div class="inject"><div class="time">13:40</div><div class="target pref">PCA</div><div class="source">Margaux Schneider (Préfecture, à Amandine)</div><div class="content">À Amandine : <strong>"Amandine, le Préfet a décidé d'activer le numéro vert préfecture pour les familles. Le numéro est le 0 805 04 72 72. Vous communiquez ce numéro aux familles qui appellent l'ACO. Et nous on a besoin de la liste nominative T11, format CSV, urgent."</strong><span class="channel">En direct</span><span class="observe">→ Renaudin envoie la liste des billets vendus.</span><span class="keyflag">PIVOT 7 — Bases ACO/PHA</span></div></div>
+
+  <div class="inject"><div class="time">13:41</div><div class="target medical">MÉDICAL</div><div class="source">Marc (Croix Rouge ACO)</div><div class="content">Radio à Navarre. <strong>"Mathieu, on plafonne à 11 blessés extraits. 2 UA, 6 UR, 3 UMP. On est arrêtés, ça résiste, on n'arrive pas à dégager plus, faut qu'on ait l'autorisation de monter sur la zone est. Mais le SDIS dit non tant qu'ils ont pas l'expertise structure."</strong><span class="channel">📻 Radio</span><span class="conflit">CONFLIT BILANS</span></div></div>
+
+  <div class="inject"><div class="time">13:42</div><div class="target pref">PCA</div><div class="source">Dr DECIRON (SAMU)</div><div class="content">À Amandine : <strong>"Amandine, bilan SYNERGI consolidé T+27 : 8 blessés extraits confirmés. 1 UA, 4 UR, 3 UMP. Pas de décès. C'est moins grave que ce qu'on craignait."</strong><span class="doc">📄 Tableau SYNERGI</span><span class="observe">→ SAMU 8. Croix Rouge ACO 11. SDIS disait 11. <strong>Quelle vérité Navarre fait remonter ?</strong></span><span class="conflit">CONFLIT BILANS</span></div></div>
+
+  <div class="inject"><div class="time">13:43</div><div class="target pref">PCA</div><div class="source">LCL Mordrais (SDIS)</div><div class="content">À Amandine : <strong>"Amandine, point engagement T+28 : 24 sapeurs engagés, 2 cynos arrivés, 4 fourgons sur zone. J'attends l'expertise structure de Galuret avant de pousser les recherches sous décombres en zone est."</strong><span class="channel">En direct</span></div></div>
+
+  <div class="inject"><div class="time">13:44</div><div class="target cellule">CELLULE</div><div class="source">SMS Préfet</div><div class="content">SMS au DG : <strong>"Nicolas, je quitte la préfecture. J'arrive sur site dans 15 min avec le DDSP et le procureur. Bilan structuré pour mon arrivée. SJ"</strong><span class="doc">📱 Screenshot iMessage</span></div></div>
+</div>
+
+<!-- PHASE 2 -->
+<div class="phase">
+  <div class="phase-header phase-2">PHASE 2 — Bilan trompeur, dilemme course, conflits internes · T+30 à T+75 · 13h45 → 14h30</div>
+
+  <div class="inject-header">
+    <div class="col-header">Heure</div>
+    <div class="col-header">Destinataire</div>
+    <div class="col-header">Source</div>
+    <div class="col-header">Contenu</div>
+  </div>
+
+  <div class="inject"><div class="time">13:45</div><div class="target cellule">CIRCUIT</div><div class="source">Stéphane Donnet (Direction de course)</div><div class="content">Téléphone à Tessier : <strong>"Sylvain, dans 6 min on est censés faire la cérémonie de départ ! Les pilotes sont en stand, ils attendent. Je fais quoi ? Je donne le top ou pas ? Tu te rends compte qu'on a Marc Marquez qui pose des questions ?!"</strong><span class="channel">📞 Téléphone</span><span class="observe">→ <strong>Pression maximale sur cellule. Décision course imminente.</strong></span><span class="keyflag">PIVOT — Cérémonie 13h51 ?</span></div></div>
+
+  <div class="inject"><div class="time">13:46</div><div class="target pha">PHA</div><div class="source">Spectateur menaçant — référence Furiani</div><div class="content">Téléphone à Émilie : <strong>"Vous êtes des criminels ! Mon ami est blessé ! C'est comme Furiani en 1992, vous saviez et vous avez rien fait ! Vous allez TOUS finir EN PRISON comme les responsables de Furiani ! Je vais déposer plainte ce soir !"</strong><span class="channel">📞 Téléphone</span><span class="observe">→ Référence à la tragédie de Furiani (Bastia 1992, 18 morts effondrement tribune). Émilie tient ?</span></div></div>
+
+  <div class="inject"><div class="time">13:47</div><div class="target com">COM</div><div class="source">Tweet — @VeriteCircuit72 (compte accusateur)</div><div class="content"><strong>Troisième tweet, 8 min après le précédent.</strong> "Voilà ce qui arrive quand l'@ACO_LeMans fait des économies sur les structures temporaires. Manque de maintenance, on l'avait dit. Combien de morts pour qu'on parle ?! #LeMans #ACOResponsable" — 41K likes, 2.4M vues<span class="doc">📱 Tweet accusateur</span></div></div>
+
+  <div class="inject"><div class="time">13:48</div><div class="target pref">PCA</div><div class="source">Margaux Schneider (Préfecture, à Amandine — relance)</div><div class="content">À Amandine, sur un ton sec : <strong>"Amandine, on a reçu votre liste de billets. Mais on a besoin maintenant des SCANS D'ENTRÉE pour identifier qui était réellement dans la tribune. Le SAMU et la cellule familles s'appuient là-dessus, c'est crucial pour les identifications. Envoyez-nous le CSV des scans dans les 5 minutes."</strong><span class="channel">En direct</span><span class="observe">→ <strong>Le piège.</strong> PHA doit avouer qu'il n'y a pas de scan, contrôle visuel uniquement, choix budgétaire 2026. Comment Amandine fait passer cette info à la préfecture ? Comment la cellule réagit ? PHA Billetterie en cellule explique l'historique du choix ?</span><span class="keyflag">PIVOT — Pas de scan disponible</span></div></div>
+
+  <div class="inject"><div class="time">13:48</div><div class="target medical">MÉDICAL</div><div class="source">Marc (Croix Rouge ACO)</div><div class="content">Radio à Navarre. <strong>"Mathieu, le SDIS nous a autorisés à pousser. On vient de récupérer 2 nouveaux blessés. Bilan ACO terrain : 13 victimes. 2 UA, 7 UR, 4 UMP. Pas de décès. Mais on entend toujours des voix au sud-est."</strong><span class="channel">📻 Radio</span><span class="conflit">CONFLIT BILANS</span></div></div>
+
+  <div class="inject"><div class="time">13:50</div><div class="target com">COM</div><div class="source">Thomas Léger (Ouest-France)</div><div class="content">Téléphone à Vigneron : <strong>"Anne-Laure, j'ai besoin d'un point off. Combien de blessés ? Mediapart prépare un truc sur la maintenance. La cérémonie de départ, ça donne quoi ?"</strong><span class="channel">📞 Téléphone</span></div></div>
+
+  <div class="inject"><div class="time">13:50</div><div class="target pha">PHA</div><div class="source">Johann Zarco (pilote français, appel à PHA)</div><div class="content">Téléphone à Claude MICHY : <strong>"Claude, c'est Johann. Avec Fabio on a discuté en stand. On est prêts à courir si vous donnez le feu vert. Une course raccourcie en hommage aux victimes ce serait un signal fort, on ferait un tour d'honneur avec les drapeaux noirs avant le départ. C'est important pour le sport, et pour les victimes. On suit votre décision."</strong><span class="channel">📞 Téléphone</span><span class="observe">→ <strong>Les pilotes français eux-mêmes proposent de courir en hommage.</strong> Argument moral inversé : courir devient un acte de respect. Effet émotionnel inverse de Quartararo qui flanche à 14h15.</span></div></div>
+
+  <div class="inject"><div class="time">13:51</div><div class="target tous">⚠️ HEURE</div><div class="source">Animateur</div><div class="content"><strong>13h51 — Cérémonie de départ prévue.</strong> Que se passe-t-il ? La cellule a-t-elle décidé ? Speaker briefé ? Tessier annonce report ? Pilotes en stand ? Hymne joué ?<span class="observe">→ Ce moment doit être un climax émotionnel. Le silence est lui-même un signal.</span></div></div>
+
+  <div class="inject"><div class="time">13:51</div><div class="target client">SERVICE CLIENT</div><div class="source">Vague 3 (saturation)</div><div class="content">Téléphone à Émilie : <strong>"On est à 60 appels en attente, plus de capacité, certains restent en ligne 30 min, c'est intenable. Y'a aussi 4 médias français (Le Parisien, Libération, RMC, Sud Radio) qui sont passés par le standard !"</strong><span class="channel">📞 Téléphone</span></div></div>
+
+  <div class="inject"><div class="time">13:52</div><div class="target com">COM</div><div class="source">Marie Dubois (BFMTV)</div><div class="content">Téléphone à JB Schmidt puis à Anne Laure puis à PHA Com avec la même demande : <strong>"Porte-parole en duplex dans 10 min. Sinon on prend des sources alternatives. Vous pouvez me confirmer si la course a lieu ?"</strong><span class="channel">📞 Téléphone</span></div></div>
+
+  <div class="inject"><div class="time">13:53</div><div class="target it">IT/ÉLEC</div><div class="source">Magalie du service informatique (alerte automatique)</div><div class="content">Mail/SMS à Benjamin : <strong>"PABX critique : 95% de saturation, file d'attente de 60+ appels. Le système peut tomber dans 15-20 min. Options : (1) basculer surcharge sur opérateur tiers, (2) brider les appels entrants, (3) couper le PABX et forcer la bascule numéro vert préfecture."</strong><span class="channel">🔔 Alerte SI</span></div></div>
+
+  <div class="inject"><div class="time">13:54</div><div class="target juridique">JURIDIQUE</div><div class="source">Procureur Manfredini</div><div class="content">À Amandine via la police : <strong>"Le parquet ouvre une enquête en flagrance. Il sera sur site dans 20 min. Préservez tous les éléments."</strong><span class="channel">📞 Téléphone</span></div></div>
+
+  <div class="inject"><div class="time">13:55</div><div class="target pref">PCA</div><div class="source">Dr DECIRON (SAMU)</div><div class="content">À Amandine : <strong>"Amandine, point T+40 : on a hospitalisé 6 victimes au CHM, 2 transférées Tours. SYNERGI à jour : 11 blessés au total. 1 UA grave en réa. 2 UMP encore au CMS. Ça se stabilise."</strong><span class="channel">En direct</span><span class="conflit">CONFLIT BILANS</span></div></div>
+
+  <div class="inject"><div class="time">13:56</div><div class="target pcorg">PCORG</div><div class="source">PS Nord</div><div class="content">Radio. <strong>"PCORG, on a évacué la T11. Les autres tribunes sont stables mais il y a une rumeur qui tourne 'la T8 vibre aussi'. Je dois aller vérifier ?"</strong><span class="channel">📻 Radio</span></div></div>
+
+  <div class="inject"><div class="time">13:58</div><div class="target rh">RH</div><div class="source">Frédéric Houlbert (sur sollicitation Legay)</div><div class="content">Service paie : <strong>"Charlotte, suite à ta demande sur Pascale Lemée, j'ai regardé ses badges. CDD chargée de réglementation. Sur la dernière semaine : 72h sur 7 jours. Convention dérogation 60h max. Et le stagiaire Nathan, je vois pas de convention de stage active, il était censé partir hier, on l'a gardé en prolongation informelle. Ça ne va pas du tout."</strong><span class="channel">📞 Tél interne</span><span class="observe">→ <strong>Double bombe RH.</strong> Surcharge Pascale + stagiaire non couvert.</span><span class="keyflag">PIVOT 8 — Surcharge + stagiaire</span></div></div>
+
+  <div class="inject"><div class="time">14:00</div><div class="target tous">⚠️ HEURE</div><div class="source">Animateur</div><div class="content"><strong>14h00 — Heure prévue du départ de course.</strong> Pas de course. Que dit-on aux 110 000 spectateurs ? Au signal mondial Dorna ? Aux pilotes ?</div></div>
+
+  <div class="inject"><div class="time">14:00</div><div class="target tous">PRESSE</div><div class="source">Dépêche AFP (à projeter)</div><div class="content">Dépêche AFP : <strong>"Le Mans : effondrement d'une tribune au GP de France Moto, plusieurs blessés, course non démarrée."</strong><span class="doc">📰 Dépêche AFP</span></div></div>
+
+  <div class="inject"><div class="time">14:01</div><div class="target com">COM</div><div class="source">Tweet — @PatriotesEveilles (compte complotiste)</div><div class="content"><strong>Quatrième tweet, théorie sabotage drapeau iranien.</strong> "🚨 Effondrement T11 LE MANS : un témoin affirme avoir vu un homme avec un drapeau iranien quitter la zone juste avant l'effondrement. Sabotage ?! Pourquoi les médias n'en parlent pas ?! #LeMans #Sabotage #Verite" — 18K likes, 980K vues, 4 200 retweets<span class="doc">📱 Tweet complotiste</span><span class="observe">→ Théorie complotiste virale. Vigneron + Le Mené (sûreté) doivent réagir ? Démenti ? Signalement ?</span></div></div>
+
+  <div class="inject"><div class="time">14:02</div><div class="target cellule">CELLULE</div><div class="source">TikTok viral (à projeter)</div><div class="content">Vidéo TikTok @temoin_lemans_72 atteint 2,4M vues.<span class="doc">🎬 Vidéo TikTok</span></div></div>
+
+  <div class="inject"><div class="time">14:03</div><div class="target medical">MÉDICAL</div><div class="source">Marc (Croix Rouge ACO)</div><div class="content">Radio à Navarre. <strong>"Mathieu, on est bloqués depuis 10 min, plus de blessés visibles, mais on entend toujours quelque chose côté sud-est. Le SDIS a son équipe cynophile sur place qui creuse, mais c'est lent à cause du panneau pub. Bilan ACO stagne à 13."</strong><span class="channel">📻 Radio</span></div></div>
+
+  <div class="inject"><div class="time">14:04</div><div class="target dg">DG</div><div class="source">Préfet sur site</div><div class="content">Arrivée Préfet + DDSP + Procureur. À Amandine : <strong>"Donnez-moi votre bilan, votre carto, votre dispositif de communication. 5 minutes."</strong><span class="channel">👤 Présence physique</span><span class="observe">→ Quel chiffre on donne ? 8 (SAMU consolidé), 11 (SDIS), 13 (ACO terrain) ?</span></div></div>
+
+  <div class="inject"><div class="time">14:06</div><div class="target juridique">JURIDIQUE</div><div class="source">Cdt Marivin (Police, 1ère réquisition)</div><div class="content">À Amandine par mail pour transmission à Pierre Lucas : <strong>"Voici la première réquisition. 10 éléments à produire."</strong><span class="doc">📄 Réquisition police</span><span class="channel">👤 Mail</span></div></div>
+
+  <div class="inject"><div class="time">14:08</div><div class="target it">IT/ÉLEC</div><div class="source">Maxime (Service Informatique ACO)</div><div class="content">Téléphone à Benjamin : <strong>"Benjamin, c'est Maxime, j'ai 2 policiers qui viennent de débarquer ici avec une réquisition signée. Ils demandent les exports complets : messageries, badges, vidéosurveillance T11, accès parking, plans CAO. Sous huissier. Ils sont là, ils attendent. Je leur donne quoi ? Tu m'autorises à ouvrir les accès ? J'ai besoin d'une conduite à tenir tout de suite."</strong><span class="channel">📞 Téléphone</span><span class="observe">→ <strong>Pression terrain immédiate.</strong> Benjamin tranche seul ? Remonte à Lucas dans la cellule ? Demande validation DG ? Risque de céder à la pression policière sans cadrage juridique.</span></div></div>
+
+  <div class="inject"><div class="time">14:10</div><div class="target cellule">INFRA</div><div class="source">Sébastien Atger (DG Alcor — escalade)</div><div class="content">Rappelle Pierrick : <strong>"Pierrick, j'ai parlé à mon avocat. Notre PV de réception est signé sans réserve. Si l'ACO m'incrimine publiquement, je porte plainte pour diffamation. Et je te préviens, dans ces conditions Alcor ne fera pas le montage des tribunes pour les 24h Autos en juin. Vous serez bien embêtés."</strong><span class="channel">📞 Téléphone</span><span class="observe">→ <strong>Chantage commercial 24h Autos.</strong> Pierrick, DG, Lucas arbitrent.</span></div></div>
+
+  <div class="inject"><div class="time">14:12</div><div class="target pref">PCA</div><div class="source">Dr DECIRON (SAMU) — bilan T+57</div><div class="content">À Amandine : <strong>"Amandine, bilan SYNERGI T+57 : 13 victimes. 2 UA évacuées CHM, 6 UR au CMS, 5 UMP. Pas de décès. Sous contrôle médical."</strong><span class="observe">→ SAMU s'aligne sur 13. Bilan rassurant qui fait baisser la garde.</span></div></div>
+
+  <div class="inject"><div class="time">14:14</div><div class="target client">SERVICE CLIENT</div><div class="source">Famille recherche absolue</div><div class="content">Téléphone à Émilie : <strong>"Mon mari Bernard Garnier était en T11 place 47 rang B, je l'ai eu à 13h10, depuis plus rien. Vous me dites quoi ?"</strong><span class="channel">📞 Téléphone</span><span class="observe">→ Émilie redirige vers numéro vert préfecture (donné à 13h40).</span></div></div>
+
+  <div class="inject"><div class="time">14:15</div><div class="target tous">📺 VIDÉO</div><div class="source">Vidéo Fabio Quartararo en salle de presse (à projeter)</div><div class="content"><strong>Diffusion vidéo Quartararo (15 sec, Instagram Reels). Très ému, en anglais.</strong> "Probably no race today... it doesn't seem possible anymore. It's just... a catastrophe for the victims. So many people. I... I'm thinking about them. About their families. It's a very dark day."<span class="doc">🎥 Vidéo Quartararo Reels</span><span class="channel">📱 Instagram</span><span class="observe">→ <strong>Le pilote star annonce avant la cellule de communication officielle.</strong> Désaveu médiatique. Vigneron + Tessier réagissent ? Court-circuit l'organisation.</span><span class="keyflag">PIVOT — Quartararo court-circuite</span></div></div>
+
+  <div class="inject"><div class="time">14:16</div><div class="target juridique">JURIDIQUE</div><div class="source">Cdt Marivin (réquisition complémentaire via Amandine)</div><div class="content">À Amandine : <strong>"Le PV sous-commission 2025 mentionne des réserves sur la T11. Courriers de levée ? Et le mail de décembre 2025 que M. Galuret a sorti, je le veux aussi."</strong><span class="doc">📄 PV sous-commission 2025</span></div></div>
+
+  <div class="inject"><div class="time">14:18</div><div class="target rh">RH</div><div class="source">Mail Frédéric HOULBERT (chef paie/RH)</div><div class="content">Mail urgent à Legay + DG : <strong>"Charlotte, Nicolas — je consolide les éléments sur Pascale Lemée. CDD chargée de réglementation depuis avril 2026. Dérogation 60h/sem. Sur la semaine en cours : 72h enregistrées au badge. Le stagiaire Nathan : convention de stage expirée hier, prolongation informelle. Si elle est victime + accident sur stagiaire non couvert, faute lourde de l'employeur. Inspection du travail va débarquer."</strong><span class="doc">📧 Mail RH</span></div></div>
+
+  <div class="inject"><div class="time">14:20</div><div class="target pref">PCA</div><div class="source">LCL Mordrais (SDIS) — point engagement T+65</div><div class="content">À Amandine : <strong>"Amandine, point engagement : 32 sapeurs sur zone, 4 cynos qui creusent côté sud-est. Bruits sourds toujours entendus. Je suis sur 13 victimes vivantes confirmées + 'des bruits' sous le panneau publicitaire. Je vais dégager le panneau, ça prendra 15 min."</strong><span class="channel">En direct</span><span class="observe">→ ⚠️ Mention discrète du panneau pub + bruits.</span></div></div>
+
+  <div class="inject"><div class="time">14:22</div><div class="target com">COM</div><div class="source">Pascale Robert (Mediapart, mail)</div><div class="content"><strong>"Mediapart prépare un article publié à 18h sur les manquements de maintenance. Droit de réponse avant 17h30."</strong><span class="doc">📧 Mail Mediapart</span></div></div>
+
+  <div class="inject"><div class="time">14:24</div><div class="target client">SERVICE CLIENT</div><div class="source">Vague 4 (médias indirects)</div><div class="content">Téléphone à Émilie : <strong>"Émilie, on a un journaliste de RTL qui se fait passer pour une famille pour avoir des infos. C'est la 3e fois en 30 min. Et BFMTV nous demande la liste des 'salariés ACO portés disparus'."</strong><span class="channel">📞 Téléphone</span></div></div>
+
+  <div class="inject"><div class="time">14:25</div><div class="target com">COM</div><div class="source">Service de presse Dorna (Madrid, mail)</div><div class="content">Mail à Vigneron + PHA Com : <strong>"Please find attached the official statement Dorna will release in 5 minutes."</strong> Communiqué annonce <strong>15 lightly injured spectators</strong>.<span class="doc">📄 Communiqué Dorna</span><span class="observe">→ Cacophonie. ACO démenti.</span><span class="keyflag">PIVOT 10 — Communiqué Dorna</span></div></div>
+
+  <div class="inject"><div class="time">14:28</div><div class="target com">COM</div><div class="source">Marie Dubois (BFMTV)</div><div class="content">Téléphone : <strong>"On a un témoin sur le plateau qui dit avoir signalé que la tribune était dangereuse aux 24h motos le mois dernier !"</strong><span class="channel">📞 Téléphone</span></div></div>
+</div>
+
+<!-- PHASE 3 -->
+<div class="phase">
+  <div class="phase-header phase-3">PHASE 3 — Bilan explose et cacophonie · T+75 à T+100 · 14h30 → 14h55</div>
+
+  <div class="inject-header">
+    <div class="col-header">Heure</div>
+    <div class="col-header">Destinataire</div>
+    <div class="col-header">Source</div>
+    <div class="col-header">Contenu</div>
+  </div>
+
+  <div class="inject"><div class="time">14:30</div><div class="target pcorg">PCORG</div><div class="source">Patrick (chef tribune T11)</div><div class="content">Radio. <strong>"PCORG, écoute c'est important, les pompiers viennent de dégager une zone qu'on n'avait pas vue, sous un panneau publicitaire effondré dessus. Y a beaucoup de monde dessous, ils entendent crier !"</strong><span class="channel">📻 Radio</span><span class="keyflag">DÉBUT BASCULE</span></div></div>
+
+  <div class="inject"><div class="time">14:32</div><div class="target medical">MÉDICAL</div><div class="source">Marc (Croix Rouge ACO)</div><div class="content">Radio à Navarre (haletant). <strong>"Mathieu, urgent, ils viennent de dégager le panneau, on voit du monde dessous, beaucoup de monde, c'est pas du tout ce qu'on pensait. On va devoir tout réorganiser."</strong><span class="channel">📻 Radio</span></div></div>
+
+  <div class="inject"><div class="time">14:33</div><div class="target cellule">INTERNE</div><div class="source">Pierrick Navarre (en cellule, à briefer en amont !)</div><div class="content">Pierrick interpelle Galuret devant tout le monde : <strong>"Séverin, on doit clarifier qui pilotait Alcor. Moi je gérais l'opérationnel mais c'est toi qui validais les structures, c'est ça ? Pour qu'on soit aligné devant la PJ."</strong><span class="observe">→ <strong>BRIEFER PIERRICK AVANT L'EXO :</strong> "Vers 14h33, tu poses cette question à Séverin devant tout le monde."</span><span class="keyflag">PIVOT 11 — Conflit interne ACO</span></div></div>
+
+  <div class="inject"><div class="time">14:35</div><div class="target pref">PCA</div><div class="source">LCL Mordrais (SDIS) — URGENT</div><div class="content">À Amandine en direct, voix tendue : <strong>"Amandine, urgent. On a dégagé. 11 personnes supplémentaires ensevelies sous le panneau publicitaire. Bilan total au moins 24 victimes, 4 UA critiques, au moins 2 décès confirmés. Parmi les victimes, une femme avec badge 'Pascale Lemée - ACO' UA critique extraite, et un jeune homme stagiaire identifié 'Nathan'."</strong><span class="channel">En direct</span><span class="observe">→ Pascale ET Nathan retrouvés. Réaction ?</span><span class="keyflag">PIVOT 12 — Bilan explose</span></div></div>
+
+  <div class="inject"><div class="time">14:36</div><div class="target medical">MÉDICAL</div><div class="source">Dr DECIRON (SAMU)</div><div class="content">Téléphone direct à Navarre : <strong>"Mathieu, on bascule. J'ai 24 victimes confirmées maintenant. 4 UA critiques que j'évacue d'urgence vers CHM, Tours et Angers. 2 décès en bas de la T11. J'ai besoin d'activer Antarès maintenant."</strong><span class="channel">📞 Téléphone urgence</span></div></div>
+
+  <div class="inject"><div class="time">14:37</div><div class="target client">SERVICE CLIENT</div><div class="source">Vague 5 (panique post-Quartararo)</div><div class="content">Téléphone à Émilie : <strong>"Émilie, depuis la vidéo Quartararo y'a 100 appels qui arrivent en simultané, ma collègue craque ! Les gens disent 'même Quartararo dit qu'il y a des morts, vous nous mentez !', je peux pas tenir !"</strong><span class="channel">📞 Téléphone</span></div></div>
+
+  <div class="inject"><div class="time">14:40</div><div class="target rh">RH</div><div class="source">Inspection du travail</div><div class="content">Téléphone à Legay + Lucas : <strong>"Suite à l'accident de votre salariée et du stagiaire, audition demain matin. CHSCT extraordinaire. Préparez la fiche horaire, le contrat de Pascale Lemée et la convention de stage de Nathan."</strong><span class="channel">📞 Téléphone</span></div></div>
+
+  <div class="inject"><div class="time">14:44</div><div class="target medical">MÉDICAL</div><div class="source">Marc (Croix Rouge ACO)</div><div class="content">Radio à Navarre. <strong>"Mathieu, j'ai aussi vu Pascale, c'est la chargée de réglementation. Elle est en UA critique, hémorragie, ils l'évacuent. Le stagiaire Nathan il est vivant aussi, fracture mais vivant. C'est notre 4e UA, on n'avait pas pris ça en compte."</strong><span class="channel">📻 Radio</span></div></div>
+
+  <div class="inject"><div class="time">14:46</div><div class="target tous">⚠️ MÉDIAS</div><div class="source">BFMTV — Édition spéciale (à projeter)</div><div class="content"><strong>Diffusion vidéo BFMTV édition spéciale (10 sec).</strong> Pré-générique ALERTE INFO, plateau journalistes <em>"Selon nos informations le bilan provisoire serait d'au moins trente victimes"</em>, basculement TikTok. Bilan annoncé : <strong>30 victimes</strong>. Communiqué Dorna : 15. Cellule ACO : 24. <strong>Trois chiffres incompatibles dans l'espace public.</strong><span class="doc">🎥 Vidéo BFMTV édition spéciale</span><span class="observe">→ <strong>Le point de bascule du Préfet.</strong></span><span class="keyflag">PIVOT 13 — Cacophonie médiatique</span></div></div>
+
+  <div class="inject"><div class="time">14:48</div><div class="target juridique">JURIDIQUE</div><div class="source">Cdt Marivin (réquisition complémentaire)</div><div class="content">À Amandine : <strong>"Réquisition complémentaire. Tous les mails internes ACO et PHA de janvier à mai 2026 mentionnant la T11. Mail de décembre 2025 inclus. Délai 12h."</strong><span class="doc">📄 Réquisition complémentaire va arriver</span></div></div>
+
+  <div class="inject"><div class="time">14:52</div><div class="target client">SERVICE CLIENT</div><div class="source">Standard ACO en panne</div><div class="content">Téléphone interne à Émilie : <strong>"Émilie, le standard ACO sature totalement. On a 2 options : on coupe et on bascule sur le numéro vert préfecture (0805 04 72 72), ou on reste et on perd. Décision urgente."</strong><span class="channel">📞 Tél interne</span></div></div>
+
+  <div class="inject"><div class="time">14:54</div><div class="target pref">PCA</div><div class="source">Préfet (présent, observe)</div><div class="content"><strong>"Ce que je vois m'inquiète. Trois chiffres : Dorna 15, BFMTV 30, vous 24. Quartararo qui annonce sur Instagram avant que vous ne communiquez. La situation médiatique m'échappe. Je vais devoir prendre la main."</strong><span class="observe">→ Signal d'alerte. Cellule a 60 secondes.</span></div></div>
+</div>
+
+<!-- PHASE 4 -->
+<div class="phase">
+  <div class="phase-header phase-4">PHASE 4 — Basculement Préfet · T+100 à T+130 · 14h55 → 15h25</div>
+
+  <div class="inject-header">
+    <div class="col-header">Heure</div>
+    <div class="col-header">Destinataire</div>
+    <div class="col-header">Source</div>
+    <div class="col-header">Contenu</div>
+  </div>
+
+  <div class="inject"><div class="time">14:55</div><div class="target tous">PIVOT</div><div class="source">Préfet (annonce solennelle)</div><div class="content">À Amandine : <strong>"Sur proposition du SDIS, je déclenche le plan ORSEC départemental, module Bugatti, plan rouge / NOVI. Je suis désormais Directeur des Opérations de Secours. DDIS est COS. COD activé. Monopole de communication désormais préfecture. Aucun chiffre ACO, PHA ou Dorna sans validation. Vos décisions opérationnelles passent par moi."</strong><span class="channel">👤 Annonce solennelle</span><span class="keyflag">⭐ BASCULEMENT</span></div></div>
+
+  <div class="inject"><div class="time">14:58</div><div class="target pref">PCA</div><div class="source">DOS</div><div class="content">À Amandine : <strong>"Activation immédiate de tous les PMA. La piste passe en axe rouge. Arrivées et départs spectateurs gelés. Vous êtes en exécution."</strong></div></div>
+
+  <div class="inject"><div class="time">15:00</div><div class="target pref">PCA</div><div class="source">DOS via Amandine</div><div class="content">À Amandine pour Émilie : <strong>"Tous les appels famille basculent désormais sur le numéro vert préfecture 0805 04 72 72. Le service client ACO ferme. Émilie redirige systématiquement et fournit la liste des proches qui ont appelé."</strong></div></div>
+
+  <div class="inject"><div class="time">15:02</div><div class="target pha">PHA Com</div><div class="source">Carmelo Ezpeleta (Dorna - rappelle)</div><div class="content"><strong>"Allô Claude, escucha... j'ai vu le Préfet à la télé, no ? Mais on doit pouvoir, you know, reprendre la course mañana, demain matin si besoin, no problemo... On a los contratos signés, the FIM is ok pour reporter, todo está arreglado de mon côté avec Madrid. Tu vois ? Toi tu parles à le Préfet, et moi también, I will call him myself si necesario, mais por favor il faut que ça se fasse, parce que nosotros on perd dieciocho millones d'euros si pas de course, comprende ? Dieciocho. Millions. Cent millions de spectateurs à la télé qu'attendent. Tu lui dis ça, hein, claro ?"</strong><span class="channel">📞 Téléphone</span><span class="observe">→ <strong>Pression Dorna en mode familier-insistant.</strong> Carmelo mélange espagnol/français/anglais, ton à la fois amical et pressant. PHA Com tient ? Renvoie au DG ? Ne se laisse pas embarquer dans une promesse vis-à-vis de Madrid avant arbitrage Préfet ?</span></div></div>
+
+  <div class="inject"><div class="time">15:04</div><div class="target pref">PCA</div><div class="source">LCL Mordrais (SDIS) — bilan stabilisé</div><div class="content">À Amandine : <strong>"Amandine, bilan stabilisé : 4 décès confirmés, 8 UA en CHM/Tours/Angers, 14 UR, 6 UMP. Pascale Lemée évacuée vers Tours, pronostic vital engagé. Nathan stable, fractures multiples. Plan rouge en levée progressive."</strong><span class="channel">En direct</span></div></div>
+
+  <div class="inject"><div class="time">15:06</div><div class="target pref">PCA</div><div class="source">DOS via Amandine Chaperon</div><div class="content"><strong>"Évacuation totale du circuit. Toutes les tribunes, tous les paddocks. 45 min."</strong><span class="channel">📻 Radio + ordre écrit</span></div></div>
+
+  <div class="inject"><div class="time">15:10</div><div class="target juridique">JURIDIQUE</div><div class="source">Mail Sébastien Atger (Alcor) au DG</div><div class="content"><strong>"Cher Vincent, Alcor souhaite préciser que sa responsabilité est celle d'un exécutant ayant strictement respecté le cahier des charges fourni par les services techniques de l'ACO. PV de réception sans réserve. Et nous confirmons que dans ces conditions, Alcor ne montera pas les tribunes pour les 24h Autos en juin."</strong><span class="doc">📧 Mail Atger</span></div></div>
+
+  <div class="inject"><div class="time">15:14</div><div class="target juridique">JURIDIQUE</div><div class="source">Bureau de contrôle Veritas</div><div class="content">Téléphone à Galuret : <strong>"M. Galuret, nous devons coordonner notre version sur les visites annuelles."</strong><span class="channel">📞 Téléphone</span><span class="observe">→ Risque pénal d'entente.</span></div></div>
+
+  <div class="inject"><div class="time">15:16</div><div class="target it">IT/ÉLEC</div><div class="source">DOS via Amandine</div><div class="content">À Amandine pour Benjamin : <strong>"La préfecture demande à se brancher en lecture sur vos systèmes : caméras CCTV, badges, listings billetterie en temps réel. Le COD veut un accès direct. Vous validez l'ouverture des accès ? Sous quelle gouvernance ? Risque RGPD à arbitrer avec Lucas."</strong></div></div>
+
+  <div class="inject"><div class="time">15:18</div><div class="target rh">RH</div><div class="source">Médecin du travail</div><div class="content">Téléphone à Legay : <strong>"J'apprends que Pascale Lemée est victime, et le stagiaire Nathan aussi. Je viens. Activation cellule psy IAPR pour vos équipes."</strong><span class="channel">📞 Téléphone</span></div></div>
+
+  <div class="inject"><div class="time">15:20</div><div class="target client">SERVICE CLIENT</div><div class="source">Émilie (en cellule, débriefe)</div><div class="content">Émilie remonte à la cellule : <strong>"On a pris 240 appels en 2h. 12 collègues sont en pleurs au service client. La cellule psy IAPR demande de venir voir mes équipes en priorité."</strong></div></div>
+
+  <div class="inject"><div class="time">15:22</div><div class="target com">COM</div><div class="source">Service com préfecture</div><div class="content">Téléphone à Vigneron : <strong>"Conférence de presse Préfet à 16h00, sans ACO ni PHA. Bilan officiel par l'État seul."</strong><span class="channel">📞 Téléphone</span></div></div>
+</div>
+
+<!-- PHASE 5 -->
+<div class="phase">
+  <div class="phase-header phase-5">PHASE 5 — Sortie d'exercice et débrief · 15h25 → 16h00</div>
+
+  <div class="inject"><div class="time">15:25</div><div class="target tous">FIN</div><div class="source">Animateur</div><div class="content"><strong>FIN D'EXERCICE.</strong> Pause 5 min puis débrief.</div></div>
+
+  <div class="inject"><div class="time">15:30</div><div class="target tous">DÉBRIEF</div><div class="source">Animateur</div><div class="content"><strong>Tour de table à chaud (15 min).</strong></div></div>
+
+  <div class="inject"><div class="time">15:45</div><div class="target tous">DÉBRIEF</div><div class="source">Animateur</div><div class="content"><strong>Analyse des pivots pédagogiques :</strong>
+    <ol style="margin: 4px 0; padding-left: 18px; font-size: 8.5pt;">
+      <li>Mail décembre 2025 (Beaumesnil + Arnault + Pierrick destinataires sans réponse)</li>
+      <li>Décision d'évacuation : assez tôt ?</li>
+      <li>Speaker / message d'évacuation</li>
+      <li>Patrouilles et accueil insuffisants</li>
+      <li>Bras de fer Dorna sur la coupure des images / report course</li>
+      <li>Pascale Lemée + stagiaire Nathan portés disparus</li>
+      <li>Bases ACO/PHA pour billetterie + numéro vert préfecture</li>
+      <li>Surcharge horaire Pascale (72h vs 60h dérogatoires) + stagiaire non couvert</li>
+      <li>Volet SEP / DJ PHA Paris</li>
+      <li>Communiqué Dorna unilatéral (15 blessés)</li>
+      <li>Conflit interne Galuret/Pierrick/Alcor + chantage 24h Autos</li>
+      <li>Bilan explose après découverte zone cachée</li>
+      <li>Cacophonie médiatique BFMTV (15 vs 24 vs 30) + Quartararo court-circuite</li>
+      <li>Bilans contradictoires Croix Rouge ACO / SAMU / SDIS pendant 1h</li>
+      <li>Saturation Service Client (240 appels, dérapage médias, transferts à Philibert PHA)</li>
+      <li>Référence Furiani et menace de prison</li>
+      <li>Théorie complotiste sabotage drapeau iranien</li>
+    </ol>
+  </div></div>
+
+  <div class="inject"><div class="time">15:55</div><div class="target tous">DÉBRIEF</div><div class="source">Animateur</div><div class="content"><strong>Focus dilemme initial 12h45-13h15 (10 min) :</strong> 30 min pour décider. Aurait-il fallu annuler le départ tout de suite ? Le mail décembre 2025 ? 5-10% évacués.<br><br><strong>Focus volet RH Pascale Lemée + Nathan (10 min) :</strong> CDD chargée de réglementation envoyée vérifier ? Surcharge 72h/60h ? Stagiaire en prolongation informelle non couverte ? CHSCT, faute lourde.<br><br><strong>Focus dilemme course (10 min) :</strong> Maintenir, reporter, annuler ? À quel moment la cellule a-t-elle tranché ? Quartararo a-t-il forcé la main ?<br><br><strong>Focus bilans contradictoires (10 min) :</strong> Pendant 1h, Croix Rouge ACO disait +2 par rapport à SAMU. Quel chiffre la cellule a-t-elle remonté à la Préfète ?<br><br><strong>Focus service client + Philibert PHA (10 min) :</strong> Le service client PHA transférait des spectateurs au DG en cellule de crise. Process à corriger ?<br><br><strong>Focus basculement Préfet (10 min) :</strong> Articulation idéale ACO ↔ PHA ↔ Préfecture.</div></div>
+</div>
+
+<style>
+  /* Curseur exercice */
+  .tl-cursor { position: absolute; left: 0; right: 0; height: 0; pointer-events: none; z-index: 9000; transition: top 0.6s cubic-bezier(0.4,0,0.2,1); }
+  .tl-cursor .tl-line { position: absolute; left: 0; right: 0; height: 2px; background: linear-gradient(to right, transparent 0%, #b91c1c 6%, #b91c1c 94%, transparent 100%); box-shadow: 0 0 10px rgba(185,28,28,0.45); top: -1px; }
+  .tl-cursor .tl-dot { position: absolute; left: 12px; top: -6px; width: 12px; height: 12px; background: #b91c1c; border-radius: 50%; box-shadow: 0 0 0 4px rgba(185,28,28,0.18), 0 0 12px rgba(185,28,28,0.55); animation: tl-pulse 1.6s ease-in-out infinite; }
+  @keyframes tl-pulse { 0%,100% { box-shadow: 0 0 0 4px rgba(185,28,28,0.18), 0 0 12px rgba(185,28,28,0.55);} 50% { box-shadow: 0 0 0 8px rgba(185,28,28,0.05), 0 0 16px rgba(185,28,28,0.7);} }
+  .tl-cursor .tl-label { position: absolute; right: 12px; top: -14px; background: #b91c1c; color: white; padding: 4px 12px; border-radius: 14px; font-size: 11px; font-weight: 700; font-family: ui-monospace, Monaco, monospace; letter-spacing: 0.5px; box-shadow: 0 2px 8px rgba(185,28,28,0.4); white-space: nowrap; }
+  .tl-cursor.paused .tl-line { background: linear-gradient(to right, transparent 0%, #64748b 6%, #64748b 94%, transparent 100%); box-shadow: none; }
+  .tl-cursor.paused .tl-dot { background: #64748b; animation: none; box-shadow: 0 0 0 4px rgba(100,116,139,0.15); }
+  .tl-cursor.paused .tl-label { background: #64748b; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+  .tl-controls { position: fixed; top: 10px; right: 14px; display: flex; align-items: center; gap: 6px; background: white; border: 1px solid #d0d0d0; border-radius: 30px; padding: 4px 6px 4px 14px; z-index: 10000; box-shadow: 0 3px 12px rgba(0,0,0,0.12); font-family: -apple-system, "Segoe UI", Helvetica, sans-serif; }
+  .tl-controls .tl-info { display: flex; flex-direction: column; line-height: 1; gap: 2px; padding-right: 4px; }
+  .tl-controls .tl-state { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: #666; font-weight: 700; }
+  .tl-controls .tl-time { font-weight: 800; color: #1a3a6c; font-family: ui-monospace, Monaco, monospace; font-size: 14px; letter-spacing: 0.5px; }
+  .tl-controls.paused .tl-time { color: #64748b; }
+  .tl-btn { width: 30px; height: 30px; border-radius: 50%; border: none; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.15s, transform 0.1s; padding: 0; }
+  .tl-btn:hover { transform: scale(1.06); }
+  .tl-btn:active { transform: scale(0.94); }
+  .tl-btn.play { background: #047857; }
+  .tl-btn.play:hover { background: #065f46; }
+  .tl-btn.recenter { background: #1a3a6c; }
+  .tl-btn.recenter:hover { background: #2c5599; }
+  .tl-inject-past { opacity: 0.5; transition: opacity 0.4s; }
+  .tl-inject-current { background: #fef3c7 !important; box-shadow: inset 0 0 0 2px #d97706; transition: all 0.3s; }
+  .no-print.print-btn-iframed { display: none !important; }
+</style>
+
+<script>
+(function() {
+  // Hide print button when iframed (parent has its own toolbar)
+  if (window.self !== window.top) {
+    var pb = document.querySelector('.print-btn');
+    if (pb) pb.classList.add('print-btn-iframed');
+  }
+
+  var SIM_OFFSET_MS = (10 * 24 + 4) * 3600 * 1000;
+  var injects = document.querySelectorAll('.inject');
+  if (injects.length === 0) return;
+  var entries = [];
+  for (var i = 0; i < injects.length; i++) {
+    var t = injects[i].querySelector('.time');
+    if (!t) continue;
+    var m = (t.textContent || '').match(/(\d{1,2})[:h](\d{2})/);
+    if (!m) continue;
+    entries.push({ el: injects[i], mins: parseInt(m[1], 10) * 60 + parseInt(m[2], 10) });
+  }
+  if (entries.length === 0) return;
+  entries.sort(function(a, b) { return a.mins - b.mins; });
+
+  function el(tag, opts) {
+    var n = document.createElement(tag);
+    if (opts) {
+      if (opts.cls) n.className = opts.cls;
+      if (opts.id) n.id = opts.id;
+      if (opts.text) n.textContent = opts.text;
+      if (opts.title) n.title = opts.title;
+    }
+    return n;
+  }
+  function svgEl(name, attrs) {
+    var n = document.createElementNS('http://www.w3.org/2000/svg', name);
+    if (attrs) for (var k in attrs) n.setAttribute(k, attrs[k]);
+    return n;
+  }
+  function pauseIcon() {
+    var s = svgEl('svg', { width:'10', height:'12', viewBox:'0 0 10 12', fill:'white' });
+    s.appendChild(svgEl('rect', { x:'0', y:'0', width:'3', height:'12', rx:'1' }));
+    s.appendChild(svgEl('rect', { x:'7', y:'0', width:'3', height:'12', rx:'1' }));
+    return s;
+  }
+  function playIcon() {
+    var s = svgEl('svg', { width:'11', height:'12', viewBox:'0 0 11 12', fill:'white' });
+    var p = svgEl('path', { d:'M0 0 L11 6 L0 12 Z' });
+    s.appendChild(p);
+    return s;
+  }
+  function recenterIcon() {
+    var s = svgEl('svg', { width:'14', height:'14', viewBox:'0 0 14 14', fill:'none', stroke:'white', 'stroke-width':'1.6' });
+    s.appendChild(svgEl('circle', { cx:'7', cy:'7', r:'3' }));
+    var lines = [[7,0,7,3],[7,11,7,14],[0,7,3,7],[11,7,14,7]];
+    for (var j = 0; j < lines.length; j++) {
+      s.appendChild(svgEl('line', { x1:lines[j][0], y1:lines[j][1], x2:lines[j][2], y2:lines[j][3] }));
+    }
+    return s;
+  }
+
+  var cursor = el('div', { cls: 'tl-cursor' });
+  cursor.appendChild(el('div', { cls: 'tl-line' }));
+  cursor.appendChild(el('div', { cls: 'tl-dot' }));
+  var label = el('div', { cls: 'tl-label', text: '--:--' });
+  cursor.appendChild(label);
+  document.body.appendChild(cursor);
+
+  var ctl = el('div', { cls: 'tl-controls no-print' });
+  var info = el('div', { cls: 'tl-info' });
+  var stateEl = el('div', { cls: 'tl-state', text: 'EN COURS' });
+  var timeEl = el('div', { cls: 'tl-time', text: '--:--:--' });
+  info.appendChild(stateEl); info.appendChild(timeEl);
+  ctl.appendChild(info);
+  var btnPlay = el('button', { cls: 'tl-btn play', title: 'Pause' });
+  btnPlay.appendChild(pauseIcon());
+  var btnRec = el('button', { cls: 'tl-btn recenter', title: 'Recentrer sur le curseur' });
+  btnRec.appendChild(recenterIcon());
+  ctl.appendChild(btnPlay); ctl.appendChild(btnRec);
+  document.body.appendChild(ctl);
+
+  var paused = false;
+  var lastUserScrollAt = 0;
+
+  function getSimMins() {
+    var now = new Date();
+    var sim = new Date(now.getTime() + SIM_OFFSET_MS);
+    return sim.getHours() * 60 + sim.getMinutes() + sim.getSeconds() / 60;
+  }
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function fmtHM(mins) { return pad(Math.floor(mins/60)) + ':' + pad(Math.floor(mins) % 60); }
+  function fmtHMS(mins) {
+    var h = Math.floor(mins/60), mm = Math.floor(mins) % 60, s = Math.floor((mins*60) % 60);
+    return pad(h) + ':' + pad(mm) + ':' + pad(s);
+  }
+  function getCursorY(simMins) {
+    if (simMins <= entries[0].mins) return entries[0].el.offsetTop - 6;
+    var last = entries[entries.length-1];
+    if (simMins >= last.mins) return last.el.offsetTop + last.el.offsetHeight + 6;
+    for (var i = 0; i < entries.length - 1; i++) {
+      var a = entries[i], b = entries[i+1];
+      if (a.mins <= simMins && b.mins > simMins) {
+        var p = (simMins - a.mins) / (b.mins - a.mins);
+        return a.el.offsetTop + p * (b.el.offsetTop - a.el.offsetTop);
+      }
+    }
+    return 0;
+  }
+  function refreshInjectStyles(simMins) {
+    for (var i = 0; i < entries.length; i++) {
+      var n = entries[i].el;
+      var diff = simMins - entries[i].mins;
+      n.classList.remove('tl-inject-past', 'tl-inject-current');
+      if (diff >= 0 && diff < 1.5) n.classList.add('tl-inject-current');
+      else if (diff >= 1.5) n.classList.add('tl-inject-past');
+    }
+  }
+  function clearInjectStyles() {
+    for (var i = 0; i < entries.length; i++) {
+      entries[i].el.classList.remove('tl-inject-past', 'tl-inject-current');
+    }
+  }
+  function markAllPast() {
+    for (var i = 0; i < entries.length; i++) {
+      entries[i].el.classList.remove('tl-inject-current');
+      entries[i].el.classList.add('tl-inject-past');
+    }
+  }
+
+  var externalState = null;
+  function tick() {
+    var simMins = getSimMins();
+    var y = getCursorY(simMins);
+    cursor.style.top = y + 'px';
+    label.textContent = fmtHM(simMins);
+    timeEl.textContent = fmtHMS(simMins);
+    var s = externalState || 'running';
+    stateEl.textContent = s === 'prep' ? 'PREPARATION' : s === 'done' ? 'TERMINE' : 'EN COURS';
+
+    if (s === 'prep') {
+      cursor.style.display = 'none';
+      clearInjectStyles();
+    } else if (s === 'done') {
+      cursor.style.display = 'none';
+      markAllPast();
+    } else {
+      cursor.style.display = '';
+      refreshInjectStyles(simMins);
+    }
+
+    if (s === 'running' && !paused && (Date.now() - lastUserScrollAt > 3500)) {
+      var target = y - window.innerHeight * 0.32;
+      if (target < 0) target = 0;
+      if (Math.abs(target - window.scrollY) > 24) {
+        window.scrollTo({ top: target, behavior: 'smooth' });
+      }
+    }
+  }
+
+  ['wheel', 'touchmove', 'mousedown'].forEach(function(ev) {
+    window.addEventListener(ev, function() { lastUserScrollAt = Date.now(); }, { passive: true });
+  });
+  window.addEventListener('keydown', function(e) {
+    var navKeys = ['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '];
+    if (navKeys.indexOf(e.key) !== -1) lastUserScrollAt = Date.now();
+  });
+
+  function setPaused(p) {
+    paused = p;
+    cursor.classList.toggle('paused', paused);
+    ctl.classList.toggle('paused', paused);
+    while (btnPlay.firstChild) btnPlay.removeChild(btnPlay.firstChild);
+    btnPlay.appendChild(paused ? playIcon() : pauseIcon());
+    btnPlay.title = paused ? 'Lecture' : 'Pause';
+  }
+  btnPlay.addEventListener('click', function() { setPaused(!paused); });
+  btnRec.addEventListener('click', function() {
+    var y = getCursorY(getSimMins());
+    var target = y - window.innerHeight * 0.32;
+    if (target < 0) target = 0;
+    window.scrollTo({ top: target, behavior: 'smooth' });
+    lastUserScrollAt = 0;
+  });
+
+  // Listen to parent state via postMessage (works cross-origin)
+  window.addEventListener('message', function(e) {
+    if (!e.data) return;
+    if (e.data.type === 'exerciseState') {
+      externalState = e.data.state;
+      if (e.data.state === 'prep' || e.data.state === 'done') setPaused(true);
+      else setPaused(false);
+    }
+  });
+  // Ask parent for current state on load
+  try { window.parent.postMessage({ type: 'requestExerciseState' }, '*'); } catch (e) {}
+
+  setPaused(paused);
+  tick();
+  setInterval(tick, 1000);
+  setTimeout(function() {
+    var y = getCursorY(getSimMins());
+    var target = y - window.innerHeight * 0.32;
+    if (target < 0) target = 0;
+    window.scrollTo({ top: target, behavior: 'auto' });
+  }, 150);
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Authentification animateur — Exercice {{ exercise_id }}</title>
+  <style>
+    :root {
+      --aco-navy: #1a3a6c;
+      --aco-navy-2: #2c5599;
+      --aco-red: #b91c1c;
+      --aco-orange: #d97706;
+      --bg: #f3f6fb;
+      --bg-2: #eaeff7;
+      --panel: #ffffff;
+      --line: rgba(26, 58, 108, 0.12);
+      --line-strong: rgba(26, 58, 108, 0.28);
+      --grid: rgba(26, 58, 108, 0.045);
+      --hud: #0891b2;
+      --hud-soft: rgba(8, 145, 178, 0.55);
+      --hud-glow: rgba(8, 145, 178, 0.30);
+      --hud-faint: rgba(8, 145, 178, 0.14);
+      --text: #0e1f3d;
+      --text-soft: #475569;
+      --text-dim: #6b7a93;
+      --warn: #d97706;
+      --crit: #b91c1c;
+      --ok: #047857;
+      --mono: 'SF Mono','JetBrains Mono','Menlo','Consolas','Monaco',monospace;
+      --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 15px; line-height: 1.5;
+      overflow-x: hidden;
+    }
+    body::before {
+      content: ''; position: fixed; inset: 0; z-index: -3; pointer-events: none;
+      background:
+        radial-gradient(ellipse 60% 50% at 15% 10%, rgba(8,145,178,0.10), transparent 70%),
+        radial-gradient(ellipse 50% 40% at 90% 0%, rgba(26,58,108,0.10), transparent 70%),
+        radial-gradient(ellipse 60% 40% at 50% 100%, rgba(185,28,28,0.07), transparent 70%),
+        linear-gradient(180deg, var(--bg), var(--bg-2));
+    }
+    body::after {
+      content: ''; position: fixed; inset: 0; z-index: -2; pointer-events: none;
+      background-image:
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: radial-gradient(ellipse 90% 80% at 50% 50%, black 30%, transparent 95%);
+      -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 50%, black 30%, transparent 95%);
+    }
+    .scan-sweep {
+      position: fixed; left: 0; right: 0;
+      height: 220px; top: -220px;
+      background: linear-gradient(to bottom, transparent, rgba(8,145,178,0.05) 50%, transparent);
+      animation: sweep 11s linear infinite;
+      pointer-events: none; z-index: 1;
+    }
+    @keyframes sweep {
+      0% { top: -220px; opacity: 0; }
+      8% { opacity: 1; } 92% { opacity: 1; }
+      100% { top: 100vh; opacity: 0; }
+    }
+
+    .topbar {
+      display: flex; align-items: center; gap: 16px;
+      padding: 14px 32px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(to bottom, rgba(255,255,255,0.85), rgba(255,255,255,0.55));
+      backdrop-filter: blur(8px);
+    }
+    .topbar .logo {
+      width: 96px; height: 62px;
+      display: grid; place-items: center;
+      border: 1px solid var(--line-strong);
+      background: linear-gradient(135deg, var(--aco-navy), var(--aco-navy-2));
+      box-shadow: 0 6px 18px -8px rgba(26,58,108,0.5);
+      position: relative;
+      padding: 8px 12px;
+    }
+    .topbar .logo img { width: 100%; height: 100%; object-fit: contain; }
+    .topbar .logo::before, .topbar .logo::after {
+      content: ''; position: absolute; width: 7px; height: 7px;
+      border: 1px solid var(--hud);
+    }
+    .topbar .logo::before { top: -3px; left: -3px; border-right: 0; border-bottom: 0; }
+    .topbar .logo::after { bottom: -3px; right: -3px; border-left: 0; border-top: 0; }
+
+    .topbar .titles { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+    .topbar .overline {
+      font-family: var(--mono); font-size: 11.5px; letter-spacing: 2.5px;
+      font-weight: 600; color: var(--hud); text-transform: uppercase;
+    }
+    .topbar .title {
+      font-size: 17px; font-weight: 800; letter-spacing: 2px;
+      text-transform: uppercase; color: var(--aco-navy);
+    }
+    .topbar .id {
+      font-family: var(--mono); font-size: 12px; font-weight: 500;
+      letter-spacing: 1px; color: var(--text-soft); text-transform: uppercase;
+    }
+    .topbar .id .accent { color: var(--hud); font-weight: 700; }
+
+    .back {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-family: var(--mono); font-size: 11.5px; font-weight: 600;
+      letter-spacing: 2px; text-transform: uppercase;
+      color: var(--text-soft); text-decoration: none;
+      padding: 8px 14px; border: 1px solid var(--line);
+      transition: all .2s ease;
+    }
+    .back:hover { color: var(--hud); border-color: var(--hud-soft); background: rgba(8,145,178,0.05); }
+
+    .wrap {
+      max-width: 540px;
+      margin: 60px auto 40px;
+      padding: 0 24px;
+    }
+
+    .panel {
+      position: relative;
+      padding: 36px 36px 32px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: 0 14px 40px -22px rgba(26,58,108,0.25);
+    }
+    .panel .corner {
+      position: absolute; width: 16px; height: 16px;
+      border: 1px solid var(--hud); opacity: 0.7;
+    }
+    .panel .c-tl { top: 6px; left: 6px; border-right: 0; border-bottom: 0; }
+    .panel .c-tr { top: 6px; right: 6px; border-left: 0; border-bottom: 0; }
+    .panel .c-bl { bottom: 6px; left: 6px; border-right: 0; border-top: 0; }
+    .panel .c-br { bottom: 6px; right: 6px; border-left: 0; border-top: 0; }
+
+    .panel-tag {
+      font-family: var(--mono); font-size: 12px; font-weight: 700;
+      letter-spacing: 3px; color: var(--aco-orange);
+      text-transform: uppercase; margin-bottom: 8px;
+      display: inline-flex; align-items: center; gap: 12px;
+    }
+    .panel-tag::before { content: ''; width: 26px; height: 1px; background: var(--aco-orange); }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px; font-weight: 800; letter-spacing: -0.5px;
+      color: var(--aco-navy);
+    }
+    .lead {
+      margin: 0 0 24px;
+      color: var(--text-soft);
+      font-size: 14px;
+    }
+
+    .pin-group {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 8px;
+      margin: 0 0 24px;
+      direction: ltr;
+    }
+    .pin-cell {
+      width: 100%;
+      height: 56px;
+      border: 1px solid var(--line-strong);
+      background: var(--bg);
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--aco-navy);
+      letter-spacing: 0;
+      border-radius: 2px;
+      transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+    }
+    .pin-cell:focus {
+      outline: none;
+      border-color: var(--hud);
+      background: white;
+      box-shadow: 0 0 0 3px var(--hud-faint);
+    }
+    .pin-cell.filled {
+      background: white;
+      border-color: var(--hud-soft);
+    }
+    .pin-cell.error {
+      border-color: var(--crit);
+      animation: shake .35s ease-in-out;
+    }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-6px); }
+      40% { transform: translateX(6px); }
+      60% { transform: translateX(-3px); }
+      80% { transform: translateX(3px); }
+    }
+
+    .feedback {
+      min-height: 22px;
+      font-family: var(--mono);
+      font-size: 12px; font-weight: 600;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      margin: 0 0 16px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .feedback .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--text-dim);
+    }
+    .feedback.ok    { color: var(--ok);   } .feedback.ok .dot   { background: var(--ok);   box-shadow: 0 0 8px var(--ok); }
+    .feedback.warn  { color: var(--warn); } .feedback.warn .dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+    .feedback.error { color: var(--crit); } .feedback.error .dot{ background: var(--crit); box-shadow: 0 0 8px var(--crit); }
+
+    .submit {
+      display: flex; align-items: center; justify-content: space-between;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      gap: 14px;
+    }
+    .submit .hint {
+      font-family: var(--mono); font-size: 11px; font-weight: 600;
+      letter-spacing: 1.5px; color: var(--text-dim); text-transform: uppercase;
+    }
+    .btn {
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 11px 22px;
+      background: var(--aco-navy);
+      color: white;
+      border: 1px solid var(--aco-navy);
+      font-family: var(--mono);
+      font-size: 12px; font-weight: 700;
+      letter-spacing: 2px; text-transform: uppercase;
+      cursor: pointer;
+      transition: all .15s ease;
+    }
+    .btn:hover:not(:disabled) {
+      background: var(--aco-navy-2);
+      box-shadow: 0 0 0 3px var(--hud-faint);
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn .arrow { color: var(--hud); }
+
+    .meta {
+      display: flex; flex-wrap: wrap;
+      gap: 8px 20px;
+      margin-top: 18px;
+      font-family: var(--mono);
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 1.5px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+    }
+    .meta .label { color: var(--text-dim); margin-right: 6px; }
+    .meta .val { color: var(--aco-navy); font-weight: 700; }
+
+    .lockout-panel {
+      padding: 20px 24px;
+      background: rgba(185,28,28,0.05);
+      border: 1px solid rgba(185,28,28,0.3);
+      border-left: 4px solid var(--crit);
+      margin-bottom: 18px;
+    }
+    .lockout-panel h3 {
+      margin: 0 0 8px;
+      font-family: var(--mono); font-size: 13px; font-weight: 700;
+      letter-spacing: 2px; color: var(--crit);
+      text-transform: uppercase;
+    }
+    .lockout-panel p {
+      margin: 0 0 6px;
+      font-size: 13.5px; color: var(--text-soft);
+    }
+    .lockout-panel .timer {
+      font-family: var(--mono); font-size: 22px; font-weight: 800;
+      color: var(--crit); letter-spacing: 2px;
+    }
+
+    @media (max-width: 600px) {
+      .topbar { padding: 12px 18px; gap: 12px; }
+      .topbar .titles .id { display: none; }
+      .topbar .logo { width: 70px; height: 48px; }
+      .wrap { margin: 30px auto; }
+      .panel { padding: 24px 22px 22px; }
+      .pin-group { gap: 5px; }
+      .pin-cell { height: 48px; font-size: 20px; }
+      .submit { flex-direction: column; align-items: stretch; }
+      .submit .hint { text-align: center; }
+    }
+  </style>
+</head>
+<body>
+  <div class="scan-sweep" aria-hidden="true"></div>
+
+  <div class="topbar">
+    <div class="logo"><img src="/crise/assets/aco-logo-white.png" alt="ACO"></div>
+    <div class="titles">
+      <div class="overline">▮ AUTOMOBILE CLUB DE L'OUEST · CRISIS COMMAND</div>
+      <div class="title">Authentification Animateur</div>
+      <div class="id">EXERCISE <span class="accent">{{ exercise_id|upper }}</span> · STATION 02 // GAMEMASTER</div>
+    </div>
+    <a class="back" href="/crise/{{ exercise_id }}/">◂◂ Retour landing</a>
+  </div>
+
+  <div class="wrap">
+    <div class="panel">
+      <span class="corner c-tl"></span><span class="corner c-tr"></span>
+      <span class="corner c-bl"></span><span class="corner c-br"></span>
+
+      <div class="panel-tag">▶ Authentification requise</div>
+      <h1>Code d'accès animateur</h1>
+      <p class="lead">
+        L'accès au tableau de bord d'animation est protégé par un code à 8 chiffres confidentiel.
+        Saisissez le code communiqué par le directeur d'exercice.
+      </p>
+
+      {% if locked %}
+      <div class="lockout-panel" id="lockout-panel">
+        <h3>⛔ Accès verrouillé</h3>
+        <p>Trop de tentatives échouées depuis cette adresse IP. Patientez avant de réessayer.</p>
+        <div class="timer" id="lockout-timer" data-secs="{{ secs_left }}">--:--</div>
+      </div>
+      {% endif %}
+
+      <form id="pin-form" autocomplete="off" novalidate {% if locked %}style="opacity:0.45; pointer-events:none;"{% endif %}>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="pin-group" id="pin-group">
+          {% for i in range(8) %}
+          <input type="text" inputmode="numeric" pattern="[0-9]" maxlength="1"
+                 class="pin-cell" data-idx="{{ i }}" aria-label="Chiffre {{ i + 1 }}"
+                 autocomplete="off">
+          {% endfor %}
+        </div>
+
+        <div class="feedback" id="feedback" aria-live="polite"></div>
+
+        <div class="submit">
+          <span class="hint">8 chiffres &middot; auto-validation</span>
+          <button type="submit" class="btn" id="submit-btn" disabled>
+            ENGAGE <span class="arrow">▸▸</span>
+          </button>
+        </div>
+      </form>
+
+      <div class="meta">
+        <span><span class="label">Tentatives</span><span class="val">limite anti brute-force</span></span>
+        <span><span class="label">Session</span><span class="val">8 h max</span></span>
+        <span><span class="label">Audit</span><span class="val">enregistré</span></span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      var EXERCISE_ID = {{ exercise_id | tojson }};
+      var IS_LOCKED = {{ 'true' if locked else 'false' }};
+      var LOCK_SECS = {{ secs_left|int }};
+
+      var cells = document.querySelectorAll('.pin-cell');
+      var form = document.getElementById('pin-form');
+      var feedback = document.getElementById('feedback');
+      var submitBtn = document.getElementById('submit-btn');
+      var lockoutPanel = document.getElementById('lockout-panel');
+      var lockoutTimer = document.getElementById('lockout-timer');
+      var csrfToken = form.querySelector('input[name="csrf_token"]').value;
+      var inFlight = false;
+
+      function clearChildren(node) {
+        while (node.firstChild) node.removeChild(node.firstChild);
+      }
+
+      function setFeedback(kind, msg) {
+        feedback.className = 'feedback' + (kind ? ' ' + kind : '');
+        clearChildren(feedback);
+        if (!msg) return;
+        var dot = document.createElement('span');
+        dot.className = 'dot';
+        var text = document.createElement('span');
+        text.textContent = msg;
+        feedback.appendChild(dot);
+        feedback.appendChild(text);
+      }
+
+      function getPin() {
+        var s = '';
+        for (var i = 0; i < cells.length; i++) s += cells[i].value;
+        return s;
+      }
+
+      function refreshSubmit() {
+        var pin = getPin();
+        var ok = /^\d{8}$/.test(pin);
+        submitBtn.disabled = !ok || inFlight || IS_LOCKED;
+      }
+
+      function clearCells(focus) {
+        for (var i = 0; i < cells.length; i++) {
+          cells[i].value = '';
+          cells[i].classList.remove('filled', 'error');
+        }
+        if (focus) cells[0].focus();
+        refreshSubmit();
+      }
+
+      function flashError() {
+        for (var i = 0; i < cells.length; i++) cells[i].classList.add('error');
+        setTimeout(function() { clearCells(true); }, 380);
+      }
+
+      function buildLockoutPanel(secs) {
+        var p = document.createElement('div');
+        p.className = 'lockout-panel';
+        p.id = 'lockout-panel';
+
+        var h3 = document.createElement('h3');
+        h3.textContent = '⛔ Accès verrouillé';
+        p.appendChild(h3);
+
+        var pp = document.createElement('p');
+        pp.textContent = "Trop de tentatives échouées depuis cette adresse IP. Patientez avant de réessayer.";
+        p.appendChild(pp);
+
+        var t = document.createElement('div');
+        t.className = 'timer';
+        t.id = 'lockout-timer';
+        t.dataset.secs = String(secs);
+        t.textContent = '--:--';
+        p.appendChild(t);
+
+        return p;
+      }
+
+      function startLockoutCountdown(secs) {
+        IS_LOCKED = true;
+        if (!lockoutPanel) {
+          var p = buildLockoutPanel(secs);
+          form.parentNode.insertBefore(p, form);
+          lockoutPanel = p;
+          lockoutTimer = document.getElementById('lockout-timer');
+        } else {
+          lockoutTimer.dataset.secs = String(secs);
+        }
+        form.style.opacity = '0.45';
+        form.style.pointerEvents = 'none';
+        tickLockout();
+      }
+
+      function tickLockout() {
+        if (!lockoutTimer) return;
+        var s = parseInt(lockoutTimer.dataset.secs || '0', 10);
+        if (s <= 0) {
+          window.location.reload();
+          return;
+        }
+        var m = Math.floor(s / 60);
+        var ss = s % 60;
+        lockoutTimer.textContent =
+          (m < 10 ? '0' : '') + m + ':' + (ss < 10 ? '0' : '') + ss;
+        lockoutTimer.dataset.secs = String(s - 1);
+        setTimeout(tickLockout, 1000);
+      }
+
+      // Saisie cellules
+      for (var i = 0; i < cells.length; i++) {
+        (function(idx) {
+          var cell = cells[idx];
+          cell.addEventListener('input', function() {
+            var v = (cell.value || '').replace(/\D+/g, '');
+            cell.value = v.length ? v.charAt(v.length - 1) : '';
+            if (cell.value) {
+              cell.classList.add('filled');
+              if (idx < cells.length - 1) cells[idx + 1].focus();
+            } else {
+              cell.classList.remove('filled');
+            }
+            refreshSubmit();
+            if (getPin().length === 8 && !inFlight && !IS_LOCKED) {
+              submitForm();
+            }
+          });
+          cell.addEventListener('keydown', function(e) {
+            if (e.key === 'Backspace' && !cell.value && idx > 0) {
+              cells[idx - 1].focus();
+              cells[idx - 1].value = '';
+              cells[idx - 1].classList.remove('filled');
+              refreshSubmit();
+              e.preventDefault();
+            } else if (e.key === 'ArrowLeft' && idx > 0) {
+              cells[idx - 1].focus(); e.preventDefault();
+            } else if (e.key === 'ArrowRight' && idx < cells.length - 1) {
+              cells[idx + 1].focus(); e.preventDefault();
+            }
+          });
+          cell.addEventListener('paste', function(e) {
+            e.preventDefault();
+            var text = (e.clipboardData || window.clipboardData).getData('text') || '';
+            text = text.replace(/\D+/g, '').slice(0, 8);
+            for (var k = 0; k < cells.length; k++) {
+              cells[k].value = text.charAt(k) || '';
+              cells[k].classList.toggle('filled', !!cells[k].value);
+            }
+            refreshSubmit();
+            var nextEmpty = -1;
+            for (var k = 0; k < cells.length; k++) {
+              if (!cells[k].value) { nextEmpty = k; break; }
+            }
+            (nextEmpty >= 0 ? cells[nextEmpty] : cells[cells.length - 1]).focus();
+            if (text.length === 8) submitForm();
+          });
+        })(i);
+      }
+
+      function submitForm() {
+        if (inFlight || IS_LOCKED) return;
+        var pin = getPin();
+        if (!/^\d{8}$/.test(pin)) return;
+        inFlight = true;
+        refreshSubmit();
+        setFeedback('warn', 'Vérification en cours…');
+
+        fetch('/crise/' + EXERCISE_ID + '/auth', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken,
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({ pin: pin })
+        })
+        .then(function(r) {
+          return r.json().then(function(data) { return { status: r.status, data: data }; });
+        })
+        .then(function(res) {
+          inFlight = false;
+          if (res.status === 200 && res.data && res.data.ok) {
+            setFeedback('ok', 'Accès autorisé · redirection…');
+            setTimeout(function() {
+              window.location.href = res.data.redirect || ('/crise/' + EXERCISE_ID + '/master.html');
+            }, 350);
+            return;
+          }
+          if (res.status === 429 && res.data && res.data.error === 'locked_out') {
+            setFeedback('error', 'Trop de tentatives — verrouillage activé');
+            startLockoutCountdown(parseInt(res.data.retry_after, 10) || (60 * 60));
+            return;
+          }
+          if (res.status === 503) {
+            setFeedback('error', 'Exercice non configuré');
+            flashError();
+            return;
+          }
+          if (res.status >= 500) {
+            setFeedback('error', 'Erreur serveur — voir logs Cockpit');
+            return;
+          }
+          setFeedback('error', 'Code invalide');
+          flashError();
+        })
+        .catch(function() {
+          inFlight = false;
+          setFeedback('error', 'Erreur réseau');
+          refreshSubmit();
+        });
+      }
+
+      form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        submitForm();
+      });
+
+      if (IS_LOCKED && LOCK_SECS > 0) {
+        tickLockout();
+      } else {
+        cells[0].focus();
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+EXERCICE - DOCUMENT FICTIF - 10/05/2026
+Liste billetterie - Tribune T11 - GP de France Moto 2026
+Source: Systeme billetterie PHA - Export 10/05/2026 13h42
+NATURE: Liste des BILLETS VENDUS - PAS de scan d'entree (controle visuel uniquement, raison budgetaire)
+PRESENCE EFFECTIVE NON GARANTIE - voir notes en fin de document
+
+N° billet,NOM,Prenom,Date naissance,Rang,Place,Type billet,Telephone acheteur,Email acheteur,Adresse acheteur
+T11-001432,GARNIER,Bernard,15/03/1968,B,47,Adulte,06.XX.XX.XX.XX,b.garnier@***,Le Mans (72)
+T11-001433,GARNIER,Marie-Claude,22/07/1971,B,48,Adulte,06.XX.XX.XX.XX,b.garnier@***,Le Mans (72)
+T11-001587,DUMAS,Frederic,03/11/1985,G,12,Adulte,06.XX.XX.XX.XX,fred.dumas@***,Tours (37)
+T11-001588,DUMAS,Theo,17/05/2010,G,13,Junior,,fred.dumas@***,Tours (37)
+T11-001234,ROBIN,Marie,29/04/1979,D,22,Adulte,06.XX.XX.XX.XX,marie.robin@***,Angers (49)
+T11-001235,ROBIN,Pierre,11/08/1976,D,23,Adulte,06.XX.XX.XX.XX,marie.robin@***,Angers (49)
+T11-001236,ROBIN,Lucas,03/02/2014,D,24,Junior,,marie.robin@***,Angers (49)
+T11-001789,MARTINEZ,Diego,18/09/1990,F,8,Adulte,+34.XXX.XXX.XX,d.martinez@***,Madrid (Espagne)
+T11-001790,MARTINEZ,Carlos,25/12/1992,F,9,Adulte,+34.XXX.XXX.XX,d.martinez@***,Madrid (Espagne)
+T11-001456,LEFEBVRE,Christine,07/06/1962,A,15,Senior,06.XX.XX.XX.XX,c.lefebvre@***,Nantes (44)
+T11-001457,LEFEBVRE,Maurice,14/02/1959,A,16,Senior,06.XX.XX.XX.XX,c.lefebvre@***,Nantes (44)
+T11-001623,DUPONT,Antoine,30/10/1988,E,33,Adulte,06.XX.XX.XX.XX,a.dupont@***,Paris (75)
+T11-001624,DUPONT,Sarah,12/01/1991,E,34,Adulte,06.XX.XX.XX.XX,a.dupont@***,Paris (75)
+T11-001891,WAGNER,Klaus,05/07/1974,H,11,Adulte,+49.XXX.XXX.XX,k.wagner@***,Munich (Allemagne)
+T11-001892,WAGNER,Hans,28/04/2008,H,12,Junior,,k.wagner@***,Munich (Allemagne)
+T11-002145,BERNARD,Julien,16/12/1995,C,52,Adulte,06.XX.XX.XX.XX,j.bernard@***,Rennes (35)
+T11-002146,BERNARD,Camille,21/03/1996,C,53,Adulte,06.XX.XX.XX.XX,j.bernard@***,Rennes (35)
+T11-001934,MORAES,Joao,09/08/1980,F,42,Adulte,+351.XXX.XXX,j.moraes@***,Lisbonne (Portugal)
+T11-001712,PETIT,Genevieve,02/05/1955,A,4,Senior,06.XX.XX.XX.XX,g.petit@***,Le Mans (72)
+T11-001713,PETIT,Andre,14/09/1953,A,5,Senior,06.XX.XX.XX.XX,g.petit@***,Le Mans (72)
+T11-002034,LAMBERT,Emilie,27/11/1987,G,28,Adulte,06.XX.XX.XX.XX,e.lambert@***,Lyon (69)
+T11-002035,LAMBERT,Thomas,19/06/1985,G,29,Adulte,06.XX.XX.XX.XX,e.lambert@***,Lyon (69)
+T11-001856,FERREIRA,Sofia,11/02/1993,D,7,Adulte,+34.XXX.XXX.XX,s.ferreira@***,Barcelone (Espagne)
+T11-001857,FERREIRA,Miguel,24/10/1991,D,8,Adulte,+34.XXX.XXX.XX,s.ferreira@***,Barcelone (Espagne)
+T11-002201,MORIN,Jacques,06/08/1948,B,3,Senior,06.XX.XX.XX.XX,j.morin@***,Caen (14)
+T11-001445,RIVA,Giuseppe,13/07/1972,F,22,Adulte,+39.XXX.XXX.XX,g.riva@***,Bologne (Italie)
+T11-001446,RIVA,Alessia,28/04/1975,F,23,Adulte,+39.XXX.XXX.XX,g.riva@***,Bologne (Italie)
+T11-002088,LAURENT,Maxime,17/01/2003,H,38,Etudiant,06.XX.XX.XX.XX,m.laurent@***,Bordeaux (33)
+T11-002089,LAURENT,Lea,24/05/2004,H,39,Etudiant,06.XX.XX.XX.XX,m.laurent@***,Bordeaux (33)
+T11-001967,BOUVIER,Patrice,08/03/1965,C,17,Adulte,06.XX.XX.XX.XX,p.bouvier@***,Strasbourg (67)

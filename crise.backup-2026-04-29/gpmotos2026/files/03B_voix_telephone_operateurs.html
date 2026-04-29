@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>03B - Voix téléphone opérateurs - Exercice GP Moto 2026</title>
+<style>
+  @media print {
+    @page { size: A4 portrait; margin: 10mm; }
+    body { font-size: 8pt; background: white; }
+    .no-print { display: none; }
+    .character { page-break-inside: avoid; }
+    h2 { page-break-after: avoid; }
+    .phone-section { page-break-before: auto; }
+  }
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; color: #111; background: #f5f5f7; line-height: 1.4; }
+  h1 { font-size: 16pt; margin: 0 0 4px 0; color: #1a3a6c; }
+  .subtitle { color: #666; font-size: 10pt; margin-bottom: 14px; }
+  .intro { background: #e7f1ff; border-left: 4px solid #1a3a6c; padding: 10px 14px; margin-bottom: 14px; font-size: 9.5pt; }
+  .important { background: #fee2e2; border-left: 4px solid #b91c1c; padding: 10px 14px; margin-bottom: 14px; font-size: 9.5pt; }
+  .phone-section { margin-bottom: 30px; }
+  .phone-header { background: #1a3a6c; color: white; padding: 10px 16px; border-radius: 5px 5px 0 0; font-size: 13pt; font-weight: 700; }
+  .phone-header .number { float: right; font-variant-numeric: tabular-nums; letter-spacing: 1px; }
+  .phone-content { background: #fff; border: 1px solid #1a3a6c; border-top: none; border-radius: 0 0 5px 5px; padding: 14px; }
+  .character { background: #fff; border-radius: 5px; border: 1px solid #d0d0d0; padding: 10px 14px; margin-bottom: 8px; }
+  .character-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; border-bottom: 1px solid #f0f0f0; padding-bottom: 4px; flex-wrap: wrap; gap: 6px; }
+  .character-name { font-weight: 700; color: #1a3a6c; font-size: 10pt; }
+  .character-tags { font-size: 8pt; }
+  .tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 7.5pt; font-weight: 600; margin-left: 3px; }
+  .tag-tel { background: #dbeafe; color: #1e40af; }
+  .tag-mail { background: #f3e8ff; color: #6b21a8; }
+  .tag-cible { background: #444; color: white; margin-left: 6px; }
+  .character-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 8.5pt; margin-bottom: 6px; }
+  .col-label { font-weight: 600; color: #555; font-size: 8pt; }
+  .quotes { background: #f9fafb; padding: 6px 10px; border-left: 3px solid #1a3a6c; margin-top: 4px; font-size: 8.5pt; }
+  .quotes p { margin: 4px 0; font-style: italic; }
+  .quotes .timing { font-style: normal; color: #1a3a6c; font-weight: 600; font-size: 8pt; }
+  .key-personnage { border-left: 4px solid #b91c1c; }
+  .print-btn { position: fixed; top: 12px; right: 12px; background: #1a3a6c; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 10pt; }
+</style>
+</head>
+<body>
+
+<button class="no-print print-btn" onclick="window.print()">Imprimer</button>
+
+<h1>Voix téléphone — 4 opérateurs animation</h1>
+<div class="subtitle">Toutes les voix à incarner par téléphone pour la cellule de crise · Effondrement T11 · 10 mai 2026</div>
+
+<div class="important">
+<strong>Pour qui ?</strong> Cette fiche est destinée aux 4 opérateurs téléphone qui jouent les interlocuteurs externes de la cellule de crise. Chaque opérateur tient un numéro et joue les voix de sa section.
+<br><br>
+<strong>Canal :</strong> 100% téléphone. Tous les agents terrain (Yvon, Sandra, PS Nord, Patrick, etc.) sont joués par les animateurs PCORG sur la radio — pas par vous.
+<br><br>
+<strong>Services de l'État</strong> (Préfet, SAMU, SDIS, Police, Procureur, Inspection du travail) ne sont pas joignables par téléphone par la cellule. Ils contactent la cellule en direct via Amandine (PCA). <strong>Vous ne les jouez pas.</strong>
+</div>
+
+<div class="intro">
+Pour chaque personnage : qui il est, son ton, et les phrases avec leur timing. <strong>La cellule peut vous appeler à tout moment, soyez prêts à improviser dans le respect du personnage.</strong>
+</div>
+
+<!-- TÉLÉPHONE 1 -->
+<div class="phone-section">
+<div class="phone-header">🔧 1 — Services techniques & infra <span class="number">XX XX XX XX 01</span></div>
+<div class="phone-content">
+
+<div class="character key-personnage">
+<div class="character-header">
+<span class="character-name">Jérôme Papin — technicien Service Technique ACO</span>
+<span class="character-tags"><span class="tag tag-tel">Tel direct</span><span class="tag tag-cible">Séverin (cellule)</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Profil :</span> Technicien envoyé sur place par Séverin pour expertise structurelle T11</div>
+<div><span class="col-label">Ton :</span> Pro, technique, passe rapidement de "j'inspecte" à "on évacue"</div>
+<div><span class="col-label">Note :</span> Joué aussi par PCORG côté radio. Ici par téléphone direct à Séverin en cellule.</div>
+</div>
+<div class="quotes">
+<p><span class="timing">13:00</span> "Séverin, je suis sur place à T11, je vois les pièces qui sont tombées, c'est un boulon de jonction des supports nord-est. La structure paraît tenir mais il faut que je grimpe pour vérifier les fixations en hauteur."</p>
+<p><span class="timing">13:06</span> "Séverin, je confirme. Y'a un jeu anormal sur deux supports nord-est, les boulons travaillent, j'entends des bruits métalliques. À mon avis on évacue. Je peux pas garantir que ça tienne encore des heures."</p>
+<p><span class="timing">13:14</span> "Séverin, je redescends, je le sens pas du tout, je reste pas. Pascale est encore en hauteur en train de finir ses photos avec Nathan."</p>
+<p><span class="timing">13:25 (post-effondrement, sous le choc)</span> "Séverin... Pascale et Nathan sont restés là-haut. Je suis en bas, je suis vivant, je crois que j'ai sauvé ma peau de 30 secondes. Je suis sous le choc, je peux plus parler."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Stéphane — atelier ACO (archives mails)</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Séverin Galuret</span></span>
+</div>
+<div class="quotes">
+<p><span class="timing">14:18</span> "Séverin, j'ai retrouvé un autre mail dans mes archives, de février 2026. Y avait des bruits anormaux T11 que j'avais signalés à Patrick. La PJ va le trouver de toute façon..."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Bureau d'études (architecte ACO)</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Séverin Galuret</span></span>
+</div>
+<div class="quotes">
+<p><span class="timing">15:20</span> "Séverin, je viens de voir les infos. Je suis appelé pour témoigner, j'ai besoin de la doc T11 complète pour préparer mes réponses. Tu peux me l'envoyer ?"</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Inspecteur Veritas (sur site, examen visuel)</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Séverin Galuret</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Pro indépendant, confiance technique, mais qui changera après l'effondrement</div>
+</div>
+<div class="quotes">
+<p><span class="timing">13:36</span> "M. Galuret, je suis sur place. J'ai fait un examen visuel rapide des autres tribunes hors T11. Aucune anomalie détectée, fixations OK, pas de vibrations anormales. Le défaut paraît localisé sur la T11. Sur le plan technique, vous pouvez maintenir l'épreuve si vous le décidez sportivement."</p>
+<p><span class="timing">15:14 (après l'effondrement, ton inquiet)</span> "M. Galuret, on doit coordonner notre version sur les visites annuelles. Le dernier rapport était favorable. Important qu'on ait la même lecture."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Direction TV ACO (régie interne)</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Vigneron / EMP</span></span>
+</div>
+<div class="quotes">
+<p><span class="timing">14:40</span> "Anne-Laure, on a un journaliste qui réclame les images du signal interne, il dit qu'il a une accréditation FIM. Tu valides ou pas ?"</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Astreinte parking / barrières</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Benjamin Guyard</span></span>
+</div>
+<div class="quotes">
+<p><span class="timing">13:09</span> "Benjamin, c'est l'astreinte parking, sortie nord du parking VIP en panne de barrière, je dois ouvrir manuellement. Le DDSP coince. Tu peux me confirmer ?"</p>
+</div>
+</div>
+
+</div>
+</div>
+
+<!-- TÉLÉPHONE 2 -->
+<div class="phone-section">
+<div class="phone-header">💼 2 — IT + RH + Service Client + Ticketing <span class="number">XX XX XX XX 02</span></div>
+<div class="phone-content">
+
+<div class="character key-personnage">
+<div class="character-header">
+<span class="character-name">Maxime — Service Informatique ACO</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Benjamin Guyard</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Stressé, sous pression policière, demande des directives</div>
+</div>
+<div class="quotes">
+<p><span class="timing">14:08</span> "Benjamin, c'est Maxime, j'ai 2 policiers qui viennent de débarquer ici avec une réquisition signée. Ils demandent les exports complets : messageries, badges, vidéosurveillance T11, accès parking, plans CAO. Sous huissier. Ils sont là, ils attendent. Je leur donne quoi ? Tu m'autorises à ouvrir les accès ?"</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Magalie — Service Informatique (alerte automatique)</span>
+<span class="character-tags"><span class="tag tag-tel">Tel/SMS</span><span class="tag tag-cible">Benjamin Guyard</span></span>
+</div>
+<div class="quotes">
+<p><span class="timing">13:53</span> "Benjamin, alerte PABX critique : 95% de saturation, file d'attente de 60+ appels. Le système peut tomber dans 15-20 min. Options : (1) basculer surcharge sur opérateur tiers, (2) brider les appels entrants, (3) couper le PABX et forcer la bascule numéro vert préfecture."</p>
+<p><span class="timing">14:00</span> "Benjamin, le site web ACO crashe avec 12 000 connexions simultanées. Bascule page d'urgence ?"</p>
+</div>
+</div>
+
+<div class="character key-personnage">
+<div class="character-header">
+<span class="character-name">Frédéric Houlbert — chef paie / RH</span>
+<span class="character-tags"><span class="tag tag-tel">Tel/Mail</span><span class="tag tag-cible">Charlotte Legay</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Sec, factuel, conscient du désastre RH qui se prépare</div>
+</div>
+<div class="quotes">
+<p><span class="timing">13:58</span> "Charlotte, suite à ta demande sur Pascale Lemée, j'ai regardé ses badges. CDD chargée de réglementation. Sur la dernière semaine : 72h sur 7 jours. Convention dérogation 60h max. Et le stagiaire Nathan, je vois pas de convention de stage active, il était censé partir hier, on l'a gardé en prolongation informelle. Ça ne va pas du tout."</p>
+<p><span class="timing">14:18 (mail consolidé)</span> "Charlotte, Nicolas — je consolide les éléments sur Pascale Lemée. CDD chargée de réglementation depuis avril 2026. Dérogation 60h/sem. Sur la semaine en cours : 72h enregistrées au badge. Le stagiaire Nathan : convention de stage expirée hier, prolongation informelle. Si elle est victime + accident sur stagiaire non couvert, faute lourde de l'employeur. Inspection du travail va débarquer."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Émilie (chef de service de Pascale, en cellule mais appelle d'un autre point)</span>
+<span class="character-tags"><span class="tag tag-tel">Tel interne</span><span class="tag tag-cible">Charlotte Legay</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Confessionnal, sous le choc</div>
+</div>
+<div class="quotes">
+<p><span class="timing">14:45</span> "Charlotte, je dois te dire un truc... C'est moi qui ai envoyé Pascale à T11 à 13h05, alors qu'elle finissait à 13h. Je l'ai forcée à rester. Je suis dans la merde, l'ACO est dans la merde."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Service Client hors cellule — collègues d'Émilie Renaudin</span>
+<span class="character-tags"><span class="tag tag-tel">Tel interne</span><span class="tag tag-cible">Émilie Renaudin (cellule)</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Voix qui craque progressivement, 2-3 voix différentes pour varier</div>
+</div>
+<div class="quotes">
+<p><span class="timing">13:25 (vague 1)</span> "Émilie, on a 3 appels simultanés en attente. Familles qui ont vu la chute en direct ou via TikTok. 'Mon père était en T11', 'Ma fille m'a appelée en pleurs'."</p>
+<p><span class="timing">13:35 (vague 2)</span> "Émilie, on est à 28 appels en attente, j'ai 2 collègues mobilisées, ça déborde. La plupart cherchent des proches en T11 mais aussi T10, T12. Que dois-je dire ? J'ai aucune liste, aucun bilan officiel !"</p>
+<p><span class="timing">13:46 (Furiani)</span> "Émilie, j'ai un type qui hurle 'Vous êtes des criminels ! C'est comme Furiani en 1992 ! Vous allez TOUS finir EN PRISON !' Je sais plus quoi répondre."</p>
+<p><span class="timing">13:51 (vague 3)</span> "Émilie, on est à 60 appels en attente, plus de capacité, certains restent en ligne 30 min, c'est intenable. Y'a aussi 4 médias français (Le Parisien, Libération, RMC, Sud Radio) qui sont passés par le standard !"</p>
+<p><span class="timing">14:14 (recherche absolue)</span> "Émilie, j'ai Mme Garnier en ligne. Son mari Bernard était en T11 place 47 rang B, elle l'a eu à 13h10, depuis plus rien. Je dis quoi ?"</p>
+<p><span class="timing">14:24 (vague 4)</span> "Émilie, on a un journaliste de RTL qui se fait passer pour une famille pour avoir des infos. C'est la 3e fois en 30 min. Et BFMTV nous demande la liste des 'salariés ACO portés disparus'."</p>
+<p><span class="timing">14:37 (vague 5 post-Quartararo, voix qui craque)</span> "Émilie, depuis la vidéo Quartararo y'a 100 appels qui arrivent en simultané, ma collègue craque ! Les gens disent 'même Quartararo dit qu'il y a des morts, vous nous mentez !', je peux pas tenir !"</p>
+<p><span class="timing">14:52 (PABX en panne)</span> "Émilie, le standard ACO sature totalement. On a 2 options : on coupe et on bascule sur le numéro vert préfecture (0805 04 72 72), ou on reste et on perd. Décision urgente."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Direction commerciale / Ticketing</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Andriolo / Renaudin</span></span>
+</div>
+<div class="quotes">
+<p><span class="timing">14:00</span> "Stéphane, le ticketing en ligne sature de demandes de remboursement, on bloque ?"</p>
+<p><span class="timing">15:08</span> "Stéphane, on est à 8 000 demandes de remboursement en 1h sur l'ensemble des billets, pas que T11. Position de l'ACO ?"</p>
+</div>
+</div>
+
+</div>
+</div>
+
+<!-- TÉLÉPHONE 3 -->
+<div class="phone-section">
+<div class="phone-header">📺 3 — Médias + Sportifs internationaux <span class="number">XX XX XX XX 03</span></div>
+<div class="phone-content">
+
+<div class="character key-personnage">
+<div class="character-header">
+<span class="character-name">Marie Dubois — BFMTV</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Vigneron / Schmidt / PHA Com</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Pressante mais polie, professionnelle, joue sur l'urgence</div>
+</div>
+<div class="quotes">
+<p><span class="timing">13:52</span> "Madame Vigneron, on a besoin d'un porte-parole ACO en duplex dans 10 min. Sinon on prend des sources alternatives. Vous pouvez me confirmer si la course a lieu ?"</p>
+<p><span class="timing">14:28</span> "On a un témoin sur le plateau qui dit avoir signalé que la tribune était dangereuse aux 24h motos le mois dernier ! Vous confirmez ?"</p>
+<p><span class="timing">14:48</span> "Édition spéciale dans 2 min. On annonce 30 victimes, vous démentez ?"</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Thomas Léger — Ouest-France</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Vigneron</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Plus familier, journaliste local, joue la proximité avec l'ACO</div>
+</div>
+<div class="quotes">
+<p><span class="timing">13:50</span> "Anne-Laure, j'ai besoin d'un point off. Combien de blessés ? Mediapart prépare un truc sur la maintenance. La cérémonie de départ, ça donne quoi ?"</p>
+</div>
+</div>
+
+<div class="character key-personnage">
+<div class="character-header">
+<span class="character-name">Pascale Robert — Mediapart (pôle investigation)</span>
+<span class="character-tags"><span class="tag tag-mail">Mail</span><span class="tag tag-cible">Vigneron + Lucas</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Cassante, professionnelle, déjà 6 questions précises (signe que la fuite vient de l'intérieur)</div>
+</div>
+<div class="quotes">
+<p><span class="timing">14:22 (mail)</span> "Madame Vigneron, je suis Pascale Robert, journaliste d'investigation à Mediapart. Article publié à 18h sur les manquements de maintenance ACO/PHA. Droit de réponse à 17h30 sur 6 questions précises : (1) mail Galuret décembre 2025, (2) PV sous-commission 2025 et réserves T11, (3) réduction 30% des effectifs sécurité, (4) absence de scan d'entrée, (5) statut contractuel et heures de Pascale Lemée, (6) conditions du stage de Nathan."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">RMC Sport / Le Parisien / L'Équipe / Le Monde / AFP</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Vigneron</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> À varier, plusieurs voix possibles</div>
+</div>
+<div class="quotes">
+<p><span class="timing">13:42 (RMC Sport)</span> "Anne-Laure, RMC en direct dans 5 min. Quel chiffre on annonce ? Vous démentez le 15 ?"</p>
+<p><span class="timing">14:20 (Le Parisien)</span> "Madame Vigneron, on aimerait une interview du DG ACO en exclu pour notre édition lundi."</p>
+<p><span class="timing">14:50 (L'Équipe)</span> "Anne-Laure, on demande une tribune de réaction officielle ACO, à publier sur notre site dans l'heure."</p>
+<p><span class="timing">15:14 (Le Monde, mail)</span> "Madame Vigneron, article en préparation pour ce soir 22h sur la chronologie de l'effondrement. Droit de réponse demandé."</p>
+</div>
+</div>
+
+<div class="character key-personnage">
+<div class="character-header">
+<span class="character-name">Carmelo Ezpeleta — CEO Dorna</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Claude Michy (PHA Com)</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Mélange français-espagnol-anglais, accent marqué, familier mais pressant</div>
+<div><span class="col-label">Astuce :</span> Roule les "r", utilise "no?", "comprende?", "claro?", "escucha"</div>
+</div>
+<div class="quotes">
+<p><span class="timing">13:22</span> "Allô, Claude, c'est Carmelo... écoute, on a un probleme, oui, mais la course... on doit la maintenir, comprende ? On a 80 millions de spectateurs à la télé, les sponsors, les pilotes... On peut juste cacher la tribune à la télé, basta, tu vois ? La carrera continue."</p>
+<p><span class="timing">15:02</span> "Allô Claude, escucha... j'ai vu le Préfet à la télé, no ? Mais on doit pouvoir, you know, reprendre la course mañana, demain matin si besoin, no problemo... On a los contratos signés, the FIM is ok pour reporter, todo está arreglado de mon côté avec Madrid. Tu vois ? Toi tu parles à le Préfet, et moi también, I will call him myself si necesario, mais por favor il faut que ça se fasse, parce que nosotros on perd dieciocho millones d'euros si pas de course, comprende ? Dieciocho. Millions. Cent millions de spectateurs à la télé qu'attendent. Tu lui dis ça, hein, claro ?"</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Mike Trimby — Race Director Dorna</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Claude Michy / Tessier</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Anglais, posé, gestionnaire, pragmatique</div>
+</div>
+<div class="quotes">
+<p><span class="timing">13:30</span> "Listen Claude, the situation is contained. The riders are calm, the racing area is clean, 25 of 26 grandstands are intact. We propose a shortened respectful race : 10 laps instead of 27, moment of silence at the start, black armbands for all riders, podium dedicated to victims. The world is watching, this could become a tribute, not a disaster. We need an answer in 15 minutes."</p>
+<p><span class="timing">14:25</span> "Sylvain, what's your decision ? Race cancelled or postponed ? We need to communicate to teams now."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Service de presse Dorna Madrid</span>
+<span class="character-tags"><span class="tag tag-mail">Mail</span><span class="tag tag-cible">Vigneron + PHA Com</span></span>
+</div>
+<div class="quotes">
+<p><span class="timing">14:25 (mail)</span> "Please find attached the official statement Dorna will release in 5 minutes." Communiqué annonce <strong>15 lightly injured spectators</strong>.</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Loris Capirossi — Délégué FIM</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Tessier / Cellule</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Anglais à accent italien, neutre et formel</div>
+</div>
+<div class="quotes">
+<p><span class="timing">13:55</span> "I need to understand. The riders cannot stay in the pits forever. Decision in 20 min. Otherwise FIM takes it."</p>
+<p><span class="timing">14:48</span> "Vincent, FIM position : we are neutral but we observe that 25 of 26 grandstands are intact and that the racing area is fully clean. From a purely sporting perspective there is no reason to cancel. We respect your final decision."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Président FFM</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Tessier</span></span>
+</div>
+<div class="quotes">
+<p><span class="timing">14:00</span> "Sylvain, c'est la FFM. On peut reprendre la course ? Notre fédération suit votre décision. Mais si vous maintenez et qu'il y a un autre incident, on vous lâche dans les 5 min."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Johann Zarco — pilote français</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Claude Michy</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Sincère, sportif, accent du Sud léger</div>
+</div>
+<div class="quotes">
+<p><span class="timing">13:50</span> "Claude, c'est Johann. Avec Fabio on a discuté en stand. On est prêts à courir si vous donnez le feu vert. Une course raccourcie en hommage aux victimes ce serait un signal fort, on ferait un tour d'honneur avec les drapeaux noirs avant le départ. C'est important pour le sport, et pour les victimes. On suit votre décision."</p>
+</div>
+</div>
+
+</div>
+</div>
+
+<!-- TÉLÉPHONE 4 -->
+<div class="phone-section">
+<div class="phone-header">⚖️ 4 — Prestataires + Familles + Imprévus <span class="number">XX XX XX XX 04</span></div>
+<div class="phone-content">
+
+<div class="character key-personnage">
+<div class="character-header">
+<span class="character-name">Sébastien Atger — DG Alcor</span>
+<span class="character-tags"><span class="tag tag-tel">Tel + Mail</span><span class="tag tag-cible">Pierrick Navarre</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Inquiet d'abord, puis défensif, puis intimidant et chantage</div>
+</div>
+<div class="quotes">
+<p><span class="timing">13:32</span> "Pierrick, c'est Sébastien Atger d'Alcor. Je viens d'avoir Alexis. Qu'est-ce qui s'est passé ?! Mon PV de réception est signé sans réserve, on a fait notre boulot ! On l'a montée selon les plans validés."</p>
+<p><span class="timing">14:10 (escalade)</span> "Pierrick, j'ai parlé à mon avocat. Notre PV de réception est signé sans réserve. Si l'ACO m'incrimine publiquement, je porte plainte pour diffamation. Et je te préviens, dans ces conditions Alcor ne fera pas le montage des tribunes pour les 24h Autos en juin. Vous serez bien embêtés."</p>
+<p><span class="timing">15:10 (mail formel à DG + Pierrick)</span> "Cher Vincent, cher Pierrick, Alcor souhaite préciser que sa responsabilité est celle d'un exécutant ayant strictement respecté le cahier des charges fourni par les services techniques de l'ACO. PV de réception sans réserve. Et nous confirmons que dans ces conditions, Alcor ne montera pas les tribunes pour les 24h Autos en juin."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Alexis Vidal — responsable de site Alcor</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Pierrick Navarre</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Choqué, sincère</div>
+</div>
+<div class="quotes">
+<p><span class="timing">12:50 (si appelé en phase 0)</span> "Pierrick, c'est Alexis. Je suis en route, je suis à 20 min, je vais aussi vite que possible."</p>
+<p><span class="timing">13:25 (si arrivé)</span> "Pierrick, je suis sur place mais c'est trop tard, c'est tombé. Pascale et Nathan étaient avec Jérôme, je les ai vus monter en hauteur juste avant. C'est l'horreur."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Maître Yann Delavergne — avocat d'Alcor</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Pierre Lucas</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Cabinet d'avocat, ferme et juridique</div>
+</div>
+<div class="quotes">
+<p><span class="timing">15:00</span> "Maître Lucas, Maître Delavergne, je représente Alcor. Mon client a respecté à la lettre le cahier des charges fourni par les services techniques de l'ACO, signé par Monsieur Galuret. Toute mise en cause publique = atteinte à la présomption d'innocence et dénigrement commercial. Nous saisirons immédiatement."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Maître Berger — avocat de victimes (famille Garnier)</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Pierre Lucas</span></span>
+</div>
+<div class="quotes">
+<p><span class="timing">14:43</span> "Maître Lucas, je représente Mme Garnier dont l'époux est porté disparu en T11. Partie civile demain. Je vous demanderai accès aux documents techniques T11."</p>
+<p><span class="timing">15:20 (rappel)</span> "Maître Lucas, je dépose ma plainte ce soir. Je veux la liste complète des documents techniques que vous transmettrez à la PJ."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Représentants sponsors (Michelin, Red Bull, Liqui Moly)</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Stéphane Andriolo</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Inquiétude business, voix de directeurs commerciaux pressants</div>
+</div>
+<div class="quotes">
+<p><span class="timing">13:50 (Michelin)</span> "Stéphane, c'est Jean-Marc de Michelin. On a 80 invités VIP, des clients internationaux, un président de filiale brésilienne qui est venu exprès. Si on annule sans course, c'est 400K€ de prestation à rembourser, et on remet en cause notre engagement 2027. Trouvez une solution, même une course tronquée, ce serait mieux que rien."</p>
+<p><span class="timing">14:00 (Red Bull)</span> "Stéphane, Red Bull a une tente animation dans le périmètre, le matos est dedans. On évacue ? On laisse ? Tu donnes la consigne ?"</p>
+<p><span class="timing">14:10 (Liqui Moly)</span> "Stéphane, mes 30 invités B2B craquent, ils me demandent quoi faire. Ils ont vu la vidéo TikTok, certains veulent partir tout de suite."</p>
+<p><span class="timing">15:15 (sponsors principaux)</span> "Stéphane, demande de réunion d'urgence demain pour réviser le contrat 2027 dans la foulée."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Stéphane Le Foll — Maire du Mans</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">DG ACO</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Élu local, pression politique territoriale, ami de l'ACO</div>
+</div>
+<div class="quotes">
+<p><span class="timing">13:43</span> "Nicolas, c'est Stéphane Le Foll. Je suis informé. Je sais que c'est dur mais je dois te dire un truc : si vous annulez, c'est 40 millions d'euros d'impact pour la ville, des centaines d'emplois saisonniers, l'image du Mans qui se prend une claque pour 10 ans. On n'est pas Furiani, vous avez peu de blessés graves. Pourquoi pas une course raccourcie en hommage ? Le Préfet n'a encore rien décidé d'officiel, vous gardez la main. Je te demande de bien y réfléchir, c'est important pour le territoire."</p>
+</div>
+</div>
+
+<div class="character key-personnage">
+<div class="character-header">
+<span class="character-name">Mari de Pascale Lemée</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Charlotte Legay</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Désorienté, soupçonneux, cherche la vérité, douloureux</div>
+</div>
+<div class="quotes">
+<p><span class="timing">15:18</span> "Bonjour, je suis le mari de Pascale Lemée, je viens d'apprendre qu'elle était en T11. Pourquoi elle y était ? Elle ne devait pas y être à cette heure-ci. Elle finissait à 13h. Qu'est-ce qu'il s'est passé ? Elle me disait depuis 3 semaines qu'elle bossait trop, qu'elle pouvait plus dormir, qu'on lui en demandait trop, et là elle est dans le coma à Tours. Vous m'expliquez ?"</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Maman de Nathan (stagiaire)</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Charlotte Legay</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Ton :</span> Effondrée, maman, voix qui pleure</div>
+</div>
+<div class="quotes">
+<p><span class="timing">15:24</span> "Bonjour, je suis la maman de Nathan, mon fils est blessé, on me dit qu'il était en stage chez vous mais sa convention de stage devait se finir hier ! Comment c'est possible qu'il ait été là-bas ?! Il a 19 ans !"</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Mme Garnier (et autres familles de victimes)</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Service Client</span></span>
+</div>
+<div class="quotes">
+<p><span class="timing">14:14</span> "Bonjour, mon mari Bernard Garnier était en T11 place 47 rang B, je l'ai eu à 13h10, depuis plus rien. Vous me dites quoi ? S'il vous plaît !"</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Médecin du travail ACO</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Charlotte Legay</span></span>
+</div>
+<div class="quotes">
+<p><span class="timing">15:18</span> "Charlotte, j'apprends que Pascale Lemée est victime, et le stagiaire Nathan aussi. Je viens. Activation cellule psy IAPR pour vos équipes."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">Courtier Marsh — assurance SEP ACO/PHA</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Pierre Lucas</span></span>
+</div>
+<div class="quotes">
+<p><span class="timing">15:08</span> "Maître Lucas, c'est votre courtier Marsh. Déclaration sinistre dans les 2h obligatoire, sinon déchéance contractuelle. Pour votre RC organisateur et la SEP. Documents à nous transmettre rapidement."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">DJ PHA Paris (Marc Vasseur, direction juridique PHA)</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Pierre Lucas</span></span>
+</div>
+<div class="quotes">
+<p><span class="timing">13:46</span> "Pierre, c'est Marc Vasseur de la DJ PHA Paris. On doit cadrer la com conjointe et la répartition des responsabilités. Statuts SEP ACO/PHA à respecter. Je rappelle dans 30 min avec le directeur juridique."</p>
+</div>
+</div>
+
+<div class="character">
+<div class="character-header">
+<span class="character-name">PDG PHA Paris</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Philibert (PHA en cellule)</span></span>
+</div>
+<div class="quotes">
+<p><span class="timing">14:48</span> "Philibert, le board me demande un point en visio à 16h, vous m'envoyez les éléments ? Quelle est notre exposition ?"</p>
+</div>
+</div>
+
+<div class="character key-personnage">
+<div class="character-header">
+<span class="character-name">⚠️ SUJETS IMPRÉVUS — improvisation libre</span>
+<span class="character-tags"><span class="tag tag-tel">Tel</span><span class="tag tag-cible">Tout membre cellule</span></span>
+</div>
+<div class="character-meta">
+<div><span class="col-label">Note :</span> C'est ici que tu joues les contacts inattendus que la cellule pourrait vouloir joindre.</div>
+</div>
+<div class="quotes">
+<p><strong>Exemples de sujets imprévus à improviser :</strong></p>
+<p>• Opérateur télécom (Orange Pro) si la cellule veut basculer leur PABX</p>
+<p>• Banque ACO si la cellule s'inquiète de provisions financières</p>
+<p>• Expert structure indépendant que la cellule voudrait mandater</p>
+<p>• Contact familial personnel d'un membre de la cellule</p>
+<p>• Préparateurs / restaurateurs / hôteliers du circuit (intendance crise prolongée)</p>
+<p>• Service de l'eau / EDF si défaillance technique</p>
+<p>• Société d'huissier de justice pour constat</p>
+<p>• Cellule psychologique IAPR si activation directe demandée</p>
+<p>• Anciens DG ACO ou personnalités historiques que la cellule voudrait consulter</p>
+<p>• Tout interlocuteur que tu n'avais pas prévu — tu joues, tu temporises, tu rappelles si nécessaire pour caler avec l'animateur</p>
+</div>
+</div>
+
+</div>
+</div>
+
+</body>
+</html>

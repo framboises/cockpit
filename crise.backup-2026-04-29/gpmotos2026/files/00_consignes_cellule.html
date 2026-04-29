@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Consignes Cellule de crise - Exercice GP Moto 2026</title>
+<style>
+  @media print {
+    @page { size: A4 portrait; margin: 10mm; }
+    body { font-size: 9.5pt; background: white; }
+    .no-print { display: none; }
+  }
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 780px; margin: 0 auto; padding: 14px; color: #111; background: #f5f5f7; line-height: 1.35; }
+  h1 { font-size: 18pt; margin: 0 0 2px 0; color: #b91c1c; text-align: center; }
+  .subtitle { color: #666; font-size: 9.5pt; text-align: center; margin-bottom: 12px; font-style: italic; }
+  .time-box { background: #1a3a6c; color: white; border-radius: 5px; padding: 8px 14px; margin-bottom: 12px; text-align: center; font-size: 10pt; }
+  .time-box strong { font-size: 11.5pt; display: block; margin-bottom: 2px; }
+  .rule-box { background: #fee2e2; border: 2.5px solid #b91c1c; border-radius: 5px; padding: 10px 16px; margin-bottom: 12px; }
+  .rule-box h2 { color: #b91c1c; margin: 0 0 6px 0; font-size: 13pt; }
+  .rule-box p { margin: 4px 0; font-size: 10pt; }
+  .rule-box strong { color: #7f1d1d; }
+  .why-box { background: #fef3c7; border-left: 3px solid #d97706; padding: 8px 14px; margin-bottom: 12px; font-size: 9.5pt; }
+  .why-box h2 { color: #9a3412; margin: 0 0 4px 0; font-size: 11pt; }
+  .why-box p { margin: 3px 0; }
+  .channels-box { background: #fff; border: 2px solid #1a3a6c; border-radius: 5px; padding: 10px 14px; margin-bottom: 12px; }
+  .channels-box h2 { color: #1a3a6c; margin: 0 0 6px 0; font-size: 12pt; text-align: center; border-bottom: 1px solid #1a3a6c; padding-bottom: 4px; }
+  .channels-intro { text-align: center; font-weight: 600; margin-bottom: 8px; font-size: 9.5pt; }
+  .phones { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 6px 0; }
+  .phone-card { background: #e7f1ff; border-left: 3px solid #1a3a6c; padding: 6px 10px; }
+  .phone-card .label { font-weight: 700; color: #1a3a6c; font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.3px; }
+  .phone-card .number { font-size: 13pt; font-weight: 700; color: #111; font-variant-numeric: tabular-nums; margin: 2px 0; letter-spacing: 0.5px; }
+  .phone-card .desc { font-size: 8pt; color: #555; line-height: 1.3; }
+  .phone-card.special { background: #fef3c7; border-left-color: #d97706; }
+  .phone-card.special .label { color: #9a3412; }
+  .channel-note { text-align: center; font-size: 8.5pt; color: #555; margin-top: 6px; font-style: italic; }
+  .examples-box { background: #fff; border: 1px solid #d0d0d0; border-radius: 5px; padding: 8px 14px; margin-bottom: 10px; font-size: 9pt; }
+  .examples-box h2 { color: #1a3a6c; margin: 0 0 5px 0; font-size: 11pt; }
+  .logigramme-box { background: #fff; border: 2px solid #1a3a6c; border-radius: 5px; padding: 10px 14px; margin-bottom: 12px; }
+  .logigramme-box h2 { color: #1a3a6c; margin: 0 0 6px 0; font-size: 12pt; text-align: center; border-bottom: 1px solid #1a3a6c; padding-bottom: 4px; }
+  .logigramme-box svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+  .logigramme-caption { font-size: 8.5pt; color: #555; margin-top: 8px; font-style: italic; text-align: center; }
+  .ex-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 4px 0; }
+  .bad { background: #fee2e2; padding: 5px 8px; border-radius: 3px; font-size: 8.5pt; }
+  .good { background: #d1fae5; padding: 5px 8px; border-radius: 3px; font-size: 8.5pt; }
+  .bad .label, .good .label { font-weight: 700; font-size: 8pt; text-transform: uppercase; display: block; margin-bottom: 2px; }
+  .bad .label { color: #991b1b; }
+  .good .label { color: #047857; }
+  .footer { text-align: center; font-size: 9pt; color: #666; margin-top: 8px; padding-top: 6px; border-top: 1px solid #ccc; }
+  .print-btn { position: fixed; top: 12px; right: 12px; background: #b91c1c; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 10pt; }
+</style>
+</head>
+<body>
+
+<button class="no-print print-btn" onclick="window.print()">Imprimer</button>
+
+<h1>⚠️ CONSIGNES — Cellule de crise</h1>
+<div class="subtitle">Exercice de crise GP Moto 2026 — À lire avant le démarrage</div>
+
+<div class="time-box">
+🕐 <strong>Convention horaire de l'exercice</strong>
+9h00 ce matin (heure réelle) = <strong>13h00 le dimanche 10 mai 2026</strong> dans le scénario. L'heure simulée s'écoule en temps réel à partir de là.
+</div>
+
+<div class="rule-box">
+<h2>🚫 RÈGLE D'OR — Aucun appel direct à vos équipes</h2>
+<p>Pendant toute la durée de l'exercice, vous ne contactez <strong>JAMAIS</strong> vos équipes habituelles directement. Pas de coup de fil à un collègue technique, à un agent terrain, à un prestataire, à votre adjoint dehors. <strong>Tout passe par l'animation</strong>, qui joue tout l'extérieur de la cellule.</p>
+<p><strong>Toute personne hors de la salle de crise est jouée par l'animation.</strong> Les services de l'État, eux, ne sont joignables que via Amandine (PCA), pas par téléphone.</p>
+</div>
+
+<div class="why-box">
+<h2>Pourquoi cette règle ?</h2>
+<p>L'objectif est de tester votre fonctionnement collectif sous pression, pas de régler les problèmes en sous-main. En passant par les canaux ci-dessous, <strong>vous laissez une trace</strong>, vous nous permettez de répondre selon le scénario, et vous traduisez vos demandes en termes que toute la cellule peut entendre.</p>
+</div>
+
+<div class="channels-box">
+<h2>📞 Comment communiquer avec l'extérieur</h2>
+<div class="channels-intro">Quatre numéros pour joindre l'animation, à composer selon le sujet :</div>
+
+<div style="background: #fef3c7; border-left: 3px solid #d97706; padding: 6px 10px; margin-bottom: 8px; font-size: 9pt;">
+<strong>⚠️ Ces numéros sont bidirectionnels.</strong> Vous pouvez aussi <strong>recevoir des appels et des SMS</strong> de l'animation depuis ces 4 numéros, ainsi que des mails simulés. La personne qui vous appelle se présentera en disant qui elle joue (ex : <em>« Allô, je suis le DG d'un de nos prestataires »</em>, <em>« Bonjour, ici une journaliste d'une chaîne info »</em>). À vous d'identifier le bon interlocuteur dans la cellule pour traiter la sollicitation.
+</div>
+
+<div class="phones">
+
+<div class="phone-card">
+<div class="label">🔧 1 — Services techniques & infra</div>
+<div class="number">XX XX XX XX 01</div>
+<div class="desc">Service technique ACO (techniciens, ateliers, bureau d'études), écrans géants, sono, régie TV ACO, astreintes électriques et techniques, équipes infrastructures, prestataires techniques sur site.</div>
+</div>
+
+<div class="phone-card">
+<div class="label">💼 2 — IT + RH + Service Client + Ticketing</div>
+<div class="number">XX XX XX XX 02</div>
+<div class="desc">Service informatique ACO, service paie / RH (hors cellule), service client hors cellule, ticketing, ressources humaines, payroll, badges, médecine du travail.</div>
+</div>
+
+<div class="phone-card">
+<div class="label">📺 3 — Médias + Sportifs internationaux</div>
+<div class="number">XX XX XX XX 03</div>
+<div class="desc">Médias français (chaînes info TV, presse quotidienne nationale et régionale, radios, presse en ligne, presse sportive). Dorna (direction et service de presse Madrid), FIM, FFM, pilotes, journalistes spécialisés moto.</div>
+</div>
+
+<div class="phone-card special">
+<div class="label">⚖️ 4 — Prestataires + Familles + Imprévus</div>
+<div class="number">XX XX XX XX 04</div>
+<div class="desc">Prestataires sur site (montage, contrôle, sécurité), bureaux de contrôle, avocats externes, courtiers et compagnies d'assurance, sponsors, élus locaux, familles éventuelles concernées par un incident, médecin du travail. <strong>Et tout sujet imprévu sortant du cadre : opérateur télécoms, banque, expert indépendant, contact que vous voudriez joindre et qui ne rentre dans aucune autre case. Si vous hésitez, c'est ici.</strong></div>
+</div>
+
+</div>
+
+<div class="channel-note">Ces 4 numéros aboutissent tous à l'animation. Les services de l'État (Préfet, SAMU, SDIS, Police, Procureur, Inspection du travail) <strong>ne sont pas joignables par téléphone</strong> : ils contactent la cellule en direct via Amandine (PCA).</div>
+</div>
+
+<div class="logigramme-box">
+<h2>📊 Logigramme — circuit des informations</h2>
+
+<svg viewBox="0 0 700 460" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+
+<!-- Légende canaux -->
+<g font-size="10">
+  <line x1="20" y1="20" x2="40" y2="20" stroke="#1a3a6c" stroke-width="2.5" stroke-dasharray="6,3"/>
+  <text x="46" y="24" fill="#1a3a6c">📞 Téléphone animation (4 numéros)</text>
+  <line x1="280" y1="20" x2="300" y2="20" stroke="#6b21a8" stroke-width="2.5"/>
+  <text x="306" y="24" fill="#6b21a8">📻 Radio crise (vers PCA)</text>
+  <line x1="490" y1="20" x2="510" y2="20" stroke="#047857" stroke-width="2.5"/>
+  <text x="516" y="24" fill="#047857">📻 Radio / 📞 (vers PCORG)</text>
+</g>
+
+<!-- Boîte centrale Cellule -->
+<rect x="240" y="180" width="220" height="100" rx="6" fill="#fee2e2" stroke="#b91c1c" stroke-width="3"/>
+<text x="350" y="210" text-anchor="middle" font-size="14" font-weight="700" fill="#b91c1c">CELLULE DE CRISE</text>
+<text x="350" y="228" text-anchor="middle" font-size="11" font-weight="600" fill="#7f1d1d">(vous)</text>
+<text x="350" y="248" text-anchor="middle" font-size="9" fill="#333">DG · Médical · Juridique · Com</text>
+<text x="350" y="261" text-anchor="middle" font-size="9" fill="#333">RH · Infra · Sûreté · Billetterie · Circuit</text>
+<text x="350" y="274" text-anchor="middle" font-size="9" fill="#333">Production · IT · EMP · Historien</text>
+
+<!-- 4 NUMÉROS ANIMATION (à gauche) -->
+<rect x="40" y="60" width="160" height="50" rx="6" fill="#e7f1ff" stroke="#1a3a6c" stroke-width="2"/>
+<text x="120" y="80" text-anchor="middle" font-size="10" font-weight="700" fill="#1a3a6c">📞 1 — Tech & Infra</text>
+<text x="120" y="98" text-anchor="middle" font-size="8" fill="#333">technique, ateliers, écrans, sono</text>
+
+<rect x="40" y="120" width="160" height="50" rx="6" fill="#e7f1ff" stroke="#1a3a6c" stroke-width="2"/>
+<text x="120" y="140" text-anchor="middle" font-size="10" font-weight="700" fill="#1a3a6c">📞 2 — IT/RH/Client</text>
+<text x="120" y="158" text-anchor="middle" font-size="8" fill="#333">info, paie, service client, ticketing</text>
+
+<rect x="40" y="290" width="160" height="50" rx="6" fill="#e7f1ff" stroke="#1a3a6c" stroke-width="2"/>
+<text x="120" y="310" text-anchor="middle" font-size="10" font-weight="700" fill="#1a3a6c">📞 3 — Médias/Sport</text>
+<text x="120" y="328" text-anchor="middle" font-size="8" fill="#333">médias, Dorna, FIM, pilotes</text>
+
+<rect x="40" y="350" width="160" height="50" rx="6" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+<text x="120" y="370" text-anchor="middle" font-size="10" font-weight="700" fill="#9a3412">📞 4 — Presta/Familles</text>
+<text x="120" y="388" text-anchor="middle" font-size="8" fill="#333">prestataires, sponsors, élus, imprévus</text>
+
+<!-- Flèches Cellule ↔ 4 numéros (bidirectionnelles) -->
+<line x1="240" y1="220" x2="200" y2="90" stroke="#1a3a6c" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrowblue_c)"/>
+<line x1="200" y1="105" x2="240" y2="225" stroke="#1a3a6c" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrowblue_c)"/>
+
+<line x1="240" y1="230" x2="200" y2="145" stroke="#1a3a6c" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrowblue_c)"/>
+<line x1="200" y1="155" x2="240" y2="235" stroke="#1a3a6c" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrowblue_c)"/>
+
+<line x1="240" y1="240" x2="200" y2="315" stroke="#1a3a6c" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrowblue_c)"/>
+<line x1="200" y1="305" x2="240" y2="245" stroke="#1a3a6c" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrowblue_c)"/>
+
+<line x1="240" y1="250" x2="200" y2="375" stroke="#1a3a6c" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrowblue_c)"/>
+<line x1="200" y1="365" x2="240" y2="255" stroke="#1a3a6c" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrowblue_c)"/>
+
+<!-- ÉTOILE PCA / Officier de liaison (à droite haut) -->
+<rect x="500" y="80" width="160" height="80" rx="6" fill="#faf5ff" stroke="#6b21a8" stroke-width="2.5"/>
+<text x="580" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#6b21a8">Officier de liaison PCA</text>
+<text x="580" y="122" text-anchor="middle" font-size="9" fill="#333">via assistant directeur</text>
+<text x="580" y="135" text-anchor="middle" font-size="9" fill="#333">de crise sur radio crise</text>
+<text x="580" y="150" text-anchor="middle" font-size="8.5" fill="#555" font-style="italic">→ services de l'État</text>
+
+<!-- Flèche Cellule ↔ PCA -->
+<line x1="460" y1="200" x2="500" y2="130" stroke="#6b21a8" stroke-width="2.5" marker-end="url(#arrowpurple_c)"/>
+<line x1="500" y1="145" x2="460" y2="215" stroke="#6b21a8" stroke-width="2.5" marker-end="url(#arrowpurple_c)"/>
+
+<!-- PCORG (à droite bas) -->
+<rect x="500" y="320" width="160" height="100" rx="6" fill="#d1fae5" stroke="#047857" stroke-width="2.5"/>
+<text x="580" y="343" text-anchor="middle" font-size="11" font-weight="700" fill="#047857">PCORG</text>
+<text x="580" y="362" text-anchor="middle" font-size="10" font-weight="700" fill="#065f46">via Lisa Feufeu</text>
+<text x="580" y="376" text-anchor="middle" font-size="9" fill="#333">(Sécurité / Sûreté)</text>
+<text x="580" y="394" text-anchor="middle" font-size="8.5" fill="#555" font-style="italic">accueil + sûreté terrain</text>
+<text x="580" y="409" text-anchor="middle" font-size="8.5" fill="#555" font-style="italic">📻 + 📞 PCORG</text>
+
+<!-- Flèche Cellule ↔ PCORG -->
+<line x1="460" y1="245" x2="500" y2="345" stroke="#047857" stroke-width="2.5" marker-end="url(#arrowgreen_c)"/>
+<line x1="500" y1="365" x2="460" y2="260" stroke="#047857" stroke-width="2.5" marker-end="url(#arrowgreen_c)"/>
+
+<!-- Encart "INTERDITS" en bas -->
+<rect x="40" y="420" width="620" height="30" rx="4" fill="#fee2e2" stroke="#b91c1c" stroke-width="1"/>
+<text x="350" y="440" text-anchor="middle" font-size="10" font-weight="600" fill="#7f1d1d">❌ INTERDIT : appel direct par téléphone à un agent terrain, à un prestataire, ou à un service de l'État</text>
+
+<!-- Marqueurs -->
+<defs>
+  <marker id="arrowblue_c" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+    <path d="M0,0 L0,6 L9,3 z" fill="#1a3a6c"/>
+  </marker>
+  <marker id="arrowpurple_c" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+    <path d="M0,0 L0,6 L9,3 z" fill="#6b21a8"/>
+  </marker>
+  <marker id="arrowgreen_c" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+    <path d="M0,0 L0,6 L9,3 z" fill="#047857"/>
+  </marker>
+</defs>
+
+</svg>
+
+<div class="logigramme-caption">
+La cellule de crise communique avec l'extérieur par 5 canaux structurés : 4 numéros téléphone <strong>bidirectionnels</strong> avec l'animation (services internes ACO/PHA, médias, prestataires, sujets imprévus), la radio crise vers le PCA (services de l'État), et la radio / téléphone PCORG (terrain). L'animation peut aussi vous appeler ou vous envoyer SMS / mails depuis les 4 numéros — elle se présentera toujours en disant qui elle joue.
+</div>
+</div>
+
+<div class="examples-box">
+<h2>Exemples concrets</h2>
+
+<div class="ex-row">
+<div class="bad"><span class="label">❌ Ne faites pas</span>"Je vais appeler ce technicien directement, j'ai son numéro perso."</div>
+<div class="good"><span class="label">✅ Faites</span>Vous appelez le 01 (services techniques) et demandez le service ou la personne souhaitée.</div>
+</div>
+
+<div class="ex-row">
+<div class="bad"><span class="label">❌ Ne faites pas</span>"Bon, je règle ça avec le prestataire en off, c'est mon contact direct."</div>
+<div class="good"><span class="label">✅ Faites</span>Vous appelez le 04 et demandez le contact prestataire concerné.</div>
+</div>
+
+<div class="ex-row">
+<div class="bad"><span class="label">❌ Ne faites pas</span>"Cette journaliste me connaît, je la rappelle directement sur son portable."</div>
+<div class="good"><span class="label">✅ Faites</span>Vous appelez le 03 et demandez la rédaction ou la personne concernée.</div>
+</div>
+
+<div class="ex-row">
+<div class="bad"><span class="label">❌ Ne faites pas</span>"J'envoie un mail au service info pour les exports, c'est plus rapide."</div>
+<div class="good"><span class="label">✅ Faites</span>Vous appelez le 02 et demandez le service informatique.</div>
+</div>
+
+</div>
+
+<div class="footer">
+<strong>En cas de doute :</strong> "Cette personne est-elle dans la salle ? Non → j'appelle un des 4 numéros." — <em>Bon exercice à toutes et à tous.</em>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Exercice de crise — GP Moto 2026</title>
+  <style>
+    :root {
+      --aco-navy: #1a3a6c;
+      --aco-navy-2: #2c5599;
+      --aco-red: #b91c1c;
+      --aco-orange: #d97706;
+      --aco-green: #047857;
+
+      --bg: #f3f6fb;
+      --bg-2: #eaeff7;
+      --panel: #ffffff;
+      --panel-soft: rgba(255, 255, 255, 0.78);
+
+      --line: rgba(26, 58, 108, 0.12);
+      --line-strong: rgba(26, 58, 108, 0.28);
+      --grid: rgba(26, 58, 108, 0.045);
+
+      --hud: #0891b2;
+      --hud-soft: rgba(8, 145, 178, 0.55);
+      --hud-glow: rgba(8, 145, 178, 0.30);
+      --hud-faint: rgba(8, 145, 178, 0.14);
+
+      --text: #0e1f3d;
+      --text-soft: #475569;
+      --text-dim: #6b7a93;
+
+      --warn: #d97706;
+      --ok: #047857;
+
+      --mono: 'SF Mono', 'JetBrains Mono', 'Menlo', 'Consolas', 'Monaco', monospace;
+      --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0; padding: 0;
+      height: 100vh;
+      height: 100dvh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.5;
+      overflow: hidden;
+    }
+
+    /* Halos colorés en arrière-plan */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      z-index: -3;
+      pointer-events: none;
+      background:
+        radial-gradient(ellipse 60% 50% at 15% 10%, rgba(8, 145, 178, 0.10), transparent 70%),
+        radial-gradient(ellipse 50% 40% at 90% 0%, rgba(26, 58, 108, 0.10), transparent 70%),
+        radial-gradient(ellipse 60% 40% at 50% 100%, rgba(217, 119, 6, 0.07), transparent 70%),
+        linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+    }
+    /* Grille tactique */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      z-index: -2;
+      pointer-events: none;
+      background-image:
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: radial-gradient(ellipse 90% 80% at 50% 50%, black 30%, transparent 95%);
+      -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 50%, black 30%, transparent 95%);
+    }
+
+    /* Scan sweep très subtil */
+    .scan-sweep {
+      position: fixed;
+      left: 0; right: 0;
+      height: 220px; top: -220px;
+      background: linear-gradient(to bottom, transparent, rgba(8, 145, 178, 0.05) 50%, transparent);
+      animation: sweep 11s linear infinite;
+      pointer-events: none; z-index: 1;
+    }
+    @keyframes sweep {
+      0% { top: -220px; opacity: 0; }
+      8% { opacity: 1; }
+      92% { opacity: 1; }
+      100% { top: 100vh; opacity: 0; }
+    }
+
+    /* Layout vertical 100vh */
+    body { display: flex; flex-direction: column; }
+
+    /* ---------- HEADER ---------- */
+    .header {
+      flex-shrink: 0;
+      position: relative;
+      padding: 14px 32px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      background: linear-gradient(to bottom, rgba(255,255,255,0.85), rgba(255,255,255,0.55));
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--line);
+    }
+    .header::after {
+      content: '';
+      position: absolute;
+      left: 0; right: 0; bottom: -1px; height: 1px;
+      background: linear-gradient(to right, transparent, var(--hud) 20%, var(--hud) 80%, transparent);
+      opacity: 0.45;
+    }
+    .header-logo {
+      width: 96px; height: 62px;
+      display: grid; place-items: center;
+      border: 1px solid var(--line-strong);
+      background: linear-gradient(135deg, var(--aco-navy), var(--aco-navy-2));
+      box-shadow: 0 6px 18px -8px rgba(26, 58, 108, 0.5);
+      position: relative;
+      padding: 8px 12px;
+    }
+    .header-logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+    .header-logo::before, .header-logo::after {
+      content: ''; position: absolute; width: 7px; height: 7px;
+      border: 1px solid var(--hud);
+    }
+    .header-logo::before { top: -3px; left: -3px; border-right: 0; border-bottom: 0; }
+    .header-logo::after { bottom: -3px; right: -3px; border-left: 0; border-top: 0; }
+
+    .header-titles { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+    .header-overline {
+      font-family: var(--mono); font-size: 11.5px; letter-spacing: 2.5px;
+      color: var(--hud); text-transform: uppercase; font-weight: 600;
+    }
+    .header-title {
+      font-size: 17px; font-weight: 800; letter-spacing: 2px;
+      text-transform: uppercase; color: var(--aco-navy);
+    }
+    .header-id {
+      font-family: var(--mono); font-size: 12px; letter-spacing: 1px;
+      color: var(--text-soft); text-transform: uppercase; font-weight: 500;
+    }
+    .header-id .accent { color: var(--hud); font-weight: 700; }
+
+    .header-status {
+      display: flex; align-items: center; gap: 12px;
+      font-family: var(--mono); font-size: 11.5px; letter-spacing: 1.2px;
+      text-transform: uppercase; color: var(--text-soft); font-weight: 600;
+    }
+    .pill {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 5px 9px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 2px;
+    }
+    .pill .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--ok);
+      box-shadow: 0 0 8px var(--ok);
+      animation: blink 1.6s ease-in-out infinite;
+    }
+    .pill.warn .dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+    /* ---------- TELEMETRY STRIP ---------- */
+    .telemetry {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 9px 32px;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      letter-spacing: 1.2px;
+      color: var(--text-soft);
+      text-transform: uppercase;
+      font-weight: 600;
+      border-bottom: 1px dashed var(--line);
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .tlm { display: inline-flex; align-items: center; gap: 6px; opacity: 0; animation: telemIn 0.4s ease forwards; }
+    .tlm .ok { color: var(--ok); }
+    .tlm .warn { color: var(--warn); }
+    .tlm .hud { color: var(--hud); }
+    .tlm .sep { color: var(--line-strong); margin: 0 4px; }
+    @keyframes telemIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }
+
+    /* ---------- MAIN ---------- */
+    .main {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 18px;
+      padding: 18px 32px 12px;
+    }
+
+    .hero {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .hero-left {
+      flex: 1;
+      min-width: 280px;
+    }
+    .hero-tag {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      color: var(--aco-orange);
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .hero-tag::before {
+      content: ''; display: inline-block; width: 26px; height: 1px; background: var(--aco-orange);
+    }
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(26px, 3.4vw, 40px);
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      line-height: 1.05;
+      color: var(--aco-navy);
+    }
+    .hero h1 .accent {
+      color: var(--hud);
+    }
+    .hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 22px;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--text-soft);
+      margin-top: 10px;
+    }
+    .hero-meta .label { color: var(--text-dim); }
+    .hero-meta .val { color: var(--aco-navy); margin-left: 6px; font-weight: 800; }
+
+    .hero-right {
+      text-align: right;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      font-weight: 600;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      color: var(--text-soft);
+    }
+    .hero-right .clk {
+      display: block;
+      font-size: 26px;
+      letter-spacing: 2.5px;
+      font-weight: 700;
+      color: var(--hud);
+      margin-top: 4px;
+      text-shadow: 0 0 18px var(--hud-glow);
+    }
+    .hero-right .clk-sim {
+      font-size: 12.5px;
+      letter-spacing: 1.8px;
+      font-weight: 700;
+      color: var(--warn);
+      display: inline-block;
+      margin-top: 4px;
+    }
+
+    /* ---------- STATIONS ---------- */
+    .section-head {
+      display: flex; align-items: center; gap: 14px;
+      margin-bottom: 12px;
+    }
+    .section-head h2 {
+      font-family: var(--mono); font-size: 12.5px; font-weight: 700;
+      letter-spacing: 3px; text-transform: uppercase;
+      margin: 0; color: var(--hud);
+      display: flex; align-items: center; gap: 12px;
+    }
+    .section-head h2::before {
+      content: ''; width: 9px; height: 9px;
+      border: 1.5px solid var(--hud); transform: rotate(45deg);
+    }
+    .section-head .rule {
+      flex: 1; height: 1px;
+      background: linear-gradient(to right, var(--hud-faint), transparent);
+    }
+    .section-head .count {
+      font-family: var(--mono); font-size: 11.5px; font-weight: 600;
+      color: var(--text-soft); letter-spacing: 1.5px;
+    }
+
+    .stations-wrap {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .stations {
+      width: 100%;
+      max-width: 1080px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 320px));
+      justify-content: center;
+      gap: 20px;
+      align-self: center;
+      margin: auto;
+    }
+
+    .station {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      padding: 18px 20px 16px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      text-decoration: none;
+      color: inherit;
+      overflow: hidden;
+      isolation: isolate;
+      transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+      box-shadow: 0 4px 14px -8px rgba(26, 58, 108, 0.15);
+    }
+    /* corners HUD */
+    .station .corner {
+      position: absolute;
+      width: 12px; height: 12px;
+      border: 1px solid currentColor;
+      pointer-events: none;
+      transition: width 0.25s ease, height 0.25s ease, opacity 0.25s ease;
+      opacity: 0.55;
+    }
+    .station .c-tl { top: 5px; left: 5px; border-right: 0; border-bottom: 0; }
+    .station .c-tr { top: 5px; right: 5px; border-left: 0; border-bottom: 0; }
+    .station .c-bl { bottom: 5px; left: 5px; border-right: 0; border-top: 0; }
+    .station .c-br { bottom: 5px; right: 5px; border-left: 0; border-top: 0; }
+
+    /* gradient de couleur */
+    .station::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 100% 60% at 50% 100%, var(--accent-soft), transparent 70%);
+      opacity: 0.5;
+      z-index: -1;
+      transition: opacity 0.25s ease;
+    }
+    /* scan line interne au hover */
+    .station::after {
+      content: '';
+      position: absolute;
+      left: 0; right: 0;
+      top: -40%;
+      height: 40%;
+      background: linear-gradient(to bottom, transparent, var(--accent-glow), transparent);
+      opacity: 0;
+      pointer-events: none;
+      z-index: 1;
+      transition: opacity 0.3s ease;
+    }
+    .station:hover::after {
+      opacity: 1;
+      animation: stationSweep 1.6s ease-in-out infinite;
+    }
+    @keyframes stationSweep {
+      0% { transform: translateY(0); }
+      100% { transform: translateY(380%); }
+    }
+
+    .station:hover {
+      transform: translateY(-3px);
+      border-color: var(--accent);
+      box-shadow:
+        0 18px 40px -16px rgba(26, 58, 108, 0.35),
+        0 0 0 1px var(--accent-soft),
+        0 0 38px -8px var(--accent-glow);
+    }
+    .station:hover::before { opacity: 0.9; }
+    .station:hover .corner { width: 18px; height: 18px; opacity: 1; }
+
+    .station-num {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      font-weight: 700;
+      letter-spacing: 2.5px;
+      color: var(--accent);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .station-num::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(to right, var(--accent-soft), transparent);
+    }
+
+    .station-icon {
+      width: 38px; height: 38px;
+      margin-bottom: 10px;
+      color: var(--accent);
+      filter: drop-shadow(0 0 12px var(--accent-glow));
+    }
+
+    .station-title {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      color: var(--aco-navy);
+      margin-bottom: 4px;
+      line-height: 1.1;
+    }
+    .station-role {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      font-weight: 600;
+      letter-spacing: 1.5px;
+      color: var(--accent);
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+    .station-desc {
+      color: var(--text-soft);
+      font-size: 13.5px;
+      line-height: 1.5;
+      flex-grow: 1;
+      margin: 0 0 12px 0;
+    }
+    .station-cta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+      font-family: var(--mono);
+      font-size: 11.5px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-soft);
+    }
+    .station-cta .arrow {
+      color: var(--accent);
+      transition: transform 0.25s ease;
+    }
+    .station:hover .station-cta .arrow { transform: translateX(6px); }
+
+    .station-cta .badge {
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text-dim);
+      letter-spacing: 1.2px;
+    }
+    .station-cta .badge.ready { color: var(--ok); border-color: rgba(4, 120, 87, 0.35); background: rgba(4, 120, 87, 0.06); }
+    .station-cta .badge.wip   { color: var(--warn); border-color: rgba(217, 119, 6, 0.35); background: rgba(217, 119, 6, 0.06); }
+
+    /* couleurs par station */
+    .station.s1 { --accent: var(--hud); --accent-soft: rgba(8, 145, 178, 0.10); --accent-glow: rgba(8, 145, 178, 0.45); color: var(--hud); }
+    .station.s2 { --accent: var(--aco-orange); --accent-soft: rgba(217, 119, 6, 0.10); --accent-glow: rgba(217, 119, 6, 0.45); color: var(--aco-orange); }
+    .station.s3 { --accent: var(--aco-red); --accent-soft: rgba(185, 28, 28, 0.10); --accent-glow: rgba(185, 28, 28, 0.45); color: var(--aco-red); }
+
+    /* ---------- FOOTER ---------- */
+    .footer {
+      flex-shrink: 0;
+      padding: 10px 32px 14px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px 22px;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      font-weight: 600;
+      letter-spacing: 1.3px;
+      text-transform: uppercase;
+      color: var(--text-soft);
+      border-top: 1px solid var(--line);
+      background: linear-gradient(to top, rgba(255,255,255,0.7), transparent);
+    }
+    .footer .grow { flex: 1; }
+    .footer .label { color: var(--text-dim); margin-right: 6px; }
+
+    /* responsive */
+    @media (max-width: 980px) {
+      html, body { overflow: auto; height: auto; min-height: 100vh; }
+      .stations { grid-template-columns: 1fr; }
+      .header { padding: 12px 18px; gap: 12px; }
+      .header-status { display: none; }
+      .telemetry { padding: 8px 18px; gap: 14px; }
+      .main { padding: 16px 18px 12px; }
+      .footer { padding: 10px 18px 18px; }
+      .hero-right { text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <div class="scan-sweep" aria-hidden="true"></div>
+
+  <header class="header">
+    <div class="header-logo">
+      <img src="../assets/aco-logo-white.png" alt="ACO — Automobile Club de l'Ouest">
+    </div>
+    <div class="header-titles">
+      <div class="header-overline">▮ AUTOMOBILE CLUB DE L'OUEST · CRISIS COMMAND</div>
+      <div class="header-title">Centre de commandement</div>
+      <div class="header-id">CALLSIGN <span class="accent">KOBAYASHI-26</span> · OPS-ID 2026-GP-EX · CIRCUIT BUGATTI</div>
+    </div>
+    <div class="header-status">
+      <div class="pill"><span class="dot"></span>SYSTEMS · NOMINAL</div>
+      <div class="pill warn"><span class="dot"></span>EXERCISE · STANDBY</div>
+    </div>
+  </header>
+
+  <div class="telemetry" aria-hidden="true">
+    <span class="tlm" style="animation-delay:0.05s;">[<span class="ok">OK</span>] BOOT <span class="hud">v2.6</span></span>
+    <span class="sep">·</span>
+    <span class="tlm" style="animation-delay:0.18s;">[<span class="ok">OK</span>] LINK <span class="hud">12 MS</span></span>
+    <span class="sep">·</span>
+    <span class="tlm" style="animation-delay:0.32s;">[<span class="ok">OK</span>] FEEDS <span class="hud">VERIFIED</span></span>
+    <span class="sep">·</span>
+    <span class="tlm" style="animation-delay:0.48s;">[<span class="ok">OK</span>] CHRONO <span class="hud">LOCKED</span></span>
+    <span class="sep">·</span>
+    <span class="tlm" style="animation-delay:0.62s;">[<span class="warn">SIM</span>] DATA <span class="warn">FICTIVES — _EXERCICE</span></span>
+    <span class="sep">·</span>
+    <span class="tlm" style="animation-delay:0.80s;">[<span class="hud">RDY</span>] STATIONS <span class="hud">03 / 03</span> ▸</span>
+  </div>
+
+  <main class="main">
+    <section class="hero">
+      <div class="hero-left">
+        <div class="hero-tag">▶ Briefing d'entrée — sélectionnez votre poste</div>
+        <h1>Exercice de gestion de crise<br><span class="accent">GP Moto 2026</span></h1>
+        <div class="hero-meta">
+          <span><span class="label">DATE OPS</span><span class="val">DIM. 10 MAI 2026</span></span>
+          <span><span class="label">SITE</span><span class="val">CIRCUIT BUGATTI · LE MANS</span></span>
+          <span><span class="label">CLASSIFICATION</span><span class="val" style="color:var(--warn)">EXERCICE — DONNÉES FICTIVES</span></span>
+        </div>
+      </div>
+      <div class="hero-right">
+        <span>Heure réelle</span>
+        <span class="clk" id="clk-real">--:--:--</span>
+        <span class="clk-sim" id="clk-sim">SIM --:--:--</span>
+      </div>
+    </section>
+
+    <div class="stations-wrap">
+      <div class="section-head">
+        <h2>Postes opérationnels</h2>
+        <span class="rule"></span>
+        <span class="count">03 STATIONS · ENGAGE</span>
+      </div>
+
+      <section class="stations">
+
+        <a class="station s1" href="player.html">
+          <span class="corner c-tl"></span><span class="corner c-tr"></span>
+          <span class="corner c-bl"></span><span class="corner c-br"></span>
+
+          <div class="station-num">STATION 01 // ROLE-PLAYER</div>
+
+          <svg class="station-icon" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="32" cy="22" r="9"/>
+            <path d="M14 54c0-10 8-16 18-16s18 6 18 16"/>
+            <path d="M8 32 L16 32 M48 32 L56 32 M32 4 L32 10" stroke-dasharray="2 3"/>
+            <circle cx="32" cy="32" r="26" stroke-dasharray="3 5" opacity="0.5"/>
+          </svg>
+
+          <div class="station-title">Participant</div>
+          <div class="station-role">// Joueur · cellule de crise</div>
+          <p class="station-desc">
+            Vue épurée pour les joueurs de l'exercice. Reçoit les inputs au fur et à mesure de leur diffusion par l'animation.
+          </p>
+          <div class="station-cta">
+            <span class="badge wip">EN PRÉPARATION</span>
+            <span>ENGAGE <span class="arrow">▸▸</span></span>
+          </div>
+        </a>
+
+        <a class="station s2" href="master.html">
+          <span class="corner c-tl"></span><span class="corner c-tr"></span>
+          <span class="corner c-bl"></span><span class="corner c-br"></span>
+
+          <div class="station-num">STATION 02 // GAMEMASTER</div>
+
+          <svg class="station-icon" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="32" cy="32" r="22"/>
+            <circle cx="32" cy="32" r="14" opacity="0.6"/>
+            <circle cx="32" cy="32" r="6" opacity="0.4"/>
+            <path d="M32 4 L32 60 M4 32 L60 32" stroke-dasharray="2 4" opacity="0.7"/>
+            <circle cx="44" cy="22" r="2.5" fill="currentColor"/>
+            <circle cx="22" cy="40" r="1.5" fill="currentColor"/>
+            <path d="M32 32 L48 18" stroke-width="1"/>
+          </svg>
+
+          <div class="station-title">Animateur</div>
+          <div class="station-role">// Tableau de bord scénario</div>
+          <p class="station-desc">
+            Console maître : timeline, fiches d'animation, médias d'inject, dispositions PCORG / PCA, contrôle de l'état d'exercice.
+          </p>
+          <div class="station-cta">
+            <span class="badge ready">OPÉRATIONNEL</span>
+            <span>ENGAGE <span class="arrow">▸▸</span></span>
+          </div>
+        </a>
+
+        <a class="station s3" href="livefeed.html">
+          <span class="corner c-tl"></span><span class="corner c-tr"></span>
+          <span class="corner c-bl"></span><span class="corner c-br"></span>
+
+          <div class="station-num">STATION 03 // OBSERVER</div>
+
+          <svg class="station-icon" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="6" y="14" width="52" height="34" rx="2"/>
+            <path d="M6 22 L58 22" opacity="0.5"/>
+            <circle cx="11" cy="18" r="1.2" fill="currentColor"/>
+            <circle cx="15" cy="18" r="1.2" fill="currentColor"/>
+            <circle cx="19" cy="18" r="1.2" fill="currentColor"/>
+            <path d="M14 32 L20 32 L24 38 L30 26 L34 34 L40 30 L50 30" stroke-width="1.5"/>
+            <path d="M22 54 L42 54 M32 48 L32 54"/>
+          </svg>
+
+          <div class="station-title">Live feed</div>
+          <div class="station-role">// Diffusion grand écran</div>
+          <p class="station-desc">
+            Mur d'images opérationnel pour projection en salle. Synthèse temps réel des inject diffusés, horloges, état du dispositif.
+          </p>
+          <div class="station-cta">
+            <span class="badge wip">EN PRÉPARATION</span>
+            <span>ENGAGE <span class="arrow">▸▸</span></span>
+          </div>
+        </a>
+
+      </section>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <span><span class="label">SIGNAL</span>FULL</span>
+    <span><span class="label">SECURE</span>RS256</span>
+    <span><span class="label">UPLINK</span>LE MANS · 47.956N · 0.207E</span>
+    <span class="grow"></span>
+    <span>v2.6 · OPS · ACO/TITAN</span>
+  </footer>
+
+  <script>
+    // Décalage simulation (idem master.html) : J+10 jours 4h
+    const SIM_OFFSET_MS = (10 * 24 + 4) * 3600 * 1000;
+    const pad = n => String(n).padStart(2, '0');
+    function fmt(d) {
+      return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    }
+    function tick() {
+      const now = new Date();
+      const sim = new Date(now.getTime() + SIM_OFFSET_MS);
+      const r = document.getElementById('clk-real');
+      const s = document.getElementById('clk-sim');
+      if (r) r.textContent = fmt(now);
+      if (s) s.textContent = 'SIM ' + fmt(sim);
+    }
+    tick();
+    setInterval(tick, 1000);
+
+    // glitch léger sur les SVG icons
+    const icons = document.querySelectorAll('.station-icon');
+    function glitchOnce() {
+      const i = icons[Math.floor(Math.random() * icons.length)];
+      if (!i) return;
+      const orig = i.style.filter;
+      i.style.filter = 'drop-shadow(0 0 14px currentColor) brightness(1.4) hue-rotate(15deg)';
+      setTimeout(() => { i.style.filter = orig; }, 90);
+    }
+    setInterval(glitchOnce, 9000 + Math.random() * 12000);
+  </script>
+</body>
+</html>

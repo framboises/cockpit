@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>06 - Inputs par pôle - Exercice GP Moto 2026</title>
+<style>
+  @media print {
+    @page { size: A4 portrait; margin: 10mm; }
+    body { font-size: 8pt; background: white; }
+    .no-print { display: none; }
+    .pole-section { page-break-inside: avoid; }
+    h2 { page-break-after: avoid; }
+  }
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; color: #111; background: #f5f5f7; line-height: 1.4; }
+  h1 { font-size: 16pt; margin: 0 0 4px 0; color: #1a3a6c; }
+  h2 { font-size: 12pt; margin: 18px 0 6px 0; color: #1a3a6c; border-bottom: 2px solid #1a3a6c; padding-bottom: 3px; }
+  .subtitle { color: #666; font-size: 10pt; margin-bottom: 14px; }
+  .intro { background: #e7f1ff; border-left: 4px solid #1a3a6c; padding: 10px 14px; margin-bottom: 14px; font-size: 9.5pt; }
+  .charge-box { background: #fef3c7; border-left: 4px solid #d97706; padding: 8px 12px; margin-bottom: 14px; font-size: 9pt; }
+  .pole-section { background: #fff; border-radius: 5px; border: 1px solid #d0d0d0; padding: 10px 14px; margin-bottom: 10px; }
+  .pole-title { font-weight: 700; color: #1a3a6c; font-size: 10.5pt; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #f0f0f0; }
+  .input-line { padding: 4px 0; border-top: 1px solid #f7f7f7; font-size: 8.5pt; }
+  .input-line:first-of-type { border-top: none; }
+  .input-line .timing { color: #1a3a6c; font-weight: 600; margin-right: 6px; font-variant-numeric: tabular-nums; }
+  .input-line .source { color: #666; font-style: italic; }
+  .key-input { background: #fee2e2; padding: 5px 7px; border-radius: 3px; }
+  .phase-marker { color: white; padding: 2px 8px; border-radius: 3px; font-size: 8pt; font-weight: 600; display: inline-block; margin-bottom: 4px; margin-top: 6px; }
+  .phase-marker.p0 { background: #0f766e; }
+  .phase-marker.p1 { background: #1a3a6c; }
+  .phase-marker.p2 { background: #d97706; }
+  .phase-marker.p3 { background: #b91c1c; }
+  .phase-marker.p4 { background: #6b21a8; }
+  .print-btn { position: fixed; top: 12px; right: 12px; background: #1a3a6c; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 10pt; }
+</style>
+</head>
+<body>
+
+<button class="no-print print-btn" onclick="window.print()">Imprimer</button>
+
+<h1>Inputs par pôle de la cellule — Exercice GP Moto 2026</h1>
+<div class="subtitle">Sollicitations permanentes pour chaque membre de la cellule · Calé sur la timeline V4 finale</div>
+
+<div class="intro">
+<strong>Usage.</strong> Cette fiche complète la timeline maîtresse en listant les sollicitations propres à chaque pôle, en plus des inputs déjà présents dans la timeline. Elle garantit qu'aucun pôle ne se tourne les pouces et que chacun a du grain à moudre tout au long.
+<br><br>
+<strong>⚠️ Important :</strong> les inputs des services de l'État (Préfet, SDIS, SAMU, Police, Procureur, Inspection du travail, Préfecture) <strong>ne figurent PAS dans cette fiche</strong>. Ils transitent tous par Amandine au PC Autorités, qui les transmet à la cellule en temps réel. Voir la fiche dédiée <em>04_animation_services_etat.html</em>.
+<br><br>
+<strong>Phase 0 = 12h45-13h15 (préliminaire). Phase 1 = 13h15-13h45 (choc). Phase 2 = 13h45-14h30 (bilan trompeur). Phase 3 = 14h30-14h55 (cacophonie + bascule). Phase 4 = 14h55-15h25 (mode subordonné + bombes RH).</strong>
+</div>
+
+<div class="charge-box">
+<strong>⚠️ Calibrage de la charge.</strong> Les inputs sont volontairement étalés pour laisser à la cellule le temps de réfléchir et de décider. Compter en moyenne <strong>1 input toutes les 6-8 minutes par pôle</strong>, soit 3-5 inputs par phase. Le pic de charge est en phase 1 (choc) et phase 3 (cacophonie). En phase 2, on laisse plus d'air pour les délibérations sur le maintien de la course. En phase 4, les inputs sont souvent <em>subis</em> et n'attendent pas de décision.
+</div>
+
+<!-- MÉDICAL -->
+<div class="pole-section">
+<div class="pole-title">Pôle Médical — Mathieu Navarre / Fabien Rocatcher (suppl.)</div>
+<span class="phase-marker p0">PHASE 0 (12h45-13h15)</span>
+<div class="input-line"><span class="timing">12:55</span> <span class="source">PCORG :</span> Pascale Lemée part vérifier la T11 avec Nathan, possible exposition à risque structurel. Tu pré-positionnes du médical à proximité ?</div>
+<div class="input-line"><span class="timing">13:08</span> <span class="source">Dr Chavrier (CMS) :</span> Mathieu, on me remonte que la T11 vibre. Si on doit évacuer, je dois préparer le CMS à recevoir des malaises ?</div>
+<span class="phase-marker p1">PHASE 1 (13h15-13h45) — pic de charge</span>
+<div class="input-line"><span class="timing">13:18</span> <span class="source">Dr Chavrier (CMS) :</span> Bascule plan blanc local proposée, j'attends ton OK</div>
+<div class="input-line"><span class="timing">13:23</span> <span class="source">Marc (Croix Rouge) :</span> Bilan rassurant, 6 blessés, "moins grave que ce qu'on craignait"</div>
+<div class="input-line"><span class="timing">13:31</span> <span class="source">Marc (Croix Rouge) :</span> Bilan ACO 9 (1 UA + 1 à confirmer), reste rassurant sur la dynamique</div>
+<div class="input-line"><span class="timing">13:37</span> <span class="source">Dr Chavrier :</span> 4 victimes au CMS, manque morphine et sutures, peut demander SAMU ?</div>
+<div class="input-line"><span class="timing">13:41</span> <span class="source">Marc :</span> Plafonne à 11 blessés, bloqué par SDIS sur zone est (attente expertise structure)</div>
+<span class="phase-marker p2">PHASE 2 (13h45-14h30) — air pour réfléchir</span>
+<div class="input-line"><span class="timing">13:48</span> <span class="source">Marc :</span> SDIS autorisé à pousser, bilan ACO 13 victimes, voix au sud-est</div>
+<div class="input-line"><span class="timing">14:03</span> <span class="source">Marc :</span> Bloqué depuis 10 min, voix sud-est, panneau pub gêne, bilan stable</div>
+<div class="input-line"><span class="timing">14:18</span> <span class="source">CHM Le Mans :</span> Combien d'UA on attend exactement ? On prépare 4 blocs ou on monte à 8 ?</div>
+<div class="input-line"><span class="timing">14:25</span> <span class="source">Dr Chavrier (CMS) :</span> CMS sature, on doit envoyer le surplus directement au CHM ou activer Antarès</div>
+<span class="phase-marker p3">PHASE 3 (14h30-14h55) — bascule</span>
+<div class="input-line key-input"><span class="timing">14:32</span> <span class="source">Marc (Croix Rouge) :</span> URGENT, panneau dégagé, beaucoup de monde dessous, on réorganise</div>
+<div class="input-line"><span class="timing">14:44</span> <span class="source">Marc :</span> Pascale Lemée UA critique hémorragie + stagiaire Nathan vivant fracture multiple</div>
+<span class="phase-marker p4">PHASE 4 (14h55-15h25)</span>
+<div class="input-line"><span class="timing">15:08</span> <span class="source">CHU Tours :</span> Pascale Lemée évacuée chez nous, pronostic vital engagé. Demande à parler à votre médecin du travail.</div>
+<div class="input-line"><span class="timing">15:18</span> <span class="source">Médecin du travail :</span> J'apprends pour Pascale et Nathan, je viens. Activation cellule psy IAPR pour vos équipes.</div>
+</div>
+
+<!-- JURIDIQUE -->
+<div class="pole-section">
+<div class="pole-title">Pôle Juridique — Pierre Lucas / Julie Accolas (suppl.)</div>
+<span class="phase-marker p0">PHASE 0</span>
+<div class="input-line key-input"><span class="timing">13:05</span> <span class="source">Séverin (en cellule) :</span> Sort le mail décembre 2025 sur T11 / CAPEX. Mise en cause Beaumesnil + Ludovic + Pierrick destinataires sans réponse. Lucas anticipe les conséquences pénales ?</div>
+<span class="phase-marker p1">PHASE 1</span>
+<div class="input-line"><span class="timing">13:32</span> <span class="source">Sébastien Atger (Alcor, à Pierrick mais Lucas alerté) :</span> PV de réception sans réserve, défense d'Alcor</div>
+<span class="phase-marker p2">PHASE 2</span>
+<div class="input-line"><span class="timing">13:46</span> <span class="source">DJ PHA Paris (Marc Vasseur) :</span> Pierre, on doit cadrer la com conjointe et la répartition des responsabilités. Statuts SEP ?</div>
+<div class="input-line"><span class="timing">14:08</span> <span class="source">Maxime (Service Informatique) :</span> Police au service info, demande exports massifs. Lucas doit cadrer.</div>
+<div class="input-line"><span class="timing">14:10</span> <span class="source">Atger (escalade) :</span> Maître Delavergne va activer, plainte si mise en cause publique, et Alcor arrête les 24h Autos</div>
+<div class="input-line"><span class="timing">14:22</span> <span class="source">Pascale Robert (Mediapart, mail) :</span> Article 18h, droit de réponse 17h30, 6 questions précises (Galuret, Pascale, Nathan, scan, économies, sous-commission)</div>
+<span class="phase-marker p3">PHASE 3</span>
+<div class="input-line"><span class="timing">14:43</span> <span class="source">Maître Berger (avocat de victime) :</span> Je représente Mme Garnier, époux porté disparu, partie civile demain</div>
+<span class="phase-marker p4">PHASE 4</span>
+<div class="input-line"><span class="timing">15:00</span> <span class="source">Maître Delavergne (avocat Alcor) :</span> Toute mise en cause publique = poursuites pour dénigrement</div>
+<div class="input-line key-input"><span class="timing">15:10</span> <span class="source">Mail Sébastien Atger (Alcor) à Vincent + Pierrick :</span> Alcor décline les 24h Autos, menace de plainte diffamation, "on n'a jamais reçu le mail Galuret"</div>
+<div class="input-line"><span class="timing">15:14</span> <span class="source">Veritas (bureau de contrôle) :</span> Coordonner notre version sur les visites annuelles (risque pénal d'entente)</div>
+<div class="input-line"><span class="timing">15:20</span> <span class="source">Courtier Marsh (assurance SEP) :</span> Déclaration sinistre dans 2h sinon déchéance contractuelle</div>
+</div>
+
+<!-- COMMUNICATION -->
+<div class="pole-section">
+<div class="pole-title">Pôle Communication — Anne-Laure Vigneron / Jean-Baptiste Schmidt (suppl.)</div>
+<span class="phase-marker p0">PHASE 0</span>
+<div class="input-line"><span class="timing">13:10</span> <span class="source">Bertrand (speaker) :</span> Vous me donnez le texte exact pour évacuer T11 ? Bilingue ? Sans paniquer les autres tribunes ?</div>
+<span class="phase-marker p1">PHASE 1 — montée des médias</span>
+<div class="input-line"><span class="timing">13:30</span> <span class="source">Tweet @JulienGP_72 (témoin direct) :</span> 32K likes, 1.8M vues</div>
+<div class="input-line"><span class="timing">13:39</span> <span class="source">Tweet @OuestFrance :</span> 4.8K likes, 580K vues, journaliste arrive</div>
+<div class="input-line"><span class="timing">13:42</span> <span class="source">RMC Sport (radio direct) :</span> "Quel chiffre on annonce ? Vous démentez le 15 ?"</div>
+<span class="phase-marker p2">PHASE 2 — pression médiatique constante</span>
+<div class="input-line"><span class="timing">13:47</span> <span class="source">Tweet @VeriteCircuit72 (accusateur) :</span> 41K likes, 2.4M vues, "économies maintenance"</div>
+<div class="input-line"><span class="timing">13:50</span> <span class="source">Thomas Léger (Ouest-France) :</span> Anne-Laure, point off ? Combien de blessés ? Cérémonie ?</div>
+<div class="input-line"><span class="timing">13:52</span> <span class="source">Marie Dubois (BFMTV) :</span> Porte-parole en duplex dans 10 min, sinon sources alternatives</div>
+<div class="input-line"><span class="timing">14:01</span> <span class="source">Tweet @PatriotesEveilles (complotiste) :</span> 18K likes, 980K vues, théorie sabotage drapeau iranien</div>
+<div class="input-line"><span class="timing">14:02</span> <span class="source">TikTok @temoin_lemans_72 :</span> 2,4M vues</div>
+<div class="input-line"><span class="timing">14:15</span> <span class="source">Vidéo Quartararo (Reels Instagram) :</span> Pilote français court-circuite la cellule de communication</div>
+<div class="input-line"><span class="timing">14:22</span> <span class="source">Pascale Robert (Mediapart) :</span> Article 18h, droit de réponse 17h30</div>
+<div class="input-line"><span class="timing">14:25</span> <span class="source">Service de presse Dorna :</span> Communiqué Dorna unilatéral 15 lightly injured</div>
+<div class="input-line"><span class="timing">14:28</span> <span class="source">Marie Dubois (BFMTV) :</span> Témoin sur le plateau "tribune dangereuse signalée aux 24h motos"</div>
+<span class="phase-marker p3">PHASE 3 — basculement médiatique</span>
+<div class="input-line key-input"><span class="timing">14:46</span> <span class="source">BFMTV — édition spéciale diffusée :</span> Annonce 30 victimes, vidéo TikTok en boucle, témoin alarmiste. Le Préfet présent regarde.</div>
+<div class="input-line"><span class="timing">14:50</span> <span class="source">L'Équipe :</span> Demande tribune de réaction officielle ACO, à publier</div>
+<span class="phase-marker p4">PHASE 4 — monopole préfecture</span>
+<div class="input-line"><span class="timing">15:14</span> <span class="source">Le Monde (mail) :</span> Article en préparation pour ce soir 22h sur la chronologie de l'effondrement, droit de réponse</div>
+<div class="input-line"><span class="timing">15:22</span> <span class="source">L'Équipe :</span> Demande d'interview du DG ACO en exclusivité demain</div>
+</div>
+
+<!-- INFRASTRUCTURES -->
+<div class="pole-section">
+<div class="pole-title">Pôle Infrastructures — Séverin Galuret / Jérôme Papin envoyé sur place</div>
+<span class="phase-marker p0">PHASE 0 — Séverin est central</span>
+<div class="input-line key-input"><span class="timing">12:45</span> <span class="source">Animateur (téléphone direct à Séverin) :</span> Premier signal — élément tombé T11, Yvon inquiet, Pierrick a aussi été appelé. Que décides-tu ?</div>
+<div class="input-line"><span class="timing">13:00</span> <span class="source">Jérôme Papin (sur place) :</span> Premier constat visuel — boulon de jonction nord-est, structure paraît OK depuis le sol, demande à monter en hauteur</div>
+<div class="input-line key-input"><span class="timing">13:05</span> <span class="source">Séverin sort le mail décembre 2025 :</span> Beaumesnil + Ludovic + Pierrick destinataires, alerte non répondue, budget CAPEX</div>
+<div class="input-line key-input"><span class="timing">13:06</span> <span class="source">Jérôme Papin :</span> Avis défavorable structurel — jeu anormal sur 2 supports nord-est, à mon avis on évacue. Pascale Lemée + Nathan sur place avec lui.</div>
+<div class="input-line"><span class="timing">13:14</span> <span class="source">Jérôme Papin :</span> Je redescends, je le sens pas du tout. Pascale est encore en hauteur avec Nathan, elle finit ses photos.</div>
+<span class="phase-marker p1">PHASE 1</span>
+<div class="input-line"><span class="timing">13:25</span> <span class="source">Jérôme Papin (post-effondrement, sous le choc) :</span> Pascale et Nathan sont restés là-haut. Je l'ai sauvé de 30 secondes.</div>
+<div class="input-line"><span class="timing">13:36</span> <span class="source">Inspecteur Veritas (sur site) :</span> Examen visuel rapide des 25 autres tribunes : aucune anomalie, défaut localisé sur T11</div>
+<span class="phase-marker p2">PHASE 2</span>
+<div class="input-line"><span class="timing">14:18</span> <span class="source">Stéphane (ateliers ACO) :</span> Séverin, j'ai retrouvé un autre mail dans mes archives, février 2026, bruits anormaux T11 signalés à Patrick</div>
+<span class="phase-marker p3">PHASE 3</span>
+<div class="input-line key-input"><span class="timing">14:33</span> <span class="source">Pierrick Navarre (en cellule, briefé en amont) :</span> Séverin, on doit clarifier qui pilotait Alcor.</div>
+<span class="phase-marker p4">PHASE 4</span>
+<div class="input-line"><span class="timing">15:14</span> <span class="source">Veritas (bureau de contrôle) :</span> Coordonner notre version sur les visites annuelles (risque pénal d'entente)</div>
+<div class="input-line"><span class="timing">15:20</span> <span class="source">Bureau d'études (architecte ACO) :</span> Séverin, je suis appelé pour témoigner, j'ai besoin de la doc T11</div>
+</div>
+
+<!-- PRODUCTION -->
+<div class="pole-section">
+<div class="pole-title">Pôle Production Événements — Christelle Jarry / Pierrick Navarre</div>
+<span class="phase-marker p0">PHASE 0 — Pierrick aussi alerté en direct</span>
+<div class="input-line key-input"><span class="timing">12:45</span> <span class="source">Animateur (téléphone direct à Pierrick) :</span> Premier signal — élément tombé T11. Décision à prendre : faire venir Alcor sur place ?</div>
+<div class="input-line"><span class="timing">13:00</span> <span class="source">Si Pierrick a appelé Alcor :</span> Alexis Vidal (Alcor) répond, dit qu'il arrive sur site dans 20 min</div>
+<span class="phase-marker p1">PHASE 1</span>
+<div class="input-line key-input"><span class="timing">13:32</span> <span class="source">Sébastien Atger (DG Alcor) :</span> Pierrick, on l'a montée selon les plans validés. Pierrick travaille avec eux depuis longtemps.</div>
+<span class="phase-marker p2">PHASE 2</span>
+<div class="input-line"><span class="timing">13:50</span> <span class="source">Représentant Michelin :</span> 80 invités VIP au paddock, on rembourse ? Vous gardez le programme tronqué ?</div>
+<div class="input-line"><span class="timing">14:00</span> <span class="source">Représentant Red Bull :</span> Tente animation dans le périmètre, matos, on remballe ?</div>
+<div class="input-line key-input"><span class="timing">14:10</span> <span class="source">Sébastien Atger (durci) :</span> Pierrick, Alcor ne sera pas le bouc émissaire. Si quelqu'un sort un mot dans la presse, on saisit nos avocats. Et 24h Autos = annulé pour nous.</div>
+<div class="input-line"><span class="timing">14:20</span> <span class="source">Tessier en cellule (via Christelle) :</span> Décision course tournée vers vous, infrastructures OK pour reprise hommage ?</div>
+<span class="phase-marker p3">PHASE 3</span>
+<div class="input-line key-input"><span class="timing">14:33</span> <span class="source">Pierrick (en cellule, briefé) :</span> Interpelle Séverin sur qui pilotait Alcor</div>
+<div class="input-line"><span class="timing">14:38</span> <span class="source">Régisseur podium :</span> Pilotes commencent à se changer, Marc Marquez et Jorge Martin partis</div>
+<div class="input-line"><span class="timing">14:45</span> <span class="source">Régisseur podium VIP :</span> 200 personnes au village partenaires veulent partir, qui pilote le débriefing ?</div>
+<span class="phase-marker p4">PHASE 4</span>
+<div class="input-line key-input"><span class="timing">15:10</span> <span class="source">Mail Atger (escalade écrite) :</span> Mise en cause publique de Galuret par Alcor, menace de plainte, fin de l'engagement 24h Auto</div>
+<div class="input-line"><span class="timing">15:18</span> <span class="source">Carmelo Ezpeleta (insiste) :</span> Reprendre la course mañana, demain matin, "I will call the Préfet myself"</div>
+<div class="input-line"><span class="timing">15:22</span> <span class="source">Direction logistique paddocks :</span> Pierrick, on a 600 véhicules à sortir du parking interne, on bloque tout ?</div>
+</div>
+
+<!-- CIRCUIT -->
+<div class="pole-section">
+<div class="pole-title">Pôle Circuit — Sylvain Tessier / Stéphane Donnet (suppl.)</div>
+<span class="phase-marker p1">PHASE 1 — Tessier est en première ligne sur le dilemme course</span>
+<div class="input-line key-input"><span class="timing">13:17</span> <span class="source">Stéphane Donnet (Direction de course, voix tendue) :</span> Sylvain, mais il se passe quoi là ?! On fait quoi, on fait la course ou pas ?! Cérémonie dans 34 min !</div>
+<div class="input-line"><span class="timing">13:30</span> <span class="source">Mike Trimby (Race Director Dorna) :</span> Course raccourcie 10 tours, hommage, podium dédié aux victimes</div>
+<span class="phase-marker p2">PHASE 2</span>
+<div class="input-line key-input"><span class="timing">13:45</span> <span class="source">Stéphane Donnet (rappel) :</span> Sylvain, dans 6 min on est censés faire la cérémonie ! Marc Marquez pose des questions !</div>
+<div class="input-line"><span class="timing">13:50</span> <span class="source">Johann Zarco (à Claude Michy mais via Tessier) :</span> Avec Fabio prêts à courir hommage, drapeaux noirs</div>
+<div class="input-line"><span class="timing">13:55</span> <span class="source">Loris Capirossi (FIM, présence physique) :</span> Decision in 20 min. Otherwise FIM takes it.</div>
+<div class="input-line"><span class="timing">14:00</span> <span class="source">Président FFM (téléphone) :</span> On peut reprendre la course ? Notre fédération suit votre décision.</div>
+<div class="input-line"><span class="timing">14:15</span> <span class="source">Vidéo Quartararo (Reels) :</span> "Probably no race today" — court-circuit officiel</div>
+<div class="input-line"><span class="timing">14:25</span> <span class="source">Race direction Dorna :</span> Sylvain, what's your decision ? Cancelled or postponed ? Teams are waiting.</div>
+<span class="phase-marker p3">PHASE 3</span>
+<div class="input-line"><span class="timing">14:38</span> <span class="source">Régisseur podium :</span> Pilotes en train de quitter leurs stands, Marc Marquez et Jorge Martin déjà partis</div>
+<div class="input-line"><span class="timing">14:48</span> <span class="source">Capirossi (FIM officielle) :</span> OK FIM officially declares the race cancelled. We need an official statement.</div>
+<span class="phase-marker p4">PHASE 4</span>
+<div class="input-line"><span class="timing">15:02</span> <span class="source">Carmelo Ezpeleta (rappelle) :</span> Reprendre demain matin, no problemo, contratos, tu vois ?</div>
+<div class="input-line"><span class="timing">15:18</span> <span class="source">Délégué FIM :</span> We need an official joint statement from you and Dorna.</div>
+</div>
+
+<!-- SÛRETÉ -->
+<div class="pole-section">
+<div class="pole-title">Pôle Sécurité / Sûreté — Lisa Feufeu (suppl. effective, Le Mené dirige l'exercice)</div>
+<span class="phase-marker p0">PHASE 0</span>
+<div class="input-line key-input"><span class="timing">13:11</span> <span class="source">PCORG :</span> Lisa, on n'a que 4 patrouilles disponibles, 2 agents accueil au lieu de 4 sur T11. Pour évacuer 1 100 personnes, c'est très juste.</div>
+<span class="phase-marker p1">PHASE 1</span>
+<div class="input-line"><span class="timing">13:24</span> <span class="source">Paul (chef patrouille 1) :</span> Renforts police demandés, gens partout, panique</div>
+<span class="phase-marker p2">PHASE 2</span>
+<div class="input-line"><span class="timing">13:50</span> <span class="source">DDPN Menard :</span> 2 sections CRS arrivent, carto à jour ?</div>
+<div class="input-line"><span class="timing">14:01</span> <span class="source">Tweet @PatriotesEveilles :</span> Théorie sabotage drapeau iranien — Lisa doit alerter via Amandine ?</div>
+<div class="input-line"><span class="timing">14:25</span> <span class="source">PCORG :</span> Drone BFMTV en zone NOTAM, signalement DGAC à valider</div>
+<span class="phase-marker p3">PHASE 3</span>
+<div class="input-line"><span class="timing">14:35</span> <span class="source">Sûreté terrain :</span> 2 personnes en faux secouristes, journalistes infiltrés</div>
+<div class="input-line"><span class="timing">14:46</span> <span class="source">Sécurité portail Sud :</span> Voiture qui a foncé sur le portail puis demi-tour, plaque relevée</div>
+<div class="input-line"><span class="timing">14:50</span> <span class="source">Régie TV ACO :</span> Drones multiples (BFMTV, RMC, non identifié) en zone interdite</div>
+<span class="phase-marker p4">PHASE 4</span>
+<div class="input-line"><span class="timing">15:10</span> <span class="source">Sûreté terrain :</span> Périmètre élargi à tenir, plus que 8 agents disponibles, demande renfort CRS</div>
+</div>
+
+<!-- BILLETTERIE -->
+<div class="pole-section">
+<div class="pole-title">Pôle Billetterie / Service Client — Émilie Renaudin / Delphine Tourancheau (suppl.)</div>
+<span class="phase-marker p0">PHASE 0</span>
+<div class="input-line"><span class="timing">12:58</span> <span class="source">Famille spectateur :</span> Premier appel "veille", veut savoir si c'est sûr de rester en T11</div>
+<span class="phase-marker p1">PHASE 1</span>
+<div class="input-line"><span class="timing">13:25</span> <span class="source">Vague 1 :</span> 3 appels simultanés en attente, familles en panique TikTok</div>
+<div class="input-line"><span class="timing">13:35</span> <span class="source">Vague 2 :</span> 28 appels en attente, familles cherchent en T11/T10/T12</div>
+<span class="phase-marker p2">PHASE 2</span>
+<div class="input-line"><span class="timing">13:46</span> <span class="source">Spectateur menaçant — Furiani :</span> Insulte, menace prison, déposera plainte</div>
+<div class="input-line"><span class="timing">13:51</span> <span class="source">Vague 3 (saturation) :</span> 60 appels en attente, médias se font passer pour familles</div>
+<div class="input-line"><span class="timing">14:14</span> <span class="source">Mme Garnier :</span> Mari Bernard en T11 place 47 rang B, plus de nouvelles</div>
+<div class="input-line"><span class="timing">14:24</span> <span class="source">Vague 4 (médias indirects) :</span> RTL fait passer pour famille, BFMTV demande "salariés ACO disparus"</div>
+<span class="phase-marker p3">PHASE 3</span>
+<div class="input-line key-input"><span class="timing">14:37</span> <span class="source">Vague 5 (post-Quartararo) :</span> 100 appels simultanés, "même Quartararo dit qu'il y a des morts !"</div>
+<div class="input-line"><span class="timing">14:50</span> <span class="source">Maître Berger :</span> Confirmation présence M. Garnier en T11, scan d'entrée ? (re-piège)</div>
+<span class="phase-marker p4">PHASE 4</span>
+<div class="input-line"><span class="timing">14:52</span> <span class="source">Standard ACO en panne :</span> PABX saturé, bascule numéro vert préfecture ou on coupe</div>
+<div class="input-line"><span class="timing">15:08</span> <span class="source">Direction commerciale :</span> 8 000 demandes de remboursement en 1h sur l'ensemble des billets</div>
+<div class="input-line"><span class="timing">15:20</span> <span class="source">Émilie (en cellule, débriefe) :</span> 240 appels pris en 2h, 12 collègues en pleurs, cellule psy demandée en priorité</div>
+</div>
+
+<!-- RH -->
+<div class="pole-section">
+<div class="pole-title">Pôle RH — Charlotte Legay / Lepesant (suppl.)</div>
+<span class="phase-marker p1">PHASE 1</span>
+<div class="input-line key-input"><span class="timing">13:36</span> <span class="source">Chef PCORG :</span> Charlotte, on cherche Pascale Lemée + stagiaire Nathan, talkies HS depuis 13h14</div>
+<span class="phase-marker p2">PHASE 2</span>
+<div class="input-line"><span class="timing">13:50</span> <span class="source">Salariés ACO sur site :</span> On reste, on évacue ?</div>
+<div class="input-line key-input"><span class="timing">13:58</span> <span class="source">Frédéric Houlbert (paie) :</span> Pascale 72h cette semaine au lieu de 60h dérogatoires + Nathan stage non actif (prolongation informelle)</div>
+<div class="input-line"><span class="timing">14:10</span> <span class="source">CSE-CSSCT :</span> Demande convocation extraordinaire dans la journée</div>
+<div class="input-line key-input"><span class="timing">14:18</span> <span class="source">Mail consolidé Houlbert :</span> Faute lourde employeur, Inspection du travail va débarquer</div>
+<div class="input-line"><span class="timing">14:25</span> <span class="source">DRH PHA :</span> On a 4 salariés PHA en T11 normalement, votre liste ?</div>
+<span class="phase-marker p3">PHASE 3</span>
+<div class="input-line"><span class="timing">14:35</span> <span class="source">Marc (Croix Rouge) :</span> Pascale UA critique extraite + Nathan vivant fracture multiple</div>
+<div class="input-line key-input"><span class="timing">14:45</span> <span class="source">Émilie (chef de service de Pascale) :</span> Charlotte, je l'ai envoyée à T11 à 13h05 alors qu'elle finissait à 13h. Je suis dans la merde, l'ACO est dans la merde.</div>
+<div class="input-line"><span class="timing">14:48</span> <span class="source">Médecin du travail :</span> Activation cellule psy IAPR, vient sur place</div>
+<div class="input-line"><span class="timing">14:50</span> <span class="source">Bénévole Croix Blanche :</span> Je peux plus tenir, qu'on me relève</div>
+<span class="phase-marker p4">PHASE 4</span>
+<div class="input-line key-input"><span class="timing">15:18</span> <span class="source">Mari de Pascale Lemée :</span> Pourquoi elle y était ? Elle finissait à 13h. Elle me disait depuis 3 semaines qu'elle bossait trop.</div>
+<div class="input-line"><span class="timing">15:20</span> <span class="source">Représentants du personnel CSE :</span> CSE extraordinaire ce soir, droit d'alerte</div>
+<div class="input-line"><span class="timing">15:24</span> <span class="source">Maman de Nathan (stagiaire) :</span> Mon fils est blessé, comment c'est possible qu'il était en stage là-bas ?</div>
+</div>
+
+<!-- INSTITUTIONNELS -->
+<div class="pole-section">
+<div class="pole-title">Pôle Institutionnels — Valérie Girard / Anne-Frédérique Dupont (suppl.)</div>
+<span class="phase-marker p1">PHASE 1</span>
+<div class="input-line"><span class="timing">13:44</span> <span class="source">SMS Préfet :</span> J'arrive dans 15 min, bilan structuré pour mon arrivée</div>
+<span class="phase-marker p2">PHASE 2</span>
+<div class="input-line"><span class="timing">13:43</span> <span class="source">Stéphane Le Foll (Maire du Mans, à DG mais Girard alertée) :</span> 40M€ d'impact, 10 ans d'image, "on n'est pas Furiani"</div>
+<div class="input-line"><span class="timing">14:25</span> <span class="source">Ministre des Sports (présent dans les loges) :</span> Souhaite être informé avant départ</div>
+<span class="phase-marker p3">PHASE 3</span>
+<div class="input-line"><span class="timing">14:48</span> <span class="source">Sénateur de la Sarthe :</span> Demande un point téléphonique avant 18h, propose intervention au Sénat</div>
+<span class="phase-marker p4">PHASE 4</span>
+<div class="input-line"><span class="timing">15:22</span> <span class="source">Région Pays de la Loire :</span> Le président demande à se rendre sur place avec une délégation</div>
+</div>
+
+<!-- COMMERCIAL -->
+<div class="pole-section">
+<div class="pole-title">Pôle Commercial / Hospitalité — Stéphane Andriolo / Élodie Lebouilleux (suppl.)</div>
+<span class="phase-marker p2">PHASE 2</span>
+<div class="input-line"><span class="timing">13:50</span> <span class="source">Michelin :</span> 80 invités VIP au paddock, on rembourse ? Programme tronqué ?</div>
+<div class="input-line"><span class="timing">14:00</span> <span class="source">Red Bull :</span> Tente animation, matos, on remballe ?</div>
+<div class="input-line"><span class="timing">14:10</span> <span class="source">Liqui Moly :</span> 30 invités B2B en train de craquer, qui leur parle ?</div>
+<span class="phase-marker p3">PHASE 3</span>
+<div class="input-line"><span class="timing">14:45</span> <span class="source">Loge ministérielle :</span> Secrétaire d'État Sports veut quitter le site, sécurisation</div>
+<span class="phase-marker p4">PHASE 4</span>
+<div class="input-line"><span class="timing">15:05</span> <span class="source">Service ticketing :</span> 8 000 demandes de remboursement</div>
+<div class="input-line"><span class="timing">15:15</span> <span class="source">Sponsors principaux :</span> Demande de réunion d'urgence demain pour réviser le contrat 2027</div>
+<div class="input-line"><span class="timing">15:20</span> <span class="source">Direction commerciale :</span> Annulations en chaîne sur les 24h Auto de juin (Alcor + autres)</div>
+</div>
+
+<!-- IT/ÉLEC -->
+<div class="pole-section">
+<div class="pole-title">Pôle Réseaux Info / Électricité — Benjamin Guyard</div>
+<span class="phase-marker p0">PHASE 0</span>
+<div class="input-line"><span class="timing">12:59</span> <span class="source">Technicien sono / écrans T11 :</span> Inquiétude PCORG, faut-il vérifier CCTV T11 par anticipation ?</div>
+<div class="input-line"><span class="timing">13:10</span> <span class="source">PCORG :</span> Comment on diffuse un message d'évacuation sur la T11 ? Process pas clair.</div>
+<span class="phase-marker p1">PHASE 1</span>
+<div class="input-line"><span class="timing">13:27</span> <span class="source">Astreinte technique terrain :</span> Disjoncteur sauté T11, caméras CCTV nord coupées + écrans HS</div>
+<span class="phase-marker p2">PHASE 2</span>
+<div class="input-line"><span class="timing">13:53</span> <span class="source">Service informatique (alerte automatique) :</span> PABX 95% saturation, 3 options à arbitrer</div>
+<div class="input-line"><span class="timing">14:00</span> <span class="source">Vigneron :</span> Site web ACO crashe (12 000 connexions), bascule page d'urgence ?</div>
+<div class="input-line key-input"><span class="timing">14:08</span> <span class="source">Maxime (Service Informatique ACO) :</span> Police au service info avec réquisition signée, exports demandés sous huissier, conduite à tenir ?</div>
+<div class="input-line"><span class="timing">14:14</span> <span class="source">PCORG :</span> Écrans géants face T8 affichent encore le compte à rebours, ça crée la confusion</div>
+<span class="phase-marker p3">PHASE 3</span>
+<div class="input-line"><span class="timing">14:42</span> <span class="source">Charlotte Legay (RH) :</span> Extraction certifiée badges Pascale Lemée + données Nathan, pour Inspection demain</div>
+<div class="input-line"><span class="timing">14:50</span> <span class="source">Pierre Lucas :</span> Réquisition complémentaire = TOUS les mails ACO/PHA mentionnant T11 sur 5 mois, mail décembre 2025 inclus, délai 12h</div>
+<span class="phase-marker p4">PHASE 4</span>
+<div class="input-line"><span class="timing">15:18</span> <span class="source">Astreinte technique :</span> Wifi public tombé, gens veulent prévenir leur famille</div>
+</div>
+
+<!-- EMP -->
+<div class="pole-section">
+<div class="pole-title">Pôle EMP — Christophe Michy / Renaud Jeanfils (suppl.)</div>
+<span class="phase-marker p1">PHASE 1</span>
+<div class="input-line"><span class="timing">13:25</span> <span class="source">Régisseur car régie Dorna :</span> Cannot cut without Madrid</div>
+<div class="input-line"><span class="timing">13:30</span> <span class="source">Mike Trimby (Race Director Dorna) :</span> Course raccourcie 10 tours, hommage</div>
+<span class="phase-marker p2">PHASE 2</span>
+<div class="input-line"><span class="timing">13:50</span> <span class="source">Régie Dorna :</span> We cut images of T11 specifically, that's max</div>
+<div class="input-line"><span class="timing">13:50</span> <span class="source">Johann Zarco :</span> Avec Fabio prêts à courir hommage, drapeaux noirs</div>
+<div class="input-line"><span class="timing">14:10</span> <span class="source">Producteur Canal+ :</span> Duplex à 16h, validez ?</div>
+<div class="input-line key-input"><span class="timing">14:15</span> <span class="source">Vidéo Quartararo (Reels) :</span> Court-circuite la chaîne officielle</div>
+<div class="input-line"><span class="timing">14:25</span> <span class="source">Service de presse Dorna :</span> Communiqué unilatéral 15 lightly injured</div>
+<span class="phase-marker p3">PHASE 3</span>
+<div class="input-line"><span class="timing">14:40</span> <span class="source">Direction TV ACO :</span> Journaliste réclame images signal interne</div>
+<span class="phase-marker p4">PHASE 4</span>
+<div class="input-line"><span class="timing">15:02</span> <span class="source">Carmelo Ezpeleta (rappelle) :</span> Reprendre la course mañana, demain matin</div>
+<div class="input-line"><span class="timing">15:15</span> <span class="source">Régie Dorna :</span> We need to know if the live signal continues or stops</div>
+<div class="input-line"><span class="timing">15:20</span> <span class="source">Capirossi (FIM) :</span> Course officiellement annulée, statement officiel demandé</div>
+</div>
+
+<!-- HISTORIEN -->
+<div class="pole-section">
+<div class="pole-title">Historien — Sandrine Picouleau / Sandra Lechêne (suppl.)</div>
+<span class="phase-marker p0">PHASE 0</span>
+<div class="input-line key-input"><span class="timing">12:50</span> <span class="source">Animateur :</span> Démarrage du livre de bord. Décision évacuer / pas évacuer = bombe judiciaire en gestation. Tout doit être horodaté.</div>
+<div class="input-line"><span class="timing">En continu</span> <span class="source">Animateur :</span> Toutes les 10 min, contrôle livre de bord. Heure exacte décision X ? Qui ? Sur quelle info ? Si pas, point débrief.</div>
+<span class="phase-marker p2">PHASE 2</span>
+<div class="input-line"><span class="timing">14:00</span> <span class="source">Lucas :</span> Sandrine, je viens valider le livre de bord, je voudrais relire les 30 dernières min.</div>
+<span class="phase-marker p3">PHASE 3</span>
+<div class="input-line"><span class="timing">14:30</span> <span class="source">DG :</span> Sortez-moi les décisions prises depuis le début, je dois faire un point au Préfet.</div>
+<span class="phase-marker p4">PHASE 4</span>
+<div class="input-line"><span class="timing">15:05</span> <span class="source">Lucas :</span> Le livre de bord doit être verrouillé, signé et horodaté avant export pour Police</div>
+</div>
+
+<!-- PRÉPARATEURS -->
+<div class="pole-section">
+<div class="pole-title">Préparateurs salle — Paul Tabardel / Toze Coelho (suppl.)</div>
+<span class="phase-marker p0">PHASE 0</span>
+<div class="input-line"><span class="timing">12:50</span> <span class="source">Ouverture salle de crise :</span> Test équipements, valise, projection livre de bord, TV, talkies. Cellule arrive.</div>
+<span class="phase-marker p1">PHASE 1</span>
+<div class="input-line"><span class="timing">13:30</span> <span class="source">Animateur :</span> PCORG demande une 2e radio chargée, vous en avez ?</div>
+<span class="phase-marker p2">PHASE 2</span>
+<div class="input-line"><span class="timing">14:00</span> <span class="source">Animateur :</span> Projecteur livre de bord HS, intervention urgente</div>
+<div class="input-line"><span class="timing">14:04</span> <span class="source">DG :</span> Préfet et Procureur dans la salle, boissons, confort ?</div>
+<div class="input-line"><span class="timing">14:25</span> <span class="source">Animateur :</span> 2 imprimantes saturées, on doit imprimer la réquisition + le PV. Plan B ?</div>
+<span class="phase-marker p3">PHASE 3</span>
+<div class="input-line"><span class="timing">14:45</span> <span class="source">Animateur :</span> Membre de la cellule qui craque psychologiquement, vous activez quoi ?</div>
+<div class="input-line"><span class="timing">14:55</span> <span class="source">DG :</span> On tient combien d'heures de plus ? Relèves prévues ?</div>
+<span class="phase-marker p4">PHASE 4</span>
+<div class="input-line"><span class="timing">15:10</span> <span class="source">DG :</span> On va devoir tenir 12h de plus minimum, ravitaillement et relèves ?</div>
+<div class="input-line"><span class="timing">15:18</span> <span class="source">Émilie :</span> Mes équipes Service Client à reloger en salle de soutien psy</div>
+</div>
+
+<!-- PHA EN CELLULE -->
+<div class="pole-section">
+<div class="pole-title">Représentants PHA en cellule — Philibert (DG) / Claude (Com) / Billetterie</div>
+<span class="phase-marker p0">PHASE 0</span>
+<div class="input-line key-input"><span class="timing">13:07</span> <span class="source">Frédéric Dumas (spectateur, transféré par service client PHA) :</span> Allô M. Philibert, je suis dans la T11 rang G, ça vibre vraiment fort. Vous êtes le DG, vous me dites quoi ?</div>
+<div class="input-line key-input"><span class="timing">13:14</span> <span class="source">Marie Robin (spectateur, transféré encore) :</span> M. Philibert, mon mari et mon fils sont en T11 ! Vous êtes responsables ! Mon fils a 12 ans !</div>
+<span class="phase-marker p1">PHASE 1</span>
+<div class="input-line key-input"><span class="timing">13:22</span> <span class="source">Carmelo Ezpeleta (à Claude Michy/PHA Com) :</span> Course doit être maintenue, 80M de spectateurs, cacher la tribune à la télé</div>
+<div class="input-line"><span class="timing">13:30</span> <span class="source">Mike Trimby Race Director Dorna :</span> Course raccourcie 10 tours hommage</div>
+<span class="phase-marker p2">PHASE 2</span>
+<div class="input-line"><span class="timing">13:46</span> <span class="source">DJ PHA Paris :</span> À Lucas, statuts SEP, communication conjointe</div>
+<div class="input-line"><span class="timing">14:25</span> <span class="source">Service de presse Dorna :</span> Communiqué Dorna unilatéral 15 lightly injured</div>
+<div class="input-line"><span class="timing">14:25</span> <span class="source">DRH PHA :</span> 4 salariés PHA en T11 normalement, votre liste ?</div>
+<span class="phase-marker p3">PHASE 3</span>
+<div class="input-line"><span class="timing">14:48</span> <span class="source">PDG PHA Paris :</span> Le board me demande un point en visio à 16h, vous m'envoyez les éléments ?</div>
+<span class="phase-marker p4">PHASE 4</span>
+<div class="input-line key-input"><span class="timing">15:02</span> <span class="source">Carmelo Ezpeleta (rappelle) :</span> Reprendre la course mañana, "I will call the Préfet myself"</div>
+<div class="input-line"><span class="timing">15:14</span> <span class="source">Service de presse Dorna :</span> Demande de coordination communiqué post-Préfet</div>
+<div class="input-line"><span class="timing">15:20</span> <span class="source">Avocats PHA Paris :</span> Cadrage répartition de responsabilité ACO/PHA dans la SEP</div>
+</div>
+
+</body>
+</html>

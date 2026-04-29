@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Pivots pédagogiques - Exercice GP Moto 2026</title>
+<style>
+  @media print {
+    @page { size: A4 portrait; margin: 12mm; }
+    body { font-size: 9pt; background: white; }
+    .no-print { display: none; }
+    .pivot { page-break-inside: avoid; }
+    h2 { page-break-after: avoid; }
+  }
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; color: #111; background: #f5f5f7; line-height: 1.4; }
+  h1 { font-size: 16pt; margin: 0 0 4px 0; color: #b91c1c; }
+  h2 { font-size: 12pt; margin: 18px 0 6px 0; color: #b91c1c; border-bottom: 2px solid #b91c1c; padding-bottom: 3px; }
+  h3 { font-size: 10pt; margin: 10px 0 4px 0; color: #9a3412; }
+  .subtitle { color: #666; font-size: 10pt; margin-bottom: 14px; }
+  .intro { background: #fee2e2; border-left: 4px solid #b91c1c; padding: 10px 14px; margin-bottom: 18px; font-size: 9.5pt; }
+  .phase-marker { display: inline-block; color: white; padding: 2px 10px; border-radius: 3px; font-size: 8.5pt; font-weight: 700; margin: 14px 0 8px 0; }
+  .phase-0 { background: #0f766e; }
+  .phase-1 { background: #1a3a6c; }
+  .phase-2 { background: #d97706; }
+  .phase-3 { background: #b91c1c; }
+  .phase-4 { background: #6b21a8; }
+  .pivot { background: #fff; border-radius: 5px; border: 1px solid #d0d0d0; padding: 12px 16px; margin-bottom: 10px; }
+  .pivot.major { border-left: 4px solid #b91c1c; background: #fef2f2; }
+  .pivot.tournant { border-left: 4px solid #6b21a8; background: #faf5ff; }
+  .pivot-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; flex-wrap: wrap; gap: 8px; }
+  .pivot-time { font-weight: 700; color: #b91c1c; font-size: 12pt; font-variant-numeric: tabular-nums; }
+  .pivot-title { font-weight: 700; color: #111; font-size: 11pt; flex: 1; }
+  .pivot-num { background: #b91c1c; color: white; padding: 2px 8px; border-radius: 3px; font-size: 8.5pt; font-weight: 700; }
+  .pivot-content { font-size: 9pt; }
+  .pivot-content p { margin: 4px 0; }
+  .pivot-tag { display: inline-block; background: #ffedd5; color: #9a3412; padding: 1px 6px; border-radius: 3px; font-size: 8pt; font-weight: 600; margin-right: 4px; }
+  ul.tips { margin: 4px 0; padding-left: 18px; font-size: 9pt; }
+  ul.tips li { margin-bottom: 3px; }
+  .observation { background: #e7f1ff; border-left: 3px solid #1a3a6c; padding: 6px 10px; margin: 6px 0; font-size: 8.5pt; }
+  .observation strong { color: #1a3a6c; }
+  .briefing { background: #fef3c7; border-left: 3px solid #d97706; padding: 6px 10px; margin: 6px 0; font-size: 8.5pt; font-weight: 600; }
+  .briefing strong { color: #9a3412; }
+  .summary-box { background: #fff; border: 2px solid #1a3a6c; border-radius: 5px; padding: 14px 18px; margin-bottom: 18px; }
+  .summary-box h2 { margin-top: 0; color: #1a3a6c; border-color: #1a3a6c; }
+  .pivot-list { display: grid; grid-template-columns: 60px 1fr 1fr; gap: 4px 12px; font-size: 8.5pt; }
+  .pivot-list .time { font-weight: 700; color: #b91c1c; font-variant-numeric: tabular-nums; }
+  .pivot-list .name { font-weight: 600; }
+  .pivot-list .theme { color: #555; font-style: italic; }
+  .print-btn { position: fixed; top: 12px; right: 12px; background: #b91c1c; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 10pt; }
+</style>
+</head>
+<body>
+
+<button class="no-print print-btn" onclick="window.print()">Imprimer</button>
+
+<h1>Pivots pédagogiques — Exercice GP Moto 2026</h1>
+<div class="subtitle">Tous les twists scénaristiques importants à observer · Effondrement T11 · 10 mai 2026 · 13h15</div>
+
+<div class="intro">
+<strong>Objet de ce document.</strong> Ce document liste tous les <strong>pivots pédagogiques</strong> qui structurent l'exercice : moments où la cellule de crise rencontre un dilemme, une révélation, une bascule, une confrontation ou un piège qui ouvre un axe de débrief.
+<br><br>
+<strong>Pour qui ?</strong> Animateur principal, observateurs, équipe de débrief. À garder sous les yeux pendant l'exercice pour repérer les moments clés et noter les réactions de la cellule.
+<br><br>
+<strong>17 pivots majeurs</strong>, répartis sur 5 phases (préliminaire / choc / bilan trompeur / bascule / monopole préfet).
+</div>
+
+<!-- TABLEAU SYNTHÈSE -->
+<div class="summary-box">
+<h2>Tableau synthèse — 17 pivots</h2>
+<div class="pivot-list">
+<span class="time">12:45</span><span class="name">Triple inject départ</span><span class="theme">Mail Yvon + appels Séverin/Pierrick</span>
+<span class="time">13:05</span><span class="name">Mail Galuret décembre 2025</span><span class="theme">Alerte CAPEX non répondue, mise en cause DG</span>
+<span class="time">13:08</span><span class="name">Décision d'évacuer</span><span class="theme">Course dans 52 min, qui tranche ?</span>
+<span class="time">13:10</span><span class="name">Speaker / message d'évacuation</span><span class="theme">Process pas clair, qui rédige ?</span>
+<span class="time">13:12</span><span class="name">Patrouilles insuffisantes</span><span class="theme">4 patrouilles, 2 agents accueil — économies budgétaires</span>
+<span class="time">13:22</span><span class="name">Bras de fer Dorna</span><span class="theme">Carmelo : "cacher la tribune à la TV"</span>
+<span class="time">13:36</span><span class="name">Pascale + Nathan disparus</span><span class="theme">Talkies muets depuis 13h14, double bombe RH</span>
+<span class="time">13:40</span><span class="name">Bases ACO/PHA billetterie</span><span class="theme">Numéro vert + liste nominative</span>
+<span class="time">13:46</span><span class="name">Référence Furiani</span><span class="theme">Spectateur menace : prison comme 1992</span>
+<span class="time">13:48</span><span class="name">Pas de scan disponible</span><span class="theme">PIÈGE préfecture, contrôle visuel uniquement</span>
+<span class="time">13:51</span><span class="name">Cérémonie de départ</span><span class="theme">Climax émotionnel, silence vs annonce</span>
+<span class="time">13:58</span><span class="name">Surcharge Pascale + stagiaire Nathan</span><span class="theme">72h/60h dérogatoires, convention expirée</span>
+<span class="time">14:01</span><span class="name">Théorie complotiste drapeau iranien</span><span class="theme">Tweet @PatriotesEveilles, 980K vues</span>
+<span class="time">14:15</span><span class="name">Quartararo court-circuite</span><span class="theme">Reels Instagram avant cellule de com</span>
+<span class="time">14:25</span><span class="name">Communiqué Dorna unilatéral</span><span class="theme">15 lightly injured, désaveu org</span>
+<span class="time">14:30</span><span class="name">Patrick : zone cachée découverte</span><span class="theme">DÉBUT BASCULE bilan</span>
+<span class="time">14:33</span><span class="name">Conflit interne Pierrick/Galuret</span><span class="theme">Devant la cellule, "qui pilotait Alcor ?"</span>
+<span class="time">14:35</span><span class="name">Bilan explose à 24+</span><span class="theme">SDIS confirme, Pascale et Nathan retrouvés</span>
+<span class="time">14:46</span><span class="name">Cacophonie médiatique BFMTV</span><span class="theme">15 vs 24 vs 30, Préfet bascule</span>
+<span class="time">14:55</span><span class="name">Basculement Préfet</span><span class="theme">Plan ORSEC, monopole communication</span>
+</div>
+</div>
+
+<!-- PHASE 0 -->
+<span class="phase-marker phase-0">PHASE PRÉLIMINAIRE — 12h45 → 13h15</span>
+<h2>Pivots avant l'effondrement</h2>
+
+<div class="pivot major">
+<div class="pivot-header">
+<span class="pivot-time">12:45</span>
+<span class="pivot-title">Triple inject de départ</span>
+<span class="pivot-num">PIVOT 0</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">DÉPART</span>Le scénario s'ouvre par une triple sollicitation simultanée :</p>
+<ul class="tips">
+<li>Message WhatsApp "Crise GP Moto" : Yvon Lemaire signale élément métallique tombé + vibrations anormales</li>
+<li>Photo de la pièce métallique au sol</li>
+<li>Appel téléphonique direct à Séverin Galuret : "Tu fais quoi ?"</li>
+<li>Appel téléphonique direct à Pierrick Navarre : "Tu veux faire venir Alcor ?"</li>
+</ul>
+<div class="observation">
+<strong>À observer :</strong> Comment Séverin et Pierrick réagissent ? Envoient quelqu'un sur place ? Y vont eux-mêmes ? Demandent venue Alcor ? Alertent la cellule ? Combien de temps avant que l'info remonte ?
+</div>
+</div>
+</div>
+
+<div class="pivot major">
+<div class="pivot-header">
+<span class="pivot-time">13:05</span>
+<span class="pivot-title">Mail Galuret décembre 2025 — alerte CAPEX non répondue</span>
+<span class="pivot-num">PIVOT 1</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">JURIDIQUE</span><span class="pivot-tag">DG</span>Séverin sort un mail dans la cellule : "Vincent, Ludovic, Pierrick — j'avais alerté en décembre sur le piquetage et la solidité de la T11, je proposais des travaux de renforcement, ça nécessitait une modification du budget CAPEX. J'ai jamais eu de réponse."</p>
+<div class="briefing">
+<strong>BRIEFER SÉVERIN AVANT L'EXERCICE :</strong> "À 13h05, tu sors ce mail dans la cellule. Tu ne caches rien."
+</div>
+<div class="observation">
+<strong>À observer :</strong> Comment Beaumesnil (DG, mis en cause) réagit ? Lucas anticipe les conséquences pénales (négligence) ? Le mail va sortir dans la réquisition complémentaire à 14h48. Préparation droit de réponse Mediapart ?
+</div>
+</div>
+</div>
+
+<div class="pivot major">
+<div class="pivot-header">
+<span class="pivot-time">13:08</span>
+<span class="pivot-title">Décision d'évacuer — la cellule a 5 min</span>
+<span class="pivot-num">PIVOT 2</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">DG</span><span class="pivot-tag">SÉCURITÉ</span>Course dans 52 min. Avis technique défavorable de Jérôme Papin. Tribune pleine à 1 100 personnes. Pression maximale.</p>
+<div class="observation">
+<strong>À observer :</strong> Combien de temps de débat ? Qui tranche ? Sur quels critères ? Quels arguments contre (course, billetterie, image) ? La décision est-elle communiquée immédiatement au PCORG ?
+</div>
+</div>
+</div>
+
+<div class="pivot">
+<div class="pivot-header">
+<span class="pivot-time">13:10</span>
+<span class="pivot-title">Speaker / message d'évacuation — process pas clair</span>
+<span class="pivot-num">PIVOT 3</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">COMMUNICATION</span><span class="pivot-tag">PCORG</span>Le PCORG appelle Benjamin : "On doit passer un message d'évacuation sur la T11 mais on sait pas comment faire concrètement. Comment on diffuse sur les hauts-parleurs ? C'est toi qui pilotes la sono ?"</p>
+<div class="observation">
+<strong>À observer :</strong> Procédure pas claire dans la tête du PCORG. Benjamin guide ? Renvoie sur Bertrand (speaker) ? Texte fourni par qui ? Bilingue ? Process à formaliser en débrief.
+</div>
+</div>
+</div>
+
+<div class="pivot major">
+<div class="pivot-header">
+<span class="pivot-time">13:12</span>
+<span class="pivot-title">Patrouilles insuffisantes — conséquence économies budgétaires</span>
+<span class="pivot-num">PIVOT 4</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">SÉCURITÉ</span><span class="pivot-tag">PHA</span>Le PCORG remonte qu'il n'a que 4 patrouilles disponibles (budget réduit) et 2 agents accueil au lieu de 4 sur T11 (économies). Comment évacuer 1 100 personnes ?</p>
+<ul class="tips">
+<li>Mais le chef d'équipe ne connaît pas la cause budgétaire — la cellule doit le découvrir</li>
+<li>Bras de fer interne ACO/PHA en plus de l'urgence</li>
+<li>Quelle décision : mobiliser des agents d'autres tribunes ?</li>
+</ul>
+<div class="observation">
+<strong>À observer :</strong> Lisa Feufeu (Sécurité) remonte les contraintes économiques en cellule ? Le DG est-il informé ? Andriolo (Commercial) défend l'arbitrage budget ?
+</div>
+</div>
+</div>
+
+<!-- EFFONDREMENT -->
+<span class="phase-marker phase-1">PHASE 1 — CHOC ET ACTIVATION SECOURS — 13h15 → 13h45</span>
+
+<div class="pivot tournant" style="border-left-width: 6px;">
+<div class="pivot-header">
+<span class="pivot-time">13:15</span>
+<span class="pivot-title">⚠️ EFFONDREMENT</span>
+<span class="pivot-num" style="background: #6b21a8;">CLIMAX 1</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">TOUS</span>Annonce solennelle : "13h15. La structure haute de la T11 vient de céder. La tribune s'effondre sur elle-même. Bilan immédiat inconnu. La course n'a pas démarré. La cérémonie de départ est dans 36 minutes."</p>
+<p>📽️ Diffusion vidéo de l'effondrement (WhatsApp).</p>
+<div class="observation">
+<strong>À observer :</strong> Choc dans la cellule. Tout est à reconstruire. La cellule pivote-t-elle vers le mode "post-incident" ou continue-t-elle à délibérer ? Combien de temps avant que les rôles se redistribuent ?
+</div>
+</div>
+</div>
+
+<h2>Pivots Phase 1 — choc et activation secours</h2>
+
+<div class="pivot major">
+<div class="pivot-header">
+<span class="pivot-time">13:22</span>
+<span class="pivot-title">Bras de fer Dorna — Carmelo demande de "cacher la tribune"</span>
+<span class="pivot-num">PIVOT 5</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">PHA</span><span class="pivot-tag">DG</span>Carmelo Ezpeleta appelle Claude Michy (PHA Com) : "Allô Claude, c'est Carmelo... écoute, on a un problema, oui, mais la course... on doit la maintenir, comprende ? On a 80 millions de spectateurs à la télé... On peut juste cacher la tribune à la télé, basta, tu vois ? La carrera continue."</p>
+<div class="observation">
+<strong>À observer :</strong> PHA réagit ? Transmet au DG ? Le ton léger de Carmelo est insupportable. Vincent (DG) tient bon ? Quelle réponse coordonnée ACO/PHA ? Trace écrite ?
+</div>
+</div>
+</div>
+
+<div class="pivot major">
+<div class="pivot-header">
+<span class="pivot-time">13:36</span>
+<span class="pivot-title">Pascale Lemée + stagiaire Nathan portés disparus</span>
+<span class="pivot-num">PIVOT 6</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">RH</span><span class="pivot-tag">JURIDIQUE</span>Le chef PCORG appelle Charlotte Legay : "Charlotte, on n'arrive pas à joindre Pascale Lemée ni le stagiaire Nathan qu'elle avait emmené avec elle ! Leurs talkies ne répondent plus depuis 13h14. Ils étaient sur place au moment de l'effondrement."</p>
+<div class="observation">
+<strong>À observer :</strong> Charlotte active quoi ? Cellule familles ? CSE ? Médecin du travail ? Le stagiaire Nathan = problème encore plus grave (convention expirée).
+</div>
+</div>
+</div>
+
+<div class="pivot">
+<div class="pivot-header">
+<span class="pivot-time">13:40</span>
+<span class="pivot-title">Numéro vert préfecture + bases ACO/PHA</span>
+<span class="pivot-num">PIVOT 7</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">SERVICE CLIENT</span><span class="pivot-tag">BILLETTERIE</span>Margaux Schneider (Préfecture) à Amandine : "Activation du numéro vert préfecture (0 805 04 72 72). Vous communiquez ce numéro aux familles. Et nous on a besoin de la liste nominative T11, format CSV, urgent."</p>
+<div class="observation">
+<strong>À observer :</strong> Renaudin envoie la liste des billets vendus ? Combien de temps pour produire le CSV ? Conflit ACO/PHA sur les bases de données ?
+</div>
+</div>
+</div>
+
+<!-- PHASE 2 -->
+<span class="phase-marker phase-2">PHASE 2 — BILAN TROMPEUR ET DILEMME COURSE — 13h45 → 14h30</span>
+
+<div class="pivot major">
+<div class="pivot-header">
+<span class="pivot-time">13:46</span>
+<span class="pivot-title">Référence Furiani — menace de prison</span>
+<span class="pivot-num">PIVOT 8</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">SERVICE CLIENT</span><span class="pivot-tag">PHA</span>Spectateur menaçant à Émilie : "Vous êtes des criminels ! C'est comme Furiani en 1992, vous saviez et vous avez rien fait ! Vous allez TOUS finir EN PRISON comme les responsables de Furiani !"</p>
+<div class="observation">
+<strong>À observer :</strong> Émilie tient ? La cellule réagit-elle au cadre Furiani (Bastia 1992, 18 morts effondrement tribune) ? Lucas anticipe-t-il l'angle pénal négligence ?
+</div>
+</div>
+</div>
+
+<div class="pivot major">
+<div class="pivot-header">
+<span class="pivot-time">13:48</span>
+<span class="pivot-title">Pas de scan disponible — LE PIÈGE préfecture</span>
+<span class="pivot-num">PIVOT 9</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">BILLETTERIE</span><span class="pivot-tag">PHA</span>Margaux Schneider relance Amandine, ton sec : "On a besoin maintenant des SCANS D'ENTRÉE pour identifier qui était réellement dans la tribune. Le SAMU et la cellule familles s'appuient là-dessus."</p>
+<p>PIÈGE : <strong>il n'y a pas de scan</strong>. Contrôle visuel uniquement, choix budgétaire 2024.</p>
+<div class="observation">
+<strong>À observer :</strong> PHA doit avouer l'absence de scan. Comment Amandine fait passer cette info à la préfecture ? Comment la cellule réagit ? PHA Billetterie en cellule explique l'historique du choix ?
+</div>
+</div>
+</div>
+
+<div class="pivot tournant">
+<div class="pivot-header">
+<span class="pivot-time">13:51</span>
+<span class="pivot-title">Cérémonie de départ — climax émotionnel</span>
+<span class="pivot-num" style="background: #6b21a8;">PIVOT 10</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">CIRCUIT</span><span class="pivot-tag">COMMUNICATION</span>13h51 — Cérémonie de départ prévue. Que se passe-t-il ? La cellule a-t-elle décidé ? Speaker briefé ? Tessier annonce report ? Pilotes en stand ? Hymne joué ?</p>
+<div class="observation">
+<strong>À observer :</strong> Ce moment doit être un climax émotionnel. Le silence est lui-même un signal. La cellule a-t-elle préparé un texte de report ? Communication coordonnée avec Dorna ? FIM ?
+</div>
+</div>
+</div>
+
+<div class="pivot major">
+<div class="pivot-header">
+<span class="pivot-time">13:58</span>
+<span class="pivot-title">Surcharge Pascale + stagiaire Nathan — double bombe RH</span>
+<span class="pivot-num">PIVOT 11</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">RH</span><span class="pivot-tag">JURIDIQUE</span>Frédéric Houlbert (paie) à Charlotte : "Pascale Lemée, CDD chargée de réglementation. Sur la dernière semaine : 72h sur 7 jours. Convention dérogation 60h max. Et le stagiaire Nathan, je vois pas de convention de stage active, il était censé partir hier, on l'a gardé en prolongation informelle."</p>
+<ul class="tips">
+<li>Faute lourde de l'employeur : surcharge volontaire ou tolérée</li>
+<li>Stagiaire en prolongation informelle = pas couvert par assurance</li>
+<li>Inspection du travail va saisir (audition demain matin à 14h40)</li>
+<li>CHSCT extraordinaire à prévoir</li>
+<li>Implication du chef de service Émilie qui craquera à 14h45</li>
+</ul>
+<div class="observation">
+<strong>À observer :</strong> Charlotte alerte Lucas (juridique) ? Le DG est-il informé ? Comment la cellule prépare-t-elle l'audition Inspection du travail ?
+</div>
+</div>
+</div>
+
+<div class="pivot">
+<div class="pivot-header">
+<span class="pivot-time">14:01</span>
+<span class="pivot-title">Théorie complotiste drapeau iranien (@PatriotesEveilles)</span>
+<span class="pivot-num">PIVOT 12</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">COMMUNICATION</span><span class="pivot-tag">SÛRETÉ</span>Tweet @PatriotesEveilles : "🚨 Effondrement T11 LE MANS : un témoin affirme avoir vu un homme avec un drapeau iranien quitter la zone juste avant l'effondrement. Sabotage ?!" — 18K likes, 980K vues, 4 200 retweets.</p>
+<div class="observation">
+<strong>À observer :</strong> Vigneron + Lisa Feufeu (sûreté) réagissent ? Démenti ? Signalement Pharos ? DGSI alertée ? Risque que la rumeur prenne en parallèle de la réalité.
+</div>
+</div>
+</div>
+
+<div class="pivot major">
+<div class="pivot-header">
+<span class="pivot-time">14:15</span>
+<span class="pivot-title">Quartararo court-circuite la cellule de communication</span>
+<span class="pivot-num">PIVOT 13</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">PILOTES</span><span class="pivot-tag">COMMUNICATION</span>Vidéo Fabio Quartararo en salle de presse, sur Instagram Reels (15 sec, anglais, très ému) : "Probably no race today... it doesn't seem possible anymore. It's just... a catastrophe for the victims. So many people. I... I'm thinking about them. About their families. It's a very dark day."</p>
+<div class="observation">
+<strong>À observer :</strong> Le pilote star annonce avant la cellule de communication officielle. Désaveu médiatique. Vigneron + Tessier réagissent ? La décision course est-elle prise sous contrainte des pilotes ?
+</div>
+</div>
+</div>
+
+<div class="pivot major">
+<div class="pivot-header">
+<span class="pivot-time">14:25</span>
+<span class="pivot-title">Communiqué Dorna unilatéral — 15 lightly injured</span>
+<span class="pivot-num">PIVOT 14</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">PHA</span><span class="pivot-tag">COMMUNICATION</span>Service de presse Dorna Madrid envoie un communiqué officiel sans coordonner avec ACO/PHA : <strong>"15 lightly injured spectators"</strong>.</p>
+<div class="observation">
+<strong>À observer :</strong> Cacophonie. ACO démenti ? Communication conjointe ? À ce stade ACO/cellule a 13 victimes confirmées Croix Rouge, mais SDIS attend dégagement zone est. Le chiffre Dorna est faux par défaut ET non coordonné.
+</div>
+</div>
+</div>
+
+<!-- PHASE 3 -->
+<span class="phase-marker phase-3">PHASE 3 — BASCULE — 14h30 → 14h55</span>
+
+<div class="pivot tournant" style="border-left-width: 6px;">
+<div class="pivot-header">
+<span class="pivot-time">14:30</span>
+<span class="pivot-title">Patrick : zone cachée découverte (DÉBUT BASCULE)</span>
+<span class="pivot-num" style="background: #6b21a8;">CLIMAX 2</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">PCORG</span><span class="pivot-tag">MÉDICAL</span>Patrick (chef tribune T11) en radio : "PCORG, écoute c'est important, les pompiers viennent de dégager une zone qu'on n'avait pas vue, sous un panneau publicitaire effondré dessus. Y a beaucoup de monde dessous, ils entendent crier !"</p>
+<div class="observation">
+<strong>À observer :</strong> Combien de temps avant que la cellule réalise que le bilan va exploser ? Réactions Mathieu Navarre ? La cellule prépare-t-elle un nouveau communiqué ? Le DG informe-t-il le Préfet immédiatement ?
+</div>
+</div>
+</div>
+
+<div class="pivot major">
+<div class="pivot-header">
+<span class="pivot-time">14:33</span>
+<span class="pivot-title">Conflit interne Pierrick / Galuret devant la cellule</span>
+<span class="pivot-num">PIVOT 15</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">JURIDIQUE</span><span class="pivot-tag">RH</span>Pierrick interpelle Galuret devant tout le monde : "Séverin, on doit clarifier qui pilotait Alcor. Moi je gérais l'opérationnel mais c'est toi qui validais les structures, c'est ça ? Pour qu'on soit aligné devant la PJ."</p>
+<div class="briefing">
+<strong>BRIEFER PIERRICK AVANT L'EXERCICE :</strong> "Vers 14h33, tu poses cette question à Séverin devant tout le monde."
+</div>
+<div class="observation">
+<strong>À observer :</strong> Lucas (juridique) intervient pour cadrer ? Le DG calme le jeu ou laisse exploser ? Le livre de bord acte la conversation ? Risque de conflit ouvert préjudiciable. <strong>Effet pédagogique :</strong> faire comprendre que la pression PJ pousse chacun à se dédouaner sur l'autre.
+</div>
+</div>
+</div>
+
+<div class="pivot tournant">
+<div class="pivot-header">
+<span class="pivot-time">14:35</span>
+<span class="pivot-title">Bilan explose à 24+ — Pascale et Nathan retrouvés</span>
+<span class="pivot-num" style="background: #6b21a8;">PIVOT 16</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">SDIS</span><span class="pivot-tag">RH</span>LCL Mordrais à Amandine, voix tendue : "On a dégagé. 11 personnes supplémentaires ensevelies sous le panneau publicitaire. Bilan total au moins 24 victimes, 4 UA critiques, au moins 2 décès confirmés. Parmi les victimes, une femme avec badge 'Pascale Lemée - ACO' UA critique extraite, et un jeune homme stagiaire identifié 'Nathan'."</p>
+<div class="observation">
+<strong>À observer :</strong> Double choc : (1) l'ampleur du bilan + (2) Pascale et Nathan retrouvés blessés. La cellule réalise qu'elle n'a pas évacué à temps ET qu'elle a perdu une salariée. Émotion vs professionnalisme. Comment Charlotte gère le contact avec mari de Pascale + maman de Nathan ?
+</div>
+</div>
+</div>
+
+<div class="pivot major">
+<div class="pivot-header">
+<span class="pivot-time">14:46</span>
+<span class="pivot-title">Cacophonie médiatique BFMTV — édition spéciale</span>
+<span class="pivot-num">PIVOT 17</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">COMMUNICATION</span><span class="pivot-tag">PRÉFET</span>BFMTV diffuse une édition spéciale annonçant <strong>30 victimes</strong> alors que la cellule en a 24 confirmés et que Dorna en a annoncé 15. Témoin présenté comme ayant signalé en mars. <strong>Trois chiffres incompatibles dans l'espace public.</strong></p>
+<p>Le Préfet, présent, voit la cacophonie en direct.</p>
+<div class="observation">
+<strong>À observer :</strong> Vigneron + DG essaient-ils de reprendre la main ? Communiqué officiel coordonné ? À ce stade, c'est trop tard : le Préfet bascule dans 9 min.
+</div>
+</div>
+</div>
+
+<!-- PHASE 4 -->
+<span class="phase-marker phase-4">PHASE 4 — MONOPOLE PRÉFET — 14h55 → 15h25</span>
+
+<div class="pivot tournant" style="border-left-width: 6px;">
+<div class="pivot-header">
+<span class="pivot-time">14:55</span>
+<span class="pivot-title">⭐ BASCULEMENT — Plan ORSEC, monopole de communication</span>
+<span class="pivot-num" style="background: #6b21a8;">CLIMAX 3</span>
+</div>
+<div class="pivot-content">
+<p><span class="pivot-tag">PRÉFET</span><span class="pivot-tag">DG</span>Préfet (annonce solennelle) : "Sur proposition du SDIS, je déclenche le plan ORSEC départemental, module Bugatti, plan rouge / NOVI. Je suis désormais Directeur des Opérations de Secours. DDIS est COS. COD activé. Monopole de communication désormais préfecture. Aucun chiffre ACO, PHA ou Dorna sans validation. Vos décisions opérationnelles passent par moi."</p>
+<div class="observation">
+<strong>À observer :</strong> La cellule passe en mode subordonné. Comment vit-elle cette dépossession ? Continue-t-elle son activité interne (juridique, RH, com interne, soutien psy) ? Ou se met-elle en pause ? Quelle articulation idéale aurait évité ce basculement ?
+</div>
+</div>
+</div>
+
+<!-- ARCHITECTURE CONFLITS -->
+<h2>Architecture des conflits internes — fil rouge des pivots</h2>
+
+<div class="pivot">
+<div class="pivot-header">
+<span class="pivot-title">Triangle Galuret / Pierrick / Alcor</span>
+</div>
+<div class="pivot-content">
+<p>Trois axes de défense qui s'opposent et apparaissent au fil de l'exercice :</p>
+<ul class="tips">
+<li><strong>Galuret (ACO Service Technique)</strong> — "J'ai validé les plans Alcor, mais avec les notes de calcul qu'ils m'ont fournies. Mon mail de décembre 2025 prouve que j'avais alerté." (Pivot 1, 13h05)</li>
+<li><strong>Pierrick (ACO Production)</strong> — "Je gérais l'opérationnel, le suivi prestataire, mais c'est le service technique qui validait les structures. Ce n'est pas mon périmètre technique." (Pivot 15, 14h33)</li>
+<li><strong>Alcor (Sébastien Atger, DG)</strong> — "Nous avons exécuté selon les plans validés par Galuret. Notre PV de réception est signé sans réserve. Toute mise en cause = poursuites." (13h32 puis escalade 14h10 et 15h10)</li>
+</ul>
+<p>+ <strong>Veritas</strong> à 15h14 qui propose à Galuret de "coordonner notre version" sur les visites annuelles → risque pénal d'entente</p>
+<p>+ <strong>Émilie</strong> (chef de service de Pascale) à 14h45 qui craque et avoue à Charlotte qu'elle a envoyé Pascale à T11 à 13h05 alors qu'elle finissait à 13h</p>
+</div>
+</div>
+
+<div class="pivot">
+<div class="pivot-header">
+<span class="pivot-title">Triangle ACO / PHA / Dorna</span>
+</div>
+<div class="pivot-content">
+<p>Trois co-organisateurs aux intérêts divergents :</p>
+<ul class="tips">
+<li><strong>ACO</strong> — Propriétaire du circuit, organisateur historique, détient l'arrêté préfectoral. Responsable de l'enceinte. <em>Veut protéger l'image, anticiper le pénal, gérer le RH.</em></li>
+<li><strong>PHA</strong> — Détient le contrat avec Dorna pour le GP. Co-organisateur. Périmètre cellule : billetterie + communication. <em>Veut éviter d'être le parapluie, faire pression sur les économies budgétaires faites en amont.</em></li>
+<li><strong>Dorna Sports SL</strong> — Promoteur MotoGP, droits TV mondiaux. <em>Veut maintenir la course coûte que coûte (18M€ de pertes annoncées par Carmelo).</em></li>
+</ul>
+<p><strong>SEP ACO/PHA</strong> — Société en Participation, partage des recettes et charges. Pacte d'associés ambigu sur la responsabilité des structures temporaires.</p>
+</div>
+</div>
+
+<!-- DOCS À CHALLENGER -->
+<h2>Documents juridiques à challenger</h2>
+
+<div class="pivot">
+<div class="pivot-content">
+<ul class="tips">
+<li>Statuts de la SEP ACO/PHA + pacte d'associés</li>
+<li>Polices d'assurance ACO, PHA, SEP (déclaration sinistre obligatoire en 2h via Marsh)</li>
+<li>Contrat avec Alcor, cahier des charges, PV de réception 6 mai 2026</li>
+<li>Notes de calcul fournies par Alcor</li>
+<li>Rapports Veritas annuels (visites mars 2026)</li>
+<li>PV sous-commission départementale 2025 (avec réserves T11)</li>
+<li>Mail Séverin Galuret du 8 décembre 2025 (CAPEX non répondu)</li>
+<li>Tous mails internes janvier-mai 2026 mentionnant T11 (réquisition complémentaire 14h48)</li>
+<li>Contrat de travail CDD Pascale Lemée + dérogation 60h</li>
+<li>Fiches horaires / extractions badges Pascale Lemée (72h enregistrées)</li>
+<li>Convention de stage Nathan (expirée la veille, prolongation informelle)</li>
+<li>Trace radio des envois mission de Pascale par Émilie (12h55 + 13h05)</li>
+</ul>
+</div>
+</div>
+
+<!-- DEBRIEF -->
+<h2>Questions de débrief</h2>
+
+<div class="pivot">
+<h3>Sur le dilemme initial (Phase préliminaire)</h3>
+<ul class="tips">
+<li>Évacuation : décision prise assez vite ? Quelle latence entre Jérôme Papin (13h06) et l'ordre speaker ?</li>
+<li>5-10% évacués au moment de l'effondrement : aurait-il fallu annuler le départ tout de suite ?</li>
+<li>Mail décembre 2025 : qui aurait dû y répondre ? Pourquoi pas de suivi ?</li>
+</ul>
+
+<h3>Sur le volet RH (Pascale + Nathan)</h3>
+<ul class="tips">
+<li>Qui est responsable de la surcharge horaire ? Émilie ? RH ? La direction ? Pascale elle-même ?</li>
+<li>Comment un stagiaire a pu être en prolongation informelle non couverte ?</li>
+<li>Le mari de Pascale et la maman de Nathan : qui les contacte, quand, comment ?</li>
+<li>Quelle préparation pour l'Inspection du travail demain matin ?</li>
+</ul>
+
+<h3>Sur le dilemme course</h3>
+<ul class="tips">
+<li>Maintenir, reporter, annuler ? À quel moment la cellule a-t-elle tranché ?</li>
+<li>Quartararo (14h15) a-t-il forcé la main de la cellule ?</li>
+<li>Comment résister au lobbying Carmelo + Trimby ?</li>
+<li>L'argument Le Foll (40M€ d'impact) a-t-il pesé ?</li>
+</ul>
+
+<h3>Sur les bilans contradictoires</h3>
+<ul class="tips">
+<li>Pendant 1h, Croix Rouge ACO disait +2 par rapport au SAMU. Quel chiffre la cellule a-t-elle remonté au Préfet ?</li>
+<li>Communiqué Dorna 15 vs cellule 24 vs BFMTV 30 : qu'est-ce qui aurait permis d'éviter l'écart ?</li>
+<li>Le triangle ACO / PHA / Dorna est-il viable en crise ?</li>
+</ul>
+
+<h3>Sur la gouvernance budgétaire</h3>
+<ul class="tips">
+<li>Patrouilles insuffisantes : quelle gouvernance pour les budgets sécurité partagés ACO/PHA ?</li>
+<li>Pas de scan d'entrée : qui a tranché et quand ? Trace ?</li>
+<li>Le mail CAPEX décembre 2025 aurait-il évité la crise ?</li>
+</ul>
+
+<h3>Sur le service client + Philibert PHA</h3>
+<ul class="tips">
+<li>Le service client PHA transférait des spectateurs au DG en cellule de crise. Process à corriger ?</li>
+<li>Comment PHA Billetterie en cellule peut-elle déléguer à son équipe sans la mettre au courant du scénario ?</li>
+</ul>
+
+<h3>Sur le basculement Préfet</h3>
+<ul class="tips">
+<li>Aurait-il dû arriver plus tôt ? Quelle articulation idéale ACO ↔ PHA ↔ Préfecture ?</li>
+<li>Le PCA Amandine est-il un goulot d'étranglement ou un facilitateur ?</li>
+<li>Comment vivre la subordination sans démobilisation interne ?</li>
+</ul>
+</div>
+
+</body>
+</html>

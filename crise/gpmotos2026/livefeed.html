@@ -1,0 +1,1219 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
+  <title>LIVE FEED — Exercice de crise GP Moto 2026</title>
+  <style>
+    :root {
+      --aco-navy: #1a3a6c;
+      --aco-navy-2: #2c5599;
+      --aco-red: #b91c1c;
+      --aco-orange: #d97706;
+      --bg-deep: #03060d;
+      --bg: #060a14;
+      --hud: #5fd1ff;
+      --hud-soft: rgba(95, 209, 255, 0.55);
+      --hud-glow: rgba(95, 209, 255, 0.45);
+      --hud-faint: rgba(95, 209, 255, 0.18);
+      --text: #d8e6f5;
+      --text-soft: #7e94b3;
+      --text-dim: #4d617e;
+      --warn: #ffb547;
+      --crit: #ff4d4d;
+      --ok: #5fffb0;
+      --mono: 'SF Mono','JetBrains Mono','Menlo','Consolas','Monaco',monospace;
+      --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100vh; height: 100dvh;
+      width: 100vw;
+      background: var(--bg-deep);
+      color: var(--text);
+      font-family: var(--sans);
+      overflow: hidden;
+    }
+    body { position: relative; }
+
+    /* ========================================================== */
+    /* IDLE (page d'attente — design HUD futuriste supersize)      */
+    /* ========================================================== */
+    #idle {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      transition: opacity 0.4s ease;
+    }
+    #idle.hidden { opacity: 0; pointer-events: none; }
+
+    #idle::before {
+      content: ''; position: absolute; inset: 0; z-index: -3; pointer-events: none;
+      background:
+        radial-gradient(ellipse 80% 60% at 50% 0%, rgba(26,58,108,0.45), transparent 70%),
+        radial-gradient(ellipse 60% 40% at 20% 100%, rgba(185,28,28,0.18), transparent 70%),
+        radial-gradient(ellipse 50% 40% at 80% 100%, rgba(217,119,6,0.14), transparent 70%),
+        linear-gradient(to bottom, var(--bg-deep), var(--bg));
+    }
+    #idle::after {
+      content: ''; position: absolute; inset: 0; z-index: -2; pointer-events: none;
+      background-image:
+        linear-gradient(rgba(80,180,255,0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(80,180,255,0.06) 1px, transparent 1px);
+      background-size: 64px 64px;
+      mask-image: radial-gradient(ellipse 80% 70% at 50% 50%, black 20%, transparent 90%);
+      -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 50%, black 20%, transparent 90%);
+    }
+    .scan-sweep {
+      position: fixed; left: 0; right: 0;
+      height: 320px; top: -320px;
+      background: linear-gradient(to bottom, transparent, rgba(95,209,255,0.06) 50%, transparent);
+      animation: sweep 11s linear infinite;
+      pointer-events: none; z-index: 2;
+    }
+    @keyframes sweep {
+      0% { top: -320px; opacity: 0; }
+      8% { opacity: 1; } 92% { opacity: 1; }
+      100% { top: 100vh; opacity: 0; }
+    }
+
+    .idle-header {
+      flex-shrink: 0;
+      display: flex; align-items: center; gap: 36px;
+      padding: 36px 64px 24px;
+      border-bottom: 1px solid var(--hud-faint);
+      background: linear-gradient(to bottom, rgba(10,17,32,0.6), transparent);
+    }
+    .idle-logo {
+      width: 132px; height: 88px;
+      display: grid; place-items: center;
+      border: 1px solid var(--hud-soft);
+      background: linear-gradient(135deg, rgba(26,58,108,0.6), rgba(10,17,32,0.4));
+      box-shadow: 0 0 32px rgba(95,209,255,0.15);
+      position: relative;
+      padding: 12px 16px;
+    }
+    .idle-logo img { width: 100%; height: 100%; object-fit: contain; }
+    .idle-logo::before, .idle-logo::after {
+      content: ''; position: absolute; width: 12px; height: 12px;
+      border: 1px solid var(--hud);
+    }
+    .idle-logo::before { top: -4px; left: -4px; border-right: 0; border-bottom: 0; }
+    .idle-logo::after { bottom: -4px; right: -4px; border-left: 0; border-top: 0; }
+
+    .idle-titles { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+    .idle-overline {
+      font-family: var(--mono);
+      font-size: clamp(14px, 1vw, 22px); letter-spacing: 4px;
+      font-weight: 600;
+      color: var(--hud); text-transform: uppercase;
+    }
+    .idle-title {
+      font-size: clamp(28px, 2.4vw, 50px);
+      font-weight: 800; letter-spacing: 4px;
+      text-transform: uppercase; color: var(--text);
+    }
+    .idle-id {
+      font-family: var(--mono);
+      font-size: clamp(13px, 0.9vw, 20px);
+      letter-spacing: 1.6px;
+      color: var(--text-soft); text-transform: uppercase;
+    }
+    .idle-id .accent { color: var(--hud); font-weight: 700; }
+
+    .idle-status {
+      display: flex; align-items: center; gap: 18px;
+      font-family: var(--mono);
+      font-size: clamp(14px, 1vw, 20px); font-weight: 600;
+      letter-spacing: 1.5px;
+      color: var(--text-soft); text-transform: uppercase;
+    }
+    .pill {
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 10px 16px;
+      border: 1px solid var(--hud-faint);
+      background: rgba(95,209,255,0.04);
+      border-radius: 2px;
+    }
+    .pill .dot {
+      width: 12px; height: 12px; border-radius: 50%;
+      background: var(--ok);
+      box-shadow: 0 0 12px var(--ok);
+      animation: blink 1.6s ease-in-out infinite;
+    }
+    .pill.warn .dot { background: var(--warn); box-shadow: 0 0 12px var(--warn); animation: none; opacity: 0.85; }
+    .pill.error .dot { background: var(--crit); box-shadow: 0 0 12px var(--crit); animation: blink 0.8s ease-in-out infinite; }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+    /* Centre : horloge SCENARIO geante (le contenu principal du livefeed)   */
+    .idle-main {
+      flex: 1;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 14px;
+      padding: 0 96px;
+      min-height: 0;
+    }
+    .sim-overline {
+      font-family: var(--mono);
+      font-size: clamp(14px, 1.1vw, 24px);
+      font-weight: 700;
+      letter-spacing: 8px;
+      text-transform: uppercase;
+      color: var(--warn);
+      text-shadow: 0 0 12px rgba(255, 181, 71, 0.4);
+      display: inline-flex; align-items: center; gap: 18px;
+    }
+    .sim-overline::before, .sim-overline::after {
+      content: '';
+      width: 60px; height: 1px;
+      background: rgba(255, 181, 71, 0.55);
+    }
+    .sim-date {
+      font-family: var(--mono);
+      font-size: clamp(28px, 2.6vw, 56px);
+      font-weight: 700;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: var(--text);
+    }
+    .sim-clock {
+      font-family: var(--mono);
+      font-size: clamp(140px, 16vw, 360px);
+      font-weight: 900;
+      letter-spacing: -3px;
+      line-height: 0.95;
+      color: var(--warn);
+      text-shadow: 0 0 80px rgba(255, 181, 71, 0.55), 0 0 160px rgba(255, 181, 71, 0.18);
+    }
+    .sim-offset {
+      font-family: var(--mono);
+      font-size: clamp(13px, 0.95vw, 20px);
+      font-weight: 600;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-top: 6px;
+    }
+
+    /* Bloc heure reelle, beaucoup plus discret, sous l'horloge sim */
+    .real-block {
+      margin-top: 36px;
+      padding: 14px 28px;
+      border: 1px solid var(--hud-faint);
+      border-radius: 4px;
+      background: rgba(95, 209, 255, 0.04);
+      display: flex; align-items: baseline; gap: 24px;
+      font-family: var(--mono);
+      font-size: clamp(14px, 1vw, 22px);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+    .real-block .lbl { color: var(--hud); font-weight: 700; }
+    .real-block .val { color: var(--text-soft); font-weight: 600; }
+
+    .idle-footer {
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 22px 64px 28px;
+      border-top: 1px solid var(--hud-faint);
+      font-family: var(--mono);
+      font-size: clamp(13px, 0.9vw, 20px);
+      letter-spacing: 2px; text-transform: uppercase;
+      color: var(--text-dim);
+      font-weight: 600;
+    }
+    .idle-footer .center {
+      flex: 1; text-align: center;
+      color: var(--hud);
+      letter-spacing: 6px;
+    }
+    .blink-cursor {
+      display: inline-block; width: 12px; height: 1em;
+      background: var(--hud); margin-left: 8px;
+      vertical-align: middle;
+      animation: cursor 1s steps(2) infinite;
+    }
+    @keyframes cursor { 50% { opacity: 0; } }
+
+    /* ========================================================== */
+    /* CLICK-TO-START overlay (geste utilisateur autoplay video)  */
+    /* ========================================================== */
+    #unlock-overlay {
+      position: fixed; inset: 0; z-index: 100;
+      background: rgba(3,6,13,0.92);
+      backdrop-filter: blur(12px);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 32px;
+      cursor: pointer;
+      transition: opacity 0.3s ease;
+    }
+    #unlock-overlay.hidden { opacity: 0; pointer-events: none; }
+    #unlock-overlay .icon {
+      font-size: clamp(80px, 9vw, 200px);
+      color: var(--hud);
+      filter: drop-shadow(0 0 30px var(--hud-glow));
+      animation: pulse-scale 1.6s ease-in-out infinite;
+    }
+    @keyframes pulse-scale {
+      0%, 100% { transform: scale(1); }
+      50%      { transform: scale(1.05); }
+    }
+    #unlock-overlay .title {
+      font-size: clamp(40px, 4vw, 84px);
+      font-weight: 800;
+      color: var(--text);
+      letter-spacing: 4px;
+      text-transform: uppercase;
+    }
+    #unlock-overlay .sub {
+      font-family: var(--mono);
+      font-size: clamp(18px, 1.4vw, 32px);
+      color: var(--text-soft);
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+
+    /* ========================================================== */
+    /* ANNOUNCE (flash plein écran avant input)                    */
+    /* Deux modes : 'alert' (rouge stressant) ou 'notification'    */
+    /* (orange doux). La classe .mode-X selectionne l'apparence.   */
+    /* ========================================================== */
+    #announce {
+      position: fixed; inset: 0; z-index: 90;
+      display: none;
+      align-items: center; justify-content: center;
+      flex-direction: column; gap: 60px;
+    }
+    #announce.active { display: flex; }
+
+    /* Mode ALERT : flash rouge agressif */
+    #announce.mode-alert {
+      background: var(--crit);
+      animation: flashbg 0.5s steps(2) infinite;
+    }
+    @keyframes flashbg {
+      0%, 100% { background: #ff0d0d; }
+      50%      { background: #1a0000; }
+    }
+    #announce.mode-alert .ico {
+      animation: shake 0.4s ease-in-out infinite;
+    }
+
+    /* Mode NOTIFICATION : pulsation orange douce, beaucoup moins stressant */
+    #announce.mode-notification {
+      background: #b96b08;
+      animation: pulsenotif 1.4s ease-in-out infinite;
+    }
+    @keyframes pulsenotif {
+      0%, 100% { background: #d97706; }
+      50%      { background: #6b3a04; }
+    }
+    #announce.mode-notification .ico {
+      animation: bell-tilt 1.2s ease-in-out infinite;
+    }
+    @keyframes bell-tilt {
+      0%, 100% { transform: rotate(-2deg); }
+      50%      { transform: rotate(2deg); }
+    }
+    #announce.mode-notification .text {
+      letter-spacing: 4px;
+    }
+
+    #announce .ico {
+      font-size: clamp(160px, 14vw, 320px);
+      filter: drop-shadow(0 0 40px rgba(255,255,255,0.7));
+    }
+    @keyframes shake {
+      0%, 100% { transform: rotate(-4deg); }
+      50%      { transform: rotate(4deg); }
+    }
+    #announce .text {
+      font-size: clamp(72px, 8vw, 200px);
+      font-weight: 900;
+      letter-spacing: 6px;
+      text-transform: uppercase;
+      color: white;
+      text-shadow: 0 0 30px rgba(0,0,0,0.5);
+      text-align: center;
+      padding: 0 40px;
+    }
+    #announce .sub {
+      font-family: var(--mono);
+      font-size: clamp(22px, 2vw, 48px);
+      letter-spacing: 6px;
+      color: rgba(255,255,255,0.85);
+      text-transform: uppercase;
+    }
+
+    /* ========================================================== */
+    /* DISPLAY (le contenu de l'input à l'antenne)                 */
+    /* ========================================================== */
+    #display {
+      position: fixed; inset: 0; z-index: 50;
+      display: none;
+      background: black;
+    }
+    #display.active { display: block; }
+
+    /* Photo */
+    .render-photo {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: black;
+    }
+    .render-photo img {
+      max-width: 100%; max-height: 100%;
+      object-fit: contain;
+    }
+
+    /* Vidéo */
+    .render-video {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: black;
+    }
+    .render-video video {
+      max-width: 100%; max-height: 100%;
+      width: 100%; height: 100%;
+      object-fit: contain;
+    }
+
+    /* PDF */
+    .render-pdf {
+      position: absolute; inset: 0;
+      overflow-y: auto;
+      background: #1a1a1a;
+      scroll-behavior: smooth;
+    }
+    .render-pdf .pages {
+      display: flex; flex-direction: column;
+      align-items: center; gap: 16px;
+      padding: 24px 0;
+    }
+    .render-pdf canvas {
+      max-width: 100%;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+      background: white;
+    }
+
+    /* CSV */
+    .render-csv {
+      position: absolute; inset: 0;
+      overflow-y: auto;
+      background: #0d141f;
+      padding: 32px 48px;
+    }
+    .render-csv h2 {
+      font-size: clamp(36px, 3vw, 64px);
+      font-weight: 800;
+      color: var(--text);
+      margin-bottom: 24px;
+      letter-spacing: 1px;
+    }
+    .render-csv h2 .sub {
+      font-family: var(--mono);
+      font-size: 0.55em;
+      color: var(--hud);
+      font-weight: 600;
+      letter-spacing: 3px;
+      margin-left: 24px;
+    }
+    .render-csv table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: clamp(18px, 1.3vw, 28px);
+      color: var(--text);
+    }
+    .render-csv thead {
+      position: sticky; top: 0;
+      background: var(--aco-navy);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    .render-csv th {
+      padding: 16px 20px;
+      text-align: left;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      font-size: 0.85em;
+      color: white;
+      border-bottom: 2px solid var(--hud);
+    }
+    .render-csv td {
+      padding: 14px 20px;
+      border-bottom: 1px solid rgba(95,209,255,0.12);
+    }
+    .render-csv tr:nth-child(even) td { background: rgba(95,209,255,0.04); }
+
+    /* Message libre */
+    .render-message {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 8vw;
+      text-align: center;
+    }
+    .render-message.level-info     { background: linear-gradient(135deg, #0c1e3f 0%, #1a3a6c 100%); }
+    .render-message.level-warning  { background: linear-gradient(135deg, #4a2a05 0%, #b9620b 100%); }
+    .render-message.level-alert    { background: linear-gradient(135deg, #3a0808 0%, #91141d 100%); }
+    .render-message.level-critical { background: linear-gradient(135deg, #5a0808 0%, #ff0d0d 100%); animation: flashbg 1s steps(2) infinite; }
+
+    .render-message .level-tag {
+      font-family: var(--mono);
+      font-size: clamp(20px, 1.6vw, 36px);
+      font-weight: 700;
+      letter-spacing: 8px;
+      text-transform: uppercase;
+      padding: 10px 24px;
+      border: 2px solid currentColor;
+      margin-bottom: 48px;
+      color: rgba(255,255,255,0.95);
+    }
+    .render-message .title {
+      font-size: clamp(54px, 6vw, 140px);
+      font-weight: 900;
+      letter-spacing: 2px;
+      line-height: 1.1;
+      color: white;
+      margin-bottom: 32px;
+      text-shadow: 0 4px 24px rgba(0,0,0,0.4);
+      max-width: 90%;
+    }
+    .render-message .body {
+      font-size: clamp(28px, 2.4vw, 56px);
+      font-weight: 500;
+      line-height: 1.4;
+      color: rgba(255,255,255,0.95);
+      max-width: 1400px;
+      white-space: pre-wrap;
+    }
+
+    /* ========================================================== */
+    /* LABEL overlay sur display (info contextuelle discrete)      */
+    /* ========================================================== */
+    #display-label {
+      position: absolute;
+      bottom: 24px; left: 24px;
+      z-index: 60;
+      font-family: var(--mono);
+      font-size: clamp(14px, 1vw, 22px);
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.55);
+      text-shadow: 0 2px 8px rgba(0,0,0,0.7);
+      padding: 8px 14px;
+      background: rgba(0,0,0,0.45);
+      border-left: 3px solid var(--hud);
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+    #display-label.hidden { opacity: 0; }
+
+    /* Erreur de connexion (badge en coin) */
+    #conn-error {
+      position: fixed;
+      top: 18px; right: 18px;
+      z-index: 95;
+      font-family: var(--mono);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding: 8px 14px;
+      background: rgba(255,77,77,0.15);
+      border: 1px solid var(--crit);
+      color: var(--crit);
+      display: none;
+    }
+    #conn-error.shown { display: block; }
+  </style>
+</head>
+<body>
+  <div class="scan-sweep" aria-hidden="true"></div>
+
+  <!-- Click-to-start overlay (premier load uniquement, geste utilisateur Chrome) -->
+  <div id="unlock-overlay">
+    <div class="icon">▶</div>
+    <div class="title">Activer le live feed</div>
+    <div class="sub">Cliquez n'importe où pour autoriser le son et l'autoplay vidéo</div>
+  </div>
+
+  <!-- Idle (page d'attente avec horloges) -->
+  <div id="idle">
+    <div class="idle-header">
+      <div class="idle-logo">
+        <img src="../assets/aco-logo-white.png" alt="ACO">
+      </div>
+      <div class="idle-titles">
+        <div class="idle-overline">▮ AUTOMOBILE CLUB DE L'OUEST · LIVE FEED</div>
+        <div class="idle-title">Salle de crise</div>
+        <div class="idle-id">EXERCISE <span class="accent">GP MOTO 2026</span> · STATION 03 // OBSERVER</div>
+      </div>
+      <div class="idle-status">
+        <div class="pill" id="status-pill"><span class="dot"></span><span id="status-text">EN LIGNE</span></div>
+      </div>
+    </div>
+
+    <div class="idle-main">
+      <div class="sim-overline">▶ HEURE DU SCÉNARIO</div>
+      <div class="sim-date" id="date-sim">—</div>
+      <div class="sim-clock" id="clk-sim">--:--:--</div>
+      <div class="sim-offset">SIMULATION · J+10D 04H · TEMPS RÉEL</div>
+
+      <div class="real-block">
+        <span><span class="lbl">Réel</span> <span class="val" id="date-real">—</span></span>
+        <span><span class="lbl">·</span> <span class="val" id="clk-real">--:--:--</span></span>
+      </div>
+    </div>
+
+    <div class="idle-footer">
+      <span>EXERCICE — DONNÉES FICTIVES</span>
+      <span class="center">EN ATTENTE DE DIFFUSION<span class="blink-cursor"></span></span>
+      <span>RÉGIE ✓ · UPLINK COCKPIT</span>
+    </div>
+  </div>
+
+  <!-- Annonce (flash rouge avant un input) -->
+  <div id="announce">
+    <div class="ico">⚠</div>
+    <div class="text">Nouvel événement<br>à venir</div>
+    <div class="sub">▮ ▮ ▮ Stand by ▮ ▮ ▮</div>
+  </div>
+
+  <!-- Display (zone de rendu de l'input) -->
+  <div id="display">
+    <!-- Le contenu est injecté par JS selon le type de payload -->
+  </div>
+
+  <!-- Label overlay sur display -->
+  <div id="display-label" class="hidden"></div>
+
+  <!-- Badge erreur connexion -->
+  <div id="conn-error">⚠ Connexion perdue · reprise auto…</div>
+
+  <!-- Audio annonces (chargés en lazy) -->
+  <audio id="alert-audio" preload="auto" src="assets/alert.mp3"></audio>
+  <audio id="notif-audio" preload="auto" src="assets/notification.mp3"></audio>
+
+  <!-- pdf.js (UMD, chargé en async ; on attend window.pdfjsLib avant d'afficher un PDF) -->
+  <script src="assets/pdfjs/pdf.min.js"></script>
+  <script>
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'assets/pdfjs/pdf.worker.min.js';
+    }
+  </script>
+
+  <script>
+  (function() {
+    'use strict';
+
+    // ===================================================================
+    // Config
+    // ===================================================================
+    var EXERCISE_ID = 'gpmotos2026';
+    var POLL_INTERVAL_OK_MS = 1000;
+    var POLL_INTERVAL_ERR_MS = 5000;
+    var POLL_INTERVAL_LONG_ERR_MS = 15000;
+    var ANNOUNCE_DURATION_MS = 3500;
+    var SIM_OFFSET_MS = (10 * 24 + 4) * 3600 * 1000;
+
+    // ===================================================================
+    // Helpers DOM
+    // ===================================================================
+    function $(id) { return document.getElementById(id); }
+    function clearChildren(node) {
+      while (node && node.firstChild) node.removeChild(node.firstChild);
+    }
+    function el(tag, attrs, children) {
+      var n = document.createElement(tag);
+      if (attrs) Object.keys(attrs).forEach(function(k) {
+        if (k === 'className') n.className = attrs[k];
+        else if (k === 'text') n.textContent = attrs[k];
+        else if (k.indexOf('on') === 0 && typeof attrs[k] === 'function')
+          n.addEventListener(k.slice(2), attrs[k]);
+        else n.setAttribute(k, attrs[k]);
+      });
+      if (children) children.forEach(function(c) {
+        if (c == null) return;
+        n.appendChild(c.nodeType ? c : document.createTextNode(String(c)));
+      });
+      return n;
+    }
+    function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+    var FR_DAYS = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+    var FR_MONTHS = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+    function fmtDate(d) {
+      return FR_DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + FR_MONTHS[d.getMonth()] + ' ' + d.getFullYear();
+    }
+    function fmtTime(d) {
+      return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+    }
+
+    // ===================================================================
+    // Client ID stable (pour heartbeat multi-TV cote regie)
+    // ===================================================================
+    var CLIENT_ID;
+    try {
+      CLIENT_ID = sessionStorage.getItem('livefeed_client_id');
+      if (!CLIENT_ID) {
+        CLIENT_ID = 'tv-' + Math.random().toString(36).slice(2, 10) + '-' + Date.now().toString(36);
+        sessionStorage.setItem('livefeed_client_id', CLIENT_ID);
+      }
+    } catch (e) {
+      CLIENT_ID = 'tv-' + Math.random().toString(36).slice(2, 10);
+    }
+
+    // ===================================================================
+    // Manifeste local des inputs (pour resoudre input_id -> file et CSV)
+    // Charge en parallele du polling (best-effort, GET public).
+    // ===================================================================
+    var MANIFEST = null;
+    function loadManifest() {
+      fetch('livefeed_inputs.json', { credentials: 'omit', cache: 'no-store' })
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(j) {
+          if (!j) return;
+          MANIFEST = { inputs: {}, csv_data: j.csv_data || {} };
+          (j.inputs || []).forEach(function(i) {
+            if (typeof i.id === 'number') MANIFEST.inputs[i.id] = i;
+          });
+        })
+        .catch(function() {});
+    }
+
+    // ===================================================================
+    // Horloges (idle)
+    // ===================================================================
+    function tickClocks() {
+      var now = new Date();
+      var sim = new Date(now.getTime() + SIM_OFFSET_MS);
+      $('clk-real').textContent = fmtTime(now);
+      $('clk-sim').textContent = fmtTime(sim);
+      $('date-real').textContent = fmtDate(now);
+      $('date-sim').textContent = fmtDate(sim);
+    }
+    tickClocks();
+    setInterval(tickClocks, 1000);
+
+    // ===================================================================
+    // Click-to-start (geste utilisateur pour debloquer autoplay+son)
+    // ===================================================================
+    var UNLOCKED = false;
+    var unlockEl = $('unlock-overlay');
+    var alertAudio = $('alert-audio');
+
+    function tryUnlock() {
+      // Pour que Chrome autorise tous les futurs play() avec son, il faut un
+      // play() AVEC son (muted=false) execute pendant la "user activation"
+      // du click. Un play muted ne compte pas comme consent unmute.
+      // Astuce : volume=0 + muted=false = lecture silencieuse mais "vraie"
+      // du point de vue de la policy autoplay. On restaure volume=1 ensuite.
+      // On debloque les 2 audios dans le meme handler (geste valable ~5s).
+      ['alert-audio', 'notif-audio'].forEach(function(id) {
+        var a = document.getElementById(id);
+        if (!a) return;
+        try {
+          a.muted = false;
+          a.volume = 0;
+          var p = a.play();
+          if (p && typeof p.then === 'function') {
+            p.then(function() {
+              a.pause();
+              a.currentTime = 0;
+              a.volume = 1;
+            }).catch(function() { a.volume = 1; });
+          } else {
+            a.pause(); a.currentTime = 0; a.volume = 1;
+          }
+        } catch (e) {}
+      });
+      UNLOCKED = true;
+      unlockEl.classList.add('hidden');
+      try { sessionStorage.setItem('livefeed_unlocked', '1'); } catch (e) {}
+      setTimeout(function() { unlockEl.style.display = 'none'; }, 400);
+    }
+
+    // On NE court-circuite PAS l'overlay meme si sessionStorage l'a flag :
+    // il faut un nouveau click pour fournir une user activation a la session
+    // courante (Chrome ne persiste pas l'autoplay-with-sound entre rechargements).
+    // Le flag reste utile pour skip l'overlay si une nouvelle iframe/popup hérite
+    // du parent, mais pour la TV on prefere un clic frais a chaque refresh.
+    try { sessionStorage.removeItem('livefeed_unlocked'); } catch (e) {}
+
+    unlockEl.addEventListener('click', tryUnlock);
+
+    // ===================================================================
+    // Statut UI (pill en haut a droite + badge erreur connexion)
+    // ===================================================================
+    var statusPill = $('status-pill');
+    var statusText = $('status-text');
+    var connError = $('conn-error');
+    function setStatus(kind, txt) {
+      statusPill.className = 'pill' + (kind === 'ok' ? '' : ' ' + kind);
+      statusText.textContent = txt;
+    }
+
+    // ===================================================================
+    // Machine a etats
+    //   IDLE       : page horloge visible
+    //   ANNOUNCING : flash rouge + son
+    //   DISPLAYING : contenu de l'input visible
+    // ===================================================================
+    var STATE = 'IDLE';
+    var lastVersion = -1;
+    var lastDisplayedVersion = -1;
+    var displayTimer = null;
+    var announceTimer = null;
+    var pdfScrollTimer = null;
+    var csvScrollTimer = null;
+    var currentVideo = null;
+    var currentPdfTask = null;
+
+    var idleEl = $('idle');
+    var announceEl = $('announce');
+    var displayEl = $('display');
+    var labelEl = $('display-label');
+    var notifAudio = $('notif-audio');
+
+    function showIdle() {
+      STATE = 'IDLE';
+      idleEl.classList.remove('hidden');
+      announceEl.classList.remove('active');
+      displayEl.classList.remove('active');
+      labelEl.classList.add('hidden');
+      stopRendererSideEffects();
+    }
+
+    function stopRendererSideEffects() {
+      if (pdfScrollTimer) { clearInterval(pdfScrollTimer); pdfScrollTimer = null; }
+      if (csvScrollTimer) { clearInterval(csvScrollTimer); csvScrollTimer = null; }
+      if (currentVideo) {
+        try { currentVideo.pause(); currentVideo.removeAttribute('src'); currentVideo.load(); } catch (e) {}
+        currentVideo = null;
+      }
+      if (currentPdfTask && typeof currentPdfTask.destroy === 'function') {
+        try { currentPdfTask.destroy(); } catch (e) {}
+        currentPdfTask = null;
+      }
+    }
+
+    // Met à jour le visuel de l'annonce (texte + classe mode-X)
+    function setAnnounceContent(mode) {
+      announceEl.classList.remove('mode-alert', 'mode-notification');
+      announceEl.classList.add('mode-' + mode);
+      var ico = announceEl.querySelector('.ico');
+      var text = announceEl.querySelector('.text');
+      var sub = announceEl.querySelector('.sub');
+      if (mode === 'notification') {
+        if (ico) ico.textContent = '\u{1F514}'; // 🔔
+        if (text) text.textContent = 'Nouvelle information';
+        if (sub) sub.textContent = '▮ ▮ Notification ▮ ▮';
+      } else {
+        if (ico) ico.textContent = '⚠'; // ⚠
+        if (text) text.textContent = 'Nouvel événement à venir';
+        if (sub) sub.textContent = '▮ ▮ ▮ Stand by ▮ ▮ ▮';
+      }
+    }
+
+    function showAnnounce(mode, onDone) {
+      STATE = 'ANNOUNCING';
+      idleEl.classList.add('hidden');
+      displayEl.classList.remove('active');
+      labelEl.classList.add('hidden');
+      setAnnounceContent(mode);
+      announceEl.classList.add('active');
+
+      // Choix audio + nombre de cycles : 1 pour alerte, 2 pour notification
+      var audio = (mode === 'notification') ? notifAudio : alertAudio;
+      var maxPlays = (mode === 'notification') ? 2 : 1;
+      var playCount = 0;
+
+      // Cleanup d'un eventuel handler precedent (evite cumul d'event listeners)
+      if (audio._announceLoopHandler) {
+        audio.removeEventListener('ended', audio._announceLoopHandler);
+        audio._announceLoopHandler = null;
+      }
+
+      var onEnded = function() {
+        playCount++;
+        if (playCount < maxPlays) {
+          try { audio.currentTime = 0; audio.play().catch(function() {}); } catch (e) {}
+        } else {
+          audio.removeEventListener('ended', onEnded);
+          audio._announceLoopHandler = null;
+        }
+      };
+      audio.addEventListener('ended', onEnded);
+      audio._announceLoopHandler = onEnded;
+
+      try {
+        audio.currentTime = 0;
+        audio.muted = false;            // son ON, le geste initial a debloque
+        audio.volume = 1;
+        var p = audio.play();
+        if (p && typeof p.catch === 'function') {
+          p.catch(function() {
+            // Si Chrome refuse encore (cas tres rare), tente muted en fallback
+            audio.muted = true;
+            audio.play().catch(function() {});
+          });
+        }
+      } catch (e) {}
+
+      if (announceTimer) clearTimeout(announceTimer);
+      announceTimer = setTimeout(function() {
+        announceTimer = null;
+        announceEl.classList.remove('active');
+        // Cleanup du listener de boucle + arret de l'audio
+        if (audio._announceLoopHandler) {
+          audio.removeEventListener('ended', audio._announceLoopHandler);
+          audio._announceLoopHandler = null;
+        }
+        try { audio.pause(); audio.currentTime = 0; } catch (e) {}
+        if (onDone) onDone();
+      }, ANNOUNCE_DURATION_MS);
+    }
+
+    function showDisplay(payload, replayAnnounce) {
+      stopRendererSideEffects();
+      clearChildren(displayEl);
+      var renderer = renderers[payload.type];
+      if (!renderer) {
+        showIdle();
+        return;
+      }
+      var node = renderer(payload);
+      if (node) displayEl.appendChild(node);
+      // Label discret en bas a gauche (sauf message libre)
+      if (payload.type === 'input' && payload.label) {
+        labelEl.textContent = '#' + (payload.num || payload.input_id) + ' · ' + payload.label;
+        labelEl.classList.remove('hidden');
+      } else {
+        labelEl.classList.add('hidden');
+      }
+      idleEl.classList.add('hidden');
+      announceEl.classList.remove('active');
+      displayEl.classList.add('active');
+      STATE = 'DISPLAYING';
+
+      // Auto-clear apres duration_s si specifie
+      if (displayTimer) { clearTimeout(displayTimer); displayTimer = null; }
+      if (typeof payload.duration_s === 'number' && payload.duration_s > 0) {
+        // Si on reprend une diffusion deja entamee (replayAnnounce=false), on
+        // calcule le temps restant a partir de started_at.
+        var remainingMs = payload.duration_s * 1000;
+        if (!replayAnnounce && payload.started_at) {
+          var started = Date.parse(payload.started_at);
+          if (!isNaN(started)) {
+            remainingMs = (payload.duration_s * 1000) - (Date.now() - started);
+          }
+        }
+        if (remainingMs > 0) {
+          displayTimer = setTimeout(function() { showIdle(); }, remainingMs);
+        } else {
+          showIdle();
+        }
+      }
+    }
+
+    // ===================================================================
+    // Renderers
+    // ===================================================================
+    var renderers = {};
+
+    renderers.input = function(payload) {
+      var mt = payload.media_type;
+      if (mt === 'photo') return renderPhoto(payload);
+      if (mt === 'video') return renderVideo(payload);
+      if (mt === 'pdf') return renderPdf(payload);
+      if (mt === 'data') return renderCsv(payload);
+      return null;
+    };
+
+    renderers.message = function(payload) {
+      var box = el('div', { className: 'render-message level-' + (payload.level || 'info') });
+      var levelLabels = { info: 'INFORMATION', warning: 'AVERTISSEMENT', alert: 'ALERTE', critical: 'CRITIQUE' };
+      box.appendChild(el('div', { className: 'level-tag', text: levelLabels[payload.level] || 'INFORMATION' }));
+      box.appendChild(el('div', { className: 'title', text: payload.title || '' }));
+      if (payload.body) box.appendChild(el('div', { className: 'body', text: payload.body }));
+      return box;
+    };
+
+    renderers.idle = function() { return null; };
+
+    function renderPhoto(payload) {
+      var wrap = el('div', { className: 'render-photo' });
+      var img = el('img', { alt: payload.label || '' });
+      img.src = 'input/' + encodeURI(payload.file);
+      wrap.appendChild(img);
+      return wrap;
+    }
+
+    function renderVideo(payload) {
+      var wrap = el('div', { className: 'render-video' });
+      var video = document.createElement('video');
+      video.src = 'input/' + encodeURI(payload.file);
+      video.controls = true;
+      video.autoplay = true;
+      video.playsInline = true;
+      video.preload = 'auto';
+      video.loop = true;            // boucle indefinie, l'animateur stoppe manuellement
+      video.muted = false;          // son ON par defaut (geste utilisateur initial debloque)
+      video.volume = 1;
+      currentVideo = video;
+      var p = video.play();
+      if (p && typeof p.catch === 'function') {
+        p.catch(function() {
+          // Si Chrome refuse l'autoplay avec son, fallback muted pour qu'au
+          // moins l'image tourne. L'animateur peut activer le son via les
+          // controls. En pratique, le geste initial click-to-start debloque.
+          video.muted = true;
+          video.play().catch(function() {});
+        });
+      }
+      wrap.appendChild(video);
+      return wrap;
+    }
+
+    function renderPdf(payload) {
+      var wrap = el('div', { className: 'render-pdf' });
+      var pages = el('div', { className: 'pages' });
+      wrap.appendChild(pages);
+
+      if (!window.pdfjsLib) {
+        pages.appendChild(el('div', { text: 'pdf.js indisponible' }));
+        return wrap;
+      }
+      var url = 'input/' + encodeURI(payload.file);
+      var task = window.pdfjsLib.getDocument(url);
+      currentPdfTask = task;
+      task.promise.then(function(pdf) {
+        var renderNext = function(pageNum) {
+          if (pageNum > pdf.numPages) {
+            startPdfAutoScroll(wrap);
+            return;
+          }
+          pdf.getPage(pageNum).then(function(page) {
+            var dpr = Math.min(window.devicePixelRatio || 1, 2);
+            var availW = wrap.clientWidth - 80;
+            var v1 = page.getViewport({ scale: 1 });
+            var scale = Math.max(0.5, Math.min(3, availW / v1.width));
+            var viewport = page.getViewport({ scale: scale * dpr });
+            var canvas = el('canvas');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            canvas.style.width = (viewport.width / dpr) + 'px';
+            canvas.style.height = (viewport.height / dpr) + 'px';
+            pages.appendChild(canvas);
+            var ctx = canvas.getContext('2d');
+            page.render({ canvasContext: ctx, viewport: viewport }).promise.then(function() {
+              renderNext(pageNum + 1);
+            }).catch(function() { renderNext(pageNum + 1); });
+          }).catch(function() { renderNext(pageNum + 1); });
+        };
+        renderNext(1);
+      }).catch(function(err) {
+        pages.appendChild(el('div', { text: 'Erreur chargement PDF : ' + err }));
+      });
+      return wrap;
+    }
+
+    function startPdfAutoScroll(wrap) {
+      // Scroll lent, pause 5s en bas, retour haut, repeat.
+      var pauseMs = 5000;
+      var stepPx = 1;
+      var stepMs = 30;
+      var pausing = false;
+      pdfScrollTimer = setInterval(function() {
+        if (!wrap || !wrap.isConnected) {
+          if (pdfScrollTimer) { clearInterval(pdfScrollTimer); pdfScrollTimer = null; }
+          return;
+        }
+        if (pausing) return;
+        if (wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 2) {
+          pausing = true;
+          setTimeout(function() {
+            wrap.scrollTo({ top: 0, behavior: 'smooth' });
+            setTimeout(function() { pausing = false; }, 1200);
+          }, pauseMs);
+          return;
+        }
+        wrap.scrollTop += stepPx;
+      }, stepMs);
+    }
+
+    function renderCsv(payload) {
+      var wrap = el('div', { className: 'render-csv' });
+      var data = MANIFEST && MANIFEST.csv_data && MANIFEST.csv_data[String(payload.input_id)];
+      var title = el('h2', { text: payload.label || 'Données' });
+      title.appendChild(el('span', { className: 'sub', text: '#' + (payload.num || payload.input_id) }));
+      wrap.appendChild(title);
+      if (!data) {
+        wrap.appendChild(el('div', { text: 'Données non disponibles (manifeste manquant)' }));
+        return wrap;
+      }
+      var table = el('table');
+      var thead = el('thead');
+      var trh = el('tr');
+      (data.headers || []).forEach(function(h) {
+        trh.appendChild(el('th', { text: h }));
+      });
+      thead.appendChild(trh);
+      table.appendChild(thead);
+      var tbody = el('tbody');
+      (data.rows || []).forEach(function(row) {
+        var tr = el('tr');
+        row.forEach(function(c) { tr.appendChild(el('td', { text: c })); });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      wrap.appendChild(table);
+
+      // Auto-scroll si trop long
+      setTimeout(function() {
+        if (wrap.scrollHeight > wrap.clientHeight + 20) {
+          var pauseMs = 5000, stepMs = 35, pausing = false;
+          csvScrollTimer = setInterval(function() {
+            if (!wrap || !wrap.isConnected) {
+              if (csvScrollTimer) { clearInterval(csvScrollTimer); csvScrollTimer = null; }
+              return;
+            }
+            if (pausing) return;
+            if (wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 2) {
+              pausing = true;
+              setTimeout(function() {
+                wrap.scrollTo({ top: 0, behavior: 'smooth' });
+                setTimeout(function() { pausing = false; }, 1200);
+              }, pauseMs);
+              return;
+            }
+            wrap.scrollTop += 1;
+          }, stepMs);
+        }
+      }, 200);
+      return wrap;
+    }
+
+    // ===================================================================
+    // Application d'un nouvel etat (transition entre versions)
+    // ===================================================================
+    function applyState(stateFromServer, isFirstLoad) {
+      var version = stateFromServer.version;
+      var payload = stateFromServer.payload || { type: 'idle' };
+
+      // No-op : meme version
+      if (version === lastDisplayedVersion) return;
+      lastDisplayedVersion = version;
+
+      if (payload.type === 'idle') {
+        showIdle();
+        return;
+      }
+
+      // Reprise d'une diffusion en cours apres reboot TV : pas de re-annonce
+      if (isFirstLoad && payload.started_at) {
+        var startedMs = Date.parse(payload.started_at);
+        if (!isNaN(startedMs)) {
+          var ageMs = Date.now() - startedMs;
+          if (typeof payload.duration_s === 'number' && payload.duration_s > 0) {
+            if (ageMs >= payload.duration_s * 1000) {
+              showIdle();
+              return;
+            }
+          }
+          // Si l'annonce est largement passee, on reprend direct sans re-annoncer
+          if (ageMs > ANNOUNCE_DURATION_MS) {
+            showDisplay(payload, false);
+            return;
+          }
+        }
+      }
+
+      // payload.announce peut etre :
+      //   "alert"        -> flash rouge + son alert.mp3 (defaut historique)
+      //   "notification" -> flash orange + son notification.mp3 (doux)
+      //   "none"         -> aucune annonce, affichage direct
+      // Retrocompat : true/false depuis d'anciens clients (peu probable)
+      var mode = payload.announce;
+      if (mode === true) mode = 'alert';
+      else if (mode === false) mode = 'none';
+      if (mode === 'alert' || mode === 'notification') {
+        showAnnounce(mode, function() { showDisplay(payload, true); });
+      } else {
+        showDisplay(payload, true);
+      }
+    }
+
+    // ===================================================================
+    // Polling backend
+    // ===================================================================
+    var pollErrors = 0;
+    var pollAbort = null;
+    var firstLoad = true;
+
+    function scheduleNextPoll(delayMs) {
+      setTimeout(pollOnce, delayMs);
+    }
+
+    function pollOnce() {
+      if (pollAbort) {
+        try { pollAbort.abort(); } catch (e) {}
+      }
+      pollAbort = new AbortController();
+      var url = 'livefeed/state?client=' + encodeURIComponent(CLIENT_ID);
+      fetch(url, {
+        method: 'GET',
+        credentials: 'omit',
+        signal: pollAbort.signal,
+        cache: 'no-store',
+      }).then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(function(data) {
+        pollErrors = 0;
+        connError.classList.remove('shown');
+        setStatus('ok', 'EN LIGNE');
+        if (data && data.ok) {
+          if (data.version !== lastVersion) {
+            lastVersion = data.version;
+            applyState(data, firstLoad);
+          }
+          firstLoad = false;
+        }
+        scheduleNextPoll(POLL_INTERVAL_OK_MS);
+      }).catch(function(err) {
+        if (err && err.name === 'AbortError') return;
+        pollErrors++;
+        var delay = pollErrors > 6 ? POLL_INTERVAL_LONG_ERR_MS : POLL_INTERVAL_ERR_MS;
+        if (pollErrors > 2) {
+          connError.classList.add('shown');
+          setStatus('error', 'HORS LIGNE');
+        }
+        scheduleNextPoll(delay);
+      });
+    }
+
+    // ===================================================================
+    // Boot
+    // ===================================================================
+    loadManifest();
+    showIdle();
+    pollOnce();
+
+    // Plein écran auto sur double-clic (utile pour la TV)
+    document.addEventListener('dblclick', function() {
+      if (!document.fullscreenElement) {
+        if (document.documentElement.requestFullscreen) {
+          document.documentElement.requestFullscreen().catch(function() {});
+        }
+      } else {
+        if (document.exitFullscreen) document.exitFullscreen().catch(function() {});
+      }
+    });
+  })();
+  </script>
+</body>
+</html>

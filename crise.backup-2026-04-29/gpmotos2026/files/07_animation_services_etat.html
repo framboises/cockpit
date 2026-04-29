@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>04 - Animation services Etat vers Amandine - Exercice GP Moto 2026</title>
+<style>
+  @media print {
+    @page { size: A4 portrait; margin: 10mm; }
+    body { font-size: 8pt; background: white; }
+    .no-print { display: none; }
+    .input { page-break-inside: avoid; }
+    h2 { page-break-after: avoid; }
+    .role-section { page-break-inside: avoid; }
+  }
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; color: #111; background: #f5f5f7; line-height: 1.4; }
+  h1 { font-size: 16pt; margin: 0 0 4px 0; color: #6b21a8; }
+  h2 { font-size: 12pt; margin: 18px 0 6px 0; color: #6b21a8; border-bottom: 2px solid #6b21a8; padding-bottom: 3px; }
+  h3 { font-size: 10pt; margin: 10px 0 4px 0; color: #581c87; }
+  .subtitle { color: #666; font-size: 10pt; margin-bottom: 14px; }
+  .intro { background: #faf5ff; border-left: 4px solid #6b21a8; padding: 10px 14px; margin-bottom: 14px; font-size: 9.5pt; }
+  .important { background: #fee2e2; border-left: 4px solid #b91c1c; padding: 10px 14px; margin-bottom: 14px; font-size: 9.5pt; }
+  .schema-box { background: #fff; border: 2px solid #6b21a8; border-radius: 5px; padding: 10px 14px; margin-bottom: 14px; font-size: 9.5pt; }
+  .schema-box h2 { margin-top: 0; }
+  .role-section { background: #fff; border-radius: 5px; border: 1px solid #d0d0d0; padding: 12px 16px; margin-bottom: 12px; }
+  .role-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 2px solid #6b21a8; }
+  .role-name { font-weight: 700; color: #6b21a8; font-size: 11pt; }
+  .role-channel { background: #f3e8ff; color: #6b21a8; padding: 2px 8px; border-radius: 3px; font-size: 8pt; font-weight: 600; }
+  .role-meta { font-size: 8.5pt; color: #555; margin-bottom: 8px; font-style: italic; }
+  .input { padding: 6px 0; border-top: 1px solid #f0f0f0; font-size: 8.5pt; }
+  .input:first-of-type { border-top: none; }
+  .input-time { font-weight: 700; color: #6b21a8; font-variant-numeric: tabular-nums; margin-right: 6px; }
+  .input-content { display: block; margin-top: 2px; }
+  .quote { background: #f9fafb; padding: 5px 8px; border-left: 3px solid #6b21a8; margin: 3px 0; font-style: italic; font-size: 8.5pt; }
+  .input-tag { display: inline-block; background: #fef3c7; color: #9a3412; padding: 1px 6px; border-radius: 3px; font-size: 7.5pt; font-weight: 600; margin-left: 4px; }
+  .key-input { background: #fee2e2; padding: 5px 7px; border-radius: 3px; }
+  .key-input .input-time { color: #b91c1c; }
+  .new-role { border-left: 4px solid #047857; }
+  .new-role .role-name { color: #047857; }
+  .new-role .role-header { border-bottom-color: #047857; }
+  ul.tips { margin: 6px 0 0 0; padding-left: 18px; font-size: 9pt; }
+  ul.tips li { margin-bottom: 4px; }
+  .print-btn { position: fixed; top: 12px; right: 12px; background: #6b21a8; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 10pt; }
+</style>
+</head>
+<body>
+
+<button class="no-print print-btn" onclick="window.print()">Imprimer</button>
+
+<h1>Animation services de l'État → Amandine (PC Autorités)</h1>
+<div class="subtitle">Toutes les voix à incarner vers Amandine · Effondrement T11 · 10 mai 2026</div>
+
+<div class="schema-box">
+<h2>Schéma de jeu</h2>
+<p><strong>Amandine est seule en exercice au PC Autorités.</strong> Elle est assise à côté de la directrice de cabinet (siège vide en attendant le Préfet). Tous les autres sièges du U décisionnel sont vides : Gendarmerie, Police Nationale, SDIS, SAMU, gestionnaires voirie Métropole et Département, Police Municipale du Mans, Délégation Militaire Départementale, Waze.</p>
+<p><strong>Mission de l'animation :</strong> jouer toutes ces voix vers Amandine par radio ou téléphone, comme si chaque représentant était physiquement présent au PC Autorités et l'interpellait.</p>
+<p><strong>Mission d'Amandine :</strong> recevoir, hiérarchiser, faire l'interface avec la cellule de crise ACO/PHA (autre salle) par radio ou téléphone.</p>
+</div>
+
+<div class="important">
+<strong>⚠️ Règle de jeu.</strong> Vous appelez Amandine en lui disant "ici Cdt Marivin (Police Nationale)", "ici LCL Mordrais (SDIS)", etc. Comme si vous étiez physiquement à côté d'elle au PC Autorités. Variez les voix entre animateurs, alternez radio/téléphone, n'enchaînez pas deux messages du même service.
+</div>
+
+<div class="intro">
+<strong>12 rôles à incarner</strong>, classés par fréquence et importance dans le scénario. Pour chaque rôle : profil, ton, et tous les inputs avec leur timing.
+<br><br>
+<strong>Légende :</strong> les rôles existant dans la timeline V4 sont en violet. Les <span style="color: #047857; font-weight: 600;">nouveaux rôles ajoutés (en vert)</span> font travailler Amandine sur des domaines non encore couverts.
+</div>
+
+<!-- SDIS -->
+<div class="role-section">
+<div class="role-header">
+<span class="role-name">🚒 LCL Mordrais — Représentant Pompiers / SDIS 72</span>
+<span class="role-channel">📻 Radio + 📞 Téléphone</span>
+</div>
+<div class="role-meta">Chef de site, prend le COS. Ton : opérationnel, factuel, fait des points engagement réguliers. Voix qui se tend lors de la bascule à 14h35.</div>
+
+<div class="input">
+<span class="input-time">13:20</span>
+<div class="quote">"Amandine, ici LCL Mordrais SDIS. Je prends le commandement opérationnel des secours. PMA terrain en cours de montage. J'ai 4 fourgons + 2 VSAV qui arrivent. Besoin d'un expert technique de l'ACO pour évaluer le risque de seconde rupture avant qu'on envoie nos hommes sous les décombres."</div>
+</div>
+
+<div class="input">
+<span class="input-time">13:33</span>
+<div class="quote">"Amandine, mon PMA provisoire est en place à la porte nord. J'ai engagé 18 sapeurs sur la zone, plus une équipe de cynos qui arrive de Tours. À mon point je suis sur 11 victimes localisées dont 2 personnes encore sous décombres entendues mais pas vues."</div>
+</div>
+
+<div class="input">
+<span class="input-time">13:43</span>
+<div class="quote">"Amandine, point engagement T+28 : 24 sapeurs engagés, 2 cynos arrivés, 4 fourgons sur zone. J'attends l'expertise structure de Galuret avant de pousser les recherches sous décombres en zone est."</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:20</span>
+<div class="quote">"Amandine, point engagement T+65 : 32 sapeurs sur zone, 4 cynos qui creusent côté sud-est. Bruits sourds toujours entendus. Je suis sur 13 victimes vivantes confirmées + 'des bruits' sous le panneau publicitaire. Je vais dégager le panneau, ça prendra 15 min."</div>
+</div>
+
+<div class="input key-input">
+<span class="input-time">14:35</span>
+<div class="quote">"Amandine, urgent (voix tendue). On a dégagé. <strong>11 personnes supplémentaires ensevelies sous le panneau publicitaire. Bilan total au moins 24 victimes, 4 UA critiques, au moins 2 décès confirmés.</strong> Parmi les victimes, une femme avec badge 'Pascale Lemée - ACO' UA critique extraite, et un jeune homme stagiaire identifié 'Nathan'."</div>
+<span class="input-tag">PIVOT — Bilan explose</span>
+</div>
+
+<div class="input">
+<span class="input-time">15:04</span>
+<div class="quote">"Amandine, bilan stabilisé : 4 décès confirmés, 8 UA en CHM/Tours/Angers, 14 UR, 6 UMP. Pascale Lemée évacuée vers Tours, pronostic vital engagé. Nathan stable, fractures multiples. Plan rouge en levée progressive."</div>
+</div>
+
+</div>
+
+<!-- SAMU -->
+<div class="role-section">
+<div class="role-header">
+<span class="role-name">🚑 Dr Deciron — Représentant SAMU 72</span>
+<span class="role-channel">📻 Radio + 📞 Téléphone</span>
+</div>
+<div class="role-meta">Médecin régulateur. Ton : factuel, médical, formats SYNERGI. S'aligne progressivement sur le bilan SDIS.</div>
+
+<div class="input">
+<span class="input-time">13:29</span>
+<div class="quote">"Amandine, je vais vous remonter le bilan SYNERGI consolidé. À 13h29 j'ai 8 victimes connues, c'est probablement plus, on extrait. 3 SMUR + 8 ambulances mobilisés."</div>
+</div>
+
+<div class="input">
+<span class="input-time">13:42</span>
+<div class="quote">"Amandine, bilan SYNERGI consolidé T+27 : 8 blessés extraits confirmés. 1 UA, 4 UR, 3 UMP. Pas de décès. C'est moins grave que ce qu'on craignait."</div>
+<span class="input-tag">CONFLIT BILANS</span>
+</div>
+
+<div class="input">
+<span class="input-time">13:55</span>
+<div class="quote">"Amandine, point T+40 : on a hospitalisé 6 victimes au CHM, 2 transférées Tours. SYNERGI à jour : 11 blessés au total. 1 UA grave en réa. 2 UMP encore au CMS. Ça se stabilise."</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:12</span>
+<div class="quote">"Amandine, bilan SYNERGI T+57 : 13 victimes. 2 UA évacuées CHM, 6 UR au CMS, 5 UMP. Pas de décès. Sous contrôle médical."</div>
+<span class="input-tag">FAUSSE STABILISATION</span>
+</div>
+
+<div class="input">
+<span class="input-time">14:36</span>
+<div class="quote">"Amandine, on bascule. J'ai 24 victimes confirmées maintenant. 4 UA critiques que j'évacue d'urgence vers CHM, Tours et Angers. 2 décès en bas de la T11. J'ai besoin d'activer Antarès maintenant."</div>
+</div>
+
+</div>
+
+<!-- POLICE NATIONALE -->
+<div class="role-section">
+<div class="role-header">
+<span class="role-name">🚨 Cdt Marivin — Représentant Police Nationale</span>
+<span class="role-channel">📞 Téléphone + 📧 Mail</span>
+</div>
+<div class="role-meta">Officier de police judiciaire. Ton : ferme, procédural. Multiples réquisitions au fil de l'exercice.</div>
+
+<div class="input">
+<span class="input-time">13:30</span>
+<div class="quote">"Amandine, gel de zone, périmètre. Toutes les images vidéosurveillance archivées. Procureur va envoyer une réquisition."</div>
+</div>
+
+<div class="input">
+<span class="input-time">13:31</span>
+<div class="quote">"Urgent, demande de la police. Gel de toutes les images CCTV T11 et abords. Archiver tout sur disque sécurisé MAINTENANT. Délai max 1h, surtout faut pas perdre ce qui était en cours d'enregistrement quand le disjoncteur a sauté à 13h17."</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:06</span>
+<div class="quote">"Amandine, voici la première réquisition. 10 éléments à produire. Mail formel pour Pierre Lucas."</div>
+<span class="input-tag">📧 Réquisition</span>
+</div>
+
+<div class="input">
+<span class="input-time">14:16</span>
+<div class="quote">"Amandine, le PV sous-commission 2025 mentionne des réserves sur la T11. Courriers de levée ? Et le mail de décembre 2025 que M. Galuret a sorti, je le veux aussi."</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:48</span>
+<div class="quote">"Amandine, réquisition complémentaire. Tous les mails internes ACO et PHA de janvier à mai 2026 mentionnant la T11. Mail de décembre 2025 inclus. Délai 12h."</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:50</span>
+<div class="quote">"Amandine, audition libre ce soir au commissariat pour M. Galuret et M. Navarre. Possibilité d'avocat. Maître Lucas peut les accompagner."</div>
+</div>
+
+<div class="input">
+<span class="input-time">15:15</span>
+<div class="quote">"Amandine, on va devoir saisir tout votre matériel vidéo en mode preuve. Caméras T11, écrans régie, disques durs. Vous validez auprès de votre IT ?"</div>
+</div>
+
+<div class="input">
+<span class="input-time">15:20</span>
+<div class="quote">"Amandine, identification du tweet @PatriotesEveilles. Le compte est basé en Bulgarie, signalement Pharos fait. Pas de réalité du sabotage iranien, c'est une fake news. La sous-préfète va communiquer un démenti officiel."</div>
+</div>
+
+</div>
+
+<!-- DGSI -->
+<div class="role-section new-role">
+<div class="role-header">
+<span class="role-name">🕵️ DGSI — Bureau régional</span>
+<span class="role-channel">📞 Téléphone</span>
+</div>
+<div class="role-meta">Direction Générale de la Sécurité Intérieure. Compétence : terrorisme, ingérence étrangère, fake news. Ton : sobre, peu loquace.</div>
+
+<div class="input">
+<span class="input-time">14:05</span>
+<div class="quote">"Amandine, DGSI bureau régional. On a identifié le tweet @PatriotesEveilles, on procède à des vérifications de routine sur l'origine du compte. Rien à votre niveau pour l'instant. On vous tiendra informés s'il y a un signalement à transmettre à la Police."</div>
+</div>
+
+</div>
+
+<!-- GENDARMERIE -->
+<div class="role-section new-role">
+<div class="role-header">
+<span class="role-name">🪖 Chef d'escadron Guillaume Dewild — Gendarmerie Nationale</span>
+<span class="role-channel">📻 Radio + 📞 Téléphone</span>
+</div>
+<div class="role-meta">Compagnie de Gendarmerie de la Sarthe. Ton : militaire, posé. Compétence territoriale sur les abords du circuit hors agglomération.</div>
+
+<div class="input">
+<span class="input-time">13:25</span>
+<div class="quote">"Amandine, ici Chef d'escadron Dewild, Gendarmerie de la Sarthe. J'engage 2 pelotons sur les abords du circuit côté rural, on boucle les accès secondaires depuis les hameaux. Concertation avec la Police Nationale pour la répartition territoriale ?"</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:00</span>
+<div class="quote">"Amandine, on a un rassemblement spontané d'une vingtaine de personnes sur la D139 au niveau de Mulsanne, qui veulent monter au circuit pour 'voir', certains avec des enfants. On les disperse mais ça pousse. Si ça grossit on demandera l'EGM."</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:30</span>
+<div class="quote">"Amandine, on a interpellé 2 personnes en faux gilets 'PRESSE' qui essayaient de passer un grillage côté Maison Blanche. Carte de presse périmée pour l'un. Garde à vue ? Je remonte au Procureur."</div>
+</div>
+
+<div class="input">
+<span class="input-time">15:10</span>
+<div class="quote">"Amandine, le PSIG est mobilisé pour escorter les véhicules funéraires hors zone, itinéraire validé hors regards. On part dans 30 min."</div>
+</div>
+
+</div>
+
+<!-- POLICE MUNICIPALE -->
+<div class="role-section new-role">
+<div class="role-header">
+<span class="role-name">👮 M. Garreau — Police Municipale Le Mans</span>
+<span class="role-channel">📻 Radio + 📞 Téléphone</span>
+</div>
+<div class="role-meta">Chef de la Police Municipale Le Mans. Ton : municipal, solidaire, mobilisable rapidement. Compétence centre-ville et abords.</div>
+
+<div class="input">
+<span class="input-time">13:35</span>
+<div class="quote">"Amandine, ici Garreau, Police Municipale du Mans. Le Maire Le Foll m'a demandé de me mettre à votre disposition. Je peux mobiliser 18 agents en 20 min, on peut tenir des points de filtrage en agglomération si besoin, et on a des renforts qu'on peut faire venir de Saint-Saturnin."</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:05</span>
+<div class="quote">"Amandine, on a des dépôts sauvages de bouquets et bougies devant la Mairie du Mans depuis 30 min, ça commence à se rassembler, des gens en pleurs. On gère l'émotion sur place, mais on aura besoin de soutien psy à un moment."</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:50</span>
+<div class="quote">"Amandine, on a des riverains du quartier Pontlieue qui appellent en série, ils sont coincés chez eux par la D309, ils n'arrivent plus à sortir pour aller chercher leurs gamins à l'école. Le standard de la Mairie déborde."</div>
+</div>
+
+</div>
+
+<!-- VOIRIE METROPOLE -->
+<div class="role-section new-role">
+<div class="role-header">
+<span class="role-name">🚧 David Bobet — Gestionnaire voirie Le Mans Métropole</span>
+<span class="role-channel">📞 Téléphone</span>
+</div>
+<div class="role-meta">Direction de la voirie métropolitaine. Compétence : voirie d'agglomération autour du circuit. Ton : technicien, pragmatique.</div>
+
+<div class="input">
+<span class="input-time">13:45</span>
+<div class="quote">"Amandine, David Bobet, voirie Le Mans Métropole. On a la D309 qui sature dans les 2 sens à hauteur du tunnel. Je peux activer 4 panneaux à message variable en moins de 10 min pour orienter vers les itinéraires de délestage. Vous me dites quoi afficher ?"</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:10</span>
+<div class="quote">"Amandine, je propose de fermer le tunnel D309 sur 2 voies pour priorité ambulances. Ça nécessite votre accord pour bloquer la sortie du parking C en remontée. Confirmation ?"</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:55</span>
+<div class="quote">"Amandine, on a des automobilistes qui abandonnent leur véhicule sur les bas-côtés de la D309 et partent à pied vers le circuit. C'est dangereux pour les secours. Je peux faire venir 3 dépanneuses sous 25 min pour évacuer."</div>
+</div>
+
+<div class="input">
+<span class="input-time">15:08</span>
+<div class="quote">"Amandine, vu l'évacuation totale annoncée, j'ai besoin de votre plan de circulation pour les 80 000 sortants. Je dois calibrer mes feux et déviations dans les 10 min, sinon on saute."</div>
+</div>
+
+</div>
+
+<!-- VOIRIE DEPARTEMENT -->
+<div class="role-section new-role">
+<div class="role-header">
+<span class="role-name">🛣️ Mickaël Cissé — Gestionnaire voirie Conseil Départemental Sarthe</span>
+<span class="role-channel">📞 Téléphone</span>
+</div>
+<div class="role-meta">Direction des routes départementales. Compétence : RD hors agglomération + autoroutes secondaires. Ton : posé, méthodique.</div>
+
+<div class="input">
+<span class="input-time">14:00</span>
+<div class="quote">"Amandine, Mickaël Cissé, voirie Conseil Départemental. Je signale qu'on a la RD338 et la RD139 qui se densifient en piétons, des gens qui descendent à pied. Je peux activer la signalisation lumineuse de prévention sur 12 km, mais ça prend 15 min. Vous me confirmez ?"</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:25</span>
+<div class="quote">"Amandine, je propose une déviation par la RD323 pour absorber le flux qui sortira du circuit en évacuation. Ça impacte 3 communes (Arnage, Pontlieue, Mulsanne). Je préviens les Maires ou c'est vous qui le faites via la sous-préfète ?"</div>
+</div>
+
+<div class="input">
+<span class="input-time">15:00</span>
+<div class="quote">"Amandine, j'ai un convoi exceptionnel agricole prévu sur la RD338 à 16h, je le décale ? Ou j'annule ? Le transporteur me demande une consigne écrite pour la déprogrammation."</div>
+</div>
+
+</div>
+
+<!-- DMD -->
+<div class="role-section new-role">
+<div class="role-header">
+<span class="role-name">🪖 David Singlande — Délégation Militaire Départementale (DMD 72)</span>
+<span class="role-channel">📞 Téléphone</span>
+</div>
+<div class="role-meta">Délégué militaire départemental. Représente l'armée auprès du Préfet. Coordonne principalement la force Sentinelle déployée sur la zone, peut aussi mobiliser des renforts ponctuels via demande au COMIA. Ton : militaire, formel.</div>
+
+<div class="input">
+<span class="input-time">13:50</span>
+<div class="quote">"Amandine, ici David Singlande, DMD 72. À la disposition du Préfet. J'ai un détachement Sentinelle de 12 militaires qui patrouillait sur l'agglomération du Mans, je peux les redéployer en appui sécurisation périmètre extérieur du circuit dans les 30 min. Le Préfet valide ?"</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:40</span>
+<div class="quote">"Amandine, mon détachement Sentinelle est positionné sur les axes d'accès Nord et Sud du circuit. Je peux densifier avec une seconde patrouille Sentinelle de 8 militaires venant de Tours sous 2h si besoin. Vous me dites ?"</div>
+</div>
+
+<div class="input">
+<span class="input-time">15:12</span>
+<div class="quote">"Amandine, pour l'évacuation totale, Sentinelle peut sécuriser les points de regroupement bus à l'extérieur du circuit. Et si nécessaire, je peux remonter au COMIA Rennes pour des renforts ponctuels supplémentaires (cars, équipe médicale militaire), mais c'est sous 4-6h minimum, c'est un autre tempo."</div>
+</div>
+
+</div>
+
+<!-- WAZE -->
+<div class="role-section new-role">
+<div class="role-header">
+<span class="role-name">🗺️ Christophe Lautier — Référent Waze (pour Amandine)</span>
+<span class="role-channel">📞 Téléphone + 💻 Console</span>
+</div>
+<div class="role-meta">Liaison Waze for Cities. Ton : data-driven, anglophone parfois. Peut bloquer la zone dans l'app, afficher des messages, voir les flux temps réel.</div>
+
+<div class="input">
+<span class="input-time">13:50</span>
+<div class="quote">"Amandine, Christophe Lautier de Waze. Je vois sur la console que les requêtes 'circuit Le Mans' explosent (+1 200% en 30 min) et le trafic se densifie sur tous les axes d'approche. Je peux bloquer la zone du circuit dans l'app pour empêcher les 'curieux' de venir. Vous validez ?"</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:15</span>
+<div class="quote">"Amandine, on voit aussi que les utilisateurs s'arrêtent en bord de D309 pour filmer (anomalies de vitesse), ça crée des sur-bouchons. Je peux pousser un message d'alerte 'circulez, ne stationnez pas' dans la zone. Format : alerte officielle préfecture ?"</div>
+</div>
+
+<div class="input">
+<span class="input-time">15:05</span>
+<div class="quote">"Amandine, pour l'évacuation, je peux pousser un guidage assisté à la sortie. Je propose 4 itinéraires différents selon le parking de stationnement. Validation des itinéraires par la voirie d'abord ?"</div>
+</div>
+
+</div>
+
+<!-- SOUS-PREFETE -->
+<div class="role-section">
+<div class="role-header">
+<span class="role-name">🏛️ Margaux Schneider — Sous-préfète</span>
+<span class="role-channel">📞 Téléphone</span>
+</div>
+<div class="role-meta">Représente le Préfet en attendant son arrivée. Ton : ferme, exigeante, formats officiels.</div>
+
+<div class="input">
+<span class="input-time">13:26</span>
+<div class="quote">"Amandine. Le Préfet veut un bilan structuré dans 10 min, format SYNERGI."</div>
+</div>
+
+<div class="input">
+<span class="input-time">13:40</span>
+<div class="quote">"Amandine, le Préfet a décidé d'activer le numéro vert préfecture pour les familles. Le numéro est le 0 805 04 72 72. Vous communiquez ce numéro aux familles qui appellent l'ACO. Et nous on a besoin de la liste nominative T11, format CSV, urgent."</div>
+</div>
+
+<div class="input key-input">
+<span class="input-time">13:48</span>
+<div class="quote">"Amandine, on a reçu votre liste de billets. Mais on a besoin maintenant des SCANS D'ENTRÉE pour identifier qui était réellement dans la tribune. Le SAMU et la cellule familles s'appuient là-dessus, c'est crucial pour les identifications. Envoyez-nous le CSV des scans dans les 5 minutes."</div>
+<span class="input-tag">PIVOT — Pas de scan</span>
+</div>
+
+</div>
+
+<!-- PREFET -->
+<div class="role-section">
+<div class="role-header">
+<span class="role-name">⭐ Préfet Sébastien Jallet</span>
+<span class="role-channel">👤 Présence physique (animateur en salle Amandine)</span>
+</div>
+<div class="role-meta">Arrive sur site à 14h04. Ton : autoritaire mais maîtrisé. C'est lui qui bascule à 14h55. <strong>Idéalement joué par un animateur qui se déplace physiquement à côté d'Amandine.</strong></div>
+
+<div class="input">
+<span class="input-time">13:44</span>
+<div class="quote">"SMS au DG ACO : 'Nicolas, je quitte la préfecture. J'arrive sur site dans 15 min avec le DDSP et le procureur. Bilan structuré pour mon arrivée. SJ'"</div>
+<span class="input-tag">📱 SMS direct DG (passe par Amandine pour info)</span>
+</div>
+
+<div class="input">
+<span class="input-time">14:04</span>
+<div class="quote">"Amandine. Donnez-moi votre bilan, votre carto, votre dispositif de communication. 5 minutes."</div>
+<span class="input-tag">Arrivée physique avec DDSP + Procureur</span>
+</div>
+
+<div class="input key-input">
+<span class="input-time">14:54</span>
+<div class="quote">"Amandine, ce que je vois m'inquiète. Trois chiffres : Dorna 15, BFMTV 30, vous 24. Quartararo qui annonce sur Instagram avant que vous ne communiquez. La situation médiatique m'échappe. Je vais devoir prendre la main."</div>
+<span class="input-tag">SIGNAL D'ALERTE</span>
+</div>
+
+<div class="input key-input">
+<span class="input-time">14:55</span>
+<div class="quote">"Amandine, sur proposition du SDIS, je déclenche le plan ORSEC départemental, module Bugatti, plan rouge / NOVI. Je suis désormais Directeur des Opérations de Secours. DDIS est COS. COD activé. Monopole de communication désormais préfecture. Aucun chiffre ACO, PHA ou Dorna sans validation. Vos décisions opérationnelles passent par moi."</div>
+<span class="input-tag">⭐ BASCULEMENT</span>
+</div>
+
+<div class="input">
+<span class="input-time">14:58</span>
+<div class="quote">"Amandine, activation immédiate de tous les PMA. La piste passe en axe rouge. Arrivées et départs spectateurs gelés. Vous êtes en exécution."</div>
+</div>
+
+<div class="input">
+<span class="input-time">15:00</span>
+<div class="quote">"Amandine, tous les appels famille basculent désormais sur le numéro vert préfecture 0805 04 72 72. Le service client ACO ferme. Émilie redirige systématiquement et fournit la liste des proches qui ont appelé."</div>
+</div>
+
+<div class="input">
+<span class="input-time">15:05</span>
+<div class="quote">"Amandine, le Préfet a décidé de relever le plan Vigipirate au niveau urgence attentat sur la zone, à titre conservatoire le temps de lever le doute sur la rumeur de sabotage. Vérifications supplémentaires des accès, pas de panique mais protocole."</div>
+</div>
+
+<div class="input">
+<span class="input-time">15:06</span>
+<div class="quote">"Amandine, évacuation totale du circuit. Toutes les tribunes, tous les paddocks. 45 min."</div>
+</div>
+
+<div class="input">
+<span class="input-time">15:08</span>
+<div class="quote">"Amandine, service de communication de la préfecture. Conférence de presse du Préfet à 16h00 sur le parvis. Le format est préfecture seule, sans ACO ni PHA ni Dorna. Vous vous abstenez de toute prise de parole publique d'ici là."</div>
+</div>
+
+<div class="input">
+<span class="input-time">15:16</span>
+<div class="quote">"Amandine, la préfecture demande à se brancher en lecture sur vos systèmes : caméras CCTV, badges, listings billetterie en temps réel. Le COD veut un accès direct. Vous validez l'ouverture des accès ? Sous quelle gouvernance ? Risque RGPD à arbitrer avec Lucas."</div>
+</div>
+
+</div>
+
+<!-- PROCUREUR -->
+<div class="role-section">
+<div class="role-header">
+<span class="role-name">⚖️ Procureur Manfredini</span>
+<span class="role-channel">📞 Téléphone (via Police) puis présence physique</span>
+</div>
+<div class="role-meta">Procureur de la République du Mans. Ton : froid, judiciaire. Arrive sur site à 14h14.</div>
+
+<div class="input">
+<span class="input-time">13:54</span>
+<div class="quote">"Amandine (via la police), le parquet ouvre une enquête en flagrance. Le Procureur sera sur site dans 20 min. Préservez tous les éléments."</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:14</span>
+<div class="quote">"Amandine, je suis sur site. Je vais vouloir entendre Galuret, Pierrick et Beaumesnil dans la journée. Garde à vue à anticiper sur certains noms selon les éléments du dossier."</div>
+<span class="input-tag">Arrivée physique</span>
+</div>
+
+<div class="input">
+<span class="input-time">15:18</span>
+<div class="quote">"Amandine, saisie du livre de bord de la cellule de crise ce soir. Je veux voir l'historien et la suppléante avant que l'exercice se termine. Préparez le verrouillage et l'horodatage du document."</div>
+</div>
+
+</div>
+
+<!-- INSPECTION TRAVAIL -->
+<div class="role-section">
+<div class="role-header">
+<span class="role-name">📋 Inspection du travail</span>
+<span class="role-channel">📞 Téléphone</span>
+</div>
+<div class="role-meta">Inspectrice du travail Sarthe. Ton : administratif, ferme, prend appui sur l'aspect Pascale + Nathan.</div>
+
+<div class="input">
+<span class="input-time">14:40</span>
+<div class="quote">"Amandine, suite à l'accident d'une de vos salariées et d'un stagiaire, audition demain matin de Mme Legay (RH) et de M. Lucas (Juridique). CHSCT extraordinaire à organiser dans la semaine. Préparez la fiche horaire de Pascale Lemée, son contrat CDD avec dérogation 60h, et la convention de stage de Nathan."</div>
+</div>
+
+<div class="input">
+<span class="input-time">15:10</span>
+<div class="quote">"Amandine, je relance. Je veux la fiche horaire et le contrat de Pascale Lemée envoyés ce soir avant 19h00, format PDF signé. Et la convention de stage de Nathan. Vos délais sont fermes."</div>
+</div>
+
+</div>
+
+<!-- AUTORITÉS POLITIQUES EXTERNES -->
+<div class="role-section new-role">
+<div class="role-header">
+<span class="role-name">🏛️ Autorités politiques externes — Élysée, Cabinet PM, Conseil Départemental, Ambassades</span>
+<span class="role-channel">📞 Téléphone</span>
+</div>
+<div class="role-meta">Hauts cabinets politiques nationaux et territoriaux + ambassades qui contactent Amandine pour avoir des informations en direct ou pour proposer leur soutien. Ton : autoritaire, pressant ou protocolaire selon les cas.</div>
+
+<div class="input">
+<span class="input-time">14:00</span>
+<div class="quote">"Amandine, c'est le cabinet du Premier Ministre. On suit depuis Matignon. Le PM veut un point dans 30 minutes. Il faut nous remonter à Paris une note de situation par mail."</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:05</span>
+<div class="quote">"Amandine, Hervé Saugez du Conseil Départemental Sarthe. Le Président du CD souhaite proposer une communication conjointe État + ACO + Département pour rassurer les Sarthois. Vous transmettez à votre cellule ?"</div>
+</div>
+
+<div class="input">
+<span class="input-time">14:45</span>
+<div class="quote">"Amandine, ici le cabinet de la Présidence de la République. Le Président demande à être informé en temps réel. Note de synthèse toutes les 30 min via votre Préfet sur la cellule interministérielle."</div>
+</div>
+
+<div class="input">
+<span class="input-time">15:05</span>
+<div class="quote">"Amandine, Ambassade d'Espagne. Nous savons qu'il y a des ressortissants espagnols dans les paddocks (Dorna, Espargaró, Marquez). Pouvez-vous nous confirmer qu'aucun n'est blessé ? Et obtenir des points de contact familles si besoin ?"</div>
+</div>
+
+<div class="input">
+<span class="input-time">15:14</span>
+<div class="quote">"Amandine, Ambassade d'Italie. Information remontée : un fan italien parmi les victimes. Nous avons besoin d'un point de contact famille via votre cellule familles. Coordination préfecture ?"</div>
+</div>
+
+</div>
+
+<!-- CONSEILS -->
+<h2>Conseils d'animation</h2>
+
+<div class="role-section">
+<ul class="tips">
+<li><strong>Variez les voix entre animateurs.</strong> Idéalement chaque rôle est joué par un animateur différent, ou en duo (un animateur tient SDIS + Police, un autre Voirie + Police Municipale, etc.). Pas plus de 2 messages d'affilée du même rôle.</li>
+<li><strong>Alternez radio et téléphone.</strong> Quand la radio sonne, Amandine décroche son talkie. Quand le téléphone sonne, elle décroche son combiné. Ça structure son jeu.</li>
+<li><strong>Le Préfet est un cas particulier.</strong> Idéalement, un animateur joue physiquement le Préfet à partir de 14h04 (il "entre" dans la salle PC Autorités où est Amandine, s'assoit à côté d'elle, parle directement à voix haute). C'est plus impactant que par téléphone.</li>
+<li><strong>Saturez sciemment Amandine à certains moments.</strong> Vers 13h30 (premier afflux : SDIS, SAMU, Police en parallèle), vers 14h00 (arrivée Préfet imminente + voiries qui demandent des consignes), vers 14h35 (bilan explose + réquisitions complémentaires). Elle doit prioriser, c'est pédagogique.</li>
+<li><strong>Faites travailler les nouveaux rôles.</strong> Voirie Métropole + Voirie Département + Police Municipale + DMD + Waze + Gendarmerie sont là pour qu'Amandine ne soit pas focalisée que sur SDIS/SAMU/Police. Ils représentent la dimension territoriale et logistique de la crise.</li>
+<li><strong>Donnez du temps à Amandine.</strong> Elle doit pouvoir transmettre vers la cellule de crise entre deux inputs. Ne saturez pas en continu, laissez des respirations de 2-3 min.</li>
+<li><strong>Ne sur-jouez pas l'émotion.</strong> Les services de l'État sont des professionnels habitués aux crises. Ils sont factuels, pas dramatiques. La seule exception : Mordrais à 14h35 (voix tendue, urgence) et le Préfet à 14h54 (frustration sourde).</li>
+</ul>
+</div>
+
+</body>
+</html>

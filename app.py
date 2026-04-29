@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 # Third-party imports
 from flask import (
-    Flask, jsonify, render_template, send_from_directory, request, 
+    Flask, Blueprint, jsonify, render_template, send_from_directory, request,
     redirect, url_for, flash, session, abort, make_response
 )
 from flask_cors import CORS
@@ -32,6 +32,7 @@ from anoloc import anoloc_bp
 from anpr import anpr_bp
 from field import field_bp
 from vision_admin import vision_admin_bp
+from crise_auth import crise_auth_bp
 from routing import routing_bp
 from cameras import cameras_bp
 import pcorg_summary
@@ -1579,6 +1580,88 @@ app.register_blueprint(routing_bp)
 csrf.exempt(app.view_functions["routing.field_route"])
 app.register_blueprint(cameras_bp)
 # app.register_blueprint(meteo_bp)
+
+# Espace exercices de crise : sous-arbre statique servi sous /crise.
+#
+# Architecture en deux blueprints :
+#   - crise_auth_bp (importe depuis crise_auth.py) : routes specifiques avec
+#     authentification PIN (master.html + files/* + input/* d'un exercice).
+#     Conserve la CSRF protection. Set des cookies JWT de session animateur.
+#     Doit etre enregistre AVANT crise_bp pour que ses routes specifiques aient
+#     priorite sur le catch-all statique.
+#   - crise_bp (defini ci-dessous) : catch-all statique pour le reste (hub,
+#     landing, player.html, livefeed.html, assets/). Pas d'auth, pas de cookie.
+#
+# Garanties d'isolation (audit) sur crise_bp :
+#   - Pas de @role_required, aucune lecture de cookie cockpit (JWT ou session).
+#   - csrf.exempt(crise_bp) : Flask-WTF n'intercepte pas.
+#   - 404 capturees localement (return direct) pour court-circuiter l'errorhandler
+#     global qui redirige sinon vers le home cockpit avec un flash message.
+#   - Fichiers/dossiers caches (commencant par '.', ex: .DS_Store, .git) bloques.
+#   - Path traversal stoppe par safe_join (werkzeug) + send_from_directory.
+#   - after_request : strip defensif des Set-Cookie au cas ou un middleware
+#     externe en injecterait. crise_auth_bp est un blueprint distinct dont
+#     les set_cookie ne sont PAS impactes par cet after_request.
+#
+# Le contenu vit dans cockpit/crise/ ; chaque exercice est un sous-dossier
+# (ex: gpmotos2026/). cockpit/crise/index.html liste les exercices disponibles.
+
+# Enregistrement de l'auth PIN : DOIT etre avant crise_bp.
+app.register_blueprint(crise_auth_bp)
+# Pas de csrf.exempt(crise_auth_bp) : la CSRF reste active sur le POST d'auth
+# (le template injecte csrf_token() et le JS l'envoie via X-CSRFToken).
+
+CRISE_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "crise")
+
+crise_bp = Blueprint("crise", __name__, url_prefix="/crise")
+
+# Patterns proteges par crise_auth_bp (PIN). Filet defensif au cas ou la priorite
+# de routing Werkzeug devierait : ces chemins ne sont JAMAIS servis en clair par
+# le catch-all statique. <exercise> = sous-dossier de cockpit/crise/.
+_CRISE_PROTECTED_RE = re.compile(
+    r"^[a-z0-9_\-]{1,64}/(master\.html|auth(/.*)?$|files/.+|input/.+|regie\.js)$"
+)
+
+def _crise_path_has_hidden(filename: str) -> bool:
+    return any(part.startswith(".") for part in filename.split("/") if part)
+
+def _crise_path_is_protected(filename: str) -> bool:
+    return bool(_CRISE_PROTECTED_RE.match(filename))
+
+@crise_bp.route("/")
+def crise_home():
+    # Pas de strict_slashes=False : on laisse Flask rediriger /crise -> /crise/
+    # (308) pour que les liens relatifs (ex: href="gpmotos2026/") se resolvent
+    # bien sous /crise/.
+    return send_from_directory(CRISE_ROOT, "index.html")
+
+@crise_bp.route("/<path:filename>")
+def crise_asset(filename):
+    if _crise_path_has_hidden(filename):
+        return ("Not found", 404)
+    # Filet defensif : refuse de servir en clair les chemins proteges par
+    # crise_auth_bp. Cette branche ne devrait JAMAIS etre atteinte si Werkzeug
+    # route correctement (les routes specifiques de crise_auth_bp ont priorite),
+    # mais on garde une protection au cas ou.
+    if _crise_path_is_protected(filename):
+        return ("Not found", 404)
+    candidate = safe_join(CRISE_ROOT, filename)
+    if not candidate or not os.path.exists(candidate):
+        return ("Not found", 404)
+    if os.path.isdir(candidate):
+        if not os.path.isfile(os.path.join(candidate, "index.html")):
+            return ("Not found", 404)
+        return send_from_directory(candidate, "index.html")
+    return send_from_directory(CRISE_ROOT, filename)
+
+@crise_bp.after_request
+def _crise_strip_cookies(response):
+    if "Set-Cookie" in response.headers:
+        del response.headers["Set-Cookie"]
+    return response
+
+app.register_blueprint(crise_bp)
+csrf.exempt(crise_bp)
 
 ################################################################################
 # DATA BILLETTERIE
