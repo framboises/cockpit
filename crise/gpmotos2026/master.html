@@ -1563,8 +1563,8 @@ body {
     <button class="menu-btn" onclick="toggleSidebar()" aria-label="Menu">&#9776;</button>
     <div class="header-logo">ACO</div>
     <div class="header-title">Exercice Crise <span>— GP Moto 2026</span></div>
-    <a class="header-back" href="../" title="Retour au hub des exercices de crise">
-      <span class="arrow">&larr;</span> Hub
+    <a class="header-back" id="header-back-link" href="./" onclick="goBack(event)" title="Retour">
+      <span class="arrow">&larr;</span> <span id="header-back-label">Hub</span>
     </a>
   </div>
   <button class="header-badge state-prep" id="exercise-badge" onclick="cycleExerciseState()" title="Cliquer pour changer l'etat">
@@ -2341,6 +2341,34 @@ function showView(name) {
   if (name !== 'doc') {
     var f = document.getElementById('doc-frame');
     if (f && f.src && f.src.indexOf('about:blank') === -1) f.src = 'about:blank';
+  }
+  // Bouton retour : hub si on est sur l'accueil, sinon retour vue accueil
+  updateBackButton(name);
+}
+
+function updateBackButton(viewName) {
+  var lbl = document.getElementById('header-back-label');
+  var link = document.getElementById('header-back-link');
+  if (!lbl || !link) return;
+  if (viewName === 'accueil') {
+    lbl.textContent = 'Hub';
+    link.title = 'Retour au hub des stations';
+  } else {
+    lbl.textContent = 'Accueil';
+    link.title = 'Retour à l\'accueil de la console animateur';
+  }
+}
+
+function goBack(ev) {
+  if (ev) ev.preventDefault();
+  var activeView = document.querySelector('.view.active');
+  var isAccueil = activeView && activeView.id === 'view-accueil';
+  if (isAccueil) {
+    // Sur l'accueil de master -> retour a la landing 3 stations
+    window.location.href = './';
+  } else {
+    // Sur une sous-vue (fiches, inputs, regie, doc, etc.) -> retour a l'accueil
+    showView('accueil');
   }
 }
 
