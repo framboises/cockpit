@@ -1629,7 +1629,7 @@ crise_bp = Blueprint("crise", __name__, url_prefix="/crise")
 # de routing Werkzeug devierait : ces chemins ne sont JAMAIS servis en clair par
 # le catch-all statique. <exercise> = sous-dossier de cockpit/crise/.
 _CRISE_PROTECTED_RE = re.compile(
-    r"^[a-z0-9_\-]{1,64}/(master\.html|auth(/.*)?$|files/.+|input/.+|regie\.js)$"
+    r"^[a-z0-9_\-]{1,64}/(master\.html|auth(/.*)?$|files/.+|regie\.js)$"
 )
 
 def _crise_path_has_hidden(filename: str) -> bool:

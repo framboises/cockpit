@@ -425,9 +425,11 @@ def serve_files(exercise_id, filename):
 
 @crise_auth_bp.route("/<exercise_id>/input/<path:filename>", methods=["GET"])
 def serve_input(exercise_id, filename):
-    blocked = _require_auth(exercise_id)
-    if blocked is not None:
-        return blocked
+    # Public : livefeed.html (sans PIN) doit pouvoir afficher les medias.
+    # Le livefeed est de toute facon visible dans la salle et le manifeste
+    # public expose deja la liste des fichiers. La regie reste gated par PIN.
+    if not _validate_exercise_id(exercise_id):
+        return ("Not found", 404)
     if any(part.startswith(".") for part in filename.split("/") if part):
         return ("Not found", 404)
     folder = os.path.join(_exercise_dir(exercise_id), "input")
