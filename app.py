@@ -3266,18 +3266,32 @@ def _clean_operator(name):
         return ""
     return re.sub(r'\s*\[.*?\]\s*$', '', name).strip()
 
+def _dt_to_iso_utc(val):
+    """Serialise un datetime en ISO avec offset.
+
+    pymongo stocke les datetimes en BSON UTC sans tzinfo. A la relecture, .isoformat()
+    sans offset est interprete par le frontend (new Date) comme heure locale au lieu
+    de UTC -> decalage du fuseau a l'affichage. On force donc tzinfo=UTC sur les naifs.
+    """
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        if val.tzinfo is None:
+            val = val.replace(tzinfo=timezone.utc)
+        return val.isoformat()
+    return val
+
+
 def _pcorg_serialise(doc):
     """Aplatit un document pcorg pour le JSON frontend."""
     gps = doc.get("gps")
     coords = gps.get("coordinates") if gps and isinstance(gps, dict) else None
     cc = doc.get("content_category") or {}
     area = doc.get("area") or {}
-    ts = doc.get("ts")
-    close_ts = doc.get("close_ts")
     return {
         "id": str(doc["_id"]),
-        "ts": ts.isoformat() if isinstance(ts, datetime) else ts,
-        "close_ts": close_ts.isoformat() if isinstance(close_ts, datetime) else close_ts,
+        "ts": _dt_to_iso_utc(doc.get("ts")),
+        "close_ts": _dt_to_iso_utc(doc.get("close_ts")),
         "category": doc.get("category"),
         "text": doc.get("text") or "",
         "area_id": area.get("id"),
@@ -3496,8 +3510,6 @@ def pcorg_detail(doc_id):
     coords = gps.get("coordinates") if gps and isinstance(gps, dict) else None
     cc = doc.get("content_category") or {}
     area = doc.get("area") or {}
-    ts = doc.get("ts")
-    close_ts = doc.get("close_ts")
     # comment_history : utiliser le champ stocke, sinon parser a la volee
     comment_history = doc.get("comment_history")
     if comment_history is None:
@@ -3532,8 +3544,8 @@ def pcorg_detail(doc_id):
     return jsonify({
         "id": str(doc["_id"]),
         "sql_id": doc.get("sql_id"),
-        "ts": ts.isoformat() if isinstance(ts, datetime) else ts,
-        "close_ts": close_ts.isoformat() if isinstance(close_ts, datetime) else close_ts,
+        "ts": _dt_to_iso_utc(doc.get("ts")),
+        "close_ts": _dt_to_iso_utc(doc.get("close_ts")),
         "category": doc.get("category"),
         "text": doc.get("text") or "",
         "text_full": doc.get("text_full") or "",
