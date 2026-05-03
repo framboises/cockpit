@@ -3296,6 +3296,9 @@ def _pcorg_serialise(doc):
     }
 
 
+PCORG_CLOSED_PAGE_SIZE = 100
+
+
 @app.route('/api/pcorg/live', methods=['GET'])
 @role_required("user")
 def pcorg_live():
@@ -3316,15 +3319,123 @@ def pcorg_live():
         PCO_PROJECTION
     ).sort("ts", -1))
 
+    closed_query = {**base, "status_code": 10}
     closed_docs = list(col.find(
-        {**base, "status_code": 10},
+        closed_query,
         PCO_PROJECTION
-    ).sort("close_ts", -1).limit(100))
+    ).sort("close_ts", -1).limit(PCORG_CLOSED_PAGE_SIZE))
+    closed_total = col.count_documents(closed_query)
 
     return jsonify({
         "open": [_pcorg_serialise(d) for d in open_docs],
         "closed": [_pcorg_serialise(d) for d in closed_docs],
-        "counts": {"open": len(open_docs), "closed": len(closed_docs)},
+        "counts": {
+            "open": len(open_docs),
+            "closed": len(closed_docs),
+            "closed_total": closed_total,
+        },
+        "closed_page_size": PCORG_CLOSED_PAGE_SIZE,
+    })
+
+
+@app.route('/api/pcorg/closed', methods=['GET'])
+@role_required("user")
+def pcorg_closed_page():
+    event = request.args.get("event", "")
+    year = request.args.get("year", "")
+    if not event or not year:
+        return jsonify({"error": "event et year requis"}), 400
+    try:
+        year = int(year)
+    except ValueError:
+        return jsonify({"error": "year invalide"}), 400
+
+    try:
+        offset = max(0, int(request.args.get("offset", 0)))
+    except ValueError:
+        offset = 0
+    try:
+        limit = int(request.args.get("limit", PCORG_CLOSED_PAGE_SIZE))
+    except ValueError:
+        limit = PCORG_CLOSED_PAGE_SIZE
+    limit = max(1, min(limit, 200))
+
+    base = {
+        "event": event, "year": year,
+        "category": {"$regex": "^PCO"}, "status_code": 10,
+    }
+    col = db["pcorg"]
+    cursor = col.find(base, PCO_PROJECTION).sort("close_ts", -1).skip(offset).limit(limit)
+    items = [_pcorg_serialise(d) for d in cursor]
+    total = col.count_documents(base)
+    return jsonify({
+        "items": items,
+        "offset": offset,
+        "limit": limit,
+        "total": total,
+        "has_more": (offset + len(items)) < total,
+    })
+
+
+@app.route('/api/pcorg/search', methods=['GET'])
+@role_required("user")
+def pcorg_search():
+    event = request.args.get("event", "")
+    year = request.args.get("year", "")
+    q = (request.args.get("q") or "").strip()
+    status = (request.args.get("status") or "all").lower()
+    if not event or not year:
+        return jsonify({"error": "event et year requis"}), 400
+    try:
+        year = int(year)
+    except ValueError:
+        return jsonify({"error": "year invalide"}), 400
+    if len(q) < 2:
+        return jsonify({"error": "query trop courte"}), 400
+
+    try:
+        limit = int(request.args.get("limit", 200))
+    except ValueError:
+        limit = 200
+    limit = max(1, min(limit, 500))
+
+    base = {"event": event, "year": year, "category": {"$regex": "^PCO"}}
+    if status == "open":
+        base["status_code"] = {"$nin": [10]}
+    elif status == "closed":
+        base["status_code"] = 10
+
+    rx = {"$regex": re.escape(q), "$options": "i"}
+    base["$or"] = [
+        {"text": rx},
+        {"category": rx},
+        {"area.desc": rx},
+        {"operator": rx},
+        {"content_category.sous_classification": rx},
+        {"content_category.patrouille": rx},
+    ]
+
+    col = db["pcorg"]
+    open_items = []
+    closed_items = []
+    if status in ("all", "open"):
+        open_q = dict(base)
+        open_q["status_code"] = {"$nin": [10]}
+        open_cur = col.find(open_q, PCO_PROJECTION).sort("ts", -1).limit(limit)
+        open_items = [_pcorg_serialise(d) for d in open_cur]
+    if status in ("all", "closed"):
+        closed_q = dict(base)
+        closed_q["status_code"] = 10
+        closed_cur = col.find(closed_q, PCO_PROJECTION).sort("close_ts", -1).limit(limit)
+        closed_items = [_pcorg_serialise(d) for d in closed_cur]
+
+    return jsonify({
+        "open": open_items,
+        "closed": closed_items,
+        "counts": {"open": len(open_items), "closed": len(closed_items)},
+        "q": q,
+        "status": status,
+        "limit": limit,
     })
 
 

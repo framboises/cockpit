@@ -3266,6 +3266,20 @@
   var expFilter = "all";
   var _expPreviousView = null;
 
+  // Pagination + recherche serveur
+  var expClosedExtra = [];          // fiches closed chargees en plus via /api/pcorg/closed
+  var expClosedTotal = 0;           // total cote serveur
+  var expClosedPageSize = 100;
+  var expClosedLoading = false;
+  var expClosedHasMore = false;
+
+  var expSearchActive = false;      // true si on est en mode recherche serveur
+  var expSearchResults = null;      // { open: [...], closed: [...] } ou null
+  var expSearchQuery = "";
+  var expSearchSeq = 0;             // anti-race (chaque appel incremente)
+  var expSearchTimer = null;
+  var expSearchLoading = false;
+
   function initExpandedPanel() {
     expPanel = document.getElementById("pcorg-expanded-panel");
     expBody = document.getElementById("pcorg-expanded-body");
@@ -3286,13 +3300,38 @@
         tabs.forEach(function (t) { t.classList.remove("active"); });
         tab.classList.add("active");
         expFilter = tab.getAttribute("data-filter");
-        renderExpanded();
+        if (expSearchActive) {
+          // relance la recherche serveur avec le nouveau filtre status
+          triggerExpandedSearch(expSearchQuery, true);
+        } else {
+          renderExpanded();
+        }
       });
     });
 
-    // Search
+    // Search (debounce 300ms, recherche serveur si q.length >= 2)
     if (expSearch) {
-      expSearch.addEventListener("input", function () { renderExpanded(); });
+      expSearch.addEventListener("input", function () {
+        var raw = (expSearch.value || "").trim();
+        if (expSearchTimer) clearTimeout(expSearchTimer);
+        if (raw.length < 2) {
+          // fin de recherche serveur, retour aux donnees locales
+          expSearchActive = false;
+          expSearchResults = null;
+          expSearchQuery = "";
+          expSearchLoading = false;
+          renderExpanded();
+          return;
+        }
+        expSearchTimer = setTimeout(function () {
+          triggerExpandedSearch(raw, false);
+        }, 300);
+      });
+    }
+
+    // Infinite scroll sur les fiches cloturees
+    if (expBody) {
+      expBody.addEventListener("scroll", onExpScroll);
     }
   }
 
@@ -3333,8 +3372,99 @@
     expFilter = "all";
     var tabs = expPanel.querySelectorAll(".pcorg-exp-tab");
     tabs.forEach(function (t) { t.classList.toggle("active", t.getAttribute("data-filter") === "all"); });
+
+    // Reset pagination + recherche
+    expClosedExtra = [];
+    expClosedTotal = (lastData && lastData.counts && typeof lastData.counts.closed_total === "number")
+      ? lastData.counts.closed_total
+      : (lastData && lastData.closed ? lastData.closed.length : 0);
+    expClosedPageSize = (lastData && lastData.closed_page_size) || 100;
+    expClosedHasMore = (lastData && lastData.closed ? lastData.closed.length : 0) < expClosedTotal;
+    expClosedLoading = false;
+    expSearchActive = false;
+    expSearchResults = null;
+    expSearchQuery = "";
+    expSearchLoading = false;
+    if (expSearchTimer) { clearTimeout(expSearchTimer); expSearchTimer = null; }
+
     renderExpanded();
     setTimeout(function () { if (expSearch) expSearch.focus(); }, 100);
+  }
+
+  function onExpScroll() {
+    if (!expBody) return;
+    if (expSearchActive) return;          // pagination desactivee en mode recherche serveur
+    if (expFilter === "open") return;     // rien a paginer pour les fiches ouvertes
+    if (!expClosedHasMore || expClosedLoading) return;
+    var threshold = 200;
+    if (expBody.scrollTop + expBody.clientHeight >= expBody.scrollHeight - threshold) {
+      loadMoreClosed();
+    }
+  }
+
+  function loadMoreClosed() {
+    var ey = (typeof getCurrentEventYear === "function") ? getCurrentEventYear() : {};
+    if (!ey.event || !ey.year) return;
+    var baseLen = (lastData && lastData.closed ? lastData.closed.length : 0);
+    var offset = baseLen + expClosedExtra.length;
+    if (offset >= expClosedTotal) {
+      expClosedHasMore = false;
+      renderExpanded();
+      return;
+    }
+    expClosedLoading = true;
+    renderExpanded();
+    var url = "/api/pcorg/closed?event=" + encodeURIComponent(ey.event)
+      + "&year=" + encodeURIComponent(ey.year)
+      + "&offset=" + offset
+      + "&limit=" + expClosedPageSize;
+    fetch(url, { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        expClosedLoading = false;
+        if (!data || !Array.isArray(data.items)) return;
+        expClosedExtra = expClosedExtra.concat(data.items);
+        if (typeof data.total === "number") expClosedTotal = data.total;
+        expClosedHasMore = !!data.has_more;
+        renderExpanded();
+      })
+      .catch(function () {
+        expClosedLoading = false;
+        renderExpanded();
+      });
+  }
+
+  function triggerExpandedSearch(q, force) {
+    var ey = (typeof getCurrentEventYear === "function") ? getCurrentEventYear() : {};
+    if (!ey.event || !ey.year) return;
+    if (!force && q === expSearchQuery && expSearchResults) return;
+    expSearchActive = true;
+    expSearchQuery = q;
+    expSearchLoading = true;
+    var seq = ++expSearchSeq;
+    renderExpanded();
+    var url = "/api/pcorg/search?event=" + encodeURIComponent(ey.event)
+      + "&year=" + encodeURIComponent(ey.year)
+      + "&status=" + encodeURIComponent(expFilter)
+      + "&q=" + encodeURIComponent(q);
+    fetch(url, { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (seq !== expSearchSeq) return;   // resultat obsolete
+        expSearchLoading = false;
+        if (!data || data.error) {
+          expSearchResults = { open: [], closed: [] };
+        } else {
+          expSearchResults = { open: data.open || [], closed: data.closed || [] };
+        }
+        renderExpanded();
+      })
+      .catch(function () {
+        if (seq !== expSearchSeq) return;
+        expSearchLoading = false;
+        expSearchResults = { open: [], closed: [] };
+        renderExpanded();
+      });
   }
 
   function closeExpanded() {
@@ -3355,36 +3485,47 @@
 
   function renderExpanded() {
     if (!expBody || !lastData) return;
-    var openItems = (lastData.open || []).map(function (it) { it._open = true; return it; });
-    var closedItems = (lastData.closed || []).map(function (it) { it._open = false; return it; });
+
+    var openItems, closedItems;
+    if (expSearchActive && expSearchResults) {
+      openItems = (expSearchResults.open || []).map(function (it) { it._open = true; return it; });
+      closedItems = (expSearchResults.closed || []).map(function (it) { it._open = false; return it; });
+    } else {
+      openItems = (lastData.open || []).map(function (it) { it._open = true; return it; });
+      var baseClosed = (lastData.closed || []).slice();
+      var allClosed = baseClosed.concat(expClosedExtra || []);
+      closedItems = allClosed.map(function (it) { it._open = false; return it; });
+    }
 
     var items;
     if (expFilter === "open") items = openItems;
     else if (expFilter === "closed") items = closedItems;
     else items = openItems.concat(closedItems);
 
-    // Search filter
-    var q = (expSearch ? expSearch.value : "").toLowerCase().trim();
-    if (q) {
-      items = items.filter(function (it) {
-        return (it.text || "").toLowerCase().indexOf(q) !== -1
-          || (it.category || "").toLowerCase().indexOf(q) !== -1
-          || (it.area_desc || "").toLowerCase().indexOf(q) !== -1
-          || (it.operator || "").toLowerCase().indexOf(q) !== -1
-          || (it.sous_classification || "").toLowerCase().indexOf(q) !== -1;
-      });
-    }
-
     expBody.textContent = "";
 
+    // Bandeau loading recherche
+    if (expSearchActive && expSearchLoading) {
+      var loadingBanner = mkEl("div", "pcorg-exp-loading");
+      loadingBanner.textContent = "Recherche en cours...";
+      expBody.appendChild(loadingBanner);
+    }
+
     if (items.length === 0) {
+      if (expSearchActive && expSearchLoading) {
+        // on a deja affiche le bandeau, on s'arrete la
+        if (expCount) expCount.textContent = "";
+        return;
+      }
       var empty = mkEl("div", "widget-placeholder");
       empty.style.padding = "60px 0";
       var emptyIco = matIcon("search_off", "");
       emptyIco.style.fontSize = "40px";
       empty.appendChild(emptyIco);
       var emptyTxt = mkEl("span", "");
-      emptyTxt.textContent = q ? "Aucun resultat pour \"" + q + "\"" : "Aucune intervention";
+      emptyTxt.textContent = expSearchActive
+        ? "Aucun resultat pour \"" + expSearchQuery + "\""
+        : "Aucune intervention";
       empty.appendChild(emptyTxt);
       expBody.appendChild(empty);
       if (expCount) expCount.textContent = "";
@@ -3497,12 +3638,38 @@
     table.appendChild(tbody);
     expBody.appendChild(table);
 
+    // Footer: pagination cloturees (sauf en mode recherche serveur)
+    if (!expSearchActive && expFilter !== "open") {
+      var footer = mkEl("div", "pcorg-exp-footer");
+      if (expClosedLoading) {
+        footer.textContent = "Chargement...";
+      } else if (expClosedHasMore) {
+        var btn = mkEl("button", "pcorg-exp-loadmore");
+        var loadedClosed = (lastData.closed || []).length + (expClosedExtra || []).length;
+        btn.textContent = "Charger plus (" + loadedClosed + " / " + expClosedTotal + ")";
+        btn.addEventListener("click", function () { loadMoreClosed(); });
+        footer.appendChild(btn);
+      } else if (expClosedTotal > 0) {
+        var loadedClosedAll = (lastData.closed || []).length + (expClosedExtra || []).length;
+        footer.textContent = "Toutes les fiches cloturees affichees (" + loadedClosedAll + ")";
+      }
+      if (footer.childNodes.length || footer.textContent) {
+        expBody.appendChild(footer);
+      }
+    }
+
     // Count
     var openCount = items.filter(function (it) { return it._open; }).length;
     var closedCount = items.filter(function (it) { return !it._open; }).length;
     if (expCount) {
-      expCount.textContent = items.length + " intervention" + (items.length > 1 ? "s" : "") +
+      var label = items.length + " intervention" + (items.length > 1 ? "s" : "") +
         " - " + openCount + " en cours, " + closedCount + " terminee" + (closedCount > 1 ? "s" : "");
+      if (expSearchActive) {
+        label = "Resultats: " + label;
+      } else if (expClosedTotal > closedItems.length && expFilter !== "open") {
+        label += " (sur " + expClosedTotal + " cloturees au total)";
+      }
+      expCount.textContent = label;
     }
   }
 
