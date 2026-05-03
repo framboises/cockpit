@@ -111,6 +111,8 @@
         ..._collectPhaseItems('open'),
         ..._collectPhaseItems('close'),
         ..._collectPhaseItems('both'),
+        ..._collectPhaseItems('switch_control'),
+        ..._collectPhaseItems('switch_free'),
       ]
     };
   }
@@ -131,6 +133,8 @@
     _fillPhaseList('open', _itemsByPhase(doc.todos, 'open'));
     _fillPhaseList('close', _itemsByPhase(doc.todos, 'close'));
     _fillPhaseList('both', _itemsByPhase(doc.todos, 'both'));
+    _fillPhaseList('switch_control', _itemsByPhase(doc.todos, 'switch_control'));
+    _fillPhaseList('switch_free', _itemsByPhase(doc.todos, 'switch_free'));
   }
 
   // ----- table rendering -----
@@ -144,8 +148,14 @@
     tbody.innerHTML = rows || '<tr><td colspan="4" class="muted">Aucun resultat</td></tr>';
   }
 
-  const _phaseIcon = { open: 'lock_open', close: 'lock', both: 'sync' };
-  const _phaseColor = { open: 'var(--success)', close: 'var(--danger)', both: 'var(--accent)' };
+  const _phaseIcon = {
+    open: 'lock_open', close: 'lock', both: 'sync',
+    switch_control: 'shield_lock', switch_free: 'lock_open_right'
+  };
+  const _phaseColor = {
+    open: 'var(--success)', close: 'var(--danger)', both: 'var(--accent)',
+    switch_control: 'var(--warning)', switch_free: 'var(--success)'
+  };
 
   function _todoText(t) {
     return typeof t === 'string' ? t : (t.text || '');

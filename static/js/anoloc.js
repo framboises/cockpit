@@ -383,14 +383,24 @@
   }
 
   // --- Update markers on the map ---
+  var _mapWaitTimer = null;
+  var _mapWaitTries = 0;
   function updateMarkers(data) {
     var mapObj = window.CockpitMapView && window.CockpitMapView.getMap
       ? window.CockpitMapView.getMap()
       : null;
     if (!mapObj) {
-      // Carte pas encore initialisee, on reessaiera au prochain refresh
+      // Carte pas encore initialisee : retry court (500 ms) au lieu d'attendre 15 s.
+      // Sinon le pin tablette/balise apparait avec ~15 s de retard au chargement.
+      if (_mapWaitTimer || _mapWaitTries >= 30) return;
+      _mapWaitTries += 1;
+      _mapWaitTimer = setTimeout(function () {
+        _mapWaitTimer = null;
+        if (lastData) updateMarkers(lastData);
+      }, 500);
       return;
     }
+    _mapWaitTries = 0;
 
     var groups = data.groups || {};
     var seenDevices = {};
@@ -414,17 +424,8 @@
         var lng = dev.lng;
         if (lat == null || lng == null) return;
 
-        // Masquer les balises arretees ET hors ligne (pas de signal GPS)
-        var isStoppedOffline = (dev.status === "stopped" && !dev.online);
-        if (isStoppedOffline) {
-          // Retirer le marker s'il existait
-          var old = anolocMarkers[dev.id];
-          if (old) {
-            if (anolocLayers[gid]) anolocLayers[gid].removeLayer(old);
-            delete anolocMarkers[dev.id];
-          }
-          return;
-        }
+        // Balises hors ligne : on garde la pin mais grisee (cf. createBeaconIcon).
+        // Tablettes hors ligne : pin normale (utile pour voir ou la patrouille a perdu signal).
 
         var existing = anolocMarkers[dev.id];
         if (existing) {
@@ -502,7 +503,9 @@
     }
 
     var isTablet = dev.kind === "tablet";
-    var container = el("div", {className: "anoloc-marker " + statusClass + (isTablet ? " tablet" : "")});
+    // Balise hors ligne : grisee pour reduire la pollution visuelle sur la carte.
+    var dimmedClass = (!isTablet && !dev.online) ? " dimmed" : "";
+    var container = el("div", {className: "anoloc-marker " + statusClass + (isTablet ? " tablet" : "") + dimmedClass});
     container.style.background = grp.color || "#6366f1";
 
     // Icone : toujours l'icone du groupe (tablettes et balises)

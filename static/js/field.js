@@ -3913,9 +3913,14 @@
     _cam.selectedCategory = null;
     _cam.selectedUrgency = "UR";
     var explicitFiche = (opts && opts.ficheId) ? opts.ficheId : null;
-    _cam.targetFicheId = explicitFiche || state.activeFicheId || null;
-    // Si fiche explicite : attache pre-cochee. Sinon : pre-cochee si
-    // l'agent a une intervention en cours.
+    // Bandeau "Joindre a la fiche" : autorise seulement si ouverture
+    // explicite depuis une fiche, OU si l'agent est activement engage
+    // (statut intervention / sur_place). En pause / fin_intervention /
+    // patrouille, active_fiche_id peut etre encore en DB mais n'est plus
+    // pertinent pour rattacher une nouvelle photo.
+    var inEngagement = state.patrolStatus === "intervention" || state.patrolStatus === "sur_place";
+    var implicitFiche = (inEngagement && state.activeFicheId) ? state.activeFicheId : null;
+    _cam.targetFicheId = explicitFiche || implicitFiche;
     _cam.attachToFiche = !!_cam.targetFicheId;
     refreshAttachBar();
     refreshComposeChips();
@@ -4118,15 +4123,20 @@
     _cam.sendBtn.disabled = !ok;
   }
 
+  function _ficheLabelFor(ficheId) {
+    var f = (state.fiches || []).find(function (x) { return x.id === ficheId; });
+    if (f && f.category) return f.category.replace("PCO.", "");
+    return String(ficheId).slice(0, 8);
+  }
+
   function refreshAttachBar() {
     if (!_cam.attachBar) return;
-    var ficheId = _cam.targetFicheId || state.activeFicheId;
+    var ficheId = _cam.targetFicheId;
     var hasFiche = !!ficheId;
     _cam.attachBar.hidden = !hasFiche;
     if (hasFiche) {
       _cam.attachCb.checked = !!_cam.attachToFiche;
-      var shortId = String(ficheId).slice(0, 8);
-      _cam.attachLabel.textContent = "Joindre a la fiche " + shortId;
+      _cam.attachLabel.textContent = "Joindre a la fiche " + _ficheLabelFor(ficheId);
     }
   }
 
@@ -4185,7 +4195,7 @@
   function sendCapturedPhotos() {
     if (_cam.photos.length === 0) return;
 
-    var ficheTarget = _cam.targetFicheId || state.activeFicheId;
+    var ficheTarget = _cam.targetFicheId;
     var attach = _cam.attachToFiche && ficheTarget;
     var commentVal = (_cam.commentEl.value || "").trim();
     if (!attach && !_cam.selectedCategory) {
@@ -4581,7 +4591,9 @@
     _scn.selectedCategory = null;
     _scn.selectedUrgency = "UR";
     var explicitFiche = (opts && opts.ficheId) ? opts.ficheId : null;
-    _scn.targetFicheId = explicitFiche || state.activeFicheId || null;
+    var inEngagement = state.patrolStatus === "intervention" || state.patrolStatus === "sur_place";
+    var implicitFiche = (inEngagement && state.activeFicheId) ? state.activeFicheId : null;
+    _scn.targetFicheId = explicitFiche || implicitFiche;
     _scn.attachToFiche = !!_scn.targetFicheId;
     refreshScanAttachBar();
     refreshScanCompose();
@@ -4729,12 +4741,12 @@
 
   function refreshScanAttachBar() {
     if (!_scn.attachBar) return;
-    var ficheId = _scn.targetFicheId || state.activeFicheId;
+    var ficheId = _scn.targetFicheId;
     var hasFiche = !!ficheId;
     _scn.attachBar.hidden = !hasFiche;
     if (hasFiche) {
       _scn.attachCb.checked = !!_scn.attachToFiche;
-      _scn.attachLabel.textContent = "Joindre a la fiche " + String(ficheId).slice(0, 8);
+      _scn.attachLabel.textContent = "Joindre a la fiche " + _ficheLabelFor(ficheId);
     }
   }
 
@@ -4803,7 +4815,7 @@
   function sendScannedCodes() {
     if (_scn.codes.length === 0) return;
 
-    var ficheTarget = _scn.targetFicheId || state.activeFicheId;
+    var ficheTarget = _scn.targetFicheId;
     var attach = _scn.attachToFiche && ficheTarget;
     var commentVal = (_scn.commentEl.value || "").trim();
     if (!attach && !_scn.selectedCategory) {

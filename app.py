@@ -2305,7 +2305,7 @@ COL_TODOS = db['todos']  # schema: { type:str, todos:[{text:str, phase:str}], cr
 
 # Helpers
 
-_VALID_PHASES = {"open", "close", "both"}
+_VALID_PHASES = {"open", "close", "both", "switch_control", "switch_free"}
 
 def _normalize_todos(raw_todos):
     """Normalise les todos en [{text, phase}]. Accepte l'ancien format [str]."""

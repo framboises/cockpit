@@ -17,6 +17,33 @@ function truncateText(text, maxChars) {
     return text.length > maxChars ? text.substring(0, maxChars) + "…" : text;
 }
 
+// Pillule de categorie : slug deterministe + fallback hashe pour categories inconnues
+function _categorySlug(cat) {
+    return String(cat || '')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+}
+function _categoryFallbackIdx(slug) {
+    let h = 0;
+    for (let i = 0; i < slug.length; i++) { h = ((h << 5) - h) + slug.charCodeAt(i); h |= 0; }
+    return (Math.abs(h) % 10) + 1; // 1..10
+}
+const _CAT_KNOWN = new Set([
+    'parking','controle','aa','hospi','general','motos','evenement',
+    'pco-secours','pco-securite','secours','securite'
+]);
+function getCategoryChipHtml(cat) {
+    const label = String(cat || '').trim();
+    if (!label) return '';
+    const slug = _categorySlug(label);
+    const cls = _CAT_KNOWN.has(slug)
+        ? `cat-${slug}`
+        : `cat-fb cat-fb-${_categoryFallbackIdx(slug)}`;
+    return `<span class="cat-chip ${cls}" title="Categorie : ${label}">${label}</span>`;
+}
+
 // 🔹 Construit un index { 'YYYY-MM-DD': { is24h, openTime, closeTime } }
 function buildPublicDatesMap(parametrage) {
   const map = {};
@@ -48,8 +75,9 @@ function getPublicBannerForDateStr(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   const prev = new Date(d); prev.setDate(prev.getDate() - 1);
   const next = new Date(d); next.setDate(next.getDate() + 1);
-  const prevEntry = window.publicDatesMap?.[prev.toISOString().slice(0, 10)];
-  const nextEntry = window.publicDatesMap?.[next.toISOString().slice(0, 10)];
+  // Bug timezone : toISOString() decale en UTC, on utilise un format local
+  const prevEntry = window.publicDatesMap?.[ymdLocal(prev)];
+  const nextEntry = window.publicDatesMap?.[ymdLocal(next)];
   const openIs00 = entry.openTime === "00:00";
   const closeIs2359 = entry.closeTime === "23:59" || entry.closeTime === "24:00" || entry.closeTime === "00:00";
   const prevCloseIs2359 = prevEntry && (prevEntry.closeTime === "23:59" || prevEntry.closeTime === "24:00" || prevEntry.closeTime === "00:00");
@@ -244,8 +272,15 @@ function clusterTimeWindow(items){
 function validTimeStr(s){ return !!(s && /^\d{1,2}:\d{2}$/.test(s.trim())); }
 
 function getOpenCloseKind(it){
+  // Priorite au champ explicite phase pose par merge.py
+  const ph = (it && it.phase || '').toLowerCase();
+  if (ph === 'open' || ph === 'close' ||
+      ph === 'switch_control' || ph === 'switch_free') return ph;
+
+  // Fallback heuristique pour les vignettes legacy / manuelles
   const s = norm(`${it.activity||''} ${it.category||''} ${it.place||''}`);
-  // mots-clés tolérants
+  if (/\bbascule\b.*\bcontrol/.test(s) || /\bcontrole(e)?\b/.test(s) && /\bbascule\b/.test(s)) return 'switch_control';
+  if (/\bretour\b.*\blibre\b/.test(s) || /\bbascule\b.*\blibre\b/.test(s)) return 'switch_free';
   if (/\bouverture\b|ouvre(r|t)?|opening|\bopen\b/.test(s))   return 'open';
   if (/\bfermeture\b|ferme(r|t)?|closing|\bclose(d)?\b/.test(s)) return 'close';
   return null; // on ne force pas si on n'est pas sûr
@@ -629,6 +664,7 @@ function createEventItem(date, item) {
             </div>
             <div class="event-time">
                 <p class="time-info">${timeInfo}</p>
+                ${getCategoryChipHtml(item.category)}
                 <p class="event-location">${fullPlace}</p>
                 ${prepHtml}
             </div>
@@ -772,7 +808,20 @@ function createClusterItem(date, cluster) {
   cluster.items?.forEach(ch => { if (!ch._id && ch.id) ch._id = String(ch.id); });
   const cfg = CLUSTER_CONFIG[cluster.type];
   const count = cluster.items.length;
-  const kindLabel = cluster.kind === 'close' ? 'Fermeture' : 'Ouverture';
+  const _kindLabels = {
+    open: 'Ouverture',
+    close: 'Fermeture',
+    switch_control: 'Bascule controlee',
+    switch_free: 'Retour libre'
+  };
+  const _kindIcons = {
+    open: cfg.icon,
+    close: cfg.icon,
+    switch_control: 'shield_lock',
+    switch_free: 'lock_open_right'
+  };
+  const kindLabel = _kindLabels[cluster.kind] || 'Ouverture';
+  const headerIcon = _kindIcons[cluster.kind] || cfg.icon;
   const timeInfo = cluster.time || 'TBC';
 
   // ✅ statut runtime au moment du rendu
@@ -793,11 +842,12 @@ function createClusterItem(date, cluster) {
   el.innerHTML = `
     <div class="event-summary">
       <div class="event-title">
-        <span class="material-icons">${cfg.icon}</span>
+        <span class="material-symbols-outlined">${headerIcon}</span>
         <h5>${cfg.label} — ${kindLabel} ${timeInfo} (${count})</h5>
       </div>
       <div class="event-time">
         <p class="time-info">${timeInfo}</p>
+        ${getCategoryChipHtml(cluster.items?.[0]?.category)}
         <p class="event-location">Regroupement</p>
         ${clusterPrepHtml}
       </div>

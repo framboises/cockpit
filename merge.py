@@ -158,9 +158,16 @@ def _build_todo_string(todo_items: list) -> str:
 
 
 def _filter_todos_by_phase(todos_items: list, phase: str) -> list:
-    """Filtre les todos par phase. phase='open' ou 'close'."""
+    """Filtre les todos par phase.
+
+    phase peut etre 'open', 'close', 'switch_control', 'switch_free'.
+    Le marqueur 'both' s'applique uniquement aux phases ouv/ferm
+    (pas aux bascules d'acces).
+    """
+    open_close = phase in ("open", "close")
     return [t["text"] for t in todos_items
-            if t.get("phase") == phase or t.get("phase") == "both"]
+            if t.get("phase") == phase
+            or (open_close and t.get("phase") == "both")]
 
 
 def _attach_todos_str(vignette: dict, base_activity: str, category: str,
@@ -231,6 +238,7 @@ def generate_vignettes_for_entry(date_str, open_time, close_time,
         "remark": remark,
         "param_id": id_source,
         "preparation_checked": "non",
+        "phase": "open",
     }
     close_vignette = {
         "_id": close_id,
@@ -247,6 +255,7 @@ def generate_vignettes_for_entry(date_str, open_time, close_time,
         "remark": "",
         "param_id": id_source,
         "preparation_checked": "non",
+        "phase": "close",
     }
 
     if extra_fields:
@@ -639,6 +648,32 @@ def _process_dynamic_schedule(items, config, id_prefix, db=None):
                 if "open" in sub and "close" in sub and sub["open"] and sub["close"]:
                     access_hours[at] = (sub["open"], sub["close"])
 
+            # Bascules d'acces (libre <-> controle) : emises par jour,
+            # independamment du split par access_type. La reference de
+            # bornes vient en priorite de la fenetre publique, fallback
+            # sur le premier access_type ouvert.
+            slots = date_entry.get("dayControlSlots") or []
+            if slots:
+                pub = date_entry.get("public") or {}
+                if pub.get("is24h"):
+                    pub_open_ref, pub_close_ref = "00:00", "23:59"
+                elif pub.get("closed"):
+                    if access_hours:
+                        pub_open_ref, pub_close_ref = next(iter(access_hours.values()))
+                    else:
+                        pub_open_ref, pub_close_ref = None, None
+                else:
+                    pub_open_ref = pub.get("open")
+                    pub_close_ref = pub.get("close")
+
+                if pub_open_ref or pub_close_ref:
+                    vignettes.extend(_emit_access_switch_vignettes(
+                        date_str, slots,
+                        pub_open_ref, pub_close_ref,
+                        activity_base, category, item_name, item_id,
+                        v_type, department, day_extra, db, todos_type
+                    ))
+
             if not access_hours:
                 continue
 
@@ -718,6 +753,75 @@ def _emit_schedule_vignettes(vignettes, dates_list, idx, date_str,
         vignettes.append(close_v)
 
 
+def _emit_access_switch_vignettes(date_str, slots, pub_open, pub_close,
+                                  activity_base, category, place, id_source,
+                                  v_type, department, extra_fields, db,
+                                  todos_type):
+    """Emet les vignettes de bascule d'acces (libre <-> controle).
+
+    Pour chaque dayControlSlot, emet une vignette a slot.start (entree dans
+    le mode du slot) et a slot.end (sortie). Les bornes coincidentes avec
+    l'ouverture/fermeture de la fenetre publique sont ignorees pour eviter
+    le doublon avec les vignettes ouv/ferm.
+
+    Le 'phase' pose sur la vignette est 'switch_control' ou 'switch_free'
+    selon le mode cible apres la transition.
+    """
+    out = []
+    for slot_idx, slot in enumerate(slots or []):
+        if not isinstance(slot, dict):
+            continue
+        s_type = (slot.get("type") or "controle").lower()
+        opposite = "libre" if s_type == "controle" else "controle"
+
+        for boundary in ("start", "end"):
+            time_str = slot.get(boundary) or ""
+            if not time_str:
+                continue
+            # Mode cible apres la transition : a 'start' on entre dans le slot,
+            # a 'end' on sort vers l'oppose.
+            target_mode = s_type if boundary == "start" else opposite
+            # Anti-doublon avec ouverture/fermeture
+            if boundary == "start" and pub_open and time_str == pub_open:
+                continue
+            if boundary == "end" and pub_close and time_str == pub_close:
+                continue
+
+            phase = "switch_control" if target_mode == "controle" else "switch_free"
+            label = ("Bascule controlee" if phase == "switch_control"
+                     else "Retour acces libre")
+            activity = f"{label} - {activity_base}"
+            seed = (f"{id_source}|{date_str}|switch-{phase}-{slot_idx}-"
+                    f"{boundary}|{place}")
+
+            v = {
+                "_id": _mk_id(seed),
+                "date": date_str,
+                "start": time_str,
+                "end": "",
+                "duration": "",
+                "category": category,
+                "activity": activity,
+                "place": place,
+                "department": department,
+                "type": v_type,
+                "origin": "parametrage",
+                "remark": "",
+                "param_id": id_source,
+                "preparation_checked": "non",
+                "phase": phase,
+            }
+            if extra_fields:
+                for k, val in extra_fields.items():
+                    v[k] = val
+
+            v = _attach_todos_str(v, activity_base, category, place,
+                                  db=db, config_todos_type=todos_type,
+                                  phase=phase)
+            out.append(v)
+    return out
+
+
 def process_dynamic_categories(data, event, year, db=None):
     """Traite toutes les categories dynamiques via merge_config."""
     vignettes = []
@@ -751,7 +855,7 @@ def process_dynamic_categories(data, event, year, db=None):
 PARAM_FIELDS = {
     "date", "start", "end", "duration", "activity",
     "category", "place", "type", "department",
-    "origin", "param_id", "todos_type",
+    "origin", "param_id", "todos_type", "phase",
 }
 
 # Champs supplementaires possibles (vignette_fields dynamiques)
