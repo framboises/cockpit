@@ -3338,6 +3338,53 @@ def pcorg_live():
     })
 
 
+@app.route('/api/pcorg/stats', methods=['GET'])
+@role_required("user")
+def pcorg_stats():
+    event = request.args.get("event", "")
+    year = request.args.get("year", "")
+    if not event or not year:
+        return jsonify({"error": "event et year requis"}), 400
+    try:
+        year = int(year)
+    except ValueError:
+        return jsonify({"error": "year invalide"}), 400
+
+    pipeline = [
+        {"$match": {"event": event, "year": year, "category": {"$regex": "^PCO"}}},
+        {"$group": {
+            "_id": {
+                "cat": "$category",
+                "closed": {"$eq": ["$status_code", 10]},
+            },
+            "n": {"$sum": 1},
+        }},
+    ]
+    counts = {}
+    total_open = 0
+    total_closed = 0
+    for row in db["pcorg"].aggregate(pipeline):
+        cat = row["_id"].get("cat") or ""
+        is_closed = bool(row["_id"].get("closed"))
+        n = int(row.get("n", 0))
+        bucket = counts.setdefault(cat, {"open": 0, "closed": 0})
+        if is_closed:
+            bucket["closed"] = n
+            total_closed += n
+        else:
+            bucket["open"] = n
+            total_open += n
+
+    return jsonify({
+        "counts": counts,
+        "totals": {
+            "open": total_open,
+            "closed": total_closed,
+            "all": total_open + total_closed,
+        },
+    })
+
+
 @app.route('/api/pcorg/closed', methods=['GET'])
 @role_required("user")
 def pcorg_closed_page():

@@ -742,24 +742,30 @@
       loadVehiclesByCategory();
     }
     refresh._vbcCounter = (refresh._vbcCounter || 0) + 1;
-    fetch("/api/pcorg/live?event=" + encodeURIComponent(ey.event) + "&year=" + encodeURIComponent(ey.year), { cache: "no-store" })
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        lastData = data;
-        // Filtrer par categories autorisees
-        var ac = window.__userAllowedCategories;
-        var filterCat = ac ? function (it) { return ac.indexOf(it.category) !== -1; } : function () { return true; };
-        var openFiltered = (data.open || []).filter(filterCat);
-        var closedFiltered = (data.closed || []).filter(filterCat);
-        renderList(listOpen, openFiltered, false, placeholderOpen);
-        renderList(listClosed, closedFiltered, true, placeholderClosed);
-        renderStats(openFiltered, closedFiltered);
-        syncTabHeights();
-        updateBadge(openFiltered.length);
-        updateMapPins(openFiltered);
-        if (expPanel && expPanel.style.display !== "none") renderExpanded();
-      })
-      .catch(function (err) { console.error("[pcorg] refresh error", err); });
+    var liveUrl = "/api/pcorg/live?event=" + encodeURIComponent(ey.event) + "&year=" + encodeURIComponent(ey.year);
+    var statsUrl = "/api/pcorg/stats?event=" + encodeURIComponent(ey.event) + "&year=" + encodeURIComponent(ey.year);
+    Promise.all([
+      fetch(liveUrl, { cache: "no-store" }).then(function (r) { return r.json(); }),
+      fetch(statsUrl, { cache: "no-store" }).then(function (r) { return r.json(); }).catch(function () { return null; }),
+    ]).then(function (results) {
+      var data = results[0];
+      var stats = results[1];
+      lastData = data;
+      // Filtrer par categories autorisees
+      var ac = window.__userAllowedCategories;
+      var filterCat = ac ? function (it) { return ac.indexOf(it.category) !== -1; } : function () { return true; };
+      var openFiltered = (data.open || []).filter(filterCat);
+      var closedFiltered = (data.closed || []).filter(filterCat);
+      renderList(listOpen, openFiltered, false, placeholderOpen);
+      renderList(listClosed, closedFiltered, true, placeholderClosed);
+      // Stats: compte sur la collection complete (fallback aux items charges si l'endpoint echoue)
+      var statsCounts = (stats && stats.counts) ? stats.counts : null;
+      renderStats(openFiltered, closedFiltered, statsCounts);
+      syncTabHeights();
+      updateBadge(openFiltered.length);
+      updateMapPins(openFiltered);
+      if (expPanel && expPanel.style.display !== "none") renderExpanded();
+    }).catch(function (err) { console.error("[pcorg] refresh error", err); });
   }
 
   // ── Render list ────────────────────────────────────────────────────────────
@@ -874,7 +880,7 @@
 
   var CATEGORY_ORDER = getAllowedCategories();
 
-  function renderStats(openItems, closedItems) {
+  function renderStats(openItems, closedItems, serverCounts) {
     if (!statsContainer) return;
     statsContainer.textContent = "";
 
@@ -882,16 +888,27 @@
     var counts = {};
     CATEGORY_ORDER.forEach(function (cat) { counts[cat] = { open: 0, closed: 0 }; });
 
-    openItems.forEach(function (item) {
-      var cat = item.category || "";
-      if (!counts[cat]) counts[cat] = { open: 0, closed: 0 };
-      counts[cat].open++;
-    });
-    closedItems.forEach(function (item) {
-      var cat = item.category || "";
-      if (!counts[cat]) counts[cat] = { open: 0, closed: 0 };
-      counts[cat].closed++;
-    });
+    if (serverCounts) {
+      // Compte serveur sur la collection complete
+      Object.keys(serverCounts).forEach(function (cat) {
+        var c = serverCounts[cat] || {};
+        if (!counts[cat]) counts[cat] = { open: 0, closed: 0 };
+        counts[cat].open = c.open || 0;
+        counts[cat].closed = c.closed || 0;
+      });
+    } else {
+      // Fallback: compte local sur les items charges
+      openItems.forEach(function (item) {
+        var cat = item.category || "";
+        if (!counts[cat]) counts[cat] = { open: 0, closed: 0 };
+        counts[cat].open++;
+      });
+      closedItems.forEach(function (item) {
+        var cat = item.category || "";
+        if (!counts[cat]) counts[cat] = { open: 0, closed: 0 };
+        counts[cat].closed++;
+      });
+    }
 
     var grid = mkEl("div", "pcorg-stats-grid");
     var totalOpen = 0, totalClosed = 0;
