@@ -947,6 +947,27 @@
     });
 
     statsContainer.appendChild(grid);
+
+    // Ligne Total (somme sur la collection complete grace a serverCounts)
+    var totalRow = mkEl("div", "pcorg-stat-total");
+    var totalLbl = mkEl("span", "pcorg-stat-total-label");
+    totalLbl.textContent = "Total";
+    totalRow.appendChild(totalLbl);
+
+    var totalCounts = mkEl("div", "pcorg-stat-total-counts");
+    var totalOpenEl = mkEl("span", "pcorg-stat-open");
+    totalOpenEl.style.color = totalOpen > 0 ? "var(--accent)" : "var(--muted)";
+    totalOpenEl.textContent = totalOpen;
+    totalOpenEl.title = "En cours";
+    totalCounts.appendChild(totalOpenEl);
+
+    var totalClosedEl = mkEl("span", "pcorg-stat-closed");
+    totalClosedEl.textContent = totalClosed;
+    totalClosedEl.title = "Terminees";
+    totalCounts.appendChild(totalClosedEl);
+
+    totalRow.appendChild(totalCounts);
+    statsContainer.appendChild(totalRow);
   }
 
   // ── Focus most recent intervention by category ─────────────────────────────
