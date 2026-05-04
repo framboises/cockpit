@@ -60,6 +60,12 @@ body {
 .status-pill.ok { color: #4ade80; border-color: #166534; }
 .status-pill.warn { color: #facc15; border-color: #854d0e; }
 .status-pill.err { color: #f87171; border-color: #991b1b; }
+.field-help-pill {
+  text-decoration: none;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+.field-help-pill:active { background: #334155; }
 
 /* Economie GPU/batterie : suspendre toutes les animations quand l'app est
    masquee (onglet cache, tablette en poche) ou si l'utilisateur prefere

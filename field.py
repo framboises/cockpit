@@ -874,6 +874,13 @@ def field_logout():
     return resp
 
 
+@field_bp.route("/field/manuel", methods=["GET"])
+def field_manuel():
+    """Manuel utilisateur de la tablette Field. Acces public (consultable
+    avant l'appairage) et hors ligne via le service worker."""
+    return render_template("field_manuel.html")
+
+
 # ---------------------------------------------------------------------------
 # Routes tablette : API (cookie field_token obligatoire)
 # ---------------------------------------------------------------------------

@@ -1,0 +1,1739 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Field - Manuel operateur</title>
+  <link rel="manifest" href="/field/manifest.webmanifest">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/field_manuel.css') }}">
+  <link rel="icon" href="/static/img/field-icon.svg" type="image/svg+xml">
+</head>
+<body>
+  <div class="manuel-page">
+
+    <header class="manuel-topbar">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span class="logo">FIELD</span>
+        <span class="title">Manuel operateur</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button id="btn-print" class="back-btn" type="button" aria-label="Imprimer le manuel">Imprimer</button>
+        <a href="/field" class="back-btn" aria-label="Retour a l application">&larr; Retour</a>
+      </div>
+    </header>
+
+    <nav class="manuel-toc" aria-label="Sommaire">
+      <h2>Sommaire</h2>
+      <ol>
+        <li><a href="#bienvenue">Bienvenue</a></li>
+        <li><a href="#avant">Avant de commencer</a></li>
+        <li><a href="#demarrage">Demarrage rapide</a></li>
+        <li><a href="#carte">Lire la carte</a></li>
+        <li><a href="#statut">Le statut patrouille</a></li>
+        <li><a href="#mission">Recevoir une mission</a></li>
+        <li><a href="#creer-fiche">Creer une fiche</a></li>
+        <li><a href="#fiche">Travailler sur une fiche</a></li>
+        <li><a href="#photos-scans">Photos et scans</a></li>
+        <li><a href="#messages">Messages avec le PC Org</a></li>
+        <li><a href="#sos" class="sos">SOS - Alerte d urgence</a></li>
+        <li><a href="#stream">Streaming live</a></li>
+        <li><a href="#push">Notifications</a></li>
+        <li><a href="#offline">Mode hors ligne</a></li>
+        <li><a href="#topbar">Lire la topbar</a></li>
+        <li><a href="#depannage">Depannage rapide</a></li>
+        <li><a href="#fin">Fin de vacation</a></li>
+        <li><a href="#glossaire">Glossaire</a></li>
+      </ol>
+    </nav>
+
+    <main class="manuel-content">
+      <h1>Manuel de la tablette Field</h1>
+      <p class="subtitle">Tout ce qu un operateur doit savoir pour utiliser la tablette pendant un evenement. Ce guide est aussi accessible depuis le bouton <strong>?</strong> de la topbar de l application.</p>
+
+      <!-- ================================================================
+           1. BIENVENUE
+           ================================================================ -->
+      <section id="bienvenue">
+        <h2><span class="section-num">01</span>Bienvenue</h2>
+
+        <p><strong>Field</strong> est l application installee sur votre tablette. Elle est le compagnon numerique du PC Organisation pendant un evenement (festival, course, manifestation sportive). Elle vous permet de recevoir vos missions, de remonter de l information au PC Org, et d etre localise en permanence.</p>
+
+        <h3>Ce que la tablette fait pour vous</h3>
+        <ul>
+          <li>Affiche la carte de l evenement avec votre position en temps reel</li>
+          <li>Vous notifie d une mission a accomplir (sonnerie + vibration)</li>
+          <li>Trace votre passage et vos actions automatiquement (pas besoin de noter)</li>
+          <li>Vous permet d envoyer des photos, des codes scannes, des comptes-rendus</li>
+          <li>Permet de declencher une alerte SOS qui touche immediatement le PC Org et vos collegues patrouilleurs</li>
+        </ul>
+
+        <h3>Ce que la tablette NE fait PAS</h3>
+        <div class="callout warn">
+          <strong>La tablette ne remplace pas la radio.</strong> Pour toute communication vocale (demande de renfort, transmission urgente, coordination immediate), utilisez la radio. La tablette est un complement ecrit et trace, pas un substitut a la voix.
+        </div>
+
+        <ul>
+          <li>Elle ne gere pas les communications vocales</li>
+          <li>Elle ne se connecte pas automatiquement a Internet : si vous etes hors couverture, certaines actions sont mises en file d attente</li>
+          <li>Elle ne contient pas de donnees confidentielles : si elle est perdue, le PC Org la revoque a distance</li>
+        </ul>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <!-- ================================================================
+           2. AVANT DE COMMENCER
+           ================================================================ -->
+      <section id="avant">
+        <h2><span class="section-num">02</span>Avant de commencer</h2>
+
+        <h3>Une tablette = une patrouille</h3>
+        <p>Chaque tablette porte un nom fixe attribue par le PC Org au moment de l appairage : <em>T01</em>, <em>T02</em>, <em>Moto-1</em>, etc. Ce nom <strong>ne change pas</strong> pendant l evenement. Il identifie la patrouille, pas la personne qui tient la tablette.</p>
+
+        <pre class="ascii">  +---------+        +---------+        +---------+
+  |  T01    |        |  T02    |        |  T03    |
+  | tablette|        | tablette|        | tablette|
+  +----+----+        +----+----+        +----+----+
+       |                  |                  |
+       v                  v                  v
+  Patrouille 1      Patrouille 2      Patrouille 3
+  (l equipage       (l equipage       (l equipage
+   peut changer)     peut changer)     peut changer)</pre>
+
+        <h3>Pas de connexion personnelle</h3>
+        <div class="callout tip">
+          <strong>Pas de login, pas de mot de passe, pas de badge a scanner.</strong> Vous n avez pas a vous identifier sur la tablette. Si vous prenez le relais d un collegue, contentez-vous de saisir l information sur le cahier de releve papier de la patrouille.
+        </div>
+
+        <h3>Le cahier de releve (organisation humaine)</h3>
+        <p>Comme la tablette ne sait pas qui la tient, le PC Org tient un cahier (papier ou tableur) de qui est sur quelle patrouille a chaque creneau. Quand vous prenez le poste :</p>
+        <ol class="steps">
+          <li>Notez votre nom, l heure de prise de poste, l etat de la batterie</li>
+          <li>Verifiez que la tablette est sur le bon statut (probablement <em>Disponible</em>)</li>
+          <li>Lisez les dernieres consignes dans la rubrique <em>Messages</em></li>
+          <li>A la fin de votre vacation : passez la tablette en <em>Pause</em> et notez l heure de fin</li>
+        </ol>
+
+        <h3>Verifications avant de partir</h3>
+        <ul>
+          <li><strong>Batterie</strong> : la pastille doit etre verte (au-dessus de 30%). Sinon, branchez la tablette sur le powerbank de la patrouille.</li>
+          <li><strong>Reseau</strong> : la pastille reseau doit etre verte. Si vous etes en zone blanche, c est normal de la voir rouge ponctuellement.</li>
+          <li><strong>GPS</strong> : la pastille GPS passe en vert apres 5 a 30 secondes en exterieur. Si elle reste rouge, sortez du batiment et patientez.</li>
+        </ul>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <!-- ================================================================
+           3. DEMARRAGE RAPIDE
+           ================================================================ -->
+      <section id="demarrage">
+        <h2><span class="section-num">03</span>Demarrage rapide (5 minutes)</h2>
+
+        <p>Vous venez de recevoir une tablette neuve, jamais appairee. Suivez ces etapes dans l ordre.</p>
+
+        <h3>Etape 1 - Recevoir le code</h3>
+        <p>Le PC Organisation vous donne un <strong>code a 6 chiffres</strong> (par radio, par SMS ou de la main a la main). Ce code n est valide que <strong>15 minutes</strong>. Si vous l avez recu il y a plus longtemps, demandez-en un nouveau.</p>
+
+        <h3>Etape 2 - Allumer la tablette et ouvrir Field</h3>
+        <ol class="steps">
+          <li>Allumez la tablette (bouton power sur le cote)</li>
+          <li>Sur l ecran d accueil, tapez sur l icone <strong>Field</strong> (pictogramme bleu)</li>
+          <li>Si l icone n est pas la, ouvrez le navigateur et tapez <em>cockpit.lemans.org/field</em></li>
+        </ol>
+
+        <h3>Etape 3 - Saisir le code</h3>
+        <p>L ecran d appairage affiche un pave numerique :</p>
+
+        <pre class="ascii">  +----------------------------------+
+  |        COCKPIT FIELD             |
+  |  Appairage de la tablette        |
+  |                                  |
+  |   [_] [_] [_] [_] [_] [_]        |
+  |                                  |
+  |    +---+ +---+ +---+             |
+  |    | 1 | | 2 | | 3 |             |
+  |    +---+ +---+ +---+             |
+  |    | 4 | | 5 | | 6 |             |
+  |    +---+ +---+ +---+             |
+  |    | 7 | | 8 | | 9 |             |
+  |    +---+ +---+ +---+             |
+  |    | < | | 0 | |OK |             |
+  |    +---+ +---+ +---+             |
+  +----------------------------------+</pre>
+
+        <ol class="steps">
+          <li>Tapez les 6 chiffres du code</li>
+          <li>Touchez <strong>OK</strong> (le bouton devient bleu quand les 6 chiffres sont saisis)</li>
+          <li>Si le code est bon : message vert <em>Tablette appairee</em> et bascule automatique vers l application</li>
+          <li>Si erreur : effacez avec la fleche retour, demandez un nouveau code au PC Org</li>
+        </ol>
+
+        <div class="callout warn">
+          <strong>Codes d erreur courants :</strong>
+          <ul>
+            <li><em>Code expire</em> : plus de 15 minutes depuis l envoi, demandez-en un nouveau</li>
+            <li><em>Code deja utilise</em> : une autre tablette a deja consomme ce code, demandez-en un nouveau</li>
+            <li><em>Trop de tentatives, patiente</em> : trop d essais en moins d une minute, attendez 1 minute</li>
+          </ul>
+        </div>
+
+        <h3>Etape 4 - Accepter les autorisations</h3>
+        <p>La premiere fois, le navigateur vous demande plusieurs permissions. <strong>Toutes sont indispensables.</strong> Touchez <em>Autoriser</em> pour chacune.</p>
+
+        <table>
+          <thead>
+            <tr><th>Demande</th><th>Pourquoi</th><th>A faire</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Position (GPS)</td><td>Pour que le PC Org sache ou vous etes</td><td>Autoriser - Toujours</td></tr>
+            <tr><td>Camera</td><td>Pour les photos et scans QR</td><td>Autoriser</td></tr>
+            <tr><td>Notifications</td><td>Pour etre alerte meme tablette en veille</td><td>Autoriser</td></tr>
+            <tr><td>Plein ecran</td><td>Pour cacher les barres du navigateur</td><td>Autoriser</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout tip">
+          Si vous avez refuse une autorisation par erreur : ouvrez les <em>Reglages de la tablette &rarr; Safari (ou Chrome) &rarr; Field &rarr; Autorisations</em>, puis remettez tout sur <em>Autoriser</em>. Voir aussi la section <a href="#depannage">Depannage</a>.
+        </div>
+
+        <h3>Etape 5 - Verifier la topbar</h3>
+        <p>En haut de l ecran, 3 pastilles indiquent l etat de la tablette. Toutes doivent etre <strong>vertes</strong> avant de commencer.</p>
+
+        <pre class="ascii">  +-------------------------------------------------+
+  | FIELD  T01  GP Moto 2026     [GPS] [Net] [Bat]  |
+  +-------------------------------------------------+
+                                  vert  vert  vert
+                                  = pret a partir</pre>
+
+        <p>Si une pastille est rouge ou orange, voir la section <a href="#topbar">Lire la topbar</a>.</p>
+
+        <h3>Etape 6 - Premier statut</h3>
+        <p>En bas de l ecran, juste au-dessus de la barre des actions, un bouton affiche votre statut. Touchez-le et choisissez <strong>Disponible</strong> pour signaler au PC Org que vous etes prete a recevoir une mission.</p>
+
+        <div class="pc-view">
+          <span class="pc-view-title">Ce que voit le PC Org</span>
+          Votre patrouille apparait en vert sur la carte du PC Org, avec le statut <em>Disponible</em>. Vous pouvez recevoir un dispatch a tout moment.
+        </div>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <!-- ================================================================
+           Sections en cours de redaction (iterations 2 et 3)
+           ================================================================ -->
+      <section id="carte">
+        <h2><span class="section-num">04</span>Lire la carte</h2>
+
+        <p>La carte occupe la majeure partie de l ecran. Elle vous montre le terrain de l evenement, votre position, et les interventions en cours.</p>
+
+        <h3>Votre position</h3>
+        <p>Un <strong>cercle bleu pulsant</strong> au centre de la carte represente votre position GPS en temps reel. Un cercle plus large et translucide autour indique la <em>precision GPS</em> : plus il est petit, plus la position est fiable.</p>
+
+        <pre class="ascii">           .-----.
+          /       \
+         (    *    )      *  = votre position
+          \   .   /       () = cercle de precision
+           '--+--'</pre>
+
+        <p>Si vous ne voyez pas votre point bleu : touchez le bouton <strong>Me recentrer</strong> (cible) en bas a gauche de la carte. La carte revient sur vous et reste centree tant que vous bougez.</p>
+
+        <h3>Les fiches d intervention sur la carte</h3>
+        <p>Chaque intervention en cours est representee par un <strong>pin colore</strong> a sa position. La couleur depend de la categorie :</p>
+
+        <table>
+          <thead><tr><th>Couleur</th><th>Categorie</th><th>Exemples</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill" style="background:#dc2626;color:#fff;border-color:#dc2626">Rouge</span></td><td>PCO.Secours</td><td>Blesse, malaise, prise en charge medicale</td></tr>
+            <tr><td><span class="pill" style="background:#7c3aed;color:#fff;border-color:#7c3aed">Violet</span></td><td>PCO.Securite</td><td>Bagarre, intrusion, vol</td></tr>
+            <tr><td><span class="pill" style="background:#f59e0b;color:#fff;border-color:#f59e0b">Orange</span></td><td>PCO.Technique</td><td>Panne electricite, fuite, materiel</td></tr>
+            <tr><td><span class="pill" style="background:#0d9488;color:#fff;border-color:#0d9488">Vert</span></td><td>PCO.Flux</td><td>Bouchon, deviation, stationnement</td></tr>
+          </tbody>
+        </table>
+
+        <p>Touchez un pin pour ouvrir la fiche correspondante.</p>
+
+        <h3>Changer de fond de carte</h3>
+        <p>Le bouton <strong>Fond de carte</strong> (icone carte, en haut a droite) cycle entre 3 fonds :</p>
+        <ol>
+          <li><strong>Plan (OSM)</strong> : carte routiere classique, lisible meme avec peu de reseau</li>
+          <li><strong>Satellite ACO</strong> : photo aerienne haute resolution du circuit, fournie par l ACO</li>
+          <li><strong>Satellite Egis</strong> : alternative satellite a plus large couverture</li>
+        </ol>
+
+        <div class="callout tip">
+          La vue <em>Satellite ACO</em> est la plus precise pour reperer une zone du circuit (un parking, un acces secours). Le <em>Plan (OSM)</em> est plus rapide en zone faible reseau.
+        </div>
+
+        <h3>Activer le carroyage</h3>
+        <p>Le bouton <strong>Carroyage</strong> (icone grille, en haut a droite) affiche une grille avec des reperes alphanumeriques (A1, B2, C3...). Cette grille est utilisee a la radio pour donner une position rapide sans coordonnees GPS.</p>
+
+        <pre class="ascii">  +----+----+----+----+
+  | A1 | B1 | C1 | D1 |
+  +----+----+----+----+
+  | A2 | B2 | C2 | D2 |
+  +----+----+----+----+
+  | A3 | B3 | C3 | D3 |   "Patrouille en C3"
+  +----+----+----+----+   = carre de 100m</pre>
+
+        <p>En zoomant fortement, une <strong>sous-grille de 25m</strong> apparait pour preciser au quart de carre (ex : C3-2).</p>
+
+        <h3>Calques (panneau lateral)</h3>
+        <p>Le bouton <strong>Calques</strong> (en bas, dans la barre des actions) ouvre un panneau ou vous pouvez activer ou masquer :</p>
+        <ul>
+          <li>Carroyage 100m / sous-grille 25m</li>
+          <li>Portes et portails (pins cyan)</li>
+          <li>Categories de POI (points d interet : PC, secouristes, parkings, etc.)</li>
+        </ul>
+
+        <h3>Rechercher un lieu</h3>
+        <p>Le bouton <strong>Recherche</strong> (loupe, en haut a droite) ouvre une zone de saisie. Tapez les premieres lettres d un POI (ex : <em>parc</em>) et touchez un resultat pour zoomer dessus.</p>
+
+        <h3>Mesurer une distance</h3>
+        <p>En bas a droite, 3 boutons d outils mesure :</p>
+        <ul>
+          <li><strong>Mesurer une distance</strong> (icone ligne) : touchez 2 points ou plus, la distance s affiche</li>
+          <li><strong>Mesurer une aire</strong> (icone carre) : touchez les sommets d une zone, la surface s affiche</li>
+          <li><strong>Mesurer un rayon</strong> (icone cercle) : touchez un centre puis un point exterieur</li>
+        </ul>
+        <p>Le bouton <strong>poubelle</strong> efface toutes les mesures en cours.</p>
+
+        <h3>Plein ecran</h3>
+        <p>Le bouton <strong>Plein ecran</strong> (icone fleches) cache les barres du navigateur pour une carte au format maximum. Re-touchez pour sortir.</p>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <section id="statut">
+        <h2><span class="section-num">05</span>Le statut patrouille</h2>
+
+        <p>Votre <strong>statut</strong> dit au PC Org ce que vous etes en train de faire. C est l information la plus importante de la tablette : elle determine si vous pouvez recevoir une mission, si vous etes deja engagee, ou en pause.</p>
+
+        <h3>Ou changer de statut</h3>
+        <p>Le bouton de statut est en bas de l ecran, juste au-dessus de la barre des actions. Il affiche le statut actuel (ex : <em>Disponible</em>) avec un chevron <strong>v</strong>. Touchez-le pour ouvrir la liste des statuts.</p>
+
+        <pre class="ascii">  +-----------------------------------------+
+  |              [carte]                    |
+  +-----------------------------------------+
+  |  +-----------------------------------+  |
+  |  |  Disponible                  v    |  |  &lt;- bouton statut
+  |  +-----------------------------------+  |
+  +-----------------------------------------+
+  | [Calques][Missions][Camera][Msgs][SOS] |
+  +-----------------------------------------+</pre>
+
+        <h3>Les 4 statuts principaux</h3>
+
+        <table>
+          <thead><tr><th>Statut</th><th>Signification</th><th>Quand l utiliser</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="pill ok">Disponible</span></td>
+              <td>En ronde, disponible pour recevoir une mission</td>
+              <td>Mode par defaut. Vous patrouillez et attendez un dispatch.</td>
+            </tr>
+            <tr>
+              <td><span class="pill warn">Intervention</span></td>
+              <td>Engagement sur le terrain, en deplacement vers une intervention</td>
+              <td>Pose automatiquement quand vous acceptez un dispatch ou creez une fiche.</td>
+            </tr>
+            <tr>
+              <td><span class="pill" style="color:#60a5fa;border-color:#1e40af">ASL</span></td>
+              <td>Arrivee sur les lieux - vous etes sur place</td>
+              <td>Pose automatiquement quand vous arrivez a moins de 10m du lieu de l intervention. Vous pouvez aussi le poser manuellement.</td>
+            </tr>
+            <tr>
+              <td><span class="pill">Pause</span></td>
+              <td>Indisponible temporairement</td>
+              <td>Repas, releve d equipage, fin de vacation. Le PC Org sait qu il ne faut pas vous dispatcher.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Le statut "Fin d intervention"</h3>
+        <p>Un 5e statut, <span class="pill" style="color:#c4b5fd;border-color:#5b21b6">Fin d intervention</span>, n apparait que lorsque vous etes en <em>Intervention</em> ou en <em>ASL</em>. Il sert a cloturer proprement une intervention en demandant la liberation au PC Org.</p>
+
+        <ol class="steps">
+          <li>Touchez le bouton de statut</li>
+          <li>Choisissez <strong>Fin d intervention</strong></li>
+          <li>Une fenetre vous demande un compte-rendu rapide (optionnel)</li>
+          <li>Touchez <strong>Confirmer fin d intervention</strong></li>
+          <li>Le PC Org est notifie. Vous repassez ensuite en <em>Disponible</em> ou <em>Pause</em>.</li>
+        </ol>
+
+        <h3>Transitions interdites</h3>
+        <div class="callout warn">
+          <strong>On ne passe pas directement d <em>Intervention</em> ou <em>ASL</em> a <em>Disponible</em>.</strong> La tablette vous force a passer par <em>Fin d intervention</em> (ou <em>Pause</em>), pour que le PC Org sache que l intervention est cloturee. C est volontaire : ca evite qu une intervention disparaisse des ecrans sans compte-rendu.
+        </div>
+
+        <pre class="ascii">  Disponible <-->  Pause
+       |              ^
+       |              |
+       v              |
+  Intervention -> Fin d intervention
+       |
+       v
+      ASL  --------> Fin d intervention</pre>
+
+        <h3>Couleurs des statuts</h3>
+        <p>Le statut a une couleur visible sur la tablette ET sur l ecran du PC Org :</p>
+        <ul>
+          <li><span class="pill ok">Disponible</span> = vert</li>
+          <li><span class="pill warn">Intervention</span> = orange</li>
+          <li><span class="pill" style="color:#60a5fa;border-color:#1e40af">ASL</span> = bleu</li>
+          <li><span class="pill">Pause</span> = gris</li>
+          <li><span class="pill" style="color:#c4b5fd;border-color:#5b21b6">Fin d intervention</span> = violet</li>
+        </ul>
+
+        <div class="pc-view">
+          <span class="pc-view-title">Ce que voit le PC Org</span>
+          Votre patrouille apparait sur la carte du PC Org avec un point de la couleur de votre statut. La liste des patrouilles est triee par statut : interventions en haut, pauses en bas. Le PC Org dispatche en priorite les patrouilles en <em>Disponible</em>.
+        </div>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <section id="mission">
+        <h2><span class="section-num">06</span>Recevoir une mission</h2>
+
+        <p>Quand le PC Org vous attribue une intervention, votre tablette vous le signale immediatement, meme si vous etiez en train de regarder la carte ou si l ecran etait eteint.</p>
+
+        <h3>L alerte plein ecran</h3>
+
+        <pre class="ascii">  +------------------------------------------+
+  |  PCO.Secours                       UA    |
+  +------------------------------------------+
+  |                                          |
+  |  Personne au sol pres de la tribune T2,  |
+  |  semble inconsciente.                    |
+  |                                          |
+  |  Zone : Tribune Honneur                  |
+  |  Carroyage : C3                          |
+  |  Position : 47.95621 N, 0.20543 E        |
+  |                                          |
+  |  +-----------+      +----------------+   |
+  |  |  IGNORER  |      |    ACCEPTER    |   |
+  |  +-----------+      +----------------+   |
+  +------------------------------------------+</pre>
+
+        <p>Une fenetre plein ecran s ouvre avec :</p>
+        <ul>
+          <li>La <strong>categorie</strong> de l intervention (Secours, Securite, Technique, Flux) et sa couleur en bandeau</li>
+          <li>Le <strong>niveau d urgence</strong> en haut a droite (<span class="pill urg-imp">IMP</span> <span class="pill urg-ur">UR</span> <span class="pill urg-ua">UA</span> <span class="pill urg-eu">EU</span>)</li>
+          <li>La <strong>description</strong> rapide de la situation</li>
+          <li>La <strong>zone</strong>, le <strong>carroyage</strong> et la <strong>position GPS</strong> du lieu</li>
+          <li>Une <strong>photo</strong> si quelqu un en a deja transmis une</li>
+        </ul>
+
+        <p>En meme temps, la tablette :</p>
+        <ul>
+          <li>Joue un son d alerte (deux tons montants)</li>
+          <li>Vibre 2 fois, puis une vibration longue</li>
+          <li>Recentre la carte sur le lieu de l intervention</li>
+        </ul>
+
+        <h3>Accepter ou refuser</h3>
+
+        <table>
+          <thead><tr><th>Bouton</th><th>Effet</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>ACCEPTER</strong></td>
+              <td>Vous prenez l intervention. Statut bascule en <span class="pill warn">Intervention</span>. La fiche detaillee s ouvre. Le menu d itineraire vous est propose.</td>
+            </tr>
+            <tr>
+              <td><strong>IGNORER</strong></td>
+              <td>La fenetre se ferme. Le PC Org est notifie que vous n avez pas pris l intervention et la dispatchera sur une autre patrouille.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout warn">
+          Refusez seulement si vous ne pouvez vraiment pas prendre l intervention (deja sur une autre, eloignement majeur). En cas de doute, acceptez et confirmez en radio avec le PC Org.
+        </div>
+
+        <h3>Lancer l itineraire</h3>
+
+        <p>Apres avoir accepte, un menu vous propose de naviguer jusqu au lieu :</p>
+
+        <pre class="ascii">  +-----------------------+
+  |  Itineraire           |
+  +-----------------------+
+  |  +-----------------+  |
+  |  | Itineraire ACO  |  |  &lt;- recommande
+  |  +-----------------+  |
+  |  +-----------------+  |
+  |  |   Google Maps   |  |
+  |  +-----------------+  |
+  |  +-----------------+  |
+  |  |    Annuler      |  |
+  |  +-----------------+  |
+  +-----------------------+</pre>
+
+        <ul>
+          <li><strong>Itineraire ACO</strong> : trace une polyline bleue sur la carte de Field, en utilisant les voies de service du circuit. <em>Recommande</em> car il connait les acces dedies.</li>
+          <li><strong>Google Maps</strong> : ouvre l application Google Maps de la tablette en mode navigation. Pratique hors enceinte du circuit, mais ne connait pas les voies de service.</li>
+          <li><strong>Annuler</strong> : ferme le menu. La fiche reste ouverte, vous pouvez relancer l itineraire plus tard depuis le bouton <em>Itineraire</em> de la fiche.</li>
+        </ul>
+
+        <h3>Arrivee sur place</h3>
+        <div class="callout do">
+          <strong>Le passage en ASL est automatique.</strong> Quand votre tablette detecte que vous etes a <strong>moins de 10 metres</strong> du lieu de l intervention, votre statut bascule tout seul de <em>Intervention</em> vers <span class="pill" style="color:#60a5fa;border-color:#1e40af">ASL</span>. Pas besoin de toucher quoi que ce soit. Le PC Org est notifie.
+        </div>
+
+        <p>Si la position GPS n est pas tres precise (interieur de batiment, foret), le passage automatique peut tarder. Vous pouvez le forcer manuellement :</p>
+        <ol class="steps">
+          <li>Touchez le bouton de statut</li>
+          <li>Choisissez <strong>ASL - Arrivee sur les lieux</strong></li>
+          <li>Confirmez</li>
+        </ol>
+
+        <h3>Le bandeau d engagement</h3>
+        <p>Tant que vous etes en intervention, un bandeau colore reste affiche en haut de l ecran avec la categorie et la description de la fiche en cours. Touchez-le pour rouvrir la fiche detaillee.</p>
+
+        <div class="pc-view">
+          <span class="pc-view-title">Ce que voit le PC Org</span>
+          Quand vous acceptez, votre patrouille devient orange (<em>Intervention</em>) sur sa carte. Quand vous arrivez a destination, vous passez en bleu (<em>ASL</em>). Le PC Org sait alors que vous prenez en charge la situation et arrete de chercher d autres ressources.
+        </div>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <section id="creer-fiche">
+        <h2><span class="section-num">07</span>Creer une fiche</h2>
+
+        <p>Vous decouvrez vous-meme un probleme sur le terrain (sans avoir ete dispatchee). Plutot que de tout decrire en radio, vous creez une <strong>fiche d intervention</strong> directement sur la tablette. Le PC Org la voit aussitot et peut envoyer du renfort si besoin.</p>
+
+        <h3>Quand creer une fiche</h3>
+        <ul>
+          <li>Vous tombez sur une situation que vous prenez en charge (chute, panne, degradation)</li>
+          <li>Vous voulez que le PC Org garde une trace ecrite et photo</li>
+          <li>Vous estimez que d autres ressources peuvent etre utiles</li>
+        </ul>
+
+        <div class="callout warn">
+          Pour une <strong>urgence vitale</strong> (personne inconsciente, agression en cours), <strong>declenchez d abord un SOS</strong> (voir section 11). La creation de fiche prend 30 secondes, le SOS est instantane et alerte tout le monde.
+        </div>
+
+        <h3>Ouvrir le formulaire</h3>
+        <ol class="steps">
+          <li>Touchez <strong>Missions</strong> dans la barre des actions (en bas)</li>
+          <li>Touchez <strong>+ Nouvelle fiche</strong> en haut du panneau</li>
+        </ol>
+
+        <h3>Remplir le formulaire</h3>
+
+        <pre class="ascii">  +-----------------------------------------+
+  |  Nouvelle intervention                  |
+  +-----------------------------------------+
+  |                                         |
+  |  Categorie *                            |
+  |  +-------+ +-------+ +-------+ +------+ |
+  |  |Secours| |Securit| |Techniq| | Flux | |
+  |  +-------+ +-------+ +-------+ +------+ |
+  |                                         |
+  |  Urgence *                              |
+  |  +---+  +---+  +---+  +---+             |
+  |  |IMP|  | UR|  | UA|  | EU|             |
+  |  +---+  +---+  +---+  +---+             |
+  |                                         |
+  |  Description *                          |
+  |  +-----------------------------------+  |
+  |  | Personne au sol pres tribune T2.. |  |
+  |  +-----------------------------------+  |
+  |                                         |
+  |  Position : 47.95621 N, 0.20543 E   OK  |
+  |  Carroyage : C3                         |
+  |                                         |
+  |  +-----------+  +--------------------+  |
+  |  |  Annuler  |  |   Creer la fiche   |  |
+  |  +-----------+  +--------------------+  |
+  +-----------------------------------------+</pre>
+
+        <h3>Choisir la categorie (obligatoire)</h3>
+        <table>
+          <thead><tr><th>Categorie</th><th>Pour quoi</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill" style="background:#dc2626;color:#fff;border-color:#dc2626">PCO.Secours</span></td><td>Blessure, malaise, prise en charge medicale</td></tr>
+            <tr><td><span class="pill" style="background:#7c3aed;color:#fff;border-color:#7c3aed">PCO.Securite</span></td><td>Bagarre, intrusion, vol, suspicion</td></tr>
+            <tr><td><span class="pill" style="background:#FF8C00;color:#fff;border-color:#FF8C00">PCO.Technique</span></td><td>Panne electrique, fuite, materiel a reparer</td></tr>
+            <tr><td><span class="pill" style="background:#2563EB;color:#fff;border-color:#2563EB">PCO.Flux</span></td><td>Bouchon, deviation, stationnement gene</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Choisir l urgence (obligatoire)</h3>
+
+        <table>
+          <thead><tr><th>Niveau</th><th>Signification</th><th>Exemple</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="pill urg-imp">IMP</span></td>
+              <td>Implique - pas de blessure, pas de victime, juste a documenter</td>
+              <td>Vehicule mal gare sans occupant</td>
+            </tr>
+            <tr>
+              <td><span class="pill urg-ur">UR</span></td>
+              <td>Urgence relative - situation stable, pas de danger immediat</td>
+              <td>Panne electrique sur un stand</td>
+            </tr>
+            <tr>
+              <td><span class="pill urg-ua">UA</span></td>
+              <td>Urgence absolue - engagement prioritaire necessaire</td>
+              <td>Personne blessee consciente</td>
+            </tr>
+            <tr>
+              <td><span class="pill urg-eu">EU</span></td>
+              <td>Detresse vitale - mobilisation de toutes les ressources</td>
+              <td>Personne inconsciente, arret cardiaque</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout tip">
+          En cas de doute, choisissez le niveau <strong>au-dessus</strong>. Il vaut mieux mobiliser un peu trop que pas assez. Le niveau peut etre re-evalue apres par le PC Org.
+        </div>
+
+        <h3>Description (obligatoire)</h3>
+        <p>Une phrase courte et claire. Ce que voit le PC Org doit suffire a comprendre la situation en 3 secondes.</p>
+
+        <ul>
+          <li><strong>OK</strong> : <em>Personne au sol pres tribune T2, semble inconsciente</em></li>
+          <li><strong>OK</strong> : <em>Vehicule en panne sur la voie d acces secours, bloque le passage</em></li>
+          <li><strong>NON</strong> : <em>RAS</em> ou <em>Probleme</em> (pas assez d info pour dispatcher)</li>
+        </ul>
+
+        <h3>Position automatique</h3>
+        <p>La position GPS de la tablette est utilisee comme position de la fiche. Si le carroyage est active, le code (ex : <em>C3</em>) est ajoute automatiquement. Vous n avez rien a saisir.</p>
+
+        <div class="callout warn">
+          Si la pastille GPS est rouge au moment de la creation, la position ne sera pas envoyee. Indiquez alors le lieu dans la description (ex : <em>tribune T2 cote nord</em>).
+        </div>
+
+        <h3>Validation</h3>
+        <ol class="steps">
+          <li>Touchez <strong>Creer la fiche</strong></li>
+          <li>Toast vert : <em>Fiche creee - Intervention demarree</em></li>
+          <li>Votre statut bascule automatiquement en <span class="pill warn">Intervention</span></li>
+          <li>Le bandeau d engagement apparait en haut de l ecran</li>
+        </ol>
+
+        <div class="pc-view">
+          <span class="pc-view-title">Ce que voit le PC Org</span>
+          Une nouvelle fiche apparait dans sa liste, avec votre nom de patrouille comme creatrice. Sur sa carte, un pin de la couleur de la categorie marque le lieu. Le PC Org peut decider d ajouter du renfort, ou simplement de suivre votre prise en charge.
+        </div>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <section id="fiche">
+        <h2><span class="section-num">08</span>Travailler sur une fiche</h2>
+
+        <p>Une fois engagee sur une fiche (acceptee ou creee par vous), vous pouvez l enrichir au fil de votre intervention : commentaires, photos, codes scannes, et la cloturer a la fin.</p>
+
+        <h3>Ouvrir la fiche en cours</h3>
+        <p>Plusieurs chemins possibles :</p>
+        <ul>
+          <li>Toucher le <strong>bandeau d engagement</strong> en haut de l ecran (visible tant que vous etes en intervention)</li>
+          <li>Toucher le <strong>pin de la fiche sur la carte</strong></li>
+          <li>Ouvrir le panneau <strong>Missions</strong> et toucher la fiche dans la liste</li>
+        </ul>
+
+        <h3>Anatomie d une fiche</h3>
+
+        <pre class="ascii">  +-------------------------------------------+
+  |  PCO.Secours                       UA     |
+  +-------------------------------------------+
+  |                                           |
+  |  Description :                            |
+  |  | Personne au sol pres tribune T2..      |
+  |                                           |
+  |  Localisation : 47.95621 N, 0.20543 E     |
+  |  Carroyage : C3                           |
+  |  Appelant : Securite tribune T2           |
+  |                                           |
+  |  Photos :                                 |
+  |  [img] [img] [img]                        |
+  |                                           |
+  |  Chronologie :                            |
+  |  - 14:32  Cree par PC Org                 |
+  |  - 14:33  T01 - Engagement confirme       |
+  |  - 14:36  T01 - Photo                     |
+  |  - 14:38  T01 - "Victime consciente, RAS" |
+  |                                           |
+  |  +-----------+ +---------+ +-----------+  |
+  |  | Photo     | | Scan    | | Commentr  |  |
+  |  +-----------+ +---------+ +-----------+  |
+  |  +-----------+ +---------+                |
+  |  | Itinerair | |Fin inter|                |
+  |  +-----------+ +---------+                |
+  +-------------------------------------------+</pre>
+
+        <h3>Ajouter un commentaire</h3>
+        <ol class="steps">
+          <li>Touchez le bouton <strong>Commentaire</strong></li>
+          <li>Tapez le texte (court, factuel : <em>Victime consciente, douleur jambe gauche</em>)</li>
+          <li>Touchez <strong>Envoyer</strong></li>
+        </ol>
+        <p>Toast vert : <em>Commentaire envoye</em>. Le commentaire apparait dans la chronologie de la fiche, cote PC Org instantanement.</p>
+
+        <h3>Ajouter une photo</h3>
+        <ol class="steps">
+          <li>Touchez le bouton <strong>Photo</strong> de la fiche (ou le bouton <em>Camera</em> de la barre du bas)</li>
+          <li>Cadrez et touchez le declencheur</li>
+          <li>Vous pouvez prendre jusqu a 5 photos d affilee</li>
+          <li>Touchez <strong>Joindre a cette fiche</strong> (case cochee par defaut puisque vous etes engagee)</li>
+          <li>Optionnel : ajoutez un commentaire qui accompagne la photo</li>
+          <li>Touchez <strong>Envoyer</strong></li>
+        </ol>
+        <p>Toast vert : <em>Photo envoyee</em>. Photo visible dans la chronologie cote PC Org. La photo est compressee automatiquement (max 1600 px) pour passer meme avec un reseau faible.</p>
+
+        <h3>Ajouter un scan QR ou code-barres</h3>
+        <p>Pratique pour scanner un badge d acces, un code de site, un QR de materiel.</p>
+        <ol class="steps">
+          <li>Touchez le bouton <strong>Scan</strong> de la fiche</li>
+          <li>Approchez le code de la camera, le scan est automatique des qu il est detecte</li>
+          <li>Vous pouvez scanner plusieurs codes a la suite (jusqu a 20)</li>
+          <li>Si le code est illisible, touchez <strong>Saisie manuelle</strong> et tapez le numero</li>
+          <li>Touchez <strong>Envoyer</strong></li>
+        </ol>
+
+        <h3>Lire la chronologie</h3>
+        <p>La chronologie de la fiche liste tous les evenements dans l ordre :</p>
+        <ul>
+          <li>Creation de la fiche (par qui, a quelle heure)</li>
+          <li>Engagements successifs des patrouilles</li>
+          <li>Tous les commentaires (cote tablette ET cote PC Org)</li>
+          <li>Toutes les photos (avec miniatures cliquables)</li>
+          <li>Tous les codes scannes</li>
+        </ul>
+        <p>C est votre carnet d intervention en temps reel, partage avec le PC Org.</p>
+
+        <h3>Cloturer la fiche</h3>
+        <div class="callout warn">
+          La cloture d une fiche n est <strong>pas la meme chose</strong> que la fin d intervention. La fiche reste ouverte tant que le PC Org n a pas decide qu elle etait traitee. Vous pouvez avoir <em>fini votre intervention</em> et passer en Disponible alors que la fiche reste ouverte (par exemple parce que les pompiers prennent le relais).
+        </div>
+
+        <h3>Fin d intervention (cote tablette)</h3>
+        <ol class="steps">
+          <li>Sur la fiche, touchez <strong>Fin d intervention</strong></li>
+          <li>Une fenetre vous demande un compte-rendu (optionnel mais recommande)</li>
+          <li>Touchez <strong>Confirmer fin d intervention</strong></li>
+          <li>Votre statut bascule en <em>Fin d intervention</em>, puis vous pouvez repasser en <em>Disponible</em></li>
+        </ol>
+
+        <p>Le compte-rendu est ajoute en chronologie. Le PC Org sait que vous vous liberez et peut redispatcher en consequence.</p>
+
+        <div class="pc-view">
+          <span class="pc-view-title">Ce que voit le PC Org</span>
+          Chaque action que vous faites sur la fiche apparait dans sa chronologie cote PC. C est lui qui decide quand cloturer definitivement la fiche (statut TERMINE), apres avoir lu votre compte-rendu et eventuellement croise avec ceux des autres intervenants.
+        </div>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <section id="photos-scans">
+        <h2><span class="section-num">09</span>Photos et scans spontanes</h2>
+
+        <p>En dehors d une fiche, vous pouvez envoyer une <strong>photo</strong> ou un <strong>scan</strong> au PC Org pour signaler quelque chose qui ne necessite pas une intervention dediee : un materiel a verifier, une zone qui s embouteille, un badge inhabituel.</p>
+
+        <h3>Ouvrir la camera</h3>
+        <p>Touchez le bouton <strong>Camera</strong> dans la barre des actions (au centre, en bas).</p>
+
+        <pre class="ascii">  +----------------------------+
+  |   Que voulez-vous faire ?  |
+  +----------------------------+
+  |  +---------+  +---------+  |
+  |  |  PHOTO  |  |  SCAN   |  |
+  |  +---------+  +---------+  |
+  +----------------------------+</pre>
+
+        <h3>Mode Photo</h3>
+
+        <ol class="steps">
+          <li>Touchez <strong>PHOTO</strong></li>
+          <li>L ecran passe en mode viseur plein ecran</li>
+          <li>Cadrez et touchez le declencheur (cercle blanc en bas)</li>
+          <li>Vous pouvez prendre <strong>jusqu a 5 photos</strong> avant d envoyer</li>
+          <li>Touchez <strong>Suite</strong> quand vous avez fini</li>
+        </ol>
+
+        <p>Boutons utiles dans le viseur :</p>
+        <ul>
+          <li><strong>Flip camera</strong> : bascule entre camera arriere (par defaut) et camera avant</li>
+          <li><strong>Torche</strong> : allume le flash en continu (utile la nuit)</li>
+          <li><strong>X</strong> : quitte le mode camera sans envoyer</li>
+        </ul>
+
+        <h3>Composer le message photo</h3>
+
+        <pre class="ascii">  +-------------------------------------+
+  |  3 photos selectionnees             |
+  |  [img] [img] [img]                  |
+  +-------------------------------------+
+  |  Categorie                          |
+  |  [Secours][Securit][Tech][Flux]     |
+  |                                     |
+  |  Urgence                            |
+  |  [IMP] [UR] [UA] [EU]               |
+  |                                     |
+  |  Commentaire                        |
+  |  [ Eclairage HS sur acces 4...    ] |
+  |                                     |
+  |  +---------+  +-----------------+   |
+  |  | Annuler |  |     Envoyer     |   |
+  |  +---------+  +-----------------+   |
+  +-------------------------------------+</pre>
+
+        <ol class="steps">
+          <li>Choisissez la <strong>categorie</strong> (obligatoire pour le routing cote PC Org)</li>
+          <li>Choisissez le <strong>niveau d urgence</strong> (par defaut : UR)</li>
+          <li>Ajoutez un <strong>commentaire court</strong> qui dit ce que la photo montre</li>
+          <li>Touchez <strong>Envoyer</strong></li>
+        </ol>
+
+        <p>Toast vert : <em>Photo envoyee</em>. Si vous etes hors ligne, la photo part en file d attente et sera envoyee des le retour du reseau (toast : <em>Hors ligne : photo en attente</em>).</p>
+
+        <h3>Mode Scan (QR / code-barres)</h3>
+
+        <ol class="steps">
+          <li>Touchez <strong>SCAN</strong> dans le menu camera</li>
+          <li>Approchez le code de la camera, le scan est automatique</li>
+          <li>Le code detecte s ajoute a la liste</li>
+          <li>Vous pouvez scanner <strong>jusqu a 20 codes</strong> a la suite</li>
+          <li>Si la lecture echoue : touchez <strong>Saisie manuelle</strong> et tapez le numero a la main</li>
+        </ol>
+
+        <p>Formats reconnus : QR Code, Code-barres EAN/UPC, Code 128, Data Matrix, PDF417, Aztec.</p>
+
+        <h3>Composer le message scan</h3>
+        <p>Comme pour la photo, vous devez choisir une <strong>categorie</strong> + une <strong>urgence</strong> + un <strong>commentaire</strong> avant d envoyer.</p>
+
+        <h3>Cas d usage</h3>
+
+        <table>
+          <thead><tr><th>Situation</th><th>Categorie</th><th>Urgence</th><th>Exemple commentaire</th></tr></thead>
+          <tbody>
+            <tr><td>Materiel HS</td><td>PCO.Technique</td><td>UR</td><td><em>Eclairage HS sur acces 4</em></td></tr>
+            <tr><td>Bouchon piste</td><td>PCO.Flux</td><td>UR</td><td><em>File d attente 200m parking P3</em></td></tr>
+            <tr><td>Degradation</td><td>PCO.Securite</td><td>IMP</td><td><em>Vitrine cassee bar tribune T1</em></td></tr>
+            <tr><td>Badge suspect</td><td>PCO.Securite</td><td>UR</td><td><em>QR badge ne scanne pas, personne le porte</em></td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout tip">
+          <strong>Photo ou fiche ?</strong> Si la situation necessite une <em>action</em> (deplacement de renfort, prise en charge), creez une <strong>fiche</strong>. Si c est juste une remontee d info, envoyez une <strong>photo spontanee</strong>.
+        </div>
+
+        <div class="pc-view">
+          <span class="pc-view-title">Ce que voit le PC Org</span>
+          La photo arrive dans sa boite de messages, taggee avec votre patrouille, la categorie et l urgence. Il peut repondre directement (texte ou photo), ou creer une fiche d intervention a partir de votre signalement si la situation evolue.
+        </div>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <section id="messages">
+        <h2><span class="section-num">10</span>Messages avec le PC Org</h2>
+
+        <p>La rubrique <strong>Messages</strong> est une boite de communication ecrite avec le PC Org. C est l equivalent d un SMS pro, trace et historise. Pratique quand la radio est saturee ou pour transmettre une information ecrite (numero de plaque, adresse complete, photo).</p>
+
+        <h3>Ouvrir la boite</h3>
+        <p>Touchez <strong>Messages</strong> dans la barre des actions (en bas). Un panneau s ouvre sur la droite avec la liste des conversations, du plus recent au plus ancien.</p>
+
+        <p>Un <strong>badge rouge</strong> sur le bouton Messages indique le nombre de messages non lus.</p>
+
+        <h3>Reception automatique</h3>
+        <p>Quand le PC Org vous envoie un message, la tablette :</p>
+        <ul>
+          <li>Joue un son et vibre brievement</li>
+          <li>Ouvre <strong>automatiquement</strong> le message si vous etes sur la carte</li>
+          <li>Affiche une notification systeme si la tablette est en veille</li>
+        </ul>
+
+        <h3>Types de messages</h3>
+
+        <table>
+          <thead><tr><th>Type</th><th>A quoi ca sert</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Info</strong></td><td>Information generale, pas d action attendue</td></tr>
+            <tr><td><strong>Instruction</strong></td><td>Consigne du PC Org, lue et appliquee</td></tr>
+            <tr><td><strong>Alerte</strong></td><td>Message prioritaire avec accent visuel rouge</td></tr>
+            <tr><td><strong>Itineraire</strong></td><td>Bouton <em>Demarrer l itineraire</em> integre, ouvre la navigation</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Lire un message</h3>
+
+        <pre class="ascii">  +-------------------------------------+
+  |  Instruction                        |
+  +-------------------------------------+
+  |  Cockpit  -  14:32                  |
+  |  Faites un tour secteur Nord,       |
+  |  signalements de regroupement.      |
+  |                                     |
+  |  Moi  -  14:34                      |
+  |  En route, ETA 5 min.               |
+  |                                     |
+  +-------------------------------------+
+  |  Reponse :                          |
+  |  +-------------------------------+  |
+  |  | Tape ta reponse...            |  |
+  |  +-------------------------------+  |
+  |  +--------+      +-------------+    |
+  |  | Photo  |      |   Envoyer   |    |
+  |  +--------+      +-------------+    |
+  +-------------------------------------+</pre>
+
+        <p>La conversation s affiche en bulles : <strong>vos messages a droite (bleu)</strong>, ceux du PC Org <strong>a gauche</strong>. L heure est sous chaque message.</p>
+
+        <h3>Repondre</h3>
+        <ol class="steps">
+          <li>Tapez votre reponse dans la zone du bas</li>
+          <li>Optionnel : touchez <strong>Photo</strong> pour ajouter une image (ouvre la camera)</li>
+          <li>Touchez <strong>Envoyer</strong></li>
+        </ol>
+
+        <p>Le PC Org voit votre reponse instantanement. Vous pouvez recevoir d autres reponses dans la meme conversation (thread).</p>
+
+        <h3>Acquittement automatique</h3>
+        <div class="callout do">
+          Quand vous ouvrez un message, il est <strong>automatiquement marque comme lu</strong> cote PC Org. Pas besoin de bouton "j ai lu".
+        </div>
+
+        <h3>Message Itineraire</h3>
+        <p>Si le PC Org vous envoie un message de type <em>Itineraire</em>, il contient un bouton <strong>Demarrer l itineraire</strong>. Touchez-le pour ouvrir le menu d itineraire (ACO ou Google Maps) directement vers le point indique. Pratique pour transmettre une adresse precise sans la dicter par radio.</p>
+
+        <h3>Garder un message a portee de main</h3>
+        <p>Les messages restent dans la boite tant qu ils ne sont pas plus vieux que <strong>7 jours</strong>. Au-dela, ils sont automatiquement supprimes. Si une consigne doit durer toute l operation, il vaut mieux la noter ailleurs (cahier de releve).</p>
+
+        <div class="pc-view">
+          <span class="pc-view-title">Ce que voit le PC Org</span>
+          Cote PC, chaque conversation est listee avec votre nom de patrouille. L heure du dernier message recu et l etat (lu / non lu) sont visibles. Les reponses sont chainees en thread, comme un SMS.
+        </div>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <!-- ================================================================
+           11. SOS
+           ================================================================ -->
+      <section id="sos">
+        <h2><span class="section-num">11</span>SOS - Alerte d urgence</h2>
+
+        <div class="callout danger">
+          <strong>Le bouton SOS est reserve aux situations qui necessitent l intervention immediate de tout le dispositif :</strong> agression, malaise grave, accident avec victimes, situation de danger imminent. Pour toute autre demande de renfort ou information urgente, utilisez la radio.
+        </div>
+
+        <h3>Declencher un SOS</h3>
+
+        <pre class="ascii">  +---------------------------------------------+
+  |                  [carte]                    |
+  |                                             |
+  |                                             |
+  |                                             |
+  +---------------------------------------------+
+  |                                       +---+ |
+  |   [Calques] [Missions] [Photo] [Msgs] |SOS| |
+  |                                       +---+ |
+  |                                       rouge |
+  +---------------------------------------------+</pre>
+
+        <ol class="steps">
+          <li>Touchez le bouton <strong>SOS</strong> (rouge, en bas a droite de la barre des actions)</li>
+          <li>Une fenetre de confirmation apparait : <em>Declencher un SOS ?</em></li>
+          <li>Touchez <strong>CONFIRMER SOS</strong> (le bouton est volontairement large pour eviter les fausses alertes)</li>
+          <li>La tablette vibre fortement, l alerte est partie</li>
+        </ol>
+
+        <div class="callout tip">
+          <strong>Pour annuler avant d envoyer :</strong> touchez <em>Annuler</em> dans la fenetre de confirmation. Une fois le SOS parti, il ne peut plus etre annule sur la tablette : prevenez immediatement le PC Org par radio.
+        </div>
+
+        <h3>Ce qui se passe au PC Org</h3>
+        <ul>
+          <li>Une banniere rouge clignotante s affiche sur l ecran du PC Org avec votre nom de patrouille et votre position GPS</li>
+          <li>Une fiche d intervention <strong>Secours</strong> en niveau <span class="pill urg-ua">UA</span> (urgence absolue) est creee automatiquement</li>
+          <li>Le PC Org peut vous appeler en radio dans la seconde pour evaluer la situation</li>
+        </ul>
+
+        <h3>Ce qui se passe sur les autres tablettes</h3>
+        <ul>
+          <li><strong>Toutes les patrouilles</strong> de l evenement recoivent une alerte plein ecran avec votre position</li>
+          <li>Vibration agressive et son d alarme, meme si la tablette etait en veille</li>
+          <li>Les patrouilles a proximite peuvent decider de venir en renfort sans attendre l ordre du PC Org</li>
+        </ul>
+
+        <div class="pc-view">
+          <span class="pc-view-title">Ce que voit le PC Org</span>
+          Banniere rouge sur la carte, position en clignotement, votre statut bascule en <em>Intervention - SOS</em>. La fiche est ouverte pour le suivi de la prise en charge.
+        </div>
+
+        <h3>Recevoir le SOS d un collegue</h3>
+
+        <pre class="ascii">  +---------------------------------------------+
+  |                                             |
+  |   ====== SOS - T03 ======                   |
+  |                                             |
+  |   Patrouille T03 a declenche                |
+  |   une alerte de detresse.                   |
+  |                                             |
+  |   Position : 47.95621 N, 0.20543 E          |
+  |                                             |
+  |   +-------------------------------+         |
+  |   |          COMPRIS              |         |
+  |   +-------------------------------+         |
+  |                                             |
+  +---------------------------------------------+</pre>
+
+        <ol class="steps">
+          <li>Une fenetre rouge plein ecran apparait avec le nom de la patrouille en detresse</li>
+          <li>La tablette vibre plusieurs fois et joue un son d alarme</li>
+          <li>Un pin rouge clignotant apparait sur la carte a la position du collegue</li>
+          <li>Touchez <strong>COMPRIS</strong> pour acquitter (ne ferme l alerte que sur votre tablette, n annule rien)</li>
+          <li>Suivez les consignes du PC Org : il decide qui se deplace en renfort</li>
+        </ol>
+
+        <div class="callout warn">
+          <strong>L acquittement n est pas un engagement.</strong> Toucher <em>COMPRIS</em> signifie seulement que vous avez vu l alerte. C est le PC Org qui decide en radio qui prend l intervention.
+        </div>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <section id="stream">
+        <h2><span class="section-num">12</span>Streaming live</h2>
+
+        <p>Le PC Org peut vous demander de <strong>diffuser ce que voit la camera arriere de votre tablette</strong> en direct, pendant quelques minutes. Utile pour qu il evalue la situation avec ses propres yeux : ampleur d un attroupement, etat d un blesse, degats sur un materiel.</p>
+
+        <h3>Comment ca demarre</h3>
+
+        <p>La demande arrive en pop-up plein ecran avec une vibration et un son d alerte :</p>
+
+        <pre class="ascii">  +-------------------------------------+
+  |  [video] Flux video demande         |
+  +-------------------------------------+
+  |  Le PC org demande a voir votre     |
+  |  camera en direct.                  |
+  |                                     |
+  |  - Demande par : Marc (PC org)      |
+  |  - Duree maximale : 5 minutes       |
+  |  - Sans audio (video seule)         |
+  |  - Aucun enregistrement serveur     |
+  |                                     |
+  |  +---------+  +-------------------+ |
+  |  | Refuser |  | Accepter et       | |
+  |  |         |  | diffuser          | |
+  |  +---------+  +-------------------+ |
+  +-------------------------------------+</pre>
+
+        <h3>Ce qui est garanti</h3>
+        <div class="callout do">
+          <ul>
+            <li><strong>Aucun audio</strong> n est diffuse, jamais. Seule la video.</li>
+            <li><strong>Aucun enregistrement</strong> n est fait sur le serveur. Le flux est seulement vu en direct par les operateurs PC Org autorises.</li>
+            <li>La duree est <strong>limitee a 5 minutes</strong>, apres quoi le flux s arrete tout seul.</li>
+            <li>Vous pouvez <strong>arreter a tout moment</strong> avec le bouton d arret.</li>
+          </ul>
+        </div>
+
+        <h3>Accepter</h3>
+        <ol class="steps">
+          <li>Touchez <strong>Accepter et diffuser</strong></li>
+          <li>La camera arriere s active automatiquement</li>
+          <li>Une bandeau rouge clignotant apparait en haut de l ecran : <em>Flux en cours - X min restantes</em></li>
+          <li>Cadrez ce que le PC Org doit voir, comme une video</li>
+          <li>La carte reste accessible : touchez <em>Carte</em> pour basculer</li>
+        </ol>
+
+        <h3>Refuser</h3>
+        <p>Touchez <strong>Refuser</strong>. Le flux n est pas demarre, le PC Org est notifie. Toast : <em>Flux refuse</em>.</p>
+
+        <p>Refusez si :</p>
+        <ul>
+          <li>Vous etes en intervention sur un acte intime (soin, deshabillage)</li>
+          <li>La situation est sensible et merite d etre discutee en radio d abord</li>
+          <li>La tablette est presque dechargee (le streaming consomme beaucoup)</li>
+        </ul>
+
+        <h3>Arreter le flux avant la fin</h3>
+        <ol class="steps">
+          <li>Touchez le bandeau rouge <em>Flux en cours</em> en haut de l ecran</li>
+          <li>Touchez <strong>Arreter le flux</strong></li>
+          <li>Le bandeau disparait, la camera s eteint</li>
+        </ol>
+
+        <p>Le PC Org peut aussi couper le flux de son cote (par exemple s il a vu ce qu il voulait voir).</p>
+
+        <h3>Limites techniques</h3>
+        <div class="callout warn">
+          Le streaming consomme <strong>beaucoup de batterie et de reseau</strong>. Si vous etes en zone faible 4G, l image peut etre saccadee ou se figer. Si la batterie passe sous 15%, le flux s arrete automatiquement pour preserver la tablette.
+        </div>
+
+        <p>La tablette peut diffuser <strong>une seule patrouille a la fois</strong>. Si une autre patrouille est deja en train de diffuser, le PC Org doit attendre qu elle ait fini ou couper son flux.</p>
+
+        <div class="pc-view">
+          <span class="pc-view-title">Ce que voit le PC Org</span>
+          Une vignette video en direct apparait dans son tableau de bord, avec votre nom de patrouille, la qualite du signal et le decompte du temps restant. Le flux peut etre re-diffuse vers le mur d ecrans de la salle de gestion, mais jamais enregistre.
+        </div>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <section id="push">
+        <h2><span class="section-num">13</span>Notifications</h2>
+
+        <p>Les <strong>notifications systeme</strong> permettent a la tablette de vous alerter <em>meme si l application Field n est pas au premier plan</em> : ecran eteint, autre application ouverte, tablette dans la sacoche.</p>
+
+        <h3>Pourquoi c est crucial</h3>
+        <div class="callout danger">
+          Sans les notifications, vous pouvez <strong>rater un dispatch ou un SOS d un collegue</strong>. Activer les notifications est indispensable pour qu une patrouille soit fiable. Le PC Org peut verifier qui a accepte les notifications et qui ne les a pas.
+        </div>
+
+        <h3>Ce qui declenche une notification</h3>
+        <ul>
+          <li>Nouvelle <strong>mission dispatchee</strong> par le PC Org (vibration + son fort)</li>
+          <li>Nouveau <strong>message</strong> dans la boite (vibration courte + bip)</li>
+          <li><strong>SOS</strong> declenche par une autre patrouille (vibration agressive + alarme)</li>
+          <li><strong>Demande de flux video</strong> par le PC Org (vibration + son d alerte)</li>
+        </ul>
+
+        <h3>Activer les notifications a l appairage</h3>
+        <p>Lors du premier lancement de Field, le navigateur affiche une fenetre :</p>
+
+        <pre class="ascii">  +-------------------------------------+
+  |  cockpit.lemans.org souhaite        |
+  |  vous envoyer des notifications     |
+  |                                     |
+  |  +-----------+  +----------------+  |
+  |  | Bloquer   |  |   Autoriser    |  |
+  |  +-----------+  +----------------+  |
+  +-------------------------------------+</pre>
+
+        <p>Touchez <strong>Autoriser</strong>. C est tout.</p>
+
+        <h3>Reactiver si vous avez bloque par erreur</h3>
+
+        <h3>Sur iPad (Safari)</h3>
+        <ol class="steps">
+          <li>Ouvrez l application <strong>Reglages</strong> de l iPad</li>
+          <li>Trouvez <strong>Safari</strong> dans la liste de gauche</li>
+          <li>Touchez <strong>Reglages des sites web</strong> &rarr; <strong>Notifications</strong></li>
+          <li>Reperez <em>cockpit.lemans.org</em> et passez le sur <strong>Autoriser</strong></li>
+          <li>Revenez dans Field, rechargez la page (tirer vers le bas)</li>
+        </ol>
+
+        <h3>Sur Crosscall T5 (Android Chrome)</h3>
+        <ol class="steps">
+          <li>Ouvrez l application <strong>Reglages</strong> du Crosscall</li>
+          <li>Allez dans <strong>Applications &rarr; Chrome &rarr; Notifications</strong></li>
+          <li>Activez les notifications pour Chrome</li>
+          <li>Dans Chrome, ouvrez le menu (3 points) &rarr; <strong>Reglages du site</strong> &rarr; <em>cockpit.lemans.org</em></li>
+          <li>Passez les notifications sur <strong>Autorisees</strong></li>
+        </ol>
+
+        <h3>Verifier que ca marche</h3>
+        <p>Demandez au PC Org de vous envoyer un <strong>message test</strong>. Si vous le recevez tablette ecran eteint, c est OK. Sinon, recommencez la procedure ci-dessus.</p>
+
+        <h3>Ne pas confondre avec les sons internes a Field</h3>
+        <p>Quand l application Field est ouverte au premier plan, elle joue ses propres sons et vibrations directement (dispatch, SOS). Les notifications systeme prennent le relais quand l ecran est eteint ou que vous etes sur une autre app. Les deux peuvent jouer en meme temps.</p>
+
+        <h3>Volume</h3>
+        <div class="callout tip">
+          Verifiez que le <strong>volume de la tablette est au maximum</strong> et que le mode <em>Ne pas deranger</em> est <strong>desactive</strong>. Sinon les notifications arrivent silencieuses et vous ne les entendez pas.
+        </div>
+
+        <h3>Tester sans deranger le PC Org</h3>
+        <p>Avant de partir en patrouille, verifiez vous-meme que votre tablette joue bien le son et vibre :</p>
+
+        <div class="test-box">
+          <div class="test-row">
+            <button id="btn-test-sound" class="test-btn" type="button">
+              Tester le son et la vibration
+            </button>
+            <span class="test-result" id="result-sound">Pas encore teste</span>
+          </div>
+          <p class="test-hint">Joue le son d alerte que vous entendrez a chaque dispatch. Vous devez l entendre clairement et sentir la tablette vibrer dans la main.</p>
+
+          <div class="test-row">
+            <button id="btn-test-notif" class="test-btn" type="button">
+              Tester une notification systeme
+            </button>
+            <span class="test-result" id="result-notif">Pas encore teste</span>
+          </div>
+          <p class="test-hint">Affiche une notification systeme. Si elle apparait en bas de l ecran (ou en banniere en haut), votre tablette est bien autorisee a vous alerter ecran eteint.</p>
+
+          <div class="test-row">
+            <span class="test-label">Etat des permissions</span>
+            <span class="test-result" id="result-perm">Verification...</span>
+          </div>
+        </div>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <section id="offline">
+        <h2><span class="section-num">14</span>Mode hors ligne</h2>
+
+        <p>Sur le terrain, le reseau 4G fait des trous : tunnels, batiments en beton, foules denses. Field est concu pour <strong>continuer a fonctionner sans reseau</strong>, dans une certaine mesure.</p>
+
+        <h3>Detection automatique</h3>
+        <p>Quand la tablette perd le reseau :</p>
+        <ul>
+          <li>La pastille <strong>Reseau</strong> en topbar passe en rouge</li>
+          <li>Une nouvelle pastille <strong>file d attente</strong> apparait avec un compteur en orange</li>
+          <li>Vous recevez un toast : <em>Hors ligne : action en attente</em></li>
+        </ul>
+
+        <pre class="ascii">  +-----------------------------------------------+
+  | FIELD T01    [GPS] [Net] [Bat 76%] [QUEUE 3]  |
+  +-----------------------------------------------+
+                  vert  rouge          orange
+                                       3 actions
+                                       en attente</pre>
+
+        <h3>Ce qui continue a marcher hors ligne</h3>
+
+        <table>
+          <thead><tr><th>Fonction</th><th>Etat hors ligne</th></tr></thead>
+          <tbody>
+            <tr><td>Voir la carte</td><td><span class="pill ok">OK</span> tuiles deja chargees en cache</td></tr>
+            <tr><td>Voir votre position GPS</td><td><span class="pill ok">OK</span> le GPS est independant du reseau</td></tr>
+            <tr><td>Changer de statut</td><td><span class="pill warn">En attente</span> envoye au retour du reseau</td></tr>
+            <tr><td>Creer une fiche</td><td><span class="pill warn">En attente</span> envoyee au retour du reseau</td></tr>
+            <tr><td>Prendre une photo</td><td><span class="pill warn">En attente</span> stockee localement, envoyee plus tard</td></tr>
+            <tr><td>Scanner un code</td><td><span class="pill warn">En attente</span></td></tr>
+            <tr><td>Ajouter un commentaire</td><td><span class="pill warn">En attente</span></td></tr>
+            <tr><td>Ouvrir le manuel</td><td><span class="pill ok">OK</span> mis en cache au demarrage</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Ce qui ne marche plus</h3>
+
+        <table>
+          <thead><tr><th>Fonction</th><th>Etat hors ligne</th></tr></thead>
+          <tbody>
+            <tr><td>Recevoir un dispatch</td><td><span class="pill err">NON</span> il faudra utiliser la radio</td></tr>
+            <tr><td>Recevoir un message</td><td><span class="pill err">NON</span> arrivera au retour du reseau</td></tr>
+            <tr><td>Recevoir un SOS d un collegue</td><td><span class="pill err">NON</span></td></tr>
+            <tr><td>Voir une zone de carte non visitee</td><td><span class="pill err">NON</span> tuile non en cache</td></tr>
+            <tr><td>Streaming live</td><td><span class="pill err">NON</span></td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout warn">
+          En zone hors ligne prolongee, prevenez le PC Org en radio que vous etes "tablette HS reseau" pour qu il ne compte pas sur vous pour des dispatchs ecrits.
+        </div>
+
+        <h3>La file d attente</h3>
+        <p>Toutes les actions que vous faites hors ligne sont stockees dans une <strong>file d attente</strong> sur la tablette. Le compteur dans la topbar (orange) indique combien d actions attendent d etre envoyees.</p>
+
+        <p>Au retour du reseau :</p>
+        <ol class="steps">
+          <li>La file se synchronise automatiquement (en arriere-plan)</li>
+          <li>Pour chaque action envoyee, vous recevez un toast vert : <em>Statut envoye (differe)</em></li>
+          <li>Le compteur diminue jusqu a disparaitre quand la file est vide</li>
+        </ol>
+
+        <h3>Forcer la synchronisation</h3>
+        <p>Vous etes revenue au reseau mais le compteur est toujours visible ? Touchez la <strong>pastille file d attente</strong> dans la topbar. La sync part immediatement.</p>
+
+        <h3>Le SOS hors ligne ?</h3>
+        <div class="callout danger">
+          <strong>Le SOS necessite le reseau.</strong> Si vous declenchez un SOS hors ligne, il sera mis en file d attente et envoye au retour du reseau, ce qui peut prendre plusieurs minutes. Pour une vraie urgence vitale en zone blanche, <strong>utilisez la radio en priorite</strong>.
+        </div>
+
+        <h3>Tuiles de carte</h3>
+        <p>La carte garde en cache les <strong>derniers fonds visualises</strong> (environ 600 tuiles). Si vous avez deja visite une zone aujourd hui, elle reste lisible meme hors ligne. En revanche, une zone jamais visitee ne s affichera pas (carre gris).</p>
+
+        <div class="callout tip">
+          <strong>Astuce :</strong> avant de partir en zone reputee sans reseau, faites un tour rapide sur la carte (Plan ET Satellite ACO) pour les zones que vous comptez patrouiller. Les tuiles seront pre-chargees.
+        </div>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <section id="topbar">
+        <h2><span class="section-num">15</span>Lire la topbar</h2>
+
+        <p>La <strong>topbar</strong> (bandeau du haut) est le tableau de bord de la tablette. Elle vous dit en un coup d oeil si tout va bien ou si quelque chose merite votre attention.</p>
+
+        <pre class="ascii">  +------------------------------------------------------+
+  | FIELD T01 GP Moto    [GPS][Net][Bat 87%][?]   14:32  |
+  +------------------------------------------------------+
+   logo  nom evenement   pastilles d etat   aide  heure</pre>
+
+        <h3>Pastilles a gauche</h3>
+
+        <ul>
+          <li><strong>FIELD</strong> : logo de l application, sans interaction</li>
+          <li><strong>T01</strong> (ou autre nom) : nom de votre patrouille, fixe pour l evenement</li>
+          <li>L evenement et l annee : indication contextuelle</li>
+        </ul>
+
+        <h3>Pastilles d etat (a droite)</h3>
+
+        <h3>1. GPS</h3>
+        <table>
+          <thead><tr><th>Couleur</th><th>Sens</th><th>A faire</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill ok">GPS</span> vert</td><td>Position GPS bonne (precision &lt; 30m)</td><td>RAS</td></tr>
+            <tr><td><span class="pill warn">GPS</span> orange</td><td>Position degradee (interieur, foret)</td><td>Sortir a decouvert si possible</td></tr>
+            <tr><td><span class="pill err">GPS</span> rouge</td><td>Aucune position disponible</td><td>Verifier autorisation GPS, sortir du batiment, redemarrer la tablette si rien ne change</td></tr>
+          </tbody>
+        </table>
+
+        <h3>2. Reseau</h3>
+        <table>
+          <thead><tr><th>Couleur</th><th>Sens</th><th>A faire</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill ok">Net</span> vert</td><td>Connexion 4G ou WiFi OK</td><td>RAS</td></tr>
+            <tr><td><span class="pill err">Net</span> rouge</td><td>Hors ligne</td><td>Voir section <a href="#offline">Mode hors ligne</a></td></tr>
+          </tbody>
+        </table>
+
+        <h3>3. Batterie</h3>
+        <table>
+          <thead><tr><th>Couleur</th><th>Pourcentage</th><th>A faire</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill ok">Bat 87%</span> vert</td><td>&gt; 30%</td><td>RAS</td></tr>
+            <tr><td><span class="pill warn">Bat 22%</span> orange</td><td>15 - 30%</td><td>Brancher sur le powerbank a la prochaine occasion</td></tr>
+            <tr><td><span class="pill err">Bat 12%</span> rouge</td><td>&lt; 15%</td><td>Brancher immediatement, sinon arret imminent</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout warn">
+          A 5%, la tablette s eteint. Toutes les actions en file d attente sont conservees mais ne seront synchronisees qu au redemarrage.
+        </div>
+
+        <h3>4. File offline (apparait seulement si actions en attente)</h3>
+
+        <pre class="ascii">  [QUEUE 3]   = 3 actions en attente d envoi
+                  (statut change, fiche creee, photo)</pre>
+
+        <p>Couleur orange. Touchez-la pour forcer la synchronisation immediate au retour du reseau. Disparait quand la file est vide.</p>
+
+        <h3>5. Upload photo (apparait pendant un envoi)</h3>
+
+        <pre class="ascii">  [UPLOAD 2]  = 2 photos en cours d envoi</pre>
+
+        <p>Couleur bleue. Disparait quand toutes les photos sont parties. Aucune action a faire, c est juste informatif.</p>
+
+        <h3>6. Bouton aide (?)</h3>
+        <p>L icone <strong>?</strong> rouvre ce manuel a tout moment, meme en plein milieu d une intervention.</p>
+
+        <h3>7. Horloge</h3>
+        <p>L heure locale, mise a jour toutes les minutes (et non a chaque seconde, pour preserver la batterie).</p>
+
+        <h3>Le scenario "tout va bien"</h3>
+
+        <pre class="ascii">  [GPS vert] [Net vert] [Bat 70% vert] [?] 14:32
+
+  Pas de pastille file d attente, pas de pastille upload.
+  Vous etes prete a partir.</pre>
+
+        <h3>Le scenario "alerte legere"</h3>
+
+        <pre class="ascii">  [GPS vert] [Net rouge] [Bat 22% orange] [QUEUE 5] [?]
+
+  Vous avez perdu le reseau, batterie qui descend.
+  Sortez de la zone hors ligne, branchez la tablette.</pre>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <section id="depannage">
+        <h2><span class="section-num">16</span>Depannage rapide</h2>
+
+        <p>Voici les pannes les plus frequentes et leur solution. Si rien ne marche, contactez le PC Org en radio en precisant <strong>quel probleme</strong> et <strong>ce que vous avez deja essaye</strong>.</p>
+
+        <h3>Le GPS est rouge en permanence</h3>
+        <ol class="steps">
+          <li>Sortez du batiment a decouvert pendant 30 secondes</li>
+          <li>Verifiez que la <em>localisation</em> est activee dans les reglages systeme de la tablette</li>
+          <li>Verifiez que Field a la permission GPS (<em>Reglages &rarr; Safari/Chrome &rarr; Field &rarr; Position : Toujours</em>)</li>
+          <li>Si toujours rouge : redemarrez la tablette (bouton power maintenu 5 sec)</li>
+        </ol>
+
+        <h3>La batterie chute trop vite</h3>
+        <ul>
+          <li>Baissez la luminosite de l ecran (plus elle est haute, plus ca consomme)</li>
+          <li>Coupez le streaming live si vous l aviez accepte</li>
+          <li>Si vous etes en <span class="pill warn">Intervention</span> ou <span class="pill" style="color:#60a5fa;border-color:#1e40af">ASL</span>, le GPS tourne a haute frequence : c est normal de consommer plus</li>
+          <li>Branchez la tablette sur le powerbank de la patrouille</li>
+        </ul>
+
+        <h3>L application rame ou affiche une page blanche</h3>
+        <ol class="steps">
+          <li>Tirez la page vers le bas pour la rafraichir (geste pull-to-refresh)</li>
+          <li>Si rien : fermez et rouvrez l application Field</li>
+          <li>Si toujours rien : redemarrez la tablette</li>
+          <li>En dernier recours, supprimez le cache du navigateur (<em>Reglages &rarr; Safari/Chrome &rarr; Effacer historique et donnees</em>) <strong>ATTENTION : cela vous deconnecte, il faut re-appairer avec un nouveau code</strong></li>
+        </ol>
+
+        <h3>L ecran "Acces refuse" s affiche</h3>
+
+        <pre class="ascii">  +----------------------------------+
+  |       ACCES REFUSE               |
+  |                                  |
+  |  Cette tablette n est plus       |
+  |  autorisee a acceder a Field.    |
+  |                                  |
+  |  +----------------------------+  |
+  |  |  Verifier maintenant       |  |
+  |  +----------------------------+  |
+  |  +----------------------------+  |
+  |  |  Appairer une autre fois   |  |
+  |  +----------------------------+  |
+  +----------------------------------+</pre>
+
+        <p>Cela arrive dans 2 cas :</p>
+        <ol>
+          <li><strong>L evenement est termine</strong> : toutes les tablettes sont revoquees automatiquement en fin de demontage. Touchez <em>Appairer une autre fois</em> et demandez un nouveau code.</li>
+          <li><strong>Revocation manuelle</strong> par l admin (tablette signalee perdue ou volee). Contactez le PC Org pour comprendre.</li>
+        </ol>
+
+        <p>La page se rafraichit automatiquement toutes les 5 secondes. Si l acces est restaure cote PC, vous etes redirigee vers Field sans rien toucher.</p>
+
+        <h3>Banniere "Mise a jour disponible"</h3>
+        <p>Quand le PC Org publie une nouvelle version de Field, une banniere apparait en haut de l ecran : <em>Mise a jour disponible - taper pour recharger</em>.</p>
+        <ul>
+          <li>Touchez la banniere quand vous avez 30 secondes de calme</li>
+          <li>L application se recharge avec la nouvelle version</li>
+          <li>Vous restez appairee, pas besoin de re-saisir un code</li>
+        </ul>
+
+        <div class="callout warn">
+          Ne tapez pas la banniere en plein milieu d une intervention : la fenetre de fiche se ferme. Attendez un moment calme.
+        </div>
+
+        <h3>La camera ne demarre pas</h3>
+        <ol class="steps">
+          <li>Verifiez que vous avez autorise l acces a la camera (<em>Reglages &rarr; Field &rarr; Camera : Autoriser</em>)</li>
+          <li>Verifiez qu aucune autre application n utilise la camera (Skype, FaceTime, Zoom)</li>
+          <li>Fermez Field et rouvrez-le</li>
+        </ol>
+
+        <h3>Pas de son sur les notifications</h3>
+        <ol class="steps">
+          <li>Verifiez le volume de la tablette (boutons sur le cote)</li>
+          <li>Verifiez que le mode <em>Ne pas deranger</em> est <strong>desactive</strong></li>
+          <li>Verifiez que les notifications sont autorisees (voir section 13)</li>
+        </ol>
+
+        <h3>La carte affiche des cases grises</h3>
+        <p>Vous etes en zone hors ligne et les tuiles ne sont pas en cache. Voir section <a href="#offline">Mode hors ligne</a>. Au retour du reseau, les tuiles se chargent automatiquement quand vous bougez la carte.</p>
+
+        <h3>Quand contacter le PC Org en radio</h3>
+        <div class="callout danger">
+          Contactez immediatement le PC Org en radio si :
+          <ul>
+            <li>Vous avez declenche un SOS et la tablette ne reagit pas</li>
+            <li>Vous etes en intervention et la tablette est completement HS (ecran noir, ne reboote pas)</li>
+            <li>La tablette est tombee, brisee, mouillee &mdash; il faut peut-etre une tablette de remplacement</li>
+            <li>Vous avez un doute sur si une action est passee ou non</li>
+          </ul>
+        </div>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <section id="fin">
+        <h2><span class="section-num">17</span>Fin de vacation</h2>
+
+        <p>Quand votre poste se termine (releve par un collegue, fin de service), prenez 2 minutes pour proprement passer la main. Une mauvaise fin de vacation = un dispatch envoye a une patrouille qui n est plus la.</p>
+
+        <h3>Cas 1 : Releve par un collegue (la tablette continue)</h3>
+
+        <ol class="steps">
+          <li>Si vous etiez en <em>Intervention</em> ou <em>ASL</em>, terminez l intervention en cours (voir section <a href="#fiche">Travailler sur une fiche</a>)</li>
+          <li>Passez le statut en <span class="pill">Pause</span></li>
+          <li>Notez sur le cahier de releve : <strong>votre nom, l heure de fin, l etat de la batterie, la presence ou non de fiches en cours</strong></li>
+          <li>Briefez le collegue oralement : derniere consigne du PC Org, points chauds du secteur, materiel a surveiller</li>
+          <li>Le collegue signe le cahier et passe la tablette en <span class="pill ok">Disponible</span> quand il est pret</li>
+        </ol>
+
+        <div class="callout do">
+          <strong>Pas besoin de se deconnecter.</strong> Comme la tablette est appairee a la patrouille (et non a la personne), votre collegue prend la suite sans rien re-saisir.
+        </div>
+
+        <h3>Cas 2 : Fin du dispositif (la tablette retourne au rack)</h3>
+
+        <ol class="steps">
+          <li>Terminez toute intervention en cours</li>
+          <li>Passez le statut en <span class="pill">Pause</span></li>
+          <li>Verifiez qu il ne reste rien dans la <strong>file d attente</strong> de la topbar (compteur orange a zero)</li>
+          <li>Notez sur le cahier de releve la fin de service et le rendu de la tablette</li>
+          <li>Branchez la tablette sur le rack de charge prevu au PC</li>
+        </ol>
+
+        <h3>Quand se deconnecter explicitement</h3>
+        <p>Vous pouvez vous deconnecter (effacer le cookie) si :</p>
+        <ul>
+          <li>La tablette quitte definitivement le service de l evenement</li>
+          <li>Vous craignez qu elle soit perdue ou volee (le PC Org devra de toute facon la revoquer cote serveur)</li>
+        </ul>
+
+        <h3>Comment se deconnecter</h3>
+        <ol class="steps">
+          <li>Touchez l icone <strong>?</strong> dans la topbar pour ouvrir ce manuel (vous y etes deja !)</li>
+          <li>Tapez l URL <em>cockpit.lemans.org/field/logout</em> dans la barre d adresse du navigateur</li>
+          <li>Vous etes redirigee vers la page d appairage</li>
+        </ol>
+
+        <div class="callout warn">
+          La deconnexion <strong>n invalide pas</strong> la tablette cote PC Org : le code reste valide jusqu a sa revocation par l admin. Pour vraiment desactiver, demandez au PC Org de revoquer la tablette dans son interface.
+        </div>
+
+        <h3>Check-list de fin de vacation</h3>
+
+        <pre class="ascii">  [ ] Statut en Pause
+  [ ] File d attente vide (compteur a zero)
+  [ ] Fiches en cours cloturees ou transmises
+  [ ] Cahier de releve a jour
+  [ ] Briefing oral fait au collegue (si releve)
+  [ ] Tablette branchee sur le rack (si fin)</pre>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+      <section id="glossaire">
+        <h2><span class="section-num">18</span>Glossaire</h2>
+
+        <p>Tous les sigles et termes utilises dans le manuel et en operationnel.</p>
+
+        <h3>Vocabulaire metier</h3>
+        <table>
+          <thead><tr><th>Terme</th><th>Definition</th></tr></thead>
+          <tbody>
+            <tr><td><strong>PCO</strong></td><td>Poste de Commandement Operationnel. Designe les categories d intervention (PCO.Secours, PCO.Securite, etc.) qui sont la classification standard des fiches.</td></tr>
+            <tr><td><strong>PC Org</strong></td><td>PC Organisation. La salle ou les operateurs supervisent l evenement, dispatchent les patrouilles, suivent les interventions sur Cockpit.</td></tr>
+            <tr><td><strong>Patrouille</strong></td><td>Une equipe de terrain (1 ou 2 personnes) avec sa tablette dediee. Identifiee par un nom fixe (T01, T02, Moto-1...).</td></tr>
+            <tr><td><strong>Dispatch</strong></td><td>Action du PC Org d attribuer une intervention a une patrouille. Cote tablette, c est la <em>modale plein ecran</em> qui s ouvre.</td></tr>
+            <tr><td><strong>Fiche</strong></td><td>Une intervention, avec sa categorie, son urgence, sa description, sa position, et toute la chronologie (commentaires, photos).</td></tr>
+            <tr><td><strong>ASL</strong></td><td>Arrivee Sur les Lieux. Statut de la patrouille quand elle est physiquement sur le lieu de l intervention.</td></tr>
+            <tr><td><strong>Engagement</strong></td><td>Le fait d accepter une mission. La tablette passe en statut <em>Intervention</em>.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Niveaux d urgence</h3>
+        <table>
+          <thead><tr><th>Code</th><th>Signification</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill urg-imp">IMP</span></td><td><strong>Implique</strong> : pas de blessure, pas de victime, juste a documenter</td></tr>
+            <tr><td><span class="pill urg-ur">UR</span></td><td><strong>Urgence Relative</strong> : situation stable, pas de danger immediat</td></tr>
+            <tr><td><span class="pill urg-ua">UA</span></td><td><strong>Urgence Absolue</strong> : engagement prioritaire necessaire</td></tr>
+            <tr><td><span class="pill urg-eu">EU</span></td><td><strong>Extreme Urgence</strong> : detresse vitale, mobilisation de toutes les ressources</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Carto et terrain</h3>
+        <table>
+          <thead><tr><th>Terme</th><th>Definition</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Carroyage</strong></td><td>Grille superposee sur la carte, qui decoupe le terrain en carres de 100m (et sous-grille de 25m). Permet de donner une position rapide en radio (ex : <em>C3</em>).</td></tr>
+            <tr><td><strong>POI</strong></td><td>Point d Interet. Lieu remarquable pre-defini sur la carte (PC, infirmerie, parking, acces).</td></tr>
+            <tr><td><strong>3P</strong></td><td>Portes / Portails / Passages. Acces specifiques au site.</td></tr>
+            <tr><td><strong>Beacon group</strong></td><td>Groupe de balises radio auquel la patrouille est rattachee, utilise par le systeme Anoloc pour le positionnement de secours.</td></tr>
+            <tr><td><strong>Tuile</strong></td><td>Petite image qui compose la carte. La carte est faite de centaines de tuiles assemblees. Mises en cache localement pour le mode hors ligne.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Technique</h3>
+        <table>
+          <thead><tr><th>Terme</th><th>Definition</th></tr></thead>
+          <tbody>
+            <tr><td><strong>PWA</strong></td><td>Progressive Web App. Une application web qui fonctionne comme une appli native : icone sur l ecran d accueil, mode plein ecran, fonctionnement hors ligne. Field est une PWA.</td></tr>
+            <tr><td><strong>Service Worker</strong></td><td>Le composant logiciel de la PWA qui gere le cache et les notifications meme quand l app est fermee.</td></tr>
+            <tr><td><strong>Push</strong></td><td>Notification systeme envoyee par le serveur a la tablette, meme ecran eteint.</td></tr>
+            <tr><td><strong>File d attente offline</strong></td><td>Memoire locale qui stocke les actions faites hors ligne, pour les envoyer au retour du reseau.</td></tr>
+            <tr><td><strong>Heartbeat</strong></td><td>Petit signal envoye en continu par la tablette au serveur, pour dire "je suis toujours la, voici ma position et ma batterie".</td></tr>
+            <tr><td><strong>Token / Cookie</strong></td><td>Identifiant secret stocke dans la tablette apres l appairage. Permet au serveur de reconnaitre la tablette sans demander un code a chaque action.</td></tr>
+            <tr><td><strong>JWT</strong></td><td>Standard technique de jeton d authentification utilise dans Cockpit. Sans interet pour l operateur.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Statuts patrouille (rappel)</h3>
+        <table>
+          <thead><tr><th>Statut</th><th>Couleur</th><th>Signification</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill ok">Disponible</span></td><td>Vert</td><td>En ronde, prete pour un dispatch</td></tr>
+            <tr><td><span class="pill warn">Intervention</span></td><td>Orange</td><td>Engagement, en deplacement</td></tr>
+            <tr><td><span class="pill" style="color:#60a5fa;border-color:#1e40af">ASL</span></td><td>Bleu</td><td>Arrivee sur les lieux</td></tr>
+            <tr><td><span class="pill">Pause</span></td><td>Gris</td><td>Indisponible temporairement</td></tr>
+            <tr><td><span class="pill" style="color:#c4b5fd;border-color:#5b21b6">Fin d intervention</span></td><td>Violet</td><td>Cloture en cours</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Categories de fiche (rappel)</h3>
+        <table>
+          <thead><tr><th>Categorie</th><th>Couleur</th><th>Pour quoi</th></tr></thead>
+          <tbody>
+            <tr><td>PCO.Secours</td><td>Rouge</td><td>Blessure, malaise, prise en charge medicale</td></tr>
+            <tr><td>PCO.Securite</td><td>Violet</td><td>Bagarre, intrusion, vol</td></tr>
+            <tr><td>PCO.Technique</td><td>Orange</td><td>Panne, fuite, materiel</td></tr>
+            <tr><td>PCO.Flux</td><td>Vert / Bleu</td><td>Bouchon, deviation, stationnement</td></tr>
+          </tbody>
+        </table>
+
+        <a href="#" class="to-top">&uarr; Haut de page</a>
+      </section>
+
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      // Surligne dans le sommaire la section visible (scroll spy simple)
+      var links = document.querySelectorAll('.manuel-toc a');
+      var sections = Array.prototype.map.call(links, function (a) {
+        var id = a.getAttribute('href');
+        return id && id.charAt(0) === '#' ? document.querySelector(id) : null;
+      });
+
+      function update() {
+        var scrollPos = window.scrollY + 120;
+        var current = -1;
+        for (var i = 0; i < sections.length; i++) {
+          if (sections[i] && sections[i].offsetTop <= scrollPos) current = i;
+        }
+        for (var j = 0; j < links.length; j++) {
+          links[j].classList.toggle('active', j === current);
+        }
+      }
+
+      window.addEventListener('scroll', update, { passive: true });
+      update();
+    })();
+
+    // -----------------------------------------------------------------
+    // Bouton "Imprimer le manuel" -- declenche window.print().
+    // Le CSS @media print masque la topbar, le sommaire, les boutons.
+    // -----------------------------------------------------------------
+    (function () {
+      var btn = document.getElementById('btn-print');
+      if (!btn) return;
+      btn.addEventListener('click', function () {
+        window.print();
+      });
+    })();
+
+    // -----------------------------------------------------------------
+    // Tests audio / vibration / notification
+    // -----------------------------------------------------------------
+    (function () {
+      var btnSound = document.getElementById('btn-test-sound');
+      var btnNotif = document.getElementById('btn-test-notif');
+      var resSound = document.getElementById('result-sound');
+      var resNotif = document.getElementById('result-notif');
+      var resPerm = document.getElementById('result-perm');
+
+      function setResult(el, text, kind) {
+        if (!el) return;
+        el.textContent = text;
+        el.className = 'test-result ' + (kind || '');
+      }
+
+      function refreshPermissionState() {
+        if (!('Notification' in window)) {
+          setResult(resPerm, 'Notifications non supportees par ce navigateur', 'err');
+          if (btnNotif) btnNotif.disabled = true;
+          return;
+        }
+        var p = Notification.permission;
+        if (p === 'granted') {
+          setResult(resPerm, 'Notifications autorisees', 'ok');
+        } else if (p === 'denied') {
+          setResult(resPerm, 'Notifications bloquees - voir procedure ci-dessus', 'err');
+        } else {
+          setResult(resPerm, 'Pas encore demande', 'warn');
+        }
+      }
+
+      function playTestSound() {
+        try {
+          var Ctx = window.AudioContext || window.webkitAudioContext;
+          if (!Ctx) return false;
+          var ctx = new Ctx();
+          var t = ctx.currentTime;
+          var osc = ctx.createOscillator();
+          var gain = ctx.createGain();
+          osc.type = 'sine';
+          // Memes notes que le son de dispatch reel (C5/E5/G5/E5/G5/C6)
+          osc.frequency.setValueAtTime(523, t);
+          osc.frequency.setValueAtTime(659, t + 0.2);
+          osc.frequency.setValueAtTime(784, t + 0.4);
+          osc.frequency.setValueAtTime(659, t + 0.6);
+          osc.frequency.setValueAtTime(784, t + 0.8);
+          osc.frequency.setValueAtTime(1047, t + 1.0);
+          gain.gain.setValueAtTime(0.5, t);
+          gain.gain.linearRampToValueAtTime(0, t + 1.3);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.onended = function () { try { ctx.close(); } catch (e) {} };
+          osc.start(t);
+          osc.stop(t + 1.3);
+          return true;
+        } catch (e) { return false; }
+      }
+
+      if (btnSound) {
+        btnSound.addEventListener('click', function () {
+          var soundOk = playTestSound();
+          var vibOk = false;
+          try {
+            if (navigator.vibrate) vibOk = navigator.vibrate([200, 100, 200, 100, 400]);
+          } catch (e) {}
+          if (soundOk && vibOk) {
+            setResult(resSound, 'Son joue + vibration declenchee', 'ok');
+          } else if (soundOk) {
+            setResult(resSound, 'Son OK / vibration non supportee (tablette posee, ou iPad ?)', 'warn');
+          } else if (vibOk) {
+            setResult(resSound, 'Vibration OK / son non joue (volume ? mode silencieux ?)', 'warn');
+          } else {
+            setResult(resSound, 'Aucun retour : verifiez volume et mode silencieux', 'err');
+          }
+        });
+      }
+
+      if (btnNotif) {
+        btnNotif.addEventListener('click', function () {
+          if (!('Notification' in window)) {
+            setResult(resNotif, 'Notifications non supportees', 'err');
+            return;
+          }
+          function showTestNotif() {
+            try {
+              var n = new Notification('Field - Test', {
+                body: 'Si vous voyez ce message, vos notifications fonctionnent.',
+                icon: '/static/img/field-icon.svg',
+                tag: 'field-manuel-test',
+                vibrate: [200, 100, 200],
+              });
+              setResult(resNotif, 'Notification envoyee - regardez l ecran', 'ok');
+              setTimeout(function () { try { n.close(); } catch (e) {} }, 5000);
+            } catch (e) {
+              setResult(resNotif, 'Erreur : ' + (e.message || e), 'err');
+            }
+          }
+          if (Notification.permission === 'granted') {
+            showTestNotif();
+          } else if (Notification.permission === 'denied') {
+            setResult(resNotif, 'Bloquees - voir procedure ci-dessus', 'err');
+          } else {
+            Notification.requestPermission().then(function (p) {
+              refreshPermissionState();
+              if (p === 'granted') showTestNotif();
+              else setResult(resNotif, 'Refuse', 'err');
+            });
+          }
+        });
+      }
+
+      refreshPermissionState();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,593 @@
+/* =====================================================================
+   COCKPIT Field - Manuel operateur
+   Page consultee au doigt sur tablette (iPad / Crosscall T5).
+   Codes couleurs alignes sur field.css pour coherence visuelle.
+   ===================================================================== */
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+  min-height: 100%;
+  overscroll-behavior-y: contain;
+  -webkit-text-size-adjust: 100%;
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+/* ----- Layout general ----- */
+.manuel-page {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+@media (max-width: 900px) {
+  .manuel-page { grid-template-columns: 1fr; }
+}
+
+/* ----- Topbar ----- */
+.manuel-topbar {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.manuel-topbar .logo {
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 2px;
+  color: #3b82f6;
+  background: #1e3a8a;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.manuel-topbar .title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+.manuel-topbar .back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #1e293b;
+  color: #e2e8f0;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  min-height: 44px;
+}
+.manuel-topbar .back-btn:active { background: #334155; }
+
+/* ----- Sommaire (colonne gauche desktop, accordeon mobile) ----- */
+.manuel-toc {
+  background: #0b1220;
+  border-right: 1px solid #1e293b;
+  padding: 16px 0;
+  position: sticky;
+  top: 56px;
+  align-self: start;
+  max-height: calc(100vh - 56px);
+  overflow-y: auto;
+}
+.manuel-toc h2 {
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #64748b;
+  margin: 0 16px 10px;
+  font-weight: 700;
+}
+.manuel-toc ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: toc;
+}
+.manuel-toc li { counter-increment: toc; }
+.manuel-toc a {
+  display: block;
+  padding: 10px 16px 10px 44px;
+  color: #cbd5e1;
+  text-decoration: none;
+  font-size: 14px;
+  border-left: 3px solid transparent;
+  position: relative;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.manuel-toc a::before {
+  content: counter(toc, decimal-leading-zero);
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: #475569;
+  font-weight: 700;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+}
+.manuel-toc a:active,
+.manuel-toc a.active {
+  background: #1e293b;
+  color: #f8fafc;
+  border-left-color: #3b82f6;
+}
+.manuel-toc a.sos {
+  color: #fca5a5;
+  font-weight: 700;
+}
+.manuel-toc a.sos::before { color: #ef4444; }
+
+@media (max-width: 900px) {
+  .manuel-toc {
+    position: static;
+    max-height: none;
+    border-right: none;
+    border-bottom: 1px solid #1e293b;
+    padding: 8px 0 12px;
+  }
+  .manuel-toc ol {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .manuel-toc a { padding: 12px 12px 12px 40px; }
+}
+
+/* ----- Contenu ----- */
+.manuel-content {
+  padding: 24px clamp(16px, 4vw, 48px) 80px;
+  max-width: 820px;
+  width: 100%;
+}
+
+.manuel-content h1 {
+  font-size: 28px;
+  font-weight: 800;
+  color: #f8fafc;
+  margin: 0 0 8px;
+  letter-spacing: -0.5px;
+}
+.manuel-content .subtitle {
+  font-size: 15px;
+  color: #94a3b8;
+  margin: 0 0 32px;
+}
+.manuel-content section {
+  margin: 48px 0;
+  scroll-margin-top: 72px;
+}
+.manuel-content section h2 {
+  font-size: 22px;
+  font-weight: 800;
+  color: #f8fafc;
+  margin: 0 0 8px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #1e293b;
+}
+.manuel-content section .section-num {
+  display: inline-block;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: #3b82f6;
+  background: #1e3a8a;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-right: 8px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  vertical-align: middle;
+}
+.manuel-content h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin: 28px 0 10px;
+}
+.manuel-content p { margin: 10px 0; }
+.manuel-content strong { color: #f8fafc; }
+.manuel-content em { color: #cbd5e1; font-style: normal; background: #1e293b; padding: 1px 6px; border-radius: 4px; font-size: 0.92em; }
+.manuel-content ul,
+.manuel-content ol { padding-left: 22px; margin: 10px 0; }
+.manuel-content li { margin: 6px 0; }
+
+/* Pas-a-pas numerotes "operateur" */
+.manuel-content ol.steps {
+  list-style: none;
+  padding: 0;
+  counter-reset: step;
+}
+.manuel-content ol.steps > li {
+  counter-increment: step;
+  position: relative;
+  padding: 12px 12px 12px 56px;
+  margin: 10px 0;
+  background: #111c30;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+}
+.manuel-content ol.steps > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #3b82f6;
+  color: #f8fafc;
+  font-weight: 700;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Encadres ----------------------------------------------------------- */
+.callout {
+  margin: 16px 0;
+  padding: 12px 14px 12px 48px;
+  border-radius: 10px;
+  border: 1px solid;
+  position: relative;
+  font-size: 14.5px;
+}
+.callout::before {
+  position: absolute;
+  left: 14px;
+  top: 12px;
+  font-size: 18px;
+  font-weight: 800;
+  width: 22px;
+  text-align: center;
+}
+.callout.tip {
+  background: #0b2942;
+  border-color: #1e40af;
+  color: #bfdbfe;
+}
+.callout.tip::before { content: "i"; color: #60a5fa; font-family: "SF Mono", Menlo, Consolas, monospace; }
+.callout.warn {
+  background: #2c1607;
+  border-color: #b45309;
+  color: #fde68a;
+}
+.callout.warn::before { content: "!"; color: #fbbf24; }
+.callout.danger {
+  background: #2a0a0a;
+  border-color: #b91c1c;
+  color: #fecaca;
+}
+.callout.danger::before { content: "!"; color: #ef4444; }
+.callout.do {
+  background: #062e1d;
+  border-color: #166534;
+  color: #bbf7d0;
+}
+.callout.do::before { content: "OK"; color: #4ade80; font-size: 11px; font-weight: 800; top: 14px; }
+.callout strong { color: inherit; }
+
+/* "Ce que voit le PC Org" */
+.pc-view {
+  margin: 18px 0;
+  padding: 14px 16px;
+  background: #111c30;
+  border-left: 4px solid #3b82f6;
+  border-radius: 0 8px 8px 0;
+  font-size: 14.5px;
+}
+.pc-view-title {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #60a5fa;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+/* Schemas ASCII ------------------------------------------------------- */
+pre.ascii {
+  font-family: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12.5px;
+  line-height: 1.35;
+  background: #0b1220;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin: 14px 0;
+  overflow-x: auto;
+  color: #cbd5e1;
+  white-space: pre;
+}
+
+/* Tableaux ----------------------------------------------------------- */
+.manuel-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 14px 0;
+  font-size: 14px;
+}
+.manuel-content th,
+.manuel-content td {
+  border: 1px solid #1e293b;
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.manuel-content th {
+  background: #111c30;
+  color: #f1f5f9;
+  font-weight: 700;
+}
+
+/* Pastille statut (re-utilisee dans le texte) ------------------------ */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pill.ok { color: #4ade80; border-color: #166534; }
+.pill.warn { color: #facc15; border-color: #854d0e; }
+.pill.err { color: #f87171; border-color: #991b1b; }
+.pill.urg-imp { background: #334155; color: #e2e8f0; }
+.pill.urg-ur  { background: #422006; color: #fde68a; border-color: #b45309; }
+.pill.urg-ua  { background: #431407; color: #fed7aa; border-color: #c2410c; }
+.pill.urg-eu  { background: #450a0a; color: #fecaca; border-color: #b91c1c; }
+
+/* Bouton "retour en haut" ------------------------------------------- */
+.to-top {
+  display: inline-block;
+  margin-top: 24px;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: #94a3b8;
+  text-decoration: none;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  min-height: 44px;
+  line-height: 24px;
+}
+.to-top:active { background: #1e293b; }
+
+/* Etat "en cours de redaction" -------------------------------------- */
+.todo-section {
+  padding: 18px;
+  border: 1px dashed #334155;
+  border-radius: 10px;
+  color: #94a3b8;
+  font-size: 14px;
+  background: #0b1220;
+}
+.todo-section em { background: transparent; color: #64748b; font-style: italic; }
+
+/* Bloc de test (notifications) -------------------------------------- */
+.test-box {
+  margin: 18px 0;
+  padding: 16px;
+  background: #0b1220;
+  border: 1px solid #1e40af;
+  border-radius: 10px;
+}
+.test-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0;
+  flex-wrap: wrap;
+}
+.test-btn {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: #f8fafc;
+  background: #2563eb;
+  border: 1px solid #3b82f6;
+  border-radius: 8px;
+  padding: 12px 18px;
+  min-height: 44px;
+  cursor: pointer;
+  transition: background 0.1s, transform 0.05s;
+}
+.test-btn:active { background: #1d4ed8; transform: scale(0.97); }
+.test-btn:disabled {
+  background: #334155;
+  border-color: #475569;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+.test-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+.test-result {
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #94a3b8;
+}
+.test-result.ok   { background: #062e1d; border-color: #166534; color: #4ade80; }
+.test-result.warn { background: #422006; border-color: #b45309; color: #facc15; }
+.test-result.err  { background: #2a0a0a; border-color: #b91c1c; color: #f87171; }
+.test-hint {
+  font-size: 13px;
+  color: #94a3b8;
+  margin: 4px 0 14px 4px;
+}
+
+/* =====================================================================
+   IMPRESSION
+   - Cache topbar, sommaire, boutons, blocs interactifs
+   - Repasse en noir sur blanc pour economiser l encre
+   - Force les sauts de page logiques
+   ===================================================================== */
+@media print {
+  html, body {
+    background: #fff !important;
+    color: #000 !important;
+    font-size: 11pt;
+    line-height: 1.4;
+    overflow: visible;
+  }
+  .manuel-page {
+    display: block;
+    min-height: auto;
+  }
+  .manuel-topbar,
+  .manuel-toc,
+  .to-top,
+  .test-box {
+    display: none !important;
+  }
+  .manuel-content {
+    padding: 0;
+    max-width: none;
+    width: auto;
+  }
+  .manuel-content h1 {
+    color: #000;
+    font-size: 20pt;
+    margin-bottom: 4pt;
+    page-break-after: avoid;
+  }
+  .manuel-content .subtitle {
+    color: #555;
+    font-size: 10pt;
+    margin-bottom: 18pt;
+  }
+  .manuel-content section {
+    margin: 0 0 14pt;
+    page-break-inside: auto;
+    break-inside: auto;
+  }
+  /* Saut de page avant chaque grande section sauf la premiere */
+  .manuel-content section + section {
+    page-break-before: always;
+    break-before: page;
+  }
+  .manuel-content section h2 {
+    color: #000;
+    font-size: 16pt;
+    border-bottom: 1.5pt solid #000;
+    page-break-after: avoid;
+  }
+  .manuel-content section h3 {
+    color: #000;
+    font-size: 12pt;
+    page-break-after: avoid;
+  }
+  .manuel-content .section-num {
+    background: #000;
+    color: #fff;
+    padding: 1pt 5pt;
+  }
+  .manuel-content p,
+  .manuel-content li {
+    color: #000;
+    orphans: 3;
+    widows: 3;
+  }
+  .manuel-content strong { color: #000; }
+  .manuel-content em {
+    background: transparent;
+    color: #000;
+    font-style: italic;
+    padding: 0;
+  }
+  /* Encadres : version sobre print, gardent leur lisibilite sans aplats sombres */
+  .callout {
+    background: #fff !important;
+    color: #000 !important;
+    border: 1pt solid #000 !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .callout::before {
+    color: #000 !important;
+  }
+  .callout.tip    { border-left: 4pt solid #2563eb !important; }
+  .callout.warn   { border-left: 4pt solid #b45309 !important; }
+  .callout.danger { border-left: 4pt solid #b91c1c !important; }
+  .callout.do     { border-left: 4pt solid #166534 !important; }
+
+  .pc-view {
+    background: #f1f5f9 !important;
+    color: #000 !important;
+    border-left: 4pt solid #1e40af !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .pc-view-title { color: #1e40af !important; }
+
+  pre.ascii {
+    background: #f8fafc !important;
+    color: #000 !important;
+    border: 0.5pt solid #cbd5e1 !important;
+    font-size: 9pt;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  ol.steps > li {
+    background: #fff !important;
+    border: 0.5pt solid #94a3b8 !important;
+    color: #000 !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  ol.steps > li::before {
+    background: #000 !important;
+    color: #fff !important;
+  }
+
+  table {
+    page-break-inside: auto;
+  }
+  thead { display: table-header-group; }
+  tr, td, th { page-break-inside: avoid; }
+  th, td {
+    border: 0.5pt solid #94a3b8 !important;
+    color: #000 !important;
+  }
+  th {
+    background: #e2e8f0 !important;
+    color: #000 !important;
+  }
+
+  /* Pillules : remplacer le fond par un cadre noir simple en print */
+  .pill {
+    background: #fff !important;
+    color: #000 !important;
+    border: 0.5pt solid #000 !important;
+  }
+
+  a { color: #000; text-decoration: none; }
+  a[href^="#"]::after { content: ""; }
+}

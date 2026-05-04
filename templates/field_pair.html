@@ -97,6 +97,18 @@
       border-radius: 6px;
       margin-bottom: 6px;
     }
+    .help-link {
+      margin-top: 8px;
+      font-size: 13px;
+      color: #94a3b8;
+      text-decoration: none;
+      padding: 8px 12px;
+      border-radius: 6px;
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+    }
+    .help-link:active { background: #1e293b; color: #cbd5e1; }
 
     @media (orientation: landscape) and (max-height: 500px) {
       .wrap { flex-direction: row; gap: 48px; padding: 16px 24px; }
@@ -120,6 +132,7 @@
         <div class="code-digit"></div>
       </div>
       <div class="msg" id="msg"></div>
+      <a href="/field/manuel" class="help-link">Premiere utilisation ? Lire le guide &rarr;</a>
     </div>
     <div class="numpad">
       <button data-k="1">1</button>

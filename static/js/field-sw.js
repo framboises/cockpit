@@ -7,7 +7,7 @@
      - API (/field/*) : network-first, fallback silencieux offline
    ===================================================================== */
 
-const SW_VERSION = "field-sw-v31";
+const SW_VERSION = "field-sw-v33";
 const APP_SHELL_CACHE = "field-shell-" + SW_VERSION;
 const TILE_CACHE = "field-tiles-" + SW_VERSION;
 const API_CACHE = "field-api-" + SW_VERSION;
@@ -20,7 +20,9 @@ const TILE_CACHE_MAX = 600; // ~3 Mo a ~5 Ko/tuile
 // network-first avec fallback cache (voir handler fetch ci-dessous).
 const APP_SHELL_URLS = [
   "/field",
+  "/field/manuel",
   "/static/css/field.css",
+  "/static/css/field_manuel.css",
   "/static/js/field.js",
   "/static/img/field-icon.svg",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
