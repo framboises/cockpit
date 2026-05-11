@@ -14,6 +14,17 @@ function timeToMinutes(timeStr) {
     return h * 60 + mn;
 }
 
+// Normalise une heure pour l'affichage: "15h30" -> "15:30", "9h05" -> "09:05".
+// Renvoie la valeur brute si elle ne match aucun format reconnu (TBC, vide, autre).
+function formatHHMM(s) {
+    if (!s) return s;
+    const t = String(s).trim();
+    if (!t || t.toUpperCase() === 'TBC') return t;
+    const m = t.match(/^(\d{1,2})[:h](\d{2})$/i);
+    if (!m) return t;
+    return `${m[1].padStart(2,'0')}:${m[2]}`;
+}
+
 // Fonction pour tronquer une chaîne à un nombre max de caractères
 function truncateText(text, maxChars) {
     return text.length > maxChars ? text.substring(0, maxChars) + "…" : text;
@@ -632,15 +643,15 @@ function createEventItem(date, item) {
     const fullPlace = (item.place || '').split('/')[0].trim();
     const truncatedTitle = truncateText(fullTitle || 'Sans titre', 50);
 
-    // Gestion de l'affichage des heures
+    // Gestion de l'affichage des heures (normalise "HHhMM" -> "HH:MM")
     let timeInfo = "";
     if (item.start && item.start.trim() !== "" && item.start.toUpperCase() !== "TBC") {
-        timeInfo = item.start;
+        timeInfo = formatHHMM(item.start);
         if (item.end && item.end.trim() !== "" && item.end.toUpperCase() !== "TBC") {
-            timeInfo += " - " + item.end;
+            timeInfo += " - " + formatHHMM(item.end);
         }
     } else if (item.end && item.end.trim() !== "" && item.end.toUpperCase() !== "TBC") {
-        timeInfo = item.end;
+        timeInfo = formatHHMM(item.end);
     } else {
         timeInfo = "TBC";
     }
@@ -679,8 +690,8 @@ function createEventItem(date, item) {
         <div class="toggle-content">
             <!-- Version détaillée -->
             <p><strong>Titre complet :</strong> ${fullTitle}</p>
-            <p><strong>Heure de début :</strong> ${item.start || "TBC"}</p>
-            <p><strong>Heure de fin :</strong> ${item.end || "TBC"}</p>
+            <p><strong>Heure de début :</strong> ${formatHHMM(item.start) || "TBC"}</p>
+            <p><strong>Heure de fin :</strong> ${formatHHMM(item.end) || "TBC"}</p>
             <p><strong>Durée :</strong> ${item.duration}</p>
             <p><strong>Département :</strong> ${item.department}</p>
             <p><strong>Lieu détaillé :</strong> ${item.place ? item.place : "Non spécifié"}</p>
@@ -1561,7 +1572,7 @@ function renderDrawerView() {
     </div>
     <div class="field">
       <div class="label">Heures</div>
-      <div class="value">${(it.start && it.start!=='TBC')?it.start:'—'} ${(it.end && it.end!=='TBC')?(' - '+it.end):''}</div>
+      <div class="value">${(it.start && it.start!=='TBC')?formatHHMM(it.start):'—'} ${(it.end && it.end!=='TBC')?(' - '+formatHHMM(it.end)):''}</div>
     </div>
     <div class="field">
       <div class="label">Catégorie</div>
@@ -1911,8 +1922,8 @@ async function openEditModalFromDrawer(dateStr, item) {
   // 5) pré-remplir tous les champs du formulaire
   const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v ?? ''; };
   setVal('event-date',   dateStr || '');
-  setVal('start-time',   (item.start && item.start!=='TBC') ? item.start : '');
-  setVal('end-time',     (item.end   && item.end  !=='TBC') ? item.end   : '');
+  setVal('start-time',   (item.start && item.start!=='TBC') ? formatHHMM(item.start) : '');
+  setVal('end-time',     (item.end   && item.end  !=='TBC') ? formatHHMM(item.end)   : '');
   setVal('duration',     item.duration || '');
   setVal('activity',     item.activity || '');
   setVal('place',        item.place || '');
