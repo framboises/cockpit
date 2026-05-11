@@ -875,7 +875,7 @@ function computeAndRenderStatus(paramData) {
 
     // 4) After last public close, during demontage period
     if (pastLastPublicClose && demontageStart && demontageEnd && todayISO <= demontageEnd) {
-        renderStatus("demontage", "demolition", "PERIODE DE DEMONTAGE",
+        renderStatus("demontage", "pallet", "PERIODE DE DEMONTAGE",
             "Du " + formatDateShort(demontageStart) + " au " + formatDateShort(demontageEnd));
         return;
     }

@@ -8578,6 +8578,214 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .pcorg-create-cat-btn.selected .material-symbols-outlined { color: #fff !important; }
 .pcorg-create-cat-btn .material-symbols-outlined { font-size: 16px; }
 
+/* ── Chip horodatage (creation + detail) ──────────────────────────── */
+.pcorg-ts-chip-row {
+  display: flex; margin-bottom: 12px;
+}
+.pcorg-ts-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px 5px 8px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--bg);
+  font-size: 0.74rem; font-weight: 600; font-family: inherit;
+  color: var(--muted); cursor: pointer; transition: all 0.15s;
+}
+.pcorg-ts-chip:hover { border-color: var(--text); }
+.pcorg-ts-chip .pcorg-ts-chip-ico { font-size: 16px; }
+.pcorg-ts-chip .pcorg-ts-chip-caret { font-size: 16px; opacity: 0.55; margin-left: 2px; }
+.pcorg-ts-chip.pcorg-ts-now {
+  color: var(--muted); border-color: var(--line);
+}
+.pcorg-ts-chip.pcorg-ts-past {
+  color: #b45309; border-color: #f59e0b; background: rgba(245, 158, 11, 0.08);
+}
+.pcorg-ts-chip.pcorg-ts-future {
+  color: #1d4ed8; border-color: #3b82f6; background: rgba(59, 130, 246, 0.08);
+}
+
+/* Popover horodatage */
+.pcorg-ts-popover {
+  position: fixed; z-index: 10001;
+  width: 260px; padding: 8px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.12);
+  display: flex; flex-direction: column; gap: 2px;
+  animation: pcorgTsPopIn 0.12s ease-out;
+}
+@keyframes pcorgTsPopIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.pcorg-ts-pop-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px 8px; font-size: 0.72rem;
+  font-weight: 700; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pcorg-ts-pop-head .material-symbols-outlined { font-size: 16px; }
+.pcorg-ts-opt {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-radius: 6px;
+  border: none; background: transparent; cursor: pointer;
+  font-size: 0.8rem; font-family: inherit; color: var(--text);
+  text-align: left; transition: background 0.1s;
+}
+.pcorg-ts-opt:hover { background: var(--bg); }
+.pcorg-ts-opt-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--muted);
+  flex-shrink: 0;
+}
+.pcorg-ts-opt-label { flex: 1; }
+.pcorg-ts-opt-time {
+  font-variant-numeric: tabular-nums; font-size: 0.74rem;
+  color: var(--muted); font-weight: 600;
+}
+.pcorg-ts-pop-sep {
+  margin: 6px 8px 4px; padding-top: 8px;
+  border-top: 1px dashed var(--line);
+  font-size: 0.68rem; font-weight: 700;
+  color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;
+}
+.pcorg-ts-custom {
+  display: flex; align-items: center; gap: 6px; padding: 4px 6px 6px;
+}
+.pcorg-ts-custom-input {
+  flex: 1; padding: 6px 8px; font-size: 0.78rem;
+  border-radius: 6px; border: 1px solid var(--line);
+  font-family: inherit; background: var(--bg); color: var(--text);
+}
+.pcorg-ts-custom-apply {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 6px;
+  border: none; background: var(--brand); color: #fff;
+  cursor: pointer; transition: opacity 0.15s;
+}
+.pcorg-ts-custom-apply:hover { opacity: 0.85; }
+.pcorg-ts-custom-apply .material-symbols-outlined { font-size: 18px; }
+
+/* Champ "Heure intervention" dans la modale detail */
+.pcorg-fiche-ts-value {
+  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.pcorg-fiche-ts-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 7px; border-radius: 999px;
+  font-size: 0.66rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.03em;
+}
+.pcorg-fiche-ts-badge .material-symbols-outlined { font-size: 13px; }
+.pcorg-fiche-ts-badge.pcorg-ts-past {
+  color: #b45309; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4);
+}
+.pcorg-fiche-ts-badge.pcorg-ts-future {
+  color: #1d4ed8; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4);
+}
+.pcorg-fiche-ts-edit {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 4px;
+  border: none; background: transparent; color: var(--muted);
+  cursor: pointer; transition: all 0.15s;
+}
+.pcorg-fiche-ts-edit:hover { background: var(--bg); color: var(--text); }
+.pcorg-fiche-ts-edit .material-symbols-outlined { font-size: 14px; }
+
+/* Badge antidate/programme dans la liste main courante */
+.pcorg-row-tsbadge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%;
+  margin-right: 2px; opacity: 0.85;
+}
+.pcorg-row-tsbadge.pcorg-ts-past { color: #b45309; }
+.pcorg-row-tsbadge.pcorg-ts-future { color: #1d4ed8; }
+.pcorg-row-tsbadge .material-symbols-outlined { font-size: 13px; }
+
+/* Picto source dans le meta de la liste */
+.pcorg-row-src-ico {
+  font-size: 14px !important; opacity: 0.85;
+  vertical-align: middle;
+}
+
+/* ── Source de la fiche (etape 2 wizard) ──────────────────────────── */
+.pcorg-source-tabs {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;
+}
+.pcorg-source-tab {
+  display: inline-flex; flex-direction: row; align-items: center;
+  gap: 4px; padding: 4px 9px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--muted);
+  font-size: 0.74rem; font-weight: 600; font-family: inherit;
+  cursor: pointer; transition: all 0.12s;
+  --src-color: var(--brand);
+}
+.pcorg-source-tab:hover {
+  border-color: var(--src-color);
+  color: var(--src-color);
+}
+.pcorg-source-tab.selected {
+  border-color: var(--src-color);
+  background: var(--src-color);
+  color: #fff;
+}
+.pcorg-source-tab.selected .pcorg-source-tab-ico { color: #fff !important; }
+.pcorg-source-tab .pcorg-source-tab-ico { font-size: 15px; color: var(--src-color); }
+.pcorg-source-tab-label { font-size: 0.74rem; }
+
+.pcorg-source-fields {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-bottom: 8px;
+}
+.pcorg-source-subgrp { margin-bottom: 0; }
+.pcorg-source-opt {
+  font-size: 0.72rem; color: var(--muted); font-weight: 400;
+  margin-left: 4px;
+}
+
+/* Canal segmented */
+.pcorg-canal-row {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.pcorg-canal-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 5px 10px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--bg);
+  color: var(--muted); cursor: pointer;
+  font-size: 0.74rem; font-weight: 600; font-family: inherit;
+  transition: all 0.12s;
+}
+.pcorg-canal-btn:hover { border-color: var(--text); color: var(--text); }
+.pcorg-canal-btn.selected {
+  border-color: var(--brand);
+  background: var(--brand); color: #fff;
+}
+.pcorg-canal-btn .pcorg-canal-btn-ico { font-size: 15px; }
+.pcorg-canal-detail { margin-top: 6px; }
+.pcorg-canal-detail .form-input {
+  padding: 6px 8px; font-size: 0.78rem;
+}
+
+/* Affichage Source dans la modale detail */
+.pcorg-fiche-source-value {
+  display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.pcorg-fiche-source-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--src-color) 15%, transparent);
+  color: var(--src-color);
+  font-size: 0.7rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.03em;
+  border: 1px solid color-mix(in srgb, var(--src-color) 35%, transparent);
+}
+.pcorg-fiche-source-chip .pcorg-fiche-source-ico { font-size: 13px; }
+.pcorg-fiche-source-who {
+  font-weight: 600; color: var(--text);
+}
+.pcorg-fiche-source-sep { color: var(--muted); }
+.pcorg-fiche-source-canal-ico { font-size: 14px !important; color: var(--muted); }
+.pcorg-fiche-source-channel { color: var(--muted); font-size: 0.82rem; }
+
 /* Context menu */
 /* ── Context menu (clic droit carte) ────────────────────────────────── */
 .pcorg-ctx-menu {

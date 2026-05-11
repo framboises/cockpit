@@ -41,8 +41,11 @@ Pas de tests automatisés ni de linter configurés.
 | `CODING` | `true` bypass l'auth en dev | `false` |
 | `ANTHROPIC_API_KEY` | Clé API Anthropic (Assistant IA — résumé pcorg) | — (route renvoie 503 si vide) |
 | `CLAUDE_MODEL` | Modèle Claude utilisé par l'Assistant IA | `claude-sonnet-4-6` |
-| `CLAUDE_TIMEOUT_SECONDS` | Timeout HTTP appel Claude | `60` |
-| `CLAUDE_MAX_TOKENS` | `max_tokens` envoyé à Claude | `2048` |
+| `CLAUDE_TIMEOUT_SECONDS` | Timeout HTTP appel Claude (entre 2 chunks SSE) | `120` |
+| `CLAUDE_MAX_TOKENS` | `max_tokens` envoyé à Claude | `16384` |
+| `CLAUDE_MAX_TOKENS_RETRY` | `max_tokens` du retry sur troncature `stop_reason=max_tokens` | `32000` |
+| `CLAUDE_RETRY_MAX_ATTEMPTS` | Nombre d'essais sur erreurs réseau / HTTP 429-503-529 | `3` |
+| `CLAUDE_RETRY_BACKOFF_BASE_S` | Base de l'exponential backoff entre retries | `1.0` |
 | `CRISE_JWT_SECRET` | Clé HS256 pour les sessions animateur d'exercice de crise | — (refus de démarrage en prod si vide) |
 | `CRISE_JWT_TTL_HOURS` | Durée du cookie de session animateur | `8` |
 | `CRISE_PIN_LOCKOUT_THRESHOLD` | Nombre d'échecs avant lockout d'IP | `6` |
@@ -155,11 +158,16 @@ Sur la sidebar de `index.html`, `edit.html`, `analyse_ops.html`, le bouton **« 
 
 - **Module Python** : `pcorg_summary.py` — helpers purs (`compute_kpis`, `select_fiches_for_prompt`, `build_prompts`, `call_claude`, `save_summary`, `list_summaries`, `get_summary`, `delete_summary`, `generate_period_summary`). Appel HTTP direct à `https://api.anthropic.com/v1/messages` (pas de SDK `anthropic`), pattern calqué sur `traffic.py` (Waze).
 - **Routes** dans `app.py` (à côté des routes `/api/pcorg/*`) :
-  - `POST /api/pcorg/summary/generate` (`manager`) — body `{event, year, period_start, period_end}` (ISO, datetime-local accepté → interprété en Europe/Paris). Court-circuite l'appel Claude si `kpis.total == 0` (sections "RAS").
+  - `POST /api/pcorg/summary/generate` (`manager`) — body `{event, year, period_start, period_end, model?, dry_run?}` (ISO, datetime-local accepté → interprété en Europe/Paris). Court-circuite l'appel Claude si `kpis.total == 0` (sections "RAS"). `model` accepte une whitelist (`claude-sonnet-4-6`, `claude-sonnet-4-5`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-haiku-4-5`) sinon fallback `CLAUDE_MODEL`. `dry_run=true` retourne le prompt assemblé sans appeler Claude (itération rapide sans coût).
   - `GET /api/pcorg/summary/list?event=&year=` (`manager`) — liste légère (sans `kpis`/`sections`).
   - `GET /api/pcorg/summary/<id>` (`manager`) — détail complet.
   - `DELETE /api/pcorg/summary/<id>` (`admin`).
+  - `GET /api/pcorg/summary/usage?from=&to=&event=&year=` (`admin`) — agrège `input_tokens`/`output_tokens`/cache tokens de `pcorg_summaries` + `pcorg_n1_retros`, calcule un coût USD approximatif via `MODEL_PRICING_USD_PER_MTOK` (cache création +25 % input, lecture cache -90 % input). Tarifs figés en code, à mettre à jour si Anthropic révise.
 - **Frontend** : `static/js/ai_assistant.js` (IIFE autonome). Les templates exposent `window.__userIsManager` à côté de `window.__userIsAdmin` ; le JS bloque l'ouverture de la modale aux non-managers (en plus du backend).
+- **Pipeline parallélisé** : `generate_period_summary` lance `compute_kpis` / `compute_comparisons` / `get_upcoming_timetable` / `compute_attendance_block` / `compute_door_reinforcement` / `select_fiches_for_prompt` dans un `ThreadPoolExecutor`, puis kicke `get_or_build_n1_retrospective` (1er appel Claude) dès que `comparisons` est dispo — il tourne en parallèle du reste. Gain ~5-10 s.
+- **Bloc Billetterie & Fréquentation** (`compute_attendance_block`) : 3 slots `yesterday/today/tomorrow` injectés dans le user prompt. Chaque slot contient `billets_vendus`, `pic_observed` + `pic_observed_hour` (heure 'HHhMM' du pic constaté, jours passés uniquement, source : `historique_controle.frequentation` → `data_access` → archive), `pic_prev` + `pic_prev_hour` (pic et heure de l'édition précédente, jour-équivalent aligné sur la date de course), `pic_projection` (pic projeté = `pic_prev * billets_N / billets_prev`), `delta_pct_vs_prev`. Le system prompt impose à Claude d'inclure dans la `synthese` (a) le pic constaté de la veille avec heure et delta, (b) le pic projeté du jour avec l'heure approximative attendue (= `pic_prev_hour`).
+- **Prompt caching** : le system prompt des 2 appels Claude est marqué `cache_control: ephemeral` (cache 5 min côté Anthropic). Sur les appels rapprochés (rapport matinal quotidien notamment), le system n'est plus refacturé. `usage` enregistre `cache_creation_input_tokens` / `cache_read_input_tokens` pour la télémétrie.
+- **Robustesse** : retry exponentiel (1 s, 2 s, 4 s) sur `claude_unreachable`, `claude_stream_interrupted`, HTTP `429`/`503`/`529`. Retry one-shot sur `stop_reason=max_tokens` avec budget `CLAUDE_MAX_TOKENS_RETRY` et consigne de concision.
 
 ### Collection MongoDB `pcorg_summaries`
 
@@ -169,10 +177,16 @@ Sur la sidebar de `index.html`, `edit.html`, `analyse_ops.html`, le bouton **« 
   period_start, period_end, created_at,
   created_by, created_by_name,
   fiches_count, truncated,
+  selection_detail: { total, majors, others, selected, cut, majors_capped,
+                      max_fiches, selected_by_urgency },
   kpis: { total, open, closed, by_category, by_urgency,
           top_zones, top_sous_classifications, top_operators, avg_duration_min },
-  sections: { faits_marquants, secours, securite, technique, recommandations },
-  raw_text, model, usage: { input_tokens, output_tokens }
+  sections: { synthese, faits_marquants, secours, securite, technique, flux,
+              fourriere, recommandations, prochaines_24h },
+  raw_text, model,
+  usage: { input_tokens, output_tokens,
+           cache_creation_input_tokens, cache_read_input_tokens,
+           retried_for_truncation? }
 }
 ```
 
@@ -180,7 +194,7 @@ Index : `(event, 1), (year, 1), (period_start, -1)` créé lazy au premier accè
 
 ### Prompt Claude
 
-Le `system` impose un **JSON strict à 5 clés** (`faits_marquants`, `secours`, `securite`, `technique`, `recommandations`) en français. Si le retour n'est pas parsable, le texte brut est stocké dans `sections.faits_marquants` et conservé dans `raw_text` pour debug. Plafond de **80 fiches** envoyées à Claude (priorité aux fiches `niveau_urgence ∈ {EU, UA}` ou `is_incident: true` qui sont toutes incluses) ; flag `truncated` exposé dans la modale.
+Le `system` impose un **JSON strict à 9 clés** (`synthese, faits_marquants, secours, securite, technique, flux, fourriere, recommandations, prochaines_24h`) en français. Si le retour n'est pas parsable, fallback sur extraction par regex des paires complètes + récupération de la dernière clé tronquée. Tolérance liste/dict dans `_normalize_sections` : si Claude renvoie une liste pour une section, elle est convertie en puces `\n- ` propres. Plafond de **80 fiches** envoyées à Claude (priorité aux fiches `niveau_urgence ∈ {EU, UA}` ou `is_incident: true` qui sont toutes incluses) ; flag `truncated` + `selection_detail.majors_capped` exposés (le second loggue un warning si > 80 majeures, contexte normal perdu).
 
 ### Erreurs
 

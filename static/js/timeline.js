@@ -323,7 +323,7 @@ function removeRedundantOpenClosePairs(byDate, { mode = 'midnight' } = {}) {
     arr.forEach(it => {
       const type = detectClusterType(it);
       const kind = getOpenCloseKind(it);
-      if (!type || !kind) return;
+      if (!type || (kind !== 'open' && kind !== 'close')) return;
       const timeKey = getClusterTimeKey(it, kind);
       if (!wantThisTime(timeKey)) return;
       const key = `${type}|${normPlace(it.place||'')}|${timeKey}`;

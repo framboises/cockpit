@@ -14,7 +14,7 @@
     "PCO.Flux", "PCO.Fourriere", "PCO.Information", "PCO.MainCourante"
   ];
 
-  var data = { sous_classifications: {}, intervenants: [], services: [], fiche_simplifiee: {}, urgence_categories: {} };
+  var data = { sous_classifications: {}, intervenants: [], services: [], fiche_simplifiee: {}, urgence_categories: {}, operateurs_internes: [], donneurs_ordre: [] };
   var dirty = false;
 
   function load() {
@@ -146,6 +146,32 @@
     container.appendChild(h3);
     container.appendChild(buildTagSection("Liste commune", data.services || [], function (newItems) {
       data.services = newItems;
+      markDirty();
+    }));
+
+    // Section 4: Operateurs internes (autocomplete "source operateur")
+    var h4 = el("div", "pcorg-cfg-title");
+    h4.textContent = "Operateurs internes (autocomplete source 'Operateur')";
+    container.appendChild(h4);
+    var op4Desc = el("div", "");
+    op4Desc.style.cssText = "font-size:0.78rem; color:var(--muted); margin:-4px 0 4px;";
+    op4Desc.textContent = "Liste proposee en autocomplete quand la fiche est creee suite a la demande d'un autre operateur PCO / dispatcher / agent terrain.";
+    container.appendChild(op4Desc);
+    container.appendChild(buildTagSection("Liste commune", data.operateurs_internes || [], function (newItems) {
+      data.operateurs_internes = newItems;
+      markDirty();
+    }));
+
+    // Section 5: Donneurs d'ordre (autocomplete "source hierarchie")
+    var h5 = el("div", "pcorg-cfg-title");
+    h5.textContent = "Donneurs d'ordre (autocomplete source 'Hierarchie')";
+    container.appendChild(h5);
+    var do5Desc = el("div", "");
+    do5Desc.style.cssText = "font-size:0.78rem; color:var(--muted); margin:-4px 0 4px;";
+    do5Desc.textContent = "Liste proposee en autocomplete quand la fiche resulte d'une consigne hierarchique (chef de poste, COS, direction).";
+    container.appendChild(do5Desc);
+    container.appendChild(buildTagSection("Liste commune", data.donneurs_ordre || [], function (newItems) {
+      data.donneurs_ordre = newItems;
       markDirty();
     }));
   }

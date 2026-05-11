@@ -2584,6 +2584,32 @@ def list_cockpit_users():
         })
     return jsonify(result)
 
+@app.route('/api/cockpit-users/names', methods=['GET'])
+@role_required("user")
+def list_cockpit_users_names():
+    """Liste minimaliste des utilisateurs Cockpit (prenom + nom).
+    Sert d'autocomplete pour la source 'Operateur' / 'Hierarchie' des fiches PCO.
+    """
+    users = db['users'].find(
+        {"roles_by_app.cockpit": {"$exists": True}},
+        {"prenom": 1, "nom": 1}
+    )
+    seen = set()
+    result = []
+    for u in users:
+        prenom = (u.get("prenom") or "").strip()
+        nom = (u.get("nom") or "").strip()
+        if not prenom and not nom:
+            continue
+        full = (prenom + " " + nom).strip()
+        if full in seen:
+            continue
+        seen.add(full)
+        result.append({"name": full})
+    result.sort(key=lambda x: x["name"].lower())
+    return jsonify(result)
+
+
 @app.route('/api/cockpit-users/<uid>/groups', methods=['PUT'])
 @role_required("admin")
 @csrf.exempt
@@ -3254,11 +3280,12 @@ def _urgency_type(category):
     return "MIXTE"
 
 PCO_PROJECTION = {
-    "_id": 1, "ts": 1, "close_ts": 1, "category": 1, "text": 1,
+    "_id": 1, "ts": 1, "close_ts": 1, "created_at": 1, "category": 1, "text": 1,
     "area": 1, "operator": 1, "severity": 1, "is_incident": 1,
     "gps": 1, "status_code": 1, "niveau_urgence": 1, "bounce_rev": 1,
     "content_category.sous_classification": 1,
     "content_category.patrouille": 1,
+    "content_category.source_type": 1,
 }
 
 def _clean_operator(name):
@@ -3292,6 +3319,7 @@ def _pcorg_serialise(doc):
         "id": str(doc["_id"]),
         "ts": _dt_to_iso_utc(doc.get("ts")),
         "close_ts": _dt_to_iso_utc(doc.get("close_ts")),
+        "created_at": _dt_to_iso_utc(doc.get("created_at")),
         "category": doc.get("category"),
         "text": doc.get("text") or "",
         "area_id": area.get("id"),
@@ -3302,6 +3330,7 @@ def _pcorg_serialise(doc):
         "status_code": doc.get("status_code", 0),
         "sous_classification": cc.get("sous_classification") or "",
         "patrouille": cc.get("patrouille") or "",
+        "source_type": cc.get("source_type") or "",
         "lat": coords[1] if coords and len(coords) >= 2 else None,
         "lon": coords[0] if coords and len(coords) >= 2 else None,
         "server": doc.get("server"),
@@ -3546,6 +3575,7 @@ def pcorg_detail(doc_id):
         "sql_id": doc.get("sql_id"),
         "ts": _dt_to_iso_utc(doc.get("ts")),
         "close_ts": _dt_to_iso_utc(doc.get("close_ts")),
+        "created_at": _dt_to_iso_utc(doc.get("created_at")),
         "category": doc.get("category"),
         "text": doc.get("text") or "",
         "text_full": doc.get("text_full") or "",
@@ -3666,6 +3696,43 @@ def _pcorg_mk_uuid(event, year, ts_str, category, text, area_id, user_id):
     return str(uuid.uuid5(uuid.NAMESPACE_URL, seed))
 
 
+# Bornes d'antidatage / programmation pour les fiches PCO
+PCORG_TS_PAST_MAX_DAYS = 60     # antidatage max
+PCORG_TS_FUTURE_MAX_DAYS = 30   # programmation max
+
+
+def _parse_intervention_ts(raw):
+    """Parse un timestamp d'intervention (ISO 8601 ou datetime-local navigateur)
+    en datetime aware Europe/Paris.
+    Retourne (datetime|None, error_str|None). raw vide/None -> (None, None).
+    """
+    if raw is None:
+        return None, None
+    if not isinstance(raw, str):
+        return None, "intervention_ts invalide"
+    s = raw.strip()
+    if not s:
+        return None, None
+    # datetime-local navigateur: '2026-05-11T14:32' (sans seconde, sans tz)
+    if "T" in s and len(s) == 16:
+        s = s + ":00"
+    # 'Z' -> '+00:00' pour fromisoformat (Python <3.11 compat safety)
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except (ValueError, TypeError):
+        return None, "intervention_ts invalide (ISO 8601 attendu)"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("Europe/Paris"))
+    now = datetime.now(ZoneInfo("Europe/Paris"))
+    if dt < now - timedelta(days=PCORG_TS_PAST_MAX_DAYS):
+        return None, f"date trop ancienne (max {PCORG_TS_PAST_MAX_DAYS} jours)"
+    if dt > now + timedelta(days=PCORG_TS_FUTURE_MAX_DAYS):
+        return None, f"date trop lointaine (max {PCORG_TS_FUTURE_MAX_DAYS} jours)"
+    return dt, None
+
+
 @app.route('/api/pcorg/create', methods=['POST'])
 @role_required("user")
 def pcorg_create():
@@ -3684,9 +3751,16 @@ def pcorg_create():
         return jsonify({"error": "year invalide"}), 400
 
     now = datetime.now(ZoneInfo("Europe/Paris"))
-    ts_str = now.isoformat()
     user = request.user_payload
     operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
+
+    # Heure d'intervention (= ts) : par defaut 'maintenant', sinon antidatage/programmation
+    intervention_ts, ts_err = _parse_intervention_ts(data.get("intervention_ts"))
+    if ts_err:
+        return jsonify({"error": ts_err}), 400
+    ts_dt = intervention_ts or now
+    ts_str = ts_dt.isoformat()
+    created_at_str = now.isoformat()
 
     lat = data.get("lat")
     lon = data.get("lon")
@@ -3705,16 +3779,17 @@ def pcorg_create():
     content_cat = data.get("content_category") or {}
     initial_comment = (data.get("comment") or "").strip()
 
-    doc_id = _pcorg_mk_uuid(event, year, ts_str, category, text, "", str(user.get("email", "")))
+    # UUID base sur created_at (immuable) -> 2 fiches antidatees identiques restent uniques
+    doc_id = _pcorg_mk_uuid(event, year, created_at_str, category, text, "", str(user.get("email", "")))
 
-    # Build initial comment / comment_history
+    # Build initial comment / comment_history (horodate sur ts d'intervention pour coherence chrono)
     comment_raw = ""
     comment_history = []
     if initial_comment:
-        ts_fmt = now.strftime("%d/%m/%Y %H:%M:%S")
+        ts_fmt = ts_dt.strftime("%d/%m/%Y %H:%M:%S")
         comment_raw = f"{ts_fmt} , {operator_name}\n {initial_comment}\n"
         comment_history.append({
-            "ts": now.isoformat(),
+            "ts": ts_str,
             "operator": operator_name,
             "text": initial_comment,
         })
@@ -3723,8 +3798,9 @@ def pcorg_create():
         "_id": doc_id,
         "event": event,
         "year": year,
-        "ts": now,
+        "ts": ts_dt,
         "timestamp_iso": ts_str,
+        "created_at": now,
         "close_ts": None,
         "close_iso": None,
         "category": category,
@@ -3848,6 +3924,7 @@ def pcorg_quick_create():
         "year": year,
         "ts": now,
         "timestamp_iso": ts_str,
+        "created_at": now,
         "close_ts": None,
         "close_iso": None,
         "category": category,
@@ -3890,7 +3967,10 @@ def pcorg_quick_create():
 @role_required("user")
 def pcorg_update(doc_id):
     """Met a jour les champs d'une intervention (SQL ou COCKPIT)."""
-    doc = db["pcorg"].find_one({"_id": doc_id}, {"status_code": 1, "event": 1, "year": 1, "category": 1, "text": 1})
+    doc = db["pcorg"].find_one(
+        {"_id": doc_id},
+        {"status_code": 1, "event": 1, "year": 1, "category": 1, "text": 1, "ts": 1},
+    )
     if not doc:
         return jsonify({"error": "introuvable"}), 404
     if doc.get("status_code") == 10:
@@ -3931,10 +4011,46 @@ def pcorg_update(doc_id):
         for k, v in cc_update.items():
             sets[f"content_category.{k}"] = v
 
+    # Heure d'intervention (ts) : antidatage / reprogrammation a posteriori
+    ts_history_entry = None
+    if "intervention_ts" in data:
+        new_ts, ts_err = _parse_intervention_ts(data.get("intervention_ts"))
+        if ts_err:
+            return jsonify({"error": ts_err}), 400
+        if new_ts is None:
+            return jsonify({"error": "intervention_ts requis"}), 400
+        old_ts = doc.get("ts")
+        if isinstance(old_ts, datetime) and old_ts.tzinfo is None:
+            old_ts = old_ts.replace(tzinfo=timezone.utc)
+        # Compare au format ISO pour eviter les micro-ecarts
+        if not isinstance(old_ts, datetime) or abs((new_ts - old_ts).total_seconds()) >= 60:
+            sets["ts"] = new_ts
+            sets["timestamp_iso"] = new_ts.isoformat()
+            user = request.user_payload
+            operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
+            now = datetime.now(ZoneInfo("Europe/Paris"))
+            old_fmt = ""
+            if isinstance(old_ts, datetime):
+                old_local = old_ts.astimezone(ZoneInfo("Europe/Paris"))
+                old_fmt = old_local.strftime("%d/%m %Hh%M")
+            new_fmt = new_ts.strftime("%d/%m %Hh%M")
+            arrow = "->"
+            ts_history_entry = {
+                "ts": now.isoformat(),
+                "operator": operator_name,
+                "text": f"Heure d'intervention modifiee : {old_fmt} {arrow} {new_fmt}" if old_fmt
+                        else f"Heure d'intervention definie : {new_fmt}",
+                "system": True,
+            }
+
     if not sets:
         return jsonify({"error": "rien a mettre a jour"}), 400
 
-    db["pcorg"].update_one({"_id": doc_id}, {"$set": sets})
+    update_ops = {"$set": sets}
+    if ts_history_entry:
+        update_ops["$push"] = {"comment_history": ts_history_entry}
+
+    db["pcorg"].update_one({"_id": doc_id}, update_ops)
 
     # Si patrouille a ete modifie, engager la tablette terrain
     new_patr = (cc_update or {}).get("patrouille", "")
@@ -4394,7 +4510,11 @@ def get_pcorg_config():
 @role_required("admin")
 def update_pcorg_config():
     data = request.get_json(force=True)
-    allowed = {"sous_classifications", "intervenants", "services", "fiche_simplifiee", "urgence_categories"}
+    allowed = {
+        "sous_classifications", "intervenants", "services",
+        "fiche_simplifiee", "urgence_categories",
+        "operateurs_internes", "donneurs_ordre",
+    }
     update = {k: v for k, v in data.items() if k in allowed}
     if not update:
         return jsonify({"error": "rien a mettre a jour"}), 400
@@ -4489,6 +4609,12 @@ def pcorg_summary_generate():
 
     event et year sont optionnels : s'ils sont absents (ou si all_events=true),
     le resume porte sur tous les evenements / toutes annees.
+
+    Body params optionnels :
+    - model : override du modele Claude (whitelist : claude-sonnet-4-6,
+      claude-opus-4-7, claude-haiku-4-5, ...). Permet A/B test.
+    - dry_run : si true, renvoie le prompt assemble sans appeler Claude
+      ni persister. Utile pour iterer sur le prompt.
     """
     data = request.get_json(silent=True) or {}
     all_events = bool(data.get("all_events"))
@@ -4514,6 +4640,9 @@ def pcorg_summary_generate():
     if data.get("as_of"):
         as_of_utc = _parse_period_dt(data.get("as_of"))
 
+    model_override = data.get("model")  # validite verifiee dans le module
+    dry_run = bool(data.get("dry_run"))
+
     user = request.user_payload or {}
     created_by_email = user.get("email", "") or ""
     created_by_name = (str(user.get("firstname", "") or "") + " " + str(user.get("lastname", "") or "")).strip()
@@ -4521,7 +4650,7 @@ def pcorg_summary_generate():
     try:
         doc = pcorg_summary.generate_period_summary(
             db, event, year, ts_start, ts_end, created_by_email, created_by_name,
-            as_of_utc=as_of_utc,
+            as_of_utc=as_of_utc, model=model_override, dry_run=dry_run,
         )
     except pcorg_summary.ClaudeError as e:
         msg = str(e)
@@ -4534,7 +4663,120 @@ def pcorg_summary_generate():
         logger.exception("pcorg_summary_generate: erreur inattendue")
         return jsonify({"ok": False, "error": str(e)}), 500
 
+    # En dry_run, doc est deja un dict serialise (non persiste).
+    if dry_run and isinstance(doc, dict) and doc.get("dry_run"):
+        return jsonify({"ok": True, "summary": doc, "dry_run": True})
     return jsonify({"ok": True, "summary": pcorg_summary._serialize_summary(doc, light=False)})
+
+
+@app.route('/api/pcorg/summary/usage', methods=['GET'])
+@role_required("admin")
+def pcorg_summary_usage():
+    """Agrege l'usage Claude des resumes generes sur une fenetre.
+
+    Query params :
+    - from : ISO datetime ou YYYY-MM-DD (defaut : 30j en arriere)
+    - to   : ISO datetime ou YYYY-MM-DD (defaut : maintenant)
+    - event, year : filtres optionnels (event filtre aussi l'agregat des retros N-1)
+
+    Retourne :
+    {
+      from, to,
+      by_model : {model: {input_tokens, output_tokens, cache_creation_input_tokens,
+                          cache_read_input_tokens, calls, estimated_cost_usd}},
+      summaries: {calls, ...}, retros: {calls, ...},
+      total_estimated_cost_usd
+    }
+
+    NB : les tarifs MODEL_PRICING_USD_PER_MTOK sont figes en code, mettre a
+    jour si Anthropic revise ses prix. Cache : creation +25 % du prix input,
+    lecture cache -90 % du prix input (tarification standard cache 5 min).
+    """
+    from_raw = request.args.get("from")
+    to_raw = request.args.get("to")
+    now = datetime.now(timezone.utc)
+    ts_to = pcorg_summary._parse_iso_dt(to_raw) if to_raw else now
+    ts_from = pcorg_summary._parse_iso_dt(from_raw) if from_raw else (now - timedelta(days=30))
+    if not ts_from or not ts_to:
+        return jsonify({"ok": False, "error": "from / to invalides"}), 400
+
+    event = request.args.get("event") or None
+    year_q = request.args.get("year")
+    year = None
+    if year_q:
+        try:
+            year = int(year_q)
+        except (TypeError, ValueError):
+            year = None
+
+    base_q = {"created_at": {"$gte": ts_from, "$lte": ts_to}}
+    if event:
+        base_q["event"] = event
+    if year is not None:
+        base_q["year"] = year
+
+    by_model = {}
+
+    def _add(model_name, usage_doc):
+        m = model_name or "unknown"
+        agg = by_model.setdefault(m, {
+            "input_tokens": 0, "output_tokens": 0,
+            "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+            "calls": 0,
+        })
+        u = usage_doc or {}
+        agg["input_tokens"] += int(u.get("input_tokens") or 0)
+        agg["output_tokens"] += int(u.get("output_tokens") or 0)
+        agg["cache_creation_input_tokens"] += int(u.get("cache_creation_input_tokens") or 0)
+        agg["cache_read_input_tokens"] += int(u.get("cache_read_input_tokens") or 0)
+        agg["calls"] += 1
+
+    summaries_calls = 0
+    for d in db['pcorg_summaries'].find(base_q, {"model": 1, "usage": 1, "_id": 0}):
+        _add(d.get("model"), d.get("usage"))
+        summaries_calls += 1
+
+    retros_q = {"created_at": {"$gte": ts_from, "$lte": ts_to}}
+    if event:
+        retros_q["event"] = event
+    retros_calls = 0
+    for d in db['pcorg_n1_retros'].find(retros_q, {"model": 1, "usage": 1, "_id": 0}):
+        _add(d.get("model"), d.get("usage"))
+        retros_calls += 1
+
+    total_cost = 0.0
+    for m, agg in by_model.items():
+        pricing = pcorg_summary.MODEL_PRICING_USD_PER_MTOK.get(m)
+        if not pricing:
+            agg["estimated_cost_usd"] = None
+            continue
+        # Tokens input non-caches = input_tokens - cache_read_input_tokens
+        # (les cache_creation_input_tokens sont DEJA inclus dans input_tokens
+        # selon la doc Anthropic ; les cache_read le sont aussi).
+        non_cached_input = max(0, agg["input_tokens"]
+                               - agg["cache_creation_input_tokens"]
+                               - agg["cache_read_input_tokens"])
+        cost = (
+            non_cached_input / 1_000_000 * pricing["input"]
+            + agg["cache_creation_input_tokens"] / 1_000_000 * pricing["input"] * 1.25
+            + agg["cache_read_input_tokens"] / 1_000_000 * pricing["input"] * 0.10
+            + agg["output_tokens"] / 1_000_000 * pricing["output"]
+        )
+        agg["estimated_cost_usd"] = round(cost, 4)
+        total_cost += cost
+
+    return jsonify({
+        "ok": True,
+        "from": ts_from.isoformat(),
+        "to": ts_to.isoformat(),
+        "filters": {"event": event, "year": year},
+        "summaries_calls": summaries_calls,
+        "retros_calls": retros_calls,
+        "by_model": by_model,
+        "total_estimated_cost_usd": round(total_cost, 4),
+        "pricing_table_usd_per_mtok": pcorg_summary.MODEL_PRICING_USD_PER_MTOK,
+        "pricing_note": "Cache : creation +25%% input, read -90%% input. Verifier claude.com/pricing.",
+    })
 
 
 @app.route('/api/pcorg/summary/list', methods=['GET'])
@@ -5554,9 +5796,14 @@ def hsh_get_dashboard():
             'series': series,
         })
 
-    # Resume par jour public (base sur la zone principale effective)
+    # Resume par jour public (base sur la zone principale effective).
+    # Le pic du jour reprend le MEME bucketing 15 min (last-of-bucket) que la
+    # serie tracee, pour rester coherent avec ce que l'utilisateur voit sur la
+    # courbe (un max brut pourrait remonter un outlier ponctuel invisible apres
+    # bucketisation).
     principal_zone = next((z for z in zones if z.get('is_principal')), None)
     principal_effective_id = principal_zone['location_id'] if principal_zone else None
+    principal_effective_type = principal_zone['location_type'] if principal_zone else None
     days_summary = []
     for dstr in event_days:
         try:
@@ -5564,18 +5811,28 @@ def hsh_get_dashboard():
         except Exception:
             continue
         pic_n = None
-        if principal_effective_id:
-            day_start = datetime(dd.year, dd.month, dd.day)
-            day_end = day_start + timedelta(days=1)
-            if dd <= today_local:
+        if principal_effective_id and dd <= today_local:
+            if dd == target_date and principal_zone is not None:
+                # Reutilise le pic deja calcule depuis la serie principale bucketisee
+                pt = principal_zone.get('pic_today')
+                pic_n = pt if pt else None
+            else:
                 p_corr = int(corrections.get(principal_effective_id, 0) or 0)
-                top = db['data_access'].find_one(
+                day_start = datetime(dd.year, dd.month, dd.day)
+                day_end = day_start + timedelta(days=1)
+                bucket_last = {}
+                for s in db['data_access'].find(
                     {'requested_location_id': principal_effective_id,
+                     'requested_location_type': principal_effective_type,
                      'timestamp': {'$gte': day_start, '$lt': day_end}},
-                    sort=[('current', -1)]
-                )
-                if top:
-                    pic_n = max(int(top.get('current', 0) or 0) - p_corr, 0)
+                    {'_id': 0, 'timestamp': 1, 'current': 1}
+                ).sort('timestamp', 1):
+                    ts = s['timestamp']
+                    bk = ts.replace(minute=(ts.minute // 15) * 15,
+                                    second=0, microsecond=0)
+                    bucket_last[bk] = max(int(s.get('current', 0) or 0) - p_corr, 0)
+                if bucket_last:
+                    pic_n = max(bucket_last.values())
         pic_n1 = None
         if prev_race_ref and race_n:
             offset = (dd - race_n).days

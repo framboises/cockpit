@@ -847,22 +847,24 @@
                     <div class="pcorg-fiche-section">Categorie <span style="color:var(--danger,#ef4444)">*</span></div>
                     <div class="pcorg-create-cats" id="pcorg-create-cats"></div>
                     <div class="pcorg-fiche-section">Informations</div>
+                    <div class="pcorg-ts-chip-row">
+                        <button type="button" class="pcorg-ts-chip pcorg-ts-now" id="pcorg-c-ts-chip" aria-haspopup="dialog" aria-expanded="false" title="Modifier l'heure d'intervention">
+                            <span class="material-symbols-outlined pcorg-ts-chip-ico">schedule</span>
+                            <span class="pcorg-ts-chip-label" id="pcorg-c-ts-chip-label">Maintenant</span>
+                            <span class="material-symbols-outlined pcorg-ts-chip-caret">expand_more</span>
+                        </button>
+                    </div>
                     <div class="form-group">
                         <label for="pcorg-c-text">Description <span style="color:var(--danger,#ef4444)">*</span></label>
                         <textarea id="pcorg-c-text" class="form-input" rows="2" required placeholder="Description de l'intervention..."></textarea>
                     </div>
-                    <div class="form-group" id="pcorg-c-appelant-group">
-                        <label for="pcorg-c-appelant">Appelant <span class="pcorg-required-star" style="color:var(--danger,#ef4444)">*</span></label>
-                        <input type="text" id="pcorg-c-appelant" class="form-input" placeholder="Nom de l'appelant" />
+                    <div class="form-group" id="pcorg-c-source-group">
+                        <label>Source <span class="pcorg-required-star" style="color:var(--danger,#ef4444)">*</span></label>
+                        <div class="pcorg-source-tabs" id="pcorg-c-source-tabs"></div>
+                        <div class="pcorg-source-fields" id="pcorg-c-source-fields"></div>
                     </div>
-                    <div class="form-group" id="pcorg-c-contact-group">
-                        <label>Contact via <span class="pcorg-required-star" style="color:var(--danger,#ef4444)">*</span></label>
-                        <div style="display:flex;gap:8px;">
-                            <label style="font-size:0.78rem;display:flex;align-items:center;gap:4px"><input type="radio" name="pcorg-c-contact" id="pcorg-c-tel" value="telephone"> Telephone</label>
-                            <label style="font-size:0.78rem;display:flex;align-items:center;gap:4px"><input type="radio" name="pcorg-c-contact" id="pcorg-c-radio" value="radio"> Radio</label>
-                            <input type="text" id="pcorg-c-radio-canal" class="form-input" placeholder="Canal..." style="flex:1;display:none" />
-                        </div>
-                    </div>
+                    <datalist id="pcorg-c-dl-operateurs"></datalist>
+                    <datalist id="pcorg-c-dl-donneurs"></datalist>
                 </div>
                 <!-- Etape 3 : champs specifiques + action prise (ordre dynamique) -->
                 <div class="pcorg-create-step" data-step="3">

@@ -9,7 +9,9 @@ Pattern d'appel HTTP externe calque sur traffic.py (Waze) et routing.py (Valhall
 import json
 import logging
 import os
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -31,7 +33,35 @@ ANTHROPIC_API_VERSION = "2023-06-01"
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6").strip()
 CLAUDE_TIMEOUT_SECONDS = int(os.getenv("CLAUDE_TIMEOUT_SECONDS", "120"))
-CLAUDE_MAX_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "8192"))
+CLAUDE_MAX_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "16384"))
+CLAUDE_MAX_TOKENS_RETRY = int(os.getenv("CLAUDE_MAX_TOKENS_RETRY", "32000"))
+
+# Retry HTTP : 3 essais sur erreurs reseau et codes 429/503/529 (overloaded).
+RETRY_MAX_ATTEMPTS = int(os.getenv("CLAUDE_RETRY_MAX_ATTEMPTS", "3"))
+RETRY_BACKOFF_BASE_S = float(os.getenv("CLAUDE_RETRY_BACKOFF_BASE_S", "1.0"))
+RETRYABLE_HTTP_CODES = {429, 503, 529}
+
+# Whitelist des modeles autorises en override par requete. La valeur par defaut
+# vient de CLAUDE_MODEL ; cette whitelist permet juste les A/B tests sans
+# changer la conf serveur.
+ALLOWED_MODELS = {
+    "claude-sonnet-4-6",
+    "claude-sonnet-4-5",
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-haiku-4-5",
+}
+
+# Tarif approximatif (USD par 1M tokens) pour estimation de cout.
+# Source : claude.com/pricing. A reverifier si Anthropic revise.
+# Valeurs cache : creation = +25% du prix input, lecture cache = -90% du prix input.
+MODEL_PRICING_USD_PER_MTOK = {
+    "claude-sonnet-4-6": {"input": 3.0,  "output": 15.0},
+    "claude-sonnet-4-5": {"input": 3.0,  "output": 15.0},
+    "claude-opus-4-7":   {"input": 15.0, "output": 75.0},
+    "claude-opus-4-6":   {"input": 15.0, "output": 75.0},
+    "claude-haiku-4-5":  {"input": 1.0,  "output": 5.0},
+}
 
 
 SUMMARIES_COLLECTION = "pcorg_summaries"
@@ -239,6 +269,50 @@ def _max_present(records):
     return max(vals) if vals else None
 
 
+def _record_hour_str(rec):
+    """Extrait l'heure 'HHhMM' (Paris) d'un record historique_controle.
+
+    Cherche dans 'hour' (str 'HH:MM'), puis dans 'date' (str ISO ou datetime).
+    Les records frequentation sont stockes en heure locale Paris dans le doc
+    historique_controle, donc pas de conversion fuseau a faire.
+    """
+    h = rec.get("hour")
+    if not h:
+        rd = rec.get("date")
+        if isinstance(rd, str) and len(rd) >= 16:
+            h = rd[11:16]
+        elif hasattr(rd, "strftime"):
+            h = rd.strftime("%H:%M")
+    if not h or ":" not in str(h):
+        return None
+    parts = str(h).split(":")
+    return parts[0].zfill(2) + "h" + parts[1].zfill(2)[:2]
+
+
+def _max_present_with_hour(records):
+    """Variante de _max_present qui retourne aussi l'heure du record max.
+
+    Retourne (val_int, hour_str_HHhMM) ou (None, None).
+    En cas d'egalite, garde le PREMIER record vu (heure la plus precoce).
+    """
+    if not records:
+        return None, None
+    best_p = None
+    best_hour = None
+    for r in records:
+        p = r.get("present")
+        if p is None:
+            continue
+        try:
+            pi = int(p)
+        except (ValueError, TypeError):
+            continue
+        if best_p is None or pi > best_p:
+            best_p = pi
+            best_hour = _record_hour_str(r)
+    return best_p, best_hour
+
+
 def _find_prev_param(db, event, year_int):
     """Charge le parametrages N-1 (annee la plus recente < N) avec tickets."""
     candidates = list(db["parametrages"].find(
@@ -301,6 +375,9 @@ def _max_current_in_snapshots(db, coll_name, target_date_paris, location_id, eve
 
     Sert pour data_access (live) ou hsh_archive_compteurs_<tag> (archive).
     Le champ `current` est stocke en string -> caste en int defensivement.
+
+    Retourne (max_int, hour_str_HHhMM) avec l'heure (Europe/Paris) du snapshot
+    qui a fourni le max. (None, None) si rien.
     """
     day_start_paris = datetime.combine(target_date_paris, datetime.min.time(), tzinfo=TZ_PARIS)
     day_end_paris = day_start_paris + timedelta(days=1)
@@ -320,8 +397,9 @@ def _max_current_in_snapshots(db, coll_name, target_date_paris, location_id, eve
             {"requested_event": {"$exists": False}},
         ]
     max_v = None
+    max_ts = None
     try:
-        for s in db[coll_name].find(q, {"current": 1}):
+        for s in db[coll_name].find(q, {"current": 1, "timestamp": 1}):
             v = s.get("current")
             try:
                 vi = int(v) if v not in (None, "") else None
@@ -331,9 +409,16 @@ def _max_current_in_snapshots(db, coll_name, target_date_paris, location_id, eve
                 continue
             if max_v is None or vi > max_v:
                 max_v = vi
+                max_ts = s.get("timestamp")
     except Exception as e:
         logger.warning("Lecture %s a echoue : %s", coll_name, e)
-    return max_v
+
+    hour_str = None
+    if max_ts is not None:
+        if isinstance(max_ts, datetime):
+            local = max_ts if max_ts.tzinfo else max_ts.replace(tzinfo=timezone.utc)
+            hour_str = local.astimezone(TZ_PARIS).strftime("%Hh%M")
+    return max_v, hour_str
 
 
 def _get_pic_observed_for_day(db, event, year_int, target_date):
@@ -346,22 +431,22 @@ def _get_pic_observed_for_day(db, event, year_int, target_date):
     3. hsh_archive_compteurs_<archive_tag> -> idem (archivage admin fait,
        cf app.py:hsh_archive_and_purge)
 
-    Retourne (pic_int, source_str) ou (None, None).
+    Retourne (pic_int, source_str, hour_str_HHhMM) ou (None, None, None).
     """
     # Tier 1 : historique_controle
     hist = _find_hist_freq(db, event, year_int)
     if hist:
         freq = _index_freq_by_day(hist)
-        pic = _max_present(freq.get(target_date.strftime("%Y-%m-%d")))
+        pic, hour = _max_present_with_hour(freq.get(target_date.strftime("%Y-%m-%d")))
         if pic is not None and pic > 0:
-            return pic, "historique_controle"
+            return pic, "historique_controle", hour
 
     main_loc_id = _get_main_counter_id(db)
 
     # Tier 2 : data_access live
-    pic = _max_current_in_snapshots(db, "data_access", target_date, main_loc_id, event=event)
+    pic, hour = _max_current_in_snapshots(db, "data_access", target_date, main_loc_id, event=event)
     if pic is not None and pic > 0:
-        return pic, "data_access"
+        return pic, "data_access", hour
 
     # Tier 3 : archive
     archive_coll = "hsh_archive_compteurs_" + _archive_tag(event, year_int)
@@ -370,11 +455,11 @@ def _get_pic_observed_for_day(db, event, year_int, target_date):
     except Exception:
         existing = []
     if archive_coll in existing:
-        pic = _max_current_in_snapshots(db, archive_coll, target_date, main_loc_id, event=event)
+        pic, hour = _max_current_in_snapshots(db, archive_coll, target_date, main_loc_id, event=event)
         if pic is not None and pic > 0:
-            return pic, "hsh_archive"
+            return pic, "hsh_archive", hour
 
-    return None, None
+    return None, None, None
 
 
 def _find_hist_freq_prev(db, event, year_int):
@@ -411,21 +496,26 @@ def compute_attendance_block(db, event, year, now_utc=None):
     Retourne None si l'event n'a pas de parametrages billetterie publique.
     """
     if not event or year is None:
+        logger.info("attendance_block : skip (event=%s year=%s)", event, year)
         return None
     try:
         year_int = int(year)
     except (TypeError, ValueError):
+        logger.info("attendance_block : skip (year non castable : %s)", year)
         return None
 
     doc = db["parametrages"].find_one({"event": event, "year": str(year)}, {"_id": 0}) \
         or db["parametrages"].find_one({"event": event, "year": year_int}, {"_id": 0})
     if not doc or "data" not in doc:
+        logger.info("attendance_block : skip (parametrages introuvable pour %s %s)", event, year)
         return None
     gh = (doc.get("data") or {}).get("globalHoraires") or {}
     public_days_raw = gh.get("dates") or []
     ticketing_config = gh.get("ticketing") or []
-    if not public_days_raw or not ticketing_config:
+    if not public_days_raw:
+        logger.info("attendance_block : skip (%s %s -> aucune date publique configuree)", event, year)
         return None
+    has_ticketing = bool(ticketing_config)
     public_dates = set()
     for d in public_days_raw:
         ds = d.get("date") if isinstance(d, dict) else d
@@ -433,12 +523,25 @@ def compute_attendance_block(db, event, year, now_utc=None):
         if pd:
             public_dates.add(pd)
     if not public_dates:
+        logger.info("attendance_block : skip (%s %s -> aucune date publique parsable)", event, year)
         return None
+    if not has_ticketing:
+        # Ticketing config absent : on continue mais billets_vendus et
+        # pic_projection seront None. Pic_observed (data_access / archive)
+        # et pic_prev (historique_controle N-1) restent accessibles, ce qui
+        # est l'essentiel pour le rapport matinal.
+        logger.info(
+            "attendance_block : %s %s -> pas de ticketing config, "
+            "calcul pics seulement (billets/projection a None)",
+            event, year,
+        )
 
     products_data = (doc.get("tickets") or {}).get("products") or {}
     race_date = _parse_yyyy_mm_dd((doc.get("data") or {}).get("race") or gh.get("race"))
 
-    # N-1 parametrages + historique
+    # N-1 parametrages (utile pour billets_vendus_prev / pic_projection).
+    # Optionnel : si l'event ne porte pas le champ tickets (ex. GPF), on
+    # continuera quand meme avec les pics N-1 issus de historique_controle.
     prev_param = _find_prev_param(db, event, year_int)
     prev_year_int = None
     prev_ticketing_config = []
@@ -457,16 +560,28 @@ def compute_attendance_block(db, event, year, now_utc=None):
     hist_n = _find_hist_freq(db, event, year_int)
     freq_n_by_day = _index_freq_by_day(hist_n)
 
-    hist_prev_doc, hist_prev_race_date = (None, None)
-    if prev_year_int:
-        hist_prev_doc, hist_prev_race_date = _find_hist_freq_prev(db, event, year_int)
+    # historique_controle.frequentation N-1 : tente toujours, meme sans
+    # prev_param (cas events non ticketises). C'est la source la plus
+    # fiable pour la frequentation et la date de course de l'edition
+    # precedente (fallback sur historique_controle.portes pour la race).
+    hist_prev_doc, hist_prev_race_date = _find_hist_freq_prev(db, event, year_int)
+    if hist_prev_doc and prev_year_int is None:
+        try:
+            prev_year_int = int(hist_prev_doc.get("year"))
+        except (TypeError, ValueError):
+            pass
     freq_prev_by_day = _index_freq_by_day(hist_prev_doc)
     prev_race_ref = hist_prev_race_date or prev_param_race_date
 
     if now_utc is None:
-        today = datetime.now(TZ_PARIS).date()
+        now_paris = datetime.now(TZ_PARIS)
     else:
-        today = now_utc.astimezone(TZ_PARIS).date()
+        now_paris = now_utc.astimezone(TZ_PARIS)
+    today = now_paris.date()
+    # En-dessous de cette heure (Europe/Paris), pic_observed du jour J n'est
+    # pas significatif (pic typique evenement sport entre 14h et 17h). Sert a
+    # eviter qu'a 7h du matin le rapport annonce un faux pic minuscule.
+    TODAY_PIC_CUTOFF_HOUR = 18
     slots = []
     for offset, key, label_fr in (
         (-1, "yesterday", "Hier"),
@@ -484,7 +599,9 @@ def compute_attendance_block(db, event, year, now_utc=None):
             "is_public": is_public,
             "billets_vendus": None,
             "pic_observed": None,
+            "pic_observed_hour": None,    # heure 'HHhMM' Paris du pic constate
             "pic_prev": None,
+            "pic_prev_hour": None,        # heure 'HHhMM' Paris du pic N-1 (~ heure attendue du pic du jour)
             "pic_projection": None,
             "delta_pct_vs_prev": None,
             "prev_year": prev_year_int,
@@ -494,19 +611,25 @@ def compute_attendance_block(db, event, year, now_utc=None):
             slots.append(slot)
             continue
 
-        # Billets vendus N pour ce jour (somme produits qui appliquent a d)
-        slot["billets_vendus"] = _day_ventes(ticketing_config, products_data, d_str)
+        # Billets vendus N pour ce jour (somme produits qui appliquent a d).
+        # Reste a None si pas de ticketing_config (event non ticketise via
+        # parametrages, ex. GPF) -> distingue 'pas de donnee' vs '0 vente'.
+        if has_ticketing:
+            slot["billets_vendus"] = _day_ventes(ticketing_config, products_data, d_str)
 
         # Pic observe N : chaine de fallback historique -> data_access -> archive.
-        # Pour le jour d'aujourd'hui ou de demain on ne cherche pas (pas encore
-        # de pic constate). Pour hier et avant, on tente de retrouver le pic.
-        if offset <= 0:
-            pic_val, pic_src = _get_pic_observed_for_day(db, event, year_int, d)
+        # Hier (offset=-1) : toujours calcule. Aujourd'hui (offset=0) : seulement
+        # si on a depasse l'heure typique du pic (sinon faux pic minuscule).
+        # Demain (offset=+1) : jamais (futur).
+        skip_today_pic = (offset == 0 and now_paris.hour < TODAY_PIC_CUTOFF_HOUR)
+        if offset <= 0 and not skip_today_pic:
+            pic_val, pic_src, pic_hour = _get_pic_observed_for_day(db, event, year_int, d)
             slot["pic_observed"] = pic_val
+            slot["pic_observed_hour"] = pic_hour
             slot["pic_observed_source"] = pic_src  # debug : "historique_controle" / "data_access" / "hsh_archive"
         else:
             slot["pic_observed"] = None
-            slot["pic_observed_source"] = None
+            slot["pic_observed_source"] = "skipped_too_early" if skip_today_pic else None
 
         # Alignement N-1 sur date de course
         prev_aligned = None
@@ -515,9 +638,13 @@ def compute_attendance_block(db, event, year, now_utc=None):
         if prev_aligned:
             slot["prev_date"] = prev_aligned.strftime("%Y-%m-%d")
 
-        # Pic N-1 jour-equivalent
+        # Pic N-1 jour-equivalent + heure (= heure attendue du pic du jour N).
         if prev_aligned:
-            slot["pic_prev"] = _max_present(freq_prev_by_day.get(prev_aligned.strftime("%Y-%m-%d")))
+            pp_val, pp_hour = _max_present_with_hour(
+                freq_prev_by_day.get(prev_aligned.strftime("%Y-%m-%d"))
+            )
+            slot["pic_prev"] = pp_val
+            slot["pic_prev_hour"] = pp_hour
 
         # Ventes N-1 jour-equivalent (utile pour la projection)
         ventes_prev = None
@@ -544,7 +671,31 @@ def compute_attendance_block(db, event, year, now_utc=None):
         for s in slots
     )
     if not has_any_value:
+        logger.info(
+            "attendance_block : %s %s -> 3 slots calcules mais TOUS vides "
+            "(public_dates=%d, prev_year=%s, race_date=%s, prev_race_ref=%s, "
+            "freq_prev_doc=%s) -> bloc non emis",
+            event, year, len(public_dates), prev_year_int, race_date, prev_race_ref,
+            "trouve" if hist_prev_doc else "absent",
+        )
         return None
+
+    # Log de diagnostic : quel slot a quoi (utile pour comprendre pourquoi
+    # le rapport matinal ne mentionne pas certains pics).
+    diag = []
+    for s in slots:
+        diag.append("%s(public=%s billets=%s pic=%s@%s pic_prev=%s@%s proj=%s d=%s%%)" % (
+            s.get("slot"),
+            s.get("is_public"),
+            s.get("billets_vendus"),
+            s.get("pic_observed"),
+            s.get("pic_observed_hour") or "-",
+            s.get("pic_prev"),
+            s.get("pic_prev_hour") or "-",
+            s.get("pic_projection"),
+            s.get("delta_pct_vs_prev") if s.get("delta_pct_vs_prev") is not None else "-",
+        ))
+    logger.info("attendance_block : %s %s -> %s", event, year, " | ".join(diag))
 
     return {
         "event": event,
@@ -1105,11 +1256,16 @@ def select_fiches_n_minus_1(db, event, year_prev, ts_start, ts_end, max_fiches=2
 
 
 def select_fiches_for_prompt(db, event, year, ts_start, ts_end, max_fiches=DEFAULT_MAX_FICHES):
-    """Retourne (fiches_serialized, total_in_period, truncated_bool).
+    """Retourne (fiches_serialized, total_in_period, truncated_bool, detail).
 
     Priorise les fiches majeures (urgence EU/UA ou is_incident) qui sont
     toujours incluses ; complete avec les autres dans la limite max_fiches.
     Si event/year sont None, la selection porte sur tous les evenements.
+
+    detail : dict {total, majors, others, cut, majors_capped, by_urgency}
+    pour debug / telemetrie (logue + expose dans la reponse API).
+    'majors_capped' = True si > max_fiches majeures (= aucune fiche normale
+    n'a pu etre incluse, signal d'alerte volumetrique).
     """
     col = db[PCORG_COLLECTION]
     base = {"ts": {"$gte": ts_start, "$lte": ts_end}}
@@ -1138,9 +1294,38 @@ def select_fiches_for_prompt(db, event, year, ts_start, ts_end, max_fiches=DEFAU
                .limit(remaining_quota)
         )
 
-    selected = majors + others
+    # Si trop de majeures, on tronque a max_fiches et on perd le contexte normal.
+    selected = (majors + others)[:max_fiches]
     truncated = total > len(selected)
-    return [_serialize_fiche(d) for d in selected], total, truncated
+
+    by_urg = {}
+    for d in selected:
+        u = d.get("niveau_urgence") or "_none"
+        by_urg[str(u)] = by_urg.get(str(u), 0) + 1
+
+    detail = {
+        "total": total,
+        "majors": len(majors),
+        "others": len(others),
+        "selected": len(selected),
+        "cut": max(0, total - len(selected)),
+        "majors_capped": len(majors) > max_fiches,
+        "max_fiches": max_fiches,
+        "selected_by_urgency": by_urg,
+    }
+    logger.info(
+        "Selection fiches : total=%d majors=%d others=%d selected=%d cut=%d capped=%s",
+        detail["total"], detail["majors"], detail["others"],
+        detail["selected"], detail["cut"], detail["majors_capped"],
+    )
+    if detail["majors_capped"]:
+        logger.warning(
+            "Fiches majeures (%d) > max_fiches (%d) : "
+            "aucune fiche normale incluse, contexte degrade",
+            len(majors), max_fiches,
+        )
+
+    return [_serialize_fiche(d) for d in selected], total, truncated, detail
 
 
 # ----------------------------------------------------------------------------
@@ -1149,7 +1334,7 @@ def select_fiches_for_prompt(db, event, year, ts_start, ts_end, max_fiches=DEFAU
 
 def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
                   comparisons=None, upcoming=None, n1_retro=None, extra_focus_note=None,
-                  door_reinforcement=None):
+                  door_reinforcement=None, attendance=None):
     """Retourne (system_prompt, user_prompt) en francais.
 
     comparisons (optionnel) : dict produit par compute_comparisons.
@@ -1159,6 +1344,9 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
        pour le rapport matinal) ajoutee au user prompt.
     door_reinforcement (optionnel) : dict produit par
        pcorg_doors_analysis.compute_door_reinforcement.
+    attendance (optionnel) : dict produit par compute_attendance_block.
+       Apporte le pic constate de la veille (avec heure), le pic projete
+       du jour, et l'heure attendue du pic via les pics N-1 jour-equivalent.
     """
     system = (
         "Tu es un analyste operationnel pour un PC Organisation d'evenement "
@@ -1191,9 +1379,17 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
         "d'activite, la tonalite generale (calme / dense / critique) et "
         "exploiter les KPIs comparatifs s'ils sont fournis (variation par "
         "rapport a la veille meme creneau, et par rapport a l'edition "
-        "precedente). Quelques mots-cles peuvent etre en **gras** pour les "
-        "chiffres ou tendances importantes. PAS de liste a puces ici, "
-        "c'est un paragraphe synthetique.\n"
+        "precedente). Si un bloc 'Billetterie & Frequentation' t'est fourni, "
+        "INCLUS OBLIGATOIREMENT dans la synthese : (a) le pic de frequentation "
+        "de la VEILLE avec son heure (ex. **48 200 personnes** vers **15h30**) "
+        "et la comparaison vs edition precedente en pourcentage, (b) le pic "
+        "PROJETE du JOUR avec l'heure approximative attendue (= heure du pic "
+        "de l'edition precedente jour-equivalent ; ex. 'pic projete a "
+        "**52 000 vers 16h**, en hausse de **+8 %** par rapport a l'an "
+        "passe'). Ces deux phrases sont obligatoires si la donnee est dispo. "
+        "Quelques mots-cles peuvent etre en **gras** pour les chiffres ou "
+        "tendances importantes. PAS de liste a puces ici, c'est un "
+        "paragraphe synthetique.\n"
         "- faits_marquants : 3 a 6 puces qui mettent en avant les "
         "evenements vraiment notables uniquement (incident reel, fait "
         "inhabituel, situation critique, anomalie). PAS un resume general. "
@@ -1258,6 +1454,32 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
         "precedente' ou 'annee precedente' (jamais 'N-1', 'jour-equivalent' "
         "ou autre jargon).\n"
         "- Si la difference est < 10%, parle de 'volume comparable'.\n"
+        "\n"
+        "Bloc Billetterie & Frequentation (si fourni) :\n"
+        "- 3 slots : yesterday / today / tomorrow. Pour chacun : "
+        "'billets_vendus' (titres N), 'pic_observed' (pic constate, "
+        "passe seulement) avec 'pic_observed_hour' (heure 'HHhMM' du pic), "
+        "'pic_prev' avec 'pic_prev_hour' (pic et heure de l'edition "
+        "precedente jour-equivalent), 'pic_projection' (pic projete = "
+        "pic_prev * billets_vendus_N / billets_vendus_prev), "
+        "'delta_pct_vs_prev' (en pourcentage).\n"
+        "- VEILLE (slot=yesterday) : utilise pic_observed + "
+        "pic_observed_hour pour annoncer le pic constate, et "
+        "delta_pct_vs_prev pour la comparaison annee precedente. Ex: 'pic "
+        "constate hier a **48 200** vers **15h30**, en hausse de **+12 %** "
+        "vs l'an passe'.\n"
+        "- AUJOURD'HUI (slot=today) : utilise pic_projection pour annoncer "
+        "le pic attendu, et pic_prev_hour comme heure approximative du pic "
+        "(en absence d'autre signal). Ex: 'pic projete a **52 000** vers "
+        "**16h**'. Si pic_projection absent mais pic_prev present, donne "
+        "le pic_prev en valeur de reference 'autour de **50 000** comme l'an "
+        "passe a la meme heure'. L'heure pic_prev_hour est la **meilleure "
+        "estimation** du moment ou interviendra le pic du jour.\n"
+        "- Ne mentionne pas un slot dont aucune donnee n'est dispo "
+        "(billets_vendus / pic_observed / pic_prev / pic_projection tous "
+        "null) -- silence vaut mieux qu'invention.\n"
+        "- N'invente pas un pic_observed si la donnee est null (cas "
+        "today/tomorrow ou jour passe sans archive). Utilise pic_projection.\n"
         "\n"
         "Style et vocabulaire :\n"
         "- Phrases redigees pour des operationnels : ne JAMAIS citer de "
@@ -1327,6 +1549,29 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
                 + _iso_paris(prev_year["race_dt_prev"]) + "\n"
                 + json.dumps(prev_year["kpis"], ensure_ascii=False, indent=2, default=_json_default)
             )
+
+    if attendance and attendance.get("slots"):
+        # Forme compacte des slots pour le prompt (on enleve les champs debug
+        # type pic_observed_source qui n'apportent rien a Claude).
+        compact_slots = []
+        for s in attendance["slots"]:
+            cs = {k: v for k, v in s.items() if k not in ("pic_observed_source",)}
+            compact_slots.append(cs)
+        att_payload = {
+            "event": attendance.get("event"),
+            "year": attendance.get("year"),
+            "prev_year": attendance.get("prev_year"),
+            "race_date": attendance.get("race_date"),
+            "prev_race_date": attendance.get("prev_race_date"),
+            "slots": compact_slots,
+        }
+        parts.append(
+            "\n\nBilletterie & Frequentation (3 jours centres sur "
+            "aujourd'hui ; pic_observed_hour = heure constatee Europe/Paris ; "
+            "pic_prev_hour = heure du pic edition precedente, sert "
+            "d'estimation pour le pic du jour) :\n"
+            + json.dumps(att_payload, ensure_ascii=False, indent=2, default=_json_default)
+        )
     if n1_retro and n1_retro.get("text"):
         parts.append(
             "\n\nNote retrospective de l'edition precedente (analyse "
@@ -1449,13 +1694,14 @@ def _build_retro_prompts(event, year_prev, ts_start, ts_end, kpis, fiches):
     return system, user
 
 
-def _call_claude_text(system_prompt, user_prompt, on_progress=None):
+def _call_claude_text(system_prompt, user_prompt, on_progress=None, model=None):
     """Variante streaming de call_claude qui retourne juste le texte brut + usage.
 
     Sert pour la retro N-1 (note synthetique courte, max_tokens=1024).
     """
-    raw_text, usage = _claude_stream_request(
-        system_prompt, user_prompt, max_tokens=1024, on_progress=on_progress,
+    raw_text, usage, _stop_reason = _claude_stream_request(
+        system_prompt, user_prompt, max_tokens=1024,
+        on_progress=on_progress, model=model,
     )
     return raw_text.strip(), usage
 
@@ -1469,12 +1715,19 @@ def _retro_cache_key(event, year_prev, ts_start, ts_end):
     }
 
 
-def get_or_build_n1_retrospective(db, event, year_prev, ts_start_prev, ts_end_prev, on_progress=None):
+def get_or_build_n1_retrospective(db, event, year_prev, ts_start_prev, ts_end_prev,
+                                   on_progress=None, model=None):
     """Retourne la note retrospective N-1 (texte court) pour une fenetre alignee.
 
     1. Cherche un cache dans `pcorg_n1_retros` sur (event, year_prev, fenetre).
     2. Sinon, calcule KPIs + selectionne un echantillon de ~80 fiches N-1, fait
        un appel Claude dedie, sauve en cache et retourne.
+
+    model (optionnel) : override CLAUDE_MODEL pour cet appel (whitelist).
+    Le cache est globalement le meme quel que soit le modele : un changement
+    de modele ne re-genere pas automatiquement la note. Pour forcer regeneration
+    apres changement de modele, supprimer manuellement la collection
+    pcorg_n1_retros pour la fenetre concernee.
 
     Retourne None en cas d'echec silencieux (pas de fiches, ou echec API) :
     le resume principal continue sans contexte N-1.
@@ -1507,15 +1760,16 @@ def get_or_build_n1_retrospective(db, event, year_prev, ts_start_prev, ts_end_pr
     kpis = compute_compact_kpis(db, event, int(year_prev), ts_start_prev, ts_end_prev)
     if kpis.get("total", 0) == 0:
         return None
-    fiches, _, _ = select_fiches_for_prompt(
+    fiches, _, _, _ = select_fiches_for_prompt(
         db, event, int(year_prev), ts_start_prev, ts_end_prev, max_fiches=80,
     )
     if not fiches:
         return None
 
     system, user = _build_retro_prompts(event, int(year_prev), ts_start_prev, ts_end_prev, kpis, fiches)
+    use_model = _validate_model(model) or CLAUDE_MODEL
     try:
-        text, usage = _call_claude_text(system, user, on_progress=on_progress)
+        text, usage = _call_claude_text(system, user, on_progress=on_progress, model=use_model)
     except ClaudeError as e:
         logger.warning("Retro N-1 echouee : %s", e)
         return None
@@ -1526,7 +1780,7 @@ def get_or_build_n1_retrospective(db, event, year_prev, ts_start_prev, ts_end_pr
     doc["text"] = text
     doc["kpis"] = kpis
     doc["fiches_count"] = len(fiches)
-    doc["model"] = CLAUDE_MODEL
+    doc["model"] = use_model
     doc["usage"] = usage
     doc["created_at"] = datetime.now(timezone.utc)
     try:
@@ -1539,7 +1793,7 @@ def get_or_build_n1_retrospective(db, event, year_prev, ts_start_prev, ts_end_pr
         "fiches_count": len(fiches),
         "from_cache": False,
         "cached_at": doc["created_at"].isoformat(),
-        "model": CLAUDE_MODEL,
+        "model": use_model,
         "usage": usage,
     }
 
@@ -1552,32 +1806,95 @@ class ClaudeError(Exception):
     """Erreur lors de l'appel a l'API Anthropic."""
 
 
-def _claude_stream_request(system_prompt, user_prompt, max_tokens, on_progress=None):
-    """Effectue un appel streaming a l'API Anthropic et retourne (text, usage).
+def _validate_model(model):
+    """Retourne le modele si valide (whitelist), sinon None pour fallback defaut."""
+    if not model:
+        return None
+    m = str(model).strip()
+    if m and m in ALLOWED_MODELS:
+        return m
+    if m:
+        logger.warning("Modele '%s' non autorise, fallback sur defaut '%s'", m, CLAUDE_MODEL)
+    return None
+
+
+def _claude_stream_request(system_prompt, user_prompt, max_tokens, on_progress=None,
+                           model=None, system_cache=True):
+    """Effectue un appel streaming a l'API Anthropic et retourne (text, usage, stop_reason).
 
     Le streaming evite les timeouts sur les reponses longues : tant que Claude
     envoie des chunks, la connexion reste vivante. Le timeout
     CLAUDE_TIMEOUT_SECONDS s'applique alors uniquement entre 2 chunks.
 
-    on_progress (optionnel) : callable(text_so_far, output_tokens_so_far)
-    appele a intervalles reguliers pour permettre un affichage en temps reel.
+    Retry automatique sur erreurs reseau et HTTP 429/503/529 avec exponential
+    backoff (3 essais, 1s/2s/4s).
+
+    Prompt caching : par defaut le system prompt est marque cache_control
+    ephemeral (cache 5 min) -> les appels rapproches ne re-paient pas le system.
+
+    Parametres :
+    - on_progress (optionnel) : callable(text_so_far, output_tokens_so_far)
+      appele a intervalles reguliers pour permettre un affichage en temps reel.
+    - model (optionnel) : override CLAUDE_MODEL pour cet appel (whitelist appliquee).
+    - system_cache (defaut True) : passer False pour desactiver le cache (debug).
+
+    Le usage retourne contient input_tokens / output_tokens
+    + cache_creation_input_tokens / cache_read_input_tokens (telemetrie cache).
+    Le stop_reason est extrait du dernier message_delta SSE ('end_turn',
+    'max_tokens', 'stop_sequence', 'tool_use'...).
     """
     if not ANTHROPIC_API_KEY:
         raise ClaudeError("ANTHROPIC_API_KEY non configuree")
+
+    use_model = _validate_model(model) or CLAUDE_MODEL
 
     headers = {
         "x-api-key": ANTHROPIC_API_KEY,
         "anthropic-version": ANTHROPIC_API_VERSION,
         "content-type": "application/json",
     }
+    # System en bloc unique avec cache_control pour profiter du prompt caching.
+    if system_cache:
+        system_payload = [{
+            "type": "text",
+            "text": system_prompt,
+            "cache_control": {"type": "ephemeral"},
+        }]
+    else:
+        system_payload = system_prompt
     body = {
-        "model": CLAUDE_MODEL,
+        "model": use_model,
         "max_tokens": int(max_tokens),
-        "system": system_prompt,
+        "system": system_payload,
         "messages": [{"role": "user", "content": user_prompt}],
         "stream": True,
     }
 
+    last_err = None
+    for attempt in range(RETRY_MAX_ATTEMPTS):
+        try:
+            return _claude_stream_attempt(headers, body, on_progress)
+        except ClaudeError as e:
+            msg = str(e)
+            retryable = (
+                msg == "claude_unreachable"
+                or msg == "claude_stream_interrupted"
+                or any(msg.startswith("claude_http_" + str(c)) for c in RETRYABLE_HTTP_CODES)
+            )
+            if not retryable or attempt >= RETRY_MAX_ATTEMPTS - 1:
+                raise
+            backoff = RETRY_BACKOFF_BASE_S * (2 ** attempt)
+            logger.warning("Claude '%s' (essai %d/%d) -> retry dans %.1fs",
+                           msg, attempt + 1, RETRY_MAX_ATTEMPTS, backoff)
+            time.sleep(backoff)
+            last_err = e
+    if last_err:
+        raise last_err
+    raise ClaudeError("retry_exhausted")
+
+
+def _claude_stream_attempt(headers, body, on_progress=None):
+    """Un seul essai d'appel streaming Anthropic. Voir _claude_stream_request."""
     try:
         resp = requests.post(
             ANTHROPIC_API_URL,
@@ -1601,6 +1918,9 @@ def _claude_stream_request(system_prompt, user_prompt, max_tokens, on_progress=N
     raw_text = ""
     usage_in = 0
     usage_out = 0
+    cache_creation = 0
+    cache_read = 0
+    stop_reason = None
     last_progress_len = 0
     try:
         # chunk_size=None pour ne pas bufferiser les chunks SSE plus que
@@ -1637,10 +1957,19 @@ def _claude_stream_request(system_prompt, user_prompt, max_tokens, on_progress=N
                 usage = msg.get("usage") or {}
                 usage_in = int(usage.get("input_tokens") or 0)
                 usage_out = int(usage.get("output_tokens") or 0)
+                cache_creation = int(usage.get("cache_creation_input_tokens") or 0)
+                cache_read = int(usage.get("cache_read_input_tokens") or 0)
             elif etype == "message_delta":
+                delta = evt.get("delta") or {}
+                if delta.get("stop_reason"):
+                    stop_reason = delta["stop_reason"]
                 usage = evt.get("usage") or {}
                 if usage.get("output_tokens"):
                     usage_out = int(usage["output_tokens"])
+                if usage.get("cache_creation_input_tokens"):
+                    cache_creation = int(usage["cache_creation_input_tokens"])
+                if usage.get("cache_read_input_tokens"):
+                    cache_read = int(usage["cache_read_input_tokens"])
             elif etype == "error":
                 err = evt.get("error") or {}
                 raise ClaudeError(
@@ -1659,20 +1988,69 @@ def _claude_stream_request(system_prompt, user_prompt, max_tokens, on_progress=N
         except Exception:
             pass
 
-    return raw_text, {"input_tokens": usage_in, "output_tokens": usage_out}
+    return raw_text, {
+        "input_tokens": usage_in,
+        "output_tokens": usage_out,
+        "cache_creation_input_tokens": cache_creation,
+        "cache_read_input_tokens": cache_read,
+    }, stop_reason
 
 
-def call_claude(system_prompt, user_prompt, on_progress=None):
+def _merge_usage(*usages):
+    """Somme cumulative de plusieurs dicts usage (input/output/cache tokens)."""
+    out = {
+        "input_tokens": 0, "output_tokens": 0,
+        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+    }
+    for u in usages:
+        if not u:
+            continue
+        for k in out:
+            out[k] += int(u.get(k) or 0)
+    return out
+
+
+def call_claude(system_prompt, user_prompt, on_progress=None, model=None):
     """Appelle l'API Claude en streaming, retourne (sections_dict, raw_text, usage).
 
     Si le retour n'est pas du JSON parsable, sections_dict est None et
     raw_text contient la reponse brute. Leve ClaudeError pour les erreurs.
+
+    Si la reponse est tronquee (stop_reason='max_tokens'), un retry est tente
+    avec CLAUDE_MAX_TOKENS_RETRY et une consigne de concision. Les usages sont
+    cumules.
     """
-    raw_text, usage_clean = _claude_stream_request(
-        system_prompt, user_prompt, CLAUDE_MAX_TOKENS, on_progress=on_progress,
+    raw_text, usage, stop_reason = _claude_stream_request(
+        system_prompt, user_prompt, CLAUDE_MAX_TOKENS,
+        on_progress=on_progress, model=model,
     )
     sections = _parse_sections(raw_text)
-    return sections, raw_text, usage_clean
+
+    if stop_reason == "max_tokens":
+        logger.warning("Reponse Claude tronquee a max_tokens (%d) -> retry avec %d",
+                       CLAUDE_MAX_TOKENS, CLAUDE_MAX_TOKENS_RETRY)
+        retry_system = system_prompt + (
+            "\n\nIMPORTANT (retry apres troncature) : la reponse precedente a "
+            "depasse le budget de tokens. Sois plus concis : maximum 4 phrases "
+            "courtes par section, maximum 6 puces par liste. Garde l'essentiel "
+            "operationnel."
+        )
+        try:
+            raw_text2, usage2, stop_reason2 = _claude_stream_request(
+                retry_system, user_prompt, CLAUDE_MAX_TOKENS_RETRY,
+                on_progress=on_progress, model=model,
+            )
+            sections2 = _parse_sections(raw_text2)
+            if sections2 is not None:
+                merged = _merge_usage(usage, usage2)
+                merged["retried_for_truncation"] = True
+                return sections2, raw_text2, merged
+            logger.warning("Retry truncation : reponse 2 toujours non parsable, "
+                           "on garde la version partielle initiale")
+        except ClaudeError as e:
+            logger.warning("Retry truncation echec : %s, on garde la version partielle", e)
+
+    return sections, raw_text, usage
 
 
 def _parse_sections(raw_text):
@@ -1763,11 +2141,34 @@ def _parse_sections(raw_text):
 
 def _normalize_sections(data):
     """Convertit un dict brut en dict ne contenant que les SECTION_KEYS,
-    chaque valeur etant une chaine non vide ou ''."""
+    chaque valeur etant une chaine non vide ou ''.
+
+    Tolerance format : si Claude renvoie une LISTE pour une section (au lieu
+    d'une chaine avec puces \\n- ), on la reconstitue proprement plutot que
+    de str()-ifier la liste Python brute (qui donnerait "['rec1', 'rec2']").
+    Idem pour un dict (rare) : on aplatit en lignes 'cle : valeur'.
+    """
     out = {}
     for key in SECTION_KEYS:
         v = data.get(key)
-        out[key] = str(v).strip() if v is not None else ""
+        if v is None:
+            out[key] = ""
+            continue
+        if isinstance(v, list):
+            items = [str(x).strip() for x in v if x is not None and str(x).strip()]
+            if not items:
+                out[key] = ""
+            elif all(it.startswith("- ") or it.startswith("* ") for it in items):
+                out[key] = "\n".join(items)
+            else:
+                out[key] = "\n".join("- " + it for it in items)
+            continue
+        if isinstance(v, dict):
+            out[key] = "\n".join(
+                str(k) + " : " + str(val) for k, val in v.items() if val
+            )
+            continue
+        out[key] = str(v).strip()
     return out
 
 
@@ -1778,12 +2179,14 @@ def _normalize_sections(data):
 def save_summary(db, event, year, ts_start, ts_end, created_by_email, created_by_name,
                  kpis, fiches_count, truncated, sections, raw_text, usage,
                  comparisons=None, upcoming=None, attendance=None, n1_retro=None,
-                 door_reinforcement=None):
+                 door_reinforcement=None, selection_detail=None, model=None):
     """Insere un document de resume et retourne le doc complet.
 
     event/year peuvent etre None (resume "tous evenements").
+    model (optionnel) : si fourni et valide, persiste a la place de CLAUDE_MODEL.
     """
     _ensure_indexes(db)
+    use_model = _validate_model(model) or CLAUDE_MODEL
     doc = {
         "_id": uuid.uuid4().hex,
         "event": event,
@@ -1795,6 +2198,7 @@ def save_summary(db, event, year, ts_start, ts_end, created_by_email, created_by
         "created_by_name": created_by_name or "",
         "fiches_count": int(fiches_count),
         "truncated": bool(truncated),
+        "selection_detail": selection_detail or None,
         "kpis": kpis,
         "comparisons": comparisons or {},
         "upcoming": upcoming or [],
@@ -1803,7 +2207,7 @@ def save_summary(db, event, year, ts_start, ts_end, created_by_email, created_by
         "door_reinforcement": door_reinforcement or None,
         "sections": sections,
         "raw_text": raw_text,
-        "model": CLAUDE_MODEL,
+        "model": use_model,
         "usage": usage or {},
     }
     db[SUMMARIES_COLLECTION].insert_one(doc)
@@ -1845,6 +2249,13 @@ def delete_summary(db, summary_id):
 def _serialize_summary(doc, light=True):
     def _iso(v):
         if isinstance(v, datetime):
+            # MongoDB BSON ne stocke pas la tzinfo : les datetime relus sont
+            # naifs en UTC. Sans suffixe explicite, le client JS
+            # (new Date(...)) interprete l'ISO comme heure locale du
+            # navigateur -> rapport matinal stocke 07h Paris (= 05h UTC) qui
+            # apparait '05:00' au lieu de '07:00'. On force +00:00.
+            if v.tzinfo is None:
+                v = v.replace(tzinfo=timezone.utc)
             return v.isoformat()
         return v
     out = {
@@ -1867,6 +2278,7 @@ def _serialize_summary(doc, light=True):
         out["attendance"] = doc.get("attendance") or None
         out["n1_retro"] = doc.get("n1_retro") or None
         out["door_reinforcement"] = doc.get("door_reinforcement") or None
+        out["selection_detail"] = doc.get("selection_detail") or None
         out["sections"] = doc.get("sections") or {}
         out["raw_text"] = doc.get("raw_text") or ""
         out["usage"] = doc.get("usage") or {}
@@ -2086,8 +2498,14 @@ def detect_active_event(db, now_utc=None):
 
 
 def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email, created_by_name,
-                             extra_focus_note=None, as_of_utc=None, on_progress=None):
+                             extra_focus_note=None, as_of_utc=None, on_progress=None,
+                             model=None, dry_run=False):
     """Calcule KPIs + comparaisons + prochaines 24h + billetterie + retro N-1, appelle Claude.
+
+    Le pipeline DB et l'appel retro N-1 (Claude) sont parallelises via un
+    ThreadPoolExecutor : tous les calculs autres que le compute_comparisons
+    courent en parallele, et le retro N-1 (qui depend de comparisons) est
+    soumis des que comparisons est dispo. Gain typique 5-10s.
 
     extra_focus_note : consigne supplementaire a injecter dans le user prompt
     (par ex. focus nuit pour le rapport matinal).
@@ -2098,89 +2516,185 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
     on_progress (optionnel) : callback(text_so_far, output_tokens_so_far)
     appele a intervalles reguliers pendant le streaming Claude. Utile pour
     afficher la progression cote CLI ou pour streamer vers une UI.
+    model (optionnel) : override du modele pour CET appel (whitelist appliquee).
+    dry_run (optionnel) : si True, retourne le prompt assemble sans appeler
+    Claude ni persister. Utile pour iterer sur le prompt sans cramer du token.
     """
-    kpis = compute_kpis(db, event, year, ts_start, ts_end)
-    comparisons = compute_comparisons(db, event, year, ts_start, ts_end)
-    upcoming = get_upcoming_timetable(db, event, year, hours=24, now_utc=as_of_utc)
-    attendance = compute_attendance_block(db, event, year, now_utc=as_of_utc)
-    # Renforts portes : import lazy pour eviter dependance circulaire au boot.
-    door_reinforcement = None
-    try:
-        import pcorg_doors_analysis
-        door_reinforcement = pcorg_doors_analysis.compute_door_reinforcement(
-            db, event, year, now_utc=as_of_utc,
-        )
-    except Exception as e:
-        logger.warning("Renforts portes : echec calcul (%s)", e)
+    use_model = _validate_model(model) or CLAUDE_MODEL
 
-    # Premier appel Claude : retrospective N-1 sur la fenetre alignee.
-    # Cache en collection pcorg_n1_retros, echec silencieux.
-    n1_retro = None
-    py = (comparisons or {}).get("prev_year_aligned")
-    if py and py.get("kpis", {}).get("total", 0) > 0:
+    def _safe_doors():
         try:
-            ts_prev_start = datetime.fromisoformat(py["period_start"])
-            ts_prev_end = datetime.fromisoformat(py["period_end"])
-            n1_retro = get_or_build_n1_retrospective(
-                db, event, py.get("year_prev"), ts_prev_start, ts_prev_end,
-                on_progress=on_progress,
+            import pcorg_doors_analysis
+            return pcorg_doors_analysis.compute_door_reinforcement(
+                db, event, year, now_utc=as_of_utc,
             )
         except Exception as e:
-            logger.warning("Retro N-1 : preparation echouee : %s", e)
-            n1_retro = None
+            logger.warning("Renforts portes : echec calcul (%s)", e)
+            return None
 
-    # Cas "aucune fiche" : on appelle quand meme Claude UNIQUEMENT pour
-    # produire le mini-briefing prochaines_24h s'il y a des jalons.
-    # Sinon on court-circuite tout.
+    # Phase 1 : tous les calculs en parallele. Les threads relachent le GIL
+    # pendant les I/O Mongo et l'appel Claude, donc le ThreadPoolExecutor
+    # parallelise effectivement.
+    with ThreadPoolExecutor(max_workers=8, thread_name_prefix="pcorg_sum") as pool:
+        f_kpis = pool.submit(compute_kpis, db, event, year, ts_start, ts_end)
+        f_cmp = pool.submit(compute_comparisons, db, event, year, ts_start, ts_end)
+        f_up = pool.submit(get_upcoming_timetable, db, event, year, 24, as_of_utc)
+        f_att = pool.submit(compute_attendance_block, db, event, year, as_of_utc)
+        f_doors = pool.submit(_safe_doors)
+        f_fiches = pool.submit(select_fiches_for_prompt, db, event, year, ts_start, ts_end)
+
+        # Kicker la retro N-1 des que comparisons est pret : elle declenche
+        # un appel Claude (~5-10s) qui peut tourner en parallele du reste.
+        # Pas de on_progress sur la retro pour ne pas melanger les streams CLI.
+        comparisons = f_cmp.result()
+        f_retro = None
+        py = (comparisons or {}).get("prev_year_aligned")
+        if py and py.get("kpis", {}).get("total", 0) > 0:
+            try:
+                ts_prev_start = datetime.fromisoformat(py["period_start"])
+                ts_prev_end = datetime.fromisoformat(py["period_end"])
+                f_retro = pool.submit(
+                    get_or_build_n1_retrospective,
+                    db, event, py.get("year_prev"), ts_prev_start, ts_prev_end,
+                    None, use_model,
+                )
+            except Exception as e:
+                logger.warning("Retro N-1 : preparation echouee : %s", e)
+
+        kpis = f_kpis.result()
+        upcoming = f_up.result()
+        attendance = f_att.result()
+        door_reinforcement = f_doors.result()
+        fiches, total_fiches, truncated, selection_detail = f_fiches.result()
+        n1_retro = None
+        if f_retro:
+            try:
+                n1_retro = f_retro.result()
+            except Exception as e:
+                logger.warning("Retro N-1 : echec runtime : %s", e)
+                n1_retro = None
+
+    # Cas "aucune fiche" : court-circuit ou appel Claude minimal.
     if kpis["total"] == 0:
         if not upcoming:
             sections = {k: "RAS" for k in SECTION_KEYS}
             sections["prochaines_24h"] = "Aucun jalon planifie dans les 24 prochaines heures."
+            if dry_run:
+                return _dry_run_payload(
+                    event, year, ts_start, ts_end, kpis, [], False,
+                    comparisons, upcoming, attendance, n1_retro,
+                    door_reinforcement, extra_focus_note, selection_detail,
+                    use_model, sections, "[shortcut: aucune fiche, aucun jalon]",
+                )
             return save_summary(
                 db, event, year, ts_start, ts_end, created_by_email, created_by_name,
-                kpis, 0, False, sections, "", {"input_tokens": 0, "output_tokens": 0},
-                comparisons=comparisons, upcoming=upcoming, attendance=attendance, n1_retro=n1_retro,
-                door_reinforcement=door_reinforcement,
+                kpis, 0, False, sections, "",
+                {"input_tokens": 0, "output_tokens": 0,
+                 "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+                comparisons=comparisons, upcoming=upcoming, attendance=attendance,
+                n1_retro=n1_retro, door_reinforcement=door_reinforcement,
+                selection_detail=selection_detail, model=use_model,
             )
-        # Sinon, appel Claude minimal pour la section prochaines_24h.
         system, user = build_prompts(
             event, year, ts_start, ts_end, kpis, [], False,
             comparisons=comparisons, upcoming=upcoming, n1_retro=n1_retro,
             extra_focus_note=extra_focus_note,
             door_reinforcement=door_reinforcement,
+            attendance=attendance,
         )
-        sections, raw_text, usage = call_claude(system, user, on_progress=on_progress)
+        if dry_run:
+            return _dry_run_payload(
+                event, year, ts_start, ts_end, kpis, [], False,
+                comparisons, upcoming, attendance, n1_retro,
+                door_reinforcement, extra_focus_note, selection_detail,
+                use_model, system_prompt=system, user_prompt=user,
+            )
+        sections, raw_text, usage = call_claude(
+            system, user, on_progress=on_progress, model=use_model,
+        )
         if sections is None:
             sections = {k: "RAS" for k in SECTION_KEYS}
             sections["prochaines_24h"] = "Reponse Claude non parsable."
-        # Force RAS pour les sections sans fiches.
         for k in SECTION_KEYS:
             if k != "prochaines_24h" and not sections.get(k):
                 sections[k] = "RAS"
         return save_summary(
             db, event, year, ts_start, ts_end, created_by_email, created_by_name,
             kpis, 0, False, sections, raw_text, usage,
-            comparisons=comparisons, upcoming=upcoming, attendance=attendance, n1_retro=n1_retro,
-            door_reinforcement=door_reinforcement,
+            comparisons=comparisons, upcoming=upcoming, attendance=attendance,
+            n1_retro=n1_retro, door_reinforcement=door_reinforcement,
+            selection_detail=selection_detail, model=use_model,
         )
 
-    fiches, total, truncated = select_fiches_for_prompt(db, event, year, ts_start, ts_end)
     system, user = build_prompts(
         event, year, ts_start, ts_end, kpis, fiches, truncated,
         comparisons=comparisons, upcoming=upcoming, n1_retro=n1_retro,
         extra_focus_note=extra_focus_note,
         door_reinforcement=door_reinforcement,
+        attendance=attendance,
     )
-    sections, raw_text, usage = call_claude(system, user, on_progress=on_progress)
+    if dry_run:
+        return _dry_run_payload(
+            event, year, ts_start, ts_end, kpis, fiches, truncated,
+            comparisons, upcoming, attendance, n1_retro,
+            door_reinforcement, extra_focus_note, selection_detail,
+            use_model, system_prompt=system, user_prompt=user,
+        )
+    sections, raw_text, usage = call_claude(
+        system, user, on_progress=on_progress, model=use_model,
+    )
     if sections is None:
-        # JSON non parsable : on conserve le texte brut dans faits_marquants
-        # et on remplit les autres en RAS pour ne rien perdre.
         sections = {k: "" for k in SECTION_KEYS}
         sections["faits_marquants"] = raw_text or "Reponse Claude non parsable."
 
     return save_summary(
         db, event, year, ts_start, ts_end, created_by_email, created_by_name,
         kpis, len(fiches), truncated, sections, raw_text, usage,
-        comparisons=comparisons, upcoming=upcoming, attendance=attendance, n1_retro=n1_retro,
-        door_reinforcement=door_reinforcement,
+        comparisons=comparisons, upcoming=upcoming, attendance=attendance,
+        n1_retro=n1_retro, door_reinforcement=door_reinforcement,
+        selection_detail=selection_detail, model=use_model,
     )
+
+
+def _dry_run_payload(event, year, ts_start, ts_end, kpis, fiches, truncated,
+                     comparisons, upcoming, attendance, n1_retro,
+                     door_reinforcement, extra_focus_note, selection_detail,
+                     model, sections=None, raw_text=None,
+                     system_prompt=None, user_prompt=None):
+    """Payload retourne par generate_period_summary en mode dry_run.
+
+    Le shape est compatible avec _serialize_summary (light=False) cote frontend
+    pour pouvoir reutiliser le meme rendu, plus les champs system_prompt /
+    user_prompt qui contiennent les prompts assembles tels qu'ils auraient ete
+    envoyes a Claude.
+    """
+    return {
+        "_id": "dry-run",
+        "id": "dry-run",
+        "dry_run": True,
+        "event": event,
+        "year": int(year) if year is not None else None,
+        "period_start": ts_start.isoformat() if hasattr(ts_start, "isoformat") else ts_start,
+        "period_end": ts_end.isoformat() if hasattr(ts_end, "isoformat") else ts_end,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "fiches_count": len(fiches),
+        "truncated": bool(truncated),
+        "selection_detail": selection_detail,
+        "kpis": kpis,
+        "comparisons": comparisons or {},
+        "upcoming": upcoming or [],
+        "attendance": attendance,
+        "n1_retro": n1_retro,
+        "door_reinforcement": door_reinforcement,
+        "model": model,
+        "sections": sections or {},
+        "raw_text": raw_text or "",
+        "usage": {"input_tokens": 0, "output_tokens": 0,
+                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+                  "dry_run": True},
+        "extra_focus_note": extra_focus_note or None,
+        "system_prompt": system_prompt or "",
+        "user_prompt": user_prompt or "",
+        "system_prompt_chars": len(system_prompt or ""),
+        "user_prompt_chars": len(user_prompt or ""),
+    }

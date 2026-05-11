@@ -174,6 +174,7 @@
     window.pcorgRefresh = refresh;
     window.pcorgUpdateTooltips = updateVehicleTooltips;
     loadPcorgConfig();
+    loadCockpitUserNames();
     loadVehiclesByCategory();
 
     setTimeout(refresh, 800);
@@ -814,6 +815,15 @@
         urgBadge.textContent = urgencyLabel(item.category, item.niveau_urgence);
         meta.appendChild(urgBadge);
       }
+      if (item.source_type) {
+        var srcMetaRow = SOURCE_BY_ID[item.source_type];
+        if (srcMetaRow) {
+          var srcIco = matIcon(srcMetaRow.icon, "pcorg-row-src-ico");
+          srcIco.style.color = srcMetaRow.color;
+          srcIco.title = "Source : " + srcMetaRow.label;
+          meta.appendChild(srcIco);
+        }
+      }
       var zone = truncZone(item.area_desc);
       if (zone) {
         var zSpan = mkEl("span", "");
@@ -824,6 +834,18 @@
       row.appendChild(content);
 
       var right = mkEl("div", "pcorg-row-right");
+      // Badge antidate / programme (delta ts vs created_at >= 1 min)
+      if (!isClosed && item.created_at && item.ts) {
+        var tsMs = new Date(item.ts).getTime();
+        var caMs = new Date(item.created_at).getTime();
+        if (Math.abs(tsMs - caMs) >= 60000) {
+          var isFuture = tsMs > Date.now() + 60000;
+          var rowBadge = mkEl("span", "pcorg-row-tsbadge pcorg-ts-" + (isFuture ? "future" : "past"));
+          rowBadge.appendChild(matIcon(isFuture ? "event_upcoming" : "history"));
+          rowBadge.title = isFuture ? "Fiche programmee" : "Fiche antidatee";
+          right.appendChild(rowBadge);
+        }
+      }
       var timeEl = mkEl("span", "pcorg-row-time");
       timeEl.textContent = isClosed ? shortTime(item.close_ts) : timeAgo(item.ts);
       right.appendChild(timeEl);
@@ -1122,15 +1144,11 @@
     var opDisplay = d.operator || "";
     if (d.operator_group) opDisplay += " (" + d.operator_group + ")";
     addField(fields, "Operateur", opDisplay);
-    if (d.ts) addField(fields, "Ouverture", new Date(d.ts).toLocaleString("fr-FR"));
+    if (d.ts) addInterventionTsField(fields, d, isClosed);
     if (d.close_ts && d.status_code === 10) addField(fields, "Cloture", new Date(d.close_ts).toLocaleString("fr-FR"));
     if (d.operator_close && d.operator_close !== d.operator) addField(fields, "Clos par", d.operator_close);
     addField(fields, "Zone", truncZone(d.area_desc));
-    addField(fields, "Appelant", cc.appelant);
-    var contact = [];
-    if (cc.telephone) contact.push(typeof cc.telephone === "string" ? cc.telephone : "Telephone");
-    if (cc.radio) contact.push(typeof cc.radio === "string" ? cc.radio : "Radio");
-    if (contact.length) addField(fields, "Via", contact.join(" / "));
+    addSourceField(fields, cc);
     addField(fields, "Carroye", cc.carroye);
     addField(fields, "Groupe", formatGroupDesc(d.group_desc, d.category));
     infoRow.appendChild(fields);
@@ -1741,6 +1759,143 @@
     parent.appendChild(row);
   }
 
+  // Champ "Ouverture" enrichi : affiche un badge si antidate/programme + crayon edit
+  function addInterventionTsField(parent, d, isClosed) {
+    var ts = new Date(d.ts);
+    var createdAt = d.created_at ? new Date(d.created_at) : null;
+    var antidated = createdAt && Math.abs(ts.getTime() - createdAt.getTime()) >= 60000;
+    var row = mkEl("div", "pcorg-fiche-field pcorg-fiche-field-ts");
+    var lbl = mkEl("span", "pcorg-fiche-label");
+    lbl.textContent = "Heure intervention";
+    row.appendChild(lbl);
+    var valWrap = mkEl("span", "pcorg-fiche-value pcorg-fiche-ts-value");
+    var val = mkEl("span", "");
+    val.textContent = ts.toLocaleString("fr-FR");
+    valWrap.appendChild(val);
+    if (antidated) {
+      var info = formatTsChipLabel(ts);
+      var badge = mkEl("span", "pcorg-fiche-ts-badge pcorg-ts-" + info.state);
+      var bIco = matIcon(info.state === "future" ? "event_upcoming" : "history");
+      badge.appendChild(bIco);
+      var bTxt = mkEl("span", "");
+      bTxt.textContent = info.state === "future" ? "Programmee" : "Antidatee";
+      badge.appendChild(bTxt);
+      badge.title = "Saisie le " + createdAt.toLocaleString("fr-FR");
+      valWrap.appendChild(badge);
+    }
+    // Bouton edit (crayon) — uniquement si fiche ouverte
+    if (!isClosed && d.status_code !== 10) {
+      var editBtn = mkEl("button", "pcorg-fiche-ts-edit");
+      editBtn.type = "button";
+      editBtn.title = "Modifier l'heure d'intervention";
+      editBtn.appendChild(matIcon("edit"));
+      editBtn.addEventListener("click", function (e) {
+        e.preventDefault(); e.stopPropagation();
+        if (_tsPopover) { closeTsPopover(); return; }
+        openTsPopover(editBtn, ts, function (newDate) {
+          var dt = newDate || new Date();
+          // datetime-local sans tz : le backend assume Europe/Paris si tzinfo absent
+          var iso = _toLocalInputValue(dt) + ":00";
+          fetch("/api/pcorg/update/" + encodeURIComponent(d.id), {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRFToken": (document.querySelector('meta[name="csrf-token"]') || {}).content || ""
+            },
+            body: JSON.stringify({ intervention_ts: iso })
+          }).then(function (r) { return r.json(); })
+          .then(function (r) {
+            if (r && r.ok) {
+              showToast("success", "Heure d'intervention mise a jour");
+              openDetailModal(d.id, false);
+              refresh();
+            } else {
+              showToast("error", (r && r.error) || "Erreur");
+            }
+          }).catch(function () { showToast("error", "Erreur reseau"); });
+        });
+      });
+      valWrap.appendChild(editBtn);
+    }
+    row.appendChild(valWrap);
+    parent.appendChild(row);
+  }
+
+  // Affichage source (modale detail) — gere fiches nouvelles ET legacy
+  function addSourceField(parent, cc) {
+    cc = cc || {};
+    var srcType = cc.source_type || "";
+    var who = "", channel = "";
+
+    if (srcType === "initiative") {
+      who = "Initiative personnelle";
+      if (cc.source_origine) who += " (" + cc.source_origine + ")";
+    } else if (srcType === "externe") {
+      who = cc.appelant || "—";
+    } else if (srcType === "operateur") {
+      who = cc.emetteur_interne || cc.appelant || "—";
+    } else if (srcType === "hierarchie") {
+      who = cc.donneur_ordre || cc.appelant || "—";
+    } else {
+      // Fallback pour fiches legacy : appelant + telephone/radio
+      if (!cc.appelant && !cc.telephone && !cc.radio) return;
+      srcType = "externe";
+      who = cc.appelant || "—";
+    }
+
+    if (srcType !== "initiative") {
+      var c = cc.canal || "";
+      if (!c) {
+        // Fallback canal depuis flags legacy
+        if (cc.telephone) c = "telephone";
+        else if (cc.radio) c = "radio";
+        else if (cc.presentiel) c = "presentiel";
+        else if (cc.mail) c = "mail";
+      }
+      if (c) {
+        var meta = CANAL_BY_ID[c];
+        channel = meta ? meta.label : c;
+        if (c === "radio") {
+          var canalDet = cc.radio_canal || (typeof cc.radio === "string" ? cc.radio : "");
+          if (canalDet) channel += " · canal " + canalDet;
+        }
+      }
+    }
+
+    var srcMeta = SOURCE_BY_ID[srcType] || SOURCE_BY_ID.externe;
+    var row = mkEl("div", "pcorg-fiche-field pcorg-fiche-field-source");
+    var lbl = mkEl("span", "pcorg-fiche-label");
+    lbl.textContent = "Source";
+    row.appendChild(lbl);
+    var val = mkEl("span", "pcorg-fiche-value pcorg-fiche-source-value");
+    var chip = mkEl("span", "pcorg-fiche-source-chip");
+    chip.style.setProperty("--src-color", srcMeta.color);
+    chip.title = srcMeta.desc;
+    var ico = matIcon(srcMeta.icon, "pcorg-fiche-source-ico");
+    chip.appendChild(ico);
+    var lblTxt = mkEl("span", "pcorg-fiche-source-type");
+    lblTxt.textContent = srcMeta.label;
+    chip.appendChild(lblTxt);
+    val.appendChild(chip);
+    var whoEl = mkEl("span", "pcorg-fiche-source-who");
+    whoEl.textContent = who;
+    val.appendChild(whoEl);
+    if (channel) {
+      var sep = mkEl("span", "pcorg-fiche-source-sep");
+      sep.textContent = "·";
+      val.appendChild(sep);
+      var cIco = matIcon(srcType === "initiative" ? "visibility"
+        : (CANAL_BY_ID[(cc.canal || "")] || {}).icon || "alt_route",
+        "pcorg-fiche-source-canal-ico");
+      val.appendChild(cIco);
+      var chEl = mkEl("span", "pcorg-fiche-source-channel");
+      chEl.textContent = channel;
+      val.appendChild(chEl);
+    }
+    row.appendChild(val);
+    parent.appendChild(row);
+  }
+
   function buildSpecificFields(category, cc) {
     var fields = [];
     var cat = category || "";
@@ -2326,11 +2481,36 @@
   var createGrid25On = false;
   var createCarroye = "";
   var _createCameraPhoto = null; // {url, cam_name} si une capture camera est jointe
+  var createInterventionTs = null; // Date|null : null = "maintenant" (defaut)
+  var createSource = "";           // "initiative" | "externe" | "operateur" | "hierarchie"
+  var createCanal = "";            // "telephone" | "radio" | "presentiel" | "mail"
+
+  // ── Source de la fiche (qui/pourquoi a declenche la creation) ───────────
+  var SOURCE_TYPES = [
+    { id: "initiative", label: "Moi",         icon: "person",         color: "#10b981",
+      desc: "Observation, ronde, ASL" },
+    { id: "externe",    label: "Externe",     icon: "call_received",  color: "#0ea5e9",
+      desc: "Spectateur, riverain, secours, organisateur" },
+    { id: "operateur",  label: "Opérateur",   icon: "groups",         color: "#8b5cf6",
+      desc: "Collègue PCO, dispatcheur, terrain" },
+    { id: "hierarchie", label: "Hiérarchie",  icon: "verified_user",  color: "#f59e0b",
+      desc: "Chef de poste, COS, direction" }
+  ];
+  var SOURCE_BY_ID = SOURCE_TYPES.reduce(function (acc, s) { acc[s.id] = s; return acc; }, {});
+
+  var CANAUX = [
+    { id: "telephone",  label: "Téléphone", icon: "call" },
+    { id: "radio",      label: "Radio",       icon: "radio" },
+    { id: "presentiel", label: "Présentiel",  icon: "co_present" },
+    { id: "mail",       label: "Mail",        icon: "mail" }
+  ];
+  var CANAL_BY_ID = CANAUX.reduce(function (acc, c) { acc[c.id] = c; return acc; }, {});
 
   // Listes de reference chargees depuis la config
   var pcorgConfig = { sous_classifications: {}, intervenants: [], services: [], fiche_simplifiee: {}, urgence_categories: {} };
   var vehiclesByCategory = {};
   var createPendingPatrouille = "";
+  var cockpitUserNames = []; // [{name: "Prenom Nom"}, ...] pour autocomplete sources
 
   function extractLabels(items) {
     if (!items || !items.length) return [];
@@ -2340,7 +2520,20 @@
   function loadPcorgConfig() {
     fetch("/api/pcorg-config")
       .then(function (r) { return r.json(); })
-      .then(function (d) { if (d) pcorgConfig = d; })
+      .then(function (d) {
+        if (d) pcorgConfig = d;
+        try { _refreshSourceDatalists(); } catch (e) {}
+      })
+      .catch(function () {});
+  }
+
+  function loadCockpitUserNames() {
+    fetch("/api/cockpit-users/names", { cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (d) {
+        if (Array.isArray(d)) cockpitUserNames = d;
+        try { _refreshSourceDatalists(); } catch (e) {}
+      })
       .catch(function () {});
   }
 
@@ -2354,6 +2547,223 @@
       .then(function (r) { return r.json(); })
       .then(function (d) { if (d) vehiclesByCategory = d; })
       .catch(function () {});
+  }
+
+  // ── Horodatage personnalise (chip + popover) ─────────────────────────────
+  // Bornes alignees avec le backend (cf. PCORG_TS_PAST_MAX_DAYS / FUTURE_MAX_DAYS)
+  var TS_PAST_MAX_DAYS = 60;
+  var TS_FUTURE_MAX_DAYS = 30;
+  var TS_QUICK_OFFSETS_MIN = [-5, -15, -30, -60]; // raccourcis (negatifs = passe)
+  var _tsPopover = null;
+  var _tsPopoverDocHandlers = null;
+
+  function _pad2(n) { return String(n).padStart(2, "0"); }
+
+  function _fmtTimeHM(d) { return _pad2(d.getHours()) + ":" + _pad2(d.getMinutes()); }
+  function _fmtDateDMY(d) { return _pad2(d.getDate()) + "/" + _pad2(d.getMonth() + 1); }
+
+  function _isSameDay(a, b) {
+    return a.getFullYear() === b.getFullYear()
+      && a.getMonth() === b.getMonth()
+      && a.getDate() === b.getDate();
+  }
+
+  // Convertit Date -> string format input[type=datetime-local] (YYYY-MM-DDTHH:MM)
+  function _toLocalInputValue(d) {
+    return d.getFullYear() + "-" + _pad2(d.getMonth() + 1) + "-" + _pad2(d.getDate())
+      + "T" + _pad2(d.getHours()) + ":" + _pad2(d.getMinutes());
+  }
+
+  // Convertit input[type=datetime-local] (sans tz) -> Date locale
+  function _fromLocalInputValue(s) {
+    if (!s) return null;
+    var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s);
+    if (!m) return null;
+    return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], 0, 0);
+  }
+
+  // Genere le label affiche dans le chip pour une Date donnee (ou null = "Maintenant")
+  function formatTsChipLabel(date) {
+    if (!date) return { label: "Maintenant", state: "now" };
+    var now = new Date();
+    var diffMs = date.getTime() - now.getTime();
+    var diffMin = Math.round(diffMs / 60000);
+    var absMin = Math.abs(diffMin);
+    // < 1 min d'ecart -> considere comme maintenant
+    if (absMin < 1) return { label: "Maintenant", state: "now" };
+    if (diffMin < 0) {
+      // Antidate (passe)
+      var lbl;
+      if (absMin < 60) {
+        lbl = "Il y a " + absMin + " min";
+      } else if (absMin < 24 * 60 && _isSameDay(date, now)) {
+        var h = Math.floor(absMin / 60);
+        var m = absMin % 60;
+        lbl = "Il y a " + h + "h" + (m ? _pad2(m) : "");
+      } else {
+        lbl = _fmtDateDMY(date) + " a " + _fmtTimeHM(date);
+      }
+      return { label: lbl, state: "past", icon: "history" };
+    }
+    // Programme (futur)
+    var lblF;
+    if (absMin < 60) {
+      lblF = "Dans " + absMin + " min";
+    } else if (absMin < 24 * 60 && _isSameDay(date, now)) {
+      lblF = "Aujourd'hui " + _fmtTimeHM(date);
+    } else {
+      var tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
+      if (_isSameDay(date, tomorrow)) lblF = "Demain " + _fmtTimeHM(date);
+      else lblF = _fmtDateDMY(date) + " a " + _fmtTimeHM(date);
+    }
+    return { label: lblF, state: "future", icon: "event_upcoming" };
+  }
+
+  // Met a jour visuel du chip
+  function updateTsChip(chipEl, date) {
+    if (!chipEl) return;
+    var info = formatTsChipLabel(date);
+    var labelEl = chipEl.querySelector(".pcorg-ts-chip-label");
+    var icoEl = chipEl.querySelector(".pcorg-ts-chip-ico");
+    if (labelEl) labelEl.textContent = info.label;
+    if (icoEl) icoEl.textContent = info.icon || "schedule";
+    chipEl.classList.remove("pcorg-ts-now", "pcorg-ts-past", "pcorg-ts-future");
+    chipEl.classList.add("pcorg-ts-" + info.state);
+  }
+
+  // Affiche le popover ancre sur chipEl. onChange(Date|null) appele a la selection.
+  function openTsPopover(chipEl, currentDate, onChange) {
+    closeTsPopover();
+    var pop = mkEl("div", "pcorg-ts-popover");
+    pop.setAttribute("role", "dialog");
+
+    var head = mkEl("div", "pcorg-ts-pop-head");
+    var headIco = matIcon("schedule");
+    head.appendChild(headIco);
+    var headTxt = mkEl("span", ""); headTxt.textContent = "Heure d'intervention";
+    head.appendChild(headTxt);
+    pop.appendChild(head);
+
+    var nowOpt = mkEl("button", "pcorg-ts-opt");
+    nowOpt.type = "button";
+    nowOpt.setAttribute("data-value", "now");
+    var nowDot = mkEl("span", "pcorg-ts-opt-dot");
+    nowOpt.appendChild(nowDot);
+    var nowLbl = mkEl("span", "pcorg-ts-opt-label");
+    nowLbl.textContent = "Maintenant";
+    nowOpt.appendChild(nowLbl);
+    var nowTime = mkEl("span", "pcorg-ts-opt-time");
+    nowTime.textContent = _fmtTimeHM(new Date());
+    nowOpt.appendChild(nowTime);
+    pop.appendChild(nowOpt);
+
+    TS_QUICK_OFFSETS_MIN.forEach(function (off) {
+      var d = new Date(Date.now() + off * 60000);
+      var btn = mkEl("button", "pcorg-ts-opt");
+      btn.type = "button";
+      var dot = mkEl("span", "pcorg-ts-opt-dot");
+      btn.appendChild(dot);
+      var lbl = mkEl("span", "pcorg-ts-opt-label");
+      lbl.textContent = "Il y a " + Math.abs(off) + " min";
+      btn.appendChild(lbl);
+      var t = mkEl("span", "pcorg-ts-opt-time");
+      t.textContent = _fmtTimeHM(d);
+      btn.appendChild(t);
+      btn.addEventListener("click", function (e) {
+        e.preventDefault(); e.stopPropagation();
+        onChange(d);
+        closeTsPopover();
+      });
+      pop.appendChild(btn);
+    });
+
+    nowOpt.addEventListener("click", function (e) {
+      e.preventDefault(); e.stopPropagation();
+      onChange(null);
+      closeTsPopover();
+    });
+
+    var sep = mkEl("div", "pcorg-ts-pop-sep");
+    sep.textContent = "Personnaliser";
+    pop.appendChild(sep);
+
+    var custom = mkEl("div", "pcorg-ts-custom");
+    var input = mkEl("input", "form-input pcorg-ts-custom-input");
+    input.type = "datetime-local";
+    var seedDate = currentDate || new Date();
+    input.value = _toLocalInputValue(seedDate);
+    var minD = new Date(); minD.setDate(minD.getDate() - TS_PAST_MAX_DAYS);
+    var maxD = new Date(); maxD.setDate(maxD.getDate() + TS_FUTURE_MAX_DAYS);
+    input.min = _toLocalInputValue(minD);
+    input.max = _toLocalInputValue(maxD);
+    custom.appendChild(input);
+    var applyBtn = mkEl("button", "pcorg-ts-custom-apply");
+    applyBtn.type = "button";
+    applyBtn.appendChild(matIcon("check"));
+    applyBtn.addEventListener("click", function (e) {
+      e.preventDefault(); e.stopPropagation();
+      var d = _fromLocalInputValue(input.value);
+      if (!d) { showToast("warning", "Date/heure invalide"); return; }
+      var diffDays = (d.getTime() - Date.now()) / 86400000;
+      if (diffDays < -TS_PAST_MAX_DAYS) {
+        showToast("warning", "Date trop ancienne (max " + TS_PAST_MAX_DAYS + " jours)");
+        return;
+      }
+      if (diffDays > TS_FUTURE_MAX_DAYS) {
+        showToast("warning", "Date trop lointaine (max " + TS_FUTURE_MAX_DAYS + " jours)");
+        return;
+      }
+      onChange(d);
+      closeTsPopover();
+    });
+    custom.appendChild(applyBtn);
+    pop.appendChild(custom);
+
+    document.body.appendChild(pop);
+    chipEl.setAttribute("aria-expanded", "true");
+
+    // Position : sous le chip, aligne a gauche; flip si overflow
+    var rect = chipEl.getBoundingClientRect();
+    pop.style.left = rect.left + "px";
+    pop.style.top = (rect.bottom + 6) + "px";
+    requestAnimationFrame(function () {
+      var pr = pop.getBoundingClientRect();
+      if (pr.right > window.innerWidth - 8) {
+        pop.style.left = Math.max(8, window.innerWidth - pr.width - 8) + "px";
+      }
+      if (pr.bottom > window.innerHeight - 8) {
+        pop.style.top = Math.max(8, rect.top - pr.height - 6) + "px";
+      }
+    });
+
+    _tsPopover = { el: pop, chip: chipEl };
+    function onDocClick(e) {
+      if (!_tsPopover) return;
+      if (e.target.closest(".pcorg-ts-popover")) return;
+      if (e.target === _tsPopover.chip || _tsPopover.chip.contains(e.target)) return;
+      closeTsPopover();
+    }
+    function onEsc(e) { if (e.key === "Escape") closeTsPopover(); }
+    setTimeout(function () {
+      document.addEventListener("click", onDocClick, true);
+      document.addEventListener("touchstart", onDocClick, true);
+    }, 50);
+    document.addEventListener("keydown", onEsc);
+    _tsPopoverDocHandlers = { onDocClick: onDocClick, onEsc: onEsc };
+  }
+
+  function closeTsPopover() {
+    if (_tsPopover) {
+      _tsPopover.chip.setAttribute("aria-expanded", "false");
+      _tsPopover.el.remove();
+      _tsPopover = null;
+    }
+    if (_tsPopoverDocHandlers) {
+      document.removeEventListener("click", _tsPopoverDocHandlers.onDocClick, true);
+      document.removeEventListener("touchstart", _tsPopoverDocHandlers.onDocClick, true);
+      document.removeEventListener("keydown", _tsPopoverDocHandlers.onEsc);
+      _tsPopoverDocHandlers = null;
+    }
   }
 
   function showCreate() { createModal.classList.add("show"); createOverlay.classList.add("show"); }
@@ -2387,22 +2797,13 @@
     var nextBtn = document.getElementById("pcorgCreateNext");
     var prevBtn = document.getElementById("pcorgCreatePrev");
     var form = document.getElementById("pcorgCreateForm");
-    var radioCheck = document.getElementById("pcorg-c-radio");
-    var telCheck = document.getElementById("pcorg-c-tel");
-    var radioCanal = document.getElementById("pcorg-c-radio-canal");
-
     if (!createModal || !btn) return;
 
     closeBtn.addEventListener("click", hideCreate);
     cancelBtn.addEventListener("click", hideCreate);
     createOverlay.addEventListener("click", hideCreate);
 
-    radioCheck.addEventListener("change", function () {
-      radioCanal.style.display = radioCheck.checked ? "" : "none";
-    });
-    telCheck.addEventListener("change", function () {
-      if (telCheck.checked) radioCanal.style.display = "none";
-    });
+    buildSourceTabs();
 
     // Click "+" -> ouvrir la modale directement a l'etape 1
     btn.addEventListener("click", function () {
@@ -2411,6 +2812,19 @@
       goToStep(1);
       initCreateMap();
     });
+
+    // Chip horodatage (etape 2)
+    var tsChip = document.getElementById("pcorg-c-ts-chip");
+    if (tsChip) {
+      tsChip.addEventListener("click", function (e) {
+        e.preventDefault(); e.stopPropagation();
+        if (_tsPopover) { closeTsPopover(); return; }
+        openTsPopover(tsChip, createInterventionTs, function (date) {
+          createInterventionTs = date;
+          updateTsChip(tsChip, date);
+        });
+      });
+    }
 
     // Navigation
     nextBtn.addEventListener("click", function () {
@@ -2430,20 +2844,8 @@
           showToast("warning", "La description est obligatoire");
           return;
         }
-        var isInfoOrMC = createSelectedCat === "PCO.Information" || createSelectedCat === "PCO.MainCourante";
-        if (!isInfoOrMC) {
-          var appelant = document.getElementById("pcorg-c-appelant").value.trim();
-          if (!appelant) {
-            showToast("warning", "L'appelant est obligatoire");
-            return;
-          }
-          var telOk = document.getElementById("pcorg-c-tel").checked;
-          var radioOk = document.getElementById("pcorg-c-radio").checked;
-          if (!telOk && !radioOk) {
-            showToast("warning", "Selectionnez un mode de contact (telephone ou radio)");
-            return;
-          }
-        }
+        var srcCheck = validateSourceFields();
+        if (!srcCheck.ok) { showToast("warning", srcCheck.msg); return; }
         goToStep(3);
       }
     });
@@ -2497,6 +2899,15 @@
     createGrid100On = false;
     createGrid25On = false;
     createStep = 1;
+    createInterventionTs = null;
+    closeTsPopover();
+    var tsChipReset = document.getElementById("pcorg-c-ts-chip");
+    if (tsChipReset) updateTsChip(tsChipReset, null);
+    createSource = "";
+    createCanal = "";
+    document.querySelectorAll(".pcorg-source-tab").forEach(function (b) { b.classList.remove("selected"); });
+    var srcFields = document.getElementById("pcorg-c-source-fields");
+    if (srcFields) srcFields.textContent = "";
     // Reset header
     var header = document.getElementById("pcorg-create-header");
     header.style.background = "var(--brand)";
@@ -2509,9 +2920,6 @@
       b.classList.remove("selected"); b.style.borderColor = ""; b.style.background = "";
     });
     document.getElementById("pcorg-create-specific").textContent = "";
-    document.getElementById("pcorg-c-radio-canal").style.display = "none";
-    // Reset required stars to visible
-    document.querySelectorAll(".pcorg-required-star").forEach(function (s) { s.style.display = ""; });
     document.getElementById("pcorg-create-pos-row").style.display = "none";
     document.getElementById("pcorg-create-map-info").style.display = "";
     document.getElementById("pcorg-create-grid25").style.display = "none";
@@ -2845,18 +3253,6 @@
       b.style.borderColor = isSel ? st.color : "";
       b.style.background = isSel ? st.color : "";
     });
-    // Show/hide appelant & contact required stars for Information / MainCourante
-    var isInfoOrMC = cat === "PCO.Information" || cat === "PCO.MainCourante";
-    var appelantGroup = document.getElementById("pcorg-c-appelant-group");
-    var contactGroup = document.getElementById("pcorg-c-contact-group");
-    if (appelantGroup) {
-      var star = appelantGroup.querySelector(".pcorg-required-star");
-      if (star) star.style.display = isInfoOrMC ? "none" : "";
-    }
-    if (contactGroup) {
-      var star2 = contactGroup.querySelector(".pcorg-required-star");
-      if (star2) star2.style.display = isInfoOrMC ? "none" : "";
-    }
     // Update header color
     var header = document.getElementById("pcorg-create-header");
     header.style.background = st.color;
@@ -2870,8 +3266,195 @@
         iconSize: [36, 36], iconAnchor: [18, 36]
       }));
     }
+    // Default source : Information/MainCourante -> "Moi" ; sinon "Externe"
+    if (!createSource) {
+      var defaultSrc = (cat === "PCO.Information" || cat === "PCO.MainCourante") ? "initiative" : "externe";
+      selectSource(defaultSrc);
+    }
     // Build specific fields for step 3
     buildSpecificCreateFields(cat);
+  }
+
+  // ── Source selector (etape 2) ──────────────────────────────────────────
+  function buildSourceTabs() {
+    var container = document.getElementById("pcorg-c-source-tabs");
+    if (!container) return;
+    container.textContent = "";
+    SOURCE_TYPES.forEach(function (src) {
+      var btn = mkEl("button", "pcorg-source-tab");
+      btn.type = "button";
+      btn.setAttribute("data-src", src.id);
+      btn.style.setProperty("--src-color", src.color);
+      var ico = matIcon(src.icon, "pcorg-source-tab-ico");
+      btn.appendChild(ico);
+      var lbl = mkEl("span", "pcorg-source-tab-label");
+      lbl.textContent = src.label;
+      btn.appendChild(lbl);
+      btn.title = src.desc;
+      btn.addEventListener("click", function () { selectSource(src.id); });
+      container.appendChild(btn);
+    });
+  }
+
+  function selectSource(srcId) {
+    createSource = srcId;
+    // Mise a jour visuel des onglets
+    document.querySelectorAll(".pcorg-source-tab").forEach(function (b) {
+      var isSel = b.getAttribute("data-src") === srcId;
+      b.classList.toggle("selected", isSel);
+    });
+    buildSourceSubFields(srcId);
+  }
+
+  function _refreshSourceDatalists() {
+    var dlOp = document.getElementById("pcorg-c-dl-operateurs");
+    var dlDo = document.getElementById("pcorg-c-dl-donneurs");
+    var userNames = (cockpitUserNames || []).map(function (u) { return u.name; }).filter(Boolean);
+    var opAdmin = extractLabels((pcorgConfig && pcorgConfig.operateurs_internes) || []);
+    var doAdmin = extractLabels((pcorgConfig && pcorgConfig.donneurs_ordre) || []);
+    // Admin d'abord (priorite metier), puis users cockpit (sans doublons)
+    function dedupMerge(primary, secondary) {
+      var seen = {};
+      var out = [];
+      primary.concat(secondary).forEach(function (v) {
+        var k = (v || "").trim().toLowerCase();
+        if (!k || seen[k]) return;
+        seen[k] = 1; out.push(v);
+      });
+      return out;
+    }
+    var opList = dedupMerge(opAdmin, userNames);
+    var doList = dedupMerge(doAdmin, userNames);
+    if (dlOp) {
+      dlOp.textContent = "";
+      opList.forEach(function (v) { var o = document.createElement("option"); o.value = v; dlOp.appendChild(o); });
+    }
+    if (dlDo) {
+      dlDo.textContent = "";
+      doList.forEach(function (v) { var o = document.createElement("option"); o.value = v; dlDo.appendChild(o); });
+    }
+  }
+
+  function buildSourceSubFields(srcId) {
+    var container = document.getElementById("pcorg-c-source-fields");
+    if (!container) return;
+    container.textContent = "";
+    _refreshSourceDatalists();
+
+    if (srcId === "initiative") {
+      // Champ optionnel : "A la suite de"
+      var grp = mkEl("div", "form-group pcorg-source-subgrp");
+      var lbl = mkEl("label", ""); lbl.setAttribute("for", "pcorg-c-source-origine");
+      lbl.textContent = "À la suite de ";
+      var optTag = mkEl("span", "pcorg-source-opt"); optTag.textContent = "(optionnel)";
+      lbl.appendChild(optTag);
+      grp.appendChild(lbl);
+      var inp = mkEl("input", "form-input"); inp.type = "text"; inp.id = "pcorg-c-source-origine";
+      inp.placeholder = "Ronde, observation directe, alerte caméra, ASL...";
+      grp.appendChild(inp);
+      container.appendChild(grp);
+      return;
+    }
+
+    var qLabel, qId, qPlaceholder, qDatalist;
+    if (srcId === "externe") {
+      qLabel = "Appelant"; qId = "pcorg-c-appelant";
+      qPlaceholder = "Nom, fonction, organisme...";
+      qDatalist = "";
+    } else if (srcId === "operateur") {
+      qLabel = "Opérateur émetteur"; qId = "pcorg-c-emetteur";
+      qPlaceholder = "Collègue PCO, dispatcheur, agent terrain";
+      qDatalist = "pcorg-c-dl-operateurs";
+    } else if (srcId === "hierarchie") {
+      qLabel = "Donneur d'ordre"; qId = "pcorg-c-donneur";
+      qPlaceholder = "Chef de poste, COS, direction sécurité...";
+      qDatalist = "pcorg-c-dl-donneurs";
+    }
+
+    // Champ "qui"
+    var grpQ = mkEl("div", "form-group pcorg-source-subgrp");
+    var lblQ = mkEl("label", "");
+    lblQ.setAttribute("for", qId);
+    lblQ.textContent = qLabel + " ";
+    var star = mkEl("span", "pcorg-required-star");
+    star.style.color = "var(--danger,#ef4444)";
+    star.textContent = "*";
+    lblQ.appendChild(star);
+    grpQ.appendChild(lblQ);
+    var inpQ = mkEl("input", "form-input");
+    inpQ.type = "text"; inpQ.id = qId; inpQ.placeholder = qPlaceholder;
+    if (qDatalist) inpQ.setAttribute("list", qDatalist);
+    grpQ.appendChild(inpQ);
+    container.appendChild(grpQ);
+
+    // Canal (obligatoire) — segmented
+    var grpC = mkEl("div", "form-group pcorg-source-subgrp");
+    var lblC = mkEl("label", "");
+    lblC.textContent = "Canal ";
+    var starC = mkEl("span", "pcorg-required-star");
+    starC.style.color = "var(--danger,#ef4444)";
+    starC.textContent = "*";
+    lblC.appendChild(starC);
+    grpC.appendChild(lblC);
+    var rowC = mkEl("div", "pcorg-canal-row");
+    CANAUX.forEach(function (c) {
+      var b = mkEl("button", "pcorg-canal-btn");
+      b.type = "button";
+      b.setAttribute("data-canal", c.id);
+      b.appendChild(matIcon(c.icon, "pcorg-canal-btn-ico"));
+      var lab = mkEl("span", ""); lab.textContent = c.label;
+      b.appendChild(lab);
+      b.addEventListener("click", function () { selectCanal(c.id); });
+      rowC.appendChild(b);
+    });
+    grpC.appendChild(rowC);
+    var canalDet = mkEl("div", "pcorg-canal-detail");
+    canalDet.id = "pcorg-c-canal-detail";
+    canalDet.style.display = "none";
+    var canalInp = mkEl("input", "form-input");
+    canalInp.id = "pcorg-c-canal-detail-input";
+    canalInp.placeholder = "Canal radio (ex: 3, Sécu, Maintenance...)";
+    canalDet.appendChild(canalInp);
+    grpC.appendChild(canalDet);
+    container.appendChild(grpC);
+
+    // Re-applique canal en cours si compatible
+    if (createCanal) selectCanal(createCanal, true);
+  }
+
+  function selectCanal(canalId, keepValue) {
+    createCanal = canalId;
+    document.querySelectorAll(".pcorg-canal-btn").forEach(function (b) {
+      b.classList.toggle("selected", b.getAttribute("data-canal") === canalId);
+    });
+    var det = document.getElementById("pcorg-c-canal-detail");
+    var inp = document.getElementById("pcorg-c-canal-detail-input");
+    if (det && inp) {
+      if (canalId === "radio") {
+        det.style.display = "";
+        if (!keepValue) inp.value = "";
+      } else {
+        det.style.display = "none";
+        if (!keepValue) inp.value = "";
+      }
+    }
+  }
+
+  function validateSourceFields() {
+    if (!createSource) return { ok: false, msg: "Selectionnez la source de la fiche" };
+    if (createSource === "initiative") return { ok: true };
+    var qId = createSource === "externe" ? "pcorg-c-appelant"
+            : createSource === "operateur" ? "pcorg-c-emetteur"
+            : "pcorg-c-donneur";
+    var v = (document.getElementById(qId) || {}).value;
+    if (!v || !v.trim()) {
+      var label = createSource === "externe" ? "L'appelant"
+                : createSource === "operateur" ? "L'opérateur émetteur"
+                : "Le donneur d'ordre";
+      return { ok: false, msg: label + " est obligatoire" };
+    }
+    if (!createCanal) return { ok: false, msg: "Selectionnez le canal" };
+    return { ok: true };
   }
 
   var createSelectedUrgency = "";
@@ -3126,14 +3709,41 @@
 
     // Build content_category
     var cc = {};
-    var appelant = document.getElementById("pcorg-c-appelant").value.trim();
-    if (appelant) cc.appelant = appelant;
-    var contactSel = document.querySelector('input[name="pcorg-c-contact"]:checked');
-    if (contactSel && contactSel.value === "telephone") {
-      cc.telephone = true;
-    } else if (contactSel && contactSel.value === "radio") {
-      var radioCanal = document.getElementById("pcorg-c-radio-canal");
-      cc.radio = radioCanal.value.trim() || true;
+    // Source de la fiche (4 types). Backwards compat : on remplit aussi
+    // appelant/telephone/radio quand pertinent pour la lecture par les anciens consumers.
+    if (createSource) cc.source_type = createSource;
+    if (createSource === "initiative") {
+      var origine = getVal("pcorg-c-source-origine");
+      if (origine) cc.source_origine = origine;
+    } else if (createSource === "externe") {
+      var appelant = getVal("pcorg-c-appelant");
+      if (appelant) cc.appelant = appelant;
+    } else if (createSource === "operateur") {
+      var emetteur = getVal("pcorg-c-emetteur");
+      if (emetteur) {
+        cc.emetteur_interne = emetteur;
+        cc.appelant = emetteur; // compat
+      }
+    } else if (createSource === "hierarchie") {
+      var donneur = getVal("pcorg-c-donneur");
+      if (donneur) {
+        cc.donneur_ordre = donneur;
+        cc.appelant = donneur; // compat
+      }
+    }
+    if (createSource && createSource !== "initiative") {
+      cc.canal = createCanal;
+      if (createCanal === "telephone") {
+        cc.telephone = true;
+      } else if (createCanal === "radio") {
+        var canalDet = getVal("pcorg-c-canal-detail-input");
+        cc.radio = canalDet || true;
+        if (canalDet) cc.radio_canal = canalDet;
+      } else if (createCanal === "presentiel") {
+        cc.presentiel = true;
+      } else if (createCanal === "mail") {
+        cc.mail = true;
+      }
     }
 
     // Carroyage from step 1
@@ -3176,6 +3786,18 @@
       lat: createLat,
       lon: createLon
     };
+
+    // Heure d'intervention personnalisee : confirm si antidatage > 24h
+    if (createInterventionTs) {
+      var diffMs = Date.now() - createInterventionTs.getTime();
+      var diffHours = diffMs / 3600000;
+      if (diffHours > 24) {
+        var fmt = _pad2(createInterventionTs.getDate()) + "/" + _pad2(createInterventionTs.getMonth() + 1)
+          + " a " + _fmtTimeHM(createInterventionTs);
+        if (!window.confirm("Creer une fiche datee du " + fmt + " ?")) return;
+      }
+      payload.intervention_ts = _toLocalInputValue(createInterventionTs) + ":00";
+    }
 
     var pendingPhoto = _createCameraPhoto;
 

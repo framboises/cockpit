@@ -1,0 +1,21 @@
+ 
+=== Lancement 08-05-26  7:00:02,86 === 
+2026-05-08 07:00:03 [INFO] Fenetre analysee : 2026-05-07T05:00:00+00:00 -> 2026-05-08T05:00:00+00:00 (UTC)
+2026-05-08 07:00:03 [INFO] Evenement detecte : GPF 2026
+2026-05-08 07:00:03 [INFO] Generation du resume Claude (streaming)...
+2026-05-08 07:00:12 [INFO]   ... 891 chars recus (1 output tokens)
+2026-05-08 07:00:18 [INFO]   ... 1788 chars recus (1 output tokens)
+2026-05-08 07:00:25 [INFO]   ... 2646 chars recus (1 output tokens)
+2026-05-08 07:00:59 [INFO]   ... 3743 chars recus (1 output tokens)
+2026-05-08 07:01:06 [INFO]   ... 4582 chars recus (1 output tokens)
+2026-05-08 07:01:13 [INFO]   ... 5420 chars recus (1 output tokens)
+2026-05-08 07:01:20 [INFO]   ... 6266 chars recus (1 output tokens)
+2026-05-08 07:01:26 [INFO]   ... 7100 chars recus (1 output tokens)
+2026-05-08 07:01:32 [INFO]   ... 7977 chars recus (1 output tokens)
+2026-05-08 07:01:38 [INFO]   ... 8861 chars recus (1 output tokens)
+2026-05-08 07:01:44 [INFO]   ... 9735 chars recus (1 output tokens)
+2026-05-08 07:01:51 [INFO]   ... 10577 chars recus (1 output tokens)
+2026-05-08 07:01:55 [INFO] Resume genere : id=24a7d47bd1c1447ba2b2f28beb647265 fiches=80 tokens_in=44650 tokens_out=3756
+2026-05-08 07:01:55 [INFO] Destinataires inscrits au rapport matinal : 8
+2026-05-08 07:01:55 [INFO] Mail envoye a 8 destinataire(s) via 192.168.254.2
+=== Fin 08-05-26  7:01:55,83 (code retour 0) === 

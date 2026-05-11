@@ -1,0 +1,25 @@
+ 
+=== Lancement 11-05-26  7:00:25,83 === 
+2026-05-11 07:00:33 [INFO] Fenetre analysee : 2026-05-10T05:00:00+00:00 -> 2026-05-11T05:00:00+00:00 (UTC)
+2026-05-11 07:00:33 [INFO] Evenement detecte : GPF 2026
+2026-05-11 07:00:33 [INFO] Generation du resume Claude (streaming)...
+2026-05-11 07:00:33 [INFO] attendance_block : GPF 2026 -> pas de ticketing config, calcul pics seulement (billets/projection a None)
+2026-05-11 07:00:33 [INFO] Selection fiches : total=75 majors=1 others=74 selected=75 cut=0 capped=False
+2026-05-11 07:00:33 [INFO] Selection fiches : total=111 majors=0 others=80 selected=80 cut=31 capped=False
+2026-05-11 07:00:33 [INFO] attendance_block : GPF 2026 -> yesterday(public=True billets=None pic=98593@14h04 pic_prev=101190@14h00 proj=None d=-3%) | today(public=False billets=None pic=None@- pic_prev=None@- proj=None d=-%) | tomorrow(public=False billets=None pic=None@- pic_prev=None@- proj=None d=-%)
+2026-05-11 07:01:04 [INFO]   ... 864 chars recus (1 output tokens)
+2026-05-11 07:01:11 [INFO]   ... 1679 chars recus (1 output tokens)
+2026-05-11 07:01:17 [INFO]   ... 2542 chars recus (1 output tokens)
+2026-05-11 07:01:24 [INFO]   ... 3375 chars recus (1 output tokens)
+2026-05-11 07:01:30 [INFO]   ... 4242 chars recus (1 output tokens)
+2026-05-11 07:01:36 [INFO]   ... 5142 chars recus (1 output tokens)
+2026-05-11 07:01:42 [INFO]   ... 5990 chars recus (1 output tokens)
+2026-05-11 07:01:49 [INFO]   ... 6842 chars recus (1 output tokens)
+2026-05-11 07:01:55 [INFO]   ... 7664 chars recus (1 output tokens)
+2026-05-11 07:02:00 [INFO]   ... 8547 chars recus (1 output tokens)
+2026-05-11 07:02:05 [INFO]   ... 9397 chars recus (1 output tokens)
+2026-05-11 07:02:11 [INFO]   ... 10303 chars recus (1 output tokens)
+2026-05-11 07:02:11 [INFO] Resume genere : id=60881b7207bb41d297681ad729325bb8 fiches=75 tokens_in=32064 tokens_out=3396
+2026-05-11 07:02:11 [INFO] Destinataires inscrits au rapport matinal : 10
+2026-05-11 07:02:11 [INFO] Mail envoye a 10 destinataire(s) via 192.168.254.2
+=== Fin 11-05-26  7:02:11,87 (code retour 0) === 
