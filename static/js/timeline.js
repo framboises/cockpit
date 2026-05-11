@@ -2,14 +2,16 @@
 // HELPERS
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// Fonction utilitaire pour convertir l'heure "HH:MM" en minutes depuis minuit
+// Fonction utilitaire pour convertir l'heure en minutes depuis minuit.
+// Accepte "HH:MM" et "HHhMM" (format FR utilise par certaines categories, ex: Procedures).
 function timeToMinutes(timeStr) {
     if (!timeStr || timeStr.toUpperCase() === "TBC") return Infinity;
-    const parts = timeStr.split(':');
-    const h = parseInt(parts[0], 10);
-    const m = parseInt(parts[1], 10);
-    if (isNaN(h) || isNaN(m)) return Infinity;
-    return h * 60 + m;
+    const m = String(timeStr).trim().match(/^(\d{1,2})[:h](\d{2})$/i);
+    if (!m) return Infinity;
+    const h = parseInt(m[1], 10);
+    const mn = parseInt(m[2], 10);
+    if (isNaN(h) || isNaN(mn)) return Infinity;
+    return h * 60 + mn;
 }
 
 // Fonction pour tronquer une chaîne à un nombre max de caractères
@@ -269,7 +271,7 @@ function clusterTimeWindow(items){
   return txt;
 }
 
-function validTimeStr(s){ return !!(s && /^\d{1,2}:\d{2}$/.test(s.trim())); }
+function validTimeStr(s){ return !!(s && /^\d{1,2}[:h]\d{2}$/i.test(s.trim())); }
 
 function getOpenCloseKind(it){
   // Priorite au champ explicite phase pose par merge.py
@@ -374,7 +376,7 @@ function removeRedundantOpenClosePairs(byDate, { mode = 'midnight' } = {}) {
 }
 
 // Heures invalides -> Infinity (en fin)
-function isValidHHMM(s){ return !!(s && /^\d{1,2}:\d{2}$/.test(s.trim())); }
+function isValidHHMM(s){ return !!(s && /^\d{1,2}[:h]\d{2}$/i.test(s.trim())); }
 
 // minute "primaire" par item, en respectant open/close quand on peut
 function getItemSortMinute(it){
@@ -415,7 +417,7 @@ function labelForItem(it){
 function hasNoTodos(item) {
   return splitTodo(item?.todo || "").length === 0;
 }
-function validHHMM(s) { return !!(s && /^\d{1,2}:\d{2}$/.test(s.trim())); }
+function validHHMM(s) { return !!(s && /^\d{1,2}[:h]\d{2}$/i.test(s.trim())); }
 
 // Renvoie 'ready' | 'progress' | 'none' | null (null => pas d'affichage)
 function getPrepStatus(item) {

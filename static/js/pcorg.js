@@ -3306,13 +3306,13 @@
     buildSourceSubFields(srcId);
   }
 
+  // Cache memoire fusionne admin + cockpit users (pour autocomplete custom)
+  var _sourceLists = { operateur: [], hierarchie: [] };
+
   function _refreshSourceDatalists() {
-    var dlOp = document.getElementById("pcorg-c-dl-operateurs");
-    var dlDo = document.getElementById("pcorg-c-dl-donneurs");
     var userNames = (cockpitUserNames || []).map(function (u) { return u.name; }).filter(Boolean);
     var opAdmin = extractLabels((pcorgConfig && pcorgConfig.operateurs_internes) || []);
     var doAdmin = extractLabels((pcorgConfig && pcorgConfig.donneurs_ordre) || []);
-    // Admin d'abord (priorite metier), puis users cockpit (sans doublons)
     function dedupMerge(primary, secondary) {
       var seen = {};
       var out = [];
@@ -3323,16 +3323,115 @@
       });
       return out;
     }
-    var opList = dedupMerge(opAdmin, userNames);
-    var doList = dedupMerge(doAdmin, userNames);
-    if (dlOp) {
-      dlOp.textContent = "";
-      opList.forEach(function (v) { var o = document.createElement("option"); o.value = v; dlOp.appendChild(o); });
+    _sourceLists.operateur = dedupMerge(opAdmin, userNames);
+    _sourceLists.hierarchie = dedupMerge(doAdmin, userNames);
+  }
+
+  // Autocomplete custom : seuil 3 chars, style app, navigation clavier
+  function attachAutocomplete(input, getItems, opts) {
+    opts = opts || {};
+    var minChars = opts.minChars != null ? opts.minChars : 3;
+    var maxItems = opts.maxItems || 10;
+    var dropdown = null;
+    var activeIndex = -1;
+    var currentItems = [];
+
+    function position() {
+      if (!dropdown) return;
+      var r = input.getBoundingClientRect();
+      dropdown.style.left = r.left + "px";
+      dropdown.style.top = (r.bottom + 4) + "px";
+      dropdown.style.minWidth = r.width + "px";
     }
-    if (dlDo) {
-      dlDo.textContent = "";
-      doList.forEach(function (v) { var o = document.createElement("option"); o.value = v; dlDo.appendChild(o); });
+
+    function close() {
+      if (dropdown) { dropdown.remove(); dropdown = null; }
+      activeIndex = -1;
     }
+
+    function setActive(idx) {
+      activeIndex = idx;
+      if (!dropdown) return;
+      var nodes = dropdown.querySelectorAll(".pcorg-autocomplete-opt");
+      nodes.forEach(function (o, i) {
+        o.classList.toggle("active", i === idx);
+        if (i === idx) o.scrollIntoView({ block: "nearest" });
+      });
+    }
+
+    function choose(idx) {
+      if (idx < 0 || idx >= currentItems.length) return;
+      input.value = currentItems[idx];
+      close();
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    function render() {
+      var q = (input.value || "").trim().toLowerCase();
+      if (q.length < minChars) { close(); return; }
+      var items = (getItems() || []).filter(function (it) {
+        return it.toLowerCase().indexOf(q) !== -1;
+      });
+      items.sort(function (a, b) {
+        var as = a.toLowerCase().indexOf(q) === 0 ? 0 : 1;
+        var bs = b.toLowerCase().indexOf(q) === 0 ? 0 : 1;
+        if (as !== bs) return as - bs;
+        return a.localeCompare(b);
+      });
+      currentItems = items.slice(0, maxItems);
+      if (!currentItems.length) { close(); return; }
+      if (!dropdown) {
+        dropdown = mkEl("div", "pcorg-autocomplete");
+        document.body.appendChild(dropdown);
+      }
+      dropdown.textContent = "";
+      activeIndex = -1;
+      currentItems.forEach(function (item, idx) {
+        var opt = mkEl("div", "pcorg-autocomplete-opt");
+        var pos = item.toLowerCase().indexOf(q);
+        if (pos === -1) {
+          opt.textContent = item;
+        } else {
+          if (pos > 0) opt.appendChild(document.createTextNode(item.slice(0, pos)));
+          var hi = document.createElement("strong");
+          hi.textContent = item.slice(pos, pos + q.length);
+          opt.appendChild(hi);
+          if (pos + q.length < item.length) {
+            opt.appendChild(document.createTextNode(item.slice(pos + q.length)));
+          }
+        }
+        opt.addEventListener("mousedown", function (e) {
+          e.preventDefault(); // empeche le blur de fermer avant le click
+          choose(idx);
+        });
+        dropdown.appendChild(opt);
+      });
+      position();
+    }
+
+    input.addEventListener("input", render);
+    input.addEventListener("focus", render);
+    input.addEventListener("blur", function () { setTimeout(close, 150); });
+    input.addEventListener("keydown", function (e) {
+      if (!dropdown || !currentItems.length) {
+        if (e.key === "Escape") close();
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActive((activeIndex + 1) % currentItems.length);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActive((activeIndex - 1 + currentItems.length) % currentItems.length);
+      } else if (e.key === "Enter") {
+        if (activeIndex >= 0) { e.preventDefault(); choose(activeIndex); }
+      } else if (e.key === "Escape") {
+        close();
+      }
+    });
+    var repos = function () { if (dropdown) position(); };
+    window.addEventListener("scroll", repos, true);
+    window.addEventListener("resize", repos);
   }
 
   function buildSourceSubFields(srcId) {
@@ -3356,19 +3455,19 @@
       return;
     }
 
-    var qLabel, qId, qPlaceholder, qDatalist;
+    var qLabel, qId, qPlaceholder, qListKey;
     if (srcId === "externe") {
       qLabel = "Appelant"; qId = "pcorg-c-appelant";
       qPlaceholder = "Nom, fonction, organisme...";
-      qDatalist = "";
+      qListKey = "";
     } else if (srcId === "operateur") {
       qLabel = "Opérateur émetteur"; qId = "pcorg-c-emetteur";
       qPlaceholder = "Collègue PCO, dispatcheur, agent terrain";
-      qDatalist = "pcorg-c-dl-operateurs";
+      qListKey = "operateur";
     } else if (srcId === "hierarchie") {
       qLabel = "Donneur d'ordre"; qId = "pcorg-c-donneur";
       qPlaceholder = "Chef de poste, COS, direction sécurité...";
-      qDatalist = "pcorg-c-dl-donneurs";
+      qListKey = "hierarchie";
     }
 
     // Champ "qui"
@@ -3383,9 +3482,13 @@
     grpQ.appendChild(lblQ);
     var inpQ = mkEl("input", "form-input");
     inpQ.type = "text"; inpQ.id = qId; inpQ.placeholder = qPlaceholder;
-    if (qDatalist) inpQ.setAttribute("list", qDatalist);
+    inpQ.autocomplete = "off";
     grpQ.appendChild(inpQ);
     container.appendChild(grpQ);
+
+    if (qListKey) {
+      attachAutocomplete(inpQ, function () { return _sourceLists[qListKey] || []; });
+    }
 
     // Canal (obligatoire) — segmented
     var grpC = mkEl("div", "form-group pcorg-source-subgrp");

@@ -8736,6 +8736,35 @@ th span { font-size: 0.88rem; font-weight: 700; }
   display: flex; flex-direction: column; gap: 8px;
   margin-bottom: 8px;
 }
+
+/* Autocomplete custom (sources operateur/hierarchie) */
+.pcorg-autocomplete {
+  position: fixed; z-index: 10010;
+  min-width: 220px; max-height: 240px; overflow-y: auto;
+  padding: 4px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.12);
+  animation: pcorgTsPopIn 0.1s ease-out;
+}
+.pcorg-autocomplete-opt {
+  padding: 6px 10px; border-radius: 5px;
+  font-size: 0.82rem; color: var(--text);
+  cursor: pointer; transition: background 0.08s;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pcorg-autocomplete-opt:hover,
+.pcorg-autocomplete-opt.active {
+  background: var(--bg);
+}
+.pcorg-autocomplete-opt strong {
+  font-weight: 700; color: var(--brand);
+}
+.pcorg-autocomplete::-webkit-scrollbar { width: 6px; }
+.pcorg-autocomplete::-webkit-scrollbar-thumb {
+  background: var(--line); border-radius: 3px;
+}
 .pcorg-source-subgrp { margin-bottom: 0; }
 .pcorg-source-opt {
   font-size: 0.72rem; color: var(--muted); font-weight: 400;
