@@ -3814,6 +3814,10 @@
     selectedCategory: null,
     selectedUrgency: "UR",
     attachToFiche: false,
+    // Quand aucune fiche cible n'existe, controle si l'envoi cree
+    // automatiquement une fiche pcorg (visible sur la carte cockpit) ou
+    // se contente d'envoyer la photo dans l'inbox PC Org.
+    createFiche: true,
     // Fiche cible quand on ouvre la camera depuis le detail d'une fiche.
     // Si null, on retombe sur state.activeFicheId (= la fiche en cours
     // d'intervention). Permet d'ajouter des photos a une fiche affichee
@@ -3922,6 +3926,7 @@
     var implicitFiche = (inEngagement && state.activeFicheId) ? state.activeFicheId : null;
     _cam.targetFicheId = explicitFiche || implicitFiche;
     _cam.attachToFiche = !!_cam.targetFicheId;
+    _cam.createFiche = true;
     refreshAttachBar();
     refreshComposeChips();
     refreshThumbStrip();
@@ -4133,10 +4138,13 @@
     if (!_cam.attachBar) return;
     var ficheId = _cam.targetFicheId;
     var hasFiche = !!ficheId;
-    _cam.attachBar.hidden = !hasFiche;
+    _cam.attachBar.hidden = false;
     if (hasFiche) {
       _cam.attachCb.checked = !!_cam.attachToFiche;
       _cam.attachLabel.textContent = "Joindre a la fiche " + _ficheLabelFor(ficheId);
+    } else {
+      _cam.attachCb.checked = !!_cam.createFiche;
+      _cam.attachLabel.textContent = "Creer une fiche d'intervention";
     }
   }
 
@@ -4218,6 +4226,7 @@
     var n = photos.length;
     var category = _cam.selectedCategory;
     var urgency = _cam.selectedUrgency;
+    var createFiche = _cam.createFiche;
     var meLatLng = state.meMarker ? state.meMarker.getLatLng() : null;
     var batteryPct = state.batteryPct;
 
@@ -4230,6 +4239,7 @@
       if (!attach) {
         fd.append("category", category);
         if (urgency) fd.append("niveau_urgence", urgency);
+        fd.append("create_fiche", createFiche ? "true" : "false");
       }
       if (meLatLng) {
         fd.append("lat", String(meLatLng.lat));
@@ -4245,6 +4255,7 @@
       if (!attach) {
         fields["category"] = category;
         if (urgency) fields["niveau_urgence"] = urgency;
+        fields["create_fiche"] = createFiche ? "true" : "false";
       }
       if (meLatLng) {
         fields["lat"] = String(meLatLng.lat);
@@ -4288,7 +4299,9 @@
       if (resp.status === 401) { release(); handleSessionLost(); return; }
       var data = resp.body || {};
       if (resp.status >= 200 && resp.status < 300 && data.ok) {
-        toast((n > 1 ? n + " photos envoyees" : "Photo envoyee") + (attach ? " (fiche)" : " au PC Org"), "ok");
+        var ficheCreated = !attach && data.fiche_id;
+        var toastSuffix = attach ? " (fiche)" : ficheCreated ? " + fiche creee" : " au PC Org";
+        toast((n > 1 ? n + " photos envoyees" : "Photo envoyee") + toastSuffix, "ok");
         release();
         // Si la modale de detail d'une fiche etait ouverte sur la fiche
         // recue, on rafraichit pour faire apparaitre la nouvelle entree.
@@ -4298,6 +4311,9 @@
             var fiche = state.fiches.find(function (fi) { return fi.id === ficheTarget; });
             if (fiche) showFicheModal(fiche);
           }
+          pollFiches();
+        }
+        if (ficheCreated) {
           pollFiches();
         }
       } else if (resp.status >= 400 && resp.status < 500) {
@@ -4371,8 +4387,13 @@
     attachCb.id = "cam-attach-cb";
     attachCb.checked = false;
     attachCb.addEventListener("change", function () {
-      _cam.attachToFiche = attachCb.checked;
-      refreshComposeChips();
+      if (_cam.targetFicheId) {
+        _cam.attachToFiche = attachCb.checked;
+        refreshComposeChips();
+      } else {
+        _cam.createFiche = attachCb.checked;
+        refreshSendEnabled();
+      }
     });
     var attachLabel = document.createElement("label");
     attachLabel.setAttribute("for", "cam-attach-cb");

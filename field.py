@@ -1537,6 +1537,13 @@ def field_photo_send():
     if urgency and urgency not in {"IMP", "UR", "UA", "EU"}:
         return jsonify({"ok": False, "error": "invalid_urgency"}), 400
 
+    # Flag pour la creation auto d'une fiche pcorg quand la categorie est
+    # presente. Defaut (champ absent) : True (compat clients < v34).
+    # Le client v34 envoie "false" quand l'operateur decoche la case.
+    create_fiche_param = (request.form.get("create_fiche") or "").strip().lower()
+    opt_out_fiche = create_fiche_param in {"false", "0"}
+    should_create_fiche = bool(category) and not opt_out_fiche
+
     # Multi-photos : champ "photos" (getlist) prioritaire, fallback "photo" (compat).
     photo_files = [pf for pf in request.files.getlist("photos") if pf and pf.filename]
     if not photo_files:
@@ -1612,13 +1619,97 @@ def field_photo_send():
         "ack_at": None,
     }
     res = db["field_messages"].insert_one(doc)
-    return jsonify({
+
+    # Si une categorie est fournie (photo spontanee classifiee), creer aussi
+    # une fiche pcorg pour qu'elle apparaisse sur la carte cockpit.
+    # Sauf si l'operateur a explicitement decoche "Creer une fiche".
+    fiche_id = None
+    if should_create_fiche:
+        import uuid as _uuid
+        fiche_text = comment if comment else "Photo " + hh_mm
+        gps_point = None
+        if lat is not None and lng is not None:
+            try:
+                gps_point = {"type": "Point", "coordinates": [float(lng), float(lat)]}
+            except (TypeError, ValueError):
+                pass
+        try:
+            year_int = int(device.get("year")) if device.get("year") is not None else None
+        except (TypeError, ValueError):
+            year_int = device.get("year")
+        seed = "{}|{}|{}|{}|{}|field:{}".format(
+            device.get("event") or "", device.get("year") or "",
+            now_local.isoformat(), category, fiche_text, str(device["_id"])
+        )
+        fiche_id = str(_uuid.uuid5(_uuid.NAMESPACE_URL, seed))
+        fiche_doc = {
+            "_id": fiche_id,
+            "event": device.get("event"),
+            "year": year_int,
+            "ts": now,
+            "timestamp_iso": now_local.isoformat(),
+            "close_ts": None,
+            "close_iso": None,
+            "category": category,
+            "source": category,
+            "text": fiche_text,
+            "text_full": fiche_text,
+            "comment": "",
+            "comment_history": [],
+            "operator": "Tablette " + name,
+            "operator_id_create": "field:" + str(device.get("_id")),
+            "operator_close": None,
+            "operator_id_close": None,
+            "status_code": 0,
+            "severity": 0,
+            "niveau_urgence": urgency,
+            "is_incident": False,
+            "area": None,
+            "gps": gps_point,
+            "group": None,
+            "content_category": {
+                "patrouille": name,
+                "field_created": True,
+                "photo_message_id": str(res.inserted_id),
+            },
+            "extracted": {"phones": None, "plates": None},
+            "tags": ["field-created"],
+            "synced_at": None,
+            "sql_id": None,
+            "guid": None,
+            "server": "COCKPIT",
+            "bounce_rev": 1,
+        }
+        db["pcorg"].insert_one(fiche_doc)
+        db["field_devices"].update_one(
+            {"_id": device["_id"]},
+            {
+                "$set": {
+                    "status": "intervention",
+                    "status_since": now,
+                    "active_fiche_id": fiche_id,
+                },
+                "$push": {
+                    "status_history": {
+                        "status": "intervention",
+                        "ts": now,
+                        "trigger": "photo_send",
+                        "fiche_id": fiche_id,
+                    },
+                },
+            },
+        )
+
+    result = {
         "ok": True,
         "id": str(res.inserted_id),
         "photos": photos_meta,
         "photo_url": photos_meta[0]["photo"],
         "thumb_url": photos_meta[0]["thumb"],
-    })
+    }
+    if fiche_id:
+        result["fiche_id"] = fiche_id
+    return jsonify(result)
 
 
 def _normalize_scan_codes(raw):

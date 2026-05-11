@@ -770,6 +770,8 @@
         <h3>Composer le message photo</h3>
 
         <pre class="ascii">  +-------------------------------------+
+  |  [x] Creer une fiche d intervention |
+  +-------------------------------------+
   |  3 photos selectionnees             |
   |  [img] [img] [img]                  |
   +-------------------------------------+
@@ -788,13 +790,16 @@
   +-------------------------------------+</pre>
 
         <ol class="steps">
-          <li>Choisissez la <strong>categorie</strong> (obligatoire pour le routing cote PC Org)</li>
+          <li>En haut, la case <strong>Creer une fiche d intervention</strong> est cochee par defaut. Decochez-la si vous voulez juste envoyer la photo au PC Org sans creer de pin sur la carte (simple remontee d info)</li>
+          <li>Choisissez la <strong>categorie</strong> (obligatoire)</li>
           <li>Choisissez le <strong>niveau d urgence</strong> (par defaut : UR)</li>
           <li>Ajoutez un <strong>commentaire court</strong> qui dit ce que la photo montre</li>
           <li>Touchez <strong>Envoyer</strong></li>
         </ol>
 
-        <p>Toast vert : <em>Photo envoyee</em>. Si vous etes hors ligne, la photo part en file d attente et sera envoyee des le retour du reseau (toast : <em>Hors ligne : photo en attente</em>).</p>
+        <p>Si la case est cochee : toast <em>Photo envoyee + fiche creee</em>, la tablette passe en statut <span class="pill status-intervention">Intervention</span> et un pin apparait sur la carte cockpit. Si la case est decochee : toast <em>Photo envoyee au PC Org</em>, aucun pin, aucun changement de statut. Si vous etes hors ligne, la photo part en file d attente et sera envoyee des le retour du reseau (toast : <em>Hors ligne : photo en attente</em>).</p>
+
+        <p><strong>Si vous etes deja en intervention sur une fiche</strong>, la case en haut affiche <em>Joindre a la fiche [Categorie]</em> au lieu de <em>Creer une fiche</em>. Cochee, la photo s ajoute a la chronologie de la fiche en cours. Decochee, la photo cree une nouvelle fiche separee (ou file vers le PC Org si vous decochez aussi cote categorie).</p>
 
         <h3>Mode Scan (QR / code-barres)</h3>
 
@@ -824,12 +829,12 @@
         </table>
 
         <div class="callout tip">
-          <strong>Photo ou fiche ?</strong> Si la situation necessite une <em>action</em> (deplacement de renfort, prise en charge), creez une <strong>fiche</strong>. Si c est juste une remontee d info, envoyez une <strong>photo spontanee</strong>.
+          <strong>Vous gardez la main.</strong> La case <em>Creer une fiche d intervention</em> est cochee par defaut : un pin apparait sur la carte cockpit en meme temps que la photo arrive dans la boite messages. Decochez-la si la situation ne necessite pas d action (juste une remontee d info, photo de courtoisie, suivi visuel).
         </div>
 
         <div class="pc-view">
           <span class="pc-view-title">Ce que voit le PC Org</span>
-          La photo arrive dans sa boite de messages, taggee avec votre patrouille, la categorie et l urgence. Il peut repondre directement (texte ou photo), ou creer une fiche d intervention a partir de votre signalement si la situation evolue.
+          Un pin de la couleur de la categorie apparait sur sa carte a votre position. La photo arrive simultanement dans sa boite de messages. Il peut ouvrir la fiche pour ajouter du renfort, modifier l urgence ou la cloturer a distance.
         </div>
 
         <a href="#" class="to-top">&uarr; Haut de page</a>
