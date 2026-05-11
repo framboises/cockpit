@@ -1,27 +1,3 @@
-2026-05-08 19:14:26 [PcorgSync] INFO Lancement sync incremental
-2026-05-08 19:14:27 [PcorgSync] INFO     Documents upsertés : 3
-2026-05-08 19:14:27 [PcorgSync] INFO     Répartition par événement :
-2026-05-08 19:14:27 [PcorgSync] INFO       GPF 2026: 3
-2026-05-08 19:14:27 [PcorgSync] INFO     Répartition par catégorie :
-2026-05-08 19:14:27 [PcorgSync] INFO       PCS.Information: 2
-2026-05-08 19:14:27 [PcorgSync] INFO       PCO.Securite: 1
-2026-05-08 19:14:27 [PcorgSync] INFO     Curseur DateWrite : 2026-05-08 17:10:33.007000
-2026-05-08 19:14:27 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
-2026-05-08 19:14:27 [PcorgSync] INFO     Total en base : 24795 docs (24795 attribués, 1208 avec GPS)
-2026-05-08 19:14:27 [PcorgSync] INFO   ============================================================
-2026-05-08 19:14:27 [PcorgSync] INFO Sync terminee avec succes
-2026-05-08 19:18:56 [PcorgSync] INFO Lancement sync incremental
-2026-05-08 19:18:56 [PcorgSync] INFO     Messages SQL récupérés : 1
-2026-05-08 19:18:56 [PcorgSync] INFO     Documents upsertés : 1
-2026-05-08 19:18:56 [PcorgSync] INFO     Répartition par événement :
-2026-05-08 19:18:56 [PcorgSync] INFO       GPF 2026: 1
-2026-05-08 19:18:56 [PcorgSync] INFO     Répartition par catégorie :
-2026-05-08 19:18:56 [PcorgSync] INFO       PCO.Technique: 1
-2026-05-08 19:18:56 [PcorgSync] INFO     Curseur DateWrite : 2026-05-08 17:16:30.563000
-2026-05-08 19:18:56 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
-2026-05-08 19:18:56 [PcorgSync] INFO     Total en base : 24796 docs (24796 attribués, 1209 avec GPS)
-2026-05-08 19:18:56 [PcorgSync] INFO   ============================================================
-2026-05-08 19:18:57 [PcorgSync] INFO Sync terminee avec succes
 2026-05-08 19:23:56 [PcorgSync] INFO Lancement sync incremental
 2026-05-08 19:23:58 [PcorgSync] INFO     Messages SQL récupérés : 1
 2026-05-08 19:23:58 [PcorgSync] INFO     Documents upsertés : 1
@@ -10366,3 +10342,39 @@
 2026-05-11 19:09:26 [PcorgSync] INFO     Total en base : 25158 docs (25158 attribués, 1468 avec GPS)
 2026-05-11 19:09:26 [PcorgSync] INFO   ============================================================
 2026-05-11 19:09:26 [PcorgSync] INFO Sync terminee avec succes
+2026-05-11 19:14:26 [PcorgSync] INFO Lancement sync incremental
+2026-05-11 19:14:27 [PcorgSync] INFO     Documents upsertés : 2
+2026-05-11 19:14:27 [PcorgSync] INFO     Répartition par événement :
+2026-05-11 19:14:27 [PcorgSync] INFO       GPF 2026: 1
+2026-05-11 19:14:27 [PcorgSync] INFO       24H AUTOS 2026: 1
+2026-05-11 19:14:27 [PcorgSync] INFO     Répartition par catégorie :
+2026-05-11 19:14:27 [PcorgSync] INFO       PCS.Information: 2
+2026-05-11 19:14:27 [PcorgSync] INFO     Curseur DateWrite : 2026-05-11 16:58:29.183000
+2026-05-11 19:14:27 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-05-11 19:14:27 [PcorgSync] INFO     Total en base : 25158 docs (25158 attribués, 1468 avec GPS)
+2026-05-11 19:14:27 [PcorgSync] INFO   ============================================================
+2026-05-11 19:14:27 [PcorgSync] INFO Sync terminee avec succes
+2026-05-11 19:19:10 [PcorgSync] INFO Lancement sync incremental
+2026-05-11 19:19:11 [PcorgSync] INFO     Documents upsertés : 2
+2026-05-11 19:19:11 [PcorgSync] INFO     Répartition par événement :
+2026-05-11 19:19:11 [PcorgSync] INFO       GPF 2026: 1
+2026-05-11 19:19:11 [PcorgSync] INFO       24H AUTOS 2026: 1
+2026-05-11 19:19:11 [PcorgSync] INFO     Répartition par catégorie :
+2026-05-11 19:19:11 [PcorgSync] INFO       PCS.Information: 2
+2026-05-11 19:19:11 [PcorgSync] INFO     Curseur DateWrite : 2026-05-11 16:58:29.183000
+2026-05-11 19:19:11 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-05-11 19:19:11 [PcorgSync] INFO     Total en base : 25158 docs (25158 attribués, 1468 avec GPS)
+2026-05-11 19:19:11 [PcorgSync] INFO   ============================================================
+2026-05-11 19:19:11 [PcorgSync] INFO Sync terminee avec succes
+2026-05-11 19:23:55 [PcorgSync] INFO Lancement sync incremental
+2026-05-11 19:23:56 [PcorgSync] INFO     Documents upsertés : 2
+2026-05-11 19:23:56 [PcorgSync] INFO     Répartition par événement :
+2026-05-11 19:23:56 [PcorgSync] INFO       GPF 2026: 1
+2026-05-11 19:23:56 [PcorgSync] INFO       24H AUTOS 2026: 1
+2026-05-11 19:23:56 [PcorgSync] INFO     Répartition par catégorie :
+2026-05-11 19:23:56 [PcorgSync] INFO       PCS.Information: 2
+2026-05-11 19:23:56 [PcorgSync] INFO     Curseur DateWrite : 2026-05-11 16:58:29.183000
+2026-05-11 19:23:56 [PcorgSync] INFO     Config pcorg : aucune nouvelle valeur
+2026-05-11 19:23:56 [PcorgSync] INFO     Total en base : 25158 docs (25158 attribués, 1468 avec GPS)
+2026-05-11 19:23:56 [PcorgSync] INFO   ============================================================
+2026-05-11 19:23:56 [PcorgSync] INFO Sync terminee avec succes

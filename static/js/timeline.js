@@ -1188,17 +1188,19 @@ async function fetchTimetable() {
                         ...rest.map(it => ({ kind:'item',    minute: getItemSortMinute(it),    data: it })),
                     ];
 
-                    // 3) Trier: minute croissante, puis clusters avant items, puis label alpha
+                    // 3) Tri chronologie pure: minute croissante, puis tiebreaker alpha
+                    //    sur le libelle affiche (pas le type/categorie) pour ne pas regrouper
+                    //    visuellement par categorie a une meme minute.
+                    const labelForNode = (n) => {
+                        if (n.kind === 'cluster') {
+                            const cfg = CLUSTER_CONFIG[n.data.type];
+                            return (cfg?.label || n.data.type || '').toLowerCase();
+                        }
+                        return labelForItem(n.data);
+                    };
                     combined.sort((a,b)=>{
                         if (a.minute !== b.minute) return a.minute - b.minute;
-                        if (a.kind !== b.kind) return a.kind === 'cluster' ? -1 : 1; // option: cluster d'abord
-                        const la = a.kind==='cluster'
-                        ? `${a.data.type}|${a.data.kind}|${a.data.time||'zzz'}`.toLowerCase()
-                        : labelForItem(a.data);
-                        const lb = b.kind==='cluster'
-                        ? `${b.data.type}|${b.data.kind}|${b.data.time||'zzz'}`.toLowerCase()
-                        : labelForItem(b.data);
-                        return la.localeCompare(lb);
+                        return labelForNode(a).localeCompare(labelForNode(b));
                     });
 
                     // 4) Rendu chronologique
