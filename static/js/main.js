@@ -1600,8 +1600,8 @@ function updateUpcomingEvents() {
         hiddenId.value = window.editingItemId || '';
 
         if (fDate)   fDate.value   = (item.date || '').slice(0,10);
-        if (fStart)  fStart.value  = item.start   || '';
-        if (fEnd)    fEnd.value    = item.end     || '';
+        if (fStart)  fStart.value  = (typeof formatHHMM === 'function' ? formatHHMM(item.start) : item.start) || '';
+        if (fEnd)    fEnd.value    = (typeof formatHHMM === 'function' ? formatHHMM(item.end)   : item.end)   || '';
         if (fDur)    fDur.value    = item.duration|| '';
         if (fCat)    fCat.value    = item.category|| '';
         if (fAct)    fAct.value    = item.activity|| '';

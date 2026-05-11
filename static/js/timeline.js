@@ -835,7 +835,7 @@ function createClusterItem(date, cluster) {
   };
   const kindLabel = _kindLabels[cluster.kind] || 'Ouverture';
   const headerIcon = _kindIcons[cluster.kind] || cfg.icon;
-  const timeInfo = cluster.time || 'TBC';
+  const timeInfo = formatHHMM(cluster.time) || 'TBC';
 
   // ✅ statut runtime au moment du rendu
   const _now = TimelineClock.get();
@@ -873,8 +873,8 @@ function createClusterItem(date, cluster) {
         ${cluster.items.map(ch => {
           const title = (ch.activity||'Sans titre').split('/')[0].trim();
           const place = (ch.place||'—').split('/')[0].trim();
-          const hours = (ch.start && ch.start!=='TBC' ? ch.start : '') +
-                        (ch.end   && ch.end  !=='TBC' ? (' - '+ch.end) : '');
+          const hours = (ch.start && ch.start!=='TBC' ? formatHHMM(ch.start) : '') +
+                        (ch.end   && ch.end  !=='TBC' ? (' - '+formatHHMM(ch.end)) : '');
           // chip individuel (base métier, pas besoin runtime ici dans la sous-ligne)
           const s = getPrepStatus(ch);
           const chip = s ? `<span class="prep-chip prep-${s} sm" title="Préparation : ${getPrepLabel(s)}">${getPrepLabel(s)}</span>` : '';
