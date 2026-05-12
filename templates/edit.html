@@ -455,6 +455,114 @@
         </div>
       </section>
 
+      <!-- Section Memoire Assistant IA -->
+      <section class="widget-card" style="margin-top:16px;">
+        <header class="widget-header" data-collapsible data-section="ai-memory">
+          <h3>Mémoire Assistant IA</h3>
+          <span class="material-symbols-outlined collapse-icon">expand_more</span>
+        </header>
+        <div class="widget-body collapsible" id="ai-memory-body">
+
+          <div class="ai-memory-stats" id="ai-memory-stats">
+            <div class="ai-memory-stat">
+              <div class="ai-memory-stat-value" id="ai-memory-stat-active">—</div>
+              <div class="ai-memory-stat-label">Directives actives</div>
+            </div>
+            <div class="ai-memory-stat">
+              <div class="ai-memory-stat-value" id="ai-memory-stat-inactive">—</div>
+              <div class="ai-memory-stat-label">Archivées</div>
+            </div>
+            <div class="ai-memory-stat">
+              <div class="ai-memory-stat-value" id="ai-memory-stat-sft">—</div>
+              <div class="ai-memory-stat-label">Samples SFT dispo</div>
+            </div>
+            <div class="ai-memory-stat">
+              <div class="ai-memory-stat-value" id="ai-memory-stat-dpo">—</div>
+              <div class="ai-memory-stat-label">Samples DPO dispo</div>
+            </div>
+            <div class="ai-memory-stat">
+              <div class="ai-memory-stat-value" id="ai-memory-stat-corrections">—</div>
+              <div class="ai-memory-stat-label">Corrections totales</div>
+            </div>
+            <div class="ai-memory-stat">
+              <div class="ai-memory-stat-value" id="ai-memory-stat-good">—</div>
+              <div class="ai-memory-stat-label">Rapports validés 👍</div>
+            </div>
+          </div>
+
+          <div class="ai-memory-toolbar">
+            <div class="ai-memory-filters">
+              <label class="ai-memory-filter">
+                <span>Événement</span>
+                <select id="ai-memory-filter-event">
+                  <option value="">— Tous —</option>
+                </select>
+              </label>
+              <label class="ai-memory-filter">
+                <span>Section</span>
+                <select id="ai-memory-filter-section">
+                  <option value="">— Toutes —</option>
+                  <option value="synthese">Synthèse</option>
+                  <option value="faits_marquants">Faits marquants</option>
+                  <option value="secours">Secours</option>
+                  <option value="securite">Sécurité</option>
+                  <option value="technique">Technique</option>
+                  <option value="flux">Flux</option>
+                  <option value="fourriere">Fourrière</option>
+                  <option value="recommandations">Recommandations</option>
+                  <option value="prochaines_24h">Prochaines 24h</option>
+                </select>
+              </label>
+              <label class="ai-memory-filter">
+                <span>Type</span>
+                <select id="ai-memory-filter-type">
+                  <option value="">— Tous —</option>
+                  <option value="principe">Principe</option>
+                  <option value="correction">Correction</option>
+                  <option value="vocabulaire">Vocabulaire</option>
+                  <option value="contexte">Contexte</option>
+                </select>
+              </label>
+              <label class="ai-memory-filter ai-memory-filter-check">
+                <input type="checkbox" id="ai-memory-filter-active" checked>
+                <span>Actives uniquement</span>
+              </label>
+            </div>
+            <div class="ai-memory-actions">
+              <button type="button" class="btn-primary" id="ai-memory-btn-new">
+                <span class="material-symbols-outlined">add</span>
+                Nouvelle directive
+              </button>
+              <button type="button" class="btn-ghost" id="ai-memory-btn-export-sft" title="Exporter le dataset SFT en JSONL">
+                <span class="material-symbols-outlined">download</span>
+                Export SFT
+              </button>
+              <button type="button" class="btn-ghost" id="ai-memory-btn-export-dpo" title="Exporter le dataset DPO en JSONL (corrections uniquement)">
+                <span class="material-symbols-outlined">download</span>
+                Export DPO
+              </button>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table id="ai-memory-table" class="table table-striped table-hover">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Scope</th>
+                  <th>Contenu</th>
+                  <th title="Nombre d'inclusions dans les prompts">Utilisée</th>
+                  <th>Auteur</th>
+                  <th>Active</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
     </div>
 
     <!-- Flash messages -->
@@ -784,5 +892,6 @@
 <script src="/static/js/pcorg_config.js"></script>
 <script src="/static/js/main.js"></script>
 <script src="/static/js/ai_assistant.js"></script>
+<script src="/static/js/ai_memory_admin.js"></script>
 </body>
 </html>

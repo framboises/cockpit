@@ -2829,3 +2829,309 @@ def _dry_run_payload(event, year, ts_start, ts_end, kpis, fiches, truncated,
         "memory_block_text": memory_block_text or "",
         "memory_directive_ids": list(memory_directive_ids or []),
     }
+
+
+# ----------------------------------------------------------------------------
+# Feedback utilisateur sur un rapport (append-only, immutable)
+# ----------------------------------------------------------------------------
+
+FEEDBACK_KINDS = ("validation", "correction", "rule", "comment")
+QUALITY_LABELS = ("good", "neutral", "bad")
+RECOMMENDATION_STATUSES = ("applied", "partial", "ignored", "not_relevant")
+
+
+def add_feedback(db, summary_id, section, kind,
+                 original_text=None, corrected_text=None,
+                 rule_text=None, comment=None, target=None,
+                 rating=None, by_email=None, by_name=None,
+                 promoted_memory_id=None):
+    """Ajoute une entry de feedback (append-only) sur un rapport.
+
+    section : une des SECTION_KEYS.
+    kind : 'validation' | 'correction' | 'rule' | 'comment'.
+    target : 'section' (defaut) ou 'bullet:N' pour cibler une puce d'une
+             section en liste (recommandations, faits_marquants, prochaines_24h).
+    rating : 'good' | 'bad' optionnel (pour 'validation' / 'comment').
+
+    Leve ValueError pour parametres invalides. Retourne le doc apres
+    insertion ou None si rapport introuvable.
+    """
+    if section not in SECTION_KEYS:
+        raise ValueError("section invalide : " + str(section))
+    if kind not in FEEDBACK_KINDS:
+        raise ValueError("kind invalide : " + str(kind))
+    if rating is not None and rating not in QUALITY_LABELS:
+        raise ValueError("rating invalide : " + str(rating))
+    if kind == "correction" and not corrected_text:
+        raise ValueError("correction requiert corrected_text non vide")
+    if kind == "rule" and not rule_text:
+        raise ValueError("rule requiert rule_text non vide")
+    entry = {
+        "section": section,
+        "kind": kind,
+        "target": target or "section",
+        "original_text": original_text,
+        "corrected_text": corrected_text,
+        "rule_text": rule_text,
+        "comment": comment,
+        "rating": rating,
+        "promoted_memory_id": promoted_memory_id,
+        "ts": datetime.now(timezone.utc),
+        "by_email": by_email or "",
+        "by_name": by_name or "",
+    }
+    res = db[SUMMARIES_COLLECTION].find_one_and_update(
+        {"_id": summary_id},
+        {"$push": {"feedback": entry}},
+        return_document=True,
+    )
+    return res
+
+
+def set_quality_label(db, summary_id, label, section=None, by_email=None):
+    """Pose un label qualite global (section=None) ou par section.
+
+    label : 'good' | 'neutral' | 'bad' | None (pour effacer).
+    Stocke aussi un audit dans quality_label_history (append-only).
+    """
+    if label is not None and label not in QUALITY_LABELS:
+        raise ValueError("label invalide : " + str(label))
+    set_op = {}
+    if section is None:
+        set_op["quality_label_global"] = label
+    else:
+        if section not in SECTION_KEYS:
+            raise ValueError("section invalide : " + str(section))
+        set_op["quality_label_per_section." + section] = label
+    push_op = {
+        "quality_label_history": {
+            "ts": datetime.now(timezone.utc),
+            "section": section,
+            "label": label,
+            "by_email": by_email or "",
+        },
+    }
+    return db[SUMMARIES_COLLECTION].find_one_and_update(
+        {"_id": summary_id},
+        {"$set": set_op, "$push": push_op},
+        return_document=True,
+    )
+
+
+def set_recommendation_status(db, summary_id, bullet_index, status,
+                              by_email=None):
+    """Marque une recommandation comme appliquee/partielle/ignoree/non pertinente.
+
+    bullet_index : index 0-based de la puce dans la section 'recommandations'
+    rendue. status : un des RECOMMENDATION_STATUSES ou None pour reset.
+    """
+    if status is not None and status not in RECOMMENDATION_STATUSES:
+        raise ValueError("status invalide : " + str(status))
+    try:
+        idx = int(bullet_index)
+    except (TypeError, ValueError):
+        raise ValueError("bullet_index invalide")
+    entry = {
+        "bullet_index": idx,
+        "status": status,
+        "ts": datetime.now(timezone.utc),
+        "by_email": by_email or "",
+    }
+    return db[SUMMARIES_COLLECTION].find_one_and_update(
+        {"_id": summary_id},
+        {"$push": {"recommendations_status": entry}},
+        return_document=True,
+    )
+
+
+def get_prompts(db, summary_id):
+    """Retourne system_prompt + user_prompt persistes pour audit/debug.
+    Reserve admin (verbeux).
+    """
+    doc = db[SUMMARIES_COLLECTION].find_one(
+        {"_id": summary_id},
+        {"system_prompt": 1, "user_prompt": 1, "memory_block_text": 1,
+         "system_prompt_hash": 1, "prompt_version": 1},
+    )
+    if not doc:
+        return None
+    return {
+        "system_prompt": doc.get("system_prompt") or "",
+        "user_prompt": doc.get("user_prompt") or "",
+        "memory_block_text": doc.get("memory_block_text") or "",
+        "system_prompt_hash": doc.get("system_prompt_hash"),
+        "prompt_version": doc.get("prompt_version"),
+    }
+
+
+# ----------------------------------------------------------------------------
+# Export dataset pour fine-tuning futur
+# ----------------------------------------------------------------------------
+
+def _section_label_fr(key):
+    """Libelle FR d'une section pour les samples (utile en assistant content)."""
+    return {
+        "synthese": "Synthese",
+        "faits_marquants": "Faits marquants",
+        "secours": "Secours",
+        "securite": "Securite",
+        "technique": "Technique",
+        "flux": "Flux",
+        "fourriere": "Fourriere",
+        "recommandations": "Recommandations",
+        "prochaines_24h": "Prochaines 24 heures",
+    }.get(key, key)
+
+
+def _assistant_content_from_sections(sections):
+    """Reconstruit la reponse au format JSON attendu par Claude depuis le
+    dict sections. Pour le dataset, on retourne le JSON serialise comme
+    Claude le produisait (compatible re-entrainement sur meme format de sortie).
+    """
+    if not sections:
+        return ""
+    payload = {k: sections.get(k, "") for k in SECTION_KEYS}
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _apply_corrections(sections, feedback_entries):
+    """Applique les corrections de feedback au dict sections pour produire la
+    'ground truth' utilisateur. Une correction au niveau section remplace la
+    valeur. Les corrections au niveau bullet ne sont pas appliquees ici
+    (necessitent parsing de la liste -- on les laisse a un re-export plus
+    riche si besoin).
+    """
+    out = dict(sections or {})
+    for f in (feedback_entries or []):
+        if f.get("kind") != "correction":
+            continue
+        section = f.get("section")
+        target = f.get("target") or "section"
+        if section in SECTION_KEYS and target == "section" and f.get("corrected_text"):
+            out[section] = f["corrected_text"]
+    return out
+
+
+def export_training_dataset(db, format_="sft", ts_from=None, ts_to=None,
+                            min_quality=None, include_memory=False,
+                            prompt_version=None):
+    """Genere des samples pour fine-tuning au format JSONL.
+
+    format_ : 'sft' (supervised) ou 'dpo' (preference paire chosen/rejected).
+    ts_from / ts_to : filtre sur created_at.
+    min_quality : 'good' (n'inclut que les rapports labelles bons) ou None.
+    include_memory : si True, concatene memory_block_text au system_prompt.
+    prompt_version : filtre sur prompt_version (ex: 1 pour la generation
+                     actuelle, evite les samples post-refonte du prompt).
+
+    Yields des dicts (a serialiser en JSONL par l'appelant).
+
+    SFT format :
+      { "messages": [
+          {"role":"system","content":"..."},
+          {"role":"user","content":"..."},
+          {"role":"assistant","content":"<JSON sections corrigees>"}
+      ]}
+
+    DPO format (uniquement pour rapports avec >=1 correction) :
+      { "prompt":"...","chosen":"<JSON corrige>","rejected":"<JSON original>"}
+    """
+    q = {}
+    if ts_from is not None:
+        q.setdefault("created_at", {})["$gte"] = ts_from
+    if ts_to is not None:
+        q.setdefault("created_at", {})["$lte"] = ts_to
+    if prompt_version is not None:
+        try:
+            q["prompt_version"] = int(prompt_version)
+        except (TypeError, ValueError):
+            pass
+
+    cur = db[SUMMARIES_COLLECTION].find(q)
+    for doc in cur:
+        system_prompt = doc.get("system_prompt") or ""
+        user_prompt = doc.get("user_prompt") or ""
+        if not system_prompt or not user_prompt:
+            # Pas exploitable : doc anterieur a l'introduction de la
+            # persistance prompts.
+            continue
+        sections_original = doc.get("sections") or {}
+        feedback = doc.get("feedback") or []
+        sections_corrected = _apply_corrections(sections_original, feedback)
+
+        # Filtre qualite : on n'inclut que les rapports juges 'bons' (global)
+        # ou ayant au moins une correction (= ground truth utilisateur).
+        global_label = doc.get("quality_label_global")
+        has_correction = any(f.get("kind") == "correction" for f in feedback)
+        if min_quality == "good":
+            if global_label != "good" and not has_correction:
+                continue
+
+        if include_memory and doc.get("memory_block_text"):
+            full_system = system_prompt + "\n\n" + doc["memory_block_text"]
+        else:
+            full_system = system_prompt
+
+        if format_ == "dpo":
+            if not has_correction:
+                continue
+            yield {
+                "prompt": full_system + "\n\n---\n\n" + user_prompt,
+                "chosen": _assistant_content_from_sections(sections_corrected),
+                "rejected": _assistant_content_from_sections(sections_original),
+                "_meta": {
+                    "summary_id": str(doc.get("_id")),
+                    "event": doc.get("event"),
+                    "year": doc.get("year"),
+                    "prompt_version": doc.get("prompt_version"),
+                    "model": doc.get("model"),
+                },
+            }
+        else:
+            # SFT : utilise les sections corrigees comme reponse cible.
+            yield {
+                "messages": [
+                    {"role": "system", "content": full_system},
+                    {"role": "user", "content": user_prompt},
+                    {"role": "assistant", "content": _assistant_content_from_sections(sections_corrected)},
+                ],
+                "_meta": {
+                    "summary_id": str(doc.get("_id")),
+                    "event": doc.get("event"),
+                    "year": doc.get("year"),
+                    "prompt_version": doc.get("prompt_version"),
+                    "model": doc.get("model"),
+                    "quality_label": global_label,
+                    "has_correction": has_correction,
+                },
+            }
+
+
+def export_stats(db):
+    """Compteurs pour la page admin (volume du dataset, samples utilisables)."""
+    total = db[SUMMARIES_COLLECTION].count_documents({})
+    with_prompts = db[SUMMARIES_COLLECTION].count_documents({
+        "system_prompt": {"$exists": True, "$ne": ""},
+        "user_prompt": {"$exists": True, "$ne": ""},
+    })
+    with_feedback = db[SUMMARIES_COLLECTION].count_documents({"feedback.0": {"$exists": True}})
+    with_corrections = db[SUMMARIES_COLLECTION].count_documents({"feedback.kind": "correction"})
+    with_quality_good = db[SUMMARIES_COLLECTION].count_documents({"quality_label_global": "good"})
+    by_prompt_version = {}
+    for r in db[SUMMARIES_COLLECTION].aggregate([
+        {"$group": {"_id": "$prompt_version", "n": {"$sum": 1}}},
+    ]):
+        by_prompt_version[str(r.get("_id"))] = int(r.get("n") or 0)
+    # Volume samples potentiels (estimes) : 1 SFT par rapport with_prompts,
+    # 1 DPO par rapport with_corrections.
+    return {
+        "total_summaries": total,
+        "with_prompts": with_prompts,
+        "with_feedback": with_feedback,
+        "with_corrections": with_corrections,
+        "with_quality_good": with_quality_good,
+        "by_prompt_version": by_prompt_version,
+        "estimated_sft_samples": with_prompts,
+        "estimated_dpo_samples": with_corrections,
+        "current_prompt_version": PROMPT_VERSION,
+    }

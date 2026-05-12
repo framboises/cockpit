@@ -3903,37 +3903,42 @@
       lon: createLon
     };
 
-    // Heure d'intervention personnalisee : confirm si antidatage > 24h
     if (createInterventionTs) {
-      var diffMs = Date.now() - createInterventionTs.getTime();
-      var diffHours = diffMs / 3600000;
-      if (diffHours > 24) {
-        var fmt = _pad2(createInterventionTs.getDate()) + "/" + _pad2(createInterventionTs.getMonth() + 1)
-          + " a " + _fmtTimeHM(createInterventionTs);
-        if (!window.confirm("Creer une fiche datee du " + fmt + " ?")) return;
-      }
       payload.intervention_ts = _toLocalInputValue(createInterventionTs) + ":00";
     }
 
     var pendingPhoto = _createCameraPhoto;
 
-    apiPost("/api/pcorg/create", payload)
-      .then(function (r) {
-        if (r.ok) {
-          // Si une photo camera etait jointe, l'attacher a la fiche creee
-          if (pendingPhoto && r.id) {
-            apiPost("/api/pcorg/comment/" + encodeURIComponent(r.id), {
-              text: "Capture camera " + pendingPhoto.cam_name,
-              photo: pendingPhoto.url
-            });
+    function _doSubmit() {
+      apiPost("/api/pcorg/create", payload)
+        .then(function (r) {
+          if (r.ok) {
+            // Si une photo camera etait jointe, l'attacher a la fiche creee
+            if (pendingPhoto && r.id) {
+              apiPost("/api/pcorg/comment/" + encodeURIComponent(r.id), {
+                text: "Capture camera " + pendingPhoto.cam_name,
+                photo: pendingPhoto.url
+              });
+            }
+            hideCreate();
+            showToast("success", "Intervention creee");
+            refresh();
+          } else {
+            showToast("error", r.error || "Erreur");
           }
-          hideCreate();
-          showToast("success", "Intervention creee");
-          refresh();
-        } else {
-          showToast("error", r.error || "Erreur");
-        }
-      });
+        });
+    }
+
+    // Heure d'intervention personnalisee : confirm si antidatage > 24h
+    if (createInterventionTs && (Date.now() - createInterventionTs.getTime()) / 3600000 > 24) {
+      var fmt = _pad2(createInterventionTs.getDate()) + "/" + _pad2(createInterventionTs.getMonth() + 1)
+        + " a " + _fmtTimeHM(createInterventionTs);
+      showConfirmToast("Creer une fiche datee du " + fmt + " ?", { okLabel: "Creer", type: "warning" })
+        .then(function (ok) { if (ok) _doSubmit(); });
+      return;
+    }
+
+    _doSubmit();
   }
 
   function getVal(id) {

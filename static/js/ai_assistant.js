@@ -494,16 +494,23 @@
       var doorsCard = buildDoorsCard(summary);
       if (doorsCard) panel.appendChild(doorsCard);
     } else {
-      var content = (summary.sections || {})[state.activeTab] || "";
+      var sectionKey = state.activeTab;
+      var content = (summary.sections || {})[sectionKey] || "";
       var card = el("div", { class: "ai-section-card ai-section-" + state.activeTab }, [
         el("div", { class: "ai-section-header" }, [
           el("span", { class: "material-symbols-outlined" }, [TAB_ICONS[state.activeTab]]),
-          el("span", { class: "ai-section-title", text: TAB_TITLES[state.activeTab] })
+          el("span", { class: "ai-section-title", text: TAB_TITLES[state.activeTab] }),
+          buildSectionToolbar(summary, sectionKey, content)
         ])
       ]);
       var body = el("div", { class: "ai-section-body" });
       if (content) {
         renderMd(content, body);
+        // Mode 'detail puces' pour les sections en liste (recommandations,
+        // prochaines_24h) : controles par puce ajoutes au-dessus du body.
+        if (sectionKey === "recommandations") {
+          card.appendChild(buildBulletControls(summary, sectionKey, content));
+        }
       } else {
         body.appendChild(el("p", { class: "ai-md-ras", text: "RAS" }));
       }
@@ -729,7 +736,8 @@
     card.appendChild(el("div", { class: "ai-upcoming-header" }, [
       el("span", { class: "material-symbols-outlined" }, ["schedule"]),
       el("span", { class: "ai-upcoming-title", text: "Prochaines 24 heures" }),
-      el("span", { class: "ai-upcoming-count", text: items.length ? String(items.length) + " jalon(s)" : "aucun jalon" })
+      el("span", { class: "ai-upcoming-count", text: items.length ? String(items.length) + " jalon(s)" : "aucun jalon" }),
+      buildSectionToolbar(summary, "prochaines_24h", briefing)
     ]));
     if (briefing) {
       var briefingEl = el("div", { class: "ai-upcoming-briefing" });
@@ -793,7 +801,8 @@
     var card = el("div", { class: "ai-section-card ai-section-synthese" }, [
       el("div", { class: "ai-section-header" }, [
         el("span", { class: "material-symbols-outlined" }, ["summarize"]),
-        el("span", { class: "ai-section-title", text: "Synthèse" })
+        el("span", { class: "ai-section-title", text: "Synthèse" }),
+        buildSectionToolbar(summary, "synthese", synth)
       ])
     ]);
     var body = el("div", { class: "ai-section-body" });
@@ -808,7 +817,8 @@
     var card = el("div", { class: "ai-section-card ai-section-faits_marquants" }, [
       el("div", { class: "ai-section-header" }, [
         el("span", { class: "material-symbols-outlined" }, ["campaign"]),
-        el("span", { class: "ai-section-title", text: "Faits marquants" })
+        el("span", { class: "ai-section-title", text: "Faits marquants" }),
+        buildSectionToolbar(summary, "faits_marquants", faits)
       ])
     ]);
     var body = el("div", { class: "ai-section-body" });
@@ -1354,6 +1364,487 @@
       toast("Rapport envoyé à " + (res.sent_count || 0) + " destinataire(s).", "success");
       closeSendMailModal();
     });
+  }
+
+  // ---------- Feedback par section : toolbar + modales ----------
+
+  // Sections en liste (puces) : on propose un mode 'détail puces' avec
+  // contrôles individuels (★ retenir / 💬 commenter / 🗒 promouvoir).
+  var LIST_SECTIONS = { recommandations: true, faits_marquants: true, prochaines_24h: true };
+
+  // Libellés FR des sections pour les modales.
+  var SECTION_LABELS_FR = {
+    synthese:        "Synthèse",
+    faits_marquants: "Faits marquants",
+    secours:         "Secours",
+    securite:        "Sécurité",
+    technique:       "Technique",
+    flux:            "Flux",
+    fourriere:       "Fourrière",
+    recommandations: "Recommandations",
+    prochaines_24h:  "Prochaines 24h"
+  };
+
+  // ----- API client feedback -----
+
+  function feedbackApi() {
+    return {
+      addFeedback: function (summaryId, body) {
+        return apiPostJson("/api/pcorg/summary/" + encodeURIComponent(summaryId) + "/feedback", body);
+      },
+      setQualityLabel: function (summaryId, label, section) {
+        return apiPostJson("/api/pcorg/summary/" + encodeURIComponent(summaryId) + "/quality-label",
+                           { label: label, section: section });
+      },
+      setRecommendationStatus: function (summaryId, bulletIndex, status) {
+        return apiPostJson("/api/pcorg/summary/" + encodeURIComponent(summaryId) + "/recommendation-status",
+                           { bullet_index: bulletIndex, status: status });
+      }
+    };
+  }
+
+  // Recharge le rapport complet depuis le backend et re-render.
+  function reloadCurrentSummary() {
+    if (!state.current || !state.current.id) return Promise.resolve();
+    return apiGetJson("/api/pcorg/summary/" + encodeURIComponent(state.current.id)).then(function (res) {
+      if (res && res.ok && res.summary) {
+        renderSummary(res.summary);
+      }
+    });
+  }
+
+  // ----- Toolbar : 👍 / 👎 / ✏️ / 💬 (par section) -----
+
+  function buildSectionToolbar(summary, sectionKey, originalText) {
+    var sid = summary && summary.id;
+    var labelPerSection = (summary && summary.quality_label_per_section) || {};
+    var currentLabel = labelPerSection[sectionKey] || null;
+    var toolbar = el("span", { class: "ai-section-toolbar" });
+
+    // Indicateur visuel de label déjà posé (badge discret en début de toolbar)
+    if (currentLabel) {
+      toolbar.appendChild(el("span", {
+        class: "ai-section-label-badge ai-section-label-" + currentLabel,
+        text: currentLabel === "good" ? "Validé" : (currentLabel === "bad" ? "À revoir" : "Neutre"),
+        title: "Label qualité posé sur cette section"
+      }));
+    }
+
+    var btnGood = el("button", {
+      type: "button",
+      class: "ai-section-tool-btn ai-tool-good" + (currentLabel === "good" ? " is-active" : ""),
+      title: "Valider cette section (👍)",
+      "aria-label": "Valider"
+    }, [el("span", { class: "material-symbols-outlined" }, ["thumb_up"])]);
+    btnGood.addEventListener("click", function (e) { e.stopPropagation(); onQualityLabel(sectionKey, currentLabel === "good" ? null : "good"); });
+
+    var btnBad = el("button", {
+      type: "button",
+      class: "ai-section-tool-btn ai-tool-bad" + (currentLabel === "bad" ? " is-active" : ""),
+      title: "À revoir (👎) — un commentaire sera demandé",
+      "aria-label": "À revoir"
+    }, [el("span", { class: "material-symbols-outlined" }, ["thumb_down"])]);
+    btnBad.addEventListener("click", function (e) { e.stopPropagation(); onMarkBad(sectionKey, originalText); });
+
+    var btnEdit = el("button", {
+      type: "button",
+      class: "ai-section-tool-btn ai-tool-edit",
+      title: "Améliorer cette section (écrire la version correcte)",
+      "aria-label": "Améliorer"
+    }, [el("span", { class: "material-symbols-outlined" }, ["edit"])]);
+    btnEdit.addEventListener("click", function (e) { e.stopPropagation(); openEditSectionModal(sectionKey, originalText); });
+
+    var btnComment = el("button", {
+      type: "button",
+      class: "ai-section-tool-btn ai-tool-comment",
+      title: "Ajouter un commentaire / une règle pour les prochains rapports",
+      "aria-label": "Commenter"
+    }, [el("span", { class: "material-symbols-outlined" }, ["chat_bubble"])]);
+    btnComment.addEventListener("click", function (e) { e.stopPropagation(); openCommentModal(sectionKey, originalText); });
+
+    toolbar.appendChild(btnGood);
+    toolbar.appendChild(btnBad);
+    toolbar.appendChild(btnEdit);
+    toolbar.appendChild(btnComment);
+    return toolbar;
+  }
+
+  function onQualityLabel(sectionKey, label) {
+    if (!state.current || !state.current.id) return;
+    feedbackApi().setQualityLabel(state.current.id, label, sectionKey).then(function (res) {
+      if (!res || !res.ok) { toast((res && res.error) || "Erreur", "error"); return; }
+      toast(label ? "Section " + (label === "good" ? "validée" : (label === "bad" ? "marquée à revoir" : "neutre")) : "Label retiré",
+            label === "good" ? "success" : "info");
+      if (res.summary) renderSummary(res.summary);
+    });
+  }
+
+  function onMarkBad(sectionKey, originalText) {
+    // 'bad' nécessite un commentaire : on ouvre la modale commentaire avec rating=bad pré-rempli.
+    openCommentModal(sectionKey, originalText, { rating: "bad", requireComment: true });
+  }
+
+  // ----- Modale d'édition (réécriture de section) -----
+
+  var editSectionEl = null;
+
+  function openEditSectionModal(sectionKey, originalText) {
+    if (!state.current || !state.current.id) return;
+    buildEditSectionModal();
+    var modal = editSectionEl;
+    modal.querySelector(".ai-edit-section-title").textContent = "Améliorer la section : " + (SECTION_LABELS_FR[sectionKey] || sectionKey);
+    var ta = modal.querySelector("#ai-edit-section-textarea");
+    var origLabel = modal.querySelector(".ai-edit-section-original");
+    ta.value = originalText || "";
+    origLabel.textContent = "Original Claude : " + ((originalText || "").substring(0, 200) + ((originalText || "").length > 200 ? "…" : ""));
+    modal.dataset.sectionKey = sectionKey;
+    modal.dataset.originalText = originalText || "";
+    var preview = modal.querySelector("#ai-edit-section-preview");
+    renderMd(ta.value, preview);
+    modal.classList.add("is-open");
+    modal.setAttribute("aria-hidden", "false");
+    setTimeout(function () { ta.focus(); }, 50);
+  }
+
+  function closeEditSectionModal() {
+    if (!editSectionEl) return;
+    editSectionEl.classList.remove("is-open");
+    editSectionEl.setAttribute("aria-hidden", "true");
+  }
+
+  function buildEditSectionModal() {
+    if (editSectionEl) return editSectionEl;
+    var overlay = el("div", { class: "ai-modal-overlay ai-edit-section-overlay", "aria-hidden": "true" });
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) closeEditSectionModal(); });
+    var modal = el("div", { class: "ai-modal ai-edit-section-modal", role: "dialog", "aria-modal": "true" });
+    var header = el("div", { class: "ai-modal-header" }, [
+      el("span", { class: "material-symbols-outlined ai-modal-icon" }, ["edit"]),
+      el("div", { class: "ai-modal-titles" }, [
+        el("h2", { class: "ai-modal-title ai-edit-section-title", text: "Améliorer la section" }),
+        el("div", { class: "ai-modal-subtitle", text: "Réécris la version que tu aurais voulu lire. Elle servira de référence pour les prochains rapports." })
+      ]),
+      el("button", { type: "button", class: "ai-modal-close", title: "Fermer", onclick: closeEditSectionModal }, [
+        el("span", { class: "material-symbols-outlined" }, ["close"])
+      ])
+    ]);
+    var origLabel = el("div", { class: "ai-edit-section-original", text: "" });
+    var editor = el("div", { class: "ai-edit-section-editor" }, [
+      el("div", { class: "ai-edit-section-pane" }, [
+        el("div", { class: "ai-edit-section-pane-label", text: "Ta version (markdown léger : **gras**, lignes - puces)" }),
+        el("textarea", { id: "ai-edit-section-textarea", class: "ai-edit-section-textarea", rows: "12" })
+      ]),
+      el("div", { class: "ai-edit-section-pane" }, [
+        el("div", { class: "ai-edit-section-pane-label", text: "Aperçu rendu" }),
+        el("div", { id: "ai-edit-section-preview", class: "ai-edit-section-preview" })
+      ])
+    ]);
+    var commentRow = el("div", { class: "ai-edit-section-comment" }, [
+      el("label", { class: "ai-edit-section-pane-label", text: "Commentaire (optionnel)" }),
+      el("input", { type: "text", id: "ai-edit-section-comment", placeholder: "Explique pourquoi tu corriges, contexte non évident, etc." })
+    ]);
+    var promoteRow = el("div", { class: "ai-edit-section-promote" }, [
+      el("label", { class: "ai-toggle-label" }, [
+        el("input", { type: "checkbox", id: "ai-edit-section-promote" }),
+        el("span", { text: "Promouvoir aussi en règle permanente (sera réinjectée dans tous les rapports futurs)" })
+      ])
+    ]);
+    var ruleRow = el("div", { class: "ai-edit-section-rule-row", style: "display:none;" }, [
+      el("label", { class: "ai-edit-section-pane-label", text: "Texte de la règle (formulation concise)" }),
+      el("input", { type: "text", id: "ai-edit-section-rule", placeholder: "Ex: Tribune Mulsanne — toujours préciser secteur..." })
+    ]);
+    var footer = el("div", { class: "ai-modal-footer" }, [
+      el("button", { type: "button", class: "ai-btn ai-btn-ghost", onclick: closeEditSectionModal }, [el("span", { text: "Annuler" })]),
+      el("button", { type: "button", class: "ai-btn ai-btn-primary", id: "ai-edit-section-save" }, [
+        el("span", { class: "material-symbols-outlined" }, ["save"]),
+        el("span", { text: "Enregistrer la correction" })
+      ])
+    ]);
+    modal.appendChild(header);
+    modal.appendChild(origLabel);
+    modal.appendChild(editor);
+    modal.appendChild(commentRow);
+    modal.appendChild(promoteRow);
+    modal.appendChild(ruleRow);
+    modal.appendChild(footer);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    var ta = overlay.querySelector("#ai-edit-section-textarea");
+    var preview = overlay.querySelector("#ai-edit-section-preview");
+    ta.addEventListener("input", function () { renderMd(ta.value, preview); });
+    overlay.querySelector("#ai-edit-section-promote").addEventListener("change", function (e) {
+      ruleRow.style.display = e.target.checked ? "" : "none";
+      // Pré-remplissage : prend la 1ère phrase du texte corrigé
+      var ruleInput = overlay.querySelector("#ai-edit-section-rule");
+      if (e.target.checked && !ruleInput.value) {
+        var first = (ta.value || "").split(/\.[\s]/)[0].replace(/^[-*\s]+/, "").trim();
+        if (first) ruleInput.value = first.substring(0, 200);
+      }
+    });
+    overlay.querySelector("#ai-edit-section-save").addEventListener("click", submitEditSection);
+
+    editSectionEl = overlay;
+    return overlay;
+  }
+
+  function submitEditSection() {
+    var modal = editSectionEl;
+    if (!modal || !state.current || !state.current.id) return;
+    var sectionKey = modal.dataset.sectionKey;
+    var originalText = modal.dataset.originalText || "";
+    var corrected = (modal.querySelector("#ai-edit-section-textarea").value || "").trim();
+    if (!corrected) { toast("La version corrigée ne peut pas être vide.", "error"); return; }
+    var comment = (modal.querySelector("#ai-edit-section-comment").value || "").trim();
+    var promote = modal.querySelector("#ai-edit-section-promote").checked;
+    var ruleText = promote ? (modal.querySelector("#ai-edit-section-rule").value || "").trim() : null;
+    if (promote && !ruleText) { toast("Renseigne le texte de la règle ou décoche la promotion.", "error"); return; }
+
+    var btn = modal.querySelector("#ai-edit-section-save");
+    btn.disabled = true;
+    feedbackApi().addFeedback(state.current.id, {
+      section: sectionKey,
+      kind: "correction",
+      original_text: originalText,
+      corrected_text: corrected,
+      comment: comment || null,
+      rule_text: ruleText,
+      promote_to_memory: !!promote
+    }).then(function (res) {
+      btn.disabled = false;
+      if (!res || !res.ok) { toast((res && res.error) || "Erreur", "error"); return; }
+      toast(promote ? "Correction enregistrée + règle ajoutée à la mémoire" : "Correction enregistrée", "success");
+      closeEditSectionModal();
+      if (res.summary) renderSummary(res.summary);
+    });
+  }
+
+  // ----- Modale commentaire / règle (sans correction) -----
+
+  var commentModalEl = null;
+  var commentModalState = { sectionKey: null, originalText: "", rating: null, requireComment: false };
+
+  function openCommentModal(sectionKey, originalText, opts) {
+    if (!state.current || !state.current.id) return;
+    opts = opts || {};
+    commentModalState = {
+      sectionKey: sectionKey,
+      originalText: originalText || "",
+      rating: opts.rating || null,
+      requireComment: !!opts.requireComment
+    };
+    buildCommentModal();
+    var modal = commentModalEl;
+    modal.querySelector(".ai-comment-modal-title").textContent =
+      (opts.rating === "bad" ? "À revoir : " : "Commentaire / règle : ")
+      + (SECTION_LABELS_FR[sectionKey] || sectionKey);
+    modal.querySelector("#ai-comment-textarea").value = "";
+    modal.querySelector("#ai-comment-promote").checked = false;
+    modal.querySelector("#ai-comment-rule").value = "";
+    modal.querySelector(".ai-comment-rule-row").style.display = "none";
+    modal.classList.add("is-open");
+    modal.setAttribute("aria-hidden", "false");
+    setTimeout(function () { modal.querySelector("#ai-comment-textarea").focus(); }, 50);
+  }
+
+  function closeCommentModal() {
+    if (!commentModalEl) return;
+    commentModalEl.classList.remove("is-open");
+    commentModalEl.setAttribute("aria-hidden", "true");
+  }
+
+  function buildCommentModal() {
+    if (commentModalEl) return commentModalEl;
+    var overlay = el("div", { class: "ai-modal-overlay ai-comment-modal-overlay", "aria-hidden": "true" });
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) closeCommentModal(); });
+    var modal = el("div", { class: "ai-modal ai-comment-modal", role: "dialog", "aria-modal": "true" });
+    var header = el("div", { class: "ai-modal-header" }, [
+      el("span", { class: "material-symbols-outlined ai-modal-icon" }, ["chat_bubble"]),
+      el("div", { class: "ai-modal-titles" }, [
+        el("h2", { class: "ai-modal-title ai-comment-modal-title", text: "Commentaire" }),
+        el("div", { class: "ai-modal-subtitle", text: "Note libre pour cette section. Si tu veux qu'elle s'applique aux futurs rapports, coche 'Promouvoir en règle'." })
+      ]),
+      el("button", { type: "button", class: "ai-modal-close", title: "Fermer", onclick: closeCommentModal }, [
+        el("span", { class: "material-symbols-outlined" }, ["close"])
+      ])
+    ]);
+    var body = el("div", { class: "ai-comment-modal-body" }, [
+      el("label", { class: "ai-edit-section-pane-label", text: "Ton commentaire" }),
+      el("textarea", { id: "ai-comment-textarea", class: "ai-edit-section-textarea", rows: "6",
+                       placeholder: "Ex: la synthèse est correcte mais il faudrait toujours mentionner..." }),
+      el("div", { class: "ai-edit-section-promote" }, [
+        el("label", { class: "ai-toggle-label" }, [
+          el("input", { type: "checkbox", id: "ai-comment-promote" }),
+          el("span", { text: "Promouvoir en règle permanente (sera réinjectée dans tous les rapports futurs)" })
+        ])
+      ]),
+      el("div", { class: "ai-comment-rule-row", style: "display:none;" }, [
+        el("label", { class: "ai-edit-section-pane-label", text: "Texte de la règle (concis)" }),
+        el("input", { type: "text", id: "ai-comment-rule", placeholder: "Ex: Pour 24H Autos en synthèse, toujours mentionner..." })
+      ])
+    ]);
+    var footer = el("div", { class: "ai-modal-footer" }, [
+      el("button", { type: "button", class: "ai-btn ai-btn-ghost", onclick: closeCommentModal }, [el("span", { text: "Annuler" })]),
+      el("button", { type: "button", class: "ai-btn ai-btn-primary", id: "ai-comment-save" }, [
+        el("span", { class: "material-symbols-outlined" }, ["save"]),
+        el("span", { text: "Enregistrer" })
+      ])
+    ]);
+    modal.appendChild(header);
+    modal.appendChild(body);
+    modal.appendChild(footer);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    overlay.querySelector("#ai-comment-promote").addEventListener("change", function (e) {
+      overlay.querySelector(".ai-comment-rule-row").style.display = e.target.checked ? "" : "none";
+      var ruleInput = overlay.querySelector("#ai-comment-rule");
+      var commentTa = overlay.querySelector("#ai-comment-textarea");
+      if (e.target.checked && !ruleInput.value) {
+        var firstLine = (commentTa.value || "").split("\n")[0].trim();
+        if (firstLine) ruleInput.value = firstLine.substring(0, 200);
+      }
+    });
+    overlay.querySelector("#ai-comment-save").addEventListener("click", submitComment);
+    commentModalEl = overlay;
+    return overlay;
+  }
+
+  function submitComment() {
+    var modal = commentModalEl;
+    var st = commentModalState;
+    if (!modal || !state.current || !state.current.id) return;
+    var comment = (modal.querySelector("#ai-comment-textarea").value || "").trim();
+    var promote = modal.querySelector("#ai-comment-promote").checked;
+    var ruleText = promote ? (modal.querySelector("#ai-comment-rule").value || "").trim() : null;
+    if (st.requireComment && !comment) {
+      toast("Un commentaire est requis quand tu marques 'À revoir'.", "error"); return;
+    }
+    if (!comment && !promote) {
+      toast("Saisis un commentaire ou coche la promotion en règle.", "error"); return;
+    }
+    if (promote && !ruleText) {
+      toast("Renseigne le texte de la règle ou décoche la promotion.", "error"); return;
+    }
+    var btn = modal.querySelector("#ai-comment-save");
+    btn.disabled = true;
+
+    var body = {
+      section: st.sectionKey,
+      kind: promote ? "rule" : "comment",
+      original_text: st.originalText,
+      comment: comment || null,
+      rating: st.rating,
+      rule_text: ruleText,
+      promote_to_memory: !!promote
+    };
+
+    // Si on marque 'bad', on pose aussi le label qualité section=bad APRÈS l'ajout du feedback.
+    feedbackApi().addFeedback(state.current.id, body).then(function (res) {
+      if (!res || !res.ok) { btn.disabled = false; toast((res && res.error) || "Erreur", "error"); return; }
+      var follow = (st.rating === "bad")
+        ? feedbackApi().setQualityLabel(state.current.id, "bad", st.sectionKey)
+        : Promise.resolve({ ok: true, summary: res.summary });
+      follow.then(function (res2) {
+        btn.disabled = false;
+        toast(promote ? "Commentaire + règle enregistrés" : "Commentaire enregistré", "success");
+        closeCommentModal();
+        var fresh = (res2 && res2.summary) || res.summary;
+        if (fresh) renderSummary(fresh);
+      });
+    });
+  }
+
+  // ----- Mode détail puces pour recommandations -----
+
+  function _splitBullets(content) {
+    if (!content) return [];
+    var lines = String(content).replace(/\r\n/g, "\n").split("\n");
+    var out = [];
+    var cur = null;
+    lines.forEach(function (line) {
+      var s = line.trim();
+      if (/^[-*]\s/.test(s)) {
+        if (cur) out.push(cur);
+        cur = s.replace(/^[-*]\s+/, "");
+      } else if (s && cur != null) {
+        cur += " " + s;
+      }
+    });
+    if (cur) out.push(cur);
+    return out;
+  }
+
+  var RECO_STATUS_LABELS = {
+    applied: "Appliquée",
+    partial: "Partielle",
+    ignored: "Ignorée",
+    not_relevant: "Non pertinent"
+  };
+  var RECO_STATUS_ORDER = ["applied", "partial", "ignored", "not_relevant"];
+
+  function _latestRecommendationStatus(summary, bulletIndex) {
+    var arr = (summary && summary.recommendations_status) || [];
+    var latest = null;
+    arr.forEach(function (e) {
+      if (e && e.bullet_index === bulletIndex) latest = e;
+    });
+    return latest;
+  }
+
+  function buildBulletControls(summary, sectionKey, content) {
+    var bullets = _splitBullets(content);
+    var wrap = el("div", { class: "ai-bullet-controls" });
+    if (!bullets.length) return wrap;
+    wrap.appendChild(el("div", { class: "ai-bullet-controls-header", text: "Détail par recommandation — marque l'état d'application et propose des règles" }));
+    bullets.forEach(function (bulletText, idx) {
+      var last = _latestRecommendationStatus(summary, idx);
+      var currentStatus = last ? last.status : null;
+      var row = el("div", { class: "ai-bullet-row" });
+      row.appendChild(el("div", { class: "ai-bullet-text", text: bulletText }));
+      var actions = el("div", { class: "ai-bullet-actions" });
+      RECO_STATUS_ORDER.forEach(function (st) {
+        var btn = el("button", {
+          type: "button",
+          class: "ai-bullet-status-btn ai-bullet-status-" + st + (currentStatus === st ? " is-active" : ""),
+          title: RECO_STATUS_LABELS[st],
+          "data-status": st,
+          "data-idx": String(idx)
+        }, [el("span", { text: RECO_STATUS_LABELS[st] })]);
+        btn.addEventListener("click", function () {
+          var nextStatus = currentStatus === st ? null : st;
+          feedbackApi().setRecommendationStatus(state.current.id, idx, nextStatus).then(function (res) {
+            if (!res || !res.ok) { toast((res && res.error) || "Erreur", "error"); return; }
+            toast(nextStatus ? "Recommandation : " + RECO_STATUS_LABELS[nextStatus] : "Statut retiré", "info");
+            if (res.summary) renderSummary(res.summary);
+          });
+        });
+        actions.appendChild(btn);
+      });
+      var promote = el("button", {
+        type: "button",
+        class: "ai-bullet-promote-btn",
+        title: "Promouvoir cette recommandation en règle permanente"
+      }, [
+        el("span", { class: "material-symbols-outlined" }, ["bookmark_add"]),
+        el("span", { text: "Promouvoir" })
+      ]);
+      promote.addEventListener("click", function () {
+        openCommentModal(sectionKey, bulletText, { rating: null });
+        // Pré-coche la promotion + pré-remplit la règle.
+        setTimeout(function () {
+          var promoteCb = commentModalEl && commentModalEl.querySelector("#ai-comment-promote");
+          var ruleInput = commentModalEl && commentModalEl.querySelector("#ai-comment-rule");
+          var ruleRow = commentModalEl && commentModalEl.querySelector(".ai-comment-rule-row");
+          if (promoteCb) { promoteCb.checked = true; promoteCb.dispatchEvent(new Event("change")); }
+          if (ruleInput) ruleInput.value = bulletText.substring(0, 200);
+          if (ruleRow) ruleRow.style.display = "";
+        }, 80);
+      });
+      actions.appendChild(promote);
+      row.appendChild(actions);
+      wrap.appendChild(row);
+    });
+    return wrap;
   }
 
   // ---------- Open / close ----------

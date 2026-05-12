@@ -37,6 +37,7 @@ from routing import routing_bp
 from cameras import cameras_bp
 import pcorg_summary
 import pcorg_summary_mail
+import pcorg_ai_memory
 
 ################################################################################
 # Configuration
@@ -5014,6 +5015,306 @@ def pcorg_summary_send(summary_id):
         "sent_count": result.get("sent_count"),
         "to": emails,
     })
+
+
+################################################################################
+# FEEDBACK SUR LES RAPPORTS (par section, immuable append-only)
+################################################################################
+
+@app.route('/api/pcorg/summary/<summary_id>/feedback', methods=['POST'])
+@role_required("manager")
+def pcorg_summary_feedback_add(summary_id):
+    """Ajoute une entry de feedback sur une section d'un rapport.
+
+    Body : { section, kind, target?, original_text?, corrected_text?,
+             rule_text?, comment?, rating?,
+             promote_to_memory?, memory_scope? }
+
+    Si promote_to_memory=True et kind='rule' (ou rule_text fourni), une entry
+    pcorg_ai_memory est aussi creee et son id retourne dans 'memory_id'. Le
+    scope par defaut est event + section + phase=None.
+    """
+    data = request.get_json(silent=True) or {}
+    section = data.get("section")
+    kind = data.get("kind")
+    user = request.user_payload or {}
+    sender_email = user.get("email", "") or ""
+    sender_name = (str(user.get("firstname", "") or "") + " " + str(user.get("lastname", "") or "")).strip()
+
+    # Si l'utilisateur demande aussi la promotion en memoire, on cree d'abord
+    # la directive pour avoir son id, puis on attache l'id au feedback.
+    memory_doc = None
+    if data.get("promote_to_memory") and (data.get("rule_text") or kind == "rule"):
+        rule_text = data.get("rule_text") or data.get("comment") or data.get("corrected_text")
+        if not rule_text:
+            return jsonify({"ok": False, "error": "rule_text requis pour promotion en memoire"}), 400
+        # Scope par defaut : event courant du rapport + section visee.
+        summary_doc = pcorg_summary.get_summary(db, summary_id)
+        if not summary_doc:
+            return jsonify({"ok": False, "error": "Resume introuvable"}), 404
+        explicit_scope = data.get("memory_scope") or {}
+        scope = {
+            "event": explicit_scope.get("event", summary_doc.get("event")),
+            "section": explicit_scope.get("section", section),
+            "phase": explicit_scope.get("phase"),
+            "year": explicit_scope.get("year"),
+        }
+        type_ = data.get("memory_type") or "principe"
+        try:
+            memory_doc = pcorg_ai_memory.promote_from_feedback(
+                db, summary_id, data, rule_text,
+                scope=scope, type_=type_,
+                created_by_email=sender_email,
+                created_by_name=sender_name,
+            )
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+        except Exception as e:
+            logger.exception("promote_from_feedback: erreur")
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    try:
+        updated = pcorg_summary.add_feedback(
+            db, summary_id,
+            section=section,
+            kind=kind,
+            original_text=data.get("original_text"),
+            corrected_text=data.get("corrected_text"),
+            rule_text=data.get("rule_text"),
+            comment=data.get("comment"),
+            target=data.get("target"),
+            rating=data.get("rating"),
+            by_email=sender_email,
+            by_name=sender_name,
+            promoted_memory_id=str(memory_doc.get("_id")) if memory_doc else None,
+        )
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.exception("add_feedback: erreur")
+        return jsonify({"ok": False, "error": str(e)}), 500
+    if not updated:
+        return jsonify({"ok": False, "error": "Resume introuvable"}), 404
+
+    return jsonify({
+        "ok": True,
+        "summary": pcorg_summary._serialize_summary(updated, light=False),
+        "memory": pcorg_ai_memory.serialize(memory_doc) if memory_doc else None,
+    })
+
+
+@app.route('/api/pcorg/summary/<summary_id>/quality-label', methods=['POST'])
+@role_required("manager")
+def pcorg_summary_quality_label(summary_id):
+    """Pose un label qualite global (section=None) ou par section.
+    Body : { label: "good|neutral|bad|null", section: "synthese|...|null" }
+    """
+    data = request.get_json(silent=True) or {}
+    label = data.get("label")
+    section = data.get("section") or None
+    user = request.user_payload or {}
+    sender_email = user.get("email", "") or ""
+    try:
+        updated = pcorg_summary.set_quality_label(
+            db, summary_id, label, section=section, by_email=sender_email,
+        )
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.exception("set_quality_label: erreur")
+        return jsonify({"ok": False, "error": str(e)}), 500
+    if not updated:
+        return jsonify({"ok": False, "error": "Resume introuvable"}), 404
+    return jsonify({
+        "ok": True,
+        "summary": pcorg_summary._serialize_summary(updated, light=False),
+    })
+
+
+@app.route('/api/pcorg/summary/<summary_id>/recommendation-status', methods=['POST'])
+@role_required("manager")
+def pcorg_summary_recommendation_status(summary_id):
+    """Marque une recommandation comme appliquee/partielle/ignoree/non pertinente.
+    Body : { bullet_index: int, status: "applied|partial|ignored|not_relevant|null" }
+    """
+    data = request.get_json(silent=True) or {}
+    user = request.user_payload or {}
+    sender_email = user.get("email", "") or ""
+    try:
+        updated = pcorg_summary.set_recommendation_status(
+            db, summary_id,
+            bullet_index=data.get("bullet_index"),
+            status=data.get("status"),
+            by_email=sender_email,
+        )
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.exception("set_recommendation_status: erreur")
+        return jsonify({"ok": False, "error": str(e)}), 500
+    if not updated:
+        return jsonify({"ok": False, "error": "Resume introuvable"}), 404
+    return jsonify({
+        "ok": True,
+        "summary": pcorg_summary._serialize_summary(updated, light=False),
+    })
+
+
+@app.route('/api/pcorg/summary/<summary_id>/prompts', methods=['GET'])
+@role_required("admin")
+def pcorg_summary_prompts(summary_id):
+    """Expose les prompts system + user persistes pour audit/debug.
+    Admin uniquement (verbeux + sensible : peut contenir des donnees fiches).
+    """
+    data = pcorg_summary.get_prompts(db, summary_id)
+    if data is None:
+        return jsonify({"ok": False, "error": "Resume introuvable"}), 404
+    return jsonify({"ok": True, **data})
+
+
+################################################################################
+# MEMOIRE CONSTITUTIONNELLE DE L'ASSISTANT IA
+################################################################################
+
+@app.route('/api/pcorg/ai-memory', methods=['GET'])
+@role_required("manager")
+def pcorg_ai_memory_list():
+    """Liste les directives (filtres optionnels event/section/active)."""
+    event = request.args.get("event") or None
+    section = request.args.get("section") or None
+    active_only = request.args.get("active_only") in ("1", "true", "yes")
+    type_ = request.args.get("type") or None
+    items = pcorg_ai_memory.list_directives(
+        db, event=event, section=section, active_only=active_only, type_=type_,
+    )
+    return jsonify({
+        "ok": True,
+        "items": [pcorg_ai_memory.serialize(d) for d in items],
+    })
+
+
+@app.route('/api/pcorg/ai-memory', methods=['POST'])
+@role_required("manager")
+def pcorg_ai_memory_create():
+    """Cree une directive.
+    Body : { content, type?, scope?, active?, weight? }
+    """
+    data = request.get_json(silent=True) or {}
+    user = request.user_payload or {}
+    sender_email = user.get("email", "") or ""
+    sender_name = (str(user.get("firstname", "") or "") + " " + str(user.get("lastname", "") or "")).strip()
+    try:
+        doc = pcorg_ai_memory.create_directive(
+            db,
+            content=data.get("content"),
+            type_=data.get("type"),
+            scope=data.get("scope"),
+            active=data.get("active", True),
+            weight=data.get("weight", 1.0),
+            created_by_email=sender_email,
+            created_by_name=sender_name,
+        )
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    return jsonify({"ok": True, "item": pcorg_ai_memory.serialize(doc)})
+
+
+@app.route('/api/pcorg/ai-memory/<directive_id>', methods=['PUT'])
+@role_required("manager")
+def pcorg_ai_memory_update(directive_id):
+    """Met a jour une directive (content, type, scope, active, weight)."""
+    data = request.get_json(silent=True) or {}
+    user = request.user_payload or {}
+    sender_email = user.get("email", "") or ""
+    try:
+        doc = pcorg_ai_memory.update_directive(
+            db, directive_id, data, updated_by_email=sender_email,
+        )
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    if not doc:
+        return jsonify({"ok": False, "error": "Directive introuvable"}), 404
+    return jsonify({"ok": True, "item": pcorg_ai_memory.serialize(doc)})
+
+
+@app.route('/api/pcorg/ai-memory/<directive_id>', methods=['DELETE'])
+@role_required("admin")
+def pcorg_ai_memory_delete(directive_id):
+    """Supprime physiquement une directive. Admin uniquement."""
+    ok = pcorg_ai_memory.delete_directive(db, directive_id)
+    if not ok:
+        return jsonify({"ok": False, "error": "Directive introuvable"}), 404
+    return jsonify({"ok": True})
+
+
+@app.route('/api/pcorg/ai-memory/stats', methods=['GET'])
+@role_required("manager")
+def pcorg_ai_memory_stats():
+    """Compteurs synthetiques de la memoire (UI admin)."""
+    return jsonify({"ok": True, **pcorg_ai_memory.stats(db)})
+
+
+################################################################################
+# EXPORT DATASET D'APPRENTISSAGE (fine-tuning futur)
+################################################################################
+
+@app.route('/api/pcorg/summary/export-dataset', methods=['GET'])
+@role_required("admin")
+def pcorg_summary_export_dataset():
+    """Genere un dataset JSONL pour fine-tuning.
+
+    Query params :
+    - format : 'sft' (defaut) ou 'dpo'
+    - from, to : ISO datetime
+    - min_quality : 'good' pour ne garder que les rapports labellises bons OU
+                    avec >=1 correction
+    - include_memory : 1 pour concatener memory_block_text au system_prompt
+    - prompt_version : entier pour filtrer
+    """
+    fmt = (request.args.get("format") or "sft").lower()
+    if fmt not in ("sft", "dpo"):
+        return jsonify({"ok": False, "error": "format invalide (sft|dpo)"}), 400
+    ts_from = pcorg_summary._parse_iso_dt(request.args.get("from")) if request.args.get("from") else None
+    ts_to = pcorg_summary._parse_iso_dt(request.args.get("to")) if request.args.get("to") else None
+    min_quality = request.args.get("min_quality") or None
+    include_memory = request.args.get("include_memory") in ("1", "true", "yes")
+    pv_raw = request.args.get("prompt_version")
+    pv = None
+    if pv_raw:
+        try:
+            pv = int(pv_raw)
+        except (TypeError, ValueError):
+            pv = None
+
+    def _stream():
+        n = 0
+        for sample in pcorg_summary.export_training_dataset(
+            db, format_=fmt, ts_from=ts_from, ts_to=ts_to,
+            min_quality=min_quality, include_memory=include_memory,
+            prompt_version=pv,
+        ):
+            yield json.dumps(sample, ensure_ascii=False, default=pcorg_summary._json_default) + "\n"
+            n += 1
+        # Pas de footer (JSONL = un objet par ligne).
+
+    from flask import Response
+    return Response(
+        _stream(),
+        mimetype="application/x-jsonlines",
+        headers={
+            "Content-Disposition": (
+                "attachment; filename=pcorg_dataset_" + fmt + "_"
+                + datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S") + ".jsonl"
+            ),
+        },
+    )
+
+
+@app.route('/api/pcorg/summary/export-stats', methods=['GET'])
+@role_required("manager")
+def pcorg_summary_export_stats():
+    """Compteurs du dataset (volume de samples disponibles)."""
+    return jsonify({"ok": True, **pcorg_summary.export_stats(db)})
 
 
 ################################################################################
