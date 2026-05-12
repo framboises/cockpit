@@ -70,6 +70,11 @@ N1_RETROS_COLLECTION = "pcorg_n1_retros"
 MORNING_REPORT_SETTINGS_ID = "morning_report"
 COCKPIT_SETTINGS_COLLECTION = "cockpit_settings"
 
+# Version du system prompt de base (incrementer manuellement quand on refond
+# le prompt). Permet de filtrer le dataset d'apprentissage par generation de
+# prompt -- utile si on veut exclure les vieux samples post-refonte.
+PROMPT_VERSION = 1
+
 # Plafond du nombre de fiches transmises a Claude (apres priorisation).
 DEFAULT_MAX_FICHES = 80
 TEXT_TRUNCATE_CHARS = 800
@@ -1334,7 +1339,7 @@ def select_fiches_for_prompt(db, event, year, ts_start, ts_end, max_fiches=DEFAU
 
 def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
                   comparisons=None, upcoming=None, n1_retro=None, extra_focus_note=None,
-                  door_reinforcement=None, attendance=None):
+                  door_reinforcement=None, attendance=None, memory_block=None):
     """Retourne (system_prompt, user_prompt) en francais.
 
     comparisons (optionnel) : dict produit par compute_comparisons.
@@ -1347,6 +1352,12 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
     attendance (optionnel) : dict produit par compute_attendance_block.
        Apporte le pic constate de la veille (avec heure), le pic projete
        du jour, et l'heure attendue du pic via les pics N-1 jour-equivalent.
+    memory_block (optionnel) : bloc texte des directives accumulees (mode
+       reference uniquement -- ce parametre N'EST PAS injecte dans le system
+       retourne ; il est envoye en bloc cache_control separe par
+       _claude_stream_request. On le mentionne ici pour que la docstring
+       reste a jour, mais build_prompts continue de retourner uniquement le
+       system de base + user pour l'audit et le dataset).
     """
     system = (
         "Tu es un analyste operationnel pour un PC Organisation d'evenement "
@@ -1819,7 +1830,7 @@ def _validate_model(model):
 
 
 def _claude_stream_request(system_prompt, user_prompt, max_tokens, on_progress=None,
-                           model=None, system_cache=True):
+                           model=None, system_cache=True, memory_block=None):
     """Effectue un appel streaming a l'API Anthropic et retourne (text, usage, stop_reason).
 
     Le streaming evite les timeouts sur les reponses longues : tant que Claude
@@ -1832,11 +1843,18 @@ def _claude_stream_request(system_prompt, user_prompt, max_tokens, on_progress=N
     Prompt caching : par defaut le system prompt est marque cache_control
     ephemeral (cache 5 min) -> les appels rapproches ne re-paient pas le system.
 
+    Si memory_block est fourni, il est ajoute comme bloc system separe avec
+    son propre cache_control. Ainsi une modification de la memoire (ajout
+    de directive) n'invalide que le cache 'memoire', pas le cache du gros
+    system de base.
+
     Parametres :
     - on_progress (optionnel) : callable(text_so_far, output_tokens_so_far)
       appele a intervalles reguliers pour permettre un affichage en temps reel.
     - model (optionnel) : override CLAUDE_MODEL pour cet appel (whitelist appliquee).
     - system_cache (defaut True) : passer False pour desactiver le cache (debug).
+    - memory_block (optionnel) : texte du bloc 'Connaissance accumulee', ajoute
+      en bloc system separe avec cache_control distinct.
 
     Le usage retourne contient input_tokens / output_tokens
     + cache_creation_input_tokens / cache_read_input_tokens (telemetrie cache).
@@ -1853,15 +1871,26 @@ def _claude_stream_request(system_prompt, user_prompt, max_tokens, on_progress=N
         "anthropic-version": ANTHROPIC_API_VERSION,
         "content-type": "application/json",
     }
-    # System en bloc unique avec cache_control pour profiter du prompt caching.
+    # System en blocs avec cache_control pour profiter du prompt caching.
+    # Si une memoire constitutionnelle est fournie, on la met en bloc separe
+    # pour que sa modification n'invalide que son propre cache.
     if system_cache:
         system_payload = [{
             "type": "text",
             "text": system_prompt,
             "cache_control": {"type": "ephemeral"},
         }]
+        if memory_block:
+            system_payload.append({
+                "type": "text",
+                "text": memory_block,
+                "cache_control": {"type": "ephemeral"},
+            })
     else:
-        system_payload = system_prompt
+        if memory_block:
+            system_payload = system_prompt + "\n\n" + memory_block
+        else:
+            system_payload = system_prompt
     body = {
         "model": use_model,
         "max_tokens": int(max_tokens),
@@ -2010,7 +2039,8 @@ def _merge_usage(*usages):
     return out
 
 
-def call_claude(system_prompt, user_prompt, on_progress=None, model=None):
+def call_claude(system_prompt, user_prompt, on_progress=None, model=None,
+                memory_block=None):
     """Appelle l'API Claude en streaming, retourne (sections_dict, raw_text, usage).
 
     Si le retour n'est pas du JSON parsable, sections_dict est None et
@@ -2019,10 +2049,13 @@ def call_claude(system_prompt, user_prompt, on_progress=None, model=None):
     Si la reponse est tronquee (stop_reason='max_tokens'), un retry est tente
     avec CLAUDE_MAX_TOKENS_RETRY et une consigne de concision. Les usages sont
     cumules.
+
+    memory_block (optionnel) : bloc 'Connaissance accumulee' ajoute en
+    bloc system separe (cache_control distinct).
     """
     raw_text, usage, stop_reason = _claude_stream_request(
         system_prompt, user_prompt, CLAUDE_MAX_TOKENS,
-        on_progress=on_progress, model=model,
+        on_progress=on_progress, model=model, memory_block=memory_block,
     )
     sections = _parse_sections(raw_text)
 
@@ -2038,7 +2071,7 @@ def call_claude(system_prompt, user_prompt, on_progress=None, model=None):
         try:
             raw_text2, usage2, stop_reason2 = _claude_stream_request(
                 retry_system, user_prompt, CLAUDE_MAX_TOKENS_RETRY,
-                on_progress=on_progress, model=model,
+                on_progress=on_progress, model=model, memory_block=memory_block,
             )
             sections2 = _parse_sections(raw_text2)
             if sections2 is not None:
@@ -2176,17 +2209,43 @@ def _normalize_sections(data):
 # Persistance MongoDB
 # ----------------------------------------------------------------------------
 
+def _compute_prompt_hash(system_prompt, user_prompt):
+    """Hash court (12 chars hex) du system + user prompt envoyes a Claude.
+
+    Sert a filtrer le dataset d'apprentissage par generation de prompt :
+    apres une refonte du system, on peut exclure les vieux samples du dataset
+    sans relire 1000 documents.
+    """
+    import hashlib
+    h = hashlib.sha256()
+    h.update((system_prompt or "").encode("utf-8", errors="replace"))
+    h.update(b"\x00")
+    h.update((user_prompt or "").encode("utf-8", errors="replace"))
+    return h.hexdigest()[:12]
+
+
 def save_summary(db, event, year, ts_start, ts_end, created_by_email, created_by_name,
                  kpis, fiches_count, truncated, sections, raw_text, usage,
                  comparisons=None, upcoming=None, attendance=None, n1_retro=None,
-                 door_reinforcement=None, selection_detail=None, model=None):
+                 door_reinforcement=None, selection_detail=None, model=None,
+                 system_prompt=None, user_prompt=None,
+                 memory_directive_ids=None, memory_block_text=None):
     """Insere un document de resume et retourne le doc complet.
 
     event/year peuvent etre None (resume "tous evenements").
     model (optionnel) : si fourni et valide, persiste a la place de CLAUDE_MODEL.
+
+    system_prompt / user_prompt : prompts complets envoyes a Claude. Persistes
+    pour preparer le dataset d'apprentissage (fine-tuning futur). Le hash et
+    la version du prompt sont aussi stockes pour permettre le filtrage.
+
+    memory_directive_ids : liste d'ids de directives injectees dans le prompt
+    courant (pour audit + increment used_count).
     """
     _ensure_indexes(db)
     use_model = _validate_model(model) or CLAUDE_MODEL
+    prompt_hash = _compute_prompt_hash(system_prompt or "", user_prompt or "") \
+        if (system_prompt or user_prompt) else None
     doc = {
         "_id": uuid.uuid4().hex,
         "event": event,
@@ -2209,6 +2268,19 @@ def save_summary(db, event, year, ts_start, ts_end, created_by_email, created_by
         "raw_text": raw_text,
         "model": use_model,
         "usage": usage or {},
+        # Persistance prompts pour dataset d'apprentissage. Snapshots
+        # immutables : ne JAMAIS re-ecrire ces champs.
+        "system_prompt": system_prompt or "",
+        "user_prompt": user_prompt or "",
+        "system_prompt_hash": prompt_hash,
+        "prompt_version": PROMPT_VERSION,
+        "memory_directive_ids": list(memory_directive_ids or []),
+        "memory_block_text": memory_block_text or "",
+        # Sous-arrays append-only pour le feedback utilisateur.
+        "feedback": [],
+        "recommendations_status": [],
+        "quality_label_per_section": {},
+        "quality_label_global": None,
     }
     db[SUMMARIES_COLLECTION].insert_one(doc)
     return doc
@@ -2282,6 +2354,16 @@ def _serialize_summary(doc, light=True):
         out["sections"] = doc.get("sections") or {}
         out["raw_text"] = doc.get("raw_text") or ""
         out["usage"] = doc.get("usage") or {}
+        # Feedback structure (immutable append-only sous-arrays).
+        out["feedback"] = doc.get("feedback") or []
+        out["recommendations_status"] = doc.get("recommendations_status") or []
+        out["quality_label_per_section"] = doc.get("quality_label_per_section") or {}
+        out["quality_label_global"] = doc.get("quality_label_global")
+        # Versioning prompt -- utile cote UI pour signaler les anciens samples.
+        out["prompt_version"] = doc.get("prompt_version")
+        out["system_prompt_hash"] = doc.get("system_prompt_hash")
+        # Les prompts complets ne sont pas envoyes par defaut (verbeux). La
+        # route /api/pcorg/summary/<id>/prompts en mode admin les expose.
     return out
 
 
@@ -2522,6 +2604,22 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
     """
     use_model = _validate_model(model) or CLAUDE_MODEL
 
+    # Charge la memoire constitutionnelle pour ce scope (event uniquement,
+    # section=None car le rapport produit toutes les sections d'un coup).
+    # Le bloc est passe en bloc cache_control separe a Claude.
+    memory_directives = []
+    memory_block_text = ""
+    try:
+        import pcorg_ai_memory
+        memory_directives, _overflow = pcorg_ai_memory.load_active_directives(
+            db, event=event, section=None,
+        )
+        memory_block_text = pcorg_ai_memory.format_directives_block(memory_directives)
+    except Exception as e:
+        logger.warning("ai_memory: chargement directives a echoue (%s)", e)
+        memory_directives = []
+        memory_block_text = ""
+
     def _safe_doors():
         try:
             import pcorg_doors_analysis
@@ -2574,6 +2672,17 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
                 logger.warning("Retro N-1 : echec runtime : %s", e)
                 n1_retro = None
 
+    memory_ids = [d.get("_id") for d in (memory_directives or []) if d.get("_id")]
+
+    def _increment_memory_usage():
+        if not memory_ids:
+            return
+        try:
+            import pcorg_ai_memory
+            pcorg_ai_memory.increment_usage(db, memory_ids)
+        except Exception as e:
+            logger.warning("ai_memory: increment_usage a echoue (%s)", e)
+
     # Cas "aucune fiche" : court-circuit ou appel Claude minimal.
     if kpis["total"] == 0:
         if not upcoming:
@@ -2585,6 +2694,8 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
                     comparisons, upcoming, attendance, n1_retro,
                     door_reinforcement, extra_focus_note, selection_detail,
                     use_model, sections, "[shortcut: aucune fiche, aucun jalon]",
+                    memory_block_text=memory_block_text,
+                    memory_directive_ids=memory_ids,
                 )
             return save_summary(
                 db, event, year, ts_start, ts_end, created_by_email, created_by_name,
@@ -2594,6 +2705,9 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
                 comparisons=comparisons, upcoming=upcoming, attendance=attendance,
                 n1_retro=n1_retro, door_reinforcement=door_reinforcement,
                 selection_detail=selection_detail, model=use_model,
+                system_prompt="", user_prompt="",
+                memory_directive_ids=memory_ids,
+                memory_block_text=memory_block_text,
             )
         system, user = build_prompts(
             event, year, ts_start, ts_end, kpis, [], False,
@@ -2608,10 +2722,14 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
                 comparisons, upcoming, attendance, n1_retro,
                 door_reinforcement, extra_focus_note, selection_detail,
                 use_model, system_prompt=system, user_prompt=user,
+                memory_block_text=memory_block_text,
+                memory_directive_ids=memory_ids,
             )
         sections, raw_text, usage = call_claude(
             system, user, on_progress=on_progress, model=use_model,
+            memory_block=memory_block_text or None,
         )
+        _increment_memory_usage()
         if sections is None:
             sections = {k: "RAS" for k in SECTION_KEYS}
             sections["prochaines_24h"] = "Reponse Claude non parsable."
@@ -2624,6 +2742,9 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
             comparisons=comparisons, upcoming=upcoming, attendance=attendance,
             n1_retro=n1_retro, door_reinforcement=door_reinforcement,
             selection_detail=selection_detail, model=use_model,
+            system_prompt=system, user_prompt=user,
+            memory_directive_ids=memory_ids,
+            memory_block_text=memory_block_text,
         )
 
     system, user = build_prompts(
@@ -2639,10 +2760,14 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
             comparisons, upcoming, attendance, n1_retro,
             door_reinforcement, extra_focus_note, selection_detail,
             use_model, system_prompt=system, user_prompt=user,
+            memory_block_text=memory_block_text,
+            memory_directive_ids=memory_ids,
         )
     sections, raw_text, usage = call_claude(
         system, user, on_progress=on_progress, model=use_model,
+        memory_block=memory_block_text or None,
     )
+    _increment_memory_usage()
     if sections is None:
         sections = {k: "" for k in SECTION_KEYS}
         sections["faits_marquants"] = raw_text or "Reponse Claude non parsable."
@@ -2653,6 +2778,9 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
         comparisons=comparisons, upcoming=upcoming, attendance=attendance,
         n1_retro=n1_retro, door_reinforcement=door_reinforcement,
         selection_detail=selection_detail, model=use_model,
+        system_prompt=system, user_prompt=user,
+        memory_directive_ids=memory_ids,
+        memory_block_text=memory_block_text,
     )
 
 
@@ -2660,7 +2788,8 @@ def _dry_run_payload(event, year, ts_start, ts_end, kpis, fiches, truncated,
                      comparisons, upcoming, attendance, n1_retro,
                      door_reinforcement, extra_focus_note, selection_detail,
                      model, sections=None, raw_text=None,
-                     system_prompt=None, user_prompt=None):
+                     system_prompt=None, user_prompt=None,
+                     memory_block_text=None, memory_directive_ids=None):
     """Payload retourne par generate_period_summary en mode dry_run.
 
     Le shape est compatible avec _serialize_summary (light=False) cote frontend
@@ -2697,4 +2826,6 @@ def _dry_run_payload(event, year, ts_start, ts_end, kpis, fiches, truncated,
         "user_prompt": user_prompt or "",
         "system_prompt_chars": len(system_prompt or ""),
         "user_prompt_chars": len(user_prompt or ""),
+        "memory_block_text": memory_block_text or "",
+        "memory_directive_ids": list(memory_directive_ids or []),
     }

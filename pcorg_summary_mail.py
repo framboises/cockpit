@@ -487,24 +487,34 @@ def _attendance_block(summary):
         # Hier : pic constate uniquement (pas de fallback projection).
         # Aujourd'hui : pic projete en valeur principale + pic en cours en complement.
         # Demain : projection.
+        # Today/tomorrow : si pic_projection et pic_observed sont absents (pas
+        # de billetterie configuree ou pic non encore atteint), on retombe sur
+        # le pic N-1 jour-equivalent pour avoir un ordre de grandeur. Dans ce
+        # cas le delta est masque (il vaudrait trivialement 0 %).
         slot_kind = slot.get("slot")
+        is_prev_fallback = False
         if slot_kind == "yesterday":
             main_pic = slot.get("pic_observed")
             main_label = "Pic constate"
         elif slot_kind == "today":
-            # En production temps reel comme en simulation, on veut systematiquement
-            # afficher le pic projete (estimation finale) ; le pic en cours arrive
-            # en complement quand il existe (live actif ou archive consultable).
             main_pic = slot.get("pic_projection")
             main_label = "Pic projete"
             if main_pic is None:
                 main_pic = slot.get("pic_observed")
                 main_label = "Pic en cours"
+            if main_pic is None and slot.get("pic_prev") is not None:
+                main_pic = slot.get("pic_prev")
+                main_label = "Pic l'an passe"
+                is_prev_fallback = True
         else:
             main_pic = slot.get("pic_projection")
             main_label = "Pic projete"
+            if main_pic is None and slot.get("pic_prev") is not None:
+                main_pic = slot.get("pic_prev")
+                main_label = "Pic l'an passe"
+                is_prev_fallback = True
         delta_html = ""
-        if slot.get("pic_prev") is not None and main_pic is not None:
+        if slot.get("pic_prev") is not None and main_pic is not None and not is_prev_fallback:
             v = slot.get("delta_pct_vs_prev")
             color, arrow = "#94a3b8", "&rarr;"
             if v is not None and abs(v) >= 5:
@@ -514,6 +524,16 @@ def _attendance_block(summary):
                 + arrow + ' ' + (("+" + str(v)) if v is not None and v >= 0 else str(v)) + '% '
                 '<span style="color:#666666;font-weight:500;">(' + _fmt_int(slot.get("pic_prev")) + ')</span>'
                 '</div>'
+            )
+        elif is_prev_fallback:
+            # Hint visuel discret pour signaler qu'on affiche la donnee de
+            # l'edition precedente faute de projection / pic constate.
+            prev_year_label = ""
+            if slot.get("prev_year"):
+                prev_year_label = " (" + str(slot["prev_year"]) + ")"
+            delta_html = (
+                '<div style="font-size:11px;color:#666666;margin-top:2px;font-style:italic;">'
+                'Reference edition precedente' + prev_year_label + '</div>'
             )
         # Aujourd'hui : ligne complementaire "Pic en cours: X" si dispo
         extra_html = ""

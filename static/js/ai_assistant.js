@@ -632,16 +632,30 @@
     // - "yesterday" : UNIQUEMENT le pic constaté (pas de fallback projection)
     // - "today"     : pic projeté en valeur principale + pic en cours en complément
     // - "tomorrow"  : projection
+    // Today/tomorrow : si projection et pic constaté sont absents, on retombe
+    // sur le pic N-1 jour-équivalent comme ordre de grandeur. Le delta est
+    // masqué dans ce cas (il vaudrait trivialement 0 %).
     var mainPic, mainLabel;
+    var isPrevFallback = false;
     if (slot.slot === "yesterday") {
       mainPic = slot.pic_observed;
       mainLabel = "Pic constaté";
     } else if (slot.slot === "today") {
       mainPic = slot.pic_projection != null ? slot.pic_projection : slot.pic_observed;
       mainLabel = slot.pic_projection != null ? "Pic projeté" : "Pic en cours";
+      if (mainPic == null && slot.pic_prev != null) {
+        mainPic = slot.pic_prev;
+        mainLabel = "Pic l'an passé";
+        isPrevFallback = true;
+      }
     } else {
       mainPic = slot.pic_projection;
       mainLabel = "Pic projeté";
+      if (mainPic == null && slot.pic_prev != null) {
+        mainPic = slot.pic_prev;
+        mainLabel = "Pic l'an passé";
+        isPrevFallback = true;
+      }
     }
 
     if (mainPic != null) {
@@ -656,7 +670,13 @@
 
     // Comparaison N-1 : couleurs sémantiques metier (hausse de fréquentation = vert,
     // baisse = rouge). Inverse de la sémantique fiches d'incident.
-    if (slot.pic_prev != null && mainPic != null) {
+    if (isPrevFallback) {
+      // En fallback N-1, on n'affiche pas le delta (=0 trivial) mais une
+      // mention discrète indiquant la source.
+      var prevYearTxt = slot.prev_year ? " (" + slot.prev_year + ")" : "";
+      col.appendChild(el("div", { class: "ai-attendance-prev-fallback",
+                                  text: "Référence édition précédente" + prevYearTxt }));
+    } else if (slot.pic_prev != null && mainPic != null) {
       var deltaTxt = "";
       var kind = "flat";
       var arrow = "→";

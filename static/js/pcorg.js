@@ -334,6 +334,20 @@
         vehSubmenu.setAttribute("data-level-veh", level);
         subItem.appendChild(vehSubmenu);
 
+        // Flip vehicle submenu up if it would overflow the viewport bottom
+        subItem.addEventListener("mouseenter", function () {
+          if (vehSubmenu.style.display === "none") return;
+          vehSubmenu.style.top = "-6px";
+          vehSubmenu.style.bottom = "";
+          requestAnimationFrame(function () {
+            var r = vehSubmenu.getBoundingClientRect();
+            if (r.bottom > window.innerHeight - 8) {
+              vehSubmenu.style.top = "";
+              vehSubmenu.style.bottom = "-6px";
+            }
+          });
+        });
+
         subItem.addEventListener("touchend", function (e) {
           // Touch: show vehicle picker as separate overlay
           onSubItemAction(e);
@@ -347,6 +361,20 @@
         submenu.appendChild(subItem);
       });
       item.appendChild(submenu);
+
+      // Flip urgency submenu up if it would overflow the viewport bottom
+      item.addEventListener("mouseenter", function () {
+        if (!item.classList.contains("has-submenu")) return;
+        submenu.style.top = "-6px";
+        submenu.style.bottom = "";
+        requestAnimationFrame(function () {
+          var r = submenu.getBoundingClientRect();
+          if (r.bottom > window.innerHeight - 8) {
+            submenu.style.top = "";
+            submenu.style.bottom = "-6px";
+          }
+        });
+      });
 
       // Touch: tap toggles sub-menu, second tap opens wizard
       item.addEventListener("touchend", function (e) {
@@ -503,21 +531,6 @@
       noneBtn.addEventListener("click", function (ev) { if (!_ctxIsTouch) onNone(ev); });
       noneBtn.addEventListener("touchend", onNone);
       vSub.appendChild(noneBtn);
-
-      // Reposition on hover: flip up if overflows bottom
-      vSub.parentElement.addEventListener("mouseenter", function () {
-        if (vSub.style.display === "none") return;
-        // Reset position
-        vSub.style.top = "-6px";
-        vSub.style.bottom = "";
-        requestAnimationFrame(function () {
-          var rect = vSub.getBoundingClientRect();
-          if (rect.bottom > window.innerHeight - 8) {
-            vSub.style.top = "";
-            vSub.style.bottom = "-6px";
-          }
-        });
-      });
     });
 
     // Reset item animations

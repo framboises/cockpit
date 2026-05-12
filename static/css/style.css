@@ -8939,6 +8939,8 @@ th span { font-size: 0.88rem; font-weight: 700; }
   display: none;
   z-index: 10001;
   animation: pcorg-ctx-in 0.12s ease-out;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 .pcorg-ctx-item.has-submenu:hover > .pcorg-ctx-submenu,
 .pcorg-ctx-submenu.touch-open {
@@ -8995,6 +8997,8 @@ th span { font-size: 0.88rem; font-weight: 700; }
   display: none;
   z-index: 10003;
   animation: pcorg-ctx-in 0.12s ease-out;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 /* Bridge zone: invisible area between urgency item and vehicle submenu */
 .pcorg-ctx-sub-item.has-veh-submenu::after {
@@ -10893,6 +10897,12 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .ai-attendance-delta-down { background: #fef2f2; color: #b91c1c; }
 .ai-attendance-delta-flat { background: #f1f5f9; color: #475569; }
 .ai-attendance-prev-value { font-weight: 500; opacity: 0.8; }
+.ai-attendance-prev-fallback {
+  font-size: 0.72rem;
+  font-style: italic;
+  color: #64748b;
+  margin-top: 2px;
+}
 .ai-attendance-extra {
   font-size: 0.74rem;
   color: #64748b;
