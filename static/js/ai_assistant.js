@@ -406,9 +406,12 @@
     body.appendChild(el("div", { class: "ai-empty", text: msg || "Aucun résumé." }));
   }
 
-  function renderSummary(summary) {
+  function renderSummary(summary, opts) {
     state.current = summary;
-    state.activeTab = "overview";
+    // Apres une action de feedback (toolbar / pilule / promotion), on veut
+    // garder l'utilisateur sur l'onglet courant. onGenerate / loadSummary /
+    // onShowHistory ne passent pas keepTab donc reviennent en vue d'ensemble.
+    if (!opts || !opts.keepTab) state.activeTab = "overview";
     refreshSendMailButton();
     var body = rootEl.querySelector("#ai-modal-body");
     clearChildren(body);
@@ -1475,7 +1478,7 @@
       if (!res || !res.ok) { toast((res && res.error) || "Erreur", "error"); return; }
       toast(label ? "Section " + (label === "good" ? "validée" : (label === "bad" ? "marquée à revoir" : "neutre")) : "Label retiré",
             label === "good" ? "success" : "info");
-      if (res.summary) renderSummary(res.summary);
+      if (res.summary) renderSummary(res.summary, { keepTab: true });
     });
   }
 
@@ -1614,7 +1617,7 @@
       if (!res || !res.ok) { toast((res && res.error) || "Erreur", "error"); return; }
       toast(promote ? "Correction enregistrée + règle ajoutée à la mémoire" : "Correction enregistrée", "success");
       closeEditSectionModal();
-      if (res.summary) renderSummary(res.summary);
+      if (res.summary) renderSummary(res.summary, { keepTab: true });
     });
   }
 
@@ -1749,7 +1752,7 @@
         toast(promote ? "Commentaire + règle enregistrés" : "Commentaire enregistré", "success");
         closeCommentModal();
         var fresh = (res2 && res2.summary) || res.summary;
-        if (fresh) renderSummary(fresh);
+        if (fresh) renderSummary(fresh, { keepTab: true });
       });
     });
   }
@@ -1815,7 +1818,7 @@
           feedbackApi().setRecommendationStatus(state.current.id, idx, nextStatus).then(function (res) {
             if (!res || !res.ok) { toast((res && res.error) || "Erreur", "error"); return; }
             toast(nextStatus ? "Recommandation : " + RECO_STATUS_LABELS[nextStatus] : "Statut retiré", "info");
-            if (res.summary) renderSummary(res.summary);
+            if (res.summary) renderSummary(res.summary, { keepTab: true });
           });
         });
         actions.appendChild(btn);

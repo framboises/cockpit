@@ -6077,6 +6077,168 @@ input:checked + .slider .slider-button::after {
   /* --- Modales en quasi plein ecran --- */
   .modal-content { width: 96vw; max-width: 96vw; }
   .event-drawer { width: 100vw; }
+
+  /* ========================================================================
+     RENDU ENRICHI EN MOBILE-FULLSCREEN
+     Les widgets sont calibres pour la sidebar desktop (260-400px).
+     En plein ecran mobile, on agrandit contenu, paddings et polices pour
+     exploiter la place et eviter les zones vides au centre.
+     ======================================================================== */
+
+  /* Header widget : barre titre plus haute et plus lisible */
+  .widget-card.mobile-fullscreen .widget-header {
+    padding: 14px 16px;
+    min-height: 56px;
+  }
+  .widget-card.mobile-fullscreen .widget-header h3 { font-size: 1.15rem; }
+  .widget-card.mobile-fullscreen .widget-tabs { gap: 6px; }
+  .widget-card.mobile-fullscreen .widget-tab,
+  .widget-card.mobile-fullscreen .trafic-sort-btn { width: 40px; height: 40px; }
+  .widget-card.mobile-fullscreen .widget-tab .material-symbols-outlined,
+  .widget-card.mobile-fullscreen .trafic-sort-btn .material-symbols-outlined { font-size: 22px; }
+
+  /* Placeholder vide : centre, grand */
+  .widget-card.mobile-fullscreen .widget-placeholder {
+    flex: 1 1 auto;
+    padding: 64px 24px;
+    font-size: 1.05rem;
+    opacity: 0.7;
+  }
+  .widget-card.mobile-fullscreen .widget-placeholder .material-symbols-outlined {
+    font-size: 80px;
+    margin-bottom: 12px;
+  }
+
+  /* === TRAFIC : compteurs 2x2 qui remplissent l'ecran === */
+  .widget-card.mobile-fullscreen#widget-traffic .widget-body { padding: 16px; }
+  .widget-card.mobile-fullscreen#widget-traffic .traffic-counters {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 14px;
+    height: 100%;
+  }
+  .widget-card.mobile-fullscreen#widget-traffic .traffic-counter {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 24px 12px;
+    min-height: 0;
+  }
+  .widget-card.mobile-fullscreen#widget-traffic .tc-icon { font-size: 36px; }
+  .widget-card.mobile-fullscreen#widget-traffic .tc-value { font-size: 2.6rem; min-width: 0; }
+  .widget-card.mobile-fullscreen#widget-traffic .tc-label { font-size: 0.95rem; }
+
+  /* === METEO : jauge centree + 3 cartes de mesures === */
+  .widget-card.mobile-fullscreen#widget-right-1 .widget-body {
+    padding: 16px;
+    gap: 16px;
+  }
+  .widget-card.mobile-fullscreen#widget-right-1 .meteo-risk-gauge {
+    font-size: 1.3rem;
+    padding: 18px 22px;
+    justify-content: center;
+    gap: 12px;
+  }
+  .widget-card.mobile-fullscreen#widget-right-1 .meteo-risk-icon { font-size: 36px; }
+  .widget-card.mobile-fullscreen#widget-right-1 .meteo-snapshot {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: none;
+  }
+  .widget-card.mobile-fullscreen#widget-right-1 .meteo-snap-item {
+    gap: 10px;
+    padding: 20px 8px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 12px;
+    font-size: 1.25rem;
+    font-weight: 700;
+  }
+  .widget-card.mobile-fullscreen#widget-right-1 .meteo-snap-item .material-symbols-outlined {
+    font-size: 40px;
+  }
+
+  /* === CONTROLE D'ACCES : KPIs enormes + barre + liste === */
+  .widget-card.mobile-fullscreen#widget-counters .widget-body { padding: 16px; }
+  .widget-card.mobile-fullscreen#widget-counters .hsh-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    align-items: stretch;
+    margin-bottom: 16px;
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+  .widget-card.mobile-fullscreen#widget-counters .hsh-summary > div {
+    background: rgba(255,255,255,0.04);
+    border-radius: 14px;
+    padding: 20px 12px;
+    text-align: center;
+  }
+  .widget-card.mobile-fullscreen#widget-counters .hsh-summary-value {
+    font-size: 2.4rem;
+  }
+  .widget-card.mobile-fullscreen#widget-counters .hsh-summary-label {
+    font-size: 0.82rem;
+    margin-top: 6px;
+  }
+  .widget-card.mobile-fullscreen#widget-counters #hsh-projection-block {
+    padding: 16px 0 12px !important;
+  }
+  .widget-card.mobile-fullscreen#widget-counters .hsh-progress-bar { height: 16px; }
+  .widget-card.mobile-fullscreen#widget-counters .hsh-progress-info {
+    font-size: 0.88rem;
+    margin-top: 8px;
+  }
+  .widget-card.mobile-fullscreen#widget-counters .hsh-counter-card {
+    padding: 14px;
+  }
+  .widget-card.mobile-fullscreen#widget-counters .hsh-counter-name {
+    font-size: 0.98rem;
+  }
+
+  /* === MAIN COURANTE : stats grid en 2 cols + listes aerées === */
+  .widget-card.mobile-fullscreen#widget-comms .widget-body { padding: 12px; }
+  .widget-card.mobile-fullscreen#widget-comms .pcorg-stats-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px;
+  }
+  .widget-card.mobile-fullscreen#widget-comms .pcorg-stats-grid .pcorg-stat-card {
+    grid-column: span 1 !important;
+    padding: 16px 12px;
+    min-height: 96px;
+  }
+  .widget-card.mobile-fullscreen#widget-comms .pcorg-stat-icon { font-size: 28px; }
+  .widget-card.mobile-fullscreen#widget-comms .pcorg-stat-total { font-size: 1.6rem; }
+
+  /* === TEMPS D'ACCES : filtre + listes tactiles === */
+  .widget-card.mobile-fullscreen#widget-parkings .trafic-filter { padding: 12px; }
+  .widget-card.mobile-fullscreen#widget-parkings .trafic-filter input {
+    height: 44px;
+    padding: 10px 14px;
+  }
+  .widget-card.mobile-fullscreen#widget-parkings .trafic-scroll { padding: 4px 8px; }
+
+  /* === ALERTES : items aeres === */
+  .widget-card.mobile-fullscreen#widget-right-3 .widget-body { padding: 8px; }
+  .widget-card.mobile-fullscreen#widget-right-3 .alert-history-entry {
+    padding: 14px 16px;
+    border-radius: 10px;
+    margin-bottom: 8px;
+  }
+  .widget-card.mobile-fullscreen#widget-right-3 .alert-history-title { font-size: 1rem; }
+  .widget-card.mobile-fullscreen#widget-right-3 .alert-history-preview {
+    font-size: 0.88rem;
+    -webkit-line-clamp: 3;
+  }
+
+  /* === AFFLUENCE === */
+  .widget-card.mobile-fullscreen#widget-right-2 .widget-body { padding: 16px; }
+
+  /* === GPS === */
+  .widget-card.mobile-fullscreen#widget-right-4 .widget-body { padding: 12px; }
 }
 
 /* ==========================================================================
