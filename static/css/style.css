@@ -6047,15 +6047,41 @@ input:checked + .slider .slider-button::after {
   .mb-tab.is-active { color: var(--brand); border-top-color: var(--brand); }
   .mb-tab:active { background: rgba(255,255,255,0.05); }
 
-  /* --- Searchbar : slot pleine largeur --- */
-  .ts-input-wrap { grid-template-columns: 28px 1fr 32px; }
+  /* --- Searchbar : compacte sur 1 seule ligne (pas de wrap) --- */
+  #timeline-searchbar { padding: 0; }
+  .ts-input-wrap {
+    grid-template-columns: 22px 1fr auto 26px !important;
+    padding: 4px 10px !important;
+    gap: 6px !important;
+    border-radius: 10px;
+  }
+  .ts-input-wrap .material-icons { font-size: 18px; }
+  #timeline-search-input { padding: 4px 0; }
   .search-filter-slot {
-    grid-column: 1 / -1;
-    min-width: 0;
-    width: 100%;
+    grid-column: 3 / 4 !important;
+    grid-row: 1 !important;
+    min-width: 0 !important;
+    width: auto !important;
+    max-width: 140px;
+    justify-content: flex-end;
   }
   .search-filter-slot select,
-  .search-filter-slot .map-cat-toggle { width: 100%; }
+  .search-filter-slot .map-cat-toggle {
+    width: auto !important;
+    max-width: 140px;
+    height: 32px;
+    padding: 4px 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Bouton map-cat (pas un input) : on peut le rendre plus petit sans declencher le zoom iOS */
+  .search-filter-slot .map-cat-toggle { font-size: 13px !important; }
+  .search-filter-slot .map-cat-toggle .material-symbols-outlined { font-size: 14px !important; }
+  #timeline-search-clear { width: 26px; height: 26px; }
+  #timeline-search-clear .material-icons { font-size: 18px; }
+  /* Liste resultats : limitee en hauteur */
+  #timeline-search-results { max-height: 260px; }
 
   /* Footer existant masque (remplace par le bottom-nav) */
   .app-footer { display: none; }

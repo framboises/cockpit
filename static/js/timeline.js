@@ -1066,7 +1066,16 @@ function _buildDayNav(dates, sectionsByDate) {
 
     pill.addEventListener('click', () => {
       const section = sectionsByDate[dateStr];
-      if (section) {
+      if (!section) return;
+      // Scroller uniquement le conteneur #timeline-main (sinon scrollIntoView
+      // propage au viewport et fait disparaitre le header en mobile)
+      const mainEl = document.getElementById('timeline-main');
+      if (mainEl && mainEl.contains(section)) {
+        const navBar = document.getElementById('day-nav-bar');
+        const navOffset = (navBar && getComputedStyle(navBar).position === 'sticky') ? navBar.offsetHeight : 0;
+        const offset = section.getBoundingClientRect().top - mainEl.getBoundingClientRect().top + mainEl.scrollTop - navOffset;
+        mainEl.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' });
+      } else {
         section.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     });
