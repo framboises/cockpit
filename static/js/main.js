@@ -266,6 +266,93 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!ev.matches) closeMobileSidebar();
     });
 
+    // ======================== MOBILE BOTTOM NAV (<=820px) ========================
+    (function () {
+        var nav = document.getElementById("mobile-bottom-nav");
+        if (!nav) return;
+        var tabs = nav.querySelectorAll(".mb-tab");
+        var activeWidget = null;
+
+        function setActive(targetId) {
+            tabs.forEach(function (t) {
+                t.classList.toggle("is-active", t.dataset.target === targetId);
+            });
+        }
+
+        function closeFullscreen() {
+            if (!activeWidget) return;
+            var btn = activeWidget.querySelector(":scope > .widget-header > .mb-close-btn, :scope > .status-indicator > .mb-close-btn");
+            if (btn) btn.remove();
+            activeWidget.classList.remove("mobile-fullscreen");
+            activeWidget = null;
+        }
+
+        function injectCloseButton(widget) {
+            var header = widget.querySelector(":scope > .widget-header") || widget.querySelector(":scope > .status-indicator");
+            if (!header) return;
+            if (header.querySelector(".mb-close-btn")) return;
+            var btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "mb-close-btn";
+            btn.setAttribute("aria-label", "Fermer");
+            var icon = document.createElement("span");
+            icon.className = "material-symbols-outlined";
+            icon.textContent = "close";
+            btn.appendChild(icon);
+            btn.addEventListener("click", function (e) {
+                e.stopPropagation();
+                closeFullscreen();
+                setActive("timeline");
+            });
+            header.appendChild(btn);
+        }
+
+        function openFullscreen(widget) {
+            if (activeWidget === widget) return;
+            closeFullscreen();
+            widget.classList.add("mobile-fullscreen");
+            injectCloseButton(widget);
+            activeWidget = widget;
+            // Chart.js et autres modules s'accrochent au resize pour recalculer
+            window.dispatchEvent(new Event("resize"));
+        }
+
+        function showTimeline() {
+            closeFullscreen();
+            // Si la carte est ouverte, revenir a la timeline via le bouton existant
+            var timelineBtn = document.getElementById("view-timeline-btn");
+            if (timelineBtn && !timelineBtn.classList.contains("active")) timelineBtn.click();
+            setActive("timeline");
+        }
+
+        function showMap() {
+            closeFullscreen();
+            var mapBtn = document.getElementById("view-map-btn");
+            if (mapBtn) mapBtn.click();
+            setActive("map");
+        }
+
+        tabs.forEach(function (tab) {
+            tab.addEventListener("click", function () {
+                var target = tab.dataset.target;
+                if (target === "timeline") return showTimeline();
+                if (target === "map") return showMap();
+                var widget = document.getElementById(target);
+                if (!widget) return;
+                openFullscreen(widget);
+                setActive(target);
+            });
+        });
+
+        // Quand on sort du mode mobile, on nettoie tout
+        mobileMQ.addEventListener("change", function (ev) {
+            if (!ev.matches) {
+                closeFullscreen();
+                setActive("timeline");
+            }
+        });
+    })();
+
     // ======================== SIMULATION CLOCK (admin) ========================
     var simToggle = document.getElementById("sidebar-sim-toggle");
     var simBody = document.getElementById("sidebar-sim-body");

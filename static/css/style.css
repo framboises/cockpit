@@ -5836,10 +5836,32 @@ input:checked + .slider .slider-button::after {
 }
 
 /* ==========================================================================
+   BOTTOM NAV MOBILE (defaut: masque, active uniquement en MQ <=820px)
+   ========================================================================== */
+
+.mobile-bottom-nav { display: none; }
+
+/* Bouton croix injecte dans le header d'un widget en mode fullscreen mobile */
+.mb-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 6px;
+  margin-left: 4px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+.mb-close-btn:hover { background: rgba(255,255,255,0.06); }
+.mb-close-btn .material-symbols-outlined { font-size: 22px; }
+
+/* ==========================================================================
    PORTRAIT MOBILE & TABLETTE  (iPhone ~390px, iPad portrait ~810px)
-   - Stack vertical complet : widgets gauche + timeline/carte + widgets droite
-   - Sidebar en off-canvas, declenchee par burger en header
-   - Footer quick-actions sticky pour switcher timeline/carte/nowline
+   - Timeline plein ecran par defaut
+   - Widgets accessibles via bottom-nav (overlay fullscreen)
+   - Sidebar off-canvas, declenchee par burger en header
    - Inputs >= 16px (anti zoom Safari iOS)
    ========================================================================== */
 
@@ -5891,45 +5913,139 @@ input:checked + .slider .slider-button::after {
   .header-actions .icon-button { width: 36px; height: 36px; }
   .view-toggle-btn { width: 32px; height: 32px; }
 
-  /* --- Grille principale single column, stack vertical --- */
+  /* --- Grille principale : timeline plein ecran (widgets accessibles via bottom-nav) --- */
   #main-content {
     grid-template-columns: 1fr !important;
-    grid-template-rows: auto auto auto auto !important;
+    grid-template-rows: auto 1fr !important;
     padding: 8px;
+    padding-bottom: 64px; /* place pour le bottom-nav */
     gap: 8px;
-    overflow-y: auto;
-    overflow-x: hidden;
+    overflow: hidden;
+  }
+  #timeline-searchbar  { grid-column: 1 !important; grid-row: 1 !important; }
+  #timeline-main       { grid-column: 1 !important; grid-row: 2 !important; min-height: 0; overflow-y: auto; }
+  #map-main,
+  #meteo-panel,
+  #pcorg-expanded-panel,
+  #counters-panel {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    min-height: 0;
   }
 
-  /* Override MQ 1024 : on REMET en colonne, pas en row scrollable */
+  /* Widgets : sortis du flux, mais le DOM reste intact (Chart.js, listeners, etc.).
+     visibility:hidden cascade aux enfants, on remet visibility:visible sur le widget en fullscreen. */
   #widgets-panel,
   #widgets-panel-right {
-    grid-column: 1 !important;
-    flex-direction: column !important;
-    overflow-x: hidden !important;
-    overflow-y: visible !important;
+    position: absolute !important;
+    visibility: hidden;
+    pointer-events: none;
+    left: -9999px;
+    top: 0;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    grid-column: auto !important;
+    grid-row: auto !important;
     padding: 0 !important;
-    gap: 8px;
+    gap: 0 !important;
   }
-  #widgets-panel       { grid-row: 1 !important; }
-  #timeline-searchbar  { grid-column: 1 !important; grid-row: 2 !important; }
-  #timeline-main       { grid-column: 1 !important; grid-row: 3 !important; min-height: 60vh; }
-  #widgets-panel-right { grid-row: 4 !important; }
 
-  /* Widgets full-width, retire min-width fixe de la MQ 1024 */
-  #widgets-panel > .widget-card,
-  #widgets-panel > .status-card,
-  #widgets-panel-right > .widget-card,
-  #widgets-panel-right > .status-card {
-    min-width: 0 !important;
-    width: 100% !important;
-    flex: 0 0 auto !important;
+  /* Widget en overlay fullscreen mobile (declenche par le bottom-nav) */
+  .widget-card.mobile-fullscreen,
+  .status-card.mobile-fullscreen {
+    position: fixed !important;
+    inset: 0 0 calc(56px + env(safe-area-inset-bottom, 0px)) 0 !important;
+    z-index: 1100 !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    background: var(--card) !important;
+    box-shadow: 0 -2px 16px rgba(0,0,0,0.4);
+    visibility: visible !important;
+    pointer-events: auto !important;
+    display: flex !important;
+    flex-direction: column;
+    overflow: hidden;
   }
-  #widget-parkings {
-    flex: 0 0 auto !important;
-    max-height: 50vh;
+  .widget-card.mobile-fullscreen .widget-header,
+  .status-card.mobile-fullscreen .status-indicator {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
   }
-  #widget-right-4 > .widget-body { max-height: 40vh; }
+  .widget-card.mobile-fullscreen .widget-body {
+    display: block !important;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    max-height: none !important;
+    min-height: 0;
+  }
+  .widget-card.mobile-fullscreen .widget-body.widget-tab-content:not(.active) { display: none !important; }
+  .widget-card.mobile-fullscreen .mb-close-btn,
+  .status-card.mobile-fullscreen .mb-close-btn { display: inline-flex; }
+
+  /* En fullscreen, les boutons "vue elargie" redondants sont masques */
+  .widget-card.mobile-fullscreen #pcorg-expand-btn,
+  .widget-card.mobile-fullscreen #meteo-expand-btn,
+  .widget-card.mobile-fullscreen #counters-expand-btn,
+  .widget-card.mobile-fullscreen .collapse-icon { display: none !important; }
+
+  /* En fullscreen, neutraliser l'etat "collapsed" des widgets repliables */
+  .widget-card.mobile-fullscreen.widget-card-collapsed .widget-body,
+  .widget-card.mobile-fullscreen .widget-body-collapsed {
+    display: block !important;
+    max-height: none !important;
+    height: auto !important;
+  }
+
+  /* --- Bottom nav (avec safe-area iOS) --- */
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: calc(56px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: var(--card);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.3);
+    z-index: 1200;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .mobile-bottom-nav::-webkit-scrollbar { display: none; }
+  .mb-tab {
+    flex: 0 0 auto;
+    min-width: 60px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    padding: 4px 10px;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 9px;
+    font-weight: 500;
+    white-space: nowrap;
+    border-top: 2px solid transparent;
+  }
+  .mb-tab .material-symbols-outlined { font-size: 22px; }
+  .mb-tab .mb-tab-label { font-size: 9.5px; }
+  .mb-tab.is-active { color: var(--brand); border-top-color: var(--brand); }
+  .mb-tab:active { background: rgba(255,255,255,0.05); }
 
   /* --- Searchbar : slot pleine largeur --- */
   .ts-input-wrap { grid-template-columns: 28px 1fr 32px; }
@@ -5941,42 +6057,8 @@ input:checked + .slider .slider-button::after {
   .search-filter-slot select,
   .search-filter-slot .map-cat-toggle { width: 100%; }
 
-  /* --- Panneaux alternants (carte, meteo, pcorg elargi, dashboard acces) :
-         se positionnent sur la ligne timeline, prennent 70vh --- */
-  #map-main,
-  #meteo-panel,
-  #pcorg-expanded-panel,
-  #counters-panel {
-    grid-column: 1 !important;
-    grid-row: 3 !important;
-    min-height: 70vh;
-  }
-  #main-content.map-fullscreen #widgets-panel,
-  #main-content.map-fullscreen #widgets-panel-right { display: none; }
-  #main-content.map-fullscreen .map-main { min-height: calc(100vh - 56px - 56px); }
-  #main-content.map-fullscreen #timeline-searchbar {
-    position: static;
-    transform: none;
-    width: 100%;
-    max-width: 100%;
-  }
-
-  /* --- Footer en sticky bottom, boutons gros pour tactile --- */
-  .app-footer {
-    position: sticky;
-    bottom: 0;
-    z-index: 100;
-    padding: 6px 8px;
-    background: var(--card);
-    border-top: 1px solid var(--line);
-  }
-  .footer-text { display: none; }
-  .footer-quick-actions {
-    justify-content: space-around;
-    width: 100%;
-    gap: 4px;
-  }
-  .sq-btn { width: 44px; height: 44px; }
+  /* Footer existant masque (remplace par le bottom-nav) */
+  .app-footer { display: none; }
 
   /* --- Inputs 16px : evite le zoom auto Safari iOS au focus --- */
   input[type="text"],
