@@ -11975,9 +11975,17 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .ai-edit-section-overlay,
 .ai-comment-modal-overlay,
 .ai-memory-modal-overlay { z-index: 10001; }
-.ai-edit-section-modal { width: min(960px, 95vw); }
-.ai-comment-modal { width: min(620px, 95vw); }
-.ai-memory-modal { width: min(720px, 95vw); }
+.ai-edit-section-modal,
+.ai-comment-modal,
+.ai-memory-modal {
+  /* Override de la regle generique .ai-modal qui force 100vh sur la grande
+     modale du rapport. Les modales secondaires s'adaptent au contenu. */
+  height: auto;
+  max-height: calc(100vh - 48px);
+}
+.ai-edit-section-modal { width: min(1020px, 95vw); }
+.ai-comment-modal { width: min(780px, 95vw); }
+.ai-memory-modal { width: min(760px, 95vw); }
 
 .ai-edit-section-original {
   background: #f8fafc;
@@ -12317,23 +12325,63 @@ th span { font-size: 0.88rem; font-weight: 700; }
 /* ============================================================================
    Page admin /edit : Mémoire Assistant IA + Stats apprentissage
    ============================================================================ */
+.ai-memory-stats-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 4px 0 10px 0;
+}
+.ai-memory-stats-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.ai-memory-refresh-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.ai-memory-refresh-btn:hover { background: #f1f5f9; color: #0f172a; }
+.ai-memory-refresh-btn .material-symbols-outlined { font-size: 16px; }
+.ai-memory-refresh-btn.is-loading .material-symbols-outlined { animation: ai-spin 1s linear infinite; }
+
 .ai-memory-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
   margin-bottom: 14px;
 }
 .ai-memory-stat {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 10px;
+  padding: 14px 10px;
   text-align: center;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.ai-memory-stat:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(15,23,42,0.06);
 }
 .ai-memory-stat-value {
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 800;
   color: #0b1024;
+  line-height: 1.1;
 }
 .ai-memory-stat-label {
   font-size: 11px;
@@ -12343,6 +12391,30 @@ th span { font-size: 0.88rem; font-weight: 700; }
   font-weight: 600;
   margin-top: 4px;
 }
+.ai-memory-stat-sub {
+  font-size: 10px;
+  color: #94a3b8;
+  margin-top: 2px;
+  font-style: italic;
+}
+.ai-memory-stat-good {
+  background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+  border-color: #86efac;
+}
+.ai-memory-stat-good .ai-memory-stat-value { color: #15803d; }
+.ai-memory-stat-good .ai-memory-stat-label { color: #166534; }
+.ai-memory-stat-bad {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  border-color: #fca5a5;
+}
+.ai-memory-stat-bad .ai-memory-stat-value { color: #b91c1c; }
+.ai-memory-stat-bad .ai-memory-stat-label { color: #991b1b; }
+.ai-memory-stat-active {
+  background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
+  border-color: #c7d2fe;
+}
+.ai-memory-stat-active .ai-memory-stat-value { color: #4338ca; }
+.ai-memory-stat-active .ai-memory-stat-label { color: #4338ca; }
 
 .ai-memory-toolbar {
   display: flex;

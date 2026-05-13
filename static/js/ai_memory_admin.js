@@ -57,6 +57,11 @@
 
   // ----- Stats -----
 
+  function setText(id, value) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = (value == null ? "—" : value);
+  }
+
   function refreshStats() {
     Promise.all([
       apiGet("/api/pcorg/ai-memory/stats"),
@@ -64,12 +69,25 @@
     ]).then(function (results) {
       var mem = results[0] || {};
       var exp = results[1] || {};
-      document.getElementById("ai-memory-stat-active").textContent = mem.active != null ? mem.active : "—";
-      document.getElementById("ai-memory-stat-inactive").textContent = mem.inactive != null ? mem.inactive : "—";
-      document.getElementById("ai-memory-stat-sft").textContent = exp.estimated_sft_samples != null ? exp.estimated_sft_samples : "—";
-      document.getElementById("ai-memory-stat-dpo").textContent = exp.estimated_dpo_samples != null ? exp.estimated_dpo_samples : "—";
-      document.getElementById("ai-memory-stat-corrections").textContent = exp.with_corrections != null ? exp.with_corrections : "—";
-      document.getElementById("ai-memory-stat-good").textContent = exp.with_quality_good != null ? exp.with_quality_good : "—";
+      setText("ai-memory-stat-active", mem.active);
+      setText("ai-memory-stat-inactive", mem.inactive);
+      setText("ai-memory-stat-sft", exp.estimated_sft_samples);
+      setText("ai-memory-stat-dpo", exp.estimated_dpo_samples);
+      setText("ai-memory-stat-corrections", exp.with_corrections);
+      // Validations par section (le clic 👍 sur une carte).
+      setText("ai-memory-stat-validations-good", exp.validations_good);
+      setText("ai-memory-stat-validations-bad", exp.validations_bad);
+      setText("ai-memory-stat-rules-promoted", exp.rules_promoted);
+      setText("ai-memory-stat-feedback", exp.feedback_entries_total);
+      // Sous-libellé : nb de rapports distincts qui ont au moins une validation
+      var subEl = document.getElementById("ai-memory-stat-validations-good-sub");
+      if (subEl) {
+        if (exp.summaries_with_section_validation != null) {
+          subEl.textContent = "sur " + exp.summaries_with_section_validation + " rapport(s)";
+        } else {
+          subEl.textContent = "";
+        }
+      }
     });
   }
 
@@ -322,6 +340,15 @@
   }
 
   document.getElementById("ai-memory-btn-new").addEventListener("click", function () { open(null); });
+
+  var refreshBtn = document.getElementById("ai-memory-refresh");
+  if (refreshBtn) refreshBtn.addEventListener("click", function () {
+    refreshBtn.classList.add("is-loading");
+    var done = function () { setTimeout(function () { refreshBtn.classList.remove("is-loading"); }, 400); };
+    Promise.all([fetchList().then(function (res) {
+      if (res && res.ok) { refreshEventFilter(res.items || []); render(res.items || []); }
+    }), refreshStats()]).then(done, done);
+  });
 
   document.getElementById("ai-memory-btn-export-sft").addEventListener("click", function () {
     var ok = confirm("Télécharger le dataset SFT (JSONL) ?\n\nInclut tous les rapports avec prompts persistés. Conseillé : ne lancer le fine-tuning qu'à partir de 500+ samples.");

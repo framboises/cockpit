@@ -3108,29 +3108,96 @@ def export_training_dataset(db, format_="sft", ts_from=None, ts_to=None,
 
 
 def export_stats(db):
-    """Compteurs pour la page admin (volume du dataset, samples utilisables)."""
-    total = db[SUMMARIES_COLLECTION].count_documents({})
-    with_prompts = db[SUMMARIES_COLLECTION].count_documents({
+    """Compteurs pour la page admin (volume du dataset, samples utilisables).
+
+    Distingue le label qualite GLOBAL (au niveau rapport entier) de la
+    validation PAR SECTION (clic 👍 sur une section). Avant ce fix, seul
+    quality_label_global etait compte, ce qui faisait apparaitre 0 alors
+    que l'utilisateur cumulait des validations de section.
+    """
+    col = db[SUMMARIES_COLLECTION]
+    total = col.count_documents({})
+    with_prompts = col.count_documents({
         "system_prompt": {"$exists": True, "$ne": ""},
         "user_prompt": {"$exists": True, "$ne": ""},
     })
-    with_feedback = db[SUMMARIES_COLLECTION].count_documents({"feedback.0": {"$exists": True}})
-    with_corrections = db[SUMMARIES_COLLECTION].count_documents({"feedback.kind": "correction"})
-    with_quality_good = db[SUMMARIES_COLLECTION].count_documents({"quality_label_global": "good"})
+    with_feedback = col.count_documents({"feedback.0": {"$exists": True}})
+    with_corrections = col.count_documents({"feedback.kind": "correction"})
+    with_quality_good_global = col.count_documents({"quality_label_global": "good"})
+
+    # ----- Validations par section : on agrege via quality_label_history qui
+    # est append-only (capture chaque clic 👍 / 👎 / retour neutre).
+    # On compte chaque entry distincte (rapport, section, label) -- ainsi un
+    # toggle 👍 puis retour neutre puis re-👍 ne compte qu'une fois la version
+    # finale (latest par (summary, section)).
+    validations_good = 0
+    validations_bad = 0
+    summaries_with_section_validation = set()
+    # Approche simple : on lit le champ persistant quality_label_per_section
+    # sur chaque doc -- plus rapide qu'un agg sur l'historique et suffisant
+    # car c'est ce qui est effectivement injecte dans les samples du dataset.
+    for d in col.find(
+        {"quality_label_per_section": {"$exists": True}},
+        {"_id": 1, "quality_label_per_section": 1},
+    ):
+        labels = d.get("quality_label_per_section") or {}
+        if not isinstance(labels, dict):
+            continue
+        had_any = False
+        for sec, lab in labels.items():
+            if lab == "good":
+                validations_good += 1
+                had_any = True
+            elif lab == "bad":
+                validations_bad += 1
+                had_any = True
+        if had_any:
+            summaries_with_section_validation.add(str(d.get("_id")))
+
+    # Total entries feedback (correction + comment + rule + validation).
+    feedback_entries_total = 0
+    rules_promoted = 0
+    for r in col.aggregate([
+        {"$match": {"feedback.0": {"$exists": True}}},
+        {"$project": {"n": {"$size": {"$ifNull": ["$feedback", []]}},
+                      "n_rules": {
+                          "$size": {
+                              "$filter": {
+                                  "input": {"$ifNull": ["$feedback", []]},
+                                  "as": "f",
+                                  "cond": {"$eq": ["$$f.kind", "rule"]},
+                              },
+                          },
+                      }}},
+        {"$group": {"_id": None,
+                    "tot": {"$sum": "$n"},
+                    "tot_rules": {"$sum": "$n_rules"}}},
+    ]):
+        feedback_entries_total = int(r.get("tot") or 0)
+        rules_promoted = int(r.get("tot_rules") or 0)
+
     by_prompt_version = {}
-    for r in db[SUMMARIES_COLLECTION].aggregate([
+    for r in col.aggregate([
         {"$group": {"_id": "$prompt_version", "n": {"$sum": 1}}},
     ]):
         by_prompt_version[str(r.get("_id"))] = int(r.get("n") or 0)
-    # Volume samples potentiels (estimes) : 1 SFT par rapport with_prompts,
-    # 1 DPO par rapport with_corrections.
+
     return {
         "total_summaries": total,
         "with_prompts": with_prompts,
         "with_feedback": with_feedback,
         "with_corrections": with_corrections,
-        "with_quality_good": with_quality_good,
+        # Validations globales (label pose sur tout le rapport)
+        "with_quality_good": with_quality_good_global,
+        # Validations par section (cumul + nb distinct de rapports)
+        "validations_good": validations_good,
+        "validations_bad": validations_bad,
+        "summaries_with_section_validation": len(summaries_with_section_validation),
+        "feedback_entries_total": feedback_entries_total,
+        "rules_promoted": rules_promoted,
         "by_prompt_version": by_prompt_version,
+        # Volume samples potentiels (estimes) : 1 SFT par rapport with_prompts,
+        # 1 DPO par rapport with_corrections.
         "estimated_sft_samples": with_prompts,
         "estimated_dpo_samples": with_corrections,
         "current_prompt_version": PROMPT_VERSION,

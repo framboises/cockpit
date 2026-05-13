@@ -463,14 +463,42 @@
         </header>
         <div class="widget-body collapsible" id="ai-memory-body">
 
+          <div class="ai-memory-stats-header">
+            <div class="ai-memory-stats-title">Statistiques d'apprentissage</div>
+            <button type="button" class="ai-memory-refresh-btn" id="ai-memory-refresh" title="Rafraîchir les compteurs">
+              <span class="material-symbols-outlined">refresh</span>
+              <span>Actualiser</span>
+            </button>
+          </div>
           <div class="ai-memory-stats" id="ai-memory-stats">
-            <div class="ai-memory-stat">
+            <div class="ai-memory-stat ai-memory-stat-active">
               <div class="ai-memory-stat-value" id="ai-memory-stat-active">—</div>
               <div class="ai-memory-stat-label">Directives actives</div>
             </div>
             <div class="ai-memory-stat">
               <div class="ai-memory-stat-value" id="ai-memory-stat-inactive">—</div>
               <div class="ai-memory-stat-label">Archivées</div>
+            </div>
+            <div class="ai-memory-stat ai-memory-stat-good">
+              <div class="ai-memory-stat-value" id="ai-memory-stat-validations-good">—</div>
+              <div class="ai-memory-stat-label">Sections validées 👍</div>
+              <div class="ai-memory-stat-sub" id="ai-memory-stat-validations-good-sub"></div>
+            </div>
+            <div class="ai-memory-stat ai-memory-stat-bad">
+              <div class="ai-memory-stat-value" id="ai-memory-stat-validations-bad">—</div>
+              <div class="ai-memory-stat-label">Sections à revoir 👎</div>
+            </div>
+            <div class="ai-memory-stat">
+              <div class="ai-memory-stat-value" id="ai-memory-stat-corrections">—</div>
+              <div class="ai-memory-stat-label">Corrections (✏️)</div>
+            </div>
+            <div class="ai-memory-stat">
+              <div class="ai-memory-stat-value" id="ai-memory-stat-rules-promoted">—</div>
+              <div class="ai-memory-stat-label">Règles promues (★)</div>
+            </div>
+            <div class="ai-memory-stat">
+              <div class="ai-memory-stat-value" id="ai-memory-stat-feedback">—</div>
+              <div class="ai-memory-stat-label">Entrées feedback total</div>
             </div>
             <div class="ai-memory-stat">
               <div class="ai-memory-stat-value" id="ai-memory-stat-sft">—</div>
@@ -479,14 +507,6 @@
             <div class="ai-memory-stat">
               <div class="ai-memory-stat-value" id="ai-memory-stat-dpo">—</div>
               <div class="ai-memory-stat-label">Samples DPO dispo</div>
-            </div>
-            <div class="ai-memory-stat">
-              <div class="ai-memory-stat-value" id="ai-memory-stat-corrections">—</div>
-              <div class="ai-memory-stat-label">Corrections totales</div>
-            </div>
-            <div class="ai-memory-stat">
-              <div class="ai-memory-stat-value" id="ai-memory-stat-good">—</div>
-              <div class="ai-memory-stat-label">Rapports validés 👍</div>
             </div>
           </div>
 
