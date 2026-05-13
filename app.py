@@ -5254,6 +5254,39 @@ def pcorg_ai_memory_stats():
     return jsonify({"ok": True, **pcorg_ai_memory.stats(db)})
 
 
+@app.route('/api/pcorg/ai-memory/suggest-rule', methods=['POST'])
+@role_required("manager")
+def pcorg_ai_memory_suggest_rule():
+    """Reformule un commentaire en directive concise via Claude Haiku.
+
+    Body : { comment, section?, event?, original_text?, corrected_text? }
+    Retourne : { ok, rule_text, usage } ou erreur.
+    """
+    data = request.get_json(silent=True) or {}
+    comment = (data.get("comment") or "").strip()
+    if not comment and not (data.get("corrected_text") or "").strip():
+        return jsonify({"ok": False, "error": "comment ou corrected_text requis"}), 400
+    try:
+        rule, usage = pcorg_ai_memory.suggest_rule_from_comment(
+            comment=comment,
+            section=data.get("section"),
+            event=data.get("event"),
+            original_text=data.get("original_text"),
+            corrected_text=data.get("corrected_text"),
+            model=data.get("model"),
+        )
+    except pcorg_summary.ClaudeError as e:
+        msg = str(e)
+        code = 503 if "ANTHROPIC_API_KEY" in msg else 502
+        return jsonify({"ok": False, "error": msg}), code
+    except Exception as e:
+        logger.exception("suggest_rule_from_comment: erreur")
+        return jsonify({"ok": False, "error": str(e)}), 500
+    if not rule:
+        return jsonify({"ok": False, "error": "reponse vide"}), 502
+    return jsonify({"ok": True, "rule_text": rule, "usage": usage})
+
+
 ################################################################################
 # EXPORT DATASET D'APPRENTISSAGE (fine-tuning futur)
 ################################################################################

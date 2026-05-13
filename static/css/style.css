@@ -6199,7 +6199,36 @@ input:checked + .slider .slider-button::after {
     font-size: 0.98rem;
   }
 
-  /* === MAIN COURANTE : stats grid en 2 cols + listes aerées === */
+  /* === MAIN COURANTE : header en grid (titre + croix, tabs + add en dessous) === */
+  .widget-card.mobile-fullscreen#widget-comms .widget-header {
+    display: grid !important;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "title    close"
+      "tabs     add";
+    row-gap: 12px;
+    column-gap: 12px;
+    align-items: center;
+    padding: 14px 16px;
+  }
+  .widget-card.mobile-fullscreen#widget-comms .widget-header h3 {
+    grid-area: title;
+    margin: 0;
+  }
+  .widget-card.mobile-fullscreen#widget-comms .widget-header > .mb-close-btn { grid-area: close; }
+  .widget-card.mobile-fullscreen#widget-comms .widget-header .widget-tabs {
+    grid-area: tabs;
+    width: 100%;
+    gap: 10px;
+    justify-content: flex-start;
+  }
+  .widget-card.mobile-fullscreen#widget-comms .widget-header #pcorg-add-btn {
+    grid-area: add;
+    width: 44px;
+    height: 44px;
+  }
+  .widget-card.mobile-fullscreen#widget-comms .widget-header #pcorg-add-btn .material-symbols-outlined { font-size: 26px; }
+
   .widget-card.mobile-fullscreen#widget-comms .widget-body { padding: 12px; }
   .widget-card.mobile-fullscreen#widget-comms .pcorg-stats-grid {
     grid-template-columns: repeat(2, 1fr) !important;
@@ -6212,6 +6241,79 @@ input:checked + .slider .slider-button::after {
   }
   .widget-card.mobile-fullscreen#widget-comms .pcorg-stat-icon { font-size: 28px; }
   .widget-card.mobile-fullscreen#widget-comms .pcorg-stat-total { font-size: 1.6rem; }
+
+  /* === MODE CARTE : searchbar flottante sur la carte pour maxer la hauteur === */
+  body.map-view #main-content {
+    grid-template-rows: 1fr !important;
+    position: relative;
+  }
+  body.map-view #timeline-searchbar {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    grid-row: auto !important;
+    z-index: 500;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+    padding: 0;
+  }
+  body.map-view #timeline-searchbar .ts-input-wrap {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 4px 8px;
+  }
+  body.map-view #timeline-searchbar:focus-within .ts-input-wrap { box-shadow: none; }
+  body.map-view #map-main,
+  body.map-view #timeline-main {
+    grid-row: 1 !important;
+    grid-column: 1 !important;
+  }
+
+  /* === TEMPS D'ACCES + AFFLUENCE : header en 2 rangees (titre puis tabs) === */
+  .widget-card.mobile-fullscreen#widget-parkings .widget-header,
+  .widget-card.mobile-fullscreen#widget-right-2 .widget-header {
+    display: grid !important;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "title  close"
+      "tabs   tabs";
+    row-gap: 12px;
+    column-gap: 12px;
+    align-items: center;
+    padding: 14px 16px;
+  }
+  .widget-card.mobile-fullscreen#widget-parkings .widget-header h3,
+  .widget-card.mobile-fullscreen#widget-right-2 .widget-header h3 {
+    grid-area: title;
+    margin: 0;
+  }
+  .widget-card.mobile-fullscreen#widget-parkings .widget-header > .mb-close-btn,
+  .widget-card.mobile-fullscreen#widget-right-2 .widget-header > .mb-close-btn {
+    grid-area: close;
+  }
+  .widget-card.mobile-fullscreen#widget-parkings .widget-header .widget-tabs,
+  .widget-card.mobile-fullscreen#widget-right-2 .widget-header .widget-tabs {
+    grid-area: tabs;
+    width: 100%;
+    gap: 8px;
+    justify-content: stretch;
+  }
+  /* Tabs : occupent equitablement la largeur (4 boutons sur parkings, 3 sur affluence) */
+  .widget-card.mobile-fullscreen#widget-parkings .widget-header .widget-tab,
+  .widget-card.mobile-fullscreen#widget-right-2 .widget-header .widget-tab {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  /* Affluence : tabs textuels (Jours/Ventes/Sites) — override le width:40px global */
+  .widget-card.mobile-fullscreen#widget-right-2 .widget-header .widget-tab {
+    width: auto !important;
+    padding: 8px 10px;
+    font-size: 0.92rem;
+  }
 
   /* === TEMPS D'ACCES : filtre + listes tactiles === */
   .widget-card.mobile-fullscreen#widget-parkings .trafic-filter { padding: 12px; }
@@ -11928,33 +12030,202 @@ th span { font-size: 0.88rem; font-weight: 700; }
   overflow-y: auto;
 }
 .ai-edit-section-comment,
-.ai-edit-section-promote,
 .ai-edit-section-rule-row {
-  padding: 0 16px 8px 16px;
+  padding: 0 16px 10px 16px;
 }
-.ai-edit-section-comment input,
-.ai-edit-section-rule-row input,
-.ai-comment-modal-body input {
+.ai-edit-section-comment input {
   width: 100%;
-  padding: 8px 10px;
+  padding: 9px 12px;
   border: 1px solid #cbd5e1;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 13px;
   box-sizing: border-box;
+  background: #ffffff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.ai-toggle-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: #334155;
-  cursor: pointer;
+.ai-edit-section-comment input:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.18);
 }
+
+/* ----- Modale commentaire : layout principal ----- */
 .ai-comment-modal-body {
-  padding: 12px 16px;
+  padding: 18px 20px 6px 20px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 16px;
+}
+.ai-comment-field { display: flex; flex-direction: column; gap: 6px; }
+.ai-comment-field-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ai-comment-field-hint {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.ai-comment-textarea,
+.ai-comment-rule-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  font-family: inherit;
+  background: #ffffff;
+  resize: vertical;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ai-comment-textarea:focus,
+.ai-comment-rule-textarea:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.18);
+}
+.ai-comment-textarea { min-height: 110px; }
+.ai-comment-rule-textarea { min-height: 60px; }
+
+/* ----- Toggle switch « Règle permanente » (custom, accessible) ----- */
+.ai-promote-row {
+  padding: 0 20px;
+}
+.ai-edit-section-modal .ai-promote-row {
+  padding: 0 16px 10px 16px;
+}
+.ai-promote-switch {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+}
+.ai-promote-switch:hover { border-color: #cbd5e1; background: #f1f5f9; }
+.ai-promote-switch input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0; height: 0;
+}
+.ai-promote-switch-track {
+  position: relative;
+  flex-shrink: 0;
+  width: 44px;
+  height: 24px;
+  background: #cbd5e1;
+  border-radius: 999px;
+  transition: background 0.2s ease;
+}
+.ai-promote-switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  transition: transform 0.2s ease;
+}
+.ai-promote-switch input[type="checkbox"]:checked ~ .ai-promote-switch-track {
+  background: #6366f1;
+}
+.ai-promote-switch input[type="checkbox"]:checked ~ .ai-promote-switch-track::after {
+  transform: translateX(20px);
+}
+.ai-promote-switch input[type="checkbox"]:focus-visible ~ .ai-promote-switch-track {
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.25);
+}
+.ai-promote-switch-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.3;
+}
+.ai-promote-switch-label strong {
+  font-size: 14px;
+  color: #1e293b;
+  font-weight: 700;
+}
+.ai-promote-switch-sub {
+  font-size: 11.5px;
+  color: #64748b;
+}
+.ai-promote-switch input[type="checkbox"]:checked ~ .ai-promote-switch-label strong { color: #4338ca; }
+
+/* ----- Bloc « Formulation de la règle » + bouton Suggérer ----- */
+.ai-comment-rule-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 20px 12px 20px;
+  animation: ai-fade-in 0.15s ease-out;
+}
+.ai-edit-section-modal .ai-comment-rule-row { padding: 0 16px 10px 16px; }
+@keyframes ai-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ai-comment-rule-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ai-suggest-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid #c7d2fe;
+  background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
+  color: #4338ca;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.ai-suggest-btn:hover {
+  background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
+  border-color: #a5b4fc;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(99,102,241,0.2);
+}
+.ai-suggest-btn:disabled { opacity: 0.6; cursor: progress; transform: none; box-shadow: none; }
+.ai-suggest-btn .material-symbols-outlined {
+  font-size: 16px;
+}
+.ai-suggest-btn.is-loading .material-symbols-outlined {
+  animation: ai-spin 1.2s linear infinite;
+}
+@keyframes ai-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.ai-suggest-hint {
+  font-size: 11px;
+  color: #94a3b8;
+  font-style: italic;
+  padding-left: 2px;
 }
 .ai-modal-footer {
   display: flex;

@@ -1542,18 +1542,33 @@
       ])
     ]);
     var commentRow = el("div", { class: "ai-edit-section-comment" }, [
-      el("label", { class: "ai-edit-section-pane-label", text: "Commentaire (optionnel)" }),
+      el("label", { class: "ai-edit-section-pane-label", for: "ai-edit-section-comment", text: "Commentaire (optionnel)" }),
       el("input", { type: "text", id: "ai-edit-section-comment", placeholder: "Explique pourquoi tu corriges, contexte non évident, etc." })
     ]);
-    var promoteRow = el("div", { class: "ai-edit-section-promote" }, [
-      el("label", { class: "ai-toggle-label" }, [
+    var promoteRow = el("div", { class: "ai-promote-row" }, [
+      el("label", { class: "ai-promote-switch", title: "Si activé, ta correction sera reformulée en règle et réinjectée dans tous les rapports futurs" }, [
         el("input", { type: "checkbox", id: "ai-edit-section-promote" }),
-        el("span", { text: "Promouvoir aussi en règle permanente (sera réinjectée dans tous les rapports futurs)" })
+        el("span", { class: "ai-promote-switch-track" }),
+        el("span", { class: "ai-promote-switch-label" }, [
+          el("strong", { text: "Règle permanente" }),
+          el("span", { class: "ai-promote-switch-sub", text: "Réinjectée dans tous les futurs rapports sur ce scope" })
+        ])
       ])
     ]);
     var ruleRow = el("div", { class: "ai-edit-section-rule-row", style: "display:none;" }, [
-      el("label", { class: "ai-edit-section-pane-label", text: "Texte de la règle (formulation concise)" }),
-      el("input", { type: "text", id: "ai-edit-section-rule", placeholder: "Ex: Tribune Mulsanne — toujours préciser secteur..." })
+      el("div", { class: "ai-comment-rule-header" }, [
+        el("label", { class: "ai-edit-section-pane-label", for: "ai-edit-section-rule" }, [
+          el("span", { text: "Formulation de la règle" }),
+          el("span", { class: "ai-comment-field-hint", text: "(concise, une phrase actionnable)" })
+        ]),
+        el("button", { type: "button", class: "ai-suggest-btn", id: "ai-edit-section-suggest",
+                       title: "Demander à Claude de reformuler la correction en règle concise" }, [
+          el("span", { class: "material-symbols-outlined" }, ["auto_awesome"]),
+          el("span", { class: "ai-suggest-btn-label", text: "Suggérer" })
+        ])
+      ]),
+      el("textarea", { id: "ai-edit-section-rule", rows: "2", class: "ai-comment-rule-textarea",
+                       placeholder: "Ex : Tribune Mulsanne — toujours préciser secteur..." })
     ]);
     var footer = el("div", { class: "ai-modal-footer" }, [
       el("button", { type: "button", class: "ai-btn ai-btn-ghost", onclick: closeEditSectionModal }, [el("span", { text: "Annuler" })]),
@@ -1585,9 +1600,44 @@
       }
     });
     overlay.querySelector("#ai-edit-section-save").addEventListener("click", submitEditSection);
+    overlay.querySelector("#ai-edit-section-suggest").addEventListener("click", suggestRuleForEdit);
 
     editSectionEl = overlay;
     return overlay;
+  }
+
+  function suggestRuleForEdit() {
+    if (!editSectionEl) return;
+    var sectionKey = editSectionEl.dataset.sectionKey;
+    var originalText = editSectionEl.dataset.originalText || "";
+    var correctedText = (editSectionEl.querySelector("#ai-edit-section-textarea").value || "").trim();
+    var commentVal = (editSectionEl.querySelector("#ai-edit-section-comment").value || "").trim();
+    if (!correctedText && !commentVal) {
+      toast("Saisis d'abord la correction ou un commentaire à reformuler.", "error"); return;
+    }
+    var btn = editSectionEl.querySelector("#ai-edit-section-suggest");
+    var lbl = btn.querySelector(".ai-suggest-btn-label");
+    btn.disabled = true;
+    var oldLabel = lbl.textContent;
+    lbl.textContent = "Reformulation…";
+    btn.classList.add("is-loading");
+    var event = (state.current && state.current.event) || null;
+    apiPostJson("/api/pcorg/ai-memory/suggest-rule", {
+      comment: commentVal,
+      corrected_text: correctedText,
+      original_text: originalText,
+      section: sectionKey,
+      event: event
+    }).then(function (res) {
+      btn.disabled = false;
+      lbl.textContent = oldLabel;
+      btn.classList.remove("is-loading");
+      if (!res || !res.ok) { toast((res && res.error) || "Erreur de reformulation", "error"); return; }
+      var input = editSectionEl.querySelector("#ai-edit-section-rule");
+      input.value = res.rule_text || "";
+      input.focus();
+      toast("Règle suggérée — tu peux la modifier avant d'enregistrer", "success");
+    });
   }
 
   function submitEditSection() {
@@ -1664,27 +1714,60 @@
       el("span", { class: "material-symbols-outlined ai-modal-icon" }, ["chat_bubble"]),
       el("div", { class: "ai-modal-titles" }, [
         el("h2", { class: "ai-modal-title ai-comment-modal-title", text: "Commentaire" }),
-        el("div", { class: "ai-modal-subtitle", text: "Note libre pour cette section. Si tu veux qu'elle s'applique aux futurs rapports, coche 'Promouvoir en règle'." })
+        el("div", { class: "ai-modal-subtitle", text: "Note libre pour cette section. Pour qu'elle alimente tous les futurs rapports, active 'Règle permanente'." })
       ]),
       el("button", { type: "button", class: "ai-modal-close", title: "Fermer", onclick: closeCommentModal }, [
         el("span", { class: "material-symbols-outlined" }, ["close"])
       ])
     ]);
-    var body = el("div", { class: "ai-comment-modal-body" }, [
-      el("label", { class: "ai-edit-section-pane-label", text: "Ton commentaire" }),
-      el("textarea", { id: "ai-comment-textarea", class: "ai-edit-section-textarea", rows: "6",
-                       placeholder: "Ex: la synthèse est correcte mais il faudrait toujours mentionner..." }),
-      el("div", { class: "ai-edit-section-promote" }, [
-        el("label", { class: "ai-toggle-label" }, [
-          el("input", { type: "checkbox", id: "ai-comment-promote" }),
-          el("span", { text: "Promouvoir en règle permanente (sera réinjectée dans tous les rapports futurs)" })
-        ])
+
+    var body = el("div", { class: "ai-comment-modal-body" });
+
+    // ----- Champ commentaire -----
+    var commentBlock = el("div", { class: "ai-comment-field" }, [
+      el("label", { class: "ai-comment-field-label", for: "ai-comment-textarea" }, [
+        el("span", { text: "Ton commentaire" }),
+        el("span", { class: "ai-comment-field-hint", text: "(libre — décris ce qui devrait changer)" })
       ]),
-      el("div", { class: "ai-comment-rule-row", style: "display:none;" }, [
-        el("label", { class: "ai-edit-section-pane-label", text: "Texte de la règle (concis)" }),
-        el("input", { type: "text", id: "ai-comment-rule", placeholder: "Ex: Pour 24H Autos en synthèse, toujours mentionner..." })
+      el("textarea", { id: "ai-comment-textarea", class: "ai-comment-textarea", rows: "5",
+                       placeholder: "Ex : la synthèse est correcte mais il faudrait toujours mentionner le pic de la veille et son heure" })
+    ]);
+
+    // ----- Toggle règle permanente (switch custom + label) -----
+    var promoteRow = el("div", { class: "ai-promote-row" }, [
+      el("label", { class: "ai-promote-switch", title: "Si activé, ce retour sera reformulé en règle et réinjecté dans tous les futurs rapports" }, [
+        el("input", { type: "checkbox", id: "ai-comment-promote" }),
+        el("span", { class: "ai-promote-switch-track" }),
+        el("span", { class: "ai-promote-switch-label" }, [
+          el("strong", { text: "Règle permanente" }),
+          el("span", { class: "ai-promote-switch-sub", text: "Sera réinjectée dans tous les rapports futurs sur ce scope" })
+        ])
       ])
     ]);
+
+    // ----- Bloc règle (caché tant que toggle off) -----
+    var ruleBlock = el("div", { class: "ai-comment-rule-row", style: "display:none;" }, [
+      el("div", { class: "ai-comment-rule-header" }, [
+        el("label", { class: "ai-comment-field-label ai-comment-rule-label", for: "ai-comment-rule" }, [
+          el("span", { text: "Formulation de la règle" }),
+          el("span", { class: "ai-comment-field-hint", text: "(concise, une phrase actionnable)" })
+        ]),
+        el("button", { type: "button", class: "ai-suggest-btn", id: "ai-comment-suggest",
+                       title: "Demander à Claude de reformuler le commentaire en règle concise" }, [
+          el("span", { class: "material-symbols-outlined" }, ["auto_awesome"]),
+          el("span", { class: "ai-suggest-btn-label", text: "Suggérer" })
+        ])
+      ]),
+      el("textarea", { type: "text", id: "ai-comment-rule", rows: "2",
+                       class: "ai-comment-rule-textarea",
+                       placeholder: "Ex : Pour 24H Autos en synthèse, mentionner systématiquement le pic veille avec heure et delta vs N-1" }),
+      el("div", { class: "ai-suggest-hint", text: "Astuce : clique « Suggérer » pour qu'une IA légère reformule ton commentaire en règle." })
+    ]);
+
+    body.appendChild(commentBlock);
+    body.appendChild(promoteRow);
+    body.appendChild(ruleBlock);
+
     var footer = el("div", { class: "ai-modal-footer" }, [
       el("button", { type: "button", class: "ai-btn ai-btn-ghost", onclick: closeCommentModal }, [el("span", { text: "Annuler" })]),
       el("button", { type: "button", class: "ai-btn ai-btn-primary", id: "ai-comment-save" }, [
@@ -1703,13 +1786,45 @@
       var ruleInput = overlay.querySelector("#ai-comment-rule");
       var commentTa = overlay.querySelector("#ai-comment-textarea");
       if (e.target.checked && !ruleInput.value) {
+        // Pré-remplit avec la 1ère phrase du commentaire en attendant que
+        // l'utilisateur clique « Suggérer ».
         var firstLine = (commentTa.value || "").split("\n")[0].trim();
         if (firstLine) ruleInput.value = firstLine.substring(0, 200);
       }
     });
+    overlay.querySelector("#ai-comment-suggest").addEventListener("click", suggestRuleForComment);
     overlay.querySelector("#ai-comment-save").addEventListener("click", submitComment);
     commentModalEl = overlay;
     return overlay;
+  }
+
+  function suggestRuleForComment() {
+    if (!commentModalEl) return;
+    var st = commentModalState;
+    var commentVal = (commentModalEl.querySelector("#ai-comment-textarea").value || "").trim();
+    if (!commentVal) { toast("Saisis d'abord un commentaire à reformuler.", "error"); return; }
+    var btn = commentModalEl.querySelector("#ai-comment-suggest");
+    var lbl = btn.querySelector(".ai-suggest-btn-label");
+    btn.disabled = true;
+    var oldLabel = lbl.textContent;
+    lbl.textContent = "Reformulation…";
+    btn.classList.add("is-loading");
+    var event = (state.current && state.current.event) || null;
+    apiPostJson("/api/pcorg/ai-memory/suggest-rule", {
+      comment: commentVal,
+      section: st.sectionKey,
+      event: event,
+      original_text: st.originalText
+    }).then(function (res) {
+      btn.disabled = false;
+      lbl.textContent = oldLabel;
+      btn.classList.remove("is-loading");
+      if (!res || !res.ok) { toast((res && res.error) || "Erreur de reformulation", "error"); return; }
+      var input = commentModalEl.querySelector("#ai-comment-rule");
+      input.value = res.rule_text || "";
+      input.focus();
+      toast("Règle suggérée — tu peux la modifier avant d'enregistrer", "success");
+    });
   }
 
   function submitComment() {

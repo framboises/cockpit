@@ -431,6 +431,75 @@ def stats(db):
     }
 
 
+def suggest_rule_from_comment(comment, section=None, event=None,
+                              original_text=None, corrected_text=None,
+                              model=None):
+    """Reformule un commentaire libre en directive concise (~1 phrase).
+
+    Utilise Claude Haiku (rapide, ~256 tokens, cout negligeable). Retourne
+    une chaine ou leve ClaudeError (importee depuis pcorg_summary).
+
+    Le contexte fourni :
+    - section ciblee (synthese, recommandations, ...) + event si dispo
+    - texte original Claude (ce qui etait dans le rapport)
+    - texte corrige si l'utilisateur a edite (sinon le commentaire seul)
+    """
+    import pcorg_summary  # import lazy pour eviter cycle
+
+    section_label = {
+        "synthese": "Synthese", "faits_marquants": "Faits marquants",
+        "secours": "Secours", "securite": "Securite",
+        "technique": "Technique", "flux": "Flux", "fourriere": "Fourriere",
+        "recommandations": "Recommandations", "prochaines_24h": "Prochaines 24h",
+    }.get(section, section or "(toutes sections)")
+
+    system = (
+        "Tu es un assistant qui transforme des retours libres d'operateurs PC "
+        "Organisation en DIRECTIVES CONCISES pour un autre assistant IA qui "
+        "redige les rapports d'evenement. Les directives sont injectees dans "
+        "le system prompt de l'IA aux futurs rapports.\n"
+        "\n"
+        "Contraintes :\n"
+        "- Reponds par UNE SEULE PHRASE en francais, mode imperatif ou "
+        "declaratif, MAX 200 caracteres.\n"
+        "- Pas de preambule, pas de guillemets, pas de markdown, pas de "
+        "puces, pas de retour a la ligne.\n"
+        "- Reste actionnable et concret : si le commentaire mentionne un "
+        "lieu, une heure, une procedure, conserve l'information.\n"
+        "- Pas de 'Il faut...', 'Penser a...', 'Ne pas oublier...' : ecris "
+        "comme une regle directe ('Pour 24H Autos en synthese, mentionner "
+        "systematiquement le pic veille avec son heure et son delta vs N-1').\n"
+        "- N'invente pas d'information : si le commentaire est vague, garde "
+        "le vague mais reste actionnable.\n"
+        "- Aucune apostrophe ou guillemet typographique."
+    )
+
+    parts = []
+    if event:
+        parts.append("Evenement : " + str(event))
+    parts.append("Section ciblee : " + str(section_label))
+    if original_text:
+        parts.append("Texte Claude (original) :\n" + str(original_text)[:1000])
+    if corrected_text:
+        parts.append("Texte corrige (utilisateur) :\n" + str(corrected_text)[:1000])
+    parts.append("Commentaire utilisateur :\n" + str(comment or "")[:1500])
+    parts.append("\nProduis la directive (une phrase, max 200 caracteres) :")
+    user = "\n\n".join(parts)
+
+    use_model = pcorg_summary._validate_model(model) or "claude-haiku-4-5"
+    raw_text, usage, _stop = pcorg_summary._claude_stream_request(
+        system, user, max_tokens=256, model=use_model,
+        system_cache=False,  # bloc unique, pas la peine de cacher
+    )
+    rule = (raw_text or "").strip()
+    # Nettoyages defensifs : si Claude a quand meme ajoute des guillemets ou
+    # un saut de ligne, on tronque proprement.
+    rule = rule.strip('"\'')
+    if "\n" in rule:
+        rule = rule.split("\n", 1)[0].strip()
+    return rule, usage
+
+
 def serialize(d):
     """Forme JSON-friendly d'une directive (pour les routes)."""
     if not d:

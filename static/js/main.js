@@ -272,6 +272,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!nav) return;
         var tabs = nav.querySelectorAll(".mb-tab");
         var activeWidget = null;
+        var backgroundView = "timeline"; // "timeline" | "map" — vue de fond derriere les overlays
 
         function setActive(targetId) {
             tabs.forEach(function (t) {
@@ -302,7 +303,7 @@ document.addEventListener("DOMContentLoaded", function () {
             btn.addEventListener("click", function (e) {
                 e.stopPropagation();
                 closeFullscreen();
-                setActive("timeline");
+                setActive(backgroundView);
             });
             header.appendChild(btn);
         }
@@ -319,17 +320,20 @@ document.addEventListener("DOMContentLoaded", function () {
 
         function showTimeline() {
             closeFullscreen();
-            // Si la carte est ouverte, revenir a la timeline via le bouton existant
             var timelineBtn = document.getElementById("view-timeline-btn");
             if (timelineBtn && !timelineBtn.classList.contains("active")) timelineBtn.click();
             setActive("timeline");
+            document.body.classList.remove("map-view");
+            backgroundView = "timeline";
         }
 
         function showMap() {
             closeFullscreen();
             var mapBtn = document.getElementById("view-map-btn");
-            if (mapBtn) mapBtn.click();
+            if (mapBtn && !mapBtn.classList.contains("active")) mapBtn.click();
             setActive("map");
+            document.body.classList.add("map-view");
+            backgroundView = "map";
         }
 
         tabs.forEach(function (tab) {
