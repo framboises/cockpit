@@ -230,14 +230,41 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
 
+    var mobileMQ = window.matchMedia("(max-width: 820px)");
+
     function toggleSidebar() {
         if (!sidebar) return;
-        sidebar.classList.toggle("collapsed");
-        localStorage.setItem("sidebar-collapsed", sidebar.classList.contains("collapsed"));
+        if (mobileMQ.matches) {
+            var open = sidebar.classList.toggle("mobile-open");
+            document.body.classList.toggle("sidebar-open", open);
+        } else {
+            sidebar.classList.toggle("collapsed");
+            localStorage.setItem("sidebar-collapsed", sidebar.classList.contains("collapsed"));
+        }
+    }
+
+    function closeMobileSidebar() {
+        if (!sidebar) return;
+        sidebar.classList.remove("mobile-open");
+        document.body.classList.remove("sidebar-open");
     }
 
     if (toggleBtn) toggleBtn.addEventListener("click", toggleSidebar);
     if (hamburgerButton) hamburgerButton.addEventListener("click", toggleSidebar);
+    var headerBurger = document.getElementById("header-burger-btn");
+    if (headerBurger) headerBurger.addEventListener("click", toggleSidebar);
+
+    document.addEventListener("click", function (e) {
+        if (!mobileMQ.matches) return;
+        if (!sidebar || !sidebar.classList.contains("mobile-open")) return;
+        if (e.target.closest("#sidebar") && !e.target.closest(".sidebar-nav .nav-btn")) return;
+        if (e.target.closest("#sidebarToggle, #header-burger-btn, #hamburger-button")) return;
+        closeMobileSidebar();
+    });
+
+    mobileMQ.addEventListener("change", function (ev) {
+        if (!ev.matches) closeMobileSidebar();
+    });
 
     // ======================== SIMULATION CLOCK (admin) ========================
     var simToggle = document.getElementById("sidebar-sim-toggle");
