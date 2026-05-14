@@ -320,8 +320,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
         function showTimeline() {
             closeFullscreen();
+            // Toujours cliquer : la fonction switchView() interne de map_view.js
+            // a son propre guard si on est deja dans la vue cible.
             var timelineBtn = document.getElementById("view-timeline-btn");
-            if (timelineBtn && !timelineBtn.classList.contains("active")) timelineBtn.click();
+            if (timelineBtn) timelineBtn.click();
             setActive("timeline");
             document.body.classList.remove("map-view");
             backgroundView = "timeline";
@@ -330,7 +332,7 @@ document.addEventListener("DOMContentLoaded", function () {
         function showMap() {
             closeFullscreen();
             var mapBtn = document.getElementById("view-map-btn");
-            if (mapBtn && !mapBtn.classList.contains("active")) mapBtn.click();
+            if (mapBtn) mapBtn.click();
             setActive("map");
             document.body.classList.add("map-view");
             backgroundView = "map";

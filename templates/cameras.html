@@ -39,8 +39,14 @@
       padding: 16px;
     }
 
+    /* Override le overflow:hidden global de la MQ mobile sur #main-content
+       (sinon la page caméras ne peut pas scroller) */
+    .cam-page-layout #main-content {
+      overflow: visible !important;
+    }
+
     /* Mobile portrait: single column + dynamic viewport + bottom safe area */
-    @media (max-width: 640px) {
+    @media (max-width: 820px) {
       .cam-page-layout {
         height: 100vh;
         height: 100dvh;
@@ -48,6 +54,10 @@
       .cam-page-layout .app-main {
         height: 100vh;
         height: 100dvh;
+        margin-left: 0 !important;
+      }
+      .cam-page-layout .app-main #main-content {
+        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)) !important;
       }
       .cam-grid {
         grid-template-columns: 1fr;
@@ -57,6 +67,24 @@
       }
       .cam-card-preview { height: 180px; }
       .cam-detail-panel { width: 100%; max-width: 100%; }
+
+      /* Header : tactile, le burger ouvre le sidemenu, on garde uniquement
+         icones + compteur en mobile pour eviter le debordement */
+      .cam-page-layout .app-header { padding: 8px 12px; gap: 6px; }
+      .cam-page-layout .header-event-name { font-size: 1rem; }
+      .cam-page-layout .header-event-year { display: none; }
+      .cam-page-layout .header-actions .btn span:not(.material-symbols-outlined) {
+        display: none;
+      }
+      .cam-page-layout .header-actions .btn {
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        justify-content: center;
+      }
+      .cam-page-layout #cam-counter span:not(.material-symbols-outlined) {
+        display: none;
+      }
     }
 
     /* Card */
@@ -513,6 +541,9 @@
   <div class="app-main">
 
     <header class="app-header">
+      <button class="header-burger" id="header-burger-btn" type="button" aria-label="Menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
       <div class="header-event-info">
         <span class="material-symbols-outlined" style="font-size:22px;color:var(--brand);">videocam</span>
         <span class="header-event-name">Cameras</span>
@@ -703,18 +734,46 @@
 <!-- ===== SCRIPTS ===== -->
 <script src="{{ url_for('static', filename='js/cameras.js') }}"></script>
 
-<!-- Sidebar toggle (shared pattern) -->
+<!-- Sidebar toggle (shared pattern, with mobile-open support) -->
 <script>
 (function(){
   var sb = document.getElementById("sidebar");
   var tog = document.getElementById("sidebarToggle");
-  if(tog && sb){
-    if(localStorage.getItem("sidebar-collapsed")==="1") sb.classList.add("collapsed");
-    tog.addEventListener("click", function(){
+  var burger = document.getElementById("header-burger-btn");
+  if(!sb) return;
+  if(localStorage.getItem("sidebar-collapsed")==="1") sb.classList.add("collapsed");
+
+  var mobileMQ = window.matchMedia("(max-width: 820px)");
+
+  function toggleSidebar(){
+    if(mobileMQ.matches){
+      var open = sb.classList.toggle("mobile-open");
+      document.body.classList.toggle("sidebar-open", open);
+    } else {
       sb.classList.toggle("collapsed");
       localStorage.setItem("sidebar-collapsed", sb.classList.contains("collapsed")?"1":"0");
-    });
+    }
   }
+
+  function closeMobileSidebar(){
+    sb.classList.remove("mobile-open");
+    document.body.classList.remove("sidebar-open");
+  }
+
+  if(tog) tog.addEventListener("click", toggleSidebar);
+  if(burger) burger.addEventListener("click", toggleSidebar);
+
+  document.addEventListener("click", function(e){
+    if(!mobileMQ.matches) return;
+    if(!sb.classList.contains("mobile-open")) return;
+    if(e.target.closest("#sidebar") && !e.target.closest(".sidebar-nav .nav-btn")) return;
+    if(e.target.closest("#sidebarToggle, #header-burger-btn")) return;
+    closeMobileSidebar();
+  });
+
+  mobileMQ.addEventListener("change", function(ev){
+    if(!ev.matches) closeMobileSidebar();
+  });
 })();
 </script>
 </body>

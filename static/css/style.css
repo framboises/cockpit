@@ -5876,10 +5876,20 @@ input:checked + .slider .slider-button::after {
   .sidebar.mobile-open {
     transform: translateX(0);
     box-shadow: var(--shadow-lg);
+    /* height dynamique : evite que la sidebar deborde sous la barre URL Safari */
+    height: 100vh;
+    height: 100dvh;
     overflow-y: auto;
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
+  }
+  /* En mobile-open, le footer ne doit plus etre pousse au bas par margin-top:auto
+     (sinon il empeche le scroll quand le contenu deborde a peine) — il suit
+     naturellement le flux et devient accessible via le scroll de la sidebar. */
+  .sidebar.mobile-open .sidebar-footer {
+    margin-top: 16px;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   /* Restaurer la sidebar pleine en mobile-open (annule l'etat collapsed) */
@@ -6509,7 +6519,6 @@ input:checked + .slider .slider-button::after {
     min-height: 96px;
   }
   .widget-card.mobile-fullscreen#widget-comms .pcorg-stat-icon { font-size: 28px; }
-  .widget-card.mobile-fullscreen#widget-comms .pcorg-stat-total { font-size: 1.6rem; }
 
   /* === MODE CARTE : searchbar flottante sur la carte pour maxer la hauteur === */
   body.map-view #main-content {
@@ -6548,6 +6557,8 @@ input:checked + .slider .slider-button::after {
     top: 10px;
     left: 10px;
     right: 10px;
+    width: auto !important;
+    max-width: calc(100vw - 20px) !important;
     grid-row: auto !important;
     z-index: 500;
     background: var(--card);
@@ -6555,6 +6566,7 @@ input:checked + .slider .slider-button::after {
     border-radius: 12px;
     box-shadow: 0 4px 14px rgba(0,0,0,0.4);
     padding: 0;
+    box-sizing: border-box;
   }
   body.map-view #timeline-searchbar .ts-input-wrap {
     background: transparent;
@@ -6596,17 +6608,18 @@ input:checked + .slider .slider-button::after {
     grid-area: tabs;
     width: 100%;
     gap: 8px;
-    justify-content: stretch;
+    justify-content: space-between;
   }
-  /* Tabs : occupent equitablement la largeur (4 boutons sur parkings, 3 sur affluence) */
+  /* Tabs : remplissent equitablement (override le width:40px global) */
   .widget-card.mobile-fullscreen#widget-parkings .widget-header .widget-tab,
   .widget-card.mobile-fullscreen#widget-right-2 .widget-header .widget-tab {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-  /* Affluence : tabs textuels (Jours/Ventes/Sites) — override le width:40px global */
-  .widget-card.mobile-fullscreen#widget-right-2 .widget-header .widget-tab {
+    flex: 1 1 0 !important;
     width: auto !important;
+    min-width: 0;
+    height: 44px !important;
+  }
+  /* Affluence : tabs textuels (Jours/Ventes/Sites) */
+  .widget-card.mobile-fullscreen#widget-right-2 .widget-header .widget-tab {
     padding: 8px 10px;
     font-size: 0.92rem;
   }
@@ -8603,26 +8616,6 @@ th span { font-size: 0.88rem; font-weight: 700; }
   font-size: 0.68rem;
   color: var(--muted);
 }
-.pcorg-stat-total {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px;
-  border-top: 1px solid var(--line);
-  margin-top: 4px;
-}
-.pcorg-stat-total-label {
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--muted);
-  text-transform: uppercase;
-}
-.pcorg-stat-total-counts {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-}
-
 /* ===== Fiche intervention modale ===== */
 .pcorg-fiche-modal { width: 720px; max-width: calc(100vw - 32px); }
 .pcorg-fiche-modal.modal {
@@ -9813,6 +9806,13 @@ th span { font-size: 0.88rem; font-weight: 700; }
   animation: pcorg-ctx-in 0.12s ease-out;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+  /* Liste vehicules potentiellement longue : on plafonne la hauteur et on
+     active le scroll. Sans ca, sur iPhone (et meme desktop avec menu ouvert
+     en bas), les items dépassent le viewport et apparaissent invisibles. */
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 /* Bridge zone: invisible area between urgency item and vehicle submenu */
 .pcorg-ctx-sub-item.has-veh-submenu::after {
