@@ -94,6 +94,22 @@
     return DEVICE_STATUS_META[dev.status] || DEVICE_STATUS_META.running;
   }
 
+  // Resout la dispo d'un vehicule (utilise par les pickers : sous-sous-menu
+  // hover + overlay touch). Retourne {dev, dsMeta, isAvailable}.
+  // Les balises GPS (kind != "tablet") sont toujours considerees disponibles.
+  function resolveVehicleAvailability(v) {
+    var anoRef = typeof window.getAnolocDeviceByLabel === "function"
+      ? window.getAnolocDeviceByLabel(v.label) : null;
+    var dev = anoRef ? anoRef.device : null;
+    var dsMeta = dev ? _resolveDeviceStatus(dev) : null;
+    var isAvailable = true;
+    if (dev && dev.kind === "tablet" && dsMeta) {
+      isAvailable = dsMeta === DEVICE_STATUS_META.patrouille
+        || dsMeta === DEVICE_STATUS_META.running;
+    }
+    return { dev: dev, dsMeta: dsMeta, isAvailable: isAvailable };
+  }
+
   // ── Helpers ────────────────────────────────────────────────────────────────
   function catStyle(cat) {
     return CATEGORY_STYLES[cat] || FALLBACK_STYLE;
@@ -465,8 +481,19 @@
       vSub.textContent = "";
       var vCat = vSub.getAttribute("data-cat-veh");
       var vLevel = vSub.getAttribute("data-level-veh");
-      var vehicles = vehiclesByCategory[vCat];
-      if (!vehicles || !vehicles.length) {
+      var allVehicles = vehiclesByCategory[vCat];
+      if (!allVehicles || !allVehicles.length) {
+        vSub.style.display = "none";
+        vSub.parentElement.classList.remove("has-veh-submenu");
+        return;
+      }
+      // Filtre : on n'affiche que les vehicules disponibles. Si tout est
+      // indisponible, on masque le sous-sous-menu (le subItem retombe sur le
+      // comportement classique = ouvrir la fiche sans vehicule).
+      var available = allVehicles.filter(function (v) {
+        return resolveVehicleAvailability(v).isAvailable;
+      });
+      if (!available.length) {
         vSub.style.display = "none";
         vSub.parentElement.classList.remove("has-veh-submenu");
         return;
@@ -478,25 +505,14 @@
       var userCanFS = !!window.__userFicheSimplifiee;
       var catFS = (pcorgConfig && pcorgConfig.fiche_simplifiee) || {};
       var isQuick = userCanFS && !!catFS[vCat];
-      // Tri alphabetique des vehicules (insensible a la casse + accents,
-      // locale fr pour gerer correctement les caracteres latins).
-      vehicles = vehicles.slice().sort(function (a, b) {
+      // Tri alphabetique (fr, insensible a la casse / accents).
+      var vehicles = available.slice().sort(function (a, b) {
         return (a.label || "").localeCompare((b.label || ""), "fr", { sensitivity: "base" });
       });
       vehicles.forEach(function (v) {
         var vBtn = mkEl("div", "pcorg-ctx-veh-item");
-        // Resolve device status via anoloc cross-reference
-        var anoRef = typeof window.getAnolocDeviceByLabel === "function"
-          ? window.getAnolocDeviceByLabel(v.label) : null;
-        var dev = anoRef ? anoRef.device : null;
-        var dsMeta = dev ? _resolveDeviceStatus(dev) : null;
-        // Seules les tablettes ont un statut d'engagement (patrouille/intervention/etc.)
-        // Les balises GPS sont toujours engageables
-        var isAvailable = true;
-        if (dev && dev.kind === "tablet" && dsMeta) {
-          isAvailable = dsMeta === DEVICE_STATUS_META.patrouille
-            || dsMeta === DEVICE_STATUS_META.running;
-        }
+        var avail = resolveVehicleAvailability(v);
+        var dsMeta = avail.dsMeta;
         // Build label with status indicator
         var nameSpan = mkEl("span", "pcorg-ctx-veh-name");
         nameSpan.textContent = v.label;
@@ -509,12 +525,8 @@
           stSpan.appendChild(document.createTextNode(dsMeta.label));
           vBtn.appendChild(stSpan);
         }
-        if (!isAvailable) {
-          vBtn.classList.add("pcorg-ctx-veh-disabled");
-        }
         function onVehPick(ev) {
           ev.stopPropagation(); ev.preventDefault();
-          if (!isAvailable) return;
           hideContextMenu();
           if (isQuick) {
             quickCreate(ctxLat, ctxLon, vCat, vLevel, v.label);
@@ -609,6 +621,17 @@
 
   function showVehiclePicker(lat, lon, cat, level, vehicles, isQuick, menuPos) {
     hideVehiclePicker();
+    // Filtre : on n'affiche que les vehicules disponibles. Si tout est
+    // indisponible, on saute le picker et on enchaine directement (quickCreate
+    // ou wizard sans vehicule).
+    var available = (vehicles || []).filter(function (v) {
+      return resolveVehicleAvailability(v).isAvailable;
+    });
+    if (!available.length) {
+      if (isQuick) quickCreate(lat, lon, cat, level);
+      else openCreateFromContext(lat, lon, cat, level);
+      return;
+    }
     var st = catStyle(cat);
     vehiclePicker = mkEl("div", "pcorg-vehicle-picker");
 
@@ -624,7 +647,7 @@
 
     var list = mkEl("div", "pcorg-vp-list");
     // Tri alphabetique (fr, insensible a la casse / accents).
-    vehicles = vehicles.slice().sort(function (a, b) {
+    vehicles = available.slice().sort(function (a, b) {
       return (a.label || "").localeCompare((b.label || ""), "fr", { sensitivity: "base" });
     });
     vehicles.forEach(function (v) {
