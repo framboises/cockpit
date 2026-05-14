@@ -9806,14 +9806,25 @@ th span { font-size: 0.88rem; font-weight: 700; }
   animation: pcorg-ctx-in 0.12s ease-out;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  /* Liste vehicules potentiellement longue : on plafonne la hauteur et on
-     active le scroll. Sans ca, sur iPhone (et meme desktop avec menu ouvert
-     en bas), les items dépassent le viewport et apparaissent invisibles. */
-  max-height: min(60vh, 420px);
+  /* Hauteur fixe max avec scroll : avec ~32px par item, ~10 items visibles.
+     Au-dela : scrollbar. Garantit que le menu reste dans le viewport meme
+     quand le hover declenche le flip bottom:-6px. */
+  max-height: 320px;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
 }
+/* Scrollbar discrete cohérente avec la maquette du menu */
+.pcorg-ctx-veh-submenu::-webkit-scrollbar { width: 6px; }
+.pcorg-ctx-veh-submenu::-webkit-scrollbar-track { background: transparent; }
+.pcorg-ctx-veh-submenu::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.4);
+  border-radius: 3px;
+}
+.pcorg-ctx-veh-submenu::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.6);
+}
+.pcorg-ctx-veh-submenu { scrollbar-width: thin; scrollbar-color: rgba(100,116,139,0.4) transparent; }
 /* Bridge zone: invisible area between urgency item and vehicle submenu */
 .pcorg-ctx-sub-item.has-veh-submenu::after {
   content: "";
