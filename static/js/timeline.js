@@ -1067,14 +1067,19 @@ function _buildDayNav(dates, sectionsByDate) {
     pill.addEventListener('click', () => {
       const section = sectionsByDate[dateStr];
       if (!section) return;
-      // Scroller uniquement le conteneur #timeline-main (sinon scrollIntoView
-      // propage au viewport et fait disparaitre le header en mobile)
-      const mainEl = document.getElementById('timeline-main');
-      if (mainEl && mainEl.contains(section)) {
+      // Trouver le scroll container reel (varie selon le viewport :
+      // .timeline-container en desktop, #timeline-main en mobile via la MQ)
+      let scrollEl = section.parentElement;
+      while (scrollEl && scrollEl !== document.body) {
+        const oy = getComputedStyle(scrollEl).overflowY;
+        if (oy === 'auto' || oy === 'scroll') break;
+        scrollEl = scrollEl.parentElement;
+      }
+      if (scrollEl && scrollEl !== document.body) {
         const navBar = document.getElementById('day-nav-bar');
         const navOffset = (navBar && getComputedStyle(navBar).position === 'sticky') ? navBar.offsetHeight : 0;
-        const offset = section.getBoundingClientRect().top - mainEl.getBoundingClientRect().top + mainEl.scrollTop - navOffset;
-        mainEl.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' });
+        const offset = section.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop - navOffset;
+        scrollEl.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' });
       } else {
         section.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }

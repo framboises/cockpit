@@ -5873,7 +5873,14 @@ input:checked + .slider .slider-button::after {
     z-index: 1100;
   }
   .sidebar.collapsed { transform: translateX(-100%); width: var(--sidebar-w); }
-  .sidebar.mobile-open { transform: translateX(0); box-shadow: var(--shadow-lg); }
+  .sidebar.mobile-open {
+    transform: translateX(0);
+    box-shadow: var(--shadow-lg);
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
 
   /* Restaurer la sidebar pleine en mobile-open (annule l'etat collapsed) */
   .sidebar.mobile-open .sidebar-brand { max-width: 100%; opacity: 1; pointer-events: auto; }
@@ -6474,8 +6481,15 @@ input:checked + .slider .slider-button::after {
   .widget-card.mobile-fullscreen#widget-comms .widget-header .widget-tabs {
     grid-area: tabs;
     width: 100%;
-    gap: 10px;
-    justify-content: flex-start;
+    gap: 8px;
+    justify-content: stretch;
+  }
+  /* Tabs : remplissent la zone disponible (override le 40px global) */
+  .widget-card.mobile-fullscreen#widget-comms .widget-header .widget-tab {
+    flex: 1 1 0 !important;
+    width: auto !important;
+    min-width: 0;
+    height: 44px !important;
   }
   .widget-card.mobile-fullscreen#widget-comms .widget-header #pcorg-add-btn {
     grid-area: add;
@@ -6501,7 +6515,34 @@ input:checked + .slider .slider-button::after {
   body.map-view #main-content {
     grid-template-rows: 1fr !important;
     position: relative;
+    /* Inclure la safe-area iOS dans le padding-bas pour que la carte ne passe
+       pas sous le bottom-nav (qui est `56px + safe-area`) */
+    padding-bottom: calc(56px + 8px + env(safe-area-inset-bottom, 0px)) !important;
   }
+  /* Idem en mode timeline pour que le contenu ne soit pas masque par le bottom-nav */
+  #main-content {
+    padding-bottom: calc(56px + 8px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Controles Leaflet : decaler pour qu'ils ne touchent ni la searchbar
+     flottante (top) ni le bord du conteneur (bottom). */
+  #cockpit-map .leaflet-top.leaflet-left,
+  #cockpit-map .leaflet-top.leaflet-right { top: 60px; }
+  #cockpit-map .leaflet-top.leaflet-left { left: 10px; }
+  #cockpit-map .leaflet-top.leaflet-right { right: 10px; }
+  #cockpit-map .leaflet-bottom.leaflet-left { left: 10px; bottom: 10px; }
+  #cockpit-map .leaflet-bottom.leaflet-right { right: 10px; bottom: 10px; }
+
+  /* Boutons un peu plus compacts en mobile pour eviter le debordement vertical */
+  #cockpit-map .leaflet-control-zoom a,
+  #cockpit-map .cockpit-tile-switcher .tile-btn,
+  #cockpit-map .cockpit-measure-tools .tile-btn {
+    width: 36px !important;
+    height: 36px !important;
+    line-height: 36px !important;
+  }
+  #cockpit-map .cockpit-tile-switcher,
+  #cockpit-map .cockpit-measure-tools { gap: 3px; }
   body.map-view #timeline-searchbar {
     position: absolute;
     top: 10px;
