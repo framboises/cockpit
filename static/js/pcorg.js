@@ -472,6 +472,11 @@
       var userCanFS = !!window.__userFicheSimplifiee;
       var catFS = (pcorgConfig && pcorgConfig.fiche_simplifiee) || {};
       var isQuick = userCanFS && !!catFS[vCat];
+      // Tri alphabetique des vehicules (insensible a la casse + accents,
+      // locale fr pour gerer correctement les caracteres latins).
+      vehicles = vehicles.slice().sort(function (a, b) {
+        return (a.label || "").localeCompare((b.label || ""), "fr", { sensitivity: "base" });
+      });
       vehicles.forEach(function (v) {
         var vBtn = mkEl("div", "pcorg-ctx-veh-item");
         // Resolve device status via anoloc cross-reference
@@ -612,6 +617,10 @@
     vehiclePicker.appendChild(header);
 
     var list = mkEl("div", "pcorg-vp-list");
+    // Tri alphabetique (fr, insensible a la casse / accents).
+    vehicles = vehicles.slice().sort(function (a, b) {
+      return (a.label || "").localeCompare((b.label || ""), "fr", { sensitivity: "base" });
+    });
     vehicles.forEach(function (v) {
       var btn = mkEl("button", "pcorg-vp-btn");
       btn.textContent = v.label;

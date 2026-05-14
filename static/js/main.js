@@ -350,6 +350,16 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         });
 
+        // FAB central "+" : declenche la creation de fiche d'intervention
+        // en reutilisant le handler existant du widget Main courante (#pcorg-add-btn).
+        var fab = document.getElementById("mb-fab-add");
+        if (fab) {
+            fab.addEventListener("click", function () {
+                var addBtn = document.getElementById("pcorg-add-btn");
+                if (addBtn) addBtn.click();
+            });
+        }
+
         // Quand on sort du mode mobile, on nettoie tout
         mobileMQ.addEventListener("change", function (ev) {
             if (!ev.matches) {

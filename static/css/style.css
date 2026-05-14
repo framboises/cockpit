@@ -5870,7 +5870,8 @@ input:checked + .slider .slider-button::after {
   .sidebar {
     width: var(--sidebar-w);
     transform: translateX(-100%);
-    z-index: 1100;
+    /* z-index 1300 : au-dessus du bottom-nav (1200) pour ne pas etre masquee */
+    z-index: 1300;
   }
   .sidebar.collapsed { transform: translateX(-100%); width: var(--sidebar-w); }
   .sidebar.mobile-open {
@@ -5884,12 +5885,20 @@ input:checked + .slider .slider-button::after {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
   }
-  /* En mobile-open, le footer ne doit plus etre pousse au bas par margin-top:auto
-     (sinon il empeche le scroll quand le contenu deborde a peine) — il suit
-     naturellement le flux et devient accessible via le scroll de la sidebar. */
+  /* Header sidebar (logo + COCKPIT + burger) : sticky en haut du scroll */
+  .sidebar.mobile-open .sidebar-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--sidebar-bg);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+  }
+  /* En mobile-open, le footer suit le flux (margin-top:auto retire pour permettre
+     le scroll) et obtient un padding-bottom genereux pour que la Deconnexion
+     soit accessible sans etre masquee par le bottom-nav. */
   .sidebar.mobile-open .sidebar-footer {
     margin-top: 16px;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
   }
 
   /* Restaurer la sidebar pleine en mobile-open (annule l'etat collapsed) */
@@ -5914,7 +5923,8 @@ input:checked + .slider .slider-button::after {
     position: fixed;
     inset: 0;
     background: rgba(0,0,0,0.5);
-    z-index: 1050;
+    /* z-index 1250 : au-dessus du bottom-nav (1200), sous la sidebar (1300) */
+    z-index: 1250;
   }
 
   .app-main { margin-left: 0 !important; }
@@ -6063,6 +6073,35 @@ input:checked + .slider .slider-button::after {
   .mb-tab .mb-tab-label { font-size: 9.5px; }
   .mb-tab.is-active { color: var(--brand); border-top-color: var(--brand); }
   .mb-tab:active { background: rgba(255,255,255,0.05); }
+
+  /* FAB central : "+" pour creer une fiche d'intervention.
+     Position fixed pour rester centre meme si le nav scrolle horizontalement,
+     deborde a moitie au-dessus de la barre (pattern iOS/Instagram). */
+  .mb-fab {
+    position: fixed;
+    bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--brand);
+    color: #fff;
+    border: 4px solid var(--card);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+    z-index: 1210;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    transition: transform 0.12s ease;
+  }
+  .mb-fab .material-symbols-outlined {
+    font-size: 30px;
+    font-weight: 700;
+  }
+  .mb-fab:active { transform: translateX(-50%) scale(0.92); }
 
   /* --- Searchbar : compacte sur 1 seule ligne (pas de wrap) --- */
   #timeline-searchbar { padding: 0; }
