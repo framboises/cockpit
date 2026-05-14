@@ -334,15 +334,19 @@
         vehSubmenu.setAttribute("data-level-veh", level);
         subItem.appendChild(vehSubmenu);
 
-        // Flip vehicle submenu up if it would overflow the viewport bottom
+        // Flip vehicle submenu up if it would overflow the viewport bottom.
+        // Important : on neutralise top via "auto" (pas "") sinon la regle CSS
+        // top:-6px reprend et le sous-menu se retrouve avec top ET bottom -> il
+        // est etire sur la seule hauteur du subItem (~30px) au lieu de s'etendre
+        // librement vers le haut.
         subItem.addEventListener("mouseenter", function () {
           if (vehSubmenu.style.display === "none") return;
           vehSubmenu.style.top = "-6px";
-          vehSubmenu.style.bottom = "";
+          vehSubmenu.style.bottom = "auto";
           requestAnimationFrame(function () {
             var r = vehSubmenu.getBoundingClientRect();
             if (r.bottom > window.innerHeight - 8) {
-              vehSubmenu.style.top = "";
+              vehSubmenu.style.top = "auto";
               vehSubmenu.style.bottom = "-6px";
             }
           });
@@ -362,15 +366,17 @@
       });
       item.appendChild(submenu);
 
-      // Flip urgency submenu up if it would overflow the viewport bottom
+      // Flip urgency submenu up if it would overflow the viewport bottom.
+      // Important : top "auto" et non "" pour vraiment neutraliser la regle CSS
+      // (sinon top:-6px reprend, combine avec bottom -> sous-menu ecrase).
       item.addEventListener("mouseenter", function () {
         if (!item.classList.contains("has-submenu")) return;
         submenu.style.top = "-6px";
-        submenu.style.bottom = "";
+        submenu.style.bottom = "auto";
         requestAnimationFrame(function () {
           var r = submenu.getBoundingClientRect();
           if (r.bottom > window.innerHeight - 8) {
-            submenu.style.top = "";
+            submenu.style.top = "auto";
             submenu.style.bottom = "-6px";
           }
         });

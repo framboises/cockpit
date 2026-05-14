@@ -5840,6 +5840,7 @@ input:checked + .slider .slider-button::after {
    ========================================================================== */
 
 .mobile-bottom-nav { display: none; }
+.mb-fab { display: none; }
 
 /* Bouton croix injecte dans le header d'un widget en mode fullscreen mobile */
 .mb-close-btn {
