@@ -6032,9 +6032,10 @@ input:checked + .slider .slider-button::after {
     height: auto !important;
   }
 
-  /* --- Bottom nav (2 sections + notch central + safe-area iOS) ---
-     Container : flex 3 colonnes [section-gauche | slot-FAB | section-droite],
-     overflow visible pour que l'encoche SVG fonctionne. */
+  /* --- Bottom nav : barre unique scrollable horizontalement.
+     L'encoche centrale est creusee dans le BACKGROUND via mask, les onglets
+     restent dans le flux et passent visuellement sous le FAB lors du scroll
+     (effet fluide, le FAB agit comme une fenetre opaque centree). */
   .mobile-bottom-nav {
     display: flex;
     position: fixed;
@@ -6043,68 +6044,80 @@ input:checked + .slider .slider-button::after {
     bottom: 0;
     height: calc(56px + env(safe-area-inset-bottom, 0px));
     padding-bottom: env(safe-area-inset-bottom, 0px);
-    background: var(--card);
-    box-shadow: 0 -2px 8px rgba(0,0,0,0.3);
+    box-shadow: 0 -2px 12px rgba(0,0,0,0.35);
     z-index: 1200;
-    overflow: visible;
-    /* Encoche centrale en U : creuse un demi-cercle au top-center pour
-       acueillir le FAB (rayon = 34px = FAB 56/2 + 6 d'air) */
-    -webkit-mask-image: radial-gradient(circle 34px at 50% 0, transparent 99%, #000 100%);
-            mask-image: radial-gradient(circle 34px at 50% 0, transparent 99%, #000 100%);
-  }
-  /* Border-top : on le simule par un pseudo-element pour qu'il suive l'encoche */
-  .mobile-bottom-nav::before {
-    content: "";
-    position: absolute;
-    inset: 0 0 auto 0;
-    height: 1px;
-    background: var(--line);
-    pointer-events: none;
-  }
-
-  .mb-section {
-    flex: 1 1 0;
-    display: flex;
     overflow-x: auto;
-    overflow-y: hidden;
+    overflow-y: visible;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    height: 56px;
+    /* Le fond est un pseudo-element ::before pour pouvoir y appliquer le mask
+       sans masquer les onglets eux-memes (qui passent au-dessus du mask). */
+    background: transparent;
+    scroll-padding-left: 8px;
+    scroll-padding-right: 8px;
   }
-  .mb-section::-webkit-scrollbar { display: none; }
-  .mb-section-left { justify-content: flex-end; padding-right: 4px; }
-  .mb-section-right { justify-content: flex-start; padding-left: 4px; }
-  /* Slot reserve au centre pour le FAB (le FAB est fixed-positioned au-dessus) */
-  .mb-fab-slot {
-    flex: 0 0 76px;
-    height: 56px;
+  .mobile-bottom-nav::-webkit-scrollbar { display: none; }
+
+  /* Background avec encoche radiale : c'est lui qui forme la barre visible,
+     creusee au centre pour acueillir le FAB. Position fixed pour ne pas
+     scroller avec les onglets. */
+  .mobile-bottom-nav::before {
+    content: "";
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: calc(56px + env(safe-area-inset-bottom, 0px));
+    background: var(--card);
+    border-top: 1px solid var(--line);
+    z-index: -1;
     pointer-events: none;
+    /* Encoche en U au top-center, rayon 36px (FAB 28 + 8 d'air) */
+    -webkit-mask-image: radial-gradient(circle 36px at 50% 0, transparent 98%, #000 100%);
+            mask-image: radial-gradient(circle 36px at 50% 0, transparent 98%, #000 100%);
   }
 
   .mb-tab {
     flex: 0 0 auto;
-    min-width: 60px;
+    min-width: 64px;
     height: 56px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 2px;
-    padding: 4px 10px;
+    padding: 6px 12px;
     background: transparent;
     border: none;
     color: var(--muted);
     cursor: pointer;
-    font-size: 9px;
+    font-size: 9.5px;
     font-weight: 500;
     white-space: nowrap;
-    border-top: 2px solid transparent;
-    transition: color 0.15s ease, border-top-color 0.15s ease;
+    position: relative;
+    transition: color 0.18s ease;
   }
   .mb-tab .material-symbols-outlined { font-size: 22px; }
   .mb-tab .mb-tab-label { font-size: 9.5px; }
-  .mb-tab.is-active { color: var(--brand); border-top-color: var(--brand); }
-  .mb-tab:active { background: rgba(255,255,255,0.06); }
+  /* Indicateur actif : barre courte sous l'icone (pas sur le top du nav, qui
+     ferait apparaitre une ligne sur le mask) */
+  .mb-tab.is-active { color: var(--brand); }
+  .mb-tab.is-active::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 4px;
+    width: 20px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--brand);
+  }
+  .mb-tab:active { background: rgba(255,255,255,0.05); }
+
+  /* Padding gauche/droite pour que les premiers/derniers onglets aient de l'air */
+  .mobile-bottom-nav > .mb-tab:first-of-type { margin-left: 6px; }
+  .mobile-bottom-nav > .mb-tab:last-of-type { margin-right: 6px; }
 
   /* FAB central : "+" pour creer une fiche d'intervention.
      S'inscrit dans la notch radiale creusee dans le nav (rayon 34px).

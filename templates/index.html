@@ -739,53 +739,48 @@
     <span class="material-symbols-outlined">add</span>
 </button>
 
-<!-- Bottom nav mobile (visible seulement <=820px) — 2 sections scrollables + notch central pour le FAB -->
+<!-- Bottom nav mobile (visible seulement <=820px) — barre unique scrollable, le FAB flotte par-dessus avec une encoche-mask. Les onglets glissent visuellement sous le FAB lors du scroll. -->
 <nav id="mobile-bottom-nav" class="mobile-bottom-nav" aria-label="Navigation mobile">
-    <div class="mb-section mb-section-left">
-        <button class="mb-tab is-active" data-target="timeline" type="button">
-            <span class="material-symbols-outlined">view_agenda</span>
-            <span class="mb-tab-label">Timeline</span>
-        </button>
-        <button class="mb-tab" data-target="map" type="button">
-            <span class="material-symbols-outlined">map</span>
-            <span class="mb-tab-label">Carte</span>
-        </button>
-        <button class="mb-tab" data-target="widget-comms" type="button">
-            <span class="material-symbols-outlined">forum</span>
-            <span class="mb-tab-label">Main cour.</span>
-        </button>
-        <button class="mb-tab" data-target="widget-traffic" type="button">
-            <span class="material-symbols-outlined">traffic</span>
-            <span class="mb-tab-label">Trafic</span>
-        </button>
-        <button class="mb-tab" data-target="widget-parkings" type="button">
-            <span class="material-symbols-outlined">local_parking</span>
-            <span class="mb-tab-label">Acces</span>
-        </button>
-    </div>
-    <div class="mb-fab-slot" aria-hidden="true"></div>
-    <div class="mb-section mb-section-right">
-        <button class="mb-tab" data-target="widget-counters" type="button">
-            <span class="material-symbols-outlined">groups</span>
-            <span class="mb-tab-label">Controle</span>
-        </button>
-        <button class="mb-tab" data-target="widget-right-1" type="button">
-            <span class="material-symbols-outlined">cloud</span>
-            <span class="mb-tab-label">Meteo</span>
-        </button>
-        <button class="mb-tab" data-target="widget-right-2" type="button">
-            <span class="material-symbols-outlined">query_stats</span>
-            <span class="mb-tab-label">Affluence</span>
-        </button>
-        <button class="mb-tab" data-target="widget-right-3" type="button">
-            <span class="material-symbols-outlined">notifications</span>
-            <span class="mb-tab-label">Alertes</span>
-        </button>
-        <button class="mb-tab" data-target="widget-right-4" type="button">
-            <span class="material-symbols-outlined">satellite_alt</span>
-            <span class="mb-tab-label">GPS</span>
-        </button>
-    </div>
+    <button class="mb-tab is-active" data-target="timeline" type="button">
+        <span class="material-symbols-outlined">view_agenda</span>
+        <span class="mb-tab-label">Timeline</span>
+    </button>
+    <button class="mb-tab" data-target="map" type="button">
+        <span class="material-symbols-outlined">map</span>
+        <span class="mb-tab-label">Carte</span>
+    </button>
+    <button class="mb-tab" data-target="widget-comms" type="button">
+        <span class="material-symbols-outlined">forum</span>
+        <span class="mb-tab-label">Main cour.</span>
+    </button>
+    <button class="mb-tab" data-target="widget-traffic" type="button">
+        <span class="material-symbols-outlined">traffic</span>
+        <span class="mb-tab-label">Trafic</span>
+    </button>
+    <button class="mb-tab" data-target="widget-parkings" type="button">
+        <span class="material-symbols-outlined">local_parking</span>
+        <span class="mb-tab-label">Acces</span>
+    </button>
+    <button class="mb-tab" data-target="widget-counters" type="button">
+        <span class="material-symbols-outlined">groups</span>
+        <span class="mb-tab-label">Controle</span>
+    </button>
+    <button class="mb-tab" data-target="widget-right-1" type="button">
+        <span class="material-symbols-outlined">cloud</span>
+        <span class="mb-tab-label">Meteo</span>
+    </button>
+    <button class="mb-tab" data-target="widget-right-2" type="button">
+        <span class="material-symbols-outlined">query_stats</span>
+        <span class="mb-tab-label">Affluence</span>
+    </button>
+    <button class="mb-tab" data-target="widget-right-3" type="button">
+        <span class="material-symbols-outlined">notifications</span>
+        <span class="mb-tab-label">Alertes</span>
+    </button>
+    <button class="mb-tab" data-target="widget-right-4" type="button">
+        <span class="material-symbols-outlined">satellite_alt</span>
+        <span class="mb-tab-label">GPS</span>
+    </button>
 </nav>
 
 <!-- Overlay -->
