@@ -134,6 +134,48 @@
         </div>
       </section>
 
+      <!-- Section Console Hik temps reel -->
+      <section class="widget-card" style="margin-top:16px;">
+        <header class="widget-header" data-collapsible data-section="hik-console">
+          <h3 style="display:flex; align-items:center; gap:8px;">
+            <span class="material-symbols-outlined" style="font-size:20px;">videocam</span>
+            Console Hik &mdash; events en temps reel
+          </h3>
+          <select id="hik-console-window" class="form-input hik-console-window-select" onclick="event.stopPropagation()">
+            <option value="300">5 dernieres min</option>
+            <option value="900" selected>15 dernieres min</option>
+            <option value="3600">1 derniere heure</option>
+            <option value="86400">24 dernieres heures</option>
+          </select>
+          <button id="btn-hik-console-refresh" class="btn-icon" title="Rafraichir" onclick="event.stopPropagation()" style="margin-right:8px;">
+            <span class="material-symbols-outlined">refresh</span>
+          </button>
+          <span class="material-symbols-outlined collapse-icon">expand_more</span>
+        </header>
+        <div class="widget-body collapsible" id="hik-console-body">
+          <p style="font-size:0.82rem; color:var(--muted); margin:0 0 10px;">
+            Liste agregee des Smart Events Hikvision recus par <code>ecoutehik2.py</code>, groupes par (camera, type). Clique sur <strong>Creer une alerte</strong> pour ouvrir la modale pre-remplie avec ces valeurs.
+          </p>
+          <div id="hik-console-status" style="font-size:0.78rem; color:var(--muted); margin-bottom:8px;"></div>
+          <div class="table-responsive">
+            <table id="hik-console-table" class="table table-striped table-hover alertes-admin-table">
+              <thead>
+                <tr>
+                  <th class="col-shrink"></th>
+                  <th>Camera</th>
+                  <th>Type d'event</th>
+                  <th class="col-shrink">Count</th>
+                  <th>Vu pour la derniere fois</th>
+                  <th class="col-shrink">Snapshot</th>
+                  <th class="col-shrink col-actions">Action</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- Section watchlist LAPI -->
       <section class="widget-card" style="margin-top:16px;">
         <header class="widget-header" data-collapsible data-section="anpr-watchlist">
@@ -330,7 +372,7 @@
 
 <!-- Modal definition d'alerte -->
 <div id="alert-def-modal" class="crud-modal" hidden>
-  <div class="crud-modal-dialog" style="max-width:560px;">
+  <div class="crud-modal-dialog" style="width:720px; max-width:92vw;">
     <div class="crud-modal-header">
       <h3 id="alert-def-modal-title">Nouvelle alerte</h3>
       <button class="crud-modal-close" data-close>&times;</button>
@@ -338,6 +380,21 @@
     <div class="crud-modal-body">
       <form id="alert-def-form">
         <input type="hidden" name="_id" />
+        <div id="alert-def-active-banner" class="modal-toggle-banner is-on">
+          <div class="modal-toggle-banner-text">
+            <div class="modal-toggle-banner-title">
+              <span class="material-symbols-outlined">notifications_active</span>
+              <span id="alert-def-active-label">Alerte active</span>
+            </div>
+            <div class="modal-toggle-banner-help">
+              Une alerte desactivee reste enregistree mais n'est plus evaluee par le moteur.
+            </div>
+          </div>
+          <label class="toggle-switch" title="Activer / desactiver l'alerte">
+            <input type="checkbox" name="enabled" checked />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
         <div class="form-row">
           <label>Slug (identifiant unique)
             <input name="slug" required placeholder="ex. meteo-vent-fort" class="form-input" />
@@ -364,79 +421,212 @@
         <div class="form-row">
           <label>Type de detection
             <select name="detection_type" class="form-input" required>
+              <option value="camera_event">Camera Hikvision - Smart Event</option>
               <option value="schedule_proximity">Horaire - proximite (X min avant)</option>
               <option value="schedule_transition">Horaire - transition (ouv/ferm)</option>
               <option value="traffic_cluster">Trafic - cluster d'incidents</option>
-              <option value="anpr_watchlist">LAPI - plaque surveillee</option>
               <option value="meteo_threshold">Meteo - seuil depassement</option>
               <option value="meteo_rain_onset">Meteo - pluie imminente</option>
               <option value="checkpoint_reassign">Controle acces - reaffectation</option>
               <option value="checkpoint_error_burst">Controle acces - rafale erreurs</option>
               <option value="pcorg_urgency">Main courante - niveau urgence</option>
+              <option value="anpr_watchlist" hidden>LAPI - plaque surveillee (deprecie, utiliser Camera Hikvision)</option>
             </select>
           </label>
         </div>
         <div class="form-row" id="params-raw-row">
-          <label>Parametres (JSON)</label>
-          <textarea name="params" class="form-input" rows="3" placeholder='{"minutes_before": 30}'></textarea>
+          <label>Parametres (JSON)
+            <textarea name="params" class="form-input" rows="3" placeholder='{"minutes_before": 30}'></textarea>
+          </label>
+        </div>
+        <div class="form-row" id="params-traffic-row" style="display:none;">
+          <div style="display:flex; gap:12px; flex-wrap:wrap;">
+            <label>Rayon de clustering (metres)
+              <input id="traffic-param-radius" type="number" min="50" step="50" value="500" class="form-input" style="width:130px;" />
+            </label>
+            <label>Seuil de score
+              <input id="traffic-param-threshold" type="number" min="1" value="10" class="form-input" style="width:130px;" />
+            </label>
+          </div>
+          <div style="margin-top:12px; padding:10px 12px; background:var(--surface-2); border-radius:8px; border-left:3px solid #6366f1; font-size:0.82rem; line-height:1.45;">
+            <strong>Comment se calcule le score&nbsp;?</strong>
+            <p style="margin:4px 0 8px; color:var(--muted);">
+              Pour chaque alerte Waze prise comme centre, le moteur additionne les poids des alertes voisines comprises dans le rayon ci-dessus. Le meilleur cluster (score max) est retenu. Il faut <strong>au moins 2 alertes</strong> dans le rayon ET un score <strong>&ge; seuil</strong> pour qu'une alerte plein ecran soit declenchee.
+            </p>
+            <table style="width:100%; font-size:0.78rem; border-collapse:collapse; margin-top:6px;">
+              <thead>
+                <tr style="text-align:left; color:var(--muted); border-bottom:1px solid var(--border);">
+                  <th style="padding:3px 6px;">Type d'incident Waze</th>
+                  <th style="padding:3px 6px; text-align:right;">Poids</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td style="padding:3px 6px;">ACCIDENT</td><td style="padding:3px 6px; text-align:right; font-weight:700; color:#dc2626;">5</td></tr>
+                <tr><td style="padding:3px 6px;">HAZARD / WEATHERHAZARD (danger)</td><td style="padding:3px 6px; text-align:right; font-weight:700; color:#f97316;">3</td></tr>
+                <tr><td style="padding:3px 6px;">JAM (bouchon)</td><td style="padding:3px 6px; text-align:right; font-weight:700; color:#eab308;">2</td></tr>
+                <tr><td style="padding:3px 6px; color:var(--muted);">ROAD_CLOSED, CONSTRUCTION</td><td style="padding:3px 6px; text-align:right; color:var(--muted); font-style:italic;">exclus</td></tr>
+              </tbody>
+            </table>
+            <p style="margin:10px 0 4px;"><strong>Choisir le seuil&nbsp;:</strong></p>
+            <ul style="margin:0 0 0 18px; padding:0; color:var(--muted);">
+              <li><strong style="color:var(--text);">3-5</strong>&nbsp;&mdash; <em>test / paranoia</em>&nbsp;: declenche des qu'il y a 2-3 incidents groupes (ex. 1 accident + 1 jam = 7).</li>
+              <li><strong style="color:var(--text);">6-8</strong>&nbsp;&mdash; <em>congestion</em>&nbsp;: repere les zones saturees (3-4 bouchons proches, ou 1 accident + 1 danger).</li>
+              <li><strong style="color:var(--text);">10-12</strong>&nbsp;&mdash; <em>equilibre</em>&nbsp;: points noirs reels (2 accidents, ou accident + danger + bouchon = 10).</li>
+              <li><strong style="color:var(--text);">15+</strong>&nbsp;&mdash; <em>strict</em>&nbsp;: carambolage ou zone critique avec plusieurs accidents.</li>
+            </ul>
+            <p style="margin:8px 0 0; color:var(--muted); font-size:0.76rem;">
+              <strong>Piege&nbsp;:</strong> une alerte isolee ne declenche jamais (minimum 2 alertes dans le rayon, quel que soit le seuil). Une fois declenchee, une zone est en cooldown 30 min.
+            </p>
+            <p style="margin:6px 0 0; color:var(--muted); font-size:0.76rem;">
+              <strong>Rayon&nbsp;:</strong> 500 m = quartier / zone parking. 1000-2000 m = secteur. Plus grand = plus de fusions inter-evenements (et donc plus de declenchements).
+            </p>
+          </div>
+        </div>
+        <div class="form-row" id="params-camera-row" style="display:none;">
+          <div class="field-block">
+            <div class="field-label">Types d'evenements detectes</div>
+            <div class="field-help">Selectionne un ou plusieurs Smart Events Hikvision. L'alerte se declenche si l'un des types coches est remonte par une des cameras selectionnees.</div>
+            <div id="camera-event-types-grid" class="checklist"></div>
+          </div>
+          <div class="field-block" style="margin-top:14px;">
+            <div class="field-label">Cameras surveillees</div>
+            <div class="field-help">Au moins une camera doit etre cochee. La liste est filtree sur les cameras activees dans /admin/cameras.</div>
+            <div id="camera-event-cameras-grid" class="checklist"></div>
+          </div>
+          <div class="field-block" style="margin-top:14px;">
+            <div class="field-label">Filtres et anti-spam</div>
+            <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin-top:6px;">
+              <label class="toggle-inline" style="padding:0;">
+                <input type="checkbox" id="camera-time-window-enabled" />
+                <span>Limiter a une plage horaire</span>
+              </label>
+              <label style="font-size:0.78rem;">De
+                <input type="time" id="camera-time-window-start" value="22:00" class="form-input" style="width:110px;" />
+              </label>
+              <label style="font-size:0.78rem;">A
+                <input type="time" id="camera-time-window-end" value="06:00" class="form-input" style="width:110px;" />
+              </label>
+            </div>
+            <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin-top:10px;">
+              <label style="font-size:0.78rem;">Cooldown par camera (minutes)
+                <input type="number" id="camera-cooldown-min" min="0" value="5" class="form-input" style="width:110px;" />
+              </label>
+              <label style="font-size:0.78rem;">Confiance minimum (0-100)
+                <input type="number" id="camera-min-confidence" min="0" max="100" value="0" class="form-input" style="width:110px;" />
+              </label>
+            </div>
+          </div>
+          <div style="margin-top:14px; padding:10px 12px; background:var(--surface-2); border-radius:8px; border-left:3px solid #dc2626; font-size:0.82rem; line-height:1.45;">
+            <strong>Comment ca marche ?</strong>
+            <p style="margin:4px 0 8px; color:var(--muted);">
+              Cette alerte se declenche des qu'une des cameras cochees remonte un des evenements selectionnes (latence &lt; 1s). Le snapshot de la camera au moment de l'evenement est joint a l'alerte plein ecran et au message WhatsApp si configure.
+            </p>
+            <p style="margin:8px 0 4px;"><strong>Exemples de configurations utiles :</strong></p>
+            <ul style="margin:0 0 0 18px; padding:0; color:var(--muted);">
+              <li><strong style="color:var(--text);">Intrusion + plage 22h-6h</strong>&nbsp;: zone fermee la nuit.</li>
+              <li><strong style="color:var(--text);">Attroupement + cooldown 2 min</strong>&nbsp;: alerte densite aux portes (anti-spam).</li>
+              <li><strong style="color:var(--text);">Objet abandonne + 0 cooldown</strong>&nbsp;: surete permanente, chaque event passe.</li>
+              <li><strong style="color:var(--text);">Stationnement interdit + cameras acces secours</strong>&nbsp;: voies pompiers degagees.</li>
+            </ul>
+          </div>
         </div>
         <div class="form-row" id="params-pcorg-row" style="display:none;">
-          <label>Categorie main courante</label>
-          <select id="pcorg-param-category" class="form-input">
-            <option value="PCO.">Toutes (PCO.*)</option>
-            <option value="PCO.Securite">PCO.Securite</option>
-            <option value="PCO.Secours">PCO.Secours</option>
-            <option value="PCO.Flux">PCO.Flux</option>
-            <option value="PCO.Technique">PCO.Technique</option>
-            <option value="PCO.Information">PCO.Information</option>
-            <option value="PCS.Information">PCS.Information</option>
-            <option value="PCS.Surete">PCS.Surete</option>
-          </select>
-          <label style="margin-top:8px;">Niveau d'urgence minimum</label>
-          <div id="pcorg-param-levels" style="display:flex; gap:6px; margin-top:4px;">
-            <button type="button" class="btn btn-sm pcorg-level-btn" data-level="IMP" style="--lc:#6b7280;">IMP - Implique</button>
-            <button type="button" class="btn btn-sm pcorg-level-btn" data-level="UR" style="--lc:#eab308;">UR - Urgence relative</button>
-            <button type="button" class="btn btn-sm pcorg-level-btn selected" data-level="UA" style="--lc:#f97316;">UA - Urgence absolue</button>
-            <button type="button" class="btn btn-sm pcorg-level-btn" data-level="EU" style="--lc:#dc2626;">EU - Detresse vitale</button>
+          <label>Categorie main courante
+            <select id="pcorg-param-category" class="form-input">
+              <option value="PCO.">Toutes (PCO.*)</option>
+              <option value="PCO.Securite">PCO.Securite</option>
+              <option value="PCO.Secours">PCO.Secours</option>
+              <option value="PCO.Flux">PCO.Flux</option>
+              <option value="PCO.Technique">PCO.Technique</option>
+              <option value="PCO.Information">PCO.Information</option>
+              <option value="PCS.Information">PCS.Information</option>
+              <option value="PCS.Surete">PCS.Surete</option>
+            </select>
+          </label>
+          <div class="field-block">
+            <div class="field-label field-label-sub">Niveau d'urgence minimum</div>
+            <div id="pcorg-param-levels" style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button type="button" class="btn btn-sm pcorg-level-btn" data-level="IMP" style="--lc:#6b7280;">IMP - Implique</button>
+              <button type="button" class="btn btn-sm pcorg-level-btn" data-level="UR" style="--lc:#eab308;">UR - Urgence relative</button>
+              <button type="button" class="btn btn-sm pcorg-level-btn selected" data-level="UA" style="--lc:#f97316;">UA - Urgence absolue</button>
+              <button type="button" class="btn btn-sm pcorg-level-btn" data-level="EU" style="--lc:#dc2626;">EU - Detresse vitale</button>
+            </div>
           </div>
         </div>
         <div class="form-row">
-          <label>Priorite (ordre d'affichage)
-            <input name="priority" type="number" value="99" min="1" class="form-input" style="width:80px;" />
-          </label>
+          <div class="field-block">
+            <div class="field-label">Niveau de priorite</div>
+            <div class="field-help">
+              Determine la position dans le widget alertes du dashboard (haute en premier) et le marqueur visuel ajoute aux messages WhatsApp.
+            </div>
+            <div id="priority-level-row" class="level-btn-row">
+              <button type="button" class="level-btn priority-level-btn" data-value="1" style="--lc:#dc2626;">
+                <span class="level-btn-marker">[!!!]</span>
+                <span class="level-btn-label">Critique</span>
+              </button>
+              <button type="button" class="level-btn priority-level-btn" data-value="2" style="--lc:#f97316;">
+                <span class="level-btn-marker">[!!]</span>
+                <span class="level-btn-label">Haute</span>
+              </button>
+              <button type="button" class="level-btn priority-level-btn selected" data-value="3" style="--lc:#eab308;">
+                <span class="level-btn-marker">[!]</span>
+                <span class="level-btn-label">Standard</span>
+              </button>
+              <button type="button" class="level-btn priority-level-btn" data-value="10" style="--lc:#3b82f6;">
+                <span class="level-btn-marker">&nbsp;</span>
+                <span class="level-btn-label">Info</span>
+              </button>
+              <button type="button" class="level-btn priority-level-btn" data-value="50" style="--lc:#6b7280;">
+                <span class="level-btn-marker">&nbsp;</span>
+                <span class="level-btn-label">Verbeux</span>
+              </button>
+            </div>
+            <input type="hidden" name="priority" value="3" />
+          </div>
         </div>
         <div class="form-row">
-          <label>Groupes destinataires</label>
-          <p style="font-size:0.78rem; color:var(--muted); margin:4px 0 8px;">
-            Si aucun groupe n'est coche, l'alerte est envoyee a tous les utilisateurs.
-          </p>
-          <div id="alert-def-groups-checkboxes" class="blocks-checklist"></div>
+          <div class="field-block">
+            <div class="field-label">Groupes destinataires</div>
+            <div class="field-help">
+              Si aucun groupe n'est coche, l'alerte est envoyee a tous les utilisateurs.
+            </div>
+            <div id="alert-def-groups-checkboxes" class="checklist"></div>
+          </div>
         </div>
-        <div class="form-row">
-          <label style="display:flex; align-items:center; gap:8px;">
-            <input type="checkbox" name="enabled" checked />
-            Actif
-          </label>
-        </div>
-        <div class="form-row" style="margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
-          <h4 style="font-size:0.85rem; margin:0 0 8px; display:flex; align-items:center; gap:6px;">
-            <span class="material-symbols-outlined" style="font-size:18px;">chat</span>
-            Notification WhatsApp
-          </h4>
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-            <input type="checkbox" name="wa_enabled" />
-            Envoyer sur WhatsApp
-          </label>
-          <div id="wa-def-options" style="margin-top:8px; display:none;">
-            <label style="font-size:0.82rem;">Groupes WhatsApp destinataires</label>
-            <div id="wa-def-groups-checkboxes" class="blocks-checklist" style="margin-bottom:8px;"></div>
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; margin-top:8px;">
-              <input type="checkbox" name="wa_dm_on_critical" />
-              Envoyer en DM pour les alertes critiques (priorite 1-2)
+        <div class="form-row" style="margin-top:6px; border-top:1px solid var(--line); padding-top:18px;">
+          <div id="alert-def-wa-banner" class="modal-toggle-banner flavor-wa">
+            <div class="modal-toggle-banner-text">
+              <div class="modal-toggle-banner-title">
+                <span class="material-symbols-outlined">chat</span>
+                <span>Notification WhatsApp</span>
+              </div>
+              <div class="modal-toggle-banner-help">
+                Envoie le message d'alerte vers un ou plusieurs groupes WhatsApp (et DM critiques optionnels).
+              </div>
+            </div>
+            <label class="toggle-switch" title="Activer la notification WhatsApp">
+              <input type="checkbox" name="wa_enabled" />
+              <span class="toggle-slider"></span>
             </label>
-            <label style="font-size:0.82rem; margin-top:8px;">Contacts DM</label>
-            <div id="wa-def-contacts-checkboxes" class="blocks-checklist" style="margin-bottom:8px;"></div>
-            <label style="font-size:0.82rem; margin-top:8px;">Cooldown (minutes)
+          </div>
+          <div id="wa-def-options" class="wa-collapse">
+            <div class="field-block">
+              <div class="field-label field-label-sub">Groupes WhatsApp destinataires</div>
+              <div class="field-help">Cochez les groupes WA qui recoivent le message d'alerte.</div>
+              <div id="wa-def-groups-checkboxes" class="checklist"></div>
+            </div>
+            <label class="toggle-inline" style="margin-top:14px;">
+              <input type="checkbox" name="wa_dm_on_critical" />
+              <span>Envoyer aussi en messages prives a des contacts nommes</span>
+            </label>
+            <div class="field-block" style="margin-top:12px;">
+              <div class="field-label field-label-sub">Contacts DM</div>
+              <div class="field-help">
+                Destinataires individuels qui recoivent un DM personnel en plus de la diffusion sur les groupes. Utile pour l'escalade (direction, chef de securite, etc.) afin qu'ils ne ratent pas l'alerte dans le flot du groupe.
+              </div>
+              <div id="wa-def-contacts-checkboxes" class="checklist"></div>
+            </div>
+            <label style="font-size:0.82rem; margin-top:14px;">Cooldown (minutes)
               <input name="wa_cooldown" type="number" value="15" min="1" class="form-input" style="width:80px;" />
             </label>
           </div>

@@ -45,7 +45,8 @@
         "pcorg-securite-ua": "shield",
         "pcorg-secours-ua": "local_hospital",
         "field_sos": "sos",
-        "field-sos": "sos"
+        "field-sos": "sos",
+        "camera-event": "videocam"
     };
     var TITLE_MAP = {
         opening: "OUVERTURE IMMINENTE", opened: "SITE OUVERT",
@@ -60,7 +61,8 @@
         "pcorg-securite-ua": "ALERTE S\u00c9CURIT\u00c9",
         "pcorg-secours-ua": "ALERTE SECOURS",
         "field_sos": "SOS TABLETTE",
-        "field-sos": "SOS TABLETTE"
+        "field-sos": "SOS TABLETTE",
+        "camera-event": "ALERTE CAMERA"
     };
 
     // Labels urgence par type de categorie
@@ -121,16 +123,20 @@
     }
 
     // --- File d'attente : empiler et afficher une par une ---
-    function enqueueAlert(type, triggeredAt, message, onView, actionData) {
+    function enqueueAlert(type, triggeredAt, message, onView, actionData, alertId) {
         // Historiser si la fonction existe (page index avec widget alertes)
         var timeStr = fmtAlertDateTime(triggeredAt);
+        var ad = actionData || {};
+        // Pour les events camera, l'icone/titre proviennent du catalogue (actionData)
+        var displayIcon = ad.icon || ICON_MAP[type] || "info";
+        var displayTitle = ad.title || TITLE_MAP[type] || type;
         if (typeof window._pushAlertHistory === "function") {
-            window._pushAlertHistory(type, ICON_MAP[type] || "info", TITLE_MAP[type] || type, timeStr, message, onView);
+            window._pushAlertHistory(type, displayIcon, displayTitle, timeStr, message, onView);
         }
 
         if (isAlertMuted(type)) return;
 
-        _alertQueue.push({ type: type, triggeredAt: triggeredAt, message: message, onView: onView, actionData: actionData || {} });
+        _alertQueue.push({ type: type, triggeredAt: triggeredAt, message: message, onView: onView, actionData: ad, alertId: alertId || null });
 
         // Si pas d'overlay active, afficher la premiere
         if (!_alertOverlay) {
@@ -224,13 +230,17 @@
 
         var icon = document.createElement("span");
         icon.className = "material-symbols-outlined critical-alert-icon";
-        icon.textContent = ICON_MAP[type] || "info";
+        var actionDataPre = item.actionData || {};
+        icon.textContent = actionDataPre.icon || ICON_MAP[type] || "info";
 
         var title = document.createElement("div");
         title.className = "critical-alert-title";
-        var actionDataPre = item.actionData || {};
         if ((type === "field_sos" || type === "field-sos") && actionDataPre.device_name) {
             title.textContent = "SOS - " + actionDataPre.device_name;
+        } else if (actionDataPre.event_type && actionDataPre.event_label) {
+            // Alerte camera : titre dynamique selon le type d'event + camera
+            title.textContent = actionDataPre.event_label.toUpperCase() +
+                (actionDataPre.camera_label ? " - " + actionDataPre.camera_label : "");
         } else {
             title.textContent = TITLE_MAP[type] || type.toUpperCase();
         }
@@ -245,6 +255,7 @@
         var isPco = type.indexOf("pcorg-") === 0;
         var isFieldSos = (type === "field_sos" || type === "field-sos");
         var actionData = item.actionData || {};
+        var isCameraEvent = !!actionData.event_type && !!actionData.camera_path;
 
         if (isFieldSos) {
             // Play alarm sound for SOS
@@ -313,6 +324,29 @@
             }
             metaLine.textContent = metaText;
             body.appendChild(metaLine);
+        } else if (isCameraEvent) {
+            // Alerte camera : message + snapshot + meta
+            var camSub = document.createElement("div");
+            camSub.className = "critical-alert-message";
+            camSub.textContent = item.message;
+            body.appendChild(camSub);
+
+            // Snapshot caméra (si disponible)
+            if (item.alertId && actionData.has_snapshot) {
+                var img = document.createElement("img");
+                img.className = "critical-alert-snapshot";
+                img.src = "/api/hik-snapshot/" + encodeURIComponent(item.alertId);
+                img.alt = "Snapshot " + (actionData.camera_label || actionData.camera_path || "");
+                img.onerror = function(){ this.style.display = "none"; };
+                body.appendChild(img);
+            }
+
+            var camMeta = document.createElement("div");
+            camMeta.className = "critical-alert-meta";
+            var metaTxt = timeStr;
+            if (actionData.camera_location) metaTxt += " — " + actionData.camera_location;
+            camMeta.textContent = metaTxt;
+            body.appendChild(camMeta);
         } else {
             // Message standard (non PCO)
             var stdSub = document.createElement("div");
@@ -354,6 +388,7 @@
             if (type === "anpr-watchlist") viewLabel = "Voir sur LAPI";
             else if (type === "checkpoint-reassign") viewLabel = "Voir Controle acces";
             else if (isPco || isFieldSos) viewLabel = "Ouvrir la fiche";
+            else if (isCameraEvent) viewLabel = "Voir la camera";
             btnView.textContent = viewLabel;
             btnView.addEventListener("click", function() {
                 if (isFieldSos) _stopSosAlarm();
@@ -420,6 +455,15 @@
                 }
             };
             fn._actionData = a.actionData;
+        }
+        // Alerte camera : detection via actionData.event_type (slug est user-defined)
+        if (a.actionData && a.actionData.event_type && a.actionData.camera_path) {
+            var camAd = a.actionData;
+            fn = function() {
+                var url = "/cameras?focus=" + encodeURIComponent(camAd.camera_path);
+                window.open(url, "_blank");
+            };
+            fn._actionData = camAd;
         }
         if ((slug === "field_sos" || slug === "field-sos") && a.actionData) {
             var ad = a.actionData;
@@ -500,7 +544,7 @@
                     recentAlerts.forEach(function(a) {
                         var slug = a.definition_slug || "";
                         var onView = _buildOnView(slug, a);
-                        enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, a.actionData);
+                        enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, a.actionData, a._id);
                     });
                     return;
                 }
@@ -511,7 +555,7 @@
                     _markSeen(a._id);
                     var slug = a.definition_slug || "";
                     var onView = _buildOnView(slug, a);
-                    enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, a.actionData);
+                    enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, a.actionData, a._id);
                 });
             })
             .catch(function(err) {

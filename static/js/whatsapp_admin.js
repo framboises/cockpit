@@ -462,54 +462,76 @@
   // Fonctions exportees pour le modal definition (alertes_admin.js)
   // ============================================================
 
+  function _renderChecklistEmpty(container, msg){
+    container.textContent = "";
+    var empty = document.createElement("div");
+    empty.className = "checklist-empty";
+    empty.textContent = msg;
+    container.appendChild(empty);
+  }
+
+  function _appendChecklistItem(container, opts){
+    var lbl = document.createElement("label");
+    lbl.className = "checklist-item";
+    var cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = opts.value;
+    cb.checked = !!opts.checked;
+    lbl.appendChild(cb);
+    if(opts.color){
+      var dot = document.createElement("span");
+      dot.className = "checklist-item-dot";
+      dot.style.background = opts.color;
+      lbl.appendChild(dot);
+    }
+    var txt = document.createElement("span");
+    txt.className = "checklist-item-label";
+    txt.textContent = opts.label;
+    lbl.appendChild(txt);
+    if(opts.sub){
+      var sub = document.createElement("span");
+      sub.className = "checklist-item-sub";
+      sub.textContent = opts.sub;
+      lbl.appendChild(sub);
+    }
+    container.appendChild(lbl);
+  }
+
   function populateWaDefCheckboxes(selectedGroups, selectedContacts){
     // Groupes
     var gContainer = $("#wa-def-groups-checkboxes");
     if(gContainer){
-      gContainer.textContent = "";
-      gContainer.style.color = "";
-      gContainer.style.fontSize = "";
-      waGroups.forEach(function(g){
-        if(!g.enabled) return;
-        var lbl = document.createElement("label");
-        lbl.style.cssText = "display:flex; align-items:center; gap:6px; padding:4px 0; cursor:pointer;";
-        var cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.value = g.group_id;
-        cb.checked = (selectedGroups || []).indexOf(g.group_id) >= 0;
-        lbl.appendChild(cb);
-        lbl.appendChild(document.createTextNode(" " + (g.name || g.group_id)));
-        gContainer.appendChild(lbl);
-      });
-      if(!waGroups.length){
-        gContainer.textContent = "Aucun groupe synchronise.";
-        gContainer.style.color = "var(--muted)";
-        gContainer.style.fontSize = "0.82rem";
+      var activeGroups = waGroups.filter(function(g){ return g.enabled; });
+      if(!activeGroups.length){
+        _renderChecklistEmpty(gContainer, "Aucun groupe WhatsApp synchronise.");
+      } else {
+        gContainer.textContent = "";
+        activeGroups.forEach(function(g){
+          _appendChecklistItem(gContainer, {
+            value: g.group_id,
+            label: g.name || g.group_id,
+            checked: (selectedGroups || []).indexOf(g.group_id) >= 0
+          });
+        });
       }
     }
 
     // Contacts
     var cContainer = $("#wa-def-contacts-checkboxes");
     if(cContainer){
-      cContainer.textContent = "";
-      cContainer.style.color = "";
-      cContainer.style.fontSize = "";
-      waContacts.forEach(function(c){
-        if(!c.enabled) return;
-        var lbl = document.createElement("label");
-        lbl.style.cssText = "display:flex; align-items:center; gap:6px; padding:4px 0; cursor:pointer;";
-        var cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.value = c.phone;
-        cb.checked = (selectedContacts || []).indexOf(c.phone) >= 0;
-        lbl.appendChild(cb);
-        lbl.appendChild(document.createTextNode(" " + c.name + " (" + c.phone + ")"));
-        cContainer.appendChild(lbl);
-      });
-      if(!waContacts.length){
-        cContainer.textContent = "Aucun contact configure.";
-        cContainer.style.color = "var(--muted)";
-        cContainer.style.fontSize = "0.82rem";
+      var activeContacts = waContacts.filter(function(c){ return c.enabled; });
+      if(!activeContacts.length){
+        _renderChecklistEmpty(cContainer, "Aucun contact DM configure.");
+      } else {
+        cContainer.textContent = "";
+        activeContacts.forEach(function(c){
+          _appendChecklistItem(cContainer, {
+            value: c.phone,
+            label: c.name,
+            sub: c.phone,
+            checked: (selectedContacts || []).indexOf(c.phone) >= 0
+          });
+        });
       }
     }
   }
@@ -517,9 +539,12 @@
   function setupWaToggle(){
     var cb = $('[name="wa_enabled"]');
     var opts = $("#wa-def-options");
+    var banner = $("#alert-def-wa-banner");
     if(!cb || !opts) return;
     function update(){
-      opts.style.display = cb.checked ? "block" : "none";
+      var on = !!cb.checked;
+      opts.classList.toggle("is-open", on);
+      if(banner) banner.classList.toggle("is-on", on);
     }
     cb.addEventListener("change", update);
     update();
@@ -574,7 +599,9 @@
       if(cooldown) cooldown.value = wa.cooldown_minutes || 15;
       populateWaDefCheckboxes(wa.groups || [], wa.dm_recipients || []);
       var opts = $("#wa-def-options");
-      if(opts) opts.style.display = (wa.enabled) ? "block" : "none";
+      var banner = $("#alert-def-wa-banner");
+      if(opts) opts.classList.toggle("is-open", !!wa.enabled);
+      if(banner) banner.classList.toggle("is-on", !!wa.enabled);
     },
     groups: function(){ return waGroups; },
     contacts: function(){ return waContacts; }

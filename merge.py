@@ -1021,9 +1021,11 @@ def update_timetable_document(event, year, vignettes, db=None):
             del data_field[date_key]
 
     timetable_doc["data"] = data_field
+    # version est gere par $inc, ne pas le repousser via $set (conflit Mongo)
+    timetable_doc.pop("version", None)
     timetable_col.update_one(
         {"event": event, "year": year},
-        {"$set": timetable_doc},
+        {"$set": timetable_doc, "$inc": {"version": 1}},
         upsert=True
     )
     logger.info(f"Timetable mis a jour : {len(vignettes)} vignettes mergees, orphelines nettoyees")

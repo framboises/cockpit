@@ -1169,6 +1169,9 @@ async function fetchTimetable() {
     return fetch(url)
         .then(response => response.json())
         .then(data => {
+            if (typeof data.version === 'number') {
+                window._timetableVersion = data.version;
+            }
             const eventList = document.getElementById("event-list");
             if (eventList) eventList.innerHTML = "";  // <-- reset pour éviter les accumulations
 
@@ -2926,4 +2929,46 @@ async function openEditModalFromDrawer(dateStr, item) {
   window.updatePrepControls      = updatePrepControls;
   window.setPrepStatusFromDrawer = setPrepStatusFromDrawer;
 
+})();
+
+// ============================================================================
+// Polling version timetable : detecte les merges declenches par groundmaster
+// (webhook /webhook/parametrage-updated) et rafraichit la timeline sans reload.
+// ============================================================================
+(function () {
+  var POLL_MS = 30000;
+  var inFlight = false;
+
+  async function pollOnce() {
+    if (inFlight) return;
+    if (document.hidden) return;
+    if (!window.selectedEvent || !window.selectedYear) return;
+    if (typeof window.fetchTimetable !== 'function') return;
+    inFlight = true;
+    try {
+      var url = '/api/timetable/version?event=' + encodeURIComponent(window.selectedEvent)
+              + '&year=' + encodeURIComponent(window.selectedYear);
+      var resp = await fetch(url, { credentials: 'same-origin' });
+      if (!resp.ok) return;
+      var json = await resp.json();
+      var remote = (json && typeof json.version === 'number') ? json.version : null;
+      if (remote === null) return;
+      var local = window._timetableVersion;
+      if (typeof local !== 'number') {
+        window._timetableVersion = remote;
+        return;
+      }
+      if (remote !== local) {
+        window._timetableVersion = remote;
+        window.fetchTimetable();
+      }
+    } catch (e) {
+      // silencieux : reseau/serveur indisponible ne doit pas casser l'UI
+    } finally {
+      inFlight = false;
+    }
+  }
+
+  if (window._timetableVersionPollTimer) clearInterval(window._timetableVersionPollTimer);
+  window._timetableVersionPollTimer = setInterval(pollOnce, POLL_MS);
 })();

@@ -9,12 +9,18 @@ circuit breaker, delai variable, etc.)
 """
 
 import os
+import hmac
+import hashlib
+import base64
 import time
 import random
 import logging
 from datetime import datetime, timezone, timedelta
 
 import requests
+
+# Taille max base64 acceptee par WAHA pour sendImage (defaut ~5 MB binaire).
+WAHA_SENDIMAGE_MAX_BYTES = int(os.environ.get("WAHA_SENDIMAGE_MAX_BYTES", str(5 * 1024 * 1024)))
 
 log = logging.getLogger("whatsapp")
 
@@ -37,6 +43,65 @@ CIRCUIT_BREAKER_THRESHOLD = 3       # erreurs consecutives avant pause
 CIRCUIT_BREAKER_PAUSE_MIN = 30      # minutes de pause apres circuit breaker
 HTTP_CONNECT_TIMEOUT = 5
 HTTP_READ_TIMEOUT = 10
+
+# Signature snapshot publique (lien envoye dans les WA, pas de session Cockpit)
+SNAPSHOT_TTL_DAYS_DEFAULT = 7
+SNAPSHOT_PUBLIC_PATH = "/public/snapshot"
+
+
+def _snapshot_secret():
+    """Cle HMAC pour signer les URLs publiques de snapshot.
+    Doit etre identique entre Cockpit et la VM PCA (ecoutehik2/cockpit_dispatch).
+    """
+    s = os.environ.get("SNAPSHOT_PUBLIC_SECRET", "").strip()
+    if s:
+        return s.encode("utf-8")
+    # Fallback dev : derive de JWT_SECRET pour eviter un crash, mais log un avertissement.
+    fallback = os.environ.get("JWT_SECRET", "dev-snapshot-fallback")
+    return fallback.encode("utf-8")
+
+
+def _cockpit_public_base():
+    return (os.environ.get("COCKPIT_PUBLIC_URL", "https://cockpit.lemans.org")).rstrip("/")
+
+
+def sign_snapshot_url(alert_id, ttl_days=None):
+    """Genere une URL publique signee pour le snapshot d'une alerte.
+
+    Format : <COCKPIT_PUBLIC_URL>/public/snapshot/<alert_id>?exp=<unix>&sig=<hmac32>
+
+    Securite : HMAC-SHA256 tronquee a 32 hex (128 bits) sur "<alert_id>:<exp>".
+    La cle vient de SNAPSHOT_PUBLIC_SECRET (env). TTL par defaut 7 jours.
+
+    L'URL est servie par GET /public/snapshot/<alert_id> qui verifie :
+      1. exp non depasse
+      2. sig HMAC match (comparison constant-time)
+      3. l'alerte existe (active ou archive) et le snapshot est sous HIK_IMAGES_ROOT
+    """
+    if not alert_id:
+        return ""
+    ttl_days = int(ttl_days or SNAPSHOT_TTL_DAYS_DEFAULT)
+    exp = int(time.time() + ttl_days * 86400)
+    payload = "%s:%d" % (str(alert_id), exp)
+    sig = hmac.new(_snapshot_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+    return "%s%s/%s?exp=%d&sig=%s" % (
+        _cockpit_public_base(), SNAPSHOT_PUBLIC_PATH, str(alert_id), exp, sig
+    )
+
+
+def verify_snapshot_signature(alert_id, exp, sig):
+    """Verifie une URL signee. Renvoie True si valide et non expiree."""
+    if not alert_id or not exp or not sig:
+        return False
+    try:
+        exp_int = int(exp)
+    except (ValueError, TypeError):
+        return False
+    if exp_int < int(time.time()):
+        return False
+    payload = "%s:%d" % (str(alert_id), exp_int)
+    expected = hmac.new(_snapshot_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+    return hmac.compare_digest(expected, str(sig))
 
 
 class WhatsAppService:
@@ -194,6 +259,58 @@ class WhatsAppService:
             self._on_send_error()
             return None
 
+    def _send_image(self, chat_id, image_path, caption=""):
+        """POST /api/sendImage avec une image en base64. Retourne le message_id.
+
+        L'image est lue depuis le disque (HIK_IMAGES_ROOT). Limitee a
+        WAHA_SENDIMAGE_MAX_BYTES (5 MB par defaut) pour respecter les limites
+        WhatsApp et eviter d'exploser la RAM/payload WAHA.
+        """
+        if not image_path or not os.path.isfile(image_path):
+            log.warning("WAHA sendImage: fichier introuvable %s", image_path)
+            return None
+        try:
+            file_size = os.path.getsize(image_path)
+            if file_size > WAHA_SENDIMAGE_MAX_BYTES:
+                log.warning(
+                    "WAHA sendImage: image trop volumineuse (%d > %d bytes), skip",
+                    file_size, WAHA_SENDIMAGE_MAX_BYTES,
+                )
+                return None
+            with open(image_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+            payload = {
+                "chatId": chat_id,
+                "file": {
+                    "mimetype": "image/jpeg",
+                    "filename": os.path.basename(image_path),
+                    "data": b64,
+                },
+                "session": self._session(),
+            }
+            if caption:
+                payload["caption"] = caption
+            headers = self._headers()
+            headers["Content-Type"] = "application/json"
+            r = requests.post(
+                "%s/api/sendImage" % self._base_url(),
+                headers=headers,
+                json=payload,
+                # Plus de read timeout : l'upload WAHA peut prendre 5-15s
+                timeout=(HTTP_CONNECT_TIMEOUT, 30),
+            )
+            if r.status_code in (200, 201):
+                self._consecutive_errors = 0
+                data = r.json() if r.content else {}
+                return data.get("id") or data.get("key", {}).get("id") or "sent"
+            log.warning("WAHA sendImage status=%d body=%s", r.status_code, r.text[:200])
+            self._on_send_error()
+            return None
+        except Exception as e:
+            log.warning("WAHA sendImage erreur: %s", e)
+            self._on_send_error()
+            return None
+
     def _on_send_error(self):
         """Incremente le compteur d'erreurs et ouvre le circuit breaker si besoin."""
         self._consecutive_errors += 1
@@ -319,8 +436,13 @@ class WhatsAppService:
         msg = alert_doc.get("message", "")
         return "%s %s : %s" % (marker, name, msg)
 
-    def format_batch_message(self, alerts_with_defs):
-        """Formate un message agrege pour plusieurs alertes."""
+    def format_batch_message(self, alerts_with_defs, include_snapshot_urls=True):
+        """Formate un message agrege pour plusieurs alertes.
+
+        Si include_snapshot_urls=False : pas de ligne "Photo : <url>" ajoutee
+        (cas ou l'image va etre envoyee directement via sendImage).
+        Sinon, URL publique signee HMAC (TTL 7j) servie par /public/snapshot/<id>.
+        """
         cfg = self.get_config()
         prefix = cfg.get("default_message_prefix", "[COCKPIT]")
 
@@ -337,10 +459,23 @@ class WhatsAppService:
             name = definition.get("name", alert_doc.get("title", "Alerte"))
             msg = alert_doc.get("message", "")
             text = "%s %s\n%s\n\n%s" % (prefix, name, time_str, msg)
+            if include_snapshot_urls:
+                action_data = alert_doc.get("actionData") or {}
+                if action_data.get("has_snapshot") and alert_doc.get("_id"):
+                    snap_url = sign_snapshot_url(alert_doc["_id"])
+                    if snap_url:
+                        text += "\nPhoto : " + snap_url
         else:
             lines = []
             for alert_doc, definition in alerts_with_defs:
-                lines.append("- %s" % self._format_single_alert(alert_doc, definition))
+                line = "- %s" % self._format_single_alert(alert_doc, definition)
+                if include_snapshot_urls:
+                    action_data = alert_doc.get("actionData") or {}
+                    if action_data.get("has_snapshot") and alert_doc.get("_id"):
+                        snap_url = sign_snapshot_url(alert_doc["_id"])
+                        if snap_url:
+                            line += " - " + snap_url
+                lines.append(line)
             text = "%s %d alertes - %s\n%s" % (
                 prefix, len(alerts_with_defs), time_str, "\n".join(lines)
             )
@@ -472,21 +607,23 @@ class WhatsAppService:
                         "name": grp.get("name", gid) if grp else gid,
                     }
 
-            # DM pour alertes critiques
+            # DM aux contacts nommes (escalade individuelle).
+            # Le flag s'appelle historiquement dm_on_critical mais ne dependait
+            # plus du niveau de priorite : si la case est cochee dans la
+            # definition, les contacts listes recoivent un DM a chaque
+            # declenchement de cette alerte.
             if wa.get("dm_on_critical"):
-                priority = definition.get("priority", 5)
-                if priority <= 2:
-                    for phone in (wa.get("dm_recipients") or []):
-                        chat_id = "%s@c.us" % phone
-                        recipient_alerts.setdefault(chat_id, []).append(
-                            (alert_doc, definition)
-                        )
-                        if chat_id not in recipient_meta:
-                            ct = self.db["cockpit_wa_contacts"].find_one({"phone": phone})
-                            recipient_meta[chat_id] = {
-                                "type": "dm",
-                                "name": ct.get("name", phone) if ct else phone,
-                            }
+                for phone in (wa.get("dm_recipients") or []):
+                    chat_id = "%s@c.us" % phone
+                    recipient_alerts.setdefault(chat_id, []).append(
+                        (alert_doc, definition)
+                    )
+                    if chat_id not in recipient_meta:
+                        ct = self.db["cockpit_wa_contacts"].find_one({"phone": phone})
+                        recipient_meta[chat_id] = {
+                            "type": "dm",
+                            "name": ct.get("name", phone) if ct else phone,
+                        }
 
         # Envoyer un message agrege par destinataire
         sent_count = 0
@@ -505,14 +642,48 @@ class WhatsAppService:
                 log.warning("WhatsApp: circuit breaker ouvert pendant le batch")
                 break
 
-            text = self.format_batch_message(alert_list)
             meta = recipient_meta.get(recipient_id, {})
+
+            # Detecter les alertes avec snapshot accessible localement (sur la
+            # machine qui execute ce code -- ecoutehik2 sur la VM PCA, ou
+            # cockpit en dev). Si oui : on envoie l'image en direct (sendImage),
+            # sinon on envoie le texte (avec URL signee en fallback).
+            snapshot_pairs = []
+            for a, d in alert_list:
+                ad = a.get("actionData") or {}
+                sp = ad.get("snapshot_path") or ""
+                if ad.get("has_snapshot") and sp and os.path.isfile(sp):
+                    snapshot_pairs.append((a, d, sp))
+
+            # Texte sans URL si on va envoyer l'image (evite le doublon).
+            text = self.format_batch_message(
+                alert_list,
+                include_snapshot_urls=(len(snapshot_pairs) == 0),
+            )
 
             # Delai humain entre envois (sauf le premier)
             if sent_count > 0:
                 self._human_delay()
 
-            msg_id = self._send_text(recipient_id, text)
+            msg_id = None
+            if len(alert_list) == 1 and snapshot_pairs:
+                # Cas optimal : 1 alerte avec snapshot -> 1 sendImage avec caption
+                _, _, snap_path = snapshot_pairs[0]
+                msg_id = self._send_image(recipient_id, snap_path, caption=text)
+                if msg_id is None:
+                    # Fallback : envoyer le texte avec URL signee si l'image echoue
+                    fallback_text = self.format_batch_message(alert_list, include_snapshot_urls=True)
+                    msg_id = self._send_text(recipient_id, fallback_text)
+            else:
+                # Cas standard : envoyer le texte, puis 1 image par alerte avec snapshot
+                msg_id = self._send_text(recipient_id, text)
+                if msg_id and snapshot_pairs:
+                    for (a, _, snap_path) in snapshot_pairs:
+                        self._human_delay()
+                        # Caption courte par image pour ne pas dupliquer le texte global
+                        cam = (a.get("actionData") or {}).get("camera_label", "")
+                        cap = "%s - %s" % (a.get("title", ""), cam) if cam else a.get("title", "")
+                        self._send_image(recipient_id, snap_path, caption=cap)
 
             # Slug agrege pour l'historique
             slugs = list(set(d.get("slug", "") for _, d in alert_list))

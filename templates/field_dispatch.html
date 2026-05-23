@@ -8,7 +8,9 @@
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 
 <body>
@@ -166,16 +168,25 @@
                 </header>
                 <div class="widget-body" id="field-admin-body">
                     <div class="table-responsive">
-                        <table id="field-devices-table" class="table table-striped table-hover" style="font-size:13px; width:100%;">
+                        <table id="field-devices-table" class="table table-striped table-hover" style="font-size:13px; width:100%; max-width:2400px; table-layout:fixed;">
+                            <colgroup>
+                                <col style="width:auto; min-width:200px;">
+                                <col style="width:160px;">
+                                <col style="width:140px;">
+                                <col style="width:180px;">
+                                <col style="width:160px;">
+                                <col style="width:92px;">
+                                <col style="width:140px;">
+                            </colgroup>
                             <thead>
                                 <tr>
-                                    <th style="min-width:160px;">Nom</th>
-                                    <th style="min-width:140px;">Evenement</th>
-                                    <th style="min-width:120px;">Groupe</th>
-                                    <th style="min-width:150px;">Derniere position</th>
-                                    <th style="min-width:120px;">Derniere activite</th>
-                                    <th style="width:70px; text-align:center;">Batterie</th>
-                                    <th style="width:120px; white-space:nowrap; text-align:right;">Actions</th>
+                                    <th style="white-space:nowrap;">Nom</th>
+                                    <th style="white-space:nowrap;">Evenement</th>
+                                    <th style="white-space:nowrap;">Groupe</th>
+                                    <th style="white-space:nowrap;">Derniere position</th>
+                                    <th style="white-space:nowrap;">Derniere activite</th>
+                                    <th style="text-align:center; white-space:nowrap;">Batterie</th>
+                                    <th style="text-align:right; white-space:nowrap;">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="field-devices-tbody">
@@ -207,17 +218,27 @@
                         </button>
                     </div>
                     <div class="table-responsive">
-                        <table id="vision-devices-table" class="table table-striped table-hover" style="font-size:13px; width:100%;">
+                        <table id="vision-devices-table" class="table table-striped table-hover" style="font-size:13px; width:100%; max-width:2400px; table-layout:fixed;">
+                            <colgroup>
+                                <col style="width:auto; min-width:200px;">
+                                <col style="width:160px;">
+                                <col style="width:160px;">
+                                <col style="width:110px;">
+                                <col style="width:180px;">
+                                <col style="width:160px;">
+                                <col style="width:92px;">
+                                <col style="width:210px;">
+                            </colgroup>
                             <thead>
                                 <tr>
-                                    <th style="min-width:160px;">Nom</th>
-                                    <th style="min-width:140px;">Operateur</th>
-                                    <th style="min-width:140px;">Evenement</th>
-                                    <th style="min-width:100px;">Lieu</th>
-                                    <th style="min-width:150px;">Derniere position</th>
-                                    <th style="min-width:120px;">Derniere activite</th>
-                                    <th style="width:70px; text-align:center;">Batterie</th>
-                                    <th style="width:200px; white-space:nowrap; text-align:right;">Actions</th>
+                                    <th style="white-space:nowrap;">Nom</th>
+                                    <th style="white-space:nowrap;">Operateur</th>
+                                    <th style="white-space:nowrap;">Evenement</th>
+                                    <th style="white-space:nowrap;">Lieu</th>
+                                    <th style="white-space:nowrap;">Derniere position</th>
+                                    <th style="white-space:nowrap;">Derniere activite</th>
+                                    <th style="text-align:center; white-space:nowrap;">Batterie</th>
+                                    <th style="text-align:right; white-space:nowrap;">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="vision-devices-tbody">
@@ -228,6 +249,295 @@
                 </div>
             </section>
 
+            <!-- ===================================================== -->
+            <!-- Section Routing overrides : corrections carte Valhalla -->
+            <!-- ===================================================== -->
+
+            <section class="widget-card" style="margin-top:24px; border-top:3px solid #7c3aed;">
+                <header class="widget-header">
+                    <h3><span class="material-symbols-outlined" style="vertical-align:middle; color:#7c3aed;">edit_location</span> Carte routing &mdash; corrections terrain</h3>
+                    <div id="rov-count" style="font-size:12px; color:var(--muted); margin-left:auto;"></div>
+                </header>
+                <div class="widget-body">
+                    <p style="font-size:12px; color:var(--muted); margin:0 0 12px;">
+                        Marquer les portails reellement fermes, les routes barrees ou les passages a forcer ouverts.
+                        Les blocages sont appliques au calcul d'itineraire en temps reel (cache 30 s).
+                        Les passages a forcer ouverts sont inventoriees pour le futur patch OSM (rebuild des tuiles).
+                    </p>
+                    <div class="rov-toolbar">
+                        <button id="rov-btn-point" class="btn rov-btn" data-mode="block_point">
+                            <span class="material-symbols-outlined" style="font-size:16px;">block</span>
+                            Bloquer un point
+                        </button>
+                        <button id="rov-btn-polygon" class="btn rov-btn" data-mode="block_polygon">
+                            <span class="material-symbols-outlined" style="font-size:16px;">draw</span>
+                            Bloquer une zone
+                        </button>
+                        <button id="rov-btn-open" class="btn rov-btn" data-mode="force_open">
+                            <span class="material-symbols-outlined" style="font-size:16px;">door_open</span>
+                            Forcer passable
+                        </button>
+                        <button id="rov-btn-cancel" class="btn btn-secondary" hidden>
+                            <span class="material-symbols-outlined" style="font-size:16px;">close</span>
+                            Annuler
+                        </button>
+                        <div id="rov-hint" class="rov-hint" hidden></div>
+                    </div>
+                    <div class="rov-layout">
+                        <div id="rov-map" class="rov-map"></div>
+                        <aside class="rov-list">
+                            <div class="rov-list-header">
+                                <strong>Corrections existantes</strong>
+                                <select id="rov-filter" class="form-input" style="font-size:12px; padding:4px;">
+                                    <option value="all">Toutes</option>
+                                    <option value="block_point">Points bloques</option>
+                                    <option value="block_polygon">Zones bloquees</option>
+                                    <option value="force_open">A forcer passable</option>
+                                </select>
+                            </div>
+                            <ul id="rov-items" class="rov-items">
+                                <li class="rov-empty">Chargement...</li>
+                            </ul>
+                        </aside>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===================================================== -->
+            <!-- Section Alfred : agent IA WhatsApp (VM Linux + WAHA)  -->
+            <!-- ===================================================== -->
+
+            <section class="widget-card" style="margin-top:24px; border-top:3px solid #059669;">
+                <header class="widget-header">
+                    <h3><span class="material-symbols-outlined" style="vertical-align:middle; color:#059669;">smart_toy</span> Alfred &mdash; agent IA WhatsApp</h3>
+                    <div id="alfred-admin-count" style="font-size:12px; color:var(--muted); margin-left:auto;"></div>
+                </header>
+                <div class="widget-body">
+                    <p style="font-size:12px; color:var(--muted); margin:0 0 12px;">
+                        Pour chaque groupe WhatsApp : activer l'ecoute, autoriser Alfred a repondre quand on le mentionne
+                        (<code>@alfred</code>), declencher des resumes periodiques, surveiller des mots-cles.
+                        Alfred tourne sur la VM <code>srv-safe-docker.aco.local</code> via Ollama (qwen 2.5 3B).
+                    </p>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+                        <button id="alfred-refresh" class="btn" title="Recharger l'affichage depuis Mongo (sans toucher a WAHA)">
+                            <span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">refresh</span>
+                            Actualiser
+                        </button>
+                        <button id="alfred-sync-wa" class="btn" title="Re-synchroniser les groupes depuis WAHA et purger ceux qui n'existent plus (utile apres un changement de numero WhatsApp)">
+                            <span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">sync</span>
+                            Resync WAHA
+                        </button>
+                        <button id="alfred-summaries-open" class="btn" title="Voir tous les resumes generes">
+                            <span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">summarize</span>
+                            Historique des resumes
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table id="alfred-groups-table" class="table table-striped table-hover" style="font-size:13px; width:100%; max-width:2400px; table-layout:fixed;">
+                            <colgroup>
+                                <col style="width:auto; min-width:240px;">
+                                <col style="width:78px;">
+                                <col style="width:78px;">
+                                <col style="width:78px;">
+                                <col style="width:118px;">
+                                <col style="width:150px;">
+                                <col style="width:160px;">
+                                <col style="width:210px;">
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th style="white-space:nowrap;">Groupe WhatsApp</th>
+                                    <th style="text-align:center; white-space:nowrap;" title="Ecouter ce groupe (ingestion des messages)">Ecouter</th>
+                                    <th style="text-align:center; white-space:nowrap;" title="Repondre aux mentions @alfred">@alfred</th>
+                                    <th style="text-align:center; white-space:nowrap;" title="Generer un resume periodique">Resume</th>
+                                    <th style="text-align:center; white-space:nowrap;" title="Intervalle (min) entre resumes">Toutes les</th>
+                                    <th style="white-space:nowrap;">Mots-cles</th>
+                                    <th style="white-space:nowrap;">Dernier resume</th>
+                                    <th style="text-align:right; white-space:nowrap;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="alfred-groups-tbody">
+                                <tr><td colspan="8" style="text-align:center; color:var(--muted); padding:16px;">Chargement...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Sous-section : Contacts autorises en DM -->
+                    <div style="margin-top:20px; padding-top:14px; border-top:1px dashed var(--border);">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                            <h4 style="margin:0; font-size:14px;">
+                                <span class="material-symbols-outlined" style="font-size:18px; vertical-align:middle; color:#059669;">verified_user</span>
+                                Contacts autorises en message prive
+                            </h4>
+                            <button id="alfred-dm-add-btn" class="btn btn-primary" style="margin-left:auto; background:#059669; font-size:12px;">
+                                <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">add</span>
+                                Autoriser un contact
+                            </button>
+                        </div>
+                        <p style="font-size:12px; color:var(--muted); margin:0 0 10px;">
+                            En DM, Alfred ne repond qu'aux contacts listes ici (mention implicite, pas besoin de
+                            <code>@alfred</code>). Les autres recoivent un message poli leur indiquant qu'il faut
+                            l'accord de Maitre Bruce. Pour recuperer le chat_id d'un contact, envoie-lui un premier DM
+                            depuis ce contact a Alfred et regarde dans les logs WAHA le <code>from</code> du webhook.
+                        </p>
+                        <div class="table-responsive">
+                            <table id="alfred-dm-table" class="table table-striped" style="font-size:13px; width:100%;">
+                                <thead>
+                                    <tr>
+                                        <th style="min-width:140px;">Libelle</th>
+                                        <th style="min-width:200px;">Chat ID WhatsApp</th>
+                                        <th style="min-width:140px;">Autorise le</th>
+                                        <th style="min-width:140px;">Par</th>
+                                        <th style="width:90px; text-align:right;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="alfred-dm-tbody">
+                                    <tr><td colspan="5" style="text-align:center; color:var(--muted); padding:12px;">Chargement...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+    </div>
+</div>
+
+<!-- CRUD Modal &mdash; Alfred ajout DM whitelist -->
+<div id="alfred-dm-modal" class="crud-modal" hidden>
+    <div class="crud-modal-dialog" style="max-width:520px;">
+        <div class="crud-modal-header">
+            <h3>Autoriser un contact en message prive</h3>
+            <button class="crud-modal-close" data-close>&times;</button>
+        </div>
+        <div class="crud-modal-body">
+            <p style="font-size:12px; color:var(--muted); margin:0 0 14px;">
+                Format attendu : <code>33123456789@c.us</code> ou <code>xxxxxxxxxxxxxxx@lid</code>.
+                Si tu colles juste un numero (ex. <code>33637257012</code>), il sera normalise en
+                <code>@c.us</code> automatiquement.
+            </p>
+            <label style="display:block; font-size:12px; font-weight:600; margin-bottom:4px;">Libelle (optionnel)</label>
+            <input id="alfred-dm-label" class="form-input" placeholder="Ludo, Marc, ..." style="width:100%; margin-bottom:12px;">
+            <label style="display:block; font-size:12px; font-weight:600; margin-bottom:4px;">Chat ID WhatsApp *</label>
+            <input id="alfred-dm-chatid" class="form-input" placeholder="33123456789@c.us" style="width:100%; font-family:monospace; font-size:12px;">
+        </div>
+        <div class="crud-modal-footer">
+            <button class="btn btn-secondary" data-close>Annuler</button>
+            <button id="alfred-dm-save" class="btn btn-primary" style="background:#059669;">Autoriser</button>
+        </div>
+    </div>
+</div>
+
+<!-- CRUD Modal &mdash; Alfred mots-cles -->
+<div id="alfred-kw-modal" class="crud-modal" hidden>
+    <div class="crud-modal-dialog">
+        <div class="crud-modal-header">
+            <h3>Mots-cles d'alerte &mdash; <span id="alfred-kw-chatname"></span></h3>
+            <button class="crud-modal-close" data-close>&times;</button>
+        </div>
+        <div class="crud-modal-body">
+            <p style="font-size:12px; color:var(--muted); margin:0 0 10px;">
+                Chaque message du groupe est teste contre ces regex. Un match cree une alerte
+                dans le moteur d'alertes Cockpit (visible dans la centrale d'alertes + dispatch WhatsApp standard).
+                Insensibles a la casse par defaut (<code>i</code>).
+            </p>
+            <input type="hidden" id="alfred-kw-chat-id">
+            <div id="alfred-kw-rules-list" style="display:flex; flex-direction:column; gap:6px; margin-bottom:10px;"></div>
+            <button id="alfred-kw-add-rule" class="btn btn-secondary" style="font-size:12px;">
+                <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">add</span>
+                Ajouter un mot-cle
+            </button>
+        </div>
+        <div class="crud-modal-footer">
+            <button class="btn btn-secondary" data-close>Annuler</button>
+            <button id="alfred-kw-save" class="btn btn-primary" style="background:#059669;">Enregistrer</button>
+        </div>
+    </div>
+</div>
+
+<!-- CRUD Modal &mdash; Alfred resumes (liste + detail) -->
+<div id="alfred-sum-modal" class="crud-modal" hidden>
+    <div class="crud-modal-dialog" style="max-width:900px;">
+        <div class="crud-modal-header">
+            <h3>Resumes Alfred</h3>
+            <button class="crud-modal-close" data-close>&times;</button>
+        </div>
+        <div class="crud-modal-body" style="display:grid; grid-template-columns:280px 1fr; gap:14px;">
+            <div style="border-right:1px solid var(--border); padding-right:10px; max-height:60vh; overflow-y:auto;">
+                <select id="alfred-sum-filter" class="form-input" style="font-size:12px; margin-bottom:8px; width:100%;">
+                    <option value="">Tous les groupes</option>
+                </select>
+                <ul id="alfred-sum-list" style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:6px;">
+                    <li style="color:var(--muted); font-size:12px;">Chargement...</li>
+                </ul>
+            </div>
+            <div id="alfred-sum-detail" style="max-height:60vh; overflow-y:auto; font-size:13px; line-height:1.5;">
+                <p style="color:var(--muted);">Selectionner un resume a gauche.</p>
+            </div>
+        </div>
+        <div class="crud-modal-footer">
+            <button class="btn btn-secondary" data-close>Fermer</button>
+        </div>
+    </div>
+</div>
+
+<!-- CRUD Modal — Routing override edit -->
+<div id="rov-edit-modal" class="crud-modal" hidden>
+    <div class="crud-modal-dialog">
+        <div class="crud-modal-header">
+            <h3 id="rov-edit-title">Nouvelle correction</h3>
+            <button class="crud-modal-close" data-close>&times;</button>
+        </div>
+        <div class="crud-modal-body">
+            <form id="rov-edit-form">
+                <input type="hidden" name="id">
+                <input type="hidden" name="type">
+                <div class="form-row">
+                    <label>Libelle (visible par les operateurs)
+                        <input name="label" required maxlength="200" placeholder="ex. Portail Bugatti Sud" class="form-input" />
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label>Champ d'application
+                        <select name="scope" class="form-input">
+                            <option value="all">Tous les itineraires</option>
+                            <option value="normal_only">Mode normal seulement (laisser passer en intervention)</option>
+                            <option value="god_only">Intervention seulement</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label>Expiration (optionnel)
+                        <input name="expires_at" type="datetime-local" class="form-input" />
+                    </label>
+                    <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">Apres cette date, la correction est ignoree automatiquement.</p>
+                </div>
+                <div class="form-row">
+                    <label>OSM ref (optionnel)
+                        <input name="osm_ref" maxlength="120" placeholder="ex. node/1234567890" class="form-input" />
+                    </label>
+                    <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">Lien vers l'element OSM concerne (utile pour le futur patch).</p>
+                </div>
+                <div class="form-row">
+                    <label>Notes
+                        <textarea name="notes" maxlength="2000" rows="2" placeholder="contexte, raison terrain..." class="form-input"></textarea>
+                    </label>
+                </div>
+                <div class="form-row" id="rov-active-row" hidden>
+                    <label style="display:flex; align-items:center; gap:8px;">
+                        <input type="checkbox" name="active" checked>
+                        Correction active
+                    </label>
+                </div>
+            </form>
+        </div>
+        <div class="crud-modal-footer">
+            <button id="rov-edit-delete" class="btn btn-secondary" style="color:#dc2626; margin-right:auto;" hidden>
+                Supprimer
+            </button>
+            <button class="btn btn-secondary" data-close>Annuler</button>
+            <button id="rov-edit-submit" class="btn btn-primary" style="background:#7c3aed;">Enregistrer</button>
         </div>
     </div>
 </div>
@@ -618,6 +928,8 @@
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
 <script src="{{ url_for('static', filename='js/field_admin.js') }}"></script>
 <script src="{{ url_for('static', filename='js/vision_admin.js') }}"></script>
+<script src="{{ url_for('static', filename='js/routing_overrides_admin.js') }}"></script>
+<script src="{{ url_for('static', filename='js/alfred_admin.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 
 <script>

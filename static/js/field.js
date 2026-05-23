@@ -68,6 +68,8 @@
     ficheCreateUrgency: "UR",
     routeLayer: null,
     routeDestination: null,  // [lat, lng]
+    routeAnimFrame: null,    // rAF id pour la polyline animee
+    routeIsGod: false,       // true si le dernier itineraire calcule est en mode prioritaire
     fichesLayer: null,
     fichesMarkers: {},       // id -> marker
     fiches: [],
@@ -2581,16 +2583,46 @@
   // ---------------------------------------------------------------------
   // Itineraires
   // ---------------------------------------------------------------------
-  function setRouteDestination(latlng, polylineEncoded) {
+
+  // Annule l'animation en cours (dash flowing) et libere la rAF.
+  function _stopRouteAnimation() {
+    if (state.routeAnimFrame) {
+      cancelAnimationFrame(state.routeAnimFrame);
+      state.routeAnimFrame = null;
+    }
+  }
+
+  // Demarre l'animation de dash sur la polyline blanche superposee.
+  // god=true => flow plus rapide (effet "urgence intervention").
+  function _startRouteAnimation(dashLine, god) {
+    _stopRouteAnimation();
+    if (!dashLine) return;
+    var speed = god ? 0.9 : 0.4;
+    var offset = 0;
+    function tick() {
+      offset = (offset - speed) % 24;
+      var el = dashLine.getElement ? dashLine.getElement() : null;
+      if (el) el.style.strokeDashoffset = String(offset);
+      state.routeAnimFrame = requestAnimationFrame(tick);
+    }
+    state.routeAnimFrame = requestAnimationFrame(tick);
+  }
+
+  // Trace un itineraire sur la carte avec le rendu "Waze" : glow large + trait
+  // bleu + dash blanc anime qui indique le sens de circulation.
+  // god=true => animation plus rapide (signal visuel d'intervention prioritaire).
+  function setRouteDestination(latlng, polylineEncoded, god) {
+    _stopRouteAnimation();
     if (state.routeLayer) {
       state.map.removeLayer(state.routeLayer);
       state.routeLayer = null;
     }
     state.routeDestination = latlng;
+    state.routeIsGod = !!god;
     if (!latlng) return;
 
     var group = L.layerGroup();
-    // Destination : gros marker rouge
+    // Destination : marker rouge (place pin)
     var destIcon = L.divIcon({
       className: "",
       html: "<div class='route-dest-marker'><span class='material-symbols-outlined'>place</span></div>",
@@ -2601,21 +2633,65 @@
 
     var routePts = polylineEncoded ? _decodePolyline6(polylineEncoded) : null;
     if (routePts && routePts.length >= 2) {
-      // Vraie polyline d'itineraire (Valhalla / stub serveur)
-      L.polyline(routePts, {
-        color: "#dc2626", weight: 5, opacity: 0.85, interactive: false,
-        lineJoin: "round", lineCap: "round"
-      }).addTo(group);
+      // Style Waze : 3-4 couches superposees (halo ambre god + glow + trait + dash anime).
+      // Bleu Cockpit pour tous les modes ; en god, on ajoute un halo ambre
+      // exterieur (code gyrophare bleu+ambre, code visuel d'urgence).
+      var lineColor = "#2563eb";    // bleu Cockpit
+      if (god) {
+        var amberHalo = L.polyline(routePts, {
+          color: "#f59e0b",        // ambre gyrophare
+          weight: 24,
+          opacity: 0.35,
+          lineCap: "round", lineJoin: "round",
+          interactive: false,
+        });
+        group.addLayer(amberHalo);
+      }
+      var glow = L.polyline(routePts, {
+        color: lineColor,
+        weight: god ? 18 : 14,
+        opacity: god ? 0.32 : 0.20,
+        lineCap: "round", lineJoin: "round",
+        interactive: false,
+      });
+      group.addLayer(glow);
+
+      var baseLine = L.polyline(routePts, {
+        color: lineColor,
+        weight: 5,
+        opacity: 0.95,
+        lineCap: "round", lineJoin: "round",
+        interactive: false,
+      });
+      group.addLayer(baseLine);
+
+      var dashLine = L.polyline(routePts, {
+        color: "#ffffff",
+        weight: 3,
+        opacity: 0.75,
+        dashArray: "8 16",
+        dashOffset: "0",
+        lineCap: "round", lineJoin: "round",
+        interactive: false,
+      });
+      group.addLayer(dashLine);
+
+      group.addTo(state.map);
+      state.routeLayer = group;
+      _startRouteAnimation(dashLine, god);
     } else if (state.meMarker) {
-      // Fallback : trait pointille direct (vol d'oiseau)
+      // Fallback : trait pointille direct (vol d'oiseau) si pas de polyline reelle.
       var mePos = state.meMarker.getLatLng();
       L.polyline(
         [[mePos.lat, mePos.lng], latlng],
-        { color: "#dc2626", weight: 3, opacity: 0.7, dashArray: "6 8", interactive: false }
+        { color: "#2563eb", weight: 3, opacity: 0.7, dashArray: "6 8", interactive: false }
       ).addTo(group);
+      group.addTo(state.map);
+      state.routeLayer = group;
+    } else {
+      group.addTo(state.map);
+      state.routeLayer = group;
     }
-    group.addTo(state.map);
-    state.routeLayer = group;
 
     // Ajuste le zoom : si on a une route reelle, on cadre dessus (guidage serre)
     try {
@@ -2655,19 +2731,6 @@
       pts.push([lat / 1e6, lon / 1e6]);
     }
     return pts;
-  }
-
-  function openInGoogleMaps(latlng) {
-    if (!latlng || latlng.length < 2) return;
-    var lat = latlng[0], lng = latlng[1];
-    var intent = "google.navigation:q=" + lat + "," + lng;
-    var webFallback = "https://www.google.com/maps/dir/?api=1&destination=" + lat + "," + lng + "&travelmode=driving";
-    try { window.location.href = intent; } catch (e) { /* swallow */ }
-    setTimeout(function () {
-      if (document.hasFocus && document.hasFocus()) {
-        window.open(webFallback, "_blank");
-      }
-    }, 800);
   }
 
   // Calcule un itineraire ACO (serveur Valhalla cote Cockpit) puis le trace.
@@ -2742,9 +2805,6 @@
       return b;
     }
 
-    var btnAco = mkBtn("aco", "route", "Itineraire ACO", "itinerary-btn-aco");
-    body.appendChild(btnAco);
-
     var prio = document.createElement("label");
     prio.className = "itinerary-priority";
     var cb = document.createElement("input");
@@ -2761,7 +2821,8 @@
     prio.appendChild(prioTxt);
     body.appendChild(prio);
 
-    body.appendChild(mkBtn("gmaps", "map", "Google Maps", "itinerary-btn-gmaps"));
+    var btnAco = mkBtn("aco", "route", "Calculer l'itineraire", "itinerary-btn-aco");
+    body.appendChild(btnAco);
 
     var btnCancel = document.createElement("button");
     btnCancel.type = "button";
@@ -2789,16 +2850,11 @@
     overlay.addEventListener("click", function (e) { if (e.target === overlay) close(); });
 
     var btnAco = overlay.querySelector("[data-action='aco']");
-    var btnGmaps = overlay.querySelector("[data-action='gmaps']");
     var btnCancel = overlay.querySelector("[data-action='cancel']");
     var cbPriority = overlay.querySelector("#itinerary-priority-cb");
     var btnAcoLabel = btnAco.querySelector(".itinerary-btn-label");
 
     btnCancel.addEventListener("click", close);
-    btnGmaps.addEventListener("click", function () {
-      close();
-      openInGoogleMaps([lat, lng]);
-    });
     btnAco.addEventListener("click", function () {
       var god = !!(cbPriority && cbPriority.checked);
       btnAco.disabled = true;
@@ -2808,14 +2864,15 @@
         close();
         if (err) {
           toast("Itineraire indisponible: " + err);
-          setRouteDestination([lat, lng]);
+          setRouteDestination([lat, lng], null, god);
           return;
         }
-        setRouteDestination([lat, lng], resp.polyline);
+        var isGod = (resp.mode === "god") || god;
+        setRouteDestination([lat, lng], resp.polyline, isGod);
         var minutes = Math.max(1, Math.round((resp.duration_s || 0) / 60));
         var km = ((resp.distance_m || 0) / 1000).toFixed(1);
         var prefix = (resp.engine === "stub") ? "Estime " : "";
-        var modeTag = (resp.mode === "god") ? " [prioritaire]" : "";
+        var modeTag = isGod ? " [prioritaire]" : "";
         toast(prefix + km + " km - " + minutes + " min" + modeTag);
       });
     });
@@ -2830,7 +2887,8 @@
     var lng = parseFloat(first[1]);
     if (isNaN(lat) || isNaN(lng)) return;
     var polyline = m.payload && m.payload.polyline;
-    setRouteDestination([lat, lng], polyline);
+    var god = !!(m.payload && m.payload.god);
+    setRouteDestination([lat, lng], polyline, god);
   }
 
   // ---------------------------------------------------------------------
@@ -6997,7 +7055,6 @@
     load3P: load3P,
     loadPoiCategories: loadPoiCategories,
     setRouteDestination: setRouteDestination,
-    openInGoogleMaps: openInGoogleMaps,
     openItineraryMenu: openItineraryMenu,
     pollFiches: pollFiches,
     triggerSos: triggerSos,

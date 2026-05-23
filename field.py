@@ -1892,7 +1892,8 @@ def _gc_stale_slots(db):
             is_stale = True
         elif status == "requested":
             # Demande non acceptee dans les FIELD_STREAM_REQUEST_TTL_S
-            if s.get("expires_at") and s["expires_at"] < now:
+            exp = s.get("expires_at")
+            if exp and (exp if exp.tzinfo else exp.replace(tzinfo=timezone.utc)) < now:
                 is_stale = True
                 db["field_streams"].update_one(
                     {"_id": s["_id"]},
@@ -1979,7 +1980,8 @@ def field_stream_accept(stream_id):
     now = _now()
     if s.get("status") != "requested":
         return jsonify({"ok": False, "error": "invalid_state", "status": s.get("status")}), 409
-    if s.get("expires_at") and s["expires_at"] < now:
+    exp = s.get("expires_at")
+    if exp and (exp if exp.tzinfo else exp.replace(tzinfo=timezone.utc)) < now:
         # Expire en silence : libere le slot
         db["field_streams"].update_one({"_id": sid}, {"$set": {"status": "expired", "ended_at": now}})
         _release_stream_slot(db, sid)

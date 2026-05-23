@@ -190,8 +190,9 @@
       backdrop-filter: blur(2px);
       z-index: 2000;
       opacity: 0; transition: opacity .25s ease;
+      pointer-events: none;
     }
-    .cam-detail-overlay.show { opacity: 1; }
+    .cam-detail-overlay.show { opacity: 1; pointer-events: auto; }
     .cam-detail-panel {
       position: fixed; top: 0; right: 0;
       width: 500px; max-width: 92vw; height: 100vh;

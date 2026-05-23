@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <system.webServer>
+    <rewrite>
+      <rules>
+        <!-- Redirection HTTP vers HTTPS -->
+        <rule name="Redirection vers HTTPS" stopProcessing="true">
+          <match url="(.*)" />
+          <conditions>
+            <add input="{HTTPS}" pattern="off" ignoreCase="true" />
+          </conditions>
+          <action type="Redirect" url="https://{HTTP_HOST}/{R:1}" redirectType="Permanent" />
+        </rule>
+        <!-- Reverse Proxy vers Waitress -->
+        <rule name="ReverseProxyToCockpit">
+          <match url="(.*)" />
+          <action type="Rewrite" url="http://127.0.0.1:4008/{R:1}" />
+        </rule>
+      </rules>
+    </rewrite>
+  </system.webServer>
+</configuration>

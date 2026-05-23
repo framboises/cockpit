@@ -500,63 +500,10 @@ def detect_traffic_cluster(definition, context):
     }
 
 
-def detect_anpr_watchlist(definition, context):
-    """Detecte les plaques surveillees dans les detections LAPI recentes."""
-    db = get_db()
-    now = context["now"]
-
-    # Charger les plaques actives de la watchlist
-    watched = list(db["cockpit_anpr_watchlist"].find({"enabled": True}))
-    if not watched:
-        return None
-
-    plates = {w["plate"]: w for w in watched}
-
-    # Chercher les detections recentes (< 60s pour couvrir l'intervalle entre 2 runs)
-    cutoff = now - timedelta(seconds=60)
-    recent = list(db["hik_anpr"].find({
-        "license_plate": {"$in": list(plates.keys())},
-        "event_dt": {"$gte": cutoff},
-    }).sort([("event_dt", -1)]).limit(20))
-
-    results = []
-    for det in recent:
-        plate = det.get("license_plate", "")
-        event_dt = det.get("event_dt")
-        dt_str = event_dt.strftime("%Y%m%d%H%M%S") if event_dt else "unknown"
-        dedup = "anpr-%s-%s" % (plate, dt_str)
-
-        # Verifier dedup
-        if db["cockpit_active_alerts"].find_one({"dedup_key": dedup}):
-            continue
-
-        w = plates.get(plate, {})
-        camera = det.get("camera_path", "")
-        # Extraire un label camera lisible
-        camera_cfg = db["anpr_camera_config"].find_one({"camera_path": camera})
-        camera_label = camera_cfg.get("label", camera) if camera_cfg and isinstance(camera_cfg, dict) else camera
-
-        time_str = event_dt.strftime("%H:%M:%S") if event_dt else ""
-        label = w.get("label", "")
-        msg = "Plaque %s detectee" % plate
-        if label:
-            msg += " (%s)" % label
-        msg += " - Camera : %s" % camera_label
-
-        results.append({
-            "definition_slug": definition["slug"],
-            "event": context.get("event", ""),
-            "year": context.get("year", ""),
-            "title": "PLAQUE SURVEILLEE DETECTEE",
-            "message": msg,
-            "timeStr": time_str,
-            "actionData": {"plate": plate, "camera": camera_label},
-            "dedup_key": dedup,
-            "triggeredAt": now,
-            "expiresAt": now + timedelta(minutes=10),
-        })
-
-    return results if results else None
+# NOTE: detect_anpr_watchlist (polling LAPI) a ete supprime au profit du
+# dispatch direct depuis ecoutehik2.py (cf. PCA/SCRIPTS/cockpit_dispatch.py).
+# Les alertes plaque watchlist sont desormais creees en temps reel par le
+# script de reception Hik, avec latence < 1s.
 
 
 def detect_meteo_threshold(definition, context):
@@ -1078,7 +1025,8 @@ HANDLERS = {
     "schedule_proximity": detect_schedule_proximity,
     "schedule_transition": detect_schedule_transition,
     "traffic_cluster": detect_traffic_cluster,
-    "anpr_watchlist": detect_anpr_watchlist,
+    # anpr_watchlist : remplace par direct-write dans ecoutehik2.py (cockpit_dispatch)
+    # camera_event   : direct-write dans ecoutehik2.py (cockpit_dispatch)
     "meteo_threshold": detect_meteo_threshold,
     "checkpoint_reassign": detect_checkpoint_reassign,
     "checkpoint_error_burst": detect_checkpoint_error_burst,

@@ -88,6 +88,10 @@
                 <span class="material-symbols-outlined">videocam</span>
                 <span class="label">Cameras</span>
             </a>
+            <button type="button" class="nav-btn" id="routing-test-button" title="Test itineraire (bac a sable Valhalla)">
+                <span class="material-symbols-outlined">science</span>
+                <span class="label">Test itineraire</span>
+            </button>
             {% endif %}
         </nav>
 
@@ -988,6 +992,15 @@ window.__userCanCloseFiche = {{ user_can_close_fiche_json|safe }};
 <script src="{{ url_for('static', filename='js/anoloc.js') }}"></script>
 <script src="{{ url_for('static', filename='js/pcorg.js') }}"></script>
 <script src="{{ url_for('static', filename='js/routing.js') }}"></script>
+<script src="{{ url_for('static', filename='js/routing_test.js') }}"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    var btn = document.getElementById("routing-test-button");
+    if (btn) btn.addEventListener("click", function () {
+      if (window.RoutingTest) window.RoutingTest.open();
+    });
+  });
+</script>
 <script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
 </body>
 </html>

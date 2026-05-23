@@ -25,10 +25,63 @@
     god: false,
     lastResult: null,   // dernier objet { polyline, distance_m, duration_s, ... }
     map: null,
-    mapLayers: null,    // L.layerGroup
+    mapLayers: null,    // L.layerGroup pour from/to/waypoints/polyline route
+    overridesLayer: null, // L.layerGroup pour les corrections admin (transparence)
+    overridesLoaded: false,
     waypointPickMode: false,
     overlay: null,
+    routeAnimFrame: null, // rAF id pour le dash anime (style Waze)
   };
+
+  // ---------------------------------------------------------------------
+  // Style Waze (glow + base + dash anime) - identique field.js
+  // ---------------------------------------------------------------------
+
+  function _stopRouteAnimation() {
+    if (STATE.routeAnimFrame) {
+      cancelAnimationFrame(STATE.routeAnimFrame);
+      STATE.routeAnimFrame = null;
+    }
+  }
+
+  function _startRouteAnimation(dashLine, god) {
+    _stopRouteAnimation();
+    if (!dashLine) return;
+    var speed = god ? 0.9 : 0.4;
+    var offset = 0;
+    function tick() {
+      offset = (offset - speed) % 24;
+      var el = dashLine.getElement ? dashLine.getElement() : null;
+      if (el) el.style.strokeDashoffset = String(offset);
+      STATE.routeAnimFrame = requestAnimationFrame(tick);
+    }
+    STATE.routeAnimFrame = requestAnimationFrame(tick);
+  }
+
+  function _drawWazeRoute(layerGroup, pts, god) {
+    var color = "#2563eb";
+    if (god) {
+      L.polyline(pts, {
+        color: "#f59e0b", weight: 24, opacity: 0.35,
+        lineCap: "round", lineJoin: "round", interactive: false,
+      }).addTo(layerGroup);
+    }
+    L.polyline(pts, {
+      color: color, weight: god ? 18 : 14, opacity: god ? 0.32 : 0.20,
+      lineCap: "round", lineJoin: "round", interactive: false,
+    }).addTo(layerGroup);
+    L.polyline(pts, {
+      color: color, weight: 5, opacity: 0.95,
+      lineCap: "round", lineJoin: "round", interactive: false,
+    }).addTo(layerGroup);
+    var dashLine = L.polyline(pts, {
+      color: "#ffffff", weight: 3, opacity: 0.75,
+      dashArray: "8 16", dashOffset: "0",
+      lineCap: "round", lineJoin: "round", interactive: false,
+    });
+    dashLine.addTo(layerGroup);
+    _startRouteAnimation(dashLine, god);
+  }
 
   function _decodePolyline6(encoded) {
     if (!encoded) return [];
@@ -191,6 +244,50 @@
   }
 
   // -----------------------------------------------------------------------
+  // Overrides admin (transparence carte)
+  // -----------------------------------------------------------------------
+
+  function _loadOverrides() {
+    if (STATE.overridesLoaded) return;
+    STATE.overridesLoaded = true;
+    fetch("/api/routing-overrides/active", { credentials: "same-origin" })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j || j.ok === false || !STATE.overridesLayer) return;
+        (j.items || []).forEach(_renderOverride);
+      })
+      .catch(function () { /* silencieux : visu non critique */ });
+  }
+
+  function _renderOverride(it) {
+    if (!STATE.overridesLayer) return;
+    var color = it.type === "force_open" ? "#16a34a" : "#dc2626";
+    var iconName = it.type === "force_open" ? "door_open" : "block";
+    var label = (it.label || "(sans libelle)")
+      + (it.scope === "god_only" ? " (intervention seule)"
+        : it.scope === "normal_only" ? " (normal seul)" : "");
+
+    if (it.type === "block_point" || it.type === "force_open") {
+      if (it.lat == null || it.lon == null) return;
+      L.marker([it.lat, it.lon], {
+        icon: L.divIcon({
+          className: "",
+          html: "<div class='rov-pin' style='background:" + color + "; opacity:0.85; width:22px; height:22px;'>"
+            + "<span class='material-symbols-outlined' style='font-size:13px;'>" + iconName + "</span></div>",
+          iconSize: [22, 22], iconAnchor: [11, 11],
+        }),
+      }).bindTooltip(label).addTo(STATE.overridesLayer);
+    } else if (it.type === "block_polygon") {
+      var ring = (it.coords || []).map(function (c) { return [c[1], c[0]]; });
+      if (ring.length < 3) return;
+      L.polygon(ring, {
+        color: color, fillColor: color,
+        fillOpacity: 0.15, weight: 1.5, opacity: 0.7,
+      }).bindTooltip(label).addTo(STATE.overridesLayer);
+    }
+  }
+
+  // -----------------------------------------------------------------------
   // Map / polyline rendering
   // -----------------------------------------------------------------------
 
@@ -205,7 +302,11 @@
       attribution: "&copy; OpenStreetMap"
     }).addTo(STATE.map);
     STATE.map.setView(center, 14);
+    // overridesLayer en-dessous de mapLayers (route plus visible)
+    STATE.overridesLayer = L.layerGroup().addTo(STATE.map);
     STATE.mapLayers = L.layerGroup().addTo(STATE.map);
+
+    _loadOverrides();
 
     STATE.map.on("click", function (e) {
       if (!STATE.waypointPickMode) return;
@@ -222,6 +323,7 @@
 
   function _renderRoute(result) {
     if (!STATE.mapLayers) return;
+    _stopRouteAnimation();
     STATE.mapLayers.clearLayers();
     STATE.lastResult = result;
 
@@ -253,14 +355,11 @@
 
     var bounds = null;
     if (pts && pts.length >= 2) {
-      L.polyline(pts, {
-        color: "#dc2626", weight: 5, opacity: 0.85,
-        lineJoin: "round", lineCap: "round"
-      }).addTo(STATE.mapLayers);
+      _drawWazeRoute(STATE.mapLayers, pts, !!STATE.god);
       bounds = L.latLngBounds(pts);
     } else if (STATE.from && STATE.to) {
       L.polyline([STATE.from, STATE.to], {
-        color: "#dc2626", weight: 3, opacity: 0.6,
+        color: "#2563eb", weight: 3, opacity: 0.5,
         dashArray: "6 8", interactive: false
       }).addTo(STATE.mapLayers);
       bounds = L.latLngBounds([STATE.from, STATE.to]);
@@ -365,6 +464,7 @@
       from: STATE.from,
       to: STATE.to,
       waypoints: STATE.waypoints,
+      god: !!STATE.god,
       title: "Itineraire (PC org)",
       body: "Itineraire envoye depuis le PC org. " +
         ((STATE.lastResult.distance_m / 1000).toFixed(1)) + " km, " +
@@ -391,10 +491,13 @@
   // -----------------------------------------------------------------------
 
   function close() {
+    _stopRouteAnimation();
     if (STATE.map) {
       try { STATE.map.remove(); } catch (e) { /* ignore */ }
       STATE.map = null;
       STATE.mapLayers = null;
+      STATE.overridesLayer = null;
+      STATE.overridesLoaded = false;
     }
     if (STATE.overlay && STATE.overlay.parentNode) {
       STATE.overlay.parentNode.removeChild(STATE.overlay);

@@ -2,6 +2,7 @@
 import os
 import re
 import json
+import hmac
 import logging
 import uuid
 import subprocess
@@ -34,10 +35,13 @@ from field import field_bp
 from vision_admin import vision_admin_bp
 from crise_auth import crise_auth_bp
 from routing import routing_bp
+from routing_overrides import routing_overrides_bp
 from cameras import cameras_bp
 import pcorg_summary
 import pcorg_summary_mail
 import pcorg_ai_memory
+import alfred
+from alfred import alfred_bp
 
 ################################################################################
 # Configuration
@@ -93,6 +97,13 @@ if not DEV_MODE and not os.getenv('SECRET_KEY'):
     raise ValueError("SECRET_KEY must be set via environment variable in production!")
 if not DEV_MODE and not os.getenv('JWT_SECRET'):
     raise ValueError("JWT_SECRET must be set via environment variable in production!")
+if not DEV_MODE and not os.getenv('SNAPSHOT_PUBLIC_SECRET'):
+    logger.warning(
+        "SNAPSHOT_PUBLIC_SECRET non configure en prod ! "
+        "Les URLs publiques de snapshot WhatsApp sont signees avec JWT_SECRET en fallback "
+        "et doivent etre regenerees apres rotation. Definir cette variable sur Cockpit ET sur la VM PCA "
+        "(ecoutehik2.py / cockpit_dispatch.py) pour cloisonner."
+    )
 
 # Connexion à MongoDB
 MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
@@ -1579,7 +1590,18 @@ csrf.exempt(vision_admin_bp)
 # conservent leur CSRF.
 app.register_blueprint(routing_bp)
 csrf.exempt(app.view_functions["routing.field_route"])
+# Routing overrides : corrections admin pour la carte (portails fermes,
+# routes barrees...). Fusionne avec les penalites Waze dans routing._compute().
+# Toutes routes admin, CSRF conserve.
+app.register_blueprint(routing_overrides_bp)
 app.register_blueprint(cameras_bp)
+# Alfred (agent IA WhatsApp via VM Linux + WAHA webhook). Le webhook POST
+# /api/wa/webhook est exempt de CSRF : WAHA ne sait pas envoyer un token CSRF,
+# l'authentification se fait par HMAC (header X-Webhook-Hmac, secret partage
+# WAHA_WEBHOOK_SECRET cote env). Les routes admin /api/alfred/* gardent leur
+# CSRF (decorees @role_required("admin") dans les sections ad hoc).
+app.register_blueprint(alfred_bp)
+csrf.exempt(app.view_functions["alfred.wa_webhook"])
 # app.register_blueprint(meteo_bp)
 
 # Espace exercices de crise : sous-arbre statique servi sous /crise.
@@ -2791,7 +2813,29 @@ DETECTION_TYPES = {
     "traffic_cluster", "anpr_watchlist", "meteo_threshold",
     "checkpoint_reassign", "checkpoint_error_burst",
     "meteo_rain_onset", "pcorg_urgency",
+    "camera_event",
 }
+
+# Catalogue des Smart Events Hikvision exposes a la modale de creation d'alerte
+# camera_event. Chaque entree decrit un type d'evenement remonte par les cameras
+# via ecoutehik2.py (cf. PCA/SCRIPTS/cockpit_dispatch.py).
+CAMERA_EVENT_TYPES = [
+    {"id": "fieldDetection",       "label": "Intrusion de zone",            "icon": "shield",            "color": "#dc2626", "desc": "Personne ou vehicule entre dans une zone interdite."},
+    {"id": "lineDetection",        "label": "Franchissement de ligne",      "icon": "linear_scale",      "color": "#dc2626", "desc": "Franchissement d'une ligne virtuelle (acces controle)."},
+    {"id": "regionEntrance",       "label": "Entree de zone",               "icon": "login",             "color": "#f97316", "desc": "Mouvement entrant dans une zone surveillee."},
+    {"id": "regionExiting",        "label": "Sortie de zone",               "icon": "logout",            "color": "#f97316", "desc": "Sortie anormale d'une zone (parking VIP hors horaire, etc.)."},
+    {"id": "unattendedBaggage",    "label": "Objet abandonne",              "icon": "luggage",           "color": "#dc2626", "desc": "Sac, colis ou objet non reclame > N secondes."},
+    {"id": "objectRemoval",        "label": "Retrait d'objet",              "icon": "inventory_2",       "color": "#f97316", "desc": "Objet retire de son emplacement (materiel, equipement)."},
+    {"id": "loiterDetection",      "label": "Flanerie",                     "icon": "accessibility",     "color": "#eab308", "desc": "Personne stationnaire trop longtemps."},
+    {"id": "peopleGathering",      "label": "Attroupement",                 "icon": "groups",            "color": "#f97316", "desc": "Densite de personnes superieure a un seuil."},
+    {"id": "fastMoving",           "label": "Mouvement rapide",             "icon": "directions_run",    "color": "#f97316", "desc": "Vitesse anormale (course, fuite, vehicule rapide)."},
+    {"id": "parkingDetection",     "label": "Stationnement interdit",       "icon": "no_crash",          "color": "#dc2626", "desc": "Vehicule en zone evacuation, acces secours, voie pompiers."},
+    {"id": "audioDetection",       "label": "Bruit anormal",                "icon": "volume_up",         "color": "#eab308", "desc": "Cri, klaxon, alarme, casse (cameras audio uniquement)."},
+    {"id": "sceneChangeDetection", "label": "Camera masquee ou deplacee",   "icon": "visibility_off",    "color": "#dc2626", "desc": "Sabotage potentiel : peinture, repositionnement, voile."},
+    {"id": "vibrationDetection",   "label": "Vibration / choc",             "icon": "vibration",         "color": "#eab308", "desc": "Impact sur une camera ou son support."},
+    {"id": "anpr_watchlist",       "label": "Plaque surveillee (LAPI)",     "icon": "local_police",      "color": "#dc2626", "desc": "Plaque presente dans la watchlist LAPI."},
+]
+CAMERA_EVENT_TYPE_IDS = {e["id"] for e in CAMERA_EVENT_TYPES}
 
 @app.route('/admin/alertes')
 @role_required("admin")
@@ -2903,6 +2947,108 @@ def delete_alert_definition(did):
     r = COL_ALERT_DEFS.delete_one({"_id": oid})
     if r.deleted_count == 0:
         return jsonify({"error": "Definition introuvable"}), 404
+    return jsonify({"ok": True})
+
+# --- Alfred (agent IA WhatsApp) ---
+# Config par groupe : lue/ecrite depuis Field Dispatch.
+
+@app.route('/api/alfred/config', methods=['GET'])
+@role_required("admin")
+def alfred_config_list():
+    return jsonify({"ok": True, "groups": alfred.list_configs()})
+
+@app.route('/api/alfred/config/<path:chat_id>', methods=['POST'])
+@role_required("admin")
+def alfred_config_upsert(chat_id):
+    data = request.get_json(force=True) or {}
+    payload = getattr(request, 'user_payload', {})
+    user_email = payload.get("email", "?")
+    try:
+        doc = alfred.upsert_config(chat_id, data, updated_by=user_email)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    last = doc.get("last_summary_at")
+    if hasattr(last, "isoformat"):
+        doc["last_summary_at"] = last.isoformat()
+    updated_at = doc.get("updated_at")
+    if hasattr(updated_at, "isoformat"):
+        doc["updated_at"] = updated_at.isoformat()
+    return jsonify({"ok": True, "group": doc})
+
+@app.route('/api/alfred/summary/trigger/<path:chat_id>', methods=['POST'])
+@role_required("admin")
+def alfred_summary_trigger(chat_id):
+    alfred.trigger_summary_now(chat_id)
+    return jsonify({"ok": True, "triggered": True})
+
+
+@app.route('/api/alfred/history/<path:chat_id>', methods=['DELETE'])
+@role_required("admin")
+def alfred_history_clear(chat_id):
+    """Vide l'historique des messages WhatsApp ingeres pour un groupe.
+
+    Supprime aussi les reponses Alfred persistees (source=alfred_response).
+    Les resumes generes ne sont PAS affectes (ils vivent dans une autre collection).
+    """
+    user_email = (getattr(request, 'user_payload', {}) or {}).get("email", "?")
+    deleted = alfred.clear_group_history(chat_id, deleted_by=user_email)
+    return jsonify({"ok": True, "deleted": deleted})
+
+@app.route('/api/alfred/summaries', methods=['GET'])
+@role_required("manager")
+def alfred_summary_list():
+    chat_id = request.args.get("chat_id") or None
+    try:
+        limit = int(request.args.get("limit") or 50)
+    except (TypeError, ValueError):
+        limit = 50
+    return jsonify({"ok": True, "summaries": alfred.list_summaries(chat_id=chat_id, limit=limit)})
+
+@app.route('/api/alfred/summaries/<sid>', methods=['GET'])
+@role_required("manager")
+def alfred_summary_get(sid):
+    doc = alfred.get_summary(sid)
+    if not doc:
+        return jsonify({"ok": False, "error": "introuvable"}), 404
+    return jsonify({"ok": True, "summary": doc})
+
+@app.route('/api/alfred/summaries/<sid>', methods=['DELETE'])
+@role_required("admin")
+def alfred_summary_delete(sid):
+    if not alfred.delete_summary(sid):
+        return jsonify({"ok": False, "error": "introuvable"}), 404
+    return jsonify({"ok": True})
+
+@app.route('/api/alfred/dm-whitelist', methods=['GET'])
+@role_required("admin")
+def alfred_dm_list():
+    return jsonify({"ok": True, "entries": alfred.list_dm_whitelist()})
+
+@app.route('/api/alfred/dm-whitelist', methods=['POST'])
+@role_required("admin")
+def alfred_dm_add():
+    data = request.get_json(force=True) or {}
+    payload = getattr(request, 'user_payload', {})
+    user_email = payload.get("email", "?")
+    try:
+        entry = alfred.add_dm_whitelist(
+            data.get("chat_id"),
+            label=data.get("label") or "",
+            added_by=user_email,
+        )
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    if hasattr(entry.get("added_at"), "isoformat"):
+        entry["added_at"] = entry["added_at"].isoformat()
+    return jsonify({"ok": True, "entry": entry})
+
+@app.route('/api/alfred/dm-whitelist/<path:chat_id>', methods=['DELETE'])
+@role_required("admin")
+def alfred_dm_remove(chat_id):
+    if not alfred.remove_dm_whitelist(chat_id):
+        return jsonify({"ok": False, "error": "introuvable"}), 404
     return jsonify({"ok": True})
 
 # --- Watchlist ANPR ---
@@ -3025,13 +3171,261 @@ def get_active_alerts():
         result.append(d)
     return jsonify(result)
 
+
+# ---------------------------------------------------------------------------
+# Camera Smart Events : catalogue, liste cameras, snapshot, console temps reel
+# ---------------------------------------------------------------------------
+
+HIK_IMAGES_ROOT = os.path.abspath(os.getenv("HIK_IMAGES_ROOT", r"E:\TITAN\production\hik_images"))
+
+
+@app.route('/api/camera-event-types', methods=['GET'])
+@role_required("admin")
+def list_camera_event_types():
+    """Retourne le catalogue des Smart Events Hik exposes a la modale."""
+    return jsonify(CAMERA_EVENT_TYPES)
+
+
+@app.route('/api/cameras-list', methods=['GET'])
+@role_required("admin")
+def list_cameras_for_alert_def():
+    """Liste des cameras enabled pour la checklist de la modale alerte.
+    Fusionne cockpit_cameras (admin Cameras) + anpr_camera_config (LAPI).
+    L'identifiant utilise pour selectionner et matcher est camera_path
+    (ex: /lapisud3) - c'est ce que ecoutehik2.py emet.
+    """
+    result = []
+    seen_paths = set()
+
+    # 1) cockpit_cameras (champ camera_path si explicitement renseigne)
+    for d in db['cockpit_cameras'].find(
+        {"enabled": True},
+        {"name": 1, "location": 1, "ip": 1, "tags": 1, "camera_path": 1}
+    ).sort([("location", 1), ("name", 1)]):
+        cp = d.get("camera_path") or ""
+        if not cp:
+            # Fallback : si pas de camera_path, on utilise /<name>
+            cp = "/" + (d.get("name") or str(d["_id"])).strip("/")
+        if cp in seen_paths:
+            continue
+        seen_paths.add(cp)
+        result.append({
+            "_id": str(d["_id"]),
+            "name": d.get("name", ""),
+            "location": d.get("location", ""),
+            "ip": d.get("ip", ""),
+            "tags": d.get("tags", []) or [],
+            "camera_path": cp,
+            "source": "cockpit_cameras",
+        })
+
+    # 2) anpr_camera_config (entrees LAPI specifiques)
+    try:
+        for d in db['anpr_camera_config'].find(
+            {},
+            {"camera_path": 1, "label": 1, "location": 1}
+        ).sort([("location", 1), ("label", 1)]):
+            cp = d.get("camera_path") or ""
+            if not cp or cp in seen_paths:
+                continue
+            seen_paths.add(cp)
+            result.append({
+                "_id": str(d["_id"]),
+                "name": d.get("label", cp),
+                "location": d.get("location", "") or "LAPI",
+                "ip": "",
+                "tags": ["lapi"],
+                "camera_path": cp,
+                "source": "anpr_camera_config",
+            })
+    except Exception as e:
+        logger.warning("merge anpr_camera_config in /api/cameras-list: %s", e)
+
+    return jsonify(result)
+
+
+@app.route('/api/hik-snapshot/<alert_id>', methods=['GET'])
+@role_required("user")
+def get_hik_snapshot(alert_id):
+    """Sert le JPEG snapshot lie a une alerte camera depuis le disque local.
+    Filtre anti path-traversal : le chemin doit etre sous HIK_IMAGES_ROOT.
+    """
+    try:
+        oid = ObjectId(alert_id)
+    except Exception:
+        return jsonify({"error": "ID invalide"}), 400
+    doc = COL_ACTIVE_ALERTS.find_one({"_id": oid}, {"actionData": 1})
+    if not doc:
+        # Tentative aussi sur l'historique au cas ou l'alerte a expire
+        doc = db['cockpit_active_alerts_archive'].find_one({"_id": oid}, {"actionData": 1})
+    if not doc:
+        return jsonify({"error": "Alerte introuvable"}), 404
+    snap = (doc.get("actionData") or {}).get("snapshot_path") or ""
+    if not snap:
+        return jsonify({"error": "Pas de snapshot"}), 404
+    # Resolution + securisation du chemin
+    full_path = os.path.abspath(snap)
+    try:
+        common = os.path.commonpath([full_path, HIK_IMAGES_ROOT])
+    except ValueError:
+        return jsonify({"error": "Chemin invalide"}), 403
+    if common != HIK_IMAGES_ROOT:
+        return jsonify({"error": "Chemin hors zone autorisee"}), 403
+    if not os.path.isfile(full_path):
+        return jsonify({"error": "Fichier introuvable"}), 404
+    from flask import send_file
+    resp = send_file(full_path, mimetype="image/jpeg", max_age=300)
+    resp.headers["Cache-Control"] = "private, max-age=300"
+    return resp
+
+
+@app.route('/public/snapshot/<alert_id>', methods=['GET'])
+@csrf.exempt
+def public_snapshot(alert_id):
+    """Route publique (pas d'auth Cockpit) servant un snapshot camera signe HMAC.
+    Utilisee dans les messages WhatsApp ; les destinataires n'ont pas a se
+    connecter a Cockpit. URL : /public/snapshot/<alert_id>?exp=<unix>&sig=<hmac32>.
+    TTL 7 jours par defaut (configurable cote signature dans whatsapp.py).
+    Variable d'env SNAPSHOT_PUBLIC_SECRET partagee Cockpit <-> ecoutehik2 (PCA).
+    """
+    from whatsapp import verify_snapshot_signature
+    exp = request.args.get("exp", "")
+    sig = request.args.get("sig", "")
+    if not verify_snapshot_signature(alert_id, exp, sig):
+        return jsonify({"error": "Lien invalide ou expire"}), 403
+    try:
+        oid = ObjectId(alert_id)
+    except Exception:
+        return jsonify({"error": "ID invalide"}), 400
+    doc = COL_ACTIVE_ALERTS.find_one({"_id": oid}, {"actionData": 1})
+    if not doc:
+        doc = db['cockpit_active_alerts_archive'].find_one({"_id": oid}, {"actionData": 1})
+    if not doc:
+        return jsonify({"error": "Alerte introuvable"}), 404
+    snap = (doc.get("actionData") or {}).get("snapshot_path") or ""
+    if not snap:
+        return jsonify({"error": "Pas de snapshot"}), 404
+    full_path = os.path.abspath(snap)
+    try:
+        common = os.path.commonpath([full_path, HIK_IMAGES_ROOT])
+    except ValueError:
+        return jsonify({"error": "Chemin invalide"}), 403
+    if common != HIK_IMAGES_ROOT:
+        return jsonify({"error": "Chemin hors zone autorisee"}), 403
+    if not os.path.isfile(full_path):
+        return jsonify({"error": "Fichier introuvable"}), 404
+    from flask import send_file
+    resp = send_file(full_path, mimetype="image/jpeg", max_age=3600)
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    # X-Robots-Tag : ne pas indexer
+    resp.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return resp
+
+
+@app.route('/api/hik-events-stream', methods=['GET'])
+@role_required("admin")
+def hik_events_stream():
+    """Console Hik temps reel.
+    Aggrege la collection hik_event_stream (alimentee par ecoutehik2.py) par
+    (camera_path, event_type) sur la fenetre [since_seconds] (defaut 900s = 15 min).
+
+    Retour : liste triee par last_dt desc :
+      [{camera_path, camera_name, camera_location, event_type, event_label,
+        event_icon, event_color, count, last_dt, last_snapshot_path,
+        last_alert_id}]
+    """
+    try:
+        since_s = int(request.args.get("since", "900"))
+    except ValueError:
+        since_s = 900
+    since_s = max(60, min(86400, since_s))
+    since_dt = datetime.now(timezone.utc) - timedelta(seconds=since_s)
+
+    col = db['hik_event_stream']
+    pipeline = [
+        {"$match": {"ts": {"$gte": since_dt}}},
+        {"$sort": {"ts": -1}},
+        {"$group": {
+            "_id": {"camera_path": "$camera_path", "event_type": "$event_type"},
+            "camera_name": {"$first": "$camera_name"},
+            "camera_location": {"$first": "$camera_location"},
+            "count": {"$sum": 1},
+            "last_dt": {"$first": "$ts"},
+            "last_snapshot_path": {"$first": "$snapshot_path"},
+            "last_id": {"$first": "$_id"},
+        }},
+        {"$sort": {"last_dt": -1}},
+        {"$limit": 200},
+    ]
+    try:
+        agg = list(col.aggregate(pipeline))
+    except Exception as e:
+        logger.warning("hik_events_stream aggregation failed: %s", e)
+        agg = []
+
+    # Map event_type -> meta
+    meta_by_id = {e["id"]: e for e in CAMERA_EVENT_TYPES}
+    result = []
+    for row in agg:
+        et = row["_id"].get("event_type", "")
+        meta = meta_by_id.get(et, {})
+        last_dt = row.get("last_dt")
+        if last_dt and last_dt.tzinfo is None:
+            last_dt = last_dt.replace(tzinfo=timezone.utc)
+        result.append({
+            "camera_path": row["_id"].get("camera_path", ""),
+            "camera_name": row.get("camera_name", "") or row["_id"].get("camera_path", ""),
+            "camera_location": row.get("camera_location", ""),
+            "event_type": et,
+            "event_label": meta.get("label", et),
+            "event_icon": meta.get("icon", "notifications"),
+            "event_color": meta.get("color", "#6b7280"),
+            "count": row.get("count", 0),
+            "last_dt": last_dt.isoformat() if last_dt else None,
+            "last_snapshot_path": row.get("last_snapshot_path") or "",
+            "last_id": str(row.get("last_id")) if row.get("last_id") else "",
+        })
+    return jsonify({"window_seconds": since_s, "rows": result})
+
+
+@app.route('/api/hik-events-stream/snapshot/<stream_id>', methods=['GET'])
+@role_required("admin")
+def hik_event_stream_snapshot(stream_id):
+    """Sert un snapshot lie a un event brut hik_event_stream (pour les thumbnails de la console).
+    Idem regles de securite que /api/hik-snapshot.
+    """
+    try:
+        oid = ObjectId(stream_id)
+    except Exception:
+        return jsonify({"error": "ID invalide"}), 400
+    doc = db['hik_event_stream'].find_one({"_id": oid}, {"snapshot_path": 1})
+    if not doc:
+        return jsonify({"error": "Event introuvable"}), 404
+    snap = doc.get("snapshot_path") or ""
+    if not snap:
+        return jsonify({"error": "Pas de snapshot"}), 404
+    full_path = os.path.abspath(snap)
+    try:
+        common = os.path.commonpath([full_path, HIK_IMAGES_ROOT])
+    except ValueError:
+        return jsonify({"error": "Chemin invalide"}), 403
+    if common != HIK_IMAGES_ROOT:
+        return jsonify({"error": "Chemin hors zone autorisee"}), 403
+    if not os.path.isfile(full_path):
+        return jsonify({"error": "Fichier introuvable"}), 404
+    from flask import send_file
+    resp = send_file(full_path, mimetype="image/jpeg", max_age=300)
+    resp.headers["Cache-Control"] = "private, max-age=300"
+    return resp
+
 ################################################################################
 # Webhook & Merge Config
 ################################################################################
 
-WEBHOOK_TOKEN = os.getenv('WEBHOOK_TOKEN', 'dev-webhook-token-change-me')
-if IS_PROD and WEBHOOK_TOKEN == 'dev-webhook-token-change-me':
-    logger.warning("WEBHOOK_TOKEN non configure en production!")
+_WEBHOOK_TOKEN_DEFAULT = 'dev-webhook-token-change-me'
+WEBHOOK_TOKEN = os.getenv('WEBHOOK_TOKEN', _WEBHOOK_TOKEN_DEFAULT)
+if IS_PROD and WEBHOOK_TOKEN == _WEBHOOK_TOKEN_DEFAULT:
+    raise ValueError("WEBHOOK_TOKEN must be set via environment variable in production!")
 
 
 @app.route('/webhook/parametrage-updated', methods=['POST'])
@@ -3039,7 +3433,7 @@ if IS_PROD and WEBHOOK_TOKEN == 'dev-webhook-token-change-me':
 def webhook_parametrage_updated():
     """Webhook appele par groundmaster quand un parametrage est modifie."""
     token = request.headers.get('X-Webhook-Token', '')
-    if token != WEBHOOK_TOKEN:
+    if not hmac.compare_digest(token, WEBHOOK_TOKEN):
         return jsonify({"error": "Unauthorized"}), 401
 
     data = request.get_json(silent=True) or {}
@@ -3054,6 +3448,22 @@ def webhook_parametrage_updated():
     except Exception as e:
         logger.error(f"Erreur webhook merge: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/timetable/version', methods=['GET'])
+@role_required("user")
+def get_timetable_version():
+    """Endpoint leger pour le polling : retourne uniquement la version du timetable.
+    Utilise par le navigateur pour declencher un refetch si le merge a tourne."""
+    event = request.args.get('event')
+    year = request.args.get('year')
+    if not event or not year:
+        return jsonify({"error": "event et year requis"}), 400
+    doc = db.timetable.find_one(
+        {"event": event, "year": year},
+        {"_id": 0, "version": 1}
+    )
+    return jsonify({"version": (doc or {}).get("version", 0)})
 
 
 @app.route('/api/cluster-config', methods=['GET'])
@@ -6445,6 +6855,12 @@ def wa_list_groups():
 @role_required("admin")
 def wa_sync_groups():
     remote = _wa_service.get_groups()
+    # Si WAHA n'a rien renvoye (timeout, session KO), on ne purge surtout pas
+    # pour eviter de tout effacer sur un coup de mou reseau.
+    if not remote:
+        return jsonify({"synced": 0, "purged": 0,
+                        "warning": "Aucun groupe renvoye par WAHA, purge ignoree"})
+    synced_ids = set()
     synced = 0
     for g in remote:
         gid = g.get("_chat_id", "")
@@ -6466,7 +6882,11 @@ def wa_sync_groups():
             upsert=True,
         )
         synced += 1
-    return jsonify({"synced": synced})
+        synced_ids.add(gid)
+    # Purge des groupes orphelins : presents en Mongo mais plus dans WAHA
+    # (ex: changement de numero WhatsApp -> groupes de l'ancien compte caducs).
+    purge = COL_WA_GROUPS.delete_many({"group_id": {"$nin": list(synced_ids)}})
+    return jsonify({"synced": synced, "purged": purge.deleted_count})
 
 @app.route('/api/whatsapp/groups/clear', methods=['DELETE'])
 @role_required("admin")
@@ -6608,6 +7028,15 @@ if __name__ == "__main__":
     # Validation pour éviter debug=True en production
     if not DEV_MODE and app.debug:
         raise RuntimeError("L'application ne doit pas tourner en mode debug en production.")
+
+    # Demarre le scheduler Alfred (resumes WhatsApp periodiques). En dev avec
+    # use_reloader=True, Werkzeug fork 2 process : on ne lance qu'une seule fois
+    # le scheduler, dans le process enfant (WERKZEUG_RUN_MAIN == 'true').
+    if not DEV_MODE or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        try:
+            alfred.start_scheduler()
+        except Exception as e:
+            logger.warning("Echec demarrage scheduler Alfred : %s", e)
 
     # Lancement de l'application
     if DEV_MODE:

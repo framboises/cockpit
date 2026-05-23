@@ -6,9 +6,12 @@
 #     (voir scripts/build_valhalla_tiles.sh).
 #   - Penalites Waze : on lit la collection waze_alerts (alimentee par traffic.py)
 #     et on convertit les alertes recentes en avoid_locations / exclude_polygons.
-#   - Mode god (gyrophare / intervention prioritaire) : ignore les bouchons et
-#     emprunte les sens interdits via un costing alternatif (par defaut bicycle,
-#     en attendant un profil emergency custom).
+#   - Mode god (gyrophare / intervention prioritaire) : costing "auto" mais
+#     avec costing_options.ignore_oneways / ignore_restrictions / ignore_access
+#     / ignore_closures et penalites portails / acces prive a zero. Conserve
+#     la vitesse vehicule tout en autorisant sens interdits, portails fermes,
+#     acces prives, voies de service. Equivalent moderne du hack "bicycle"
+#     historique, sans la penalite de vitesse vehicule.
 #   - Fallback stub : si Valhalla est injoignable, retourne une polyline droite
 #     entre les points avec un ETA estime par haversine (utile en dev avant
 #     deploiement de Valhalla, et comme garde-fou en prod).
@@ -36,6 +39,10 @@ from field import (
     INBOX_MESSAGE_TTL_SECONDS,
 )
 
+# Overrides edites par l'admin (portails fermes, routes barrees...).
+# Fusionnes avec les penalites Waze dans _compute().
+from routing_overrides import get_active_overrides_for_compute
+
 
 routing_bp = Blueprint("routing", __name__)
 logger = logging.getLogger("routing")
@@ -48,10 +55,23 @@ logger = logging.getLogger("routing")
 VALHALLA_URL = os.getenv("VALHALLA_URL", "http://localhost:8002").rstrip("/")
 VALHALLA_TIMEOUT = int(os.getenv("VALHALLA_TIMEOUT_SECONDS", "5"))
 
-# Costing utilise en mode god. "bicycle" en MVP : ignore beaucoup de oneways,
-# accepte les living_streets et paths. Pour aller plus loin : compiler un
-# profil "emergency" custom et passer ROUTING_GOD_COSTING=emergency.
-ROUTING_GOD_COSTING = os.getenv("ROUTING_GOD_COSTING", "bicycle")
+# Costing options injectees en mode god (intervention prioritaire). On reste
+# sur "auto" pour conserver les vitesses vehicule mais on neutralise toutes
+# les restrictions civiles : sens uniques, acces prives, portails, voies de
+# service, fermetures. Equivalent moderne d'un costing "emergency" custom,
+# sans dependance a une recompilation Valhalla.
+ROUTING_GOD_COSTING_OPTIONS = {
+    "ignore_oneways": True,
+    "ignore_restrictions": True,
+    "ignore_access": True,
+    "ignore_closures": True,
+    "gate_cost": 0,
+    "gate_penalty": 0,
+    "private_access_penalty": 0,
+    "service_penalty": 0,
+    "use_tracks": 1.0,
+    "use_living_streets": 1.0,
+}
 
 # Anciennete max d'une alerte Waze pour qu'elle soit prise en compte
 WAZE_MAX_AGE_MINUTES = int(os.getenv("ROUTING_WAZE_MAX_AGE_MIN", "30"))
@@ -251,26 +271,34 @@ def _call_valhalla(from_pt, to_pt, waypoints, god, avoids):
             locations.append({"lat": ll[0], "lon": ll[1], "type": "via"})
     locations.append({"lat": to_pt[0], "lon": to_pt[1], "type": "break"})
 
-    costing = ROUTING_GOD_COSTING if god else "auto"
     payload = {
         "locations": locations,
-        "costing": costing,
+        "costing": "auto",
         "directions_options": {"units": "kilometers"},
         "id": "cockpit-routing",
     }
+    if god:
+        payload["costing_options"] = {"auto": dict(ROUTING_GOD_COSTING_OPTIONS)}
 
+    avoid_locations = []
+    exclude_polygons = []
     if not god and avoids:
-        avoid_locations = []
-        exclude_polygons = []
         for a in avoids:
             if a["penalty_s"] >= HARD_AVOID_PENALTY_THRESHOLD:
                 avoid_locations.append({"lat": a["lat"], "lon": a["lon"]})
             else:
                 exclude_polygons.append(_circle_polygon(a["lat"], a["lon"], radius_m=80))
-        if avoid_locations:
-            payload["avoid_locations"] = avoid_locations
-        if exclude_polygons:
-            payload["exclude_polygons"] = exclude_polygons
+
+    # Overrides admin (toujours appliques selon leur scope, y compris en god
+    # si scope=all ou god_only - cf. routing_overrides.get_active_overrides_for_compute).
+    ov_avoid, ov_polys = get_active_overrides_for_compute(god)
+    avoid_locations.extend(ov_avoid)
+    exclude_polygons.extend(ov_polys)
+
+    if avoid_locations:
+        payload["avoid_locations"] = avoid_locations
+    if exclude_polygons:
+        payload["exclude_polygons"] = exclude_polygons
 
     try:
         url = VALHALLA_URL + "/route"
@@ -509,6 +537,7 @@ def forward_route():
         "to": list(data.get("to") or []),
         "via": data.get("waypoints") or [],
         "forced": True,
+        "god": bool(data.get("god")),
     }
 
     title = (data.get("title") or "Itineraire").strip()[:120]
