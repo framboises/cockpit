@@ -1500,9 +1500,18 @@
   // ==========================================================================
 
   function switchView(view) {
-    // Fermer le panel meteo si ouvert (avant le guard pour que ca marche meme si deja en vue map)
-    var meteoPanel = document.getElementById("meteo-panel");
-    if (meteoPanel) meteoPanel.style.display = "none";
+    // Fermer les panels plein-ecran si ouverts (avant le guard pour que ca marche meme si deja en vue map)
+    ["meteo-panel", "affluence-panel", "counters-panel", "pcorg-expanded-panel"].forEach(function (id) {
+      var p = document.getElementById(id);
+      if (p) p.style.display = "none";
+    });
+    ["meteo-expand-btn", "affluence-expand-btn", "counters-expand-btn", "pcorg-expand-btn"].forEach(function (id) {
+      var b = document.getElementById(id);
+      if (b) {
+        var ic = b.querySelector(".material-symbols-outlined");
+        if (ic) ic.textContent = "open_in_full";
+      }
+    });
 
     if (view === currentView) return;
     // Exit map fullscreen before switching views

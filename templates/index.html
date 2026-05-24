@@ -465,6 +465,57 @@
                 </div>
             </div>
 
+            <!-- Panel Analyse Affluence (meme emplacement, alternance avec timeline/carte) -->
+            <div id="affluence-panel" class="meteo-panel affluence-panel" style="display:none;">
+                <div class="meteo-panel-header">
+                    <h3>Analyse Affluence</h3>
+                    <div class="meteo-panel-tabs" id="affluence-panel-tabs"></div>
+                    <span id="affluence-panel-update" class="hsh-last-update"></span>
+                    <button class="meteo-panel-close" id="affluence-panel-close" title="Fermer">
+                        <span class="material-symbols-outlined">close_fullscreen</span>
+                    </button>
+                </div>
+                <div class="meteo-panel-body" id="affluence-panel-body">
+                    <!-- 1. KPIs globaux -->
+                    <section class="meteo-section">
+                        <h4>Synthese globale</h4>
+                        <div class="affluence-kpi-strip" id="affluence-kpi-strip"></div>
+                    </section>
+                    <!-- 2. Detail du jour selectionne -->
+                    <section class="meteo-section">
+                        <h4 id="affluence-day-title">Detail du jour</h4>
+                        <div class="affluence-day-detail">
+                            <div class="affluence-day-cards" id="affluence-day-cards"></div>
+                            <div class="affluence-chart-wrap">
+                                <canvas id="affluence-hourly-chart"></canvas>
+                            </div>
+                        </div>
+                    </section>
+                    <!-- 3. Tableau global tous les jours publics -->
+                    <section class="meteo-section">
+                        <h4>Tableau journalier (tous les jours publics)</h4>
+                        <div id="affluence-days-table"></div>
+                    </section>
+                    <!-- 4. Courbes de remplissage N / N-1 / N-2 -->
+                    <section class="meteo-section">
+                        <h4>Courbes de remplissage (jours avant la course)</h4>
+                        <div class="affluence-fillcurve-wrap">
+                            <canvas id="affluence-fill-chart"></canvas>
+                        </div>
+                    </section>
+                    <!-- 5. Sites (parkings/campings) -->
+                    <section class="meteo-section">
+                        <h4>Sites (parkings & campings)</h4>
+                        <div id="affluence-sites-list"></div>
+                    </section>
+                    <!-- 6. Alertes & seuils -->
+                    <section class="meteo-section meteo-thresholds-card">
+                        <h4>Alertes & seuils operationnels</h4>
+                        <div id="affluence-alerts"></div>
+                    </section>
+                </div>
+            </div>
+
             <!-- Widgets droite -->
             <aside id="widgets-panel-right" aria-label="Widgets droite">
 
@@ -559,6 +610,9 @@
                             <button class="widget-tab" data-tab="affluence-tab2">Ventes</button>
                             <button class="widget-tab" data-tab="affluence-tab3">Sites</button>
                         </div>
+                        <button class="meteo-header-expand" id="affluence-expand-btn" title="Analyse detaillee">
+                            <span class="material-symbols-outlined">open_in_full</span>
+                        </button>
                     </header>
                     <div class="widget-body widget-tab-content active" id="widget-right-2-body" data-tab="affluence-jours">
                         <div class="widget-placeholder">
@@ -989,6 +1043,7 @@ window.__userCanCloseFiche = {{ user_can_close_fiche_json|safe }};
 <script src="{{ url_for('static', filename='js/controle_access.js') }}"></script>
 <script src="{{ url_for('static', filename='js/controle_dashboard.js') }}"></script>
 <script src="{{ url_for('static', filename='js/affluence.js') }}"></script>
+<script src="{{ url_for('static', filename='js/affluence_panel.js') }}"></script>
 <script src="{{ url_for('static', filename='js/anoloc.js') }}"></script>
 <script src="{{ url_for('static', filename='js/pcorg.js') }}"></script>
 <script src="{{ url_for('static', filename='js/routing.js') }}"></script>

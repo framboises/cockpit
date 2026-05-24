@@ -107,6 +107,12 @@
       var mb = document.getElementById("meteo-expand-btn");
       if (mb) mb.querySelector(".material-symbols-outlined").textContent = "open_in_full";
     }
+    var aff = document.getElementById("affluence-panel");
+    if (aff && aff.style.display !== "none") {
+      aff.style.display = "none";
+      var ab = document.getElementById("affluence-expand-btn");
+      if (ab) ab.querySelector(".material-symbols-outlined").textContent = "open_in_full";
+    }
 
     var timeline = document.getElementById("timeline-main");
     var mapMain = document.getElementById("map-main");

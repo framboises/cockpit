@@ -2204,6 +2204,240 @@ def get_affluence():
     })
 
 
+@app.route('/get_affluence_hourly', methods=['GET'])
+@role_required("user")
+@block_required("widget-right-2")
+def get_affluence_hourly():
+    """Courbe horaire des presents pour un jour donne :
+    - n  : presents annee en cours (historique_controle{year=N} si dispo,
+           sinon data_access bucketise par tranches de 15 min).
+    - n1 : presents annee precedente (jour-equivalent aligne sur la course).
+    Sert au grand panneau Affluence (section "Vue du jour selectionne").
+    """
+    event = request.args.get("event")
+    year = request.args.get("year")
+    date_str = request.args.get("date")
+    if not event or not year or not date_str:
+        return jsonify({"error": "Missing event, year or date"}), 400
+    try:
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        year_int = int(year)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid date or year"}), 400
+
+    # Date de course N (priorite parametrages.data.race -> globalHoraires.race)
+    doc = db['parametrages'].find_one({'event': event, 'year': year}, {'_id': 0})
+    race_date = None
+    if doc:
+        race_raw = (doc.get('data') or {}).get('race') or \
+                   ((doc.get('data') or {}).get('globalHoraires') or {}).get('race')
+        race_date = _parse_race_date(race_raw)
+
+    # N-1 : doc frequentation + race date alignee
+    hist_prev_doc, hist_prev_race_date = pcorg_summary._find_hist_freq_prev(db, event, year_int)
+    prev_race_date = hist_prev_race_date
+    if not prev_race_date:
+        # Fallback : parametrages N-1
+        prev_param = pcorg_summary._find_prev_param(db, event, year_int)
+        if prev_param:
+            prev_race_raw = (prev_param.get('data') or {}).get('race') or \
+                            ((prev_param.get('data') or {}).get('globalHoraires') or {}).get('race')
+            prev_race_date = _parse_race_date(prev_race_raw)
+
+    prev_aligned = None
+    if race_date and prev_race_date:
+        offset_days = (target_date - race_date).days
+        prev_aligned = prev_race_date + timedelta(days=offset_days)
+
+    # N-1 hourly : trie par heure
+    n1_series = []
+    pic_prev = None
+    pic_prev_hour = None
+    if hist_prev_doc and prev_aligned:
+        freq_by_day = pcorg_summary._index_freq_by_day(hist_prev_doc)
+        records = freq_by_day.get(prev_aligned.strftime('%Y-%m-%d'), [])
+        tmp = []
+        for r in records:
+            try:
+                p = int(r.get('present') or 0)
+            except (ValueError, TypeError):
+                continue
+            h = pcorg_summary._record_hour_str(r)  # 'HHhMM' ou None
+            if not h:
+                continue
+            hh_mm = h.replace('h', ':')
+            tmp.append((hh_mm, p))
+        tmp.sort(key=lambda x: x[0])
+        n1_series = [{"hour": hm, "present": p} for hm, p in tmp]
+        if tmp:
+            best = max(tmp, key=lambda x: x[1])
+            pic_prev = best[1]
+            pic_prev_hour = best[0].replace(':', 'h')
+
+    # N hourly : historique_controle{year=N} en priorite, sinon data_access bucketise
+    n_series = []
+    hist_n = pcorg_summary._find_hist_freq(db, event, year_int)
+    if hist_n:
+        freq_n = pcorg_summary._index_freq_by_day(hist_n)
+        records = freq_n.get(target_date.strftime('%Y-%m-%d'), [])
+        tmp = []
+        for r in records:
+            try:
+                p = int(r.get('present') or 0)
+            except (ValueError, TypeError):
+                continue
+            rd = r.get('date')
+            ts = None
+            if isinstance(rd, str) and len(rd) >= 16:
+                ts = rd
+            elif hasattr(rd, 'isoformat'):
+                ts = rd.isoformat()
+            elif r.get('hour'):
+                ts = target_date.strftime('%Y-%m-%d') + 'T' + str(r.get('hour'))
+            if ts:
+                tmp.append((ts, p))
+        tmp.sort(key=lambda x: x[0])
+        n_series = [{"ts": ts, "present": p} for ts, p in tmp]
+
+    if not n_series and target_date <= datetime.now(ZoneInfo("Europe/Paris")).date():
+        # Fallback data_access pour le jour en cours / la veille recente
+        main_loc_id = pcorg_summary._get_main_counter_id(db)
+        if main_loc_id:
+            tz_paris = ZoneInfo("Europe/Paris")
+            day_start_paris = datetime.combine(target_date, datetime.min.time(), tzinfo=tz_paris)
+            day_end_paris = day_start_paris + timedelta(days=1)
+            day_start_utc = day_start_paris.astimezone(timezone.utc)
+            day_end_utc = day_end_paris.astimezone(timezone.utc)
+            q = {
+                "timestamp": {"$gte": day_start_utc, "$lt": day_end_utc},
+                "_id": {"$ne": "___GLOBAL___"},
+                "requested_location_id": str(main_loc_id),
+                "$or": [
+                    {"requested_event": event},
+                    {"requested_event": {"$exists": False}},
+                ],
+            }
+            # Bucket par tranches de 15 minutes : on garde le max(current) du bucket.
+            buckets = {}
+            try:
+                for s in db['data_access'].find(q, {"current": 1, "timestamp": 1}):
+                    v = s.get('current')
+                    try:
+                        vi = int(v) if v not in (None, "") else None
+                    except (ValueError, TypeError):
+                        continue
+                    if vi is None:
+                        continue
+                    ts = s.get('timestamp')
+                    if not isinstance(ts, datetime):
+                        continue
+                    local = (ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)).astimezone(tz_paris)
+                    bucket_min = (local.minute // 15) * 15
+                    bucket = local.replace(minute=bucket_min, second=0, microsecond=0)
+                    key = bucket.isoformat()
+                    if key not in buckets or vi > buckets[key]:
+                        buckets[key] = vi
+            except Exception as e:
+                logging.warning("get_affluence_hourly data_access fallback failed: %s", e)
+            n_series = [{"ts": k, "present": v} for k, v in sorted(buckets.items())]
+
+    return jsonify({
+        "date": date_str,
+        "race_date": race_date.isoformat() if race_date else None,
+        "prev_date": prev_aligned.isoformat() if prev_aligned else None,
+        "prev_race_date": prev_race_date.isoformat() if prev_race_date else None,
+        "n": n_series,
+        "n1": n1_series,
+        "pic_prev": pic_prev,
+        "pic_prev_hour": pic_prev_hour,
+    })
+
+
+@app.route('/get_affluence_curves', methods=['GET'])
+@role_required("user")
+@block_required("widget-right-2")
+def get_affluence_curves():
+    """Courbes de remplissage (ventes cumulees) par 'jours avant course'
+    pour N, N-1 et N-2. Sert au grand panneau Affluence pour visualiser
+    si la saison N est en avance/retard de remplissage par rapport aux
+    editions precedentes.
+    """
+    event = request.args.get("event")
+    year = request.args.get("year")
+    if not event or not year:
+        return jsonify({"error": "Missing event or year"}), 400
+    try:
+        year_int = int(year)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid year"}), 400
+
+    # N : parametrages courants
+    doc_n = db['parametrages'].find_one({'event': event, 'year': year}, {'_id': 0})
+    points_n, final_n, race_n = ([], 0, None)
+    if doc_n:
+        points_n, final_n, race_n = _fill_curve(doc_n)
+
+    # N-1 et N-2 : on cherche les 2 plus recentes editions < year_int avec tickets
+    candidates = list(db['parametrages'].find(
+        {'event': event, 'tickets': {'$exists': True}},
+        {'year': 1, 'data.globalHoraires': 1, 'data.race': 1, 'tickets': 1, '_id': 0}
+    ))
+    prev_sorted = []
+    for cand in sorted(candidates, key=lambda c: str(c.get('year', '')), reverse=True):
+        try:
+            cy = int(cand.get('year', ''))
+        except (ValueError, TypeError):
+            continue
+        if cy < year_int:
+            prev_sorted.append((cy, cand))
+
+    prev_n_minus_1 = prev_sorted[0] if len(prev_sorted) >= 1 else None
+    prev_n_minus_2 = prev_sorted[1] if len(prev_sorted) >= 2 else None
+
+    def _serialize(curve_points):
+        # Trie ascendant sur d_before (du plus eloigne vers J-0)
+        return [{"d_before": d, "ventes": v}
+                for d, v in sorted(curve_points, key=lambda x: -x[0])]
+
+    out_n = _serialize(points_n)
+    out_n1, final_n1, year_n1 = [], None, None
+    if prev_n_minus_1:
+        year_n1, cand1 = prev_n_minus_1
+        pts1, final1, _ = _fill_curve(cand1)
+        out_n1 = _serialize(pts1)
+        final_n1 = final1
+    out_n2, final_n2, year_n2 = [], None, None
+    if prev_n_minus_2:
+        year_n2, cand2 = prev_n_minus_2
+        pts2, final2, _ = _fill_curve(cand2)
+        out_n2 = _serialize(pts2)
+        final_n2 = final2
+
+    # Position de N au jour de la derniere maj (J - last_update)
+    last_update = (doc_n or {}).get('tickets', {}).get('lastUpdate') if doc_n else None
+    days_before_now = None
+    if race_n and last_update:
+        try:
+            last_dt = datetime.strptime(last_update, '%Y-%m-%d').date()
+            days_before_now = (race_n - last_dt).days
+        except ValueError:
+            pass
+
+    return jsonify({
+        "year_n": year_int,
+        "year_n1": year_n1,
+        "year_n2": year_n2,
+        "race_n": race_n.isoformat() if race_n else None,
+        "n": out_n,
+        "n_minus_1": out_n1,
+        "n_minus_2": out_n2,
+        "final_n_minus_1": final_n1,
+        "final_n_minus_2": final_n2,
+        "days_before_now": days_before_now,
+        "last_update": last_update,
+    })
+
+
 ################################################################################
 # MONITOR TV
 ################################################################################

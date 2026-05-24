@@ -116,6 +116,14 @@ function expandMeteoPanel(targetDate) {
     if (pcorgBtn) pcorgBtn.querySelector('.material-symbols-outlined').textContent = 'open_in_full';
   }
 
+  // Fermer le panel affluence s'il est ouvert
+  var affPanel = document.getElementById('affluence-panel');
+  if (affPanel && affPanel.style.display !== 'none') {
+    affPanel.style.display = 'none';
+    var affBtn = document.getElementById('affluence-expand-btn');
+    if (affBtn) affBtn.querySelector('.material-symbols-outlined').textContent = 'open_in_full';
+  }
+
   if (timeline) timeline.style.display = 'none';
   if (mapMain) mapMain.style.display = 'none';
   panel.style.display = 'flex';
