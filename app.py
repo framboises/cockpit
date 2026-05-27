@@ -29,6 +29,7 @@ from waitress import serve
 from traffic import traffic_bp
 from merge import run_merge
 from analyse_ops import analyse_ops_bp
+from scan_report import scan_report_bp
 from anoloc import anoloc_bp
 from anpr import anpr_bp
 from field import field_bp
@@ -1574,6 +1575,7 @@ def get_sun_times():
 
 app.register_blueprint(traffic_bp)
 app.register_blueprint(analyse_ops_bp)
+app.register_blueprint(scan_report_bp)
 app.register_blueprint(anoloc_bp)
 app.register_blueprint(anpr_bp)
 app.register_blueprint(field_bp)

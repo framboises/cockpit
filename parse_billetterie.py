@@ -348,12 +348,33 @@ def detect_date_from_page1(page):
 # ── Variante Reporting Hebdo (5+ pages, tableau pages 4-5) ───────────────
 
 def detect_variant(pdf):
-    """Renvoie 'reporting_hebdo' ou 'billetterie' selon la structure du PDF."""
+    """Renvoie 'reporting_hebdo', 'lmc' ou 'billetterie' selon la structure du PDF."""
     if len(pdf.pages) >= 5:
         t1 = pdf.pages[0].extract_text() or ''
         if 'Reporting Hebdo' in t1 or 'évolution billetterie' in t1.lower():
             return 'reporting_hebdo'
+    if len(pdf.pages) == 3:
+        t1 = pdf.pages[0].extract_text() or ''
+        if 'LMC' in t1 or 'Etat Hebdo' in t1 or re.search(r'LMC_Comparatif', t1):
+            return 'lmc'
     return 'billetterie'
+
+
+def detect_date_lmc(page):
+    """Pour LMC : date DD/MM/YY (année 2 chiffres), peut être n'importe où sur la page."""
+    words = page.extract_words(x_tolerance=2, y_tolerance=2)
+    # Priorité aux dates les plus en haut
+    dates = []
+    for w in words:
+        m = re.match(r'(\d{2})/(\d{2})/(\d{2})$', w['text'])
+        if m:
+            dates.append((w['top'], m.group(1), m.group(2), 2000 + int(m.group(3))))
+    if dates:
+        # Prendre la date la plus en haut (snapshot le plus récent)
+        dates.sort(key=lambda d: (d[0], -d[3]))
+        _, dd, mm, yyyy = dates[0]
+        return dd, mm, yyyy
+    return None, None, None
 
 
 def _group_rows(page, y_tol=3):
@@ -547,6 +568,266 @@ def _extract_tribunes(rows5, y_start, y_end):
         out.append((clean, total_old, total_new))
         seen_names.add(full_id)
     return out
+
+
+# ── Variante LMC (Etat Hebdo 3 pages, page 3 = comparatif 2023 vs 2025) ─
+
+# Zones X pour LMC (page portrait 595 wide)
+LMC_NAME_X = (30, 135)
+LMC_TOTAL_OLD = (211, 215.5)
+LMC_TOTAL_NEW = (363, 370)
+
+
+def _find_y_total_lmc(rows, y_max=200):
+    """Y de la ligne 'Total 2023 ... Total 2025' (Total Entrées)."""
+    for y in sorted(rows):
+        if y > y_max:
+            break
+        line = " ".join(w['text'] for w in rows[y])
+        if re.search(r'Total\s+20\d{2}', line):
+            return y
+    return None
+
+
+def _sum_values_in_zone(words, x_min, x_max):
+    """Somme les valeurs entières dans la zone X, regroupées par micro-ligne (top arrondi à 0.5).
+    Chaque micro-ligne contient un nombre (potentiellement avec séparateur de milliers : '54 499').
+    Plusieurs micro-lignes superposées (Plein Tarif + Tarif ACO empilés) sont sommées."""
+    by_row = {}
+    for w in words:
+        if not (x_min <= w['x0'] < x_max):
+            continue
+        key = round(w['top'] * 2) / 2
+        by_row.setdefault(key, []).append(w)
+    total = 0
+    found = False
+    for ws in by_row.values():
+        ws.sort(key=lambda w: w['x0'])
+        joined = ' '.join(w['text'] for w in ws)
+        v = parse_int(joined)
+        if v is not None:
+            total += v
+            found = True
+    return total if found else None
+
+
+def parse_lmc(pdf):
+    """Parse LMC Etat Hebdo : extrait Total Entrées, Tribunes, Aires + leurs totaux.
+
+    Stratégie : extraction fine (y_tolerance=0.5), détection dynamique des colonnes TOTAL,
+    SOMMATION des valeurs entre tribunes/aires (chaque tribune a plusieurs sous-tarifs empilés)."""
+    page3 = pdf.pages[2]
+    words = page3.extract_words(x_tolerance=1, y_tolerance=0.5)
+
+    # Détection dynamique : positions X des en-têtes "TOTAL" et années depuis 'Tarifs 20XX'
+    # (top < 60 pour couvrir les variants où header est à top ~ 48)
+    header_words = [w for w in words if w['top'] < 60]
+    total_x_positions = sorted(w['x0'] for w in header_words if w['text'] == 'TOTAL')
+    years_in_header = sorted(set(int(m.group(1)) for w in header_words
+                                  for m in [re.match(r'^(20\d{2})$', w['text'])] if m))
+
+    if len(total_x_positions) >= 2 and len(years_in_header) >= 2:
+        # Deux colonnes TOTAL — calibrer zones X autour de chacune
+        x_total_old_center = total_x_positions[0]
+        x_total_new_center = total_x_positions[1]
+        # Le label "TOTAL" est au-dessus de la colonne ; la zone des valeurs commence à peu près au même x
+        # Width typique 8-12 (assez pour "62 246" mais pas la colonne adjacente)
+        X_OLD = (x_total_old_center - 4, x_total_old_center + 8)
+        X_NEW = (x_total_new_center - 4, x_total_new_center + 8)
+        year_old, year_new = years_in_header[0], years_in_header[1]
+    else:
+        # Fallback : positions fixes
+        X_OLD = LMC_TOTAL_OLD
+        X_NEW = LMC_TOTAL_NEW
+        year_old = years_in_header[0] if years_in_header else None
+        year_new = years_in_header[1] if len(years_in_header) >= 2 else None
+
+    out_old, out_new = [], []
+
+    def words_in_y(top_min, top_max):
+        return [w for w in words if top_min <= w['top'] <= top_max]
+
+    def row_words(top, half=1.0):
+        return [w for w in words if abs(w['top'] - top) <= half]
+
+    # Pré-calcul : tous les "Total 20XX" rows (peut être à différents Y selon le PDF)
+    total_year_rows = []  # liste de (top, t_o, t_n)
+    seen_tops = set()
+    for w in words:
+        if w['text'] == 'Total' and w['x0'] < 200 and w['top'] > 60:
+            same_top = round(w['top'])
+            if same_top in seen_tops:
+                continue
+            # Année doit être EXACTEMENT sur la même micro-row (top diff < 0.4)
+            same = [w2['text'] for w2 in words if abs(w2['top'] - w['top']) < 0.4]
+            if any(re.match(r'^20\d{2}$', t) for t in same):
+                seen_tops.add(same_top)
+                # Mais pour les valeurs, on accepte la ligne entière (les valeurs peuvent être sur Y+0.5)
+                rwords = row_words(w['top'])
+                t_o = _sum_values_in_zone(rwords, *X_OLD)
+                t_n = _sum_values_in_zone(rwords, *X_NEW)
+                total_year_rows.append((w['top'], t_o, t_n))
+    total_year_rows.sort()
+
+    # 1) Total Entrées = premier "Total 20XX" trouvé
+    y_total_e = None
+    if total_year_rows:
+        y_total_e, t_o, t_n = total_year_rows[0]
+        if t_o: out_old.append(('Total Entrees', t_o))
+        if t_n: out_new.append(('Total Entrees', t_n))
+
+    # 2) Tribunes : marqueurs Tx (Y > Y_total_e pour éviter faux positifs)
+    # x marge variable selon PDF : étendre à [70, 130]
+    tribunes = []
+    for w in words:
+        if 70 < w['x0'] < 130 and w['top'] > (y_total_e or 60) + 10 and re.match(r'^T\d+(?:bis|ter)?$', w['text']):
+            tribunes.append((w['top'], w['text']))
+    tribunes.sort()
+
+    y_last_trib = tribunes[-1][0] if tribunes else 0
+
+    # 3) Total Tribunes : premier "Total" en marge après la dernière tribune (sans 20XX)
+    y_total_trib = None
+    if tribunes:
+        for w in sorted(words, key=lambda w: w['top']):
+            if w['text'] == 'Total' and w['x0'] < 150 and w['top'] > y_last_trib + 3:
+                same = [w2['text'] for w2 in words if abs(w2['top'] - w['top']) < 0.4]
+                if any(re.match(r'^20\d{2}$', t) for t in same):
+                    continue
+                y_total_trib = w['top']
+                rwords = row_words(w['top'])
+                t_o = _sum_values_in_zone(rwords, *X_OLD)
+                t_n = _sum_values_in_zone(rwords, *X_NEW)
+                if t_o: out_old.append(('Total Tribunes', t_o))
+                if t_n: out_new.append(('Total Tribunes', t_n))
+                break
+
+    # 4) Tribunes individuelles : sommer entre tribune i et tribune i+1 (Y boundaries = milieux)
+    def _trib_name(top, tx_label):
+        # Nom : mots strictement sur la même micro-row que le marqueur Tx, x ∈ [100, 130]
+        # + le nom (mot alpha) qui suit immédiatement (Siko, Wimille, etc.)
+        same = [w for w in words if abs(w['top'] - top) < 0.6 and 100 < w['x0'] < 140
+                and not re.match(r'^\d+$', w['text']) and w['text'] != '-']
+        same.sort(key=lambda w: w['x0'])
+        full = ' '.join(w['text'] for w in same)
+        return full.strip() or tx_label
+
+    for i, (top, tname) in enumerate(tribunes):
+        full = _trib_name(top, tname)
+        # Y range : milieu entre tribunes pour éviter overlap
+        prev_top = tribunes[i-1][0] if i > 0 else top - 12
+        next_top = tribunes[i+1][0] if i+1 < len(tribunes) else (y_total_trib if y_total_trib else top + 12)
+        y_start = (prev_top + top) / 2 + 0.5 if i > 0 else top - 4
+        y_end = (top + next_top) / 2 - 0.5
+        rwords = words_in_y(y_start, y_end)
+        t_o = _sum_values_in_zone(rwords, *X_OLD)
+        t_n = _sum_values_in_zone(rwords, *X_NEW)
+        if t_o is not None: out_old.append((full, t_o))
+        if t_n is not None: out_new.append((full, t_n))
+
+    # 5) Aires : détecter les noms (mots alpha en marge entre y_total_trib et y_total_aires)
+    if y_total_trib:
+        # Trouver d'abord y_total_aires (le 'Total' avec la plus grande somme après y_total_trib)
+        totals_after_trib = []
+        for w in words:
+            if w['text'] == 'Total' and 100 < w['x0'] < 150 and w['top'] > y_total_trib + 30:
+                rwords = row_words(w['top'])
+                t_o = _sum_values_in_zone(rwords, *X_OLD)
+                t_n = _sum_values_in_zone(rwords, *X_NEW)
+                totals_after_trib.append((w['top'], t_o, t_n))
+
+        y_total_aires = None
+        if totals_after_trib:
+            big = [t for t in totals_after_trib if (t[1] or 0) + (t[2] or 0) > 1000]
+            if big:
+                chosen = max(big, key=lambda x: (x[1] or 0) + (x[2] or 0))
+                y_total_aires = chosen[0]
+                if chosen[1]: out_old.append(('Total Aires', chosen[1]))
+                if chosen[2]: out_new.append(('Total Aires', chosen[2]))
+
+        # Aires individuelles
+        if y_total_aires:
+            # Détecter le X de la marge des noms d'aires (varie selon PDF: 102 pour S-1, ~54 pour S-13)
+            # → on prend le X le plus fréquent parmi les mots alpha en marge entre y_total_trib et y_total_aires
+            from collections import Counter
+            margin_x_counts = Counter()
+            for w in words:
+                if not (y_total_trib + 3 < w['top'] < y_total_aires - 2):
+                    continue
+                if not (30 <= w['x0'] < 130):
+                    continue
+                if re.match(r'^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\-]{2,}$', w['text']):
+                    margin_x_counts[round(w['x0'])] += 1
+            if not margin_x_counts:
+                anchor_x = 102
+            else:
+                anchor_x = margin_x_counts.most_common(1)[0][0]
+
+            aire_anchors = []
+            for w in words:
+                if not (y_total_trib + 3 < w['top'] < y_total_aires - 2):
+                    continue
+                if not (anchor_x - 2 <= w['x0'] < anchor_x + 3):
+                    continue
+                if re.match(r'^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\-]{2,}$', w['text']):
+                    blacklist = {'total', 'tarif', 'plein', 'tarifs', 'vendu', 'commandé',
+                                 'capacité', 'occupation', 'tribune', 'capacit',
+                                 'gratuit', 'inclus', 'salarié', 'etudiant', 'pmr',
+                                 'contrôleur', 'individuel', 'jeudi', 'vendredi',
+                                 'samedi', 'dimanche', 'mercredi', 'mardi', 'cible',
+                                 'groupe', 'remplissag', 'paddock', 'pitlounge'}
+                    if w['text'].lower() in blacklist:
+                        continue
+                    aire_anchors.append((w['top'], w['x0'], w['text']))
+
+            aire_anchors.sort()
+            # Pour chaque ancre, construire le nom complet en prenant les mots adjacents
+            # de la même micro-row (top ±0.5) à partir de l'ancre, en excluant chiffres et symboles
+            grouped = []
+            for top_a, x_a, txt_a in aire_anchors:
+                name_words = [w for w in words if abs(w['top'] - top_a) < 0.6
+                              and anchor_x - 2 <= w['x0'] < anchor_x + 60
+                              and re.match(r'^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\-]+$', w['text'])]
+                name_words.sort(key=lambda w: w['x0'])
+                full_name = ' '.join(w['text'] for w in name_words)
+                grouped.append((top_a, full_name))
+
+            seen = set()
+            unique_aires = []
+            for top, name in grouped:
+                if name.lower() in seen or len(name) < 3:
+                    continue
+                seen.add(name.lower())
+                unique_aires.append((top, name))
+
+            # Pour chaque aire, sommer dans la zone Y jusqu'à l'aire suivante
+            for k, (top, name) in enumerate(unique_aires):
+                y_start = top - 2
+                y_end = unique_aires[k+1][0] - 1 if k+1 < len(unique_aires) else y_total_aires - 1
+                rwords = words_in_y(y_start, y_end)
+                t_o = _sum_values_in_zone(rwords, *X_OLD)
+                t_n = _sum_values_in_zone(rwords, *X_NEW)
+                if t_o is None and t_n is None:
+                    continue
+                if t_o is not None: out_old.append((name, t_o))
+                if t_n is not None: out_new.append((name, t_n))
+
+    # 6) Total intermédiaire (Green Tickets / Suppléments) : Total entre y_total_e et la première tribune
+    if y_total_e and tribunes:
+        intermediate_totals = []
+        for w in words:
+            if w['text'] == 'Total' and 100 < w['x0'] < 150 and y_total_e + 30 < w['top'] < tribunes[0][0] - 5:
+                rwords = row_words(w['top'])
+                t_o = _sum_values_in_zone(rwords, *X_OLD)
+                t_n = _sum_values_in_zone(rwords, *X_NEW)
+                if (t_o or 0) + (t_n or 0) > 100:
+                    intermediate_totals.append((w['top'], t_o, t_n))
+        if intermediate_totals:
+            _, t_o, t_n = intermediate_totals[-1]  # le plus proche des tribunes
+            if t_o: out_old.append(('Total Section Intermediaire', t_o))
+            if t_n: out_new.append(('Total Section Intermediaire', t_n))
+
+    return year_old, year_new, out_old, out_new
 
 
 # ── Extraction produits hospitalité (Cartes 24, Accréditations) ─────────
@@ -924,19 +1205,28 @@ def process_pdf(pdf_path, topic_code, output_dir):
         pdf.close()
         return []
 
-    dd, mm, date_year = detect_date_from_page1(pdf.pages[0])
+    variant = detect_variant(pdf)
+
+    if variant == 'lmc':
+        dd, mm, date_year = detect_date_lmc(pdf.pages[0])
+    else:
+        dd, mm, date_year = detect_date_from_page1(pdf.pages[0])
+
     if not dd:
         print("  WARN: date non trouvee sur page 1")
         pdf.close()
         return []
-
-    variant = detect_variant(pdf)
 
     if variant == 'reporting_hebdo':
         year_old, year_new, st_old, st_new = parse_reporting_hebdo(pdf)
         if not year_old:
             year_old, year_new = date_year - 1, date_year
         print(f"  Variant: Reporting Hebdo")
+    elif variant == 'lmc':
+        year_old, year_new, st_old, st_new = parse_lmc(pdf)
+        if not year_old:
+            year_old, year_new = date_year - 2, date_year  # LMC bisannuel
+        print(f"  Variant: LMC Etat Hebdo")
     else:
         year_old, year_new = detect_years(pdf.pages[2])
         if not year_old:

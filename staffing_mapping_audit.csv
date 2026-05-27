@@ -1,0 +1,144 @@
+Unite (scan),Categorie,Numero affectation,Nom affectation,Validation (OK = valide / NON = pas de scan/tripode)
+AA CLOS FLEURI,Accueil - Chef,3740,Clos fleuri - Chef de Secteur,NON
+AA CLOS FLEURI,Accueil - Operationnel,3741,Clos Fleuri - Contrôle,OK
+AA CLOS FLEURI,Accueil - Operationnel,3742,Clos Fleuri - Placiers,NON
+AA CLOS FLEURI,Accueil - Operationnel,3743,Clos Fleuri - Sortie,NON
+AA CLOS FLEURI,Accueil - Operationnel,3744,Clos Fleuri - Médiateurs,NON
+AA EPINETTES,Accueil - Chef,3430,Epinettes - Chef de poste,NON
+AA EPINETTES,Accueil - Operationnel,3431,Épinettes - Accès Principal,OK
+AA EPINETTES,Accueil - Operationnel,3432,Epinettes - Placiers,NON
+AA EPINETTES,Accueil - Operationnel,3433,Epinettes - Médiateurs,NON
+AA HIPPODROME,Accueil - Chef,3200,Prairie/Hippodrome - Chef de secteur,NON
+AA HIPPODROME,Accueil - Chef,3230,Hippodrome - Chef de poste,NON
+AA HIPPODROME,Accueil - Operationnel,3202,Prairie / Hippodrome - Orientation,NON
+AA HIPPODROME,Accueil - Operationnel,3203,Prairie/Hippodrome - Zone de contrôle,OK
+AA HIPPODROME,Accueil - Operationnel,3231,Hippodrome - Placiers,NON
+AA HIPPODROME,Accueil - Operationnel,3232,Hippodrome - Traçage,NON
+AA HIPPODROME,Accueil - Operationnel,3233,Hippodrome - Médiateurs,NON
+AA MULSANNE,Accueil - Operationnel,1751,Mulsanne - Accès Véhicules,OK
+AA MULSANNE,Accueil - Operationnel,1752,Mulsanne - Accès Piétons Aire d'accueil,OK
+AA MULSANNE,Accueil - Operationnel,1753,Mulsanne - Accès Piétons Annexe,OK
+MAISON DES HUNAUDIERES,Accueil - Operationnel,4412,Zone D - Poste Fixe - Placier Maison des hunaudières,NON
+P M1,Accueil - Chef,3501,M1 - Chef de poste,OK
+P M1,Accueil - Operationnel,3502,M1 - Accès Parking,OK
+P M1,Accueil - Operationnel,3504,M1 - Placiers,NON
+P M1,Accueil - Operationnel,3505,M1 - Accès Navettes,NON
+P MULSANNE,Accueil - Operationnel,1702,Mulsanne - Accès Principal,OK
+P MULSANNE,Accueil - Operationnel,1703,Mulsanne - Placiers,NON
+P OUEST,Accueil - Chef,1402,Accès Ouest - Chef de poste,OK
+P OUEST,Accueil - Chef,1410,Intérieur Ouest - Chef de poste,NON
+P OUEST,Accueil - Operationnel,1403,Ouest - Portail 7,NON
+P OUEST,Accueil - Operationnel,1404,Ouest - Zone de contrôle,OK
+P OUEST,Accueil - Operationnel,1405,Héronnière - Portail HER 2,NON
+P OUEST,Accueil - Operationnel,1406,(absent bible),NON
+P OUEST,Accueil - Operationnel,1411,Ouest - Placiers,NON
+P OUEST,Accueil - Operationnel,1412,Ouest - Parking Privée,NON
+P OUEST,Accueil - Operationnel,1413,Ouest Annexe - Accès Principal,NON
+P OUEST,Accueil - Operationnel,1414,Ouest Annexe - Placiers,NON
+P PANORAMA,Accueil - Chef,1260,Chef de Poste,OK
+P PANORAMA,Accueil - Chef,1270,Chef de poste,OK
+P PANORAMA,Accueil - Operationnel,1253,(absent bible),NON
+P PANORAMA,Accueil - Operationnel,1261,Zone de contrôle portail PAN 2,NON
+P PANORAMA,Accueil - Operationnel,1262,Zone de contrôle portail PAN 4,OK
+P PANORAMA,Accueil - Operationnel,1271,Panorama - Placiers,NON
+P PANORAMA,Accueil - Operationnel,1280,Portail 4 - Contrôle d'accès,NON
+P PANORAMA,Accueil - Operationnel,1454,Porte Annexe - Accès parking planeur,NON
+P PANORAMA,Accueil - Operationnel,1460,Planeur - Accès Véhicules,NON
+PADDOCKS,Accueil - Chef,2002,Chef de Zone Grand Paddock,NON
+PADDOCKS,Accueil - Chef,2004,Accès Paddock Sud - Chef de Poste,OK
+PADDOCKS,Accueil - Operationnel,2005,Paddock - Accès Paddock Sud,OK
+PADDOCKS,Accueil - Operationnel,2081,Accès Paddock Nord,OK
+PORTE ANNEXE,Accueil - Chef,1451,Porte Annexe - Chef de poste,OK
+PORTE ANNEXE,Accueil - Operationnel,1452,Porte Annexe - Accès Piétons,OK
+PORTE ANNEXE,Securite - Operationnel,8730,Porte Annexe - Accès piétons,OK
+PORTE CHATEAU,Accueil - Chef,3450,Porte Château - Chef de poste,OK
+PORTE CHATEAU,Accueil - Operationnel,3451,Porte Château - Accès Piétons,OK
+PORTE CHATEAU,Accueil - Operationnel,3452,Porte Château - Accès Véhicules,OK
+PORTE CIK,Accueil - Chef,3100,Porte CIK - Chef de poste,OK
+PORTE CIK,Accueil - Operationnel,3101,Porte CIK - Accès piétons,OK
+PORTE CONCIERGERIE,Accueil - Operationnel,1461,Accès Piétons Conciergerie,OK
+PORTE EST,Accueil - Chef,3302,Porte Est - Chef de poste,OK
+PORTE EST,Accueil - Operationnel,3304,Porte Est - Accès Piétons,OK
+PORTE EST,Securite - Operationnel,8002,Porte Est - Accès Piétons,OK
+PORTE GARAGE VERT,Accueil - Chef,3520,Porte Garage Vert - Chef de poste,OK
+PORTE GARAGE VERT,Accueil - Operationnel,3521,Porte Garage Vert - Accès Véhicules,OK
+PORTE GARAGE VERT,Securite - Operationnel,8771,Porte E12 - Garage Vert,OK
+PORTE GLAMPING,Securite - Operationnel,9240,Château du Houx / Glamping - Accès véhicules AA,OK
+PORTE GLAMPING,Securite - Operationnel,9242,Château du Houx / Glamping - Équipe Mobile - SSIAP,NON
+PORTE GLAMPING,Securite - Operationnel,9244,Mobile AA Château du Houx / Glamping,NON
+PORTE KARTING PIETONS,Accueil - Chef,3180,Porte karting piétons - Chef de poste,OK
+PORTE KARTING PIETONS,Accueil - Operationnel,3181,Porte Karting Piétons,OK
+PORTE KARTING PIETONS,Securite - Operationnel,8793,Porte Karting - Accès Piétons,OK
+PORTE KARTING VEHICULES,Accueil - Operationnel,3170,(absent bible),NON
+PORTE KARTING VEHICULES,Accueil - Operationnel,3171,Porte Karting Véhicules,OK
+PORTE MAISON BLANCHE PIETONS,Accueil - Chef,1560,Porte piétons - Chef de poste,OK
+PORTE MAISON BLANCHE PIETONS,Accueil - Operationnel,1561,Maison Blanche - Accès piétons,OK
+PORTE MAISON BLANCHE PIETONS,Securite - Operationnel,8740,Porte Passerelle Maison Blanche - Accès piétons,OK
+PORTE MAISON BLANCHE VEHICULES,Accueil - Chef,1551,Porte véhicules - Chef de poste,OK
+PORTE MAISON BLANCHE VEHICULES,Accueil - Operationnel,1552,Maison Blanche - Accès Véhicules,OK
+PORTE MUSEE,Securite - Operationnel,8723,Porte Musée - Accès Piétons,OK
+PORTE NAVETTES VIP,Securite - Operationnel,9220,M1 - Entrée Navette VIP,OK
+PORTE NORD BIS,Accueil - Operationnel,1204,Porte Nord - Accès Piétons Bis,OK
+PORTE NORD BIS,Securite - Operationnel,8722,Porte Nord bis - Accès Piétons,OK
+PORTE NORD PIETONS,Accueil - Chef,1202,Chef de Poste,OK
+PORTE NORD PIETONS,Accueil - Operationnel,1203,Porte Nord - Accès Piétons,OK
+PORTE NORD PIETONS,Securite - Operationnel,8001,Porte Nord - Accès Piétons,OK
+PORTE NORD PIETONS,Securite - Operationnel,8720,Porte Nord - Accès Piétons,OK
+PORTE NORD VEHICULES,Accueil - Chef,1220,Chef de poste,OK
+PORTE NORD VEHICULES,Accueil - Operationnel,1222,Porte Nord - Accès Véhicules,OK
+PORTE PANORAMA,Accueil - Chef,1251,Chef de poste,OK
+PORTE PANORAMA,Accueil - Operationnel,1252,Panorama - Passerelle - Accès Piétons,OK
+PORTE PANORAMA,Securite - Operationnel,8710,Porte Passerelle Panorama - Accès piétons,OK
+PORTE RACCORDEMENT,Accueil - Chef,1500,Raccordement - Chef de Poste,OK
+PORTE RACCORDEMENT,Accueil - Operationnel,1501,Raccordement - Accès Portail,OK
+PORTE RACCORDEMENT,Accueil - Operationnel,1502,Raccordement - Accès Véhicules,OK
+PORTE RACCORDEMENT,Accueil - Operationnel,1503,Raccordement - Portail OUE3,
+PORTE SUD,Accueil - Chef,3003,Porte Sud - Chef de Secteur,OK
+PORTE SUD,Accueil - Operationnel,3005,Porte Sud - Contrôle,OK
+PORTE SUD,Securite - Operationnel,8602,Porte Sud - Accès Véhicules,OK
+PORTE SUD,Securite - Operationnel,8780,Porte Sud - Accès Véhicules,OK
+PORTE TERTRE ROUGE,Accueil - Chef,1350,Chef de Poste,OK
+PORTE TERTRE ROUGE,Accueil - Operationnel,1353,Porte Tertre Rouge - Accès Piétons,OK
+PORTE TERTRE ROUGE,Securite - Operationnel,8701,Porte Tertre Rouge - Accès Piétons,OK
+TRIBUNE 01,Accueil - Operationnel,1004,Tribunes 1 - Accès Principal,OK
+TRIBUNE 03,Accueil - Operationnel,1011,Tribune 3 - Accès Principal,OK
+TRIBUNE 04,Accueil - Operationnel,1021,Tribunes 8 - Accès Principal,OK
+TRIBUNE 05,Accueil - Operationnel,1022,Tribunes 9 - Accès Principal,OK
+TRIBUNE 06,Accueil - Operationnel,1013,Tribunes 6/7 - Accès Principal,OK
+TRIBUNE 10,Accueil - Operationnel,1052,Tribune 10 - Accès Principal,OK
+TRIBUNE 11,Accueil - Operationnel,1053,Tribune 11 - Accès Principal,OK
+TRIBUNE 12,Accueil - Operationnel,1061,Tribune 12 - Accès Principal,OK
+TRIBUNE 13,Accueil - Operationnel,1062,Tribune 13 - Accès Principal,OK
+TRIBUNE 14,Accueil - Operationnel,1063,Tribune 14 - Accès Principal,OK
+TRIBUNE 15,Accueil - Operationnel,1071,Tribune 15 - Accès Principal,OK
+TRIBUNE 16,Accueil - Operationnel,1072,Tribune 16 - Accès Principal,OK
+TRIBUNE 18,Accueil - Operationnel,1085,Tribune 18 - Accès Tribune,OK
+TRIBUNE 18,Accueil - Operationnel,1086,Tribune 18 - Poste Mobile,NON
+TRIBUNE 19,Accueil - Operationnel,1102,Tribune 19 - Accès Principal,OK
+TRIBUNE 20,Accueil - Operationnel,1103,Tribune 20 - Accès Principal,OK
+TRIBUNE 21,Accueil - Operationnel,1104,Tribune 21 - Accès Principal,OK
+TRIBUNE 23,Accueil - Operationnel,1111,Tribune 23 - Accès Principal,OK
+TRIBUNE 29,Accueil - Operationnel,1142,Tribune 29/30 - Accès Principal,OK
+TRIBUNE 30,Accueil - Operationnel,1112,Tribune 24 - Accès Principal,OK
+TRIBUNE 52,Accueil - Operationnel,1121,Tribune 34 - Accès Principal,OK
+UAM,Accueil - Chef,5000,Chef de Zone d'Unité d'Appui Mobile,NON
+UAM,Accueil - Operationnel,5002,UAM - Intervention n°1,NON
+UAM,Accueil - Operationnel,5003,UAM - Intervention n°2,NON
+UAM,Accueil - Operationnel,5004,UAM - Intervention n°3,NON
+UAM,Accueil - Operationnel,5005,UAM - Intervention n°4,NON
+UAM,Accueil - Operationnel,5006,UAM - Intervention n°5,NON
+UAM,Accueil - Operationnel,5007,UAM - Intervention n°6,NON
+VIRAGE PORSCHE,Accueil - Operationnel,3723,Porte Porsche - Accès véhicules,OK
+WELCOME,Accueil - Chef,2040,Welcome - Chef de poste,NON
+WELCOME,Accueil - Operationnel,2041,Descente Welcome,PADDOCKS
+WELCOME,Accueil - Operationnel,2370,Welcome - Accueil,
+WELCOME,Securite - Operationnel,8190,Sous-sol Welcome - Surveillance stockage,
+WELCOME,Securite - Operationnel,8191,Parc Fermé sous Welcome,
+WELCOME,Securite - Operationnel,8192,P1 A - Escalier depuis Welcome,PADDOCKS
+WELCOME,Securite - Operationnel,8300,Welcome - SSIAP,
+WELCOME,Securite - Operationnel,8301,Welcome - Surveillance nuit,
+WELCOME,Securite - Operationnel,8302,Welcome RDC - Ascenseur gauche et droite,
+WELCOME,Securite - Operationnel,8303,Welcome - Terrasse,
+WELCOME,Securite - Operationnel,8304,Welcome vers Terrace 24,
+WELCOME,Securite - Operationnel,8305,Parvis Welcome,
+WELCOME,Securite - Operationnel,8306,Welcome - Intérieur,
