@@ -861,6 +861,31 @@ HTML_TEMPLATE = r"""<!doctype html>
     .nav-overview button { padding: 11px 14px; font-size: 14px; }
   }
 
+  /* Mode iframe : meme comportement que mobile (sidebar en drawer overlay)
+     applique a TOUS les viewports. Active quand le report est integre dans
+     l'app cockpit via iframe. */
+  body.iframed aside {
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: 270px; z-index: 40;
+    transform: translateX(0);
+    transition: transform .22s ease;
+    box-shadow: 4px 0 18px rgba(0, 0, 0, 0.5);
+  }
+  body.iframed.menu-collapsed aside {
+    transform: translateX(-100%);
+    box-shadow: none;
+    width: 270px;
+    padding: 60px 0 14px;
+    border-right: 1px solid var(--border);
+  }
+  body.iframed main, body.iframed.menu-collapsed main { padding-left: 14px; }
+  body.iframed:not(.menu-collapsed)::after {
+    content: '';
+    position: fixed; top: 0; right: 0; bottom: 0; left: 270px;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 35;
+  }
+
   /* Scrollbars dans le ton du theme */
   * { scrollbar-width: thin; scrollbar-color: #3a4a66 transparent; }
   ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -1292,7 +1317,11 @@ function renderAnalysis(a, host, z) {
 }
 
 const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
-const closeMenuOnMobile = () => { if (isMobile()) document.body.classList.add('menu-collapsed'); };
+const isIframed = () => { try { return window.self !== window.top; } catch (e) { return true; } };
+const isOverlayMode = () => isMobile() || isIframed();
+const closeMenuOnMobile = () => { if (isOverlayMode()) document.body.classList.add('menu-collapsed'); };
+// Marqueur iframe : applique le mode overlay sidebar quand on est dans une iframe
+if (isIframed()) document.body.classList.add('iframed');
 
 const ZONE_GROUPS = [
   { id: 'aire_accueil', label: "Aires d'accueil",
@@ -2502,12 +2531,12 @@ document.querySelectorAll('.cat-tab').forEach(btn => {
   });
 });
 
-// Drawer ferme par defaut sur mobile
-if (isMobile()) document.body.classList.add('menu-collapsed');
+// Drawer ferme par defaut sur mobile ou en mode iframe
+if (isOverlayMode()) document.body.classList.add('menu-collapsed');
 
 // Tap sur le backdrop sombre (cote droit du drawer) ferme le menu
 document.addEventListener('click', e => {
-  if (!isMobile() || document.body.classList.contains('menu-collapsed')) return;
+  if (!isOverlayMode() || document.body.classList.contains('menu-collapsed')) return;
   const aside = document.querySelector('aside');
   const toggle = document.getElementById('menu-toggle');
   if (aside.contains(e.target) || toggle.contains(e.target)) return;
