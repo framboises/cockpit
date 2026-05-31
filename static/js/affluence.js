@@ -298,9 +298,12 @@ function renderSitesTab(data) {
     }
     grid.appendChild(headerRow);
 
-    // Lignes
-    for (var i = 0; i < data.sites.length; i++) {
-        var s = data.sites[i];
+    // Lignes (tri alphabetique)
+    var sortedSites = data.sites.slice().sort(function (a, b) {
+        return (a.name || "").localeCompare(b.name || "", "fr");
+    });
+    for (var i = 0; i < sortedSites.length; i++) {
+        var s = sortedSites[i];
         var row = document.createElement("div");
         row.className = "site-row";
 

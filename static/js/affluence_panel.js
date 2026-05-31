@@ -624,7 +624,9 @@
     var container = document.getElementById("affluence-sites-list");
     if (!container) return;
     container.innerHTML = "";
-    var sites = data.sites || [];
+    var sites = (data.sites || []).slice().sort(function (a, b) {
+      return (a.name || "").localeCompare(b.name || "", "fr");
+    });
     if (!sites.length) {
       var ph = document.createElement("div");
       ph.className = "affluence-empty";
