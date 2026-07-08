@@ -1,0 +1,21 @@
+ 
+=== Lancement 04-06-26  7:00:24,69 === 
+2026-06-04 07:00:25 [INFO] Fenetre analysee : 2026-06-03T05:00:00+00:00 -> 2026-06-04T05:00:00+00:00 (UTC)
+2026-06-04 07:00:25 [INFO] Evenement detecte : 24H AUTOS 2026
+2026-06-04 07:00:25 [INFO] Generation du resume Claude (streaming)...
+2026-06-04 07:00:25 [INFO] Selection fiches : total=24 majors=0 others=24 selected=24 cut=0 capped=False
+2026-06-04 07:00:25 [INFO] attendance_block : 24H AUTOS 2026 -> 3 slots calcules mais TOUS vides (public_dates=7, prev_year=2025, race_date=2026-06-13, prev_race_ref=2025-06-14, freq_prev_doc=trouve) -> bloc non emis
+2026-06-04 07:00:25 [INFO] Selection fiches : total=45 majors=0 others=45 selected=45 cut=0 capped=False
+2026-06-04 07:00:50 [INFO]   ... 831 chars recus (8 output tokens)
+2026-06-04 07:00:58 [INFO]   ... 1687 chars recus (8 output tokens)
+2026-06-04 07:01:04 [INFO]   ... 2513 chars recus (8 output tokens)
+2026-06-04 07:01:11 [INFO]   ... 3352 chars recus (8 output tokens)
+2026-06-04 07:01:18 [INFO]   ... 4205 chars recus (8 output tokens)
+2026-06-04 07:01:24 [INFO]   ... 5109 chars recus (8 output tokens)
+2026-06-04 07:01:30 [INFO]   ... 5979 chars recus (8 output tokens)
+2026-06-04 07:01:37 [INFO]   ... 6813 chars recus (8 output tokens)
+2026-06-04 07:01:43 [INFO]   ... 7719 chars recus (8 output tokens)
+2026-06-04 07:01:43 [INFO] Resume genere : id=f5745372a27e4a89b6ade97117598adf fiches=24 tokens_in=13184 tokens_out=2690
+2026-06-04 07:01:43 [INFO] Destinataires inscrits au rapport matinal : 11
+2026-06-04 07:01:43 [INFO] Mail envoye a 11 destinataire(s) via 192.168.254.2
+=== Fin 04-06-26  7:01:44,13 (code retour 0) === 

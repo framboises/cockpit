@@ -12,9 +12,11 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 
   <style>
-    .app-layout { display: flex; min-height: 100vh; }
-    .scan-report-main { flex: 1; display: flex; flex-direction: column;
-      background: #0f1620; overflow: hidden; }
+    .app-layout { display: flex; height: 100vh; overflow: hidden; }
+    /* .scan-report-main complete .app-main (qui gere deja le margin-left de la
+       sidebar fixe cockpit) : sans .app-main, l'iframe passe SOUS la sidebar et
+       la masque. */
+    .scan-report-main { background: #0f1620; overflow: hidden; }
     .scan-report-header { padding: 14px 20px; border-bottom: 1px solid #2a3548;
       color: #e6ecf5; display: flex; align-items: baseline; gap: 18px;
       flex-wrap: wrap; }
@@ -95,7 +97,7 @@
   </aside>
 
   <!-- ===== MAIN ===== -->
-  <main class="scan-report-main">
+  <main class="app-main scan-report-main">
     <div class="scan-report-header">
       <h1>Rapport scans &mdash; {{ event|replace('_', ' ')|upper }} {{ year }}</h1>
       <span class="meta">analyse 15 min / horaire / quotidienne par zone et par porte</span>

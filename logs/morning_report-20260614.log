@@ -1,0 +1,25 @@
+ 
+=== Lancement 14-06-26  7:00:02,35 === 
+2026-06-14 07:00:03 [INFO] Fenetre analysee : 2026-06-13T05:00:00+00:00 -> 2026-06-14T05:00:00+00:00 (UTC)
+2026-06-14 07:00:03 [INFO] Evenement detecte : 24H AUTOS 2026
+2026-06-14 07:00:03 [INFO] Generation du resume Claude (streaming)...
+2026-06-14 07:00:03 [INFO] Selection fiches : total=223 majors=1 others=79 selected=80 cut=143 capped=False
+2026-06-14 07:00:03 [INFO] Selection fiches : total=120 majors=0 others=80 selected=80 cut=40 capped=False
+2026-06-14 07:00:03 [INFO] attendance_block : 24H AUTOS 2026 -> yesterday(public=True billets=134771 pic=148919@16h08 pic_prev=138600@16h00 proj=158702 d=7%) | today(public=True billets=139644 pic=None@- pic_prev=108960@14h00 proj=124220 d=14%) | tomorrow(public=False billets=None pic=None@- pic_prev=None@- proj=None d=-%)
+2026-06-14 07:00:33 [INFO]   ... 897 chars recus (1 output tokens)
+2026-06-14 07:00:39 [INFO]   ... 1745 chars recus (1 output tokens)
+2026-06-14 07:00:46 [INFO]   ... 2597 chars recus (1 output tokens)
+2026-06-14 07:00:54 [INFO]   ... 3459 chars recus (1 output tokens)
+2026-06-14 07:01:00 [INFO]   ... 4309 chars recus (1 output tokens)
+2026-06-14 07:01:06 [INFO]   ... 5179 chars recus (1 output tokens)
+2026-06-14 07:01:13 [INFO]   ... 5997 chars recus (1 output tokens)
+2026-06-14 07:01:20 [INFO]   ... 6861 chars recus (1 output tokens)
+2026-06-14 07:01:27 [INFO]   ... 7720 chars recus (1 output tokens)
+2026-06-14 07:01:33 [INFO]   ... 8573 chars recus (1 output tokens)
+2026-06-14 07:01:38 [INFO]   ... 9377 chars recus (1 output tokens)
+2026-06-14 07:01:44 [INFO]   ... 10301 chars recus (1 output tokens)
+2026-06-14 07:01:51 [INFO]   ... 11173 chars recus (1 output tokens)
+2026-06-14 07:01:57 [INFO] Resume genere : id=16ae9c4c90274a8281aaeb1eaf8da24b fiches=80 tokens_in=41194 tokens_out=3877
+2026-06-14 07:01:57 [INFO] Destinataires inscrits au rapport matinal : 12
+2026-06-14 07:01:57 [INFO] Mail envoye a 12 destinataire(s) via 192.168.254.2
+=== Fin 14-06-26  7:01:57,75 (code retour 0) === 

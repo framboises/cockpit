@@ -219,7 +219,10 @@
         }
         return b;
       };
-      kpisEl.appendChild(kpi("Actuellement", z.current));
+      kpisEl.appendChild(kpi("Presents (hors veh.)", z.current));
+      if (z.veh_excluded != null && z.veh_excluded > 0) {
+        kpisEl.appendChild(kpi("Vehicules exclus", z.veh_excluded));
+      }
       kpisEl.appendChild(kpi("Pic du jour", z.pic_today, pct(z.pic_today, z.pic_n1_same_day)));
       if (z.pic_n1_same_day != null) kpisEl.appendChild(kpi("Pic N-1 jour", z.pic_n1_same_day));
       if (z.max_n1_season != null) kpisEl.appendChild(kpi("Max N-1 saison", z.max_n1_season));

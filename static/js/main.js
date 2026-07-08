@@ -1742,7 +1742,14 @@ function updateUpcomingEvents() {
         const title = addEventModal.querySelector('h3');
         if (title) title.textContent = "Modifier un evenement";
 
-        addEventModal.style.display = 'block';
+        if (window.populateEventTodoEditor) window.populateEventTodoEditor(item.todo || '');
+
+        addEventModal.style.display = 'flex';
+        addEventModal.querySelectorAll('.form-error').forEach(n => n.remove());
+        addEventModal.querySelectorAll('.input-error').forEach(n => n.classList.remove('input-error'));
+        addEventModal.querySelector('#category-manager')?.setAttribute('hidden', '');
+        const _meb = addEventModal.querySelector('.modal-body');
+        if (_meb) _meb.scrollTop = 0;
         setTimeout(() => addEventModal.classList.add('show'), 10);
 
         if (window.closeEventDrawer) window.closeEventDrawer();

@@ -135,13 +135,15 @@
       countersBody.appendChild(card);
     });
 
-    // Si un compteur principal est choisi, afficher sa valeur corrigee ; sinon,
-    // fallback sur la somme de tous les compteurs moins les vehicules.
+    // Vrai present = humains (spectateurs + enfants + accredites) MOINS les
+    // vehicules. Si un compteur principal est choisi, on part de sa valeur
+    // corrigee moins ses vehicules ; sinon, somme de tous les compteurs moins
+    // tous les vehicules.
     var presentPersonnes;
     if (principalPresent != null) {
-      presentPersonnes = principalPresent;
+      presentPersonnes = Math.max(principalPresent - principalVeh, 0);
     } else {
-      presentPersonnes = totalCurrent - totalVehPresents;
+      presentPersonnes = Math.max(totalCurrent - totalVehPresents, 0);
     }
     totalCurrentEl.textContent = formatNum(presentPersonnes);
     latestTotalCurrent = presentPersonnes;
@@ -154,16 +156,21 @@
       var enfShow = useprincipal ? principalEnf : totalEnfPresents;
       var vehShow = useprincipal ? principalVeh : totalVehPresents;
       var corrShow = useprincipal ? principalCorrection : totalCorrection;
-      var parts = [];
-      if (accShow > 0) parts.push(formatNum(accShow) + " accredites");
-      if (enfShow > 0) parts.push(formatNum(enfShow) + " enfants");
-      if (vehShow > 0) parts.push(formatNum(vehShow) + " vehicules");
+      // accredites + enfants sont INCLUS dans le present ; vehicules EXCLUS.
+      var dont = [];
+      if (accShow > 0) dont.push(formatNum(accShow) + " accredites");
+      if (enfShow > 0) dont.push(formatNum(enfShow) + " enfants");
+      var extra = [];
+      if (vehShow > 0) extra.push(formatNum(vehShow) + " vehicules exclus");
       if (corrShow) {
         var sign = corrShow > 0 ? "-" : "+";
-        parts.push("corr. " + sign + formatNum(Math.abs(corrShow)));
+        extra.push("corr. " + sign + formatNum(Math.abs(corrShow)));
       }
-      if (parts.length) {
-        enfLabel.textContent = "dont " + parts.join(", ");
+      var bits = [];
+      if (dont.length) bits.push("dont " + dont.join(", "));
+      if (extra.length) bits.push(extra.join(", "));
+      if (bits.length) {
+        enfLabel.textContent = bits.join("  -  ");
         enfLabel.style.display = "";
       } else {
         enfLabel.style.display = "none";

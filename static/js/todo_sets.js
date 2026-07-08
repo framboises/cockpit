@@ -23,7 +23,6 @@
   }
 
   const tbody = $('#todo-sets-table tbody');
-  const filterType = $('#filter-type');
   const checkAll = $('#check-all');
   const btnAdd = $('#btn-add');
   const btnDeleteSel = $('#btn-delete-selected');
@@ -42,7 +41,16 @@
 
   // ----- dynamic todo items -----
 
-  function _addItemRow(listEl, text) {
+  // Le mode d'acces (controle/libre/both) ne concerne que ouverture/fermeture.
+  // Les bascules (switch_*) encodent deja la transition de mode.
+  function _phaseHasControl(phase) {
+    return phase === 'open' || phase === 'close' || phase === 'both';
+  }
+
+  function _addItemRow(listEl, text, control) {
+    const phase = (listEl.id || '').replace('todo-list-', '');
+    const withControl = _phaseHasControl(phase);
+
     const row = document.createElement('div');
     row.className = 'todo-item-row';
 
@@ -57,10 +65,23 @@
         if (input.value.trim()) {
           const newRow = _addItemRow(listEl, '');
           row.after(newRow);
-          newRow.querySelector('input').focus();
+          newRow.querySelector('input[type="text"]').focus();
         }
       }
     });
+
+    row.appendChild(input);
+
+    if (withControl) {
+      const sel = document.createElement('select');
+      sel.className = 'todo-item-control';
+      sel.title = "Mode d'acces cible (l'item ouvre en controle ou libre)";
+      sel.innerHTML = '<option value="both">Tous</option>'
+                    + '<option value="controle">Contrôlé</option>'
+                    + '<option value="libre">Libre</option>';
+      sel.value = (control === 'controle' || control === 'libre') ? control : 'both';
+      row.appendChild(sel);
+    }
 
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
@@ -71,7 +92,6 @@
       row.remove();
     });
 
-    row.appendChild(input);
     row.appendChild(removeBtn);
     listEl.appendChild(row);
     return row;
@@ -80,16 +100,19 @@
   function _fillPhaseList(phase, items) {
     const listEl = $('#todo-list-' + phase);
     listEl.innerHTML = '';
-    items.forEach(text => _addItemRow(listEl, text));
+    items.forEach(it => _addItemRow(listEl, it.text, it.control));
   }
 
   function _collectPhaseItems(phase) {
     const listEl = $('#todo-list-' + phase);
     if (!listEl) return [];
-    return $$('input[type="text"]', listEl)
-      .map(i => i.value.trim())
-      .filter(Boolean)
-      .map(text => ({ text, phase }));
+    return $$('.todo-item-row', listEl).map(row => {
+      const text = (row.querySelector('input[type="text"]')?.value || '').trim();
+      if (!text) return null;
+      const ctrlSel = row.querySelector('.todo-item-control');
+      const control = ctrlSel ? ctrlSel.value : 'both';
+      return { text, phase, control };
+    }).filter(Boolean);
   }
 
   // boutons "+ Ajouter"
@@ -123,7 +146,9 @@
         if (typeof t === 'string') return phase === 'open';
         return (t.phase || 'open') === phase;
       })
-      .map(t => typeof t === 'string' ? t : t.text);
+      .map(t => typeof t === 'string'
+        ? { text: t, control: 'both' }
+        : { text: t.text, control: t.control || 'both' });
   }
 
   function payloadToForm(doc){
@@ -140,11 +165,7 @@
   // ----- table rendering -----
 
   function renderRows(list){
-    const q = (filterType.value||'').toLowerCase();
-    const rows = list
-      .filter(x=> !q || (x.type||'').toLowerCase().includes(q))
-      .map(renderRow)
-      .join('');
+    const rows = (list || []).map(renderRow).join('');
     tbody.innerHTML = rows || '<tr><td colspan="4" class="muted">Aucun resultat</td></tr>';
   }
 
@@ -163,6 +184,11 @@
   function _todoPhase(t) {
     return typeof t === 'string' ? 'open' : (t.phase || 'open');
   }
+  function _todoControl(t) {
+    return typeof t === 'string' ? 'both' : (t.control || 'both');
+  }
+  const _controlIcon = { controle: 'shield_lock', libre: 'lock_open_right' };
+  const _controlColor = { controle: '#9a3412', libre: '#166534' };
 
   function renderRow(d){
     const items = (d.todos || []).slice(0, 4);
@@ -170,9 +196,14 @@
       const ph = _todoPhase(t);
       const icon = _phaseIcon[ph] || 'sync';
       const color = _phaseColor[ph] || 'var(--muted)';
+      const ctrl = _todoControl(t);
+      const ctrlHtml = (ctrl === 'controle' || ctrl === 'libre')
+        ? '<span class="material-symbols-outlined" style="font-size:12px;color:' + _controlColor[ctrl] + ';" title="' + ctrl + '">' + _controlIcon[ctrl] + '</span>'
+        : '';
       return '<span style="display:inline-flex;align-items:center;gap:2px;">'
         + '<span class="material-symbols-outlined" style="font-size:13px;color:' + color + ';">' + icon + '</span>'
         + escapeHtml(_todoText(t))
+        + ctrlHtml
         + '</span>';
     }).join(' <span style="color:var(--muted);">&#8226;</span> ');
     const more = (d.todos||[]).length > 4 ? ' <span class="muted">(+' + ((d.todos.length - 4)) + ')</span>' : '';
@@ -197,8 +228,6 @@
     current = list;
     renderRows(list);
   }
-
-  filterType.addEventListener('input', ()=> renderRows(current));
 
   btnAdd.addEventListener('click', ()=>{
     modalTitle.textContent = 'Nouveau type';

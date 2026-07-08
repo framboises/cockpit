@@ -1,0 +1,5 @@
+ 
+=== Lancement 24-06-26  7:00:02,42 === 
+2026-06-24 07:00:03 [INFO] Rapport matinal desactive globalement (cockpit_settings.morning_report.enabled=false). Sortie.
+2026-06-24 07:00:03 [INFO] Pour activer : page Cockpit /edit -> 'Rapport matinal automatique'. Pour bypasser ce check en CLI : --force.
+=== Fin 24-06-26  7:00:03,89 (code retour 0) === 

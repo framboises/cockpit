@@ -57,6 +57,26 @@ function getCategoryChipHtml(cat) {
     return `<span class="cat-chip ${cls}" title="Categorie : ${label}">${label}</span>`;
 }
 
+// 🔹 Mode d'acces d'un item ('controle'|'libre') a partir de item.dayControl,
+// porte par les vignettes des categories portes/parkings/aires/tribunes/
+// boutiques/campements. Retourne null si non renseigne.
+function getAccessInfo(item) {
+    const mode = String((item && item.dayControl) || '').toLowerCase();
+    if (mode === 'controle') return { mode, label: 'Contrôlé',    icon: 'shield_lock',      cls: 'access-controle' };
+    if (mode === 'libre')    return { mode, label: 'Accès libre', icon: 'lock_open_right',   cls: 'access-libre' };
+    return null;
+}
+
+// 🔹 Chip d'acces a l'ouverture. Limite a la phase 'open' (a la fermeture
+// l'info n'a pas de sens — la vignette de fermeture n'ouvre rien).
+function getAccessChipHtml(item) {
+    if (!item || item.phase !== 'open') return '';
+    const info = getAccessInfo(item);
+    if (!info) return '';
+    return `<span class="access-chip ${info.cls}" title="Ouverture en acces ${info.mode}">`
+         + `<span class="material-symbols-outlined">${info.icon}</span>${info.label}</span>`;
+}
+
 // 🔹 Construit un index { 'YYYY-MM-DD': { is24h, openTime, closeTime } }
 function buildPublicDatesMap(parametrage) {
   const map = {};
@@ -678,6 +698,7 @@ function createEventItem(date, item) {
             <div class="event-time">
                 <p class="time-info">${timeInfo}</p>
                 ${getCategoryChipHtml(item.category)}
+                ${getAccessChipHtml(item)}
                 <p class="event-location">${fullPlace}</p>
                 ${prepHtml}
             </div>
@@ -886,6 +907,7 @@ function createClusterItem(date, cluster) {
                   <div style="font-weight:700;">${title}</div>
                   <div style="opacity:.8; font-size:12px;">${place} ${hours?('• '+hours):''}</div>
                 </div>
+                ${getAccessChipHtml(ch)}
                 ${chip}
               </div>
             </li>`;
@@ -1311,6 +1333,22 @@ function openTimetableItemModal(date, item) {
     if (typeof showToast === "function") showToast("warning", "Details evenement indisponibles.");
 }
 
+// Rafraichit la timeline en conservant la position de scroll courante.
+// Sans ca, le rebuild complet du DOM ramene au premier jour de la timeline.
+function refreshTimetablePreservingScroll() {
+    let scrollEl = document.getElementById("event-list");
+    while (scrollEl && scrollEl !== document.body) {
+        const oy = getComputedStyle(scrollEl).overflowY;
+        if (oy === 'auto' || oy === 'scroll') break;
+        scrollEl = scrollEl.parentElement;
+    }
+    if (scrollEl === document.body) scrollEl = null;
+    const saved = scrollEl ? scrollEl.scrollTop : 0;
+    return Promise.resolve(fetchTimetable()).then(() => {
+        if (scrollEl) requestAnimationFrame(() => { scrollEl.scrollTop = saved; });
+    });
+}
+
 // Expose fetchTimetable, fetchParametrage et openEventDrawer globalement pour main.js
 window.fetchTimetable = fetchTimetable;
 window.fetchParametrage = fetchParametrage;
@@ -1342,10 +1380,18 @@ document.addEventListener('DOMContentLoaded', function(){
 
     // Fonction pour ouvrir la modale en ajoutant la classe "show"
     function openModal(modal) {
-        modal.style.display = 'block';
+        modal.style.display = 'flex';
+        // Nettoyer les erreurs d'une session précédente + repositionner le scroll en haut
+        modal.querySelectorAll('.form-error').forEach(n => n.remove());
+        modal.querySelectorAll('.input-error').forEach(n => n.classList.remove('input-error'));
+        // Replier le gestionnaire de categories
+        modal.querySelector('#category-manager')?.setAttribute('hidden', '');
+        const body = modal.querySelector('.modal-body');
+        if (body) body.scrollTop = 0;
         // Permettre la transition définie dans le CSS (opacity et scale)
         setTimeout(() => {
             modal.classList.add('show');
+            modal.querySelector('#event-date')?.focus();
         }, 10);
     }
     
@@ -1360,14 +1406,21 @@ document.addEventListener('DOMContentLoaded', function(){
     
     // Ouvrir la modale lors du clic sur le bouton "Ajouter un événement"
     addEventButton.addEventListener('click', async function(){
-      const cats = await loadCategories();
-      categorySelect.innerHTML = '';
-      (cats || []).forEach(cat => {
-        const option = document.createElement('option');
-        option.value = cat;
-        option.textContent = cat;
-        categorySelect.appendChild(option);
-      });
+      // Repartir sur un formulaire propre (sinon les valeurs d'une edition restent)
+      window.formMode = 'add';
+      window.editingItemId = null;
+      addEventForm.reset();
+      const idHidden = document.getElementById('edit-id-hidden');
+      if (idHidden) idHidden.value = '';
+      const prep = document.getElementById('prep-status-hidden');
+      if (prep) prep.value = '';
+      const title = addEventModal.querySelector('h3');
+      if (title) title.textContent = "Ajouter un événement à la Timetable";
+
+      await loadCategories();
+      refreshEventCategorySelect('');   // select trie, rien de pre-selectionne
+      if (window.populateEventTodoEditor) window.populateEventTodoEditor('');
+
       openModal(addEventModal);
     });
     
@@ -1386,7 +1439,35 @@ document.addEventListener('DOMContentLoaded', function(){
         if (title) title.textContent = "Ajouter un événement à la Timetable";
         closeModal(addEventModal);
     });
-    
+
+    // --- Gestionnaire de categories (ouvrir/fermer + ajouter) ---
+    const categoryManageBtn = document.getElementById('category-manage-btn');
+    const categoryManager   = document.getElementById('category-manager');
+    const catMgrAddBtn      = document.getElementById('cat-mgr-add-btn');
+    const catMgrInput       = document.getElementById('cat-mgr-input');
+
+    categoryManageBtn?.addEventListener('click', (e) => {
+        e.preventDefault();      // ne pas focaliser le select (bouton dans un <label>)
+        e.stopPropagation();
+        const open = categoryManager.hasAttribute('hidden');
+        if (open) {
+            categoryManager.removeAttribute('hidden');
+            loadCategoryManager();
+        } else {
+            categoryManager.setAttribute('hidden', '');
+        }
+    });
+    catMgrAddBtn?.addEventListener('click', addCategoryFromManager);
+    catMgrInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); addCategoryFromManager(); }
+    });
+
+    // --- Editeur de taches : bouton d'ajout d'une tache ---
+    document.getElementById('event-todo-add')?.addEventListener('click', () => {
+        const row = _addEventTodoRow('');
+        row?.querySelector('input')?.focus();
+    });
+
     // Soumission du formulaire (ADD ou EDIT)
     addEventForm.addEventListener('submit', function(e){
         e.preventDefault();
@@ -1394,20 +1475,36 @@ document.addEventListener('DOMContentLoaded', function(){
         const isEdit = (window.formMode === 'edit');
         const endpoint = isEdit ? '/update_timetable_event' : '/add_timetable_event';
 
-        // Validation personnalisée: au moins start OU end
-        const startVal = (document.getElementById('start-time').value || '').trim();
-        const endVal   = (document.getElementById('end-time').value   || '').trim();
+        // === Validation renforcée ===
+        // Nettoyage des erreurs précédentes
+        document.querySelectorAll('#addEventForm .form-error').forEach(n => n.remove());
+        document.querySelectorAll('#addEventForm .input-error').forEach(n => n.classList.remove('input-error'));
 
-        // Nettoyage anciens messages d'erreur éventuels
-        document.querySelectorAll('.form-error').forEach(n => n.remove());
+        const dateVal     = (document.getElementById('event-date').value || '').trim();
+        const startVal    = (document.getElementById('start-time').value || '').trim();
+        const endVal      = (document.getElementById('end-time').value   || '').trim();
+        const categoryVal = (document.getElementById('category').value   || '').trim();
+        const activityVal = (document.getElementById('activity').value   || '').trim();
 
-        if (!startVal && !endVal) {
+        let firstInvalid = null;
+        const markError = (id, msg) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.classList.add('input-error');
           const err = document.createElement('div');
           err.className = 'form-error';
-          err.textContent = 'Saisir au moins une heure de début ou de fin.';
-          // on affiche l'erreur sous le champ "Heure de début"
-          document.getElementById('start-time').closest('.form-group').appendChild(err);
-          document.getElementById('start-time').focus();
+          err.textContent = msg;
+          el.closest('.form-group').appendChild(err);
+          if (!firstInvalid) firstInvalid = el;
+        };
+
+        if (!dateVal)               markError('event-date', 'La date est obligatoire.');
+        if (!categoryVal)           markError('category',   'La catégorie est obligatoire.');
+        if (!activityVal)           markError('activity',   "L'activité est obligatoire.");
+        if (!startVal && !endVal)   markError('start-time', 'Saisir au moins une heure (début ou fin).');
+
+        if (firstInvalid) {
+          firstInvalid.focus();
           return; // stop submit
         }
 
@@ -1424,6 +1521,7 @@ document.addEventListener('DOMContentLoaded', function(){
             place: document.getElementById('place').value,
             department: document.getElementById('department').value,
             remark: document.getElementById('remark').value,
+            todo: (typeof window.collectEventTodos === 'function' ? window.collectEventTodos() : ''),
             type: "Timetable",
             origin: isEdit ? "manual-edit" : "manual",
             preparation_checked: (document.getElementById('prep-status-hidden')?.value ?? '')
@@ -1469,10 +1567,9 @@ document.addEventListener('DOMContentLoaded', function(){
                 const title = addEventModal.querySelector('h3');
                 if (title) title.textContent = "Ajouter un événement à la Timetable";
 
-                // Rafraîchir la timeline
-                const eventList = document.getElementById("event-list");
-                if (eventList) eventList.innerHTML = "";
-                fetchTimetable();
+                // Rafraîchir la timeline en conservant la position de scroll
+                // (fetchTimetable vide deja #event-list lui-meme)
+                refreshTimetablePreservingScroll();
             } else {
                 showDynamicFlashMessage(data.message || "Erreur lors de l'enregistrement", "error");
             }
@@ -1483,10 +1580,24 @@ document.addEventListener('DOMContentLoaded', function(){
         });
     });
     
-    // Fermer la modale si l'utilisateur clique en dehors du contenu de la modale
-    window.addEventListener('click', function(e){
-        if(e.target == addEventModal){
-            closeModal(addEventModal);
+    // Reset commun (mode + titre) puis fermeture
+    function dismissAddEventModal() {
+        window.formMode = 'add';
+        window.editingItemId = null;
+        const title = addEventModal.querySelector('h3');
+        if (title) title.textContent = "Ajouter un événement à la Timetable";
+        closeModal(addEventModal);
+    }
+
+    // Fermer la modale si l'utilisateur clique sur le fond (backdrop)
+    addEventModal.addEventListener('click', function(e){
+        if (e.target === addEventModal) dismissAddEventModal();
+    });
+
+    // Fermer avec la touche Echap
+    document.addEventListener('keydown', function(e){
+        if (e.key === 'Escape' && addEventModal.classList.contains('show')) {
+            dismissAddEventModal();
         }
     });
 });
@@ -1599,6 +1710,14 @@ function renderDrawerView() {
       <div class="label">Lieu</div>
       <div class="value">${it.place || '—'}</div>
     </div>
+    ${(() => {
+      const info = getAccessInfo(it);
+      if (!info) return '';
+      return `<div class="field">
+      <div class="label">Accès</div>
+      <div class="value"><span class="access-chip ${info.cls}"><span class="material-symbols-outlined">${info.icon}</span>${info.label}</span></div>
+    </div>`;
+    })()}
     <div class="field">
       <div class="label">Département</div>
       <div class="value">${it.department || '—'}</div>
@@ -1792,7 +1911,7 @@ function saveUpdate(dateStr, item, closeAfter = false) {
   .then(res=>{
     if (res.success) {
       showDynamicFlashMessage("Mise à jour réussie", "success");
-      fetchTimetable(); // rafraîchir la liste
+      refreshTimetablePreservingScroll(); // rafraîchir la liste sans perdre la position
       closeAfter && closeEventDrawer();
       // recharger la vue lecture avec l'objet mis à jour
       !_drawerCurrent || renderDrawerView();
@@ -1899,12 +2018,194 @@ async function loadCategories() {
     const res = await fetch(url);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    window.categories = Array.isArray(data?.categories) ? data.categories : [];
+    const list = Array.isArray(data?.categories) ? data.categories : [];
+    // Tri alphabetique insensible a la casse (le backend trie deja, filet de securite)
+    list.sort((a, b) => String(a).localeCompare(String(b), 'fr', { sensitivity: 'base' }));
+    window.categories = list;
     return window.categories;
   } catch (e) {
     console.error('[loadCategories] échec:', e);
     window.categories = window.categories || [];
     return window.categories;
+  }
+}
+
+// =====================================================================
+// Modale ajout/edition : editeur de taches de la vignette + gestionnaire
+// de categories (ajout / suppression des orphelines).
+// =====================================================================
+
+function _csrfToken() {
+  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+}
+
+// ---- Editeur de taches (TODO) propre a la vignette ----
+function _addEventTodoRow(text, done) {
+  const list = document.getElementById('event-todo-list');
+  if (!list) return null;
+  const row = document.createElement('div');
+  row.className = 'event-todo-row';
+  row.dataset.done = done ? '1' : '';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'form-input';
+  input.placeholder = 'Tâche...';
+  input.value = text || '';
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (input.value.trim()) {
+        const r = _addEventTodoRow('');
+        row.after(r);
+        r.querySelector('input').focus();
+      }
+    }
+  });
+
+  const rm = document.createElement('button');
+  rm.type = 'button';
+  rm.className = 'event-todo-remove';
+  rm.title = 'Supprimer la tâche';
+  rm.innerHTML = '<span class="material-symbols-outlined">close</span>';
+  rm.addEventListener('click', () => row.remove());
+
+  row.appendChild(input);
+  row.appendChild(rm);
+  list.appendChild(row);
+  return row;
+}
+
+// Remplit l'editeur depuis une chaine markdown ('- [ ] ...'), preservant l'etat coche.
+window.populateEventTodoEditor = function (todoStr) {
+  const list = document.getElementById('event-todo-list');
+  if (!list) return;
+  list.innerHTML = '';
+  splitTodo(todoStr || '').forEach(it => _addEventTodoRow(it.text, it.done));
+};
+
+// Reconstruit la chaine markdown a partir des lignes (etat coche preserve par ligne).
+window.collectEventTodos = function () {
+  const list = document.getElementById('event-todo-list');
+  if (!list) return '';
+  const items = Array.from(list.querySelectorAll('.event-todo-row'))
+    .map(row => ({
+      text: (row.querySelector('input[type="text"]')?.value || '').trim(),
+      done: row.dataset.done === '1',
+    }))
+    .filter(it => it.text);
+  return serializeTodo(items);
+};
+
+// ---- Gestionnaire de categories ----
+// Reconstruit le <select> depuis window.categories (deja trie), conserve la selection.
+function refreshEventCategorySelect(selected) {
+  const sel = document.getElementById('category');
+  if (!sel) return;
+  const keep = (selected != null) ? selected : sel.value;
+  sel.innerHTML = '';
+  (window.categories || []).forEach(cat => {
+    const o = document.createElement('option');
+    o.value = cat;
+    o.textContent = cat;
+    if (cat === keep) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+async function loadCategoryManager() {
+  const listEl = document.getElementById('cat-mgr-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="cat-mgr-empty">Chargement…</div>';
+  try {
+    const url = '/api/timetable-categories?event=' +
+      encodeURIComponent(window.selectedEvent) +
+      '&year=' + encodeURIComponent(window.selectedYear);
+    const res = await fetch(url);
+    const data = await res.json();
+    const cats = data.categories || [];
+    listEl.innerHTML = '';
+    if (!cats.length) { listEl.innerHTML = '<div class="cat-mgr-empty">Aucune catégorie.</div>'; return; }
+    cats.forEach(c => {
+      const row = document.createElement('div');
+      row.className = 'cat-mgr-row';
+
+      const name = document.createElement('span');
+      name.className = 'cat-mgr-name';
+      name.textContent = c.name;
+
+      const count = document.createElement('span');
+      count.className = 'cat-mgr-count' + (c.orphan ? ' is-orphan' : '');
+      count.textContent = c.count;
+      count.title = c.count + ' vignette(s)';
+
+      row.appendChild(name);
+      row.appendChild(count);
+
+      if (c.orphan) {
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'cat-mgr-del';
+        del.title = 'Supprimer cette catégorie orpheline';
+        del.innerHTML = '<span class="material-symbols-outlined">delete</span>';
+        del.addEventListener('click', () => deleteCategoryOrphan(c.name));
+        row.appendChild(del);
+      }
+      listEl.appendChild(row);
+    });
+  } catch (e) {
+    listEl.innerHTML = '<div class="cat-mgr-empty">Erreur de chargement.</div>';
+  }
+}
+
+async function addCategoryFromManager() {
+  const input = document.getElementById('cat-mgr-input');
+  const cat = (input?.value || '').trim();
+  if (!cat) return;
+  try {
+    const res = await fetch('/api/timetable-categories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _csrfToken() },
+      body: JSON.stringify({ event: window.selectedEvent, year: window.selectedYear, category: cat }),
+    });
+    const data = await res.json();
+    if (!data.ok) { showDynamicFlashMessage("Ajout impossible", "error"); return; }
+    input.value = '';
+    window.categories = null;            // invalider le cache
+    await loadCategories();
+    refreshEventCategorySelect(cat);     // selectionner la nouvelle categorie
+    await loadCategoryManager();
+    showDynamicFlashMessage("Catégorie ajoutée", "success");
+  } catch (e) {
+    showDynamicFlashMessage("Erreur réseau", "error");
+  }
+}
+
+async function deleteCategoryOrphan(cat) {
+  const ok = (typeof showConfirmToast === 'function')
+    ? await showConfirmToast('Supprimer la catégorie "' + cat + '" ?', { type: "error", okLabel: "Supprimer" })
+    : window.confirm('Supprimer la catégorie "' + cat + '" ?');
+  if (!ok) return;
+  try {
+    const res = await fetch('/api/timetable-categories', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _csrfToken() },
+      body: JSON.stringify({ event: window.selectedEvent, year: window.selectedYear, category: cat }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      showDynamicFlashMessage(data.error === 'not_orphan'
+        ? 'Catégorie utilisée par ' + (data.count || 0) + ' vignette(s), suppression refusée.'
+        : 'Suppression impossible', "error");
+      return;
+    }
+    window.categories = null;
+    await loadCategories();
+    refreshEventCategorySelect();
+    await loadCategoryManager();
+    showDynamicFlashMessage("Catégorie supprimée", "success");
+  } catch (e) {
+    showDynamicFlashMessage("Erreur réseau", "error");
   }
 }
 
@@ -1947,6 +2248,9 @@ async function openEditModalFromDrawer(dateStr, item) {
   setVal('department',   item.department || '');
   setVal('remark',       item.remark || '');
 
+  // Editeur de taches de la vignette
+  if (window.populateEventTodoEditor) window.populateEventTodoEditor(item.todo || '');
+
   // 6) hidden _id (ID FIXE pour éviter toute ambiguïté)
   let hidden = addEventForm.querySelector('#edit-id-hidden');
   if (!hidden) {
@@ -1976,7 +2280,12 @@ async function openEditModalFromDrawer(dateStr, item) {
 
   // 8) ouvrir la modale
   const openModal = (modal)=>{
-    modal.style.display='block';
+    modal.style.display='flex';
+    modal.querySelectorAll('.form-error').forEach(n => n.remove());
+    modal.querySelectorAll('.input-error').forEach(n => n.classList.remove('input-error'));
+    modal.querySelector('#category-manager')?.setAttribute('hidden', '');
+    const body = modal.querySelector('.modal-body');
+    if (body) body.scrollTop = 0;
     setTimeout(()=>modal.classList.add('show'),10);
   };
   openModal(addEventModal);

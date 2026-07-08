@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Circulation - Poste de controle</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+
+    <!-- Fonts -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+
+    <style>
+    /* ===== Tokens (variante sombre poste de controle, base charte Cockpit) ===== */
+    :root{
+        --bg:        #0b1220;
+        --bg-2:      #0f172a;
+        --panel:     #1e293b;
+        --panel-2:   #172132;
+        --line:      rgba(148,163,184,0.16);
+        --line-2:    rgba(148,163,184,0.28);
+        --text:      #f1f5f9;
+        --muted:     #94a3b8;
+        --muted-2:   #64748b;
+        --brand:     #2563eb;
+        --brand-soft:rgba(37,99,235,0.16);
+
+        /* echelle de gravite (identique a traffic.js / app) */
+        --sev-good:  #22c55e;
+        --sev-warn:  #f59e0b;
+        --sev-high:  #f97316;
+        --sev-crit:  #ef4444;
+        --sev-closed:#8b5cf6;
+    }
+
+    *,*::before,*::after{ box-sizing:border-box; }
+    html,body{ margin:0; padding:0; height:100%; }
+    body{
+        font-family:"Outfit",system-ui,-apple-system,sans-serif;
+        background:radial-gradient(1200px 800px at 80% -10%, #14223c 0%, var(--bg) 60%);
+        color:var(--text);
+        overflow:hidden;
+        -webkit-font-smoothing:antialiased;
+    }
+    .material-symbols-outlined{
+        font-variation-settings:'FILL' 1,'wght' 500,'GRAD' 0,'opsz' 40;
+        line-height:1;
+        vertical-align:middle;
+    }
+
+    .screen{
+        height:100vh;
+        display:grid;
+        grid-template-rows:auto auto 1fr;
+        gap:clamp(10px,1vw,18px);
+        padding:clamp(12px,1.4vw,24px);
+    }
+
+    /* ===== Top bar ===== */
+    .topbar{
+        display:flex; align-items:center; gap:18px;
+    }
+    .brand{
+        display:flex; flex-direction:column; gap:2px; min-width:0;
+    }
+    .brand h1{
+        margin:0; font-size:clamp(20px,1.9vw,34px); font-weight:800;
+        letter-spacing:.5px; display:flex; align-items:center; gap:12px;
+    }
+    .brand h1 .material-symbols-outlined{ color:var(--brand); font-size:1.15em; }
+    .brand .sub{
+        font-size:clamp(11px,.85vw,15px); color:var(--muted); font-weight:500;
+        letter-spacing:.4px; text-transform:uppercase;
+    }
+    .zone-badge{
+        margin-left:6px; padding:3px 12px; border-radius:999px;
+        background:var(--brand-soft); color:#bfdbfe; font-weight:700;
+        font-size:clamp(10px,.75vw,13px); letter-spacing:1px; text-transform:uppercase;
+        border:1px solid rgba(37,99,235,0.35);
+    }
+    .topbar-right{
+        margin-left:auto; display:flex; align-items:center; gap:clamp(14px,1.6vw,30px);
+    }
+    .clock{
+        text-align:right;
+    }
+    .clock .time{
+        font-size:clamp(26px,2.6vw,46px); font-weight:800; font-variant-numeric:tabular-nums;
+        letter-spacing:1px; line-height:1;
+    }
+    .clock .date{
+        font-size:clamp(11px,.85vw,15px); color:var(--muted); text-transform:capitalize; font-weight:500;
+    }
+    .freshness{
+        display:flex; align-items:center; gap:8px;
+        font-size:clamp(11px,.8vw,14px); color:var(--muted); font-weight:600;
+    }
+    .fresh-dot{
+        width:11px; height:11px; border-radius:50%;
+        background:var(--sev-good); box-shadow:0 0 10px var(--sev-good);
+    }
+    .fresh-dot.stale{ background:var(--sev-crit); box-shadow:0 0 10px var(--sev-crit); animation:blink 1s steps(2) infinite; }
+    .btn-full{
+        background:var(--panel); border:1px solid var(--line); color:var(--muted);
+        width:46px; height:46px; border-radius:12px; cursor:pointer;
+        display:flex; align-items:center; justify-content:center; transition:.15s;
+    }
+    .btn-full:hover{ color:var(--text); border-color:var(--line-2); }
+    .btn-full .material-symbols-outlined{ font-size:24px; }
+
+    /* ===== Verdict banner ===== */
+    .verdict{
+        border-radius:18px; padding:clamp(14px,1.5vw,28px) clamp(20px,2.2vw,40px);
+        display:flex; align-items:center; gap:clamp(18px,2vw,38px);
+        position:relative; overflow:hidden;
+        border:1px solid var(--vc, var(--line));
+        background:
+            linear-gradient(90deg, color-mix(in srgb, var(--vc,#334155) 26%, transparent) 0%, color-mix(in srgb, var(--vc,#334155) 8%, transparent) 45%, transparent 80%),
+            var(--panel-2);
+    }
+    .verdict::before{
+        content:""; position:absolute; left:0; top:0; bottom:0; width:8px; background:var(--vc,#334155);
+    }
+    .verdict-icon{
+        flex:none; width:clamp(60px,5vw,96px); height:clamp(60px,5vw,96px);
+        border-radius:20px; display:flex; align-items:center; justify-content:center;
+        background:color-mix(in srgb, var(--vc,#334155) 22%, transparent);
+        border:1px solid color-mix(in srgb, var(--vc,#334155) 50%, transparent);
+    }
+    .verdict-icon .material-symbols-outlined{ font-size:clamp(38px,3.4vw,64px); color:var(--vc,#cbd5e1); }
+    .verdict-main{ min-width:0; flex:1; }
+    .verdict-word{
+        font-size:clamp(30px,3.4vw,62px); font-weight:900; letter-spacing:1px; line-height:1;
+        color:var(--vc,#e2e8f0); text-transform:uppercase;
+    }
+    .verdict-reco{
+        margin-top:6px; font-size:clamp(15px,1.4vw,26px); font-weight:600; color:var(--text);
+    }
+    .verdict-reasons{
+        margin-top:6px; font-size:clamp(12px,.95vw,17px); color:var(--muted); font-weight:500;
+    }
+    .verdict.pulse .verdict-icon{ animation:pulse 1.4s ease-in-out infinite; }
+
+    /* ===== Counters strip (inside verdict, right) ===== */
+    .counters{
+        flex:none; display:flex; gap:clamp(8px,.8vw,16px);
+    }
+    .counter{
+        min-width:clamp(86px,7vw,128px);
+        background:var(--panel); border:1px solid var(--line); border-radius:14px;
+        padding:clamp(8px,.9vw,16px) clamp(10px,1vw,18px);
+        display:flex; flex-direction:column; align-items:center; gap:2px;
+        position:relative; transition:.2s;
+    }
+    .counter .material-symbols-outlined{ font-size:clamp(20px,1.7vw,30px); color:var(--muted); }
+    .counter .cval{ font-size:clamp(26px,2.6vw,48px); font-weight:800; line-height:1; font-variant-numeric:tabular-nums; }
+    .counter .clabel{ font-size:clamp(9px,.7vw,13px); color:var(--muted); text-transform:uppercase; letter-spacing:.6px; font-weight:600; }
+    .counter.hot{ border-color:color-mix(in srgb, var(--cc) 60%, transparent); background:color-mix(in srgb, var(--cc) 14%, var(--panel)); }
+    .counter.hot .material-symbols-outlined,
+    .counter.hot .cval{ color:var(--cc); }
+    .counter.critical{ animation:pulse-border 1.4s ease-in-out infinite; }
+
+    /* ===== Main grid ===== */
+    .main{
+        display:grid; grid-template-columns:1.1fr 1fr 1fr; gap:clamp(10px,1vw,18px);
+        min-height:0;
+    }
+    .panel{
+        background:var(--panel-2); border:1px solid var(--line); border-radius:18px;
+        display:flex; flex-direction:column; min-height:0; overflow:hidden;
+    }
+    .panel-head{
+        display:flex; align-items:center; gap:10px;
+        padding:clamp(10px,1vw,18px) clamp(14px,1.4vw,24px);
+        border-bottom:1px solid var(--line); flex:none;
+    }
+    .panel-head .material-symbols-outlined{ color:var(--brand); font-size:clamp(20px,1.6vw,28px); }
+    .panel-head h2{
+        margin:0; font-size:clamp(14px,1.2vw,22px); font-weight:700; letter-spacing:.5px; text-transform:uppercase;
+    }
+    .panel-head .count-pill{
+        margin-left:auto; background:var(--panel); border:1px solid var(--line);
+        padding:3px 12px; border-radius:999px; font-size:clamp(11px,.85vw,15px); font-weight:700; color:var(--muted);
+    }
+    .panel-body{ flex:1; min-height:0; overflow:hidden; padding:clamp(8px,.8vw,14px); display:flex; flex-direction:column; gap:clamp(6px,.6vw,10px); }
+
+    /* ===== Alert rows ===== */
+    .alert-row{
+        display:flex; align-items:center; gap:clamp(10px,1vw,18px);
+        background:var(--panel); border:1px solid var(--line); border-left-width:5px;
+        border-radius:12px; padding:clamp(8px,.85vw,15px) clamp(12px,1.1vw,20px);
+        border-left-color:var(--ac,#64748b);
+    }
+    .alert-ico{
+        flex:none; width:clamp(38px,3vw,54px); height:clamp(38px,3vw,54px); border-radius:12px;
+        display:flex; align-items:center; justify-content:center;
+        background:color-mix(in srgb, var(--ac,#64748b) 18%, transparent);
+    }
+    .alert-ico .material-symbols-outlined{ font-size:clamp(22px,1.9vw,34px); color:var(--ac,#cbd5e1); }
+    .alert-txt{ min-width:0; flex:1; }
+    .alert-title{
+        font-size:clamp(14px,1.2vw,22px); font-weight:700; line-height:1.15;
+        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .alert-title .badge{
+        font-size:.62em; font-weight:800; letter-spacing:.5px; text-transform:uppercase;
+        color:var(--ac); margin-left:8px; vertical-align:middle;
+    }
+    .alert-loc{
+        margin-top:3px; font-size:clamp(11px,.95vw,17px); color:var(--muted);
+        display:flex; align-items:center; gap:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .alert-loc .material-symbols-outlined{ font-size:1.1em; color:var(--muted-2); }
+    .alert-age{
+        flex:none; text-align:right; font-size:clamp(11px,.9vw,16px); color:var(--muted); font-weight:600;
+        font-variant-numeric:tabular-nums;
+    }
+    .alert-age .fresh{ color:var(--sev-warn); }
+
+    /* ===== Axe rows ===== */
+    .axe-row{
+        display:flex; align-items:center; gap:clamp(10px,1vw,16px);
+        background:var(--panel); border:1px solid var(--line); border-radius:12px;
+        padding:clamp(8px,.85vw,15px) clamp(12px,1.1vw,20px);
+    }
+    .axe-row.sev{ border-left:5px solid var(--ac); }
+    .dir-badge{
+        flex:none; font-size:clamp(9px,.7vw,12px); font-weight:800; letter-spacing:.5px;
+        padding:3px 8px; border-radius:6px; text-transform:uppercase;
+    }
+    .dir-in{ background:rgba(34,197,94,0.16); color:#86efac; }
+    .dir-out{ background:rgba(245,158,11,0.16); color:#fcd34d; }
+    .dir-none{ background:var(--line); color:var(--muted); }
+    .axe-name{
+        flex:1; min-width:0; font-size:clamp(14px,1.2vw,22px); font-weight:700;
+        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .axe-time{
+        flex:none; font-size:clamp(15px,1.4vw,26px); font-weight:800; font-variant-numeric:tabular-nums; min-width:3.2em; text-align:right;
+    }
+    .axe-delay{
+        flex:none; font-size:clamp(12px,1vw,18px); font-weight:700; min-width:3.6em; text-align:right;
+    }
+    .axe-status{
+        flex:none; font-size:clamp(10px,.78vw,14px); font-weight:800; letter-spacing:.5px;
+        text-transform:uppercase; padding:4px 10px; border-radius:8px; min-width:5.5em; text-align:center;
+        color:var(--ac); background:color-mix(in srgb, var(--ac) 16%, transparent);
+    }
+
+    /* ===== Panneau secours (axes rouges) ===== */
+    .panel--secours{ border-color:rgba(239,68,68,0.35); }
+    .panel--secours .panel-head{ border-bottom-color:rgba(239,68,68,0.30); background:rgba(239,68,68,0.06); }
+    .panel--secours .panel-head .material-symbols-outlined{ color:var(--sev-crit); }
+    .secours-tag{
+        flex:none; width:clamp(34px,2.6vw,46px); height:clamp(34px,2.6vw,46px); border-radius:10px;
+        display:flex; align-items:center; justify-content:center;
+        background:rgba(239,68,68,0.16); border:1px solid rgba(239,68,68,0.30);
+    }
+    .secours-tag .material-symbols-outlined{ font-size:clamp(20px,1.7vw,30px); color:var(--sev-crit); }
+
+    .ok-strip{
+        margin-top:auto; display:flex; align-items:center; justify-content:center; gap:10px;
+        padding:clamp(8px,.8vw,14px); border-radius:12px;
+        background:rgba(34,197,94,0.10); border:1px solid rgba(34,197,94,0.25);
+        color:#86efac; font-weight:700; font-size:clamp(12px,1vw,18px);
+    }
+    .ok-strip .material-symbols-outlined{ color:var(--sev-good); }
+
+    .empty{
+        flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+        color:var(--muted-2);
+    }
+    .empty .material-symbols-outlined{ font-size:clamp(40px,4vw,72px); color:rgba(148,163,184,0.25); }
+    .empty .t{ font-size:clamp(14px,1.2vw,22px); font-weight:600; color:var(--muted); }
+    .empty.ok .material-symbols-outlined{ color:var(--sev-good); }
+
+    .more-note{
+        text-align:center; color:var(--muted-2); font-size:clamp(11px,.85vw,15px); font-weight:600; padding:4px;
+    }
+
+    @keyframes blink{ 50%{ opacity:.25; } }
+    @keyframes pulse{ 0%,100%{ transform:scale(1); } 50%{ transform:scale(1.06); } }
+    @keyframes pulse-border{ 0%,100%{ box-shadow:0 0 0 0 transparent; } 50%{ box-shadow:0 0 0 3px color-mix(in srgb, var(--cc) 40%, transparent); } }
+
+    /* scrollbar discrete (au cas ou debordement) */
+    .panel-body::-webkit-scrollbar{ width:8px; }
+    .panel-body::-webkit-scrollbar-thumb{ background:var(--line-2); border-radius:4px; }
+    </style>
+</head>
+<body>
+<div class="screen">
+
+    <!-- ===== Top bar ===== -->
+    <div class="topbar">
+        <div class="brand">
+            <h1>
+                <span class="material-symbols-outlined">moving</span>
+                CIRCULATION
+                <span class="zone-badge">Ma zone</span>
+            </h1>
+            <span class="sub">Supervision Waze temps reel - Poste de controle</span>
+        </div>
+        <div class="topbar-right">
+            <div class="freshness">
+                <span class="fresh-dot" id="fresh-dot"></span>
+                <span id="fresh-text">MAJ ...</span>
+            </div>
+            <div class="clock">
+                <div class="time" id="clock-time">--:--</div>
+                <div class="date" id="clock-date">---</div>
+            </div>
+            <button class="btn-full" id="btn-fullscreen" title="Plein ecran">
+                <span class="material-symbols-outlined">fullscreen</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- ===== Verdict + counters ===== -->
+    <div class="verdict" id="verdict">
+        <div class="verdict-icon"><span class="material-symbols-outlined" id="verdict-icon">hourglass_empty</span></div>
+        <div class="verdict-main">
+            <div class="verdict-word" id="verdict-word">CHARGEMENT</div>
+            <div class="verdict-reco" id="verdict-reco">Recuperation des donnees trafic...</div>
+            <div class="verdict-reasons" id="verdict-reasons"></div>
+        </div>
+        <div class="counters" id="counters">
+            <div class="counter" id="c-accident" style="--cc:var(--sev-crit)">
+                <span class="material-symbols-outlined">car_crash</span>
+                <span class="cval" id="n-accident">0</span>
+                <span class="clabel">Accidents</span>
+            </div>
+            <div class="counter" id="c-jam" style="--cc:var(--sev-high)">
+                <span class="material-symbols-outlined">traffic_jam</span>
+                <span class="cval" id="n-jam">0</span>
+                <span class="clabel">Bouchons</span>
+            </div>
+            <div class="counter" id="c-hazard" style="--cc:var(--sev-warn)">
+                <span class="material-symbols-outlined">warning</span>
+                <span class="cval" id="n-hazard">0</span>
+                <span class="clabel">Dangers</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Main : alertes | axes ===== -->
+    <div class="main">
+        <section class="panel">
+            <div class="panel-head">
+                <span class="material-symbols-outlined">e911_emergency</span>
+                <h2>Alertes sur les routes</h2>
+                <span class="count-pill" id="alerts-pill">0</span>
+            </div>
+            <div class="panel-body" id="alerts-body"></div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-head">
+                <span class="material-symbols-outlined">timer</span>
+                <h2>Axes sous tension</h2>
+                <span class="count-pill" id="axes-pill">0</span>
+            </div>
+            <div class="panel-body" id="axes-body"></div>
+        </section>
+
+        <section class="panel panel--secours">
+            <div class="panel-head">
+                <span class="material-symbols-outlined">e911_emergency</span>
+                <h2>Axes de secours</h2>
+                <span class="count-pill" id="secours-pill">0</span>
+            </div>
+            <div class="panel-body" id="secours-body"></div>
+        </section>
+    </div>
+
+</div>
+
+<script>
+(function(){
+    "use strict";
+
+    var REFRESH_MS = 30000;       // rafraichissement donnees
+    var STALE_MS   = 150000;      // au-dela : donnees considerees perimees
+    var MAX_ALERTS = 9;           // lignes alertes visibles
+    var MAX_AXES   = 10;          // lignes axes visibles
+
+    // Geofence des alertes Waze : cercle autour du point central du circuit 24h.
+    // Le feed couvre une zone plus large ; on ne garde que les alertes a l'interieur.
+    var ZONE_CENTER = { lat: 47.93827259819777, lon: 0.2229518934089374 };
+    var ZONE_RADIUS_KM = 3.5;
+
+    function haversineKm(lat1, lon1, lat2, lon2){
+        var R = 6371, toRad = Math.PI / 180;
+        var dLat = (lat2 - lat1) * toRad, dLon = (lon2 - lon1) * toRad;
+        var a = Math.sin(dLat/2)*Math.sin(dLat/2)
+              + Math.cos(lat1*toRad)*Math.cos(lat2*toRad)*Math.sin(dLon/2)*Math.sin(dLon/2);
+        return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+    }
+    // alerte Waze : location = {x: lon, y: lat}. Sans coords exploitables -> hors zone.
+    function alertInZone(a){
+        var loc = a && a.location;
+        if(!loc || loc.y == null || loc.x == null) return false;
+        return haversineKm(ZONE_CENTER.lat, ZONE_CENTER.lon, loc.y, loc.x) <= ZONE_RADIUS_KM;
+    }
+
+    var lastSuccess = 0;
+
+    function $(id){ return document.getElementById(id); }
+
+    // ---------- Horloge ----------
+    function tickClock(){
+        var now = new Date();
+        $("clock-time").textContent = now.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
+        $("clock-date").textContent = now.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});
+        // fraicheur
+        var dot = $("fresh-dot"), txt = $("fresh-text");
+        if(!lastSuccess){ txt.textContent = "MAJ ..."; return; }
+        var age = Math.round((Date.now()-lastSuccess)/1000);
+        if(age*1000 > STALE_MS){
+            dot.classList.add("stale");
+            txt.textContent = "Signal perdu (" + fmtAge(age) + ")";
+        } else {
+            dot.classList.remove("stale");
+            txt.textContent = "MAJ il y a " + fmtAge(age);
+        }
+    }
+    function fmtAge(sec){
+        if(sec < 60) return sec + "s";
+        var m = Math.floor(sec/60);
+        if(m < 60) return m + "min";
+        return Math.floor(m/60) + "h" + ("0"+(m%60)).slice(-2);
+    }
+
+    // ---------- Formatage ----------
+    function fmtTime(seconds){
+        if(seconds == null || isNaN(seconds)) return "--";
+        seconds = Math.max(0, seconds|0);
+        var m = Math.floor(seconds/60), s = seconds%60;
+        if(m) return m + "m" + (s ? (s<10?"0":"")+s : "");
+        return s + "s";
+    }
+    function fmtDelay(seconds){
+        var s = Math.max(0, seconds|0);
+        if(s === 0) return "a l'heure";
+        var m = Math.floor(s/60), r = s%60;
+        if(m) return "+" + m + "m" + (r?(r<10?"0":"")+r:"");
+        return "+" + r + "s";
+    }
+    function ageFromMillis(pubMillis){
+        if(!pubMillis) return {txt:"", fresh:false};
+        var sec = Math.round((Date.now() - pubMillis)/1000);
+        if(sec < 0) sec = 0;
+        return { txt: "il y a " + fmtAge(sec), fresh: sec < 600 };
+    }
+
+    // ---------- Traductions Waze ----------
+    var SUBTYPE_FR = {
+        "ACCIDENT_MINOR":"Accident mineur","ACCIDENT_MAJOR":"Accident majeur",
+        "JAM_LIGHT_TRAFFIC":"Trafic leger","JAM_MODERATE_TRAFFIC":"Trafic modere",
+        "JAM_HEAVY_TRAFFIC":"Trafic dense","JAM_STAND_STILL_TRAFFIC":"Trafic a l'arret",
+        "HAZARD_ON_ROAD":"Danger sur la route","HAZARD_ON_SHOULDER":"Danger bas-cote",
+        "HAZARD_WEATHER":"Danger meteo","HAZARD_ON_ROAD_OBJECT":"Objet sur la route",
+        "HAZARD_ON_ROAD_POT_HOLE":"Nid-de-poule","HAZARD_ON_ROAD_ROAD_KILL":"Animal sur la route",
+        "HAZARD_ON_SHOULDER_CAR_STOPPED":"Vehicule arrete bas-cote","HAZARD_ON_SHOULDER_ANIMALS":"Animaux bas-cote",
+        "HAZARD_ON_SHOULDER_MISSING_SIGN":"Panneau manquant","HAZARD_WEATHER_FOG":"Brouillard",
+        "HAZARD_WEATHER_HAIL":"Grele","HAZARD_WEATHER_HEAVY_RAIN":"Forte pluie","HAZARD_WEATHER_HEAVY_SNOW":"Forte neige",
+        "HAZARD_WEATHER_FLOOD":"Inondation","HAZARD_WEATHER_FREEZING_RAIN":"Pluie verglacante","HAZARD_WEATHER_HEAT_WAVE":"Canicule",
+        "HAZARD_ON_ROAD_LANE_CLOSED":"Voie fermee","HAZARD_ON_ROAD_OIL":"Huile sur la route","HAZARD_ON_ROAD_ICE":"Verglas",
+        "HAZARD_ON_ROAD_CONSTRUCTION":"Travaux","HAZARD_ON_ROAD_CAR_STOPPED":"Vehicule arrete",
+        "HAZARD_ON_ROAD_TRAFFIC_LIGHT_FAULT":"Feu en panne","HAZARD_ON_ROAD_EMERGENCY_VEHICLE":"Vehicule d'urgence",
+        "HAZARD_ON_ROAD_PEDESTRIAN":"Pieton sur la route","HAZARD_ON_SHOULDER_EMERGENCY_VEHICLE":"Vehicule d'urgence bas-cote",
+        "ROAD_CLOSED_HAZARD":"Fermee - danger","ROAD_CLOSED_CONSTRUCTION":"Fermee - travaux","ROAD_CLOSED_EVENT":"Fermee - evenement",
+        "NO_SUBTYPE":""
+    };
+    var TYPE_FR = { "ACCIDENT":"Accident","JAM":"Bouchon","HAZARD":"Danger","WEATHERHAZARD":"Danger meteo","ROAD_CLOSED":"Route fermee","CONSTRUCTION":"Travaux" };
+    function subtypeFr(s){ return SUBTYPE_FR[s] != null ? SUBTYPE_FR[s] : (s||""); }
+    function typeFr(t){ return TYPE_FR[t] || t || ""; }
+
+    // type -> meta (couleur, icone, priorite d'affichage)
+    // NB: ROAD_CLOSED volontairement absent : toutes les routes de la zone sont
+    // fermees pour le circuit (etat nominal), on l'ignore partout.
+    var TYPE_META = {
+        "ACCIDENT":   { color:"var(--sev-crit)",   icon:"car_crash",   prio:0, label:"Accident" },
+        "JAM":        { color:"var(--sev-high)",    icon:"traffic_jam", prio:2, label:"Bouchon" },
+        "HAZARD":     { color:"var(--sev-warn)",    icon:"warning",     prio:3, label:"Danger" }
+    };
+    function normType(t){
+        t = String(t||"").toUpperCase();
+        if(t === "TRAFFIC_JAM") return "JAM";
+        if(t === "WEATHERHAZARD") return "HAZARD";
+        return t;
+    }
+
+    // ---------- Verdict ----------
+    var VERDICT = [
+        { word:"FLUIDE",    color:"var(--sev-good)", icon:"check_circle",  reco:"Circulation normale - aucune action requise" },
+        { word:"VIGILANCE", color:"var(--sev-warn)", icon:"visibility",    reco:"Trafic plus dense - surveiller l'evolution" },
+        { word:"TENSION",   color:"var(--sev-high)", icon:"warning",       reco:"Ralentissements - anticiper une deviation" },
+        { word:"CRITIQUE",  color:"var(--sev-crit)", icon:"crisis_alert",  reco:"Intervenir : fluidifier ou devier la circulation" }
+    ];
+
+    function el(tag, cls, txt){
+        var e = document.createElement(tag);
+        if(cls) e.className = cls;
+        if(txt != null) e.textContent = txt;
+        return e;
+    }
+    function icon(name){ var s = el("span","material-symbols-outlined"); s.textContent = name; return s; }
+
+    // ---------- Rendu alertes ----------
+    function renderAlerts(alerts){
+        var body = $("alerts-body");
+        body.textContent = "";
+        $("alerts-pill").textContent = alerts.length;
+
+        if(!alerts.length){
+            var emp = el("div","empty ok");
+            emp.appendChild(icon("verified"));
+            emp.appendChild(el("div","t","Aucune alerte signalee sur le reseau"));
+            body.appendChild(emp);
+            return;
+        }
+
+        // tri : priorite type, puis plus recent
+        var sorted = alerts.slice().sort(function(a,b){
+            var pa = (TYPE_META[a._t]||{prio:9}).prio, pb = (TYPE_META[b._t]||{prio:9}).prio;
+            if(pa !== pb) return pa - pb;
+            return (b.pubMillis||0) - (a.pubMillis||0);
+        });
+
+        var shown = sorted.slice(0, MAX_ALERTS);
+        shown.forEach(function(a){
+            var meta = TYPE_META[a._t] || { color:"#64748b", icon:"warning", label:a._t };
+            var row = el("div","alert-row");
+            row.style.setProperty("--ac", meta.color);
+
+            var ico = el("div","alert-ico"); ico.appendChild(icon(meta.icon)); row.appendChild(ico);
+
+            var txt = el("div","alert-txt");
+            var title = el("div","alert-title");
+            var st = subtypeFr(a.subtype);
+            title.appendChild(document.createTextNode(st && st !== meta.label ? st : meta.label));
+            var badge = el("span","badge", meta.label);
+            title.appendChild(badge);
+            txt.appendChild(title);
+
+            var locStr = a.street || a.city || "Localisation non precisee";
+            if(a.street && a.city && a.city !== a.street) locStr = a.street + " - " + a.city;
+            var loc = el("div","alert-loc");
+            loc.appendChild(icon("location_on"));
+            loc.appendChild(document.createTextNode(locStr));
+            txt.appendChild(loc);
+            row.appendChild(txt);
+
+            var ag = ageFromMillis(a.pubMillis);
+            var age = el("div","alert-age");
+            var inner = el("span", ag.fresh ? "fresh" : "", ag.txt);
+            age.appendChild(inner);
+            row.appendChild(age);
+
+            body.appendChild(row);
+        });
+
+        if(sorted.length > shown.length){
+            body.appendChild(el("div","more-note","+ " + (sorted.length - shown.length) + " autre(s) alerte(s)"));
+        }
+    }
+
+    // ---------- Rendu axes ----------
+    function dirBadge(direction){
+        if(direction === "in")  return {cls:"dir-in",  txt:"Entree"};
+        if(direction === "out") return {cls:"dir-out", txt:"Sortie"};
+        return {cls:"dir-none", txt:"Axe"};
+    }
+    function sevColor(sev){
+        if(sev >= 4) return "var(--sev-crit)";
+        if(sev === 3) return "var(--sev-high)";
+        if(sev === 2) return "var(--sev-warn)";
+        return "var(--sev-good)";
+    }
+
+    // ---------- Gravite recalculee cote dashboard ----------
+    // On ignore le "status"/"severity" du serveur : son fallback en temps absolu
+    // (sans reference historique) classe a tort tout trajet > 60s en "bouchon".
+    // Ici la gravite ne depend QUE du ratio actuel/historique. Sans reference
+    // historique fiable, on considere l'axe fluide (on ne dramatise pas).
+    // Termes volontairement sobres pour un poste de controle.
+    function classify(r){
+        var cur = r.currentTime || 0;
+        var hist = r.historicTime || 0;
+        if(hist <= 5) return { sev:0, label:"Fluide" };   // pas de reference exploitable
+        var ratio = cur / hist;
+        // Perte de temps absolue (secondes) vs temps normal.
+        var delay = (r.deltaSeconds != null) ? r.deltaSeconds : Math.max(0, cur - hist);
+        // Double-verrou : il faut A LA FOIS un ratio eleve ET une perte de temps
+        // reelle. Un troncon court (ex. 20s -> 80s) a un gros ratio mais ne coute
+        // qu'une minute : ce n'est pas un bouchon. On exige donc un delai plancher.
+        if(ratio >= 3.0 && delay >= 600) return { sev:4, label:"Bouchon" };       // x3 ET +10 min
+        if(ratio >= 2.2 && delay >= 300) return { sev:3, label:"Fort ralenti" };  // x2.2 ET +5 min
+        if(ratio >= 1.6 && delay >= 120) return { sev:2, label:"Ralenti" };       // x1.6 ET +2 min
+        if(ratio >= 1.35 && delay >= 60) return { sev:1, label:"Dense" };         // x1.35 ET +1 min
+        return { sev:0, label:"Fluide" };
+    }
+    function renderAxes(routes){
+        var body = $("axes-body");
+        body.textContent = "";
+
+        // axes a surveiller : gravite recalculee >= 2 (ralenti et au-dela)
+        var hot = routes.filter(function(r){ return classify(r).sev >= 2; });
+        var fluid = routes.length - hot.length;
+        $("axes-pill").textContent = hot.length;
+
+        if(!hot.length){
+            var emp = el("div","empty ok");
+            emp.appendChild(icon("check_circle"));
+            emp.appendChild(el("div","t", routes.length ? "Tous les axes sont fluides (" + routes.length + " surveilles)" : "Aucune donnee d'axe disponible"));
+            body.appendChild(emp);
+            return;
+        }
+
+        // trier worst-first sur la gravite recalculee
+        hot.sort(function(a, b){ return classify(b).sev - classify(a).sev; });
+        var shown = hot.slice(0, MAX_AXES);
+        shown.forEach(function(r){
+            var c = classify(r);
+            var color = sevColor(c.sev);
+            var row = el("div","axe-row sev");
+            row.style.setProperty("--ac", color);
+
+            var db = dirBadge(r.direction);
+            var badge = el("div","dir-badge " + db.cls, db.txt);
+            row.appendChild(badge);
+
+            row.appendChild(el("div","axe-name", r.terrain || r.rawName || "?"));
+
+            var t = el("div","axe-time", fmtTime(r.currentTime)); row.appendChild(t);
+
+            var delay = el("div","axe-delay");
+            delay.style.color = color;
+            delay.textContent = (r.deltaSeconds != null && r.deltaSeconds > 0) ? fmtDelay(r.deltaSeconds) : "+0";
+            row.appendChild(delay);
+
+            var status = el("div","axe-status", c.label.toUpperCase());
+            status.style.setProperty("--ac", color);
+            row.appendChild(status);
+
+            body.appendChild(row);
+        });
+
+        if(hot.length > shown.length){
+            body.appendChild(el("div","more-note","+ " + (hot.length - shown.length) + " autre(s) axe(s) ralenti(s)"));
+        }
+        if(fluid > 0){
+            var strip = el("div","ok-strip");
+            strip.appendChild(icon("check_circle"));
+            strip.appendChild(document.createTextNode(fluid + " axe(s) fluide(s)"));
+            body.appendChild(strip);
+        }
+    }
+
+    // ---------- Rendu axes de secours (balise ** = category "security") ----------
+    // Temps de parcours des forces de secours et securite. Toujours tous affiches
+    // (worst first) : un axe de secours degrade doit sauter aux yeux.
+    function renderSecours(routes){
+        var body = $("secours-body");
+        body.textContent = "";
+        $("secours-pill").textContent = routes.length;
+
+        if(!routes.length){
+            var emp = el("div","empty");
+            emp.appendChild(icon("e911_emergency"));
+            emp.appendChild(el("div","t","Aucun axe de secours configure"));
+            body.appendChild(emp);
+            return;
+        }
+
+        var degraded = 0;
+        routes.slice(0, 12).forEach(function(r){
+            var c = classify(r);
+            if(c.sev >= 2) degraded++;
+            var color = sevColor(c.sev);
+            var row = el("div","axe-row sev");
+            row.style.setProperty("--ac", color);
+
+            var tag = el("div","secours-tag"); tag.appendChild(icon("siren")); row.appendChild(tag);
+
+            row.appendChild(el("div","axe-name", r.terrain || r.rawName || "?"));
+
+            row.appendChild(el("div","axe-time", fmtTime(r.currentTime)));
+
+            var delay = el("div","axe-delay");
+            delay.style.color = color;
+            delay.textContent = (r.deltaSeconds != null && r.deltaSeconds > 0) ? fmtDelay(r.deltaSeconds) : "+0";
+            row.appendChild(delay);
+
+            var status = el("div","axe-status", c.label.toUpperCase());
+            status.style.setProperty("--ac", color);
+            row.appendChild(status);
+
+            body.appendChild(row);
+        });
+
+        if(routes.length > 12){
+            body.appendChild(el("div","more-note","+ " + (routes.length - 12) + " autre(s) axe(s)"));
+        }
+        var strip = el("div","ok-strip");
+        if(degraded > 0){
+            strip.style.background = "rgba(239,68,68,0.10)";
+            strip.style.borderColor = "rgba(239,68,68,0.25)";
+            strip.style.color = "#fca5a5";
+            strip.textContent = "";
+            var wic = icon("warning"); wic.style.color = "var(--sev-crit)";
+            strip.appendChild(wic);
+            strip.appendChild(document.createTextNode(degraded + " axe(s) de secours degrade(s)"));
+        } else {
+            strip.appendChild(icon("check_circle"));
+            strip.appendChild(document.createTextNode("Tous les axes de secours sont degages"));
+        }
+        body.appendChild(strip);
+    }
+
+    // ---------- Verdict global ----------
+    // Le verdict reflete les AXES SURVEILLES (temps de parcours de tes itineraires),
+    // + les ACCIDENTS dans la zone qui pesent fort (escalade directe en CRITIQUE).
+    // Les bouchons / dangers Waze restent informatifs (compteurs + liste) et ne
+    // pilotent PAS le verdict : ils peuvent etre n'importe ou dans le cercle, hors
+    // de tes itineraires, et faisaient diverger le verdict du panneau "Axes".
+    function computeVerdict(counts, worstSev){
+        if(counts.ACCIDENT > 0 || worstSev >= 4) return 3;   // CRITIQUE : accident en zone, ou axe en bouchon
+        if(worstSev === 3) return 2;                         // TENSION  : axe en fort ralenti
+        if(worstSev === 2) return 1;                         // VIGILANCE: axe ralenti
+        return 0;                                            // FLUIDE
+    }
+    function buildReasons(counts, worstAxe){
+        // Raisons alignees sur ce qui PILOTE le verdict : accidents en zone + axes
+        // surveilles. Les bouchons / dangers Waze restent visibles dans les compteurs.
+        var bits = [];
+        if(counts.ACCIDENT > 0)    bits.push(counts.ACCIDENT + " accident" + (counts.ACCIDENT>1?"s":"") + " dans la zone");
+        if(worstAxe){
+            var wc = classify(worstAxe);
+            if(wc.sev >= 2){
+                var db = worstAxe.direction === "in" ? "Entree " : worstAxe.direction === "out" ? "Sortie " : "";
+                bits.push("axe le plus lent : " + db + (worstAxe.terrain||"") + " (" + wc.label.toLowerCase() + ")");
+            }
+        }
+        return bits.join("  -  ");
+    }
+    function applyVerdict(level, reasons){
+        var v = VERDICT[level];
+        var box = $("verdict");
+        box.style.setProperty("--vc", v.color);
+        box.classList.toggle("pulse", level === 3);
+        $("verdict-icon").textContent = v.icon;
+        $("verdict-word").textContent = v.word;
+        $("verdict-reco").textContent = v.reco;
+        $("verdict-reasons").textContent = reasons || "";
+    }
+
+    function setCounter(id, n, critical){
+        $("n-" + id).textContent = n;
+        var c = $("c-" + id);
+        c.classList.toggle("hot", n > 0);
+        c.classList.toggle("critical", !!critical && n > 0);
+    }
+
+    // ---------- Fetch ----------
+    function refresh(){
+        Promise.all([
+            fetch("/alerts").then(function(r){ if(!r.ok) throw new Error("alerts " + r.status); return r.json(); }),
+            fetch("/trafic/all_routes").then(function(r){ if(!r.ok) throw new Error("routes " + r.status); return r.json(); })
+        ]).then(function(res){
+            var rawAlerts = Array.isArray(res[0]) ? res[0] : [];
+            var routes = (res[1] && Array.isArray(res[1].routes)) ? res[1].routes : [];
+
+            // normaliser + filtrer les alertes connues
+            var alerts = [];
+            var counts = { ACCIDENT:0, JAM:0, HAZARD:0 };
+            var jamStandstill = 0, jamHeavy = 0;
+            rawAlerts.forEach(function(a){
+                if(!a) return;
+                if(!alertInZone(a)) return;   // geofence cercle 3.5 km autour du circuit
+                var t = normType(a.type);
+                if(!TYPE_META[t]) return;
+                a._t = t;
+                alerts.push(a);
+                counts[t] = (counts[t]||0) + 1;
+                if(t === "JAM"){
+                    if(a.subtype === "JAM_STAND_STILL_TRAFFIC") jamStandstill++;
+                    if(a.subtype === "JAM_HEAVY_TRAFFIC") jamHeavy++;
+                }
+            });
+
+            // axes : exclure securite/libre du calcul de tension (on garde acces + autoroutes)
+            var trafRoutes = routes.filter(function(r){ return r.category === "pkg_aa" || r.tag === "P"; });
+            // axes de secours (balise ** dans le feed Waze) : bloc dedie
+            var secoursRoutes = routes.filter(function(r){ return r.category === "security"; });
+            var worstSev = 0, worstAxe = null;
+            trafRoutes.forEach(function(r){
+                var s = classify(r).sev;
+                if(s > worstSev){ worstSev = s; worstAxe = r; }
+            });
+
+            // compteurs
+            setCounter("accident", counts.ACCIDENT, true);
+            setCounter("jam", counts.JAM, false);
+            setCounter("hazard", counts.HAZARD, false);
+
+            // verdict
+            var level = computeVerdict(counts, worstSev);
+            applyVerdict(level, buildReasons(counts, worstAxe));
+
+            // listes
+            renderAlerts(alerts);
+            renderAxes(trafRoutes);
+            renderSecours(secoursRoutes);
+
+            lastSuccess = Date.now();
+            tickClock();
+        }).catch(function(err){
+            console.error("[circulation] refresh:", err);
+            // on laisse l'horloge marquer la perte de signal via lastSuccess
+            tickClock();
+        });
+    }
+
+    // ---------- Plein ecran ----------
+    $("btn-fullscreen").addEventListener("click", function(){
+        var d = document.documentElement;
+        if(!document.fullscreenElement){
+            (d.requestFullscreen || d.webkitRequestFullscreen || function(){}).call(d);
+        } else {
+            (document.exitFullscreen || document.webkitExitFullscreen || function(){}).call(document);
+        }
+    });
+
+    // ---------- Boot ----------
+    tickClock();
+    setInterval(tickClock, 1000);
+    refresh();
+    setInterval(refresh, REFRESH_MS);
+
+})();
+</script>
+</body>
+</html>

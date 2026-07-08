@@ -43,6 +43,12 @@ MAX_TX = 100
 # bit 7 (128) = nouveau layout XML, bit 8 (256) = inclure erreurs
 OPTION_TRANSACTIONS = 128 + 256  # 384
 
+# Issuer utilise pour les requetes Transactions. Il depend de la config Skidata
+# de l'evenement (24H Motos = 6, 24H Autos 2026 = 3). Priorite : champ
+# `hsh_issuer_tx` du doc ___GLOBAL___, puis variable d'env HSH_TX_ISSUER, puis 3.
+# Les requetes Counter restent en Issuer 6 (compteurs globaux, OK).
+DEFAULT_TX_ISSUER = int(os.getenv("HSH_TX_ISSUER", "3"))
+
 TZ_PARIS = zoneinfo.ZoneInfo("Europe/Paris")
 
 TASK_NAME = "Live controle acces"
@@ -239,6 +245,7 @@ GLOBAL_DEFAULTS = {
     "dernier_inventaire": None,
     "dernier_transaction_id": None,
     "dernier_cycle": None,
+    "hsh_issuer_tx": DEFAULT_TX_ISSUER,
 }
 
 
@@ -396,7 +403,9 @@ def build_counter_location_xml(location_id, location_type):
 </TSData>"""
 
 
-def build_transactions_xml(from_dt=None, to_dt=None, last_tx_id=None):
+def build_transactions_xml(from_dt=None, to_dt=None, last_tx_id=None, issuer=None):
+    if issuer is None:
+        issuer = DEFAULT_TX_ISSUER
     attrs = f'Type="Transactions" MaxTransactions="{MAX_TX}" Option="{OPTION_TRANSACTIONS}"'
     if from_dt:
         attrs += f' From="{from_dt}"'
@@ -407,7 +416,7 @@ def build_transactions_xml(from_dt=None, to_dt=None, last_tx_id=None):
     return f"""<TSData>
     <Header>
         <Version>HSHIF25</Version>
-        <Issuer>6</Issuer>
+        <Issuer>{issuer}</Issuer>
         <Receiver>1</Receiver>
         <ID>Tx_{int(time.time())}</ID>
     </Header>
@@ -1074,6 +1083,12 @@ def executer_transactions(sock, doc_global, cache_titres=None):
     evenement_clean = doc_global.get("evenement_clean", "")
     last_tx_id = doc_global.get("dernier_transaction_id")
 
+    # Issuer des requetes Transactions : champ ___GLOBAL___ prioritaire, sinon defaut.
+    tx_issuer = doc_global.get("hsh_issuer_tx")
+    if tx_issuer is None:
+        tx_issuer = DEFAULT_TX_ISSUER
+    print(f"  Issuer transactions: {tx_issuer}")
+
     # Forçage de période depuis l'admin (1-3 jours)
     force_jours = doc_global.get("force_collecte_jours")
     if force_jours:
@@ -1128,6 +1143,7 @@ def executer_transactions(sock, doc_global, cache_titres=None):
             from_dt=from_dt,
             to_dt=to_dt,
             last_tx_id=cursor,
+            issuer=tx_issuer,
         )
         frame = encapsuler_transactions(xml_req)
         resp = envoyer_et_recevoir(sock, frame)

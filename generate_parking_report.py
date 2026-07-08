@@ -861,30 +861,39 @@ HTML_TEMPLATE = r"""<!doctype html>
     .nav-overview button { padding: 11px 14px; font-size: 14px; }
   }
 
-  /* Mode iframe : meme comportement que mobile (sidebar en drawer overlay)
-     applique a TOUS les viewports. Active quand le report est integre dans
-     l'app cockpit via iframe. */
-  body.iframed aside {
-    position: fixed; top: 0; left: 0; bottom: 0;
-    width: 270px; z-index: 40;
-    transform: translateX(0);
-    transition: transform .22s ease;
-    box-shadow: 4px 0 18px rgba(0, 0, 0, 0.5);
-  }
-  body.iframed.menu-collapsed aside {
-    transform: translateX(-100%);
-    box-shadow: none;
-    width: 270px;
-    padding: 60px 0 14px;
-    border-right: 1px solid var(--border);
-  }
-  body.iframed main, body.iframed.menu-collapsed main { padding-left: 14px; }
-  body.iframed:not(.menu-collapsed)::after {
-    content: '';
-    position: fixed; top: 0; right: 0; bottom: 0; left: 270px;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 35;
-  }
+  /* Mode iframe : la sidebar zones du rapport est remplacee par une barre de
+     selection horizontale en haut, pour ne pas entrer en conflit avec la
+     sidebar de l'app Cockpit. Active quand le report est integre via iframe.
+     body passe en layout colonne -> [barre du haut] + [main pleine largeur]. */
+  body.iframed { flex-direction: column; }
+  body.iframed aside,
+  body.iframed > .menu-toggle,
+  body.iframed > .home-btn { display: none !important; }
+  body.iframed:not(.menu-collapsed)::after { content: none; }
+  body.iframed main, body.iframed.menu-collapsed main { padding-left: 28px; }
+
+  .iframe-topbar { display: none; }
+  body.iframed .iframe-topbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    flex-shrink: 0; padding: 9px 16px; background: var(--panel);
+    border-bottom: 1px solid var(--border); }
+  .iframe-topbar .itb-cats { display: flex; gap: 6px; flex-shrink: 0; }
+  .iframe-topbar .cat-tab { flex: 0 0 auto; padding: 6px 14px; }
+  .itb-select { flex: 1 1 200px; min-width: 180px; max-width: 340px;
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 10px; font-size: 13px; font-family: inherit;
+    cursor: pointer; }
+  .itb-select:focus { outline: none; border-color: var(--accent); }
+  .itb-home, .itb-peaks { display: inline-flex; align-items: center; gap: 6px;
+    flex-shrink: 0; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 7px 12px;
+    font-size: 13px; cursor: pointer; font-family: inherit;
+    transition: background .12s, border-color .12s, color .12s; }
+  .itb-home { padding: 7px 10px; }
+  .itb-home:hover, .itb-peaks:hover { border-color: var(--accent); color: var(--accent); }
+  .itb-home.active, .itb-peaks.active { background: var(--accent);
+    border-color: var(--accent); color: #0f1620; }
+  .itb-home svg, .itb-peaks svg { width: 16px; height: 16px; }
 
   /* Scrollbars dans le ton du theme */
   * { scrollbar-width: thin; scrollbar-color: #3a4a66 transparent; }
@@ -898,6 +907,29 @@ HTML_TEMPLATE = r"""<!doctype html>
 </style>
 </head>
 <body>
+<div class="iframe-topbar" id="iframe-topbar">
+  <button class="itb-home" id="home-btn-top" title="Tableau de bord" aria-label="Accueil">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 12l9-9 9 9"></path>
+      <path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10"></path>
+      <path d="M10 21V14h4v7"></path>
+    </svg>
+  </button>
+  <div class="itb-cats">
+    <button class="cat-tab active" data-cat="zone">Zones</button>
+    <button class="cat-tab" data-cat="porte">Portes</button>
+  </div>
+  <select class="itb-select" id="zone-select" aria-label="Selectionner une zone ou une porte"></select>
+  <button class="itb-peaks" id="nav-peaks-top" title="Vue d'ensemble - Pics">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="3 17 9 11 13 15 21 7"></polyline>
+      <polyline points="14 7 21 7 21 14"></polyline>
+    </svg>
+    Pics
+  </button>
+</div>
 <button class="menu-toggle" id="menu-toggle" aria-label="Replier le menu" title="Replier / deplier le menu">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
        stroke-linecap="round" stroke-linejoin="round">
@@ -1352,6 +1384,7 @@ function renderSidebar(filter) {
   const ul = document.getElementById('zone-list');
   const f = (filter || '').toLowerCase();
   ul.replaceChildren();
+  renderZoneSelect(f);
   const filteredList = currentList().filter(z => z.name.toLowerCase().includes(f));
   if (currentCategory === 'porte') {
     // Pas de sous-groupes pour les portes (elles sont toutes "Enceinte Generale")
@@ -1375,6 +1408,41 @@ function buildSidebarItem(z) {
   return li;
 }
 
+// Barre du haut (mode iframe) : remplit le <select> des zones/portes en
+// reprenant le meme filtre/groupement que la sidebar.
+function renderZoneSelect(filter) {
+  const sel = document.getElementById('zone-select');
+  if (!sel) return;
+  const f = (filter || '').toLowerCase();
+  const list = currentList().filter(z => z.name.toLowerCase().includes(f));
+  sel.replaceChildren();
+  sel.appendChild(new Option(
+    currentCategory === 'porte' ? 'Choisir une porte...' : 'Choisir une zone...', ''));
+  if (currentCategory === 'porte') {
+    list.forEach(z => sel.appendChild(new Option(z.name, z.name)));
+  } else {
+    groupZones(list).forEach(g => {
+      const og = document.createElement('optgroup');
+      og.label = g.label + ' (' + g.items.length + ')';
+      g.items.forEach(z => og.appendChild(new Option(z.name, z.name)));
+      sel.appendChild(og);
+    });
+  }
+  sel.value = activeZone || '';
+}
+
+// Synchronise l'etat actif de la barre du haut avec le viewMode courant.
+function updateTopbarState() {
+  const hb = document.getElementById('home-btn-top');
+  const pb = document.getElementById('nav-peaks-top');
+  const sel = document.getElementById('zone-select');
+  if (hb) hb.classList.toggle('active', viewMode === 'home');
+  if (pb) pb.classList.toggle('active',
+    viewMode === 'peaks-overview' || viewMode === 'peaks-detail');
+  if (sel) sel.value =
+    ((viewMode === 'zone' || viewMode === 'zone-day') && activeZone) ? activeZone : '';
+}
+
 function selectZone(zoneName) {
   viewMode = 'zone';
   activeZone = zoneName;
@@ -1385,6 +1453,7 @@ function selectZone(zoneName) {
   });
   const z = findUnit(zoneName);
   if (z) render(z);
+  updateTopbarState();
 }
 
 function showHome() {
@@ -1397,6 +1466,7 @@ function showHome() {
   charts.forEach(c => c.destroy());
   charts = [];
   renderHome();
+  updateTopbarState();
 }
 
 function aggregatePortesEnceinte() {
@@ -1605,6 +1675,7 @@ function showPeaksOverview() {
   charts.forEach(c => c.destroy());
   charts = [];
   renderPeaksOverview();
+  updateTopbarState();
 }
 
 function showPeaksDetail(zoneName) {
@@ -1615,6 +1686,7 @@ function showPeaksDetail(zoneName) {
   charts.forEach(c => c.destroy());
   charts = [];
   renderPeaksDetail();
+  updateTopbarState();
 }
 
 function showZoneDay(zoneName, date) {
@@ -1631,6 +1703,7 @@ function showZoneDay(zoneName, date) {
   charts.forEach(c => c.destroy());
   charts = [];
   renderZoneDay(z, date);
+  updateTopbarState();
 }
 
 function render(z) {
@@ -2475,6 +2548,16 @@ document.getElementById('nav-peaks').addEventListener('click', () => {
 document.getElementById('home-btn').addEventListener('click', () => {
   showHome();
   closeMenuOnMobile();
+});
+
+// Barre du haut (mode iframe) : memes actions, sans drawer a refermer.
+const _homeTop = document.getElementById('home-btn-top');
+if (_homeTop) _homeTop.addEventListener('click', () => showHome());
+const _peaksTop = document.getElementById('nav-peaks-top');
+if (_peaksTop) _peaksTop.addEventListener('click', () => showPeaksOverview());
+const _zoneSelect = document.getElementById('zone-select');
+if (_zoneSelect) _zoneSelect.addEventListener('change', e => {
+  if (e.target.value) selectZone(e.target.value);
 });
 
 document.addEventListener('keydown', e => {

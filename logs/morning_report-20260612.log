@@ -1,0 +1,26 @@
+ 
+=== Lancement 12-06-26  7:00:02,53 === 
+2026-06-12 07:00:03 [INFO] Fenetre analysee : 2026-06-11T05:00:00+00:00 -> 2026-06-12T05:00:00+00:00 (UTC)
+2026-06-12 07:00:03 [INFO] Evenement detecte : 24H AUTOS 2026
+2026-06-12 07:00:03 [INFO] Generation du resume Claude (streaming)...
+2026-06-12 07:00:03 [INFO] Selection fiches : total=172 majors=1 others=79 selected=80 cut=92 capped=False
+2026-06-12 07:00:03 [INFO] Selection fiches : total=211 majors=0 others=80 selected=80 cut=131 capped=False
+2026-06-12 07:00:03 [INFO] attendance_block : 24H AUTOS 2026 -> yesterday(public=True billets=118204 pic=83140@21h17 pic_prev=74024@21h00 proj=88233 d=12%) | today(public=True billets=103560 pic=None@- pic_prev=37999@16h00 proj=47621 d=25%) | tomorrow(public=True billets=133272 pic=None@- pic_prev=138600@16h00 proj=156937 d=13%)
+2026-06-12 07:00:35 [INFO]   ... 885 chars recus (1 output tokens)
+2026-06-12 07:00:42 [INFO]   ... 1744 chars recus (1 output tokens)
+2026-06-12 07:00:49 [INFO]   ... 2620 chars recus (1 output tokens)
+2026-06-12 07:00:56 [INFO]   ... 3427 chars recus (1 output tokens)
+2026-06-12 07:01:01 [INFO]   ... 4257 chars recus (1 output tokens)
+2026-06-12 07:01:08 [INFO]   ... 5147 chars recus (1 output tokens)
+2026-06-12 07:01:16 [INFO]   ... 6053 chars recus (1 output tokens)
+2026-06-12 07:01:23 [INFO]   ... 6952 chars recus (1 output tokens)
+2026-06-12 07:01:30 [INFO]   ... 7789 chars recus (1 output tokens)
+2026-06-12 07:01:36 [INFO]   ... 8661 chars recus (1 output tokens)
+2026-06-12 07:01:42 [INFO]   ... 9517 chars recus (1 output tokens)
+2026-06-12 07:01:48 [INFO]   ... 10374 chars recus (1 output tokens)
+2026-06-12 07:01:54 [INFO]   ... 11292 chars recus (1 output tokens)
+2026-06-12 07:02:02 [INFO]   ... 12181 chars recus (1 output tokens)
+2026-06-12 07:02:03 [INFO] Resume genere : id=78570683ef6445b3a65fbb3e07389a30 fiches=80 tokens_in=44712 tokens_out=4268
+2026-06-12 07:02:03 [INFO] Destinataires inscrits au rapport matinal : 12
+2026-06-12 07:02:03 [INFO] Mail envoye a 12 destinataire(s) via 192.168.254.2
+=== Fin 12-06-26  7:02:03,45 (code retour 0) === 

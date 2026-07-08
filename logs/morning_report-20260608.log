@@ -1,0 +1,27 @@
+ 
+=== Lancement 08-06-26  7:00:02,42 === 
+2026-06-08 07:00:03 [INFO] Fenetre analysee : 2026-06-07T05:00:00+00:00 -> 2026-06-08T05:00:00+00:00 (UTC)
+2026-06-08 07:00:03 [INFO] Evenement detecte : 24H AUTOS 2026
+2026-06-08 07:00:03 [INFO] Generation du resume Claude (streaming)...
+2026-06-08 07:00:03 [INFO] Selection fiches : total=102 majors=0 others=80 selected=80 cut=22 capped=False
+2026-06-08 07:00:03 [INFO] Selection fiches : total=84 majors=0 others=80 selected=80 cut=4 capped=False
+2026-06-08 07:00:03 [INFO] attendance_block : 24H AUTOS 2026 -> yesterday(public=True billets=107228 pic=26372@15h52 pic_prev=24312@16h00 proj=29507 d=8%) | today(public=False billets=None pic=None@- pic_prev=None@- proj=None d=-%) | tomorrow(public=True billets=103535 pic=None@- pic_prev=15098@16h00 proj=18916 d=25%)
+2026-06-08 07:00:32 [INFO]   ... 813 chars recus (1 output tokens)
+2026-06-08 07:00:39 [INFO]   ... 1672 chars recus (1 output tokens)
+2026-06-08 07:00:46 [INFO]   ... 2531 chars recus (1 output tokens)
+2026-06-08 07:00:53 [INFO]   ... 3378 chars recus (1 output tokens)
+2026-06-08 07:00:59 [INFO]   ... 4189 chars recus (1 output tokens)
+2026-06-08 07:01:07 [INFO]   ... 5037 chars recus (1 output tokens)
+2026-06-08 07:01:14 [INFO]   ... 5853 chars recus (1 output tokens)
+2026-06-08 07:01:22 [INFO]   ... 6696 chars recus (1 output tokens)
+2026-06-08 07:01:30 [INFO]   ... 7540 chars recus (1 output tokens)
+2026-06-08 07:01:37 [INFO]   ... 8380 chars recus (1 output tokens)
+2026-06-08 07:01:44 [INFO]   ... 9240 chars recus (1 output tokens)
+2026-06-08 07:01:48 [INFO]   ... 10057 chars recus (1 output tokens)
+2026-06-08 07:01:54 [INFO]   ... 10955 chars recus (1 output tokens)
+2026-06-08 07:02:01 [INFO]   ... 11859 chars recus (1 output tokens)
+2026-06-08 07:02:07 [INFO]   ... 12695 chars recus (1 output tokens)
+2026-06-08 07:02:08 [INFO] Resume genere : id=b378f43c67fb40caa69d33bfb26d6cb4 fiches=80 tokens_in=37736 tokens_out=4301
+2026-06-08 07:02:08 [INFO] Destinataires inscrits au rapport matinal : 11
+2026-06-08 07:02:08 [INFO] Mail envoye a 11 destinataire(s) via 192.168.254.2
+=== Fin 08-06-26  7:02:09,41 (code retour 0) === 

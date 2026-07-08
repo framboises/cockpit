@@ -1,6 +1,7 @@
 # Standard library imports
 import os
 import re
+import unicodedata
 import json
 import hmac
 import logging
@@ -911,11 +912,103 @@ def get_timetable_categories():
             {"$group": {"_id": "$events.v.category"}}
         ]
         result = list(db.timetable.aggregate(pipeline))
-        categories = [doc["_id"] for doc in result if doc["_id"]]
-        return jsonify({"categories": categories})
+        used = [doc["_id"] for doc in result if doc["_id"]]
+
+        # Fusion avec la liste persistante (categories ajoutees manuellement,
+        # potentiellement sans vignette) puis tri alphabetique insensible a la casse.
+        custom_doc = COL_TT_CATEGORIES.find_one({"event": event, "year": year}) or {}
+        custom = custom_doc.get("categories", []) or []
+        merged = sorted(set(used) | set(custom), key=lambda s: (s or "").lower())
+        return jsonify({"categories": merged})
     except Exception as e:
         logger.error("Error getting categories: " + str(e))
         return jsonify({"categories": []}), 500
+
+
+# Collection des categories Timetable curees manuellement (par event/year).
+# Permet d'ajouter une categorie avant qu'une vignette ne l'utilise, et de
+# supprimer les "orphelines" (categories sans aucune vignette) sans risque.
+COL_TT_CATEGORIES = db['timetable_custom_categories']
+
+
+def _used_category_counts(event, year):
+    """Retourne {categorie: nombre_de_vignettes} pour event/year."""
+    pipeline = [
+        {"$match": {"event": event, "year": str(year)}},
+        {"$project": {"events": {"$objectToArray": "$data"}}},
+        {"$unwind": "$events"},
+        {"$unwind": "$events.v"},
+        {"$group": {"_id": "$events.v.category", "count": {"$sum": 1}}},
+    ]
+    out = {}
+    for doc in db.timetable.aggregate(pipeline):
+        if doc["_id"]:
+            out[doc["_id"]] = doc["count"]
+    return out
+
+
+@app.route('/api/timetable-categories', methods=['GET'])
+@role_required("user")
+def list_timetable_categories():
+    """Liste enrichie pour le gestionnaire de categories de la modale.
+
+    Retourne [{name, count, custom, orphan}] triee, count = nombre de vignettes,
+    orphan = count 0 (supprimable).
+    """
+    event = request.args.get('event')
+    year = str(request.args.get('year') or '')
+    if not event or not year:
+        return jsonify({"categories": []}), 400
+    counts = _used_category_counts(event, year)
+    custom_doc = COL_TT_CATEGORIES.find_one({"event": event, "year": year}) or {}
+    custom = set(custom_doc.get("categories", []) or [])
+    names = set(counts) | custom
+    out = []
+    for n in sorted(names, key=lambda s: (s or "").lower()):
+        cnt = counts.get(n, 0)
+        out.append({"name": n, "count": cnt, "custom": n in custom, "orphan": cnt == 0})
+    return jsonify({"categories": out})
+
+
+@app.route('/api/timetable-categories', methods=['POST'])
+@role_required("user")
+def add_timetable_category():
+    """Ajoute une categorie a la liste persistante (event/year)."""
+    data = request.get_json(force=True) or {}
+    event = data.get('event')
+    year = str(data.get('year') or '')
+    cat = (data.get('category') or '').strip()
+    if not event or not year or not cat:
+        return jsonify({"ok": False, "error": "missing_params"}), 400
+    if len(cat) > 120:
+        return jsonify({"ok": False, "error": "too_long"}), 400
+    COL_TT_CATEGORIES.update_one(
+        {"event": event, "year": year},
+        {"$addToSet": {"categories": cat}},
+        upsert=True,
+    )
+    return jsonify({"ok": True, "category": cat})
+
+
+@app.route('/api/timetable-categories', methods=['DELETE'])
+@role_required("manager")
+def delete_timetable_category():
+    """Supprime une categorie SI elle est orpheline (0 vignette)."""
+    data = request.get_json(force=True) or {}
+    event = data.get('event')
+    year = str(data.get('year') or '')
+    cat = (data.get('category') or '').strip()
+    if not event or not year or not cat:
+        return jsonify({"ok": False, "error": "missing_params"}), 400
+    counts = _used_category_counts(event, year)
+    if counts.get(cat, 0) > 0:
+        return jsonify({"ok": False, "error": "not_orphan",
+                        "count": counts[cat]}), 409
+    COL_TT_CATEGORIES.update_one(
+        {"event": event, "year": year},
+        {"$pull": {"categories": cat}},
+    )
+    return jsonify({"ok": True})
 
 # -------------------------------------------------------------------------------
 # Route pour ajouter un événement dans la collection timetable
@@ -1775,6 +1868,28 @@ def get_counter_max():
 ################################################################################
 
 
+def _event_hist_aliases(event):
+    """Noms sous lesquels un evenement peut etre stocke dans historique_controle.
+
+    La collection historique_controle est incoherente : certains events y sont
+    ecrits sous leur nom complet (ex: '24H AUTOS'), d'autres sous leur code court
+    (ex: 'LMC' pour 'LE MANS CLASSIC', 'GPE', 'SBK'), parfois les deux. Le code
+    court vit dans evenement.short. On renvoie donc [nom, short] (dedup, ordre
+    preserve) pour requeter l'historique avec {'event': {'$in': aliases}}.
+    """
+    aliases = []
+    if event:
+        aliases.append(event)
+        try:
+            ev_doc = db.evenement.find_one({'nom': event}, {'_id': 0, 'short': 1})
+            short = (ev_doc or {}).get('short')
+            if short and short not in aliases:
+                aliases.append(short)
+        except Exception:
+            pass
+    return aliases
+
+
 def _parse_race_date(raw):
     """Parse une date de course (string ISO ou datetime) en date."""
     if not raw:
@@ -1948,8 +2063,9 @@ def get_affluence():
     prev_hist_race_date = None
     prev_data_by_day = {}
     if race_date and current_year_int:
+        hist_aliases = _event_hist_aliases(event)
         prev_hist_candidates = list(db['historique_controle'].find(
-            {'type': 'frequentation', 'event': event},
+            {'type': 'frequentation', 'event': {'$in': hist_aliases}},
             sort=[('year', -1)]
         ))
         for cand in prev_hist_candidates:
@@ -1959,7 +2075,7 @@ def get_affluence():
                 prev_hist_race_raw = cand.get('race')
                 if not prev_hist_race_raw:
                     portes_doc = db['historique_controle'].find_one(
-                        {'type': 'portes', 'event': event, 'year': prev_hist_year},
+                        {'type': 'portes', 'event': {'$in': hist_aliases}, 'year': prev_hist_year},
                         {'_id': 0, 'race': 1}
                     )
                     if portes_doc:
@@ -2490,6 +2606,54 @@ def update_general_stat():
     
     return jsonify(stats)
 
+# ---------------------------------------------------------------------------
+# Terrains (parkings / campings) — taux de remplissage vs ventes + jauge live
+# ---------------------------------------------------------------------------
+# Association terrain (parametrages) <-> compteur live-access (locations_selectionnees).
+# Auto-match par nom normalise, override manuel persiste dans terrain_location_mapping.
+COL_TERRAIN_MAP = db['terrain_location_mapping']  # 1 doc / (event, year), champ mappings
+
+_TERRAIN_STOPWORDS = {"PARKING", "PARK", "CAMPING", "AA", "AIRE", "ACCUEIL", "P", "PK", "CP"}
+
+def _norm_terrain_name(s):
+    """Normalise un nom de terrain/location pour le matching (sans accents/casse/bruit)."""
+    s = unicodedata.normalize('NFKD', s or '').encode('ascii', 'ignore').decode('ascii').upper()
+    s = re.sub(r'[^A-Z0-9]+', ' ', s)
+    toks = [t for t in s.split() if t and t not in _TERRAIN_STOPWORDS]
+    return ' '.join(toks)
+
+def _terrain_base_name(name):
+    """Nom de base d'un terrain en retirant le numero de parcelle final.
+    'PRAIRIE 1' -> 'PRAIRIE', 'MULSANNE 12' -> 'MULSANNE', 'EXPO AUTOS' inchange."""
+    s = (name or '').strip()
+    s2 = re.sub(r'\s*\d+\s*$', '', s).strip()
+    return s2 or s
+
+def _auto_match_location(terrain_name, locations_norm):
+    """locations_norm: liste de (loc, normname). Retourne la meilleure loc ou None."""
+    tn = _norm_terrain_name(terrain_name)
+    if not tn:
+        return None
+    tset = set(tn.split())
+    best, best_score = None, 0.0
+    for loc, ln in locations_norm:
+        if not ln:
+            continue
+        if ln == tn:
+            return loc  # match exact
+        lset = set(ln.split())
+        if not lset:
+            continue
+        inter = tset & lset
+        union = tset | lset
+        jacc = len(inter) / len(union) if union else 0.0
+        contained = (tn in ln) or (ln in tn)
+        score = jacc + (0.5 if contained else 0.0)
+        if score > best_score:
+            best_score, best = score, loc
+    return best if best_score >= 0.5 else None
+
+
 @app.route('/terrains', methods=['GET'])
 @role_required("user")
 def parkings():
@@ -2497,31 +2661,192 @@ def parkings():
     year = request.args.get('year')
     if not event or not year:
         return "Missing event or year parameter", 400
+    payload = getattr(request, 'user_payload', {})
+    is_admin = (payload.get("app_role") == "admin") or payload.get("is_super_admin") \
+               or ("admin" in (payload.get("roles", []) or []))
+    return render_template("terrains.html", event=event, year=year,
+                           is_admin=bool(is_admin),
+                           user_firstname=payload.get("firstname", ""),
+                           user_lastname=payload.get("lastname", ""),
+                           user_email=payload.get("email", ""))
 
-    # Exemple de structure de données avec des placeholders pour chaque parking/aire d'accueil
-    terrains_data = [
-        {"id": "parking-a", "name": "Parking A", "scans": "N/A", "tickets": "N/A", "gauge": "N/A"},
-        {"id": "parking-b", "name": "Parking B", "scans": "N/A", "tickets": "N/A", "gauge": "N/A"},
-        {"id": "aire-accueil", "name": "Aire d'Accueil", "scans": "N/A", "tickets": "N/A", "gauge": "N/A"}
-    ]
-    
-    return render_template("terrains.html", terrains=terrains_data, event=event, year=year)
 
-@app.route('/update_parkings', methods=['GET'])
+@app.route('/api/terrains/fill', methods=['GET'])
 @role_required("user")
-def update_parkings():
+def api_terrains_fill():
+    """Taux de remplissage par terrain : presents live (jauge live-access) vs
+    billets vendus (primaire) et vs capacite (secondaire)."""
     event = request.args.get('event')
     year = request.args.get('year')
     if not event or not year:
-        return jsonify({"error": "Missing event or year parameter"}), 400
+        return jsonify({"error": "Missing event or year"}), 400
 
-    # Remplacez ces valeurs par vos requêtes sur la base de données
-    terrains_data = [
-        {"id": "parking-a", "scans": "N/A", "tickets": "N/A", "gauge": "N/A"},
-        {"id": "parking-b", "scans": "N/A", "tickets": "N/A", "gauge": "N/A"},
-        {"id": "aire-accueil", "scans": "N/A", "tickets": "N/A", "gauge": "N/A"}
-    ]
-    return jsonify({"parkings": terrains_data})
+    param = db['parametrages'].find_one({'event': event, 'year': year}, {'_id': 0}) or {}
+    data = param.get('data', {}) or {}
+    products = (param.get('tickets', {}) or {}).get('products', {}) or {}
+    last_update = (param.get('tickets', {}) or {}).get('lastUpdate')
+
+    global_doc = _hsh_read_global()
+    locations = global_doc.get('locations_selectionnees', []) or []
+    corrections = global_doc.get('corrections_compteurs', {}) or {}
+
+    # Dernier compteur live par location activee
+    counters = {}
+    for loc in locations:
+        lid = str(loc.get('id'))
+        c = db['data_access'].find_one(
+            {'requested_location_id': lid, 'requested_location_type': loc.get('type')},
+            sort=[('timestamp', -1)],
+            projection={'_id': 0, 'current': 1, 'upper_limit': 1, 'timestamp': 1}
+        )
+        counters[lid] = c
+
+    locations_norm = [(loc, _norm_terrain_name(loc.get('name', ''))) for loc in locations]
+    map_doc = COL_TERRAIN_MAP.find_one({'event': event, 'year': str(year)}) or {}
+    mappings = map_doc.get('mappings', {}) or {}
+
+    def _present_for_loc(loc):
+        """(present, upper_limit, ts) du compteur d'une location, ou (None,None,None)."""
+        if not loc:
+            return None, None, None
+        c = counters.get(str(loc.get('id')))
+        if not c:
+            return None, None, None
+        corr = int(corrections.get(str(loc.get('id')), 0) or 0)
+        present = max(int(c.get('current', 0) or 0) - corr, 0)
+        cts = c.get('timestamp')
+        ts = (cts.isoformat() + 'Z') if hasattr(cts, 'isoformat') else None
+        return present, c.get('upper_limit'), ts
+
+    terrains_out = []   # par parcelle -> alimente la modale d'association
+    groups = {}         # cle compteur (ou nom de base) -> agregat -> alimente le board
+
+    for kind, key in (("parking", "parkingsHoraires"), ("camping", "campingsHoraires")):
+        for t in data.get(key, []):
+            tk = t.get('ticketing', []) or []
+            if not tk:
+                continue
+            tid = str(t.get('id') or t.get('name'))
+            name = t.get('name', '?')
+            prod_names = [x.get('product') for x in tk if x.get('product')]
+            ventes = sum(products.get(p, {}).get('ventes', 0) for p in prod_names)
+            capacite = t.get('capacite') or t.get('capacite_theorique') or 0
+
+            # Association : manuel d'abord, sinon auto (sauf si explicitement vide)
+            loc = None
+            source = None
+            manual = mappings.get(tid)
+            if manual and manual.get('location_id'):
+                loc = next((l for l in locations if str(l.get('id')) == str(manual['location_id'])), None)
+                if loc:
+                    source = 'manual'
+            if manual and manual.get('cleared'):
+                source = 'none'                              # association volontairement vide
+            elif loc is None:
+                loc = _auto_match_location(name, locations_norm)
+                if loc:
+                    source = 'auto'
+
+            present_t, _u, _ts = _present_for_loc(loc)
+            terrains_out.append({
+                'id': tid, 'name': name, 'type': kind,
+                'capacite': capacite or None, 'products': prod_names, 'ventes': ventes,
+                'location': ({'id': str(loc.get('id')), 'type': loc.get('type'),
+                              'name': loc.get('name')} if loc else None),
+                'match_source': source,
+                'present': present_t,
+            })
+
+            # Agregation : par compteur si associe (fusionne PRAIRIE 1/2/3 -> compteur
+            # PRAIRIE), sinon par nom de base (numero de parcelle retire).
+            if loc:
+                gkey = 'loc::' + str(loc.get('id'))
+                gname = loc.get('name')
+            else:
+                gkey = 'na::' + kind + '::' + _terrain_base_name(name).upper()
+                gname = _terrain_base_name(name)
+            g = groups.get(gkey)
+            if not g:
+                g = {'key': gkey, 'name': gname, 'type': kind,
+                     'location': ({'id': str(loc.get('id')), 'type': loc.get('type'),
+                                   'name': loc.get('name')} if loc else None),
+                     'members': [], 'ventes': 0, 'capacite': 0, 'sources': set()}
+                groups[gkey] = g
+            g['members'].append({'name': name, 'products': prod_names, 'ventes': ventes})
+            g['ventes'] += ventes
+            g['capacite'] += (capacite or 0)
+            if source:
+                g['sources'].add(source)
+
+    groups_out = []
+    for g in groups.values():
+        loc = g['location']
+        present, upper, ts = _present_for_loc(loc) if loc else (None, None, None)
+        cap = g['capacite'] or None
+        if loc:
+            gsrc = 'manual' if 'manual' in g['sources'] else 'auto'
+        else:
+            gsrc = 'none' if (g['sources'] and g['sources'] <= {'none'}) else None
+        taux_vendus = round(present / g['ventes'] * 100) if (present is not None and g['ventes']) else None
+        taux_cap = round(present / cap * 100) if (present is not None and cap) else None
+        groups_out.append({
+            'key': g['key'], 'name': g['name'], 'type': g['type'],
+            'location': loc, 'match_source': gsrc,
+            'members': g['members'], 'members_count': len(g['members']),
+            'ventes': g['ventes'], 'capacite': cap,
+            'present': present, 'upper_limit': upper,
+            'taux_vendus': taux_vendus, 'taux_capacite': taux_cap,
+            'timestamp': ts,
+        })
+    # associes (avec taux) en premier, du plus rempli au moins, puis non associes
+    groups_out.sort(key=lambda x: (x['taux_vendus'] is None, -(x['taux_vendus'] or 0), x['name']))
+
+    return jsonify({
+        'event': event, 'year': year,
+        'groups': groups_out,
+        'terrains': terrains_out,
+        'locations': [{'id': str(l.get('id')), 'type': l.get('type'),
+                       'name': l.get('name')} for l in locations],
+        'last_update_tickets': last_update,
+    })
+
+
+@app.route('/api/terrains/mapping', methods=['POST'])
+@role_required("admin")
+def api_terrains_mapping():
+    """Override manuel de l'association terrain <-> compteur (admin).
+    Body: {event, year, terrain_id, mode: 'auto'|'none'|'manual', location_id?, location_type?}."""
+    body = request.get_json(silent=True) or {}
+    event = body.get('event')
+    year = body.get('year')
+    terrain_id = body.get('terrain_id')
+    mode = body.get('mode', 'manual')
+    if not event or not year or not terrain_id:
+        return jsonify({"error": "Missing event, year or terrain_id"}), 400
+
+    doc = COL_TERRAIN_MAP.find_one({'event': event, 'year': str(year)}) \
+        or {'event': event, 'year': str(year), 'mappings': {}}
+    mappings = doc.get('mappings', {}) or {}
+
+    if mode == 'auto':
+        mappings.pop(terrain_id, None)                       # revient a l'auto-match
+    elif mode == 'none':
+        mappings[terrain_id] = {'cleared': True}             # aucune association
+    else:
+        location_id = body.get('location_id')
+        if not location_id:
+            return jsonify({"error": "Missing location_id"}), 400
+        mappings[terrain_id] = {
+            'location_id': str(location_id),
+            'location_type': body.get('location_type'),
+        }
+
+    COL_TERRAIN_MAP.update_one(
+        {'event': event, 'year': str(year)},
+        {'$set': {'mappings': mappings, 'updated_at': datetime.now(timezone.utc)}},
+        upsert=True
+    )
+    return jsonify({"ok": True, "mode": mode, "terrain_id": terrain_id})
 
 @app.route('/doors', methods=['GET'])
 @role_required("user")
@@ -2565,22 +2890,30 @@ COL_TODOS = db['todos']  # schema: { type:str, todos:[{text:str, phase:str}], cr
 # Helpers
 
 _VALID_PHASES = {"open", "close", "both", "switch_control", "switch_free"}
+_VALID_CONTROLS = {"controle", "libre", "both"}
 
 def _normalize_todos(raw_todos):
-    """Normalise les todos en [{text, phase}]. Accepte l'ancien format [str]."""
+    """Normalise les todos en [{text, phase, control}]. Accepte l'ancien format [str].
+
+    'control' ('controle'|'libre'|'both') cible une tache selon le mode d'acces
+    de l'item a l'ouverture/fermeture. Defaut 'both' (s'applique aux deux modes).
+    """
     result = []
     for item in (raw_todos or []):
         if isinstance(item, str):
             text = item.strip()
             if text:
-                result.append({"text": text, "phase": "open"})
+                result.append({"text": text, "phase": "open", "control": "both"})
         elif isinstance(item, dict):
             text = str(item.get("text", "")).strip()
             phase = item.get("phase", "both")
             if phase not in _VALID_PHASES:
                 phase = "both"
+            control = item.get("control", "both")
+            if control not in _VALID_CONTROLS:
+                control = "both"
             if text:
-                result.append({"text": text, "phase": phase})
+                result.append({"text": text, "phase": phase, "control": control})
     return result
 
 def _pub(doc):
@@ -6007,6 +6340,20 @@ COL_HSH_AGG_TITRES = db['hsh_agg_titres']
 HSH_GLOBAL_ID = "___GLOBAL___"
 
 
+@app.route('/circulation')
+@role_required("manager")
+def circulation_page():
+    """Tableau de bord trafic plein ecran (TV poste de controle global).
+    Consomme les memes feeds Waze que les widgets index (/alerts, /trafic/all_routes)."""
+    payload = getattr(request, 'user_payload', {})
+    user_roles = payload.get("roles", [])
+    return render_template('circulation.html',
+                           user_roles=user_roles,
+                           user_firstname=payload.get("firstname", ""),
+                           user_lastname=payload.get("lastname", ""),
+                           user_email=payload.get("email", ""))
+
+
 @app.route('/live-controle')
 @role_required("admin")
 def live_controle_page():
@@ -6337,8 +6684,9 @@ def hsh_get_counters_context():
     prev_hist_race_date = None
     prev_hist_race_dt = None
     prev_data_by_day = {}
+    hist_aliases = _event_hist_aliases(event)
     prev_hist_candidates = list(db['historique_controle'].find(
-        {'type': 'frequentation', 'event': event},
+        {'type': 'frequentation', 'event': {'$in': hist_aliases}},
         sort=[('year', -1)]
     ))
     for cand in prev_hist_candidates:
@@ -6347,7 +6695,7 @@ def hsh_get_counters_context():
             prev_hist_race_raw = cand.get('race')
             if not prev_hist_race_raw:
                 portes_doc = db['historique_controle'].find_one(
-                    {'type': 'portes', 'event': event, 'year': cand_year},
+                    {'type': 'portes', 'event': {'$in': hist_aliases}, 'year': cand_year},
                     {'_id': 0, 'race': 1}
                 )
                 if portes_doc:
@@ -6618,15 +6966,21 @@ def hsh_get_dashboard():
     global_doc = _hsh_read_global()
     locations = global_doc.get('locations_selectionnees', []) or []
     corrections = global_doc.get('corrections_compteurs', {}) or {}
+    corrections_veh = global_doc.get('corrections_vehicules', {}) or {}
     principal_id = global_doc.get('compteur_principal_id')
     principal_id_str = str(principal_id) if principal_id else None
 
-    # Reference N-1 via parametrages + fallback portes
+    # Reference N-1 : edition precedente = historique_controle frequentation le
+    # plus recent (annee < courante). Source de verite pour la presence N-1,
+    # independante de parametrages (dont le doc N-1 peut manquer ou etre un stub
+    # sans 'tickets', ex: LE MANS CLASSIC). L'historique peut etre stocke sous le
+    # nom complet OU le code court (cf. _event_hist_aliases).
     race_n = None
     prev_race_ref = None
     prev_year_str = None
     event_days = []
     doc_n = None
+    prev_hist_by_day = {}
     if event and year:
         doc_n = db['parametrages'].find_one({'event': event, 'year': year}) or {}
         gh = (doc_n.get('data') or {}).get('globalHoraires', {})
@@ -6634,35 +6988,31 @@ def hsh_get_dashboard():
         race_n = _parse_race_date((doc_n.get('data') or {}).get('race') or gh.get('race'))
         try:
             cy = int(year)
-            for cand in db['parametrages'].find(
-                {'event': event, 'tickets': {'$exists': True}},
-                {'year': 1, 'data.race': 1, '_id': 0}
+        except (ValueError, TypeError):
+            cy = None
+        if cy is not None:
+            hist_aliases = _event_hist_aliases(event)
+            prev_hist = None
+            for cand in db['historique_controle'].find(
+                {'type': 'frequentation', 'event': {'$in': hist_aliases}}
             ).sort('year', -1):
-                try:
-                    cyn = int(cand.get('year', ''))
-                except (ValueError, TypeError):
-                    continue
-                if cyn < cy:
-                    prev_year_str = str(cyn)
+                cyn = cand.get('year')
+                if isinstance(cyn, (int, float)) and int(cyn) < cy:
+                    prev_hist = cand
+                    prev_year_str = str(int(cyn))
+                    break
+            if prev_hist is not None:
+                # Date de course N-1 : privilegier portes (fiable), repli sur la
+                # 'race' du doc frequentation lui-meme.
+                prev_race_ref = _parse_race_date(prev_hist.get('race'))
+                if not prev_race_ref:
                     portes = db['historique_controle'].find_one(
-                        {'type': 'portes', 'event': event, 'year': cyn},
+                        {'type': 'portes', 'event': {'$in': hist_aliases},
+                         'year': int(prev_year_str)},
                         {'_id': 0, 'race': 1}
                     )
-                    prev_race_ref = _parse_race_date((portes or {}).get('race')) or \
-                                    _parse_race_date((cand.get('data') or {}).get('race'))
-                    break
-        except (ValueError, TypeError):
-            pass
-
-    # Historique N-1 par jour
-    prev_hist_by_day = {}
-    if prev_year_str:
-        try:
-            hist = db['historique_controle'].find_one(
-                {'type': 'frequentation', 'event': event, 'year': int(prev_year_str)}
-            )
-            if hist:
-                for rec in hist.get('data', []):
+                    prev_race_ref = _parse_race_date((portes or {}).get('race'))
+                for rec in prev_hist.get('data', []) or []:
                     rd = rec.get('date')
                     if isinstance(rd, str):
                         day_key = rd[:10]
@@ -6676,29 +7026,109 @@ def hsh_get_dashboard():
                         'hour': hour,
                         'present': rec.get('present', 0),
                     })
-        except (ValueError, TypeError):
-            pass
 
-    # data_access.timestamp est stocke en datetime naif (en UTC).
-    today_local = datetime.now().date()
+    # data_access.timestamp est stocke en datetime NAIF representant de l'UTC.
+    # ATTENTION : le serveur tourne en heure de Paris (datetime.now() = Paris),
+    # donc une fenetre jour construite en naif-Paris et comparee a des timestamps
+    # UTC decale la courbe du meme offset (+2h l'ete) : les points de 00h-02h
+    # locaux sont stockes la veille en UTC et tombent hors fenetre. On construit
+    # donc les bornes en Europe/Paris puis on convertit en UTC naif.
+    tz_paris = ZoneInfo("Europe/Paris")
+
+    def _paris_day_bounds_utc(d):
+        """[minuit, minuit+1j) heure de Paris, convertis en UTC naif pour matcher
+        data_access.timestamp (UTC naif)."""
+        start_p = datetime(d.year, d.month, d.day, tzinfo=tz_paris)
+        end_p = start_p + timedelta(days=1)
+        return (start_p.astimezone(timezone.utc).replace(tzinfo=None),
+                end_p.astimezone(timezone.utc).replace(tzinfo=None))
+
+    today_local = datetime.now(tz_paris).date()
     # Jour de reference du graphique principal (par defaut aujourd'hui)
     try:
         target_date = datetime.strptime(target_date_param, '%Y-%m-%d').date() if target_date_param else today_local
     except Exception:
         target_date = today_local
-    target_day_start = datetime(target_date.year, target_date.month, target_date.day)
-    target_day_end = target_day_start + timedelta(days=1)
+    target_day_start, target_day_end = _paris_day_bounds_utc(target_date)
 
     # Plage "totale collecte" = depuis le premier jour public (ou 4j avant today) jusqu'a maintenant
     if event_days:
         try:
             first_event_day = min(datetime.strptime(d, '%Y-%m-%d').date() for d in event_days)
-            full_start = datetime(first_event_day.year, first_event_day.month, first_event_day.day)
+            full_start, _ = _paris_day_bounds_utc(first_event_day)
         except Exception:
             full_start = target_day_start - timedelta(days=3)
     else:
         full_start = target_day_start - timedelta(days=3)
-    full_end = datetime.now() + timedelta(hours=1)
+    full_end = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
+
+    # ------------------------------------------------------------------
+    # Vehicules a deduire pour obtenir le VRAI present (humains = spectateurs
+    # + enfants + accredites, MOINS les vehicules). On reconstruit, par zone
+    # (Area/Venue) et par tranche de 5 min, le solde cumule
+    # (entrees_vehicules - sorties_vehicules) issu de hsh_transactions_agg,
+    # remonte aux zones via la hierarchie checkpoint -> parent_area/parent_venue
+    # (meme logique que /counters). Le cumul est remis a zero chaque jour, pour
+    # rester coherent avec le widget (fenetre jour) et les courbes multi-jours.
+    # ------------------------------------------------------------------
+    import bisect
+    cp_to_zones = {}
+    for cp_doc in COL_HSH_STRUCTURE.find(
+            {'location_type': 'Checkpoint'},
+            {'_id': 0, 'location_id': 1, 'parent_area': 1, 'parent_venue': 1}):
+        zset = set()
+        for pk in ('parent_area', 'parent_venue'):
+            parent = cp_doc.get(pk) or {}
+            pid = parent.get('id')
+            if pid:
+                zset.add(str(pid))
+        if zset:
+            cp_to_zones[cp_doc.get('location_id')] = zset
+
+    zone_veh_events = {}
+    veh_q = {'tranche': {'$gte': full_start.replace(tzinfo=timezone.utc),
+                         '$lt': full_end.replace(tzinfo=timezone.utc)}}
+    for agg in COL_HSH_TX_AGG.find(
+            veh_q,
+            {'_id': 0, 'checkpoint_id': 1, 'tranche': 1,
+             'entrees_vehicules': 1, 'sorties_vehicules': 1}):
+        zones_for = cp_to_zones.get(agg.get('checkpoint_id'))
+        if not zones_for:
+            continue
+        tr = agg.get('tranche')
+        if tr is None:
+            continue
+        # tranche stocke en UTC tz-aware ; data_access.timestamp est naif (UTC).
+        if getattr(tr, 'tzinfo', None) is not None:
+            tr = tr.astimezone(timezone.utc).replace(tzinfo=None)
+        delta = (agg.get('entrees_vehicules') or 0) - (agg.get('sorties_vehicules') or 0)
+        for z in zones_for:
+            zone_veh_events.setdefault(z, []).append((tr, delta))
+
+    zone_veh_prefix = {}
+    for z, evs in zone_veh_events.items():
+        evs.sort(key=lambda x: x[0])
+        times = [e[0] for e in evs]
+        prefix = []
+        run = 0
+        for _, d in evs:
+            run += d
+            prefix.append(run)
+        zone_veh_prefix[z] = (times, prefix)
+
+    def veh_present_at(zone_id, at_dt, corr_veh=0):
+        """Vehicules presents dans la zone a l'instant at_dt (cumul du jour de at_dt)."""
+        entry = zone_veh_prefix.get(str(zone_id))
+        if not entry or at_dt is None:
+            return 0
+        times, prefix = entry
+        day_start = at_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        hi = bisect.bisect_right(times, at_dt)
+        if hi == 0:
+            return 0
+        lo = bisect.bisect_left(times, day_start)
+        total = prefix[hi - 1] - (prefix[lo - 1] if lo > 0 else 0)
+        return max(total - (corr_veh or 0), 0)
 
     # historique_controle ne contient qu'une serie globale (zone principale d'enceinte).
     # On ne l'expose donc que pour la zone principale ou, a defaut, la premiere zone.
@@ -6724,6 +7154,7 @@ def hsh_get_dashboard():
         ltype = loc.get('type')
         name = loc.get('name', f'Loc {lid}')
         correction = int(corrections.get(lid, 0) or 0)
+        corr_veh = int(corrections_veh.get(lid, 0) or 0)
 
         is_principal = (principal_id_str == lid) if principal_id_str else (idx == 0 and not has_principal)
 
@@ -6747,7 +7178,8 @@ def hsh_get_dashboard():
             bucket = ts.replace(minute=(ts.minute // bucket_minutes) * bucket_minutes,
                                 second=0, microsecond=0)
             key = bucket.isoformat() + 'Z'
-            present = max(int(s.get('current', 0) or 0) - correction, 0)
+            veh = veh_present_at(lid, bucket, corr_veh)
+            present = max(int(s.get('current', 0) or 0) - correction - veh, 0)
             if key != last_bucket_key:
                 series.append({'ts': key, 'present': present})
                 last_bucket_key = key
@@ -6759,9 +7191,14 @@ def hsh_get_dashboard():
         latest = db['data_access'].find_one(
             {'requested_location_id': lid, 'requested_location_type': ltype},
             sort=[('timestamp', -1)],
-            projection={'_id': 0, 'current': 1}
+            projection={'_id': 0, 'current': 1, 'timestamp': 1}
         )
-        current = max(int((latest or {}).get('current', 0) or 0) - correction, 0) if latest else 0
+        veh_now = 0
+        if latest:
+            veh_now = veh_present_at(lid, latest.get('timestamp'), corr_veh)
+            current = max(int(latest.get('current', 0) or 0) - correction - veh_now, 0)
+        else:
+            current = 0
 
         zones.append({
             'location_id': lid,
@@ -6770,6 +7207,7 @@ def hsh_get_dashboard():
             'is_principal': is_principal,
             'correction': correction,
             'current': current,
+            'veh_excluded': veh_now,
             'pic_today': pic_today,
             'pic_n1_same_day': pic_n1_principal if is_principal else None,
             'max_n1_season': max_n1_principal if is_principal else None,
@@ -6798,8 +7236,8 @@ def hsh_get_dashboard():
                 pic_n = pt if pt else None
             else:
                 p_corr = int(corrections.get(principal_effective_id, 0) or 0)
-                day_start = datetime(dd.year, dd.month, dd.day)
-                day_end = day_start + timedelta(days=1)
+                p_corr_veh = int(corrections_veh.get(principal_effective_id, 0) or 0)
+                day_start, day_end = _paris_day_bounds_utc(dd)
                 bucket_last = {}
                 for s in db['data_access'].find(
                     {'requested_location_id': principal_effective_id,
@@ -6810,7 +7248,8 @@ def hsh_get_dashboard():
                     ts = s['timestamp']
                     bk = ts.replace(minute=(ts.minute // 15) * 15,
                                     second=0, microsecond=0)
-                    bucket_last[bk] = max(int(s.get('current', 0) or 0) - p_corr, 0)
+                    bk_veh = veh_present_at(principal_effective_id, bk, p_corr_veh)
+                    bucket_last[bk] = max(int(s.get('current', 0) or 0) - p_corr - bk_veh, 0)
                 if bucket_last:
                     pic_n = max(bucket_last.values())
         pic_n1 = None

@@ -85,7 +85,11 @@ def _reset_todos_cache():
 
 
 def _get_todos_cache(db) -> dict:
-    """Charge les todos. Retourne {type: [{text, phase}, ...]}."""
+    """Charge les todos. Retourne {type: [{text, phase, control}, ...]}.
+
+    'control' vaut 'controle', 'libre' ou 'both' (defaut) : permet de cibler
+    une tache selon le mode d'acces (dayControl) de l'item a l'ouverture.
+    """
     global _TODOS_CACHE
     if _TODOS_CACHE is not None:
         return _TODOS_CACHE
@@ -98,14 +102,20 @@ def _get_todos_cache(db) -> dict:
             for x in raw:
                 if isinstance(x, str):
                     if x.strip():
-                        items.append({"text": x.strip(), "phase": "open"})
+                        items.append({"text": x.strip(), "phase": "open",
+                                      "control": "both"})
                 elif isinstance(x, dict):
                     text = str(x.get("text", "")).strip()
                     phase = x.get("phase", "both")
-                    if phase not in ("open", "close", "both"):
+                    if phase not in ("open", "close", "both",
+                                     "switch_control", "switch_free"):
                         phase = "both"
+                    control = x.get("control", "both")
+                    if control not in ("controle", "libre", "both"):
+                        control = "both"
                     if text:
-                        items.append({"text": text, "phase": phase})
+                        items.append({"text": text, "phase": phase,
+                                      "control": control})
             _TODOS_CACHE[t] = items
     except Exception as e:
         logger.error(f"Impossible de charger la collection 'todos': {e}")
@@ -157,17 +167,33 @@ def _build_todo_string(todo_items: list) -> str:
     return "\n".join(f"- [ ] {t}" for t in todo_items)
 
 
-def _filter_todos_by_phase(todos_items: list, phase: str) -> list:
-    """Filtre les todos par phase.
+def _filter_todos_by_phase(todos_items: list, phase: str,
+                           control: str = None) -> list:
+    """Filtre les todos par phase et par mode d'acces.
 
     phase peut etre 'open', 'close', 'switch_control', 'switch_free'.
-    Le marqueur 'both' s'applique uniquement aux phases ouv/ferm
+    Le marqueur 'both' (phase) s'applique uniquement aux phases ouv/ferm
     (pas aux bascules d'acces).
+
+    control : mode d'acces de l'item ('controle'|'libre'|None). Le filtrage
+    par mode ne s'applique qu'aux ouvertures/fermetures : une tache marquee
+    'controle' ou 'libre' n'est retenue que si elle correspond au mode de
+    l'item. Les taches 'both' (defaut) sont toujours retenues. Sur les
+    bascules d'acces, le mode est ignore (la phase encode deja la transition).
     """
     open_close = phase in ("open", "close")
-    return [t["text"] for t in todos_items
-            if t.get("phase") == phase
-            or (open_close and t.get("phase") == "both")]
+    out = []
+    for t in todos_items:
+        phase_ok = (t.get("phase") == phase
+                    or (open_close and t.get("phase") == "both"))
+        if not phase_ok:
+            continue
+        if open_close:
+            t_ctrl = t.get("control") or "both"
+            if t_ctrl != "both" and t_ctrl != (control or ""):
+                continue
+        out.append(t["text"])
+    return out
 
 
 def _attach_todos_str(vignette: dict, base_activity: str, category: str,
@@ -183,7 +209,10 @@ def _attach_todos_str(vignette: dict, base_activity: str, category: str,
         todos_items = cache.get(todo_type) or []
         if not todos_items:
             return vignette
-        filtered = _filter_todos_by_phase(todos_items, phase)
+        # Mode d'acces porte par la vignette (deja pose via extra_fields avant
+        # cet appel). None pour les items sans notion de controle (globalHoraires).
+        control = (vignette.get("dayControl") or "").lower() or None
+        filtered = _filter_todos_by_phase(todos_items, phase, control)
         if not filtered:
             return vignette
         vignette["todo"] = _build_todo_string(filtered)
@@ -501,7 +530,7 @@ def process_global_horaires(global_data, event, year, db=None):
     if global_data.get("team"):
         vignettes += _process_iso_single(
             global_data["team"],
-            "Arrivee equipe", "Controle", "Equipe",
+            "Arrivée des concurrents", "Controle", "Concurrents",
             "team", "Timetable", db=db
         )
 

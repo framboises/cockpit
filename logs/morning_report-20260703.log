@@ -1,0 +1,24 @@
+ 
+=== Lancement 03-07-26  7:00:04,45 === 
+2026-07-03 07:00:05 [INFO] Fenetre analysee : 2026-07-02T05:00:00+00:00 -> 2026-07-03T05:00:00+00:00 (UTC)
+2026-07-03 07:00:05 [INFO] Evenement detecte : LE MANS CLASSIC 2026
+2026-07-03 07:00:05 [INFO] Generation du resume Claude (streaming)...
+2026-07-03 07:00:05 [INFO] Selection fiches : total=89 majors=0 others=80 selected=80 cut=9 capped=False
+2026-07-03 07:00:05 [INFO] attendance_block : LE MANS CLASSIC 2026 -> yesterday(public=True billets=10240 pic=10090@17h32 pic_prev=None@- proj=None d=-%) | today(public=True billets=10545 pic=None@- pic_prev=None@- proj=None d=-%) | tomorrow(public=True billets=10655 pic=None@- pic_prev=None@- proj=None d=-%)
+2026-07-03 07:00:19 [INFO]   ... 890 chars recus (1 output tokens)
+2026-07-03 07:00:22 [INFO]   ... 1747 chars recus (1 output tokens)
+2026-07-03 07:00:29 [INFO]   ... 2585 chars recus (1 output tokens)
+2026-07-03 07:00:35 [INFO]   ... 3432 chars recus (1 output tokens)
+2026-07-03 07:00:41 [INFO]   ... 4254 chars recus (1 output tokens)
+2026-07-03 07:00:49 [INFO]   ... 5089 chars recus (1 output tokens)
+2026-07-03 07:00:56 [INFO]   ... 5949 chars recus (1 output tokens)
+2026-07-03 07:01:02 [INFO]   ... 6761 chars recus (1 output tokens)
+2026-07-03 07:01:09 [INFO]   ... 7617 chars recus (1 output tokens)
+2026-07-03 07:01:15 [INFO]   ... 8463 chars recus (1 output tokens)
+2026-07-03 07:01:21 [INFO]   ... 9333 chars recus (1 output tokens)
+2026-07-03 07:01:27 [INFO]   ... 10157 chars recus (1 output tokens)
+2026-07-03 07:01:34 [INFO]   ... 10991 chars recus (1 output tokens)
+2026-07-03 07:01:35 [INFO] Resume genere : id=4fda3a6401f44338879a80ab34d47b09 fiches=80 tokens_in=41748 tokens_out=3871
+2026-07-03 07:01:35 [INFO] Destinataires inscrits au rapport matinal : 12
+2026-07-03 07:01:35 [INFO] Mail envoye a 12 destinataire(s) via 192.168.254.2
+=== Fin 03-07-26  7:01:35,55 (code retour 0) === 

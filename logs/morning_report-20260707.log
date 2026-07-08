@@ -1,0 +1,19 @@
+ 
+=== Lancement 07-07-26  7:00:03,12 === 
+2026-07-07 07:00:03 [INFO] Fenetre analysee : 2026-07-06T05:00:00+00:00 -> 2026-07-07T05:00:00+00:00 (UTC)
+2026-07-07 07:00:03 [INFO] Evenement detecte : LE MANS CLASSIC 2026
+2026-07-07 07:00:03 [INFO] Generation du resume Claude (streaming)...
+2026-07-07 07:00:04 [INFO] Selection fiches : total=38 majors=0 others=38 selected=38 cut=0 capped=False
+2026-07-07 07:00:04 [INFO] attendance_block : LE MANS CLASSIC 2026 -> 3 slots calcules mais TOUS vides (public_dates=4, prev_year=None, race_date=2026-07-04, prev_race_ref=None, freq_prev_doc=absent) -> bloc non emis
+2026-07-07 07:00:11 [INFO]   ... 846 chars recus (1 output tokens)
+2026-07-07 07:00:18 [INFO]   ... 1693 chars recus (1 output tokens)
+2026-07-07 07:00:25 [INFO]   ... 2521 chars recus (1 output tokens)
+2026-07-07 07:00:33 [INFO]   ... 3407 chars recus (1 output tokens)
+2026-07-07 07:00:41 [INFO]   ... 4281 chars recus (1 output tokens)
+2026-07-07 07:00:47 [INFO]   ... 5133 chars recus (1 output tokens)
+2026-07-07 07:00:52 [INFO]   ... 5963 chars recus (1 output tokens)
+2026-07-07 07:00:58 [INFO]   ... 6788 chars recus (1 output tokens)
+2026-07-07 07:01:02 [INFO] Resume genere : id=4a31b683ce9a4f37b7ad1c9405833c54 fiches=38 tokens_in=16609 tokens_out=2578
+2026-07-07 07:01:02 [INFO] Destinataires inscrits au rapport matinal : 12
+2026-07-07 07:01:02 [INFO] Mail envoye a 12 destinataire(s) via 192.168.254.2
+=== Fin 07-07-26  7:01:02,64 (code retour 0) === 

@@ -323,6 +323,20 @@
           }
           card.appendChild(stats);
 
+          // Vrai present : humains (spectateurs + enfants + accredites) MOINS vehicules
+          var corrVehReel = parseInt(c.correction_veh, 10) || 0;
+          var vehPresReel = Math.max((c.entrees_veh || 0) - (c.sorties_veh || 0) - corrVehReel, 0);
+          var presentReel = Math.max(corrected - vehPresReel, 0);
+          var reel = el("div", "hsh-counter-reel");
+          reel.style.fontWeight = "600";
+          reel.style.marginTop = "4px";
+          var reelHtml = "Presents (hors veh.): <strong>" + presentReel + "</strong>";
+          if (vehPresReel > 0) {
+            reelHtml += " <span style=\"font-size:0.7rem;opacity:0.7;font-weight:400;\">(" + corrected + " - " + vehPresReel + " veh.)</span>";
+          }
+          reel.innerHTML = reelHtml;
+          card.appendChild(reel);
+
           // Detail par categorie (personnes / vehicules / enfants / accredites)
           var eVeh = c.entrees_veh || 0;
           var sVeh = c.sorties_veh || 0;

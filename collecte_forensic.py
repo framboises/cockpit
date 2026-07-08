@@ -18,7 +18,7 @@ import zoneinfo
 from pymongo import MongoClient, UpdateOne
 from live_controle import (
     HSH_IP, HSH_PORT, CONNECT_TIMEOUT, READ_TIMEOUT_TRANSACTIONS,
-    TZ_PARIS, MAX_TX, OPTION_TRANSACTIONS,
+    TZ_PARIS, MAX_TX, OPTION_TRANSACTIONS, DEFAULT_TX_ISSUER,
     build_transactions_xml, parse_transactions,
     envoyer_et_recevoir, encapsuler_transactions,
     lire_global,
@@ -37,7 +37,7 @@ def paris_to_utc(dt_str):
     return dt_paris.astimezone(datetime.timezone.utc)
 
 
-def collecter_et_stocker(sock, from_utc, to_utc):
+def collecter_et_stocker(sock, from_utc, to_utc, issuer=None):
     """Collecte toutes les transactions entre from et to, stocke dans handshake_forensic."""
     from_dt = from_utc.strftime("%Y-%m-%dT%H:%M:%S")
     to_dt = to_utc.strftime("%Y-%m-%dT%H:%M:%S")
@@ -58,6 +58,7 @@ def collecter_et_stocker(sock, from_utc, to_utc):
             from_dt=from_dt,
             to_dt=to_dt,
             last_tx_id=cursor,
+            issuer=issuer,
         )
         frame = encapsuler_transactions(xml_req)
         resp = envoyer_et_recevoir(sock, frame)
@@ -98,7 +99,7 @@ def collecter_et_stocker(sock, from_utc, to_utc):
     return total
 
 
-def collecter_depuis_curseur(sock, last_tx_id):
+def collecter_depuis_curseur(sock, last_tx_id, issuer=None):
     """Collecte toutes les transactions apres last_tx_id, stocke dans handshake_forensic."""
     print(f"Reprise depuis LastTransactionId={last_tx_id}")
 
@@ -110,7 +111,7 @@ def collecter_depuis_curseur(sock, last_tx_id):
 
     while True:
         page += 1
-        xml_req = build_transactions_xml(last_tx_id=cursor)
+        xml_req = build_transactions_xml(last_tx_id=cursor, issuer=issuer)
         frame = encapsuler_transactions(xml_req)
         resp = envoyer_et_recevoir(sock, frame)
         if not resp:
@@ -163,8 +164,13 @@ def main():
         print("Aucun evenement configure dans ___GLOBAL___.")
         return
 
+    tx_issuer = doc.get("hsh_issuer_tx")
+    if tx_issuer is None:
+        tx_issuer = DEFAULT_TX_ISSUER
+
     print(f"Evenement: {evenement}")
     print(f"Connexion HSH: {HSH_IP}:{HSH_PORT}")
+    print(f"Issuer transactions: {tx_issuer}")
     print(f"Collection cible: handshake_forensic")
     print()
 
@@ -181,7 +187,7 @@ def main():
         try:
             with socket.create_connection((HSH_IP, HSH_PORT), timeout=CONNECT_TIMEOUT) as sock:
                 sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                total = collecter_depuis_curseur(sock, last_tx_id)
+                total = collecter_depuis_curseur(sock, last_tx_id, issuer=tx_issuer)
                 try:
                     sock.shutdown(socket.SHUT_RDWR)
                 except OSError:
@@ -202,7 +208,7 @@ def main():
         try:
             with socket.create_connection((HSH_IP, HSH_PORT), timeout=CONNECT_TIMEOUT) as sock:
                 sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                total = collecter_et_stocker(sock, from_utc, to_utc)
+                total = collecter_et_stocker(sock, from_utc, to_utc, issuer=tx_issuer)
                 try:
                     sock.shutdown(socket.SHUT_RDWR)
                 except OSError:

@@ -1,0 +1,24 @@
+ 
+=== Lancement 13-06-26  7:00:02,98 === 
+2026-06-13 07:00:03 [INFO] Fenetre analysee : 2026-06-12T05:00:00+00:00 -> 2026-06-13T05:00:00+00:00 (UTC)
+2026-06-13 07:00:03 [INFO] Evenement detecte : 24H AUTOS 2026
+2026-06-13 07:00:03 [INFO] Generation du resume Claude (streaming)...
+2026-06-13 07:00:03 [INFO] Selection fiches : total=158 majors=0 others=80 selected=80 cut=78 capped=False
+2026-06-13 07:00:03 [INFO] Selection fiches : total=216 majors=0 others=80 selected=80 cut=136 capped=False
+2026-06-13 07:00:03 [INFO] attendance_block : 24H AUTOS 2026 -> yesterday(public=True billets=104447 pic=43722@16h20 pic_prev=37999@16h00 proj=48028 d=15%) | today(public=True billets=134771 pic=None@- pic_prev=138600@16h00 proj=158702 d=15%) | tomorrow(public=True billets=139644 pic=None@- pic_prev=108960@14h00 proj=124220 d=14%)
+2026-06-13 07:00:32 [INFO]   ... 920 chars recus (1 output tokens)
+2026-06-13 07:00:40 [INFO]   ... 1816 chars recus (1 output tokens)
+2026-06-13 07:00:46 [INFO]   ... 2658 chars recus (1 output tokens)
+2026-06-13 07:00:53 [INFO]   ... 3533 chars recus (1 output tokens)
+2026-06-13 07:01:00 [INFO]   ... 4375 chars recus (1 output tokens)
+2026-06-13 07:01:06 [INFO]   ... 5208 chars recus (1 output tokens)
+2026-06-13 07:01:13 [INFO]   ... 6067 chars recus (1 output tokens)
+2026-06-13 07:01:19 [INFO]   ... 6917 chars recus (1 output tokens)
+2026-06-13 07:01:25 [INFO]   ... 7737 chars recus (1 output tokens)
+2026-06-13 07:01:31 [INFO]   ... 8604 chars recus (1 output tokens)
+2026-06-13 07:01:37 [INFO]   ... 9494 chars recus (1 output tokens)
+2026-06-13 07:01:44 [INFO]   ... 10357 chars recus (1 output tokens)
+2026-06-13 07:01:48 [INFO] Resume genere : id=afbe6eda170c4360895b372fba1b1d6e fiches=80 tokens_in=42106 tokens_out=3772
+2026-06-13 07:01:48 [INFO] Destinataires inscrits au rapport matinal : 12
+2026-06-13 07:01:49 [INFO] Mail envoye a 12 destinataire(s) via 192.168.254.2
+=== Fin 13-06-26  7:01:49,42 (code retour 0) === 

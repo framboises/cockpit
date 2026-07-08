@@ -59,6 +59,12 @@
                 <span class="material-symbols-outlined">insert_chart</span>
                 <span class="label">Statistiques</span>
             </button>
+            {% if "manager" in user_roles %}
+            <a href="/circulation" class="nav-btn" target="_blank" rel="noopener" title="Tableau de bord circulation (TV poste de controle)">
+                <span class="material-symbols-outlined">moving</span>
+                <span class="label">Circulation</span>
+            </a>
+            {% endif %}
             {% if "admin" in user_roles %}
             <a href="/live-controle" class="nav-btn">
                 <span class="material-symbols-outlined">sensors</span>
@@ -548,7 +554,7 @@
                         <div class="hsh-summary" id="hsh-summary">
                             <div>
                                 <div class="hsh-summary-value" id="hsh-total-current">&mdash;</div>
-                                <div class="hsh-summary-label">Presents actuellement</div>
+                                <div class="hsh-summary-label">Presents (hors vehicules)</div>
                                 <div class="hsh-summary-sub" id="hsh-dont-enfants" style="display:none;"></div>
                             </div>
                             <div>
@@ -708,52 +714,75 @@
 </div>
 
 <!-- Ajout evenement -->
-<div id="addEventModal" class="modal">
+<div id="addEventModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="addEventTitle">
     <div class="modal-content">
-        <span class="close" id="closeAddEvent"></span>
-        <h3>Ajouter un evenement a la Timetable</h3>
+        <div class="modal-header">
+            <h3 id="addEventTitle">Ajouter un événement à la Timetable</h3>
+            <button type="button" class="modal-close" id="closeAddEvent" title="Fermer" aria-label="Fermer">
+                <span class="material-symbols-outlined">close</span>
+            </button>
+        </div>
         <form id="addEventForm" novalidate>
-            <div class="form-group">
-                <label for="event-date">Date (YYYY-MM-DD) <span class="req">*</span></label>
-                <input type="date" id="event-date" name="date" required class="form-input">
-            </div>
-            <div class="form-group">
-                <label for="start-time">
-                    Heure de debut <span class="req">*</span>
-                    <small class="hint">au moins un des deux (debut ou fin)</small>
-                </label>
-                <input type="text" id="start-time" name="start" placeholder="ex: 07:00 ou TBC" class="form-input">
-            </div>
-            <div class="form-group">
-                <label for="end-time">
-                    Heure de fin <span class="req">*</span>
-                    <small class="hint">au moins un des deux (debut ou fin)</small>
-                </label>
-                <input type="text" id="end-time" name="end" placeholder="ex: 20:00 ou TBC" class="form-input">
-            </div>
-            <div class="form-group">
-                <label for="duration">Duree:</label>
-                <input type="text" id="duration" name="duration" placeholder="ex: 13:00" class="form-input">
-            </div>
-            <div class="form-group">
-                <label for="category">Categorie <span class="req">*</span></label>
-                <select id="category" name="category" required class="form-input"></select>
-            </div>
-            <div class="form-group">
-                <label for="activity">Activite <span class="req">*</span></label>
-                <input type="text" id="activity" name="activity" required class="form-input">
-            </div>
-            <div class="form-group">
-                <label for="place">Lieu:</label>
-                <input type="text" id="place" name="place" class="form-input">
-            </div>
-            <div class="form-group">
-                <label for="department">Departement:</label>
-                <input type="text" id="department" name="department" class="form-input">
-            </div>
-            <div class="form-group">
-                <label for="remark">Remarques:</label>
-                <textarea id="remark" name="remark" class="form-input"></textarea>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="event-date">Date <span class="req">*</span></label>
+                    <input type="date" id="event-date" name="date" required class="form-input">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="start-time">Heure de début</label>
+                        <input type="text" id="start-time" name="start" placeholder="ex: 07:00 ou TBC" class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label for="end-time">Heure de fin</label>
+                        <input type="text" id="end-time" name="end" placeholder="ex: 20:00 ou TBC" class="form-input">
+                    </div>
+                </div>
+                <p class="form-hint-row">Renseigner au moins une heure (début ou fin).</p>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="duration">Durée</label>
+                        <input type="text" id="duration" name="duration" placeholder="ex: 13:00" class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label for="category">
+                            Catégorie <span class="req">*</span>
+                            <button type="button" id="category-manage-btn" class="field-link-btn" title="Gérer les catégories">Gérer</button>
+                        </label>
+                        <select id="category" name="category" required class="form-input"></select>
+                    </div>
+                </div>
+                <div id="category-manager" class="category-manager" hidden>
+                    <div class="cat-mgr-add">
+                        <input type="text" id="cat-mgr-input" class="form-input" placeholder="Nouvelle catégorie" maxlength="120" autocomplete="off">
+                        <button type="button" id="cat-mgr-add-btn" class="btn-mini">Ajouter</button>
+                    </div>
+                    <div id="cat-mgr-list" class="cat-mgr-list"></div>
+                    <p class="cat-mgr-hint">Seules les catégories sans vignette (0) peuvent être supprimées.</p>
+                </div>
+                <div class="form-group">
+                    <label for="activity">Activité <span class="req">*</span></label>
+                    <input type="text" id="activity" name="activity" required class="form-input" placeholder="ex: Ouverture Porte Sud">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="place">Lieu</label>
+                        <input type="text" id="place" name="place" class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label for="department">Département</label>
+                        <input type="text" id="department" name="department" class="form-input">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="remark">Remarques</label>
+                    <textarea id="remark" name="remark" class="form-input"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Tâches de préparation</label>
+                    <div id="event-todo-list" class="event-todo-list"></div>
+                    <button type="button" id="event-todo-add" class="btn-mini">+ Ajouter une tâche</button>
+                </div>
             </div>
             <div class="modal-buttons">
                 <button type="button" class="cancel-btn" id="cancelAddEvent">Annuler</button>

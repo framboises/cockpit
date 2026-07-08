@@ -1,0 +1,25 @@
+ 
+=== Lancement 07-06-26  7:00:03,02 === 
+2026-06-07 07:00:03 [INFO] Fenetre analysee : 2026-06-06T05:00:00+00:00 -> 2026-06-07T05:00:00+00:00 (UTC)
+2026-06-07 07:00:03 [INFO] Evenement detecte : 24H AUTOS 2026
+2026-06-07 07:00:03 [INFO] Generation du resume Claude (streaming)...
+2026-06-07 07:00:03 [INFO] Selection fiches : total=61 majors=0 others=61 selected=61 cut=0 capped=False
+2026-06-07 07:00:03 [INFO] attendance_block : 24H AUTOS 2026 -> yesterday(public=False billets=None pic=None@- pic_prev=None@- proj=None d=-%) | today(public=True billets=107228 pic=None@- pic_prev=24312@16h00 proj=29507 d=21%) | tomorrow(public=False billets=None pic=None@- pic_prev=None@- proj=None d=-%)
+2026-06-07 07:00:03 [INFO] Selection fiches : total=102 majors=0 others=80 selected=80 cut=22 capped=False
+2026-06-07 07:00:31 [INFO]   ... 913 chars recus (1 output tokens)
+2026-06-07 07:00:37 [INFO]   ... 1752 chars recus (1 output tokens)
+2026-06-07 07:00:47 [INFO]   ... 2615 chars recus (1 output tokens)
+2026-06-07 07:00:51 [INFO]   ... 3441 chars recus (1 output tokens)
+2026-06-07 07:00:58 [INFO]   ... 4315 chars recus (1 output tokens)
+2026-06-07 07:01:05 [INFO]   ... 5158 chars recus (1 output tokens)
+2026-06-07 07:01:12 [INFO]   ... 6025 chars recus (1 output tokens)
+2026-06-07 07:01:20 [INFO]   ... 6938 chars recus (1 output tokens)
+2026-06-07 07:01:26 [INFO]   ... 7830 chars recus (1 output tokens)
+2026-06-07 07:01:31 [INFO]   ... 8672 chars recus (1 output tokens)
+2026-06-07 07:01:37 [INFO]   ... 9512 chars recus (1 output tokens)
+2026-06-07 07:01:43 [INFO]   ... 10359 chars recus (1 output tokens)
+2026-06-07 07:01:50 [INFO]   ... 11215 chars recus (1 output tokens)
+2026-06-07 07:01:52 [INFO] Resume genere : id=504764faae1b482ebfa58fdee7d4a3c9 fiches=61 tokens_in=34815 tokens_out=3978
+2026-06-07 07:01:52 [INFO] Destinataires inscrits au rapport matinal : 11
+2026-06-07 07:01:52 [INFO] Mail envoye a 11 destinataire(s) via 192.168.254.2
+=== Fin 07-06-26  7:01:52,61 (code retour 0) === 
