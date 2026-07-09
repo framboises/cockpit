@@ -36,6 +36,14 @@
     return b;
   }
 
+  function fmtDate(v) {
+    if (!v) return "—";
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" }) +
+      " " + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  }
+
   // ---------- API ----------
   function j(r) { return r.json(); }
   function jsonHeaders() {
