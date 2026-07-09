@@ -76,14 +76,17 @@
 
   <!-- Main -->
   <div class="app-main single-col-page">
-    <header class="app-header">
-      <span class="header-title" style="display:flex; align-items:center; gap:8px;">
+    <header class="app-header wk-header">
+      <span class="header-title" style="display:flex; align-items:center; gap:8px; flex:none;">
         <span class="material-symbols-outlined" style="font-size:22px;">menu_book</span>
-        Wiki des procédures
+        <span>Wiki des procédures</span>
       </span>
-      <div class="header-spacer"></div>
+      <div class="wk-search">
+        <span class="material-symbols-outlined">search</span>
+        <input id="wiki-search" type="search" placeholder="Rechercher une situation, un code, un lieu…" autocomplete="off">
+      </div>
       {% if "admin" in user_roles %}
-      <a href="/admin/wiki" class="wk-btn" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;">
+      <a href="/admin/wiki" class="wk-btn" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;flex:none;">
         <span class="material-symbols-outlined" style="font-size:18px;">edit_note</span> Administration
       </a>
       {% endif %}
@@ -108,12 +111,8 @@
           </div>
         </section>
 
-        <!-- Recherche + filtres -->
+        <!-- Filtres par catégorie -->
         <div class="wk-toolbar">
-          <div class="wk-search">
-            <span class="material-symbols-outlined">search</span>
-            <input id="wiki-search" type="search" placeholder="Rechercher une situation, un code, un lieu…" autocomplete="off">
-          </div>
           <div class="wk-filters" id="wiki-filters"></div>
         </div>
         <div class="wk-count" id="wiki-count"></div>

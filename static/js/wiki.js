@@ -1,5 +1,5 @@
 /* Wiki des procédures PC Orga — consultation + fonctions de rendu partagées.
-   Expose window.Wiki { esc, flowHtml, cardHtml } pour réutilisation (admin).
+   Expose window.Wiki { esc, flowHtml, tileHtml, detailHtml } pour réutilisation (admin).
    L'initialisation de la consultation ne se déclenche que si #wiki-grid existe. */
 (function () {
   function esc(s) {
@@ -36,27 +36,55 @@
     return '<div class="wk-sec"><h4>' + esc(title) + "</h4>" + inner + "</div>";
   }
 
-  function cardHtml(p, catMap) {
+  /* Texte indexé pour la recherche */
+  function searchText(p) {
+    return ((p.code || "") + " " + (p.titre || "") + " " + (p.situation || "") + " " +
+      (p.souscas || []).join(" ") + " " + (p.acteurs || "") + " " +
+      (p.questions || []).join(" ") + " " + (p.details || []).join(" ")).toLowerCase();
+  }
+
+  /* Tuile compacte pour la grille */
+  function tileHtml(p, catMap) {
+    var cat = (catMap && catMap[p.dom]) || { label: p.dom, color: "#64748b" };
+    var badge = p.status === "draft" ? '<span class="wk-badge">brouillon</span>' : "";
+    var nq = (p.questions || []).length;
+    var foot = '<div class="wk-tile-foot">';
+    if ((p.flow || []).length) foot += '<span class="wk-tf"><span class="material-symbols-outlined">account_tree</span>logigramme</span>';
+    if (nq) foot += '<span class="wk-tf"><span class="material-symbols-outlined">help</span>' + nq + " question" + (nq > 1 ? "s" : "") + "</span>";
+    foot += "</div>";
+    return '<div class="wk-tile" tabindex="0" role="button" data-code="' + esc(p.code) +
+      '" data-dom="' + esc(p.dom) + '" data-txt="' + esc(searchText(p)) +
+      '" style="--wk-tc:' + cat.color + '">' +
+      badge +
+      '<div class="wk-tile-top">' +
+        '<span class="wk-tile-code">' + esc(p.code) + "</span>" +
+        '<span class="wk-tile-dom">' + esc(cat.label) + "</span>" +
+      "</div>" +
+      '<div class="wk-tile-title">' + esc(p.titre) + "</div>" +
+      (p.situation ? '<div class="wk-tile-sit">' + esc(p.situation) + "</div>" : "") +
+      foot +
+      "</div>";
+  }
+
+  /* En-tête + corps détaillé (contenu de la modale) */
+  function detailHtml(p, catMap) {
     var cat = (catMap && catMap[p.dom]) || { label: p.dom, color: "#64748b" };
     var steps = (p.conduite || []).map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("");
     var subs = (p.souscas || []).map(function (s) { return "<span>" + esc(s) + "</span>"; }).join("");
     var ques = (p.questions || []).map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("");
     var tips = (p.details || []).map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("");
     var badge = p.status === "draft" ? '<span class="wk-badge">brouillon</span>' : "";
-    var txt = ((p.code || "") + " " + (p.titre || "") + " " + (p.situation || "") + " " +
-      (p.souscas || []).join(" ") + " " + (p.acteurs || "") + " " +
-      (p.questions || []).join(" ") + " " + (p.details || []).join(" ")).toLowerCase();
 
-    return '<div class="wk-card" data-dom="' + esc(p.dom) + '" data-txt="' + esc(txt) + '">' +
-      '<div class="wk-chead" tabindex="0" role="button" aria-expanded="false" ' +
-      'onclick="WikiToggle(this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();WikiToggle(this)}">' +
+    var head = '<div class="wk-fiche-head">' +
       '<div class="wk-stripe" style="background:' + cat.color + '"></div>' +
       '<div class="wk-code" style="color:' + cat.color + '">' + esc(p.code) + "</div>" +
-      '<div class="wk-title"><span class="wk-dom">' + esc(cat.label) + "</span>" + esc(p.titre) + "</div>" +
-      badge +
-      '<div class="wk-caret">▶</div>' +
-      "</div>" +
-      '<div class="wk-cbody">' +
+      '<div class="wk-htitle"><span class="wk-dom">' + esc(cat.label) + "</span>" +
+      "<h3>" + esc(p.titre) + "</h3></div>" + badge +
+      '<button type="button" class="wk-iconbtn" data-wk-close aria-label="Fermer">' +
+      '<span class="material-symbols-outlined">close</span></button>' +
+      "</div>";
+
+    var body = '<div class="wk-fiche-body">' +
       sec("Situation", "<p>" + esc(p.situation || "") + "</p>") +
       (ques ? '<div class="wk-qbox"><h4>Les bonnes questions à poser</h4><ul class="wk-qlist">' + ques + "</ul></div>" : "") +
       ((p.flow && p.flow.length) ? '<div class="wk-flowsec"><h4>Le cheminement</h4>' + flowHtml(p.flow) + "</div>" : "") +
@@ -69,14 +97,12 @@
       '<div class="wk-sec wk-warn"><h4>Pièges</h4><p>' + esc(p.pieges || "") + "</p></div>" +
       "</div></div>" +
       (tips ? '<div class="wk-sec wk-tips"><h4>Réflexes terrain — ce que font les opérateurs</h4><ul class="wk-tiplist">' + tips + "</ul></div>" : "") +
-      "</div></div>";
+      "</div>";
+
+    return head + body;
   }
 
-  window.Wiki = { esc: esc, flowHtml: flowHtml, cardHtml: cardHtml };
-  window.WikiToggle = function (el) {
-    var open = el.parentNode.classList.toggle("wk-open");
-    el.setAttribute("aria-expanded", open);
-  };
+  window.Wiki = { esc: esc, flowHtml: flowHtml, tileHtml: tileHtml, detailHtml: detailHtml };
 
   /* ---------- Consultation (seulement si le conteneur existe) ---------- */
   var grid = document.getElementById("wiki-grid");
@@ -87,11 +113,12 @@
   var countEl = document.getElementById("wiki-count");
   var noresEl = document.getElementById("wiki-nores");
   var activeDom = "all";
+  var byCode = {}, catMapGlobal = {};
 
   function apply() {
     var term = (searchEl.value || "").trim().toLowerCase();
     var n = 0;
-    grid.querySelectorAll(".wk-card").forEach(function (c) {
+    grid.querySelectorAll(".wk-tile").forEach(function (c) {
       var okd = activeDom === "all" || c.dataset.dom === activeDom;
       var okt = !term || c.dataset.txt.indexOf(term) !== -1;
       var show = okd && okt;
@@ -116,20 +143,41 @@
     });
   }
 
+  /* ----- modale de détail ----- */
+  var back = null;
+  function closeModal() { if (back) { back.remove(); back = null; document.removeEventListener("keydown", onEsc); } }
+  function onEsc(e) { if (e.key === "Escape") closeModal(); }
+  function openModal(code) {
+    var p = byCode[code];
+    if (!p) return;
+    closeModal();
+    back = document.createElement("div");
+    back.className = "wk-modal-back";
+    back.innerHTML = '<div class="wk-modal wk-modal-fiche">' + detailHtml(p, catMapGlobal) + "</div>";
+    back.addEventListener("click", function (e) { if (e.target === back || e.target.closest("[data-wk-close]")) closeModal(); });
+    document.body.appendChild(back);
+    document.addEventListener("keydown", onEsc);
+  }
+
   function jget(url) { return fetch(url, { credentials: "same-origin" }).then(function (r) { return r.json(); }); }
 
   Promise.all([jget("/api/wiki/categories"), jget("/api/wiki/procedures")])
     .then(function (res) {
       var cats = res[0] || [], procs = res[1] || [];
-      var catMap = {};
-      cats.forEach(function (c) { catMap[c.key] = { label: c.label, color: c.color }; });
+      catMapGlobal = {};
+      cats.forEach(function (c) { catMapGlobal[c.key] = { label: c.label, color: c.color }; });
+      procs.forEach(function (p) { byCode[p.code] = p; });
       filtersEl.innerHTML =
         '<div class="wk-chip wk-on" data-dom="all" tabindex="0" role="button">Toutes</div>' +
         cats.map(function (c) {
           return '<div class="wk-chip" data-dom="' + c.key + '" data-color="' + c.color + '" tabindex="0" role="button">' +
             '<span class="wk-dot" style="background:' + c.color + '"></span>' + esc(c.label) + "</div>";
         }).join("");
-      grid.innerHTML = procs.map(function (p) { return cardHtml(p, catMap); }).join("");
+      grid.innerHTML = procs.map(function (p) { return tileHtml(p, catMapGlobal); }).join("");
+      grid.querySelectorAll(".wk-tile").forEach(function (t) {
+        t.addEventListener("click", function () { openModal(t.dataset.code); });
+        t.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openModal(t.dataset.code); } });
+      });
       searchEl.addEventListener("input", apply);
       wireFilters();
       apply();
