@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>COCKPIT — Wiki des procédures</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/wiki.css') }}">
+</head>
+
+<body>
+<div class="app-layout">
+
+  <!-- Sidebar -->
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-header">
+      <img class="sidebar-logo" src="{{ url_for('static', filename='img/ACO-logo-monochrome-universel-blanc.png') }}" alt="ACO">
+      <span class="sidebar-brand">COCKPIT</span>
+      <button id="sidebarToggle" class="sidebar-toggle" aria-label="Toggle sidebar">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+    </div>
+
+    <nav class="sidebar-nav">
+      <a href="/" class="nav-btn">
+        <span class="material-symbols-outlined">dashboard</span>
+        <span class="label">Cockpit</span>
+      </a>
+      <a href="/wiki" class="nav-btn is-active">
+        <span class="material-symbols-outlined">menu_book</span>
+        <span class="label">Wiki procédures</span>
+      </a>
+      {% if "admin" in user_roles %}
+      <a href="/live-controle" class="nav-btn">
+        <span class="material-symbols-outlined">sensors</span>
+        <span class="label">Controle acces</span>
+      </a>
+      <a href="/analyse-ops" class="nav-btn">
+        <span class="material-symbols-outlined">biotech</span>
+        <span class="label">Analyse Ops</span>
+      </a>
+      <a href="/admin/alertes" class="nav-btn">
+        <span class="material-symbols-outlined">notifications_active</span>
+        <span class="label">Alertes</span>
+      </a>
+      <a href="/admin/wiki" class="nav-btn">
+        <span class="material-symbols-outlined">edit_note</span>
+        <span class="label">Wiki (admin)</span>
+      </a>
+      {% endif %}
+    </nav>
+
+    <div class="sidebar-ai" title="Assistant IA (bientot)">
+      <span class="material-symbols-outlined">smart_toy</span>
+      <span>Assistant IA</span>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-user-info">
+        <span class="material-symbols-outlined sidebar-user-avatar">account_circle</span>
+        <div class="sidebar-user-details">
+          <span class="sidebar-user-name">{{ user_firstname }} {{ user_lastname }}</span>
+          <span class="sidebar-user-email">{{ user_email }}</span>
+        </div>
+      </div>
+      <a href="/logout_redirect" class="nav-btn nav-btn-danger">
+        <span class="material-symbols-outlined">logout</span>
+        <span class="label">Deconnexion</span>
+      </a>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="app-main single-col-page">
+    <header class="app-header">
+      <span class="header-title" style="display:flex; align-items:center; gap:8px;">
+        <span class="material-symbols-outlined" style="font-size:22px;">menu_book</span>
+        Wiki des procédures
+      </span>
+      <div class="header-spacer"></div>
+      {% if "admin" in user_roles %}
+      <a href="/admin/wiki" class="wk-btn" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;">
+        <span class="material-symbols-outlined" style="font-size:18px;">edit_note</span> Administration
+      </a>
+      {% endif %}
+    </header>
+
+    <div id="main-content">
+      <div class="wk-wrap">
+
+        <!-- Cheminement type -->
+        <section class="wk-hero">
+          <h1>Le cheminement type d'une interaction</h1>
+          <div class="wk-sub">Quelle que soit la situation, l'opérateur suit le même fil. Ces sept temps sont la trame commune à toutes les procédures : la levée de doute vidéo précède toujours l'engagement d'un moyen.</div>
+          <div class="wk-chemin-lbl">La conduite à tenir, en un coup d'œil</div>
+          <div class="wk-chemin">
+            <div class="wk-cstep"><div class="wk-cn">1</div><div class="wk-ct">Qualifier</div><div class="wk-cd">quoi, où, gravité</div></div>
+            <div class="wk-cstep"><div class="wk-cn">2</div><div class="wk-ct">Localiser</div><div class="wk-cd">sans ambiguïté</div></div>
+            <div class="wk-cstep wk-hl"><div class="wk-cn">3</div><div class="wk-ct">Lever le doute</div><div class="wk-cd">à la vidéo, avant d'engager</div></div>
+            <div class="wk-cstep"><div class="wk-cn">4</div><div class="wk-ct">Engager</div><div class="wk-cd">le bon acteur</div></div>
+            <div class="wk-cstep"><div class="wk-cn">5</div><div class="wk-ct">Suivre</div><div class="wk-cd">et relancer</div></div>
+            <div class="wk-cstep"><div class="wk-cn">6</div><div class="wk-ct">Tracer</div><div class="wk-cd">identités, plaques, horaires</div></div>
+            <div class="wk-cstep"><div class="wk-cn">7</div><div class="wk-ct">Clôturer</div><div class="wk-cd">sur confirmation, sans doublon</div></div>
+          </div>
+        </section>
+
+        <!-- Recherche + filtres -->
+        <div class="wk-toolbar">
+          <div class="wk-search">
+            <span class="material-symbols-outlined">search</span>
+            <input id="wiki-search" type="search" placeholder="Rechercher une situation, un code, un lieu…" autocomplete="off">
+          </div>
+          <div class="wk-filters" id="wiki-filters"></div>
+        </div>
+        <div class="wk-count" id="wiki-count"></div>
+
+        <div class="wk-grid" id="wiki-grid"></div>
+        <div class="wk-nores" id="wiki-nores">Aucune procédure ne correspond.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script>
+  (function () {
+    var t = document.getElementById("sidebarToggle");
+    if (t) t.addEventListener("click", function () { document.getElementById("sidebar").classList.toggle("collapsed"); });
+  })();
+</script>
+<script src="{{ url_for('static', filename='js/wiki.js') }}"></script>
+</body>
+</html>

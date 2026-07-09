@@ -7696,6 +7696,235 @@ def wa_history():
     })
 
 ################################################################################
+# WIKI DES PROCÉDURES PC ORGA
+#   Collections : cockpit_wiki_categories, cockpit_wiki_procedures
+#   Consultation : /wiki (role user)   ·   Admin CRUD : /admin/wiki (role admin)
+#   Seed initial : python seed_wiki.py
+################################################################################
+COL_WIKI_CAT = db["cockpit_wiki_categories"]
+COL_WIKI_PROC = db["cockpit_wiki_procedures"]
+try:
+    COL_WIKI_PROC.create_index("code", unique=True)
+    COL_WIKI_PROC.create_index([("status", 1)])
+    COL_WIKI_CAT.create_index("key", unique=True)
+except Exception as _e:
+    logger.warning("wiki index init: %s", _e)
+
+_WIKI_NODE_KINDS = {"start", "act", "watch", "engage", "ask", "end"}
+
+
+def _wiki_clean_flow(flow):
+    """Nettoie/valide le logigramme : liste de noeuds {k,t} (+ y,n si décision)."""
+    out = []
+    for n in (flow or []):
+        if not isinstance(n, dict):
+            continue
+        k = (n.get("k") or "").strip()
+        if k not in _WIKI_NODE_KINDS:
+            continue
+        node = {"k": k, "t": (n.get("t") or "").strip()}
+        if k == "ask":
+            node["y"] = (n.get("y") or "").strip()
+            node["n"] = (n.get("n") or "").strip() or "—"
+        out.append(node)
+    return out
+
+
+def _wiki_proc_from_payload(data):
+    """Construit un document procédure propre à partir du JSON du front."""
+    def _slist(v):
+        return [str(x).strip() for x in (v or []) if str(x).strip()]
+    return {
+        "code": (data.get("code") or "").strip().upper(),
+        "titre": (data.get("titre") or "").strip(),
+        "dom": (data.get("dom") or "").strip(),
+        "situation": (data.get("situation") or "").strip(),
+        "questions": _slist(data.get("questions")),
+        "acteurs": (data.get("acteurs") or "").strip(),
+        "conduite": _slist(data.get("conduite")),
+        "consigner": (data.get("consigner") or "").strip(),
+        "pieges": (data.get("pieges") or "").strip(),
+        "souscas": _slist(data.get("souscas")),
+        "details": _slist(data.get("details")),
+        "flow": _wiki_clean_flow(data.get("flow")),
+        "status": "published" if data.get("status") == "published" else "draft",
+    }
+
+
+# ---- Pages ---------------------------------------------------------------
+@app.route("/wiki")
+@role_required("user")
+def wiki_page():
+    payload = getattr(request, "user_payload", {})
+    return render_template("wiki.html",
+                           user_roles=payload.get("roles", []),
+                           user_firstname=payload.get("firstname", ""),
+                           user_lastname=payload.get("lastname", ""),
+                           user_email=payload.get("email", ""),
+                           app_role=payload.get("app_role", "user"))
+
+
+@app.route("/admin/wiki")
+@role_required("admin")
+def wiki_admin_page():
+    payload = getattr(request, "user_payload", {})
+    return render_template("wiki_admin.html",
+                           user_roles=payload.get("roles", []),
+                           user_firstname=payload.get("firstname", ""),
+                           user_lastname=payload.get("lastname", ""),
+                           user_email=payload.get("email", ""),
+                           app_role=payload.get("app_role", "user"))
+
+
+# ---- API consultation (utilisateur connecté) ----------------------------
+@app.route("/api/wiki/categories", methods=["GET"])
+@role_required("user")
+def wiki_list_categories():
+    cats = list(COL_WIKI_CAT.find().sort([("order", 1), ("key", 1)]))
+    return jsonify([_pub(c) for c in cats])
+
+
+@app.route("/api/wiki/procedures", methods=["GET"])
+@role_required("user")
+def wiki_list_procedures():
+    procs = list(COL_WIKI_PROC.find({"status": "published"}).sort([("code", 1)]))
+    return jsonify([_pub(p) for p in procs])
+
+
+# ---- API admin : procédures (CRUD) --------------------------------------
+@app.route("/api/wiki/admin/procedures", methods=["GET"])
+@role_required("admin")
+def wiki_admin_list_procedures():
+    procs = list(COL_WIKI_PROC.find().sort([("code", 1)]))
+    return jsonify([_pub(p) for p in procs])
+
+
+@app.route("/api/wiki/admin/procedures", methods=["POST"])
+@role_required("admin")
+def wiki_admin_create_procedure():
+    payload = getattr(request, "user_payload", {})
+    data = request.get_json(force=True) or {}
+    doc = _wiki_proc_from_payload(data)
+    if not doc["code"] or not doc["titre"] or not doc["dom"]:
+        return jsonify({"error": "code, titre et catégorie sont obligatoires"}), 400
+    if COL_WIKI_PROC.find_one({"code": doc["code"]}):
+        return jsonify({"error": "Ce code existe déjà"}), 409
+    now = datetime.now(timezone.utc)
+    who = payload.get("email") or "admin"
+    doc.update({"version": 1, "created_at": now, "updated_at": now,
+                "created_by": who, "updated_by": who})
+    ins = COL_WIKI_PROC.insert_one(doc)
+    doc["_id"] = ins.inserted_id
+    return jsonify(_pub(doc)), 201
+
+
+@app.route("/api/wiki/admin/procedures/<pid>", methods=["PUT"])
+@role_required("admin")
+def wiki_admin_update_procedure(pid):
+    payload = getattr(request, "user_payload", {})
+    try:
+        oid = ObjectId(pid)
+    except Exception:
+        return jsonify({"error": "ID invalide"}), 400
+    cur = COL_WIKI_PROC.find_one({"_id": oid})
+    if not cur:
+        return jsonify({"error": "Introuvable"}), 404
+    data = request.get_json(force=True) or {}
+    patch = _wiki_proc_from_payload(data)
+    if not patch["code"] or not patch["titre"] or not patch["dom"]:
+        return jsonify({"error": "code, titre et catégorie sont obligatoires"}), 400
+    if COL_WIKI_PROC.find_one({"code": patch["code"], "_id": {"$ne": oid}}):
+        return jsonify({"error": "Ce code est déjà utilisé"}), 409
+    patch["version"] = int(cur.get("version", 1)) + 1
+    patch["updated_at"] = datetime.now(timezone.utc)
+    patch["updated_by"] = payload.get("email") or "admin"
+    res = COL_WIKI_PROC.find_one_and_update({"_id": oid}, {"$set": patch}, return_document=True)
+    return jsonify(_pub(res))
+
+
+@app.route("/api/wiki/admin/procedures/<pid>", methods=["DELETE"])
+@role_required("admin")
+def wiki_admin_delete_procedure(pid):
+    try:
+        oid = ObjectId(pid)
+    except Exception:
+        return jsonify({"error": "ID invalide"}), 400
+    r = COL_WIKI_PROC.delete_one({"_id": oid})
+    if r.deleted_count == 0:
+        return jsonify({"error": "Introuvable"}), 404
+    return jsonify({"ok": True})
+
+
+# ---- API admin : catégories ---------------------------------------------
+@app.route("/api/wiki/admin/categories", methods=["GET"])
+@role_required("admin")
+def wiki_admin_list_categories():
+    cats = list(COL_WIKI_CAT.find().sort([("order", 1), ("key", 1)]))
+    return jsonify([_pub(c) for c in cats])
+
+
+@app.route("/api/wiki/admin/categories", methods=["POST"])
+@role_required("admin")
+def wiki_admin_create_category():
+    data = request.get_json(force=True) or {}
+    key = re.sub(r"[^a-z0-9_-]+", "", (data.get("key") or "").strip().lower())
+    label = (data.get("label") or "").strip()
+    color = (data.get("color") or "#2563eb").strip()
+    if not key or not label:
+        return jsonify({"error": "clé et libellé obligatoires"}), 400
+    if COL_WIKI_CAT.find_one({"key": key}):
+        return jsonify({"error": "Cette clé existe déjà"}), 409
+    order = int(data.get("order", COL_WIKI_CAT.count_documents({})))
+    doc = {"key": key, "label": label, "color": color, "order": order}
+    ins = COL_WIKI_CAT.insert_one(doc)
+    doc["_id"] = ins.inserted_id
+    return jsonify(_pub(doc)), 201
+
+
+@app.route("/api/wiki/admin/categories/<cid>", methods=["PUT"])
+@role_required("admin")
+def wiki_admin_update_category(cid):
+    try:
+        oid = ObjectId(cid)
+    except Exception:
+        return jsonify({"error": "ID invalide"}), 400
+    data = request.get_json(force=True) or {}
+    patch = {}
+    if "label" in data:
+        patch["label"] = (data.get("label") or "").strip()
+    if "color" in data:
+        patch["color"] = (data.get("color") or "").strip()
+    if "order" in data:
+        try:
+            patch["order"] = int(data.get("order"))
+        except Exception:
+            pass
+    if not patch:
+        return jsonify({"error": "rien à mettre à jour"}), 400
+    res = COL_WIKI_CAT.find_one_and_update({"_id": oid}, {"$set": patch}, return_document=True)
+    if not res:
+        return jsonify({"error": "Introuvable"}), 404
+    return jsonify(_pub(res))
+
+
+@app.route("/api/wiki/admin/categories/<cid>", methods=["DELETE"])
+@role_required("admin")
+def wiki_admin_delete_category(cid):
+    try:
+        oid = ObjectId(cid)
+    except Exception:
+        return jsonify({"error": "ID invalide"}), 400
+    cat = COL_WIKI_CAT.find_one({"_id": oid})
+    if not cat:
+        return jsonify({"error": "Introuvable"}), 404
+    used = COL_WIKI_PROC.count_documents({"dom": cat.get("key")})
+    if used:
+        return jsonify({"error": "Catégorie utilisée par %d procédure(s)" % used}), 409
+    COL_WIKI_CAT.delete_one({"_id": oid})
+    return jsonify({"ok": True})
+
+
+################################################################################
 # Exécution
 ################################################################################
 

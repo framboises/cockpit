@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>COCKPIT — Wiki (administration)</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/wiki.css') }}">
+</head>
+
+<body>
+<div class="app-layout">
+
+  <!-- Sidebar -->
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-header">
+      <img class="sidebar-logo" src="{{ url_for('static', filename='img/ACO-logo-monochrome-universel-blanc.png') }}" alt="ACO">
+      <span class="sidebar-brand">COCKPIT</span>
+      <button id="sidebarToggle" class="sidebar-toggle" aria-label="Toggle sidebar">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+    </div>
+
+    <nav class="sidebar-nav">
+      <a href="/" class="nav-btn">
+        <span class="material-symbols-outlined">dashboard</span>
+        <span class="label">Cockpit</span>
+      </a>
+      <a href="/wiki" class="nav-btn">
+        <span class="material-symbols-outlined">menu_book</span>
+        <span class="label">Wiki procédures</span>
+      </a>
+      {% if "admin" in user_roles %}
+      <a href="/live-controle" class="nav-btn">
+        <span class="material-symbols-outlined">sensors</span>
+        <span class="label">Controle acces</span>
+      </a>
+      <a href="/analyse-ops" class="nav-btn">
+        <span class="material-symbols-outlined">biotech</span>
+        <span class="label">Analyse Ops</span>
+      </a>
+      <a href="/admin/alertes" class="nav-btn">
+        <span class="material-symbols-outlined">notifications_active</span>
+        <span class="label">Alertes</span>
+      </a>
+      <a href="/admin/wiki" class="nav-btn is-active">
+        <span class="material-symbols-outlined">edit_note</span>
+        <span class="label">Wiki (admin)</span>
+      </a>
+      {% endif %}
+    </nav>
+
+    <div class="sidebar-ai" title="Assistant IA (bientot)">
+      <span class="material-symbols-outlined">smart_toy</span>
+      <span>Assistant IA</span>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-user-info">
+        <span class="material-symbols-outlined sidebar-user-avatar">account_circle</span>
+        <div class="sidebar-user-details">
+          <span class="sidebar-user-name">{{ user_firstname }} {{ user_lastname }}</span>
+          <span class="sidebar-user-email">{{ user_email }}</span>
+        </div>
+      </div>
+      <a href="/logout_redirect" class="nav-btn nav-btn-danger">
+        <span class="material-symbols-outlined">logout</span>
+        <span class="label">Deconnexion</span>
+      </a>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="app-main single-col-page">
+    <header class="app-header">
+      <span class="header-title" style="display:flex; align-items:center; gap:8px;">
+        <span class="material-symbols-outlined" style="font-size:22px;">edit_note</span>
+        Wiki — administration
+      </span>
+      <div class="header-spacer"></div>
+      <a href="/wiki" class="wk-btn" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;">
+        <span class="material-symbols-outlined" style="font-size:18px;">visibility</span> Voir le wiki
+      </a>
+    </header>
+
+    <div id="main-content">
+      <div class="wk-adm">
+
+        <!-- Colonne gauche : liste des fiches -->
+        <div class="wk-adm-side">
+          <div class="wk-adm-actions">
+            <button id="wk-new-btn" class="wk-btn wk-primary">
+              <span class="material-symbols-outlined" style="font-size:18px;">add</span> Nouvelle fiche
+            </button>
+            <button id="wk-cats-btn" class="wk-btn">
+              <span class="material-symbols-outlined" style="font-size:18px;">category</span> Catégories
+            </button>
+          </div>
+          <div class="wk-search wk-adm-search">
+            <span class="material-symbols-outlined">search</span>
+            <input id="wk-adm-search" type="search" placeholder="Rechercher une fiche…" autocomplete="off">
+          </div>
+          <div id="wk-adm-list" class="wk-adm-list"></div>
+        </div>
+
+        <!-- Colonne droite : éditeur -->
+        <div id="wk-editor" class="wk-adm-main"></div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script>
+  (function () {
+    var t = document.getElementById("sidebarToggle");
+    if (t) t.addEventListener("click", function () { document.getElementById("sidebar").classList.toggle("collapsed"); });
+  })();
+</script>
+<script src="{{ url_for('static', filename='js/wiki.js') }}"></script>
+<script src="{{ url_for('static', filename='js/wiki_admin.js') }}"></script>
+</body>
+</html>
