@@ -7,8 +7,10 @@
 .wk-wrap{max-width:1120px;margin:0 auto;padding:20px 20px 80px}
 .wk-mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
 
-/* --- signal (levée de doute / décision / questions / cheminement) --- */
-.wk-wrap{--wk-signal:#b45309;--wk-signal-bg:#fef3e2;--wk-signal-bd:#f0dcb8;
+/* --- signal (levée de doute / décision / questions / cheminement) ---
+   Déclarés au niveau racine pour que la modale (ajoutée dans <body>, hors
+   .wk-wrap) et l'aperçu du logigramme côté admin héritent bien des couleurs. */
+:root{--wk-signal:#b45309;--wk-signal-bg:#fef3e2;--wk-signal-bd:#f0dcb8;
  --wk-green:#0f7a4f;--wk-green-bg:#e7f2ea;--wk-slate:#475569;--wk-slate-bg:#eef2f6}
 
 /* ---------- En-tête : cheminement type ---------- */
