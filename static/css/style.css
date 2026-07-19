@@ -246,6 +246,34 @@ img { max-width: 100%; }
     background: rgba(148, 163, 184, 0.25);
     border-radius: 3px;
   }
+
+  /* Blocs du bas a taille stable : selects Evenement/Annee, Assistant IA,
+     Simulation et footer ne se compressent jamais (flex-shrink:0). La nav
+     ci-dessus (flex:1 1 auto) absorbe toute la hauteur restante et reste la
+     seule zone scrollable, quelle que soit la hauteur de ces blocs. */
+  .sidebar-panel,
+  .sidebar-ai,
+  .sidebar-sim,
+  .sidebar-footer {
+    flex-shrink: 0;
+  }
+
+  /* Simulation : le corps est borne en hauteur et scrolle en interne. La taille
+     du bloc reste maitrisee a l'ouverture -> il ne pousse pas la nav hors ecran
+     ni ne fait deborder la sidebar ; la hauteur restante de la nav ne varie que
+     du delta borne, pas de tout le contenu de la simulation. */
+  .sidebar-sim-body {
+    max-height: 240px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+  }
+  .sidebar-sim-body::-webkit-scrollbar { width: 6px; }
+  .sidebar-sim-body::-webkit-scrollbar-track { background: transparent; }
+  .sidebar-sim-body::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.25);
+    border-radius: 3px;
+  }
 }
 
 .nav-btn {
