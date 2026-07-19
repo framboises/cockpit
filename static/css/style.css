@@ -233,6 +233,13 @@ img { max-width: 100%; }
     scrollbar-width: thin;
     scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
   }
+  /* Sans ceci, les boutons (flex-shrink:1 par defaut) se compressent
+     verticalement pour tenir dans la hauteur reduite de la nav au lieu de
+     deborder : l'overflow ne se declenche jamais et rien ne scrolle. On force
+     leur hauteur naturelle pour que la nav deborde et devienne scrollable. */
+  .sidebar-nav > * {
+    flex-shrink: 0;
+  }
   .sidebar-nav::-webkit-scrollbar { width: 6px; }
   .sidebar-nav::-webkit-scrollbar-track { background: transparent; }
   .sidebar-nav::-webkit-scrollbar-thumb {
