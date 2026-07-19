@@ -216,6 +216,31 @@ img { max-width: 100%; }
   padding: 8px 0;
 }
 
+/* Desktop / grand ecran (> 820px) : la nav devient la zone scrollable de la
+   sidebar. Sur un MacBook Pro (viewport court) avec une longue liste de menus
+   (mode admin), le .sidebar-panel (selects Evenement/Annee) et le footer
+   etaient pousses hors ecran, et .sidebar { overflow: hidden } empechait tout
+   scroll pour y acceder. En rendant la nav flex-grow + scrollable, le panel et
+   le footer restent toujours epingles et visibles en bas ; seule la liste des
+   menus scrolle. Le bloc mobile/tablette (<= 820px) gere deja son propre scroll
+   integral et n'est pas concerne par cette regle. */
+@media (min-width: 821px) {
+  .sidebar-nav {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+  }
+  .sidebar-nav::-webkit-scrollbar { width: 6px; }
+  .sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+  .sidebar-nav::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.25);
+    border-radius: 3px;
+  }
+}
+
 .nav-btn {
   display: flex;
   align-items: center;
