@@ -7710,11 +7710,14 @@ try:
 except Exception as _e:
     logger.warning("wiki index init: %s", _e)
 
-_WIKI_NODE_KINDS = {"start", "act", "watch", "engage", "ask", "end"}
+_WIKI_NODE_KINDS = {"start", "act", "watch", "engage", "ask", "end", "fork"}
+_WIKI_MAX_DEPTH = 4  # garde-fou anti-récursion sur les embranchements imbriqués
 
 
-def _wiki_clean_flow(flow):
-    """Nettoie/valide le logigramme : liste de noeuds {k,t} (+ y,n si décision)."""
+def _wiki_clean_flow(flow, depth=0):
+    """Nettoie/valide le logigramme : liste de noeuds {k,t}.
+       - ask  : décision binaire, ajoute y/n
+       - fork : embranchement, ajoute branches[{label, flow[]}] (récursif)"""
     out = []
     for n in (flow or []):
         if not isinstance(n, dict):
@@ -7726,6 +7729,17 @@ def _wiki_clean_flow(flow):
         if k == "ask":
             node["y"] = (n.get("y") or "").strip()
             node["n"] = (n.get("n") or "").strip() or "—"
+        elif k == "fork":
+            branches = []
+            if depth < _WIKI_MAX_DEPTH and isinstance(n.get("branches"), list):
+                for b in n["branches"]:
+                    if not isinstance(b, dict):
+                        continue
+                    branches.append({
+                        "label": (b.get("label") or "").strip(),
+                        "flow": _wiki_clean_flow(b.get("flow"), depth + 1),
+                    })
+            node["branches"] = branches
         out.append(node)
     return out
 

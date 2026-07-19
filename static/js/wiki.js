@@ -8,28 +8,34 @@
     });
   }
 
+  function nodeHtml(nd) {
+    var k = nd.k || "";
+    if (k === "fork" && nd.branches && nd.branches.length) {
+      var h = '<div class="wk-node wk-ask wk-fork"><span class="wk-tg">Embranchement</span>' + esc(nd.t) + "</div>";
+      h += '<div class="wk-forkrow">';
+      nd.branches.forEach(function (br) {
+        h += '<div class="wk-bcol"><div class="wk-bcol-lab">' + esc(br.label || "—") + "</div>" +
+          ((br.flow && br.flow.length) ? flowHtml(br.flow) : "") + "</div>";
+      });
+      return h + "</div>";
+    }
+    if (k === "ask") {
+      var a = '<div class="wk-node wk-ask"><span class="wk-tg">Décision</span>' + esc(nd.t) + "</div>";
+      a += '<div class="wk-branch">';
+      a += '<div class="wk-bchip wk-yes"><span class="wk-lab">OUI</span>' + esc(nd.y) + "</div>";
+      if (nd.n && nd.n !== "—" && nd.n !== "poursuivre")
+        a += '<div class="wk-bchip wk-no"><span class="wk-lab">NON</span>' + esc(nd.n) + "</div>";
+      else
+        a += '<div class="wk-bchip wk-no wk-muted"><span class="wk-lab">NON</span>poursuivre</div>';
+      return a + "</div>";
+    }
+    if (k === "watch") return '<div class="wk-node wk-watch"><span class="wk-ic">◉</span>' + esc(nd.t) + "</div>";
+    if (k === "engage") return '<div class="wk-node wk-engage"><span class="wk-tg">Engager</span>' + esc(nd.t) + "</div>";
+    return '<div class="wk-node wk-' + esc(k) + '">' + esc(nd.t) + "</div>";
+  }
+
   function flowHtml(flow) {
-    var h = '<div class="wk-flow">';
-    (flow || []).forEach(function (nd) {
-      var k = nd.k || "";
-      if (k === "ask") {
-        h += '<div class="wk-node wk-ask"><span class="wk-tg">Décision</span>' + esc(nd.t) + "</div>";
-        h += '<div class="wk-branch">';
-        h += '<div class="wk-bchip wk-yes"><span class="wk-lab">OUI</span>' + esc(nd.y) + "</div>";
-        if (nd.n && nd.n !== "—" && nd.n !== "poursuivre")
-          h += '<div class="wk-bchip wk-no"><span class="wk-lab">NON</span>' + esc(nd.n) + "</div>";
-        else
-          h += '<div class="wk-bchip wk-no wk-muted"><span class="wk-lab">NON</span>poursuivre</div>';
-        h += "</div>";
-      } else if (k === "watch") {
-        h += '<div class="wk-node wk-watch"><span class="wk-ic">◉</span>' + esc(nd.t) + "</div>";
-      } else if (k === "engage") {
-        h += '<div class="wk-node wk-engage"><span class="wk-tg">Engager</span>' + esc(nd.t) + "</div>";
-      } else {
-        h += '<div class="wk-node wk-' + esc(k) + '">' + esc(nd.t) + "</div>";
-      }
-    });
-    return h + "</div>";
+    return '<div class="wk-flow">' + (flow || []).map(nodeHtml).join("") + "</div>";
   }
 
   function sec(title, inner) {

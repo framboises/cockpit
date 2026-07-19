@@ -10,8 +10,11 @@
     { k: "watch", label: "Levée de doute" },
     { k: "engage", label: "Engager un acteur" },
     { k: "ask", label: "Décision (Oui / Non)" },
+    { k: "fork", label: "Embranchement (hypothèses)" },
     { k: "end", label: "Clôture" }
   ];
+  var MAX_BRANCHES = 4;
+  var MAX_DEPTH = 3;
 
   // ---------- utils DOM ----------
   function el(tag, attrs, kids) {
@@ -96,55 +99,117 @@
     return box;
   }
 
-  // ---------- éditeur de logigramme ----------
-  var flowStepsBox = null, flowPreview = null;
+  // ---------- éditeur de logigramme (récursif, avec embranchements) ----------
+  var flowRoot = null, flowPreview = null;
+  function onFlowChange() { dirty = true; previewFlow(); }
   function previewFlow() {
     if (!flowPreview) return;
-    var flow = collectFlow();
-    flowPreview.innerHTML = '<div class="wk-fp-lbl">Aperçu</div>' + window.Wiki.flowHtml(flow);
+    flowPreview.innerHTML = '<div class="wk-fp-lbl">Aperçu</div>' + window.Wiki.flowHtml(collectFlow());
   }
-  function collectFlow() {
-    if (!flowStepsBox) return [];
-    return Array.prototype.map.call(flowStepsBox.querySelectorAll(".wk-fe-step"), function (r) { return r._get(); })
-      .filter(function (n) { return n.t || n.k; });
+  function collectFlow() { return flowRoot ? flowRoot._collect() : []; }
+
+  function directChildren(box, cls) {
+    return Array.prototype.filter.call(box.children, function (c) {
+      return c.classList && c.classList.contains(cls);
+    });
   }
-  function flowRow(node) {
+
+  /* Une branche d'embranchement : libellé d'hypothèse + sous-flux imbriqué */
+  function makeBranch(br, depth) {
+    br = br || { label: "", flow: [] };
+    var block = el("div", { class: "wk-fe-branch" });
+    var lab = el("input", { class: "wk-input", placeholder: "Hypothèse / condition (ex : Victime consciente)" });
+    lab.value = br.label || "";
+    lab.addEventListener("input", onFlowChange);
+    var rm = iconBtn("close", function () { block.remove(); onFlowChange(); }, true);
+    var head = el("div", { class: "wk-fe-branch-head" }, [lab, rm]);
+    var sub = makeSection(br.flow, depth + 1);
+    block.appendChild(head); block.appendChild(sub);
+    block._get = function () { return { label: lab.value.trim(), flow: sub._collect() }; };
+    return block;
+  }
+
+  /* Une étape (nœud). Pour "fork", pilote une liste de branches. */
+  function makeStep(node, depth) {
     node = node || { k: "act", t: "" };
     var row = el("div", { class: "wk-fe-step" });
     var sel = el("select", { class: "wk-select" });
     KINDS.forEach(function (kd) { var o = el("option", { value: kd.k, text: kd.label }); if (kd.k === node.k) o.selected = true; sel.appendChild(o); });
     var txt = el("input", { class: "wk-input", placeholder: "Texte du nœud" }); txt.value = node.t || "";
-    var up = iconBtn("arrow_upward", function () { var p = row.previousElementSibling; if (p) flowStepsBox.insertBefore(row, p); dirty = true; previewFlow(); });
-    var down = iconBtn("arrow_downward", function () { var n = row.nextElementSibling; if (n) flowStepsBox.insertBefore(n, row); dirty = true; previewFlow(); });
-    var del = iconBtn("close", function () { row.remove(); dirty = true; previewFlow(); }, true);
-    var top = el("div", { class: "wk-fe-top" }, [sel, txt, up, down, del]);
-    var branches = el("div", { class: "wk-fe-branches" });
+    var up = iconBtn("arrow_upward", function () { var s = row.parentNode, p = row.previousElementSibling; if (p && p.classList.contains("wk-fe-step")) s.insertBefore(row, p); onFlowChange(); });
+    var down = iconBtn("arrow_downward", function () { var s = row.parentNode, n = row.nextElementSibling; if (n && n.classList.contains("wk-fe-step")) s.insertBefore(n, row); onFlowChange(); });
+    var del = iconBtn("close", function () { row.remove(); onFlowChange(); }, true);
+    row.appendChild(el("div", { class: "wk-fe-top" }, [sel, txt, up, down, del]));
+
+    // décision binaire (ask)
+    var askBox = el("div", { class: "wk-fe-branches" });
     var yIn = el("input", { class: "wk-input", placeholder: "Branche OUI → …" }); yIn.value = node.y || "";
     var nIn = el("input", { class: "wk-input", placeholder: "Branche NON → … (vide = poursuivre)" }); nIn.value = (node.n && node.n !== "—") ? node.n : "";
-    branches.appendChild(yIn); branches.appendChild(nIn);
-    row.appendChild(top); row.appendChild(branches);
-    function sync() { branches.style.display = sel.value === "ask" ? "grid" : "none"; }
+    yIn.addEventListener("input", onFlowChange); nIn.addEventListener("input", onFlowChange);
+    askBox.appendChild(yIn); askBox.appendChild(nIn);
+    row.appendChild(askBox);
+
+    // embranchement (fork) — liste de branches, chacune avec son sous-flux
+    var brList = el("div", { class: "wk-fe-branchlist" });
+    var addBranch = el("button", { type: "button", class: "wk-addbtn", onclick: function () {
+      if (directChildren(brList, "wk-fe-branch").length >= MAX_BRANCHES) { toast("warning", "4 branches maximum."); return; }
+      brList.appendChild(makeBranch({ label: "", flow: [] }, depth)); onFlowChange();
+    } });
+    addBranch.appendChild(icon("call_split", 16)); addBranch.appendChild(document.createTextNode("Ajouter une hypothèse"));
+    var forkBox = el("div", { class: "wk-fe-fork" }, [brList, addBranch]);
+    if (depth >= MAX_DEPTH) forkBox.appendChild(el("div", { class: "wk-fe-note", text: "Profondeur maximale atteinte pour de nouveaux embranchements." }));
+    row.appendChild(forkBox);
+
+    var forkSeeded = false;
+    function seedBranches(list) {
+      (list && list.length ? list : [{ label: "", flow: [] }, { label: "", flow: [] }]).forEach(function (b) {
+        brList.appendChild(makeBranch(b, depth));
+      });
+      forkSeeded = true;
+    }
+    if (node.k === "fork") seedBranches(node.branches);
+
+    function sync() {
+      var isAsk = sel.value === "ask", isFork = sel.value === "fork";
+      askBox.style.display = isAsk ? "grid" : "none";
+      forkBox.style.display = isFork ? "block" : "none";
+      txt.placeholder = isFork ? "Question / critère de décision" : "Texte du nœud";
+      if (isFork && !forkSeeded) seedBranches(null);
+    }
     sync();
-    function changed() { dirty = true; previewFlow(); }
-    sel.addEventListener("change", function () { sync(); changed(); });
-    txt.addEventListener("input", changed);
-    yIn.addEventListener("input", changed);
-    nIn.addEventListener("input", changed);
+    sel.addEventListener("change", function () { sync(); onFlowChange(); });
+    txt.addEventListener("input", onFlowChange);
+
     row._get = function () {
       var o = { k: sel.value, t: txt.value.trim() };
       if (sel.value === "ask") { o.y = yIn.value.trim(); o.n = nIn.value.trim() || "—"; }
+      else if (sel.value === "fork") {
+        o.branches = directChildren(brList, "wk-fe-branch").map(function (b) { return b._get(); })
+          .filter(function (b) { return b.label || (b.flow && b.flow.length); });
+      }
       return o;
     };
     return row;
   }
-  function flowEditor(flow) {
-    flowStepsBox = el("div", { class: "wk-fe-steps" });
-    (flow || []).forEach(function (n) { flowStepsBox.appendChild(flowRow(n)); });
-    var add = el("button", { type: "button", class: "wk-addbtn", onclick: function () { flowStepsBox.appendChild(flowRow({ k: "act", t: "" })); dirty = true; previewFlow(); } });
+
+  /* Un flux = liste ordonnée d'étapes + bouton d'ajout. Profondeur pour l'imbrication. */
+  function makeSection(flow, depth) {
+    depth = depth || 0;
+    var section = el("div", { class: "wk-fe-steps" + (depth ? " wk-fe-sub" : "") });
+    (flow || []).forEach(function (n) { section.appendChild(makeStep(n, depth)); });
+    var add = el("button", { type: "button", class: "wk-addbtn", onclick: function () {
+      section.insertBefore(makeStep({ k: "act", t: "" }, depth), add); onFlowChange();
+    } });
     add.appendChild(icon("add", 16)); add.appendChild(document.createTextNode("Ajouter une étape"));
-    flowStepsBox.appendChild(add);
+    section.appendChild(add);
+    section._collect = function () { return directChildren(section, "wk-fe-step").map(function (r) { return r._get(); }); };
+    return section;
+  }
+
+  function flowEditor(flow) {
+    flowRoot = makeSection(flow, 0);
     flowPreview = el("div", { class: "wk-fe-preview" });
-    var wrap = el("div", { class: "wk-flow-editor" }, [flowStepsBox, flowPreview]);
+    var wrap = el("div", { class: "wk-flow-editor" }, [flowRoot, flowPreview]);
     setTimeout(previewFlow, 0);
     return wrap;
   }
