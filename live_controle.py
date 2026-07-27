@@ -40,14 +40,30 @@ READ_TIMEOUT_COUNTER = 5
 READ_TIMEOUT_TRANSACTIONS = 15
 
 MAX_TX = 100
-# bit 7 (128) = nouveau layout XML, bit 8 (256) = inclure erreurs
-OPTION_TRANSACTIONS = 128 + 256  # 384
+# Option des inquiries Transactions (spec HSHIF25 v2.34 SS4.27.4 : bits 0-6 =
+# bits de SUPPRESSION). 1409 = 1024 + 256 + 128 + 1 :
+#   bit 10 (1024) = recuperer aussi les transactions des autres billetteries
+#                   (SECUTIX etc.) -- indispensable depuis que notre interface
+#                   a sa billetterie ACO dediee (juin 2026, cf. Skidata/C. Laulhe)
+#   bit 8  (256)  = inclure les transactions en erreur (alimente hsh_erreurs)
+#   bit 7  (128)  = nouveau layout XML
+#   bit 0  (1)    = supprimer RawData (XML brut du data carrier, jamais parse)
+# On NE supprime PAS : Checkpoint/Gate/Area (localisation + sens Entry/Exit),
+# Venue (fallback Entry/Exit), Permission (porte l'UPID -> detection -ACCRED),
+# TSProperty (ENTREE/PRODUCT... utile pour categoriser pieton/vehicule).
+# Skidata recommandait 1520 (supprime Venue+TSProperty+Permission) mais on
+# perdrait l'UPID des accredites et le signal TSProperty. Ancienne valeur : 384.
+OPTION_TRANSACTIONS = 1024 + 256 + 128 + 1  # 1409
 
-# Issuer utilise pour les requetes Transactions. Il depend de la config Skidata
-# de l'evenement (24H Motos = 6, 24H Autos 2026 = 3). Priorite : champ
-# `hsh_issuer_tx` du doc ___GLOBAL___, puis variable d'env HSH_TX_ISSUER, puis 3.
-# Les requetes Counter restent en Issuer 6 (compteurs globaux, OK).
-DEFAULT_TX_ISSUER = int(os.getenv("HSH_TX_ISSUER", "3"))
+# Issuer de NOTRE interface (socket HSHIF25, 192.168.2.10:5205). Depuis juin
+# 2026, Skidata a rattache l'interface a une billetterie ACO dediee et STABLE :
+# Issuer = 2 (ex-WEEZEVENT renommee ACO). Avant, l'interface etait rattachee a
+# la billetterie principale de chaque event (TICKETNET/6 au GP Motos,
+# SECUTIX/3 au 24H Autos), d'ou la valse d'Issuer. Avec le bit 10 (cf.
+# OPTION_TRANSACTIONS), Issuer 2 lit les transactions de toutes les
+# billetteries. Reste configurable par securite : champ `hsh_issuer_tx` du doc
+# ___GLOBAL___, puis variable d'env HSH_TX_ISSUER, puis 2.
+DEFAULT_TX_ISSUER = int(os.getenv("HSH_TX_ISSUER", "2"))
 
 TZ_PARIS = zoneinfo.ZoneInfo("Europe/Paris")
 
@@ -378,10 +394,12 @@ def envoyer_et_recevoir(sock, frame):
 #              CONSTRUCTEURS XML
 # =========================================================
 def build_counter_global_xml():
+    # Issuer 2 = notre billetterie ACO dediee (cf. DEFAULT_TX_ISSUER). Avant
+    # juin 2026 : 6 (TICKETNET), qui n'est plus notre rattachement.
     return f"""<TSData>
     <Header>
         <Version>HSHIF25</Version>
-        <Issuer>6</Issuer>
+        <Issuer>{DEFAULT_TX_ISSUER}</Issuer>
         <Receiver>1</Receiver>
         <ID>Counter_Global_{int(time.time())}</ID>
     </Header>
@@ -393,7 +411,7 @@ def build_counter_location_xml(location_id, location_type):
     return f"""<TSData>
     <Header>
         <Version>HSHIF25</Version>
-        <Issuer>6</Issuer>
+        <Issuer>{DEFAULT_TX_ISSUER}</Issuer>
         <Receiver>1</Receiver>
         <ID>Location_{location_id}</ID>
     </Header>
