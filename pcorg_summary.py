@@ -45,6 +45,7 @@ RETRYABLE_HTTP_CODES = {429, 503, 529}
 # vient de CLAUDE_MODEL ; cette whitelist permet juste les A/B tests sans
 # changer la conf serveur.
 ALLOWED_MODELS = {
+    "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-sonnet-4-5",
     "claude-opus-4-7",
@@ -56,6 +57,10 @@ ALLOWED_MODELS = {
 # Source : claude.com/pricing. A reverifier si Anthropic revise.
 # Valeurs cache : creation = +25% du prix input, lecture cache = -90% du prix input.
 MODEL_PRICING_USD_PER_MTOK = {
+    # Tarif catalogue. Un tarif d'introduction (2 / 10) court jusqu'au
+    # 31/08/2026 : d'ici la, l'estimation de cout est donc majoree, ce qui est
+    # le bon sens de l'erreur pour un suivi de budget.
+    "claude-sonnet-5":   {"input": 3.0,  "output": 15.0},
     "claude-sonnet-4-6": {"input": 3.0,  "output": 15.0},
     "claude-sonnet-4-5": {"input": 3.0,  "output": 15.0},
     "claude-opus-4-7":   {"input": 15.0, "output": 75.0},

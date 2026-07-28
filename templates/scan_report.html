@@ -28,6 +28,124 @@
       font-family: inherit; }
     .scan-report-empty code { background: #1a2231; padding: 2px 6px;
       border-radius: 4px; color: #fbbf24; font-size: 12px; }
+    /* Rappel des couples event/annee reellement generes (sous les selects) */
+    .scan-report-available { font-size: 11px; line-height: 1.5; color: #8aa0bd; }
+    .scan-report-available b { color: #e6ecf5; font-weight: 600; }
+
+    /* --- Theme sombre des modales -------------------------------------- */
+    /* .crud-modal-dialog s'appuie sur les variables de theme du cockpit, qui
+       valent les couleurs claires. Cette page a une palette sombre codee en
+       dur : on redefinit les variables dans le scope des modales plutot que
+       de surcharger une a une les regles de style.css. */
+    #scan-import-modal, #scan-regen-modal {
+      --card: #1a2231;
+      --line: #2a3548;
+      --bg: #131b28;
+      --text: #e6ecf5;
+      --muted: #8aa0bd;
+      --primary: #4f9eff;
+    }
+    #scan-import-modal .crud-modal-body,
+    #scan-regen-modal .crud-modal-body { color: #c8d6ea; }
+    #scan-import-modal .form-input,
+    #scan-regen-modal .form-input { background: #0f1620; border-color: #2a3548;
+      color: #e6ecf5; }
+    #scan-import-modal label, #scan-regen-modal label { color: #8aa0bd; }
+    /* Les cases a cocher heritent sinon de la largeur 100 % des champs de
+       formulaire du cockpit, ce qui fait passer le libelle a la ligne. Le
+       flex-direction:column des labels du cockpit doit aussi etre annule :
+       sans lui la case se retrouve empilee au-dessus de son libelle. */
+    #scan-import-modal input[type="checkbox"],
+    #scan-regen-modal input[type="checkbox"] { width: 15px; height: 15px;
+      flex: 0 0 auto; margin: 0; accent-color: #4f9eff; }
+    #scan-import-modal label.scan-check, #scan-regen-modal label.scan-check {
+      flex-direction: row; align-items: center; justify-content: flex-start; }
+    #scan-import-modal .btn-secondary, #scan-regen-modal .btn-secondary {
+      background: #232d3f; border-color: #2a3548; color: #c8d6ea; }
+    #scan-import-modal code, #scan-regen-modal code { background: #0f1620;
+      padding: 1px 5px; border-radius: 3px; color: #fbbf24; }
+
+    /* --- Actions du bandeau ------------------------------------------- */
+    /* .scan-report-header est en align-items:baseline : les boutons ont
+       besoin d'un recentrage explicite en plus du refoulement a droite. */
+    .scan-report-actions { margin-left: auto; align-self: center;
+      display: flex; align-items: center; gap: 8px; }
+    .scan-icon-btn { width: 32px; height: 32px; display: flex;
+      align-items: center; justify-content: center; padding: 0;
+      border-radius: 6px; border: 1px solid #2a3548; background: #1a2231;
+      color: #8aa0bd; cursor: pointer; transition: all .12s; }
+    .scan-icon-btn:hover { background: #232d3f; border-color: #4f9eff;
+      color: #4f9eff; }
+    .scan-icon-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .scan-icon-btn .material-symbols-outlined { font-size: 19px; }
+    .scan-tpl-link { display: flex; align-items: center; gap: 5px;
+      font-size: 12px; color: #8aa0bd; text-decoration: none;
+      padding: 5px 9px; border-radius: 6px; border: 1px solid #2a3548; }
+    .scan-tpl-link:hover { color: #4f9eff; border-color: #4f9eff; }
+    .scan-tpl-link .material-symbols-outlined { font-size: 16px; }
+
+    /* --- Barre de progression ------------------------------------------ */
+    /* Clonee de .hsh-progress-* plutot que reutilisee : ces classes sont
+       liees a la jauge « pic projete » de controle_access.js, les partager
+       ferait casser cette page a la moindre refonte la-bas. */
+    .scan-progress { margin: 14px 0 6px; }
+    .scan-progress-bar { position: relative; height: 8px; border-radius: 4px;
+      background: #2a3548; overflow: hidden; }
+    .scan-progress-fill { height: 100%; width: 0; border-radius: 4px;
+      background: #4f9eff; transition: width .3s ease; }
+    .scan-progress-bar.indeterminate .scan-progress-fill { width: 35%;
+      animation: scan-slide 1.1s ease-in-out infinite; }
+    @keyframes scan-slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+    .scan-progress-info { display: flex; justify-content: space-between;
+      font-size: 11.5px; color: #8aa0bd; margin-top: 6px; }
+
+    /* --- Contenu des modales ------------------------------------------- */
+    .scan-drop { border: 2px dashed #2a3548; border-radius: 8px;
+      padding: 26px 18px; text-align: center; color: #8aa0bd;
+      cursor: pointer; transition: all .15s; }
+    .scan-drop:hover, .scan-drop.dragover { border-color: #4f9eff;
+      background: rgba(79,158,255,.06); color: #e6ecf5; }
+    .scan-drop .material-symbols-outlined { font-size: 34px; display: block;
+      margin-bottom: 8px; }
+    .scan-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px,1fr));
+      gap: 10px; margin: 6px 0 14px; }
+    .scan-tile { background: #1a2231; border: 1px solid #2a3548;
+      border-radius: 7px; padding: 9px 11px; }
+    .scan-tile .k { font-size: 10.5px; text-transform: uppercase;
+      letter-spacing: .5px; color: #8aa0bd; }
+    .scan-tile .v { font-size: 17px; font-weight: 600; color: #e6ecf5;
+      margin-top: 3px; }
+    .scan-note { border-radius: 7px; padding: 10px 12px; font-size: 12.5px;
+      line-height: 1.55; margin-bottom: 12px; }
+    .scan-note.warn { background: rgba(251,191,36,.09);
+      border: 1px solid rgba(251,191,36,.35); color: #fbbf24; }
+    .scan-note.info { background: rgba(79,158,255,.09);
+      border: 1px solid rgba(79,158,255,.3); color: #9cc5ff; }
+    .scan-note.err { background: rgba(248,113,113,.09);
+      border: 1px solid rgba(248,113,113,.35); color: #f87171; }
+    .scan-note.ok { background: rgba(74,222,128,.09);
+      border: 1px solid rgba(74,222,128,.3); color: #4ade80; }
+
+    /* --- Grille de mapping --------------------------------------------- */
+    .scanmap-row { display: grid; grid-template-columns: 1.5fr .9fr 1.6fr;
+      gap: 9px; align-items: start; padding: 10px 0;
+      border-bottom: 1px solid #232d3f; }
+    .scanmap-row:last-child { border-bottom: none; }
+    .scanmap-name { font-size: 13px; color: #e6ecf5; font-weight: 500; }
+    .scanmap-sub { font-size: 11px; color: #8aa0bd; margin-top: 2px; }
+    .scanmap-row select, .scanmap-row input { width: 100%; padding: 6px 8px;
+      background: #0f1620; border: 1px solid #2a3548; border-radius: 5px;
+      color: #e6ecf5; font-size: 12.5px; font-family: inherit; }
+    .scanmap-row select:focus, .scanmap-row input:focus { outline: none;
+      border-color: #4f9eff; }
+    .scanmap-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+    .scanmap-chip { font-size: 11px; padding: 3px 8px; border-radius: 11px;
+      background: #232d3f; border: 1px solid #2a3548; color: #9cc5ff;
+      cursor: pointer; }
+    .scanmap-chip:hover { border-color: #4f9eff; background: #2a3548; }
+    .scanmap-chip.is-set { background: rgba(74,222,128,.14);
+      border-color: rgba(74,222,128,.4); color: #4ade80; }
+    .scan-modal-scroll { max-height: 46vh; overflow-y: auto; }
   </style>
 </head>
 
@@ -85,6 +203,18 @@
       {% endif %}
     </nav>
 
+    <div class="sidebar-panel">
+      <div>
+        <label for="event-select">Evenement</label>
+        <select id="event-select"></select>
+      </div>
+      <div>
+        <label for="year-select">Annee</label>
+        <select id="year-select"></select>
+      </div>
+      <div class="scan-report-available" id="scan-report-available"></div>
+    </div>
+
     <div class="sidebar-footer">
       <div class="sidebar-user-info">
         <span class="material-symbols-outlined sidebar-user-avatar">account_circle</span>
@@ -101,11 +231,30 @@
     <div class="scan-report-header">
       <h1>Rapport scans &mdash; {{ event|replace('_', ' ')|upper }} {{ year }}</h1>
       <span class="meta">analyse 15 min / horaire / quotidienne par zone et par porte</span>
+      <div class="scan-report-actions">
+        <a href="/scan-report/template.xlsx" class="scan-tpl-link"
+           title="Telecharger le modele Excel">
+          <span class="material-symbols-outlined">download</span>
+          <span>Modele</span>
+        </a>
+        <button type="button" id="scan-import-btn" class="scan-icon-btn"
+                title="Importer un fichier Excel de scans">
+          <span class="material-symbols-outlined">upload_file</span>
+        </button>
+        <button type="button" id="scan-regen-btn" class="scan-icon-btn"
+                title="Regenerer le rapport">
+          <span class="material-symbols-outlined">refresh</span>
+        </button>
+        <button type="button" id="scan-analysis-btn" class="scan-icon-btn"
+                title="Analyse redigee">
+          <span class="material-symbols-outlined">smart_toy</span>
+        </button>
+      </div>
     </div>
 
     {% if report_available %}
     <iframe class="scan-report-iframe"
-            src="/scan-report/static?event={{ event }}&year={{ year }}"
+            src="/scan-report/static?event={{ event|urlencode }}&amp;year={{ year|urlencode }}"
             allow="fullscreen"></iframe>
     {% else %}
     <div class="scan-report-empty">
@@ -117,7 +266,272 @@
 
 </div>
 
+<!-- ===== MODALE IMPORT (3 etapes dans un seul dialogue) ===== -->
+<div id="scan-import-modal" class="crud-modal" hidden>
+  <div class="crud-modal-dialog">
+    <div class="crud-modal-header">
+      <h3 id="scan-import-title">Importer des scans</h3>
+      <button type="button" class="crud-modal-close" data-close>&times;</button>
+    </div>
+    <div class="crud-modal-body">
+
+      <!-- etape 1 : depot du fichier -->
+      <div id="scan-step-file">
+        <div class="scan-note info">
+          Le fichier doit suivre le format d'export Sirius (zone / porte / device,
+          pas de 15 min). Le <a href="/scan-report/template.xlsx" style="color:inherit;text-decoration:underline;">modele</a>
+          decrit les regles en detail.
+        </div>
+        <div class="scan-drop" id="scan-drop">
+          <span class="material-symbols-outlined">cloud_upload</span>
+          <div><strong>Choisir un fichier</strong> ou le deposer ici</div>
+          <div style="font-size:11.5px;margin-top:5px;">.xlsx ou .xlsm, 25 Mo maximum</div>
+        </div>
+        <input type="file" id="scan-file-input" accept=".xlsx,.xlsm" hidden>
+        <div class="scan-progress" id="scan-upload-progress" hidden>
+          <div class="scan-progress-bar"><div class="scan-progress-fill"></div></div>
+          <div class="scan-progress-info">
+            <span id="scan-upload-label">Envoi...</span>
+            <span id="scan-upload-pct">0 %</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- etape 2 : apercu -->
+      <div id="scan-step-preview" hidden>
+        <div id="scan-preview-notes"></div>
+        <div class="scan-tiles" id="scan-preview-tiles"></div>
+        <div class="form-row">
+          <label>Date de course
+            <input type="text" id="scan-race" class="form-input"
+                   placeholder="2024-04-20T15:00:00">
+          </label>
+        </div>
+        <div id="scan-unresolved-block" hidden>
+          <div style="font-size:12.5px;color:#8aa0bd;margin:14px 0 4px;">
+            <strong id="scan-unresolved-count" style="color:#fbbf24;"></strong>
+            &mdash; choisir l'entite cartographique, ou laisser vide si l'unite
+            n'est pas un lieu (service, guichet).
+          </div>
+          <div class="scan-modal-scroll" id="scan-map-rows"></div>
+          <label class="scan-check" style="display:flex;gap:7px;font-size:12.5px;margin-top:11px;">
+            <input type="checkbox" id="scan-save-overrides" checked>
+            <span>Memoriser ces rattachements pour les prochains imports</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- etape 3 : resultat -->
+      <div id="scan-step-result" hidden>
+        <div class="scan-progress" id="scan-commit-progress">
+          <div class="scan-progress-bar indeterminate"><div class="scan-progress-fill"></div></div>
+          <div class="scan-progress-info"><span id="scan-commit-label">Ecriture en base...</span><span></span></div>
+        </div>
+        <div id="scan-result-body"></div>
+      </div>
+
+    </div>
+    <div class="crud-modal-footer">
+      <button type="button" class="btn btn-secondary" data-close>Fermer</button>
+      <button type="button" class="btn btn-primary" id="scan-commit-btn" hidden>
+        Importer
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODALE ANALYSE REDIGEE ===== -->
+<div id="scan-analysis-modal" class="crud-modal" hidden>
+  <div class="crud-modal-dialog" style="max-width:900px;">
+    <div class="crud-modal-header">
+      <h3 id="scan-analysis-title">Analyse redigee</h3>
+      <button type="button" class="crud-modal-close" data-close>&times;</button>
+    </div>
+    <div class="crud-modal-body">
+      <div id="scan-analysis-head"></div>
+      <div class="scan-progress" id="scan-analysis-progress" hidden>
+        <div class="scan-progress-bar"><div class="scan-progress-fill"></div></div>
+        <div class="scan-progress-info">
+          <span id="scan-analysis-step"></span><span id="scan-analysis-pct"></span>
+        </div>
+      </div>
+      <div class="scan-modal-scroll" id="scan-analysis-body"></div>
+    </div>
+    <div class="crud-modal-footer">
+      <button type="button" class="btn btn-secondary" data-close>Fermer</button>
+      <button type="button" class="btn btn-secondary" id="scan-analysis-history">
+        Historique
+      </button>
+      <button type="button" class="btn btn-primary" id="scan-analysis-go">
+        Generer
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODALE EFFECTIFS (2e temps de l'import) ===== -->
+<div id="scan-staffing-modal" class="crud-modal" hidden>
+  <div class="crud-modal-dialog">
+    <div class="crud-modal-header">
+      <h3>Effectifs</h3>
+      <button type="button" class="crud-modal-close" data-close>&times;</button>
+    </div>
+    <div class="crud-modal-body">
+      <div class="scan-note info">
+        Le rattachement d'un poste a une unite de scan ne peut pas etre devine :
+        il faut le valider a la main. Telecharger le tableau, remplir la colonne
+        <strong>Validation</strong> (<code>OK</code>, <code>NON</code>, ou
+        <code>PADDOCKS</code> pour reaffecter le poste aux paddocks), puis le
+        redeposer ici.
+      </div>
+      <div style="display:flex;gap:9px;align-items:center;margin-bottom:14px;">
+        <a id="scan-staffing-dl" class="btn btn-secondary" href="#">
+          1. Telecharger le tableau
+        </a>
+        <button type="button" class="btn btn-secondary" id="scan-staffing-pick">
+          2. Deposer le tableau valide
+        </button>
+        <input type="file" id="scan-staffing-file" accept=".csv" hidden>
+      </div>
+      <div id="scan-staffing-body"></div>
+      <div class="scan-progress" id="scan-staffing-progress" hidden>
+        <div class="scan-progress-bar indeterminate"><div class="scan-progress-fill"></div></div>
+        <div class="scan-progress-info"><span>Calcul des effectifs...</span><span></span></div>
+      </div>
+    </div>
+    <div class="crud-modal-footer">
+      <button type="button" class="btn btn-secondary" data-close>Fermer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODALE REGENERATION ===== -->
+<div id="scan-regen-modal" class="crud-modal" hidden>
+  <div class="crud-modal-dialog" style="min-width:460px;">
+    <div class="crud-modal-header">
+      <h3>Regenerer le rapport</h3>
+      <button type="button" class="crud-modal-close" data-close>&times;</button>
+    </div>
+    <div class="crud-modal-body">
+      <div id="scan-regen-body"></div>
+      <div class="scan-progress" id="scan-regen-progress" hidden>
+        <div class="scan-progress-bar"><div class="scan-progress-fill"></div></div>
+        <div class="scan-progress-info">
+          <span id="scan-regen-label"></span><span id="scan-regen-pct"></span>
+        </div>
+      </div>
+    </div>
+    <div class="crud-modal-footer">
+      <button type="button" class="btn btn-secondary" data-close>Fermer</button>
+      <button type="button" class="btn btn-primary" id="scan-regen-go">Regenerer</button>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/scan_report.js') }}"></script>
 <script>
+  // ---- Selecteur event / annee du rapport --------------------------------
+  // Cle localStorage dediee a cette page : le rapport est un artefact statique
+  // genere hors ligne, sa selection n'a pas a suivre celle du cockpit temps
+  // reel (qui pointerait souvent sur un event sans rapport genere).
+  (function(){
+    var LS_EVENT = 'scanreport_event';
+    var LS_YEAR  = 'scanreport_year';
+
+    var curEvent = {{ event|tojson }};
+    var curYear  = String({{ year|tojson }});
+
+    var params = new URLSearchParams(location.search);
+    var hasExplicit = params.has('event') || params.has('year');
+
+    // Ouverture "nue" (/scan-report) : on restaure la derniere selection.
+    if (!hasExplicit) {
+      var savedEvent = localStorage.getItem(LS_EVENT);
+      var savedYear  = localStorage.getItem(LS_YEAR);
+      if (savedEvent && savedYear && (savedEvent !== curEvent || savedYear !== curYear)) {
+        location.replace('/scan-report?event=' + encodeURIComponent(savedEvent) +
+                         '&year=' + encodeURIComponent(savedYear));
+        return;
+      }
+    }
+
+    localStorage.setItem(LS_EVENT, curEvent);
+    localStorage.setItem(LS_YEAR, curYear);
+
+    var eventSelect = document.getElementById('event-select');
+    var yearSelect  = document.getElementById('year-select');
+
+    function go() {
+      var ev = eventSelect.value;
+      var yr = yearSelect.value;
+      localStorage.setItem(LS_EVENT, ev);
+      localStorage.setItem(LS_YEAR, yr);
+      location.href = '/scan-report?event=' + encodeURIComponent(ev) +
+                      '&year=' + encodeURIComponent(yr);
+    }
+
+    // Evenements : liste cockpit standard, + la valeur courante si elle n'y
+    // figure pas (ex. slug brut '24h_du_mans' passe a la main dans l'URL).
+    fetch('/get_events')
+      .then(function(r){ return r.json(); })
+      .then(function(rows){
+        var noms = (rows || []).map(function(it){ return it.nom; }).filter(Boolean);
+        if (noms.indexOf(curEvent) === -1) noms.unshift(curEvent);
+        noms.forEach(function(nom){
+          var o = document.createElement('option');
+          o.value = nom;
+          o.textContent = nom;
+          if (nom === curEvent) o.selected = true;
+          eventSelect.appendChild(o);
+        });
+      })
+      .catch(function(err){
+        console.error('Erreur chargement des evenements :', err);
+        var o = document.createElement('option');
+        o.value = curEvent; o.textContent = curEvent; o.selected = true;
+        eventSelect.appendChild(o);
+      });
+
+    // Annees : meme plage que la sidebar cockpit (2024 -> annee+1).
+    var currentYear = new Date().getFullYear();
+    for (var y = 2024; y <= currentYear + 1; y++) {
+      var oy = document.createElement('option');
+      oy.value = String(y);
+      oy.textContent = String(y);
+      if (String(y) === curYear) oy.selected = true;
+      yearSelect.appendChild(oy);
+    }
+    if (!yearSelect.value || yearSelect.value !== curYear) {
+      var extra = document.createElement('option');
+      extra.value = curYear; extra.textContent = curYear; extra.selected = true;
+      yearSelect.appendChild(extra);
+    }
+
+    eventSelect.addEventListener('change', go);
+    yearSelect.addEventListener('change', go);
+
+    // Rappel de ce qui est reellement genere : sans ca, choisir un event sans
+    // rapport ne donne aucune piste sur les combinaisons valides.
+    fetch('/scan-report/available')
+      .then(function(r){ return r.json(); })
+      .then(function(rows){
+        var host = document.getElementById('scan-report-available');
+        if (!host) return;
+        if (!rows || !rows.length) {
+          host.textContent = 'Aucun rapport genere.';
+          return;
+        }
+        host.textContent = 'Disponible : ';
+        rows.forEach(function(r, i){
+          if (i) host.appendChild(document.createTextNode(', '));
+          var b = document.createElement('b');
+          b.textContent = r.event + ' ' + r.year;
+          host.appendChild(b);
+        });
+      })
+      .catch(function(err){ console.error('Erreur chargement disponibilite :', err); });
+  })();
+
   // Toggle sidebar collapse (memoire localStorage)
   (function(){
     var sb = document.getElementById('sidebar');

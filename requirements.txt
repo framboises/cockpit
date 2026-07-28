@@ -9,3 +9,10 @@ waitress>=2.1.2
 firebase-admin>=6.0.0
 pywebpush>=2.0.0
 Pillow>=10.0.0
+# Lecture/ecriture des classeurs de scans (scan_import.py), desormais importe
+# dans le process Flask et plus seulement par les scripts autonomes.
+openpyxl>=3.1.0
+# Importes au chargement de analyse_ops.py : sans eux l'app ne demarre pas sur
+# un environnement fraichement installe.
+numpy>=1.24.0
+pandas>=2.0.0

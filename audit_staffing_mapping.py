@@ -111,13 +111,37 @@ FALLBACK_PATTERNS = {
 }
 
 
-def main():
-    client = MongoClient(MONGO_URI)
-    db = client[DB_NAME]
+def calendar_collection_name(event, year):
+    """Nom de la collection calendrier pour un couple (evenement, annee).
+
+    Convention observee en base : `calendrier_<annee>_<evenement colle et
+    sans accent>` — '24H AUTOS' 2025 -> calendrier_2025_24hautos,
+    'LE MANS CLASSIC' -> calendrier_2025_lemansclassic.
+    """
+    import unicodedata as _ud
+    slug = _ud.normalize('NFKD', str(event or ''))
+    slug = slug.encode('ascii', 'ignore').decode('ascii').lower()
+    slug = re.sub(r'[^a-z0-9]+', '', slug)
+    return 'calendrier_%s_%s' % (year, slug)
+
+
+class StaffingSourcesMissing(Exception):
+    """Bible ou calendrier absent pour ce couple (evenement, annee)."""
+
+
+def main(event=BIBLE_EVENT, year=BIBLE_YEAR, csv_output=None, db=None,
+         param_year=None):
+    own_client = None
+    if db is None:
+        own_client = MongoClient(MONGO_URI)
+        db = own_client[DB_NAME]
+    year = int(year)
+    csv_output = csv_output or CSV_OUTPUT
+    param_year = param_year or str(year)
 
     # --- 1. Charger les sources ---
     bible_by_num = {}
-    for d in db['bible'].find({'event': BIBLE_EVENT, 'year': BIBLE_YEAR},
+    for d in db['bible'].find({'event': event, 'year': year},
                                {'post.number':1, 'post.metier':1, 'post.affectation':1, 'post.zone':1}):
         post = d.get('post', {})
         num = post.get('number')
@@ -125,15 +149,22 @@ def main():
             bible_by_num[num] = {'metier': post.get('metier'), 'affect': post.get('affectation'),
                                  'zone': post.get('zone')}
     print(f'Bible : {len(bible_by_num)} postes')
+    if not bible_by_num:
+        raise StaffingSourcesMissing(
+            'Aucun poste dans la bible pour %s %s' % (event, year))
 
+    cal_name = calendar_collection_name(event, year)
+    if cal_name not in db.list_collection_names():
+        raise StaffingSourcesMissing(
+            'Collection calendrier %s absente pour %s %s' % (cal_name, event, year))
     cal_by_sc = {}
-    for d in db['calendrier_2025_24hautos'].find({}, {'shiftcode':1,'accueil_surete':1,
-                                                       'donnees_presences':1, 'zone':1,
-                                                       'secteur':1, 'poste':1}):
+    for d in db[cal_name].find({}, {'shiftcode':1,'accueil_surete':1,
+                                    'donnees_presences':1, 'zone':1,
+                                    'secteur':1, 'poste':1}):
         sc = d.get('shiftcode')
         if sc is not None:
             cal_by_sc[int(sc)] = d
-    print(f'Calendrier : {len(cal_by_sc)} docs')
+    print(f'Calendrier {cal_name} : {len(cal_by_sc)} docs')
 
     # GeoJSON
     geos = {}
@@ -145,7 +176,7 @@ def main():
           f'terrains={len(geos["terrains"])} hospitalites={len(geos["hospitalites"])}')
 
     # Parametrages : event/year
-    param_doc = db['parametrages'].find_one({'event': PARAM_EVENT, 'year': PARAM_YEAR}) or {}
+    param_doc = db['parametrages'].find_one({'event': event, 'year': param_year}) or {}
     pdata = param_doc.get('data', {}) or {}
     # parkingsHoraires et campingsHoraires : list de dicts avec id (=feature_id) + name
     parking_by_name = {}
@@ -370,9 +401,9 @@ def main():
     }
     # Recharger les validations deja saisies (key = unite|num)
     existing_validations = {}
-    if os.path.isfile(CSV_OUTPUT):
+    if os.path.isfile(csv_output):
         try:
-            with open(CSV_OUTPUT, 'r', encoding='utf-8') as f:
+            with open(csv_output, 'r', encoding='utf-8') as f:
                 r = csv.reader(f)
                 header = next(r, None)
                 # On suppose colonnes : unite, categorie, num, nom, validation
@@ -382,7 +413,7 @@ def main():
         except Exception:
             existing_validations = {}
 
-    with open(CSV_OUTPUT, 'w', newline='', encoding='utf-8') as f:
+    with open(csv_output, 'w', newline='', encoding='utf-8') as f:
         w = csv.writer(f)
         w.writerow([
             'Unite (scan)', 'Categorie', 'Numero affectation', 'Nom affectation',
@@ -397,7 +428,10 @@ def main():
                 p['affectation'],
                 existing_validations.get(key, ''),
             ])
-    print(f'\nCSV validation : {CSV_OUTPUT}')
+    print(f'\nCSV validation : {csv_output}')
+    if own_client is not None:
+        own_client.close()
+    return csv_output
 
 
 if __name__ == '__main__':

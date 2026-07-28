@@ -451,16 +451,18 @@ def serialize_porte(doc, tripodes_mode=False):
     return out
 
 
-def main():
-    client = MongoClient(MONGO_URI)
-    db = client[DB_NAME]
-    cur = db['parking_scans'].find({'event': EVENT, 'year': YEAR}).sort('zone', 1)
-    zones = [serialize_zone(d) for d in cur]
-    if not zones:
-        raise SystemExit('Aucune donnee dans parking_scans pour ' + EVENT + '/' + str(YEAR))
-    print(f'Zones serialisees : {len(zones)}')
+class ReportGenerationError(Exception):
+    """Echec de generation exploitable par un appelant.
 
-    # Charge le flag place_config.tripodes depuis la collection portes geojson
+    Remplace le `raise SystemExit` d'origine : SystemExit derive de
+    BaseException et n'est donc PAS attrape par un `except Exception`. Dans un
+    thread de travail, le thread mourrait en silence et le job resterait
+    bloque sur « en cours » indefiniment.
+    """
+
+
+def load_tripodes_flag(db):
+    """Noms de portes (majuscules) equipees de tripodes, depuis le geojson."""
     tripodes_flag = {}
     portes_geo = db['portes'].find_one() or {}
     for f in portes_geo.get('features', []) or []:
@@ -469,28 +471,81 @@ def main():
         pc = p.get('place_config') or {}
         if nm and pc.get('tripodes'):
             tripodes_flag[nm] = True
-    print(f'Portes geojson avec tripodes=True : {len(tripodes_flag)} ({sorted(tripodes_flag)})')
+    return tripodes_flag
 
-    cur_p = db['porte_scans'].find({'event': EVENT, 'year': YEAR}).sort('porte', 1)
+
+def render_html(payload):
+    """Injecte le payload dans le gabarit et retourne le HTML complet."""
+    data_json = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+    return HTML_TEMPLATE.replace('__DATA__', data_json)
+
+
+def build_payload_legacy(db, event, year, progress_cb=None):
+    """Payload construit depuis parking_scans / porte_scans (ancienne chaine).
+
+    Conserve tel quel pour que le rapport 24H AUTOS 2025 — le seul enrichi
+    avec les effectifs — continue d'etre reproductible a l'identique.
+    """
+    def _p(pct, msg):
+        if progress_cb:
+            progress_cb(pct, msg)
+
+    _p(10, 'Lecture des zones')
+    cur = db['parking_scans'].find({'event': event, 'year': year}).sort('zone', 1)
+    zones = [serialize_zone(d) for d in cur]
+    if not zones:
+        raise ReportGenerationError(
+            'Aucune donnee dans parking_scans pour %s/%s' % (event, year))
+
+    _p(45, 'Lecture des portes')
+    tripodes_flag = load_tripodes_flag(db)
+    cur_p = db['porte_scans'].find({'event': event, 'year': year}).sort('porte', 1)
     portes = [serialize_porte(d, tripodes_mode=tripodes_flag.get(d['porte'].upper(), False))
               for d in cur_p]
-    print(f'Portes serialisees : {len(portes)}')
 
-    payload = {
-        'event': EVENT,
-        'year': YEAR,
+    _p(85, 'Assemblage')
+    return {
+        'event': event,
+        'year': year,
         'generated_at': datetime.now().isoformat(timespec='seconds'),
         'zones': zones,
         'portes': portes,
     }
 
-    data_json = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
 
-    html = HTML_TEMPLATE.replace('__DATA__', data_json)
-    with open(OUTPUT, 'w', encoding='utf-8') as f:
-        f.write(html)
-    size_kb = os.path.getsize(OUTPUT) / 1024
-    print(f'Ecrit : {OUTPUT} ({size_kb:.1f} Ko)')
+def main(event=EVENT, year=YEAR, output=None, db=None, progress_cb=None):
+    """Genere le rapport HTML pour un couple (event, year).
+
+    `db` permet d'injecter la base de l'application (titan_dev ou titan selon
+    l'environnement) plutot que d'ouvrir une connexion sur DB_NAME code en dur.
+    """
+    own_client = None
+    if db is None:
+        own_client = MongoClient(MONGO_URI)
+        db = own_client[DB_NAME]
+    out_path = output or OUTPUT
+    try:
+        payload = build_payload_legacy(db, event, year, progress_cb)
+        html = render_html(payload)
+        # Ecriture atomique : l'iframe ne doit jamais servir un fichier
+        # a moitie ecrit.
+        tmp_path = out_path + '.tmp'
+        os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            f.write(html)
+        os.replace(tmp_path, out_path)
+        size_kb = os.path.getsize(out_path) / 1024
+        if progress_cb:
+            progress_cb(100, 'Ecrit (%.0f Ko)' % size_kb)
+        else:
+            print(f'Zones serialisees : {len(payload["zones"])}')
+            print(f'Portes serialisees : {len(payload["portes"])}')
+            print(f'Ecrit : {out_path} ({size_kb:.1f} Ko)')
+        return {'path': out_path, 'size_kb': size_kb,
+                'zones': len(payload['zones']), 'portes': len(payload['portes'])}
+    finally:
+        if own_client is not None:
+            own_client.close()
 
 
 HTML_TEMPLATE = r"""<!doctype html>

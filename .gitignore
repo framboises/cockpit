@@ -9,3 +9,8 @@ static/ressources/.DS_Store
 firebase-service-account.json
 vapid_private.pem
 keys/*_private.pem
+
+# Rapports generes (1,2 Mo par couple evenement/annee)
+reports/
+# Classeurs en attente d import
+uploads/scan_imports/

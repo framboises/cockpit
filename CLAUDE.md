@@ -374,3 +374,181 @@ Le runbook complet (rebuild PBF, application du patch, restart container, debugg
 - **`block_point` est précis** : Valhalla snape sur l'arête la plus proche du point. Si tu poses le marqueur entre deux voies parallèles, c'est la plus proche qui sera interdite — pas forcément celle visée. Zoomer fort avant de poser.
 - **Le mode god ignore aussi les `block_*` de scope `normal_only`** (par construction). Si tu veux qu'un blocage s'applique aussi à l'intervention, mettre `scope=all` ou `god_only`.
 - **Le `force_open` n'a aucun effet runtime**. Il faut éditer le PBF (patch OSM type `+access=yes` sur le node concerné) puis rebuilder les tuiles côté VM. Voir `infra/valhalla/README.md` section "Évolutions possibles".
+
+## Chaîne scans (import Excel → base → rapport → analyse)
+
+La page `/scan-report` (admin) pilote toute la chaîne : déposer un export Excel de scans de billets, le rattacher aux entités cartographiques, écrire les documents `historique_controle`, régénérer le rapport HTML, et produire une analyse rédigée par Claude.
+
+Elle remplace un enchaînement manuel de 5 scripts (`import_zone_scans.py`, `import_porte_scans.py`, `import_uam_help.py`, `audit_staffing_mapping.py`, `import_staffing_to_scans.py`) qui contenaient des chemins absolus `/Users/framboises/...` et `DB_NAME = 'titan_dev'` en dur. **Ces scripts sont conservés mais ne sont plus le chemin nominal.**
+
+### Architecture
+
+| Module | Rôle |
+|--------|------|
+| `scan_import.py` | Parseur xlsx, résolveur de features, constructeurs des 3 documents, archivage |
+| `scan_report_build.py` | Adaptateur `complet` → contrat du gabarit HTML, génération du fichier |
+| `scan_staffing.py` | Audit des effectifs (CSV à valider) et application du CSV validé |
+| `scan_analysis.py` | KPI agrégés, prompts, appel Claude, persistance |
+| `scan_report.py` | Blueprint : routes, staging d'import, registre de jobs |
+| `static/js/scan_report.js` | IIFE autonome : modales, mapping manuel, barres de progression |
+
+Tous les modules reçoivent `db` en argument (`from app import db` donne `titan_dev` en dev, `titan` en prod, cf. `app.py:115`). **Ne jamais coder le nom de base en dur.**
+
+### Format Excel attendu
+
+Export Sirius hiérarchique (cf. `uploads/zone-complet-24HM-2024.xlsx`). Un modèle est téléchargeable depuis la page (`/scan-report/template.xlsx`), généré à la volée avec une feuille « Notice » et une feuille « Unités connues » alimentée depuis la base.
+
+- Ligne 1 : datetime, **uniquement sur la 1re colonne de chaque groupe fusionné**
+- Ligne 2 : sens `Entrée` | `Sortie` | **`Autre`**
+- Ligne 3 : `SPACE_CODE - Identifiant` (ignorée)
+- Colonnes A/B/C : zone | porte | device, avec report vers le bas
+- Lignes 4+ : entiers, pas de 15 min, **créneaux vides omis** (non zéro-remplis)
+- Colonne `Total` et ligne `zone == 'Total'` ignorées
+
+Un groupe fusionné fait 1, 2 ou 3 colonnes selon les sens présents : le datetime n'est donc **pas toujours porté par la colonne `Entrée`**. Le parseur propage le dernier datetime rencontré (`_build_column_map`).
+
+### Le sens « Autre »
+
+**Ce n'est pas une catégorie de scan mais une configuration de boîtier** : un PDA non paramétré en entrée/sortie. Sur 24H MOTOS 2024, 30 boîtiers scannent exclusivement en `Autre`, et `PORTE ANNEXE` (19 389 scans) comme `PORTE PANORAMA` (21 893) ont 100 % de leur trafic dans cette colonne.
+
+Conséquences, appliquées partout dans la chaîne :
+- **compté** dans `portes.scan_count` (total de passages, sens confondus)
+- **stocké à part** (`total_autre`) dans `complet`
+- **exclu du calcul de présents** : sans direction, aucun solde n'est calculable
+- **absent du rapport HTML** : le gabarit n'a que deux séries. La modale de régénération affiche le volume non représenté (`autre_scans_not_shown`)
+
+Les fichiers 2025 n'ont pas cette colonne : le parseur la traite comme optionnelle.
+
+### Les trois documents produits
+
+Tous dans `historique_controle`, index unique `(event, year, type)`, `year` en **int**, `event` = nom cockpit majuscules (`24H MOTOS`, jamais le slug `24h_du_mans`). Datetimes **naïfs, heure locale Paris**.
+
+| type | clé | granularité | sémantique |
+|------|-----|-------------|------------|
+| `complet` | `complet` | 15 min | **nouveau**. Une entrée par unité, `entree`/`sortie`/`autre` en **deltas par créneau**, `present` en cumul courant. Porte aussi `_id_feature`, `devices`, `uam_help`, `pda_renfort`, `staffing` |
+| `frequentation` | `data` | horaire | série **globale unique** (agrégat ENCEINTE GENERALE), `entree`/`sortie` **cumulés**, `present = entree - sortie` |
+| `portes` | `doors` | horaire | `[{name, doors_id, scans:[{id, timestamp (datetime BSON), scan_count}]}]`, `scan_count` = tous sens confondus |
+
+`data_15min` de `complet` **n'a pas de champ `id`** : l'uuid n'a aucune signification inter-collection et pèse 45 des 136 octets de chaque enregistrement. Un garde-fou refuse l'écriture au-delà de 12 Mo (limite BSON 16 Mo).
+
+`frequentation` porte en plus `source: 'scan_import'`, `excluded_autre` et `doors_without_direction` — traçabilité de ce qui manque à la courbe de présents.
+
+### Rattachement aux entités cartographiques
+
+La clé durable est **`properties._id_feature`** (chaîne hexadécimale de 24 caractères). **Il n'existe pas de `id_feature`.** Présent sur 100 % des features de `portes`, `hospitalites`, `terrains`, `tribunes`.
+
+Résolveur à 3 niveaux, dans l'ordre :
+
+1. **Corrections manuelles** persistées dans `scan_feature_overrides`
+2. **Récolte** des documents `historique_controle{type:portes}` existants — 39 noms curatés, zéro ambiguïté, source la plus fiable car elle connaît les libellés historiques
+3. **Rapprochement normalisé** contre le GeoJSON (casse, accents, ponctuation ; strip des préfixes `AA `/`P `/`PARKING ` côté zones ; `ANCIEN 2025`/`NUMERO 2026` pour les tribunes)
+
+`canonical_porte()` replie en plus les variantes orthographiques des deux côtés : `PORTAIL`→`PORTE`, `VEHICULES`→`VEHICULE`, `PIETONS`→`PIETON`. C'est ce qui rattache `PORTAIL HOUX 5` à `PORTE HOUX 5`.
+
+Un rapprochement **multi-candidats est laissé non résolu** (`PORTE CIK` existe deux fois dans le GeoJSON) : l'UI propose alors les candidats et des suggestions par score de Jaccard.
+
+Sur 24H MOTOS 2024 : 14/19 unités résolues automatiquement, 17/19 après mapping manuel. `PORTE NORD CLUB` et `CONCENTRATION` n'ont aucune entité — c'est normal, certaines unités sont des services, pas des lieux.
+
+### Archivage
+
+Toute réécriture **archive d'abord** l'ancien document dans `historique_controle_archive` (copie intégrale + `archived_at`, `archived_by`, `archived_reason`, `original_id`), puis remplace. Plusieurs générations coexistent, rien n'est jamais perdu.
+
+⚠️ **Réimporter dégrade potentiellement une référence N-1.** Le `frequentation` de 24H MOTOS 2024 issu de la collecte temps réel totalisait 166 328 entrées ; le xlsx en donne 131 975 (−20,7 %). Ces deux sources ne couvrent pas le même périmètre de portes, et ce document sert de comparaison N-1 à `pcorg_summary._find_hist_freq` et `app.py:2067`. La modale d'import affiche l'écart en rouge au-delà de 10 %.
+
+### Routes
+
+Toutes sur `scan_report_bp`, donc **admin-only** via `before_request` → `_check_admin()` (bypass `CODING=true`), et **CSRF actif** (ce blueprint n'est pas exempté).
+
+| Route | Rôle |
+|-------|------|
+| `GET /scan-report` | Page + iframe |
+| `GET /scan-report/static` | Sert le HTML généré |
+| `GET /scan-report/available` | Couples (event, year) disponibles, alimente la sidebar |
+| `GET /scan-report/template.xlsx` | Modèle Excel |
+| `GET /scan-report/features?collection=` | Inventaire d'une collection géo (mapping manuel) |
+| `POST /scan-report/import/analyze` | multipart xlsx → aperçu + mapping, **sans rien écrire** |
+| `POST /scan-report/import/commit` | Écrit les 3 documents, archive l'existant |
+| `DELETE /scan-report/import/<token>` | Abandon, purge le fichier en attente |
+| `GET /scan-report/staffing/audit.csv` | Tableau de rapprochement des effectifs à valider |
+| `POST /scan-report/staffing/apply` | Applique le CSV validé sur les unités `complet` |
+| `POST /scan-report/generate` | Régénère le rapport (job asynchrone) |
+| `GET /scan-report/generate/status?job=` | État d'un job (génération **et** analyse) |
+| `POST /scan-report/analysis/generate` | Analyse rédigée (`dry_run: true` = prompt sans appel API) |
+| `GET /scan-report/analysis/list` / `/<id>` | Historique et détail |
+
+Erreurs au format `{"ok": false, "error": "<code>"}` (convention `field.py:594`). **Ne pas utiliser `abort(404)`** : le handler 404 global (`app.py:700`) redirige vers `/`, ce qui casserait un appel XHR.
+
+### Import en deux temps
+
+`analyze` parse et garde le classeur en mémoire (`_STAGING`, TTL 30 min, 3 entrées max) ; `commit` rejoue avec le mapping corrigé. Le fichier source est conservé sous `uploads/scan_imports/<token>.xlsx` pour la traçabilité, et balayé sur la **date du fichier** — ce nettoyage survit donc à un redémarrage, contrairement au registre mémoire.
+
+⚠️ `_STAGING` et le registre de jobs supposent **un seul process**. Vrai sous waitress (même hypothèse que `analyse_ops.py:49`). Avec gunicorn multi-workers, il faudrait basculer le staging dans une collection Mongo à index TTL.
+
+### Génération du rapport
+
+**`generate_parking_report.py` n'a subi que des modifications chirurgicales** : `main(event, year, output, db, progress_cb)`, extraction de `render_html()`, et `raise SystemExit` → `ReportGenerationError`. La constante `HTML_TEMPLATE` (~2 140 lignes, 90 % du fichier) et toutes les fonctions d'analyse sont **intactes**.
+
+`scan_report_build.py` fabrique des pseudo-documents au contrat attendu (`{zone, total_entree, total_sortie, intervals:[{ts, entree, sortie}]}`) et appelle les `serialize_zone` / `serialize_porte` existants. Repli automatique sur `parking_scans`/`porte_scans` si aucun `complet` n'existe — c'est ce qui garde 24H AUTOS 2025 reproductible à l'identique.
+
+Sortie : `reports/parking_report_<slug>_<year>.html`, écriture atomique (tmp + `os.replace`). Le dossier fait foi (`_list_reports()`), un rapport frais apparaît sans redémarrage. `LEGACY_REPORTS` ne sert plus qu'au repli sur `parking_report.html` à la racine.
+
+Les unités **sans aucun flux dirigé sont écartées du rapport** (elles ne produiraient qu'un onglet vide) ; la modale les nomme.
+
+### Effectifs
+
+Deux temps, parce que le rattachement poste ↔ unité de scan ne se devine pas :
+
+1. `GET /scan-report/staffing/audit.csv` produit le tableau (unité → post_numbers → bible → calendrier)
+2. L'utilisateur remplit la colonne **Validation** : `OK`, `NON`, ou `PADDOCKS` pour réaffecter
+3. `POST /scan-report/staffing/apply` calcule agents-h, pic simultané et courbe horaire, puis pose `staffing` sur les unités `complet`
+
+Les validations sont persistées dans `scan_staffing_validations` et **repré-remplies automatiquement** au prochain audit (en-tête `X-Audit-Prefilled`). Seul le CSV est accepté : le `.numbers` est un format de poste de travail.
+
+`audit_staffing_mapping.py` a été paramétré (`main(event, year, csv_output, db)`) et déduit le nom de la collection calendrier via `calendar_collection_name()` — convention `calendrier_<année>_<événement collé sans accent>`.
+
+⚠️ **Les effectifs ne sont calculables que si la bible ET le calendrier existent pour le couple.** Ce n'est pas le cas de la plupart des éditions anciennes : 24H MOTOS 2024 n'a ni `calendrier_2024_24hmotos` ni poste dans `bible`. La route répond alors **404 `sources_effectifs_absentes`** avec la raison exacte.
+
+### Aide UAM et renforts PDA
+
+Calculés **automatiquement à l'import** (logique portée depuis `import_uam_help.py`), car déductibles du seul classeur :
+
+- `uam_help` : un boîtier de la ligne `UAM` a scanné sur cette porte → du renfort mobile y est passé
+- `pda_renfort` : sur une porte à tripodes, un PDA non-UAM a servi → **débordement des tourniquets**, signal d'exploitation fort
+
+Nécessite le détail par boîtier, que l'agrégation par unité efface : le parseur conserve `device_hours` pour les seules portes d'enceinte.
+
+Sans ligne `UAM` dans le fichier (cas de 24H MOTOS 2024), `uam_help` est vide partout — ce n'est pas une anomalie.
+
+### Analyse rédigée (Claude)
+
+`scan_analysis.py` réutilise **`pcorg_summary.call_claude`** plutôt que le SDK `anthropic` : cette fonction porte déjà le retry exponentiel (429/503/529), le retry sur troncature, le prompt caching et la télémétrie d'usage.
+
+Modèle par défaut **`claude-sonnet-5`** (ajouté à `ALLOWED_MODELS` et `MODEL_PRICING_USD_PER_MTOK` dans `pcorg_summary.py`). Tarif catalogue 3 $/15 $ déclaré ; un tarif d'introduction 2 $/10 $ court jusqu'au 31/08/2026, donc l'estimation de coût est majorée d'ici là.
+
+Le prompt ne contient **que des KPI agrégés** (~3 600 tokens), jamais les créneaux bruts. System prompt imposant un JSON strict à 7 clés : `synthese`, `pics_et_saturation`, `portes_critiques`, `zones_critiques`, `comparaison_n1`, `anomalies`, `recommandations`.
+
+Persistance dans `scan_analyses`, historisée (jamais écrasée) pour pouvoir comparer deux analyses.
+
+⚠️ **Le prompt avertit explicitement le modèle sur la provenance des données.** Chaque jeu porte un champ `source` (`scan_import` vs `collecte_temps_reel`) et le system prompt impose de présenter tout écart entre éditions de sources différentes comme potentiellement lié au changement de mesure, jamais comme une variation de fréquentation avérée. Sans cela, le modèle conclurait à une baisse de 24 % entre 2023 et 2024 qui n'est qu'un artefact.
+
+Si `ANTHROPIC_API_KEY` est vide → **503 `cle_api_absente`**. Le mode `dry_run` permet d'itérer sur le prompt sans consommer de tokens.
+
+### Collections créées
+
+| Collection | Contenu |
+|------------|---------|
+| `historique_controle_archive` | Générations remplacées, append-only, pas de TTL |
+| `scan_feature_overrides` | Mapping manuel nom de scan → `_id_feature`, index unique `(scan_name, kind, event, year)` |
+| `scan_staffing_validations` | Colonne Validation saisie à la main, repré-remplie à chaque audit |
+| `scan_analyses` | Analyses Claude historisées |
+
+### Pièges
+
+- **`year` doit être un `int`.** Un `str` créerait un doublon sous l'index unique au lieu de mettre à jour.
+- **`event` est le nom cockpit** (`24H MOTOS`), jamais le slug `24h_du_mans` de l'ancienne chaîne. `EVENT_ALIASES` ne sert plus qu'au repli sur les rapports historiques.
+- **Datetimes naïfs Paris.** Écrire de l'UTC décalerait silencieusement les données de 2 h en été.
+- **`SystemExit` dérive de `BaseException`** : dans un thread de travail, un `except Exception` ne l'attrape pas, le thread meurt en silence et le job reste bloqué. Les workers attrapent `BaseException` et libèrent la cible dans un `finally`.
+- **Les noms d'unités viennent du classeur téléversé**, donc d'une source non maîtrisée. Toute interpolation dans du HTML côté JS doit passer par `esc()` — sinon un fichier avec une zone nommée `<img onerror=…>` exécute du script dans une page admin.
+- **`reports/` et `uploads/scan_imports/` sont dans `.gitignore`.** Un rapport pèse 0,3 à 1,2 Mo.
+- **`openpyxl` est désormais importé dans le process Flask** (et plus seulement par les scripts autonomes) : il est dans `requirements.txt`, avec `numpy` et `pandas` qui manquaient déjà (importés par `analyse_ops.py` au chargement — sans eux l'app ne démarre pas sur un environnement neuf).
+- Le gabarit HTML classe les zones par préfixe de nom (`TRIBUNE`, `P `, `AA `), conventions 24H AUTOS. Les zones d'autres éditions (`BEAUSEJOUR`, `PARKING OUEST`…) n'apparaissent dans aucun encadré « Vue par catégorie », mais restent accessibles par le menu déroulant.
