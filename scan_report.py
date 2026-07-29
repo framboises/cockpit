@@ -618,6 +618,14 @@ def scan_report_import_commit():
     unresolved = [{'kind': k[0], 'name': k[1]}
                   for k, v in resolved.items()
                   if not v['_id_feature'] and k not in ignored]
+
+    # Le rapport est un fichier fige : sans regeneration il montrerait encore
+    # l'etat d'avant. On l'enchaine plutot que de compter sur la memoire de
+    # l'utilisateur. L'analyse redigee n'appelle le modele que si les donnees
+    # qui l'alimentent ont bouge (empreinte), donc la laisser active ne coute
+    # rien quand l'import ne change pas la frequentation.
+    regen_job, _ = start_generate_job(event, year, True, user)
+
     return jsonify({
         'ok': True, 'run_id': run_id, 'event': event, 'year': year,
         'written': written, 'archived': archived,
@@ -625,6 +633,7 @@ def scan_report_import_commit():
         'ignored': sorted(name for _, name in ignored),
         'ignored_doors': sorted(name for kind, name in ignored
                                 if kind == 'porte'),
+        'regen_job': regen_job,
     })
 
 
@@ -705,6 +714,12 @@ def scan_report_mapping_post():
         logger.exception('Application du mapping impossible')
         return _err('mapping_impossible', 500, detail=str(exc))
 
+    # Meme raison qu'a l'import : sans regeneration, la correction reste
+    # invisible dans le rapport. Rien a enchainer si rien n'a change.
+    if info.get('changed'):
+        info['regen_job'], _ = start_generate_job(
+            event, year, True, _current_user_email())
+
     info['ok'] = True
     return jsonify(info)
 
@@ -734,6 +749,34 @@ def _sweep_jobs():
             _JOBS_BY_TARGET.pop((job['event'], job['year']), None)
 
 
+def start_generate_job(event, year, with_analysis=True, user=None):
+    """Met une generation en file et retourne (job_id, job_deja_en_cours).
+
+    Extrait de la route pour que l'import et l'edition de mapping puissent
+    enchainer la regeneration sans que l'utilisateur ait a y penser : c'est
+    l'oubli de regenerer, pas la generation elle-meme, qui coute du temps.
+    """
+    target = ('report', event, year)
+    with _JOBS_LOCK:
+        _sweep_jobs()
+        running = _JOBS_BY_TARGET.get(target)
+        if running and _JOBS.get(running, {}).get('status') in ('queued', 'running'):
+            return running, True
+        job_id = uuid.uuid4().hex
+        _JOBS[job_id] = {
+            'id': job_id, 'event': event, 'year': year,
+            'status': 'queued', 'progress': 0, 'step': 'En attente',
+            'error': None, 'detail': None, 'result': None,
+            'started_at': time.time(), 'finished_at': None,
+        }
+        _JOBS_BY_TARGET[target] = job_id
+
+    threading.Thread(target=_run_generate,
+                     args=(job_id, event, year, with_analysis, user),
+                     daemon=True).start()
+    return job_id, False
+
+
 @scan_report_bp.route('/scan-report/generate', methods=['POST'])
 def scan_report_generate():
     """Lance la generation du rapport pour (event, year)."""
@@ -748,26 +791,10 @@ def scan_report_generate():
     # n'appelle Claude que si les donnees ont change depuis la derniere, mais
     # on laisse la possibilite de la couper franchement.
     with_analysis = body.get('analysis') is not False
-    user = _current_user_email()
-
-    target = ('report', event, year)
-    with _JOBS_LOCK:
-        _sweep_jobs()
-        running = _JOBS_BY_TARGET.get(target)
-        if running and _JOBS.get(running, {}).get('status') in ('queued', 'running'):
-            return _err('generation_en_cours', 409, job_id=running)
-        job_id = uuid.uuid4().hex
-        _JOBS[job_id] = {
-            'id': job_id, 'event': event, 'year': year,
-            'status': 'queued', 'progress': 0, 'step': 'En attente',
-            'error': None, 'detail': None, 'result': None,
-            'started_at': time.time(), 'finished_at': None,
-        }
-        _JOBS_BY_TARGET[target] = job_id
-
-    threading.Thread(target=_run_generate,
-                     args=(job_id, event, year, with_analysis, user),
-                     daemon=True).start()
+    job_id, already = start_generate_job(
+        event, year, with_analysis, _current_user_email())
+    if already:
+        return _err('generation_en_cours', 409, job_id=job_id)
     return jsonify({'ok': True, 'job_id': job_id})
 
 

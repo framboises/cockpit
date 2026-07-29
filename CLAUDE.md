@@ -530,6 +530,14 @@ Erreurs au format `{"ok": false, "error": "<code>"}` (convention `field.py:594`)
 
 ⚠️ `_STAGING` et le registre de jobs supposent **un seul process**. Vrai sous waitress (même hypothèse que `analyse_ops.py:49`). Avec gunicorn multi-workers, il faudrait basculer le staging dans une collection Mongo à index TTL.
 
+### Régénération enchaînée
+
+Le rapport est un **fichier figé** : sans régénération il montre encore l'état d'avant. `import/commit` et `POST /scan-report/mapping` enchaînent donc la génération eux-mêmes (`start_generate_job`, extrait de la route `/generate`) et renvoient `regen_job` ; l'UI suit l'avancement dans le même panneau.
+
+Ce n'est pas la génération qui coûtait du temps — 219 à 415 ms — mais **l'oubli de régénérer**. Mesuré à 2 s de bout en bout après une correction de mapping.
+
+L'analyse rédigée reste active : son empreinte SHA-256 ne bouge que si les données qui l'alimentent ont changé. Corriger une catégorie ne touche pas la fréquentation → aucun appel au modèle. Écarter une porte la change → un appel, justifié.
+
 ### Génération du rapport
 
 **`generate_parking_report.py` n'a subi que des modifications chirurgicales** : `main(event, year, output, db, progress_cb)`, extraction de `render_html()`, et `raise SystemExit` → `ReportGenerationError`. La constante `HTML_TEMPLATE` (~2 140 lignes, 90 % du fichier) et toutes les fonctions d'analyse sont **intactes**.

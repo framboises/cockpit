@@ -599,15 +599,60 @@
           esc(d.unresolved.map(function (u) { return u.name; }).join(", ")) +
           "</strong>. Les donnees sont importees, seule la localisation manque."));
       }
-      body.appendChild(note("info",
-        "Etape suivante : regenerer le rapport avec le bouton " +
-        "<span class=\"material-symbols-outlined\" style=\"font-size:14px;vertical-align:-2px;\">refresh</span> " +
-        "du bandeau. Les effectifs sont calcules a ce moment-la, depuis le " +
-        "calendrier — rien a deposer."));
+      followRegen(d.regen_job, body);
     }).catch(function () {
       $("#scan-commit-progress").hidden = true;
       $("#scan-result-body").appendChild(note("err", ERRORS.reseau_indisponible));
     });
+  }
+
+  // ---- Regeneration enchainee ----------------------------------------------
+
+  /**
+   * Suit une regeneration lancee par le serveur a la suite d'un import ou
+   * d'une correction de mapping, et rend son avancement dans `host`.
+   *
+   * Le rapport est un fichier fige : sans cet enchainement, l'utilisateur doit
+   * penser a regenerer, et c'est cet oubli qui coute du temps — pas la
+   * generation, qui tient sous la seconde hors appel au modele.
+   */
+  function followRegen(jobId, host) {
+    if (!jobId) return;
+    var box = note("info", "Regeneration du rapport en cours...");
+    host.appendChild(box);
+    var startedAt = Date.now();
+
+    function tick() {
+      apiGet("/scan-report/generate/status?job=" + encodeURIComponent(jobId))
+        .then(function (d) {
+          if (!d.ok) { box.innerHTML = "Regeneration : etat inconnu."; return; }
+          var sec = Math.round((Date.now() - startedAt) / 1000);
+          if (d.status === "running" || d.status === "queued") {
+            box.innerHTML = "Regeneration du rapport — " +
+              esc(d.step || "") + (sec > 2 ? " (" + sec + " s)" : "");
+            setTimeout(tick, 1000);
+            return;
+          }
+          if (d.status === "done") {
+            var r = d.result || {};
+            box.className = "scan-note ok";
+            box.innerHTML = "<strong>Rapport regenere.</strong> " +
+              esc(r.zones || 0) + " zone(s), " + esc(r.portes || 0) +
+              " porte(s) — " + esc(r.size_kb || 0) + " Ko en " + sec + " s. " +
+              "Recharger la page pour le voir.";
+          } else {
+            box.className = "scan-note err";
+            box.innerHTML = "La regeneration a echoue (" +
+              esc(d.error || "inconnue") + "). Relancer avec le bouton " +
+              "de regeneration du bandeau.";
+          }
+        })
+        .catch(function () {
+          box.className = "scan-note err";
+          box.innerHTML = "Suivi de la regeneration interrompu.";
+        });
+    }
+    tick();
   }
 
   // ---- Correction du mapping apres import ----------------------------------
@@ -698,8 +743,7 @@
       }
       lines.push("Cumul d'entrees de l'enceinte : " + fmt(d.enceinte_entree) + ".");
       notes.appendChild(note("ok", lines.join("<br>")));
-      notes.appendChild(note("info",
-        "Regenerer le rapport pour que ces corrections y apparaissent."));
+      followRegen(d.regen_job, notes);
       // Recharger : les etats affiches doivent refleter ce qui est en base.
       mappingCtx.overrides = {};
       apiGet("/scan-report/mapping?event=" + encodeURIComponent(currentEvent()) +
