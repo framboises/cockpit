@@ -230,30 +230,84 @@ def load_editions(db, event, year, back=2):
     document `frequentation`, sans date de course, ou explicitement exclue est
     ignoree — sans faire echouer les autres.
     """
-    editions = []
+    raw = []
     y = int(year)
     candidate = y
     # On remonte plus loin que `back` : certaines editions manquent (LMC est
     # biennal, 24H CAMIONS n'a pas 2025).
-    while len(editions) <= back and candidate > y - (back + 4):
+    while len(raw) <= back and candidate > y - (back + 4):
         if (event, candidate) not in EXCLUDED_EDITIONS:
             doc = _find_frequentation(db, event, candidate)
             race = _race_date(db, event, candidate)
             if doc and race:
-                editions.append({
-                    'year': candidate,
-                    'race_date': race.isoformat(),
-                    'is_current': candidate == y,
-                    'days': daily_aggregate(doc, race),
-                    'hourly': hourly_series(doc, race),
-                    'source': doc.get('source') or 'collecte_temps_reel',
-                    'doors': _door_count(db, event, candidate),
-                })
+                raw.append({'year': candidate, 'doc': doc, 'race': race})
             elif doc and not race:
                 logger.warning('Edition %s %s ignoree : date de course introuvable',
                                event, candidate)
         candidate -= 1
+
+    races = _normalize_race_dates(event, raw)
+
+    editions = []
+    for item in raw:
+        race = races[item['year']]
+        editions.append({
+            'year': item['year'],
+            'race_date': race.isoformat(),
+            'is_current': item['year'] == y,
+            'days': daily_aggregate(item['doc'], race),
+            'hourly': hourly_series(item['doc'], race),
+            'source': item['doc'].get('source') or 'collecte_temps_reel',
+            'doors': _door_count(db, event, item['year']),
+        })
     return editions
+
+
+def _normalize_race_dates(event, raw):
+    """Recale les dates de course sur un meme jour de semaine.
+
+    Le champ `race` ne designe pas la meme chose selon le millesime : jusqu'a
+    2024 il porte le DEPART (24H AUTOS 2024 : samedi 16h), en 2025 il porte
+    l'ARRIVEE (dimanche 14h). Aligner tel quel compare le samedi d'une edition
+    au dimanche d'une autre — un decalage d'un jour entier sur toute la vue,
+    invisible parce que les courbes restent plausibles.
+
+    On ne corrige pas `pcorg_summary._load_race_dt`, qui sert aux resumes
+    quotidiens en production. On normalise ici, sur le seul invariant qui ne
+    depende pas du format de course : un evenement annuel revient chaque annee
+    le meme jour de semaine. Le jour dominant sur les editions chargees fait
+    reference, les autres sont recalees dessus (au plus 3 jours d'ecart).
+
+    Retourne {annee: date}.
+    """
+    out = {item['year']: item['race'] for item in raw}
+    if len(raw) < 2:
+        return out
+
+    counts = {}
+    for item in raw:
+        wd = item['race'].weekday()
+        counts[wd] = counts.get(wd, 0) + 1
+    # Egalite : le jour de l'edition la plus ancienne l'emporte. Les vieilles
+    # editions portent le champ `race` d'origine, celui du depart.
+    top = max(counts.values())
+    tied = [wd for wd, n in counts.items() if n == top]
+    if len(tied) > 1:
+        target = raw[-1]['race'].weekday()
+    else:
+        target = tied[0]
+
+    for item in raw:
+        race = item['race']
+        delta = (race.weekday() - target) % 7
+        if delta == 0:
+            continue
+        shift = delta if delta <= 3 else delta - 7
+        out[item['year']] = race - timedelta(days=shift)
+        logger.info('%s %s : date de course recalee de %s a %s '
+                    '(alignement sur le jour de semaine dominant)',
+                    event, item['year'], race, out[item['year']])
+    return out
 
 
 # ---------------------------------------------------------------------------

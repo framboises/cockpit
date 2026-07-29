@@ -545,6 +545,12 @@ Les éditions ne sont **jamais** comparées par date calendaire mais par **déca
 
 C'est ce qui rend l'alignement gratuit : chaque édition d'un même événement produit le même squelette d'offsets (24H MOTOS `J-5(16h), J-4…J(24h), J+1(18h)` = 154 enregistrements tous les ans ; 24H AUTOS = 176).
 
+⚠️ **Le champ `race` ne désigne pas la même chose selon le millésime.** Jusqu'en 2024 il porte le **départ** (24H AUTOS 2024 : samedi 16h), en 2025 il porte l'**arrivée** (dimanche 14h). Aligner tel quel compare le samedi d'une édition au dimanche d'une autre — un décalage d'un jour entier sur toute la vue, invisible parce que les courbes restent plausibles.
+
+`_normalize_race_dates()` recale les éditions sur le **jour de semaine dominant** parmi celles chargées. C'est le seul invariant qui ne dépende pas du format de course : un événement annuel revient chaque année le même jour de semaine. En cas d'égalité, l'édition la plus ancienne fait référence (elle porte le champ d'origine, celui du départ). L'heuristique laisse GPF sur le dimanche et 24H AUTOS / MOTOS / CAMIONS / SBK / LMC sur le samedi.
+
+**`pcorg_summary._load_race_dt` n'est pas corrigé** : il sert aux résumés quotidiens en production, la normalisation reste locale à cette vue.
+
 #### Le pic de présents, pas les entrées
 
 Le **nombre de portes instrumentées a changé d'une édition à l'autre** (24H AUTOS : 21 → 22 → 26 → 29). Le total d'entrées 2022 → 2023 bondit de +68 % : c'est la mesure, pas la foule.
@@ -606,6 +612,7 @@ Sans `ANTHROPIC_API_KEY`, le rapport se génère **sans la section** (log en war
 - **`openpyxl` est désormais importé dans le process Flask** (et plus seulement par les scripts autonomes) : il est dans `requirements.txt`, avec `numpy` et `pandas` qui manquaient déjà (importés par `analyse_ops.py` au chargement — sans eux l'app ne démarre pas sur un environnement neuf).
 - **La météo est dans `donnees_meteo`, pas `historique_meteo`** (qui est une route Flask). Les clés sont accentuées, `0` est légitime, et quelques jours portent un `NaN` BSON réel.
 - **Les comparaisons entre éditions ne valent que sur le pic de présents.** Le nombre de portes instrumentées a changé chaque année ; les totaux d'entrées comparés d'une édition à l'autre mesurent l'instrumentation, pas la foule.
+- **Le champ `race` porte le départ jusqu'en 2024 et l'arrivée en 2025.** Toute comparaison pluriannuelle qui l'utilise brut est décalée d'un jour sans que rien ne le signale.
 - **Un jour à zéro en début de période n'est pas une fréquentation nulle** mais un capteur pas encore actif. Le confondre ferait lire une chute inexistante.
 - **`call_claude` filtre les sections sur `section_keys`** (défaut : les neuf clés pcorg). Un nouveau contrat JSON sans ce paramètre perd toutes ses sections en silence.
 - Le gabarit HTML classe les zones par préfixe de nom (`TRIBUNE`, `P `, `AA `), conventions 24H AUTOS. Les zones d'autres éditions (`BEAUSEJOUR`, `PARKING OUEST`…) n'apparaissent dans aucun encadré « Vue par catégorie », mais restent accessibles par le menu déroulant.
