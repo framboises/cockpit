@@ -222,7 +222,7 @@ def build_payload_from_complet(db, event, year, progress_cb=None,
 
 
 def _build_frequentation(db, event, year, info, with_analysis=True,
-                         created_by=None):
+                         created_by=None, progress_cb=None):
     """Bloc frequentation, ou None. Un echec ici ne doit pas perdre le rapport."""
     import scan_frequentation
     try:
@@ -243,6 +243,10 @@ def _build_frequentation(db, event, year, info, with_analysis=True,
     # jamais un par lecture — et zero appel si les donnees n'ont pas bouge.
     if with_analysis:
         import scan_analysis
+        # Seule etape qui peut durer : tout le reste tient sous la seconde.
+        # Le dire dans le libelle evite de lire l'attente comme un blocage.
+        if progress_cb:
+            progress_cb(88, 'Analyse redigee (appel au modele, 30 a 90 s)')
         try:
             doc = scan_analysis.generate_frequentation_analysis(
                 db, event, year, block, created_by=created_by)
@@ -306,7 +310,7 @@ def generate(db, event, year, progress_cb=None, with_analysis=True,
     _p(86, 'Frequentation et comparaison aux editions passees')
     payload['frequentation'] = _build_frequentation(
         db, event, year, info, with_analysis=with_analysis,
-        created_by=created_by)
+        created_by=created_by, progress_cb=progress_cb)
 
     _p(92, 'Rendu HTML')
     html = gpr.render_html(payload)

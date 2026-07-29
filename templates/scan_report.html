@@ -421,6 +421,16 @@
     </div>
     <div class="crud-modal-body">
       <div id="scan-regen-body"></div>
+      <label class="scan-check" style="display:flex;gap:7px;font-size:12.5px;margin-top:12px;">
+        <input type="checkbox" id="scan-regen-analysis" checked>
+        <span>Inclure l'analyse redigee de la frequentation</span>
+      </label>
+      <div class="scan-note info" style="margin-top:8px;">
+        C'est la seule etape lente : le reste de la generation prend moins
+        d'une seconde. L'analyse n'appelle le modele que si les donnees ont
+        change depuis la derniere ; sinon elle est reprise telle quelle.
+        Decocher pour une regeneration immediate.
+      </div>
       <div class="scan-progress" id="scan-regen-progress" hidden>
         <div class="scan-progress-bar"><div class="scan-progress-fill"></div></div>
         <div class="scan-progress-info">

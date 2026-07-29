@@ -37,6 +37,9 @@
   }
 
   // Etat de l'import en cours.
+  // Horodatage du lancement d'une regeneration, pour afficher le temps ecoule.
+  var regenStartedAt = null;
+
   var state = {
     token: null,
     units: [],
@@ -614,8 +617,11 @@
     fill.style.width = "0%";
     $("#scan-regen-label").textContent = "Demarrage...";
 
+    var withAnalysis = $("#scan-regen-analysis").checked;
+    regenStartedAt = Date.now();
     apiPostJson("/scan-report/generate", {
-      event: currentEvent(), year: parseInt(currentYear(), 10)
+      event: currentEvent(), year: parseInt(currentYear(), 10),
+      analysis: withAnalysis
     }).then(function (d) {
       if (!d.ok) {
         prog.hidden = true;
@@ -637,9 +643,14 @@
         var pct = d.progress || 0;
         fill.style.width = pct + "%";
         $("#scan-regen-pct").textContent = pct + " %";
-        $("#scan-regen-label").textContent = d.step || d.status || "";
+        // Le compteur dit que ca avance : sans lui, l'attente sur le modele
+        // (30 a 90 s) se lit comme un blocage.
+        var sec = regenStartedAt
+          ? Math.round((Date.now() - regenStartedAt) / 1000) : 0;
+        $("#scan-regen-label").textContent =
+          (d.step || d.status || "") + (sec > 2 ? " — " + sec + " s" : "");
         if (d.status === "running" || d.status === "queued") {
-          setTimeout(function () { poll(jobId, fill); }, 1500);
+          setTimeout(function () { poll(jobId, fill); }, 1000);
           return;
         }
         $("#scan-regen-go").disabled = false;

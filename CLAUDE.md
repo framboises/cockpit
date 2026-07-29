@@ -655,7 +655,9 @@ Le rapport est un **fichier HTML autonome, zéro appel réseau**. L'analyse est 
 
 Le prompt ne contient **que les agrégats journaliers** (7 jours × 3 éditions + météo + insights, ~3 200 tokens) : jamais la courbe horaire, qui coûterait dix fois le prompt entier sans rien apporter. Contrat JSON strict à 6 clés : `synthese`, `dynamique_journaliere`, `controle_acces`, `comparaison_editions`, `effet_meteo`, `recommandations`.
 
-Sans `ANTHROPIC_API_KEY`, le rapport se génère **sans la section** (log en warning, `info.frequentation_analysis == 'absente'`) — jamais d'échec de génération. `POST /scan-report/generate` accepte `{"analysis": false}` pour couper l'analyse franchement.
+Sans `ANTHROPIC_API_KEY`, le rapport se génère **sans la section** (log en warning, `info.frequentation_analysis == 'absente'`) — jamais d'échec de génération. `POST /scan-report/generate` accepte `{"analysis": false}` pour couper l'analyse franchement, et la modale de régénération expose une case à cocher pour ça.
+
+⚠️ **L'appel au modèle est la seule étape lente de la génération.** Mesuré sur ce poste (sans clé API donc sans appel) : 219 ms pour 24H MOTOS 2024, 415 ms pour 24H AUTOS 2025, rendu HTML de 1,3 Mo compris. Avec la clé, l'appel `claude-sonnet-5` ajoute 30 à 90 s, doublés en cas de retry sur troncature, plus l'exponential backoff sur 429/503/529. Une régénération qui « prend des plombes » attend le modèle, rien d'autre. Le libellé de progression le nomme explicitement et un compteur de secondes tourne, pour ne pas lire l'attente comme un blocage.
 
 ⚠️ **`pcorg_summary.call_claude` filtre les sections sur `section_keys`, par défaut les neuf clés du résumé pcorg.** Tout appelant qui impose un autre contrat JSON **doit** passer `section_keys`, sinon ses sections sont silencieusement remplacées par des sections pcorg vides. C'était le cas de `generate_scan_analysis` (5 sections sur 7 perdues) avant que le paramètre n'existe.
 
