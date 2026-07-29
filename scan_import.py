@@ -454,6 +454,7 @@ def _load_overrides(db, event=None, year=None):
             '_id_feature': doc.get('_id_feature'),
             'feature_collection': doc.get('feature_collection'),
             'category': doc.get('category'),
+            'ignored': doc.get('ignored'),
             'targeted': targeted,
         }
     return out
@@ -688,8 +689,18 @@ def resolve_features(db, units, event=None, year=None, overrides=None):
                 unit['name'], unit['kind'], entry['feature_collection'])
             entry['category_source'] = 'auto'
 
+        # Unite ecartee de l'import : elle ne figurera dans AUCUN des trois
+        # documents. Jamais deduit — c'est une decision d'exploitation, et
+        # ecarter une porte modifie la serie de l'enceinte generale.
+        entry['ignored'] = bool(manual.get('ignored'))
+
         result[key] = entry
     return result
+
+
+def ignored_keys(resolved):
+    """Cles des unites ecartees, au format `unit['key']`."""
+    return {k for k, v in (resolved or {}).items() if v.get('ignored')}
 
 
 # ---------------------------------------------------------------------------
@@ -734,8 +745,11 @@ def build_complet_doc(parsed, resolved, event, year, race_iso=None,
     qui rapproche dangereusement le document de la limite BSON de 16 Mo.
     """
     uam_by_porte = uam_by_porte or {}
+    ignored = ignored_keys(resolved)
     units_out = []
     for unit in parsed['units']:
+        if unit['key'] in ignored:
+            continue
         feat = resolved.get(unit['key'], {})
         present = 0
         series = []
@@ -792,7 +806,7 @@ def build_complet_doc(parsed, resolved, event, year, race_iso=None,
     }
 
 
-def build_frequentation_doc(parsed, event, year, race_iso=None):
+def build_frequentation_doc(parsed, event, year, race_iso=None, resolved=None):
     """Document `type: "frequentation"` — serie globale horaire de l'enceinte.
 
     Shape strictement identique a l'existant : une seule serie sous la cle
@@ -801,12 +815,17 @@ def build_frequentation_doc(parsed, event, year, race_iso=None):
     app.py:7133) sont cables dessus, y compris sur la presence de `present`.
 
     `autre` est exclu : sans direction il fausserait le solde de presents.
+
+    ⚠ Ecarter une porte change CE document, donc la reference N-1 de toutes
+    les comparaisons du cockpit. C'est voulu quand l'unite n'est pas une porte
+    d'enceinte (guichet, service), mais ce n'est jamais anodin.
     """
+    ignored = ignored_keys(resolved)
     hourly = defaultdict(lambda: {'e': 0, 's': 0})
     excluded_autre = 0
     doors_without_direction = []
     for unit in parsed['units']:
-        if unit['kind'] != 'porte':
+        if unit['kind'] != 'porte' or unit['key'] in ignored:
             continue  # seules les portes d'enceinte composent la serie globale
         excluded_autre += unit['total_autre']
         # Seuil et non egalite stricte : PORTE ANNEXE totalise 19 389 scans
@@ -846,6 +865,9 @@ def build_frequentation_doc(parsed, event, year, race_iso=None):
         'source': 'scan_import',
         'excluded_autre': excluded_autre,
         'doors_without_direction': doors_without_direction,
+        # Portes volontairement ecartees : sans cette trace, un lecteur futur
+        # ne peut pas savoir pourquoi le total differe d'une autre generation.
+        'ignored_doors': sorted(name for kind, name in ignored if kind == 'porte'),
     }
 
 
@@ -859,9 +881,10 @@ def build_portes_doc(parsed, resolved, event, year, race_iso=None):
     `doors_id` est le `_id_feature` ; il est omis quand l'unite n'a pas pu
     etre localisee, exactement comme PORTAIL HOUX 5 aujourd'hui.
     """
+    ignored = ignored_keys(resolved)
     doors = []
     for unit in parsed['units']:
-        if unit['kind'] != 'porte':
+        if unit['kind'] != 'porte' or unit['key'] in ignored:
             continue
         scans = []
         for hour, counts in _hourly(unit):
@@ -961,6 +984,11 @@ def save_overrides(db, overrides, created_by=None):
             fields['feature_collection'] = val.get('feature_collection')
         if val.get('category') in CATEGORY_IDS:
             fields['category'] = val['category']
+        # `ignored` est memorise dans les deux sens : reactiver une unite
+        # ecartee doit survivre au prochain import, sinon elle disparaitrait
+        # a nouveau sans que personne ne comprenne pourquoi.
+        if val.get('ignored') is not None:
+            fields['ignored'] = bool(val['ignored'])
         if len(fields) == 2:  # rien d'autre que l'horodatage
             continue
         db[OVERRIDES_COLLECTION].update_one(

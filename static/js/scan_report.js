@@ -267,11 +267,19 @@
       " non localisee(s)";
     $("#scan-only-unresolved").checked = false;
     renderMapRows(state.units);
+    refreshIgnoreRecap();
 
     showStep("preview");
   }
 
+  function isIgnored(u, key) {
+    var ov = state.overrides[key];
+    if (ov && ov.ignored != null) return !!ov.ignored;
+    return !!u.ignored;
+  }
+
   function rowState(u, key) {
+    if (isIgnored(u, key)) return "is-ignored";
     var ov = state.overrides[key];
     if (ov && (ov._id_feature || ov.category)) return "is-manual";
     if (!u._id_feature) return "is-none";
@@ -300,6 +308,21 @@
         (u.zone && u.zone !== u.name ? " · " + u.zone : "") +
         " · " + fmt(u.total_entree + u.total_sortie + u.total_autre) + " scans" +
         (u.feature_label ? " · " + u.feature_label : "");
+
+      // Ecarter une unite : elle ne figurera dans aucun des trois documents.
+      var ignLabel = document.createElement("label");
+      // `scan-check` annule le flex-direction:column que .crud-modal-body
+      // impose a tous les labels : sans elle, la case se retrouve empilee
+      // au-dessus de son libelle.
+      ignLabel.className = "scanmap-ignore scan-check";
+      var ignBox = document.createElement("input");
+      ignBox.type = "checkbox";
+      ignBox.checked = isIgnored(u, key);
+      var ignTxt = document.createElement("span");
+      ignTxt.textContent = "Ignorer";
+      ignLabel.appendChild(ignBox);
+      ignLabel.appendChild(ignTxt);
+      left.appendChild(ignLabel);
 
       // Categorie d'exploitation : pilote le regroupement du rapport et la
       // capacite retenue (pietons ou vehicules), donc l'effectif recommande.
@@ -400,12 +423,54 @@
       });
       loadList();
 
+      function applyIgnore() {
+        var off = ignBox.checked;
+        state.overrides[key] = state.overrides[key] || {};
+        state.overrides[key].ignored = off;
+        // Les controles restent lisibles mais inoperants : l'unite ne sera pas
+        // ecrite, il n'y a plus rien a decider pour elle.
+        [catSel, sel, input].forEach(function (c) { c.disabled = off; });
+        row.className = "scanmap-row " + rowState(u, key);
+        refreshIgnoreRecap();
+      }
+      ignBox.addEventListener("change", applyIgnore);
+      if (ignBox.checked) applyIgnore();
+
       row.appendChild(left);
       row.appendChild(catBox);
       row.appendChild(collBox);
       row.appendChild(right);
       host.appendChild(row);
     });
+  }
+
+  // Ecarter une porte retire ses scans de la serie de l'enceinte generale,
+  // qui sert de reference N-1 a tout le cockpit. Le chiffrer en direct evite
+  // de le decouvrir apres coup.
+  function refreshIgnoreRecap() {
+    var box = $("#scan-ignore-recap");
+    if (!box) return;
+    var off = state.units.filter(function (u) {
+      return isIgnored(u, u.kind + "|" + u.name);
+    });
+    if (!off.length) { box.hidden = true; return; }
+    var scans = off.reduce(function (s, u) {
+      return s + u.total_entree + u.total_sortie + u.total_autre;
+    }, 0);
+    var doors = off.filter(function (u) { return u.kind === "porte"; });
+    var enceinte = doors.reduce(function (s, u) {
+      return s + u.total_entree;
+    }, 0);
+    var txt = off.length + " unite(s) ignoree(s) — " + fmt(scans) +
+      " scans exclus de l'import";
+    if (doors.length) {
+      txt += ", dont " + doors.length + " porte(s) : " + fmt(enceinte) +
+        " entrees retirees de la serie de l'enceinte generale";
+    }
+    box.hidden = false;
+    clear(box);
+    box.appendChild(note(doors.length ? "warn" : "info",
+      esc(txt) + ".<br>" + esc(off.map(function (u) { return u.name; }).join(", "))));
   }
 
   function labelled(text) {
@@ -464,6 +529,8 @@
         _id_feature: state.overrides[k]._id_feature || null,
         feature_collection: state.overrides[k].feature_collection || null,
         category: state.overrides[k].category || null,
+        ignored: state.overrides[k].ignored != null
+          ? state.overrides[k].ignored : null,
         save: payload.save_overrides
       };
     });
@@ -493,9 +560,21 @@
         }).join(", ")) + ".");
       }
       if (d.overrides_saved) {
-        lines.push(d.overrides_saved + " rattachement(s) memorise(s).");
+        lines.push(d.overrides_saved + " choix memorise(s).");
       }
       body.appendChild(note("ok", lines.join("<br>")));
+      if (d.ignored && d.ignored.length) {
+        // Ecarter une porte change la serie de l'enceinte, donc la reference
+        // N-1 des comparaisons du cockpit : le redire apres coup.
+        body.appendChild(note(
+          (d.ignored_doors && d.ignored_doors.length) ? "warn" : "info",
+          "<strong>" + d.ignored.length + " unite(s) ignoree(s)</strong>, " +
+          "absente(s) des trois documents : " + esc(d.ignored.join(", ")) + "." +
+          ((d.ignored_doors && d.ignored_doors.length)
+            ? "<br>Dont " + d.ignored_doors.length + " porte(s) — la serie de " +
+              "l'enceinte generale a ete recalculee sans elles."
+            : "")));
+      }
       if (d.unresolved && d.unresolved.length) {
         body.appendChild(note("warn",
           "Non localisees (aucune entite cartographique) : <strong>" +

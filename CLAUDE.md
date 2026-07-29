@@ -431,7 +431,7 @@ Tous dans `historique_controle`, index unique `(event, year, type)`, `year` en *
 
 `data_15min` de `complet` **n'a pas de champ `id`** : l'uuid n'a aucune signification inter-collection et pèse 45 des 136 octets de chaque enregistrement. Un garde-fou refuse l'écriture au-delà de 12 Mo (limite BSON 16 Mo).
 
-`frequentation` porte en plus `source: 'scan_import'`, `excluded_autre` et `doors_without_direction` — traçabilité de ce qui manque à la courbe de présents.
+`frequentation` porte en plus `source: 'scan_import'`, `excluded_autre`, `doors_without_direction` et `ignored_doors` — traçabilité de ce qui manque à la courbe de présents.
 
 ### Rattachement aux entités cartographiques
 
@@ -466,6 +466,18 @@ Ce n'est **pas** le rattachement géographique, et les deux sont indépendants :
 Sans catégorie explicite (rapports générés avant, ou chemin de repli `parking_scans`), `guessCategoryFromName()` retombe sur les conventions de nommage 24H AUTOS (`TRIBUNE `, `AA `, `P `). C'est ce repli qui laissait `BEAUSEJOUR`, `KARTING SUD` et `PARKING OUEST` hors de toute catégorie, avec la capacité véhicule par défaut. Réimporter le classeur fixe la catégorie une fois pour toutes.
 
 `save_overrides` mémorise **une catégorie seule**, sans `_id_feature` : classer une zone ne suppose pas de savoir où elle se trouve. `resolve_features` **fusionne** le choix mémorisé et celui de l'UI plutôt que de remplacer, sinon choisir une catégorie effacerait un rattachement déjà connu.
+
+### Unités ignorées
+
+Une case « Ignorer » par ligne écarte l'unité de l'import : elle ne figure dans **aucun des trois documents**. Utile pour les guichets et services qui ne sont pas des points de passage (`HELPDESK`, `LITIGE`, `UAM`, `SERI`, `PUNISHER`).
+
+⚠️ **Écarter une porte modifie la série de l'enceinte générale**, donc la référence N-1 de toutes les comparaisons du cockpit. Ce n'est jamais anodin. La modale chiffre l'effet **en direct** pendant la saisie (« N unité(s) ignorée(s) — X scans exclus, dont Y portes : Z entrées retirées de la série de l'enceinte »), le redit après l'écriture, et le document `frequentation` garde la trace dans `ignored_doors`.
+
+Testé sur 24H MOTOS 2024 : ignorer `PORTE MUSEE` fait passer le cumul d'entrées de 131 975 à 127 692 (−4 283), `complet` de 19 à 17 unités et `portes` de 13 à 11.
+
+L'état est mémorisé **dans les deux sens** (`ignored: true` comme `false`) : réactiver une unité écartée doit survivre au prochain import, sinon elle disparaîtrait à nouveau sans que personne ne comprenne pourquoi.
+
+⚠️ `build_frequentation_doc` ne recevait pas `resolved` — il a fallu le lui passer pour qu'il connaisse les exclusions. Les deux autres constructeurs l'avaient déjà.
 
 ### Archivage
 
@@ -652,7 +664,7 @@ Sans `ANTHROPIC_API_KEY`, le rapport se génère **sans la section** (log en war
 | Collection | Contenu |
 |------------|---------|
 | `historique_controle_archive` | Générations remplacées, append-only, pas de TTL |
-| `scan_feature_overrides` | Choix manuels par nom de scan : `_id_feature` et/ou `category`. Index unique `(scan_name, kind, event, year)` |
+| `scan_feature_overrides` | Choix manuels par nom de scan : `_id_feature`, `category` et/ou `ignored`. Index unique `(scan_name, kind, event, year)` |
 | `scan_analyses` | Analyses Claude historisées. `kind` vaut `scans` ou `frequentation` ; les documents antérieurs au champ sont des analyses de scans. Les analyses de fréquentation portent une `fingerprint` (réutilisation sans appel API) |
 
 ### Pièges

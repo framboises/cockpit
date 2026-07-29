@@ -470,6 +470,7 @@ def scan_report_import_analyze():
             'suggestions': res.get('suggestions', []),
             'category': res.get('category'),
             'category_source': res.get('category_source'),
+            'ignored': bool(res.get('ignored')),
         })
 
     totals = {
@@ -543,10 +544,12 @@ def scan_report_import_commit():
             continue
         kind, name = key.split('|', 1)
         cat = val.get('category')
+        ign = val.get('ignored')
         overrides[(kind, name)] = {
             '_id_feature': val.get('_id_feature') or None,
             'feature_collection': val.get('feature_collection'),
             'category': cat if cat in scan_import.CATEGORY_IDS else None,
+            'ignored': bool(ign) if ign is not None else None,
             'save': bool(val.get('save')),
         }
 
@@ -573,7 +576,8 @@ def scan_report_import_commit():
                                       imported_by=user, imported_at=now,
                                       uam_by_porte=uam_by_porte),
         scan_import.build_portes_doc(parsed, resolved, event, year, race),
-        scan_import.build_frequentation_doc(parsed, event, year, race),
+        scan_import.build_frequentation_doc(parsed, event, year, race,
+                                            resolved=resolved),
     ]
 
     try:
@@ -610,12 +614,17 @@ def scan_report_import_commit():
     with _STAGING_LOCK:
         _drop_staged(token)
 
+    ignored = scan_import.ignored_keys(resolved)
     unresolved = [{'kind': k[0], 'name': k[1]}
-                  for k, v in resolved.items() if not v['_id_feature']]
+                  for k, v in resolved.items()
+                  if not v['_id_feature'] and k not in ignored]
     return jsonify({
         'ok': True, 'run_id': run_id, 'event': event, 'year': year,
         'written': written, 'archived': archived,
         'overrides_saved': saved, 'unresolved': unresolved,
+        'ignored': sorted(name for _, name in ignored),
+        'ignored_doors': sorted(name for kind, name in ignored
+                                if kind == 'porte'),
     })
 
 

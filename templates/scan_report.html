@@ -138,6 +138,11 @@
     .scanmap-row.is-manual { border-left-color: #4ade80; }
     .scanmap-row.is-none { border-left-color: #fbbf24;
       background: rgba(251,191,36,.045); }
+    /* Ignoree : la ligne reste lisible mais visiblement hors jeu. */
+    .scanmap-row.is-ignored { border-left-color: #6b7a90; opacity: .45; }
+    .scanmap-row.is-ignored .scanmap-name { text-decoration: line-through; }
+    .scanmap-ignore { font-size: 11.5px; color: #8aa0bd; margin-top: 6px;
+      cursor: pointer; font-weight: 400; }
     .scanmap-head { display: flex; justify-content: space-between;
       align-items: flex-end; gap: 14px; margin: 14px 0 6px; }
     .scanmap-head-txt { font-size: 12.5px; color: #8aa0bd; }
@@ -152,6 +157,7 @@
     .scanmap-legend .dot-auto { background: #2a3548; }
     .scanmap-legend .dot-manual { background: #4ade80; }
     .scanmap-legend .dot-none { background: #fbbf24; }
+    .scanmap-legend .dot-ignored { background: #6b7a90; }
     .scanmap-col-label { font-size: 10px; text-transform: uppercase;
       letter-spacing: .4px; color: #61728c; margin-bottom: 3px; }
     .scanmap-name { font-size: 13px; color: #e6ecf5; font-weight: 500; }
@@ -347,7 +353,9 @@
             <span><i class="dot dot-auto"></i>propose automatiquement</span>
             <span><i class="dot dot-manual"></i>choix manuel</span>
             <span><i class="dot dot-none"></i>non localisee</span>
+            <span><i class="dot dot-ignored"></i>ignoree</span>
           </div>
+          <div id="scan-ignore-recap" hidden></div>
           <div class="scan-modal-scroll" id="scan-map-rows"></div>
           <label class="scan-check" style="display:flex;gap:7px;font-size:12.5px;margin-top:11px;">
             <input type="checkbox" id="scan-save-overrides" checked>
