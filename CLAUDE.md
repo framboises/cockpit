@@ -449,6 +449,24 @@ Un rapprochement **multi-candidats est laissé non résolu** (`PORTE CIK` existe
 
 Sur 24H MOTOS 2024 : 14/19 unités résolues automatiquement, 17/19 après mapping manuel. `PORTE NORD CLUB` et `CONCENTRATION` n'ont aucune entité — c'est normal, certaines unités sont des services, pas des lieux.
 
+**La modale expose les 19 unités, pas seulement les non résolues.** Une résolution automatique peut se tromper, et la catégorie n'est qu'une proposition dans tous les cas. Un liseré à gauche de chaque ligne donne l'état — gris `proposé automatiquement`, vert `choix manuel`, ambre `non localisée` — et une case « N'afficher que les non localisées » réduit la liste sans rien perdre des choix déjà faits.
+
+### Catégorie d'unité
+
+`UNIT_CATEGORIES` dans `scan_import.py` : `porte`, `tribune`, `aire_accueil`, `parking`, `paddock`, `hospitalite`, `autre`. Proposée par `guess_category()`, **modifiable à l'import**, stockée sur chaque unité `complet` (`category` + `category_source`).
+
+Ce n'est **pas** le rattachement géographique, et les deux sont indépendants : une unité peut être localisée sans qu'on sache la classer, et l'inverse. La catégorie pilote trois choses dans le rapport :
+
+1. le regroupement de la liste latérale (`groupZones`)
+2. l'encadré « Vue par catégorie » du tableau de bord
+3. **la capacité retenue** — 650 personnes/h pour `tribune`, `paddock`, `hospitalite` ; 250 véhicules/h pour le reste — donc l'effectif recommandé
+
+⚠️ **Le nom du champ côté rapport est `zone_category`, pas `category`** : `category` est déjà pris dans le contrat du gabarit et vaut `'zone'` ou `'porte'`.
+
+Sans catégorie explicite (rapports générés avant, ou chemin de repli `parking_scans`), `guessCategoryFromName()` retombe sur les conventions de nommage 24H AUTOS (`TRIBUNE `, `AA `, `P `). C'est ce repli qui laissait `BEAUSEJOUR`, `KARTING SUD` et `PARKING OUEST` hors de toute catégorie, avec la capacité véhicule par défaut. Réimporter le classeur fixe la catégorie une fois pour toutes.
+
+`save_overrides` mémorise **une catégorie seule**, sans `_id_feature` : classer une zone ne suppose pas de savoir où elle se trouve. `resolve_features` **fusionne** le choix mémorisé et celui de l'UI plutôt que de remplacer, sinon choisir une catégorie effacerait un rattachement déjà connu.
+
 ### Archivage
 
 Toute réécriture **archive d'abord** l'ancien document dans `historique_controle_archive` (copie intégrale + `archived_at`, `archived_by`, `archived_reason`, `original_id`), puis remplace. Plusieurs générations coexistent, rien n'est jamais perdu.
@@ -634,7 +652,7 @@ Sans `ANTHROPIC_API_KEY`, le rapport se génère **sans la section** (log en war
 | Collection | Contenu |
 |------------|---------|
 | `historique_controle_archive` | Générations remplacées, append-only, pas de TTL |
-| `scan_feature_overrides` | Mapping manuel nom de scan → `_id_feature`, index unique `(scan_name, kind, event, year)` |
+| `scan_feature_overrides` | Choix manuels par nom de scan : `_id_feature` et/ou `category`. Index unique `(scan_name, kind, event, year)` |
 | `scan_analyses` | Analyses Claude historisées. `kind` vaut `scans` ou `frequentation` ; les documents antérieurs au champ sont des analyses de scans. Les analyses de fréquentation portent une `fingerprint` (réutilisation sans appel API) |
 
 ### Pièges
@@ -651,4 +669,5 @@ Sans `ANTHROPIC_API_KEY`, le rapport se génère **sans la section** (log en war
 - **Le champ `race` porte le départ jusqu'en 2024 et l'arrivée en 2025.** Toute comparaison pluriannuelle qui l'utilise brut est décalée d'un jour sans que rien ne le signale.
 - **Un jour à zéro en début de période n'est pas une fréquentation nulle** mais un capteur pas encore actif. Le confondre ferait lire une chute inexistante.
 - **`call_claude` filtre les sections sur `section_keys`** (défaut : les neuf clés pcorg). Un nouveau contrat JSON sans ce paramètre perd toutes ses sections en silence.
-- Le gabarit HTML classe les zones par préfixe de nom (`TRIBUNE`, `P `, `AA `), conventions 24H AUTOS. Les zones d'autres éditions (`BEAUSEJOUR`, `PARKING OUEST`…) n'apparaissent dans aucun encadré « Vue par catégorie », mais restent accessibles par le menu déroulant.
+- **La catégorie d'une unité est choisie à l'import**, pas devinée du nom. Le repli par préfixe (`TRIBUNE`, `P `, `AA `, conventions 24H AUTOS) ne sert plus qu'aux rapports générés avant cette bascule et au chemin `parking_scans`. Un couple réimporté porte sa catégorie explicite, y compris pour les libellés hors convention (`BEAUSEJOUR`, `KARTING SUD`).
+- **Changer la catégorie change l'effectif recommandé**, puisqu'elle détermine la capacité (650 personnes/h vs 250 véhicules/h). Ce n'est pas un réglage d'affichage.

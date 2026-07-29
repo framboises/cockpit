@@ -256,15 +256,31 @@
 
     $("#scan-race").value = data.race || "";
 
+    state.categories = data.categories || [];
     var unresolved = state.units.filter(function (u) { return !u._id_feature; });
-    $("#scan-unresolved-block").hidden = unresolved.length === 0;
-    if (unresolved.length) {
-      $("#scan-unresolved-count").textContent =
-        unresolved.length + " unite(s) non localisee(s)";
-      renderMapRows(unresolved);
-    }
+    // Toutes les unites sont proposees a la verification, y compris celles
+    // resolues automatiquement : une resolution auto peut se tromper, et la
+    // categorie n'est qu'une proposition dans tous les cas.
+    $("#scan-unresolved-block").hidden = state.units.length === 0;
+    $("#scan-unresolved-count").textContent =
+      state.units.length + " unite(s), dont " + unresolved.length +
+      " non localisee(s)";
+    $("#scan-only-unresolved").checked = false;
+    renderMapRows(state.units);
 
     showStep("preview");
+  }
+
+  function rowState(u, key) {
+    var ov = state.overrides[key];
+    if (ov && (ov._id_feature || ov.category)) return "is-manual";
+    if (!u._id_feature) return "is-none";
+    // Un choix memorise lors d'un import precedent compte comme manuel, qu'il
+    // porte sur l'entite ou sur la seule categorie.
+    if (u.feature_source === "manuel" || u.category_source === "manuel") {
+      return "is-manual";
+    }
+    return "is-auto";
   }
 
   function renderMapRows(units) {
@@ -273,7 +289,8 @@
     units.forEach(function (u) {
       var key = u.kind + "|" + u.name;
       var row = document.createElement("div");
-      row.className = "scanmap-row";
+      row.className = "scanmap-row " + rowState(u, key);
+      row.dataset.resolved = u._id_feature ? "1" : "0";
 
       var left = document.createElement("div");
       left.innerHTML = '<div class="scanmap-name"></div><div class="scanmap-sub"></div>';
@@ -281,21 +298,46 @@
       left.querySelector(".scanmap-sub").textContent =
         (u.kind === "porte" ? "porte" : "zone") +
         (u.zone && u.zone !== u.name ? " · " + u.zone : "") +
-        " · " + fmt(u.total_entree + u.total_sortie + u.total_autre) + " scans";
+        " · " + fmt(u.total_entree + u.total_sortie + u.total_autre) + " scans" +
+        (u.feature_label ? " · " + u.feature_label : "");
 
+      // Categorie d'exploitation : pilote le regroupement du rapport et la
+      // capacite retenue (pietons ou vehicules), donc l'effectif recommande.
+      var catBox = document.createElement("div");
+      catBox.appendChild(labelled("Categorie"));
+      var catSel = document.createElement("select");
+      (state.categories || []).forEach(function (c) {
+        var o = document.createElement("option");
+        o.value = c.id;
+        o.textContent = c.label;
+        if (c.id === u.category) o.selected = true;
+        catSel.appendChild(o);
+      });
+      catSel.addEventListener("change", function () {
+        setOverride(key, null, null, catSel.value);
+        row.className = "scanmap-row " + rowState(u, key);
+      });
+      catBox.appendChild(catSel);
+
+      var collBox = document.createElement("div");
+      collBox.appendChild(labelled("Collection"));
       var sel = document.createElement("select");
       ["portes", "terrains", "hospitalites", "tribunes"].forEach(function (c) {
         var o = document.createElement("option");
         o.value = c; o.textContent = c;
-        if (c === (u.kind === "porte" ? "portes" : "terrains")) o.selected = true;
+        if (c === (u.feature_collection ||
+                   (u.kind === "porte" ? "portes" : "terrains"))) o.selected = true;
         sel.appendChild(o);
       });
+      collBox.appendChild(sel);
 
       var right = document.createElement("div");
+      right.appendChild(labelled("Entite cartographique"));
       var input = document.createElement("input");
       input.type = "text";
       input.setAttribute("list", "scanlist-" + key.replace(/[^a-z0-9]/gi, ""));
       input.placeholder = "Rechercher une entite...";
+      if (u.feature_label) input.value = u.feature_label;
       var datalist = document.createElement("datalist");
       datalist.id = input.getAttribute("list");
       var chips = document.createElement("div");
@@ -319,6 +361,7 @@
             x.classList.remove("is-set");
           });
           chip.classList.add("is-set");
+          row.className = "scanmap-row " + rowState(u, key);
         });
         chips.appendChild(chip);
       });
@@ -337,7 +380,10 @@
       }
       sel.addEventListener("change", function () {
         input.value = "";
-        delete state.overrides[key];
+        // Changer de collection annule le rattachement, pas la categorie :
+        // ce sont deux decisions independantes.
+        clearFeatureOverride(key);
+        row.className = "scanmap-row " + rowState(u, key);
         loadList();
       });
       input.addEventListener("change", function () {
@@ -345,22 +391,46 @@
         for (var i = 0; i < opts.length; i++) {
           if (opts[i].value === input.value) {
             setOverride(key, opts[i].dataset.id, sel.value);
+            row.className = "scanmap-row " + rowState(u, key);
             return;
           }
         }
-        delete state.overrides[key];
+        clearFeatureOverride(key);
+        row.className = "scanmap-row " + rowState(u, key);
       });
       loadList();
 
       row.appendChild(left);
-      row.appendChild(sel);
+      row.appendChild(catBox);
+      row.appendChild(collBox);
       row.appendChild(right);
       host.appendChild(row);
     });
   }
 
-  function setOverride(key, id, collection) {
-    state.overrides[key] = { _id_feature: id, feature_collection: collection };
+  function labelled(text) {
+    var d = document.createElement("div");
+    d.className = "scanmap-col-label";
+    d.textContent = text;
+    return d;
+  }
+
+  // Un override porte le rattachement, la categorie, ou les deux. On fusionne
+  // plutot que d'ecraser : choisir une categorie ne doit pas effacer l'entite
+  // deja selectionnee.
+  function setOverride(key, id, collection, category) {
+    var cur = state.overrides[key] || {};
+    if (id) { cur._id_feature = id; cur.feature_collection = collection; }
+    if (category) { cur.category = category; }
+    state.overrides[key] = cur;
+  }
+
+  function clearFeatureOverride(key) {
+    var cur = state.overrides[key];
+    if (!cur) return;
+    delete cur._id_feature;
+    delete cur.feature_collection;
+    if (!cur.category) delete state.overrides[key];
   }
 
   function fetchFeatures(collection) {
@@ -391,8 +461,9 @@
     };
     Object.keys(state.overrides).forEach(function (k) {
       payload.overrides[k] = {
-        _id_feature: state.overrides[k]._id_feature,
-        feature_collection: state.overrides[k].feature_collection,
+        _id_feature: state.overrides[k]._id_feature || null,
+        feature_collection: state.overrides[k].feature_collection || null,
+        category: state.overrides[k].category || null,
         save: payload.save_overrides
       };
     });
@@ -716,6 +787,18 @@
     var regenBtn = $("#scan-regen-btn");
     if (importBtn) importBtn.addEventListener("click", openImport);
     if (regenBtn) regenBtn.addEventListener("click", openRegen);
+
+    // Filtre d'affichage seulement : masquer une ligne ne touche pas aux
+    // choix deja faits, qui vivent dans state.overrides.
+    var onlyUnres = $("#scan-only-unresolved");
+    if (onlyUnres) {
+      onlyUnres.addEventListener("change", function () {
+        var rows = document.querySelectorAll("#scan-map-rows .scanmap-row");
+        rows.forEach(function (r) {
+          r.hidden = onlyUnres.checked && r.dataset.resolved === "1";
+        });
+      });
+    }
 
     var drop = $("#scan-drop");
     var input = $("#scan-file-input");

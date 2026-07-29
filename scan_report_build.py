@@ -192,6 +192,9 @@ def build_payload_from_complet(db, event, year, progress_cb=None,
         # Rattachement geographique conserve jusqu'au payload : c'est par lui
         # que les effectifs sont calcules, sans repasser par le nom.
         out['_id_feature'] = unit.get('_id_feature')
+        # Categorie choisie a l'import. `category` est deja pris dans le
+        # contrat du gabarit ('zone' / 'porte'), d'ou le nom distinct.
+        out['zone_category'] = unit.get('category')
 
     if not zones and not portes:
         raise gpr.ReportGenerationError(

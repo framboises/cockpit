@@ -453,9 +453,81 @@ def _load_overrides(db, event=None, year=None):
         out[key] = {
             '_id_feature': doc.get('_id_feature'),
             'feature_collection': doc.get('feature_collection'),
+            'category': doc.get('category'),
             'targeted': targeted,
         }
     return out
+
+
+# ---------------------------------------------------------------------------
+# Categorie d'unite
+# ---------------------------------------------------------------------------
+#
+# La categorie n'est PAS le rattachement geographique. Elle dit ce qu'est
+# l'unite pour l'exploitation, et elle pilote trois choses dans le rapport :
+# le regroupement de la liste laterale, l'encadre « Vue par categorie », et
+# surtout la CAPACITE retenue (650 personnes/h pour un lieu pietonnier, 250
+# vehicules/h pour un parking) — donc l'effectif recommande.
+#
+# Elle etait jusqu'ici devinee par prefixe de nom, avec les conventions
+# 24H AUTOS en dur (`TRIBUNE `, `AA `, `P `). Les editions qui ne les suivent
+# pas (BEAUSEJOUR, PARKING OUEST, KARTING SUD) n'atterrissaient dans aucune
+# categorie et heritaient de la capacite vehicule par defaut.
+
+UNIT_CATEGORIES = [
+    {'id': 'porte', 'label': 'Porte d\'enceinte', 'flow': 'personnes'},
+    {'id': 'tribune', 'label': 'Tribune', 'flow': 'personnes'},
+    {'id': 'aire_accueil', 'label': 'Aire d\'accueil', 'flow': 'vehicules'},
+    {'id': 'parking', 'label': 'Parking', 'flow': 'vehicules'},
+    {'id': 'paddock', 'label': 'Paddock', 'flow': 'personnes'},
+    {'id': 'hospitalite', 'label': 'Hospitalite', 'flow': 'personnes'},
+    {'id': 'autre', 'label': 'Autre', 'flow': 'vehicules'},
+]
+CATEGORY_IDS = {c['id'] for c in UNIT_CATEGORIES}
+
+# Libelles connus qui ne suivent aucune convention de prefixe.
+_CATEGORY_BY_NAME = {
+    'PADDOCKS': 'paddock',
+    'MAISON DES HUNAUDIERES': 'hospitalite',
+    'WELCOME': 'hospitalite',
+    'VISITES MUSEE': 'hospitalite',
+}
+
+# Collection geo -> categorie, quand le nom ne tranche pas. C'est plus fiable
+# qu'un prefixe : une unite rattachee a une feature de `tribunes` EST une
+# tribune, quel que soit son libelle.
+_CATEGORY_BY_COLLECTION = {
+    'portes': 'porte',
+    'tribunes': 'tribune',
+    'hospitalites': 'hospitalite',
+}
+
+
+def guess_category(name, kind, feature_collection=None):
+    """Categorie proposee pour une unite. Toujours une valeur, jamais None.
+
+    Ordre : le nom d'abord (le plus explicite pour l'exploitant), puis le
+    rattachement geographique, puis un repli par nature d'unite.
+    """
+    if kind == 'porte':
+        return 'porte'
+    n = (name or '').strip().upper()
+    if n in _CATEGORY_BY_NAME:
+        return _CATEGORY_BY_NAME[n]
+    if n.startswith('TRIBUNE'):
+        return 'tribune'
+    if n.startswith('AA ') or 'AIRE D' in n:
+        return 'aire_accueil'
+    if n.startswith('P ') or n.startswith('PARKING'):
+        return 'parking'
+    if 'PADDOCK' in n:
+        return 'paddock'
+    if 'HOSPITALIT' in n:
+        return 'hospitalite'
+    by_coll = _CATEGORY_BY_COLLECTION.get(feature_collection)
+    if by_coll:
+        return by_coll
+    return 'autre'
 
 
 def _suggest_for(unit, geo, exclude_ids, limit=6):
@@ -563,8 +635,13 @@ def resolve_features(db, units, event=None, year=None, overrides=None):
                            for c, f, l in candidates],
         }
 
-        manual = live.get(key) or saved.get((unit['kind'], norm))
-        if manual and manual.get('_id_feature'):
+        # Fusion, pas remplacement : un choix de l'UI qui ne porte QUE sur la
+        # categorie ne doit pas effacer un rattachement geographique deja
+        # memorise (et reciproquement).
+        manual = dict(saved.get((unit['kind'], norm)) or {})
+        manual.update({k: v for k, v in (live.get(key) or {}).items()
+                       if v is not None})
+        if manual.get('_id_feature'):
             entry.update({
                 '_id_feature': manual['_id_feature'],
                 'feature_collection': manual.get('feature_collection'),
@@ -598,6 +675,19 @@ def resolve_features(db, units, event=None, year=None, overrides=None):
                 unit, geo, exclude_ids={c['_id_feature'] for c in entry['candidates']})
         else:
             entry['suggestions'] = []
+
+        # Categorie : choix explicite s'il existe, proposition sinon. Elle est
+        # independante du rattachement geographique — une unite peut etre
+        # localisee sans qu'on sache la classer, et l'inverse.
+        chosen = (manual or {}).get('category')
+        if chosen in CATEGORY_IDS:
+            entry['category'] = chosen
+            entry['category_source'] = 'manuel'
+        else:
+            entry['category'] = guess_category(
+                unit['name'], unit['kind'], entry['feature_collection'])
+            entry['category_source'] = 'auto'
+
         result[key] = entry
     return result
 
@@ -669,6 +759,12 @@ def build_complet_doc(parsed, resolved, event, year, race_iso=None,
             '_id_feature': feat.get('_id_feature'),
             'feature_collection': feat.get('feature_collection'),
             'feature_source': feat.get('feature_source', 'aucun'),
+            # Categorie d'exploitation : pilote le regroupement et la capacite
+            # retenue dans le rapport. Sans elle, le gabarit retombe sur les
+            # prefixes de nom, conventions 24H AUTOS.
+            'category': feat.get('category') or guess_category(
+                unit['name'], unit['kind'], feat.get('feature_collection')),
+            'category_source': feat.get('category_source', 'auto'),
             'devices': unit['devices'],
             'device_count': unit['device_count'],
             'pda_count': unit['pda_count'],
@@ -850,18 +946,27 @@ def ensure_indexes(db):
 
 
 def save_overrides(db, overrides, created_by=None):
-    """Persiste les mappings manuels pour les reutiliser aux imports suivants."""
+    """Persiste les choix manuels pour les reutiliser aux imports suivants.
+
+    Un choix de categorie seul est memorisable : classer une zone ne suppose
+    pas de savoir ou elle se trouve.
+    """
     saved = 0
     for (kind, name), val in (overrides or {}).items():
-        if not val.get('_id_feature') or not val.get('save'):
+        if not val.get('save'):
+            continue
+        fields = {'updated_at': datetime.now(), 'created_by': created_by}
+        if val.get('_id_feature'):
+            fields['_id_feature'] = val['_id_feature']
+            fields['feature_collection'] = val.get('feature_collection')
+        if val.get('category') in CATEGORY_IDS:
+            fields['category'] = val['category']
+        if len(fields) == 2:  # rien d'autre que l'horodatage
             continue
         db[OVERRIDES_COLLECTION].update_one(
             {'scan_name': name, 'kind': kind,
              'event': val.get('event'), 'year': val.get('year')},
-            {'$set': {'_id_feature': val['_id_feature'],
-                      'feature_collection': val.get('feature_collection'),
-                      'updated_at': datetime.now(),
-                      'created_by': created_by}},
+            {'$set': fields},
             upsert=True)
         saved += 1
     return saved

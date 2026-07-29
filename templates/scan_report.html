@@ -127,10 +127,33 @@
       border: 1px solid rgba(74,222,128,.3); color: #4ade80; }
 
     /* --- Grille de mapping --------------------------------------------- */
-    .scanmap-row { display: grid; grid-template-columns: 1.5fr .9fr 1.6fr;
-      gap: 9px; align-items: start; padding: 10px 0;
-      border-bottom: 1px solid #232d3f; }
+    /* 4 colonnes : unite | categorie | collection geo | entite */
+    .scanmap-row { display: grid; grid-template-columns: 1.35fr .85fr .75fr 1.5fr;
+      gap: 9px; align-items: start; padding: 10px 0 10px 11px;
+      border-bottom: 1px solid #232d3f; border-left: 3px solid transparent; }
     .scanmap-row:last-child { border-bottom: none; }
+    /* L'etat du rattachement se lit au liseré, pas seulement a la couleur du
+       texte : un liseré reste visible en vision daltonienne. */
+    .scanmap-row.is-auto { border-left-color: #2a3548; }
+    .scanmap-row.is-manual { border-left-color: #4ade80; }
+    .scanmap-row.is-none { border-left-color: #fbbf24;
+      background: rgba(251,191,36,.045); }
+    .scanmap-head { display: flex; justify-content: space-between;
+      align-items: flex-end; gap: 14px; margin: 14px 0 6px; }
+    .scanmap-head-txt { font-size: 12.5px; color: #8aa0bd; }
+    .scanmap-head-txt strong { color: #fbbf24; }
+    .scanmap-filter { display: flex; gap: 6px; font-size: 12px;
+      white-space: nowrap; align-items: center; cursor: pointer; }
+    .scanmap-legend { display: flex; gap: 15px; font-size: 11px; color: #8aa0bd;
+      margin-bottom: 6px; }
+    .scanmap-legend span { display: flex; align-items: center; gap: 5px; }
+    .scanmap-legend .dot { width: 3px; height: 12px; border-radius: 2px;
+      display: inline-block; }
+    .scanmap-legend .dot-auto { background: #2a3548; }
+    .scanmap-legend .dot-manual { background: #4ade80; }
+    .scanmap-legend .dot-none { background: #fbbf24; }
+    .scanmap-col-label { font-size: 10px; text-transform: uppercase;
+      letter-spacing: .4px; color: #61728c; margin-bottom: 3px; }
     .scanmap-name { font-size: 13px; color: #e6ecf5; font-weight: 500; }
     .scanmap-sub { font-size: 11px; color: #8aa0bd; margin-top: 2px; }
     .scanmap-row select, .scanmap-row input { width: 100%; padding: 6px 8px;
@@ -308,15 +331,27 @@
           </label>
         </div>
         <div id="scan-unresolved-block" hidden>
-          <div style="font-size:12.5px;color:#8aa0bd;margin:14px 0 4px;">
-            <strong id="scan-unresolved-count" style="color:#fbbf24;"></strong>
-            &mdash; choisir l'entite cartographique, ou laisser vide si l'unite
-            n'est pas un lieu (service, guichet).
+          <div class="scanmap-head">
+            <div class="scanmap-head-txt">
+              <strong id="scan-unresolved-count"></strong>
+              &mdash; verifier l'entite cartographique et la categorie de chaque
+              unite. Laisser l'entite vide si l'unite n'est pas un lieu
+              (service, guichet).
+            </div>
+            <label class="scan-check scanmap-filter">
+              <input type="checkbox" id="scan-only-unresolved">
+              <span>N'afficher que les non localisees</span>
+            </label>
+          </div>
+          <div class="scanmap-legend">
+            <span><i class="dot dot-auto"></i>propose automatiquement</span>
+            <span><i class="dot dot-manual"></i>choix manuel</span>
+            <span><i class="dot dot-none"></i>non localisee</span>
           </div>
           <div class="scan-modal-scroll" id="scan-map-rows"></div>
           <label class="scan-check" style="display:flex;gap:7px;font-size:12.5px;margin-top:11px;">
             <input type="checkbox" id="scan-save-overrides" checked>
-            <span>Memoriser ces rattachements pour les prochains imports</span>
+            <span>Memoriser ces choix pour les prochains imports</span>
           </label>
         </div>
       </div>

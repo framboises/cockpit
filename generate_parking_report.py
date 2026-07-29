@@ -1485,23 +1485,42 @@ const closeMenuOnMobile = () => { if (isOverlayMode()) document.body.classList.a
 if (isIframed()) document.body.classList.add('iframed');
 
 const ZONE_GROUPS = [
-  { id: 'aire_accueil', label: "Aires d'accueil",
-    match: n => n.startsWith('AA ') },
-  { id: 'hospitalite', label: 'Hospitalite',
-    match: n => ['MAISON DES HUNAUDIERES', 'WELCOME', 'VISITES MUSEE'].indexOf(n) >= 0 },
-  { id: 'paddock', label: 'Paddocks',
-    match: n => n === 'PADDOCKS' },
-  { id: 'parking', label: 'Parkings',
-    match: n => n.startsWith('P ') },
-  { id: 'tribune', label: 'Tribunes',
-    match: n => n.startsWith('TRIBUNE') },
+  { id: 'aire_accueil', label: "Aires d'accueil" },
+  { id: 'hospitalite', label: 'Hospitalite' },
+  { id: 'paddock', label: 'Paddocks' },
+  { id: 'parking', label: 'Parkings' },
+  { id: 'tribune', label: 'Tribunes' },
 ];
+
+// Repli quand l'unite n'a pas de categorie choisie a l'import : conventions
+// de nommage 24H AUTOS. Les editions qui ne les suivent pas (BEAUSEJOUR,
+// PARKING OUEST, KARTING SUD) tombaient dans « Autres » et heritaient de la
+// capacite vehicule. Reimporter le classeur pose la categorie explicitement.
+function guessCategoryFromName(name, isPorte) {
+  if (isPorte) return 'porte';
+  const n = (name || '').toUpperCase();
+  if (['MAISON DES HUNAUDIERES', 'WELCOME', 'VISITES MUSEE'].indexOf(n) >= 0) {
+    return 'hospitalite';
+  }
+  if (n === 'PADDOCKS') return 'paddock';
+  if (n.startsWith('TRIBUNE')) return 'tribune';
+  if (n.startsWith('AA ')) return 'aire_accueil';
+  if (n.startsWith('P ')) return 'parking';
+  return 'autre';
+}
+
+// Categorie d'exploitation d'une unite : le choix fait a l'import fait foi.
+function unitCategory(z) {
+  if (!z) return 'autre';
+  if (z.zone_category) return z.zone_category;
+  return guessCategoryFromName(z.name, z.category === 'porte');
+}
 
 function groupZones(list) {
   const grouped = ZONE_GROUPS.map(g => ({ ...g, items: [] }));
   const other = [];
   list.forEach(z => {
-    const g = grouped.find(g => g.match(z.name));
+    const g = grouped.find(g => g.id === unitCategory(z));
     if (g) g.items.push(z);
     else other.push(z);
   });
@@ -2292,17 +2311,16 @@ function renderHome() {
   sec2.appendChild(el('h3', null, 'Vue par categorie'));
   const catBox = el('div', { class: 'home-cats' });
   const cats = [
-    { id: 'tribune', label: 'Tribunes', match: n => n.startsWith('TRIBUNE'), src: DATA.zones || [] },
-    { id: 'aire_accueil', label: "Aires d'accueil", match: n => n.startsWith('AA '), src: DATA.zones || [] },
-    { id: 'parking', label: 'Parkings', match: n => n.startsWith('P '), src: DATA.zones || [] },
-    { id: 'paddock', label: 'Paddocks', match: n => n === 'PADDOCKS', src: DATA.zones || [] },
-    { id: 'hospitalite', label: 'Hospitalite',
-      match: n => ['MAISON DES HUNAUDIERES','WELCOME','VISITES MUSEE'].indexOf(n) >= 0,
-      src: DATA.zones || [] },
-    { id: 'porte', label: 'Portes enceinte', match: () => true, src: DATA.portes || [] },
+    { id: 'tribune', label: 'Tribunes', src: DATA.zones || [] },
+    { id: 'aire_accueil', label: "Aires d'accueil", src: DATA.zones || [] },
+    { id: 'parking', label: 'Parkings', src: DATA.zones || [] },
+    { id: 'paddock', label: 'Paddocks', src: DATA.zones || [] },
+    { id: 'hospitalite', label: 'Hospitalite', src: DATA.zones || [] },
+    { id: 'autre', label: 'Autres zones', src: DATA.zones || [] },
+    { id: 'porte', label: 'Portes enceinte', all: true, src: DATA.portes || [] },
   ];
   cats.forEach(c => {
-    const items = c.src.filter(z => c.match(z.name));
+    const items = c.all ? c.src : c.src.filter(z => unitCategory(z) === c.id);
     if (!items.length) return;
     const totalE = items.reduce((s, z) => s + z.total_entree, 0);
     const totalS = items.reduce((s, z) => s + z.total_sortie, 0);
@@ -2893,7 +2911,15 @@ function sustainedPeakInHours(staff, hours) {
   return peak;
 }
 
+// Aires d'accueil qui se comportent comme des tribunes : flux pietonnier
+// malgre le prefixe. Ne sert plus qu'aux rapports sans categorie explicite.
 const ZONES_AS_TRIBUNE = new Set(['AA ARNAGE', 'AA MULSANNE']);
+
+// Categories a flux pietonnier : 650 personnes/h par agent. Les autres sont
+// des flux vehicule : 250/h. C'est ce choix qui determine l'effectif
+// recommande, d'ou l'interet de le fixer a l'import plutot que de le deduire
+// d'un prefixe de nom.
+const PEDESTRIAN_CATEGORIES = new Set(['tribune', 'paddock', 'hospitalite']);
 
 function zoneCapacity(unitOrName) {
   // Accepte un nom (string) ou l'objet unite complet
@@ -2903,6 +2929,11 @@ function zoneCapacity(unitOrName) {
              pda_count: unitOrName.pda_count || 0,
              tripode_count: unitOrName.tripode_count || 0,
              device_count: unitOrName.device_count || 0 };
+  }
+  if (unitOrName && typeof unitOrName === 'object' && unitOrName.zone_category) {
+    return PEDESTRIAN_CATEGORIES.has(unitOrName.zone_category)
+      ? { cap: 650, unit: 'personnes' }
+      : { cap: 250, unit: 'vehicules' };
   }
   const name = (typeof unitOrName === 'string') ? unitOrName : (unitOrName ? unitOrName.name : '');
   const n = (name || '').toUpperCase();

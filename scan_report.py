@@ -468,6 +468,8 @@ def scan_report_import_analyze():
             'feature_label': res['feature_label'],
             'candidates': res['candidates'],
             'suggestions': res.get('suggestions', []),
+            'category': res.get('category'),
+            'category_source': res.get('category_source'),
         })
 
     totals = {
@@ -501,6 +503,7 @@ def scan_report_import_analyze():
             'enceinte_entree': eg_entree,
         },
         'units': units,
+        'categories': scan_import.UNIT_CATEGORIES,
         'unresolved_count': sum(1 for u in units if not u['_id_feature']),
         'existing': existing,
         'delta_pct': delta_pct,
@@ -530,15 +533,20 @@ def scan_report_import_commit():
         return _err('annee_invalide')
     race = body.get('race') or scan_import.resolve_race(db, event, year)
 
-    # Mapping manuel : {"porte|PORTE NORD": {_id_feature, feature_collection, save}}
+    # Choix manuels, par unite :
+    # {"porte|PORTE NORD": {_id_feature, feature_collection, category, save}}
+    # Le rattachement geographique et la categorie sont independants : on peut
+    # classer une unite sans savoir ou elle est, et l'inverse.
     overrides = {}
     for key, val in (body.get('overrides') or {}).items():
         if '|' not in key or not isinstance(val, dict):
             continue
         kind, name = key.split('|', 1)
+        cat = val.get('category')
         overrides[(kind, name)] = {
             '_id_feature': val.get('_id_feature') or None,
             'feature_collection': val.get('feature_collection'),
+            'category': cat if cat in scan_import.CATEGORY_IDS else None,
             'save': bool(val.get('save')),
         }
 
