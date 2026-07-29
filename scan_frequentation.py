@@ -374,6 +374,7 @@ def door_inventory(doc, geo_index):
         fid = door.get('doors_id')
         out.append({
             'name': name,
+            '_id_feature': str(fid) if fid else None,
             # Sans rattachement geographique, l'unite est un service mobile
             # (UAM, HELPDESK, LITIGE) et pas un lieu de passage.
             'category': geo_index.get(str(fid)) if fid else 'sans_lieu',
@@ -522,6 +523,20 @@ def load_editions(db, event, year, back=2):
     return editions
 
 
+def _unit_key(unit):
+    """Identite durable d'une unite : le rattachement geographique d'abord.
+
+    ⚠ Comparer les NOMS fait passer un renommage pour une suppression suivie
+    d'une creation. `PORTE HOUX` est devenue `PORTE HOUX 5` en 2025 et
+    `PORTE KARTING PIETON` a pris un S : meme `_id_feature` a chaque fois.
+    Le nom ne sert de cle que pour les unites sans lieu (services mobiles).
+    """
+    fid = unit.get('_id_feature')
+    if fid:
+        return ('feature', str(fid))
+    return ('nom', (unit.get('name') or '').strip().upper())
+
+
 def compare_units(editions):
     """Portes actives d'une edition a l'autre : communes, apparues, disparues.
 
@@ -531,7 +546,7 @@ def compare_units(editions):
     current = next((e for e in editions if e['is_current']), None)
     if not current or not current.get('units'):
         return None
-    cur_names = {u['name'] for u in current['units']}
+    cur = {_unit_key(u): u for u in current['units']}
     by_cat = defaultdict(list)
     for u in current['units']:
         by_cat[u['category'] or 'sans_lieu'].append(u['name'])
@@ -540,17 +555,26 @@ def compare_units(editions):
     for ed in editions:
         if ed['is_current'] or not ed.get('units'):
             continue
-        prev = {u['name'] for u in ed['units']}
+        prev = {_unit_key(u): u for u in ed['units']}
+        common = set(cur) & set(prev)
+        # Un renommage n'est ni une apparition ni une disparition : c'est la
+        # meme porte sous un autre libelle, et le dire evite de lire une
+        # evolution de dispositif la ou il n'y en a pas.
+        renamed = [{'from': prev[k]['name'], 'to': cur[k]['name']}
+                   for k in common
+                   if (prev[k]['name'] or '').strip().upper()
+                   != (cur[k]['name'] or '').strip().upper()]
         versus.append({
             'year': ed['year'],
             'total': len(prev),
-            'added': sorted(cur_names - prev),
-            'removed': sorted(prev - cur_names),
-            'common': len(cur_names & prev),
+            'added': sorted(cur[k]['name'] for k in set(cur) - set(prev)),
+            'removed': sorted(prev[k]['name'] for k in set(prev) - set(cur)),
+            'renamed': sorted(renamed, key=lambda r: r['to']),
+            'common': len(common),
         })
     return {
         'year': current['year'],
-        'total': len(cur_names),
+        'total': len(cur),
         'by_category': {k: sorted(v) for k, v in sorted(by_cat.items())},
         'versus': versus,
         # Les zones, tribunes et hospitalites n'ont pas d'inventaire par

@@ -713,6 +713,8 @@ Le volume de scans vient de `historique_controle{type:portes}`, pas de `frequent
 
 Les unités sans `doors_id` sont classées `sans_lieu` : ce sont des services mobiles (UAM, HELPDESK, LITIGE, SERI, PUNISHER), pas des lieux de passage.
 
+⚠️ **La comparaison porte sur `_id_feature`, jamais sur le nom.** Les libellés changent d'une édition à l'autre — `PORTE HOUX` → `PORTE HOUX 5`, `PASSERELLE ANNEXE` → `PORTE ANNEXE`, `PORTE KARTING PIETON` → `…PIETONS` — pour le même `_id_feature`. Comparer les noms faisait lire 4 suppressions et 4 créations là où il n'y avait que des renommages : 17 portes communes annoncées vs 2023 au lieu de 21. Les renommages sont désormais listés à part (`renamed`), ni comme apparition ni comme disparition. Le nom ne sert de clé que pour les unités `sans_lieu`, qui n'ont pas de feature.
+
 #### Sortie de la vue Fréquentation
 
 `body.cat-freq` masque la recherche, la liste des unités, le sélecteur et le bouton Pics — la vue ne représente aucune liste d'unités. En sortir sans défaire cet état laissait **l'onglet allumé et la navigation escamotée** : le rapport paraissait bloqué sur Fréquentation.

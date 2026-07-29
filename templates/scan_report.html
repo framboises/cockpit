@@ -246,9 +246,15 @@
     .scanmap-row select:focus, .scanmap-row input:focus { outline: none;
       border-color: #4f9eff; }
     .scanmap-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
-    .scanmap-chip { font-size: 11px; padding: 3px 8px; border-radius: 11px;
-      background: #232d3f; border: 1px solid #2a3548; color: #9cc5ff;
-      cursor: pointer; }
+    .scanmap-chip { font-size: 11px; padding: 3px 8px 3px 6px;
+      border-radius: 11px; background: #232d3f; border: 1px solid #2a3548;
+      color: #9cc5ff; cursor: pointer; display: inline-flex;
+      align-items: center; gap: 4px; }
+    /* Le picto dit la collection d'un coup d'oeil ; le titre la nomme. */
+    .scanmap-chip .material-symbols-outlined { font-size: 13px;
+      color: #6b8cae; font-variation-settings: "wght" 300; }
+    .scanmap-chip:hover .material-symbols-outlined { color: #4f9eff; }
+    .scanmap-chip.is-set .material-symbols-outlined { color: #4ade80; }
     .scanmap-chip:hover { border-color: #4f9eff; background: #2a3548; }
     .scanmap-chip.is-set { background: rgba(74,222,128,.14);
       border-color: rgba(74,222,128,.4); color: #4ade80; }
@@ -636,13 +642,19 @@
     var yearSelect  = document.getElementById('year-select');
 
     function go() {
-      var ev = eventSelect.value;
-      var yr = yearSelect.value;
+      goTo(eventSelect.value, yearSelect.value);
+    }
+
+    // Exposee pour que scan_report.js puisse basculer sur le couple qui vient
+    // d'etre importe : la selection memorisee doit suivre, sinon un simple
+    // rechargement ramenerait l'ancien couple.
+    function goTo(ev, yr) {
       localStorage.setItem(LS_EVENT, ev);
       localStorage.setItem(LS_YEAR, yr);
       location.href = '/scan-report?event=' + encodeURIComponent(ev) +
                       '&year=' + encodeURIComponent(yr);
     }
+    window.scanReportGoTo = goTo;
 
     // Evenements : liste cockpit standard, + la valeur courante si elle n'y
     // figure pas (ex. slug brut '24h_du_mans' passe a la main dans l'URL).

@@ -677,6 +677,12 @@ HTML_TEMPLATE = r"""<!doctype html>
   .cat-tab.active { background: var(--accent); border-color: var(--accent);
     color: #0f1620; }
 
+  /* Hors des vues d'unite (tableau de bord, frequentation), le selecteur et
+     le bouton Pics de la barre du haut ne menent nulle part. La liste
+     laterale, elle, reste : c'est la navigation du mode autonome. */
+  body.no-unit-nav .itb-select,
+  body.no-unit-nav .itb-peaks { display: none; }
+
   /* Vue Frequentation : page a part entiere, sans navigation par unite. */
   body.cat-freq .search,
   body.cat-freq .nav-overview,
@@ -740,6 +746,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   .freq-diff li { margin-bottom: 6px; line-height: 1.6; }
   .diff-add { color: #008300; font-weight: 600; }
   .diff-del { color: #d55181; font-weight: 600; }
+  .diff-ren { color: #c98500; font-weight: 600; }
 
   /* Vue d'ensemble pics */
   .nav-overview { padding: 10px 14px 10px; }
@@ -1580,21 +1587,36 @@ function renderZoneSelect(filter) {
 }
 
 // Synchronise l'etat actif de la barre du haut avec le viewMode courant.
+// Vues qui parcourent des unites : ce sont les seules ou le selecteur et le
+// bouton Pics ont un sens.
+const UNIT_VIEWS = ['zone', 'zone-day', 'peaks-overview', 'peaks-detail'];
+
 function updateTopbarState() {
   const hb = document.getElementById('home-btn-top');
   const pb = document.getElementById('nav-peaks-top');
   const sel = document.getElementById('zone-select');
+  const inUnits = UNIT_VIEWS.indexOf(viewMode) >= 0;
+
   if (hb) hb.classList.toggle('active', viewMode === 'home');
   if (pb) pb.classList.toggle('active',
     viewMode === 'peaks-overview' || viewMode === 'peaks-detail');
   if (sel) sel.value =
     ((viewMode === 'zone' || viewMode === 'zone-day') && activeZone) ? activeZone : '';
-  // La vue Frequentation n'appartient a aucun des deux boutons : sans cela ils
-  // resteraient allumes sur l'etat precedent.
-  if (viewMode === 'frequentation') {
-    if (hb) hb.classList.remove('active');
-    if (pb) pb.classList.remove('active');
-  }
+
+  // L'onglet actif suit la VUE, pas la categorie memorisee. Sinon « Zones »
+  // restait allume sur le tableau de bord, en meme temps que la maison, alors
+  // qu'aucune unite n'est affichee.
+  document.querySelectorAll('.cat-tab').forEach(b => {
+    const on = viewMode === 'frequentation'
+      ? b.dataset.cat === 'freq'
+      : (inUnits && b.dataset.cat === currentCategory);
+    b.classList.toggle('active', on);
+  });
+
+  // Selecteur d'unite et bouton Pics : masques hors des vues d'unite. Sur le
+  // tableau de bord ils ne menent nulle part, et le selecteur y affiche un
+  // choix vide qui laisse croire a un bug.
+  document.body.classList.toggle('no-unit-nav', !inUnits);
 }
 
 function selectZone(zoneName) {
@@ -1854,8 +1876,9 @@ function renderFreqWeatherStrips(host, f, axis) {
 
   const rain = spread('rain');
   if (rain.some(v => v != null)) {
-    const { canvas } = buildFreqChartCard(
-      host, 'Precipitations (mm/jour)', null, { cls: 'freq-strip' });
+    const { canvas, expand, titleText } = buildFreqChartCard(
+      host, 'Precipitations (mm/jour)', null,
+      { cls: 'freq-strip', expandable: true });
     const opts = freqLineOptions('mm');
     opts.plugins.zoom = undefined;
     const ch = new Chart(canvas, {
@@ -1867,13 +1890,14 @@ function renderFreqWeatherStrips(host, f, axis) {
       options: opts,
     });
     charts.push(ch);
+    expand.addEventListener('click', () => openChartFullscreen(ch, titleText));
   }
 
   const tmax = spread('tmax'), tmin = spread('tmin');
   if (tmax.some(v => v != null)) {
-    const { canvas } = buildFreqChartCard(
+    const { canvas, expand, titleText } = buildFreqChartCard(
       host, 'Temperature (degres C)', 'Trait epais : maximale. Trait fin : minimale.',
-      { cls: 'freq-strip' });
+      { cls: 'freq-strip', expandable: true });
     const opts = freqLineOptions('degres C');
     opts.plugins.zoom = undefined;
     opts.scales.y.beginAtZero = false;
@@ -1891,6 +1915,7 @@ function renderFreqWeatherStrips(host, f, axis) {
       options: opts,
     });
     charts.push(ch);
+    expand.addEventListener('click', () => openChartFullscreen(ch, titleText));
   }
 }
 
@@ -1933,8 +1958,11 @@ function renderFreqDayMultiples(host, f) {
     }).filter(Boolean);
     if (!datasets.length) return;
 
-    const { canvas } = buildFreqChartCard(
-      grid, offsetLabel(d.offset) + ' - ' + fmtDateFr(d.date), null, {});
+    // Les petits multiples sont minuscules par construction : sans plein
+    // ecran ils ne se lisent pas.
+    const { canvas, expand, titleText } = buildFreqChartCard(
+      grid, offsetLabel(d.offset) + ' - ' + fmtDateFr(d.date), null,
+      { expandable: true });
     const opts = freqLineOptions('Presents', { zeroFloor: true });
     opts.plugins.zoom = undefined;
     opts.scales.y.title.display = false;
@@ -1946,6 +1974,7 @@ function renderFreqDayMultiples(host, f) {
     };
     const ch = new Chart(canvas, { type: 'line', data: { labels, datasets }, options: opts });
     charts.push(ch);
+    expand.addEventListener('click', () => openChartFullscreen(ch, titleText));
   });
   if (grid.childNodes.length) host.appendChild(grid);
 }
@@ -2037,7 +2066,15 @@ function renderFreqUnits(host, f) {
           v.year + ' et plus en ' + uc.year + ' : '),
         v.removed.join(', ')));
     }
-    if (!v.added.length && !v.removed.length) {
+    // Un renommage n'est ni une apparition ni une disparition : meme
+    // `_id_feature`, autre libelle. Le confondre ferait lire une evolution
+    // de dispositif la ou il n'y en a pas.
+    (v.renamed || []).forEach(r => {
+      ul.appendChild(el('li', null,
+        el('span', { class: 'diff-ren' }, '~ renommee : '),
+        r.from + ' -> ' + r.to));
+    });
+    if (!v.added.length && !v.removed.length && !(v.renamed || []).length) {
       ul.appendChild(el('li', { class: 'a-empty' }, 'Perimetre identique.'));
     }
     box.appendChild(ul);
@@ -3413,7 +3450,13 @@ document.addEventListener('keydown', e => {
 document.querySelectorAll('.cat-tab').forEach(btn => {
   btn.addEventListener('click', () => {
     const cat = btn.dataset.cat;
-    if (cat === currentCategory) return;
+    // Comparer a la seule categorie memorisee ne suffit pas : sur le tableau
+    // de bord elle vaut deja « zone », et cliquer sur ZONES ne faisait donc
+    // rien. C'est la VUE qui dit si on y est deja.
+    const alreadyThere = cat === 'freq'
+      ? viewMode === 'frequentation'
+      : (cat === currentCategory && UNIT_VIEWS.indexOf(viewMode) >= 0);
+    if (alreadyThere) return;
     if (cat === 'freq') lastUnitCategory = currentCategory;
     currentCategory = cat;
     document.querySelectorAll('.cat-tab').forEach(b => {

@@ -54,6 +54,7 @@
 
   var state = {
     token: null,
+    imported: null,  // couple (event, year) du dernier import reussi
     units: [],
     overrides: {},   // "kind|name" -> {_id_feature, feature_collection}
     featureCache: {} // collection -> [items]
@@ -412,7 +413,12 @@
       (u.suggestions || []).concat(u.candidates || []).forEach(function (c) {
         var chip = document.createElement("span");
         chip.className = "scanmap-chip";
-        chip.textContent = c.label;
+        var ico = document.createElement("span");
+        ico.className = "material-symbols-outlined";
+        ico.textContent = COLLECTION_ICONS[c.collection] || "place";
+        chip.appendChild(ico);
+        chip.appendChild(document.createTextNode(c.label));
+        // Le titre reste : le picto seul ne suffit pas a nommer la collection.
         chip.title = c.collection;
         chip.addEventListener("click", function () {
           setOverride(ctx, key, c._id_feature, c.collection);
@@ -521,6 +527,16 @@
       esc(txt) + ".<br>" + esc(off.map(function (u) { return u.name; }).join(", "))));
   }
 
+  // Picto par collection geographique. Deux entites peuvent porter le meme
+  // nom dans deux collections differentes (PORTE CIK existe deux fois) : sans
+  // marqueur visible, il fallait survoler chaque pastille pour les distinguer.
+  var COLLECTION_ICONS = {
+    portes: "door_front",
+    terrains: "landscape",
+    tribunes: "stadium",
+    hospitalites: "restaurant"
+  };
+
   function labelled(text) {
     var d = document.createElement("div");
     d.className = "scanmap-col-label";
@@ -602,6 +618,10 @@
         }
         return;
       }
+      // Le couple qui vient d'etre importe : a la fermeture de la modale, on
+      // charge le rapport correspondant plutot que de laisser l'utilisateur
+      // sur celui d'avant.
+      state.imported = { event: d.event, year: d.year };
       var lines = ["<strong>Import termine.</strong>",
         "Documents ecrits : " + esc(d.written.join(", ")) + "."];
       if (d.archived && d.archived.length) {
@@ -1152,6 +1172,19 @@
             headers: { "X-CSRFToken": csrf() }
           }).catch(function () {});
           state.token = null;
+        }
+        // Import reussi : on ouvre le couple qui vient d'etre importe. Sans
+        // ca on retombe sur le rapport d'avant, qui ne montre rien de ce qui
+        // vient d'etre ecrit.
+        if (modal.id === "scan-import-modal" && state.imported) {
+          var im = state.imported;
+          state.imported = null;
+          if (window.scanReportGoTo) {
+            window.scanReportGoTo(im.event, im.year);
+          } else {
+            location.href = "/scan-report?event=" + encodeURIComponent(im.event) +
+                            "&year=" + encodeURIComponent(im.year);
+          }
         }
       });
     });
