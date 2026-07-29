@@ -771,6 +771,12 @@ def scan_report_generate():
     except (TypeError, ValueError):
         return _err('annee_invalide')
 
+    # L'analyse redigee de la frequentation est embarquee dans le rapport. Elle
+    # n'appelle Claude que si les donnees ont change depuis la derniere, mais
+    # on laisse la possibilite de la couper franchement.
+    with_analysis = body.get('analysis') is not False
+    user = _current_user_email()
+
     target = ('report', event, year)
     with _JOBS_LOCK:
         _sweep_jobs()
@@ -786,12 +792,13 @@ def scan_report_generate():
         }
         _JOBS_BY_TARGET[target] = job_id
 
-    threading.Thread(target=_run_generate, args=(job_id, event, year),
+    threading.Thread(target=_run_generate,
+                     args=(job_id, event, year, with_analysis, user),
                      daemon=True).start()
     return jsonify({'ok': True, 'job_id': job_id})
 
 
-def _run_generate(job_id, event, year):
+def _run_generate(job_id, event, year, with_analysis=True, created_by=None):
     """Corps du thread de generation.
 
     Attrape BaseException et non Exception : une SystemExit ou une
@@ -811,7 +818,9 @@ def _run_generate(job_id, event, year):
     try:
         with _JOBS_LOCK:
             _JOBS[job_id]['status'] = 'running'
-        info = scan_report_build.generate(db, event, year, progress_cb=progress)
+        info = scan_report_build.generate(
+            db, event, year, progress_cb=progress,
+            with_analysis=with_analysis, created_by=created_by)
         with _JOBS_LOCK:
             job = _JOBS[job_id]
             job.update({'status': 'done', 'progress': 100,

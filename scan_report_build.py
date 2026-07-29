@@ -210,7 +210,50 @@ def build_payload_from_complet(db, event, year, progress_cb=None,
     return payload, info
 
 
-def generate(db, event, year, progress_cb=None):
+def _build_frequentation(db, event, year, info, with_analysis=True,
+                         created_by=None):
+    """Bloc frequentation, ou None. Un echec ici ne doit pas perdre le rapport."""
+    import scan_frequentation
+    try:
+        block = scan_frequentation.build_frequentation_block(db, event, year)
+    except Exception:
+        logger.warning('Bloc frequentation indisponible pour %s %s',
+                       event, year, exc_info=True)
+        return None
+    if not block:
+        info['frequentation_editions'] = []
+        return None
+
+    info['frequentation_editions'] = [e['year'] for e in block['editions']]
+    info['entries_comparable'] = block.get('entries_comparable')
+
+    # L'analyse est EMBARQUEE ici et pas appelee a l'ouverture : le rapport est
+    # un fichier autonome, sans aucun appel reseau. Un appel par regeneration,
+    # jamais un par lecture — et zero appel si les donnees n'ont pas bouge.
+    if with_analysis:
+        import scan_analysis
+        try:
+            doc = scan_analysis.generate_frequentation_analysis(
+                db, event, year, block, created_by=created_by)
+        except Exception:
+            logger.warning('Analyse frequentation echouee pour %s %s',
+                           event, year, exc_info=True)
+            doc = None
+        if doc and doc.get('sections'):
+            block['analysis'] = {
+                'sections': doc['sections'],
+                'model': doc.get('model'),
+                'created_at': str(doc.get('created_at') or ''),
+            }
+            info['frequentation_analysis'] = (
+                'reutilisee' if doc.get('reused') else 'generee')
+        else:
+            info['frequentation_analysis'] = 'absente'
+    return block
+
+
+def generate(db, event, year, progress_cb=None, with_analysis=True,
+             created_by=None):
     """Genere le rapport pour (event, year) et retourne un descriptif.
 
     Utilise le document `complet` s'il existe, sinon retombe sur l'ancienne
@@ -232,6 +275,15 @@ def generate(db, event, year, progress_cb=None):
         info = {'source': 'legacy', 'zones': len(payload['zones']),
                 'portes': len(payload['portes']), 'omitted_units': [],
                 'autre_scans_not_shown': 0, 'staffing_grafted': 0}
+
+    # Bloc frequentation : ajoute ici et pas dans les deux constructeurs, parce
+    # que c'est le seul endroit ou le NOM COCKPIT de l'evenement est connu a
+    # coup sur. Le chemin de repli travaille sur le slug historique
+    # (`24h_du_mans`), avec lequel historique_controle ne trouverait rien.
+    _p(86, 'Frequentation et comparaison aux editions passees')
+    payload['frequentation'] = _build_frequentation(
+        db, event, year, info, with_analysis=with_analysis,
+        created_by=created_by)
 
     _p(92, 'Rendu HTML')
     html = gpr.render_html(payload)

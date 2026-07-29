@@ -2045,7 +2045,7 @@ def _merge_usage(*usages):
 
 
 def call_claude(system_prompt, user_prompt, on_progress=None, model=None,
-                memory_block=None):
+                memory_block=None, section_keys=None):
     """Appelle l'API Claude en streaming, retourne (sections_dict, raw_text, usage).
 
     Si le retour n'est pas du JSON parsable, sections_dict est None et
@@ -2057,12 +2057,17 @@ def call_claude(system_prompt, user_prompt, on_progress=None, model=None,
 
     memory_block (optionnel) : bloc 'Connaissance accumulee' ajoute en
     bloc system separe (cache_control distinct).
+
+    section_keys (optionnel) : cles attendues en sortie. Par defaut les neuf
+    sections du resume pcorg. Les appelants qui imposent un autre contrat JSON
+    (chaine scans) DOIVENT le passer, sinon leurs sections sont filtrees et
+    remplacees par des sections pcorg vides.
     """
     raw_text, usage, stop_reason = _claude_stream_request(
         system_prompt, user_prompt, CLAUDE_MAX_TOKENS,
         on_progress=on_progress, model=model, memory_block=memory_block,
     )
-    sections = _parse_sections(raw_text)
+    sections = _parse_sections(raw_text, section_keys)
 
     if stop_reason == "max_tokens":
         logger.warning("Reponse Claude tronquee a max_tokens (%d) -> retry avec %d",
@@ -2078,7 +2083,7 @@ def call_claude(system_prompt, user_prompt, on_progress=None, model=None,
                 retry_system, user_prompt, CLAUDE_MAX_TOKENS_RETRY,
                 on_progress=on_progress, model=model, memory_block=memory_block,
             )
-            sections2 = _parse_sections(raw_text2)
+            sections2 = _parse_sections(raw_text2, section_keys)
             if sections2 is not None:
                 merged = _merge_usage(usage, usage2)
                 merged["retried_for_truncation"] = True
@@ -2091,7 +2096,7 @@ def call_claude(system_prompt, user_prompt, on_progress=None, model=None,
     return sections, raw_text, usage
 
 
-def _parse_sections(raw_text):
+def _parse_sections(raw_text, section_keys=None):
     """Tente de parser un JSON dans raw_text et de retourner un dict de sections.
 
     Robustesse :
@@ -2104,6 +2109,7 @@ def _parse_sections(raw_text):
     """
     if not raw_text:
         return None
+    keys = tuple(section_keys) if section_keys else SECTION_KEYS
     txt = raw_text.strip()
     # Tolere un eventuel bloc markdown ```json ... ```
     if txt.startswith("```"):
@@ -2118,7 +2124,7 @@ def _parse_sections(raw_text):
     try:
         data = json.loads(txt)
         if isinstance(data, dict):
-            return _normalize_sections(data)
+            return _normalize_sections(data, keys)
     except (ValueError, TypeError):
         pass
 
@@ -2130,7 +2136,7 @@ def _parse_sections(raw_text):
     pairs = _re_local.findall(pattern, txt, _re_local.DOTALL)
     recovered = {}
     for k, v in pairs:
-        if k in SECTION_KEYS:
+        if k in keys:
             # Decode les escapes JSON dans la valeur.
             try:
                 recovered[k] = json.loads('"' + v + '"')
@@ -2147,7 +2153,7 @@ def _parse_sections(raw_text):
     if key_matches:
         last_match = key_matches[-1]
         last_key = last_match.group(1)
-        if last_key in SECTION_KEYS and last_key not in recovered:
+        if last_key in keys and last_key not in recovered:
             start = last_match.end()
             val_chars = []
             i = start
@@ -2174,11 +2180,11 @@ def _parse_sections(raw_text):
 
     if not recovered:
         return None
-    return _normalize_sections(recovered)
+    return _normalize_sections(recovered, keys)
 
 
-def _normalize_sections(data):
-    """Convertit un dict brut en dict ne contenant que les SECTION_KEYS,
+def _normalize_sections(data, section_keys=None):
+    """Convertit un dict brut en dict ne contenant que les cles attendues,
     chaque valeur etant une chaine non vide ou ''.
 
     Tolerance format : si Claude renvoie une LISTE pour une section (au lieu
@@ -2187,7 +2193,7 @@ def _normalize_sections(data):
     Idem pour un dict (rare) : on aplatit en lignes 'cle : valeur'.
     """
     out = {}
-    for key in SECTION_KEYS:
+    for key in (tuple(section_keys) if section_keys else SECTION_KEYS):
         v = data.get(key)
         if v is None:
             out[key] = ""

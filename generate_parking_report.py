@@ -677,6 +677,61 @@ HTML_TEMPLATE = r"""<!doctype html>
   .cat-tab.active { background: var(--accent); border-color: var(--accent);
     color: #0f1620; }
 
+  /* Vue Frequentation : page a part entiere, sans navigation par unite. */
+  body.cat-freq .search,
+  body.cat-freq .nav-overview,
+  body.cat-freq #zone-list,
+  body.cat-freq .itb-select,
+  body.cat-freq .itb-peaks { display: none; }
+  .cat-tab { font-size: 11px; padding: 7px 6px; }
+
+  /* Palette des editions — validee au script du skill dataviz sur fond
+     #0f1620 : pire ecart daltonisme DE 13.0, bien au-dessus du seuil de 8.
+     L'emphase sur l'annee courante passe par l'epaisseur du trait, pas par
+     la couleur, pour que les trois annees restent distinguables. */
+  .freq-hero { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap;
+    margin-bottom: 6px; }
+  .freq-hero-val { font-size: 52px; font-weight: 600; color: var(--accent);
+    line-height: 1; font-variant-numeric: tabular-nums; }
+  .freq-hero-label { font-size: 12px; text-transform: uppercase;
+    letter-spacing: 0.6px; color: var(--muted); }
+  .freq-hero-sub { font-size: 13px; color: var(--muted); }
+  .freq-legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 10px 0 4px; }
+  .freq-legend-item { display: flex; align-items: center; gap: 7px;
+    font-size: 12px; color: var(--text); }
+  .freq-swatch { width: 22px; height: 3px; border-radius: 2px; flex: 0 0 auto; }
+  .freq-note { background: rgba(251,191,36,0.09);
+    border: 1px solid rgba(251,191,36,0.35); color: var(--amber);
+    border-radius: 7px; padding: 10px 12px; font-size: 12.5px;
+    line-height: 1.55; margin: 12px 0; }
+  /* La courbe maitresse porte la page : hauteur genereuse, les bandeaux
+     meteo restent des accompagnements. */
+  .freq-main .chart-wrap { height: 400px; }
+  .freq-sub { margin: -6px 0 10px; font-size: 12px; color: var(--muted); }
+  .freq-strip .chart-wrap { height: 120px; }
+  .freq-small { display: grid; gap: 12px; margin-top: 12px;
+                grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+  .freq-small .chart-card { padding: 12px 14px; }
+  .freq-small .chart-wrap { height: 150px; }
+  .freq-small h3 { font-size: 12px; margin-bottom: 8px; }
+  .freq-strip h3 { font-size: 11px; }
+  .freq-daygrid { display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  .freq-daycard { background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 13px 15px; }
+  .freq-daycard .d-off { font-size: 11px; font-weight: 700; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 0.5px; }
+  .freq-daycard .d-date { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .freq-daycard .d-val { font-size: 26px; font-weight: 600; color: var(--text);
+    font-variant-numeric: tabular-nums; margin-top: 8px; }
+  .freq-daycard .d-sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+  .freq-daycard .d-meteo { margin-top: 9px; padding-top: 8px;
+    border-top: 1px solid var(--border); font-size: 11.5px; color: var(--muted);
+    display: flex; gap: 12px; flex-wrap: wrap; }
+  .freq-daycard .d-delta { font-size: 11.5px; margin-top: 5px; }
+  .freq-daycard.unmeasured { opacity: .55; }
+  .freq-insights li { margin-bottom: 7px; line-height: 1.6; }
+
   /* Vue d'ensemble pics */
   .nav-overview { padding: 10px 14px 10px; }
   .nav-overview button { width: 100%; text-align: left; padding: 9px 12px;
@@ -974,6 +1029,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   <div class="itb-cats">
     <button class="cat-tab active" data-cat="zone">Zones</button>
     <button class="cat-tab" data-cat="porte">Portes</button>
+    <button class="cat-tab" data-cat="freq">Frequentation</button>
   </div>
   <select class="itb-select" id="zone-select" aria-label="Selectionner une zone ou une porte"></select>
   <button class="itb-peaks" id="nav-peaks-top" title="Vue d'ensemble - Pics">
@@ -1010,6 +1066,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   <div class="cat-tabs">
     <button class="cat-tab active" data-cat="zone">Zones</button>
     <button class="cat-tab" data-cat="porte">Portes</button>
+    <button class="cat-tab" data-cat="freq">Frequentation</button>
   </div>
   <div class="nav-overview">
     <button id="nav-peaks" title="Voir le pic de presents par unite">
@@ -1496,6 +1553,12 @@ function updateTopbarState() {
     viewMode === 'peaks-overview' || viewMode === 'peaks-detail');
   if (sel) sel.value =
     ((viewMode === 'zone' || viewMode === 'zone-day') && activeZone) ? activeZone : '';
+  // La vue Frequentation n'appartient a aucun des deux boutons : sans cela ils
+  // resteraient allumes sur l'etat precedent.
+  if (viewMode === 'frequentation') {
+    if (hb) hb.classList.remove('active');
+    if (pb) pb.classList.remove('active');
+  }
 }
 
 function selectZone(zoneName) {
@@ -1522,6 +1585,480 @@ function showHome() {
   charts = [];
   renderHome();
   updateTopbarState();
+}
+
+// ===========================================================================
+// Vue Frequentation : fréquentation journaliere de l'enceinte, comparee aux
+// editions passees et croisee avec la meteo.
+// ===========================================================================
+
+// Palette validee au script du skill dataviz (fond #0f1620, mode sombre) :
+// pire ecart daltonisme DE 13.0 pour un seuil de 8, vision normale DE 29.9.
+const FREQ_COLORS = ['#3987e5', '#008300', '#d55181', '#c98500'];
+const FREQ_RAIN = '#3987e5';
+const FREQ_TEMP = '#c98500';
+
+const offsetLabel = o => (o === 0 ? 'Jour J' : (o > 0 ? 'J+' + o : 'J' + o));
+
+function freqData() {
+  // Lecture defensive : les rapports generes avant cette vue n'ont pas la cle.
+  return (typeof DATA !== 'undefined' && DATA.frequentation) || null;
+}
+
+function showFrequentation() {
+  viewMode = 'frequentation';
+  activeZone = null;
+  activeDay = null;
+  document.getElementById('home-btn').classList.remove('active');
+  document.getElementById('nav-peaks').classList.remove('active');
+  document.querySelectorAll('.zone-list li').forEach(li => li.classList.remove('active'));
+  charts.forEach(c => c.destroy());
+  charts = [];
+  renderFrequentation();
+  updateTopbarState();
+}
+
+function freqAxis(editions) {
+  // Axe commun a toutes les editions : slots horaires alignes sur le jour de
+  // course. C'est ce qui rend les annees superposables malgre des dates
+  // calendaires differentes.
+  let min = Infinity, max = -Infinity;
+  editions.forEach(e => (e.hourly || []).forEach(h => {
+    if (h.slot < min) min = h.slot;
+    if (h.slot > max) max = h.slot;
+  }));
+  if (!isFinite(min)) return { slots: [], labels: [] };
+  const slots = [], labels = [];
+  for (let s = min; s <= max; s++) {
+    slots.push(s);
+    const off = Math.floor(s / 24);
+    const hour = ((s % 24) + 24) % 24;
+    // On n'etiquette que le debut de journee : 170 etiquettes seraient
+    // illisibles, et le lecteur vise un jour, pas une heure precise.
+    labels.push(hour === 0 ? offsetLabel(off) : '');
+  }
+  return { slots, labels, min, max };
+}
+
+function freqLineOptions(yTitle) {
+  return {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },  // une infobulle, toutes les series
+    plugins: {
+      legend: { display: false },  // legende maison sous le titre, plus lisible
+      tooltip: {
+        backgroundColor: '#0f1620', borderColor: '#2a3548', borderWidth: 1,
+        callbacks: {
+          title: items => {
+            if (!items.length) return '';
+            const s = items[0].dataset._slots[items[0].dataIndex];
+            const off = Math.floor(s / 24);
+            const hour = ((s % 24) + 24) % 24;
+            return offsetLabel(off) + ' - ' + String(hour).padStart(2, '0') + 'h';
+          },
+        },
+      },
+      zoom: {
+        pan: { enabled: true, mode: 'x', modifierKey: null },
+        zoom: { wheel: { enabled: false }, pinch: { enabled: true },
+                drag: { enabled: false }, mode: 'x' },
+        limits: { x: { minRange: 6 } },
+      },
+    },
+    scales: {
+      x: { ticks: { color: '#8aa0bd', maxRotation: 0, autoSkip: false },
+           grid: { color: 'rgba(255,255,255,0.04)' } },
+      y: { beginAtZero: true, ticks: { color: '#8aa0bd' },
+           grid: { color: 'rgba(255,255,255,0.06)' },
+           title: { display: true, text: yTitle, color: '#8aa0bd' } },
+    },
+  };
+}
+
+function buildFreqChartCard(host, title, subtitle, opts) {
+  opts = opts || {};
+  const card = el('div', { class: 'chart-card' + (opts.cls ? ' ' + opts.cls : '') });
+  card.appendChild(el('h3', null, title));
+  let expand = null;
+  // Le plein ecran n'a de sens que sur la courbe maitresse : un bouton sans
+  // effet sur les bandeaux serait pire que pas de bouton.
+  if (opts.expandable) {
+    expand = el('button', { class: 'chart-expand', 'aria-label': 'Ouvrir en grand',
+                            title: 'Ouvrir en grand' });
+    expand.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"' +
+      ' stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline>' +
+      '<polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line>' +
+      '<line x1="3" y1="21" x2="10" y2="14"></line></svg>';
+    card.appendChild(expand);
+  }
+  if (subtitle) card.appendChild(el('div', { class: 'freq-sub' }, subtitle));
+  const wrap = el('div', { class: 'chart-wrap' });
+  const canvas = document.createElement('canvas');
+  wrap.appendChild(canvas);
+  card.appendChild(wrap);
+  host.appendChild(card);
+  return { card, canvas, wrap, expand, titleText: title };
+}
+
+function renderFreqMainChart(host, f, axis) {
+  const { card, canvas, wrap, expand, titleText } =
+    buildFreqChartCard(host, 'Presents dans l\'enceinte, aligne sur le jour de course',
+                       'Survol : toutes les editions a la meme position. Molette = zoom apres 2,5 s.',
+                       { expandable: true, cls: 'freq-main' });
+
+  const datasets = f.editions.map((ed, i) => {
+    const bySlot = {};
+    (ed.hourly || []).forEach(h => { bySlot[h.slot] = h.present; });
+    const data = axis.slots.map(s => (s in bySlot ? bySlot[s] : null));
+    return {
+      label: String(ed.year),
+      data,
+      _slots: axis.slots,
+      borderColor: FREQ_COLORS[i % FREQ_COLORS.length],
+      backgroundColor: FREQ_COLORS[i % FREQ_COLORS.length] + '1a',  // ~10 %
+      // L'annee courante porte l'emphase par l'epaisseur, pas par la couleur.
+      borderWidth: ed.is_current ? 2.6 : 1.8,
+      fill: ed.is_current,
+      pointRadius: 0, pointHoverRadius: 5, pointHitRadius: 24,
+      tension: 0.25, spanGaps: false,
+    };
+  });
+
+  const ch = new Chart(canvas, {
+    type: 'line',
+    data: { labels: axis.labels, datasets },
+    options: freqLineOptions('Presents'),
+  });
+  charts.push(ch);
+  expand.addEventListener('click', () => openChartFullscreen(ch, titleText));
+  attachWheelZoomDelay(wrap, ch);
+  return card;
+}
+
+function renderFreqWeatherStrips(host, f, axis) {
+  const current = f.editions.find(e => e.is_current);
+  if (!current) return;
+  const byDate = {};
+  current.days.forEach(d => { byDate[d.offset] = d.date; });
+
+  // Valeur quotidienne etalee sur les 24 slots du jour : les bandeaux restent
+  // ainsi cales sur le meme axe temporel que la courbe principale.
+  const spread = key => axis.slots.map(s => {
+    const w = f.weather[byDate[Math.floor(s / 24)]];
+    return w && w[key] != null ? w[key] : null;
+  });
+
+  const rain = spread('rain');
+  if (rain.some(v => v != null)) {
+    const { canvas } = buildFreqChartCard(
+      host, 'Precipitations (mm/jour)', null, { cls: 'freq-strip' });
+    const opts = freqLineOptions('mm');
+    opts.plugins.zoom = undefined;
+    const ch = new Chart(canvas, {
+      type: 'bar',
+      data: { labels: axis.labels,
+              datasets: [{ label: 'Pluie', data: rain, _slots: axis.slots,
+                           backgroundColor: FREQ_RAIN, borderWidth: 0,
+                           barPercentage: 1, categoryPercentage: 1 }] },
+      options: opts,
+    });
+    charts.push(ch);
+  }
+
+  const tmax = spread('tmax'), tmin = spread('tmin');
+  if (tmax.some(v => v != null)) {
+    const { canvas } = buildFreqChartCard(
+      host, 'Temperature (degres C)', 'Trait epais : maximale. Trait fin : minimale.',
+      { cls: 'freq-strip' });
+    const opts = freqLineOptions('degres C');
+    opts.plugins.zoom = undefined;
+    opts.scales.y.beginAtZero = false;
+    const ch = new Chart(canvas, {
+      type: 'line',
+      data: { labels: axis.labels, datasets: [
+        // La mesure est journaliere : des marches disent la verite, une courbe
+        // lissee inventerait une variation intra-journaliere.
+        { label: 'Maximale', data: tmax, _slots: axis.slots, borderColor: FREQ_TEMP,
+          backgroundColor: FREQ_TEMP + '1a', borderWidth: 2, pointRadius: 0,
+          fill: '+1', stepped: 'middle', spanGaps: false },
+        { label: 'Minimale', data: tmin, _slots: axis.slots, borderColor: FREQ_TEMP + '99',
+          borderWidth: 1.4, pointRadius: 0, stepped: 'middle', spanGaps: false },
+      ] },
+      options: opts,
+    });
+    charts.push(ch);
+  }
+}
+
+function renderFreqDayMultiples(host, f) {
+  // Un petit multiple par jour : c'est la seule lecture qui montre que deux
+  // editions atteignent le meme pic sans se remplir au meme rythme.
+  const current = f.editions.find(e => e.is_current);
+  if (!current) return;
+  const hours = [];
+  for (let h = 0; h < 24; h++) hours.push(h);
+  const labels = hours.map(h => (h % 6 === 0 ? String(h).padStart(2, '0') + 'h' : ''));
+
+  const grid = el('div', { class: 'freq-small' });
+  current.days.forEach(d => {
+    if (!d.measured) return;
+    const datasets = f.editions.map((ed, i) => {
+      const day = (ed.days || []).find(x => x.offset === d.offset);
+      if (!day || !day.measured) return null;
+      const bySlot = {};
+      (ed.hourly || []).forEach(h => {
+        if (Math.floor(h.slot / 24) === d.offset) bySlot[((h.slot % 24) + 24) % 24] = h.present;
+      });
+      return {
+        label: String(ed.year),
+        data: hours.map(h => (h in bySlot ? bySlot[h] : null)),
+        _slots: hours.map(h => d.offset * 24 + h),
+        borderColor: FREQ_COLORS[i % FREQ_COLORS.length],
+        backgroundColor: FREQ_COLORS[i % FREQ_COLORS.length] + '1a',
+        borderWidth: ed.is_current ? 2.4 : 1.6,
+        fill: ed.is_current,
+        pointRadius: 0, pointHoverRadius: 4, pointHitRadius: 18,
+        tension: 0.25, spanGaps: false,
+      };
+    }).filter(Boolean);
+    if (!datasets.length) return;
+
+    const { canvas } = buildFreqChartCard(
+      grid, offsetLabel(d.offset) + ' - ' + fmtDateFr(d.date), null, {});
+    const opts = freqLineOptions('Presents');
+    opts.plugins.zoom = undefined;
+    opts.scales.y.title.display = false;
+    opts.plugins.tooltip.callbacks.title = items =>
+      (items.length ? String(items[0].label || '').padStart(2, '0') : '');
+    const ch = new Chart(canvas, { type: 'line', data: { labels, datasets }, options: opts });
+    charts.push(ch);
+  });
+  if (grid.childNodes.length) host.appendChild(grid);
+}
+
+
+function renderFreqDayCards(host, f) {
+  const current = f.editions.find(e => e.is_current);
+  if (!current) return;
+  const prev = f.editions.filter(e => !e.is_current);
+  const grid = el('div', { class: 'freq-daygrid' });
+
+  current.days.forEach(d => {
+    const card = el('div', { class: 'freq-daycard' + (d.measured ? '' : ' unmeasured') });
+    card.appendChild(el('div', { class: 'd-off' }, offsetLabel(d.offset)));
+    card.appendChild(el('div', { class: 'd-date' }, fmtDateFr(d.date)));
+
+    if (!d.measured) {
+      // Capteurs pas encore actifs : le dire, plutot que d'afficher un zero
+      // qui se lirait comme une frequentation nulle.
+      card.appendChild(el('div', { class: 'd-val' }, '--'));
+      card.appendChild(el('div', { class: 'd-sub' }, 'aucune mesure ce jour'));
+    } else {
+      card.appendChild(el('div', { class: 'd-val' }, fmt(d.peak_present)));
+      card.appendChild(el('div', { class: 'd-sub' },
+        'presents au pic' + (d.peak_hour ? ' a ' + d.peak_hour : '')));
+      card.appendChild(el('div', { class: 'd-sub' }, fmt(d.entrees) + ' entrees'));
+
+      prev.forEach(ed => {
+        const p = ed.days.find(x => x.offset === d.offset && x.measured);
+        if (!p || !p.peak_present) return;
+        const delta = Math.round((d.peak_present - p.peak_present) * 1000 / p.peak_present) / 10;
+        const cls = delta > 0 ? 'delta-up' : (delta < 0 ? 'delta-down' : 'delta-flat');
+        card.appendChild(el('div', { class: 'd-delta ' + cls },
+          (delta > 0 ? '+' : '') + delta + ' % vs ' + ed.year));
+      });
+    }
+
+    const w = f.weather[d.date];
+    if (w) {
+      const meteo = el('div', { class: 'd-meteo' });
+      if (w.tmax != null) meteo.appendChild(el('span', null, w.tmax + ' degres'));
+      if (w.rain != null) meteo.appendChild(el('span', null, w.rain + ' mm'));
+      if (w.sun != null) meteo.appendChild(el('span', null, w.sun + ' h soleil'));
+      card.appendChild(meteo);
+    }
+    grid.appendChild(card);
+  });
+  host.appendChild(grid);
+}
+
+function renderFreqInsights(host, f) {
+  const ins = f.insights || {};
+  const ul = el('ul', { class: 'freq-insights' });
+
+  if (ins.busiest_day) {
+    const b = ins.busiest_day;
+    ul.appendChild(el('li', null, 'Jour le plus charge : ' + offsetLabel(b.offset) +
+      ' (' + fmtDateFr(b.date) + '), ' + fmt(b.peak_present) + ' presents au pic' +
+      (b.peak_hour ? ' a ' + b.peak_hour : '') + '.'));
+  }
+
+  const rh = ins.race_day_peak_by_year || [];
+  if (rh.length > 1) {
+    const hours = [...new Set(rh.map(r => r.hour))];
+    ul.appendChild(el('li', null, hours.length === 1
+      ? 'Le pic du jour de course tombe a ' + hours[0] + ' sur les ' + rh.length +
+        ' editions comparees : ' + rh.map(r => r.year + ' ' + fmt(r.peak_present)).join(', ') + '.'
+      : 'Heure du pic le jour de course : ' +
+        rh.map(r => r.year + ' a ' + r.hour + ' (' + fmt(r.peak_present) + ')').join(', ') + '.'));
+  }
+
+  const wc = ins.weather_correlation || {};
+  const strongest = [['pluie', wc.rain], ['temperature', wc.tmax], ['ensoleillement', wc.sun]]
+    .filter(x => x[1] != null)
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
+  if (strongest && wc.sample_days) {
+    const [name, r] = strongest;
+    const force = Math.abs(r) >= 0.6 ? 'forte' : (Math.abs(r) >= 0.3 ? 'moderee' : 'faible');
+    ul.appendChild(el('li', null,
+      'Lien meteo le plus marque : ' + name + ', correlation ' + force + ' (' + r +
+      ') sur ' + wc.sample_days + ' jours. Une correlation ne prouve pas une cause.'));
+  }
+
+  if (ul.childNodes.length) {
+    const sec = el('div', { class: 'analysis' });
+    sec.appendChild(el('h4', null, 'Constats'));
+    sec.appendChild(ul);
+    host.appendChild(sec);
+  }
+}
+
+const FREQ_ANALYSIS_TITLES = {
+  synthese: 'Synthese',
+  dynamique_journaliere: 'Dynamique journaliere',
+  comparaison_editions: 'Comparaison entre editions',
+  effet_meteo: 'Effet de la meteo',
+  recommandations: 'Recommandations',
+};
+
+function renderFreqAnalysis(host, f) {
+  const sections = f.analysis && f.analysis.sections;
+  if (!sections) return;
+  const order = Object.keys(FREQ_ANALYSIS_TITLES)
+    .filter(k => (sections[k] || '').trim());
+  if (!order.length) return;
+
+  const box = el('div', { class: 'analysis' });
+  box.appendChild(el('h4', null, 'Analyse redigee'));
+  order.forEach(k => {
+    const sec = el('div', { class: 'a-section' });
+    if (k !== 'synthese') sec.appendChild(el('h4', null, FREQ_ANALYSIS_TITLES[k]));
+    const lines = String(sections[k]).split('\n').map(l => l.trim()).filter(Boolean);
+    const bullets = lines.filter(l => l.startsWith('- ') || l.startsWith('* '));
+    // Le modele repond en texte a puces : on le rend en liste plutot que de
+    // laisser des tirets dans un paragraphe.
+    if (bullets.length === lines.length) {
+      const ul = el('ul');
+      lines.forEach(l => ul.appendChild(el('li', null, l.slice(2).trim())));
+      sec.appendChild(ul);
+    } else {
+      lines.forEach(l => sec.appendChild(
+        el('p', { class: 'a-overview' }, l.replace(/^[-*]\s+/, ''))));
+    }
+    box.appendChild(sec);
+  });
+  const meta = [f.analysis.model, (f.analysis.created_at || '').slice(0, 16)]
+    .filter(Boolean).join(' - ');
+  if (meta) box.appendChild(el('div', { class: 'a-empty' },
+    'Genere par ' + meta + '. Relire avant diffusion.'));
+  host.appendChild(box);
+}
+
+function renderFrequentation() {
+  const main = document.getElementById('main');
+  main.replaceChildren();
+
+  const f = freqData();
+  if (!f || !f.editions || !f.editions.length) {
+    main.appendChild(el('h2', null, 'Frequentation'));
+    main.appendChild(el('div', { class: 'a-empty' },
+      'Aucune donnee de frequentation pour cette edition. Cette vue s\'appuie sur ' +
+      'le document historique_controle de type frequentation.'));
+    main.scrollTop = 0;
+    return;
+  }
+
+  const current = f.editions.find(e => e.is_current) || f.editions[0];
+  const prev = f.editions.filter(e => !e.is_current);
+
+  const header = el('div', { class: 'sticky-header' });
+  header.appendChild(el('h2', null, 'Frequentation de l\'enceinte generale'));
+  header.appendChild(el('div', { class: 'subtitle' },
+    String(f.event).replace(/_/g, ' ').toUpperCase() + ' ' + f.year +
+    ' - ' + f.totals.days_measured + ' jours mesures' +
+    (prev.length ? ' - compare a ' + prev.map(e => e.year).join(' et ') : '')));
+
+  const hero = el('div', { class: 'freq-hero' });
+  hero.appendChild(el('div', { class: 'freq-hero-val' }, fmt(f.totals.peak_present)));
+  const heroTxt = el('div');
+  heroTxt.appendChild(el('div', { class: 'freq-hero-label' }, 'Pic de presents'));
+  const b = (f.insights || {}).busiest_day;
+  heroTxt.appendChild(el('div', { class: 'freq-hero-sub' },
+    b ? offsetLabel(b.offset) + ' - ' + fmtDateFr(b.date) + (b.peak_hour ? ' a ' + b.peak_hour : '')
+      : ''));
+  hero.appendChild(heroTxt);
+  prev.forEach(ed => {
+    const p = Math.max(0, ...ed.days.map(d => d.peak_present || 0));
+    if (!p) return;
+    const delta = Math.round((f.totals.peak_present - p) * 1000 / p) / 10;
+    const box = el('div');
+    box.appendChild(el('div', { class: 'freq-hero-label' }, 'vs ' + ed.year));
+    box.appendChild(el('div', {
+      class: 'kpi-value ' + (delta > 0 ? 'green' : (delta < 0 ? 'red' : '')),
+    }, (delta > 0 ? '+' : '') + delta + ' %'));
+    hero.appendChild(box);
+  });
+  header.appendChild(hero);
+  main.appendChild(header);
+
+  // Legende maison : chaque edition est nommee, l'identite ne repose donc
+  // jamais sur la seule couleur.
+  const legend = el('div', { class: 'freq-legend' });
+  f.editions.forEach((ed, i) => {
+    const item = el('div', { class: 'freq-legend-item' });
+    const sw = el('span', { class: 'freq-swatch' });
+    sw.style.background = FREQ_COLORS[i % FREQ_COLORS.length];
+    sw.style.height = ed.is_current ? '4px' : '2px';
+    item.appendChild(sw);
+    item.appendChild(document.createTextNode(
+      ed.year + (ed.is_current ? ' (edition analysee)' : '')));
+    legend.appendChild(item);
+  });
+  main.appendChild(legend);
+
+  if (f.entries_comparable === false) {
+    const doors = (f.insights || {}).doors_by_year || {};
+    main.appendChild(el('div', { class: 'freq-note' },
+      'Le nombre de portes instrumentees differe entre les editions (' +
+      Object.keys(doors).sort().map(y => y + ' : ' + doors[y]).join(', ') +
+      '). Les totaux d\'entrees ne sont donc pas comparables d\'une annee sur ' +
+      'l\'autre : la comparaison porte sur le pic de presents, qui ne depend ' +
+      'quasiment pas des portes instrumentees en marge.'));
+  }
+
+  const axis = freqAxis(f.editions);
+  const charts1 = el('div', { class: 'charts' });
+  main.appendChild(charts1);
+  if (axis.slots.length) {
+    renderFreqMainChart(charts1, f, axis);
+    renderFreqWeatherStrips(charts1, f, axis);
+  }
+
+  const cmpSec = el('div', { class: 'home-section' });
+  cmpSec.appendChild(el('h3', null, 'Journee par journee, editions superposees'));
+  main.appendChild(cmpSec);
+  renderFreqDayMultiples(cmpSec, f);
+
+  const daysSec = el('div', { class: 'home-section' });
+  daysSec.appendChild(el('h3', null, 'Detail par jour'));
+  main.appendChild(daysSec);
+  renderFreqDayCards(daysSec, f);
+
+  renderFreqInsights(main, f);
+
+  renderFreqAnalysis(main, f);
+
+  main.scrollTop = 0;
 }
 
 function aggregatePortesEnceinte() {
@@ -2663,6 +3200,14 @@ document.querySelectorAll('.cat-tab').forEach(btn => {
     peaksFilter = '';
     activeZone = null;
     activeDay = null;
+    // La frequentation n'est pas une liste d'unites : on masque le chrome de
+    // navigation par unite (recherche, liste, bouton Pics) et on affiche une
+    // page a part entiere.
+    document.body.classList.toggle('cat-freq', cat === 'freq');
+    if (cat === 'freq') {
+      showFrequentation();
+      return;
+    }
     renderSidebar('');
     const list = currentList();
     if (list.length) selectZone(list[0].name);

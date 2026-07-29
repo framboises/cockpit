@@ -533,6 +533,59 @@ Persistance dans `scan_analyses`, historisée (jamais écrasée) pour pouvoir co
 
 Si `ANTHROPIC_API_KEY` est vide → **503 `cle_api_absente`**. Le mode `dry_run` permet d'itérer sur le prompt sans consommer de tokens.
 
+### Vue Fréquentation
+
+Troisième onglet du rapport, à côté de **Zones** et **Portes** : un tableau de bord de la fréquentation de l'**enceinte générale**, jour par jour, comparé aux deux éditions précédentes et croisé avec la météo.
+
+Module de données : `scan_frequentation.py` (fonctions pures, `db` en argument). Le bloc est injecté dans le payload par `scan_report_build._build_frequentation()` sous `DATA.frequentation`, et rendu par `renderFrequentation()` dans `HTML_TEMPLATE`. La clé est lue défensivement (`DATA.frequentation || null`) : les rapports générés avant cette vue continuent de fonctionner, l'onglet affiche un message explicite.
+
+#### Alignement au jour de course
+
+Les éditions ne sont **jamais** comparées par date calendaire mais par **décalage au jour de course** (`J-5 … J+1`), résolu via `pcorg_summary._load_race_dt` (4 niveaux de repli — `race` manque sur tous les documents 2025). L'axe des abscisses est un `slot = offset * 24 + heure`, partagé par la courbe maîtresse et les deux bandeaux météo.
+
+C'est ce qui rend l'alignement gratuit : chaque édition d'un même événement produit le même squelette d'offsets (24H MOTOS `J-5(16h), J-4…J(24h), J+1(18h)` = 154 enregistrements tous les ans ; 24H AUTOS = 176).
+
+#### Le pic de présents, pas les entrées
+
+Le **nombre de portes instrumentées a changé d'une édition à l'autre** (24H AUTOS : 21 → 22 → 26 → 29). Le total d'entrées 2022 → 2023 bondit de +68 % : c'est la mesure, pas la foule.
+
+Conséquence appliquée partout : **le pic de présents est le KPI principal** (il ne dépend quasiment pas des portes instrumentées en marge), les entrées sont secondaires. Quand `entries_comparable` est faux, la vue affiche un encadré nommant le nombre de portes par édition, et le prompt Claude interdit de commenter les écarts d'entrées.
+
+#### Météo
+
+Collection **`donnees_meteo`** (13 000+ documents, 1990 → 2026, un par jour calendaire). ⚠️ `historique_meteo` est une *route Flask*, pas une collection.
+
+Clés disponibles, et rien d'autre : `Date`, `Température max (°C)`, `Température min (°C)`, `Précipitations (mm)`, `Ensoleillement (h)`. **Ni vent ni conditions** (le vent n'existe que dans `meteo_previsions`, qui sont des prévisions et ne remontent qu'à octobre 2024).
+
+Deux pièges traités par `load_weather` : les clés sont **accentuées** avec repli non accentué et `0` est une valeur légitime (sentinelle `_MISSING`, jamais `.get(k) or default`) ; quelques jours 2025/2026 portent un **`NaN` BSON réel** qui casse `jsonify` (`_clean_number` le replie sur `None`).
+
+#### Règles de visualisation
+
+- **Jamais de double axe.** Fréquentation et température sur deux échelles inventeraient une corrélation. La météo est dans des **bandeaux alignés sous la courbe**, partageant l'axe temporel.
+- Palette validée au script (`bun scripts/validate_palette.js … --mode dark --surface "#0f1620"`) : `#3987e5` (édition analysée), `#008300` (N-1), `#d55181` (N-2). Pire écart daltonisme ΔE 13,0 pour un seuil de 8. **La palette historique du rapport échoue** (`#4ade80` ↔ `#f87171`, ΔE 7,9 en deutéranopie) — hors périmètre, non corrigée.
+- L'année courante porte l'emphase par l'**épaisseur** (2,6px + aire à 10 %), pas par la couleur. Légende maison sous le titre : l'identité ne repose jamais sur la seule couleur.
+- La température est rendue en **marches** (`stepped: 'middle'`) : la mesure est journalière, une courbe lissée inventerait une variation intra-journalière.
+
+#### Jours non mesurés
+
+Les jours à zéro en début de période (24H MOTOS 2023 J-5, LMC 2022 J-4) sont des **capteurs pas encore actifs**, pas une fréquentation nulle. Portés par `measured: false`, affichés `--` avec la mention « aucune mesure ce jour », exclus des comparaisons et signalés comme tels au modèle.
+
+#### Éditions exclues
+
+`EXCLUDED_EDITIONS = {('GPE', 2022), ('GPE', 2023)}` : GPE 2023 a une date de course fausse (2023-09-09 pour des données d'octobre — l'alignement serait décalé de 28 jours) et GPE 2022 a un cumul d'entrées qui finit à 0. `SBK` et `SUPERBIKE` 2024 sont les mêmes 80 enregistrements sous deux noms, dédoublonnés via `event_aliases`.
+
+#### Analyse rédigée embarquée
+
+Le rapport est un **fichier HTML autonome, zéro appel réseau**. L'analyse est donc générée **à la génération du rapport**, jamais à l'ouverture — un appel par régénération, jamais un par lecture.
+
+`scan_analysis.generate_frequentation_analysis()` calcule une **empreinte SHA-256 des données envoyées au modèle** et réutilise l'analyse déjà en base si elle est identique. Une régénération pour une correction d'affichage ne consomme donc aucun token — c'est la seule économie qui compte vraiment, celle de l'appel qu'on ne fait pas. `force=True` la contourne.
+
+Le prompt ne contient **que les agrégats journaliers** (7 jours × 3 éditions + météo + insights, ~3 200 tokens) : jamais la courbe horaire, qui coûterait dix fois le prompt entier sans rien apporter. Contrat JSON strict à 5 clés : `synthese`, `dynamique_journaliere`, `comparaison_editions`, `effet_meteo`, `recommandations`.
+
+Sans `ANTHROPIC_API_KEY`, le rapport se génère **sans la section** (log en warning, `info.frequentation_analysis == 'absente'`) — jamais d'échec de génération. `POST /scan-report/generate` accepte `{"analysis": false}` pour couper l'analyse franchement.
+
+⚠️ **`pcorg_summary.call_claude` filtre les sections sur `section_keys`, par défaut les neuf clés du résumé pcorg.** Tout appelant qui impose un autre contrat JSON **doit** passer `section_keys`, sinon ses sections sont silencieusement remplacées par des sections pcorg vides. C'était le cas de `generate_scan_analysis` (5 sections sur 7 perdues) avant que le paramètre n'existe.
+
 ### Collections créées
 
 | Collection | Contenu |
@@ -540,7 +593,7 @@ Si `ANTHROPIC_API_KEY` est vide → **503 `cle_api_absente`**. Le mode `dry_run`
 | `historique_controle_archive` | Générations remplacées, append-only, pas de TTL |
 | `scan_feature_overrides` | Mapping manuel nom de scan → `_id_feature`, index unique `(scan_name, kind, event, year)` |
 | `scan_staffing_validations` | Colonne Validation saisie à la main, repré-remplie à chaque audit |
-| `scan_analyses` | Analyses Claude historisées |
+| `scan_analyses` | Analyses Claude historisées. `kind` vaut `scans` ou `frequentation` ; les documents antérieurs au champ sont des analyses de scans. Les analyses de fréquentation portent une `fingerprint` (réutilisation sans appel API) |
 
 ### Pièges
 
@@ -551,4 +604,8 @@ Si `ANTHROPIC_API_KEY` est vide → **503 `cle_api_absente`**. Le mode `dry_run`
 - **Les noms d'unités viennent du classeur téléversé**, donc d'une source non maîtrisée. Toute interpolation dans du HTML côté JS doit passer par `esc()` — sinon un fichier avec une zone nommée `<img onerror=…>` exécute du script dans une page admin.
 - **`reports/` et `uploads/scan_imports/` sont dans `.gitignore`.** Un rapport pèse 0,3 à 1,2 Mo.
 - **`openpyxl` est désormais importé dans le process Flask** (et plus seulement par les scripts autonomes) : il est dans `requirements.txt`, avec `numpy` et `pandas` qui manquaient déjà (importés par `analyse_ops.py` au chargement — sans eux l'app ne démarre pas sur un environnement neuf).
+- **La météo est dans `donnees_meteo`, pas `historique_meteo`** (qui est une route Flask). Les clés sont accentuées, `0` est légitime, et quelques jours portent un `NaN` BSON réel.
+- **Les comparaisons entre éditions ne valent que sur le pic de présents.** Le nombre de portes instrumentées a changé chaque année ; les totaux d'entrées comparés d'une édition à l'autre mesurent l'instrumentation, pas la foule.
+- **Un jour à zéro en début de période n'est pas une fréquentation nulle** mais un capteur pas encore actif. Le confondre ferait lire une chute inexistante.
+- **`call_claude` filtre les sections sur `section_keys`** (défaut : les neuf clés pcorg). Un nouveau contrat JSON sans ce paramètre perd toutes ses sections en silence.
 - Le gabarit HTML classe les zones par préfixe de nom (`TRIBUNE`, `P `, `AA `), conventions 24H AUTOS. Les zones d'autres éditions (`BEAUSEJOUR`, `PARKING OUEST`…) n'apparaissent dans aucun encadré « Vue par catégorie », mais restent accessibles par le menu déroulant.
