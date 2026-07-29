@@ -565,9 +565,9 @@ C'est ce qui rend l'alignement gratuit : chaque édition d'un même événement 
 
 #### Le pic de présents, pas les entrées
 
-Le **nombre de portes instrumentées a changé d'une édition à l'autre** (24H AUTOS : 21 → 22 → 26 → 29). Le total d'entrées 2022 → 2023 bondit de +68 % : c'est la mesure, pas la foule.
+Le **nombre de portes en service a changé d'une édition à l'autre** (24H AUTOS : 21 → 22 → 26 → 29). Le total d'entrées 2022 → 2023 bondit de +68 % : c'est la mesure, pas la foule.
 
-Conséquence appliquée partout : **le pic de présents est le KPI principal** (il ne dépend quasiment pas des portes instrumentées en marge), les entrées sont secondaires. Quand `entries_comparable` est faux, la vue affiche un encadré nommant le nombre de portes par édition, et le prompt Claude interdit de commenter les écarts d'entrées.
+Conséquence appliquée partout : **le pic de présents est le KPI principal** (il ne dépend quasiment pas des portes ouvertes en marge), les entrées sont secondaires. Quand `entries_comparable` est faux, la vue affiche un encadré nommant le nombre de portes par édition, et le prompt Claude interdit de commenter les écarts d'entrées.
 
 #### Météo
 
@@ -584,6 +584,31 @@ Deux pièges traités par `load_weather` : les clés sont **accentuées** avec r
 - L'année courante porte l'emphase par l'**épaisseur** (2,6px + aire à 10 %), pas par la couleur. Légende maison sous le titre : l'identité ne repose jamais sur la seule couleur.
 - La température est rendue en **marches** (`stepped: 'middle'`) : la mesure est journalière, une courbe lissée inventerait une variation intra-journalière.
 
+#### Perte de contrôle d'accès
+
+`access_control()` détecte les moments où l'enceinte cesse d'être comptée. Deux constats **distincts**, à ne pas confondre :
+
+- **`final_present`** — à la dernière mesure, N personnes sont encore comptées à l'intérieur. Leurs sorties n'ont jamais été enregistrées. C'est structurel : 70 à 94 % du pic selon les éditions (24H AUTOS 2025 : 107 089, soit 77 % du pic).
+- **`events`** — plages où la présence reste au-dessus de 25 % du pic alors que les scans tombent sous 20 % de l'attendu. `controle_non_tenu` quand les portes scannent encore un peu (l'évacuation après l'arrivée, portes ouvertes en grand) ; `mesure_absente` quand aucune donnée n'existe (24H AUTOS 2025 : jeudi 12/06 de 14h à 23h, 0 scan pour 74 024 présents).
+
+⚠️ **Le seuil est calibré par heure du jour, pas sur une médiane globale.** À 3 h du matin l'absence de scan est normale — les spectateurs dorment sur place. Une médiane globale ferait remonter toutes les nuits comme des pertes de contrôle.
+
+⚠️ **La série de présence s'arrête souvent avant celle des portes.** La dernière valeur connue est reportée, sinon la plage la plus intéressante — celle d'après l'arrivée — serait perdue.
+
+Le volume de scans vient de `historique_controle{type:portes}`, pas de `frequentation` : c'est la seule source qui couvre la période d'évacuation.
+
+#### Comparatif des unités entre éditions
+
+`compare_units()` répond à « quelles portes étaient ouvertes cette année et pas l'an dernier » : communes, apparues, disparues.
+
+⚠️ **Seules les portes sont comparables.** `historique_controle{type:portes}` est le seul inventaire par édition (276 unités sur 22 éditions) et il ne contient que des portes — vérifié, aucune hospitalité, tribune ni terrain. Les zones n'existent que pour l'édition courante (`parking_scans` 2025, `complet` 24H MOTOS 2024). La vue le dit explicitement plutôt que de laisser croire à un périmètre complet.
+
+Les unités sans `doors_id` sont classées `sans_lieu` : ce sont des services mobiles (UAM, HELPDESK, LITIGE, SERI, PUNISHER), pas des lieux de passage.
+
+#### Jours de semaine sur l'axe
+
+L'axe porte deux lignes : le décalage au jour de course (`J-2`) **et** le jour de semaine (`jeu.`). La course tombant chaque année le même jour, un offset désigne toujours le même jour — et c'est en jours de semaine que raisonne l'exploitation. `FREQ_RACE_DATE` est posé au rendu depuis l'édition analysée ; `offsetWeekday()` en dérive le nom. L'infobulle et le prompt Claude reprennent la même convention.
+
 #### Jours non mesurés
 
 Les jours à zéro en début de période (24H MOTOS 2023 J-5, LMC 2022 J-4) sont des **capteurs pas encore actifs**, pas une fréquentation nulle. Portés par `measured: false`, affichés `--` avec la mention « aucune mesure ce jour », exclus des comparaisons et signalés comme tels au modèle.
@@ -598,7 +623,7 @@ Le rapport est un **fichier HTML autonome, zéro appel réseau**. L'analyse est 
 
 `scan_analysis.generate_frequentation_analysis()` calcule une **empreinte SHA-256 des données envoyées au modèle** et réutilise l'analyse déjà en base si elle est identique. Une régénération pour une correction d'affichage ne consomme donc aucun token — c'est la seule économie qui compte vraiment, celle de l'appel qu'on ne fait pas. `force=True` la contourne.
 
-Le prompt ne contient **que les agrégats journaliers** (7 jours × 3 éditions + météo + insights, ~3 200 tokens) : jamais la courbe horaire, qui coûterait dix fois le prompt entier sans rien apporter. Contrat JSON strict à 5 clés : `synthese`, `dynamique_journaliere`, `comparaison_editions`, `effet_meteo`, `recommandations`.
+Le prompt ne contient **que les agrégats journaliers** (7 jours × 3 éditions + météo + insights, ~3 200 tokens) : jamais la courbe horaire, qui coûterait dix fois le prompt entier sans rien apporter. Contrat JSON strict à 6 clés : `synthese`, `dynamique_journaliere`, `controle_acces`, `comparaison_editions`, `effet_meteo`, `recommandations`.
 
 Sans `ANTHROPIC_API_KEY`, le rapport se génère **sans la section** (log en warning, `info.frequentation_analysis == 'absente'`) — jamais d'échec de génération. `POST /scan-report/generate` accepte `{"analysis": false}` pour couper l'analyse franchement.
 
@@ -622,7 +647,7 @@ Sans `ANTHROPIC_API_KEY`, le rapport se génère **sans la section** (log en war
 - **`reports/` et `uploads/scan_imports/` sont dans `.gitignore`.** Un rapport pèse 0,3 à 1,2 Mo.
 - **`openpyxl` est désormais importé dans le process Flask** (et plus seulement par les scripts autonomes) : il est dans `requirements.txt`, avec `numpy` et `pandas` qui manquaient déjà (importés par `analyse_ops.py` au chargement — sans eux l'app ne démarre pas sur un environnement neuf).
 - **La météo est dans `donnees_meteo`, pas `historique_meteo`** (qui est une route Flask). Les clés sont accentuées, `0` est légitime, et quelques jours portent un `NaN` BSON réel.
-- **Les comparaisons entre éditions ne valent que sur le pic de présents.** Le nombre de portes instrumentées a changé chaque année ; les totaux d'entrées comparés d'une édition à l'autre mesurent l'instrumentation, pas la foule.
+- **Les comparaisons entre éditions ne valent que sur le pic de présents.** Le nombre de portes en service a changé chaque année ; les totaux d'entrées comparés d'une édition à l'autre mesurent le dispositif, pas la foule.
 - **Le champ `race` porte le départ jusqu'en 2024 et l'arrivée en 2025.** Toute comparaison pluriannuelle qui l'utilise brut est décalée d'un jour sans que rien ne le signale.
 - **Un jour à zéro en début de période n'est pas une fréquentation nulle** mais un capteur pas encore actif. Le confondre ferait lire une chute inexistante.
 - **`call_claude` filtre les sections sur `section_keys`** (défaut : les neuf clés pcorg). Un nouveau contrat JSON sans ce paramètre perd toutes ses sections en silence.

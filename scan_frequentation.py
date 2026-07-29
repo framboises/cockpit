@@ -32,6 +32,8 @@ previsions, pas des observations.
 
 import logging
 import math
+import statistics
+from collections import defaultdict
 from datetime import datetime, timedelta
 
 import pcorg_summary
@@ -39,6 +41,18 @@ import pcorg_summary
 logger = logging.getLogger(__name__)
 
 WEATHER_COLLECTION = 'donnees_meteo'
+
+# Collections geo, pour classer une unite de scan (porte / tribune / ...).
+GEO_COLLECTIONS = ('portes', 'tribunes', 'hospitalites', 'terrains')
+
+# Detection des pertes de controle d'acces. Une plage est retenue quand la
+# presence reste significative ET que le volume de scans s'effondre sous une
+# fraction de ce qu'on observe habituellement A LA MEME HEURE DU JOUR.
+# Calibrer sur une mediane globale ferait remonter toutes les nuits, ou
+# l'absence de scan est normale (les spectateurs dorment sur place).
+ACCESS_PRESENCE_FLOOR = 0.25    # presence >= 25 % du pic de l'edition
+ACCESS_COLLAPSE_RATIO = 0.20    # scans < 20 % de l'attendu pour cette heure
+ACCESS_MIN_HOURS = 2            # une heure isolee n'est pas un evenement
 
 # Editions dont les donnees sont inexploitables, verifiees une par une :
 #   GPE 2022 : le cumul d'entrees finit a 0
@@ -211,16 +225,147 @@ def hourly_series(doc, race_date):
     return out
 
 
-def _door_count(db, event, year):
-    """Nombre de portes instrumentees — la mesure de comparabilite d'une edition."""
+def _geo_index(db):
+    """`_id_feature` -> collection geo, pour classer une unite de scan."""
+    out = {}
+    for coll in GEO_COLLECTIONS:
+        try:
+            doc = db[coll].find_one() or {}
+        except Exception:
+            logger.warning('Collection geo %s illisible', coll, exc_info=True)
+            continue
+        for feat in doc.get('features') or []:
+            props = feat.get('properties') or {}
+            if props.get('_id_feature'):
+                out[str(props['_id_feature'])] = coll
+    return out
+
+
+def _portes_doc(db, event, year):
+    """Document `historique_controle{type: portes}` d'une edition, ou None."""
     aliases = event_aliases(db, event)
     for y in (int(year), str(year)):
         doc = db['historique_controle'].find_one(
-            {'type': 'portes', 'event': {'$in': aliases}, 'year': y},
-            {'doors.name': 1})
+            {'type': 'portes', 'event': {'$in': aliases}, 'year': y})
         if doc:
-            return len(doc.get('doors') or [])
+            return doc
     return None
+
+
+def door_inventory(doc, geo_index):
+    """Unites de scan d'une edition : [{name, category}].
+
+    ⚠ Ce document est le SEUL inventaire par edition disponible en base, et il
+    ne contient que des portes. Les zones, tribunes et hospitalites n'existent
+    que pour l'edition courante (`parking_scans` 2025, `complet` 24H MOTOS
+    2024) : aucune comparaison pluriannuelle n'est possible sur ces categories.
+    """
+    out = []
+    for door in (doc or {}).get('doors') or []:
+        name = (door.get('name') or '').strip()
+        if not name:
+            continue
+        fid = door.get('doors_id')
+        out.append({
+            'name': name,
+            # Sans rattachement geographique, l'unite est un service mobile
+            # (UAM, HELPDESK, LITIGE) et pas un lieu de passage.
+            'category': geo_index.get(str(fid)) if fid else 'sans_lieu',
+        })
+    return sorted(out, key=lambda d: d['name'])
+
+
+def _door_hourly_scans(doc):
+    """'YYYY-MM-DDTHH' -> total de scans, toutes portes confondues."""
+    per_hour = defaultdict(int)
+    for door in (doc or {}).get('doors') or []:
+        for scan in door.get('scans') or []:
+            ts = scan.get('timestamp')
+            key = (ts.strftime('%Y-%m-%dT%H') if hasattr(ts, 'strftime')
+                   else str(ts)[:13])
+            if len(key) == 13:
+                per_hour[key] += int(scan.get('scan_count') or 0)
+    return dict(per_hour)
+
+
+def _presence_by_hour(doc):
+    """'YYYY-MM-DDTHH' -> presents, depuis le document `frequentation`."""
+    out = {}
+    for rec in (doc or {}).get('data') or []:
+        key = str(rec.get('date'))[:13]
+        if len(key) == 13:
+            out[key] = int(rec.get('present') or 0)
+    return out
+
+
+def access_control(freq_doc, portes_doc):
+    """Perte de controle d'acces : plages ou l'enceinte n'est plus comptee.
+
+    Deux constats distincts, qu'il ne faut pas confondre :
+
+    - `solde_non_resorbe` : a la derniere mesure, N personnes sont encore
+      comptees a l'interieur. Leurs sorties n'ont jamais ete enregistrees.
+      C'est structurel — 70 a 94 % du pic selon les editions.
+    - `events` : plages ou la presence reste forte alors que les scans
+      s'effondrent. `controle_non_tenu` quand les portes scannent encore un
+      peu (typiquement l'evacuation apres l'arrivee, portes ouvertes en
+      grand), `mesure_absente` quand aucune donnee n'existe sur la plage.
+    """
+    pres = _presence_by_hour(freq_doc)
+    if not pres:
+        return None
+    per_hour = _door_hourly_scans(portes_doc)
+
+    peak = max(pres.values()) if pres else 0
+    last_key = max(pres)
+    out = {
+        'peak_present': peak,
+        'final_present': pres[last_key],
+        'final_at': last_key,
+        'final_pct': round(100.0 * pres[last_key] / peak, 1) if peak else None,
+        'events': [],
+    }
+    if not per_hour or not peak:
+        return out
+
+    # Attendu par heure du jour : a 03h on n'attend pas le volume de 11h.
+    by_hod = defaultdict(list)
+    for key, val in per_hour.items():
+        by_hod[int(key[11:13])].append(val)
+    expected = {h: statistics.median(v) for h, v in by_hod.items()}
+
+    floor = peak * ACCESS_PRESENCE_FLOOR
+    hours = sorted(set(per_hour) | set(pres))
+    carried, run, runs = 0, [], []
+    for key in hours:
+        # La serie de presence s'arrete souvent avant celle des portes : on
+        # reporte la derniere valeur connue plutot que de perdre la plage qui
+        # nous interesse le plus, celle d'apres l'arrivee.
+        if key in pres:
+            carried = pres[key]
+        exp = expected.get(int(key[11:13]), 0)
+        scans = per_hour.get(key)
+        gap = scans is None
+        scans = scans or 0
+        collapsed = exp > 0 and scans < exp * ACCESS_COLLAPSE_RATIO
+        if carried >= floor and (collapsed or gap):
+            run.append((key, carried, scans, exp, gap))
+        else:
+            if len(run) >= ACCESS_MIN_HOURS:
+                runs.append(run)
+            run = []
+    if len(run) >= ACCESS_MIN_HOURS:
+        runs.append(run)
+
+    for r in runs:
+        out['events'].append({
+            'start': r[0][0], 'end': r[-1][0], 'hours': len(r),
+            'present_max': max(x[1] for x in r),
+            'scans': sum(x[2] for x in r),
+            'scans_expected': int(sum(x[3] for x in r)),
+            'kind': 'mesure_absente' if all(x[4] for x in r) else 'controle_non_tenu',
+        })
+    return out
 
 
 def load_editions(db, event, year, back=2):
@@ -247,10 +392,13 @@ def load_editions(db, event, year, back=2):
         candidate -= 1
 
     races = _normalize_race_dates(event, raw)
+    geo = _geo_index(db)
 
     editions = []
     for item in raw:
         race = races[item['year']]
+        portes_doc = _portes_doc(db, event, item['year'])
+        units = door_inventory(portes_doc, geo)
         editions.append({
             'year': item['year'],
             'race_date': race.isoformat(),
@@ -258,9 +406,49 @@ def load_editions(db, event, year, back=2):
             'days': daily_aggregate(item['doc'], race),
             'hourly': hourly_series(item['doc'], race),
             'source': item['doc'].get('source') or 'collecte_temps_reel',
-            'doors': _door_count(db, event, item['year']),
+            'doors': len(units) or None,
+            'units': units,
+            'access_control': access_control(item['doc'], portes_doc),
         })
     return editions
+
+
+def compare_units(editions):
+    """Portes actives d'une edition a l'autre : communes, apparues, disparues.
+
+    Repond a « quelles portes etaient ouvertes cette annee et pas l'an dernier »,
+    la seule comparaison d'inventaire que les donnees permettent.
+    """
+    current = next((e for e in editions if e['is_current']), None)
+    if not current or not current.get('units'):
+        return None
+    cur_names = {u['name'] for u in current['units']}
+    by_cat = defaultdict(list)
+    for u in current['units']:
+        by_cat[u['category'] or 'sans_lieu'].append(u['name'])
+
+    versus = []
+    for ed in editions:
+        if ed['is_current'] or not ed.get('units'):
+            continue
+        prev = {u['name'] for u in ed['units']}
+        versus.append({
+            'year': ed['year'],
+            'total': len(prev),
+            'added': sorted(cur_names - prev),
+            'removed': sorted(prev - cur_names),
+            'common': len(cur_names & prev),
+        })
+    return {
+        'year': current['year'],
+        'total': len(cur_names),
+        'by_category': {k: sorted(v) for k, v in sorted(by_cat.items())},
+        'versus': versus,
+        # Les zones, tribunes et hospitalites n'ont pas d'inventaire par
+        # edition en base : le dire plutot que laisser croire a un perimetre
+        # complet.
+        'categories_covered': ['portes'],
+    }
 
 
 def _normalize_race_dates(event, raw):
@@ -447,6 +635,17 @@ def compute_insights(editions, weather):
     insights['doors_by_year'] = doors
     insights['entries_comparable'] = len(set(doors.values())) <= 1 if doors else None
 
+    # Controle d'acces : le solde jamais resorbe et les plages non tenues sont
+    # des faits d'exploitation, pas des artefacts de mesure a masquer.
+    insights['access_control'] = current.get('access_control')
+    insights['access_control_by_year'] = [
+        {'year': e['year'],
+         'final_present': (e.get('access_control') or {}).get('final_present'),
+         'final_pct': (e.get('access_control') or {}).get('final_pct'),
+         'events': len((e.get('access_control') or {}).get('events') or [])}
+        for e in editions if e.get('access_control')
+    ]
+
     return insights
 
 
@@ -472,6 +671,7 @@ def build_frequentation_block(db, event, year, back=2):
         'editions': editions,
         'weather': weather,
         'insights': insights,
+        'units_comparison': compare_units(editions),
         'totals': {
             'peak_present': max((d['peak_present'] or 0) for d in measured) if measured else 0,
             'entrees': sum((d['entrees'] or 0) for d in measured),

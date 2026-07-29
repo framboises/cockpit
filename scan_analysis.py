@@ -43,8 +43,8 @@ SCAN_SECTION_KEYS = (
 )
 
 FREQ_SECTION_KEYS = (
-    'synthese', 'dynamique_journaliere', 'comparaison_editions',
-    'effet_meteo', 'recommandations',
+    'synthese', 'dynamique_journaliere', 'controle_acces',
+    'comparaison_editions', 'effet_meteo', 'recommandations',
 )
 
 
@@ -372,14 +372,24 @@ Vocabulaire des donnees :
   presents est l'indicateur de dimensionnement : c'est lui qui dit combien de
   monde etait simultanement dans l'enceinte.
 - "entrees" est un cumul de passages sur la journee. Il depend directement du
-  nombre de portes instrumentees.
+  nombre de portes en service.
 - "mesure": false signifie que rien n'a ete releve ce jour-la (capteurs pas
   encore actifs). Ce n'est PAS une frequentation nulle. Ne compare jamais un
   jour non mesure a un jour mesure.
+- La course tombe chaque annee le meme jour de la semaine. Nomme les jours par
+  leur nom (vendredi, samedi, dimanche) en plus du decalage : c'est ainsi que
+  raisonne l'exploitation.
+- "controle_acces" decrit les moments ou l'enceinte a cesse d'etre comptee.
+  "solde_non_resorbe" est le nombre de personnes encore comptees a l'interieur
+  a la derniere mesure : leurs sorties n'ont jamais ete enregistrees.
+  Dans "plages", "controle_non_tenu" signifie que les portes ne scannaient
+  quasiment plus alors que l'enceinte etait pleine (typiquement l'evacuation
+  apres l'arrivee, portes ouvertes en grand) ; "mesure_absente" signifie
+  qu'aucune donnee n'existe sur la plage. Ce sont deux problemes differents.
 
 Regles de fond, non negociables :
 - Chiffre tout. Une affirmation sans valeur ni heure ne sert a rien.
-- Si "perimetre_comparable" vaut false, le nombre de portes instrumentees
+- Si "perimetre_comparable" vaut false, le nombre de portes en service
   differe entre les editions. Tu DOIS alors ecrire explicitement que les
   totaux d'entrees ne sont pas comparables, et ne raisonner les comparaisons
   d'editions que sur le pic de presents.
@@ -392,13 +402,24 @@ Regles de fond, non negociables :
 - N'invente rien. Si une donnee manque pour conclure, ecris-le.
 
 Reponds UNIQUEMENT par un objet JSON valide, sans texte autour, avec exactement
-ces cinq cles, toutes en francais :
+ces six cles, toutes en francais :
 - "synthese" : 3 a 5 phrases. Pic de presents de l'edition avec son jour et son
-  heure, montee en charge sur la semaine, position vs editions precedentes.
+  heure, montee en charge sur la semaine, position vs editions precedentes. Si
+  une perte de controle d'acces notable est signalee, mentionne-la ici.
 - "dynamique_journaliere" : comment la frequentation se construit dans la
   journee et d'un jour a l'autre. Heures de montee, de pic, de vidage.
+- "controle_acces" : les moments ou l'enceinte a cesse d'etre comptee. Pour
+  chaque plage, donne le jour de semaine, les heures, la duree, le volume de
+  scans releve face a l'attendu, et le nombre de personnes presentes. Enonce le
+  solde non resorbe et ce qu'il represente en sorties non enregistrees. Dis
+  franchement ce que cela coute en exploitation (comptage de fin d'evenement
+  inexploitable, evacuation non tracee). Si aucune plage n'est signalee et que
+  le solde est faible, ecris exactement "Aucune perte de controle d'acces
+  notable sur cette edition."
 - "comparaison_editions" : ce qui a change vs les editions precedentes, sur le
-  pic de presents. Si aucune edition comparable n'est fournie, ecris exactement
+  pic de presents. Commente aussi les portes ouvertes ou fermees d'une edition
+  a l'autre si "portes_par_edition" en signale. Si aucune edition comparable
+  n'est fournie, ecris exactement
   "Aucune edition precedente comparable dans les donnees fournies."
 - "effet_meteo" : ce que la meteo semble avoir fait, avec les reserves d'usage.
 - "recommandations" : actions concretes de dimensionnement pour l'edition
@@ -437,14 +458,29 @@ def build_frequentation_prompt_payload(block):
             'date_jour_de_course': ed.get('race_date'),
             'jours': jours,
         })
+    ins = block.get('insights') or {}
+    ac = ins.get('access_control') or {}
+    uc = block.get('units_comparison') or {}
     return {
         'evenement': block.get('event'),
         'annee': block.get('year'),
         'perimetre_comparable': block.get('entries_comparable'),
-        'portes_instrumentees_par_edition':
-            (block.get('insights') or {}).get('doors_by_year'),
+        'portes_en_service_par_edition': ins.get('doors_by_year'),
+        # Comparatif d'inventaire : uniquement les portes, seul document
+        # existant pour toutes les editions.
+        'portes_par_edition': {
+            'total_edition_analysee': uc.get('total'),
+            'ecarts': uc.get('versus'),
+        } if uc else None,
+        'controle_acces': {
+            'solde_non_resorbe': ac.get('final_present'),
+            'solde_pct_du_pic': ac.get('final_pct'),
+            'derniere_mesure': ac.get('final_at'),
+            'plages': ac.get('events'),
+            'par_edition': ins.get('access_control_by_year'),
+        } if ac else None,
         'editions': editions,
-        'constats_calcules': block.get('insights'),
+        'constats_calcules': ins,
     }
 
 

@@ -731,6 +731,15 @@ HTML_TEMPLATE = r"""<!doctype html>
   .freq-daycard .d-delta { font-size: 11.5px; margin-top: 5px; }
   .freq-daycard.unmeasured { opacity: .55; }
   .freq-insights li { margin-bottom: 7px; line-height: 1.6; }
+  /* Perte de controle : signalee par une bordure, pas par la seule couleur. */
+  .freq-insights li.freq-alert { border-left: 3px solid #f59e0b;
+    padding-left: 10px; margin-left: -13px; }
+  .freq-diff { margin-top: 12px; }
+  .freq-diff h4 { font-size: 12.5px; color: var(--muted); margin-bottom: 5px;
+    text-transform: uppercase; letter-spacing: 0.4px; }
+  .freq-diff li { margin-bottom: 6px; line-height: 1.6; }
+  .diff-add { color: #008300; font-weight: 600; }
+  .diff-del { color: #d55181; font-weight: 600; }
 
   /* Vue d'ensemble pics */
   .nav-overview { padding: 10px 14px 10px; }
@@ -1608,6 +1617,18 @@ const FREQ_TEMP = '#c98500';
 
 const offsetLabel = o => (o === 0 ? 'Jour J' : (o > 0 ? 'J+' + o : 'J' + o));
 
+// Jour de course de l'edition analysee, pose au rendu. Toutes les editions
+// etant recalees sur le meme jour de semaine, un offset designe le meme jour
+// pour toutes : « J-2 » est toujours le jeudi sur 24H AUTOS.
+let FREQ_RACE_DATE = null;
+
+function offsetWeekday(off, short) {
+  if (!FREQ_RACE_DATE || off == null) return '';
+  const d = new Date(FREQ_RACE_DATE.getTime() + off * 86400000);
+  const name = WEEKDAYS_FR[d.getUTCDay()];
+  return short ? name.slice(0, 3) + '.' : name;
+}
+
 function freqData() {
   // Lecture defensive : les rapports generes avant cette vue n'ont pas la cle.
   return (typeof DATA !== 'undefined' && DATA.frequentation) || null;
@@ -1643,7 +1664,10 @@ function freqAxis(editions) {
     const hour = ((s % 24) + 24) % 24;
     // On n'etiquette que le debut de journee : 170 etiquettes seraient
     // illisibles, et le lecteur vise un jour, pas une heure precise.
-    labels.push(hour === 0 ? offsetLabel(off) : '');
+    // Deux lignes : l'offset au jour de course, et le jour de semaine — la
+    // course tombe toujours le meme jour, donc « J-2 » EST le jeudi, et c'est
+    // en jours de semaine que raisonne l'exploitation.
+    labels.push(hour === 0 ? [offsetLabel(off), offsetWeekday(off, true)] : '');
   }
   return { slots, labels, min, max };
 }
@@ -1662,7 +1686,9 @@ function freqLineOptions(yTitle) {
             const s = items[0].dataset._slots[items[0].dataIndex];
             const off = Math.floor(s / 24);
             const hour = ((s % 24) + 24) % 24;
-            return offsetLabel(off) + ' - ' + String(hour).padStart(2, '0') + 'h';
+            const wd = offsetWeekday(off);
+            return offsetLabel(off) + (wd ? ' - ' + wd : '') +
+                   ' - ' + String(hour).padStart(2, '0') + 'h';
           },
         },
       },
@@ -1890,6 +1916,70 @@ function renderFreqDayCards(host, f) {
   host.appendChild(grid);
 }
 
+const UNIT_CATEGORY_LABELS = {
+  portes: 'Portes', tribunes: 'Tribunes', hospitalites: 'Hospitalites',
+  terrains: 'Terrains', sans_lieu: 'Services sans lieu fixe',
+};
+
+// Quelles portes ont ete ouvertes cette annee, et lesquelles ont change par
+// rapport aux editions passees. C'est la seule comparaison d'inventaire que
+// les donnees permettent : seul le document `portes` existe par edition.
+function renderFreqUnits(host, f) {
+  const uc = f.units_comparison;
+  if (!uc || !uc.total) return;
+
+  const sec = el('div', { class: 'home-section' });
+  sec.appendChild(el('h3', null, 'Portes en service - comparaison entre editions'));
+
+  const cats = Object.keys(uc.by_category || {});
+  if (cats.length) {
+    const line = el('div', { class: 'freq-sub' },
+      uc.total + ' unites de scan actives en ' + uc.year + ' : ' +
+      cats.map(c => (uc.by_category[c] || []).length + ' ' +
+        (UNIT_CATEGORY_LABELS[c] || c).toLowerCase()).join(', ') + '.');
+    sec.appendChild(line);
+  }
+
+  (uc.versus || []).forEach(v => {
+    const box = el('div', { class: 'freq-diff' });
+    box.appendChild(el('h4', null,
+      'vs ' + v.year + ' - ' + v.total + ' unites, ' + v.common + ' en commun'));
+    const ul = el('ul');
+    if (v.added.length) {
+      ul.appendChild(el('li', null,
+        el('span', { class: 'diff-add' }, '+ ' + v.added.length + ' active(s) en ' +
+          uc.year + ' et pas en ' + v.year + ' : '),
+        v.added.join(', ')));
+    }
+    if (v.removed.length) {
+      ul.appendChild(el('li', null,
+        el('span', { class: 'diff-del' }, '- ' + v.removed.length + ' active(s) en ' +
+          v.year + ' et plus en ' + uc.year + ' : '),
+        v.removed.join(', ')));
+    }
+    if (!v.added.length && !v.removed.length) {
+      ul.appendChild(el('li', { class: 'a-empty' }, 'Perimetre identique.'));
+    }
+    box.appendChild(ul);
+    sec.appendChild(box);
+  });
+
+  sec.appendChild(el('div', { class: 'a-empty' },
+    'Ce comparatif ne porte que sur les unites de controle d\'acces, seul ' +
+    'inventaire enregistre pour toutes les editions. Les zones, tribunes et ' +
+    'hospitalites ne le sont que pour l\'edition courante : elles ne peuvent ' +
+    'pas etre comparees d\'une annee sur l\'autre.'));
+  host.appendChild(sec);
+}
+
+// '2025-06-15T17' -> 'dimanche 15/06 a 17h'
+function fmtFreqHour(key) {
+  if (!key) return '-';
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})$/.exec(key);
+  if (!m) return key;
+  return weekdayFr(m[1], m[2], m[3]) + ' ' + m[3] + '/' + m[2] + ' a ' + m[4] + 'h';
+}
+
 function renderFreqInsights(host, f) {
   const ins = f.insights || {};
   const ul = el('ul', { class: 'freq-insights' });
@@ -1910,6 +2000,26 @@ function renderFreqInsights(host, f) {
       : 'Heure du pic le jour de course : ' +
         rh.map(r => r.year + ' a ' + r.hour + ' (' + fmt(r.peak_present) + ')').join(', ') + '.'));
   }
+
+  // Controle d'acces : un fait d'exploitation, pas un defaut de mesure a
+  // taire. Le solde jamais resorbe se lit directement en sorties non comptees.
+  const ac = ins.access_control;
+  if (ac && ac.final_present) {
+    ul.appendChild(el('li', null,
+      'A la derniere mesure (' + fmtFreqHour(ac.final_at) + '), ' +
+      fmt(ac.final_present) + ' personnes sont encore comptees dans l\'enceinte, ' +
+      'soit ' + ac.final_pct + ' % du pic : autant de sorties qui n\'ont jamais ' +
+      'ete enregistrees.'));
+  }
+  (ac && ac.events || []).forEach(ev => {
+    const perte = ev.kind === 'controle_non_tenu';
+    ul.appendChild(el('li', { class: 'freq-alert' },
+      (perte ? 'Controle d\'acces non tenu' : 'Aucune mesure aux portes') +
+      ' de ' + fmtFreqHour(ev.start) + ' a ' + fmtFreqHour(ev.end) +
+      ' (' + ev.hours + ' h) : ' + fmt(ev.scans) + ' scans releves contre ' +
+      fmt(ev.scans_expected) + ' attendus a ces heures, alors que ' +
+      fmt(ev.present_max) + ' personnes etaient dans l\'enceinte.'));
+  });
 
   const wc = ins.weather_correlation || {};
   const strongest = [['pluie', wc.rain], ['temperature', wc.tmax], ['ensoleillement', wc.sun]]
@@ -1934,6 +2044,7 @@ function renderFreqInsights(host, f) {
 const FREQ_ANALYSIS_TITLES = {
   synthese: 'Synthese',
   dynamique_journaliere: 'Dynamique journaliere',
+  controle_acces: 'Controle d\'acces',
   comparaison_editions: 'Comparaison entre editions',
   effet_meteo: 'Effet de la meteo',
   recommandations: 'Recommandations',
@@ -1989,6 +2100,10 @@ function renderFrequentation() {
   const current = f.editions.find(e => e.is_current) || f.editions[0];
   const prev = f.editions.filter(e => !e.is_current);
 
+  // Reference des jours de semaine pour tout le rendu (axe, infobulles).
+  FREQ_RACE_DATE = current.race_date
+    ? new Date(current.race_date + 'T00:00:00Z') : null;
+
   const header = el('div', { class: 'sticky-header' });
   header.appendChild(el('h2', null, 'Frequentation de l\'enceinte generale'));
   header.appendChild(el('div', { class: 'subtitle' },
@@ -2037,11 +2152,11 @@ function renderFrequentation() {
   if (f.entries_comparable === false) {
     const doors = (f.insights || {}).doors_by_year || {};
     main.appendChild(el('div', { class: 'freq-note' },
-      'Le nombre de portes instrumentees differe entre les editions (' +
+      'Le nombre de portes en service differe entre les editions (' +
       Object.keys(doors).sort().map(y => y + ' : ' + doors[y]).join(', ') +
       '). Les totaux d\'entrees ne sont donc pas comparables d\'une annee sur ' +
       'l\'autre : la comparaison porte sur le pic de presents, qui ne depend ' +
-      'quasiment pas des portes instrumentees en marge.'));
+      'quasiment pas des portes ouvertes en marge.'));
   }
 
   const axis = freqAxis(f.editions);
@@ -2061,6 +2176,8 @@ function renderFrequentation() {
   daysSec.appendChild(el('h3', null, 'Detail par jour'));
   main.appendChild(daysSec);
   renderFreqDayCards(daysSec, f);
+
+  renderFreqUnits(main, f);
 
   renderFreqInsights(main, f);
 
