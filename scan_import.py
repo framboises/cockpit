@@ -29,8 +29,15 @@ import unicodedata
 import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import openpyxl
+
+# Toute la chaine scans travaille en datetimes NAIFS, heure locale Paris :
+# c'est la convention des documents deja en base et de ce que lisent les
+# autres logiciels. Ce fuseau ne sert qu'a ramener une source horodatee en
+# UTC vers cette convention, jamais a produire de l'aware.
+TZ_PARIS = ZoneInfo('Europe/Paris')
 
 # ---------------------------------------------------------------------------
 # Constantes
@@ -718,6 +725,41 @@ def _iso(dt):
     return dt.strftime('%Y-%m-%dT%H:%M:%S')
 
 
+def to_naive_paris_iso(raw):
+    """Toute forme de date -> chaine ISO NAIVE en heure locale Paris.
+
+    Les sources ne parlent pas la meme langue :
+      - `historique_controle.race`            '2024-04-20T15:00:00'      naif Paris
+      - `parametrages.data.race`              '2026-04-18T15:00:00'      naif Paris
+      - `parametrages.data.globalHoraires.race'2026-04-18T13:00:00.000Z' UTC
+
+    Sans normalisation, importer une edition qui n'a pas encore de document
+    `historique_controle` ecrivait la valeur UTC telle quelle : 2 h de decalage
+    en ete, et un format avec `Z` que le reste de la chaine et les logiciels
+    tiers n'attendent pas. Tout ce qui entre repart donc en naif Paris.
+
+    Une valeur deja naive est renvoyee inchangee : elle est PAR CONVENTION en
+    heure de Paris, on ne lui applique aucune conversion.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        dt = raw
+    else:
+        s = str(raw).strip()
+        if not s:
+            return None
+        # 'Z' n'est pas reconnu par fromisoformat avant Python 3.11.
+        s = s.replace('Z', '+00:00').replace('z', '+00:00')
+        try:
+            dt = datetime.fromisoformat(s)
+        except ValueError:
+            return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(TZ_PARIS).replace(tzinfo=None)
+    return _iso(dt)
+
+
 def _sorted_slots(unit):
     return sorted(unit['slots'].items())
 
@@ -1009,7 +1051,7 @@ def save_overrides(db, overrides, created_by=None):
 # ---------------------------------------------------------------------------
 
 def resolve_race(db, event, year):
-    """Date de course au format ISO naif, ou None.
+    """Date de course au format ISO NAIF, heure locale Paris, ou None.
 
     Ordre de resolution, du plus fiable au moins fiable :
       1. le document `historique_controle` deja en base (portes puis
@@ -1017,13 +1059,20 @@ def resolve_race(db, event, year):
       2. `parametrages.data.globalHoraires.race` puis `parametrages.data.race`
          (l'annee y est stockee en STR en prod, on tente les deux formes)
     Si rien ne sort, l'appelant doit demander la date a l'utilisateur.
+
+    ⚠ `globalHoraires.race` est stocke en UTC avec un `Z` final, contrairement
+    a tout le reste de la chaine. Toute valeur passe donc par
+    `to_naive_paris_iso` : sans ca, la premiere edition importee d'un evenement
+    (celle qui n'a pas encore de `historique_controle`) recevait une date
+    decalee de 2 h en ete, dans un format que les autres logiciels n'attendent
+    pas.
     """
     for hc_type in ('portes', 'frequentation'):
         for y in (int(year), str(year)):
             doc = db['historique_controle'].find_one(
                 {'type': hc_type, 'event': event, 'year': y}, {'race': 1})
             if doc and doc.get('race'):
-                return doc['race']
+                return to_naive_paris_iso(doc['race'])
 
     proj = {'data.race': 1, 'data.globalHoraires.race': 1}
     for y in (str(year), int(year)):
@@ -1033,7 +1082,9 @@ def resolve_race(db, event, year):
         data = doc.get('data') or {}
         for raw in ((data.get('globalHoraires') or {}).get('race'), data.get('race')):
             if raw:
-                return str(raw)
+                normalized = to_naive_paris_iso(raw)
+                if normalized:
+                    return normalized
     return None
 
 

@@ -532,7 +532,11 @@ def scan_report_import_commit():
         year = int(body.get('year') or staged['year'])
     except (TypeError, ValueError):
         return _err('annee_invalide')
-    race = body.get('race') or scan_import.resolve_race(db, event, year)
+    # La date saisie a la main passe par le meme filtre que les sources : le
+    # champ accepte ce que l'utilisateur colle, y compris une valeur UTC
+    # copiee depuis parametrages.
+    race = (scan_import.to_naive_paris_iso(body.get('race'))
+            or scan_import.resolve_race(db, event, year))
 
     # Choix manuels, par unite :
     # {"porte|PORTE NORD": {_id_feature, feature_collection, category, save}}

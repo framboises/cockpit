@@ -434,6 +434,28 @@ Tous dans `historique_controle`, index unique `(event, year, type)`, `year` en *
 
 `frequentation` porte en plus `source: 'scan_import'`, `excluded_autre`, `doors_without_direction` et `ignored_doors` — traçabilité de ce qui manque à la courbe de présents.
 
+### Fuseaux horaires
+
+**Toute la chaîne scans travaille en datetimes naïfs, heure locale Paris.** Aucun `Z`, aucun offset, nulle part. C'est la convention des documents déjà en base et de ce que lisent les autres logiciels.
+
+Vérifié sur l'ensemble des documents : `frequentation.data[].date` et `complet.data_15min[].date` sont des **chaînes ISO sans fuseau**, `portes.doors[].scans[].timestamp` des **datetimes BSON naïfs** — identique entre l'ancienne chaîne (collecte temps réel) et `scan_import`. Excel n'ayant pas de fuseau, openpyxl rend des datetimes naïfs : les créneaux entrent déjà dans la bonne convention.
+
+⚠️ **`parametrages.data.globalHoraires.race` est la seule source stockée en UTC, avec un `Z` final.** Elle ne parle pas la même langue que le reste :
+
+| Source | Exemple (24H MOTOS 2026) | Fuseau |
+|---|---|---|
+| `historique_controle.race` | `2026-04-18T15:00:00` | naïf Paris |
+| `parametrages.data.race` | `2026-04-18T15:00:00` | naïf Paris |
+| `parametrages.data.globalHoraires.race` | `2026-04-18T13:00:00.000Z` | **UTC** |
+
+`resolve_race` faisait un `str(raw)` sans conversion. Pour un couple déjà en base, le niveau 1 (`historique_controle`) répondait en premier et masquait le problème ; mais **la première édition importée d'un événement** — celle qui n'a pas encore de `historique_controle` — recevait la valeur UTC telle quelle : 2 h de décalage en été, 1 h en hiver, et un format avec `Z` inattendu en aval.
+
+`to_naive_paris_iso()` normalise désormais tout ce qui entre, y compris la date saisie à la main dans la modale. Une valeur déjà naïve est renvoyée **inchangée** — elle est par convention en heure de Paris, on ne lui applique aucune conversion. Vérifié idempotent sur les 30 valeurs `race` en base.
+
+Contrôle rapide : la course des 24H MOTOS tombe toujours **samedi 15h** — 2024, 2025 et 2026 renvoient bien `15:00:00`.
+
+Les lecteurs (`pcorg_summary._parse_race_dt`, `_parse_iso_dt`) savaient déjà gérer les deux formes (naïf → Paris, `Z` → UTC). Le défaut était côté écriture, pas lecture.
+
 ### Rattachement aux entités cartographiques
 
 La clé durable est **`properties._id_feature`** (chaîne hexadécimale de 24 caractères). **Il n'existe pas de `id_feature`.** Présent sur 100 % des features de `portes`, `hospitalites`, `terrains`, `tribunes`.
@@ -699,7 +721,7 @@ Sans `ANTHROPIC_API_KEY`, le rapport se génère **sans la section** (log en war
 
 - **`year` doit être un `int`.** Un `str` créerait un doublon sous l'index unique au lieu de mettre à jour.
 - **`event` est le nom cockpit** (`24H MOTOS`), jamais le slug `24h_du_mans` de l'ancienne chaîne. `EVENT_ALIASES` ne sert plus qu'au repli sur les rapports historiques.
-- **Datetimes naïfs Paris.** Écrire de l'UTC décalerait silencieusement les données de 2 h en été.
+- **Datetimes naïfs Paris.** Écrire de l'UTC décalerait silencieusement les données de 2 h en été. Seul `parametrages.data.globalHoraires.race` est en UTC avec un `Z` : tout ce qui entre passe par `scan_import.to_naive_paris_iso()`.
 - **`SystemExit` dérive de `BaseException`** : dans un thread de travail, un `except Exception` ne l'attrape pas, le thread meurt en silence et le job reste bloqué. Les workers attrapent `BaseException` et libèrent la cible dans un `finally`.
 - **Les noms d'unités viennent du classeur téléversé**, donc d'une source non maîtrisée. Toute interpolation dans du HTML côté JS doit passer par `esc()` — sinon un fichier avec une zone nommée `<img onerror=…>` exécute du script dans une page admin.
 - **`reports/` et `uploads/scan_imports/` sont dans `.gitignore`.** Un rapport pèse 0,3 à 1,2 Mo.
