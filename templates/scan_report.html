@@ -758,29 +758,54 @@
         return true;
       }
 
+      // Distance d'un point a un segment : sert a garder les traits de rappel
+      // a l'ecart des autres pastilles.
+      function segDist(ax, ay, bx, by, px, py) {
+        var dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+        var t = l2 ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0;
+        t = Math.max(0, Math.min(1, t));
+        var qx = ax + t * dx, qy = ay + t * dy;
+        return Math.sqrt((px - qx) * (px - qx) + (py - qy) * (py - qy));
+      }
+
       // Les virages serres (esses, Porsche, chicane Ford) se suivent de trop
       // pres pour tenir cote a cote : on eloigne la pastille jusqu'a trouver
-      // une place libre, d'abord vers l'exterieur puis vers l'interieur du
-      // circuit — comme sur les cartes officielles, ou quelques numeros sont
-      // a l'interieur faute de place dehors.
+      // une place libre. Les deux cotes sont testes A CHAQUE DISTANCE, pas
+      // l'exterieur en entier puis l'interieur : c'est ce qui envoyait les
+      // 3, 5 et 21 loin dehors alors qu'une place les attendait juste a
+      // l'interieur du circuit.
+      // Les candidats ne sont pas cherches que sur la normale au trace : dans
+      // la chicane Ford, les deux cotes sont bouches et le 21 partait au bout
+      // d'un trait de 52 unites qui traversait le 20. Quelques angles autour
+      // de la normale suffisent a trouver une place proche.
+      var ANGLES = [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35];
       var placed = [];
       function freeSpot(px, py, ux, uy, w, trackMargin) {
         var dirs = [1, -1];
-        for (var s = 0; s < dirs.length; s++) {
-          for (var d = 12; d <= 52; d += 4) {
-            var x = px + ux * d * dirs[s], y = py + uy * d * dirs[s];
+        for (var d = 18; d <= 54; d += 4) {
+          for (var s = 0; s < dirs.length; s++) {
+            for (var ai = 0; ai < ANGLES.length; ai++) {
+            var ca = Math.cos(ANGLES[ai]), sa = Math.sin(ANGLES[ai]);
+            var rx = ux * ca - uy * sa, ry = ux * sa + uy * ca;
+            var x = px + rx * d * dirs[s], y = py + ry * d * dirs[s];
             if (trackMargin && !clearOfTrack(x, y, trackMargin)) continue;
             var ok = true;
             for (var k = 0; k < placed.length; k++) {
               var q = placed[k];
               if (Math.abs(q.x - x) < (q.w + w) / 2 + 2 &&
                   Math.abs(q.y - y) < 15) { ok = false; break; }
+              // Le trait de rappel ne doit pas traverser une autre pastille.
+              if (trackMargin &&
+                  segDist(px, py, x, y, q.x, q.y) < q.w / 2 + 2) {
+                ok = false; break;
+              }
             }
             if (ok) { placed.push({ x: x, y: y, w: w }); return { x: x, y: y }; }
+            }
           }
         }
-        placed.push({ x: px + ux * 52, y: py + uy * 52, w: w });
-        return { x: px + ux * 52, y: py + uy * 52 };
+        placed.push({ x: px + ux * 54, y: py + uy * 54, w: w });
+        return { x: px + ux * 54, y: py + uy * 54 };
       }
 
       var g = document.createElementNS(NS, 'g');
@@ -790,14 +815,20 @@
         var len = Math.sqrt(vx * vx + vy * vy) || 1;
         var ux = vx / len, uy = vy / len;
         var w = String(c.n).length > 1 ? 18 : 15;
-        var pos = freeSpot(pt.x, pt.y, ux, uy, w, w / 2 + 3);
+        var pos = freeSpot(pt.x, pt.y, ux, uy, w, w / 2 + 7);
 
         // Trait de rappel : sans lui, une pastille eloignee ne se rattache
         // plus visuellement a son virage.
+        // Le trait part du trace et s'arrete au BORD de la pastille : le
+        // faire aller jusqu'au centre le fait deborder sous le chiffre.
+        var ldx = pos.x - pt.x, ldy = pos.y - pt.y;
+        var ll = Math.sqrt(ldx * ldx + ldy * ldy) || 1;
         var lead = document.createElementNS(NS, 'line');
         lead.setAttribute('class', 'corner-lead');
-        lead.setAttribute('x1', pt.x); lead.setAttribute('y1', pt.y);
-        lead.setAttribute('x2', pos.x); lead.setAttribute('y2', pos.y);
+        lead.setAttribute('x1', pt.x + ldx / ll * 3);
+        lead.setAttribute('y1', pt.y + ldy / ll * 3);
+        lead.setAttribute('x2', pos.x - ldx / ll * (w / 2));
+        lead.setAttribute('y2', pos.y - ldy / ll * (w / 2));
 
         var dot = document.createElementNS(NS, 'circle');
         dot.setAttribute('class', 'corner-dot');
@@ -844,8 +875,8 @@
         var w = c.name.length * 4.6, h = 11;
 
         var best = null, dirs = [1, -1];
-        for (var s2 = 0; s2 < dirs.length && !best; s2++) {
-          for (var d = 14; d <= 64 && !best; d += 4) {
+        for (var d = 20; d <= 70 && !best; d += 4) {
+          for (var s2 = 0; s2 < dirs.length && !best; s2++) {
             var ax = pt.x + ux * d * dirs[s2], ay = pt.y + uy * d * dirs[s2];
             // Le texte part a l'oppose du circuit : ancre a gauche quand on
             // est a droite, a droite quand on est a gauche.
