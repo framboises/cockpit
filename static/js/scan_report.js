@@ -821,6 +821,9 @@
     var analysisHist = $("#scan-analysis-history");
     if (analysisHist) analysisHist.addEventListener("click", showHistory);
 
+    var staffBtn = $("#scan-staffing-btn");
+    if (staffBtn) staffBtn.addEventListener("click", openStaffing);
+
     var staffPick = $("#scan-staffing-pick");
     var staffFile = $("#scan-staffing-file");
     if (staffPick && staffFile) {

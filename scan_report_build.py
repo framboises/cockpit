@@ -81,11 +81,19 @@ def _legacy_enrichment(db, event, year):
     Un import Excel seul ne peut pas les produire : ils viennent des scripts
     d'enrichissement. On les greffe quand ils existent pour ce couple plutot
     que de faire disparaitre les panneaux du rapport.
+
+    ⚠ `parking_scans` / `porte_scans` sont indexees sur le SLUG de l'ancienne
+    chaine (`24h_du_mans`), pas sur le nom cockpit (`24H AUTOS`). Interroger
+    avec le nom cockpit ne remonte rien et fait disparaitre silencieusement
+    tous les effectifs du rapport.
     """
     by_name = {}
+    slug = _legacy_slug(event)
+    events = {event, slug}
     try:
         for coll, key in (('parking_scans', 'zone'), ('porte_scans', 'porte')):
-            for doc in db[coll].find({'event': event, 'year': year}):
+            for doc in db[coll].find({'event': {'$in': sorted(events)},
+                                      'year': int(year)}):
                 name = (doc.get(key) or '').strip().upper()
                 if not name:
                     continue
@@ -153,7 +161,10 @@ def build_payload_from_complet(db, event, year, progress_cb=None,
             'total_entree': int(unit.get('total_entree') or 0),
             'total_sortie': int(unit.get('total_sortie') or 0),
             'intervals': intervals,
-            'staffing': extra.get('staffing'),
+            # Le staffing pose par l'etape « Effectifs » vit sur l'unite du
+            # document complet : le lire en priorite, sinon l'affichage des
+            # agents reste a zero alors que le calcul a bien eu lieu.
+            'staffing': unit.get('staffing') or extra.get('staffing'),
         }
 
         if unit.get('kind') == 'porte':

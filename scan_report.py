@@ -604,13 +604,47 @@ def scan_report_import_commit():
     with _STAGING_LOCK:
         _drop_staged(token)
 
+    # Effectifs : si des validations ont deja ete saisies pour ce couple, on
+    # les rejoue tout de suite. L'utilisateur s'attend a ce que l'import
+    # enrichisse tout ; le passage par l'etape manuelle n'est necessaire que
+    # la premiere fois, quand aucune validation n'existe encore.
+    staffing_info = _apply_saved_staffing(db, event, year, user)
+
     unresolved = [{'kind': k[0], 'name': k[1]}
                   for k, v in resolved.items() if not v['_id_feature']]
     return jsonify({
         'ok': True, 'run_id': run_id, 'event': event, 'year': year,
         'written': written, 'archived': archived,
         'overrides_saved': saved, 'unresolved': unresolved,
+        'staffing': staffing_info,
     })
+
+
+def _apply_saved_staffing(db, event, year, user):
+    """Rejoue les validations d'effectifs deja memorisees, si elles existent.
+
+    Retourne un descriptif pour l'UI : `status` vaut 'applique',
+    'aucune_validation' (premier import de ce couple) ou 'sources_absentes'
+    (edition sans bible ni calendrier).
+    """
+    import scan_staffing
+    try:
+        saved = scan_staffing.load_saved_validations(db, event, year)
+        if not saved:
+            return {'status': 'aucune_validation'}
+        rows = scan_staffing.build_validation_rows(db, event, year)
+        if not rows:
+            return {'status': 'aucune_validation'}
+        staffing = scan_staffing.compute_staffing(db, event, year, rows)
+        applied = scan_staffing.attach_staffing(db, event, year, staffing, user)
+        return {'status': 'applique', 'units': len(applied),
+                'validations': len(saved)}
+    except scan_staffing.StaffingSourcesMissing as exc:
+        return {'status': 'sources_absentes', 'detail': str(exc)}
+    except Exception as exc:
+        logger.warning('Application automatique des effectifs impossible',
+                       exc_info=True)
+        return {'status': 'echec', 'detail': str(exc)}
 
 
 @scan_report_bp.route('/scan-report/import/<token>', methods=['DELETE'])

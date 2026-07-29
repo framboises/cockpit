@@ -259,6 +259,44 @@ def compute_staffing(db, event, year, validations):
     return unit_staffing
 
 
+def build_validation_rows(db, event, year):
+    """Lignes de validation reconstituees depuis l'audit + les choix memorises.
+
+    Permet de rejouer les effectifs sans redemander le CSV a l'utilisateur,
+    des lors qu'il a valide ce couple au moins une fois.
+    """
+    content, _ = build_audit_csv(db, event, year)
+    return _parse_csv(content)
+
+
+def attach_staffing(db, event, year, staffing, saved_by=None):
+    """Pose le `staffing` calcule sur les unites du document `complet`.
+
+    Retourne la liste des unites effectivement rattachees.
+    """
+    doc = db['historique_controle'].find_one(
+        {'event': event, 'year': int(year), 'type': 'complet'})
+    if not doc:
+        raise StaffingSourcesMissing(
+            'Aucun document complet pour %s %s : importer le classeur d\'abord'
+            % (event, year))
+
+    by_upper = {k.strip().upper(): v for k, v in staffing.items()}
+    applied = []
+    for unit in doc.get('complet') or []:
+        st = by_upper.get((unit.get('name') or '').strip().upper())
+        if st:
+            unit['staffing'] = st
+            applied.append(unit['name'])
+
+    db['historique_controle'].update_one(
+        {'_id': doc['_id']},
+        {'$set': {'complet': doc['complet'],
+                  'staffing_applied_at': datetime.now(),
+                  'staffing_applied_by': saved_by}})
+    return applied
+
+
 def apply_validated_csv(db, event, year, csv_content, saved_by=None):
     """Applique le CSV valide : calcule puis pose `staffing` sur `complet`.
 
@@ -273,28 +311,7 @@ def apply_validated_csv(db, event, year, csv_content, saved_by=None):
                      saved_by=saved_by)
 
     staffing = compute_staffing(db, event, year, validations)
-
-    doc = db['historique_controle'].find_one(
-        {'event': event, 'year': year, 'type': 'complet'})
-    if not doc:
-        raise StaffingSourcesMissing(
-            'Aucun document complet pour %s %s : importer le classeur d\'abord'
-            % (event, year))
-
-    by_upper = {k.strip().upper(): v for k, v in staffing.items()}
-    applied, units_out = [], []
-    for unit in doc.get('complet') or []:
-        st = by_upper.get((unit.get('name') or '').strip().upper())
-        if st:
-            unit['staffing'] = st
-            applied.append(unit['name'])
-        units_out.append(unit['name'])
-
-    db['historique_controle'].update_one(
-        {'_id': doc['_id']},
-        {'$set': {'complet': doc['complet'],
-                  'staffing_applied_at': datetime.now(),
-                  'staffing_applied_by': saved_by}})
+    applied = attach_staffing(db, event, year, staffing, saved_by=saved_by)
 
     applied_upper = {a.strip().upper() for a in applied}
     unmatched = sorted(u for u in staffing
