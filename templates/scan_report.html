@@ -25,15 +25,22 @@
     .scan-report-header .meta { color: #8aa0bd; font-size: 13px; }
     .scan-report-iframe { flex: 1; width: 100%; border: 0; min-height: 0; }
     /* --- Etat vide : circuit dessine, voiture en tour de chauffe --------- */
-    .scan-report-empty { padding: 40px; color: #8aa0bd; text-align: center;
-      font-family: inherit; min-height: 62vh; display: flex;
-      flex-direction: column; align-items: center; justify-content: center;
-      gap: 0; }
+    .scan-report-empty { padding: 32px 40px; color: #8aa0bd;
+      text-align: center; font-family: inherit; height: 100%;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 24px; overflow: auto; }
+    /* Sur large, le circuit passe a cote du texte : il est en portrait et
+       mangerait sinon toute la hauteur disponible. */
+    @media (min-width: 900px) {
+      .scan-report-empty { flex-direction: row; gap: 56px; text-align: left; }
+      .scan-empty-text { max-width: 340px; }
+    }
     /* Conteneur cale sur le SVG : la voiture vit hors du SVG (offset-path
        n'existe pas sur un element SVG), elle doit donc se positionner dans le
-       meme repere. 317 x 682 de viewBox affiches en 190 x 409 (trace recadre sur sa bbox). */
-    .scan-empty-viz { position: relative; width: 190px; height: 409px; }
-    .scan-empty-track { width: 190px; height: 409px; overflow: visible;
+       meme repere. 317 x 682 de viewBox affiches en 236 x 508 (trace recadre sur sa bbox). */
+    .scan-empty-viz { position: relative; width: 236px; height: 508px;
+      flex: 0 0 auto; }
+    .scan-empty-track { width: 236px; height: 508px; overflow: visible;
       display: block; }
     .track-base { fill: none; stroke: #1e2838; stroke-width: 11;
       stroke-linejoin: round; }
@@ -42,6 +49,14 @@
       stroke-dashoffset: 1700; animation: trackDraw 2.4s ease-out forwards; }
     @keyframes trackDraw { to { stroke-dashoffset: 0; } }
     .track-start { stroke: #e6ecf5; stroke-width: 2.5; stroke-linecap: round; }
+    /* Reperes de virage : numeros officiels + noms d'usage. */
+    .corner-dot { fill: #0f1620; stroke: #4f9eff; stroke-width: 2; }
+    .corner-num { fill: #9cc5ff; font-size: 9px; font-weight: 600;
+      text-anchor: middle; dominant-baseline: central; font-family: inherit; }
+    .corner-name { fill: #6b7d96; font-size: 9px; font-family: inherit;
+      dominant-baseline: central; }
+    .straight-name { fill: #55657d; font-size: 8.5px; font-family: inherit;
+      font-style: italic; text-anchor: middle; }
     .track-labels text { fill: #4c5b73; font-size: 8.5px;
       font-family: inherit; letter-spacing: .3px; text-anchor: middle; }
 
@@ -54,15 +69,15 @@
       animation: lap var(--lap, 6s) linear infinite;
       animation-delay: 1.4s; }
     @keyframes lap { to { offset-distance: 100%; } }
-    /* Meme facteur d'echelle que le SVG (190 / 317), origine en haut a gauche
+    /* Meme facteur d'echelle que le SVG (236 / 317), origine en haut a gauche
        pour que le repere coincide. */
-    .scan-empty-car { scale: calc(190 / 317); transform-origin: 0 0; }
+    .scan-empty-car { scale: calc(236 / 317); transform-origin: 0 0; }
     @media (prefers-reduced-motion: reduce) {
       .track-line { animation: none; stroke-dashoffset: 0; }
       .scan-empty-car { animation: none; }
     }
 
-    .scan-empty-title { margin-top: 22px; font-size: 15px; color: #c8d6ea; }
+    .scan-empty-title { margin-top: 0; font-size: 15px; color: #c8d6ea; }
     .scan-empty-title strong { color: #e6ecf5; }
     .scan-empty-hint { margin-top: 6px; font-size: 12.5px; }
     .scan-empty-hint .material-symbols-outlined { font-size: 15px;
@@ -360,14 +375,16 @@
       <div class="scan-empty-car" aria-hidden="true"></div>
       </div>
 
-      <p class="scan-empty-title">Aucun rapport pour
-        <strong>{{ event }} {{ year }}</strong></p>
-      <p class="scan-empty-hint">
-        Deposer un classeur de scans avec le bouton
-        <span class="material-symbols-outlined">upload_file</span>
-        en haut a droite, puis regenerer.
-      </p>
-      <p class="scan-empty-egg" id="scan-empty-egg" hidden></p>
+      <div class="scan-empty-text">
+        <p class="scan-empty-title">Aucun rapport pour
+          <strong>{{ event }} {{ year }}</strong></p>
+        <p class="scan-empty-hint">
+          Deposer un classeur de scans avec le bouton
+          <span class="material-symbols-outlined">upload_file</span>
+          en haut a droite, puis regenerer.
+        </p>
+        <p class="scan-empty-egg" id="scan-empty-egg" hidden></p>
+      </div>
     </div>
     {% endif %}
   </main>
@@ -658,6 +675,84 @@
 
     eventSelect.addEventListener('change', go);
     yearSelect.addEventListener('change', go);
+
+    // Reperes de virage, poses sur le trace lui-meme : les positions sont
+    // exprimees en fraction de tour et resolues par getPointAtLength, donc
+    // elles suivent si le trace change. Numerotation officielle du Circuit
+    // de la Sarthe (38 courbes, 21 virages numerotes).
+    (function () {
+      var line = document.querySelector('.track-line');
+      var svg = document.querySelector('.scan-empty-track');
+      if (!line || !svg || !line.getTotalLength) return;
+
+      var CORNERS = [
+        { at: 0.940, n: '1-2',   name: 'Dunlop' },
+        { at: 0.010, n: '3-5',   name: 'Esses de la Foret' },
+        { at: 0.045, n: '6',     name: 'Tertre Rouge' },
+        { at: 0.215, n: '7',     name: 'Chicane Forza' },
+        { at: 0.340, n: '8',     name: 'Chicane Michelin' },
+        { at: 0.460, n: '9',     name: 'Mulsanne' },
+        { at: 0.620, n: '10-12', name: 'Indianapolis' },
+        { at: 0.710, n: '13-14', name: 'Arnage' },
+        { at: 0.780, n: '16-18', name: 'Courbes Porsche' },
+        { at: 0.855, n: '19-21', name: 'Chicane Ford' }
+      ];
+
+      var NS = 'http://www.w3.org/2000/svg';
+      var L = line.getTotalLength();
+
+      // Centre du trace : sert a pousser chaque etiquette VERS L'EXTERIEUR,
+      // sinon la moitie d'entre elles se poseraient sur la piste.
+      var cx = 0, cy = 0, N = 60;
+      for (var i = 0; i < N; i++) {
+        var q = line.getPointAtLength(L * i / N);
+        cx += q.x / N; cy += q.y / N;
+      }
+
+      var g = document.createElementNS(NS, 'g');
+      CORNERS.forEach(function (c) {
+        var pt = line.getPointAtLength(L * c.at);
+        var vx = pt.x - cx, vy = pt.y - cy;
+        var len = Math.sqrt(vx * vx + vy * vy) || 1;
+        var ux = vx / len, uy = vy / len;
+
+        // Pastille dimensionnee au libelle : « 10-12 » ne tient pas dans le
+        // meme cercle que « 9 ».
+        var w = 15 + Math.max(0, c.n.length - 1) * 4.2;
+        var dot = document.createElementNS(NS, 'rect');
+        dot.setAttribute('class', 'corner-dot');
+        dot.setAttribute('x', pt.x - w / 2); dot.setAttribute('y', pt.y - 7.5);
+        dot.setAttribute('width', w); dot.setAttribute('height', 15);
+        dot.setAttribute('rx', 7.5);
+        var num = document.createElementNS(NS, 'text');
+        num.setAttribute('class', 'corner-num');
+        num.setAttribute('x', pt.x); num.setAttribute('y', pt.y);
+        num.textContent = c.n;
+
+        var lx = pt.x + ux * (w / 2 + 6), ly = pt.y + uy * (w / 2 + 6);
+        var name = document.createElementNS(NS, 'text');
+        name.setAttribute('class', 'corner-name');
+        name.setAttribute('x', lx); name.setAttribute('y', ly);
+        // Le texte part vers l'exterieur : ancre a gauche a droite du trace,
+        // a droite a gauche, sinon il repasse par-dessus la piste.
+        name.setAttribute('text-anchor', ux >= 0 ? 'start' : 'end');
+        name.textContent = c.name;
+
+        g.appendChild(dot); g.appendChild(num); g.appendChild(name);
+      });
+
+      // La ligne droite des Hunaudieres n'est pas un virage : elle se nomme
+      // le long du trace, entre Tertre Rouge et Mulsanne.
+      var mid = line.getPointAtLength(L * 0.28);
+      var straight = document.createElementNS(NS, 'text');
+      straight.setAttribute('class', 'straight-name');
+      straight.setAttribute('x', mid.x - 26); straight.setAttribute('y', mid.y);
+      straight.setAttribute('text-anchor', 'end');
+      straight.textContent = 'Ligne droite des Hunaudieres';
+      g.appendChild(straight);
+
+      svg.appendChild(g);
+    })();
 
     // Ecran vide : cliquer sur le circuit lance un tour rapide. Au 24e, un
     // clin d'oeil. Purement decoratif, aucune donnee en jeu.
