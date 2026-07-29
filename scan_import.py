@@ -462,6 +462,7 @@ def _load_overrides(db, event=None, year=None):
             'feature_collection': doc.get('feature_collection'),
             'category': doc.get('category'),
             'ignored': doc.get('ignored'),
+            'no_location': doc.get('no_location'),
             'targeted': targeted,
         }
     return out
@@ -621,7 +622,11 @@ def resolve_features(db, units, event=None, year=None, overrides=None):
 
     Retourne {(kind, name): {_id_feature, feature_collection, feature_source,
                              feature_label, candidates}}.
-    `feature_source` vaut 'manuel', 'historique', 'geojson' ou 'aucun'.
+    `feature_source` vaut 'manuel', 'historique', 'geojson', 'sans_lieu' ou
+    'aucun'. Les deux derniers different : `sans_lieu` est une DECISION (cette
+    unite n'est pas un lieu — guichet, service, renfort mobile), `aucun` est un
+    rattachement qui reste a faire. Les confondre laissait des unites signalees
+    « a localiser » a chaque import alors que la question etait tranchee.
     """
     geo = _load_geo_index(db)
     known = _harvest_known_doors(db)
@@ -649,7 +654,12 @@ def resolve_features(db, units, event=None, year=None, overrides=None):
         manual = dict(saved.get((unit['kind'], norm)) or {})
         manual.update({k: v for k, v in (live.get(key) or {}).items()
                        if v is not None})
-        if manual.get('_id_feature'):
+        if manual.get('no_location'):
+            # Decision explicite : cette unite n'est pas un lieu. On n'essaie
+            # meme pas de la rapprocher — proposer des candidats reposerait la
+            # question a chaque import.
+            entry.update({'feature_source': 'sans_lieu', 'candidates': []})
+        elif manual.get('_id_feature'):
             entry.update({
                 '_id_feature': manual['_id_feature'],
                 'feature_collection': manual.get('feature_collection'),
@@ -678,11 +688,12 @@ def resolve_features(db, units, event=None, year=None, overrides=None):
                     entry['feature_label'] = l
                     break
 
-        if not entry['_id_feature']:
+        if entry['_id_feature'] or entry['feature_source'] == 'sans_lieu':
+            entry['suggestions'] = []
+        else:
             entry['suggestions'] = _suggest_for(
                 unit, geo, exclude_ids={c['_id_feature'] for c in entry['candidates']})
-        else:
-            entry['suggestions'] = []
+        entry['no_location'] = entry['feature_source'] == 'sans_lieu'
 
         # Categorie : choix explicite s'il existe, proposition sinon. Elle est
         # independante du rattachement geographique — une unite peut etre
@@ -1035,6 +1046,15 @@ def save_overrides(db, overrides, created_by=None):
         # a nouveau sans que personne ne comprenne pourquoi.
         if val.get('ignored') is not None:
             fields['ignored'] = bool(val['ignored'])
+        # Memorise dans les deux sens : repasser une unite de « sans lieu » a
+        # « a localiser » doit survivre au prochain import.
+        if val.get('no_location') is not None:
+            fields['no_location'] = bool(val['no_location'])
+            if val['no_location']:
+                # Un choix « aucune » efface le rattachement memorise, sinon
+                # il reviendrait au prochain import.
+                fields['_id_feature'] = None
+                fields['feature_collection'] = None
         if len(fields) == 2:  # rien d'autre que l'horodatage
             continue
         db[OVERRIDES_COLLECTION].update_one(

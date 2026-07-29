@@ -275,19 +275,30 @@
     importCtx.units = state.units;
     importCtx.overrides = state.overrides;
     importCtx.categories = state.categories;
-    var unresolved = state.units.filter(function (u) { return !u._id_feature; });
+    var unresolved = state.units.filter(function (u) {
+      return !u._id_feature && !u.no_location;
+    });
     // Toutes les unites sont proposees a la verification, y compris celles
     // resolues automatiquement : une resolution auto peut se tromper, et la
     // categorie n'est qu'une proposition dans tous les cas.
     $("#scan-unresolved-block").hidden = state.units.length === 0;
     $("#scan-unresolved-count").textContent =
       state.units.length + " unite(s), dont " + unresolved.length +
-      " non localisee(s)";
+      " a localiser";
     $("#scan-only-unresolved").checked = false;
     renderMapRows(importCtx);
     refreshIgnoreRecap(importCtx);
 
     showStep("preview");
+  }
+
+  // « Aucune collection » : decision explicite que l'unite n'est pas un lieu
+  // (guichet, service, renfort mobile). A distinguer d'un rattachement encore
+  // a faire, qui lui doit rester signale.
+  function isNoLocation(ctx, u, key) {
+    var ov = ctx.overrides[key];
+    if (ov && ov.no_location != null) return !!ov.no_location;
+    return !!u.no_location;
   }
 
   function isIgnored(ctx, u, key) {
@@ -298,6 +309,7 @@
 
   function rowState(ctx, u, key) {
     if (isIgnored(ctx, u, key)) return "is-ignored";
+    if (isNoLocation(ctx, u, key)) return "is-nolocation";
     var ov = ctx.overrides[key];
     if (ov && (ov._id_feature || ov.category)) return "is-manual";
     if (!u._id_feature) return "is-none";
@@ -314,9 +326,12 @@
     clear(host);
     ctx.units.forEach(function (u) {
       var key = u.kind + "|" + u.name;
+      var noLoc = isNoLocation(ctx, u, key);
       var row = document.createElement("div");
       row.className = "scanmap-row " + rowState(ctx, u, key);
-      row.dataset.resolved = u._id_feature ? "1" : "0";
+      // « sans lieu » est une question tranchee : le filtre « a localiser »
+      // ne doit pas la reposer.
+      row.dataset.resolved = (u._id_feature || noLoc) ? "1" : "0";
 
       var left = document.createElement("div");
       left.innerHTML = '<div class="scanmap-name"></div><div class="scanmap-sub"></div>';
@@ -363,13 +378,16 @@
       var collBox = document.createElement("div");
       collBox.appendChild(labelled("Collection"));
       var sel = document.createElement("select");
-      ["portes", "terrains", "hospitalites", "tribunes"].forEach(function (c) {
-        var o = document.createElement("option");
-        o.value = c; o.textContent = c;
-        if (c === (u.feature_collection ||
-                   (u.kind === "porte" ? "portes" : "terrains"))) o.selected = true;
-        sel.appendChild(o);
-      });
+      var current = noLoc ? "" : (u.feature_collection ||
+                                  (u.kind === "porte" ? "portes" : "terrains"));
+      [["", "(aucune)"], ["portes", "portes"], ["terrains", "terrains"],
+       ["hospitalites", "hospitalites"], ["tribunes", "tribunes"]]
+        .forEach(function (c) {
+          var o = document.createElement("option");
+          o.value = c[0]; o.textContent = c[1];
+          if (c[0] === current) o.selected = true;
+          sel.appendChild(o);
+        });
       collBox.appendChild(sel);
 
       var right = document.createElement("div");
@@ -377,12 +395,14 @@
       var input = document.createElement("input");
       input.type = "text";
       input.setAttribute("list", "scanlist-" + key.replace(/[^a-z0-9]/gi, ""));
-      input.placeholder = "Rechercher une entite...";
-      if (u.feature_label) input.value = u.feature_label;
+      input.placeholder = noLoc ? "sans lieu" : "Rechercher une entite...";
+      input.disabled = noLoc;
+      if (u.feature_label && !noLoc) input.value = u.feature_label;
       var datalist = document.createElement("datalist");
       datalist.id = input.getAttribute("list");
       var chips = document.createElement("div");
       chips.className = "scanmap-chips";
+      chips.hidden = noLoc;
       right.appendChild(input);
       right.appendChild(datalist);
       right.appendChild(chips);
@@ -409,6 +429,7 @@
 
       function loadList() {
         var coll = sel.value;
+        if (!coll) { clear(datalist); return; }
         fetchFeatures(coll).then(function (items) {
           clear(datalist);
           items.forEach(function (it) {
@@ -424,6 +445,15 @@
         // Changer de collection annule le rattachement, pas la categorie :
         // ce sont deux decisions independantes.
         clearFeatureOverride(ctx, key);
+        var none = sel.value === "";
+        ctx.overrides[key] = ctx.overrides[key] || {};
+        ctx.overrides[key].no_location = none;
+        // Sans collection il n'y a rien a chercher : le champ est neutralise
+        // plutot que de laisser croire qu'une saisie est attendue.
+        input.disabled = none;
+        input.placeholder = none ? "sans lieu" : "Rechercher une entite...";
+        chips.hidden = none;
+        row.dataset.resolved = (u._id_feature || none) ? "1" : "0";
         row.className = "scanmap-row " + rowState(ctx, u, key);
         loadList();
       });
@@ -549,6 +579,8 @@
         category: state.overrides[k].category || null,
         ignored: state.overrides[k].ignored != null
           ? state.overrides[k].ignored : null,
+        no_location: state.overrides[k].no_location != null
+          ? state.overrides[k].no_location : null,
         save: payload.save_overrides
       };
     });
@@ -677,11 +709,7 @@
         }
         mappingCtx.units = d.units || [];
         mappingCtx.categories = d.categories || [];
-        var unres = mappingCtx.units.filter(function (u) { return !u._id_feature; });
-        var off = mappingCtx.units.filter(function (u) { return u.ignored; });
-        $("#scan-mapping-count").textContent =
-          mappingCtx.units.length + " unite(s), dont " + unres.length +
-          " non localisee(s) et " + off.length + " ignoree(s)";
+        refreshMappingCount();
         notes.appendChild(note("info",
           "Source : <strong>" + esc(d.source_file || "import") + "</strong>" +
           (d.imported_at ? " du " + esc(d.imported_at.slice(0, 16)) : "") +
@@ -698,6 +726,18 @@
       });
   }
 
+  // Le compteur doit refleter l'etat en base, y compris apres application :
+  // le laisser fige donnait l'impression que rien n'avait ete enregistre.
+  function refreshMappingCount() {
+    var u = mappingCtx.units;
+    var unres = u.filter(function (x) { return !x._id_feature && !x.no_location; });
+    var noloc = u.filter(function (x) { return x.no_location; });
+    var off = u.filter(function (x) { return x.ignored; });
+    $("#scan-mapping-count").textContent =
+      u.length + " unite(s), dont " + unres.length + " a localiser, " +
+      noloc.length + " sans lieu et " + off.length + " ignoree(s)";
+  }
+
   function applyMapping() {
     var btn = $("#scan-mapping-go");
     btn.disabled = true;
@@ -711,6 +751,7 @@
         feature_collection: o.feature_collection || null,
         category: o.category || null,
         ignored: !!o.ignored,
+        no_location: !!o.no_location,
       };
     });
 
@@ -753,6 +794,7 @@
           mappingCtx.units = fresh.units || [];
           renderMapRows(mappingCtx);
           refreshIgnoreRecap(mappingCtx);
+          refreshMappingCount();
         });
     }).catch(function () {
       $("#scan-mapping-progress").hidden = true;

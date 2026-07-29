@@ -471,6 +471,7 @@ def scan_report_import_analyze():
             'category': res.get('category'),
             'category_source': res.get('category_source'),
             'ignored': bool(res.get('ignored')),
+            'no_location': bool(res.get('no_location')),
         })
 
     totals = {
@@ -549,11 +550,13 @@ def scan_report_import_commit():
         kind, name = key.split('|', 1)
         cat = val.get('category')
         ign = val.get('ignored')
+        nol = val.get('no_location')
         overrides[(kind, name)] = {
             '_id_feature': val.get('_id_feature') or None,
             'feature_collection': val.get('feature_collection'),
             'category': cat if cat in scan_import.CATEGORY_IDS else None,
             'ignored': bool(ign) if ign is not None else None,
+            'no_location': bool(nol) if nol is not None else None,
             'save': bool(val.get('save')),
         }
 
@@ -619,9 +622,12 @@ def scan_report_import_commit():
         _drop_staged(token)
 
     ignored = scan_import.ignored_keys(resolved)
+    # Une unite explicitement declaree sans lieu n'est PAS « a localiser » :
+    # la question a ete tranchee, la signaler serait du bruit.
     unresolved = [{'kind': k[0], 'name': k[1]}
                   for k, v in resolved.items()
-                  if not v['_id_feature'] and k not in ignored]
+                  if not v['_id_feature'] and not v.get('no_location')
+                  and k not in ignored]
 
     # Le rapport est un fichier fige : sans regeneration il montrerait encore
     # l'etat d'avant. On l'enchaine plutot que de compter sur la memoire de
@@ -705,6 +711,7 @@ def scan_report_mapping_post():
             'feature_collection': val.get('feature_collection'),
             'category': cat if cat in scan_import.CATEGORY_IDS else None,
             'ignored': bool(val.get('ignored')),
+            'no_location': bool(val.get('no_location')),
         }
 
     try:

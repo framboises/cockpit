@@ -470,7 +470,18 @@ Résolveur à 3 niveaux, dans l'ordre :
 
 Un rapprochement **multi-candidats est laissé non résolu** (`PORTE CIK` existe deux fois dans le GeoJSON) : l'UI propose alors les candidats et des suggestions par score de Jaccard.
 
-Sur 24H MOTOS 2024 : 14/19 unités résolues automatiquement, 17/19 après mapping manuel. `PORTE NORD CLUB` et `CONCENTRATION` n'ont aucune entité — c'est normal, certaines unités sont des services, pas des lieux.
+Sur 24H MOTOS 2024 : 14/19 unités résolues automatiquement, 17/19 après mapping manuel. `PORTE NORD CLUB` et `CONCENTRATION` n'ont aucune entité — ce sont des services, pas des lieux, et ils sont désormais marqués comme tels (voir ci-dessous).
+
+**Collection `(aucune)` — l'unité n'est pas un lieu.** `feature_source` distingue deux situations que le code confondait :
+
+| `feature_source` | Sens |
+|---|---|
+| `aucun` | rattachement **à faire** — signalé, proposé à chaque import |
+| `sans_lieu` | **décision** : guichet, service, renfort mobile. La question est tranchée |
+
+Sans cette distinction, `HELPDESK`, `LITIGE`, `UAM`, `SERI`, `PUNISHER`, `CONCENTRATION` remontaient « à localiser » à chaque import, alors qu'il n'y avait rien à localiser. Une unité `sans_lieu` ne reçoit ni candidats ni suggestions, sort du compteur « à localiser » et du filtre correspondant, et son liseré est neutre (bleu-gris) — surtout pas l'ambre du « à traiter ».
+
+Choisir `(aucune)` **efface le rattachement mémorisé** (`_id_feature: None` dans l'override), sinon il reviendrait au prochain import. Le choix est mémorisé dans les deux sens : repasser une unité de « sans lieu » à « à localiser » survit aussi.
 
 **La modale expose les 19 unités, pas seulement les non résolues.** Une résolution automatique peut se tromper, et la catégorie n'est qu'une proposition dans tous les cas. Un liseré à gauche de chaque ligne donne l'état — gris `proposé automatiquement`, vert `choix manuel`, ambre `non localisée` — et une case « N'afficher que les non localisées » réduit la liste sans rien perdre des choix déjà faits.
 
@@ -714,7 +725,7 @@ Sans `ANTHROPIC_API_KEY`, le rapport se génère **sans la section** (log en war
 | Collection | Contenu |
 |------------|---------|
 | `historique_controle_archive` | Générations remplacées, append-only, pas de TTL |
-| `scan_feature_overrides` | Choix manuels par nom de scan : `_id_feature`, `category` et/ou `ignored`. Index unique `(scan_name, kind, event, year)` |
+| `scan_feature_overrides` | Choix manuels par nom de scan : `_id_feature`, `category`, `ignored` et/ou `no_location`. Index unique `(scan_name, kind, event, year)` |
 | `scan_analyses` | Analyses Claude historisées. `kind` vaut `scans` ou `frequentation` ; les documents antérieurs au champ sont des analyses de scans. Les analyses de fréquentation portent une `fingerprint` (réutilisation sans appel API) |
 
 ### Pièges

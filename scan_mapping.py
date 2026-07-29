@@ -86,6 +86,7 @@ def load_mapping(db, event, year):
             '_id_feature': unit.get('_id_feature'),
             'feature_collection': unit.get('feature_collection'),
             'feature_source': unit.get('feature_source') or 'aucun',
+            'no_location': unit.get('feature_source') == 'sans_lieu',
             'feature_label': None,
             'category': unit.get('category') or scan_import.guess_category(
                 unit.get('name'), unit.get('kind'),
@@ -244,6 +245,21 @@ def apply_mapping(db, event, year, changes, applied_by=None,
             continue
 
         changed = False
+
+        # « Aucune collection » : cette unite n'est pas un lieu. Decision
+        # explicite, distincte d'un rattachement encore a faire.
+        want_nolocation = bool(ch.get('no_location'))
+        if want_nolocation != (unit.get('feature_source') == 'sans_lieu'):
+            if want_nolocation:
+                unit['_id_feature'] = None
+                unit['feature_collection'] = None
+                unit['feature_source'] = 'sans_lieu'
+            else:
+                unit['feature_source'] = 'aucun'
+            overrides.setdefault((unit.get('kind'), unit.get('name')), {})[
+                'no_location'] = want_nolocation
+            changed = True
+
         want_ignored = bool(ch.get('ignored'))
         if want_ignored != bool(unit.get('ignored')):
             unit['ignored'] = want_ignored
@@ -253,7 +269,8 @@ def apply_mapping(db, event, year, changes, applied_by=None,
                 'ignored'] = want_ignored
             changed = True
 
-        if ch.get('_id_feature') and ch['_id_feature'] != unit.get('_id_feature'):
+        if (not want_nolocation and ch.get('_id_feature')
+                and ch['_id_feature'] != unit.get('_id_feature')):
             unit['_id_feature'] = ch['_id_feature']
             unit['feature_collection'] = ch.get('feature_collection')
             unit['feature_source'] = 'manuel'

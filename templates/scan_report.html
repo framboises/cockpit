@@ -145,6 +145,11 @@
     .scanmap-row.is-manual { border-left-color: #4ade80; }
     .scanmap-row.is-none { border-left-color: #fbbf24;
       background: rgba(251,191,36,.045); }
+    /* Sans lieu : decision prise, donc neutre — surtout pas le liseré ambre
+       du « a localiser », qui se lirait comme une tache en attente. */
+    .scanmap-row.is-nolocation { border-left-color: #6b8cae; }
+    .scanmap-row.is-nolocation .scanmap-sub::after { content: " · sans lieu";
+      color: #6b8cae; }
     /* Ignoree : la ligne reste lisible mais visiblement hors jeu. */
     .scanmap-row.is-ignored { border-left-color: #6b7a90; opacity: .45; }
     .scanmap-row.is-ignored .scanmap-name { text-decoration: line-through; }
@@ -165,6 +170,7 @@
     .scanmap-legend .dot-manual { background: #4ade80; }
     .scanmap-legend .dot-none { background: #fbbf24; }
     .scanmap-legend .dot-ignored { background: #6b7a90; }
+    .scanmap-legend .dot-nolocation { background: #6b8cae; }
     .scanmap-col-label { font-size: 10px; text-transform: uppercase;
       letter-spacing: .4px; color: #61728c; margin-bottom: 3px; }
     .scanmap-name { font-size: 13px; color: #e6ecf5; font-weight: 500; }
@@ -363,7 +369,8 @@
           <div class="scanmap-legend">
             <span><i class="dot dot-auto"></i>propose automatiquement</span>
             <span><i class="dot dot-manual"></i>choix manuel</span>
-            <span><i class="dot dot-none"></i>non localisee</span>
+            <span><i class="dot dot-none"></i>a localiser</span>
+            <span><i class="dot dot-nolocation"></i>sans lieu (choisi)</span>
             <span><i class="dot dot-ignored"></i>ignoree</span>
           </div>
           <div id="scan-ignore-recap" hidden></div>
@@ -437,7 +444,8 @@
           <div class="scanmap-head-txt">
             <strong id="scan-mapping-count"></strong>
             &mdash; corriger l'entite cartographique, la categorie, ou ecarter
-            une unite. Les trois documents sont reconstruits ; l'ancien est
+            une unite. Collection <strong>(aucune)</strong> si l'unite n'est pas
+            un lieu. Les trois documents sont reconstruits ; l'ancien est
             archive.
           </div>
           <label class="scan-check scanmap-filter">
@@ -448,7 +456,8 @@
         <div class="scanmap-legend">
           <span><i class="dot dot-auto"></i>propose automatiquement</span>
           <span><i class="dot dot-manual"></i>choix manuel</span>
-          <span><i class="dot dot-none"></i>non localisee</span>
+          <span><i class="dot dot-none"></i>a localiser</span>
+          <span><i class="dot dot-nolocation"></i>sans lieu (choisi)</span>
           <span><i class="dot dot-ignored"></i>ignoree</span>
         </div>
         <div id="scan-mapping-recap" hidden></div>
