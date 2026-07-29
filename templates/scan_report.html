@@ -60,8 +60,11 @@
     .corner-lead { stroke: #2f3d52; stroke-width: 1; }
     .corner-name { fill: #7086a3; font-size: 9.5px; font-family: inherit;
       dominant-baseline: central; }
+    /* Pas de text-anchor ici : une propriete CSS prime sur l'attribut de
+       presentation, et le centrage annulait l'ancrage calcule au placement —
+       le libelle repassait alors sur la piste. */
     .straight-name { fill: #55657d; font-size: 8.5px; font-family: inherit;
-      font-style: italic; text-anchor: middle; }
+      font-style: italic; }
     .track-labels text { fill: #4c5b73; font-size: 8.5px;
       font-family: inherit; letter-spacing: .3px; text-anchor: middle; }
 
@@ -712,11 +715,12 @@
         { at: 0.945, name: 'Dunlop' },
         { at: 0.012, name: 'Esses de la Foret' },
         { at: 0.047, name: 'Tertre Rouge' },
-        { at: 0.222, name: 'Chicane Forza' },
-        { at: 0.345, name: 'Chicane Michelin' },
+        { at: 0.222, name: 'Premiere chicane' },
+        { at: 0.345, name: 'Deuxieme chicane' },
         { at: 0.462, name: 'Mulsanne' },
-        { at: 0.625, name: 'Indianapolis' },
-        { at: 0.717, name: 'Arnage' },
+        { at: 0.617, name: 'Indianapolis' },
+        { at: 0.642, name: 'Arnage' },
+        { at: 0.717, name: 'Beausejour' },
         { at: 0.762, name: 'Courbes Porsche' },
         { at: 0.857, name: 'Chicane Ford' }
       ];
@@ -843,16 +847,57 @@
         g.appendChild(lead); g.appendChild(dot); g.appendChild(num);
       });
 
-      // La ligne droite des Hunaudieres n'est pas un virage : elle se nomme
-      // le long du trace, entre Tertre Rouge et Mulsanne.
+      // Ligne de depart / arrivee : a mi-chemin entre le dernier virage (21)
+      // et le premier (1), en travers de la piste. Deduite de la tangente au
+      // trace plutot qu'ecrite en dur, pour rester juste si le trace change.
+      var START = (0.863 + 0.937) / 2;
+      var sp = line.getPointAtLength(L * START);
+      var sa = line.getPointAtLength(L * START - 3);
+      var sb = line.getPointAtLength(L * START + 3);
+      var tl = Math.sqrt((sb.x - sa.x) * (sb.x - sa.x) +
+                         (sb.y - sa.y) * (sb.y - sa.y)) || 1;
+      var nx = -(sb.y - sa.y) / tl, ny = (sb.x - sa.x) / tl;
+      var startLine = document.createElementNS(NS, 'line');
+      startLine.setAttribute('class', 'track-start');
+      startLine.setAttribute('x1', sp.x - nx * 7);
+      startLine.setAttribute('y1', sp.y - ny * 7);
+      startLine.setAttribute('x2', sp.x + nx * 7);
+      startLine.setAttribute('y2', sp.y + ny * 7);
+      g.appendChild(startLine);
+
+      // La ligne droite des Hunaudieres n'est pas un virage : elle se nomme le
+      // long du trace. Sa position passe par la meme recherche de place que
+      // les noms de virage, sinon elle se pose sur la piste.
       var mid = line.getPointAtLength(L * 0.29);
+      var mvx = mid.x - cx, mvy = mid.y - cy;
+      var mlen = Math.sqrt(mvx * mvx + mvy * mvy) || 1;
+      var mux = mvx / mlen, muy = mvy / mlen;
+      var label = 'Ligne droite des Hunaudieres';
+      var lw = label.length * 4.2, spot = null;
+      for (var sd = 16; sd <= 80 && !spot; sd += 4) {
+        for (var sg = 0; sg < 2 && !spot; sg++) {
+          var sgn = sg === 0 ? -1 : 1;   // vers l'interieur d'abord
+          var axx = mid.x + mux * sd * sgn, ayy = mid.y + muy * sd * sgn;
+          var right = (mux * sgn) >= 0;
+          var bx0 = right ? axx + 4 : axx - 4 - lw;
+          if (!boxClearOfTrack(bx0, ayy - 6, bx0 + lw, ayy + 6)) continue;
+          var freeOfPills = true;
+          for (var pk = 0; pk < placed.length; pk++) {
+            var pq = placed[pk];
+            if (pq.x > bx0 - pq.w / 2 && pq.x < bx0 + lw + pq.w / 2 &&
+                Math.abs(pq.y - ayy) < 13) { freeOfPills = false; break; }
+          }
+          if (freeOfPills) spot = { x: axx, y: ayy, right: right };
+        }
+      }
+      if (!spot) spot = { x: mid.x - mux * 40, y: mid.y - muy * 40, right: false };
       var straight = document.createElementNS(NS, 'text');
       straight.setAttribute('class', 'straight-name');
-      straight.setAttribute('x', mid.x - 34); straight.setAttribute('y', mid.y);
-      straight.setAttribute('text-anchor', 'end');
-      straight.textContent = 'Ligne droite des Hunaudieres';
+      straight.setAttribute('x', spot.x + (spot.right ? 4 : -4));
+      straight.setAttribute('y', spot.y);
+      straight.setAttribute('text-anchor', spot.right ? 'start' : 'end');
+      straight.textContent = label;
       g.appendChild(straight);
-      svg.appendChild(g);
 
       // Un nom occupe une boite, pas un point : le tester comme un point le
       // laissait traverser la piste (Indianapolis, Chicane Ford).
@@ -905,6 +950,8 @@
         t.textContent = c.name;
         g.appendChild(t);
       });
+
+      svg.appendChild(g);
     })();
 
     // Ecran vide : cliquer sur le circuit lance un tour rapide. Au 24e, un
