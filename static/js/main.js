@@ -520,7 +520,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Populate year select
     const currentYear = new Date().getFullYear();
-    const startYear   = 2024;
+    // 2023 est la premiere edition dont on ait des donnees exploitables dans
+    // historique_controle. Changer cette borne impose de la changer aussi dans
+    // templates/scan_report.html, qui a sa propre copie du selecteur.
+    const startYear   = 2023;
     if (yearSelect) {
         const preferredYear = savedYear ? parseInt(savedYear, 10) : currentYear;
 
