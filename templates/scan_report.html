@@ -24,10 +24,49 @@
       letter-spacing: 0.4px; }
     .scan-report-header .meta { color: #8aa0bd; font-size: 13px; }
     .scan-report-iframe { flex: 1; width: 100%; border: 0; min-height: 0; }
+    /* --- Etat vide : circuit dessine, voiture en tour de chauffe --------- */
     .scan-report-empty { padding: 40px; color: #8aa0bd; text-align: center;
-      font-family: inherit; }
-    .scan-report-empty code { background: #1a2231; padding: 2px 6px;
-      border-radius: 4px; color: #fbbf24; font-size: 12px; }
+      font-family: inherit; min-height: 62vh; display: flex;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 0; }
+    /* Conteneur cale sur le SVG : la voiture vit hors du SVG (offset-path
+       n'existe pas sur un element SVG), elle doit donc se positionner dans le
+       meme repere. 420 x 210 de viewBox affiches en 300 x 150. */
+    .scan-empty-viz { position: relative; width: 300px; height: 150px; }
+    .scan-empty-track { width: 300px; height: 150px; overflow: visible;
+      display: block; }
+    .track-base { fill: none; stroke: #1e2838; stroke-width: 13;
+      stroke-linejoin: round; }
+    .track-line { fill: none; stroke: url(#trackGlow); stroke-width: 2;
+      stroke-linejoin: round; stroke-dasharray: 1000;
+      stroke-dashoffset: 1000; animation: trackDraw 2.4s ease-out forwards; }
+    @keyframes trackDraw { to { stroke-dashoffset: 0; } }
+    .track-start rect { fill: #e6ecf5; }
+
+    /* La voiture suit exactement le meme trace que la ligne de course. */
+    .scan-empty-car { width: 7px; height: 7px; border-radius: 50%;
+      background: #fbbf24; box-shadow: 0 0 10px 2px rgba(251,191,36,.55);
+      position: absolute; top: 0; left: 0;
+      offset-path: path("M 78 168 C 30 168 26 108 74 104 L 168 96 C 196 94 196 54 226 52 L 322 46 C 380 42 396 104 356 132 L 268 170 C 236 182 206 178 186 168 Z");
+      offset-rotate: auto;
+      animation: lap var(--lap, 6s) linear infinite;
+      animation-delay: 1.4s; }
+    @keyframes lap { to { offset-distance: 100%; } }
+    /* Meme facteur d'echelle que le SVG (300 / 420), origine en haut a gauche
+       pour que le repere coincide. */
+    .scan-empty-car { scale: calc(300 / 420); transform-origin: 0 0; }
+    @media (prefers-reduced-motion: reduce) {
+      .track-line { animation: none; stroke-dashoffset: 0; }
+      .scan-empty-car { animation: none; }
+    }
+
+    .scan-empty-title { margin-top: 22px; font-size: 15px; color: #c8d6ea; }
+    .scan-empty-title strong { color: #e6ecf5; }
+    .scan-empty-hint { margin-top: 6px; font-size: 12.5px; }
+    .scan-empty-hint .material-symbols-outlined { font-size: 15px;
+      vertical-align: -3px; color: #9cc5ff; }
+    .scan-empty-egg { margin-top: 14px; font-size: 12px; color: #fbbf24;
+      font-style: italic; }
     /* Rappel des couples event/annee reellement generes (sous les selects) */
     .scan-report-available { font-size: 11px; line-height: 1.5; color: #8aa0bd; }
     .scan-report-available b { color: #e6ecf5; font-weight: 600; }
@@ -304,8 +343,42 @@
             allow="fullscreen"></iframe>
     {% else %}
     <div class="scan-report-empty">
-      <p>Aucun rapport disponible pour <strong>{{ event }} / {{ year }}</strong>.</p>
-      <p>Pour le generer : <code>python3 generate_parking_report.py</code></p>
+      <div class="scan-empty-viz">
+      <svg class="scan-empty-track" viewBox="0 0 420 210" role="img"
+           aria-label="Circuit stylise, aucun rapport disponible">
+        <defs>
+          <linearGradient id="trackGlow" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#4f9eff"/>
+            <stop offset="100%" stop-color="#9cc5ff"/>
+          </linearGradient>
+        </defs>
+        <!-- Bas-cote : trace complet, en retrait -->
+        <path class="track-base" d="M 78 168 C 30 168 26 108 74 104 L 168 96
+                 C 196 94 196 54 226 52 L 322 46 C 380 42 396 104 356 132
+                 L 268 170 C 236 182 206 178 186 168 Z"/>
+        <!-- Ligne de course : se dessine au chargement -->
+        <path id="raceLine" class="track-line"
+              d="M 78 168 C 30 168 26 108 74 104 L 168 96
+                 C 196 94 196 54 226 52 L 322 46 C 380 42 396 104 356 132
+                 L 268 170 C 236 182 206 178 186 168 Z"/>
+        <!-- Ligne de depart -->
+        <g class="track-start">
+          <rect x="120" y="161" width="4" height="14" rx="1"/>
+          <rect x="124" y="161" width="4" height="7" rx="1" opacity=".45"/>
+          <rect x="128" y="161" width="4" height="14" rx="1" opacity=".7"/>
+        </g>
+      </svg>
+      <div class="scan-empty-car" aria-hidden="true"></div>
+      </div>
+
+      <p class="scan-empty-title">Aucun rapport pour
+        <strong>{{ event }} {{ year }}</strong></p>
+      <p class="scan-empty-hint">
+        Deposer un classeur de scans avec le bouton
+        <span class="material-symbols-outlined">upload_file</span>
+        en haut a droite, puis regenerer.
+      </p>
+      <p class="scan-empty-egg" id="scan-empty-egg" hidden></p>
     </div>
     {% endif %}
   </main>
@@ -596,6 +669,33 @@
 
     eventSelect.addEventListener('change', go);
     yearSelect.addEventListener('change', go);
+
+    // Ecran vide : cliquer sur le circuit lance un tour rapide. Au 24e, un
+    // clin d'oeil. Purement decoratif, aucune donnee en jeu.
+    (function () {
+      var empty = document.querySelector('.scan-report-empty');
+      var car = document.querySelector('.scan-empty-car');
+      var egg = document.getElementById('scan-empty-egg');
+      if (!empty || !car || !egg) return;
+      var laps = 0;
+      var MESSAGES = {
+        1: 'Tour lance.',
+        5: 'Le rythme monte.',
+        12: 'Mi-course.',
+        24: '24 tours. Il serait temps d\'importer un classeur.'
+      };
+      empty.addEventListener('click', function () {
+        laps += 1;
+        // 6 s au depart, jusqu'a 1,2 s : au-dela ce n'est plus lisible.
+        var dur = Math.max(1.2, 6 - laps * 0.35);
+        car.style.setProperty('--lap', dur.toFixed(2) + 's');
+        car.style.animationDelay = '0s';
+        if (MESSAGES[laps]) {
+          egg.textContent = MESSAGES[laps];
+          egg.hidden = false;
+        }
+      });
+    })();
 
     // Rappel de ce qui est reellement genere : sans ca, choisir un event sans
     // rapport ne donne aucune piste sur les combinaisons valides.
