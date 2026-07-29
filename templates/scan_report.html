@@ -33,14 +33,18 @@
        mangerait sinon toute la hauteur disponible. */
     @media (min-width: 900px) {
       .scan-report-empty { flex-direction: row; gap: 56px; text-align: left; }
-      .scan-empty-text { max-width: 340px; }
+      .scan-empty-text { max-width: 380px; }
     }
     /* Conteneur cale sur le SVG : la voiture vit hors du SVG (offset-path
        n'existe pas sur un element SVG), elle doit donc se positionner dans le
-       meme repere. 317 x 682 de viewBox affiches en 236 x 508 (trace recadre sur sa bbox). */
-    .scan-empty-viz { position: relative; width: 236px; height: 508px;
-      flex: 0 0 auto; }
-    .scan-empty-track { width: 236px; height: 508px; overflow: visible;
+       meme repere. 317 x 682 de viewBox, taille reelle donnee par --track-w (trace recadre sur sa bbox). */
+    /* Taille pilotee par --track-w, calee sur la hauteur disponible au
+       chargement : le trace est en portrait (317 x 682), c'est la hauteur qui
+       le contraint, pas la largeur. */
+    .scan-empty-viz { position: relative; flex: 0 0 auto;
+      width: var(--track-w, 300px);
+      height: calc(var(--track-w, 300px) * 682 / 317); }
+    .scan-empty-track { width: 100%; height: 100%; overflow: visible;
       display: block; }
     .track-base { fill: none; stroke: #1e2838; stroke-width: 11;
       stroke-linejoin: round; }
@@ -51,9 +55,10 @@
     .track-start { stroke: #e6ecf5; stroke-width: 2.5; stroke-linecap: round; }
     /* Reperes de virage : numeros officiels + noms d'usage. */
     .corner-dot { fill: #0f1620; stroke: #4f9eff; stroke-width: 2; }
-    .corner-num { fill: #9cc5ff; font-size: 9px; font-weight: 600;
+    .corner-num { fill: #9cc5ff; font-size: 8.5px; font-weight: 600;
       text-anchor: middle; dominant-baseline: central; font-family: inherit; }
-    .corner-name { fill: #6b7d96; font-size: 9px; font-family: inherit;
+    .corner-lead { stroke: #2f3d52; stroke-width: 1; }
+    .corner-name { fill: #7086a3; font-size: 9.5px; font-family: inherit;
       dominant-baseline: central; }
     .straight-name { fill: #55657d; font-size: 8.5px; font-family: inherit;
       font-style: italic; text-anchor: middle; }
@@ -69,9 +74,10 @@
       animation: lap var(--lap, 6s) linear infinite;
       animation-delay: 1.4s; }
     @keyframes lap { to { offset-distance: 100%; } }
-    /* Meme facteur d'echelle que le SVG (236 / 317), origine en haut a gauche
+    /* Meme facteur d'echelle que le SVG (--track-w / 317), origine en haut a gauche
        pour que le repere coincide. */
-    .scan-empty-car { scale: calc(236 / 317); transform-origin: 0 0; }
+    .scan-empty-car { scale: calc(var(--track-w, 300px) / 317px);
+      transform-origin: 0 0; }
     @media (prefers-reduced-motion: reduce) {
       .track-line { animation: none; stroke-dashoffset: 0; }
       .scan-empty-car { animation: none; }
@@ -676,37 +682,84 @@
     eventSelect.addEventListener('change', go);
     yearSelect.addEventListener('change', go);
 
-    // Reperes de virage, poses sur le trace lui-meme : les positions sont
-    // exprimees en fraction de tour et resolues par getPointAtLength, donc
-    // elles suivent si le trace change. Numerotation officielle du Circuit
-    // de la Sarthe (38 courbes, 21 virages numerotes).
+    // Les 21 virages numerotes du Circuit de la Sarthe, poses sur le trace
+    // lui-meme : chaque apex est exprime en fraction de tour et resolu par
+    // getPointAtLength, donc les reperes suivent si le trace change. Les
+    // fractions viennent d'un releve de courbure du chemin, recale sur la
+    // numerotation officielle.
     (function () {
       var line = document.querySelector('.track-line');
       var svg = document.querySelector('.scan-empty-track');
       if (!line || !svg || !line.getTotalLength) return;
 
       var CORNERS = [
-        { at: 0.940, n: '1-2',   name: 'Dunlop' },
-        { at: 0.010, n: '3-5',   name: 'Esses de la Foret' },
-        { at: 0.045, n: '6',     name: 'Tertre Rouge' },
-        { at: 0.215, n: '7',     name: 'Chicane Forza' },
-        { at: 0.340, n: '8',     name: 'Chicane Michelin' },
-        { at: 0.460, n: '9',     name: 'Mulsanne' },
-        { at: 0.620, n: '10-12', name: 'Indianapolis' },
-        { at: 0.710, n: '13-14', name: 'Arnage' },
-        { at: 0.780, n: '16-18', name: 'Courbes Porsche' },
-        { at: 0.855, n: '19-21', name: 'Chicane Ford' }
+        { n: 1,  at: 0.937 }, { n: 2,  at: 0.953 },
+        { n: 3,  at: 0.962 }, { n: 4,  at: 0.012 }, { n: 5,  at: 0.022 },
+        { n: 6,  at: 0.047 },
+        { n: 7,  at: 0.222 },
+        { n: 8,  at: 0.345 },
+        { n: 9,  at: 0.462 },
+        { n: 10, at: 0.610 }, { n: 11, at: 0.625 }, { n: 12, at: 0.642 },
+        { n: 13, at: 0.717 },
+        { n: 14, at: 0.743 }, { n: 15, at: 0.750 }, { n: 16, at: 0.762 },
+        { n: 17, at: 0.783 }, { n: 18, at: 0.798 },
+        { n: 19, at: 0.845 }, { n: 20, at: 0.857 }, { n: 21, at: 0.863 }
       ];
+      // Noms d'usage, poses sur le trace a hauteur du virage representatif du
+      // groupe. Ils sont places APRES les pastilles et partagent leur
+      // detection de collision, donc ils se rangent au-dela sans les couvrir.
+      var NAMES = [
+        { at: 0.945, name: 'Dunlop' },
+        { at: 0.012, name: 'Esses de la Foret' },
+        { at: 0.047, name: 'Tertre Rouge' },
+        { at: 0.222, name: 'Chicane Forza' },
+        { at: 0.345, name: 'Chicane Michelin' },
+        { at: 0.462, name: 'Mulsanne' },
+        { at: 0.625, name: 'Indianapolis' },
+        { at: 0.717, name: 'Arnage' },
+        { at: 0.762, name: 'Courbes Porsche' },
+        { at: 0.857, name: 'Chicane Ford' }
+      ];
+
+      // Le trace occupe la hauteur disponible : plus il est grand, plus les
+      // virages serres (esses, Porsche, chicane Ford) se distinguent.
+      var viz = document.querySelector('.scan-empty-viz');
+      var host = document.querySelector('.scan-report-empty');
+      function sizeTrack() {
+        if (!viz || !host) return;
+        var maxH = host.clientHeight - 56;
+        var w = Math.max(210, Math.min(400, maxH * 317 / 682));
+        viz.style.setProperty('--track-w', Math.round(w) + 'px');
+      }
+      sizeTrack();
+      window.addEventListener('resize', sizeTrack);
 
       var NS = 'http://www.w3.org/2000/svg';
       var L = line.getTotalLength();
 
-      // Centre du trace : sert a pousser chaque etiquette VERS L'EXTERIEUR,
-      // sinon la moitie d'entre elles se poseraient sur la piste.
+      // Centre du trace : sert a pousser chaque pastille VERS L'EXTERIEUR.
       var cx = 0, cy = 0, N = 60;
       for (var i = 0; i < N; i++) {
         var q = line.getPointAtLength(L * i / N);
         cx += q.x / N; cy += q.y / N;
+      }
+
+      // Les virages serres (esses, Porsche, chicane Ford) se suivent de trop
+      // pres pour tenir cote a cote : on eloigne la pastille jusqu'a trouver
+      // une place libre, comme sur les cartes officielles.
+      var placed = [];
+      function freeSpot(px, py, ux, uy, w) {
+        for (var d = 12; d <= 52; d += 4) {
+          var x = px + ux * d, y = py + uy * d, ok = true;
+          for (var k = 0; k < placed.length; k++) {
+            var q = placed[k];
+            if (Math.abs(q.x - x) < (q.w + w) / 2 + 2 &&
+                Math.abs(q.y - y) < 15) { ok = false; break; }
+          }
+          if (ok) { placed.push({ x: x, y: y, w: w }); return { x: x, y: y }; }
+        }
+        placed.push({ x: px + ux * 52, y: py + uy * 52, w: w });
+        return { x: px + ux * 52, y: py + uy * 52 };
       }
 
       var g = document.createElementNS(NS, 'g');
@@ -715,43 +768,60 @@
         var vx = pt.x - cx, vy = pt.y - cy;
         var len = Math.sqrt(vx * vx + vy * vy) || 1;
         var ux = vx / len, uy = vy / len;
+        var w = String(c.n).length > 1 ? 18 : 15;
+        var pos = freeSpot(pt.x, pt.y, ux, uy, w);
 
-        // Pastille dimensionnee au libelle : « 10-12 » ne tient pas dans le
-        // meme cercle que « 9 ».
-        var w = 15 + Math.max(0, c.n.length - 1) * 4.2;
-        var dot = document.createElementNS(NS, 'rect');
+        // Trait de rappel : sans lui, une pastille eloignee ne se rattache
+        // plus visuellement a son virage.
+        var lead = document.createElementNS(NS, 'line');
+        lead.setAttribute('class', 'corner-lead');
+        lead.setAttribute('x1', pt.x); lead.setAttribute('y1', pt.y);
+        lead.setAttribute('x2', pos.x); lead.setAttribute('y2', pos.y);
+
+        var dot = document.createElementNS(NS, 'circle');
         dot.setAttribute('class', 'corner-dot');
-        dot.setAttribute('x', pt.x - w / 2); dot.setAttribute('y', pt.y - 7.5);
-        dot.setAttribute('width', w); dot.setAttribute('height', 15);
-        dot.setAttribute('rx', 7.5);
+        dot.setAttribute('cx', pos.x); dot.setAttribute('cy', pos.y);
+        dot.setAttribute('r', w / 2);
+
         var num = document.createElementNS(NS, 'text');
         num.setAttribute('class', 'corner-num');
-        num.setAttribute('x', pt.x); num.setAttribute('y', pt.y);
+        num.setAttribute('x', pos.x); num.setAttribute('y', pos.y);
         num.textContent = c.n;
 
-        var lx = pt.x + ux * (w / 2 + 6), ly = pt.y + uy * (w / 2 + 6);
-        var name = document.createElementNS(NS, 'text');
-        name.setAttribute('class', 'corner-name');
-        name.setAttribute('x', lx); name.setAttribute('y', ly);
-        // Le texte part vers l'exterieur : ancre a gauche a droite du trace,
-        // a droite a gauche, sinon il repasse par-dessus la piste.
-        name.setAttribute('text-anchor', ux >= 0 ? 'start' : 'end');
-        name.textContent = c.name;
-
-        g.appendChild(dot); g.appendChild(num); g.appendChild(name);
+        g.appendChild(lead); g.appendChild(dot); g.appendChild(num);
       });
 
       // La ligne droite des Hunaudieres n'est pas un virage : elle se nomme
       // le long du trace, entre Tertre Rouge et Mulsanne.
-      var mid = line.getPointAtLength(L * 0.28);
+      var mid = line.getPointAtLength(L * 0.29);
       var straight = document.createElementNS(NS, 'text');
       straight.setAttribute('class', 'straight-name');
-      straight.setAttribute('x', mid.x - 26); straight.setAttribute('y', mid.y);
+      straight.setAttribute('x', mid.x - 34); straight.setAttribute('y', mid.y);
       straight.setAttribute('text-anchor', 'end');
       straight.textContent = 'Ligne droite des Hunaudieres';
       g.appendChild(straight);
-
       svg.appendChild(g);
+
+      // Noms poses en dernier : les pastilles ont deja reserve leur place.
+      NAMES.forEach(function (c) {
+        var pt = line.getPointAtLength(L * c.at);
+        var vx = pt.x - cx, vy = pt.y - cy;
+        var len = Math.sqrt(vx * vx + vy * vy) || 1;
+        var ux = vx / len, uy = vy / len;
+        // Largeur approchee du texte, pour que la detection de collision
+        // travaille sur l'encombrement reel et pas sur un point.
+        var w = c.name.length * 4.6;
+        var pos = freeSpot(pt.x, pt.y, ux, uy, w);
+        var t = document.createElementNS(NS, 'text');
+        t.setAttribute('class', 'corner-name');
+        // Le texte s'ecarte du trace : ancre a gauche a droite du circuit, a
+        // droite a gauche, sinon il repasse par-dessus la piste.
+        t.setAttribute('x', pos.x + (ux >= 0 ? 4 : -4));
+        t.setAttribute('y', pos.y);
+        t.setAttribute('text-anchor', ux >= 0 ? 'start' : 'end');
+        t.textContent = c.name;
+        g.appendChild(t);
+      });
     })();
 
     // Ecran vide : cliquer sur le circuit lance un tour rapide. Au 24e, un
