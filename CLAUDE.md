@@ -652,6 +652,25 @@ C'est ce qui rend l'alignement gratuit : chaque édition d'un même événement 
 
 **`pcorg_summary._load_race_dt` n'est pas corrigé** : il sert aux résumés quotidiens en production, la normalisation reste locale à cette vue.
 
+#### Granularité : 15 min, pas l'heure
+
+**Le pic de présents est LA valeur de référence, et un échantillonnage à l'heure pile le manque.** La vue lisait le document `frequentation`, qui est horaire, alors que le KPI du tableau de bord lit du 15 min — d'où deux chiffres différents pour la même chose :
+
+| | horaire (avant) | 15 min (après) |
+|---|---|---|
+| 24H AUTOS 2025 | 138 600 à 16:00 | **142 622 à 16:15** (+4 022, 2,9 %) |
+| 24H MOTOS 2024 | 26 431 à 13:00 | **26 573 à 14:15** (+142) |
+
+`enclosure_series()` prend la source la plus fine disponible, dans cet ordre : `complet.data_15min` (agrégé sur les portes non ignorées) → `porte_scans.intervals` (ancienne chaîne, 15 min aussi) → `frequentation.data` (horaire, dernier recours). La granularité retenue est exposée dans `edition.granularity`.
+
+⚠️ **`porte_scans` est indexée sur le SLUG** (`24h_du_mans`), pas sur le nom cockpit. Sans l'alias, la requête ne remonte rien et on retombe silencieusement sur l'horaire.
+
+**Un slot vaut un quart d'heure** : `slot = offset * 96 + heure * 4 + minute // 15`. Une édition horaire tombe sur les multiples de 4, ce qui permet de superposer les deux granularités sur le même axe.
+
+⚠️ **`spanGaps` reste désactivé** — il masquerait les vraies coupures de mesure. Les éditions horaires seraient donc réduites à des points isolés : `bridgeHourlyGaps()` comble **uniquement** les intervalles d'exactement une heure. Une heure manquante (8 slots) reste un trou, comme il se doit.
+
+⚠️ Le solde peut être **légèrement négatif** en début de période (une sortie scannée avant toute entrée : −6 sur 24H AUTOS 2025). L'axe des présences est donc planché à zéro via `freqLineOptions(titre, {zeroFloor: true})` — surtout pas globalement, la température peut vraiment descendre sous zéro.
+
 #### Le pic de présents, pas les entrées
 
 Le **nombre de portes en service a changé d'une édition à l'autre** (24H AUTOS : 21 → 22 → 26 → 29). Le total d'entrées 2022 → 2023 bondit de +68 % : c'est la mesure, pas la foule.
@@ -693,6 +712,12 @@ Le volume de scans vient de `historique_controle{type:portes}`, pas de `frequent
 ⚠️ **Seules les portes sont comparables.** `historique_controle{type:portes}` est le seul inventaire par édition (276 unités sur 22 éditions) et il ne contient que des portes — vérifié, aucune hospitalité, tribune ni terrain. Les zones n'existent que pour l'édition courante (`parking_scans` 2025, `complet` 24H MOTOS 2024). La vue le dit explicitement plutôt que de laisser croire à un périmètre complet.
 
 Les unités sans `doors_id` sont classées `sans_lieu` : ce sont des services mobiles (UAM, HELPDESK, LITIGE, SERI, PUNISHER), pas des lieux de passage.
+
+#### Sortie de la vue Fréquentation
+
+`body.cat-freq` masque la recherche, la liste des unités, le sélecteur et le bouton Pics — la vue ne représente aucune liste d'unités. En sortir sans défaire cet état laissait **l'onglet allumé et la navigation escamotée** : le rapport paraissait bloqué sur Fréquentation.
+
+`exitFrequentation()` restaure la catégorie précédente (mémorisée dans `lastUnitCategory` à l'entrée) et est appelée par `showHome`, `showPeaksOverview`, `showZoneDay` et `selectZone` — tous les chemins de sortie.
 
 #### Jours de semaine sur l'axe
 

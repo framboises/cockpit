@@ -1598,6 +1598,9 @@ function updateTopbarState() {
 }
 
 function selectZone(zoneName) {
+  // Selectionner une unite depuis le menu deroulant alors qu'on est sur la
+  // vue Frequentation doit aussi rendre la navigation.
+  exitFrequentation();
   viewMode = 'zone';
   activeZone = zoneName;
   document.getElementById('nav-peaks').classList.remove('active');
@@ -1610,7 +1613,24 @@ function selectZone(zoneName) {
   updateTopbarState();
 }
 
+// Categorie active avant d'entrer dans la vue Frequentation. Celle-ci ne
+// represente aucune liste d'unites : `body.cat-freq` masque la recherche, la
+// liste, le selecteur et le bouton Pics. En sortir sans defaire cet etat
+// laissait l'onglet allume et la navigation escamotee.
+let lastUnitCategory = 'zone';
+
+function exitFrequentation() {
+  if (currentCategory !== 'freq') return;
+  currentCategory = lastUnitCategory;
+  document.body.classList.remove('cat-freq');
+  document.querySelectorAll('.cat-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.cat === currentCategory);
+  });
+  renderSidebar('');
+}
+
 function showHome() {
+  exitFrequentation();
   viewMode = 'home';
   activeZone = null;
   activeDay = null;
@@ -1666,10 +1686,32 @@ function showFrequentation() {
   updateTopbarState();
 }
 
+// Un slot vaut un QUART D'HEURE. Le pas fin n'est pas cosmetique : c'est lui
+// qui donne le vrai pic de presence, celui qui sert de reference. Une edition
+// dont on n'a que l'horaire tombe simplement sur les multiples de 4.
+const SLOTS_PER_DAY = 96;
+const SLOTS_PER_HOUR = 4;
+
+// Une edition dont on n'a que l'horaire ne tombe que sur un slot sur quatre.
+// `spanGaps` reste volontairement desactive — il masquerait les vraies
+// coupures de mesure — on comble donc UNIQUEMENT les intervalles d'exactement
+// une heure. Une heure manquante (8 slots) reste un trou, comme il se doit.
+function bridgeHourlyGaps(bySlot) {
+  const keys = Object.keys(bySlot).map(Number).sort((a, b) => a - b);
+  for (let i = 0; i < keys.length - 1; i++) {
+    const a = keys[i], b = keys[i + 1];
+    if (b - a !== SLOTS_PER_HOUR) continue;
+    const va = bySlot[a], vb = bySlot[b];
+    for (let s = a + 1; s < b; s++) {
+      bySlot[s] = va + (vb - va) * ((s - a) / (b - a));
+    }
+  }
+}
+
 function freqAxis(editions) {
-  // Axe commun a toutes les editions : slots horaires alignes sur le jour de
-  // course. C'est ce qui rend les annees superposables malgre des dates
-  // calendaires differentes.
+  // Axe commun a toutes les editions : slots alignes sur le jour de course.
+  // C'est ce qui rend les annees superposables malgre des dates calendaires
+  // differentes.
   let min = Infinity, max = -Infinity;
   editions.forEach(e => (e.hourly || []).forEach(h => {
     if (h.slot < min) min = h.slot;
@@ -1679,19 +1721,20 @@ function freqAxis(editions) {
   const slots = [], labels = [];
   for (let s = min; s <= max; s++) {
     slots.push(s);
-    const off = Math.floor(s / 24);
-    const hour = ((s % 24) + 24) % 24;
+    const off = Math.floor(s / SLOTS_PER_DAY);
+    const inDay = ((s % SLOTS_PER_DAY) + SLOTS_PER_DAY) % SLOTS_PER_DAY;
     // On n'etiquette que le debut de journee : 170 etiquettes seraient
     // illisibles, et le lecteur vise un jour, pas une heure precise.
     // Deux lignes : l'offset au jour de course, et le jour de semaine — la
     // course tombe toujours le meme jour, donc « J-2 » EST le jeudi, et c'est
     // en jours de semaine que raisonne l'exploitation.
-    labels.push(hour === 0 ? [offsetLabel(off), offsetWeekday(off, true)] : '');
+    labels.push(inDay === 0 ? [offsetLabel(off), offsetWeekday(off, true)] : '');
   }
   return { slots, labels, min, max };
 }
 
-function freqLineOptions(yTitle) {
+function freqLineOptions(yTitle, opts) {
+  opts = opts || {};
   return {
     responsive: true, maintainAspectRatio: false,
     interaction: { mode: 'index', intersect: false },  // une infobulle, toutes les series
@@ -1703,11 +1746,14 @@ function freqLineOptions(yTitle) {
           title: items => {
             if (!items.length) return '';
             const s = items[0].dataset._slots[items[0].dataIndex];
-            const off = Math.floor(s / 24);
-            const hour = ((s % 24) + 24) % 24;
+            const off = Math.floor(s / SLOTS_PER_DAY);
+            const inDay = ((s % SLOTS_PER_DAY) + SLOTS_PER_DAY) % SLOTS_PER_DAY;
+            const hour = Math.floor(inDay / SLOTS_PER_HOUR);
+            const minute = (inDay % SLOTS_PER_HOUR) * 15;
             const wd = offsetWeekday(off);
-            return offsetLabel(off) + (wd ? ' - ' + wd : '') +
-                   ' - ' + String(hour).padStart(2, '0') + 'h';
+            return offsetLabel(off) + (wd ? ' - ' + wd : '') + ' - ' +
+                   String(hour).padStart(2, '0') + 'h' +
+                   String(minute).padStart(2, '0');
           },
         },
       },
@@ -1721,7 +1767,11 @@ function freqLineOptions(yTitle) {
     scales: {
       x: { ticks: { color: '#8aa0bd', maxRotation: 0, autoSkip: false },
            grid: { color: 'rgba(255,255,255,0.04)' } },
-      y: { beginAtZero: true, ticks: { color: '#8aa0bd' },
+      // `zeroFloor` uniquement sur les presences : un solde legerement negatif
+      // en debut de periode (une sortie scannee avant toute entree) etirerait
+      // sinon l'axe sous zero. La temperature, elle, peut vraiment y descendre.
+      y: { beginAtZero: true, min: opts.zeroFloor ? 0 : undefined,
+           ticks: { color: '#8aa0bd' },
            grid: { color: 'rgba(255,255,255,0.06)' },
            title: { display: true, text: yTitle, color: '#8aa0bd' } },
     },
@@ -1762,6 +1812,7 @@ function renderFreqMainChart(host, f, axis) {
   const datasets = f.editions.map((ed, i) => {
     const bySlot = {};
     (ed.hourly || []).forEach(h => { bySlot[h.slot] = h.present; });
+    bridgeHourlyGaps(bySlot);
     const data = axis.slots.map(s => (s in bySlot ? bySlot[s] : null));
     return {
       label: String(ed.year),
@@ -1780,7 +1831,7 @@ function renderFreqMainChart(host, f, axis) {
   const ch = new Chart(canvas, {
     type: 'line',
     data: { labels: axis.labels, datasets },
-    options: freqLineOptions('Presents'),
+    options: freqLineOptions('Presents', { zeroFloor: true }),
   });
   charts.push(ch);
   expand.addEventListener('click', () => openChartFullscreen(ch, titleText));
@@ -1794,10 +1845,10 @@ function renderFreqWeatherStrips(host, f, axis) {
   const byDate = {};
   current.days.forEach(d => { byDate[d.offset] = d.date; });
 
-  // Valeur quotidienne etalee sur les 24 slots du jour : les bandeaux restent
-  // ainsi cales sur le meme axe temporel que la courbe principale.
+  // Valeur quotidienne etalee sur tous les slots du jour : les bandeaux
+  // restent ainsi cales sur le meme axe temporel que la courbe principale.
   const spread = key => axis.slots.map(s => {
-    const w = f.weather[byDate[Math.floor(s / 24)]];
+    const w = f.weather[byDate[Math.floor(s / SLOTS_PER_DAY)]];
     return w && w[key] != null ? w[key] : null;
   });
 
@@ -1848,9 +1899,12 @@ function renderFreqDayMultiples(host, f) {
   // editions atteignent le meme pic sans se remplir au meme rythme.
   const current = f.editions.find(e => e.is_current);
   if (!current) return;
-  const hours = [];
-  for (let h = 0; h < 24; h++) hours.push(h);
-  const labels = hours.map(h => (h % 6 === 0 ? String(h).padStart(2, '0') + 'h' : ''));
+  // Petits multiples au quart d'heure eux aussi : ils doivent montrer le meme
+  // pic que la courbe maitresse, sinon deux lectures du meme jour divergent.
+  const inDay = [];
+  for (let q = 0; q < SLOTS_PER_DAY; q++) inDay.push(q);
+  const labels = inDay.map(q => (q % (6 * SLOTS_PER_HOUR) === 0
+    ? String(q / SLOTS_PER_HOUR).padStart(2, '0') + 'h' : ''));
 
   const grid = el('div', { class: 'freq-small' });
   current.days.forEach(d => {
@@ -1860,12 +1914,15 @@ function renderFreqDayMultiples(host, f) {
       if (!day || !day.measured) return null;
       const bySlot = {};
       (ed.hourly || []).forEach(h => {
-        if (Math.floor(h.slot / 24) === d.offset) bySlot[((h.slot % 24) + 24) % 24] = h.present;
+        if (Math.floor(h.slot / SLOTS_PER_DAY) === d.offset) {
+          bySlot[((h.slot % SLOTS_PER_DAY) + SLOTS_PER_DAY) % SLOTS_PER_DAY] = h.present;
+        }
       });
+      bridgeHourlyGaps(bySlot);
       return {
         label: String(ed.year),
-        data: hours.map(h => (h in bySlot ? bySlot[h] : null)),
-        _slots: hours.map(h => d.offset * 24 + h),
+        data: inDay.map(q => (q in bySlot ? bySlot[q] : null)),
+        _slots: inDay.map(q => d.offset * SLOTS_PER_DAY + q),
         borderColor: FREQ_COLORS[i % FREQ_COLORS.length],
         backgroundColor: FREQ_COLORS[i % FREQ_COLORS.length] + '1a',
         borderWidth: ed.is_current ? 2.4 : 1.6,
@@ -1878,11 +1935,15 @@ function renderFreqDayMultiples(host, f) {
 
     const { canvas } = buildFreqChartCard(
       grid, offsetLabel(d.offset) + ' - ' + fmtDateFr(d.date), null, {});
-    const opts = freqLineOptions('Presents');
+    const opts = freqLineOptions('Presents', { zeroFloor: true });
     opts.plugins.zoom = undefined;
     opts.scales.y.title.display = false;
-    opts.plugins.tooltip.callbacks.title = items =>
-      (items.length ? String(items[0].label || '').padStart(2, '0') : '');
+    opts.plugins.tooltip.callbacks.title = items => {
+      if (!items.length) return '';
+      const q = items[0].dataIndex;
+      return String(Math.floor(q / SLOTS_PER_HOUR)).padStart(2, '0') + 'h' +
+             String((q % SLOTS_PER_HOUR) * 15).padStart(2, '0');
+    };
     const ch = new Chart(canvas, { type: 'line', data: { labels, datasets }, options: opts });
     charts.push(ch);
   });
@@ -2401,6 +2462,7 @@ function renderHome() {
 }
 
 function showPeaksOverview() {
+  exitFrequentation();
   viewMode = 'peaks-overview';
   activeZone = null;
   peaksDetailZone = null;
@@ -2427,6 +2489,7 @@ function showPeaksDetail(zoneName) {
 function showZoneDay(zoneName, date) {
   const z = findUnit(zoneName);
   if (!z) return;
+  exitFrequentation();
   viewMode = 'zone-day';
   activeZone = zoneName;
   activeDay = date;
@@ -3351,6 +3414,7 @@ document.querySelectorAll('.cat-tab').forEach(btn => {
   btn.addEventListener('click', () => {
     const cat = btn.dataset.cat;
     if (cat === currentCategory) return;
+    if (cat === 'freq') lastUnitCategory = currentCategory;
     currentCategory = cat;
     document.querySelectorAll('.cat-tab').forEach(b => {
       b.classList.toggle('active', b.dataset.cat === cat);

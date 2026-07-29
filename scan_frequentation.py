@@ -130,13 +130,33 @@ def _race_date(db, event, year):
 # Agregation journaliere
 # ---------------------------------------------------------------------------
 
-def daily_aggregate(doc, race_date):
+def _index_by_day(records):
+    """Enregistrements -> {'YYYY-MM-DD': [records]}.
+
+    Equivalent de `pcorg_summary._index_freq_by_day`, mais sur une liste
+    plutot que sur un document : la serie peut venir de `frequentation`
+    (horaire) comme de `complet` (15 min).
+    """
+    out = {}
+    for rec in records or []:
+        raw = rec.get('date')
+        if isinstance(raw, str):
+            key = raw[:10]
+        elif hasattr(raw, 'strftime'):
+            key = raw.strftime('%Y-%m-%d')
+        else:
+            continue
+        out.setdefault(key, []).append(rec)
+    return out
+
+
+def daily_aggregate(records, race_date):
     """Serie journaliere d'une edition, indexee par offset au jour de course.
 
     `entree` et `sortie` sont des cumuls : les entrees du jour sont la somme des
     deltas positifs. `present` est instantane, donc son maximum est direct.
     """
-    by_day = pcorg_summary._index_freq_by_day(doc)
+    by_day = _index_by_day(records)
     if not by_day:
         return []
 
@@ -191,38 +211,124 @@ def daily_aggregate(doc, race_date):
     return days
 
 
-def hourly_series(doc, race_date):
-    """Courbe horaire alignee : [{slot, offset, hour, present}].
+def presence_series(records, race_date):
+    """Courbe alignee au jour de course : [{slot, offset, hour, minute, present}].
 
-    `slot` = offset_jours * 24 + heure. Cet axe continu permet de superposer
-    plusieurs editions dont les dates calendaires different.
+    `slot` est un index de QUART D'HEURE : `offset_jours * 96 + heure * 4 +
+    minute // 15`. Cet axe continu permet de superposer plusieurs editions dont
+    les dates calendaires different, et il accepte les deux granularites — une
+    edition horaire tombe simplement sur les multiples de 4.
+
+    Le pas de 15 min n'est pas cosmetique : c'est lui qui donne le vrai pic de
+    presence, celui qui sert de reference. Un echantillonnage a l'heure pile le
+    manque.
     """
     out = []
-    for rec in doc.get('data') or []:
+    for rec in records or []:
         raw = rec.get('date')
-        key = raw[:10] if isinstance(raw, str) else (
-            raw.strftime('%Y-%m-%d') if hasattr(raw, 'strftime') else None)
-        if not key:
+        if isinstance(raw, str):
+            key, time_txt = raw[:10], raw[11:16]
+        elif hasattr(raw, 'strftime'):
+            key, time_txt = raw.strftime('%Y-%m-%d'), raw.strftime('%H:%M')
+        else:
             continue
         try:
             d = datetime.strptime(key, '%Y-%m-%d').date()
-        except ValueError:
-            continue
-        hour_txt = raw[11:13] if isinstance(raw, str) and len(raw) >= 13 else (
-            raw.strftime('%H') if hasattr(raw, 'strftime') else None)
-        try:
-            hour = int(hour_txt)
-        except (TypeError, ValueError):
+            hour = int(time_txt[:2])
+            minute = int(time_txt[3:5]) if len(time_txt) >= 5 else 0
+        except (ValueError, TypeError):
             continue
         offset = (d - race_date).days if race_date else 0
         out.append({
-            'slot': offset * 24 + hour,
+            'slot': offset * 96 + hour * 4 + minute // 15,
             'offset': offset,
             'hour': hour,
+            'minute': minute,
             'present': int(rec.get('present') or 0),
         })
     out.sort(key=lambda x: x['slot'])
     return out
+
+
+def enclosure_series(db, event, year):
+    """Serie de presence de l'enceinte, au pas le plus fin disponible.
+
+    Retourne (records, granularite) ou `records` a la meme forme que
+    `frequentation.data` : {date, entree, sortie, present} en CUMULS.
+
+    Le document `frequentation` est horaire. Quand un document `complet`
+    existe, il porte les memes portes au pas de 15 min : on le prefere, sinon
+    le pic est celui d'un echantillonnage a l'heure pile, pas le vrai pic.
+    L'ecart n'est pas anecdotique — 24H AUTOS 2025 : 138 600 a l'heure contre
+    142 622 au quart d'heure, soit 4 022 personnes (2,9 %). C'est ce qui
+    faisait diverger le KPI de la page d'accueil et celui de cette vue.
+    """
+    doc = db['historique_controle'].find_one(
+        {'event': event, 'year': int(year), 'type': 'complet'})
+    if doc:
+        slots = {}
+        for unit in doc.get('complet') or []:
+            if unit.get('kind') != 'porte' or unit.get('ignored'):
+                continue
+            for rec in unit.get('data_15min') or []:
+                key = rec.get('date')
+                if not key:
+                    continue
+                agg = slots.setdefault(str(key), {'e': 0, 's': 0})
+                agg['e'] += int(rec.get('entree') or 0)
+                agg['s'] += int(rec.get('sortie') or 0)
+        if slots:
+            out, cum_e, cum_s = [], 0, 0
+            for key in sorted(slots):
+                cum_e += slots[key]['e']
+                cum_s += slots[key]['s']
+                out.append({'date': key, 'entree': cum_e, 'sortie': cum_s,
+                            'present': cum_e - cum_s})
+            return out, '15min'
+
+    # Ancienne chaine : `porte_scans` porte les memes creneaux de 15 min, sous
+    # une autre forme et indexee sur le SLUG d'evenement. C'est la seule
+    # source fine des couples pas encore importes (24H AUTOS 2025).
+    slots = {}
+    try:
+        # ⚠ `porte_scans` est indexee sur le SLUG de l'ancienne chaine
+        # (`24h_du_mans`), pas sur le nom cockpit. Sans l'alias, la requete ne
+        # remonte rien et on retombe silencieusement sur l'horaire.
+        aliases = set(event_aliases(db, event))
+        try:
+            from scan_report import EVENT_ALIASES
+            slug = EVENT_ALIASES.get((event or '').strip().upper())
+            if slug:
+                aliases.add(slug)
+        except Exception:
+            pass
+        for doc in db['porte_scans'].find(
+                {'event': {'$in': sorted(aliases)},
+                 'year': {'$in': [int(year), str(year)]}}):
+            for iv in doc.get('intervals') or []:
+                ts = iv.get('ts')
+                if ts is None:
+                    continue
+                key = ts.strftime('%Y-%m-%dT%H:%M:%S') if hasattr(ts, 'strftime') \
+                    else str(ts)
+                agg = slots.setdefault(key, {'e': 0, 's': 0})
+                agg['e'] += int(iv.get('entree') or 0)
+                agg['s'] += int(iv.get('sortie') or 0)
+    except Exception:
+        logger.warning('Lecture de porte_scans impossible pour %s %s',
+                       event, year, exc_info=True)
+        slots = {}
+    if slots:
+        out, cum_e, cum_s = [], 0, 0
+        for key in sorted(slots):
+            cum_e += slots[key]['e']
+            cum_s += slots[key]['s']
+            out.append({'date': key, 'entree': cum_e, 'sortie': cum_s,
+                        'present': cum_e - cum_s})
+        return out, '15min'
+
+    freq = _find_frequentation(db, event, year)
+    return ((freq.get('data') or []) if freq else []), 'horaire'
 
 
 def _geo_index(db):
@@ -385,7 +491,9 @@ def load_editions(db, event, year, back=2):
             doc = _find_frequentation(db, event, candidate)
             race = _race_date(db, event, candidate)
             if doc and race:
-                raw.append({'year': candidate, 'doc': doc, 'race': race})
+                records, granularity = enclosure_series(db, event, candidate)
+                raw.append({'year': candidate, 'doc': doc, 'race': race,
+                            'records': records, 'granularity': granularity})
             elif doc and not race:
                 logger.warning('Edition %s %s ignoree : date de course introuvable',
                                event, candidate)
@@ -403,8 +511,9 @@ def load_editions(db, event, year, back=2):
             'year': item['year'],
             'race_date': race.isoformat(),
             'is_current': item['year'] == y,
-            'days': daily_aggregate(item['doc'], race),
-            'hourly': hourly_series(item['doc'], race),
+            'days': daily_aggregate(item['records'], race),
+            'hourly': presence_series(item['records'], race),
+            'granularity': item['granularity'],
             'source': item['doc'].get('source') or 'collecte_temps_reel',
             'doors': len(units) or None,
             'units': units,
