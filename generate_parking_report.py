@@ -1027,9 +1027,9 @@ HTML_TEMPLATE = r"""<!doctype html>
     </svg>
   </button>
   <div class="itb-cats">
-    <button class="cat-tab active" data-cat="zone">Zones</button>
-    <button class="cat-tab" data-cat="porte">Portes</button>
     <button class="cat-tab" data-cat="freq">Frequentation</button>
+    <button class="cat-tab" data-cat="porte">Portes</button>
+    <button class="cat-tab active" data-cat="zone">Zones</button>
   </div>
   <select class="itb-select" id="zone-select" aria-label="Selectionner une zone ou une porte"></select>
   <button class="itb-peaks" id="nav-peaks-top" title="Vue d'ensemble - Pics">
@@ -1064,9 +1064,9 @@ HTML_TEMPLATE = r"""<!doctype html>
 </div>
 <aside>
   <div class="cat-tabs">
-    <button class="cat-tab active" data-cat="zone">Zones</button>
-    <button class="cat-tab" data-cat="porte">Portes</button>
     <button class="cat-tab" data-cat="freq">Frequentation</button>
+    <button class="cat-tab" data-cat="porte">Portes</button>
+    <button class="cat-tab active" data-cat="zone">Zones</button>
   </div>
   <div class="nav-overview">
     <button id="nav-peaks" title="Voir le pic de presents par unite">
@@ -1217,9 +1217,11 @@ const TRIPODES_PER_AGENT = 3;
 const isTripodesPorte = z => !!(z && z.tripodes_mode);
 
 function porteAgentsSimuAtPeak(z) {
+  // Accueil et securite sortent du meme calcul (calendrier, creneaux 30 min) :
+  // les deux ont un pic simultane reel, plus un comptage statique de postes.
   const st = z.staffing || {};
   const a = (st.accueil && st.accueil.peak_simu) || 0;
-  const s = (st.securite && st.securite.count_op) || 0;
+  const s = (st.securite && st.securite.peak_simu) || 0;
   return { accueil: a, securite: s, total: a + s };
 }
 
@@ -1227,7 +1229,7 @@ function porteHourlyAgents(z, date, hour) {
   // hour = '00' a '23' (string)
   const st = z.staffing || {};
   const a = (((st.accueil || {}).hourly || {})[date] || {})[hour] || 0;
-  const s = (st.securite && st.securite.count_op) || 0; // statique, on suppose presents
+  const s = (((st.securite || {}).hourly || {})[date] || {})[hour] || 0;
   return { accueil: a, securite: s, total: a + s };
 }
 
@@ -1279,14 +1281,19 @@ function appendStaffingKpis(host, staffing) {
   host.appendChild(kpiCard(
     'Personnel Securite planifie',
     fmt(s.count_op || 0) + ' postes',
-    (s.count_op || 0) > 0 ? 'compte statique (numeros sec. refaits)' : 'aucun renseigne',
+    (s.count_op || 0) > 0
+      ? 'pic simu ' + fmt(s.peak_simu || 0) + ' simultanes' +
+        (s.peak_simu_ts ? ' (' + fmtTsFr(s.peak_simu_ts) + ')' : '')
+      : 'aucun poste securite rattache a ce lieu',
     'red',
   ));
-  if (a.agents_h_total) {
+  const ah = (a.agents_h_total || 0) + (s.agents_h_total || 0);
+  if (ah) {
     host.appendChild(kpiCard(
-      'Agents.h Accueil periode',
-      fmt(Math.round(a.agents_h_total)) + ' h',
-      'somme heures-personnes scan (chefs exclus)',
+      'Agents.h periode',
+      fmt(Math.round(ah)) + ' h',
+      fmt(Math.round(a.agents_h_total || 0)) + ' h Accueil + ' +
+        fmt(Math.round(s.agents_h_total || 0)) + ' h Securite',
       'green',
     ));
   }
@@ -1396,24 +1403,25 @@ function renderAnalysis(a, host, z) {
     const ul = el('ul');
     const a = st.accueil || {};
     const s = st.securite || {};
-    if (a.count_op || a.count_chef) {
-      ul.appendChild(el('li', null,
-        'Accueil : ' + (a.count_op || 0) + ' poste' + ((a.count_op || 0) > 1 ? 's' : '') +
-        ' operationnel(s) + ' + (a.count_chef || 0) + ' chef(s) - ' +
-        Math.round(a.agents_h_total || 0) + ' agents.h cumules, pic simu ' +
-        (a.peak_simu || 0) + ' agents' +
-        (a.peak_simu_ts ? ' le ' + reformatDatesInText(a.peak_simu_ts) : '')));
+    const line = (label, b) => 'poste' + ((b.count_op || 0) > 1 ? 's' : '') +
+      ' - ' + Math.round(b.agents_h_total || 0) + ' agents.h cumules, pic simu ' +
+      (b.peak_simu || 0) + ' agents' +
+      (b.peak_simu_ts ? ' le ' + reformatDatesInText(b.peak_simu_ts) : '');
+    if (a.count_op) {
+      ul.appendChild(el('li', null, 'Accueil : ' + a.count_op + ' ' + line('Accueil', a)));
     }
-    if (s.count_op || s.count_chef) {
-      const aff = (s.affectations || []).slice(0, 3).join(', ');
-      ul.appendChild(el('li', null,
-        'Securite : ' + (s.count_op || 0) + ' poste' + ((s.count_op || 0) > 1 ? 's' : '') +
-        ' (compte statique - numeros sec. refaits cote calendrier 2025)' +
-        (aff ? ' - ex : ' + aff : '')));
+    if (s.count_op) {
+      ul.appendChild(el('li', null, 'Securite : ' + s.count_op + ' ' + line('Securite', s)));
     }
     if (!(a.count_op || s.count_op)) {
       ul.appendChild(el('li', { class: 'a-empty' },
-        'Aucun poste valide pour cette unite (uniquement non-scan / surveillance).'));
+        'Aucun poste du calendrier n\'est rattache a ce lieu.'));
+    } else if (st.posts_total && st.posts_matched < st.posts_total) {
+      // Les post_numbers d'une feature ne sont pas filtres par edition : ceux
+      // qui ne sont pas au calendrier de l'annee sont normalement ecartes.
+      ul.appendChild(el('li', { class: 'a-empty' },
+        st.posts_matched + ' des ' + st.posts_total + ' postes rattaches a ce lieu ' +
+        'figurent au calendrier de cette edition.'));
     }
     sec.appendChild(ul);
     host.appendChild(sec);
@@ -2394,6 +2402,11 @@ function render(z) {
         ' \u00b7 nuit ' + _ps.shiftTotals.nuit, 'amber'),
     );
   }
+
+  // Effectif REELLEMENT planifie (vert/rouge), a cote de l'effectif recommande
+  // (ambre) calcule depuis les flux. Les deux repondent a des questions
+  // differentes : ce qui etait prevu, et ce qu'il aurait fallu.
+  appendStaffingKpis(kpiHost, z.staffing);
 
   const progBody = tpl.querySelector('[data-bind=progression]');
   k.progression.forEach(p => {

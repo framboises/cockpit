@@ -176,13 +176,6 @@
     generation_en_cours: "Une generation est deja en cours pour ce couple.",
     generation_impossible: "La generation du rapport a echoue.",
     job_inconnu: "Tache inconnue ou expiree.",
-    // Effectifs
-    sources_effectifs_absentes:
-      "Donnees de reference absentes pour ce couple (bible ou calendrier).",
-    effectifs_impossible: "Le calcul des effectifs a echoue.",
-    audit_impossible: "Le tableau d'audit n'a pas pu etre produit.",
-    csv_vide: "Le fichier CSV est vide.",
-    csv_sans_ligne_exploitable: "Aucune ligne exploitable dans le CSV.",
     // Analyse
     cle_api_absente:
       "Cle API Anthropic non configuree sur le serveur : l'analyse redigee " +
@@ -439,76 +432,13 @@
           "</strong>. Les donnees sont importees, seule la localisation manque."));
       }
       body.appendChild(note("info",
-        "Etapes suivantes : rattacher les <a href=\"#\" id=\"scan-goto-staffing\" " +
-        "style=\"color:#9cc5ff;\">effectifs</a> (facultatif), puis regenerer le " +
-        "rapport avec le bouton " +
+        "Etape suivante : regenerer le rapport avec le bouton " +
         "<span class=\"material-symbols-outlined\" style=\"font-size:14px;vertical-align:-2px;\">refresh</span> " +
-        "du bandeau."));
-      var link = document.getElementById("scan-goto-staffing");
-      if (link) {
-        link.addEventListener("click", function (e) {
-          e.preventDefault();
-          $("#scan-import-modal").hidden = true;
-          openStaffing();
-        });
-      }
+        "du bandeau. Les effectifs sont calcules a ce moment-la, depuis le " +
+        "calendrier — rien a deposer."));
     }).catch(function () {
       $("#scan-commit-progress").hidden = true;
       $("#scan-result-body").appendChild(note("err", ERRORS.reseau_indisponible));
-    });
-  }
-
-  // ---- Effectifs -----------------------------------------------------------
-
-  function openStaffing() {
-    clear($("#scan-staffing-body"));
-    $("#scan-staffing-progress").hidden = true;
-    $("#scan-staffing-file").value = "";
-    var q = "?event=" + encodeURIComponent(currentEvent()) +
-            "&year=" + encodeURIComponent(currentYear());
-    $("#scan-staffing-dl").setAttribute("href", "/scan-report/staffing/audit.csv" + q);
-    $("#scan-staffing-modal").hidden = false;
-  }
-
-  function applyStaffing(file) {
-    if (!file) return;
-    var body = $("#scan-staffing-body");
-    clear(body);
-    $("#scan-staffing-progress").hidden = false;
-
-    var fd = new FormData();
-    fd.append("file", file);
-    fd.append("event", currentEvent());
-    fd.append("year", currentYear());
-
-    fetch("/scan-report/staffing/apply", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "X-CSRFToken": csrf() },
-      body: fd
-    }).then(function (r) { return r.json(); }).then(function (d) {
-      $("#scan-staffing-progress").hidden = true;
-      if (!d.ok) {
-        body.appendChild(note("err", msg(d)));
-        return;
-      }
-      body.appendChild(note("ok",
-        "<strong>Effectifs appliques.</strong><br>" +
-        esc(d.rows) + " ligne(s) lue(s), " + esc(d.validated_ok) +
-        " validee(s) OK, " + esc(d.units_computed) + " unite(s) calculee(s), " +
-        esc((d.units_applied || []).length) + " rattachee(s) au document."));
-      if (d.units_unmatched && d.units_unmatched.length) {
-        // Ces unites existent dans la bible mais pas dans le classeur importe :
-        // le dire evite de croire que leurs effectifs ont ete pris en compte.
-        body.appendChild(note("warn",
-          "Unite(s) du tableau absente(s) du classeur importe, donc sans " +
-          "effet : <strong>" + esc(d.units_unmatched.join(", ")) + "</strong>."));
-      }
-      body.appendChild(note("info",
-        "Regenerer le rapport pour que les effectifs y apparaissent."));
-    }).catch(function () {
-      $("#scan-staffing-progress").hidden = true;
-      body.appendChild(note("err", ERRORS.reseau_indisponible));
     });
   }
 
@@ -820,18 +750,6 @@
     if (analysisGo) analysisGo.addEventListener("click", runAnalysis);
     var analysisHist = $("#scan-analysis-history");
     if (analysisHist) analysisHist.addEventListener("click", showHistory);
-
-    var staffBtn = $("#scan-staffing-btn");
-    if (staffBtn) staffBtn.addEventListener("click", openStaffing);
-
-    var staffPick = $("#scan-staffing-pick");
-    var staffFile = $("#scan-staffing-file");
-    if (staffPick && staffFile) {
-      staffPick.addEventListener("click", function () { staffFile.click(); });
-      staffFile.addEventListener("change", function () {
-        applyStaffing(staffFile.files[0]);
-      });
-    }
 
     document.querySelectorAll(".crud-modal [data-close]").forEach(function (el) {
       el.addEventListener("click", function () {

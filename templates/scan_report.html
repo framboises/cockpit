@@ -241,10 +241,6 @@
                 title="Importer un fichier Excel de scans">
           <span class="material-symbols-outlined">upload_file</span>
         </button>
-        <button type="button" id="scan-staffing-btn" class="scan-icon-btn"
-                title="Effectifs (Accueil / Securite)">
-          <span class="material-symbols-outlined">groups</span>
-        </button>
         <button type="button" id="scan-regen-btn" class="scan-icon-btn"
                 title="Regenerer le rapport">
           <span class="material-symbols-outlined">refresh</span>
@@ -369,42 +365,6 @@
       <button type="button" class="btn btn-primary" id="scan-analysis-go">
         Generer
       </button>
-    </div>
-  </div>
-</div>
-
-<!-- ===== MODALE EFFECTIFS (2e temps de l'import) ===== -->
-<div id="scan-staffing-modal" class="crud-modal" hidden>
-  <div class="crud-modal-dialog">
-    <div class="crud-modal-header">
-      <h3>Effectifs</h3>
-      <button type="button" class="crud-modal-close" data-close>&times;</button>
-    </div>
-    <div class="crud-modal-body">
-      <div class="scan-note info">
-        Le rattachement d'un poste a une unite de scan ne peut pas etre devine :
-        il faut le valider a la main. Telecharger le tableau, remplir la colonne
-        <strong>Validation</strong> (<code>OK</code>, <code>NON</code>, ou
-        <code>PADDOCKS</code> pour reaffecter le poste aux paddocks), puis le
-        redeposer ici.
-      </div>
-      <div style="display:flex;gap:9px;align-items:center;margin-bottom:14px;">
-        <a id="scan-staffing-dl" class="btn btn-secondary" href="#">
-          1. Telecharger le tableau
-        </a>
-        <button type="button" class="btn btn-secondary" id="scan-staffing-pick">
-          2. Deposer le tableau valide
-        </button>
-        <input type="file" id="scan-staffing-file" accept=".csv" hidden>
-      </div>
-      <div id="scan-staffing-body"></div>
-      <div class="scan-progress" id="scan-staffing-progress" hidden>
-        <div class="scan-progress-bar indeterminate"><div class="scan-progress-fill"></div></div>
-        <div class="scan-progress-info"><span>Calcul des effectifs...</span><span></span></div>
-      </div>
-    </div>
-    <div class="crud-modal-footer">
-      <button type="button" class="btn btn-secondary" data-close>Fermer</button>
     </div>
   </div>
 </div>

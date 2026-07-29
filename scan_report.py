@@ -4,13 +4,12 @@ Blueprint Cockpit : chaine scans, de l'import Excel a l'analyse redigee.
 Transport HTTP uniquement — la logique metier vit dans les modules dedies :
     scan_import.py        parsing, resolution des features, ecriture Mongo
     scan_report_build.py  generation du rapport HTML
-    scan_staffing.py      effectifs (audit CSV + application)
+    scan_staffing.py      effectifs derives du calendrier (aucune saisie)
     scan_analysis.py      analyse redigee par Claude
 
 Groupes de routes :
 - page et service du rapport  : /scan-report, /static, /available
 - import                      : /template.xlsx, /features, /import/*
-- effectifs                   : /staffing/audit.csv, /staffing/apply
 - generation                  : /generate, /generate/status
 - analyse                     : /analysis/*
 
@@ -25,7 +24,6 @@ attente entre analyze et commit, `_JOBS` pour les taches asynchrones.
 Documentation complete : CLAUDE.md, section « Chaine scans ».
 """
 
-import io
 import logging
 import os
 import re
@@ -604,47 +602,13 @@ def scan_report_import_commit():
     with _STAGING_LOCK:
         _drop_staged(token)
 
-    # Effectifs : si des validations ont deja ete saisies pour ce couple, on
-    # les rejoue tout de suite. L'utilisateur s'attend a ce que l'import
-    # enrichisse tout ; le passage par l'etape manuelle n'est necessaire que
-    # la premiere fois, quand aucune validation n'existe encore.
-    staffing_info = _apply_saved_staffing(db, event, year, user)
-
     unresolved = [{'kind': k[0], 'name': k[1]}
                   for k, v in resolved.items() if not v['_id_feature']]
     return jsonify({
         'ok': True, 'run_id': run_id, 'event': event, 'year': year,
         'written': written, 'archived': archived,
         'overrides_saved': saved, 'unresolved': unresolved,
-        'staffing': staffing_info,
     })
-
-
-def _apply_saved_staffing(db, event, year, user):
-    """Rejoue les validations d'effectifs deja memorisees, si elles existent.
-
-    Retourne un descriptif pour l'UI : `status` vaut 'applique',
-    'aucune_validation' (premier import de ce couple) ou 'sources_absentes'
-    (edition sans bible ni calendrier).
-    """
-    import scan_staffing
-    try:
-        saved = scan_staffing.load_saved_validations(db, event, year)
-        if not saved:
-            return {'status': 'aucune_validation'}
-        rows = scan_staffing.build_validation_rows(db, event, year)
-        if not rows:
-            return {'status': 'aucune_validation'}
-        staffing = scan_staffing.compute_staffing(db, event, year, rows)
-        applied = scan_staffing.attach_staffing(db, event, year, staffing, user)
-        return {'status': 'applique', 'units': len(applied),
-                'validations': len(saved)}
-    except scan_staffing.StaffingSourcesMissing as exc:
-        return {'status': 'sources_absentes', 'detail': str(exc)}
-    except Exception as exc:
-        logger.warning('Application automatique des effectifs impossible',
-                       exc_info=True)
-        return {'status': 'echec', 'detail': str(exc)}
 
 
 @scan_report_bp.route('/scan-report/import/<token>', methods=['DELETE'])
@@ -653,87 +617,6 @@ def scan_report_import_abort(token):
     with _STAGING_LOCK:
         _drop_staged(token)
     return jsonify({'ok': True})
-
-
-# ===========================================================================
-# Effectifs (2e temps de l'import)
-# ===========================================================================
-#
-# Le rapprochement poste <-> unite de scan ne peut pas etre automatise : on
-# produit un tableau a valider, l'utilisateur l'annote, on le rejoue. Les
-# validations sont conservees en base pour ne pas refaire le travail a chaque
-# import.
-
-@scan_report_bp.route('/scan-report/staffing/audit.csv')
-def scan_report_staffing_audit():
-    """Tableau de rapprochement des effectifs, a valider a la main."""
-    from app import db
-    import scan_staffing
-
-    event = (request.args.get('event') or DEFAULT_EVENT).strip()
-    try:
-        year = int(request.args.get('year') or DEFAULT_YEAR)
-    except (TypeError, ValueError):
-        return _err('annee_invalide')
-
-    try:
-        content, stats = scan_staffing.build_audit_csv(db, event, year)
-    except scan_staffing.StaffingSourcesMissing as exc:
-        # Cas frequent sur les editions anciennes : ni bible ni calendrier.
-        return _err('sources_effectifs_absentes', 404, detail=str(exc))
-    except Exception as exc:
-        logger.exception('Audit des effectifs impossible')
-        return _err('audit_impossible', 500, detail=str(exc))
-
-    buf = io.BytesIO(content.encode('utf-8-sig'))  # BOM : Excel lit l'UTF-8
-    name = 'effectifs_%s_%s.csv' % (
-        re.sub(r'[^A-Za-z0-9]+', '_', event).strip('_').lower(), year)
-    resp = send_file(buf, as_attachment=True, download_name=name,
-                     mimetype='text/csv')
-    resp.headers['X-Audit-Rows'] = str(stats['rows'])
-    resp.headers['X-Audit-Prefilled'] = str(stats['prefilled'])
-    return resp
-
-
-@scan_report_bp.route('/scan-report/staffing/apply', methods=['POST'])
-def scan_report_staffing_apply():
-    """Applique le tableau valide sur les unites du document complet."""
-    from app import db
-    import scan_staffing
-
-    upload = request.files.get('file')
-    if upload is None or not upload.filename:
-        return _err('fichier_manquant')
-    if not upload.filename.lower().endswith('.csv'):
-        # Volontairement CSV seul : le .numbers est un format de poste de
-        # travail, illisible sans dependance supplementaire cote serveur.
-        return _err('extension_invalide', 400,
-                    detail='Exporter la feuille au format CSV')
-    raw = upload.read()
-    if not raw:
-        return _err('fichier_vide')
-    if len(raw) > MAX_UPLOAD_BYTES:
-        return _err('fichier_trop_volumineux', 413)
-
-    event = (request.form.get('event') or DEFAULT_EVENT).strip()
-    try:
-        year = int(request.form.get('year') or DEFAULT_YEAR)
-    except (TypeError, ValueError):
-        return _err('annee_invalide')
-
-    try:
-        info = scan_staffing.apply_validated_csv(
-            db, event, year, raw, saved_by=_current_user_email())
-    except scan_staffing.StaffingSourcesMissing as exc:
-        return _err('sources_effectifs_absentes', 404, detail=str(exc))
-    except ValueError as exc:
-        return _err(str(exc), 400)
-    except Exception as exc:
-        logger.exception('Application des effectifs impossible')
-        return _err('effectifs_impossible', 500, detail=str(exc))
-
-    info['ok'] = True
-    return jsonify(info)
 
 
 # ===========================================================================

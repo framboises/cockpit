@@ -9,11 +9,14 @@ d'analyse restent intacts.
 
 Deux sources possibles, dans cet ordre :
   1. `historique_controle{type: "complet"}` — nouvelle chaine d'import
-  2. `parking_scans` / `porte_scans` — ancienne chaine, seule a porter les
-     effectifs pour 24H AUTOS 2025
+  2. `parking_scans` / `porte_scans` — ancienne chaine
 
 Le repli garantit que le rapport historique reste reproductible a l'identique
 tant qu'aucun `complet` n'a ete importe pour ce couple.
+
+Les effectifs ne viennent d'aucune de ces deux sources : ils sont derives du
+calendrier en fin de generation par `scan_staffing.attach_to_payload`, pour
+les deux chemins.
 """
 
 import logging
@@ -161,10 +164,11 @@ def build_payload_from_complet(db, event, year, progress_cb=None,
             'total_entree': int(unit.get('total_entree') or 0),
             'total_sortie': int(unit.get('total_sortie') or 0),
             'intervals': intervals,
-            # Le staffing pose par l'etape « Effectifs » vit sur l'unite du
-            # document complet : le lire en priorite, sinon l'affichage des
-            # agents reste a zero alors que le calcul a bien eu lieu.
-            'staffing': unit.get('staffing') or extra.get('staffing'),
+            # Pas de staffing ici : il est calcule en fin de generation, par
+            # `scan_staffing.attach_to_payload`. Reprendre celui du document
+            # ferait survivre le resultat de l'ancienne chaine a validation
+            # manuelle, dont les compteurs a zero se lisent comme « personne
+            # n'etait en poste ».
         }
 
         if unit.get('kind') == 'porte':
@@ -178,11 +182,16 @@ def build_payload_from_complet(db, event, year, progress_cb=None,
             # qu'aux couples importes avant cette mise en place.
             pseudo['uam_help'] = unit.get('uam_help') or extra.get('uam_help')
             pseudo['pda_renfort'] = unit.get('pda_renfort') or extra.get('pda_renfort')
-            portes.append(gpr.serialize_porte(
+            out = gpr.serialize_porte(
                 pseudo,
-                tripodes_mode=tripodes_flag.get((name or '').upper(), False)))
+                tripodes_mode=tripodes_flag.get((name or '').upper(), False))
+            portes.append(out)
         else:
-            zones.append(gpr.serialize_zone(pseudo))
+            out = gpr.serialize_zone(pseudo)
+            zones.append(out)
+        # Rattachement geographique conserve jusqu'au payload : c'est par lui
+        # que les effectifs sont calcules, sans repasser par le nom.
+        out['_id_feature'] = unit.get('_id_feature')
 
     if not zones and not portes:
         raise gpr.ReportGenerationError(
@@ -205,7 +214,6 @@ def build_payload_from_complet(db, event, year, progress_cb=None,
         'portes': len(portes),
         'omitted_units': omitted,
         'autre_scans_not_shown': autre_not_shown,
-        'staffing_grafted': sum(1 for e in enrichment.values() if e.get('staffing')),
     }
     return payload, info
 
@@ -274,7 +282,19 @@ def generate(db, event, year, progress_cb=None, with_analysis=True,
         payload['event'] = event
         info = {'source': 'legacy', 'zones': len(payload['zones']),
                 'portes': len(payload['portes']), 'omitted_units': [],
-                'autre_scans_not_shown': 0, 'staffing_grafted': 0}
+                'autre_scans_not_shown': 0}
+
+    # Effectifs : calcules ici, pour les deux chemins de generation. Derives du
+    # calendrier via `_id_feature`, sans aucune saisie — un rapport regenere
+    # reflete donc toujours le dernier planning en base.
+    _p(84, 'Effectifs depuis le calendrier')
+    import scan_staffing
+    try:
+        info['staffing'] = scan_staffing.attach_to_payload(db, event, year, payload)
+    except Exception:
+        logger.warning('Calcul des effectifs echoue pour %s %s',
+                       event, year, exc_info=True)
+        info['staffing'] = {'error': 'effectifs_indisponibles'}
 
     # Bloc frequentation : ajoute ici et pas dans les deux constructeurs, parce
     # que c'est le seul endroit ou le NOM COCKPIT de l'evenement est connu a

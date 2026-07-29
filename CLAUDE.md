@@ -387,7 +387,7 @@ Elle remplace un enchaînement manuel de 5 scripts (`import_zone_scans.py`, `imp
 |--------|------|
 | `scan_import.py` | Parseur xlsx, résolveur de features, constructeurs des 3 documents, archivage |
 | `scan_report_build.py` | Adaptateur `complet` → contrat du gabarit HTML, génération du fichier |
-| `scan_staffing.py` | Audit des effectifs (CSV à valider) et application du CSV validé |
+| `scan_staffing.py` | Effectifs Accueil/Sécurité dérivés du calendrier, sans aucune saisie |
 | `scan_analysis.py` | KPI agrégés, prompts, appel Claude, persistance |
 | `scan_report.py` | Blueprint : routes, staging d'import, registre de jobs |
 | `static/js/scan_report.js` | IIFE autonome : modales, mapping manuel, barres de progression |
@@ -425,7 +425,7 @@ Tous dans `historique_controle`, index unique `(event, year, type)`, `year` en *
 
 | type | clé | granularité | sémantique |
 |------|-----|-------------|------------|
-| `complet` | `complet` | 15 min | **nouveau**. Une entrée par unité, `entree`/`sortie`/`autre` en **deltas par créneau**, `present` en cumul courant. Porte aussi `_id_feature`, `devices`, `uam_help`, `pda_renfort`, `staffing` |
+| `complet` | `complet` | 15 min | **nouveau**. Une entrée par unité, `entree`/`sortie`/`autre` en **deltas par créneau**, `present` en cumul courant. Porte aussi `_id_feature`, `devices`, `uam_help`, `pda_renfort` |
 | `frequentation` | `data` | horaire | série **globale unique** (agrégat ENCEINTE GENERALE), `entree`/`sortie` **cumulés**, `present = entree - sortie` |
 | `portes` | `doors` | horaire | `[{name, doors_id, scans:[{id, timestamp (datetime BSON), scan_count}]}]`, `scan_count` = tous sens confondus |
 
@@ -469,8 +469,6 @@ Toutes sur `scan_report_bp`, donc **admin-only** via `before_request` → `_chec
 | `POST /scan-report/import/analyze` | multipart xlsx → aperçu + mapping, **sans rien écrire** |
 | `POST /scan-report/import/commit` | Écrit les 3 documents, archive l'existant |
 | `DELETE /scan-report/import/<token>` | Abandon, purge le fichier en attente |
-| `GET /scan-report/staffing/audit.csv` | Tableau de rapprochement des effectifs à valider |
-| `POST /scan-report/staffing/apply` | Applique le CSV validé sur les unités `complet` |
 | `POST /scan-report/generate` | Régénère le rapport (job asynchrone) |
 | `GET /scan-report/generate/status?job=` | État d'un job (génération **et** analyse) |
 | `POST /scan-report/analysis/generate` | Analyse rédigée (`dry_run: true` = prompt sans appel API) |
@@ -496,17 +494,31 @@ Les unités **sans aucun flux dirigé sont écartées du rapport** (elles ne pro
 
 ### Effectifs
 
-Deux temps, parce que le rattachement poste ↔ unité de scan ne se devine pas :
+**Entièrement dérivés, aucune saisie.** Calculés à chaque génération du rapport par `scan_staffing.attach_to_payload`, pour les deux chemins de génération. Un rapport régénéré reflète donc toujours le dernier planning en base.
 
-1. `GET /scan-report/staffing/audit.csv` produit le tableau (unité → post_numbers → bible → calendrier)
-2. L'utilisateur remplit la colonne **Validation** : `OK`, `NON`, ou `PADDOCKS` pour réaffecter
-3. `POST /scan-report/staffing/apply` calcule agents-h, pic simultané et courbe horaire, puis pose `staffing` sur les unités `complet`
+La chaîne de rattachement existe déjà et ne demande aucun arbitrage :
 
-Les validations sont persistées dans `scan_staffing_validations` et **repré-remplies automatiquement** au prochain audit (en-tête `X-Audit-Prefilled`). Seul le CSV est accepté : le `.numbers` est un format de poste de travail.
+```
+unité de scan → _id_feature → feature géo → post_numbers → shiftcode → calendrier_<année>_<événement>
+```
 
-`audit_staffing_mapping.py` a été paramétré (`main(event, year, csv_output, db)`) et déduit le nom de la collection calendrier via `calendar_collection_name()` — convention `calendrier_<année>_<événement collé sans accent>`.
+Le calendrier porte `accueil_surete` (`A` / `S`) et `donnees_presences`, une liste de journées découpées en créneaux de 30 min avec `nombre_personnes`. **Accueil et sécurité se calculent exactement pareil** : la seule différence est la valeur de `accueil_surete`. Chaque bloc produit `count_op`, `agents_h_total`, `peak_simu`, `peak_simu_ts` et `hourly`.
 
-⚠️ **Les effectifs ne sont calculables que si la bible ET le calendrier existent pour le couple.** Ce n'est pas le cas de la plupart des éditions anciennes : 24H MOTOS 2024 n'a ni `calendrier_2024_24hmotos` ni poste dans `bible`. La route répond alors **404 `sources_effectifs_absentes`** avec la raison exacte.
+- un créneau vaut 30 min, d'où agents-h = `somme(nombre_personnes) × 0,5`
+- la courbe horaire retient le **maximum** des deux demi-heures, pas leur somme : c'est un effectif présent, pas un volume
+- `post_config` donne le détail par poste (`access_control`, `palpation`, `placier`, `controle_tripode`)
+
+Les unités du document `complet` portent déjà leur `_id_feature`. Celles issues de l'ancienne chaîne (`parking_scans`) n'en ont pas : `resolve_units_for_names` rejoue le résolveur de l'import, qui connaît les variantes orthographiques et les corrections manuelles.
+
+⚠️ **`attach_to_payload` est seule maîtresse du champ `staffing`** : elle l'efface d'abord sur toutes les unités. Sans ça, un reste de l'ancienne chaîne à validation manuelle survivrait avec ses compteurs à zéro, qui se lisent comme « personne n'était en poste ».
+
+⚠️ **Les `post_numbers` d'une feature ne sont pas filtrés par édition** — c'est une liste unique par lieu. Le filtrage se fait à la jointure : un poste absent du calendrier de l'année ne compte pas. C'est ce qui rend la liste réutilisable d'une édition à l'autre. Le rapport affiche `posts_matched / posts_total` quand les deux diffèrent.
+
+⚠️ **Aucun poste de sécurité n'est rattaché à une feature** (24H AUTOS 2025 : 119 `post_numbers` résolus, 119 en `A`, 0 en `S`). Les 255 postes `S` du calendrier sont découpés sur un autre axe (`zone` : « Portes », « Paddock », « Extérieur Bugatti »… ; `secteur` : « Ouest », « Houx »…). Le code est prêt — la sécurité apparaîtra dès que ces postes seront ajoutés aux `post_numbers` côté carto. En attendant le rapport écrit « aucun poste sécurité rattaché à ce lieu », jamais un zéro muet.
+
+⚠️ **Deux formats de calendrier coexistent.** Depuis 2025 : `shiftcode` + `donnees_presences`. En 2024 (`calendrier_2024_24hautos`, 2 826 docs) : colonnes Excel brutes (`'10h - 10h30'`, `'ACCUEIL / SÛRETE'`, `'N°'`), sans `shiftcode`. `load_calendar` lève `StaffingSourcesMissing` plutôt que de rendre des effectifs vides. Et **24H MOTOS 2024 n'a aucun calendrier** — ses effectifs sont donc absents, à juste titre.
+
+Un échec du calcul ne perd jamais le rapport : il est journalisé et `info['staffing']` porte l'erreur.
 
 ### Aide UAM et renforts PDA
 
@@ -598,7 +610,6 @@ Sans `ANTHROPIC_API_KEY`, le rapport se génère **sans la section** (log en war
 |------------|---------|
 | `historique_controle_archive` | Générations remplacées, append-only, pas de TTL |
 | `scan_feature_overrides` | Mapping manuel nom de scan → `_id_feature`, index unique `(scan_name, kind, event, year)` |
-| `scan_staffing_validations` | Colonne Validation saisie à la main, repré-remplie à chaque audit |
 | `scan_analyses` | Analyses Claude historisées. `kind` vaut `scans` ou `frequentation` ; les documents antérieurs au champ sont des analyses de scans. Les analyses de fréquentation portent une `fingerprint` (réutilisation sans appel API) |
 
 ### Pièges
