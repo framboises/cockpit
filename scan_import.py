@@ -748,8 +748,6 @@ def build_complet_doc(parsed, resolved, event, year, race_iso=None,
     ignored = ignored_keys(resolved)
     units_out = []
     for unit in parsed['units']:
-        if unit['key'] in ignored:
-            continue
         feat = resolved.get(unit['key'], {})
         present = 0
         series = []
@@ -779,6 +777,11 @@ def build_complet_doc(parsed, resolved, event, year, race_iso=None,
             'category': feat.get('category') or guess_category(
                 unit['name'], unit['kind'], feat.get('feature_collection')),
             'category_source': feat.get('category_source', 'auto'),
+            # Une unite ecartee reste dans `complet` avec son drapeau, elle
+            # n'est retiree que des documents derives et du rapport. Ses
+            # series sont ainsi conservees : la reintegrer plus tard depuis
+            # l'editeur de mapping ne demande pas de reprendre le classeur.
+            'ignored': unit['key'] in ignored,
             'devices': unit['devices'],
             'device_count': unit['device_count'],
             'pda_count': unit['pda_count'],
@@ -923,7 +926,8 @@ def _doc_size(doc):
     return len(bson.BSON.encode(doc))
 
 
-def archive_and_replace(db, doc, archived_by=None, import_id=None):
+def archive_and_replace(db, doc, archived_by=None, import_id=None,
+                        reason='reimport'):
     """Archive le document existant puis ecrit le nouveau.
 
     L'index unique de `historique_controle` porte sur (event, year, type) :
@@ -950,7 +954,7 @@ def archive_and_replace(db, doc, archived_by=None, import_id=None):
         snapshot.pop('_id', None)
         snapshot['archived_at'] = datetime.now()
         snapshot['archived_by'] = archived_by
-        snapshot['archived_reason'] = 'reimport'
+        snapshot['archived_reason'] = reason
         snapshot['replaced_by_import_id'] = import_id
         snapshot['original_id'] = existing['_id']
         archive_id = db[ARCHIVE_COLLECTION].insert_one(snapshot).inserted_id

@@ -150,6 +150,12 @@ def build_payload_from_complet(db, event, year, progress_cb=None,
         pct = 12 + int(70.0 * i / total)
         _p(pct, 'Analyse de %s' % unit.get('name'))
 
+        # Unite ecartee a l'import ou depuis l'editeur de mapping : elle reste
+        # dans `complet` avec ses series, mais n'a rien a faire dans le
+        # rapport ni dans les documents derives.
+        if unit.get('ignored'):
+            continue
+
         intervals = _intervals(unit)
         flow = sum(it['entree'] + it['sortie'] for it in intervals)
         if not flow:

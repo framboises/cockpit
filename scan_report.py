@@ -637,6 +637,79 @@ def scan_report_import_abort(token):
 
 
 # ===========================================================================
+# Edition du mapping apres import
+# ===========================================================================
+#
+# Corriger un rattachement n'impose plus de reteleverser le classeur : les
+# trois documents sont reconstruits depuis `complet`, qui porte deja les
+# series par unite. Voir scan_mapping.py pour l'equivalence verifiee.
+
+@scan_report_bp.route('/scan-report/mapping')
+def scan_report_mapping_get():
+    """Mapping courant d'un couple, au format de la table d'import."""
+    from app import db
+    import scan_mapping
+
+    event = (request.args.get('event') or DEFAULT_EVENT).strip()
+    try:
+        year = int(request.args.get('year') or DEFAULT_YEAR)
+    except (TypeError, ValueError):
+        return _err('annee_invalide')
+
+    try:
+        data = scan_mapping.load_mapping(db, event, year)
+    except scan_mapping.MappingError as exc:
+        return _err(exc.code, exc.status, detail=exc.detail)
+    except Exception as exc:
+        logger.exception('Lecture du mapping impossible')
+        return _err('mapping_illisible', 500, detail=str(exc))
+
+    data['ok'] = True
+    return jsonify(data)
+
+
+@scan_report_bp.route('/scan-report/mapping', methods=['POST'])
+def scan_report_mapping_post():
+    """Applique des corrections de mapping et reecrit les trois documents."""
+    from app import db
+    import scan_import
+    import scan_mapping
+
+    body = request.get_json(silent=True) or {}
+    event = (body.get('event') or DEFAULT_EVENT).strip()
+    try:
+        year = int(body.get('year') or DEFAULT_YEAR)
+    except (TypeError, ValueError):
+        return _err('annee_invalide')
+
+    changes = {}
+    for key, val in (body.get('changes') or {}).items():
+        if '|' not in key or not isinstance(val, dict):
+            continue
+        cat = val.get('category')
+        changes[key] = {
+            '_id_feature': val.get('_id_feature') or None,
+            'feature_collection': val.get('feature_collection'),
+            'category': cat if cat in scan_import.CATEGORY_IDS else None,
+            'ignored': bool(val.get('ignored')),
+        }
+
+    try:
+        info = scan_mapping.apply_mapping(
+            db, event, year, changes,
+            applied_by=_current_user_email(),
+            save_overrides=bool(body.get('save_overrides')))
+    except scan_mapping.MappingError as exc:
+        return _err(exc.code, exc.status, detail=exc.detail)
+    except Exception as exc:
+        logger.exception('Application du mapping impossible')
+        return _err('mapping_impossible', 500, detail=str(exc))
+
+    info['ok'] = True
+    return jsonify(info)
+
+
+# ===========================================================================
 # Generation du rapport (job asynchrone)
 # ===========================================================================
 #

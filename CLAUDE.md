@@ -389,6 +389,7 @@ Elle remplace un enchaînement manuel de 5 scripts (`import_zone_scans.py`, `imp
 | `scan_report_build.py` | Adaptateur `complet` → contrat du gabarit HTML, génération du fichier |
 | `scan_staffing.py` | Effectifs Accueil/Sécurité dérivés du calendrier, sans aucune saisie |
 | `scan_analysis.py` | KPI agrégés, prompts, appel Claude, persistance |
+| `scan_mapping.py` | Correction du mapping après import, reconstruction depuis `complet` |
 | `scan_report.py` | Blueprint : routes, staging d'import, registre de jobs |
 | `static/js/scan_report.js` | IIFE autonome : modales, mapping manuel, barres de progression |
 
@@ -467,9 +468,24 @@ Sans catégorie explicite (rapports générés avant, ou chemin de repli `parkin
 
 `save_overrides` mémorise **une catégorie seule**, sans `_id_feature` : classer une zone ne suppose pas de savoir où elle se trouve. `resolve_features` **fusionne** le choix mémorisé et celui de l'UI plutôt que de remplacer, sinon choisir une catégorie effacerait un rattachement déjà connu.
 
+### Édition du mapping après import
+
+Bouton dédié dans le bandeau (`edit_location_alt`), à côté de « Régénérer ». Corrige entité, catégorie et exclusion **sans reprendre le classeur** : `scan_mapping.py` reconstruit les trois documents depuis `complet`, qui porte déjà les séries 15 min de chaque unité.
+
+Équivalence vérifiée chiffre par chiffre sur 24H MOTOS 2024 avant de brancher quoi que ce soit :
+
+- `frequentation` recalculé depuis `complet` : 151 enregistrements, **0 différent**, cumul final 131 975 / 107 259 identique
+- `portes` reconstruit : 13 portes, mêmes noms, mêmes `doors_id`, **280 516 scans** de part et d'autre
+
+L'ancien document est archivé (`archived_reason: 'edition_mapping'`), donc une correction reste annulable. La table est la même que celle de l'import — `renderMapRows` prend un contexte (`importCtx` / `mappingCtx`) qui porte la cible DOM et le stockage des choix.
+
+⚠️ **Ne fonctionne que pour les couples ayant un document `complet`.** 24H AUTOS 2025 tombe encore sur l'ancienne chaîne (`parking_scans`) : la route répond **404 `complet_absent`**. Il faut l'importer une fois.
+
 ### Unités ignorées
 
-Une case « Ignorer » par ligne écarte l'unité de l'import : elle ne figure dans **aucun des trois documents**. Utile pour les guichets et services qui ne sont pas des points de passage (`HELPDESK`, `LITIGE`, `UAM`, `SERI`, `PUNISHER`).
+Une case « Ignorer » par ligne écarte l'unité : elle ne figure dans **aucun des trois documents** ni dans le rapport.
+
+⚠️ **L'unité reste dans `complet` avec son drapeau `ignored`**, ses séries conservées — elle n'est retirée que des documents dérivés et du rapport (`build_payload_from_complet` la saute). C'est ce qui rend l'exclusion **réversible** depuis l'éditeur de mapping, sans reprendre le classeur. La supprimer aurait perdu la donnée. Utile pour les guichets et services qui ne sont pas des points de passage (`HELPDESK`, `LITIGE`, `UAM`, `SERI`, `PUNISHER`).
 
 ⚠️ **Écarter une porte modifie la série de l'enceinte générale**, donc la référence N-1 de toutes les comparaisons du cockpit. Ce n'est jamais anodin. La modale chiffre l'effet **en direct** pendant la saisie (« N unité(s) ignorée(s) — X scans exclus, dont Y portes : Z entrées retirées de la série de l'enceinte »), le redit après l'écriture, et le document `frequentation` garde la trace dans `ignored_doors`.
 
@@ -496,6 +512,8 @@ Toutes sur `scan_report_bp`, donc **admin-only** via `before_request` → `_chec
 | `GET /scan-report/available` | Couples (event, year) disponibles, alimente la sidebar |
 | `GET /scan-report/template.xlsx` | Modèle Excel |
 | `GET /scan-report/features?collection=` | Inventaire d'une collection géo (mapping manuel) |
+| `GET /scan-report/mapping` | Mapping courant d'un couple, depuis `complet` |
+| `POST /scan-report/mapping` | Applique des corrections et reconstruit les trois documents |
 | `POST /scan-report/import/analyze` | multipart xlsx → aperçu + mapping, **sans rien écrire** |
 | `POST /scan-report/import/commit` | Écrit les 3 documents, archive l'existant |
 | `DELETE /scan-report/import/<token>` | Abandon, purge le fichier en attente |

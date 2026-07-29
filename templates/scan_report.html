@@ -37,7 +37,7 @@
        valent les couleurs claires. Cette page a une palette sombre codee en
        dur : on redefinit les variables dans le scope des modales plutot que
        de surcharger une a une les regles de style.css. */
-    #scan-import-modal, #scan-regen-modal {
+    #scan-import-modal, #scan-regen-modal, #scan-mapping-modal {
       --card: #1a2231;
       --line: #2a3548;
       --bg: #131b28;
@@ -46,23 +46,30 @@
       --primary: #4f9eff;
     }
     #scan-import-modal .crud-modal-body,
-    #scan-regen-modal .crud-modal-body { color: #c8d6ea; }
+    #scan-regen-modal .crud-modal-body,
+    #scan-mapping-modal .crud-modal-body { color: #c8d6ea; }
     #scan-import-modal .form-input,
-    #scan-regen-modal .form-input { background: #0f1620; border-color: #2a3548;
+    #scan-regen-modal .form-input,
+    #scan-mapping-modal .form-input { background: #0f1620; border-color: #2a3548;
       color: #e6ecf5; }
-    #scan-import-modal label, #scan-regen-modal label { color: #8aa0bd; }
+    #scan-import-modal label, #scan-regen-modal label,
+    #scan-mapping-modal label { color: #8aa0bd; }
     /* Les cases a cocher heritent sinon de la largeur 100 % des champs de
        formulaire du cockpit, ce qui fait passer le libelle a la ligne. Le
        flex-direction:column des labels du cockpit doit aussi etre annule :
        sans lui la case se retrouve empilee au-dessus de son libelle. */
     #scan-import-modal input[type="checkbox"],
-    #scan-regen-modal input[type="checkbox"] { width: 15px; height: 15px;
+    #scan-regen-modal input[type="checkbox"],
+    #scan-mapping-modal input[type="checkbox"] { width: 15px; height: 15px;
       flex: 0 0 auto; margin: 0; accent-color: #4f9eff; }
-    #scan-import-modal label.scan-check, #scan-regen-modal label.scan-check {
+    #scan-import-modal label.scan-check, #scan-regen-modal label.scan-check,
+    #scan-mapping-modal label.scan-check {
       flex-direction: row; align-items: center; justify-content: flex-start; }
-    #scan-import-modal .btn-secondary, #scan-regen-modal .btn-secondary {
+    #scan-import-modal .btn-secondary, #scan-regen-modal .btn-secondary,
+    #scan-mapping-modal .btn-secondary {
       background: #232d3f; border-color: #2a3548; color: #c8d6ea; }
-    #scan-import-modal code, #scan-regen-modal code { background: #0f1620;
+    #scan-import-modal code, #scan-regen-modal code,
+    #scan-mapping-modal code { background: #0f1620;
       padding: 1px 5px; border-radius: 3px; color: #fbbf24; }
 
     /* --- Actions du bandeau ------------------------------------------- */
@@ -270,6 +277,10 @@
                 title="Importer un fichier Excel de scans">
           <span class="material-symbols-outlined">upload_file</span>
         </button>
+        <button type="button" id="scan-mapping-btn" class="scan-icon-btn"
+                title="Corriger le mapping des unites">
+          <span class="material-symbols-outlined">edit_location_alt</span>
+        </button>
         <button type="button" id="scan-regen-btn" class="scan-icon-btn"
                 title="Regenerer le rapport">
           <span class="material-symbols-outlined">refresh</span>
@@ -407,6 +418,55 @@
       </button>
       <button type="button" class="btn btn-primary" id="scan-analysis-go">
         Generer
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODALE MAPPING (correction apres import) ===== -->
+<div id="scan-mapping-modal" class="crud-modal" hidden>
+  <div class="crud-modal-dialog" style="min-width:900px;max-width:1100px;">
+    <div class="crud-modal-header">
+      <h3 id="scan-mapping-title">Mapping des unites</h3>
+      <button type="button" class="crud-modal-close" data-close>&times;</button>
+    </div>
+    <div class="crud-modal-body">
+      <div id="scan-mapping-notes"></div>
+      <div id="scan-mapping-block" hidden>
+        <div class="scanmap-head">
+          <div class="scanmap-head-txt">
+            <strong id="scan-mapping-count"></strong>
+            &mdash; corriger l'entite cartographique, la categorie, ou ecarter
+            une unite. Les trois documents sont reconstruits ; l'ancien est
+            archive.
+          </div>
+          <label class="scan-check scanmap-filter">
+            <input type="checkbox" id="scan-mapping-only-unresolved">
+            <span>N'afficher que les non localisees</span>
+          </label>
+        </div>
+        <div class="scanmap-legend">
+          <span><i class="dot dot-auto"></i>propose automatiquement</span>
+          <span><i class="dot dot-manual"></i>choix manuel</span>
+          <span><i class="dot dot-none"></i>non localisee</span>
+          <span><i class="dot dot-ignored"></i>ignoree</span>
+        </div>
+        <div id="scan-mapping-recap" hidden></div>
+        <div class="scan-modal-scroll" id="scan-mapping-rows"></div>
+        <label class="scan-check" style="display:flex;gap:7px;font-size:12.5px;margin-top:11px;">
+          <input type="checkbox" id="scan-mapping-save" checked>
+          <span>Memoriser ces choix pour les prochains imports</span>
+        </label>
+      </div>
+      <div class="scan-progress" id="scan-mapping-progress" hidden>
+        <div class="scan-progress-bar indeterminate"><div class="scan-progress-fill"></div></div>
+        <div class="scan-progress-info"><span>Reecriture des documents...</span><span></span></div>
+      </div>
+    </div>
+    <div class="crud-modal-footer">
+      <button type="button" class="btn btn-secondary" data-close>Fermer</button>
+      <button type="button" class="btn btn-primary" id="scan-mapping-go" hidden>
+        Appliquer
       </button>
     </div>
   </div>

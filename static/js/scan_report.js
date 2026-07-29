@@ -40,6 +40,18 @@
   // Horodatage du lancement d'une regeneration, pour afficher le temps ecoule.
   var regenStartedAt = null;
 
+  // Deux contextes pour la meme table de mapping : celle de l'import (avant
+  // ecriture) et celle de la correction apres coup (sur le document `complet`).
+  // Meme rendu, memes interactions, cibles DOM et stockage differents.
+  var importCtx = {
+    host: "#scan-map-rows", recap: "#scan-ignore-recap",
+    units: [], overrides: {}, categories: [],
+  };
+  var mappingCtx = {
+    host: "#scan-mapping-rows", recap: "#scan-mapping-recap",
+    units: [], overrides: {}, categories: [],
+  };
+
   var state = {
     token: null,
     units: [],
@@ -260,6 +272,9 @@
     $("#scan-race").value = data.race || "";
 
     state.categories = data.categories || [];
+    importCtx.units = state.units;
+    importCtx.overrides = state.overrides;
+    importCtx.categories = state.categories;
     var unresolved = state.units.filter(function (u) { return !u._id_feature; });
     // Toutes les unites sont proposees a la verification, y compris celles
     // resolues automatiquement : une resolution auto peut se tromper, et la
@@ -269,21 +284,21 @@
       state.units.length + " unite(s), dont " + unresolved.length +
       " non localisee(s)";
     $("#scan-only-unresolved").checked = false;
-    renderMapRows(state.units);
-    refreshIgnoreRecap();
+    renderMapRows(importCtx);
+    refreshIgnoreRecap(importCtx);
 
     showStep("preview");
   }
 
-  function isIgnored(u, key) {
-    var ov = state.overrides[key];
+  function isIgnored(ctx, u, key) {
+    var ov = ctx.overrides[key];
     if (ov && ov.ignored != null) return !!ov.ignored;
     return !!u.ignored;
   }
 
-  function rowState(u, key) {
-    if (isIgnored(u, key)) return "is-ignored";
-    var ov = state.overrides[key];
+  function rowState(ctx, u, key) {
+    if (isIgnored(ctx, u, key)) return "is-ignored";
+    var ov = ctx.overrides[key];
     if (ov && (ov._id_feature || ov.category)) return "is-manual";
     if (!u._id_feature) return "is-none";
     // Un choix memorise lors d'un import precedent compte comme manuel, qu'il
@@ -294,13 +309,13 @@
     return "is-auto";
   }
 
-  function renderMapRows(units) {
-    var host = $("#scan-map-rows");
+  function renderMapRows(ctx) {
+    var host = $(ctx.host);
     clear(host);
-    units.forEach(function (u) {
+    ctx.units.forEach(function (u) {
       var key = u.kind + "|" + u.name;
       var row = document.createElement("div");
-      row.className = "scanmap-row " + rowState(u, key);
+      row.className = "scanmap-row " + rowState(ctx, u, key);
       row.dataset.resolved = u._id_feature ? "1" : "0";
 
       var left = document.createElement("div");
@@ -320,7 +335,7 @@
       ignLabel.className = "scanmap-ignore scan-check";
       var ignBox = document.createElement("input");
       ignBox.type = "checkbox";
-      ignBox.checked = isIgnored(u, key);
+      ignBox.checked = isIgnored(ctx, u, key);
       var ignTxt = document.createElement("span");
       ignTxt.textContent = "Ignorer";
       ignLabel.appendChild(ignBox);
@@ -332,7 +347,7 @@
       var catBox = document.createElement("div");
       catBox.appendChild(labelled("Categorie"));
       var catSel = document.createElement("select");
-      (state.categories || []).forEach(function (c) {
+      (ctx.categories || []).forEach(function (c) {
         var o = document.createElement("option");
         o.value = c.id;
         o.textContent = c.label;
@@ -340,8 +355,8 @@
         catSel.appendChild(o);
       });
       catSel.addEventListener("change", function () {
-        setOverride(key, null, null, catSel.value);
-        row.className = "scanmap-row " + rowState(u, key);
+        setOverride(ctx, key, null, null, catSel.value);
+        row.className = "scanmap-row " + rowState(ctx, u, key);
       });
       catBox.appendChild(catSel);
 
@@ -380,14 +395,14 @@
         chip.textContent = c.label;
         chip.title = c.collection;
         chip.addEventListener("click", function () {
-          setOverride(key, c._id_feature, c.collection);
+          setOverride(ctx, key, c._id_feature, c.collection);
           input.value = c.label;
           sel.value = c.collection;
           chips.querySelectorAll(".scanmap-chip").forEach(function (x) {
             x.classList.remove("is-set");
           });
           chip.classList.add("is-set");
-          row.className = "scanmap-row " + rowState(u, key);
+          row.className = "scanmap-row " + rowState(ctx, u, key);
         });
         chips.appendChild(chip);
       });
@@ -408,33 +423,33 @@
         input.value = "";
         // Changer de collection annule le rattachement, pas la categorie :
         // ce sont deux decisions independantes.
-        clearFeatureOverride(key);
-        row.className = "scanmap-row " + rowState(u, key);
+        clearFeatureOverride(ctx, key);
+        row.className = "scanmap-row " + rowState(ctx, u, key);
         loadList();
       });
       input.addEventListener("change", function () {
         var opts = datalist.querySelectorAll("option");
         for (var i = 0; i < opts.length; i++) {
           if (opts[i].value === input.value) {
-            setOverride(key, opts[i].dataset.id, sel.value);
-            row.className = "scanmap-row " + rowState(u, key);
+            setOverride(ctx, key, opts[i].dataset.id, sel.value);
+            row.className = "scanmap-row " + rowState(ctx, u, key);
             return;
           }
         }
-        clearFeatureOverride(key);
-        row.className = "scanmap-row " + rowState(u, key);
+        clearFeatureOverride(ctx, key);
+        row.className = "scanmap-row " + rowState(ctx, u, key);
       });
       loadList();
 
       function applyIgnore() {
         var off = ignBox.checked;
-        state.overrides[key] = state.overrides[key] || {};
-        state.overrides[key].ignored = off;
+        ctx.overrides[key] = ctx.overrides[key] || {};
+        ctx.overrides[key].ignored = off;
         // Les controles restent lisibles mais inoperants : l'unite ne sera pas
         // ecrite, il n'y a plus rien a decider pour elle.
         [catSel, sel, input].forEach(function (c) { c.disabled = off; });
-        row.className = "scanmap-row " + rowState(u, key);
-        refreshIgnoreRecap();
+        row.className = "scanmap-row " + rowState(ctx, u, key);
+        refreshIgnoreRecap(ctx);
       }
       ignBox.addEventListener("change", applyIgnore);
       if (ignBox.checked) applyIgnore();
@@ -450,11 +465,11 @@
   // Ecarter une porte retire ses scans de la serie de l'enceinte generale,
   // qui sert de reference N-1 a tout le cockpit. Le chiffrer en direct evite
   // de le decouvrir apres coup.
-  function refreshIgnoreRecap() {
-    var box = $("#scan-ignore-recap");
+  function refreshIgnoreRecap(ctx) {
+    var box = $(ctx.recap);
     if (!box) return;
-    var off = state.units.filter(function (u) {
-      return isIgnored(u, u.kind + "|" + u.name);
+    var off = ctx.units.filter(function (u) {
+      return isIgnored(ctx, u, u.kind + "|" + u.name);
     });
     if (!off.length) { box.hidden = true; return; }
     var scans = off.reduce(function (s, u) {
@@ -486,19 +501,19 @@
   // Un override porte le rattachement, la categorie, ou les deux. On fusionne
   // plutot que d'ecraser : choisir une categorie ne doit pas effacer l'entite
   // deja selectionnee.
-  function setOverride(key, id, collection, category) {
-    var cur = state.overrides[key] || {};
+  function setOverride(ctx, key, id, collection, category) {
+    var cur = ctx.overrides[key] || {};
     if (id) { cur._id_feature = id; cur.feature_collection = collection; }
     if (category) { cur.category = category; }
-    state.overrides[key] = cur;
+    ctx.overrides[key] = cur;
   }
 
-  function clearFeatureOverride(key) {
-    var cur = state.overrides[key];
+  function clearFeatureOverride(ctx, key) {
+    var cur = ctx.overrides[key];
     if (!cur) return;
     delete cur._id_feature;
     delete cur.feature_collection;
-    if (!cur.category) delete state.overrides[key];
+    if (cur.category == null && cur.ignored == null) delete ctx.overrides[key];
   }
 
   function fetchFeatures(collection) {
@@ -592,6 +607,113 @@
     }).catch(function () {
       $("#scan-commit-progress").hidden = true;
       $("#scan-result-body").appendChild(note("err", ERRORS.reseau_indisponible));
+    });
+  }
+
+  // ---- Correction du mapping apres import ----------------------------------
+
+  function openMapping() {
+    var notes = $("#scan-mapping-notes");
+    clear(notes);
+    $("#scan-mapping-block").hidden = true;
+    $("#scan-mapping-go").hidden = true;
+    $("#scan-mapping-progress").hidden = true;
+    $("#scan-mapping-title").textContent =
+      "Mapping des unites — " + currentEvent() + " " + currentYear();
+    $("#scan-mapping-modal").hidden = false;
+    mappingCtx.overrides = {};
+
+    apiGet("/scan-report/mapping?event=" + encodeURIComponent(currentEvent()) +
+           "&year=" + encodeURIComponent(currentYear()))
+      .then(function (d) {
+        if (!d.ok) {
+          notes.appendChild(note("err", msg(d)));
+          return;
+        }
+        mappingCtx.units = d.units || [];
+        mappingCtx.categories = d.categories || [];
+        var unres = mappingCtx.units.filter(function (u) { return !u._id_feature; });
+        var off = mappingCtx.units.filter(function (u) { return u.ignored; });
+        $("#scan-mapping-count").textContent =
+          mappingCtx.units.length + " unite(s), dont " + unres.length +
+          " non localisee(s) et " + off.length + " ignoree(s)";
+        notes.appendChild(note("info",
+          "Source : <strong>" + esc(d.source_file || "import") + "</strong>" +
+          (d.imported_at ? " du " + esc(d.imported_at.slice(0, 16)) : "") +
+          ". Les corrections reconstruisent les trois documents depuis " +
+          "<code>complet</code>, sans reprendre le classeur."));
+        $("#scan-mapping-only-unresolved").checked = false;
+        renderMapRows(mappingCtx);
+        refreshIgnoreRecap(mappingCtx);
+        $("#scan-mapping-block").hidden = false;
+        $("#scan-mapping-go").hidden = false;
+      })
+      .catch(function () {
+        notes.appendChild(note("err", ERRORS.reseau_indisponible));
+      });
+  }
+
+  function applyMapping() {
+    var btn = $("#scan-mapping-go");
+    btn.disabled = true;
+    $("#scan-mapping-progress").hidden = false;
+
+    var changes = {};
+    Object.keys(mappingCtx.overrides).forEach(function (k) {
+      var o = mappingCtx.overrides[k];
+      changes[k] = {
+        _id_feature: o._id_feature || null,
+        feature_collection: o.feature_collection || null,
+        category: o.category || null,
+        ignored: !!o.ignored,
+      };
+    });
+
+    apiPostJson("/scan-report/mapping", {
+      event: currentEvent(), year: parseInt(currentYear(), 10),
+      save_overrides: $("#scan-mapping-save").checked,
+      changes: changes
+    }).then(function (d) {
+      $("#scan-mapping-progress").hidden = true;
+      btn.disabled = false;
+      var notes = $("#scan-mapping-notes");
+      clear(notes);
+      if (!d.ok) {
+        notes.appendChild(note("err", msg(d)));
+        return;
+      }
+      if (!d.changed) {
+        notes.appendChild(note("info", "Aucun changement a appliquer."));
+        return;
+      }
+      var lines = ["<strong>" + d.changed + " unite(s) modifiee(s).</strong>",
+        "Documents reecrits : " + esc((d.rewritten || []).join(", ")) +
+        " — les precedents sont archives.",
+        d.units + " unite(s) retenue(s)."];
+      if (d.ignored && d.ignored.length) {
+        lines.push("Ignorees : " + esc(d.ignored.join(", ")) + ".");
+      }
+      if (d.restored && d.restored.length) {
+        lines.push("Reintegrees : " + esc(d.restored.join(", ")) + ".");
+      }
+      lines.push("Cumul d'entrees de l'enceinte : " + fmt(d.enceinte_entree) + ".");
+      notes.appendChild(note("ok", lines.join("<br>")));
+      notes.appendChild(note("info",
+        "Regenerer le rapport pour que ces corrections y apparaissent."));
+      // Recharger : les etats affiches doivent refleter ce qui est en base.
+      mappingCtx.overrides = {};
+      apiGet("/scan-report/mapping?event=" + encodeURIComponent(currentEvent()) +
+             "&year=" + encodeURIComponent(currentYear()))
+        .then(function (fresh) {
+          if (!fresh.ok) return;
+          mappingCtx.units = fresh.units || [];
+          renderMapRows(mappingCtx);
+          refreshIgnoreRecap(mappingCtx);
+        });
+    }).catch(function () {
+      $("#scan-mapping-progress").hidden = true;
+      btn.disabled = false;
+      $("#scan-mapping-notes").appendChild(note("err", ERRORS.reseau_indisponible));
     });
   }
 
@@ -879,16 +1001,22 @@
     if (regenBtn) regenBtn.addEventListener("click", openRegen);
 
     // Filtre d'affichage seulement : masquer une ligne ne touche pas aux
-    // choix deja faits, qui vivent dans state.overrides.
-    var onlyUnres = $("#scan-only-unresolved");
-    if (onlyUnres) {
-      onlyUnres.addEventListener("change", function () {
-        var rows = document.querySelectorAll("#scan-map-rows .scanmap-row");
-        rows.forEach(function (r) {
-          r.hidden = onlyUnres.checked && r.dataset.resolved === "1";
+    // choix deja faits, qui vivent dans les overrides du contexte.
+    [["#scan-only-unresolved", "#scan-map-rows"],
+     ["#scan-mapping-only-unresolved", "#scan-mapping-rows"]].forEach(function (p) {
+      var chk = $(p[0]);
+      if (!chk) return;
+      chk.addEventListener("change", function () {
+        document.querySelectorAll(p[1] + " .scanmap-row").forEach(function (r) {
+          r.hidden = chk.checked && r.dataset.resolved === "1";
         });
       });
-    }
+    });
+
+    var mapBtn = $("#scan-mapping-btn");
+    if (mapBtn) mapBtn.addEventListener("click", openMapping);
+    var mapGo = $("#scan-mapping-go");
+    if (mapGo) mapGo.addEventListener("click", applyMapping);
 
     var drop = $("#scan-drop");
     var input = $("#scan-file-input");
