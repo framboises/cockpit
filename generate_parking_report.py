@@ -740,13 +740,16 @@ HTML_TEMPLATE = r"""<!doctype html>
   /* Perte de controle : signalee par une bordure, pas par la seule couleur. */
   .freq-insights li.freq-alert { border-left: 3px solid #f59e0b;
     padding-left: 10px; margin-left: -13px; }
-  .freq-diff { margin-top: 12px; }
+  /* font-size explicite : ce bloc vit dans .home-section, qui ne fixe rien,
+     donc il heritait des 16 px du body — deux fois la taille des listes
+     voisines. */
+  .freq-diff { margin-top: 12px; font-size: 12.5px; }
   .freq-diff h4 { font-size: 12.5px; color: var(--muted); margin-bottom: 5px;
     text-transform: uppercase; letter-spacing: 0.4px; }
+  .freq-diff ul { margin: 0; padding-left: 18px; }
   .freq-diff li { margin-bottom: 6px; line-height: 1.6; }
   .diff-add { color: #008300; font-weight: 600; }
   .diff-del { color: #d55181; font-weight: 600; }
-  .diff-ren { color: #c98500; font-weight: 600; }
 
   /* Vue d'ensemble pics */
   .nav-overview { padding: 10px 14px 10px; }
@@ -842,7 +845,10 @@ HTML_TEMPLATE = r"""<!doctype html>
   .analysis .a-section.warn { color: var(--amber); }
   .analysis .a-section.warn h4 { color: var(--amber); }
   .analysis .a-section.alert h4 { color: var(--red); }
-  .analysis .a-empty { color: var(--muted); font-size: 12px; font-style: italic; }
+  /* Portee volontairement large : cette classe sert aussi hors de
+     .analysis (comparatif des portes), ou elle retombait aux 16 px du
+     body — le double des textes voisins. */
+  .a-empty { color: var(--muted); font-size: 12px; font-style: italic; }
   .a-warning { background: rgba(251, 191, 36, 0.10); border-left: 3px solid var(--amber);
     padding: 10px 14px; border-radius: 6px; margin-top: 12px;
     font-size: 13px; line-height: 1.5; color: var(--amber); }
@@ -2066,15 +2072,11 @@ function renderFreqUnits(host, f) {
           v.year + ' et plus en ' + uc.year + ' : '),
         v.removed.join(', ')));
     }
-    // Un renommage n'est ni une apparition ni une disparition : meme
-    // `_id_feature`, autre libelle. Le confondre ferait lire une evolution
-    // de dispositif la ou il n'y en a pas.
-    (v.renamed || []).forEach(r => {
-      ul.appendChild(el('li', null,
-        el('span', { class: 'diff-ren' }, '~ renommee : '),
-        r.from + ' -> ' + r.to));
-    });
-    if (!v.added.length && !v.removed.length && !(v.renamed || []).length) {
+    // Les renommages ne sont pas listes : savoir que PORTE HOUX s'appelle
+    // desormais PORTE HOUX 5 n'aide pas a lire le dispositif. Ce qui compte,
+    // c'est qu'ils ne soient plus comptes comme une disparition suivie d'une
+    // creation — voir `compare_units`.
+    if (!v.added.length && !v.removed.length) {
       ul.appendChild(el('li', { class: 'a-empty' }, 'Perimetre identique.'));
     }
     box.appendChild(ul);
@@ -2276,6 +2278,12 @@ function renderFrequentation() {
       'quasiment pas des portes ouvertes en marge.'));
   }
 
+  // Les analyses textuelles ouvrent la vue : on lit les conclusions, puis les
+  // courbes qui les etayent. Elles fermaient la page, ou personne ne
+  // descendait les chercher.
+  renderFreqAnalysis(main, f);
+  renderFreqInsights(main, f);
+
   const axis = freqAxis(f.editions);
   const charts1 = el('div', { class: 'charts' });
   main.appendChild(charts1);
@@ -2295,10 +2303,6 @@ function renderFrequentation() {
   renderFreqDayCards(daysSec, f);
 
   renderFreqUnits(main, f);
-
-  renderFreqInsights(main, f);
-
-  renderFreqAnalysis(main, f);
 
   main.scrollTop = 0;
 }
