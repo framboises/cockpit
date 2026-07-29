@@ -744,19 +744,40 @@
         cx += q.x / N; cy += q.y / N;
       }
 
+      // Le trace echantillonne, pour verifier qu'une pastille ne se pose pas
+      // SUR la piste. Le circuit revient sur lui-meme (Porsche, chicane
+      // Ford) : s'ecarter vers l'exterieur ne suffit pas toujours, la
+      // pastille retombe sur un autre brin.
+      var samples = [];
+      for (var si = 0; si < 400; si++) samples.push(line.getPointAtLength(L * si / 400));
+      function clearOfTrack(x, y, margin) {
+        for (var i = 0; i < samples.length; i++) {
+          var dx = samples[i].x - x, dy = samples[i].y - y;
+          if (dx * dx + dy * dy < margin * margin) return false;
+        }
+        return true;
+      }
+
       // Les virages serres (esses, Porsche, chicane Ford) se suivent de trop
       // pres pour tenir cote a cote : on eloigne la pastille jusqu'a trouver
-      // une place libre, comme sur les cartes officielles.
+      // une place libre, d'abord vers l'exterieur puis vers l'interieur du
+      // circuit — comme sur les cartes officielles, ou quelques numeros sont
+      // a l'interieur faute de place dehors.
       var placed = [];
-      function freeSpot(px, py, ux, uy, w) {
-        for (var d = 12; d <= 52; d += 4) {
-          var x = px + ux * d, y = py + uy * d, ok = true;
-          for (var k = 0; k < placed.length; k++) {
-            var q = placed[k];
-            if (Math.abs(q.x - x) < (q.w + w) / 2 + 2 &&
-                Math.abs(q.y - y) < 15) { ok = false; break; }
+      function freeSpot(px, py, ux, uy, w, trackMargin) {
+        var dirs = [1, -1];
+        for (var s = 0; s < dirs.length; s++) {
+          for (var d = 12; d <= 52; d += 4) {
+            var x = px + ux * d * dirs[s], y = py + uy * d * dirs[s];
+            if (trackMargin && !clearOfTrack(x, y, trackMargin)) continue;
+            var ok = true;
+            for (var k = 0; k < placed.length; k++) {
+              var q = placed[k];
+              if (Math.abs(q.x - x) < (q.w + w) / 2 + 2 &&
+                  Math.abs(q.y - y) < 15) { ok = false; break; }
+            }
+            if (ok) { placed.push({ x: x, y: y, w: w }); return { x: x, y: y }; }
           }
-          if (ok) { placed.push({ x: x, y: y, w: w }); return { x: x, y: y }; }
         }
         placed.push({ x: px + ux * 52, y: py + uy * 52, w: w });
         return { x: px + ux * 52, y: py + uy * 52 };
@@ -769,7 +790,7 @@
         var len = Math.sqrt(vx * vx + vy * vy) || 1;
         var ux = vx / len, uy = vy / len;
         var w = String(c.n).length > 1 ? 18 : 15;
-        var pos = freeSpot(pt.x, pt.y, ux, uy, w);
+        var pos = freeSpot(pt.x, pt.y, ux, uy, w, w / 2 + 3);
 
         // Trait de rappel : sans lui, une pastille eloignee ne se rattache
         // plus visuellement a son virage.
@@ -802,23 +823,54 @@
       g.appendChild(straight);
       svg.appendChild(g);
 
+      // Un nom occupe une boite, pas un point : le tester comme un point le
+      // laissait traverser la piste (Indianapolis, Chicane Ford).
+      function boxClearOfTrack(x0, y0, x1, y1) {
+        for (var i = 0; i < samples.length; i++) {
+          var q = samples[i];
+          if (q.x > x0 - 2 && q.x < x1 + 2 && q.y > y0 - 2 && q.y < y1 + 2) {
+            return false;
+          }
+        }
+        return true;
+      }
+
       // Noms poses en dernier : les pastilles ont deja reserve leur place.
       NAMES.forEach(function (c) {
         var pt = line.getPointAtLength(L * c.at);
         var vx = pt.x - cx, vy = pt.y - cy;
         var len = Math.sqrt(vx * vx + vy * vy) || 1;
         var ux = vx / len, uy = vy / len;
-        // Largeur approchee du texte, pour que la detection de collision
-        // travaille sur l'encombrement reel et pas sur un point.
-        var w = c.name.length * 4.6;
-        var pos = freeSpot(pt.x, pt.y, ux, uy, w);
+        var w = c.name.length * 4.6, h = 11;
+
+        var best = null, dirs = [1, -1];
+        for (var s2 = 0; s2 < dirs.length && !best; s2++) {
+          for (var d = 14; d <= 64 && !best; d += 4) {
+            var ax = pt.x + ux * d * dirs[s2], ay = pt.y + uy * d * dirs[s2];
+            // Le texte part a l'oppose du circuit : ancre a gauche quand on
+            // est a droite, a droite quand on est a gauche.
+            var toRight = (ux * dirs[s2]) >= 0;
+            var x0 = toRight ? ax + 4 : ax - 4 - w;
+            if (!boxClearOfTrack(x0, ay - h / 2, x0 + w, ay + h / 2)) continue;
+            var ok = true;
+            for (var k = 0; k < placed.length; k++) {
+              var q = placed[k];
+              if (q.x > x0 - q.w / 2 && q.x < x0 + w + q.w / 2 &&
+                  Math.abs(q.y - ay) < 13) { ok = false; break; }
+            }
+            if (ok) best = { x: ax, y: ay, right: toRight };
+          }
+        }
+        if (!best) {
+          best = { x: pt.x + ux * 16, y: pt.y + uy * 16, right: ux >= 0 };
+        }
+        placed.push({ x: best.x, y: best.y, w: w });
+
         var t = document.createElementNS(NS, 'text');
         t.setAttribute('class', 'corner-name');
-        // Le texte s'ecarte du trace : ancre a gauche a droite du circuit, a
-        // droite a gauche, sinon il repasse par-dessus la piste.
-        t.setAttribute('x', pos.x + (ux >= 0 ? 4 : -4));
-        t.setAttribute('y', pos.y);
-        t.setAttribute('text-anchor', ux >= 0 ? 'start' : 'end');
+        t.setAttribute('x', best.x + (best.right ? 4 : -4));
+        t.setAttribute('y', best.y);
+        t.setAttribute('text-anchor', best.right ? 'start' : 'end');
         t.textContent = c.name;
         g.appendChild(t);
       });
