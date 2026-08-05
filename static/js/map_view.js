@@ -15,7 +15,8 @@
   let tileLayerOSM = null;
   let tileLayerSatACO = null;
   let tileLayerSatEGIS = null;
-  let currentTile = "osm"; // "osm" | "sat-aco" | "sat-egis"
+  let tileLayerSatIGN = null;
+  let currentTile = "osm"; // "osm" | "sat-aco" | "sat-egis" | "sat-ign"
 
   // --- Map preferences state ---
   var mapDefaults = { hidden_categories: [], default_tile: "osm" };
@@ -119,6 +120,14 @@
       tms: true,
       maxZoom: 22,
       attribution: "ACO"
+    });
+
+    // Orthophoto IGN (Geoplateforme, sans cle API) : tuiles natives jusqu'au zoom 19,
+    // puis agrandissement pixelise jusqu'au zoom 22.
+    tileLayerSatIGN = L.tileLayer("https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}", {
+      attribution: "IGN-F/Geoplateforme",
+      maxNativeZoom: 19,
+      maxZoom: 22
     });
 
     // Fullscreen toggle control
@@ -1135,7 +1144,8 @@
     var tileOpts = [
       { value: "osm", text: "OpenStreetMap" },
       { value: "sat-egis", text: "Satellite (Esri)" },
-      { value: "sat-aco", text: "Satellite (ACO)" }
+      { value: "sat-aco", text: "Satellite (ACO)" },
+      { value: "sat-ign", text: "Satellite (IGN)" }
     ];
     tileOpts.forEach(function (o) {
       var opt = document.createElement("option");
@@ -1398,9 +1408,11 @@
     if (currentTile === "osm" && map.hasLayer(tileLayerOSM)) map.removeLayer(tileLayerOSM);
     if (currentTile === "sat-egis" && map.hasLayer(tileLayerSatEGIS)) map.removeLayer(tileLayerSatEGIS);
     if (currentTile === "sat-aco" && map.hasLayer(tileLayerSatACO)) map.removeLayer(tileLayerSatACO);
+    if (currentTile === "sat-ign" && map.hasLayer(tileLayerSatIGN)) map.removeLayer(tileLayerSatIGN);
     // Add new
     if (tile === "sat-egis") tileLayerSatEGIS.addTo(map);
     else if (tile === "sat-aco") tileLayerSatACO.addTo(map);
+    else if (tile === "sat-ign") tileLayerSatIGN.addTo(map);
     else tileLayerOSM.addTo(map);
     currentTile = tile;
   }
@@ -2517,8 +2529,12 @@
       map.removeLayer(tileLayerSatEGIS);
       tileLayerSatACO.addTo(map);
       currentTile = "sat-aco";
-    } else {
+    } else if (currentTile === "sat-aco") {
       map.removeLayer(tileLayerSatACO);
+      tileLayerSatIGN.addTo(map);
+      currentTile = "sat-ign";
+    } else {
+      map.removeLayer(tileLayerSatIGN);
       tileLayerOSM.addTo(map);
       currentTile = "osm";
     }

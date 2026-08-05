@@ -598,6 +598,8 @@ function openMeteoModal(date) {
           `;
 
           // Remplir le tableau historique
+          // Une valeur peut etre null : releve non publie par la station meteo
+          const fmt = (v, unit) => (v === null || v === undefined) ? '--' : `${v}${unit}`;
           const tbody = modalContent.querySelector('#historicalTable tbody');
           for (const year in historicalData) {
             const data = historicalData[year];
@@ -615,8 +617,8 @@ function openMeteoModal(date) {
             } else {
               const jourColumns = (year == new Date().getFullYear() || !data['Température Jour (°C)'])
                 ? `<td></td><td></td>`
-                : `<td>${data['Température Jour (°C)'].max}°C / ${data['Température Jour (°C)'].min}°C</td>
-                   <td>${data['Précipitations Jour (mm)']} mm</td>`;
+                : `<td>${fmt(data['Température Jour (°C)'].max, '°C')} / ${fmt(data['Température Jour (°C)'].min, '°C')}</td>
+                   <td>${fmt(data['Précipitations Jour (mm)'], ' mm')}</td>`;
 
               tr.innerHTML = `
                 <td>${year}</td>

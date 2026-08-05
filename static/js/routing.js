@@ -297,10 +297,24 @@
     if (!mapDiv) return;
     var center = STATE.from || STATE.to || [47.9517, 0.2247];
     STATE.map = L.map(mapDiv, { zoomControl: true });
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
+    var routingOSM = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxNativeZoom: 19,
+      maxZoom: 22,
       attribution: "&copy; OpenStreetMap"
     }).addTo(STATE.map);
+    var routingACO = L.tileLayer("/tiles/{z}/{x}/{y}.png", {
+      tms: true, maxZoom: 22, attribution: "ACO"
+    });
+    // Orthophoto IGN (Geoplateforme, sans cle API) : tuiles natives jusqu'au zoom 19,
+    // puis agrandissement pixelise jusqu'au zoom 22.
+    var routingIGN = L.tileLayer("https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}", {
+      maxNativeZoom: 19, maxZoom: 22, attribution: "IGN-F/Geoplateforme"
+    });
+    L.control.layers(
+      { "OSM": routingOSM, "Satellite ACO": routingACO, "Satellite IGN": routingIGN },
+      null,
+      { position: "topright" }
+    ).addTo(STATE.map);
     STATE.map.setView(center, 14);
     // overridesLayer en-dessous de mapLayers (route plus visible)
     STATE.overridesLayer = L.layerGroup().addTo(STATE.map);

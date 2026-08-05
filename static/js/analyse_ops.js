@@ -1846,7 +1846,12 @@
         var container = $("lab-map-carroye");
         if (!container || labMapCarroye) return;
         labMapCarroye = L.map(container, {center: [47.938561, 0.224318], zoom: 14, maxZoom: 22, zoomControl: true, scrollWheelZoom: true});
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {attribution: "OSM", maxNativeZoom: 19, maxZoom: 22}).addTo(labMapCarroye);
+        var carroyeOSM = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {attribution: "OSM", maxNativeZoom: 19, maxZoom: 22}).addTo(labMapCarroye);
+        var carroyeACO = L.tileLayer("/tiles/{z}/{x}/{y}.png", {attribution: "ACO", tms: true, maxZoom: 22});
+        // Orthophoto IGN (Geoplateforme, sans cle API) : tuiles natives jusqu'au zoom 19,
+        // puis agrandissement pixelise jusqu'au zoom 22.
+        var carroyeIGN = L.tileLayer("https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}", {attribution: "IGN-F/Geoplateforme", maxNativeZoom: 19, maxZoom: 22});
+        L.control.layers({"OSM": carroyeOSM, "Satellite ACO": carroyeACO, "Satellite IGN": carroyeIGN}, null, {position: "topright"}).addTo(labMapCarroye);
         // Init layer groups
         _mapLayers.carroyes = L.layerGroup().addTo(labMapCarroye);
         _mapLayers.gpsPoints = L.layerGroup().addTo(labMapCarroye);
@@ -2088,7 +2093,12 @@
         var container = $("lab-map-convergence");
         if (!container || labMapConv) return;
         labMapConv = L.map(container, {center: [47.938561, 0.224318], zoom: 14, maxZoom: 22, zoomControl: true, scrollWheelZoom: true});
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {attribution: "OSM", maxNativeZoom: 19, maxZoom: 22}).addTo(labMapConv);
+        var convOSM = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {attribution: "OSM", maxNativeZoom: 19, maxZoom: 22}).addTo(labMapConv);
+        var convACO = L.tileLayer("/tiles/{z}/{x}/{y}.png", {attribution: "ACO", tms: true, maxZoom: 22});
+        // Orthophoto IGN (Geoplateforme, sans cle API) : tuiles natives jusqu'au zoom 19,
+        // puis agrandissement pixelise jusqu'au zoom 22.
+        var convIGN = L.tileLayer("https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}", {attribution: "IGN-F/Geoplateforme", maxNativeZoom: 19, maxZoom: 22});
+        L.control.layers({"OSM": convOSM, "Satellite ACO": convACO, "Satellite IGN": convIGN}, null, {position: "topright"}).addTo(labMapConv);
         if (window._labConvergenceData) updateMapConvergence(window._labConvergenceData);
     }
 

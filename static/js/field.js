@@ -38,7 +38,7 @@
     map: null,
     tileLayers: {},
     currentLayerKey: "plan",
-    layerOrder: ["plan", "sat_aco", "sat_esri"],
+    layerOrder: ["plan", "sat_aco", "sat_esri", "sat_ign"],
     meMarker: null,
     meCircle: null,
     lastPushedAt: 0,
@@ -608,6 +608,12 @@
       "/field/resources/tiles/{z}/{x}/{y}.png",
       { tms: true, maxZoom: 22, attribution: "ACO" }
     );
+    // Orthophoto IGN (Géoplateforme, sans clé API) : tuiles natives jusqu'au zoom 19,
+    // puis agrandissement pixelisé jusqu'au zoom 22.
+    state.tileLayers.sat_ign = L.tileLayer(
+      "https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+      { attribution: "IGN-F/Géoplateforme", maxNativeZoom: 19, maxZoom: 22 }
+    );
 
     state.tileLayers.plan.addTo(state.map);
     state.currentLayerKey = "plan";
@@ -632,7 +638,7 @@
     });
     state.tileLayers[nextKey].addTo(state.map);
     state.currentLayerKey = nextKey;
-    var labelByKey = { plan: "Plan (OSM)", sat_aco: "Satellite ACO", sat_esri: "Satellite Egis" };
+    var labelByKey = { plan: "Plan (OSM)", sat_aco: "Satellite ACO", sat_esri: "Satellite Egis", sat_ign: "Satellite IGN" };
     toast(labelByKey[nextKey] || nextKey);
   }
 

@@ -1959,10 +1959,11 @@
       attributionControl: false, dragging: false, scrollWheelZoom: false,
       doubleClickZoom: false, touchZoom: false
     });
+    // Vignette d'apercu volontairement figee : pas de selecteur de couches ici.
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19
+      maxNativeZoom: 19, maxZoom: 22
     }).addTo(detailMiniMap);
-    var pinHtml = "<div class='pcorg-pin' style='background:" + st.color + "'>" +
+    var pinHtml ="<div class='pcorg-pin' style='background:" + st.color + "'>" +
       "<span class='material-symbols-outlined'>" + st.icon + "</span></div>";
     L.marker([lat, lon], {
       icon: L.divIcon({ className: "", html: pinHtml, iconSize: [36, 36], iconAnchor: [18, 36] })
@@ -2892,8 +2893,12 @@
         createMiniMap.removeLayer(createTileSatEGIS);
         createTileSatACO.addTo(createMiniMap);
         createTileCurrent = "sat-aco";
-      } else {
+      } else if (createTileCurrent === "sat-aco") {
         createMiniMap.removeLayer(createTileSatACO);
+        createTileSatIGN.addTo(createMiniMap);
+        createTileCurrent = "sat-ign";
+      } else {
+        createMiniMap.removeLayer(createTileSatIGN);
         createTileOSM.addTo(createMiniMap);
         createTileCurrent = "osm";
       }
@@ -2980,7 +2985,7 @@
     }
   }
 
-  var createTileOSM = null, createTileSatEGIS = null, createTileSatACO = null;
+  var createTileOSM = null, createTileSatEGIS = null, createTileSatACO = null, createTileSatIGN = null;
   var createTileCurrent = "osm";
 
   function initCreateMap() {
@@ -3006,6 +3011,11 @@
       });
       createTileSatACO = L.tileLayer("/tiles/{z}/{x}/{y}.png", {
         tms: true, maxZoom: 22
+      });
+      // Orthophoto IGN (Géoplateforme, sans clé API) : tuiles natives jusqu'au zoom 19,
+      // puis agrandissement pixelisé jusqu'au zoom 22.
+      createTileSatIGN = L.tileLayer("https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}", {
+        maxNativeZoom: 19, maxZoom: 22
       });
       createMiniMap.invalidateSize();
 

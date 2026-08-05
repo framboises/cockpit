@@ -1365,6 +1365,28 @@ def get_meteo_previsions():
 
     return jsonify(results)
 
+def _meteo_val(doc, key):
+    """Valeur numerique d'un releve donnees_meteo, None si absente/illisible.
+
+    La collection contient des null (releve non publie par la station) et,
+    pour les imports anterieurs a aout 2026, des NaN. Les deux doivent etre
+    traites comme "pas de mesure" et non comme un zero.
+    """
+    value = doc.get(key)
+    if value is None:
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if value != value else value  # NaN != NaN
+
+
+def _meteo_round(doc, key, digits=1):
+    value = _meteo_val(doc, key)
+    return None if value is None else round(value, digits)
+
+
 @app.route('/historique_meteo/<date>', methods=['GET'])
 @role_required("user")
 @block_required("widget-right-1")
@@ -1392,13 +1414,19 @@ def get_historique_meteo(date):
             }))
 
             if monthly_data:
-                total_precipitations = sum([entry.get('Précipitations (mm)', 0) for entry in monthly_data if entry.get('Précipitations (mm)', 0) is not None])
-                max_temperature = max([entry.get('Température max (°C)', 0) for entry in monthly_data if entry.get('Température max (°C)', 0) is not None])
-                min_temperature = min([entry.get('Température min (°C)', 0) for entry in monthly_data if entry.get('Température min (°C)', 0) is not None])
-                
-                if len([entry.get('Température max (°C)', 0) for entry in monthly_data]) > 0:
-                    avg_temperature = sum([entry.get('Température max (°C)', 0) for entry in monthly_data]) / len(monthly_data)
-                    avg_temperature = round(avg_temperature, 1)
+                # donnees_meteo peut contenir des valeurs manquantes (null pour un
+                # releve non publie par la station, NaN pour les vieux imports) :
+                # on les ecarte au lieu de contaminer les agregats.
+                precipitations = [v for v in (_meteo_val(e, 'Précipitations (mm)') for e in monthly_data) if v is not None]
+                temps_max = [v for v in (_meteo_val(e, 'Température max (°C)') for e in monthly_data) if v is not None]
+                temps_min = [v for v in (_meteo_val(e, 'Température min (°C)') for e in monthly_data) if v is not None]
+
+                total_precipitations = sum(precipitations)
+                max_temperature = max(temps_max) if temps_max else 0
+                min_temperature = min(temps_min) if temps_min else 0
+
+                if temps_max:
+                    avg_temperature = round(sum(temps_max) / len(temps_max), 1)
                 else:
                     avg_temperature = 0
 
@@ -1419,10 +1447,10 @@ def get_historique_meteo(date):
                             'Température Min Mois (°C)': round(min_temperature, 1),
                             'Température Moyenne Mois (°C)': avg_temperature,
                             'Température Jour (°C)': {
-                                'max': round(daily_data.get('Température max (°C)', 0), 1),
-                                'min': round(daily_data.get('Température min (°C)', 0), 1)
+                                'max': _meteo_round(daily_data, 'Température max (°C)'),
+                                'min': _meteo_round(daily_data, 'Température min (°C)')
                             },
-                            'Précipitations Jour (mm)': round(daily_data.get('Précipitations (mm)', 0), 1)
+                            'Précipitations Jour (mm)': _meteo_round(daily_data, 'Précipitations (mm)')
                         }
                     else:
                         result[year] = {
@@ -1437,8 +1465,9 @@ def get_historique_meteo(date):
                     'message': f'Aucune donnée disponible pour {month}/{year}'
                 }
 
-        result_cleaned = json.loads(json.dumps(result).replace('NaN', '0'))
-        return jsonify(result_cleaned)
+        # Plus besoin de rustine anti-NaN : _meteo_val ecarte les valeurs
+        # manquantes en amont, le JSON produit est donc valide.
+        return jsonify(result)
 
     except Exception as e:
         print(f"Erreur lors de la récupération des données historiques: {e}")
@@ -4130,7 +4159,7 @@ def set_map_defaults():
     data = request.get_json(force=True) or {}
     hidden = data.get("hidden_categories", [])
     tile = data.get("default_tile", "osm")
-    if tile not in ("osm", "sat-egis", "sat-aco"):
+    if tile not in ("osm", "sat-egis", "sat-aco", "sat-ign"):
         tile = "osm"
     hidden_colors = data.get("hidden_route_colors", {})
     db.merge_config.update_one(
@@ -4181,7 +4210,7 @@ def set_map_preferences():
         prefs["hidden_categories"] = data["hidden_categories"]
     if "default_tile" in data:
         tile = data["default_tile"]
-        prefs["default_tile"] = tile if tile in ("osm", "sat-egis", "sat-aco") else "osm"
+        prefs["default_tile"] = tile if tile in ("osm", "sat-egis", "sat-aco", "sat-ign") else "osm"
     if "hidden_route_colors" in data:
         prefs["hidden_route_colors"] = data["hidden_route_colors"]
     COL_USER_GROUPS.update_one(
