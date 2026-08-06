@@ -218,53 +218,11 @@ function getCurrentEventYear() {
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
 document.addEventListener("DOMContentLoaded", function () {
-    const sidebar = document.getElementById("sidebar");
-    const toggleBtn = document.getElementById("sidebarToggle");
-    const hamburgerButton = document.getElementById("hamburger-button");
-
-    // Restaurer l'etat sidebar depuis localStorage (defaut: collapsed)
-    if (sidebar) {
-        var stored = localStorage.getItem("sidebar-collapsed");
-        if (stored === null || stored === "true") {
-            sidebar.classList.add("collapsed");
-        }
-    }
-
+    // Le pilotage de la barre laterale (repli, mode mobile, boutons burger)
+    // vit desormais dans static/js/sidebar.js, partage par les onze pages qui
+    // incluent templates/_sidebar.html. NE PAS le rebrancher ici : deux
+    // ecouteurs sur #sidebarToggle se declenchent tous les deux et s'annulent.
     var mobileMQ = window.matchMedia("(max-width: 820px)");
-
-    function toggleSidebar() {
-        if (!sidebar) return;
-        if (mobileMQ.matches) {
-            var open = sidebar.classList.toggle("mobile-open");
-            document.body.classList.toggle("sidebar-open", open);
-        } else {
-            sidebar.classList.toggle("collapsed");
-            localStorage.setItem("sidebar-collapsed", sidebar.classList.contains("collapsed"));
-        }
-    }
-
-    function closeMobileSidebar() {
-        if (!sidebar) return;
-        sidebar.classList.remove("mobile-open");
-        document.body.classList.remove("sidebar-open");
-    }
-
-    if (toggleBtn) toggleBtn.addEventListener("click", toggleSidebar);
-    if (hamburgerButton) hamburgerButton.addEventListener("click", toggleSidebar);
-    var headerBurger = document.getElementById("header-burger-btn");
-    if (headerBurger) headerBurger.addEventListener("click", toggleSidebar);
-
-    document.addEventListener("click", function (e) {
-        if (!mobileMQ.matches) return;
-        if (!sidebar || !sidebar.classList.contains("mobile-open")) return;
-        if (e.target.closest("#sidebar") && !e.target.closest(".sidebar-nav .nav-btn")) return;
-        if (e.target.closest("#sidebarToggle, #header-burger-btn, #hamburger-button")) return;
-        closeMobileSidebar();
-    });
-
-    mobileMQ.addEventListener("change", function (ev) {
-        if (!ev.matches) closeMobileSidebar();
-    });
 
     // ======================== MOBILE BOTTOM NAV (<=820px) ========================
     (function () {
@@ -1855,29 +1813,7 @@ function showDynamicFlashMessage(message, category, duration) {
 // NAVBAR (safe listeners)
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
-on("stats-page-button", "click", function(){
-    if (!window.selectedEvent || !window.selectedYear) {
-        showToast("error", "Veuillez selectionner un evenement et une annee");
-        return;
-    }
-    const url = "/general_stat?event=" + encodeURIComponent(window.selectedEvent) + "&year=" + encodeURIComponent(window.selectedYear);
-    window.open(url, "_blank");
-});
-
-on("parkings-page-button", "click", function(){
-    if (!window.selectedEvent || !window.selectedYear) {
-        showToast("error", "Veuillez selectionner un evenement et une annee");
-        return;
-    }
-    const url = "/terrains?event=" + encodeURIComponent(window.selectedEvent) + "&year=" + encodeURIComponent(window.selectedYear);
-    window.open(url, "_blank");
-});
-
-on("doors-page-button", "click", function(){
-    if (!window.selectedEvent || !window.selectedYear) {
-        showToast("error", "Veuillez selectionner un evenement et une annee");
-        return;
-    }
-    const url = "/doors?event=" + encodeURIComponent(window.selectedEvent) + "&year=" + encodeURIComponent(window.selectedYear);
-    window.open(url, "_blank");
-});
+// Portes / Parkings / Statistiques : voir static/js/sidebar.js. Ils y sont
+// branches pour toutes les pages, en relisant l'evenement et l'annee dans
+// localStorage a defaut de selecteur. Les rebrancher ici ouvrirait deux
+// onglets par clic sur les pages qui chargent les deux fichiers.

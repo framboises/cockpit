@@ -46,17 +46,26 @@ function renderMeteoWidget(data) {
       gauge.appendChild(source);
     }
     if (source) {
+      // Le niveau est TOUJOURS affiche, vert compris. Ne rien montrer quand
+      // tout va bien empeche de distinguer "vigilance verte" de "vigilance
+      // non surveillee" -- or c'est justement ce qu'un operateur doit pouvoir
+      // verifier d'un coup d'oeil.
+      var COUL = { vert: '#22c55e', jaune: '#e0b400', orange: '#f59628', rouge: '#dc3232' };
       if (v && v.perime) {
-        source.textContent = 'bulletin perime';
+        source.textContent = 'Vigilance perimee';
+        source.style.color = '#dc3232';
         source.title = 'Bulletin Meteo-France du ' + (v.update_time || '?') +
-          ' — plus de 6 h, il n eleve plus le niveau';
-      } else if (v && v.couleur && v.couleur !== 'vert') {
-        source.textContent = 'Vigilance Meteo-France ' + v.couleur;
-        source.title = 'Bulletin du ' + (v.update_time || '?') +
+          ' -- plus de ' + (v.peremption_h || 6) + ' h, il n eleve plus le niveau';
+      } else if (v && v.couleur) {
+        source.textContent = 'Vigilance ' + v.couleur;
+        source.style.color = COUL[v.couleur] || 'var(--muted)';
+        source.title = 'Meteo-France, bulletin du ' + (v.update_time || '?') +
           (v.age_h != null ? ' (il y a ' + v.age_h + ' h)' : '');
       } else {
-        source.textContent = '';
-        source.title = '';
+        // Distinct du vert : ici on ne SAIT pas, faute de bulletin collecte.
+        source.textContent = 'Vigilance indisponible';
+        source.style.color = 'var(--muted)';
+        source.title = 'Aucun bulletin en base -- verifier la tache de collecte';
       }
     }
   }

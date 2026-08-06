@@ -769,17 +769,7 @@
         qs("#anpr-modal")?.addEventListener("click", function (e) { if (e.target === this) closeModal("anpr-modal"); });
         qs("#anpr-config-modal")?.addEventListener("click", function (e) { if (e.target === this) closeModal("anpr-config-modal"); });
         document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closeModal("anpr-modal"); closeModal("anpr-config-modal"); } });
-        // Sidebar (restore + toggle with memory)
-        var sidebar = qs("#sidebar");
-        if (sidebar) {
-            var stored = localStorage.getItem("sidebar-collapsed");
-            if (stored === null || stored === "true") sidebar.classList.add("collapsed");
-        }
-        qs("#sidebarToggle")?.addEventListener("click", function () {
-            if (!sidebar) return;
-            sidebar.classList.toggle("collapsed");
-            localStorage.setItem("sidebar-collapsed", sidebar.classList.contains("collapsed"));
-        });
+        // Repli de la barre laterale : static/js/sidebar.js.
     }
 
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();

@@ -34,159 +34,11 @@
 <div class="app-layout">
 
     <!-- ===== SIDEBAR ===== -->
-    <aside id="sidebar" class="sidebar">
-        <div class="sidebar-header">
-            <img class="sidebar-logo" src="{{ url_for('static', filename='img/ACO-logo-monochrome-universel-blanc.png') }}" alt="ACO">
-            <span class="sidebar-brand">COCKPIT</span>
-            <button id="sidebarToggle" class="sidebar-toggle" aria-label="Toggle sidebar">
-                <span class="material-symbols-outlined">menu</span>
-            </button>
-        </div>
-
-        <nav class="sidebar-nav">
-            <a href="/" class="nav-btn is-active">
-                <span class="material-symbols-outlined">dashboard</span>
-                <span class="label">Cockpit</span>
-            </a>
-            <button class="nav-btn" id="doors-page-button">
-                <span class="material-symbols-outlined">door_front</span>
-                <span class="label">Portes</span>
-            </button>
-            <button class="nav-btn" id="parkings-page-button">
-                <span class="material-symbols-outlined">local_parking</span>
-                <span class="label">Parkings</span>
-            </button>
-            <button class="nav-btn" id="stats-page-button">
-                <span class="material-symbols-outlined">insert_chart</span>
-                <span class="label">Statistiques</span>
-            </button>
-            <a href="/wiki" class="nav-btn">
-                <span class="material-symbols-outlined">menu_book</span>
-                <span class="label">Wiki procedures</span>
-            </a>
-            {% if "manager" in user_roles %}
-            <a href="/circulation" class="nav-btn" target="_blank" rel="noopener" title="Tableau de bord circulation (TV poste de controle)">
-                <span class="material-symbols-outlined">moving</span>
-                <span class="label">Circulation</span>
-            </a>
-            {% endif %}
-            {% if "admin" in user_roles %}
-            <a href="/live-controle" class="nav-btn">
-                <span class="material-symbols-outlined">sensors</span>
-                <span class="label">Controle acces</span>
-            </a>
-            <a href="/field-dispatch" class="nav-btn">
-                <span class="material-symbols-outlined">tablet_android</span>
-                <span class="label">Field dispatch</span>
-            </a>
-            <a href="/config/todos" class="nav-btn">
-                <span class="material-symbols-outlined">settings</span>
-                <span class="label">Configuration</span>
-            </a>
-            <a href="/scan-report" class="nav-btn">
-                <span class="material-symbols-outlined">qr_code_scanner</span>
-                <span class="label">Rapport scans</span>
-            </a>
-            <a href="/analyse-ops" class="nav-btn">
-                <span class="material-symbols-outlined">biotech</span>
-                <span class="label">Analyse Ops</span>
-            </a>
-            <a href="/anpr" class="nav-btn">
-                <span class="material-symbols-outlined">directions_car</span>
-                <span class="label">LAPI</span>
-            </a>
-            <a href="/admin/alertes" class="nav-btn">
-                <span class="material-symbols-outlined">notifications_active</span>
-                <span class="label">Alertes</span>
-            </a>
-            <a href="/admin/wiki" class="nav-btn">
-                <span class="material-symbols-outlined">edit_note</span>
-                <span class="label">Wiki (admin)</span>
-            </a>
-            <a href="/cameras" class="nav-btn">
-                <span class="material-symbols-outlined">videocam</span>
-                <span class="label">Cameras</span>
-            </a>
-            <button type="button" class="nav-btn" id="routing-test-button" title="Test itineraire (bac a sable Valhalla)">
-                <span class="material-symbols-outlined">science</span>
-                <span class="label">Test itineraire</span>
-            </button>
-            {% endif %}
-        </nav>
-
-        <div class="sidebar-panel">
-            <div>
-                <label for="event-select">Evenement</label>
-                <select id="event-select"></select>
-            </div>
-            <div>
-                <label for="year-select">Annee</label>
-                <select id="year-select"></select>
-            </div>
-        </div>
-
-        <!-- AI Assistant teaser -->
-        <div class="sidebar-ai" title="Assistant IA (bientot)">
-            <span class="material-symbols-outlined">smart_toy</span>
-            <span>Assistant IA</span>
-        </div>
-
-        {% if "admin" in user_roles %}
-        <!-- Simulation horloge (admin only) -->
-        <div class="sidebar-sim" id="sidebar-sim">
-            <div class="sidebar-sim-header" id="sidebar-sim-toggle">
-                <span class="material-symbols-outlined" style="font-size:18px;">schedule</span>
-                <span class="label">Simulation</span>
-                <span class="sim-live-badge" id="sim-badge" style="display:none;">SIM</span>
-            </div>
-            <div class="sidebar-sim-body" id="sidebar-sim-body" style="display:none;">
-                <div class="sim-clock" id="sim-clock-display">--:--</div>
-                <div class="sim-date" id="sim-date-display">--/--/----</div>
-                <div class="sim-controls">
-                    <label class="sim-label" for="sim-datetime">Date & heure</label>
-                    <input type="datetime-local" id="sim-datetime" class="sim-input" />
-                </div>
-                <div class="sim-speed-row">
-                    <label class="sim-label" for="sim-speed">Vitesse</label>
-                    <select id="sim-speed" class="sim-input">
-                        <option value="0.0167">x1 (temps reel)</option>
-                        <option value="0.0833">x5</option>
-                        <option value="0.25">x15</option>
-                        <option value="0.5">x30</option>
-                        <option value="1">x60 (1min/s)</option>
-                        <option value="5">x300 (5min/s)</option>
-                        <option value="15">x900 (15min/s)</option>
-                    </select>
-                </div>
-                <div class="sim-actions">
-                    <button class="sim-btn sim-btn-start" id="sim-start" title="Demarrer">
-                        <span class="material-symbols-outlined">play_arrow</span>
-                    </button>
-                    <button class="sim-btn" id="sim-pause" title="Pause" disabled>
-                        <span class="material-symbols-outlined">pause</span>
-                    </button>
-                    <button class="sim-btn sim-btn-stop" id="sim-reset" title="Revenir a l'heure reelle">
-                        <span class="material-symbols-outlined">stop</span>
-                    </button>
-                </div>
-            </div>
-        </div>
-        {% endif %}
-
-        <div class="sidebar-footer">
-            <div class="sidebar-user-info">
-                <span class="material-symbols-outlined sidebar-user-avatar">account_circle</span>
-                <div class="sidebar-user-details">
-                    <span class="sidebar-user-name">{{ user_firstname }} {{ user_lastname }}</span>
-                    <span class="sidebar-user-email">{{ user_email }}</span>
-                </div>
-            </div>
-            <a href="/logout_redirect" class="nav-btn nav-btn-danger">
-                <span class="material-symbols-outlined">logout</span>
-                <span class="label">Deconnexion</span>
-            </a>
-        </div>
-    </aside>
+    {% set sidebar_active = '/' %}
+    {% set sidebar_panel = true %}
+    {% set sidebar_sim = true %}
+    {% set sidebar_routing_test = true %}
+    {% include '_sidebar.html' %}
 
     <!-- ===== MAIN ===== -->
     <div class="app-main">
@@ -1100,5 +952,6 @@ window.__userCanCloseFiche = {{ user_can_close_fiche_json|safe }};
   });
 </script>
 <script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
 </body>
 </html>

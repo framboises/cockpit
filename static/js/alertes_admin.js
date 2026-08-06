@@ -924,18 +924,5 @@
   loadAll();
   startHikConsolePolling();
 
-  // Sidebar (restore + toggle with memory)
-  var sidebar = $("#sidebar");
-  if (sidebar) {
-    var stored = localStorage.getItem("sidebar-collapsed");
-    if (stored === null || stored === "true") sidebar.classList.add("collapsed");
-  }
-  var toggleBtn = $("#sidebarToggle");
-  if (toggleBtn) {
-    toggleBtn.addEventListener("click", function () {
-      if (!sidebar) return;
-      sidebar.classList.toggle("collapsed");
-      localStorage.setItem("sidebar-collapsed", sidebar.classList.contains("collapsed"));
-    });
-  }
+  // Repli de la barre laterale : static/js/sidebar.js.
 })();

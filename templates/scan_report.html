@@ -266,78 +266,10 @@
 <div class="app-layout">
 
   <!-- ===== SIDEBAR (clone du standard cockpit) ===== -->
-  <aside id="sidebar" class="sidebar">
-    <div class="sidebar-header">
-      <img class="sidebar-logo" src="{{ url_for('static', filename='img/ACO-logo-monochrome-universel-blanc.png') }}" alt="ACO">
-      <span class="sidebar-brand">COCKPIT</span>
-      <button id="sidebarToggle" class="sidebar-toggle" aria-label="Toggle sidebar">
-        <span class="material-symbols-outlined">menu</span>
-      </button>
-    </div>
-
-    <nav class="sidebar-nav">
-      <a href="/" class="nav-btn">
-        <span class="material-symbols-outlined">dashboard</span>
-        <span class="label">Cockpit</span>
-      </a>
-      {% if "admin" in user_roles %}
-      <a href="/live-controle" class="nav-btn">
-        <span class="material-symbols-outlined">sensors</span>
-        <span class="label">Controle acces</span>
-      </a>
-      <a href="/field-dispatch" class="nav-btn">
-        <span class="material-symbols-outlined">tablet_android</span>
-        <span class="label">Field dispatch</span>
-      </a>
-      <a href="/config/todos" class="nav-btn">
-        <span class="material-symbols-outlined">settings</span>
-        <span class="label">Configuration</span>
-      </a>
-      <a href="/scan-report" class="nav-btn is-active">
-        <span class="material-symbols-outlined">qr_code_scanner</span>
-        <span class="label">Rapport scans</span>
-      </a>
-      <a href="/analyse-ops" class="nav-btn">
-        <span class="material-symbols-outlined">biotech</span>
-        <span class="label">Analyse Ops</span>
-      </a>
-      <a href="/anpr" class="nav-btn">
-        <span class="material-symbols-outlined">directions_car</span>
-        <span class="label">LAPI</span>
-      </a>
-      <a href="/admin/alertes" class="nav-btn">
-        <span class="material-symbols-outlined">notifications_active</span>
-        <span class="label">Alertes</span>
-      </a>
-      <a href="/cameras" class="nav-btn">
-        <span class="material-symbols-outlined">videocam</span>
-        <span class="label">Cameras</span>
-      </a>
-      {% endif %}
-    </nav>
-
-    <div class="sidebar-panel">
-      <div>
-        <label for="event-select">Evenement</label>
-        <select id="event-select"></select>
-      </div>
-      <div>
-        <label for="year-select">Annee</label>
-        <select id="year-select"></select>
-      </div>
-      <div class="scan-report-available" id="scan-report-available"></div>
-    </div>
-
-    <div class="sidebar-footer">
-      <div class="sidebar-user-info">
-        <span class="material-symbols-outlined sidebar-user-avatar">account_circle</span>
-        <div class="sidebar-user-details">
-          <span class="sidebar-user-name">{{ user_firstname }} {{ user_lastname }}</span>
-          <span class="sidebar-user-email">{{ user_email }}</span>
-        </div>
-      </div>
-    </div>
-  </aside>
+  {% set sidebar_active = '/scan-report' %}
+  {% set sidebar_panel = true %}
+  {% set sidebar_extra = '_sidebar_scan_report.html' %}
+  {% include '_sidebar.html' %}
 
   <!-- ===== MAIN ===== -->
   <main class="app-main scan-report-main">
@@ -1015,17 +947,13 @@
       .catch(function(err){ console.error('Erreur chargement disponibilite :', err); });
   })();
 
-  // Toggle sidebar collapse (memoire localStorage)
-  (function(){
-    var sb = document.getElementById('sidebar');
-    var tog = document.getElementById('sidebarToggle');
-    if (!sb || !tog) return;
-    if (localStorage.getItem('sidebar-collapsed') === '1') sb.classList.add('collapsed');
-    tog.addEventListener('click', function(){
-      sb.classList.toggle('collapsed');
-      localStorage.setItem('sidebar-collapsed', sb.classList.contains('collapsed') ? '1' : '0');
-    });
-  })();
+  // Repli de la barre laterale : static/js/sidebar.js.
 </script>
+<script>
+  window.__userIsAdmin   = {{ "true" if "admin" in user_roles else "false" }};
+  window.__userIsManager = {{ "true" if ("manager" in user_roles or "admin" in user_roles) else "false" }};
+</script>
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
 </body>
 </html>

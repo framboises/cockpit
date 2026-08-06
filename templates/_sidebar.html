@@ -1,0 +1,209 @@
+{#
+  Barre laterale COCKPIT -- source unique, incluse par toutes les pages.
+
+  POURQUOI UN PARTIEL
+
+  La sidebar avait ete copiee-collee dans onze gabarits. Chaque copie a derive :
+  liens absents ici, libelle accentue la, bouton de deconnexion oublie sur une
+  page, bouton "Assistant IA" affiche sur dix pages mais fonctionnel sur trois,
+  et sept implementations differentes du bouton de repli. Resynchroniser onze
+  copies les aurait fait rederiver. Il n'y en a plus qu'une.
+
+  UTILISATION
+
+      {% set sidebar_active = '/scan-report' %}
+      {% set sidebar_panel  = true %}
+      {% include '_sidebar.html' %}
+
+  Le comportement (repli, Portes / Parkings / Statistiques) vit dans
+  static/js/sidebar.js, a charger sur toute page qui inclut ce fichier.
+
+  VARIABLES ATTENDUES  (toutes optionnelles, valeurs sures par defaut)
+
+    sidebar_active   chemin de la page courante, pour le liseré is-active
+    sidebar_panel    affiche les selecteurs evenement / annee     (defaut faux)
+    sidebar_sim      affiche le pilote d'horloge simulee          (defaut faux)
+    sidebar_ai       affiche le bouton Assistant IA               (defaut vrai)
+    sidebar_extra    nom d'un gabarit a inserer sous les selecteurs
+                     (suppose sidebar_panel : le bloc est rendu dans le panneau)
+    sidebar_routing_test  affiche le bac a sable Valhalla         (defaut faux)
+
+  sidebar_routing_test n'est vrai que sur les pages qui chargent Leaflet ET
+  routing_test.js. Ailleurs le bouton ouvrirait une modale vide : mieux vaut
+  qu'il soit absent que present et mort.
+
+  Le contexte du gabarit appelant (user_roles, user_firstname, ...) est
+  automatiquement visible ici : {% include %} n'isole pas la portee.
+#}
+{% set _actif = sidebar_active | default('', true) %}
+{% set _ai = sidebar_ai if sidebar_ai is defined else true %}
+{% macro nav_class(cible) %}nav-btn{{ ' is-active' if _actif == cible else '' }}{% endmacro %}
+<aside id="sidebar" class="sidebar">
+    <div class="sidebar-header">
+        <img class="sidebar-logo" src="{{ url_for('static', filename='img/ACO-logo-monochrome-universel-blanc.png') }}" alt="ACO">
+        <span class="sidebar-brand">COCKPIT</span>
+        <button id="sidebarToggle" class="sidebar-toggle" aria-label="Replier ou deplier le menu">
+            <span class="material-symbols-outlined">menu</span>
+        </button>
+    </div>
+
+    <nav class="sidebar-nav">
+        <a href="/" class="{{ nav_class('/') }}">
+            <span class="material-symbols-outlined">dashboard</span>
+            <span class="label">Cockpit</span>
+        </a>
+        {# Ces trois boutons ouvrent un onglet parametre par l'evenement et
+           l'annee courants. sidebar.js les relit dans localStorage, donc ils
+           fonctionnent aussi sur les pages sans selecteur. #}
+        <button type="button" class="nav-btn" id="doors-page-button">
+            <span class="material-symbols-outlined">door_front</span>
+            <span class="label">Portes</span>
+        </button>
+        <button type="button" class="nav-btn" id="parkings-page-button">
+            <span class="material-symbols-outlined">local_parking</span>
+            <span class="label">Parkings</span>
+        </button>
+        <button type="button" class="nav-btn" id="stats-page-button">
+            <span class="material-symbols-outlined">insert_chart</span>
+            <span class="label">Statistiques</span>
+        </button>
+        <a href="/wiki" class="{{ nav_class('/wiki') }}">
+            <span class="material-symbols-outlined">menu_book</span>
+            <span class="label">Wiki procedures</span>
+        </a>
+        {% if "manager" in user_roles %}
+        <a href="/circulation" class="nav-btn" target="_blank" rel="noopener" title="Tableau de bord circulation (TV poste de controle)">
+            <span class="material-symbols-outlined">moving</span>
+            <span class="label">Circulation</span>
+        </a>
+        <a href="/meteo-mur" class="nav-btn" target="_blank" rel="noopener" title="Mur meteo plein ecran (TV PC Organisation)">
+            <span class="material-symbols-outlined">radar</span>
+            <span class="label">Mur meteo</span>
+        </a>
+        {% endif %}
+        {% if "admin" in user_roles %}
+        <a href="/live-controle" class="{{ nav_class('/live-controle') }}">
+            <span class="material-symbols-outlined">sensors</span>
+            <span class="label">Controle acces</span>
+        </a>
+        <a href="/field-dispatch" class="{{ nav_class('/field-dispatch') }}">
+            <span class="material-symbols-outlined">tablet_android</span>
+            <span class="label">Field dispatch</span>
+        </a>
+        <a href="/config/todos" class="{{ nav_class('/config/todos') }}">
+            <span class="material-symbols-outlined">settings</span>
+            <span class="label">Configuration</span>
+        </a>
+        <a href="/scan-report" class="{{ nav_class('/scan-report') }}">
+            <span class="material-symbols-outlined">qr_code_scanner</span>
+            <span class="label">Rapport scans</span>
+        </a>
+        <a href="/analyse-ops" class="{{ nav_class('/analyse-ops') }}">
+            <span class="material-symbols-outlined">biotech</span>
+            <span class="label">Analyse Ops</span>
+        </a>
+        <a href="/anpr" class="{{ nav_class('/anpr') }}">
+            <span class="material-symbols-outlined">directions_car</span>
+            <span class="label">LAPI</span>
+        </a>
+        <a href="/admin/alertes" class="{{ nav_class('/admin/alertes') }}">
+            <span class="material-symbols-outlined">notifications_active</span>
+            <span class="label">Alertes</span>
+        </a>
+        <a href="/admin/wiki" class="{{ nav_class('/admin/wiki') }}">
+            <span class="material-symbols-outlined">edit_note</span>
+            <span class="label">Wiki (admin)</span>
+        </a>
+        <a href="/cameras" class="{{ nav_class('/cameras') }}">
+            <span class="material-symbols-outlined">videocam</span>
+            <span class="label">Cameras</span>
+        </a>
+        {% if sidebar_routing_test %}
+        <button type="button" class="nav-btn" id="routing-test-button" title="Test itineraire (bac a sable Valhalla)">
+            <span class="material-symbols-outlined">science</span>
+            <span class="label">Test itineraire</span>
+        </button>
+        {% endif %}
+        {% endif %}
+    </nav>
+
+    {% if sidebar_panel %}
+    <div class="sidebar-panel">
+        <div>
+            <label for="event-select">Evenement</label>
+            <select id="event-select"></select>
+        </div>
+        <div>
+            <label for="year-select">Annee</label>
+            <select id="year-select"></select>
+        </div>
+        {% if sidebar_extra %}{% include sidebar_extra %}{% endif %}
+    </div>
+    {% endif %}
+
+    {% if _ai and "manager" in user_roles %}
+    {# Reserve au manager : ai_assistant.js refuse l'ouverture en dessous
+       (isManager), et /api/pcorg/summary/* est gate cote serveur. L'afficher
+       a un simple utilisateur ne produisait qu'un message d'erreur. #}
+    <div class="sidebar-ai" title="Assistant IA">
+        <span class="material-symbols-outlined">smart_toy</span>
+        <span>Assistant IA</span>
+    </div>
+    {% endif %}
+
+    {% if sidebar_sim and "admin" in user_roles %}
+    {# Pilote d'horloge simulee : ne pilote que la timeline de l'index. #}
+    <div class="sidebar-sim" id="sidebar-sim">
+        <div class="sidebar-sim-header" id="sidebar-sim-toggle">
+            <span class="material-symbols-outlined" style="font-size:18px;">schedule</span>
+            <span class="label">Simulation</span>
+            <span class="sim-live-badge" id="sim-badge" style="display:none;">SIM</span>
+        </div>
+        <div class="sidebar-sim-body" id="sidebar-sim-body" style="display:none;">
+            <div class="sim-clock" id="sim-clock-display">--:--</div>
+            <div class="sim-date" id="sim-date-display">--/--/----</div>
+            <div class="sim-controls">
+                <label class="sim-label" for="sim-datetime">Date & heure</label>
+                <input type="datetime-local" id="sim-datetime" class="sim-input" />
+            </div>
+            <div class="sim-speed-row">
+                <label class="sim-label" for="sim-speed">Vitesse</label>
+                <select id="sim-speed" class="sim-input">
+                    <option value="0.0167">x1 (temps reel)</option>
+                    <option value="0.0833">x5</option>
+                    <option value="0.25">x15</option>
+                    <option value="0.5">x30</option>
+                    <option value="1">x60 (1min/s)</option>
+                    <option value="5">x300 (5min/s)</option>
+                    <option value="15">x900 (15min/s)</option>
+                </select>
+            </div>
+            <div class="sim-actions">
+                <button class="sim-btn sim-btn-start" id="sim-start" title="Demarrer">
+                    <span class="material-symbols-outlined">play_arrow</span>
+                </button>
+                <button class="sim-btn" id="sim-pause" title="Pause" disabled>
+                    <span class="material-symbols-outlined">pause</span>
+                </button>
+                <button class="sim-btn sim-btn-stop" id="sim-reset" title="Revenir a l'heure reelle">
+                    <span class="material-symbols-outlined">stop</span>
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="sidebar-footer">
+        <div class="sidebar-user-info">
+            <span class="material-symbols-outlined sidebar-user-avatar">account_circle</span>
+            <div class="sidebar-user-details">
+                <span class="sidebar-user-name">{{ user_firstname }} {{ user_lastname }}</span>
+                <span class="sidebar-user-email">{{ user_email }}</span>
+            </div>
+        </div>
+        <a href="/logout_redirect" class="nav-btn nav-btn-danger">
+            <span class="material-symbols-outlined">logout</span>
+            <span class="label">Deconnexion</span>
+        </a>
+    </div>
+</aside>

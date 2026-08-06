@@ -476,71 +476,8 @@
 <div class="app-layout cam-page-layout">
 
   <!-- ===== SIDEBAR ===== -->
-  <aside id="sidebar" class="sidebar">
-    <div class="sidebar-header">
-      <img class="sidebar-logo" src="{{ url_for('static', filename='img/ACO-logo-monochrome-universel-blanc.png') }}" alt="ACO">
-      <span class="sidebar-brand">COCKPIT</span>
-      <button id="sidebarToggle" class="sidebar-toggle" aria-label="Toggle sidebar">
-        <span class="material-symbols-outlined">menu</span>
-      </button>
-    </div>
-
-    <nav class="sidebar-nav">
-      <a href="/" class="nav-btn">
-        <span class="material-symbols-outlined">dashboard</span>
-        <span class="label">Cockpit</span>
-      </a>
-      {% if "admin" in user_roles %}
-      <a href="/live-controle" class="nav-btn">
-        <span class="material-symbols-outlined">sensors</span>
-        <span class="label">Controle acces</span>
-      </a>
-      <a href="/config/todos" class="nav-btn">
-        <span class="material-symbols-outlined">settings</span>
-        <span class="label">Configuration</span>
-      </a>
-      <a href="/scan-report" class="nav-btn">
-          <span class="material-symbols-outlined">qr_code_scanner</span>
-          <span class="label">Rapport scans</span>
-      </a>
-      <a href="/analyse-ops" class="nav-btn">
-        <span class="material-symbols-outlined">biotech</span>
-        <span class="label">Analyse Ops</span>
-      </a>
-      <a href="/anpr" class="nav-btn">
-        <span class="material-symbols-outlined">directions_car</span>
-        <span class="label">LAPI</span>
-      </a>
-      <a href="/admin/alertes" class="nav-btn">
-        <span class="material-symbols-outlined">notifications_active</span>
-        <span class="label">Alertes</span>
-      </a>
-      <a href="/cameras" class="nav-btn is-active">
-        <span class="material-symbols-outlined">videocam</span>
-        <span class="label">Cameras</span>
-      </a>
-      {% endif %}
-    </nav>
-
-    <div class="sidebar-ai" title="Assistant IA (bientot)">
-      <span class="material-symbols-outlined">smart_toy</span>
-      <span>Assistant IA</span>
-    </div>
-
-    <div class="sidebar-footer">
-      <div class="sidebar-user-info">
-        <span class="material-symbols-outlined sidebar-user-avatar">account_circle</span>
-        <div class="sidebar-user-details">
-          <span class="sidebar-user-name">{{ user_firstname }} {{ user_lastname }}</span>
-          <span class="sidebar-user-email">{{ user_email }}</span>
-        </div>
-      </div>
-      <a href="/logout_redirect" class="nav-btn nav-btn-danger">
-        <span class="material-symbols-outlined">logout</span>
-        <span class="label">Deconnexion</span>
-      </a>
-    </div>
-  </aside>
+  {% set sidebar_active = '/cameras' %}
+  {% include '_sidebar.html' %}
 
   <!-- ===== MAIN ===== -->
   <div class="app-main">
@@ -739,47 +676,12 @@
 <!-- ===== SCRIPTS ===== -->
 <script src="{{ url_for('static', filename='js/cameras.js') }}"></script>
 
-<!-- Sidebar toggle (shared pattern, with mobile-open support) -->
 <script>
-(function(){
-  var sb = document.getElementById("sidebar");
-  var tog = document.getElementById("sidebarToggle");
-  var burger = document.getElementById("header-burger-btn");
-  if(!sb) return;
-  if(localStorage.getItem("sidebar-collapsed")==="1") sb.classList.add("collapsed");
-
-  var mobileMQ = window.matchMedia("(max-width: 820px)");
-
-  function toggleSidebar(){
-    if(mobileMQ.matches){
-      var open = sb.classList.toggle("mobile-open");
-      document.body.classList.toggle("sidebar-open", open);
-    } else {
-      sb.classList.toggle("collapsed");
-      localStorage.setItem("sidebar-collapsed", sb.classList.contains("collapsed")?"1":"0");
-    }
-  }
-
-  function closeMobileSidebar(){
-    sb.classList.remove("mobile-open");
-    document.body.classList.remove("sidebar-open");
-  }
-
-  if(tog) tog.addEventListener("click", toggleSidebar);
-  if(burger) burger.addEventListener("click", toggleSidebar);
-
-  document.addEventListener("click", function(e){
-    if(!mobileMQ.matches) return;
-    if(!sb.classList.contains("mobile-open")) return;
-    if(e.target.closest("#sidebar") && !e.target.closest(".sidebar-nav .nav-btn")) return;
-    if(e.target.closest("#sidebarToggle, #header-burger-btn")) return;
-    closeMobileSidebar();
-  });
-
-  mobileMQ.addEventListener("change", function(ev){
-    if(!ev.matches) closeMobileSidebar();
-  });
-})();
+  window.__userIsAdmin   = {{ "true" if "admin" in user_roles else "false" }};
+  window.__userIsManager = {{ "true" if ("manager" in user_roles or "admin" in user_roles) else "false" }};
 </script>
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
 </body>
 </html>

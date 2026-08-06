@@ -25,87 +25,9 @@
 <div class="app-layout">
 
   <!-- Sidebar -->
-  <aside id="sidebar" class="sidebar">
-    <div class="sidebar-header">
-      <img class="sidebar-logo" src="{{ url_for('static', filename='img/ACO-logo-monochrome-universel-blanc.png') }}" alt="ACO">
-      <span class="sidebar-brand">COCKPIT</span>
-      <button id="sidebarToggle" class="sidebar-toggle" aria-label="Toggle sidebar">
-        <span class="material-symbols-outlined">menu</span>
-      </button>
-    </div>
-
-    <nav class="sidebar-nav">
-      <a href="/" class="nav-btn">
-        <span class="material-symbols-outlined">dashboard</span>
-        <span class="label">Cockpit</span>
-      </a>
-      {% if "admin" in user_roles %}
-      <a href="/live-controle" class="nav-btn">
-        <span class="material-symbols-outlined">sensors</span>
-        <span class="label">Controle acces</span>
-      </a>
-      <a href="/field-dispatch" class="nav-btn">
-        <span class="material-symbols-outlined">tablet_android</span>
-        <span class="label">Field dispatch</span>
-      </a>
-      <a href="/config/todos" class="nav-btn is-active">
-        <span class="material-symbols-outlined">settings</span>
-        <span class="label">Configuration</span>
-      </a>
-      <a href="/scan-report" class="nav-btn">
-          <span class="material-symbols-outlined">qr_code_scanner</span>
-          <span class="label">Rapport scans</span>
-      </a>
-      <a href="/analyse-ops" class="nav-btn">
-        <span class="material-symbols-outlined">biotech</span>
-        <span class="label">Analyse Ops</span>
-      </a>
-      <a href="/anpr" class="nav-btn">
-        <span class="material-symbols-outlined">directions_car</span>
-        <span class="label">LAPI</span>
-      </a>
-      <a href="/admin/alertes" class="nav-btn">
-        <span class="material-symbols-outlined">notifications_active</span>
-        <span class="label">Alertes</span>
-      </a>
-      <a href="/cameras" class="nav-btn">
-        <span class="material-symbols-outlined">videocam</span>
-        <span class="label">Cameras</span>
-      </a>
-      {% endif %}
-    </nav>
-
-    <div class="sidebar-panel">
-      <div>
-        <label for="event-select">Evenement</label>
-        <select id="event-select"></select>
-      </div>
-      <div>
-        <label for="year-select">Annee</label>
-        <select id="year-select"></select>
-      </div>
-    </div>
-
-    <!-- AI Assistant teaser -->
-    <div class="sidebar-ai" title="Assistant IA (bientot)">
-        <span class="material-symbols-outlined">smart_toy</span>
-        <span>Assistant IA</span>
-    </div>
-
-    <div class="sidebar-footer">
-      <div class="sidebar-user-info">
-        <span class="material-symbols-outlined sidebar-user-avatar">account_circle</span>
-        <div class="sidebar-user-details">
-          <span class="sidebar-user-name">{{ user_firstname }} {{ user_lastname }}</span>
-          <span class="sidebar-user-email">{{ user_email }}</span>
-        </div>
-      </div>
-      <a href="/logout_redirect" class="nav-btn nav-btn-danger">
-        <span class="material-symbols-outlined">logout</span>
-        <span class="label">Deconnexion</span>
-      </a>
-    </div>
-  </aside>
+  {% set sidebar_active = '/config/todos' %}
+  {% set sidebar_panel = true %}
+  {% include '_sidebar.html' %}
 
   <!-- Main -->
   <div class="app-main single-col-page">
@@ -976,5 +898,6 @@
 <script src="/static/js/main.js"></script>
 <script src="/static/js/ai_assistant.js"></script>
 <script src="/static/js/ai_memory_admin.js"></script>
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
 </body>
 </html>

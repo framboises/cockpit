@@ -1687,6 +1687,7 @@ def get_meteo_widget_summary():
             'update_time': bulletin.get('update_time'),
             'age_h': round(age_h, 1) if age_h is not None else None,
             'perime': perime,
+            'peremption_h': 6,
         }
 
     label = risk_labels[max_severity]
