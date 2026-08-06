@@ -23,13 +23,22 @@
   var elMaj = document.getElementById("meteo-maj");
   var elFlux = document.getElementById("meteo-flux");
   var elHint = document.getElementById("meteo-draw-hint");
+  var elMurFond = document.getElementById("meteo-mur-fond");
+  var elMurTxt = document.getElementById("meteo-mur-txt");
 
   var carte = null;
   var rectSite = null;
   var rectVeille = null;
-  var etat = { bbox_site: null, veille_km: 40, defaut: null };
+  var etat = { bbox_site: null, veille_km: 40, defaut: null,
+               mur: null, mur_defaut: null, fonds: [] };
   var enDessin = false;
   var coinDepart = null;
+
+  // Carte de cadrage du mur : distincte de la carte d'emprise. On y regle un
+  // point de vue (centre + zoom + fond), pas une geometrie.
+  var carteMur = null;
+  var coucheMur = null;
+  var repereMur = null;
 
   function csrfToken() {
     var meta = document.querySelector('meta[name="csrf-token"]');
@@ -54,8 +63,75 @@
     bbox_trop_petite: "L'emprise doit englober toutes les zones du circuit.",
     bbox_trop_grande: "Emprise trop large : la grille deviendrait inutilement lourde.",
     veille_km_invalide: "Rayon de veille illisible.",
-    veille_km_hors_bornes: "Rayon de veille hors bornes (10 a 150 km)."
+    veille_km_hors_bornes: "Rayon de veille hors bornes (10 a 150 km).",
+    mur_centre_invalide: "Centre du mur illisible.",
+    mur_centre_hors_bornes: "Centre du mur hors des bornes geographiques.",
+    mur_zoom_invalide: "Niveau de zoom illisible.",
+    mur_zoom_hors_bornes: "Niveau de zoom hors bornes (6 a 15).",
+    mur_fond_inconnu: "Fond de carte inconnu."
   };
+
+  // ------------------------------------------------------------------------
+  // Cadrage du mur
+  // ------------------------------------------------------------------------
+
+  function fondPar(cle) {
+    for (var i = 0; i < etat.fonds.length; i++) {
+      if (etat.fonds[i].cle === cle) return etat.fonds[i];
+    }
+    return etat.fonds[0] || null;
+  }
+
+  function majTexteMur() {
+    if (!elMurTxt || !etat.mur) return;
+    elMurTxt.textContent = "centre " + etat.mur.centre.lat.toFixed(4) + ", " +
+      etat.mur.centre.lon.toFixed(4) + "  ·  zoom " + etat.mur.zoom;
+  }
+
+  function poserFondMur() {
+    if (!carteMur || !etat.mur) return;
+    var fond = fondPar(etat.mur.fond);
+    if (!fond) return;
+    if (coucheMur) carteMur.removeLayer(coucheMur);
+    coucheMur = L.tileLayer(fond.url, {
+      maxNativeZoom: fond.max_zoom, maxZoom: 19,
+      attribution: "IGN-F/Geoplateforme"
+    }).addTo(carteMur);
+  }
+
+  function initCarteMur() {
+    if (!document.getElementById("meteo-mur-map") || !etat.mur) return;
+    if (carteMur) {
+      carteMur.invalidateSize();
+      carteMur.setView([etat.mur.centre.lat, etat.mur.centre.lon], etat.mur.zoom);
+      return;
+    }
+    // fadeAnimation desactive : au changement de fond on retire une couche pour
+    // en poser une autre, et le fondu de Leaflet laissait les nouvelles tuiles a
+    // opacity 0 -- chargees, mais invisibles. La carte paraissait vide.
+    carteMur = L.map("meteo-mur-map", {
+      zoomControl: true, attributionControl: true, fadeAnimation: false
+    });
+    carteMur.setView([etat.mur.centre.lat, etat.mur.centre.lon], etat.mur.zoom);
+    poserFondMur();
+
+    // Le circuit, pour savoir ce qu'on cadre.
+    repereMur = L.circleMarker(
+      [etat.mur_defaut.centre.lat, etat.mur_defaut.centre.lon],
+      { radius: 5, color: "#f8fafc", weight: 2, fillColor: "#0ea5e9", fillOpacity: 0.9 }
+    ).addTo(carteMur);
+
+    // Le cadrage se lit sur la carte elle-meme : pas de champs a saisir, ce
+    // qu'on voit ici est ce que la TV affichera.
+    carteMur.on("moveend zoomend", function () {
+      var c = carteMur.getCenter();
+      etat.mur.centre = { lat: c.lat, lon: c.lng };
+      etat.mur.zoom = carteMur.getZoom();
+      majTexteMur();
+      statut("Modifie, non enregistre", "#f59e0b");
+    });
+    majTexteMur();
+  }
 
   function veilleDepuisRayon(km) {
     // Meme calcul que cote serveur, pour que l'apercu corresponde a ce qui
@@ -144,6 +220,20 @@
         etat.bbox_site = d.bbox_site;
         etat.veille_km = d.veille_km;
         etat.defaut = d.bbox_site_defaut;
+        etat.mur = d.mur;
+        etat.mur_defaut = d.mur_defaut;
+        etat.fonds = d.mur_fonds || [];
+        if (elMurFond) {
+          elMurFond.textContent = "";
+          etat.fonds.forEach(function (f) {
+            var o = document.createElement("option");
+            o.value = f.cle;
+            o.textContent = f.libelle;
+            if (f.cle === etat.mur.fond) o.selected = true;
+            elMurFond.appendChild(o);
+          });
+        }
+        initCarteMur();
         if (elVeille) elVeille.value = d.veille_km;
         if (elVeilleVal) elVeilleVal.textContent = d.veille_km + " km";
         if (elMaj) {
@@ -202,7 +292,12 @@
     fetch("/api/meteo/config", {
       method: "PUT",
       headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken() },
-      body: JSON.stringify({ bbox_site: etat.bbox_site, veille_km: etat.veille_km })
+      body: JSON.stringify({
+        bbox_site: etat.bbox_site,
+        veille_km: etat.veille_km,
+        mur: etat.mur ? { centre: etat.mur.centre, zoom: etat.mur.zoom,
+                          fond: etat.mur.fond } : undefined
+      })
     })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (res) {
@@ -253,9 +348,35 @@
       etat.veille_km = 40;
       if (elVeille) elVeille.value = 40;
       if (elVeilleVal) elVeilleVal.textContent = "40 km";
+      if (etat.mur && etat.mur_defaut && carteMur) {
+        etat.mur.fond = etat.mur_defaut.fond;
+        if (elMurFond) elMurFond.value = etat.mur.fond;
+        poserFondMur();
+        carteMur.setView([etat.mur_defaut.centre.lat, etat.mur_defaut.centre.lon],
+                         etat.mur_defaut.zoom);
+      }
       dessiner();
       cadrer();
       statut("Defauts restaures, non enregistres", "#f59e0b");
+    });
+  }
+
+  if (elMurFond) {
+    elMurFond.addEventListener("change", function () {
+      if (!etat.mur) return;
+      etat.mur.fond = elMurFond.value;
+      poserFondMur();
+      statut("Modifie, non enregistre", "#f59e0b");
+    });
+  }
+
+  var btnRecentrer = document.getElementById("btn-meteo-mur-recentrer");
+  if (btnRecentrer) {
+    btnRecentrer.addEventListener("click", function () {
+      if (!carteMur || !etat.mur_defaut) return;
+      // setView declenche moveend, qui met l'etat a jour et marque non enregistre.
+      carteMur.setView([etat.mur_defaut.centre.lat, etat.mur_defaut.centre.lon],
+                       etat.mur_defaut.zoom);
     });
   }
 
@@ -267,7 +388,12 @@
   var entete = document.querySelector('[data-section="meteo"]');
   if (entete) {
     entete.addEventListener("click", function () {
-      setTimeout(function () { if (carte) { carte.invalidateSize(); cadrer(); } }, 220);
+      setTimeout(function () {
+        if (carte) { carte.invalidateSize(); cadrer(); }
+        // La carte de cadrage est dans le meme bloc repliable : sans ce
+        // recalcul, elle ne charge que le quart de ses tuiles a l'ouverture.
+        if (carteMur) carteMur.invalidateSize();
+      }, 220);
     });
   }
 

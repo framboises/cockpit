@@ -69,6 +69,44 @@ BBOX_SITE_DEFAUT = {"west": 0.188, "south": 47.906, "east": 0.357, "north": 48.0
 # Au-dela, la grille devient inutilement lourde sans rien apporter.
 COTE_MAX_DEG = 3.0
 
+# ---------------------------------------------------------------------------
+# Cadrage de la carte du mur meteo
+#
+# Distinct de bbox_site et de bbox_veille, qui sont des emprises de CALCUL. Ici
+# on ne parle que d'affichage : ou est centree la carte du mur et a quelle
+# echelle. Une emprise de veille a 40 km n'impose pas de la montrer en entier --
+# on peut vouloir cadrer serre sur le circuit et laisser les cellules entrer
+# dans le champ, ou au contraire prendre du recul.
+# ---------------------------------------------------------------------------
+
+# Zoom 10 montre environ 80 km de large sur un ecran de mur : l'emprise de
+# veille par defaut y tient tout juste.
+MUR_ZOOM_DEFAUT = 10
+MUR_ZOOM_MIN = 6
+MUR_ZOOM_MAX = 15
+
+# Le plan IGN plutot que l'orthophoto : a cette echelle, une photo aerienne est
+# une texture sombre ou les couleurs de pluie se lisent mal, alors que le plan
+# donne les villes et les axes -- les reperes dont on a besoin pour dire ou est
+# la cellule. L'orthophoto reste disponible.
+MUR_FONDS = {
+    "plan": {
+        "libelle": "Plan IGN",
+        "url": ("https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile"
+                "&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM"
+                "&FORMAT=image/png&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}"),
+        "max_zoom": 18,
+    },
+    "ortho": {
+        "libelle": "Orthophoto IGN",
+        "url": ("https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile"
+                "&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM"
+                "&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}"),
+        "max_zoom": 19,
+    },
+}
+MUR_FOND_DEFAUT = "plan"
+
 
 def _db():
     from app import db
@@ -86,9 +124,35 @@ def _config_meteo():
     return {
         "bbox_site": bbox,
         "veille_km": int(donnees.get("veille_km") or VEILLE_KM_DEFAUT),
+        "mur": _config_mur(donnees),
         "updated_at": donnees.get("updated_at"),
         "updated_by": donnees.get("updated_by"),
         "par_defaut": "bbox_site" not in donnees,
+    }
+
+
+def _config_mur(donnees):
+    """Cadrage de la carte du mur, avec repli sur le centre du circuit."""
+    centre = donnees.get("mur_centre") or {}
+    fond = donnees.get("mur_fond")
+    try:
+        lat = float(centre.get("lat"))
+        lon = float(centre.get("lon"))
+    except (TypeError, ValueError):
+        lat, lon = LAT_CIRCUIT, LON_CIRCUIT
+    try:
+        zoom = int(donnees.get("mur_zoom") or MUR_ZOOM_DEFAUT)
+    except (TypeError, ValueError):
+        zoom = MUR_ZOOM_DEFAUT
+    if fond not in MUR_FONDS:
+        fond = MUR_FOND_DEFAUT
+    return {
+        "centre": {"lat": lat, "lon": lon},
+        "zoom": max(MUR_ZOOM_MIN, min(MUR_ZOOM_MAX, zoom)),
+        "fond": fond,
+        "fond_url": MUR_FONDS[fond]["url"],
+        "fond_max_zoom": MUR_FONDS[fond]["max_zoom"],
+        "par_defaut": "mur_centre" not in donnees,
     }
 
 
@@ -132,7 +196,18 @@ def get_config():
         "veille_km_min": VEILLE_KM_MIN,
         "veille_km_max": VEILLE_KM_MAX,
         "cote_max_deg": COTE_MAX_DEG,
+        "mur_zoom_min": MUR_ZOOM_MIN,
+        "mur_zoom_max": MUR_ZOOM_MAX,
     }
+    configuration["mur_defaut"] = {
+        "centre": {"lat": LAT_CIRCUIT, "lon": LON_CIRCUIT},
+        "zoom": MUR_ZOOM_DEFAUT,
+        "fond": MUR_FOND_DEFAUT,
+    }
+    configuration["mur_fonds"] = [
+        {"cle": cle, "libelle": v["libelle"], "url": v["url"], "max_zoom": v["max_zoom"]}
+        for cle, v in MUR_FONDS.items()
+    ]
     return jsonify(configuration)
 
 
@@ -152,6 +227,33 @@ def set_config():
     if not (VEILLE_KM_MIN <= veille <= VEILLE_KM_MAX):
         return jsonify({"ok": False, "error": "veille_km_hors_bornes"}), 400
 
+    # Cadrage du mur : optionnel. Un appelant qui ne l'envoie pas ne doit pas
+    # voir le sien remis a zero -- on ne touche a la cle que si elle est fournie.
+    mur = donnees.get("mur")
+    champs_mur = {}
+    if mur is not None:
+        try:
+            lat = float((mur.get("centre") or {})["lat"])
+            lon = float((mur.get("centre") or {})["lon"])
+        except (KeyError, TypeError, ValueError):
+            return jsonify({"ok": False, "error": "mur_centre_invalide"}), 400
+        if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+            return jsonify({"ok": False, "error": "mur_centre_hors_bornes"}), 400
+        try:
+            zoom = int(mur.get("zoom"))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "mur_zoom_invalide"}), 400
+        if not (MUR_ZOOM_MIN <= zoom <= MUR_ZOOM_MAX):
+            return jsonify({"ok": False, "error": "mur_zoom_hors_bornes"}), 400
+        fond = mur.get("fond") or MUR_FOND_DEFAUT
+        if fond not in MUR_FONDS:
+            return jsonify({"ok": False, "error": "mur_fond_inconnu"}), 400
+        champs_mur = {
+            "data.meteo.mur_centre": {"lat": lat, "lon": lon},
+            "data.meteo.mur_zoom": zoom,
+            "data.meteo.mur_fond": fond,
+        }
+
     payload = getattr(request, "user_payload", {}) or {}
     auteur = " ".join(x for x in (payload.get("firstname"), payload.get("lastname")) if x) \
         or payload.get("email") or "inconnu"
@@ -163,6 +265,7 @@ def set_config():
             "data.meteo.veille_km": veille,
             "data.meteo.updated_at": datetime.now(timezone.utc).replace(tzinfo=None),
             "data.meteo.updated_by": auteur,
+            **champs_mur,
         }},
         upsert=True,
     )
@@ -520,6 +623,9 @@ def mur():
             "png": f"/static/meteo/radar/{radar['png_path']}" if radar else None,
             "bbox": radar.get("bbox") if radar else None,
         } if radar else None,
+        # Cadrage de la carte, servi ici pour eviter un second appel : le mur
+        # tourne sans surveillance, chaque requete en plus est une panne en plus.
+        "mur": _config_mur((_config_doc().get("data") or {}).get("meteo") or {}),
     })
 
 
