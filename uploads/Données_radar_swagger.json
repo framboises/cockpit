@@ -1,0 +1,912 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "DonneesPubliquesRadar",
+    "description": "Obtenir les données publiques Radar pour la France.",
+    "contact": {
+      "name": "API Support",
+      "url": "https://portail-api.meteofrance.fr/authenticationendpoint/aide.do",
+      "email": "vd@meteo.fr"
+    },
+    "version": "2.0"
+  },
+  "servers": [
+    {
+      "url": "https://public-api.meteofrance.fr/public/DPRadar/v1"
+    }
+  ],
+  "security": [
+    {
+      "default": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "ProduitsRadarMosaïque",
+      "description": "Services de téléchargement des données mosaique radar les plus récentes."
+    },
+    {
+      "name": "ProduitsRadarIndividuel",
+      "description": "Services de téléchargement des données des radars individuels les plus récentes."
+    }
+  ],
+  "paths": {
+    "/mosaiques": {
+      "get": {
+        "tags": [
+          "ProduitsRadarMosaïque"
+        ],
+        "summary": "Télécharger la liste des zones de mosaïques disponibles.",
+        "operationId": "getmosaiques",
+        "responses": {
+          "200": {
+            "description": "OK\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/json_cat"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "description": "Erreur interne du serveur"
+          },
+          "502": {
+            "description": "Erreur de passerelle"
+          },
+          "503": {
+            "description": "Service indisponible"
+          },
+          "504": {
+            "description": "Temps trop long"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-throttling-tier": "Unlimited",
+        "x-auth-type": "Application & Application User"
+      }
+    },
+    "/mosaiques/{zone}": {
+      "get": {
+        "tags": [
+          "ProduitsRadarMosaïque"
+        ],
+        "summary": "Obtenir la description de la zone",
+        "description": "",
+        "operationId": "getzonemosaiques",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/zone"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/json_cat"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "description": "Erreur interne du serveur"
+          },
+          "502": {
+            "description": "Erreur de passerelle"
+          },
+          "503": {
+            "description": "Service indisponible"
+          },
+          "504": {
+            "description": "Temps trop long"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-throttling-tier": "Unlimited",
+        "x-auth-type": "Application & Application User"
+      }
+    },
+    "/mosaiques/{zone}/observations": {
+      "get": {
+        "tags": [
+          "ProduitsRadarMosaïque"
+        ],
+        "summary": "Télécharger la liste des observations disponibles pour la zone spécifiée.",
+        "description": "",
+        "operationId": "getproduitsmosaiques",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/zone"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/json_cat"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "description": "Erreur interne du serveur"
+          },
+          "502": {
+            "description": "Erreur de passerelle"
+          },
+          "503": {
+            "description": "Service indisponible"
+          },
+          "504": {
+            "description": "Temps trop long"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-throttling-tier": "Unlimited",
+        "x-auth-type": "Application & Application User"
+      }
+    },
+    "/mosaiques/{zone}/observations/{observation}": {
+      "get": {
+        "tags": [
+          "ProduitsRadarMosaïque"
+        ],
+        "summary": "Obtenir la description de l'observation mosaïque disponible.",
+        "description": "",
+        "operationId": "descrproduitsmosaiques",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/zone"
+          },
+          {
+            "$ref": "#/components/parameters/observationM"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/json_cat"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "description": "Erreur interne du serveur"
+          },
+          "502": {
+            "description": "Erreur de passerelle"
+          },
+          "503": {
+            "description": "Service indisponible"
+          },
+          "504": {
+            "description": "Temps trop long"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-throttling-tier": "Unlimited",
+        "x-auth-type": "Application & Application User"
+      }
+    },
+    "/mosaiques/{zone}/observations/{observation}/produit": {
+      "get": {
+        "tags": [
+          "ProduitsRadarMosaïque"
+        ],
+        "summary": "Télécharger le fichier des données mosaïque radar de précipitation à la fréquence 5 minutes.",
+        "description": "Renvoie la mosaïque disponible pour l'observation et la zone demandées (métropole, outre-mer), à la maille demandée et pour la date (TU) la plus récente.",
+        "operationId": "getmosaique",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/zone"
+          },
+          {
+            "$ref": "#/components/parameters/observationM"
+          },
+          {
+            "name": "maille",
+            "in": "query",
+            "description": "en mètre",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK\n\n**Note** : le format renvoyé dépend de la maille (HDF5 ou BUFR zippé).\n",
+            "content": {
+              "application/octet-stream+gzip": {
+                "schema": {
+                  "$ref": "#/components/schemas/gzip"
+                }
+              },
+              "application/x-hdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "HDF5"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "description": "Erreur interne du serveur"
+          },
+          "502": {
+            "description": "Erreur de passerelle"
+          },
+          "503": {
+            "description": "Service indisponible"
+          },
+          "504": {
+            "description": "Temps trop long"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "50KPerMin"
+      }
+    },
+    "/liste-stations": {
+      "get": {
+        "tags": [
+          "ProduitsRadarIndividuel"
+        ],
+        "summary": "Télécharger la liste complète des stations radar.",
+        "description": "Renvoie la liste complète des stations.",
+        "operationId": "getlistestations",
+        "responses": {
+          "200": {
+            "description": "OK\n\n**Note** : Format texte CSV.\n",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string",
+                  "format": "text"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "description": "Erreur interne du serveur"
+          },
+          "502": {
+            "description": "Erreur de passerelle"
+          },
+          "503": {
+            "description": "Service indisponible"
+          },
+          "504": {
+            "description": "Temps trop long"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/stations": {
+      "get": {
+        "tags": [
+          "ProduitsRadarIndividuel"
+        ],
+        "summary": "Télécharger la liste des stations disponibles.",
+        "description": "",
+        "operationId": "getstations",
+        "responses": {
+          "200": {
+            "description": "OK\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/json_cat"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "description": "Erreur interne du serveur"
+          },
+          "502": {
+            "description": "Erreur de passerelle"
+          },
+          "503": {
+            "description": "Service indisponible"
+          },
+          "504": {
+            "description": "Temps trop long"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-throttling-tier": "Unlimited",
+        "x-auth-type": "Application & Application User"
+      }
+    },
+    "/stations/{id_station}": {
+      "get": {
+        "tags": [
+          "ProduitsRadarIndividuel"
+        ],
+        "summary": "Obtenir la description de la station.",
+        "operationId": "getstationinfo",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/station"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/json_cat"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "description": "Erreur interne du serveur"
+          },
+          "502": {
+            "description": "Erreur de passerelle"
+          },
+          "503": {
+            "description": "Service indisponible"
+          },
+          "504": {
+            "description": "Temps trop long"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-throttling-tier": "Unlimited",
+        "x-auth-type": "Application & Application User"
+      }
+    },
+    "/stations/{id_station}/observations": {
+      "get": {
+        "tags": [
+          "ProduitsRadarIndividuel"
+        ],
+        "summary": "Télécharger la liste des observations disponible pour la station spécifiée.",
+        "operationId": "getstationobs",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/station"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/json_cat"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "description": "Erreur interne du serveur"
+          },
+          "502": {
+            "description": "Erreur de passerelle"
+          },
+          "503": {
+            "description": "Service indisponible"
+          },
+          "504": {
+            "description": "Temps trop long"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-throttling-tier": "Unlimited",
+        "x-auth-type": "Application & Application User"
+      }
+    },
+    "/stations/{id_station}/observations/{observation}": {
+      "get": {
+        "tags": [
+          "ProduitsRadarIndividuel"
+        ],
+        "summary": "Obtenir la description de l'observation pour la station spécifiée.",
+        "operationId": "getstationobsdescr",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/station"
+          },
+          {
+            "$ref": "#/components/parameters/observationS"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/json_cat"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "description": "Erreur interne du serveur"
+          },
+          "502": {
+            "description": "Erreur de passerelle"
+          },
+          "503": {
+            "description": "Service indisponible"
+          },
+          "504": {
+            "description": "Temps trop long"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-throttling-tier": "Unlimited",
+        "x-auth-type": "Application & Application User"
+      }
+    },
+    "/stations/{id_station}/observations/{observation}/produit": {
+      "get": {
+        "tags": [
+          "ProduitsRadarIndividuel"
+        ],
+        "summary": "Télécharger le fichier des données de précipitations du radar individuel à la fréquence 5 minutes.",
+        "description": "Renvoie les données d'observations du radar, pour un tour d'antenne, à la date (TU) la plus récente.",
+        "operationId": "getpolaires",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/station"
+          },
+          {
+            "$ref": "#/components/parameters/observationS"
+          },
+          {
+            "$ref": "#/components/parameters/tour"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK\n\n**Note** : Format BUFR zippé.\n",
+            "content": {
+              "application/octet-stream+gzip": {
+                "schema": {
+                  "$ref": "#/components/schemas/gzip"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          },
+          "500": {
+            "description": "Erreur interne du serveur"
+          },
+          "502": {
+            "description": "Erreur de passerelle"
+          },
+          "503": {
+            "description": "Service indisponible"
+          },
+          "504": {
+            "description": "Temps trop long"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "50KPerMin"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "gzip": {
+        "type": "string",
+        "format": "binary"
+      },
+      "json_cat": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "atribution": {
+            "type": "string"
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "href": {
+                  "type": "string"
+                },
+                "rel": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "400": {
+        "description": "Mauvaise requête.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "integer"
+                },
+                "msg": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "401": {
+        "description": "Accès non autorisé",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "integer"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Donnée absente.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "integer"
+                },
+                "msg": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "422": {
+        "description": "Requête incomprehensible ou incomplète",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "detail": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string"
+                      },
+                      "loc": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "msg": {
+                        "type": "string"
+                      },
+                      "input": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "429": {
+        "description": "Seuil de requête atteint.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "integer"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "nextAccessTime": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "observationM": {
+        "name": "observation",
+        "in": "path",
+        "required": true,
+        "style": "simple",
+        "explode": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "observationS": {
+        "name": "observation",
+        "in": "path",
+        "required": true,
+        "style": "simple",
+        "explode": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "zone": {
+        "name": "zone",
+        "in": "path",
+        "required": true,
+        "style": "simple",
+        "explode": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "station": {
+        "name": "id_station",
+        "in": "path",
+        "description": "Identifiant du radar parmi une liste de référence",
+        "required": true,
+        "style": "simple",
+        "explode": true,
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "tour": {
+        "name": "tour_antenne",
+        "in": "query",
+        "description": "Un caractère (A-H).\n\n**Attention !** Ce paramètre est obligatoire pour les observations PAM et PAG\n",
+        "required": false,
+        "style": "form",
+        "explode": true,
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "securitySchemes": {
+      "default": {
+        "type": "oauth2",
+        "flows": {
+          "implicit": {
+            "authorizationUrl": "https://public-api.meteofrance.fr/authorize",
+            "scopes": {}
+          }
+        }
+      }
+    }
+  }
+}

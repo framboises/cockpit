@@ -32,6 +32,33 @@ function renderMeteoWidget(data) {
     }
     var label = document.getElementById('meteo-risk-label');
     if (label) label.textContent = data.risk_label;
+
+    // La vigilance Meteo-France prime sur les seuils internes (calcul dans
+    // app.py). On dit ici D'OU vient le niveau affiche : un shield orange
+    // n'appelle pas la meme reaction selon qu'il vient d'un seuil maison ou
+    // d'un bulletin officiel opposable.
+    var v = data.vigilance;
+    var source = document.getElementById('meteo-risk-source');
+    if (!source && gauge) {
+      source = document.createElement('span');
+      source.id = 'meteo-risk-source';
+      source.className = 'meteo-risk-source';
+      gauge.appendChild(source);
+    }
+    if (source) {
+      if (v && v.perime) {
+        source.textContent = 'bulletin perime';
+        source.title = 'Bulletin Meteo-France du ' + (v.update_time || '?') +
+          ' — plus de 6 h, il n eleve plus le niveau';
+      } else if (v && v.couleur && v.couleur !== 'vert') {
+        source.textContent = 'Vigilance Meteo-France ' + v.couleur;
+        source.title = 'Bulletin du ' + (v.update_time || '?') +
+          (v.age_h != null ? ' (il y a ' + v.age_h + ' h)' : '');
+      } else {
+        source.textContent = '';
+        source.title = '';
+      }
+    }
   }
 
   // Snapshot conditions actuelles

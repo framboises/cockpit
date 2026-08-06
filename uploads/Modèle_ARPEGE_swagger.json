@@ -1,0 +1,4229 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "ARPEGE",
+    "version": "1.0"
+  },
+  "servers": [
+    {
+      "url": "https://public-api.meteofrance.fr/public/arpege/1.0"
+    }
+  ],
+  "security": [
+    {
+      "default": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "ARPEGE 0.1",
+      "description": "Service de consultation (WMS) et de téléchargement (WCS) des données issues du modèle de prévision numérique atmosphérique global français. Résolution 0.1 degré sur l'Europe. Échéances 0 à échéance max.\n\nView service (WMS) and download service (WCS) of data from the French numerical weather prediction global model. Resolution 0.1 degree over Europe. Steps 0 to max h."
+    },
+    {
+      "name": "ARPEGE 0.25",
+      "description": "Service de consultation (WMS) et de téléchargement (WCS) des données issues du modèle de prévision  numérique atmosphérique global français.  Résolution 0.25 degré sur le globe. Échéances 0 à échéance max.\n\nView service (WMS) and download service (WCS) of data from the French numerical weather prediction global model.   Resolution 0.25 degree on the globe. Steps 0 to max h.\n"
+    },
+    {
+      "name": "Analyse ARPEGE ATOURX01",
+      "description": "Service de visualisation (WMS) et de téléchargement (WCS) des données issues des analyses du modèle français de prévision atmosphérique  ARPEGE à résolution 0,1° en points de grille sur une zone Atlantique-Europe étendue (sur la zone 100E, 100W, 80N, 10S). Échéances 0 à 102h par pas de 3 heures.\n\nView service (WMS) and download service (WCS) of data from analyzes of the French atmospheric forecast model  ARPEGE at 0.1° resolution in grid points over an extended Atlantic-Europe zone (over a 100E, 100W, 80N, 10S zone). Steps 0 to 102 hours by 3 hours"
+    },
+    {
+      "name": "Prévisions ARPEGE ATOURX01",
+      "description": "Service de visualisation (WMS) des données issues du modèle de prévision  numérique atmosphérique de prévision numérique global français sur une  zone Atlantique-Europe étendue. Résolution 0.1 degré sur un domaine  Atlantique-Europe étendu. Échéances 0 à échéance max par pas de 3 heures.\n\nView service (WMS) of data from the French global numerical weather  prediction model on a large area over Atlantic and Europe. Resolution 0.1  degree on a large area over Atlantic and Europe. Steps 0 to max h by 3 hours"
+    },
+    {
+      "name": "Prévisions ARPEGE EURAT1S20",
+      "description": "Service de visualisation (WMS) des données issues du modèle de prévision  numérique atmosphérique de prévision numérique global français sur  une zone Europe étendue. Résolution 0.05 degré sur un domaine Europe étendu.  Échéances 0 à échéance max par pas de 3 heures.\n\nView service (WMS) of data from the French global numerical weather prediction  model on a large area over Europe. Resolution 0.05 degree on a large area over Europe.  Steps 0 to max h by 3 hours"
+    }
+  ],
+  "paths": {
+    "/wms/MF-NWP-GLOBAL-ARPEGE-01-EUROPE-WMS/GetCapabilities": {
+      "get": {
+        "tags": [
+          "ARPEGE 0.1"
+        ],
+        "description": "Le GetCapabilities retourne les métadonnées du service (couches proposées, projections associées, auteur…)\n\nThe GetCapabilities returns the metadata of the service (proposed layers, associated projections, author, etc.)",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WMS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WMS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WMS version. The only accepted value is 1.3.0",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.3.0"
+              ]
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "default": "eng",
+              "enum": [
+                "eng",
+                "fre"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wms/MF-NWP-GLOBAL-ARPEGE-01-EUROPE-WMS/GetMap": {
+      "get": {
+        "tags": [
+          "ARPEGE 0.1"
+        ],
+        "description": "GetMap permet d'obtenir une carte (format d'image) dont les caractéristiques sont définies par le client à l’aide de paramètres standardisés\n\nGetMap return a map (image format) whose characteristics are defined by the customer using standardized parameters        ",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WMS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WMS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WMS version. The only accepted value is 1.3.0",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.3.0"
+              ]
+            }
+          },
+          {
+            "name": "layers",
+            "in": "query",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "Pressure reduced to MSL/Pression réduite au niveau de la mer.",
+                "value": "PRESSURE__MEAN_SEA_LEVEL"
+              },
+              "2": {
+                "summary": "Absolute vorticity at isobaric surface/Tourbillon absolu sur des surfaces isobares.",
+                "value": "ABSOLUTE_VORTICITY__ISOBARIC_SURFACE"
+              },
+              "3": {
+                "summary": "Cloud water/Eau nuageuse",
+                "value": "CLOUD_WATER__ISOBARIC_SURFACE"
+              },
+              "4": {
+                "summary": "Dew point temperature at isobaric surface/Température du point de rosée sur des surfaces isobares.",
+                "value": "DEW_POINT_TEMPERATURE__ISOBARIC_SURFACE"
+              },
+              "5": {
+                "summary": "Geopotential at isobaric surface/Altitude géopotentielle sur des surfaces isobares.",
+                "value": "GEOPOTENTIAL__ISOBARIC_SURFACE"
+              },
+              "6": {
+                "summary": "Potential temperature/Température potentielle",
+                "value": "POTENTIAL_TEMPERATURE__ISOBARIC_SURFACE"
+              },
+              "7": {
+                "summary": "Potential Vorticity at isobaric surface/Tourbillon potentiel sur des surfaces isobares.",
+                "value": "POTENTIAL_VORTICITY__ISOBARIC_SURFACE"
+              },
+              "8": {
+                "summary": "Pseudo-adiabatic potential temperature at isobaric surface/Température pseudo-adiabatique potentielle du thermomètre mouillé sur des surfaces isobares.",
+                "value": "PSEUDO_ADIABATIC_POTENTIAL_TEMPERATURE__ISOBARIC_SURFACE"
+              },
+              "9": {
+                "summary": "Horizontal wind divergence/Divergence du vent horizontal",
+                "value": "RELATIVE_DIVERGENCE__ISOBARIC_SURFACE"
+              },
+              "10": {
+                "summary": "Relative humidity at isobaric surface/Humidité relative sur des surfaces isobares.",
+                "value": "RELATIVE_HUMIDITY__ISOBARIC_SURFACE"
+              },
+              "11": {
+                "summary": "Relative vorticity/Tourbillon relatif",
+                "value": "RELATIVE_VORTICITY__ISOBARIC_SURFACE"
+              },
+              "12": {
+                "summary": "Specific cloud ice water content at isobaric surface/Glace nuageuse sur des surfaces isobares.",
+                "value": "SPECIFIC_CLOUD_ICE_WATER_CONTENT__ISOBARIC_SURFACE"
+              },
+              "13": {
+                "summary": "Temperature at isobaric surface/Température de l'air sur des surfaces isobares.",
+                "value": "TEMPERATURE__ISOBARIC_SURFACE"
+              },
+              "14": {
+                "summary": "Turbulent kinetic energy at isobaric surface/Energie cinétique turbulente sur des surfaces isobares.",
+                "value": "TURBULENT_KINETIC_ENERGY__ISOBARIC_SURFACE"
+              },
+              "15": {
+                "summary": "Vertical velocity pressure at isobaric surface/Vitesse verticale sur des surfaces isobares.",
+                "value": "VERTICAL_VELOCITY_PRESSURE__ISOBARIC_SURFACE"
+              },
+              "16": {
+                "summary": "Wind dicection and speed at isobaric surface/Direction et force du vent sur des surfaces isobares.",
+                "value": "WIND__ISOBARIC_SURFACE"
+              },
+              "17": {
+                "summary": "Wind speed at isobaric surface/Force du vent sur des surfaces isobares.",
+                "value": "WIND_SPEED__ISOBARIC_SURFACE"
+              },
+              "18": {
+                "summary": "Brightness temperature/Température de brillance dans le canal infrarouge 10.8 microns.",
+                "value": "BRIGHTNESS_TEMPERATURE__GROUND_OR_WATER_SURFACE"
+              },
+              "19": {
+                "summary": "Brightness temperature in IR 6,2 micron/Température de brillance dans le canal infrarouge 6.2 microns.",
+                "value": "BRIGHTNESS_TEMPERATURE_62__GROUND_OR_WATER_SURFACE"
+              },
+              "20": {
+                "summary": "Convective available potential energy/CAPE de la particule la plus instable en basses couches avec coefficient d'entraînement.",
+                "value": "CONVECTIVE_AVAILABLE_POTENTIAL_ENERGY__GROUND_OR_WATER_SURFACE"
+              },
+              "21": {
+                "summary": "Convective cloud cover/Nébulosité convective",
+                "value": "CONVECTIVE_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "22": {
+                "summary": "Convective inhibition/Inhibition convective",
+                "value": "CONVECTIVE_INHIBITION__GROUND_OR_WATER_SURFACE"
+              },
+              "23": {
+                "summary": "Convective precipitations/Précipitation sous maille",
+                "value": "CONVECTIVE_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "24": {
+                "summary": "Convective snow/Précipitation neigeuse convective",
+                "value": "CONVECTIVE_SNOW__GROUND_OR_WATER_SURFACE"
+              },
+              "25": {
+                "summary": "Convective water precipitation/Précipitation liquides convective",
+                "value": "CONVECTIVE_WATER_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "26": {
+                "summary": "downward short-wave radiation flux/Flux solaire descendant",
+                "value": "DOWNWARD_SHORT_WAVE_RADIATION_FLUX__GROUND_OR_WATER_SURFACE"
+              },
+              "27": {
+                "summary": "Geometric height/Altitude géométrique.",
+                "value": "GEOMETRIC_HEIGHT__GROUND_OR_WATER_SURFACE"
+              },
+              "28": {
+                "summary": "High cloud cover/Nébulosité de l'étage supérieur.",
+                "value": "HIGH_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "29": {
+                "summary": "Large scale precipitation/Précipitations de grande échelle",
+                "value": "LARGE_SCALE_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "30": {
+                "summary": "Large scale snow/Précipitation neigeuse de grande échelle",
+                "value": "LARGE_SCALE_SNOW__GROUND_OR_WATER_SURFACE"
+              },
+              "31": {
+                "summary": "Large scale water precipitation/Précipitations liquide de grande échelle",
+                "value": "LARGE_SCALE_WATER_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "32": {
+                "summary": "Low cloud cover/Nébulosité de l'étage inférieur.",
+                "value": "LOW_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "33": {
+                "summary": "Medium cloud cover/Nébulosité de l'étage moyen.",
+                "value": "MEDIUM_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "34": {
+                "summary": "Horizontal moisture convergence/Diagnostic instantané de convergence d'humidité",
+                "value": "MOISTURE_CONVERGENCE__GROUND_OR_WATER_SURFACE"
+              },
+              "35": {
+                "summary": "Planetary boundary layer height/Hauteur de la couche limite.",
+                "value": "PLANETARY_BOUNDARY_LAYER_HEIGHT__GROUND_OR_WATER_SURFACE"
+              },
+              "36": {
+                "summary": "Integrated water vapour content on the vertical./Contenu intégré en vapeur d'eau sur la verticale.",
+                "value": "PRECIPITABLE_WATER__GROUND_OR_WATER_SURFACE"
+              },
+              "37": {
+                "summary": "Type of precipitation most frequent in the last  3 hours/Type de précipitation le plus courant sur 3 heures",
+                "value": "PRECIPITATION_TYPE_180_MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "38": {
+                "summary": "Type of precipitation most frequent in the last hour/Type de précipitation le plus courant sur 1 heure",
+                "value": "PRECIPITATION_TYPE_60_MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "39": {
+                "summary": "Pressure/Pression sol.",
+                "value": "PRESSURE__GROUND_OR_WATER_SURFACE"
+              },
+              "40": {
+                "summary": "Type of precipitation most severe in the last 3 hours/Type de précipitation le plus sévère sur 3 heures",
+                "value": "SEVERE_PRECIPITATION_TYPE_180_MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "41": {
+                "summary": "Type of precipitation most severe in the last hour/Type de précipitation le plus sévère sur 1 heure",
+                "value": "SEVERE_PRECIPITATION_TYPE_60_MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "42": {
+                "summary": "Snow depth/Epaisseur de neige au sol",
+                "value": "SNOW_DEPTH__GROUND_OR_WATER_SURFACE"
+              },
+              "43": {
+                "summary": "Temperature/Température de surface.",
+                "value": "TEMPERATURE__GROUND_OR_WATER_SURFACE"
+              },
+              "44": {
+                "summary": "Total cloud cover/Nébulosité totale.",
+                "value": "TOTAL_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "45": {
+                "summary": "Total precipitation/Quantité totale de précipitations.",
+                "value": "TOTAL_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "46": {
+                "summary": "Total snow precipitation/Quantité de précipitations sous forme de neige.",
+                "value": "TOTAL_SNOW_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "47": {
+                "summary": "Total water precipitation/Quantité de précipitations sous forme liquide.",
+                "value": "TOTAL_WATER_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "48": {
+                "summary": "Visibility (min) in the last 3 hours/Visibilité mini sur 3 heures",
+                "value": "VISIBILITY_MINI_180MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "49": {
+                "summary": "Visibility (min) in the last hour/Visibilité mini sur 1 heure",
+                "value": "VISIBILITY_MINI_60MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "50": {
+                "summary": "Visibility under precipitation (mini) in the last 3 hours/Visibilité mini sous précipitations sur 3 heures",
+                "value": "VISIBILITY_MINI_PRECIP_180MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "51": {
+                "summary": "Visibility under precipitation (mini) in the last hour/Visibilité mini sous précipitations sur 1 heure",
+                "value": "VISIBILITY_MINI_PRECIP_60MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "52": {
+                "summary": "Water equivalent of accumulated snow depth/Equivalent eau de l’épaisseur de neige accumulée",
+                "value": "WATER_EQUIVALENT_ACCUMULATED_SNOW__GROUND_OR_WATER_SURFACE"
+              },
+              "53": {
+                "summary": "Altitude where the temperature is equal to -10°C, with an ascending diagnosis, from positive to negative./Altitude pour laquelle la température est égale à -20°C, avec un diagnostic ascendant, du positif vers le négatif.",
+                "value": "ALTITUDE_TEMPERATURE__ISOTHERMAL_LEVEL_25315"
+              },
+              "54": {
+                "summary": "Altitude where the temperature is equal to -10°C, with an ascending diagnosis, from positive to negative./Altitude pour laquelle la température est égale à -10°C, avec un diagnostic ascendant, du positif vers le négatif.",
+                "value": "ALTITUDE_TEMPERATURE__ISOTHERMAL_LEVEL_26315"
+              },
+              "55": {
+                "summary": "Altitude where the temperature is equal to 0°C, with an ascending diagnosis, from positive to negative./Altitude pour laquelle la température est égale à 0°C, avec un diagnostic ascendant, du positif vers le négatif.",
+                "value": "ALTITUDE_TEMPERATURE__ISOTHERMAL_LEVEL_27315"
+              },
+              "56": {
+                "summary": "Altitude of dew point temperature at 273.15K/Altitude de la température du point de rosé à 0°C",
+                "value": "ALTITUDE_TPW__ISOTHERMAL_LEVEL_27315"
+              },
+              "57": {
+                "summary": "Altitude of dew point temperature at 274.15K/Altitude de la température du point de rosé à 1°C",
+                "value": "ALTITUDE_TPW__ISOTHERMAL_LEVEL_27415"
+              },
+              "58": {
+                "summary": "Altitude of dew point temperature at 274.65K/Altitude de la température du point de rosé à 1,5°C",
+                "value": "ALTITUDE_TPW__ISOTHERMAL_LEVEL_27465"
+              },
+              "59": {
+                "summary": "Cloud water/Eau nuageuse",
+                "value": "CLOUD_WATER__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "60": {
+                "summary": "Dew point temperature height levels at specified height level above ground/Température du point de rosée en niveaux hauteur.",
+                "value": "DEW_POINT_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "61": {
+                "summary": "Maximum temperature at specified height level above ground/Température maximale de l'air en niveaux hauteur",
+                "value": "MAXIMUM_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "62": {
+                "summary": "Minimum temperature at specified height level above ground/Température minimale de l'air en niveaux hauteur",
+                "value": "MINIMUM_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "63": {
+                "summary": "Pressure height levels at specified height level above ground/Pression en niveaux hauteur.",
+                "value": "PRESSURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "64": {
+                "summary": "Pseudo-adiabatic potential temperature at isobaric surfaces/Température pseudo-adiabatique potentielle du thermomètre mouillé sur des surfaces isobares.",
+                "value": "PSEUDO_ADIABATIC_POTENTIAL_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "65": {
+                "summary": "Relative humidity at specified height level above ground/Humidité relative en niveaux hauteur.",
+                "value": "RELATIVE_HUMIDITY__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "66": {
+                "summary": "Specific cloud ice water content height levels at specified height level above ground/Glace nuageuse en niveaux hauteur.",
+                "value": "SPECIFIC_CLOUD_ICE_WATER_CONTENT__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "67": {
+                "summary": "Temperature at specified height level above ground/Température de l'air en niveaux hauteur.",
+                "value": "TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "68": {
+                "summary": "Turbulent kinetic energy height levels at specified height level above ground/Energie cinétique turbulente en niveaux hauteur.",
+                "value": "TURBULENT_KINETIC_ENERGY__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "69": {
+                "summary": "Wind direction and speed at height levels at specified height level above ground/Direction et force du vent en niveaux hauteur.",
+                "value": "WIND__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "70": {
+                "summary": "Wind direction and speed at specified height level above ground/Direction et force du vent en niveaux hauteur.",
+                "value": "WIND_GUST__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "71": {
+                "summary": "Wind speed height levels at specified height level above ground/Force du vent en niveaux hauteur.",
+                "value": "WIND_SPEED__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "72": {
+                "summary": "Wind speed (gust) at specified height level above ground/Rafale de vent en niveaux hauteur.",
+                "value": "WIND_SPEED_GUST__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "73": {
+                "summary": "Absolute vorticity at 1.5 PVU surface/Tourbillon Absolu au niveau 1.5 PVU.",
+                "value": "ABSOLUTE_VORTICITY__POTENTIAL_VORTICITY_SURFACE_1500"
+              },
+              "74": {
+                "summary": "Absolute vorticity at 2 PVU surface/Tourbillon Absolu au niveau 2 PVU.",
+                "value": "ABSOLUTE_VORTICITY__POTENTIAL_VORTICITY_SURFACE_2000"
+              },
+              "75": {
+                "summary": "Geopotential height at 1.5 PVU surface/Géopotentiel (m) au niveau 1.5 PVU",
+                "value": "GEOPOTENTIAL__POTENTIAL_VORTICITY_SURFACE_1500"
+              },
+              "76": {
+                "summary": "Geopotential height at 2 PVU surface/Géopotentiel (m) au niveau 2 PVU",
+                "value": "GEOPOTENTIAL__POTENTIAL_VORTICITY_SURFACE_2000"
+              },
+              "77": {
+                "summary": "Theta ( potential temperature ) at 1.5 PVU surface/Theta (Température potentielle) au niveau 1.5 PVU",
+                "value": "POTENTIAL_TEMPERATURE__POTENTIAL_VORTICITY_SURFACE_1500"
+              },
+              "78": {
+                "summary": "Theta ( potential temperature ) at 2 PVU surface/Theta (Température potentielle) au niveau 2 PVU",
+                "value": "POTENTIAL_TEMPERATURE__POTENTIAL_VORTICITY_SURFACE_2000"
+              },
+              "79": {
+                "summary": "Wind direction and speed at 1.5 PVU surface/Direction et force du vent à la surface 1.5 PVU",
+                "value": "WIND__POTENTIAL_VORTICITY_SURFACE_1500"
+              },
+              "80": {
+                "summary": "Wind direction and speed at 2.0 PVU surface/Direction et force du vent à la surface 2.0 PVU",
+                "value": "WIND__POTENTIAL_VORTICITY_SURFACE_2000"
+              },
+              "81": {
+                "summary": "Wind speed at 1.5 PVU surface/Force du vent au niveau 1.5 PVU",
+                "value": "WIND_SPEED__POTENTIAL_VORTICITY_SURFACE_1500"
+              },
+              "82": {
+                "summary": "Wind speed at 2 PVU surface/Force du vent au niveau 2 PVU",
+                "value": "WIND_SPEED__POTENTIAL_VORTICITY_SURFACE_2000"
+              }
+            }
+          },
+          {
+            "name": "crs",
+            "in": "query",
+            "description": "CRS. The only accepted value is EPSG:4326",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "EPSG:4326"
+              ]
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Format",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image/png"
+              ]
+            }
+          },
+          {
+            "name": "bbox",
+            "in": "query",
+            "description": "bbox",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "20,-32,72,42",
+                "value": "20,-32,72,42"
+              }
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "description": "height",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "256",
+                "value": "256"
+              }
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "description": "width",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "256",
+                "value": "256"
+              }
+            }
+          },
+          {
+            "name": "transparent",
+            "in": "query",
+            "description": "transparent true or false",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "true",
+                "value": "true"
+              },
+              "2": {
+                "summary": "false",
+                "value": "false"
+              }
+            }
+          },
+          {
+            "name": "reference_time",
+            "in": "query",
+            "description": "reference_time in YYYY-MM-JJTHH:mm:ssZ format (see the result of the GetCapabilities for available reference_time)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "time",
+            "in": "query",
+            "description": "time in YYYY-MM-JJTHH:mm:ssZ format (see the result of the GetCapabilities for available time)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "elevation",
+            "in": "query",
+            "description": "elevation (see the result of the GetCapabilities for available elevation)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "styles",
+            "in": "query",
+            "description": "styles (see the result of the GetCapabilities for available styles)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wcs/MF-NWP-GLOBAL-ARPEGE-01-EUROPE-WCS/GetCapabilities": {
+      "get": {
+        "tags": [
+          "ARPEGE 0.1"
+        ],
+        "description": "GetCapabilities retourne la liste des opérations supportées par le service, et la liste des champs (coverages) disponibles\n\nGetCapabilities returns the list of operations supported by the service, and the list of available fields (coverages)",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WCS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WCS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WCS version. The only accepted value is 2.0.1",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2.0.1"
+              ]
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "default": "eng",
+              "enum": [
+                "eng",
+                "fre"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wcs/MF-NWP-GLOBAL-ARPEGE-01-EUROPE-WCS/DescribeCoverage": {
+      "get": {
+        "tags": [
+          "ARPEGE 0.1"
+        ],
+        "description": "DescribeCoverage décrit la structure du coverage (extension spatiale, extension temporelle, géométrie de la grille, type des données et unité des valeurs sur la grille)\n\nDescribeCoverage describes the coverage structure (spatial extension, temporal extension, grid geometry, data type and unit of values on the grid)",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WCS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WCS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WCS version. The only accepted value is 2.0.1",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2.0.1"
+              ]
+            }
+          },
+          {
+            "name": "coverageID",
+            "in": "query",
+            "description": "Identifiant du coverage (tel qu'il apparaît dans la réponse GetCapabilities)",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wcs/MF-NWP-GLOBAL-ARPEGE-01-EUROPE-WCS/GetCoverage": {
+      "get": {
+        "tags": [
+          "ARPEGE 0.1"
+        ],
+        "description": "GetCoverage renvoie le coverage\n\n\nGetCoverage return the coverage",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WCS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WCS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WCS version. The only accepted value is 2.0.1",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2.0.1"
+              ]
+            }
+          },
+          {
+            "name": "coverageid",
+            "in": "query",
+            "description": "Identifiant du coverage (tel qu'il apparaît dans la réponse GetCapabilities)",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subset",
+            "in": "query",
+            "description": "Paramètres de sous-sélection, selon les différents axes. Il faut que la combinatoire des paramètres de sous-sélection dans la requête définissent un sous-ensemble de dimension 2 au maximum.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Format",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image/tiff",
+                "application/wmo-grib"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wms/MF-NWP-GLOBAL-ARPEGE-025-GLOBE-WMS/GetCapabilities": {
+      "get": {
+        "tags": [
+          "ARPEGE 0.25"
+        ],
+        "description": "Le GetCapabilities retourne les métadonnées du service (couches proposées, projections associées, auteur…)\n\nThe GetCapabilities returns the metadata of the service (proposed layers, associated projections, author, etc.)",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WMS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WMS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WMS version. The only accepted value is 1.3.0",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.3.0"
+              ]
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "default": "eng",
+              "enum": [
+                "eng",
+                "fre"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wms/MF-NWP-GLOBAL-ARPEGE-025-GLOBE-WMS/GetMap": {
+      "get": {
+        "tags": [
+          "ARPEGE 0.25"
+        ],
+        "description": "GetMap permet d'obtenir une carte (format d'image) dont les caractéristiques sont définies par le client à l’aide de paramètres standardisés\n\nGetMap return a map (image format) whose characteristics are defined by the customer using standardized parameters        ",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WMS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WMS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WMS version. The only accepted value is 1.3.0",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.3.0"
+              ]
+            }
+          },
+          {
+            "name": "layers",
+            "in": "query",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "Pressure reduced to MSL/Pression réduite au niveau de la mer.",
+                "value": "PRESSURE__MEAN_SEA_LEVEL"
+              },
+              "2": {
+                "summary": "Absolute vorticity at isobaric surfaces/Tourbillon absolu sur des surfaces isobares.",
+                "value": "ABSOLUTE_VORTICITY__ISOBARIC_SURFACE"
+              },
+              "3": {
+                "summary": "Cloud water/Eau nuageuse",
+                "value": "CLOUD_WATER__ISOBARIC_SURFACE"
+              },
+              "4": {
+                "summary": "Dew point temperature at isobaric surfaces/Température du point de rosée sur des surfaces isobares.",
+                "value": "DEW_POINT_TEMPERATURE__ISOBARIC_SURFACE"
+              },
+              "5": {
+                "summary": "Geopotential height of isobaric surfaces/Altitude géopotentielle des surfaces isobares.",
+                "value": "GEOPOTENTIAL__ISOBARIC_SURFACE"
+              },
+              "6": {
+                "summary": "Potential temperature/Température potentielle",
+                "value": "POTENTIAL_TEMPERATURE__ISOBARIC_SURFACE"
+              },
+              "7": {
+                "summary": "Potential Vorticity at isobaric surfaces/Tourbillon potentiel sur des surfaces isobares.",
+                "value": "POTENTIAL_VORTICITY__ISOBARIC_SURFACE"
+              },
+              "8": {
+                "summary": "Pseudo-adiabatic potential temperature at isobaric surfaces/Température pseudo-adiabatique potentielle du thermomètre mouillé sur des surfaces isobares.",
+                "value": "PSEUDO_ADIABATIC_POTENTIAL_TEMPERATURE__ISOBARIC_SURFACE"
+              },
+              "9": {
+                "summary": "Horizontal wind divergence/Divergence du vent horizontal",
+                "value": "RELATIVE_DIVERGENCE__ISOBARIC_SURFACE"
+              },
+              "10": {
+                "summary": "Relative humidity at isobaric surfaces/Humidité relative sur des surfaces isobares.",
+                "value": "RELATIVE_HUMIDITY__ISOBARIC_SURFACE"
+              },
+              "11": {
+                "summary": "Relative vorticity/Tourbillon relatif",
+                "value": "RELATIVE_VORTICITY__ISOBARIC_SURFACE"
+              },
+              "12": {
+                "summary": "Specific cloud ice water content at isobaric surfaces/Glace nuageuse sur des surfaces isobares.",
+                "value": "SPECIFIC_CLOUD_ICE_WATER_CONTENT__ISOBARIC_SURFACE"
+              },
+              "13": {
+                "summary": "Temperature at isobaric surfaces/Température de l'air sur des surfaces isobares.",
+                "value": "TEMPERATURE__ISOBARIC_SURFACE"
+              },
+              "14": {
+                "summary": "Turbulent kinetic energy at isobaric surfaces/Energie cinétique turbulente sur des surfaces isobares.",
+                "value": "TURBULENT_KINETIC_ENERGY__ISOBARIC_SURFACE"
+              },
+              "15": {
+                "summary": "Vertical velocity pressure at isobaric surfaces/Vitesse verticale sur des surfaces isobares.",
+                "value": "VERTICAL_VELOCITY_PRESSURE__ISOBARIC_SURFACE"
+              },
+              "16": {
+                "summary": "Wind direction and speed at isobaric surfaces/Direction et force du vent sur des surfaces isobares.",
+                "value": "WIND__ISOBARIC_SURFACE"
+              },
+              "17": {
+                "summary": "Wind speed at isobaric surfaces/Force du vent sur des surfaces isobares.",
+                "value": "WIND_SPEED__ISOBARIC_SURFACE"
+              },
+              "18": {
+                "summary": "Average lightning strike density over 3 hours/Densité d'éclairs Moyenne sur 3H",
+                "value": "AVERAGE_LIGHTNING_STRIKE_DENSITY_OVER_3HOURS__GROUND_OR_WATER_SURFACE"
+              },
+              "19": {
+                "summary": "Maximum CAPE calculated using virtual potential temperature/CAPE maximale calculée en utilisant la température potentielle virtuelle",
+                "value": "CONVECTIVE_AVAILABLE_POTENTIAL_ENERGY__GROUND_OR_WATER_SURFACE"
+              },
+              "20": {
+                "summary": "CAPE model, calculated at any point in the model where it triggers its convection pattern/CAPE modèle, calculée en tout point du modèle où celui-ci déclenche son schéma de convection",
+                "value": "CONVECTIVE_AVAILABLE_POTENTIAL_ENERGY_MOD__GROUND_OR_WATER_SURFACE"
+              },
+              "21": {
+                "summary": "Convective cloud cover/Nébulosité convective",
+                "value": "CONVECTIVE_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "22": {
+                "summary": "Convective inhibition/Inhibition convective",
+                "value": "CONVECTIVE_INHIBITION__GROUND_OR_WATER_SURFACE"
+              },
+              "23": {
+                "summary": "Total convective precipitation/Quantité de précipitations convective.",
+                "value": "CONVECTIVE_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "24": {
+                "summary": "Convective snow/Précipitation neigeuse convective",
+                "value": "CONVECTIVE_SNOW__GROUND_OR_WATER_SURFACE"
+              },
+              "25": {
+                "summary": "Convective water precipitation/Précipitation liquides convective",
+                "value": "CONVECTIVE_WATER_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "26": {
+                "summary": "downward short-wave radiation flux/Flux solaire descendant",
+                "value": "DOWNWARD_SHORT_WAVE_RADIATION_FLUX__GROUND_OR_WATER_SURFACE"
+              },
+              "27": {
+                "summary": "Geometric height/Altitude géométrique.",
+                "value": "GEOMETRIC_HEIGHT__GROUND_OR_WATER_SURFACE"
+              },
+              "28": {
+                "summary": "High cloud cover/Nébulosité de l'étage supérieur.",
+                "value": "HIGH_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "29": {
+                "summary": "Large scale precipitation/Précipitations de grande échelle",
+                "value": "LARGE_SCALE_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "30": {
+                "summary": "Large scale snow/Précipitation neigeuse de grande échelle",
+                "value": "LARGE_SCALE_SNOW__GROUND_OR_WATER_SURFACE"
+              },
+              "31": {
+                "summary": "Large scale water precipitation/Précipitations liquide de grande échelle",
+                "value": "LARGE_SCALE_WATER_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "32": {
+                "summary": "Lightning strike density cumulated/Densité d'éclairs Cumulée",
+                "value": "LIGHTNING_STRIKE_DENSITY_CUMULATED__GROUND_OR_WATER_SURFACE"
+              },
+              "33": {
+                "summary": "Low cloud cover/Nébulosité de l'étage inférieur.",
+                "value": "LOW_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "34": {
+                "summary": "CAPE calculated using the particle method, with drag-out coefficient/CAPE calculée selon la méthode de la particule, avec coefficient d’entraînement",
+                "value": "MEAN_LAYER_CAPE__GROUND_OR_WATER_SURFACE"
+              },
+              "35": {
+                "summary": "Medium cloud cover/Nébulosité de l'étage moyen.",
+                "value": "MEDIUM_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "36": {
+                "summary": "Horizontal moisture convergence/Diagnostic instantané de convergence d'humidité",
+                "value": "MOISTURE_CONVERGENCE__GROUND_OR_WATER_SURFACE"
+              },
+              "37": {
+                "summary": "Thickness in metres of the Atmospheric Boundary Layer/Epaisseur en m de la Couche Limite Atmosphérique",
+                "value": "PLANETARY_BOUNDARY_LAYER_HEIGHT__GROUND_OR_WATER_SURFACE"
+              },
+              "38": {
+                "summary": "Integrated water vapour content on the vertical./Contenu intégré en vapeur d'eau sur la verticale.",
+                "value": "PRECIPITABLE_WATER__GROUND_OR_WATER_SURFACE"
+              },
+              "39": {
+                "summary": "Type of precipitation most frequent in the last  3 hours/Type de précipitation le plus courant sur 3 heures",
+                "value": "PRECIPITATION_TYPE_180_MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "40": {
+                "summary": "Type of precipitation most frequent in the last hour/Type de précipitation le plus courant sur 1 heure",
+                "value": "PRECIPITATION_TYPE_60_MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "41": {
+                "summary": "Pressure/Pression sol.",
+                "value": "PRESSURE__GROUND_OR_WATER_SURFACE"
+              },
+              "42": {
+                "summary": "Type of precipitation most severe in the last 3 hours/Type de précipitation le plus sévère sur 3 heures",
+                "value": "SEVERE_PRECIPITATION_TYPE_180_MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "43": {
+                "summary": "Type of precipitation most severe in the last hour/Type de précipitation le plus sévère sur 1 heure",
+                "value": "SEVERE_PRECIPITATION_TYPE_60_MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "44": {
+                "summary": "Snow depth/Epaisseur de neige au sol",
+                "value": "SNOW_DEPTH__GROUND_OR_WATER_SURFACE"
+              },
+              "45": {
+                "summary": "Surface temperature/Température de surface.",
+                "value": "TEMPERATURE__GROUND_OR_WATER_SURFACE"
+              },
+              "46": {
+                "summary": "Total cloud cover/Nébulosité totale.",
+                "value": "TOTAL_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "47": {
+                "summary": "Total precipitation/Quantité totale de précipitations.",
+                "value": "TOTAL_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "48": {
+                "summary": "Total snow precipitation/Quantité de précipitations sous forme de neige.",
+                "value": "TOTAL_SNOW_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "49": {
+                "summary": "Total water precipitation/Quantité de précipitations sous forme liquide.",
+                "value": "TOTAL_WATER_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "50": {
+                "summary": "Visibility (min) in the last 3 hours/Visibilité mini sur 3 heures",
+                "value": "VISIBILITY_MINI_180MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "51": {
+                "summary": "Visibility (min) in the last hour/Visibilité mini sur 1 heure",
+                "value": "VISIBILITY_MINI_60MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "52": {
+                "summary": "Visibility under precipitation (mini) in the last 3 hours/Visibilité mini sous précipitations sur 3 heures",
+                "value": "VISIBILITY_MINI_PRECIP_180MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "53": {
+                "summary": "Visibility under precipitation (mini) in the last hour/Visibilité mini sous précipitations sur 1 heure",
+                "value": "VISIBILITY_MINI_PRECIP_60MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "54": {
+                "summary": "Water equivalent of accumulated snow depth/Equivalent eau de l’épaisseur de neige accumulée",
+                "value": "WATER_EQUIVALENT_ACCUMULATED_SNOW__GROUND_OR_WATER_SURFACE"
+              },
+              "55": {
+                "summary": "Brightness temperature/Température de brillance dans le canal infrarouge 10.8 microns.",
+                "value": "BRIGHTNESS_TEMPERATURE__GROUND_OR_WATER_SURFACE"
+              },
+              "56": {
+                "summary": "Brightness temperature in IR 6,2 micron/Température de brillance dans le canal infrarouge 6.2 microns.",
+                "value": "BRIGHTNESS_TEMPERATURE_62__GROUND_OR_WATER_SURFACE"
+              },
+              "57": {
+                "summary": "Altitude where the temperature is equal to -10°C, with an ascending diagnosis, from positive to negative./Altitude pour laquelle la température est égale à -20°C, avec un diagnostic ascendant, du positif vers le négatif.",
+                "value": "ALTITUDE_TEMPERATURE__ISOTHERMAL_LEVEL_25315"
+              },
+              "58": {
+                "summary": "Altitude where the temperature is equal to -10°C, with an ascending diagnosis, from positive to negative./Altitude pour laquelle la température est égale à -10°C, avec un diagnostic ascendant, du positif vers le négatif.",
+                "value": "ALTITUDE_TEMPERATURE__ISOTHERMAL_LEVEL_26315"
+              },
+              "59": {
+                "summary": "Altitude where the temperature is equal to 0°C, with an ascending diagnosis, from positive to negative./Altitude pour laquelle la température est égale à 0°C, avec un diagnostic ascendant, du positif vers le négatif.",
+                "value": "ALTITUDE_TEMPERATURE__ISOTHERMAL_LEVEL_27315"
+              },
+              "60": {
+                "summary": "Altitude of dew point temperature at 273.15K/Altitude de la température du point de rosé à 0°C",
+                "value": "ALTITUDE_TPW__ISOTHERMAL_LEVEL_27315"
+              },
+              "61": {
+                "summary": "Altitude of dew point temperature at 274.15K/Altitude de la température du point de rosé à 1°C",
+                "value": "ALTITUDE_TPW__ISOTHERMAL_LEVEL_27415"
+              },
+              "62": {
+                "summary": "Altitude of dew point temperature at 274.65K/Altitude de la température du point de rosé à 1,5°C",
+                "value": "ALTITUDE_TPW__ISOTHERMAL_LEVEL_27465"
+              },
+              "63": {
+                "summary": "Cloud water/Eau nuageuse",
+                "value": "CLOUD_WATER__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "64": {
+                "summary": "Dew point temperature at specified height level above ground/Température du point de rosée en niveaux hauteur.",
+                "value": "DEW_POINT_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "65": {
+                "summary": "Maximum temperature at specified height level above ground/Température maximale de l'air en niveaux hauteur",
+                "value": "MAXIMUM_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "66": {
+                "summary": "Minimum temperature at specified height level above ground/Température minimale de l'air en niveaux hauteur",
+                "value": "MINIMUM_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "67": {
+                "summary": "Pressure at specified height level above ground/Pression en niveaux hauteur.",
+                "value": "PRESSURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "68": {
+                "summary": "Pseudo-adiabatic potential temperature at isobaric surfaces/Température pseudo-adiabatique potentielle du thermomètre mouillé sur des surfaces isobares.",
+                "value": "PSEUDO_ADIABATIC_POTENTIAL_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "69": {
+                "summary": "Relative humidity at specified height level above ground/Humidité relative en niveaux hauteur.",
+                "value": "RELATIVE_HUMIDITY__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "70": {
+                "summary": "Specific cloud ice water content at specified height level above ground/Glace nuageuse en niveaux hauteur.",
+                "value": "SPECIFIC_CLOUD_ICE_WATER_CONTENT__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "71": {
+                "summary": "Temperature at specified height level above ground/Température de l'air en niveaux hauteur.",
+                "value": "TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "72": {
+                "summary": "Turbulent kinetic energy at specified height level above ground/Energie cinétique turbulente en niveaux hauteur.",
+                "value": "TURBULENT_KINETIC_ENERGY__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "73": {
+                "summary": "Wind direction and speed at specified height level above ground/Direction et force du vent en niveaux hauteur.",
+                "value": "WIND__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "74": {
+                "summary": "Wind gust direction and speed at specified height level above ground/Direction et force de la rafale du vent en niveaux hauteur.",
+                "value": "WIND_GUST__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "75": {
+                "summary": "Wind speed at specified height level above ground/Force du vent en niveaux hauteur.",
+                "value": "WIND_SPEED__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "76": {
+                "summary": "Wind speed gust at specified height level above ground/Rafale de vent en niveaux hauteur.",
+                "value": "WIND_SPEED_GUST__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "77": {
+                "summary": "Maximum wind gust during the hour at height level above ground/Rafale de vent maximum durant l’heure en niveaux hauteur.",
+                "value": "WIND_SPEED_GUST_MAX__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "78": {
+                "summary": "Absolute vorticity at 1.5 PVU surface/Tourbillon Absolu au niveau 1.5 PVU.",
+                "value": "ABSOLUTE_VORTICITY__POTENTIAL_VORTICITY_SURFACE_1500"
+              },
+              "79": {
+                "summary": "Absolute vorticity at 2 PVU surface/Tourbillon Absolu au niveau 2 PVU.",
+                "value": "ABSOLUTE_VORTICITY__POTENTIAL_VORTICITY_SURFACE_2000"
+              },
+              "80": {
+                "summary": "Absolute vorticity at 0.7 PVU surface/Tourbillon Absolu au niveau 0.7 PVU",
+                "value": "ABSOLUTE_VORTICITY__POTENTIAL_VORTICITY_SURFACE_700"
+              },
+              "81": {
+                "summary": "Geopotential height at 1.5 PVU surface/Géopotentiel (m) au niveau 1.5 PVU",
+                "value": "GEOPOTENTIAL__POTENTIAL_VORTICITY_SURFACE_1500"
+              },
+              "82": {
+                "summary": "Geopotential height at 2 PVU surface/Géopotentiel (m) au niveau 2 PVU",
+                "value": "GEOPOTENTIAL__POTENTIAL_VORTICITY_SURFACE_2000"
+              },
+              "83": {
+                "summary": "Geopotential height at 0.7 PVU surface/Géopotentiel (m) au niveau 0.7 PVU",
+                "value": "GEOPOTENTIAL__POTENTIAL_VORTICITY_SURFACE_700"
+              },
+              "84": {
+                "summary": "Theta ( potential temperature ) at 1,5 PVU surface/Theta (Température potentielle) au niveau 1,5 PVU",
+                "value": "POTENTIAL_TEMPERATURE__POTENTIAL_VORTICITY_SURFACE_1500"
+              },
+              "85": {
+                "summary": "Theta ( potential temperature ) at 2 PVU surface/Theta (Température potentielle) au niveau 2 PVU",
+                "value": "POTENTIAL_TEMPERATURE__POTENTIAL_VORTICITY_SURFACE_2000"
+              },
+              "86": {
+                "summary": "Theta ( potential temperature ) at 0.7 PVU surface/Theta (Température potentielle) au niveau 0.7 PVU",
+                "value": "POTENTIAL_TEMPERATURE__POTENTIAL_VORTICITY_SURFACE_700"
+              },
+              "87": {
+                "summary": "Wind direction and speed at  1.5 PVU surface/Direction et force du vent à la surface 1.5 PVU",
+                "value": "WIND__POTENTIAL_VORTICITY_SURFACE_1500"
+              },
+              "88": {
+                "summary": "Wind direction and speed at  2.0 PVU surface/Direction et force du vent à la surface 2.0 PVU",
+                "value": "WIND__POTENTIAL_VORTICITY_SURFACE_2000"
+              },
+              "89": {
+                "summary": "Wind direction and speed at  0.7 PVU surface/Direction et force du vent à la surface 0.7 PVU",
+                "value": "WIND__POTENTIAL_VORTICITY_SURFACE_700"
+              },
+              "90": {
+                "summary": "Wind speed at 1.5 PVU surface/Force du vent au niveau 1.5 PVU",
+                "value": "WIND_SPEED__POTENTIAL_VORTICITY_SURFACE_1500"
+              },
+              "91": {
+                "summary": "Wind speed at 2 PVU surface/Force du vent au niveau 2 PVU",
+                "value": "WIND_SPEED__POTENTIAL_VORTICITY_SURFACE_2000"
+              },
+              "92": {
+                "summary": "Wind speed at 0.7 PVU surface/Force du vent au niveau 0.7 PVU",
+                "value": "WIND_SPEED__POTENTIAL_VORTICITY_SURFACE_700"
+              }
+            }
+          },
+          {
+            "name": "crs",
+            "in": "query",
+            "description": "CRS. The only accepted value is EPSG:4326",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "EPSG:4326"
+              ]
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Format",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image/png"
+              ]
+            }
+          },
+          {
+            "name": "bbox",
+            "in": "query",
+            "description": "bbox",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "-90,-180,90,180",
+                "value": "-90,-180,90,180"
+              }
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "description": "height",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "256",
+                "value": "256"
+              }
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "description": "width",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "256",
+                "value": "256"
+              }
+            }
+          },
+          {
+            "name": "transparent",
+            "in": "query",
+            "description": "transparent true or false",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "true",
+                "value": "true"
+              },
+              "2": {
+                "summary": "false",
+                "value": "false"
+              }
+            }
+          },
+          {
+            "name": "reference_time",
+            "in": "query",
+            "description": "reference_time in YYYY-MM-JJTHH:mm:ssZ format (see the result of the GetCapabilities for available reference_time)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "time",
+            "in": "query",
+            "description": "time in YYYY-MM-JJTHH:mm:ssZ format (see the result of the GetCapabilities for available time)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "elevation",
+            "in": "query",
+            "description": "elevation (see the result of the GetCapabilities for available elevation)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "styles",
+            "in": "query",
+            "description": "styles (see the result of the GetCapabilities for available styles)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wcs/MF-NWP-GLOBAL-ARPEGE-025-GLOBE-WCS/GetCapabilities": {
+      "get": {
+        "tags": [
+          "ARPEGE 0.25"
+        ],
+        "description": "GetCapabilities retourne la liste des opérations supportées par le service, et la liste des champs (coverages) disponibles\n\nGetCapabilities returns the list of operations supported by the service, and the list of available fields (coverages)",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WCS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WCS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WCS version. The only accepted value is 2.0.1",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2.0.1"
+              ]
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "default": "eng",
+              "enum": [
+                "eng",
+                "fre"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wcs/MF-NWP-GLOBAL-ARPEGE-025-GLOBE-WCS/DescribeCoverage": {
+      "get": {
+        "tags": [
+          "ARPEGE 0.25"
+        ],
+        "description": "DescribeCoverage décrit la structure du coverage (extension spatiale, extension temporelle, géométrie de la grille, type des données et unité des valeurs sur la grille)\n\nDescribeCoverage describes the coverage structure (spatial extension, temporal extension, grid geometry, data type and unit of values on the grid)",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WCS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WCS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WCS version. The only accepted value is 2.0.1",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2.0.1"
+              ]
+            }
+          },
+          {
+            "name": "coverageID",
+            "in": "query",
+            "description": "Identifiant du coverage (tel qu'il apparaît dans la réponse GetCapabilities)",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wcs/MF-NWP-GLOBAL-ARPEGE-025-GLOBE-WCS/GetCoverage": {
+      "get": {
+        "tags": [
+          "ARPEGE 0.25"
+        ],
+        "description": "GetCoverage renvoie le coverage\n\n\nGetCoverage return the coverage",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WCS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WCS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WCS version. The only accepted value is 2.0.1",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2.0.1"
+              ]
+            }
+          },
+          {
+            "name": "coverageid",
+            "in": "query",
+            "description": "Identifiant du coverage (tel qu'il apparaît dans la réponse GetCapabilities)",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subset",
+            "in": "query",
+            "description": "Paramètres de sous-sélection, selon les différents axes. Il faut que la combinatoire des paramètres de sous-sélection dans la requête définissent un sous-ensemble de dimension 2 au maximum.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Format",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image/tiff",
+                "application/wmo-grib"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wms/MF-NWP-GLOBAL-PAARPEGE-01-ATOURX-WMS/GetCapabilities": {
+      "get": {
+        "tags": [
+          "Analyse ARPEGE ATOURX01"
+        ],
+        "description": "Le GetCapabilities retourne les métadonnées du service (couches proposées, projections associées, auteur…)\n\nThe GetCapabilities returns the metadata of the service (proposed layers, associated projections, author, etc.)",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WMS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WMS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WMS version. The only accepted value is 1.3.0",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.3.0"
+              ]
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "default": "eng",
+              "enum": [
+                "eng",
+                "fre"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wms/MF-NWP-GLOBAL-PAARPEGE-01-ATOURX-WMS/GetMap": {
+      "get": {
+        "tags": [
+          "Analyse ARPEGE ATOURX01"
+        ],
+        "description": "GetMap permet d'obtenir une carte (format d'image) dont les caractéristiques sont définies par le client à l’aide de paramètres standardisés\n\nGetMap return a map (image format) whose characteristics are defined by the customer using standardized parameters",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WMS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WMS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WMS version. The only accepted value is 1.3.0",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.3.0"
+              ]
+            }
+          },
+          {
+            "name": "layers",
+            "in": "query",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "Pressure reduced to MSL/Pression réduite au niveau de la mer.",
+                "value": "PRESSURE__MEAN_SEA_LEVEL"
+              },
+              "2": {
+                "summary": "Total cloud cover/Nébulosité totale.",
+                "value": "TOTAL_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "3": {
+                "summary": "downward short-wave radiation flux/Flux solaire descendant",
+                "value": "DOWNWARD_SHORT_WAVE_RADIATION_FLUX__GROUND_OR_WATER_SURFACE"
+              },
+              "4": {
+                "summary": "short-wave radiation flux/Flux solaire",
+                "value": "SHORT_WAVE_RADIATION_FLUX__GROUND_OR_WATER_SURFACE"
+              },
+              "5": {
+                "summary": "Total precipitation/Quantité totale de précipitations.",
+                "value": "TOTAL_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "6": {
+                "summary": "Total snow precipitation/Quantité de précipitations sous forme de neige.",
+                "value": "TOTAL_SNOW_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "7": {
+                "summary": "Geometric height/Altitude géométrique.",
+                "value": "GEOMETRIC_HEIGHT__GROUND_OR_WATER_SURFACE"
+              },
+              "8": {
+                "summary": "Pressure/Pression sol.",
+                "value": "PRESSURE__GROUND_OR_WATER_SURFACE"
+              },
+              "9": {
+                "summary": "Temperature/Température de surface.",
+                "value": "TEMPERATURE__GROUND_OR_WATER_SURFACE"
+              },
+              "10": {
+                "summary": "Low cloud cover/Nébulosité de l'étage inférieur.",
+                "value": "LOW_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "11": {
+                "summary": "High cloud cover/Nébulosité de l'étage supérieur.",
+                "value": "HIGH_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "12": {
+                "summary": "Medium cloud cover/Nébulosité de l'étage moyen.",
+                "value": "MEDIUM_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "13": {
+                "summary": "Convective available potential energy/CAPE de la particule la plus instable en basses couches avec coefficient d'entraînement.",
+                "value": "CONVECTIVE_AVAILABLE_POTENTIAL_ENERGY__GROUND_OR_WATER_SURFACE"
+              },
+              "14": {
+                "summary": "Brightness temperature/Température de brillance dans le canal infrarouge 10.8 microns.",
+                "value": "BRIGHTNESS_TEMPERATURE__GROUND_OR_WATER_SURFACE"
+              },
+              "15": {
+                "summary": "Total water precipitation/Quantité de précipitations sous forme liquide.",
+                "value": "TOTAL_WATER_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "16": {
+                "summary": "Planetary boundary layer height/Hauteur de la couche limite.",
+                "value": "PLANETARY_BOUNDARY_LAYER_HEIGHT__GROUND_OR_WATER_SURFACE"
+              },
+              "17": {
+                "summary": "Temperature at isobaric surface/Température de l'air sur des surfaces isobares.",
+                "value": "TEMPERATURE__ISOBARIC_SURFACE"
+              },
+              "18": {
+                "summary": "Relative humidity at isobaric surface/Humidité relative sur des surfaces isobares.",
+                "value": "RELATIVE_HUMIDITY__ISOBARIC_SURFACE"
+              },
+              "19": {
+                "summary": "Geopotential at isobaric surface/Altitude géopotentielle sur des surfaces isobares.",
+                "value": "GEOPOTENTIAL__ISOBARIC_SURFACE"
+              },
+              "20": {
+                "summary": "Dew point temperature at isobaric surface/Température du point de rosée sur des surfaces isobares.",
+                "value": "DEW_POINT_TEMPERATURE__ISOBARIC_SURFACE"
+              },
+              "21": {
+                "summary": "Wind dicection and speed at isobaric surface/Direction et force du vent sur des surfaces isobares.",
+                "value": "WIND__ISOBARIC_SURFACE"
+              },
+              "22": {
+                "summary": "Wind speed at isobaric surface/Force du vent sur des surfaces isobares.",
+                "value": "WIND_SPEED__ISOBARIC_SURFACE"
+              },
+              "23": {
+                "summary": "Vertical velocity pressure at isobaric surface/Vitesse verticale sur des surfaces isobares.",
+                "value": "VERTICAL_VELOCITY_PRESSURE__ISOBARIC_SURFACE"
+              },
+              "24": {
+                "summary": "Specific cloud ice water content at isobaric surface/Glace nuageuse sur des surfaces isobares.",
+                "value": "SPECIFIC_CLOUD_ICE_WATER_CONTENT__ISOBARIC_SURFACE"
+              },
+              "25": {
+                "summary": "Turbulent kinetic energy at isobaric surface/Energie cinétique turbulente sur des surfaces isobares.",
+                "value": "TURBULENT_KINETIC_ENERGY__ISOBARIC_SURFACE"
+              },
+              "26": {
+                "summary": "Absolute vorticity at isobaric surface/Tourbillon absolu sur des surfaces isobares.",
+                "value": "ABSOLUTE_VORTICITY__ISOBARIC_SURFACE"
+              },
+              "27": {
+                "summary": "Potential Vorticity at isobaric surface/Tourbillon potentiel sur des surfaces isobares.",
+                "value": "POTENTIAL_VORTICITY__ISOBARIC_SURFACE"
+              },
+              "28": {
+                "summary": "Pseudo-adiabatic potential temperature at isobaric surface/Température pseudo-adiabatique potentielle du thermomètre mouillé sur des surfaces isobares.",
+                "value": "PSEUDO_ADIABATIC_POTENTIAL_TEMPERATURE__ISOBARIC_SURFACE"
+              },
+              "29": {
+                "summary": "Temperature at specified height level above ground/Température de l'air en niveaux hauteur.",
+                "value": "TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "30": {
+                "summary": "Minimum temperature at specified height level above ground/Température minimale de l'air en niveaux hauteur",
+                "value": "MINIMUM_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "31": {
+                "summary": "Maximum temperature at specified height level above ground/Température maximale de l'air en niveaux hauteur",
+                "value": "MAXIMUM_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "32": {
+                "summary": "Relative humidity at specified height level above ground/Humidité relative en niveaux hauteur.",
+                "value": "RELATIVE_HUMIDITY__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "33": {
+                "summary": "Wind direction and speed at height levels at specified height level above ground/Direction et force du vent en niveaux hauteur.",
+                "value": "WIND__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "34": {
+                "summary": "Wind speed height levels at specified height level above ground/Force du vent en niveaux hauteur.",
+                "value": "WIND_SPEED__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "35": {
+                "summary": "Pressure height levels at specified height level above ground/Pression en niveaux hauteur.",
+                "value": "PRESSURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "36": {
+                "summary": "Dew point temperature height levels at specified height level above ground/Température du point de rosée en niveaux hauteur.",
+                "value": "DEW_POINT_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "37": {
+                "summary": "Turbulent kinetic energy height levels at specified height level above ground/Energie cinétique turbulente en niveaux hauteur.",
+                "value": "TURBULENT_KINETIC_ENERGY__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "38": {
+                "summary": "Specific cloud ice water content height levels at specified height level above ground/Glace nuageuse en niveaux hauteur.",
+                "value": "SPECIFIC_CLOUD_ICE_WATER_CONTENT__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "39": {
+                "summary": "Wind speed (gust) at specified height level above ground/Rafale de vent en niveaux hauteur.",
+                "value": "WIND_SPEED_GUST__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              }
+            }
+          },
+          {
+            "name": "crs",
+            "in": "query",
+            "description": "CRS. The only accepted value is EPSG:4326",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "EPSG:4326"
+              ]
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Format",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image/png"
+              ]
+            }
+          },
+          {
+            "name": "bbox",
+            "in": "query",
+            "description": "bbox",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "20.0,-32.0,72.0,42.0",
+                "value": "20.0,-32.0,72.0,42.0"
+              }
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "description": "height",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "256",
+                "value": "256"
+              }
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "description": "width",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "256",
+                "value": "256"
+              }
+            }
+          },
+          {
+            "name": "transparent",
+            "in": "query",
+            "description": "transparent true or false",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "true",
+                "value": "true"
+              },
+              "2": {
+                "summary": "false",
+                "value": "false"
+              }
+            }
+          },
+          {
+            "name": "reference_time",
+            "in": "query",
+            "description": "reference_time in YYYY-MM-JJTHH:mm:ssZ format (see the result of the GetCapabilities for available reference_time)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "time",
+            "in": "query",
+            "description": "time in YYYY-MM-JJTHH:mm:ssZ format (see the result of the GetCapabilities for available time)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "elevation",
+            "in": "query",
+            "description": "elevation (see the result of the GetCapabilities for available elevation)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "styles",
+            "in": "query",
+            "description": "styles (see the result of the GetCapabilities for available styles)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wcs/MF-NWP-GLOBAL-PAARPEGE-01-ATOURX-WCS/GetCapabilities": {
+      "get": {
+        "tags": [
+          "Analyse ARPEGE ATOURX01"
+        ],
+        "description": "GetCapabilities retourne la liste des opérations supportées par le service, et la liste des champs (coverages) disponibles\n\nGetCapabilities returns the list of operations supported by the service, and the list of available fields (coverages)",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WCS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WCS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WCS version. The only accepted value is 2.0.1",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2.0.1"
+              ]
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "default": "eng",
+              "enum": [
+                "eng",
+                "fre"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wcs/MF-NWP-GLOBAL-PAARPEGE-01-ATOURX-WCS/DescribeCoverage": {
+      "get": {
+        "tags": [
+          "Analyse ARPEGE ATOURX01"
+        ],
+        "description": "DescribeCoverage décrit la structure du coverage (extension spatiale, extension temporelle, géométrie de la grille, type des données et unité des valeurs sur la grille)\n\nDescribeCoverage describes the coverage structure (spatial extension, temporal extension, grid geometry, data type and unit of values ​​on the grid)",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WCS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WCS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WCS version. The only accepted value is 2.0.1",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2.0.1"
+              ]
+            }
+          },
+          {
+            "name": "coverageID",
+            "in": "query",
+            "description": "Identifiant du coverage (tel qu'il apparaît dans la réponse GetCapabilities)",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wcs/MF-NWP-GLOBAL-PAARPEGE-01-ATOURX-WCS/GetCoverage": {
+      "get": {
+        "tags": [
+          "Analyse ARPEGE ATOURX01"
+        ],
+        "description": "GetCoverage renvoie le coverage\n\n\nGetCoverage return the coverage",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WCS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WCS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WCS version. The only accepted value is 2.0.1",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2.0.1"
+              ]
+            }
+          },
+          {
+            "name": "coverageid",
+            "in": "query",
+            "description": "Identifiant du coverage (tel qu'il apparaît dans la réponse GetCapabilities)",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subset",
+            "in": "query",
+            "description": "Paramètres de sous-sélection, selon les différents axes. Il faut que la combinatoire des paramètres de sous-sélection dans la requête définissent un sous-ensemble de dimension 2 au maximum.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Format",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image/tiff",
+                "application/wmo-grib"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Report generated succefully. ",
+            "content": {
+              "application/wmo-grib": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wms/MF-NWP-GLOBAL-ARPEGE-01-ATOURX-WMS/GetCapabilities": {
+      "get": {
+        "tags": [
+          "Prévisions ARPEGE ATOURX01"
+        ],
+        "description": "Le GetCapabilities retourne les métadonnées du service (couches proposées, projections associées, auteur…)\n\nThe GetCapabilities returns the metadata of the service (proposed layers, associated projections, author, etc.)",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WMS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WMS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WMS version. The only accepted value is 1.3.0",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.3.0"
+              ]
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "default": "eng",
+              "enum": [
+                "eng",
+                "fre"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wms/MF-NWP-GLOBAL-ARPEGE-01-ATOURX-WMS/GetMap": {
+      "get": {
+        "tags": [
+          "Prévisions ARPEGE ATOURX01"
+        ],
+        "description": "GetMap permet d'obtenir une carte (format d'image) dont les caractéristiques sont définies par le client à l’aide de paramètres standardisés\n\nGetMap return a map (image format) whose characteristics are defined by the customer using standardized parameters",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WMS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WMS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WMS version. The only accepted value is 1.3.0",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.3.0"
+              ]
+            }
+          },
+          {
+            "name": "layers",
+            "in": "query",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "Pressure reduced to MSL/Pression réduite au niveau de la mer.",
+                "value": "PRESSURE__MEAN_SEA_LEVEL"
+              },
+              "2": {
+                "summary": "Total cloud cover/Nébulosité totale.",
+                "value": "TOTAL_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "3": {
+                "summary": "downward short-wave radiation flux/Flux solaire descendant",
+                "value": "DOWNWARD_SHORT_WAVE_RADIATION_FLUX__GROUND_OR_WATER_SURFACE"
+              },
+              "4": {
+                "summary": "short-wave radiation flux/Flux solaire",
+                "value": "SHORT_WAVE_RADIATION_FLUX__GROUND_OR_WATER_SURFACE"
+              },
+              "5": {
+                "summary": "Total precipitation/Quantité totale de précipitations.",
+                "value": "TOTAL_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "6": {
+                "summary": "Total snow precipitation/Quantité de précipitations sous forme de neige.",
+                "value": "TOTAL_SNOW_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "7": {
+                "summary": "Geometric height/Altitude géométrique.",
+                "value": "GEOMETRIC_HEIGHT__GROUND_OR_WATER_SURFACE"
+              },
+              "8": {
+                "summary": "Pressure/Pression sol.",
+                "value": "PRESSURE__GROUND_OR_WATER_SURFACE"
+              },
+              "9": {
+                "summary": "Temperature/Température de surface.",
+                "value": "TEMPERATURE__GROUND_OR_WATER_SURFACE"
+              },
+              "10": {
+                "summary": "Low cloud cover/Nébulosité de l'étage inférieur.",
+                "value": "LOW_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "11": {
+                "summary": "High cloud cover/Nébulosité de l'étage supérieur.",
+                "value": "HIGH_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "12": {
+                "summary": "Medium cloud cover/Nébulosité de l'étage moyen.",
+                "value": "MEDIUM_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "13": {
+                "summary": "Convective available potential energy/CAPE de la particule la plus instable en basses couches avec coefficient d'entraînement.",
+                "value": "CONVECTIVE_AVAILABLE_POTENTIAL_ENERGY__GROUND_OR_WATER_SURFACE"
+              },
+              "14": {
+                "summary": "Brightness temperature/Température de brillance dans le canal infrarouge 10.8 microns.",
+                "value": "BRIGHTNESS_TEMPERATURE__GROUND_OR_WATER_SURFACE"
+              },
+              "15": {
+                "summary": "Total water precipitation/Quantité de précipitations sous forme liquide.",
+                "value": "TOTAL_WATER_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "16": {
+                "summary": "Planetary boundary layer height/Hauteur de la couche limite.",
+                "value": "PLANETARY_BOUNDARY_LAYER_HEIGHT__GROUND_OR_WATER_SURFACE"
+              },
+              "17": {
+                "summary": "Temperature at isobaric surface/Température de l'air sur des surfaces isobares.",
+                "value": "TEMPERATURE__ISOBARIC_SURFACE"
+              },
+              "18": {
+                "summary": "Relative humidity at isobaric surface/Humidité relative sur des surfaces isobares.",
+                "value": "RELATIVE_HUMIDITY__ISOBARIC_SURFACE"
+              },
+              "19": {
+                "summary": "Geopotential at isobaric surface/Altitude géopotentielle sur des surfaces isobares.",
+                "value": "GEOPOTENTIAL__ISOBARIC_SURFACE"
+              },
+              "20": {
+                "summary": "Dew point temperature at isobaric surface/Température du point de rosée sur des surfaces isobares.",
+                "value": "DEW_POINT_TEMPERATURE__ISOBARIC_SURFACE"
+              },
+              "21": {
+                "summary": "Wind dicection and speed at isobaric surface/Direction et force du vent sur des surfaces isobares.",
+                "value": "WIND__ISOBARIC_SURFACE"
+              },
+              "22": {
+                "summary": "Wind speed at isobaric surface/Force du vent sur des surfaces isobares.",
+                "value": "WIND_SPEED__ISOBARIC_SURFACE"
+              },
+              "23": {
+                "summary": "Vertical velocity pressure at isobaric surface/Vitesse verticale sur des surfaces isobares.",
+                "value": "VERTICAL_VELOCITY_PRESSURE__ISOBARIC_SURFACE"
+              },
+              "24": {
+                "summary": "Specific cloud ice water content at isobaric surface/Glace nuageuse sur des surfaces isobares.",
+                "value": "SPECIFIC_CLOUD_ICE_WATER_CONTENT__ISOBARIC_SURFACE"
+              },
+              "25": {
+                "summary": "Turbulent kinetic energy at isobaric surface/Energie cinétique turbulente sur des surfaces isobares.",
+                "value": "TURBULENT_KINETIC_ENERGY__ISOBARIC_SURFACE"
+              },
+              "26": {
+                "summary": "Absolute vorticity at isobaric surface/Tourbillon absolu sur des surfaces isobares.",
+                "value": "ABSOLUTE_VORTICITY__ISOBARIC_SURFACE"
+              },
+              "27": {
+                "summary": "Potential Vorticity at isobaric surface/Tourbillon potentiel sur des surfaces isobares.",
+                "value": "POTENTIAL_VORTICITY__ISOBARIC_SURFACE"
+              },
+              "28": {
+                "summary": "Pseudo-adiabatic potential temperature at isobaric surface/Température pseudo-adiabatique potentielle du thermomètre mouillé sur des surfaces isobares.",
+                "value": "PSEUDO_ADIABATIC_POTENTIAL_TEMPERATURE__ISOBARIC_SURFACE"
+              },
+              "29": {
+                "summary": "Temperature at specified height level above ground/Température de l'air en niveaux hauteur.",
+                "value": "TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "30": {
+                "summary": "Minimum temperature at specified height level above ground/Température minimale de l'air en niveaux hauteur",
+                "value": "MINIMUM_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "31": {
+                "summary": "Maximum temperature at specified height level above ground/Température maximale de l'air en niveaux hauteur",
+                "value": "MAXIMUM_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "32": {
+                "summary": "Relative humidity at specified height level above ground/Humidité relative en niveaux hauteur.",
+                "value": "RELATIVE_HUMIDITY__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "33": {
+                "summary": "Wind direction and speed at height levels at specified height level above ground/Direction et force du vent en niveaux hauteur.",
+                "value": "WIND__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "34": {
+                "summary": "Wind speed height levels at specified height level above ground/Force du vent en niveaux hauteur.",
+                "value": "WIND_SPEED__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "35": {
+                "summary": "Pressure height levels at specified height level above ground/Pression en niveaux hauteur.",
+                "value": "PRESSURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "36": {
+                "summary": "Dew point temperature height levels at specified height level above ground/Température du point de rosée en niveaux hauteur.",
+                "value": "DEW_POINT_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "37": {
+                "summary": "Turbulent kinetic energy height levels at specified height level above ground/Energie cinétique turbulente en niveaux hauteur.",
+                "value": "TURBULENT_KINETIC_ENERGY__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "38": {
+                "summary": "Specific cloud ice water content height levels at specified height level above ground/Glace nuageuse en niveaux hauteur.",
+                "value": "SPECIFIC_CLOUD_ICE_WATER_CONTENT__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "39": {
+                "summary": "Wind speed (gust) at specified height level above ground/Rafale de vent en niveaux hauteur.",
+                "value": "WIND_SPEED_GUST__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              }
+            }
+          },
+          {
+            "name": "crs",
+            "in": "query",
+            "description": "CRS. The only accepted value is EPSG:4326",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "EPSG:4326"
+              ]
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Format",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image/png"
+              ]
+            }
+          },
+          {
+            "name": "bbox",
+            "in": "query",
+            "description": "bbox",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "20.0,-32.0,72.0,42.0",
+                "value": "20.0,-32.0,72.0,42.0"
+              }
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "description": "height",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "256",
+                "value": "256"
+              }
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "description": "width",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "256",
+                "value": "256"
+              }
+            }
+          },
+          {
+            "name": "transparent",
+            "in": "query",
+            "description": "transparent true or false",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "true",
+                "value": "true"
+              },
+              "2": {
+                "summary": "false",
+                "value": "false"
+              }
+            }
+          },
+          {
+            "name": "reference_time",
+            "in": "query",
+            "description": "reference_time in YYYY-MM-JJTHH:mm:ssZ format (see the result of the GetCapabilities for available reference_time)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "time",
+            "in": "query",
+            "description": "time in YYYY-MM-JJTHH:mm:ssZ format (see the result of the GetCapabilities for available time)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "elevation",
+            "in": "query",
+            "description": "elevation (see the result of the GetCapabilities for available elevation)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "styles",
+            "in": "query",
+            "description": "styles (see the result of the GetCapabilities for available styles)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wcs/MF-NWP-GLOBAL-ARPEGE-01-ATOURX-WCS/GetCapabilities": {
+      "get": {
+        "tags": [
+          "Prévisions ARPEGE ATOURX01"
+        ],
+        "description": "GetCapabilities retourne la liste des opérations supportées par le service, et la liste des champs (coverages) disponibles\n\nGetCapabilities returns the list of operations supported by the service, and the list of available fields (coverages)",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WCS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WCS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WCS version. The only accepted value is 2.0.1",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2.0.1"
+              ]
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "default": "eng",
+              "enum": [
+                "eng",
+                "fre"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wcs/MF-NWP-GLOBAL-ARPEGE-01-ATOURX-WCS/DescribeCoverage": {
+      "get": {
+        "tags": [
+          "Prévisions ARPEGE ATOURX01"
+        ],
+        "description": "DescribeCoverage décrit la structure du coverage (extension spatiale, extension temporelle, géométrie de la grille, type des données et unité des valeurs sur la grille)\n\nDescribeCoverage describes the coverage structure (spatial extension, temporal extension, grid geometry, data type and unit of values ​​on the grid)",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WCS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WCS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WCS version. The only accepted value is 2.0.1",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2.0.1"
+              ]
+            }
+          },
+          {
+            "name": "coverageID",
+            "in": "query",
+            "description": "Identifiant du coverage (tel qu'il apparaît dans la réponse GetCapabilities)",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wcs/MF-NWP-GLOBAL-ARPEGE-01-ATOURX-WCS/GetCoverage": {
+      "get": {
+        "tags": [
+          "Prévisions ARPEGE ATOURX01"
+        ],
+        "description": "GetCoverage renvoie le coverage\n\n\nGetCoverage return the coverage",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WCS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WCS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WCS version. The only accepted value is 2.0.1",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2.0.1"
+              ]
+            }
+          },
+          {
+            "name": "coverageid",
+            "in": "query",
+            "description": "Identifiant du coverage (tel qu'il apparaît dans la réponse GetCapabilities)",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subset",
+            "in": "query",
+            "description": "Paramètres de sous-sélection, selon les différents axes. Il faut que la combinatoire des paramètres de sous-sélection dans la requête définissent un sous-ensemble de dimension 2 au maximum.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Format",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image/tiff",
+                "application/wmo-grib"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Report generated succefully. ",
+            "content": {
+              "application/wmo-grib": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wms/MF-NWP-GLOBAL-ARPEGE-005-EURAT-WMS/GetCapabilities": {
+      "get": {
+        "tags": [
+          "Prévisions ARPEGE EURAT1S20"
+        ],
+        "description": "Le GetCapabilities retourne les métadonnées du service (couches proposées, projections associées, auteur…)\n\nThe GetCapabilities returns the metadata of the service (proposed layers, associated projections, author, etc.)",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WMS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WMS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WMS version. The only accepted value is 1.3.0",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.3.0"
+              ]
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "default": "eng",
+              "enum": [
+                "eng",
+                "fre"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wms/MF-NWP-GLOBAL-ARPEGE-005-EURAT-WMS/GetMap": {
+      "get": {
+        "tags": [
+          "Prévisions ARPEGE EURAT1S20"
+        ],
+        "description": "GetMap permet d'obtenir une carte (format d'image) dont les caractéristiques sont définies par le client à l’aide de paramètres standardisés\n\nGetMap return a map (image format) whose characteristics are defined by the customer using standardized parameters        ",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WMS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WMS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WMS version. The only accepted value is 1.3.0",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.3.0"
+              ]
+            }
+          },
+          {
+            "name": "layers",
+            "in": "query",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "Pressure reduced to MSL/Pression réduite au niveau de la mer.",
+                "value": "PRESSURE__MEAN_SEA_LEVEL"
+              },
+              "2": {
+                "summary": "Pseudo-adiabatic potential temperature at isobaric surface/Température pseudo-adiabatique potentielle du thermomètre mouillé sur des surfaces isobares.",
+                "value": "PSEUDO_ADIABATIC_POTENTIAL_TEMPERATURE__ISOBARIC_SURFACE"
+              },
+              "3": {
+                "summary": "Maximum convective available potential energy/CAPE de la particule la plus instable en basses couches avec coefficient d'entraînement.",
+                "value": "CONVECTIVE_AVAILABLE_POTENTIAL_ENERGY_MAX__GROUND_OR_WATER_SURFACE"
+              },
+              "4": {
+                "summary": "Convective cloud cover/Nébulosité convective",
+                "value": "CONVECTIVE_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "5": {
+                "summary": "Convective inhibition/Inhibition convective",
+                "value": "CONVECTIVE_INHIBITION__GROUND_OR_WATER_SURFACE"
+              },
+              "6": {
+                "summary": "Convective precipitations/Précipitation sous maille",
+                "value": "CONVECTIVE_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "7": {
+                "summary": "Convective snow/Précipitation neigeuse convective",
+                "value": "CONVECTIVE_SNOW__GROUND_OR_WATER_SURFACE"
+              },
+              "8": {
+                "summary": "Convective water precipitation/Précipitation liquides convective",
+                "value": "CONVECTIVE_WATER_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "9": {
+                "summary": "downward short-wave radiation flux/Flux solaire descendant",
+                "value": "DOWNWARD_SHORT_WAVE_RADIATION_FLUX__GROUND_OR_WATER_SURFACE"
+              },
+              "10": {
+                "summary": "Geometric height/Altitude géométrique.",
+                "value": "GEOMETRIC_HEIGHT__GROUND_OR_WATER_SURFACE"
+              },
+              "11": {
+                "summary": "High cloud cover/Nébulosité de l'étage supérieur.",
+                "value": "HIGH_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "12": {
+                "summary": "Large scale precipitation/Précipitations de grande échelle",
+                "value": "LARGE_SCALE_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "13": {
+                "summary": "Large scale snow/Précipitation neigeuse de grande échelle",
+                "value": "LARGE_SCALE_SNOW__GROUND_OR_WATER_SURFACE"
+              },
+              "14": {
+                "summary": "Large scale water precipitation/Précipitations liquide de grande échelle",
+                "value": "LARGE_SCALE_WATER_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "15": {
+                "summary": "Low cloud cover/Nébulosité de l'étage inférieur.",
+                "value": "LOW_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "16": {
+                "summary": "Medium cloud cover/Nébulosité de l'étage moyen.",
+                "value": "MEDIUM_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "17": {
+                "summary": "Planetary boundary layer height/Hauteur de la couche limite.",
+                "value": "PLANETARY_BOUNDARY_LAYER_HEIGHT__GROUND_OR_WATER_SURFACE"
+              },
+              "18": {
+                "summary": "Type of precipitation most frequent in the last  3 hours/Type de précipitation le plus courant sur 3 heures",
+                "value": "PRECIPITATION_TYPE_180_MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "19": {
+                "summary": "Type of precipitation most frequent in the last hour/Type de précipitation le plus courant sur 1 heure",
+                "value": "PRECIPITATION_TYPE_60_MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "20": {
+                "summary": "Type of precipitation most severe in the last 3 hours/Type de précipitation le plus sévère sur 3 heures",
+                "value": "SEVERE_PRECIPITATION_TYPE_180_MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "21": {
+                "summary": "Type of precipitation most severe in the last hour/Type de précipitation le plus sévère sur 1 heure",
+                "value": "SEVERE_PRECIPITATION_TYPE_60_MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "22": {
+                "summary": "Temperature/Température de surface.",
+                "value": "TEMPERATURE__GROUND_OR_WATER_SURFACE"
+              },
+              "23": {
+                "summary": "Total cloud cover/Nébulosité totale.",
+                "value": "TOTAL_CLOUD_COVER__GROUND_OR_WATER_SURFACE"
+              },
+              "24": {
+                "summary": "Total precipitation/Quantité totale de précipitations.",
+                "value": "TOTAL_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "25": {
+                "summary": "Total snow precipitation/Quantité de précipitations sous forme de neige.",
+                "value": "TOTAL_SNOW_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "26": {
+                "summary": "Total water precipitation/Quantité de précipitations sous forme liquide.",
+                "value": "TOTAL_WATER_PRECIPITATION__GROUND_OR_WATER_SURFACE"
+              },
+              "27": {
+                "summary": "Visibility (min) in the last 3 hours/Visibilité mini sur 3 heures",
+                "value": "VISIBILITY_MINI_180MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "28": {
+                "summary": "Visibility (min) in the last hour/Visibilité mini sur 1 heure",
+                "value": "VISIBILITY_MINI_60MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "29": {
+                "summary": "Visibility under precipitation (mini) in the last 3 hours/Visibilité mini sous précipitations sur 3 heures",
+                "value": "VISIBILITY_MINI_PRECIP_180MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "30": {
+                "summary": "Visibility under precipitation (mini) in the last hour/Visibilité mini sous précipitations sur 1 heure",
+                "value": "VISIBILITY_MINI_PRECIP_60MIN__GROUND_OR_WATER_SURFACE"
+              },
+              "31": {
+                "summary": "Water equivalent of accumulated snow depth/Equivalent eau de l’épaisseur de neige accumulée",
+                "value": "WATER_EQUIVALENT_ACCUMULATED_SNOW__GROUND_OR_WATER_SURFACE"
+              },
+              "32": {
+                "summary": "Cloud water content at specified height level above ground/Contenu en eau du nuage en niveaux hauteur.",
+                "value": "CLOUD_WATER_CONTENT__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "33": {
+                "summary": "Dew point temperature height levels at specified height level above ground/Température du point de rosée en niveaux hauteur.",
+                "value": "DEW_POINT_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "34": {
+                "summary": "Maximum temperature at specified height level above ground/Température maximale de l'air en niveaux hauteur",
+                "value": "MAXIMUM_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "35": {
+                "summary": "Minimum temperature at specified height level above ground/Température minimale de l'air en niveaux hauteur",
+                "value": "MINIMUM_TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "36": {
+                "summary": "Relative humidity at specified height level above ground/Humidité relative en niveaux hauteur.",
+                "value": "RELATIVE_HUMIDITY__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "37": {
+                "summary": "Specific cloud ice water content height levels at specified height level above ground/Glace nuageuse en niveaux hauteur.",
+                "value": "SPECIFIC_CLOUD_ICE_WATER_CONTENT__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "38": {
+                "summary": "Temperature at specified height level above ground/Température de l'air en niveaux hauteur.",
+                "value": "TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "39": {
+                "summary": "Wind direction and speed at height levels at specified height level above ground/Direction et force du vent en niveaux hauteur.",
+                "value": "WIND__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "40": {
+                "summary": "Gust direction and speed at height levels at specified height level above ground in the last hour/Direction et force de la rafale de vent maximale sur l’heure précédente en niveaux hauteur.",
+                "value": "WIND_GUST__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "41": {
+                "summary": "Gust direction and speed at height levels at specified height level above ground in the last 3 hours/Direction et force de la rafale max de vent en niveaux hauteur sur 3 heures",
+                "value": "WIND_GUST_180_MIN__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "42": {
+                "summary": "Wind speed height levels at specified height level above ground/Force du vent en niveaux hauteur.",
+                "value": "WIND_SPEED__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "43": {
+                "summary": "Wind speed (gust) at specified height level above ground/Rafale de vent en niveaux hauteur.",
+                "value": "WIND_SPEED_GUST__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "44": {
+                "summary": "Wind speed (max gust) at specified height level above ground during the last hour/Rafale maximale de vent en niveaux hauteur sur l’heure précédente",
+                "value": "WIND_SPEED_MAXIMUM_GUST__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              },
+              "45": {
+                "summary": "Wind speed (max gust) at specified height level above ground in the last 3 hours/Rafale maximale de vent en niveaux hauteur sur 3 heures",
+                "value": "WIND_SPEED_MAXIMUM_GUST_180_MIN__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND"
+              }
+            }
+          },
+          {
+            "name": "crs",
+            "in": "query",
+            "description": "CRS. The only accepted value is EPSG:4326",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "EPSG:4326"
+              ]
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Format",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image/png"
+              ]
+            }
+          },
+          {
+            "name": "bbox",
+            "in": "query",
+            "description": "bbox",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "-10,-100,80,100",
+                "value": "-10,-100,80,100"
+              }
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "description": "height",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "256",
+                "value": "256"
+              }
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "description": "width",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "256",
+                "value": "256"
+              }
+            }
+          },
+          {
+            "name": "transparent",
+            "in": "query",
+            "description": "transparent true or false",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "1": {
+                "summary": "true",
+                "value": "true"
+              },
+              "2": {
+                "summary": "false",
+                "value": "false"
+              }
+            }
+          },
+          {
+            "name": "reference_time",
+            "in": "query",
+            "description": "reference_time in YYYY-MM-JJTHH:mm:ssZ format (see the result of the GetCapabilities for available reference_time)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "time",
+            "in": "query",
+            "description": "time in YYYY-MM-JJTHH:mm:ssZ format (see the result of the GetCapabilities for available time)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "elevation",
+            "in": "query",
+            "description": "elevation (see the result of the GetCapabilities for available elevation)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "styles",
+            "in": "query",
+            "description": "styles (see the result of the GetCapabilities for available styles)",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wcs/MF-NWP-GLOBAL-ARPEGE-005-EURAT-WCS/GetCapabilities": {
+      "get": {
+        "tags": [
+          "Prévisions ARPEGE EURAT1S20"
+        ],
+        "description": "GetCapabilities retourne la liste des opérations supportées par le service, et la liste des champs (coverages) disponibles\n\nGetCapabilities returns the list of operations supported by the service, and the list of available fields (coverages)",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WCS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WCS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WCS version. The only accepted value is 2.0.1",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2.0.1"
+              ]
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "default": "eng",
+              "enum": [
+                "eng",
+                "fre"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wcs/MF-NWP-GLOBAL-ARPEGE-005-EURAT-WCS/DescribeCoverage": {
+      "get": {
+        "tags": [
+          "Prévisions ARPEGE EURAT1S20"
+        ],
+        "description": "DescribeCoverage décrit la structure du coverage (extension spatiale, extension temporelle, géométrie de la grille, type des données et unité des valeurs sur la grille)\n\nDescribeCoverage describes the coverage structure (spatial extension, temporal extension, grid geometry, data type and unit of values on the grid)",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WCS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WCS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WCS version. The only accepted value is 2.0.1",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2.0.1"
+              ]
+            }
+          },
+          {
+            "name": "coverageID",
+            "in": "query",
+            "description": "Identifiant du coverage (tel qu'il apparaît dans la réponse GetCapabilities)",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    },
+    "/wcs/MF-NWP-GLOBAL-ARPEGE-005-EURAT-WCS/GetCoverage": {
+      "get": {
+        "tags": [
+          "Prévisions ARPEGE EURAT1S20"
+        ],
+        "description": "GetCoverage renvoie le coverage\n\n\nGetCoverage return the coverage",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "description": "The only mandatory accepted value is WCS.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "WCS"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "WCS version. The only accepted value is 2.0.1",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2.0.1"
+              ]
+            }
+          },
+          {
+            "name": "coverageid",
+            "in": "query",
+            "description": "Identifiant du coverage (tel qu'il apparaît dans la réponse GetCapabilities)",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subset",
+            "in": "query",
+            "description": "Paramètres de sous-sélection, selon les différents axes. Il faut que la combinatoire des paramètres de sous-sélection dans la requête définissent un sous-ensemble de dimension 2 au maximum.",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Format",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image/tiff",
+                "application/wmo-grib"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/Badrequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ThrottlingLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          }
+        },
+        "security": [
+          {
+            "default": []
+          }
+        ],
+        "x-auth-type": "Application & Application User",
+        "x-throttling-tier": "Unlimited"
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "InvalidToken": {
+        "description": "Invalid token"
+      },
+      "Forbidden": {
+        "description": "Forbidden"
+      },
+      "InternalServer": {
+        "description": "Internal Server Error"
+      },
+      "Badrequest": {
+        "description": "Bad request"
+      },
+      "OK": {
+        "description": "OK"
+      },
+      "ThrottlingLimit": {
+        "description": "Throttling limit"
+      },
+      "Unavailable": {
+        "description": "Service Unavailable"
+      },
+      "Timeout": {
+        "description": "Backend Timeout"
+      }
+    },
+    "securitySchemes": {
+      "default": {
+        "type": "oauth2",
+        "flows": {
+          "implicit": {
+            "authorizationUrl": "https://public-api.meteofrance.fr/authorize",
+            "scopes": {}
+          }
+        }
+      }
+    }
+  }
+}

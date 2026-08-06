@@ -39,6 +39,7 @@ from crise_auth import crise_auth_bp
 from routing import routing_bp
 from routing_overrides import routing_overrides_bp
 from cameras import cameras_bp
+from meteo import meteo_bp
 import pcorg_summary
 import pcorg_summary_mail
 import pcorg_ai_memory
@@ -1629,11 +1630,77 @@ def get_meteo_widget_summary():
 
     risk_labels = {'green': 'RAS', 'orange': 'Vigilance', 'red': 'Alerte'}
 
+    # ── La vigilance Meteo-France prime sur les seuils internes ──
+    #
+    # Les seuils ci-dessus sont une appreciation locale, calculee sur la
+    # prevision d'un point. La vigilance est un produit de securite publique,
+    # opposable, et c'est elle que regardera la prefecture. Un orange officiel
+    # doit donc allumer la jauge meme si aucun seuil interne n'est franchi --
+    # l'inverse laisserait lire "RAS" un jour de vigilance orange orages.
+    #
+    # On ne prend que le MAXIMUM : la vigilance ne peut qu'elever le niveau,
+    # jamais l'abaisser. Un vert officiel n'efface pas des rafales a 90 km/h
+    # mesurees sur le circuit.
+    vigilance_info = None
+    try:
+        bulletin = db.meteo_vigilance.find_one({'departement': '72'},
+                                               sort=[('update_time', -1)])
+    except Exception:
+        bulletin = None
+
+    if bulletin:
+        # Correspondance des echelles : jaune -> orange chez nous (notre
+        # echelle n'a que trois crans), orange et rouge -> red.
+        couleur_vers_severite = {'vert': 'green', 'jaune': 'orange',
+                                 'orange': 'red', 'rouge': 'red'}
+        ordre = {'green': 0, 'orange': 1, 'red': 2}
+
+        pire_couleur, phenomenes = 'vert', []
+        for periode in bulletin.get('periodes') or []:
+            # Seule l'echeance du jour compte pour la jauge temps reel.
+            if periode.get('echeance') not in (None, 'J'):
+                continue
+            for ph in periode.get('phenomenes') or []:
+                if ordre.get(couleur_vers_severite.get(ph.get('couleur'), 'green'), 0) > \
+                   ordre.get(couleur_vers_severite.get(pire_couleur, 'green'), 0):
+                    pire_couleur = ph.get('couleur')
+                if ph.get('nom') and ph['nom'] not in phenomenes:
+                    phenomenes.append(ph['nom'])
+
+        # Peremption : un bulletin trop vieux n'eleve plus rien, mais le dit.
+        age_h = None
+        try:
+            emis = datetime.fromisoformat(
+                str(bulletin.get('update_time')).replace('Z', '+00:00'))
+            age_h = (datetime.now(timezone.utc) - emis).total_seconds() / 3600.0
+        except (TypeError, ValueError):
+            pass
+        perime = age_h is not None and age_h > 6
+
+        severite_vigilance = couleur_vers_severite.get(pire_couleur, 'green')
+        if not perime and ordre.get(severite_vigilance, 0) > ordre.get(max_severity, 0):
+            max_severity = severite_vigilance
+
+        vigilance_info = {
+            'couleur': pire_couleur,
+            'phenomenes': phenomenes,
+            'update_time': bulletin.get('update_time'),
+            'age_h': round(age_h, 1) if age_h is not None else None,
+            'perime': perime,
+        }
+
+    label = risk_labels[max_severity]
+    if vigilance_info and vigilance_info['perime']:
+        label += ' — bulletin perime'
+    elif vigilance_info and vigilance_info['phenomenes'] and max_severity != 'green':
+        label = ', '.join(vigilance_info['phenomenes'])
+
     return jsonify({
         'current': current_data,
         'alerts': deduped_alerts,
         'risk_level': max_severity,
-        'risk_label': risk_labels[max_severity]
+        'risk_label': label,
+        'vigilance': vigilance_info
     })
 
 
@@ -1726,7 +1793,15 @@ app.register_blueprint(cameras_bp)
 # CSRF (decorees @role_required("admin") dans les sections ad hoc).
 app.register_blueprint(alfred_bp)
 csrf.exempt(app.view_functions["alfred.wa_webhook"])
-# app.register_blueprint(meteo_bp)
+# Meteo : configuration de l'emprise de veille et lecture des grilles radar.
+# Les collecteurs vivent dans tools/Meteo/ et ne sont pas pilotes d'ici ; ce
+# blueprint expose la configuration qu'ils lisent, et l'etat de fraicheur des
+# flux.
+#
+# CSRF ACTIVE, comme scan_report_bp : le seul verbe mutateur est PUT
+# /api/meteo/config, appele depuis meteo_bbox.js qui envoie X-CSRFToken.
+# Rien ici n'est consomme par un client externe qui ne saurait pas le faire.
+app.register_blueprint(meteo_bp)
 
 # Espace exercices de crise : sous-arbre statique servi sous /crise.
 #
@@ -6378,6 +6453,25 @@ def circulation_page():
     user_roles = payload.get("roles", [])
     return render_template('circulation.html',
                            user_roles=user_roles,
+                           user_firstname=payload.get("firstname", ""),
+                           user_lastname=payload.get("lastname", ""),
+                           user_email=payload.get("email", ""))
+
+
+@app.route('/meteo-mur')
+@role_required("manager")
+def meteo_mur_page():
+    """Tableau de bord meteo plein ecran (TV du PC Organisation).
+
+    Meme role que /circulation pour le trafic : une page que personne ne
+    pilote, qui se rafraichit seule et repond sans etre sollicitee aux
+    questions du moment -- va-t-il pleuvoir, quand, faut-il agir.
+
+    Consomme /api/meteo/mur, qui agrege previsions, vigilance, radar et
+    humidite des sols en une seule charge."""
+    payload = getattr(request, 'user_payload', {})
+    return render_template('meteo_mur.html',
+                           user_roles=payload.get("roles", []),
                            user_firstname=payload.get("firstname", ""),
                            user_lastname=payload.get("lastname", ""),
                            user_email=payload.get("email", ""))

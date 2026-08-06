@@ -14,6 +14,11 @@
 
   <!-- App CSS -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+  <!-- Leaflet 1.9.4, servi en local : pas de dependance CDN a l'execution,
+       et pas de question d'integrite sur un script tiers. -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='libs/leaflet/leaflet.css') }}">
+  <script src="{{ url_for('static', filename='libs/leaflet/leaflet.js') }}"></script>
 </head>
 
 <body>
@@ -250,6 +255,59 @@
               <span class="material-symbols-outlined" style="font-size:16px;">deselect</span>
             </button>
           </div>
+        </div>
+      </section>
+
+      <!-- Section Meteo — emprise de veille radar -->
+      <section class="widget-card" style="margin-top:16px;">
+        <header class="widget-header" data-collapsible data-section="meteo">
+          <h3>Meteo — Zone de veille radar</h3>
+          <div style="display:flex; gap:6px; align-items:center; margin-left:auto; margin-right:8px;" onclick="event.stopPropagation()">
+            <span id="meteo-status" style="font-size:0.78rem; color:var(--muted);"></span>
+            <button id="btn-meteo-reset" class="btn-icon" title="Revenir a l'emprise par defaut">
+              <span class="material-symbols-outlined">restart_alt</span>
+            </button>
+            <button id="btn-meteo-save" class="btn-icon" title="Enregistrer l'emprise">
+              <span class="material-symbols-outlined">save</span>
+            </button>
+          </div>
+          <span class="material-symbols-outlined collapse-icon">expand_more</span>
+        </header>
+        <div class="widget-body collapsible" id="meteo-body">
+
+          <p style="font-size:0.82rem; color:var(--muted); margin:0 0 12px;">
+            Deux emprises. Le <strong>site</strong> (bleu) sert au calcul par zone : il doit
+            englober toutes les aires d'accueil, campings, parkings et tribunes.
+            La <strong>veille</strong> (ambre) sert a voir arriver les cellules : une cellule a
+            35 km/h que l'on veut detecter 45 min a l'avance se trouve a 26 km.
+          </p>
+
+          <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
+            <label style="font-size:0.84rem; font-weight:600; white-space:nowrap;">Rayon de veille</label>
+            <input type="range" id="meteo-veille" min="10" max="150" step="5" value="40" style="width:220px;">
+            <span id="meteo-veille-val" style="font-size:0.84rem; font-weight:600; min-width:56px;">40 km</span>
+            <span style="width:1px; height:20px; background:rgba(148,163,184,0.2);"></span>
+            <button id="btn-meteo-draw" class="btn-icon" title="Redessiner l'emprise du site" style="width:auto; padding:0 10px; gap:6px; display:inline-flex; align-items:center;">
+              <span class="material-symbols-outlined" style="font-size:18px;">crop_free</span>
+              <span style="font-size:0.8rem;">Dessiner le site</span>
+            </button>
+            <span id="meteo-draw-hint" style="font-size:0.78rem; color:var(--muted);"></span>
+          </div>
+
+          <div id="meteo-map" style="height:340px; border-radius:8px; overflow:hidden; background:rgba(148,163,184,0.08);"></div>
+
+          <div style="display:flex; gap:20px; flex-wrap:wrap; margin-top:12px; font-size:0.78rem; color:var(--muted);">
+            <span>Site : <code id="meteo-bbox-txt">—</code></span>
+            <span>Grille radar : <code id="meteo-grille-txt">—</code></span>
+            <span id="meteo-maj"></span>
+          </div>
+
+          <h4 style="margin:18px 0 8px; font-size:0.88rem;">Fraicheur des flux</h4>
+          <p style="font-size:0.78rem; color:var(--muted); margin:0 0 8px;">
+            L'API radar ne sert que la derniere image : une interruption de collecte
+            creuse un trou definitif dans l'animation du passe, sans rattrapage possible.
+          </p>
+          <div id="meteo-flux" style="display:flex; flex-wrap:wrap; gap:10px;"></div>
         </div>
       </section>
 
@@ -912,6 +970,7 @@
 <script src="/static/js/groups.js"></script>
 <script src="/static/js/merge_config.js"></script>
 <script src="/static/js/map_defaults.js"></script>
+<script src="/static/js/meteo_bbox.js"></script>
 <script src="/static/js/anoloc_admin.js"></script>
 <script src="/static/js/pcorg_config.js"></script>
 <script src="/static/js/main.js"></script>

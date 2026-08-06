@@ -20,6 +20,7 @@
 
     <!-- App CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/meteo_avance.css') }}">
 
     <!-- Libs JS -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1079,6 +1080,7 @@ window.__userCanCloseFiche = {{ user_can_close_fiche_json|safe }};
 <script src="{{ url_for('static', filename='js/alerte.js') }}"></script>
 <script src="{{ url_for('static', filename='js/traffic.js') }}"></script>
 <script src="{{ url_for('static', filename='js/meteo.js') }}"></script>
+<script src="{{ url_for('static', filename='js/meteo_avance.js') }}"></script>
 <script src="{{ url_for('static', filename='js/timeline.js') }}"></script>
 <script src="{{ url_for('static', filename='js/map_view.js') }}"></script>
 <script src="{{ url_for('static', filename='js/controle_access.js') }}"></script>

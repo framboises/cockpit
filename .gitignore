@@ -14,3 +14,6 @@ keys/*_private.pem
 reports/
 # Classeurs en attente d import
 uploads/scan_imports/
+
+# Images radar generees toutes les 5 minutes par tools/Meteo/collecte_radar.py
+static/meteo/

@@ -1,0 +1,273 @@
+/* ==========================================================================
+   METEO AVANCEE — radar sur la carte, contrainte thermique, vigilance
+   Complete style.css sans le modifier.
+   ========================================================================== */
+
+/* --- Barre de lecture du radar, posee sur la carte --------------------- */
+.radar-barre {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(15, 22, 32, 0.88);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  color: #e6edf5;
+  font-size: 0.8rem;
+  max-width: min(560px, 88%);
+}
+
+.radar-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; flex: 0 0 30px;
+  border: none; border-radius: 6px; cursor: pointer;
+  background: rgba(57, 135, 229, 0.18);
+  color: #7fb2f0;
+}
+.radar-btn:hover { background: rgba(57, 135, 229, 0.30); }
+.radar-btn .material-symbols-outlined { font-size: 19px; }
+
+.radar-curseur { flex: 1 1 130px; min-width: 90px; accent-color: #3987e5; cursor: pointer; }
+
+.radar-infos { display: flex; flex-direction: column; gap: 1px; min-width: 128px; }
+.radar-heure { font-weight: 700; font-size: 0.92rem; line-height: 1.1; }
+.radar-type  { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+.radar-max   { font-size: 0.7rem; color: #94a3b8; }
+.radar-source { font-size: 0.64rem; color: #64748b; white-space: nowrap; }
+
+/* Le bouton radar n'a AUCUN style propre : il reutilise les classes
+   .cockpit-tile-switcher / .tile-btn de style.css, comme le carroyage et le
+   selecteur de fond. Taille, couleurs, ombre, hover et etat .active viennent
+   de la, donc il suivra toute evolution du theme sans intervention ici. */
+
+/* --- Vigilance -------------------------------------------------------- */
+.vigilance-carte { border-radius: 8px; padding: 12px 14px; }
+.vigilance-entete { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.vigilance-pastille {
+  padding: 3px 10px; border-radius: 4px; color: #fff;
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em;
+}
+.vigilance-libelle { font-size: 0.86rem; font-weight: 600; }
+.vigilance-periode {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  padding: 4px 0; font-size: 0.82rem;
+}
+.vigilance-periode strong { min-width: 92px; }
+.vigilance-phen { font-size: 0.8rem; }
+.vigilance-pied {
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  font-size: 0.72rem; color: var(--muted, #94a3b8);
+}
+
+/* Pastille dans le bandeau du header : uniquement hors vert */
+.vigilance-bandeau {
+  padding: 4px 12px; border-radius: 5px; color: #fff;
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.03em;
+  white-space: nowrap; margin-right: 10px; align-self: center;
+}
+
+/* --- Contrainte thermique (WBGT) -------------------------------------- */
+.wbgt-jours { display: flex; gap: 10px; flex-wrap: wrap; }
+.wbgt-jour {
+  flex: 1 1 148px; min-width: 148px;
+  background: rgba(148, 163, 184, 0.07);
+  border-radius: 8px; padding: 10px 12px;
+}
+.wbgt-date   { font-size: 0.72rem; color: var(--muted, #94a3b8); }
+.wbgt-valeur { font-size: 1.5rem; font-weight: 700; line-height: 1.15; }
+.wbgt-niveau { font-size: 0.78rem; font-weight: 600; }
+.wbgt-detail { font-size: 0.7rem; color: var(--muted, #94a3b8); margin-top: 2px; }
+.wbgt-plage {
+  font-size: 0.7rem; margin-top: 6px; padding-top: 6px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+.wbgt-consigne { font-size: 0.72rem; margin-top: 5px; font-style: italic; }
+.wbgt-reserve {
+  font-size: 0.68rem; margin-top: 5px; color: #f59628;
+  font-weight: 600; cursor: help;
+}
+
+/* --- Humidite des sols ------------------------------------------------- */
+.sol-ligne { display: flex; gap: 10px; flex-wrap: wrap; }
+.sol-bloc {
+  flex: 1 1 118px; padding: 8px 12px; border-radius: 6px;
+  background: rgba(148, 163, 184, 0.07);
+}
+.sol-libelle { font-size: 0.7rem; color: var(--muted, #94a3b8); text-transform: uppercase; letter-spacing: 0.04em; }
+.sol-valeur  { font-size: 1.2rem; font-weight: 700; line-height: 1.25; }
+.sol-note    { font-size: 0.68rem; color: var(--muted, #94a3b8); }
+
+.sol-spark-titre { font-size: 0.7rem; color: var(--muted, #94a3b8); margin: 12px 0 4px; }
+.sol-spark {
+  display: flex; align-items: flex-end; gap: 2px;
+  height: 44px; padding: 3px; border-radius: 5px;
+  background: rgba(148, 163, 184, 0.06);
+}
+.sol-barre { flex: 1 1 auto; min-width: 2px; border-radius: 1px 1px 0 0; cursor: help; }
+
+/* --- Divers ------------------------------------------------------------ */
+.meteo-note {
+  font-size: 0.74rem; color: var(--muted, #94a3b8);
+  margin: 0 0 10px; line-height: 1.45;
+}
+.meteo-vide { font-size: 0.8rem; color: var(--muted, #94a3b8); font-style: italic; }
+.radar-resume { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; font-size: 0.82rem; }
+.meteo-bouton {
+  padding: 5px 12px; border-radius: 6px; cursor: pointer;
+  border: 1px solid rgba(57, 135, 229, 0.45);
+  background: rgba(57, 135, 229, 0.14); color: #7fb2f0;
+  font-size: 0.78rem; font-weight: 600;
+}
+.meteo-bouton:hover { background: rgba(57, 135, 229, 0.26); }
+
+/* Le mur du PC Orga est un ecran clair : les fonds sombres y sont illisibles. */
+@media (prefers-color-scheme: light) {
+  .radar-barre { background: rgba(255, 255, 255, 0.94); color: #1e293b; }
+  .radar-source { color: #64748b; }
+}
+
+/* Origine du niveau affiche par la jauge de risque du widget Meteo.
+   Un shield orange n'appelle pas la meme reaction selon qu'il vient d'un
+   seuil interne ou d'un bulletin officiel opposable : la jauge doit le dire. */
+.meteo-risk-source {
+  display: block;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  margin-top: 1px;
+  cursor: help;
+}
+
+/* ==========================================================================
+   MODE DASHBOARD DU BLOC ANALYSE METEO
+   Le panneau occupe par defaut la seule colonne centrale (grid-column 2/3).
+   En mode dashboard il prend les trois colonnes : la donnee est desormais
+   trop riche pour 1fr, et c'est une lecture de decision, pas un widget.
+   ========================================================================== */
+.meteo-panel.dashboard {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+}
+
+.meteo-dash-toggle {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.meteo-dash-toggle:hover { background: var(--brand-light); color: var(--brand); }
+.meteo-dash-toggle .material-symbols-outlined { font-size: 19px; }
+
+/* --- Bandeau de synthese, en tete du dashboard --- */
+.dash-synthese {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.dash-tuile {
+  padding: 10px 12px; border-radius: 8px;
+  background: rgba(148, 163, 184, 0.07);
+  border-left: 3px solid var(--brand);
+}
+.dash-tuile-libelle {
+  font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.dash-tuile-valeur { font-size: 1.35rem; font-weight: 700; line-height: 1.2; }
+.dash-tuile-note { font-size: 0.68rem; color: var(--muted); }
+
+/* --- Table horaire --- */
+.dash-table-wrap { overflow-x: auto; }
+table.dash-heures {
+  width: 100%; border-collapse: collapse; font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+}
+table.dash-heures th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--card);
+  text-align: right; padding: 6px 8px; font-size: 0.66rem;
+  text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);
+  border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+table.dash-heures th:first-child,
+table.dash-heures td:first-child { text-align: left; font-weight: 700; }
+table.dash-heures td {
+  padding: 5px 8px; text-align: right; white-space: nowrap;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.10);
+}
+table.dash-heures tr:hover td { background: rgba(148, 163, 184, 0.07); }
+table.dash-heures tr.nuit td { opacity: 0.55; }
+
+/* Cellules qui portent une alerte : la couleur ne suffit pas a elle seule,
+   elle est toujours doublee d'un contenu textuel lisible. */
+td.seuil-vigilance { color: #e0b400; font-weight: 700; }
+td.seuil-danger    { color: #f59628; font-weight: 700; }
+td.seuil-critique  { color: #dc3232; font-weight: 700; }
+
+.dash-fleche { display: inline-block; font-size: 0.9rem; }
+.dash-jour-titre {
+  font-size: 0.82rem; font-weight: 700; margin: 16px 0 6px;
+  padding-bottom: 4px; border-bottom: 1px solid var(--line);
+}
+.dash-source {
+  font-size: 0.66rem; color: var(--muted); font-weight: 400;
+  margin-left: 8px;
+}
+
+/* ==========================================================================
+   MODALE METEO DU JOUR — mode dashboard
+   La modale generique fait 640 px : trop etroit des lors qu'on affiche 16
+   parametres horaires. Elle passe ici en large, avec un plafond de hauteur
+   qui laisse la table defiler seule plutot que toute la modale.
+   ========================================================================== */
+#meteoModal.meteo-modal-large {
+  width: min(1320px, calc(100vw - 48px));
+  max-height: 90vh;
+}
+#meteoModal.meteo-modal-large .modal-content { padding: 0; }
+
+.mj-entete {
+  display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.mj-titre { font-size: 1.05rem; font-weight: 700; }
+.mj-sous { font-size: 0.76rem; color: var(--muted); }
+.mj-fermer {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  color: var(--muted); font-size: 1.4rem; line-height: 1; padding: 0 4px;
+}
+.mj-fermer:hover { color: var(--text); }
+
+.mj-corps { padding: 14px 20px 20px; }
+
+/* Onglets : la journee, l'historique, la contrainte */
+.mj-onglets { display: flex; gap: 4px; margin-bottom: 14px; flex-wrap: wrap; }
+.mj-onglet {
+  padding: 6px 14px; border-radius: var(--radius-sm); cursor: pointer;
+  border: 1px solid var(--line); background: transparent;
+  color: var(--muted); font-size: 0.8rem; font-weight: 600;
+}
+.mj-onglet:hover { background: var(--brand-light); color: var(--brand); }
+.mj-onglet.actif { background: var(--brand); color: #fff; border-color: var(--brand); }
+.mj-vue { display: none; }
+.mj-vue.actif { display: block; }
+
+.mj-graph { height: 260px; margin-bottom: 8px; }
+.mj-table-wrap { max-height: 46vh; overflow: auto; }
+
+/* Rose des vents miniature, dans la synthese */
+.mj-rose {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 1.5px solid currentColor; font-size: 0.95rem;
+}
