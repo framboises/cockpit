@@ -348,11 +348,18 @@ def detect_date_from_page1(page):
 # ── Variante Reporting Hebdo (5+ pages, tableau pages 4-5) ───────────────
 
 def detect_variant(pdf):
-    """Renvoie 'reporting_hebdo', 'lmc' ou 'billetterie' selon la structure du PDF."""
+    """Renvoie 'reporting_hebdo', 'hebdo_compact', 'lmc' ou 'billetterie'."""
     if len(pdf.pages) >= 5:
         t1 = pdf.pages[0].extract_text() or ''
         if 'Reporting Hebdo' in t1 or 'évolution billetterie' in t1.lower():
             return 'reporting_hebdo'
+    # Reporting Hebdo condensé (24HC) : tableau comparatif sur une seule page
+    # large, dont la ligne d'en-tête est trop basse pour find_column_boundaries.
+    # Les comparatifs 24HM, eux aussi sur page large, ont leur en-tête en haut :
+    # parse_subtotals les traite correctement et doit continuer à les prendre.
+    pg = hc_table_page(pdf)
+    if pg is not None and not _hc_legacy_columns_ok(pg):
+        return 'hebdo_compact'
     if len(pdf.pages) == 3:
         t1 = pdf.pages[0].extract_text() or ''
         if 'LMC' in t1 or 'Etat Hebdo' in t1 or re.search(r'LMC_Comparatif', t1):
@@ -1148,9 +1155,295 @@ def parse_reporting_hebdo(pdf):
     return year_old, year_new, out_old, out_new
 
 
+# ── Variante Reporting Hebdo condensé (24HC : tableau sur une page large) ─
+#
+# Le comparatif tient sur une seule page paysage large : bloc année N-1 à
+# gauche, bloc année N à droite, alignés ligne à ligne. Les positions des
+# colonnes varient d'un PDF à l'autre : tout est détecté dynamiquement depuis
+# la ligne d'en-tête de chaque section. La valeur retenue est la colonne TOTAL
+# (Vendu + WheelsRacing + Commandé).
+#
+# Les libellés produit ne figurent que dans le bloc de gauche : ils servent aux
+# deux années, ce qui garantit des clés produit identiques dans l'historique.
+
+HC_ROW_TOL = 5         # regroupement vertical : aligne les deux blocs
+HC_MARGIN_X = 40       # en deçà : lettres verticales de section (PARKING, AA)
+HC_NAME_MAX_DX = -25   # fin de la zone nom, relative au x0 de la colonne Vendu
+HC_ADJACENT_DY = 10    # écart vertical max pour rattacher une ligne orpheline
+HC_SEC_LABEL = {1: 'Parking', 2: 'AA'}
+
+
+def hc_table_page(pdf):
+    """Page du tableau comparatif sur une seule page large, ou None."""
+    for pg in pdf.pages:
+        if pg.width > 1000 and 'Sous-total' in (pg.extract_text() or ''):
+            return pg
+    return None
+
+
+def _hc_legacy_columns_ok(page):
+    """find_column_boundaries sait-il calibrer les colonnes sur cette page ?
+
+    Elle ne regarde que les mots à top <= 60. Quand l'en-tête est plus bas,
+    elle retombe silencieusement sur des positions codées en dur et lit des
+    valeurs fausses : c'est ce cas que la variante condensée prend en charge.
+    """
+    vendu = cmd = 0
+    for w in page.extract_words(x_tolerance=2, y_tolerance=2):
+        if w['top'] > 60:
+            continue
+        if w['text'] == 'Vendu':
+            vendu += 1
+        elif w['text'] == 'Commandé':
+            cmd += 1
+    return vendu >= 2 and cmd >= 2
+
+
+def _hc_cells(words, gap=4.0):
+    """Regroupe les mots d'une ligne en cellules (recolle '27' + '668')."""
+    out = []
+    for w in sorted(words, key=lambda w: w['x0']):
+        if out and w['x0'] - out[-1][1] < gap:
+            x0, _x1, txt = out[-1]
+            out[-1] = (x0, w['x1'], txt + ' ' + w['text'])
+        else:
+            out.append((w['x0'], w['x1'], w['text']))
+    return out
+
+
+def _hc_num(txt):
+    """Entier pur ('27 668' -> 27668). None pour un tarif, un % ou du texte."""
+    s = txt.replace('\xa0', ' ').strip()
+    if '%' in s or '€' in s or ',' in s or '.' in s:
+        return None
+    if not re.fullmatch(r'-?\d[\d\s]*', s):
+        return None
+    return int(re.sub(r'\s+', '', s))
+
+
+def _hc_pick(cells, hx0, hx1):
+    """Cellule numérique chevauchant le plus la colonne TOTAL de l'en-tête.
+
+    Les valeurs sont alignées à droite et débordent légèrement le libellé
+    d'en-tête : la zone est élargie, sans atteindre la colonne suivante
+    (Σ Ventes pour les entrées, Libre pour parking/aires).
+    """
+    lo, hi = hx0 - 4, hx1 + 10
+    best, best_ov = None, 0.0
+    for x0, x1, txt in cells:
+        v = _hc_num(txt)
+        if v is None:
+            continue
+        ov = min(x1, hi) - max(x0, lo)
+        if ov > best_ov:
+            best, best_ov = v, ov
+    return best
+
+
+def _hc_rows(page, tol=HC_ROW_TOL):
+    rows = {}
+    for w in page.extract_words(x_tolerance=2, y_tolerance=2):
+        rows.setdefault(round(w['top'] / tol) * tol, []).append(w)
+    for y in rows:
+        rows[y].sort(key=lambda w: w['x0'])
+    return rows
+
+
+def _hc_headers(rows, x_min, x_max):
+    """En-têtes de section (ligne portant 'TOTAL' et 'Vendu').
+
+    -> [(y, total_x0, total_x1, vendu_x0)]
+    """
+    out = []
+    for y in sorted(rows):
+        ws = [w for w in rows[y] if x_min <= w['x0'] < x_max]
+        tot = next((w for w in ws if w['text'] == 'TOTAL'), None)
+        ven = next((w for w in ws if w['text'] == 'Vendu'), None)
+        if tot and ven:
+            out.append((y, tot['x0'], tot['x1'], ven['x0']))
+    return out
+
+
+def _hc_is_alpha(txt):
+    """Cellule de texte : contient une lettre, sans être un tarif ni un nombre."""
+    return bool(re.search(r'[A-Za-zÀ-ÿ]', txt)
+                and '€' not in txt and '%' not in txt
+                and not re.fullmatch(r'[\d\s.,-]+', txt))
+
+
+def _hc_product_name(cells, x_min, x_max):
+    """Dernière séquence contiguë de cellules texte dans [x_min, x_max).
+
+    Les sections parking/aires ont une colonne 'zone' à gauche puis le nom du
+    produit : on retient la séquence la plus à droite, qui est le produit.
+    """
+    seq, cur, last_x1 = [], [], None
+    for x0, x1, txt in cells:
+        if not (x_min <= x0 < x_max):
+            continue
+        if not _hc_is_alpha(txt):
+            if cur:
+                seq.append(cur)
+            cur, last_x1 = [], None
+            continue
+        if cur and last_x1 is not None and x0 - last_x1 > 12:
+            seq.append(cur)
+            cur = []
+        cur.append(txt)
+        last_x1 = x1
+    if cur:
+        seq.append(cur)
+    if not seq:
+        return ''
+    return re.sub(r'\s+', ' ', ' '.join(seq[-1])).strip()
+
+
+def _hc_has_label(cells, vx0):
+    """La ligne porte-t-elle un libellé à gauche de la colonne Vendu ?"""
+    return any(_hc_is_alpha(txt) for x0, _x1, txt in cells if x0 < vx0)
+
+
+def parse_hebdo_compact(pdf):
+    """Parse le comparatif condensé.
+
+    Renvoie (results_old, results_new, warnings) avec
+    results = [(nom_produit, total), ...].
+    """
+    pg = hc_table_page(pdf)
+    if pg is None:
+        return [], [], ['page tableau introuvable']
+
+    rows = _hc_rows(pg)
+    split = pg.width / 2
+    h_old = _hc_headers(rows, 0, split)
+    h_new = _hc_headers(rows, split, pg.width)
+    warnings = []
+    if not h_old or not h_new:
+        return [], [], [f'en-tetes manquants (old={len(h_old)}, new={len(h_new)})']
+
+    def sec_of(y, hdrs):
+        cur = None
+        for i, h in enumerate(hdrs):
+            if h[0] <= y:
+                cur = (i, h)
+        return cur
+
+    items = []      # [y, nom|None, v_old, v_new], dans l'ordre vertical
+    closed = set()  # sections déjà closes par leur ligne 'Total'
+
+    for y in sorted(rows):
+        s_old = sec_of(y, h_old)
+        if s_old is None:
+            continue
+        i_sec, (hy, hx0, hx1, vx0) = s_old
+        if y <= hy or i_sec in closed:
+            continue
+        s_new = sec_of(y, h_new)
+
+        c_old = _hc_cells([w for w in rows[y] if w['x0'] < split])
+        c_new = _hc_cells([w for w in rows[y] if w['x0'] >= split])
+        if not c_old and not c_new:
+            continue
+
+        v_old = _hc_pick(c_old, hx0, hx1)
+        v_new = _hc_pick(c_new, s_new[1][1], s_new[1][2]) if s_new else None
+        line = ' '.join(t for _x0, _x1, t in c_old)
+
+        m = re.search(r'[Ss]ous-total\s+(.+?)(?=\s+-?\d|\s*$)', line)
+        if m:
+            nom = m.group(1).strip()
+        elif re.search(r'\bTotal\s+20\d{2}\b', line):
+            nom = 'Total Entrees'
+        elif re.match(r'^\s*Total\b', line):
+            # Total de section : clôt la section (le récap de bas de page suit)
+            nom = f'Total {HC_SEC_LABEL.get(i_sec, i_sec)}'
+            closed.add(i_sec)
+        elif i_sec in HC_SEC_LABEL:
+            raw = _hc_product_name(c_old, HC_MARGIN_X, vx0 + HC_NAME_MAX_DX)
+            nom = f'{HC_SEC_LABEL[i_sec]} {raw}' if raw else None
+        elif not _hc_has_label(c_old, vx0):
+            # Section Entrées, ligne purement numérique : c'est la suite d'un
+            # sous-total dont seuls les CA tiennent sur la ligne du libellé.
+            nom = None
+        else:
+            # Produit de détail des entrées : seuls les sous-totaux nous
+            # intéressent, et la ligne ne doit pas servir de valeur orpheline.
+            continue
+
+        items.append([y, nom, v_old, v_new])
+
+    # Réconciliation : selon les PDFs, le libellé d'une ligne et ses quantités
+    # tombent sur deux lignes voisines. Un produit sans valeur adopte celles de
+    # la ligne orpheline (valeurs sans libellé) la plus proche verticalement.
+    for it in items:
+        if it[1] is None:
+            continue
+        for slot in (2, 3):
+            if it[slot] is not None:
+                continue
+            best, best_dy = None, None
+            for nb in items:
+                if nb is it or nb[1] is not None or nb[slot] is None:
+                    continue
+                dy = abs(nb[0] - it[0])
+                if dy > HC_ADJACENT_DY:
+                    continue
+                if best_dy is None or dy < best_dy:
+                    best, best_dy = nb, dy
+            if best is not None:
+                it[slot] = best[slot]
+                best[slot] = None
+
+    out_old, out_new = [], []
+    for _y, nom, v_old, v_new in items:
+        if nom is None:
+            if v_old is not None or v_new is not None:
+                warnings.append(f'valeurs orphelines non rattachees : {v_old}/{v_new}')
+            continue
+        if v_old is None and v_new is None:
+            warnings.append(f'{nom} : aucune valeur TOTAL lue')
+            continue
+        if v_old is not None:
+            out_old.append((nom, v_old))
+        if v_new is not None:
+            out_new.append((nom, v_new))
+
+    return out_old, out_new, warnings
+
+
+def detect_years_compact(pdf):
+    """(annee_N-1, annee_N) depuis les en-têtes de la page tableau."""
+    pg = hc_table_page(pdf)
+    if pg is None:
+        return None, None
+    text = pg.extract_text() or ''
+    ys = sorted({int(m.group(1))
+                 for m in re.finditer(r'(?:Tarif|Total|CA\s+\w+)\s+(20\d{2})', text)})
+    return (ys[0], ys[-1]) if len(ys) >= 2 else (None, None)
+
+
+def detect_date_any(pdf):
+    """Date DD/MM/YYYY cherchée page par page, la plus haute d'abord.
+
+    Plus tolérant que detect_date_from_page1 : certains exports ont une page 1
+    de garde ou un graphique pleine page à la place du tableau de synthèse.
+    """
+    for pg in pdf.pages:
+        cands = []
+        for w in pg.extract_words(x_tolerance=2, y_tolerance=2):
+            m = re.match(r'^(\d{2})/(\d{2})/(\d{4})$', w['text'])
+            if m:
+                cands.append((w['top'], m.group(1), m.group(2), int(m.group(3))))
+        if cands:
+            cands.sort()
+            _top, dd, mm, yy = cands[0]
+            return dd, mm, yy
+    return None, None, None
+
+
 # ── XLSX ─────────────────────────────────────────────────────────────────
 
-def write_xlsx(products, year, dd, mm, output_dir):
+def write_xlsx(products, year, dd, mm, output_dir, topic_code=None):
     wb = Workbook()
     ws = wb.active
     ws.title = "productReceipts"
@@ -1188,7 +1481,10 @@ def write_xlsx(products, year, dd, mm, output_dir):
     ws.column_dimensions['B'].width = 40
     ws.column_dimensions['C'].width = 25
 
-    filename = f"Query_{year}{mm}{dd}.xlsx"
+    # Le topic_code préfixe le nom : deux évènements peuvent produire un
+    # snapshot à la même date, et le nom seul les ferait s'écraser.
+    prefix = f"{topic_code}_" if topic_code else ""
+    filename = f"{prefix}Query_{year}{mm}{dd}.xlsx"
     filepath = os.path.join(output_dir, filename)
     wb.save(filepath)
     return filepath
@@ -1200,24 +1496,36 @@ def process_pdf(pdf_path, topic_code, output_dir):
     print(f"\nTraitement: {os.path.basename(pdf_path)}")
 
     pdf = pdfplumber.open(pdf_path)
-    if len(pdf.pages) < 3:
+    variant = detect_variant(pdf)
+
+    # Le comparatif condensé tient parfois sur 2 pages : le garde ci-dessous ne
+    # s'applique qu'aux formats qui lisent pdf.pages[2] en dur.
+    if variant != 'hebdo_compact' and len(pdf.pages) < 3:
         print(f"  SKIP: {len(pdf.pages)} pages")
         pdf.close()
         return []
 
-    variant = detect_variant(pdf)
-
     if variant == 'lmc':
         dd, mm, date_year = detect_date_lmc(pdf.pages[0])
+    elif variant == 'hebdo_compact':
+        dd, mm, date_year = detect_date_any(pdf)
     else:
         dd, mm, date_year = detect_date_from_page1(pdf.pages[0])
 
     if not dd:
-        print("  WARN: date non trouvee sur page 1")
+        print("  WARN: date non trouvee")
         pdf.close()
         return []
 
-    if variant == 'reporting_hebdo':
+    if variant == 'hebdo_compact':
+        year_old, year_new = detect_years_compact(pdf)
+        if not year_old:
+            year_old, year_new = date_year - 1, date_year
+        st_old, st_new, hc_warn = parse_hebdo_compact(pdf)
+        print(f"  Variant: Reporting Hebdo condense")
+        for w in hc_warn:
+            print(f"  WARN: {w}")
+    elif variant == 'reporting_hebdo':
         year_old, year_new, st_old, st_new = parse_reporting_hebdo(pdf)
         if not year_old:
             year_old, year_new = date_year - 1, date_year
@@ -1244,11 +1552,11 @@ def process_pdf(pdf_path, topic_code, output_dir):
 
     files = []
     if st_new:
-        f = write_xlsx(st_new, year_new, dd, mm, output_dir)
+        f = write_xlsx(st_new, year_new, dd, mm, output_dir, topic_code)
         print(f"  -> {os.path.basename(f)}")
         files.append(f)
     if st_old:
-        f = write_xlsx(st_old, year_old, dd, mm, output_dir)
+        f = write_xlsx(st_old, year_old, dd, mm, output_dir, topic_code)
         print(f"  -> {os.path.basename(f)}")
         files.append(f)
 
@@ -1282,10 +1590,13 @@ def main():
             else:
                 print(f"Fichier introuvable: {p}")
     else:
+        # 'Reporting Hebdo' couvre les exports condenses, dont le nom ne
+        # contient pas 'Billetterie'.
         pdfs = sorted([
             os.path.join(uploads_dir, f)
             for f in os.listdir(uploads_dir)
-            if f.endswith('.pdf') and 'Billetterie' in f
+            if f.endswith('.pdf')
+            and ('Billetterie' in f or 'Reporting Hebdo' in f)
         ])
 
     if not pdfs:

@@ -1667,27 +1667,32 @@ def get_meteo_widget_summary():
                 if ph.get('nom') and ph['nom'] not in phenomenes:
                     phenomenes.append(ph['nom'])
 
-        # Peremption : un bulletin trop vieux n'eleve plus rien, mais le dit.
-        age_h = None
-        try:
-            emis = datetime.fromisoformat(
-                str(bulletin.get('update_time')).replace('Z', '+00:00'))
-            age_h = (datetime.now(timezone.utc) - emis).total_seconds() / 3600.0
-        except (TypeError, ValueError):
-            pass
-        perime = age_h is not None and age_h > 6
+        # Peremption : etablie sur la validite que Meteo-France publie dans le
+        # bulletin, pas sur un seuil d'age maison. Le seuil de 6 h qui figurait
+        # ici declarait perime un bulletin courant tous les jours de midi a 16 h,
+        # puisque les publications sont a 6 h et 16 h locales. Regle unique
+        # partagee avec /api/meteo/vigilance : meteo.etat_vigilance.
+        from meteo import etat_vigilance
+        fraicheur = etat_vigilance(bulletin)
+        perime = bool(fraicheur['perime'])
 
         severite_vigilance = couleur_vers_severite.get(pire_couleur, 'green')
         if not perime and ordre.get(severite_vigilance, 0) > ordre.get(max_severity, 0):
             max_severity = severite_vigilance
 
+        # Nota : un bulletin encore valide mais non rafraichi eleve quand meme
+        # le niveau. Il parle bien de maintenant ; c'est sa confirmation qui
+        # manque, et sur un produit de securite l'exces de prudence est le bon
+        # sens d'erreur. Seule la validite depassee cesse d'elever.
         vigilance_info = {
             'couleur': pire_couleur,
             'phenomenes': phenomenes,
             'update_time': bulletin.get('update_time'),
-            'age_h': round(age_h, 1) if age_h is not None else None,
+            'age_h': fraicheur['age_h'],
             'perime': perime,
-            'peremption_h': 6,
+            'retard_collecte': fraicheur['retard_collecte'],
+            'valide_jusqua': fraicheur['valide_jusqua'],
+            'motif': fraicheur['motif'],
         }
 
     label = risk_labels[max_severity]

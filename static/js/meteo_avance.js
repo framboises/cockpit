@@ -305,10 +305,23 @@
     var pied = el("div", "vigilance-pied");
     pied.textContent = "Bulletin du " + (v.update_time || "?") +
       (v.age_h !== null && v.age_h !== undefined ? "  (il y a " + v.age_h + " h)" : "");
+    // La peremption vient du serveur (meteo.etat_vigilance), etablie sur la
+    // validite que Meteo-France publie dans le bulletin. Elle reposait ici sur
+    // un seuil d'age de 6 h, qui declarait perime un bulletin courant tous les
+    // jours de midi a 16 h -- les publications sont a 6 h et 16 h locales.
     if (v.perime) {
-      pied.textContent += "  —  PERIME (> " + v.peremption_h + " h), a ne pas utiliser tel quel";
+      pied.textContent += "  —  PERIME (validite depassee), a ne pas utiliser tel quel";
       pied.style.color = "#dc3232";
       pied.style.fontWeight = "700";
+    } else if (v.retard_collecte) {
+      // Couvre encore l'instant present, mais plus confirme depuis un cycle
+      // de publication : une reactualisation a pu passer inapercue.
+      pied.textContent += "  —  NON RAFRAICHIE, verifier la collecte";
+      pied.style.color = "#f59628";
+      pied.style.fontWeight = "700";
+    } else if (v.valide_jusqua) {
+      pied.textContent += "  ·  valide jusqu a " +
+        String(v.valide_jusqua).slice(11, 16) + " UTC";
     }
     carte_.appendChild(pied);
     s.appendChild(carte_);

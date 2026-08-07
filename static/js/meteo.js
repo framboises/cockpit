@@ -55,11 +55,21 @@ function renderMeteoWidget(data) {
         source.textContent = 'Vigilance perimee';
         source.style.color = '#dc3232';
         source.title = 'Bulletin Meteo-France du ' + (v.update_time || '?') +
-          ' -- plus de ' + (v.peremption_h || 6) + ' h, il n eleve plus le niveau';
+          ' -- sa validite publiee est passee, il n eleve plus le niveau';
+      } else if (v && v.retard_collecte) {
+        // Encore valide, mais plus confirme depuis un cycle de publication :
+        // le niveau reste celui-ci, sa fraicheur ne peut plus etre affirmee.
+        source.textContent = 'Vigilance ' + v.couleur + ' non rafraichie';
+        source.style.color = '#f59628';
+        source.title = 'Bulletin Meteo-France du ' + (v.update_time || '?') +
+          (v.age_h != null ? ' -- ' + v.age_h + ' h sans actualisation' : '') +
+          ' -- verifier la tache de collecte';
       } else if (v && v.couleur) {
         source.textContent = 'Vigilance ' + v.couleur;
         source.style.color = COUL[v.couleur] || 'var(--muted)';
         source.title = 'Meteo-France, bulletin du ' + (v.update_time || '?') +
+          (v.valide_jusqua
+            ? ', valide jusqu a ' + String(v.valide_jusqua).slice(11, 16) + ' UTC' : '') +
           (v.age_h != null ? ' (il y a ' + v.age_h + ' h)' : '');
       } else {
         // Distinct du vert : ici on ne SAIT pas, faute de bulletin collecte.

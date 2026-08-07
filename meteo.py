@@ -341,7 +341,100 @@ def etat_collecte():
     return jsonify({"flux": flux, "maintenant": maintenant.isoformat()})
 
 
-PEREMPTION_VIGILANCE_H = 6
+# ---------------------------------------------------------------------------
+# Peremption d'un bulletin de vigilance
+#
+# LA VALIDITE EST PUBLIEE PAR METEO-FRANCE, ON NE L'INVENTE PAS.
+#
+# Chaque periode du bulletin porte `begin_validity_time` et `end_validity_time`
+# (stockes en `debut` / `fin` par collecte_vigilance.py). Le bulletin du matin
+# couvre typiquement 04:00 -> 22:00 UTC pour l'echeance J, puis J1 prend le
+# relais. Tant qu'une periode couvre l'instant present, le bulletin dit quelque
+# chose de maintenant : il n'est pas perime.
+#
+# Un seuil d'age fixe etait faux. Meteo-France publie deux fois par jour, a 6 h
+# et 16 h locales -- soit un intervalle normal allant jusqu'a 14 h. Le seuil de
+# six heures qui figurait ici declarait donc "perime" un bulletin parfaitement
+# courant tous les jours de midi a 16 h, et de minuit a 6 h.
+#
+# L'age reste expose : il sert l'infobulle et le repli. Mais il ne decide plus.
+# ---------------------------------------------------------------------------
+
+# Repli quand le bulletin ne porte aucune periode exploitable. Choisi au-dessus
+# de l'intervalle normal maximal entre deux publications (16 h -> 6 h = 14 h),
+# avec une marge : au-dela, c'est la collecte qui est en cause, pas le bulletin.
+PEREMPTION_REPLI_H = 15
+
+
+def _instant(valeur):
+    """Parse un horodatage ISO du producteur. None si illisible."""
+    if not valeur:
+        return None
+    try:
+        return datetime.fromisoformat(str(valeur).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+
+
+def etat_vigilance(bulletin, maintenant=None):
+    """Fraicheur d'un bulletin. Deux faits distincts, a ne pas confondre.
+
+      perime           la validite publiee par Meteo-France est passee : le
+                       producteur ne dit plus rien de l'instant present.
+      retard_collecte  le bulletin couvre encore maintenant, mais aucune
+                       actualisation n'est arrivee depuis plus d'un cycle de
+                       publication. Il reste le meilleur element disponible, il
+                       n'est simplement plus confirme.
+
+    La distinction compte. Un bulletin du matin couvre J et J1 : sa validite
+    publiee s'etend sur pres de deux jours. Si la collecte s'arrete, il resterait
+    "valide" trente heures durant, alors qu'une reactualisation en orange a pu
+    etre emise entre-temps sans qu'on la voie. Le premier drapeau seul laisserait
+    donc passer ce cas.
+
+    Retourne {perime, retard_collecte, age_h, valide_jusqua, motif}.
+    `motif` dit sur quoi la decision repose, pour ne pas avoir a la deviner.
+    """
+    if not bulletin:
+        return {"perime": None, "retard_collecte": None, "age_h": None,
+                "valide_jusqua": None, "motif": "aucun_bulletin"}
+
+    maintenant = maintenant or datetime.now(timezone.utc)
+
+    emis = _instant(bulletin.get("update_time"))
+    age_h = round((maintenant - emis).total_seconds() / 3600.0, 1) if emis else None
+    retard = bool(age_h is not None and age_h > PEREMPTION_REPLI_H)
+
+    # Validite publiee : on cherche la periode qui couvre l'instant present.
+    fin_couvrante = None
+    fin_max = None
+    for periode in bulletin.get("periodes") or []:
+        debut = _instant(periode.get("debut"))
+        fin = _instant(periode.get("fin"))
+        if fin and (fin_max is None or fin > fin_max):
+            fin_max = fin
+        if debut and fin and debut <= maintenant <= fin:
+            if fin_couvrante is None or fin > fin_couvrante:
+                fin_couvrante = fin
+
+    if fin_couvrante is not None:
+        return {"perime": False, "retard_collecte": retard, "age_h": age_h,
+                "valide_jusqua": fin_couvrante.isoformat(),
+                "motif": "validite_publiee"}
+
+    if fin_max is not None:
+        # Toutes les periodes sont derriere nous : le producteur lui-meme ne
+        # dit plus rien de maintenant.
+        return {"perime": True, "retard_collecte": retard, "age_h": age_h,
+                "valide_jusqua": fin_max.isoformat(),
+                "motif": "validite_publiee_depassee"}
+
+    # Aucune periode exploitable : repli sur l'age.
+    if age_h is None:
+        return {"perime": None, "retard_collecte": None, "age_h": None,
+                "valide_jusqua": None, "motif": "horodatage_illisible"}
+    return {"perime": retard, "retard_collecte": retard, "age_h": age_h,
+            "valide_jusqua": None, "motif": "repli_sur_age"}
 
 
 @meteo_bp.route("/vigilance", methods=["GET"])
@@ -350,30 +443,17 @@ def vigilance():
     """Dernier bulletin, avec sa fraicheur.
 
     Produit de securite publique : restitution sans reinterpretation,
-    horodatage du producteur toujours joint, et peremption explicite au-dela
-    de six heures. Un bulletin perime doit se declarer tel, jamais se laisser
-    lire comme courant.
+    horodatage du producteur toujours joint, et peremption etablie sur la
+    validite qu'il publie lui-meme. Un bulletin perime doit se declarer tel,
+    jamais se laisser lire comme courant -- ni l'inverse.
     """
     dernier = _db()["meteo_vigilance"].find_one(
         {"departement": "72"}, {"_id": 0}, sort=[("update_time", -1)])
     if not dernier:
         return jsonify({"disponible": False, "motif": "aucun_bulletin"})
 
-    horodatage = dernier.get("update_time")
-    age_h = None
-    perime = None
-    if horodatage:
-        try:
-            emis = datetime.fromisoformat(str(horodatage).replace("Z", "+00:00"))
-            age_h = (datetime.now(timezone.utc) - emis).total_seconds() / 3600.0
-            perime = age_h > PEREMPTION_VIGILANCE_H
-        except ValueError:
-            pass
-
     dernier["disponible"] = True
-    dernier["age_h"] = round(age_h, 1) if age_h is not None else None
-    dernier["perime"] = perime
-    dernier["peremption_h"] = PEREMPTION_VIGILANCE_H
+    dernier.update(etat_vigilance(dernier))
     return jsonify(dernier)
 
 
@@ -612,7 +692,9 @@ def mur():
         "prochaines": suite,
         "prochaine_pluie": prochaine_pluie,
         "consignes": consignes,
-        "vigilance": bulletin,
+        # Fraicheur jointe au bulletin : le mur ne doit pas recalculer une
+        # peremption de son cote, c'est ainsi qu'une regle fausse se duplique.
+        "vigilance": {**bulletin, **etat_vigilance(bulletin)} if bulletin else None,
         "sol": sol,
         "radar": {
             "valid_at": radar["valid_at"].isoformat() if radar else None,

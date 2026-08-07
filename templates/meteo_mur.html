@@ -304,15 +304,24 @@
 
     // Regle non negociable : l'horodatage accompagne la valeur, et un bulletin
     // perime se signale au lieu de passer pour courant.
-    var age = null;
-    try {
-      age = (Date.now() - new Date(v.update_time).getTime()) / 3600000;
-    } catch (e) { age = null; }
-    var perime = age !== null && age > 6;
-    $("vig-horodatage").textContent = "bulletin du " +
-      String(v.update_time || "?").replace("T", " ").replace("Z", " UTC") +
-      (perime ? "  —  PERIME" : "");
-    bandeau.classList.toggle("perime", perime);
+    //
+    // La peremption vient du serveur (meteo.etat_vigilance), qui la lit dans la
+    // validite publiee par Meteo-France. Elle etait recalculee ici sur un seuil
+    // de 6 h : le bandeau clignotait PERIME tous les jours de midi a 16 h sur un
+    // bulletin parfaitement courant, les publications etant a 6 h et 16 h.
+    var perime = v.perime === true;
+    var horodatage = "bulletin du " +
+      String(v.update_time || "?").replace("T", " ").replace("Z", " UTC");
+    if (perime) {
+      horodatage += "  —  PERIME";
+    } else if (v.retard_collecte) {
+      horodatage += "  —  NON RAFRAICHIE depuis " + Math.round(v.age_h || 0) + " h";
+    } else if (v.valide_jusqua) {
+      horodatage += "  ·  valide jusqu'a " +
+        String(v.valide_jusqua).slice(11, 16) + " UTC";
+    }
+    $("vig-horodatage").textContent = horodatage;
+    bandeau.classList.toggle("perime", perime || v.retard_collecte === true);
   }
 
   function majActuel(a) {
