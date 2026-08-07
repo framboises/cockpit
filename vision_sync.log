@@ -593,3 +593,688 @@
 2026-08-05 15:56:36 [VisionSync] INFO Immatriculations: 10719 upsert
 2026-08-05 15:56:36 [VisionSync] INFO Blacklist: 32 entrees syncees
 2026-08-05 15:56:36 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 15:58:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 15:58:45 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 16:01:42 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 16:01:43 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 16:01:43 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 16:03:23 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 16:03:27 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 16:06:30 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 16:06:30 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 16:06:30 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 16:08:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 16:08:23 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 16:11:16 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 16:11:17 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 16:11:17 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 16:13:25 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 16:13:38 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 16:16:14 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 16:16:15 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 16:16:15 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 16:18:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 16:18:20 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 16:21:02 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 16:21:03 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 16:21:03 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 16:23:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 16:23:49 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 16:26:42 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 16:26:43 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 16:26:43 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 16:28:23 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 16:28:30 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 16:31:37 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 16:31:38 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 16:31:38 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 16:33:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 16:33:24 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 16:36:13 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 16:36:14 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 16:36:14 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 16:38:23 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 16:38:26 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 16:41:24 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 16:41:25 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 16:41:25 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 16:43:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 16:43:55 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 16:46:57 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 16:46:57 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 16:46:57 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 16:48:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 16:48:21 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 16:51:13 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 16:51:14 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 16:51:14 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 16:53:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 16:53:54 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 16:56:34 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 16:56:34 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 16:56:34 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 16:58:29 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 16:58:35 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 17:01:22 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 17:01:22 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 17:01:22 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 17:03:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 17:03:50 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 17:06:25 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 17:06:25 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 17:06:25 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 17:08:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 17:08:52 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 17:11:23 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 17:11:23 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 17:11:23 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 17:13:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 17:13:49 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 17:16:27 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 17:16:28 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 17:16:28 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 17:18:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 17:18:17 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 17:21:07 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 17:21:07 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 17:21:07 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 17:23:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 17:23:48 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 17:26:56 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 17:26:56 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 17:26:56 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 17:28:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 17:28:21 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 17:31:40 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 17:31:40 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 17:31:40 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 17:33:29 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 17:33:32 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 17:36:44 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 17:36:44 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 17:36:44 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 17:38:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 17:38:51 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 17:42:10 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 17:42:11 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 17:42:11 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 17:43:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 17:43:54 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 17:47:04 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 17:47:04 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 17:47:04 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 17:48:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 17:48:21 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 17:51:32 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 17:51:33 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 17:51:33 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 17:53:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 17:53:55 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 17:57:15 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 17:57:15 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 17:57:15 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 17:58:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 17:58:51 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 18:01:34 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 18:01:34 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 18:01:34 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 18:03:23 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 18:03:27 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 18:05:58 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 18:05:59 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 18:05:59 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 18:08:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 18:08:51 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 18:11:31 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 18:11:32 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 18:11:32 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 18:13:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 18:13:49 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 18:16:38 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 18:16:38 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 18:16:38 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 18:18:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 18:18:21 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 18:21:18 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 18:21:19 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 18:21:19 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 18:23:23 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 18:23:27 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 18:26:43 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 18:26:44 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 18:26:44 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 18:28:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 18:28:46 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 18:32:12 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 18:32:12 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 18:32:12 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 18:33:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 18:33:22 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 18:36:42 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 18:36:42 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 18:36:42 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 18:38:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 18:38:51 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 18:42:01 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 18:42:01 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 18:42:01 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 18:43:23 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 18:43:28 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 18:46:38 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 18:46:39 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 18:46:39 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 18:48:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 18:48:24 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 18:51:28 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 18:51:29 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 18:51:29 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 18:53:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 18:53:55 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 18:56:38 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 18:56:38 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 18:56:38 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 18:58:29 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 18:58:36 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 19:01:19 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 19:01:19 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 19:01:19 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 19:03:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 19:03:50 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 19:06:26 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 19:06:27 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 19:06:27 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 19:08:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 19:08:54 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 19:11:40 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 19:11:41 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 19:11:41 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 19:13:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 19:13:49 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 19:16:41 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 19:16:41 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 19:16:41 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 19:18:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 19:18:17 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 19:21:21 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 19:21:21 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 19:21:21 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 19:23:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 19:23:54 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 19:27:18 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 19:27:18 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 19:27:18 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 19:28:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 19:28:21 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 19:31:52 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 19:31:52 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 19:31:52 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 19:33:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 19:33:48 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 19:37:02 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 19:37:02 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 19:37:02 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 19:38:29 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 19:38:32 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 19:41:40 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 19:41:40 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 19:41:40 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 19:43:29 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 19:43:35 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 19:46:39 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 19:46:39 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 19:46:39 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 19:48:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 19:48:21 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 19:50:56 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 19:50:56 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 19:50:56 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 19:53:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 19:53:54 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 19:56:41 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 19:56:41 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 19:56:41 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 19:58:29 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 19:58:36 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 20:01:26 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 20:01:26 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 20:01:26 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 20:03:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 20:03:48 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 20:06:43 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 20:06:43 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 20:06:43 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 20:08:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 20:08:51 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 20:12:04 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 20:12:04 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 20:12:04 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 20:13:23 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 20:13:34 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 20:16:52 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 20:16:53 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 20:16:53 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 20:18:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 20:18:46 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 20:22:08 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 20:22:08 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 20:22:08 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 20:23:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 20:23:54 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 20:27:32 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 20:27:33 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 20:27:33 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 20:28:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 20:28:17 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 20:32:07 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 20:32:07 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 20:32:07 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 20:33:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 20:33:17 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 20:36:54 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 20:36:54 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 20:36:54 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 20:38:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 20:38:51 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 20:42:03 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 20:42:03 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 20:42:03 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 20:43:23 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 20:43:29 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 20:46:44 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 20:47:06 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 20:47:06 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 20:48:29 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 20:48:37 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 20:51:52 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 20:51:52 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 20:51:52 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 20:53:23 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 20:53:26 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 20:56:23 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 20:56:23 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 20:56:23 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 20:58:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 20:58:46 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 21:01:47 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 21:01:47 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 21:01:47 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 21:03:23 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 21:03:26 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 21:06:38 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 21:06:38 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 21:06:38 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 21:08:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 21:08:51 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 21:12:00 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 21:12:01 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 21:12:01 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 21:13:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 21:13:49 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 21:17:10 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 21:17:10 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 21:17:10 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 21:18:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 21:18:17 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 21:21:44 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 21:21:45 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 21:21:45 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 21:23:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 21:23:54 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 21:27:36 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 21:27:36 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 21:27:36 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 21:28:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 21:28:21 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 21:32:04 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 21:32:04 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 21:32:04 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 21:33:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 21:33:27 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 21:36:30 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 21:36:31 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 21:36:31 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 21:38:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 21:38:52 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 21:41:56 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 21:41:56 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 21:41:56 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 21:43:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 21:43:49 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 21:47:00 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 21:47:00 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 21:47:00 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 21:48:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 21:48:21 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 21:50:56 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 21:50:57 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 21:50:57 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 21:53:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 21:53:54 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 21:56:45 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 21:56:45 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 21:56:45 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 21:58:29 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 21:58:32 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 22:01:31 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 22:01:32 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 22:01:32 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 22:03:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 22:03:49 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 22:06:45 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 22:06:46 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 22:06:46 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 22:08:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 22:08:54 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 22:11:59 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 22:12:00 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 22:12:00 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 22:13:25 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 22:13:37 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 22:16:48 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 22:16:50 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 22:16:50 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 22:18:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 22:18:21 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 22:21:40 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 22:21:41 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 22:21:41 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 22:23:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 22:23:55 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 22:27:26 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 22:27:26 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 22:27:26 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 22:28:29 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 22:28:36 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 22:31:37 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 22:31:38 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 22:31:38 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 22:33:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 22:33:24 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 22:36:14 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 22:36:15 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 22:36:15 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 22:38:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 22:38:51 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 22:41:48 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 22:41:48 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 22:41:48 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 22:43:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 22:43:49 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 22:46:25 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 22:46:26 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 22:46:26 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 22:48:23 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 22:48:27 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 22:51:06 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 22:51:06 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 22:51:06 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 22:53:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 22:53:54 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 22:56:53 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 22:56:54 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 22:56:54 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 22:58:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 22:58:22 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 23:01:23 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 23:01:23 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 23:01:23 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 23:03:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 23:03:16 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 23:06:06 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 23:06:06 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 23:06:06 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 23:08:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 23:08:45 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 23:11:43 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 23:11:43 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 23:11:43 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 23:13:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 23:13:49 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 23:16:55 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 23:16:55 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 23:16:55 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 23:18:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 23:18:21 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 23:21:27 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 23:21:27 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 23:21:27 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 23:23:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 23:23:54 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 23:27:03 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 23:27:03 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 23:27:03 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 23:28:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 23:28:46 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 23:31:59 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 23:31:59 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 23:31:59 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 23:33:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 23:33:24 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 23:36:11 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 23:36:11 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 23:36:11 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 23:38:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 23:38:51 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 23:41:37 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 23:41:37 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 23:41:37 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 23:43:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 23:43:49 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 23:46:38 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 23:46:39 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 23:46:39 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 23:48:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 23:48:21 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 23:50:59 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 23:50:59 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 23:50:59 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 23:53:29 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 23:53:32 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-05 23:56:25 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-05 23:56:26 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-05 23:56:26 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-05 23:58:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-05 23:58:21 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 00:01:32 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 00:01:32 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 00:01:32 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 00:03:15 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 00:03:19 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 00:06:13 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 00:06:14 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 00:06:14 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 00:08:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 00:08:51 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 00:11:56 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 00:11:57 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 00:11:57 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 00:13:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 00:13:52 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 00:16:51 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 00:16:52 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 00:16:52 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 00:18:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 00:18:21 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 00:21:25 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 00:21:25 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 00:21:25 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 00:23:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 00:23:55 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 00:27:10 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 00:27:11 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 00:27:11 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 00:28:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 00:28:51 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 00:31:57 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 00:31:57 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 00:31:57 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 00:33:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 00:33:25 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 00:36:15 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 00:36:16 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 00:36:16 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 00:38:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 00:38:51 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 00:41:40 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 00:41:40 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 00:41:40 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 00:43:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 00:43:49 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 00:46:26 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 00:46:26 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 00:46:26 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 00:48:23 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 00:48:27 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 00:51:14 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 00:51:14 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 00:51:14 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 00:53:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 00:53:54 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 00:57:04 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 00:57:04 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 00:57:04 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 00:58:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 00:58:52 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 01:02:19 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 01:02:19 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 01:02:19 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 01:03:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 01:03:19 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 01:06:28 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 01:06:28 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 01:06:28 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 01:08:29 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 01:08:33 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 01:11:34 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 01:11:34 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 01:11:34 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 01:13:38 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 01:13:43 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 01:16:49 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 01:16:49 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 01:16:49 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 01:18:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 01:18:17 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 01:21:29 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 01:21:29 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 01:21:29 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 01:23:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 01:23:49 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 01:27:07 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 01:27:08 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 01:27:08 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 01:28:29 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 01:28:33 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 01:31:32 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 01:31:32 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 01:31:32 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 01:33:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 01:33:18 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 01:35:53 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 01:35:53 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 01:35:53 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 01:38:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 01:38:48 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 01:41:28 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 01:41:28 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 01:41:28 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 01:43:39 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 01:43:43 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 01:46:37 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 01:46:37 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 01:46:37 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 01:48:39 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 01:48:42 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 01:51:44 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 01:51:44 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 01:51:44 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 01:53:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 01:53:49 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 01:57:05 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 01:57:05 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 01:57:05 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 01:58:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 01:58:18 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 02:01:46 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 02:01:47 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 02:01:47 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 02:03:39 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 02:03:41 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 02:07:11 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 02:07:12 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 02:07:12 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 02:08:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 02:08:17 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 02:11:54 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 02:11:54 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 02:11:54 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 02:13:39 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 02:13:47 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 02:17:29 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 02:17:29 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 02:17:29 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 02:18:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 02:18:18 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 02:22:06 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 02:22:06 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 02:22:06 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 02:23:29 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 02:23:32 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 02:26:53 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 02:26:53 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 02:26:53 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 02:28:40 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 02:28:43 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 02:31:48 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 02:31:49 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 02:31:49 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 02:33:29 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 02:33:30 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 02:36:16 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 02:36:16 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 02:36:16 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 02:38:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 02:38:48 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 02:41:43 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 02:41:44 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 02:41:44 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 02:43:39 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 02:43:43 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 02:46:48 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 02:46:49 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 02:46:49 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 02:48:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 02:48:15 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 02:51:21 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 02:51:21 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 02:51:21 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 02:53:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 02:53:49 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 02:57:12 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 02:57:12 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 02:57:12 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 02:58:14 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 02:58:17 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 03:01:51 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 03:01:51 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 03:01:51 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 03:03:39 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 03:03:45 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 03:07:34 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 03:07:34 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 03:07:34 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 03:08:44 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 03:08:48 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 03:12:40 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 03:12:40 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 03:12:40 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 03:13:39 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 03:13:44 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 03:16:55 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 03:16:56 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 03:16:56 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
+2026-08-06 03:18:29 [VisionSync] INFO === Demarrage sync Vision incremental ===
+2026-08-06 03:18:31 [VisionSync] INFO Config syncee: GPF 2026
+2026-08-06 03:21:59 [VisionSync] INFO Immatriculations: 10719 upsert
+2026-08-06 03:21:59 [VisionSync] INFO Blacklist: 32 entrees syncees
+2026-08-06 03:21:59 [VisionSync] INFO Sync terminee: 10719 immat, 32 blacklist
