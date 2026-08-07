@@ -224,38 +224,6 @@
             <span id="meteo-maj"></span>
           </div>
 
-          <h4 style="margin:22px 0 8px; font-size:0.88rem;">Cadrage du mur meteo</h4>
-          <p style="font-size:0.78rem; color:var(--muted); margin:0 0 10px;">
-            Ce que montre la carte de <a href="/meteo-mur" target="_blank" rel="noopener"
-            style="color:inherit;">/meteo-mur</a> sur la TV du PC. C'est un reglage
-            d'<strong>affichage</strong> : il ne touche ni au calcul par zone ni a
-            l'emprise collectee. Deplacez et zoomez la carte ci-dessous jusqu'au
-            cadrage voulu, puis enregistrez.
-          </p>
-
-          <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
-            <label style="font-size:0.84rem; font-weight:600;" for="meteo-mur-fond">Fond de carte</label>
-            <select id="meteo-mur-fond" class="form-input" style="width:auto; min-width:170px;"></select>
-            <span style="width:1px; height:20px; background:rgba(148,163,184,0.2);"></span>
-            <button id="btn-meteo-mur-recentrer" class="btn-icon" title="Revenir au circuit"
-                    style="width:auto; padding:0 10px; gap:6px; display:inline-flex; align-items:center;">
-              <span class="material-symbols-outlined" style="font-size:18px;">my_location</span>
-              <span style="font-size:0.8rem;">Recentrer sur le circuit</span>
-            </button>
-            <span id="meteo-mur-txt" style="font-size:0.78rem; color:var(--muted);">—</span>
-          </div>
-
-          <!-- Proportions calees sur la carte du mur (colonne quasi carree sur la
-               TV). Un apercu pleine largeur montrerait bien plus de terrain que
-               l'ecran du PC : on cadrerait a cote. -->
-          <div id="meteo-mur-map"
-               style="width:min(100%, 470px); aspect-ratio:1 / 1; border-radius:8px;
-                      overflow:hidden; background:rgba(148,163,184,0.08);"></div>
-          <p style="font-size:0.74rem; color:var(--muted); margin:6px 0 0;">
-            Cet apercu est aux proportions de la carte du mur : ce que vous voyez
-            ici est ce que la TV affichera.
-          </p>
-
           <h4 style="margin:18px 0 8px; font-size:0.88rem;">Fraicheur des flux</h4>
           <p style="font-size:0.78rem; color:var(--muted); margin:0 0 8px;">
             L'API radar ne sert que la derniere image : une interruption de collecte

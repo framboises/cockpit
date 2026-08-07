@@ -3,23 +3,62 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Meteo - Poste de controle</title>
+  <title>Meteo - Poste de commandement</title>
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='libs/leaflet/leaflet.css') }}">
-  <script src="{{ url_for('static', filename='libs/leaflet/leaflet.js') }}"></script>
 
   <style>
-  /* Tokens repris de circulation.html : le mur doit etre homogene d'un
-     ecran a l'autre, un operateur passe de l'un a l'autre du regard. */
+  /* ==========================================================================
+     MUR METEO — TV du poste de commandement
+
+     CE N'EST PAS UNE PAGE WEB, C'EST UN PANNEAU.
+
+     Personne ne s'en approche, personne ne clique, personne ne fait defiler.
+     On le lit de trois a cinq metres, en passant, entre deux autres choses.
+     Trois regles en decoulent, et elles priment sur toute considerration
+     d'esthetique ou de densite :
+
+       1. TAILLE. A quatre metres, un caractere doit faire environ 2 cm de haut
+          pour se lire sans effort. Sur un 75 pouces en 1920 px de large, cela
+          fait a peu pres 24 px de hauteur de capitale, donc 32 px de corps.
+          Aucune donnee n'est ecrite plus petit. Les libelles peuvent l'etre,
+          la valeur jamais. Les tailles sont exprimees en vw : le panneau suit
+          la dalle sans qu'on ait a le rerelger.
+
+       2. REPONDRE, PAS AFFICHER. La question du PC n'est pas "quelle
+          temperature fait-il" mais "est-ce que quelque chose arrive, quand, et
+          qu'est-ce que j'en fais". D'ou le verdict en haut, qui repond meme
+          quand la reponse est "rien" -- un ecran calme et un ecran en panne se
+          ressemblent trop pour laisser le silence dire quelque chose.
+
+       3. PAS DE CARTE. Une carte radar est illisible a cette distance : on n'y
+          distingue ni les contours, ni l'echelle, ni le sens du deplacement.
+          Ce qu'elle apportait -- quand la pluie arrive, combien, combien de
+          temps -- est desormais dit en toutes lettres et sur la frise horaire.
+          Le radar reste sur la carte du cockpit, ou l'operateur est a 60 cm.
+     ========================================================================== */
   :root{
     --bg:#0b1220; --bg-2:#0f172a; --panel:#1e293b; --panel-2:#172132;
-    --line:rgba(148,163,184,0.16); --line-2:rgba(148,163,184,0.28);
+    --line:rgba(148,163,184,0.16); --line-2:rgba(148,163,184,0.30);
     --text:#f1f5f9; --muted:#94a3b8; --muted-2:#64748b;
-    --brand:#2563eb; --brand-soft:rgba(37,99,235,0.16);
-    --sev-good:#22c55e; --sev-warn:#f59e0b; --sev-bad:#ef4444; --sev-crit:#b91c1c;
+    --sev-normal:#22c55e; --sev-vigilance:#eab308;
+    --sev-danger:#f97316; --sev-critique:#ef4444;
     --vig-vert:#008300; --vig-jaune:#e0b400; --vig-orange:#f59628; --vig-rouge:#dc3232;
+
+    /* Echelle typographique, pilotee par la HAUTEUR et non la largeur.
+       C'est la hauteur qui contraint : le panneau doit tenir en un ecran, sans
+       defilement ni rognage. Une echelle en vw seuls gonflait le texte sur une
+       dalle large et coupait le bas des blocs. Le min(vw, vh) garde une borne
+       laterale pour les formats etroits, et les valeurs sont calees sur une
+       dalle 1920 x 1080 :
+         verdict 81 px   geant 97 px   grand 48 px   moyen 32 px   libelle 20 px
+       Le corps le plus petit reste a 32 px : aucune DONNEE n'est ecrite en
+       dessous, seuls les libelles le sont. */
+    --t-verdict: clamp(2rem, min(4.4vw, 7.5vh), 7rem);
+    --t-geant:   clamp(2.6rem, min(5.6vw, 9vh), 8rem);
+    --t-grand:   clamp(1.5rem, min(2.7vw, 4.4vh), 3.4rem);
+    --t-moyen:   clamp(1rem, min(1.65vw, 3vh), 2rem);
+    --t-libelle: clamp(0.78rem, min(1.05vw, 1.9vh), 1.3rem);
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%}
@@ -27,266 +66,239 @@
     background:var(--bg); color:var(--text);
     font-family:'Outfit',system-ui,sans-serif;
     overflow:hidden; display:flex; flex-direction:column;
+    font-variant-numeric:tabular-nums;
+  }
+  .libelle{
+    font-size:var(--t-libelle); font-weight:700; text-transform:uppercase;
+    letter-spacing:0.09em; color:var(--muted);
   }
 
-  /* --- Bandeau superieur --- */
-  .mur-tete{
-    display:flex; align-items:center; gap:20px;
-    padding:12px 24px; background:var(--bg-2);
+  /* --- Bandeau : identite, heure, vigilance, sante des flux --------------- */
+  .tete{
+    display:flex; align-items:center; gap:clamp(12px,1.6vw,32px);
+    padding:0.7vw 1.4vw; background:var(--bg-2);
+    border-bottom:1px solid var(--line); flex:0 0 auto;
+  }
+  .tete .marque{font-size:var(--t-moyen); font-weight:900; letter-spacing:0.14em; color:var(--muted)}
+  .tete .horloge{font-size:var(--t-grand); font-weight:800; line-height:1}
+  .tete .jour{font-size:var(--t-moyen); color:var(--muted); text-transform:capitalize;
+    white-space:nowrap}
+  .tete .vig, .tete .flux, .tete .vig-horodatage{white-space:nowrap}
+  .tete .droite{margin-left:auto; display:flex; align-items:center; gap:clamp(12px,1.6vw,32px)}
+  .puce{width:0.8vw; height:0.8vw; min-width:10px; min-height:10px;
+        border-radius:50%; display:inline-block; margin-right:0.5vw}
+  .flux{font-size:var(--t-moyen); color:var(--muted); display:flex; align-items:center}
+
+  /* Vigilance : pastille pleine, pas un simple texte colore. Elle doit se
+     reperer avant meme d'etre lue. */
+  .vig{
+    display:flex; align-items:center; gap:0.8vw;
+    padding:0.35vw 1.1vw; border-radius:99px; font-size:var(--t-moyen); font-weight:800;
+    border:2px solid transparent;
+  }
+  .vig .phen{font-weight:600; opacity:0.92}
+  .vig-horodatage{font-size:var(--t-libelle); color:var(--muted); font-weight:500}
+
+  /* --- Verdict : la ligne que l'on lit du fond de la salle ---------------- */
+  .verdict{
+    flex:0 0 auto; padding:1.1vw 1.4vw;
+    display:flex; align-items:baseline; gap:1.6vw; flex-wrap:wrap;
     border-bottom:1px solid var(--line);
   }
-  .mur-titre{font-size:1.5rem; font-weight:800; letter-spacing:-0.02em}
-  .mur-horloge{font-size:2.1rem; font-weight:800; font-variant-numeric:tabular-nums}
-  .mur-date{font-size:0.9rem; color:var(--muted)}
-  .mur-etat{margin-left:auto; display:flex; align-items:center; gap:14px; font-size:0.85rem; color:var(--muted)}
-  .pastille{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px}
-
-  /* --- Bandeau vigilance : pleine largeur, impossible a manquer --- */
-  .mur-vigilance{
-    display:flex; align-items:center; gap:18px;
-    padding:10px 24px; font-size:1.15rem; font-weight:700;
-    letter-spacing:0.02em;
+  .verdict-titre{font-size:var(--t-verdict); font-weight:900; line-height:1; letter-spacing:-0.02em}
+  .verdict-detail{font-size:var(--t-moyen); color:var(--muted); font-weight:500}
+  .verdict-echeance{
+    margin-left:auto; font-size:var(--t-grand); font-weight:800; line-height:1;
   }
-  .mur-vigilance .libelle{font-size:0.82rem; font-weight:600; opacity:0.85}
-  .mur-vigilance .horodatage{margin-left:auto; font-size:0.76rem; font-weight:500; opacity:0.8}
+  .verdict-echeance small{display:block; font-size:var(--t-libelle); color:var(--muted); font-weight:700}
 
-  /* --- Grille principale --- */
-  .mur-grille{
-    flex:1; display:grid; gap:14px; padding:14px 24px 20px;
-    grid-template-columns: 1.15fr 1.5fr 1.1fr;
-    grid-template-rows: auto 1fr;
-    min-height:0;
+  /* --- Corps : conditions du moment + les quatre contraintes -------------- */
+  .corps{
+    flex:1 1 0; display:grid; gap:0.9vw; padding:0.9vw 1.4vw;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.6fr);
+    min-height:0; overflow:hidden;
   }
-  .carte{
+  .bloc{
     background:var(--panel); border:1px solid var(--line);
-    border-radius:14px; padding:16px 18px; min-height:0;
+    border-radius:1vw; padding:1vh 1.2vw;
     display:flex; flex-direction:column;
-  }
-  .carte h2{
-    font-size:0.78rem; font-weight:700; text-transform:uppercase;
-    letter-spacing:0.08em; color:var(--muted); margin-bottom:12px;
+    min-height:0; overflow:hidden;
   }
 
-  /* --- Conditions du moment --- */
-  .maintenant{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap}
-  .temp-geante{font-size:4.6rem; font-weight:800; line-height:0.95; letter-spacing:-0.04em}
-  .ressenti{font-size:1rem; color:var(--muted)}
-  .mesures{display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-top:16px}
-  .mesure{background:var(--panel-2); border-radius:10px; padding:10px 12px}
-  .mesure .lib{font-size:0.68rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted)}
-  .mesure .val{font-size:1.5rem; font-weight:700; line-height:1.15}
-  .mesure .note{font-size:0.72rem; color:var(--muted)}
-  .fleche-vent{display:inline-block; font-size:1.3rem}
+  .temp-geante{font-size:var(--t-geant); font-weight:900; line-height:0.95; letter-spacing:-0.04em}
+  .temp-geante .deg{font-size:0.45em; font-weight:800; vertical-align:0.42em}
+  .ressenti{font-size:var(--t-moyen); color:var(--muted); margin-top:0.4vh}
+  /* Le bloc laissait un grand vide sous la temperature. Il porte desormais
+     l'amplitude a venir : c'est ce qui se decide la nuit -- releve, couvertures,
+     fermeture des zones exposees. */
+  .tendance{font-size:var(--t-moyen); font-weight:700; margin-top:1.2vh; line-height:1.5}
+  .tendance b{font-size:1.35em; font-weight:900}
+  .mesures{display:grid; grid-template-columns:repeat(2, 1fr); gap:0.6vw;
+    margin-top:auto; padding-top:0.8vw; min-height:0}
+  .mesure{background:var(--panel-2); border-radius:0.6vw; padding:0.6vh 0.9vw}
+  .mesure .val{font-size:var(--t-grand); font-weight:800; line-height:1.05}
+  .mesure .val .u{font-size:0.42em; font-weight:700; color:var(--muted); margin-left:0.2em}
+  .mesure .note{font-size:var(--t-libelle); color:var(--muted); font-weight:600; margin-top:0.15vw}
+  .fleche{display:inline-block; font-size:0.7em; margin-right:0.2em}
 
-  /* --- Prochaine pluie : la question du jour J --- */
-  .pluie-annonce{
-    border-radius:12px; padding:16px 18px; margin-bottom:14px;
-    display:flex; align-items:center; gap:16px;
+  /* Quatre tuiles : orage, vent, chaleur, sol. Le liseré epais porte la
+     gravite, doublee par le mot -- jamais la couleur seule. */
+  .tuiles{display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr;
+    gap:0.9vw; min-height:0; overflow:hidden}
+  .tuile{
+    background:var(--panel); border:1px solid var(--line);
+    border-left:0.55vw solid var(--muted-2);
+    border-radius:1vw; padding:0.9vh 1.2vw;
+    display:flex; flex-direction:column; min-height:0; overflow:hidden;
   }
-  .pluie-annonce .delai{font-size:3rem; font-weight:800; line-height:0.95}
-  .pluie-annonce .detail{font-size:0.92rem; line-height:1.35}
-
-  /* --- Radar --- */
-  #mur-radar-hote{flex:1; position:relative; min-height:220px; display:flex}
-  #mur-radar{flex:1; border-radius:10px; overflow:hidden; background:var(--panel-2)}
-  /* ATTENUATION DU FOND
-     La palette de pluie monte jusqu'a l'orange (250,150,40) a 20 mm/h --
-     exactement la teinte des autoroutes du plan IGN. Sans desaturation, l'A11
-     se lit comme une averse forte. Il faut donc attenuer le fond, mais SANS
-     filtrer les tuiles : `opacity` sur la couche Leaflet comme `filter` sur
-     .leaflet-tile-pane ou .leaflet-tile-container compositent tuile par tuile
-     et couvrent la carte d'un quadrillage de coutures (constate).
-     La solution est un voile unique en backdrop-filter, glisse entre le calque
-     des tuiles (z-index 200) et celui de la pluie (400) : une seule passe de
-     composition, aucune couture, et la pluie garde sa saturation. */
-  .mur-voile{position:absolute; inset:-2000px; z-index:300; pointer-events:none;
-    backdrop-filter:saturate(0.28) brightness(1.03);
-    -webkit-backdrop-filter:saturate(0.28) brightness(1.03)}
-  /* Un radar sans echo est une image entierement transparente : sans ce
-     bandeau, l'ecran est indiscernable d'un radar en panne. Un mur que
-     personne ne pilote doit dire "il ne pleut pas", pas se taire.
-     z-index au-dessus des panes Leaflet (400 pour les tuiles, 700 pour les
-     popups) : sinon le bandeau passe sous la carte et devient illisible. */
-  .radar-vide{position:absolute; left:50%; top:14px; transform:translateX(-50%);
-    z-index:800; background:rgba(10,15,22,0.90); color:#e2e8f0; padding:7px 16px;
-    border-radius:999px; font-size:0.86rem; font-weight:600;
-    letter-spacing:0.02em; pointer-events:none; white-space:nowrap;
-    border:1px solid rgba(148,163,184,0.35);
-    box-shadow:0 2px 10px rgba(0,0,0,0.45)}
-  .radar-pied{font-size:0.72rem; color:var(--muted); margin-top:8px; display:flex; gap:14px}
-
-  /* --- Timeline des prochaines heures --- */
-  .heures{display:flex; gap:8px; overflow-x:auto; padding-bottom:4px}
-  .heure-bloc{
-    flex:0 0 84px; background:var(--panel-2); border-radius:10px;
-    padding:10px 8px; text-align:center; border-top:3px solid var(--muted-2);
+  .tuile-tete{display:flex; align-items:baseline; gap:0.8vw}
+  .tuile-etat{margin-left:auto; font-size:var(--t-moyen); font-weight:800; letter-spacing:0.04em}
+  .tuile-valeur{font-size:var(--t-grand); font-weight:900; line-height:1.05; margin-top:0.3vw}
+  .tuile-valeur .u{font-size:0.4em; font-weight:700; color:var(--muted); margin-left:0.25em}
+  .tuile-detail{font-size:var(--t-moyen); color:var(--muted); font-weight:500}
+  .tuile-consigne{
+    margin-top:auto; padding-top:0.6vw; font-size:var(--t-moyen);
+    font-weight:700; line-height:1.25;
   }
-  .heure-bloc .h{font-size:0.82rem; font-weight:700}
-  .heure-bloc .t{font-size:1.35rem; font-weight:800; line-height:1.2}
-  .heure-bloc .d{font-size:0.68rem; color:var(--muted); line-height:1.4}
+  .tuile-pic{font-size:var(--t-libelle); color:var(--muted); font-weight:600; margin-top:0.3vw}
 
-  /* --- Consignes : ce qu'il y a a faire --- */
-  .consignes{display:flex; flex-direction:column; gap:8px; overflow-y:auto; min-height:0}
-  .consigne{
-    display:flex; align-items:flex-start; gap:10px;
-    padding:11px 13px; border-radius:10px; background:var(--panel-2);
-    border-left:4px solid var(--muted-2);
+  /* --- Frise des douze prochaines heures ---------------------------------- */
+  .frise{
+    flex:0 0 auto; padding:0 1.4vw 1vw; display:flex; flex-direction:column; gap:0.5vw;
   }
-  .consigne .quand{font-size:0.95rem; font-weight:800; min-width:52px}
-  .consigne .quoi{font-size:0.88rem; line-height:1.35}
-  .consigne.critique{border-left-color:var(--sev-crit); background:rgba(185,28,28,0.14)}
-  .consigne.danger{border-left-color:var(--sev-bad); background:rgba(239,68,68,0.10)}
-  .consigne.vigilance{border-left-color:var(--sev-warn); background:rgba(245,158,11,0.10)}
-  .rien{color:var(--muted); font-size:0.95rem; padding:18px 0; text-align:center}
+  .frise-rail{display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:0.5vw}
+  .heure{
+    background:var(--panel); border-radius:0.7vw; padding:0.7vh 0.4vw 0.8vh;
+    text-align:center; border-top:0.42vw solid var(--muted-2);
+    display:flex; flex-direction:column; align-items:center; gap:0.25vw;
+  }
+  .heure.maintenant{background:var(--panel-2); outline:2px solid var(--line-2)}
+  .heure .h{font-size:var(--t-moyen); font-weight:800; letter-spacing:0.02em}
+  .heure .t{font-size:var(--t-grand); font-weight:900; line-height:1}
+  /* Jauge de pluie : une hauteur, pas une couleur seule. Une barre vide se
+     distingue d'une barre pleine meme sans percevoir la teinte. */
+  .jauge{width:60%; height:3.4vh; min-height:18px; background:rgba(148,163,184,0.14);
+         border-radius:0.3vw; display:flex; align-items:flex-end; overflow:hidden}
+  .jauge span{display:block; width:100%; background:#38bdf8; border-radius:0.3vw 0.3vw 0 0}
+  .heure .mm{font-size:var(--t-libelle); font-weight:800; color:#7dd3fc; min-height:1.2em}
+  .heure .raf{font-size:var(--t-libelle); font-weight:700; color:var(--muted)}
 
-  .sol-ligne2{display:flex; gap:10px; margin-top:auto; padding-top:12px}
-  .sol-item{flex:1; background:var(--panel-2); border-radius:9px; padding:9px 11px}
+  .pied{
+    flex:0 0 auto; padding:0.35vw 1.4vw 0.7vw;
+    font-size:var(--t-libelle); color:var(--muted-2); display:flex; gap:1.6vw;
+  }
 
-  .perime{animation:clign 1.6s ease-in-out infinite}
-  @keyframes clign{0%,100%{opacity:1}50%{opacity:0.45}}
+  .clign{animation:clign 1.6s ease-in-out infinite}
+  @keyframes clign{0%,100%{opacity:1}50%{opacity:0.42}}
   </style>
 </head>
 <body>
 
-  <div class="mur-tete">
-    <span class="mur-titre">METEO</span>
-    <div>
-      <div class="mur-horloge" id="horloge">--:--</div>
-      <div class="mur-date" id="date-jour"></div>
+  <header class="tete">
+    <span class="marque">METEO</span>
+    <span class="horloge" id="horloge">--:--</span>
+    <span class="jour" id="jour"></span>
+    <div class="droite">
+      <div class="vig" id="vig"><span id="vig-niveau">--</span></div>
+      <span class="vig-horodatage" id="vig-horodatage"></span>
+      <span class="flux" id="flux"><span class="puce" style="background:var(--muted-2)"></span>chargement</span>
     </div>
-    <div class="mur-etat">
-      <span id="etat-flux"><span class="pastille" style="background:var(--muted-2)"></span>chargement</span>
-      <span>Source : Meteo-France</span>
-    </div>
-  </div>
+  </header>
 
-  <div class="mur-vigilance" id="bandeau-vigilance" style="background:rgba(148,163,184,0.10)">
-    <span class="libelle">VIGILANCE SARTHE</span>
-    <span id="vig-niveau">--</span>
-    <span id="vig-phenomenes" style="font-weight:500;font-size:0.95rem"></span>
-    <span class="horodatage" id="vig-horodatage"></span>
-  </div>
+  <section class="verdict" id="verdict">
+    <span class="verdict-titre" id="verdict-titre">CHARGEMENT</span>
+    <span class="verdict-detail" id="verdict-detail"></span>
+    <span class="verdict-echeance" id="verdict-echeance" hidden></span>
+  </section>
 
-  <div class="mur-grille">
-    <!-- Colonne 1 : conditions du moment -->
-    <div class="carte" style="grid-row:1 / -1">
-      <h2>Conditions actuelles</h2>
-      <div class="maintenant">
-        <span class="temp-geante" id="temp">--</span>
-        <div>
-          <div class="ressenti" id="ressenti"></div>
-          <div class="ressenti" id="heure-obs"></div>
-        </div>
-      </div>
+  <main class="corps">
+    <section class="bloc">
+      <div class="libelle">Maintenant</div>
+      <div class="temp-geante" id="temp">--<span class="deg">°</span></div>
+      <div class="ressenti" id="ressenti"></div>
+      <div class="tendance" id="tendance"></div>
       <div class="mesures">
         <div class="mesure">
-          <div class="lib">Vent</div>
-          <div class="val" id="vent">--</div>
-          <div class="note" id="vent-dir"></div>
+          <div class="val"><span class="fleche" id="vent-fleche">→</span><span id="vent">--</span><span class="u">km/h</span></div>
+          <div class="note" id="vent-note">vent moyen</div>
         </div>
         <div class="mesure">
-          <div class="lib">Rafales</div>
-          <div class="val" id="rafale">--</div>
-          <div class="note">km/h</div>
+          <div class="val"><span id="rafale">--</span><span class="u">km/h</span></div>
+          <div class="note">rafales</div>
         </div>
         <div class="mesure">
-          <div class="lib">Humidite</div>
-          <div class="val" id="humidite">--</div>
-          <div class="note" id="nebulosite"></div>
+          <div class="val"><span id="humidite">--</span><span class="u">%</span></div>
+          <div class="note" id="nebulosite">humidite</div>
         </div>
         <div class="mesure">
-          <div class="lib">WBGT</div>
-          <div class="val" id="wbgt">--</div>
-          <div class="note" id="wbgt-note"></div>
+          <div class="val"><span id="pluie-h">--</span><span class="u">mm/h</span></div>
+          <div class="note">precipitations</div>
         </div>
       </div>
-      <div class="sol-ligne2">
-        <div class="sol-item">
-          <div class="lib" style="font-size:0.68rem;color:var(--muted);text-transform:uppercase">Humidite des sols</div>
-          <div class="val" id="swi" style="font-size:1.25rem;font-weight:700">--</div>
-          <div class="note" id="swi-note" style="font-size:0.72rem;color:var(--muted)"></div>
-        </div>
-      </div>
-    </div>
+    </section>
 
-    <!-- Colonne 2 : pluie et radar -->
-    <div class="carte" style="grid-row:1 / -1">
-      <h2>Precipitations</h2>
-      <div class="pluie-annonce" id="pluie-annonce" style="background:var(--panel-2)">
-        <span class="delai" id="pluie-delai">--</span>
-        <span class="detail" id="pluie-detail">chargement</span>
-      </div>
-      <div id="mur-radar-hote">
-        <div id="mur-radar"></div>
-        <div id="radar-vide" class="radar-vide" hidden>Aucune precipitation detectee</div>
-      </div>
-      <div class="radar-pied">
-        <span id="radar-age">--</span>
-        <span id="radar-max"></span>
-        <span id="radar-source" style="margin-left:auto">Source : Meteo-France / IGN</span>
-      </div>
-    </div>
+    <section class="tuiles" id="tuiles"></section>
+  </main>
 
-    <!-- Colonne 3 : consignes puis heures -->
-    <div class="carte">
-      <h2>A anticiper</h2>
-      <div class="consignes" id="consignes"><div class="rien">Chargement...</div></div>
-    </div>
-    <div class="carte">
-      <h2>Prochaines heures</h2>
-      <div class="heures" id="heures"></div>
-    </div>
-  </div>
+  <section class="frise">
+    <div class="libelle" id="frise-titre">Les 12 prochaines heures</div>
+    <div class="frise-rail" id="rail"></div>
+  </section>
+
+  <footer class="pied">
+    <span id="pied-source">Source : Meteo-France</span>
+    <span id="pied-modele"></span>
+    <span id="pied-maj" style="margin-left:auto"></span>
+  </footer>
 
 <script>
 (function () {
   "use strict";
 
-  // Une page de mur n'est jamais sollicitee : elle se rafraichit seule.
-  // 60 s suffit -- les previsions horaires ne bougent pas plus vite, et le
-  // radar est de toute facon a 5 min de cadence.
   var PERIODE_MS = 60000;
-  var carte = null, coucheRadar = null;
+  var $ = function (id) { return document.getElementById(id); };
+  var F = function (v, d) { return (v === null || v === undefined) ? "--" : Number(v).toFixed(d); };
 
-  // Repli si la configuration n'est pas encore posee : centre du circuit, plan
-  // IGN. Le mur doit afficher quelque chose meme sur une base vierge.
-  var CADRAGE_DEFAUT = {
-    centre: { lat: 47.9450, lon: 0.2240 },
-    zoom: 10,
-    fond: "plan",
-    fond_url: "https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile" +
-      "&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM" +
-      "&FORMAT=image/png&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
-    fond_max_zoom: 18
+  var COULEUR = {
+    normal: "var(--sev-normal)", vigilance: "var(--sev-vigilance)",
+    danger: "var(--sev-danger)", critique: "var(--sev-critique)"
+  };
+  var MOT = {
+    normal: "RAS", vigilance: "VIGILANCE", danger: "DANGER", critique: "CRITIQUE"
+  };
+  var VIG = {
+    vert:   { fond: "rgba(0,131,0,0.22)",    trait: "#3ac93a" },
+    jaune:  { fond: "rgba(224,180,0,0.22)",  trait: "#f5d24a" },
+    orange: { fond: "rgba(245,150,40,0.26)", trait: "#ffa94d" },
+    rouge:  { fond: "rgba(220,50,50,0.30)",  trait: "#ff6b6b" }
   };
 
-  function $(id) { return document.getElementById(id); }
-  function F(v, d) { return (v === null || v === undefined) ? "--" : Number(v).toFixed(d); }
+  // Pluie horaire au-dela de laquelle la jauge est pleine. 8 mm en une heure
+  // est deja une forte averse : plafonner plus haut ecraserait toutes les
+  // pluies ordinaires en une barre invisible.
+  var JAUGE_PLEINE_MM = 8;
 
-  var COULEURS_VIG = {
-    vert:   { fond: "rgba(0,131,0,0.20)",   trait: "#3ac93a" },
-    jaune:  { fond: "rgba(224,180,0,0.20)", trait: "#f5d24a" },
-    orange: { fond: "rgba(245,150,40,0.24)", trait: "#ffa94d" },
-    rouge:  { fond: "rgba(220,50,50,0.28)",  trait: "#ff6b6b" }
-  };
-  var NIV_WBGT = {
-    normal: "#22c55e", vigilance: "#f5d24a", vigilance_haute: "#f59e0b",
-    danger: "#ef4444", danger_extreme: "#b91c1c"
-  };
+  function vider(el) { while (el.firstChild) el.removeChild(el.firstChild); }
 
   function horloge() {
     var d = new Date();
     $("horloge").textContent =
       String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
-    $("date-jour").textContent = d.toLocaleDateString("fr-FR",
+    $("jour").textContent = d.toLocaleDateString("fr-FR",
       { weekday: "long", day: "numeric", month: "long" });
   }
 
+  // ------------------------------------------------------------------------
+
   function majVigilance(v) {
-    var bandeau = $("bandeau-vigilance");
+    var boite = $("vig"), niveau = $("vig-niveau"), horo = $("vig-horodatage");
     if (!v) {
-      $("vig-niveau").textContent = "indisponible";
-      bandeau.style.background = "rgba(148,163,184,0.10)";
+      boite.style.background = "rgba(148,163,184,0.12)";
+      boite.style.borderColor = "var(--line-2)";
+      vider(niveau);
+      niveau.textContent = "VIGILANCE INDISPONIBLE";
+      niveau.style.color = "var(--muted)";
+      horo.textContent = "aucun bulletin en base";
       return;
     }
     var couleur = "vert", ordre = ["vert", "jaune", "orange", "rouge"], phen = [];
@@ -296,229 +308,253 @@
         if (phen.indexOf(x.nom) === -1) phen.push(x.nom);
       });
     });
-    var style = COULEURS_VIG[couleur] || COULEURS_VIG.vert;
-    bandeau.style.background = style.fond;
-    $("vig-niveau").textContent = couleur.toUpperCase();
-    $("vig-niveau").style.color = style.trait;
-    $("vig-phenomenes").textContent = phen.length ? phen.join(", ") : "aucun phenomene signale";
+    var style = VIG[couleur] || VIG.vert;
+    boite.style.background = style.fond;
+    boite.style.borderColor = style.trait;
 
-    // Regle non negociable : l'horodatage accompagne la valeur, et un bulletin
-    // perime se signale au lieu de passer pour courant.
-    //
-    // La peremption vient du serveur (meteo.etat_vigilance), qui la lit dans la
-    // validite publiee par Meteo-France. Elle etait recalculee ici sur un seuil
-    // de 6 h : le bandeau clignotait PERIME tous les jours de midi a 16 h sur un
-    // bulletin parfaitement courant, les publications etant a 6 h et 16 h.
-    var perime = v.perime === true;
-    var horodatage = "bulletin du " +
-      String(v.update_time || "?").replace("T", " ").replace("Z", " UTC");
-    if (perime) {
-      horodatage += "  —  PERIME";
-    } else if (v.retard_collecte) {
-      horodatage += "  —  NON RAFRAICHIE depuis " + Math.round(v.age_h || 0) + " h";
-    } else if (v.valide_jusqua) {
-      horodatage += "  ·  valide jusqu'a " +
-        String(v.valide_jusqua).slice(11, 16) + " UTC";
+    vider(niveau);
+    niveau.style.color = style.trait;
+    niveau.appendChild(document.createTextNode("VIGILANCE " + couleur.toUpperCase()));
+    if (phen.length) {
+      var s = document.createElement("span");
+      s.className = "phen";
+      s.textContent = phen.join(", ");
+      niveau.appendChild(document.createTextNode("  "));
+      niveau.appendChild(s);
     }
-    $("vig-horodatage").textContent = horodatage;
-    bandeau.classList.toggle("perime", perime || v.retard_collecte === true);
+
+    // La peremption vient du serveur (meteo.etat_vigilance), etablie sur la
+    // validite que Meteo-France publie lui-meme.
+    var texte = "bulletin du " + String(v.update_time || "?").slice(0, 16).replace("T", " ") + " UTC";
+    if (v.perime) texte += "  —  PERIME";
+    else if (v.retard_collecte) texte += "  —  NON RAFRAICHIE";
+    else if (v.valide_jusqua) texte += "  ·  valide jusqu a " + String(v.valide_jusqua).slice(11, 16);
+    horo.textContent = texte;
+    horo.classList.toggle("clign", v.perime === true || v.retard_collecte === true);
+  }
+
+  function majVerdict(v) {
+    if (!v) return;
+    var couleur = COULEUR[v.niveau] || "var(--text)";
+    $("verdict").style.background =
+      v.niveau === "normal" ? "transparent" : "rgba(255,255,255,0.04)";
+    $("verdict-titre").textContent = v.titre || "";
+    $("verdict-titre").style.color = v.niveau === "normal" ? "var(--sev-normal)" : couleur;
+    $("verdict-titre").classList.toggle("clign", v.niveau === "critique");
+    $("verdict-detail").textContent = v.detail || "";
+    var ech = $("verdict-echeance");
+    if (v.echeance) {
+      vider(ech);
+      ech.appendChild(document.createTextNode(v.echeance));
+      var s = document.createElement("small");
+      s.textContent = "echeance";
+      ech.appendChild(s);
+      ech.style.color = couleur;
+      ech.hidden = false;
+    } else {
+      ech.hidden = true;
+    }
   }
 
   function majActuel(a) {
     if (!a) return;
-    $("temp").textContent = F(a.temperature_c, 0) + "°";
-    $("heure-obs").textContent = "releve de " + (a.heure || "--") +
-      (a.source ? "  (" + a.source + ")" : "");
-    var r = [];
-    if (a.humidex !== null && a.humidex !== undefined) r.push("humidex " + F(a.humidex, 0));
-    if (a.tw_c !== null && a.tw_c !== undefined) r.push("temp. humide " + F(a.tw_c, 1) + "°");
-    $("ressenti").textContent = r.join("  ·  ");
+    vider($("temp"));
+    $("temp").appendChild(document.createTextNode(F(a.temperature_c, 0)));
+    var deg = document.createElement("span");
+    deg.className = "deg"; deg.textContent = "°";
+    $("temp").appendChild(deg);
+
+    var bouts = [];
+    if (a.humidex !== null && a.humidex !== undefined) bouts.push("humidex " + F(a.humidex, 0));
+    if (a.heure) bouts.push("releve de " + a.heure);
+    if (a.source) bouts.push(a.source);
+    $("ressenti").textContent = bouts.join("  ·  ");
 
     $("vent").textContent = F(a.vent_moyen_kmh, 0);
-    var dir = $("vent-dir");
-    dir.textContent = "";
-    if (a.vent_direction_deg !== null && a.vent_direction_deg !== undefined) {
-      var fl = document.createElement("span");
-      fl.className = "fleche-vent";
-      fl.textContent = "↓";
-      // La fleche montre ou VA le vent ; la direction meteo dit d'ou il vient.
-      fl.style.transform = "rotate(" + ((a.vent_direction_deg + 180) % 360) + "deg)";
-      fl.style.display = "inline-block";
-      dir.appendChild(fl);
-      dir.appendChild(document.createTextNode(" km/h  de " + a.vent_direction));
-    } else {
-      dir.textContent = "km/h";
-    }
-
     $("rafale").textContent = F(a.vent_rafale_kmh, 0);
-    $("rafale").style.color = (a.vent_rafale_kmh >= 80) ? "var(--sev-crit)"
-      : (a.vent_rafale_kmh >= 60 ? "var(--sev-bad)"
-      : (a.vent_rafale_kmh >= 40 ? "var(--sev-warn)" : "var(--text)"));
+    $("humidite").textContent = F(a.humidite_pct, 0);
+    $("pluie-h").textContent = F(a.pluie_mm, 1);
+    $("vent-note").textContent = "vent moyen" + (a.vent_direction ? " de " + a.vent_direction : "");
+    $("nebulosite").textContent = a.nebulosite_pct !== null && a.nebulosite_pct !== undefined
+      ? ("humidite  ·  nuages " + F(a.nebulosite_pct, 0) + " %") : "humidite";
 
-    $("humidite").textContent = F(a.humidite_pct, 0) + " %";
-    $("nebulosite").textContent = (a.nebulosite_pct !== null && a.nebulosite_pct !== undefined)
-      ? ("nuages " + F(a.nebulosite_pct, 0) + " %") : "";
-
-    $("wbgt").textContent = F(a.wbgt_c, 1);
-    $("wbgt").style.color = NIV_WBGT[a.wbgt_niveau] || "var(--text)";
-    // Un WBGT peu fiable le dit : l'approximation surestime la nuit et par
-    // vent soutenu, l'afficher nu induirait en erreur.
-    $("wbgt-note").textContent = (a.wbgt_fiabilite && a.wbgt_fiabilite !== "bonne")
-      ? ("°C  · " + a.wbgt_fiabilite) : "°C";
+    // La fleche pointe la ou VA le vent : c'est ce qui se lit d'un coup d'oeil
+    // quand on cherche d'ou arrive une cellule.
+    //
+    // Le glyphe de base est une fleche vers la DROITE, soit un cap de 90 deg.
+    // Un vent DE D souffle VERS D+180. La rotation vaut donc (D + 180) - 90,
+    // c'est-a-dire D + 90. Le +180 pose ici au depart donnait une fleche a
+    // 90 deg de la realite : un vent de nord etait montre soufflant vers
+    // l'ouest, ce qui trompe precisement quand on cherche d'ou vient la pluie.
+    if (a.vent_direction_deg !== null && a.vent_direction_deg !== undefined) {
+      $("vent-fleche").style.transform = "rotate(" + (a.vent_direction_deg + 90) + "deg)";
+      $("vent-fleche").style.display = "inline-block";
+    } else {
+      $("vent-fleche").style.display = "none";
+    }
   }
 
-  function majPluie(p) {
-    var bloc = $("pluie-annonce");
-    if (!p) {
-      $("pluie-delai").textContent = "--";
-      $("pluie-detail").textContent = "prevision immediate indisponible";
-      bloc.style.background = "var(--panel-2)";
-      return;
+  function tuile(c) {
+    var el = document.createElement("div");
+    el.className = "tuile";
+    el.style.borderLeftColor = COULEUR[c.niveau] || "var(--muted-2)";
+
+    var tete = document.createElement("div");
+    tete.className = "tuile-tete";
+    var lib = document.createElement("span");
+    lib.className = "libelle"; lib.textContent = c.libelle;
+    var etat = document.createElement("span");
+    etat.className = "tuile-etat";
+    etat.textContent = MOT[c.niveau] || "";
+    etat.style.color = COULEUR[c.niveau] || "var(--muted)";
+    tete.appendChild(lib); tete.appendChild(etat);
+    el.appendChild(tete);
+
+    if (c.valeur !== null && c.valeur !== undefined) {
+      var val = document.createElement("div");
+      val.className = "tuile-valeur";
+      val.appendChild(document.createTextNode(c.valeur));
+      if (c.unite) {
+        var u = document.createElement("span");
+        u.className = "u"; u.textContent = c.unite;
+        val.appendChild(u);
+      }
+      el.appendChild(val);
     }
-    if (!p.attendue) {
-      $("pluie-delai").textContent = "SEC";
-      $("pluie-delai").style.color = "var(--sev-good)";
-      $("pluie-detail").textContent = "aucune precipitation prevue sur le site " +
-        "dans les " + (p.horizon_min || "?") + " prochaines minutes";
-      bloc.style.background = "rgba(34,197,94,0.12)";
-      return;
+
+    var det = document.createElement("div");
+    det.className = "tuile-detail";
+    det.textContent = c.detail || "";
+    el.appendChild(det);
+
+    // Le pic n'est affiche que s'il depasse la valeur courante : sinon il
+    // repete l'information et occupe une place qui vaut cher.
+    if (c.pic_heure && c.pic !== null && c.pic !== undefined && c.pic > (c.valeur || 0)) {
+      var pic = document.createElement("div");
+      pic.className = "tuile-pic";
+      pic.textContent = "jusqu a " + c.pic + " vers " + c.pic_heure;
+      el.appendChild(pic);
     }
-    $("pluie-delai").textContent = p.dans_min + " min";
-    var fort = (p.pic_mmh || 0) >= 5;
-    $("pluie-delai").style.color = fort ? "var(--sev-bad)" : "var(--sev-warn)";
-    $("pluie-detail").textContent =
-      "pluie attendue vers " + String(p.a || "").slice(11, 16) +
-      "  ·  " + F(p.intensite_mmh, 1) + " mm/h" +
-      (p.pic_mmh > p.intensite_mmh
-        ? ("  ·  pic " + F(p.pic_mmh, 1) + " mm/h a +" + p.pic_dans_min + " min") : "");
-    bloc.style.background = fort ? "rgba(239,68,68,0.14)" : "rgba(245,158,11,0.13)";
+
+    if (c.consigne) {
+      var cons = document.createElement("div");
+      cons.className = "tuile-consigne";
+      cons.textContent = c.consigne;
+      cons.style.color = COULEUR[c.niveau] || "var(--text)";
+      el.appendChild(cons);
+    }
+    return el;
   }
 
-  // Cadrage : centre, zoom et fond viennent de la configuration (section Meteo
-  // de /config/todos). On ne cadre plus sur l'emprise du radar -- elle fait
-  // 80 km de large et noyait le circuit dans de la campagne.
-  function initCarte(mur) {
-    carte = L.map("mur-radar", {
-      zoomControl: false, attributionControl: false,
-      dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
-      boxZoom: false, keyboard: false,
-      // Carte fixe : le fondu n'apporte rien et peut laisser des tuiles a
-      // opacity 0 sur un ecran que personne ne surveille.
-      fadeAnimation: false
+  function majTendance(liste) {
+    var el = $("tendance");
+    vider(el);
+    var temps = (liste || []).filter(function (h) {
+      return h && h.temperature_c !== null && h.temperature_c !== undefined;
     });
-    // Pas d'option `opacity` ici : elle rend visibles les bords de tuiles.
-    // L'attenuation passe par le voile pose plus bas (cf. .mur-voile).
-    L.tileLayer(mur.fond_url, {
-      maxNativeZoom: mur.fond_max_zoom, maxZoom: 19
-    }).addTo(carte);
-    carte.setView([mur.centre.lat, mur.centre.lon], mur.zoom);
-
-    // Le voile doit etre FRERE des calques Leaflet, pas enfant du conteneur :
-    // .leaflet-map-pane porte une transformation et cree son propre contexte
-    // d'empilement, un element pose a cote passerait au-dessus de tout et
-    // desaturerait aussi la pluie. Le debord de 2000 px couvre le decalage de
-    // cette transformation -- la carte du mur ne se deplace pas.
-    var planCarte = carte.getContainer().querySelector(".leaflet-map-pane");
-    if (planCarte) {
-      var voile = document.createElement("div");
-      voile.className = "mur-voile";
-      planCarte.appendChild(voile);
-    }
-    // Repere du circuit : sans lui, a ce niveau de zoom, on ne sait pas ou
-    // regarder sur un fond de campagne sarthoise.
-    L.circleMarker([mur.centre.lat, mur.centre.lon], {
-      radius: 5, color: "#f8fafc", weight: 2, fillColor: "#0ea5e9", fillOpacity: 0.9
-    }).addTo(carte);
-    return carte;
-  }
-
-  function majRadar(r, mur) {
-    var vide = $("radar-vide");
-    if (!r || !r.png || !r.bbox) {
-      vide.textContent = "Radar indisponible";
-      vide.hidden = false;
-      $("radar-age").textContent = "aucune image en base";
-      $("radar-max").textContent = "";
-      return;
-    }
-    if (!carte) initCarte(mur || CADRAGE_DEFAUT);
-
-    var bornes = [[r.bbox.south, r.bbox.west], [r.bbox.north, r.bbox.east]];
-    if (coucheRadar) carte.removeLayer(coucheRadar);
-    // Horodatage en cache-buster : sans lui le navigateur garderait l'image
-    // precedente, et le mur afficherait une situation perimee sans le dire.
-    coucheRadar = L.imageOverlay(r.png + "?t=" + encodeURIComponent(r.valid_at || ""),
-      bornes, { opacity: 0.8 }).addTo(carte);
-
-    // Une lame d'eau a 0 mm/h produit une image entierement transparente. Le
-    // calque est bien la et a jour : c'est qu'il ne pleut pas.
-    var sec = !(r.max_mmh > 0);
-    vide.textContent = "Aucune precipitation detectee";
-    vide.hidden = !sec;
-
-    $("radar-age").textContent = "image de " + String(r.valid_at || "").slice(11, 16) +
-      (r.age_min !== null ? ("  (il y a " + Math.round(r.age_min) + " min)") : "");
-    $("radar-max").textContent = sec ? "aucun echo"
-      : ("maximum " + F(r.max_mmh, 1) + " mm/h");
-  }
-
-  function majConsignes(liste) {
-    var hote = $("consignes");
-    hote.textContent = "";
-    if (!liste || !liste.length) {
-      var rien = document.createElement("div");
-      rien.className = "rien";
-      rien.textContent = "Aucune consigne sur les prochaines heures";
-      hote.appendChild(rien);
-      return;
-    }
-    liste.forEach(function (c) {
-      var d = document.createElement("div");
-      d.className = "consigne " + c.niveau;
-      var q = document.createElement("span");
-      q.className = "quand"; q.textContent = c.heure;
-      var t = document.createElement("span");
-      t.className = "quoi"; t.textContent = c.texte;
-      d.appendChild(q); d.appendChild(t);
-      hote.appendChild(d);
+    if (temps.length < 2) return;
+    var mini = temps[0], maxi = temps[0];
+    temps.forEach(function (h) {
+      if (h.temperature_c < mini.temperature_c) mini = h;
+      if (h.temperature_c > maxi.temperature_c) maxi = h;
     });
+    // On ne nomme que l'extreme qui reste a venir et qui change quelque chose :
+    // repeter la temperature courante n'apprendrait rien.
+    var cible = (maxi.temperature_c - temps[0].temperature_c) >=
+                (temps[0].temperature_c - mini.temperature_c) ? maxi : mini;
+    if (Math.abs(cible.temperature_c - temps[0].temperature_c) < 2) return;
+    var mot = cible === maxi ? "jusqu a " : "descend a ";
+    el.appendChild(document.createTextNode(mot));
+    var b = document.createElement("b");
+    b.textContent = F(cible.temperature_c, 0) + "°";
+    el.appendChild(b);
+    el.appendChild(document.createTextNode(" vers " + String(cible.heure).slice(0, 5)));
   }
 
-  function majHeures(liste) {
-    var hote = $("heures");
-    hote.textContent = "";
-    (liste || []).forEach(function (h) {
+  function majContraintes(liste) {
+    var hote = $("tuiles");
+    vider(hote);
+    (liste || []).forEach(function (c) { hote.appendChild(tuile(c)); });
+  }
+
+  function majFrise(liste, consignes) {
+    var rail = $("rail");
+    vider(rail);
+    liste = liste || [];
+    $("frise-titre").textContent = liste.length
+      ? ("Les " + liste.length + " prochaines heures")
+      : "Prevision horaire indisponible";
+
+    // Une consigne se lit a l'heure ou elle tombe, pas dans une liste a part :
+    // c'est le "quand" qui declenche l'action.
+    var parHeure = {};
+    (consignes || []).forEach(function (c) { parHeure[c.heure] = c; });
+
+    liste.forEach(function (h, i) {
       if (!h) return;
-      var b = document.createElement("div");
-      b.className = "heure-bloc";
-      var rafale = h.vent_rafale_kmh || 0;
-      b.style.borderTopColor = rafale >= 60 ? "var(--sev-bad)"
-        : ((h.pluie_mm || 0) >= 1 ? "var(--brand)" : "var(--muted-2)");
-      var hh = document.createElement("div"); hh.className = "h"; hh.textContent = h.heure;
-      var tt = document.createElement("div"); tt.className = "t"; tt.textContent = F(h.temperature_c, 0) + "°";
-      var dd = document.createElement("div"); dd.className = "d";
-      dd.textContent = F(h.pluie_mm, 1) + " mm";
-      var d2 = document.createElement("div"); d2.className = "d";
-      d2.textContent = F(rafale, 0) + " km/h" + (h.vent_direction ? " " + h.vent_direction : "");
-      b.appendChild(hh); b.appendChild(tt); b.appendChild(dd); b.appendChild(d2);
-      hote.appendChild(b);
+      var col = document.createElement("div");
+      col.className = "heure" + (i === 0 ? " maintenant" : "");
+      var c = parHeure[h.heure];
+      col.style.borderTopColor = c ? (COULEUR[c.niveau] || "var(--muted-2)") : "var(--muted-2)";
+
+      var heure = document.createElement("div");
+      heure.className = "h"; heure.textContent = String(h.heure || "").slice(0, 5);
+      col.appendChild(heure);
+
+      var temp = document.createElement("div");
+      temp.className = "t"; temp.textContent = F(h.temperature_c, 0) + "°";
+      col.appendChild(temp);
+
+      var mm = h.pluie_mm || 0;
+      var jauge = document.createElement("div");
+      jauge.className = "jauge";
+      var barre = document.createElement("span");
+      barre.style.height = Math.max(0, Math.min(1, mm / JAUGE_PLEINE_MM)) * 100 + "%";
+      if (mm >= 5) barre.style.background = "#2563eb";
+      jauge.appendChild(barre);
+      col.appendChild(jauge);
+
+      var lib = document.createElement("div");
+      lib.className = "mm";
+      lib.textContent = mm > 0 ? F(mm, 1) + " mm" : "";
+      col.appendChild(lib);
+
+      var raf = document.createElement("div");
+      raf.className = "raf";
+      raf.textContent = F(h.vent_rafale_kmh, 0) + " km/h";
+      if ((h.vent_rafale_kmh || 0) >= 60) raf.style.color = "var(--sev-danger)";
+      else if ((h.vent_rafale_kmh || 0) >= 40) raf.style.color = "var(--sev-vigilance)";
+      col.appendChild(raf);
+
+      rail.appendChild(col);
     });
   }
 
-  function majEtat(d) {
-    var e = $("etat-flux");
-    e.textContent = "";
-    var age = d.radar && d.radar.age_min;
-    // Le radar n'a pas de rattrapage : une collecte arretee creuse un trou
-    // definitif. Sa fraicheur doit donc se voir sur le mur, pas seulement
-    // dans les journaux du serveur.
-    var ok = age !== null && age !== undefined && age < 20;
+  function majFlux(d) {
+    var el = $("flux");
+    vider(el);
+    // La sante des flux vient du serveur, qui sait lesquels alimentent
+    // reellement cet ecran. Un libelle court : le bandeau ne doit pas se
+    // replier sur deux lignes et pousser tout le reste vers le bas.
+    var f = d.fraicheur || { ok: false, en_retard: [] };
     var p = document.createElement("span");
-    p.className = "pastille";
-    p.style.background = ok ? "var(--sev-good)" : "var(--sev-warn)";
-    e.appendChild(p);
-    e.appendChild(document.createTextNode(
-      ok ? "flux a jour" : ("radar en retard de " + Math.round(age || 0) + " min")));
+    p.className = "puce";
+    p.style.background = f.ok ? "var(--sev-normal)" : "var(--sev-vigilance)";
+    el.appendChild(p);
+    var texte = "flux a jour";
+    if (!f.ok && (f.en_retard || []).length) {
+      var pire = f.en_retard[0];
+      texte = pire.age_min === null
+        ? (pire.libelle + " absente")
+        : (pire.libelle + " " + Math.round(pire.age_min / 60) + " h");
+      if ((f.en_retard || []).length > 1) texte += " +" + (f.en_retard.length - 1);
+    }
+    el.appendChild(document.createTextNode(texte));
+
+    $("pied-modele").textContent = d.actuel && d.actuel.source
+      ? ("modele " + d.actuel.source + "  ·  WBGT " + (d.actuel.methode || "")) : "";
+    $("pied-maj").textContent = "mis a jour a " +
+      new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
   }
 
   function charger() {
@@ -526,29 +562,28 @@
       .then(function (r) { return r.json(); })
       .then(function (d) {
         majVigilance(d.vigilance);
+        majVerdict(d.verdict);
         majActuel(d.actuel);
-        majPluie(d.prochaine_pluie);
-        majRadar(d.radar, d.mur);
-        majConsignes(d.consignes);
-        majHeures(d.prochaines);
-        majEtat(d);
-        if (d.sol) {
-          $("swi").textContent = F(d.sol.swi, 3);
-          var swi = d.sol.swi;
-          $("swi").style.color = swi < 0.2 ? "var(--sev-bad)"
-            : (swi < 0.4 ? "var(--sev-warn)" : "var(--sev-good)");
-          $("swi-note").textContent = swi < 0.2 ? "sols tres secs — risque incendie"
-            : (swi < 0.4 ? "sols secs" : "reserve correcte");
-        }
+        majTendance(d.prochaines);
+        majContraintes(d.contraintes);
+        majFrise(d.prochaines, d.consignes);
+        majFlux(d);
       })
       .catch(function (e) {
         console.error("[Mur meteo]", e);
-        var el = $("etat-flux");
-        el.textContent = "";
+        // Un mur qui n'a plus de donnees doit le dire en grand : sinon il
+        // continue d'afficher la derniere situation connue comme si elle etait
+        // la situation courante.
+        $("verdict-titre").textContent = "DONNEES INDISPONIBLES";
+        $("verdict-titre").style.color = "var(--sev-critique)";
+        $("verdict-titre").classList.add("clign");
+        $("verdict-detail").textContent = "le mur n est plus alimente — verifier Cockpit";
+        var el = $("flux");
+        vider(el);
         var p = document.createElement("span");
-        p.className = "pastille"; p.style.background = "var(--sev-bad)";
+        p.className = "puce"; p.style.background = "var(--sev-critique)";
         el.appendChild(p);
-        el.appendChild(document.createTextNode("donnees indisponibles"));
+        el.appendChild(document.createTextNode("liaison perdue"));
       });
   }
 
