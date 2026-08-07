@@ -265,12 +265,27 @@
 
   // ── Renderers ────────────────────────────────────────────────────────────
 
+  function frDate(iso) {
+    if (!iso) return "";
+    var p = iso.split("-");
+    return p.length === 3 ? p[2] + "/" + p[1] + "/" + p[0] : iso;
+  }
+
   function renderUpdate(data) {
     var el = document.getElementById("affluence-panel-update");
     if (!el) return;
     var bits = [];
-    if (data.last_update) bits.push("Maj billetterie : " + data.last_update.split("-").reverse().join("/"));
-    if (data.prev_year) bits.push("N-1 : " + data.prev_year);
+    if (data.last_update) {
+      bits.push("Maj billetterie : " + frDate(data.last_update) +
+                (data.days_before != null ? " (J-" + data.days_before + ")" : ""));
+    }
+    if (data.prev_year) {
+      // Nommer la date de reference N-1 : c'est elle qui rend le delta lisible,
+      // et elle n'a rien d'evident (meme J- avant course, pas meme date).
+      var n1 = "N-1 : " + data.prev_year;
+      if (data.prev_reference_date) n1 += " au " + frDate(data.prev_reference_date) + " (meme avancement)";
+      bits.push(n1);
+    }
     el.textContent = bits.join("  -  ");
   }
 
@@ -300,7 +315,8 @@
     strip.innerHTML = "";
 
     var totalN = data.total_ventes;
-    var totalPrev = data.total_ventes_prev;
+    var totalPrev = data.total_ventes_prev;            // N-1 au meme avancement
+    var totalPrevFinal = data.total_ventes_prev_final; // N-1 au soir de la course
     var totalProj = data.total_projection;
     var totalProjLow = data.total_projection_low;
     var totalDelta = data.total_delta;
@@ -313,18 +329,32 @@
     }
     strip.appendChild(makeKpiCard("Billets vendus (N)", fmt(totalN), subDelta, subDeltaClass));
 
-    // KPI 2 : Vendu N-1 + delta %
+    // KPI 2 : Vendu N-1 au meme avancement + delta %
     var deltaPct = pct(totalN, totalPrev);
     var sub2 = null, sub2Class = "";
     if (deltaPct != null) {
       sub2 = (deltaPct >= 0 ? "+" : "") + deltaPct + " % vs N-1";
       sub2Class = deltaPct >= 0 ? "pos" : "neg";
     }
-    strip.appendChild(makeKpiCard("Vendus N-1 (meme avancement)", fmt(totalPrev), sub2, sub2Class));
+    var card2 = makeKpiCard("Vendus N-1 (meme avancement)", fmt(totalPrev), sub2, sub2Class);
+    if (data.prev_reference_date) {
+      card2.title = "Meme panier billetterie, lu au " + frDate(data.prev_reference_date) +
+                    " (meme nombre de jours avant course). Total final " +
+                    (data.prev_year || "N-1") + " : " + fmt(totalPrevFinal);
+    }
+    strip.appendChild(card2);
 
-    // KPI 3 : Projection finale (fourchette)
+    // KPI 3 : Projection finale (fourchette) + comparaison au FINAL N-1
     var projVal = fmtRange(totalProjLow, totalProj);
-    strip.appendChild(makeKpiCard("Projection finale", projVal, "fourchette basse - haute", ""));
+    var midProj = (totalProjLow != null && totalProj != null)
+      ? Math.round((totalProjLow + totalProj) / 2) : totalProj;
+    var projPct = pct(midProj, totalPrevFinal);
+    var sub3 = "fourchette basse - haute", sub3Class = "";
+    if (projPct != null) {
+      sub3 = (projPct >= 0 ? "+" : "") + projPct + " % vs final " + (data.prev_year || "N-1");
+      sub3Class = projPct >= 0 ? "pos" : "neg";
+    }
+    strip.appendChild(makeKpiCard("Projection finale", projVal, sub3, sub3Class));
 
     // KPI 4 : Pic maximal projete sur l'event (max sur tous les jours)
     var maxPic = null;
@@ -463,10 +493,15 @@
     table.className = "affluence-table";
     var thead = document.createElement("thead");
     var thr = document.createElement("tr");
-    ["Jour", "Vendus N", "Δ jour", "Vendus N-1", "Δ % N-1", "Projection vente", "Pic N-1", "Pic projete"]
-      .forEach(function (h) {
+    var refTitle = global.prev_reference_date
+      ? "N-1 lu au " + frDate(global.prev_reference_date) + ", meme nombre de jours avant course"
+      : "";
+    ["Jour", "Vendus N", "Δ jour", "Vendus N-1 (meme av.)", "Δ % N-1",
+     "Projection vente", "Pic N-1", "Pic projete"]
+      .forEach(function (h, i) {
         var th = document.createElement("th");
         th.textContent = h;
+        if ((i === 3 || i === 4) && refTitle) th.title = refTitle;
         thr.appendChild(th);
       });
     thead.appendChild(thr);
@@ -477,10 +512,11 @@
       var tr = document.createElement("tr");
       if (d.date === activeDate) tr.className = "active";
 
-      function td(txt, cls) {
+      function td(txt, cls, title) {
         var c = document.createElement("td");
         c.textContent = txt;
         if (cls) c.className = cls;
+        if (title) c.title = title;
         return c;
       }
 
@@ -497,18 +533,21 @@
       }
       tr.appendChild(td(deltaTxt, deltaCls));
 
-      tr.appendChild(td(fmt(d.ventes_prev)));
+      tr.appendChild(td(fmt(d.ventes_prev), "", refTitle));
 
-      // Δ % N-1
+      // Δ % N-1, a avancement egal
       var dPct = pct(d.ventes, d.ventes_prev);
       var dPctTxt = "--", dPctCls = "";
       if (dPct != null) {
         dPctTxt = (dPct >= 0 ? "+" : "") + dPct + " %";
         dPctCls = dPct >= 0 ? "affluence-delta-pos" : "affluence-delta-neg";
       }
-      tr.appendChild(td(dPctTxt, dPctCls));
+      tr.appendChild(td(dPctTxt, dPctCls, refTitle));
 
-      tr.appendChild(td(fmtRange(d.projection_low, d.projection)));
+      tr.appendChild(td(fmtRange(d.projection_low, d.projection), "",
+                        d.ventes_prev_final != null
+                          ? "Total final " + (global.prev_year || "N-1") + " ce jour : " + fmt(d.ventes_prev_final)
+                          : ""));
       tr.appendChild(td(fmt(d.pic_prev)));
       tr.appendChild(td(fmtRange(d.pic_projection_low, d.pic_projection)));
 
@@ -663,10 +702,16 @@
       if (s.ventes_prev != null) {
         var dPct = pct(ventes, s.ventes_prev);
         var pctTxt = dPct == null ? "" : " (" + (dPct >= 0 ? "+" : "") + dPct + " %)";
-        stats.appendChild(statSpan("N-1", fmt(s.ventes_prev) + pctTxt));
+        var n1Span = statSpan("N-1", fmt(s.ventes_prev) + pctTxt);
+        n1Span.title = "Au meme avancement" +
+          (data.prev_reference_date ? " (" + frDate(data.prev_reference_date) + ")" : "") +
+          (s.ventes_prev_final != null ? " - final " + (data.prev_year || "N-1") + " : " + fmt(s.ventes_prev_final) : "");
+        stats.appendChild(n1Span);
       }
       if (s.projection != null) {
-        stats.appendChild(statSpan("Proj.", fmt(s.projection)));
+        var projSpan = statSpan("Proj.", fmt(s.projection));
+        projSpan.title = "Projection fin de saison, sur la courbe N-1 de ce site";
+        stats.appendChild(projSpan);
       }
       row.appendChild(stats);
 
@@ -724,20 +769,23 @@
       }
     });
 
-    // 2. Croissance forte vs N-1
+    // 2. Croissance forte vs N-1, a avancement egal
     if (data.total_ventes != null && data.total_ventes_prev != null && data.total_ventes_prev > 0) {
       var pct = Math.round(100 * (data.total_ventes - data.total_ventes_prev) / data.total_ventes_prev);
+      var stage = data.prev_reference_date
+        ? " (vs " + frDate(data.prev_reference_date) + ", meme avancement)" : "";
       if (pct >= 20) {
         alerts.push({
           level: "info",
           icon: "trending_up",
-          text: "Croissance billetterie globale : +" + pct + " % vs N-1 (vigilance flux/parkings)"
+          text: "Croissance billetterie globale : +" + pct + " % vs N-1" + stage +
+                " (vigilance flux/parkings)"
         });
       } else if (pct <= -15) {
         alerts.push({
           level: "info",
           icon: "trending_down",
-          text: "Repli billetterie : " + pct + " % vs N-1"
+          text: "Repli billetterie : " + pct + " % vs N-1" + stage
         });
       }
     }

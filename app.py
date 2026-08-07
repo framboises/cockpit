@@ -2029,27 +2029,65 @@ def _parse_race_datetime(raw):
         return None
 
 
-def _fill_curve(param_doc, race_date_override=None):
-    """Retourne [(days_before_race, total_ventes)] tries descending, final, race_date.
+def _ticketing_product_names(param_doc):
+    """Produits references dans globalHoraires.ticketing = le panier 'enceinte
+    generale'.
+
+    C'est le seul perimetre comparable d'une edition a l'autre : il ne contient
+    que les titres d'entree affectes aux jours publics (mono-jour ou multi-jours),
+    a l'exclusion des campings, parkings et des agregats synthetiques que le
+    referentiel billetterie ajoute parfois (24C TOTAL_ENTREES, TOTAL_AA...) et
+    qui double-comptent le reste.
+    """
+    gh = (param_doc.get('data') or {}).get('globalHoraires') or {}
+    names = set()
+    for tc in gh.get('ticketing', []) or []:
+        for pname in tc.get('products', []) or []:
+            if pname:
+                names.add(pname)
+    return names
+
+
+def _param_race_date(param_doc):
+    """Date de course d'un doc parametrages, avec repli.
+
+    data.race -> globalHoraires.race -> 1er jour public. Le repli compte : sur
+    plusieurs editions (24H CAMIONS 2024/2025/2026) data.race est absent et seul
+    globalHoraires.race est renseigne ; sans repli toutes les courbes sortent
+    vides.
+    """
+    data = param_doc.get('data') or {}
+    gh = data.get('globalHoraires') or {}
+    rd = _parse_race_date(data.get('race') or gh.get('race'))
+    if rd:
+        return rd
+    for d in gh.get('dates', []) or []:
+        try:
+            return datetime.strptime(d.get('date', ''), '%Y-%m-%d').date()
+        except Exception:
+            continue
+    return None
+
+
+def _curve_points(products, race_date):
+    """[(days_before_race, total_ventes)] tries descending pour un sous-ensemble
+    de produits.
+
     Filtre la fenetre saisonniere autour de la course pour eviter de melanger les
     historiques de plusieurs editions. Applique un forward-fill par produit avant
     aggregation pour combler les trous de snapshots non synchronises.
-    race_date_override permet de forcer la date de reference (ex: portes plus fiable
-    que parametrages) pour un calcul des days_before coherent.
     """
-    rd = race_date_override or _parse_race_date(param_doc.get('data', {}).get('race'))
-    if not rd:
-        return [], 0, None
-    prods = param_doc.get('tickets', {}).get('products', {})
+    if not products or not race_date:
+        return []
 
-    season_start = rd - timedelta(days=300)
-    season_end = rd + timedelta(days=30)
+    season_start = race_date - timedelta(days=300)
+    season_end = race_date + timedelta(days=30)
 
     product_series = {}
     all_dates = set()
-    for pname, p in prods.items():
+    for pname, p in products.items():
         series = {}
-        for h in p.get('history', []):
+        for h in (p or {}).get('history', []):
             try:
                 d = datetime.strptime(h['date'], '%Y-%m-%d').date()
             except Exception:
@@ -2061,12 +2099,12 @@ def _fill_curve(param_doc, race_date_override=None):
             product_series[pname] = series
 
     if not all_dates:
-        return [], 0, None
+        return []
 
     sorted_dates = sorted(all_dates)
     sorted_series = {pn: sorted(s.items()) for pn, s in product_series.items()}
 
-    snaps = {}
+    points = []
     for date_key in sorted_dates:
         total = 0
         for items in sorted_series.values():
@@ -2077,35 +2115,71 @@ def _fill_curve(param_doc, race_date_override=None):
                 else:
                     break
             total += last_val
-        snaps[date_key] = total
+        dt = datetime.strptime(date_key, '%Y-%m-%d').date()
+        points.append(((race_date - dt).days, total))
 
-    points = []
-    for d, v in snaps.items():
-        dt = datetime.strptime(d, '%Y-%m-%d').date()
-        points.append(((rd - dt).days, v))
     points.sort(key=lambda x: x[0], reverse=True)
+    return points
 
-    final_from_curve = snaps[sorted_dates[-1]]
-    final_actual = sum(p.get('ventes', 0) for p in prods.values())
+
+def _select_products(param_doc, product_names=None):
+    """Produits d'un doc parametrages, restreints au panier demande si fourni."""
+    prods = (param_doc.get('tickets') or {}).get('products', {}) or {}
+    if not product_names:
+        return prods
+    return {k: v for k, v in prods.items() if k in product_names}
+
+
+def _fill_curve(param_doc, race_date_override=None, product_names=None):
+    """Retourne [(days_before_race, total_ventes)] tries descending, final, race_date.
+
+    race_date_override permet de forcer la date de reference (ex: portes plus
+    fiable que parametrages) pour un calcul des days_before coherent.
+    product_names restreint le panier : indispensable pour que le taux de
+    remplissage interpole soit celui des entrees et pas celui d'un melange
+    entrees + campings (qui saturent des janvier) + agregats double-comptes.
+    """
+    rd = race_date_override or _param_race_date(param_doc)
+    if not rd:
+        return [], 0, None
+    prods = _select_products(param_doc, product_names)
+    points = _curve_points(prods, rd)
+    if not points:
+        return [], 0, None
+
+    final_from_curve = points[-1][1]  # points tries descending sur days_before
+    final_actual = sum((p or {}).get('ventes', 0) for p in prods.values())
     final = max(final_from_curve, final_actual)
 
     return points, final, rd
 
 
-def _interpolate_pct(points, final, target_days_before):
-    """Interpole le % atteint a target_days_before jours de la course."""
-    if not points or final <= 0:
+def _interpolate_value(points, target_days_before):
+    """Valeur absolue de la courbe a target_days_before jours de la course.
+
+    Les snapshots billetterie sont hebdomadaires avec des trous d'un mois : on
+    interpole lineairement entre les deux snapshots encadrants, et on borne aux
+    extremites de la serie.
+    """
+    if not points:
         return None
     for i in range(len(points) - 1):
         d1, v1 = points[i]
         d2, v2 = points[i + 1]
         if d1 >= target_days_before >= d2:
             ratio = (d1 - target_days_before) / (d1 - d2) if d1 != d2 else 0
-            pct = (v1 + ratio * (v2 - v1)) / final * 100
-            return pct
+            return v1 + ratio * (v2 - v1)
     if target_days_before >= points[0][0]:
-        return points[0][1] / final * 100
-    return points[-1][1] / final * 100
+        return points[0][1]
+    return points[-1][1]
+
+
+def _interpolate_pct(points, final, target_days_before):
+    """Interpole le % atteint a target_days_before jours de la course."""
+    if not points or final <= 0:
+        return None
+    v = _interpolate_value(points, target_days_before)
+    return None if v is None else v / final * 100
 
 
 @app.route('/get_affluence', methods=['GET'])
@@ -2125,7 +2199,6 @@ def get_affluence():
     gh = doc['data'].get('globalHoraires', {})
     public_days = gh.get('dates', [])
     ticketing_config = gh.get('ticketing', [])
-    race_raw = doc['data'].get('race') or gh.get('race')
     tickets = doc.get('tickets', {})
     products_data = tickets.get('products', {})
     last_update = tickets.get('lastUpdate')
@@ -2134,7 +2207,7 @@ def get_affluence():
         return jsonify({"days": [], "total_ventes": None, "last_update": last_update})
 
     # Parser la date de course courante
-    race_date = _parse_race_date(race_raw)
+    race_date = _param_race_date(doc)
 
     # ── Charger parametrages N-1 (ventes precedentes) ──
     prev_year_str = None
@@ -2146,10 +2219,13 @@ def get_affluence():
     current_year_int = int(year) if year.isdigit() else None
 
     if current_year_int:
-        # Chercher le parametrage de l'annee precedente la plus recente
+        # Chercher le parametrage de l'annee precedente la plus recente.
+        # parkings/campings sont projetes : sans eux le bloc Sites n'a aucun N-1.
         prev_candidates = list(db['parametrages'].find(
             {'event': event, 'tickets': {'$exists': True}},
-            {'year': 1, 'data.globalHoraires': 1, 'data.race': 1, 'tickets': 1, '_id': 0}
+            {'year': 1, 'data.globalHoraires': 1, 'data.race': 1,
+             'data.parkingsHoraires': 1, 'data.campingsHoraires': 1,
+             'tickets': 1, '_id': 0}
         ))
         for cand in sorted(prev_candidates, key=lambda c: str(c.get('year', '')), reverse=True):
             cand_year = cand.get('year', '')
@@ -2166,8 +2242,7 @@ def get_affluence():
         prev_ticketing_config = prev_gh.get('ticketing', [])
         prev_public_days = prev_gh.get('dates', [])
         prev_products_data = prev_param.get('tickets', {}).get('products', {})
-        prev_race_raw = prev_param.get('data', {}).get('race') or prev_gh.get('race')
-        prev_race_date = _parse_race_date(prev_race_raw)
+        prev_race_date = _param_race_date(prev_param)
 
     # ── Charger historique_controle N-1 (pic presents) ──
     prev_hist_race_date = None
@@ -2210,17 +2285,33 @@ def get_affluence():
     # (via doc portes, fiable) sur parametrages.data.race (parfois errone).
     prev_race_ref = prev_hist_race_date or prev_race_date
 
-    # ── Calculer la projection basee sur les courbes N-1 et N-2 ──
-    # Calculer le ratio de projection
-    projection_ratio = None  # ventes_actuelles / projection = ce ratio
-    if race_date and last_update:
-        last_dt = datetime.strptime(last_update, '%Y-%m-%d').date()
-        days_before = (race_date - last_dt).days
+    # ── Paniers "enceinte generale" (produits references dans ticketing) ──
+    # day_ventes est multi-compte (un billet week-end compte sur chaque jour)
+    # pour refleter la presence attendue par jour ; les totaux ne doivent PAS
+    # agreger cela, d'ou l'ensemble unique.
+    referenced_products = _ticketing_product_names(doc)
+    prev_referenced = _ticketing_product_names(prev_param) if prev_param else set()
 
+    # ── Calculer la projection basee sur les courbes N-1 et N-2 ──
+    # Les courbes sont restreintes au meme panier que le total : y laisser les
+    # campings (satures des janvier) ou les agregats TOTAL_* du referentiel
+    # fausserait le taux de remplissage, donc la projection.
+    projection_ratio = None  # ventes_actuelles / projection = ce ratio
+    days_before = None
+    if race_date and last_update:
+        try:
+            last_dt = datetime.strptime(last_update, '%Y-%m-%d').date()
+        except ValueError:
+            last_dt = None
+        if last_dt:
+            days_before = (race_date - last_dt).days
+
+    if days_before is not None:
         fill_pcts = []
         # Courbe N-1
         if prev_param:
-            pts, final, _ = _fill_curve(prev_param, race_date_override=prev_race_ref)
+            pts, final, _ = _fill_curve(prev_param, race_date_override=prev_race_ref,
+                                        product_names=prev_referenced)
             pct = _interpolate_pct(pts, final, days_before)
             if pct:
                 fill_pcts.append(pct)
@@ -2233,7 +2324,7 @@ def get_affluence():
                 except (ValueError, TypeError):
                     continue
                 if cy < current_year_int and cand.get('year') != prev_year_str:
-                    pts2, final2, _ = _fill_curve(cand)
+                    pts2, final2, _ = _fill_curve(cand, product_names=_ticketing_product_names(cand))
                     pct2 = _interpolate_pct(pts2, final2, days_before)
                     if pct2:
                         fill_pcts.append(pct2)
@@ -2244,13 +2335,6 @@ def get_affluence():
             if avg_pct > 0:
                 projection_ratio = avg_pct / 100  # ex: 0.55 = on est a 55% du final
 
-    # ── Totaux sur l'ensemble unique des produits references ──
-    # day_ventes est multi-compte (billet 4J compte 4 fois) pour refleter la
-    # presence attendue par jour ; les totaux ne doivent PAS agreger cela.
-    referenced_products = set()
-    for tc in ticketing_config:
-        for pname in tc.get('products', []):
-            referenced_products.add(pname)
     total_ventes = sum(
         products_data.get(p, {}).get('ventes', 0) for p in referenced_products
     )
@@ -2261,18 +2345,50 @@ def get_affluence():
         if len(hist) >= 2:
             total_delta += pdata.get('ventes', 0) - hist[-2].get('ventes', 0)
 
-    prev_referenced = set()
-    for tc in prev_ticketing_config:
-        for pname in tc.get('products', []):
-            prev_referenced.add(pname)
-    total_ventes_prev = sum(
+    # Final N-1 : le panier au soir de la course precedente. Sert de socle aux
+    # projections (une projection est un total final, elle se compare a un final).
+    total_ventes_prev_final = sum(
         prev_products_data.get(p, {}).get('ventes', 0) for p in prev_referenced
     )
 
-    # Delta de croissance N vs N-1 : sert de borne basse a la projection.
-    # La projection "courbe" peut s'emballer si la saison N a pris son avance tot
-    # et aplatit en fin ; la projection "delta" applique simplement la croissance
-    # observee au final N-1 et borne le haut.
+    # ── N-1 au meme avancement ──
+    # C'est LA reference de comparaison : le meme panier, lu au meme nombre de
+    # jours avant la course. Comparer les ventes N en cours au final N-1 ferait
+    # lire un effondrement de -78 % en pleine saison alors qu'on est a parite.
+    def _prev_curve(product_names):
+        """(points, final) de la courbe N-1 restreinte a un panier de produits."""
+        if not product_names or not prev_race_ref:
+            return [], 0
+        prods = {p: prev_products_data[p] for p in product_names if p in prev_products_data}
+        points = _curve_points(prods, prev_race_ref)
+        if not points:
+            return [], 0
+        final = max(points[-1][1], sum((prods[p] or {}).get('ventes', 0) for p in prods))
+        return points, final
+
+    def _prev_at_same_stage(product_names):
+        if days_before is None:
+            return None
+        points, _ = _prev_curve(product_names)
+        v = _interpolate_value(points, days_before)
+        return None if v is None else int(round(v))
+
+    def _prev_fill_ratio(product_names):
+        """Part du final N-1 deja atteinte a days_before, pour ce panier."""
+        if days_before is None:
+            return None
+        points, final = _prev_curve(product_names)
+        pct = _interpolate_pct(points, final, days_before)
+        return pct / 100 if pct and pct > 0 else None
+
+    total_ventes_prev = _prev_at_same_stage(prev_referenced)
+    prev_reference_date = None
+    if prev_race_ref and days_before is not None:
+        prev_reference_date = (prev_race_ref - timedelta(days=days_before)).strftime('%Y-%m-%d')
+
+    # Croissance reelle N/N-1 a avancement egal (ex: 0,97 = 3 % sous la saison
+    # precedente au meme stade). Appliquee au final N-1, elle donne la seconde
+    # borne de la projection, independante de la forme de la courbe.
     delta_n_vs_n1 = None
     if total_ventes_prev and total_ventes_prev > 0:
         delta_n_vs_n1 = total_ventes / total_ventes_prev
@@ -2308,40 +2424,43 @@ def get_affluence():
                 if len(hist) >= 2:
                     day_delta += pdata.get('ventes', 0) - hist[-2].get('ventes', 0)
 
-        # Ventes N-1 pour le jour equivalent (meme offset depuis la course)
-        ventes_prev = None
+        # Produits N-1 du jour equivalent (meme offset depuis la course).
+        # Un jour public N est rapproche du jour public N-1 de meme rang, pas de
+        # la meme date calendaire : les editions ne tombent pas au meme jour.
+        prev_day_products = set()
         if race_date and prev_race_ref and prev_ticketing_config:
             offset_days = (day_date - race_date).days
-            target_prev_date = prev_race_ref + timedelta(days=offset_days)
-            target_prev_str = target_prev_date.strftime('%Y-%m-%d')
-
-            day_ventes_prev = 0
-            found_prev = False
+            target_prev_str = (prev_race_ref + timedelta(days=offset_days)).strftime('%Y-%m-%d')
             for tc in prev_ticketing_config:
                 days_scope = tc.get('days', [])
-                prods = tc.get('products', [])
                 applies = (days_scope == 'all') or (target_prev_str in days_scope)
                 if not applies:
                     continue
-                for pname in prods:
-                    pdata = prev_products_data.get(pname)
-                    if not pdata:
-                        continue
-                    day_ventes_prev += pdata.get('ventes', 0)
-                    found_prev = True
+                for pname in tc.get('products', []):
+                    if pname in prev_products_data:
+                        prev_day_products.add(pname)
 
-            if found_prev:
-                ventes_prev = day_ventes_prev
+        # Final N-1 de ce jour (socle des projections) et N-1 au meme avancement
+        # (reference de comparaison affichee).
+        ventes_prev_final = None
+        ventes_prev = None
+        if prev_day_products:
+            ventes_prev_final = sum(
+                prev_products_data.get(p, {}).get('ventes', 0) for p in prev_day_products
+            )
+            ventes_prev = _prev_at_same_stage(prev_day_products)
 
-        # Projection ventes pour ce jour : fourchette low (delta) -> high (courbe)
-        day_projection = None       # borne haute (courbe N-1)
-        day_projection_low = None   # borne basse (delta de croissance actuel)
+        # Projection ventes pour ce jour : fourchette courbe / croissance
+        day_projection = None       # via le taux de remplissage N-1
+        day_projection_low = None   # via la croissance a avancement egal
         if projection_ratio and projection_ratio > 0:
             day_projection = round(day_ventes / projection_ratio)
-        if ventes_prev and ventes_prev > 0 and delta_n_vs_n1:
-            # borne basse = ventes finales N-1 du meme jour * croissance globale N/N-1 observee
-            # plafonnee a au moins les ventes actuelles N (on ne redescend pas)
-            day_projection_low = max(day_ventes, round(ventes_prev * delta_n_vs_n1))
+        if ventes_prev_final and ventes_prev_final > 0 and delta_n_vs_n1:
+            # final N-1 du meme jour * croissance N/N-1 constatee a avancement egal,
+            # plafonne a au moins les ventes actuelles N (on ne redescend pas)
+            day_projection_low = max(day_ventes, round(ventes_prev_final * delta_n_vs_n1))
+        if day_projection and day_projection_low and day_projection_low > day_projection:
+            day_projection, day_projection_low = day_projection_low, day_projection
 
         # Pic N-1 et Pic projete depuis historique_controle (fourchette aussi)
         pic_prev = None
@@ -2354,10 +2473,12 @@ def get_affluence():
             if target_key in prev_data_by_day:
                 records = prev_data_by_day[target_key]
                 pic_prev = max((r.get('present', 0) for r in records), default=0)
-                # Pic projete = projection_ventes * (pic_prev / ventes_prev)
-                # Le ratio pic/ventes de N-1 capture les enfants gratuits + accredites
-                if pic_prev and ventes_prev and ventes_prev > 0:
-                    pic_ratio = pic_prev / ventes_prev
+                # Pic projete = projection_ventes * (pic_prev / ventes_prev_final)
+                # Le ratio pic/ventes de N-1 capture les enfants gratuits + accredites.
+                # Il se calcule sur le FINAL N-1 : une projection est un total de
+                # fin de saison, la rapporter au N-1 a mi-saison la ferait exploser.
+                if pic_prev and ventes_prev_final and ventes_prev_final > 0:
+                    pic_ratio = pic_prev / ventes_prev_final
                     if day_projection:
                         pic_projection = round(day_projection * pic_ratio)
                     if day_projection_low:
@@ -2369,6 +2490,7 @@ def get_affluence():
             "ventes": day_ventes,
             "delta": day_delta,
             "ventes_prev": ventes_prev,
+            "ventes_prev_final": ventes_prev_final,
             "projection": day_projection,
             "projection_low": day_projection_low,
             "pic_prev": pic_prev,
@@ -2379,22 +2501,26 @@ def get_affluence():
 
     total_projection = round(total_ventes / projection_ratio) if projection_ratio else None
     total_projection_low = None
-    if total_ventes_prev and delta_n_vs_n1:
-        total_projection_low = max(total_ventes, round(total_ventes_prev * delta_n_vs_n1))
+    if total_ventes_prev_final and delta_n_vs_n1:
+        total_projection_low = max(total_ventes, round(total_ventes_prev_final * delta_n_vs_n1))
+    if total_projection and total_projection_low and total_projection_low > total_projection:
+        total_projection, total_projection_low = total_projection_low, total_projection
 
     # ── Sites (parkings + campings avec ticketing) ──
-    # Charger aussi les sites N-1 pour comparer par nom de site
-    prev_sites_by_name = {}
+    # Les sites vivent hors du panier enceinte generale (ticketing propre a chaque
+    # parking/camping). On garde le rapprochement par nom, avec les deux N-1 :
+    # final (comparable a une projection) et meme avancement (comparable aux
+    # ventes en cours).
+    prev_site_products = {}
     if prev_param:
         prev_data = prev_param.get('data', {})
-        prev_prods = prev_param.get('tickets', {}).get('products', {})
         for sk in ('parkingsHoraires', 'campingsHoraires'):
             for ps in prev_data.get(sk, []):
                 ptk = ps.get('ticketing', [])
                 if not ptk:
                     continue
-                sv = sum(prev_prods.get(t.get('product', ''), {}).get('ventes', 0) for t in ptk)
-                prev_sites_by_name[ps.get('name', '')] = sv
+                names = {t.get('product', '') for t in ptk if t.get('product')}
+                prev_site_products[ps.get('name', '')] = names
 
     sites = []
     for source_key in ('parkingsHoraires', 'campingsHoraires'):
@@ -2409,13 +2535,28 @@ def get_affluence():
                 if pdata:
                     site_ventes += pdata.get('ventes', 0)
             site_name = site.get('name', '?')
-            site_ventes_prev = prev_sites_by_name.get(site_name)
-            site_projection = round(site_ventes / projection_ratio) if projection_ratio else None
+            prev_names = prev_site_products.get(site_name)
+            site_ventes_prev_final = None
+            site_ventes_prev = None
+            site_ratio = None
+            if prev_names:
+                site_ventes_prev_final = sum(
+                    prev_products_data.get(p, {}).get('ventes', 0) for p in prev_names
+                )
+                site_ventes_prev = _prev_at_same_stage(prev_names)
+                site_ratio = _prev_fill_ratio(prev_names)
+            # Chaque site est projete sur SA courbe N-1 : les campings sont
+            # quasi pleins des le printemps, leur appliquer le taux de
+            # remplissage des entrees (encore a un quart en juillet) quadruplerait
+            # une jauge deja atteinte. Repli sur le ratio global si pas d'N-1.
+            ratio = site_ratio or projection_ratio
+            site_projection = round(site_ventes / ratio) if ratio else None
             sites.append({
                 'name': site_name,
                 'capacite': site.get('capacite') or site.get('capacite_theorique') or 0,
                 'ventes': site_ventes,
                 'ventes_prev': site_ventes_prev,
+                'ventes_prev_final': site_ventes_prev_final,
                 'projection': site_projection,
             })
 
@@ -2424,10 +2565,13 @@ def get_affluence():
         "total_ventes": total_ventes,
         "total_delta": total_delta,
         "total_ventes_prev": total_ventes_prev if total_ventes_prev else None,
+        "total_ventes_prev_final": total_ventes_prev_final if total_ventes_prev_final else None,
         "total_projection": total_projection,
         "total_projection_low": total_projection_low,
         "last_update": last_update,
         "prev_year": prev_year_str,
+        "prev_reference_date": prev_reference_date,
+        "days_before": days_before,
         "sites": sites
     })
 
@@ -2603,7 +2747,7 @@ def get_affluence_curves():
     doc_n = db['parametrages'].find_one({'event': event, 'year': year}, {'_id': 0})
     points_n, final_n, race_n = ([], 0, None)
     if doc_n:
-        points_n, final_n, race_n = _fill_curve(doc_n)
+        points_n, final_n, race_n = _fill_curve(doc_n, product_names=_ticketing_product_names(doc_n))
 
     # N-1 et N-2 : on cherche les 2 plus recentes editions < year_int avec tickets
     candidates = list(db['parametrages'].find(
@@ -2631,13 +2775,13 @@ def get_affluence_curves():
     out_n1, final_n1, year_n1 = [], None, None
     if prev_n_minus_1:
         year_n1, cand1 = prev_n_minus_1
-        pts1, final1, _ = _fill_curve(cand1)
+        pts1, final1, _ = _fill_curve(cand1, product_names=_ticketing_product_names(cand1))
         out_n1 = _serialize(pts1)
         final_n1 = final1
     out_n2, final_n2, year_n2 = [], None, None
     if prev_n_minus_2:
         year_n2, cand2 = prev_n_minus_2
-        pts2, final2, _ = _fill_curve(cand2)
+        pts2, final2, _ = _fill_curve(cand2, product_names=_ticketing_product_names(cand2))
         out_n2 = _serialize(pts2)
         final_n2 = final2
 
@@ -6854,9 +6998,13 @@ def hsh_get_counters_context():
     if last_update:
         last_dt = datetime.strptime(last_update, '%Y-%m-%d').date()
         days_before = (race_date - last_dt).days
+        # Meme panier que /get_affluence : les produits references dans
+        # globalHoraires.ticketing, sinon le taux de remplissage melange les
+        # campings et les agregats TOTAL_* du referentiel.
         fill_pcts = []
         if prev_param:
-            pts, final, _ = _fill_curve(prev_param)
+            pts, final, _ = _fill_curve(prev_param, race_date_override=prev_hist_race_date,
+                                        product_names=_ticketing_product_names(prev_param))
             pct = _interpolate_pct(pts, final, days_before)
             if pct:
                 fill_pcts.append(pct)
@@ -6866,7 +7014,7 @@ def hsh_get_counters_context():
             except (ValueError, TypeError):
                 continue
             if cy < current_year_int and str(cand.get('year')) != str(prev_year_str):
-                pts2, final2, _ = _fill_curve(cand)
+                pts2, final2, _ = _fill_curve(cand, product_names=_ticketing_product_names(cand))
                 pct2 = _interpolate_pct(pts2, final2, days_before)
                 if pct2:
                     fill_pcts.append(pct2)

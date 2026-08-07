@@ -21,6 +21,12 @@ function formatRange(low, high) {
     return formatShort(low) + "-" + formatShort(high);
 }
 
+function frDate(iso) {
+    if (!iso) return "";
+    var p = iso.split("-");
+    return p.length === 3 ? p[2] + "/" + p[1] + "/" + p[0] : iso;
+}
+
 // ── Tab 1 : Affluence ──────────────────────────────────────────────────
 
 function renderAffluenceTab(data) {
@@ -144,6 +150,10 @@ function renderVentesTab(data) {
     if (!data.days || data.days.length === 0) return;
 
     var prevLabel = data.prev_year ? " (" + data.prev_year + ")" : "";
+    var refTitle = data.prev_reference_date
+        ? "N-1 au meme avancement : " + frDate(data.prev_reference_date) +
+          (data.days_before != null ? " (J-" + data.days_before + ")" : "")
+        : "";
 
     var grid = document.createElement("div");
     grid.className = "affluence-grid";
@@ -158,6 +168,9 @@ function renderVentesTab(data) {
         var col = document.createElement("div");
         col.className = "affluence-col-label";
         col.textContent = labels[h];
+        // La colonne N-1 est lue au meme nombre de jours avant course, pas au
+        // final de la saison precedente : on le dit au survol.
+        if (h === 1 && refTitle) col.title = refTitle;
         headerRow.appendChild(col);
     }
     grid.appendChild(headerRow);
@@ -188,12 +201,13 @@ function renderVentesTab(data) {
         }
         row.appendChild(ventesCell);
 
-        // Ventes prev + pill % diff
+        // Ventes N-1 au meme avancement + pill % diff
         var vprevCell = document.createElement("div");
         vprevCell.className = "affluence-metric";
         var vprevVal = document.createElement("span");
         vprevVal.className = "affluence-value";
         vprevVal.textContent = formatNumber(d.ventes_prev);
+        if (refTitle) vprevVal.title = refTitle;
         vprevCell.appendChild(vprevVal);
         if (d.ventes_prev != null && d.ventes_prev > 0 && d.ventes != null) {
             var pct = ((d.ventes - d.ventes_prev) / d.ventes_prev * 100).toFixed(0);
@@ -204,19 +218,21 @@ function renderVentesTab(data) {
         }
         row.appendChild(vprevCell);
 
-        // Projection + pill delta vs N-1 (fourchette low - high compact)
+        // Projection + pill delta vs FINAL N-1 (une projection est un total de fin
+        // de saison : elle se compare au final N-1, pas au N-1 a mi-saison)
         var projCell = document.createElement("div");
         projCell.className = "affluence-metric";
         var projVal = document.createElement("span");
         projVal.className = "affluence-value";
         projVal.textContent = formatRange(d.projection_low, d.projection);
         projCell.appendChild(projVal);
-        if (d.projection != null && d.ventes_prev != null && d.ventes_prev > 0) {
+        if (d.projection != null && d.ventes_prev_final != null && d.ventes_prev_final > 0) {
             var midProj = d.projection_low != null ? Math.round((d.projection_low + d.projection) / 2) : d.projection;
-            var projDiff = ((midProj - d.ventes_prev) / d.ventes_prev * 100).toFixed(0);
+            var projDiff = ((midProj - d.ventes_prev_final) / d.ventes_prev_final * 100).toFixed(0);
             var projPill = document.createElement("span");
             projPill.className = "affluence-pill " + (projDiff >= 0 ? "positive" : "negative");
             projPill.textContent = (projDiff >= 0 ? "+" : "") + projDiff + "%";
+            projPill.title = "Projection vs total final " + (data.prev_year || "N-1");
             projCell.appendChild(projPill);
         }
         row.appendChild(projCell);
@@ -342,13 +358,13 @@ function renderSitesTab(data) {
         ventesCell.textContent = formatNumber(s.ventes);
         row.appendChild(ventesCell);
 
-        // Projection + pill delta vs N-1
+        // Projection + pill delta vs total final N-1 du site
         var projCell = document.createElement("div");
         var projVal = document.createElement("span");
         projVal.textContent = formatNumber(s.projection);
         projCell.appendChild(projVal);
-        if (s.projection != null && s.ventes_prev != null && s.ventes_prev > 0) {
-            var diff = ((s.projection - s.ventes_prev) / s.ventes_prev * 100).toFixed(0);
+        if (s.projection != null && s.ventes_prev_final != null && s.ventes_prev_final > 0) {
+            var diff = ((s.projection - s.ventes_prev_final) / s.ventes_prev_final * 100).toFixed(0);
             var pill = document.createElement("span");
             pill.className = "affluence-pill " + (diff >= 0 ? "positive" : "negative");
             pill.textContent = (diff >= 0 ? "+" : "") + diff + "%";
