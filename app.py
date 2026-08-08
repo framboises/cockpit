@@ -2123,9 +2123,17 @@ def _curve_points(products, race_date):
 
 
 def _select_products(param_doc, product_names=None):
-    """Produits d'un doc parametrages, restreints au panier demande si fourni."""
+    """Produits d'un doc parametrages, restreints au panier demande.
+
+    `None` = pas de filtre. Un ensemble **vide** n'est pas la meme chose : il
+    signifie que l'edition n'a aucune config ticketing (cas de 24H AUTOS 2024,
+    0 entree pour 106 produits) et donc aucun panier comparable. Retomber sur
+    tous les produits reintroduirait campings et agregats TOTAL_*, c'est-a-dire
+    exactement la courbe faussee qu'on cherche a eviter — mieux vaut ecarter
+    l'edition des references que lui faire dire n'importe quoi.
+    """
     prods = (param_doc.get('tickets') or {}).get('products', {}) or {}
-    if not product_names:
+    if product_names is None:
         return prods
     return {k: v for k, v in prods.items() if k in product_names}
 
@@ -2180,6 +2188,69 @@ def _interpolate_pct(points, final, target_days_before):
         return None
     v = _interpolate_value(points, target_days_before)
     return None if v is None else v / final * 100
+
+
+def _ticketing_day_groups(param_doc, race_date):
+    """Regroupe les produits ticketing par portee de jours, exprimee en offsets
+    au jour de course : {'all'} ou {(0,)} ou {(0, 1)}...
+
+    La signature est **stable d'une edition a l'autre** alors que les noms de
+    produits changent completement ('24C WEEK_END' -> '24C Entree Week-end  -
+    Course'). C'est elle qui permet de projeter chaque type de billet sur son
+    propre rythme de vente : a J-50 un Pack VIP est ecoule aux deux tiers quand
+    un billet Samedi en est au cinquieme. Un taux unique pour tout le panier
+    suppose que le mix produits de N est celui de N-1 — vrai sur le total,
+    faux jour par jour.
+    """
+    gh = (param_doc.get('data') or {}).get('globalHoraires') or {}
+    groups = {}
+    for tc in gh.get('ticketing', []) or []:
+        prods = [p for p in (tc.get('products') or []) if p]
+        if not prods:
+            continue
+        scope = tc.get('days', [])
+        if scope == 'all':
+            sig = 'all'
+        elif race_date:
+            offsets = set()
+            for ds in scope or []:
+                try:
+                    offsets.add((datetime.strptime(ds, '%Y-%m-%d').date() - race_date).days)
+                except Exception:
+                    continue
+            if not offsets:
+                continue
+            sig = tuple(sorted(offsets))
+        else:
+            continue
+        groups.setdefault(sig, set()).update(prods)
+    return groups
+
+
+def _group_fill_rates(param_doc, race_ref, target_days_before):
+    """{signature: part du final deja vendue a target_days_before} pour une
+    edition de reference."""
+    rates = {}
+    for sig, names in _ticketing_day_groups(param_doc, race_ref).items():
+        pts, final, _ = _fill_curve(param_doc, race_date_override=race_ref, product_names=names)
+        pct = _interpolate_pct(pts, final, target_days_before)
+        if pct and pct > 0:
+            rates[sig] = pct / 100
+    return rates
+
+
+def _reference_weights(n):
+    """Poids geometriques decroissants : N-1 pese le double de N-2, etc.
+
+    Rien ne prouve que l'edition la plus recente soit la plus predictive, mais
+    elle partage davantage de contexte (grille tarifaire, calendrier de mise en
+    vente) avec la saison en cours.
+    """
+    if n <= 0:
+        return []
+    raw = [0.5 ** i for i in range(n)]
+    total = sum(raw)
+    return [r / total for r in raw]
 
 
 @app.route('/get_affluence', methods=['GET'])
@@ -2285,6 +2356,21 @@ def get_affluence():
     # (via doc portes, fiable) sur parametrages.data.race (parfois errone).
     prev_race_ref = prev_hist_race_date or prev_race_date
 
+    # Dates de course fiables de toutes les editions passees, pour caler les
+    # courbes de reference au-dela de N-1.
+    hist_race_by_year = {}
+    if current_year_int:
+        for h in db['historique_controle'].find(
+            {'type': {'$in': ['portes', 'frequentation']},
+             'event': {'$in': _event_hist_aliases(event)}},
+            {'_id': 0, 'year': 1, 'race': 1}
+        ):
+            hy, hr = h.get('year'), h.get('race')
+            if isinstance(hy, (int, float)) and hr and int(hy) not in hist_race_by_year:
+                rd = _parse_race_date(hr)
+                if rd:
+                    hist_race_by_year[int(hy)] = rd
+
     # ── Paniers "enceinte generale" (produits references dans ticketing) ──
     # day_ventes est multi-compte (un billet week-end compte sur chaque jour)
     # pour refleter la presence attendue par jour ; les totaux ne doivent PAS
@@ -2292,11 +2378,6 @@ def get_affluence():
     referenced_products = _ticketing_product_names(doc)
     prev_referenced = _ticketing_product_names(prev_param) if prev_param else set()
 
-    # ── Calculer la projection basee sur les courbes N-1 et N-2 ──
-    # Les courbes sont restreintes au meme panier que le total : y laisser les
-    # campings (satures des janvier) ou les agregats TOTAL_* du referentiel
-    # fausserait le taux de remplissage, donc la projection.
-    projection_ratio = None  # ventes_actuelles / projection = ce ratio
     days_before = None
     if race_date and last_update:
         try:
@@ -2306,34 +2387,31 @@ def get_affluence():
         if last_dt:
             days_before = (race_date - last_dt).days
 
-    if days_before is not None:
-        fill_pcts = []
-        # Courbe N-1
-        if prev_param:
-            pts, final, _ = _fill_curve(prev_param, race_date_override=prev_race_ref,
-                                        product_names=prev_referenced)
-            pct = _interpolate_pct(pts, final, days_before)
-            if pct:
-                fill_pcts.append(pct)
-
-        # Courbe N-2
-        if current_year_int:
-            for cand in sorted(prev_candidates, key=lambda c: str(c.get('year', '')), reverse=True):
-                try:
-                    cy = int(cand.get('year', ''))
-                except (ValueError, TypeError):
-                    continue
-                if cy < current_year_int and cand.get('year') != prev_year_str:
-                    pts2, final2, _ = _fill_curve(cand, product_names=_ticketing_product_names(cand))
-                    pct2 = _interpolate_pct(pts2, final2, days_before)
-                    if pct2:
-                        fill_pcts.append(pct2)
+    # ── Taux de remplissage de chaque edition de reference ──
+    # Une edition de reference fournit, a days_before, la part de son total final
+    # deja vendue — globalement et par groupe de jours. Les courbes sont
+    # restreintes au panier ticketing : y laisser les campings (satures des
+    # janvier) ou les agregats TOTAL_* du referentiel fausserait le taux.
+    MAX_REFERENCE_EDITIONS = 3
+    reference_rates = []
+    if days_before is not None and current_year_int:
+        for cand in sorted(prev_candidates, key=lambda c: str(c.get('year', '')), reverse=True):
+            try:
+                cy = int(cand.get('year', ''))
+            except (ValueError, TypeError):
+                continue
+            if cy >= current_year_int:
+                continue
+            race_ref = hist_race_by_year.get(cy) or _param_race_date(cand)
+            pts, final, _ = _fill_curve(cand, race_date_override=race_ref,
+                                        product_names=_ticketing_product_names(cand))
+            g_pct = _interpolate_pct(pts, final, days_before)
+            g_rate = g_pct / 100 if g_pct and g_pct > 0 else None
+            groups = _group_fill_rates(cand, race_ref, days_before)
+            if g_rate or groups:
+                reference_rates.append({'year': cy, 'global': g_rate, 'groups': groups})
+                if len(reference_rates) >= MAX_REFERENCE_EDITIONS:
                     break
-
-        if fill_pcts:
-            avg_pct = sum(fill_pcts) / len(fill_pcts)
-            if avg_pct > 0:
-                projection_ratio = avg_pct / 100  # ex: 0.55 = on est a 55% du final
 
     total_ventes = sum(
         products_data.get(p, {}).get('ventes', 0) for p in referenced_products
@@ -2387,11 +2465,82 @@ def get_affluence():
         prev_reference_date = (prev_race_ref - timedelta(days=days_before)).strftime('%Y-%m-%d')
 
     # Croissance reelle N/N-1 a avancement egal (ex: 0,97 = 3 % sous la saison
-    # precedente au meme stade). Appliquee au final N-1, elle donne la seconde
-    # borne de la projection, independante de la forme de la courbe.
+    # precedente au meme stade). Appliquee au final N-1, elle donne une
+    # projection independante de la forme des courbes.
     delta_n_vs_n1 = None
     if total_ventes_prev and total_ventes_prev > 0:
         delta_n_vs_n1 = total_ventes / total_ventes_prev
+
+    # ── Projection ──
+    # Une projection par edition de reference, chacune ventilee par groupe de
+    # jours, plus une projection "croissance". La valeur centrale est la moyenne
+    # ponderee des editions (N-1 pese le double de N-2) ; la fourchette est le
+    # min/max de TOUTES les projections, y compris celle par croissance.
+    #
+    # Moyenner les editions en une seule fourchette etroite masquait leur
+    # desaccord : sur 24H CAMIONS 2026 a J-50, 2025 projette 52 637 et 2024
+    # 67 539 pour des finals quasi identiques (2024 vendait simplement plus
+    # tard). L'ecart entre editions EST l'incertitude, il doit se voir.
+    groups_n = _ticketing_day_groups(doc, race_date)
+    ventes_by_sig = {}
+    for sig, names in groups_n.items():
+        ventes_by_sig[sig] = sum(products_data.get(p, {}).get('ventes', 0) for p in names)
+
+    def _project_on(ventes_map, ref):
+        """Projection d'un panier ventile par signature sur une edition de ref.
+
+        Un groupe absent de l'edition de reference (billet cree cette annee)
+        retombe sur le taux global de cette edition.
+        """
+        total = 0.0
+        for sig, v in ventes_map.items():
+            rate = ref['groups'].get(sig) or ref['global']
+            if not rate:
+                return None
+            total += v / rate
+        return int(round(total)) if total else None
+
+    def _growth_projection(ventes_now, prev_final):
+        if not prev_final or not delta_n_vs_n1:
+            return None
+        return max(ventes_now, int(round(prev_final * delta_n_vs_n1)))
+
+    def _assemble(ventes_map, ventes_now, prev_final):
+        """(central, low, high, [{source, value}]) pour un panier donne."""
+        per_edition = []
+        for ref in reference_rates:
+            v = _project_on(ventes_map, ref)
+            if v:
+                per_edition.append({'source': str(ref['year']), 'value': v})
+        detail = list(per_edition)
+        growth = _growth_projection(ventes_now, prev_final)
+        if growth:
+            detail.append({'source': 'croissance', 'value': growth})
+        if not detail:
+            return None, None, None, []
+        if per_edition:
+            weights = _reference_weights(len(per_edition))
+            central = int(round(sum(w * p['value'] for w, p in zip(weights, per_edition))))
+        else:
+            central = growth
+        values = [p['value'] for p in detail]
+        return central, min(values), max(values), detail
+
+    total_projection, total_projection_low, total_projection_high, projection_refs = _assemble(
+        ventes_by_sig, total_ventes, total_ventes_prev_final
+    )
+
+    # Dispersion entre methodes : dit si la projection est solide (editions
+    # d'accord) ou fragile. Sans elle, une fourchette large se lit comme une
+    # precision, pas comme un doute.
+    projection_spread_pct = None
+    if total_projection and total_projection_low and total_projection_high:
+        projection_spread_pct = int(round(
+            100 * (total_projection_high - total_projection_low) / total_projection
+        ))
+
+    # Ratio implicite, encore utilise comme repli pour les sites sans historique.
+    projection_ratio = (total_ventes / total_projection) if total_projection else None
 
     # ── Construire la reponse par jour ──
     result_days = []
@@ -2450,22 +2599,25 @@ def get_affluence():
             )
             ventes_prev = _prev_at_same_stage(prev_day_products)
 
-        # Projection ventes pour ce jour : fourchette courbe / croissance
-        day_projection = None       # via le taux de remplissage N-1
-        day_projection_low = None   # via la croissance a avancement egal
-        if projection_ratio and projection_ratio > 0:
-            day_projection = round(day_ventes / projection_ratio)
-        if ventes_prev_final and ventes_prev_final > 0 and delta_n_vs_n1:
-            # final N-1 du meme jour * croissance N/N-1 constatee a avancement egal,
-            # plafonne a au moins les ventes actuelles N (on ne redescend pas)
-            day_projection_low = max(day_ventes, round(ventes_prev_final * delta_n_vs_n1))
-        if day_projection and day_projection_low and day_projection_low > day_projection:
-            day_projection, day_projection_low = day_projection_low, day_projection
+        # Projection ventes du jour : meme assemblage que le total, mais sur les
+        # seuls groupes de billets valables ce jour-la. C'est ce qui distingue le
+        # samedi du dimanche : les billets a la journee se vendent nettement plus
+        # tard que les week-end, un taux global unique les confondrait.
+        day_offset = (day_date - race_date).days if race_date else None
+        day_by_sig = {}
+        if day_offset is not None:
+            for sig, v in ventes_by_sig.items():
+                if sig == 'all' or day_offset in sig:
+                    day_by_sig[sig] = v
+        day_projection, day_projection_low, day_projection_high, day_projection_refs = _assemble(
+            day_by_sig, day_ventes, ventes_prev_final
+        )
 
         # Pic N-1 et Pic projete depuis historique_controle (fourchette aussi)
         pic_prev = None
         pic_projection = None
         pic_projection_low = None
+        pic_projection_high = None
         if race_date and prev_race_ref:
             offset_days = (day_date - race_date).days
             target_prev_date = prev_race_ref + timedelta(days=offset_days)
@@ -2483,6 +2635,8 @@ def get_affluence():
                         pic_projection = round(day_projection * pic_ratio)
                     if day_projection_low:
                         pic_projection_low = round(day_projection_low * pic_ratio)
+                    if day_projection_high:
+                        pic_projection_high = round(day_projection_high * pic_ratio)
 
         result_days.append({
             "date": day_str,
@@ -2493,18 +2647,14 @@ def get_affluence():
             "ventes_prev_final": ventes_prev_final,
             "projection": day_projection,
             "projection_low": day_projection_low,
+            "projection_high": day_projection_high,
+            "projection_refs": day_projection_refs,
             "pic_prev": pic_prev,
             "pic_projection": pic_projection,
             "pic_projection_low": pic_projection_low,
+            "pic_projection_high": pic_projection_high,
             "prev_year": prev_year_str
         })
-
-    total_projection = round(total_ventes / projection_ratio) if projection_ratio else None
-    total_projection_low = None
-    if total_ventes_prev_final and delta_n_vs_n1:
-        total_projection_low = max(total_ventes, round(total_ventes_prev_final * delta_n_vs_n1))
-    if total_projection and total_projection_low and total_projection_low > total_projection:
-        total_projection, total_projection_low = total_projection_low, total_projection
 
     # ── Sites (parkings + campings avec ticketing) ──
     # Les sites vivent hors du panier enceinte generale (ticketing propre a chaque
@@ -2568,6 +2718,9 @@ def get_affluence():
         "total_ventes_prev_final": total_ventes_prev_final if total_ventes_prev_final else None,
         "total_projection": total_projection,
         "total_projection_low": total_projection_low,
+        "total_projection_high": total_projection_high,
+        "projection_refs": projection_refs,
+        "projection_spread_pct": projection_spread_pct,
         "last_update": last_update,
         "prev_year": prev_year_str,
         "prev_reference_date": prev_reference_date,

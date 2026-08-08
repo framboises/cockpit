@@ -271,6 +271,25 @@
     return p.length === 3 ? p[2] + "/" + p[1] + "/" + p[0] : iso;
   }
 
+  // Detail des methodes de projection. La valeur affichee est la moyenne
+  // ponderee des editions de reference ; ce qui compte pour l'exploitant, c'est
+  // de savoir sur quoi elle repose et a quel point les editions divergent.
+  function projectionTitle(low, high, refs) {
+    var bits = [];
+    if (low != null && high != null && low !== high) {
+      bits.push("Fourchette " + fmt(low) + " - " + fmt(high));
+    }
+    (refs || []).forEach(function (r) {
+      bits.push("  " + (r.source === "croissance" ? "croissance N-1" : "si comme " + r.source) +
+                " : " + fmt(r.value));
+    });
+    return bits.join("\n");
+  }
+
+  function editionRefs(data) {
+    return (data.projection_refs || []).filter(function (r) { return r.source !== "croissance"; });
+  }
+
   function renderUpdate(data) {
     var el = document.getElementById("affluence-panel-update");
     if (!el) return;
@@ -344,17 +363,19 @@
     }
     strip.appendChild(card2);
 
-    // KPI 3 : Projection finale (fourchette) + comparaison au FINAL N-1
-    var projVal = fmtRange(totalProjLow, totalProj);
-    var midProj = (totalProjLow != null && totalProj != null)
-      ? Math.round((totalProjLow + totalProj) / 2) : totalProj;
-    var projPct = pct(midProj, totalPrevFinal);
-    var sub3 = "fourchette basse - haute", sub3Class = "";
-    if (projPct != null) {
-      sub3 = (projPct >= 0 ? "+" : "") + projPct + " % vs final " + (data.prev_year || "N-1");
-      sub3Class = projPct >= 0 ? "pos" : "neg";
+    // KPI 3 : Projection finale (valeur centrale) + fourchette min/max en sous-ligne
+    var totalProjHigh = data.total_projection_high;
+    var sub3 = "fourchette basse - haute";
+    if (totalProjLow != null && totalProjHigh != null && totalProjLow !== totalProjHigh) {
+      sub3 = fmtRange(totalProjLow, totalProjHigh);
+      if (data.projection_spread_pct != null) sub3 += "  (ecart " + data.projection_spread_pct + " %)";
+    } else {
+      var projPct = pct(totalProj, totalPrevFinal);
+      if (projPct != null) sub3 = (projPct >= 0 ? "+" : "") + projPct + " % vs final " + (data.prev_year || "N-1");
     }
-    strip.appendChild(makeKpiCard("Projection finale", projVal, sub3, sub3Class));
+    var card3 = makeKpiCard("Projection finale", fmt(totalProj), sub3, "");
+    card3.title = projectionTitle(totalProjLow, totalProjHigh, data.projection_refs);
+    strip.appendChild(card3);
 
     // KPI 4 : Pic maximal projete sur l'event (max sur tous les jours)
     var maxPic = null;
@@ -390,9 +411,10 @@
         cards.appendChild(makeKpiCard("Billets vendus (J)", fmt(dayInfo.ventes), null, ""));
         cards.appendChild(makeKpiCard("Pic N-1 (jour eq.)", fmt(dayInfo.pic_prev),
                                       hourly.pic_prev_hour ? "vers " + hourly.pic_prev_hour : null, ""));
-        cards.appendChild(makeKpiCard("Pic projete",
-                                      fmtRange(dayInfo.pic_projection_low, dayInfo.pic_projection),
-                                      "fourchette", ""));
+        var picCard = makeKpiCard("Pic projete", fmt(dayInfo.pic_projection),
+                                  fmtRange(dayInfo.pic_projection_low, dayInfo.pic_projection_high), "");
+        picCard.title = projectionTitle(dayInfo.pic_projection_low, dayInfo.pic_projection_high, null);
+        cards.appendChild(picCard);
         // Delta projection vs N-1
         var deltaPic = pct(dayInfo.pic_projection, dayInfo.pic_prev);
         var subDp = null, subDpClass = "";
@@ -544,12 +566,15 @@
       }
       tr.appendChild(td(dPctTxt, dPctCls, refTitle));
 
-      tr.appendChild(td(fmtRange(d.projection_low, d.projection), "",
-                        d.ventes_prev_final != null
-                          ? "Total final " + (global.prev_year || "N-1") + " ce jour : " + fmt(d.ventes_prev_final)
-                          : ""));
+      var projTitle = projectionTitle(d.projection_low, d.projection_high, d.projection_refs);
+      if (d.ventes_prev_final != null) {
+        projTitle += (projTitle ? "\n" : "") +
+          "Total final " + (global.prev_year || "N-1") + " ce jour : " + fmt(d.ventes_prev_final);
+      }
+      tr.appendChild(td(fmt(d.projection), "", projTitle));
       tr.appendChild(td(fmt(d.pic_prev)));
-      tr.appendChild(td(fmtRange(d.pic_projection_low, d.pic_projection)));
+      tr.appendChild(td(fmt(d.pic_projection), "",
+                        projectionTitle(d.pic_projection_low, d.pic_projection_high, null)));
 
       tbody.appendChild(tr);
     });
@@ -790,7 +815,37 @@
       }
     }
 
-    // 3. Donnees obsoletes
+    // 3. Solidite de la projection. Une fourchette large se lit comme une
+    // precision si rien ne dit sur quoi elle repose : on nomme les editions et
+    // leur desaccord.
+    var refs = editionRefs(data);
+    if (data.total_projection != null) {
+      if (refs.length === 0) {
+        alerts.push({
+          level: "warning",
+          icon: "help",
+          text: "Projection sans edition de reference exploitable : elle repose sur la seule " +
+                "croissance vs N-1, sans courbe de remplissage"
+        });
+      } else if (refs.length === 1) {
+        alerts.push({
+          level: "info",
+          icon: "info",
+          text: "Une seule edition de reference (" + refs[0].source + ") : projection non recoupee"
+        });
+      } else if (data.projection_spread_pct != null && data.projection_spread_pct >= 20) {
+        var detail = refs.map(function (r) { return r.source + " -> " + fmtShort(r.value); }).join(", ");
+        alerts.push({
+          level: "warning",
+          icon: "linear_scale",
+          text: "Projection peu robuste : les editions de reference divergent de " +
+                data.projection_spread_pct + " % (" + detail + "). " +
+                "Les saisons passees n'ont pas vendu au meme rythme."
+        });
+      }
+    }
+
+    // 4. Donnees obsoletes
     if (data.last_update) {
       try {
         var last = new Date(data.last_update + "T00:00:00");

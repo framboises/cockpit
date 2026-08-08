@@ -27,6 +27,21 @@ function frDate(iso) {
     return p.length === 3 ? p[2] + "/" + p[1] + "/" + p[0] : iso;
 }
 
+// La valeur affichee est la moyenne ponderee des editions de reference ; la
+// fourchette min/max et le detail par edition vivent dans l'infobulle, sinon la
+// cellule devient illisible et le desaccord entre editions reste invisible.
+function projectionTitle(low, high, refs) {
+    var bits = [];
+    if (low != null && high != null && low !== high) {
+        bits.push("Fourchette " + formatNumber(low) + " - " + formatNumber(high));
+    }
+    (refs || []).forEach(function (r) {
+        bits.push("  " + (r.source === "croissance" ? "croissance N-1" : "comme " + r.source)
+                  + " : " + formatNumber(r.value));
+    });
+    return bits.join("\n");
+}
+
 // ── Tab 1 : Affluence ──────────────────────────────────────────────────
 
 function renderAffluenceTab(data) {
@@ -78,12 +93,13 @@ function renderAffluenceTab(data) {
         dayLabel.textContent = d.label;
         row.appendChild(dayLabel);
 
-        // Projection ventes (fourchette low - high compact)
+        // Projection ventes (valeur centrale, fourchette en infobulle)
         var projCell = document.createElement("div");
         projCell.className = "affluence-metric";
         var projVal = document.createElement("span");
         projVal.className = "affluence-value";
-        projVal.textContent = formatRange(d.projection_low, d.projection);
+        projVal.textContent = formatShort(d.projection);
+        projVal.title = projectionTitle(d.projection_low, d.projection_high, d.projection_refs);
         projCell.appendChild(projVal);
         row.appendChild(projCell);
 
@@ -96,16 +112,16 @@ function renderAffluenceTab(data) {
         picCell.appendChild(picVal);
         row.appendChild(picCell);
 
-        // Pic projete : fourchette low - high compact
+        // Pic projete (valeur centrale, fourchette en infobulle)
         var picProjCell = document.createElement("div");
         picProjCell.className = "affluence-metric";
         var picProjVal = document.createElement("span");
         picProjVal.className = "affluence-value";
-        picProjVal.textContent = formatRange(d.pic_projection_low, d.pic_projection);
+        picProjVal.textContent = formatShort(d.pic_projection);
+        picProjVal.title = projectionTitle(d.pic_projection_low, d.pic_projection_high, null);
         picProjCell.appendChild(picProjVal);
         if (d.pic_projection != null && d.pic_prev != null && d.pic_prev > 0) {
-            var midPic = d.pic_projection_low != null ? Math.round((d.pic_projection_low + d.pic_projection) / 2) : d.pic_projection;
-            var pct = ((midPic - d.pic_prev) / d.pic_prev * 100).toFixed(0);
+            var pct = ((d.pic_projection - d.pic_prev) / d.pic_prev * 100).toFixed(0);
             var pill = document.createElement("span");
             pill.className = "affluence-pill " + (pct >= 0 ? "positive" : "negative");
             pill.textContent = (pct >= 0 ? "+" : "") + pct + "%";
@@ -124,7 +140,9 @@ function renderAffluenceTab(data) {
 
     if (data.total_projection) {
         var projSpan = document.createElement("span");
-        projSpan.textContent = "Proj. " + formatRange(data.total_projection_low, data.total_projection);
+        projSpan.textContent = "Proj. " + formatShort(data.total_projection);
+        projSpan.title = projectionTitle(data.total_projection_low, data.total_projection_high,
+                                         data.projection_refs);
         footer.appendChild(projSpan);
     }
 
@@ -224,11 +242,11 @@ function renderVentesTab(data) {
         projCell.className = "affluence-metric";
         var projVal = document.createElement("span");
         projVal.className = "affluence-value";
-        projVal.textContent = formatRange(d.projection_low, d.projection);
+        projVal.textContent = formatShort(d.projection);
+        projVal.title = projectionTitle(d.projection_low, d.projection_high, d.projection_refs);
         projCell.appendChild(projVal);
         if (d.projection != null && d.ventes_prev_final != null && d.ventes_prev_final > 0) {
-            var midProj = d.projection_low != null ? Math.round((d.projection_low + d.projection) / 2) : d.projection;
-            var projDiff = ((midProj - d.ventes_prev_final) / d.ventes_prev_final * 100).toFixed(0);
+            var projDiff = ((d.projection - d.ventes_prev_final) / d.ventes_prev_final * 100).toFixed(0);
             var projPill = document.createElement("span");
             projPill.className = "affluence-pill " + (projDiff >= 0 ? "positive" : "negative");
             projPill.textContent = (projDiff >= 0 ? "+" : "") + projDiff + "%";
@@ -260,7 +278,9 @@ function renderVentesTab(data) {
     if (data.total_projection) {
         var projFooter = document.createElement("span");
         projFooter.className = "affluence-update";
-        projFooter.textContent = "Proj. " + formatRange(data.total_projection_low, data.total_projection);
+        projFooter.textContent = "Proj. " + formatShort(data.total_projection);
+        projFooter.title = projectionTitle(data.total_projection_low, data.total_projection_high,
+                                           data.projection_refs);
         footer.appendChild(projFooter);
     }
 
