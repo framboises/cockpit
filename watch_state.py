@@ -80,6 +80,19 @@ def event_label(short, year):
     return "%s %02d" % (short, int(year) % 100)
 
 
+def _safe_int(value):
+    """Convertit en entier, ou None si la valeur n'est pas exploitable.
+
+    Les annees arrivent tantot en int, tantot en chaine selon l'emetteur, et
+    parfois en valeur libre saisie a la main. Un seul point de conversion evite
+    que les deux chemins de resolve_event ne divergent.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def resolve_event(config, counter_doc):
     """Retourne (event, year) : epingle si demande, sinon derive du compteur.
 
@@ -90,18 +103,8 @@ def resolve_event(config, counter_doc):
     """
     config = config or {}
     if config.get("event_mode") == "pinned":
-        annee = config.get("year")
-        try:
-            annee = int(annee)
-        except (TypeError, ValueError):
-            annee = None
-        return config.get("event"), annee
+        return config.get("event"), _safe_int(config.get("year"))
 
     if not counter_doc:
         return None, None
-    annee = counter_doc.get("year")
-    try:
-        annee = int(annee)
-    except (TypeError, ValueError):
-        annee = None
-    return counter_doc.get("requested_event"), annee
+    return counter_doc.get("requested_event"), _safe_int(counter_doc.get("year"))

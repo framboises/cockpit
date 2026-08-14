@@ -49,6 +49,13 @@ class TestEntryRate:
         t1 = datetime(2026, 8, 14, 12, 0)
         assert watch_state.entry_rate(48213, t1, 47413, t1) is None
 
+    def test_horodatages_inverses_est_none(self):
+        # Un snapshot anterieur plus recent que le courant : incoherence de
+        # source, on ne publie pas un debit calcule a l'envers.
+        t1 = datetime(2026, 8, 14, 12, 0)
+        t2 = t1 + timedelta(minutes=15)
+        assert watch_state.entry_rate(48213, t1, 47413, t2) is None
+
 
 class TestSelectAlerts:
     CONFIG = [
@@ -95,6 +102,13 @@ class TestSelectAlerts:
     def test_config_vide(self):
         assert watch_state.select_alerts([{"definition_slug": "a"}], []) == []
 
+    def test_niveau_par_defaut_si_absent(self):
+        # Une regle de configuration sans niveau explicite vaut 1 : la montre
+        # signale, mais ne reveille pas.
+        config = [{"slug": "a", "label": "Sans niveau"}]
+        out = watch_state.select_alerts([{"definition_slug": "a"}], config)
+        assert out == [{"l": 1, "m": "Sans niveau"}]
+
 
 class TestEventLabel:
     def test_format_court(self):
@@ -130,3 +144,7 @@ class TestResolveEvent:
     def test_annee_illisible(self):
         counter = {"requested_event": "X", "year": "n/a"}
         assert watch_state.resolve_event({}, counter) == ("X", None)
+
+    def test_epingle_avec_annee_illisible(self):
+        cfg = {"event_mode": "pinned", "event": "24H MOTOS", "year": "n/a"}
+        assert watch_state.resolve_event(cfg, self.COUNTER) == ("24H MOTOS", None)
