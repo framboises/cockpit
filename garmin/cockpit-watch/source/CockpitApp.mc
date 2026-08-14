@@ -14,7 +14,8 @@ class CockpitApp extends Application.AppBase {
     }
 
     function getInitialView() {
-        return [new CockpitView(), new CockpitDelegate()];
+        var view = new CockpitView();
+        return [view, new CockpitDelegate(view)];
     }
 
     (:glance)
