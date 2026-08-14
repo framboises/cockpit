@@ -92,7 +92,7 @@
 .wbgt-consigne { font-size: 0.72rem; margin-top: 5px; font-style: italic; }
 .wbgt-reserve {
   font-size: 0.68rem; margin-top: 5px; color: #f59628;
-  font-weight: 600; cursor: help;
+  font-weight: 600;
 }
 
 /* --- Humidite des sols ------------------------------------------------- */
@@ -111,7 +111,7 @@
   height: 44px; padding: 3px; border-radius: 5px;
   background: rgba(148, 163, 184, 0.06);
 }
-.sol-barre { flex: 1 1 auto; min-width: 2px; border-radius: 1px 1px 0 0; cursor: help; }
+.sol-barre { flex: 1 1 auto; min-width: 3px; border-radius: 1px 1px 0 0; }
 
 /* --- Divers ------------------------------------------------------------ */
 .meteo-note {
@@ -144,7 +144,6 @@
   letter-spacing: 0.02em;
   color: var(--muted);
   margin-top: 1px;
-  cursor: help;
 }
 
 /* ==========================================================================
@@ -271,3 +270,56 @@ td.seuil-critique  { color: #dc3232; font-weight: 700; }
   width: 30px; height: 30px; border-radius: 50%;
   border: 1.5px solid currentColor; font-size: 0.95rem;
 }
+
+/* Le curseur d'aide n'est porte QUE par les elements qui ont reellement une
+   infobulle -- pose par le helper infobulle() de meteo_avance.js. Une classe
+   qui promet une explication sans en avoir fait survoler pour rien. Le
+   pointille sous le libelle annonce l'infobulle avant meme le survol. */
+.a-infobulle {
+  cursor: help;
+  text-decoration: underline dotted rgba(148, 163, 184, 0.55);
+  text-underline-offset: 2px;
+}
+.sol-bloc.a-infobulle { text-decoration: none; }
+.sol-bloc.a-infobulle .sol-libelle {
+  text-decoration: underline dotted rgba(148, 163, 184, 0.55);
+  text-underline-offset: 2px;
+}
+.sol-barre.a-infobulle { text-decoration: none; }
+
+/* Vigilance : l'echeance en cours se distingue de ce qui est annonce. */
+.vigilance-quand {
+  font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted, #94a3b8); font-weight: 700;
+}
+.vigilance-a-venir {
+  margin-left: auto; font-size: 0.72rem; font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.vigilance-periode.courante { font-weight: 600; }
+.vigilance-pastille-mini {
+  display: inline-block; padding: 1px 7px; border-radius: 99px;
+  font-size: 0.62rem; font-weight: 800; color: #0b1220;
+  letter-spacing: 0.04em; margin: 0 6px;
+}
+
+/* --- Modale du jour : navigation et graphiques -------------------------- */
+.mj-nav {
+  background: rgba(148, 163, 184, 0.12); border: 1px solid rgba(148, 163, 184, 0.25);
+  color: inherit; border-radius: 6px; width: 30px; height: 30px;
+  font-size: 1.1rem; line-height: 1; cursor: pointer; flex: 0 0 auto;
+  /* .mj-entete aligne sur la ligne de base : sans cela, un bouton carre se
+     cale sur la baseline de son glyphe et pend sous le titre. */
+  align-self: center;
+}
+.mj-nav:hover { background: rgba(148, 163, 184, 0.24); }
+.mj-nav.inactif { opacity: 0.3; cursor: default; }
+.mj-graph-titre {
+  font-size: 0.74rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--muted, #94a3b8); margin: 12px 0 4px;
+}
+/* Les cartes de jour du bloc WBGT ouvrent le detail : le dire au survol. */
+.wbgt-jour.ouvrable { cursor: pointer; transition: background 0.12s, transform 0.12s; }
+.wbgt-jour.ouvrable:hover { background: rgba(148, 163, 184, 0.10); transform: translateY(-1px); }
+.wbgt-jour.ouvrable:focus-visible { outline: 2px solid #3987e5; outline-offset: 2px; }
+.wbgt-jour.a-infobulle { text-decoration: none; }

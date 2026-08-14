@@ -1655,26 +1655,21 @@ def get_meteo_widget_summary():
                                  'orange': 'red', 'rouge': 'red'}
         ordre = {'green': 0, 'orange': 1, 'red': 2}
 
-        pire_couleur, phenomenes = 'vert', []
-        for periode in bulletin.get('periodes') or []:
-            # Seule l'echeance du jour compte pour la jauge temps reel.
-            if periode.get('echeance') not in (None, 'J'):
-                continue
-            for ph in periode.get('phenomenes') or []:
-                if ordre.get(couleur_vers_severite.get(ph.get('couleur'), 'green'), 0) > \
-                   ordre.get(couleur_vers_severite.get(pire_couleur, 'green'), 0):
-                    pire_couleur = ph.get('couleur')
-                if ph.get('nom') and ph['nom'] not in phenomenes:
-                    phenomenes.append(ph['nom'])
-
-        # Peremption : etablie sur la validite que Meteo-France publie dans le
-        # bulletin, pas sur un seuil d'age maison. Le seuil de 6 h qui figurait
-        # ici declarait perime un bulletin courant tous les jours de midi a 16 h,
-        # puisque les publications sont a 6 h et 16 h locales. Regle unique
-        # partagee avec /api/meteo/vigilance : meteo.etat_vigilance.
-        from meteo import etat_vigilance
+        # Niveau et peremption viennent tous deux de meteo.py : une seule regle,
+        # un seul endroit. Le calcul qui figurait ici ne lisait que l'echeance J
+        # et les phenomenes, la ou le panneau developpe prenait le maximum de
+        # toutes les echeances via couleur_max. Un jaune annonce pour DEMAIN
+        # donnait donc "RAS — vigilance vert" dans la jauge et "vigilance jaune"
+        # dans le panneau, au meme instant. Constate en production.
+        #
+        # La jauge dit l'etat COURANT : elle prend couleur_jour. Ce qui est
+        # annonce pour demain se lit dans le panneau, a sa place, date.
+        from meteo import etat_vigilance, niveau_vigilance
         fraicheur = etat_vigilance(bulletin)
+        niveau = niveau_vigilance(bulletin)
         perime = bool(fraicheur['perime'])
+        pire_couleur = niveau['couleur_jour']
+        phenomenes = niveau['phenomenes_jour']
 
         severite_vigilance = couleur_vers_severite.get(pire_couleur, 'green')
         if not perime and ordre.get(severite_vigilance, 0) > ordre.get(max_severity, 0):
@@ -1687,6 +1682,12 @@ def get_meteo_widget_summary():
         vigilance_info = {
             'couleur': pire_couleur,
             'phenomenes': phenomenes,
+            # Ce qui est annonce au-dela d'aujourd'hui, expose separement pour
+            # que la jauge puisse le mentionner sans jamais le confondre avec
+            # l'etat courant.
+            'couleur_max': niveau['couleur_max'],
+            'phenomenes_max': niveau['phenomenes_max'],
+            'echeances': niveau['echeances'],
             'update_time': bulletin.get('update_time'),
             'age_h': fraicheur['age_h'],
             'perime': perime,

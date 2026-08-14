@@ -47,6 +47,24 @@
     });
   }
 
+  // Une infobulle vide est pire que pas d'infobulle : le curseur devient un
+  // point d'interrogation, l'utilisateur survole, et rien ne vient. C'etait le
+  // cas de .wbgt-reserve, dont le title valait [].join(" ; ") -- soit "" --
+  // des que le modele n'emettait aucune reserve. Ce helper pose l'attribut ET
+  // l'aspect cliquable UNIQUEMENT s'il y a quelque chose a lire.
+  function infobulle(element, texte) {
+    if (!element) return element;
+    var contenu = (texte || "").toString().trim();
+    if (!contenu) {
+      element.removeAttribute("title");
+      element.classList.remove("a-infobulle");
+      return element;
+    }
+    element.setAttribute("title", contenu);
+    element.classList.add("a-infobulle");
+    return element;
+  }
+
   function el(tag, cls, texte) {
     var n = document.createElement(tag);
     if (cls) n.className = cls;
@@ -265,34 +283,49 @@
       return s;
     }
 
-    var couleurMax = "vert";
-    (v.periodes || []).forEach(function (p) {
-      var ordre = ["vert", "jaune", "orange", "rouge"];
-      if (ordre.indexOf(p.couleur_max) > ordre.indexOf(couleurMax)) couleurMax = p.couleur_max;
-    });
-    var style = VIGILANCE[couleurMax] || VIGILANCE.vert;
+    // La pastille porte la couleur DU JOUR, pas le maximum de toutes les
+    // echeances. Elle prenait le maximum : un jaune annonce pour demain faisait
+    // afficher "jaune" ici pendant que la jauge du cockpit disait "vert" pour
+    // le meme instant. Les deux lisent desormais couleur_jour, calculee une
+    // seule fois cote serveur (meteo.niveau_vigilance).
+    var couleurJour = v.couleur_jour || "vert";
+    var couleurMax = v.couleur_max || couleurJour;
+    var style = VIGILANCE[couleurJour] || VIGILANCE.vert;
 
     var carte_ = el("div", "vigilance-carte");
     carte_.style.background = style.fond;
     carte_.style.borderLeft = "4px solid " + style.trait;
 
     var entete = el("div", "vigilance-entete");
-    var pastille = el("span", "vigilance-pastille", couleurMax.toUpperCase());
+    var pastille = el("span", "vigilance-pastille", couleurJour.toUpperCase());
     pastille.style.background = style.trait;
     entete.appendChild(pastille);
     entete.appendChild(el("span", "vigilance-libelle", style.texte));
+    entete.appendChild(el("span", "vigilance-quand", "en cours"));
+
+    // Ce qui monte plus tard s'annonce, sans jamais remplacer l'etat courant.
+    if (couleurMax !== couleurJour) {
+      var suite = el("span", "vigilance-a-venir",
+        "annonce : " + couleurMax.toUpperCase() + " a venir");
+      suite.style.color = (VIGILANCE[couleurMax] || {}).trait || "inherit";
+      entete.appendChild(suite);
+    }
     carte_.appendChild(entete);
 
-    (v.periodes || []).forEach(function (p) {
-      var ligne = el("div", "vigilance-periode");
+    (v.echeances || []).forEach(function (p) {
+      var ligne = el("div", "vigilance-periode" + (p.courante ? " courante" : ""));
       var quand = p.echeance === "J" ? "Aujourd'hui" : "Demain";
-      ligne.appendChild(el("strong", null, quand));
-      if (!p.phenomenes.length) {
+      var titre = el("strong", null, quand + (p.courante ? " (en cours)" : ""));
+      ligne.appendChild(titre);
+      var pastilleP = el("span", "vigilance-pastille-mini", (p.couleur || "vert").toUpperCase());
+      pastilleP.style.background = (VIGILANCE[p.couleur] || VIGILANCE.vert).trait;
+      ligne.appendChild(pastilleP);
+      if (!(p.phenomenes || []).length) {
         ligne.appendChild(el("span", "vigilance-phen", "aucun phenomene signale"));
       } else {
-        p.phenomenes.forEach(function (ph) {
-          var tag = el("span", "vigilance-phen", ph.nom + " — " + ph.couleur);
-          tag.style.color = (VIGILANCE[ph.couleur] || {}).trait || "inherit";
+        p.phenomenes.forEach(function (nom) {
+          var tag = el("span", "vigilance-phen", nom);
+          tag.style.color = (VIGILANCE[p.couleur] || {}).trait || "inherit";
           tag.style.fontWeight = "600";
           ligne.appendChild(tag);
         });
@@ -328,6 +361,23 @@
     return s;
   }
 
+  // Le champ wbgt_fiabilite vaut "sous_estime", "surestime" ou "hors_domaine".
+  // Affiche tel quel, c'est du jargon interne ; explique, c'est une reserve
+  // utile a qui doit decider d'une rotation d'equipes.
+  var LIBELLE_FIABILITE = {
+    sous_estime: "indice probablement sous-estime",
+    surestime: "indice probablement surestime",
+    hors_domaine: "hors domaine de validite"
+  };
+  var EXPLICATION_FIABILITE = {
+    sous_estime: "L'approximation employee minore l'indice dans ces conditions : "
+      + "la contrainte reelle est probablement superieure a la valeur affichee.",
+    surestime: "L'approximation employee majore l'indice dans ces conditions : "
+      + "la contrainte reelle est probablement inferieure a la valeur affichee.",
+    hors_domaine: "Conditions hors du domaine ou l'approximation a ete etablie : "
+      + "la valeur est indicative et ne doit pas fonder seule une decision."
+  };
+
   function sectionThermique(analyse) {
     var s = el("section", "meteo-section");
     s.appendChild(el("h4", null, "Contrainte thermique — WBGT"));
@@ -344,8 +394,24 @@
       if (!ct || !ct.pic) return;
       var niveau = NIVEAUX[ct.pic.wbgt_niveau] || NIVEAUX.normal;
 
-      var carte_ = el("div", "wbgt-jour");
+      var carte_ = el("div", "wbgt-jour ouvrable");
       carte_.style.borderTop = "3px solid " + niveau.trait;
+      // Ces cartes portent une date et ressemblent a des onglets : elles
+      // n'etaient pourtant liees a rien, et cliquer dessus ne faisait rien.
+      // Elles ouvrent desormais le detail du jour, comme les vignettes de la
+      // barre laterale.
+      carte_.setAttribute("role", "button");
+      carte_.setAttribute("tabindex", "0");
+      infobulle(carte_, "Ouvrir le detail du " + jour.date);
+      carte_.addEventListener("click", function () {
+        if (window.openMeteoModal) window.openMeteoModal(jour.date);
+      });
+      carte_.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          if (window.openMeteoModal) window.openMeteoModal(jour.date);
+        }
+      });
       carte_.appendChild(el("div", "wbgt-date", jour.date));
       var val = el("div", "wbgt-valeur", ct.pic.wbgt_c + " °C");
       val.style.color = niveau.trait;
@@ -362,8 +428,13 @@
         carte_.appendChild(el("div", "wbgt-consigne", ct.pic.wbgt_consigne));
       }
       if (ct.pic.wbgt_fiabilite && ct.pic.wbgt_fiabilite !== "bonne") {
-        var res = el("div", "wbgt-reserve", "! " + ct.pic.wbgt_fiabilite);
-        res.title = (ct.pic.wbgt_reserves || []).join(" ; ");
+        var motifs = (ct.pic.wbgt_reserves || []).filter(function (x) { return x; });
+        var res = el("div", "wbgt-reserve", "! " + LIBELLE_FIABILITE[ct.pic.wbgt_fiabilite]
+          || ("! " + ct.pic.wbgt_fiabilite));
+        // A defaut de motif detaille, l'infobulle explique au moins le mot :
+        // "sous_estime" seul n'apprend rien a qui n'a pas ecrit le code.
+        infobulle(res, motifs.length ? motifs.join(" ; ")
+          : (EXPLICATION_FIABILITE[ct.pic.wbgt_fiabilite] || ""));
         carte_.appendChild(res);
       }
       grille.appendChild(carte_);
@@ -394,7 +465,7 @@
       "la ou un cumul de pluie ne dit rien de la reserve du sol."));
 
     var ligne = el("div", "sol-ligne");
-    function bloc(libelle, valeur, couleur, note) {
+    function bloc(libelle, valeur, couleur, note, explication) {
       var b = el("div", "sol-bloc");
       b.style.borderLeft = "3px solid " + couleur;
       b.appendChild(el("div", "sol-libelle", libelle));
@@ -402,24 +473,39 @@
       v.style.color = couleur;
       b.appendChild(v);
       if (note) b.appendChild(el("div", "sol-note", note));
-      return b;
+      // Ces quatre indicateurs sont des sigles : sans explication au survol,
+      // ils n'apprennent rien a qui n'a pas lu la documentation SIM2.
+      return infobulle(b, explication);
     }
 
     var swi = sol.swi;
     var couleurSwi = swi < 0.2 ? "#dc3232" : (swi < 0.4 ? "#f59628" : "#008300");
     var etatSwi = swi < 0.2 ? "sols tres secs" : (swi < 0.4 ? "sols secs" : "reserve correcte");
-    ligne.appendChild(bloc("SWI", (swi !== null ? swi.toFixed(3) : "--"), couleurSwi, etatSwi));
+    ligne.appendChild(bloc("SWI", (swi !== null ? swi.toFixed(3) : "--"), couleurSwi, etatSwi,
+      "Indice d humidite des sols, de 0 (point de fletrissement, la plante ne peut "
+      + "plus extraire d eau) a 1 (capacite au champ) et au-dela si le sol est sature. "
+      + "En dessous de 0,2 la reserve utile est quasi epuisee : c est le volet risque "
+      + "incendie. Au-dessus de 1, c est la portance des parkings en herbe qui est en jeu. "
+      + "Source Meteo-France SIM2, maille SAFRAN 8 km du circuit."));
 
     var anomalie = sol.sswi_10j;
     var couleurAno = anomalie < -1 ? "#dc3232" : (anomalie < -0.5 ? "#f59628" : "#008300");
     ligne.appendChild(bloc("SSWI 10 j",
       (anomalie !== null ? (anomalie > 0 ? "+" : "") + anomalie.toFixed(2) : "--"),
-      couleurAno, anomalie < -1 ? "anomalie marquee" : "dans la normale"));
+      couleurAno, anomalie < -1 ? "anomalie marquee" : "dans la normale",
+      "Ecart a la normale saisonniere sur dix jours, en ecarts-types. Zero = saison "
+      + "ordinaire, -1 = plus sec que neuf annees sur dix. Le SWI dit l etat du sol, "
+      + "le SSWI dit si cet etat est inhabituel pour la saison."));
 
     ligne.appendChild(bloc("ETP", (sol.etp !== null ? sol.etp + " mm" : "--"),
-      "#3987e5", "evapotranspiration"));
+      "#3987e5", "evapotranspiration",
+      "Evapotranspiration potentielle du jour : hauteur d eau que le sol et la "
+      + "vegetation peuvent perdre. Comparee a la pluie, elle donne le bilan hydrique — "
+      + "ETP superieure a la pluie signifie que le sol continue de s assecher."));
     ligne.appendChild(bloc("Pluie", (sol.preliq !== null ? sol.preliq + " mm" : "--"),
-      "#3987e5", "sur la maille"));
+      "#3987e5", "sur la maille",
+      "Pluie liquide du jour sur la maille SAFRAN de 8 km, et non sur le pluviometre "
+      + "du circuit : c est la valeur qui alimente le bilan du sol ci-contre."));
 
     s.appendChild(ligne);
 
@@ -435,7 +521,7 @@
         var h = x.swi === null ? 0 : ((x.swi - mini) / etendue) * 100;
         barre.style.height = Math.max(4, h) + "%";
         barre.style.background = x.swi < 0.2 ? "#dc3232" : (x.swi < 0.4 ? "#f59628" : "#008300");
-        barre.title = x.date + " : SWI " + (x.swi !== null ? x.swi.toFixed(3) : "--");
+        infobulle(barre, x.date + " — SWI " + (x.swi !== null ? x.swi.toFixed(3) : "non mesure"));
         spark.appendChild(barre);
       });
       s.appendChild(el("div", "sol-spark-titre", "SWI sur 30 jours"));
@@ -508,11 +594,8 @@
 
     var vigCouleur = "vert";
     var ordre = ["vert", "jaune", "orange", "rouge"];
-    if (vigilance && vigilance.periodes) {
-      vigilance.periodes.forEach(function (p) {
-        if (ordre.indexOf(p.couleur_max) > ordre.indexOf(vigCouleur)) vigCouleur = p.couleur_max;
-      });
-    }
+    // Meme regle que la pastille et que la jauge du cockpit : l'etat courant.
+    if (vigilance && vigilance.couleur_jour) vigCouleur = vigilance.couleur_jour;
     bloc.appendChild(tuile("Vigilance", vigCouleur.toUpperCase(),
       (vigilance && vigilance.perime) ? "bulletin perime" : "Meteo-France",
       (VIGILANCE[vigCouleur] || VIGILANCE.vert).trait));
@@ -982,11 +1065,32 @@
     hote.textContent = "";
 
     var entete = E("div", "mj-entete");
+
+    // Navigation entre jours : la modale s'ouvrait sur une date et ne
+    // permettait plus d'en changer -- il fallait la fermer, retrouver la
+    // vignette et rouvrir. Les fleches parcourent l'horizon disponible.
+    var dispo = jourDisponibles();
+    var rang = dispo.indexOf(date);
+    function fleche(libelle, cible, titre) {
+      var b = E("button", "mj-nav" + (cible ? "" : " inactif"), libelle);
+      if (cible) {
+        infobulle(b, titre);
+        b.addEventListener("click", function () { window.openMeteoModal(cible); });
+      } else {
+        b.disabled = true;
+      }
+      return b;
+    }
+    var precedent = rang > 0 ? dispo[rang - 1] : null;
+    var suivant = (rang >= 0 && rang < dispo.length - 1) ? dispo[rang + 1] : null;
+    entete.appendChild(fleche("‹", precedent, precedent ? "Jour precedent : " + precedent : ""));
+
     entete.appendChild(E("span", "mj-titre", "Meteo du " + date));
     var sources = {};
     (jour.heures || []).forEach(function (h) { if (h.source) sources[h.source] = 1; });
     entete.appendChild(E("span", "mj-sous",
       Object.keys(sources).join(" + ") + " — Source : Meteo-France"));
+    entete.appendChild(fleche("›", suivant, suivant ? "Jour suivant : " + suivant : ""));
     var fermer = E("button", "mj-fermer", "×");
     fermer.addEventListener("click", function () {
       // Retirer l'elargissement : la modale #meteoModal est partagee, la
@@ -1021,11 +1125,17 @@
 
     vues.heures.appendChild(tableJour(jour));
 
-    var cadre = E("div", "mj-graph");
-    var canvas = document.createElement("canvas");
-    canvas.id = "mj-canvas";
-    cadre.appendChild(canvas);
-    vues.courbes.appendChild(cadre);
+    // Deux cadres : thermique et pluie d'un cote, vent de l'autre. Chacun a
+    // ses axes visibles ; voir le commentaire de dessiner().
+    [["Temperature, WBGT et pluie", "mj-canvas"],
+     ["Vent et rafales", "mj-canvas-vent"]].forEach(function (paire) {
+      vues.courbes.appendChild(E("div", "mj-graph-titre", paire[0]));
+      var cadre = E("div", "mj-graph");
+      var canvas = document.createElement("canvas");
+      canvas.id = paire[1];
+      cadre.appendChild(canvas);
+      vues.courbes.appendChild(cadre);
+    });
 
     vues.histo.appendChild(tableHistorique(historique));
 
@@ -1069,42 +1179,100 @@
     return wrap;
   }
 
-  var graphique = null;
+  var graphiques = [];
+  // Dates couvertes par /api/meteo/analyse, memorisees a chaque chargement :
+  // elles bornent la navigation d'un jour a l'autre dans la modale.
+  var joursConnus = [];
+  function jourDisponibles() { return joursConnus.slice(); }
+
+  var COMMUN = {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: { legend: { labels: { boxWidth: 12, font: { size: 11 } } } }
+  };
+
+  // DEUX GRAPHIQUES, PAS UN
+  //
+  // Il n'y en avait qu'un, portant quatre series sur trois axes -- dont celui
+  // des rafales, declare `display: false`. La courbe du vent flottait donc sans
+  // aucune graduation : impossible de lire une valeur, impossible de la situer
+  // par rapport a un seuil. Une courbe qu'on ne peut pas quantifier est pire
+  // qu'une courbe absente, elle donne l'illusion d'une information.
+  //
+  // Separer resout le probleme sans mentir sur les echelles : chaque panneau
+  // porte des grandeurs comparables et TOUS ses axes sont visibles. Le panneau
+  // vent porte en plus les seuils operationnels, ce qui en fait une aide a la
+  // decision et non un simple trace.
   function dessiner(jour) {
-    var canvas = document.getElementById("mj-canvas");
-    if (!canvas || typeof Chart === "undefined") return;
-    if (graphique) { graphique.destroy(); graphique = null; }
+    if (typeof Chart === "undefined") return;
+    graphiques.forEach(function (g) { g.destroy(); });
+    graphiques = [];
     var h = jour.heures || [];
-    graphique = new Chart(canvas.getContext("2d"), {
-      type: "line",
-      data: {
-        labels: h.map(function (x) { return x.heure; }),
-        datasets: [
-          { label: "Temperature (°C)", data: h.map(function (x) { return x.temperature_c; }),
-            borderColor: "#dc3232", yAxisID: "y1", tension: 0.3, fill: false },
-          { label: "WBGT (°C)", data: h.map(function (x) { return x.wbgt_c; }),
-            borderColor: "#f59628", yAxisID: "y1", tension: 0.3, fill: false, borderDash: [5, 4] },
-          { label: "Pluie (mm)", data: h.map(function (x) { return x.pluie_mm; }),
-            borderColor: "#3987e5", backgroundColor: "rgba(57,135,229,0.25)",
-            yAxisID: "y2", type: "bar" },
-          { label: "Rafale (km/h)", data: h.map(function (x) { return x.vent_rafale_kmh; }),
-            borderColor: "#008300", yAxisID: "y3", tension: 0.3, fill: false }
-        ]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        interaction: { mode: "index", intersect: false },
-        plugins: { legend: { labels: { boxWidth: 12, font: { size: 11 } } } },
-        scales: {
-          y1: { type: "linear", position: "left", title: { display: true, text: "°C" } },
-          y2: { type: "linear", position: "right", beginAtZero: true,
-                title: { display: true, text: "mm" }, grid: { display: false } },
-          // Le vent a sa propre echelle, masquee : superposer trois grandeurs
-          // sur deux axes rendrait la lecture fausse.
-          y3: { type: "linear", display: false, beginAtZero: true }
-        }
-      }
-    });
+    var heures = h.map(function (x) { return x.heure; });
+
+    var c1 = document.getElementById("mj-canvas");
+    if (c1) {
+      graphiques.push(new Chart(c1.getContext("2d"), {
+        type: "line",
+        data: {
+          labels: heures,
+          datasets: [
+            { label: "Temperature (°C)", data: h.map(function (x) { return x.temperature_c; }),
+              borderColor: "#dc3232", yAxisID: "y1", tension: 0.3, fill: false },
+            { label: "WBGT (°C)", data: h.map(function (x) { return x.wbgt_c; }),
+              borderColor: "#f59628", yAxisID: "y1", tension: 0.3, fill: false, borderDash: [5, 4] },
+            { label: "Pluie (mm)", data: h.map(function (x) { return x.pluie_mm; }),
+              backgroundColor: "rgba(57,135,229,0.45)", borderColor: "#3987e5",
+              yAxisID: "y2", type: "bar" }
+          ]
+        },
+        options: Object.assign({}, COMMUN, {
+          scales: {
+            y1: { type: "linear", position: "left",
+                  title: { display: true, text: "degres C" } },
+            y2: { type: "linear", position: "right", beginAtZero: true,
+                  title: { display: true, text: "pluie (mm)" }, grid: { display: false } }
+          }
+        })
+      }));
+    }
+
+    var c2 = document.getElementById("mj-canvas-vent");
+    if (c2) {
+      var rafales = h.map(function (x) { return x.vent_rafale_kmh; });
+      var maxi = Math.max.apply(null, rafales.filter(function (x) {
+        return x !== null && x !== undefined;
+      }).concat([50]));
+      graphiques.push(new Chart(c2.getContext("2d"), {
+        type: "line",
+        data: {
+          labels: heures,
+          datasets: [
+            { label: "Rafales (km/h)", data: rafales,
+              borderColor: "#008300", backgroundColor: "rgba(0,131,0,0.12)",
+              tension: 0.3, fill: true },
+            { label: "Vent moyen (km/h)",
+              data: h.map(function (x) { return x.vent_moyen_kmh; }),
+              borderColor: "#7dd3fc", tension: 0.3, fill: false, borderDash: [4, 3] },
+            // Seuils internes Cockpit, traces en pointille : ils situent la
+            // courbe au lieu de laisser l'oeil estimer.
+            { label: "Vigilance 40 km/h", data: heures.map(function () { return 40; }),
+              borderColor: "rgba(234,179,8,0.75)", borderWidth: 1.5,
+              borderDash: [6, 5], pointRadius: 0, fill: false },
+            { label: "Danger 60 km/h", data: heures.map(function () { return 60; }),
+              borderColor: "rgba(249,115,22,0.75)", borderWidth: 1.5,
+              borderDash: [6, 5], pointRadius: 0, fill: false }
+          ]
+        },
+        options: Object.assign({}, COMMUN, {
+          scales: {
+            y: { type: "linear", beginAtZero: true,
+                 suggestedMax: Math.max(70, Math.ceil(maxi / 10) * 10),
+                 title: { display: true, text: "km/h" } }
+          }
+        })
+      }));
+    }
   }
 
   // La modale peut etre fermee par plusieurs chemins (croix d'origine, clic
@@ -1115,7 +1283,8 @@
     window.closeMeteoModal = function () {
       var m = document.getElementById("meteoModal");
       if (m) m.classList.remove("meteo-modal-large");
-      if (graphique) { graphique.destroy(); graphique = null; }
+      graphiques.forEach(function (g) { g.destroy(); });
+      graphiques = [];
       return fermerOriginal.apply(this, arguments);
     };
   }
@@ -1140,6 +1309,7 @@
       fetch("/historique_meteo/" + encodeURIComponent(date))
         .then(function (r) { return r.json(); }).catch(function () { return null; })
     ]).then(function (res) {
+      joursConnus = ((res[0] || {}).jours || []).map(function (j) { return j.date; });
       var jour = ((res[0] || {}).jours || []).filter(function (j) { return j.date === date; })[0];
       if (!jour) {
         // Repli sur la modale d'origine plutot qu'un ecran vide : la date

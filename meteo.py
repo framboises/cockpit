@@ -299,6 +299,77 @@ def _instant(valeur):
         return None
 
 
+ORDRE_COULEURS = ["vert", "jaune", "orange", "rouge"]
+
+
+def niveau_vigilance(bulletin, maintenant=None):
+    """Couleur du bulletin, distinguee selon l'echeance.
+
+    DEUX COULEURS, PAS UNE, ET C'EST LA TOUT LE PROBLEME.
+
+    Un bulletin porte l'echeance J et l'echeance J1. La jauge du cockpit ne
+    retenait que J ; le panneau developpe prenait le maximum des deux. Un jaune
+    annonce pour demain donnait donc "RAS — vigilance vert" dans le petit bloc
+    et "vigilance jaune" dans le grand, au meme instant, sur un produit de
+    securite publique. Constate en production.
+
+    La regle est desormais unique et rendue ici :
+      couleur_jour  ce que dit le bulletin pour MAINTENANT -- ce qu'affiche
+                    toute jauge d'etat courant
+      couleur_max   le pire sur l'ensemble des echeances -- ce qui sert a
+                    annoncer, jamais a qualifier l'instant present
+    Les deux sont exposees, et l'appelant choisit en connaissance de cause.
+    """
+    resultat = {"couleur_jour": "vert", "couleur_max": "vert",
+                "phenomenes_jour": [], "phenomenes_max": [], "echeances": []}
+    if not bulletin:
+        return resultat
+
+    maintenant = maintenant or datetime.now(timezone.utc)
+
+    def rang(couleur):
+        return ORDRE_COULEURS.index(couleur) if couleur in ORDRE_COULEURS else 0
+
+    for periode in bulletin.get("periodes") or []:
+        couleur = periode.get("couleur_max") or "vert"
+        noms = [p.get("nom") for p in (periode.get("phenomenes") or []) if p.get("nom")]
+
+        debut = _instant(periode.get("debut"))
+        fin = _instant(periode.get("fin"))
+        courante = bool(debut and fin and debut <= maintenant <= fin)
+
+        resultat["echeances"].append({
+            "echeance": periode.get("echeance"),
+            "couleur": couleur, "phenomenes": noms,
+            "debut": periode.get("debut"), "fin": periode.get("fin"),
+            "courante": courante,
+        })
+
+        if rang(couleur) > rang(resultat["couleur_max"]):
+            resultat["couleur_max"] = couleur
+        for nom in noms:
+            if nom not in resultat["phenomenes_max"]:
+                resultat["phenomenes_max"].append(nom)
+
+        if courante:
+            if rang(couleur) > rang(resultat["couleur_jour"]):
+                resultat["couleur_jour"] = couleur
+            for nom in noms:
+                if nom not in resultat["phenomenes_jour"]:
+                    resultat["phenomenes_jour"].append(nom)
+
+    # Repli : si aucune periode ne couvre l'instant present (bulletin en cours
+    # de bascule), l'echeance J fait foi plutot que rien.
+    if not any(e["courante"] for e in resultat["echeances"]):
+        for e in resultat["echeances"]:
+            if e["echeance"] in (None, "J"):
+                resultat["couleur_jour"] = e["couleur"]
+                resultat["phenomenes_jour"] = list(e["phenomenes"])
+                break
+
+    return resultat
+
+
 def etat_vigilance(bulletin, maintenant=None):
     """Fraicheur d'un bulletin. Deux faits distincts, a ne pas confondre.
 
@@ -377,6 +448,7 @@ def vigilance():
 
     dernier["disponible"] = True
     dernier.update(etat_vigilance(dernier))
+    dernier.update(niveau_vigilance(dernier))
     return jsonify(dernier)
 
 
@@ -639,7 +711,8 @@ def mur():
         "fraicheur": _fraicheur_mur(db, maintenant, actuel_enrichi),
         # Fraicheur jointe au bulletin : le mur ne doit pas recalculer une
         # peremption de son cote, c'est ainsi qu'une regle fausse se duplique.
-        "vigilance": {**bulletin, **etat_vigilance(bulletin)} if bulletin else None,
+        "vigilance": ({**bulletin, **etat_vigilance(bulletin),
+                       **niveau_vigilance(bulletin)} if bulletin else None),
         "sol": sol,
         "radar": {
             "valid_at": radar["valid_at"].isoformat() if radar else None,
