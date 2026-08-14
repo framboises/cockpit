@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -55,6 +55,21 @@ class TestEntryRate:
         t1 = datetime(2026, 8, 14, 12, 0)
         t2 = t1 + timedelta(minutes=15)
         assert watch_state.entry_rate(48213, t1, 47413, t2) is None
+
+    def test_ecart_dans_la_borne_est_calcule(self):
+        # Exactement a la limite (incluse) : le debit doit encore sortir.
+        t1 = datetime(2026, 8, 14, 12, 0)
+        t0 = t1 - timedelta(seconds=watch_state.RATE_MAX_GAP_S)
+        assert watch_state.entry_rate(48213, t1, 47413, t0) is not None
+
+    def test_ecart_trop_grand_est_none(self):
+        # Interruption du flux Skidata (ou premier releve d'une edition) :
+        # le releve anterieur date de plus d'une heure. Le delta d'entrees
+        # ecrase par un delta de temps enorme rendrait un debit proche de
+        # zero, presente comme le debit courant sur une foule qui entre.
+        t1 = datetime(2026, 8, 14, 12, 0)
+        t0 = t1 - timedelta(seconds=watch_state.RATE_MAX_GAP_S + 1)
+        assert watch_state.entry_rate(48213, t1, 47413, t0) is None
 
 
 class TestSelectAlerts:
@@ -180,12 +195,30 @@ class FakeCollection:
         return out
 
     @staticmethod
-    def _match(doc, cle, val):
-        actuel = doc.get(cle)
+    def _as_comparable_utc(value):
+        """Aligne un datetime naif sur la convention pymongo : un client non
+        tz_aware stocke un aware en UTC et le relit naif-UTC. Comparer un
+        conscient a un naif leve un TypeError en Python pur, alors que
+        MongoDB compare les deux sans broncher (BSON normalise tout en UTC
+        sur le fil). Sans cette normalisation, un test qui reproduit
+        fidelement ce que pymongo rend (naif) contre un `now_utc` conscient
+        (la forme correcte, cf. CRITIQUE 1) casserait le double a cause du
+        Fake, pas du code teste."""
+        if isinstance(value, datetime) and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
+    @classmethod
+    def _match(cls, doc, cle, val):
+        actuel = cls._as_comparable_utc(doc.get(cle))
         if isinstance(val, dict):
-            if "$lte" in val and not (actuel is not None and actuel <= val["$lte"]):
+            if "$lte" in val and not (
+                    actuel is not None
+                    and actuel <= cls._as_comparable_utc(val["$lte"])):
                 return False
-            if "$gt" in val and not (actuel is not None and actuel > val["$gt"]):
+            if "$gt" in val and not (
+                    actuel is not None
+                    and actuel > cls._as_comparable_utc(val["$gt"])):
                 return False
             if "$in" in val and actuel not in val["$in"]:
                 return False
@@ -310,12 +343,20 @@ class TestBuildState:
         )
 
     def test_payload_complet(self):
-        st = watch_state.build_state(self._db(), NOW)
+        # `now_utc=NOW` : la valeur n'a pas a etre reellement en UTC pour ce
+        # test d'assemblage, elle sert seulement a rendre l'alerte active
+        # (expiresAt = NOW + 1h dans self._db()) comparable a l'appel reel de
+        # build_state(db, now, now_utc). La semantique du fuseau est testee
+        # a part dans TestFuseauxHoraires, qui NE PEUT PAS etre tautologique.
+        st = watch_state.build_state(self._db(), NOW, now_utc=NOW)
         assert st["e"] == 48213
         assert st["er"] == 3200
         assert st["n"] == "24HM 26"
         assert st["al"] == [{"l": 3, "m": "SOS tablette"}]
-        assert st["t"] == int(NOW.timestamp())
+        # `horodatage` est naif-UTC (comme le rend pymongo) : l'epoch publie
+        # doit venir d'une interpretation UTC, jamais de .timestamp() nu qui
+        # utiliserait le fuseau local du poste executant les tests.
+        assert st["t"] == int(NOW.replace(tzinfo=timezone.utc).timestamp())
 
     def test_base_vide_ne_leve_pas(self):
         st = watch_state.build_state(FakeDb(), NOW)
@@ -326,7 +367,7 @@ class TestBuildState:
 
     def test_taille_sous_deux_ko(self):
         import json
-        st = watch_state.build_state(self._db(), NOW)
+        st = watch_state.build_state(self._db(), NOW, now_utc=NOW)
         assert len(json.dumps(st).encode("utf-8")) < 2048
 
 
@@ -368,3 +409,52 @@ class TestReadWeatherNow:
 
     def test_aucun_document(self):
         assert watch_state.read_weather_now(FakeDb(), NOW) == (None, None)
+
+
+class TestFuseauxHoraires:
+    """Non-regression des deux pannes critiques trouvees en relecture finale.
+
+    Ces deux tests ne peuvent PAS etre tautologiques : l'epoch/l'instant de
+    reference est calcule par un chemin totalement independant de celui
+    teste (jamais la meme transformation naive/UTC des deux cotes de
+    l'egalite), contrairement a l'ancien `test_payload_complet` qui
+    comparait `int(NOW.timestamp())` -- calcule avec le meme defaut fautif
+    que le code -- et ne pouvait donc rien detecter.
+    """
+
+    def test_alerte_expirant_bientot_est_conservee(self):
+        # Reproduit la panne CRITIQUE 1 : expiresAt naif-UTC (tel que
+        # pymongo le relit), compare a un now_utc CONSCIENT. L'alerte expire
+        # reellement dans 20 minutes : avec l'ancien filtre (comparaison a
+        # une heure locale), l'ecart de 1h a 2h la faisait paraitre deja
+        # expiree.
+        maintenant_utc = datetime.now(timezone.utc)
+        expire = maintenant_utc.replace(tzinfo=None) + timedelta(minutes=20)
+        db = FakeDb(cockpit_active_alerts=[{
+            "definition_slug": "a", "event": "24H MOTOS", "year": "2026",
+            "expiresAt": expire,
+        }])
+        out = watch_state.read_active_alerts(
+            db, "24H MOTOS", 2026, maintenant_utc)
+        assert len(out) == 1
+
+    def test_t_publie_le_bon_epoch(self):
+        # Reproduit la panne CRITIQUE 2 : `horodatage` est naif mais
+        # contient de l'UTC (pymongo, client non tz_aware). L'epoch publie
+        # doit valoir l'epoch reel, pas l'epoch decale de l'heure locale du
+        # serveur.
+        instant = datetime.now(timezone.utc)
+        naif_utc = instant.replace(tzinfo=None)
+        db = FakeDb(
+            data_access=[
+                {"_id": "___GLOBAL___", "compteur_principal_id": "628"},
+                {"requested_location_id": "628", "entries": 100,
+                 "timestamp": naif_utc, "requested_event": "24H MOTOS",
+                 "year": "2026"},
+            ],
+        )
+        st = watch_state.build_state(db, datetime.now(), now_utc=instant)
+        # `instant.timestamp()` est un chemin de calcul independant : un
+        # datetime conscient sait convertir son propre epoch sans repasser
+        # par le `.replace(tzinfo=utc)` du code teste.
+        assert abs(st["t"] - instant.timestamp()) < 2

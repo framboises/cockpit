@@ -4,7 +4,7 @@ Fonctions pures et lectures Mongo, `db` toujours passe en argument. Aucun
 import Flask : ce module se teste sans application.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 # Seuils WBGT en degres, replies sur l'echelle 0-3 de la montre. Ils viennent
 # de SEUILS_WBGT (ISO 7243) dans meteo_thermique.py, dont le palier
@@ -29,6 +29,12 @@ def wbgt_level(wbgt_c, thresholds=None):
     return min(niveau, 3)
 
 
+# Au-dela de cet ecart, les deux releves ne decrivent plus le meme regime :
+# une interruption du flux Skidata donnerait un debit proche de zero sur une
+# foule qui entre, et rien dans le payload ne le signalerait.
+RATE_MAX_GAP_S = 3600
+
+
 def entry_rate(entries_now, ts_now, entries_before, ts_before):
     """Debit d'entrees en personnes/heure entre deux releves du compteur."""
     if entries_now is None or ts_now is None:
@@ -37,6 +43,13 @@ def entry_rate(entries_now, ts_now, entries_before, ts_before):
         return None
     delta_s = (ts_now - ts_before).total_seconds()
     if delta_s <= 0:
+        return None
+    if delta_s > RATE_MAX_GAP_S:
+        # Les deux releves ne decrivent plus le meme regime (interruption du
+        # flux Skidata, ou premier releve d'une edition) : un debit calcule
+        # sur un ecart pareil serait proche de zero quelle que soit la foule
+        # reelle en train d'entrer, et rien ne le distinguerait d'un debit
+        # nul legitime.
         return None
     delta_e = entries_now - entries_before
     if delta_e < 0:
@@ -173,18 +186,23 @@ def read_event_short(db, event):
     return doc.get("short")
 
 
-def read_active_alerts(db, event, year, now):
-    """Alertes actives non expirees de l'evenement retenu."""
+def read_active_alerts(db, event, year, now_utc):
+    """Alertes actives non expirees de l'evenement retenu.
+
+    `now_utc` est CONSCIENT du fuseau : alert_engine ecrit expiresAt en UTC
+    conscient et pymongo le relit naif UTC. Le comparer a une heure locale
+    ecartait toute alerte expirant a moins de deux heures, c'est-a-dire
+    presque toutes.
+    """
     if not event or year is None:
         return []
     # `year` est stocke tantot en chaine tantot en entier selon les emetteurs.
     annees = [year, str(year)]
-    docs = db["cockpit_active_alerts"].find({
+    return list(db["cockpit_active_alerts"].find({
         "event": event,
         "year": {"$in": annees},
-    })
-    return [d for d in docs
-            if d.get("expiresAt") is None or d["expiresAt"] > now]
+        "expiresAt": {"$gt": now_utc},
+    }))
 
 
 def read_weather_now(db, now):
@@ -227,8 +245,21 @@ def read_weather_now(db, now):
     return bloc.get("wbgt_c"), bloc.get("wbgt_niveau")
 
 
-def build_state(db, now):
-    """Assemble le payload servi a la montre."""
+def build_state(db, now, now_utc=None):
+    """Assemble le payload servi a la montre.
+
+    DEUX HORLOGES, deux conventions, ne pas les confondre :
+      `now`     naif, heure locale Paris. C'est la convention des creneaux
+                horaires de meteo_previsions.
+      `now_utc` conscient, UTC. C'est la convention des documents ecrits par
+                alert_engine et live_controle, que pymongo relit naifs UTC.
+
+    Les avoir confondus a produit deux pannes silencieuses : aucune alerte ne
+    parvenait a la montre, et toute donnee s'affichait perimee de deux heures.
+    """
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+
     config = read_config(db)
 
     location_id = read_principal_id(db)
@@ -247,10 +278,14 @@ def build_state(db, now):
 
     event, year = resolve_event(config, courant)
     wbgt, _ = read_weather_now(db, now)
-    actives = read_active_alerts(db, event, year, now)
+    actives = read_active_alerts(db, event, year, now_utc)
 
     return {
-        "t": int(horodatage.timestamp()) if horodatage else None,
+        # `horodatage` est naif mais contient de l'UTC (pymongo, client non
+        # tz_aware). .timestamp() l'interpreterait en heure locale du
+        # serveur et decalerait l'epoch de deux heures en ete.
+        "t": int(horodatage.replace(tzinfo=timezone.utc).timestamp())
+             if horodatage else None,
         "n": event_label(read_event_short(db, event), year),
         "e": entrees,
         "er": debit,

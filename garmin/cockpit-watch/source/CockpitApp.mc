@@ -34,9 +34,20 @@ class CockpitApp extends Application.AppBase {
 
     // La bande verticale que le systeme dessine a gauche de la glance. La
     // colorer coute zero pixel dessine et donne le niveau au premier regard.
+    //
+    // La fraicheur passe avant le niveau : une donnee perimee (telephone
+    // hors de portee, jeton revoque, certificat expire) rend le niveau
+    // affiche non fiable -- une bande verte dessus etait un mensonge, pas
+    // une absence d'alerte. `staleAfter` reprend le meme repli a 90 s que
+    // CockpitView et GlanceView.
     (:glance)
     function getGlanceTheme() {
         var st = Cache.load();
+        var staleAfter = Application.Properties.getValue("staleAfter");
+        if (staleAfter == null) { staleAfter = 90; }
+        if (State.isStale(st, Time.now().value(), staleAfter)) {
+            return AppBase.GLANCE_THEME_GOLD;
+        }
         var worst = State.worstLevel(st);
         if (worst >= 3) {
             return AppBase.GLANCE_THEME_RED;

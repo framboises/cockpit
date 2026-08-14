@@ -56,6 +56,14 @@ class CockpitView extends WatchUi.View {
     function onFetched(ok, st) {
         if (ok && st != null) {
             Cache.save(st);
+            // Les deux chemins (app et fond) ecrivent le meme cache, donc le
+            // controle de transition vit dans Alerting, partage : le premier
+            // qui ecrit deplace la reference, il n'y a pas de double
+            // vibration. Sans cet appel ici, un franchissement de seuil
+            // pendant que l'app est ouverte au poignet ne vibrait jamais --
+            // il fallait attendre le prochain cycle de fond (jusqu'a 5 min),
+            // et l'alerte etait perdue si le niveau redescendait entre-temps.
+            Alerting.check(st);
         }
         // En cas d'echec on garde le cache : l'age affiche dira lui-meme
         // depuis combien de temps la donnee n'a pas bouge.

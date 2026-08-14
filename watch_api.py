@@ -357,7 +357,8 @@ def state():
     if _cache["payload"] is not None and maintenant - _cache["at"] < CACHE_TTL_S:
         return jsonify(_cache["payload"])
 
-    payload = watch_state.build_state(_db(), datetime.now())
+    payload = watch_state.build_state(
+        _db(), datetime.now(), datetime.now(timezone.utc))
     _cache["payload"] = payload
     _cache["at"] = maintenant
     return jsonify(payload)

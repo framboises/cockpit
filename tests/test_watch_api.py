@@ -65,9 +65,9 @@ class TestState:
         }])
         monkeypatch.setattr(watch_api, "_db", lambda: db)
         monkeypatch.setattr(watch_api.watch_state, "build_state",
-                            lambda d, n: {"t": 1, "n": "24HM 26", "e": 2,
-                                          "er": 3, "w": 4.0, "wl": 1,
-                                          "al": []})
+                            lambda d, n, n_utc: {"t": 1, "n": "24HM 26", "e": 2,
+                                                 "er": 3, "w": 4.0, "wl": 1,
+                                                 "al": []})
         rep = client.get("/api/v1/watch/state",
                          headers={"Authorization": "Bearer secret"})
         assert rep.status_code == 200
@@ -82,7 +82,7 @@ class TestState:
         monkeypatch.setattr(watch_api, "_db", lambda: db)
         appels = {"n": 0}
 
-        def compte(d, n):
+        def compte(d, n, n_utc):
             appels["n"] += 1
             return {"t": 1, "n": None, "e": 1, "er": None, "w": None,
                     "wl": 0, "al": []}
@@ -103,9 +103,9 @@ class TestRateLimit:
         }])
         monkeypatch.setattr(watch_api, "_db", lambda: db)
         monkeypatch.setattr(watch_api.watch_state, "build_state",
-                            lambda d, n: {"t": 1, "n": None, "e": 1,
-                                          "er": None, "w": None, "wl": 0,
-                                          "al": []})
+                            lambda d, n, n_utc: {"t": 1, "n": None, "e": 1,
+                                                 "er": None, "w": None, "wl": 0,
+                                                 "al": []})
         entetes = {"Authorization": "Bearer secret"}
         codes = [client.get("/api/v1/watch/state", headers=entetes).status_code
                  for _ in range(watch_api.RATE_LIMIT_MAX + 2)]
@@ -120,8 +120,9 @@ class TestRateLimit:
         }])
         monkeypatch.setattr(watch_api, "_db", lambda: db)
         monkeypatch.setattr(watch_api.watch_state, "build_state",
-                            lambda d, n: {"t": 1, "n": None, "e": 1, "er": None,
-                                          "w": None, "wl": 0, "al": []})
+                            lambda d, n, n_utc: {"t": 1, "n": None, "e": 1,
+                                                 "er": None, "w": None, "wl": 0,
+                                                 "al": []})
         entetes = {"Authorization": "Bearer secret"}
         codes = [client.get("/api/v1/watch/state", headers=entetes).status_code
                  for _ in range(watch_api.RATE_LIMIT_MAX + 1)]
@@ -137,8 +138,9 @@ class TestRateLimit:
         }])
         monkeypatch.setattr(watch_api, "_db", lambda: db)
         monkeypatch.setattr(watch_api.watch_state, "build_state",
-                            lambda d, n: {"t": 1, "n": None, "e": 1, "er": None,
-                                          "w": None, "wl": 0, "al": []})
+                            lambda d, n, n_utc: {"t": 1, "n": None, "e": 1,
+                                                 "er": None, "w": None, "wl": 0,
+                                                 "al": []})
         entetes = {"Authorization": "Bearer secret"}
         rep = None
         for _ in range(watch_api.RATE_LIMIT_MAX + 1):
