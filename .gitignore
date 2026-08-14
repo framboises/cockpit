@@ -20,3 +20,7 @@ static/meteo/
 
 # Espace de travail des plans superpowers (scratch, non versionne)
 .superpowers/
+
+# Cles developpeur Connect IQ : ne doivent jamais entrer dans le depot
+*.der
+developer_key.pem

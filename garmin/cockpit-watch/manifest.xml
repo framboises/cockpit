@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<iq:manifest version="3" xmlns:iq="http://www.garmin.com/xml/connectiq">
+    <iq:application
+        id="C736AB55A59548BEB4E53CA2D21F2BBB"
+        type="watch-app"
+        name="@Strings.AppName"
+        entry="CockpitApp"
+        launcherIcon="@Drawables.LauncherIcon"
+        minApiLevel="6.0.0">
+        <iq:products>
+            <iq:product id="fenix8solar51mm"/>
+        </iq:products>
+        <iq:permissions>
+            <iq:uses-permission id="Communications"/>
+            <iq:uses-permission id="Background"/>
+        </iq:permissions>
+        <iq:languages>
+            <iq:language>fre</iq:language>
+            <iq:language>eng</iq:language>
+        </iq:languages>
+        <iq:barrels/>
+    </iq:application>
+</iq:manifest>

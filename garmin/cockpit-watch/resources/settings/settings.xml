@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<settings>
+    <setting propertyKey="@Properties.host" title="Domaine">
+        <settingConfig type="alphaNumeric" maxLength="64"/>
+    </setting>
+    <setting propertyKey="@Properties.token" title="Jeton">
+        <settingConfig type="alphaNumeric" maxLength="64"/>
+    </setting>
+    <setting propertyKey="@Properties.pollPeak" title="Periode pic (s)">
+        <settingConfig type="numeric" min="30" max="600"/>
+    </setting>
+    <setting propertyKey="@Properties.pollNormal" title="Periode normale (s)">
+        <settingConfig type="numeric" min="60" max="1800"/>
+    </setting>
+    <setting propertyKey="@Properties.staleAfter" title="Seuil peremption (s)">
+        <settingConfig type="numeric" min="30" max="3600"/>
+    </setting>
+    <setting propertyKey="@Properties.alertVibrate" title="Vibrer sur alerte">
+        <settingConfig type="boolean"/>
+    </setting>
+    <setting propertyKey="@Properties.mockData" title="Donnees simulees">
+        <settingConfig type="boolean"/>
+    </setting>
+    <setting propertyKey="@Properties.mockScenario" title="Scenario simule">
+        <settingConfig type="numeric" min="0" max="3"/>
+    </setting>
+</settings>

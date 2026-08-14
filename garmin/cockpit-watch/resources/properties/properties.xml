@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<properties>
+    <property id="host" type="string">cockpit.lemans.org</property>
+    <property id="token" type="string"></property>
+    <property id="pollPeak" type="number">60</property>
+    <property id="pollNormal" type="number">180</property>
+    <property id="staleAfter" type="number">90</property>
+    <property id="alertVibrate" type="boolean">true</property>
+    <property id="mockData" type="boolean">false</property>
+    <property id="mockScenario" type="number">0</property>
+</properties>

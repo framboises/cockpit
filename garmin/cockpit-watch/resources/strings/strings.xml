@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<strings>
+    <string id="AppName">Cockpit</string>
+    <string id="Stale">perime depuis</string>
+    <string id="NoAlert">RAS</string>
+    <string id="NoData">pas de donnee</string>
+    <string id="Entries">entrees</string>
+    <string id="Rate">pers/h</string>
+</strings>
