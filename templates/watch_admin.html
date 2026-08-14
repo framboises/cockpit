@@ -9,6 +9,76 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    .watch-admin-table { width:100%; }
+    .watch-admin-table th.col-shrink,
+    .watch-admin-table td.col-shrink { white-space:nowrap; padding-left:8px; padding-right:8px; text-align:center; }
+
+    .watch-admin-form-row { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:14px; }
+    .watch-admin-field { display:flex; flex-direction:column; gap:4px; font-size:0.82rem; font-weight:600; color:var(--text); }
+    .watch-admin-field .form-input { width:auto; }
+    .watch-admin-field-narrow .form-input { width:110px; }
+
+    .watch-admin-radio-row { display:flex; gap:20px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+    .watch-admin-radio { display:flex; align-items:center; gap:8px; font-size:0.86rem; font-weight:500; color:var(--text); cursor:pointer; }
+    .watch-admin-radio input[type="radio"] { width:16px; height:16px; accent-color:var(--brand); cursor:pointer; margin:0; }
+
+    .watch-admin-subtitle { font-size:0.82rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; margin:18px 0 10px; }
+    .watch-admin-help { font-size:0.82rem; color:var(--muted); margin:0 0 12px; }
+
+    .watch-admin-btn-sm { padding:5px 12px; font-size:0.78rem; }
+
+    .watch-admin-pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:0.76rem; font-weight:600; }
+    .watch-admin-pill.is-active { background:var(--success-light); color:var(--success); }
+    .watch-admin-pill.is-revoked { background:var(--danger-light); color:var(--danger); }
+
+    .watch-admin-level-row { display:flex; gap:6px; }
+    .watch-admin-level-btn {
+      border:1px solid var(--lc, var(--line));
+      color:var(--lc, var(--text));
+      background:transparent;
+      width:30px;
+      height:30px;
+      border-radius:6px;
+      font-size:0.82rem;
+      font-weight:600;
+      cursor:pointer;
+      transition:all 0.15s ease;
+    }
+    .watch-admin-level-btn:hover { background:color-mix(in srgb, var(--lc, var(--brand)) 12%, transparent); }
+    .watch-admin-level-btn.selected {
+      background:var(--lc, var(--brand));
+      color:#fff;
+      box-shadow:0 1px 3px color-mix(in srgb, var(--lc, var(--brand)) 40%, transparent);
+    }
+
+    .watch-admin-secret-box {
+      display:flex;
+      align-items:flex-start;
+      gap:12px;
+      margin:0 0 16px;
+      padding:12px 14px;
+      background:var(--brand-light);
+      border:1px dashed var(--brand);
+      border-radius:var(--radius-md);
+    }
+    .watch-admin-secret-label { font-size:0.78rem; color:var(--muted); margin-bottom:6px; }
+    .watch-admin-secret {
+      display:block;
+      font-family: ui-monospace, "SF Mono", "Liberation Mono", Menlo, Consolas, monospace;
+      font-size:0.92rem;
+      letter-spacing:0.3px;
+      word-break:break-all;
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:var(--radius-sm);
+      padding:8px 10px;
+      color:var(--text);
+      user-select:all;
+    }
+
+    .watch-admin-footer-row { display:flex; justify-content:flex-end; margin-top:6px; }
+  </style>
 </head>
 
 <body>
@@ -29,55 +99,122 @@
     </header>
 
     <div id="main-content">
-      <div class="watch-admin">
-        <h1>Montre cockpit</h1>
 
-        <section id="watch-tokens">
-          <h2>Jetons</h2>
-          <form id="watch-token-form">
-            <input type="text" id="watch-token-label" placeholder="Libelle du jeton"
-                   maxlength="60" required>
-            <button type="submit">Emettre</button>
+      <!-- Section Jetons -->
+      <section class="widget-card">
+        <header class="widget-header">
+          <h3>Jetons</h3>
+        </header>
+        <div class="widget-body">
+          <form id="watch-token-form" class="watch-admin-form-row">
+            <label class="watch-admin-field" style="flex:1; min-width:220px;">Libelle du jeton
+              <input type="text" id="watch-token-label" class="form-input" placeholder="Libelle du jeton"
+                     maxlength="60" required>
+            </label>
+            <button type="submit" class="btn btn-primary">Emettre</button>
           </form>
-          <p id="watch-token-clear" hidden></p>
-          <table id="watch-token-table">
-            <thead>
-              <tr><th>Libelle</th><th>Cree le</th><th>Derniere utilisation</th>
-                  <th>IP</th><th>Etat</th><th></th></tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </section>
 
-        <section id="watch-event">
-          <h2>Evenement rapporte</h2>
-          <label><input type="radio" name="watch-mode" value="auto"> Suivre le compteur</label>
-          <label><input type="radio" name="watch-mode" value="pinned"> Epingler</label>
-          <select id="watch-event-select" disabled></select>
-          <input type="number" id="watch-year" min="2000" max="2100" disabled>
-        </section>
+          <div id="watch-token-clear" class="watch-admin-secret-box" hidden>
+            <span class="material-symbols-outlined" style="font-size:20px; color:var(--brand);">vpn_key</span>
+            <div style="flex:1; min-width:0;">
+              <div class="watch-admin-secret-label">Jeton (affiche une seule fois — copiez-le maintenant) :</div>
+              <code id="watch-token-clear-value" class="watch-admin-secret"></code>
+            </div>
+            <button type="button" id="watch-token-copy" class="btn btn-secondary watch-admin-btn-sm" title="Copier le jeton">
+              <span class="material-symbols-outlined" style="font-size:18px; vertical-align:middle;">content_copy</span>
+            </button>
+          </div>
 
-        <section id="watch-alerts">
-          <h2>Alertes envoyees a la montre</h2>
-          <table id="watch-alert-table">
-            <thead>
-              <tr><th>Envoyer</th><th>Definition</th><th>Niveau</th><th>Libelle court</th></tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-          <h3>Seuils WBGT</h3>
-          <input type="number" id="watch-wbgt-1" step="0.5">
-          <input type="number" id="watch-wbgt-2" step="0.5">
-          <input type="number" id="watch-wbgt-3" step="0.5">
-        </section>
+          <div class="table-responsive">
+            <table id="watch-token-table" class="table table-striped table-hover watch-admin-table">
+              <thead>
+                <tr>
+                  <th>Libelle</th>
+                  <th>Cree le</th>
+                  <th>Derniere utilisation</th>
+                  <th>IP</th>
+                  <th class="col-shrink">Etat</th>
+                  <th class="col-shrink">Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
 
-        <button id="watch-save">Enregistrer</button>
-        <p id="watch-status" role="status"></p>
+      <!-- Section Evenement rapporte -->
+      <section class="widget-card" style="margin-top:16px;">
+        <header class="widget-header">
+          <h3>Evenement rapporte</h3>
+        </header>
+        <div class="widget-body">
+          <div class="watch-admin-radio-row">
+            <label class="watch-admin-radio">
+              <input type="radio" name="watch-mode" value="auto"> Suivre le compteur
+            </label>
+            <label class="watch-admin-radio">
+              <input type="radio" name="watch-mode" value="pinned"> Epingler
+            </label>
+          </div>
+          <div class="watch-admin-form-row">
+            <label class="watch-admin-field">Evenement
+              <select id="watch-event-select" class="form-input" disabled></select>
+            </label>
+            <label class="watch-admin-field watch-admin-field-narrow">Annee
+              <input type="number" id="watch-year" class="form-input" min="2000" max="2100" disabled>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section Alertes -->
+      <section class="widget-card" style="margin-top:16px;">
+        <header class="widget-header">
+          <h3>Alertes envoyees a la montre</h3>
+        </header>
+        <div class="widget-body">
+          <div class="table-responsive">
+            <table id="watch-alert-table" class="table table-striped table-hover watch-admin-table">
+              <thead>
+                <tr>
+                  <th class="col-shrink">Envoyer</th>
+                  <th>Definition</th>
+                  <th>Niveau</th>
+                  <th>Libelle court</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <h4 class="watch-admin-subtitle">Seuils WBGT (&deg;C)</h4>
+          <div class="watch-admin-form-row">
+            <label class="watch-admin-field watch-admin-field-narrow">Niveau 1
+              <input type="number" id="watch-wbgt-1" class="form-input" step="0.5">
+            </label>
+            <label class="watch-admin-field watch-admin-field-narrow">Niveau 2
+              <input type="number" id="watch-wbgt-2" class="form-input" step="0.5">
+            </label>
+            <label class="watch-admin-field watch-admin-field-narrow">Niveau 3
+              <input type="number" id="watch-wbgt-3" class="form-input" step="0.5">
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <div class="watch-admin-footer-row">
+        <button id="watch-save" class="btn btn-primary">Enregistrer</button>
       </div>
+
     </div>
   </div>
 </div>
 
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script src="/static/js/toast.js"></script>
 <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
 <script src="{{ url_for('static', filename='js/watch_admin.js') }}"></script>
 </body>

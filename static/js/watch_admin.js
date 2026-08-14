@@ -15,12 +15,6 @@
     return d.innerHTML;
   }
 
-  function say(message, erreur) {
-    var el = document.getElementById('watch-status');
-    el.textContent = message;
-    el.className = erreur ? 'error' : 'ok';
-  }
-
   function request(method, url, body) {
     var options = {
       method: method,
@@ -36,15 +30,21 @@
     });
   }
 
+  var LEVEL_COLORS = { 1: 'var(--brand)', 2: 'var(--warning)', 3: 'var(--danger)' };
+
   function renderTokens(tokens) {
     var tbody = document.querySelector('#watch-token-table tbody');
     tbody.innerHTML = tokens.map(function (t) {
-      var etat = t.revoked ? 'revoque' : 'actif';
-      var bouton = t.revoked ? ''
-        : '<button data-revoke="' + esc(t._id) + '">Revoquer</button>';
+      var pillClass = t.revoked ? 'is-revoked' : 'is-active';
+      var etat = t.revoked ? 'Revoque' : 'Actif';
+      var bouton = t.revoked
+        ? '<span style="color:var(--muted); font-size:0.8rem;">&mdash;</span>'
+        : '<button type="button" class="btn btn-secondary watch-admin-btn-sm" data-revoke="' +
+          esc(t._id) + '">Revoquer</button>';
       return '<tr><td>' + esc(t.label) + '</td><td>' + esc(t.created_at) +
              '</td><td>' + esc(t.last_used_at || '--') + '</td><td>' +
-             esc(t.last_ip || '--') + '</td><td>' + etat + '</td><td>' +
+             esc(t.last_ip || '--') + '</td><td class="col-shrink"><span class="watch-admin-pill ' +
+             pillClass + '">' + etat + '</span></td><td class="col-shrink">' +
              bouton + '</td></tr>';
     }).join('');
   }
@@ -58,15 +58,18 @@
       var coche = regle ? ' checked' : '';
       var niveau = regle ? regle.level : 1;
       var label = regle && regle.label ? regle.label : d.name;
-      return '<tr><td><input type="checkbox" data-slug="' + esc(d.slug) + '"' +
+      var slugAttr = esc(d.slug);
+      var niveaux = [1, 2, 3].map(function (n) {
+        return '<button type="button" class="watch-admin-level-btn' +
+               (n === niveau ? ' selected' : '') + '" data-slug="' + slugAttr +
+               '" data-level="' + n + '" style="--lc:' + LEVEL_COLORS[n] + ';">' +
+               n + '</button>';
+      }).join('');
+      return '<tr><td class="col-shrink"><input type="checkbox" data-slug="' + slugAttr + '"' +
              coche + '></td><td>' + esc(d.name) + '</td>' +
-             '<td><select data-level="' + esc(d.slug) + '">' +
-             [1, 2, 3].map(function (n) {
-               return '<option value="' + n + '"' +
-                      (n === niveau ? ' selected' : '') + '>' + n + '</option>';
-             }).join('') + '</select></td>' +
-             '<td><input type="text" maxlength="24" data-label="' +
-             esc(d.slug) + '" value="' + esc(label) + '"></td></tr>';
+             '<td><div class="watch-admin-level-row">' + niveaux + '</div></td>' +
+             '<td><input type="text" class="form-input" maxlength="24" data-label="' +
+             slugAttr + '" value="' + esc(label) + '"></td></tr>';
     }).join('');
   }
 
@@ -98,16 +101,18 @@
 
   function collect() {
     var alerts = [];
-    document.querySelectorAll('[data-slug]').forEach(function (cb) {
-      if (!cb.checked) { return; }
-      var slug = cb.getAttribute('data-slug');
-      alerts.push({
-        slug: slug,
-        level: parseInt(
-          document.querySelector('[data-level="' + slug + '"]').value, 10),
-        label: document.querySelector('[data-label="' + slug + '"]').value
+    document.querySelectorAll('#watch-alert-table tbody input[type="checkbox"][data-slug]')
+      .forEach(function (cb) {
+        if (!cb.checked) { return; }
+        var slug = cb.getAttribute('data-slug');
+        var selectedBtn = document.querySelector(
+          '.watch-admin-level-btn.selected[data-slug="' + slug + '"]');
+        alerts.push({
+          slug: slug,
+          level: selectedBtn ? parseInt(selectedBtn.getAttribute('data-level'), 10) : 1,
+          label: document.querySelector('[data-label="' + slug + '"]').value
+        });
       });
-    });
     var mode = document.querySelector('input[name="watch-mode"]:checked').value;
     return {
       event_mode: mode,
@@ -131,11 +136,11 @@
       state.evenements = j.evenements;
       renderEvent();
       renderAlerts();
-    }).catch(function (e) { say('Chargement impossible : ' + e.message, true); });
+    }).catch(function (e) { showToast('error', 'Chargement impossible : ' + e.message); });
 
     request('GET', API + '/tokens').then(function (j) {
       renderTokens(j.tokens);
-    }).catch(function (e) { say('Jetons illisibles : ' + e.message, true); });
+    }).catch(function (e) { showToast('error', 'Jetons illisibles : ' + e.message); });
   }
 
   document.addEventListener('DOMContentLoaded', function () {
@@ -146,12 +151,28 @@
         ev.preventDefault();
         var label = document.getElementById('watch-token-label').value;
         request('POST', API + '/tokens', { label: label }).then(function (j) {
-          var p = document.getElementById('watch-token-clear');
-          p.hidden = false;
-          p.textContent = 'Jeton (affiche une seule fois) : ' + j.token;
+          var box = document.getElementById('watch-token-clear');
+          box.hidden = false;
+          document.getElementById('watch-token-clear-value').textContent = j.token;
           document.getElementById('watch-token-label').value = '';
+          showToast('success', 'Jeton emis.');
           load();
-        }).catch(function (e) { say('Emission refusee : ' + e.message, true); });
+        }).catch(function (e) { showToast('error', 'Emission refusee : ' + e.message); });
+      });
+
+    document.getElementById('watch-token-copy')
+      .addEventListener('click', function () {
+        var value = document.getElementById('watch-token-clear-value').textContent;
+        if (!value) { return; }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(value).then(function () {
+            showToast('success', 'Jeton copie dans le presse-papiers.');
+          }).catch(function () {
+            showToast('error', 'Copie impossible. Selectionnez et copiez manuellement.');
+          });
+        } else {
+          showToast('error', 'Copie non supportee par ce navigateur. Selectionnez et copiez manuellement.');
+        }
       });
 
     document.querySelector('#watch-token-table')
@@ -159,9 +180,19 @@
         var id = ev.target.getAttribute && ev.target.getAttribute('data-revoke');
         if (!id) { return; }
         request('POST', API + '/tokens/' + id + '/revoke').then(function () {
-          say('Jeton revoque.');
+          showToast('success', 'Jeton revoque.');
           load();
-        }).catch(function (e) { say('Revocation refusee : ' + e.message, true); });
+        }).catch(function (e) { showToast('error', 'Revocation refusee : ' + e.message); });
+      });
+
+    document.querySelector('#watch-alert-table')
+      .addEventListener('click', function (ev) {
+        var btn = ev.target.closest && ev.target.closest('.watch-admin-level-btn');
+        if (!btn) { return; }
+        var slug = btn.getAttribute('data-slug');
+        document.querySelectorAll('.watch-admin-level-btn[data-slug="' + slug + '"]')
+          .forEach(function (b) { b.classList.remove('selected'); });
+        btn.classList.add('selected');
       });
 
     document.querySelectorAll('input[name="watch-mode"]').forEach(function (r) {
@@ -170,8 +201,8 @@
 
     document.getElementById('watch-save').addEventListener('click', function () {
       request('PUT', API + '/config', collect()).then(function () {
-        say('Configuration enregistree.');
-      }).catch(function (e) { say('Enregistrement refuse : ' + e.message, true); });
+        showToast('success', 'Configuration enregistree.');
+      }).catch(function (e) { showToast('error', 'Enregistrement refuse : ' + e.message); });
     });
   });
 }());
