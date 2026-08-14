@@ -3,6 +3,7 @@ using Toybox.Graphics;
 using Toybox.Application;
 using Toybox.Timer;
 using Toybox.Time;
+using Toybox.Math;
 
 class CockpitView extends WatchUi.View {
 
@@ -94,6 +95,18 @@ class CockpitView extends WatchUi.View {
         return Graphics.COLOR_GREEN;
     }
 
+    // Largeur utile de l'ecran rond a la hauteur y. Sur un cadran circulaire, la
+    // place disponible depend de l'eloignement au centre : un texte qui tient au
+    // milieu deborde en haut ou en bas.
+    hidden function largeurUtile(dc, y) {
+        var r = dc.getWidth() / 2.0;
+        var dy = (y - r).abs();
+        if (dy >= r) {
+            return 0.0;
+        }
+        return 2.0 * Math.sqrt(r * r - dy * dy);
+    }
+
     hidden function drawMain(dc) {
         var w = dc.getWidth();
         var st = mState;
@@ -114,12 +127,23 @@ class CockpitView extends WatchUi.View {
         // est accroche pour rester visible malgre la troncature a deux
         // lignes plus bas.
         var label = (st != null && st["n"] != null) ? st["n"] : "--";
-        if (al.size() == 1) {
-            label = label + " · 1 alerte";
-        } else if (al.size() > 1) {
-            label = label + " · " + al.size().toString() + " alertes";
-        }
         var y = 24;
+        var n = (st != null && st["al"] != null) ? st["al"].size() : 0;
+        if (n > 0) {
+            var longue = label + " . " + n.toString() + (n > 1 ? " alertes" : " alerte");
+            var courte = label + " . " + n.toString();
+            // Le bloc est dans la moitie haute : c'est son sommet qui contraint.
+            var dispo = largeurUtile(dc, y);
+            if (dc.getTextWidthInPixels(longue, Graphics.FONT_XTINY) <= dispo) {
+                label = longue;
+            } else if (dc.getTextWidthInPixels(courte, Graphics.FONT_XTINY) <= dispo) {
+                label = courte;
+            }
+            // Si meme la forme courte ne tient pas, on garde le libelle seul :
+            // mieux vaut perdre le compte que rendre le nom de l'evenement
+            // illisible, c'est lui qui revele une configuration epinglee sur
+            // le mauvais evenement.
+        }
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, y, Graphics.FONT_XTINY, label,
                     Graphics.TEXT_JUSTIFY_CENTER);
@@ -153,8 +177,8 @@ class CockpitView extends WatchUi.View {
             dc.drawText(w / 2, y, Graphics.FONT_XTINY, "RAS",
                         Graphics.TEXT_JUSTIFY_CENTER);
         } else {
-            var n = al.size() > 2 ? 2 : al.size();
-            for (var i = 0; i < n; i += 1) {
+            var nShow = al.size() > 2 ? 2 : al.size();
+            for (var i = 0; i < nShow; i += 1) {
                 dc.setColor(levelColor(al[i][0]), Graphics.COLOR_TRANSPARENT);
                 dc.drawText(w / 2, y, Graphics.FONT_XTINY, al[i][1],
                             Graphics.TEXT_JUSTIFY_CENTER);
