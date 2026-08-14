@@ -624,6 +624,7 @@ C'est la brique que le demandeur veut voir en premier : une console lisible dans
 - Create: `garmin/cockpit-watch/source/FmtTest.mc`
 - Modify: `garmin/cockpit-watch/source/CockpitView.mc`
 - Modify: `garmin/cockpit-watch/source/CockpitDelegate.mc`
+- Modify: `garmin/cockpit-watch/source/CockpitApp.mc` (étape 7 : `getInitialView()` passe désormais la vue au délégué)
 
 **Interfaces:**
 - Consumes: `Cache.save`, `Cache.load`, `State.alertMax`, `State.wbgtLevel`, `State.worstAgeSec`, `State.isStale` (Tâche 2).
@@ -2393,9 +2394,8 @@ def validate_config(payload):
 
 def _admin_guard():
     """Renvoie une reponse d'erreur si l'appelant n'est pas admin, sinon None."""
-    from app import CODING, ROLE_HIERARCHY
     import jwt as pyjwt
-    from app import JWT_SECRET, JWT_ALGORITHM, APP_KEY
+    from app import CODING, JWT_SECRET, JWT_ALGORITHM, APP_KEY
 
     if CODING:
         return None
@@ -2520,11 +2520,18 @@ Attendu : tous les tests passent.
 
 - [ ] **Étape 5 : Créer la page admin**
 
+⚠️ **Ce projet n'a aucun `base.html` et n'utilise `{% extends %}` nulle part** —
+vérifié sur ses 24 templates. Chaque page est un document HTML autonome, avec
+`<meta name="csrf-token" content="{{ csrf_token() }}">` en ligne 6, les
+feuilles de style du projet, et `{% include '_sidebar.html' %}` pour la
+navigation. **Ouvrir `templates/wiki_admin.html` et reprendre exactement sa
+structure d'en-tête et de layout** (c'est la page admin la plus proche, et la
+plus courte). Le fragment ci-dessous ne donne que le contenu propre à la
+montre, à insérer dans cette coquille.
+
 `templates/watch_admin.html` :
 
 ```html
-{% extends "base.html" %}
-{% block content %}
 <div class="watch-admin">
   <h1>Montre cockpit</h1>
 
@@ -2571,10 +2578,7 @@ Attendu : tous les tests passent.
   <p id="watch-status" role="status"></p>
 </div>
 <script src="{{ url_for('static', filename='js/watch_admin.js') }}"></script>
-{% endblock %}
 ```
-
-Si `templates/base.html` n'existe pas sous ce nom, reprendre le gabarit utilisé par `templates/field_dispatch.html` (l'ouvrir pour relever son `{% extends %}` et son nom de bloc).
 
 - [ ] **Étape 6 : Créer le JS**
 
