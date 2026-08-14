@@ -328,3 +328,43 @@ class TestBuildState:
         import json
         st = watch_state.build_state(self._db(), NOW)
         assert len(json.dumps(st).encode("utf-8")) < 2048
+
+
+class TestReadWeatherNow:
+    def _db_avec(self, entree):
+        return FakeDb(meteo_previsions=[{
+            "Date": "2026-08-14",
+            "Heures": [entree],
+        }])
+
+    def test_cles_accentuees(self):
+        # Les documents en base portent les cles accentuees ; c'est la forme
+        # nominale, la variante sans accent n'est qu'un repli.
+        db = self._db_avec({"Heure": "12:00",
+                            "Température (°C)": 30.0,
+                            "Humidité (%)": 60})
+        wbgt, niveau = watch_state.read_weather_now(db, NOW)
+        assert wbgt is not None
+        assert niveau is not None
+
+    def test_repli_sans_accent(self):
+        db = self._db_avec({"Heure": "12:00",
+                            "Temperature (C)": 30.0, "Humidite (%)": 60})
+        wbgt, _ = watch_state.read_weather_now(db, NOW)
+        assert wbgt is not None
+
+    def test_zero_est_une_valeur_legitime(self):
+        # 0 degre et 0 % d'humidite sont des mesures valides : un `or defaut`
+        # les remplacerait silencieusement.
+        db = self._db_avec({"Heure": "12:00",
+                            "Temperature (C)": 0, "Humidite (%)": 0})
+        wbgt, _ = watch_state.read_weather_now(db, NOW)
+        assert wbgt is not None
+
+    def test_creneau_absent(self):
+        db = self._db_avec({"Heure": "03:00",
+                            "Temperature (C)": 30.0, "Humidite (%)": 60})
+        assert watch_state.read_weather_now(db, NOW) == (None, None)
+
+    def test_aucun_document(self):
+        assert watch_state.read_weather_now(FakeDb(), NOW) == (None, None)
