@@ -1,27 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <settings>
-    <setting propertyKey="@Properties.host" title="Domaine">
+    <setting propertyKey="@Properties.host" title="@Strings.SetHost">
         <settingConfig type="alphaNumeric" maxLength="64"/>
     </setting>
-    <setting propertyKey="@Properties.token" title="Jeton">
+    <setting propertyKey="@Properties.token" title="@Strings.SetToken">
         <settingConfig type="alphaNumeric" maxLength="64"/>
     </setting>
-    <setting propertyKey="@Properties.pollPeak" title="Periode pic (s)">
+    <setting propertyKey="@Properties.pollPeak" title="@Strings.SetPollPeak">
         <settingConfig type="numeric" min="30" max="600"/>
     </setting>
-    <setting propertyKey="@Properties.pollNormal" title="Periode normale (s)">
+    <setting propertyKey="@Properties.pollNormal" title="@Strings.SetPollNormal">
         <settingConfig type="numeric" min="60" max="1800"/>
     </setting>
-    <setting propertyKey="@Properties.staleAfter" title="Seuil peremption (s)">
+    <setting propertyKey="@Properties.staleAfter" title="@Strings.SetStaleAfter">
         <settingConfig type="numeric" min="30" max="3600"/>
     </setting>
-    <setting propertyKey="@Properties.alertVibrate" title="Vibrer sur alerte">
+    <setting propertyKey="@Properties.alertVibrate" title="@Strings.SetAlertVibrate">
         <settingConfig type="boolean"/>
     </setting>
-    <setting propertyKey="@Properties.mockData" title="Donnees simulees">
+    <setting propertyKey="@Properties.mockData" title="@Strings.SetMockData">
         <settingConfig type="boolean"/>
     </setting>
-    <setting propertyKey="@Properties.mockScenario" title="Scenario simule">
+    <setting propertyKey="@Properties.mockScenario" title="@Strings.SetMockScenario">
         <settingConfig type="numeric" min="0" max="3"/>
     </setting>
 </settings>
