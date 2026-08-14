@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>COCKPIT — Montre (administration)</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+<div class="app-layout">
+
+  <!-- Sidebar -->
+  {% set sidebar_active = '/watch-admin' %}
+  {% include '_sidebar.html' %}
+
+  <!-- Main -->
+  <div class="app-main single-col-page">
+    <header class="app-header">
+      <span class="header-title" style="display:flex; align-items:center; gap:8px;">
+        <span class="material-symbols-outlined" style="font-size:22px;">watch</span>
+        Montre cockpit — administration
+      </span>
+      <div class="header-spacer"></div>
+    </header>
+
+    <div id="main-content">
+      <div class="watch-admin">
+        <h1>Montre cockpit</h1>
+
+        <section id="watch-tokens">
+          <h2>Jetons</h2>
+          <form id="watch-token-form">
+            <input type="text" id="watch-token-label" placeholder="Libelle du jeton"
+                   maxlength="60" required>
+            <button type="submit">Emettre</button>
+          </form>
+          <p id="watch-token-clear" hidden></p>
+          <table id="watch-token-table">
+            <thead>
+              <tr><th>Libelle</th><th>Cree le</th><th>Derniere utilisation</th>
+                  <th>IP</th><th>Etat</th><th></th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </section>
+
+        <section id="watch-event">
+          <h2>Evenement rapporte</h2>
+          <label><input type="radio" name="watch-mode" value="auto"> Suivre le compteur</label>
+          <label><input type="radio" name="watch-mode" value="pinned"> Epingler</label>
+          <select id="watch-event-select" disabled></select>
+          <input type="number" id="watch-year" min="2000" max="2100" disabled>
+        </section>
+
+        <section id="watch-alerts">
+          <h2>Alertes envoyees a la montre</h2>
+          <table id="watch-alert-table">
+            <thead>
+              <tr><th>Envoyer</th><th>Definition</th><th>Niveau</th><th>Libelle court</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <h3>Seuils WBGT</h3>
+          <input type="number" id="watch-wbgt-1" step="0.5">
+          <input type="number" id="watch-wbgt-2" step="0.5">
+          <input type="number" id="watch-wbgt-3" step="0.5">
+        </section>
+
+        <button id="watch-save">Enregistrer</button>
+        <p id="watch-status" role="status"></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+<script src="{{ url_for('static', filename='js/watch_admin.js') }}"></script>
+</body>
+</html>

@@ -185,6 +185,165 @@ def bearer_required(f):
     return wrapper
 
 
+EVENT_MODES = ("auto", "pinned")
+
+
+def validate_config(payload):
+    """Valide une configuration montre. Retourne (ok, code_erreur)."""
+    mode = payload.get("event_mode", "auto")
+    if mode not in EVENT_MODES:
+        return False, "event_mode_invalide"
+
+    if mode == "pinned":
+        if not payload.get("event"):
+            return False, "event_requis"
+        try:
+            int(payload.get("year"))
+        except (TypeError, ValueError):
+            return False, "year_requis"
+
+    for regle in payload.get("alerts") or []:
+        if not regle.get("slug"):
+            return False, "slug_requis"
+        try:
+            niveau = int(regle.get("level"))
+        except (TypeError, ValueError):
+            return False, "level_invalide"
+        if niveau < 1 or niveau > 3:
+            return False, "level_invalide"
+
+    seuils = payload.get("wbgt_levels")
+    if seuils is not None:
+        if len(seuils) != 3:
+            return False, "wbgt_levels_invalides"
+        try:
+            valeurs = [float(s) for s in seuils]
+        except (TypeError, ValueError):
+            return False, "wbgt_levels_invalides"
+        if valeurs != sorted(valeurs) or len(set(valeurs)) != 3:
+            return False, "wbgt_levels_invalides"
+
+    return True, None
+
+
+def _admin_guard():
+    """Renvoie une reponse d'erreur si l'appelant n'est pas admin, sinon None."""
+    import jwt as pyjwt
+    from app import CODING, JWT_SECRET, JWT_ALGORITHM, APP_KEY
+
+    if CODING:
+        return None
+
+    token = request.cookies.get("access_token")
+    if not token:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    try:
+        payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except pyjwt.InvalidTokenError:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    role = (payload.get("roles_by_app") or {}).get(APP_KEY)
+    if role != "admin":
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+    return None
+
+
+def _admin_identity():
+    from app import CODING
+    if CODING:
+        return "dev"
+    import jwt as pyjwt
+    from app import JWT_SECRET, JWT_ALGORITHM
+    token = request.cookies.get("access_token") or ""
+    try:
+        payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except pyjwt.InvalidTokenError:
+        return "inconnu"
+    return payload.get("email") or "inconnu"
+
+
+@watch_bp.route("/admin/tokens", methods=["GET"])
+def admin_list_tokens():
+    refus = _admin_guard()
+    if refus:
+        return refus
+    db = _db()
+    docs = db["watch_tokens"].find({}, {"token_sha256": 0})
+    sortie = []
+    for doc in docs:
+        doc["_id"] = str(doc["_id"])
+        for cle in ("created_at", "revoked_at", "last_used_at"):
+            valeur = doc.get(cle)
+            if hasattr(valeur, "isoformat"):
+                doc[cle] = valeur.isoformat()
+        sortie.append(doc)
+    return jsonify({"ok": True, "tokens": sortie})
+
+
+@watch_bp.route("/admin/tokens", methods=["POST"])
+def admin_create_token():
+    refus = _admin_guard()
+    if refus:
+        return refus
+    donnees = request.get_json(silent=True) or {}
+    label = (donnees.get("label") or "").strip()
+    if not label:
+        return jsonify({"ok": False, "error": "label_requis"}), 400
+    token = issue_token(_db(), label, _admin_identity())
+    # Le clair n'est renvoye qu'ici, une seule fois.
+    return jsonify({"ok": True, "token": token})
+
+
+@watch_bp.route("/admin/tokens/<token_id>/revoke", methods=["POST"])
+def admin_revoke_token(token_id):
+    refus = _admin_guard()
+    if refus:
+        return refus
+    if not revoke_token(_db(), token_id):
+        return jsonify({"ok": False, "error": "introuvable"}), 404
+    return jsonify({"ok": True})
+
+
+@watch_bp.route("/admin/config", methods=["GET"])
+def admin_get_config():
+    refus = _admin_guard()
+    if refus:
+        return refus
+    db = _db()
+    config = watch_state.read_config(db)
+    definitions = list(db["cockpit_alert_definitions"].find(
+        {}, {"_id": 0, "slug": 1, "name": 1, "enabled": 1}))
+    evenements = list(db["evenement"].find({}, {"_id": 0, "nom": 1, "short": 1}))
+    return jsonify({"ok": True, "config": config,
+                    "definitions": definitions, "evenements": evenements})
+
+
+@watch_bp.route("/admin/config", methods=["PUT"])
+def admin_put_config():
+    refus = _admin_guard()
+    if refus:
+        return refus
+    donnees = request.get_json(silent=True) or {}
+    ok, erreur = validate_config(donnees)
+    if not ok:
+        return jsonify({"ok": False, "error": erreur}), 400
+
+    maj = {
+        "event_mode": donnees.get("event_mode", "auto"),
+        "event": donnees.get("event"),
+        "year": int(donnees["year"]) if donnees.get("year") else None,
+        "alerts": donnees.get("alerts") or [],
+        "wbgt_levels": donnees.get("wbgt_levels")
+                       or list(watch_state.WBGT_DEFAULT_LEVELS),
+        "updated_at": datetime.now(timezone.utc),
+        "updated_by": _admin_identity(),
+    }
+    _db()["watch_config"].update_one({"_id": "watch"}, {"$set": maj},
+                                     upsert=True)
+    reset_cache()
+    return jsonify({"ok": True})
+
+
 @watch_bp.route("/state", methods=["GET"])
 @bearer_required
 def state():

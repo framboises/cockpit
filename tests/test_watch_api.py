@@ -196,6 +196,48 @@ class TestTouchTokenThrottle:
             watch_api._touch_token(db, db["watch_tokens"].docs[0])  # ne leve pas
 
 
+class TestAdminConfigValidation:
+    def test_niveau_hors_bornes_refuse(self):
+        import watch_api
+        ok, erreur = watch_api.validate_config({
+            "event_mode": "auto",
+            "alerts": [{"slug": "a", "level": 7}],
+            "wbgt_levels": [25, 28, 30],
+        })
+        assert ok is False
+        assert erreur == "level_invalide"
+
+    def test_mode_inconnu_refuse(self):
+        import watch_api
+        ok, erreur = watch_api.validate_config({"event_mode": "parfois"})
+        assert ok is False
+        assert erreur == "event_mode_invalide"
+
+    def test_epingle_sans_evenement_refuse(self):
+        import watch_api
+        ok, erreur = watch_api.validate_config({
+            "event_mode": "pinned", "event": "", "year": 2026})
+        assert ok is False
+        assert erreur == "event_requis"
+
+    def test_seuils_non_croissants_refuses(self):
+        import watch_api
+        ok, erreur = watch_api.validate_config({
+            "event_mode": "auto", "wbgt_levels": [30, 28, 25]})
+        assert ok is False
+        assert erreur == "wbgt_levels_invalides"
+
+    def test_configuration_valide(self):
+        import watch_api
+        ok, erreur = watch_api.validate_config({
+            "event_mode": "pinned", "event": "24H MOTOS", "year": 2026,
+            "alerts": [{"slug": "field_sos", "level": 3, "label": "SOS"}],
+            "wbgt_levels": [25, 28, 30],
+        })
+        assert ok is True
+        assert erreur is None
+
+
 class _FakeCollection:
     def __init__(self, docs=None):
         self.docs = list(docs or [])

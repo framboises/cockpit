@@ -6798,6 +6798,18 @@ def live_controle_page():
                            user_email=payload.get("email", ""))
 
 
+@app.route('/watch-admin')
+@role_required("admin")
+def watch_admin_page():
+    payload = getattr(request, 'user_payload', {})
+    user_roles = payload.get("roles", [])
+    return render_template('watch_admin.html',
+                           user_roles=user_roles,
+                           user_firstname=payload.get("firstname", ""),
+                           user_lastname=payload.get("lastname", ""),
+                           user_email=payload.get("email", ""))
+
+
 def _hsh_read_global():
     doc = db.data_access.find_one({"_id": HSH_GLOBAL_ID})
     if doc is None:
