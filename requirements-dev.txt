@@ -1,0 +1,4 @@
+# Dependances de developpement uniquement. requirements.txt reste le contrat
+# de production et n'est pas touche.
+-r requirements.txt
+pytest>=8.0.0
