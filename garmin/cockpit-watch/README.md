@@ -137,8 +137,21 @@ Pas de publication sur le store. On copie le `.prg` à la main.
 "$SDK/bin/monkeyc" -o bin/cockpit.prg -f monkey.jungle \
   -y ~/.garmin_keys/developer_key.der -d fenix8solar51mm -r
 cp bin/cockpit.prg /Volumes/GARMIN/GARMIN/APPS/
+cp bin/cockpit-settings.json /Volumes/GARMIN/GARMIN/SETTINGS/   # voir ci-dessous
 diskutil eject /Volumes/GARMIN
 ```
+
+⚠️ **Le fichier de réglages est probablement à copier lui aussi, et ce point
+reste à confirmer sur la montre.** Le build produit deux fichiers : le `.prg`
+et un `cockpit-settings.json` à côté. Le binaire du simulateur cherche ses
+réglages dans `0:/GARMIN/Settings/<nom>-settings.json`, c'est-à-dire dans le
+système de fichiers de l'appareil et non à côté de l'exécutable — ce qui
+laisse penser qu'une montre sideloadée sans ce fichier n'aurait aucun réglage,
+donc **pas de jeton, donc une montre muette**.
+
+Si le dossier `GARMIN/SETTINGS/` n'existe pas sur la montre, le créer. Si les
+réglages n'apparaissent pas dans Connect IQ Mobile après le sideload, c'est la
+première chose à vérifier.
 
 ## Réglages
 
@@ -231,6 +244,23 @@ consignés ici pour ne pas les redécouvrir :
    milieu déborde en haut ou en bas.
 7. **La zone de glance est rectangulaire**, elle : n'y importe pas la
    logique de corde ci-dessus.
+8. **Les titres de `settings.xml` doivent être des ressources, jamais des
+   littéraux.** Écrire `title="Domaine"` en dur le compile en `$literal0$`,
+   rangé sous une pseudo-langue interne nommée `valyrian`. Les réglages
+   deviennent alors illisibles par tout éditeur — donc impossible de saisir
+   le jeton, donc montre muette. Passer par `title="@Strings.SetHost"`.
+9. **Chaque langue déclarée dans le manifeste exige son dossier
+   `resources-<lang>/`.** Déclarer `<iq:language>fre</iq:language>` sans
+   `resources-fre/` ne produit aucune traduction utilisable. Vérifié sur le
+   sample `Strings` du SDK : 12 langues déclarées, 12 dossiers. Le dossier
+   `resources/` sert de défaut et n'a pas besoin d'être déclaré.
+10. **L'éditeur de réglages du simulateur ne lit pas le fichier produit par
+    le build.** Il attend un fichier agrégé, aux clés `apps` / `languages`,
+    dans le système de fichiers de l'appareil simulé — là où `monkeyc`
+    produit un fichier aux clés `settings` / `languages` à côté du `.prg`.
+    Les deux ne sont pas interchangeables, et `monkeydo` ne pousse jamais le
+    second. Pour tester un scénario sans passer par cet éditeur, construire
+    un `.prg` dédié avec la valeur en dur.
 
 ## Ce qui peut rendre la montre silencieusement muette
 
@@ -317,12 +347,52 @@ actif), relever après 24 h.
 
 **Résultat constaté :** _(à compléter après la tâche 11)_ % sur 24 h
 
-### 3. Rendu visuel des quatre scénarios simulés
+### 3. Rendu visuel des quatre scénarios simulés — VALIDÉ
 
-Jamais observé à l'œil : le sandbox de développement utilisé pour ce projet
-bloque les captures d'écran du simulateur. Le layout a été validé **par le
-calcul**, à partir des hauteurs de police mesurées sur le device (section
-Métriques mesurées ci-dessus) et de `CockpitView.largeurUtile`.
+Le layout avait été établi **par le calcul**, à partir des hauteurs de police
+mesurées sur le device (section Métriques mesurées) et de
+`CockpitView.largeurUtile` : le sandbox de développement bloquait les
+captures d'écran du simulateur.
 
-**Résultat constaté :** _(à compléter après vérification visuelle sur la
-montre ou une capture du simulateur en environnement non restreint)_
+**Résultat constaté (14/08/2026, simulateur, fenix8solar51mm)** : les quatre
+scénarios s'affichent correctement. Les trois défauts corrigés au calcul sont
+confirmés absents à l'écran — le compteur d'entrées ne mord pas sur la ligne
+de débit, les lignes d'alerte ne se chevauchent pas, et le pied de page n'est
+pas rogné par le bord rond.
+
+Pour reproduire sans passer par l'éditeur de réglages du simulateur (voir
+piège 10), construire quatre exécutables avec le scénario en dur :
+
+```bash
+# depuis une copie temporaire du projet, remplacer dans Api.fetch
+#   var mock = Application.Properties.getValue("mockData");  ->  var mock = true;
+#   var scenario = Application.Properties.getValue(...);      ->  var scenario = N;
+# puis compiler un .prg par scenario
+```
+
+### 4. Connect IQ Mobile affiche-t-il les huit réglages ?
+
+**C'est la vérification la plus importante des quatre** : sans elle, pas de
+saisie du jeton, donc pas de montre.
+
+L'éditeur de réglages du **simulateur** ne permet pas de la faire (piège 10 :
+il lit un fichier d'une autre forme). Le seul test valable est donc sur le
+téléphone, après sideload.
+
+Protocole : sideloader le `.prg` **et** le `cockpit-settings.json` (voir la
+section Sideload), puis ouvrir Connect IQ Mobile > Cockpit > Réglages.
+
+Attendu : huit réglages libellés en français — Domaine, Jeton, Periode pic,
+Periode normale, Seuil peremption, Vibrer sur alerte, Donnees simulees,
+Scenario simule.
+
+Si la liste est vide ou illisible, vérifier dans l'ordre : le
+`cockpit-settings.json` a-t-il bien été copié dans `GARMIN/SETTINGS/` ; le
+fichier déclare-t-il les langues `fra`/`fre` (et non une pseudo-langue) —
+contrôle rapide :
+
+```bash
+python3 -c "import json;print(list(json.load(open('bin/cockpit-settings.json'))['languages'].keys()))"
+```
+
+**Résultat constaté :** _(à compléter après la tâche 11)_
