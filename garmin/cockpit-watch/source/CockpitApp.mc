@@ -1,5 +1,7 @@
 using Toybox.Application;
 using Toybox.WatchUi;
+using Toybox.Background;
+using Toybox.Time;
 
 class CockpitApp extends Application.AppBase {
 
@@ -8,6 +10,13 @@ class CockpitApp extends Application.AppBase {
     }
 
     function onStart(state) {
+        // 5 minutes est le plancher impose par la plateforme, pas un choix :
+        // "Temporal events cannot be set to occur less than 5 minutes after
+        // the last temporal event occurred". Un seul evenement temporel peut
+        // etre enregistre a la fois.
+        if (Toybox has :Background) {
+            Background.registerForTemporalEvent(new Time.Duration(300));
+        }
     }
 
     function onStop(state) {

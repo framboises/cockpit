@@ -9,6 +9,14 @@ class CockpitService extends System.ServiceDelegate {
     }
 
     function onTemporalEvent() {
+        Api.fetch(method(:onFetched));
+    }
+
+    function onFetched(ok, st) {
+        if (ok && st != null) {
+            Cache.save(st);
+            Alerting.check(st);
+        }
         Background.exit(null);
     }
 }
