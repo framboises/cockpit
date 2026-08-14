@@ -1810,6 +1810,11 @@ csrf.exempt(app.view_functions["alfred.wa_webhook"])
 # Rien ici n'est consomme par un client externe qui ne saurait pas le faire.
 app.register_blueprint(meteo_bp)
 
+from watch_api import watch_bp
+app.register_blueprint(watch_bp)
+# Pas de csrf.exempt(watch_bp) : /state est un GET, que Flask-WTF ne protege
+# pas, et les routes admin qui ecrivent doivent garder la protection.
+
 # Espace exercices de crise : sous-arbre statique servi sous /crise.
 #
 # Architecture en deux blueprints :
