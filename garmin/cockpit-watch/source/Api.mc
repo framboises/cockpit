@@ -7,7 +7,20 @@ using Toybox.PersistedContent;
 (:background)
 module Api {
 
+    // Une seule requete en vol a la fois : sur un reseau lent, le timer peut
+    // redemander avant la reponse precedente, et la plus ancienne ecraserait
+    // alors la plus recente dans le cache. C'est aussi du trafic BLE gaspille,
+    // ce qui compte sur une cible de 24 h d'autonomie.
+    //
+    // La garde est bornee dans le temps : si un callback ne revient jamais, on
+    // ne doit pas cesser definitivement de se rafraichir.
+    const IN_FLIGHT_TIMEOUT_S = 30;
+
+    // `hidden` est refuse a l'echelle module par le compilateur : ces variables
+    // sont donc visibles de partout. Elles restent l'etat interne d'Api, aucun
+    // autre fichier ne doit y toucher.
     var mCallback = null;
+    var mInFlightSince = null;
 
     // Le payload HTTP porte les alertes en dictionnaires ; le cache les stocke
     // en tableaux, moitie moins d'octets et d'objets a instancier au reveil de
@@ -52,6 +65,15 @@ module Api {
             return;
         }
 
+        var maintenant = Time.now().value();
+        if (mInFlightSince != null
+            && (maintenant - mInFlightSince) < IN_FLIGHT_TIMEOUT_S) {
+            // Requete deja en vol et pas encore expiree : on ne double pas.
+            callback.invoke(false, null);
+            return;
+        }
+        mInFlightSince = maintenant;
+
         // HTTPS obligatoire : makeWebRequest refuse un certificat auto-signe.
         var url = "https://" + host + "/api/v1/watch/state";
         Communications.makeWebRequest(
@@ -71,6 +93,7 @@ module Api {
     function onReceive(responseCode as Lang.Number,
                         data as Lang.Dictionary or Lang.String
                             or PersistedContent.Iterator or Null) as Void {
+        mInFlightSince = null;
         if (responseCode != 200 || data == null) {
             if (mCallback != null) {
                 mCallback.invoke(false, null);
