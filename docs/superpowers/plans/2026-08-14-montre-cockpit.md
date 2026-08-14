@@ -1130,7 +1130,16 @@ Dans le simulateur : **Simulation → Glance View**. Attendu : deux lignes lisib
 
 - [ ] **Étape 4 : Mesurer la mémoire de la glance**
 
-Dans le simulateur, **File → View Memory** pendant l'affichage de la glance. Attendu : consommation **sous 64 Ko** (limite `glance` de ce device). Si le seuil est approché, vérifier qu'aucun module non annoté `(:glance)` n'a été tiré dans le scope.
+`monkeyc` sait rendre la consommation par espace de code, sans passer par l'interface graphique du simulateur :
+
+```bash
+"$SDK/bin/monkeyc" --build-stats 0 -o bin/cockpit.prg -f monkey.jungle \
+  -y ~/.garmin_keys/developer_key.der -d fenix8solar51mm
+```
+
+La sortie donne `Data:` et `Code:` pour `Foreground`, `Background` et `Glance`. La consommation de la glance est la **somme** de ses deux lignes, à comparer aux **65 536 octets** de budget de ce device.
+
+Référence avant cette tâche : glance 1 490 + 1 321 = 2 811 octets, soit 4,3 % du budget. Si l'ajout de la vue de glance fait bondir ce chiffre, c'est qu'un module non annoté `(:glance)` a été tiré dans le périmètre.
 
 Consigner la valeur mesurée dans le message de commit — c'est un chiffre, pas une supposition.
 
@@ -3209,12 +3218,13 @@ Attendu : les 6 tests d'`Alerting` passent, ainsi que tous les précédents.
 - [ ] **Étape 7 : Mesurer la mémoire du service de fond**
 
 ```bash
-"$SDK/bin/monkeyc" -o bin/cockpit.prg -f monkey.jungle \
+"$SDK/bin/monkeyc" --build-stats 0 -o bin/cockpit.prg -f monkey.jungle \
   -y ~/.garmin_keys/developer_key.der -d fenix8solar51mm
-"$SDK/bin/monkeydo" bin/cockpit.prg fenix8solar51mm
 ```
 
-Dans le simulateur : **Simulation → Trigger Background Event**, puis **File → View Memory**. Attendu : sous 64 Ko (limite `background` de ce device). Consigner la valeur dans le message de commit.
+La consommation du service de fond est la **somme** des lignes `Background` de `Data:` et `Code:`, à comparer aux **65 536 octets** de budget de ce device. Référence avant les tâches 9 et 10 : 1 426 + 1 244 = 2 670 octets, soit 4,1 %.
+
+`Api.mc` et `Alerting.mc` étant tous deux `(:background)`, ce chiffre va monter — c'est attendu. Ce qui ne le serait pas, c'est de voir le poids de la vue ou du formatage y apparaître. Consigner la valeur dans le message de commit.
 
 - [ ] **Étape 8 : Commit**
 
