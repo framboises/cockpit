@@ -8,7 +8,7 @@ import hashlib
 import logging
 import secrets
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import wraps
 
 from flask import Blueprint, jsonify, request
@@ -67,6 +67,16 @@ def _client_ip():
     ).split(",")[0].strip()
 
 
+def _maintenant():
+    """Naif UTC, coherent avec ce que pymongo rend en lecture sur un client
+    non tz_aware (celui de app.py). Comparer ce naif a un datetime conscient
+    du fuseau leverait un TypeError des la deuxieme requete dans la fenetre
+    de throttle : c'est exactement le bug trouve en verification bout en
+    bout. Meme forme que meteo.py (datetime.now(timezone.utc).replace(
+    tzinfo=None)), pas datetime.utcnow() qui est deprecie."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def hash_token(token):
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -78,7 +88,7 @@ def issue_token(db, label, created_by):
     db["watch_tokens"].insert_one({
         "label": label,
         "token_sha256": hash_token(token),
-        "created_at": datetime.utcnow(),
+        "created_at": _maintenant(),
         "created_by": created_by,
         "revoked": False,
         "revoked_at": None,
@@ -91,6 +101,7 @@ def issue_token(db, label, created_by):
 
 def verify_token(db, token):
     """Lookup indexe sur le hash : aucune comparaison de secrets."""
+    _ensure_indexes(db)
     if not token:
         return None
     doc = db["watch_tokens"].find_one({"token_sha256": hash_token(token)})
@@ -108,20 +119,15 @@ def revoke_token(db, token_id):
     res = db["watch_tokens"].update_one(
         {"_id": oid},
         {"$set": {"revoked": True,
-                  "revoked_at": datetime.utcnow()}},
+                  "revoked_at": _maintenant()}},
     )
     return bool(getattr(res, "matched_count", 1))
 
 
 def _touch_token(db, doc):
-    """Telemetrie d'usage, bridee a une ecriture par minute.
-
-    Naif UTC partout (comme le rend pymongo en lecture, le client n'etant
-    pas tz_aware) : comparer un naif a un aware leverait un TypeError des
-    la deuxieme requete dans la fenetre de throttle.
-    """
+    """Telemetrie d'usage, bridee a une ecriture par minute."""
     dernier = doc.get("last_used_at")
-    maintenant = datetime.utcnow()
+    maintenant = _maintenant()
     if dernier is not None:
         if (maintenant - dernier).total_seconds() < LAST_USED_THROTTLE_S:
             return
