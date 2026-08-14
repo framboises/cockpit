@@ -1158,6 +1158,7 @@ git commit -m "feat(montre): glance trois chiffres, sans reseau (memoire mesuree
 - Create: `watch_state.py`
 - Create: `tests/test_watch_state.py`
 - Create: `requirements-dev.txt`
+- Create: `conftest.py` (vide, à la racine)
 
 **Interfaces:**
 - Consumes: rien.
@@ -1184,6 +1185,14 @@ Installer :
 
 ```bash
 python3 -m pip install -r requirements-dev.txt
+```
+
+Le `python3` du poste **est déjà** le venv du projet (`/Users/ludovic/Dropbox/ACO/TITAN/virtual_titan`, Python 3.12) : ne pas en créer un, ne rien activer.
+
+Créer aussi un `conftest.py` **vide à la racine du dépôt**. Sans lui, seule la forme `python3 -m pytest` fonctionne (elle ajoute le répertoire courant à `sys.path`) et un `pytest tests/...` nu échoue en `ModuleNotFoundError: No module named 'watch_state'` — vérifié empiriquement sur ce dépôt. Un `conftest.py` racine fait ajouter la racine à `sys.path` dans les deux cas.
+
+```bash
+touch conftest.py
 ```
 
 - [ ] **Étape 2 : Écrire les tests qui échouent**
