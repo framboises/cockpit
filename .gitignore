@@ -17,3 +17,6 @@ uploads/scan_imports/
 
 # Images radar generees toutes les 5 minutes par tools/Meteo/collecte_radar.py
 static/meteo/
+
+# Espace de travail des plans superpowers (scratch, non versionne)
+.superpowers/
