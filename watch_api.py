@@ -229,7 +229,8 @@ def validate_config(payload):
 def _admin_guard():
     """Renvoie une reponse d'erreur si l'appelant n'est pas admin, sinon None."""
     import jwt as pyjwt
-    from app import CODING, JWT_SECRET, JWT_ALGORITHM, APP_KEY
+    from app import (CODING, JWT_SECRET, JWT_ALGORITHM, APP_KEY,
+                     SUPER_ADMIN_ROLE)
 
     if CODING:
         return None
@@ -242,8 +243,13 @@ def _admin_guard():
     except pyjwt.InvalidTokenError:
         return jsonify({"ok": False, "error": "unauthorized"}), 401
 
+    # Meme regle que role_required, qui garde la page, et que
+    # field.py:admin_required : un super_admin global vaut admin sur chaque
+    # application, sans role cockpit explicite. Sans ca, la page s'ouvre mais
+    # tous ses appels API echouent en 403.
+    is_super_admin = SUPER_ADMIN_ROLE in (payload.get("global_roles") or [])
     role = (payload.get("roles_by_app") or {}).get(APP_KEY)
-    if role != "admin":
+    if not is_super_admin and role != "admin":
         return jsonify({"ok": False, "error": "forbidden"}), 403
     return None
 

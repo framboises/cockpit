@@ -238,6 +238,55 @@ class TestAdminConfigValidation:
         assert erreur is None
 
 
+class TestAdminGuardSuperAdmin:
+    def _cookie_client(self, client, monkeypatch, global_roles, roles_by_app):
+        """Pose un cookie access_token reel, signe avec un secret de test,
+        et neutralise CODING pour forcer le chemin production du garde.
+        C'est ce chemin, pas le bypass dev, qui distingue super_admin d'un
+        role cockpit explicite.
+
+        Le module app n'est jamais importe pour de vrai ici : app.py ouvre
+        une connexion MongoDB reelle a l'import (ligne 113), ce qui laisse
+        un MongoClient non ferme et un ResourceWarning au shutdown de
+        l'interpreteur -- casserait la suite a zero avertissement pour un
+        test qui ne veut verifier que la logique du garde. On substitue donc
+        un module app minimal, ne portant que les constantes lues par
+        _admin_guard ; jwt.decode() reste le vrai decodage PyJWT."""
+        import sys
+        import types
+        import watch_api
+        import jwt as pyjwt
+
+        secret = "test-secret-key"
+        fake_app = types.ModuleType("app")
+        fake_app.CODING = False
+        fake_app.JWT_SECRET = secret
+        fake_app.JWT_ALGORITHM = "HS256"
+        fake_app.APP_KEY = "cockpit"
+        fake_app.SUPER_ADMIN_ROLE = "super_admin"
+        monkeypatch.setitem(sys.modules, "app", fake_app)
+        monkeypatch.setattr(watch_api, "_db", lambda: _FakeDb())
+
+        token = pyjwt.encode(
+            {"global_roles": global_roles, "roles_by_app": roles_by_app},
+            secret, algorithm="HS256")
+        client.set_cookie("access_token", token)
+
+    def test_super_admin_sans_role_cockpit_est_accepte(self, client, monkeypatch):
+        # role_required laisse deja passer ce profil sur la page : le garde
+        # API doit s'aligner, sinon la page s'ouvre et ne fonctionne pas.
+        self._cookie_client(client, monkeypatch,
+                            global_roles=["super_admin"], roles_by_app={})
+        rep = client.get("/api/v1/watch/admin/config")
+        assert rep.status_code == 200
+
+    def test_sans_role_ni_super_admin_est_refuse(self, client, monkeypatch):
+        self._cookie_client(client, monkeypatch,
+                            global_roles=[], roles_by_app={})
+        rep = client.get("/api/v1/watch/admin/config")
+        assert rep.status_code == 403
+
+
 class _FakeCollection:
     def __init__(self, docs=None):
         self.docs = list(docs or [])
@@ -248,6 +297,10 @@ class _FakeCollection:
             if all(doc.get(k) == v for k, v in (query or {}).items()):
                 return doc
         return None
+
+    def find(self, query=None, projection=None, sort=None):
+        return [doc for doc in self.docs
+                if all(doc.get(k) == v for k, v in (query or {}).items())]
 
     def update_one(self, query, update, upsert=False):
         self.updates.append((query, update))
