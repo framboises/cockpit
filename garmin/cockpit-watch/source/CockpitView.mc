@@ -50,12 +50,15 @@ class CockpitView extends WatchUi.View {
     }
 
     function refresh() {
-        var mock = Application.Properties.getValue("mockData");
-        if (mock != null && mock) {
-            var scenario = Application.Properties.getValue("mockScenario");
-            if (scenario == null) { scenario = 0; }
-            Cache.save(Mock.state(scenario, Time.now().value()));
+        Api.fetch(method(:onFetched));
+    }
+
+    function onFetched(ok, st) {
+        if (ok && st != null) {
+            Cache.save(st);
         }
+        // En cas d'echec on garde le cache : l'age affiche dira lui-meme
+        // depuis combien de temps la donnee n'a pas bouge.
         mState = Cache.load();
         // Reajuste le rythme si le niveau d'alerte ou le WBGT a franchi le
         // seuil pendant que la vue est affichee : sans ca, le polling reste
