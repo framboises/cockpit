@@ -148,3 +148,183 @@ class TestResolveEvent:
     def test_epingle_avec_annee_illisible(self):
         cfg = {"event_mode": "pinned", "event": "24H MOTOS", "year": "n/a"}
         assert watch_state.resolve_event(cfg, self.COUNTER) == ("24H MOTOS", None)
+
+
+class FakeCollection:
+    """Collection Mongo minimale : juste ce que watch_state appelle."""
+
+    def __init__(self, docs=None):
+        self.docs = list(docs or [])
+        self.last_query = None
+
+    def find_one(self, query=None, projection=None, sort=None):
+        self.last_query = query
+        docs = self._matching(query)
+        if sort:
+            cle, sens = sort[0]
+            docs = sorted(docs, key=lambda d: d.get(cle),
+                          reverse=(sens == -1))
+        return docs[0] if docs else None
+
+    def find(self, query=None, projection=None):
+        self.last_query = query
+        return list(self._matching(query))
+
+    def _matching(self, query):
+        if not query:
+            return list(self.docs)
+        out = []
+        for doc in self.docs:
+            if all(self._match(doc, cle, val) for cle, val in query.items()):
+                out.append(doc)
+        return out
+
+    @staticmethod
+    def _match(doc, cle, val):
+        actuel = doc.get(cle)
+        if isinstance(val, dict):
+            if "$lte" in val and not (actuel is not None and actuel <= val["$lte"]):
+                return False
+            if "$gt" in val and not (actuel is not None and actuel > val["$gt"]):
+                return False
+            if "$in" in val and actuel not in val["$in"]:
+                return False
+            return True
+        return actuel == val
+
+
+class FakeDb:
+    def __init__(self, **collections):
+        self._cols = {k: FakeCollection(v) for k, v in collections.items()}
+
+    def __getitem__(self, name):
+        if name not in self._cols:
+            self._cols[name] = FakeCollection([])
+        return self._cols[name]
+
+
+NOW = datetime(2026, 8, 14, 12, 0)
+
+
+def _counter(entries, minutes_ago, event="24H MOTOS", year="2026"):
+    return {
+        "requested_location_id": "628",
+        "requested_location_type": "Area",
+        "entries": entries,
+        "timestamp": NOW - timedelta(minutes=minutes_ago),
+        "requested_event": event,
+        "year": year,
+    }
+
+
+class TestReadConfig:
+    def test_defauts_si_absent(self):
+        db = FakeDb()
+        cfg = watch_state.read_config(db)
+        assert cfg["event_mode"] == "auto"
+        assert cfg["alerts"] == []
+        assert cfg["wbgt_levels"] == list(watch_state.WBGT_DEFAULT_LEVELS)
+
+    def test_lit_le_document(self):
+        db = FakeDb(watch_config=[{
+            "_id": "watch", "event_mode": "pinned",
+            "event": "24H CAMIONS", "year": 2025,
+            "alerts": [{"slug": "a", "level": 2}],
+            "wbgt_levels": [26, 29, 32],
+        }])
+        cfg = watch_state.read_config(db)
+        assert cfg["event_mode"] == "pinned"
+        assert cfg["wbgt_levels"] == [26, 29, 32]
+
+
+class TestReadCounter:
+    def test_prend_le_dernier_releve(self):
+        db = FakeDb(data_access=[_counter(100, 30), _counter(150, 5)])
+        doc = watch_state.read_counter(db, "628")
+        assert doc["entries"] == 150
+
+    def test_absent(self):
+        assert watch_state.read_counter(FakeDb(), "628") is None
+
+    def test_snapshot_anterieur(self):
+        db = FakeDb(data_access=[
+            _counter(100, 30), _counter(120, 16), _counter(150, 1),
+        ])
+        doc = watch_state.read_counter_before(db, "628", NOW - timedelta(minutes=15))
+        assert doc["entries"] == 120
+
+
+class TestReadPrincipalId:
+    def test_lit_le_doc_global(self):
+        db = FakeDb(data_access=[
+            {"_id": "___GLOBAL___", "compteur_principal_id": "628"},
+        ])
+        assert watch_state.read_principal_id(db) == "628"
+
+    def test_absent(self):
+        assert watch_state.read_principal_id(FakeDb()) is None
+
+
+class TestReadActiveAlerts:
+    def test_ecarte_les_expirees(self):
+        db = FakeDb(cockpit_active_alerts=[
+            {"definition_slug": "a", "event": "24H MOTOS", "year": "2026",
+             "expiresAt": NOW + timedelta(hours=1)},
+            {"definition_slug": "b", "event": "24H MOTOS", "year": "2026",
+             "expiresAt": NOW - timedelta(hours=1)},
+        ])
+        out = watch_state.read_active_alerts(db, "24H MOTOS", 2026, NOW)
+        assert [a["definition_slug"] for a in out] == ["a"]
+
+    def test_sans_evenement_ne_remonte_rien(self):
+        db = FakeDb(cockpit_active_alerts=[
+            {"definition_slug": "a", "expiresAt": NOW + timedelta(hours=1)},
+        ])
+        assert watch_state.read_active_alerts(db, None, None, NOW) == []
+
+
+class TestBuildState:
+    def _db(self):
+        return FakeDb(
+            data_access=[
+                {"_id": "___GLOBAL___", "compteur_principal_id": "628"},
+                _counter(47413, 15),
+                _counter(48213, 0),
+            ],
+            watch_config=[{
+                "_id": "watch", "event_mode": "auto",
+                "alerts": [{"slug": "field_sos", "level": 3,
+                            "label": "SOS tablette"}],
+            }],
+            cockpit_active_alerts=[{
+                "definition_slug": "field_sos", "event": "24H MOTOS",
+                "year": "2026", "title": "SOS",
+                "expiresAt": NOW + timedelta(hours=1),
+            }],
+            evenement=[{"nom": "24H MOTOS", "short": "24HM"}],
+            meteo_previsions=[{
+                "Date": "2026-08-14",
+                "Heures": [{"Heure": "12:00", "Temperature (C)": 30.0,
+                            "Humidite (%)": 60}],
+            }],
+        )
+
+    def test_payload_complet(self):
+        st = watch_state.build_state(self._db(), NOW)
+        assert st["e"] == 48213
+        assert st["er"] == 3200
+        assert st["n"] == "24HM 26"
+        assert st["al"] == [{"l": 3, "m": "SOS tablette"}]
+        assert st["t"] == int(NOW.timestamp())
+
+    def test_base_vide_ne_leve_pas(self):
+        st = watch_state.build_state(FakeDb(), NOW)
+        assert st["e"] is None
+        assert st["er"] is None
+        assert st["al"] == []
+        assert st["wl"] == 0
+
+    def test_taille_sous_deux_ko(self):
+        import json
+        st = watch_state.build_state(self._db(), NOW)
+        assert len(json.dumps(st).encode("utf-8")) < 2048

@@ -4,6 +4,8 @@ Fonctions pures et lectures Mongo, `db` toujours passe en argument. Aucun
 import Flask : ce module se teste sans application.
 """
 
+from datetime import timedelta
+
 # Seuils WBGT en degres, replies sur l'echelle 0-3 de la montre. Ils viennent
 # de SEUILS_WBGT (ISO 7243) dans meteo_thermique.py, dont le palier
 # danger_extreme (33) est absorbe par le niveau 3 : au-dela de "suspendre le
@@ -108,3 +110,151 @@ def resolve_event(config, counter_doc):
     if not counter_doc:
         return None, None
     return counter_doc.get("requested_event"), _safe_int(counter_doc.get("year"))
+
+
+# Identifiant du document de configuration globale du live-controle.
+HSH_GLOBAL_ID = "___GLOBAL___"
+
+# Recul utilise pour calculer le debit. Assez long pour lisser le bruit d'un
+# releve, assez court pour rester une photographie de l'instant.
+RATE_WINDOW = timedelta(minutes=15)
+
+
+def read_config(db):
+    """Configuration montre, avec ses defauts. Ne renvoie jamais None."""
+    doc = db["watch_config"].find_one({"_id": "watch"}) or {}
+    return {
+        "event_mode": doc.get("event_mode") or "auto",
+        "event": doc.get("event"),
+        "year": doc.get("year"),
+        "alerts": doc.get("alerts") or [],
+        "wbgt_levels": doc.get("wbgt_levels") or list(WBGT_DEFAULT_LEVELS),
+    }
+
+
+def read_principal_id(db):
+    """Identifiant du compteur principal, choisi dans la page live-controle."""
+    doc = db["data_access"].find_one({"_id": HSH_GLOBAL_ID}) or {}
+    principal = doc.get("compteur_principal_id")
+    return str(principal) if principal else None
+
+
+def read_counter(db, location_id):
+    """Dernier releve du compteur.
+
+    Comme le widget compteurs du cockpit, on interroge le seul
+    requested_location_id : le releve porte lui-meme son evenement et son
+    annee, la donnee s'auto-identifie.
+    """
+    if not location_id:
+        return None
+    return db["data_access"].find_one(
+        {"requested_location_id": str(location_id)},
+        sort=[("timestamp", -1)],
+    )
+
+
+def read_counter_before(db, location_id, moment):
+    """Releve le plus recent anterieur a `moment`, pour le calcul du debit."""
+    if not location_id:
+        return None
+    return db["data_access"].find_one(
+        {"requested_location_id": str(location_id),
+         "timestamp": {"$lte": moment}},
+        sort=[("timestamp", -1)],
+    )
+
+
+def read_event_short(db, event):
+    """Sigle court de l'evenement (24H MOTOS -> 24HM)."""
+    if not event:
+        return None
+    doc = db["evenement"].find_one({"nom": event}) or {}
+    return doc.get("short")
+
+
+def read_active_alerts(db, event, year, now):
+    """Alertes actives non expirees de l'evenement retenu."""
+    if not event or year is None:
+        return []
+    # `year` est stocke tantot en chaine tantot en entier selon les emetteurs.
+    annees = [year, str(year)]
+    docs = db["cockpit_active_alerts"].find({
+        "event": event,
+        "year": {"$in": annees},
+    })
+    return [d for d in docs
+            if d.get("expiresAt") is None or d["expiresAt"] > now]
+
+
+def read_weather_now(db, now):
+    """WBGT du creneau horaire courant, en degres.
+
+    Meme source que le mur meteo : le document du jour dans meteo_previsions,
+    enrichi par meteo_thermique.analyser().
+    """
+    doc = db["meteo_previsions"].find_one({"Date": now.strftime("%Y-%m-%d")})
+    if not doc:
+        return None, None
+
+    heure_courante = now.strftime("%H:00")
+    entree = None
+    for candidat in doc.get("Heures") or []:
+        if candidat.get("Heure") == heure_courante:
+            entree = candidat
+            break
+    if entree is None:
+        return None, None
+
+    # Les cles sont accentuees en base, avec repli non accentue : 0 est une
+    # valeur legitime, on ne peut pas ecrire `.get(k) or defaut`.
+    temperature = entree.get("Température (°C)")
+    if temperature is None:
+        temperature = entree.get("Temperature (C)")
+    humidite = entree.get("Humidité (%)")
+    if humidite is None:
+        humidite = entree.get("Humidite (%)")
+    if temperature is None or humidite is None:
+        return None, None
+
+    import meteo_thermique
+
+    bloc = meteo_thermique.analyser(
+        temperature, humidite,
+        vent_kmh=entree.get("Vent moyen (km/h)"),
+        heure=int(str(entree.get("Heure", "0")).split(":")[0]),
+    )
+    return bloc.get("wbgt_c"), bloc.get("wbgt_niveau")
+
+
+def build_state(db, now):
+    """Assemble le payload servi a la montre."""
+    config = read_config(db)
+
+    location_id = read_principal_id(db)
+    courant = read_counter(db, location_id)
+    entrees = _safe_int(courant.get("entries")) if courant else None
+
+    horodatage = courant.get("timestamp") if courant else None
+
+    debit = None
+    if courant and horodatage is not None:
+        anterieur = read_counter_before(db, location_id, horodatage - RATE_WINDOW)
+        if anterieur:
+            avant = _safe_int(anterieur.get("entries"))
+            debit = entry_rate(entrees, horodatage,
+                               avant, anterieur.get("timestamp"))
+
+    event, year = resolve_event(config, courant)
+    wbgt, _ = read_weather_now(db, now)
+    actives = read_active_alerts(db, event, year, now)
+
+    return {
+        "t": int(horodatage.timestamp()) if horodatage else None,
+        "n": event_label(read_event_short(db, event), year),
+        "e": entrees,
+        "er": debit,
+        "w": round(wbgt, 1) if wbgt is not None else None,
+        "wl": wbgt_level(wbgt, tuple(config["wbgt_levels"])),
+        "al": select_alerts(actives, config["alerts"]),
+    }
