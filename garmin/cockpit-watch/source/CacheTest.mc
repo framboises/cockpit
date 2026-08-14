@@ -43,6 +43,16 @@ function testAlertMaxEmptyIsZero(logger) {
 }
 
 (:test)
+function testWorstLevelTakesHigher(logger) {
+    Test.assertEqual(State.worstLevel({"wl" => 1, "al" => [[3, "x"]]}), 3);
+    Test.assertEqual(State.worstLevel({"wl" => 3, "al" => [[1, "x"]]}), 3);
+    Test.assertEqual(State.worstLevel({"wl" => 2, "al" => []}), 2);
+    Test.assertEqual(State.worstLevel({}), 0);
+    Test.assertEqual(State.worstLevel(null), 0);
+    return true;
+}
+
+(:test)
 function testWorstAgeTakesOlder(logger) {
     // donnee de 300 s, reponse de 10 s : c'est la donnee qui est perimee
     var st = {"t" => 700, "rx" => 990};

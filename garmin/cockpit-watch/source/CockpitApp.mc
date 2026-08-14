@@ -28,9 +28,7 @@ class CockpitApp extends Application.AppBase {
     (:glance)
     function getGlanceTheme() {
         var st = Cache.load();
-        var wl = State.wbgtLevel(st);
-        var al = State.alertMax(st);
-        var worst = wl > al ? wl : al;
+        var worst = State.worstLevel(st);
         if (worst >= 3) {
             return AppBase.GLANCE_THEME_RED;
         }

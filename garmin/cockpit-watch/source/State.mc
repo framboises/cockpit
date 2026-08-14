@@ -26,6 +26,16 @@ module State {
         return st["wl"];
     }
 
+    // La gravite affichee est toujours le pire des deux axes : une chaleur
+    // dangereuse et une alerte critique ne se compensent pas. Centralise ici
+    // pour que la bande d'indicateur, la glance et la vue principale ne
+    // puissent pas diverger.
+    function worstLevel(st) {
+        var wl = wbgtLevel(st);
+        var al = alertMax(st);
+        return wl > al ? wl : al;
+    }
+
     function dataAgeSec(st, nowSec) {
         if (st == null || st["t"] == null) {
             return null;

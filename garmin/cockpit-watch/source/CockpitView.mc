@@ -43,9 +43,7 @@ class CockpitView extends WatchUi.View {
         if (peak == null) { peak = 60; }
         if (normal == null) { normal = 180; }
         // On resserre le rythme des que ca chauffe, sans reglage manuel.
-        var level = State.alertMax(mState);
-        var wl = State.wbgtLevel(mState);
-        if (level >= 2 || wl >= 2) {
+        if (State.worstLevel(mState) >= 2) {
             return peak * 1000;
         }
         return normal * 1000;

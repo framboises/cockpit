@@ -17,10 +17,9 @@ class CockpitGlanceView extends WatchUi.GlanceView {
                     Fmt.count(st != null ? st["e"] : null),
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        var wl = State.wbgtLevel(st);
         var al = State.alertMax(st);
         var color = Graphics.COLOR_GREEN;
-        var worst = wl > al ? wl : al;
+        var worst = State.worstLevel(st);
         if (worst >= 3) { color = Graphics.COLOR_RED; }
         else if (worst >= 2) { color = Graphics.COLOR_ORANGE; }
         else if (worst >= 1) { color = Graphics.COLOR_YELLOW; }
