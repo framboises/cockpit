@@ -176,9 +176,9 @@ Mémoire, mesurée avec `monkeyc --build-stats 0` (fiable partout ; l'interface
 **View Memory** du simulateur est bloquée dans certains environnements) :
 
 ```
-Glance      5049 octets sur 65536   ( 7,7 %)
-Background  4675 octets sur 65536   ( 7,1 %)
-Foreground  ~6900 octets sur 786432 ( 0,9 %)
+Glance      4920 octets sur 65536   ( 7,5 %)
+Background  4549 octets sur 65536   ( 6,9 %)
+Foreground  7534 octets sur 786432  ( 1,0 %)
 ```
 
 ```bash
@@ -187,10 +187,13 @@ Foreground  ~6900 octets sur 786432 ( 0,9 %)
   --build-stats 0
 ```
 
-Confortablement sous les trois budgets. Un rebuild refait pour cette rédaction
-donne des totaux très proches (à quelques centaines d'octets près, effet
-normal des évolutions du code depuis la mesure d'origine) — même ordre de
-grandeur, mêmes marges.
+Ces chiffres sont ceux du **build de release** (`-r`), celui qu'on charge sur
+la montre. Un build de debug donne des totaux légèrement supérieurs (environ
++130 octets sur la glance et sur le service de fond, +180 sur la device app),
+les blocs annotés `(:debug)` y étant conservés. Comparer deux mesures faites
+dans des modes différents donne un écart qui n'a rien à voir avec le code.
+
+Confortablement sous les trois budgets.
 
 Affichage, mesuré via `dc.getFontHeight()` sur `fenix8solar51mm` :
 
