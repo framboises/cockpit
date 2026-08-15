@@ -60,3 +60,29 @@ function testWorstLevelInchangeEnModePast(logger) {
     Test.assertEqual(State.worstLevel(st), 2);
     return true;
 }
+
+(:test)
+function testMotifDistingueArretEtPanne(logger) {
+    Test.assertEqual(State.motif({"m" => "past", "mr" => "inactif"}), "inactif");
+    Test.assertEqual(State.motif({"m" => "past", "mr" => "sans_releve"}),
+                     "sans_releve");
+    Test.assert(State.motif({"m" => "live"}) == null);
+    return true;
+}
+
+(:test)
+function testMotifToleereLAbsenceDeDonnee(logger) {
+    // Un cache anterieur a ce champ, ou l'absence totale de cache : le motif
+    // ne doit jamais lever, seulement rester muet.
+    Test.assert(State.motif(null) == null);
+    Test.assert(State.motif({"m" => "past"}) == null);
+    return true;
+}
+
+(:test)
+function testPresentsLitLeChampP(logger) {
+    Test.assertEqual(State.presents({"p" => 48213}), 48213);
+    Test.assert(State.presents({"p" => null}) == null);
+    Test.assert(State.presents(null) == null);
+    return true;
+}

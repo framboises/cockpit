@@ -158,13 +158,15 @@ class CockpitView extends WatchUi.View {
                     Graphics.TEXT_JUSTIFY_CENTER);
 
         // Le chiffre principal change de nature selon le mode, et sa
-        // sous-ligne le nomme : en direct les entrees cumulees et leur debit,
-        // hors evenement le pic de l'edition rapportee et son instant. Sans
-        // ce libelle, deux grandeurs tres differentes occuperaient la meme
-        // place sans que rien ne les distingue.
+        // sous-ligne le nomme. En direct, ce sont les PRESENTS qui montent
+        // au sommet -- pas le cumul d'entrees, qui ne redescend jamais et
+        // annoncerait encore 130 000 a 23 h quand il ne reste que 40 000
+        // personnes. Le cumul et son debit ne disparaissent pas : ils
+        // descendent en sous-ligne. Hors evenement, c'est le pic de
+        // l'edition rapportee et son instant qui prennent leur place.
         var passe = State.isPast(st);
         var chiffre = passe ? (st != null ? st["pk"] : null)
-                            : (st != null ? st["e"] : null);
+                            : State.presents(st);
         var sousLigne;
         if (passe) {
             var quand = (st != null) ? st["pkt"] : null;
@@ -172,7 +174,8 @@ class CockpitView extends WatchUi.View {
                         ? ("pic " + Fmt.day(quand) + " " + Fmt.hour(quand))
                         : "pic";
         } else {
-            sousLigne = Fmt.rate(st != null ? st["er"] : null) + " pers/h";
+            sousLigne = Fmt.count(st != null ? st["e"] : null) + " entrees - "
+                        + Fmt.rate(st != null ? st["er"] : null) + " pers/h";
         }
 
         y = y + hX + 4;
@@ -193,8 +196,46 @@ class CockpitView extends WatchUi.View {
                     "WBGT " + Fmt.wbgt(st != null ? st["w"] : null),
                     Graphics.TEXT_JUSTIFY_CENTER);
 
-        // Alertes : deux lignes au plus, le reste sur la seconde page.
         y = y + hM + 4;
+
+        // Bande de voyants : uniquement s'il y a quelque chose a signaler
+        // (fiches PC org en instance, ou trafic sorti du vert). L'absence
+        // dit "rien a signaler" mieux qu'une ligne de zeros, et une page qui
+        // doit se lire en deux secondes ne doit pas en etre encombree --
+        // elle ne consomme donc AUCUNE hauteur quand tout est calme.
+        var pg = Cache.loadPages();
+        var mc = Pages.bloc(pg, "mc");
+        var tr = Pages.bloc(pg, "tr");
+        var vd = (tr != null) ? tr["vd"] : null;
+        var bouts = [];
+        if (mc != null) {
+            var enCours = mc["s"][0] + mc["sc"][0] + mc["tq"][0] + mc["f"][0]
+                          + mc["o"][0];
+            if (enCours > 0) { bouts.add("MC " + enCours.toString()); }
+        }
+        if (vd != null && vd >= 1) {
+            bouts.add(Pages.verdictMot(vd));
+        }
+        var nBouts = bouts.size();
+        if (nBouts > 0) {
+            var texteVoyants = "";
+            for (var iv = 0; iv < nBouts; iv += 1) {
+                if (iv > 0) { texteVoyants += "   "; }
+                texteVoyants += bouts[iv];
+            }
+            // Coloree par le pire des deux axes. Un trafic degrade est un
+            // signal de gravite connue (echelle 0-3 du mur) ; des fiches en
+            // instance seules n'en portent aucune -- gris neutre plutot que
+            // le vert de "fluide", qui laisserait croire a un satisfecit.
+            var couleurVoyants = (vd != null && vd >= 1) ? levelColor(vd)
+                                                          : Graphics.COLOR_LT_GRAY;
+            dc.setColor(couleurVoyants, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(w / 2, y, Graphics.FONT_XTINY, texteVoyants,
+                        Graphics.TEXT_JUSTIFY_CENTER);
+            y = y + hX + 2;
+        }
+
+        // Alertes : deux lignes au plus, le reste sur la seconde page.
         if (al.size() == 0) {
             dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, y, Graphics.FONT_XTINY, "RAS",
@@ -209,21 +250,32 @@ class CockpitView extends WatchUi.View {
             }
         }
 
-        // Age de la donnee, en rouge des qu'elle est perimee. Positionne
-        // depuis le bas de l'ecran (rond : la corde disponible se retrecit
-        // pres du bord, d'ou le texte raccourci sans "depuis").
+        // Pied de page, positionne depuis le bas de l'ecran (rond : la corde
+        // disponible se retrecit pres du bord, d'ou des textes courts).
         var staleAfter = Application.Properties.getValue("staleAfter");
         if (staleAfter == null) { staleAfter = 90; }
         var age = State.worstAgeSec(st, now);
-        var stale = State.isStale(st, now, staleAfter);
-        dc.setColor(stale ? Graphics.COLOR_RED : Graphics.COLOR_DK_GRAY,
-                    Graphics.COLOR_TRANSPARENT);
+
         if (passe) {
-            // Hors evenement il n'y a aucun compteur a dater. Afficher l'age
-            // d'un releve inexistant, ou le taire, laisserait croire a du
-            // direct ; on nomme l'etat.
+            // Le pied nomme la CAUSE du mode passe, pas seulement l'etat :
+            // "inactif" (live-controle arrete sur le cockpit, l'etat normal
+            // 350 jours par an) et "sans_releve" (le drapeau dit actif mais
+            // plus aucun releve n'arrive -- le collecteur est en panne) se
+            // confondaient jusqu'ici sous un seul "edition terminee". Les
+            // peindre pareil perdrait l'information la plus utile : celle
+            // qui dit si une intervention est necessaire.
+            var mr = State.motif(st);
+            var texte = "hors evenement";
+            var couleur = Graphics.COLOR_DK_GRAY;
+            if (mr != null && mr.equals("inactif")) {
+                texte = "live inactif";
+            } else if (mr != null && mr.equals("sans_releve")) {
+                texte = "aucun releve";
+                couleur = Graphics.COLOR_RED;
+            }
+            dc.setColor(couleur, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, dc.getHeight() - hX - 17, Graphics.FONT_XTINY,
-                        "edition terminee", Graphics.TEXT_JUSTIFY_CENTER);
+                        texte, Graphics.TEXT_JUSTIFY_CENTER);
             return;
         }
         // "compteur" et pas "perime" : le payload ne porte qu'un horodatage, `t`,
@@ -232,6 +284,9 @@ class CockpitView extends WatchUi.View {
         // grave : pendant un evenement le compteur se met a jour en permanence,
         // donc rien n'afficherait "perime" meme si le flux meteo s'etait fige.
         // Nommer ce qui vieillit vaut mieux qu'un "perime" qui parait tout couvrir.
+        var stale = State.isStale(st, now, staleAfter);
+        dc.setColor(stale ? Graphics.COLOR_RED : Graphics.COLOR_DK_GRAY,
+                    Graphics.COLOR_TRANSPARENT);
         var foot = "compteur " + Fmt.age(age);
         dc.drawText(w / 2, dc.getHeight() - hX - 17, Graphics.FONT_XTINY, foot,
                     Graphics.TEXT_JUSTIFY_CENTER);

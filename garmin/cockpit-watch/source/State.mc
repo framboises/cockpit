@@ -75,6 +75,29 @@ module State {
         return st["m"].equals("past");
     }
 
+    // La CAUSE du mode passe, jamais exposee hors de ce mode : "inactif"
+    // (arret volontaire du live-controle, l'etat normal 350 jours par an) et
+    // "sans_releve" (le drapeau dit actif mais plus aucun releve n'arrive --
+    // le collecteur est en panne) ne doivent surtout pas se peindre pareil,
+    // c'est le pied de la vue principale qui en decide. `null` en mode live
+    // et pour un cache anterieur a ce champ.
+    function motif(st) {
+        if (st == null || !isPast(st)) {
+            return null;
+        }
+        return st["mr"];
+    }
+
+    // Les personnes presentes. Jamais un chiffre perime : le serveur ne
+    // remplit `p` qu'en mode live (voir isPast), donc un accesseur simple
+    // suffit ici -- pas de garde supplementaire a dupliquer.
+    function presents(st) {
+        if (st == null) {
+            return null;
+        }
+        return st["p"];
+    }
+
     function isStale(st, nowSec, staleAfter) {
         // Une edition close ne vieillit pas : son pic est definitif. Sans ce
         // court-circuit, `t` etant nul, la montre finirait par afficher
