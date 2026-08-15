@@ -253,3 +253,86 @@ function testDessinMainCouranteTousCompteursAZeroNeLevePas(logger) {
     vue.onUpdate(dcDeTest());
     return true;
 }
+
+// Les six tests qui suivent exercent TraficView (tache 11) dans ses trois
+// etats (bloc present avec terrains, terrains vides, bloc absent), les
+// quatre premiers parcourant chacun un des quatre verdicts -- c'est le SEUL
+// endroit ou toute l'echelle 0..3 est parcourue en dessin, la fonction pure
+// Pages.verdictMot etant deja couverte a part dans PagesTest.mc.
+
+// Noms de terrain reels et longs, repris de test_watch_state.py::
+// test_taille_du_payload_complet_sous_deux_ko (le pire cas plausible cote
+// serveur) -- pas des noms inventes plus courts qui ne diraient rien du
+// risque de debordement mesure a la sonde.
+function trBlocPireCas(vd) {
+    return {"t" => Time.now().value(), "vd" => vd, "ac" => 3, "z" => 27,
+            "r" => [["Entree Houx paddock", "i", 24, 3],
+                    ["Sortie Musee circuit", "o", 18, 2],
+                    ["Rond point Maison Blanche", "i", 15, 2],
+                    ["Parking Karting exterieur", "-", 6, 1]]};
+}
+
+(:test)
+function testDessinTraficVerdictFluideNeLevePas(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(0), "me" => null,
+                     "st" => null});
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
+function testDessinTraficVerdictVigilanceNeLevePas(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(1), "me" => null,
+                     "st" => null});
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
+function testDessinTraficVerdictTensionNeLevePas(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(2), "me" => null,
+                     "st" => null});
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
+function testDessinTraficVerdictCritiqueNeLevePas(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
+                     "st" => null});
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
+function testDessinTraficTerrainsVidesNeLevePas(logger) {
+    // r vide : ce n'est pas une panne, Waze n'a juste rien remonte de
+    // charge sur les axes surveilles -- distinct du bloc tr absent.
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null,
+                     "tr" => {"t" => Time.now().value(), "vd" => 0, "ac" => 0,
+                              "z" => 0, "r" => []},
+                     "me" => null, "st" => null});
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
+function testDessinTraficBlocAbsentNeLevePas(logger) {
+    // Aucun Cache.savePages() : source des quatre blocs en panne cote
+    // serveur, exactement le cas que Pages.bloc doit rendre en null.
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
