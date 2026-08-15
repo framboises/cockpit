@@ -98,7 +98,7 @@ class TestMeteo:
                 {"niveau": "vigilance", "texte": "Pluie 2 mm - parkings en herbe"},
                 {"niveau": "danger", "texte": "Rafales 62 km/h - securiser les structures"},
             ],
-            "vigilance": {"niveau": 1},
+            "vigilance": {"couleur_jour": "jaune", "couleur_max": "orange"},
         }
         monkeypatch.setattr(watch_pages.meteo_etat, "etat_mur",
                             lambda d, m: etat)
@@ -127,3 +127,56 @@ class TestMeteo:
             raise RuntimeError("piaf injoignable")
         monkeypatch.setattr(watch_pages.meteo_etat, "etat_mur", casse)
         assert watch_pages.build_meteo(FakeDb(), datetime(2026, 8, 15, 12, 0)) is None
+
+    def test_vg_derive_de_la_couleur_jour_reelle(self):
+        # etat_mur n'est PAS monkeypatche ici : c'est la vraie fonction qui
+        # fusionne bulletin brut + etat_vigilance() + niveau_vigilance(), et
+        # aucune des trois ne porte de cle "niveau". Un double fabrique
+        # d'apres l'implementation (comme avant ce correctif) validerait sa
+        # propre hypothese plutot que le vrai contrat de meteo_etat.
+        #
+        # niveau_vigilance()/etat_vigilance() sont appelees par etat_mur SANS
+        # lui passer son propre `maintenant` -- elles retombent donc sur
+        # l'horloge murale (datetime.now(timezone.utc)). Le bulletin doit
+        # couvrir l'instant reel d'execution, pas une date figee, sous peine
+        # de comparer un naif a un conscient (TypeError, constate en ecrivant
+        # ce test). C'est un comportement de meteo_etat (tache 2), hors
+        # perimetre de cette tache.
+        agora = datetime.now(timezone.utc)
+        bulletin = {
+            "departement": "72",
+            "update_time": agora.isoformat(),
+            "periodes": [
+                {"echeance": "J", "couleur_max": "orange",
+                 "phenomenes": [{"nom": "Vent"}],
+                 "debut": (agora - timedelta(hours=1)).isoformat(),
+                 "fin": (agora + timedelta(hours=1)).isoformat()},
+            ],
+        }
+        db = FakeDb(meteo_vigilance=[bulletin])
+        bloc = watch_pages.build_meteo(db, agora)
+        # "orange" est a l'indice 2 de meteo_etat.ORDRE_COULEURS.
+        assert bloc["vg"] == 2
+
+    def test_vg_a_zero_sans_bulletin(self):
+        bloc = watch_pages.build_meteo(FakeDb(), datetime(2026, 8, 15, 12, 0))
+        assert bloc["vg"] == 0
+
+    def test_t_date_le_dernier_run_piaf_pas_l_instant_du_calcul(self):
+        # Si `t` datait l'instant de l'appel, le bloc paraitrait eternellement
+        # frais meme quand le flux se fige. run_at (chaine ISO) est le seul
+        # horodatage reel qu'expose etat_mur.
+        maintenant = datetime(2026, 8, 15, 12, 0)
+        run_at = datetime(2026, 8, 15, 11, 30)
+        grilles = [{"flux": "piaf", "run_at": run_at, "echeance_min": 30,
+                    "valid_at": run_at, "max_mmh": 0.0}]
+        db = FakeDb(meteo_grilles=grilles)
+        bloc = watch_pages.build_meteo(db, maintenant)
+        assert bloc["t"] == watch_pages._epoch(run_at)
+        assert bloc["t"] != watch_pages._epoch(maintenant)
+
+    def test_t_est_none_sans_run_piaf(self):
+        # Pas de donnee PIAF (cas reel en base dev) : `t` doit dire "je ne
+        # sais pas dater", pas mentir en affichant l'instant du calcul.
+        bloc = watch_pages.build_meteo(FakeDb(), datetime(2026, 8, 15, 12, 0))
+        assert bloc["t"] is None

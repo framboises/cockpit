@@ -149,9 +149,35 @@ def build_meteo(db, now):
             consigne = entree.get("texte")
 
     vigilance = etat.get("vigilance") or {}
+    # `vigilance` fusionne bulletin brut + etat_vigilance() + niveau_vigilance() :
+    # aucun des trois ne porte de cle "niveau". La couleur du jour, elle,
+    # existe reellement (niveau_vigilance) -- on la reduit sur l'echelle du
+    # mur, sans en inventer une pour la montre.
+    couleur_jour = vigilance.get("couleur_jour")
+    if couleur_jour in meteo_etat.ORDRE_COULEURS:
+        vg = meteo_etat.ORDRE_COULEURS.index(couleur_jour)
+    else:
+        vg = 0
+
+    # `t` doit dater la DONNEE, pas l'instant du calcul -- sinon le bloc parait
+    # eternellement frais meme si le flux se fige. Le seul horodatage reel
+    # qu'expose etat_mur est le run PIAF (prochaine_pluie.run_at) ; les
+    # previsions horaires n'en portent aucun (meteo_etat._fraicheur_mur le dit
+    # explicitement). Ce n'est donc qu'une verite partielle -- ca date la
+    # pluie a venir, pas la temperature -- mais c'est la meilleure date
+    # disponible, et mieux vaut ca qu'une date inventee. Sans elle, `t` reste
+    # None : la montre doit pouvoir dire "je ne sais pas dater" plutot que de
+    # mentir sur la fraicheur.
+    horodatage = None
+    run_at = pluie.get("run_at")
+    if run_at:
+        try:
+            horodatage = _epoch(datetime.fromisoformat(str(run_at)))
+        except (TypeError, ValueError):
+            horodatage = None
 
     return {
-        "t": _epoch(now),
+        "t": horodatage,
         "tc": actuel.get("temperature_c"),
         "v": actuel.get("vent_moyen_kmh"),
         "rf": actuel.get("vent_rafale_kmh"),
@@ -159,5 +185,5 @@ def build_meteo(db, now):
         "pm": pluie.get("pic_mmh") if attendue else None,
         "cn": consigne[:CONSIGNE_MAX] if consigne else None,
         "cl": niveau,
-        "vg": vigilance.get("niveau") or 0,
+        "vg": vg,
     }
