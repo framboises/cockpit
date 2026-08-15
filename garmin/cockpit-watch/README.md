@@ -87,10 +87,25 @@ mkdir -p bin
 "$SDK/bin/monkeydo" bin/cockpit.prg fenix8solar51mm
 ```
 
-Régler les propriétés dans **Settings > Application Settings**. Mettre
-`mockData` à vrai pour travailler sans backend ni jeton ; `mockScenario`
-fait défiler quatre cas (0 nominal, 1 WBGT en hausse, 2 alerte critique,
-3 donnée périmée).
+⚠️ **L'éditeur de réglages du simulateur ne fonctionne pas pour ce projet.**
+`File > Edit Persistent Storage > Edit Application.Properties data` répond
+« No settings file found for this app ». `monkeydo` ne pousse que le `.prg` et
+jamais le `cockpit-settings.json`, que l'éditeur cherche dans le système de
+fichiers de l'appareil simulé (`0:/GARMIN/Settings/`). Constaté, non résolu.
+
+Pour changer une valeur, construire un `.prg` dédié — c'est de toute façon la
+méthode retenue pour la montre elle-même (section Réglages) :
+
+```bash
+# avec un jeton, pour interroger la vraie production
+tools/build-avec-jeton.sh <JETON> debug essai
+"$SDK/bin/monkeydo" bin/essai.prg fenix8solar51mm
+```
+
+Pour les quatre scénarios simulés, patcher `Api.fetch` dans une copie
+temporaire du projet (`var mock = true; var scenario = N;`) et compiler un
+`.prg` par scénario : 0 nominal, 1 WBGT en hausse, 2 alerte critique,
+3 donnée périmée.
 
 Voir la glance : **Simulation > Glance View**.
 Déclencher le service de fond : **Simulation > Trigger Background Event**.
@@ -137,26 +152,62 @@ Pas de publication sur le store. On copie le `.prg` à la main.
 "$SDK/bin/monkeyc" -o bin/cockpit.prg -f monkey.jungle \
   -y ~/.garmin_keys/developer_key.der -d fenix8solar51mm -r
 cp bin/cockpit.prg /Volumes/GARMIN/GARMIN/APPS/
-cp bin/cockpit-settings.json /Volumes/GARMIN/GARMIN/SETTINGS/   # voir ci-dessous
 diskutil eject /Volumes/GARMIN
 ```
 
-⚠️ **Le fichier de réglages est probablement à copier lui aussi, et ce point
-reste à confirmer sur la montre.** Le build produit deux fichiers : le `.prg`
-et un `cockpit-settings.json` à côté. Le binaire du simulateur cherche ses
-réglages dans `0:/GARMIN/Settings/<nom>-settings.json`, c'est-à-dire dans le
-système de fichiers de l'appareil et non à côté de l'exécutable — ce qui
-laisse penser qu'une montre sideloadée sans ce fichier n'aurait aucun réglage,
-donc **pas de jeton, donc une montre muette**.
+**Le `.prg` suffit**, mais il doit contenir le jeton : voir la section
+Reglages ci-dessous. Une app sideloadee ne peut pas etre configuree depuis le
+telephone.
 
-Si le dossier `GARMIN/SETTINGS/` n'existe pas sur la montre, le créer. Si les
-réglages n'apparaissent pas dans Connect IQ Mobile après le sideload, c'est la
-première chose à vérifier.
+Au premier lancement, la montre cree elle-meme un fichier `.SET` du meme nom
+dans `/GARMIN/Apps/SETTINGS/`, rempli avec les valeurs par defaut du `.prg`.
+C'est ce fichier qui porte les reglages cote appareil — pas le
+`cockpit-settings.json` produit par le build, qui ne sert qu'a l'outillage de
+developpement.
 
 ## Réglages
 
-Ils se saisissent depuis Connect IQ Mobile (Cockpit > Réglages), pas dans le
-code : le jeton n'est jamais en dur.
+⚠️ **Une app chargée par sideload ne peut pas voir ses réglages modifiés
+depuis Connect IQ Mobile ni Garmin Express.** Après sideload, l'app n'a
+simplement pas de bouton de réglages — son icône apparaît même en carré gris.
+C'est une limite de la plateforme Connect IQ, pas de cette app :
+
+> *« It's not possible to set app settings of a side loaded app from GCM or
+> GE. »*
+> — [forums Garmin, fil marqué SOLVED](https://forums.garmin.com/developer/connect-iq/f/discussion/429848/solved-settings-connect-iq-app-for-sideloaded-app---is-this-possible)
+
+Le cahier des charges de ce projet demandait à la fois le jeton dans les
+Properties, saisi depuis les réglages Connect IQ, **et** une distribution par
+sideload. Les deux sont incompatibles. Personne ne l'a vu avant le premier
+essai sur le simulateur.
+
+### La parade retenue : compiler le jeton dans le `.prg`
+
+C'est ce que recommande le même fil pour des valeurs statiques. Un script s'en
+charge, sans jamais écrire le jeton dans le dépôt :
+
+```bash
+tools/build-avec-jeton.sh <JETON>                    # release, pour la montre
+tools/build-avec-jeton.sh <JETON> debug essai        # debug, pour le simulateur
+```
+
+La copie de travail vit dans un dossier temporaire supprimé en sortie, et le
+`.prg` produit va dans `bin/`, exclu par `.gitignore`.
+
+**Changer de jeton impose donc un rebuild et un re-sideload** — deux minutes.
+En contrepartie le jeton reste révocable en un clic depuis `/watch-admin`, ce
+qui est la protection qui compte : un binaire perdu se neutralise côté serveur.
+
+### Les deux autres options, écartées
+
+- **Copier un fichier `.SET`** portant exactement le nom du `.prg` dans
+  `/GARMIN/Apps/SETTINGS/` sur la montre. C'est la solution du fil, mais elle
+  ajoute une manipulation à chaque changement et le format `.SET` n'est pas
+  celui que produit notre build.
+- **Publier l'app sur le store Connect IQ**, même en privé : les réglages
+  redeviennent éditables depuis le téléphone. Exclu par le cahier des charges.
+
+### Les réglages disponibles
 
 | Réglage | Défaut | Rôle |
 |---|---|---|
@@ -370,29 +421,19 @@ piège 10), construire quatre exécutables avec le scénario en dur :
 # puis compiler un .prg par scenario
 ```
 
-### 4. Connect IQ Mobile affiche-t-il les huit réglages ?
+### 4. Le jeton compilé est-il bien pris en compte ?
 
-**C'est la vérification la plus importante des quatre** : sans elle, pas de
-saisie du jeton, donc pas de montre.
+La question d'origine — « Connect IQ Mobile affiche-t-il les huit réglages ? »
+— **est tranchée par la documentation, la réponse est non** : une app
+sideloadee n'a pas de bouton de reglages. Voir la section Reglages.
 
-L'éditeur de réglages du **simulateur** ne permet pas de la faire (piège 10 :
-il lit un fichier d'une autre forme). Le seul test valable est donc sur le
-téléphone, après sideload.
+Ce qui reste a verifier est donc different : que le jeton compile dans le
+`.prg` par `tools/build-avec-jeton.sh` est bien lu au demarrage, et que la
+montre joint la production.
 
-Protocole : sideloader le `.prg` **et** le `cockpit-settings.json` (voir la
-section Sideload), puis ouvrir Connect IQ Mobile > Cockpit > Réglages.
+Protocole : construire avec un jeton emis en prod, sideloader, ouvrir l'app.
 
-Attendu : huit réglages libellés en français — Domaine, Jeton, Periode pic,
-Periode normale, Seuil peremption, Vibrer sur alerte, Donnees simulees,
-Scenario simule.
+Attendu : le compteur d'entrees et le WBGT s'affichent avec un age coherent.
+Si tout reste a `--`, la requete echoue — jeton refuse, reseau, ou certificat.
 
-Si la liste est vide ou illisible, vérifier dans l'ordre : le
-`cockpit-settings.json` a-t-il bien été copié dans `GARMIN/SETTINGS/` ; le
-fichier déclare-t-il les langues `fra`/`fre` (et non une pseudo-langue) —
-contrôle rapide :
-
-```bash
-python3 -c "import json;print(list(json.load(open('bin/cockpit-settings.json'))['languages'].keys()))"
-```
-
-**Résultat constaté :** _(à compléter après la tâche 11)_
+**Résultat constaté :**
