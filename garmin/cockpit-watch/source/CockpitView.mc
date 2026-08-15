@@ -204,7 +204,13 @@ class CockpitView extends WatchUi.View {
         var stale = State.isStale(st, now, staleAfter);
         dc.setColor(stale ? Graphics.COLOR_RED : Graphics.COLOR_DK_GRAY,
                     Graphics.COLOR_TRANSPARENT);
-        var foot = stale ? ("perime " + Fmt.age(age)) : Fmt.age(age);
+        // "compteur" et pas "perime" : le payload ne porte qu'un horodatage, `t`,
+        // celui du releve Skidata. Le WBGT du creneau courant peut etre frais
+        // alors que le compteur date de plusieurs mois — et l'inverse est plus
+        // grave : pendant un evenement le compteur se met a jour en permanence,
+        // donc rien n'afficherait "perime" meme si le flux meteo s'etait fige.
+        // Nommer ce qui vieillit vaut mieux qu'un "perime" qui parait tout couvrir.
+        var foot = "compteur " + Fmt.age(age);
         dc.drawText(w / 2, dc.getHeight() - hX - 17, Graphics.FONT_XTINY, foot,
                     Graphics.TEXT_JUSTIFY_CENTER);
     }

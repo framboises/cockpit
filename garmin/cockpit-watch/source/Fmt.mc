@@ -51,6 +51,12 @@ module Fmt {
         if (sec < 3600) {
             return (sec / 60).toString() + " min";
         }
-        return (sec / 3600).toString() + " h";
+        // Au-dela de deux jours, les heures ne se lisent plus : un releve vieux
+        // de 113 jours s'affichait "2725 h", chiffre qu'il faut diviser de tete
+        // pour comprendre, et qui deborde de la largeur utile sur l'ecran rond.
+        if (sec < 172800) {
+            return (sec / 3600).toString() + " h";
+        }
+        return (sec / 86400).toString() + " j";
     }
 }

@@ -15,9 +15,21 @@ class CockpitGlanceView extends WatchUi.GlanceView {
         var h = dc.getHeight();
         var now = Time.now().value();
 
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(0, h / 4, Graphics.FONT_GLANCE,
-                    Fmt.count(st != null ? st["e"] : null),
+        var staleAfter = Application.Properties.getValue("staleAfter");
+        if (staleAfter == null) { staleAfter = 90; }
+        var stale = State.isStale(st, now, staleAfter);
+
+        // L'age accompagne le COMPTEUR, pas le WBGT. Le payload ne porte qu'un
+        // horodatage, `t`, celui du releve Skidata : le WBGT du creneau courant
+        // peut etre frais alors que le compteur date de plusieurs mois. Afficher
+        // "perime" a cote du WBGT le faisait passer pour perime lui aussi.
+        var ligne1 = Fmt.count(st != null ? st["e"] : null);
+        if (stale) {
+            ligne1 += "  " + Fmt.age(State.worstAgeSec(st, now));
+        }
+        dc.setColor(stale ? Graphics.COLOR_LT_GRAY : Graphics.COLOR_WHITE,
+                    Graphics.COLOR_TRANSPARENT);
+        dc.drawText(0, h / 4, Graphics.FONT_GLANCE, ligne1,
                     Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
 
         var al = State.alertMax(st);
@@ -39,16 +51,8 @@ class CockpitGlanceView extends WatchUi.GlanceView {
         // qu'ajouter l'age a la ligne actuelle (180 px mesures) ne le
         // pouvait pas (37 px restants). La couleur de la bande (pas de
         // cette ligne) est traitee a part dans getGlanceTheme.
-        var staleAfter = Application.Properties.getValue("staleAfter");
-        if (staleAfter == null) { staleAfter = 90; }
-        var stale = State.isStale(st, now, staleAfter);
-
-        var ligne2 = "WBGT " + Fmt.wbgt(st != null ? st["w"] : null);
-        if (stale) {
-            ligne2 += " perime " + Fmt.age(State.worstAgeSec(st, now));
-        } else {
-            ligne2 += "   alerte " + al.toString();
-        }
+        var ligne2 = "WBGT " + Fmt.wbgt(st != null ? st["w"] : null)
+                     + "   alerte " + al.toString();
 
         dc.setColor(color, Graphics.COLOR_TRANSPARENT);
         dc.drawText(0, (h * 3) / 4, Graphics.FONT_GLANCE, ligne2,

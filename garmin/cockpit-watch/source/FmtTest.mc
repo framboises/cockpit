@@ -36,6 +36,15 @@ function testAgeInHours(logger) {
 }
 
 (:test)
+function testAgeEnJoursAuDelaDeDeuxJours(logger) {
+    // 2725 h illisibles sur la montre : au-dela de deux jours on passe aux jours.
+    Test.assertEqual(Fmt.age(172799), "47 h");
+    Test.assertEqual(Fmt.age(172800), "2 j");
+    Test.assertEqual(Fmt.age(9810000), "113 j");
+    return true;
+}
+
+(:test)
 function testAgeNullIsDashes(logger) {
     Test.assertEqual(Fmt.age(null), "--");
     return true;
