@@ -640,9 +640,6 @@ function openMeteoModal(date) {
               <div class="chart-container">
                 <canvas id="meteoChart"></canvas>
               </div>
-              <div class="chart-container">
-                <canvas id="meteoChartPluie"></canvas>
-              </div>
             </div>
           `;
 
@@ -682,12 +679,18 @@ function openMeteoModal(date) {
             tbody.appendChild(tr);
           }
 
-          // Deux graphiques plutot qu'un seul a double axe. La temperature et le
-          // WBGT sont tous deux en degres : les mettre sur la meme echelle rend
-          // leur ecart lisible, et c'est justement cet ecart qui compte — un WBGT
-          // qui rejoint la temperature de l'air signale une humidite qui empeche
-          // la transpiration d'evacuer la chaleur. La pluie, elle, est en mm :
-          // la superposer sur un second axe inventerait une correlation.
+          // Un seul graphique, deux axes : degres a gauche, millimetres a droite.
+          // Choix assume de lecture — tout au meme endroit.
+          //
+          // Temperature et WBGT partagent l'axe de gauche, tous deux en degres :
+          // c'est leur ECART qui porte l'information, un WBGT qui rejoint la
+          // temperature de l'air signalant une humidite qui empeche la
+          // transpiration d'evacuer la chaleur.
+          //
+          // La pluie est tracee en BARRES et non en courbe : sur un second axe,
+          // deux courbes d'unites differentes se lisent comme correlees alors
+          // qu'elles ne le sont pas. Une barre se lit comme une quantite tombee,
+          // pas comme une tendance a comparer aux lignes.
           const labels        = day.Heures.map(h => h.Heure);
           const temperatures  = day.Heures.map(h => parseFloat(h['Température (°C)']));
           const wbgt          = day.Heures.map(h => (h.wbgt_c === null || h.wbgt_c === undefined) ? null : parseFloat(h.wbgt_c));
@@ -720,8 +723,13 @@ function openMeteoModal(date) {
             data: {
               labels,
               datasets: [
-                { label: 'Température (°C)', data: temperatures, borderColor: COULEUR_TEMP, borderWidth: 2, pointRadius: 0, fill: false },
-                { label: 'WBGT (°C)',        data: wbgt,         borderColor: COULEUR_WBGT, borderWidth: 2, pointRadius: 0, fill: false, spanGaps: false },
+                {
+                  label: 'Pluviométrie (mm)', data: pluviometrie, type: 'bar',
+                  backgroundColor: 'rgba(37,99,235,.35)', borderColor: COULEUR_PLUIE,
+                  borderWidth: 1, yAxisID: 'y2', order: 5
+                },
+                { label: 'Température (°C)', data: temperatures, borderColor: COULEUR_TEMP, borderWidth: 2, pointRadius: 0, fill: false, yAxisID: 'y1', order: 1 },
+                { label: 'WBGT (°C)',        data: wbgt,         borderColor: COULEUR_WBGT, borderWidth: 2, pointRadius: 0, fill: false, spanGaps: false, yAxisID: 'y1', order: 1 },
                 seuil(30, 'rgba(220,38,38,.45)'),
                 seuil(28, 'rgba(234,88,12,.40)'),
                 seuil(25, 'rgba(202,138,4,.35)')
@@ -750,27 +758,15 @@ function openMeteoModal(date) {
               },
               scales: {
                 x: { ticks: { maxRotation: 90, minRotation: 45 } },
-                y: { type: 'linear', position: 'left', title: { display: true, text: 'Degres Celsius' } }
-              }
-            }
-          });
-
-          new Chart(document.getElementById('meteoChartPluie').getContext('2d'), {
-            type: 'line',
-            data: {
-              labels,
-              datasets: [
-                { label: 'Pluviométrie (mm)', data: pluviometrie, borderColor: COULEUR_PLUIE, borderWidth: 2, pointRadius: 0, fill: false }
-              ]
-            },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              interaction: { mode: 'index', intersect: false },
-              plugins: { legend: { display: false } },
-              scales: {
-                x: { ticks: { maxRotation: 90, minRotation: 45 } },
-                y: { type: 'linear', position: 'left', beginAtZero: true, title: { display: true, text: 'Pluviométrie (mm)' } }
+                y1: {
+                  type: 'linear', position: 'left',
+                  title: { display: true, text: 'Degres Celsius (temperature et WBGT)' }
+                },
+                y2: {
+                  type: 'linear', position: 'right', beginAtZero: true,
+                  title: { display: true, text: 'Pluviométrie (mm)' },
+                  grid: { display: false }
+                }
               }
             }
           });
