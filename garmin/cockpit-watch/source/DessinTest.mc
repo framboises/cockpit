@@ -187,3 +187,69 @@ function testDessinEditionsListeVideNeLevePas(logger) {
     vue.scroll(1);
     return true;
 }
+
+// Les quatre tests qui suivent exercent MainCouranteView (tache 10) dans ses
+// trois etats distincts (bloc present, bloc absent, mode past) plus le cas
+// ou toutes les fiches sont a zero -- un etat que le bloc PRESENT peut
+// legitimement porter (calme operationnel reel), a ne pas confondre avec le
+// bloc absent qui rend des tirets. Comme le reste de ce fichier, ils ne
+// jugent pas l'esthetique : ils prouvent que ces chemins de dessin ne
+// levent pas.
+
+(:test)
+function testDessinMainCourantePresenteNeLevePas(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new MainCouranteView();
+    Cache.save({"t" => Time.now().value(), "rx" => Time.now().value(),
+                "m" => "live", "n" => "24HM 26", "e" => 48213, "er" => 3200,
+                "p" => 44980, "pk" => 39800, "pkt" => Time.now().value() - 5400,
+                "w" => 27.4, "wl" => 1, "al" => []});
+    Cache.savePages({"mc" => {"t" => Time.now().value() - 120,
+                               "s" => [2, 14], "sc" => [1, 8], "tq" => [0, 3],
+                               "f" => [1, 1], "o" => [3, 5]},
+                     "tr" => null, "me" => null, "st" => null});
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
+function testDessinMainCouranteBlocAbsentNeLevePas(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new MainCouranteView();
+    Cache.save({"t" => Time.now().value(), "rx" => Time.now().value(),
+                "m" => "live", "n" => "24HM 26", "e" => 48213, "er" => 3200,
+                "p" => 44980, "pk" => 39800, "pkt" => Time.now().value() - 5400,
+                "w" => 27.4, "wl" => 1, "al" => []});
+    // Aucun Cache.savePages() : source des quatre blocs en panne cote
+    // serveur, exactement le cas que Pages.bloc doit rendre en null.
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
+function testDessinMainCourantePastNeLevePas(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new MainCouranteView();
+    Cache.save({"t" => null, "rx" => Time.now().value(), "m" => "past",
+                "n" => "LMC 26", "e" => null, "er" => null,
+                "pk" => 52409, "pkt" => 1783175368,
+                "w" => 24.2, "wl" => 0, "al" => []});
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
+function testDessinMainCouranteTousCompteursAZeroNeLevePas(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new MainCouranteView();
+    Cache.save({"t" => Time.now().value(), "rx" => Time.now().value(),
+                "m" => "live", "n" => "24HM 26", "e" => 48213, "er" => 3200,
+                "p" => 44980, "pk" => 39800, "pkt" => Time.now().value() - 5400,
+                "w" => 27.4, "wl" => 1, "al" => []});
+    Cache.savePages({"mc" => {"t" => Time.now().value(),
+                               "s" => [0, 0], "sc" => [0, 0], "tq" => [0, 0],
+                               "f" => [0, 0], "o" => [0, 0]},
+                     "tr" => null, "me" => null, "st" => null});
+    vue.onUpdate(dcDeTest());
+    return true;
+}

@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <drawables>
     <bitmap id="LauncherIcon" filename="launcher_icon.svg" dithering="none" />
+    <bitmap id="IconeSecours" filename="mc_secours.svg" dithering="none" />
+    <bitmap id="IconeSecurite" filename="mc_securite.svg" dithering="none" />
+    <bitmap id="IconeTechnique" filename="mc_technique.svg" dithering="none" />
+    <bitmap id="IconeFlux" filename="mc_flux.svg" dithering="none" />
 </drawables>
