@@ -43,3 +43,40 @@ class TestEgaliteDesDatetimes:
         db = FakeDb(x=[{"run_at": datetime(2026, 8, 15, 11, 50), "n": 1}])
         conscient = datetime(2026, 8, 15, 11, 50, tzinfo=timezone.utc)
         assert db["x"].find_one({"run_at": conscient})["n"] == 1
+
+
+class TestAggregate:
+    def test_match_puis_group_compte_vraiment(self):
+        # Verifie le travail reel du pipeline (filtrage + comptage par cle
+        # composite), pas seulement une forme de sortie attendue par le test.
+        db = FakeDb(x=[
+            {"cat": "PCO.Secours", "s": 2}, {"cat": "PCO.Secours", "s": 2},
+            {"cat": "PCO.Secours", "s": 10}, {"cat": "AUTRE", "s": 2},
+        ])
+        pipeline = [
+            {"$match": {"cat": {"$regex": "^PCO"}}},
+            {"$group": {"_id": {"cat": "$cat", "clos": {"$eq": ["$s", 10]}},
+                        "n": {"$sum": 1}}},
+        ]
+        lignes = {(l["_id"]["cat"], l["_id"]["clos"]): l["n"]
+                  for l in db["x"].aggregate(pipeline)}
+        assert lignes == {("PCO.Secours", False): 2, ("PCO.Secours", True): 1}
+
+    def test_match_regex_exclut_ce_qui_ne_matche_pas(self):
+        db = FakeDb(x=[{"cat": "PCO.Secours"}, {"cat": "AUTRE"}])
+        pipeline = [{"$match": {"cat": {"$regex": "^PCO"}}},
+                    {"$group": {"_id": "$cat", "n": {"$sum": 1}}}]
+        assert [l["_id"] for l in db["x"].aggregate(pipeline)] == [
+            "PCO.Secours"]
+
+    def test_etage_inconnu_leve(self):
+        # Un etage ignore en silence rendrait le pipeline tautologique.
+        db = FakeDb(x=[{"n": 1}])
+        with pytest.raises(NotImplementedError):
+            list(db["x"].aggregate([{"$project": {"n": 1}}]))
+
+    def test_accumulateur_inconnu_leve(self):
+        db = FakeDb(x=[{"n": 1}])
+        with pytest.raises(NotImplementedError):
+            list(db["x"].aggregate(
+                [{"$group": {"_id": "$n", "moy": {"$avg": "$n"}}}]))

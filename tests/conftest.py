@@ -6,9 +6,10 @@ que de laisser passer -- un double trop permissif rend les tests
 tautologiques, ce qui est pire que pas de test du tout.
 """
 
+import re
 from datetime import datetime, timezone
 
-_OPERATEURS_CONNUS = {"$lte", "$lt", "$gt", "$gte", "$in", "$ne"}
+_OPERATEURS_CONNUS = {"$lte", "$lt", "$gt", "$gte", "$in", "$ne", "$regex"}
 
 
 class FakeCursor:
@@ -82,6 +83,73 @@ class FakeCollection:
         restants = [d for d in self.docs if d not in self._matching(query)]
         self.docs = restants
 
+    def aggregate(self, pipeline):
+        """Pipeline minimal : seuls $match et $group sont reconnus, parce
+        que c'est tout ce que watch_pages appelle reellement. Tout etage
+        non reconnu leve -- l'ignorer rendrait le test tautologique, comme
+        pour _match et FakeCursor.sort."""
+        docs = list(self.docs)
+        for etage in pipeline:
+            if list(etage.keys()) == ["$match"]:
+                spec = etage["$match"]
+                docs = [d for d in docs
+                        if all(self._match(d, cle, val)
+                               for cle, val in spec.items())]
+            elif list(etage.keys()) == ["$group"]:
+                docs = self._aggregate_group(docs, etage["$group"])
+            else:
+                raise NotImplementedError(
+                    "FakeCollection.aggregate ne sait pas traiter l'etage "
+                    "%r" % etage)
+        return docs
+
+    @classmethod
+    def _eval_expr(cls, doc, expr):
+        """Evalue une expression d'agregation minimale : reference de champ
+        ('$champ') ou operateur {'$eq': [a, b]}. Une expression non reconnue
+        leve plutot que de rendre une valeur plausible mais fausse."""
+        if isinstance(expr, str) and expr.startswith("$"):
+            return doc.get(expr[1:])
+        if isinstance(expr, dict):
+            if list(expr.keys()) == ["$eq"]:
+                gauche, droite = expr["$eq"]
+                return (cls._eval_expr(doc, gauche)
+                        == cls._eval_expr(doc, droite))
+            raise NotImplementedError(
+                "FakeCollection.aggregate ne sait pas evaluer %r" % expr)
+        return expr
+
+    @classmethod
+    def _aggregate_group(cls, docs, spec):
+        id_spec = spec.get("_id")
+        accum_specs = {cle: val for cle, val in spec.items() if cle != "_id"}
+        for accum_expr in accum_specs.values():
+            if list(accum_expr.keys()) != ["$sum"] or accum_expr["$sum"] != 1:
+                # Seul $sum: 1 (compter des documents) est implemente : rien
+                # d'autre n'est appele par le code teste a ce jour.
+                raise NotImplementedError(
+                    "FakeCollection.aggregate ne sait pas accumuler %r"
+                    % accum_expr)
+
+        groupes = {}
+        ordre = []
+        for doc in docs:
+            if isinstance(id_spec, dict):
+                valeur_id = {cle: cls._eval_expr(doc, expr)
+                             for cle, expr in id_spec.items()}
+                cle_groupe = tuple(sorted(valeur_id.items()))
+            else:
+                valeur_id = cls._eval_expr(doc, id_spec)
+                cle_groupe = valeur_id
+            if cle_groupe not in groupes:
+                groupes[cle_groupe] = {"_id": valeur_id}
+                groupes[cle_groupe].update(
+                    {cle: 0 for cle in accum_specs})
+                ordre.append(cle_groupe)
+            for cle in accum_specs:
+                groupes[cle_groupe][cle] += 1
+        return [groupes[cle_groupe] for cle_groupe in ordre]
+
     def _matching(self, query):
         if not query:
             return list(self.docs)
@@ -134,6 +202,10 @@ class FakeCollection:
             if "$in" in val and actuel not in val["$in"]:
                 return False
             if "$ne" in val and actuel == val["$ne"]:
+                return False
+            if "$regex" in val and not (
+                    isinstance(actuel, str)
+                    and re.search(val["$regex"], actuel)):
                 return False
             return True
         # Les deux cotes passent par la normalisation, pas seulement le
