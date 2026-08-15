@@ -12,6 +12,7 @@ l'appelant met le bloc a null et les autres pages restent servies.
 import logging
 from datetime import datetime, timezone
 
+import meteo_etat
 import trafic_etat
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,12 @@ CATEGORIES_AUTRES = ("PCO.Information", "PCO.MainCourante", "PCO.Fourriere")
 
 # Une fiche est close quand status_code vaut 10 (app.py:4808).
 STATUT_CLOS = 10
+
+# Niveaux de consigne du mur, replies sur l'echelle 0-3 de la montre.
+NIVEAUX_CONSIGNE = {"vigilance": 1, "danger": 2, "critique": 3}
+
+# Une consigne plus longue deborde la largeur utile du cadran rond.
+CONSIGNE_MAX = 44
 
 
 def _epoch(moment):
@@ -109,4 +116,48 @@ def build_trafic(db, now_utc=None):
         "ac": comptes.get("ACCIDENT", 0),
         "z": comptes.get("total", 0),
         "r": resume,
+    }
+
+
+def build_meteo(db, now):
+    """Condense l'etat du mur. None si la source est injoignable.
+
+    AUCUN SEUIL N'EST REINVENTE ICI. Le mur decide -- rafales, WBGT, orage --
+    et redige la consigne en langage d'action ; la montre la repete. C'est ce
+    qui garantit que le poignet et le mur ne se contrediront jamais.
+    """
+    try:
+        etat = meteo_etat.etat_mur(db, now)
+    except Exception as exc:
+        logger.warning("watch_pages : etat meteo indisponible (%s)", exc)
+        return None
+    if not etat:
+        return None
+
+    actuel = etat.get("actuel") or {}
+    pluie = etat.get("prochaine_pluie") or {}
+    attendue = bool(pluie.get("attendue"))
+
+    # La consigne retenue est la plus grave, pas la premiere : la liste du mur
+    # est chronologique, or c'est la gravite qui commande l'action.
+    consigne = None
+    niveau = 0
+    for entree in etat.get("consignes") or []:
+        rang = NIVEAUX_CONSIGNE.get(entree.get("niveau"), 0)
+        if rang > niveau:
+            niveau = rang
+            consigne = entree.get("texte")
+
+    vigilance = etat.get("vigilance") or {}
+
+    return {
+        "t": _epoch(now),
+        "tc": actuel.get("temperature_c"),
+        "v": actuel.get("vent_moyen_kmh"),
+        "rf": actuel.get("vent_rafale_kmh"),
+        "pl": pluie.get("dans_min") if attendue else None,
+        "pm": pluie.get("pic_mmh") if attendue else None,
+        "cn": consigne[:CONSIGNE_MAX] if consigne else None,
+        "cl": niveau,
+        "vg": vigilance.get("niveau") or 0,
     }

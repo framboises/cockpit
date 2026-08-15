@@ -85,3 +85,45 @@ class TestTrafic:
 
     def test_sans_donnee_waze_rend_none(self):
         assert watch_pages.build_trafic(FakeDb(), NOW) is None
+
+
+class TestMeteo:
+    def test_condense_l_etat_du_mur(self, monkeypatch):
+        etat = {
+            "actuel": {"temperature_c": 21.3, "vent_moyen_kmh": 18,
+                       "vent_rafale_kmh": 34},
+            "prochaine_pluie": {"attendue": True, "dans_min": 25,
+                                "pic_mmh": 2.4},
+            "consignes": [
+                {"niveau": "vigilance", "texte": "Pluie 2 mm - parkings en herbe"},
+                {"niveau": "danger", "texte": "Rafales 62 km/h - securiser les structures"},
+            ],
+            "vigilance": {"niveau": 1},
+        }
+        monkeypatch.setattr(watch_pages.meteo_etat, "etat_mur",
+                            lambda d, m: etat)
+        bloc = watch_pages.build_meteo(FakeDb(), datetime(2026, 8, 15, 12, 0))
+        assert bloc["tc"] == 21.3
+        assert bloc["rf"] == 34
+        assert bloc["pl"] == 25
+        assert bloc["pm"] == 2.4
+        # La consigne retenue est LA PLUS GRAVE, pas la premiere de la liste.
+        assert bloc["cn"].startswith("Rafales 62")
+        assert bloc["cl"] == 2
+
+    def test_sans_pluie_attendue_les_champs_sont_nuls(self, monkeypatch):
+        etat = {"actuel": {"temperature_c": 18.0},
+                "prochaine_pluie": {"attendue": False},
+                "consignes": [], "vigilance": None}
+        monkeypatch.setattr(watch_pages.meteo_etat, "etat_mur",
+                            lambda d, m: etat)
+        bloc = watch_pages.build_meteo(FakeDb(), datetime(2026, 8, 15, 12, 0))
+        assert bloc["pl"] is None
+        assert bloc["pm"] is None
+        assert bloc["cn"] is None
+
+    def test_source_qui_leve_rend_none(self, monkeypatch):
+        def casse(d, m):
+            raise RuntimeError("piaf injoignable")
+        monkeypatch.setattr(watch_pages.meteo_etat, "etat_mur", casse)
+        assert watch_pages.build_meteo(FakeDb(), datetime(2026, 8, 15, 12, 0)) is None
