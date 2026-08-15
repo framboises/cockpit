@@ -42,20 +42,30 @@ STATUT_CLOS = 10
 NIVEAUX_CONSIGNE = {"vigilance": 1, "danger": 2, "critique": 3}
 
 # Une consigne plus longue deborde ce que couperConsigne (MeteoView.mc) peut
-# repartir sur ses DEUX LIGNES -- l'ancienne valeur (44) avait ete calibree
-# pour UNE seule ligne, alors que couperConsigne redecoupe le reliquat sur
-# une seconde depuis le debut. Mesure a la sonde sur device (fenix8solar
-# 51mm, cf. DessinTest.mc et le rapport de tache), pas devinee :
-#   - hauteurs de police : hX=22, hS=34, hM=39
-#   - corde disponible aux deux ordonnees ou la consigne se dessine : de
-#     442.85 px (scenario "sans pluie", ligne 1, la plus etroite -- PAS le
-#     scenario "avec pluie" comme on pourrait le supposer, elle est plus
-#     pres du bord) a 453.14 px (scenario "avec pluie", ligne 2)
-#   - a ce pire dispo, une chaine plausible tient ENTIERE sur deux lignes
-#     jusqu'a 72 caracteres, tronque des 75
+# repartir sur ses DEUX LIGNES. Remesure integralement en aout 2026 : les
+# sondes de mise en page de tout ce projet, cette valeur comprise, avaient
+# ete calibrees sur un ecran fenix 8 AMOLED de 454x454 (System.
+# getDeviceSettings() code en dur a la mauvaise taille) alors que l'app
+# cible fenix8solar51mm, dont l'ecran mesure REELLEMENT 280x280 -- rayon 140,
+# pas 227. La valeur numerique retombe par coincidence sur 68 (l'ancienne),
+# mais la mesure qui la justifie est entierement neuve, cf. DessinTest.mc et
+# le rapport de tache :
+#   - hauteurs de police reelles (280x280) : hX=22, hS=34, hM=39
+#   - corde disponible aux deux ordonnees ou la consigne se dessine
+#     desormais (pire cas : vigilance ET pluie affichees) : 276.83 px
+#     (ligne 1, y=161) et 267.72 px (ligne 2, y=181)
+#   - a cette corde, FONT_SMALL (le choix d'origine) ne tenait que ~43
+#     caracteres au total sur ses deux lignes : les deux pires consignes
+#     REELLES (52 et 59 caracteres, ci-dessous) en ressortaient tronquees
+#     AVANT LEUR VERBE alors meme qu'elles ne debordaient pas de l'ecran --
+#     invisible a un test qui ne verifie que la geometrie. MeteoView.mc est
+#     donc passee en FONT_XTINY pour la consigne (l'emphase visuelle cede
+#     devant l'integrite du message de securite), qui tient ENTIER sur deux
+#     lignes jusqu'a 68 caracteres, tronque des 70
 # Les deux pires consignes REELLES passent entieres avec marge : foudre +
 # grele (52 caracteres) et WBGT danger (59 caracteres, meteo_thermique.py).
-# 68 reste dans la marge verifiee (n=68 et n=70 confirmes tenir entiers).
+# 68 reste exactement a la marge verifiee (n=68 confirme tenir entier,
+# n=70 tronque).
 CONSIGNE_MAX = 68
 
 # Alertes perimees au-dela de cette duree : meme convention que

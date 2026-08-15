@@ -43,6 +43,34 @@ class FrequentationView extends WatchUi.View {
         return delta.toString() + "%";
     }
 
+    // Meme geometrie que les autres vues : sur un cadran rond, la place
+    // utile depend de l'eloignement au centre.
+    hidden function largeurUtile(dc, y) {
+        var r = dc.getWidth() / 2.0;
+        var dy = (y - r).abs();
+        if (dy >= r) {
+            return 0.0;
+        }
+        return 2.0 * Math.sqrt(r * r - dy * dy);
+    }
+
+    // La ligne "edition" (compte a six chiffres + jour + heure) est la plus
+    // large de la page, et elle se dessine pres du bord ou la corde du
+    // cadran rond se retrecit (mesure au device, fenix8solar51mm 280x280) :
+    // la forme longue debordait de pres de 50 px. Repli sur une forme
+    // compacte (prefixe raccourci, sans separateur) avant de l'afficher --
+    // publique pour rester testable en VALEUR (meme raison que
+    // calculDeltaPct), un debordement horizontal ne leve jamais d'exception.
+    function formatEdition(pk, pkt) {
+        return "edition " + Fmt.count(pk) + " . " + Fmt.day(pkt) + " "
+               + Fmt.hour(pkt);
+    }
+
+    function formatEditionCourt(pk, pkt) {
+        return "ed. " + Fmt.count(pk) + " " + Fmt.day(pkt) + " "
+               + Fmt.hour(pkt);
+    }
+
     function onUpdate(dc) {
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
         dc.clear();
@@ -80,12 +108,20 @@ class FrequentationView extends WatchUi.View {
         // peuvent valoir null avec `freq` present (aucun pic releve pour
         // l'instant aujourd'hui, un etat reel tot dans la journee) --
         // Fmt.count/le repli sur DASH le rendent nativement.
+        //
+        // Quatre lignes (label, pic en NUMBER_MEDIUM, heure, N-1+delta,
+        // edition rapportee) doivent tenir entre le titre et le pied (241
+        // sur 280, mesure au device) : l'espacement d'origine faisait finir
+        // la derniere ligne exactement SUR le pied (les deux se
+        // superposaient a l'ecran). Resserre -- verifie par
+        // DebordementTest.mc, pire cas (six chiffres partout) : la derniere
+        // ligne finit a 239, 2 px avant le pied.
         var y = 26 + hX + 10;
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, y, Graphics.FONT_XTINY, "pic du jour",
                     Graphics.TEXT_JUSTIFY_CENTER);
 
-        y += hX + 4;
+        y += hX + 2;
         var pj = (freq != null) ? freq["pj"] : null;
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, y, Graphics.FONT_NUMBER_MEDIUM, Fmt.count(pj),
@@ -100,7 +136,7 @@ class FrequentationView extends WatchUi.View {
 
         // Strate 2 : N-1 au jour equivalent, et son delta -- calcule ICI,
         // sur la montre, a partir de `pj`/`n1` : le serveur ne l'envoie pas.
-        y += hX + 16;
+        y += hX + 4;
         var n1 = (freq != null) ? freq["n1"] : null;
         var delta = calculDeltaPct(pj, n1);
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
@@ -111,13 +147,17 @@ class FrequentationView extends WatchUi.View {
         // Strate 3 : pic de l'edition rapportee -- lu dans le NOYAU
         // (pk/pkt), independant du bloc "st" : reste affiche meme si "st"
         // est absent, comme la page 1 le fait deja en mode past.
-        y += hS + 14;
+        y += hS + 4;
         var pk = (noyau != null) ? noyau["pk"] : null;
         var pkt = (noyau != null) ? noyau["pkt"] : null;
+        var texteEdition = formatEdition(pk, pkt);
+        var dispoEdition = largeurUtile(dc, y);
+        if (dc.getTextWidthInPixels(texteEdition, Graphics.FONT_XTINY)
+                > dispoEdition) {
+            texteEdition = formatEditionCourt(pk, pkt);
+        }
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, y, Graphics.FONT_XTINY,
-                    "edition " + Fmt.count(pk) + " . " + Fmt.day(pkt) + " "
-                    + Fmt.hour(pkt),
+        dc.drawText(w / 2, y, Graphics.FONT_XTINY, texteEdition,
                     Graphics.TEXT_JUSTIFY_CENTER);
 
         // Pied de page : age du bloc "st", ou son absence nommee

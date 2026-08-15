@@ -124,77 +124,97 @@ class MeteoView extends WatchUi.View {
 
         var meteo = Pages.bloc(Cache.loadPages(), "me");
 
-        // Liseré de vigilance Meteo-France, sous le texte (dessine en
-        // premier) : un anneau proche du bord, jamais affirmatif sur un etat
-        // qu'on ignore -- seulement quand le bloc est present ET vg >= 1.
-        // Rayon et epaisseur choisis pour rester tres a l'interieur de la
-        // marge deja mesuree sur les autres vues (>70 px) au pied de page,
-        // le seul texte qui s'approche du bord.
-        if (meteo != null) {
-            var vg = meteo["vg"];
-            if (vg != null && vg >= 1) {
-                dc.setColor(couleurNiveau(vg), Graphics.COLOR_TRANSPARENT);
-                dc.setPenWidth(5);
-                dc.drawCircle(w / 2, dc.getHeight() / 2, w / 2 - 10);
-                dc.setPenWidth(1);
-            }
-        }
-
-        // Titre : moitie haute (y=26 < 227), meme position fixe que les
-        // autres vues -- toujours rendu, bloc present ou non.
+        // Titre : mesure au device (fenix8solar51mm, 280x280, rayon 140 --
+        // PAS 227, l'erreur qui a motive la reprise complete de cette page).
+        // Toujours rendu, bloc present ou non.
+        var y = 24;
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, 26, Graphics.FONT_XTINY, "METEO",
+        dc.drawText(w / 2, y, Graphics.FONT_XTINY, "METEO",
                     Graphics.TEXT_JUSTIFY_CENTER);
+        y += hX + 2;
+
+        // Vigilance Meteo-France : le MOT d'abord, la couleur en renfort --
+        // jamais la couleur seule (l'ancien lisere, retire : sur un ecran de
+        // 280, un anneau assez large pour se voir couvre le pied de page
+        // dans TOUS les cas, cf. sonde/rapport de tache -- << c'est la place
+        // qui tranche >>, et la place n'a pas suffi). Absente quand vg est
+        // inconnu OU vert (Pages.vigilanceMot rend null dans les deux cas),
+        // meme regle que la bande de voyants de la page 1 : rien a signaler
+        // ne s'affiche pas. DISTINCTE de la consigne (cl/cn) plus bas --
+        // deux echelles independantes, cf. CLAUDE.md.
+        var vg = (meteo != null) ? meteo["vg"] : null;
+        var motVigilance = Pages.vigilanceMot(vg);
+        if (motVigilance != null) {
+            dc.setColor(couleurNiveau(vg), Graphics.COLOR_TRANSPARENT);
+            dc.drawText(w / 2, y, Graphics.FONT_XTINY, motVigilance,
+                        Graphics.TEXT_JUSTIFY_CENTER);
+            y += hX + 2;
+        }
 
         // Strate 1 : l'instant. Temperature en gros (FONT_MEDIUM, meme poids
         // que le WBGT en page 1), vent/rafale en dessous.
-        var y = 26 + hX + 14;
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, y, Graphics.FONT_MEDIUM,
                     formatTemp(meteo != null ? meteo["tc"] : null),
                     Graphics.TEXT_JUSTIFY_CENTER);
+        y += hM + 2;
 
-        y += hM + 4;
         var v = (meteo != null) ? meteo["v"] : null;
         var rf = (meteo != null) ? meteo["rf"] : null;
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, y, Graphics.FONT_XTINY,
                     "vent " + formatKmh(v) + " . rafales " + formatKmh(rf),
                     Graphics.TEXT_JUSTIFY_CENTER);
+        y += hX + 2;
 
         // Strate 2 : la pluie a venir. Trois etats distincts -- bloc absent
         // (on ne sait pas), bloc present sans pluie attendue (`pl == null`,
         // un fait connu, jamais ecrit "0"), bloc present avec pluie
-        // attendue (`pl` en minutes + `pm` au pic).
-        y += hX + 14;
+        // attendue. Le pic (`pm`) est desormais sur LA MEME ligne que le
+        // delai (une seule ligne SMALL, pas deux) : sur un ecran deux fois
+        // plus etroit, la ligne separee du pic ne tient plus a cote de la
+        // vigilance et de la consigne -- cf. rapport de tache, budget
+        // vertical mesure.
         if (meteo == null) {
             dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, y, Graphics.FONT_XTINY, "pluie --",
                         Graphics.TEXT_JUSTIFY_CENTER);
-            y += hX + 14;
+            y += hX + 2;
         } else if (meteo["pl"] == null) {
             dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, y, Graphics.FONT_XTINY, "pas de pluie attendue",
                         Graphics.TEXT_JUSTIFY_CENTER);
-            y += hX + 14;
+            y += hX + 2;
         } else {
+            // FONT_XTINY (pas FONT_SMALL comme l'ancienne premiere ligne) :
+            // fusionner delai et pic sur une seule ligne SMALL debordait
+            // horizontalement (mesure a la sonde -- 322 px contre ~270
+            // disponibles). XTINY tient largement et libere en plus 12 px de
+            // hauteur pour la consigne, le texte le plus important de la
+            // page.
             dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(w / 2, y, Graphics.FONT_SMALL,
-                        "pluie dans " + meteo["pl"].toString() + " min",
+            dc.drawText(w / 2, y, Graphics.FONT_XTINY,
+                        "pluie " + meteo["pl"].toString() + " min (pic "
+                        + formatMmh(meteo["pm"]) + ")",
                         Graphics.TEXT_JUSTIFY_CENTER);
-            var yPic = y + hS - 2;
-            dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(w / 2, yPic, Graphics.FONT_XTINY,
-                        formatMmh(meteo["pm"]) + " au pic",
-                        Graphics.TEXT_JUSTIFY_CENTER);
-            y = yPic + hX + 14;
+            y += hX + 2;
         }
 
         // Strate 3 : la consigne -- le texte le plus important de la page,
         // redige par le mur et affiche tel quel, colore par `cl`. Trois
         // etats : bloc absent (tirets), bloc present sans consigne active
         // (fait connu, "aucune consigne"), bloc present avec consigne
-        // (coloree, sur une ou deux lignes selon la largeur disponible).
+        // (coloree, sur deux lignes). FONT_XTINY, PAS FONT_SMALL (l'ancien
+        // choix, garde pour son emphase visuelle) : mesure au device, la
+        // corde a cet endroit (277/259 px) ne tient que ~43 caracteres au
+        // total en SMALL -- les DEUX consignes reelles les plus longues (52
+        // et 59 caracteres) en ressortaient tronquees avant leur verbe
+        // d'action alors meme qu'elles COLLAIENT dans l'ecran (aucun
+        // debordement geometrique, donc invisible a un test qui ne verifie
+        // que les bornes -- cf. rapport de tache, sonde de contenu). En
+        // XTINY, la meme corde tient environ 66 caracteres au total,
+        // confirme par testCouperConsigneNeTronquePasLesDeuxConsignesReelles
+        // (DessinTest.mc) qui rejoue les deux consignes entieres.
         if (meteo == null) {
             dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, y, Graphics.FONT_XTINY, Fmt.DASH,
@@ -205,14 +225,14 @@ class MeteoView extends WatchUi.View {
                         Graphics.TEXT_JUSTIFY_CENTER);
         } else {
             var dispo1 = largeurUtile(dc, y);
-            var dispo2 = largeurUtile(dc, y + hS - 2);
-            var lignes = couperConsigne(dc, meteo["cn"], Graphics.FONT_SMALL,
+            var dispo2 = largeurUtile(dc, y + hX - 2);
+            var lignes = couperConsigne(dc, meteo["cn"], Graphics.FONT_XTINY,
                                         dispo1, dispo2);
             dc.setColor(couleurNiveau(meteo["cl"]), Graphics.COLOR_TRANSPARENT);
-            dc.drawText(w / 2, y, Graphics.FONT_SMALL, lignes[0],
+            dc.drawText(w / 2, y, Graphics.FONT_XTINY, lignes[0],
                         Graphics.TEXT_JUSTIFY_CENTER);
             if (lignes.size() > 1) {
-                dc.drawText(w / 2, y + hS - 2, Graphics.FONT_SMALL, lignes[1],
+                dc.drawText(w / 2, y + hX - 2, Graphics.FONT_XTINY, lignes[1],
                             Graphics.TEXT_JUSTIFY_CENTER);
             }
         }

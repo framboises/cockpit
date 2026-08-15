@@ -88,3 +88,34 @@ function testCachePagesNAffecteJamaisLeNoyau(logger) {
     Test.assert(!st.hasKey("tr"));
     return true;
 }
+
+// Vigilance Meteo-France : echelle 0-3 distincte du verdict trafic et de la
+// consigne (meteo_etat.ORDRE_COULEURS). null pour "vert" ET "inconnu" -- les
+// deux etats ou rien ne doit s'afficher, cf. la regle commune "absente quand
+// tout est calme".
+
+(:test)
+function testVigilanceMotNommeLesTroisNiveaux(logger) {
+    Test.assertEqual(Pages.vigilanceMot(1), "VIGILANCE JAUNE");
+    Test.assertEqual(Pages.vigilanceMot(2), "VIGILANCE ORANGE");
+    Test.assertEqual(Pages.vigilanceMot(3), "VIGILANCE ROUGE");
+    Test.assertEqual(Pages.vigilanceMot(5), "VIGILANCE ROUGE");
+    return true;
+}
+
+(:test)
+function testVigilanceMotNullQuandVertOuInconnu(logger) {
+    Test.assert(Pages.vigilanceMot(0) == null);
+    Test.assert(Pages.vigilanceMot(null) == null);
+    return true;
+}
+
+(:test)
+function testVigilanceMotCourtPartageLaMemeEchelle(logger) {
+    Test.assertEqual(Pages.vigilanceMotCourt(1), "VIG JAUNE");
+    Test.assertEqual(Pages.vigilanceMotCourt(2), "VIG ORANGE");
+    Test.assertEqual(Pages.vigilanceMotCourt(3), "VIG ROUGE");
+    Test.assert(Pages.vigilanceMotCourt(0) == null);
+    Test.assert(Pages.vigilanceMotCourt(null) == null);
+    return true;
+}

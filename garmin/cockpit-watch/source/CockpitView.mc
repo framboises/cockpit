@@ -272,7 +272,9 @@ class CockpitView extends WatchUi.View {
         var pg = Cache.loadPages();
         var mc = Pages.bloc(pg, "mc");
         var tr = Pages.bloc(pg, "tr");
+        var meteoBloc = Pages.bloc(pg, "me");
         var vd = (tr != null) ? tr["vd"] : null;
+        var vg = (meteoBloc != null) ? meteoBloc["vg"] : null;
         var bouts = [];
         // Cinq deref gardes individuellement, PAS un deref direct de mc["s"]
         // [0] etc : cette page (page 0) doit TOUJOURS se dessiner, elle se
@@ -294,32 +296,55 @@ class CockpitView extends WatchUi.View {
         if (vd != null && vd >= 1) {
             bouts.add(Pages.verdictMot(vd));
         }
+        // Vigilance Meteo-France, forme compacte (partage la ligne avec MC
+        // et le verdict trafic) -- seulement quand vg >= 1, meme regle
+        // "absente quand tout est calme" que le reste de la bande.
+        // vigilanceMotCourt rend deja null pour vert/inconnu.
+        var motVigCourt = Pages.vigilanceMotCourt(vg);
+        if (motVigCourt != null) {
+            bouts.add(motVigCourt);
+        }
         var nBouts = bouts.size();
+        var bandeAffichee = false;
         if (nBouts > 0) {
             var texteVoyants = "";
             for (var iv = 0; iv < nBouts; iv += 1) {
                 if (iv > 0) { texteVoyants += "   "; }
                 texteVoyants += bouts[iv];
             }
-            // Coloree par le pire des deux axes. Un trafic degrade est un
-            // signal de gravite connue (echelle 0-3 du mur) ; des fiches en
-            // instance seules n'en portent aucune -- gris neutre plutot que
-            // le vert de "fluide", qui laisserait croire a un satisfecit.
-            var couleurVoyants = (vd != null && vd >= 1) ? levelColor(vd)
-                                                          : Graphics.COLOR_LT_GRAY;
+            // Coloree par le pire des trois axes (MC ne porte aucun niveau,
+            // seule sa presence compte). Un trafic ou une vigilance degrades
+            // sont des signaux de gravite connue (echelle 0-3 partagee) ;
+            // des fiches en instance seules n'en portent aucune -- gris
+            // neutre plutot que le vert de "fluide", qui laisserait croire a
+            // un satisfecit.
+            var pireNiveau = 0;
+            if (vd != null && vd > pireNiveau) { pireNiveau = vd; }
+            if (vg != null && vg > pireNiveau) { pireNiveau = vg; }
+            var couleurVoyants = (pireNiveau >= 1) ? levelColor(pireNiveau)
+                                                    : Graphics.COLOR_LT_GRAY;
             dc.setColor(couleurVoyants, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, y, Graphics.FONT_XTINY, texteVoyants,
                         Graphics.TEXT_JUSTIFY_CENTER);
             y = y + hX + 2;
+            bandeAffichee = true;
         }
 
-        // Alertes : deux lignes au plus, le reste sur la seconde page.
+        // Alertes : le reste (au-dela de ce qui tient) reste consultable sur
+        // la seconde page, ET le compte total est deja porte par le libelle
+        // d'evenement en tete de page -- rien n'est perdu, juste replie.
+        // Le budget vertical restant jusqu'au pied ne permet qu'UNE seule
+        // ligne d'alerte quand la bande de voyants est deja affichee
+        // (mesure au device, fenix8solar51mm 280x280) : deux lignes pleines
+        // dans ce cas chevauchaient le pied. Sans bande, les deux lignes
+        // tiennent.
         if (al.size() == 0) {
             dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, y, Graphics.FONT_XTINY, "RAS",
                         Graphics.TEXT_JUSTIFY_CENTER);
         } else {
-            var nShow = al.size() > 2 ? 2 : al.size();
+            var maxAlertes = bandeAffichee ? 1 : 2;
+            var nShow = al.size() > maxAlertes ? maxAlertes : al.size();
             for (var i = 0; i < nShow; i += 1) {
                 dc.setColor(levelColor(al[i][0]), Graphics.COLOR_TRANSPARENT);
                 dc.drawText(w / 2, y, Graphics.FONT_XTINY, al[i][1],
@@ -370,6 +395,24 @@ class CockpitView extends WatchUi.View {
                     Graphics.TEXT_JUSTIFY_CENTER);
     }
 
+    // Troncature caractere par caractere jusqu'a rentrer dans `dispo` --
+    // meme filet de securite que MeteoView.ajusterTexte/TraficView.
+    // ajusterNom. Les libelles d'alerte sont bornes a 24 caracteres cote
+    // serveur (watch_state.LABEL_MAX), mais la config qui les produit reste
+    // modifiable sans que cette vue en soit avertie : mieux vaut tronquer
+    // que deborder si la borne serveur change un jour.
+    hidden function ajusterTexte(dc, texte, font, dispo) {
+        if (dc.getTextWidthInPixels(texte, font) <= dispo) {
+            return texte;
+        }
+        var t = texte;
+        while (t.length() > 1 &&
+               dc.getTextWidthInPixels(t, font) > dispo) {
+            t = t.substring(0, t.length() - 1);
+        }
+        return t;
+    }
+
     hidden function drawAlerts(dc) {
         var w = dc.getWidth();
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
@@ -382,10 +425,16 @@ class CockpitView extends WatchUi.View {
                         Graphics.TEXT_JUSTIFY_CENTER);
             return;
         }
+        // Le serveur borne deja a 5 alertes (watch_state.MAX_ALERTS), qui
+        // tiennent toutes entre y=66 et y=186 (mesure au device, ecran
+        // 280x280) : rien n'est jete ici, seule la largeur de chaque ligne
+        // est defendue.
         var y = 66;
         for (var i = 0; i < al.size(); i += 1) {
+            var dispo = largeurUtile(dc, y);
+            var texte = ajusterTexte(dc, al[i][1], Graphics.FONT_XTINY, dispo);
             dc.setColor(levelColor(al[i][0]), Graphics.COLOR_TRANSPARENT);
-            dc.drawText(w / 2, y, Graphics.FONT_XTINY, al[i][1],
+            dc.drawText(w / 2, y, Graphics.FONT_XTINY, texte,
                         Graphics.TEXT_JUSTIFY_CENTER);
             y += 30;
         }

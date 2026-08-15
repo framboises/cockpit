@@ -7,12 +7,13 @@ using Toybox.Math;
 // n'est demande edition par edition en faisant defiler.
 class EditionsView extends WatchUi.View {
 
-    // Quatre entrees par ecran, mesure sur le device (sonde de mise en page,
-    // buffer hors-ecran) : la quatrieme finit a 318 px sur 454, soit 100 px
-    // avant le repere de defilement. Cinq tiendraient encore -- la cinquieme
-    // finit a 382 -- mais elles se serrent la ou la corde du cadran rond se
-    // retrecit le plus vite, pour n'economiser qu'un cran de defilement.
-    hidden const PAR_ECRAN = 4;
+    // Trois entrees par ecran, mesure sur le VRAI device (fenix8solar51mm,
+    // 280x280 -- PAS 454, l'ecran d'un autre modele que les sondes de ce
+    // projet imposaient par erreur, cf. rapport de tache). A ce spacing
+    // (64 px par entree, cf. onUpdate), la troisieme finit a 244 px, sous le
+    // repere de defilement (246) ; la quatrieme commencerait a 254 et
+    // deborderait de l'ecran (280) des son detail.
+    hidden const PAR_ECRAN = 3;
 
     hidden var mEditions = null;
     hidden var mErreur = false;

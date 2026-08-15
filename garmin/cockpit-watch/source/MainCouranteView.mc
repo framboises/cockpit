@@ -62,9 +62,9 @@ class MainCouranteView extends WatchUi.View {
         var hX = dc.getFontHeight(Graphics.FONT_XTINY);
         var hS = dc.getFontHeight(Graphics.FONT_SMALL);
 
-        // Titre : moitie haute (y=26 < 227), c'est son sommet qui contraint
-        // -- largeurUtile(dc, 26) mesure 211 px, tres au-dessus des ~132 px
-        // necessaires au libelle.
+        // Titre : moitie haute, sommet contraint -- ecran mesure au device
+        // (fenix8solar51mm, 280x280), corde tres au-dessus du besoin du
+        // libelle.
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, 26, Graphics.FONT_XTINY, "MAIN COURANTE",
                     Graphics.TEXT_JUSTIFY_CENTER);
@@ -81,13 +81,21 @@ class MainCouranteView extends WatchUi.View {
 
         var mc = Pages.bloc(Cache.loadPages(), "mc");
 
-        // Premiere ligne icone, moitie haute (y < 227) : c'est son sommet
-        // qui contraint. C'est aussi la plus etroite des quatre lignes
-        // icone (elle est la plus proche du bord) -- la colonne icone/texte
-        // est donc fixee depuis SA corde, ce qui la garde alignee sur les
+        // Premiere ligne icone, moitie haute : c'est son sommet qui
+        // contraint. C'est aussi la plus etroite des quatre lignes icone
+        // (elle est la plus proche du bord) -- la colonne icone/texte est
+        // donc fixee depuis SA corde, ce qui la garde alignee sur les
         // quatre lignes plutot que de la faire onduler comme le ferait un
         // recalcul par ligne.
-        var y = 26 + hX + 14;
+        //
+        // Cinq lignes (quatre categories + le repli "+ N autres") doivent
+        // tenir entre le titre et le pied (241 sur un ecran de 280, mesure
+        // au device) : l'espacement d'origine (gap 14 puis 8 entre lignes)
+        // debordait sur le pied de 23 px (mesure a la sonde). Resserre a
+        // gap 10 puis 2 -- verifie par DebordementTest.mc, pire cas
+        // (compteurs a deux chiffres partout) : la derniere ligne finit a
+        // 236, 5 px avant le pied.
+        var y = 26 + hX + 10;
         var chordEtroite = largeurUtile(dc, y);
         var margeCol = (w - chordEtroite) / 2.0 + 6;
         var iconeX = margeCol;
@@ -95,32 +103,26 @@ class MainCouranteView extends WatchUi.View {
 
         ligneCategorie(dc, y, iconeX, texteX, mIconeSecours,
                        formatPaire(mc != null ? mc["s"] : null));
-        y += hS + 8;
+        y += hS + 2;
         ligneCategorie(dc, y, iconeX, texteX, mIconeSecurite,
                        formatPaire(mc != null ? mc["sc"] : null));
-        y += hS + 8;
+        y += hS + 2;
         ligneCategorie(dc, y, iconeX, texteX, mIconeTechnique,
                        formatPaire(mc != null ? mc["tq"] : null));
-        y += hS + 8;
+        y += hS + 2;
         ligneCategorie(dc, y, iconeX, texteX, mIconeFlux,
                        formatPaire(mc != null ? mc["f"] : null));
-        y += hS + 8;
+        y += hS + 2;
 
         // Ligne repliee : Information + Main Courante + Fourriere. Les
-        // taire ferait disparaitre des fiches reelles de l'ecran. Cette
-        // ligne bascule en moitie basse (y=230 >= 227) : c'est sa BASE
-        // (y + hS) qui contrainte -- largeurUtile(dc, y + hS) mesure encore
-        // 448 px a cet endroit, tres proche du centre du cadran.
+        // taire ferait disparaitre des fiches reelles de l'ecran.
         var texteAutres = "+ " + formatPaire(mc != null ? mc["o"] : null);
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, y, Graphics.FONT_SMALL, texteAutres,
                     Graphics.TEXT_JUSTIFY_CENTER);
 
         // Pied de page : age du bloc, ou son absence nommee explicitement --
-        // jamais un silence qui laisserait croire que tout va bien. Moitie
-        // basse (y=415, base=437 >= 227) : la base contraint, et
-        // largeurUtile(dc, 437) mesure 172 px, largement au-dessus des
-        // ~106 px necessaires au plus long des deux libelles possibles.
+        // jamais un silence qui laisserait croire que tout va bien.
         var yFoot = dc.getHeight() - hX - 17;
         if (mc == null) {
             dc.setColor(Graphics.COLOR_RED, Graphics.COLOR_TRANSPARENT);

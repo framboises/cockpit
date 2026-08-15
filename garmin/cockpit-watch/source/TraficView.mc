@@ -123,9 +123,9 @@ class TraficView extends WatchUi.View {
 
         var tr = Pages.bloc(Cache.loadPages(), "tr");
 
-        // Bandeau verdict : moitie haute (y=34 < 227), c'est son sommet qui
-        // contraint -- cf. sonde, largeurUtile(dc, 34) tres au-dessus du mot
-        // le plus long ("VIGILANCE") en FONT_MEDIUM. Toujours rendu, meme si
+        // Bandeau verdict : moitie haute, sommet contraint -- corde tres
+        // au-dessus du mot le plus long ("VIGILANCE") en FONT_MEDIUM.
+        // Toujours rendu, meme si
         // `tr` est absent : couleurVerdict(null) et Pages.verdictMot(null)
         // rendent deja gris fonce / "--" nativement -- la structure de la
         // page ne change pas d'un etat a l'autre, seul son contenu le fait.
@@ -181,7 +181,17 @@ class TraficView extends WatchUi.View {
             // sont des libelles Waze arbitraires, potentiellement longs
             // (cf. ajusterNom), une seule ligne pleine largeur leur laisse
             // toute la corde disponible plutot que la moitie.
-            for (var i = 0; i < terrains.size(); i += 1) {
+            //
+            // Le serveur envoie jusqu'a quatre terrains (MAX_TERRAINS,
+            // watch_pages.py), mais seuls DEUX tiennent entre le bandeau et
+            // le pied sur un ecran de 280 (mesure au device -- le 3e
+            // chevauchait deja le pied, le 4e etait entierement hors ecran).
+            // Le reste n'est pas jete : le nombre masque est ajoute a la
+            // ligne de comptes plus bas ("+N axes").
+            var maxTerrains = 2;
+            var nTerrains = terrains.size() > maxTerrains ? maxTerrains
+                                                            : terrains.size();
+            for (var i = 0; i < nTerrains; i += 1) {
                 var t = terrains[i];
 
                 var dispoNom = largeurUtile(dc, y);
@@ -210,6 +220,14 @@ class TraficView extends WatchUi.View {
         // alertes seul inconnu) doit se peindre pareil. formatComptes est
         // testee en valeur a part (DessinTest.mc).
         var texteComptes = formatComptes(tr["z"], tr["ac"]);
+        // Terrains masques par la limite d'affichage (pas les terrains
+        // absents du payload -- ceux-la, watch_pages ne les envoie deja
+        // plus) : ajoutes en toutes lettres, jamais tus.
+        var resteTerrains = terrains.size() - (terrains.size() > 2 ? 2 : terrains.size());
+        if (resteTerrains > 0) {
+            texteComptes += "  +" + resteTerrains.toString()
+                            + (resteTerrains > 1 ? " axes" : " axe");
+        }
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, y, Graphics.FONT_XTINY, texteComptes,
                     Graphics.TEXT_JUSTIFY_CENTER);
