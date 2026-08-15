@@ -302,6 +302,32 @@ class TestMeteo:
         assert bloc["t"] == watch_pages._epoch(run_at)
         assert bloc["t"] != watch_pages._epoch(maintenant)
 
+    def test_consignes_reelles_les_plus_longues_ne_sont_pas_tronquees(self, monkeypatch):
+        # CONSIGNE_MAX (44) avait ete calibre pour UNE ligne, alors que
+        # MeteoView.couperConsigne repartit desormais les caracteres
+        # survivants sur DEUX lignes -- la capacite de la seconde etait
+        # jetee avant que la montre ne voie le texte. Rejoue les deux pires
+        # consignes REELLES du systeme (meteo_etat.py : foudre+grele,
+        # meteo_thermique.py : WBGT danger) et verifie qu'elles survivent
+        # entieres. Un CONSIGNE_MAX qui redescendrait a 44 (ou tout en
+        # dessous de 59) ferait tomber ce test.
+        foudre = "Foudre prevue sur la zone avec grele — mise a l'abri"
+        wbgt = "WBGT 30.5 °C — Travail lourd a suspendre, rotations courtes"
+        assert len(foudre) == 52
+        assert len(wbgt) == 59
+
+        for consigne_texte in (foudre, wbgt):
+            etat = {
+                "actuel": {"temperature_c": 20.0},
+                "prochaine_pluie": {"attendue": False},
+                "consignes": [{"niveau": "danger", "texte": consigne_texte}],
+                "vigilance": None,
+            }
+            monkeypatch.setattr(watch_pages.meteo_etat, "etat_mur",
+                                lambda d, m, etat=etat: etat)
+            bloc = watch_pages.build_meteo(FakeDb(), datetime(2026, 8, 15, 12, 0))
+            assert bloc["cn"] == consigne_texte
+
     def test_valeurs_entieres_sont_converties_en_flottant(self, monkeypatch):
         # meteo_previsions ne garantit pas le type : une vitesse de vent
         # entiere est parfaitement legitime cote source. MeteoView.mc

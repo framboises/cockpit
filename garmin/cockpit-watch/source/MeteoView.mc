@@ -13,9 +13,9 @@ using Toybox.Time;
 // tel quel et colore par son niveau (`cl`) -- jamais reinterprete depuis les
 // valeurs brutes (temperature/vent/rafale/pluie).
 //
-// Contrairement a la main courante et a la frequentation, Waze^H^H la meteo
-// tourne toute l'annee (watch_state.py, meme constructeur en mode live et
-// past) : cette vue n'a pas de cas "hors evenement".
+// Contrairement a la main courante et a la frequentation, la meteo tourne
+// toute l'annee (watch_state.py, meme constructeur en mode live et past) :
+// cette vue n'a pas de cas "hors evenement".
 class MeteoView extends WatchUi.View {
 
     function initialize() {
@@ -80,12 +80,15 @@ class MeteoView extends WatchUi.View {
 
     // Coupe la consigne sur au plus deux lignes, a la derniere espace qui
     // tient dans `dispo1` (la corde de la premiere ligne). La consigne
-    // (<=44 caracteres) est le texte le plus large de la page -- elle ne
-    // tient pas toujours en une ligne en FONT_SMALL (mesure a la sonde).
-    // Rend un tableau de 1 ou 2 chaines, jamais plus : la seconde ligne est
-    // elle-meme tronquee par ajusterTexte si le reliquat ne tenait pas non
-    // plus dans sa propre corde (dispo2).
-    hidden function couperConsigne(dc, texte, font, dispo1, dispo2) {
+    // (<=CONSIGNE_MAX caracteres, watch_pages.py) est le texte le plus
+    // large de la page -- elle ne tient pas toujours en une ligne en
+    // FONT_SMALL (mesure a la sonde). Rend un tableau de 1 ou 2 chaines,
+    // jamais plus : la seconde ligne est elle-meme tronquee par
+    // ajusterTexte si le reliquat ne tenait pas non plus dans sa propre
+    // corde (dispo2). Publique (meme raison que FrequentationView.
+    // calculDeltaPct) pour rester testable en VALEUR sur device : une
+    // troncature au milieu d'un mot ne leve jamais d'exception.
+    function couperConsigne(dc, texte, font, dispo1, dispo2) {
         if (dc.getTextWidthInPixels(texte, font) <= dispo1) {
             return [texte];
         }

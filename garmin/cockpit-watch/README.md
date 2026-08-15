@@ -56,12 +56,12 @@ code mort, jamais câblé, et ont été supprimées à la tâche 14). Seules
 `EditionsView` et `SautMenu`, réellement poussées via `WatchUi.pushView`,
 gardent leur delegate (`EditionsDelegate`, `SautMenuDelegate`).
 
-100 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
+107 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
 `Pages`, la navigation (`CockpitView.nextPage`/`previousPage`/`setPage`/
 `pageView`) et les chemins de dessin des six vues (`DessinTest.mc` : le rendu
 ne doit lever dans aucun état atteignable, y compris un mode `past` sans pic
 ou un bloc de page absent).
-Le backend est couvert par 197 tests pytest, dont `watch_api.py`,
+Le backend est couvert par 222 tests pytest, dont `watch_api.py`,
 `watch_state.py`, `watch_peaks.py`, `watch_pages.py`, `trafic_etat.py` et
 `meteo_etat.py`.
 
@@ -227,7 +227,7 @@ Tests backend, depuis la racine du dépôt Cockpit (pas ce dossier) :
 python3 -m pytest tests/ -q
 ```
 
-`197 passed` — `test_watch_state.py`, `test_watch_api.py`, `test_watch_peaks.py`,
+`222 passed` — `test_watch_state.py`, `test_watch_api.py`, `test_watch_peaks.py`,
 `test_watch_pages.py`, `test_trafic_etat.py`, `test_meteo_etat.py`,
 `test_conftest.py`.
 

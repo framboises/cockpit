@@ -118,6 +118,47 @@ function testDessinVoyantsAbsentsQuandCalmeNeLevePas(logger) {
 }
 
 (:test)
+function testDessinVoyantsMcPaireManquanteNeLevePas(logger) {
+    // Correction 6 : si la forme du bloc mc change sans bump de
+    // Cache.SCHEMA_PAGES (ici : la cle "s" absente), la page 0 -- celle qui
+    // doit se lire en deux secondes -- ne doit JAMAIS lever dans onUpdate.
+    // Avant le garde-fou (CockpitView.premierElement), le deref nu
+    // mc["s"][0] + mc["sc"][0] + ... faisait tomber TOUTE la page sur cette
+    // seule cle manquante. Retirer premierElement fait tomber ce test.
+    var vue = new CockpitView();
+    Cache.save({"t" => Time.now().value(), "rx" => Time.now().value(),
+                "m" => "live", "n" => "24HM 26", "e" => 48213, "er" => 3200,
+                "p" => 44980,
+                "pk" => 39800, "pkt" => Time.now().value() - 5400,
+                "w" => 27.4, "wl" => 1, "al" => []});
+    Cache.savePages({"mc" => {"sc" => [1, 0], "tq" => [0, 0],
+                               "f" => [1, 0], "o" => [0, 0]},
+                     "tr" => {"vd" => 2}, "me" => null, "st" => null});
+    vue.onFetched(false, null);
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
+function testDessinVoyantsMcPaireVideNeLevePas(logger) {
+    // Variante de la meme correction : la cle existe mais porte un tableau
+    // VIDE plutot qu'absente -- un deref [0] nu leverait aussi la-dessus,
+    // premierElement doit s'en proteger tout autant.
+    var vue = new CockpitView();
+    Cache.save({"t" => Time.now().value(), "rx" => Time.now().value(),
+                "m" => "live", "n" => "24HM 26", "e" => 48213, "er" => 3200,
+                "p" => 44980,
+                "pk" => 39800, "pkt" => Time.now().value() - 5400,
+                "w" => 27.4, "wl" => 1, "al" => []});
+    Cache.savePages({"mc" => {"s" => [], "sc" => [1, 0], "tq" => [0, 0],
+                               "f" => [1, 0], "o" => [0, 0]},
+                     "tr" => {"vd" => 2}, "me" => null, "st" => null});
+    vue.onFetched(false, null);
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
 function testDessinSansBlocsPagesNeLevePas(logger) {
     // Aucun cache de pages disponible (jamais recu, ou source en panne sur
     // les quatre blocs) : Cache.loadPages() rend null, Pages.bloc doit
@@ -343,6 +384,57 @@ function testDessinTraficBlocAbsentNeLevePas(logger) {
     return true;
 }
 
+// Les trois tests qui suivent verifient formatComptes en VALEUR (correction
+// 5) : un compte ac/z INCONNU (alertes perimees ou source en panne, cf.
+// watch_pages.build_trafic/ALERTES_MAX_AGE) doit rendre des tirets, jamais
+// "0" -- qui se lirait comme un calme operationnel avere. Un test "ne leve
+// pas" ne le detecterait jamais, la chaine produite ne leve rien dans les
+// deux cas.
+
+(:test)
+function testFormatComptesTiretsQuandAlertesInconnu(logger) {
+    var vue = new TraficView();
+    Test.assertEqual(vue.formatComptes(null, null), "-- alerte . -- accident");
+    return true;
+}
+
+(:test)
+function testFormatComptesValeursConnuesEtPluriel(logger) {
+    var vue = new TraficView();
+    Test.assertEqual(vue.formatComptes(0, 0), "0 alerte . 0 accident");
+    Test.assertEqual(vue.formatComptes(1, 1), "1 alerte . 1 accident");
+    Test.assertEqual(vue.formatComptes(3, 2), "3 alertes . 2 accidents");
+    return true;
+}
+
+(:test)
+function testFormatComptesUneSeuleMoitieInconnue(logger) {
+    // Cas mixte, improbable cote serveur (ac/z tombent ensemble) mais la
+    // vue ne doit pas en dependre : chaque moitie se degrade
+    // independamment.
+    var vue = new TraficView();
+    Test.assertEqual(vue.formatComptes(null, 2), "-- alerte . 2 accidents");
+    Test.assertEqual(vue.formatComptes(5, null), "5 alertes . -- accident");
+    return true;
+}
+
+// Le test qui suit verifie statutSeverite en VALEUR (correction 2) : les
+// mots doivent etre ceux du MUR (circulation.html:590-601), pas ceux de
+// trafic_etat.classify_congestion qui n'alimente plus cette vue depuis que
+// severite_axe (double verrou) l'a remplace.
+
+(:test)
+function testStatutSeveriteReprendLesMotsDuMur(logger) {
+    var vue = new TraficView();
+    Test.assertEqual(vue.statutSeverite(0), "fluide");
+    Test.assertEqual(vue.statutSeverite(1), "dense");
+    Test.assertEqual(vue.statutSeverite(2), "ralenti");
+    Test.assertEqual(vue.statutSeverite(3), "fort ralenti");
+    Test.assertEqual(vue.statutSeverite(4), "bouchon");
+    Test.assertEqual(vue.statutSeverite(null), "--");
+    return true;
+}
+
 // Les cinq tests qui suivent exercent MeteoView (tache 12) : bloc absent, et
 // les quatre combinaisons pluie x consigne (le bloc reste vivant toute
 // l'annee, pas de mode past a part). Comme le reste de ce fichier, ils ne
@@ -352,16 +444,17 @@ function testDessinTraficBlocAbsentNeLevePas(logger) {
 
 (:test)
 function testDessinMeteoPluieEtConsigneNeLevePas(logger) {
-    // Le pire cas plausible : pluie attendue, consigne au maximum des 44
-    // caracteres (watch_pages.CONSIGNE_MAX), et vigilance orange -- exerce
-    // le lisere colore ET le decoupage de la consigne sur deux lignes.
+    // Le pire cas plausible : pluie attendue, consigne au maximum des 68
+    // caracteres (watch_pages.CONSIGNE_MAX, releve pour porter deux lignes
+    // -- tache 7), et vigilance orange -- exerce le lisere colore ET le
+    // decoupage de la consigne sur deux lignes.
     Application.Storage.deleteValue(Cache.KEY_PAGES);
     var vue = new MeteoView();
     Cache.savePages({"mc" => null, "tr" => null, "st" => null,
                      "me" => {"t" => Time.now().value() - 300, "tc" => 31.6,
                               "v" => 25.0, "rf" => 72.0, "pl" => 15,
                               "pm" => 8.0,
-                              "cn" => "Palpation renforcee sur tous les postes nord",
+                              "cn" => "Palpation renforcee sur tous les postes nord et sud avant le depart.",
                               "cl" => 2, "vg" => 2}});
     vue.onUpdate(dcDeTest());
     return true;
@@ -415,6 +508,47 @@ function testDessinMeteoBlocAbsentNeLevePas(logger) {
     Application.Storage.deleteValue(Cache.KEY_PAGES);
     var vue = new MeteoView();
     vue.onUpdate(dcDeTest());
+    return true;
+}
+
+// Correction 7 : CONSIGNE_MAX (watch_pages.py) est passe a 68 apres MESURE
+// sur device (fenix8solar51mm), pas estimation -- une sonde temporaire
+// (retiree apres usage, chiffres consignes dans le rapport de tache) a
+// mesure hX=22/hS=34/hM=39, les cordes reelles ou la consigne se dessine
+// (442.85 a 453.14 px selon le scenario pluie/sans-pluie -- "sans pluie"
+// porte le dispo1 le PLUS ETROIT, 442.85 px, pas "avec pluie" comme on
+// pourrait le supposer a tort) et la capacite reelle de couperConsigne sur
+// une chaine plausible : le decoupage tient ENTIER jusqu'a 72 caracteres,
+// tronque des 75 (mots utilises : "Palpation renforcee sur tous les postes
+// nord et sud avant le depart des courses prevues cet apres midi la").
+// 68 reste dans la marge verifiee (n=70 confirme tenir, n=72 aussi).
+//
+// Ce test-ci reste PERMANENT (contrairement a la sonde) : il rejoue les
+// DEUX pires consignes REELLES du systeme (meteo_etat.py, foudre+grele 52
+// caracteres et WBGT danger 59 caracteres) contre le dispo1/dispo2 le plus
+// etroit mesure (scenario "sans pluie") et verifie qu'aucune des deux
+// lignes n'est tronquee -- CONSIGNE_MAX ne sert a rien si couperConsigne
+// tronque quand meme la seconde ligne derriere lui.
+(:test)
+function testCouperConsigneNeTronquePasLesDeuxConsignesReelles(logger) {
+    var dc = dcDeTest();
+    var vue = new MeteoView();
+    // Mesures a la sonde, scenario "sans pluie" (le plus etroit) :
+    // dispo1 a y=177 (loin du centre 227), dispo2 a y=209.
+    var dispo1 = 442.85;
+    var dispo2 = 452.57;
+
+    var foudre = "Foudre prevue sur la zone avec grele — mise a l'abri";
+    var lignesFoudre = vue.couperConsigne(dc, foudre, Graphics.FONT_SMALL,
+                                          dispo1, dispo2);
+    Test.assertEqual(lignesFoudre.size(), 2);
+    Test.assertEqual(lignesFoudre[0] + " " + lignesFoudre[1], foudre);
+
+    var wbgt = "WBGT 30.5 °C — Travail lourd a suspendre, rotations courtes";
+    var lignesWbgt = vue.couperConsigne(dc, wbgt, Graphics.FONT_SMALL,
+                                        dispo1, dispo2);
+    Test.assertEqual(lignesWbgt.size(), 2);
+    Test.assertEqual(lignesWbgt[0] + " " + lignesWbgt[1], wbgt);
     return true;
 }
 

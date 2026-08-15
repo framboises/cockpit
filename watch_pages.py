@@ -42,9 +42,20 @@ STATUT_CLOS = 10
 NIVEAUX_CONSIGNE = {"vigilance": 1, "danger": 2, "critique": 3}
 
 # Une consigne plus longue deborde ce que couperConsigne (MeteoView.mc) peut
-# repartir sur ses DEUX lignes -- mesure a la sonde sur device (fenix8solar
-# 51mm), cf. rapport de tache : les deux pires cas reels (foudre+grele 52
-# caracteres, WBGT danger 59 caracteres) doivent passer entiers.
+# repartir sur ses DEUX LIGNES -- l'ancienne valeur (44) avait ete calibree
+# pour UNE seule ligne, alors que couperConsigne redecoupe le reliquat sur
+# une seconde depuis le debut. Mesure a la sonde sur device (fenix8solar
+# 51mm, cf. DessinTest.mc et le rapport de tache), pas devinee :
+#   - hauteurs de police : hX=22, hS=34, hM=39
+#   - corde disponible aux deux ordonnees ou la consigne se dessine : de
+#     442.85 px (scenario "sans pluie", ligne 1, la plus etroite -- PAS le
+#     scenario "avec pluie" comme on pourrait le supposer, elle est plus
+#     pres du bord) a 453.14 px (scenario "avec pluie", ligne 2)
+#   - a ce pire dispo, une chaine plausible tient ENTIERE sur deux lignes
+#     jusqu'a 72 caracteres, tronque des 75
+# Les deux pires consignes REELLES passent entieres avec marge : foudre +
+# grele (52 caracteres) et WBGT danger (59 caracteres, meteo_thermique.py).
+# 68 reste dans la marge verifiee (n=68 et n=70 confirmes tenir entiers).
 CONSIGNE_MAX = 68
 
 # Alertes perimees au-dela de cette duree : meme convention que

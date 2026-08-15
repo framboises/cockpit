@@ -154,6 +154,15 @@ class CockpitView extends WatchUi.View {
         }
     }
 
+    // Premier element d'une paire [en_cours, terminees], ou null si la
+    // paire elle-meme est absente ou vide -- jamais un deref nu, qui
+    // leverait sur une forme de bloc inattendue. Meme esprit defensif que
+    // MainCouranteView.formatPaire, sur la page qui ne doit jamais tomber.
+    hidden function premierElement(paire) {
+        if (paire == null || paire.size() == 0) { return null; }
+        return paire[0];
+    }
+
     hidden function levelColor(level) {
         if (level >= 3) { return Graphics.COLOR_RED; }
         if (level >= 2) { return Graphics.COLOR_ORANGE; }
@@ -265,9 +274,21 @@ class CockpitView extends WatchUi.View {
         var tr = Pages.bloc(pg, "tr");
         var vd = (tr != null) ? tr["vd"] : null;
         var bouts = [];
-        if (mc != null) {
-            var enCours = mc["s"][0] + mc["sc"][0] + mc["tq"][0] + mc["f"][0]
-                          + mc["o"][0];
+        // Cinq deref gardes individuellement, PAS un deref direct de mc["s"]
+        // [0] etc : cette page (page 0) doit TOUJOURS se dessiner, elle se
+        // lit en deux secondes. Si la forme du bloc mc change sans bump de
+        // Cache.SCHEMA_PAGES, MainCouranteView.formatPaire degrade deja
+        // proprement sa propre page (page 2) -- ici, un deref nu ferait
+        // lever onUpdate et effacerait la page la plus critique de l'app.
+        // Une paire manquante ou vide saute simplement le voyant MC, le
+        // reste de la page (trafic, WBGT, alertes) continue de se dessiner.
+        var s = premierElement(mc != null ? mc["s"] : null);
+        var sc = premierElement(mc != null ? mc["sc"] : null);
+        var tq = premierElement(mc != null ? mc["tq"] : null);
+        var f = premierElement(mc != null ? mc["f"] : null);
+        var o = premierElement(mc != null ? mc["o"] : null);
+        if (s != null && sc != null && tq != null && f != null && o != null) {
+            var enCours = s + sc + tq + f + o;
             if (enCours > 0) { bouts.add("MC " + enCours.toString()); }
         }
         if (vd != null && vd >= 1) {

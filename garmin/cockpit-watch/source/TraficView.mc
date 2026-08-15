@@ -15,6 +15,23 @@ class TraficView extends WatchUi.View {
         View.initialize();
     }
 
+    // "3 alertes . 1 accident", ou tirets si le compte est INCONNU (perime
+    // ou source en panne, watch_pages.build_trafic/ALERTES_MAX_AGE) --
+    // jamais "0", qui se lirait comme un calme operationnel avere. Publique
+    // (meme raison que FrequentationView.calculDeltaPct) pour rester
+    // testable en VALEUR : un retour a l'ancien "0 alerte . 0 accident" ne
+    // leverait aucune exception, un test "ne leve pas" ne le detecterait
+    // donc jamais.
+    function formatComptes(z, ac) {
+        var zTxt = (z != null)
+                   ? (z.toString() + (z > 1 ? " alertes" : " alerte"))
+                   : (Fmt.DASH + " alerte");
+        var acTxt = (ac != null)
+                   ? (ac.toString() + (ac > 1 ? " accidents" : " accident"))
+                   : (Fmt.DASH + " accident");
+        return zTxt + " . " + acTxt;
+    }
+
     // Meme geometrie que les autres vues : sur un cadran rond, la place
     // utile depend de l'eloignement au centre.
     hidden function largeurUtile(dc, y) {
@@ -38,10 +55,11 @@ class TraficView extends WatchUi.View {
         return Graphics.COLOR_GREEN;
     }
 
-    // Severite par terrain, 0-4 (trafic_etat.classify_congestion), echelle
-    // distincte du verdict global 0-3. 0 et 1 ("plus fluide"/"normal") sont
-    // tous deux sans probleme -> vert ; 4 ("bouchon") est aussi grave que 3
-    // ("sature") au regard de l'action a mener -> meme rouge.
+    // Severite par terrain, 0-4 (trafic_etat.severite_axe, double verrou du
+    // mur -- PAS trafic_etat.classify_congestion), echelle distincte du
+    // verdict global 0-3. 0 et 1 ("Fluide"/"Dense") sont tous deux sans
+    // probleme -> vert ; 4 ("Bouchon") est aussi grave que 3
+    // ("Fort ralenti") au regard de l'action a mener -> meme rouge.
     hidden function couleurSeverite(sev) {
         if (sev == null) { return Graphics.COLOR_DK_GRAY; }
         if (sev >= 4) { return Graphics.COLOR_RED; }
@@ -50,14 +68,22 @@ class TraficView extends WatchUi.View {
         return Graphics.COLOR_GREEN;
     }
 
-    // Mots non accentues (comme partout ailleurs dans l'app) repris de
-    // trafic_etat.classify_congestion.
-    hidden function statutSeverite(sev) {
+    // Mots non accentues (comme partout ailleurs dans l'app) repris du MUR
+    // (circulation.html:590-601, classify()) -- meme echelle 0-4 que
+    // trafic_etat.severite_axe, qui alimente t[3] ici. CE N'EST PAS le
+    // vocabulaire de trafic_etat.classify_congestion (normal/charge/
+    // sature/bouchon) : cette vue affichait ces mots-la contre un nombre
+    // qui vient desormais de severite_axe (double verrou du mur), une
+    // echelle differente -- pire cas trouve, severite 1 : le mur dit
+    // "Dense", l'ancien vocabulaire ici disait "normal". Publique (meme
+    // raison que FrequentationView.calculDeltaPct) pour rester testable en
+    // VALEUR : une derive de vocabulaire ne leve jamais d'exception.
+    function statutSeverite(sev) {
         if (sev == null) { return "--"; }
         if (sev >= 4) { return "bouchon"; }
-        if (sev == 3) { return "sature"; }
-        if (sev == 2) { return "charge"; }
-        if (sev == 1) { return "normal"; }
+        if (sev == 3) { return "fort ralenti"; }
+        if (sev == 2) { return "ralenti"; }
+        if (sev == 1) { return "dense"; }
         return "fluide";
     }
 
@@ -136,10 +162,13 @@ class TraficView extends WatchUi.View {
         if (terrains == null) { terrains = []; }
 
         if (terrains.size() == 0) {
-            // Liste vide != panne : aucun axe surveille n'est charge en ce
-            // moment, ce n'est jamais un blanc silencieux.
+            // Liste vide != panne : `r` porte les quatre terrains les plus
+            // charges SANS plancher de severite (watch_pages.build_trafic),
+            // donc une liste vide veut dire "aucun axe surveille n'a ete
+            // rapporte" -- pas "rien n'est charge", que le libelle precedent
+            // laissait entendre a tort.
             dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(w / 2, y, Graphics.FONT_SMALL, "aucun axe charge",
+            dc.drawText(w / 2, y, Graphics.FONT_SMALL, "aucun axe rapporte",
                         Graphics.TEXT_JUSTIFY_CENTER);
             y += hS + 10;
         } else {
@@ -173,11 +202,14 @@ class TraficView extends WatchUi.View {
         }
 
         // Comptes d'alertes/accidents Waze dans le geofence du circuit.
-        var z = (tr["z"] != null) ? tr["z"] : 0;
-        var ac = (tr["ac"] != null) ? tr["ac"] : 0;
-        var texteComptes = z.toString() + (z > 1 ? " alertes" : " alerte")
-                            + " . " + ac.toString()
-                            + (ac > 1 ? " accidents" : " accident");
+        // `z`/`ac` valent desormais reellement `null` quand le collecteur
+        // d'alertes est en panne ou perime (watch_pages.build_trafic,
+        // ALERTES_MAX_AGE) : un compte inconnu doit rendre "--", jamais
+        // "0" -- ce meme fichier le rend deja plus haut (lignes ~125-126)
+        // pour le cas bloc entier absent, ce cas-ci (bloc present, compte
+        // alertes seul inconnu) doit se peindre pareil. formatComptes est
+        // testee en valeur a part (DessinTest.mc).
+        var texteComptes = formatComptes(tr["z"], tr["ac"]);
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, y, Graphics.FONT_XTINY, texteComptes,
                     Graphics.TEXT_JUSTIFY_CENTER);
