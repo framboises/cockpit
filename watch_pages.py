@@ -10,10 +10,12 @@ l'appelant met le bloc a null et les autres pages restent servies.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 
 import meteo_etat
+import pcorg_summary
 import trafic_etat
+import watch_peaks
 
 logger = logging.getLogger(__name__)
 
@@ -186,4 +188,79 @@ def build_meteo(db, now):
         "cn": consigne[:CONSIGNE_MAX] if consigne else None,
         "cl": niveau,
         "vg": vg,
+    }
+
+
+def _epoch_du_pic(jour, heure_str):
+    """Epoch UTC du releve qui a produit le pic du jour, pas l'instant du calcul.
+
+    `_max_current_in_snapshots` ne rend que l'heure Paris formattee ("14h15"),
+    pas le datetime brut du releve. On la recombine avec `jour` pour obtenir
+    un horodatage reel : c'est precisement ce qui date LA DONNEE (le moment
+    ou le compteur a fourni cette valeur), et pas simplement << maintenant >>.
+    Si le compteur se fige, cet horodatage cesse d'avancer alors que `now`
+    continuerait de tourner -- c'est l'ecueil deja rencontre sur le bloc
+    meteo (tache 5).
+    """
+    if not heure_str:
+        return None
+    try:
+        heures, minutes = heure_str.split("h")
+        instant_paris = datetime.combine(
+            jour, time(int(heures), int(minutes)), tzinfo=pcorg_summary.TZ_PARIS)
+    except (TypeError, ValueError):
+        return None
+    return _epoch(instant_paris)
+
+
+def _pic_multi_source(db, jour, location_id):
+    """Plus haut pic de presents d'un jour donne, toutes sources balayees.
+
+    Le direct (`data_access`) ne porte que les jours pas encore archives :
+    un jour clos, dont l'admin a purge le direct, n'y laisse plus rien. Sans
+    balayer aussi les archives, interroger un jour passe rendrait un pic
+    absent alors que la donnee existe bel et bien -- ailleurs. Meme principe
+    que `watch_peaks.peak_for_edition`, qui refuse deja de deviner depuis le
+    nom de la collection : on regarde toutes les sources, sans a priori.
+    """
+    pic = None
+    heure = None
+    for collection in watch_peaks.snapshot_collections(db):
+        valeur, h = pcorg_summary._max_current_in_snapshots(
+            db, collection, jour, location_id)
+        if valeur is not None and (pic is None or valeur > pic):
+            pic = valeur
+            heure = h
+    return pic, heure
+
+
+def build_frequentation(db, event, year, now,
+                        location_id=watch_peaks.DEFAULT_LOCATION_ID):
+    """Pic de presents du jour, son heure, et le pic N-1 au jour EQUIVALENT.
+
+    L'alignement N-1 se fait au decalage au jour de course, jamais a la date
+    calendaire : c'est la convention de tout le cockpit (cf. CLAUDE.md,
+    bloc affluence), et une edition ne tombe pas le meme jour du mois d'une
+    annee sur l'autre. `resolve_race_dt` porte deja la garde sur l'annee et
+    les alias historique_controle -- on ne la contourne pas.
+    """
+    if not event or year is None:
+        return None
+
+    jour = now.date()
+    pic, heure = _pic_multi_source(db, jour, location_id)
+
+    pic_n1 = None
+    course = watch_peaks.resolve_race_dt(db, event, int(year))
+    course_n1 = watch_peaks.resolve_race_dt(db, event, int(year) - 1)
+    if course is not None and course_n1 is not None:
+        decalage = jour - course.date()
+        jour_n1 = course_n1.date() + decalage
+        pic_n1, _ = _pic_multi_source(db, jour_n1, location_id)
+
+    return {
+        "t": _epoch_du_pic(jour, heure),
+        "pj": pic,
+        "ph": heure,
+        "n1": pic_n1,
     }

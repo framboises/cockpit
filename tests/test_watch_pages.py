@@ -180,3 +180,135 @@ class TestMeteo:
         # sais pas dater", pas mentir en affichant l'instant du calcul.
         bloc = watch_pages.build_meteo(FakeDb(), datetime(2026, 8, 15, 12, 0))
         assert bloc["t"] is None
+
+
+class TestFrequentation:
+    def test_pic_du_jour_et_n1_au_jour_equivalent(self, monkeypatch):
+        # On isole le calcul de l'acces Mongo : ce qui est teste ici, c'est
+        # l'ALIGNEMENT au jour de course, pas la lecture des snapshots.
+        #
+        # La course 2026 et la course 2025 sont volontairement placees a
+        # deux dates calendaires DIFFERENTES (18 avril / 19 avril, meme
+        # samedi) -- exactement le cas reel des 24H MOTOS (cf. rapport,
+        # verifie sur la base dev : samedi 18/04/2026, samedi 19/04/2025).
+        # Avec deux courses au meme jour du mois, un alignement naif << meme
+        # date calendaire l'annee d'avant >> coinciderait par accident avec
+        # le bon alignement par decalage, et le sabotage de l'etape 6 ne
+        # ferait tomber aucun test -- c'est tautologique.
+        appels = []
+
+        def faux_max(db, coll, jour, loc, event=None):
+            appels.append(jour)
+            return (52100, "14h15") if len(appels) == 1 else (49800, "15h02")
+
+        monkeypatch.setattr(watch_pages.pcorg_summary,
+                            "_max_current_in_snapshots", faux_max)
+
+        def fausse_course(db, ev, an):
+            return {2026: datetime(2026, 4, 18, 13, 0, tzinfo=timezone.utc),
+                    2025: datetime(2025, 4, 19, 13, 0, tzinfo=timezone.utc)}[an]
+
+        monkeypatch.setattr(watch_pages.watch_peaks, "resolve_race_dt",
+                            fausse_course)
+
+        bloc = watch_pages.build_frequentation(
+            FakeDb(), "24H MOTOS", 2026,
+            datetime(2026, 4, 17, 12, 0), location_id="628")
+
+        assert bloc["pj"] == 52100
+        assert bloc["ph"] == "14h15"
+        assert bloc["n1"] == 49800
+        # jour = veille de la course 2026 (17/04, J-1). Le jour equivalent
+        # N-1 est donc la veille de la course 2025 (19/04 - 1 = 18/04), PAS
+        # le 17 avril 2025 (meme date calendaire que 2026, mais J-2 par
+        # rapport a la course 2025).
+        assert appels[1] == datetime(2025, 4, 19).date() - timedelta(days=1)
+
+    def test_sans_date_de_course_pas_de_n1(self, monkeypatch):
+        monkeypatch.setattr(watch_pages.watch_peaks, "resolve_race_dt",
+                            lambda db, ev, an: None)
+        monkeypatch.setattr(watch_pages.pcorg_summary,
+                            "_max_current_in_snapshots",
+                            lambda *a, **k: (52100, "14h15"))
+        bloc = watch_pages.build_frequentation(
+            FakeDb(), "24H MOTOS", 2026, datetime(2026, 4, 17, 12, 0))
+        assert bloc["pj"] == 52100
+        assert bloc["n1"] is None
+
+    def test_sans_evenement_rend_none(self):
+        assert watch_pages.build_frequentation(
+            FakeDb(), None, None, datetime(2026, 4, 17, 12, 0)) is None
+
+    def test_t_date_le_releve_du_pic_pas_l_instant_du_calcul(self, monkeypatch):
+        # `_max_current_in_snapshots` ne rend que l'heure Paris formattee du
+        # releve qui a produit le pic ("14h15") -- c'est cette heure-la, pas
+        # `now`, qui doit dater le bloc. Si le compteur se figeait a 14h15,
+        # `t` doit rester fige a 14h15 lui aussi.
+        monkeypatch.setattr(watch_pages.watch_peaks, "resolve_race_dt",
+                            lambda db, ev, an: None)
+        monkeypatch.setattr(watch_pages.pcorg_summary,
+                            "_max_current_in_snapshots",
+                            lambda *a, **k: (52100, "14h15"))
+        maintenant = datetime(2026, 4, 17, 20, 0)
+        bloc = watch_pages.build_frequentation(
+            FakeDb(), "24H MOTOS", 2026, maintenant)
+        attendu = datetime(2026, 4, 17, 14, 15, tzinfo=watch_pages.pcorg_summary.TZ_PARIS)
+        assert bloc["t"] == watch_pages._epoch(attendu)
+        assert bloc["t"] != watch_pages._epoch(maintenant)
+
+    def test_sans_pic_du_jour_t_est_none(self, monkeypatch):
+        # Aucun releve aujourd'hui : on ne sait pas dater, `t` doit le dire
+        # plutot que de mentir sur une fraicheur inventee.
+        monkeypatch.setattr(watch_pages.watch_peaks, "resolve_race_dt",
+                            lambda db, ev, an: None)
+        monkeypatch.setattr(watch_pages.pcorg_summary,
+                            "_max_current_in_snapshots",
+                            lambda *a, **k: (None, None))
+        bloc = watch_pages.build_frequentation(
+            FakeDb(), "24H MOTOS", 2026, datetime(2026, 4, 17, 12, 0))
+        assert bloc["pj"] is None
+        assert bloc["t"] is None
+
+    def test_pic_du_jour_lu_reellement_dans_data_access_et_larchive_n1(self, monkeypatch):
+        # Chemin reel, sans monkeypatch de _max_current_in_snapshots : on
+        # verifie que le vrai balayage Mongo (via FakeDb) retrouve le pic du
+        # jour dans data_access, et le pic N-1 dans une collection d'archive
+        # -- watch_peaks.snapshot_collections doit bien les balayer toutes.
+        # resolve_race_dt reste monkeypatche : le construire fidelement sur
+        # FakeDb demanderait de reproduire parametrages/historique_controle,
+        # hors perimetre de ce test (ce que couvre deja watch_peaks).
+        _ps = watch_pages.pcorg_summary
+
+        def snap(loc, current, heure_paris):
+            return {"_id": "snap-%s" % heure_paris.isoformat(),
+                    "requested_location_id": loc,
+                    "current": str(current),
+                    "timestamp": heure_paris.astimezone(timezone.utc)
+                                            .replace(tzinfo=None)}
+
+        jour_2026 = datetime(2026, 4, 18, 14, 15, tzinfo=_ps.TZ_PARIS)
+        jour_2025 = datetime(2025, 4, 18, 15, 2, tzinfo=_ps.TZ_PARIS)
+
+        db = FakeDb(
+            data_access=[
+                snap("628", 100, datetime(2026, 4, 18, 9, 0, tzinfo=_ps.TZ_PARIS)),
+                snap("628", 52100, jour_2026),
+            ],
+            hsh_archive_compteurs_test=[
+                snap("628", 49800, jour_2025),
+            ],
+        )
+
+        def course(db_arg, ev, an):
+            return {2026: datetime(2026, 4, 18, 13, 0, tzinfo=timezone.utc),
+                    2025: datetime(2025, 4, 18, 13, 0, tzinfo=timezone.utc)}[an]
+
+        monkeypatch.setattr(watch_pages.watch_peaks, "resolve_race_dt", course)
+
+        bloc = watch_pages.build_frequentation(
+            db, "24H MOTOS", 2026, datetime(2026, 4, 18, 20, 0),
+            location_id="628")
+
+        assert bloc["pj"] == 52100
+        assert bloc["ph"] == "14h15"
+        assert bloc["n1"] == 49800
