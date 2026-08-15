@@ -13,8 +13,19 @@ memes fonctions -- il n'en existe toujours qu'une version.
 """
 
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import meteo_thermique as thermique
+
+# Convention du projet (documentee dans watch_state.py) : `maintenant`, tel
+# qu'il arrive ici depuis meteo.py (datetime.now(), naif) et watch_pages.py
+# (naif, heure locale Paris egalement), est un naif-PARIS -- jamais naif-UTC.
+# Sert uniquement a convertir `maintenant` avant de le comparer aux
+# horodatages CONSCIENTS des bulletins de vigilance (etat_vigilance/
+# niveau_vigilance), qui portent un fuseau explicite (toujours UTC cote
+# Meteo-France). Un simple `replace(tzinfo=timezone.utc)` decalerait
+# l'instant de 1h ou 2h (heure d'hiver/ete) -- il faut une VRAIE conversion.
+TZ_PARIS = ZoneInfo("Europe/Paris")
 
 # ---------------------------------------------------------------------------
 # Horizon et seuils du mur
@@ -361,16 +372,40 @@ def etat_mur(db, maintenant):
 
     # etat_vigilance/niveau_vigilance comparent `maintenant` aux `debut`/`fin`
     # des periodes du bulletin, parses par `_instant()` en datetimes CONSCIENTS
-    # (les chaines du producteur portent toujours un fuseau). `maintenant`, lui,
-    # est naif ici la moitie du temps (meteo.py appelle etat_mur avec
-    # datetime.now(), watch_pages.py avec un datetime deja conscient) : un naif
-    # compare a un conscient leve TypeError. Le reste de cette fonction traite
-    # `maintenant` comme un naif-UTC (meme convention que les horodatages Mongo
-    # qu'il compare ailleurs, ex. _fraicheur_mur) -- on ne le convertit donc
-    # QUE pour ces deux appels, sans toucher a la valeur transmise partout
-    # ailleurs dans ce dictionnaire.
-    maintenant_pour_vigilance = (maintenant if maintenant.tzinfo is not None
-                                  else maintenant.replace(tzinfo=timezone.utc))
+    # et toujours en UTC (le producteur, Meteo-France, publie systematiquement
+    # avec un fuseau explicite). `maintenant`, lui, arrive ici NAIF la moitie
+    # du temps -- et quand il est naif, c'est en heure LOCALE PARIS, pas UTC :
+    # meteo.py appelle etat_mur(_db(), datetime.now()) (naif, heure serveur),
+    # watch_pages.py transmet le `now` documente dans watch_state.py comme
+    # << naif, heure locale Paris >>. Un naif compare a un conscient leve
+    # TypeError -- il faut donc convertir avant ces deux appels.
+    #
+    # Un simple `replace(tzinfo=timezone.utc)` (premiere version de cette
+    # correction) RE-ETIQUETTE l'instant sans le deplacer : un `maintenant`
+    # de 14h00 heure de Paris devenait 14h00 UTC, soit 16h00 heure de Paris
+    # en ete -- deux heures d'avance qui peuvent faire retomber le calcul sur
+    # une AUTRE periode du bulletin (`courante`) et fausser l'age calcule,
+    # donc `vg`, la couleur de vigilance affichee en tete de la montre. Avant
+    # cette fonction (et avant meme le premier passage de `maintenant` a
+    # etat_vigilance/niveau_vigilance), la production etait correcte : ces
+    # deux fonctions ignoraient `maintenant` et lisaient
+    # `datetime.now(timezone.utc)`, l'instant absolu reel. `astimezone(UTC)`
+    # apres avoir pose le VRAI fuseau (Europe/Paris, avec son decalage
+    # hiver/ete) restaure cette exactitude tout en rendant la fonction
+    # deterministe pour l'horloge qu'on lui donne.
+    #
+    # Ni `maintenant` (transmis tel quel plus bas, y compris a
+    # `_fraicheur_mur`) ni le reste de cette fonction ne sont touches : elle
+    # continue de traiter `maintenant` comme un naif-PARIS partout ailleurs
+    # (comparaisons a `meteo_previsions`, qui est aussi en heure de Paris).
+    # `_fraicheur_mur` compare CE MEME naif-Paris a des horodatages Mongo
+    # naifs-UTC -- un decalage preexistant, deplace verbatim depuis
+    # meteo.mur() a l'extraction de cette fonction, qui alimente le mur du PC
+    # Organisation. Corriger ce point changerait l'affichage du mur, hors
+    # perimetre de cette tache : signale, non repare.
+    maintenant_pour_vigilance = (
+        maintenant if maintenant.tzinfo is not None
+        else maintenant.replace(tzinfo=TZ_PARIS).astimezone(timezone.utc))
 
     return {
         "maintenant": maintenant.isoformat(timespec="seconds"),

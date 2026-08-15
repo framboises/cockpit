@@ -394,6 +394,43 @@ class TestVigilance:
         assert vigilance["motif"] == "validite_publiee"
         assert vigilance["perime"] is False
 
+    def test_maintenant_est_converti_depuis_paris_pas_reetiquete(self):
+        # `maintenant` arrive ici NAIF en heure locale PARIS (watch_state.py
+        # le documente ainsi, meteo.py appelle etat_mur(_db(),
+        # datetime.now())) -- jamais naif-UTC. Un simple
+        # `replace(tzinfo=timezone.utc)` decale l'instant de l'ecart Paris/UTC
+        # (2h en ete) au lieu de le convertir : ce test choisit un
+        # `maintenant` et des periodes ou les deux interpretations tombent
+        # dans des periodes DIFFERENTES, pour que l'erreur change le resultat
+        # observable (`couleur_jour`) plutot que de rester invisible.
+        #
+        # 21h30 heure de Paris, mi-aout (CEST, UTC+2) = 19h30 UTC :
+        #   - periode A (jaune) couvre 18h00-20h00 UTC -> couvre 19h30 UTC,
+        #     l'interpretation CORRECTE doit la choisir comme "courante".
+        #   - periode B (rouge) couvre 20h00-23h00 UTC -> ne couvre PAS
+        #     19h30 UTC, mais couvrirait 21h30 si `maintenant` etait
+        #     RE-ETIQUETE UTC au lieu d'etre converti depuis Paris. Une
+        #     regression vers `replace(tzinfo=timezone.utc)` ferait tomber ce
+        #     test sur "rouge" au lieu de "jaune".
+        maintenant_paris = datetime(2026, 8, 15, 21, 30)
+        bulletin = {
+            "departement": "72",
+            "update_time": "2026-08-15T09:00:00+00:00",
+            "periodes": [
+                {"echeance": "J", "couleur_max": "jaune",
+                 "debut": "2026-08-15T18:00:00+00:00",
+                 "fin": "2026-08-15T20:00:00+00:00",
+                 "phenomenes": [{"nom": "Orages"}]},
+                {"echeance": "J1", "couleur_max": "rouge",
+                 "debut": "2026-08-15T20:00:00+00:00",
+                 "fin": "2026-08-15T23:00:00+00:00",
+                 "phenomenes": [{"nom": "Canicule"}]},
+            ],
+        }
+        etat = meteo_etat.etat_mur(
+            base(meteo_vigilance=[bulletin]), maintenant_paris)
+        assert etat["vigilance"]["couleur_jour"] == "jaune"
+
     def test_les_fonctions_de_vigilance_restent_publiques(self):
         # meteo.py et app.py les importent : elles ne vivent plus dans meteo.py
         # mais leur contrat, lui, n'a pas bouge.

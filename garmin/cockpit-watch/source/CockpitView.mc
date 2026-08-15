@@ -309,6 +309,15 @@ class CockpitView extends WatchUi.View {
             if (vg != null && vg > pireNiveau) { pireNiveau = vg; }
             var couleurVoyants = (pireNiveau >= 1) ? levelColor(pireNiveau)
                                                     : Graphics.COLOR_LT_GRAY;
+            // Filet de securite : "MC N   TENSION   VIG ORANGE" (jusqu'a
+            // trois elements) n'a jamais ete borne en largeur -- trouve a
+            // la relecture, avec une fixture de test qui ne jouait pas non
+            // plus le pire cas reel (compteurs a deux chiffres, vigilance
+            // rouge). Tronque plutot que de deborder du verre rond, meme
+            // filet que TraficView/FrequentationView.
+            var dispoVoyants = Pages.largeurUtile(dc, y, hX);
+            texteVoyants = ajusterTexte(dc, texteVoyants, Graphics.FONT_XTINY,
+                                        dispoVoyants);
             dc.setColor(couleurVoyants, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, y, Graphics.FONT_XTINY, texteVoyants,
                         Graphics.TEXT_JUSTIFY_CENTER);

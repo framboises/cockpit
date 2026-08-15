@@ -265,10 +265,39 @@ function testDebordementCockpitPage0PireCasNeDeborgePas(logger) {
                 "w" => 32.6, "wl" => 2,
                 "al" => [[3, "SOS tablette"], [2, "Vent 72 km/h"],
                          [1, "Ouverture imminente"]]});
-    Cache.savePages({"mc" => {"s" => [2, 14], "sc" => [1, 8], "tq" => [0, 3],
-                               "f" => [1, 1], "o" => [3, 5]},
-                     "tr" => {"vd" => 2},
-                     "me" => {"vg" => 2}, "st" => null});
+    // Pire cas REEL de la bande de voyants (trouve manquant a la relecture :
+    // la fixture precedente rendait "MC 7", un seul chiffre, jamais le
+    // compteur a deux chiffres plausible en pleine affluence) : MC a deux
+    // chiffres, verdict trafic CRITIQUE, vigilance ROUGE -- "MC 78   CRITIQUE   VIG ROUGE".
+    Cache.savePages({"mc" => {"s" => [12, 14], "sc" => [21, 8], "tq" => [7, 3],
+                               "f" => [15, 1], "o" => [23, 5]},
+                     "tr" => {"vd" => 3},
+                     "me" => {"vg" => 3}, "st" => null});
+    vue.onFetched(false, null);
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    verifierNeDebordePas(logger, dc, piedStandard(dc));
+    return true;
+}
+
+// Complement : le pire cas REALISTE ci-dessus ne force pas la troncature
+// (26,8 corde disponible suffit), donc a lui seul il ne prouve pas que le
+// filet de securite ajoute a la relecture (ajusterTexte sur la bande de
+// voyants) fonctionne reellement -- seulement qu'il ne CASSE rien. Ce test
+// force deliberement un MC a six chiffres (au-dela de tout plausible) pour
+// exercer effectivement le chemin de troncature et prouver qu'il reste dans
+// le verre rond.
+(:test)
+function testDebordementCockpitPage0BandeForceLaTroncatureNeDeborgePas(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new CockpitView();
+    Cache.save({"t" => Time.now().value(), "rx" => Time.now().value(),
+                "m" => "live", "n" => "24HM 26", "e" => 148919, "er" => 3200,
+                "p" => 142622, "pk" => 148919, "pkt" => Time.now().value() - 5400,
+                "w" => 32.6, "wl" => 2, "al" => []});
+    Cache.savePages({"mc" => {"s" => [999999, 0], "sc" => [0, 0],
+                               "tq" => [0, 0], "f" => [0, 0], "o" => [0, 0]},
+                     "tr" => {"vd" => 3}, "me" => {"vg" => 3}, "st" => null});
     vue.onFetched(false, null);
     var dc = dcEnregistrement();
     vue.onUpdate(dc);
