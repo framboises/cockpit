@@ -183,6 +183,56 @@ class TestMeteo:
 
 
 class TestFrequentation:
+    def test_lit_le_compteur_principal_choisi_par_lexploitation(self, monkeypatch):
+        # La page 1 de la montre lit deja le compteur PRINCIPAL choisi dans
+        # le live-controle (watch_state.read_principal_id), pas un id fige.
+        # Si cette page-ci restait sur "628" en dur, le jour ou
+        # l'exploitation bascule le principal (panne d'un boitier, secours),
+        # les deux pages de la meme montre liraient deux appareils physiques
+        # differents pour le meme instant, sans que rien ne le signale. `pj`
+        # et `n1` doivent en plus venir du MEME compteur : ce sont deux
+        # chiffres compares cote a cote.
+        locs_interrogees = []
+
+        def faux_max(db, coll, jour, loc, event=None):
+            locs_interrogees.append(loc)
+            return (52100, "14h15")
+
+        monkeypatch.setattr(watch_pages.pcorg_summary,
+                            "_max_current_in_snapshots", faux_max)
+        monkeypatch.setattr(watch_pages.watch_peaks, "resolve_race_dt",
+                            lambda db, ev, an: None)
+
+        db = FakeDb(data_access=[
+            {"_id": "___GLOBAL___", "compteur_principal_id": "999"},
+        ])
+        bloc = watch_pages.build_frequentation(
+            db, "24H MOTOS", 2026, datetime(2026, 4, 17, 12, 0))
+
+        assert bloc["pj"] == 52100
+        # Le compteur choisi par l'exploitation ("999"), jamais "628" en dur.
+        assert locs_interrogees == ["999"]
+
+    def test_repli_sur_le_compteur_par_defaut_sans_principal_configure(self, monkeypatch):
+        # Base sans document global (ou sans compteur_principal_id) : repli
+        # sur watch_peaks.DEFAULT_LOCATION_ID, le comportement actuel.
+        locs_interrogees = []
+
+        def faux_max(db, coll, jour, loc, event=None):
+            locs_interrogees.append(loc)
+            return (52100, "14h15")
+
+        monkeypatch.setattr(watch_pages.pcorg_summary,
+                            "_max_current_in_snapshots", faux_max)
+        monkeypatch.setattr(watch_pages.watch_peaks, "resolve_race_dt",
+                            lambda db, ev, an: None)
+
+        bloc = watch_pages.build_frequentation(
+            FakeDb(), "24H MOTOS", 2026, datetime(2026, 4, 17, 12, 0))
+
+        assert bloc["pj"] == 52100
+        assert locs_interrogees == [watch_pages.watch_peaks.DEFAULT_LOCATION_ID]
+
     def test_pic_du_jour_et_n1_au_jour_equivalent(self, monkeypatch):
         # On isole le calcul de l'acces Mongo : ce qui est teste ici, c'est
         # l'ALIGNEMENT au jour de course, pas la lecture des snapshots.

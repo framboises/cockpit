@@ -16,6 +16,7 @@ import meteo_etat
 import pcorg_summary
 import trafic_etat
 import watch_peaks
+import watch_state
 
 logger = logging.getLogger(__name__)
 
@@ -268,8 +269,7 @@ def _jour_semaine_aligne(jour_n1, jour_semaine_cible):
     return jour_n1 - timedelta(days=decalage)
 
 
-def build_frequentation(db, event, year, now,
-                        location_id=watch_peaks.DEFAULT_LOCATION_ID):
+def build_frequentation(db, event, year, now, location_id=None):
     """Pic de presents du jour, son heure, et le pic N-1 au jour EQUIVALENT.
 
     L'alignement N-1 se fait au decalage au jour de course, jamais a la date
@@ -283,9 +283,26 @@ def build_frequentation(db, event, year, now,
     sans cela, une edition dont `globalHoraires.race` change de convention
     (depart / arrivee) d'un millesime a l'autre fausserait l'alignement
     d'un jour entier, silencieusement.
+
+    `location_id` par defaut n'est PAS une constante figee : c'est le
+    compteur PRINCIPAL choisi par l'exploitation dans le live-controle
+    (`watch_state.read_principal_id`), le meme que celui que lit la page 1
+    de la montre. Repli sur `watch_peaks.DEFAULT_LOCATION_ID` seulement si
+    le document global ne le precise pas. Sans cet alignement, le jour ou
+    l'exploitation bascule le compteur principal (panne d'un boitier,
+    passage sur un secours), cette page continuerait de lire l'ancien
+    appareil en dur -- deux pages de la meme montre montrant deux
+    compteurs physiques differents pour le meme instant, sans que rien ne
+    le signale. `pj`/`ph` ET `n1` utilisent le meme `location_id` : ce sont
+    deux chiffres affiches cote a cote comme une comparaison, ils doivent
+    venir du meme appareil ou l'ecart ne veut rien dire. Si le principal
+    est repointe vers un boitier sans historique N-1, `n1` tombe
+    naturellement a `None` -- jamais un chiffre invente.
     """
     if not event or year is None:
         return None
+    if location_id is None:
+        location_id = watch_state.read_principal_id(db) or watch_peaks.DEFAULT_LOCATION_ID
 
     jour = now.date()
     pic, heure = _pic_multi_source(db, jour, location_id)
