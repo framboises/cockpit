@@ -12,7 +12,13 @@ l'appelant met le bloc a null et les autres pages restent servies.
 import logging
 from datetime import datetime, timezone
 
+import trafic_etat
+
 logger = logging.getLogger(__name__)
+
+# Au-dela, la liste ne tient plus sur un cadran rond et le detail se lit sur
+# le cockpit.
+MAX_TERRAINS = 4
 
 # Les quatre categories nommees sur la page, et leur cle dans le payload.
 CATEGORIES_NOMMEES = (
@@ -69,3 +75,38 @@ def build_main_courante(db, event, year, now_utc=None):
         autres[1] += paire[1]
     bloc["o"] = autres
     return bloc
+
+
+def build_trafic(db, now_utc=None):
+    """Verdict global, comptes geofences et terrains les plus charges."""
+    routes = trafic_etat.lire_routes(db)
+    alertes = trafic_etat.lire_alertes(db)
+    if not routes and not alertes:
+        return None
+
+    terrains = trafic_etat.agreger_terrains(routes)
+    comptes = trafic_etat.compter_alertes(alertes)
+    pire = max([t["severity"] for t in terrains], default=0)
+
+    # Tri par gravite decroissante, pas par ratio : la montre montre d'abord
+    # ce qui coince, et deux terrains de ratios voisins peuvent tomber dans
+    # des paliers differents.
+    ordonnes = sorted(terrains, key=lambda t: t["severity"], reverse=True)
+
+    resume = []
+    for terrain in ordonnes[:MAX_TERRAINS]:
+        sens = {"in": "i", "out": "o"}.get(terrain.get("direction"), "-")
+        resume.append([
+            terrain["terrain"],
+            sens,
+            int(round((terrain["currentTime"] or 0) / 60.0)),
+            terrain["severity"],
+        ])
+
+    return {
+        "t": _epoch(trafic_etat.fraicheur(db)),
+        "vd": trafic_etat.verdict_global(comptes, pire),
+        "ac": comptes.get("ACCIDENT", 0),
+        "z": comptes.get("total", 0),
+        "r": resume,
+    }

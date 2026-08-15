@@ -46,3 +46,42 @@ class TestMainCourante:
 
     def test_sans_evenement_rend_none(self):
         assert watch_pages.build_main_courante(FakeDb(), None, None, NOW) is None
+
+
+class TestTrafic:
+    def _db(self, routes, alertes):
+        return FakeDb(
+            waze_trafic=[{"fetched_at": datetime(2026, 8, 15, 11, 59),
+                          "data": {"routes": routes}}],
+            waze_alerts=[{"fetched_at": datetime(2026, 8, 15, 11, 59),
+                          "data": alertes}],
+        )
+
+    def test_quatre_terrains_au_plus_les_plus_charges(self):
+        routes = [{"name": "#I# T%d" % i, "time": 100 * (i + 1),
+                   "historicTime": 100} for i in range(6)]
+        bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
+        assert len(bloc["r"]) == 4
+        # Le plus charge en premier : la montre montre d'abord ce qui coince.
+        assert bloc["r"][0][0] == "T5"
+
+    def test_temps_converti_en_minutes(self):
+        # currentTime est en SECONDES cote Waze.
+        routes = [{"name": "#I# Ouest", "time": 1080, "historicTime": 600}]
+        bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
+        assert bloc["r"][0][2] == 18
+
+    def test_verdict_et_comptes_geofences(self):
+        import trafic_etat
+        dedans = {"type": "ACCIDENT",
+                  "location": {"y": trafic_etat.ZONE_CENTER_LAT,
+                               "x": trafic_etat.ZONE_CENTER_LON}}
+        dehors = {"type": "ACCIDENT",
+                  "location": {"y": trafic_etat.ZONE_CENTER_LAT + 0.5,
+                               "x": trafic_etat.ZONE_CENTER_LON}}
+        bloc = watch_pages.build_trafic(self._db([], [dedans, dehors]), NOW)
+        assert bloc["ac"] == 1
+        assert bloc["vd"] == 3
+
+    def test_sans_donnee_waze_rend_none(self):
+        assert watch_pages.build_trafic(FakeDb(), NOW) is None
