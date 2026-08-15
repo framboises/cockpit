@@ -6,12 +6,13 @@ module Mock {
     // donnee perimee, hors evenement (arret volontaire), source en panne
     // sur les quatre blocs, hors evenement (collecteur en panne).
     //
-    // NOTE : ces quatre blocs n'atteignent Cache.loadPages() qu'en passant
-    // par le meme chemin que le reseau (Api.onReceive -> Cache.savePages).
-    // Api.fetch() court-circuite ce chemin en mode mock -- ils restent donc
-    // ici a titre de forme representative pour les futures vues de page,
-    // sans etre exerces par le rendu de la page 1 tant que ce branchement
-    // n'existe pas.
+    // Ce dictionnaire imite le PAYLOAD BRUT du serveur, pas la forme du
+    // cache : `al` porte donc des dictionnaires {"l"=>niveau, "m"=>libelle}
+    // (cf. watch_state.select_alerts), pas les tuples compacts que le cache
+    // stocke. C'est Api.fetch() qui fait passer ce dictionnaire par
+    // toCacheDict/toPagesDict, exactement comme onReceive() le fait pour une
+    // vraie reponse reseau -- la coupure noyau/pages ne doit se faire qu'a
+    // cet unique endroit.
     function state(scenario, nowSec) {
         if (scenario == 4) {
             // Hors evenement, arret volontaire : plus de direct, mais le pic
@@ -74,8 +75,9 @@ module Mock {
                     "er" => 5200, "p" => 58400,
                     "pk" => 50690, "pkt" => nowSec - 900,
                     "w" => 31.6, "wl" => 3,
-                    "al" => [[3, "SOS tablette"], [2, "Vent 72 km/h"],
-                             [1, "Ouverture imminente"]],
+                    "al" => [{"l" => 3, "m" => "SOS tablette"},
+                             {"l" => 2, "m" => "Vent 72 km/h"},
+                             {"l" => 1, "m" => "Ouverture imminente"}],
                     "mc" => {"t" => nowSec, "s" => [3, 9], "sc" => [2, 5],
                              "tq" => [2, 3], "f" => [1, 2], "o" => [0, 2]},
                     "tr" => {"t" => nowSec, "vd" => 3, "ac" => 1, "z" => 6,
@@ -116,7 +118,7 @@ module Mock {
                     "er" => 3200, "p" => 44980,
                     "pk" => 39800, "pkt" => nowSec - 5400,
                     "w" => 27.4, "wl" => 1,
-                    "al" => [[1, "Ouverture imminente"]],
+                    "al" => [{"l" => 1, "m" => "Ouverture imminente"}],
                     "mc" => null, "tr" => null, "me" => null, "st" => null};
         }
         // Scenario nominal (0 par defaut) : calme, aucun voyant.
@@ -124,7 +126,8 @@ module Mock {
                 "mr" => null, "n" => "24HM 26", "e" => 48213, "er" => 3200,
                 "p" => 44980,
                 "pk" => 39800, "pkt" => nowSec - 5400,
-                "w" => 27.4, "wl" => 1, "al" => [[1, "Ouverture imminente"]],
+                "w" => 27.4, "wl" => 1,
+                "al" => [{"l" => 1, "m" => "Ouverture imminente"}],
                 "mc" => {"t" => nowSec, "s" => [0, 5], "sc" => [0, 2],
                          "tq" => [0, 1], "f" => [0, 0], "o" => [0, 1]},
                 "tr" => {"t" => nowSec, "vd" => 0, "ac" => 0, "z" => 1,

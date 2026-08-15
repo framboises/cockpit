@@ -220,3 +220,50 @@ function testFetchRefuseUneRequeteDejaEnVol(logger) {
     Api.mInFlightSince = null;
     return true;
 }
+
+// Fix round 1, tache 9 : la branche mock de fetch() invoquait directement le
+// callback avec Mock.state() -- Cache.save() dans onFetched stockait alors
+// les quatre blocs mc/tr/me/st verbatim dans le NOYAU, exactement la forme
+// que la coupure en deux cles Storage cherche a empecher (et que la vraie
+// glance ne recoit jamais). fetch() en mode mock doit etre symetrique du
+// chemin reseau (onReceive) : toCacheDict pour le noyau, toPagesDict +
+// Cache.savePages pour les blocs.
+(:test)
+function testFetchModeMockRepartitLesQuatreBlocsCommeLeReseau(logger) {
+    ApiTestSupport.reset();
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+
+    var mockAvant = Application.Properties.getValue("mockData");
+    var scenarioAvant = Application.Properties.getValue("mockScenario");
+    Application.Properties.setValue("mockData", true);
+    Application.Properties.setValue("mockScenario", 2);
+
+    Api.mCallback = null;
+    Api.fetch(new Lang.Method(ApiTestSupport, :capture));
+
+    Test.assertEqual(ApiTestSupport.mOk, true);
+    var st = ApiTestSupport.mSt;
+    Test.assert(st != null);
+    // Le noyau ne porte JAMAIS les quatre blocs.
+    Test.assert(!st.hasKey("mc"));
+    Test.assert(!st.hasKey("tr"));
+    Test.assert(!st.hasKey("me"));
+    Test.assert(!st.hasKey("st"));
+    // Mais garde bien les champs qui lui reviennent, passes par
+    // toCacheDict -- y compris les alertes, converties depuis le format brut
+    // {"l"=>, "m"=>} vers les tuples compacts du cache.
+    Test.assertEqual(st["p"], 58400);
+    Test.assertEqual(st["al"].size(), 3);
+    Test.assertEqual(st["al"][0][0], 3);
+    Test.assertEqual(st["al"][0][1], "SOS tablette");
+
+    // Les quatre blocs, eux, atterrissent dans la seconde cle.
+    var pg = Cache.loadPages();
+    Test.assert(pg != null);
+    Test.assertEqual(pg["tr"]["vd"], 3);
+    Test.assertEqual(pg["mc"]["s"][0], 3);
+
+    Application.Properties.setValue("mockData", mockAvant);
+    Application.Properties.setValue("mockScenario", scenarioAvant);
+    return true;
+}

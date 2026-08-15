@@ -100,7 +100,16 @@ module Api {
         if (mock != null && mock) {
             var scenario = Application.Properties.getValue("mockScenario");
             if (scenario == null) { scenario = 0; }
-            callback.invoke(true, Mock.state(scenario, Time.now().value()));
+            // Symetrique du chemin reseau (onReceive) : Mock.state() imite le
+            // payload COMPLET du serveur, donc la coupure noyau/pages doit se
+            // faire ici de la meme facon, avec les memes fonctions. Sans ca,
+            // Cache.save() dans onFetched stockerait les quatre blocs
+            // verbatim dans le noyau -- exactement la forme que la coupure en
+            // deux cles Storage cherche a empecher, et que la glance ne
+            // produit jamais en production.
+            var etat = Mock.state(scenario, Time.now().value());
+            Cache.savePages(toPagesDict(etat));
+            callback.invoke(true, toCacheDict(etat, Time.now().value()));
             return;
         }
 
