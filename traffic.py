@@ -5,10 +5,11 @@ from pymongo import MongoClient
 from functools import wraps
 import logging
 import os
-import re
 import threading
 import time
 import requests
+
+from trafic_etat import agreger_terrains, classify_congestion, parse_route_name
 
 traffic_bp = Blueprint('traffic', __name__)
 
@@ -274,132 +275,17 @@ def get_trafic_data():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Balises acceptees : ##, #I#, #O#, #P#, #I1#, #O2#, #P1#, ...
-TAG_RE = re.compile(r'^\s*(#([IOP])(\d+)?#|##)\s*(.+?)\s*$')
-SECURITY_RE = re.compile(r'^\s*\*\*\s*(.+?)\s*$')
-
-def parse_route_name(name: str):
-    """
-    Retourne (direction, terrain, tag, variant).
-    Le variant (chiffre du tag) est utilise pour distinguer les itineraires P.
-    Pour I/O, les variants sont des troncons du meme itineraire (on les fusionne).
-    Exemples:
-      "## Ouest"      -> (None, "Ouest", "neutral", None)
-      "#I# Ouest"     -> ("in",  "Ouest", "I", None)
-      "#I2# Ouest"    -> ("in",  "Ouest", "I", None)    # troncon, meme terrain
-      "#O1# Panorama" -> ("out", "Panorama", "O", None) # troncon, meme terrain
-      "#P# A11"       -> (None,  "A11", "P", None)
-      "#P1# A28"      -> (None,  "A28", "P", "1")       # itineraire distinct
-      "#P2# A28"      -> (None,  "A28", "P", "2")       # itineraire distinct
-      "** SDIS -> X"  -> (None,  "SDIS -> X", "security", None)
-      "Route libre"   -> (None,  "Route libre", "free", None)
-    """
-    m = TAG_RE.match(name or "")
-    if m:
-        io = m.group(2)          # 'I', 'O', 'P' ou None
-        num = m.group(3)         # chiffre optionnel
-        terrain = m.group(4).strip()
-        if io == 'I':
-            return "in", terrain, "I", None
-        if io == 'O':
-            return "out", terrain, "O", None
-        if io == 'P':
-            return None, terrain, "P", num  # num distingue les itineraires P
-        return None, terrain, "neutral", None  # cas "##"
-
-    ms = SECURITY_RE.match(name or "")
-    if ms:
-        return None, ms.group(1).strip(), "security", None
-
-    return None, (name or "").strip(), "free", None
-
-def classify_congestion(current_time, historic_time):
-    # (ta logique d’origine)
-    if not historic_time or historic_time <= 0:
-        t = current_time or 0
-        if t < 15:   return ("normal",    1)
-        if t < 30:   return ("chargé",    2)
-        if t < 60:   return ("saturé",    3)
-        if t >= 60:  return ("bouchon",   4)
-        return ("normal", 1)
-
-    ratio = (current_time or 0) / float(historic_time)
-    if ratio < 0.9:    return ("plus fluide", 0)
-    if ratio < 1.2:    return ("normal",      1)
-    if ratio < 1.6:    return ("chargé",      2)
-    if ratio < 2.5:    return ("saturé",      3)
-    return ("bouchon", 4)
-
 @traffic_bp.route('/trafic/waiting_data_structured')
 def get_trafic_data_parking_structured():
     try:
         trafic_data, cache_status = _get_waze_trafic_payload()
-
-        # Agrégateur: clé = (terrain, direction)
-        agg = {}
-
-        for route in trafic_data["routes"]:
-            if not isinstance(route, dict):
-                continue
-
-            raw_name = route.get("name", "")
-            # On ne garde que ##, #I#, #O#, #I1#, #O2#, etc.
-            if not (raw_name.startswith("##") or raw_name.startswith("#I") or raw_name.startswith("#O")):
-                continue
-
-            direction, terrain, _tag, _variant = parse_route_name(raw_name)
-            cur  = int(route.get("time", 0) or 0)
-            hist = int(route.get("historicTime", 0) or 0)
-
-            key = (terrain, direction)
-            if key not in agg:
-                agg[key] = {
-                    "terrain": terrain,
-                    "direction": direction,    # "in" | "out" | None
-                    "sumCurrent": 0,
-                    "sumHistoric": 0,
-                    "routesCount": 0,
-                }
-            agg[key]["sumCurrent"]  += max(0, cur)
-            agg[key]["sumHistoric"] += max(0, hist)
-            agg[key]["routesCount"] += 1
-
-        terrains = []
-        for (_terrain, _direction), rec in agg.items():
-            sum_cur  = rec["sumCurrent"]
-            sum_hist = rec["sumHistoric"]
-
-            # Ratio/delta sur les SOMMES
-            ratio_val = (sum_cur / sum_hist) if sum_hist > 0 else None
-            ratio_round = round(ratio_val, 2) if ratio_val is not None else None
-            delta_s   = max(0, sum_cur - sum_hist) if sum_hist > 0 else None
-            delta_pct = round((ratio_val - 1) * 100) if ratio_val is not None else None
-
-            status, severity = classify_congestion(sum_cur, sum_hist)
-
-            terrains.append({
-                "terrain": rec["terrain"],
-                "direction": rec["direction"],
-                "currentTime": sum_cur,
-                "historicTime": sum_hist,
-                "ratio": ratio_round,        # ex: 1.27
-                "deltaSeconds": delta_s,     # ≥ 0 si hist > 0, sinon None
-                "deltaPercent": delta_pct,   # ex: 27
-                "status": status,
-                "severity": severity,
-                "routesCount": rec["routesCount"],
-            })
-
-        # Tri par ratio décroissant (None en fin)
-        terrains.sort(key=lambda t: (-1 if t["ratio"] is None else t["ratio"]), reverse=True)
-
         return _jsonify_with_cache({
-            "terrains": terrains,
+            "terrains": agreger_terrains(trafic_data.get("routes")),
             "updateTime": trafic_data.get("updateTime")
         }, cache_status)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
+
 @traffic_bp.route('/trafic/all_routes')
 def get_all_routes():
     """Toutes les routes individuelles, sans fusion."""
