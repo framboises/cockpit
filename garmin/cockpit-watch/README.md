@@ -137,22 +137,21 @@ Pas de publication sur le store. On copie le `.prg` à la main.
 "$SDK/bin/monkeyc" -o bin/cockpit.prg -f monkey.jungle \
   -y ~/.garmin_keys/developer_key.der -d fenix8solar51mm -r
 cp bin/cockpit.prg /Volumes/GARMIN/GARMIN/APPS/
+cp bin/cockpit-settings.json /Volumes/GARMIN/GARMIN/SETTINGS/   # voir ci-dessous
 diskutil eject /Volumes/GARMIN
 ```
 
-**Le `.prg` suffit.** Le build produit aussi un `cockpit-settings.json` a
-cote, mais c'est un artefact destine a l'outillage, pas a la montre : les
-libelles et les cles de reglages sont compiles **dans le `.prg`**, ce qui se
-verifie directement.
+⚠️ **Le fichier de réglages est probablement à copier lui aussi, et ce point
+reste à confirmer sur la montre.** Le build produit deux fichiers : le `.prg`
+et un `cockpit-settings.json` à côté. Le binaire du simulateur cherche ses
+réglages dans `0:/GARMIN/Settings/<nom>-settings.json`, c'est-à-dire dans le
+système de fichiers de l'appareil et non à côté de l'exécutable — ce qui
+laisse penser qu'une montre sideloadée sans ce fichier n'aurait aucun réglage,
+donc **pas de jeton, donc une montre muette**.
 
-```bash
-strings bin/cockpit.prg | grep -c "Domaine"   # 2 : une occurrence par langue
-```
-
-C'est de la que Connect IQ Mobile lit les reglages a afficher. Le chemin
-`0:/GARMIN/Settings/` que l'on trouve dans le binaire du simulateur est son
-stockage interne a lui, pour son propre editeur de reglages — un detail
-d'implementation du simulateur, sans rapport avec le sideload.
+Si le dossier `GARMIN/SETTINGS/` n'existe pas sur la montre, le créer. Si les
+réglages n'apparaissent pas dans Connect IQ Mobile après le sideload, c'est la
+première chose à vérifier.
 
 ## Réglages
 
@@ -380,16 +379,17 @@ L'éditeur de réglages du **simulateur** ne permet pas de la faire (piège 10 :
 il lit un fichier d'une autre forme). Le seul test valable est donc sur le
 téléphone, après sideload.
 
-Protocole : sideloader le `.prg` (il suffit, voir la section Sideload), puis
-ouvrir Connect IQ Mobile > Cockpit > Réglages.
+Protocole : sideloader le `.prg` **et** le `cockpit-settings.json` (voir la
+section Sideload), puis ouvrir Connect IQ Mobile > Cockpit > Réglages.
 
 Attendu : huit réglages libellés en français — Domaine, Jeton, Periode pic,
 Periode normale, Seuil peremption, Vibrer sur alerte, Donnees simulees,
 Scenario simule.
 
-Si la liste est vide ou illisible, le `.prg` a probablement été construit
-avec des titres littéraux ou sans dossier de langue (pièges 8 et 9). Contrôle
-rapide sur l'artefact de build, qui reflète ce que le `.prg` embarque :
+Si la liste est vide ou illisible, vérifier dans l'ordre : le
+`cockpit-settings.json` a-t-il bien été copié dans `GARMIN/SETTINGS/` ; le
+fichier déclare-t-il les langues `fra`/`fre` (et non une pseudo-langue) —
+contrôle rapide :
 
 ```bash
 python3 -c "import json;print(list(json.load(open('bin/cockpit-settings.json'))['languages'].keys()))"
