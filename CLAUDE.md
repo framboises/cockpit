@@ -914,24 +914,58 @@ consomment tous les deux :
   coexistent désormais : `classify_congestion` pour les panneaux existants,
   `severite_axe` pour la montre.
 
-  ⚠️ **Un écart structurel indépendant de la formule subsiste, non corrigé
-  à cette tâche** : `agreger_terrains()` (montre) n'agrège que les noms
-  préfixés `##`, `#I`, `#O`, et **exclut les axes `#P` (parkings)** ; le
-  panneau « Axes » du mur les inclut (`category === "pkg_aa"` couvre aussi
-  le tag `P`). Un axe `#P` fortement bouchonné n'est donc **jamais vu** par
-  la montre, quel que soit son niveau de sévérité — vérifié : un axe `#P` à
-  ratio ×6 avec 2500 s de retard classerait sévérité 4 côté mur et reste
-  invisible côté montre. La montre agrège aussi par `(terrain, direction)`
-  avant de classer, quand le mur classe chaque axe individuellement et
-  prend le pire — les deux stratégies ne divergent pas systématiquement
-  (testé : un terrain à deux axes de sévérités très différentes donne le
-  même résultat des deux côtés dans le cas testé, parce que la somme
-  atteint par coïncidence le même palier que l'axe le pire), mais rien ne
-  garantit que ça tienne en général. Corriger ces deux points demanderait
-  de faire lire à la montre les routes individuelles (comme
-  `/trafic/all_routes`) plutôt que l'agrégat par terrain — hors périmètre
-  de cette tâche, qui portait sur la formule de sévérité, pas sur le
-  périmètre des axes couverts.
+  **Un second écart, indépendant de la formule, a été trouvé puis corrigé
+  dans la même tâche : le PÉRIMÈTRE des axes couverts par le verdict
+  global.** `agreger_terrains()` (montre) n'agrège que les noms préfixés
+  `##`, `#I`, `#O`, et **exclut les axes `#P` (parkings)** ; le panneau
+  « Axes » du mur les inclut (`circulation.html:793`,
+  `r.category === "pkg_aa" || r.tag === "P"`, redondant puisque P est déjà
+  dans pkg_aa). Un parking `#P` très chargé restait donc **invisible au
+  verdict global de la montre jusqu'au niveau CRITIQUE** — un manque
+  silencieux, jamais une fausse alerte, exactement la faute qu'un outil de
+  supervision ne doit jamais commettre (une page qui paraît calme alors
+  qu'elle ne sait pas). Corrigé par `trafic_etat.pire_severite_mur(routes)` :
+  reproduit le même ensemble d'axes que le mur (toutes les routes taguées
+  `I`/`O`/`neutral`/`P`, chacune classée **individuellement** par
+  `severite_axe`, sans agrégation par terrain — comme le fait `classify()`
+  côté mur), et alimente désormais `verdict_global()` à la place du maximum
+  pris sur les seuls terrains agrégés. `watch_pages.build_trafic()` :
+
+  ```python
+  terrains = trafic_etat.agreger_terrains(routes)      # inchange, pour "r"
+  for terrain in terrains:
+      terrain["severity"] = trafic_etat.severite_axe(terrain)
+  pire = trafic_etat.pire_severite_mur(routes)          # pour "vd", pas les terrains
+  ```
+
+  **Conséquence assumée** : la montre peut afficher un verdict élevé sans
+  qu'aucun terrain de la liste `r` (page Trafic) ne l'explique, quand la
+  cause est un parking — la page ne liste que les axes d'entrée/sortie, pas
+  les parkings, choix d'affichage délibéré. C'est le bon compromis : un
+  verdict visible sans terrain qui l'explique renvoie au moins
+  l'utilisateur regarder le mur ou le cockpit ; un verdict qui reste FLUIDE
+  ne renvoie nulle part. Vérifié : un axe `#P` à ratio ×6, retard 2500 s —
+  invisible dans `agreger_terrains()` (`r == []`) — fait désormais monter
+  `vd` à 3 (CRITIQUE), identique des deux côtés (avant la correction : `vd`
+  restait à 0, FLUIDE).
+
+  ⚠️ **Un écart résiduel, plus fin, n'a volontairement pas été corrigé —
+  et il ne touche que l'AFFICHAGE (`r`), plus le verdict global** : pour
+  construire la liste `r` de la page Trafic, `agreger_terrains()` **agrège**
+  les axes d'un même `(terrain, direction)` (somme des temps
+  courant/historique de tous les tronçons) avant de classer, quand le mur
+  classe **chaque route individuelle** puis prend le pire pour son propre
+  panneau. Cet écart-là est à double sens, pas un manque silencieux : le
+  ratio agrégé ne peut pas dépasser le pire ratio individuel (moins
+  alarmiste que le mur), mais le retard agrégé est la somme des retards de
+  tous les tronçons et peut dépasser celui de n'importe quel axe pris seul
+  (plus alarmiste que le mur) — le résultat dépend des données, dans un sens
+  ou dans l'autre. Le verdict global (`vd`), lui, n'est plus concerné : il
+  vient maintenant de `pire_severite_mur`, calculé sur les routes non
+  agrégées, exactement comme le mur. Corriger la sévérité *affichée* par
+  terrain demanderait de faire lire à la montre les routes individuelles
+  plutôt que l'agrégat, rien que pour l'affichage — hors périmètre de cette
+  tâche, qui portait sur le verdict.
 
 ### Le champ `mr` et la règle du bloc absent
 

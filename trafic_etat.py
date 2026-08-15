@@ -120,6 +120,51 @@ def severite_axe(axe):
     return 0
 
 
+def pire_severite_mur(routes):
+    """Pire severite_axe() sur TOUTES les routes que le panneau << Axes >>
+    du mur retient -- routes brutes, AUCUNE agregation par terrain.
+
+    Le filtre du mur (circulation.html:793) est
+    `r.category === "pkg_aa" || r.tag === "P"`. `category` vaut "pkg_aa"
+    pour les tags I/O/neutral/P (cf. traffic.py:get_all_routes) : le
+    `|| tag === "P"` du mur est donc redondant, P est deja dans pkg_aa.
+    Reproduit ici directement sur `parse_route_name` -- watch_pages ne peut
+    pas appeler la route HTTP /trafic/all_routes (process Flask interne).
+
+    C'EST DELIBEREMENT PLUS LARGE que agreger_terrains(), qui ne retient
+    que les prefixes ##/#I/#O et exclut donc les axes #P (parkings).
+    Cette fonction existe precisement pour que le VERDICT GLOBAL de la
+    montre voie ce que agreger_terrains() ne montre pas : un parking tres
+    charge doit faire monter le verdict, meme s'il n'apparait dans aucun
+    terrain affiche en page 3 (ce choix d'affichage-la reste assume, cf.
+    watch_pages.build_trafic). Un manque silencieux sur un outil de
+    supervision -- une page qui parait calme alors qu'elle ne sait pas --
+    est la faute que ce projet cherche a eliminer partout ailleurs ; un
+    verdict eleve sans terrain qui l'explique renvoie au moins vers le mur
+    ou le cockpit, il n'est pas muet.
+
+    Contrairement a agreger_terrains, chaque route est classee
+    INDIVIDUELLEMENT (pas de somme des temps de plusieurs troncons avant
+    classement) : c'est exactement ce que fait classify() cote mur.
+    """
+    pire = 0
+    for route in routes or []:
+        if not isinstance(route, dict):
+            continue
+        _direction, _terrain, tag, _variant = parse_route_name(
+            route.get("name", ""))
+        if tag not in ("I", "O", "neutral", "P"):
+            continue
+        cur = int(route.get("time", 0) or 0)
+        hist = int(route.get("historicTime", 0) or 0)
+        delta = max(0, cur - hist) if hist > 0 else None
+        sev = severite_axe({"currentTime": cur, "historicTime": hist,
+                            "deltaSeconds": delta})
+        if sev > pire:
+            pire = sev
+    return pire
+
+
 def agreger_terrains(routes):
     """Agrege les itineraires surveilles par (terrain, direction).
 

@@ -108,6 +108,33 @@ class TestSeveriteAxe:
         assert avec == sans == 4
 
 
+class TestPireSeveriteMur:
+    def test_axe_parking_bouchonne_est_vu_alors_qu_il_est_exclu_de_l_agregation(self):
+        # #P n'apparait jamais dans agreger_terrains() (prefixe non retenu),
+        # mais le mur le classe (category pkg_aa). pire_severite_mur doit
+        # donc le voir : c'est la raison d'etre de cette fonction.
+        routes = [{"name": "#P3#Parking Sud", "time": 3000, "historicTime": 500}]
+        assert trafic_etat.agreger_terrains(routes) == []
+        assert trafic_etat.pire_severite_mur(routes) == 4
+
+    def test_axes_entree_sortie_seuls_coincide_avec_l_agregation_a_un_axe(self):
+        # Cas nominal : quand chaque terrain n'a qu'une route, agregation et
+        # classement individuel donnent la meme severite.
+        routes = [{"name": "#I# Ouest", "time": 1080, "historicTime": 600}]
+        terrains = trafic_etat.agreger_terrains(routes)
+        assert trafic_etat.pire_severite_mur(routes) == \
+            trafic_etat.severite_axe(terrains[0])
+
+    def test_axe_non_balise_est_ignore(self):
+        routes = [{"name": "Fresne -> Leroy Merlin", "time": 5000,
+                   "historicTime": 100}]
+        assert trafic_etat.pire_severite_mur(routes) == 0
+
+    def test_aucune_route_rend_zero(self):
+        assert trafic_etat.pire_severite_mur([]) == 0
+        assert trafic_etat.pire_severite_mur(None) == 0
+
+
 class TestCompterAlertes:
     def test_ne_compte_que_ce_qui_est_en_zone(self):
         alertes = [

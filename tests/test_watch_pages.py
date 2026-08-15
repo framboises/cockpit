@@ -105,6 +105,28 @@ class TestTrafic:
         assert bloc["r"][0][3] == 0
         assert bloc["vd"] == 0
 
+    def test_parking_bouchonne_fait_monter_le_verdict_sans_apparaitre_en_liste(self):
+        # Deuxieme correction de la tache 14 : un parking (#P) tres charge
+        # est exclu de agreger_terrains (prefixe non retenu) donc absent de
+        # `r`, mais le mur le voit (category pkg_aa) et le verdict global de
+        # la montre doit le voir aussi -- sinon un bouchon de parking reste
+        # invisible au poignet alors qu'il s'affiche jusqu'a CRITIQUE sur le
+        # mur. Avant cette correction, ce cas restait FLUIDE.
+        routes = [{"name": "#P3#Parking Sud", "time": 3000, "historicTime": 500}]
+        bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
+        assert bloc["r"] == []       # aucun axe d'entree/sortie agrege
+        assert bloc["vd"] == 3       # mais le verdict global le voit : CRITIQUE
+
+    def test_cas_nominal_axes_entree_seuls_reste_inchange(self):
+        # Sans aucun axe #P, le calcul global sur toutes les routes
+        # coincide avec l'ancien calcul par terrains agreges (une seule
+        # route par terrain dans ce jeu) : cette correction ne doit rien
+        # changer au cas nominal.
+        routes = [{"name": "#I# Ouest", "time": 1080, "historicTime": 600}]
+        bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
+        assert bloc["r"][0][3] == 2  # ratio 1.8, retard 480s -> severite 2
+        assert bloc["vd"] == 1       # VIGILANCE
+
 
 class TestMeteo:
     def test_condense_l_etat_du_mur(self, monkeypatch):

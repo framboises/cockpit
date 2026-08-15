@@ -97,6 +97,25 @@ def build_trafic(db, now_utc=None):
     montre pouvait annoncer une degradation qu'aucun operateur ne voyait sur
     le mur, precisement la fausse alerte que le double verrou existe pour
     ecarter (cf. severite_axe).
+
+    Le verdict global (`vd`), lui, n'est PAS calcule sur les seuls terrains
+    agreges : `agreger_terrains` ne retient que les axes prefixes ##/#I/#O
+    et exclut donc les parkings (#P), que le mur inclut dans son panneau
+    << Axes >>. Sans correction, un parking tres charge restait invisible a
+    la montre jusqu'au niveau CRITIQUE -- un manque SILENCIEUX, jamais une
+    fausse alerte, precisement la faute que ce projet cherche a eliminer :
+    une page qui parait calme alors qu'elle ne sait pas. `pire_severite_mur`
+    reproduit donc le meme ensemble d'axes que le mur (toutes les routes
+    I/O/neutral/P, classees individuellement, sans agregation) pour cette
+    seule valeur.
+
+    Consequence assumee : la montre peut afficher un verdict eleve sans
+    qu'aucun terrain de la liste `r` ne l'explique, quand la cause est un
+    parking. C'est le bon compromis -- un verdict visible sans cause listee
+    renvoie au moins l'utilisateur regarder le mur ou le cockpit ; un
+    verdict qui reste FLUIDE ne renvoie nulle part. La liste `r` continue
+    de montrer les terrains d'entree/sortie agreges : choix d'affichage
+    assume, cette page montre les axes d'acces, pas les parkings.
     """
     routes = trafic_etat.lire_routes(db)
     alertes = trafic_etat.lire_alertes(db)
@@ -107,7 +126,7 @@ def build_trafic(db, now_utc=None):
     for terrain in terrains:
         terrain["severity"] = trafic_etat.severite_axe(terrain)
     comptes = trafic_etat.compter_alertes(alertes)
-    pire = max([t["severity"] for t in terrains], default=0)
+    pire = trafic_etat.pire_severite_mur(routes)
 
     # Tri par gravite decroissante, pas par ratio : la montre montre d'abord
     # ce qui coince, et deux terrains de ratios voisins peuvent tomber dans
