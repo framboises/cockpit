@@ -119,7 +119,7 @@ class MeteoView extends WatchUi.View {
         var hS = dc.getFontHeight(Graphics.FONT_SMALL);
         var hM = dc.getFontHeight(Graphics.FONT_MEDIUM);
 
-        var meteo = Pages.bloc(Cache.loadPages(), "meteo");
+        var meteo = Pages.bloc(Cache.loadPages(), "me");
 
         // Liseré de vigilance Meteo-France, sous le texte (dessine en
         // premier) : un anneau proche du bord, jamais affirmatif sur un etat
