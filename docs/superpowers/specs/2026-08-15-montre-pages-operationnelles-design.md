@@ -78,10 +78,10 @@ redescend jamais, il annonce 130 000 à 23 h quand il reste 40 000 personnes.
 
 Le chiffre héros devient donc :
 
-| Mode | Héros | Sous-ligne |
-|---|---|---|
-| `live` | **présents** (`p`) | `48 213 entrées · 3 200 pers/h` |
-| `past` | pic de l'édition (`pk`) | `pic dim. 10 mai 14h04` |
+| Mode | Héros | Sous-ligne | Pied |
+|---|---|---|---|
+| `live` | **présents** (`p`) | `48 213 entrées · 3 200 pers/h` | âge du compteur |
+| `past` | pic de l'édition (`pk`) | `pic dim. 10 mai 14h04` | motif (ci-dessous) |
 
 Les deux répondent à *combien de personnes* — l'une maintenant, l'autre au
 maximum. Le cumul et le débit descendent en sous-ligne, ils ne disparaissent
@@ -92,22 +92,52 @@ du compteur ENCEINTE GENERALE les porte, dans le document que
 `watch_state.read_counter` charge déjà. Repli sur `entries - exits` si
 `current` manque.
 
+**La montre n'affiche JAMAIS un nombre de présents hors mode `live`.** `p` est
+`null` par construction dès qu'il n'y a pas de relevé frais : c'est déjà ce
+que garantissent les deux gardes posées le 14/08. La page ne remplit pas ce
+vide avec la dernière valeur connue — un chiffre de présents périmé est
+indiscernable d'un chiffre juste, et c'est précisément lui qu'on regarde pour
+décider.
+
+### 4.1 Nommer la cause, pas seulement l'état
+
+`m: "past"` recouvre aujourd'hui **deux situations très différentes** :
+
+| Cause | Ce que ça veut dire | Gravité |
+|---|---|---|
+| `live_controle_actif` est faux | le live-contrôle est arrêté sur le cockpit, hors événement ou volontairement | normal |
+| le drapeau est vrai mais aucun relevé récent | **le collecteur est planté alors qu'on le croit en marche** | incident |
+
+Les confondre serait perdre l'information la plus utile : la seconde est une
+panne à traiter, la première est le fonctionnement normal 350 jours par an.
+
+Le payload gagne donc `mr` (motif), valant `"inactif"` ou `"sans_releve"`, et
+le pied de la page 1 écrit :
+
+| `mr` | Pied | Couleur |
+|---|---|---|
+| `inactif` | `live inactif` | gris |
+| `sans_releve` | `aucun releve` | **rouge** |
+
+C'est le prolongement direct de la correction du 14/08 : nommer ce qui
+manque vaut mieux qu'un libellé générique qui paraît tout couvrir.
+
 ## 5. Contenu des quatre pages
 
 Maquettes (écran rond 454 × 454, mesures de mise en page à faire au moment de
 l'implémentation avec la sonde décrite en §11) :
 
 ```
-   MAIN COURANTE            TRAFIC                MÉTÉO             FRÉQUENTATION
+   MAIN COURANTE           TRAFIC                 MÉTÉO             FRÉQUENTATION
 
-  SECOURS      2       Ouest    ↓ 18  saturé        21 °C          Pic jour  52 100
-  SÉCURITÉ     0       Houx     ↑ 12  chargé    vent 18 raf. 34         à 14h15
-  TECHNIQUE    1       Panorama ↓  9  normal   ───────────────
-  FLUX         0      ─────────────────         Pluie dans 25 min   N-1  49 800
-      + 1 autre        3 alertes Waze             2,4 mm/h au pic         +4,6 %
-
-   il y a 40 s          il y a 1 min          Rafales 62 —          Pic édition
-                                            sécuriser les structures   50 690
+    🏥  2 (14)          ▛ TENSION ▟             21 °C          Pic jour  52 100
+    🛡  0 (3)        Ouest    ↓ 18 saturé   vent 18 raf. 34         à 14h15
+    🔧  1 (8)        Houx     ↑ 12 chargé  ───────────────
+    ⇄  0 (5)        Panorama ↓  9 normal   Pluie dans 25 min   N-1  49 800
+       + 1 (12)      ────────────────        2,4 mm/h au pic         +4,6 %
+                      3 alertes · 0 accident
+   il y a 40 s          il y a 1 min       Rafales 62 —          Pic édition
+                                        sécuriser les structures     50 690
 ```
 
 ### 5.1 Main courante
@@ -116,20 +146,34 @@ Les compteurs **en instance** (fiches non clôturées), pris sur
 `/api/pcorg/stats` — agrégation par `category` sur `^PCO`, `status_code == 10`
 signifiant clôturée.
 
-Quatre catégories nommées, colorées à la couleur de la catégorie quand elles
-sont non nulles, grises à zéro :
+**Des icônes, pas des mots.** Chaque ligne porte l'icône de la catégorie, le
+nombre **en cours**, et le nombre **terminées entre parenthèses** :
 
-| Affiché | `category` |
-|---|---|
-| SECOURS | `PCO.Secours` |
-| SÉCURITÉ | `PCO.Securite` |
-| TECHNIQUE | `PCO.Technique` |
-| FLUX | `PCO.Flux` |
+```
+   🏥  2 (14)        local_hospital   #dc2626   PCO.Secours
+   🛡  0 (3)         shield           #ef4444   PCO.Securite
+   🔧  1 (8)         build            #f59e0b   PCO.Technique
+   ⇄  0 (5)         swap_calls       #0d9488   PCO.Flux
+        + 1 (12)     — les trois autres catégories
+```
+
+Les icônes sont **celles du cockpit** (`CATEGORY_STYLES` dans `pcorg.js`), pour
+que le poignet et l'écran parlent la même langue visuelle. Rendues en SVG dans
+`resources/drawables/` — le projet en a déjà un (`launcher_icon.svg`), le
+compilateur les rastérise.
+
+⚠️ **Secours `#dc2626` et Sécurité `#ef4444` sont deux rouges quasi
+identiques.** Sur un cadran de 454 px, la couleur ne les distingue pas : c'est
+la **forme** de l'icône qui porte l'identité. Ne jamais compter sur la teinte
+seule pour ces deux-là.
 
 Les trois autres catégories existantes — `PCO.Information`,
 `PCO.MainCourante`, `PCO.Fourriere` — sont **repliées sur une ligne
-« + N autres »**, jamais omises : les compter à zéro serait faux, et les taire
+« + N (M) »**, jamais omises : les compter à zéro serait faux, et les taire
 ferait disparaître des fiches réelles.
+
+Le compte de fiches terminées vient du même appel : `/api/pcorg/stats` rend
+déjà `{open, closed}` par catégorie.
 
 ⚠️ **Le widget cockpit filtre les catégories par utilisateur**
 (`window.__userAllowedCategories`). Les jetons montre (`watch_tokens`) n'ont
@@ -162,9 +206,44 @@ résultat est juste ; sur le repli, tout trajet de plus d'une minute est
 terrains ayant un temps historique**, et rangera les autres sans étiquette de
 gravité. C'est un défaut du cockpit signalé en §12, pas corrigé ici.
 
-Les alertes Waze (`waze_alerts`, liste de dictionnaires typés `ROAD_CLOSED`,
-`JAM`, etc.) sont **comptées, pas listées** : sur un poignet, le nombre
+Les alertes Waze (`waze_alerts`, dictionnaires typés `ACCIDENT`, `JAM`,
+`HAZARD`…) sont **comptées, pas listées** : sur un poignet, le nombre
 déclenche l'action, le détail se lit sur le cockpit.
+
+### 5.2.1 Le verdict global
+
+Le mur trafic (`/circulation`) affiche un verdict global en quatre niveaux,
+qui est **l'information la plus dense de toute la page**. La montre le reprend,
+en haut de la page Trafic, coloré :
+
+| `vd` | Mot | Couleur | Reco du mur |
+|---|---|---|---|
+| 0 | FLUIDE | vert | circulation normale |
+| 1 | VIGILANCE | jaune | trafic plus dense, surveiller |
+| 2 | TENSION | orange | ralentissements, anticiper une déviation |
+| 3 | CRITIQUE | rouge | intervenir : fluidifier ou dévier |
+
+⚠️ **La règle de calcul n'est pas celle qu'on devinerait, et elle doit être
+reproduite à l'identique.** Le commentaire de `circulation.html` l'explique :
+les **bouchons et dangers Waze ne pilotent PAS le verdict**. Seuls comptent les
+axes surveillés et les accidents en zone — parce qu'un bouchon Waze peut se
+trouver n'importe où dans le cercle, hors des itinéraires suivis, et faisait
+diverger le verdict du panneau « Axes ».
+
+```
+vd = 3  si  accidents_en_zone > 0  OU  pire_severite >= 4   (bouchon sur un axe)
+vd = 2  si  pire_severite == 3                              (axe saturé)
+vd = 1  si  pire_severite == 2                              (axe chargé)
+vd = 0  sinon
+```
+
+⚠️ **Le comptage d'alertes est géofencé** : cercle de `ZONE_RADIUS_KM = 3.5`
+autour de `ZONE_CENTER = (47.93827259819777, 0.2229518934089374)`, distance
+haversine. Sans ce filtre, la montre compterait des alertes du flux Waze
+situées hors du périmètre et afficherait un verdict que le mur ne montre pas.
+
+Le payload porte donc `vd` (verdict), `ac` (accidents en zone) et `z` (total
+d'alertes en zone) — jamais des comptes bruts non géofencés.
 
 ### 5.3 Météo
 
@@ -258,14 +337,15 @@ nombre de montres.
 
 ```json
 {
-  "t": 1776971469, "n": "24HM 26", "m": "live",
+  "t": 1776971469, "n": "24HM 26", "m": "live", "mr": null,
   "p": 47320, "e": 48213, "er": 3200,
   "pk": 50690, "pkt": 1776517509,
   "w": 27.4, "wl": 1, "al": [],
 
-  "mc": {"t": 1776971400, "s": 2, "sc": 0, "tq": 1, "f": 0, "o": 1},
+  "mc": {"t": 1776971400,
+         "s": [2, 14], "sc": [0, 3], "tq": [1, 8], "f": [0, 5], "o": [1, 12]},
 
-  "tr": {"t": 1776971440, "z": 3,
+  "tr": {"t": 1776971440, "vd": 2, "ac": 0, "z": 3,
          "r": [["Ouest", "i", 18, 3], ["Houx", "o", 12, 2]]},
 
   "me": {"t": 1776971400, "tc": 21.3, "v": 18, "rf": 34,
@@ -278,9 +358,12 @@ nombre de montres.
 
 | Clé | Sens |
 |---|---|
-| `p` | présents maintenant |
-| `mc.s` / `.sc` / `.tq` / `.f` / `.o` | secours, sécurité, technique, flux, autres — **en instance** |
-| `tr.z` | nombre d'alertes Waze actives |
+| `p` | présents maintenant — **`null` hors mode `live`** |
+| `mr` | motif du mode `past` : `"inactif"` ou `"sans_releve"` ; `null` en `live` |
+| `mc.s` / `.sc` / `.tq` / `.f` / `.o` | secours, sécurité, technique, flux, autres — **`[en cours, terminées]`** |
+| `tr.vd` | verdict global 0-3, règle du mur reproduite à l'identique (§5.2.1) |
+| `tr.ac` | accidents dans le géofence de 3,5 km |
+| `tr.z` | total d'alertes Waze dans le géofence |
 | `tr.r[i]` | `[terrain, "i"/"o"/"-", minutes, sévérité 0-4]` |
 | `me.pl` / `.pm` | pluie dans N minutes / intensité au pic (`null` si aucune attendue) |
 | `me.cn` / `.cl` | consigne rédigée / son niveau 0-3 |
