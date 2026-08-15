@@ -10,7 +10,7 @@ l'appelant met le bloc a null et les autres pages restent servies.
 """
 
 import logging
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 
 import meteo_etat
 import pcorg_summary
@@ -234,6 +234,40 @@ def _pic_multi_source(db, jour, location_id):
     return pic, heure
 
 
+def _jour_semaine_aligne(jour_n1, jour_semaine_cible):
+    """Recale une date de course N-1 sur le jour de semaine de la course N.
+
+    `globalHoraires.race` (que `resolve_race_dt` privilegie) ne designe pas
+    toujours la meme chose d'un millesime a l'autre : certaines editions y
+    portent le DEPART, d'autres l'ARRIVEE -- documente dans CLAUDE.md pour
+    24H MOTOS 2025 (arrivee, dimanche) contre 2026 (depart, samedi), et
+    constate aussi sur 24H AUTOS. Comparer les dates telles quelles decale
+    tout l'alignement d'un jour, de la pire maniere : le resultat reste
+    plausible a l'oeil (un dimanche succede a un samedi sans rien
+    d'absurde), donc l'erreur ne se voit pas.
+
+    Le seul invariant qui ne depende pas de la convention de saisie est
+    qu'un evenement annuel revient chaque annee le meme jour de semaine
+    (meme principe que `scan_frequentation._normalize_race_dates`, qui
+    resout le meme probleme pour la vue Frequentation du rapport scans).
+    On ne corrige donc pas la date elle-meme, seulement son jour de
+    semaine, au plus proche (ecart signe ramene dans [-3, +3] jours) --
+    jamais de saut de plus de trois jours, qui trahirait autre chose qu'une
+    simple confusion depart/arrivee.
+
+    `resolve_race_dt` n'est PAS touchee : elle resout une edition a la
+    fois et ne peut pas connaitre le jour de semaine de sa voisine, la
+    normalisation est par nature une operation de paire. Ses fenetres de
+    balayage de pic (+/-10 et +3 jours) tolerent de toute facon un ecart
+    d'un jour sans consequence : rien n'a besoin d'etre elargi.
+    """
+    delta = (jour_n1.weekday() - jour_semaine_cible) % 7
+    if delta == 0:
+        return jour_n1
+    decalage = delta if delta <= 3 else delta - 7
+    return jour_n1 - timedelta(days=decalage)
+
+
 def build_frequentation(db, event, year, now,
                         location_id=watch_peaks.DEFAULT_LOCATION_ID):
     """Pic de presents du jour, son heure, et le pic N-1 au jour EQUIVALENT.
@@ -243,6 +277,12 @@ def build_frequentation(db, event, year, now,
     bloc affluence), et une edition ne tombe pas le meme jour du mois d'une
     annee sur l'autre. `resolve_race_dt` porte deja la garde sur l'annee et
     les alias historique_controle -- on ne la contourne pas.
+
+    La date de course N-1 est en plus recalee sur le jour de semaine de la
+    course N avant d'appliquer le decalage (voir `_jour_semaine_aligne`) :
+    sans cela, une edition dont `globalHoraires.race` change de convention
+    (depart / arrivee) d'un millesime a l'autre fausserait l'alignement
+    d'un jour entier, silencieusement.
     """
     if not event or year is None:
         return None
@@ -254,8 +294,9 @@ def build_frequentation(db, event, year, now,
     course = watch_peaks.resolve_race_dt(db, event, int(year))
     course_n1 = watch_peaks.resolve_race_dt(db, event, int(year) - 1)
     if course is not None and course_n1 is not None:
+        course_n1_jour = _jour_semaine_aligne(course_n1.date(), course.weekday())
         decalage = jour - course.date()
-        jour_n1 = course_n1.date() + decalage
+        jour_n1 = course_n1_jour + decalage
         pic_n1, _ = _pic_multi_source(db, jour_n1, location_id)
 
     return {

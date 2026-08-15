@@ -224,6 +224,41 @@ class TestFrequentation:
         # rapport a la course 2025).
         assert appels[1] == datetime(2025, 4, 19).date() - timedelta(days=1)
 
+    def test_n1_recale_sur_le_jour_de_semaine_de_lannee_courante(self, monkeypatch):
+        # globalHoraires.race porte tantot le depart, tantot l'arrivee selon
+        # le millesime (documente dans CLAUDE.md) : ici la course 2026 tombe
+        # un samedi, la course 2025 (telle que resolve_race_dt la rend, sans
+        # normalisation) un dimanche -- meme evenement, jour de semaine
+        # different. Sans recalage, l'alignement comparerait le samedi de
+        # course N a l'apres-course de N-1, un decalage d'un jour qui reste
+        # plausible a l'oeil et donc invisible sans ce test.
+        appels = []
+
+        def faux_max(db, coll, jour, loc, event=None):
+            appels.append(jour)
+            return (52100, "14h15") if len(appels) == 1 else (40077, "15h07")
+
+        monkeypatch.setattr(watch_pages.pcorg_summary,
+                            "_max_current_in_snapshots", faux_max)
+
+        def fausse_course(db, ev, an):
+            return {2026: datetime(2026, 4, 18, 13, 0, tzinfo=timezone.utc),  # samedi
+                    2025: datetime(2025, 4, 20, 13, 0, tzinfo=timezone.utc)}[an]  # dimanche
+
+        monkeypatch.setattr(watch_pages.watch_peaks, "resolve_race_dt",
+                            fausse_course)
+
+        bloc = watch_pages.build_frequentation(
+            FakeDb(), "24H MOTOS", 2026,
+            datetime(2026, 4, 18, 20, 0), location_id="628")
+
+        assert bloc["n1"] == 40077
+        # Le jour de course 2025 (dimanche 20/04) doit etre recale sur le
+        # samedi (jour de semaine de la course 2026) AVANT d'appliquer le
+        # decalage a la course : 20/04 - 1 jour = 19/04, jamais le 20/04
+        # tel quel.
+        assert appels[1] == datetime(2025, 4, 19).date()
+
     def test_sans_date_de_course_pas_de_n1(self, monkeypatch):
         monkeypatch.setattr(watch_pages.watch_peaks, "resolve_race_dt",
                             lambda db, ev, an: None)
@@ -277,6 +312,13 @@ class TestFrequentation:
         # resolve_race_dt reste monkeypatche : le construire fidelement sur
         # FakeDb demanderait de reproduire parametrages/historique_controle,
         # hors perimetre de ce test (ce que couvre deja watch_peaks).
+        #
+        # Les deux courses tombent le MEME jour de semaine (samedi) mais a
+        # des dates calendaires differentes (18 avril 2026, 19 avril 2025) --
+        # exactement le cas reel verifie sur la base dev, et deliberement
+        # PAS le meme jour du mois : sinon `_jour_semaine_aligne` ne
+        # recalerait rien et ce test ne distinguerait plus un alignement par
+        # decalage-de-course d'un alignement par date calendaire.
         _ps = watch_pages.pcorg_summary
 
         def snap(loc, current, heure_paris):
@@ -287,7 +329,7 @@ class TestFrequentation:
                                             .replace(tzinfo=None)}
 
         jour_2026 = datetime(2026, 4, 18, 14, 15, tzinfo=_ps.TZ_PARIS)
-        jour_2025 = datetime(2025, 4, 18, 15, 2, tzinfo=_ps.TZ_PARIS)
+        jour_2025 = datetime(2025, 4, 19, 15, 2, tzinfo=_ps.TZ_PARIS)
 
         db = FakeDb(
             data_access=[
@@ -300,8 +342,8 @@ class TestFrequentation:
         )
 
         def course(db_arg, ev, an):
-            return {2026: datetime(2026, 4, 18, 13, 0, tzinfo=timezone.utc),
-                    2025: datetime(2025, 4, 18, 13, 0, tzinfo=timezone.utc)}[an]
+            return {2026: datetime(2026, 4, 18, 13, 0, tzinfo=timezone.utc),  # samedi
+                    2025: datetime(2025, 4, 19, 13, 0, tzinfo=timezone.utc)}[an]  # samedi
 
         monkeypatch.setattr(watch_pages.watch_peaks, "resolve_race_dt", course)
 
