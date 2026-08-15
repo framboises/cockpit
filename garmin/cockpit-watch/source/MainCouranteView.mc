@@ -1,6 +1,5 @@
 using Toybox.WatchUi;
 using Toybox.Graphics;
-using Toybox.Math;
 using Toybox.Time;
 
 // Main courante : fiches PC Organisation en instance, par categorie, lues
@@ -22,17 +21,6 @@ class MainCouranteView extends WatchUi.View {
         mIconeSecurite = WatchUi.loadResource(Rez.Drawables.IconeSecurite);
         mIconeTechnique = WatchUi.loadResource(Rez.Drawables.IconeTechnique);
         mIconeFlux = WatchUi.loadResource(Rez.Drawables.IconeFlux);
-    }
-
-    // Meme geometrie que CockpitView/EditionsView : sur un cadran rond, la
-    // place utile depend de l'eloignement au centre.
-    hidden function largeurUtile(dc, y) {
-        var r = dc.getWidth() / 2.0;
-        var dy = (y - r).abs();
-        if (dy >= r) {
-            return 0.0;
-        }
-        return 2.0 * Math.sqrt(r * r - dy * dy);
     }
 
     // "3 (12)" -- en cours, puis terminees entre parentheses. `null` (bloc
@@ -96,7 +84,7 @@ class MainCouranteView extends WatchUi.View {
         // (compteurs a deux chiffres partout) : la derniere ligne finit a
         // 236, 5 px avant le pied.
         var y = 26 + hX + 10;
-        var chordEtroite = largeurUtile(dc, y);
+        var chordEtroite = Pages.largeurUtile(dc, y, hS);
         var margeCol = (w - chordEtroite) / 2.0 + 6;
         var iconeX = margeCol;
         var texteX = iconeX + 32 + 10;

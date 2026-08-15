@@ -3,7 +3,6 @@ using Toybox.Graphics;
 using Toybox.Application;
 using Toybox.Timer;
 using Toybox.Time;
-using Toybox.Math;
 
 class CockpitView extends WatchUi.View {
 
@@ -170,18 +169,6 @@ class CockpitView extends WatchUi.View {
         return Graphics.COLOR_GREEN;
     }
 
-    // Largeur utile de l'ecran rond a la hauteur y. Sur un cadran circulaire, la
-    // place disponible depend de l'eloignement au centre : un texte qui tient au
-    // milieu deborde en haut ou en bas.
-    hidden function largeurUtile(dc, y) {
-        var r = dc.getWidth() / 2.0;
-        var dy = (y - r).abs();
-        if (dy >= r) {
-            return 0.0;
-        }
-        return 2.0 * Math.sqrt(r * r - dy * dy);
-    }
-
     hidden function drawMain(dc) {
         var w = dc.getWidth();
         var st = mState;
@@ -207,8 +194,7 @@ class CockpitView extends WatchUi.View {
         if (n > 0) {
             var longue = label + " . " + n.toString() + (n > 1 ? " alertes" : " alerte");
             var courte = label + " . " + n.toString();
-            // Le bloc est dans la moitie haute : c'est son sommet qui contraint.
-            var dispo = largeurUtile(dc, y);
+            var dispo = Pages.largeurUtile(dc, y, hX);
             if (dc.getTextWidthInPixels(longue, Graphics.FONT_XTINY) <= dispo) {
                 label = longue;
             } else if (dc.getTextWidthInPixels(courte, Graphics.FONT_XTINY) <= dispo) {
@@ -415,6 +401,7 @@ class CockpitView extends WatchUi.View {
 
     hidden function drawAlerts(dc) {
         var w = dc.getWidth();
+        var hX = dc.getFontHeight(Graphics.FONT_XTINY);
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, 30, Graphics.FONT_XTINY, "ALERTES",
                     Graphics.TEXT_JUSTIFY_CENTER);
@@ -431,7 +418,7 @@ class CockpitView extends WatchUi.View {
         // est defendue.
         var y = 66;
         for (var i = 0; i < al.size(); i += 1) {
-            var dispo = largeurUtile(dc, y);
+            var dispo = Pages.largeurUtile(dc, y, hX);
             var texte = ajusterTexte(dc, al[i][1], Graphics.FONT_XTINY, dispo);
             dc.setColor(levelColor(al[i][0]), Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, y, Graphics.FONT_XTINY, texte,

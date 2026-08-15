@@ -523,38 +523,42 @@ function testDessinMeteoBlocAbsentNeLevePas(logger) {
 }
 
 // Reprise mise en page (ecran REEL 280x280, fenix8solar51mm -- PAS 454, cf.
-// rapport de tache) : CONSIGNE_MAX (watch_pages.py) reste a 68, mais la
-// mesure qui le justifie est refaite entierement. Une sonde temporaire
-// (retiree apres usage) a mesure la corde reelle ou la consigne se dessine
-// desormais (y=161, la ou vient la vigilance ET la pluie affichees, le pire
-// cas de la page) : dispo1=276.83 px, dispo2=267.72 px.
+// rapport de tache) : CONSIGNE_MAX (watch_pages.py) passe de 68 a 66. Deux
+// mesures successives, toutes deux invalidees par une relecture qui a
+// trouve le MEME defaut de raisonnement sur l'axe des largeurs que celui
+// qui a motive toute cette tache sur l'axe des ordonnees :
 //
-// A ces cordes, FONT_SMALL (le choix d'origine, garde pour son emphase
-// visuelle) ne tient que ~43 caracteres au total sur ses deux lignes -- les
-// DEUX consignes reelles les plus longues (52 et 59 caracteres) en
-// ressortaient TRONQUEES AVANT LEUR VERBE alors meme qu'elles ne
-// debordaient pas de l'ecran (invisible a un test qui ne verifie que les
-// bornes geometriques, cf. DebordementTest.mc -- d'ou ce test-ci, qui
-// verifie le CONTENU, pas la geometrie). Passee en FONT_XTINY, la meme
-// corde tient le decoupage ENTIER jusqu'a 68 caracteres, tronque des 70
-// (mots utilises : "Palpation renforcee sur tous les postes nord et sud
-// avant le depart des courses prevues cet apres midi la"). 68 reste
-// exactement a la marge verifiee, avec 9 caracteres d'ecart au-dessus de la
-// plus longue consigne reelle connue (WBGT, 59).
+//   1) Premiere mesure (sonde) : dispo1=276,83 px, dispo2=267,72 px, en
+//      passant `largeurUtile(dc, y)` -- la corde a l'ANCRE (le sommet du
+//      bloc de texte), pas a son bord le plus eloigne du centre.
+//   2) Relecture : sur un cadran rond, la corde RETRECIT en s'eloignant du
+//      centre, donc c'est le bord du bloc [y, y+hauteur] le plus eloigne
+//      qui contraint -- pas forcement l'ancre. `Pages.largeurUtile(dc, y,
+//      hauteur)` corrige ce calcul dans toute l'app (cf. Pages.mc). A la
+//      corde REELLE (dispo1=266,47 px a y=161/base=183, dispo2=250,05 px a
+//      y=181/base=203, toutes deux plus etroites qu'annonce), la capacite
+//      de couperConsigne en FONT_XTINY tombe de 68 a 66 caracteres --
+//      verifie a la sonde (retiree apres usage) : n=66 tient ENTIER,
+//      n=68 tronque desormais.
+//
+// Les DEUX consignes reelles les plus longues (foudre+grele 52 caracteres,
+// WBGT danger 59 caracteres) tiennent toujours ENTIERES a 66, avec 7
+// caracteres de marge au-dessus de la plus longue des deux (WBGT).
 //
 // Ce test rejoue les DEUX pires consignes REELLES du systeme (meteo_etat.py,
 // foudre+grele 52 caracteres et WBGT danger 59 caracteres) contre le
-// dispo1/dispo2 mesures et verifie qu'aucune des deux lignes n'est tronquee
-// -- CONSIGNE_MAX ne sert a rien si couperConsigne tronque quand meme la
-// seconde ligne derriere lui.
+// dispo1/dispo2 CORRIGES et verifie qu'aucune des deux lignes n'est
+// tronquee -- CONSIGNE_MAX ne sert a rien si couperConsigne tronque quand
+// meme la seconde ligne derriere lui.
 (:test)
 function testCouperConsigneNeTronquePasLesDeuxConsignesReelles(logger) {
     var dc = dcDeTest();
     var vue = new MeteoView();
-    // Mesures a la sonde, pire cas (vigilance affichee, consigne demarre a
-    // y=161) : dispo1 a y=161, dispo2 a y=161+hX-2=181.
-    var dispo1 = 276.83;
-    var dispo2 = 267.72;
+    // Mesures via Pages.largeurUtile (bord contraignant, pas l'ancre),
+    // pire cas (vigilance affichee, consigne demarre a y=161) : dispo1 a
+    // y=161/base=183, dispo2 a y=181/base=203.
+    var dispo1 = 266.47;
+    var dispo2 = 250.05;
 
     var foudre = "Foudre prevue sur la zone avec grele — mise a l'abri";
     var lignesFoudre = vue.couperConsigne(dc, foudre, Graphics.FONT_XTINY,
@@ -570,7 +574,7 @@ function testCouperConsigneNeTronquePasLesDeuxConsignesReelles(logger) {
     return true;
 }
 
-// Complement en VALEUR (pas seulement "ne leve pas") : CONSIGNE_MAX (68)
+// Complement en VALEUR (pas seulement "ne leve pas") : CONSIGNE_MAX (66)
 // doit survivre au decoupage ENTIER sur les deux lignes, au pire dispo
 // mesure -- c'est la garantie que le plafond cote serveur et la capacite
 // reelle de la vue restent alignes. Si l'un des deux bouge sans l'autre, ce
@@ -579,10 +583,10 @@ function testCouperConsigneNeTronquePasLesDeuxConsignesReelles(logger) {
 function testConsigneMaxTientEntierSurDeuxLignes(logger) {
     var dc = dcDeTest();
     var vue = new MeteoView();
-    var dispo1 = 276.83;
-    var dispo2 = 267.72;
+    var dispo1 = 266.47;
+    var dispo2 = 250.05;
     var alphabet = "Palpation renforcee sur tous les postes nord et sud avant le depart des courses prevues cet apres midi la";
-    var texte = alphabet.substring(0, 68);
+    var texte = alphabet.substring(0, 66);
     var lignes = vue.couperConsigne(dc, texte, Graphics.FONT_XTINY,
                                     dispo1, dispo2);
     Test.assertEqual(lignes.size(), 2);

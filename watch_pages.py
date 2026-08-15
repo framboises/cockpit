@@ -42,18 +42,31 @@ STATUT_CLOS = 10
 NIVEAUX_CONSIGNE = {"vigilance": 1, "danger": 2, "critique": 3}
 
 # Une consigne plus longue deborde ce que couperConsigne (MeteoView.mc) peut
-# repartir sur ses DEUX LIGNES. Remesure integralement en aout 2026 : les
-# sondes de mise en page de tout ce projet, cette valeur comprise, avaient
-# ete calibrees sur un ecran fenix 8 AMOLED de 454x454 (System.
-# getDeviceSettings() code en dur a la mauvaise taille) alors que l'app
-# cible fenix8solar51mm, dont l'ecran mesure REELLEMENT 280x280 -- rayon 140,
-# pas 227. La valeur numerique retombe par coincidence sur 68 (l'ancienne),
-# mais la mesure qui la justifie est entierement neuve, cf. DessinTest.mc et
-# le rapport de tache :
+# repartir sur ses DEUX LIGNES. Remesure DEUX FOIS en aout 2026, la seconde
+# fois pour corriger la premiere :
+#
+#   1) Toutes les sondes de mise en page de ce projet, cette valeur comprise,
+#      avaient ete calibrees sur un ecran fenix 8 AMOLED de 454x454 (System.
+#      getDeviceSettings() code en dur a la mauvaise taille) alors que l'app
+#      cible fenix8solar51mm, dont l'ecran mesure REELLEMENT 280x280 -- rayon
+#      140, pas 227. Premiere remesure : 68 (coincidence numerique avec
+#      l'ancienne valeur, mais methode entierement neuve).
+#   2) Une relecture a trouve le MEME defaut de raisonnement sur l'axe des
+#      LARGEURS que celui corrige en (1) sur l'axe des ordonnees : le calcul
+#      de corde disponible (largeurUtile) evaluait la largeur a l'ANCRE du
+#      bloc de texte (son sommet), jamais a son bord le plus eloigne du
+#      centre -- qui est celui qui contraint reellement sur un cadran rond,
+#      et qui peut etre la BASE du bloc quand celui-ci est sous le centre.
+#      `Pages.largeurUtile(dc, y, hauteur)` corrige ce calcul dans toute
+#      l'app. Deuxieme remesure, a la corde REELLE : CONSIGNE_MAX retombe de
+#      68 a 66.
+#
+# Chiffres de la mesure finale (cf. DessinTest.mc et le rapport de tache) :
 #   - hauteurs de police reelles (280x280) : hX=22, hS=34, hM=39
 #   - corde disponible aux deux ordonnees ou la consigne se dessine
-#     desormais (pire cas : vigilance ET pluie affichees) : 276.83 px
-#     (ligne 1, y=161) et 267.72 px (ligne 2, y=181)
+#     desormais (pire cas : vigilance ET pluie affichees), bord contraignant
+#     (la BASE de chaque ligne, pas son sommet) : 266,47 px (ligne 1,
+#     y=161, base=183) et 250,05 px (ligne 2, y=181, base=203)
 #   - a cette corde, FONT_SMALL (le choix d'origine) ne tenait que ~43
 #     caracteres au total sur ses deux lignes : les deux pires consignes
 #     REELLES (52 et 59 caracteres, ci-dessous) en ressortaient tronquees
@@ -61,12 +74,13 @@ NIVEAUX_CONSIGNE = {"vigilance": 1, "danger": 2, "critique": 3}
 #     invisible a un test qui ne verifie que la geometrie. MeteoView.mc est
 #     donc passee en FONT_XTINY pour la consigne (l'emphase visuelle cede
 #     devant l'integrite du message de securite), qui tient ENTIER sur deux
-#     lignes jusqu'a 68 caracteres, tronque des 70
-# Les deux pires consignes REELLES passent entieres avec marge : foudre +
-# grele (52 caracteres) et WBGT danger (59 caracteres, meteo_thermique.py).
-# 68 reste exactement a la marge verifiee (n=68 confirme tenir entier,
-# n=70 tronque).
-CONSIGNE_MAX = 68
+#     lignes jusqu'a 66 caracteres, tronque des 68
+# Les deux pires consignes REELLES passent toujours entieres, avec marge :
+# foudre + grele (52 caracteres) et WBGT danger (59 caracteres,
+# meteo_thermique.py) -- 7 caracteres d'ecart au-dessus de la plus longue
+# des deux. 66 reste exactement a la marge verifiee (n=66 confirme tenir
+# entier, n=68 tronque).
+CONSIGNE_MAX = 66
 
 # Alertes perimees au-dela de cette duree : meme convention que
 # MONGO_MAX_AGE_SECONDS (traffic.py), qui protege le MUR en repliant sur un

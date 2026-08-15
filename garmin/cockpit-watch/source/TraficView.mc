@@ -1,6 +1,5 @@
 using Toybox.WatchUi;
 using Toybox.Graphics;
-using Toybox.Math;
 using Toybox.Time;
 
 // Trafic : verdict global du mur circulation, terrains les plus charges,
@@ -30,17 +29,6 @@ class TraficView extends WatchUi.View {
                    ? (ac.toString() + (ac > 1 ? " accidents" : " accident"))
                    : (Fmt.DASH + " accident");
         return zTxt + " . " + acTxt;
-    }
-
-    // Meme geometrie que les autres vues : sur un cadran rond, la place
-    // utile depend de l'eloignement au centre.
-    hidden function largeurUtile(dc, y) {
-        var r = dc.getWidth() / 2.0;
-        var dy = (y - r).abs();
-        if (dy >= r) {
-            return 0.0;
-        }
-        return 2.0 * Math.sqrt(r * r - dy * dy);
     }
 
     // Les mots et couleurs du verdict sont ceux du mur (circulation.html:494),
@@ -102,15 +90,24 @@ class TraficView extends WatchUi.View {
     // la corde la plus etroite du bloc terrains (360 px a y=89). Filet de
     // securite au-dela de cette marge mesuree : tronquer plutot que deborder.
     hidden function ajusterNom(dc, nom, dispo) {
-        if (dc.getTextWidthInPixels(nom, Graphics.FONT_SMALL) <= dispo) {
-            return nom;
+        return ajusterTexte(dc, nom, Graphics.FONT_SMALL, dispo);
+    }
+
+    // Troncature caractere par caractere jusqu'a rentrer dans `dispo` --
+    // meme filet de securite que MeteoView.ajusterTexte/CockpitView.
+    // ajusterTexte, generalise ici (font en parametre) pour couvrir aussi
+    // la ligne de comptes (FONT_XTINY), qui n'a pas de largeur bornee cote
+    // serveur.
+    hidden function ajusterTexte(dc, texte, font, dispo) {
+        if (dc.getTextWidthInPixels(texte, font) <= dispo) {
+            return texte;
         }
-        var texte = nom;
-        while (texte.length() > 1 &&
-               dc.getTextWidthInPixels(texte, Graphics.FONT_SMALL) > dispo) {
-            texte = texte.substring(0, texte.length() - 1);
+        var t = texte;
+        while (t.length() > 1 &&
+               dc.getTextWidthInPixels(t, font) > dispo) {
+            t = t.substring(0, t.length() - 1);
         }
-        return texte;
+        return t;
     }
 
     function onUpdate(dc) {
@@ -137,7 +134,12 @@ class TraficView extends WatchUi.View {
         dc.drawText(w / 2, y, Graphics.FONT_MEDIUM, Pages.verdictMot(vd),
                     Graphics.TEXT_JUSTIFY_CENTER);
 
-        y += hM + 16;
+        // Resserre a 8 (etait 16) : la ligne de comptes qui suit les
+        // terrains a besoin de la corde la plus large possible a son
+        // ordonnee (la BASE de son bloc, pas son ancre, contraint -- cf.
+        // Pages.largeurUtile) ; la remonter de 8 px gagne ~15 px de corde a
+        // cet endroit, cf. rapport de tache.
+        y += hM + 8;
 
         if (tr == null) {
             // Bloc source en panne : on ne sait PAS combien de terrains il y
@@ -197,7 +199,7 @@ class TraficView extends WatchUi.View {
             for (var i = 0; i < nTerrains; i += 1) {
                 var t = terrains[i];
 
-                var dispoNom = largeurUtile(dc, y);
+                var dispoNom = Pages.largeurUtile(dc, y, hS);
                 var nom = ajusterNom(dc, t[0], dispoNom);
                 dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
                 dc.drawText(w / 2, y, Graphics.FONT_SMALL, nom,
@@ -225,14 +227,29 @@ class TraficView extends WatchUi.View {
         var texteComptes = formatComptes(tr["z"], tr["ac"]);
         // Terrains masques par la limite d'affichage (pas les terrains
         // absents du payload -- ceux-la, watch_pages ne les envoie deja
-        // plus) : ajoutes en toutes lettres, jamais tus.
+        // plus) : ajoutes en toutes lettres, jamais tus. Le filet de
+        // securite qui suit doit donc tronquer le COMPTE si la ligne
+        // deborde, jamais la mention "+N axes" -- sinon la mention
+        // disparaitrait exactement dans le cas ou elle compte le plus (deux
+        // terrains masques ET des comptes eleves).
         var resteTerrains = terrains.size() -
                              (terrains.size() > maxTerrains ? maxTerrains
                                                              : terrains.size());
+        var suffixeReste = "";
         if (resteTerrains > 0) {
-            texteComptes += "  +" + resteTerrains.toString()
-                            + (resteTerrains > 1 ? " axes" : " axe");
+            suffixeReste = "  +" + resteTerrains.toString()
+                           + (resteTerrains > 1 ? " axes" : " axe");
         }
+        // Filet de securite : compte a deux chiffres + accidents peut
+        // depasser la corde (la plus etroite de la page, cf.
+        // Pages.largeurUtile) dans le pire cas plausible -- tronquer le
+        // compte plutot que deborder du verre rond, en reservant toujours
+        // la place du suffixe "+N axes".
+        var dispoComptes = Pages.largeurUtile(dc, y, hX);
+        var dispoBase = dispoComptes -
+                         dc.getTextWidthInPixels(suffixeReste, Graphics.FONT_XTINY);
+        texteComptes = ajusterTexte(dc, texteComptes, Graphics.FONT_XTINY,
+                                    dispoBase) + suffixeReste;
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, y, Graphics.FONT_XTINY, texteComptes,
                     Graphics.TEXT_JUSTIFY_CENTER);

@@ -359,6 +359,19 @@ def etat_mur(db, maintenant):
     contraintes = _contraintes(actuel_enrichi, suite, sol)
     verdict = _verdict(prochaine_pluie, consignes, contraintes)
 
+    # etat_vigilance/niveau_vigilance comparent `maintenant` aux `debut`/`fin`
+    # des periodes du bulletin, parses par `_instant()` en datetimes CONSCIENTS
+    # (les chaines du producteur portent toujours un fuseau). `maintenant`, lui,
+    # est naif ici la moitie du temps (meteo.py appelle etat_mur avec
+    # datetime.now(), watch_pages.py avec un datetime deja conscient) : un naif
+    # compare a un conscient leve TypeError. Le reste de cette fonction traite
+    # `maintenant` comme un naif-UTC (meme convention que les horodatages Mongo
+    # qu'il compare ailleurs, ex. _fraicheur_mur) -- on ne le convertit donc
+    # QUE pour ces deux appels, sans toucher a la valeur transmise partout
+    # ailleurs dans ce dictionnaire.
+    maintenant_pour_vigilance = (maintenant if maintenant.tzinfo is not None
+                                  else maintenant.replace(tzinfo=timezone.utc))
+
     return {
         "maintenant": maintenant.isoformat(timespec="seconds"),
         "actuel": actuel_enrichi,
@@ -374,8 +387,19 @@ def etat_mur(db, maintenant):
         "fraicheur": _fraicheur_mur(db, maintenant, actuel_enrichi),
         # Fraicheur jointe au bulletin : le mur ne doit pas recalculer une
         # peremption de son cote, c'est ainsi qu'une regle fausse se duplique.
-        "vigilance": ({**bulletin, **etat_vigilance(bulletin),
-                       **niveau_vigilance(bulletin)} if bulletin else None),
+        # `maintenant_pour_vigilance` est explicitement transmis aux deux --
+        # sans lui, elles retombaient chacune sur leur propre
+        # `datetime.now(timezone.utc)`, jamais sur l'horloge que l'appelant a
+        # fournie a etat_mur. Sans consequence en production (etat_mur n'est
+        # jamais appele avec un `maintenant` different de l'heure reelle),
+        # mais une fonction doit rester deterministe pour l'horloge qu'on lui
+        # donne -- c'est ce qui faisait echouer test_meteo_etat.py::
+        # TestVigilance::test_le_bulletin_est_rendu_avec_sa_fraicheur des que
+        # la date change.
+        "vigilance": ({**bulletin,
+                       **etat_vigilance(bulletin, maintenant_pour_vigilance),
+                       **niveau_vigilance(bulletin, maintenant_pour_vigilance)}
+                      if bulletin else None),
         "sol": sol,
         "radar": {
             "valid_at": radar["valid_at"].isoformat() if radar else None,

@@ -1,6 +1,5 @@
 using Toybox.WatchUi;
 using Toybox.Graphics;
-using Toybox.Math;
 using Toybox.Time;
 
 // Meteo : etat du mur (temperature, vent, rafales), pluie a venir, et la
@@ -20,17 +19,6 @@ class MeteoView extends WatchUi.View {
 
     function initialize() {
         View.initialize();
-    }
-
-    // Meme geometrie que les autres vues : sur un cadran rond, la place
-    // utile depend de l'eloignement au centre.
-    hidden function largeurUtile(dc, y) {
-        var r = dc.getWidth() / 2.0;
-        var dy = (y - r).abs();
-        if (dy >= r) {
-            return 0.0;
-        }
-        return 2.0 * Math.sqrt(r * r - dy * dy);
     }
 
     // Meme echelle 0-3 que Pages.verdictMot/TraficView.couleurVerdict --
@@ -205,14 +193,16 @@ class MeteoView extends WatchUi.View {
         // etats : bloc absent (tirets), bloc present sans consigne active
         // (fait connu, "aucune consigne"), bloc present avec consigne
         // (coloree, sur deux lignes). FONT_XTINY, PAS FONT_SMALL (l'ancien
-        // choix, garde pour son emphase visuelle) : mesure au device, la
-        // corde a cet endroit (277/259 px) ne tient que ~43 caracteres au
-        // total en SMALL -- les DEUX consignes reelles les plus longues (52
-        // et 59 caracteres) en ressortaient tronquees avant leur verbe
-        // d'action alors meme qu'elles COLLAIENT dans l'ecran (aucun
-        // debordement geometrique, donc invisible a un test qui ne verifie
-        // que les bornes -- cf. rapport de tache, sonde de contenu). En
-        // XTINY, la meme corde tient environ 66 caracteres au total,
+        // choix, garde pour son emphase visuelle) : a la corde REELLEMENT
+        // disponible (le bord du bloc [y, y+hauteur] le plus eloigne du
+        // centre, cf. Pages.largeurUtile -- PAS l'ancre), FONT_SMALL ne
+        // tient que ~43 caracteres au total sur ses deux lignes. Les DEUX
+        // consignes reelles les plus longues (52 et 59 caracteres) en
+        // ressortaient tronquees avant leur verbe d'action alors meme
+        // qu'elles COLLAIENT dans l'ecran (aucun debordement geometrique,
+        // donc invisible a un test qui ne verifie que les bornes -- cf.
+        // rapport de tache, sonde de contenu). En XTINY, la meme corde
+        // tient CONSIGNE_MAX (watch_pages.py, 66) caracteres au total,
         // confirme par testCouperConsigneNeTronquePasLesDeuxConsignesReelles
         // (DessinTest.mc) qui rejoue les deux consignes entieres.
         if (meteo == null) {
@@ -224,8 +214,8 @@ class MeteoView extends WatchUi.View {
             dc.drawText(w / 2, y, Graphics.FONT_XTINY, "aucune consigne",
                         Graphics.TEXT_JUSTIFY_CENTER);
         } else {
-            var dispo1 = largeurUtile(dc, y);
-            var dispo2 = largeurUtile(dc, y + hX - 2);
+            var dispo1 = Pages.largeurUtile(dc, y, hX);
+            var dispo2 = Pages.largeurUtile(dc, y + hX - 2, hX);
             var lignes = couperConsigne(dc, meteo["cn"], Graphics.FONT_XTINY,
                                         dispo1, dispo2);
             dc.setColor(couleurNiveau(meteo["cl"]), Graphics.COLOR_TRANSPARENT);

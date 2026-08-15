@@ -43,17 +43,6 @@ class FrequentationView extends WatchUi.View {
         return delta.toString() + "%";
     }
 
-    // Meme geometrie que les autres vues : sur un cadran rond, la place
-    // utile depend de l'eloignement au centre.
-    hidden function largeurUtile(dc, y) {
-        var r = dc.getWidth() / 2.0;
-        var dy = (y - r).abs();
-        if (dy >= r) {
-            return 0.0;
-        }
-        return 2.0 * Math.sqrt(r * r - dy * dy);
-    }
-
     // La ligne "edition" (compte a six chiffres + jour + heure) est la plus
     // large de la page, et elle se dessine pres du bord ou la corde du
     // cadran rond se retrecit (mesure au device, fenix8solar51mm 280x280) :
@@ -64,6 +53,22 @@ class FrequentationView extends WatchUi.View {
     function formatEdition(pk, pkt) {
         return "edition " + Fmt.count(pk) + " . " + Fmt.day(pkt) + " "
                + Fmt.hour(pkt);
+    }
+
+    // Troncature caractere par caractere jusqu'a rentrer dans `dispo` --
+    // meme filet de securite que MeteoView.ajusterTexte/TraficView.
+    // ajusterNom : la forme compacte peut encore deborder au pire cas
+    // (jour/mois longs, six chiffres), cf. rapport de tache.
+    hidden function ajusterTexte(dc, texte, font, dispo) {
+        if (dc.getTextWidthInPixels(texte, font) <= dispo) {
+            return texte;
+        }
+        var t = texte;
+        while (t.length() > 1 &&
+               dc.getTextWidthInPixels(t, font) > dispo) {
+            t = t.substring(0, t.length() - 1);
+        }
+        return t;
     }
 
     function formatEditionCourt(pk, pkt) {
@@ -113,10 +118,11 @@ class FrequentationView extends WatchUi.View {
         // edition rapportee) doivent tenir entre le titre et le pied (241
         // sur 280, mesure au device) : l'espacement d'origine faisait finir
         // la derniere ligne exactement SUR le pied (les deux se
-        // superposaient a l'ecran). Resserre -- verifie par
-        // DebordementTest.mc, pire cas (six chiffres partout) : la derniere
-        // ligne finit a 239, 2 px avant le pied.
-        var y = 26 + hX + 10;
+        // superposaient a l'ecran). Resserre encore a la relecture (la
+        // ligne "edition" a aussi besoin de la corde la plus large
+        // possible a son ordonnee, cf. plus bas) -- verifie par
+        // DebordementTest.mc, pire cas (six chiffres partout).
+        var y = 26 + hX + 4;
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, y, Graphics.FONT_XTINY, "pic du jour",
                     Graphics.TEXT_JUSTIFY_CENTER);
@@ -136,7 +142,7 @@ class FrequentationView extends WatchUi.View {
 
         // Strate 2 : N-1 au jour equivalent, et son delta -- calcule ICI,
         // sur la montre, a partir de `pj`/`n1` : le serveur ne l'envoie pas.
-        y += hX + 4;
+        y += hX + 2;
         var n1 = (freq != null) ? freq["n1"] : null;
         var delta = calculDeltaPct(pj, n1);
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
@@ -146,16 +152,23 @@ class FrequentationView extends WatchUi.View {
 
         // Strate 3 : pic de l'edition rapportee -- lu dans le NOYAU
         // (pk/pkt), independant du bloc "st" : reste affiche meme si "st"
-        // est absent, comme la page 1 le fait deja en mode past.
-        y += hS + 4;
+        // est absent, comme la page 1 le fait deja en mode past. Trois
+        // paliers : forme longue, forme compacte, et troncature de la forme
+        // compacte si meme celle-ci deborde encore (pire cas mesure a la
+        // relecture : la forme compacte depassait encore le verre rond de
+        // 17,5 px a cette ordonnee, la BASE du bloc -- pas l'ancre --
+        // contraint desormais, cf. Pages.largeurUtile).
+        y += hS + 2;
         var pk = (noyau != null) ? noyau["pk"] : null;
         var pkt = (noyau != null) ? noyau["pkt"] : null;
         var texteEdition = formatEdition(pk, pkt);
-        var dispoEdition = largeurUtile(dc, y);
+        var dispoEdition = Pages.largeurUtile(dc, y, hX);
         if (dc.getTextWidthInPixels(texteEdition, Graphics.FONT_XTINY)
                 > dispoEdition) {
             texteEdition = formatEditionCourt(pk, pkt);
         }
+        texteEdition = ajusterTexte(dc, texteEdition, Graphics.FONT_XTINY,
+                                    dispoEdition);
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, y, Graphics.FONT_XTINY, texteEdition,
                     Graphics.TEXT_JUSTIFY_CENTER);

@@ -1,6 +1,5 @@
 using Toybox.WatchUi;
 using Toybox.Graphics;
-using Toybox.Math;
 
 // Consultation des editions passees : libelle, pic de presents, jour et heure
 // du pic. Une seule requete rapporte la liste ET tous les pics, donc rien
@@ -54,17 +53,6 @@ class EditionsView extends WatchUi.View {
         WatchUi.requestUpdate();
     }
 
-    // Meme geometrie que CockpitView : sur un cadran rond, la place utile
-    // depend de l'eloignement au centre.
-    hidden function largeurUtile(dc, y) {
-        var r = dc.getWidth() / 2.0;
-        var dy = (y - r).abs();
-        if (dy >= r) {
-            return 0.0;
-        }
-        return 2.0 * Math.sqrt(r * r - dy * dy);
-    }
-
     function onUpdate(dc) {
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
         dc.clear();
@@ -99,7 +87,7 @@ class EditionsView extends WatchUi.View {
 
         for (var i = mHaut; i < fin; i += 1) {
             var e = mEditions[i];
-            var marge = (w - largeurUtile(dc, y)) / 2.0 + 6;
+            var marge = (w - Pages.largeurUtile(dc, y, hS)) / 2.0 + 6;
 
             // Libelle a gauche, pic a droite : les chiffres s'alignent d'une
             // ligne a l'autre, donc se comparent d'un regard.
@@ -111,7 +99,7 @@ class EditionsView extends WatchUi.View {
 
             var yQuand = y + hS - 2;
             dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(w - ((w - largeurUtile(dc, yQuand)) / 2.0 + 6), yQuand,
+            dc.drawText(w - ((w - Pages.largeurUtile(dc, yQuand, hX)) / 2.0 + 6), yQuand,
                         Graphics.FONT_XTINY,
                         Fmt.day(e[2]) + " " + Fmt.hour(e[2]),
                         Graphics.TEXT_JUSTIFY_RIGHT);

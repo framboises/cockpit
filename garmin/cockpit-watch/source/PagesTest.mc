@@ -1,5 +1,6 @@
 using Toybox.Test;
 using Toybox.Application;
+using Toybox.Math;
 
 (:test)
 function testVerdictMotSuitLesMemsMotsQueLeMur(logger) {
@@ -117,5 +118,69 @@ function testVigilanceMotCourtPartageLaMemeEchelle(logger) {
     Test.assertEqual(Pages.vigilanceMotCourt(3), "VIG ROUGE");
     Test.assert(Pages.vigilanceMotCourt(0) == null);
     Test.assert(Pages.vigilanceMotCourt(null) == null);
+    return true;
+}
+
+// largeurUtile(dc, y, hauteur) : le bord CONTRAIGNANT est celui le plus
+// eloigne du centre (140 sur un ecran de 280), pas l'ancre (y) seule. Ces
+// tests figent en VALEUR les quatre ecarts mesures a la relecture -- avant
+// correction, chaque appelant passait juste `y` et surestimait la place
+// disponible.
+
+(:test)
+function testLargeurUtileBlocEntierementEnHautUtiliseLeSommet(logger) {
+    // Bloc [24,46], entierement en moitie haute : le sommet (24, le plus
+    // eloigne du centre) contraint deja, comme avant la correction -- ce
+    // cas ne doit PAS changer de resultat.
+    var dc = dcDeTest();
+    var attendu = 2.0 * Math.sqrt(140.0 * 140.0 - 116.0 * 116.0);
+    Test.assertEqual(Pages.largeurUtile(dc, 24, 22).toNumber(), attendu.toNumber());
+    return true;
+}
+
+(:test)
+function testLargeurUtileBlocEnBasUtiliseLaBase(logger) {
+    // Bloc [217,239] (ligne "edition", FrequentationView) : la BASE (239),
+    // pas le sommet (217), est la plus eloignee du centre. L'ancien calcul
+    // (largeurUtile(dc, 217)) annoncait 233,85 px ; le bon bord donne
+    // 198,0 px -- l'ecart (35,9 px) mesure a la relecture.
+    var dc = dcDeTest();
+    var ancre = Pages.largeurUtile(dc, 217, 0);
+    var correct = Pages.largeurUtile(dc, 217, 22);
+    Test.assert(correct < ancre);
+    Test.assert((correct - 198.0).abs() < 0.5);
+    Test.assert((ancre - 233.85).abs() < 0.5);
+    return true;
+}
+
+(:test)
+function testLargeurUtileConsigneMeteoDeuxLignes(logger) {
+    // Les deux dispo de MeteoView (consigne, FONT_XTINY, hauteur 22) :
+    // ligne 1 a y=161 (base 183), ligne 2 a y=181 (base 203).
+    var dc = dcDeTest();
+    var dispo1 = Pages.largeurUtile(dc, 161, 22);
+    var dispo2 = Pages.largeurUtile(dc, 181, 22);
+    Test.assert((dispo1 - 266.46).abs() < 0.5);
+    Test.assert((dispo2 - 250.05).abs() < 0.5);
+    return true;
+}
+
+(:test)
+function testLargeurUtileTraficDeuxiemeTerrain(logger) {
+    // TraficView, nom du 2e terrain (FONT_SMALL, hauteur 34) a y=153 :
+    // la base (187) contraint, pas le sommet (153).
+    var dc = dcDeTest();
+    var dispo = Pages.largeurUtile(dc, 153, 34);
+    Test.assert((dispo - 263.7).abs() < 0.5);
+    return true;
+}
+
+(:test)
+function testLargeurUtileZeroHorsDuCadran(logger) {
+    // Bloc entierement hors du cercle (y=280, hauteur=0) : corde nulle,
+    // jamais negative ni une exception de racine de nombre negatif.
+    var dc = dcDeTest();
+    Test.assertEqual(Pages.largeurUtile(dc, 280, 0), 0.0);
+    Test.assertEqual(Pages.largeurUtile(dc, -50, 0), 0.0);
     return true;
 }

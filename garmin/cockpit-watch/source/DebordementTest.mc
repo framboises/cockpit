@@ -18,12 +18,26 @@ using Toybox.Math;
 // sur la taille REELLE de l'ecran, mais enregistre chaque element dessine
 // (rectangle englobant) plutot que de le peindre. Apres onUpdate(dc), on
 // dispose de la liste exacte de ce que la vue a essaye d'afficher et ou --
-// on peut alors verifier que rien ne sort de l'ecran et que rien ne
-// chevauche le pied de page, sur l'ecran REEL, dans chaque etat atteignable.
+// on peut alors verifier que rien ne sort du VERRE ROND (pas seulement du
+// carre qui l'entoure) et que rien ne chevauche le pied de page, sur
+// l'ecran REEL, dans chaque etat atteignable.
+//
+// Premiere version de ce fichier (relecture) : la verification ne comparait
+// les rectangles qu'au CARRE [0,largeur]x[0,hauteur], jamais au disque
+// inscrit -- exactement le meme defaut de raisonnement que celui qui a
+// motive toute cette tache, mais sur l'axe des largeurs plutot que des
+// ordonnees (cf. largeurUtile dans Pages.mc). Un texte pouvait donc rester
+// dans le carre tout en debordant du verre rond aux quatre coins du cadran,
+// sans qu'aucune violation ne soit relevee -- cas concret trouve a la
+// relecture : la bande de voyants de CockpitView (page 0) se dessinait sans
+// aucun controle de largeur a une ordonnee ou la corde vaut 260,8 px.
+// `depassementCadran` verifie desormais les QUATRE COINS de chaque
+// rectangle contre le disque, la seule contrainte reelle sur un cadran
+// rond.
 //
 // Verifie par sabotage (cf. rapport de tache) : deplacer une seule ligne
-// d'une vue en dehors de sa position mesuree fait tomber le test
-// correspondant.
+// d'une vue en dehors de sa position mesuree, OU reintroduire un appel a
+// largeurUtile sans la hauteur du bloc, fait tomber le test correspondant.
 class RecordingDc {
 
     hidden var mReal;
@@ -111,22 +125,53 @@ function piedStandard(dc) {
     return dc.getHeight() - dc.getFontHeight(Graphics.FONT_XTINY) - 17;
 }
 
+// Distance du coin le plus eloigne du centre du cadran, moins le rayon.
+// Positif = ce coin deborde du VERRE ROND ; negatif ou nul = a l'interieur.
+// Les quatre coins du rectangle englobant sont testes individuellement --
+// PAS une comparaison au carre [0,largeur]x[0,hauteur], que la premiere
+// version de ce fichier utilisait. Cette premiere version laissait passer
+// tout rectangle reste dans le carre mais sorti du disque inscrit (les
+// quatre coins du cadran, hors du verre sur une montre ronde) -- c'est
+// exactement ce que largeurUtile existe pour empecher cote production, et
+// ce test doit verifier la MEME contrainte, pas une approximation plus
+// laxiste. Le carre est en fait un cas particulier inutile ici : sur un
+// cadran rond, le disque inscrit (rayon = largeur/2 = hauteur/2) est
+// TOUJOURS strictement contenu dans le carre sauf aux quatre points de
+// tangence -- rester dans le disque garantit deja de rester dans le carre.
+function depassementCadran(r, cx, cy, rayon) {
+    var coins = [[r["x0"], r["y0"]], [r["x1"], r["y0"]],
+                 [r["x0"], r["y1"]], [r["x1"], r["y1"]]];
+    var pire = -1.0;
+    for (var i = 0; i < coins.size(); i += 1) {
+        var dx = coins[i][0] - cx;
+        var dy = coins[i][1] - cy;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > pire) {
+            pire = dist;
+        }
+    }
+    return pire - rayon;
+}
+
 // Liste les violations en texte (pour le logger) plutot qu'un simple
 // booleen : un test qui tombe doit dire OU et de COMBIEN, pas seulement
 // "echec".
 //
 // `footBandTop` peut valoir null (EditionsView, page ALERTES : pas de
-// convention de pied fixe) -- dans ce cas seul le debordement hors ecran est
-// verifie.
+// convention de pied fixe) -- dans ce cas seul le debordement du verre rond
+// est verifie.
 function violationsDebordement(rects, width, height, footBandTop, eps) {
     var out = [];
+    var cx = width / 2.0;
+    var cy = height / 2.0;
+    var rayon = width / 2.0;
     for (var i = 0; i < rects.size(); i += 1) {
         var r = rects[i];
-        if (r["x0"] < 0 - eps || r["x1"] > width + eps ||
-            r["y0"] < 0 - eps || r["y1"] > height + eps) {
-            out.add("HORS ECRAN [" + r["label"] + "] x=" + r["x0"] + ".." +
-                    r["x1"] + " y=" + r["y0"] + ".." + r["y1"] +
-                    " (ecran " + width + "x" + height + ")");
+        var depassement = depassementCadran(r, cx, cy, rayon);
+        if (depassement > eps) {
+            out.add("HORS DU VERRE ROND [" + r["label"] + "] x=" + r["x0"] +
+                    ".." + r["x1"] + " y=" + r["y0"] + ".." + r["y1"] +
+                    " depasse de " + depassement + " px (rayon " + rayon + ")");
         } else if (footBandTop != null && r["y0"] < footBandTop - eps &&
                    r["y1"] > footBandTop + eps) {
             out.add("CHEVAUCHE LE PIED [" + r["label"] + "] y=" + r["y0"] +
@@ -143,6 +188,65 @@ function verifierNeDebordePas(logger, dc, footBandTop) {
         logger.debug(violations[i]);
     }
     Test.assertEqual(violations.size(), 0);
+}
+
+// Preuve directe, independante de toute vue : depassementCadran verifie le
+// DISQUE inscrit, pas le carre qui l'entoure. Un rectangle peut rester
+// entierement dans [0,280]x[0,280] -- ce que l'ancienne version de ce
+// fichier verifiait -- tout en debordant aux quatre coins du cadran rond.
+// Le coin (280,0) d'un rectangle colle au coin superieur droit de l'ecran
+// est a sqrt(140^2+140^2)=197,99 px du centre (140,140), largement au-dela
+// du rayon (140) -- hors du verre, dans le carre.
+(:test)
+function testDepassementCadranDetecteUnCoinDeCarreHorsDuCercle(logger) {
+    var r = {"x0" => 260.0, "y0" => 0.0, "x1" => 280.0, "y1" => 20.0,
+             "label" => "coin"};
+    var depassement = depassementCadran(r, 140.0, 140.0, 140.0);
+    Test.assert(depassement > 50.0);
+    return true;
+}
+
+(:test)
+function testDepassementCadranToleereUnRectangleCentre(logger) {
+    // Contre-epreuve : un rectangle proche du centre, meme large, ne
+    // deborde pas -- depassementCadran ne doit pas etre systematiquement
+    // punitif.
+    var r = {"x0" => 40.0, "y0" => 130.0, "x1" => 240.0, "y1" => 150.0,
+             "label" => "centre"};
+    var depassement = depassementCadran(r, 140.0, 140.0, 140.0);
+    Test.assert(depassement <= 0.0);
+    return true;
+}
+
+// EditionsView n'a pas de pied fixe, mais un repere de defilement bas ("v",
+// dc.getHeight() - hX - 12) qui joue le meme role : rien ne doit s'en
+// approcher au point de le chevaucher. Mesure a la sonde : la 3e entree
+// finissait a 244, le repere a 246 -- 2 px d'ecart, jamais verifie
+// jusqu'ici. `null` si le repere n'est pas affiche (rien en dessous) :
+// rien a verifier dans ce cas.
+function verifierPasDeChevauchementRepere(logger, dc) {
+    var rects = dc.rects();
+    var yRepere = null;
+    for (var i = 0; i < rects.size(); i += 1) {
+        if (rects[i]["label"] != null && rects[i]["label"].equals("v")) {
+            yRepere = rects[i]["y0"];
+        }
+    }
+    if (yRepere == null) {
+        return;
+    }
+    var eps = 1.0;
+    for (var i = 0; i < rects.size(); i += 1) {
+        var r = rects[i];
+        if (r["label"] != null && r["label"].equals("v")) {
+            continue;
+        }
+        if (r["y1"] > yRepere + eps) {
+            logger.debug("CHEVAUCHE LE REPERE DE DEFILEMENT [" + r["label"]
+                         + "] y1=" + r["y1"] + " (repere a " + yRepere + ")");
+        }
+        Test.assert(r["y1"] <= yRepere + eps);
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -200,14 +304,22 @@ function testDebordementCockpitPage1PireCasNeDeborgePas(logger) {
                 "m" => "live", "n" => "24HM 26", "e" => 48213, "er" => 3200,
                 "p" => 44980, "pk" => 39800, "pkt" => Time.now().value() - 5400,
                 "w" => 27.4, "wl" => 1,
-                // Labels a la borne serveur reelle (watch_state.LABEL_MAX =
-                // 24 caracteres) : au-dela, le serveur tronque deja avant
-                // transport, la vue n'a jamais a en recevoir de plus longs.
-                "al" => [[3, "SOS tablette Houx 5"],
-                         [3, "Evacuation Beausejour"],
-                         [2, "Vent rafale 72 km/h"],
-                         [2, "Palpation postes sud"],
-                         [1, "Ouverture imminente"]]});
+                // Labels a la borne serveur EXACTE (watch_state.LABEL_MAX =
+                // 24 caracteres, verifie ci-dessous) -- le vrai pire cas,
+                // pas une approximation plus courte. Au-dela de 24, le
+                // serveur tronque deja avant transport.
+                "al" => [[3, "SOS tablette Houx 5 nord"],
+                         [3, "Evacuation Beausejour 12"],
+                         [2, "Vent rafale 72 km/h fort"],
+                         [2, "Palpation postes sud A12"],
+                         [1, "Ouverture imminente Nord"]]});
+    // Verifie que le fixture ci-dessus est bien au pire cas annonce (24
+    // caracteres), pas une approximation : un test qui pretend jouer le
+    // pire cas doit le prouver, pas seulement l'affirmer en commentaire.
+    var al = Cache.load()["al"];
+    for (var i = 0; i < al.size(); i += 1) {
+        Test.assertEqual(al[i][1].length(), 24);
+    }
     vue.onFetched(false, null);
     vue.nextPage();
     var dc = dcEnregistrement();
@@ -387,10 +499,12 @@ function testDebordementEditionsPireCasNeDeborgePas(logger) {
     var dc = dcEnregistrement();
     vue.onUpdate(dc);
     verifierNeDebordePas(logger, dc, null);
+    verifierPasDeChevauchementRepere(logger, dc);
 
     vue.scroll(5);
     var dc2 = dcEnregistrement();
     vue.onUpdate(dc2);
     verifierNeDebordePas(logger, dc2, null);
+    verifierPasDeChevauchementRepere(logger, dc2);
     return true;
 }
