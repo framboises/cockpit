@@ -2,6 +2,8 @@ using Toybox.Test;
 using Toybox.Graphics;
 using Toybox.Time;
 using Toybox.Application;
+using Toybox.Math;
+using Toybox.System;
 
 // Aucun test n'exercait le chemin de DESSIN : les tests portaient tous sur les
 // fonctions pures. Un deref sur un champ nul dans drawMain -- typiquement `pk`
@@ -340,6 +342,305 @@ function testDessinTraficBlocAbsentNeLevePas(logger) {
     Application.Storage.deleteValue(Cache.KEY_PAGES);
     var vue = new TraficView();
     vue.onUpdate(dcDeTest());
+    return true;
+}
+
+// Les cinq tests qui suivent exercent MeteoView (tache 12) : bloc absent, et
+// les quatre combinaisons pluie x consigne (le bloc reste vivant toute
+// l'annee, pas de mode past a part). Comme le reste de ce fichier, ils ne
+// jugent pas l'esthetique : ils prouvent que ces chemins de dessin ne
+// levent pas -- y compris le lisere de vigilance (vg >= 1) et le decoupage
+// de la consigne sur deux lignes.
+
+(:test)
+function testDessinMeteoPluieEtConsigneNeLevePas(logger) {
+    // Le pire cas plausible : pluie attendue, consigne au maximum des 44
+    // caracteres (watch_pages.CONSIGNE_MAX), et vigilance orange -- exerce
+    // le lisere colore ET le decoupage de la consigne sur deux lignes.
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new MeteoView();
+    Cache.savePages({"mc" => null, "tr" => null, "st" => null,
+                     "me" => {"t" => Time.now().value() - 300, "tc" => 31.6,
+                              "v" => 25.0, "rf" => 72.0, "pl" => 15,
+                              "pm" => 8.0,
+                              "cn" => "Palpation renforcee sur tous les postes nord",
+                              "cl" => 2, "vg" => 2}});
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
+function testDessinMeteoPluieSansConsigneNeLevePas(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new MeteoView();
+    Cache.savePages({"mc" => null, "tr" => null, "st" => null,
+                     "me" => {"t" => Time.now().value() - 300, "tc" => 22.0,
+                              "v" => 18.0, "rf" => 30.0, "pl" => 40,
+                              "pm" => 3.0, "cn" => null, "cl" => 0, "vg" => 0}});
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
+function testDessinMeteoSansPluieAvecConsigneNeLevePas(logger) {
+    // Consigne active sans pluie a l'horizon (ex : palpation renforcee pour
+    // une autre raison que la meteo elle-meme n'exprime pas) -- prouve que
+    // la consigne ne depend pas de l'etat de la strate pluie.
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new MeteoView();
+    Cache.savePages({"mc" => null, "tr" => null, "st" => null,
+                     "me" => {"t" => Time.now().value() - 300, "tc" => 27.0,
+                              "v" => 12.0, "rf" => 20.0, "pl" => null,
+                              "pm" => null, "cn" => "Rafales 62 km/h - securiser les structures",
+                              "cl" => 1, "vg" => 0}});
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
+function testDessinMeteoSansPluieSansConsigneNeLevePas(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new MeteoView();
+    Cache.savePages({"mc" => null, "tr" => null, "st" => null,
+                     "me" => {"t" => Time.now().value() - 1800, "tc" => 18.5,
+                              "v" => 10.0, "rf" => 18.0, "pl" => null,
+                              "pm" => null, "cn" => null, "cl" => 0, "vg" => 0}});
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
+function testDessinMeteoBlocAbsentNeLevePas(logger) {
+    // Source en panne : structure fixe (titre, trois strates en tirets),
+    // pied "indisponible" en rouge -- aucun lisere de vigilance (vg
+    // inconnu, jamais affirmatif).
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new MeteoView();
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+// Les quatre tests qui suivent exercent FrequentationView (tache 12) : bloc
+// present (avec et sans pic du jour deja releve), bloc absent en mode live,
+// et le mode past qui court-circuite toute la page ("hors evenement",
+// meme regle que MainCouranteView -- la comparaison au jour equivalent n'a
+// pas d'objet hors saison, le serveur ne construit meme pas le bloc).
+
+(:test)
+function testDessinFrequentationPresenteNeLevePas(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new FrequentationView();
+    Cache.save({"t" => Time.now().value(), "rx" => Time.now().value(),
+                "m" => "live", "n" => "24HM 26", "e" => 51200, "er" => 4100,
+                "p" => 47850, "pk" => 44100, "pkt" => Time.now().value() - 3600,
+                "w" => 29.1, "wl" => 2, "al" => []});
+    Cache.savePages({"mc" => null, "tr" => null, "me" => null,
+                     "st" => {"t" => Time.now().value() - 600, "pj" => 44100,
+                              "ph" => "13h20", "n1" => 40000}});
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
+function testDessinFrequentationSansPicDuJourNeLevePas(logger) {
+    // Bloc present mais aucun pic releve pour l'instant (tot dans la
+    // journee) : `pj`/`ph`/`n1` a null alors que le bloc existe -- distinct
+    // du bloc absent, Fmt.count/le repli sur DASH doivent le rendre sans
+    // lever.
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new FrequentationView();
+    Cache.save({"t" => Time.now().value(), "rx" => Time.now().value(),
+                "m" => "live", "n" => "24HM 26", "e" => 0, "er" => 0,
+                "p" => 0, "pk" => 44100, "pkt" => Time.now().value() - 3600,
+                "w" => 18.0, "wl" => 0, "al" => []});
+    Cache.savePages({"mc" => null, "tr" => null, "me" => null,
+                     "st" => {"t" => null, "pj" => null, "ph" => null,
+                              "n1" => null}});
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
+function testDessinFrequentationBlocAbsentNeLevePas(logger) {
+    // Source en panne sur "st" (live) : structure fixe en tirets, sauf le
+    // pic d'edition qui vient du NOYAU (pk/pkt) et reste donc affiche.
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new FrequentationView();
+    Cache.save({"t" => Time.now().value(), "rx" => Time.now().value(),
+                "m" => "live", "n" => "24HM 26", "e" => 48213, "er" => 3200,
+                "p" => 44980, "pk" => 39800, "pkt" => Time.now().value() - 5400,
+                "w" => 27.4, "wl" => 1, "al" => []});
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+(:test)
+function testDessinFrequentationPastNeLevePas(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new FrequentationView();
+    Cache.save({"t" => null, "rx" => Time.now().value(), "m" => "past",
+                "n" => "LMC 26", "e" => null, "er" => null,
+                "pk" => 52409, "pkt" => 1783175368,
+                "w" => 24.2, "wl" => 0, "al" => []});
+    vue.onUpdate(dcDeTest());
+    return true;
+}
+
+// Delta N-1 : le seul calcul non trivial de cette tache, verifie en VALEUR
+// (pas seulement "ne leve pas") -- Test.assert(x == null), jamais
+// Test.assertEqual(x, null) qui plante dans ce SDK.
+
+(:test)
+function testFrequentationDeltaPctPositifNeLevePas(logger) {
+    var vue = new FrequentationView();
+    // (44100 - 40000) / 40000 * 100 = 10.25 -> arrondi 10.
+    Test.assertEqual(vue.calculDeltaPct(44100, 40000), 10);
+    return true;
+}
+
+(:test)
+function testFrequentationDeltaPctNegatifNeLevePas(logger) {
+    var vue = new FrequentationView();
+    // (36000 - 40000) / 40000 * 100 = -10.0 exact.
+    Test.assertEqual(vue.calculDeltaPct(36000, 40000), -10);
+    return true;
+}
+
+(:test)
+function testFrequentationDeltaPctSansN1NeLevePas(logger) {
+    var vue = new FrequentationView();
+    Test.assert(vue.calculDeltaPct(44100, null) == null);
+    return true;
+}
+
+(:test)
+function testFrequentationDeltaPctN1ZeroNeLevePas(logger) {
+    // n1 == 0 : division impossible, jamais un delta invente (pas de
+    // division par zero, pas un delta enorme absurde).
+    var vue = new FrequentationView();
+    Test.assert(vue.calculDeltaPct(100, 0) == null);
+    return true;
+}
+
+(:test)
+function sondeMiseEnPageMeteoFrequentation(logger) {
+    var dc = dcDeTest();
+    var r = 227.0;
+    var hX = dc.getFontHeight(Graphics.FONT_XTINY);
+    var hS = dc.getFontHeight(Graphics.FONT_SMALL);
+    var hM = dc.getFontHeight(Graphics.FONT_MEDIUM);
+    var hN = dc.getFontHeight(Graphics.FONT_NUMBER_MEDIUM);
+    System.println("hX=" + hX + " hS=" + hS + " hM=" + hM + " hN=" + hN);
+
+    // -- METEO --
+    var yTitre = 26;
+    var yTemp = yTitre + hX + 14;
+    var yVent = yTemp + hM + 4;
+    var yPluieDebut = yVent + hX + 14;
+    var yPluieSmall = yPluieDebut;                 // ligne "pluie dans N min"
+    var yPluiePic = yPluieSmall + hS - 2;           // ligne "X mm/h au pic"
+    var yPluieSeule = yPluieDebut;                  // ligne "pas de pluie attendue"
+    var yConsigneAvecPluie = yPluiePic + hX + 14;
+    var yConsigneSansPluie = yPluieDebut + hX + 14;
+    var yFoot = dc.getHeight() - hX - 17;
+
+    var pts = [["titre", yTitre], ["temp", yTemp], ["vent", yVent],
+               ["pluie_small", yPluieSmall], ["pluie_pic", yPluiePic],
+               ["pluie_seule", yPluieSeule],
+               ["consigne_avec_pluie_l1", yConsigneAvecPluie],
+               ["consigne_avec_pluie_l2", yConsigneAvecPluie + hS - 2],
+               ["consigne_sans_pluie_l1", yConsigneSansPluie],
+               ["consigne_sans_pluie_l2", yConsigneSansPluie + hS - 2],
+               ["foot", yFoot]];
+    for (var i = 0; i < pts.size(); i += 1) {
+        var y = pts[i][1];
+        var dy = (y - r).abs();
+        var moitie = (y < r) ? "HAUTE" : "BASSE";
+        var bord = (y < r) ? y : (y + hS);
+        var dyBord = (bord - r).abs();
+        var corde = (dyBord >= r) ? 0.0 : 2.0 * Math.sqrt(r * r - dyBord * dyBord);
+        System.println("meteo " + pts[i][0] + " y=" + y + " " + moitie
+                       + " bordY=" + bord + " corde=" + corde);
+    }
+
+    // Textes reels a mesurer aux polices utilisees.
+    var consigne44 = "Palpation renforcee sur tous les postes nord";
+    var consigneBrief = "Rafales 62 km/h - securiser les structures";
+    System.println("largeur consigne44 SMALL=" +
+                    dc.getTextWidthInPixels(consigne44, Graphics.FONT_SMALL));
+    System.println("largeur consigne44 XTINY=" +
+                    dc.getTextWidthInPixels(consigne44, Graphics.FONT_XTINY));
+    System.println("largeur consigneBrief SMALL=" +
+                    dc.getTextWidthInPixels(consigneBrief, Graphics.FONT_SMALL));
+    System.println("largeur temp SMALL(24.2 C)=" +
+                    dc.getTextWidthInPixels("24.2 C", Graphics.FONT_MEDIUM));
+    System.println("largeur vent XTINY=" +
+                    dc.getTextWidthInPixels("vent 25 km/h . rafales 72 km/h",
+                                            Graphics.FONT_XTINY));
+    System.println("largeur pluie SMALL=" +
+                    dc.getTextWidthInPixels("pluie dans 180 min", Graphics.FONT_SMALL));
+    System.println("largeur pluiepic XTINY=" +
+                    dc.getTextWidthInPixels("99.9 mm/h au pic", Graphics.FONT_XTINY));
+    System.println("largeur titre METEO XTINY=" +
+                    dc.getTextWidthInPixels("METEO", Graphics.FONT_XTINY));
+    System.println("largeur pluie_seule XTINY=" +
+                    dc.getTextWidthInPixels("pas de pluie attendue", Graphics.FONT_XTINY));
+    System.println("largeur pluie_absente XTINY=" +
+                    dc.getTextWidthInPixels("pluie --", Graphics.FONT_XTINY));
+    System.println("largeur consigne_absente XTINY=" +
+                    dc.getTextWidthInPixels("aucune consigne", Graphics.FONT_XTINY));
+    System.println("largeur consigne_dash XTINY=" +
+                    dc.getTextWidthInPixels("--", Graphics.FONT_XTINY));
+    System.println("largeur consigne_l1_avecpluie SMALL=" +
+                    dc.getTextWidthInPixels("Palpation renforcee sur tous les",
+                                            Graphics.FONT_SMALL));
+    System.println("largeur consigne_l2_avecpluie SMALL=" +
+                    dc.getTextWidthInPixels("postes nord", Graphics.FONT_SMALL));
+    System.println("largeur indispo XTINY=" +
+                    dc.getTextWidthInPixels("indisponible", Graphics.FONT_XTINY));
+
+    // -- FREQUENTATION --
+    var yTitreF = 26;
+    var yLabel = yTitreF + hX + 10;
+    var yHero = yLabel + hX + 4;
+    var ySub = yHero + hN + 2;
+    var yN1 = ySub + hX + 16;
+    var yEdition = yN1 + hS + 14;
+    var yFootF = dc.getHeight() - hX - 17;
+    var ptsF = [["titre", yTitreF], ["label", yLabel], ["hero", yHero],
+                ["sub", ySub], ["n1", yN1], ["edition", yEdition],
+                ["foot", yFootF]];
+    for (var j = 0; j < ptsF.size(); j += 1) {
+        var yf = ptsF[j][1];
+        var dyf = (yf - r).abs();
+        var moitief = (yf < r) ? "HAUTE" : "BASSE";
+        var hRef = hX;
+        if (ptsF[j][0].equals("hero")) { hRef = hN; }
+        if (ptsF[j][0].equals("n1")) { hRef = hS; }
+        var bordf = (yf < r) ? yf : (yf + hRef);
+        var dyBordf = (bordf - r).abs();
+        var cordef = (dyBordf >= r) ? 0.0 : 2.0 * Math.sqrt(r * r - dyBordf * dyBordf);
+        System.println("freq " + ptsF[j][0] + " y=" + yf + " " + moitief
+                       + " bordY=" + bordf + " corde=" + cordef);
+    }
+    System.println("largeur titre FREQUENTATION XTINY=" +
+                    dc.getTextWidthInPixels("FREQUENTATION", Graphics.FONT_XTINY));
+    System.println("largeur hero NUMBER_MEDIUM(148 919)=" +
+                    dc.getTextWidthInPixels(Fmt.count(148919),
+                                            Graphics.FONT_NUMBER_MEDIUM));
+    System.println("largeur n1 SMALL pire=" +
+                    dc.getTextWidthInPixels("N-1 148 919 (-100%)", Graphics.FONT_SMALL));
+    System.println("largeur edition XTINY pire=" +
+                    dc.getTextWidthInPixels("edition 148 919 . dim. 20 avril 15h05",
+                                            Graphics.FONT_XTINY));
+    System.println("largeur label pic du jour XTINY=" +
+                    dc.getTextWidthInPixels("pic du jour", Graphics.FONT_XTINY));
+    System.println("largeur sub XTINY(a 15h05)=" +
+                    dc.getTextWidthInPixels("a 15h05", Graphics.FONT_XTINY));
+    System.println("largeur maj foot XTINY pire=" +
+                    dc.getTextWidthInPixels("maj 172800 j", Graphics.FONT_XTINY));
+    System.println("largeur hors evenement SMALL=" +
+                    dc.getTextWidthInPixels("hors evenement", Graphics.FONT_SMALL));
     return true;
 }
 
