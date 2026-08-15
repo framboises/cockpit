@@ -48,8 +48,10 @@ module Api {
             // payload serveur et oublie ici serait perdu en SILENCE, sans
             // erreur ni trace. C'est le cas de m/pk/pkt.
             "m" => (data != null && data["m"] != null) ? data["m"] : "live",
+            "mr" => (data != null) ? data["mr"] : null,
             "e" => (data != null) ? data["e"] : null,
             "er" => (data != null) ? data["er"] : null,
+            "p" => (data != null) ? data["p"] : null,
             "pk" => (data != null) ? data["pk"] : null,
             "pkt" => (data != null) ? data["pkt"] : null,
             "w" => (data != null) ? data["w"] : null,
@@ -57,6 +59,21 @@ module Api {
             "al" => al,
             "rx" => nowSec,
             "ok" => true
+        };
+    }
+
+    // Les quatre blocs vont dans une SECONDE cle Storage, lue par la seule
+    // app. Les mettre dans le noyau ferait deserialiser du trafic a la glance
+    // a chaque affichage, sur un budget de 64 Ko dont elle utilise deja 11 %.
+    function toPagesDict(data) {
+        if (data == null) {
+            return null;
+        }
+        return {
+            "mc" => data["mc"],
+            "tr" => data["tr"],
+            "me" => data["me"],
+            "st" => data["st"]
         };
     }
 
@@ -186,6 +203,7 @@ module Api {
             return;
         }
         var st = toCacheDict(data, Time.now().value());
+        Cache.savePages(toPagesDict(data));
         if (mCallback != null) {
             mCallback.invoke(true, st);
         }

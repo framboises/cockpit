@@ -71,6 +71,31 @@ function testToCacheSupposeLeDirectSansMode(logger) {
 }
 
 (:test)
+function testToCacheReporteLesQuatreBlocs(logger) {
+    var data = {"t" => 100, "m" => "live", "mr" => null, "p" => 47320,
+                "mc" => {"s" => [2, 14]}, "tr" => {"vd" => 2},
+                "me" => {"tc" => 21.3}, "st" => {"pj" => 52100},
+                "al" => []};
+    var st = Api.toCacheDict(data, 200);
+    Test.assertEqual(st["p"], 47320);
+    var pg = Api.toPagesDict(data);
+    Test.assertEqual(pg["tr"]["vd"], 2);
+    Test.assertEqual(pg["st"]["pj"], 52100);
+    return true;
+}
+
+(:test)
+function testLeNoyauNePortePasLesBlocs(logger) {
+    // Le cache est coupe en deux : la glance et le service de fond lisent le
+    // noyau, sur un budget de 64 Ko, et n'ont aucune raison de deserialiser
+    // du trafic qu'ils n'affichent jamais.
+    var data = {"t" => 100, "tr" => {"vd" => 2}, "al" => []};
+    var st = Api.toCacheDict(data, 200);
+    Test.assert(!st.hasKey("tr"));
+    return true;
+}
+
+(:test)
 function testToEditionsCompacte(logger) {
     var data = {"ok" => true, "ed" => [
         {"n" => "LMC 26", "ev" => "LE MANS CLASSIC", "y" => 2026,
@@ -143,6 +168,26 @@ function testOnReceive200AvecPayloadEstUnSucces(logger) {
     Test.assertEqual(ApiTestSupport.mSt["e"], 5);
     Test.assertEqual(ApiTestSupport.mSt["al"].size(), 0);
     Test.assert(Api.mInFlightSince == null);
+    return true;
+}
+
+(:test)
+function testOnReceiveSauvegardeAussiLesQuatreBlocs(logger) {
+    // Le wiring reel : onReceive doit pousser les blocs dans la seconde cle
+    // du cache, pas seulement les rendre disponibles via toPagesDict.
+    ApiTestSupport.reset();
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    Api.mCallback = new Lang.Method(ApiTestSupport, :capture);
+    Api.mInFlightSince = 22222;
+    var data = {"t" => 100, "e" => 5, "al" => [],
+                "mc" => {"s" => [2, 14]}, "tr" => {"vd" => 2},
+                "me" => null, "st" => {"pj" => 52100}};
+    Api.onReceive(200, data);
+    var pg = Cache.loadPages();
+    Test.assert(pg != null);
+    Test.assertEqual(pg["tr"]["vd"], 2);
+    Test.assertEqual(pg["st"]["pj"], 52100);
+    Test.assert(pg["me"] == null);
     return true;
 }
 
