@@ -146,24 +146,46 @@ python -m pytest tests/test_watch_state.py tests/test_watch_api.py -q
 
 ### Sideload
 
-Pas de publication sur le store. On copie le `.prg` à la main.
+Pas de publication sur le store. On copie le `.prg` a la main dans
+`GARMIN/APPS/` sur la montre.
+
+⚠️ **La tactix 8 ne se monte pas comme une cle USB.** Elle expose du **MTP**,
+que macOS ne gere pas nativement : il n'y a donc **aucun volume dans
+`/Volumes/`** et aucun chemin a copier en ligne de commande. Verifie sur ce
+poste — `diskutil list external` ne renvoie rien alors que la montre est bien
+vue sur le bus USB (vendor Garmin `0x091E`).
+
+Les instructions qu'on trouve partout du genre
+`cp bin/cockpit.prg /Volumes/GARMIN/GARMIN/APPS/` valent pour les modeles plus
+anciens, en stockage de masse. Pas pour celui-ci.
+
+**Methode retenue — Android File Transfer** (client MTP, souvent deja installe
+sur un Mac ayant croise un appareil Android) :
+
+1. `tools/build-avec-jeton.sh <JETON>` — produit `bin/cockpit.prg` en release
+2. brancher la montre, ouvrir **Android File Transfer**
+3. deposer `cockpit.prg` dans `GARMIN/APPS/`
+4. ejecter, la montre redemarre et l'app apparait dans la liste
+
+**Si Android File Transfer n'affiche pas la montre** — il est pense pour les
+appareils Android et rechigne parfois sur les autres peripheriques MTP :
 
 ```bash
-"$SDK/bin/monkeyc" -o bin/cockpit.prg -f monkey.jungle \
-  -y ~/.garmin_keys/developer_key.der -d fenix8solar51mm -r
-cp bin/cockpit.prg /Volumes/GARMIN/GARMIN/APPS/
-diskutil eject /Volumes/GARMIN
+brew install libmtp
+mtp-detect                                   # confirme que la montre repond
+mtp-sendfile bin/cockpit.prg /GARMIN/APPS/cockpit.prg
 ```
 
-**Le `.prg` suffit**, mais il doit contenir le jeton : voir la section
-Reglages ci-dessous. Une app sideloadee ne peut pas etre configuree depuis le
-telephone.
+Autre client graphique possible : openMTP.
 
 Au premier lancement, la montre cree elle-meme un fichier `.SET` du meme nom
-dans `/GARMIN/Apps/SETTINGS/`, rempli avec les valeurs par defaut du `.prg`.
-C'est ce fichier qui porte les reglages cote appareil — pas le
+dans `/GARMIN/Apps/SETTINGS/`, rempli avec les valeurs par defaut compilees
+dans le `.prg`. C'est ce fichier qui porte les reglages cote appareil — pas le
 `cockpit-settings.json` produit par le build, qui ne sert qu'a l'outillage de
 developpement.
+
+**Le `.prg` doit contenir le jeton** : une app sideloadee ne peut pas etre
+configuree depuis le telephone, voir la section Reglages.
 
 ## Réglages
 
