@@ -220,8 +220,21 @@ class FakeCollection:
                     actuel is not None
                     and actuel > cls._as_comparable_utc(val["$gt"])):
                 return False
+            if "$gte" in val and not (
+                    actuel is not None
+                    and actuel >= cls._as_comparable_utc(val["$gte"])):
+                return False
             if "$in" in val and actuel not in val["$in"]:
                 return False
+            # Un operateur inconnu laisse passer le document. C'est le defaut
+            # le plus dangereux de ce double : un filtre que le Fake ignore
+            # rend le test tautologique, il passe autant avec le code correct
+            # qu'avec le code fautif. D'ou ce garde-fou -- mieux vaut un test
+            # qui casse bruyamment qu'un test qui ne verifie rien.
+            inconnus = set(val) - {"$lte", "$gt", "$gte", "$in"}
+            if inconnus:
+                raise NotImplementedError(
+                    "FakeCollection ne sait pas filtrer %s" % sorted(inconnus))
             return True
         return actuel == val
 
@@ -286,6 +299,49 @@ class TestReadCounter:
         doc = watch_state.read_counter_before(db, "628", NOW - timedelta(minutes=15))
         assert doc["entries"] == 120
 
+    def test_borne_de_fraicheur_ecarte_le_residu(self):
+        # Le cas reel : LMC archive, il ne reste dans data_access qu'un
+        # residu 24H MOTOS du 23/04. Sans borne, c'est lui qui remontait.
+        residu = _counter(8, minutes_ago=113 * 24 * 60)
+        db = FakeDb(data_access=[residu])
+        assert watch_state.read_counter(db, "628") is residu
+        assert watch_state.read_counter(
+            db, "628",
+            max_age=watch_state.COUNTER_MAX_AGE,
+            now_utc=NOW.replace(tzinfo=timezone.utc)) is None
+
+    def test_borne_de_fraicheur_garde_un_releve_recent(self):
+        # La borne ne doit pas etre si serree qu'elle coupe le direct : une
+        # heure d'anciennete reste un evenement en cours.
+        recent = _counter(48213, minutes_ago=60)
+        db = FakeDb(data_access=[recent])
+        assert watch_state.read_counter(
+            db, "628",
+            max_age=watch_state.COUNTER_MAX_AGE,
+            now_utc=NOW.replace(tzinfo=timezone.utc)) is recent
+
+
+class TestReadLiveActive:
+    def test_drapeau_leve(self):
+        db = FakeDb(data_access=[
+            {"_id": "___GLOBAL___", "live_controle_actif": True},
+        ])
+        assert watch_state.read_live_active(db) is True
+
+    def test_drapeau_baisse(self):
+        db = FakeDb(data_access=[
+            {"_id": "___GLOBAL___", "live_controle_actif": False},
+        ])
+        assert watch_state.read_live_active(db) is False
+
+    def test_champ_absent_vaut_inactif(self):
+        # Meme defaut que /api/live-controle/status : absent = inactif.
+        db = FakeDb(data_access=[{"_id": "___GLOBAL___"}])
+        assert watch_state.read_live_active(db) is False
+
+    def test_aucun_doc_global(self):
+        assert watch_state.read_live_active(FakeDb()) is False
+
 
 class TestReadPrincipalId:
     def test_lit_le_doc_global(self):
@@ -320,7 +376,8 @@ class TestBuildState:
     def _db(self):
         return FakeDb(
             data_access=[
-                {"_id": "___GLOBAL___", "compteur_principal_id": "628"},
+                {"_id": "___GLOBAL___", "compteur_principal_id": "628",
+                 "live_controle_actif": True},
                 _counter(47413, 15),
                 _counter(48213, 0),
             ],
@@ -357,6 +414,7 @@ class TestBuildState:
         # doit venir d'une interpretation UTC, jamais de .timestamp() nu qui
         # utiliserait le fuseau local du poste executant les tests.
         assert st["t"] == int(NOW.replace(tzinfo=timezone.utc).timestamp())
+        assert st["m"] == "live"
 
     def test_base_vide_ne_leve_pas(self):
         st = watch_state.build_state(FakeDb(), NOW)
@@ -364,6 +422,65 @@ class TestBuildState:
         assert st["er"] is None
         assert st["al"] == []
         assert st["wl"] == 0
+        assert st["m"] == "past"
+
+    def _db_residu(self, actif):
+        """Base d'apres archivage : plus que le residu d'une edition close."""
+        return FakeDb(
+            data_access=[
+                {"_id": "___GLOBAL___", "compteur_principal_id": "628",
+                 "live_controle_actif": actif},
+                _counter(8, minutes_ago=113 * 24 * 60),
+            ],
+            evenement=[{"nom": "24H MOTOS", "short": "24HM"}],
+        )
+
+    def test_residu_apres_archivage_ne_fait_pas_de_direct(self):
+        # LA regression a tenir. La montre affichait << 24HM 26 >> avec les
+        # 8 entrees du 23 avril, presentees comme du direct perime de
+        # 113 jours. Ni les chiffres ni le libelle d'evenement ne doivent
+        # survivre a la borne de fraicheur.
+        st = watch_state.build_state(self._db_residu(actif=True), NOW,
+                                     now_utc=NOW.replace(tzinfo=timezone.utc))
+        assert st["m"] == "past"
+        assert st["e"] is None
+        assert st["er"] is None
+        assert st["t"] is None
+        assert st["n"] is None
+
+    def test_collecteur_desarme_coupe_le_direct_sans_attendre(self):
+        # Meme base, mais un releve FRAIS : seul le drapeau distingue les
+        # deux cas. Si on avait garde la seule borne de fraicheur, ce
+        # scenario -- desactivation en fin d'edition -- serait reste
+        # << live >> pendant six heures.
+        db = FakeDb(
+            data_access=[
+                {"_id": "___GLOBAL___", "compteur_principal_id": "628",
+                 "live_controle_actif": False},
+                _counter(48213, minutes_ago=1),
+            ],
+            evenement=[{"nom": "24H MOTOS", "short": "24HM"}],
+        )
+        st = watch_state.build_state(db, NOW,
+                                     now_utc=NOW.replace(tzinfo=timezone.utc))
+        assert st["m"] == "past"
+        assert st["e"] is None
+
+    def test_evenement_epingle_survit_au_mode_past(self):
+        # L'epinglage dit QUEL evenement, pas s'il y a du direct. Une
+        # configuration epinglee garde donc son libelle et ses alertes meme
+        # sans releve frais -- c'est le recours pour qui veut ses alertes
+        # quand le live-controle est arrete.
+        db = self._db_residu(actif=False)
+        db["watch_config"].docs.append({
+            "_id": "watch", "event_mode": "pinned",
+            "event": "24H MOTOS", "year": 2026,
+        })
+        st = watch_state.build_state(db, NOW,
+                                     now_utc=NOW.replace(tzinfo=timezone.utc))
+        assert st["m"] == "past"
+        assert st["n"] == "24HM 26"
+        assert st["e"] is None
 
     def test_taille_sous_deux_ko(self):
         import json
@@ -447,7 +564,8 @@ class TestFuseauxHoraires:
         naif_utc = instant.replace(tzinfo=None)
         db = FakeDb(
             data_access=[
-                {"_id": "___GLOBAL___", "compteur_principal_id": "628"},
+                {"_id": "___GLOBAL___", "compteur_principal_id": "628",
+                 "live_controle_actif": True},
                 {"requested_location_id": "628", "entries": 100,
                  "timestamp": naif_utc, "requested_event": "24H MOTOS",
                  "year": "2026"},

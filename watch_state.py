@@ -132,6 +132,11 @@ HSH_GLOBAL_ID = "___GLOBAL___"
 # releve, assez court pour rester une photographie de l'instant.
 RATE_WINDOW = timedelta(minutes=15)
 
+# Au-dela de cette anciennete, un releve ne decrit plus un evenement en cours.
+# Le collecteur tourne en boucle continue : un principal muet depuis six heures
+# est un collecteur arrete, pas une foule immobile.
+COUNTER_MAX_AGE = timedelta(hours=6)
+
 
 def read_config(db):
     """Configuration montre, avec ses defauts. Ne renvoie jamais None."""
@@ -152,19 +157,43 @@ def read_principal_id(db):
     return str(principal) if principal else None
 
 
-def read_counter(db, location_id):
-    """Dernier releve du compteur.
+def read_live_active(db):
+    """Le collecteur live-controle est-il arme ?
+
+    Meme lecture et meme defaut que /api/live-controle/status (app.py:7907) :
+    champ absent = inactif. C'est ce drapeau qui fait disparaitre le widget
+    compteurs du cockpit (controle_access.js:277) ; sans lui, la montre
+    affichait des chiffres que le cockpit, lui, avait cesse de montrer.
+    """
+    doc = db["data_access"].find_one({"_id": HSH_GLOBAL_ID}) or {}
+    return bool(doc.get("live_controle_actif", False))
+
+
+def read_counter(db, location_id, max_age=None, now_utc=None):
+    """Dernier releve du compteur, borne en fraicheur si `max_age` est donne.
 
     Comme le widget compteurs du cockpit, on interroge le seul
     requested_location_id : le releve porte lui-meme son evenement et son
     annee, la donnee s'auto-identifie.
+
+    Sans borne, cette requete remonte le dernier releve *connu*, quel que soit
+    son age et son evenement. Apres l'archivage d'une edition, ce qui subsiste
+    dans data_access est un residu d'une edition anterieure : la montre a
+    affiche pendant des semaines les entrees du 23 avril sous le libelle
+    << 24HM 26 >>. Aucun releve dans la fenetre signifie qu'aucun evenement
+    n'est en cours -- pas qu'il faut se rabattre sur le dernier connu.
     """
     if not location_id:
         return None
-    return db["data_access"].find_one(
-        {"requested_location_id": str(location_id)},
-        sort=[("timestamp", -1)],
-    )
+    filtre = {"requested_location_id": str(location_id)}
+    if max_age is not None:
+        if now_utc is None:
+            now_utc = datetime.now(timezone.utc)
+        # `timestamp` est naif mais porte de l'UTC (pymongo, client non
+        # tz_aware). BSON normalise les deux cotes en UTC sur le fil, la
+        # comparaison est donc juste malgre la difference de forme.
+        filtre["timestamp"] = {"$gte": now_utc - max_age}
+    return db["data_access"].find_one(filtre, sort=[("timestamp", -1)])
 
 
 def read_counter_before(db, location_id, moment):
@@ -262,8 +291,22 @@ def build_state(db, now, now_utc=None):
 
     config = read_config(db)
 
+    # DEUX GARDES, aucune ne suffit seule.
+    #
+    # Le drapeau attrape l'arret propre : quand l'exploitation desactive le
+    # live-controle en fin d'edition, les releves cessent d'arriver mais les
+    # derniers restent en base. Le drapeau le dit dans la seconde ; la seule
+    # fraicheur mettrait six heures a s'en apercevoir.
+    #
+    # La fraicheur attrape le collecteur plante : la, le drapeau dit encore
+    # << actif >> et mentirait indefiniment. C'est exactement ce que la
+    # pastille de sante du cockpit signale en passant en << warning >>.
     location_id = read_principal_id(db)
-    courant = read_counter(db, location_id)
+    courant = None
+    if read_live_active(db):
+        courant = read_counter(db, location_id,
+                               max_age=COUNTER_MAX_AGE, now_utc=now_utc)
+    mode = "live" if courant else "past"
     entrees = _safe_int(courant.get("entries")) if courant else None
 
     horodatage = courant.get("timestamp") if courant else None
@@ -287,6 +330,10 @@ def build_state(db, now, now_utc=None):
         "t": int(horodatage.replace(tzinfo=timezone.utc).timestamp())
              if horodatage else None,
         "n": event_label(read_event_short(db, event), year),
+        # `m` dit si les chiffres decrivent un evenement en cours. La montre
+        # s'en sert pour ne pas crier << perime >> sur une edition close : en
+        # `past`, `t` est null par construction et l'age n'a plus de sens.
+        "m": mode,
         "e": entrees,
         "er": debit,
         "w": round(wbgt, 1) if wbgt is not None else None,
