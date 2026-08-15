@@ -1313,6 +1313,28 @@ def get_meteo_details(date):
         if not day_data:
             return jsonify({'error': 'No data found for the given date'}), 404
         day_data['_id'] = str(day_data['_id'])
+
+        # WBGT par creneau, calcule ici et pas cote client : la formule vit dans
+        # meteo_thermique et sert deja au mur et a la montre. La recoder en
+        # JavaScript creerait une seconde verite qui divergerait un jour.
+        import meteo_thermique as thermique
+        for entree in (day_data.get('Heures') or []):
+            temperature = entree.get('Température (°C)')
+            if temperature is None:
+                temperature = entree.get('Temperature (C)')
+            humidite = entree.get('Humidité (%)')
+            if humidite is None:
+                humidite = entree.get('Humidite (%)')
+            # 0 est une valeur legitime : tester `is None`, jamais la verite.
+            if temperature is None or humidite is None:
+                entree['wbgt_c'] = None
+                continue
+            try:
+                valeur = thermique.wbgt_approche(float(temperature), float(humidite))
+            except (TypeError, ValueError):
+                valeur = None
+            entree['wbgt_c'] = round(valeur, 1) if valeur is not None else None
+
         return jsonify(day_data)
 
     except Exception as e:

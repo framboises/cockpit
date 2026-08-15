@@ -640,6 +640,9 @@ function openMeteoModal(date) {
               <div class="chart-container">
                 <canvas id="meteoChart"></canvas>
               </div>
+              <div class="chart-container">
+                <canvas id="meteoChartPluie"></canvas>
+              </div>
             </div>
           `;
 
@@ -679,28 +682,95 @@ function openMeteoModal(date) {
             tbody.appendChild(tr);
           }
 
-          // Graphique
+          // Deux graphiques plutot qu'un seul a double axe. La temperature et le
+          // WBGT sont tous deux en degres : les mettre sur la meme echelle rend
+          // leur ecart lisible, et c'est justement cet ecart qui compte — un WBGT
+          // qui rejoint la temperature de l'air signale une humidite qui empeche
+          // la transpiration d'evacuer la chaleur. La pluie, elle, est en mm :
+          // la superposer sur un second axe inventerait une correlation.
           const labels        = day.Heures.map(h => h.Heure);
           const temperatures  = day.Heures.map(h => parseFloat(h['Température (°C)']));
+          const wbgt          = day.Heures.map(h => (h.wbgt_c === null || h.wbgt_c === undefined) ? null : parseFloat(h.wbgt_c));
           const pluviometrie  = day.Heures.map(h => parseFloat(h['Pluviométrie (mm)']));
-          const ctx = document.getElementById('meteoChart').getContext('2d');
 
-          new Chart(ctx, {
+          // Palette validee (node scripts/validate_palette.js --mode light
+          // --surface "#ffffff") : ecart DeltaE 33,8 en vision normale, 32,7 en
+          // protanopie, 25,5 en tritanopie. Le couple rouge/orange qu'on choisit
+          // spontanement echoue a 8,7, sous le seuil de 15.
+          const COULEUR_TEMP = '#c2410c';
+          const COULEUR_WBGT = '#7c3aed';
+          const COULEUR_PLUIE = '#2563eb';
+
+          // Seuils ISO 7243, memes bornes que le mur et la montre. Traces en
+          // reference et non en serie : hors legende, pour ne pas les faire
+          // passer pour une mesure.
+          const seuil = (valeur, couleur) => ({
+            label: '_seuil' + valeur,
+            data: labels.map(() => valeur),
+            borderColor: couleur,
+            borderWidth: 1,
+            borderDash: [4, 4],
+            pointRadius: 0,
+            fill: false,
+            order: 10
+          });
+
+          new Chart(document.getElementById('meteoChart').getContext('2d'), {
             type: 'line',
             data: {
               labels,
               datasets: [
-                { label: 'Température (°C)', data: temperatures, borderColor: 'red',  fill: false, yAxisID: 'y1' },
-                { label: 'Pluviométrie (mm)', data: pluviometrie, borderColor: 'blue', fill: false, yAxisID: 'y2' }
+                { label: 'Température (°C)', data: temperatures, borderColor: COULEUR_TEMP, borderWidth: 2, pointRadius: 0, fill: false },
+                { label: 'WBGT (°C)',        data: wbgt,         borderColor: COULEUR_WBGT, borderWidth: 2, pointRadius: 0, fill: false, spanGaps: false },
+                seuil(30, 'rgba(220,38,38,.45)'),
+                seuil(28, 'rgba(234,88,12,.40)'),
+                seuil(25, 'rgba(202,138,4,.35)')
               ]
             },
             options: {
               responsive: true,
               maintainAspectRatio: false,
+              interaction: { mode: 'index', intersect: false },
+              plugins: {
+                legend: { labels: { filter: item => !item.text.startsWith('_seuil') } },
+                tooltip: {
+                  filter: item => !item.dataset.label.startsWith('_seuil'),
+                  callbacks: {
+                    afterBody: items => {
+                      const v = items.find(i => i.dataset.label === 'WBGT (°C)');
+                      if (!v || v.parsed.y === null) { return ''; }
+                      const w = v.parsed.y;
+                      if (w >= 30) { return 'Travail lourd a suspendre, rotations courtes'; }
+                      if (w >= 28) { return 'Pauses regulieres, hydratation renforcee'; }
+                      if (w >= 25) { return 'Surveillance des equipes en effort'; }
+                      return '';
+                    }
+                  }
+                }
+              },
               scales: {
                 x: { ticks: { maxRotation: 90, minRotation: 45 } },
-                y1: { type: 'linear', position: 'left',  title: { display: true, text: 'Température (°C)' }, grid: { color: 'rgba(255,99,132,.2)' } },
-                y2: { type: 'linear', position: 'right', title: { display: true, text: 'Pluviométrie (mm)' }, grid: { display: false } }
+                y: { type: 'linear', position: 'left', title: { display: true, text: 'Degres Celsius' } }
+              }
+            }
+          });
+
+          new Chart(document.getElementById('meteoChartPluie').getContext('2d'), {
+            type: 'line',
+            data: {
+              labels,
+              datasets: [
+                { label: 'Pluviométrie (mm)', data: pluviometrie, borderColor: COULEUR_PLUIE, borderWidth: 2, pointRadius: 0, fill: false }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: { mode: 'index', intersect: false },
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { ticks: { maxRotation: 90, minRotation: 45 } },
+                y: { type: 'linear', position: 'left', beginAtZero: true, title: { display: true, text: 'Pluviométrie (mm)' } }
               }
             }
           });
