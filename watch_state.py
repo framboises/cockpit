@@ -274,8 +274,12 @@ def read_weather_now(db, now):
     return bloc.get("wbgt_c"), bloc.get("wbgt_niveau")
 
 
-def build_state(db, now, now_utc=None):
+def build_state(db, now, now_utc=None, peaks=None):
     """Assemble le payload servi a la montre.
+
+    `peaks` est le module watch_peaks, INJECTE et non importe : watch_peaks
+    importe deja watch_state pour ses libelles, l'importer en retour ferait
+    un cycle. L'injection garde aussi ce module testable sans lui.
 
     DEUX HORLOGES, deux conventions, ne pas les confondre :
       `now`     naif, heure locale Paris. C'est la convention des creneaux
@@ -320,8 +324,39 @@ def build_state(db, now, now_utc=None):
                                avant, anterieur.get("timestamp"))
 
     event, year = resolve_event(config, courant)
+
+    # Hors evenement et en mode auto, rien n'identifie plus d'edition : le
+    # compteur ne repond plus et c'est justement ce qu'on voulait. On rapporte
+    # alors la derniere edition consultable, sinon l'ecran principal serait
+    # vide les 350 jours de l'annee ou rien ne roule. Un evenement epingle
+    # n'est jamais remplace : l'epinglage est un choix explicite.
+    pic = None
+    pic_ts = None
+
+    if peaks is not None and event is None:
+        # On retient la premiere edition dont le pic est exploitable, pas
+        # simplement la plus recente : nommer une edition sans savoir la
+        # chiffrer donne un ecran qui affiche un titre et des tirets. Mieux
+        # vaut une edition un peu plus ancienne mais renseignee -- c'est la
+        # meme regle que /editions, qui omet ce qu'il ne sait pas mesurer.
+        for edition in peaks.list_editions(db, now_utc=now_utc):
+            candidat, instant = peaks.cached_peak(
+                db, edition["event"], edition["year"], now_utc=now_utc)
+            if candidat is None:
+                continue
+            event = edition["event"]
+            year = edition["year"]
+            pic, pic_ts = candidat, instant
+            break
+
     wbgt, _ = read_weather_now(db, now)
     actives = read_active_alerts(db, event, year, now_utc)
+
+    # Pic de presents de l'edition rapportee. En cours, il monte encore ; une
+    # fois l'edition close, il est definitif. Un seul couple de champs dans
+    # les deux cas, pour que la montre n'ait pas deux facons de lire un pic.
+    if pic is None and peaks is not None and event and year is not None:
+        pic, pic_ts = peaks.cached_peak(db, event, year, now_utc=now_utc)
 
     return {
         # `horodatage` est naif mais contient de l'UTC (pymongo, client non
@@ -336,6 +371,10 @@ def build_state(db, now, now_utc=None):
         "m": mode,
         "e": entrees,
         "er": debit,
+        "pk": pic,
+        # Meme convention que `t` : epoch UTC. La montre le rend en heure
+        # locale, ce qui donne Paris.
+        "pkt": int(pic_ts.timestamp()) if pic_ts else None,
         "w": round(wbgt, 1) if wbgt is not None else None,
         "wl": wbgt_level(wbgt, tuple(config["wbgt_levels"])),
         "al": select_alerts(actives, config["alerts"]),

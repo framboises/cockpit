@@ -13,6 +13,7 @@ from functools import wraps
 
 from flask import Blueprint, jsonify, request
 
+import watch_peaks
 import watch_state
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,13 @@ RATE_LIMIT_MAX = 60
 # produirait 1 440 ecritures par jour pour un seul champ d'horodatage.
 LAST_USED_THROTTLE_S = 60
 
+# Le pic d'une edition close ne change plus jamais et watch_peaks a deja son
+# cache persistant : cette fenetre-ci ne sert qu'a eviter de reparcourir la
+# liste des editions et de relire Mongo a chaque ouverture du menu.
+EDITIONS_CACHE_TTL_S = 3600
+
 _cache = {"at": 0.0, "payload": None}
+_editions_cache = {"at": 0.0, "payload": None}
 _rate_log = {}
 _indexes_ready = False
 
@@ -47,6 +54,8 @@ def _db():
 def reset_cache():
     _cache["at"] = 0.0
     _cache["payload"] = None
+    _editions_cache["at"] = 0.0
+    _editions_cache["payload"] = None
 
 
 def reset_rate_limit():
@@ -358,7 +367,49 @@ def state():
         return jsonify(_cache["payload"])
 
     payload = watch_state.build_state(
-        _db(), datetime.now(), datetime.now(timezone.utc))
+        _db(), datetime.now(), datetime.now(timezone.utc),
+        peaks=watch_peaks)
     _cache["payload"] = payload
     _cache["at"] = maintenant
+    return jsonify(payload)
+
+
+@watch_bp.route("/editions", methods=["GET"])
+@bearer_required
+def editions():
+    """Editions consultables avec leur pic, en une seule requete.
+
+    Une requete donne la liste ET tous les pics : la montre n'a pas a demander
+    edition par edition, et le plafond de 60 requetes / 300 s n'est jamais
+    menace par l'ouverture du menu.
+
+    Les editions sans pic exploitable sont OMISES, pas renvoyees avec un pic
+    nul. Une ligne vide dans une liste se lit comme une edition sans public,
+    alors qu'elle ne dit que l'absence de mesure -- et la montre n'a pas la
+    place d'expliquer la nuance.
+    """
+    maintenant = time.time()
+    if (_editions_cache["payload"] is not None
+            and maintenant - _editions_cache["at"] < EDITIONS_CACHE_TTL_S):
+        return jsonify(_editions_cache["payload"])
+
+    db = _db()
+    now_utc = datetime.now(timezone.utc)
+    liste = []
+    for edition in watch_peaks.list_editions(db, now_utc=now_utc):
+        pic, instant = watch_peaks.cached_peak(
+            db, edition["event"], edition["year"], now_utc=now_utc)
+        if pic is None:
+            continue
+        liste.append({
+            "n": edition["label"],
+            "ev": edition["event"],
+            "y": edition["year"],
+            "pk": pic,
+            "pkt": int(instant.timestamp()) if instant else None,
+        })
+
+    payload = {"ok": True, "ed": liste}
+    _editions_cache["payload"] = payload
+    _editions_cache["at"] = maintenant
     return jsonify(payload)

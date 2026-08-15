@@ -1,4 +1,5 @@
 import hashlib
+from datetime import datetime, timezone
 
 import pytest
 
@@ -65,7 +66,7 @@ class TestState:
         }])
         monkeypatch.setattr(watch_api, "_db", lambda: db)
         monkeypatch.setattr(watch_api.watch_state, "build_state",
-                            lambda d, n, n_utc: {"t": 1, "n": "24HM 26", "e": 2,
+                            lambda d, n, n_utc, **kw: {"t": 1, "n": "24HM 26", "e": 2,
                                                  "er": 3, "w": 4.0, "wl": 1,
                                                  "al": []})
         rep = client.get("/api/v1/watch/state",
@@ -82,7 +83,7 @@ class TestState:
         monkeypatch.setattr(watch_api, "_db", lambda: db)
         appels = {"n": 0}
 
-        def compte(d, n, n_utc):
+        def compte(d, n, n_utc, **kw):
             appels["n"] += 1
             return {"t": 1, "n": None, "e": 1, "er": None, "w": None,
                     "wl": 0, "al": []}
@@ -91,6 +92,81 @@ class TestState:
         entetes = {"Authorization": "Bearer secret"}
         client.get("/api/v1/watch/state", headers=entetes)
         client.get("/api/v1/watch/state", headers=entetes)
+        assert appels["n"] == 1
+
+
+class TestEditions:
+    PIC_TS = datetime(2026, 4, 18, 13, 5, 9, tzinfo=timezone.utc)
+
+    def _client_arme(self, client, monkeypatch, editions, pics):
+        import watch_api
+        db = _FakeDb(watch_tokens=[{
+            "_id": "1", "token_sha256": watch_api.hash_token("secret"),
+            "revoked": False,
+        }])
+        monkeypatch.setattr(watch_api, "_db", lambda: db)
+        monkeypatch.setattr(watch_api.watch_peaks, "list_editions",
+                            lambda d, now_utc=None: list(editions))
+        monkeypatch.setattr(
+            watch_api.watch_peaks, "cached_peak",
+            lambda d, ev, y, now_utc=None: pics.get((ev, y), (None, None)))
+        return {"Authorization": "Bearer secret"}
+
+    def test_sans_jeton_401(self, client):
+        assert client.get("/api/v1/watch/editions").status_code == 401
+
+    def test_liste_et_pics_en_une_requete(self, client, monkeypatch):
+        entetes = self._client_arme(
+            client, monkeypatch,
+            editions=[
+                {"event": "LE MANS CLASSIC", "year": 2026, "label": "LMC 26"},
+                {"event": "24H MOTOS", "year": 2026, "label": "24HM 26"},
+            ],
+            pics={("LE MANS CLASSIC", 2026): (52409, self.PIC_TS),
+                  ("24H MOTOS", 2026): (50690, self.PIC_TS)})
+        rep = client.get("/api/v1/watch/editions", headers=entetes)
+        assert rep.status_code == 200
+        corps = rep.get_json()
+        assert corps["ok"] is True
+        assert [e["n"] for e in corps["ed"]] == ["LMC 26", "24HM 26"]
+        assert corps["ed"][0] == {
+            "n": "LMC 26", "ev": "LE MANS CLASSIC", "y": 2026,
+            "pk": 52409, "pkt": int(self.PIC_TS.timestamp()),
+        }
+
+    def test_edition_sans_pic_est_omise(self, client, monkeypatch):
+        # Omise, pas renvoyee avec pk null : une ligne vide se lit comme une
+        # edition sans public, alors qu'elle ne dit que l'absence de mesure.
+        entetes = self._client_arme(
+            client, monkeypatch,
+            editions=[
+                {"event": "SUPERBIKE", "year": 2026, "label": "SBK 26"},
+                {"event": "24H MOTOS", "year": 2026, "label": "24HM 26"},
+            ],
+            pics={("24H MOTOS", 2026): (50690, self.PIC_TS)})
+        corps = client.get("/api/v1/watch/editions", headers=entetes).get_json()
+        assert [e["n"] for e in corps["ed"]] == ["24HM 26"]
+
+    def test_le_cache_evite_un_second_calcul(self, client, monkeypatch):
+        import watch_api
+        db = _FakeDb(watch_tokens=[{
+            "_id": "1", "token_sha256": watch_api.hash_token("secret"),
+            "revoked": False,
+        }])
+        monkeypatch.setattr(watch_api, "_db", lambda: db)
+        appels = {"n": 0}
+
+        def compte(d, now_utc=None):
+            appels["n"] += 1
+            return [{"event": "24H MOTOS", "year": 2026, "label": "24HM 26"}]
+
+        monkeypatch.setattr(watch_api.watch_peaks, "list_editions", compte)
+        monkeypatch.setattr(
+            watch_api.watch_peaks, "cached_peak",
+            lambda d, ev, y, now_utc=None: (50690, self.PIC_TS))
+        entetes = {"Authorization": "Bearer secret"}
+        client.get("/api/v1/watch/editions", headers=entetes)
+        client.get("/api/v1/watch/editions", headers=entetes)
         assert appels["n"] == 1
 
 
@@ -103,7 +179,7 @@ class TestRateLimit:
         }])
         monkeypatch.setattr(watch_api, "_db", lambda: db)
         monkeypatch.setattr(watch_api.watch_state, "build_state",
-                            lambda d, n, n_utc: {"t": 1, "n": None, "e": 1,
+                            lambda d, n, n_utc, **kw: {"t": 1, "n": None, "e": 1,
                                                  "er": None, "w": None, "wl": 0,
                                                  "al": []})
         entetes = {"Authorization": "Bearer secret"}
@@ -120,7 +196,7 @@ class TestRateLimit:
         }])
         monkeypatch.setattr(watch_api, "_db", lambda: db)
         monkeypatch.setattr(watch_api.watch_state, "build_state",
-                            lambda d, n, n_utc: {"t": 1, "n": None, "e": 1,
+                            lambda d, n, n_utc, **kw: {"t": 1, "n": None, "e": 1,
                                                  "er": None, "w": None, "wl": 0,
                                                  "al": []})
         entetes = {"Authorization": "Bearer secret"}
@@ -138,7 +214,7 @@ class TestRateLimit:
         }])
         monkeypatch.setattr(watch_api, "_db", lambda: db)
         monkeypatch.setattr(watch_api.watch_state, "build_state",
-                            lambda d, n, n_utc: {"t": 1, "n": None, "e": 1,
+                            lambda d, n, n_utc, **kw: {"t": 1, "n": None, "e": 1,
                                                  "er": None, "w": None, "wl": 0,
                                                  "al": []})
         entetes = {"Authorization": "Bearer secret"}

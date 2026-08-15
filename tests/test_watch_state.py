@@ -410,6 +410,126 @@ class TestBuildState:
         assert len(json.dumps(st).encode("utf-8")) < 2048
 
 
+class FakePeaks:
+    """Doublure de watch_peaks. C'est ce que l'injection achete : build_state
+    se teste sans base d'archives ni date de course."""
+
+    def __init__(self, editions=None, pics=None):
+        self._editions = editions or []
+        self._pics = pics or {}
+        self.demandes = []
+
+    def list_editions(self, db, now_utc=None):
+        return list(self._editions)
+
+    def cached_peak(self, db, event, year, now_utc=None):
+        self.demandes.append((event, year))
+        return self._pics.get((event, year), (None, None))
+
+
+PIC_TS = datetime(2026, 4, 18, 13, 5, 9, tzinfo=timezone.utc)
+
+
+class TestBuildStatePics:
+    def _db_direct(self):
+        return FakeDb(
+            data_access=[
+                {"_id": "___GLOBAL___", "compteur_principal_id": "628",
+                 "live_controle_actif": True},
+                _counter(48213, 0),
+            ],
+            evenement=[{"nom": "24H MOTOS", "short": "24HM"}],
+        )
+
+    def _db_hors_evenement(self):
+        return FakeDb(
+            data_access=[
+                {"_id": "___GLOBAL___", "compteur_principal_id": "628",
+                 "live_controle_actif": False},
+            ],
+            evenement=[{"nom": "LE MANS CLASSIC", "short": "LMC"}],
+        )
+
+    def test_pic_de_l_edition_en_cours(self):
+        peaks = FakePeaks(pics={("24H MOTOS", 2026): (50690, PIC_TS)})
+        st = watch_state.build_state(self._db_direct(), NOW, now_utc=NOW,
+                                     peaks=peaks)
+        assert st["m"] == "live"
+        assert st["pk"] == 50690
+        assert st["pkt"] == int(PIC_TS.timestamp())
+
+    def test_hors_evenement_rapporte_la_derniere_edition(self):
+        # Sans ce repli, l'ecran principal serait vide les 350 jours de
+        # l'annee ou rien ne roule : plus de compteur, donc plus d'evenement
+        # derive, donc plus de libelle ni de pic.
+        peaks = FakePeaks(
+            editions=[{"event": "LE MANS CLASSIC", "year": 2026,
+                       "label": "LMC 26"}],
+            pics={("LE MANS CLASSIC", 2026): (52409, PIC_TS)},
+        )
+        st = watch_state.build_state(self._db_hors_evenement(), NOW,
+                                     now_utc=NOW, peaks=peaks)
+        assert st["m"] == "past"
+        assert st["e"] is None
+        assert st["t"] is None
+        assert st["n"] == "LMC 26"
+        assert st["pk"] == 52409
+
+    def test_evenement_epingle_n_est_pas_remplace(self):
+        # L'epinglage est un choix explicite : le repli ne doit jamais passer
+        # devant, meme hors evenement.
+        db = self._db_hors_evenement()
+        db["watch_config"].docs.append({
+            "_id": "watch", "event_mode": "pinned",
+            "event": "24H MOTOS", "year": 2026,
+        })
+        db["evenement"].docs.append({"nom": "24H MOTOS", "short": "24HM"})
+        peaks = FakePeaks(
+            editions=[{"event": "LE MANS CLASSIC", "year": 2026,
+                       "label": "LMC 26"}],
+            pics={("24H MOTOS", 2026): (50690, PIC_TS),
+                  ("LE MANS CLASSIC", 2026): (52409, PIC_TS)},
+        )
+        st = watch_state.build_state(db, NOW, now_utc=NOW, peaks=peaks)
+        assert st["n"] == "24HM 26"
+        assert st["pk"] == 50690
+        assert ("LE MANS CLASSIC", 2026) not in peaks.demandes
+
+    def test_sans_module_peaks_le_payload_reste_valide(self):
+        # watch_state doit rester utilisable seul : c'est ce qui interdit le
+        # cycle d'import avec watch_peaks.
+        st = watch_state.build_state(self._db_direct(), NOW, now_utc=NOW)
+        assert st["pk"] is None
+        assert st["pkt"] is None
+        assert st["e"] == 48213
+
+    def test_aucune_edition_consultable(self):
+        peaks = FakePeaks(editions=[])
+        st = watch_state.build_state(self._db_hors_evenement(), NOW,
+                                     now_utc=NOW, peaks=peaks)
+        assert st["n"] is None
+        assert st["pk"] is None
+        assert st["pkt"] is None
+
+    def test_le_repli_saute_les_editions_sans_pic(self):
+        # Cas rencontre sur la base reelle : l'edition la plus recente n'a pas
+        # d'archive exploitable. La retenir donnerait un ecran qui affiche un
+        # titre et des tirets ; on descend jusqu'a la premiere edition qu'on
+        # sait chiffrer.
+        db = self._db_hors_evenement()
+        db["evenement"].docs.append({"nom": "24H AUTOS", "short": "24HA"})
+        peaks = FakePeaks(
+            editions=[
+                {"event": "24H AUTOS", "year": 2026, "label": "24HA 26"},
+                {"event": "LE MANS CLASSIC", "year": 2026, "label": "LMC 26"},
+            ],
+            pics={("LE MANS CLASSIC", 2026): (52409, PIC_TS)},
+        )
+        st = watch_state.build_state(db, NOW, now_utc=NOW, peaks=peaks)
+        assert st["n"] == "LMC 26"
+        assert st["pk"] == 52409
+
+
 class TestReadWeatherNow:
     def _db_avec(self, entree):
         return FakeDb(meteo_previsions=[{
