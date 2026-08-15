@@ -96,24 +96,41 @@ class TraficView extends WatchUi.View {
         var hM = dc.getFontHeight(Graphics.FONT_MEDIUM);
 
         var tr = Pages.bloc(Cache.loadPages(), "tr");
-        if (tr == null) {
-            // Tirets, et on NOMME le bloc absent : un ecran vide se lit
-            // comme un trafic fluide, ce qu'il ne dit pas.
-            dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(w / 2, dc.getHeight() / 2 - hM / 2, Graphics.FONT_MEDIUM,
-                        "trafic --", Graphics.TEXT_JUSTIFY_CENTER);
-            return;
-        }
 
         // Bandeau verdict : moitie haute (y=34 < 227), c'est son sommet qui
         // contraint -- cf. sonde, largeurUtile(dc, 34) tres au-dessus du mot
-        // le plus long ("VIGILANCE") en FONT_MEDIUM.
+        // le plus long ("VIGILANCE") en FONT_MEDIUM. Toujours rendu, meme si
+        // `tr` est absent : couleurVerdict(null) et Pages.verdictMot(null)
+        // rendent deja gris fonce / "--" nativement -- la structure de la
+        // page ne change pas d'un etat a l'autre, seul son contenu le fait.
+        // Pas de couleur affirmative (vert/jaune/orange/rouge) sur un etat
+        // qu'on ignore : le gris fonce dit explicitement "inconnu".
         var y = 34;
-        dc.setColor(couleurVerdict(tr["vd"]), Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, y, Graphics.FONT_MEDIUM, Pages.verdictMot(tr["vd"]),
+        var vd = (tr != null) ? tr["vd"] : null;
+        dc.setColor(couleurVerdict(vd), Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w / 2, y, Graphics.FONT_MEDIUM, Pages.verdictMot(vd),
                     Graphics.TEXT_JUSTIFY_CENTER);
 
         y += hM + 16;
+
+        if (tr == null) {
+            // Bloc source en panne : on ne sait PAS combien de terrains il y
+            // aurait, donc on n'en invente aucune ligne (regle commune aux
+            // quatre pages) -- seuls les deux champs fixes de cette page
+            // (bandeau deja rendu ci-dessus, comptes ci-dessous) passent en
+            // tirets, meme ordonnee que le message "aucun axe charge" du cas
+            // terrains vides pour garder la meme structure -- seul le
+            // contenu (et le sens, absence vs zero connu) differe.
+            dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(w / 2, y, Graphics.FONT_XTINY, "-- alerte . -- accident",
+                        Graphics.TEXT_JUSTIFY_CENTER);
+
+            var yFootAbsent = dc.getHeight() - hX - 17;
+            dc.setColor(Graphics.COLOR_RED, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(w / 2, yFootAbsent, Graphics.FONT_XTINY, "indisponible",
+                        Graphics.TEXT_JUSTIFY_CENTER);
+            return;
+        }
 
         var terrains = tr["r"];
         if (terrains == null) { terrains = []; }

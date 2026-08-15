@@ -330,6 +330,13 @@ function testDessinTraficTerrainsVidesNeLevePas(logger) {
 function testDessinTraficBlocAbsentNeLevePas(logger) {
     // Aucun Cache.savePages() : source des quatre blocs en panne cote
     // serveur, exactement le cas que Pages.bloc doit rendre en null.
+    //
+    // Exercice la regle des quatre pages : la structure reste FIXE (bandeau
+    // verdict en tirets/gris, ligne de comptes en tirets, pied "indisponible"
+    // en rouge) -- aucune ligne de terrain n'est inventee puisque leur
+    // NOMBRE est inconnu quand la source est en panne. Distinct du cas
+    // "terrains vides" (testDessinTraficTerrainsVidesNeLevePas), ou le
+    // nombre est connu (zero) et le dit explicitement.
     Application.Storage.deleteValue(Cache.KEY_PAGES);
     var vue = new TraficView();
     vue.onUpdate(dcDeTest());
