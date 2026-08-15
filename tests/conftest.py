@@ -11,6 +11,35 @@ from datetime import datetime, timezone
 _OPERATEURS_CONNUS = {"$lte", "$lt", "$gt", "$gte", "$in", "$ne"}
 
 
+class FakeCursor:
+    """Ce que rend find() : iterable et triable, comme un curseur pymongo.
+
+    find() rendait une liste nue. Un appelant qui ecrit
+    find(...).sort("echeance_min", 1) -- ce que fait meteo_etat pour ordonner
+    les echeances PIAF -- tombait donc sur un AttributeError, et ce chemin
+    restait intestable. Le tri porte la signature pymongo (cle, sens), pas
+    celle de list.sort : c'est un curseur, pas une liste.
+    """
+
+    def __init__(self, docs):
+        self.docs = list(docs)
+
+    def sort(self, cle, sens=1):
+        # Trier sur une cle qu'un document ne porte pas rendrait un ordre
+        # arbitraire : le test passerait avec le code correct comme avec le
+        # code fautif. On leve plutot que de mentir sur l'ordre.
+        sans_cle = [d for d in self.docs if cle not in d]
+        if sans_cle:
+            raise NotImplementedError(
+                "FakeCursor ne sait pas trier sur %r : %d document(s) ne "
+                "portent pas cette cle" % (cle, len(sans_cle)))
+        self.docs.sort(key=lambda d: d[cle], reverse=(sens == -1))
+        return self
+
+    def __iter__(self):
+        return iter(self.docs)
+
+
 class FakeCollection:
     """Collection Mongo minimale : juste ce que le code teste appelle."""
 
@@ -30,7 +59,7 @@ class FakeCollection:
 
     def find(self, query=None, projection=None):
         self.last_query = query
-        return list(self._matching(query))
+        return FakeCursor(self._matching(query))
 
     def count_documents(self, query=None):
         return len(self._matching(query))
@@ -107,7 +136,13 @@ class FakeCollection:
             if "$ne" in val and actuel == val["$ne"]:
                 return False
             return True
-        return actuel == val
+        # Les deux cotes passent par la normalisation, pas seulement le
+        # document : les operateurs le faisaient deja, l'egalite simple non.
+        # Un filtre {"run_at": <datetime naif>} -- ce que fait meteo_etat pour
+        # relire les echeances du dernier run PIAF -- ne trouvait donc jamais
+        # le document dont la valeur venait pourtant d'etre lue, l'un des
+        # cotes etant rendu conscient et l'autre non.
+        return actuel == cls._as_comparable_utc(val)
 
 
 class FakeDb:

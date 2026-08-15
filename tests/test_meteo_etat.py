@@ -10,7 +10,7 @@ donnent un WBGT normal (verifie contre meteo_thermique.SEUILS_WBGT). Chaque
 test ne fait varier que le parametre qu'il examine.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from conftest import FakeDb
 
@@ -59,11 +59,24 @@ def contrainte(etat, cle):
     return next(c for c in etat["contraintes"] if c["cle"] == cle)
 
 
+def piaf(intensites, run_at=None):
+    """Les echeances d'un run PIAF, {echeance_min: max_mmh}.
+
+    Volontairement fournies dans le desordre : etat_mur les trie par echeance
+    et c'est ce tri qui designe la PREMIERE pluie. Les donner deja ordonnees
+    rendrait le test vert meme si le tri disparaissait.
+    """
+    run_at = run_at or (MAINTENANT - timedelta(minutes=10))
+    return [{"flux": "piaf", "run_at": run_at, "echeance_min": ech,
+             "valid_at": run_at + timedelta(minutes=ech), "max_mmh": mmh}
+            for ech, mmh in sorted(intensites.items(), reverse=True)]
+
+
 class TestEtatMur:
     def test_base_vide_ne_leve_pas(self):
         # La montre doit pouvoir demander la meteo meme quand aucune source
         # n'a encore ecrit : un bloc a None est acceptable, une exception non.
-        etat = meteo_etat.etat_mur(FakeDb(), MAINTENANT, {})
+        etat = meteo_etat.etat_mur(FakeDb(), MAINTENANT)
         assert isinstance(etat, dict)
         assert etat["actuel"] is None
         assert etat["prochaines"] == []
@@ -75,7 +88,7 @@ class TestEtatMur:
     def test_contrat_de_cles(self):
         # Le mur et la montre lisent le meme dictionnaire : toute cle qui
         # disparaitrait viderait un bloc d'ecran sans erreur visible.
-        etat = meteo_etat.etat_mur(base(), MAINTENANT, {})
+        etat = meteo_etat.etat_mur(base(), MAINTENANT)
         assert set(etat) == {
             "maintenant", "actuel", "prochaines", "prochaine_pluie",
             "consignes", "contraintes", "verdict", "fraicheur", "vigilance",
@@ -85,32 +98,31 @@ class TestEtatMur:
         # Douze heures, soit la duree d'une vacation. La valeur est ecrite en
         # clair et non lue depuis la constante : la comparer a elle-meme ne
         # dirait rien si quelqu'un la changeait.
-        etat = meteo_etat.etat_mur(base(), MAINTENANT, {})
+        etat = meteo_etat.etat_mur(base(), MAINTENANT)
         assert meteo_etat.HORIZON_HEURES == 12
         assert len(etat["prochaines"]) == 12
         assert etat["actuel"]["heure"] == "12:00"
         assert etat["prochaines"][-1]["heure"] == "23:00"
 
     def test_calme_ne_signale_rien(self):
-        etat = meteo_etat.etat_mur(base(), MAINTENANT, {})
+        etat = meteo_etat.etat_mur(base(), MAINTENANT)
         assert etat["consignes"] == []
         assert {c["niveau"] for c in etat["contraintes"]} == {"normal"}
         assert etat["verdict"]["niveau"] == "normal"
         assert etat["verdict"]["titre"] == "RIEN A SIGNALER"
 
-    def test_config_non_consomme(self):
-        # config est dans la signature pour que mur et montre appellent la
-        # meme fonction ; le mur ne lit ni bbox ni rayon de veille aujourd'hui.
-        vide = meteo_etat.etat_mur(base(), MAINTENANT, {})
-        peuplee = meteo_etat.etat_mur(
-            base(), MAINTENANT, {"bbox_site": {"west": 0.1}, "veille_km": 40})
-        assert vide == peuplee
+    def test_signature_a_deux_parametres(self):
+        # Le mur ne lit aucune configuration : en accepter une obligerait
+        # l'appelant a charger parametrages a chaque rafraichissement pour rien.
+        import inspect
+        assert list(inspect.signature(meteo_etat.etat_mur).parameters) == [
+            "db", "maintenant"]
 
 
 class TestConsigneVent:
     def test_rafale_au_dessus_de_80_est_critique(self):
         etat = meteo_etat.etat_mur(
-            base({15: {"Vent rafale (km/h)": 92.0}}), MAINTENANT, {})
+            base({15: {"Vent rafale (km/h)": 92.0}}), MAINTENANT)
         consigne = next(c for c in etat["consignes"] if c["heure"] == "15:00")
         assert consigne["niveau"] == "critique"
         assert "evacuation des structures provisoires" in consigne["texte"]
@@ -121,7 +133,7 @@ class TestConsigneVent:
 
     def test_rafale_entre_60_et_80_est_danger(self):
         etat = meteo_etat.etat_mur(
-            base({14: {"Vent rafale (km/h)": 65.0}}), MAINTENANT, {})
+            base({14: {"Vent rafale (km/h)": 65.0}}), MAINTENANT)
         consigne = next(c for c in etat["consignes"] if c["heure"] == "14:00")
         assert consigne["niveau"] == "danger"
         assert "securiser les structures" in consigne["texte"]
@@ -131,7 +143,7 @@ class TestConsigneVent:
         # 45 km/h marque la contrainte sans imposer d'action horaire : le
         # bandeau du mur n'a pas a se remplir pour du vent ordinaire.
         etat = meteo_etat.etat_mur(
-            base({14: {"Vent rafale (km/h)": 45.0}}), MAINTENANT, {})
+            base({14: {"Vent rafale (km/h)": 45.0}}), MAINTENANT)
         assert etat["consignes"] == []
         vent = contrainte(etat, "vent")
         assert vent["niveau"] == "vigilance"
@@ -141,7 +153,7 @@ class TestConsigneVent:
 
     def test_verdict_de_repli_sur_la_contrainte(self):
         etat = meteo_etat.etat_mur(
-            base({14: {"Vent rafale (km/h)": 45.0}}), MAINTENANT, {})
+            base({14: {"Vent rafale (km/h)": 45.0}}), MAINTENANT)
         assert etat["verdict"]["titre"] == "VENT A SURVEILLER"
         assert etat["verdict"]["niveau"] == "vigilance"
 
@@ -150,7 +162,7 @@ class TestConsigneChaleur:
     def test_wbgt_en_danger_impose_une_consigne(self):
         etat = meteo_etat.etat_mur(
             base({16: {"Température (°C)": 31.0, "Humidité (%)": 62}}),
-            MAINTENANT, {})
+            MAINTENANT)
         consigne = next(c for c in etat["consignes"] if c["heure"] == "16:00")
         assert consigne["niveau"] == "danger"
         assert consigne["texte"].startswith("WBGT ")
@@ -159,7 +171,7 @@ class TestConsigneChaleur:
         assert chaleur["pic_heure"] == "16:00"
 
     def test_wbgt_normal_reste_muet(self):
-        etat = meteo_etat.etat_mur(base(), MAINTENANT, {})
+        etat = meteo_etat.etat_mur(base(), MAINTENANT)
         assert contrainte(etat, "chaleur")["niveau"] == "normal"
 
 
@@ -168,7 +180,7 @@ class TestConsigneOrage:
         etat = meteo_etat.etat_mur(
             base({17: {"CAPE (J/kg)": 2600, "Foudre (impacts/km2)": 4.0,
                        "Grele (kg/m2)": 1.2}}),
-            MAINTENANT, {})
+            MAINTENANT)
         consigne = next(c for c in etat["consignes"] if c["heure"] == "17:00")
         assert consigne["niveau"] == "critique"
         assert consigne["texte"].endswith("mise a l'abri")
@@ -182,7 +194,7 @@ class TestConsigneOrage:
         # seul l'orage avere le fait.
         etat = meteo_etat.etat_mur(
             base({17: {"CAPE (J/kg)": 1800, "Foudre (impacts/km2)": 0.5}}),
-            MAINTENANT, {})
+            MAINTENANT)
         assert etat["consignes"] == []
         orage = contrainte(etat, "orage")
         assert orage["niveau"] == "danger"
@@ -192,7 +204,7 @@ class TestConsigneOrage:
 class TestContrainteSol:
     def test_pluie_horaire_declenche_une_vigilance(self):
         etat = meteo_etat.etat_mur(
-            base({18: {"Pluviométrie (mm)": 9.5}}), MAINTENANT, {})
+            base({18: {"Pluviométrie (mm)": 9.5}}), MAINTENANT)
         consigne = next(c for c in etat["consignes"] if c["heure"] == "18:00")
         assert consigne["niveau"] == "vigilance"
         assert "parkings en herbe" in consigne["texte"]
@@ -204,7 +216,7 @@ class TestContrainteSol:
     def test_cumul_au_dessus_de_15_mm_est_un_danger(self):
         etat = meteo_etat.etat_mur(
             base({18: {"Pluviométrie (mm)": 9.0},
-                  19: {"Pluviométrie (mm)": 7.0}}), MAINTENANT, {})
+                  19: {"Pluviométrie (mm)": 7.0}}), MAINTENANT)
         sol = contrainte(etat, "sol")
         assert sol["niveau"] == "danger"
         assert sol["consigne"] == "Parkings en herbe a fermer ou renforcer"
@@ -216,7 +228,7 @@ class TestContrainteSol:
         etat = meteo_etat.etat_mur(
             base(meteo_sol=[{"circuit": True, "date": "2026-08-14",
                              "swi": 0.15}]),
-            MAINTENANT, {})
+            MAINTENANT)
         sol = contrainte(etat, "sol")
         assert sol["niveau"] == "vigilance"
         assert "risque incendie" in sol["consigne"]
@@ -230,7 +242,7 @@ class TestUneConsigneParHeure:
         # l'action la plus contraignante.
         etat = meteo_etat.etat_mur(
             base({15: {"Vent rafale (km/h)": 92.0,
-                       "Pluviométrie (mm)": 9.5}}), MAINTENANT, {})
+                       "Pluviométrie (mm)": 9.5}}), MAINTENANT)
         a_quinze = [c for c in etat["consignes"] if c["heure"] == "15:00"]
         assert len(a_quinze) == 1
         assert a_quinze[0]["niveau"] == "critique"
@@ -238,8 +250,82 @@ class TestUneConsigneParHeure:
     def test_consignes_triees_par_heure(self):
         etat = meteo_etat.etat_mur(
             base({20: {"Vent rafale (km/h)": 92.0},
-                  14: {"Vent rafale (km/h)": 65.0}}), MAINTENANT, {})
+                  14: {"Vent rafale (km/h)": 65.0}}), MAINTENANT)
         assert [c["heure"] for c in etat["consignes"]] == ["14:00", "20:00"]
+
+
+class TestProchainePluie:
+    """La question du jour J : va-t-il pleuvoir, dans combien de temps.
+
+    C'est le seul bloc du mur qui repose sur la prevision immediate PIAF, et
+    le seul qui exige un curseur trie -- d'ou son absence de couverture
+    jusqu'ici.
+    """
+
+    def test_pluie_attendue(self):
+        etat = meteo_etat.etat_mur(
+            base(meteo_grilles=piaf({15: 0.0, 30: 1.4, 45: 6.2, 60: 0.3})),
+            MAINTENANT)
+        pluie = etat["prochaine_pluie"]
+        assert pluie["attendue"] is True
+        # 15 min est sous le seuil de perception (0,2 mm/h) : la premiere
+        # echeance retenue est bien 30, pas la premiere du run.
+        assert pluie["dans_min"] == 30
+        assert pluie["intensite_mmh"] == 1.4
+        assert pluie["a"] == "2026-08-15T12:20:00"
+        assert pluie["pic_mmh"] == 6.2
+        assert pluie["pic_dans_min"] == 45
+        assert pluie["horizon_min"] == 60
+        assert pluie["run_at"] == "2026-08-15T11:50:00"
+
+    def test_pluie_attendue_pilote_le_verdict(self):
+        etat = meteo_etat.etat_mur(
+            base(meteo_grilles=piaf({15: 0.0, 30: 1.4, 45: 6.2, 60: 0.3})),
+            MAINTENANT)
+        assert etat["verdict"]["titre"] == "PLUIE DANS 30 MIN"
+        assert etat["verdict"]["niveau"] == "vigilance"
+        assert etat["verdict"]["echeance"] == "12:20"
+
+    def test_rien_sous_le_seuil_de_perception(self):
+        # 0,1 mm/h est mesure mais imperceptible : annoncer de la pluie pour
+        # ca ferait douter du mur le reste du temps.
+        etat = meteo_etat.etat_mur(
+            base(meteo_grilles=piaf({15: 0.0, 30: 0.1, 45: 0.19, 60: 0.0})),
+            MAINTENANT)
+        pluie = etat["prochaine_pluie"]
+        assert pluie["attendue"] is False
+        assert pluie["horizon_min"] == 60
+        assert "dans_min" not in pluie
+        assert "pic_mmh" not in pluie
+        assert etat["verdict"]["titre"] == "RIEN A SIGNALER"
+
+    def test_le_run_le_plus_recent_fait_foi(self):
+        vieux = piaf({15: 9.9, 30: 9.9}, run_at=MAINTENANT - timedelta(hours=4))
+        recent = piaf({15: 0.0, 30: 0.0})
+        etat = meteo_etat.etat_mur(
+            base(meteo_grilles=vieux + recent), MAINTENANT)
+        assert etat["prochaine_pluie"]["attendue"] is False
+        assert etat["prochaine_pluie"]["run_at"] == "2026-08-15T11:50:00"
+
+    def test_piaf_frais_rend_la_fraicheur_verte(self):
+        # Seule la branche "piaf absent" etait couverte ; celle-ci calcule
+        # reellement un age contre le seuil de 30 min.
+        etat = meteo_etat.etat_mur(
+            base(meteo_grilles=piaf({15: 0.0})), MAINTENANT)
+        flux = next(f for f in etat["fraicheur"]["flux"] if f["cle"] == "piaf")
+        assert flux["age_min"] == 10.0
+        assert flux["ok"] is True
+        assert etat["fraicheur"]["ok"] is True
+        assert etat["fraicheur"]["en_retard"] == []
+
+    def test_piaf_trop_vieux_est_signale(self):
+        etat = meteo_etat.etat_mur(
+            base(meteo_grilles=piaf({15: 0.0},
+                                    run_at=MAINTENANT - timedelta(minutes=45))),
+            MAINTENANT)
+        flux = next(f for f in etat["fraicheur"]["flux"] if f["cle"] == "piaf")
+        assert flux["age_min"] == 45.0
+        assert flux["ok"] is False
 
 
 class TestVerdict:
@@ -267,13 +353,13 @@ class TestVerdict:
 
 class TestFraicheur:
     def test_absence_de_piaf_et_de_previsions_est_signalee(self):
-        etat = meteo_etat.etat_mur(FakeDb(), MAINTENANT, {})
+        etat = meteo_etat.etat_mur(FakeDb(), MAINTENANT)
         fraicheur = etat["fraicheur"]
         assert fraicheur["ok"] is False
         assert {f["cle"] for f in fraicheur["en_retard"]} == {"piaf", "previsions"}
 
     def test_previsions_presentes_mais_piaf_absent(self):
-        etat = meteo_etat.etat_mur(base(), MAINTENANT, {})
+        etat = meteo_etat.etat_mur(base(), MAINTENANT)
         fraicheur = etat["fraicheur"]
         assert fraicheur["ok"] is False
         assert [f["cle"] for f in fraicheur["en_retard"]] == ["piaf"]
@@ -300,7 +386,7 @@ class TestVigilance:
             ],
         }
         etat = meteo_etat.etat_mur(
-            base(meteo_vigilance=[bulletin]), MAINTENANT, {})
+            base(meteo_vigilance=[bulletin]), MAINTENANT)
         vigilance = etat["vigilance"]
         assert vigilance["departement"] == "72"
         assert vigilance["couleur_jour"] == "jaune"

@@ -376,8 +376,12 @@ def mur():
     Le calcul vit dans meteo_etat, partage avec la montre : les seuils de
     rafale, de WBGT et d'orage ne doivent exister qu'a un seul endroit,
     sinon le poignet finit par contredire le mur.
+
+    Aucune configuration n'est passee : le mur n'en lit aucune, et appeler
+    _config_meteo() ici couterait un find_one sur parametrages a chaque
+    rafraichissement pour une valeur que personne ne consomme.
     """
-    return jsonify(meteo_etat.etat_mur(_db(), datetime.now(), _config_meteo()))
+    return jsonify(meteo_etat.etat_mur(_db(), datetime.now()))
 
 
 @meteo_bp.route("/radar/sequence", methods=["GET"])

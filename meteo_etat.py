@@ -210,7 +210,7 @@ def etat_vigilance(bulletin, maintenant=None):
             "valide_jusqua": None, "motif": "repli_sur_age"}
 
 
-def etat_mur(db, maintenant, config):
+def etat_mur(db, maintenant):
     """Tout ce qu'affiche le mur du PC Organisation, en un appel.
 
     Une page de mur n'est pas une page de consultation : personne ne clique,
@@ -222,10 +222,12 @@ def etat_mur(db, maintenant, config):
     maintenant, actuel, prochaines, prochaine_pluie, consignes, contraintes,
     verdict, fraicheur, vigilance, sol, radar.
 
-    `config` n'est pas consomme aujourd'hui -- le mur ne lit ni la bbox de site
-    ni le rayon de veille. Il figure dans la signature parce que la montre et le
-    mur doivent appeler la meme fonction avec le meme contexte, et qu'ajouter le
-    parametre plus tard obligerait a reprendre les deux appelants.
+    PAS DE PARAMETRE DE CONFIGURATION. Le mur ne lit ni la bbox de site ni le
+    rayon de veille : les accepter obligerait l'appelant a charger le document
+    parametrages -- un find_one non indexe -- a chaque affichage, pour une
+    valeur que personne ne lit. Le jour ou la meteo devra lire sa config, le
+    parametre reviendra ; d'ici la il couterait un aller-retour Mongo par
+    rafraichissement, sur un ecran qui se rafraichit tout seul en continu.
     """
     # --- Prochaine pluie, d'apres PIAF ---
     #
