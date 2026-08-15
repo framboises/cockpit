@@ -26,11 +26,13 @@ class CockpitDelegate extends WatchUi.BehaviorDelegate {
         return true;
     }
 
-    // MENU ouvre la consultation des editions passees. La vue principale
-    // reste le direct : on ne quitte l'instant que sur un geste explicite.
+    // MENU ouvre le menu de saut (SautMenu) : les six pages du cycle, plus
+    // "Pics par edition" -- qui reste donc atteignable, en une seule entree,
+    // malgre la disparition du raccourci direct qu'etait ce geste avant
+    // cette tache.
     function onMenu() {
-        var vue = new EditionsView();
-        WatchUi.pushView(vue, new EditionsDelegate(vue), WatchUi.SLIDE_UP);
+        var menu = new SautMenu();
+        WatchUi.pushView(menu, new SautMenuDelegate(mView), WatchUi.SLIDE_UP);
         return true;
     }
 }

@@ -12,8 +12,24 @@ class CockpitView extends WatchUi.View {
     hidden var mPage = 0;
     hidden var mPeriod = 0;
 
+    // Les quatre pages annexes sont dessinees DANS cette vue (onUpdate
+    // appelle directement leur onUpdate(dc), deja autonome -- chacune gere
+    // deja son propre clear/couleurs et lit son bloc dans Cache/Pages) plutot
+    // que poussees sur la pile : HAUT/BAS reste un simple changement de page,
+    // sans empiler de vues. Creees une fois ici (le cout, notamment le
+    // chargement des icones de MainCouranteView, ne doit pas se repeter a
+    // chaque page suivante).
+    hidden var mMainCourante;
+    hidden var mTrafic;
+    hidden var mMeteo;
+    hidden var mFrequentation;
+
     function initialize() {
         View.initialize();
+        mMainCourante = new MainCouranteView();
+        mTrafic = new TraficView();
+        mMeteo = new MeteoView();
+        mFrequentation = new FrequentationView();
     }
 
     function onLayout(dc) {
@@ -82,18 +98,51 @@ class CockpitView extends WatchUi.View {
         WatchUi.requestUpdate();
     }
 
+    // Six pages en cycle, dans l'ordre d'urgence operationnelle : tableau de
+    // bord, alertes, main courante, trafic, meteo, frequentation.
     function nextPage() {
-        mPage = (mPage + 1) % 2;
+        mPage = (mPage + 1) % 6;
         WatchUi.requestUpdate();
     }
 
+    // Saut direct depuis le menu (SautMenuDelegate) : pose la page courante
+    // sans passer par le cycle.
+    function setPage(n) {
+        mPage = n;
+        WatchUi.requestUpdate();
+    }
+
+    // Public pour rester testable en VALEUR (DessinTest.mc verifie que
+    // nextPage boucle bien sur 6 et revient a 0), pas seulement en absence
+    // d'exception.
+    function currentPage() {
+        return mPage;
+    }
+
+    // Table page -> vue annexe pour les pages 2..5, seule source de verite
+    // pour l'aiguillage (onUpdate l'appelle, ne duplique pas le mapping).
+    // Publique (comme FrequentationView.calculDeltaPct) pour rester
+    // testable en VALEUR : un swap accidentel entre deux pages voisines
+    // (ex: meteo/frequentation) ne leverait aucune exception -- seule une
+    // verification par instanceof le detecte.
+    function pageView(n) {
+        if (n == 2) { return mMainCourante; }
+        if (n == 3) { return mTrafic; }
+        if (n == 4) { return mMeteo; }
+        return mFrequentation;
+    }
+
     function onUpdate(dc) {
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
-        dc.clear();
         if (mPage == 0) {
+            dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
+            dc.clear();
             drawMain(dc);
-        } else {
+        } else if (mPage == 1) {
+            dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
+            dc.clear();
             drawAlerts(dc);
+        } else {
+            pageView(mPage).onUpdate(dc);
         }
     }
 

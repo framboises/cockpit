@@ -519,3 +519,94 @@ function testFrequentationDeltaPctN1ZeroNeLevePas(logger) {
     Test.assert(vue.calculDeltaPct(100, 0) == null);
     return true;
 }
+
+// Navigation (tache 13) : six pages en cycle, aiguillage inline dans
+// CockpitView.onUpdate. Ces tests verifient une VALEUR (currentPage(), pas
+// seulement l'absence d'exception) -- la lecon de la tache 12 est que
+// "ne leve pas" n'aurait pas revele un aiguillage qui pointe vers la
+// mauvaise page.
+
+(:test)
+function testNextPageBoucleSurSixEtRevientAZero(logger) {
+    var vue = new CockpitView();
+    Test.assertEqual(vue.currentPage(), 0);
+    for (var i = 0; i < 5; i += 1) {
+        vue.nextPage();
+    }
+    Test.assertEqual(vue.currentPage(), 5);
+    // Le sixieme appel referme le cycle.
+    vue.nextPage();
+    Test.assertEqual(vue.currentPage(), 0);
+    return true;
+}
+
+(:test)
+function testSetPagePoseLaPageDemandee(logger) {
+    // Mecanisme utilise par SautMenuDelegate pour sauter directement a une
+    // page choisie dans le menu, sans passer par le cycle.
+    var vue = new CockpitView();
+    vue.setPage(4);
+    Test.assertEqual(vue.currentPage(), 4);
+    return true;
+}
+
+(:test)
+function testPageViewAiguilleVersLaBonneVue(logger) {
+    // Verifie l'aiguillage en VALEUR (instanceof), pas seulement l'absence
+    // d'exception -- un swap entre deux pages voisines (ex : meteo <->
+    // frequentation) dessinerait sans lever, seul ce test le detecterait.
+    var vue = new CockpitView();
+    Test.assert(vue.pageView(2) instanceof MainCouranteView);
+    Test.assert(vue.pageView(3) instanceof TraficView);
+    Test.assert(vue.pageView(4) instanceof MeteoView);
+    Test.assert(vue.pageView(5) instanceof FrequentationView);
+    return true;
+}
+
+(:test)
+function testDessinChaquePageNeLevePas(logger) {
+    // Complement de testPageViewAiguilleVersLaBonneVue : couvre le risque de
+    // deref nul (ex : une vue annexe jamais initialisee) sur les six pages,
+    // dans les deux modes (live, teste ici via Cache.save "live" ci-dessous)
+    // et past (deja couvert par les tests dedies plus haut pour les pages 0
+    // et 2/5).
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new CockpitView();
+    Cache.save({"t" => Time.now().value(), "rx" => Time.now().value(),
+                "m" => "live", "n" => "24HM 26", "e" => 48213, "er" => 3200,
+                "p" => 44980, "pk" => 39800, "pkt" => Time.now().value() - 5400,
+                "w" => 27.4, "wl" => 1, "al" => []});
+    Cache.savePages({"mc" => {"s" => [2, 1], "sc" => [1, 0], "tq" => [0, 0],
+                               "f" => [1, 0], "o" => [0, 0]},
+                     "tr" => {"vd" => 1}, "me" => {"tc" => 22.0},
+                     "st" => {"pj" => 40000, "ph" => "13h20", "n1" => 38000}});
+    vue.onFetched(false, null);
+    for (var p = 0; p < 6; p += 1) {
+        vue.setPage(p);
+        vue.onUpdate(dcDeTest());
+    }
+    return true;
+}
+
+// Menu de saut (SautMenu) : sept entrees dans l'ordre attendu, les six pages
+// du cycle puis les editions -- verifie en VALEUR (id + libelle de chaque
+// entree), pas seulement que la construction ne leve pas. Un oubli d'entree
+// ou un mauvais ordre serait invisible a un simple "ne leve pas".
+
+(:test)
+function testSautMenuSeptEntreesDansLOrdre(logger) {
+    var menu = new SautMenu();
+    var labels = ["Tableau de bord", "Alertes", "Main courante", "Trafic",
+                  "Meteo", "Frequentation", "Pics par edition"];
+    var ids = [0, 1, 2, 3, 4, 5, -1];
+    for (var i = 0; i < labels.size(); i += 1) {
+        var item = menu.getItem(i);
+        Test.assert(item != null);
+        Test.assertEqual(item.getLabel(), labels[i]);
+        Test.assertEqual(item.getId(), ids[i]);
+    }
+    // Rien au-dela de la septieme entree : les editions sont bien une
+    // entree de CE menu, pas nichees dans un sous-menu supplementaire.
+    Test.assert(menu.getItem(labels.size()) == null);
+    return true;
+}
