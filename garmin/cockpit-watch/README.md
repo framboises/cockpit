@@ -26,18 +26,44 @@ Trois points d'entrée (`CockpitApp.mc`) partagent un cache commun :
 |---|---|
 | `Cache.mc` | cache `Application.Storage` versionné (schéma `v`), partagé par les trois points d'entrée |
 | `State.mc` | accès typés au cache : niveaux (`wbgtLevel`, `alertMax`, `worstLevel`), âges (`dataAgeSec` = âge de la donnée, `responseAgeSec` = âge de la réponse HTTP, `worstAgeSec` = le pire des deux) |
-| `Fmt.mc` | formatage : groupement des milliers, âges lisibles, WBGT à une décimale |
-| `Api.mc` | requête réseau vers `/api/v1/watch/state`, conversion du payload, garde anti-doublon bornée à 30 s |
+| `Fmt.mc` | formatage : groupement des milliers, âges lisibles, WBGT à une décimale, jour et heure d'un epoch (rendus en heure locale de la montre) |
+| `Api.mc` | requêtes réseau vers `/api/v1/watch/state` et `/api/v1/watch/editions`, conversion des payloads, garde anti-doublon bornée à 30 s |
 | `Alerting.mc` | transition de niveau + vibration, jamais en boucle |
-| `Mock.mc` | quatre scénarios simulés pour travailler sans backend |
+| `Mock.mc` | cinq scénarios simulés pour travailler sans backend, plus une liste d'éditions |
 | `CockpitView.mc` / `CockpitDelegate.mc` | console (device app) |
+| `EditionsView.mc` | consultation des pics par édition, ouverte par MENU |
 | `GlanceView.mc` | glance |
 | `BgService.mc` | service de fond (`CockpitService extends ServiceDelegate`) |
 | `CockpitApp.mc` | les trois points d'entrée : device app, glance, background |
 
-29 tests Run No Evil couvrent `Cache`, `State` (via `Fmt`), `Fmt`, `Api` et
-`Alerting`. Le backend (`watch_api.py`, `watch_state.py`) est couvert par 63
-tests pytest.
+45 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api` et `Alerting`.
+Le backend (`watch_api.py`, `watch_state.py`, `watch_peaks.py`) est couvert par
+111 tests pytest.
+
+## Navigation
+
+| Geste | Effet |
+|-------|-------|
+| HAUT / BAS | page suivante (console, puis liste des alertes) |
+| ENTER | rafraîchissement immédiat |
+| **MENU** | **pics par édition** — HAUT/BAS fait défiler, BACK revient |
+
+## Les deux modes
+
+Le payload porte un champ `m` qui vaut `live` ou `past`.
+
+**`live`** — un événement tourne : le collecteur live-contrôle est armé *et* le
+compteur principal a un relevé de moins de 6 h. La console affiche les entrées
+cumulées, le débit, et date le compteur en pied d'écran.
+
+**`past`** — hors événement. `e`, `er` et `t` valent `null` ; le grand chiffre
+devient le **pic de présents** de l'édition rapportée, sa sous-ligne donne le
+jour et l'heure de ce pic, et le pied dit « edition terminee ».
+
+Dans ce mode la montre n'affiche **jamais** « périmé » : le pic d'une édition
+close est définitif, rien n'y vieillit. La détection de péremption reste
+entière en `live`, où elle signale un vrai incident (téléphone hors de portée,
+jeton révoqué, certificat expiré).
 
 ## Prérequis
 
@@ -240,7 +266,7 @@ qui est la protection qui compte : un binaire perdu se neutralise côté serveur
 | `staleAfter` | 90 s | au-delà, la donnée s'affiche en rouge |
 | `alertVibrate` | vrai | couper la vibration |
 | `mockData` | faux | travailler sans réseau |
-| `mockScenario` | 0 | scénario simulé |
+| `mockScenario` | 0 | scénario simulé (0 nominal, 1 WBGT, 2 alerte critique, 3 donnée périmée, **4 hors événement**) |
 
 ## Backend
 

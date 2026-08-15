@@ -41,6 +41,57 @@ function testToCacheStampsResponseTime(logger) {
     return true;
 }
 
+// toCacheDict recopie champ par champ : un champ ajoute au payload serveur et
+// oublie ici serait perdu en SILENCE. C'est exactement ce qui serait arrive a
+// m/pk/pkt sans ces tests.
+
+(:test)
+function testToCacheReporteModeEtPic(logger) {
+    var data = {"t" => 100, "n" => "LMC 26", "m" => "past",
+                "e" => null, "er" => null,
+                "pk" => 52409, "pkt" => 1783175368,
+                "w" => 24.2, "wl" => 0, "al" => []};
+    var st = Api.toCacheDict(data, 200);
+    Test.assertEqual(st["m"], "past");
+    Test.assertEqual(st["pk"], 52409);
+    Test.assertEqual(st["pkt"], 1783175368);
+    return true;
+}
+
+(:test)
+function testToCacheSupposeLeDirectSansMode(logger) {
+    // Un serveur anterieur a l'ajout de `m` ne l'envoie pas. Prendre son
+    // silence pour du passe couperait le direct sur une montre a jour face a
+    // un backend qui ne l'est pas encore.
+    var st = Api.toCacheDict({"t" => 100, "e" => 5}, 200);
+    Test.assertEqual(st["m"], "live");
+    Test.assert(st["pk"] == null);
+    Test.assert(st["pkt"] == null);
+    return true;
+}
+
+(:test)
+function testToEditionsCompacte(logger) {
+    var data = {"ok" => true, "ed" => [
+        {"n" => "LMC 26", "ev" => "LE MANS CLASSIC", "y" => 2026,
+         "pk" => 52409, "pkt" => 1783175368},
+        {"n" => "24HM 26", "ev" => "24H MOTOS", "y" => 2026,
+         "pk" => 50690, "pkt" => 1776517509}]};
+    var liste = Api.toEditionsList(data);
+    Test.assertEqual(liste.size(), 2);
+    Test.assertEqual(liste[0][0], "LMC 26");
+    Test.assertEqual(liste[0][1], 52409);
+    Test.assertEqual(liste[1][0], "24HM 26");
+    return true;
+}
+
+(:test)
+function testToEditionsSansListeNeCassePas(logger) {
+    Test.assertEqual(Api.toEditionsList({"ok" => true}).size(), 0);
+    Test.assertEqual(Api.toEditionsList(null).size(), 0);
+    return true;
+}
+
 (:test)
 function testToCacheHandlesMissingAlerts(logger) {
     var st = Api.toCacheDict({"t" => 100}, 200);

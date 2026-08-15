@@ -65,7 +65,27 @@ module State {
         return a > b ? a : b;
     }
 
+    // Hors evenement, le serveur repond "past" : il n'y a pas de releve en
+    // cours, `t`, `e` et `er` sont nuls par construction et le payload porte
+    // le pic d'une edition close.
+    function isPast(st) {
+        if (st == null || st["m"] == null) {
+            return false;
+        }
+        return st["m"].equals("past");
+    }
+
     function isStale(st, nowSec, staleAfter) {
+        // Une edition close ne vieillit pas : son pic est definitif. Sans ce
+        // court-circuit, `t` etant nul, la montre finirait par afficher
+        // "perime" sur un ecran dont TOUTE la donnee est figee par nature --
+        // un avertissement auquel aucune action ne peut repondre, et qui
+        // serait permanent hors evenement, c'est-a-dire l'essentiel de
+        // l'annee. Le mode repasse a "live" des la premiere reponse ou un
+        // evenement tourne.
+        if (isPast(st)) {
+            return false;
+        }
         var age = worstAgeSec(st, nowSec);
         if (age == null) {
             return true;

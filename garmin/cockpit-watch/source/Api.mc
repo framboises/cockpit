@@ -22,6 +22,14 @@ module Api {
     var mCallback = null;
     var mInFlightSince = null;
 
+    // Callback SEPARE pour /editions. mCallback est unique : si les deux
+    // requetes partageaient le meme, une reponse d'editions arrivee pendant
+    // qu'une requete d'etat est en vol serait remise au mauvais destinataire
+    // -- la vue principale recevrait une liste d'editions a la place de son
+    // etat. La garde mInFlightSince, elle, reste PARTAGEE : une seule requete
+    // sur le lien BLE a la fois, c'est tout son objet.
+    var mEditionsCallback = null;
+
     // Le payload HTTP porte les alertes en dictionnaires ; le cache les stocke
     // en tableaux, moitie moins d'octets et d'objets a instancier au reveil de
     // la glance.
@@ -36,14 +44,36 @@ module Api {
         return {
             "t" => (data != null) ? data["t"] : null,
             "n" => (data != null) ? data["n"] : null,
+            // Cette fonction recopie champ par champ : tout champ ajoute au
+            // payload serveur et oublie ici serait perdu en SILENCE, sans
+            // erreur ni trace. C'est le cas de m/pk/pkt.
+            "m" => (data != null && data["m"] != null) ? data["m"] : "live",
             "e" => (data != null) ? data["e"] : null,
             "er" => (data != null) ? data["er"] : null,
+            "pk" => (data != null) ? data["pk"] : null,
+            "pkt" => (data != null) ? data["pkt"] : null,
             "w" => (data != null) ? data["w"] : null,
             "wl" => (data != null && data["wl"] != null) ? data["wl"] : 0,
             "al" => al,
             "rx" => nowSec,
             "ok" => true
         };
+    }
+
+    // Les editions arrivent en dictionnaires ; on les compacte en tableaux
+    // comme les alertes, meme raison : moins d'octets en Storage et moins
+    // d'objets a instancier.
+    function toEditionsList(data) {
+        var out = [];
+        var brut = (data != null) ? data["ed"] : null;
+        if (brut == null) {
+            return out;
+        }
+        for (var i = 0; i < brut.size(); i += 1) {
+            var e = brut[i];
+            out.add([e["n"], e["pk"], e["pkt"]]);
+        }
+        return out;
     }
 
     function fetch(callback) {
@@ -88,6 +118,61 @@ module Api {
             },
             new Lang.Method(Api, :onReceive)
         );
+    }
+
+    function fetchEditions(callback) {
+        var mock = Application.Properties.getValue("mockData");
+        if (mock != null && mock) {
+            callback.invoke(true, Mock.editions());
+            return;
+        }
+
+        var host = Application.Properties.getValue("host");
+        var token = Application.Properties.getValue("token");
+        if (host == null || host.length() == 0
+            || token == null || token.length() == 0) {
+            callback.invoke(false, null);
+            return;
+        }
+
+        var maintenant = Time.now().value();
+        if (mInFlightSince != null
+            && (maintenant - mInFlightSince) < IN_FLIGHT_TIMEOUT_S) {
+            callback.invoke(false, null);
+            return;
+        }
+        mInFlightSince = maintenant;
+        // Arme apres la garde, pas avant : un appel refuse ne doit pas
+        // remplacer le destinataire d'une reponse deja en vol.
+        mEditionsCallback = callback;
+
+        Communications.makeWebRequest(
+            "https://" + host + "/api/v1/watch/editions",
+            {},
+            {
+                :method => Communications.HTTP_REQUEST_METHOD_GET,
+                :headers => {
+                    "Authorization" => "Bearer " + token
+                },
+                :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
+            },
+            new Lang.Method(Api, :onReceiveEditions)
+        );
+    }
+
+    function onReceiveEditions(responseCode as Lang.Number,
+                        data as Lang.Dictionary or Lang.String
+                            or PersistedContent.Iterator or Null) as Void {
+        mInFlightSince = null;
+        if (responseCode != 200 || data == null) {
+            if (mEditionsCallback != null) {
+                mEditionsCallback.invoke(false, null);
+            }
+            return;
+        }
+        if (mEditionsCallback != null) {
+            mEditionsCallback.invoke(true, toEditionsList(data));
+        }
     }
 
     function onReceive(responseCode as Lang.Number,

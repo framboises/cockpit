@@ -56,3 +56,52 @@ function testWbgtOneDecimal(logger) {
     Test.assertEqual(Fmt.wbgt(null), "--");
     return true;
 }
+
+// Le pic reutilise `count` : meme separateur de milliers que le compteur, donc
+// deux nombres de meme nature se lisent pareil.
+(:test)
+function testPicUtiliseLeMemeGroupement(logger) {
+    Test.assertEqual(Fmt.count(52409), "52 409");
+    Test.assertEqual(Fmt.count(148919), "148 919");
+    return true;
+}
+
+(:test)
+function testJourEtHeureNullsSontDesTirets(logger) {
+    Test.assertEqual(Fmt.day(null), "--");
+    Test.assertEqual(Fmt.hour(null), "--");
+    return true;
+}
+
+// Ces deux tests n'affirment PAS une valeur absolue : le rendu depend du
+// fuseau de la montre, et l'epingler ferait passer le test sur un poste et
+// echouer sur un autre sans que rien ne soit casse. On verifie la forme et
+// une invariance vraie sous tout fuseau.
+
+(:test)
+function testHeureALaBonneForme(logger) {
+    var rendu = Fmt.hour(1776517509);
+    Test.assertEqual(rendu.length(), 5);
+    Test.assertEqual(rendu.substring(2, 3), "h");
+    return true;
+}
+
+(:test)
+function testUneHeureDePlusDecaleDUneHeure(logger) {
+    // Invariant valable sous tout fuseau : deux instants a 3600 s d'ecart ne
+    // peuvent pas rendre la meme heure. C'est ce qui attraperait un epoch
+    // fige ou une conversion qui ignore son argument.
+    var a = Fmt.hour(1776517509);
+    var b = Fmt.hour(1776517509 + 3600);
+    Test.assert(!a.equals(b));
+    return true;
+}
+
+(:test)
+function testJourChangeDUnJourALAutre(logger) {
+    var a = Fmt.day(1776517509);
+    var b = Fmt.day(1776517509 + 86400);
+    Test.assert(!a.equals(b));
+    Test.assert(!a.equals("--"));
+    return true;
+}

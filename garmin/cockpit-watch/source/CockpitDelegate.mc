@@ -25,4 +25,12 @@ class CockpitDelegate extends WatchUi.BehaviorDelegate {
         mView.nextPage();
         return true;
     }
+
+    // MENU ouvre la consultation des editions passees. La vue principale
+    // reste le direct : on ne quitte l'instant que sur un geste explicite.
+    function onMenu() {
+        var vue = new EditionsView();
+        WatchUi.pushView(vue, new EditionsDelegate(vue), WatchUi.SLIDE_UP);
+        return true;
+    }
 }

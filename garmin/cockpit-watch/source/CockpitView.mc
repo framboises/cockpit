@@ -157,18 +157,32 @@ class CockpitView extends WatchUi.View {
         dc.drawText(w / 2, y, Graphics.FONT_XTINY, label,
                     Graphics.TEXT_JUSTIFY_CENTER);
 
-        // Entrees, le chiffre principal.
+        // Le chiffre principal change de nature selon le mode, et sa
+        // sous-ligne le nomme : en direct les entrees cumulees et leur debit,
+        // hors evenement le pic de l'edition rapportee et son instant. Sans
+        // ce libelle, deux grandeurs tres differentes occuperaient la meme
+        // place sans que rien ne les distingue.
+        var passe = State.isPast(st);
+        var chiffre = passe ? (st != null ? st["pk"] : null)
+                            : (st != null ? st["e"] : null);
+        var sousLigne;
+        if (passe) {
+            var quand = (st != null) ? st["pkt"] : null;
+            sousLigne = (quand != null)
+                        ? ("pic " + Fmt.day(quand) + " " + Fmt.hour(quand))
+                        : "pic";
+        } else {
+            sousLigne = Fmt.rate(st != null ? st["er"] : null) + " pers/h";
+        }
+
         y = y + hX + 4;
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, y, Graphics.FONT_NUMBER_MEDIUM,
-                    Fmt.count(st != null ? st["e"] : null),
+        dc.drawText(w / 2, y, Graphics.FONT_NUMBER_MEDIUM, Fmt.count(chiffre),
                     Graphics.TEXT_JUSTIFY_CENTER);
 
-        // Debit.
         y = y + hN + 2;
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, y, Graphics.FONT_XTINY,
-                    Fmt.rate(st != null ? st["er"] : null) + " pers/h",
+        dc.drawText(w / 2, y, Graphics.FONT_XTINY, sousLigne,
                     Graphics.TEXT_JUSTIFY_CENTER);
 
         // WBGT, colore par son niveau.
@@ -204,6 +218,14 @@ class CockpitView extends WatchUi.View {
         var stale = State.isStale(st, now, staleAfter);
         dc.setColor(stale ? Graphics.COLOR_RED : Graphics.COLOR_DK_GRAY,
                     Graphics.COLOR_TRANSPARENT);
+        if (passe) {
+            // Hors evenement il n'y a aucun compteur a dater. Afficher l'age
+            // d'un releve inexistant, ou le taire, laisserait croire a du
+            // direct ; on nomme l'etat.
+            dc.drawText(w / 2, dc.getHeight() - hX - 17, Graphics.FONT_XTINY,
+                        "edition terminee", Graphics.TEXT_JUSTIFY_CENTER);
+            return;
+        }
         // "compteur" et pas "perime" : le payload ne porte qu'un horodatage, `t`,
         // celui du releve Skidata. Le WBGT du creneau courant peut etre frais
         // alors que le compteur date de plusieurs mois — et l'inverse est plus
