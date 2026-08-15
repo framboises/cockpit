@@ -165,88 +165,10 @@ class TestResolveEvent:
         assert watch_state.resolve_event(cfg, self.COUNTER) == ("24H MOTOS", None)
 
 
-class FakeCollection:
-    """Collection Mongo minimale : juste ce que watch_state appelle."""
-
-    def __init__(self, docs=None):
-        self.docs = list(docs or [])
-        self.last_query = None
-
-    def find_one(self, query=None, projection=None, sort=None):
-        self.last_query = query
-        docs = self._matching(query)
-        if sort:
-            cle, sens = sort[0]
-            docs = sorted(docs, key=lambda d: d.get(cle),
-                          reverse=(sens == -1))
-        return docs[0] if docs else None
-
-    def find(self, query=None, projection=None):
-        self.last_query = query
-        return list(self._matching(query))
-
-    def _matching(self, query):
-        if not query:
-            return list(self.docs)
-        out = []
-        for doc in self.docs:
-            if all(self._match(doc, cle, val) for cle, val in query.items()):
-                out.append(doc)
-        return out
-
-    @staticmethod
-    def _as_comparable_utc(value):
-        """Aligne un datetime naif sur la convention pymongo : un client non
-        tz_aware stocke un aware en UTC et le relit naif-UTC. Comparer un
-        conscient a un naif leve un TypeError en Python pur, alors que
-        MongoDB compare les deux sans broncher (BSON normalise tout en UTC
-        sur le fil). Sans cette normalisation, un test qui reproduit
-        fidelement ce que pymongo rend (naif) contre un `now_utc` conscient
-        (la forme correcte, cf. CRITIQUE 1) casserait le double a cause du
-        Fake, pas du code teste."""
-        if isinstance(value, datetime) and value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value
-
-    @classmethod
-    def _match(cls, doc, cle, val):
-        actuel = cls._as_comparable_utc(doc.get(cle))
-        if isinstance(val, dict):
-            if "$lte" in val and not (
-                    actuel is not None
-                    and actuel <= cls._as_comparable_utc(val["$lte"])):
-                return False
-            if "$gt" in val and not (
-                    actuel is not None
-                    and actuel > cls._as_comparable_utc(val["$gt"])):
-                return False
-            if "$gte" in val and not (
-                    actuel is not None
-                    and actuel >= cls._as_comparable_utc(val["$gte"])):
-                return False
-            if "$in" in val and actuel not in val["$in"]:
-                return False
-            # Un operateur inconnu laisse passer le document. C'est le defaut
-            # le plus dangereux de ce double : un filtre que le Fake ignore
-            # rend le test tautologique, il passe autant avec le code correct
-            # qu'avec le code fautif. D'ou ce garde-fou -- mieux vaut un test
-            # qui casse bruyamment qu'un test qui ne verifie rien.
-            inconnus = set(val) - {"$lte", "$gt", "$gte", "$in"}
-            if inconnus:
-                raise NotImplementedError(
-                    "FakeCollection ne sait pas filtrer %s" % sorted(inconnus))
-            return True
-        return actuel == val
-
-
-class FakeDb:
-    def __init__(self, **collections):
-        self._cols = {k: FakeCollection(v) for k, v in collections.items()}
-
-    def __getitem__(self, name):
-        if name not in self._cols:
-            self._cols[name] = FakeCollection([])
-        return self._cols[name]
+# Le double Mongo vit dans tests/conftest.py : watch_state et watch_peaks
+# le partagent, et une seule implementation evite qu'ils divergent sur ce
+# que Mongo fait reellement.
+from conftest import FakeDb  # noqa: E402
 
 
 NOW = datetime(2026, 8, 14, 12, 0)
