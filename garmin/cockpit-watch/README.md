@@ -36,7 +36,9 @@ Trois points d'entrée (`CockpitApp.mc`) partagent un cache commun :
 | `BgService.mc` | service de fond (`CockpitService extends ServiceDelegate`) |
 | `CockpitApp.mc` | les trois points d'entrée : device app, glance, background |
 
-45 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api` et `Alerting`.
+51 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting` et
+les chemins de dessin des deux vues (`DessinTest.mc` : le rendu ne doit lever
+dans aucun etat atteignable, y compris un mode `past` sans pic).
 Le backend (`watch_api.py`, `watch_state.py`, `watch_peaks.py`) est couvert par
 111 tests pytest.
 
