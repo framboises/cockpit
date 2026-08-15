@@ -4,7 +4,10 @@ Fonctions pures et lectures Mongo, `db` toujours passe en argument. Aucun
 import Flask : ce module se teste sans application.
 """
 
+import logging
 from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 # Seuils WBGT en degres, replies sur l'echelle 0-3 de la montre. Ils viennent
 # de SEUILS_WBGT (ISO 7243) dans meteo_thermique.py, dont le palier
@@ -274,12 +277,14 @@ def read_weather_now(db, now):
     return bloc.get("wbgt_c"), bloc.get("wbgt_niveau")
 
 
-def build_state(db, now, now_utc=None, peaks=None):
+def build_state(db, now, now_utc=None, peaks=None, pages=None):
     """Assemble le payload servi a la montre.
 
-    `peaks` est le module watch_peaks, INJECTE et non importe : watch_peaks
-    importe deja watch_state pour ses libelles, l'importer en retour ferait
-    un cycle. L'injection garde aussi ce module testable sans lui.
+    `peaks` est le module watch_peaks, `pages` le module watch_pages : tous
+    deux INJECTES et non importes. watch_peaks comme watch_pages importent
+    deja watch_state (pour ses libelles et pour read_principal_id), les
+    importer en retour ferait un cycle. L'injection garde aussi ce module
+    testable sans eux -- `pages=None` doit laisser les quatre blocs a None.
 
     DEUX HORLOGES, deux conventions, ne pas les confondre :
       `now`     naif, heure locale Paris. C'est la convention des creneaux
@@ -306,12 +311,34 @@ def build_state(db, now, now_utc=None, peaks=None):
     # << actif >> et mentirait indefiniment. C'est exactement ce que la
     # pastille de sante du cockpit signale en passant en << warning >>.
     location_id = read_principal_id(db)
+    actif = read_live_active(db)
     courant = None
-    if read_live_active(db):
+    if actif:
         courant = read_counter(db, location_id,
                                max_age=COUNTER_MAX_AGE, now_utc=now_utc)
     mode = "live" if courant else "past"
     entrees = _safe_int(courant.get("entries")) if courant else None
+
+    # `mr` distingue deux situations que `m: past` a lui seul confondait :
+    # un live-controle arrete (normal, 350 jours par an) et un collecteur
+    # plante alors que le drapeau le dit encore en marche (incident a
+    # traiter -- c'est exactement ce que la pastille de sante du cockpit
+    # signale en passant en << warning >>).
+    motif = None
+    if mode == "past":
+        motif = "inactif" if not actif else "sans_releve"
+
+    # Les presents, pas le cumul d'entrees : c'est la grandeur qui gouverne
+    # une decision d'exploitation. Jamais hors mode live -- un chiffre de
+    # presents perime est indiscernable d'un chiffre juste, et c'est
+    # precisement lui qu'on regarde pour decider.
+    presents = None
+    if courant:
+        presents = _safe_int(courant.get("current"))
+        if presents is None:
+            sorties = _safe_int(courant.get("exits"))
+            if entrees is not None and sorties is not None:
+                presents = entrees - sorties
 
     horodatage = courant.get("timestamp") if courant else None
 
@@ -358,7 +385,30 @@ def build_state(db, now, now_utc=None, peaks=None):
     if pic is None and peaks is not None and event and year is not None:
         pic, pic_ts = peaks.cached_peak(db, event, year, now_utc=now_utc)
 
-    return {
+    # Les quatre blocs des pages operationnelles. Chaque bloc dans son
+    # propre try : une source qui tombe met SON bloc a null, jamais un 500
+    # ni un payload perdu -- le serveur doit rester capable de donner le
+    # WBGT quand Waze ne repond plus. En mode past, main courante et
+    # frequentation n'ont pas d'objet hors evenement : quatre lectures
+    # Mongo economisees a chaque cycle, 350 jours par an. Trafic et meteo,
+    # eux, restent vivants toute l'annee.
+    blocs = {"mc": None, "tr": None, "me": None, "st": None}
+    if pages is not None:
+        constructeurs = (
+            ("mc", lambda: pages.build_main_courante(db, event, year, now_utc)
+                   if mode == "live" else None),
+            ("tr", lambda: pages.build_trafic(db, now_utc)),
+            ("me", lambda: pages.build_meteo(db, now)),
+            ("st", lambda: pages.build_frequentation(db, event, year, now)
+                   if mode == "live" else None),
+        )
+        for cle, construire in constructeurs:
+            try:
+                blocs[cle] = construire()
+            except Exception as exc:
+                logger.warning("watch_state : bloc %s indisponible (%s)", cle, exc)
+
+    payload = {
         # `horodatage` est naif mais contient de l'UTC (pymongo, client non
         # tz_aware). .timestamp() l'interpreterait en heure locale du
         # serveur et decalerait l'epoch de deux heures en ete.
@@ -369,6 +419,12 @@ def build_state(db, now, now_utc=None, peaks=None):
         # s'en sert pour ne pas crier << perime >> sur une edition close : en
         # `past`, `t` est null par construction et l'age n'a plus de sens.
         "m": mode,
+        # Distingue arret volontaire (`inactif`) et collecteur en panne
+        # (`sans_releve`) -- confondre les deux perdrait l'information la
+        # plus utile. `None` en mode live.
+        "mr": motif,
+        # Les presents, jamais hors mode live (voir plus haut).
+        "p": presents,
         "e": entrees,
         "er": debit,
         "pk": pic,
@@ -379,3 +435,5 @@ def build_state(db, now, now_utc=None, peaks=None):
         "wl": wbgt_level(wbgt, tuple(config["wbgt_levels"])),
         "al": select_alerts(actives, config["alerts"]),
     }
+    payload.update(blocs)
+    return payload

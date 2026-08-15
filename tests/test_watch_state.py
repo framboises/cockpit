@@ -410,6 +410,78 @@ class TestBuildState:
         assert len(json.dumps(st).encode("utf-8")) < 2048
 
 
+class TestPresentsEtMotif:
+    def test_presents_en_direct(self):
+        db = FakeDb(
+            data_access=[
+                {"_id": "___GLOBAL___", "compteur_principal_id": "628",
+                 "live_controle_actif": True},
+                dict(_counter(48213, 0), current="47320"),
+            ],
+            evenement=[{"nom": "24H MOTOS", "short": "24HM"}],
+        )
+        st = watch_state.build_state(db, NOW, now_utc=NOW)
+        assert st["p"] == 47320
+        assert st["mr"] is None
+
+    def test_presents_jamais_affiches_hors_direct(self):
+        # Un chiffre de presents perime est indiscernable d'un chiffre juste,
+        # et c'est precisement lui qu'on regarde pour decider.
+        db = FakeDb(data_access=[
+            {"_id": "___GLOBAL___", "compteur_principal_id": "628",
+             "live_controle_actif": False},
+            dict(_counter(48213, 1), current="47320"),
+        ])
+        st = watch_state.build_state(db, NOW, now_utc=NOW)
+        assert st["p"] is None
+
+    def test_motif_inactif(self):
+        db = FakeDb(data_access=[
+            {"_id": "___GLOBAL___", "compteur_principal_id": "628",
+             "live_controle_actif": False},
+            _counter(48213, 1),
+        ])
+        st = watch_state.build_state(db, NOW, now_utc=NOW)
+        assert st["mr"] == "inactif"
+
+    def test_motif_sans_releve_est_un_incident(self):
+        # Drapeau leve mais plus aucun releve : le collecteur est plante alors
+        # qu'on le croit en marche. Ce n'est PAS le meme evenement qu'un arret
+        # volontaire, et la montre doit pouvoir les distinguer.
+        db = FakeDb(data_access=[
+            {"_id": "___GLOBAL___", "compteur_principal_id": "628",
+             "live_controle_actif": True},
+            _counter(8, minutes_ago=113 * 24 * 60),
+        ])
+        st = watch_state.build_state(db, NOW,
+                                     now_utc=NOW.replace(tzinfo=timezone.utc))
+        assert st["mr"] == "sans_releve"
+
+    def test_repli_sur_entrees_moins_sorties(self):
+        db = FakeDb(
+            data_access=[
+                {"_id": "___GLOBAL___", "compteur_principal_id": "628",
+                 "live_controle_actif": True},
+                dict(_counter(48213, 0), exits="1000"),
+            ],
+        )
+        st = watch_state.build_state(db, NOW, now_utc=NOW)
+        assert st["p"] == 47213
+
+    def test_mode_live_sans_motif(self):
+        # `mr` ne vaut jamais autre chose que None en direct : ce n'est pas
+        # seulement l'absence des DEUX motifs, c'est la garantie que la
+        # montre ne lira jamais un motif perime a cote d'un `m: live`.
+        db = FakeDb(data_access=[
+            {"_id": "___GLOBAL___", "compteur_principal_id": "628",
+             "live_controle_actif": True},
+            _counter(48213, 0),
+        ])
+        st = watch_state.build_state(db, NOW, now_utc=NOW)
+        assert st["m"] == "live"
+        assert st["mr"] is None
+
+
 class FakePeaks:
     """Doublure de watch_peaks. C'est ce que l'injection achete : build_state
     se teste sans base d'archives ni date de course."""
@@ -428,6 +500,47 @@ class FakePeaks:
 
 
 PIC_TS = datetime(2026, 4, 18, 13, 5, 9, tzinfo=timezone.utc)
+
+
+class FakePages:
+    """Doublure de watch_pages. Les formes de retour reprennent EXACTEMENT
+    celles des quatre vrais constructeurs (watch_pages.py) : mc rend
+    {t, s, sc, tq, f, o}, tr rend {t, vd, ac, z, r}, me rend
+    {t, tc, v, rf, pl, pm, cn, cl, vg}, st rend {t, pj, ph, n1}. Une forme
+    differente ne detecterait pas un mauvais cablage cote build_state.
+    """
+
+    def __init__(self, mc=None, tr=None, me=None, st=None, raise_on=None):
+        self._mc = mc
+        self._tr = tr
+        self._me = me
+        self._st = st
+        self._raise_on = raise_on or set()
+        self.appels = []
+
+    def build_main_courante(self, db, event, year, now_utc=None):
+        self.appels.append("mc")
+        if "mc" in self._raise_on:
+            raise RuntimeError("main courante en panne")
+        return self._mc
+
+    def build_trafic(self, db, now_utc=None):
+        self.appels.append("tr")
+        if "tr" in self._raise_on:
+            raise RuntimeError("trafic en panne")
+        return self._tr
+
+    def build_meteo(self, db, now):
+        self.appels.append("me")
+        if "me" in self._raise_on:
+            raise RuntimeError("meteo en panne")
+        return self._me
+
+    def build_frequentation(self, db, event, year, now, location_id=None):
+        self.appels.append("st")
+        if "st" in self._raise_on:
+            raise RuntimeError("frequentation en panne")
+        return self._st
 
 
 class TestBuildStatePics:
@@ -528,6 +641,116 @@ class TestBuildStatePics:
         st = watch_state.build_state(db, NOW, now_utc=NOW, peaks=peaks)
         assert st["n"] == "LMC 26"
         assert st["pk"] == 52409
+
+    def test_pages_non_injecte_les_quatre_blocs_sont_none(self):
+        # `pages=None` doit laisser watch_state utilisable seul, comme pour
+        # `peaks` -- meme motif, meme garde.
+        st = watch_state.build_state(self._db_direct(), NOW, now_utc=NOW)
+        assert st["mc"] is None
+        assert st["tr"] is None
+        assert st["me"] is None
+        assert st["st"] is None
+
+    def test_pages_injecte_peuple_les_quatre_blocs_en_direct(self):
+        pages = FakePages(
+            mc={"t": 1, "s": [3, 12], "sc": [1, 5], "tq": [0, 2],
+                "f": [2, 8], "o": [1, 4]},
+            tr={"t": 1, "vd": 1, "ac": 2, "z": 15,
+                "r": [["Entree Houx", "i", 12, 2]]},
+            me={"t": 1, "tc": 27.4, "v": 18, "rf": 32, "pl": 45, "pm": 6.2,
+                "cn": "Suspendre les activites en exterieur", "cl": 2, "vg": 1},
+            st={"t": 1, "pj": 48213, "ph": "14h15", "n1": 46012},
+        )
+        st = watch_state.build_state(self._db_direct(), NOW, now_utc=NOW,
+                                     pages=pages)
+        assert st["mc"] == pages._mc
+        assert st["tr"] == pages._tr
+        assert st["me"] == pages._me
+        assert st["st"] == pages._st
+        assert set(pages.appels) == {"mc", "tr", "me", "st"}
+
+    def test_mode_past_ne_construit_ni_mc_ni_st(self):
+        # Quatre lectures Mongo economisees a chaque cycle, 350 jours par an.
+        # Trafic et meteo, eux, restent vivants toute l'annee : Waze et la
+        # meteo tournent hors evenement.
+        pages = FakePages(
+            tr={"t": 1, "vd": 0, "ac": 0, "z": 0, "r": []},
+            me={"t": 1, "tc": 22.0, "v": 10, "rf": 15, "pl": None,
+                "pm": None, "cn": None, "cl": 0, "vg": 0},
+        )
+        st = watch_state.build_state(self._db_hors_evenement(), NOW,
+                                     now_utc=NOW, pages=pages)
+        assert st["m"] == "past"
+        assert st["mc"] is None
+        assert st["st"] is None
+        assert "mc" not in pages.appels
+        assert "st" not in pages.appels
+        assert "tr" in pages.appels
+        assert "me" in pages.appels
+
+    def test_source_en_panne_ne_prive_pas_les_autres_blocs(self):
+        # Chaque bloc dans son propre try : le serveur doit rester capable
+        # de donner le WBGT quand Waze -- ou ici, la main courante -- ne
+        # repond plus.
+        pages = FakePages(
+            tr={"t": 1, "vd": 0, "ac": 0, "z": 0, "r": []},
+            me={"t": 1, "tc": 22.0, "v": 10, "rf": 15, "pl": None,
+                "pm": None, "cn": None, "cl": 0, "vg": 0},
+            raise_on={"mc"},
+        )
+        st = watch_state.build_state(self._db_direct(), NOW, now_utc=NOW,
+                                     pages=pages)
+        assert st["mc"] is None
+        assert st["tr"] == pages._tr
+        assert st["me"] == pages._me
+
+    def test_taille_du_payload_complet_sous_deux_ko(self):
+        # Verrouille le budget de 2 Ko sur un payload proche du pire cas
+        # plausible : cinq alertes, quatre terrains, une consigne meteo
+        # longue -- pas seulement un cas nominal qui laisserait passer une
+        # regression de taille.
+        import json
+
+        db = FakeDb(
+            data_access=[
+                {"_id": "___GLOBAL___", "compteur_principal_id": "628",
+                 "live_controle_actif": True},
+                dict(_counter(48213, 0), current="47320"),
+            ],
+            watch_config=[{
+                "_id": "watch", "event_mode": "auto",
+                "alerts": [{"slug": "s%d" % i, "level": 3,
+                            "label": "Alerte operationnelle longue %d" % i}
+                           for i in range(5)],
+            }],
+            cockpit_active_alerts=[
+                {"definition_slug": "s%d" % i, "event": "24H MOTOS",
+                 "year": "2026", "title": "t", "expiresAt": NOW + timedelta(hours=1)}
+                for i in range(5)
+            ],
+            evenement=[{"nom": "24H MOTOS", "short": "24HM"}],
+            meteo_previsions=[{
+                "Date": "2026-08-14",
+                "Heures": [{"Heure": "12:00", "Temperature (C)": 30.0,
+                            "Humidite (%)": 60}],
+            }],
+        )
+        pages = FakePages(
+            mc={"t": 1, "s": [12, 34], "sc": [5, 21], "tq": [3, 9],
+                "f": [7, 18], "o": [2, 11]},
+            tr={"t": 1, "vd": 2, "ac": 3, "z": 27,
+                "r": [["Entree Houx paddock", "i", 24, 3],
+                      ["Sortie Musee circuit", "o", 18, 2],
+                      ["Rond point Maison Blanche", "i", 15, 2],
+                      ["Parking Karting exterieur", "-", 6, 1]]},
+            me={"t": 1, "tc": 31.2, "v": 22, "rf": 38, "pl": 45, "pm": 8.4,
+                "cn": "Suspendre toute activite exterieure non protegee",
+                "cl": 3, "vg": 2},
+            st={"t": 1, "pj": 142622, "ph": "16h15", "n1": 138600},
+        )
+        st = watch_state.build_state(db, NOW, now_utc=NOW, pages=pages)
+        brut = json.dumps(st, ensure_ascii=False).encode("utf-8")
+        assert len(brut) < 2048
 
 
 class TestReadWeatherNow:

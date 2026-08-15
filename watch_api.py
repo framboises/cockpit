@@ -13,6 +13,7 @@ from functools import wraps
 
 from flask import Blueprint, jsonify, request
 
+import watch_pages
 import watch_peaks
 import watch_state
 
@@ -368,7 +369,7 @@ def state():
 
     payload = watch_state.build_state(
         _db(), datetime.now(), datetime.now(timezone.utc),
-        peaks=watch_peaks)
+        peaks=watch_peaks, pages=watch_pages)
     _cache["payload"] = payload
     _cache["at"] = maintenant
     return jsonify(payload)
