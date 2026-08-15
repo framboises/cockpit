@@ -65,6 +65,49 @@ class TestAgregerTerrains:
         assert out[0]["terrain"] == "Bouche"
 
 
+class TestSeveriteAxe:
+    def test_axe_unique_ratio_1_5_retard_500s_donne_severite_1(self):
+        # Le cas divergent trouve a la tache 14 : ratio 1,5, 500s de retard.
+        # classify_congestion (ratio seul) rendait severite 2 -> vd montre
+        # VIGILANCE alors que le mur (classify() JS) rend severite 1 et reste
+        # FLUIDE (le verdict ne monte qu'a partir de severite >= 2). Ce test
+        # verifie que severite_axe rend bien la valeur du mur, 1, pas 2.
+        axe = {"currentTime": 1500, "historicTime": 1000, "deltaSeconds": 500}
+        assert trafic_etat.severite_axe(axe) == 1
+
+    def test_troncon_court_ratio_eleve_retard_faible_reste_fluide(self):
+        # LE cas que le double verrou existe pour ecarter : 15s -> 45s est un
+        # ratio x3 mais ne coute que 30s. Sans le plancher de retard (delay
+        # >= 60s pour sortir de "Fluide"), ce troncon negligeable resterait
+        # severite 0 -- alors que classify_congestion (ratio seul, l'ancien
+        # calcul de la montre) l'aurait classe "bouchon", severite 4.
+        axe = {"currentTime": 45, "historicTime": 15, "deltaSeconds": 30}
+        assert trafic_etat.severite_axe(axe) == 0
+        assert trafic_etat.classify_congestion(45, 15) == ("bouchon", 4)
+
+    def test_vrai_bouchon_ratio_3_retard_600s_donne_severite_4(self):
+        axe = {"currentTime": 1800, "historicTime": 600, "deltaSeconds": 1200}
+        assert trafic_etat.severite_axe(axe) == 4
+
+    def test_historic_time_sous_le_seuil_est_sans_reference(self):
+        # hist <= 5 : aucune reference exploitable, severite 0 quel que soit
+        # le courant -- meme regle que classify() cote mur.
+        assert trafic_etat.severite_axe(
+            {"currentTime": 200, "historicTime": 5, "deltaSeconds": 195}) == 0
+        assert trafic_etat.severite_axe(
+            {"currentTime": 200, "historicTime": 0, "deltaSeconds": None}) == 0
+
+    def test_delta_seconds_absent_est_recalcule(self):
+        # Fidele au mur : deltaSeconds est relu s'il existe, sinon
+        # max(0, cur - hist). Meme resultat que le meme axe avec
+        # deltaSeconds explicite.
+        avec = trafic_etat.severite_axe(
+            {"currentTime": 1800, "historicTime": 600, "deltaSeconds": 1200})
+        sans = trafic_etat.severite_axe(
+            {"currentTime": 1800, "historicTime": 600})
+        assert avec == sans == 4
+
+
 class TestCompterAlertes:
     def test_ne_compte_que_ce_qui_est_en_zone(self):
         alertes = [

@@ -875,31 +875,63 @@ consomment tous les deux :
   plus grave dans la liste déjà triée par gravité que rend `etat_mur`, et
   réduire `couleur_jour` sur l'échelle 0-3 du mur via
   `meteo_etat.ORDRE_COULEURS`.
-- **`trafic_etat.py`** — situation différente et **moins garantie** : c'est
-  un **port**, pas un partage. Le calcul de sévérité par axe et le verdict
-  global du mur vivent en JavaScript, inline dans `circulation.html`
-  (`classify()` ligne ~587, `computeVerdict()` ligne ~728) — aucun moyen de
-  les faire appeler par le backend Python. `trafic_etat.verdict_global()`
-  reproduit fidèlement la structure de décision de `computeVerdict()`
-  (accident en zone ou sévérité ≥ 4 → CRITIQUE ; == 3 → TENSION ; == 2 →
-  VIGILANCE ; sinon FLUIDE), et `parse_route_name`/`classify_congestion` sont
-  *déplacés* depuis `traffic.py` (mêmes fonctions, nouvel emplacement — pas
-  une réécriture). **Mais la sévérité par axe qui alimente ce verdict n'est
-  PAS calculée pareil des deux côtés** : `classify_congestion` (Python,
-  utilisé par `agreger_terrains`) classe sur un ratio courant/historique pur
-  (paliers 0,9/1,2/1,6/2,5) après avoir sommé les temps de TOUS les axes
-  partageant un `(terrain, direction)` ; `classify()` (JS, mur) exige un
-  double verrou ratio **et** retard absolu (paliers 1,35/1,6/2,2/3,0, chacun
-  avec un plancher en secondes) sur **chaque axe individuel**, et inclut les
-  axes tagués `#P` (parkings) que `agreger_terrains` exclut de son
-  agrégation (elle ne retient que les noms préfixés `##`, `#I`, `#O`).
-  Vérifié à la tâche 14 par un cas synthétique : un axe unique à ratio 1,5
-  avec 500 s de retard classe sévérité 2 côté Python (→ vd montre =
-  VIGILANCE) contre sévérité 1 côté JS (→ vd mur = FLUIDE) — **une
-  divergence réelle est possible**, même si elle ne s'est pas manifestée sur
-  les données réelles comparées ce jour-là (calmes des deux côtés). C'est un
-  risque connu, documenté depuis la conception de ce lot, et l'unification
-  (faire consommer le verdict serveur par le mur) reste hors périmètre.
+- **`trafic_etat.py`** — situation différente : c'est un **port**, pas un
+  partage. Le calcul de sévérité par axe et le verdict global du mur vivent
+  en JavaScript, inline dans `circulation.html` (`classify()` ligne ~587,
+  `computeVerdict()` ligne ~728) — aucun moyen de les faire appeler par le
+  backend Python. `trafic_etat.verdict_global()` reproduit fidèlement la
+  structure de décision de `computeVerdict()` (accident en zone ou sévérité
+  ≥ 4 → CRITIQUE ; == 3 → TENSION ; == 2 → VIGILANCE ; sinon FLUIDE), et
+  `parse_route_name`/`classify_congestion` sont *déplacés* depuis
+  `traffic.py` (mêmes fonctions, nouvel emplacement — pas une réécriture).
+
+  **La tâche 14 a trouvé et corrigé une divergence réelle sur la sévérité
+  par axe qui alimente ce verdict.** `classify_congestion` (Python, utilisé
+  par `/trafic/waiting_data_structured` et les autres panneaux du mur) ne
+  regarde que le ratio courant/historique (paliers 0,9/1,2/1,6/2,5).
+  `classify()` (JS, le panneau « Axes » de `circulation.html`) exige un
+  **double verrou** : ratio élevé **ET** perte de temps absolue en secondes
+  (paliers 1,35/1,6/2,2/3,0, chacun avec un plancher de retard). Son
+  commentaire d'origine dit pourquoi (`circulation.html:594-596`) : *« un
+  tronçon court (ex. 20s → 80s) a un gros ratio mais ne coûte qu'une minute :
+  ce n'est pas un bouchon »* — sans ce plancher, un tronçon négligeable
+  remonte en fausse alerte, précisément ce que le double verrou existe pour
+  écarter. `trafic_etat.severite_axe()` porte maintenant ce double verrou à
+  l'identique, et `watch_pages.build_trafic()` l'utilise pour recalculer la
+  sévérité de chaque terrain (`terrain["severity"] =
+  trafic_etat.severite_axe(terrain)`) **avant** de la passer à
+  `verdict_global()` — donc pour la sévérité affichée par terrain ET pour
+  le verdict global. Vérifié : le cas trouvé à la tâche 14 (axe unique,
+  ratio 1,5, retard 500 s) donne désormais sévérité 1 des deux côtés (vd
+  FLUIDE, plus VIGILANCE côté montre) ; le cas du tronçon court (15s → 45s,
+  ratio ×3, retard 30 s) donne sévérité 0 des deux côtés, alors que
+  `classify_congestion` l'aurait classé « bouchon », sévérité 4.
+
+  ⚠️ **`classify_congestion` n'a pas été touchée** — elle continue
+  d'alimenter `/trafic/waiting_data_structured`, dont la tâche 1 a prouvé le
+  payload identique à l'octet près ; la modifier aurait cassé cette garantie
+  et changé l'affichage d'autres panneaux du cockpit. Les deux fonctions
+  coexistent désormais : `classify_congestion` pour les panneaux existants,
+  `severite_axe` pour la montre.
+
+  ⚠️ **Un écart structurel indépendant de la formule subsiste, non corrigé
+  à cette tâche** : `agreger_terrains()` (montre) n'agrège que les noms
+  préfixés `##`, `#I`, `#O`, et **exclut les axes `#P` (parkings)** ; le
+  panneau « Axes » du mur les inclut (`category === "pkg_aa"` couvre aussi
+  le tag `P`). Un axe `#P` fortement bouchonné n'est donc **jamais vu** par
+  la montre, quel que soit son niveau de sévérité — vérifié : un axe `#P` à
+  ratio ×6 avec 2500 s de retard classerait sévérité 4 côté mur et reste
+  invisible côté montre. La montre agrège aussi par `(terrain, direction)`
+  avant de classer, quand le mur classe chaque axe individuellement et
+  prend le pire — les deux stratégies ne divergent pas systématiquement
+  (testé : un terrain à deux axes de sévérités très différentes donne le
+  même résultat des deux côtés dans le cas testé, parce que la somme
+  atteint par coïncidence le même palier que l'axe le pire), mais rien ne
+  garantit que ça tienne en général. Corriger ces deux points demanderait
+  de faire lire à la montre les routes individuelles (comme
+  `/trafic/all_routes`) plutôt que l'agrégat par terrain — hors périmètre
+  de cette tâche, qui portait sur la formule de sévérité, pas sur le
+  périmètre des axes couverts.
 
 ### Le champ `mr` et la règle du bloc absent
 

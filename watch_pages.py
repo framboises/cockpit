@@ -88,13 +88,24 @@ def build_main_courante(db, event, year, now_utc=None):
 
 
 def build_trafic(db, now_utc=None):
-    """Verdict global, comptes geofences et terrains les plus charges."""
+    """Verdict global, comptes geofences et terrains les plus charges.
+
+    La severite de chaque terrain est RECALCULEE par trafic_etat.severite_axe
+    (double verrou du mur), pas lue depuis agreger_terrains()["severity"] --
+    celle-ci vient de classify_congestion (ratio seul), qui n'est pas la
+    regle que le mur applique a son panneau << Axes >>. Sans ce recalcul, la
+    montre pouvait annoncer une degradation qu'aucun operateur ne voyait sur
+    le mur, precisement la fausse alerte que le double verrou existe pour
+    ecarter (cf. severite_axe).
+    """
     routes = trafic_etat.lire_routes(db)
     alertes = trafic_etat.lire_alertes(db)
     if not routes and not alertes:
         return None
 
     terrains = trafic_etat.agreger_terrains(routes)
+    for terrain in terrains:
+        terrain["severity"] = trafic_etat.severite_axe(terrain)
     comptes = trafic_etat.compter_alertes(alertes)
     pire = max([t["severity"] for t in terrains], default=0)
 

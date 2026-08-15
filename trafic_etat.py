@@ -76,6 +76,50 @@ def classify_congestion(current_time, historic_time):
     return ("bouchon", 4)
 
 
+def severite_axe(axe):
+    """Severite 0-4 d'un axe, double verrou ratio ET perte de temps absolue.
+
+    Port fidele de classify() -- circulation.html:587-602 (le mur). NE PAS
+    FUSIONNER avec classify_congestion, qui n'evalue que le ratio et alimente
+    /trafic/waiting_data_structured : la tache 1 a prouve ce payload
+    identique a l'octet pres, une fusion le romprait et changerait
+    l'affichage d'autres panneaux du cockpit. Les deux coexistent :
+    classify_congestion pour les panneaux existants, severite_axe pour la
+    montre -- qui doit reproduire le panneau Axes du mur, pas inventer un
+    troisieme verdict.
+
+    Le double verrou existe pour ecarter les troncons courts a gros ratio
+    mais perte de temps negligeable. Commentaire d'origine, circulation.html
+    ligne 594-596 : un troncon court (ex. 20s -> 80s) a un gros ratio mais ne
+    coute qu'une minute -- ce n'est pas un bouchon, d'ou le delai plancher.
+
+    `axe` porte les cles produites par agreger_terrains (ou tout dict
+    partageant les memes noms de champs) : currentTime, historicTime,
+    deltaSeconds. Fidele au mur, `deltaSeconds` est relu s'il existe, sinon
+    recalcule en max(0, cur - hist) -- en pratique agreger_terrains ne
+    produit `deltaSeconds: None` que lorsque historicTime vaut 0, deja
+    intercepte par le repli hist <= 5 ci-dessous, mais le repli reste pour
+    ne jamais planter sur un appelant qui omettrait le champ.
+    """
+    hist = axe.get("historicTime") or 0
+    if hist <= 5:
+        return 0  # pas de reference exploitable, cf. classify() JS
+    cur = axe.get("currentTime") or 0
+    ratio = cur / float(hist)
+    delay = axe.get("deltaSeconds")
+    if delay is None:
+        delay = max(0, cur - hist)
+    if ratio >= 3.0 and delay >= 600:
+        return 4
+    if ratio >= 2.2 and delay >= 300:
+        return 3
+    if ratio >= 1.6 and delay >= 120:
+        return 2
+    if ratio >= 1.35 and delay >= 60:
+        return 1
+    return 0
+
+
 def agreger_terrains(routes):
     """Agrege les itineraires surveilles par (terrain, direction).
 

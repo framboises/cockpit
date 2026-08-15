@@ -86,6 +86,25 @@ class TestTrafic:
     def test_sans_donnee_waze_rend_none(self):
         assert watch_pages.build_trafic(FakeDb(), NOW) is None
 
+    def test_severite_recalculee_au_double_verrou_pas_au_ratio_seul(self):
+        # Cas divergent trouve a la tache 14 : un axe unique, ratio 1,5,
+        # 500s de retard. L'ancien calcul (classify_congestion, ratio seul)
+        # aurait rendu severite 2 -> vd VIGILANCE, alors que le mur
+        # (double verrou) reste severite 1 -> vd FLUIDE. build_trafic doit
+        # desormais rendre le verdict du mur, pas celui du ratio seul.
+        routes = [{"name": "#I# Ouest", "time": 1500, "historicTime": 1000}]
+        bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
+        assert bloc["r"][0][3] == 1  # severite affichee, pas 2
+        assert bloc["vd"] == 0       # FLUIDE, pas VIGILANCE
+
+    def test_troncon_court_ne_declenche_pas_de_severite(self):
+        # 15s -> 45s : ratio x3 mais 30s de retard seulement, sous le
+        # plancher du mur. classify_congestion l'aurait classe "bouchon".
+        routes = [{"name": "#I# Court", "time": 45, "historicTime": 15}]
+        bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
+        assert bloc["r"][0][3] == 0
+        assert bloc["vd"] == 0
+
 
 class TestMeteo:
     def test_condense_l_etat_du_mur(self, monkeypatch):
