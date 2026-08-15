@@ -4,6 +4,10 @@ Affiche au poignet le compteur d'entrées, la contrainte thermique (WBGT) et les
 alertes actives du PC Organisation. Vibre sur franchissement de seuil à la
 hausse, jamais en boucle.
 
+Six pages en cycle (HAUT/BAS) : tableau de bord, liste des alertes, main
+courante PC org, trafic, météo, fréquentation. Un menu de saut (MENU) permet
+d'atterrir directement sur n'importe laquelle, plus « Pics par édition ».
+
 Distribuée en **sideload** uniquement (pas de publication sur le store Connect
 IQ) : c'est le directeur des opérations adjoint qui porte la montre, pas le
 grand public.
@@ -30,25 +34,78 @@ Trois points d'entrée (`CockpitApp.mc`) partagent un cache commun :
 | `Api.mc` | requêtes réseau vers `/api/v1/watch/state` et `/api/v1/watch/editions`, conversion des payloads, garde anti-doublon bornée à 30 s |
 | `Alerting.mc` | transition de niveau + vibration, jamais en boucle |
 | `Mock.mc` | cinq scénarios simulés pour travailler sans backend, plus une liste d'éditions |
-| `CockpitView.mc` / `CockpitDelegate.mc` | console (device app) |
-| `EditionsView.mc` | consultation des pics par édition, ouverte par MENU |
+| `Pages.mc` | accesseurs de lecture des quatre blocs de pages (`mc`/`tr`/`me`/`st`) dans le cache Storage dédié, plus `verdictMot` (mots du verdict trafic partagés avec `CockpitView.drawMain`) |
+| `CockpitView.mc` / `CockpitDelegate.mc` | console (device app) : tableau de bord (page 0), liste des alertes (page 1), et aiguillage inline (`pageView`) vers les quatre vues de pages annexes (2 à 5) |
+| `MainCouranteView.mc` | page « Main courante » : compteurs PC org en cours/terminées par catégorie |
+| `TraficView.mc` | page « Trafic » : verdict global, comptes d'alertes géofencées, terrains les plus chargés |
+| `MeteoView.mc` | page « Météo » : température, vent, rafale, pluie à venir, consigne la plus grave du mur |
+| `FrequentationView.mc` | page « Fréquentation » : pic de présents du jour et son heure, comparé au N-1 au même décalage à la course |
+| `EditionsView.mc` | consultation des pics par édition, atteinte par le menu de saut (MENU) |
+| `SautMenu.mc` | menu de saut : les six pages du cycle plus « Pics par édition » |
 | `GlanceView.mc` | glance |
 | `BgService.mc` | service de fond (`CockpitService extends ServiceDelegate`) |
 | `CockpitApp.mc` | les trois points d'entrée : device app, glance, background |
 
-51 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting` et
-les chemins de dessin des deux vues (`DessinTest.mc` : le rendu ne doit lever
-dans aucun etat atteignable, y compris un mode `past` sans pic).
-Le backend (`watch_api.py`, `watch_state.py`, `watch_peaks.py`) est couvert par
-111 tests pytest.
+⚠️ **Les quatre vues de pages annexes sont dessinées EN LIGNE dans
+`CockpitView.onUpdate`** (leur propre `onUpdate(dc)` est appelé directement),
+jamais poussées sur la pile de vues Connect IQ : HAUT/BAS reste un simple
+changement d'entier (`mPage`), sans empiler/dépiler. C'est une contrainte de
+conception, pas un oubli — elles n'ont donc **pas** de delegate propre (les
+classes `XxxDelegate` qui existaient dans chaque fichier de vue étaient du
+code mort, jamais câblé, et ont été supprimées à la tâche 14). Seules
+`EditionsView` et `SautMenu`, réellement poussées via `WatchUi.pushView`,
+gardent leur delegate (`EditionsDelegate`, `SautMenuDelegate`).
+
+100 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
+`Pages`, la navigation (`CockpitView.nextPage`/`previousPage`/`setPage`/
+`pageView`) et les chemins de dessin des six vues (`DessinTest.mc` : le rendu
+ne doit lever dans aucun état atteignable, y compris un mode `past` sans pic
+ou un bloc de page absent).
+Le backend est couvert par 197 tests pytest, dont `watch_api.py`,
+`watch_state.py`, `watch_peaks.py`, `watch_pages.py`, `trafic_etat.py` et
+`meteo_etat.py`.
 
 ## Navigation
 
+Six pages en cycle, dans l'ordre d'urgence opérationnelle :
+
+| # | Page | Contenu |
+|---|------|---------|
+| 0 | Tableau de bord | présents/pic, WBGT, voyants, alertes (deux premières lignes) |
+| 1 | Alertes | liste complète des alertes actives |
+| 2 | Main courante | compteurs PC org en cours/terminées par catégorie |
+| 3 | Trafic | verdict global, comptes géofencés, terrains les plus chargés |
+| 4 | Météo | température, vent, rafale, pluie à venir, consigne la plus grave |
+| 5 | Fréquentation | pic de présents du jour, son heure, comparaison N-1 |
+
 | Geste | Effet |
 |-------|-------|
-| HAUT / BAS | page suivante (console, puis liste des alertes) |
+| HAUT | page suivante (`nextPage`, boucle 0→5→0) |
+| BAS | page précédente (`previousPage`, boucle 0→5 en arrière) |
 | ENTER | rafraîchissement immédiat |
-| **MENU** | **pics par édition** — HAUT/BAS fait défiler, BACK revient |
+| **MENU** | **menu de saut** — les six pages ci-dessus, dans le même ordre, plus « Pics par édition » ; choisir une page l'affiche directement (`setPage`), sans passer par le cycle |
+
+⚠️ Avec deux pages seulement (état du projet avant la tâche 13), avancer et
+reculer revenaient au même — `onPreviousPage` appelait `nextPage()` sans que
+ça se voie. Avec six pages c'est devenu un vrai défaut (BAS faisait avancer de
+cinq pages) : corrigé à la tâche 14, avec un test dédié qui vérifie qu'un
+retour arrière depuis la page 0 atterrit bien sur la page 5.
+
+### Motif du mode `past` (page 0 et Main courante)
+
+Le pied de la page 0 ne se contente pas de dire « hors événement » : il nomme
+la cause, cf. `watch_state.py` et `State.motif`.
+
+| `mr` | Sens | Affiché |
+|------|------|---------|
+| `inactif` | Live-contrôle désactivé côté cockpit — l'état normal 350 jours par an | « live inactif » (gris) |
+| `sans_releve` | Le drapeau dit toujours actif, mais plus aucun relevé n'arrive — le collecteur est en panne | « aucun releve » (rouge) |
+
+Confondre les deux perdrait l'information la plus utile : celle qui dit si
+une intervention est nécessaire. Aucune des deux garde seule ne suffit — le
+drapeau attrape l'arrêt propre en une seconde (la seule fraîcheur mettrait six
+heures à s'en apercevoir), la fraîcheur attrape le collecteur planté (où le
+drapeau mentirait indéfiniment).
 
 ## Les deux modes
 
@@ -164,13 +221,15 @@ PASSED (passed=29, failed=0, errors=0)
 Un script CI qui se fierait au code de sortie casserait silencieusement dès
 le premier lancement.
 
-Tests backend :
+Tests backend, depuis la racine du dépôt Cockpit (pas ce dossier) :
 
 ```bash
-python -m pytest tests/test_watch_state.py tests/test_watch_api.py -q
+python3 -m pytest tests/ -q
 ```
 
-`63 passed`.
+`197 passed` — `test_watch_state.py`, `test_watch_api.py`, `test_watch_peaks.py`,
+`test_watch_pages.py`, `test_trafic_etat.py`, `test_meteo_etat.py`,
+`test_conftest.py`.
 
 ### Sideload
 
@@ -290,9 +349,9 @@ Mémoire, mesurée avec `monkeyc --build-stats 0` (fiable partout ; l'interface
 **View Memory** du simulateur est bloquée dans certains environnements) :
 
 ```
-Glance      4920 octets sur 65536   ( 7,5 %)
-Background  4549 octets sur 65536   ( 6,9 %)
-Foreground  7534 octets sur 786432  ( 1,0 %)
+Glance      11 344 octets sur 65 536   (17,3 %)   -- donnees 5886 + code 5458
+Background  10 835 octets sur 65 536   (16,5 %)   -- donnees 5804 + code 5031
+Foreground  24 365 octets sur 786 432  ( 3,1 %)   -- donnees 8719 + code 15 646
 ```
 
 ```bash
@@ -302,12 +361,33 @@ Foreground  7534 octets sur 786432  ( 1,0 %)
 ```
 
 Ces chiffres sont ceux du **build de release** (`-r`), celui qu'on charge sur
-la montre. Un build de debug donne des totaux légèrement supérieurs (environ
-+130 octets sur la glance et sur le service de fond, +180 sur la device app),
-les blocs annotés `(:debug)` y étant conservés. Comparer deux mesures faites
-dans des modes différents donne un écart qui n'a rien à voir avec le code.
+la montre, mesurés après l'ajout des quatre pages opérationnelles (tâches
+9-13). Un build de debug donne des totaux légèrement supérieurs, les blocs
+annotés `(:debug)` y étant conservés. Comparer deux mesures faites dans des
+modes différents donne un écart qui n'a rien à voir avec le code.
 
 Confortablement sous les trois budgets.
+
+⚠️ **`monkeyc --build-stats` ne mesure pas ce qui est réellement compilé par
+espace mémoire.** Vérifié par expérience contrôlée à la tâche 8 : une
+fonction morte, jamais appelée, sans aucune annotation `(:glance)` ni
+`(:background)`, gonfle la glance ET le fond du même montant que si elle
+était réellement utilisée par ces deux espaces. Cette métrique ne dit donc
+rien sur ce qui s'exécute réellement dans la glance ou en tâche de fond — elle
+mesure la taille du binaire produit, pas son partitionnement logique.
+
+**La vraie garantie que le calcul des quatre pages (`Pages.mc` + les cinq
+vues annexes) ne s'exécute jamais en glance ni en tâche de fond est
+STRUCTURELLE, pas métrique** : aucun de ces fichiers ne porte d'annotation
+`(:glance)` ou `(:background)`, et les blocs qu'ils lisent vivent dans une clé
+`Application.Storage` séparée (`Cache.KEY_PAGES`, distincte de `Cache.KEY`)
+que ni `GlanceView.mc` ni `BgService.mc` ne lisent jamais — voir grep ci-après.
+
+```bash
+grep -rn "(:glance)\|(:background)" source/Pages.mc source/MainCouranteView.mc \
+  source/TraficView.mc source/MeteoView.mc source/FrequentationView.mc
+# aucune correspondance
+```
 
 Affichage, mesuré via `dc.getFontHeight()` sur `fenix8solar51mm` :
 

@@ -22,7 +22,7 @@ class CockpitDelegate extends WatchUi.BehaviorDelegate {
     }
 
     function onPreviousPage() {
-        mView.nextPage();
+        mView.previousPage();
         return true;
     }
 

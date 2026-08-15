@@ -841,3 +841,107 @@ Sans `ANTHROPIC_API_KEY`, le rapport se génère **sans la section** (log en war
 - **`call_claude` filtre les sections sur `section_keys`** (défaut : les neuf clés pcorg). Un nouveau contrat JSON sans ce paramètre perd toutes ses sections en silence.
 - **La catégorie d'une unité est choisie à l'import**, pas devinée du nom. Le repli par préfixe (`TRIBUNE`, `P `, `AA `, conventions 24H AUTOS) ne sert plus qu'aux rapports générés avant cette bascule et au chemin `parking_scans`. Un couple réimporté porte sa catégorie explicite, y compris pour les libellés hors convention (`BEAUSEJOUR`, `KARTING SUD`).
 - **Changer la catégorie change l'effectif recommandé**, puisqu'elle détermine la capacité (650 personnes/h vs 250 véhicules/h). Ce n'est pas un réglage d'affichage.
+
+## Montre connectée (app Connect IQ, `garmin/cockpit-watch/`)
+
+Une app Garmin (tactix 8 Solar / fēnix 8 Solar 51 mm, sideload uniquement)
+affiche au poignet du directeur des opérations adjoint six pages en cycle
+(HAUT/BAS) : tableau de bord, alertes, main courante PC org, trafic, météo,
+fréquentation ; plus un menu de saut (MENU) et une page « Pics par édition ».
+Authentification par jeton Bearer émis depuis `/watch-admin`. Documentation
+complète dans `garmin/cockpit-watch/README.md` — cette section ne couvre que
+ce qui touche le code serveur Cockpit.
+
+### `trafic_etat.py` et `meteo_etat.py` — pourquoi ils existent
+
+Ni `traffic.py` ni `meteo.py` ne sont importables par un module de calcul
+sans backend Flask : **les deux importent `app`** (pour le blueprint, la
+config, les helpers Mongo partagés), et `app.py` déclenche son cycle d'auth
+et ses collecteurs au chargement. Le payload de la montre (`watch_api.py` →
+`watch_pages.py`) doit pourtant produire le même verdict trafic et la même
+consigne météo que les murs (`circulation.html`, `meteo_mur.html`), sans
+importer ni `app`, ni relancer ses collecteurs, ni dupliquer les seuils.
+
+La solution retenue : extraire le calcul pur, sans aucun import Flask, dans
+deux modules dédiés que `traffic.py`/`meteo.py` **et** `watch_pages.py`
+consomment tous les deux :
+
+- **`meteo_etat.py`** — extraction complète : `meteo.mur()` (route qui sert
+  le mur) et `watch_pages.build_meteo()` appellent **littéralement la même
+  fonction**, `meteo_etat.etat_mur(db, now)`. Zéro risque de divergence par
+  construction — ce n'est pas une réimplémentation parallèle, c'est le même
+  code exécuté deux fois. Vérifié à la tâche 14 : `build_meteo` ne réinvente
+  aucun seuil (rafale, WBGT, orage), il ne fait que choisir la consigne la
+  plus grave dans la liste déjà triée par gravité que rend `etat_mur`, et
+  réduire `couleur_jour` sur l'échelle 0-3 du mur via
+  `meteo_etat.ORDRE_COULEURS`.
+- **`trafic_etat.py`** — situation différente et **moins garantie** : c'est
+  un **port**, pas un partage. Le calcul de sévérité par axe et le verdict
+  global du mur vivent en JavaScript, inline dans `circulation.html`
+  (`classify()` ligne ~587, `computeVerdict()` ligne ~728) — aucun moyen de
+  les faire appeler par le backend Python. `trafic_etat.verdict_global()`
+  reproduit fidèlement la structure de décision de `computeVerdict()`
+  (accident en zone ou sévérité ≥ 4 → CRITIQUE ; == 3 → TENSION ; == 2 →
+  VIGILANCE ; sinon FLUIDE), et `parse_route_name`/`classify_congestion` sont
+  *déplacés* depuis `traffic.py` (mêmes fonctions, nouvel emplacement — pas
+  une réécriture). **Mais la sévérité par axe qui alimente ce verdict n'est
+  PAS calculée pareil des deux côtés** : `classify_congestion` (Python,
+  utilisé par `agreger_terrains`) classe sur un ratio courant/historique pur
+  (paliers 0,9/1,2/1,6/2,5) après avoir sommé les temps de TOUS les axes
+  partageant un `(terrain, direction)` ; `classify()` (JS, mur) exige un
+  double verrou ratio **et** retard absolu (paliers 1,35/1,6/2,2/3,0, chacun
+  avec un plancher en secondes) sur **chaque axe individuel**, et inclut les
+  axes tagués `#P` (parkings) que `agreger_terrains` exclut de son
+  agrégation (elle ne retient que les noms préfixés `##`, `#I`, `#O`).
+  Vérifié à la tâche 14 par un cas synthétique : un axe unique à ratio 1,5
+  avec 500 s de retard classe sévérité 2 côté Python (→ vd montre =
+  VIGILANCE) contre sévérité 1 côté JS (→ vd mur = FLUIDE) — **une
+  divergence réelle est possible**, même si elle ne s'est pas manifestée sur
+  les données réelles comparées ce jour-là (calmes des deux côtés). C'est un
+  risque connu, documenté depuis la conception de ce lot, et l'unification
+  (faire consommer le verdict serveur par le mur) reste hors périmètre.
+
+### Le champ `mr` et la règle du bloc absent
+
+Deux conventions transverses aux quatre blocs de pages (`mc`/`tr`/`me`/`st`
+dans le payload, cf. `watch_pages.py`) :
+
+- **`mr`** (motif) distingue, en mode `past` (hors événement), un arrêt
+  volontaire (`inactif` — le live-contrôle est désactivé côté cockpit, l'état
+  normal 350 jours par an) d'un collecteur en panne (`sans_releve` — le
+  drapeau dit encore actif mais plus aucun relevé n'arrive). Aucune des deux
+  garde seule ne suffit : le drapeau attrape l'arrêt propre en une seconde,
+  la fraîcheur attrape le collecteur planté que le drapeau mentirait
+  indéfiniment. Les confondre sous un seul « édition terminée » perdrait
+  l'information qui dit si une intervention est nécessaire.
+- **Un bloc absent (`None`) reste `None` dans le payload**, jamais remplacé
+  par un objet à champs vides. Chaque constructeur de `watch_pages.py` ne
+  lève jamais — une source injoignable rend `None`, et l'appelant continue de
+  servir les autres pages. Côté Monkey C, chaque vue de page (`TraficView`,
+  `MeteoView`, etc.) teste explicitement ce `null` et affiche « indisponible »
+  plutôt que de tenter un accès qui ferait planter le rendu — sauf
+  `TraficView`, qui garde sa structure fixe (tirets) plutôt qu'un message,
+  pour ne pas faire sauter la mise en page entre deux relevés.
+
+### Deux pièges vérifiés sur ce lot
+
+- **`monkeyc --build-stats` ne mesure pas ce qui est compilé par espace
+  mémoire** (device app / glance / fond). Vérifié par expérience contrôlée à
+  la tâche 8 : une fonction morte, jamais appelée, sans aucune annotation
+  `(:glance)` ni `(:background)`, gonfle la glance ET le fond du même montant
+  que si elle y était réellement exécutée. Cette métrique mesure la taille du
+  binaire produit, pas son partitionnement logique. **La garantie qu'un
+  module ne s'exécute jamais en glance/fond est structurelle** (absence
+  d'annotation `(:glance)`/`(:background)` sur le fichier, et données rangées
+  dans une clé `Application.Storage` que ces deux espaces ne lisent jamais),
+  pas une lecture de `--build-stats`.
+- **Sur un cadran rond, le texte est ancré par le HAUT**, jamais par son
+  centre vertical (pas de `TEXT_JUSTIFY_VCENTER` dans ce projet) : un bloc
+  posé à `y` occupe `[y, y + hauteur police]`. Un bloc de la moitié haute de
+  l'écran est donc contraint par son **sommet** (la corde disponible se
+  resserre en montant vers le bord), un bloc de la moitié basse par sa
+  **base** (elle se resserre en descendant). Vérifier le mauvais bord donne
+  un calcul de largeur disponible qui semble juste et laisse pourtant
+  déborder le texte à l'écran réel. Ce piège s'est refermé **quatre fois**
+  sur ce projet — toujours en vérifiant le bord qui ne contraint pas le bloc
+  concerné.

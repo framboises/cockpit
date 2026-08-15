@@ -541,6 +541,22 @@ function testNextPageBoucleSurSixEtRevientAZero(logger) {
 }
 
 (:test)
+function testPreviousPageDepuisZeroArriveACinq(logger) {
+    // Symetrique de testNextPageBoucleSurSixEtRevientAZero : avec six pages,
+    // BAS doit reculer d'une page, pas avancer de cinq. Avec deux pages
+    // seulement (etat avant la tache 13), nextPage() et previousPage()
+    // etaient indiscernables -- ce test mord si onPreviousPage() reste
+    // cable sur nextPage() par erreur.
+    var vue = new CockpitView();
+    Test.assertEqual(vue.currentPage(), 0);
+    vue.previousPage();
+    Test.assertEqual(vue.currentPage(), 5);
+    vue.previousPage();
+    Test.assertEqual(vue.currentPage(), 4);
+    return true;
+}
+
+(:test)
 function testSetPagePoseLaPageDemandee(logger) {
     // Mecanisme utilise par SautMenuDelegate pour sauter directement a une
     // page choisie dans le menu, sans passer par le cycle.

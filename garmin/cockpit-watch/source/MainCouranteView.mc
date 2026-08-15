@@ -135,19 +135,3 @@ class MainCouranteView extends WatchUi.View {
         }
     }
 }
-
-
-class MainCouranteDelegate extends WatchUi.BehaviorDelegate {
-
-    hidden var mView;
-
-    function initialize(view) {
-        BehaviorDelegate.initialize();
-        mView = view;
-    }
-
-    function onBack() {
-        WatchUi.popView(WatchUi.SLIDE_DOWN);
-        return true;
-    }
-}

@@ -193,19 +193,3 @@ class TraficView extends WatchUi.View {
                     Graphics.TEXT_JUSTIFY_CENTER);
     }
 }
-
-
-class TraficDelegate extends WatchUi.BehaviorDelegate {
-
-    hidden var mView;
-
-    function initialize(view) {
-        BehaviorDelegate.initialize();
-        mView = view;
-    }
-
-    function onBack() {
-        WatchUi.popView(WatchUi.SLIDE_DOWN);
-        return true;
-    }
-}

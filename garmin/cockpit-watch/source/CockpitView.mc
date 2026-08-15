@@ -105,6 +105,14 @@ class CockpitView extends WatchUi.View {
         WatchUi.requestUpdate();
     }
 
+    // Symetrique de nextPage : + 5 plutot que - 1 pour ne jamais produire de
+    // modulo negatif (Monkey C, comme beaucoup de langages, ne garantit pas
+    // qu'un modulo d'operande negatif reste positif).
+    function previousPage() {
+        mPage = (mPage + 5) % 6;
+        WatchUi.requestUpdate();
+    }
+
     // Saut direct depuis le menu (SautMenuDelegate) : pose la page courante
     // sans passer par le cycle.
     function setPage(n) {

@@ -231,19 +231,3 @@ class MeteoView extends WatchUi.View {
         }
     }
 }
-
-
-class MeteoDelegate extends WatchUi.BehaviorDelegate {
-
-    hidden var mView;
-
-    function initialize(view) {
-        BehaviorDelegate.initialize();
-        mView = view;
-    }
-
-    function onBack() {
-        WatchUi.popView(WatchUi.SLIDE_DOWN);
-        return true;
-    }
-}
