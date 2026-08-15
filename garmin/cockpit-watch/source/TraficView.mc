@@ -161,6 +161,14 @@ class TraficView extends WatchUi.View {
         var terrains = tr["r"];
         if (terrains == null) { terrains = []; }
 
+        // Le serveur envoie jusqu'a quatre terrains (MAX_TERRAINS,
+        // watch_pages.py), mais seuls DEUX tiennent entre le bandeau et le
+        // pied sur un ecran de 280 (mesure au device -- le 3e chevauchait
+        // deja le pied, le 4e etait entierement hors ecran). Partage avec
+        // le calcul de `resteTerrains` plus bas, pour ne jamais desaccorder
+        // le nombre affiche et le nombre annonce comme masque.
+        var maxTerrains = 2;
+
         if (terrains.size() == 0) {
             // Liste vide != panne : `r` porte les quatre terrains les plus
             // charges SANS plancher de severite (watch_pages.build_trafic),
@@ -182,13 +190,8 @@ class TraficView extends WatchUi.View {
             // (cf. ajusterNom), une seule ligne pleine largeur leur laisse
             // toute la corde disponible plutot que la moitie.
             //
-            // Le serveur envoie jusqu'a quatre terrains (MAX_TERRAINS,
-            // watch_pages.py), mais seuls DEUX tiennent entre le bandeau et
-            // le pied sur un ecran de 280 (mesure au device -- le 3e
-            // chevauchait deja le pied, le 4e etait entierement hors ecran).
             // Le reste n'est pas jete : le nombre masque est ajoute a la
             // ligne de comptes plus bas ("+N axes").
-            var maxTerrains = 2;
             var nTerrains = terrains.size() > maxTerrains ? maxTerrains
                                                             : terrains.size();
             for (var i = 0; i < nTerrains; i += 1) {
@@ -223,7 +226,9 @@ class TraficView extends WatchUi.View {
         // Terrains masques par la limite d'affichage (pas les terrains
         // absents du payload -- ceux-la, watch_pages ne les envoie deja
         // plus) : ajoutes en toutes lettres, jamais tus.
-        var resteTerrains = terrains.size() - (terrains.size() > 2 ? 2 : terrains.size());
+        var resteTerrains = terrains.size() -
+                             (terrains.size() > maxTerrains ? maxTerrains
+                                                             : terrains.size());
         if (resteTerrains > 0) {
             texteComptes += "  +" + resteTerrains.toString()
                             + (resteTerrains > 1 ? " axes" : " axe");

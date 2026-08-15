@@ -692,6 +692,23 @@ function testFrequentationDeltaPctN1ZeroNeLevePas(logger) {
     return true;
 }
 
+// formatEdition/formatEditionCourt en VALEUR : la forme longue devait
+// deborder de pres de 50 px pres du pied (mesure au device, ecran
+// 280x280) -- le repli vers la forme compacte est verifie ici en tant que
+// CONTENU (les deux chaines), le fait qu'il tienne a l'ecran l'est a part
+// dans DebordementTest.mc.
+(:test)
+function testFormatEditionEtFormeCompacte(logger) {
+    var vue = new FrequentationView();
+    Test.assertEqual(vue.formatEdition(148919, 1776517509),
+                     "edition 148 919 . " + Fmt.day(1776517509) + " "
+                     + Fmt.hour(1776517509));
+    Test.assertEqual(vue.formatEditionCourt(148919, 1776517509),
+                     "ed. 148 919 " + Fmt.day(1776517509) + " "
+                     + Fmt.hour(1776517509));
+    return true;
+}
+
 // Navigation (tache 13) : six pages en cycle, aiguillage inline dans
 // CockpitView.onUpdate. Ces tests verifient une VALEUR (currentPage(), pas
 // seulement l'absence d'exception) -- la lecon de la tache 12 est que

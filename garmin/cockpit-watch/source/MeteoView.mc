@@ -63,9 +63,9 @@ class MeteoView extends WatchUi.View {
 
     // Troncature caractere par caractere jusqu'a rentrer dans `dispo` --
     // meme filet de securite que TraficView.ajusterNom, sur un texte dont la
-    // provenance differe (redige par le serveur, borne a 44 caracteres cote
-    // watch_pages.CONSIGNE_MAX) mais qui n'est pas davantage sous controle
-    // de cette vue.
+    // provenance differe (redige par le serveur, borne a CONSIGNE_MAX
+    // caracteres cote watch_pages.py) mais qui n'est pas davantage sous
+    // controle de cette vue.
     hidden function ajusterTexte(dc, texte, font, dispo) {
         if (dc.getTextWidthInPixels(texte, font) <= dispo) {
             return texte;
@@ -81,8 +81,9 @@ class MeteoView extends WatchUi.View {
     // Coupe la consigne sur au plus deux lignes, a la derniere espace qui
     // tient dans `dispo1` (la corde de la premiere ligne). La consigne
     // (<=CONSIGNE_MAX caracteres, watch_pages.py) est le texte le plus
-    // large de la page -- elle ne tient pas toujours en une ligne en
-    // FONT_SMALL (mesure a la sonde). Rend un tableau de 1 ou 2 chaines,
+    // large de la page -- elle ne tient pas toujours en une ligne, meme en
+    // FONT_XTINY (mesure au device, appelant reel : onUpdate ci-dessous).
+    // Rend un tableau de 1 ou 2 chaines,
     // jamais plus : la seconde ligne est elle-meme tronquee par
     // ajusterTexte si le reliquat ne tenait pas non plus dans sa propre
     // corde (dispo2). Publique (meme raison que FrequentationView.
@@ -119,7 +120,6 @@ class MeteoView extends WatchUi.View {
         dc.clear();
         var w = dc.getWidth();
         var hX = dc.getFontHeight(Graphics.FONT_XTINY);
-        var hS = dc.getFontHeight(Graphics.FONT_SMALL);
         var hM = dc.getFontHeight(Graphics.FONT_MEDIUM);
 
         var meteo = Pages.bloc(Cache.loadPages(), "me");

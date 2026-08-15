@@ -257,6 +257,32 @@ function testDebordementTraficPireCasNeDeborgePas(logger) {
     return true;
 }
 
+// Contenu, pas seulement geometrie : sur quatre terrains recus, seuls DEUX
+// sont affiches (budget vertical mesure) -- les deux masques ne doivent
+// jamais disparaitre en silence, ils doivent apparaitre en toutes lettres
+// dans la ligne de comptes ("+2 axes"). Un test purement geometrique ne
+// verrait jamais une regression qui remplacerait ce mecanisme par un
+// silence -- la page continuerait de tenir dans l'ecran.
+(:test)
+function testTraficMentionneLesTerrainsMasques(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
+                     "st" => null});
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    var rects = dc.rects();
+    var trouve = false;
+    for (var i = 0; i < rects.size(); i += 1) {
+        var label = rects[i]["label"];
+        if (label != null && label.find("+2 axes") != null) {
+            trouve = true;
+        }
+    }
+    Test.assert(trouve);
+    return true;
+}
+
 (:test)
 function testDebordementTraficBlocAbsentNeDeborgePas(logger) {
     Application.Storage.deleteValue(Cache.KEY_PAGES);
