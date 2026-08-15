@@ -21,6 +21,14 @@ ZONE_RADIUS_KM = 3.5
 # Seuls ces types pilotent l'affichage du mur ; les autres sont ignores.
 TYPES_COMPTES = ("ACCIDENT", "JAM", "HAZARD")
 
+# Alias Waze -> type compte, miroir de normType() cote mur
+# (circulation.html:486-491). Le mur normalise CHAQUE alerte AVANT de tester
+# son appartenance a TYPE_META ; sans le meme alias ici, tout TRAFFIC_JAM et
+# WEATHERHAZARD du geofence est compte par le mur et jete par la montre --
+# le compte d'alertes de la montre est alors structurellement inferieur a
+# celui affiche sur le mur, pour le meme flux Waze.
+ALIAS_TYPES = {"TRAFFIC_JAM": "JAM", "WEATHERHAZARD": "HAZARD"}
+
 TAG_RE = re.compile(r'^\s*(#([IOP])(\d+)?#|##)\s*(.+?)\s*$')
 SECURITY_RE = re.compile(r'^\s*\*\*\s*(.+?)\s*$')
 
@@ -248,6 +256,7 @@ def compter_alertes(alertes):
         if not alerte_en_zone(alerte):
             continue
         type_ = str((alerte or {}).get("type") or "").upper()
+        type_ = ALIAS_TYPES.get(type_, type_)
         if type_ in comptes:
             comptes[type_] += 1
     comptes["total"] = sum(comptes[t] for t in TYPES_COMPTES)
@@ -287,6 +296,22 @@ def lire_alertes(db):
 
 
 def fraicheur(db):
-    """Horodatage du dernier releve Waze, naif UTC, ou None."""
+    """Horodatage du dernier releve Waze (routes), naif UTC, ou None."""
     doc = db["waze_trafic"].find_one(sort=[("fetched_at", -1)]) or {}
+    return doc.get("fetched_at")
+
+
+def fraicheur_alertes(db):
+    """Horodatage du dernier releve Waze (alertes), naif UTC, ou None.
+
+    `ac`/`z` (watch_pages.build_trafic) viennent de waze_alerts, une
+    collection DIFFERENTE de waze_trafic -- fraicheur() ne la couvre pas.
+    Sans cette fonction, un collecteur d'alertes arrete rendait `ac`/`z` a
+    0 avec la date, parfaitement fraiche, du flux routes : une page calme
+    parce qu'elle a cesse de savoir. traffic.py refuse deja un document
+    Mongo perime pour le mur (MONGO_MAX_AGE_SECONDS) et retombe sur un
+    appel Waze direct -- la montre n'a pas ce repli, elle doit donc au
+    moins savoir dater ce qu'elle affiche.
+    """
+    doc = db["waze_alerts"].find_one(sort=[("fetched_at", -1)]) or {}
     return doc.get("fetched_at")

@@ -1,3 +1,7 @@
+from datetime import datetime
+
+from conftest import FakeDb
+
 import trafic_etat
 
 
@@ -151,3 +155,43 @@ class TestCompterAlertes:
                                  "x": trafic_etat.ZONE_CENTER_LON}}]
         comptes = trafic_etat.compter_alertes(alertes)
         assert comptes["total"] == 0
+
+    def test_traffic_jam_est_compte_comme_jam(self):
+        # Miroir de normType() cote mur (circulation.html:486-491) : le
+        # type Waze brut est TRAFFIC_JAM, pas JAM. Sans l'alias, le mur le
+        # compte (il normalise avant de tester) et la montre le jette --
+        # elle affiche alors structurellement moins d'alertes que le mur
+        # pour le meme flux.
+        alertes = [{"type": "TRAFFIC_JAM",
+                    "location": {"y": trafic_etat.ZONE_CENTER_LAT,
+                                 "x": trafic_etat.ZONE_CENTER_LON}}]
+        comptes = trafic_etat.compter_alertes(alertes)
+        assert comptes["JAM"] == 1
+        assert comptes["total"] == 1
+
+    def test_weatherhazard_est_compte_comme_hazard(self):
+        alertes = [{"type": "WEATHERHAZARD",
+                    "location": {"y": trafic_etat.ZONE_CENTER_LAT,
+                                 "x": trafic_etat.ZONE_CENTER_LON}}]
+        comptes = trafic_etat.compter_alertes(alertes)
+        assert comptes["HAZARD"] == 1
+        assert comptes["total"] == 1
+
+    def test_alias_insensible_a_la_casse(self):
+        # Le type Waze brut est deja passe en .upper() avant l'alias : une
+        # alerte qui arriverait en casse mixte doit se comporter pareil.
+        alertes = [{"type": "traffic_jam",
+                    "location": {"y": trafic_etat.ZONE_CENTER_LAT,
+                                 "x": trafic_etat.ZONE_CENTER_LON}}]
+        comptes = trafic_etat.compter_alertes(alertes)
+        assert comptes["JAM"] == 1
+
+
+class TestFraicheurAlertes:
+    def test_rend_le_fetched_at_du_dernier_releve(self):
+        moment = datetime(2026, 8, 15, 11, 40)
+        db = FakeDb(waze_alerts=[{"fetched_at": moment, "data": []}])
+        assert trafic_etat.fraicheur_alertes(db) == moment
+
+    def test_none_sans_document(self):
+        assert trafic_etat.fraicheur_alertes(FakeDb()) is None

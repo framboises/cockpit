@@ -127,6 +127,92 @@ class TestTrafic:
         assert bloc["r"][0][3] == 2  # ratio 1.8, retard 480s -> severite 2
         assert bloc["vd"] == 1       # VIGILANCE
 
+    # --- Fraicheur separee des alertes (correction 1) ----------------
+    #
+    # ac/z/vd viennent de waze_alerts, une collection DIFFERENTE de
+    # waze_trafic (qui date le reste du bloc via trafic_etat.fraicheur).
+    # Un collecteur d'alertes arrete rendait avant cette correction ac=0,
+    # z=0 et un verdict affirmatif, avec une date parfaitement fraiche --
+    # la panne silencieuse que ce projet elimine partout ailleurs.
+
+    def test_alertes_perimees_rendent_ac_z_vd_a_none(self):
+        # waze_trafic frais (11:59), waze_alerts vieux de 20 min (11:40) --
+        # au-dela d'ALERTES_MAX_AGE (300s). Sans la garde, ac/z tomberaient
+        # a 0 et vd resterait affirmatif.
+        db = FakeDb(
+            waze_trafic=[{"fetched_at": datetime(2026, 8, 15, 11, 59),
+                          "data": {"routes": [
+                              {"name": "#I# Ouest", "time": 100,
+                               "historicTime": 100}]}}],
+            waze_alerts=[{"fetched_at": datetime(2026, 8, 15, 11, 40),
+                          "data": []}],
+        )
+        bloc = watch_pages.build_trafic(db, NOW)
+        assert bloc["ac"] is None
+        assert bloc["z"] is None
+        assert bloc["vd"] is None
+
+    def test_alertes_absentes_rendent_aussi_ac_z_vd_a_none(self):
+        # Aucun document waze_alerts du tout (collecteur jamais lance, ou
+        # collection purgee) : meme regle que perime, ac/z/vd a None.
+        db = FakeDb(
+            waze_trafic=[{"fetched_at": datetime(2026, 8, 15, 11, 59),
+                          "data": {"routes": [
+                              {"name": "#I# Ouest", "time": 100,
+                               "historicTime": 100}]}}],
+        )
+        bloc = watch_pages.build_trafic(db, NOW)
+        assert bloc["ac"] is None
+        assert bloc["z"] is None
+        assert bloc["vd"] is None
+        # Sans horodatage alertes, on retombe sur le seul horodatage connu
+        # (routes) -- jamais None alors qu'une moitie du bloc EST datee.
+        assert bloc["t"] == watch_pages._epoch(datetime(2026, 8, 15, 11, 59))
+
+    def test_deux_flux_frais_ac_z_vd_restent_affirmes(self):
+        # Comportement inchange quand routes ET alertes sont fraiches --
+        # non-regression explicite de la garde ajoutee.
+        db = FakeDb(
+            waze_trafic=[{"fetched_at": datetime(2026, 8, 15, 11, 59),
+                          "data": {"routes": [
+                              {"name": "#I# Ouest", "time": 100,
+                               "historicTime": 100}]}}],
+            waze_alerts=[{"fetched_at": datetime(2026, 8, 15, 11, 58),
+                          "data": []}],
+        )
+        bloc = watch_pages.build_trafic(db, NOW)
+        assert bloc["ac"] == 0
+        assert bloc["z"] == 0
+        assert bloc["vd"] == 0
+
+    def test_t_prend_le_plus_ancien_des_deux_horodatages(self):
+        # routes plus ancien (11:55) que alertes (11:59) : `t` doit porter
+        # le plus ancien des deux, pas le plus recent -- un bloc n'est
+        # frais que si ses DEUX moities le sont.
+        db = FakeDb(
+            waze_trafic=[{"fetched_at": datetime(2026, 8, 15, 11, 55),
+                          "data": {"routes": [
+                              {"name": "#I# Ouest", "time": 100,
+                               "historicTime": 100}]}}],
+            waze_alerts=[{"fetched_at": datetime(2026, 8, 15, 11, 59),
+                          "data": []}],
+        )
+        bloc = watch_pages.build_trafic(db, NOW)
+        assert bloc["t"] == watch_pages._epoch(datetime(2026, 8, 15, 11, 55))
+
+    def test_t_prend_le_plus_ancien_meme_quand_alertes_plus_ancien(self):
+        # Symetrique : alertes plus ancien (11:50) que routes (11:59).
+        db = FakeDb(
+            waze_trafic=[{"fetched_at": datetime(2026, 8, 15, 11, 59),
+                          "data": {"routes": [
+                              {"name": "#I# Ouest", "time": 100,
+                               "historicTime": 100}]}}],
+            waze_alerts=[{"fetched_at": datetime(2026, 8, 15, 11, 50),
+                          "data": []}],
+        )
+        bloc = watch_pages.build_trafic(db, NOW)
+        assert bloc["t"] == watch_pages._epoch(datetime(2026, 8, 15, 11, 50))
+
 
 class TestMeteo:
     def test_condense_l_etat_du_mur(self, monkeypatch):
@@ -215,6 +301,30 @@ class TestMeteo:
         bloc = watch_pages.build_meteo(db, maintenant)
         assert bloc["t"] == watch_pages._epoch(run_at)
         assert bloc["t"] != watch_pages._epoch(maintenant)
+
+    def test_valeurs_entieres_sont_converties_en_flottant(self, monkeypatch):
+        # meteo_previsions ne garantit pas le type : une vitesse de vent
+        # entiere est parfaitement legitime cote source. MeteoView.mc
+        # appelle .format("%.1f"/"%.0f") sur tc/v/rf/pm -- une methode qui
+        # n'existe que sur Float en Monkey C. Tous les tests/mocks existants
+        # fournissaient deja des flottants : c'est exactement le cas qu'aucun
+        # d'eux n'aurait attrape.
+        etat = {
+            "actuel": {"temperature_c": 21, "vent_moyen_kmh": 18,
+                       "vent_rafale_kmh": 34},
+            "prochaine_pluie": {"attendue": True, "dans_min": 25,
+                                "pic_mmh": 2},
+            "consignes": [], "vigilance": None,
+        }
+        monkeypatch.setattr(watch_pages.meteo_etat, "etat_mur",
+                            lambda d, m: etat)
+        bloc = watch_pages.build_meteo(FakeDb(), datetime(2026, 8, 15, 12, 0))
+        assert isinstance(bloc["tc"], float)
+        assert isinstance(bloc["v"], float)
+        assert isinstance(bloc["rf"], float)
+        assert isinstance(bloc["pm"], float)
+        assert bloc["tc"] == 21.0
+        assert bloc["pm"] == 2.0
 
     def test_t_est_none_sans_run_piaf(self):
         # Pas de donnee PIAF (cas reel en base dev) : `t` doit dire "je ne

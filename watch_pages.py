@@ -41,8 +41,18 @@ STATUT_CLOS = 10
 # Niveaux de consigne du mur, replies sur l'echelle 0-3 de la montre.
 NIVEAUX_CONSIGNE = {"vigilance": 1, "danger": 2, "critique": 3}
 
-# Une consigne plus longue deborde la largeur utile du cadran rond.
-CONSIGNE_MAX = 44
+# Une consigne plus longue deborde ce que couperConsigne (MeteoView.mc) peut
+# repartir sur ses DEUX lignes -- mesure a la sonde sur device (fenix8solar
+# 51mm), cf. rapport de tache : les deux pires cas reels (foudre+grele 52
+# caracteres, WBGT danger 59 caracteres) doivent passer entiers.
+CONSIGNE_MAX = 68
+
+# Alertes perimees au-dela de cette duree : meme convention que
+# MONGO_MAX_AGE_SECONDS (traffic.py), qui protege le MUR en repliant sur un
+# appel Waze direct passe ce delai. La montre n'a pas ce repli -- passe ce
+# delai, elle rend `ac`/`z`/`vd` a None plutot qu'un compte fige qui
+# semblerait a jour.
+ALERTES_MAX_AGE = 300
 
 
 def _epoch(moment):
@@ -52,6 +62,45 @@ def _epoch(moment):
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
     return int(moment.timestamp())
+
+
+def _age_seconds(moment, now_utc):
+    """Age en secondes d'un datetime naif-UTC ou conscient. None si `moment`
+    est None -- ne jamais confondre << pas de donnee >> et << age zero >>."""
+    if moment is None:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return (now_utc - moment).total_seconds()
+
+
+def _horodatage_le_plus_ancien(a, b):
+    """Le plus ancien de deux horodatages Mongo (naifs UTC par convention).
+
+    Meme principe que State.worstAgeSec cote montre : un seul horodatage
+    connu suffit a dater le bloc, les deux absents rendent None. Prendre le
+    PLUS ANCIEN (pas le plus recent) est ce qui garantit qu'un bloc n'est
+    montre frais que si ses DEUX moities (routes ET alertes) le sont --
+    sinon un flux fige silencieusement laisserait le bloc entier paraitre a
+    jour tant que l'AUTRE flux, lui, continue d'arriver.
+    """
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return min(a, b)
+
+
+def _as_float(valeur):
+    """Convertit en flottant avant transport. Rien ne garantit le type cote
+    source (meteo_previsions peut porter un entier : vent nul, releve
+    arrondi) et MeteoView.mc appelle .format("%.1f"/"%.0f") sur ces champs,
+    une methode qui n'existe que sur Float en Monkey C -- un entier ferait
+    tomber l'app ENTIERE au premier onUpdate, pas seulement cette page.
+    app.py:1596 fait deja la meme conversion pour la meme raison, cote mur."""
+    if valeur is None:
+        return None
+    return float(valeur)
 
 
 def build_main_courante(db, event, year, now_utc=None):
@@ -116,7 +165,21 @@ def build_trafic(db, now_utc=None):
     verdict qui reste FLUIDE ne renvoie nulle part. La liste `r` continue
     de montrer les terrains d'entree/sortie agreges : choix d'affichage
     assume, cette page montre les axes d'acces, pas les parkings.
+
+    `ac`/`z`/`vd` dependent des ALERTES (waze_alerts), une collection
+    DIFFERENTE de celle qui date le reste du bloc (waze_trafic). Sans garde
+    separee, un collecteur d'alertes arrete rendait `ac`/`z` a 0 avec la
+    date -- fraiche -- du seul flux routes : verdict FLUIDE affirme alors
+    que la montre ignore purement et simplement les accidents. Passe
+    `ALERTES_MAX_AGE`, ou si le document d'alertes manque, `ac`/`z`/`vd`
+    valent tous `None` -- un verdict qui depend des accidents ne peut pas
+    etre affirme quand on ignore les accidents. `t` devient le plus ANCIEN
+    des deux horodatages (routes, alertes) : le bloc n'est frais que si SES
+    DEUX MOITIES le sont, meme logique que State.worstAgeSec cote montre.
     """
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+
     routes = trafic_etat.lire_routes(db)
     alertes = trafic_etat.lire_alertes(db)
     if not routes and not alertes:
@@ -125,8 +188,27 @@ def build_trafic(db, now_utc=None):
     terrains = trafic_etat.agreger_terrains(routes)
     for terrain in terrains:
         terrain["severity"] = trafic_etat.severite_axe(terrain)
-    comptes = trafic_etat.compter_alertes(alertes)
     pire = trafic_etat.pire_severite_mur(routes)
+
+    t_routes = trafic_etat.fraicheur(db)
+    t_alertes = trafic_etat.fraicheur_alertes(db)
+    age_alertes = _age_seconds(t_alertes, now_utc)
+    alertes_fraiches = age_alertes is not None and age_alertes <= ALERTES_MAX_AGE
+
+    if alertes_fraiches:
+        comptes = trafic_etat.compter_alertes(alertes)
+        ac = comptes.get("ACCIDENT", 0)
+        z = comptes.get("total", 0)
+        vd = trafic_etat.verdict_global(comptes, pire)
+    else:
+        # Collecteur d'alertes arrete ou document perime : ne JAMAIS rendre
+        # un compte fige a zero, qui se lirait comme un calme operationnel
+        # avere. C'est LA panne silencieuse que ce projet elimine partout
+        # ailleurs -- une page qui parait calme parce qu'elle a cesse de
+        # savoir.
+        ac = None
+        z = None
+        vd = None
 
     # Tri par gravite decroissante, pas par ratio : la montre montre d'abord
     # ce qui coince, et deux terrains de ratios voisins peuvent tomber dans
@@ -144,10 +226,10 @@ def build_trafic(db, now_utc=None):
         ])
 
     return {
-        "t": _epoch(trafic_etat.fraicheur(db)),
-        "vd": trafic_etat.verdict_global(comptes, pire),
-        "ac": comptes.get("ACCIDENT", 0),
-        "z": comptes.get("total", 0),
+        "t": _epoch(_horodatage_le_plus_ancien(t_routes, t_alertes)),
+        "vd": vd,
+        "ac": ac,
+        "z": z,
         "r": resume,
     }
 
@@ -211,11 +293,18 @@ def build_meteo(db, now):
 
     return {
         "t": horodatage,
-        "tc": actuel.get("temperature_c"),
-        "v": actuel.get("vent_moyen_kmh"),
-        "rf": actuel.get("vent_rafale_kmh"),
+        # Flottants forces AVANT transport : MeteoView.mc appelle
+        # .format("%.1f"/"%.0f") sur tc/v/rf/pm, une methode qui n'existe que
+        # sur Float en Monkey C. Rien ne garantit que meteo_previsions porte
+        # un flottant (une vitesse de vent entiere y est parfaitement
+        # legitime) -- sans cette conversion, un entier fait tomber l'app
+        # ENTIERE au premier onUpdate, pas seulement cette page. Voir
+        # app.py:1596, qui force deja un type pour la meme raison cote mur.
+        "tc": _as_float(actuel.get("temperature_c")),
+        "v": _as_float(actuel.get("vent_moyen_kmh")),
+        "rf": _as_float(actuel.get("vent_rafale_kmh")),
         "pl": pluie.get("dans_min") if attendue else None,
-        "pm": pluie.get("pic_mmh") if attendue else None,
+        "pm": _as_float(pluie.get("pic_mmh")) if attendue else None,
         "cn": consigne[:CONSIGNE_MAX] if consigne else None,
         "cl": niveau,
         "vg": vg,
