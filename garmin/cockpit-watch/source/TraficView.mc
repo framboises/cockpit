@@ -301,10 +301,16 @@ class TraficView extends WatchUi.View {
         var fin = debut + AXES_PAR_ECRAN;
         if (fin > liste.size()) { fin = liste.size(); }
 
+        // "AXES 7-12 / 13", mais "AXES 13 / 13" quand la derniere sous-page
+        // n'en porte qu'un : "AXES 13-13" se lit comme une erreur
+        // d'affichage. Mesure sur les 13 axes reels du releve de prod, ou
+        // c'est exactement le cas de la derniere page.
+        var plage = (fin - debut > 1)
+                    ? ((debut + 1).toString() + "-" + fin.toString())
+                    : fin.toString();
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, 26, Graphics.FONT_XTINY,
-                    "AXES " + (debut + 1).toString() + "-" + fin.toString()
-                    + " / " + liste.size().toString(),
+                    "AXES " + plage + " / " + liste.size().toString(),
                     Graphics.TEXT_JUSTIFY_CENTER);
 
         var y = 26 + hX + 12;

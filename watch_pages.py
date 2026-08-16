@@ -263,16 +263,29 @@ def build_trafic(db, now_utc=None):
         z = None
         vd = None
 
-    # Ordre : accidents d'abord, puis gravite decroissante, puis minutes
-    # perdues. Un accident qui vient de tomber sur un axe encore fluide
-    # passe donc devant un bouchon installe -- c'est sur lui qu'on engage
-    # des moyens, il ne doit pas se retrouver en troisieme sous-page. Le
-    # tri se fait sur la GRAVITE, pas sur le ratio : deux axes de ratios
+    # Ordre, du plus urgent au moins urgent :
+    #
+    #   1. les axes porteurs d'un ACCIDENT
+    #   2. les axes porteurs d'une autre alerte (bouchon, danger)
+    #   3. la gravite du trafic, decroissante
+    #   4. les minutes perdues
+    #
+    # Un accident qui vient de tomber sur un axe encore fluide passe donc
+    # devant un bouchon installe : c'est sur lui qu'on engage des moyens, et
+    # il ne doit pas se retrouver en troisieme sous-page. Le second palier
+    # existe pour la meme raison a un cran en dessous -- un axe signale par
+    # Waze mais dont les temps de parcours n'ont pas encore bouge est plus
+    # interessant qu'un axe dont on ne sait rien de particulier.
+    #
+    # Le tri se fait sur la GRAVITE, pas sur le ratio : deux axes de ratios
     # voisins peuvent tomber dans des paliers differents.
     def _cle_tri(axe):
         alertes_axe = axe.get("alertes") or {}
+        accident = 1 if alertes_axe.get("ACCIDENT") else 0
+        signale = 1 if any(alertes_axe.get(t) for t in ("JAM", "HAZARD")) else 0
         return (
-            1 if alertes_axe.get("ACCIDENT") else 0,
+            accident,
+            signale,
             axe["severity"],
             axe.get("deltaSeconds") or 0,
         )

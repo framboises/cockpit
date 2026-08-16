@@ -235,6 +235,39 @@ class TestTrafic:
         assert bloc["r"][0][3] == 0      # bien fluide
         assert bloc["r"][1][0] == "Bouche"
 
+    def test_axe_signale_passe_devant_un_axe_dont_on_ne_sait_rien(self):
+        # Palier intermediaire : sous les accidents, mais au-dessus des axes
+        # sans rien de particulier. Un axe que Waze signale mais dont les
+        # temps de parcours n'ont pas encore bouge est plus interessant
+        # qu'un axe fluide et muet -- il ne doit pas se retrouver noye au
+        # milieu de la liste.
+        import trafic_etat
+        lat = trafic_etat.ZONE_CENTER_LAT
+        lon = trafic_etat.ZONE_CENTER_LON
+        muet = self._route_droite("#I# Muet", lat, lon + 0.05)
+        signale = self._route_droite("#I# Signale", lat, lon)
+        danger = {"type": "HAZARD", "location": {"y": lat, "x": lon}}
+        bloc = watch_pages.build_trafic(self._db([muet, signale], [danger]),
+                                        NOW)
+        assert [ligne[0] for ligne in bloc["r"]] == ["Signale", "Muet"]
+
+    def test_un_accident_passe_devant_un_axe_seulement_signale(self):
+        # Les deux paliers ne doivent pas se confondre : l'accident reste
+        # au-dessus du simple signalement.
+        import trafic_etat
+        lat = trafic_etat.ZONE_CENTER_LAT
+        lon = trafic_etat.ZONE_CENTER_LON
+        avec_danger = self._route_droite("#I# Danger", lat, lon + 0.05)
+        avec_accident = self._route_droite("#I# Accident", lat, lon)
+        alertes = [
+            {"type": "HAZARD",
+             "location": {"y": lat, "x": lon + 0.05}},
+            {"type": "ACCIDENT", "location": {"y": lat, "x": lon}},
+        ]
+        bloc = watch_pages.build_trafic(
+            self._db([avec_danger, avec_accident], alertes), NOW)
+        assert [ligne[0] for ligne in bloc["r"]] == ["Accident", "Danger"]
+
     def test_comptes_bouchons_et_dangers_exposes(self):
         import trafic_etat
         lat = trafic_etat.ZONE_CENTER_LAT

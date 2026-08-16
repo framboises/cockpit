@@ -37,7 +37,7 @@ Trois points d'entrée (`CockpitApp.mc`) partagent un cache commun :
 | `Pages.mc` | accesseurs de lecture des quatre blocs de pages (`mc`/`tr`/`me`/`st`) dans le cache Storage dédié, plus `verdictMot` (mots du verdict trafic partagés avec `CockpitView.drawMain`) |
 | `CockpitView.mc` / `CockpitDelegate.mc` | console (device app) : tableau de bord (page 0), liste des alertes (page 1), et aiguillage inline (`pageView`) vers les quatre vues de pages annexes (2 à 5) |
 | `MainCouranteView.mc` | page « Main courante » : compteurs PC org en cours/terminées par catégorie |
-| `TraficView.mc` | page « Trafic » : verdict global, comptes d'alertes géofencées, terrains les plus chargés |
+| `TraficView.mc` | page « Trafic » : livret feuilleté à START — bilan (verdict global, accidents/bouchons/dangers, axe le plus dégradé) puis tous les axes du mur, six par écran |
 | `MeteoView.mc` | page « Météo » : température, vent, rafale, pluie à venir, consigne la plus grave du mur |
 | `FrequentationView.mc` | page « Fréquentation » : pic de présents du jour et son heure, comparé au N-1 au même décalage à la course |
 | `EditionsView.mc` | consultation des pics par édition, atteinte par le menu de saut (MENU) |
@@ -56,7 +56,7 @@ code mort, jamais câblé, et ont été supprimées à la tâche 14). Seules
 `EditionsView` et `SautMenu`, réellement poussées via `WatchUi.pushView`,
 gardent leur delegate (`EditionsDelegate`, `SautMenuDelegate`).
 
-132 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
+149 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
 `Pages`, la navigation (`CockpitView.nextPage`/`previousPage`/`setPage`/
 `pageView`) et les chemins de dessin des six vues (`DessinTest.mc` : le rendu
 ne doit lever dans aucun état atteignable, y compris un mode `past` sans pic
@@ -69,7 +69,7 @@ C'est **`DebordementTest.mc`** qui porte la garantie géométrique : il capture
 les rectangles réellement dessinés, sur la taille d'écran lue à l'exécution,
 et échoue si l'un d'eux sort du disque inscrit ou chevauche le pied de page.
 
-Le backend est couvert par 223 tests pytest, dont `watch_api.py`,
+Le backend est couvert par 253 tests pytest, dont `watch_api.py`,
 `watch_state.py`, `watch_peaks.py`, `watch_pages.py`, `trafic_etat.py` et
 `meteo_etat.py`.
 
@@ -82,7 +82,7 @@ Six pages en cycle, dans l'ordre d'urgence opérationnelle :
 | 0 | Tableau de bord | présents/pic, WBGT, voyants, alertes (deux premières lignes) |
 | 1 | Alertes | liste complète des alertes actives |
 | 2 | Main courante | compteurs PC org en cours/terminées par catégorie |
-| 3 | Trafic | verdict global, comptes géofencés, terrains les plus chargés |
+| 3 | Trafic | **livret** : bilan, puis tous les axes du mur six par écran (START feuillette) |
 | 4 | Météo | température, vent, rafale, pluie à venir, consigne la plus grave |
 | 5 | Fréquentation | pic de présents du jour, son heure, comparaison N-1 |
 
@@ -90,7 +90,7 @@ Six pages en cycle, dans l'ordre d'urgence opérationnelle :
 |-------|-------|
 | HAUT | page suivante (`nextPage`, boucle 0→5→0) |
 | BAS | page précédente (`previousPage`, boucle 0→5 en arrière) |
-| ENTER | rafraîchissement immédiat |
+| ENTER (START) | sur la page **Trafic**, feuillette le livret (bilan → axes 1-6 → 7-12 → … → bilan) ; sur les cinq autres pages, rafraîchissement immédiat |
 | **MENU** | **menu de saut** — les six pages ci-dessus, dans le même ordre, plus « Pics par édition » ; choisir une page l'affiche directement (`setPage`), sans passer par le cycle |
 
 ⚠️ Avec deux pages seulement (état du projet avant la tâche 13), avancer et
@@ -114,6 +114,95 @@ une intervention est nécessaire. Aucune des deux garde seule ne suffit — le
 drapeau attrape l'arrêt propre en une seconde (la seule fraîcheur mettrait six
 heures à s'en apercevoir), la fraîcheur attrape le collecteur planté (où le
 drapeau mentirait indéfiniment).
+
+## La page Trafic
+
+La montre affiche **exactement les axes du panneau « Axes » du mur**
+(`trafic_etat.axes_mur`) : un par itinéraire Waze balisé `#I`/`#O`/`##`/`#P`,
+sans aucune agrégation, avec la sévérité calculée route par route par le
+double verrou `severite_axe`. Treize axes sur le relevé d'août 2026, dont
+deux parkings.
+
+⚠️ **Ne pas confondre avec `agreger_terrains`**, qui somme les tronçons d'un
+même terrain avant de classer et qui alimente
+`/trafic/waiting_data_structured`. La montre lisait cette agrégation
+jusqu'en août 2026 et pouvait donc afficher, pour un même axe, une sévérité
+que le mur n'affiche nulle part : sur `#I# Ouest` (120 s contre 100 s
+d'historique) et `#I2# Ouest` (900 contre 300), l'agrégation donne 3 quand
+le mur affiche 0 et 4.
+
+### Les alertes sont posées sur un axe
+
+Les routes Waze portent leur polyligne (`line`, un point tous les ~55 m).
+`trafic_etat.rattacher_alertes` calcule la distance point-segment de chaque
+alerte géofencée à chaque axe et la pose sur **le plus proche, et lui seul**
+— deux itinéraires d'un même terrain se longent (`#I# Ouest` et `#I2# Ouest`
+passent à 10 m l'un de l'autre), la compter deux fois la ferait apparaître
+en double dans la liste.
+
+**Le seuil de 250 m est posé au milieu d'un vide mesuré**, pas au jugé. Sur
+les deux relevés Waze disponibles en base, tout rattachement réel tombe
+entre 0 et 151 m, et tout le reste à 677 m ou plus — rien entre les deux :
+
+| Alerte | Axe le plus proche | Distance |
+|---|---|---|
+| ACCIDENT D338 | `## Panorama` | 47 m |
+| HAZARD D323 | `#P# A11` | 0 m |
+| HAZARD D323 | `#P1# A28` | 1 m |
+| JAM D338 | `#I# Antares Sud` | **151 m** |
+| ROAD_CLOSED Rue Marcel Cerdan | `## Panorama` | **793 m** |
+
+Une alerte qui ne longe aucun axe compte quand même dans le bilan : elle est
+dans le cercle, elle n'accuse simplement personne.
+
+### Pourquoi `ROAD_CLOSED` n'est jamais compté
+
+Le mur l'exclut délibérément (`circulation.html:479`) et les données le
+confirment deux fois :
+
+- **relevé de dev, pris après les 24H Motos 2026** : 11 fermetures dans le
+  géofence, dont **9 signalements de la même avenue Félix Geneslay**,
+  publiés trois jours après la course. Ce sont **nos propres fermetures**,
+  remontées par les usagers Waze.
+- **relevé de prod** : 2 des 3 fermetures datent du **6 octobre 2025**, sans
+  nom de rue, et tombent **à 0 m de l'axe Ouest** — elles le marqueraient
+  barré en permanence.
+
+Un quatrième compte afficherait donc un nombre non nul en continu, dont la
+valeur ne dépendrait ni d'un incident ni de rien d'actionnable. Décision
+prise en connaissance de cause en août 2026, après avoir posé la question ;
+la rouvrir demande de nouvelles mesures, pas une nouvelle opinion.
+
+### Ordre des axes
+
+Accidents d'abord, puis les axes porteurs d'une autre alerte, puis la
+gravité décroissante, puis les minutes perdues. Un accident qui vient de
+tomber sur un axe encore fluide passe donc devant un bouchon installé :
+c'est sur lui qu'on engage des moyens, il ne doit pas se retrouver en
+troisième sous-page.
+
+### Ce que porte une ligne
+
+```
+> Ouest 2      ACC  +7  12'
+```
+
+sens (`>` entrant, `<` sortant, `P` parking, `-` inconnu), nom, badge de la
+pire alerte rattachée, **retard en minutes**, temps de parcours.
+
+⚠️ **Le retard n'est pas décoratif** : il porte la gravité en clair à côté
+de la couleur. Le projet s'interdit partout de faire porter une identité à
+la seule couleur — un daltonien en plein soleil ne distingue pas l'orange du
+rouge.
+
+⚠️ **Le nom est le seul élément élastique.** Il cède la place au temps, au
+retard et au badge, jamais l'inverse : un temps tronqué serait un chiffre
+**faux** (`2` pour `24`), pas un mot abrégé — et rien dans un contrôle
+géométrique ne distingue les deux. D'où un test dédié sur les valeurs
+réellement dessinées (`testTraficNeTronqueJamaisLesChiffres`).
+
+Mesuré sur les 13 axes réels : aucun nom n'est tronqué (le plus large,
+« Antares Sud », occupe 91 px sur les ~130 disponibles).
 
 ## Les deux modes
 
