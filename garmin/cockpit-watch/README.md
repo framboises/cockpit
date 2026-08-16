@@ -56,12 +56,20 @@ code mort, jamais câblé, et ont été supprimées à la tâche 14). Seules
 `EditionsView` et `SautMenu`, réellement poussées via `WatchUi.pushView`,
 gardent leur delegate (`EditionsDelegate`, `SautMenuDelegate`).
 
-107 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
+132 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
 `Pages`, la navigation (`CockpitView.nextPage`/`previousPage`/`setPage`/
 `pageView`) et les chemins de dessin des six vues (`DessinTest.mc` : le rendu
 ne doit lever dans aucun état atteignable, y compris un mode `past` sans pic
 ou un bloc de page absent).
-Le backend est couvert par 222 tests pytest, dont `watch_api.py`,
+
+⚠️ **`DessinTest.mc` ne prouve qu'une chose : que le rendu ne lève pas.** Il
+ne dit rien de ce qui s'affiche, et dessiner hors écran ne lève pas — c'est
+ainsi que quatre pages sur six ont pu déborder sans qu'aucun test ne bronche.
+C'est **`DebordementTest.mc`** qui porte la garantie géométrique : il capture
+les rectangles réellement dessinés, sur la taille d'écran lue à l'exécution,
+et échoue si l'un d'eux sort du disque inscrit ou chevauche le pied de page.
+
+Le backend est couvert par 223 tests pytest, dont `watch_api.py`,
 `watch_state.py`, `watch_peaks.py`, `watch_pages.py`, `trafic_etat.py` et
 `meteo_etat.py`.
 

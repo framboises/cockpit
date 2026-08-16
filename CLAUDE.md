@@ -1011,3 +1011,44 @@ dans le payload, cf. `watch_pages.py`) :
   déborder le texte à l'écran réel. Ce piège s'est refermé **quatre fois**
   sur ce projet — toujours en vérifiant le bord qui ne contraint pas le bloc
   concerné.
+
+  ⚠️ **La même règle vaut pour l'argument passé à `largeurUtile`**, et c'est
+  là qu'elle a été oubliée le plus longtemps : appeler `largeurUtile(dc, y)`
+  mesure la corde à l'ancre du texte, donc **surestime la place** pour tout
+  bloc de la moitié basse. Écarts réellement mesurés avant correction : 36 px
+  sur la ligne « édition » de `FrequentationView`, 18 px sur la seconde ligne
+  de consigne météo — celle sur laquelle `CONSIGNE_MAX` avait justement été
+  calibré. La fonction prend désormais la hauteur du bloc
+  (`Pages.largeurUtile(dc, y, hauteur)`) et évalue le bord le plus éloigné du
+  centre, y compris quand le bloc est à cheval sur celui-ci.
+
+- **L'écran de la cible fait 280 × 280, pas 454 × 454.** Le fenix 8 *Solar*
+  porte un écran MIP de 280 px ; c'est le fenix 8 AMOLED qui fait 454. Toutes
+  les sondes de mise en page de ce projet ont créé leur tampon en **imposant**
+  `454 × 454` au lieu de lire `System.getDeviceSettings()`. Elles mesuraient
+  donc une page 1,6 fois trop haute **et un rayon de cadran de 227 au lieu de
+  140** : positions verticales et largeurs disponibles étaient fausses
+  ensemble. Résultat sur la vraie montre : quatre pages sur six débordaient,
+  le pied de page se superposait au contenu, et un itinéraire sur deux de la
+  page Trafic était dessiné hors écran.
+
+  Ce défaut a traversé quatorze tâches, deux relectures d'ensemble et une
+  centaine de tests, parce que **tout le monde partageait la même hypothèse
+  fausse** : les tests de dessin prouvent qu'un rendu ne lève pas, et dessiner
+  hors écran ne lève pas. Il a été trouvé par l'utilisateur, à l'œil, sur sa
+  montre. **Ne jamais coder une dimension d'écran en dur, nulle part** — pas
+  même dans une sonde jetable. `DebordementTest.mc` échoue désormais si un
+  bloc sort du disque inscrit ou chevauche le pied, sur la taille lue à
+  l'exécution.
+
+### Piège d'outillage : lancer le simulateur au premier plan
+
+Une commande lancée en arrière-plan depuis une session d'agent **ne réveille
+pas cet agent** : il attend indéfiniment une notification qui n'arrivera pas.
+Ce piège s'est refermé **trois fois** sur ce lot, pour une vingtaine de
+minutes perdues à chaque fois, toujours sur `monkeydo` (le simulateur met une
+à deux minutes à rendre ses tests, ce qui donne envie de le mettre en fond).
+
+Lancer `monkeyc` et `monkeydo` **au premier plan** et attendre le résultat
+dans la même invocation. Seul `connectiq` — le service graphique — se lance
+en arrière-plan, parce qu'il doit rester vivant.
