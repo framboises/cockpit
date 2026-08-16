@@ -34,16 +34,31 @@ SECURITY_RE = re.compile(r'^\s*\*\*\s*(.+?)\s*$')
 
 
 def parse_route_name(name):
-    """(direction, terrain, tag, variant). Deplace depuis traffic.py."""
+    """(direction, terrain, tag, variant). Deplace depuis traffic.py.
+
+    `variant` porte le numero du tag quand il y en a un : "2" pour
+    `#I2# Ouest` comme pour `#P2# A28`, None sinon. Les tags I et O le
+    rendaient toujours None avant aout 2026 ; le numero est desormais rendu
+    pour eux aussi, ce qui est le SEUL moyen de distinguer deux itineraires
+    d'un meme terrain et d'une meme direction -- `#I# Ouest` et
+    `#I2# Ouest` coexistent en base et sont deux routes differentes, que la
+    liste d'axes de la montre affiche cote a cote.
+
+    AUCUN appelant ne lisait ce 4e element (verifie : traffic.py:301,
+    pire_severite_mur, agreger_terrains le nomment tous `_variant`), le
+    passage de None au numero ne change donc la sortie d'aucune route
+    existante -- en particulier pas celle de
+    /trafic/waiting_data_structured, prouvee identique a l'octet pres.
+    """
     m = TAG_RE.match(name or "")
     if m:
         io = m.group(2)
         num = m.group(3)
         terrain = m.group(4).strip()
         if io == 'I':
-            return "in", terrain, "I", None
+            return "in", terrain, "I", num
         if io == 'O':
-            return "out", terrain, "O", None
+            return "out", terrain, "O", num
         if io == 'P':
             return None, terrain, "P", num
         return None, terrain, "neutral", None
@@ -128,6 +143,170 @@ def severite_axe(axe):
     return 0
 
 
+def axes_mur(routes):
+    """Les axes du panneau << Axes >> du mur, UN PAR ITINERAIRE Waze.
+
+    Meme ensemble, meme decoupage et meme classement individuel que
+    renderAxes() (circulation.html:603) : filtre tag in (I, O, neutral, P),
+    AUCUNE agregation, severite calculee route par route.
+
+    NE PAS CONFONDRE AVEC agreger_terrains(), qui somme les troncons d'un
+    meme terrain avant de classer, et qui alimente
+    /trafic/waiting_data_structured. Les deux repondent a deux questions
+    differentes et ne doivent pas fusionner : le mur ne montre nulle part la
+    somme des troncons, il montre des itineraires. La montre affichait
+    jusqu'ici les terrains agreges et pouvait donc annoncer, pour un meme
+    axe, une severite que le mur n'affichait pas -- exactement la divergence
+    que severite_axe() avait ete ecrite pour eliminer.
+
+    Chaque axe porte sa polyligne (`line`) : c'est elle qui permet de
+    rattacher une alerte Waze a un axe (cf. rattacher_alertes).
+    """
+    axes = []
+    for route in routes or []:
+        if not isinstance(route, dict):
+            continue
+        direction, terrain, tag, variant = parse_route_name(
+            route.get("name", ""))
+        if tag not in ("I", "O", "neutral", "P"):
+            continue
+        cur = int(route.get("time", 0) or 0)
+        hist = int(route.get("historicTime", 0) or 0)
+        delta = max(0, cur - hist) if hist > 0 else None
+        # Deux itineraires peuvent partager terrain ET direction (`#I# Ouest`
+        # et `#I2# Ouest`) : sans le numero, la montre afficherait deux
+        # lignes rigoureusement identiques sauf le temps, illisibles.
+        nom = terrain if not variant else (terrain + " " + str(variant))
+        axes.append({
+            "nom": nom,
+            "terrain": terrain,
+            "direction": direction,
+            "parking": tag == "P",
+            "currentTime": cur,
+            "historicTime": hist,
+            "deltaSeconds": delta,
+            "severity": severite_axe({"currentTime": cur,
+                                      "historicTime": hist,
+                                      "deltaSeconds": delta}),
+            "line": route.get("line") or [],
+        })
+    return axes
+
+
+# Au-dela, une alerte n'est plus posee sur l'axe mais a cote. Seuil choisi
+# au MILIEU D'UN VIDE MESURE, pas au juge : sur les deux relevés Waze
+# disponibles en base (prod 31/03/2026, dev post-24H Motos), toute alerte
+# qui appartient reellement a un axe surveille tombe entre 0 et 151 m, et
+# tout le reste a 677 m ou plus. Aucune alerte, sur aucun des deux relevés,
+# ne tombe entre 152 et 676 m. 250 m laisse donc un facteur ~1,7 de marge
+# au-dessus du plus lointain vrai rattachement et ~2,7 sous le plus proche
+# faux.
+DISTANCE_RATTACHEMENT_M = 250.0
+
+# Projection locale : metres par degre de latitude, et par degre de
+# longitude A L'EQUATEUR (a corriger par cos(latitude)).
+_M_PAR_DEG_LAT = 110540.0
+_M_PAR_DEG_LON_EQUATEUR = 111320.0
+
+
+def distance_point_segment_m(lat, lon, p1, p2):
+    """Distance en metres d'un point au segment [p1, p2].
+
+    Projection equirectangulaire centree sur le point lui-meme : sur les
+    quelques kilometres du geofence, l'erreur est tres inferieure a la
+    precision GPS d'un signalement Waze, et le calcul reste une poignee de
+    multiplications -- il tourne des dizaines de milliers de fois par
+    construction de bloc.
+
+    La distance est prise au SEGMENT, pas aux sommets : les polylignes Waze
+    n'ont un point que tous les ~55 m, et se contenter des sommets
+    introduirait jusqu'a ~27 m d'erreur sur un seuil de 250.
+    """
+    kx = _M_PAR_DEG_LON_EQUATEUR * math.cos(math.radians(lat))
+    ky = _M_PAR_DEG_LAT
+    bx = (p1["x"] - lon) * kx
+    by = (p1["y"] - lat) * ky
+    cx = (p2["x"] - lon) * kx
+    cy = (p2["y"] - lat) * ky
+    dx = cx - bx
+    dy = cy - by
+    longueur2 = dx * dx + dy * dy
+    if longueur2 <= 0:
+        return math.hypot(bx, by)
+    # Projection du point (a l'origine du repere) sur le segment, bornee aux
+    # deux extremites : sans le bornage, un point au-dela du bout du segment
+    # serait mesure a la DROITE prolongee, donc bien trop pres.
+    t = max(0.0, min(1.0, (-bx * dx - by * dy) / longueur2))
+    return math.hypot(bx + t * dx, by + t * dy)
+
+
+def distance_point_axe_m(lat, lon, axe):
+    """Distance en metres d'un point a la polyligne d'un axe, ou None.
+
+    None quand l'axe n'a pas de geometrie exploitable : un axe sans
+    polyligne ne peut RIEN se voir rattacher, il ne doit surtout pas
+    devenir le plus proche par defaut.
+    """
+    ligne = (axe or {}).get("line") or []
+    meilleure = None
+    for i in range(len(ligne) - 1):
+        try:
+            d = distance_point_segment_m(lat, lon, ligne[i], ligne[i + 1])
+        except (TypeError, KeyError, ValueError):
+            continue
+        if meilleure is None or d < meilleure:
+            meilleure = d
+    return meilleure
+
+
+def rattacher_alertes(axes, alertes, seuil_m=DISTANCE_RATTACHEMENT_M):
+    """Pose sur chaque axe le compte des alertes qui tombent dessus.
+
+    Chaque axe recoit `alertes`, un dict {type: compte} sur les memes trois
+    types que compter_alertes (ACCIDENT, JAM, HAZARD), alias compris. Le
+    total par type sur tous les axes est donc INFERIEUR OU EGAL au compte
+    geofence du bilan : une alerte du cercle qui ne longe aucun axe
+    surveille n'est rattachee nulle part, et c'est voulu -- elle compte
+    dans le bilan, elle n'accuse aucun axe.
+
+    Une alerte n'est rattachee qu'a UN SEUL axe, le plus proche. Deux
+    itineraires d'un meme terrain se croisent ou se longent (`#I# Ouest` et
+    `#I2# Ouest` passent a 10 m l'un de l'autre sur le releve de prod) :
+    compter l'alerte sur les deux la ferait apparaitre en double dans la
+    liste, et gonflerait un compte deja lisible dans le bilan.
+    """
+    for axe in axes or []:
+        axe["alertes"] = {t: 0 for t in TYPES_COMPTES}
+    if not axes:
+        return axes
+
+    for alerte in alertes or []:
+        if not alerte_en_zone(alerte):
+            continue
+        type_ = str((alerte or {}).get("type") or "").upper()
+        type_ = ALIAS_TYPES.get(type_, type_)
+        if type_ not in TYPES_COMPTES:
+            continue
+        loc = (alerte or {}).get("location") or {}
+        try:
+            lat = float(loc.get("y"))
+            lon = float(loc.get("x"))
+        except (TypeError, ValueError):
+            continue
+        proche = None
+        distance = None
+        for axe in axes:
+            d = distance_point_axe_m(lat, lon, axe)
+            if d is None:
+                continue
+            if distance is None or d < distance:
+                distance = d
+                proche = axe
+        if proche is not None and distance is not None and distance <= seuil_m:
+            proche["alertes"][type_] += 1
+    return axes
+
+
 def pire_severite_mur(routes):
     """Pire severite_axe() sur TOUTES les routes que le panneau << Axes >>
     du mur retient -- routes brutes, AUCUNE agregation par terrain.
@@ -154,23 +333,14 @@ def pire_severite_mur(routes):
     Contrairement a agreger_terrains, chaque route est classee
     INDIVIDUELLEMENT (pas de somme des temps de plusieurs troncons avant
     classement) : c'est exactement ce que fait classify() cote mur.
+
+    Delegue desormais a axes_mur() pour que l'ensemble d'axes du VERDICT et
+    celui de la LISTE affichee soient litteralement le meme code. Tant que
+    les deux etaient ecrits separement, ils pouvaient diverger en silence --
+    et un verdict calcule sur un ensemble plus large que la liste est
+    precisement ce qui produisait un << CRITIQUE >> sans cause visible.
     """
-    pire = 0
-    for route in routes or []:
-        if not isinstance(route, dict):
-            continue
-        _direction, _terrain, tag, _variant = parse_route_name(
-            route.get("name", ""))
-        if tag not in ("I", "O", "neutral", "P"):
-            continue
-        cur = int(route.get("time", 0) or 0)
-        hist = int(route.get("historicTime", 0) or 0)
-        delta = max(0, cur - hist) if hist > 0 else None
-        sev = severite_axe({"currentTime": cur, "historicTime": hist,
-                            "deltaSeconds": delta})
-        if sev > pire:
-            pire = sev
-    return pire
+    return max([axe["severity"] for axe in axes_mur(routes)] or [0])
 
 
 def agreger_terrains(routes):

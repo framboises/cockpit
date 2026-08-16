@@ -57,13 +57,40 @@ class TestTrafic:
                           "data": alertes}],
         )
 
-    def test_quatre_terrains_au_plus_les_plus_charges(self):
+    def test_tous_les_axes_sont_rendus_le_plus_charge_en_tete(self):
+        # La liste ne se limite plus a quatre entrees : la page trafic les
+        # pagine par six. Six axes rentrent donc tous, tries du plus charge
+        # au moins charge -- la montre montre d'abord ce qui coince.
         routes = [{"name": "#I# T%d" % i, "time": 100 * (i + 1),
                    "historicTime": 100} for i in range(6)]
         bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
-        assert len(bloc["r"]) == 4
-        # Le plus charge en premier : la montre montre d'abord ce qui coince.
+        assert len(bloc["r"]) == 6
         assert bloc["r"][0][0] == "T5"
+        assert [ligne[0] for ligne in bloc["r"]] == [
+            "T5", "T4", "T3", "T2", "T1", "T0"]
+
+    def test_le_plafond_d_axes_est_borne(self):
+        # Filet contre une reconfiguration cote operateur : aucun releve
+        # observe n'en a plus de 13, mais le payload ne doit pas pouvoir
+        # enfler en silence.
+        routes = [{"name": "#I# T%02d" % i, "time": 100 + i,
+                   "historicTime": 100} for i in range(watch_pages.MAX_AXES + 7)]
+        bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
+        assert len(bloc["r"]) == watch_pages.MAX_AXES
+
+    def test_deux_itineraires_d_un_meme_terrain_restent_distincts(self):
+        # `#I# Ouest` et `#I2# Ouest` coexistent en base : ce sont deux
+        # itineraires differents, que le mur affiche sur deux lignes. Les
+        # sommer (ancien comportement, via agreger_terrains) affichait une
+        # severite que le mur ne montrait nulle part.
+        routes = [
+            {"name": "#I# Ouest", "time": 120, "historicTime": 100},
+            {"name": "#I2# Ouest", "time": 900, "historicTime": 300},
+        ]
+        bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
+        assert len(bloc["r"]) == 2
+        noms = [ligne[0] for ligne in bloc["r"]]
+        assert noms == ["Ouest 2", "Ouest"]
 
     def test_temps_converti_en_minutes(self):
         # currentTime est en SECONDES cote Waze.
@@ -105,17 +132,118 @@ class TestTrafic:
         assert bloc["r"][0][3] == 0
         assert bloc["vd"] == 0
 
-    def test_parking_bouchonne_fait_monter_le_verdict_sans_apparaitre_en_liste(self):
-        # Deuxieme correction de la tache 14 : un parking (#P) tres charge
-        # est exclu de agreger_terrains (prefixe non retenu) donc absent de
-        # `r`, mais le mur le voit (category pkg_aa) et le verdict global de
-        # la montre doit le voir aussi -- sinon un bouchon de parking reste
-        # invisible au poignet alors qu'il s'affiche jusqu'a CRITIQUE sur le
-        # mur. Avant cette correction, ce cas restait FLUIDE.
+    def test_parking_bouchonne_fait_monter_le_verdict_ET_apparait_en_liste(self):
+        # La tache 14 avait corrige la moitie du probleme : le verdict voyait
+        # le parking (via pire_severite_mur) mais la liste ne le montrait pas
+        # (agreger_terrains exclut le prefixe #P). La montre pouvait donc
+        # afficher CRITIQUE sans qu'aucune ligne ne l'explique -- compromis
+        # assume a l'epoque, supprime maintenant que la page pagine ses axes.
+        # Verdict et liste portent desormais sur le MEME ensemble.
         routes = [{"name": "#P3#Parking Sud", "time": 3000, "historicTime": 500}]
         bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
-        assert bloc["r"] == []       # aucun axe d'entree/sortie agrege
-        assert bloc["vd"] == 3       # mais le verdict global le voit : CRITIQUE
+        assert bloc["vd"] == 3                 # CRITIQUE
+        assert len(bloc["r"]) == 1             # et la cause est listee
+        assert bloc["r"][0][0] == "Parking Sud 3"
+        assert bloc["r"][0][1] == "p"          # marque comme parking
+        assert bloc["r"][0][3] == 4            # severite du mur
+
+    # --- Rattachement des alertes aux axes ---------------------------
+    #
+    # Sans lui, la page dit << un accident dans le cercle >> sans dire ou.
+    # Le seuil (trafic_etat.DISTANCE_RATTACHEMENT_M) est pose au milieu d'un
+    # vide mesure sur les deux relevés Waze disponibles en base.
+
+    def _route_droite(self, nom, lat, lon, longueur_deg=0.01):
+        # Segment nord-sud passant par (lat, lon).
+        return {"name": nom, "time": 100, "historicTime": 100,
+                "line": [{"x": lon, "y": lat - longueur_deg},
+                         {"x": lon, "y": lat + longueur_deg}]}
+
+    def test_alerte_posee_sur_un_axe_le_marque(self):
+        import trafic_etat
+        lat = trafic_etat.ZONE_CENTER_LAT
+        lon = trafic_etat.ZONE_CENTER_LON
+        routes = [self._route_droite("#I# Sur", lat, lon),
+                  self._route_droite("#I# Loin", lat, lon + 0.05)]
+        accident = {"type": "ACCIDENT", "location": {"y": lat, "x": lon}}
+        bloc = watch_pages.build_trafic(self._db(routes, [accident]), NOW)
+        lignes = {ligne[0]: ligne[4] for ligne in bloc["r"]}
+        assert lignes["Sur"] == watch_pages.FL_ACCIDENT
+        assert lignes["Loin"] == 0
+
+    def test_alerte_trop_loin_de_tout_axe_ne_marque_personne(self):
+        # Elle compte quand meme dans le bilan : elle est dans le cercle,
+        # elle n'accuse simplement aucun axe surveille.
+        import trafic_etat
+        lat = trafic_etat.ZONE_CENTER_LAT
+        lon = trafic_etat.ZONE_CENTER_LON
+        routes = [self._route_droite("#I# Axe", lat, lon)]
+        # ~1,1 km a l'est, tres au-dela des 250 m du seuil.
+        loin = {"type": "ACCIDENT", "location": {"y": lat, "x": lon + 0.015}}
+        bloc = watch_pages.build_trafic(self._db(routes, [loin]), NOW)
+        assert bloc["ac"] == 1
+        assert bloc["r"][0][4] == 0
+
+    def test_drapeaux_combines_sur_un_meme_axe(self):
+        import trafic_etat
+        lat = trafic_etat.ZONE_CENTER_LAT
+        lon = trafic_etat.ZONE_CENTER_LON
+        routes = [self._route_droite("#I# Axe", lat, lon)]
+        alertes = [
+            {"type": "ACCIDENT", "location": {"y": lat, "x": lon}},
+            {"type": "TRAFFIC_JAM", "location": {"y": lat + 0.0005, "x": lon}},
+        ]
+        bloc = watch_pages.build_trafic(self._db(routes, alertes), NOW)
+        assert bloc["r"][0][4] == watch_pages.FL_ACCIDENT | watch_pages.FL_BOUCHON
+
+    def test_accident_fait_remonter_un_axe_fluide_en_tete(self):
+        # Un accident qui vient de tomber sur un axe encore fluide passe
+        # devant un axe deja bouchonne : c'est sur lui qu'on engage des
+        # moyens, il ne doit pas se retrouver en troisieme sous-page.
+        import trafic_etat
+        lat = trafic_etat.ZONE_CENTER_LAT
+        lon = trafic_etat.ZONE_CENTER_LON
+        fluide = self._route_droite("#I# Fluide", lat, lon)
+        bouche = self._route_droite("#I# Bouche", lat, lon + 0.05)
+        bouche["time"] = 3000
+        bouche["historicTime"] = 500
+        accident = {"type": "ACCIDENT", "location": {"y": lat, "x": lon}}
+        bloc = watch_pages.build_trafic(self._db([fluide, bouche], [accident]),
+                                        NOW)
+        assert bloc["r"][0][0] == "Fluide"
+        assert bloc["r"][0][3] == 0      # bien fluide
+        assert bloc["r"][1][0] == "Bouche"
+
+    def test_comptes_bouchons_et_dangers_exposes(self):
+        import trafic_etat
+        lat = trafic_etat.ZONE_CENTER_LAT
+        lon = trafic_etat.ZONE_CENTER_LON
+        alertes = [
+            {"type": "TRAFFIC_JAM", "location": {"y": lat, "x": lon}},
+            {"type": "WEATHERHAZARD", "location": {"y": lat, "x": lon}},
+            {"type": "HAZARD", "location": {"y": lat, "x": lon}},
+        ]
+        bloc = watch_pages.build_trafic(self._db([], alertes), NOW)
+        assert bloc["jm"] == 1
+        assert bloc["hz"] == 2      # WEATHERHAZARD est un alias de HAZARD
+        assert bloc["ac"] == 0
+        assert bloc["z"] == 3
+
+    def test_alertes_perimees_rendent_les_drapeaux_a_none_pas_a_zero(self):
+        # Meme regle que ac/z/vd : un drapeau a 0 se lit << rien sur cet
+        # axe >>, ce qui serait un mensonge quand la source est muette.
+        db = FakeDb(
+            waze_trafic=[{"fetched_at": datetime(2026, 8, 15, 11, 59),
+                          "data": {"routes": [
+                              {"name": "#I# Ouest", "time": 100,
+                               "historicTime": 100}]}}],
+            waze_alerts=[{"fetched_at": datetime(2026, 8, 15, 11, 40),
+                          "data": []}],
+        )
+        bloc = watch_pages.build_trafic(db, NOW)
+        assert bloc["r"][0][4] is None
+        assert bloc["jm"] is None
+        assert bloc["hz"] is None
 
     def test_cas_nominal_axes_entree_seuls_reste_inchange(self):
         # Sans aucun axe #P, le calcul global sur toutes les routes

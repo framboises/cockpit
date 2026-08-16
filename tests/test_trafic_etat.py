@@ -139,6 +139,197 @@ class TestPireSeveriteMur:
         assert trafic_etat.pire_severite_mur(None) == 0
 
 
+class TestAxesMur:
+    def test_un_axe_par_itineraire_sans_agregation(self):
+        # agreger_terrains sommerait ces deux troncons en un seul terrain
+        # "Ouest" ; le mur en affiche deux lignes, axes_mur aussi.
+        routes = [
+            {"name": "#I# Ouest", "time": 120, "historicTime": 100},
+            {"name": "#I2# Ouest", "time": 900, "historicTime": 300},
+        ]
+        assert len(trafic_etat.agreger_terrains(routes)) == 1
+        axes = trafic_etat.axes_mur(routes)
+        assert len(axes) == 2
+        assert sorted(a["nom"] for a in axes) == ["Ouest", "Ouest 2"]
+
+    def test_severite_calculee_itineraire_par_itineraire(self):
+        # 900s contre 300s d'historique : ratio 3, retard 600s -> severite 4
+        # sur CE troncon. Agrege avec l'autre (1020 contre 400), le ratio
+        # tombe a 2,55 et la severite a 3 -- chiffre que le mur n'affiche
+        # nulle part.
+        routes = [
+            {"name": "#I# Ouest", "time": 120, "historicTime": 100},
+            {"name": "#I2# Ouest", "time": 900, "historicTime": 300},
+        ]
+        axes = {a["nom"]: a["severity"] for a in trafic_etat.axes_mur(routes)}
+        assert axes["Ouest 2"] == 4
+        assert axes["Ouest"] == 0
+
+    def test_parkings_inclus_et_marques(self):
+        routes = [{"name": "#P3#Parking Sud", "time": 3000,
+                   "historicTime": 500}]
+        axes = trafic_etat.axes_mur(routes)
+        assert len(axes) == 1
+        assert axes[0]["parking"] is True
+        assert axes[0]["nom"] == "Parking Sud 3"
+
+    def test_axe_non_balise_est_ignore(self):
+        routes = [{"name": "Fresne -> Leroy Merlin", "time": 5000,
+                   "historicTime": 100},
+                  {"name": "** SDIS -> Sud", "time": 500, "historicTime": 100}]
+        assert trafic_etat.axes_mur(routes) == []
+
+    def test_meme_ensemble_que_pire_severite_mur(self):
+        # Les deux doivent porter sur exactement les memes axes : un verdict
+        # calcule sur un ensemble plus large que la liste affichee produit un
+        # << CRITIQUE >> sans cause visible.
+        routes = [
+            {"name": "#I# Ouest", "time": 120, "historicTime": 100},
+            {"name": "#P3#Parking Sud", "time": 3000, "historicTime": 500},
+            {"name": "Fresne -> Leroy Merlin", "time": 5000, "historicTime": 1},
+        ]
+        axes = trafic_etat.axes_mur(routes)
+        assert trafic_etat.pire_severite_mur(routes) == \
+            max(a["severity"] for a in axes)
+
+
+class TestDistanceEtRattachement:
+    # Un degre de latitude vaut ~110,54 km : 0,001 degre = ~110,5 m. Toutes
+    # les distances attendues ci-dessous se verifient a la main sur cette
+    # seule constante, sans rejouer le calcul teste.
+    LAT = trafic_etat.ZONE_CENTER_LAT
+    LON = trafic_etat.ZONE_CENTER_LON
+
+    def _axe(self, nom, lat, lon, demi=0.01):
+        return {"name": nom, "time": 100, "historicTime": 100,
+                "line": [{"x": lon, "y": lat - demi},
+                         {"x": lon, "y": lat + demi}]}
+
+    def test_point_sur_le_segment_est_a_zero(self):
+        p1 = {"x": self.LON, "y": self.LAT - 0.01}
+        p2 = {"x": self.LON, "y": self.LAT + 0.01}
+        d = trafic_etat.distance_point_segment_m(self.LAT, self.LON, p1, p2)
+        assert d < 1.0
+
+    def test_distance_perpendiculaire_au_segment(self):
+        # Point decale de 0,001 degre de latitude = ~110,5 m d'un segment
+        # est-ouest.
+        p1 = {"x": self.LON - 0.01, "y": self.LAT}
+        p2 = {"x": self.LON + 0.01, "y": self.LAT}
+        d = trafic_etat.distance_point_segment_m(self.LAT + 0.001, self.LON,
+                                                 p1, p2)
+        assert 108 < d < 113
+
+    def test_distance_bornee_a_l_extremite_du_segment(self):
+        # Point au-dela du bout du segment : la distance est celle du bout,
+        # pas celle de la droite prolongee (qui vaudrait zero ici).
+        p1 = {"x": self.LON, "y": self.LAT}
+        p2 = {"x": self.LON, "y": self.LAT + 0.001}
+        d = trafic_etat.distance_point_segment_m(self.LAT + 0.003, self.LON,
+                                                 p1, p2)
+        assert 215 < d < 225      # ~2 x 110,5 m
+
+    def test_axe_sans_geometrie_ne_capte_rien(self):
+        # Un axe sans polyligne ne doit surtout pas devenir le plus proche
+        # par defaut : il rend None, pas zero.
+        assert trafic_etat.distance_point_axe_m(self.LAT, self.LON,
+                                                {"line": []}) is None
+        assert trafic_etat.distance_point_axe_m(self.LAT, self.LON, {}) is None
+
+    def test_alerte_rattachee_a_l_axe_le_plus_proche_seulement(self):
+        axes = trafic_etat.axes_mur([
+            self._axe("#I# Proche", self.LAT, self.LON),
+            self._axe("#I# Autre", self.LAT, self.LON + 0.0005),
+        ])
+        trafic_etat.rattacher_alertes(axes, [
+            {"type": "ACCIDENT", "location": {"y": self.LAT, "x": self.LON}},
+        ])
+        marques = {a["nom"]: a["alertes"]["ACCIDENT"] for a in axes}
+        # Les deux axes sont a moins de 250 m, mais l'alerte n'est comptee
+        # qu'une fois, sur le plus proche.
+        assert marques == {"Proche": 1, "Autre": 0}
+
+    def test_le_seuil_encadre_le_vide_mesure(self):
+        # CE test est celui qui fixe la VALEUR du seuil ; les autres se
+        # contentent de verifier qu'il existe. Trouve par sabotage : ramener
+        # DISTANCE_RATTACHEMENT_M de 250 a 20 ne faisait tomber aucun test.
+        #
+        # Les deux bornes sont les cas reels mesures sur le releve de prod du
+        # 31/03/2026 : le bouchon D338 est a 151 m de l'axe Antares Sud (il
+        # DOIT se rattacher, c'est le vrai rattachement le plus lointain
+        # observe), la fermeture Rue Marcel Cerdan est a 793 m de tout axe
+        # (elle ne DOIT pas, c'est le faux le plus proche observe).
+        axes = trafic_etat.axes_mur([self._axe("#I# Axe", self.LAT, self.LON)])
+        proche = 151.0 / 110540.0      # ~151 m au nord du bout du segment
+        loin = 793.0 / 110540.0        # ~793 m
+        trafic_etat.rattacher_alertes(axes, [
+            {"type": "ACCIDENT",
+             "location": {"y": self.LAT + 0.01 + proche, "x": self.LON}},
+        ])
+        assert axes[0]["alertes"]["ACCIDENT"] == 1, \
+            "un vrai rattachement mesure a 151 m doit passer"
+        trafic_etat.rattacher_alertes(axes, [
+            {"type": "ACCIDENT",
+             "location": {"y": self.LAT + 0.01 + loin, "x": self.LON}},
+        ])
+        assert axes[0]["alertes"]["ACCIDENT"] == 0, \
+            "un faux rattachement mesure a 793 m doit etre ecarte"
+
+    def test_alerte_au_dela_du_seuil_n_est_rattachee_a_rien(self):
+        axes = trafic_etat.axes_mur([self._axe("#I# Axe", self.LAT, self.LON)])
+        trafic_etat.rattacher_alertes(axes, [
+            # ~331 m au nord du bout du segment : au-dela des 250 m.
+            {"type": "ACCIDENT",
+             "location": {"y": self.LAT + 0.013, "x": self.LON}},
+        ])
+        assert axes[0]["alertes"]["ACCIDENT"] == 0
+
+    def test_alerte_hors_geofence_ignoree_meme_collee_a_un_axe(self):
+        # Le geofence prime : un axe qui sortirait du cercle ne doit pas
+        # ramener des alertes que le bilan ne compte pas.
+        loin_lat = self.LAT + 0.5
+        axes = trafic_etat.axes_mur([self._axe("#I# Loin", loin_lat, self.LON)])
+        trafic_etat.rattacher_alertes(axes, [
+            {"type": "ACCIDENT", "location": {"y": loin_lat, "x": self.LON}},
+        ])
+        assert axes[0]["alertes"]["ACCIDENT"] == 0
+
+    def test_types_non_comptes_ne_marquent_aucun_axe(self):
+        # ROAD_CLOSED est volontairement hors TYPES_COMPTES (circulation
+        # .html:479) : autour du circuit, les fermetures sont l'etat nominal
+        # et le flux en porte des signalements vieux de plusieurs mois.
+        axes = trafic_etat.axes_mur([self._axe("#I# Axe", self.LAT, self.LON)])
+        trafic_etat.rattacher_alertes(axes, [
+            {"type": "ROAD_CLOSED",
+             "location": {"y": self.LAT, "x": self.LON}},
+        ])
+        assert axes[0]["alertes"] == {"ACCIDENT": 0, "JAM": 0, "HAZARD": 0}
+
+    def test_alias_de_type_pris_en_compte(self):
+        axes = trafic_etat.axes_mur([self._axe("#I# Axe", self.LAT, self.LON)])
+        trafic_etat.rattacher_alertes(axes, [
+            {"type": "TRAFFIC_JAM", "location": {"y": self.LAT, "x": self.LON}},
+            {"type": "WEATHERHAZARD",
+             "location": {"y": self.LAT, "x": self.LON}},
+        ])
+        assert axes[0]["alertes"]["JAM"] == 1
+        assert axes[0]["alertes"]["HAZARD"] == 1
+
+    def test_alerte_sans_coordonnees_ne_plante_pas(self):
+        axes = trafic_etat.axes_mur([self._axe("#I# Axe", self.LAT, self.LON)])
+        trafic_etat.rattacher_alertes(axes, [{"type": "ACCIDENT"}, None,
+                                             {"type": "ACCIDENT",
+                                              "location": {}}])
+        assert axes[0]["alertes"]["ACCIDENT"] == 0
+
+    def test_chaque_axe_recoit_son_compteur_meme_sans_alerte(self):
+        # Sans initialisation, la vue devrait distinguer un axe sans
+        # compteur d'un axe a zero -- deux facons de dire la meme chose.
+        axes = trafic_etat.axes_mur([self._axe("#I# Axe", self.LAT, self.LON)])
+        trafic_etat.rattacher_alertes(axes, [])
+        assert axes[0]["alertes"] == {"ACCIDENT": 0, "JAM": 0, "HAZARD": 0}
+
+
 class TestCompterAlertes:
     def test_ne_compte_que_ce_qui_est_en_zone(self):
         alertes = [

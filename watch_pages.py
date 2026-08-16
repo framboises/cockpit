@@ -20,9 +20,19 @@ import watch_state
 
 logger = logging.getLogger(__name__)
 
-# Au-dela, la liste ne tient plus sur un cadran rond et le detail se lit sur
-# le cockpit.
-MAX_TERRAINS = 4
+# Six axes par sous-page, trois sous-pages : au-dela, le poignet n'est plus
+# le bon outil et le detail se lit sur le mur. Aucun releve Waze observe en
+# base n'approche ce plafond (13 axes surveilles en aout 2026) ; il n'existe
+# que pour qu'une reconfiguration cote operateur ne puisse pas faire enfler
+# le payload sans que personne ne s'en apercoive.
+MAX_AXES = 18
+AXES_PAR_SOUS_PAGE = 6
+
+# Drapeaux d'alerte poses sur un axe, combinables : un meme axe peut porter
+# un accident ET un bouchon. Miroir exact de TraficView.mc (FL_*).
+FL_ACCIDENT = 1
+FL_BOUCHON = 2
+FL_DANGER = 4
 
 # Les quatre categories nommees sur la page, et leur cle dans le payload.
 CATEGORIES_NOMMEES = (
@@ -182,24 +192,26 @@ def build_trafic(db, now_utc=None):
     le mur, precisement la fausse alerte que le double verrou existe pour
     ecarter (cf. severite_axe).
 
-    Le verdict global (`vd`), lui, n'est PAS calcule sur les seuls terrains
-    agreges : `agreger_terrains` ne retient que les axes prefixes ##/#I/#O
-    et exclut donc les parkings (#P), que le mur inclut dans son panneau
-    << Axes >>. Sans correction, un parking tres charge restait invisible a
-    la montre jusqu'au niveau CRITIQUE -- un manque SILENCIEUX, jamais une
-    fausse alerte, precisement la faute que ce projet cherche a eliminer :
-    une page qui parait calme alors qu'elle ne sait pas. `pire_severite_mur`
-    reproduit donc le meme ensemble d'axes que le mur (toutes les routes
-    I/O/neutral/P, classees individuellement, sans agregation) pour cette
-    seule valeur.
+    La liste `r` porte desormais TOUS les axes du panneau << Axes >> du mur
+    (trafic_etat.axes_mur), un par itineraire Waze, parkings compris, et
+    plus les quatre terrains agreges les plus charges. Deux defauts
+    disparaissent d'un coup :
 
-    Consequence assumee : la montre peut afficher un verdict eleve sans
-    qu'aucun terrain de la liste `r` ne l'explique, quand la cause est un
-    parking. C'est le bon compromis -- un verdict visible sans cause listee
-    renvoie au moins l'utilisateur regarder le mur ou le cockpit ; un
-    verdict qui reste FLUIDE ne renvoie nulle part. La liste `r` continue
-    de montrer les terrains d'entree/sortie agreges : choix d'affichage
-    assume, cette page montre les axes d'acces, pas les parkings.
+      - le verdict pouvait etre eleve sans qu'aucune ligne ne l'explique,
+        quand la cause etait un parking -- `agreger_terrains` les exclut,
+        `pire_severite_mur` les voyait. Verdict et liste sont maintenant
+        calcules sur le MEME ensemble d'axes, par le meme code.
+      - la severite affichee venait d'une somme de troncons que le mur ne
+        montre nulle part. A itineraire egal, la montre et le mur affichent
+        maintenant le meme chiffre.
+
+    Chaque axe porte `fl`, un masque des alertes Waze POSEES DESSUS
+    (trafic_etat.rattacher_alertes, seuil de 250 m mesure) : c'est ce qui
+    permet de lire << l'accident est sur Panorama >> et plus seulement
+    << il y a un accident quelque part dans le cercle >>. `fl` vaut None,
+    jamais 0, quand les alertes sont perimees -- meme regle que ac/z/vd
+    ci-dessous : un axe sans drapeau doit vouloir dire << rien sur cet
+    axe >>, jamais << je ne sais pas >>.
 
     `ac`/`z`/`vd` dependent des ALERTES (waze_alerts), une collection
     DIFFERENTE de celle qui date le reste du bloc (waze_trafic). Sans garde
@@ -220,10 +232,11 @@ def build_trafic(db, now_utc=None):
     if not routes and not alertes:
         return None
 
-    terrains = trafic_etat.agreger_terrains(routes)
-    for terrain in terrains:
-        terrain["severity"] = trafic_etat.severite_axe(terrain)
-    pire = trafic_etat.pire_severite_mur(routes)
+    # Un seul appel : le verdict et la liste doivent porter sur exactement
+    # les memes axes, et `pire_severite_mur(routes)` recalculerait la meme
+    # chose une seconde fois pour en rendre le max.
+    axes = trafic_etat.axes_mur(routes)
+    pire = max([axe["severity"] for axe in axes] or [0])
 
     t_routes = trafic_etat.fraicheur(db)
     t_alertes = trafic_etat.fraicheur_alertes(db)
@@ -233,8 +246,11 @@ def build_trafic(db, now_utc=None):
     if alertes_fraiches:
         comptes = trafic_etat.compter_alertes(alertes)
         ac = comptes.get("ACCIDENT", 0)
+        jm = comptes.get("JAM", 0)
+        hz = comptes.get("HAZARD", 0)
         z = comptes.get("total", 0)
         vd = trafic_etat.verdict_global(comptes, pire)
+        trafic_etat.rattacher_alertes(axes, alertes)
     else:
         # Collecteur d'alertes arrete ou document perime : ne JAMAIS rendre
         # un compte fige a zero, qui se lirait comme un calme operationnel
@@ -242,28 +258,55 @@ def build_trafic(db, now_utc=None):
         # ailleurs -- une page qui parait calme parce qu'elle a cesse de
         # savoir.
         ac = None
+        jm = None
+        hz = None
         z = None
         vd = None
 
-    # Tri par gravite decroissante, pas par ratio : la montre montre d'abord
-    # ce qui coince, et deux terrains de ratios voisins peuvent tomber dans
-    # des paliers differents.
-    ordonnes = sorted(terrains, key=lambda t: t["severity"], reverse=True)
+    # Ordre : accidents d'abord, puis gravite decroissante, puis minutes
+    # perdues. Un accident qui vient de tomber sur un axe encore fluide
+    # passe donc devant un bouchon installe -- c'est sur lui qu'on engage
+    # des moyens, il ne doit pas se retrouver en troisieme sous-page. Le
+    # tri se fait sur la GRAVITE, pas sur le ratio : deux axes de ratios
+    # voisins peuvent tomber dans des paliers differents.
+    def _cle_tri(axe):
+        alertes_axe = axe.get("alertes") or {}
+        return (
+            1 if alertes_axe.get("ACCIDENT") else 0,
+            axe["severity"],
+            axe.get("deltaSeconds") or 0,
+        )
+
+    ordonnes = sorted(axes, key=_cle_tri, reverse=True)
 
     resume = []
-    for terrain in ordonnes[:MAX_TERRAINS]:
-        sens = {"in": "i", "out": "o"}.get(terrain.get("direction"), "-")
+    for axe in ordonnes[:MAX_AXES]:
+        if axe["parking"]:
+            sens = "p"
+        else:
+            sens = {"in": "i", "out": "o"}.get(axe["direction"], "-")
+        drapeaux = None
+        if alertes_fraiches:
+            alertes_axe = axe.get("alertes") or {}
+            drapeaux = (
+                (FL_ACCIDENT if alertes_axe.get("ACCIDENT") else 0)
+                | (FL_BOUCHON if alertes_axe.get("JAM") else 0)
+                | (FL_DANGER if alertes_axe.get("HAZARD") else 0)
+            )
         resume.append([
-            terrain["terrain"],
+            axe["nom"],
             sens,
-            int(round((terrain["currentTime"] or 0) / 60.0)),
-            terrain["severity"],
+            int(round((axe["currentTime"] or 0) / 60.0)),
+            axe["severity"],
+            drapeaux,
         ])
 
     return {
         "t": _epoch(_horodatage_le_plus_ancien(t_routes, t_alertes)),
         "vd": vd,
         "ac": ac,
+        "jm": jm,
+        "hz": hz,
         "z": z,
         "r": resume,
     }
