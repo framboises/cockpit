@@ -319,3 +319,61 @@ function testSansGuidageLesDeuxChampsRestentNuls(logger) {
     Test.assert(pg["gd"] == null);
     return true;
 }
+
+
+// --- Transport de la prochaine vignette de timeline ---------------------
+//
+// Troisieme fois que ce defaut se produit sur ce projet (apres `me`, puis
+// `gd`/`gs`) : un champ ajoute au payload serveur et oublie dans
+// toCacheDict est perdu en SILENCE, sans erreur ni trace. Trouve par
+// sabotage a chaque fois, jamais par la suite verte.
+
+(:test)
+function testToCacheReporteLaProchaineVignette(logger) {
+    var data = {"t" => 100, "m" => "live", "al" => [],
+                "nx" => [1786871218, "Ouverture au public", "Controle", 0]};
+    var st = Api.toCacheDict(data, 200);
+    Test.assert(st["nx"] != null);
+    Test.assertEqual(st["nx"][1], "Ouverture au public");
+    return true;
+}
+
+(:test)
+function testToCacheReporteLeCompteDeFactorisation(logger) {
+    // Le quatrieme element dit qu'une ligne en vaut huit. Le perdre
+    // afficherait "Ouverture parkings" sans dire combien.
+    var data = {"t" => 100, "m" => "live", "al" => [],
+                "nx" => [1786871218, "Ouverture parkings", "CHINETTI", 8]};
+    var st = Api.toCacheDict(data, 200);
+    Test.assertEqual(st["nx"][3], 8);
+    return true;
+}
+
+(:test)
+function testSansProchaineLeChampResteNul(logger) {
+    // Payload d'un serveur anterieur a cette page, ou simplement hors
+    // evenement : ni exception, ni valeur par defaut inventee.
+    var st = Api.toCacheDict({"t" => 100, "m" => "live", "al" => []}, 200);
+    Test.assert(st["nx"] == null);
+    return true;
+}
+
+(:test)
+function testToTimelineListExtraitLaListe(logger) {
+    var liste = Api.toTimelineList(
+        {"ok" => true,
+         "tl" => [[1786871218, "Ouverture au public", "Controle", 0]]});
+    Test.assertEqual(liste.size(), 1);
+    Test.assertEqual(liste[0][1], "Ouverture au public");
+    return true;
+}
+
+(:test)
+function testToTimelineListToleereUneReponseVide(logger) {
+    // Hors evenement, le serveur rend `tl: []`. Et une reponse malformee ne
+    // doit pas lever : la page affiche "rien de prevu", pas une erreur.
+    Test.assertEqual(Api.toTimelineList({"ok" => true, "tl" => []}).size(), 0);
+    Test.assertEqual(Api.toTimelineList({"ok" => true}).size(), 0);
+    Test.assertEqual(Api.toTimelineList(null).size(), 0);
+    return true;
+}

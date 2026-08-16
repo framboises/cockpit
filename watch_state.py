@@ -7,6 +7,8 @@ import Flask : ce module se teste sans application.
 import logging
 from datetime import datetime, timedelta, timezone
 
+import watch_timeline
+
 logger = logging.getLogger(__name__)
 
 # Seuils WBGT en degres, replies sur l'echelle 0-3 de la montre. Ils viennent
@@ -408,6 +410,36 @@ def build_state(db, now, now_utc=None, peaks=None, pages=None):
             except Exception as exc:
                 logger.warning("watch_state : bloc %s indisponible (%s)", cle, exc)
 
+    # La PROCHAINE vignette de la timeline, seule. La liste complete vit sur
+    # /timeline, requetee paresseusement quand la page s'ouvre : la porter
+    # ici couterait 570 octets a chaque releve, sur un budget de 2 Ko dont
+    # il reste moins de 300. Ces soixante-dix octets-la, en revanche,
+    # permettent a la page d'afficher quelque chose des son ouverture --
+    # depuis le cache, meme hors de portee du telephone.
+    #
+    # `timeline` est IMPORTE et non injecte, contrairement a peaks et pages :
+    # watch_timeline n'importe pas watch_state (il ne connait que
+    # pcorg_summary, qui n'importe ni Flask ni app), il n'y a donc aucun
+    # cycle a eviter ici.
+    #
+    # Calcule dans LES DEUX MODES, contrairement a mc et st. La premiere
+    # version le reservait au mode live, par economie ; un sabotage a montre
+    # que cette garde ne coutait rien et retirait de l'information :
+    #
+    #   - en mode auto (le cas courant), hors evenement, resolve_event rend
+    #     deja (None, None) et prochaines() sort sans toucher Mongo. La
+    #     garde n'economisait donc rien du tout.
+    #   - en mode epingle, elle SUPPRIMAIT la timeline precisement quand
+    #     elle sert le plus : la veille et le matin de l'evenement, pendant
+    #     le montage, avant que le live-controle ne soit arme. Le
+    #     live-controle dit << on compte les entrees >>, pas << il se passe
+    #     quelque chose >>.
+    prochaine = None
+    try:
+        prochaine = watch_timeline.prochaine(db, event, year, now_utc=now_utc)
+    except Exception as exc:
+        logger.warning("watch_state : timeline indisponible (%s)", exc)
+
     payload = {
         # `horodatage` est naif mais contient de l'UTC (pymongo, client non
         # tz_aware). .timestamp() l'interpreterait en heure locale du
@@ -434,6 +466,8 @@ def build_state(db, now, now_utc=None, peaks=None, pages=None):
         "w": round(wbgt, 1) if wbgt is not None else None,
         "wl": wbgt_level(wbgt, tuple(config["wbgt_levels"])),
         "al": select_alerts(actives, config["alerts"]),
+        # [epoch, activite, lieu, compte de factorisation], ou None.
+        "nx": prochaine,
     }
     payload.update(blocs)
     return payload

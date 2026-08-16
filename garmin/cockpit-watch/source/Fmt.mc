@@ -74,6 +74,34 @@ module Fmt {
         return info.day_of_week + " " + info.day.toString() + " " + info.month;
     }
 
+    // Compte a rebours jusqu'a un instant futur : "dans 42 min", "dans 3 h",
+    // "maintenant". C'est LA valeur de la page Timeline -- une heure seule
+    // ("08:00") oblige a un calcul mental, un delai se lit d'un coup.
+    //
+    // Calcule au POIGNET a partir d'un epoch, jamais formate cote serveur :
+    // un releve peut avoir jusqu'a trois minutes de retard, et un "dans 42
+    // min" fige a l'emission serait faux a l'arrivee.
+    //
+    // Le passe rend "maintenant" plutot qu'un delai negatif : entre le
+    // dernier releve et l'affichage, une vignette peut avoir franchi son
+    // heure sans que le serveur ait eu le temps de la retirer. Annoncer
+    // "dans -2 min" serait absurde ; "maintenant" est exactement juste.
+    function delai(epochSec, nowSec) {
+        if (epochSec == null || nowSec == null) {
+            return DASH;
+        }
+        var reste = epochSec - nowSec;
+        if (reste < 60) {
+            return "maintenant";
+        }
+        if (reste < 3600) {
+            return "dans " + (reste / 60).toString() + " min";
+        }
+        // Au-dela d'une heure, les minutes n'ajoutent rien a la decision :
+        // on retient "dans 3 h", pas "dans 3 h 12".
+        return "dans " + (reste / 3600).toString() + " h";
+    }
+
     // Heure d'un instant, meme convention locale. Le pic d'affluence se lit
     // autant a son heure qu'a sa date : "sam. 18 avr. 15h05" dit une chose
     // qu'une date seule ne dit pas.

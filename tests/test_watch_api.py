@@ -554,6 +554,180 @@ class TestGuidage:
         assert str(self.id_b) not in liste
 
 
+class TestTimeline:
+    """L'endpoint paresseux : la liste complete ne voyage qu'a l'ouverture de
+    la page. Le payload principal, lui, ne porte que la PROCHAINE vignette."""
+
+    SECRET = "secret-tl"
+
+    def _monde(self, monkeypatch, actif=True, minutes=5):
+        import watch_api
+        from datetime import datetime, timedelta, timezone
+        from zoneinfo import ZoneInfo
+        from conftest import FakeDb
+
+        tz = ZoneInfo("Europe/Paris")
+        # Le releve doit etre RECENT pour que le mode live tienne.
+        maintenant = datetime.now(timezone.utc)
+        demain = (maintenant.astimezone(tz) + timedelta(hours=2))
+        jour = demain.strftime("%Y-%m-%d")
+        heure = demain.strftime("%H:%M")
+
+        db = FakeDb(
+            watch_tokens=[{"_id": "1",
+                           "token_sha256": watch_api.hash_token(self.SECRET),
+                           "revoked": False}],
+            data_access=[{
+                "_id": "___GLOBAL___", "compteur_principal_id": "628",
+                "live_controle_actif": actif},
+                {"requested_location_id": "628", "entries": 100,
+                 "requested_event": "24H MOTOS", "year": "2026",
+                 "timestamp": (maintenant
+                               - timedelta(minutes=minutes)).replace(tzinfo=None)}],
+            watch_config=[{"_id": "watch", "event_mode": "auto", "alerts": []}],
+            timetable=[{"event": "24H MOTOS", "year": "2026",
+                        "data": {jour: [
+                            {"date": jour, "start": heure,
+                             "activity": "Ouverture au public",
+                             "place": "Controle", "category": "General"}]}}],
+        )
+        monkeypatch.setattr(watch_api, "_db", lambda: db)
+        return db
+
+    def _get(self, client):
+        return client.get("/api/v1/watch/timeline",
+                          headers={"Authorization": "Bearer " + self.SECRET})
+
+    def test_jeton_requis(self, client, monkeypatch):
+        self._monde(monkeypatch)
+        assert client.get("/api/v1/watch/timeline").status_code == 401
+
+    def test_liste_servie(self, client, monkeypatch):
+        self._monde(monkeypatch)
+        corps = self._get(client).get_json()
+        assert corps["ok"] is True
+        assert len(corps["tl"]) == 1
+        quand, activite, lieu, compte = corps["tl"][0]
+        assert activite == "Ouverture au public"
+        assert lieu == "Controle"
+        assert isinstance(quand, int)
+
+    def test_live_controle_arrete_rend_une_liste_vide(self, client, monkeypatch):
+        # LE piege que la garde evite : sans le drapeau live, la requete
+        # remonterait le dernier releve connu et servirait la timeline d'une
+        # edition terminee. C'est le defaut qui avait fait afficher les
+        # entrees du 23 avril sous le libelle "24HM 26" pendant des semaines.
+        self._monde(monkeypatch, actif=False)
+        assert self._get(client).get_json()["tl"] == []
+
+    def test_releve_perime_rend_une_liste_vide(self, client, monkeypatch):
+        # Seconde garde, independante de la premiere : le drapeau dit encore
+        # actif, mais plus aucun releve n'arrive depuis sept heures.
+        self._monde(monkeypatch, minutes=7 * 60)
+        assert self._get(client).get_json()["tl"] == []
+
+    def test_cache_partage_entre_montres(self, client, monkeypatch):
+        # Contrairement au guidage, la timeline est la MEME pour tout le
+        # monde : le cache peut donc etre commun, et le document timetable
+        # n'est lu qu'une fois par minute quel que soit le nombre de
+        # montres.
+        import watch_api
+        db = self._monde(monkeypatch)
+        self._get(client)
+        # On vide la base : une seconde requete dans la fenetre de cache
+        # doit quand meme rendre la liste.
+        db["timetable"].docs = []
+        assert len(self._get(client).get_json()["tl"]) == 1
+        watch_api.reset_cache()
+        assert self._get(client).get_json()["tl"] == []
+
+
+class TestProchaineDansLeState:
+    """`nx` permet a la page d'afficher quelque chose des son ouverture,
+    depuis le cache, sans attendre /timeline ni etre a portee du telephone."""
+
+    def test_nx_porte_la_prochaine_vignette(self, monkeypatch):
+        from datetime import datetime, timedelta, timezone
+        from zoneinfo import ZoneInfo
+        from conftest import FakeDb
+        import watch_state
+
+        tz = ZoneInfo("Europe/Paris")
+        maintenant = datetime.now(timezone.utc)
+        futur = maintenant.astimezone(tz) + timedelta(hours=2)
+        jour = futur.strftime("%Y-%m-%d")
+
+        db = FakeDb(
+            data_access=[{"_id": "___GLOBAL___",
+                          "compteur_principal_id": "628",
+                          "live_controle_actif": True},
+                         {"requested_location_id": "628", "entries": 100,
+                          "requested_event": "24H MOTOS", "year": "2026",
+                          "timestamp": (maintenant
+                                        - timedelta(minutes=5)).replace(tzinfo=None)}],
+            watch_config=[{"_id": "watch", "event_mode": "auto", "alerts": []}],
+            timetable=[{"event": "24H MOTOS", "year": "2026",
+                        "data": {jour: [
+                            {"date": jour, "start": futur.strftime("%H:%M"),
+                             "activity": "Ouverture au public",
+                             "place": "Controle"}]}}],
+        )
+        st = watch_state.build_state(db, datetime.now(), now_utc=maintenant)
+        assert st["m"] == "live"
+        assert st["nx"] is not None
+        assert st["nx"][1] == "Ouverture au public"
+
+    def test_nx_absent_sans_evenement_resolu(self, monkeypatch):
+        # Mode auto hors evenement : resolve_event rend (None, None), et
+        # prochaines() sort sans meme toucher Mongo.
+        from datetime import datetime, timezone
+        from conftest import FakeDb
+        import watch_state
+
+        db = FakeDb(data_access=[{"_id": "___GLOBAL___",
+                                  "compteur_principal_id": "628",
+                                  "live_controle_actif": False}],
+                    watch_config=[{"_id": "watch", "event_mode": "auto",
+                                   "alerts": []}])
+        st = watch_state.build_state(db, datetime.now(),
+                                     now_utc=datetime.now(timezone.utc))
+        assert st["m"] == "past"
+        assert st["nx"] is None
+
+    def test_nx_present_avant_l_armement_du_live_controle(self):
+        # LE cas qui a fait retirer la garde `mode == "live"`, trouve par
+        # sabotage : evenement EPINGLE, live-controle pas encore arme (on est
+        # la veille, ou tot le matin), et le montage bat son plein. C'est
+        # precisement le moment ou << qu'est-ce qui tombe dans l'heure >>
+        # sert le plus -- la garde le rendait muet.
+        from datetime import datetime, timedelta, timezone
+        from zoneinfo import ZoneInfo
+        from conftest import FakeDb
+        import watch_state
+
+        tz = ZoneInfo("Europe/Paris")
+        maintenant = datetime.now(timezone.utc)
+        futur = maintenant.astimezone(tz) + timedelta(hours=2)
+        jour = futur.strftime("%Y-%m-%d")
+
+        db = FakeDb(
+            data_access=[{"_id": "___GLOBAL___",
+                          "compteur_principal_id": "628",
+                          "live_controle_actif": False}],
+            watch_config=[{"_id": "watch", "event_mode": "pinned",
+                           "event": "24H MOTOS", "year": 2026, "alerts": []}],
+            timetable=[{"event": "24H MOTOS", "year": "2026",
+                        "data": {jour: [
+                            {"date": jour, "start": futur.strftime("%H:%M"),
+                             "activity": "Debut du montage",
+                             "place": "Montage"}]}}],
+        )
+        st = watch_state.build_state(db, datetime.now(), now_utc=maintenant)
+        assert st["m"] == "past"          # le live-controle n'est pas arme
+        assert st["nx"] is not None       # et la timeline est quand meme la
+        assert st["nx"][1] == "Debut du montage"
+
+
 class _FakeCollection:
     def __init__(self, docs=None):
         self.docs = list(docs or [])

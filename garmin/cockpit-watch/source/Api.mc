@@ -29,6 +29,7 @@ module Api {
     // etat. La garde mInFlightSince, elle, reste PARTAGEE : une seule requete
     // sur le lien BLE a la fois, c'est tout son objet.
     var mEditionsCallback = null;
+    var mTimelineCallback = null;
 
     // Le payload HTTP porte les alertes en dictionnaires ; le cache les stocke
     // en tableaux, moitie moins d'octets et d'objets a instancier au reveil de
@@ -61,6 +62,13 @@ module Api {
             // lit que le noyau : sans ce scalaire, un point envoye pendant
             // que l'app est fermee n'aurait fait vibrer personne.
             "gs" => (data != null) ? data["gs"] : null,
+            // La PROCHAINE vignette de timeline, seule : [epoch, activite,
+            // lieu, compte]. La liste complete vit sur /timeline, requetee
+            // paresseusement. Elle est dans le NOYAU et non dans les pages
+            // parce qu'elle tient en 70 octets et qu'elle sert au coup
+            // d'oeil -- c'est aussi ce qui permettra un jour de la poser sur
+            // la glance sans requete supplementaire.
+            "nx" => (data != null) ? data["nx"] : null,
             "al" => al,
             "rx" => nowSec,
             "ok" => true
@@ -100,6 +108,17 @@ module Api {
             out.add([e["n"], e["pk"], e["pkt"]]);
         }
         return out;
+    }
+
+    // La liste arrive deja compactee en tableaux cote serveur
+    // (watch_timeline._compacter) : rien a reformer ici, seulement a
+    // extraire et a se proteger d'une reponse malformee.
+    function toTimelineList(data) {
+        var brut = (data != null) ? data["tl"] : null;
+        if (brut == null) {
+            return [];
+        }
+        return brut;
     }
 
     function fetch(callback) {
@@ -193,6 +212,61 @@ module Api {
             },
             new Lang.Method(Api, :onReceiveEditions)
         );
+    }
+
+    function fetchTimeline(callback) {
+        var mock = Application.Properties.getValue("mockData");
+        if (mock != null && mock) {
+            callback.invoke(true, Mock.timeline(Time.now().value()));
+            return;
+        }
+
+        var host = Application.Properties.getValue("host");
+        var token = Application.Properties.getValue("token");
+        if (host == null || host.length() == 0
+            || token == null || token.length() == 0) {
+            callback.invoke(false, null);
+            return;
+        }
+
+        var maintenant = Time.now().value();
+        if (mInFlightSince != null
+            && (maintenant - mInFlightSince) < IN_FLIGHT_TIMEOUT_S) {
+            callback.invoke(false, null);
+            return;
+        }
+        mInFlightSince = maintenant;
+        // Arme apres la garde, pas avant : un appel refuse ne doit pas
+        // remplacer le destinataire d'une reponse deja en vol.
+        mTimelineCallback = callback;
+
+        Communications.makeWebRequest(
+            "https://" + host + "/api/v1/watch/timeline",
+            {},
+            {
+                :method => Communications.HTTP_REQUEST_METHOD_GET,
+                :headers => {
+                    "Authorization" => "Bearer " + token
+                },
+                :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
+            },
+            new Lang.Method(Api, :onReceiveTimeline)
+        );
+    }
+
+    function onReceiveTimeline(responseCode as Lang.Number,
+                        data as Lang.Dictionary or Lang.String
+                            or PersistedContent.Iterator or Null) as Void {
+        mInFlightSince = null;
+        if (responseCode != 200 || data == null) {
+            if (mTimelineCallback != null) {
+                mTimelineCallback.invoke(false, null);
+            }
+            return;
+        }
+        if (mTimelineCallback != null) {
+            mTimelineCallback.invoke(true, toTimelineList(data));
+        }
     }
 
     function onReceiveEditions(responseCode as Lang.Number,

@@ -891,3 +891,215 @@ function testEcranVideEnseigneStartEnEntier(logger) {
     verifierNeDebordePas(logger, dc, null);
     return true;
 }
+
+
+// Bornes de troncature SERVEUR (watch_timeline.ACTIVITE_MAX = 30,
+// LIEU_MAX = 24) : au-dela, le serveur coupe deja. Ecrites en toutes
+// lettres -- Monkey C n'a pas d'operateur de repetition de chaine, et un
+// libelle plus court ne serait pas le pire cas.
+const TL_ACTIVITE_MAX = "Ouverture des tribunes nord es";
+const TL_LIEU_MAX = "SINGHER, SOMMER, DURAND,";
+
+// ---------------------------------------------------------------------
+// TimelineView : le heros et les ecrans de liste, plus les etats de
+// chargement. Les libelles viennent du timetable, donc d'une source que
+// cette app ne controle pas -- le pire cas est aux bornes de troncature
+// serveur (watch_timeline.ACTIVITE_MAX / LIEU_MAX).
+// ---------------------------------------------------------------------
+
+// Un fixture qui pretend jouer le pire cas doit le PROUVER, pas seulement
+// l'affirmer en commentaire : ces deux longueurs sont les bornes de
+// troncature serveur (watch_timeline.ACTIVITE_MAX / LIEU_MAX), et un
+// libelle plus court ne testerait rien.
+(:test)
+function testFixtureTimelineEstBienAuPireCas(logger) {
+    Test.assertEqual(TL_ACTIVITE_MAX.length(), 30);
+    Test.assertEqual(TL_LIEU_MAX.length(), 24);
+    return true;
+}
+
+(:test)
+function testDebordementTimelineHerosDepuisLeCacheNeDeborgePas(logger) {
+    var base = Time.now().value();
+    Cache.save({"t" => base, "rx" => base, "m" => "live", "al" => [],
+                "nx" => [base + 2520, TL_ACTIVITE_MAX, TL_LIEU_MAX, 12]});
+    var vue = new TimelineView();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    verifierNeDebordePas(logger, dc, piedStandard(dc));
+    return true;
+}
+
+(:test)
+function testDebordementTimelineToutesLesSousPagesNeDeborgentPas(logger) {
+    var base = Time.now().value();
+    Cache.save({"t" => base, "rx" => base, "m" => "live", "al" => [],
+                "nx" => null});
+    var vue = new TimelineView();
+    // Pire cas : le plafond serveur (watch_timeline.MAX_VIGNETTES = 12) avec
+    // des libelles aux bornes de troncature et des comptes a deux chiffres.
+    var pire = [];
+    for (var i = 0; i < 12; i += 1) {
+        pire.add([base + 600 * (i + 1), TL_ACTIVITE_MAX, TL_LIEU_MAX, 12]);
+    }
+    vue.onRecue(true, pire);
+    var total = vue.nbSousPages();
+    // 12 vignettes = 1 heros + 3 ecrans de quatre. Sans cette verification,
+    // une regression ramenant le livret a une page ferait passer la boucle
+    // sans rien couvrir.
+    Test.assertEqual(total, 4);
+    for (var i = 0; i < total; i += 1) {
+        var dc = dcEnregistrement();
+        vue.onUpdate(dc);
+        verifierNeDebordePas(logger, dc, piedStandard(dc));
+        vue.sousPageSuivante();
+    }
+    return true;
+}
+
+(:test)
+function testDebordementTimelineRienDePrevuNeDeborgePas(logger) {
+    Application.Storage.deleteValue(Cache.KEY);
+    var vue = new TimelineView();
+    vue.onRecue(true, []);
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    verifierNeDebordePas(logger, dc, piedStandard(dc));
+    return true;
+}
+
+(:test)
+function testDebordementTimelineIndisponibleNeDeborgePas(logger) {
+    Application.Storage.deleteValue(Cache.KEY);
+    var vue = new TimelineView();
+    vue.onRecue(false, null);
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    verifierNeDebordePas(logger, dc, piedStandard(dc));
+    return true;
+}
+
+// Contenu, pas seulement geometrie. Trois regressions possibles qu'aucun
+// controle geometrique ne verrait : le delai remplace par une heure, le
+// compte de factorisation perdu, et "rien de prevu" confondu avec une
+// panne.
+
+(:test)
+function testTimelineAfficheUnDelaiPasSeulementUneHeure(logger) {
+    // LA valeur de la page. Une heure seule ("08:00") oblige a un calcul
+    // mental ; c'est le delai qui porte la decision.
+    var base = Time.now().value();
+    Cache.save({"t" => base, "rx" => base, "m" => "live", "al" => [],
+                "nx" => [base + 2520, "Ouverture au public", "Controle", 0]});
+    var vue = new TimelineView();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    var rects = dc.rects();
+    var trouve = false;
+    for (var i = 0; i < rects.size(); i += 1) {
+        var label = rects[i]["label"];
+        if (label != null && label.equals("dans 42 min")) { trouve = true; }
+    }
+    Test.assert(trouve);
+    return true;
+}
+
+(:test)
+function testTimelineAfficheLeCompteDeFactorisation(logger) {
+    // Une ligne qui en vaut huit doit le DIRE : c'est ce qui fait tenir 65
+    // vignettes en 9 lignes sans mentir sur ce qui se passe.
+    var base = Time.now().value();
+    Cache.save({"t" => base, "rx" => base, "m" => "live", "al" => [],
+                "nx" => [base + 2520, "Ouverture parkings", "CHINETTI", 8]});
+    var vue = new TimelineView();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    var rects = dc.rects();
+    var trouve = false;
+    for (var i = 0; i < rects.size(); i += 1) {
+        var label = rects[i]["label"];
+        if (label != null && label.find("(8)") != null) { trouve = true; }
+    }
+    Test.assert(trouve);
+    return true;
+}
+
+(:test)
+function testTimelineDistingueRienDePrevuEtIndisponible(logger) {
+    // Deux etats que la page ne doit jamais confondre : rien n'est prevu
+    // (normal l'essentiel de l'annee) et la source ne repond pas (incident).
+    Application.Storage.deleteValue(Cache.KEY);
+    var vide = new TimelineView();
+    vide.onRecue(true, []);
+    var dc1 = dcEnregistrement();
+    vide.onUpdate(dc1);
+
+    var casse = new TimelineView();
+    casse.onRecue(false, null);
+    var dc2 = dcEnregistrement();
+    casse.onUpdate(dc2);
+
+    Test.assert(tlContient(dc1, "rien de prevu"));
+    Test.assert(!tlContient(dc1, "indisponible"));
+    Test.assert(tlContient(dc2, "indisponible"));
+    return true;
+}
+
+function tlContient(dc, texte) {
+    var rects = dc.rects();
+    for (var i = 0; i < rects.size(); i += 1) {
+        var label = rects[i]["label"];
+        if (label != null && label.find(texte) != null) {
+            return true;
+        }
+    }
+    return false;
+}
+
+
+// LE compte de factorisation ne doit JAMAIS etre tronque. Trouve a la
+// sonde : "Ouverture des tribunes nord es (12)" sortait
+// "Ouverture des tribunes nord es (1" -- un chiffre FAUX, qui annonce une
+// tribune la ou il y en a douze. Un mot abrege se voit, un nombre ampute se
+// lit comme une valeur. Invisible a tout controle geometrique : le texte
+// tronque tient parfaitement dans l'ecran.
+(:test)
+function testTimelineNeTronqueJamaisLeCompte(logger) {
+    var base = Time.now().value();
+    Cache.save({"t" => base, "rx" => base, "m" => "live", "al" => [],
+                "nx" => [base + 2520, TL_ACTIVITE_MAX, TL_LIEU_MAX, 12]});
+    var vue = new TimelineView();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    verifierNeDebordePas(logger, dc, piedStandard(dc));
+    Test.assert(tlUnLabelFinitPar(dc, "(12)"));
+
+    // Meme garantie sur les ecrans de liste, ou la corde est plus etroite
+    // encore et la police plus petite.
+    var pire = [];
+    for (var i = 0; i < 4; i += 1) {
+        pire.add([base + 600 * (i + 1), TL_ACTIVITE_MAX, TL_LIEU_MAX, 12]);
+    }
+    vue.onRecue(true, pire);
+    vue.sousPageSuivante();
+    var dc2 = dcEnregistrement();
+    vue.onUpdate(dc2);
+    verifierNeDebordePas(logger, dc2, piedStandard(dc2));
+    Test.assert(tlUnLabelFinitPar(dc2, "(12)"));
+    return true;
+}
+
+function tlUnLabelFinitPar(dc, fin) {
+    var rects = dc.rects();
+    for (var i = 0; i < rects.size(); i += 1) {
+        var label = rects[i]["label"];
+        if (label != null && label.length() >= fin.length()) {
+            var queue = label.substring(label.length() - fin.length(),
+                                        label.length());
+            if (queue.equals(fin)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}

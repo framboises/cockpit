@@ -19,6 +19,7 @@ import watch_guidage
 import watch_pages
 import watch_peaks
 import watch_state
+import watch_timeline
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +44,16 @@ LAST_USED_THROTTLE_S = 60
 # liste des editions et de relire Mongo a chaque ouverture du menu.
 EDITIONS_CACHE_TTL_S = 3600
 
+# La timeline change lentement (des horaires poses a l'avance), mais elle
+# doit refleter l'ecoulement du temps : une vignette passee doit disparaitre.
+# Soixante secondes tiennent les deux bouts -- le document timetable n'est lu
+# qu'une fois par minute quel que soit le nombre de montres, et la liste ne
+# retarde jamais de plus d'une minute sur ce que le cockpit affiche.
+TIMELINE_CACHE_TTL_S = 60
+
 _cache = {"at": 0.0, "payload": None}
 _editions_cache = {"at": 0.0, "payload": None}
+_timeline_cache = {"at": 0.0, "payload": None}
 _rate_log = {}
 _indexes_ready = False
 
@@ -60,6 +69,8 @@ def reset_cache():
     _cache["payload"] = None
     _editions_cache["at"] = 0.0
     _editions_cache["payload"] = None
+    _timeline_cache["at"] = 0.0
+    _timeline_cache["payload"] = None
 
 
 def reset_rate_limit():
@@ -416,6 +427,62 @@ def _avec_guidage(payload, jeton):
     sortie["gd"] = bloc
     sortie["gs"] = bloc["s"] if bloc else None
     return sortie
+
+
+@watch_bp.route("/timeline", methods=["GET"])
+@bearer_required
+def timeline():
+    """Les prochaines vignettes de la timeline operationnelle.
+
+    Endpoint PARESSEUX, sur le modele de /editions : la montre ne le
+    demande qu'a l'ouverture de sa page Timeline. La liste complete pese
+    ~570 octets, que le payload principal ne peut pas porter (il lui reste
+    moins de 300 octets sur son budget de 2 Ko) et qu'il serait de toute
+    facon absurde de transmettre a chaque releve pour une page consultee
+    quelques fois par jour.
+
+    Le payload principal porte, lui, la PROCHAINE vignette seule (`nx`,
+    ~70 octets) : la page affiche donc quelque chose des son ouverture,
+    depuis le cache, sans attendre cette requete ni meme etre a portee du
+    telephone.
+
+    Cache COMMUN a toutes les montres, contrairement au guidage : la
+    timeline est la meme pour tout le monde. C'est ce qui permet de ne lire
+    le document timetable qu'une fois par minute quel que soit le nombre de
+    montres enrolees.
+    """
+    maintenant = time.time()
+    if (_timeline_cache["payload"] is not None
+            and maintenant - _timeline_cache["at"] < TIMELINE_CACHE_TTL_S):
+        return jsonify(_timeline_cache["payload"])
+
+    db = _db()
+    now_utc = datetime.now(timezone.utc)
+    config = watch_state.read_config(db)
+
+    # Meme resolution d'evenement que build_state, AVEC les deux memes
+    # gardes : le drapeau live ET la fraicheur du releve. Sans elles, la
+    # requete remonterait le dernier releve connu quel que soit son age --
+    # c'est exactement le defaut qui avait fait afficher a la montre les
+    # entrees du 23 avril sous le libelle << 24HM 26 >> pendant des
+    # semaines (cf. watch_state.read_counter). Ici, il ferait servir la
+    # timeline d'une edition terminee.
+    counter = None
+    if watch_state.read_live_active(db):
+        counter = watch_state.read_counter(
+            db, watch_state.read_principal_id(db),
+            max_age=watch_state.COUNTER_MAX_AGE, now_utc=now_utc)
+    event, year = watch_state.resolve_event(config, counter)
+
+    # Hors evenement, `counter` est nul et resolve_event rend (None, None)
+    # en mode auto : prochaines() rend alors une liste vide, que la page
+    # affiche << rien de prevu >>. C'est l'etat normal, pas une panne.
+    payload = {"ok": True,
+               "tl": watch_timeline.prochaines(db, event, year,
+                                               now_utc=now_utc)}
+    _timeline_cache["payload"] = payload
+    _timeline_cache["at"] = maintenant
+    return jsonify(payload)
 
 
 # --- Guidage : routes d'administration --------------------------------

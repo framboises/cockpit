@@ -95,7 +95,9 @@ module Mock {
                     "gs" => 3,
                     "gd" => {"lat" => 47.9503, "lon" => 0.2214,
                              "n" => "Porte Houx 5", "s" => 3,
-                             "t" => nowSec - 60}};
+                             "t" => nowSec - 60},
+                    "nx" => [nowSec + 2520, "Ouverture au public",
+                             "Controle", 0]};
         }
         if (scenario == 3) {
             // Recue a l'instant, mais la donnee date de 22 minutes. Calme
@@ -149,6 +151,21 @@ module Mock {
     // Liste d'editions du simulateur : les vraies valeurs relevees en base,
     // pour que la mise en page soit eprouvee sur des nombres a six chiffres
     // et des libelles de longueur reelle.
+    // Timeline simulee : le matin d'une journee de course, avec ses
+    // ouvertures factorisees -- la forme reelle que rend
+    // watch_timeline.prochaines.
+    // `base` est passe par l'appelant, comme pour state(scenario, nowSec) :
+    // ce module est annote (:background) et n'importe pas Toybox.Time.
+    function timeline(base) {
+        return [[base + 900, "Ouverture Centre accreditation", "Centre accreditation", 0],
+                [base + 900, "Ouverture parkings", "CHINETTI, EXPO MOTOS, LMS", 8],
+                [base + 4500, "Ouverture au public", "Controle", 0],
+                [base + 4500, "Ouverture portes", "PORTE ANNEXE, PORTE CIK", 8],
+                [base + 4500, "Ouverture tribunes", "SINGHER, SOMMER, DURAND", 5],
+                [base + 12600, "Warm-up", "Piste", 0],
+                [base + 21600, "Depart course", "Piste", 0]];
+    }
+
     function editions() {
         return [["LMC 26", 52409, 1783175368],
                 ["24HA 26", 148919, 1781359710],

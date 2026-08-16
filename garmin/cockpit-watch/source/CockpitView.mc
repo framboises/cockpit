@@ -23,6 +23,7 @@ class CockpitView extends WatchUi.View {
     hidden var mMeteo;
     hidden var mFrequentation;
     hidden var mGuidage;
+    hidden var mTimeline;
 
     function initialize() {
         View.initialize();
@@ -31,6 +32,7 @@ class CockpitView extends WatchUi.View {
         mMeteo = new MeteoView();
         mFrequentation = new FrequentationView();
         mGuidage = new GuidageView();
+        mTimeline = new TimelineView();
     }
 
     function onLayout(dc) {
@@ -112,13 +114,18 @@ class CockpitView extends WatchUi.View {
     // c'est lui qui decide quand allumer et eteindre le GPS.
     static const PAGE_GUIDAGE = 6;
 
-    static const NB_PAGES = 7;
+    // Index de la page Timeline. Elle ferme le cycle mais reste atteignable
+    // en une entree du menu de saut.
+    static const PAGE_TIMELINE = 7;
 
-    // Sept pages en cycle, dans l'ordre d'urgence operationnelle : tableau
+    static const NB_PAGES = 8;
+
+    // Huit pages en cycle, dans l'ordre d'urgence operationnelle : tableau
     // de bord, alertes, main courante, trafic, meteo, frequentation,
-    // guidage. Le guidage ferme la marche : c'est la seule page qui
-    // consomme un capteur, on ne la traverse pas par accident en
-    // feuilletant.
+    // guidage, timeline. Le guidage et la timeline ferment la marche : le
+    // premier consomme un capteur, la seconde une requete -- on ne les
+    // traverse pas par accident en feuilletant, et le menu de saut (MENU)
+    // reste le chemin court vers l'une comme vers l'autre.
     function nextPage() {
         quitterPage();
         mPage = (mPage + 1) % NB_PAGES;
@@ -156,6 +163,9 @@ class CockpitView extends WatchUi.View {
         if (mPage == PAGE_GUIDAGE) {
             mGuidage.desactiver();
         }
+        if (mPage == PAGE_TIMELINE) {
+            mTimeline.remiseAZero();
+        }
     }
 
     // Le GPS ne s'allume QUE sur la page Guidage, et s'eteint des qu'on la
@@ -164,6 +174,11 @@ class CockpitView extends WatchUi.View {
     hidden function entrerPage() {
         if (mPage == PAGE_GUIDAGE) {
             mGuidage.activer();
+        }
+        if (mPage == PAGE_TIMELINE) {
+            // Requete paresseuse, une seule fois : activer() ne redemande
+            // rien si la liste est deja la.
+            mTimeline.activer();
         }
     }
 
@@ -174,6 +189,10 @@ class CockpitView extends WatchUi.View {
     function onSelectPressed() {
         if (mPage == PAGE_TRAFIC) {
             mTrafic.sousPageSuivante();
+            return;
+        }
+        if (mPage == PAGE_TIMELINE) {
+            mTimeline.sousPageSuivante();
             return;
         }
         if (mPage == PAGE_GUIDAGE) {
@@ -205,6 +224,7 @@ class CockpitView extends WatchUi.View {
         if (n == 3) { return mTrafic; }
         if (n == 4) { return mMeteo; }
         if (n == PAGE_GUIDAGE) { return mGuidage; }
+        if (n == PAGE_TIMELINE) { return mTimeline; }
         return mFrequentation;
     }
 

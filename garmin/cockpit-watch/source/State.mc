@@ -109,6 +109,18 @@ module State {
         return st["gs"];
     }
 
+    // La prochaine vignette de timeline : [epoch, activite, lieu, compte],
+    // ou null. Le compte a rebours est calcule au POIGNET a partir de
+    // l'epoch -- une heure formatee cote serveur serait juste a l'emission
+    // et fausse trois minutes plus tard, ce qui est precisement l'age que
+    // peut avoir un releve.
+    function prochaine(st) {
+        if (st == null) {
+            return null;
+        }
+        return st["nx"];
+    }
+
     function isStale(st, nowSec, staleAfter) {
         // Une edition close ne vieillit pas : son pic est definitif. Sans ce
         // court-circuit, `t` etant nul, la montre finirait par afficher

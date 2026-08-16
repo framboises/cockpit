@@ -777,6 +777,10 @@ class TestBuildStatePics:
                     "n": "Rond point Maison Blan", "s": 9999,
                     "t": 1786871218}
         st["gs"] = 9999
+        # La prochaine vignette de timeline, aux bornes de troncature
+        # (watch_timeline.ACTIVITE_MAX / LIEU_MAX). La liste complete, elle,
+        # ne voyage jamais dans ce payload -- elle vit sur /timeline.
+        st["nx"] = [1786871218, "O" * 30, "L" * 24, 12]
         brut = json.dumps(st, ensure_ascii=False).encode("utf-8")
         assert len(brut) < 2048
 

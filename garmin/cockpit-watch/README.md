@@ -4,10 +4,10 @@ Affiche au poignet le compteur d'entrées, la contrainte thermique (WBGT) et les
 alertes actives du PC Organisation. Vibre sur franchissement de seuil à la
 hausse, jamais en boucle.
 
-Sept pages en cycle (HAUT/BAS) : tableau de bord, liste des alertes, main
-courante PC org, trafic, météo, fréquentation, guidage. Un menu de saut (MENU)
-permet d'atterrir directement sur n'importe laquelle, plus « Pics par
-édition ».
+Huit pages en cycle (HAUT/BAS) : tableau de bord, liste des alertes, main
+courante PC org, trafic, météo, fréquentation, guidage, timeline. Un menu de
+saut (MENU) permet d'atterrir directement sur n'importe laquelle, plus
+« Pics par édition ».
 
 Distribuée en **sideload** uniquement (pas de publication sur le store Connect
 IQ) : c'est le directeur des opérations adjoint qui porte la montre, pas le
@@ -38,13 +38,14 @@ Trois points d'entrée (`CockpitApp.mc`) partagent un cache commun :
 | `Pages.mc` | accesseurs de lecture des blocs de pages (`mc`/`tr`/`me`/`st`/`gd`) dans le cache Storage dédié, plus `verdictMot`, `vigilanceMot` et `largeurUtile` (corde du cadran rond) |
 | `CockpitView.mc` / `CockpitDelegate.mc` | console (device app) : tableau de bord (page 0), liste des alertes (page 1), et aiguillage inline (`pageView`) vers les quatre vues de pages annexes (2 à 5) |
 | `MainCouranteView.mc` | page « Main courante » : compteurs PC org en cours/terminées par catégorie |
+| `TimelineView.mc` | page « Timeline » : le prochain acte en délai, puis la liste feuilletée. **Deux sources** — `nx` du cache pour l'affichage immédiat, `/timeline` pour la liste |
 | `GuidageView.mc` | page « Guidage » : flèche vers le point reçu, distance, START enregistre un waypoint natif. **Seul endroit de l'app qui allume un capteur continu** |
 | `Geo.mc` | distance haversine, cap initial, angle relatif — fonctions pures, testées en valeur |
 | `TraficView.mc` | page « Trafic » : livret feuilleté à START — bilan (verdict global, accidents/bouchons/dangers, axe le plus dégradé) puis tous les axes du mur, six par écran |
 | `MeteoView.mc` | page « Météo » : température, vent, rafale, pluie à venir, consigne la plus grave du mur |
 | `FrequentationView.mc` | page « Fréquentation » : pic de présents du jour et son heure, comparé au N-1 au même décalage à la course |
 | `EditionsView.mc` | consultation des pics par édition, atteinte par le menu de saut (MENU) |
-| `SautMenu.mc` | menu de saut : les sept pages du cycle plus « Pics par édition » |
+| `SautMenu.mc` | menu de saut : les huit pages du cycle plus « Pics par édition » |
 | `GlanceView.mc` | glance |
 | `BgService.mc` | service de fond (`CockpitService extends ServiceDelegate`) |
 | `CockpitApp.mc` | les trois points d'entrée : device app, glance, background |
@@ -59,7 +60,7 @@ code mort, jamais câblé, et ont été supprimées à la tâche 14). Seules
 `EditionsView` et `SautMenu`, réellement poussées via `WatchUi.pushView`,
 gardent leur delegate (`EditionsDelegate`, `SautMenuDelegate`).
 
-207 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
+245 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
 `Pages`, la navigation (`CockpitView.nextPage`/`previousPage`/`setPage`/
 `pageView`) et les chemins de dessin des six vues (`DessinTest.mc` : le rendu
 ne doit lever dans aucun état atteignable, y compris un mode `past` sans pic
@@ -72,13 +73,13 @@ C'est **`DebordementTest.mc`** qui porte la garantie géométrique : il capture
 les rectangles réellement dessinés, sur la taille d'écran lue à l'exécution,
 et échoue si l'un d'eux sort du disque inscrit ou chevauche le pied de page.
 
-Le backend est couvert par 306 tests pytest, dont `watch_api.py`,
+Le backend est couvert par 335 tests pytest, dont `watch_api.py`,
 `watch_state.py`, `watch_peaks.py`, `watch_pages.py`, `watch_guidage.py`,
-`trafic_etat.py` et `meteo_etat.py`.
+`watch_timeline.py`, `trafic_etat.py` et `meteo_etat.py`.
 
 ## Navigation
 
-Sept pages en cycle, dans l'ordre d'urgence opérationnelle :
+Huit pages en cycle, dans l'ordre d'urgence opérationnelle :
 
 | # | Page | Contenu |
 |---|------|---------|
@@ -89,13 +90,14 @@ Sept pages en cycle, dans l'ordre d'urgence opérationnelle :
 | 4 | Météo | température, vent, rafale, pluie à venir, consigne la plus grave |
 | 5 | Fréquentation | pic de présents du jour, son heure, comparaison N-1 |
 | 6 | Guidage | flèche et distance vers un point envoyé depuis le cockpit |
+| 7 | Timeline | ce qui tombe dans les 12 h à venir, en délais (« dans 42 min ») |
 
 | Geste | Effet |
 |-------|-------|
-| HAUT | page suivante (`nextPage`, boucle 0→6→0) |
-| BAS | page précédente (`previousPage`, boucle 0→6 en arrière) |
-| ENTER (START) | sur la page **Trafic**, feuillette le livret (bilan → axes 1-6 → 7-12 → … → bilan) ; sur la page **Guidage**, enregistre le point dans les lieux natifs ; sur les cinq autres pages, rafraîchissement immédiat |
-| **MENU** | **menu de saut** — les sept pages ci-dessus, dans le même ordre, plus « Pics par édition » ; choisir une page l'affiche directement (`setPage`), sans passer par le cycle |
+| HAUT | page suivante (`nextPage`, boucle 0→7→0) |
+| BAS | page précédente (`previousPage`, boucle 0→7 en arrière) |
+| ENTER (START) | sur la page **Trafic**, feuillette le livret (bilan → axes 1-6 → 7-12 → … → bilan) ; sur la page **Guidage**, enregistre le point dans les lieux natifs ; sur la page **Timeline**, feuillette le livret ; sur les cinq autres pages, rafraîchissement immédiat |
+| **MENU** | **menu de saut** — les huit pages ci-dessus, dans le même ordre, plus « Pics par édition » ; choisir une page l'affiche directement (`setPage`), sans passer par le cycle |
 
 ⚠️ Avec deux pages seulement (état du projet avant la tâche 13), avancer et
 reculer revenaient au même — `onPreviousPage` appelait `nextPage()` sans que
@@ -207,6 +209,80 @@ réellement dessinées (`testTraficNeTronqueJamaisLesChiffres`).
 
 Mesuré sur les 13 axes réels : aucun nom n'est tronqué (le plus large,
 « Antares Sud », occupe 91 px sur les ~130 disponibles).
+
+## La page Timeline
+
+C'est la raison d'etre du cockpit ramenee au poignet : non pas un chiffre,
+mais **ce qui tombe dans l'heure**.
+
+La valeur n'est pas l'heure mais le **délai**. « 08:00 » oblige à un calcul
+mental ; « dans 42 min » se lit d'un coup. Le compte à rebours est calculé
+**au poignet** à partir d'un epoch — un « dans 42 min » figé côté serveur
+serait faux à l'arrivée, et le relevé peut avoir trois minutes de retard.
+
+### Aucun calcul métier n'est réécrit
+
+`pcorg_summary.get_upcoming_timetable` existait déjà, et fait tout le
+travail : fenêtre glissante, tri, et surtout la **factorisation des
+ouvertures simultanées**. Sur la journée de course des 24H Motos 2026, elle
+ramène **65 vignettes brutes à 9 lignes** — huit parkings qui ouvrent à 7 h
+font une ligne, pas huit. C'est exactement ce qui rend l'information lisible
+sur un cadran.
+
+`watch_timeline.py` ne fait que compacter sa sortie pour le transport.
+
+### Deux sources, et c'est délibéré
+
+| Champ | Transport | Contenu |
+|---|---|---|
+| `nx` | payload principal, ~70 octets | la **prochaine vignette seule** |
+| `tl` | `/timeline`, requête paresseuse, ~570 octets | la **liste complète** |
+
+Ce n'est pas de la redondance : c'est ce qui fait qu'on n'attend jamais
+devant un écran vide. Le héros s'affiche depuis le cache dès l'ouverture,
+**même hors de portée du téléphone**, et la liste se remplit derrière.
+
+⚠️ **La liste ne pouvait pas entrer dans le payload principal** : il ne
+reste que 182 octets sur le budget de 2 Ko. Et il serait absurde de
+transmettre 570 octets toutes les minutes pour une page consultée quelques
+fois par jour. `/timeline` suit le modèle de `/editions` : cache **commun à
+toutes les montres** (contrairement au guidage), donc le document timetable
+n'est lu qu'une fois par minute quel que soit le nombre de montres.
+
+### `nx` est calculé dans les deux modes
+
+Contrairement aux blocs `mc` et `st`, qui ne vivent qu'en mode live. La
+première version le réservait au live par économie ; **un sabotage a montré
+que cette garde ne coûtait rien et retirait de l'information** :
+
+- en mode auto hors événement, `resolve_event` rend déjà `(None, None)` et
+  la fonction sort sans toucher Mongo — la garde n'économisait rien ;
+- en mode épinglé, elle supprimait la timeline **précisément quand elle sert
+  le plus** : la veille et le matin, pendant le montage, avant que le
+  live-contrôle ne soit armé. Le live-contrôle dit « on compte les entrées »,
+  pas « il se passe quelque chose ».
+
+`/timeline`, lui, garde les deux gardes (drapeau live **et** fraîcheur du
+relevé) en mode auto : sans elles, il servirait la timeline d'une édition
+terminée — le défaut que `watch_state.read_counter` documente.
+
+### Le compte de factorisation ne cède jamais
+
+⚠️ Trouvé à la sonde : `Ouverture des tribunes nord es (12)` tronqué à la
+corde sortait `Ouverture des tribunes nord es (1` — **un chiffre faux**, qui
+annonce une tribune là où il y en a douze. Un mot abrégé se voit ; un nombre
+amputé se lit comme une valeur.
+
+Même règle que la ligne d'axe de `TraficView` : le **nom** est le seul
+élément élastique, les chiffres ne cèdent jamais. `ajusterLibelle` réserve
+la place du compte avant de tronquer l'activité, et un test compare le texte
+**réellement dessiné**.
+
+### « Rien de prévu » n'est pas une panne
+
+L'état normal l'essentiel de l'année. La page le distingue explicitement de
+« indisponible » (source injoignable) — confondre les deux ferait chercher un
+incident là où il n'y en a pas.
 
 ## La page Guidage
 

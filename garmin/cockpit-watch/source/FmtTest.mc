@@ -105,3 +105,47 @@ function testJourChangeDUnJourALAutre(logger) {
     Test.assert(!a.equals("--"));
     return true;
 }
+
+// --- Compte a rebours de la page Timeline -------------------------------
+//
+// C'est la valeur de la page : une heure seule ("08:00") oblige a un calcul
+// mental, un delai se lit d'un coup. Teste en VALEUR -- une formule fausse
+// ne leve rien, elle affiche juste un mauvais chiffre.
+
+(:test)
+function testDelaiEnMinutes(logger) {
+    Test.assertEqual(Fmt.delai(1000 + 2520, 1000), "dans 42 min");
+    Test.assertEqual(Fmt.delai(1000 + 60, 1000), "dans 1 min");
+    return true;
+}
+
+(:test)
+function testDelaiEnHeuresAuDelaDUneHeure(logger) {
+    Test.assertEqual(Fmt.delai(1000 + 3600, 1000), "dans 1 h");
+    Test.assertEqual(Fmt.delai(1000 + 11520, 1000), "dans 3 h");
+    return true;
+}
+
+(:test)
+function testSousUneMinuteDitMaintenant(logger) {
+    // "dans 0 min" se lirait comme une erreur d'affichage.
+    Test.assertEqual(Fmt.delai(1000 + 59, 1000), "maintenant");
+    Test.assertEqual(Fmt.delai(1000, 1000), "maintenant");
+    return true;
+}
+
+(:test)
+function testInstantPasseDitMaintenantPasUnNegatif(logger) {
+    // Entre le dernier releve et l'affichage, une vignette peut avoir
+    // franchi son heure sans que le serveur ait eu le temps de la retirer.
+    // "dans -2 min" serait absurde.
+    Test.assertEqual(Fmt.delai(1000 - 120, 1000), "maintenant");
+    return true;
+}
+
+(:test)
+function testDelaiInconnuEstUnTiret(logger) {
+    Test.assertEqual(Fmt.delai(null, 1000), Fmt.DASH);
+    Test.assertEqual(Fmt.delai(1000, null), Fmt.DASH);
+    return true;
+}

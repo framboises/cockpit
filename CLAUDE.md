@@ -845,10 +845,10 @@ Sans `ANTHROPIC_API_KEY`, le rapport se génère **sans la section** (log en war
 ## Montre connectée (app Connect IQ, `garmin/cockpit-watch/`)
 
 Une app Garmin (tactix 8 Solar / fēnix 8 Solar 51 mm, sideload uniquement)
-affiche au poignet du directeur des opérations adjoint sept pages en cycle
+affiche au poignet du directeur des opérations adjoint huit pages en cycle
 (HAUT/BAS) : tableau de bord, alertes, main courante PC org, trafic, météo,
-fréquentation, guidage ; plus un menu de saut (MENU) et une page « Pics par
-édition ».
+fréquentation, guidage, timeline ; plus un menu de saut (MENU) et une page
+« Pics par édition ».
 Authentification par jeton Bearer émis depuis `/watch-admin`. Documentation
 complète dans `garmin/cockpit-watch/README.md` — cette section ne couvre que
 ce qui touche le code serveur Cockpit.
@@ -1041,6 +1041,40 @@ dans le payload, cf. `watch_pages.py`) :
   même dans une sonde jetable. `DebordementTest.mc` échoue désormais si un
   bloc sort du disque inscrit ou chevauche le pied, sur la taille lue à
   l'exécution.
+
+### Timeline : ce qui tombe dans les 12 h à venir
+
+8ᵉ page. **Aucun calcul métier n'est réécrit** :
+`pcorg_summary.get_upcoming_timetable` existait déjà et porte la
+factorisation des ouvertures simultanées — 65 vignettes brutes deviennent
+9 lignes sur une journée de course. `watch_timeline.py` ne fait que
+compacter sa sortie.
+
+⚠️ **Le délai est calculé au POIGNET, à partir d'un epoch.** Un « dans
+42 min » formaté côté serveur serait juste à l'émission et faux trois
+minutes plus tard — ce qui est précisément l'âge que peut avoir un relevé.
+Rien de formaté ne voyage.
+
+⚠️ **Deux sources, délibérément.** `nx` (la prochaine vignette seule,
+~70 octets) voyage dans le payload principal ; la liste complète (~570) vit
+sur `/timeline`, requêtée à l'ouverture de la page. Ce n'est pas de la
+redondance : le héros s'affiche depuis le cache dès l'ouverture, même hors
+de portée du téléphone. La liste ne pouvait de toute façon pas entrer dans
+le payload — il reste 182 octets sur le budget de 2 Ko.
+
+⚠️ **`nx` est calculé dans les DEUX modes**, contrairement à `mc` et `st`.
+Un sabotage a montré que la garde `mode == "live"` ne coûtait rien (en mode
+auto hors événement, `resolve_event` rend déjà `(None, None)`) et retirait
+la timeline **précisément quand elle sert le plus** : la veille et le matin,
+pendant le montage, avant l'armement du live-contrôle. `/timeline`, lui,
+garde les deux gardes en mode auto — sans elles il servirait la timeline
+d'une édition terminée.
+
+⚠️ **Le compte de factorisation ne cède jamais à la troncature.** Trouvé à
+la sonde : `Ouverture des tribunes nord es (12)` sortait
+`…nord es (1` — un chiffre **faux**, qui annonce une tribune là où il y en a
+douze. Le nom est le seul élément élastique, comme sur la ligne d'axe de
+`TraficView`.
 
 ### Guidage : un point GPS poussé du cockpit vers une montre
 

@@ -982,8 +982,9 @@ function testDessinChaquePageNeLevePas(logger) {
 function testSautMenuSeptEntreesDansLOrdre(logger) {
     var menu = new SautMenu();
     var labels = ["Tableau de bord", "Alertes", "Main courante", "Trafic",
-                  "Meteo", "Frequentation", "Guidage", "Pics par edition"];
-    var ids = [0, 1, 2, 3, 4, 5, 6, -1];
+                  "Meteo", "Frequentation", "Guidage", "Timeline",
+                  "Pics par edition"];
+    var ids = [0, 1, 2, 3, 4, 5, 6, 7, -1];
     for (var i = 0; i < labels.size(); i += 1) {
         var item = menu.getItem(i);
         Test.assert(item != null);
@@ -1140,5 +1141,80 @@ function testStartEnregistreLeWaypointSurLaPageGuidage(logger) {
         if (label != null && label.find("enregistre") != null) { trouve = true; }
     }
     Test.assert(trouve);
+    return true;
+}
+
+
+// --- START et cycle de vie de la page Timeline --------------------------
+//
+// Ecrit apres un sabotage qui n'avait rien fait tomber : debrancher START
+// de la timeline laissait 240 tests au vert, et rendait la liste
+// definitivement inaccessible -- l'utilisateur n'aurait jamais vu que le
+// heros, sans rien pour lui dire qu'il manquait quelque chose.
+
+(:test)
+function testStartFeuilleteLaTimeline(logger) {
+    var base = Time.now().value();
+    Cache.save({"t" => base, "rx" => base, "m" => "live", "al" => [],
+                "nx" => [base + 600, "Ouverture au public", "Controle", 0]});
+    var vue = new CockpitView();
+    vue.setPage(CockpitView.PAGE_TIMELINE);
+    var timeline = vue.pageView(CockpitView.PAGE_TIMELINE);
+    timeline.onRecue(true, tlVignettes(base));
+    Test.assertEqual(timeline.sousPage(), 0);
+    vue.onSelectPressed();
+    Test.assertEqual(timeline.sousPage(), 1);
+    vue.onSelectPressed();
+    Test.assertEqual(timeline.sousPage(), 2);
+    return true;
+}
+
+(:test)
+function testStartNeFeuilletePasLaTimelineDepuisUneAutrePage(logger) {
+    var base = Time.now().value();
+    var vue = new CockpitView();
+    var timeline = vue.pageView(CockpitView.PAGE_TIMELINE);
+    timeline.onRecue(true, tlVignettes(base));
+    var pages = [0, 1, 2, 4, 5];
+    for (var i = 0; i < pages.size(); i += 1) {
+        vue.setPage(pages[i]);
+        vue.onSelectPressed();
+        Test.assertEqual(timeline.sousPage(), 0);
+    }
+    return true;
+}
+
+(:test)
+function testQuitterLaTimelineRevientAuHeros(logger) {
+    var base = Time.now().value();
+    var vue = new CockpitView();
+    vue.setPage(CockpitView.PAGE_TIMELINE);
+    var timeline = vue.pageView(CockpitView.PAGE_TIMELINE);
+    timeline.onRecue(true, tlVignettes(base));
+    vue.onSelectPressed();
+    vue.onSelectPressed();
+    Test.assertEqual(timeline.sousPage(), 2);
+    vue.nextPage();
+    Test.assertEqual(timeline.sousPage(), 0);
+    return true;
+}
+
+(:test)
+function testPageTimelineEstBienLaHuitieme(logger) {
+    var vue = new CockpitView();
+    Test.assert(vue.pageView(CockpitView.PAGE_TIMELINE) instanceof TimelineView);
+    return true;
+}
+
+(:test)
+function testLaTimelineNAllumeAucunCapteur(logger) {
+    // La page Guidage est la SEULE a consommer un capteur continu. Entrer
+    // sur la timeline ne doit pas allumer le GPS -- une fuite de capteur ne
+    // se voit pas a l'ecran, elle se voit sur la batterie trois jours plus
+    // tard.
+    var vue = new CockpitView();
+    var guidage = vue.pageView(CockpitView.PAGE_GUIDAGE);
+    vue.setPage(CockpitView.PAGE_TIMELINE);
+    Test.assertEqual(guidage.estActive(), false);
     return true;
 }
