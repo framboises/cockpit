@@ -56,6 +56,11 @@ module Api {
             "pkt" => (data != null) ? data["pkt"] : null,
             "w" => (data != null) ? data["w"] : null,
             "wl" => (data != null && data["wl"] != null) ? data["wl"] : 0,
+            // Compteur de sequence du guidage, SEUL dans le noyau (le point
+            // complet va dans les pages, ci-dessous). Le service de fond ne
+            // lit que le noyau : sans ce scalaire, un point envoye pendant
+            // que l'app est fermee n'aurait fait vibrer personne.
+            "gs" => (data != null) ? data["gs"] : null,
             "al" => al,
             "rx" => nowSec,
             "ok" => true
@@ -73,7 +78,11 @@ module Api {
             "mc" => data["mc"],
             "tr" => data["tr"],
             "me" => data["me"],
-            "st" => data["st"]
+            "st" => data["st"],
+            // Le point de guidage complet : lu par la seule page Guidage,
+            // donc range avec les blocs de pages et jamais dans le noyau
+            // que deserialise la glance a chaque affichage.
+            "gd" => data["gd"]
         };
     }
 

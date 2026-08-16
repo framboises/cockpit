@@ -4,6 +4,7 @@ using Toybox.System;
 using Toybox.Application;
 using Toybox.Time;
 using Toybox.Math;
+using Toybox.Position;
 
 // Anti-debordement PERMANENT. Aucun test de dessin anterieur ne pouvait
 // attraper le defaut qui a motive ce fichier : les sondes de mise en page de
@@ -96,6 +97,26 @@ class RecordingDc {
         mRects.add({"x0" => x.toFloat(), "y0" => y.toFloat(),
                     "x1" => (x + 32).toFloat(), "y1" => (y + 32).toFloat(),
                     "label" => "<icone>"});
+    }
+
+    // La fleche de la page Guidage est un polygone plein. Sans cette
+    // methode, RecordingDc leverait -- et surtout, la fleche echapperait
+    // entierement au controle geometrique, alors que c'est le plus grand
+    // element dessine de toute l'app.
+    function fillPolygon(points) {
+        var x0 = points[0][0];
+        var y0 = points[0][1];
+        var x1 = x0;
+        var y1 = y0;
+        for (var i = 1; i < points.size(); i += 1) {
+            if (points[i][0] < x0) { x0 = points[i][0]; }
+            if (points[i][0] > x1) { x1 = points[i][0]; }
+            if (points[i][1] < y0) { y0 = points[i][1]; }
+            if (points[i][1] > y1) { y1 = points[i][1]; }
+        }
+        mRects.add({"x0" => x0.toFloat(), "y0" => y0.toFloat(),
+                    "x1" => x1.toFloat(), "y1" => y1.toFloat(),
+                    "label" => "<fleche>"});
     }
 
     function drawCircle(x, y, r) {
@@ -627,5 +648,246 @@ function testDebordementEditionsPireCasNeDeborgePas(logger) {
     vue.onUpdate(dc2);
     verifierNeDebordePas(logger, dc2, null);
     verifierPasDeChevauchementRepere(logger, dc2);
+    return true;
+}
+
+
+// ---------------------------------------------------------------------
+// GuidageView : les quatre etats de la page, et la fleche dans TOUTES les
+// directions. Un triangle tourne autour de son centre : c'est a 45 degres
+// que sa boite englobante est la plus large, pas a 0 -- verifier une seule
+// orientation ne prouverait rien.
+// ---------------------------------------------------------------------
+
+(:test)
+function testDebordementGuidageSansPointNeDeborgePas(logger) {
+    guidagePages(null);
+    var vue = new GuidageView();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    verifierNeDebordePas(logger, dc, null);
+    return true;
+}
+
+(:test)
+function testDebordementGuidageRechercheGpsNeDeborgePas(logger) {
+    guidagePages(GD_HOUX);
+    var vue = new GuidageView();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    verifierNeDebordePas(logger, dc, piedStandard(dc));
+    return true;
+}
+
+(:test)
+function testDebordementGuidageSansCapNeDeborgePas(logger) {
+    guidagePages(GD_HOUX);
+    var vue = new GuidageView();
+    vue.injecterPourTest([47.9493, 0.2214], null, Position.QUALITY_GOOD);
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    verifierNeDebordePas(logger, dc, piedStandard(dc));
+    return true;
+}
+
+(:test)
+function testDebordementGuidageFlecheDansToutesLesDirections(logger) {
+    // Trente-six orientations, tous les dix degres : la boite englobante
+    // d'un triangle tourne varie avec l'angle, et n'est maximale ni a 0 ni
+    // a 90 degres.
+    guidagePages(GD_HOUX);
+    var vue = new GuidageView();
+    for (var cap = 0; cap < 360; cap += 10) {
+        vue.injecterPourTest([47.9493, 0.2214], cap.toFloat(),
+                             Position.QUALITY_GOOD);
+        var dc = dcEnregistrement();
+        vue.onUpdate(dc);
+        verifierNeDebordePas(logger, dc, piedStandard(dc));
+    }
+    return true;
+}
+
+(:test)
+function testDebordementGuidageNomLongEtDistanceLongueNeDeborgentPas(logger) {
+    // Pire cas de largeur : libelle au maximum autorise cote serveur
+    // (watch_guidage.LABEL_MAX = 24) et distance a deux chiffres de km.
+    guidagePages({"lat" => 48.857, "lon" => 2.352,
+                  "n" => "Rond point Maison Blan", "s" => 9,
+                  "t" => 1786000000});
+    var vue = new GuidageView();
+    vue.injecterPourTest([47.9493, 0.2214], 45.0, Position.QUALITY_POOR);
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    verifierNeDebordePas(logger, dc, piedStandard(dc));
+    return true;
+}
+
+// Contenu, pas seulement geometrie : la page doit DIRE ce qu'elle sait.
+// Une regression qui supprimerait le mot de qualite laisserait la couleur
+// seule porter l'information -- ce que ce projet s'interdit partout.
+(:test)
+function testGuidageNommeLaQualiteDuFix(logger) {
+    guidagePages(GD_HOUX);
+    var vue = new GuidageView();
+    vue.injecterPourTest([47.9493, 0.2214], 0.0, Position.QUALITY_POOR);
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    var rects = dc.rects();
+    var trouve = false;
+    for (var i = 0; i < rects.size(); i += 1) {
+        var label = rects[i]["label"];
+        if (label != null && label.find("GPS faible") != null) { trouve = true; }
+    }
+    Test.assert(trouve);
+    return true;
+}
+
+(:test)
+function testGuidageDitQueLaBoussoleManque(logger) {
+    // Distinct de << recherche GPS >> : on SAIT ou l'on est, c'est
+    // l'orientation du poignet qui manque. Les deux se corrigent
+    // differemment (attendre vs bouger le bras).
+    guidagePages(GD_HOUX);
+    var vue = new GuidageView();
+    vue.injecterPourTest([47.9493, 0.2214], null, Position.QUALITY_GOOD);
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    var rects = dc.rects();
+    var trouve = false;
+    for (var i = 0; i < rects.size(); i += 1) {
+        var label = rects[i]["label"];
+        if (label != null && label.find("boussole") != null) { trouve = true; }
+    }
+    Test.assert(trouve);
+    return true;
+}
+
+(:test)
+function testGuidageNeDessinePasDeFlecheSansCap(logger) {
+    // LA regression a tenir, et elle est INVISIBLE a un controle
+    // geometrique : une fleche pointant le nord par defaut tient
+    // parfaitement dans l'ecran. Seule la liste de ce qui est dessine le
+    // dit.
+    guidagePages(GD_HOUX);
+    var vue = new GuidageView();
+    vue.injecterPourTest([47.9493, 0.2214], null, Position.QUALITY_GOOD);
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    var rects = dc.rects();
+    for (var i = 0; i < rects.size(); i += 1) {
+        var label = rects[i]["label"];
+        Test.assert(label == null || !label.equals("<fleche>"));
+    }
+    return true;
+}
+
+(:test)
+function testGuidageDessineLaFlecheDesQueLeCapArrive(logger) {
+    // Contre-epreuve du test precedent : sans elle, supprimer purement et
+    // simplement la fleche ferait passer les deux.
+    guidagePages(GD_HOUX);
+    var vue = new GuidageView();
+    vue.injecterPourTest([47.9493, 0.2214], 0.0, Position.QUALITY_GOOD);
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    var rects = dc.rects();
+    var trouve = false;
+    for (var i = 0; i < rects.size(); i += 1) {
+        var label = rects[i]["label"];
+        if (label != null && label.equals("<fleche>")) { trouve = true; }
+    }
+    Test.assert(trouve);
+    return true;
+}
+
+
+// --- Le pied de page n'est jamais tronque -------------------------------
+//
+// Un texte coupe tient PARFAITEMENT dans l'ecran : aucun controle
+// geometrique ne le signale. La premiere redaction de ce pied affichait
+// "GPS faible  .  STA" et "boussole indispo" -- trouve a la sonde, jamais
+// par un test. Ces tests-ci comparent le texte REELLEMENT dessine au texte
+// entier attendu.
+
+function labelDuPied(dc) {
+    // Le pied est le dernier texte dessine, et le seul dont l'ordonnee
+    // vaut piedStandard.
+    var rects = dc.rects();
+    var y = piedStandard(dc);
+    for (var i = 0; i < rects.size(); i += 1) {
+        if ((rects[i]["y0"] - y).abs() < 1.0) {
+            return rects[i]["label"];
+        }
+    }
+    return null;
+}
+
+(:test)
+function testPiedGuidageEntierRechercheGps(logger) {
+    guidagePages(GD_HOUX);
+    var vue = new GuidageView();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    Test.assertEqual(labelDuPied(dc), "recherche GPS");
+    return true;
+}
+
+(:test)
+function testPiedGuidageEntierSansBoussole(logger) {
+    guidagePages(GD_HOUX);
+    var vue = new GuidageView();
+    vue.injecterPourTest([47.9493, 0.2214], null, Position.QUALITY_GOOD);
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    Test.assertEqual(labelDuPied(dc), "sans boussole");
+    return true;
+}
+
+(:test)
+function testPiedGuidageEntierPourChaqueQualite(logger) {
+    guidagePages(GD_HOUX);
+    var vue = new GuidageView();
+    var qualites = [Position.QUALITY_GOOD, Position.QUALITY_USABLE,
+                    Position.QUALITY_POOR];
+    var mots = ["GPS bon", "GPS moyen", "GPS faible"];
+    for (var i = 0; i < qualites.size(); i += 1) {
+        vue.injecterPourTest([47.9493, 0.2214], 0.0, qualites[i]);
+        var dc = dcEnregistrement();
+        vue.onUpdate(dc);
+        Test.assertEqual(labelDuPied(dc), mots[i]);
+    }
+    return true;
+}
+
+(:test)
+function testPiedGuidageEntierApresEnregistrement(logger) {
+    guidagePages(GD_HOUX);
+    var vue = new GuidageView();
+    vue.injecterPourTest([47.9493, 0.2214], 0.0, Position.QUALITY_GOOD);
+    vue.enregistrerWaypoint();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    Test.assertEqual(labelDuPied(dc), "enregistre");
+    return true;
+}
+
+(:test)
+function testEcranVideEnseigneStartEnEntier(logger) {
+    // L'indice sur START vit sur l'ecran vide, ou la corde est large. Il ne
+    // doit pas y etre tronque non plus.
+    guidagePages(null);
+    var vue = new GuidageView();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    var rects = dc.rects();
+    var trouve = false;
+    for (var i = 0; i < rects.size(); i += 1) {
+        var label = rects[i]["label"];
+        if (label != null && label.equals("START l'enregistrera")) {
+            trouve = true;
+        }
+    }
+    Test.assert(trouve);
+    verifierNeDebordePas(logger, dc, null);
     return true;
 }

@@ -29,6 +29,7 @@ module Pages {
     function trafic(pg) { return bloc(pg, "tr"); }
     function meteo(pg) { return bloc(pg, "me"); }
     function frequentation(pg) { return bloc(pg, "st"); }
+    function guidage(pg) { return bloc(pg, "gd"); }
 
     // Vigilance Meteo-France (`vg`, echelle 0-3 de meteo_etat.ORDRE_COULEURS
     // -- vert/jaune/orange/rouge), DISTINCTE de la consigne (`cn`/`cl`, seuils

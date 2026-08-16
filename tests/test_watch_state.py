@@ -768,6 +768,15 @@ class TestBuildStatePics:
             st={"t": 1, "pj": 142622, "ph": "16h15", "n1": 138600},
         )
         st = watch_state.build_state(db, NOW, now_utc=NOW, pages=pages)
+        # Le guidage n'est PAS produit par build_state : il est ajoute par
+        # watch_api.state sur une copie, apres le cache partage (il est
+        # adresse a une seule montre). Le budget doit malgre tout le
+        # compter, sinon ce test cesserait de porter sur le payload
+        # reellement servi.
+        st["gd"] = {"lat": 47.950312, "lon": 0.221407,
+                    "n": "Rond point Maison Blan", "s": 9999,
+                    "t": 1786871218}
+        st["gs"] = 9999
         brut = json.dumps(st, ensure_ascii=False).encode("utf-8")
         assert len(brut) < 2048
 

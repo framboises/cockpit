@@ -894,13 +894,16 @@ function testFormatEditionEtFormeCompacte(logger) {
 
 (:test)
 function testNextPageBoucleSurSixEtRevientAZero(logger) {
+    // Le cycle compte SEPT pages depuis l'ajout du guidage. Le nombre est
+    // lu sur CockpitView.NB_PAGES plutot que recopie : un test qui figerait
+    // le compte cesserait de suivre l'app a la page suivante.
     var vue = new CockpitView();
     Test.assertEqual(vue.currentPage(), 0);
-    for (var i = 0; i < 5; i += 1) {
+    for (var i = 0; i < CockpitView.NB_PAGES - 1; i += 1) {
         vue.nextPage();
     }
-    Test.assertEqual(vue.currentPage(), 5);
-    // Le sixieme appel referme le cycle.
+    Test.assertEqual(vue.currentPage(), CockpitView.NB_PAGES - 1);
+    // L'appel suivant referme le cycle.
     vue.nextPage();
     Test.assertEqual(vue.currentPage(), 0);
     return true;
@@ -916,9 +919,9 @@ function testPreviousPageDepuisZeroArriveACinq(logger) {
     var vue = new CockpitView();
     Test.assertEqual(vue.currentPage(), 0);
     vue.previousPage();
-    Test.assertEqual(vue.currentPage(), 5);
+    Test.assertEqual(vue.currentPage(), CockpitView.NB_PAGES - 1);
     vue.previousPage();
-    Test.assertEqual(vue.currentPage(), 4);
+    Test.assertEqual(vue.currentPage(), CockpitView.NB_PAGES - 2);
     return true;
 }
 
@@ -979,15 +982,15 @@ function testDessinChaquePageNeLevePas(logger) {
 function testSautMenuSeptEntreesDansLOrdre(logger) {
     var menu = new SautMenu();
     var labels = ["Tableau de bord", "Alertes", "Main courante", "Trafic",
-                  "Meteo", "Frequentation", "Pics par edition"];
-    var ids = [0, 1, 2, 3, 4, 5, -1];
+                  "Meteo", "Frequentation", "Guidage", "Pics par edition"];
+    var ids = [0, 1, 2, 3, 4, 5, 6, -1];
     for (var i = 0; i < labels.size(); i += 1) {
         var item = menu.getItem(i);
         Test.assert(item != null);
         Test.assertEqual(item.getLabel(), labels[i]);
         Test.assertEqual(item.getId(), ids[i]);
     }
-    // Rien au-dela de la septieme entree : les editions sont bien une
+    // Rien au-dela de la derniere entree : les editions sont bien une
     // entree de CE menu, pas nichees dans un sous-menu supplementaire.
     Test.assert(menu.getItem(labels.size()) == null);
     return true;
@@ -1059,5 +1062,83 @@ function testPageTraficEstBienLaTroisieme(logger) {
     // un decalage d'un rang enverrait START feuilleter la meteo.
     var vue = new CockpitView();
     Test.assert(vue.pageView(CockpitView.PAGE_TRAFIC) instanceof TraficView);
+    return true;
+}
+
+
+// --- Le GPS ne survit pas a la sortie de la page ------------------------
+//
+// Ecrit apres un sabotage qui n'avait rien fait tomber : supprimer
+// l'extinction du GPS dans quitterPage laissait 194 tests au vert, et
+// aurait vide la batterie d'une montre qui tient trente jours. C'est le
+// seul capteur continu de toute l'app, et son extinction est invisible a
+// l'ecran -- donc invisible a tout test de dessin.
+
+(:test)
+function testGpsAllumeSeulementSurLaPageGuidage(logger) {
+    var vue = new CockpitView();
+    var guidage = vue.pageView(CockpitView.PAGE_GUIDAGE);
+    Test.assertEqual(guidage.estActive(), false);
+    vue.setPage(CockpitView.PAGE_GUIDAGE);
+    Test.assertEqual(guidage.estActive(), true);
+    return true;
+}
+
+(:test)
+function testGpsEteintEnQuittantLaPageParHautBas(logger) {
+    var vue = new CockpitView();
+    var guidage = vue.pageView(CockpitView.PAGE_GUIDAGE);
+    vue.setPage(CockpitView.PAGE_GUIDAGE);
+    Test.assertEqual(guidage.estActive(), true);
+    vue.nextPage();
+    Test.assertEqual(guidage.estActive(), false);
+    return true;
+}
+
+(:test)
+function testGpsEteintEnQuittantLaPageParLeMenu(logger) {
+    // setPage est le chemin du menu de saut : il doit eteindre comme
+    // HAUT/BAS, sinon sauter de Guidage vers Meteo laisserait le GPS
+    // allume indefiniment.
+    var vue = new CockpitView();
+    var guidage = vue.pageView(CockpitView.PAGE_GUIDAGE);
+    vue.setPage(CockpitView.PAGE_GUIDAGE);
+    vue.setPage(0);
+    Test.assertEqual(guidage.estActive(), false);
+    return true;
+}
+
+(:test)
+function testGpsEteintALaFermetureDeLApp(logger) {
+    // Quitter l'app depuis la page Guidage : onHide est le dernier filet.
+    var vue = new CockpitView();
+    var guidage = vue.pageView(CockpitView.PAGE_GUIDAGE);
+    vue.setPage(CockpitView.PAGE_GUIDAGE);
+    Test.assertEqual(guidage.estActive(), true);
+    vue.onHide();
+    Test.assertEqual(guidage.estActive(), false);
+    return true;
+}
+
+(:test)
+function testStartEnregistreLeWaypointSurLaPageGuidage(logger) {
+    // Sur cette page, START ne doit PAS rafraichir : il pousse le point
+    // dans les lieux enregistres. Un cablage inverse ne leve rien.
+    guidagePages(GD_HOUX);
+    var vue = new CockpitView();
+    vue.setPage(CockpitView.PAGE_GUIDAGE);
+    var guidage = vue.pageView(CockpitView.PAGE_GUIDAGE);
+    vue.onSelectPressed();
+    // Le pied de page affiche la confirmation : c'est la trace observable
+    // de l'enregistrement.
+    var dc = dcEnregistrement();
+    guidage.onUpdate(dc);
+    var rects = dc.rects();
+    var trouve = false;
+    for (var i = 0; i < rects.size(); i += 1) {
+        var label = rects[i]["label"];
+        if (label != null && label.find("enregistre") != null) { trouve = true; }
+    }
+    Test.assert(trouve);
     return true;
 }

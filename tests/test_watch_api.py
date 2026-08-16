@@ -365,6 +365,195 @@ class TestAdminGuardSuperAdmin:
         assert rep.status_code == 403
 
 
+class TestGuidage:
+    """Le point de guidage est adresse a UNE montre, alors que le payload
+    /state est mis en cache et servi a toutes. C'est le seul endroit de
+    l'API ou cette distinction existe, et c'est donc le seul endroit ou une
+    fuite d'une montre vers une autre est possible."""
+
+    SECRET_A = "secret-a"
+    SECRET_B = "secret-b"
+
+    def _monde(self, monkeypatch):
+        """Deux montres enrolees, une base partagee, build_state neutralise."""
+        import sys
+        import types
+        import watch_api
+        from bson.objectid import ObjectId
+        from conftest import FakeDb
+
+        self.id_a = ObjectId()
+        self.id_b = ObjectId()
+        db = FakeDb(watch_tokens=[
+            {"_id": self.id_a, "token_sha256": watch_api.hash_token(self.SECRET_A),
+             "revoked": False, "label": "montre ludo"},
+            {"_id": self.id_b, "token_sha256": watch_api.hash_token(self.SECRET_B),
+             "revoked": False, "label": "montre adjoint"},
+        ], watch_guidage=[])
+        monkeypatch.setattr(watch_api, "_db", lambda: db)
+        monkeypatch.setattr(watch_api.watch_state, "build_state",
+                            lambda d, n, n_utc, **kw: {"t": 1, "al": []})
+        # CODING=True court-circuite le garde admin, comme en dev.
+        # _admin_guard importe les cinq constantes d'un coup AVANT de
+        # tester CODING : les omettre leve ImportError, pas un 401.
+        fake_app = types.ModuleType("app")
+        fake_app.CODING = True
+        fake_app.JWT_SECRET = "test"
+        fake_app.JWT_ALGORITHM = "HS256"
+        fake_app.APP_KEY = "cockpit"
+        fake_app.SUPER_ADMIN_ROLE = "super_admin"
+        monkeypatch.setitem(sys.modules, "app", fake_app)
+        watch_api.watch_guidage.reset_indexes()
+        return db
+
+    def _etat(self, client, secret):
+        return client.get("/api/v1/watch/state",
+                          headers={"Authorization": "Bearer " + secret}).get_json()
+
+    def _envoyer(self, client, token_id, lat, lon, label):
+        return client.post("/api/v1/watch/admin/guidage",
+                           json={"token_id": str(token_id), "lat": lat,
+                                 "lon": lon, "label": label})
+
+    # --- Isolation entre montres ------------------------------------
+
+    def test_deux_montres_ne_partagent_pas_leur_point(self, client, monkeypatch):
+        # LA raison d'etre de _avec_guidage. Les deux appels tombent dans la
+        # MEME fenetre de cache (CACHE_TTL_S) : si le point entrait dans le
+        # payload cache, la seconde montre recevrait celui de la premiere.
+        self._monde(monkeypatch)
+        self._envoyer(client, self.id_a, 47.95, 0.22, "Porte Houx 5")
+        self._envoyer(client, self.id_b, 47.94, 0.23, "Tribune 12")
+        a = self._etat(client, self.SECRET_A)
+        b = self._etat(client, self.SECRET_B)
+        assert a["gd"]["n"] == "Porte Houx 5"
+        assert b["gd"]["n"] == "Tribune 12"
+
+    def test_une_montre_sans_point_ne_recoit_rien(self, client, monkeypatch):
+        # Variante du precedent, et le cas le plus dangereux : A est guidee,
+        # B ne l'est pas. B doit recevoir null, pas le point de A.
+        self._monde(monkeypatch)
+        self._envoyer(client, self.id_a, 47.95, 0.22, "Porte Houx 5")
+        assert self._etat(client, self.SECRET_A)["gd"] is not None
+        b = self._etat(client, self.SECRET_B)
+        assert b["gd"] is None
+        assert b["gs"] is None
+
+    def test_le_payload_cache_reste_vierge(self, client, monkeypatch):
+        # Le cache partage ne doit JAMAIS porter de guidage : sinon la
+        # premiere montre servie contaminerait le cache pour 20 secondes.
+        import watch_api
+        self._monde(monkeypatch)
+        self._envoyer(client, self.id_a, 47.95, 0.22, "Porte Houx 5")
+        self._etat(client, self.SECRET_A)
+        assert "gd" not in watch_api._cache["payload"]
+        assert "gs" not in watch_api._cache["payload"]
+
+    # --- Forme du payload -------------------------------------------
+
+    def test_gd_porte_le_point_et_gs_la_sequence(self, client, monkeypatch):
+        # gd va dans les blocs de pages cote montre, gs dans le noyau : c'est
+        # gs, et lui seul, que lit le service de fond pour vibrer.
+        self._monde(monkeypatch)
+        self._envoyer(client, self.id_a, 47.95, 0.22, "Porte Houx 5")
+        etat = self._etat(client, self.SECRET_A)
+        assert etat["gd"] == {"lat": 47.95, "lon": 0.22, "n": "Porte Houx 5",
+                              "s": 1, "t": etat["gd"]["t"]}
+        assert etat["gs"] == 1
+
+    def test_sans_guidage_les_deux_champs_sont_nuls(self, client, monkeypatch):
+        self._monde(monkeypatch)
+        etat = self._etat(client, self.SECRET_A)
+        assert etat["gd"] is None
+        assert etat["gs"] is None
+
+    def test_renvoi_du_meme_point_fait_monter_la_sequence(self, client, monkeypatch):
+        # C'est ce que la montre observe pour vibrer une seconde fois.
+        self._monde(monkeypatch)
+        self._envoyer(client, self.id_a, 47.95, 0.22, "Porte Houx 5")
+        self._envoyer(client, self.id_a, 47.95, 0.22, "Porte Houx 5")
+        assert self._etat(client, self.SECRET_A)["gs"] == 2
+
+    def test_guidage_illisible_ne_casse_pas_le_payload(self, client, monkeypatch):
+        # Regle commune a tous les blocs : une source abimee met le bloc a
+        # null, elle ne fait pas tomber le reste de l'etat.
+        import watch_api
+        self._monde(monkeypatch)
+        monkeypatch.setattr(watch_api.watch_guidage, "read_point",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError()))
+        etat = self._etat(client, self.SECRET_A)
+        assert etat["gd"] is None
+        assert etat["t"] == 1        # le reste du payload est intact
+
+    # --- Routes d'administration ------------------------------------
+
+    def test_envoi_nominal(self, client, monkeypatch):
+        self._monde(monkeypatch)
+        rep = self._envoyer(client, self.id_a, 47.95, 0.22, "Porte Houx 5")
+        assert rep.status_code == 200
+        assert rep.get_json() == {"ok": True, "seq": 1, "label": "Porte Houx 5"}
+
+    def test_coordonnees_invalides_refusees(self, client, monkeypatch):
+        self._monde(monkeypatch)
+        rep = self._envoyer(client, self.id_a, "au nord", 0.22, "X")
+        assert rep.status_code == 400
+        assert rep.get_json()["error"] == "coordonnees_invalides"
+
+    def test_libelle_vide_refuse(self, client, monkeypatch):
+        self._monde(monkeypatch)
+        rep = self._envoyer(client, self.id_a, 47.95, 0.22, "  ")
+        assert rep.status_code == 400
+        assert rep.get_json()["error"] == "libelle_vide"
+
+    def test_montre_absente_du_corps(self, client, monkeypatch):
+        self._monde(monkeypatch)
+        rep = client.post("/api/v1/watch/admin/guidage",
+                          json={"lat": 47.95, "lon": 0.22, "label": "X"})
+        assert rep.status_code == 400
+        assert rep.get_json()["error"] == "montre_absente"
+
+    def test_identifiant_de_montre_malforme(self, client, monkeypatch):
+        # Un ObjectId invalide leverait InvalidId et rendrait un 500.
+        self._monde(monkeypatch)
+        rep = self._envoyer(client, "pas-un-objectid", 47.95, 0.22, "X")
+        assert rep.status_code == 400
+
+    def test_montre_inconnue_refusee(self, client, monkeypatch):
+        from bson.objectid import ObjectId
+        self._monde(monkeypatch)
+        rep = self._envoyer(client, ObjectId(), 47.95, 0.22, "X")
+        assert rep.status_code == 404
+
+    def test_montre_revoquee_refusee(self, client, monkeypatch):
+        # Ecrire un point pour un jeton revoque le laisserait en base sans
+        # que rien ne le lise, et l'operateur croirait avoir envoye.
+        db = self._monde(monkeypatch)
+        db["watch_tokens"].docs[0]["revoked"] = True
+        rep = self._envoyer(client, self.id_a, 47.95, 0.22, "X")
+        assert rep.status_code == 404
+
+    def test_effacement(self, client, monkeypatch):
+        self._monde(monkeypatch)
+        self._envoyer(client, self.id_a, 47.95, 0.22, "X")
+        rep = client.delete("/api/v1/watch/admin/guidage/" + str(self.id_a))
+        assert rep.get_json() == {"ok": True, "efface": True}
+        assert self._etat(client, self.SECRET_A)["gd"] is None
+
+    def test_effacement_sans_point_ne_ment_pas(self, client, monkeypatch):
+        self._monde(monkeypatch)
+        rep = client.delete("/api/v1/watch/admin/guidage/" + str(self.id_a))
+        assert rep.get_json()["efface"] is False
+
+    def test_liste_pour_la_carte(self, client, monkeypatch):
+        # La carte du cockpit doit montrer quelle montre est deja guidee,
+        # sinon l'operateur ecraserait un guidage en cours sans le savoir.
+        self._monde(monkeypatch)
+        self._envoyer(client, self.id_a, 47.95, 0.22, "Porte Houx 5")
+        liste = client.get("/api/v1/watch/admin/guidage").get_json()["guidage"]
+        assert liste[str(self.id_a)]["label"] == "Porte Houx 5"
+        assert str(self.id_b) not in liste
+
+
 class _FakeCollection:
     def __init__(self, docs=None):
         self.docs = list(docs or [])

@@ -1,7 +1,7 @@
 using Toybox.WatchUi;
 
-// Menu de saut : sept entrees, les six pages du cycle HAUT/BAS (dans le meme
-// ordre) plus "Pics par edition". MENU ouvrait autrefois EditionsView
+// Menu de saut : huit entrees, les sept pages du cycle HAUT/BAS (dans le
+// meme ordre) plus "Pics par edition". MENU ouvrait autrefois EditionsView
 // directement -- ce raccourci disparait au profit de ce menu, mais la vue
 // reste atteignable en une seule entree (la derniere), pas nichee plus loin.
 class SautMenu extends WatchUi.Menu2 {
@@ -14,6 +14,7 @@ class SautMenu extends WatchUi.Menu2 {
         addItem(new WatchUi.MenuItem("Trafic", null, 3, {}));
         addItem(new WatchUi.MenuItem("Meteo", null, 4, {}));
         addItem(new WatchUi.MenuItem("Frequentation", null, 5, {}));
+        addItem(new WatchUi.MenuItem("Guidage", null, 6, {}));
         addItem(new WatchUi.MenuItem("Pics par edition", null, -1, {}));
     }
 }
@@ -30,7 +31,9 @@ class SautMenuDelegate extends WatchUi.Menu2InputDelegate {
     }
 
     // Choisir une page pose mPage sur la vue principale et referme le menu
-    // (identifiants 0..5, memes indices que CockpitView.nextPage). Choisir
+    // (identifiants 0..6, memes indices que CockpitView.nextPage). Passer
+    // par setPage allume le GPS de la page Guidage comme le ferait
+    // HAUT/BAS -- c'est setPage qui appelle entrerPage, pas le cycle. Choisir
     // les editions (identifiant -1) pousse EditionsView, exactement comme
     // MENU le faisait directement avant cette tache.
     function onSelect(item) {

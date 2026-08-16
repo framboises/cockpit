@@ -845,9 +845,10 @@ Sans `ANTHROPIC_API_KEY`, le rapport se génère **sans la section** (log en war
 ## Montre connectée (app Connect IQ, `garmin/cockpit-watch/`)
 
 Une app Garmin (tactix 8 Solar / fēnix 8 Solar 51 mm, sideload uniquement)
-affiche au poignet du directeur des opérations adjoint six pages en cycle
+affiche au poignet du directeur des opérations adjoint sept pages en cycle
 (HAUT/BAS) : tableau de bord, alertes, main courante PC org, trafic, météo,
-fréquentation ; plus un menu de saut (MENU) et une page « Pics par édition ».
+fréquentation, guidage ; plus un menu de saut (MENU) et une page « Pics par
+édition ».
 Authentification par jeton Bearer émis depuis `/watch-admin`. Documentation
 complète dans `garmin/cockpit-watch/README.md` — cette section ne couvre que
 ce qui touche le code serveur Cockpit.
@@ -1040,6 +1041,36 @@ dans le payload, cf. `watch_pages.py`) :
   même dans une sonde jetable. `DebordementTest.mc` échoue désormais si un
   bloc sort du disque inscrit ou chevauche le pied, sur la taille lue à
   l'exécution.
+
+### Guidage : un point GPS poussé du cockpit vers une montre
+
+`/watch-admin` porte une carte : on clique un point, on le nomme, on choisit
+une montre, il part. La montre l'affiche (flèche, distance) sur une 7ᵉ page,
+et START le pousse dans ses **lieux enregistrés natifs** pour que la
+navigation Garmin le reprenne. Documentation complète dans
+`garmin/cockpit-watch/README.md` ; trois pièges valent d'être ici.
+
+⚠️ **`/state` sert un payload mis en cache 20 s, IDENTIQUE pour toutes les
+montres.** Un point de guidage est adressé à une seule : il est donc ajouté
+par `watch_api._avec_guidage` sur une **copie**, après le cache, à partir du
+jeton porteur de la requête. L'écrire dans le payload caché ferait fuiter le
+point d'une montre vers toutes les autres pendant 20 secondes. C'est le seul
+endroit de l'API montre où le payload n'est pas commun, et donc le seul où
+une fuite est possible.
+
+⚠️ **Le GPS n'est allumé que pendant que la page Guidage est affichée** —
+seul capteur continu de toute l'app. `CockpitView.entrerPage`/`quitterPage`
+l'allument et l'éteignent, `onHide` est le filet à la fermeture. Cette
+extinction est **invisible à l'écran**, donc invisible à tout test de dessin :
+un sabotage a montré que la supprimer laissait 194 tests au vert.
+
+⚠️ **Un texte tronqué tient parfaitement dans l'écran** — aucun contrôle
+géométrique ne le signale. La corde au pied de page ne fait que **133,7 px**
+sur ce cadran : `boussole indisponible` (164 px) sortait `boussole indispo`,
+et `GPS faible . START = enregistrer` (255 px) sortait `GPS faible . STA`.
+Trouvé à la sonde, jamais par un test. Tous les libellés du pied sont
+désormais mesurés, et cinq tests comparent le texte **réellement dessiné** au
+texte entier attendu.
 
 ### Piège d'outillage : lancer le simulateur au premier plan
 

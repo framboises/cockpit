@@ -80,3 +80,66 @@ class TestAggregate:
         with pytest.raises(NotImplementedError):
             list(db["x"].aggregate(
                 [{"$group": {"_id": "$n", "moy": {"$avg": "$n"}}}]))
+
+
+class TestFindOneAndUpdate:
+    """Le double porte desormais `$inc`, qui compte les envois de guidage --
+    donc qui declenche la vibration cote montre. Un double qui l'ignorerait
+    en silence laisserait passer un compteur fige, la meme classe de bug que
+    le faux `$gte` corrige plus haut dans ce fichier."""
+
+    def test_incremente_un_champ_absent_depuis_zero(self):
+        db = FakeDb(x=[{"k": 1}])
+        doc = db["x"].find_one_and_update({"k": 1}, {"$inc": {"seq": 1}})
+        assert doc["seq"] == 1
+
+    def test_incremente_un_champ_existant(self):
+        db = FakeDb(x=[{"k": 1, "seq": 6}])
+        doc = db["x"].find_one_and_update({"k": 1}, {"$inc": {"seq": 1}})
+        assert doc["seq"] == 7
+
+    def test_upsert_cree_le_document_avec_le_filtre(self):
+        db = FakeDb(x=[])
+        doc = db["x"].find_one_and_update(
+            {"k": 9}, {"$set": {"v": "a"}, "$inc": {"seq": 1}}, upsert=True)
+        assert doc == {"k": 9, "v": "a", "seq": 1}
+        assert len(db["x"].docs) == 1
+
+    def test_sans_upsert_un_document_absent_rend_none(self):
+        db = FakeDb(x=[])
+        assert db["x"].find_one_and_update({"k": 9}, {"$inc": {"seq": 1}}) is None
+        assert db["x"].docs == []
+
+    def test_deux_appels_ne_creent_pas_deux_documents(self):
+        # Le vrai index unique l'interdit en base ; le double doit se
+        # comporter pareil, sinon le test de remplacement serait faux.
+        db = FakeDb(x=[])
+        for _ in range(3):
+            db["x"].find_one_and_update({"k": 1}, {"$inc": {"seq": 1}},
+                                        upsert=True)
+        assert len(db["x"].docs) == 1
+        assert db["x"].docs[0]["seq"] == 3
+
+    def test_operateur_inconnu_leve(self):
+        db = FakeDb(x=[{"k": 1}])
+        with pytest.raises(NotImplementedError):
+            db["x"].find_one_and_update({"k": 1}, {"$unset": {"k": ""}})
+
+
+class TestDeleteOne:
+    def test_rend_le_compte_supprime(self):
+        db = FakeDb(x=[{"k": 1}, {"k": 2}])
+        assert db["x"].delete_one({"k": 1}).deleted_count == 1
+        assert [d["k"] for d in db["x"].docs] == [2]
+
+    def test_rien_a_supprimer_rend_zero(self):
+        # Ce zero est lu comme un booleen par l'appelant : le rendre a None
+        # ferait passer un << rien a effacer >> pour un << efface >>.
+        db = FakeDb(x=[{"k": 1}])
+        assert db["x"].delete_one({"k": 9}).deleted_count == 0
+        assert len(db["x"].docs) == 1
+
+    def test_n_en_supprime_qu_un_seul(self):
+        db = FakeDb(x=[{"k": 1}, {"k": 1}])
+        db["x"].delete_one({"k": 1})
+        assert len(db["x"].docs) == 1

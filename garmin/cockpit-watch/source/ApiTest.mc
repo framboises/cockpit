@@ -267,3 +267,55 @@ function testFetchModeMockRepartitLesQuatreBlocsCommeLeReseau(logger) {
     Application.Properties.setValue("mockScenario", scenarioAvant);
     return true;
 }
+
+
+// --- Transport du guidage ----------------------------------------------
+//
+// Les trois tests qui suivent ont ete ecrits APRES un sabotage qui n'avait
+// rien fait tomber : supprimer `gd` de toPagesDict, ou `gs` de toCacheDict,
+// laissait 194 tests au vert alors que la page Guidage serait restee
+// definitivement vide et la vibration definitivement muette. C'est
+// exactement le defaut que le commentaire de toCacheDict annonce -- il
+// s'etait deja produit sur `me` -- et qu'aucun test ne couvrait encore
+// pour ces deux champs-la.
+
+(:test)
+function testToPagesReporteLePointDeGuidage(logger) {
+    var data = {"t" => 100, "mc" => null, "tr" => null, "me" => null,
+                "st" => null,
+                "gd" => {"lat" => 47.9503, "lon" => 0.2214,
+                         "n" => "Porte Houx 5", "s" => 3}};
+    var pg = Api.toPagesDict(data);
+    Test.assert(pg["gd"] != null);
+    Test.assertEqual(pg["gd"]["n"], "Porte Houx 5");
+    Test.assertEqual(pg["gd"]["s"], 3);
+    return true;
+}
+
+(:test)
+function testToCacheReporteLaSequenceDeGuidage(logger) {
+    // `gs` est le SEUL champ de guidage dans le noyau, et c'est lui qui
+    // declenche la vibration : le service de fond ne lit que le noyau.
+    var data = {"t" => 100, "m" => "live", "al" => [], "gs" => 7,
+                "gd" => {"lat" => 47.9503, "lon" => 0.2214, "n" => "X",
+                         "s" => 7}};
+    var st = Api.toCacheDict(data, 200);
+    Test.assertEqual(st["gs"], 7);
+    // Le point COMPLET, lui, ne doit pas encombrer le noyau : la glance le
+    // deserialiserait a chaque affichage sans jamais l'utiliser.
+    Test.assert(!st.hasKey("gd"));
+    return true;
+}
+
+(:test)
+function testSansGuidageLesDeuxChampsRestentNuls(logger) {
+    // Payload d'un serveur anterieur a cette fonctionnalite : ni l'un ni
+    // l'autre ne doit lever, et surtout aucun ne doit prendre une valeur
+    // par defaut qui ferait vibrer la montre.
+    var data = {"t" => 100, "m" => "live", "al" => []};
+    var st = Api.toCacheDict(data, 200);
+    var pg = Api.toPagesDict(data);
+    Test.assert(st["gs"] == null);
+    Test.assert(pg["gd"] == null);
+    return true;
+}

@@ -88,7 +88,14 @@ module Mock {
                              "cn" => "Palpation renforcee", "cl" => 2,
                              "vg" => 2},
                     "st" => {"t" => nowSec - 120, "pj" => 50690,
-                             "ph" => "15h05", "n1" => 44100}};
+                             "ph" => "15h05", "n1" => 44100},
+                    // Seul scenario portant un guidage : les autres restent
+                    // sans point, qui est l'etat normal. Porte Houx 5, coin
+                    // nord-ouest du circuit.
+                    "gs" => 3,
+                    "gd" => {"lat" => 47.9503, "lon" => 0.2214,
+                             "n" => "Porte Houx 5", "s" => 3,
+                             "t" => nowSec - 60}};
         }
         if (scenario == 3) {
             // Recue a l'instant, mais la donnee date de 22 minutes. Calme

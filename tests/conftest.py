@@ -41,6 +41,14 @@ class FakeCursor:
         return iter(self.docs)
 
 
+class _ResultatSuppression:
+    """Ce que pymongo rend sur delete_one/delete_many : un objet portant
+    `deleted_count`, pas un entier nu."""
+
+    def __init__(self, deleted_count):
+        self.deleted_count = deleted_count
+
+
 class FakeCollection:
     """Collection Mongo minimale : juste ce que le code teste appelle."""
 
@@ -66,7 +74,12 @@ class FakeCollection:
         return len(self._matching(query))
 
     def create_index(self, keys, **kwargs):
-        self.indexes.append((tuple(keys), kwargs.get("name")))
+        # Les kwargs sont conserves ENTIERS (et plus seulement `name`) :
+        # `unique` est ce qui garantit qu'un second envoi de guidage
+        # remplace le premier au lieu d'en creer un doublon. Ne garder que
+        # le nom rendait cette garantie invérifiable, donc son test
+        # tautologique.
+        self.indexes.append((keys, dict(kwargs)))
         return kwargs.get("name")
 
     def update_one(self, filtre, update, upsert=False):
@@ -82,6 +95,47 @@ class FakeCollection:
     def delete_many(self, query=None):
         restants = [d for d in self.docs if d not in self._matching(query)]
         self.docs = restants
+
+    def delete_one(self, query=None):
+        """Supprime AU PLUS un document, et rend son compte.
+
+        Le compte est ce que lit l'appelant (watch_guidage.clear_point rend
+        True/False dessus) : le rendre a None ferait passer un << rien a
+        effacer >> pour un << efface >>.
+        """
+        cible = self.find_one(query)
+        if cible is None:
+            return _ResultatSuppression(0)
+        self.docs = [d for d in self.docs if d is not cible]
+        return _ResultatSuppression(1)
+
+    def find_one_and_update(self, filtre, update, upsert=False,
+                            return_document=None):
+        """$set et $inc, avec upsert. Rend le document APRES modification.
+
+        `$inc` n'est pas du sucre ici : c'est lui qui porte le compteur de
+        sequence du guidage, donc la vibration cote montre. Un double qui
+        l'ignorerait en silence laisserait passer un compteur fige --
+        exactement la classe de bug que le faux `$gte` de ce fichier avait
+        deja produite. Tout operateur non reconnu leve, plutot que d'etre
+        ignore : un test tautologique est pire qu'une absence de test.
+        """
+        inconnus = set(update.keys()) - {"$set", "$inc"}
+        if inconnus:
+            raise NotImplementedError(
+                "operateurs non geres par le double : %s" % sorted(inconnus))
+
+        cible = self.find_one(filtre)
+        if cible is None:
+            if not upsert:
+                return None
+            cible = dict(filtre)
+            self.docs.append(cible)
+
+        cible.update(update.get("$set", {}))
+        for cle, pas in (update.get("$inc") or {}).items():
+            cible[cle] = (cible.get(cle) or 0) + pas
+        return cible
 
     def aggregate(self, pipeline):
         """Pipeline minimal : seuls $match et $group sont reconnus, parce

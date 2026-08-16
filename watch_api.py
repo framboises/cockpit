@@ -11,8 +11,11 @@ import time
 from datetime import datetime, timezone
 from functools import wraps
 
+from bson.errors import InvalidId
+from bson.objectid import ObjectId
 from flask import Blueprint, jsonify, request
 
+import watch_guidage
 import watch_pages
 import watch_peaks
 import watch_state
@@ -363,16 +366,124 @@ def admin_put_config():
 @watch_bp.route("/state", methods=["GET"])
 @bearer_required
 def state():
+    """Etat commun a toutes les montres, plus le guidage propre a celle-ci.
+
+    ⚠️ LE CACHE EST PARTAGE ENTRE TOUTES LES MONTRES. Le point de guidage,
+    lui, est adresse a UNE montre : il ne peut donc pas entrer dans le
+    payload mis en cache, sinon la premiere montre servie imposerait son
+    point a toutes les autres pendant CACHE_TTL_S. Il est ajoute sur une
+    COPIE, apres coup, a partir du jeton porteur de la requete -- et le
+    payload en cache reste rigoureusement celui de tout le monde.
+
+    La copie est superficielle (`dict(...)`) : on n'ajoute que des cles de
+    premier niveau, les blocs imbriques ne sont jamais modifies.
+    """
     maintenant = time.time()
     if _cache["payload"] is not None and maintenant - _cache["at"] < CACHE_TTL_S:
-        return jsonify(_cache["payload"])
+        payload = _cache["payload"]
+    else:
+        payload = watch_state.build_state(
+            _db(), datetime.now(), datetime.now(timezone.utc),
+            peaks=watch_peaks, pages=watch_pages)
+        _cache["payload"] = payload
+        _cache["at"] = maintenant
 
-    payload = watch_state.build_state(
-        _db(), datetime.now(), datetime.now(timezone.utc),
-        peaks=watch_peaks, pages=watch_pages)
-    _cache["payload"] = payload
-    _cache["at"] = maintenant
-    return jsonify(payload)
+    return jsonify(_avec_guidage(payload, request.watch_token))
+
+
+def _avec_guidage(payload, jeton):
+    """Copie du payload, enrichie du guidage de CETTE montre.
+
+    Deux champs, volontairement separes :
+
+      - `gd` : le point complet (coordonnees, libelle). Il ne sert qu'a la
+        page Guidage, donc il voyage dans les blocs de pages cote montre,
+        que la glance et le service de fond ne deserialisent jamais.
+      - `gs` : le seul compteur de sequence, dans le NOYAU du payload. C'est
+        lui qui declenche la vibration a l'arrivee d'un point, et le service
+        de fond ne lit que le noyau -- sans ce scalaire, un point envoye
+        pendant que l'app est fermee n'aurait fait vibrer personne.
+
+    Ne leve jamais : un guidage illisible laisse le reste du payload intact,
+    meme regle que les quatre blocs de watch_pages.
+    """
+    sortie = dict(payload or {})
+    bloc = None
+    try:
+        bloc = watch_guidage.read_point(_db(), (jeton or {}).get("_id"))
+    except Exception:
+        logger.exception("Guidage illisible, payload servi sans")
+    sortie["gd"] = bloc
+    sortie["gs"] = bloc["s"] if bloc else None
+    return sortie
+
+
+# --- Guidage : routes d'administration --------------------------------
+#
+# Envoyer un point sur la montre de quelqu'un est une DIRECTIVE, pas une
+# consultation : meme garde admin que la gestion des jetons, et on trace qui
+# a envoye quoi (`sent_by`).
+
+
+@watch_bp.route("/admin/guidage", methods=["GET"])
+def admin_list_guidage():
+    refus = _admin_guard()
+    if refus:
+        return refus
+    return jsonify({"ok": True, "guidage": watch_guidage.list_points(_db())})
+
+
+@watch_bp.route("/admin/guidage", methods=["POST"])
+def admin_set_guidage():
+    refus = _admin_guard()
+    if refus:
+        return refus
+    corps = request.get_json(silent=True) or {}
+    token_id = corps.get("token_id")
+    if not token_id:
+        return jsonify({"ok": False, "error": "montre_absente"}), 400
+
+    db = _db()
+    try:
+        cible = ObjectId(str(token_id))
+    except (InvalidId, TypeError):
+        return jsonify({"ok": False, "error": "montre_inconnue"}), 400
+    # La montre doit exister ET ne pas etre revoquee : ecrire un point pour
+    # un jeton revoque le laisserait en base sans que rien ne le lise
+    # jamais, et l'operateur croirait avoir envoye quelque chose.
+    #
+    # Le drapeau lu est `revoked`, exactement celui que verify_token teste --
+    # PAS `revoked_at`, qui l'accompagne mais qu'aucune autre garde de ce
+    # fichier ne consulte. Deux gardes qui ne lisent pas le meme champ
+    # finissent toujours par diverger.
+    doc = db["watch_tokens"].find_one({"_id": cible})
+    if doc is None or doc.get("revoked"):
+        return jsonify({"ok": False, "error": "montre_inconnue"}), 404
+
+    try:
+        point = watch_guidage.set_point(
+            db, cible, corps.get("lat"), corps.get("lon"),
+            corps.get("label"), sent_by=_admin_identity())
+    except ValueError as erreur:
+        return jsonify({"ok": False, "error": str(erreur)}), 400
+
+    logger.info("Guidage envoye vers la montre %s par %s : %s",
+                token_id, _admin_identity(), point.get("label"))
+    return jsonify({"ok": True, "seq": point.get("seq"),
+                    "label": point.get("label")})
+
+
+@watch_bp.route("/admin/guidage/<token_id>", methods=["DELETE"])
+def admin_clear_guidage(token_id):
+    refus = _admin_guard()
+    if refus:
+        return refus
+    try:
+        cible = ObjectId(str(token_id))
+    except (InvalidId, TypeError):
+        return jsonify({"ok": False, "error": "montre_inconnue"}), 400
+    efface = watch_guidage.clear_point(_db(), cible)
+    return jsonify({"ok": True, "efface": efface})
 
 
 @watch_bp.route("/editions", methods=["GET"])

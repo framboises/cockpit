@@ -2,7 +2,7 @@
   'use strict';
 
   var API = '/api/v1/watch/admin';
-  var state = { config: null, definitions: [], evenements: [] };
+  var state = { config: null, definitions: [], evenements: [], tokens: [], guidage: {} };
 
   function csrfToken() {
     var meta = document.querySelector('meta[name="csrf-token"]');
@@ -33,6 +33,7 @@
   var LEVEL_COLORS = { 1: 'var(--brand)', 2: 'var(--warning)', 3: 'var(--danger)' };
 
   function renderTokens(tokens) {
+    state.tokens = tokens;
     var tbody = document.querySelector('#watch-token-table tbody');
     tbody.innerHTML = tokens.map(function (t) {
       var pillClass = t.revoked ? 'is-revoked' : 'is-active';
@@ -129,6 +130,149 @@
     };
   }
 
+  // --- Guidage ---------------------------------------------------------
+  //
+  // L'operateur clique un point sur la carte, le nomme, choisit une montre.
+  // Le point remplace celui de cette montre : c'est une destination unique
+  // (<< ou dois-je aller MAINTENANT >>), pas une file d'attente.
+
+  var CIRCUIT_BBOX = [[47.9295, 0.1930], [47.9720, 0.2620]];
+
+  var guidage = { map: null, marker: null, latlng: null };
+
+  function initGuidageMap() {
+    var div = document.getElementById('watch-guidage-map');
+    if (!div || guidage.map || typeof L === 'undefined') { return; }
+
+    guidage.map = L.map(div, { zoomControl: true });
+    var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxNativeZoom: 19, maxZoom: 22, attribution: '&copy; OpenStreetMap'
+    }).addTo(guidage.map);
+    var aco = L.tileLayer('/tiles/{z}/{x}/{y}.png', {
+      tms: true, maxZoom: 22, attribution: 'ACO'
+    });
+    var ign = L.tileLayer('https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}', {
+      maxNativeZoom: 19, maxZoom: 22, attribution: 'IGN-F/Geoplateforme'
+    });
+    L.control.layers({ 'OSM': osm, 'Satellite ACO': aco, 'Satellite IGN': ign },
+                     null, { position: 'topright' }).addTo(guidage.map);
+    guidage.map.fitBounds(CIRCUIT_BBOX);
+
+    // Calque des guidages DEJA en cours : sans lui, l'operateur ecraserait
+    // un guidage sans savoir qu'il en existait un.
+    guidage.layerActifs = L.layerGroup().addTo(guidage.map);
+
+    guidage.map.on('click', function (ev) { poserPoint(ev.latlng); });
+
+    // La carte est construite dans un conteneur dont la taille n'est connue
+    // qu'apres la mise en page : sans ce recalcul, les tuiles se dessinent
+    // sur une portion de la zone seulement.
+    setTimeout(function () { if (guidage.map) { guidage.map.invalidateSize(); } }, 120);
+  }
+
+  function poserPoint(latlng) {
+    guidage.latlng = latlng;
+    if (guidage.marker) {
+      guidage.marker.setLatLng(latlng);
+    } else {
+      guidage.marker = L.marker(latlng, { draggable: true }).addTo(guidage.map);
+      guidage.marker.on('dragend', function () {
+        guidage.latlng = guidage.marker.getLatLng();
+        majCoords();
+      });
+    }
+    majCoords();
+  }
+
+  function majCoords() {
+    var div = document.getElementById('watch-guidage-coords');
+    var bouton = document.getElementById('watch-guidage-send');
+    if (!guidage.latlng) {
+      div.textContent = 'Aucun point selectionne.';
+      div.classList.remove('watch-guidage-coords-set');
+      if (bouton) { bouton.disabled = true; }
+      return;
+    }
+    div.textContent = 'Point : ' + guidage.latlng.lat.toFixed(6) + ', '
+                      + guidage.latlng.lng.toFixed(6)
+                      + ' — faites glisser le marqueur pour ajuster.';
+    div.classList.add('watch-guidage-coords-set');
+    if (bouton) { bouton.disabled = false; }
+  }
+
+  function renderGuidageTokens() {
+    var select = document.getElementById('watch-guidage-token');
+    if (!select) { return; }
+    var precedent = select.value;
+    // Une montre revoquee ne lira jamais le point : la proposer ferait
+    // croire a un envoi reussi.
+    var actives = (state.tokens || []).filter(function (t) { return !t.revoked; });
+    select.innerHTML = actives.map(function (t) {
+      return '<option value="' + esc(t._id) + '">' + esc(t.label || t._id) + '</option>';
+    }).join('');
+    if (precedent) { select.value = precedent; }
+    var vide = actives.length === 0;
+    select.disabled = vide;
+    if (vide) {
+      select.innerHTML = '<option value="">Aucune montre active</option>';
+    }
+  }
+
+  function nomMontre(id) {
+    var trouve = (state.tokens || []).filter(function (t) { return t._id === id; })[0];
+    return trouve ? (trouve.label || id) : id;
+  }
+
+  function renderGuidageTable() {
+    var tbody = document.querySelector('#watch-guidage-table tbody');
+    if (!tbody) { return; }
+    var ids = Object.keys(state.guidage || {});
+    if (!ids.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);">'
+                        + 'Aucun guidage en cours.</td></tr>';
+    } else {
+      tbody.innerHTML = ids.map(function (id) {
+        var g = state.guidage[id];
+        return '<tr>'
+          + '<td>' + esc(nomMontre(id)) + '</td>'
+          + '<td>' + esc(g.label) + '</td>'
+          + '<td>' + esc(Number(g.lat).toFixed(5) + ', ' + Number(g.lon).toFixed(5)) + '</td>'
+          + '<td>' + esc(formatInstant(g.sent_at)) + '</td>'
+          + '<td class="col-shrink">'
+          + '<button type="button" class="btn btn-secondary watch-admin-btn-sm" '
+          + 'data-guidage-clear="' + esc(id) + '">Effacer</button></td>'
+          + '</tr>';
+      }).join('');
+    }
+    majMarqueursActifs();
+  }
+
+  function majMarqueursActifs() {
+    if (!guidage.layerActifs) { return; }
+    guidage.layerActifs.clearLayers();
+    Object.keys(state.guidage || {}).forEach(function (id) {
+      var g = state.guidage[id];
+      if (g.lat == null || g.lon == null) { return; }
+      L.circleMarker([g.lat, g.lon], {
+        radius: 8, color: '#2563eb', weight: 2, fillOpacity: 0.25
+      }).bindTooltip(nomMontre(id) + ' — ' + (g.label || ''),
+                     { direction: 'top' }).addTo(guidage.layerActifs);
+    });
+  }
+
+  function formatInstant(epochSec) {
+    if (!epochSec) { return '--'; }
+    var d = new Date(epochSec * 1000);
+    return d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
+  }
+
+  function rechargerGuidage() {
+    return request('GET', API + '/guidage').then(function (j) {
+      state.guidage = j.guidage || {};
+      renderGuidageTable();
+    });
+  }
+
   function load() {
     request('GET', API + '/config').then(function (j) {
       state.config = j.config;
@@ -140,11 +284,64 @@
 
     request('GET', API + '/tokens').then(function (j) {
       renderTokens(j.tokens);
+      // Le selecteur de montre et le tableau des guidages dependent tous
+      // deux de la liste des jetons : les charger a la suite evite un
+      // selecteur vide le temps d'un aller-retour.
+      return request('GET', API + '/guidage');
+    }).then(function (j) {
+      state.guidage = j.guidage || {};
+      renderGuidageTokens();
+      renderGuidageTable();
     }).catch(function (e) { showToast('error', 'Jetons illisibles : ' + e.message); });
   }
 
   document.addEventListener('DOMContentLoaded', function () {
     load();
+    initGuidageMap();
+
+    document.getElementById('watch-guidage-form')
+      .addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        if (!guidage.latlng) {
+          showToast('error', 'Cliquez d\'abord un point sur la carte.');
+          return;
+        }
+        var tokenId = document.getElementById('watch-guidage-token').value;
+        if (!tokenId) {
+          showToast('error', 'Aucune montre selectionnee.');
+          return;
+        }
+        var label = document.getElementById('watch-guidage-label').value.trim();
+        var bouton = document.getElementById('watch-guidage-send');
+        // Un double clic enverrait deux fois le point et ferait vibrer la
+        // montre deux fois pour un seul geste.
+        bouton.disabled = true;
+        request('POST', API + '/guidage', {
+          token_id: tokenId,
+          lat: guidage.latlng.lat,
+          lon: guidage.latlng.lng,
+          label: label
+        }).then(function () {
+          showToast('success', 'Point envoye a ' + nomMontre(tokenId)
+                    + '. Il arrive au prochain releve de la montre.');
+          return rechargerGuidage();
+        }).catch(function (e) {
+          showToast('error', 'Envoi refuse : ' + e.message);
+        }).then(function () { bouton.disabled = false; });
+      });
+
+    document.querySelector('#watch-guidage-table')
+      .addEventListener('click', function (ev) {
+        var id = ev.target.getAttribute
+                 && ev.target.getAttribute('data-guidage-clear');
+        if (!id) { return; }
+        request('DELETE', API + '/guidage/' + id).then(function () {
+          showToast('success', 'Guidage efface.');
+          return rechargerGuidage();
+        }).catch(function (e) {
+          showToast('error', 'Effacement refuse : ' + e.message);
+        });
+      });
 
     document.getElementById('watch-token-form')
       .addEventListener('submit', function (ev) {

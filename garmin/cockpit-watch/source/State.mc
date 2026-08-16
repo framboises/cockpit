@@ -98,6 +98,17 @@ module State {
         return st["p"];
     }
 
+    // Compteur de sequence du guidage, ou null. Il ne dit RIEN du contenu
+    // du point : il dit seulement qu'un envoi a eu lieu. C'est tout ce que
+    // le service de fond a besoin de savoir pour vibrer, et c'est pourquoi
+    // le point complet n'entre pas dans le noyau.
+    function guidageSeq(st) {
+        if (st == null) {
+            return null;
+        }
+        return st["gs"];
+    }
+
     function isStale(st, nowSec, staleAfter) {
         // Une edition close ne vieillit pas : son pic est definitif. Sans ce
         // court-circuit, `t` etant nul, la montre finirait par afficher

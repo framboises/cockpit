@@ -22,6 +22,7 @@ class CockpitView extends WatchUi.View {
     hidden var mTrafic;
     hidden var mMeteo;
     hidden var mFrequentation;
+    hidden var mGuidage;
 
     function initialize() {
         View.initialize();
@@ -29,6 +30,7 @@ class CockpitView extends WatchUi.View {
         mTrafic = new TraficView();
         mMeteo = new MeteoView();
         mFrequentation = new FrequentationView();
+        mGuidage = new GuidageView();
     }
 
     function onLayout(dc) {
@@ -46,6 +48,10 @@ class CockpitView extends WatchUi.View {
             mTimer.stop();
             mTimer = null;
         }
+        // Filet indispensable : quitter l'app depuis la page Guidage
+        // laisserait sinon le GPS allume sur une montre qui tient trente
+        // jours autrement. C'est le seul capteur continu de toute l'app.
+        mGuidage.desactiver();
     }
 
     function onTick() as Void {
@@ -102,11 +108,21 @@ class CockpitView extends WatchUi.View {
     // enverrait START feuilleter une page qui n'a pas de sous-pages.
     static const PAGE_TRAFIC = 3;
 
-    // Six pages en cycle, dans l'ordre d'urgence operationnelle : tableau de
-    // bord, alertes, main courante, trafic, meteo, frequentation.
+    // Index de la page Guidage. Nomme pour la meme raison que PAGE_TRAFIC :
+    // c'est lui qui decide quand allumer et eteindre le GPS.
+    static const PAGE_GUIDAGE = 6;
+
+    static const NB_PAGES = 7;
+
+    // Sept pages en cycle, dans l'ordre d'urgence operationnelle : tableau
+    // de bord, alertes, main courante, trafic, meteo, frequentation,
+    // guidage. Le guidage ferme la marche : c'est la seule page qui
+    // consomme un capteur, on ne la traverse pas par accident en
+    // feuilletant.
     function nextPage() {
         quitterPage();
-        mPage = (mPage + 1) % 6;
+        mPage = (mPage + 1) % NB_PAGES;
+        entrerPage();
         WatchUi.requestUpdate();
     }
 
@@ -115,7 +131,8 @@ class CockpitView extends WatchUi.View {
     // qu'un modulo d'operande negatif reste positif).
     function previousPage() {
         quitterPage();
-        mPage = (mPage + 5) % 6;
+        mPage = (mPage + NB_PAGES - 1) % NB_PAGES;
+        entrerPage();
         WatchUi.requestUpdate();
     }
 
@@ -124,6 +141,7 @@ class CockpitView extends WatchUi.View {
     function setPage(n) {
         quitterPage();
         mPage = n;
+        entrerPage();
         WatchUi.requestUpdate();
     }
 
@@ -135,6 +153,18 @@ class CockpitView extends WatchUi.View {
         if (mPage == PAGE_TRAFIC) {
             mTrafic.remiseAZero();
         }
+        if (mPage == PAGE_GUIDAGE) {
+            mGuidage.desactiver();
+        }
+    }
+
+    // Le GPS ne s'allume QUE sur la page Guidage, et s'eteint des qu'on la
+    // quitte. Symetrie stricte avec quitterPage : toute page qui allumerait
+    // un capteur sans l'eteindre viderait la batterie en silence.
+    hidden function entrerPage() {
+        if (mPage == PAGE_GUIDAGE) {
+            mGuidage.activer();
+        }
     }
 
     // START. Sur la page trafic il feuillette le livret (bilan, puis les
@@ -144,6 +174,14 @@ class CockpitView extends WatchUi.View {
     function onSelectPressed() {
         if (mPage == PAGE_TRAFIC) {
             mTrafic.sousPageSuivante();
+            return;
+        }
+        if (mPage == PAGE_GUIDAGE) {
+            // START pousse le point dans les lieux enregistres natifs, d'ou
+            // la navigation Garmin peut le reprendre. Sur cette page, un
+            // rafraichissement force n'apporterait rien : le point ne change
+            // que quand le cockpit en envoie un autre.
+            mGuidage.enregistrerWaypoint();
             return;
         }
         refresh();
@@ -166,6 +204,7 @@ class CockpitView extends WatchUi.View {
         if (n == 2) { return mMainCourante; }
         if (n == 3) { return mTrafic; }
         if (n == 4) { return mMeteo; }
+        if (n == PAGE_GUIDAGE) { return mGuidage; }
         return mFrequentation;
     }
 

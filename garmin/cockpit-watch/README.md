@@ -4,9 +4,10 @@ Affiche au poignet le compteur d'entrées, la contrainte thermique (WBGT) et les
 alertes actives du PC Organisation. Vibre sur franchissement de seuil à la
 hausse, jamais en boucle.
 
-Six pages en cycle (HAUT/BAS) : tableau de bord, liste des alertes, main
-courante PC org, trafic, météo, fréquentation. Un menu de saut (MENU) permet
-d'atterrir directement sur n'importe laquelle, plus « Pics par édition ».
+Sept pages en cycle (HAUT/BAS) : tableau de bord, liste des alertes, main
+courante PC org, trafic, météo, fréquentation, guidage. Un menu de saut (MENU)
+permet d'atterrir directement sur n'importe laquelle, plus « Pics par
+édition ».
 
 Distribuée en **sideload** uniquement (pas de publication sur le store Connect
 IQ) : c'est le directeur des opérations adjoint qui porte la montre, pas le
@@ -34,14 +35,16 @@ Trois points d'entrée (`CockpitApp.mc`) partagent un cache commun :
 | `Api.mc` | requêtes réseau vers `/api/v1/watch/state` et `/api/v1/watch/editions`, conversion des payloads, garde anti-doublon bornée à 30 s |
 | `Alerting.mc` | transition de niveau + vibration, jamais en boucle |
 | `Mock.mc` | cinq scénarios simulés pour travailler sans backend, plus une liste d'éditions |
-| `Pages.mc` | accesseurs de lecture des quatre blocs de pages (`mc`/`tr`/`me`/`st`) dans le cache Storage dédié, plus `verdictMot` (mots du verdict trafic partagés avec `CockpitView.drawMain`) |
+| `Pages.mc` | accesseurs de lecture des blocs de pages (`mc`/`tr`/`me`/`st`/`gd`) dans le cache Storage dédié, plus `verdictMot`, `vigilanceMot` et `largeurUtile` (corde du cadran rond) |
 | `CockpitView.mc` / `CockpitDelegate.mc` | console (device app) : tableau de bord (page 0), liste des alertes (page 1), et aiguillage inline (`pageView`) vers les quatre vues de pages annexes (2 à 5) |
 | `MainCouranteView.mc` | page « Main courante » : compteurs PC org en cours/terminées par catégorie |
+| `GuidageView.mc` | page « Guidage » : flèche vers le point reçu, distance, START enregistre un waypoint natif. **Seul endroit de l'app qui allume un capteur continu** |
+| `Geo.mc` | distance haversine, cap initial, angle relatif — fonctions pures, testées en valeur |
 | `TraficView.mc` | page « Trafic » : livret feuilleté à START — bilan (verdict global, accidents/bouchons/dangers, axe le plus dégradé) puis tous les axes du mur, six par écran |
 | `MeteoView.mc` | page « Météo » : température, vent, rafale, pluie à venir, consigne la plus grave du mur |
 | `FrequentationView.mc` | page « Fréquentation » : pic de présents du jour et son heure, comparé au N-1 au même décalage à la course |
 | `EditionsView.mc` | consultation des pics par édition, atteinte par le menu de saut (MENU) |
-| `SautMenu.mc` | menu de saut : les six pages du cycle plus « Pics par édition » |
+| `SautMenu.mc` | menu de saut : les sept pages du cycle plus « Pics par édition » |
 | `GlanceView.mc` | glance |
 | `BgService.mc` | service de fond (`CockpitService extends ServiceDelegate`) |
 | `CockpitApp.mc` | les trois points d'entrée : device app, glance, background |
@@ -56,7 +59,7 @@ code mort, jamais câblé, et ont été supprimées à la tâche 14). Seules
 `EditionsView` et `SautMenu`, réellement poussées via `WatchUi.pushView`,
 gardent leur delegate (`EditionsDelegate`, `SautMenuDelegate`).
 
-149 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
+207 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
 `Pages`, la navigation (`CockpitView.nextPage`/`previousPage`/`setPage`/
 `pageView`) et les chemins de dessin des six vues (`DessinTest.mc` : le rendu
 ne doit lever dans aucun état atteignable, y compris un mode `past` sans pic
@@ -69,13 +72,13 @@ C'est **`DebordementTest.mc`** qui porte la garantie géométrique : il capture
 les rectangles réellement dessinés, sur la taille d'écran lue à l'exécution,
 et échoue si l'un d'eux sort du disque inscrit ou chevauche le pied de page.
 
-Le backend est couvert par 253 tests pytest, dont `watch_api.py`,
-`watch_state.py`, `watch_peaks.py`, `watch_pages.py`, `trafic_etat.py` et
-`meteo_etat.py`.
+Le backend est couvert par 306 tests pytest, dont `watch_api.py`,
+`watch_state.py`, `watch_peaks.py`, `watch_pages.py`, `watch_guidage.py`,
+`trafic_etat.py` et `meteo_etat.py`.
 
 ## Navigation
 
-Six pages en cycle, dans l'ordre d'urgence opérationnelle :
+Sept pages en cycle, dans l'ordre d'urgence opérationnelle :
 
 | # | Page | Contenu |
 |---|------|---------|
@@ -85,13 +88,14 @@ Six pages en cycle, dans l'ordre d'urgence opérationnelle :
 | 3 | Trafic | **livret** : bilan, puis tous les axes du mur six par écran (START feuillette) |
 | 4 | Météo | température, vent, rafale, pluie à venir, consigne la plus grave |
 | 5 | Fréquentation | pic de présents du jour, son heure, comparaison N-1 |
+| 6 | Guidage | flèche et distance vers un point envoyé depuis le cockpit |
 
 | Geste | Effet |
 |-------|-------|
-| HAUT | page suivante (`nextPage`, boucle 0→5→0) |
-| BAS | page précédente (`previousPage`, boucle 0→5 en arrière) |
-| ENTER (START) | sur la page **Trafic**, feuillette le livret (bilan → axes 1-6 → 7-12 → … → bilan) ; sur les cinq autres pages, rafraîchissement immédiat |
-| **MENU** | **menu de saut** — les six pages ci-dessus, dans le même ordre, plus « Pics par édition » ; choisir une page l'affiche directement (`setPage`), sans passer par le cycle |
+| HAUT | page suivante (`nextPage`, boucle 0→6→0) |
+| BAS | page précédente (`previousPage`, boucle 0→6 en arrière) |
+| ENTER (START) | sur la page **Trafic**, feuillette le livret (bilan → axes 1-6 → 7-12 → … → bilan) ; sur la page **Guidage**, enregistre le point dans les lieux natifs ; sur les cinq autres pages, rafraîchissement immédiat |
+| **MENU** | **menu de saut** — les sept pages ci-dessus, dans le même ordre, plus « Pics par édition » ; choisir une page l'affiche directement (`setPage`), sans passer par le cycle |
 
 ⚠️ Avec deux pages seulement (état du projet avant la tâche 13), avancer et
 reculer revenaient au même — `onPreviousPage` appelait `nextPage()` sans que
@@ -203,6 +207,112 @@ réellement dessinées (`testTraficNeTronqueJamaisLesChiffres`).
 
 Mesuré sur les 13 axes réels : aucun nom n'est tronqué (le plus large,
 « Antares Sud », occupe 91 px sur les ~130 disponibles).
+
+## La page Guidage
+
+Le cockpit envoie un point GPS à **une montre précise** (`/watch-admin`,
+section Guidage : on clique la carte, on nomme le point, on choisit la
+montre). La montre le reçoit dans son relevé normal et affiche une flèche,
+la distance et le nom. **START le pousse dans les lieux enregistrés natifs**,
+d'où la navigation Garmin le reprend — carte, fil d'Ariane, alerte hors
+trajet, tout ce que 280 pixels ne feront jamais.
+
+### Le GPS ne tourne que sur cette page
+
+C'est le **seul capteur continu de toute l'app**, et l'oublier allumé
+viderait une batterie qui tient [30 jours en mode montre](https://www.garmin.com/en-US/p/1390829/).
+`CockpitView.entrerPage`/`quitterPage` l'allument et l'éteignent à chaque
+changement de page, et `onHide` est le dernier filet à la fermeture de
+l'app.
+
+⚠️ **Cette extinction est invisible à l'écran, donc invisible à tout test de
+dessin.** Un sabotage l'a montré : supprimer l'appel à `desactiver()`
+laissait 194 tests au vert. Quatre tests dédiés (`DessinTest.mc`) vérifient
+maintenant l'allumage et les trois chemins d'extinction (HAUT/BAS, menu de
+saut, fermeture).
+
+Conséquence assumée : **pas de guidage en arrière-plan**, pas de « tu
+t'approches », pas de suivi continu. C'est le prix de la batterie.
+
+### La flèche ne ment jamais
+
+Sans cap de la montre, `angleFleche()` rend `null` et **aucune flèche n'est
+dessinée** — un disque neutre tient la place. On connaîtrait la direction du
+point dans le monde, mais pas l'orientation du poignet : dessiner
+reviendrait à pointer le nord en prétendant montrer la route.
+
+Le cap vient de `Sensor.Info.heading`, pas de `Position.Info.heading` : le
+premier bascule sur la **boussole magnétique à l'arrêt** et sur la direction
+de déplacement en mouvement, le second est un cap route qui ne veut rien
+dire quand on s'arrête pour regarder sa montre.
+
+⚠️ Là encore, une flèche pointant le nord par défaut tient **parfaitement**
+dans l'écran : `testGuidageNeDessinePasDeFlecheSansCap` compare la liste de
+ce qui est réellement dessiné, avec sa contre-épreuve.
+
+### Le pied de page ne fait que 134 px
+
+Corde mesurée à l'ordonnée du pied (`y=241`, hauteur 22) : **133,7 px**, la
+plus étroite de la page. Les premières rédactions sortaient tronquées au
+milieu d'un mot — `GPS faible  .  STA`, `boussole indispo` — ce qu'aucun
+contrôle géométrique ne signale, puisque le texte coupé tient dans l'écran.
+
+Tous les libellés sont donc mesurés :
+
+| Libellé | Largeur | |
+|---|---|---|
+| `GPS bon` | 63 px | ✓ |
+| `GPS faible` | 79 px | ✓ |
+| `enregistre` | 78 px | ✓ |
+| `sans boussole` | 108 px | ✓ |
+| `non enregistre` | 109 px | ✓ |
+| `recherche GPS` | 111 px | ✓ |
+| `boussole indisponible` | 164 px | ✗ |
+| `enregistrement refuse` | 168 px | ✗ |
+| `enregistre dans les lieux` | 186 px | ✗ |
+| `GPS faible . START = enregistrer` | 255 px | ✗ |
+
+L'indice sur START vit donc sur l'**écran vide** — celui qu'on voit presque
+toujours, et où la corde est large. Cinq tests comparent le texte
+réellement dessiné au texte entier attendu.
+
+### Un point par montre, jamais partagé
+
+⚠️ **`/state` sert un payload mis en cache 20 s, identique pour toutes les
+montres.** Le guidage, lui, est adressé à une seule : il est donc ajouté par
+`watch_api._avec_guidage` sur une **copie**, après le cache, à partir du
+jeton porteur de la requête. Trois tests verrouillent cette isolation, dont
+un qui vérifie que le payload en cache ne porte jamais de guidage.
+
+Deux champs, volontairement séparés :
+
+| Champ | Où | Pourquoi |
+|---|---|---|
+| `gd` | blocs de pages | le point complet, lu par la seule page Guidage |
+| `gs` | noyau du payload | la séquence seule — le service de fond ne lit que le noyau, et c'est lui qui fait vibrer |
+
+`seq` s'incrémente à **chaque** envoi, même identique : renvoyer le même
+point est un acte volontaire de l'opérateur (« je te le redis ») qui doit se
+faire sentir. Et la montre vibre sur tout **changement** de séquence, pas
+seulement à la hausse — effacer puis renvoyer fait repartir le compteur à 1,
+qu'une règle « à la hausse » rendrait silencieux.
+
+### Latence et précision
+
+Garmin n'a pas de notification poussée vers une app : le point arrive au
+prochain relevé, soit **dans les 3 minutes**, ou immédiatement en
+rafraîchissant depuis une autre page. La vibration part aussi depuis le
+service de fond, app fermée.
+
+Le fix GPS demande 30 à 60 s à froid. Entre les tribunes et les structures
+métalliques, GPS et boussole se dégradent : ±10 m suffit pour trouver une
+porte, pas pour retrouver quelqu'un dans une foule. La qualité du fix est
+**nommée** au pied de page, jamais portée par la seule couleur de la flèche.
+
+### Permissions ajoutées au manifeste
+
+`Positioning` (GPS), `Sensor` (boussole), `PersistedContent` (waypoint
+natif). Vérifiées à la compilation pour `fenix8solar51mm`.
 
 ## Les deux modes
 
