@@ -2,34 +2,93 @@ using Toybox.WatchUi;
 using Toybox.Graphics;
 using Toybox.Time;
 
-// Trafic : verdict global du mur circulation, terrains les plus charges,
-// comptes d'alertes/accidents dans le geofence du circuit. Lu depuis
-// Pages.bloc(Cache.loadPages(), "tr") -- cf. watch_pages.build_trafic.
-// Contrairement a la main courante, Waze tourne toute l'annee : cette vue
-// n'a pas de cas "hors evenement", le serveur construit le bloc meme en
-// mode past.
+// Trafic : un petit livret a l'interieur de la page, feuillete avec START.
+//
+//   sous-page 0  bilan  -- verdict global du mur, accidents / bouchons /
+//                          dangers en zone, axe le plus degrade
+//   sous-pages 1..N     -- TOUS les axes du mur, six par ecran, du plus
+//                          degrade au moins degrade
+//
+// La liste porte desormais un axe par ITINERAIRE Waze (trafic_etat.axes_mur),
+// parkings compris, et plus quatre terrains agreges : c'est le meme decoupage
+// et la meme severite que le panneau << Axes >> du mur, donc le poignet et
+// l'ecran ne peuvent plus afficher deux chiffres differents du meme axe.
+//
+// Chaque ligne porte les alertes Waze POSEES SUR CET AXE (masque `fl`,
+// rattachement geometrique cote serveur) : la page dit desormais sur quel axe
+// se trouve l'accident, et plus seulement qu'il y en a un dans le cercle.
+//
+// Lu depuis Pages.bloc(Cache.loadPages(), "tr") -- cf. watch_pages.build_trafic.
+// Contrairement a la main courante, Waze tourne toute l'annee : cette vue n'a
+// pas de cas "hors evenement", le serveur construit le bloc meme en mode past.
 class TraficView extends WatchUi.View {
+
+    // Six axes par ecran. Mesure au VRAI device (fenix8solar51mm, 280x280) :
+    // a hX = 22 px et un pas de 29, la sixieme ligne finit a 225 px, sous le
+    // pied de page (241). Une septieme commencerait a 234 et le chevaucherait.
+    hidden const AXES_PAR_ECRAN = 6;
+
+    // Masque d'alertes rattachees a l'axe. Miroir EXACT de watch_pages.FL_* :
+    // ces valeurs voyagent dans le payload, les deux cotes doivent bouger
+    // ensemble.
+    hidden const FL_ACCIDENT = 1;
+    hidden const FL_BOUCHON = 2;
+    hidden const FL_DANGER = 4;
+
+    hidden var mSousPage = 0;
 
     function initialize() {
         View.initialize();
     }
 
-    // "3 alertes . 1 accident", ou tirets si le compte est INCONNU (perime
-    // ou source en panne, watch_pages.build_trafic/ALERTES_MAX_AGE) --
-    // jamais "0", qui se lirait comme un calme operationnel avere. Publique
-    // (meme raison que FrequentationView.calculDeltaPct) pour rester
-    // testable en VALEUR : un retour a l'ancien "0 alerte . 0 accident" ne
-    // leverait aucune exception, un test "ne leve pas" ne le detecterait
-    // donc jamais.
-    function formatComptes(z, ac) {
-        var zTxt = (z != null)
-                   ? (z.toString() + (z > 1 ? " alertes" : " alerte"))
-                   : (Fmt.DASH + " alerte");
-        var acTxt = (ac != null)
-                   ? (ac.toString() + (ac > 1 ? " accidents" : " accident"))
-                   : (Fmt.DASH + " accident");
-        return zTxt + " . " + acTxt;
+    // --- Etat du livret ------------------------------------------------
+    //
+    // Les quatre fonctions ci-dessous sont publiques pour rester testables
+    // EN VALEUR (meme raison que FrequentationView.calculDeltaPct) : un
+    // livret qui boucle mal, ou qui laisse un index pointer au-dela de la
+    // liste apres un rafraichissement qui l'a raccourcie, ne leve aucune
+    // exception -- seul un test sur les valeurs le voit.
+
+    function axes() {
+        var tr = Pages.bloc(Cache.loadPages(), "tr");
+        if (tr == null) { return []; }
+        var r = tr["r"];
+        return r == null ? [] : r;
     }
+
+    // 1 (le bilan) + un ecran par tranche de six axes. Toujours >= 1 : le
+    // bilan existe meme sans aucun axe, il porte le verdict.
+    function nbSousPages() {
+        var n = axes().size();
+        if (n <= 0) { return 1; }
+        return 1 + (n + AXES_PAR_ECRAN - 1) / AXES_PAR_ECRAN;
+    }
+
+    // Index BORNE a la volee. La liste peut raccourcir entre deux
+    // rafraichissements (un axe disparait du releve Waze) : sans ce bornage,
+    // l'utilisateur resterait bloque sur un ecran vide sans comprendre
+    // pourquoi.
+    function sousPage() {
+        var n = nbSousPages();
+        if (mSousPage >= n) { return n - 1; }
+        if (mSousPage < 0) { return 0; }
+        return mSousPage;
+    }
+
+    function sousPageSuivante() {
+        mSousPage = (sousPage() + 1) % nbSousPages();
+        WatchUi.requestUpdate();
+    }
+
+    // Appelee quand on quitte la page trafic (CockpitView) : revenir au
+    // bilan est previsible. Retrouver la page d'axes qu'on avait laissee
+    // serait defendable, mais fait perdre le verdict -- la seule chose qui
+    // vaille un coup d'oeil rapide.
+    function remiseAZero() {
+        mSousPage = 0;
+    }
+
+    // --- Vocabulaire et couleurs ---------------------------------------
 
     // Les mots et couleurs du verdict sont ceux du mur (circulation.html:494),
     // le mot vient de Pages.verdictMot -- la couleur seule ne porte jamais
@@ -43,11 +102,11 @@ class TraficView extends WatchUi.View {
         return Graphics.COLOR_GREEN;
     }
 
-    // Severite par terrain, 0-4 (trafic_etat.severite_axe, double verrou du
-    // mur -- PAS trafic_etat.classify_congestion), echelle distincte du
-    // verdict global 0-3. 0 et 1 ("Fluide"/"Dense") sont tous deux sans
-    // probleme -> vert ; 4 ("Bouchon") est aussi grave que 3
-    // ("Fort ralenti") au regard de l'action a mener -> meme rouge.
+    // Severite par axe, 0-4 (trafic_etat.severite_axe, double verrou du mur
+    // -- PAS trafic_etat.classify_congestion), echelle distincte du verdict
+    // global 0-3. 0 et 1 ("Fluide"/"Dense") sont tous deux sans probleme ->
+    // vert ; 4 ("Bouchon") est aussi grave que 3 ("Fort ralenti") au regard
+    // de l'action a mener -> meme rouge.
     hidden function couleurSeverite(sev) {
         if (sev == null) { return Graphics.COLOR_DK_GRAY; }
         if (sev >= 4) { return Graphics.COLOR_RED; }
@@ -58,14 +117,10 @@ class TraficView extends WatchUi.View {
 
     // Mots non accentues (comme partout ailleurs dans l'app) repris du MUR
     // (circulation.html:590-601, classify()) -- meme echelle 0-4 que
-    // trafic_etat.severite_axe, qui alimente t[3] ici. CE N'EST PAS le
-    // vocabulaire de trafic_etat.classify_congestion (normal/charge/
-    // sature/bouchon) : cette vue affichait ces mots-la contre un nombre
-    // qui vient desormais de severite_axe (double verrou du mur), une
-    // echelle differente -- pire cas trouve, severite 1 : le mur dit
-    // "Dense", l'ancien vocabulaire ici disait "normal". Publique (meme
-    // raison que FrequentationView.calculDeltaPct) pour rester testable en
-    // VALEUR : une derive de vocabulaire ne leve jamais d'exception.
+    // trafic_etat.severite_axe. CE N'EST PAS le vocabulaire de
+    // trafic_etat.classify_congestion (normal/charge/sature/bouchon), qui
+    // suit une autre echelle. Publique pour rester testable en VALEUR : une
+    // derive de vocabulaire ne leve jamais d'exception.
     function statutSeverite(sev) {
         if (sev == null) { return "--"; }
         if (sev >= 4) { return "bouchon"; }
@@ -75,29 +130,49 @@ class TraficView extends WatchUi.View {
         return "fluide";
     }
 
-    // "i"/"o"/"-" (watch_pages.build_trafic) -- boitier entrant / sortant /
-    // sans direction connue.
-    hidden function sensFleche(sens) {
+    // "i"/"o"/"p"/"-" (watch_pages.build_trafic) -- entrant / sortant /
+    // parking / sans direction connue.
+    hidden function sensGlyphe(sens) {
         if (sens != null && sens.equals("i")) { return ">"; }
         if (sens != null && sens.equals("o")) { return "<"; }
+        if (sens != null && sens.equals("p")) { return "P"; }
         return "-";
     }
 
-    // Les noms de terrain viennent du libelle Waze cote operateur (arbitraire,
-    // pas controle par cette app) : cf. test_watch_state.py::
-    // test_taille_du_payload_complet_sous_deux_ko, ou "Rond point Maison
-    // Blanche" (26 caracteres) mesure 313 px en FONT_SMALL -- deja proche de
-    // la corde la plus etroite du bloc terrains (360 px a y=89). Filet de
-    // securite au-dela de cette marge mesuree : tronquer plutot que deborder.
-    hidden function ajusterNom(dc, nom, dispo) {
-        return ajusterTexte(dc, nom, Graphics.FONT_SMALL, dispo);
+    // Badge de la PIRE alerte posee sur l'axe, ou null. Trois lettres et pas
+    // une pastille de couleur : sur une ligne d'axe deja dense, la couleur
+    // seule ne dirait pas de QUOI il s'agit -- et un daltonien ne
+    // distinguerait pas le rouge de l'accident de l'orange du bouchon.
+    // Une seule alerte affichee (la plus grave) : la largeur d'une ligne ne
+    // permet pas les trois, et c'est la plus grave qui decide de l'action.
+    // Publique pour rester testable en VALEUR.
+    function badgeAlerte(fl) {
+        if (fl == null || fl == 0) { return null; }
+        if ((fl & FL_ACCIDENT) != 0) { return "ACC"; }
+        if ((fl & FL_BOUCHON) != 0) { return "BOU"; }
+        if ((fl & FL_DANGER) != 0) { return "DGR"; }
+        return null;
+    }
+
+    hidden function couleurBadge(fl) {
+        if (fl == null || fl == 0) { return Graphics.COLOR_DK_GRAY; }
+        if ((fl & FL_ACCIDENT) != 0) { return Graphics.COLOR_RED; }
+        if ((fl & FL_BOUCHON) != 0) { return Graphics.COLOR_ORANGE; }
+        return Graphics.COLOR_YELLOW;
+    }
+
+    // "3 accidents", "1 bouchon", ou "-- accident" si le compte est INCONNU
+    // (alertes perimees ou source en panne, watch_pages/ALERTES_MAX_AGE) --
+    // jamais "0", qui se lirait comme un calme operationnel avere. Publique
+    // pour rester testable en VALEUR : un retour a "0 accident" ne leverait
+    // aucune exception, un test "ne leve pas" ne le detecterait jamais.
+    function formatCompte(n, singulier, pluriel) {
+        if (n == null) { return Fmt.DASH + " " + singulier; }
+        return n.toString() + " " + (n > 1 ? pluriel : singulier);
     }
 
     // Troncature caractere par caractere jusqu'a rentrer dans `dispo` --
-    // meme filet de securite que MeteoView.ajusterTexte/CockpitView.
-    // ajusterTexte, generalise ici (font en parametre) pour couvrir aussi
-    // la ligne de comptes (FONT_XTINY), qui n'a pas de largeur bornee cote
-    // serveur.
+    // meme filet de securite que MeteoView.ajusterTexte / CockpitView.
     hidden function ajusterTexte(dc, texte, font, dispo) {
         if (dc.getTextWidthInPixels(texte, font) <= dispo) {
             return texte;
@@ -110,158 +185,222 @@ class TraficView extends WatchUi.View {
         return t;
     }
 
+    // --- Rendu ----------------------------------------------------------
+
     function onUpdate(dc) {
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
         dc.clear();
+        var tr = Pages.bloc(Cache.loadPages(), "tr");
+        if (sousPage() == 0) {
+            dessinerBilan(dc, tr);
+        } else {
+            dessinerAxes(dc, tr, sousPage() - 1);
+        }
+        dessinerPied(dc, tr);
+    }
+
+    hidden function dessinerBilan(dc, tr) {
         var w = dc.getWidth();
         var hX = dc.getFontHeight(Graphics.FONT_XTINY);
         var hS = dc.getFontHeight(Graphics.FONT_SMALL);
         var hM = dc.getFontHeight(Graphics.FONT_MEDIUM);
 
-        var tr = Pages.bloc(Cache.loadPages(), "tr");
-
-        // Bandeau verdict : moitie haute, sommet contraint -- corde tres
-        // au-dessus du mot le plus long ("VIGILANCE") en FONT_MEDIUM.
-        // Toujours rendu, meme si
-        // `tr` est absent : couleurVerdict(null) et Pages.verdictMot(null)
-        // rendent deja gris fonce / "--" nativement -- la structure de la
-        // page ne change pas d'un etat a l'autre, seul son contenu le fait.
-        // Pas de couleur affirmative (vert/jaune/orange/rouge) sur un etat
-        // qu'on ignore : le gris fonce dit explicitement "inconnu".
-        var y = 34;
+        // Bandeau verdict. TOUJOURS rendu, meme si `tr` est absent :
+        // couleurVerdict(null) et Pages.verdictMot(null) rendent deja gris
+        // fonce / "--" nativement -- la structure de la page ne change pas
+        // d'un etat a l'autre, seul son contenu le fait. Pas de couleur
+        // affirmative (vert/jaune/orange/rouge) sur un etat qu'on ignore :
+        // le gris fonce dit explicitement "inconnu".
         var vd = (tr != null) ? tr["vd"] : null;
         dc.setColor(couleurVerdict(vd), Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, y, Graphics.FONT_MEDIUM, Pages.verdictMot(vd),
+        dc.drawText(w / 2, 34, Graphics.FONT_MEDIUM, Pages.verdictMot(vd),
                     Graphics.TEXT_JUSTIFY_CENTER);
 
-        // Resserre a 8 (etait 16) : la ligne de comptes qui suit les
-        // terrains a besoin de la corde la plus large possible a son
-        // ordonnee (la BASE de son bloc, pas son ancre, contraint -- cf.
-        // Pages.largeurUtile) ; la remonter de 8 px gagne ~15 px de corde a
-        // cet endroit, cf. rapport de tache.
-        y += hM + 8;
+        // Les trois comptes du mur, un par ligne, chacun colore SEULEMENT
+        // s'il est non nul : un zero en couleur d'alerte se lit de loin
+        // comme une alerte.
+        var y = 34 + hM + 9;
+        var pas = hS + 6;
+        var ac = (tr != null) ? tr["ac"] : null;
+        var jm = (tr != null) ? tr["jm"] : null;
+        var hz = (tr != null) ? tr["hz"] : null;
 
+        dessinerCompte(dc, y, hS, formatCompte(ac, "accident", "accidents"),
+                       ac, Graphics.COLOR_RED);
+        dessinerCompte(dc, y + pas, hS,
+                       formatCompte(jm, "bouchon", "bouchons"),
+                       jm, Graphics.COLOR_ORANGE);
+        dessinerCompte(dc, y + 2 * pas, hS,
+                       formatCompte(hz, "danger", "dangers"),
+                       hz, Graphics.COLOR_YELLOW);
+
+        // Derniere ligne : ce qui coince le plus, nomme. Sans elle, le
+        // verdict resterait sans cause et il faudrait feuilleter pour la
+        // trouver.
+        var yPire = y + 3 * pas + 4;
+        var liste = (tr != null) ? tr["r"] : null;
+        var texte;
+        var couleur = Graphics.COLOR_DK_GRAY;
         if (tr == null) {
-            // Bloc source en panne : on ne sait PAS combien de terrains il y
-            // aurait, donc on n'en invente aucune ligne (regle commune aux
-            // quatre pages) -- seuls les deux champs fixes de cette page
-            // (bandeau deja rendu ci-dessus, comptes ci-dessous) passent en
-            // tirets, meme ordonnee que le message "aucun axe charge" du cas
-            // terrains vides pour garder la meme structure -- seul le
-            // contenu (et le sens, absence vs zero connu) differe.
-            dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(w / 2, y, Graphics.FONT_XTINY, "-- alerte . -- accident",
-                        Graphics.TEXT_JUSTIFY_CENTER);
-
-            var yFootAbsent = dc.getHeight() - hX - 17;
-            dc.setColor(Graphics.COLOR_RED, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(w / 2, yFootAbsent, Graphics.FONT_XTINY, "indisponible",
-                        Graphics.TEXT_JUSTIFY_CENTER);
-            return;
-        }
-
-        var terrains = tr["r"];
-        if (terrains == null) { terrains = []; }
-
-        // Le serveur envoie jusqu'a quatre terrains (MAX_TERRAINS,
-        // watch_pages.py), mais seuls DEUX tiennent entre le bandeau et le
-        // pied sur un ecran de 280 (mesure au device -- le 3e chevauchait
-        // deja le pied, le 4e etait entierement hors ecran). Partage avec
-        // le calcul de `resteTerrains` plus bas, pour ne jamais desaccorder
-        // le nombre affiche et le nombre annonce comme masque.
-        var maxTerrains = 2;
-
-        if (terrains.size() == 0) {
-            // Liste vide != panne : `r` porte les quatre terrains les plus
-            // charges SANS plancher de severite (watch_pages.build_trafic),
-            // donc une liste vide veut dire "aucun axe surveille n'a ete
-            // rapporte" -- pas "rien n'est charge", que le libelle precedent
-            // laissait entendre a tort.
-            dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(w / 2, y, Graphics.FONT_SMALL, "aucun axe rapporte",
-                        Graphics.TEXT_JUSTIFY_CENTER);
-            y += hS + 10;
+            texte = "source indisponible";
+        } else if (liste == null || liste.size() == 0) {
+            // Liste vide != panne : `r` porte TOUS les axes du mur sans
+            // plancher de severite, donc une liste vide veut dire "aucun axe
+            // surveille n'a ete rapporte" -- pas "rien n'est charge".
+            texte = "aucun axe rapporte";
         } else {
-            // Deja tries par gravite decroissante cote serveur (watch_pages
-            // .build_trafic) : ne pas retrier, l'ordre porte l'intention
-            // (montrer d'abord ce qui coince).
-            //
-            // Deux lignes par terrain (nom centre, puis sens/minutes/statut
-            // centre) plutot qu'une ligne coupee en deux colonnes : les noms
-            // sont des libelles Waze arbitraires, potentiellement longs
-            // (cf. ajusterNom), une seule ligne pleine largeur leur laisse
-            // toute la corde disponible plutot que la moitie.
-            //
-            // Le reste n'est pas jete : le nombre masque est ajoute a la
-            // ligne de comptes plus bas ("+N axes").
-            var nTerrains = terrains.size() > maxTerrains ? maxTerrains
-                                                            : terrains.size();
-            for (var i = 0; i < nTerrains; i += 1) {
-                var t = terrains[i];
-
-                var dispoNom = Pages.largeurUtile(dc, y, hS);
-                var nom = ajusterNom(dc, t[0], dispoNom);
-                dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-                dc.drawText(w / 2, y, Graphics.FONT_SMALL, nom,
-                            Graphics.TEXT_JUSTIFY_CENTER);
-
-                var yDetail = y + hS - 2;
-                var detail = sensFleche(t[1]) + " " + t[2].toString() + " min "
-                             + statutSeverite(t[3]);
-                dc.setColor(couleurSeverite(t[3]), Graphics.COLOR_TRANSPARENT);
-                dc.drawText(w / 2, yDetail, Graphics.FONT_XTINY, detail,
-                            Graphics.TEXT_JUSTIFY_CENTER);
-
-                y = yDetail + hX + 10;
+            var pire = axePireSeverite(liste);
+            if (pire[3] == null || pire[3] <= 0) {
+                texte = liste.size().toString() + " axes, tous fluides";
+            } else {
+                texte = pire[0] + " " + Fmt.DASH + " " + statutSeverite(pire[3]);
+                couleur = couleurSeverite(pire[3]);
             }
         }
+        dc.setColor(couleur, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w / 2, yPire, Graphics.FONT_XTINY,
+                    ajusterTexte(dc, texte, Graphics.FONT_XTINY,
+                                 Pages.largeurUtile(dc, yPire, hX)),
+                    Graphics.TEXT_JUSTIFY_CENTER);
+    }
 
-        // Comptes d'alertes/accidents Waze dans le geofence du circuit.
-        // `z`/`ac` valent desormais reellement `null` quand le collecteur
-        // d'alertes est en panne ou perime (watch_pages.build_trafic,
-        // ALERTES_MAX_AGE) : un compte inconnu doit rendre "--", jamais
-        // "0" -- ce meme fichier le rend deja plus haut (lignes ~125-126)
-        // pour le cas bloc entier absent, ce cas-ci (bloc present, compte
-        // alertes seul inconnu) doit se peindre pareil. formatComptes est
-        // testee en valeur a part (DessinTest.mc).
-        var texteComptes = formatComptes(tr["z"], tr["ac"]);
-        // Terrains masques par la limite d'affichage (pas les terrains
-        // absents du payload -- ceux-la, watch_pages ne les envoie deja
-        // plus) : ajoutes en toutes lettres, jamais tus. Le filet de
-        // securite qui suit doit donc tronquer le COMPTE si la ligne
-        // deborde, jamais la mention "+N axes" -- sinon la mention
-        // disparaitrait exactement dans le cas ou elle compte le plus (deux
-        // terrains masques ET des comptes eleves).
-        var resteTerrains = terrains.size() -
-                             (terrains.size() > maxTerrains ? maxTerrains
-                                                             : terrains.size());
-        var suffixeReste = "";
-        if (resteTerrains > 0) {
-            suffixeReste = "  +" + resteTerrains.toString()
-                           + (resteTerrains > 1 ? " axes" : " axe");
+    // L'axe le plus DEGRADE, pas le premier de la liste : celle-ci est
+    // triee accidents d'abord (watch_pages), donc son premier element peut
+    // etre un axe parfaitement fluide sur lequel un accident vient de
+    // tomber. Publique pour rester testable en VALEUR.
+    function axePireSeverite(liste) {
+        var pire = liste[0];
+        for (var i = 1; i < liste.size(); i += 1) {
+            var sev = liste[i][3];
+            var ref = pire[3];
+            if (sev != null && (ref == null || sev > ref)) {
+                pire = liste[i];
+            }
         }
-        // Filet de securite : compte a deux chiffres + accidents peut
-        // depasser la corde (la plus etroite de la page, cf.
-        // Pages.largeurUtile) dans le pire cas plausible -- tronquer le
-        // compte plutot que deborder du verre rond, en reservant toujours
-        // la place du suffixe "+N axes".
-        var dispoComptes = Pages.largeurUtile(dc, y, hX);
-        var dispoBase = dispoComptes -
-                         dc.getTextWidthInPixels(suffixeReste, Graphics.FONT_XTINY);
-        texteComptes = ajusterTexte(dc, texteComptes, Graphics.FONT_XTINY,
-                                    dispoBase) + suffixeReste;
+        return pire;
+    }
+
+    hidden function dessinerCompte(dc, y, hauteur, texte, valeur, couleurVive) {
+        var w = dc.getWidth();
+        var couleur = (valeur != null && valeur > 0)
+                      ? couleurVive : Graphics.COLOR_DK_GRAY;
+        dc.setColor(couleur, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w / 2, y, Graphics.FONT_SMALL,
+                    ajusterTexte(dc, texte, Graphics.FONT_SMALL,
+                                 Pages.largeurUtile(dc, y, hauteur)),
+                    Graphics.TEXT_JUSTIFY_CENTER);
+    }
+
+    hidden function dessinerAxes(dc, tr, ecran) {
+        var w = dc.getWidth();
+        var hX = dc.getFontHeight(Graphics.FONT_XTINY);
+        var liste = (tr != null) ? tr["r"] : null;
+        if (liste == null) { liste = []; }
+
+        var debut = ecran * AXES_PAR_ECRAN;
+        var fin = debut + AXES_PAR_ECRAN;
+        if (fin > liste.size()) { fin = liste.size(); }
+
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, y, Graphics.FONT_XTINY, texteComptes,
+        dc.drawText(w / 2, 26, Graphics.FONT_XTINY,
+                    "AXES " + (debut + 1).toString() + "-" + fin.toString()
+                    + " / " + liste.size().toString(),
                     Graphics.TEXT_JUSTIFY_CENTER);
 
-        // Pied de page : age du bloc. Moitie basse, meme position que les
-        // autres vues -- cf. sonde, sa BASE contraint et reste tres au-dessus
-        // du besoin des deux libelles possibles.
+        var y = 26 + hX + 12;
+        for (var i = debut; i < fin; i += 1) {
+            dessinerLigneAxe(dc, y, hX, liste[i]);
+            y += hX + 7;
+        }
+    }
+
+    // Une ligne : glyphe de sens, nom, badge d'alerte, retard, temps.
+    //
+    //     > Ouest 2      ACC  +7  12'
+    //
+    // La gravite est portee par le RETARD EN MINUTES, pas seulement par la
+    // couleur : c'est le meme chiffre que la colonne `axe-delay` du mur, et
+    // il reste lisible pour qui ne distingue pas l'orange du rouge.
+    //
+    // Le nom est le seul element elastique : il cede la place au reste,
+    // jamais l'inverse. Les noms viennent du libelle Waze cote operateur
+    // (arbitraire, non controle par cette app) et peuvent depasser toute
+    // largeur -- alors qu'un temps tronque serait un chiffre FAUX, pas un
+    // mot abrege.
+    hidden function dessinerLigneAxe(dc, y, hX, axe) {
+        var w = dc.getWidth();
+        var font = Graphics.FONT_XTINY;
+
+        // 8 px de marge interne de chaque cote : coller le texte au verre
+        // rond le rend illisible sur une lunette biseautee.
+        var dispo = Pages.largeurUtile(dc, y, hX) - 16;
+        if (dispo < 40) { return; }
+        var xG = w / 2.0 - dispo / 2.0;
+        var xD = w / 2.0 + dispo / 2.0;
+
+        var sev = axe[3];
+        var couleur = couleurSeverite(sev);
+
+        // Temps de parcours, ancre a droite.
+        var temps = (axe[2] != null) ? (axe[2].toString() + "'") : (Fmt.DASH);
+        dc.setColor(couleur, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(xD, y, font, temps, Graphics.TEXT_JUSTIFY_RIGHT);
+        var xCurseur = xD - dc.getTextWidthInPixels(temps, font) - 6;
+
+        // Retard, juste a gauche du temps. Affiche seulement s'il y en a un :
+        // un "+0" sur chaque ligne fluide n'apporterait rien et mangerait la
+        // place du nom.
+        var retard = (axe.size() > 5 && axe[5] != null) ? axe[5] : 0;
+        if (retard > 0) {
+            var txtRetard = "+" + retard.toString();
+            dc.drawText(xCurseur, y, font, txtRetard,
+                        Graphics.TEXT_JUSTIFY_RIGHT);
+            xCurseur -= dc.getTextWidthInPixels(txtRetard, font) + 6;
+        }
+
+        // Badge d'alerte rattachee a CET axe.
+        var fl = (axe.size() > 4) ? axe[4] : null;
+        var badge = badgeAlerte(fl);
+        if (badge != null) {
+            dc.setColor(couleurBadge(fl), Graphics.COLOR_TRANSPARENT);
+            dc.drawText(xCurseur, y, font, badge, Graphics.TEXT_JUSTIFY_RIGHT);
+            xCurseur -= dc.getTextWidthInPixels(badge, font) + 6;
+        }
+
+        // Glyphe de sens, ancre a gauche.
+        var glyphe = sensGlyphe(axe[1]);
+        dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(xG, y, font, glyphe, Graphics.TEXT_JUSTIFY_LEFT);
+        var xNom = xG + dc.getTextWidthInPixels(glyphe, font) + 6;
+
+        // Le nom prend ce qui reste, et rien de plus.
+        var place = xCurseur - xNom;
+        if (place <= 0) { return; }
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(xNom, y, font,
+                    ajusterTexte(dc, axe[0], font, place),
+                    Graphics.TEXT_JUSTIFY_LEFT);
+    }
+
+    // Pied commun aux sous-pages : age du bloc et position dans le livret.
+    // Le compteur de sous-pages est ce qui dit qu'il Y A quelque chose
+    // apres -- sans lui, rien n'indique que START feuillette.
+    hidden function dessinerPied(dc, tr) {
+        var w = dc.getWidth();
+        var hX = dc.getFontHeight(Graphics.FONT_XTINY);
         var yFoot = dc.getHeight() - hX - 17;
         var now = Time.now().value();
-        var age = (tr["t"] != null) ? (now - tr["t"]) : null;
+        var age = (tr != null && tr["t"] != null) ? (now - tr["t"]) : null;
+        var texte = "maj " + Fmt.age(age);
+        var total = nbSousPages();
+        if (total > 1) {
+            texte += "  " + (sousPage() + 1).toString() + "/"
+                     + total.toString();
+        }
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, yFoot, Graphics.FONT_XTINY, "maj " + Fmt.age(age),
+        dc.drawText(w / 2, yFoot, Graphics.FONT_XTINY,
+                    ajusterTexte(dc, texte, Graphics.FONT_XTINY,
+                                 Pages.largeurUtile(dc, yFoot, hX)),
                     Graphics.TEXT_JUSTIFY_CENTER);
     }
 }

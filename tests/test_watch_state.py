@@ -174,6 +174,17 @@ from conftest import FakeDb  # noqa: E402
 NOW = datetime(2026, 8, 14, 12, 0)
 
 
+def _max_axes():
+    """Plafond d'axes de la page trafic, lu a la source.
+
+    Le recopier ici figerait le pire cas a une valeur qui cesserait de
+    l'etre le jour ou watch_pages relevera le plafond -- et le budget de
+    2 Ko serait alors verrouille sur un payload qui n'existe plus.
+    """
+    import watch_pages
+    return watch_pages.MAX_AXES
+
+
 def _counter(entries, minutes_ago, event="24H MOTOS", year="2026"):
     return {
         "requested_location_id": "628",
@@ -706,9 +717,15 @@ class TestBuildStatePics:
 
     def test_taille_du_payload_complet_sous_deux_ko(self):
         # Verrouille le budget de 2 Ko sur un payload proche du pire cas
-        # plausible : cinq alertes, quatre terrains, une consigne meteo
-        # longue -- pas seulement un cas nominal qui laisserait passer une
-        # regression de taille.
+        # plausible : cinq alertes, la liste d'axes AU PLAFOND
+        # (watch_pages.MAX_AXES, avec des noms Waze longs et des drapeaux
+        # d'alerte), une consigne meteo longue -- pas seulement un cas
+        # nominal qui laisserait passer une regression de taille.
+        #
+        # Le passage de 4 terrains agreges a tous les axes du mur a plus que
+        # double ce bloc ; ce test est ce qui garantit que la page trafic ne
+        # peut pas grossir jusqu'a faire sauter le budget BLE sans que
+        # personne ne le voie.
         import json
 
         db = FakeDb(
@@ -738,11 +755,13 @@ class TestBuildStatePics:
         pages = FakePages(
             mc={"t": 1, "s": [12, 34], "sc": [5, 21], "tq": [3, 9],
                 "f": [7, 18], "o": [2, 11]},
-            tr={"t": 1, "vd": 2, "ac": 3, "z": 27,
-                "r": [["Entree Houx paddock", "i", 24, 3],
-                      ["Sortie Musee circuit", "o", 18, 2],
-                      ["Rond point Maison Blanche", "i", 15, 2],
-                      ["Parking Karting exterieur", "-", 6, 1]]},
+            tr={"t": 1, "vd": 2, "ac": 3, "jm": 9, "hz": 15, "z": 27,
+                # MAX_AXES lignes, chacune avec le nom Waze le plus long
+                # observe (26 caracteres, cf. la borne de ce meme fichier),
+                # un drapeau d'alerte et un retard a deux chiffres.
+                "r": [["Rond point Maison Blanche %d" % i,
+                       ["i", "o", "-", "p"][i % 4], 24, 3, 5, 17]
+                      for i in range(_max_axes())]},
             me={"t": 1, "tc": 31.2, "v": 22, "rf": 38, "pl": 45, "pm": 8.4,
                 "cn": "Suspendre toute activite exterieure non protegee",
                 "cl": 3, "vg": 2},

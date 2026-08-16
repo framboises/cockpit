@@ -97,9 +97,15 @@ class CockpitView extends WatchUi.View {
         WatchUi.requestUpdate();
     }
 
+    // Index de la page trafic dans le cycle. Nomme plutot qu'ecrit en dur
+    // aux trois endroits qui le testent : un decalage silencieux d'un rang
+    // enverrait START feuilleter une page qui n'a pas de sous-pages.
+    static const PAGE_TRAFIC = 3;
+
     // Six pages en cycle, dans l'ordre d'urgence operationnelle : tableau de
     // bord, alertes, main courante, trafic, meteo, frequentation.
     function nextPage() {
+        quitterPage();
         mPage = (mPage + 1) % 6;
         WatchUi.requestUpdate();
     }
@@ -108,6 +114,7 @@ class CockpitView extends WatchUi.View {
     // modulo negatif (Monkey C, comme beaucoup de langages, ne garantit pas
     // qu'un modulo d'operande negatif reste positif).
     function previousPage() {
+        quitterPage();
         mPage = (mPage + 5) % 6;
         WatchUi.requestUpdate();
     }
@@ -115,8 +122,31 @@ class CockpitView extends WatchUi.View {
     // Saut direct depuis le menu (SautMenuDelegate) : pose la page courante
     // sans passer par le cycle.
     function setPage(n) {
+        quitterPage();
         mPage = n;
         WatchUi.requestUpdate();
+    }
+
+    // Le livret de la page trafic revient a son bilan quand on la quitte.
+    // Sans ca, revenir sur la page apres en etre parti rouvrirait la
+    // troisieme page d'axes -- et le verdict, la seule chose qui vaille un
+    // coup d'oeil rapide, ne serait plus la ou on l'attend.
+    hidden function quitterPage() {
+        if (mPage == PAGE_TRAFIC) {
+            mTrafic.remiseAZero();
+        }
+    }
+
+    // START. Sur la page trafic il feuillette le livret (bilan, puis les
+    // axes six par six) ; partout ailleurs il force un rafraichissement.
+    // Publique pour rester testable en VALEUR : un cablage inverse ne leve
+    // aucune exception, il rend juste le livret inaccessible.
+    function onSelectPressed() {
+        if (mPage == PAGE_TRAFIC) {
+            mTrafic.sousPageSuivante();
+            return;
+        }
+        refresh();
     }
 
     // Public pour rester testable en VALEUR (DessinTest.mc verifie que

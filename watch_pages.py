@@ -299,6 +299,13 @@ def build_trafic(db, now_utc=None):
             int(round((axe["currentTime"] or 0) / 60.0)),
             axe["severity"],
             drapeaux,
+            # Retard en minutes, arrondi vers le BAS : il porte la gravite en
+            # clair sur la ligne d'axe, la ou la couleur seule ne suffit pas
+            # (un daltonien en plein soleil ne distingue pas orange de rouge).
+            # C'est le meme chiffre que la colonne `axe-delay` du mur.
+            # Arrondi vers le bas et non au plus proche : annoncer 1 min de
+            # retard la ou il y en a 30 secondes gonflerait chaque ligne.
+            int((axe.get("deltaSeconds") or 0) // 60),
         ])
 
     return {

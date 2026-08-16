@@ -386,41 +386,133 @@ function testDebordementMainCourantePireCasNeDeborgePas(logger) {
 // decroissante, verdict CRITIQUE.
 // ---------------------------------------------------------------------
 
+// TOUTES les sous-pages du livret, pas seulement la premiere : la page
+// trafic n'est plus un ecran mais un livret feuillete a START, et un
+// debordement sur la troisieme page d'axes serait aussi invisible qu'un
+// debordement sur la premiere.
 (:test)
-function testDebordementTraficPireCasNeDeborgePas(logger) {
+function testDebordementTraficToutesLesSousPagesNeDeborgentPas(logger) {
     Application.Storage.deleteValue(Cache.KEY_PAGES);
     var vue = new TraficView();
     Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
                      "st" => null});
+    var total = vue.nbSousPages();
+    // Le fixture est au plafond serveur (18 axes) : il DOIT produire le
+    // bilan plus trois ecrans d'axes. Sans cette verification, une
+    // regression qui ramenerait le livret a une seule page ferait passer la
+    // boucle ci-dessous sans rien couvrir.
+    Test.assertEqual(total, 4);
+    for (var i = 0; i < total; i += 1) {
+        var dc = dcEnregistrement();
+        vue.onUpdate(dc);
+        verifierNeDebordePas(logger, dc, piedStandard(dc));
+        vue.sousPageSuivante();
+    }
+    return true;
+}
+
+// Contenu, pas seulement geometrie : la derniere sous-page ne contient que
+// six axes sur dix-huit, et rien dans un test geometrique ne verrait une
+// regression qui perdrait les douze autres -- la page continuerait de tenir
+// dans l'ecran. Le compteur du pied ("4/4") et l'entete ("AXES 13-18 / 18")
+// sont ce qui dit a l'utilisateur ou il en est.
+(:test)
+function testTraficNommeSaPositionDansLeLivret(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
+                     "st" => null});
+    vue.sousPageSuivante();
+    vue.sousPageSuivante();
+    vue.sousPageSuivante();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    var rects = dc.rects();
+    var entete = false;
+    var compteur = false;
+    for (var i = 0; i < rects.size(); i += 1) {
+        var label = rects[i]["label"];
+        if (label == null) { continue; }
+        if (label.find("AXES 13-18 / 18") != null) { entete = true; }
+        if (label.find("4/4") != null) { compteur = true; }
+    }
+    Test.assert(entete);
+    Test.assert(compteur);
+    return true;
+}
+
+// Le nom d'axe est le seul element elastique de la ligne : il doit ceder la
+// place au temps, au retard et au badge, jamais l'inverse. Un temps tronque
+// serait un chiffre FAUX ("2" pour "24"), pas un mot abrege -- et rien dans
+// un controle geometrique ne distingue les deux.
+(:test)
+function testTraficNeTronqueJamaisLesChiffres(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    // Nom absurdement long ET badge ET retard a deux chiffres : la ligne ne
+    // peut tenir qu'en rognant le nom.
+    Cache.savePages({"mc" => null,
+                     "tr" => {"t" => Time.now().value(), "vd" => 3, "ac" => 1,
+                              "jm" => 0, "hz" => 0, "z" => 1,
+                              "r" => [["Rond point de la Maison Blanche cote sud",
+                                       "i", 24, 4, 1, 17]]},
+                     "me" => null, "st" => null});
+    vue.sousPageSuivante();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    verifierNeDebordePas(logger, dc, piedStandard(dc));
+    var rects = dc.rects();
+    var temps = false;
+    var retard = false;
+    var badge = false;
+    for (var i = 0; i < rects.size(); i += 1) {
+        var label = rects[i]["label"];
+        if (label == null) { continue; }
+        if (label.equals("24'")) { temps = true; }
+        if (label.equals("+17")) { retard = true; }
+        if (label.equals("ACC")) { badge = true; }
+    }
+    Test.assert(temps);
+    Test.assert(retard);
+    Test.assert(badge);
+    return true;
+}
+
+(:test)
+function testDebordementTraficBilanSansAxeNeDeborgePas(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null,
+                     "tr" => {"t" => Time.now().value(), "vd" => 0, "ac" => 0,
+                              "jm" => 0, "hz" => 0, "z" => 0, "r" => []},
+                     "me" => null, "st" => null});
     var dc = dcEnregistrement();
     vue.onUpdate(dc);
     verifierNeDebordePas(logger, dc, piedStandard(dc));
     return true;
 }
 
-// Contenu, pas seulement geometrie : sur quatre terrains recus, seuls DEUX
-// sont affiches (budget vertical mesure) -- les deux masques ne doivent
-// jamais disparaitre en silence, ils doivent apparaitre en toutes lettres
-// dans la ligne de comptes ("+2 axes"). Un test purement geometrique ne
-// verrait jamais une regression qui remplacerait ce mecanisme par un
-// silence -- la page continuerait de tenir dans l'ecran.
+// Comptes INCONNUS (alertes perimees) : le bilan passe en tirets. Trois
+// lignes de tirets sont plus courtes que trois comptes, mais la ligne du
+// pire axe, elle, reste pleine -- le cas merite sa propre verification.
 (:test)
-function testTraficMentionneLesTerrainsMasques(logger) {
+function testDebordementTraficComptesInconnusNeDeborgePas(logger) {
     Application.Storage.deleteValue(Cache.KEY_PAGES);
     var vue = new TraficView();
-    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
-                     "st" => null});
+    Cache.savePages({"mc" => null,
+                     "tr" => {"t" => Time.now().value(), "vd" => null,
+                              "ac" => null, "jm" => null, "hz" => null,
+                              "z" => null,
+                              "r" => [["Rond point Maison Blanche", "i", 24,
+                                       4, null, 17]]},
+                     "me" => null, "st" => null});
     var dc = dcEnregistrement();
     vue.onUpdate(dc);
-    var rects = dc.rects();
-    var trouve = false;
-    for (var i = 0; i < rects.size(); i += 1) {
-        var label = rects[i]["label"];
-        if (label != null && label.find("+2 axes") != null) {
-            trouve = true;
-        }
-    }
-    Test.assert(trouve);
+    verifierNeDebordePas(logger, dc, piedStandard(dc));
+    vue.sousPageSuivante();
+    var dc2 = dcEnregistrement();
+    vue.onUpdate(dc2);
+    verifierNeDebordePas(logger, dc2, piedStandard(dc2));
     return true;
 }
 

@@ -98,6 +98,27 @@ class TestTrafic:
         bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
         assert bloc["r"][0][2] == 18
 
+    def test_retard_expose_en_minutes_arrondi_vers_le_bas(self):
+        # Le retard porte la gravite EN CLAIR sur la ligne d'axe : sans lui,
+        # seule la couleur la distinguerait. 1080 - 600 = 480 s = 8 min.
+        routes = [{"name": "#I# Ouest", "time": 1080, "historicTime": 600}]
+        bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
+        assert bloc["r"][0][5] == 8
+
+    def test_retard_de_moins_d_une_minute_reste_a_zero(self):
+        # Arrondi vers le bas : 30 s de retard ne doivent pas s'afficher
+        # << +1 >>, ce qui gonflerait chaque ligne de la liste.
+        routes = [{"name": "#I# Ouest", "time": 630, "historicTime": 600}]
+        bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
+        assert bloc["r"][0][5] == 0
+
+    def test_retard_nul_quand_l_axe_est_plus_rapide_que_l_historique(self):
+        # deltaSeconds n'est jamais negatif (max(0, ...) dans axes_mur) : un
+        # axe plus fluide que d'habitude affiche +0, pas un retard negatif.
+        routes = [{"name": "#I# Ouest", "time": 300, "historicTime": 600}]
+        bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
+        assert bloc["r"][0][5] == 0
+
     def test_verdict_et_comptes_geofences(self):
         import trafic_etat
         dedans = {"type": "ACCIDENT",

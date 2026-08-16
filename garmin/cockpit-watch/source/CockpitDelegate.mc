@@ -9,9 +9,12 @@ class CockpitDelegate extends WatchUi.BehaviorDelegate {
         mView = view;
     }
 
-    // ENTER force un rafraichissement immediat.
+    // ENTER (START). Sur la page trafic il feuillette le livret de la page
+    // (bilan, puis les axes six par six) ; partout ailleurs il force un
+    // rafraichissement immediat. La decision vit dans la vue, pas ici :
+    // c'est elle qui sait quelle page est affichee.
     function onSelect() {
-        mView.refresh();
+        mView.onSelectPressed();
         return true;
     }
 

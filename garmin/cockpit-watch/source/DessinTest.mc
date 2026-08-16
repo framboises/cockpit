@@ -316,12 +316,26 @@ function testDessinMainCouranteTousCompteursAZeroNeLevePas(logger) {
 // test_taille_du_payload_complet_sous_deux_ko (le pire cas plausible cote
 // serveur) -- pas des noms inventes plus courts qui ne diraient rien du
 // risque de debordement mesure a la sonde.
+// La liste porte desormais TOUS les axes du mur (watch_pages.MAX_AXES au
+// plafond), un par itineraire Waze : le pire cas est donc 18 lignes, pas
+// quatre. Chaque ligne est au format
+// [nom, sens, minutes, severite, drapeaux d'alerte, retard].
 function trBlocPireCas(vd) {
-    return {"t" => Time.now().value(), "vd" => vd, "ac" => 3, "z" => 27,
-            "r" => [["Entree Houx paddock", "i", 24, 3],
-                    ["Sortie Musee circuit", "o", 18, 2],
-                    ["Rond point Maison Blanche", "i", 15, 2],
-                    ["Parking Karting exterieur", "-", 6, 1]]};
+    var noms = ["Rond point Maison Blanche", "Parking Karting exterieur",
+                "Entree Houx paddock", "Sortie Musee circuit"];
+    var sens = ["i", "o", "-", "p"];
+    var axes = [];
+    for (var i = 0; i < 18; i += 1) {
+        // Severites decroissantes (la liste arrive triee du serveur),
+        // drapeaux d'alerte sur les premieres lignes, retards a deux
+        // chiffres : le pire cas de largeur d'une ligne d'axe.
+        var sev = 4 - (i / 5);
+        var fl = (i < 3) ? (1 << i) : 0;
+        axes.add([noms[i % 4] + " " + (i + 1).toString(), sens[i % 4],
+                  24 - i, sev, fl, 17 - i]);
+    }
+    return {"t" => Time.now().value(), "vd" => vd, "ac" => 3, "jm" => 9,
+            "hz" => 15, "z" => 27, "r" => axes};
 }
 
 (:test)
@@ -395,37 +409,196 @@ function testDessinTraficBlocAbsentNeLevePas(logger) {
     return true;
 }
 
-// Les trois tests qui suivent verifient formatComptes en VALEUR (correction
-// 5) : un compte ac/z INCONNU (alertes perimees ou source en panne, cf.
-// watch_pages.build_trafic/ALERTES_MAX_AGE) doit rendre des tirets, jamais
+// Les trois tests qui suivent verifient formatCompte en VALEUR : un compte
+// INCONNU (alertes perimees ou source en panne, cf.
+// watch_pages.build_trafic/ALERTES_MAX_AGE) doit rendre un tiret, jamais
 // "0" -- qui se lirait comme un calme operationnel avere. Un test "ne leve
 // pas" ne le detecterait jamais, la chaine produite ne leve rien dans les
 // deux cas.
 
 (:test)
-function testFormatComptesTiretsQuandAlertesInconnu(logger) {
+function testFormatCompteTiretQuandInconnu(logger) {
     var vue = new TraficView();
-    Test.assertEqual(vue.formatComptes(null, null), "-- alerte . -- accident");
+    Test.assertEqual(vue.formatCompte(null, "accident", "accidents"),
+                     "-- accident");
     return true;
 }
 
 (:test)
-function testFormatComptesValeursConnuesEtPluriel(logger) {
+function testFormatCompteValeursConnuesEtPluriel(logger) {
     var vue = new TraficView();
-    Test.assertEqual(vue.formatComptes(0, 0), "0 alerte . 0 accident");
-    Test.assertEqual(vue.formatComptes(1, 1), "1 alerte . 1 accident");
-    Test.assertEqual(vue.formatComptes(3, 2), "3 alertes . 2 accidents");
+    Test.assertEqual(vue.formatCompte(0, "accident", "accidents"),
+                     "0 accident");
+    Test.assertEqual(vue.formatCompte(1, "bouchon", "bouchons"), "1 bouchon");
+    Test.assertEqual(vue.formatCompte(3, "danger", "dangers"), "3 dangers");
     return true;
 }
 
 (:test)
-function testFormatComptesUneSeuleMoitieInconnue(logger) {
-    // Cas mixte, improbable cote serveur (ac/z tombent ensemble) mais la
-    // vue ne doit pas en dependre : chaque moitie se degrade
-    // independamment.
+function testFormatCompteUnSeulResteAuSingulier(logger) {
+    // Le pluriel bascule a 2, pas a 1 : "1 accidents" sur un mur de
+    // supervision se remarque, et pour de mauvaises raisons.
     var vue = new TraficView();
-    Test.assertEqual(vue.formatComptes(null, 2), "-- alerte . 2 accidents");
-    Test.assertEqual(vue.formatComptes(5, null), "5 alertes . -- accident");
+    Test.assertEqual(vue.formatCompte(1, "accident", "accidents"),
+                     "1 accident");
+    Test.assertEqual(vue.formatCompte(2, "accident", "accidents"),
+                     "2 accidents");
+    return true;
+}
+
+// --- Le livret de sous-pages -------------------------------------------
+//
+// Six tests en VALEUR : un livret qui boucle mal, qui compte mal ses pages,
+// ou qui laisse un index pointer au-dela de la liste apres un
+// rafraichissement qui l'a raccourcie, ne leve AUCUNE exception -- il
+// affiche simplement un ecran vide que rien ne signale.
+
+(:test)
+function testTraficNbSousPagesUnEcranParTrancheDeSix(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    // 18 axes = 1 bilan + 3 ecrans de six.
+    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
+                     "st" => null});
+    Test.assertEqual(vue.nbSousPages(), 4);
+    return true;
+}
+
+(:test)
+function testTraficNbSousPagesArrondiVersLeHaut(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    // 7 axes = 1 bilan + 2 ecrans (six, puis un seul). Le septieme ne doit
+    // pas disparaitre parce que la division tombe juste au-dessous.
+    var axes = [];
+    for (var i = 0; i < 7; i += 1) {
+        axes.add(["Axe " + i.toString(), "i", 10, 1, 0, 2]);
+    }
+    Cache.savePages({"mc" => null,
+                     "tr" => {"t" => Time.now().value(), "vd" => 1, "ac" => 0,
+                              "jm" => 0, "hz" => 0, "z" => 0, "r" => axes},
+                     "me" => null, "st" => null});
+    Test.assertEqual(vue.nbSousPages(), 3);
+    return true;
+}
+
+(:test)
+function testTraficSansAxeGardeLeBilanSeul(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null,
+                     "tr" => {"t" => Time.now().value(), "vd" => 0, "ac" => 0,
+                              "jm" => 0, "hz" => 0, "z" => 0, "r" => []},
+                     "me" => null, "st" => null});
+    // Le bilan porte le verdict : il existe meme sans aucun axe.
+    Test.assertEqual(vue.nbSousPages(), 1);
+    Test.assertEqual(vue.sousPage(), 0);
+    return true;
+}
+
+(:test)
+function testTraficStartBoucleSurLeBilan(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
+                     "st" => null});
+    Test.assertEqual(vue.sousPage(), 0);
+    vue.sousPageSuivante();
+    Test.assertEqual(vue.sousPage(), 1);
+    vue.sousPageSuivante();
+    vue.sousPageSuivante();
+    Test.assertEqual(vue.sousPage(), 3);
+    vue.sousPageSuivante();
+    Test.assertEqual(vue.sousPage(), 0);   // revient au bilan
+    return true;
+}
+
+(:test)
+function testTraficIndexBorneSiLaListeRaccourcit(logger) {
+    // LA regression a tenir : l'utilisateur est sur la 4e sous-page quand un
+    // rafraichissement ramene deux axes seulement. Sans bornage, la vue
+    // dessinerait un ecran vide en boucle, sans rien pour l'expliquer.
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
+                     "st" => null});
+    vue.sousPageSuivante();
+    vue.sousPageSuivante();
+    vue.sousPageSuivante();
+    Test.assertEqual(vue.sousPage(), 3);
+    Cache.savePages({"mc" => null,
+                     "tr" => {"t" => Time.now().value(), "vd" => 1, "ac" => 0,
+                              "jm" => 0, "hz" => 0, "z" => 0,
+                              "r" => [["Ouest", "i", 8, 1, 0, 2]]},
+                     "me" => null, "st" => null});
+    Test.assertEqual(vue.nbSousPages(), 2);
+    Test.assertEqual(vue.sousPage(), 1);   // borne, pas 3
+    return true;
+}
+
+(:test)
+function testTraficRemiseAZeroRevientAuBilan(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
+                     "st" => null});
+    vue.sousPageSuivante();
+    vue.sousPageSuivante();
+    vue.remiseAZero();
+    Test.assertEqual(vue.sousPage(), 0);
+    return true;
+}
+
+// --- Badge d'alerte, en VALEUR -----------------------------------------
+//
+// Le badge est la seule chose qui dise SUR QUEL AXE se trouve l'accident.
+// Un masque mal decode ne leve rien : il affiche le mauvais mot, ou rien.
+
+(:test)
+function testBadgeAlerteNommeLaPireAlerte(logger) {
+    var vue = new TraficView();
+    Test.assertEqual(vue.badgeAlerte(1), "ACC");
+    Test.assertEqual(vue.badgeAlerte(2), "BOU");
+    Test.assertEqual(vue.badgeAlerte(4), "DGR");
+    return true;
+}
+
+(:test)
+function testBadgeAlerteGardeLaPlusGraveQuandPlusieurs(logger) {
+    // Un axe peut porter un accident ET un bouchon ET un danger : la ligne
+    // n'a la place que d'un badge, c'est le plus grave qui decide de
+    // l'action a mener.
+    var vue = new TraficView();
+    Test.assertEqual(vue.badgeAlerte(1 | 2), "ACC");
+    Test.assertEqual(vue.badgeAlerte(1 | 2 | 4), "ACC");
+    Test.assertEqual(vue.badgeAlerte(2 | 4), "BOU");
+    return true;
+}
+
+(:test)
+function testBadgeAlerteMuetSansAlerteEtSiInconnu(logger) {
+    // 0 (rien sur cet axe) et null (alertes perimees, on ne SAIT pas) se
+    // dessinent tous deux sans badge -- mais le bilan, lui, les distingue :
+    // "0 accident" contre "-- accident".
+    var vue = new TraficView();
+    Test.assert(vue.badgeAlerte(0) == null);
+    Test.assert(vue.badgeAlerte(null) == null);
+    return true;
+}
+
+// --- L'axe le plus degrade, en VALEUR ----------------------------------
+
+(:test)
+function testAxePireSeveriteIgnoreLOrdreDeLaListe(logger) {
+    // La liste arrive triee ACCIDENTS D'ABORD : son premier element peut
+    // etre un axe parfaitement fluide sur lequel un accident vient de
+    // tomber. Prendre liste[0] comme "pire axe" afficherait donc "Fluide --
+    // fluide" a cote d'un verdict CRITIQUE.
+    var vue = new TraficView();
+    var liste = [["Fluide accidente", "i", 5, 0, 1, 0],
+                 ["Bouchonne", "o", 30, 4, 0, 22],
+                 ["Ralenti", "i", 12, 2, 0, 4]];
+    Test.assertEqual(vue.axePireSeverite(liste)[0], "Bouchonne");
     return true;
 }
 
@@ -817,5 +990,74 @@ function testSautMenuSeptEntreesDansLOrdre(logger) {
     // Rien au-dela de la septieme entree : les editions sont bien une
     // entree de CE menu, pas nichees dans un sous-menu supplementaire.
     Test.assert(menu.getItem(labels.size()) == null);
+    return true;
+}
+
+// --- START : feuilleter le trafic, rafraichir ailleurs ------------------
+//
+// Le cablage se verifie en VALEUR : un START branche a l'envers ne leve
+// aucune exception. Sur la page trafic il rendrait le livret inaccessible
+// (l'utilisateur ne verrait jamais que le bilan) ; ailleurs il perdrait le
+// rafraichissement force, et rien a l'ecran ne le dirait.
+
+(:test)
+function testStartFeuilleteLeLivretSurLaPageTrafic(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
+                     "st" => null});
+    var vue = new CockpitView();
+    vue.setPage(CockpitView.PAGE_TRAFIC);
+    var trafic = vue.pageView(CockpitView.PAGE_TRAFIC);
+    Test.assertEqual(trafic.sousPage(), 0);
+    vue.onSelectPressed();
+    Test.assertEqual(trafic.sousPage(), 1);
+    vue.onSelectPressed();
+    Test.assertEqual(trafic.sousPage(), 2);
+    return true;
+}
+
+(:test)
+function testStartNeFeuilletePasAilleurs(logger) {
+    // Sur toute autre page, START garde son role de rafraichissement : il ne
+    // doit surtout pas faire avancer le livret en arriere-plan, sinon
+    // revenir sur la page trafic ouvrirait un ecran d'axes au hasard.
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
+                     "st" => null});
+    var vue = new CockpitView();
+    var trafic = vue.pageView(CockpitView.PAGE_TRAFIC);
+    var pages = [0, 1, 2, 4, 5];
+    for (var i = 0; i < pages.size(); i += 1) {
+        vue.setPage(pages[i]);
+        vue.onSelectPressed();
+        Test.assertEqual(trafic.sousPage(), 0);
+    }
+    return true;
+}
+
+(:test)
+function testQuitterLaPageTraficRevientAuBilan(logger) {
+    // Repartir de la troisieme page d'axes en revenant sur la page ferait
+    // perdre le verdict, la seule chose qui vaille un coup d'oeil rapide.
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
+                     "st" => null});
+    var vue = new CockpitView();
+    vue.setPage(CockpitView.PAGE_TRAFIC);
+    var trafic = vue.pageView(CockpitView.PAGE_TRAFIC);
+    vue.onSelectPressed();
+    vue.onSelectPressed();
+    Test.assertEqual(trafic.sousPage(), 2);
+    vue.nextPage();                       // on quitte le trafic
+    Test.assertEqual(trafic.sousPage(), 0);
+    return true;
+}
+
+(:test)
+function testPageTraficEstBienLaTroisieme(logger) {
+    // PAGE_TRAFIC pilote a la fois le cablage de START et la remise a zero :
+    // un decalage d'un rang enverrait START feuilleter la meteo.
+    var vue = new CockpitView();
+    Test.assert(vue.pageView(CockpitView.PAGE_TRAFIC) instanceof TraficView);
     return true;
 }
