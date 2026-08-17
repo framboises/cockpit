@@ -381,7 +381,7 @@ class TestCompterAlertes:
 class TestFraicheurAlertes:
     def test_rend_le_fetched_at_du_dernier_releve(self):
         moment = datetime(2026, 8, 15, 11, 40)
-        db = FakeDb(waze_alerts=[{"fetched_at": moment, "data": []}])
+        db = FakeDb(waze_alerts=[{"_id": "latest", "fetched_at": moment, "data": []}])
         assert trafic_etat.fraicheur_alertes(db) == moment
 
     def test_none_sans_document(self):

@@ -1305,23 +1305,63 @@ function testAxeAfficheTempsEtRetardAuFormatDuCockpit(logger) {
 
 (:test)
 function testAxeNommeLeSensEnLettres(logger) {
-    // ENT / SOR / PKG plutot que > < P : le cockpit ecrit ENTREE / SORTIE
-    // en toutes lettres, et un chevron seul demande d'etre interprete.
+    // ENT / SOR plutot que > < : le cockpit ecrit ENTREE / SORTIE en
+    // toutes lettres (dirLabel), et un chevron seul demande d'etre
+    // interprete.
     Application.Storage.deleteValue(Cache.KEY_PAGES);
     var vue = new TraficView();
     Cache.savePages({"mc" => null,
                      "tr" => {"t" => Time.now().value(), "vd" => 0, "ac" => 0,
                               "jm" => 0, "hz" => 0, "z" => 0,
                               "r" => [["Ouest", "i", 260, 0, 0, 0],
-                                      ["Porte Sud", "o", 120, 0, 0, 0],
-                                      ["A28", "p", 900, 0, 0, 0]]},
+                                      ["Porte Sud", "o", 120, 0, 0, 0]]},
                      "me" => null, "st" => null});
     vue.sousPageSuivante();
     var dc = dcEnregistrement();
     vue.onUpdate(dc);
     Test.assert(tlContient(dc, "ENT"));
     Test.assert(tlContient(dc, "SOR"));
-    Test.assert(tlContient(dc, "PKG"));
+    return true;
+}
+
+(:test)
+function testAxeSansDirectionNAfficheNiPkgNiTiret(logger) {
+    // DEUX defauts corriges d'un coup, tous deux signales a l'usage :
+    //
+    //   - "PKG" sur le tag `#P` etait FAUX : ce tag designe les AUTOROUTES
+    //     (A28, A11 -- verifie sur le releve reel), pas les parkings. Le
+    //     cockpit lui accole une icone de bifurcation d'autoroute, et son
+    //     onglet << Autoroutes >> filtre precisement dessus.
+    //   - "--" sur les parkings (tag `##`) etait TROMPEUR : le tiret
+    //     signifie << valeur inconnue >> partout ailleurs dans cette app,
+    //     alors qu'ici il n'y a rien a connaitre -- un parking n'a pas de
+    //     sens de circulation.
+    //
+    // Les deux rendent desormais une colonne VIDE, comme le cockpit.
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null,
+                     "tr" => {"t" => Time.now().value(), "vd" => 0, "ac" => 0,
+                              "jm" => 0, "hz" => 0, "z" => 0,
+                              // A28 est une AUTOROUTE (tag p), Panorama un
+                              // parking (tag neutral).
+                              "r" => [["A28", "p", 900, 0, 0, 0],
+                                      ["Panorama", "-", 120, 0, 0, 0]]},
+                     "me" => null, "st" => null});
+    vue.sousPageSuivante();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    var rects = dc.rects();
+    for (var i = 0; i < rects.size(); i += 1) {
+        var label = rects[i]["label"];
+        if (label == null) { continue; }
+        Test.assert(!label.equals("PKG"));
+        Test.assert(!label.equals(Fmt.DASH));
+    }
+    // Les axes sont bien la, ce sont seulement leurs colonnes de sens qui
+    // sont vides.
+    Test.assert(tlContient(dc, "A28"));
+    Test.assert(tlContient(dc, "Panorama"));
     return true;
 }
 

@@ -51,9 +51,9 @@ class TestMainCourante:
 class TestTrafic:
     def _db(self, routes, alertes):
         return FakeDb(
-            waze_trafic=[{"fetched_at": datetime(2026, 8, 15, 11, 59),
+            waze_trafic=[{"_id": "latest", "fetched_at": datetime(2026, 8, 15, 11, 59),
                           "data": {"routes": routes}}],
-            waze_alerts=[{"fetched_at": datetime(2026, 8, 15, 11, 59),
+            waze_alerts=[{"_id": "latest", "fetched_at": datetime(2026, 8, 15, 11, 59),
                           "data": alertes}],
         )
 
@@ -293,11 +293,11 @@ class TestTrafic:
         # Meme regle que ac/z/vd : un drapeau a 0 se lit << rien sur cet
         # axe >>, ce qui serait un mensonge quand la source est muette.
         db = FakeDb(
-            waze_trafic=[{"fetched_at": datetime(2026, 8, 15, 11, 59),
+            waze_trafic=[{"_id": "latest", "fetched_at": datetime(2026, 8, 15, 11, 59),
                           "data": {"routes": [
                               {"name": "#I# Ouest", "time": 100,
                                "historicTime": 100}]}}],
-            waze_alerts=[{"fetched_at": datetime(2026, 8, 15, 11, 40),
+            waze_alerts=[{"_id": "latest", "fetched_at": datetime(2026, 8, 15, 11, 40),
                           "data": []}],
         )
         bloc = watch_pages.build_trafic(db, NOW)
@@ -328,11 +328,11 @@ class TestTrafic:
         # au-dela d'ALERTES_MAX_AGE (300s). Sans la garde, ac/z tomberaient
         # a 0 et vd resterait affirmatif.
         db = FakeDb(
-            waze_trafic=[{"fetched_at": datetime(2026, 8, 15, 11, 59),
+            waze_trafic=[{"_id": "latest", "fetched_at": datetime(2026, 8, 15, 11, 59),
                           "data": {"routes": [
                               {"name": "#I# Ouest", "time": 100,
                                "historicTime": 100}]}}],
-            waze_alerts=[{"fetched_at": datetime(2026, 8, 15, 11, 40),
+            waze_alerts=[{"_id": "latest", "fetched_at": datetime(2026, 8, 15, 11, 40),
                           "data": []}],
         )
         bloc = watch_pages.build_trafic(db, NOW)
@@ -344,7 +344,7 @@ class TestTrafic:
         # Aucun document waze_alerts du tout (collecteur jamais lance, ou
         # collection purgee) : meme regle que perime, ac/z/vd a None.
         db = FakeDb(
-            waze_trafic=[{"fetched_at": datetime(2026, 8, 15, 11, 59),
+            waze_trafic=[{"_id": "latest", "fetched_at": datetime(2026, 8, 15, 11, 59),
                           "data": {"routes": [
                               {"name": "#I# Ouest", "time": 100,
                                "historicTime": 100}]}}],
@@ -361,11 +361,11 @@ class TestTrafic:
         # Comportement inchange quand routes ET alertes sont fraiches --
         # non-regression explicite de la garde ajoutee.
         db = FakeDb(
-            waze_trafic=[{"fetched_at": datetime(2026, 8, 15, 11, 59),
+            waze_trafic=[{"_id": "latest", "fetched_at": datetime(2026, 8, 15, 11, 59),
                           "data": {"routes": [
                               {"name": "#I# Ouest", "time": 100,
                                "historicTime": 100}]}}],
-            waze_alerts=[{"fetched_at": datetime(2026, 8, 15, 11, 58),
+            waze_alerts=[{"_id": "latest", "fetched_at": datetime(2026, 8, 15, 11, 58),
                           "data": []}],
         )
         bloc = watch_pages.build_trafic(db, NOW)
@@ -378,11 +378,11 @@ class TestTrafic:
         # le plus ancien des deux, pas le plus recent -- un bloc n'est
         # frais que si ses DEUX moities le sont.
         db = FakeDb(
-            waze_trafic=[{"fetched_at": datetime(2026, 8, 15, 11, 55),
+            waze_trafic=[{"_id": "latest", "fetched_at": datetime(2026, 8, 15, 11, 55),
                           "data": {"routes": [
                               {"name": "#I# Ouest", "time": 100,
                                "historicTime": 100}]}}],
-            waze_alerts=[{"fetched_at": datetime(2026, 8, 15, 11, 59),
+            waze_alerts=[{"_id": "latest", "fetched_at": datetime(2026, 8, 15, 11, 59),
                           "data": []}],
         )
         bloc = watch_pages.build_trafic(db, NOW)
@@ -391,11 +391,11 @@ class TestTrafic:
     def test_t_prend_le_plus_ancien_meme_quand_alertes_plus_ancien(self):
         # Symetrique : alertes plus ancien (11:50) que routes (11:59).
         db = FakeDb(
-            waze_trafic=[{"fetched_at": datetime(2026, 8, 15, 11, 59),
+            waze_trafic=[{"_id": "latest", "fetched_at": datetime(2026, 8, 15, 11, 59),
                           "data": {"routes": [
                               {"name": "#I# Ouest", "time": 100,
                                "historicTime": 100}]}}],
-            waze_alerts=[{"fetched_at": datetime(2026, 8, 15, 11, 50),
+            waze_alerts=[{"_id": "latest", "fetched_at": datetime(2026, 8, 15, 11, 50),
                           "data": []}],
         )
         bloc = watch_pages.build_trafic(db, NOW)

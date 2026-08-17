@@ -141,20 +141,37 @@ class TraficView extends WatchUi.View {
         return "fluide";
     }
 
-    // "i"/"o"/"p"/"-" (watch_pages.build_trafic) -- entrant / sortant /
-    // parking / sans direction connue.
+    // DIRECTION de l'axe : "i" entrant, "o" sortant. Port de dirLabel
+    // (static/js/traffic.js:52), qui rend ENTREE / SORTIE ou RIEN.
     //
-    // Trois lettres et non une fleche : le cockpit ecrit ENTREE / SORTIE en
-    // toutes lettres (dirLabel, static/js/traffic.js:52), et ">" seul
-    // demande d'etre interprete. Les formes longues font 56 a 72 px, la
-    // corde n'en a pas les moyens sur une ligne deja chargee -- ENT / SOR /
-    // PKG en font 31 a 33 et se lisent sans effort.
+    // Trois lettres et non une fleche : ">" seul demande d'etre interprete,
+    // et les formes longues (56 a 72 px) ne tiennent pas sur une ligne deja
+    // chargee. ENT / SOR font 31 et 32 px.
+    //
+    // ⚠️ UN AXE SANS DIRECTION REND UNE CHAINE VIDE, PAS UN TIRET. Le tiret
+    // signifie << valeur inconnue >> partout ailleurs dans cette app ; ici
+    // il n'y a rien a connaitre. Les parkings et aires d'accueil (tag `##`,
+    // transporte "-") et les autoroutes (tag `#P`, transporte "p") n'ont pas
+    // de sens de circulation : le cockpit laisse la colonne vide pour eux,
+    // et c'est exact.
+    //
+    // ⚠️ NE JAMAIS ECRIRE "PKG" POUR "p". Le tag `#P` de Waze designe les
+    // AUTOROUTES (A28, A11 -- verifie sur le releve reel), pas les parkings.
+    // Le cockpit lui accole une icone `fork_right`, une bifurcation
+    // d'autoroute (tagLabel, static/js/traffic.js:58), et son onglet
+    // << Autoroutes >> filtre precisement sur `tag === "P"` tandis que son
+    // onglet << Parkings >> filtre sur `category === "pkg_aa" && tag !== "P"`.
+    // La premiere version de cette vue affichait "PKG" sur les autoroutes et
+    // "--" sur les parkings : les deux etaient faux, en sens inverse.
+    //
+    // Le TYPE d'axe n'est donc pas rendu ici : le nom le porte deja ("A28"
+    // est manifestement une autoroute, "Panorama" un parking), et la montre
+    // n'a pas d'onglet de filtrage a alimenter contrairement au cockpit.
     // Publique pour rester testable en VALEUR.
     function sensLibelle(sens) {
         if (sens != null && sens.equals("i")) { return "ENT"; }
         if (sens != null && sens.equals("o")) { return "SOR"; }
-        if (sens != null && sens.equals("p")) { return "PKG"; }
-        return Fmt.DASH;
+        return "";
     }
 
     // Badge de la PIRE alerte posee sur l'axe, ou null. Trois lettres et pas

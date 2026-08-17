@@ -453,21 +453,40 @@ def verdict_global(comptes, pire_severite):
     return 0
 
 
+# Le collecteur externe (waze_collector.py, tache planifiee toutes les
+# 2 min) REECRIT un document unique par collection, `_id: "latest"`. C'est
+# lui qu'il faut cibler -- exactement comme le fait le mur
+# (traffic.py:166), et non le plus recent par tri sur `fetched_at`.
+#
+# Les deux ramenent le meme document tant que la collection n'en contient
+# qu'un, ce qui est le cas aujourd'hui. Mais un tri sans index depend de ce
+# que la collection contient, la ou un acces par cle primaire dit ce qu'on
+# veut : LE releve courant. Si un jour un document d'archive atterrissait
+# la, le tri pourrait le ramener et la montre daterait ses chiffres sur lui
+# -- une divergence silencieuse avec le mur, qui n'y serait pas expose.
+#
+# ⚠️ NE PAS CONFONDRE avec `waze_trafic_history`, ou le collecteur depose un
+# SNAPSHOT toutes les 16-18 min : cette collection-la sert aux comparaisons
+# dans le temps, pas a l'etat courant. Dater la montre dessus lui ferait
+# annoncer un quart d'heure de retard en permanence.
+_ID_COURANT = "latest"
+
+
 def lire_routes(db):
-    """Itineraires du dernier releve Waze en base."""
-    doc = db["waze_trafic"].find_one(sort=[("fetched_at", -1)]) or {}
+    """Itineraires du releve Waze courant."""
+    doc = db["waze_trafic"].find_one({"_id": _ID_COURANT}) or {}
     return ((doc.get("data") or {}).get("routes")) or []
 
 
 def lire_alertes(db):
-    """Alertes Waze du dernier releve, non filtrees."""
-    doc = db["waze_alerts"].find_one(sort=[("fetched_at", -1)]) or {}
+    """Alertes Waze du releve courant, non filtrees."""
+    doc = db["waze_alerts"].find_one({"_id": _ID_COURANT}) or {}
     return doc.get("data") or []
 
 
 def fraicheur(db):
-    """Horodatage du dernier releve Waze (routes), naif UTC, ou None."""
-    doc = db["waze_trafic"].find_one(sort=[("fetched_at", -1)]) or {}
+    """Horodatage du releve Waze courant (routes), naif UTC, ou None."""
+    doc = db["waze_trafic"].find_one({"_id": _ID_COURANT}) or {}
     return doc.get("fetched_at")
 
 
@@ -483,5 +502,5 @@ def fraicheur_alertes(db):
     appel Waze direct -- la montre n'a pas ce repli, elle doit donc au
     moins savoir dater ce qu'elle affiche.
     """
-    doc = db["waze_alerts"].find_one(sort=[("fetched_at", -1)]) or {}
+    doc = db["waze_alerts"].find_one({"_id": _ID_COURANT}) or {}
     return doc.get("fetched_at")

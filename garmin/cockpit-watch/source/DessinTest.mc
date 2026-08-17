@@ -1225,3 +1225,35 @@ function testLaTimelineNAllumeAucunCapteur(logger) {
     Test.assertEqual(guidage.estActive(), false);
     return true;
 }
+
+
+// --- Le tag `#P` designe les AUTOROUTES, pas les parkings ---------------
+//
+// Defaut signale a l'usage : la vue affichait "PKG" sur l'A28 et l'A11, et
+// "--" sur les vrais parkings (Panorama, Beausejour, Raineries). Les deux
+// etaient faux, en sens inverse.
+//
+// La preuve est dans le cockpit : son onglet << Autoroutes >> filtre sur
+// `tag === "P"`, son onglet << Parkings >> sur
+// `category === "pkg_aa" && tag !== "P"`, et tagLabel(P) rend l'icone
+// `fork_right` -- une bifurcation d'autoroute.
+
+(:test)
+function testSensLibelleNommeLesDeuxDirections(logger) {
+    var vue = new TraficView();
+    Test.assertEqual(vue.sensLibelle("i"), "ENT");
+    Test.assertEqual(vue.sensLibelle("o"), "SOR");
+    return true;
+}
+
+(:test)
+function testSensLibelleVideSurAutorouteEtParking(logger) {
+    // Ni "PKG" (faux : `p` est une autoroute), ni un tiret (trompeur : le
+    // tiret signifie << inconnu >> partout ailleurs, or il n'y a rien a
+    // connaitre -- ces axes n'ont pas de sens de circulation).
+    var vue = new TraficView();
+    Test.assertEqual(vue.sensLibelle("p"), "");     // autoroute
+    Test.assertEqual(vue.sensLibelle("-"), "");     // parking, aire
+    Test.assertEqual(vue.sensLibelle(null), "");
+    return true;
+}

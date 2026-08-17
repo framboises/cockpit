@@ -1065,6 +1065,28 @@ ressemblaient. Un sabotage l'a confirmé après coup — le masquer laissait
 par axe**, et quatre axes par écran au lieu de six. Le payload transporte
 donc des **secondes**, plus des minutes arrondies.
 
+⚠️ **Le tag Waze `#P` designe les AUTOROUTES (A28, A11), pas les
+parkings.** Les parkings sont en `##`, sans direction. Le cockpit le prouve
+trois fois : onglet « Autoroutes » filtré sur `tag === "P"`, onglet
+« Parkings » sur `category === "pkg_aa" && tag !== "P"`, et `tagLabel("P")`
+qui rend l'icône `fork_right`. La première version de la page affichait
+`PKG` sur les autoroutes et `--` sur les parkings — les deux faux, en sens
+inverse. Un axe sans direction rend désormais une colonne **vide**, jamais
+un tiret : le tiret signifie « inconnu » partout ailleurs dans cette app.
+
+### Fraîcheur Waze : `latest`, jamais l'historique
+
+Le collecteur externe (`waze_collector.py`, tâche planifiée **toutes les
+2 min**) réécrit `{"_id": "latest"}` dans `waze_trafic` et `waze_alerts`, et
+dépose un snapshot dans `waze_*_history` toutes les 16-18 min. **Lire
+l'historique ferait annoncer un quart d'heure de retard en permanence.**
+
+⚠️ **Le mur masque les pannes de collecteur, la montre non.** `traffic.py`
+a un troisième étage : au-delà de `MONGO_MAX_AGE_SECONDS` (300 s), il
+appelle l'API Waze en direct. La montre lit uniquement Mongo. Un « maj
+42 min » au poignet alors que le mur paraît normal signale donc un
+**collecteur arrêté**, pas un défaut d'affichage.
+
 ### Indicateur de pagination (`Pages.dessinerPagination`)
 
 Losanges en haut à droite, plein pour la page courante. Partagé par les

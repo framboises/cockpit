@@ -60,7 +60,7 @@ code mort, jamais câblé, et ont été supprimées à la tâche 14). Seules
 `EditionsView` et `SautMenu`, réellement poussées via `WatchUi.pushView`,
 gardent leur delegate (`EditionsDelegate`, `SautMenuDelegate`).
 
-268 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
+271 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
 `Pages`, la navigation (`CockpitView.nextPage`/`previousPage`/`setPage`/
 `pageView`) et les chemins de dessin des six vues (`DessinTest.mc` : le rendu
 ne doit lever dans aucun état atteignable, y compris un mode `past` sans pic
@@ -205,9 +205,22 @@ ENT        4m 20s             +45s
 |---|---|---|
 | nom | Waze | **seul élément élastique** |
 | badge | rattachement géométrique | la pire alerte posée sur cet axe |
-| `ENT`/`SOR`/`PKG` | `dirLabel` | entrée / sortie / parking |
+| `ENT`/`SOR`/vide | `dirLabel` | entrée / sortie / **pas de direction** |
 | `4m 20s` | `formatTime` | temps de parcours |
 | `+45s` | `formatDelay` | retard sur l'historique |
+
+⚠️ **Le tag Waze `#P` désigne les AUTOROUTES, pas les parkings.** A28 et
+A11 le portent ; les parkings (Panorama, Beauséjour, Raineries) sont en
+`##`, sans direction. Le cockpit le prouve trois fois : son onglet
+« Autoroutes » filtre sur `tag === "P"`, son onglet « Parkings » sur
+`category === "pkg_aa" && tag !== "P"`, et `tagLabel("P")` rend l'icône
+`fork_right` — une bifurcation d'autoroute.
+
+La première version affichait `PKG` sur les autoroutes et `--` sur les
+parkings : **les deux étaient faux, en sens inverse**. Un axe sans
+direction rend désormais une **colonne vide**, comme le cockpit — et
+surtout pas un tiret, qui signifie « valeur inconnue » partout ailleurs
+dans cette app alors qu'ici il n'y a rien à connaître.
 
 ⚠️ **Le retard est TOUJOURS affiché, `+0s` compris**, comme dans le
 cockpit. La première version le masquait à zéro : un axe fluide (retard
@@ -230,6 +243,30 @@ réellement dessinées.
 
 Mesuré sur les 13 axes réels : le bloc pèse 495 octets, et aucun chiffre
 n'est tronqué.
+
+### Fraîcheur : la montre date, le mur masque
+
+Le collecteur Waze est un **processus externe** (`waze_collector.py`, tâche
+planifiée **toutes les 2 minutes**), qui réécrit un document unique par
+collection : `_id: "latest"`. Il dépose en plus un **snapshot** dans
+`waze_trafic_history` toutes les 16-18 min — ne pas confondre les deux : la
+montre lit `latest`, jamais l'historique.
+
+⚠️ **La montre lit `{"_id": "latest"}`, comme le mur** (`traffic.py:166`),
+et non le plus récent par tri sur `fetched_at`. Les deux donnent le même
+document tant que la collection n'en contient qu'un ; mais un tri dépend de
+ce que la collection contient, là où un accès par clé primaire dit ce qu'on
+veut : *le* relevé courant.
+
+⚠️ **Le mur a un troisième étage que la montre n'a pas.** Si le document
+Mongo dépasse `MONGO_MAX_AGE_SECONDS` (300 s), `traffic.py` appelle
+**l'API Waze en direct**. Le mur est donc frais même collecteur arrêté — la
+montre, elle, affiche l'âge réel du dernier relevé.
+
+**Conséquence à connaître : un « maj 42 min » au poignet alors que le mur
+paraît normal signale un collecteur en panne, pas un défaut de la montre.**
+C'est le comportement voulu — une supervision qui masque l'âge de ses
+données ne supervise plus rien.
 
 ### L'indicateur de pagination
 
