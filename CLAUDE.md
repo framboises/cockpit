@@ -1042,6 +1042,25 @@ dans le payload, cf. `watch_pages.py`) :
   bloc sort du disque inscrit ou chevauche le pied, sur la taille lue à
   l'exécution.
 
+### Les alertes de la montre ne filtrent pas sur l'événement
+
+⚠️ **`watch_state.read_active_alerts` ne filtre QUE sur `expiresAt`.**
+Filtrer sur event/year — ce que faisait la première version — perdait 100 %
+des alertes hors période d'événement.
+
+`alert_engine.build_context` ne résout un événement que si un paramétrage
+couvre la date du jour (repli à 7 jours). Sinon les handlers écrivent
+`context.get("event", "")` → **chaîne vide** (`alert_engine.py:490`), qu'aucun
+couple réel ne matche, ni en mode `pinned` ni en mode `auto`. Or les alertes
+trafic, météo et main courante tournent, elles, toute l'année.
+
+Le cockpit ne filtre pas non plus (`app.py:4154`). La sélection est faite
+par les **slugs cochés dans `/watch-admin`** (`select_alerts`), qui portent
+aussi le niveau de gravité : un filtre, pas deux.
+
+Les SOS terrain échappent au problème — `field.py:3983` écrit event/year
+depuis la tablette enrôlée.
+
 ### La ligne d'axe suit le bloc « Temps d'accès », pas le mur
 
 ⚠️ **Deux références distinctes, et il ne faut pas les confondre.** Le mur

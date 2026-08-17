@@ -298,11 +298,49 @@ class TestReadActiveAlerts:
         out = watch_state.read_active_alerts(db, "24H MOTOS", 2026, NOW)
         assert [a["definition_slug"] for a in out] == ["a"]
 
-    def test_sans_evenement_ne_remonte_rien(self):
+    def test_alerte_sans_evenement_remonte_quand_meme(self):
+        """LE cas qui a fait perdre 100 % des alertes en production.
+
+        `alert_engine.build_context` ne resout un evenement que si un
+        parametrage couvre la date du jour (repli a sept jours). Hors de
+        cette fenetre -- soit ~350 jours par an -- les alertes s'ecrivent
+        avec `event: ""` et `year: ""` (alert_engine.py:490,
+        `context.get("event", "")`).
+
+        Constate en production le 17/08/2026 : deux alertes trafic actives
+        et non expirees, affichees par le cockpit, invisibles sur la montre.
+        Le filtre Mongo rendait [] avant meme que select_alerts n'ait
+        quelque chose a trancher.
+        """
+        db = FakeDb(cockpit_active_alerts=[
+            {"definition_slug": "traffic-cluster", "event": "", "year": "",
+             "expiresAt": NOW + timedelta(minutes=8)},
+        ])
+        out = watch_state.read_active_alerts(db, "24H CAMIONS", 2026, NOW)
+        assert [a["definition_slug"] for a in out] == ["traffic-cluster"]
+
+    def test_alerte_d_un_autre_evenement_remonte_aussi(self):
+        """Consequence assumee de l'abandon du filtre : la montre montre ce
+        que montre le cockpit, qui ne filtre pas non plus (app.py:4154,
+        `query = {"expiresAt": {"$gt": now}}`). Deux ecrans qui se
+        contrediraient seraient pires qu'un filtre trop large -- et la
+        SELECTION reste faite par les slugs coches dans /watch-admin.
+        """
+        db = FakeDb(cockpit_active_alerts=[
+            {"definition_slug": "a", "event": "GPF", "year": "2025",
+             "expiresAt": NOW + timedelta(hours=1)},
+        ])
+        out = watch_state.read_active_alerts(db, "24H CAMIONS", 2026, NOW)
+        assert len(out) == 1
+
+    def test_sans_evenement_resolu_les_alertes_remontent_encore(self):
+        # La montre peut ne pas avoir d'evenement (mode auto hors periode) :
+        # les alertes trafic et meteo, elles, tournent toute l'annee.
         db = FakeDb(cockpit_active_alerts=[
             {"definition_slug": "a", "expiresAt": NOW + timedelta(hours=1)},
         ])
-        assert watch_state.read_active_alerts(db, None, None, NOW) == []
+        out = watch_state.read_active_alerts(db, None, None, NOW)
+        assert len(out) == 1
 
 
 class TestBuildState:

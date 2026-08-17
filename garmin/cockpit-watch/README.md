@@ -60,7 +60,7 @@ code mort, jamais câblé, et ont été supprimées à la tâche 14). Seules
 `EditionsView` et `SautMenu`, réellement poussées via `WatchUi.pushView`,
 gardent leur delegate (`EditionsDelegate`, `SautMenuDelegate`).
 
-271 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
+281 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
 `Pages`, la navigation (`CockpitView.nextPage`/`previousPage`/`setPage`/
 `pageView`) et les chemins de dessin des six vues (`DessinTest.mc` : le rendu
 ne doit lever dans aucun état atteignable, y compris un mode `past` sans pic
@@ -73,7 +73,7 @@ C'est **`DebordementTest.mc`** qui porte la garantie géométrique : il capture
 les rectangles réellement dessinés, sur la taille d'écran lue à l'exécution,
 et échoue si l'un d'eux sort du disque inscrit ou chevauche le pied de page.
 
-Le backend est couvert par 335 tests pytest, dont `watch_api.py`,
+Le backend est couvert par 337 tests pytest, dont `watch_api.py`,
 `watch_state.py`, `watch_peaks.py`, `watch_pages.py`, `watch_guidage.py`,
 `watch_timeline.py`, `trafic_etat.py` et `meteo_etat.py`.
 
@@ -120,6 +120,36 @@ une intervention est nécessaire. Aucune des deux garde seule ne suffit — le
 drapeau attrape l'arrêt propre en une seconde (la seule fraîcheur mettrait six
 heures à s'en apercevoir), la fraîcheur attrape le collecteur planté (où le
 drapeau mentirait indéfiniment).
+
+## Les alertes : aucun filtre sur l'événement
+
+⚠️ **`read_active_alerts` ne filtre PAS sur event/year, et c'est
+délibéré.** La première version le faisait, et ne remontait donc jamais
+rien hors période d'événement.
+
+`alert_engine.build_context` ne résout un événement que si un paramétrage
+couvre la date du jour (repli à sept jours). Hors de cette fenêtre — soit
+**~350 jours par an** — chaque handler écrit `context.get("event", "")`,
+c'est-à-dire la **chaîne vide** (`alert_engine.py:490`). Aucun couple réel
+ne peut la matcher : ni le mode `pinned` ni le mode `auto`.
+
+Constaté en production le 17/08/2026 : deux alertes trafic actives et non
+expirées, affichées par le cockpit, **invisibles sur la montre**. Le filtre
+Mongo rendait `[]` avant même que `select_alerts` n'ait quelque chose à
+trancher.
+
+Le cockpit lui-même ne filtre pas (`app.py:4154` :
+`query = {"expiresAt": {"$gt": now}}`). Deux écrans qui se contrediraient
+seraient pires qu'un filtre trop large — c'est la règle suivie partout
+ailleurs (verdict trafic, consigne météo).
+
+**La sélection reste faite par `select_alerts`** : seuls les slugs cochés
+dans `/watch-admin` partent au poignet, et c'est cette liste qui porte
+aussi le niveau de gravité. Un filtre, pas deux.
+
+Trois alertes ne sont concernées par rien de tout cela : les **SOS
+terrain** (`field.py:3983`) écrivent event/year depuis la tablette
+enrôlée, valeurs réelles.
 
 ## La page Trafic
 

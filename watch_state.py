@@ -221,20 +221,39 @@ def read_event_short(db, event):
 
 
 def read_active_alerts(db, event, year, now_utc):
-    """Alertes actives non expirees de l'evenement retenu.
+    """Toutes les alertes actives non expirees.
+
+    ⚠️ AUCUN FILTRE SUR event/year, ET C'EST DELIBERE. La premiere version
+    filtrait sur le couple retenu par la montre, et ne remontait donc
+    JAMAIS rien : `alert_engine.build_context` ne resout un evenement que
+    si un parametrage couvre la date du jour (avec un repli a sept jours).
+    Hors de cette fenetre, les alertes s'ecrivent avec `event: ""` et
+    `year: ""` -- la valeur par defaut de `context.get("event", "")`,
+    alert_engine.py:490 -- qu'aucun couple reel ne peut matcher.
+
+    Constate en production : quatre alertes actives sur le cockpit, zero
+    sur la montre, alors que le payload arrivait par ailleurs a jour.
+
+    Le cockpit lui-meme ne filtre pas sur l'evenement pour son bandeau
+    d'alertes : la montre doit montrer ce que montre le cockpit, sans quoi
+    les deux se contredisent -- exactement ce que ce projet s'interdit
+    ailleurs (verdict trafic, consigne meteo).
+
+    La SELECTION reste assuree par `select_alerts` : seuls les slugs
+    coches dans /watch-admin partent au poignet, et c'est cette liste qui
+    porte aussi le niveau de gravite. Un filtre, pas deux.
+
+    `event` et `year` restent dans la signature : ils ne servent plus a
+    filtrer, mais les retirer casserait les appelants sans rien gagner, et
+    ils redeviendront utiles le jour ou le moteur d'alertes resoudra
+    toujours son evenement.
 
     `now_utc` est CONSCIENT du fuseau : alert_engine ecrit expiresAt en UTC
     conscient et pymongo le relit naif UTC. Le comparer a une heure locale
     ecartait toute alerte expirant a moins de deux heures, c'est-a-dire
     presque toutes.
     """
-    if not event or year is None:
-        return []
-    # `year` est stocke tantot en chaine tantot en entier selon les emetteurs.
-    annees = [year, str(year)]
     return list(db["cockpit_active_alerts"].find({
-        "event": event,
-        "year": {"$in": annees},
         "expiresAt": {"$gt": now_utc},
     }))
 
