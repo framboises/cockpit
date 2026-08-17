@@ -420,3 +420,30 @@ function testMotErreurNulQuandToutVaBien(logger) {
     Test.assert(Api.motErreur(null) == null);
     return true;
 }
+
+
+// --- "Jamais essaye" n'est pas "refuse" ---------------------------------
+//
+// Quand le jeton n'est pas compile, `fetch` sort SANS envoyer de requete.
+// KEY_ERR gardait alors la valeur d'un essai precedent : un 401 vieux
+// d'une semaine restait affiche alors que la montre ne parlait meme plus
+// au serveur. Constate a l'usage -- trois reconstructions successives, le
+// meme "jeton refuse" a l'ecran, et un jeton pourtant accepte en curl.
+
+(:test)
+function testMotErreurDistingueJetonAbsentEtJetonRefuse(logger) {
+    // Deux diagnostics opposes : reconstruire avec un jeton, ou en emettre
+    // un nouveau parce que l'actuel est revoque.
+    Test.assertEqual(Api.motErreur(Api.ERR_SANS_JETON), "jeton absent");
+    Test.assertEqual(Api.motErreur(401), "jeton refuse");
+    return true;
+}
+
+(:test)
+function testCodeInterneHorsPlageHttp(logger) {
+    // ERR_SANS_JETON ne doit pouvoir se confondre avec aucun code HTTP
+    // reel, sans quoi une reponse serveur inattendue afficherait
+    // "jeton absent".
+    Test.assert(Api.ERR_SANS_JETON > 599);
+    return true;
+}

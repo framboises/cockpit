@@ -43,6 +43,12 @@ module Api {
     // << ton jeton est mort >>.
     const KEY_ERR = "lerr";
 
+    // Codes internes, hors de la plage HTTP et hors des codes negatifs de
+    // Communications : la montre n'a meme PAS ESSAYE d'appeler le serveur.
+    // Distinguer ce cas d'un refus est ce qui evite de chercher un probleme
+    // de jeton la ou il n'y a pas de jeton du tout.
+    const ERR_SANS_JETON = 1001;
+
     // Le payload HTTP porte les alertes en dictionnaires ; le cache les stocke
     // en tableaux, moitie moins d'octets et d'objets a instancier au reveil de
     // la glance.
@@ -62,6 +68,11 @@ module Api {
     // viennent du serveur et se distinguent, eux.
     function motErreur(code) {
         if (code == null) { return null; }
+        // Le cas le plus trompeur, et le plus frequent apres un sideload :
+        // l'app n'a pas de jeton compile. Elle n'appelle donc jamais le
+        // serveur -- dire "jeton refuse" enverrait chercher une revocation
+        // qui n'existe pas.
+        if (code == ERR_SANS_JETON) { return "jeton absent"; }
         if (code == 401) { return "jeton refuse"; }
         if (code == 429) { return "trop de requetes"; }
         if (code >= 500) { return "serveur en panne"; }
@@ -180,6 +191,18 @@ module Api {
         var token = Application.Properties.getValue("token");
         if (host == null || host.length() == 0
             || token == null || token.length() == 0) {
+            // AUCUNE REQUETE N'EST ENVOYEE ICI, et c'est tout le piege :
+            // sans ce marquage, KEY_ERR gardait la valeur d'un essai
+            // PRECEDENT. Un 401 vieux d'une semaine restait donc affiche
+            // alors que la montre ne parlait meme plus au serveur -- on
+            // pouvait reconstruire l'app dix fois sans que le message
+            // change, puisque rien ne le reecrivait ni ne l'effacait.
+            //
+            // Constate a l'usage : trois reconstructions successives, le
+            // meme "jeton refuse" a l'ecran, et un jeton pourtant accepte
+            // en curl. Le vrai etat n'etait pas << refuse >> mais
+            // << jamais configure >>.
+            Application.Storage.setValue(KEY_ERR, ERR_SANS_JETON);
             callback.invoke(false, null);
             return;
         }
@@ -188,6 +211,7 @@ module Api {
         if (mInFlightSince != null
             && (maintenant - mInFlightSince) < IN_FLIGHT_TIMEOUT_S) {
             // Requete deja en vol et pas encore expiree : on ne double pas.
+            // Pas de marquage : ce n'est pas une panne, c'est une garde.
             callback.invoke(false, null);
             return;
         }

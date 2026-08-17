@@ -60,7 +60,7 @@ code mort, jamais câblé, et ont été supprimées à la tâche 14). Seules
 `EditionsView` et `SautMenu`, réellement poussées via `WatchUi.pushView`,
 gardent leur delegate (`EditionsDelegate`, `SautMenuDelegate`).
 
-281 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
+285 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
 `Pages`, la navigation (`CockpitView.nextPage`/`previousPage`/`setPage`/
 `pageView`) et les chemins de dessin des six vues (`DessinTest.mc` : le rendu
 ne doit lever dans aucun état atteignable, y compris un mode `past` sans pic
@@ -143,6 +143,21 @@ Le script fait désormais deux choses de plus :
 - **il interroge le serveur** avec ce jeton juste après la compilation, et
   dit `ACCEPTE` ou `REFUSE (401)` avant qu'on ne charge quoi que ce soit.
   L'hôte se surcharge avec `WATCH_HOST=`.
+
+⚠️ **« jeton absent » et « jeton refuse » ne veulent pas dire la même
+chose.** Sans jeton compilé, `Api.fetch` sort **sans envoyer de requête** :
+il n'y a donc ni code HTTP, ni erreur nouvelle. La première version du
+diagnostic laissait dans ce cas le dernier code connu — un `401` d'un essai
+antérieur restait affiché indéfiniment, et reconstruire l'app n'y changeait
+rien puisque rien ne le réécrivait. Ce cas pose maintenant son propre code
+(`ERR_SANS_JETON`), hors de la plage HTTP.
+
+| Affiché | Sens | Geste |
+|---|---|---|
+| `jeton absent` | l'app n'a pas de jeton compilé | rebuild via `build-avec-jeton.sh` |
+| `jeton refuse` | le serveur rejette le jeton (401) | réémettre depuis `/watch-admin` |
+| `telephone injoignable` | lien BLE coupé | rapprocher le téléphone |
+| `trop de requetes` | quota atteint (429) | attendre 5 min |
 
 Côté serveur, chaque refus est tracé : `Jeton montre refuse depuis <ip>`
 (`watch_api.py:197`). Aucune ligne dans les logs alors que la montre

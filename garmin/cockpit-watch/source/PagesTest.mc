@@ -253,6 +253,14 @@ function testPaginationResteDansLeCadran(logger) {
     return true;
 }
 
+// `libelleFraicheur` lit la derniere erreur en Storage : sans remise a
+// zero, ces tests dependraient de l'ordre d'execution -- un test amont qui
+// laisse un 401 ferait echouer ceux d'ici. Defaut rendu visible par
+// l'ajout du code ERR_SANS_JETON.
+function fraicheurSansErreur() {
+    Application.Storage.deleteValue(Api.KEY_ERR);
+}
+
 // --- Fraicheur : deux pannes, deux libelles -----------------------------
 //
 // Cas reel qui a motive ce libelle : le serveur repondait a 4 secondes de
@@ -261,6 +269,7 @@ function testPaginationResteDansLeCadran(logger) {
 
 (:test)
 function testFraicheurNominaleDitMaj(logger) {
+    fraicheurSansErreur();
     var now = 100000;
     Test.assertEqual(
         Pages.libelleFraicheur({"t" => now - 30, "rx" => now - 30}, 30, now),
@@ -305,6 +314,7 @@ function testSeuilHorsLigneLaisssePasserUnRetardCourt(logger) {
 
 (:test)
 function testFraicheurToleereUnCacheSansReception(logger) {
+    fraicheurSansErreur();
     var now = 100000;
     Test.assertEqual(Pages.libelleFraicheur(null, 30, now), "maj 30 s");
     Test.assertEqual(Pages.libelleFraicheur({"t" => now - 30}, 30, now),
@@ -314,8 +324,43 @@ function testFraicheurToleereUnCacheSansReception(logger) {
 
 (:test)
 function testFraicheurInconnueResteUnTiret(logger) {
+    fraicheurSansErreur();
     var now = 100000;
     Test.assertEqual(Pages.libelleFraicheur({"rx" => now - 10}, null, now),
                      "maj " + Fmt.DASH);
+    return true;
+}
+
+(:test)
+function testFraicheurNommeLaCauseQuandOnLaConnait(logger) {
+    // Quand la montre SAIT pourquoi elle echoue, elle le dit plutot que
+    // "hors ligne" : un jeton absent et un telephone hors de portee
+    // appellent deux gestes differents, et attendre ne resout que le
+    // second.
+    Application.Storage.setValue(Api.KEY_ERR, Api.ERR_SANS_JETON);
+    var now = 100000;
+    Test.assertEqual(
+        Pages.libelleFraicheur({"t" => now - 10800, "rx" => now - 10800},
+                               10800, now),
+        "jeton absent 3 h");
+    Application.Storage.setValue(Api.KEY_ERR, 401);
+    Test.assertEqual(
+        Pages.libelleFraicheur({"t" => now - 10800, "rx" => now - 10800},
+                               10800, now),
+        "jeton refuse 3 h");
+    fraicheurSansErreur();
+    return true;
+}
+
+(:test)
+function testCauseIgnoreeQuandLaReponseEstFraiche(logger) {
+    // Une erreur ancienne ne doit pas parasiter un etat sain : sous le
+    // seuil hors-ligne, on affiche l'age de la donnee, point.
+    Application.Storage.setValue(Api.KEY_ERR, 401);
+    var now = 100000;
+    Test.assertEqual(
+        Pages.libelleFraicheur({"t" => now - 60, "rx" => now - 60}, 60, now),
+        "maj 1 min");
+    fraicheurSansErreur();
     return true;
 }
