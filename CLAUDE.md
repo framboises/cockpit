@@ -1042,6 +1042,27 @@ dans le payload, cf. `watch_pages.py`) :
   bloc sort du disque inscrit ou chevauche le pied, sur la taille lue à
   l'exécution.
 
+### Le jeton est une CONSTANTE DE CODE, pas une Property
+
+⚠️ **`Application.Properties` survit au sideload, comme `Storage`.** Une
+valeur écrite un jour dans les réglages **écrase la valeur par défaut
+compilée**, et c'est elle qui part sur le réseau. Le binaire peut porter le
+bon jeton (`strings` le confirme) pendant que la montre en envoie un autre.
+
+Cas réel : un ancien jeton laissé actif le temps d'une transition, révoqué
+cinq heures plus tard. La montre s'est arrêtée net en 401 — et **cinq
+reconstructions avec le nouveau jeton n'ont rien changé**, puisqu'elle
+n'envoyait pas celui-là.
+
+Le jeton vit donc dans `source/Jeton.mc` (`const VALEUR`), rempli par
+`build-avec-jeton.sh` dans une copie temporaire. `Jeton.valeur()` donne la
+priorité à la constante et ne retombe sur la Property qu'en repli — ce qui
+donne le dernier mot à la construction, jamais à un reliquat de réglage.
+
+Le pied de page affiche l'**empreinte** (4 caractères) du jeton employé sur
+les erreurs `401` et `jeton absent` : c'est ce qui aurait tranché en cinq
+secondes au lieu de cinq reconstructions.
+
 ### `Application.Storage` survit au sideload
 
 ⚠️ Réinstaller l'app ne vide **pas** son stockage. Un code d'erreur, un

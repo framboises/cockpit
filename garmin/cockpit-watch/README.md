@@ -60,7 +60,7 @@ code mort, jamais câblé, et ont été supprimées à la tâche 14). Seules
 `EditionsView` et `SautMenu`, réellement poussées via `WatchUi.pushView`,
 gardent leur delegate (`EditionsDelegate`, `SautMenuDelegate`).
 
-287 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
+290 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
 `Pages`, la navigation (`CockpitView.nextPage`/`previousPage`/`setPage`/
 `pageView`) et les chemins de dessin des six vues (`DessinTest.mc` : le rendu
 ne doit lever dans aucun état atteignable, y compris un mode `past` sans pic
@@ -158,6 +158,24 @@ rien puisque rien ne le réécrivait. Ce cas pose maintenant son propre code
 | `jeton refuse` | le serveur rejette le jeton (401) | réémettre depuis `/watch-admin` |
 | `telephone injoignable` | lien BLE coupé | rapprocher le téléphone |
 | `trop de requetes` | quota atteint (429) | attendre 5 min |
+
+⚠️ **`Application.Properties` survit aussi au sideload**, et c'est le piège
+qui a coûté le plus cher. Une valeur de jeton écrite un jour dans les
+réglages **écrase la valeur par défaut compilée**. Le binaire peut porter
+le bon jeton pendant que la montre en envoie un autre.
+
+Cas réel : un ancien jeton laissé actif le temps d'une transition, révoqué
+cinq heures plus tard. La montre s'est arrêtée en 401, et cinq
+reconstructions avec le nouveau jeton n'ont rien changé.
+
+Le jeton vit donc désormais dans `source/Jeton.mc` (`const VALEUR`), rempli
+par le script dans une copie temporaire. `Jeton.valeur()` donne la priorité
+à la constante ; la Property ne sert plus que de repli (simulateur,
+installations existantes). Ce qui est compilé est ce qui part.
+
+Le pied affiche l'**empreinte** du jeton employé (4 caractères) sur les
+erreurs `401` et `jeton absent` — assez pour reconnaître un jeton d'un coup
+d'œil, trop peu pour en reconstituer un.
 
 ⚠️ **`Application.Storage` survit au sideload.** Réinstaller l'app ne vide
 pas son stockage : un code d'erreur mémorisé lors d'un essai antérieur —

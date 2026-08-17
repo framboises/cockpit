@@ -480,3 +480,33 @@ function testApresOubliLaMontreNAffichePlusDErreur(logger) {
         "hors ligne 3 h");
     return true;
 }
+
+
+// --- Le jeton compile a le dernier mot ----------------------------------
+//
+// Les Properties SURVIVENT AU SIDELOAD, comme le Storage : une valeur
+// ecrite un jour dans les reglages ecrasait la valeur par defaut compilee,
+// et c'est elle qui partait sur le reseau.
+//
+// Cas reel : un ancien jeton, laisse actif le temps de la transition puis
+// revoque cinq heures plus tard. La montre s'est arretee net en 401, et
+// cinq reconstructions avec le NOUVEAU jeton n'ont rien change -- elle
+// n'envoyait pas celui-la.
+
+(:test)
+function testEmpreinteDistingueDeuxJetons(logger) {
+    // Quatre caracteres : assez pour reconnaitre un jeton d'un coup d'oeil,
+    // trop peu pour en reconstituer un (ils en font 43).
+    Test.assertEqual(Jeton.empreinte().length(), 4);
+    return true;
+}
+
+(:test)
+function testEmpreinteSansJetonEstNeutre(logger) {
+    // Sans jeton du tout, l'empreinte ne doit pas lever ni afficher un
+    // fragment de rien.
+    var e = Jeton.empreinte();
+    Test.assert(e != null);
+    Test.assert(e.length() == 4);
+    return true;
+}

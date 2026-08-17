@@ -196,7 +196,7 @@ module Api {
         }
 
         var host = Application.Properties.getValue("host");
-        var token = Application.Properties.getValue("token");
+        var token = Jeton.valeur();
         if (host == null || host.length() == 0
             || token == null || token.length() == 0) {
             // AUCUNE REQUETE N'EST ENVOYEE ICI, et c'est tout le piege :
@@ -249,7 +249,7 @@ module Api {
         }
 
         var host = Application.Properties.getValue("host");
-        var token = Application.Properties.getValue("token");
+        var token = Jeton.valeur();
         if (host == null || host.length() == 0
             || token == null || token.length() == 0) {
             callback.invoke(false, null);
@@ -289,7 +289,7 @@ module Api {
         }
 
         var host = Application.Properties.getValue("host");
-        var token = Application.Properties.getValue("token");
+        var token = Jeton.valeur();
         if (host == null || host.length() == 0
             || token == null || token.length() == 0) {
             callback.invoke(false, null);

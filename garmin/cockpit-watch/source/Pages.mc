@@ -91,6 +91,15 @@ module Pages {
             // differents, et attendre ne resout que le second.
             var mot = Api.motErreur(Api.derniereErreur());
             if (mot != null) {
+                // L'EMPREINTE du jeton employe accompagne les deux erreurs
+                // qui le concernent. Sans elle, il etait impossible de
+                // savoir si la montre envoyait le jeton qu'on venait de
+                // compiler ou un reliquat de reglage -- c'est exactement ce
+                // qui a coute cinq reconstructions.
+                var code = Api.derniereErreur();
+                if (code == 401 || code == Api.ERR_SANS_JETON) {
+                    return mot + " " + Jeton.empreinte();
+                }
                 return mot + " " + Fmt.age(ageReponse);
             }
             return "hors ligne " + Fmt.age(ageReponse);

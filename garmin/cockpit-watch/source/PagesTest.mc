@@ -337,17 +337,35 @@ function testFraicheurNommeLaCauseQuandOnLaConnait(logger) {
     // "hors ligne" : un jeton absent et un telephone hors de portee
     // appellent deux gestes differents, et attendre ne resout que le
     // second.
+    // Les deux erreurs qui concernent le JETON affichent son empreinte, pas
+    // l'age : l'age ne dit pas QUEL jeton part, et c'est precisement ce
+    // qu'il fallait savoir. Cinq reconstructions ont ete perdues faute de
+    // pouvoir distinguer le jeton compile d'un reliquat de reglage.
     Application.Storage.setValue(Api.KEY_ERR, Api.ERR_SANS_JETON);
     var now = 100000;
     Test.assertEqual(
         Pages.libelleFraicheur({"t" => now - 10800, "rx" => now - 10800},
                                10800, now),
-        "jeton absent 3 h");
+        "jeton absent " + Jeton.empreinte());
     Application.Storage.setValue(Api.KEY_ERR, 401);
     Test.assertEqual(
         Pages.libelleFraicheur({"t" => now - 10800, "rx" => now - 10800},
                                10800, now),
-        "jeton refuse 3 h");
+        "jeton refuse " + Jeton.empreinte());
+    fraicheurSansErreur();
+    return true;
+}
+
+(:test)
+function testAutresErreursGardentLAge(logger) {
+    // Un telephone injoignable ou un quota atteint n'ont rien a voir avec
+    // le jeton : c'est l'age qui compte, pas son empreinte.
+    Application.Storage.setValue(Api.KEY_ERR, -104);
+    var now = 100000;
+    Test.assertEqual(
+        Pages.libelleFraicheur({"t" => now - 1800, "rx" => now - 1800},
+                               1800, now),
+        "telephone injoignable 30 min");
     fraicheurSansErreur();
     return true;
 }

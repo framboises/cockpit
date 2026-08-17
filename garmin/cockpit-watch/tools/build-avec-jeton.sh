@@ -89,6 +89,18 @@ if not re.fullmatch(r"[A-Za-z0-9_-]+", jeton):
         "  Un jeton copie depuis un terminal peut porter une coupure de "
         "ligne invisible.")
 
+# 1) La CONSTANTE DE CODE, qui a le dernier mot a l'execution.
+#    Les Properties survivent au sideload : une valeur ecrite un jour dans
+#    les reglages ecrase la valeur par defaut compilee. Une constante, non.
+j = pathlib.Path(tmp) / "source" / "Jeton.mc"
+sj = j.read_text(encoding="utf-8")
+avant_j = 'const VALEUR = "";'
+if avant_j not in sj:
+    raise SystemExit("constante VALEUR introuvable ou deja renseignee dans Jeton.mc")
+j.write_text(sj.replace(avant_j, 'const VALEUR = "%s";' % jeton, 1),
+             encoding="utf-8")
+
+# 2) La propriete, conservee en repli (simulateur, installations existantes).
 p = pathlib.Path(tmp) / "resources" / "properties" / "properties.xml"
 s = p.read_text(encoding="utf-8")
 avant = '<property id="token" type="string"></property>'
@@ -100,7 +112,7 @@ if avant not in s:
 p.write_text(s.replace(avant,
     '<property id="token" type="string">%s</property>' % escape(jeton), 1),
     encoding="utf-8")
-print("  jeton valide (%d caracteres)" % len(jeton))
+print("  jeton valide (%d caracteres), empreinte %s..." % (len(jeton), jeton[:4]))
 PYEOF
 
 mkdir -p "$PROJET/bin"
