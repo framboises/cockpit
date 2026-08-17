@@ -74,6 +74,58 @@ module Fmt {
         return info.day_of_week + " " + info.day.toString() + " " + info.month;
     }
 
+    // Temps de parcours : "4m 20s", "45s". Port EXACT de formatTime
+    // (static/js/traffic.js:11), le bloc << Temps d'acces >> du cockpit.
+    //
+    // C'est la reference retenue pour la liste d'axes de la montre, et non
+    // le mur circulation : "24'" seul est ambigu -- minutes ou secondes ? --
+    // sur des trajets qui vont de quelques dizaines de secondes a une
+    // demi-heure. Le format du cockpit ne laisse aucun doute.
+    //
+    // Les secondes sont omises quand elles valent zero ("4m", pas "4m 00s") :
+    // c'est ce que fait le cockpit, et la corde d'une ligne d'axe est
+    // comptee.
+    function duree(sec) {
+        if (sec == null) {
+            return DASH;
+        }
+        var s = sec < 0 ? 0 : sec;
+        var m = s / 60;
+        var r = s % 60;
+        if (m > 0) {
+            if (r == 0) {
+                return m.toString() + "m";
+            }
+            return m.toString() + "m " + (r < 10 ? "0" : "") + r.toString() + "s";
+        }
+        return s.toString() + "s";
+    }
+
+    // Retard par rapport a l'historique : "+0s", "+45s", "+1m 30s". Port
+    // EXACT de formatDelay (static/js/traffic.js:20).
+    //
+    // TOUJOURS affiche, "+0s" compris -- c'est ce que fait le cockpit, et
+    // c'est ce qui distingue un axe FLUIDE (retard connu, nul) d'un axe
+    // dont on ignore le retard. Masquer le zero les confondrait.
+    function retard(sec) {
+        if (sec == null) {
+            return DASH;
+        }
+        var s = sec < 0 ? 0 : sec;
+        if (s == 0) {
+            return "+0s";
+        }
+        var m = s / 60;
+        var r = s % 60;
+        if (m > 0 && r > 0) {
+            return "+" + m.toString() + "m " + r.toString() + "s";
+        }
+        if (m > 0) {
+            return "+" + m.toString() + "m";
+        }
+        return "+" + r.toString() + "s";
+    }
+
     // Compte a rebours jusqu'a un instant futur : "dans 42 min", "dans 3 h",
     // "maintenant". C'est LA valeur de la page Timeline -- une heure seule
     // ("08:00") oblige a un calcul mental, un delai se lit d'un coup.

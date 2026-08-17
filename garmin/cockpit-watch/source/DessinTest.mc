@@ -331,8 +331,11 @@ function trBlocPireCas(vd) {
         // chiffres : le pire cas de largeur d'une ligne d'axe.
         var sev = 4 - (i / 5);
         var fl = (i < 3) ? (1 << i) : 0;
+        // Temps et retard en SECONDES (watch_pages les transporte ainsi
+        // depuis le passage au format du bloc << Temps d'acces >>) :
+        // 24 min descendant a 6, retards de 17 min a 0.
         axes.add([noms[i % 4] + " " + (i + 1).toString(), sens[i % 4],
-                  24 - i, sev, fl, 17 - i]);
+                  (24 - i) * 60, sev, fl, (17 - i) * 60]);
     }
     return {"t" => Time.now().value(), "vd" => vd, "ac" => 3, "jm" => 9,
             "hz" => 15, "z" => 27, "r" => axes};
@@ -457,10 +460,11 @@ function testFormatCompteUnSeulResteAuSingulier(logger) {
 function testTraficNbSousPagesUnEcranParTrancheDeSix(logger) {
     Application.Storage.deleteValue(Cache.KEY_PAGES);
     var vue = new TraficView();
-    // 18 axes = 1 bilan + 3 ecrans de six.
+    // 18 axes = 1 bilan + 5 ecrans (quatre par ecran depuis le passage au
+    // format du bloc << Temps d'acces >> : deux lignes par axe).
     Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
                      "st" => null});
-    Test.assertEqual(vue.nbSousPages(), 4);
+    Test.assertEqual(vue.nbSousPages(), 6);
     return true;
 }
 
@@ -468,7 +472,7 @@ function testTraficNbSousPagesUnEcranParTrancheDeSix(logger) {
 function testTraficNbSousPagesArrondiVersLeHaut(logger) {
     Application.Storage.deleteValue(Cache.KEY_PAGES);
     var vue = new TraficView();
-    // 7 axes = 1 bilan + 2 ecrans (six, puis un seul). Le septieme ne doit
+    // 7 axes = 1 bilan + 2 ecrans (quatre, puis trois). Le septieme ne doit
     // pas disparaitre parce que la division tombe juste au-dessous.
     var axes = [];
     for (var i = 0; i < 7; i += 1) {
@@ -502,12 +506,15 @@ function testTraficStartBoucleSurLeBilan(logger) {
     var vue = new TraficView();
     Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
                      "st" => null});
+    // Le nombre de sous-pages est lu a la source plutot que recopie : un
+    // test qui figerait le compte cesserait de suivre la vue au prochain
+    // changement de mise en page.
+    var total = vue.nbSousPages();
     Test.assertEqual(vue.sousPage(), 0);
-    vue.sousPageSuivante();
-    Test.assertEqual(vue.sousPage(), 1);
-    vue.sousPageSuivante();
-    vue.sousPageSuivante();
-    Test.assertEqual(vue.sousPage(), 3);
+    for (var i = 1; i < total; i += 1) {
+        vue.sousPageSuivante();
+        Test.assertEqual(vue.sousPage(), i);
+    }
     vue.sousPageSuivante();
     Test.assertEqual(vue.sousPage(), 0);   // revient au bilan
     return true;

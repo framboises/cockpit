@@ -1,4 +1,5 @@
 using Toybox.Math;
+using Toybox.Graphics;
 
 // Ce module n'existe que pour l'app : AUCUNE annotation (:glance) ni
 // (:background) ici. C'est ce qui garantit que les quatre blocs (mc/tr/me/st)
@@ -56,6 +57,86 @@ module Pages {
         if (vg >= 3) { return "VIG ROUGE"; }
         if (vg == 2) { return "VIG ORANGE"; }
         return "VIG JAUNE";
+    }
+
+    // --- Indicateur de pagination ---------------------------------------
+    //
+    // Une rangee de petits losanges en haut a droite : PLEIN pour la
+    // sous-page courante, CONTOUR SEUL pour les autres. C'est la seule
+    // chose qui dise qu'il Y A d'autres pages -- sans elle, un utilisateur
+    // qui n'a jamais appuye sur START ne peut pas deviner qu'il en existe.
+    //
+    // En haut a DROITE et non centre : l'entete de page ("AXES 5-8 / 18",
+    // "PROCHAIN") occupe deja toute la corde a son ordonnee. Les losanges
+    // vivent donc au-dessus, sur une bande ou rien d'autre ne se dessine.
+    //
+    // Le losange est incline (parallelogramme) plutot que rond : sur un MIP
+    // sans anti-aliasing, un petit cercle rend un moignon de six pixels
+    // baveux, une forme a angles vifs reste nette.
+
+    const PAGINATION_Y = 14;        // ordonnee du sommet des losanges
+    const PAGINATION_H = 9;         // hauteur
+    const PAGINATION_L = 6;         // largeur de la base
+    const PAGINATION_BIAIS = 3;     // decalage horizontal du sommet
+    const PAGINATION_PAS = 12;      // entraxe
+
+    // Au-dela, la rangee deborde de la corde disponible et les losanges
+    // deviennent indistinguables. Un livret plus long affiche alors son
+    // compteur de pied ("7/9") et rien ici -- un indicateur illisible vaut
+    // moins qu'une absence d'indicateur.
+    const PAGINATION_MAX = 8;
+
+    // Les losanges sont-ils dessinables pour ce nombre de pages ?
+    // Publique pour rester testable en VALEUR : une rangee silencieusement
+    // absente ne leve aucune exception.
+    function paginationVisible(total) {
+        return total != null && total > 1 && total <= PAGINATION_MAX;
+    }
+
+    // Abscisse du bord GAUCHE du losange d'index `i`, la rangee etant
+    // calee a droite de la corde disponible a son ordonnee.
+    function paginationX(dc, total, i) {
+        var largeur = (total - 1) * PAGINATION_PAS + PAGINATION_L
+                      + PAGINATION_BIAIS;
+        // La corde est mesuree a la BASE des losanges (le bord le plus
+        // eloigne du centre pour un bloc de la moitie haute, cf.
+        // largeurUtile), moins 10 px de marge interne.
+        var corde = largeurUtile(dc, PAGINATION_Y, PAGINATION_H) - 20;
+        var xDroite = dc.getWidth() / 2.0 + corde / 2.0;
+        return xDroite - largeur + i * PAGINATION_PAS;
+    }
+
+    // Dessine la rangee. `courante` est un index 0-base.
+    function dessinerPagination(dc, courante, total) {
+        if (!paginationVisible(total)) {
+            return;
+        }
+        var yH = PAGINATION_Y;
+        var yB = PAGINATION_Y + PAGINATION_H;
+        for (var i = 0; i < total; i += 1) {
+            var x = paginationX(dc, total, i);
+            // Parallelogramme penche vers la droite : base en bas a gauche,
+            // sommet decale de PAGINATION_BIAIS.
+            var pts = [[x + PAGINATION_BIAIS, yH],
+                       [x + PAGINATION_BIAIS + PAGINATION_L, yH],
+                       [x + PAGINATION_L, yB],
+                       [x, yB]];
+            if (i == courante) {
+                dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+                dc.fillPolygon(pts);
+            } else {
+                // Contour seul. Gris moyen et non blanc : la page courante
+                // doit rester la plus lumineuse de la rangee, sinon la
+                // distinction plein/vide ne se voit pas d'un coup d'oeil.
+                dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
+                dc.setPenWidth(1);
+                for (var k = 0; k < 4; k += 1) {
+                    var a = pts[k];
+                    var b = pts[(k + 1) % 4];
+                    dc.drawLine(a[0], a[1], b[0], b[1]);
+                }
+            }
+        }
     }
 
     // Largeur utile du cadran rond a la hauteur d'un BLOC, pas d'un point.

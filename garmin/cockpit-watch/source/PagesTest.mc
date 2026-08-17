@@ -184,3 +184,71 @@ function testLargeurUtileZeroHorsDuCadran(logger) {
     Test.assertEqual(Pages.largeurUtile(dc, -50, 0), 0.0);
     return true;
 }
+
+// --- Indicateur de pagination ------------------------------------------
+//
+// C'est la SEULE chose qui dise qu'il y a d'autres pages : sans elle, un
+// utilisateur qui n'a jamais appuye sur START ne peut pas deviner qu'il en
+// existe. Une rangee silencieusement absente ne leve aucune exception --
+// d'ou des tests en VALEUR, pas seulement en geometrie.
+
+(:test)
+function testPaginationMuetteSurUneSeulePage(logger) {
+    // Un livret d'une seule page n'est pas un livret : afficher un losange
+    // unique ferait croire qu'il y a autre chose a voir.
+    Test.assertEqual(Pages.paginationVisible(1), false);
+    Test.assertEqual(Pages.paginationVisible(0), false);
+    Test.assertEqual(Pages.paginationVisible(null), false);
+    return true;
+}
+
+(:test)
+function testPaginationVisibleDesDeuxPages(logger) {
+    Test.assertEqual(Pages.paginationVisible(2), true);
+    Test.assertEqual(Pages.paginationVisible(6), true);
+    Test.assertEqual(Pages.paginationVisible(Pages.PAGINATION_MAX), true);
+    return true;
+}
+
+(:test)
+function testPaginationMuetteAuDelaDuPlafond(logger) {
+    // Au-dela, la rangee deborde de la corde et les losanges deviennent
+    // indistinguables : le compteur du pied ("7/9") prend le relais. Un
+    // indicateur illisible vaut moins qu'une absence d'indicateur.
+    Test.assertEqual(Pages.paginationVisible(Pages.PAGINATION_MAX + 1), false);
+    Test.assertEqual(Pages.paginationVisible(20), false);
+    return true;
+}
+
+(:test)
+function testPaginationCaleeADroite(logger) {
+    // En haut a DROITE, comme demande : quel que soit le nombre de pages,
+    // le bord droit de la rangee ne bouge pas -- ce sont les losanges qui
+    // s'ajoutent vers la gauche.
+    var dc = dcDeTest();
+    var droite2 = Pages.paginationX(dc, 2, 1);
+    var droite6 = Pages.paginationX(dc, 6, 5);
+    Test.assert((droite2 - droite6).abs() < 0.01);
+    return true;
+}
+
+(:test)
+function testPaginationEspacementRegulier(logger) {
+    var dc = dcDeTest();
+    var x0 = Pages.paginationX(dc, 6, 0);
+    var x1 = Pages.paginationX(dc, 6, 1);
+    Test.assertEqual((x1 - x0).toNumber(), Pages.PAGINATION_PAS);
+    return true;
+}
+
+(:test)
+function testPaginationResteDansLeCadran(logger) {
+    // L'ordonnee est tout en haut du cadran, la ou la corde est la plus
+    // etroite : au plafond de pages, la rangee doit encore tenir.
+    var dc = dcDeTest();
+    var corde = Pages.largeurUtile(dc, Pages.PAGINATION_Y, Pages.PAGINATION_H);
+    var largeur = (Pages.PAGINATION_MAX - 1) * Pages.PAGINATION_PAS
+                  + Pages.PAGINATION_L + Pages.PAGINATION_BIAIS;
+    Test.assert(largeur < corde);
+    return true;
+}

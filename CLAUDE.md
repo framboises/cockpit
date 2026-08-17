@@ -1042,6 +1042,41 @@ dans le payload, cf. `watch_pages.py`) :
   bloc sort du disque inscrit ou chevauche le pied, sur la taille lue à
   l'exécution.
 
+### La ligne d'axe suit le bloc « Temps d'accès », pas le mur
+
+⚠️ **Deux références distinctes, et il ne faut pas les confondre.** Le mur
+`circulation.html` donne les **seuils de sévérité** et le **verdict global**
+(`severite_axe`, `verdict_global`). Le bloc « Temps d'accès » de la page
+principale (`static/js/traffic.js`) donne le **format des chiffres** — et
+c'est lui la bonne référence pour une liste d'axes.
+
+Concrètement : `4m 20s` et non `24'` (sur des trajets de 33 s à 25 min, une
+unité implicite se devine mal), `+45s` **toujours affiché, `+0s` compris**,
+et `ENT`/`SOR`/`PKG` plutôt que des chevrons. `Fmt.duree` et `Fmt.retard`
+sont des ports exacts de `formatTime` et `formatDelay`.
+
+⚠️ **Masquer le retard nul était le défaut signalé à l'usage** : un axe
+fluide (retard connu, nul) et un axe dont on ignore le retard se
+ressemblaient. Un sabotage l'a confirmé après coup — le masquer laissait
+264 tests au vert.
+
+⚠️ Ce format demande **176 px dans son pire cas** sur une corde utile de
+186 : il ne reste rien pour le nom sur une seule ligne. D'où **deux lignes
+par axe**, et quatre axes par écran au lieu de six. Le payload transporte
+donc des **secondes**, plus des minutes arrondies.
+
+### Indicateur de pagination (`Pages.dessinerPagination`)
+
+Losanges en haut à droite, plein pour la page courante. Partagé par les
+deux pages à livret (Trafic, Timeline).
+
+⚠️ **Se tait au-delà de 8 pages** : la corde ne fait que 122 px à cette
+ordonnée, et des losanges indistinguables valent moins que pas de losanges
+du tout — le compteur du pied prend le relais.
+
+⚠️ **En haut à droite et non centré** : l'en-tête de page occupe déjà toute
+la corde à son ordonnée.
+
 ### Timeline : ce qui tombe dans les 12 h à venir
 
 8ᵉ page. **Aucun calcul métier n'est réécrit** :

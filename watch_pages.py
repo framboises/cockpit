@@ -309,16 +309,20 @@ def build_trafic(db, now_utc=None):
         resume.append([
             axe["nom"],
             sens,
-            int(round((axe["currentTime"] or 0) / 60.0)),
+            # SECONDES, pas minutes. La montre reprend le format du bloc
+            # << Temps d'acces >> du cockpit (static/js/traffic.js:
+            # formatTime/formatDelay) : "4m 20s", "45s", "+1m 30s". Des
+            # minutes arrondies interdiraient ce format, et "24'" seul est
+            # ambigu -- minutes ou secondes ? -- sur des trajets qui vont de
+            # quelques dizaines de secondes a une demi-heure.
+            int(axe["currentTime"] or 0),
             axe["severity"],
             drapeaux,
-            # Retard en minutes, arrondi vers le BAS : il porte la gravite en
-            # clair sur la ligne d'axe, la ou la couleur seule ne suffit pas
-            # (un daltonien en plein soleil ne distingue pas orange de rouge).
-            # C'est le meme chiffre que la colonne `axe-delay` du mur.
-            # Arrondi vers le bas et non au plus proche : annoncer 1 min de
-            # retard la ou il y en a 30 secondes gonflerait chaque ligne.
-            int((axe.get("deltaSeconds") or 0) // 60),
+            # Retard en SECONDES, jamais negatif (max(0, ...) dans axes_mur).
+            # Le cockpit l'affiche TOUJOURS, "+0s" compris, dans une pastille
+            # coloree : sans lui, un axe fluide et un axe dont on ignore le
+            # retard se ressemblent.
+            int(axe.get("deltaSeconds") or 0),
         ])
 
     return {

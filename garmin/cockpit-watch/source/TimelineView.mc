@@ -121,6 +121,7 @@ class TimelineView extends WatchUi.View {
             dessinerListe(dc, sousPage() - 1);
         }
         dessinerPied(dc);
+        Pages.dessinerPagination(dc, sousPage(), nbSousPages());
     }
 
     hidden function dessinerHeros(dc) {

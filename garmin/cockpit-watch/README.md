@@ -41,7 +41,7 @@ Trois points d'entrée (`CockpitApp.mc`) partagent un cache commun :
 | `TimelineView.mc` | page « Timeline » : le prochain acte en délai, puis la liste feuilletée. **Deux sources** — `nx` du cache pour l'affichage immédiat, `/timeline` pour la liste |
 | `GuidageView.mc` | page « Guidage » : flèche vers le point reçu, distance, START enregistre un waypoint natif. **Seul endroit de l'app qui allume un capteur continu** |
 | `Geo.mc` | distance haversine, cap initial, angle relatif — fonctions pures, testées en valeur |
-| `TraficView.mc` | page « Trafic » : livret feuilleté à START — bilan (verdict global, accidents/bouchons/dangers, axe le plus dégradé) puis tous les axes du mur, six par écran |
+| `TraficView.mc` | page « Trafic » : livret feuilleté à START — bilan (verdict global, accidents/bouchons/dangers, axe le plus dégradé) puis tous les axes du mur, quatre par écran |
 | `MeteoView.mc` | page « Météo » : température, vent, rafale, pluie à venir, consigne la plus grave du mur |
 | `FrequentationView.mc` | page « Fréquentation » : pic de présents du jour et son heure, comparé au N-1 au même décalage à la course |
 | `EditionsView.mc` | consultation des pics par édition, atteinte par le menu de saut (MENU) |
@@ -60,7 +60,7 @@ code mort, jamais câblé, et ont été supprimées à la tâche 14). Seules
 `EditionsView` et `SautMenu`, réellement poussées via `WatchUi.pushView`,
 gardent leur delegate (`EditionsDelegate`, `SautMenuDelegate`).
 
-245 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
+268 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
 `Pages`, la navigation (`CockpitView.nextPage`/`previousPage`/`setPage`/
 `pageView`) et les chemins de dessin des six vues (`DessinTest.mc` : le rendu
 ne doit lever dans aucun état atteignable, y compris un mode `past` sans pic
@@ -86,7 +86,7 @@ Huit pages en cycle, dans l'ordre d'urgence opérationnelle :
 | 0 | Tableau de bord | présents/pic, WBGT, voyants, alertes (deux premières lignes) |
 | 1 | Alertes | liste complète des alertes actives |
 | 2 | Main courante | compteurs PC org en cours/terminées par catégorie |
-| 3 | Trafic | **livret** : bilan, puis tous les axes du mur six par écran (START feuillette) |
+| 3 | Trafic | **livret** : bilan, puis tous les axes du mur quatre par écran (START feuillette) |
 | 4 | Météo | température, vent, rafale, pluie à venir, consigne la plus grave |
 | 5 | Fréquentation | pic de présents du jour, son heure, comparaison N-1 |
 | 6 | Guidage | flèche et distance vers un point envoyé depuis le cockpit |
@@ -189,26 +189,68 @@ troisième sous-page.
 
 ### Ce que porte une ligne
 
+**La référence est le bloc « Temps d'accès » de la page principale du
+cockpit** (`static/js/traffic.js`), pas le mur circulation. Le mur donne les
+seuils de sévérité et le verdict ; le bloc Temps d'accès donne le **format
+des chiffres**, et c'est lui qu'on lit sans avoir à deviner.
+
+Deux lignes par axe :
+
 ```
-> Ouest 2      ACC  +7  12'
+Antares Sud                    ACC
+ENT        4m 20s             +45s
 ```
 
-sens (`>` entrant, `<` sortant, `P` parking, `-` inconnu), nom, badge de la
-pire alerte rattachée, **retard en minutes**, temps de parcours.
+| Élément | Source | Rôle |
+|---|---|---|
+| nom | Waze | **seul élément élastique** |
+| badge | rattachement géométrique | la pire alerte posée sur cet axe |
+| `ENT`/`SOR`/`PKG` | `dirLabel` | entrée / sortie / parking |
+| `4m 20s` | `formatTime` | temps de parcours |
+| `+45s` | `formatDelay` | retard sur l'historique |
 
-⚠️ **Le retard n'est pas décoratif** : il porte la gravité en clair à côté
-de la couleur. Le projet s'interdit partout de faire porter une identité à
-la seule couleur — un daltonien en plein soleil ne distingue pas l'orange du
-rouge.
+⚠️ **Le retard est TOUJOURS affiché, `+0s` compris**, comme dans le
+cockpit. La première version le masquait à zéro : un axe fluide (retard
+connu, nul) et un axe dont on ignore le retard se ressemblaient alors. Un
+sabotage l'a confirmé — masquer le zéro laissait 264 tests au vert.
 
-⚠️ **Le nom est le seul élément élastique.** Il cède la place au temps, au
-retard et au badge, jamais l'inverse : un temps tronqué serait un chiffre
-**faux** (`2` pour `24`), pas un mot abrégé — et rien dans un contrôle
-géométrique ne distingue les deux. D'où un test dédié sur les valeurs
-réellement dessinées (`testTraficNeTronqueJamaisLesChiffres`).
+⚠️ **Le temps est en `4m 20s`, jamais `24'`.** Sur des trajets allant de
+33 secondes à 25 minutes, une unité implicite se devine mal. C'est
+exactement ce que le format du cockpit résout.
 
-Mesuré sur les 13 axes réels : aucun nom n'est tronqué (le plus large,
-« Antares Sud », occupe 91 px sur les ~130 disponibles).
+⚠️ **Deux lignes, donc quatre axes par écran** au lieu de six. Le format du
+cockpit demande 176 px dans son pire cas sur une corde utile de 186 : il ne
+reste rien pour le nom sur une seule ligne. Deux axes de moins par écran,
+mais des chiffres qu'on n'a plus à interpréter.
+
+⚠️ **Le nom cède, les chiffres jamais.** Un temps ou un retard tronqué
+serait une valeur **fausse**, pas un mot abrégé — et rien dans un contrôle
+géométrique ne distingue les deux. D'où des tests sur les valeurs
+réellement dessinées.
+
+Mesuré sur les 13 axes réels : le bloc pèse 495 octets, et aucun chiffre
+n'est tronqué.
+
+### L'indicateur de pagination
+
+Une rangée de petits losanges en haut à droite — **plein** pour la
+sous-page courante, **contour seul** pour les autres. C'est la seule chose
+qui dise qu'il *y a* d'autres pages : sans elle, qui n'a jamais appuyé sur
+START ne peut pas deviner qu'il en existe.
+
+Partagé par les deux pages à livret (Trafic et Timeline), dans `Pages.mc`.
+
+⚠️ **Au-delà de 8 pages, la rangée se tait** : elle déborderait de la corde
+disponible (122 px mesurés à cette ordonnée) et les losanges deviendraient
+indistinguables. Le compteur du pied (`7/9`) prend alors le relais — un
+indicateur illisible vaut moins qu'une absence d'indicateur.
+
+⚠️ **En haut à droite et non centré** : l'en-tête de page (`AXES 5-8 / 18`)
+occupe déjà toute la corde à son ordonnée. Les losanges vivent au-dessus,
+sur une bande où rien d'autre ne se dessine — un test le vérifie.
+
+Le losange est **incliné à angles vifs** plutôt que rond : sur un écran MIP
+sans anti-aliasing, un petit cercle rend un moignon baveux de six pixels.
 
 ## La page Timeline
 

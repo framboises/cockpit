@@ -23,10 +23,21 @@ using Toybox.Time;
 // pas de cas "hors evenement", le serveur construit le bloc meme en mode past.
 class TraficView extends WatchUi.View {
 
-    // Six axes par ecran. Mesure au VRAI device (fenix8solar51mm, 280x280) :
-    // a hX = 22 px et un pas de 29, la sixieme ligne finit a 225 px, sous le
-    // pied de page (241). Une septieme commencerait a 234 et le chevaucherait.
-    hidden const AXES_PAR_ECRAN = 6;
+    // QUATRE axes par ecran, DEUX lignes chacun. Mesure au VRAI device
+    // (fenix8solar51mm, 280x280) : premiere ligne a y = 58 + 46*i, seconde a
+    // +19 px ; le quatrieme axe finit a 237, juste sous le pied (241).
+    //
+    // Six axes sur une ligne chacun tenaient auparavant -- mais avec un
+    // format de temps ambigu ("24'"). Le format du bloc << Temps d'acces >>
+    // du cockpit ("4m 20s" + "+45s") demande 176 px a lui seul dans son
+    // pire cas, sur une corde utile de 186 : il ne reste rien pour le nom.
+    // D'ou la seconde ligne. Deux axes de moins par ecran, mais des chiffres
+    // qu'on n'a plus a deviner.
+    hidden const AXES_PAR_ECRAN = 4;
+
+    // Ordonnee de la premiere ligne d'un axe, et pas entre deux axes.
+    hidden const AXE_Y0 = 58;
+    hidden const AXE_PAS = 46;
 
     // Masque d'alertes rattachees a l'axe. Miroir EXACT de watch_pages.FL_* :
     // ces valeurs voyagent dans le payload, les deux cotes doivent bouger
@@ -132,11 +143,18 @@ class TraficView extends WatchUi.View {
 
     // "i"/"o"/"p"/"-" (watch_pages.build_trafic) -- entrant / sortant /
     // parking / sans direction connue.
-    hidden function sensGlyphe(sens) {
-        if (sens != null && sens.equals("i")) { return ">"; }
-        if (sens != null && sens.equals("o")) { return "<"; }
-        if (sens != null && sens.equals("p")) { return "P"; }
-        return "-";
+    //
+    // Trois lettres et non une fleche : le cockpit ecrit ENTREE / SORTIE en
+    // toutes lettres (dirLabel, static/js/traffic.js:52), et ">" seul
+    // demande d'etre interprete. Les formes longues font 56 a 72 px, la
+    // corde n'en a pas les moyens sur une ligne deja chargee -- ENT / SOR /
+    // PKG en font 31 a 33 et se lisent sans effort.
+    // Publique pour rester testable en VALEUR.
+    function sensLibelle(sens) {
+        if (sens != null && sens.equals("i")) { return "ENT"; }
+        if (sens != null && sens.equals("o")) { return "SOR"; }
+        if (sens != null && sens.equals("p")) { return "PKG"; }
+        return Fmt.DASH;
     }
 
     // Badge de la PIRE alerte posee sur l'axe, ou null. Trois lettres et pas
@@ -197,6 +215,7 @@ class TraficView extends WatchUi.View {
             dessinerAxes(dc, tr, sousPage() - 1);
         }
         dessinerPied(dc, tr);
+        Pages.dessinerPagination(dc, sousPage(), nbSousPages());
     }
 
     hidden function dessinerBilan(dc, tr) {
@@ -313,10 +332,8 @@ class TraficView extends WatchUi.View {
                     "AXES " + plage + " / " + liste.size().toString(),
                     Graphics.TEXT_JUSTIFY_CENTER);
 
-        var y = 26 + hX + 12;
         for (var i = debut; i < fin; i += 1) {
-            dessinerLigneAxe(dc, y, hX, liste[i]);
-            y += hX + 7;
+            dessinerAxe(dc, AXE_Y0 + AXE_PAS * (i - debut), hX, liste[i]);
         }
     }
 
@@ -333,59 +350,84 @@ class TraficView extends WatchUi.View {
     // (arbitraire, non controle par cette app) et peuvent depasser toute
     // largeur -- alors qu'un temps tronque serait un chiffre FAUX, pas un
     // mot abrege.
-    hidden function dessinerLigneAxe(dc, y, hX, axe) {
+    // Un axe, DEUX lignes -- structure du bloc << Temps d'acces >> du
+    // cockpit (static/js/traffic.js:createRow), ramenee a la corde d'un
+    // cadran de 280 px :
+    //
+    //     Antares Sud                    ACC
+    //     ENT        4m 20s             +45s
+    //
+    // Ligne 1 : le nom (elastique) et le badge de la pire alerte posee sur
+    // cet axe. Ligne 2 : le sens, le temps de parcours, le retard.
+    //
+    // Le RETARD est toujours affiche, "+0s" compris, comme le fait le
+    // cockpit : c'est ce qui distingue un axe fluide (retard connu, nul)
+    // d'un axe dont on ignore le retard. L'ancienne version le masquait a
+    // zero, et les deux se ressemblaient.
+    //
+    // Le TEMPS est en "4m 20s" et non "24'" : sur des trajets allant de
+    // quelques dizaines de secondes a une demi-heure, une unite implicite
+    // se devine mal.
+    hidden function dessinerAxe(dc, y, hX, axe) {
         var w = dc.getWidth();
         var font = Graphics.FONT_XTINY;
-
-        // 8 px de marge interne de chaque cote : coller le texte au verre
-        // rond le rend illisible sur une lunette biseautee.
-        var dispo = Pages.largeurUtile(dc, y, hX) - 16;
-        if (dispo < 40) { return; }
-        var xG = w / 2.0 - dispo / 2.0;
-        var xD = w / 2.0 + dispo / 2.0;
-
         var sev = axe[3];
         var couleur = couleurSeverite(sev);
 
-        // Temps de parcours, ancre a droite.
-        var temps = (axe[2] != null) ? (axe[2].toString() + "'") : (Fmt.DASH);
-        dc.setColor(couleur, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(xD, y, font, temps, Graphics.TEXT_JUSTIFY_RIGHT);
-        var xCurseur = xD - dc.getTextWidthInPixels(temps, font) - 6;
+        // --- Ligne 1 : nom + badge d'alerte ---
+        //
+        // 8 px de marge interne de chaque cote : coller le texte au verre
+        // rond le rend illisible sur une lunette biseautee.
+        var dispo1 = Pages.largeurUtile(dc, y, hX) - 16;
+        if (dispo1 < 40) { return; }
+        var xG1 = w / 2.0 - dispo1 / 2.0;
+        var xD1 = w / 2.0 + dispo1 / 2.0;
 
-        // Retard, juste a gauche du temps. Affiche seulement s'il y en a un :
-        // un "+0" sur chaque ligne fluide n'apporterait rien et mangerait la
-        // place du nom.
-        var retard = (axe.size() > 5 && axe[5] != null) ? axe[5] : 0;
-        if (retard > 0) {
-            var txtRetard = "+" + retard.toString();
-            dc.drawText(xCurseur, y, font, txtRetard,
-                        Graphics.TEXT_JUSTIFY_RIGHT);
-            xCurseur -= dc.getTextWidthInPixels(txtRetard, font) + 6;
-        }
-
-        // Badge d'alerte rattachee a CET axe.
+        var placeNom = dispo1;
         var fl = (axe.size() > 4) ? axe[4] : null;
         var badge = badgeAlerte(fl);
         if (badge != null) {
             dc.setColor(couleurBadge(fl), Graphics.COLOR_TRANSPARENT);
-            dc.drawText(xCurseur, y, font, badge, Graphics.TEXT_JUSTIFY_RIGHT);
-            xCurseur -= dc.getTextWidthInPixels(badge, font) + 6;
+            dc.drawText(xD1, y, font, badge, Graphics.TEXT_JUSTIFY_RIGHT);
+            placeNom -= dc.getTextWidthInPixels(badge, font) + 6;
+        }
+        if (placeNom > 0) {
+            dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(xG1, y, font,
+                        ajusterTexte(dc, axe[0], font, placeNom),
+                        Graphics.TEXT_JUSTIFY_LEFT);
         }
 
-        // Glyphe de sens, ancre a gauche.
-        var glyphe = sensGlyphe(axe[1]);
-        dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(xG, y, font, glyphe, Graphics.TEXT_JUSTIFY_LEFT);
-        var xNom = xG + dc.getTextWidthInPixels(glyphe, font) + 6;
+        // --- Ligne 2 : sens, temps, retard ---
+        //
+        // Le nom de la ligne 1 est le seul element elastique de l'axe : ici,
+        // rien ne cede. Un temps ou un retard tronque serait un chiffre
+        // FAUX, pas un mot abrege -- et rien dans un controle geometrique ne
+        // distingue les deux.
+        var y2 = y + hX - 3;
+        var dispo2 = Pages.largeurUtile(dc, y2, hX) - 16;
+        if (dispo2 < 40) { return; }
+        var xG2 = w / 2.0 - dispo2 / 2.0;
+        var xD2 = w / 2.0 + dispo2 / 2.0;
 
-        // Le nom prend ce qui reste, et rien de plus.
-        var place = xCurseur - xNom;
-        if (place <= 0) { return; }
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(xNom, y, font,
-                    ajusterTexte(dc, axe[0], font, place),
+        // Retard a droite, colore par la severite : c'est lui qui dit si
+        // l'axe se degrade, le temps seul ne le dit pas (un trajet long
+        // peut etre parfaitement normal).
+        var retard = (axe.size() > 5) ? axe[5] : null;
+        dc.setColor(couleur, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(xD2, y2, font, Fmt.retard(retard),
+                    Graphics.TEXT_JUSTIFY_RIGHT);
+
+        // Sens a gauche, en gris : c'est un reperage, pas une mesure.
+        dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(xG2, y2, font, sensLibelle(axe[1]),
                     Graphics.TEXT_JUSTIFY_LEFT);
+
+        // Temps au centre, en blanc : la valeur de reference, celle qu'on
+        // vient chercher.
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w / 2, y2, font, Fmt.duree(axe[2]),
+                    Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     // Pied commun aux sous-pages : age du bloc et position dans le livret.

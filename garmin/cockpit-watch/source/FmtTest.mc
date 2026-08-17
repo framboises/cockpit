@@ -149,3 +149,76 @@ function testDelaiInconnuEstUnTiret(logger) {
     Test.assertEqual(Fmt.delai(1000, null), Fmt.DASH);
     return true;
 }
+
+// --- Temps et retard, format du bloc "Temps d'acces" du cockpit ---------
+//
+// Ports EXACTS de formatTime et formatDelay (static/js/traffic.js). Les
+// valeurs attendues ci-dessous sont celles que produit le cockpit, pas
+// celles que produit ce code : c'est ce qui rend ces tests capables de
+// detecter une DIVERGENCE, et non seulement une regression.
+
+(:test)
+function testDureeEnMinutesEtSecondes(logger) {
+    Test.assertEqual(Fmt.duree(260), "4m 20s");
+    Test.assertEqual(Fmt.duree(125), "2m 05s");   // seconde sur deux chiffres
+    Test.assertEqual(Fmt.duree(1799), "29m 59s");
+    return true;
+}
+
+(:test)
+function testDureeSousUneMinuteResteEnSecondes(logger) {
+    // Un troncon court se compte en secondes : l'afficher "0m 45s" ferait
+    // lire un zero de tete la ou il n'y a rien a lire.
+    Test.assertEqual(Fmt.duree(45), "45s");
+    Test.assertEqual(Fmt.duree(0), "0s");
+    return true;
+}
+
+(:test)
+function testDureeOmetLesSecondesNulles(logger) {
+    // "4m", pas "4m 00s" : c'est ce que fait le cockpit, et la corde d'une
+    // ligne d'axe est comptee.
+    Test.assertEqual(Fmt.duree(240), "4m");
+    Test.assertEqual(Fmt.duree(60), "1m");
+    return true;
+}
+
+(:test)
+function testDureeInconnueEstUnTiret(logger) {
+    Test.assertEqual(Fmt.duree(null), Fmt.DASH);
+    return true;
+}
+
+(:test)
+function testRetardToujoursAfficheMemeNul(logger) {
+    // LA regle du cockpit : "+0s" est une information (retard connu, nul),
+    // pas une absence. Le masquer confondrait un axe fluide avec un axe
+    // dont on ignore le retard.
+    Test.assertEqual(Fmt.retard(0), "+0s");
+    return true;
+}
+
+(:test)
+function testRetardEnSecondesPuisMinutes(logger) {
+    Test.assertEqual(Fmt.retard(45), "+45s");
+    Test.assertEqual(Fmt.retard(90), "+1m 30s");
+    Test.assertEqual(Fmt.retard(120), "+2m");
+    Test.assertEqual(Fmt.retard(480), "+8m");
+    return true;
+}
+
+(:test)
+function testRetardNegatifRameneAZero(logger) {
+    // Le serveur ne rend jamais de negatif (max(0, ...) dans axes_mur),
+    // mais formatDelay cote cockpit s'en protege aussi -- un axe plus
+    // rapide que d'habitude affiche "+0s".
+    Test.assertEqual(Fmt.retard(-30), "+0s");
+    return true;
+}
+
+(:test)
+function testRetardInconnuEstUnTiret(logger) {
+    // Distinct de "+0s" : la source ne repond pas, on ne SAIT pas.
+    Test.assertEqual(Fmt.retard(null), Fmt.DASH);
+    return true;
+}

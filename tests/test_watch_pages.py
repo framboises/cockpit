@@ -92,29 +92,35 @@ class TestTrafic:
         noms = [ligne[0] for ligne in bloc["r"]]
         assert noms == ["Ouest 2", "Ouest"]
 
-    def test_temps_converti_en_minutes(self):
-        # currentTime est en SECONDES cote Waze.
+    def test_temps_transporte_en_secondes(self):
+        # SECONDES, comme le rend Waze, et non des minutes arrondies : la
+        # montre reprend le format du bloc << Temps d'acces >> du cockpit
+        # ("4m 20s", "45s"), qui a besoin de la seconde. Et "18'" seul
+        # serait ambigu sur des trajets allant de quelques dizaines de
+        # secondes a une demi-heure.
         routes = [{"name": "#I# Ouest", "time": 1080, "historicTime": 600}]
         bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
-        assert bloc["r"][0][2] == 18
+        assert bloc["r"][0][2] == 1080
 
-    def test_retard_expose_en_minutes_arrondi_vers_le_bas(self):
+    def test_retard_transporte_en_secondes(self):
         # Le retard porte la gravite EN CLAIR sur la ligne d'axe : sans lui,
-        # seule la couleur la distinguerait. 1080 - 600 = 480 s = 8 min.
+        # seule la couleur la distinguerait. 1080 - 600 = 480 s.
         routes = [{"name": "#I# Ouest", "time": 1080, "historicTime": 600}]
         bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
-        assert bloc["r"][0][5] == 8
+        assert bloc["r"][0][5] == 480
 
-    def test_retard_de_moins_d_une_minute_reste_a_zero(self):
-        # Arrondi vers le bas : 30 s de retard ne doivent pas s'afficher
-        # << +1 >>, ce qui gonflerait chaque ligne de la liste.
+    def test_retard_de_moins_d_une_minute_conserve_ses_secondes(self):
+        # Le cockpit affiche "+30s" et non "+0" : la seconde compte sur les
+        # troncons courts, ou c'est justement elle qui distingue un axe
+        # fluide d'un axe qui commence a se charger.
         routes = [{"name": "#I# Ouest", "time": 630, "historicTime": 600}]
         bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
-        assert bloc["r"][0][5] == 0
+        assert bloc["r"][0][5] == 30
 
     def test_retard_nul_quand_l_axe_est_plus_rapide_que_l_historique(self):
         # deltaSeconds n'est jamais negatif (max(0, ...) dans axes_mur) : un
-        # axe plus fluide que d'habitude affiche +0, pas un retard negatif.
+        # axe plus fluide que d'habitude affiche "+0s", pas un retard
+        # negatif -- exactement ce que fait formatDelay cote cockpit.
         routes = [{"name": "#I# Ouest", "time": 300, "historicTime": 600}]
         bloc = watch_pages.build_trafic(self._db(routes, []), NOW)
         assert bloc["r"][0][5] == 0

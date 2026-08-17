@@ -759,8 +759,11 @@ class TestBuildStatePics:
                 # MAX_AXES lignes, chacune avec le nom Waze le plus long
                 # observe (26 caracteres, cf. la borne de ce meme fichier),
                 # un drapeau d'alerte et un retard a deux chiffres.
+                # Temps et retard en SECONDES (le format du cockpit en a
+                # besoin) : quatre chiffres au lieu de deux, sur dix-huit
+                # lignes. C'est ce que le budget doit reellement encaisser.
                 "r": [["Rond point Maison Blanche %d" % i,
-                       ["i", "o", "-", "p"][i % 4], 24, 3, 5, 17]
+                       ["i", "o", "-", "p"][i % 4], 1799, 3, 5, 1799]
                       for i in range(_max_axes())]},
             me={"t": 1, "tc": 31.2, "v": 22, "rf": 38, "pl": 45, "pm": 8.4,
                 "cn": "Suspendre toute activite exterieure non protegee",

@@ -99,10 +99,12 @@ class RecordingDc {
                     "label" => "<icone>"});
     }
 
-    // La fleche de la page Guidage est un polygone plein. Sans cette
-    // methode, RecordingDc leverait -- et surtout, la fleche echapperait
-    // entierement au controle geometrique, alors que c'est le plus grand
-    // element dessine de toute l'app.
+    // Polygones pleins : la fleche de la page Guidage, et les losanges
+    // pleins de l'indicateur de pagination. RecordingDc ne sait pas ce
+    // qu'un polygone REPRESENTE -- il l'etiquette donc "<polygone>" et non
+    // "<fleche>", qui n'etait juste que tant que la fleche etait le seul
+    // polygone de l'app. Sans cette methode, RecordingDc leverait, et ces
+    // formes echapperaient entierement au controle geometrique.
     function fillPolygon(points) {
         var x0 = points[0][0];
         var y0 = points[0][1];
@@ -116,7 +118,21 @@ class RecordingDc {
         }
         mRects.add({"x0" => x0.toFloat(), "y0" => y0.toFloat(),
                     "x1" => x1.toFloat(), "y1" => y1.toFloat(),
-                    "label" => "<fleche>"});
+                    "label" => "<polygone>"});
+    }
+
+    // Le contour des losanges de pagination. Sans cette methode,
+    // RecordingDc leverait -- et surtout, l'indicateur echapperait au
+    // controle geometrique alors qu'il vit tout en haut du cadran, la ou la
+    // corde est la plus etroite.
+    function drawLine(x0, y0, x1, y1) {
+        var ax = x0 < x1 ? x0 : x1;
+        var bx = x0 < x1 ? x1 : x0;
+        var ay = y0 < y1 ? y0 : y1;
+        var by = y0 < y1 ? y1 : y0;
+        mRects.add({"x0" => ax.toFloat(), "y0" => ay.toFloat(),
+                    "x1" => bx.toFloat(), "y1" => by.toFloat(),
+                    "label" => "<pagination>"});
     }
 
     function drawCircle(x, y, r) {
@@ -419,10 +435,10 @@ function testDebordementTraficToutesLesSousPagesNeDeborgentPas(logger) {
                      "st" => null});
     var total = vue.nbSousPages();
     // Le fixture est au plafond serveur (18 axes) : il DOIT produire le
-    // bilan plus trois ecrans d'axes. Sans cette verification, une
-    // regression qui ramenerait le livret a une seule page ferait passer la
-    // boucle ci-dessous sans rien couvrir.
-    Test.assertEqual(total, 4);
+    // bilan plus cinq ecrans d'axes (quatre par ecran). Sans cette
+    // verification, une regression qui ramenerait le livret a une seule
+    // page ferait passer la boucle ci-dessous sans rien couvrir.
+    Test.assertEqual(total, 6);
     for (var i = 0; i < total; i += 1) {
         var dc = dcEnregistrement();
         vue.onUpdate(dc);
@@ -435,7 +451,7 @@ function testDebordementTraficToutesLesSousPagesNeDeborgentPas(logger) {
 // Contenu, pas seulement geometrie : la derniere sous-page ne contient que
 // six axes sur dix-huit, et rien dans un test geometrique ne verrait une
 // regression qui perdrait les douze autres -- la page continuerait de tenir
-// dans l'ecran. Le compteur du pied ("4/4") et l'entete ("AXES 13-18 / 18")
+// dans l'ecran. Le compteur du pied ("6/6") et l'entete ("AXES 17-18 / 18")
 // sont ce qui dit a l'utilisateur ou il en est.
 (:test)
 function testTraficNommeSaPositionDansLeLivret(logger) {
@@ -443,9 +459,11 @@ function testTraficNommeSaPositionDansLeLivret(logger) {
     var vue = new TraficView();
     Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
                      "st" => null});
-    vue.sousPageSuivante();
-    vue.sousPageSuivante();
-    vue.sousPageSuivante();
+    // On va jusqu'a la DERNIERE sous-page, quel que soit leur nombre.
+    var total = vue.nbSousPages();
+    for (var i = 1; i < total; i += 1) {
+        vue.sousPageSuivante();
+    }
     var dc = dcEnregistrement();
     vue.onUpdate(dc);
     var rects = dc.rects();
@@ -454,8 +472,8 @@ function testTraficNommeSaPositionDansLeLivret(logger) {
     for (var i = 0; i < rects.size(); i += 1) {
         var label = rects[i]["label"];
         if (label == null) { continue; }
-        if (label.find("AXES 13-18 / 18") != null) { entete = true; }
-        if (label.find("4/4") != null) { compteur = true; }
+        if (label.find("AXES 17-18 / 18") != null) { entete = true; }
+        if (label.find("6/6") != null) { compteur = true; }
     }
     Test.assert(entete);
     Test.assert(compteur);
@@ -475,8 +493,10 @@ function testTraficNeTronqueJamaisLesChiffres(logger) {
     Cache.savePages({"mc" => null,
                      "tr" => {"t" => Time.now().value(), "vd" => 3, "ac" => 1,
                               "jm" => 0, "hz" => 0, "z" => 1,
+                              // Temps et retard en SECONDES : 24 min et
+                              // 17 min, soit "24m" et "+17m" a l'ecran.
                               "r" => [["Rond point de la Maison Blanche cote sud",
-                                       "i", 24, 4, 1, 17]]},
+                                       "i", 1440, 4, 1, 1020]]},
                      "me" => null, "st" => null});
     vue.sousPageSuivante();
     var dc = dcEnregistrement();
@@ -489,8 +509,8 @@ function testTraficNeTronqueJamaisLesChiffres(logger) {
     for (var i = 0; i < rects.size(); i += 1) {
         var label = rects[i]["label"];
         if (label == null) { continue; }
-        if (label.equals("24'")) { temps = true; }
-        if (label.equals("+17")) { retard = true; }
+        if (label.equals("24m")) { temps = true; }
+        if (label.equals("+17m")) { retard = true; }
         if (label.equals("ACC")) { badge = true; }
     }
     Test.assert(temps);
@@ -776,7 +796,7 @@ function testGuidageNeDessinePasDeFlecheSansCap(logger) {
     var rects = dc.rects();
     for (var i = 0; i < rects.size(); i += 1) {
         var label = rects[i]["label"];
-        Test.assert(label == null || !label.equals("<fleche>"));
+        Test.assert(label == null || !label.equals("<polygone>"));
     }
     return true;
 }
@@ -794,7 +814,7 @@ function testGuidageDessineLaFlecheDesQueLeCapArrive(logger) {
     var trouve = false;
     for (var i = 0; i < rects.size(); i += 1) {
         var label = rects[i]["label"];
-        if (label != null && label.equals("<fleche>")) { trouve = true; }
+        if (label != null && label.equals("<polygone>")) { trouve = true; }
     }
     Test.assert(trouve);
     return true;
@@ -1102,4 +1122,229 @@ function tlUnLabelFinitPar(dc, fin) {
         }
     }
     return false;
+}
+
+
+// --- Indicateur de pagination : geometrie et contenu ---------------------
+//
+// Il vit tout en haut du cadran, la ou la corde est la plus etroite (122 px
+// mesures) : c'est l'endroit le plus expose au debordement de toute l'app.
+
+// Compte les elements de pagination reellement dessines. Un losange plein
+// est un polygone, un losange vide quatre segments -- d'ou le comptage
+// separe : c'est lui qui prouve que la page COURANTE est distinguee des
+// autres, ce qu'aucun controle geometrique ne verrait.
+function comptePagination(dc) {
+    var rects = dc.rects();
+    var contours = 0;
+    var pleins = 0;
+    for (var i = 0; i < rects.size(); i += 1) {
+        var label = rects[i]["label"];
+        if (label == null) { continue; }
+        if (label.equals("<pagination>")) { contours += 1; }
+        if (label.equals("<polygone>")) { pleins += 1; }
+    }
+    return [contours, pleins];
+}
+
+(:test)
+function testPaginationUnSeulLosangePlein(logger) {
+    // Un seul plein, et exactement (total - 1) vides : c'est ce qui dit OU
+    // l'on est. Deux pleins, ou aucun, ne diraient plus rien.
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
+                     "st" => null});
+    var total = vue.nbSousPages();
+    for (var p = 0; p < total; p += 1) {
+        var dc = dcEnregistrement();
+        vue.onUpdate(dc);
+        var compte = comptePagination(dc);
+        // Quatre segments par losange vide.
+        Test.assertEqual(compte[0], (total - 1) * 4);
+        Test.assertEqual(compte[1], 1);
+        vue.sousPageSuivante();
+    }
+    return true;
+}
+
+(:test)
+function testPaginationNeDeborgePasDuCadran(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
+                     "st" => null});
+    var total = vue.nbSousPages();
+    for (var p = 0; p < total; p += 1) {
+        var dc = dcEnregistrement();
+        vue.onUpdate(dc);
+        verifierNeDebordePas(logger, dc, piedStandard(dc));
+        vue.sousPageSuivante();
+    }
+    return true;
+}
+
+(:test)
+function testPaginationNeChevauchePasLEntete(logger) {
+    // Les losanges vivent AU-DESSUS de l'entete de page, sur une bande ou
+    // rien d'autre ne se dessine. L'entete occupe deja toute la corde a son
+    // ordonnee -- les superposer les rendrait illisibles tous les deux.
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null, "tr" => trBlocPireCas(3), "me" => null,
+                     "st" => null});
+    vue.sousPageSuivante();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    var rects = dc.rects();
+    var basPagination = 0.0;
+    var hautContenu = 999.0;
+    for (var i = 0; i < rects.size(); i += 1) {
+        var r = rects[i];
+        var label = r["label"];
+        if (label != null
+            && (label.equals("<pagination>") || label.equals("<polygone>"))) {
+            if (r["y1"] > basPagination) { basPagination = r["y1"]; }
+        } else if (r["y0"] < hautContenu) {
+            hautContenu = r["y0"];
+        }
+    }
+    Test.assert(basPagination > 0.0);
+    Test.assert(basPagination <= hautContenu);
+    return true;
+}
+
+(:test)
+function testPaginationAbsenteQuandUneSeulePage(logger) {
+    // Aucun axe : le livret n'a que son bilan, et l'indicateur doit se
+    // taire plutot que d'afficher un losange unique qui ferait croire
+    // qu'il y a autre chose a voir.
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null,
+                     "tr" => {"t" => Time.now().value(), "vd" => 0, "ac" => 0,
+                              "jm" => 0, "hz" => 0, "z" => 0, "r" => []},
+                     "me" => null, "st" => null});
+    Test.assertEqual(vue.nbSousPages(), 1);
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    var compte = comptePagination(dc);
+    Test.assertEqual(compte[0], 0);
+    Test.assertEqual(compte[1], 0);
+    return true;
+}
+
+(:test)
+function testPaginationAussiSurLaTimeline(logger) {
+    // Les deux pages a livret la portent : une seule des deux serait une
+    // incoherence que rien ne signalerait.
+    var base = Time.now().value();
+    Cache.save({"t" => base, "rx" => base, "m" => "live", "al" => [],
+                "nx" => null});
+    var vue = new TimelineView();
+    var liste = [];
+    for (var i = 0; i < 8; i += 1) {
+        liste.add([base + 600 * (i + 1), "Acte " + i.toString(), "La", 0]);
+    }
+    vue.onRecue(true, liste);
+    vue.sousPageSuivante();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    var compte = comptePagination(dc);
+    Test.assertEqual(compte[1], 1);
+    Test.assertEqual(compte[0], (vue.nbSousPages() - 1) * 4);
+    verifierNeDebordePas(logger, dc, piedStandard(dc));
+    return true;
+}
+
+
+// --- La ligne d'axe dit ce qu'elle affiche ------------------------------
+//
+// Ecrits apres un sabotage qui n'avait rien fait tomber : masquer le retard
+// quand il vaut zero laissait 264 tests au vert. C'etait pourtant le defaut
+// signale a l'usage -- un axe fluide (retard connu, nul) et un axe dont on
+// ignore le retard se ressemblaient. Le cockpit, lui, affiche toujours
+// "+0s" (static/js/traffic.js:formatDelay).
+
+(:test)
+function testAxeAfficheLeRetardMemeNul(logger) {
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null,
+                     "tr" => {"t" => Time.now().value(), "vd" => 0, "ac" => 0,
+                              "jm" => 0, "hz" => 0, "z" => 0,
+                              // 260 s de trajet, aucun retard.
+                              "r" => [["Ouest", "i", 260, 0, 0, 0]]},
+                     "me" => null, "st" => null});
+    vue.sousPageSuivante();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    Test.assert(tlContient(dc, "+0s"));
+    return true;
+}
+
+(:test)
+function testAxeAfficheTempsEtRetardAuFormatDuCockpit(logger) {
+    // Le format exact du bloc << Temps d'acces >> : "4m 20s" et "+45s".
+    // Une regression vers "4'" ou "+0" ne leverait rien -- elle rendrait
+    // seulement les chiffres ambigus, ce qui etait le probleme d'origine.
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null,
+                     "tr" => {"t" => Time.now().value(), "vd" => 1, "ac" => 0,
+                              "jm" => 0, "hz" => 0, "z" => 0,
+                              "r" => [["Ouest", "i", 260, 2, 0, 45]]},
+                     "me" => null, "st" => null});
+    vue.sousPageSuivante();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    Test.assert(tlContient(dc, "4m 20s"));
+    Test.assert(tlContient(dc, "+45s"));
+    return true;
+}
+
+(:test)
+function testAxeNommeLeSensEnLettres(logger) {
+    // ENT / SOR / PKG plutot que > < P : le cockpit ecrit ENTREE / SORTIE
+    // en toutes lettres, et un chevron seul demande d'etre interprete.
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null,
+                     "tr" => {"t" => Time.now().value(), "vd" => 0, "ac" => 0,
+                              "jm" => 0, "hz" => 0, "z" => 0,
+                              "r" => [["Ouest", "i", 260, 0, 0, 0],
+                                      ["Porte Sud", "o", 120, 0, 0, 0],
+                                      ["A28", "p", 900, 0, 0, 0]]},
+                     "me" => null, "st" => null});
+    vue.sousPageSuivante();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    Test.assert(tlContient(dc, "ENT"));
+    Test.assert(tlContient(dc, "SOR"));
+    Test.assert(tlContient(dc, "PKG"));
+    return true;
+}
+
+(:test)
+function testAxeNeTronqueJamaisLesChiffresSurDeuxLignes(logger) {
+    // Le nom (ligne 1) est le seul element elastique. Temps, retard et sens
+    // (ligne 2) ne cedent jamais : un chiffre tronque est une valeur FAUSSE.
+    Application.Storage.deleteValue(Cache.KEY_PAGES);
+    var vue = new TraficView();
+    Cache.savePages({"mc" => null,
+                     "tr" => {"t" => Time.now().value(), "vd" => 3, "ac" => 1,
+                              "jm" => 0, "hz" => 0, "z" => 1,
+                              // Pire cas : nom tres long, 29m 59s, +1m 30s.
+                              "r" => [["Rond point de la Maison Blanche cote sud",
+                                       "i", 1799, 4, 1, 90]]},
+                     "me" => null, "st" => null});
+    vue.sousPageSuivante();
+    var dc = dcEnregistrement();
+    vue.onUpdate(dc);
+    verifierNeDebordePas(logger, dc, piedStandard(dc));
+    Test.assert(tlContient(dc, "29m 59s"));
+    Test.assert(tlContient(dc, "+1m 30s"));
+    Test.assert(tlContient(dc, "ENT"));
+    Test.assert(tlContient(dc, "ACC"));
+    return true;
 }
