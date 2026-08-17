@@ -121,6 +121,34 @@ drapeau attrape l'arrêt propre en une seconde (la seule fraîcheur mettrait six
 heures à s'en apercevoir), la fraîcheur attrape le collecteur planté (où le
 drapeau mentirait indéfiniment).
 
+## Le jeton : compilé, donc à vérifier avant le sideload
+
+Une app chargée par sideload **n'a pas d'écran de réglages** (limite de la
+plateforme, pas de cette app) : le jeton est donc compilé comme valeur par
+défaut de la propriété, par `tools/build-avec-jeton.sh`. Changer de jeton
+impose un rebuild et un re-sideload.
+
+⚠️ **Un jeton refusé ne se voyait qu'une fois la montre chargée**, sous la
+forme d'un écran figé sur un cache — le pied affichait « maj 3 h », qui
+ressemble à un problème de collecteur. Il a fallu une demi-journée pour
+nommer la cause.
+
+Le script fait désormais deux choses de plus :
+
+- **il valide la forme du jeton** (base64 url-safe, ni espace ni caractère
+  XML) et refuse de construire sinon. Un jeton copié depuis un terminal
+  peut porter une coupure de ligne invisible ; le serveur fait `.strip()`
+  (`watch_api.py:192`), la montre non — elle enverrait donc un jeton
+  différent de celui qui a été émis.
+- **il interroge le serveur** avec ce jeton juste après la compilation, et
+  dit `ACCEPTE` ou `REFUSE (401)` avant qu'on ne charge quoi que ce soit.
+  L'hôte se surcharge avec `WATCH_HOST=`.
+
+Côté serveur, chaque refus est tracé : `Jeton montre refuse depuis <ip>`
+(`watch_api.py:197`). Aucune ligne dans les logs alors que la montre
+affiche « jeton refuse » signifierait que les requêtes n'atteignent même
+pas Flask.
+
 ## Les alertes : aucun filtre sur l'événement
 
 ⚠️ **`read_active_alerts` ne filtre PAS sur event/year, et c'est
