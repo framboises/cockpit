@@ -402,6 +402,140 @@ class TestTrafic:
         assert bloc["t"] == watch_pages._epoch(datetime(2026, 8, 15, 11, 50))
 
 
+class TestContraintesMeteo:
+    """Le mur produit DEUX listes, et la montre ne lisait que l'une.
+
+    `consignes` ne se declenche qu'aux seuils hauts (rafale >= 60 km/h,
+    WBGT danger, orage avere, pluie >= 5 mm). `contraintes` descend jusqu'a
+    la VIGILANCE -- rafale >= 40 km/h notamment. Il y avait donc un trou de
+    40 a 60 km/h ou le mur parlait et la montre se taisait.
+    """
+
+    # La contrainte vent REELLE du 17/08/2026, telle que la rend
+    # meteo_etat._contrainte_vent : rafale courante 37, pic prevu 45 a 17h00.
+    VENT_REEL = {
+        "cle": "vent", "libelle": "Vent", "valeur": 37, "unite": "km/h",
+        "detail": "en rafales", "niveau": "vigilance",
+        "consigne": "Surveiller bacher, signalisation, chapiteaux",
+        "pic": 45, "pic_heure": "17:00",
+    }
+
+    def test_le_cas_reel_du_17_aout_passe_entier(self):
+        # 65 caracteres sur les 66 disponibles : l'operateur voit le pic ET
+        # l'heure ET l'action, sans troncature.
+        texte = watch_pages._texte_contrainte(self.VENT_REEL)
+        assert texte == ("Vent 45 km/h 17:00 — "
+                         "Surveiller bacher, signalisation, chapiteaux")
+        assert len(texte) <= watch_pages.CONSIGNE_MAX
+
+    def test_contrainte_remonte_dans_le_bloc(self, monkeypatch):
+        # Bout en bout : ce que voit reellement la montre. Aucune consigne
+        # (rafale sous 60), mais une contrainte en vigilance.
+        etat = {"actuel": {"temperature_c": 21.0, "vent_moyen_kmh": 18.0,
+                           "vent_rafale_kmh": 36.8},
+                "prochaine_pluie": {"attendue": False},
+                "consignes": [],
+                "contraintes": [self.VENT_REEL],
+                "vigilance": {}}
+        monkeypatch.setattr(watch_pages.meteo_etat, "etat_mur",
+                            lambda db, now: etat)
+        bloc = watch_pages.build_meteo(FakeDb(), NOW)
+        assert bloc["cn"].startswith("Vent 45 km/h 17:00")
+        assert bloc["cl"] == 1        # vigilance
+
+    def test_une_consigne_plus_grave_prime_sur_une_contrainte(self, monkeypatch):
+        # La gravite commande, quelle que soit la liste d'origine : un orage
+        # avere (critique) passe devant un vent en vigilance.
+        etat = {"actuel": {"temperature_c": 21.0},
+                "prochaine_pluie": {"attendue": False},
+                "consignes": [{"niveau": "critique", "heure": "18:00",
+                               "texte": "Foudre prevue — mise a l abri"}],
+                "contraintes": [self.VENT_REEL],
+                "vigilance": {}}
+        monkeypatch.setattr(watch_pages.meteo_etat, "etat_mur",
+                            lambda db, now: etat)
+        bloc = watch_pages.build_meteo(FakeDb(), NOW)
+        assert bloc["cn"] == "Foudre prevue — mise a l abri"
+        assert bloc["cl"] == 3
+
+    def test_une_contrainte_plus_grave_prime_sur_une_consigne(self, monkeypatch):
+        # Symetrique : les deux listes sont a egalite de traitement, seule la
+        # gravite tranche.
+        orage = {"libelle": "Orage", "unite": "", "niveau": "critique",
+                 "pic": None, "pic_heure": "17:00",
+                 "consigne": "Mise a l abri a preparer"}
+        etat = {"actuel": {"temperature_c": 21.0},
+                "prochaine_pluie": {"attendue": False},
+                "consignes": [{"niveau": "vigilance", "heure": "16:00",
+                               "texte": "Pluie 6 mm — parkings en herbe"}],
+                "contraintes": [orage],
+                "vigilance": {}}
+        monkeypatch.setattr(watch_pages.meteo_etat, "etat_mur",
+                            lambda db, now: etat)
+        bloc = watch_pages.build_meteo(FakeDb(), NOW)
+        assert bloc["cn"] == "Orage 17:00 — Mise a l abri a preparer"
+        assert bloc["cl"] == 3
+
+    def test_contrainte_normale_ne_dit_rien(self, monkeypatch):
+        # Les quatre contraintes sont TOUJOURS presentes, la plupart en
+        # "normal" : les relayer ferait parler la montre en permanence.
+        calme = {"libelle": "Vent", "unite": "km/h", "niveau": "normal",
+                 "pic": 12, "pic_heure": None, "consigne": ""}
+        etat = {"actuel": {"temperature_c": 21.0},
+                "prochaine_pluie": {"attendue": False},
+                "consignes": [], "contraintes": [calme], "vigilance": {}}
+        monkeypatch.setattr(watch_pages.meteo_etat, "etat_mur",
+                            lambda db, now: etat)
+        bloc = watch_pages.build_meteo(FakeDb(), NOW)
+        assert bloc["cn"] is None
+        assert bloc["cl"] == 0
+
+    def test_contrainte_sans_action_est_ecartee(self):
+        # L'orage en simple vigilance porte une consigne VIDE cote mur (rien
+        # a preparer pour une instabilite sans declencheur) : afficher un
+        # titre sans action ne dirait rien.
+        muette = {"libelle": "Orage", "unite": "", "niveau": "vigilance",
+                  "pic": None, "pic_heure": "17:00", "consigne": ""}
+        assert watch_pages._texte_contrainte(muette) is None
+
+    def test_les_chiffres_ne_sont_jamais_tronques(self):
+        # Meme regle que la ligne d'axe de TraficView : un nombre ampute se
+        # lit comme une valeur, un texte coupe se voit. C'est donc l'action
+        # qui cede.
+        longue = {"libelle": "Chaleur", "unite": "WBGT", "niveau": "danger",
+                  "pic": 30.5, "pic_heure": "15:00",
+                  "consigne": "Travail lourd a suspendre, rotations courtes "
+                              "et hydratation renforcee sur tous les postes"}
+        texte = watch_pages._texte_contrainte(longue)
+        assert len(texte) <= watch_pages.CONSIGNE_MAX
+        # LA verification qui compte : le prefixe chiffre est PRESENT ET
+        # ENTIER. Se contenter de startswith laissait passer une troncature
+        # appliquee a la chaine complete -- elle coupe la fin, donc les
+        # chiffres survivent par hasard sur un texte court. Defaut trouve
+        # par sabotage.
+        prefixe = "Chaleur 30.5 WBGT 15:00 — "
+        assert texte.startswith(prefixe)
+        # Et il reste de la place pour dire quoi faire : un prefixe seul,
+        # ou suivi de deux mots, ne serait pas une consigne.
+        assert len(texte) - len(prefixe) >= 12
+        assert texte[len(prefixe):] == longue["consigne"][:len(texte) - len(prefixe)]
+
+    def test_valeur_entiere_sans_decimale_parasite(self):
+        # %g plutot que str() : 45.0 s'ecrit "45", 30.5 reste "30.5".
+        assert "45 km/h" in watch_pages._texte_contrainte(
+            dict(self.VENT_REEL, pic=45.0))
+        assert "30.5 WBGT" in watch_pages._texte_contrainte(
+            {"libelle": "Chaleur", "unite": "WBGT", "niveau": "danger",
+             "pic": 30.5, "pic_heure": None, "consigne": "Rotations courtes"})
+
+    def test_sans_pic_ni_heure_l_action_suffit(self):
+        seule = {"libelle": "Sol", "unite": "SWI", "niveau": "vigilance",
+                 "pic": None, "pic_heure": None,
+                 "consigne": "Sols tres secs — risque incendie"}
+        assert watch_pages._texte_contrainte(seule) == (
+            "Sol — Sols tres secs — risque incendie")
+
+
 class TestMeteo:
     def test_condense_l_etat_du_mur(self, monkeypatch):
         etat = {

@@ -73,7 +73,7 @@ C'est **`DebordementTest.mc`** qui porte la garantie géométrique : il capture
 les rectangles réellement dessinés, sur la taille d'écran lue à l'exécution,
 et échoue si l'un d'eux sort du disque inscrit ou chevauche le pied de page.
 
-Le backend est couvert par 337 tests pytest, dont `watch_api.py`,
+Le backend est couvert par 346 tests pytest, dont `watch_api.py`,
 `watch_state.py`, `watch_peaks.py`, `watch_pages.py`, `watch_guidage.py`,
 `watch_timeline.py`, `trafic_etat.py` et `meteo_etat.py`.
 
@@ -194,6 +194,40 @@ Côté serveur, chaque refus est tracé : `Jeton montre refuse depuis <ip>`
 (`watch_api.py:197`). Aucune ligne dans les logs alors que la montre
 affiche « jeton refuse » signifierait que les requêtes n'atteignent même
 pas Flask.
+
+## Météo : le mur produit DEUX listes, il faut les deux
+
+⚠️ `etat_mur` rend `consignes` **et** `contraintes`. La montre ne lisait que
+la première.
+
+| Liste | Se déclenche à | Contenu |
+|---|---|---|
+| `consignes` | rafale ≥ **60** km/h, WBGT danger, orage avéré, pluie ≥ 5 mm | ce qu'il y a à faire, par heure |
+| `contraintes` | dès la **vigilance** — rafale ≥ **40** km/h | les 4 décisions permanentes : vent, chaleur, orage, sol |
+
+Il y avait donc un **trou de 40 à 60 km/h** : le mur affichait « Vent —
+vigilance — pic 45 km/h à 17:00 — surveiller bâches, signalisation,
+chapiteaux » et la montre ne disait rien. Constaté le 17/08/2026 avec une
+rafale prévue à 44,8 km/h à 17 h, visible sur le widget et le mur, absente
+du poignet.
+
+C'est exactement la contradiction que le commentaire de `build_meteo`
+interdit (« AUCUN SEUIL N'EST REINVENTE ICI. Le mur decide […] la montre la
+repete ») : aucun seuil n'était réinventé, mais la montre lisait la mauvaise
+des deux listes.
+
+Une contrainte devient `Vent 45 km/h 17:00 — Surveiller bacher,
+signalisation, chapiteaux` (65 caractères sur les 66 disponibles). Les
+**chiffres d'abord**, l'action ensuite — et c'est l'action qui se tronque,
+jamais les chiffres, même règle que la ligne d'axe de `TraficView`. L'heure
+du pic est le cœur de l'information : c'est une prévision, la valeur
+courante étant déjà portée par `rf`.
+
+⚠️ Les quatre contraintes sont **toujours présentes**, la plupart en
+`normal` : seules les non-normales sont relayées, sinon la montre parlerait
+en permanence. Et l'orage en simple vigilance porte une consigne **vide**
+côté mur (rien à préparer pour une instabilité sans déclencheur) — un titre
+sans action ne dirait rien, il est écarté.
 
 ## Les alertes : aucun filtre sur l'événement
 

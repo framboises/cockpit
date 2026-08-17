@@ -1084,6 +1084,23 @@ Règle générale : toute donnée de Storage qui décrit un ÉTAT COURANT (et no
 un historique) doit être remise à zéro au démarrage, ou porter un numéro de
 version. Sinon elle finit par mentir après une mise à jour.
 
+### Météo : `consignes` ET `contraintes`, jamais l'une seule
+
+⚠️ `meteo_etat.etat_mur` rend **deux** listes. `consignes` ne se déclenche
+qu'aux seuils hauts (rafale ≥ 60 km/h, WBGT danger, orage avéré, pluie
+≥ 5 mm) ; `contraintes` porte les quatre décisions permanentes (vent,
+chaleur, orage, sol) et descend jusqu'à la **vigilance** — rafale ≥ 40 km/h.
+
+`watch_pages.build_meteo` ne lisait que `consignes` : trou de 40 à 60 km/h
+où le mur parlait et la montre se taisait. Constaté le 17/08/2026, rafale
+prévue à 44,8 km/h à 17 h — visible widget et mur, absente du poignet.
+C'est la contradiction que le commentaire de la fonction interdit : aucun
+seuil n'était réinventé, mais la mauvaise liste était lue.
+
+Les quatre contraintes sont **toujours présentes**, la plupart en `normal` :
+seules les non-normales sont relayées. Et l'orage en vigilance porte une
+consigne **vide** côté mur — un titre sans action est écarté.
+
 ### Les alertes de la montre ne filtrent pas sur l'événement
 
 ⚠️ **`watch_state.read_active_alerts` ne filtre QUE sur `expiresAt`.**

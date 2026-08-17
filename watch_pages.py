@@ -336,6 +336,46 @@ def build_trafic(db, now_utc=None):
     }
 
 
+def _texte_contrainte(contrainte):
+    """Une contrainte du mur, ramenee a une ligne de cadran.
+
+    Rend None quand il n'y a rien a dire : l'orage en simple << vigilance >>
+    porte une consigne VIDE cote mur (rien a preparer pour une instabilite
+    sans declencheur), et afficher un titre sans action ne dirait rien.
+
+    Les CHIFFRES d'abord, l'action ensuite -- et c'est l'action qui se
+    tronque si la corde manque, jamais les chiffres. Meme regle que la
+    ligne d'axe de TraficView : un nombre ampute se lit comme une valeur,
+    un texte coupe se voit. L'heure du pic est le coeur de l'information
+    (c'est une PREVISION), la valeur courante etant deja portee par `rf`.
+    """
+    action = (contrainte.get("consigne") or "").strip()
+    if not action:
+        return None
+
+    tete = (contrainte.get("libelle") or "").strip()
+    pic = contrainte.get("pic")
+    if pic is not None:
+        unite = (contrainte.get("unite") or "").strip()
+        # %g plutot que str() : 45.0 s'ecrit "45", 30.5 reste "30.5".
+        tete += " %g" % pic
+        if unite:
+            tete += " " + unite
+    heure = contrainte.get("pic_heure")
+    if heure:
+        tete += " " + str(heure)
+    if not tete:
+        return action
+
+    prefixe = tete + " — "
+    reste = CONSIGNE_MAX - len(prefixe)
+    if reste < 12:
+        # Corde trop courte pour dire quoi faire : l'action seule vaut mieux
+        # qu'un chiffre suivi de trois mots inintelligibles.
+        return action
+    return prefixe + action[:reste]
+
+
 def build_meteo(db, now):
     """Condense l'etat du mur. None si la source est injoignable.
 
@@ -355,8 +395,22 @@ def build_meteo(db, now):
     pluie = etat.get("prochaine_pluie") or {}
     attendue = bool(pluie.get("attendue"))
 
-    # La consigne retenue est la plus grave, pas la premiere : la liste du mur
-    # est chronologique, or c'est la gravite qui commande l'action.
+    # LE MUR PRODUIT DEUX LISTES, ET IL FAUT LES DEUX.
+    #
+    # `consignes` ne se declenche qu'aux seuils hauts : rafale >= 60 km/h,
+    # WBGT danger, orage avere, pluie >= 5 mm. `contraintes` couvre les
+    # quatre decisions permanentes (vent, chaleur, orage, sol) et descend
+    # jusqu'a la VIGILANCE -- rafale >= 40 km/h notamment.
+    #
+    # Ne lire que `consignes` creait un trou de 40 a 60 km/h : le mur
+    # affichait << Vent -- vigilance -- pic 45 km/h a 17:00 -- surveiller
+    # baches, signalisation, chapiteaux >> et la montre ne disait rien.
+    # Constate le 17/08/2026 : rafale prevue a 44,8 km/h a 17h00, visible
+    # sur le widget et le mur, absente du poignet.
+    #
+    # C'est exactement la contradiction que le commentaire ci-dessus
+    # interdit. Aucun seuil n'etait reinvente -- mais la montre lisait la
+    # mauvaise des deux listes que produit le mur.
     consigne = None
     niveau = 0
     for entree in etat.get("consignes") or []:
@@ -364,6 +418,14 @@ def build_meteo(db, now):
         if rang > niveau:
             niveau = rang
             consigne = entree.get("texte")
+
+    for contrainte in etat.get("contraintes") or []:
+        rang = NIVEAUX_CONSIGNE.get(contrainte.get("niveau"), 0)
+        if rang > niveau:
+            texte = _texte_contrainte(contrainte)
+            if texte:
+                niveau = rang
+                consigne = texte
 
     vigilance = etat.get("vigilance") or {}
     # `vigilance` fusionne bulletin brut + etat_vigilance() + niveau_vigilance() :
