@@ -377,3 +377,46 @@ function testToTimelineListToleereUneReponseVide(logger) {
     Test.assertEqual(Api.toTimelineList(null).size(), 0);
     return true;
 }
+
+
+// --- La cause d'un echec, pas seulement l'echec -------------------------
+//
+// `responseCode` etait JETE : un jeton revoque (401), un quota depasse
+// (429), un serveur eteint (5xx) et un Bluetooth coupe (codes negatifs)
+// produisaient tous le meme silence. La montre affichait alors un cache
+// vieux de trois heures sans que rien ne permette de choisir entre
+// << rapproche le telephone >> et << ton jeton est mort >>.
+
+(:test)
+function testMotErreurNommeLesCausesServeur(logger) {
+    Test.assertEqual(Api.motErreur(401), "jeton refuse");
+    Test.assertEqual(Api.motErreur(429), "trop de requetes");
+    Test.assertEqual(Api.motErreur(500), "serveur en panne");
+    Test.assertEqual(Api.motErreur(503), "serveur en panne");
+    return true;
+}
+
+(:test)
+function testMotErreurRegroupeLesCodesBle(logger) {
+    // Les codes negatifs de Communications (BLE_HOST_TIMEOUT,
+    // BLE_CONNECTION_UNAVAILABLE...) veulent tous dire la meme chose a
+    // l'usage : le telephone n'est pas joignable. Les distinguer
+    // n'aiderait personne au poignet.
+    Test.assertEqual(Api.motErreur(-104), "telephone injoignable");
+    Test.assertEqual(Api.motErreur(-2), "telephone injoignable");
+    return true;
+}
+
+(:test)
+function testMotErreurCodeInattenduResteLisible(logger) {
+    // Un code serveur qu'on n'a pas prevu doit quand meme s'afficher :
+    // mieux vaut "erreur 418" qu'un silence.
+    Test.assertEqual(Api.motErreur(418), "erreur 418");
+    return true;
+}
+
+(:test)
+function testMotErreurNulQuandToutVaBien(logger) {
+    Test.assert(Api.motErreur(null) == null);
+    return true;
+}

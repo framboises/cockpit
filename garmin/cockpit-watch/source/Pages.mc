@@ -86,6 +86,13 @@ module Pages {
     function libelleFraicheur(st, ageDonnee, nowSec) {
         var ageReponse = State.responseAgeSec(st, nowSec);
         if (ageReponse != null && ageReponse > SEUIL_HORS_LIGNE_S) {
+            // La CAUSE quand on la connait, l'age sinon : un jeton refuse
+            // et un telephone hors de portee demandent deux gestes
+            // differents, et attendre ne resout que le second.
+            var mot = Api.motErreur(Api.derniereErreur());
+            if (mot != null) {
+                return mot + " " + Fmt.age(ageReponse);
+            }
             return "hors ligne " + Fmt.age(ageReponse);
         }
         return "maj " + Fmt.age(ageDonnee);

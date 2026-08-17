@@ -31,9 +31,44 @@ module Api {
     var mEditionsCallback = null;
     var mTimelineCallback = null;
 
+    // Code de la derniere reponse /state, conserve en Storage pour survivre
+    // au redemarrage de l'app ET etre visible depuis le service de fond.
+    //
+    // Il etait JETE : `onReceive` testait `responseCode != 200` puis
+    // rendait `false` sans dire pourquoi. Un jeton revoque (401), un
+    // depassement de quota (429), un serveur eteint (-2/-104 selon la
+    // couche) et un Bluetooth coupe produisaient tous le meme silence --
+    // et la montre affichait un cache vieux de trois heures sans que rien
+    // ne permette de choisir entre << rapproche le telephone >> et
+    // << ton jeton est mort >>.
+    const KEY_ERR = "lerr";
+
     // Le payload HTTP porte les alertes en dictionnaires ; le cache les stocke
     // en tableaux, moitie moins d'octets et d'objets a instancier au reveil de
     // la glance.
+    // Code de la derniere reponse en echec, ou null si le dernier echange a
+    // reussi. Publique pour rester testable en VALEUR et lisible par les
+    // vues.
+    function derniereErreur() {
+        return Application.Storage.getValue(KEY_ERR);
+    }
+
+    // Mot correspondant, ou null. Le CODE seul ("-104") ne dit rien a qui
+    // regarde sa montre ; le mot dit quoi faire.
+    //
+    // Les codes negatifs sont ceux de Communications (BLE_HOST_TIMEOUT,
+    // BLE_CONNECTION_UNAVAILABLE, etc.) : ils veulent tous dire la meme
+    // chose a l'usage -- le telephone n'est pas joignable. Les positifs
+    // viennent du serveur et se distinguent, eux.
+    function motErreur(code) {
+        if (code == null) { return null; }
+        if (code == 401) { return "jeton refuse"; }
+        if (code == 429) { return "trop de requetes"; }
+        if (code >= 500) { return "serveur en panne"; }
+        if (code > 0) { return "erreur " + code.toString(); }
+        return "telephone injoignable";
+    }
+
     function toCacheDict(data, nowSec) {
         var al = [];
         var brut = (data != null) ? data["al"] : null;
@@ -289,11 +324,17 @@ module Api {
                             or PersistedContent.Iterator or Null) as Void {
         mInFlightSince = null;
         if (responseCode != 200 || data == null) {
+            // Conserve la CAUSE, pas seulement l'echec : c'est elle qui dit
+            // quel geste faire.
+            Application.Storage.setValue(KEY_ERR, responseCode);
             if (mCallback != null) {
                 mCallback.invoke(false, null);
             }
             return;
         }
+        // Un succes efface l'erreur : sans ca, un 401 vieux d'une semaine
+        // resterait affiche alors que tout remarche.
+        Application.Storage.deleteValue(KEY_ERR);
         var st = toCacheDict(data, Time.now().value());
         Cache.savePages(toPagesDict(data));
         if (mCallback != null) {
