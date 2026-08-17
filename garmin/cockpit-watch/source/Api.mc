@@ -59,6 +59,14 @@ module Api {
         return Application.Storage.getValue(KEY_ERR);
     }
 
+    // Efface l'erreur memorisee. Appelee au demarrage de l'app
+    // (CockpitApp.onStart) : Application.Storage survit au sideload, donc
+    // sans cet oubli une erreur d'une installation precedente survivrait a
+    // la reinstallation censee la corriger.
+    function oublierErreur() {
+        Application.Storage.deleteValue(KEY_ERR);
+    }
+
     // Mot correspondant, ou null. Le CODE seul ("-104") ne dit rien a qui
     // regarde sa montre ; le mot dit quoi faire.
     //

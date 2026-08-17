@@ -447,3 +447,36 @@ function testCodeInterneHorsPlageHttp(logger) {
     Test.assert(Api.ERR_SANS_JETON > 599);
     return true;
 }
+
+
+// --- Le stockage survit au sideload -------------------------------------
+//
+// Reinstaller l'app ne vide pas Application.Storage : un code d'erreur
+// memorise lors d'un essai anterieur restait en place et n'etait efface
+// qu'apres une requete REUSSIE. "jeton refuse" est ainsi reste affiche
+// apres quatre reconstructions, avec un jeton pourtant accepte (HTTP 200)
+// et bien present dans le binaire (verifie par `strings`).
+
+(:test)
+function testOublierErreurNettoieLeStockage(logger) {
+    Application.Storage.setValue(Api.KEY_ERR, 401);
+    Test.assertEqual(Api.derniereErreur(), 401);
+    Api.oublierErreur();
+    Test.assert(Api.derniereErreur() == null);
+    return true;
+}
+
+(:test)
+function testApresOubliLaMontreNAffichePlusDErreur(logger) {
+    // Bout en bout : une erreur ancienne ne doit pas survivre au demarrage,
+    // sinon la reinstallation censee corriger le probleme ne change rien a
+    // l'ecran.
+    Application.Storage.setValue(Api.KEY_ERR, 401);
+    Api.oublierErreur();
+    var now = 100000;
+    Test.assertEqual(
+        Pages.libelleFraicheur({"t" => now - 10800, "rx" => now - 10800},
+                               10800, now),
+        "hors ligne 3 h");
+    return true;
+}

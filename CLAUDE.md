@@ -1042,6 +1042,27 @@ dans le payload, cf. `watch_pages.py`) :
   bloc sort du disque inscrit ou chevauche le pied, sur la taille lue à
   l'exécution.
 
+### `Application.Storage` survit au sideload
+
+⚠️ Réinstaller l'app ne vide **pas** son stockage. Un code d'erreur, un
+cache, un compteur mémorisés par une version antérieure survivent à la
+réinstallation censée les corriger.
+
+Constaté : « jeton refuse » est resté affiché après **quatre
+reconstructions successives**, alors que le jeton compilé était accepté par
+le serveur (HTTP 200) et bien présent dans le binaire (`strings`). Le
+message ne venait pas du serveur, il venait du stockage — écrit une fois,
+effacé seulement après une requête réussie.
+
+`CockpitApp.onStart` appelle donc `Api.oublierErreur()`. **Au démarrage, la
+montre ne sait rien de son lien au serveur** ; toute valeur qui prétend le
+contraire est fausse. Même principe qu'`Alerting`, qui ne vibre jamais sans
+référence antérieure.
+
+Règle générale : toute donnée de Storage qui décrit un ÉTAT COURANT (et non
+un historique) doit être remise à zéro au démarrage, ou porter un numéro de
+version. Sinon elle finit par mentir après une mise à jour.
+
 ### Les alertes de la montre ne filtrent pas sur l'événement
 
 ⚠️ **`watch_state.read_active_alerts` ne filtre QUE sur `expiresAt`.**

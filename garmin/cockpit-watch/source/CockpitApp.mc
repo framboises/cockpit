@@ -10,6 +10,24 @@ class CockpitApp extends Application.AppBase {
     }
 
     function onStart(state) {
+        // ⚠️ APPLICATION.STORAGE SURVIT AU SIDELOAD. Reinstaller l'app ne
+        // vide pas son stockage : un code d'erreur memorise lors d'un essai
+        // ANTERIEUR -- avec un autre jeton, une autre version -- reste en
+        // place, et n'etait efface qu'apres une requete REUSSIE.
+        //
+        // Consequence observee : "jeton refuse" restait affiche apres
+        // quatre reconstructions successives, alors que le jeton compile
+        // etait accepte par le serveur (HTTP 200 verifie) et bien present
+        // dans le binaire. Le message ne venait pas du serveur, il venait
+        // du stockage.
+        //
+        // Au demarrage, la montre ne sait RIEN de son lien au serveur.
+        // Pretendre le contraire est faux, et c'est exactement le principe
+        // deja applique par Alerting (pas de vibration sans reference
+        // anterieure). L'erreur se reconstruira d'elle-meme au premier
+        // echange rate, quelques secondes plus tard.
+        Api.oublierErreur();
+
         // 5 minutes est le plancher impose par la plateforme, pas un choix :
         // "Temporal events cannot be set to occur less than 5 minutes after
         // the last temporal event occurred". Un seul evenement temporel peut

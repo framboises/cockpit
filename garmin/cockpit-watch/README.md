@@ -60,7 +60,7 @@ code mort, jamais câblé, et ont été supprimées à la tâche 14). Seules
 `EditionsView` et `SautMenu`, réellement poussées via `WatchUi.pushView`,
 gardent leur delegate (`EditionsDelegate`, `SautMenuDelegate`).
 
-285 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
+287 tests Run No Evil couvrent `Cache`, `State`, `Fmt`, `Api`, `Alerting`,
 `Pages`, la navigation (`CockpitView.nextPage`/`previousPage`/`setPage`/
 `pageView`) et les chemins de dessin des six vues (`DessinTest.mc` : le rendu
 ne doit lever dans aucun état atteignable, y compris un mode `past` sans pic
@@ -158,6 +158,19 @@ rien puisque rien ne le réécrivait. Ce cas pose maintenant son propre code
 | `jeton refuse` | le serveur rejette le jeton (401) | réémettre depuis `/watch-admin` |
 | `telephone injoignable` | lien BLE coupé | rapprocher le téléphone |
 | `trop de requetes` | quota atteint (429) | attendre 5 min |
+
+⚠️ **`Application.Storage` survit au sideload.** Réinstaller l'app ne vide
+pas son stockage : un code d'erreur mémorisé lors d'un essai antérieur —
+autre jeton, autre version — restait en place, et n'était effacé qu'après
+une requête *réussie*. « jeton refuse » est ainsi resté affiché après
+**quatre reconstructions successives**, avec un jeton pourtant accepté
+(HTTP 200) et bien présent dans le binaire (vérifié par `strings`).
+
+`CockpitApp.onStart` appelle désormais `Api.oublierErreur()` : au
+démarrage, la montre ne sait rien de son lien au serveur, et prétendre le
+contraire est faux. L'erreur se reconstruit d'elle-même au premier échange
+raté — c'est le principe déjà appliqué par `Alerting` (pas de vibration
+sans référence antérieure).
 
 Côté serveur, chaque refus est tracé : `Jeton montre refuse depuis <ip>`
 (`watch_api.py:197`). Aucune ligne dans les logs alors que la montre
