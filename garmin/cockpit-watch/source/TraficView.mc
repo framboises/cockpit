@@ -456,7 +456,9 @@ class TraficView extends WatchUi.View {
         var yFoot = dc.getHeight() - hX - 17;
         var now = Time.now().value();
         var age = (tr != null && tr["t"] != null) ? (now - tr["t"]) : null;
-        var texte = "maj " + Fmt.age(age);
+        // Distingue un collecteur en retard d'une montre hors de portee :
+        // les deux affichaient le meme age (cf. Pages.libelleFraicheur).
+        var texte = Pages.libelleFraicheur(Cache.load(), age, now);
         var total = nbSousPages();
         if (total > 1) {
             texte += "  " + (sousPage() + 1).toString() + "/"

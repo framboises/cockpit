@@ -252,3 +252,70 @@ function testPaginationResteDansLeCadran(logger) {
     Test.assert(largeur < corde);
     return true;
 }
+
+// --- Fraicheur : deux pannes, deux libelles -----------------------------
+//
+// Cas reel qui a motive ce libelle : le serveur repondait a 4 secondes de
+// fraicheur, et la page trafic affichait "maj 3 h". C'etait le lien BLE,
+// pas le collecteur Waze -- rien a l'ecran ne permettait de le savoir.
+
+(:test)
+function testFraicheurNominaleDitMaj(logger) {
+    var now = 100000;
+    Test.assertEqual(
+        Pages.libelleFraicheur({"t" => now - 30, "rx" => now - 30}, 30, now),
+        "maj 30 s");
+    return true;
+}
+
+(:test)
+function testMontreHorsLigneLeDit(logger) {
+    // Donnee ET reponse a trois heures : c'est le lien qui est coupe.
+    var now = 100000;
+    Test.assertEqual(
+        Pages.libelleFraicheur({"t" => now - 10800, "rx" => now - 10800},
+                               10800, now),
+        "hors ligne 3 h");
+    return true;
+}
+
+(:test)
+function testCollecteurEnRetardResteUnMaj(logger) {
+    // LA distinction : reponse recue il y a 20 s -- la montre parle
+    // parfaitement au serveur -- mais donnee vieille d'une heure. La, c'est
+    // le collecteur Waze, et il faut aller le voir.
+    var now = 100000;
+    Test.assertEqual(
+        Pages.libelleFraicheur({"t" => now - 3600, "rx" => now - 20},
+                               3600, now),
+        "maj 1 h");
+    return true;
+}
+
+(:test)
+function testSeuilHorsLigneLaisssePasserUnRetardCourt(logger) {
+    // Le service de fond tourne toutes les 5 min : un cycle manque est
+    // normal, on ne crie pas dessus.
+    var now = 100000;
+    Test.assertEqual(
+        Pages.libelleFraicheur({"t" => now - 300, "rx" => now - 300}, 300, now),
+        "maj 5 min");
+    return true;
+}
+
+(:test)
+function testFraicheurToleereUnCacheSansReception(logger) {
+    var now = 100000;
+    Test.assertEqual(Pages.libelleFraicheur(null, 30, now), "maj 30 s");
+    Test.assertEqual(Pages.libelleFraicheur({"t" => now - 30}, 30, now),
+                     "maj 30 s");
+    return true;
+}
+
+(:test)
+function testFraicheurInconnueResteUnTiret(logger) {
+    var now = 100000;
+    Test.assertEqual(Pages.libelleFraicheur({"rx" => now - 10}, null, now),
+                     "maj " + Fmt.DASH);
+    return true;
+}

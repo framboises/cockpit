@@ -59,6 +59,38 @@ module Pages {
         return "VIG JAUNE";
     }
 
+    // Au-dela, la montre n'a pas parle au serveur depuis assez longtemps
+    // pour que ce soit la cause la plus probable de tout age eleve. Cale
+    // sur le rythme du service de fond (5 min) : deux cycles manques.
+    const SEUIL_HORS_LIGNE_S = 660;
+
+    // Pied de page : "maj 30 s", ou "hors ligne 3 h" quand c'est la MONTRE
+    // qui n'a pas joint le serveur.
+    //
+    // ⚠️ DEUX PANNES DIFFERENTES, ET LE MEME AGE LES AFFICHAIT PAREIL.
+    // `t` date la DONNEE cote serveur, `rx` la derniere REPONSE recue par
+    // la montre. Cas reel : le serveur repondait a 4 SECONDES de fraicheur
+    // et la page affichait "maj 3 h" -- c'etait le lien BLE, pas le
+    // collecteur Waze, et rien a l'ecran ne permettait de le savoir.
+    //
+    // Les deux appellent des gestes opposes : rapprocher le telephone, ou
+    // aller voir le collecteur. Meme distinction que `mr` en mode past.
+    //
+    // Le lien prime quand les deux sont vieux : tant que la montre ne parle
+    // pas au serveur, l'age de `t` qu'elle affiche est celui d'un cache,
+    // pas une mesure.
+    //
+    // Publique pour rester testable en VALEUR : afficher le mauvais des
+    // deux ages ne leve rien, et envoie chercher la panne au mauvais
+    // endroit.
+    function libelleFraicheur(st, ageDonnee, nowSec) {
+        var ageReponse = State.responseAgeSec(st, nowSec);
+        if (ageReponse != null && ageReponse > SEUIL_HORS_LIGNE_S) {
+            return "hors ligne " + Fmt.age(ageReponse);
+        }
+        return "maj " + Fmt.age(ageDonnee);
+    }
+
     // --- Indicateur de pagination ---------------------------------------
     //
     // Une rangee de petits losanges en haut a droite : PLEIN pour la
