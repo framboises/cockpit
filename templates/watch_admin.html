@@ -30,6 +30,25 @@
     .watch-admin-btn-sm { padding:5px 12px; font-size:0.78rem; }
 
     .watch-guidage-map { height:380px; border-radius:8px; border:1px solid var(--line); }
+
+    .watch-admin-niveaux { width:auto; margin:0 0 14px; font-size:0.82rem; }
+    .watch-admin-niveaux th, .watch-admin-niveaux td { padding:4px 14px 4px 0; }
+    .watch-admin-niveaux td:not(:first-child) { text-align:center; }
+    .watch-niveau-chip {
+      display:inline-block; width:22px; height:22px; line-height:22px;
+      border-radius:50%; text-align:center; font-weight:700; color:#fff;
+    }
+    .watch-niveau-chip.n1 { background:var(--brand); }
+    .watch-niveau-chip.n2 { background:var(--warning); }
+    .watch-niveau-chip.n3 { background:var(--danger); }
+
+    .watch-badge-chip {
+      display:inline-block; padding:2px 7px; border-radius:5px;
+      font-size:0.72rem; font-weight:700; letter-spacing:0.5px; color:#fff;
+    }
+    .watch-badge-chip.acc { background:var(--danger); }
+    .watch-badge-chip.bou { background:#f97316; }
+    .watch-badge-chip.dgr { background:#eab308; color:#422006; }
     .watch-guidage-coords-set { color:var(--text); font-weight:600; }
 
     .watch-admin-pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:0.76rem; font-weight:600; }
@@ -228,6 +247,56 @@
           <h3>Alertes envoyees a la montre</h3>
         </header>
         <div class="widget-body">
+          <p class="watch-admin-help">
+            Seules les definitions cochees partent a la montre. Le niveau ne
+            vient pas de l'alerte elle-meme (aucune n'en porte) : c'est vous
+            qui le fixez ici, et il commande quatre choses.
+          </p>
+
+          <table class="table watch-admin-niveaux">
+            <thead>
+              <tr>
+                <th>Effet sur la montre</th>
+                <th class="col-shrink"><span class="watch-niveau-chip n1">1</span></th>
+                <th class="col-shrink"><span class="watch-niveau-chip n2">2</span></th>
+                <th class="col-shrink"><span class="watch-niveau-chip n3">3</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Vibration a l'arrivee</td>
+                <td>courte</td><td>courte</td><td><strong>longue</strong></td>
+              </tr>
+              <tr>
+                <td>Tonalite</td>
+                <td>grave</td><td>grave</td><td><strong>aigue</strong></td>
+              </tr>
+              <tr>
+                <td>Rythme d'interrogation</td>
+                <td>3 min</td><td><strong>1 min</strong></td><td><strong>1 min</strong></td>
+              </tr>
+              <tr>
+                <td>Bande de la glance</td>
+                <td>verte</td><td><strong>or</strong></td><td><strong>rouge</strong></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <p class="watch-admin-help">
+            <strong>Deux seuils comptent.</strong> A partir de <strong>2</strong>,
+            la montre resserre son rythme : elle apprend un evenement dans la
+            minute au lieu de trois. A <strong>3</strong> seulement, la
+            vibration devient longue et le son aigu &mdash; c'est le seul
+            niveau qu'on reconnait sans regarder la montre.
+            <br>
+            Le niveau sert aussi a trier : les alertes s'affichent de la plus
+            grave a la moins grave, et seules les <strong>5 premieres</strong>
+            partent.
+            <br>
+            <strong>Si toutes vos regles sont au meme niveau</strong>, un SOS
+            tablette sonnera exactement comme une pluie imminente.
+          </p>
+
           <div class="table-responsive">
             <table id="watch-alert-table" class="table table-striped table-hover watch-admin-table">
               <thead>
@@ -241,6 +310,36 @@
               <tbody></tbody>
             </table>
           </div>
+
+          <h4 class="watch-admin-subtitle">Page trafic &mdash; badges des axes</h4>
+          <p class="watch-admin-help">
+            Sur la page Trafic de la montre, chaque axe peut porter un badge :
+            c'est l'alerte Waze <strong>rattachee a cet axe</strong> (moins de
+            250 m de son trace). Un axe peut en porter plusieurs ; seule la
+            plus grave s'affiche, faute de place.
+          </p>
+          <table class="table watch-admin-niveaux">
+            <tbody>
+              <tr>
+                <td><span class="watch-badge-chip acc">ACC</span></td>
+                <td style="text-align:left;">Accident</td>
+              </tr>
+              <tr>
+                <td><span class="watch-badge-chip bou">BOU</span></td>
+                <td style="text-align:left;">Bouchon</td>
+              </tr>
+              <tr>
+                <td><span class="watch-badge-chip dgr">DGR</span></td>
+                <td style="text-align:left;">Danger (objet sur la route, vehicule arrete, danger meteo&hellip;)</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="watch-admin-help">
+            Les routes barrees ne sont jamais comptees : autour du circuit,
+            les fermetures sont l'etat nominal, et le flux Waze en porte des
+            signalements vieux de plusieurs mois. Le mur circulation applique
+            la meme regle.
+          </p>
 
           <h4 class="watch-admin-subtitle">Seuils WBGT (&deg;C)</h4>
           <div class="watch-admin-form-row">
