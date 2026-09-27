@@ -2383,6 +2383,14 @@ def get_affluence():
                         day_records[day_key].append(rec)
                     prev_data_by_day = dict(day_records)
                 break
+        # Pic N-1 : serie au quart d'heure (presents_etat.historique_n1), la meme
+        # que la case << Meme jour N-1 >> de general-stats et le rapport matinal.
+        # La serie horaire ratait le vrai pic (51 889 contre 52 520 sur
+        # 24H CAMIONS 2025, samedi).
+        if prev_hist_race_date:
+            n1 = presents_etat.historique_n1(db, event, current_year_int, hist_aliases)
+            if n1 and n1.get('par_jour'):
+                prev_data_by_day = n1['par_jour']
 
     # Reference unifiee de la date de course N-1 : privilegier historique_controle
     # (via doc portes, fiable) sur parametrages.data.race (parfois errone).
@@ -6855,6 +6863,12 @@ def _hsh_read_global():
     return doc
 
 
+# Presents sur site (compteur - correction - vehicules presents depuis la
+# derniere remise a zero du compteur) : calcul unique dans presents_etat.py,
+# partage avec la montre. Voir la docstring du module.
+import presents_etat
+
+
 @app.route('/api/live-controle/config', methods=['GET'])
 @role_required("user")
 def hsh_get_config():
@@ -7342,47 +7356,11 @@ def hsh_get_counters():
     principal_id = doc.get("compteur_principal_id")
     principal_id_str = str(principal_id) if principal_id else None
 
-    # Agreger vehicules/enfants du jour depuis hsh_transactions_agg
-    # Les compteurs live sont par location (Area, Venue...), les transactions sont par checkpoint.
-    # On doit remonter : checkpoint -> parent_area/parent_venue via hsh_structure.
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    pipeline = [
-        {"$match": {"tranche": {"$gte": today_start}}},
-        {"$group": {
-            "_id": "$checkpoint_id",
-            "entrees_veh": {"$sum": {"$ifNull": ["$entrees_vehicules", 0]}},
-            "sorties_veh": {"$sum": {"$ifNull": ["$sorties_vehicules", 0]}},
-            "entrees_enf": {"$sum": {"$ifNull": ["$entrees_enfants", 0]}},
-            "sorties_enf": {"$sum": {"$ifNull": ["$sorties_enfants", 0]}},
-            "entrees_acc": {"$sum": {"$ifNull": ["$entrees_accredites", 0]}},
-            "sorties_acc": {"$sum": {"$ifNull": ["$sorties_accredites", 0]}},
-        }},
-    ]
-    veh_enf_by_cp = {}
-    for agg in COL_HSH_TX_AGG.aggregate(pipeline):
-        veh_enf_by_cp[agg["_id"]] = agg
-
-    # Construire le mapping location_id -> totaux vehicules/enfants/accredites en remontant la hierarchie
-    # Un checkpoint appartient a une area (parent_area.id) et une venue (parent_venue.id)
-    veh_enf_by_loc = {}
-    for cp_doc in COL_HSH_STRUCTURE.find({"location_type": "Checkpoint"}):
-        cp_id = cp_doc.get("location_id")
-        cp_counts = veh_enf_by_cp.get(cp_id)
-        if not cp_counts:
-            continue
-        # Remonter vers les parents
-        for parent_key in ("parent_area", "parent_venue"):
-            parent = cp_doc.get(parent_key, {})
-            pid = parent.get("id") if parent else None
-            if pid:
-                if pid not in veh_enf_by_loc:
-                    veh_enf_by_loc[pid] = {"entrees_veh": 0, "sorties_veh": 0, "entrees_enf": 0, "sorties_enf": 0, "entrees_acc": 0, "sorties_acc": 0}
-                veh_enf_by_loc[pid]["entrees_veh"] += cp_counts.get("entrees_veh", 0)
-                veh_enf_by_loc[pid]["sorties_veh"] += cp_counts.get("sorties_veh", 0)
-                veh_enf_by_loc[pid]["entrees_enf"] += cp_counts.get("entrees_enf", 0)
-                veh_enf_by_loc[pid]["sorties_enf"] += cp_counts.get("sorties_enf", 0)
-                veh_enf_by_loc[pid]["entrees_acc"] += cp_counts.get("entrees_acc", 0)
-                veh_enf_by_loc[pid]["sorties_acc"] += cp_counts.get("sorties_acc", 0)
+    # Soldes vehicules/enfants/accredites cumules depuis la derniere remise a
+    # zero de CHAQUE compteur, jamais depuis minuit : un vehicule gare la
+    # veille est toujours sur site. Calcul partage avec la montre.
+    veh_enf_by_loc = presents_etat.soldes_categories(
+        db, locations, doc.get("activation_timestamp"))
 
     result = []
     for loc in locations:
@@ -7465,41 +7443,15 @@ def hsh_get_dashboard():
         except (ValueError, TypeError):
             cy = None
         if cy is not None:
-            hist_aliases = _event_hist_aliases(event)
-            prev_hist = None
-            for cand in db['historique_controle'].find(
-                {'type': 'frequentation', 'event': {'$in': hist_aliases}}
-            ).sort('year', -1):
-                cyn = cand.get('year')
-                if isinstance(cyn, (int, float)) and int(cyn) < cy:
-                    prev_hist = cand
-                    prev_year_str = str(int(cyn))
-                    break
-            if prev_hist is not None:
-                # Date de course N-1 : privilegier portes (fiable), repli sur la
-                # 'race' du doc frequentation lui-meme.
-                prev_race_ref = _parse_race_date(prev_hist.get('race'))
-                if not prev_race_ref:
-                    portes = db['historique_controle'].find_one(
-                        {'type': 'portes', 'event': {'$in': hist_aliases},
-                         'year': int(prev_year_str)},
-                        {'_id': 0, 'race': 1}
-                    )
-                    prev_race_ref = _parse_race_date((portes or {}).get('race'))
-                for rec in prev_hist.get('data', []) or []:
-                    rd = rec.get('date')
-                    if isinstance(rd, str):
-                        day_key = rd[:10]
-                        hour = rd[11:16] if len(rd) >= 16 else None
-                    elif hasattr(rd, 'strftime'):
-                        day_key = rd.strftime('%Y-%m-%d')
-                        hour = rd.strftime('%H:%M')
-                    else:
-                        continue
-                    prev_hist_by_day.setdefault(day_key, []).append({
-                        'hour': hour,
-                        'present': rec.get('present', 0),
-                    })
+            # Serie N-1 au quart d'heure, chaque point date de l'instant qu'il
+            # mesure (presents_etat.historique_n1, partage avec la montre). La
+            # serie horaire faisait bouger la comparaison par paliers d'une
+            # heure, et avec 45 min d'avance.
+            n1 = presents_etat.historique_n1(db, event, cy, _event_hist_aliases(event))
+            if n1 is not None:
+                prev_year_str = str(n1['year'])
+                prev_race_ref = n1['race']
+                prev_hist_by_day = n1['par_jour']
 
     # data_access.timestamp est stocke en datetime NAIF representant de l'UTC.
     # ATTENTION : le serveur tourne en heure de Paris (datetime.now() = Paris),
@@ -7542,67 +7494,16 @@ def hsh_get_dashboard():
     # (Area/Venue) et par tranche de 5 min, le solde cumule
     # (entrees_vehicules - sorties_vehicules) issu de hsh_transactions_agg,
     # remonte aux zones via la hierarchie checkpoint -> parent_area/parent_venue
-    # (meme logique que /counters). Le cumul est remis a zero chaque jour, pour
-    # rester coherent avec le widget (fenetre jour) et les courbes multi-jours.
+    # (meme logique que /counters). Le cumul part de la derniere remise a zero
+    # du compteur de la zone, comme son 'current' : jamais de remise a zero
+    # quotidienne, un vehicule gare la veille est toujours sur site.
+    # Calcul partage avec la montre : presents_etat.Vehicules.
     # ------------------------------------------------------------------
-    import bisect
-    cp_to_zones = {}
-    for cp_doc in COL_HSH_STRUCTURE.find(
-            {'location_type': 'Checkpoint'},
-            {'_id': 0, 'location_id': 1, 'parent_area': 1, 'parent_venue': 1}):
-        zset = set()
-        for pk in ('parent_area', 'parent_venue'):
-            parent = cp_doc.get(pk) or {}
-            pid = parent.get('id')
-            if pid:
-                zset.add(str(pid))
-        if zset:
-            cp_to_zones[cp_doc.get('location_id')] = zset
-
-    zone_veh_events = {}
-    veh_q = {'tranche': {'$gte': full_start.replace(tzinfo=timezone.utc),
-                         '$lt': full_end.replace(tzinfo=timezone.utc)}}
-    for agg in COL_HSH_TX_AGG.find(
-            veh_q,
-            {'_id': 0, 'checkpoint_id': 1, 'tranche': 1,
-             'entrees_vehicules': 1, 'sorties_vehicules': 1}):
-        zones_for = cp_to_zones.get(agg.get('checkpoint_id'))
-        if not zones_for:
-            continue
-        tr = agg.get('tranche')
-        if tr is None:
-            continue
-        # tranche stocke en UTC tz-aware ; data_access.timestamp est naif (UTC).
-        if getattr(tr, 'tzinfo', None) is not None:
-            tr = tr.astimezone(timezone.utc).replace(tzinfo=None)
-        delta = (agg.get('entrees_vehicules') or 0) - (agg.get('sorties_vehicules') or 0)
-        for z in zones_for:
-            zone_veh_events.setdefault(z, []).append((tr, delta))
-
-    zone_veh_prefix = {}
-    for z, evs in zone_veh_events.items():
-        evs.sort(key=lambda x: x[0])
-        times = [e[0] for e in evs]
-        prefix = []
-        run = 0
-        for _, d in evs:
-            run += d
-            prefix.append(run)
-        zone_veh_prefix[z] = (times, prefix)
-
-    def veh_present_at(zone_id, at_dt, corr_veh=0):
-        """Vehicules presents dans la zone a l'instant at_dt (cumul du jour de at_dt)."""
-        entry = zone_veh_prefix.get(str(zone_id))
-        if not entry or at_dt is None:
-            return 0
-        times, prefix = entry
-        day_start = at_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-        hi = bisect.bisect_right(times, at_dt)
-        if hi == 0:
-            return 0
-        lo = bisect.bisect_left(times, day_start)
-        total = prefix[hi - 1] - (prefix[lo - 1] if lo > 0 else 0)
-        return max(total - (corr_veh or 0), 0)
+    vehicules = presents_etat.Vehicules(
+        db, locations, global_doc.get('activation_timestamp'),
+        depuis_label=presents_etat.to_tranche_label(target_day_start).replace(
+            hour=0, minute=0, second=0, microsecond=0))
+    veh_present_at = vehicules.presents_at
 
     # historique_controle ne contient qu'une serie globale (zone principale d'enceinte).
     # On ne l'expose donc que pour la zone principale ou, a defaut, la premiere zone.
@@ -7647,20 +7548,26 @@ def hsh_get_dashboard():
 
         series = []
         last_bucket_key = None
+        # Pic du jour = plus haut RELEVE (toutes les 3 min), pas le max de la
+        # serie tracee : celle-ci ne garde que le dernier releve de chaque quart
+        # d'heure, si bien qu'un pic pouvait BAISSER en cours de quart d'heure
+        # (37 500 a 13h09 puis 37 449 a 13h12, le 27/09/2026) et afficher moins
+        # que le chiffre << presents >> vu quelques minutes plus tot.
+        pic_today, pic_today_ts = 0, None
         for s in snaps:
             ts = s['timestamp']
             bucket = ts.replace(minute=(ts.minute // bucket_minutes) * bucket_minutes,
                                 second=0, microsecond=0)
             key = bucket.isoformat() + 'Z'
-            veh = veh_present_at(lid, bucket, corr_veh)
+            veh = veh_present_at(lid, ts, corr_veh)
             present = max(int(s.get('current', 0) or 0) - correction - veh, 0)
+            if present > pic_today:
+                pic_today, pic_today_ts = present, ts
             if key != last_bucket_key:
                 series.append({'ts': key, 'present': present})
                 last_bucket_key = key
             else:
                 series[-1]['present'] = present
-
-        pic_today = max((p['present'] for p in series), default=0)
         # "current" = valeur la plus recente tout court (pas specifique au jour cible)
         latest = db['data_access'].find_one(
             {'requested_location_id': lid, 'requested_location_type': ltype},
@@ -7669,7 +7576,7 @@ def hsh_get_dashboard():
         )
         veh_now = 0
         if latest:
-            veh_now = veh_present_at(lid, latest.get('timestamp'), corr_veh)
+            veh_now = veh_present_at(lid, latest.get('timestamp'), corr_veh, until_end=True)
             current = max(int(latest.get('current', 0) or 0) - correction - veh_now, 0)
         else:
             current = 0
@@ -7683,16 +7590,17 @@ def hsh_get_dashboard():
             'current': current,
             'veh_excluded': veh_now,
             'pic_today': pic_today,
+            # Instant du releve qui a donne le pic (UTC, 'Z'), pour l'heure affichee.
+            'pic_today_ts': (pic_today_ts.isoformat() + 'Z') if pic_today_ts else None,
             'pic_n1_same_day': pic_n1_principal if is_principal else None,
             'max_n1_season': max_n1_principal if is_principal else None,
             'series': series,
         })
 
     # Resume par jour public (base sur la zone principale effective).
-    # Le pic du jour reprend le MEME bucketing 15 min (last-of-bucket) que la
-    # serie tracee, pour rester coherent avec ce que l'utilisateur voit sur la
-    # courbe (un max brut pourrait remonter un outlier ponctuel invisible apres
-    # bucketisation).
+    # Le pic du jour est le plus haut releve, comme `pic_today` : le dernier
+    # releve de chaque quart d'heure (la courbe) sous-estimait le pic et
+    # pouvait le faire baisser.
     principal_zone = next((z for z in zones if z.get('is_principal')), None)
     principal_effective_id = principal_zone['location_id'] if principal_zone else None
     principal_effective_type = principal_zone['location_type'] if principal_zone else None
@@ -7712,20 +7620,16 @@ def hsh_get_dashboard():
                 p_corr = int(corrections.get(principal_effective_id, 0) or 0)
                 p_corr_veh = int(corrections_veh.get(principal_effective_id, 0) or 0)
                 day_start, day_end = _paris_day_bounds_utc(dd)
-                bucket_last = {}
                 for s in db['data_access'].find(
                     {'requested_location_id': principal_effective_id,
                      'requested_location_type': principal_effective_type,
                      'timestamp': {'$gte': day_start, '$lt': day_end}},
                     {'_id': 0, 'timestamp': 1, 'current': 1}
-                ).sort('timestamp', 1):
-                    ts = s['timestamp']
-                    bk = ts.replace(minute=(ts.minute // 15) * 15,
-                                    second=0, microsecond=0)
-                    bk_veh = veh_present_at(principal_effective_id, bk, p_corr_veh)
-                    bucket_last[bk] = max(int(s.get('current', 0) or 0) - p_corr - bk_veh, 0)
-                if bucket_last:
-                    pic_n = max(bucket_last.values())
+                ):
+                    s_veh = veh_present_at(principal_effective_id, s['timestamp'], p_corr_veh)
+                    v = max(int(s.get('current', 0) or 0) - p_corr - s_veh, 0)
+                    if pic_n is None or v > pic_n:
+                        pic_n = v
         pic_n1 = None
         if prev_race_ref and race_n:
             offset = (dd - race_n).days

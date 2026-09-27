@@ -7,6 +7,7 @@ import Flask : ce module se teste sans application.
 import logging
 from datetime import datetime, timedelta, timezone
 
+import presents_etat
 import watch_timeline
 
 logger = logging.getLogger(__name__)
@@ -353,13 +354,19 @@ def build_state(db, now, now_utc=None, peaks=None, pages=None):
     # une decision d'exploitation. Jamais hors mode live -- un chiffre de
     # presents perime est indiscernable d'un chiffre juste, et c'est
     # precisement lui qu'on regarde pour decider.
+    #
+    # Et les presents du COCKPIT, pas le `current` brut du compteur : on en
+    # retire la correction et les vehicules presents sur site, exactement
+    # comme le widget Controle d'acces de l'accueil et la TV general-stats
+    # (presents_etat, calcul unique). Le brut comptait ~1 200 vehicules
+    # comme des personnes sur 24H CAMIONS 2026.
     presents = None
     if courant:
-        presents = _safe_int(courant.get("current"))
-        if presents is None:
-            sorties = _safe_int(courant.get("exits"))
-            if entrees is not None and sorties is not None:
-                presents = entrees - sorties
+        try:
+            presents = presents_etat.presents_principal(db, courant, now_utc=now_utc)
+        except Exception as exc:
+            logger.warning("watch_state : presents indisponibles (%s)", exc)
+            presents = None
 
     horodatage = courant.get("timestamp") if courant else None
 

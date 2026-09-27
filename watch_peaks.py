@@ -29,6 +29,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import pcorg_summary as _ps
+import presents_etat as _pe
 import watch_state as _ws
 
 logger = logging.getLogger(__name__)
@@ -227,9 +228,39 @@ def peak_for_edition(db, event, year, location_id=DEFAULT_LOCATION_ID):
     Balaye data_access et toutes les archives sur la fenetre de dates, sans
     lire ni le nom de collection ni `requested_event`.
     """
+    pic, instant, _ = _peak_with_method(db, event, year, location_id)
+    return pic, instant
+
+
+def _peak_with_method(db, event, year, location_id=DEFAULT_LOCATION_ID):
+    """(pic, instant_utc, methode) ; methode = "presents" ou "brut"."""
     debut, fin = edition_window(db, event, year)
     if debut is None:
-        return None, None
+        return None, None, None
+
+    # EDITION EN COURS DE COMPTAGE : pic des PRESENTS du cockpit (correction
+    # et vehicules deduits), et seulement depuis la derniere remise a zero du
+    # compteur. Le max brut de `current` sur la fenetre remontait la valeur
+    # fantome d'avant la remise a zero : 22 447 le 22/09 sur 24H CAMIONS
+    # 2026, pour quelques centaines de personnes reelles. Les editions
+    # closes gardent le balayage brut : leurs soldes vehicules ne sont plus
+    # en base (hsh_transactions_agg ne garde que l'edition courante).
+    global_doc = _pe.read_global(db)
+    if _pe.edition_en_direct(global_doc, event):
+        loc = _pe.principal_location(global_doc)
+        if loc is not None and str(loc.get("id")) == str(location_id):
+            # Pas de repli sur le brut en cas d'echec : il rendrait
+            # justement la valeur fantome. Mieux vaut un tiret.
+            try:
+                pic, bucket = _pe.pic_presents(db, loc, debut, fin, global_doc)
+            except Exception as exc:
+                logger.warning("watch_peaks : pic des presents indisponible (%s)", exc)
+                return None, None, None
+            if pic is not None:
+                return pic, _as_utc(bucket), "presents"
+            # Plus aucun releve dans data_access (edition archivee) : on
+            # balaye les archives en brut, et cached_peak conserve le pic
+            # << presents >> deja memorise plutot que ce brut.
 
     ensure_indexes(db)
 
@@ -242,7 +273,7 @@ def peak_for_edition(db, event, year, location_id=DEFAULT_LOCATION_ID):
         if maxi is None or valeur > maxi:
             maxi = valeur
             maxi_ts = instant
-    return maxi, maxi_ts
+    return maxi, maxi_ts, "brut"
 
 
 def list_editions(db, now_utc=None):
@@ -310,7 +341,21 @@ def cached_peak(db, event, year, location_id=DEFAULT_LOCATION_ID, now_utc=None):
         if frais:
             return doc.get("peak"), _as_utc(doc.get("peak_ts"))
 
-    pic, instant = peak_for_edition(db, event, annee, location_id)
+    pic, instant, methode = _peak_with_method(db, event, annee, location_id)
+
+    # Un pic mesure sur les PRESENTS pendant l'edition est definitif une fois
+    # le live-controle coupe : le recalculer alors en brut ferait revenir la
+    # valeur fantome d'avant la remise a zero, et l'ecrirait pour toujours.
+    if (methode != "presents" and doc is not None
+            and doc.get("methode") == "presents"):
+        debut, fin = edition_window(db, event, annee)
+        if debut is None or not (debut <= now_utc < fin):
+            # Edition close : on fige, pour ne plus la recalculer.
+            try:
+                cache.update_one({"_id": cle}, {"$set": {"source": "archive"}})
+            except Exception as exc:
+                logger.warning("watch_peaks : ecriture du cache %s echouee (%s)", cle, exc)
+        return doc.get("peak"), _as_utc(doc.get("peak_ts"))
     if pic is None:
         return None, None
 
@@ -327,6 +372,7 @@ def cached_peak(db, event, year, location_id=DEFAULT_LOCATION_ID, now_utc=None):
                 "peak_ts": instant.replace(tzinfo=None) if instant else None,
                 "computed_at": now_utc.replace(tzinfo=None),
                 "source": "live" if en_cours else "archive",
+                "methode": methode,
             }},
             upsert=True,
         )

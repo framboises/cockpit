@@ -14,6 +14,7 @@ from datetime import datetime, time, timedelta, timezone
 
 import meteo_etat
 import pcorg_summary
+import presents_etat
 import trafic_etat
 import watch_peaks
 import watch_state
@@ -588,16 +589,39 @@ def build_frequentation(db, event, year, now, location_id=None):
         location_id = watch_state.read_principal_id(db) or watch_peaks.DEFAULT_LOCATION_ID
 
     jour = now.date()
-    pic, heure = _pic_multi_source(db, jour, location_id)
 
-    pic_n1 = None
-    course = watch_peaks.resolve_race_dt(db, event, int(year))
-    course_n1 = watch_peaks.resolve_race_dt(db, event, int(year) - 1)
-    if course is not None and course_n1 is not None:
-        course_n1_jour = _jour_semaine_aligne(course_n1.date(), course.weekday())
-        decalage = jour - course.date()
-        jour_n1 = course_n1_jour + decalage
-        pic_n1, _ = _pic_multi_source(db, jour_n1, location_id)
+    # Pic du jour : les PRESENTS du cockpit (correction et vehicules
+    # deduits), meme calcul et meme decoupage 15 min que le << Pic du jour >>
+    # de la TV general-stats. Repli sur le max brut du compteur seulement si
+    # le live-controle ne compte pas cette edition (aucun solde vehicules).
+    pic, heure = None, None
+    global_doc = presents_etat.read_global(db)
+    loc = presents_etat.principal_location(global_doc)
+    if (presents_etat.edition_en_direct(global_doc, event)
+            and loc is not None and str(loc.get("id")) == str(location_id)):
+        debut, fin = presents_etat.paris_day_bounds_utc(jour)
+        pic, bucket = presents_etat.pic_presents(db, loc, debut, fin, global_doc)
+        if bucket is not None:
+            h = presents_etat.to_tranche_label(bucket)
+            heure = "%02dh%02d" % (h.hour, h.minute)
+    else:
+        pic, heure = _pic_multi_source(db, jour, location_id)
+
+    # N-1 : historique_controle{frequentation}, la source de la TV. Les
+    # releves bruts du compteur N-1 n'existent pas pour toutes les editions
+    # (24H CAMIONS 2025 : aucun), et quand ils existent ils ne deduisent pas
+    # les vehicules -- la comparaison serait fausse. Repli sur l'ancienne
+    # lecture seulement si l'historique ne sait pas repondre.
+    pic_n1 = presents_etat.pic_n1_historique(
+        db, event, year, jour, aliases=watch_peaks.event_aliases(db, event))
+    if pic_n1 is None:
+        course = watch_peaks.resolve_race_dt(db, event, int(year))
+        course_n1 = watch_peaks.resolve_race_dt(db, event, int(year) - 1)
+        if course is not None and course_n1 is not None:
+            course_n1_jour = _jour_semaine_aligne(course_n1.date(), course.weekday())
+            decalage = jour - course.date()
+            jour_n1 = course_n1_jour + decalage
+            pic_n1, _ = _pic_multi_source(db, jour_n1, location_id)
 
     return {
         "t": _epoch_du_pic(jour, heure),

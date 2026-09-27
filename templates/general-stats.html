@@ -138,6 +138,54 @@
     @keyframes blink{ 50%{ opacity:.25; } }
     .panel-body::-webkit-scrollbar{ width:8px; }
     .panel-body::-webkit-scrollbar-thumb{ background:var(--line-2); border-radius:4px; }
+
+    /* ===== Telephone (portrait) : une colonne, chaque donnee sur toute la
+       largeur, la page defile. L'ecran TV (hauteur fixe, sans defilement)
+       n'est pas touche au-dela de 760 px. ===== */
+    @media (max-width: 760px){
+        body{ overflow-x:hidden; overflow-y:auto; }
+        .screen{ height:auto; min-height:100vh; display:flex; flex-direction:column; gap:12px;
+                 padding:12px 12px calc(12px + env(safe-area-inset-bottom, 0px)); }
+
+        .topbar{ flex-wrap:wrap; gap:8px 12px; }
+        .brand h1{ font-size:22px; flex-wrap:wrap; gap:8px; }
+        .brand .sub{ display:none; }
+        .topbar-right{ margin-left:0; width:100%; justify-content:space-between; gap:12px; }
+        .clock .time{ font-size:26px; }
+        .btn-full{ display:none; }
+
+        .hero{ flex-direction:column; gap:12px; }
+        .hero-main{ padding:16px 16px 16px 22px; }
+        .hero-number{ font-size:64px; }
+        .n1-compare{ font-size:15px; }
+        .n1-compare .n1-num{ font-size:26px; }
+        .gauge-meta{ font-size:13px; gap:8px; }
+        .hero-context{ font-size:13px; line-height:1.4; }
+
+        .kpis{ grid-template-columns:1fr; gap:10px; }
+        .kpi{ min-width:0; padding:12px 16px; flex-direction:row; flex-wrap:wrap; align-items:baseline; justify-content:flex-start; column-gap:12px; }
+        .kpi .k-label{ flex:1 1 100%; font-size:12px; }
+        .kpi .k-value{ font-size:32px; }
+        .kpi .k-sub{ font-size:13px; }
+
+        .main{ display:flex; flex-direction:column; gap:12px; }
+        .panel{ overflow:visible; }
+        .panel-head{ flex-wrap:wrap; padding:12px 14px; }
+        .panel-head h2{ font-size:15px; }
+        .legend{ margin-left:0; width:100%; font-size:12px; }
+        .panel-body{ overflow:visible; padding:12px; }
+        #chart-wrap{ flex:none; height:260px; }
+
+        .day-label{ width:64px; font-size:14px; }
+        .day-vals{ min-width:84px; }
+        .day-pic{ font-size:17px; }
+        .day-prev{ font-size:12px; }
+
+        .zone-card{ flex:1 1 100%; }
+        .zone-name{ font-size:13px; }
+        .zone-now{ font-size:26px; }
+        .zone-pic{ font-size:12px; }
+    }
     </style>
 </head>
 <body>
@@ -244,6 +292,7 @@
     var REFRESH_MS = 30000;
     var STALE_MS   = 180000;
     var lastSuccess = 0;
+    var lastChart = null;   // [serieN, serieN1] du dernier rendu, pour le redessiner
 
     function $(id){ return document.getElementById(id); }
     function fmtInt(n){ return (n == null || isNaN(n)) ? "--" : Math.round(n).toLocaleString("fr-FR"); }
@@ -307,7 +356,17 @@
         var ymax = Math.max.apply(null, all.map(function(p){return p.y;}));
         ymax = ymax > 0 ? ymax * 1.12 : 10;
 
-        var W = 1000, H = 360, PL = 64, PR = 22, PT = 22, PB = 34;
+        // Le viewBox epouse les proportions reelles du cadre, et textes et
+        // traits sont exprimes en pixels ecran : sans cela, le SVG etire
+        // (preserveAspectRatio none) ecrasait les libelles sur un telephone
+        // en portrait (texte a ~6 px, courbe d'un pixel).
+        var cw = wrap.clientWidth || 1000, ch = wrap.clientHeight || 360;
+        var W = 1000, H = Math.max(200, Math.min(1600, Math.round(W * ch / cw)));
+        var u = W / cw;                                  // unites SVG par pixel
+        var FS = Math.max(18, Math.round(12 * u));       // corps des libelles
+        var LW = Math.max(4, 2.5 * u);                   // epaisseur de la courbe N
+        var PL = Math.max(64, Math.round(FS * 3.4)), PR = 22, PT = 22, PB = Math.round(FS * 1.9);
+        lastChart = [seriesN, seriesN1];
         function sx(x){ return PL + (x - xmin) / (xmax - xmin) * (W - PL - PR); }
         function sy(y){ return H - PB - (y / ymax) * (H - PT - PB); }
 
@@ -325,29 +384,31 @@
         [0, 0.5, 1].forEach(function(f){
             var yv = ymax * f, y = sy(yv);
             svg += '<line x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + (W-PR) + '" y2="' + y.toFixed(1) + '" stroke="rgba(148,163,184,0.14)" stroke-width="1"/>';
-            svg += '<text x="' + (PL-8) + '" y="' + (y+5).toFixed(1) + '" fill="#64748b" font-size="18" text-anchor="end" font-family="Outfit">' + fmtInt(yv) + '</text>';
+            svg += '<text x="' + (PL-8) + '" y="' + (y + FS*0.3).toFixed(1) + '" fill="#64748b" font-size="' + FS + '" text-anchor="end" font-family="Outfit">' + fmtInt(yv) + '</text>';
         });
-        // labels X (heures rondes)
+        // labels X (heures rondes) : autant que la largeur en laisse tenir
         var startH = Math.ceil(xmin/60), endH = Math.floor(xmax/60);
-        var stepH = (endH - startH) > 10 ? 2 : 1;
+        var maxLabels = Math.max(2, Math.floor((W - PL - PR) / (FS * 2.6)));
+        var stepH = Math.max(1, Math.ceil((endH - startH + 1) / maxLabels));
         for(var h = startH; h <= endH; h += stepH){
             var x = sx(h*60);
-            svg += '<line x1="' + x.toFixed(1) + '" y1="' + PT + '" x2="' + x.toFixed(1) + '" y2="' + (H-PB) + '" stroke="rgba(148,163,184,0.07)" stroke-width="1"/>';
-            svg += '<text x="' + x.toFixed(1) + '" y="' + (H-10) + '" fill="#64748b" font-size="18" text-anchor="middle" font-family="Outfit">' + h + 'h</text>';
+            svg += '<line x1="' + x.toFixed(1) + '" y1="' + PT + '" x2="' + x.toFixed(1) + '" y2="' + (H-PB) + '" stroke="rgba(148,163,184,0.07)" stroke-width="' + u.toFixed(2) + '"/>';
+            svg += '<text x="' + x.toFixed(1) + '" y="' + (H - FS*0.55).toFixed(1) + '" fill="#64748b" font-size="' + FS + '" text-anchor="middle" font-family="Outfit">' + h + 'h</text>';
         }
 
         // N-1 ligne pointillee
         if(ptsP.length){
-            svg += '<path d="' + linePath(ptsP) + '" fill="none" stroke="#94a3b8" stroke-width="3" stroke-dasharray="7 7" stroke-linejoin="round" stroke-linecap="round" opacity="0.8"/>';
+            var dash = (LW * 1.75).toFixed(1);
+            svg += '<path d="' + linePath(ptsP) + '" fill="none" stroke="#94a3b8" stroke-width="' + (LW*0.75).toFixed(1) + '" stroke-dasharray="' + dash + ' ' + dash + '" stroke-linejoin="round" stroke-linecap="round" opacity="0.8"/>';
         }
         // N aire + ligne
         if(ptsN.length){
             var area = linePath(ptsN) + ' L' + sx(ptsN[ptsN.length-1].x).toFixed(1) + ' ' + (H-PB) + ' L' + sx(ptsN[0].x).toFixed(1) + ' ' + (H-PB) + ' Z';
             svg += '<path d="' + area + '" fill="url(#areaGrad)"/>';
-            svg += '<path d="' + linePath(ptsN) + '" fill="none" stroke="#38bdf8" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>';
+            svg += '<path d="' + linePath(ptsN) + '" fill="none" stroke="#38bdf8" stroke-width="' + LW.toFixed(1) + '" stroke-linejoin="round" stroke-linecap="round"/>';
             // point courant
             var last = ptsN[ptsN.length-1];
-            svg += '<circle cx="' + sx(last.x).toFixed(1) + '" cy="' + sy(last.y).toFixed(1) + '" r="7" fill="#38bdf8" stroke="#0b1220" stroke-width="3"/>';
+            svg += '<circle cx="' + sx(last.x).toFixed(1) + '" cy="' + sy(last.y).toFixed(1) + '" r="' + (LW*1.75).toFixed(1) + '" fill="#38bdf8" stroke="#0b1220" stroke-width="' + (LW*0.75).toFixed(1) + '"/>';
         }
         svg += '</svg>';
         wrap.innerHTML = svg;
@@ -368,17 +429,32 @@
 
     // ---------- N-1 a l'heure courante (valeur absolue + delta) ----------
     // Reference = horloge REELLE (pas le dernier bucket 15 min de la serie N, qui
-    // restait fige dans la meme tranche). On compare les presents live au point
-    // N-1 le plus proche de l'heure courante. Recalcule a chaque refresh.
+    // restait fige dans la meme tranche). On compare les presents live au N-1
+    // interpole a l'heure courante. Recalcule a chaque refresh.
     function n1AtNow(seriesN1, currentPresents){
         var p = seriesN1 || [];
         if(!p.length) return null;
         var now = new Date();
-        var nowMin = now.getHours()*60 + now.getMinutes();
-        var best = null, bestDiff = 1e9;
-        p.forEach(function(q){ var x = hmToMin(q.hour); if(x == null) return; var d = Math.abs(x - nowMin); if(d < bestDiff){ bestDiff = d; best = q; } });
-        if(!best || bestDiff > 90) return null;
-        var prev = best.present || 0;
+        var nowMin = now.getHours()*60 + now.getMinutes() + now.getSeconds()/60;
+        // Interpolation lineaire entre les deux points N-1 qui encadrent
+        // l'heure courante (serie au quart d'heure) : sans elle, le N-1
+        // bougeait par paliers a cote d'un compteur N rafraichi en continu.
+        var avant = null, apres = null;
+        p.forEach(function(q){
+            var x = hmToMin(q.hour); if(x == null) return;
+            if(x <= nowMin && (!avant || x > avant.x)) avant = {x:x, y:q.present||0};
+            if(x >= nowMin && (!apres || x < apres.x)) apres = {x:x, y:q.present||0};
+        });
+        var prev;
+        if(avant && apres && apres.x - avant.x <= 90){
+            prev = apres.x === avant.x ? avant.y
+                 : Math.round(avant.y + (apres.y - avant.y) * (nowMin - avant.x) / (apres.x - avant.x));
+        } else {
+            var proche = null, ecart = 1e9;
+            [avant, apres].forEach(function(q){ if(q && Math.abs(q.x - nowMin) < ecart){ ecart = Math.abs(q.x - nowMin); proche = q; } });
+            if(!proche || ecart > 90) return null;
+            prev = proche.y;
+        }
         if(prev <= 0) return null;
         var hour = now.getHours() + "h" + ("0"+now.getMinutes()).slice(-2);
         var pct = (currentPresents != null) ? Math.round((currentPresents - prev) / prev * 100) : null;
@@ -496,7 +572,9 @@
                 + '<span class="n1-num">' + fmtInt(cmp.value) + '</span>';
             if(cmp.pct != null){
                 var pos = cmp.pct >= 0;
-                var dcol = pos ? "var(--high)" : "var(--good)";
+                // Moins de monde que l'an dernier est une mauvaise nouvelle :
+                // rouge en dessous de -5 %, orange a +/-5 %, vert au-dessus.
+                var dcol = cmp.pct < -5 ? "var(--crit)" : cmp.pct <= 5 ? "var(--warn)" : "var(--good)";
                 html += '<span class="n1-delta" style="color:' + dcol + '">'
                     + '<span class="material-symbols-outlined" style="color:inherit;font-size:1em;">' + (pos ? "arrow_upward" : "arrow_downward") + '</span>'
                     + (pos ? "+" : "") + cmp.pct + '%</span>';
@@ -542,7 +620,10 @@
         $("kpi-pic-day").textContent = principal ? fmtInt(principal.pic_today) : "--";
         // heure du pic du jour (depuis la serie)
         var picHour = " ";
-        if(principal && principal.series && principal.series.length){
+        if(principal && principal.pic_today_ts && principal.pic_today > 0){
+            // Instant exact du releve le plus haut (pas un point de la courbe).
+            picHour = "a " + tsToHour(principal.pic_today_ts);
+        } else if(principal && principal.series && principal.series.length){
             var best = null;
             principal.series.forEach(function(p){ if(!best || (p.present||0) > (best.present||0)) best = p; });
             if(best && (best.present||0) > 0) picHour = "a " + tsToHour(best.ts);
@@ -611,6 +692,14 @@
         var d = document.documentElement;
         if(!document.fullscreenElement){ (d.requestFullscreen || d.webkitRequestFullscreen || function(){}).call(d); }
         else { (document.exitFullscreen || document.webkitExitFullscreen || function(){}).call(document); }
+    });
+
+    // Rotation du telephone / redimensionnement : le graphique est calcule
+    // sur la taille de son cadre, il faut le redessiner.
+    var resizeTimer = null;
+    window.addEventListener("resize", function(){
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(function(){ if(lastChart) buildChart(lastChart[0], lastChart[1]); }, 150);
     });
 
     // ---------- Boot ----------

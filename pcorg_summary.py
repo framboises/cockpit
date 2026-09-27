@@ -18,6 +18,8 @@ from zoneinfo import ZoneInfo
 import requests
 from pymongo import ASCENDING, DESCENDING
 
+import presents_etat
+
 TZ_PARIS = ZoneInfo("Europe/Paris")
 
 
@@ -583,6 +585,36 @@ def compute_attendance_block(db, event, year, now_utc=None):
     freq_prev_by_day = _index_freq_by_day(hist_prev_doc)
     prev_race_ref = hist_prev_race_date or prev_param_race_date
 
+    # Le DASHBOARD fait reference (general-stats, /api/live-controle/dashboard) :
+    # meme serie N-1 que lui, au quart d'heure et datee de l'instant mesure
+    # (presents_etat.historique_n1). La serie horaire ratait le vrai pic
+    # (51 889 contre 52 520, 24H CAMIONS 2025 samedi) et ses heures avaient
+    # 45 min d'avance -- or pic_prev_hour sert d'heure attendue du pic du jour.
+    try:
+        n1_serie = presents_etat.historique_n1(db, event, year_int)
+    except Exception as exc:
+        logger.warning("attendance_block : serie N-1 du dashboard indisponible (%s)", exc)
+        n1_serie = None
+    if n1_serie and n1_serie.get("par_jour"):
+        freq_prev_by_day = n1_serie["par_jour"]
+        if n1_serie.get("race"):
+            prev_race_ref = n1_serie["race"]
+
+    # Pic constate : les PRESENTS du dashboard (correction et vehicules
+    # deduits, depuis la derniere remise a zero du compteur) tant que le
+    # live-controle compte cette edition. Le max brut de `current` comptait
+    # les vehicules comme des personnes (51 845 annonces le 27/09/2026 pour
+    # 49 974 au dashboard).
+    presents_global = None
+    presents_loc = None
+    try:
+        g = presents_etat.read_global(db)
+        if presents_etat.edition_en_direct(g, event):
+            presents_global = g
+            presents_loc = presents_etat.principal_location(g)
+    except Exception as exc:
+        logger.warning("attendance_block : presents du dashboard indisponibles (%s)", exc)
+
     if now_utc is None:
         now_paris = datetime.now(TZ_PARIS)
     else:
@@ -633,7 +665,21 @@ def compute_attendance_block(db, event, year, now_utc=None):
         # Demain (offset=+1) : jamais (futur).
         skip_today_pic = (offset == 0 and now_paris.hour < TODAY_PIC_CUTOFF_HOUR)
         if offset <= 0 and not skip_today_pic:
-            pic_val, pic_src, pic_hour = _get_pic_observed_for_day(db, event, year_int, d)
+            pic_val = pic_src = pic_hour = None
+            if presents_loc is not None:
+                try:
+                    d0, d1 = presents_etat.paris_day_bounds_utc(d)
+                    pic_val, instant = presents_etat.pic_presents(db, presents_loc, d0, d1, presents_global)
+                    if pic_val is not None:
+                        pic_src = "presents_dashboard"
+                        # Heure du releve le plus haut : celle qu'affiche le
+                        # dashboard (<< Pic du jour a 19h06 >>).
+                        pic_hour = presents_etat.to_tranche_label(instant).strftime("%Hh%M")
+                except Exception as exc:
+                    logger.warning("attendance_block : pic des presents indisponible (%s)", exc)
+                    pic_val = None
+            if pic_val is None:
+                pic_val, pic_src, pic_hour = _get_pic_observed_for_day(db, event, year_int, d)
             slot["pic_observed"] = pic_val
             slot["pic_observed_hour"] = pic_hour
             slot["pic_observed_source"] = pic_src  # debug : "historique_controle" / "data_access" / "hsh_archive"

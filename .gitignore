@@ -25,6 +25,9 @@ static/meteo/
 *.der
 developer_key.pem
 
+# Exports CSV ad hoc (donnees generees, regenerables via scripts/)
+exports/
+
 # Journaux et trames du jumeau de remorque PMV (banc d essai local)
 docs/pmv/banc-essai/banc/
 docs/pmv/reference/banc/

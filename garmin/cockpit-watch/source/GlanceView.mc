@@ -23,7 +23,10 @@ class CockpitGlanceView extends WatchUi.GlanceView {
         // horodatage, `t`, celui du releve Skidata : le WBGT du creneau courant
         // peut etre frais alors que le compteur date de plusieurs mois. Afficher
         // "perime" a cote du WBGT le faisait passer pour perime lui aussi.
-        var ligne1 = Fmt.count(st != null ? st["e"] : null);
+        // Les PRESENTS sur site, comme le chiffre principal de la page 1 --
+        // pas le cumul d'entrees, qui ne redescend jamais. Nul hors mode
+        // live, comme `e` avant lui : la glance affiche alors un tiret.
+        var ligne1 = Fmt.count(State.presents(st));
         if (stale) {
             ligne1 += "  " + Fmt.age(State.worstAgeSec(st, now));
         }
