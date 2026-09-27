@@ -40,6 +40,7 @@ from routing import routing_bp
 from routing_overrides import routing_overrides_bp
 from cameras import cameras_bp
 from meteo import meteo_bp
+from pmv import pmv_bp
 import pcorg_summary
 import pcorg_summary_mail
 import pcorg_ai_memory
@@ -1815,6 +1816,9 @@ csrf.exempt(app.view_functions["routing.field_route"])
 # Toutes routes admin, CSRF conserve.
 app.register_blueprint(routing_overrides_bp)
 app.register_blueprint(cameras_bp)
+# PMV : pilotage des remorques a panneau a message variable (TCP 9520 vers les
+# routeurs 4G, cf. pmv.py). Page manager, CSRF ACTIF sur toutes les ecritures.
+app.register_blueprint(pmv_bp)
 # Alfred (agent IA WhatsApp via VM Linux + WAHA webhook). Le webhook POST
 # /api/wa/webhook est exempt de CSRF : WAHA ne sait pas envoyer un token CSRF,
 # l'authentification se fait par HMAC (header X-Webhook-Hmac, secret partage
@@ -8425,6 +8429,12 @@ if __name__ == "__main__":
             alfred.start_scheduler()
         except Exception as e:
             logger.warning("Echec demarrage scheduler Alfred : %s", e)
+        # Planificateur PMV (envois programmes aux remorques, cf. pmv.py)
+        try:
+            import pmv
+            pmv.start_scheduler()
+        except Exception as e:
+            logger.warning("Echec demarrage scheduler PMV : %s", e)
 
     # Lancement de l'application
     if DEV_MODE:

@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>COCKPIT -- PMV</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/pmv.css') }}">
+</head>
+
+<body>
+<div class="app-layout pmv-page">
+
+  {% set sidebar_active = '/pmv' %}
+  {% include '_sidebar.html' %}
+
+  <div class="app-main single-col-page">
+
+    <header class="app-header">
+      <button class="header-burger" id="header-burger-btn" type="button" aria-label="Menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+      <div class="header-event-info">
+        <span class="material-symbols-outlined" style="font-size:22px;color:var(--brand);">signpost</span>
+        <span class="header-event-name">PMV</span>
+        <span class="header-event-year" style="opacity:.6;">Panneaux a message variable</span>
+      </div>
+      <div class="header-spacer"></div>
+      <div class="header-actions" style="gap:10px;">
+        <div class="pmv-header-meta" id="pmv-compteur" title="Remorques joignables / remorques actives">
+          <span class="material-symbols-outlined">cell_tower</span>
+          <span id="pmv-compteur-texte">--</span>
+        </div>
+        <button class="btn btn-primary pmv-btn-icon-text" id="pmv-actualiser" type="button" title="Relire le registre et resoudre les adresses">
+          <span class="material-symbols-outlined">refresh</span> <span>Actualiser</span>
+        </button>
+      </div>
+    </header>
+
+    <div id="main-content">
+
+      <nav class="lab-center-tabs" id="pmv-onglets" role="tablist">
+        <button class="lab-tab active" type="button" data-vue="poste" role="tab">
+          <span class="material-symbols-outlined">map</span><span class="pmv-tab-label">Poste</span>
+        </button>
+        <button class="lab-tab" type="button" data-vue="messages" role="tab">
+          <span class="material-symbols-outlined">palette</span><span class="pmv-tab-label">Messages</span>
+        </button>
+        <button class="lab-tab" type="button" data-vue="programmation" role="tab">
+          <span class="material-symbols-outlined">schedule</span><span class="pmv-tab-label">Programmation</span>
+        </button>
+        <button class="lab-tab" type="button" data-vue="historique" role="tab">
+          <span class="material-symbols-outlined">history</span><span class="pmv-tab-label">Historique</span>
+        </button>
+        {% if "admin" in user_roles %}
+        <button class="lab-tab" type="button" data-vue="registre" role="tab">
+          <span class="material-symbols-outlined">inventory_2</span><span class="pmv-tab-label">Registre</span>
+        </button>
+        {% endif %}
+      </nav>
+
+      <!-- ================= POSTE ================= -->
+      <div class="pmv-view pmv-stack active" data-vue="poste">
+        <div class="pmv-poste">
+          <section class="widget-card">
+            <header class="widget-header">
+              <h3><span class="material-symbols-outlined">map</span> Carte des remorques</h3>
+              <div class="pmv-widget-meta" id="pmv-carte-meta">-</div>
+            </header>
+            <div class="widget-body">
+              <div id="pmv-carte" class="pmv-map"></div>
+              <div class="pmv-map-note">Positions saisies dans le registre. Les remorques sans position n'apparaissent que dans la liste.</div>
+            </div>
+          </section>
+
+          <section class="widget-card pmv-list-card">
+            <header class="widget-header">
+              <h3><span class="material-symbols-outlined">signpost</span> Remorques</h3>
+              <div class="pmv-widget-meta" id="pmv-liste-meta">-</div>
+            </header>
+            <div class="widget-body">
+              <ul class="pmv-list" id="pmv-liste" aria-live="polite">
+                <li class="pmv-empty"><span class="lab-progress-ring"></span> Chargement...</li>
+              </ul>
+            </div>
+          </section>
+        </div>
+
+        <section class="widget-card" id="pmv-action">
+          <header class="widget-header">
+            <h3><span class="material-symbols-outlined">send</span> <span id="pmv-action-titre">Afficher un message</span></h3>
+            <div class="widget-tabs pmv-cible" id="pmv-cible">
+              <button class="widget-tab active" type="button" data-cible="remorque"><span class="material-symbols-outlined">signpost</span> Une remorque</button>
+              <button class="widget-tab" type="button" data-cible="groupe"><span class="material-symbols-outlined">workspaces</span> Un groupe</button>
+            </div>
+            <div class="pmv-widget-meta" id="pmv-action-meta"></div>
+          </header>
+          <div class="widget-body">
+            <div class="pmv-empty" id="pmv-action-vide">
+              <span class="material-symbols-outlined">touch_app</span>
+              Selectionnez une remorque dans la liste ou sur la carte.
+            </div>
+
+            <div class="pmv-action-grid" id="pmv-action-corps" hidden>
+              <div>
+                <div class="pmv-section-title">Ce qui va s'afficher</div>
+                <div class="pmv-apercu"><canvas id="pmv-apercu" width="96" height="64"></canvas></div>
+                <div class="pmv-apercu-legende" id="pmv-apercu-legende">Aucune image choisie</div>
+                <div class="form-group pmv-source-biblio">
+                  <label for="pmv-source-message">Message de la bibliotheque</label>
+                  <select class="form-input" id="pmv-source-message"><option value="">Choisir un message...</option></select>
+                </div>
+                <div class="pmv-source">
+                  <button class="btn btn-secondary pmv-btn-icon-text pmv-btn-sm" type="button" id="pmv-source-editeur" title="Reprendre le dessin en cours dans l'editeur">
+                    <span class="material-symbols-outlined">palette</span> Dessin de l'editeur
+                  </button>
+                  <label class="btn btn-secondary pmv-btn-icon-text pmv-btn-sm" for="pmv-fichier">
+                    <span class="material-symbols-outlined">image</span> Fichier 96 x 64
+                  </label>
+                  <input type="file" id="pmv-fichier" accept=".png,.bmp,.jpg,.jpeg,image/png,image/bmp,image/jpeg">
+                </div>
+              </div>
+
+              <div id="pmv-zone-groupe" hidden>
+                <div class="form-group">
+                  <label for="pmv-groupe-select">Groupe de remorques</label>
+                  <select class="form-input" id="pmv-groupe-select"><option value="">Choisir un groupe...</option></select>
+                </div>
+                <div class="pmv-cta">
+                  <button class="btn btn-primary pmv-btn-icon-text" id="pmv-envoyer-groupe" type="button" disabled>
+                    <span class="material-symbols-outlined">send</span> <span id="pmv-envoyer-groupe-libelle">Envoyer au groupe</span>
+                  </button>
+                  <div class="pmv-raison" id="pmv-raison-groupe"></div>
+                </div>
+                <div class="pmv-avert">
+                  Chaque remorque est traitee comme un envoi unitaire (dalle verifiee, affichage sauvegarde),
+                  trois a la fois. Celles qui affichent deja ce message ou sont occupees sont ecartees.
+                </div>
+                <div class="table-responsive">
+                  <table class="table pmv-table-groupe">
+                    <thead><tr><th>Remorque</th><th>Etat</th><th class="col-shrink">Resultat</th></tr></thead>
+                    <tbody id="pmv-groupe-corps"></tbody>
+                  </table>
+                </div>
+                <div class="pmv-resultat" id="pmv-groupe-bilan" hidden></div>
+              </div>
+
+              <div id="pmv-zone-remorque">
+                <div class="pmv-cta">
+                  <button class="btn btn-primary pmv-btn-icon-text" id="pmv-envoyer" type="button" disabled>
+                    <span class="material-symbols-outlined">send</span> <span id="pmv-envoyer-libelle">Envoyer</span>
+                  </button>
+                  <div class="pmv-raison" id="pmv-raison"></div>
+                </div>
+                <div class="pmv-avert">
+                  L'image remplace aussitot l'affichage du panneau, au bord de la route.
+                  L'affichage actuel est sauvegarde d'abord et peut etre remis ensuite.
+                </div>
+                <div class="pmv-secondaires">
+                  <button class="btn btn-secondary pmv-btn-icon-text" id="pmv-tester" type="button">
+                    <span class="material-symbols-outlined">cable</span> Tester la connexion
+                  </button>
+                  <button class="btn btn-secondary pmv-btn-icon-text" id="pmv-restaurer" type="button" disabled>
+                    <span class="material-symbols-outlined">undo</span> Remettre l'affichage d'avant
+                  </button>
+                </div>
+                <div class="pmv-sauvegarde" id="pmv-sauvegarde"></div>
+
+                <ol class="pmv-steps" id="pmv-etapes" hidden></ol>
+                <div class="pmv-resultat" id="pmv-resultat" hidden></div>
+                <details class="pmv-log" id="pmv-journal" hidden>
+                  <summary><span class="material-symbols-outlined">chevron_right</span> Journal technique</summary>
+                  <pre id="pmv-journal-texte"></pre>
+                </details>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ================= MESSAGES ================= -->
+      <div class="pmv-view pmv-stack" data-vue="messages">
+        <section class="widget-card" id="ped-root">
+          <header class="widget-header pmv-ed-entete">
+            <h3><span class="material-symbols-outlined">palette</span> Editeur 96 x 64</h3>
+            <div class="widget-tabs" id="ped-modes">
+              <button class="widget-tab active" type="button" data-mode="dessin"><span class="material-symbols-outlined">brush</span> Dessin</button>
+              <button class="widget-tab" type="button" data-mode="copier"><span class="material-symbols-outlined">crop</span> Copier depuis une image</button>
+            </div>
+            <div class="pmv-widget-meta pmv-ed-meta">
+              <span id="ped-edition" class="pmv-pill is-unknown no-dot">Nouveau message</span>
+              <button class="btn-icon" type="button" id="ped-nouveau" title="Nouveau message (dessin vide)"><span class="material-symbols-outlined">note_add</span></button>
+              <button class="btn-icon" type="button" id="ped-aide-btn" title="Aide de l'editeur"><span class="material-symbols-outlined">help</span></button>
+            </div>
+          </header>
+
+          <div class="widget-body pmv-ed">
+            <!-- ---------- Colonne outils ---------- -->
+            <aside class="pmv-ed-outils">
+              <div id="ped-panneau-dessin">
+                <div class="pmv-section-title">Couleur</div>
+                <div class="pmv-ed-palette" id="ped-palette"></div>
+
+                <div class="pmv-section-title">Outils</div>
+                <div class="pmv-ed-grille-outils" id="ped-outils">
+                  <button class="btn-icon" type="button" data-outil="pencil" title="Crayon (P)"><span class="material-symbols-outlined">edit</span></button>
+                  <button class="btn-icon" type="button" data-outil="eraser" title="Gomme (E)"><span class="material-symbols-outlined">ink_eraser</span></button>
+                  <button class="btn-icon" type="button" data-outil="fill" title="Remplissage (F)"><span class="material-symbols-outlined">format_color_fill</span></button>
+                  <button class="btn-icon" type="button" data-outil="eye" title="Pipette (I)"><span class="material-symbols-outlined">colorize</span></button>
+                  <button class="btn-icon" type="button" data-outil="line" title="Ligne (L)"><span class="material-symbols-outlined">pen_size_2</span></button>
+                  <button class="btn-icon" type="button" data-outil="rect" title="Rectangle (R)"><span class="material-symbols-outlined">crop_square</span></button>
+                  <button class="btn-icon" type="button" data-outil="circle" title="Cercle (C)"><span class="material-symbols-outlined">circle</span></button>
+                  <button class="btn-icon" type="button" data-outil="triangle" title="Triangle (G)"><span class="material-symbols-outlined">change_history</span></button>
+                  <button class="btn-icon" type="button" data-outil="sel" title="Selection (S)"><span class="material-symbols-outlined">select</span></button>
+                  <button class="btn-icon" type="button" data-outil="text" title="Texte (T)"><span class="material-symbols-outlined">title</span></button>
+                  <button class="btn-icon pmv-ed-annuler" type="button" id="ped-annuler" title="Annuler (Ctrl+Z)"><span class="material-symbols-outlined">undo</span> <span>Annuler</span></button>
+                </div>
+
+                <div class="pmv-ed-props" id="ped-props">
+                  <div class="pmv-ed-prop" id="ped-prop-epaisseur">
+                    <label for="ped-epaisseur">Epaisseur</label>
+                    <input type="range" id="ped-epaisseur" min="1" max="6" value="1">
+                    <span class="pmv-ed-val" id="ped-epaisseur-val">1 px</span>
+                  </div>
+                  <div class="pmv-ed-prop" id="ped-prop-gomme" hidden>
+                    <label>Gomme</label>
+                    <div class="widget-tabs" id="ped-gomme">
+                      <button class="widget-tab active" type="button" data-taille="1">1 px</button>
+                      <button class="widget-tab" type="button" data-taille="2">2 x 2</button>
+                      <button class="widget-tab" type="button" data-taille="4">4 x 4</button>
+                    </div>
+                  </div>
+                  <div class="pmv-ed-prop" id="ped-prop-forme" hidden>
+                    <label>Forme</label>
+                    <div class="widget-tabs" id="ped-forme">
+                      <button class="widget-tab active" type="button" data-forme="outline">Contour</button>
+                      <button class="widget-tab" type="button" data-forme="fill">Plein</button>
+                    </div>
+                  </div>
+                  <div class="pmv-ed-astuce" id="ped-prop-triangle" hidden>Clic = pointe, glisser = base et direction.</div>
+                  <div class="pmv-ed-texte" id="ped-prop-texte" hidden>
+                    <input type="text" class="form-input" id="ped-texte" placeholder="TEXTE PMV" maxlength="32" autocomplete="off" spellcheck="false">
+                    <div class="pmv-ed-prop">
+                      <label for="ped-police">Police</label>
+                      <select class="form-input" id="ped-police">
+                        <option value="pmv" selected>Compacte 4 x 5</option>
+                        <option value="f57">Standard 5 x 7</option>
+                      </select>
+                    </div>
+                    <div class="pmv-ed-prop">
+                      <label for="ped-echelle">Echelle</label>
+                      <input type="range" id="ped-echelle" min="1" max="4" value="1">
+                      <span class="pmv-ed-val" id="ped-echelle-val">x1</span>
+                    </div>
+                    <div class="pmv-ed-texte-apercu"><canvas id="ped-texte-apercu" height="14"></canvas></div>
+                    <div class="pmv-ed-astuce">Survol = apercu, clic = poser le texte.</div>
+                  </div>
+                </div>
+
+                <div class="pmv-section-title">Affichage</div>
+                <div class="pmv-ed-ligne">
+                  <button class="btn-icon" type="button" id="ped-zoom-moins" title="Zoom arriere"><span class="material-symbols-outlined">zoom_out</span></button>
+                  <span class="pmv-ed-val" id="ped-zoom-val">x8</span>
+                  <button class="btn-icon" type="button" id="ped-zoom-plus" title="Zoom avant"><span class="material-symbols-outlined">zoom_in</span></button>
+                  <button class="btn-icon" type="button" id="ped-zoom-ajuster" title="Ajuster a la zone"><span class="material-symbols-outlined">fit_screen</span></button>
+                </div>
+                <label class="pmv-check"><input type="checkbox" id="ped-grille" checked> Grille des pixels</label>
+                <label class="pmv-check"><input type="checkbox" id="ped-reperes"> Reperes centraux</label>
+
+                <div class="pmv-section-title">Fichier</div>
+                <div class="pmv-ed-fichier">
+                  <button class="btn btn-secondary pmv-btn-icon-text pmv-btn-sm" type="button" id="ped-inserer" title="Inserer une image en superposition deplacable"><span class="material-symbols-outlined">add_photo_alternate</span> Inserer une image</button>
+                  <button class="btn btn-secondary pmv-btn-icon-text pmv-btn-sm" type="button" id="ped-importer" title="Remplacer le dessin par une image (BMP, PNG, JPG)"><span class="material-symbols-outlined">upload</span> Importer</button>
+                  <button class="btn btn-secondary pmv-btn-icon-text pmv-btn-sm" type="button" id="ped-exporter-png"><span class="material-symbols-outlined">download</span> PNG</button>
+                  <button class="btn btn-secondary pmv-btn-icon-text pmv-btn-sm" type="button" id="ped-exporter-bmp"><span class="material-symbols-outlined">download</span> BMP</button>
+                  <button class="btn btn-danger pmv-btn-icon-text pmv-btn-sm" type="button" id="ped-vider"><span class="material-symbols-outlined">delete_sweep</span> Vider</button>
+                </div>
+                <input type="file" id="ped-fichier-import" accept=".bmp,.png,.jpg,.jpeg,image/bmp,image/png,image/jpeg" hidden>
+                <input type="file" id="ped-fichier-inserer" accept=".bmp,.png,.jpg,.jpeg,image/bmp,image/png,image/jpeg" hidden>
+              </div>
+
+              <div id="ped-panneau-copier" hidden>
+                <p class="pmv-help">Chargez une image de n'importe quelle taille, puis choisissez comment la ramener en 96 x 64.</p>
+                <button class="btn btn-primary pmv-btn-icon-text" type="button" id="ped-cp-charger"><span class="material-symbols-outlined">image</span> Charger une image source</button>
+                <input type="file" id="ped-cp-fichier" accept=".bmp,.png,.jpg,.jpeg,.webp,image/*" hidden>
+                <div class="pmv-ed-cp-etat" id="ped-cp-etat">Aucune source chargee</div>
+                <div class="pmv-ed-cp-actions" id="ped-cp-choix" hidden>
+                  <button class="btn btn-secondary pmv-btn-icon-text" type="button" id="ped-cp-centre" title="Placer la source centree sur fond noir"><span class="material-symbols-outlined">center_focus_strong</span> Placer au centre</button>
+                  <button class="btn btn-secondary pmv-btn-icon-text" type="button" id="ped-cp-original" title="Decouper une zone 96 x 64 a la resolution d'origine"><span class="material-symbols-outlined">crop_free</span> Decouper en 96 x 64</button>
+                  <button class="btn btn-secondary pmv-btn-icon-text" type="button" id="ped-cp-perso" title="Cadre 3:2 redimensionnable, mis a l'echelle 96 x 64"><span class="material-symbols-outlined">crop_3_2</span> Cadre ajustable</button>
+                  <button class="btn btn-secondary pmv-btn-icon-text" type="button" id="ped-cp-fit" title="Toute la source, bandes noires si besoin"><span class="material-symbols-outlined">fit_screen</span> Ajuster en entier</button>
+                  <button class="btn btn-secondary pmv-btn-icon-text" type="button" id="ped-cp-zone" title="Prelever une zone a deposer sur le dessin"><span class="material-symbols-outlined">content_cut</span> Copier une zone</button>
+                  <button class="btn btn-danger pmv-btn-icon-text" type="button" id="ped-cp-abandon"><span class="material-symbols-outlined">close</span> Abandonner</button>
+                </div>
+                <div class="pmv-ed-cp-actions" id="ped-cp-valider" hidden>
+                  <button class="btn btn-primary pmv-btn-icon-text" type="button" id="ped-cp-ok"><span class="material-symbols-outlined">check</span> Valider le cadrage</button>
+                  <button class="btn btn-secondary pmv-btn-icon-text" type="button" id="ped-cp-retour"><span class="material-symbols-outlined">arrow_back</span> Retour</button>
+                </div>
+                <div class="pmv-ed-cp-actions" id="ped-cp-zonebar" hidden>
+                  <button class="btn btn-primary pmv-btn-icon-text" type="button" id="ped-cp-copier-zone"><span class="material-symbols-outlined">content_copy</span> Copier la selection</button>
+                  <button class="btn btn-secondary pmv-btn-icon-text" type="button" id="ped-cp-retour-zone"><span class="material-symbols-outlined">arrow_back</span> Retour</button>
+                </div>
+              </div>
+            </aside>
+
+            <!-- ---------- Scene ---------- -->
+            <div class="pmv-ed-centre">
+              <div class="pmv-ed-scene" id="ped-scene">
+                <div class="pmv-ed-toile" id="ped-toile">
+                  <canvas id="ped-mc"></canvas><canvas id="ped-go"></canvas><canvas id="ped-oc"></canvas>
+                </div>
+                <div class="pmv-ed-source" id="ped-source" hidden>
+                  <canvas id="ped-src"></canvas><canvas id="ped-src-ov"></canvas>
+                </div>
+                <div class="pmv-ed-source-vide" id="ped-source-vide" hidden>
+                  <span class="material-symbols-outlined">image</span> Chargez une image source pour l'afficher ici
+                </div>
+              </div>
+              <div class="pmv-ed-statut">
+                <span id="ped-coords">--</span>
+                <span class="pmv-ed-couleur"><span class="pmv-ed-pastille" id="ped-couleur-pastille"></span><span id="ped-couleur-hex">#FFFFFF</span></span>
+                <span id="ped-comptes" class="pmv-ed-comptes"></span>
+              </div>
+            </div>
+
+            <!-- ---------- Colonne droite ---------- -->
+            <aside class="pmv-ed-cote">
+              <div class="pmv-ed-bloc">
+              <div class="pmv-section-title">Sur la remorque</div>
+              <div class="pmv-ed-simulateur" id="ped-simulateur"></div>
+              <div class="pmv-apercu-legende">Representation stylisee, non contractuelle</div>
+              </div>
+
+              <div class="pmv-ed-bloc">
+              <div class="pmv-section-title">Bibliotheque</div>
+              <div class="form-group">
+                <label for="ped-nom">Nom du message</label>
+                <input class="form-input" id="ped-nom" maxlength="80" placeholder="Parking complet">
+              </div>
+              <div class="form-group">
+                <label for="ped-categorie">Categorie</label>
+                <input class="form-input" id="ped-categorie" maxlength="40" list="ped-categories" placeholder="Parkings, Securite, Orientation...">
+                <datalist id="ped-categories"></datalist>
+              </div>
+              <div class="form-group">
+                <label for="ped-etiquettes">Etiquettes <span class="hint">separees par des virgules</span></label>
+                <input class="form-input" id="ped-etiquettes" maxlength="200">
+              </div>
+              <div class="pmv-ed-boutons">
+                <button class="btn btn-primary pmv-btn-icon-text" type="button" id="ped-enregistrer"><span class="material-symbols-outlined">save</span> <span id="ped-enregistrer-libelle">Enregistrer</span></button>
+                <button class="btn btn-secondary pmv-btn-icon-text" type="button" id="ped-enregistrer-copie" hidden title="Enregistrer comme un nouveau message"><span class="material-symbols-outlined">library_add</span> Nouveau</button>
+              </div>
+              <button class="btn btn-secondary pmv-btn-icon-text pmv-ed-utiliser" type="button" id="ped-utiliser" title="Ouvrir l'onglet Poste avec ce dessin pret a envoyer">
+                <span class="material-symbols-outlined">send</span> Utiliser pour un envoi
+              </button>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="widget-card">
+          <header class="widget-header">
+            <h3><span class="material-symbols-outlined">photo_library</span> Bibliotheque de messages</h3>
+            <div class="pmv-widget-meta" id="pmv-biblio-meta">-</div>
+          </header>
+          <div class="widget-body">
+            <div class="pmv-filtres">
+              <div class="form-group">
+                <label for="pmv-biblio-recherche">Rechercher</label>
+                <input class="form-input" id="pmv-biblio-recherche" placeholder="Nom, categorie, etiquette" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="pmv-biblio-categorie">Categorie</label>
+                <select class="form-input" id="pmv-biblio-categorie"><option value="">Toutes</option></select>
+              </div>
+              <label class="pmv-check"><input type="checkbox" id="pmv-biblio-evenement"> Evenement courant seulement</label>
+            </div>
+            <div class="pmv-biblio" id="pmv-biblio"></div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ================= PROGRAMMATION ================= -->
+      <div class="pmv-view pmv-stack" data-vue="programmation">
+        <section class="widget-card">
+          <header class="widget-header">
+            <h3><span class="material-symbols-outlined">more_time</span> Programmer un envoi</h3>
+            <div class="pmv-widget-meta">Heure de Paris</div>
+          </header>
+          <div class="widget-body">
+            <p class="pmv-help">
+              A l'heure dite, Cockpit envoie le message a la remorque ou au groupe, avec les memes controles qu'un
+              envoi a la main. Deux programmations sur une meme remorque doivent etre espacees d'au moins
+              <strong id="pmv-prog-ecart">15</strong> minutes (la memoire du panneau s'use a chaque ecriture).
+              Si le serveur etait indisponible a l'heure prevue, l'envoi n'est pas rattrape plus de 10 minutes apres.
+            </p>
+            <div class="pmv-prog-form">
+              <div class="form-group">
+                <label for="pmv-prog-cible">Cible</label>
+                <select class="form-input" id="pmv-prog-cible"></select>
+              </div>
+              <div class="form-group">
+                <label for="pmv-prog-message">Message de la bibliotheque</label>
+                <select class="form-input" id="pmv-prog-message"></select>
+              </div>
+              <div class="form-group">
+                <label for="pmv-prog-at">Date et heure</label>
+                <input class="form-input" type="datetime-local" id="pmv-prog-at" step="60">
+              </div>
+              <div class="pmv-prog-apercu"><img id="pmv-prog-apercu" alt="" hidden></div>
+              <button class="btn btn-primary pmv-btn-icon-text" type="button" id="pmv-prog-creer">
+                <span class="material-symbols-outlined">schedule_send</span> Programmer
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section class="widget-card">
+          <header class="widget-header">
+            <h3><span class="material-symbols-outlined">event_upcoming</span> A venir</h3>
+            <div class="pmv-widget-meta" id="pmv-prog-meta">-</div>
+          </header>
+          <div class="widget-body">
+            <div class="table-responsive">
+              <table class="table table-striped table-hover">
+                <thead><tr><th class="col-shrink">Message</th><th>Quand</th><th>Cible</th><th>Par</th><th class="col-shrink">Etat</th><th class="col-shrink"></th></tr></thead>
+                <tbody id="pmv-prog-a-venir"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="widget-card">
+          <header class="widget-header">
+            <h3><span class="material-symbols-outlined">event_available</span> Passees</h3>
+          </header>
+          <div class="widget-body">
+            <div class="table-responsive">
+              <table class="table table-striped table-hover">
+                <thead><tr><th class="col-shrink">Message</th><th>Prevue</th><th>Cible</th><th>Par</th><th class="col-shrink">Etat</th><th>Detail</th></tr></thead>
+                <tbody id="pmv-prog-passees"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ================= HISTORIQUE ================= -->
+      <div class="pmv-view pmv-stack" data-vue="historique">
+        <section class="widget-card">
+          <header class="widget-header">
+            <h3><span class="material-symbols-outlined">history</span> Historique des envois</h3>
+            <div class="pmv-widget-meta" id="pmv-histo-meta">-</div>
+          </header>
+          <div class="widget-body">
+            <div class="pmv-filtres">
+              <div class="form-group">
+                <label for="pmv-histo-panneau">Remorque</label>
+                <select class="form-input" id="pmv-histo-panneau"><option value="">Toutes</option></select>
+              </div>
+              <label class="pmv-check"><input type="checkbox" id="pmv-histo-evenement"> Evenement courant seulement</label>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-striped table-hover">
+                <thead>
+                  <tr>
+                    <th class="col-shrink">Message</th><th>Remorque</th><th>Action</th><th>Par</th>
+                    <th>Quand</th><th class="col-shrink">Duree</th><th class="col-shrink">Resultat</th>
+                  </tr>
+                </thead>
+                <tbody id="pmv-histo-corps"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ================= REGISTRE (admin) ================= -->
+      {% if "admin" in user_roles %}
+      <div class="pmv-view pmv-stack" data-vue="registre">
+        <section class="widget-card">
+          <header class="widget-header">
+            <h3><span class="material-symbols-outlined">inventory_2</span> Registre des remorques</h3>
+            <div class="pmv-widget-meta" style="display:flex;gap:8px;">
+              <label class="btn btn-secondary pmv-btn-icon-text pmv-btn-sm" for="pmv-import-fichier" title="Importer l'export JSON des fiches de l'ancien editeur (volet Reseau)">
+                <span class="material-symbols-outlined">upload_file</span> Importer des fiches
+              </label>
+              <input type="file" id="pmv-import-fichier" accept=".json,application/json" hidden>
+              <button class="btn btn-primary pmv-btn-icon-text pmv-btn-sm" id="pmv-ajouter" type="button">
+                <span class="material-symbols-outlined">add</span> Ajouter une remorque
+              </button>
+            </div>
+          </header>
+          <div class="widget-body">
+            <p class="pmv-help">
+              Cockpit ne se connecte qu'aux remorques de ce registre, sur le port 9520. L'adresse est
+              resolue a chaque operation depuis la plaque (info&lt;PLAQUE&gt;.ddns.net) ; une IP fixe
+              n'est utile que pour une remorque hors DNS ou pour le jumeau de banc d'essai.
+            </p>
+            <div class="table-responsive">
+              <table class="table table-striped table-hover">
+                <thead>
+                  <tr>
+                    <th class="col-shrink">Plaque</th><th>Nom</th><th>Localisation</th>
+                    <th class="col-shrink">Position</th><th class="col-shrink">Adresse</th>
+                    <th class="col-shrink">Etat</th><th class="col-shrink"></th>
+                  </tr>
+                </thead>
+                <tbody id="pmv-registre-corps"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="widget-card">
+          <header class="widget-header">
+            <h3><span class="material-symbols-outlined">workspaces</span> Groupes de remorques</h3>
+            <div class="pmv-widget-meta">
+              <button class="btn btn-primary pmv-btn-icon-text pmv-btn-sm" id="pmv-groupe-ajouter" type="button">
+                <span class="material-symbols-outlined">add</span> Nouveau groupe
+              </button>
+            </div>
+          </header>
+          <div class="widget-body">
+            <p class="pmv-help">Un groupe (ex. Parkings Nord) permet d'afficher le meme message sur plusieurs remorques en une fois, ou de le programmer.</p>
+            <div class="table-responsive">
+              <table class="table table-striped table-hover">
+                <thead><tr><th>Nom</th><th>Remorques</th><th class="col-shrink"></th></tr></thead>
+                <tbody id="pmv-groupes-corps"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
+</div>
+
+{% if "admin" in user_roles %}
+<!-- ===== MODALE REMORQUE ===== -->
+<div class="crud-modal pmv-modal" id="pmv-modal-panneau" hidden>
+  <div class="crud-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="pmv-modal-titre">
+    <div class="crud-modal-header">
+      <h3 id="pmv-modal-titre">Nouvelle remorque</h3>
+      <button class="crud-modal-close" type="button" data-fermer aria-label="Fermer">&times;</button>
+    </div>
+    <div class="crud-modal-body">
+      <div class="pmv-form-grid">
+        <div class="form-group">
+          <label for="pmv-f-plaque">Plaque <span class="req">*</span></label>
+          <input class="form-input" id="pmv-f-plaque" placeholder="AA-000-AA" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="form-group">
+          <label for="pmv-f-nom">Nom court</label>
+          <input class="form-input" id="pmv-f-nom" placeholder="PMV Parking Nord" maxlength="80">
+        </div>
+        <div class="form-group pleine">
+          <label for="pmv-f-loc">Localisation</label>
+          <input class="form-input" id="pmv-f-loc" placeholder="Rond-point Arnage, sens entree circuit" maxlength="300">
+        </div>
+        <div class="form-group pleine">
+          <label for="pmv-f-desc">Description</label>
+          <textarea class="form-input" id="pmv-f-desc" rows="2" maxlength="500" style="min-height:60px;"></textarea>
+        </div>
+        <div class="form-group pleine">
+          <label>Position <span class="hint">clic sur la carte pour placer la remorque</span></label>
+          <div id="pmv-f-carte" class="pmv-form-map"></div>
+          <div class="pmv-coords">
+            <span id="pmv-f-coords">Aucune position</span>
+            <button class="btn btn-secondary pmv-btn-sm" type="button" id="pmv-f-effacer-pos">Effacer</button>
+          </div>
+        </div>
+        <div class="form-group pleine">
+          <label class="pmv-check"><input type="checkbox" id="pmv-f-actif" checked> Remorque active</label>
+        </div>
+        <div class="pleine pmv-admin-zone">
+          <div class="pmv-section-title">Avance</div>
+          <div class="pmv-form-grid">
+            <div class="form-group">
+              <label for="pmv-f-ip">IP fixe <span class="hint">optionnel</span></label>
+              <input class="form-input" id="pmv-f-ip" placeholder="vide = resolution DNS" autocomplete="off">
+            </div>
+            <div class="form-group" style="display:flex;align-items:flex-end;">
+              <label class="pmv-check"><input type="checkbox" id="pmv-f-jumeau"> Jumeau de banc d'essai (127.0.0.1)</label>
+            </div>
+          </div>
+          <p class="pmv-help" style="margin:0;">Le jumeau (docs/pmv/banc-essai/faux_panneau.py) n'est visible et utilisable que par les admins.</p>
+        </div>
+      </div>
+      <div class="form-error" id="pmv-f-erreur"></div>
+    </div>
+    <div class="crud-modal-footer">
+      <button class="btn btn-secondary" type="button" data-fermer>Annuler</button>
+      <button class="btn btn-primary" type="button" id="pmv-f-enregistrer">Enregistrer</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if "admin" in user_roles %}
+<!-- ===== MODALE GROUPE ===== -->
+<div class="crud-modal pmv-modal" id="pmv-modal-groupe" hidden>
+  <div class="crud-modal-dialog pmv-modal-etroite" role="dialog" aria-modal="true" aria-labelledby="pmv-g-titre">
+    <div class="crud-modal-header">
+      <h3 id="pmv-g-titre">Nouveau groupe</h3>
+      <button class="crud-modal-close" type="button" data-fermer aria-label="Fermer">&times;</button>
+    </div>
+    <div class="crud-modal-body">
+      <div class="form-group">
+        <label for="pmv-g-nom">Nom du groupe <span class="req">*</span></label>
+        <input class="form-input" id="pmv-g-nom" maxlength="60" placeholder="Parkings Nord">
+      </div>
+      <div class="pmv-section-title">Remorques</div>
+      <div class="pmv-g-liste" id="pmv-g-liste"></div>
+      <div class="form-error" id="pmv-g-erreur"></div>
+    </div>
+    <div class="crud-modal-footer">
+      <button class="btn btn-secondary" type="button" data-fermer>Annuler</button>
+      <button class="btn btn-primary" type="button" id="pmv-g-enregistrer">Enregistrer</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- ===== MODALE INSERTION D'IMAGE (editeur) ===== -->
+<div class="crud-modal pmv-modal" id="ped-modal-inserer" hidden>
+  <div class="crud-modal-dialog pmv-modal-etroite" role="dialog" aria-modal="true" aria-labelledby="ped-ins-titre">
+    <div class="crud-modal-header">
+      <h3 id="ped-ins-titre">Inserer une image</h3>
+      <button class="crud-modal-close" type="button" data-fermer aria-label="Fermer">&times;</button>
+    </div>
+    <div class="crud-modal-body">
+      <div class="pmv-ins-apercu"><canvas id="ped-ins-apercu"></canvas></div>
+      <div class="pmv-ins-info" id="ped-ins-info">--</div>
+      <div class="pmv-section-title">Taille maximale</div>
+      <div class="widget-tabs pmv-ins-tailles" id="ped-ins-tailles">
+        <button class="widget-tab" type="button" data-taille="16">16</button>
+        <button class="widget-tab" type="button" data-taille="24">24</button>
+        <button class="widget-tab active" type="button" data-taille="32">32</button>
+        <button class="widget-tab" type="button" data-taille="48">48</button>
+        <button class="widget-tab" type="button" data-taille="64">64</button>
+      </div>
+      <div class="pmv-ins-perso">
+        <label for="ped-ins-taille">Personnalisee</label>
+        <input class="form-input" type="number" id="ped-ins-taille" min="4" max="96" value="32"> px
+      </div>
+      <div class="pmv-ins-resultat" id="ped-ins-resultat"></div>
+      <p class="pmv-help" style="margin:8px 0 0;">L'image apparait ensuite sur le dessin et suit la souris : un clic la depose, Echap l'abandonne.</p>
+    </div>
+    <div class="crud-modal-footer">
+      <button class="btn btn-secondary" type="button" data-fermer>Annuler</button>
+      <button class="btn btn-primary" type="button" id="ped-ins-ok">Inserer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODALE AIDE (editeur) ===== -->
+<div class="crud-modal pmv-modal" id="ped-modal-aide" hidden>
+  <div class="crud-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="ped-aide-titre">
+    <div class="crud-modal-header">
+      <h3 id="ped-aide-titre">Aide de l'editeur</h3>
+      <button class="crud-modal-close" type="button" data-fermer aria-label="Fermer">&times;</button>
+    </div>
+    <div class="crud-modal-body pmv-aide">
+      <div class="widget-tabs pmv-aide-onglets" id="ped-aide-onglets">
+        <button class="widget-tab active" type="button" data-aide="depart">Prise en main</button>
+        <button class="widget-tab" type="button" data-aide="outils">Outils</button>
+        <button class="widget-tab" type="button" data-aide="texte">Texte</button>
+        <button class="widget-tab" type="button" data-aide="selection">Selection</button>
+        <button class="widget-tab" type="button" data-aide="copier">Copier</button>
+        <button class="widget-tab" type="button" data-aide="clavier">Raccourcis</button>
+        <button class="widget-tab" type="button" data-aide="conseils">Conseils PMV</button>
+      </div>
+      <div data-aide-section="depart">
+        <p>Chaque pixel du dessin est une LED de la remorque : la dalle fait <strong>96 x 64</strong>, sans mise a l'echelle a l'affichage. Le noir correspond aux LED eteintes.</p>
+        <ul>
+          <li>Choisir une <strong>couleur</strong>, puis un <strong>outil</strong>, et dessiner sur la zone noire.</li>
+          <li>La <strong>molette</strong> zoome ; le bouton d'ajustement remplit la zone disponible.</li>
+          <li><strong>Ctrl+Z</strong> annule (40 niveaux). La grille apparait a partir du zoom x4.</li>
+          <li>Les <strong>reperes centraux</strong> aident a centrer un pictogramme ; ils ne sont jamais envoyes.</li>
+          <li><strong>Enregistrer</strong> range le dessin dans la bibliotheque ; <strong>Utiliser pour un envoi</strong> le prepare dans l'onglet Poste.</li>
+        </ul>
+      </div>
+      <div data-aide-section="outils" hidden>
+        <table class="table">
+          <tr><td class="col-shrink"><strong>Crayon</strong> (P)</td><td>Trace en maintenant le clic. Epaisseur 1 a 6 px.</td></tr>
+          <tr><td class="col-shrink"><strong>Gomme</strong> (E)</td><td>Efface en noir, par carre de 1, 2 ou 4 px.</td></tr>
+          <tr><td class="col-shrink"><strong>Remplissage</strong> (F)</td><td>Remplit la zone contigue de meme couleur.</td></tr>
+          <tr><td class="col-shrink"><strong>Pipette</strong> (I)</td><td>Reprend la couleur d'un pixel, puis revient au crayon.</td></tr>
+          <tr><td class="col-shrink"><strong>Ligne</strong> (L)</td><td>Clic, glisser, relacher.</td></tr>
+          <tr><td class="col-shrink"><strong>Rectangle</strong> (R)</td><td>Clic-glisser ; contour ou plein.</td></tr>
+          <tr><td class="col-shrink"><strong>Cercle</strong> (C)</td><td>Clic = centre, glisser = rayon ; contour ou plein.</td></tr>
+          <tr><td class="col-shrink"><strong>Triangle</strong> (G)</td><td>Clic = pointe, glisser vers la base : le geste donne taille et direction. Ideal pour les fleches.</td></tr>
+        </table>
+      </div>
+      <div data-aide-section="texte" hidden>
+        <ul>
+          <li>Saisir le texte, puis survoler le dessin : l'apercu suit la souris. Un <strong>clic</strong> le grave.</li>
+          <li><strong>Compacte 4 x 5</strong> : minimum lisible sur route. <strong>Standard 5 x 7</strong> : plus lisible de loin.</li>
+          <li>L'<strong>echelle</strong> (x1 a x4) grossit les lettres ; l'espace entre lettres reste de 1 px.</li>
+          <li>Caracteres : A-Z, a-z, 0-9, ponctuation courante et accents francais (police 5 x 7).</li>
+        </ul>
+      </div>
+      <div data-aide-section="selection" hidden>
+        <ul>
+          <li>Outil <strong>Selection</strong> (S) : cliquer-glisser pour entourer une zone, qui est alors decoupee.</li>
+          <li>Glisser l'interieur pour la deplacer ; <strong>Entree</strong> ou un clic dehors pour la deposer.</li>
+          <li><strong>Alt</strong> au relacher : copier sans effacer l'original. <strong>Suppr</strong> : effacer la zone.</li>
+          <li><strong>Clic droit</strong> ou Ctrl+C / Ctrl+X / Ctrl+V : copier, couper, coller. Le collage suit la souris jusqu'au clic.</li>
+        </ul>
+      </div>
+      <div data-aide-section="copier" hidden>
+        <ul>
+          <li>Onglet <strong>Copier depuis une image</strong> : charger une photo ou un visuel de n'importe quelle taille.</li>
+          <li><strong>Placer au centre</strong> (sources de 96 x 64 ou moins), <strong>Decouper en 96 x 64</strong> (cadre deplacable, pixels d'origine), <strong>Cadre ajustable</strong> (3:2, poignees aux coins) ou <strong>Ajuster en entier</strong> (bandes noires).</li>
+          <li><strong>Copier une zone</strong> : tracer un rectangle sur la source ; il est ensuite depose sur le dessin actuel, par-dessus.</li>
+          <li>Tout est annulable par Ctrl+Z.</li>
+        </ul>
+      </div>
+      <div data-aide-section="clavier" hidden>
+        <table class="table">
+          <tr><td class="col-shrink">P E F I</td><td>Crayon, gomme, remplissage, pipette</td></tr>
+          <tr><td class="col-shrink">L R C G</td><td>Ligne, rectangle, cercle, triangle</td></tr>
+          <tr><td class="col-shrink">S T</td><td>Selection, texte</td></tr>
+          <tr><td class="col-shrink">Ctrl+Z</td><td>Annuler</td></tr>
+          <tr><td class="col-shrink">Ctrl+C / X / V</td><td>Copier, couper, coller la selection</td></tr>
+          <tr><td class="col-shrink">Entree / Echap</td><td>Deposer / abandonner la selection ou le collage</td></tr>
+          <tr><td class="col-shrink">Molette</td><td>Zoom</td></tr>
+        </table>
+        <p class="pmv-help">Les raccourcis ne sont actifs que dans l'onglet Messages, hors saisie de texte.</p>
+      </div>
+      <div data-aide-section="conseils" hidden>
+        <ul>
+          <li>Un message se lit en moins de 2 secondes a 50 km/h : <strong>5 mots au maximum</strong>, 2 lignes au plus.</li>
+          <li>Privilegier les majuscules. 4 x 5 en x2 : environ 9 caracteres par ligne ; 5 x 7 en x2 : environ 7.</li>
+          <li>Fond toujours noir. Blanc : message principal ; jaune : avertissement ; rouge : interdiction ; vert : itineraire libre.</li>
+          <li>Verifier le rendu dans l'apercu de la remorque avant d'enregistrer.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="crud-modal-footer">
+      <button class="btn btn-primary" type="button" data-fermer>Fermer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MENU CONTEXTUEL (editeur) ===== -->
+<div class="pmv-menu" id="ped-menu" hidden>
+  <button type="button" id="ped-menu-couper"><span class="material-symbols-outlined">content_cut</span> Couper</button>
+  <button type="button" id="ped-menu-copier"><span class="material-symbols-outlined">content_copy</span> Copier</button>
+  <hr>
+  <button type="button" id="ped-menu-coller"><span class="material-symbols-outlined">content_paste</span> Coller</button>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+  window.__userIsAdmin   = {{ "true" if "admin" in user_roles else "false" }};
+  window.__userIsManager = {{ "true" if ("manager" in user_roles or "admin" in user_roles) else "false" }};
+</script>
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script src="{{ url_for('static', filename='js/pmv_editor.js') }}"></script>
+<script src="{{ url_for('static', filename='js/pmv.js') }}"></script>
+</body>
+</html>

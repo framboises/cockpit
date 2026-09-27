@@ -295,6 +295,29 @@
     };
     portesCtrl.addTo(map);
 
+    // PMV (remorques a panneau a message variable) : lecture seule, managers.
+    // La page /pmv est gardee manager, son API aussi : sans le role, pas de bouton.
+    if (window.__userIsManager === true) {
+      var pmvCtrl = L.control({ position: "bottomright" });
+      pmvCtrl.onAdd = function () {
+        var div = L.DomUtil.create("div", "leaflet-bar cockpit-measure-tools cockpit-pmv-ctrl");
+        var btn = document.createElement("button");
+        btn.className = "tile-btn";
+        btn.id = "map-pmv-btn";
+        btn.title = "Remorques PMV (panneaux a message variable)";
+        var ico = document.createElement("span");
+        ico.className = "material-symbols-outlined";
+        ico.style.fontSize = "20px";
+        ico.textContent = "signpost";
+        btn.appendChild(ico);
+        div.appendChild(btn);
+        L.DomEvent.disableClickPropagation(div);
+        btn.addEventListener("click", togglePmv);
+        return div;
+      };
+      pmvCtrl.addTo(map);
+    }
+
     // Load portes names for search (always, regardless of layer visibility)
     loadPortesForSearch();
 
@@ -2624,6 +2647,84 @@
       lng += latlngs[i][1];
     }
     return [lat / latlngs.length, lng / latlngs.length];
+  }
+
+  // ---------------------------------------------------------------------------
+  // PMV : remorques a panneau a message variable (cf. pmv.py, page /pmv)
+  // Lecture seule : etat de la derniere resolution connue (aucune requete DNS
+  // declenchee d'ici) et affichage deduit. Rafraichi toutes les 2 min.
+  // ---------------------------------------------------------------------------
+  var _pmvVisible = false;
+  var _pmvLayer = null;
+  var _pmvTimer = null;
+  var PMV_COULEURS = { ok: "var(--success)", introuvable: "var(--danger)", dns_indisponible: "var(--warning)", ip_fixe: "var(--brand)" };
+
+  function togglePmv() {
+    _pmvVisible = !_pmvVisible;
+    var btn = document.getElementById("map-pmv-btn");
+    if (btn) btn.classList.toggle("active", _pmvVisible);
+    if (_pmvVisible) {
+      if (!_pmvLayer) _pmvLayer = L.layerGroup().addTo(map);
+      loadPmv();
+      _pmvTimer = setInterval(loadPmv, 120000);
+    } else {
+      clearInterval(_pmvTimer);
+      _pmvTimer = null;
+      if (_pmvLayer) { map.removeLayer(_pmvLayer); _pmvLayer = null; }
+    }
+  }
+
+  function pmvDate(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    return isNaN(d) ? "" : d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) + " " +
+      d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  }
+
+  function loadPmv() {
+    if (!_pmvVisible || !_pmvLayer) return;
+    fetch("/api/pmv/carte", { credentials: "same-origin" })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!_pmvLayer || !data || !data.ok) return;
+        _pmvLayer.clearLayers();
+        (data.panneaux || []).forEach(function (p) {
+          var couleur = PMV_COULEURS[p.etat] || "#94a3b8";
+          var marker = L.marker([p.lat, p.lng], {
+            icon: L.divIcon({
+              className: "",
+              html: '<div class="rov-pin" style="background:' + couleur + '"><span class="material-symbols-outlined">signpost</span></div>',
+              iconSize: [28, 28],
+              iconAnchor: [14, 14]
+            })
+          });
+          var etat = { ok: "Joignable", introuvable: "Introuvable (eteinte ?)", dns_indisponible: "Etat inconnu (DNS)",
+                       ip_fixe: "IP fixe" }[p.etat] || "Etat inconnu";
+          var a = p.affiche_deduit;
+          var affiche = "";
+          if (a && a.type === "cockpit") {
+            affiche = '<div style="color:var(--muted);font-size:0.78rem;margin-top:6px;">Affiche probablement :</div>' +
+              (a.png_b64 ? '<img alt="" src="data:image/png;base64,' + escapeHtml(a.png_b64) + '" style="width:96px;height:64px;image-rendering:pixelated;border-radius:3px;background:#0f172a;display:block;margin:4px 0;">' : "") +
+              '<div style="font-size:0.8rem;">' + escapeHtml(a.message_nom || "image envoyee par Cockpit") + "</div>";
+          } else if (a && a.type === "sigma") {
+            affiche = '<div style="color:var(--muted);font-size:0.78rem;margin-top:6px;">Message Sigma : ' + escapeHtml((a.noms || []).join(", ")) + "</div>";
+          }
+          var dernier = p.dernier_envoi
+            ? '<div style="color:var(--muted);font-size:0.75rem;margin-top:4px;">Dernier envoi ' + escapeHtml(pmvDate(p.dernier_envoi.fin)) +
+              (p.dernier_envoi.resultat === "ok" ? "" : " (echec)") + "</div>" : "";
+          marker.bindPopup(
+            '<div class="popup-content" style="min-width:190px;">' +
+            "<strong>" + escapeHtml(p.plaque) + "</strong> " + escapeHtml(p.nom || "") +
+            (p.localisation ? '<div style="color:var(--muted);font-size:0.8rem;">' + escapeHtml(p.localisation) + "</div>" : "") +
+            '<div style="font-size:0.8rem;font-weight:600;margin-top:4px;color:' + couleur + ';">' + etat + "</div>" +
+            affiche + dernier +
+            '<div style="margin-top:8px;"><a href="/pmv?panneau=' + encodeURIComponent(p.id) + '" style="color:var(--brand);font-weight:600;text-decoration:none;">Ouvrir dans PMV</a></div>' +
+            "</div>", { maxWidth: 260 });
+          marker.bindTooltip(p.plaque + (p.nom ? " - " + p.nom : ""), { direction: "top", offset: [0, -14] });
+          _pmvLayer.addLayer(marker);
+        });
+      })
+      .catch(function (err) { console.error("[MapView] Erreur PMV:", err); });
   }
 
   function escapeHtml(s) {
