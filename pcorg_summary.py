@@ -32,8 +32,42 @@ logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_API_VERSION = "2023-06-01"
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6").strip()
+# Cle propre a Cockpit (cle "cockpit-prod" de la console), SANS repli sur la
+# variable generique ANTHROPIC_API_KEY : celle-ci est lue par tout script lance
+# sous le meme compte Windows, qui consommait alors sous le nom de Cockpit sans
+# que la console permette de distinguer qui.
+def _read_cockpit_api_key():
+    """COCKPIT_ANTHROPIC_API_KEY depuis l'environnement du process, sinon depuis
+    le registre Windows (variables Utilisateur puis Systeme).
+
+    Un process Windows herite de l'environnement de la fenetre qui le lance :
+    un serveur relance depuis un terminal ouvert AVANT la pose de la variable
+    ne la voyait pas (constate le 29/09/2026, "ANTHROPIC_API_KEY non configuree"
+    alors que la cle etait bien enregistree). Le registre est la source que
+    [Environment]::SetEnvironmentVariable(..., "User") met a jour.
+    """
+    val = os.getenv("COCKPIT_ANTHROPIC_API_KEY", "").strip()
+    if val or os.name != "nt":
+        return val
+    try:
+        import winreg
+        for hive, path in ((winreg.HKEY_CURRENT_USER, r"Environment"),
+                           (winreg.HKEY_LOCAL_MACHINE,
+                            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")):
+            try:
+                with winreg.OpenKey(hive, path) as k:
+                    v, _ = winreg.QueryValueEx(k, "COCKPIT_ANTHROPIC_API_KEY")
+                    if v and str(v).strip():
+                        return str(v).strip()
+            except OSError:
+                continue
+    except Exception:
+        pass
+    return ""
+
+
+ANTHROPIC_API_KEY = _read_cockpit_api_key()
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5").strip()
 CLAUDE_TIMEOUT_SECONDS = int(os.getenv("CLAUDE_TIMEOUT_SECONDS", "120"))
 CLAUDE_MAX_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "16384"))
 CLAUDE_MAX_TOKENS_RETRY = int(os.getenv("CLAUDE_MAX_TOKENS_RETRY", "32000"))
@@ -47,28 +81,63 @@ RETRYABLE_HTTP_CODES = {429, 503, 529}
 # vient de CLAUDE_MODEL ; cette whitelist permet juste les A/B tests sans
 # changer la conf serveur.
 ALLOWED_MODELS = {
+    "claude-sonnet-5-5",
     "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-sonnet-4-5",
+    "claude-opus-5-5",
     "claude-opus-4-7",
     "claude-opus-4-6",
     "claude-haiku-4-5",
 }
 
-# Tarif approximatif (USD par 1M tokens) pour estimation de cout.
-# Source : claude.com/pricing. A reverifier si Anthropic revise.
-# Valeurs cache : creation = +25% du prix input, lecture cache = -90% du prix input.
+# Tarifs (USD par 1M tokens). Verifies le 29/09/2026 sur
+# https://platform.claude.com/docs/en/about-claude/pricing -- a reverifier si
+# Anthropic revise ses prix.
+#   input       : tokens d'entree NON caches (champ usage.input_tokens)
+#   cache_write : ecriture cache 5 min (1,25 x input)
+#   cache_read  : lecture cache (0,1 x input en general, 0,05 x sur Opus 5.5)
+#   output      : tokens de sortie (thinking compris)
+# Le tarif d'introduction de Sonnet 5 (2 / 10) est devenu le tarif standard :
+# la hausse a 3 / 15 prevue au 01/09/2026 n'a pas eu lieu.
+# Opus 4.6 / 4.7 sont a 5 / 25 (et non 15 / 75, tarif des Opus 4 / 4.1 retires).
 MODEL_PRICING_USD_PER_MTOK = {
-    # Tarif catalogue. Un tarif d'introduction (2 / 10) court jusqu'au
-    # 31/08/2026 : d'ici la, l'estimation de cout est donc majoree, ce qui est
-    # le bon sens de l'erreur pour un suivi de budget.
-    "claude-sonnet-5":   {"input": 3.0,  "output": 15.0},
-    "claude-sonnet-4-6": {"input": 3.0,  "output": 15.0},
-    "claude-sonnet-4-5": {"input": 3.0,  "output": 15.0},
-    "claude-opus-4-7":   {"input": 15.0, "output": 75.0},
-    "claude-opus-4-6":   {"input": 15.0, "output": 75.0},
-    "claude-haiku-4-5":  {"input": 1.0,  "output": 5.0},
+    "claude-sonnet-5-5": {"input": 2.0, "output": 10.0, "cache_write": 2.50, "cache_read": 0.20},
+    "claude-sonnet-5":   {"input": 2.0, "output": 10.0, "cache_write": 2.50, "cache_read": 0.20},
+    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "cache_write": 3.75, "cache_read": 0.30},
+    "claude-sonnet-4-5": {"input": 3.0, "output": 15.0, "cache_write": 3.75, "cache_read": 0.30},
+    "claude-opus-5-5":   {"input": 4.0, "output": 20.0, "cache_write": 5.00, "cache_read": 0.20},
+    "claude-opus-4-7":   {"input": 5.0, "output": 25.0, "cache_write": 6.25, "cache_read": 0.50},
+    "claude-opus-4-6":   {"input": 5.0, "output": 25.0, "cache_write": 6.25, "cache_read": 0.50},
+    "claude-haiku-4-5":  {"input": 1.0, "output": 5.0,  "cache_write": 1.25, "cache_read": 0.10},
 }
+PRICING_VERIFIED_ON = "2026-09-29"
+
+# Modeles acceptant output_config.format (structured outputs, GA, sans header
+# beta) et output_config.effort. Sources : pages structured-outputs et effort
+# de platform.claude.com, lues le 29/09/2026. Haiku 4.5 et Sonnet 4.5 ne
+# supportent PAS effort : l'envoyer provoquerait une 400.
+STRUCTURED_OUTPUT_MODELS = {
+    "claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-4-6",
+    "claude-sonnet-4-5", "claude-opus-5-5", "claude-opus-4-7",
+    "claude-opus-4-6", "claude-haiku-4-5",
+}
+EFFORT_MODELS = {
+    "claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-4-6",
+    "claude-opus-5-5", "claude-opus-4-7", "claude-opus-4-6",
+}
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+# Effort par defaut des rapports. "medium" plutot que "high" (defaut API) :
+# la tache est de la synthese de donnees deja agregees, pas du raisonnement
+# ouvert. Sur Sonnet 5.5 le thinking adaptatif partage max_tokens et est
+# facture comme de la sortie ; "high" allongeait la generation (70-130 s) sans
+# gain visible sur ce type de compte-rendu. Surchargeable par CLAUDE_EFFORT.
+CLAUDE_EFFORT = (os.getenv("CLAUDE_EFFORT", "medium") or "").strip().lower() or None
+if CLAUDE_EFFORT and CLAUDE_EFFORT not in EFFORT_LEVELS:
+    CLAUDE_EFFORT = None
+
+AI_USAGE_LOG_COLLECTION = "ai_usage_log"
+AI_BUDGET_SETTINGS_ID = "ai_budget"
 
 
 SUMMARIES_COLLECTION = "pcorg_summaries"
@@ -80,7 +149,9 @@ COCKPIT_SETTINGS_COLLECTION = "cockpit_settings"
 # Version du system prompt de base (incrementer manuellement quand on refond
 # le prompt). Permet de filtrer le dataset d'apprentissage par generation de
 # prompt -- utile si on veut exclure les vieux samples post-refonte.
-PROMPT_VERSION = 1
+# v2 (29/09/2026) : regles de pic dedupliquees (un seul endroit), sortie en
+# structured outputs, consigne de concision du retry passee dans le tour user.
+PROMPT_VERSION = 2
 
 # Plafond du nombre de fiches transmises a Claude (apres priorisation).
 DEFAULT_MAX_FICHES = 80
@@ -117,6 +188,287 @@ def _ensure_indexes(db):
         _indexes_ensured = True
     except Exception as e:
         logger.warning("Impossible de creer l'index sur %s: %s", SUMMARIES_COLLECTION, e)
+
+
+# ----------------------------------------------------------------------------
+# Couts, journal d'usage et budget IA
+# ----------------------------------------------------------------------------
+
+_USAGE_KEYS = ("input_tokens", "output_tokens",
+               "cache_creation_input_tokens", "cache_read_input_tokens")
+
+
+def _usage_ints(usage):
+    u = usage or {}
+    out = {}
+    for k in _USAGE_KEYS:
+        try:
+            out[k] = int(u.get(k) or 0)
+        except (TypeError, ValueError):
+            out[k] = 0
+    return out
+
+
+def compute_cost_usd(model, usage):
+    """Cout USD d'un appel (ou d'un cumul d'appels du meme modele).
+
+    Dans l'API Anthropic, usage.input_tokens EXCLUT les tokens lus ou ecrits
+    en cache : les quatre compteurs sont disjoints et s'additionnent.
+        cout = input * p_in + cache_creation * p_cache_write
+             + cache_read * p_cache_read + output * p_out
+    Retourne None si le modele n'a pas de tarif connu.
+    """
+    pricing = MODEL_PRICING_USD_PER_MTOK.get(model or "")
+    if not pricing:
+        return None
+    u = _usage_ints(usage)
+    p_in = float(pricing["input"])
+    p_cw = float(pricing.get("cache_write", p_in * 1.25))
+    p_cr = float(pricing.get("cache_read", p_in * 0.10))
+    p_out = float(pricing["output"])
+    return (
+        u["input_tokens"] * p_in
+        + u["cache_creation_input_tokens"] * p_cw
+        + u["cache_read_input_tokens"] * p_cr
+        + u["output_tokens"] * p_out
+    ) / 1_000_000
+
+
+_ai_usage_index_ensured = False
+
+
+def record_ai_usage(db, feature, model, usage, meta=None):
+    """Journalise un appel IA dans `ai_usage_log` (cout calcule a l'insertion).
+
+    Pour les fonctionnalites qui ne persistent pas deja leur usage ailleurs
+    (pcorg_summaries, pcorg_n1_retros et scan_analyses sont agreges
+    directement). Ne leve jamais : un echec de journalisation ne doit pas
+    faire echouer la fonctionnalite. Retourne le doc insere ou None.
+    """
+    global _ai_usage_index_ensured
+    if db is None:
+        return None
+    try:
+        u = _usage_ints(usage)
+        cost = compute_cost_usd(model, u)
+        doc = {
+            "_id": uuid.uuid4().hex,
+            "ts": datetime.now(timezone.utc),
+            "feature": str(feature or "inconnu"),
+            "model": model or "unknown",
+            "usage": u,
+            "cost_usd": round(cost, 6) if cost is not None else None,
+            "meta": dict(meta or {}),
+        }
+        db[AI_USAGE_LOG_COLLECTION].insert_one(doc)
+        if not _ai_usage_index_ensured:
+            try:
+                db[AI_USAGE_LOG_COLLECTION].create_index([("ts", DESCENDING)], name="ts")
+                db[AI_USAGE_LOG_COLLECTION].create_index(
+                    [("feature", ASCENDING), ("ts", DESCENDING)], name="feature_ts")
+                _ai_usage_index_ensured = True
+            except Exception:
+                pass
+        return doc
+    except Exception as e:
+        logger.warning("record_ai_usage(%s) a echoue : %s", feature, e)
+        return None
+
+
+def _to_naive_paris(dt):
+    """datetime aware -> naive heure de Paris (scan_analyses stocke du naif local)."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(TZ_PARIS).replace(tzinfo=None)
+
+
+def aggregate_ai_usage(db, ts_from, ts_to, event=None, year=None):
+    """Agrege l'usage et le cout IA sur [ts_from, ts_to] (datetimes aware UTC).
+
+    Sources (disjointes, pas de double comptage) :
+    - pcorg_summaries      -> 'resume_pcorg' / 'rapport_matinal'
+    - pcorg_n1_retros      -> 'retro_n1'
+    - scan_analyses        -> 'analyse_scans' / 'analyse_frequentation'
+    - ai_usage_log         -> feature libre (suggest-rule, nouvelles fonctions)
+    Les appels sans aucun token (court-circuit 'aucune fiche') sont ignores.
+    """
+    by_model = {}
+    by_feature = {}
+    unknown_models = set()
+    counts = {"summaries": 0, "retros": 0, "scan_analyses": 0, "log": 0}
+    total = [0.0]
+
+    def _add(feature, model, usage):
+        u = _usage_ints(usage)
+        if not any(u.values()):
+            return False
+        m = model or "unknown"
+        cost = compute_cost_usd(m, u)
+        if cost is None:
+            unknown_models.add(m)
+        for bucket, key in ((by_model, m), (by_feature, feature)):
+            agg = bucket.setdefault(key, {k: 0 for k in _USAGE_KEYS})
+            agg.setdefault("calls", 0)
+            agg.setdefault("estimated_cost_usd", 0.0)
+            for k in _USAGE_KEYS:
+                agg[k] += u[k]
+            agg["calls"] += 1
+            if cost is not None:
+                agg["estimated_cost_usd"] += cost
+            if bucket is by_feature:
+                agg.setdefault("models", {})
+                agg["models"][m] = agg["models"].get(m, 0) + 1
+        if cost is not None:
+            total[0] += cost
+        return True
+
+    q = {"created_at": {"$gte": ts_from, "$lte": ts_to}}
+    if event:
+        q["event"] = event
+    if year is not None:
+        q["year"] = int(year)
+    for d in db[SUMMARIES_COLLECTION].find(q, {"model": 1, "usage": 1, "created_by": 1, "_id": 0}):
+        feat = "rapport_matinal" if str(d.get("created_by") or "").startswith("morning-report@") else "resume_pcorg"
+        if _add(feat, d.get("model"), d.get("usage")):
+            counts["summaries"] += 1
+
+    rq = {"created_at": {"$gte": ts_from, "$lte": ts_to}}
+    if event:
+        rq["event"] = event
+    for d in db[N1_RETROS_COLLECTION].find(rq, {"model": 1, "usage": 1, "_id": 0}):
+        if _add("retro_n1", d.get("model"), d.get("usage")):
+            counts["retros"] += 1
+
+    # scan_analyses : created_at naif heure locale (datetime.now() du serveur).
+    sq = {"created_at": {"$gte": _to_naive_paris(ts_from), "$lte": _to_naive_paris(ts_to)}}
+    if event:
+        sq["event"] = event
+    if year is not None:
+        sq["year"] = int(year)
+    try:
+        for d in db["scan_analyses"].find(sq, {"model": 1, "usage": 1, "kind": 1, "_id": 0}):
+            feat = "analyse_frequentation" if d.get("kind") == "frequentation" else "analyse_scans"
+            if _add(feat, d.get("model"), d.get("usage")):
+                counts["scan_analyses"] += 1
+    except Exception as e:
+        logger.warning("aggregate_ai_usage : lecture scan_analyses a echoue (%s)", e)
+
+    lq = {"ts": {"$gte": ts_from, "$lte": ts_to}}
+    if event:
+        lq["meta.event"] = event
+    if year is not None:
+        lq["meta.year"] = int(year)
+    for d in db[AI_USAGE_LOG_COLLECTION].find(lq, {"feature": 1, "model": 1, "usage": 1, "_id": 0}):
+        if _add(d.get("feature") or "inconnu", d.get("model"), d.get("usage")):
+            counts["log"] += 1
+
+    for bucket in (by_model, by_feature):
+        for agg in bucket.values():
+            agg["estimated_cost_usd"] = round(agg["estimated_cost_usd"], 4)
+    return {
+        "by_model": by_model,
+        "by_feature": by_feature,
+        "counts": counts,
+        "total_estimated_cost_usd": round(total[0], 4),
+        "unknown_pricing_models": sorted(unknown_models),
+    }
+
+
+def _month_bounds_utc(now_utc=None):
+    """Debut / fin du mois calendaire courant (heure de Paris), en UTC aware."""
+    now_utc = now_utc or datetime.now(timezone.utc)
+    now_paris = now_utc.astimezone(TZ_PARIS)
+    start = now_paris.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if start.month == 12:
+        end = start.replace(year=start.year + 1, month=1)
+    else:
+        end = start.replace(month=start.month + 1)
+    return start.astimezone(timezone.utc), end.astimezone(timezone.utc)
+
+
+def get_ai_budget(db):
+    """Retourne {monthly_usd, block_when_exceeded, updated_at, updated_by}."""
+    doc = db[COCKPIT_SETTINGS_COLLECTION].find_one({"_id": AI_BUDGET_SETTINGS_ID}) or {}
+    monthly = doc.get("monthly_usd")
+    try:
+        monthly = float(monthly) if monthly not in (None, "") else None
+    except (TypeError, ValueError):
+        monthly = None
+    return {
+        "monthly_usd": monthly,
+        "block_when_exceeded": bool(doc.get("block_when_exceeded", False)),
+        "updated_at": doc.get("updated_at"),
+        "updated_by": doc.get("updated_by"),
+    }
+
+
+def set_ai_budget(db, monthly_usd=None, block_when_exceeded=False, updated_by_email=None):
+    """Enregistre le budget mensuel IA. monthly_usd None ou <= 0 = pas de budget."""
+    val = None
+    if monthly_usd not in (None, ""):
+        try:
+            val = float(monthly_usd)
+        except (TypeError, ValueError):
+            raise ValueError("monthly_usd invalide")
+        if val < 0:
+            raise ValueError("monthly_usd doit etre positif")
+        if val == 0:
+            val = None
+    db[COCKPIT_SETTINGS_COLLECTION].update_one(
+        {"_id": AI_BUDGET_SETTINGS_ID},
+        {"$set": {
+            "monthly_usd": val,
+            "block_when_exceeded": bool(block_when_exceeded),
+            "updated_at": datetime.now(timezone.utc),
+            "updated_by": updated_by_email or "",
+        }},
+        upsert=True,
+    )
+    return get_ai_budget(db)
+
+
+def ai_budget_status(db, now_utc=None):
+    """Consommation du mois courant face au budget (pour l'UI et le blocage)."""
+    budget = get_ai_budget(db)
+    m_start, m_end = _month_bounds_utc(now_utc)
+    agg = aggregate_ai_usage(db, m_start, m_end)
+    spent = agg["total_estimated_cost_usd"]
+    monthly = budget["monthly_usd"]
+    return {
+        "monthly_usd": monthly,
+        "block_when_exceeded": budget["block_when_exceeded"],
+        "month_start": m_start.isoformat(),
+        "month_end": m_end.isoformat(),
+        "spent_usd": spent,
+        "pct": (round(100.0 * spent / monthly, 1) if monthly else None),
+        "exceeded": bool(monthly and spent >= monthly),
+    }
+
+
+def check_ai_budget(db, now_utc=None):
+    """Leve ClaudeError('budget_exceeded') si le budget mensuel est depasse ET
+    que le blocage est active. Sans budget ou sans blocage : ne fait rien.
+
+    Appele au debut de _claude_stream_request quand un `db` est fourni. Une
+    erreur de lecture Mongo n'empeche jamais l'appel (fail-open).
+    """
+    if db is None:
+        return None
+    try:
+        budget = get_ai_budget(db)
+        if not budget["block_when_exceeded"] or not budget["monthly_usd"]:
+            return None
+        status = ai_budget_status(db, now_utc)
+    except Exception as e:
+        logger.warning("check_ai_budget : lecture impossible (%s), appel autorise", e)
+        return None
+    if status["exceeded"]:
+        logger.warning("Budget IA mensuel depasse (%.2f / %.2f USD) : appel refuse",
+                       status["spent_usd"], status["monthly_usd"])
+        raise ClaudeError("budget_exceeded")
+    return status
 
 
 # ----------------------------------------------------------------------------
@@ -221,6 +573,50 @@ def _aligned_prev_year_window(ts_start, ts_end, race_dt_n, race_dt_prev):
         race_dt_prev + timedelta(seconds=off_start),
         race_dt_prev + timedelta(seconds=off_end),
     )
+
+
+PREV_EDITION_MAX_BACK = 5
+
+
+def _has_pcorg_fiches(db, event, year_int):
+    try:
+        return db[PCORG_COLLECTION].count_documents(
+            {"event": event, "year": int(year_int)}, limit=1) > 0
+    except Exception:
+        return False
+
+
+def find_previous_edition(db, event, year, has_data=None, max_back=PREV_EDITION_MAX_BACK):
+    """Definition UNIQUE de l'edition precedente (le 'N-1' de l'Assistant IA).
+
+    = l'edition la plus recente strictement anterieure a `year` qui (1) a une
+    date de course resolvable et (2) a des donnees pour l'usage vise
+    (`has_data(db, event, year_int)` ; par defaut : au moins une fiche pcorg).
+    Un evenement saute une annee (annulation, pas d'edition) ne fait donc plus
+    tomber la comparaison : on remonte jusqu'a `max_back` ans.
+
+    Retourne (year_prev_int, race_dt_prev_utc) ou (None, None).
+    Utilise par compute_comparisons (donc la retro N-1) et
+    pcorg_doors_analysis. Le bloc Billetterie & Frequentation applique deja
+    la meme regle via ses propres sources (parametrages / historique_controle).
+    """
+    if not event or year is None:
+        return None, None
+    try:
+        year_int = int(year)
+    except (TypeError, ValueError):
+        return None, None
+    check = has_data or _has_pcorg_fiches
+    for y in range(year_int - 1, year_int - 1 - int(max_back), -1):
+        race = _load_race_dt(db, event, y)
+        if not race:
+            continue
+        try:
+            if check(db, event, y):
+                return y, race
+        except Exception as e:
+            logger.warning("find_previous_edition : test donnees %s %s echoue (%s)", event, y, e)
+    return None, None
 
 
 # ----------------------------------------------------------------------------
@@ -1135,25 +1531,25 @@ def compute_comparisons(db, event, year, ts_start, ts_end):
             "kpis": kpis,
         }
 
-    # N-1 aligne sur date de course : necessite event + year + parametrages OK
-    # pour les deux annees.
+    # Edition precedente alignee sur date de course : la plus recente edition
+    # anterieure ayant des fiches (find_previous_edition), pas strictement N-1.
     if event and year is not None:
         race_dt_n = _load_race_dt(db, event, int(year))
-        race_dt_prev = _load_race_dt(db, event, int(year) - 1)
+        year_prev, race_dt_prev = find_previous_edition(db, event, year)
         if race_dt_n and race_dt_prev:
             prev_start, prev_end = _aligned_prev_year_window(
                 ts_start, ts_end, race_dt_n, race_dt_prev,
             )
             if prev_start and prev_end:
-                kpis = compute_compact_kpis(db, event, int(year) - 1, prev_start, prev_end)
+                kpis = compute_compact_kpis(db, event, year_prev, prev_start, prev_end)
                 out["prev_year_aligned"] = {
-                    "label": "Annee precedente, meme position par rapport a la course",
+                    "label": "Edition precedente, meme position par rapport a la course",
                     "period_start": prev_start.isoformat(),
                     "period_end": prev_end.isoformat(),
                     "kpis": kpis,
                     "race_dt_n": race_dt_n.isoformat(),
                     "race_dt_prev": race_dt_prev.isoformat(),
-                    "year_prev": int(year) - 1,
+                    "year_prev": int(year_prev),
                 }
     return out
 
@@ -1311,6 +1707,78 @@ def select_fiches_n_minus_1(db, event, year_prev, ts_start, ts_end, max_fiches=2
     return [_serialize_fiche_compact(d) for d in selected]
 
 
+# Champs necessaires a _serialize_fiche + au tri de l'echantillonnage.
+_SELECTION_PROJECTION = {
+    "_id": 1, "event": 1, "year": 1, "ts": 1, "close_ts": 1, "category": 1,
+    "content_category.sous_classification": 1, "niveau_urgence": 1,
+    "is_incident": 1, "status_code": 1, "operator": 1, "area.desc": 1,
+    "text": 1, "text_full": 1, "comment_history": 1,
+}
+
+STRATIFY_MAX_BUCKETS = 12
+
+
+def _as_aware_utc(v):
+    if isinstance(v, datetime):
+        return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+    return None
+
+
+def _stratified_pick(docs, quota, ts_start, ts_end, max_buckets=STRATIFY_MAX_BUCKETS):
+    """Echantillon des fiches non majeures reparti sur TOUTE la periode.
+
+    L'ancienne selection prenait les plus recentes : sur 24 h, toute la
+    premiere moitie de la periode disparaissait des qu'on depassait le quota.
+    Ici la fenetre est decoupee en N tranches egales (N = min(quota, 12)) et on
+    pioche a tour de role une fiche par tranche. Dans une tranche, priorite :
+    fiches ouvertes, puis les plus commentees, puis les plus recentes.
+
+    Retourne (fiches_choisies_triees_par_ts, nombre_de_tranches).
+    """
+    if quota <= 0 or not docs:
+        return [], 0
+    if len(docs) <= quota:
+        return list(docs), 0
+    t0 = _as_aware_utc(ts_start)
+    t1 = _as_aware_utc(ts_end)
+    n = max(1, min(int(quota), int(max_buckets)))
+    span = (t1 - t0).total_seconds() if (t0 and t1) else 0
+    buckets = [[] for _ in range(n)]
+    for d in docs:
+        ts = _as_aware_utc(d.get("ts"))
+        if span <= 0 or ts is None:
+            idx = 0
+        else:
+            idx = int((ts - t0).total_seconds() / span * n)
+            idx = min(max(idx, 0), n - 1)
+        buckets[idx].append(d)
+
+    def _prio(d):
+        is_open = 0 if d.get("status_code") == 10 else 1
+        hist = d.get("comment_history")
+        n_comments = len(hist) if isinstance(hist, list) else 0
+        ts = _as_aware_utc(d.get("ts"))
+        return (is_open, n_comments, ts.timestamp() if ts else 0)
+
+    for b in buckets:
+        b.sort(key=_prio, reverse=True)
+    picked = []
+    cursor = [0] * n
+    while len(picked) < quota:
+        progressed = False
+        for i in range(n):
+            if len(picked) >= quota:
+                break
+            if cursor[i] < len(buckets[i]):
+                picked.append(buckets[i][cursor[i]])
+                cursor[i] += 1
+                progressed = True
+        if not progressed:
+            break
+    picked.sort(key=lambda d: (_as_aware_utc(d.get("ts")) or datetime.min.replace(tzinfo=timezone.utc)))
+    return picked, n
+
+
 def select_fiches_for_prompt(db, event, year, ts_start, ts_end, max_fiches=DEFAULT_MAX_FICHES):
     """Retourne (fiches_serialized, total_in_period, truncated_bool, detail).
 
@@ -1343,12 +1811,13 @@ def select_fiches_for_prompt(db, event, year, ts_start, ts_end, max_fiches=DEFAU
 
     remaining_quota = max(0, max_fiches - len(majors))
     others = []
+    n_buckets = 0
     if remaining_quota > 0:
-        others = list(
-            col.find({**base, "_id": {"$nin": list(major_ids)}})
-               .sort("ts", DESCENDING)
-               .limit(remaining_quota)
+        candidates = list(
+            col.find({**base, "_id": {"$nin": list(major_ids)}}, _SELECTION_PROJECTION)
+               .sort("ts", ASCENDING)
         )
+        others, n_buckets = _stratified_pick(candidates, remaining_quota, ts_start, ts_end)
 
     # Si trop de majeures, on tronque a max_fiches et on perd le contexte normal.
     selected = (majors + others)[:max_fiches]
@@ -1368,6 +1837,9 @@ def select_fiches_for_prompt(db, event, year, ts_start, ts_end, max_fiches=DEFAU
         "majors_capped": len(majors) > max_fiches,
         "max_fiches": max_fiches,
         "selected_by_urgency": by_urg,
+        # Methode d'echantillonnage des fiches non majeures.
+        "method": "majeures_toutes+echantillon_stratifie_temps",
+        "time_buckets": n_buckets,
     }
     logger.info(
         "Selection fiches : total=%d majors=%d others=%d selected=%d cut=%d capped=%s",
@@ -1442,13 +1914,8 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
         "exploiter les KPIs comparatifs s'ils sont fournis (variation par "
         "rapport a la veille meme creneau, et par rapport a l'edition "
         "precedente). Si un bloc 'Billetterie & Frequentation' t'est fourni, "
-        "INCLUS OBLIGATOIREMENT dans la synthese : (a) le pic de frequentation "
-        "de la VEILLE avec son heure (ex. **48 200 personnes** vers **15h30**) "
-        "et la comparaison vs edition precedente en pourcentage, (b) le pic "
-        "PROJETE du JOUR avec l'heure approximative attendue (= heure du pic "
-        "de l'edition precedente jour-equivalent ; ex. 'pic projete a "
-        "**52 000 vers 16h**, en hausse de **+8 %** par rapport a l'an "
-        "passe'). Ces deux phrases sont obligatoires si la donnee est dispo. "
+        "la synthese DOIT contenir les deux phrases de pic definies plus bas "
+        "(section 'Bloc Billetterie & Frequentation'). "
         "Quelques mots-cles peuvent etre en **gras** pour les chiffres ou "
         "tendances importantes. PAS de liste a puces ici, c'est un "
         "paragraphe synthetique.\n"
@@ -1517,7 +1984,8 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
         "ou autre jargon).\n"
         "- Si la difference est < 10%, parle de 'volume comparable'.\n"
         "\n"
-        "Bloc Billetterie & Frequentation (si fourni) :\n"
+        "Bloc Billetterie & Frequentation (si fourni) -- SEULE reference "
+        "pour les pics de frequentation :\n"
         "- 3 slots : yesterday / today / tomorrow. Pour chacun : "
         "'billets_vendus' (titres N), 'pic_observed' (pic constate, "
         "passe seulement) avec 'pic_observed_hour' (heure 'HHhMM' du pic), "
@@ -1525,18 +1993,18 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
         "precedente jour-equivalent), 'pic_projection' (pic projete = "
         "pic_prev * billets_vendus_N / billets_vendus_prev), "
         "'delta_pct_vs_prev' (en pourcentage).\n"
-        "- VEILLE (slot=yesterday) : utilise pic_observed + "
-        "pic_observed_hour pour annoncer le pic constate, et "
-        "delta_pct_vs_prev pour la comparaison annee precedente. Ex: 'pic "
-        "constate hier a **48 200** vers **15h30**, en hausse de **+12 %** "
-        "vs l'an passe'.\n"
-        "- AUJOURD'HUI (slot=today) : utilise pic_projection pour annoncer "
-        "le pic attendu, et pic_prev_hour comme heure approximative du pic "
-        "(en absence d'autre signal). Ex: 'pic projete a **52 000** vers "
-        "**16h**'. Si pic_projection absent mais pic_prev present, donne "
-        "le pic_prev en valeur de reference 'autour de **50 000** comme l'an "
-        "passe a la meme heure'. L'heure pic_prev_hour est la **meilleure "
-        "estimation** du moment ou interviendra le pic du jour.\n"
+        "- Phrase 1 obligatoire dans la synthese, VEILLE (slot=yesterday) : "
+        "pic constate (pic_observed) avec son heure (pic_observed_hour) et "
+        "la comparaison a l'edition precedente (delta_pct_vs_prev). Ex: "
+        "'pic constate hier a **48 200** vers **15h30**, en hausse de "
+        "**+12 %** vs l'an passe'.\n"
+        "- Phrase 2 obligatoire dans la synthese, AUJOURD'HUI (slot=today) : "
+        "pic projete (pic_projection) avec l'heure attendue = pic_prev_hour "
+        "(meilleure estimation du moment du pic du jour) et "
+        "delta_pct_vs_prev. Ex: 'pic projete a **52 000** vers **16h**, en "
+        "hausse de **+8 %** vs l'an passe'. Si pic_projection est absent "
+        "mais pic_prev present : 'pic attendu autour de **50 000** comme "
+        "l'an passe a la meme heure'.\n"
         "- Ne mentionne pas un slot dont aucune donnee n'est dispo "
         "(billets_vendus / pic_observed / pic_prev / pic_projection tous "
         "null) -- silence vaut mieux qu'invention.\n"
@@ -1756,29 +2224,53 @@ def _build_retro_prompts(event, year_prev, ts_start, ts_end, kpis, fiches):
     return system, user
 
 
-def _call_claude_text(system_prompt, user_prompt, on_progress=None, model=None):
+RETRO_MAX_TOKENS = 4096
+
+
+def _call_claude_text(system_prompt, user_prompt, on_progress=None, model=None, db=None):
     """Variante streaming de call_claude qui retourne juste le texte brut + usage.
 
-    Sert pour la retro N-1 (note synthetique courte, max_tokens=1024).
+    Sert pour la retro N-1 (note synthetique courte). max_tokens=4096 et non
+    1024 : sur les modeles a thinking adaptatif, la reflexion consomme le meme
+    budget que la reponse. Pas de cache prompt : la note est elle-meme mise en
+    cache en base, le system n'est donc jamais relu dans les 5 min (une
+    ecriture cache coute +25 % pour rien).
     """
-    raw_text, usage, _stop_reason = _claude_stream_request(
-        system_prompt, user_prompt, max_tokens=1024,
-        on_progress=on_progress, model=model,
+    raw_text, usage, stop_reason = _claude_stream_request(
+        system_prompt, user_prompt, max_tokens=RETRO_MAX_TOKENS,
+        on_progress=on_progress, model=model, system_cache=False,
+        db=db, effort=CLAUDE_EFFORT,
     )
+    if stop_reason == "max_tokens":
+        logger.warning("Retro N-1 tronquee a max_tokens (%d)", RETRO_MAX_TOKENS)
     return raw_text.strip(), usage
 
 
+def _hour_floor_iso(v):
+    """Arrondit un datetime a l'heure (vers le bas) pour la cle de cache."""
+    if hasattr(v, "replace") and hasattr(v, "isoformat"):
+        return v.replace(minute=0, second=0, microsecond=0).isoformat()
+    return str(v)
+
+
 def _retro_cache_key(event, year_prev, ts_start, ts_end):
+    """Cle de cache de la retro N-1, fenetre arrondie a l'heure.
+
+    La fenetre N-1 est derivee de la periode demandee a la seconde pres : deux
+    rapports demandes a quelques minutes d'ecart ne partageaient jamais leur
+    retro. Arrondie a l'heure, la cle est reutilisee par tout rapport de la
+    meme heure (rapport matinal, regenerations successives).
+    """
     return {
         "event": event,
         "year_prev": int(year_prev),
-        "period_start": ts_start.isoformat() if hasattr(ts_start, "isoformat") else str(ts_start),
-        "period_end": ts_end.isoformat() if hasattr(ts_end, "isoformat") else str(ts_end),
+        "period_start": _hour_floor_iso(ts_start),
+        "period_end": _hour_floor_iso(ts_end),
     }
 
 
 def get_or_build_n1_retrospective(db, event, year_prev, ts_start_prev, ts_end_prev,
-                                   on_progress=None, model=None):
+                                   on_progress=None, model=None, cache_only=False):
     """Retourne la note retrospective N-1 (texte court) pour une fenetre alignee.
 
     1. Cherche un cache dans `pcorg_n1_retros` sur (event, year_prev, fenetre).
@@ -1818,6 +2310,10 @@ def get_or_build_n1_retrospective(db, event, year_prev, ts_start_prev, ts_end_pr
             "model": cached.get("model"),
             "usage": cached.get("usage") or {},
         }
+    if cache_only:
+        # dry_run : jamais d'appel Claude (la retro coutait un appel reel a
+        # chaque essai de prompt quand elle n'etait pas deja en cache).
+        return None
 
     kpis = compute_compact_kpis(db, event, int(year_prev), ts_start_prev, ts_end_prev)
     if kpis.get("total", 0) == 0:
@@ -1831,7 +2327,8 @@ def get_or_build_n1_retrospective(db, event, year_prev, ts_start_prev, ts_end_pr
     system, user = _build_retro_prompts(event, int(year_prev), ts_start_prev, ts_end_prev, kpis, fiches)
     use_model = _validate_model(model) or CLAUDE_MODEL
     try:
-        text, usage = _call_claude_text(system, user, on_progress=on_progress, model=use_model)
+        text, usage = _call_claude_text(system, user, on_progress=on_progress,
+                                        model=use_model, db=db)
     except ClaudeError as e:
         logger.warning("Retro N-1 echouee : %s", e)
         return None
@@ -1880,51 +2377,28 @@ def _validate_model(model):
     return None
 
 
-def _claude_stream_request(system_prompt, user_prompt, max_tokens, on_progress=None,
-                           model=None, system_cache=True, memory_block=None):
-    """Effectue un appel streaming a l'API Anthropic et retourne (text, usage, stop_reason).
-
-    Le streaming evite les timeouts sur les reponses longues : tant que Claude
-    envoie des chunks, la connexion reste vivante. Le timeout
-    CLAUDE_TIMEOUT_SECONDS s'applique alors uniquement entre 2 chunks.
-
-    Retry automatique sur erreurs reseau et HTTP 429/503/529 avec exponential
-    backoff (3 essais, 1s/2s/4s).
-
-    Prompt caching : par defaut le system prompt est marque cache_control
-    ephemeral (cache 5 min) -> les appels rapproches ne re-paient pas le system.
-
-    Si memory_block est fourni, il est ajoute comme bloc system separe avec
-    son propre cache_control. Ainsi une modification de la memoire (ajout
-    de directive) n'invalide que le cache 'memoire', pas le cache du gros
-    system de base.
-
-    Parametres :
-    - on_progress (optionnel) : callable(text_so_far, output_tokens_so_far)
-      appele a intervalles reguliers pour permettre un affichage en temps reel.
-    - model (optionnel) : override CLAUDE_MODEL pour cet appel (whitelist appliquee).
-    - system_cache (defaut True) : passer False pour desactiver le cache (debug).
-    - memory_block (optionnel) : texte du bloc 'Connaissance accumulee', ajoute
-      en bloc system separe avec cache_control distinct.
-
-    Le usage retourne contient input_tokens / output_tokens
-    + cache_creation_input_tokens / cache_read_input_tokens (telemetrie cache).
-    Le stop_reason est extrait du dernier message_delta SSE ('end_turn',
-    'max_tokens', 'stop_sequence', 'tool_use'...).
-    """
-    if not ANTHROPIC_API_KEY:
-        raise ClaudeError("ANTHROPIC_API_KEY non configuree")
-
-    use_model = _validate_model(model) or CLAUDE_MODEL
-
-    headers = {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": ANTHROPIC_API_VERSION,
-        "content-type": "application/json",
+def build_output_schema(section_keys=None):
+    """JSON schema strict des sections attendues (toutes des chaines requises)."""
+    keys = tuple(section_keys) if section_keys else SECTION_KEYS
+    return {
+        "type": "object",
+        "properties": {k: {"type": "string"} for k in keys},
+        "required": list(keys),
+        "additionalProperties": False,
     }
-    # System en blocs avec cache_control pour profiter du prompt caching.
-    # Si une memoire constitutionnelle est fournie, on la met en bloc separe
-    # pour que sa modification n'invalide que son propre cache.
+
+
+def build_request_body(system_prompt, user_prompt, max_tokens, model=None,
+                       system_cache=True, memory_block=None,
+                       output_schema=None, effort=None):
+    """Construit le corps de requete /v1/messages (pur, sans I/O : testable).
+
+    - system en blocs cache_control si system_cache (memoire en bloc separe :
+      la modifier n'invalide que son propre cache) ;
+    - output_config.format = json_schema si output_schema et modele compatible ;
+    - output_config.effort si effort et modele compatible.
+    """
+    use_model = _validate_model(model) or CLAUDE_MODEL
     if system_cache:
         system_payload = [{
             "type": "text",
@@ -1949,11 +2423,77 @@ def _claude_stream_request(system_prompt, user_prompt, max_tokens, on_progress=N
         "messages": [{"role": "user", "content": user_prompt}],
         "stream": True,
     }
+    output_config = {}
+    if output_schema and use_model in STRUCTURED_OUTPUT_MODELS:
+        output_config["format"] = {"type": "json_schema", "schema": output_schema}
+    if effort and effort in EFFORT_LEVELS and use_model in EFFORT_MODELS:
+        output_config["effort"] = effort
+    if output_config:
+        body["output_config"] = output_config
+    return body
+
+
+def _claude_stream_request(system_prompt, user_prompt, max_tokens, on_progress=None,
+                           model=None, system_cache=True, memory_block=None,
+                           db=None, output_schema=None, effort=None, on_thinking=None):
+    """Effectue un appel streaming a l'API Anthropic et retourne (text, usage, stop_reason).
+
+    Le streaming evite les timeouts sur les reponses longues : tant que Claude
+    envoie des chunks, la connexion reste vivante. Le timeout
+    CLAUDE_TIMEOUT_SECONDS s'applique alors uniquement entre 2 chunks.
+
+    Retry automatique sur erreurs reseau et HTTP 429/503/529 avec exponential
+    backoff (3 essais, 1s/2s/4s).
+
+    Prompt caching : par defaut le system prompt est marque cache_control
+    ephemeral (cache 5 min) -> les appels rapproches ne re-paient pas le system.
+
+    Si memory_block est fourni, il est ajoute comme bloc system separe avec
+    son propre cache_control. Ainsi une modification de la memoire (ajout
+    de directive) n'invalide que le cache 'memoire', pas le cache du gros
+    system de base.
+
+    Parametres :
+    - on_progress (optionnel) : callable(text_so_far, output_tokens_so_far)
+      appele a intervalles reguliers pour permettre un affichage en temps reel.
+    - model (optionnel) : override CLAUDE_MODEL pour cet appel (whitelist appliquee).
+    - system_cache (defaut True) : passer False pour desactiver le cache (debug).
+    - memory_block (optionnel) : texte du bloc 'Connaissance accumulee', ajoute
+      en bloc system separe avec cache_control distinct.
+    - db (optionnel) : si fourni, check_ai_budget(db) est appele avant l'appel
+      (refus ClaudeError('budget_exceeded') si budget depasse et blocage actif).
+    - output_schema (optionnel) : JSON schema -> structured outputs
+      (output_config.format), si le modele le supporte.
+    - effort (optionnel) : 'low'|'medium'|'high'|... -> output_config.effort, si
+      le modele le supporte (ignore sinon, pour eviter une 400).
+    - on_thinking (optionnel) : callable(thinking_chars_so_far) appele pendant
+      la phase de reflexion (thinking adaptatif), dont le texte est ignore.
+
+    Le usage retourne contient input_tokens / output_tokens
+    + cache_creation_input_tokens / cache_read_input_tokens (telemetrie cache).
+    Le stop_reason est extrait du dernier message_delta SSE ('end_turn',
+    'max_tokens', 'stop_sequence', 'tool_use'...).
+    """
+    if not ANTHROPIC_API_KEY:
+        raise ClaudeError("COCKPIT_ANTHROPIC_API_KEY non configuree")
+    if db is not None:
+        check_ai_budget(db)
+
+    headers = {
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": ANTHROPIC_API_VERSION,
+        "content-type": "application/json",
+    }
+    body = build_request_body(
+        system_prompt, user_prompt, max_tokens, model=model,
+        system_cache=system_cache, memory_block=memory_block,
+        output_schema=output_schema, effort=effort,
+    )
 
     last_err = None
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
-            return _claude_stream_attempt(headers, body, on_progress)
+            return _claude_stream_attempt(headers, body, on_progress, on_thinking)
         except ClaudeError as e:
             msg = str(e)
             retryable = (
@@ -1973,8 +2513,13 @@ def _claude_stream_request(system_prompt, user_prompt, max_tokens, on_progress=N
     raise ClaudeError("retry_exhausted")
 
 
-def _claude_stream_attempt(headers, body, on_progress=None):
-    """Un seul essai d'appel streaming Anthropic. Voir _claude_stream_request."""
+def _claude_stream_attempt(headers, body, on_progress=None, on_thinking=None):
+    """Un seul essai d'appel streaming Anthropic. Voir _claude_stream_request.
+
+    Seuls les text_delta composent la reponse : les thinking_delta /
+    signature_delta (thinking adaptatif) sont ignores, seul leur volume est
+    remonte via on_thinking pour l'affichage de progression.
+    """
     try:
         resp = requests.post(
             ANTHROPIC_API_URL,
@@ -2002,6 +2547,8 @@ def _claude_stream_attempt(headers, body, on_progress=None):
     cache_read = 0
     stop_reason = None
     last_progress_len = 0
+    thinking_chars = 0
+    last_thinking_report = 0
     try:
         # chunk_size=None pour ne pas bufferiser les chunks SSE plus que
         # necessaire (chaque event SSE = quelques bytes a quelques centaines).
@@ -2032,6 +2579,21 @@ def _claude_stream_attempt(headers, body, on_progress=None):
                             on_progress(raw_text, usage_out)
                         except Exception:
                             pass
+                elif delta.get("type") == "thinking_delta":
+                    thinking_chars += len(delta.get("thinking") or "")
+                    if on_thinking and thinking_chars - last_thinking_report >= 200:
+                        last_thinking_report = thinking_chars
+                        try:
+                            on_thinking(thinking_chars)
+                        except Exception:
+                            pass
+            elif etype == "content_block_start":
+                cb = evt.get("content_block") or {}
+                if cb.get("type") in ("thinking", "redacted_thinking") and on_thinking:
+                    try:
+                        on_thinking(thinking_chars)
+                    except Exception:
+                        pass
             elif etype == "message_start":
                 msg = evt.get("message") or {}
                 usage = msg.get("usage") or {}
@@ -2062,6 +2624,15 @@ def _claude_stream_attempt(headers, body, on_progress=None):
             raise ClaudeError("claude_stream_interrupted")
         # Sinon, on garde le texte partiel et on continue.
 
+    # Depuis la generation 5.5, des filtres de securite peuvent decliner une
+    # requete (HTTP 200, stop_reason "refusal"). Sans ce controle, le texte
+    # vide ou partiel etait parse en sections vides et le rapport enregistre
+    # comme s'il etait reussi.
+    if stop_reason == "refusal":
+        logger.warning("Claude a decline la requete (modele %s, %d tokens produits)",
+                       body.get("model"), usage_out)
+        raise ClaudeError("claude_refusal")
+
     if on_progress and last_progress_len < len(raw_text):
         try:
             on_progress(raw_text, usage_out)
@@ -2090,15 +2661,35 @@ def _merge_usage(*usages):
     return out
 
 
+RETRY_CONCISION_NOTE = (
+    "\n\nIMPORTANT (nouvel essai apres troncature) : la reponse precedente a "
+    "depasse le budget de tokens. Sois plus concis : maximum 4 phrases "
+    "courtes par section, maximum 6 puces par liste. Garde l'essentiel "
+    "operationnel."
+)
+
+_EFFORT_DEFAULT = object()
+
+
 def call_claude(system_prompt, user_prompt, on_progress=None, model=None,
-                memory_block=None, section_keys=None):
+                memory_block=None, section_keys=None, db=None,
+                system_cache=True, structured=True, effort=_EFFORT_DEFAULT,
+                on_thinking=None):
     """Appelle l'API Claude en streaming, retourne (sections_dict, raw_text, usage).
 
     Si le retour n'est pas du JSON parsable, sections_dict est None et
     raw_text contient la reponse brute. Leve ClaudeError pour les erreurs.
 
+    Sortie : structured outputs (output_config.format, schema construit depuis
+    section_keys : toutes les cles requises, chaines, additionalProperties
+    false) quand le modele le supporte. Le parseur tolerant (_parse_sections,
+    recuperation par regex) ne sert plus que de filet : modele sans support,
+    reponse tronquee a max_tokens. Si l'API refuse le schema (HTTP 400), un
+    second essai part sans output_config.
+
     Si la reponse est tronquee (stop_reason='max_tokens'), un retry est tente
-    avec CLAUDE_MAX_TOKENS_RETRY et une consigne de concision. Les usages sont
+    avec CLAUDE_MAX_TOKENS_RETRY et une consigne de concision AJOUTEE AU TOUR
+    USER (le system reste identique, son cache reste valable). Les usages sont
     cumules.
 
     memory_block (optionnel) : bloc 'Connaissance accumulee' ajoute en
@@ -2108,26 +2699,43 @@ def call_claude(system_prompt, user_prompt, on_progress=None, model=None,
     sections du resume pcorg. Les appelants qui imposent un autre contrat JSON
     (chaine scans) DOIVENT le passer, sinon leurs sections sont filtrees et
     remplacees par des sections pcorg vides.
+
+    db (optionnel) : active le controle de budget (check_ai_budget).
+    system_cache (defaut True) : cache_control sur le system.
+    effort (defaut CLAUDE_EFFORT) : output_config.effort ; None pour ne rien
+    envoyer (defaut API).
     """
-    raw_text, usage, stop_reason = _claude_stream_request(
-        system_prompt, user_prompt, CLAUDE_MAX_TOKENS,
-        on_progress=on_progress, model=model, memory_block=memory_block,
-    )
+    use_effort = CLAUDE_EFFORT if effort is _EFFORT_DEFAULT else effort
+    schema = build_output_schema(section_keys) if structured else None
+
+    def _request(user_text, max_tokens, with_schema=True):
+        return _claude_stream_request(
+            system_prompt, user_text, max_tokens,
+            on_progress=on_progress, model=model, memory_block=memory_block,
+            system_cache=system_cache, db=db,
+            output_schema=schema if with_schema else None,
+            effort=use_effort if with_schema else None,
+            on_thinking=on_thinking,
+        )
+
+    use_schema = True
+    try:
+        raw_text, usage, stop_reason = _request(user_prompt, CLAUDE_MAX_TOKENS)
+    except ClaudeError as e:
+        if str(e) != "claude_http_400" or not schema:
+            raise
+        logger.warning("HTTP 400 avec output_config : nouvel essai sans structured outputs ni effort")
+        use_schema = False
+        raw_text, usage, stop_reason = _request(user_prompt, CLAUDE_MAX_TOKENS, with_schema=False)
     sections = _parse_sections(raw_text, section_keys)
 
     if stop_reason == "max_tokens":
         logger.warning("Reponse Claude tronquee a max_tokens (%d) -> retry avec %d",
                        CLAUDE_MAX_TOKENS, CLAUDE_MAX_TOKENS_RETRY)
-        retry_system = system_prompt + (
-            "\n\nIMPORTANT (retry apres troncature) : la reponse precedente a "
-            "depasse le budget de tokens. Sois plus concis : maximum 4 phrases "
-            "courtes par section, maximum 6 puces par liste. Garde l'essentiel "
-            "operationnel."
-        )
         try:
-            raw_text2, usage2, stop_reason2 = _claude_stream_request(
-                retry_system, user_prompt, CLAUDE_MAX_TOKENS_RETRY,
-                on_progress=on_progress, model=model, memory_block=memory_block,
+            raw_text2, usage2, stop_reason2 = _request(
+                user_prompt + RETRY_CONCISION_NOTE, CLAUDE_MAX_TOKENS_RETRY,
+                with_schema=use_schema,
             )
             sections2 = _parse_sections(raw_text2, section_keys)
             if sections2 is not None:
@@ -2409,6 +3017,26 @@ def _serialize_summary(doc, light=True):
         out["door_reinforcement"] = doc.get("door_reinforcement") or None
         out["selection_detail"] = doc.get("selection_detail") or None
         out["sections"] = doc.get("sections") or {}
+        # Corrections utilisateur par section (derniere l'emporte) :
+        # {section: {text, by_email, by_name, ts}}. Le rendu (UI, mail)
+        # affiche ce texte a la place de sections[section].
+        corr_out = {}
+        for key, corr in (doc.get("sections_corrected") or {}).items():
+            if isinstance(corr, dict):
+                c = dict(corr)
+                c["ts"] = _iso(c.get("ts"))
+                corr_out[key] = c
+        if not corr_out:
+            # Rapports corriges avant l'introduction du champ : on rejoue
+            # feedback[] (derniere correction de section l'emporte).
+            for f in (doc.get("feedback") or []):
+                if (f.get("kind") == "correction" and (f.get("target") or "section") == "section"
+                        and f.get("section") in SECTION_KEYS and f.get("corrected_text")):
+                    corr_out[f["section"]] = {
+                        "text": f["corrected_text"], "by_email": f.get("by_email") or "",
+                        "by_name": f.get("by_name") or "", "ts": _iso(f.get("ts")),
+                    }
+        out["sections_corrected"] = corr_out
         out["raw_text"] = doc.get("raw_text") or ""
         out["usage"] = doc.get("usage") or {}
         # Feedback structure (immutable append-only sous-arrays).
@@ -2636,9 +3264,61 @@ def detect_active_event(db, now_utc=None):
     return (ev, yr)
 
 
+def detect_event_phase(db, event, year, ts_start, ts_end):
+    """Phase de l'evenement ou tombe le milieu de la periode analysee.
+
+    Deduite de parametrages.data.globalHoraires (dates UTC avec 'Z') :
+    - 'montage'   : montage.start <= t < montage.end
+    - 'demontage' : demontage.start <= t <= demontage.end
+    - 'course'    : entre la fin du montage et le debut du demontage
+    Retourne None si les horaires manquent (SAISON, event non parametre) ou si
+    la periode tombe hors de l'edition : les directives scopees par phase ne
+    sont alors pas injectees.
+    """
+    if not event or year is None:
+        return None
+    try:
+        year_int = int(year)
+    except (TypeError, ValueError):
+        return None
+    proj = {"data.globalHoraires.montage": 1, "data.globalHoraires.demontage": 1}
+    try:
+        doc = db["parametrages"].find_one({"event": event, "year": str(year_int)}, proj) \
+            or db["parametrages"].find_one({"event": event, "year": year_int}, proj)
+    except Exception:
+        doc = None
+    gh = ((doc or {}).get("data") or {}).get("globalHoraires") or {}
+    m = gh.get("montage") or {}
+    dm = gh.get("demontage") or {}
+    m_start, m_end = _parse_iso_dt(m.get("start")), _parse_iso_dt(m.get("end"))
+    d_start, d_end = _parse_iso_dt(dm.get("start")), _parse_iso_dt(dm.get("end"))
+    t0 = _as_aware_utc(ts_start)
+    t1 = _as_aware_utc(ts_end)
+    if not t0 or not t1:
+        return None
+    mid = t0 + (t1 - t0) / 2
+    if m_start and m_end and m_start <= mid < m_end:
+        return "montage"
+    if d_start and d_end and d_start <= mid <= d_end:
+        return "demontage"
+    if m_end and d_start and m_end <= mid < d_start:
+        return "course"
+    return None
+
+
+SUMMARY_STEPS = (
+    ("data", "Calcul des indicateurs"),
+    ("retro", "Note de l'edition precedente"),
+    ("thinking", "Reflexion du modele"),
+    ("writing", "Redaction du rapport"),
+    ("saving", "Enregistrement"),
+)
+
+
 def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email, created_by_name,
                              extra_focus_note=None, as_of_utc=None, on_progress=None,
-                             model=None, dry_run=False):
+                             model=None, dry_run=False, on_step=None, on_thinking=None,
+                             prompt_cache=True):
     """Calcule KPIs + comparaisons + prochaines 24h + billetterie + retro N-1, appelle Claude.
 
     Le pipeline DB et l'appel retro N-1 (Claude) sont parallelises via un
@@ -2655,21 +3335,45 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
     on_progress (optionnel) : callback(text_so_far, output_tokens_so_far)
     appele a intervalles reguliers pendant le streaming Claude. Utile pour
     afficher la progression cote CLI ou pour streamer vers une UI.
+    on_step (optionnel) : callback(step_key, label) a chaque etape (cf.
+    SUMMARY_STEPS) -- sert a la barre de progression du job de generation.
+    on_thinking (optionnel) : callback(thinking_chars) pendant la reflexion.
     model (optionnel) : override du modele pour CET appel (whitelist appliquee).
     dry_run (optionnel) : si True, retourne le prompt assemble sans appeler
-    Claude ni persister. Utile pour iterer sur le prompt sans cramer du token.
+    Claude ni persister. La retro N-1 n'est alors lue que depuis son cache
+    (jamais generee) : un dry_run ne coute aucun token.
+    prompt_cache (defaut True) : cache_control sur le system. Le rapport
+    matinal passe False : un appel par jour, l'ecriture cache (+25 %) n'est
+    jamais relue dans les 5 minutes.
     """
     use_model = _validate_model(model) or CLAUDE_MODEL
 
-    # Charge la memoire constitutionnelle pour ce scope (event uniquement,
-    # section=None car le rapport produit toutes les sections d'un coup).
-    # Le bloc est passe en bloc cache_control separe a Claude.
+    def _step(key):
+        if not on_step:
+            return
+        label = dict(SUMMARY_STEPS).get(key, key)
+        try:
+            on_step(key, label)
+        except Exception:
+            pass
+
+    _step("data")
+
+    # Charge la memoire constitutionnelle pour ce contexte : evenement, annee
+    # et phase (montage / course / demontage) filtrent reellement ; les
+    # directives de section sont toutes chargees puis groupees par section
+    # dans le bloc (le rapport produit toutes les sections d'un coup).
     memory_directives = []
     memory_block_text = ""
+    phase = None
+    try:
+        phase = detect_event_phase(db, event, year, ts_start, ts_end)
+    except Exception as e:
+        logger.warning("detection de phase echouee (%s)", e)
     try:
         import pcorg_ai_memory
         memory_directives, _overflow = pcorg_ai_memory.load_active_directives(
-            db, event=event, section=None,
+            db, event=event, section=None, phase=phase, year=year,
         )
         memory_block_text = pcorg_ai_memory.format_directives_block(memory_directives)
     except Exception as e:
@@ -2711,7 +3415,7 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
                 f_retro = pool.submit(
                     get_or_build_n1_retrospective,
                     db, event, py.get("year_prev"), ts_prev_start, ts_prev_end,
-                    None, use_model,
+                    None, use_model, bool(dry_run),
                 )
             except Exception as e:
                 logger.warning("Retro N-1 : preparation echouee : %s", e)
@@ -2723,6 +3427,7 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
         fiches, total_fiches, truncated, selection_detail = f_fiches.result()
         n1_retro = None
         if f_retro:
+            _step("retro")
             try:
                 n1_retro = f_retro.result()
             except Exception as e:
@@ -2730,6 +3435,8 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
                 n1_retro = None
 
     memory_ids = [d.get("_id") for d in (memory_directives or []) if d.get("_id")]
+    if selection_detail is not None:
+        selection_detail["phase"] = phase
 
     def _increment_memory_usage():
         if not memory_ids:
@@ -2739,6 +3446,38 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
             pcorg_ai_memory.increment_usage(db, memory_ids)
         except Exception as e:
             logger.warning("ai_memory: increment_usage a echoue (%s)", e)
+
+    writing_started = [False]
+
+    def _progress(text, tokens):
+        if not writing_started[0]:
+            writing_started[0] = True
+            _step("writing")
+        if on_progress:
+            on_progress(text, tokens)
+
+    thinking_started = [False]
+
+    def _thinking(n_chars):
+        if not thinking_started[0] and not writing_started[0]:
+            thinking_started[0] = True
+            _step("thinking")
+        if on_thinking:
+            on_thinking(n_chars)
+
+    def _call(system, user):
+        # Etape 'thinking' affichee des l'envoi : sur un modele sans thinking
+        # elle bascule sur 'writing' au premier texte recu.
+        _step("thinking")
+        thinking_started[0] = True
+        return call_claude(
+            system, user, on_progress=_progress, model=use_model,
+            memory_block=memory_block_text or None, db=db,
+            system_cache=bool(prompt_cache), on_thinking=_thinking,
+        )
+
+    empty_usage = {"input_tokens": 0, "output_tokens": 0,
+                   "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
 
     # Cas "aucune fiche" : court-circuit ou appel Claude minimal.
     if kpis["total"] == 0:
@@ -2754,11 +3493,10 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
                     memory_block_text=memory_block_text,
                     memory_directive_ids=memory_ids,
                 )
+            _step("saving")
             return save_summary(
                 db, event, year, ts_start, ts_end, created_by_email, created_by_name,
-                kpis, 0, False, sections, "",
-                {"input_tokens": 0, "output_tokens": 0,
-                 "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+                kpis, 0, False, sections, "", dict(empty_usage),
                 comparisons=comparisons, upcoming=upcoming, attendance=attendance,
                 n1_retro=n1_retro, door_reinforcement=door_reinforcement,
                 selection_detail=selection_detail, model=use_model,
@@ -2782,10 +3520,7 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
                 memory_block_text=memory_block_text,
                 memory_directive_ids=memory_ids,
             )
-        sections, raw_text, usage = call_claude(
-            system, user, on_progress=on_progress, model=use_model,
-            memory_block=memory_block_text or None,
-        )
+        sections, raw_text, usage = _call(system, user)
         _increment_memory_usage()
         if sections is None:
             sections = {k: "RAS" for k in SECTION_KEYS}
@@ -2793,6 +3528,7 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
         for k in SECTION_KEYS:
             if k != "prochaines_24h" and not sections.get(k):
                 sections[k] = "RAS"
+        _step("saving")
         return save_summary(
             db, event, year, ts_start, ts_end, created_by_email, created_by_name,
             kpis, 0, False, sections, raw_text, usage,
@@ -2820,15 +3556,13 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
             memory_block_text=memory_block_text,
             memory_directive_ids=memory_ids,
         )
-    sections, raw_text, usage = call_claude(
-        system, user, on_progress=on_progress, model=use_model,
-        memory_block=memory_block_text or None,
-    )
+    sections, raw_text, usage = _call(system, user)
     _increment_memory_usage()
     if sections is None:
         sections = {k: "" for k in SECTION_KEYS}
         sections["faits_marquants"] = raw_text or "Reponse Claude non parsable."
 
+    _step("saving")
     return save_summary(
         db, event, year, ts_start, ts_end, created_by_email, created_by_name,
         kpis, len(fiches), truncated, sections, raw_text, usage,
@@ -2839,6 +3573,152 @@ def generate_period_summary(db, event, year, ts_start, ts_end, created_by_email,
         memory_directive_ids=memory_ids,
         memory_block_text=memory_block_text,
     )
+
+
+# ----------------------------------------------------------------------------
+# Generation en arriere-plan (job + progression), pour la route HTTP
+# ----------------------------------------------------------------------------
+#
+# Meme motif que scan_report.py (_JOBS + verrou + TTL) : la generation prend
+# 1 a 2 minutes, elle ne doit plus bloquer un thread waitress. Registre en
+# memoire : suppose UN SEUL process (vrai sous waitress). Le rapport matinal
+# appelle generate_period_summary directement (mode synchrone).
+
+import threading as _threading
+
+_SUMMARY_JOBS = {}
+_SUMMARY_JOBS_BY_USER = {}
+_SUMMARY_JOBS_LOCK = _threading.Lock()
+SUMMARY_JOB_TTL_SECONDS = 60 * 60
+# Estimation de la taille d'un rapport (caracteres JSON) pour la jauge de
+# redaction. Purement indicatif : la barre plafonne a 95 % avant la fin.
+EXPECTED_REPORT_CHARS = 9000
+
+
+def _sweep_summary_jobs():
+    """Purge les jobs termines depuis plus d'une heure ; verrou deja pris."""
+    now = time.time()
+    for jid in [j for j, v in _SUMMARY_JOBS.items()
+                if v.get("finished_at") and now - v["finished_at"] > SUMMARY_JOB_TTL_SECONDS]:
+        job = _SUMMARY_JOBS.pop(jid, None)
+        if job and _SUMMARY_JOBS_BY_USER.get(job.get("owner")) == jid:
+            _SUMMARY_JOBS_BY_USER.pop(job.get("owner"), None)
+
+
+def _job_progress_pct(job):
+    """Pourcentage indicatif a partir de l'etape et du volume recu."""
+    step = job.get("step_key")
+    if step == "data":
+        return 5
+    if step == "retro":
+        return 12
+    if step == "thinking":
+        return 20
+    if step == "writing":
+        ratio = min(1.0, float(job.get("chars") or 0) / EXPECTED_REPORT_CHARS)
+        return int(25 + 70 * ratio)
+    if step == "saving":
+        return 97
+    if job.get("status") == "done":
+        return 100
+    return 0
+
+
+def start_summary_job(db, params, owner, runner=None):
+    """Lance la generation en tache de fond. Retourne (job_id, deja_en_cours).
+
+    params : kwargs de generate_period_summary (sans db ni callbacks).
+    owner  : email de l'utilisateur -- un seul job en cours par utilisateur
+             (un double clic ne lance pas deux appels payants).
+    runner : injection pour les tests (defaut generate_period_summary).
+    """
+    with _SUMMARY_JOBS_LOCK:
+        _sweep_summary_jobs()
+        running = _SUMMARY_JOBS_BY_USER.get(owner)
+        if running and _SUMMARY_JOBS.get(running, {}).get("status") in ("queued", "running"):
+            return running, True
+        job_id = uuid.uuid4().hex
+        _SUMMARY_JOBS[job_id] = {
+            "id": job_id, "owner": owner, "status": "queued",
+            "step_key": None, "step": "En attente", "steps": [k for k, _ in SUMMARY_STEPS],
+            "chars": 0, "output_tokens": 0, "thinking_chars": 0,
+            "error": None, "result_id": None, "summary": None,
+            "started_at": time.time(), "finished_at": None,
+        }
+        _SUMMARY_JOBS_BY_USER[owner] = job_id
+
+    _threading.Thread(target=_run_summary_job,
+                      args=(job_id, db, dict(params), runner or generate_period_summary),
+                      daemon=True, name="pcorg-summary-" + job_id[:8]).start()
+    return job_id, False
+
+
+def _run_summary_job(job_id, db, params, runner):
+    """Corps du thread. Attrape BaseException (cf. scan_report._run_generate)."""
+    def _upd(**kw):
+        with _SUMMARY_JOBS_LOCK:
+            job = _SUMMARY_JOBS.get(job_id)
+            if job:
+                job.update(kw)
+
+    def on_step(key, label):
+        _upd(step_key=key, step=label)
+
+    def on_progress(text, tokens):
+        _upd(chars=len(text or ""), output_tokens=int(tokens or 0))
+
+    def on_thinking(n):
+        _upd(thinking_chars=int(n or 0))
+
+    try:
+        _upd(status="running")
+        doc = runner(db, on_step=on_step, on_progress=on_progress,
+                     on_thinking=on_thinking, **params)
+        summary = _serialize_summary(doc, light=False) if doc and not doc.get("dry_run") else doc
+        _upd(status="done", step_key="done", step="Termine",
+             result_id=str((doc or {}).get("_id", "")), summary=summary)
+    except BaseException as exc:
+        msg = str(exc) if isinstance(exc, ClaudeError) else ("erreur_interne: " + str(exc))
+        if not isinstance(exc, ClaudeError):
+            logger.exception("Generation resume pcorg (job %s) impossible", job_id)
+        else:
+            logger.warning("Generation resume pcorg (job %s) : %s", job_id, exc)
+        _upd(status="error", error=msg, step="Echec")
+    finally:
+        with _SUMMARY_JOBS_LOCK:
+            job = _SUMMARY_JOBS.get(job_id)
+            if job:
+                job["finished_at"] = time.time()
+                if _SUMMARY_JOBS_BY_USER.get(job.get("owner")) == job_id:
+                    _SUMMARY_JOBS_BY_USER.pop(job.get("owner"), None)
+
+
+def get_summary_job(job_id, owner=None):
+    """Etat d'un job pour la route de suivi. None si inconnu (ou autre owner)."""
+    with _SUMMARY_JOBS_LOCK:
+        job = _SUMMARY_JOBS.get(job_id or "")
+        if not job:
+            return None
+        if owner is not None and job.get("owner") and job["owner"] != owner:
+            return None
+        end = job.get("finished_at") or time.time()
+        out = {
+            "id": job["id"],
+            "status": job["status"],
+            "step_key": job.get("step_key"),
+            "step": job.get("step"),
+            "steps": [{"key": k, "label": l} for k, l in SUMMARY_STEPS],
+            "chars": job.get("chars") or 0,
+            "output_tokens": job.get("output_tokens") or 0,
+            "thinking_chars": job.get("thinking_chars") or 0,
+            "elapsed_s": round(end - job["started_at"], 1),
+            "progress": 100 if job["status"] == "done" else _job_progress_pct(job),
+            "error": job.get("error"),
+            "result_id": job.get("result_id"),
+        }
+        if job["status"] == "done":
+            out["summary"] = job.get("summary")
+        return out
 
 
 def _dry_run_payload(event, year, ts_start, ts_end, kpis, fiches, truncated,
@@ -2897,6 +3777,25 @@ QUALITY_LABELS = ("good", "neutral", "bad")
 RECOMMENDATION_STATUSES = ("applied", "partial", "ignored", "not_relevant")
 
 
+def validate_feedback(section, kind, corrected_text=None, rule_text=None, rating=None):
+    """Valide un feedback SANS l'ecrire (ValueError si invalide).
+
+    Appele par la route avant toute promotion en memoire : sinon une
+    directive etait creee puis le feedback refuse, laissant une directive
+    orpheline active dans tous les prompts suivants.
+    """
+    if section not in SECTION_KEYS:
+        raise ValueError("section invalide : " + str(section))
+    if kind not in FEEDBACK_KINDS:
+        raise ValueError("kind invalide : " + str(kind))
+    if rating is not None and rating not in QUALITY_LABELS:
+        raise ValueError("rating invalide : " + str(rating))
+    if kind == "correction" and not corrected_text:
+        raise ValueError("correction requiert corrected_text non vide")
+    if kind == "rule" and not rule_text:
+        raise ValueError("rule requiert rule_text non vide")
+
+
 def add_feedback(db, summary_id, section, kind,
                  original_text=None, corrected_text=None,
                  rule_text=None, comment=None, target=None,
@@ -2913,16 +3812,8 @@ def add_feedback(db, summary_id, section, kind,
     Leve ValueError pour parametres invalides. Retourne le doc apres
     insertion ou None si rapport introuvable.
     """
-    if section not in SECTION_KEYS:
-        raise ValueError("section invalide : " + str(section))
-    if kind not in FEEDBACK_KINDS:
-        raise ValueError("kind invalide : " + str(kind))
-    if rating is not None and rating not in QUALITY_LABELS:
-        raise ValueError("rating invalide : " + str(rating))
-    if kind == "correction" and not corrected_text:
-        raise ValueError("correction requiert corrected_text non vide")
-    if kind == "rule" and not rule_text:
-        raise ValueError("rule requiert rule_text non vide")
+    validate_feedback(section, kind, corrected_text=corrected_text,
+                      rule_text=rule_text, rating=rating)
     entry = {
         "section": section,
         "kind": kind,
@@ -2937,12 +3828,38 @@ def add_feedback(db, summary_id, section, kind,
         "by_email": by_email or "",
         "by_name": by_name or "",
     }
+    update = {"$push": {"feedback": entry}}
+    # Une correction de section REMPLACE le texte affiche (UI + mail) : la
+    # derniere correction l'emporte, l'historique complet reste dans
+    # feedback[] (utilise tel quel par l'export dataset). Les corrections au
+    # niveau puce (target 'bullet:N') ne sont pas appliquees au rendu.
+    if kind == "correction" and (target or "section") == "section":
+        update["$set"] = {
+            "sections_corrected." + section: {
+                "text": corrected_text,
+                "by_email": by_email or "",
+                "by_name": by_name or "",
+                "ts": entry["ts"],
+            },
+        }
     res = db[SUMMARIES_COLLECTION].find_one_and_update(
         {"_id": summary_id},
-        {"$push": {"feedback": entry}},
+        update,
         return_document=True,
     )
     return res
+
+
+def effective_sections(summary):
+    """Sections a afficher : texte corrige par un utilisateur s'il existe,
+    sinon le texte genere. Accepte un doc brut ou serialise."""
+    out = dict((summary or {}).get("sections") or {})
+    for key, corr in ((summary or {}).get("sections_corrected") or {}).items():
+        if isinstance(corr, dict) and corr.get("text"):
+            out[key] = corr["text"]
+        elif isinstance(corr, str) and corr:
+            out[key] = corr
+    return out
 
 
 def set_quality_label(db, summary_id, label, section=None, by_email=None):

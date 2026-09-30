@@ -139,6 +139,7 @@
       if (scope.phase) scopeParts.push(scope.phase);
       if (scope.year) scopeParts.push(scope.year);
       var scopeStr = scopeParts.length ? scopeParts.join(" / ") : "Global";
+      if (it.weight != null && Number(it.weight) !== 1) scopeStr += " · poids " + it.weight;
 
       var typeBadge = el("span", { class: "ai-memory-type-badge ai-memory-type-" + (it.type || "principe"), text: it.type || "principe" });
 
@@ -263,6 +264,14 @@
           return s;
         })()
       ]),
+      el("label", { class: "ai-memory-form-row", title: "Si renseignée, la directive ne s'applique qu'aux rapports de cette année" }, [
+        el("span", { class: "ai-memory-form-label", text: "Année (vide = toutes)" }),
+        el("input", { type: "number", id: "ai-memory-modal-year", min: "2000", max: "2100", step: "1", placeholder: "Ex: 2026" })
+      ]),
+      el("label", { class: "ai-memory-form-row", title: "Priorité d'injection : au-delà de 50 directives, les poids les plus faibles sont écartés" }, [
+        el("span", { class: "ai-memory-form-label", text: "Poids (priorité, défaut 1)" }),
+        el("input", { type: "number", id: "ai-memory-modal-weight", min: "0", max: "10", step: "0.5", value: "1" })
+      ]),
       el("label", { class: "ai-memory-form-row ai-memory-form-row-wide" }, [
         el("span", { class: "ai-memory-form-label", text: "Contenu (concis, formulation directive)" }),
         el("textarea", { id: "ai-memory-modal-content", rows: "5",
@@ -299,6 +308,8 @@
     modalEl.querySelector("#ai-memory-modal-event").value = scope.event || "";
     modalEl.querySelector("#ai-memory-modal-section").value = scope.section || "";
     modalEl.querySelector("#ai-memory-modal-phase").value = scope.phase || "";
+    modalEl.querySelector("#ai-memory-modal-year").value = scope.year || "";
+    modalEl.querySelector("#ai-memory-modal-weight").value = (directive && directive.weight != null) ? directive.weight : 1;
     modalEl.querySelector("#ai-memory-modal-content").value = (directive && directive.content) || "";
     modalEl.querySelector("#ai-memory-modal-active").checked = directive ? !!directive.active : true;
     modalEl.classList.add("is-open");
@@ -319,12 +330,16 @@
       scope: {
         event: modalEl.querySelector("#ai-memory-modal-event").value || null,
         section: modalEl.querySelector("#ai-memory-modal-section").value || null,
-        phase: modalEl.querySelector("#ai-memory-modal-phase").value || null
+        phase: modalEl.querySelector("#ai-memory-modal-phase").value || null,
+        year: modalEl.querySelector("#ai-memory-modal-year").value ? parseInt(modalEl.querySelector("#ai-memory-modal-year").value, 10) : null
       },
       content: modalEl.querySelector("#ai-memory-modal-content").value,
-      active: modalEl.querySelector("#ai-memory-modal-active").checked
+      active: modalEl.querySelector("#ai-memory-modal-active").checked,
+      weight: parseFloat(modalEl.querySelector("#ai-memory-modal-weight").value)
     };
     if (!payload.content || !payload.content.trim()) { toast("Contenu requis", "error"); return; }
+    if (isNaN(payload.weight) || payload.weight < 0) { toast("Poids invalide (nombre positif)", "error"); return; }
+    if (payload.scope.year != null && isNaN(payload.scope.year)) { toast("Année invalide", "error"); return; }
     var btn = modalEl.querySelector("#ai-memory-modal-save");
     btn.disabled = true;
     var p = editId
@@ -360,6 +375,189 @@
     if (!ok) return;
     window.location.href = "/api/pcorg/summary/export-dataset?format=dpo";
   });
+
+  // ----- Coûts IA (admin) : coût par fonctionnalité / modèle + budget mensuel -----
+
+  var FEATURE_LABELS = {
+    resume_pcorg: "Résumé PC Org (à la demande)",
+    rapport_matinal: "Rapport matinal",
+    retro_n1: "Note édition précédente",
+    analyse_scans: "Analyse des scans",
+    analyse_frequentation: "Analyse fréquentation",
+    suggest_rule: "Reformulation de règle"
+  };
+
+  function fmtUsd(v) {
+    if (v == null) return "—";
+    return Number(v).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " $";
+  }
+  function fmtInt(v) { return v == null ? "—" : Number(v).toLocaleString("fr-FR"); }
+  function isoDate(d) {
+    var p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  }
+
+  var costsEl = null;
+
+  function buildCostsModal() {
+    if (costsEl) return costsEl;
+    var overlay = el("div", { class: "ai-modal-overlay ai-costs-modal-overlay", "aria-hidden": "true" });
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) closeCosts(); });
+    var now = new Date();
+    var first = new Date(now.getFullYear(), now.getMonth(), 1);
+    var modal = el("div", { class: "ai-modal ai-costs-modal", role: "dialog", "aria-modal": "true" }, [
+      el("div", { class: "ai-modal-header" }, [
+        el("span", { class: "material-symbols-outlined ai-modal-icon" }, ["payments"]),
+        el("div", { class: "ai-modal-titles" }, [
+          el("h2", { class: "ai-modal-title", text: "Coûts IA" }),
+          el("div", { class: "ai-modal-subtitle", id: "ai-costs-subtitle", text: "Estimation d'après les tokens consommés et les tarifs publics Anthropic." })
+        ]),
+        el("button", { type: "button", class: "ai-modal-close", title: "Fermer", onclick: closeCosts }, [
+          el("span", { class: "material-symbols-outlined" }, ["close"])
+        ])
+      ]),
+      el("div", { class: "ai-costs-body" }, [
+        el("div", { class: "ai-costs-budget", id: "ai-costs-budget" }, [el("div", { class: "ai-costs-sub", text: "Chargement du budget…" })]),
+        el("div", { class: "ai-costs-toolbar" }, [
+          el("label", null, ["Du", el("input", { type: "date", id: "ai-costs-from", value: isoDate(first) })]),
+          el("label", null, ["Au", el("input", { type: "date", id: "ai-costs-to", value: isoDate(now) })]),
+          el("button", { type: "button", class: "ai-btn ai-btn-primary", id: "ai-costs-refresh" }, [
+            el("span", { class: "material-symbols-outlined" }, ["refresh"]),
+            el("span", { text: "Actualiser" })
+          ])
+        ]),
+        el("div", { id: "ai-costs-result" })
+      ])
+    ]);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    overlay.querySelector("#ai-costs-refresh").addEventListener("click", loadCosts);
+    costsEl = overlay;
+    return overlay;
+  }
+
+  function openCosts() {
+    buildCostsModal();
+    costsEl.classList.add("is-open");
+    costsEl.setAttribute("aria-hidden", "false");
+    loadCosts();
+  }
+  function closeCosts() {
+    if (!costsEl) return;
+    costsEl.classList.remove("is-open");
+    costsEl.setAttribute("aria-hidden", "true");
+  }
+
+  function costsTable(title, rows, labelFn) {
+    var keys = Object.keys(rows || {}).sort(function (a, b) {
+      return (rows[b].estimated_cost_usd || 0) - (rows[a].estimated_cost_usd || 0);
+    });
+    var wrap = el("div", null, [el("div", { class: "ai-memory-stats-title", text: title })]);
+    if (!keys.length) { wrap.appendChild(el("div", { class: "ai-costs-sub", text: "Aucun appel sur la période." })); return wrap; }
+    var tbody = el("tbody");
+    keys.forEach(function (k) {
+      var r = rows[k];
+      tbody.appendChild(el("tr", null, [
+        el("td", { text: labelFn(k, r) }),
+        el("td", { class: "num", text: fmtInt(r.calls) }),
+        el("td", { class: "num", text: fmtInt(r.input_tokens) }),
+        el("td", { class: "num", text: fmtInt((r.cache_creation_input_tokens || 0) + (r.cache_read_input_tokens || 0)) }),
+        el("td", { class: "num", text: fmtInt(r.output_tokens) }),
+        el("td", { class: "num", text: fmtUsd(r.estimated_cost_usd) })
+      ]));
+    });
+    wrap.appendChild(el("table", { class: "ai-costs-table" }, [
+      el("thead", null, [el("tr", null, [
+        el("th", { text: "" }), el("th", { text: "Appels" }), el("th", { text: "Entrée" }),
+        el("th", { text: "Cache (écr.+lect.)" }), el("th", { text: "Sortie" }), el("th", { text: "Coût" })
+      ])]),
+      tbody
+    ]));
+    return wrap;
+  }
+
+  function renderBudget(b) {
+    var host = costsEl.querySelector("#ai-costs-budget");
+    clearChildren(host);
+    var monthly = b && b.monthly_usd;
+    host.appendChild(el("div", { class: "ai-memory-stats-title", text: "Budget du mois en cours" }));
+    host.appendChild(el("div", null, [
+      el("span", { class: "ai-costs-total", text: fmtUsd(b ? b.spent_usd : null) }),
+      el("span", { class: "ai-costs-sub", text: monthly ? "  sur " + fmtUsd(monthly) + " (" + (b.pct != null ? b.pct : 0) + " %)" : "  aucun budget défini" })
+    ]));
+    if (monthly) {
+      var pct = Math.min(100, b.pct || 0);
+      host.appendChild(el("div", { class: "ai-costs-budget-bar" }, [
+        el("div", { class: "ai-costs-budget-fill" + (b.exceeded ? " is-over" : (pct >= 80 ? " is-warn" : "")), style: "width:" + pct + "%" })
+      ]));
+      if (b.exceeded) {
+        host.appendChild(el("div", { class: "ai-costs-sub", text: b.block_when_exceeded
+          ? "Budget atteint : les nouvelles générations sont refusées jusqu'au mois prochain."
+          : "Budget dépassé (information seulement, aucune génération n'est bloquée)." }));
+      }
+    }
+    var input = el("input", { type: "number", min: "0", step: "1", id: "ai-costs-budget-input", placeholder: "USD / mois" });
+    if (monthly) input.value = monthly;
+    var block = el("input", { type: "checkbox", id: "ai-costs-budget-block" });
+    block.checked = !!(b && b.block_when_exceeded);
+    var save = el("button", { type: "button", class: "ai-btn ai-btn-ghost" }, [el("span", { text: "Enregistrer le budget" })]);
+    save.addEventListener("click", function () {
+      save.disabled = true;
+      apiSend("PUT", "/api/pcorg/summary/budget", {
+        monthly_usd: input.value === "" ? null : Number(input.value),
+        block_when_exceeded: block.checked
+      }).then(function (res) {
+        save.disabled = false;
+        if (!res || !res.ok) { toast((res && res.error) || "Erreur", "error"); return; }
+        toast("Budget IA enregistré", "success");
+        renderBudget(res);
+      });
+    });
+    host.appendChild(el("div", { class: "ai-costs-budget-form" }, [
+      el("span", { text: "Budget mensuel (USD, vide = aucun) :" }), input,
+      el("label", null, [block, " Bloquer les nouvelles générations une fois atteint"]),
+      save
+    ]));
+  }
+
+  function loadCosts() {
+    var from = costsEl.querySelector("#ai-costs-from").value;
+    var to = costsEl.querySelector("#ai-costs-to").value;
+    var url = "/api/pcorg/summary/usage?from=" + encodeURIComponent(from + "T00:00")
+      + "&to=" + encodeURIComponent(to + "T23:59:59");
+    var host = costsEl.querySelector("#ai-costs-result");
+    clearChildren(host);
+    host.appendChild(el("div", { class: "ai-costs-sub", text: "Chargement…" }));
+    apiGet(url).then(function (res) {
+      clearChildren(host);
+      if (!res || !res.ok) { host.appendChild(el("div", { class: "ai-costs-sub", text: "Erreur : " + ((res && res.error) || "?") })); return; }
+      renderBudget(res.budget);
+      host.appendChild(el("div", null, [
+        el("span", { class: "ai-costs-total", text: fmtUsd(res.total_estimated_cost_usd) }),
+        el("span", { class: "ai-costs-sub", text: "  sur la période (tarifs vérifiés le " + (res.pricing_verified_on || "?") + ")" })
+      ]));
+      if (res.unknown_pricing_models && res.unknown_pricing_models.length) {
+        host.appendChild(el("div", { class: "ai-costs-sub", text: "Sans tarif connu (non chiffrés) : " + res.unknown_pricing_models.join(", ") }));
+      }
+      host.appendChild(costsTable("Par fonctionnalité", res.by_feature, function (k) { return FEATURE_LABELS[k] || k; }));
+      host.appendChild(costsTable("Par modèle", res.by_model, function (k) { return k; }));
+    }).catch(function () {
+      clearChildren(host);
+      host.appendChild(el("div", { class: "ai-costs-sub", text: "Serveur injoignable." }));
+    });
+  }
+
+  if (window.__userIsAdmin === true) {
+    var actionsBar = document.querySelector("#ai-memory-body .ai-memory-actions");
+    if (actionsBar) {
+      var costsBtn = el("button", { type: "button", class: "btn-ghost", id: "ai-memory-btn-costs", title: "Coût de l'IA par fonctionnalité et par modèle, budget mensuel" }, [
+        el("span", { class: "material-symbols-outlined" }, ["payments"]),
+        "Coûts IA"
+      ]);
+      costsBtn.addEventListener("click", openCosts);
+      actionsBar.appendChild(costsBtn);
+    }
+  }
 
   load();
 })();

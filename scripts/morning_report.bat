@@ -8,7 +8,7 @@ REM    - Python prod (par defaut : E:\TITAN\production\titan_prod\Scripts\python
 REM      Surcharge possible via la variable d'env COCKPIT_PYTHON.
 REM    - Cockpit installe (par defaut : E:\TITAN\production\cockpit)
 REM      Surcharge via COCKPIT_DIR.
-REM    - Variables d'env SMTP_* et ANTHROPIC_API_KEY definies au niveau Machine
+REM    - Variables d'env SMTP_* et COCKPIT_ANTHROPIC_API_KEY definies au niveau Machine
 REM      (ou User si la tache tourne sous ton compte) — voir README.
 REM
 REM  Detection de l'evenement cible :

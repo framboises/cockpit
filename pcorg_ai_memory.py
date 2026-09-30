@@ -31,10 +31,11 @@ Modele de donnees - collection `pcorg_ai_memory` :
 Conventions :
 - Une directive avec scope.event=None s'applique a TOUS les evenements.
 - Une directive avec scope.section=None s'applique a TOUTES les sections.
-- L'injection prompt charge les directives matchant (scope.event in [event, None])
-  AND (scope.section in [section, None]). C'est volontairement permissif : on
-  prefere ajouter du contexte plutot que de manquer une regle pertinente.
-- Plafond defensif : MAX_DIRECTIVES_PER_PROMPT pour eviter d'exploser le prompt.
+- scope.year / scope.phase RESTREIGNENT reellement l'injection (annee exacte,
+  phase montage/course/demontage deduite de parametrages.globalHoraires) ;
+  scope.section groupe la directive sous 'Pour la section X' dans le bloc.
+  Voir build_scope_query.
+- Plafond defensif : MAX_DIRECTIVES_PER_PROMPT (tri poids desc puis recence).
 """
 
 from __future__ import annotations
@@ -66,8 +67,8 @@ ALLOWED_SECTIONS = (
 ALLOWED_PHASES = ("montage", "course", "demontage")
 
 # Plafond defensif : au-dela, le bloc devient trop long et noie le system.
-# Si on depasse, on garde les directives les plus utilisees (used_count) et
-# les plus recentes. Un warning est emis pour rappeler de fusionner.
+# Si on depasse, on garde les directives de poids le plus eleve puis les plus
+# recentes. Un warning est emis pour rappeler de fusionner.
 MAX_DIRECTIVES_PER_PROMPT = 50
 
 # Longueur max d'une directive : si trop longue, signal que c'est une
@@ -211,7 +212,8 @@ def get_directive(db, directive_id):
 
 def list_directives(db, event=None, section=None, active_only=False,
                     type_=None, limit=200):
-    """Liste les directives selon filtres. Tri : used_count desc puis recente.
+    """Liste les directives selon filtres. Tri : poids desc puis recente
+    (meme ordre que l'injection dans le prompt).
 
     event/section : valeur exacte attendue OU None pour 'pas de filtre'.
     Pour matcher 'directives globales applicables a event X' (scope.event ==
@@ -230,7 +232,7 @@ def list_directives(db, event=None, section=None, active_only=False,
         q["type"] = type_
     return list(
         db[COLLECTION].find(q)
-            .sort([("used_count", DESCENDING), ("created_at", DESCENDING)])
+            .sort([("weight", DESCENDING), ("created_at", DESCENDING)])
             .limit(int(limit))
     )
 
@@ -239,38 +241,50 @@ def list_directives(db, event=None, section=None, active_only=False,
 # Chargement pour injection prompt
 # ----------------------------------------------------------------------------
 
-def load_active_directives(db, event=None, section=None, phase=None, year=None,
-                            max_count=MAX_DIRECTIVES_PER_PROMPT):
-    """Charge les directives actives applicables au contexte (event, section,
-    phase, year). Semantique permissive : une directive de scope plus large
-    (event=None par ex.) s'applique aussi.
+def build_scope_query(event=None, section=None, phase=None, year=None):
+    """Filtre Mongo des directives actives applicables a un contexte de rapport.
 
-    Tri : weight desc, used_count desc, created_at desc.
+    Regles (un champ de scope renseigne RESTREINT la directive) :
+    - scope.event  : directive globale (None) ou de cet evenement. Rapport
+      'tous evenements' (event=None) -> directives globales uniquement.
+    - scope.year   : directive sans annee, ou de CETTE annee. Rapport sans
+      annee -> directives sans annee uniquement.
+    - scope.phase  : directive sans phase, ou de la phase de la periode
+      (montage / course / demontage). Phase inconnue (pas de globalHoraires,
+      SAISON...) -> directives sans phase uniquement.
+    - scope.section : section=None (cas du rapport, qui produit toutes les
+      sections d'un coup) -> TOUTES les sections ; elles sont regroupees par
+      section dans le bloc injecte (format_directives_block).
     """
-    _ensure_indexes(db)
     q = {"active": True}
-
-    # event : match exact ou None (global)
-    if event is not None:
-        q["scope.event"] = {"$in": [event, None]}
-    # sinon (event=None dans le rapport), on prend uniquement les directives
-    # globales pour eviter de melanger les events
-    else:
-        q["scope.event"] = None
-
-    if section is not None:
-        q["scope.section"] = {"$in": [section, None]}
-    if phase is not None:
-        q["scope.phase"] = {"$in": [phase, None]}
+    q["scope.event"] = {"$in": [event, None]} if event is not None else None
     if year is not None:
         try:
             q["scope.year"] = {"$in": [int(year), None]}
         except (TypeError, ValueError):
             q["scope.year"] = None
+    else:
+        q["scope.year"] = None
+    q["scope.phase"] = {"$in": [phase, None]} if phase else None
+    if section is not None:
+        q["scope.section"] = {"$in": [section, None]}
+    return q
+
+
+def load_active_directives(db, event=None, section=None, phase=None, year=None,
+                            max_count=MAX_DIRECTIVES_PER_PROMPT):
+    """Charge les directives actives applicables au contexte (event, section,
+    phase, year). Voir build_scope_query pour la semantique des scopes.
+
+    Tri : weight desc puis created_at desc (plus used_count, qui favorisait
+    mecaniquement les regles les plus anciennes). Au-dela du plafond, ce sont
+    les poids les plus faibles qui sautent.
+    """
+    _ensure_indexes(db)
+    q = build_scope_query(event=event, section=section, phase=phase, year=year)
 
     cur = db[COLLECTION].find(q).sort([
         ("weight", DESCENDING),
-        ("used_count", DESCENDING),
         ("created_at", DESCENDING),
     ]).limit(int(max_count) + 1)
 
@@ -278,9 +292,9 @@ def load_active_directives(db, event=None, section=None, phase=None, year=None,
     overflow = len(items) > max_count
     if overflow:
         logger.warning(
-            "ai_memory: %d directives matchent le scope (event=%s section=%s) "
-            "-> tronquees a %d. Envisager fusion/archivage.",
-            len(items), event, section, max_count,
+            "ai_memory: %d+ directives matchent le scope (event=%s section=%s "
+            "phase=%s year=%s) -> tronquees a %d. Envisager fusion/archivage.",
+            len(items), event, section, phase, year, max_count,
         )
         items = items[:max_count]
     return items, overflow
@@ -310,15 +324,16 @@ def format_directives_block(directives) -> str:
     lines = [
         "Connaissance accumulee et bonnes pratiques (directives validees par "
         "les operateurs PC Org au fil des rapports precedents, a appliquer "
-        "systematiquement quand le contexte s'y prete) :",
+        "systematiquement quand le contexte s'y prete). Les directives "
+        "generales valent pour tout le rapport ; celles listees sous 'Pour la "
+        "section X' ne concernent QUE cette section :",
     ]
-    for d in directives:
+
+    def _entry(d):
         scope = d.get("scope") or {}
         scope_parts = []
         if scope.get("event"):
             scope_parts.append("event: " + str(scope["event"]))
-        if scope.get("section"):
-            scope_parts.append("section: " + str(scope["section"]))
         if scope.get("phase"):
             scope_parts.append("phase: " + str(scope["phase"]))
         if scope.get("year"):
@@ -326,9 +341,27 @@ def format_directives_block(directives) -> str:
         scope_str = ", ".join(scope_parts) if scope_parts else "global"
         type_str = str(d.get("type") or "principe").upper()
         content = (d.get("content") or "").strip()
+        return ["", "- [" + type_str + " | " + scope_str + "]", "  " + content]
+
+    general = [d for d in directives if not (d.get("scope") or {}).get("section")]
+    by_section = {}
+    for d in directives:
+        sec = (d.get("scope") or {}).get("section")
+        if sec:
+            by_section.setdefault(sec, []).append(d)
+
+    if general:
         lines.append("")
-        lines.append("- [" + type_str + " | " + scope_str + "]")
-        lines.append("  " + content)
+        lines.append("Directives generales :")
+        for d in general:
+            lines.extend(_entry(d))
+    ordered = [s for s in ALLOWED_SECTIONS if s in by_section]
+    ordered += sorted(s for s in by_section if s not in ALLOWED_SECTIONS)
+    for sec in ordered:
+        lines.append("")
+        lines.append("Pour la section " + sec + " :")
+        for d in by_section[sec]:
+            lines.extend(_entry(d))
     return "\n".join(lines)
 
 
@@ -433,7 +466,7 @@ def stats(db):
 
 def suggest_rule_from_comment(comment, section=None, event=None,
                               original_text=None, corrected_text=None,
-                              model=None):
+                              model=None, db=None, by_email=None):
     """Reformule un commentaire libre en directive concise (~1 phrase).
 
     Utilise Claude Haiku (rapide, ~256 tokens, cout negligeable). Retourne
@@ -490,7 +523,15 @@ def suggest_rule_from_comment(comment, section=None, event=None,
     raw_text, usage, _stop = pcorg_summary._claude_stream_request(
         system, user, max_tokens=256, model=use_model,
         system_cache=False,  # bloc unique, pas la peine de cacher
+        db=db,               # controle de budget si fourni
     )
+    # Cet appel n'est persiste nulle part ailleurs : on le journalise pour
+    # qu'il apparaisse dans les couts IA.
+    if db is not None:
+        pcorg_summary.record_ai_usage(
+            db, "suggest_rule", use_model, usage,
+            meta={"event": event, "section": section, "by": by_email or ""},
+        )
     rule = (raw_text or "").strip()
     # Nettoyages defensifs : si Claude a quand meme ajoute des guillemets ou
     # un saut de ligne, on tronque proprement.

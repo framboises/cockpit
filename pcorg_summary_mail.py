@@ -416,7 +416,7 @@ def _upcoming_block(summary):
     jalons strategiques dans le briefing). Le compteur de jalons reste affiche
     en chip a titre indicatif.
     """
-    sections = summary.get("sections") or {}
+    sections = _effective_sections(summary)
     items = summary.get("upcoming") or []
     briefing = sections.get("prochaines_24h") or ""
     if not briefing and not items:
@@ -710,23 +710,19 @@ def _doors_block(summary):
     )
 
 
-def _retro_block(summary):
-    retro = summary.get("n1_retro")
-    if not retro or not retro.get("text"):
-        return ""
-    return (
-        '<tr><td style="padding:8px 24px;">'
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'style="background:#fef9c3;border:1px solid #facc15;border-left:4px solid #ca8a04;'
-        'border-radius:8px;">'
-        '<tr><td style="padding:14px 16px;">'
-        '<div style="font-size:13px;font-weight:700;color:#713f12;'
-        'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">'
-        'Note retrospective &mdash; edition precedente</div>'
-        '<div style="font-size:13px;line-height:1.55;color:#422006;white-space:pre-wrap;">'
-        + _h(retro["text"]) + '</div>'
-        '</td></tr></table></td></tr>'
-    )
+def _effective_sections(summary):
+    """Sections a envoyer : la correction utilisateur remplace le texte genere
+    (champ sections_corrected, derniere correction l'emporte)."""
+    out = dict(summary.get("sections") or {})
+    for key, corr in (summary.get("sections_corrected") or {}).items():
+        if isinstance(corr, dict) and corr.get("text"):
+            out[key] = corr["text"]
+    return out
+
+
+# NB : la note retrospective N-1 (summary['n1_retro']) est un contexte INTERNE
+# du prompt, jamais montre au lecteur : elle n'apparait ni dans le HTML ni
+# dans la version texte du mail.
 
 
 def _spacer(h_px=12):
@@ -749,7 +745,7 @@ def render_summary_html(summary):
     7. Sections thematiques detaillees (Secours / Securite / Technique /
        Flux / Fourriere / Recommandations)
     """
-    sections = summary.get("sections") or {}
+    sections = _effective_sections(summary)
 
     # Decoupage des sections : les 2 premieres en haut (vue macro), les 6
     # autres en bas (detail thematique).
@@ -784,17 +780,16 @@ def render_summary_text(summary):
     parts.append("Genere par : " + (summary.get("created_by_name") or summary.get("created_by") or ""))
     parts.append("Fiches analysees : " + str(summary.get("fiches_count") or 0))
     parts.append("")
-    sections = summary.get("sections") or {}
+    sections = _effective_sections(summary)
     for key, label, _c in SECTION_LABELS:
         parts.append(label.upper())
         parts.append("-" * 60)
         parts.append((sections.get(key) or "RAS").strip())
         parts.append("")
-    retro = summary.get("n1_retro")
-    if retro and retro.get("text"):
-        parts.append("NOTE RETROSPECTIVE EDITION PRECEDENTE")
+    if sections.get("prochaines_24h"):
+        parts.append("PROCHAINES 24 HEURES")
         parts.append("-" * 60)
-        parts.append(retro["text"].strip())
+        parts.append(sections["prochaines_24h"].strip())
         parts.append("")
     parts.append("--")
     parts.append("Cockpit Assistant IA - TITAN ACO")

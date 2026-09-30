@@ -13,7 +13,11 @@ Pipeline :
 
 Usage :
     python pcorg_morning_report.py            # production (cas standard)
-    python pcorg_morning_report.py --dry-run  # genere et affiche, n'envoie pas
+    python pcorg_morning_report.py --dry-run  # assemble le prompt SANS appeler
+                                              # Claude, sans rien enregistrer
+                                              # ni envoyer (tailles affichees)
+    python pcorg_morning_report.py --no-send  # genere + enregistre, sans mail
+                                              # (alias historique : --no-mail)
     python pcorg_morning_report.py --to=alice@example.com
                                               # test : forcer la liste de
                                               # destinataires (un seul mail
@@ -51,22 +55,10 @@ EXTRA_FOCUS_NOTE_NIGHT = (
     "Incidents nocturnes, situations qui ont sollicite l'astreinte, "
     "rondes notables, anomalies decouvertes au petit matin. Si la nuit "
     "n'a rien de notable, dis-le clairement plutot que de meubler.\n"
-    "2. SYNTHESE - PIC DE FREQUENTATION (obligatoire si bloc Billetterie & "
-    "Frequentation fourni) :\n"
-    "   - Annonce le PIC CONSTATE DE LA VEILLE avec son heure et la "
-    "comparaison annee precedente. Format type : 'pic constate hier a "
-    "**48 200** vers **15h30**, en hausse de **+12 %** vs l'an passe' "
-    "(utilise slot=yesterday : pic_observed, pic_observed_hour, "
-    "delta_pct_vs_prev).\n"
-    "   - Annonce le PIC PROJETE DU JOUR avec l'heure approximative "
-    "attendue. Format type : 'pic projete a **52 000** vers **16h**, "
-    "en hausse de **+8 %** vs l'an passe' (utilise slot=today : "
-    "pic_projection comme pic, pic_prev_hour comme heure attendue, "
-    "delta_pct_vs_prev pour la comparaison). L'heure du pic du jour est "
-    "ESTIMEE a partir de l'heure du pic de l'edition precedente sur le "
-    "jour-equivalent.\n"
-    "   - Si pic_projection est null mais pic_prev present, parle de "
-    "'pic attendu autour de **X** comme l'an passe a la meme heure'.\n"
+    "2. SYNTHESE - PIC DE FREQUENTATION : les deux phrases de pic (veille "
+    "constate, jour projete) definies dans le bloc Billetterie & "
+    "Frequentation du system sont ici d'autant plus attendues : c'est la "
+    "premiere information lue au briefing du matin.\n"
     "3. SYNTHESE - VOLUME ACTIVITE : situe systematiquement le volume "
     "d'activite par rapport a la veille meme creneau et a l'edition "
     "precedente (KPIs comparatifs fournis).\n"
@@ -114,9 +106,11 @@ def _last_24h_window():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Rapport matinal PC Organisation")
-    parser.add_argument("--dry-run", action="store_true", help="Genere sans envoyer le mail")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Assemble le prompt sans appeler Claude, sans enregistrer ni envoyer")
     parser.add_argument("--to", default="", help="Destinataires (csv) qui remplacent la liste opt-in (test)")
-    parser.add_argument("--no-mail", action="store_true", help="Genere et sauve mais n'envoie aucun mail")
+    parser.add_argument("--no-send", "--no-mail", action="store_true", dest="no_send",
+                        help="Genere et enregistre le rapport mais n'envoie aucun mail")
     parser.add_argument("--as-of", default="", dest="as_of",
                         help="ISO datetime pour simuler le 'now' (test, ex: 2025-06-14T07:00)")
     parser.add_argument("--force", action="store_true",
@@ -191,6 +185,10 @@ def main(argv=None):
                 extra_focus_note=EXTRA_FOCUS_NOTE_NIGHT,
                 as_of_utc=as_of_utc,
                 on_progress=_on_progress,
+                dry_run=bool(args.dry_run),
+                # Un appel par jour : une ecriture de cache prompt (+25 %)
+                # ne serait jamais relue dans les 5 minutes.
+                prompt_cache=False,
             )
         except pcorg_summary.ClaudeError as e:
             log.error("Echec appel Claude : %s", e)
@@ -199,14 +197,31 @@ def main(argv=None):
             log.exception("Erreur inattendue lors de la generation du resume")
             return 3
 
+        if args.dry_run:
+            # Aucun appel Claude, rien d'enregistre, aucun mail.
+            sys_chars = int(doc.get("system_prompt_chars") or 0)
+            usr_chars = int(doc.get("user_prompt_chars") or 0)
+            mem_chars = len(doc.get("memory_block_text") or "")
+            log.info("DRY-RUN : prompt assemble, aucun appel Claude, rien enregistre ni envoye.")
+            log.info("  system : %d chars | memoire : %d chars (%d directive(s)) | user : %d chars",
+                     sys_chars, mem_chars, len(doc.get("memory_directive_ids") or []), usr_chars)
+            log.info("  ~%d tokens d'entree estimes (4 chars/token), fiches=%s, retro N-1 %s",
+                     (sys_chars + mem_chars + usr_chars) // 4, doc.get("fiches_count"),
+                     "en cache" if doc.get("n1_retro") else "absente (non generee en dry-run)")
+            sel = doc.get("selection_detail") or {}
+            log.info("  selection : %s (phase=%s)", {k: sel.get(k) for k in
+                     ("total", "majors", "others", "selected", "method", "time_buckets")},
+                     sel.get("phase"))
+            return 0
+
         log.info("Resume genere : id=%s fiches=%s tokens_in=%s tokens_out=%s",
                  doc.get("_id"),
                  doc.get("fiches_count"),
                  (doc.get("usage") or {}).get("input_tokens"),
                  (doc.get("usage") or {}).get("output_tokens"))
 
-        if args.dry_run or args.no_mail:
-            log.info("Mode dry-run / no-mail : aucun envoi.")
+        if args.no_send:
+            log.info("Mode --no-send : rapport enregistre, aucun envoi.")
             return 0
 
         # 3. Resolution destinataires

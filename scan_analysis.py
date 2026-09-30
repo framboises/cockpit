@@ -25,7 +25,7 @@ import pcorg_summary
 logger = logging.getLogger(__name__)
 
 ANALYSES_COLLECTION = 'scan_analyses'
-DEFAULT_MODEL = 'claude-sonnet-5'
+DEFAULT_MODEL = 'claude-sonnet-5-5'
 
 # Nombre d'unites detaillees dans le prompt. Au-dela, le modele se disperse et
 # le cout grimpe sans gain : les unites sont classees par volume et seules les
@@ -105,14 +105,27 @@ def _unit_kpis(unit):
     }
 
 
-def compute_kpis(db, event, year):
-    """KPI agreges du document `complet`, prets a etre mis dans le prompt."""
-    doc = db['historique_controle'].find_one(
-        {'event': event, 'year': int(year), 'type': 'complet'})
+def compute_kpis(db, event, year, doc=None, source=None):
+    """KPI agreges du document `complet`, prets a etre mis dans le prompt.
+
+    Source des unites : archive du controle d'acces live d'abord (pseudo
+    `complet` en memoire), import Excel sinon -- meme regle que le rapport
+    (scan_report_build.resolve_units_doc). `doc` permet d'injecter un
+    document deja resolu.
+    """
+    if doc is None:
+        import scan_report_build
+        doc, source = scan_report_build.resolve_units_doc(db, event, year)
     if not doc:
         raise ClaudeError('Aucun document complet pour %s %s' % (event, year))
+    live = (source or doc.get('source')) == 'live_controle'
 
-    units = [u for u in (doc.get('complet') or [])]
+    # Les unites ecartees (guichets, services) sont hors rapport : elles
+    # n'ont rien a faire dans le prompt non plus. Sans ce filtre, les editions
+    # importees les envoyaient quand meme ; on garde ce comportement pour
+    # elles (charge utile inchangee) et on filtre en live.
+    units = [u for u in (doc.get('complet') or [])
+             if not (live and u.get('ignored'))]
     kpis = [k for k in (_unit_kpis(u) for u in units) if k]
     kpis.sort(key=lambda k: -(k['entrees'] + k['sorties']))
 
@@ -124,8 +137,15 @@ def compute_kpis(db, event, year):
     total_a = sum(k['sans_direction'] for k in kpis)
 
     # Presents de l'enceinte : la serie globale du document frequentation.
-    freq = db['historique_controle'].find_one(
-        {'event': event, 'year': int(year), 'type': 'frequentation'})
+    # En live, ce document n'existe pas (et ne doit pas etre ecrit) : meme
+    # serie recalculee depuis les portes retenues, comme l'import la construit.
+    if live:
+        import live_scan_units
+        freq = {'data': live_scan_units.enclosure_hourly(doc.get('complet') or []),
+                'excluded_autre': 0, 'doors_without_direction': []}
+    else:
+        freq = db['historique_controle'].find_one(
+            {'event': event, 'year': int(year), 'type': 'frequentation'})
     enceinte = None
     if freq and freq.get('data'):
         best = max(freq['data'], key=lambda r: int(r.get('present') or 0))
@@ -138,10 +158,20 @@ def compute_kpis(db, event, year):
             'portes_sans_direction': freq.get('doors_without_direction') or [],
         }
 
-    return {
+    extra = {}
+    if live:
+        conv = (doc.get('live') or {}).get('conventions') or {}
+        extra['note_source'] = (
+            "live_controle = transactions du controle d'acces HSH archivees "
+            "(tranches de 5 min regroupees au quart d'heure), pas un export "
+            "Excel. Portes : %s. Zones : %s. Refus : %s. Aucun scan sans "
+            "direction en live." % (conv.get('portes'), conv.get('zones'),
+                                    conv.get('refus')))
+
+    out = {
         'event': event,
         'year': int(year),
-        'source': 'scan_import',
+        'source': 'live_controle' if live else 'scan_import',
         'race': doc.get('race'),
         'periode': {'debut': doc.get('period_start'), 'fin': doc.get('period_end')},
         'creneaux': doc.get('slot_count'),
@@ -154,6 +184,8 @@ def compute_kpis(db, event, year):
         'non_localisees': [k['nom'] for k in kpis if not k['localisee']],
         'tronque': len(portes) > MAX_UNITS_DETAILED or len(zones) > MAX_UNITS_DETAILED,
     }
+    out.update(extra)
+    return out
 
 
 def compute_comparison(db, event, year):
@@ -209,8 +241,10 @@ Regles de fond :
   plutot que de supposer.
 - ATTENTION aux comparaisons entre editions : le champ "source" indique d'ou
   vient chaque jeu. "scan_import" vient d'un export Excel de billetterie,
-  "collecte_temps_reel" de la remontee terrain. Ces deux sources ne couvrent
-  pas le meme perimetre de portes. Si les sources different entre l'edition
+  "collecte_temps_reel" de la remontee terrain, "live_controle" des
+  transactions du controle d'acces archivees (scans refuses exclus, voir
+  "note_source"). Ces sources ne couvrent pas le meme perimetre de portes ni
+  les memes conventions de comptage. Si les sources different entre l'edition
   analysee et la precedente, tu DOIS le dire explicitement et presenter tout
   ecart comme potentiellement lie au changement de mesure, jamais comme une
   variation de frequentation averee.
@@ -274,10 +308,19 @@ def generate_scan_analysis(db, event, year, model=None, created_by=None,
     if on_progress:
         on_progress(30, 'Appel du modele')
     use_model = pcorg_summary._validate_model(model) or DEFAULT_MODEL
+
+    # call_claude rappelle on_progress(texte_recu, tokens_sortie) et non
+    # (pct, msg) : l'ancien lambda levait (str * float) a chaque appel,
+    # exception avalee, et la barre restait figee a 30 %.
+    def _claude_progress(text, tokens):
+        if on_progress:
+            pct = 30 + int(60 * min(1.0, len(text or '') / 8000.0))
+            on_progress(pct, 'Redaction (%d tokens)' % int(tokens or 0))
+
     sections, raw_text, usage = pcorg_summary.call_claude(
         system, user, model=use_model, section_keys=SCAN_SECTION_KEYS,
-        on_progress=(lambda pct, msg: on_progress(30 + int(pct * 0.6), msg))
-        if on_progress else None,
+        on_progress=_claude_progress if on_progress else None,
+        db=db,  # controle du budget IA mensuel
     )
 
     if on_progress:
@@ -446,22 +489,53 @@ def build_frequentation_prompt_payload(block):
                 j['presents_pic'] = d.get('peak_present')
                 j['heure_pic'] = d.get('peak_hour')
                 j['entrees'] = d.get('entrees')
+            elif d.get('unmeasured_reason'):
+                j['raison_non_mesure'] = d.get('unmeasured_reason')
             w = (block.get('weather') or {}).get(d.get('date'))
             if w:
                 j['meteo'] = {'t_max': w.get('tmax'), 't_min': w.get('tmin'),
                               'pluie_mm': w.get('rain'), 'soleil_h': w.get('sun')}
             jours.append(j)
-        editions.append({
+        entry = {
             'annee': ed.get('year'),
             'edition_analysee': bool(ed.get('is_current')),
             'source': ed.get('source'),
             'date_jour_de_course': ed.get('race_date'),
             'jours': jours,
-        })
+        }
+        # Editions du controle d'acces live seulement : la charge utile d'une
+        # edition importee reste identique (empreinte, donc pas de nouvel appel).
+        if ed.get('presents_method'):
+            entry['methode_presents'] = ed.get('presents_method')
+            entry['base_du_pic'] = ed.get('peak_basis')
+            ci = ed.get('counter_initial') or {}
+            if ci:
+                # Solde affiche des le premier releve : sans remise a zero
+                # observee, reliquat qui majore tous les presents de l'edition.
+                entry['solde_initial_compteur'] = ci.get('current')
+                entry['premier_releve'] = ci.get('at')
+                entry['remise_a_zero_observee'] = bool(ci.get('reset_in_window'))
+        editions.append(entry)
     ins = block.get('insights') or {}
     ac = ins.get('access_control') or {}
     uc = block.get('units_comparison') or {}
-    return {
+    sources = block.get('sources_by_year') or {}
+    if 'live_controle' in sources.values():
+        extra = {
+            'sources_par_edition': sources,
+            'note_sources': (
+                "live_controle = releves du compteur Area ENCEINTE GENERALE toutes "
+                "les ~3 min, presents = solde du compteur moins les vehicules, pic = "
+                "plus haut releve ; scan_import / collecte_temps_reel = somme des "
+                "portes d'un export, au pas de 15 min ou horaire. Perimetres et "
+                "methodes differents : un ecart entre deux editions de sources "
+                "differentes peut venir de la mesure. Un solde_initial_compteur "
+                "eleve sans remise_a_zero_observee est un reliquat des evenements "
+                "precedents : il majore tous les presents de l'edition d'autant."),
+        }
+    else:
+        extra = {}
+    out = {
         'evenement': block.get('event'),
         'annee': block.get('year'),
         'perimetre_comparable': block.get('entries_comparable'),
@@ -482,6 +556,8 @@ def build_frequentation_prompt_payload(block):
         'editions': editions,
         'constats_calcules': ins,
     }
+    out.update(extra)
+    return out
 
 
 def _freq_fingerprint(payload):
@@ -540,7 +616,11 @@ def generate_frequentation_analysis(db, event, year, block, model=None,
     try:
         sections, raw_text, usage = pcorg_summary.call_claude(
             FREQ_SYSTEM_PROMPT, user, model=use_model,
-            section_keys=FREQ_SECTION_KEYS)
+            section_keys=FREQ_SECTION_KEYS,
+            # Un appel par regeneration, et seulement si les donnees ont
+            # change : l'ecriture cache (+25 %) ne serait jamais relue.
+            system_cache=False,
+            db=db)
     except ClaudeError as e:
         logger.warning('Analyse frequentation indisponible (%s %s) : %s',
                        event, year, e)

@@ -70,7 +70,7 @@
   }
 
   function toast(msg, type) {
-    if (window.showToast) { window.showToast(msg, type || "info"); return; }
+    if (window.showToast) { window.showToast(type || "info", msg); return; }
     try { console.log("[ai-assistant]", type || "info", msg); } catch (e) {}
   }
 
@@ -240,7 +240,7 @@
     var header = el("div", { class: "ai-modal-header" }, [
       el("span", { class: "material-symbols-outlined ai-modal-icon" }, ["smart_toy"]),
       el("div", { class: "ai-modal-titles" }, [
-        el("h2", { class: "ai-modal-title", text: "Assistant IA — Résumé fiches PC Organisation" }),
+        el("h2", { class: "ai-modal-title", id: "ai-modal-title", text: "Assistant IA" }),
         el("div", { class: "ai-modal-subtitle", id: "ai-modal-context" })
       ]),
       el("button", { type: "button", class: "ai-modal-close", title: "Fermer", "aria-label": "Fermer", onclick: closeModal }, [
@@ -325,10 +325,35 @@
     ]);
     collapsedBar.addEventListener("click", function () { setControlsCollapsed(false); });
 
+    // Onglets : Resume / Briefing / RETEX dans la MEME modale (un seul bouton
+    // IA dans la sidebar). Briefing et RETEX sont fournis par ai_reports.js,
+    // montes a la premiere ouverture de leur onglet.
+    var modes = [{ key: "resume", icon: "summarize", label: "Résumé période" }];
+    if (window.AIReports) {
+      modes.push({ key: "briefing", icon: "assignment", label: "Briefing de situation" });
+      if (window.__userIsAdmin === true) modes.push({ key: "retex", icon: "history_edu", label: "RETEX d'édition" });
+    }
+    var modeTabs = el("div", { class: "ai-mode-tabs", role: "tablist" }, modes.map(function (m) {
+      return el("button", { type: "button", class: "ai-mode-tab", role: "tab", "data-mode": m.key }, [
+        el("span", { class: "material-symbols-outlined" }, [m.icon]),
+        el("span", { text: m.label })
+      ]);
+    }));
+    modeTabs.addEventListener("click", function (e) {
+      var t = e.target.closest(".ai-mode-tab");
+      if (t) setMode(t.getAttribute("data-mode"));
+    });
+    if (modes.length < 2) modeTabs.hidden = true;
+
+    var panelResume = el("div", { class: "ai-mode-panel", "data-mode": "resume" }, [controls, collapsedBar, body]);
+    var panelBriefing = el("div", { class: "ai-mode-panel", "data-mode": "briefing", hidden: "hidden" });
+    var panelRetex = el("div", { class: "ai-mode-panel", "data-mode": "retex", hidden: "hidden" });
+
     modal.appendChild(header);
-    modal.appendChild(controls);
-    modal.appendChild(collapsedBar);
-    modal.appendChild(body);
+    modal.appendChild(modeTabs);
+    modal.appendChild(panelResume);
+    modal.appendChild(panelBriefing);
+    modal.appendChild(panelRetex);
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
@@ -396,6 +421,32 @@
     }
     rootEl.querySelector("#ai-date-start").value = toLocalInputValue(start);
     rootEl.querySelector("#ai-date-end").value = toLocalInputValue(now);
+  }
+
+  // ---------- Texte affiche d'une section (correction utilisateur prioritaire) ----------
+
+  function sectionText(summary, key) {
+    var corr = ((summary && summary.sections_corrected) || {})[key];
+    if (corr && corr.text) return corr.text;
+    return ((summary && summary.sections) || {})[key] || "";
+  }
+
+  function correctionMarker(summary, key) {
+    var corr = ((summary && summary.sections_corrected) || {})[key];
+    if (!corr || !corr.text) return null;
+    var who = corr.by_name || corr.by_email || "un utilisateur";
+    var when = "";
+    if (corr.ts) {
+      var d = new Date(corr.ts);
+      if (!isNaN(d.getTime())) when = " le " + pad2(d.getDate()) + "/" + pad2(d.getMonth() + 1) + " à " + pad2(d.getHours()) + "h" + pad2(d.getMinutes());
+    }
+    return el("span", {
+      class: "ai-corrected-marker",
+      title: "Texte corrigé manuellement" + when + ". Le texte généré reste conservé dans l'historique."
+    }, [
+      el("span", { class: "material-symbols-outlined" }, ["edit_note"]),
+      el("span", { text: "corrigé par " + who })
+    ]);
   }
 
   // ---------- Render summary ----------
@@ -498,11 +549,12 @@
       if (doorsCard) panel.appendChild(doorsCard);
     } else {
       var sectionKey = state.activeTab;
-      var content = (summary.sections || {})[sectionKey] || "";
+      var content = sectionText(summary, sectionKey);
       var card = el("div", { class: "ai-section-card ai-section-" + state.activeTab }, [
         el("div", { class: "ai-section-header" }, [
           el("span", { class: "material-symbols-outlined" }, [TAB_ICONS[state.activeTab]]),
           el("span", { class: "ai-section-title", text: TAB_TITLES[state.activeTab] }),
+          correctionMarker(summary, sectionKey),
           buildSectionToolbar(summary, sectionKey, content)
         ])
       ]);
@@ -731,8 +783,7 @@
   }
 
   function buildUpcomingCard(summary) {
-    var sections = summary.sections || {};
-    var briefing = sections.prochaines_24h || "";
+    var briefing = sectionText(summary, "prochaines_24h");
     var items = summary.upcoming || [];
     if (!briefing && !items.length) return null;
     var card = el("div", { class: "ai-upcoming-card" });
@@ -740,6 +791,7 @@
       el("span", { class: "material-symbols-outlined" }, ["schedule"]),
       el("span", { class: "ai-upcoming-title", text: "Prochaines 24 heures" }),
       el("span", { class: "ai-upcoming-count", text: items.length ? String(items.length) + " jalon(s)" : "aucun jalon" }),
+      correctionMarker(summary, "prochaines_24h"),
       buildSectionToolbar(summary, "prochaines_24h", briefing)
     ]));
     if (briefing) {
@@ -800,11 +852,12 @@
   }
 
   function buildSyntheseCard(summary) {
-    var synth = (summary.sections || {}).synthese || "";
+    var synth = sectionText(summary, "synthese");
     var card = el("div", { class: "ai-section-card ai-section-synthese" }, [
       el("div", { class: "ai-section-header" }, [
         el("span", { class: "material-symbols-outlined" }, ["summarize"]),
         el("span", { class: "ai-section-title", text: "Synthèse" }),
+        correctionMarker(summary, "synthese"),
         buildSectionToolbar(summary, "synthese", synth)
       ])
     ]);
@@ -816,11 +869,12 @@
   }
 
   function buildFaitsMarquantsCard(summary) {
-    var faits = (summary.sections || {}).faits_marquants || "";
+    var faits = sectionText(summary, "faits_marquants");
     var card = el("div", { class: "ai-section-card ai-section-faits_marquants" }, [
       el("div", { class: "ai-section-header" }, [
         el("span", { class: "material-symbols-outlined" }, ["campaign"]),
         el("span", { class: "ai-section-title", text: "Faits marquants" }),
+        correctionMarker(summary, "faits_marquants"),
         buildSectionToolbar(summary, "faits_marquants", faits)
       ])
     ]);
@@ -1039,13 +1093,10 @@
     }
 
     setBusy(true);
-    setStatus("Génération en cours… (10 à 60 s)", "info");
+    setStatus("Génération en cours… (compter 1 à 2 minutes)", "info");
     var body = rootEl.querySelector("#ai-modal-body");
     clearChildren(body);
-    body.appendChild(el("div", { class: "ai-loading" }, [
-      el("span", { class: "ai-spinner" }),
-      el("span", { text: "Calcul des KPIs et appel au modèle…" })
-    ]));
+    body.appendChild(buildProgressPanel());
 
     var payload = {
       period_start: startStr,
@@ -1060,19 +1111,146 @@
     if (asOfInput && asOfInput.value) {
       payload.as_of = asOfInput.value;
     }
+    var t0 = Date.now();
+    startProgressTicker(t0);
     apiPostJson("/api/pcorg/summary/generate", payload).then(function (res) {
-      setBusy(false);
-      if (!res || !res.ok) {
-        var err = (res && res.error) || "Erreur inconnue";
-        setStatus("Échec : " + err, "error");
-        renderEmpty("Échec : " + err);
+      if (!res || !res.ok || !res.job) {
+        failGeneration((res && res.error) || "Erreur inconnue");
         return;
       }
-      setStatus("Résumé généré.", "ok");
-      renderSummary(res.summary);
-      setControlsCollapsed(true);
-      state.history = null;
+      if (res.already_running) toast("Une génération est déjà en cours : suivi de celle-ci.", "info");
+      pollGenerateJob(res.job);
+    }).catch(function () { failGeneration("Serveur injoignable"); });
+  }
+
+  // ---------- Suivi de la génération en tâche de fond ----------
+
+  var GEN_ERROR_LABELS = {
+    budget_exceeded: "budget IA mensuel atteint (voir Coûts IA)",
+    claude_unreachable: "service Claude injoignable",
+    claude_refusal: "le modèle a décliné la requête",
+    job_inconnu: "tâche introuvable (serveur redémarré ?)"
+  };
+
+  function humanError(err) {
+    var e = String(err || "");
+    if (GEN_ERROR_LABELS[e]) return GEN_ERROR_LABELS[e];
+    if (e.indexOf("claude_http_") === 0) return "erreur de l'API Claude (" + e.replace("claude_http_", "HTTP ") + ")";
+    return e || "erreur inconnue";
+  }
+
+  var genTicker = null;
+
+  function stopProgressTicker() {
+    if (genTicker) { clearInterval(genTicker); genTicker = null; }
+  }
+
+  function startProgressTicker(t0) {
+    stopProgressTicker();
+    genTicker = setInterval(function () {
+      var sec = rootEl && rootEl.querySelector("#ai-gen-seconds");
+      if (!sec) { stopProgressTicker(); return; }
+      sec.textContent = Math.round((Date.now() - t0) / 1000) + " s";
+    }, 1000);
+  }
+
+  function buildProgressPanel() {
+    var steps = [
+      ["data", "Calcul des indicateurs"],
+      ["retro", "Note de l'édition précédente"],
+      ["thinking", "Réflexion du modèle"],
+      ["writing", "Rédaction du rapport"],
+      ["saving", "Enregistrement"]
+    ];
+    var list = el("ol", { class: "ai-gen-steps", id: "ai-gen-steps" });
+    steps.forEach(function (s) {
+      list.appendChild(el("li", { class: "ai-gen-step", "data-step": s[0] }, [
+        el("span", { class: "material-symbols-outlined ai-gen-step-icon" }, ["radio_button_unchecked"]),
+        el("span", { text: s[1] })
+      ]));
     });
+    return el("div", { class: "ai-gen-progress", id: "ai-gen-progress" }, [
+      el("div", { class: "ai-gen-head" }, [
+        el("span", { class: "ai-spinner" }),
+        el("span", { class: "ai-gen-label", id: "ai-gen-label", text: "Démarrage…" }),
+        el("span", { class: "ai-gen-seconds", id: "ai-gen-seconds", text: "0 s" })
+      ]),
+      el("div", { class: "ai-gen-bar" }, [el("div", { class: "ai-gen-bar-fill", id: "ai-gen-bar-fill", style: "width:2%" })]),
+      list,
+      el("div", { class: "ai-gen-detail", id: "ai-gen-detail",
+                  text: "L'appel au modèle prend en général 1 à 2 minutes. Vous pouvez laisser la fenêtre ouverte." })
+    ]);
+  }
+
+  function updateProgressPanel(job) {
+    if (!rootEl) return;
+    var fill = rootEl.querySelector("#ai-gen-bar-fill");
+    if (fill) fill.style.width = Math.max(2, Math.min(100, job.progress || 0)) + "%";
+    var lbl = rootEl.querySelector("#ai-gen-label");
+    if (lbl) lbl.textContent = job.step || "…";
+    var order = ["data", "retro", "thinking", "writing", "saving"];
+    var cur = order.indexOf(job.step_key);
+    rootEl.querySelectorAll(".ai-gen-step").forEach(function (li) {
+      var idx = order.indexOf(li.getAttribute("data-step"));
+      var done = job.status === "done" || (cur >= 0 && idx < cur);
+      var active = !done && idx === cur;
+      li.classList.toggle("is-done", done);
+      li.classList.toggle("is-active", active);
+      var icon = li.querySelector(".ai-gen-step-icon");
+      if (icon) icon.textContent = done ? "check_circle" : (active ? "pending" : "radio_button_unchecked");
+    });
+    var detail = rootEl.querySelector("#ai-gen-detail");
+    if (detail) {
+      if (job.step_key === "writing") {
+        detail.textContent = formatNumberFr(job.chars) + " caractères reçus · " + formatNumberFr(job.output_tokens) + " tokens";
+      } else if (job.step_key === "thinking" && job.thinking_chars) {
+        detail.textContent = "Le modèle analyse les données (" + formatNumberFr(job.thinking_chars) + " caractères de réflexion)…";
+      }
+    }
+  }
+
+  function failGeneration(err) {
+    stopProgressTicker();
+    setBusy(false);
+    var msg = "Échec : " + humanError(err);
+    setStatus(msg, "error");
+    renderEmpty(msg);
+    toast(msg, "error");
+  }
+
+  function pollGenerateJob(jobId) {
+    var errors = 0;
+    function tick() {
+      if (!rootEl) return;
+      apiGetJson("/api/pcorg/summary/generate/status?job=" + encodeURIComponent(jobId)).then(function (res) {
+        if (!res || !res.ok) {
+          if (res && res.error === "job_inconnu") { failGeneration("job_inconnu"); return; }
+          errors++;
+          if (errors >= 5) { failGeneration((res && res.error) || "suivi impossible"); return; }
+          setTimeout(tick, 3000);
+          return;
+        }
+        errors = 0;
+        updateProgressPanel(res);
+        if (res.status === "done") {
+          stopProgressTicker();
+          setBusy(false);
+          setStatus("Résumé généré en " + Math.round(res.elapsed_s || 0) + " s.", "ok");
+          if (res.summary) renderSummary(res.summary);
+          else if (res.result_id) loadSummary(res.result_id);
+          setControlsCollapsed(true);
+          state.history = null;
+          return;
+        }
+        if (res.status === "error") { failGeneration(res.error); return; }
+        setTimeout(tick, 1500);
+      }).catch(function () {
+        errors++;
+        if (errors >= 5) { failGeneration("Serveur injoignable"); return; }
+        setTimeout(tick, 3000);
+      });
+    }
+    setTimeout(tick, 800);
   }
 
   function onShowHistory() {
@@ -1499,7 +1677,7 @@
     var ta = modal.querySelector("#ai-edit-section-textarea");
     var origLabel = modal.querySelector(".ai-edit-section-original");
     ta.value = originalText || "";
-    origLabel.textContent = "Original Claude : " + ((originalText || "").substring(0, 200) + ((originalText || "").length > 200 ? "…" : ""));
+    origLabel.textContent = "Texte actuel : " + ((originalText || "").substring(0, 200) + ((originalText || "").length > 200 ? "…" : ""));
     modal.dataset.sectionKey = sectionKey;
     modal.dataset.originalText = originalText || "";
     var preview = modal.querySelector("#ai-edit-section-preview");
@@ -1967,33 +2145,69 @@
 
   // ---------- Open / close ----------
 
-  function openModal() {
+  var MODE_SUBTITLES = {
+    briefing: "État du site maintenant, pour la relève",
+    retex: "Rapport complet d'une édition, imprimable"
+  };
+
+  function setMode(mode) {
+    if (!rootEl) return;
+    var tab = rootEl.querySelector('.ai-mode-tab[data-mode="' + mode + '"]');
+    if (!tab) mode = "resume";
+    state.mode = mode;
+    rootEl.querySelectorAll(".ai-mode-tab").forEach(function (t) {
+      var on = t.getAttribute("data-mode") === mode;
+      t.classList.toggle("is-active", on);
+      t.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    rootEl.querySelectorAll(".ai-mode-panel").forEach(function (p) {
+      p.hidden = p.getAttribute("data-mode") !== mode;
+    });
+    if (mode === "resume") {
+      refreshContextLabel();
+      return;
+    }
+    var ctx = rootEl.querySelector("#ai-modal-context");
+    if (ctx) ctx.textContent = MODE_SUBTITLES[mode] || "";
+    var panel = rootEl.querySelector('.ai-mode-panel[data-mode="' + mode + '"]');
+    if (!window.AIReports || !panel) return;
+    if (mode === "briefing") window.AIReports.mountBriefing(panel);
+    else if (mode === "retex") window.AIReports.mountRetex(panel);
+  }
+
+  // mode : "resume" (defaut), "briefing" ou "retex".
+  function openModal(mode) {
     if (!isManager()) {
       toast("Assistant IA réservé aux managers.", "error");
       return;
     }
     buildModal();
-    refreshContextLabel();
     if (!rootEl.querySelector("#ai-date-start").value) applyPreset("24h");
     setControlsCollapsed(false);
     rootEl.classList.add("is-open");
     rootEl.setAttribute("aria-hidden", "false");
     setStatus("");
+    setMode(typeof mode === "string" ? mode : (state.mode || "resume"));
   }
 
   function closeModal() {
     if (!rootEl) return;
     rootEl.classList.remove("is-open");
     rootEl.setAttribute("aria-hidden", "true");
+    if (window.AIReports && window.AIReports.hideEmbedded) window.AIReports.hideEmbedded();
   }
 
+  window.AIAssistant = { open: openModal, close: closeModal };
+
   function attachSidebarBindings() {
-    var btns = document.querySelectorAll(".sidebar-ai");
+    // [data-ai-assistant] : bouton de navigation de _sidebar.html ; .sidebar-ai
+    // garde pour une page qui porterait encore l'ancien encadre.
+    var btns = document.querySelectorAll(".sidebar-ai, [data-ai-assistant]");
     if (!btns.length) return;
     btns.forEach(function (b) {
       b.setAttribute("role", "button");
       b.setAttribute("tabindex", "0");
-      b.setAttribute("title", "Assistant IA — Résumé fiches PC");
+      if (!b.getAttribute("title")) b.setAttribute("title", "Assistant IA — Résumé, briefing de situation, RETEX");
       b.classList.add("sidebar-ai-active");
       b.addEventListener("click", function (e) { e.preventDefault(); openModal(); });
       b.addEventListener("keydown", function (e) {

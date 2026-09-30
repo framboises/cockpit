@@ -252,7 +252,13 @@ def compute_door_reinforcement(db, event, year, now_utc=None):
         now_utc = datetime.now(timezone.utc)
 
     race_dt_n = pcorg_summary._load_race_dt(db, event, year_int)
-    race_dt_prev = pcorg_summary._load_race_dt(db, event, year_int - 1)
+    # Edition precedente = la plus recente anterieure ayant des releves de
+    # portes (definition commune pcorg_summary.find_previous_edition), et non
+    # plus strictement year - 1.
+    year_prev_int, race_dt_prev = pcorg_summary.find_previous_edition(
+        db, event, year_int,
+        has_data=lambda _db, ev, y: bool(_load_doors_doc(_db, ev, y)),
+    )
     if not race_dt_n or not race_dt_prev:
         return None
 
@@ -268,7 +274,7 @@ def compute_door_reinforcement(db, event, year, now_utc=None):
         return None
 
     # Charge doors N-1
-    doors_doc = _load_doors_doc(db, event, year_int - 1)
+    doors_doc = _load_doors_doc(db, event, year_prev_int)
     if not doors_doc or not doors_doc.get("doors"):
         return None
 
@@ -322,7 +328,7 @@ def compute_door_reinforcement(db, event, year, now_utc=None):
         top_buckets_by_family[fk] = {b for b, _ in sorted_b[:TOP_K_PEAKS]}
 
     # Charge fiches N-1 dans la fenetre alignee
-    fiches = _load_fiches_n1(db, event, year_int - 1, ts_start_prev, ts_end_prev)
+    fiches = _load_fiches_n1(db, event, year_prev_int, ts_start_prev, ts_end_prev)
 
     # Pour chaque fiche : tokens du blob, familles matchees, et bucket
     # Compte fiches par (family_key, bucket) et par categorie.
@@ -419,7 +425,7 @@ def compute_door_reinforcement(db, event, year, now_utc=None):
         "race_n_minus_1": race_dt_prev.isoformat(),
         "window_n": [ts_start_n.isoformat(), ts_end_n.isoformat()],
         "window_n_minus_1": [ts_start_prev.isoformat(), ts_end_prev.isoformat()],
-        "year_prev": year_int - 1,
+        "year_prev": year_prev_int,
         "matching_strategy": "B_full_text_S2_tokens_familles",
         "families": [
             {"key": fk, "label": fam["label"], "doors": fam["doors"]}
