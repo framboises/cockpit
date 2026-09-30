@@ -160,8 +160,6 @@
     fetch(url)
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        console.log("[Anoloc] /anoloc/live response:", JSON.stringify(data).substring(0, 500));
-        console.log("[Anoloc] groups count:", Object.keys(data.groups || {}).length, "enabled:", data.enabled);
         if (!data.enabled) {
           showDisabled();
           return;
@@ -176,9 +174,7 @@
           window.pcorgUpdateTooltips();
         }
       })
-      .catch(function (err) {
-        console.error("[Anoloc] refresh error:", err);
-      });
+      .catch(function () {});
   }
 
   function showDisabled() {
@@ -378,8 +374,6 @@
     if (headerCount) headerCount.textContent = totalOnline + "/" + totalAll;
     var headerDot = document.getElementById("anoloc-header-dot");
     if (headerDot) headerDot.className = "anoloc-status-dot " + (totalOnline > 0 ? "online" : "offline");
-
-    console.log("[Anoloc] updatePanel done: " + groupIds.length + " groups rendered, " + totalOnline + "/" + totalAll + " devices, groupList children:", groupList ? groupList.children.length : "NO groupList", "body classes:", document.getElementById("widget-right-4-body") ? document.getElementById("widget-right-4-body").className : "NO body");
   }
 
   // --- Update markers on the map ---
@@ -782,7 +776,11 @@
           }).then(function (r) { return r.json(); })
             .then(function (resp) {
               if (resp && resp.ok) {
-                if (marker && marker.getPopup()) marker.closePopup();
+                var mk = anolocMarkers[dev.id];
+                if (mk && mk.getPopup()) mk.closePopup();
+                // Sans relecture immediate, la tablette restait affichee en
+                // "Fin d'intervention" jusqu'au prochain cycle (15 s).
+                refresh();
               } else {
                 releaseBtn.disabled = false;
                 releaseBtn.textContent = "Liberer";

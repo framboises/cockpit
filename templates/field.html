@@ -8,6 +8,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Field">
+  <meta name="application-name" content="Field">
+  <meta name="format-detection" content="telephone=no">
   <title>COCKPIT Field</title>
 
   <link rel="manifest" href="/field/manifest.webmanifest">
@@ -16,7 +18,11 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/field.css') }}">
   <link rel="icon" href="/static/img/field-icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="/static/img/field-icon.svg">
+  <link rel="icon" href="/static/img/field-icon-192.png" type="image/png" sizes="192x192">
+  <!-- iOS ignore les SVG en apple-touch-icon : PNG 180 plein cadre, sans transparence -->
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/img/field-apple-touch-icon.png">
+  <!-- Aide a l'installation (iOS : Web Push seulement une fois l'app sur l'ecran d'accueil) -->
+  <script src="{{ url_for('static', filename='js/field_install_hint.js') }}" defer></script>
 </head>
 <body>
   <!-- BARRE SUPERIEURE -->
@@ -72,6 +78,9 @@
       </button>
       <button class="map-fab" id="btn-grid-fab" aria-label="Afficher / masquer le carroyage" aria-pressed="false" title="Carroyage">
         <span class="material-symbols-outlined" aria-hidden="true">grid_3x3</span>
+      </button>
+      <button class="map-fab map-fab-route-clear" id="btn-route-clear" aria-label="Effacer l'itineraire" title="Effacer l'itineraire" hidden>
+        <span class="material-symbols-outlined" aria-hidden="true">wrong_location</span>
       </button>
     </div>
 
@@ -189,9 +198,9 @@
 
   <!-- BARRE DE STATUT PATROUILLE -->
   <div class="field-status-bar" id="status-bar">
-    <button class="status-current" id="status-btn" aria-label="Changer le statut de patrouille" aria-haspopup="dialog" title="Changer le statut">
+    <button class="status-current" id="status-btn" aria-label="Changer de statut" aria-haspopup="dialog" title="Changer le statut">
       <span class="status-dot" id="status-dot" aria-hidden="true"></span>
-      <span class="status-text" id="status-text">Patrouille</span>
+      <span class="status-text" id="status-text">Disponible</span>
       <span class="material-symbols-outlined status-chevron" aria-hidden="true">expand_more</span>
     </button>
   </div>
@@ -226,7 +235,7 @@
   <div class="field-modal" id="status-modal" role="dialog" aria-modal="true" aria-labelledby="status-modal-title" hidden>
     <div class="field-modal-box status-modal-box">
       <div class="field-modal-header">
-        <h2 id="status-modal-title">Statut de la patrouille</h2>
+        <h2 id="status-modal-title">Mon statut</h2>
         <button class="icon-btn" id="status-modal-close" aria-label="Fermer" title="Fermer">
           <span class="material-symbols-outlined" aria-hidden="true">close</span>
         </button>

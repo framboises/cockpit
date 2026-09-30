@@ -247,6 +247,7 @@ def _tablet_to_device(tablet):
         "kind": "tablet",
         "patrol_status": patrol_status,
         "patrol_status_since": status_since_iso,
+        "category": tablet.get("category"),
         "active_fiche_id": tablet.get("active_fiche_id"),
         "fin_comment": tablet.get("fin_comment") or "",
     }
@@ -452,15 +453,17 @@ def anoloc_vehicles_by_category():
         if g.get("enabled") is not False and g.get("pco_category")
     }
     for gid, tablets in tablets_by_group.items():
-        cat = cat_by_group.get(gid)
-        if not cat:
-            continue
         if visible_groups is not None and gid not in visible_groups:
             continue
-        if cat not in result:
-            result[cat] = []
-            seen[cat] = set()
         for t in tablets:
+            # Categorie choisie a l'appairage, a defaut celle du groupe : une
+            # tablette n'est proposee que sur les fiches de sa categorie.
+            cat = t.get("category") or cat_by_group.get(gid)
+            if not cat:
+                continue
+            if cat not in result:
+                result[cat] = []
+                seen[cat] = set()
             label = t.get("name") or "?"
             if label in seen[cat]:
                 continue

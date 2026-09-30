@@ -99,6 +99,7 @@
                                 <col style="width:auto; min-width:200px;">
                                 <col style="width:160px;">
                                 <col style="width:140px;">
+                                <col style="width:160px;">
                                 <col style="width:180px;">
                                 <col style="width:160px;">
                                 <col style="width:92px;">
@@ -109,6 +110,7 @@
                                     <th style="white-space:nowrap;">Nom</th>
                                     <th style="white-space:nowrap;">Evenement</th>
                                     <th style="white-space:nowrap;">Groupe</th>
+                                    <th style="white-space:nowrap;" title="La tablette ne voit et ne cree que des fiches de cette categorie">Categorie</th>
                                     <th style="white-space:nowrap;">Derniere position</th>
                                     <th style="white-space:nowrap;">Derniere activite</th>
                                     <th style="text-align:center; white-space:nowrap;">Batterie</th>
@@ -119,6 +121,42 @@
                                 <tr><td colspan="7" style="text-align:center; color:var(--muted); padding:16px;">Chargement...</td></tr>
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===================================================== -->
+            <!-- Section Dispatch automatique (dispatch_config_admin.js) -->
+            <!-- ===================================================== -->
+
+            <section class="widget-card" id="dispatch-config-section" style="margin-top:24px; border-top:3px solid #dc2626;">
+                <header class="widget-header">
+                    <h3><span class="material-symbols-outlined" style="vertical-align:middle; color:#dc2626;">assignment_ind</span> Dispatch automatique</h3>
+                    <div id="dispatch-cfg-meta" style="font-size:12px; color:var(--muted); margin-left:auto;"></div>
+                </header>
+                <div class="widget-body">
+                    <p style="font-size:12px; color:var(--muted); margin:0 0 12px; line-height:1.5;">
+                        A la creation d'une fiche, si sa categorie le demande, elle est proposee
+                        automatiquement a l'unite disponible la plus proche de la meme categorie
+                        et du metier correspondant (sous-classification). L'unite dispose du delai
+                        de reponse pour accepter (compte a rebours sur la tablette) ; sans reponse
+                        ou en cas de refus, la fiche est proposee a l'unite suivante. Apres le
+                        nombre de propositions indique, la fiche passe dans la file du service,
+                        traitee par ses responsables sur
+                        <a href="/dispatch-service" style="color:var(--brand); font-weight:600;">/dispatch-service</a>.
+                    </p>
+                    <div id="dispatch-cfg-list" class="dcfg-list">
+                        <div style="text-align:center; color:var(--muted); padding:16px;">Chargement...</div>
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
+                        <button id="dispatch-cfg-reload" class="btn" type="button">
+                            <span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">undo</span>
+                            Annuler les modifications
+                        </button>
+                        <button id="dispatch-cfg-save" class="btn btn-primary" type="button">
+                            <span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">save</span>
+                            Enregistrer
+                        </button>
                     </div>
                 </div>
             </section>
@@ -603,6 +641,27 @@
                     </p>
                 </div>
                 <div class="form-row">
+                    <label>Categorie de fiches
+                        <select name="category" class="form-input">
+                            <option value="">Celle du groupe</option>
+                        </select>
+                    </label>
+                    <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
+                        La tablette ne voit que les fiches de cette categorie, n'est proposee au
+                        PC Org que sur ces fiches, et ne cree des fiches que dans cette categorie.
+                    </p>
+                </div>
+                <div class="form-row">
+                    <label style="display:block;">Metiers couverts (dispatch automatique)</label>
+                    <div id="field-pair-metiers" class="dcfg-metiers-box">
+                        <span style="color:var(--muted); font-size:12px;">Choisir un groupe ou une categorie.</span>
+                    </div>
+                    <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
+                        Aucun coche = tous les metiers. Seules les fiches de ces metiers seront
+                        proposees automatiquement a la tablette.
+                    </p>
+                </div>
+                <div class="form-row">
                     <label>Notes (optionnel)
                         <input name="notes" placeholder="ex. operateur referent, modele..." class="form-input" />
                     </label>
@@ -842,6 +901,58 @@
     </div>
 </div>
 
+<!-- CRUD Modal — Field device metiers -->
+<div id="field-metiers-modal" class="crud-modal" hidden>
+    <div class="crud-modal-dialog" style="max-width:520px;">
+        <div class="crud-modal-header">
+            <h3 id="field-metiers-title">Metiers de la tablette</h3>
+            <button class="crud-modal-close" data-close>&times;</button>
+        </div>
+        <div class="crud-modal-body">
+            <p id="field-metiers-cat" style="font-size:12px; color:var(--muted); margin:0 0 8px;"></p>
+            <div id="field-metiers-list" class="dcfg-metiers-box"></div>
+            <p style="font-size:11px; color:var(--muted); margin:6px 0 0;">
+                Aucun coche = tous les metiers. Seules les fiches de ces metiers seront
+                proposees automatiquement a la tablette.
+            </p>
+        </div>
+        <div class="crud-modal-footer">
+            <button class="btn btn-secondary" data-close>Annuler</button>
+            <button id="field-metiers-submit" class="btn btn-primary">Enregistrer</button>
+        </div>
+    </div>
+</div>
+
+<style>
+  .dcfg-list { display:flex; flex-direction:column; gap:10px; }
+  .dcfg-card { border:1px solid var(--line); border-radius:var(--radius-sm, 6px); padding:10px 12px; background:var(--bg); }
+  .dcfg-card-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+  .dcfg-card-title { font-weight:700; font-size:14px; min-width:120px; }
+  .dcfg-card-code { font-size:11px; color:var(--muted); font-family:monospace; }
+  .dcfg-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:8px 14px; font-size:12px; }
+  .dcfg-grid label { display:flex; flex-direction:column; gap:3px; color:var(--muted); }
+  .dcfg-grid .form-input { font-size:12px; padding:4px 6px; }
+  .dcfg-levels { display:flex; gap:10px; flex-wrap:wrap; align-items:center; font-size:12px; }
+  .dcfg-levels label, .dcfg-grid label.dcfg-check { display:inline-flex; flex-direction:row; align-items:center; gap:4px; cursor:pointer; color:inherit; }
+  .dcfg-managers { margin-top:8px; font-size:12px; }
+  .dcfg-chips { display:flex; flex-wrap:wrap; gap:6px; margin:4px 0; }
+  .dcfg-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 4px 2px 8px; border-radius:12px; background:rgba(37,99,235,0.12); color:inherit; font-size:12px; }
+  .dcfg-chip small { color:var(--muted); }
+  .dcfg-chip button { border:none; background:transparent; cursor:pointer; font-size:14px; line-height:1; padding:0 4px; color:var(--muted); }
+  .dcfg-chip button:hover { color:#dc2626; }
+  .dcfg-ac { position:relative; max-width:360px; }
+  .dcfg-ac-list { position:absolute; z-index:50; left:0; right:0; top:100%; background:var(--card, #fff); border:1px solid var(--line); border-radius:6px; max-height:220px; overflow:auto; box-shadow:0 6px 18px rgba(0,0,0,0.15); }
+  .dcfg-ac-item { padding:6px 8px; cursor:pointer; font-size:12px; }
+  .dcfg-ac-item:hover, .dcfg-ac-item.is-active { background:rgba(37,99,235,0.12); }
+  .dcfg-ac-item small { color:var(--muted); margin-left:6px; }
+  .dcfg-metiers-box { display:flex; flex-wrap:wrap; gap:6px 14px; padding:8px; border:1px solid var(--line); border-radius:6px; max-height:200px; overflow:auto; font-size:12px; }
+  .dcfg-metiers-box label { display:inline-flex; align-items:center; gap:4px; cursor:pointer; }
+  .field-dev-metiers { display:flex; align-items:center; gap:4px; margin-top:3px; font-size:11px; color:var(--muted); }
+  .field-dev-metiers span.txt { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
+  .field-dev-metiers button { border:none; background:transparent; cursor:pointer; padding:0; color:var(--muted); display:inline-flex; }
+  .field-dev-metiers button:hover { color:var(--brand); }
+</style>
+
 <!-- Toast container -->
 <div id="toast-container"></div>
 
@@ -852,7 +963,9 @@
   window.FIELD_ADMIN_ALL_SCOPES = true;
 </script>
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
 <script src="{{ url_for('static', filename='js/field_admin.js') }}"></script>
+<script src="{{ url_for('static', filename='js/dispatch_config_admin.js') }}"></script>
 <script src="{{ url_for('static', filename='js/vision_admin.js') }}"></script>
 <script src="{{ url_for('static', filename='js/routing_overrides_admin.js') }}"></script>
 <script src="{{ url_for('static', filename='js/alfred_admin.js') }}"></script>
@@ -904,5 +1017,6 @@
 </script>
 <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_reports.js') }}"></script>
 </body>
 </html>

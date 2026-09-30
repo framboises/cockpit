@@ -4,9 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0f172a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Field">
+  <meta name="format-detection" content="telephone=no">
   <title>COCKPIT Field - Appairage</title>
+  <!-- Un telephone non appaire arrive ici : l'installation (ecran d'accueil)
+       peut partir de cette page, elle doit donc porter manifest et icones. -->
+  <link rel="manifest" href="/field/manifest.webmanifest">
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
-  <link rel="apple-touch-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/img/field-apple-touch-icon.png">
   <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body {
@@ -110,6 +118,27 @@
     }
     .help-link:active { background: #1e293b; color: #cbd5e1; }
 
+    /* Telephones : la page tenait en hauteur sur tablette seulement ;
+       on laisse defiler et on resserre (6 cases de 48 px debordaient a 360 px). */
+    @media (max-height: 700px) {
+      html, body { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    }
+    @media (max-width: 600px) {
+      html, body { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+      .wrap {
+        gap: 20px;
+        padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+      }
+      .left { gap: 12px; }
+      h1 { font-size: 20px; }
+      .code-display { gap: 6px; font-size: 28px; letter-spacing: 0; min-height: 52px; }
+      .code-digit { width: 42px; height: 52px; }
+      .numpad { gap: 10px; max-width: 300px; }
+      .numpad button { aspect-ratio: 1.6; font-size: 26px; min-height: 48px; }
+    }
+    @media (max-width: 340px) {
+      .code-digit { width: 38px; height: 48px; }
+    }
     @media (orientation: landscape) and (max-height: 500px) {
       .wrap { flex-direction: row; gap: 48px; padding: 16px 24px; }
       .left { gap: 14px; }
@@ -121,7 +150,7 @@
   <div class="wrap">
     <div class="left">
       <div class="logo">COCKPIT FIELD</div>
-      <h1>Appairage de la tablette</h1>
+      <h1>Appairage de l'appareil</h1>
       <p class="subtitle">Saisis le code a 6 chiffres fourni par le PC Organisation.</p>
       <div class="code-display" id="codeDisplay">
         <div class="code-digit"></div>

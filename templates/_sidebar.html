@@ -71,7 +71,24 @@
             <span class="material-symbols-outlined">menu_book</span>
             <span class="label">Wiki procedures</span>
         </a>
+        {# File du service (dispatch_auto) : visible de tous, la page explique
+           elle-meme comment devenir responsable d'une categorie. #}
+        <a href="/dispatch-service" class="{{ nav_class('/dispatch-service') }}" title="File du service : fiches a dispatcher vers les unites Field">
+            <span class="material-symbols-outlined">assignment_ind</span>
+            <span class="label">File du service</span>
+        </a>
         {% if "manager" in user_roles %}
+        {% if _ai %}
+        {# Assistant IA (resume, briefing, RETEX : une modale a onglets). Bouton
+           de navigation comme les autres : icone seule sidebar repliee, libelle
+           depliee. Lie par ai_assistant.js via data-ai-assistant. Reserve au
+           manager : l'ouverture est refusee en dessous et /api/pcorg/summary/*
+           est gate cote serveur. #}
+        <button type="button" class="nav-btn" data-ai-assistant title="Assistant IA : résumé, briefing de situation, RETEX">
+            <span class="material-symbols-outlined">smart_toy</span>
+            <span class="label">Assistant IA</span>
+        </button>
+        {% endif %}
         <a href="/circulation" class="nav-btn" target="_blank" rel="noopener" title="Tableau de bord circulation (TV poste de controle)">
             <span class="material-symbols-outlined">moving</span>
             <span class="label">Circulation</span>
@@ -149,15 +166,6 @@
     </div>
     {% endif %}
 
-    {% if _ai and "manager" in user_roles %}
-    {# Reserve au manager : ai_assistant.js refuse l'ouverture en dessous
-       (isManager), et /api/pcorg/summary/* est gate cote serveur. L'afficher
-       a un simple utilisateur ne produisait qu'un message d'erreur. #}
-    <div class="sidebar-ai" title="Assistant IA">
-        <span class="material-symbols-outlined">smart_toy</span>
-        <span>Assistant IA</span>
-    </div>
-    {% endif %}
 
     {% if sidebar_sim and "admin" in user_roles %}
     {# Pilote d'horloge simulee : ne pilote que la timeline de l'index. #}

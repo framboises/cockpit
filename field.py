@@ -16,6 +16,7 @@ from flask import Blueprint, jsonify, request, render_template, make_response, r
 from werkzeug.utils import safe_join, secure_filename
 from datetime import datetime, timezone, timedelta
 from pymongo import MongoClient, ReturnDocument
+from pymongo.errors import DuplicateKeyError
 from bson.objectid import ObjectId
 from io import BytesIO
 import os
@@ -25,6 +26,9 @@ import logging
 import re
 import uuid as _uuid
 from functools import wraps
+
+import pcorg_history as PH
+import dispatch_auto as DA
 
 try:
     from PIL import Image, ImageOps
@@ -279,6 +283,12 @@ def _ensure_indexes(db):
         db["field_streams"].create_index("device_id")
         db["field_streams"].create_index("status")
         db["field_streams"].create_index("expires_at", expireAfterSeconds=0)
+
+        # field_client_requests : cle d'idempotence des actions tablette
+        # (SOS, creation de fiche). _id = "<device_id>|<kind>|<cle client>" :
+        # un renvoi (reseau coupe apres ecriture, file hors ligne, double tap)
+        # retrouve le resultat du premier envoi au lieu de tout recreer.
+        db["field_client_requests"].create_index("createdAt", expireAfterSeconds=2 * 24 * 3600)
 
         # Seed les N slots si la collection est vide (idempotent)
         _seed_stream_slots(db)
@@ -545,6 +555,78 @@ def field_token_required(f):
 # Helpers de publication : serialiser les documents pour JSON
 # ---------------------------------------------------------------------------
 
+# Categories de fiche qu'une tablette peut porter (une seule par tablette).
+# Meme liste que ALL_PCO_CATEGORIES dans app.py.
+FIELD_CATEGORIES = [
+    {"id": "PCO.Secours", "label": "Secours", "icon": "medical_services", "color": "#DC2626"},
+    {"id": "PCO.Securite", "label": "Securite", "icon": "security", "color": "#7C3AED"},
+    {"id": "PCO.Technique", "label": "Technique", "icon": "build", "color": "#FF8C00"},
+    {"id": "PCO.Flux", "label": "Flux", "icon": "directions_car", "color": "#2563EB"},
+    {"id": "PCO.Fourriere", "label": "Fourriere", "icon": "local_shipping", "color": "#0891B2"},
+    {"id": "PCO.Information", "label": "Information", "icon": "info", "color": "#64748B"},
+    {"id": "PCO.MainCourante", "label": "Main courante", "icon": "edit_note", "color": "#475569"},
+]
+FIELD_CATEGORY_IDS = {c["id"] for c in FIELD_CATEGORIES}
+# Destinataires d'un SOS en plus de l'equipe de l'emetteur.
+SOS_RESPONDER_CATEGORIES = {"PCO.Securite", "PCO.Secours"}
+
+
+def _group_categories(db):
+    """{beacon_group_id: pco_category} depuis la config Anoloc."""
+    config = db["anoloc_config"].find_one({"_id": "global"}, {"beacon_groups": 1}) or {}
+    return {
+        g.get("id"): g.get("pco_category")
+        for g in config.get("beacon_groups", []) or []
+        if g.get("id") and g.get("pco_category")
+    }
+
+
+def _device_category(db, device, group_cats=None):
+    """Categorie effective d'une tablette : celle choisie a l'appairage, a
+    defaut celle de son groupe de balises (tablettes appairees avant le choix
+    explicite). None = aucune restriction (comportement historique)."""
+    if not device:
+        return None
+    cat = device.get("category")
+    if cat:
+        return cat
+    if group_cats is None:
+        group_cats = _group_categories(db)
+    return group_cats.get(device.get("beacon_group_id"))
+
+
+def _clean_metiers(raw):
+    """Metiers d'une unite (libelles de sous-classification). Liste vide =
+    tous les metiers de sa categorie."""
+    out = []
+    for m in raw if isinstance(raw, list) else []:
+        m = str(m or "").strip()[:60]
+        if m and m not in out:
+            out.append(m)
+    return out[:40]
+
+
+def _sos_recipients(db, sender, event, year):
+    """Tablettes a prevenir d'un SOS : equipes securite/secours, l'equipe de
+    l'emetteur et les tablettes sans categorie. Jamais les revoquees. Un
+    electricien ne recoit plus l'alarme d'une patrouille a l'autre bout du
+    circuit."""
+    group_cats = _group_categories(db)
+    wanted = set(SOS_RESPONDER_CATEGORIES)
+    sender_cat = _device_category(db, sender, group_cats)
+    if sender_cat:
+        wanted.add(sender_cat)
+    return [
+        o for o in db["field_devices"].find({
+            "event": event,
+            "year": year,
+            "_id": {"$ne": sender["_id"]},
+            "revoked": {"$ne": True},
+        }, {"_id": 1, "name": 1, "category": 1, "beacon_group_id": 1})
+        if _device_category(db, o, group_cats) in wanted | {None}
+    ]
+
+
 def _pub_device(device):
     if not device:
         return None
@@ -554,6 +636,8 @@ def _pub_device(device):
         "event": device.get("event"),
         "year": device.get("year"),
         "beacon_group_id": device.get("beacon_group_id"),
+        "category": device.get("category"),
+        "metiers": device.get("metiers") or [],
         "created_at": _iso(device.get("createdAt")),
         "last_seen": _iso(device.get("last_seen")),
         "revoked": bool(device.get("revoked")),
@@ -581,6 +665,54 @@ def _pub_message(msg):
         "created_at": _iso(msg.get("createdAt")),
         "ack_at": _iso(msg.get("ack_at")),
     }
+
+
+_CLIENT_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+
+def _claim_client_request(db, device_id, kind, client_key):
+    """Reserve une cle d'idempotence cote tablette.
+
+    Retourne (True, None) si la cle est nouvelle (l'appelant fait le travail
+    puis appelle `_finish_client_request`), (False, result) si elle a deja ete
+    vue : `result` est le resultat memorise du premier envoi (None s'il est
+    encore en cours). Sans cle valide, (True, None) : comportement historique.
+    """
+    if not client_key or not _CLIENT_KEY_RE.match(str(client_key)):
+        return True, None
+    key = "{}|{}|{}".format(device_id, kind, client_key)
+    try:
+        db["field_client_requests"].insert_one({"_id": key, "createdAt": _now(), "result": None})
+        return True, None
+    except DuplicateKeyError:
+        pass
+    except Exception as e:
+        # Base indisponible pour la cle : on ne bloque JAMAIS un SOS dessus
+        logger.warning("field: claim %s failed: %s", key, e)
+        return True, None
+    prev = db["field_client_requests"].find_one({"_id": key}) or {}
+    if prev.get("result") is None:
+        # Premier envoi mort en route (exception serveur) : au-dela d'une
+        # minute sans resultat, on laisse le renvoi refaire le travail plutot
+        # que de le refuser indefiniment.
+        created = prev.get("createdAt")
+        if isinstance(created, datetime):
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            if (_now() - created).total_seconds() > 60:
+                db["field_client_requests"].update_one({"_id": key}, {"$set": {"createdAt": _now()}})
+                return True, None
+    return False, prev.get("result")
+
+
+def _finish_client_request(db, device_id, kind, client_key, result):
+    if not client_key or not _CLIENT_KEY_RE.match(str(client_key)):
+        return
+    key = "{}|{}|{}".format(device_id, kind, client_key)
+    try:
+        db["field_client_requests"].update_one({"_id": key}, {"$set": {"result": result}})
+    except Exception as e:
+        logger.debug("field: finish %s failed: %s", key, e)
 
 
 def _iso(value):
@@ -687,10 +819,17 @@ def _load_thread_root(db, msg_oid):
 @field_bp.route("/field/manifest.webmanifest", methods=["GET"])
 def field_manifest():
     """PWA manifest. Pas d'auth : le navigateur le charge avant le login."""
+    # Tablettes patrouille ET telephones personnels (logistique, technique,
+    # electricite, informatique) : libelle neutre, orientation libre.
+    # Icones PNG obligatoires : Chrome Android exige 192 et 512 raster pour
+    # proposer l'installation, iOS ignore les SVG (apple-touch-icon dans le
+    # template). L'icone maskable est pleine page (glyphe dans la zone sure).
     manifest = {
-        "name": "COCKPIT Field",
+        "id": "/field",
+        "name": "Cockpit terrain - interventions",
         "short_name": "Field",
-        "description": "Application terrain pour tablettes patrouille",
+        "description": "Cockpit terrain : interventions, messages et alertes "
+                       "pour les equipes sur le terrain",
         "start_url": "/field",
         "scope": "/field",
         "display": "standalone",
@@ -700,10 +839,28 @@ def field_manifest():
         "lang": "fr-FR",
         "icons": [
             {
+                "src": "/static/img/field-icon-192.png",
+                "sizes": "192x192",
+                "type": "image/png",
+                "purpose": "any",
+            },
+            {
+                "src": "/static/img/field-icon-512.png",
+                "sizes": "512x512",
+                "type": "image/png",
+                "purpose": "any",
+            },
+            {
+                "src": "/static/img/field-icon-maskable-512.png",
+                "sizes": "512x512",
+                "type": "image/png",
+                "purpose": "maskable",
+            },
+            {
                 "src": "/static/img/field-icon.svg",
-                "sizes": "192x192 512x512 any",
+                "sizes": "any",
                 "type": "image/svg+xml",
-                "purpose": "any maskable",
+                "purpose": "any",
             },
         ],
     }
@@ -831,6 +988,8 @@ def field_pair_submit():
         "event": pairing.get("event"),
         "year": pairing.get("year"),
         "beacon_group_id": pairing.get("beacon_group_id"),
+        "category": pairing.get("category"),
+        "metiers": pairing.get("metiers") or [],
         "token_hash": token_hash,
         "createdAt": _now(),
         "paired_at": _now(),
@@ -1042,8 +1201,10 @@ def field_position():
                         return 2 * R * asin(min(1, sqrt(s)))
                     dist = _hav(lat, lng, fcoords[1], fcoords[0])
                     if dist <= 10:
-                        db["field_devices"].update_one(
-                            {"_id": request.device["_id"], "status": {"$in": ["intervention", "patrouille"]}},
+                        res = db["field_devices"].update_one(
+                            {"_id": request.device["_id"],
+                             "active_fiche_id": fiche_id,
+                             "status": {"$in": ["intervention", "patrouille"]}},
                             {
                                 "$set": {"status": "sur_place", "status_since": _now()},
                                 "$push": {"status_history": {
@@ -1053,6 +1214,16 @@ def field_position():
                                 }},
                             },
                         )
+                        # Meme trace que l'ASL manuelle : sans elle, le cockpit
+                        # voyait la tablette passer ASL sans rien dans la fiche.
+                        if res.modified_count:
+                            PH.append_entry(db["pcorg"], fiche_id, PH.make_entry(
+                                "field:" + (request.device.get("name") or "?"),
+                                "Statut: Arrivee sur les lieux (ASL)\nDetectee automatiquement (GPS a moins de 10 m)",
+                                origin="field", ts=_now(),
+                            ), inc_bounce=True)
+                            DA.mark_step(db, fiche_id, "arrived_at",
+                                         device_name=request.device.get("name"))
     except Exception:
         pass  # non-bloquant
 
@@ -1097,11 +1268,58 @@ def field_status_set():
     now = _now()
 
     cur_status = device.get("status") or "patrouille"
+    cur_fiche = device.get("active_fiche_id")
+
+    # Statut rejoue par la file hors ligne de la tablette : s'il a ete saisi
+    # AVANT le dernier changement connu du serveur (liberation cockpit,
+    # cloture, ASL auto...), il est perime. Le rejouer ecrasait l'etat reel
+    # plusieurs minutes plus tard (ex. une tablette liberee repassait en
+    # intervention au retour du reseau).
+    queued_at = data.get("queued_at")
+    if queued_at is not None:
+        try:
+            queued_dt = datetime.fromtimestamp(float(queued_at) / 1000.0, tz=timezone.utc)
+        except (TypeError, ValueError, OverflowError, OSError):
+            queued_dt = None
+        since = device.get("status_since")
+        if queued_dt and isinstance(since, datetime):
+            if since.tzinfo is None:
+                since = since.replace(tzinfo=timezone.utc)
+            if queued_dt < since:
+                return jsonify({"ok": False, "error": "stale_status",
+                                "status": cur_status}), 409
+
+    # Engagement sur une fiche precise (bouton "Engagement" / "Prendre en
+    # charge") : la fiche doit etre ouverte et affectee a cette tablette.
+    fiche_param = (data.get("fiche_id") or "").strip() or None
+    if fiche_param and new_status in ("intervention", "sur_place"):
+        f = db["pcorg"].find_one({"_id": fiche_param},
+                                 {"content_category.patrouille": 1, "status_code": 1})
+        if not f or f.get("status_code") == 10:
+            return jsonify({"ok": False, "error": "fiche_indisponible"}), 409
+        if ((f.get("content_category") or {}).get("patrouille") or "") != (device.get("name") or ""):
+            return jsonify({"ok": False, "error": "not_assigned"}), 403
+    else:
+        fiche_param = None
+
+    # Passer en pause (ou autre) avec une proposition en attente vaut refus :
+    # l'unite suivante est sollicitee tout de suite, sans attendre l'echeance.
+    pending = (device.get("pending_proposal") or {}).get("fiche_id")
+    if pending and new_status != "patrouille":
+        DA.refuse(db, pending, device, now=now)
 
     # Interdire passage direct intervention/sur_place -> patrouille
     if new_status == "patrouille" and cur_status in ("intervention", "sur_place"):
         return jsonify({"ok": False, "error": "transition_interdite",
                         "message": "Utilisez 'Fin d intervention' avant de revenir en disponible"}), 400
+
+    # Renvoi du meme statut (double tap, retry reseau) : rien a ecrire. Sans
+    # ce garde, chaque renvoi ajoutait une entree "Engagement confirme" de
+    # plus dans la chronologie de la fiche.
+    if (new_status == cur_status and (fiche_param is None or fiche_param == cur_fiche)
+            and new_status != "fin_intervention"):
+        return jsonify({"ok": True, "status": cur_status, "active_fiche_id": cur_fiche,
+                        "unchanged": True})
 
     update = {
         "$set": {
@@ -1125,27 +1343,37 @@ def field_status_set():
     # Si retour a patrouille, on desassocie la fiche active
     if new_status == "patrouille":
         update["$set"]["active_fiche_id"] = None
+    elif fiche_param:
+        update["$set"]["active_fiche_id"] = fiche_param
+        update["$push"]["status_history"]["fiche_id"] = fiche_param
 
     db["field_devices"].update_one({"_id": device["_id"]}, update)
 
-    # Ajouter une entree dans la chronologie de la fiche active pour ASL et engagement
-    fiche_id = device.get("active_fiche_id")
-    if fiche_id and new_status in ("sur_place", "intervention"):
+    # Entree dans la chronologie de la fiche active (engagement, ASL, fin).
+    # La fin d'intervention porte le compte-rendu de l'agent dans la meme
+    # entree : il etait poste a part par la tablette, sans file hors ligne,
+    # et se perdait sur un reseau instable.
+    fiche_id = fiche_param or cur_fiche
+    if fiche_id and new_status in ("sur_place", "intervention", "fin_intervention"):
         status_labels = {
             "sur_place": "Arrivee sur les lieux (ASL)",
             "intervention": "Engagement confirme",
+            "fin_intervention": "Fin d'intervention",
         }
-        chrono_entry = {
-            "ts": now,
-            "text": "Statut: " + status_labels.get(new_status, new_status),
-            "operator": "field:" + (device.get("name") or "?"),
-        }
-        db["pcorg"].update_one(
-            {"_id": fiche_id},
-            {"$push": {"comment_history": chrono_entry}},
+        text = "Statut: " + status_labels.get(new_status, new_status)
+        if new_status == "fin_intervention" and update["$set"].get("fin_comment"):
+            text += "\n" + update["$set"]["fin_comment"]
+        chrono_entry = PH.make_entry(
+            "field:" + (device.get("name") or "?"), text, origin="field", ts=now,
         )
+        PH.append_entry(db["pcorg"], fiche_id, chrono_entry, inc_bounce=True)
+        # Horodatages d'intervention (delais engagement / arrivee)
+        step = {"intervention": "engaged_at", "sur_place": "arrived_at"}.get(new_status)
+        if step:
+            DA.mark_step(db, fiche_id, step, now=now, device_name=device.get("name"))
 
-    return jsonify({"ok": True, "status": new_status})
+    return jsonify({"ok": True, "status": new_status,
+                    "active_fiche_id": None if new_status == "patrouille" else fiche_id})
 
 
 @field_bp.route("/field/create-fiche", methods=["POST"])
@@ -1174,9 +1402,22 @@ def field_create_fiche():
     year = device.get("year")
 
     db = _get_mongo_db()
+    device_category = _device_category(db, device)
+    if device_category and category != device_category:
+        return jsonify({"ok": False, "error": "category_not_allowed",
+                        "allowed": device_category}), 403
     now = _now()
     now_local = _now_local()
     ts_str = now_local.isoformat()
+
+    # Idempotence : la file hors ligne rejoue la creation si la reponse s'est
+    # perdue (requete pourtant arrivee) -> une seconde fiche identique.
+    client_token = (data.get("client_token") or "").strip()
+    is_new, prev = _claim_client_request(db, device["_id"], "fiche", client_token)
+    if not is_new:
+        if prev and prev.get("id"):
+            return jsonify({"ok": True, "id": prev["id"], "duplicate": True})
+        return jsonify({"ok": False, "error": "in_progress"}), 409
 
     # GPS courant
     lat = data.get("lat")
@@ -1262,6 +1503,7 @@ def field_create_fiche():
         },
     )
 
+    _finish_client_request(db, device["_id"], "fiche", client_token, {"id": fiche_id})
     return jsonify({"ok": True, "id": fiche_id})
 
 
@@ -1290,34 +1532,25 @@ def field_my_fiche_close(fiche_id):
 
     now = _now()
     now_local = _now_local()
-    ts_fmt = now_local.strftime("%d/%m/%Y %H:%M:%S")
     operator = "field:" + name
 
-    comment_line = "{} , {}\n Statut: En cours -> Termine\n".format(ts_fmt, operator)
-    history_entry = {
-        "ts": now.isoformat(),
-        "operator": operator,
-        "text": "Statut: En cours -> Termine",
-    }
-
-    old_comment = fiche.get("comment") or ""
-    new_comment = old_comment + comment_line if old_comment else comment_line
-
-    db["pcorg"].update_one(
-        {"_id": fiche_id},
-        {
-            "$set": {
-                "status_code": 10,
-                "close_ts": now,
-                "close_iso": now_local.isoformat(),
-                "operator_close": operator,
-                "operator_id_close": "field:" + str(device.get("_id")),
-                "comment": new_comment,
-            },
-            "$push": {"comment_history": history_entry},
-            "$inc": {"bounce_rev": 1},
+    history_entry = PH.make_entry(operator, "Statut: En cours -> Terminé", origin="field", ts=now)
+    n = PH.append_entry(
+        db["pcorg"], fiche_id, history_entry,
+        set_fields={
+            "status_code": 10,
+            "close_ts": now,
+            "close_iso": now_local.isoformat(),
+            "operator_close": operator,
+            "operator_id_close": "field:" + str(device.get("_id")),
+            "cockpit_status_at": now,
         },
+        owned={"status"}, inc_bounce=True,
+        extra_filter={"status_code": {"$ne": 10}},
     )
+    if not n:
+        return jsonify({"ok": False, "error": "already_closed"}), 400
+    DA.on_close(db, fiche_id)
 
     # Retour en patrouille si c'etait la fiche active
     cur = db["field_devices"].find_one({"_id": device["_id"]})
@@ -1344,18 +1577,53 @@ def field_my_fiche_close(fiche_id):
     return jsonify({"ok": True})
 
 
+@field_bp.route("/field/proposal/<fiche_id>/accept", methods=["POST"])
+@field_token_required
+def field_proposal_accept(fiche_id):
+    """L'unite accepte la fiche proposee : elle est engagee dessus."""
+    ok, code = DA.accept(_get_mongo_db(), fiche_id, request.device)
+    if not ok:
+        return jsonify({"ok": False, "error": code}), 409
+    return jsonify({"ok": True, "status": "intervention", "active_fiche_id": fiche_id})
+
+
+@field_bp.route("/field/proposal/<fiche_id>/refuse", methods=["POST"])
+@field_token_required
+def field_proposal_refuse(fiche_id):
+    """Refus : la fiche part tout de suite a l'unite suivante. Idempotent
+    (un refus rejoue apres expiration renvoie ok)."""
+    DA.refuse(_get_mongo_db(), fiche_id, request.device)
+    return jsonify({"ok": True})
+
+
+@field_bp.route("/field/my-fiches/<fiche_id>/finish", methods=["POST"])
+@field_token_required
+def field_my_fiche_finish(fiche_id):
+    """Fin d'intervention avec issue et compte-rendu obligatoire, pour les
+    categories ou l'unite peut clore (dispatch_auto, `self_close`).
+    Body : {outcome: resolu|partiel|materiel|impossible, report}."""
+    data = request.get_json(silent=True) or {}
+    ok, code = DA.finish(_get_mongo_db(), fiche_id, request.device,
+                         (data.get("outcome") or "").strip(), data.get("report") or "")
+    if not ok:
+        status = 400 if code in ("issue_invalide", "compte_rendu_obligatoire") else 403 \
+            if code in ("not_assigned", "cloture_terrain_desactivee") else 409
+        return jsonify({"ok": False, "error": code}), status
+    return jsonify({"ok": True, "result": code})
+
+
 @field_bp.route("/field/pco-categories", methods=["GET"])
 @field_token_required
 def field_pco_categories():
-    """Liste les categories PCO disponibles pour la creation de fiches terrain."""
-    return jsonify({
-        "categories": [
-            {"id": "PCO.Secours", "label": "Secours", "icon": "medical_services"},
-            {"id": "PCO.Securite", "label": "Securite", "icon": "security"},
-            {"id": "PCO.Technique", "label": "Technique", "icon": "build"},
-            {"id": "PCO.Flux", "label": "Flux", "icon": "directions_car"},
-        ]
-    })
+    """Categories dans lesquelles cette tablette peut creer des fiches : la
+    sienne seule si elle en a une, sinon les quatre historiques."""
+    cat = _device_category(_get_mongo_db(), request.device)
+    if cat:
+        cats = [c for c in FIELD_CATEGORIES if c["id"] == cat]
+    else:
+        legacy = {"PCO.Secours", "PCO.Securite", "PCO.Technique", "PCO.Flux"}
+        cats = [c for c in FIELD_CATEGORIES if c["id"] in legacy]
+    return jsonify({"categories": cats, "device_category": cat})
 
 
 @field_bp.route("/field/inbox", methods=["GET"])
@@ -1375,8 +1643,25 @@ def field_inbox():
         except Exception:
             pass
 
-    cursor = db["field_messages"].find(query).sort("createdAt", 1).limit(200)
-    messages = [_pub_message(m) for m in cursor]
+    # Les 200 PLUS RECENTS, remis dans l'ordre chronologique. L'ancien tri
+    # croissant + limit(200) rendait les 200 plus anciens : au-dela de 200
+    # messages sur la retention de 7 jours (SOS diffuses, photos, reponses),
+    # les nouveaux messages n'arrivaient plus jamais sur la tablette.
+    docs = list(db["field_messages"].find(query).sort("createdAt", -1).limit(200))
+    docs.reverse()
+    messages = [_pub_message(m) for m in docs]
+
+    # SOS diffuses : signaler ceux dont la fiche est close, pour que la
+    # tablette retire le repere de la carte (il y restait jusqu'au rechargement).
+    sos_fiches = {(m.get("payload") or {}).get("pcorg_id") for m in docs
+                  if m.get("type") == "sos_broadcast"}
+    sos_fiches.discard(None)
+    if sos_fiches:
+        closed = {f["_id"] for f in db["pcorg"].find(
+            {"_id": {"$in": list(sos_fiches)}, "status_code": 10}, {"_id": 1})}
+        for pub, m in zip(messages, docs):
+            if m.get("type") == "sos_broadcast":
+                pub["sos_resolved"] = (m.get("payload") or {}).get("pcorg_id") in closed
     return jsonify({"ok": True, "messages": messages, "now": _iso(_now())})
 
 
@@ -1543,6 +1828,11 @@ def field_photo_send():
     create_fiche_param = (request.form.get("create_fiche") or "").strip().lower()
     opt_out_fiche = create_fiche_param in {"false", "0"}
     should_create_fiche = bool(category) and not opt_out_fiche
+    if should_create_fiche:
+        device_category = _device_category(_get_mongo_db(), device)
+        if device_category and category != device_category:
+            return jsonify({"ok": False, "error": "category_not_allowed",
+                            "allowed": device_category}), 403
 
     # Multi-photos : champ "photos" (getlist) prioritaire, fallback "photo" (compat).
     photo_files = [pf for pf in request.files.getlist("photos") if pf and pf.filename]
@@ -2183,6 +2473,8 @@ def _pub_pairing(p):
         "event": p.get("event"),
         "year": p.get("year"),
         "beacon_group_id": p.get("beacon_group_id"),
+        "category": p.get("category"),
+        "metiers": p.get("metiers") or [],
         "notes": p.get("notes", ""),
         "createdAt": _iso(p.get("createdAt")),
         "expiresAt": _iso(p.get("expiresAt")),
@@ -2303,10 +2595,13 @@ def field_admin_pairings_create():
     event = (data.get("event") or "").strip()
     year = str(data.get("year") or "").strip()
     beacon_group_id = (data.get("beacon_group_id") or "").strip()
+    category = (data.get("category") or "").strip()
     notes = (data.get("notes") or "").strip()
 
     if not name:
         return jsonify({"ok": False, "error": "missing_name"}), 400
+    if category and category not in FIELD_CATEGORY_IDS:
+        return jsonify({"ok": False, "error": "invalid_category"}), 400
     if not event or not year:
         return jsonify({"ok": False, "error": "missing_event_year"}), 400
     if not beacon_group_id:
@@ -2321,6 +2616,8 @@ def field_admin_pairings_create():
     grp = next((g for g in config.get("beacon_groups", []) or [] if g.get("id") == beacon_group_id), None)
     if not grp:
         return jsonify({"ok": False, "error": "unknown_beacon_group"}), 400
+    # Sans choix explicite, la tablette prend la categorie de son groupe.
+    category = category or grp.get("pco_category") or None
 
     # Le nom ne doit pas collisionner avec une balise anoloc ou une autre tablette
     if _label_conflict(db, name, event, year):
@@ -2342,6 +2639,8 @@ def field_admin_pairings_create():
         "event": event,
         "year": year,
         "beacon_group_id": beacon_group_id,
+        "category": category,
+        "metiers": _clean_metiers(data.get("metiers")),
         "notes": notes,
         "createdAt": _now(),
         "expiresAt": _now() + timedelta(seconds=PAIRING_CODE_TTL_SECONDS),
@@ -2474,11 +2773,13 @@ def field_admin_devices_list():
         query["beacon_group_id"] = group
     if not include_revoked:
         query["revoked"] = {"$ne": True}
-    devices = [
-        _pub_device_admin(d)
-        for d in db["field_devices"].find(query).sort("createdAt", -1)
-    ]
-    return jsonify({"devices": devices})
+    group_cats = _group_categories(db)
+    devices = []
+    for d in db["field_devices"].find(query).sort("createdAt", -1):
+        pub = _pub_device_admin(d)
+        pub["category_effective"] = _device_category(db, d, group_cats)
+        devices.append(pub)
+    return jsonify({"devices": devices, "categories": FIELD_CATEGORIES})
 
 
 @field_bp.route("/field/admin/devices/<device_id>/revoke", methods=["POST"])
@@ -2544,6 +2845,44 @@ def field_admin_device_rename(device_id):
 
     db["field_devices"].update_one({"_id": oid}, {"$set": {"name": new_name}})
     return jsonify({"ok": True})
+
+
+@field_bp.route("/field/admin/devices/<device_id>/category", methods=["POST"])
+@admin_required
+def field_admin_device_category(device_id):
+    """Change la categorie d'une tablette : elle ne voit et ne cree plus que
+    des fiches de cette categorie. Chaine vide = categorie du groupe."""
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    data = request.get_json(silent=True) or {}
+    category = (data.get("category") or "").strip()
+    if category and category not in FIELD_CATEGORY_IDS:
+        return jsonify({"ok": False, "error": "invalid_category"}), 400
+
+    db = _get_mongo_db()
+    res = db["field_devices"].update_one({"_id": oid}, {"$set": {"category": category or None}})
+    if res.matched_count == 0:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    device = db["field_devices"].find_one({"_id": oid})
+    return jsonify({"ok": True, "category_effective": _device_category(db, device)})
+
+
+@field_bp.route("/field/admin/devices/<device_id>/metiers", methods=["POST"])
+@admin_required
+def field_admin_device_metiers(device_id):
+    """Metiers couverts par l'unite : seules les fiches de ces metiers lui
+    sont proposees automatiquement. Liste vide = tous."""
+    try:
+        oid = ObjectId(device_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    metiers = _clean_metiers((request.get_json(silent=True) or {}).get("metiers"))
+    res = _get_mongo_db()["field_devices"].update_one({"_id": oid}, {"$set": {"metiers": metiers}})
+    if res.matched_count == 0:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    return jsonify({"ok": True, "metiers": metiers})
 
 
 @field_bp.route("/field/admin/devices/<device_id>", methods=["DELETE"])
@@ -3608,20 +3947,31 @@ def field_my_fiches():
     except (TypeError, ValueError):
         year_val = year
 
+    # Relire le device pour avoir le statut et la categorie frais (un admin
+    # peut changer la categorie pendant que la tablette tourne).
+    dev_fresh = db["field_devices"].find_one({"_id": device["_id"]}) or device
+    device_category = _device_category(db, dev_fresh)
+
     base_query = {
         "event": event,
         "year": year_val,
         "content_category.patrouille": name,
         "category": {"$regex": "^PCO"},
     }
+    if device_category:
+        # Une tablette ne voit que les fiches de sa categorie. Exceptions :
+        # son propre SOS (toujours PCO.Secours) et la fiche sur laquelle elle
+        # est engagee, au cas ou le PC Org en changerait la categorie.
+        base_query["$or"] = [
+            {"category": device_category},
+            {"content_category.field_sos": True},
+            {"_id": dev_fresh.get("active_fiche_id") or "__none__"},
+        ]
 
-    # Ouvertes : status_code != 10 et (close_ts null ou absent)
+    # Ouvertes : status_code != 10 (seule convention de cloture). L'ancien
+    # $or sur close_ts nul remontait en "ouvertes" des fiches closes.
     open_query = dict(base_query)
-    open_query["$or"] = [
-        {"status_code": {"$ne": 10}},
-        {"close_ts": None},
-        {"close_ts": {"$exists": False}},
-    ]
+    open_query["status_code"] = {"$ne": 10}
     closed_query = dict(base_query)
     closed_query["status_code"] = 10
 
@@ -3653,8 +4003,6 @@ def field_my_fiches():
 
     open_list = [pub(f) for f in db["pcorg"].find(open_query).sort("ts", -1).limit(200)]
     closed_list = [pub(f) for f in db["pcorg"].find(closed_query).sort("close_ts", -1).limit(50)]
-    # Relire le device pour avoir le statut frais
-    dev_fresh = db["field_devices"].find_one({"_id": device["_id"]}) or device
 
     # Determiner le tracking_mode effectif (purge watchers expires)
     tracking_mode = "normal"
@@ -3704,6 +4052,13 @@ def field_my_fiches():
         "open": open_list,
         "closed": closed_list,
         "device_name": name,
+        "device_category": device_category,
+        "device_metiers": dev_fresh.get("metiers") or [],
+        # Proposition automatique en attente de reponse (compte a rebours)
+        "proposal": DA.proposal_for_device(db, dev_fresh),
+        # Cloture par l'unite autorisee pour sa categorie (fin avec issue)
+        "self_close": bool(device_category and DA.category_config(
+            DA.get_config(db), device_category).get("self_close")),
         "device_status": dev_fresh.get("status") or "patrouille",
         "active_fiche_id": dev_fresh.get("active_fiche_id"),
         "tracking_mode": tracking_mode,
@@ -3726,6 +4081,16 @@ def field_my_fiche_detail(fiche_id):
         return jsonify({"ok": False, "error": "not_found"}), 404
 
     cc = fiche.get("content_category") or {}
+    # Une tablette ne lit que ses fiches : affectee, active, ou creee par elle.
+    # Avant, n'importe quelle tablette lisait n'importe quelle fiche par son id.
+    readable = (
+        (name and cc.get("patrouille") == name)
+        or str(device.get("active_fiche_id") or "") == str(fiche["_id"])
+        or fiche.get("operator_id_create") == "field:" + str(device.get("_id"))
+    )
+    if not readable:
+        return jsonify({"ok": False, "error": "not_assigned"}), 403
+
     gps = fiche.get("gps") or {}
     coords = gps.get("coordinates") if isinstance(gps, dict) else None
     lat = lng = None
@@ -3738,13 +4103,11 @@ def field_my_fiche_detail(fiche_id):
 
     ts = fiche.get("ts")
     close_ts = fiche.get("close_ts")
-    raw_history = fiche.get("comment_history") or []
-    comment_history = []
-    for h in raw_history:
-        entry = dict(h)
-        if isinstance(entry.get("ts"), datetime):
-            entry["ts"] = _iso(entry["ts"])
-        comment_history.append(entry)
+    raw_history = fiche.get("comment_history")
+    if raw_history is None:
+        raw_history = PH.parse_comment(fiche.get("comment"))
+    # Horodatages normalises, statut / commentaire separes, cloture synthetique
+    comment_history = PH.decorate_history(raw_history, fiche)
 
     return jsonify({
         "ok": True,
@@ -3831,11 +4194,7 @@ def field_my_fiche_comment_with_photo(fiche_id):
                 return jsonify({"ok": False, "error": e.code, "uploaded": photos_meta}), e.status
             photos_meta.append({"photo": url, "thumb": thumb})
 
-    entry = {
-        "ts": _now(),
-        "text": comment or "",
-        "operator": "field:" + name,
-    }
+    entry = PH.make_entry("field:" + name, comment or "", origin="field", ts=_now())
     if photos_meta:
         entry["photos"] = photos_meta
         # Back-compat : 1ere photo aussi en champs plats
@@ -3844,17 +4203,10 @@ def field_my_fiche_comment_with_photo(fiche_id):
     if codes:
         entry["codes"] = codes
 
-    update_sets = {}
-    if comment:
-        update_sets["comment"] = comment
-
-    db["pcorg"].update_one(
-        {"_id": fiche_id},
-        {
-            "$set": update_sets,
-            "$push": {"comment_history": entry},
-        },
-    )
+    # Ajout atomique a la chronologie ET au champ texte `comment`. L'ancien
+    # code remplacait `comment` par le seul dernier message (tout
+    # l'historique texte etait perdu) et ne signalait rien au cockpit.
+    PH.append_entry(db["pcorg"], fiche_id, entry, inc_bounce=True)
     return jsonify({
         "ok": True,
         "photos": photos_meta,
@@ -3867,7 +4219,13 @@ def field_my_fiche_comment_with_photo(fiche_id):
 @field_bp.route("/field/photos/<path:photo_path>", methods=["GET"])
 def field_photo_serve(photo_path):
     """Sert une photo uploadee depuis une tablette.
-    Pas d'auth field_token : les photos sont visibles par les operateurs cockpit."""
+
+    Deux lecteurs legitimes : une tablette appairee non revoquee (cookie
+    field_token) ou un utilisateur cockpit (JWT, n'importe quel role). Avant,
+    la route etait publique : /field/* est hors portail, une URL suffisait.
+    """
+    if not _photo_viewer_allowed():
+        return jsonify({"ok": False, "error": "auth_required"}), 401
     safe_path = os.path.normpath(photo_path)
     if ".." in safe_path or safe_path.startswith("/"):
         abort(404)
@@ -3877,8 +4235,32 @@ def field_photo_serve(photo_path):
     directory = os.path.dirname(full)
     filename = os.path.basename(full)
     resp = send_from_directory(directory, filename)
-    resp.headers["Cache-Control"] = "public, max-age=86400"
+    resp.headers["Cache-Control"] = "private, max-age=86400"
     return resp
+
+
+def _photo_viewer_allowed():
+    from app import JWT_SECRET, JWT_ALGORITHM, CODING, APP_KEY, SUPER_ADMIN_ROLE
+    import jwt as pyjwt
+
+    if CODING:
+        return True
+    token = request.cookies.get(FIELD_COOKIE_NAME)
+    if token:
+        device = _get_mongo_db()["field_devices"].find_one(
+            {"token_hash": _hash_token(token)}, {"revoked": 1})
+        if device and not device.get("revoked"):
+            return True
+    jwt_token = request.cookies.get("access_token")
+    if jwt_token:
+        try:
+            payload = pyjwt.decode(jwt_token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+            return False
+        if SUPER_ADMIN_ROLE in (payload.get("global_roles") or []):
+            return True
+        return bool((payload.get("roles_by_app") or {}).get(APP_KEY))
+    return False
 
 
 @field_bp.route("/field/sos", methods=["POST"])
@@ -3912,18 +4294,27 @@ def field_sos():
 
     db = _get_mongo_db()
 
+    # Idempotence : la tablette renvoie le MEME sos_id tant qu'elle n'a pas
+    # recu de confirmation (reseau 4G instable, file hors ligne, double tap).
+    # Sans cette cle, chaque renvoi creait une fiche, une alerte plein ecran
+    # sur tous les postes et une diffusion a toutes les tablettes : le meme
+    # SOS "revenait" plusieurs fois, a des instants differents.
+    sos_id = (data.get("sos_id") or "").strip()
+    is_new, prev = _claim_client_request(db, device["_id"], "sos", sos_id)
+    if not is_new:
+        return jsonify({"ok": True, "pcorg_id": (prev or {}).get("pcorg_id"), "duplicate": True})
+
     # 1) Creer une fiche PCO automatique (categorie PCO.Secours, niveau UA)
     fiche_id = None
     try:
-        import uuid as _uuid
         ts_str = now_local.isoformat()
         text_lines = ["SOS tablette : " + name]
         if lat is not None and lng is not None:
             text_lines.append("Position : {:.5f}, {:.5f}".format(lat, lng))
         text = " \u2014 ".join(text_lines)
-        # ID unique par SOS (inclut le timestamp pour ne pas dedup)
+        # ID unique par SOS (cle client si fournie, sinon horodatage)
         seed = "field-sos|{}|{}|{}|{}".format(
-            str(device.get("_id")), ts_str, lat or 0, lng or 0
+            str(device.get("_id")), sos_id or ts_str, lat or 0, lng or 0
         )
         fiche_id = str(_uuid.uuid5(_uuid.NAMESPACE_URL, seed))
         gps = None
@@ -3997,10 +4388,12 @@ def field_sos():
             "lng": lng,
             "battery": battery,
             "pcorg_id": fiche_id,
+            "sos_id": sos_id or None,
         },
     }
 
     db["cockpit_active_alerts"].insert_one(alert)
+    _finish_client_request(db, device["_id"], "sos", sos_id, {"pcorg_id": fiche_id})
 
     # 3) Confirmer a la tablette emettrice
     db["field_messages"].insert_one({
@@ -4019,11 +4412,7 @@ def field_sos():
     })
 
     # 4) Broadcast SOS a toutes les autres tablettes du meme event/year
-    other_devices = db["field_devices"].find({
-        "event": event,
-        "year": year,
-        "_id": {"$ne": device["_id"]},
-    }, {"_id": 1, "name": 1})
+    other_devices = _sos_recipients(db, device, event, year)
     sos_messages = []
     for other in other_devices:
         sos_messages.append({

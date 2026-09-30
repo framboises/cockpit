@@ -34,6 +34,12 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
+  /* Encoche / barre d'etat iOS (status-bar-style black-translucent en mode
+     installe : le contenu passe SOUS la barre d'etat sans ce padding).
+     env() vaut 0 sur les tablettes : rendu inchange. */
+  padding-top: calc(8px + env(safe-area-inset-top));
+  padding-left: calc(12px + env(safe-area-inset-left));
+  padding-right: calc(12px + env(safe-area-inset-right));
   background: #0f172a;
   border-bottom: 1px solid #1e293b;
   z-index: 900;
@@ -1163,6 +1169,8 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
   z-index: 900;
   min-height: 64px;
   padding-bottom: max(6px, env(safe-area-inset-bottom));
+  padding-left: max(8px, env(safe-area-inset-left));
+  padding-right: max(8px, env(safe-area-inset-right));
 }
 .action-btn {
   display: flex;
@@ -1244,11 +1252,19 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
   width: 100vw;
   /* --vvh suit le visualViewport (init JS): quand le clavier virtuel
      apparait, la modale ne deborde plus sous le clavier. */
-  height: var(--vvh, 100vh);
+  height: 100vh;
+  height: var(--vvh, 100dvh);
+  /* iOS decale le visualViewport (offsetTop) a l'ouverture du clavier :
+     --vvt (pose par field.js) garde la modale dans la zone visible. */
+  top: var(--vvt, 0px);
   background: rgba(15,23,42,0.85);
   z-index: 2000;
   display: flex; align-items: center; justify-content: center;
   padding: 16px;
+  padding-top: max(16px, env(safe-area-inset-top));
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
 }
 .field-modal[hidden] { display: none !important; }
 .field-modal-box {
@@ -1494,6 +1510,7 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
 .field-toast {
   position: fixed;
   top: 70px; left: 50%; transform: translateX(-50%);
+  top: calc(70px + env(safe-area-inset-top));
   background: #1e293b;
   border: 1px solid #334155;
   color: #f1f5f9;
@@ -2015,60 +2032,16 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
    BREAKPOINTS
    ===================================================================== */
 
-/* iPhone portrait (width < 500) */
-@media (max-width: 500px) {
-  .status-pill .status-label { display: none; }
-  .clock { font-size: 12px; padding: 3px 6px; }
-  .device-event { display: none; }
-  .topbar-left .logo { font-size: 11px; padding: 3px 6px; }
-  .action-btn .label { display: none; }
-  .action-btn { min-height: 48px; }
-  .action-btn .material-symbols-outlined { font-size: 24px; }
-  .field-actions { grid-template-columns: repeat(5, 1fr); min-height: 56px; }
-  .field-topbar { min-height: 46px; padding: 6px 10px; }
-}
-
-/* iPhone landscape (tres peu de hauteur) */
-@media (orientation: landscape) and (max-height: 500px) {
-  body { grid-template-columns: auto 1fr; grid-template-rows: 1fr; }
-  .field-topbar {
-    grid-column: 1 / 2;
-    flex-direction: column;
-    min-height: unset;
-    min-width: 56px;
-    border-bottom: none;
-    border-right: 1px solid #1e293b;
-    padding: 6px 4px;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 8px;
-  }
-  .topbar-left { flex-direction: column; gap: 4px; align-items: center; }
-  .topbar-left .device { display: none; }
-  .topbar-right { flex-direction: column; gap: 4px; }
-  .clock { font-size: 11px; padding: 2px 4px; }
-  .status-pill { padding: 3px 5px; }
-  .status-pill .status-label { display: none; }
-  .field-map-wrap { grid-column: 2 / 3; }
-  .field-actions {
-    position: absolute;
-    bottom: 8px; left: 50%;
-    transform: translateX(-50%);
-    grid-template-columns: repeat(5, 56px);
-    min-height: unset;
-    padding: 4px;
-    background: rgba(15,23,42,0.92);
-    border: 1px solid #1e293b;
-    border-radius: 12px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-  }
-  .action-btn { min-height: 48px; }
-  .action-btn .label { display: none; }
-}
+/* Blocs telephones : en FIN de fichier (voir tout en bas), sinon les
+   regles de base definies plus loin l'emporteraient a specificite egale. */
 
 /* Crosscall T5 portrait (800x1280) : plus de place, boutons plus gros */
 @media (min-width: 700px) and (orientation: portrait) {
-  .field-topbar { min-height: 64px; padding: 12px 16px; }
+  .field-topbar {
+    min-height: 64px;
+    padding: 12px 16px;
+    padding-top: calc(12px + env(safe-area-inset-top));
+  }
   .topbar-left .logo { font-size: 15px; padding: 6px 10px; }
   .device-name { font-size: 17px; }
   .device-event { font-size: 13px; }
@@ -2343,9 +2316,16 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
   margin-top: 2px;
   white-space: pre-wrap;
 }
-.fd-status-change .fd-chrono-text {
-  font-style: italic; color: #64748b;
+/* Ligne de statut / modification : pastille discrete. Le commentaire qui
+   l'accompagne (motif de cloture...) garde le style normal, lisible. */
+.fd-chrono-status {
+  display: inline-block; margin-top: 3px; padding: 1px 8px;
+  border-radius: 10px; font-size: 11px; font-weight: 600;
+  background: rgba(148, 163, 184, 0.18); color: #cbd5e1;
 }
+.fd-chrono-status.closed { background: rgba(34, 197, 94, 0.18); color: #86efac; }
+.fd-chrono-change { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+.fd-chrono-empty { font-size: 11px; color: #64748b; font-style: italic; margin-top: 2px; }
 .fd-chrono-photo {
   display: block;
   max-width: 180px; max-height: 140px;
@@ -2828,3 +2808,353 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
 }
 .itinerary-priority input[type="checkbox"] { margin: 0; transform: scale(1.2); accent-color: #dc2626; }
 .itinerary-priority .material-symbols-outlined { font-size: 18px; }
+
+/* Effacer l'itineraire : visible seulement quand un trace est affiche */
+.map-fab.map-fab-route-clear[hidden] { display: none; }
+.map-fab.map-fab-route-clear { color: #fca5a5; border-color: #7f1d1d; }
+
+/* =====================================================================
+   AIDE A L'INSTALLATION iOS (field_install_hint.js)
+   Affichee seulement sur iPhone / iPad hors mode installe : sur iOS, le
+   Web Push n'existe qu'une fois l'app ajoutee a l'ecran d'accueil.
+   ===================================================================== */
+.field-install-hint {
+  position: fixed;
+  top: calc(60px + env(safe-area-inset-top));
+  left: max(10px, env(safe-area-inset-left));
+  right: max(10px, env(safe-area-inset-right));
+  max-width: 520px;
+  margin: 0 auto;
+  z-index: 1500; /* sous les modales (2000) et les alertes plein ecran */
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px 8px 12px;
+  background: #1e3a8a;
+  border: 1px solid #3b82f6;
+  border-radius: 12px;
+  color: #f8fafc;
+  font-size: 13px;
+  line-height: 1.35;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.field-install-hint > .material-symbols-outlined { font-size: 26px; color: #93c5fd; flex-shrink: 0; }
+.field-install-hint-text { flex: 1; min-width: 0; }
+.field-install-hint-text .material-symbols-outlined {
+  font-size: 16px;
+  vertical-align: -3px;
+}
+.field-install-hint-close {
+  flex-shrink: 0;
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  color: #cbd5e1;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+}
+.field-install-hint-close:active { background: rgba(255, 255, 255, 0.12); }
+.field-install-hint-action {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 0 14px;
+  background: #2563eb;
+  border: 1px solid #3b82f6;
+  border-radius: 10px;
+  color: #fff;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.field-install-hint-action:active { background: #1d4ed8; }
+.field-install-hint-action:disabled { opacity: 0.6; }
+/* Paysage telephone : plus de barre en haut, le bandeau remonte. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .field-install-hint { top: calc(8px + env(safe-area-inset-top)); }
+}
+
+/* ---------------------------------------------------------------------
+   TELEPHONES (techniciens : logistique, technique, electricite, info)
+   Trois blocs, du plus general au plus specifique :
+     1. petits ecrans, portrait OU paysage : (max-width: 600px), (max-height: 500px)
+        -> securites communes (zoom iOS, cibles tactiles, modales et
+           overlays bornes a l'ecran visible, encoche / barre d'accueil)
+     2. telephone portrait : (max-width: 600px)          360 a 430 px
+     3. telephone paysage  : (orientation: landscape) and (max-height: 500px)
+   Les tablettes (Crosscall 800x1280, paysage 1280x800) ne rentrent dans
+   aucun de ces blocs : leur rendu est inchange.
+   --------------------------------------------------------------------- */
+
+/* 1. Petits ecrans (portrait ou paysage) */
+@media (max-width: 600px), (max-height: 500px) {
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+
+  /* iOS zoome la page au focus de tout champ < 16 px : on s'aligne. */
+  input[type="text"], input[type="search"], input[type="number"],
+  input[type="tel"], input:not([type]), textarea, select,
+  .poi-search-input, .fiche-create-text, .fd-comment-input,
+  .msg-reply-input, .field-camera-comment { font-size: 16px; }
+
+  /* Cibles tactiles >= 44 px */
+  .icon-btn { width: 44px; height: 44px; }
+  .btn-primary, .btn-danger, .btn-confirm-ack { min-height: 44px; }
+  .msg-reply-send, .msg-reply-photo-btn { min-width: 44px; min-height: 44px; }
+  .fd-photo-btn { width: 44px; height: 44px; }
+  .layer-row { min-height: 44px; }
+  .leaflet-control-zoom a {
+    width: 40px !important; height: 40px !important;
+    line-height: 40px !important;
+  }
+
+  /* Modales : bornees a la zone visible (clavier compris), scroll interne. */
+  .field-modal {
+    padding-top: max(8px, env(safe-area-inset-top));
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+  }
+  .field-modal-box,
+  .fiche-detail-box { max-height: 100%; }
+  .field-modal-header, .fiche-detail-header,
+  .field-modal-actions, .fiche-detail-actions { flex-shrink: 0; }
+  .field-modal-body, .fiche-detail-body, .fiche-create-body, .status-options {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .status-option { min-height: 48px; padding: 10px 14px; }
+  .fiche-detail-actions > button { flex: 1 1 auto; justify-content: center; }
+  .field-modal-actions { flex-wrap: wrap; }
+
+  /* Overlays plein ecran : encoche + barre d'accueil, et contenu
+     scrollable plutot que coupe (en paysage surtout). */
+  .sos-confirm-overlay, .sos-alert-overlay, .dispatch-alert-overlay,
+  .field-session-lost, .capture-chooser, .itinerary-menu-overlay,
+  .field-lightbox {
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+  .sos-confirm-box, .sos-alert-box, .field-session-lost-box,
+  .capture-chooser-box, .itinerary-menu {
+    max-height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .dispatch-alert-box {
+    max-height: 100%;
+    display: flex; flex-direction: column;
+  }
+  .dispatch-alert-header, .dispatch-alert-actions { flex-shrink: 0; }
+  .dispatch-alert-body {
+    flex: 1 1 auto; min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .field-lightbox-close {
+    top: calc(12px + env(safe-area-inset-top));
+    right: calc(12px + env(safe-area-inset-right));
+  }
+
+  /* Camera / scan : suivent la zone visible (clavier ouvert en mode
+     compose) et evitent l'encoche laterale en paysage. */
+  .field-camera, .field-scan {
+    bottom: auto;
+    top: var(--vvt, 0px);
+    height: 100vh;
+    height: var(--vvh, 100dvh);
+  }
+  .cam-compose, .scan-compose {
+    max-height: 60%;
+    padding-left: calc(14px + env(safe-area-inset-left));
+    padding-right: calc(14px + env(safe-area-inset-right));
+  }
+  .field-camera-close, .field-scan-close { left: calc(12px + env(safe-area-inset-left)); }
+  .field-camera-switch, .field-scan-switch { right: calc(12px + env(safe-area-inset-right)); }
+  .field-camera-torch, .field-scan-torch { right: calc(64px + env(safe-area-inset-right)); }
+  .cam-attach-bar, .scan-attach-bar {
+    left: calc(64px + env(safe-area-inset-left));
+    right: calc(116px + env(safe-area-inset-right));
+  }
+  .field-stream-preview { right: calc(12px + env(safe-area-inset-right)); }
+
+  /* Panneaux lateraux (Messages, Missions, Calques) : feuille pleine
+     largeur sur la zone carte. */
+  .inbox-panel, .layers-panel {
+    width: 100%;
+    border-left: none;
+    box-shadow: none;
+  }
+  .inbox-header, .layers-header { padding: 6px 6px 6px 14px; }
+  .inbox-list, .layers-list { overscroll-behavior: contain; }
+
+  /* Recherche POI : pleine largeur (masque temporairement zoom et FAB). */
+  .poi-search-panel { left: 8px; right: 8px; top: 8px; max-height: calc(100% - 16px); }
+  .poi-search-results { max-height: none; flex: 1; min-height: 0; }
+
+  /* La batterie du telephone est deja dans sa barre d'etat (et l'API
+     Battery n'existe pas sur iOS : la pastille resterait a "--"). */
+  #battery-status { display: none; }
+  /* Les compteurs d'actions en attente / d'envois restent visibles. */
+  .offline-queue-pill .status-label,
+  .field-upload-pill .status-label { display: inline; }
+  .offline-queue-pill, .field-help-pill {
+    min-height: 36px; min-width: 36px; justify-content: center;
+  }
+}
+
+/* 2. Telephone portrait (360 a 430 px, Crosscall portrait = 800 : exclu) */
+@media (max-width: 600px) {
+  .field-topbar {
+    min-height: 46px;
+    gap: 8px;
+    padding-top: calc(6px + env(safe-area-inset-top));
+    padding-bottom: 6px;
+    padding-left: calc(10px + env(safe-area-inset-left));
+    padding-right: calc(10px + env(safe-area-inset-right));
+  }
+  .topbar-left { gap: 8px; }
+  .topbar-left .logo { font-size: 11px; padding: 3px 6px; letter-spacing: 1px; flex-shrink: 0; }
+  .device-event { display: none; }
+  .topbar-right { gap: 4px; flex-shrink: 0; }
+  .status-pill { padding: 4px 5px; }
+  .status-pill .status-label { display: none; }
+  .offline-queue-pill .status-label,
+  .field-upload-pill .status-label { display: inline; }
+  .clock { font-size: 12px; padding: 3px 6px; }
+
+  /* Barre de statut : cible tactile pleine largeur >= 44 px */
+  .status-current { min-height: 44px; padding: 6px 14px; }
+
+  /* Barre d'actions : 5 boutons >= 56 px de large a 360 px, libelles gardes
+     (nouveaux utilisateurs), colonnes bornees pour ne jamais deborder. */
+  .field-actions {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+    min-height: 60px;
+    padding-top: 6px;
+  }
+  .action-btn { min-height: 52px; min-width: 0; padding: 4px 2px; }
+  .action-btn .material-symbols-outlined { font-size: 24px; }
+  .action-btn .label {
+    display: block;
+    max-width: 100%;
+    font-size: 10px; line-height: 1.15;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .field-actions .action-sos { margin-left: 8px; }
+  .field-actions .action-sos::before { left: -6px; }
+  .field-actions .action-sos .material-symbols-outlined { font-size: 26px; }
+
+  /* Controles carte : la colonne droite (FAB + mesures) ne doit pas se
+     chevaucher sur ~420 px de carte -> outils de mesure a l'horizontale. */
+  .map-fab-group-tr { top: 10px; right: calc(10px + env(safe-area-inset-right)); gap: 6px; }
+  .map-fab-bl { bottom: 10px; left: 10px; width: 50px; height: 50px; }
+  .map-measure-tools {
+    flex-direction: row;
+    gap: 6px;
+    padding: 6px;
+    right: 10px;
+    /* au-dessus de l'attribution Leaflet (z-index 1000, coin bas droit) */
+    bottom: 20px;
+    border-radius: 12px;
+  }
+  .map-measure-tools .tile-btn { width: 44px; height: 44px; }
+  .measure-tooltip { max-width: calc(100% - 24px); white-space: normal; text-align: center; }
+
+  .field-modal-box { border-radius: 14px; }
+  .fiche-detail-header { border-radius: 14px 14px 0 0; }
+
+  /* Bandeau de mise a jour : au-dessus de la barre statut + actions */
+  .field-update-banner { bottom: calc(118px + env(safe-area-inset-bottom)); }
+}
+
+/* Tres petits telephones : on retire ce que le telephone affiche deja */
+@media (max-width: 420px) {
+  /* L'heure est dans la barre d'etat du telephone (portrait). */
+  .clock { display: none; }
+}
+@media (max-width: 380px) {
+  .topbar-left .logo { display: none; }
+}
+
+/* 3. Telephone paysage (tres peu de hauteur) : barre d'etat a gauche,
+   carte + bandeau engagement + barre de statut au centre, actions en
+   colonne a droite. Plus rien ne flotte au-dessus de la carte. */
+@media (orientation: landscape) and (max-height: 500px) {
+  body {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr) auto auto;
+  }
+  .field-topbar {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    flex-direction: column;
+    min-height: unset;
+    min-width: 56px;
+    border-bottom: none;
+    border-right: 1px solid #1e293b;
+    padding: calc(6px + env(safe-area-inset-top)) 4px calc(6px + env(safe-area-inset-bottom));
+    padding-left: calc(4px + env(safe-area-inset-left));
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    overflow-y: auto;
+  }
+  .topbar-left { flex-direction: column; gap: 4px; align-items: center; }
+  .topbar-left .device { display: none; }
+  .topbar-left .logo { display: block; font-size: 10px; padding: 3px 4px; letter-spacing: 1px; }
+  .topbar-right { flex-direction: column; gap: 4px; }
+  /* En paysage iOS masque sa barre d'etat : l'horloge redevient utile. */
+  .clock { display: block; font-size: 11px; padding: 2px 4px; }
+  .status-pill { padding: 3px 5px; }
+  .status-pill .status-label { display: none; }
+  .offline-queue-pill .status-label,
+  .field-upload-pill .status-label { display: inline; }
+
+  .field-map-wrap { grid-column: 2; grid-row: 1; }
+  .field-engage-banner { grid-column: 2; grid-row: 2; }
+  .field-status-bar { grid-column: 2; grid-row: 3; }
+  .status-current { min-height: 40px; padding: 4px 14px; }
+
+  .field-actions {
+    grid-column: 3;
+    grid-row: 1 / -1;
+    grid-template-columns: 60px;
+    grid-auto-rows: minmax(44px, 64px);
+    align-content: center;
+    min-height: unset;
+    gap: 6px;
+    padding: calc(6px + env(safe-area-inset-top)) 6px calc(6px + env(safe-area-inset-bottom));
+    padding-right: calc(6px + env(safe-area-inset-right));
+    border-top: none;
+    border-left: 1px solid #1e293b;
+    overflow-y: auto;
+  }
+  .action-btn { min-height: 44px; padding: 2px; }
+  .action-btn .material-symbols-outlined { font-size: 22px; }
+  .action-btn .label { display: block; font-size: 9px; line-height: 1.1; }
+  .field-actions .action-sos { margin-left: 0; margin-top: 8px; }
+  .field-actions .action-sos::before {
+    left: 10%; right: 10%; top: -8px; bottom: auto;
+    width: auto; height: 2px;
+  }
+  .field-actions .action-sos .material-symbols-outlined { font-size: 24px; }
+
+  /* Carte courte (~300 px) : FAB du haut a l'horizontale. */
+  .map-fab-group-tr { flex-direction: row; top: 8px; right: 8px; gap: 6px; }
+  .map-measure-tools { flex-direction: row; gap: 6px; padding: 6px; right: 8px; bottom: 20px; }
+  .map-measure-tools .tile-btn { width: 44px; height: 44px; }
+  .map-fab-bl { bottom: 8px; left: 8px; width: 48px; height: 48px; }
+
+  .inbox-panel, .layers-panel { width: min(420px, 100%); border-left: 1px solid #1e293b; }
+  .field-update-banner { bottom: calc(56px + env(safe-area-inset-bottom)); }
+}

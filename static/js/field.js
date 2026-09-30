@@ -36,6 +36,8 @@
   // ---------------------------------------------------------------------
   var state = {
     map: null,
+    deviceCategory: null,
+    selfClose: false,
     tileLayers: {},
     currentLayerKey: "plan",
     layerOrder: ["plan", "sat_aco", "sat_esri", "sat_ign"],
@@ -68,6 +70,8 @@
     ficheCreateUrgency: "UR",
     routeLayer: null,
     routeDestination: null,  // [lat, lng]
+    routeFicheId: null,      // fiche vers laquelle mene l'itineraire (auto-effacement)
+    statusChangedAt: 0,      // dernier changement de statut local (garde de pollFiches)
     routeAnimFrame: null,    // rAF id pour la polyline animee
     routeIsGod: false,       // true si le dernier itineraire calcule est en mode prioritaire
     fichesLayer: null,
@@ -303,18 +307,30 @@
             return fetchPromise.then(function (r) {
               // 4xx (hors 401) : action rejetee par le serveur, on l abandonne
               if (r.status >= 400 && r.status < 500 && r.status !== 401) {
+                var isStatus = rec.url === "/field/status";
                 return remove(rec.id).then(function () {
+                  if (isStatus) {
+                    // Statut depasse par un changement plus recent (cockpit,
+                    // cloture...) : on se recale sur le serveur sans alarmer.
+                    toast("Statut hors ligne ignore : l'etat a change entre-temps", "warn");
+                    try { pollFiches(); } catch (e) { /* noop */ }
+                    return;
+                  }
                   toast("Action abandonnee (" + (rec.label || "?") + " : " + r.status + ")", "err");
                 });
               }
               if (r.status === 401) { throw new Error("auth"); }
               if (!r.ok) throw new Error("server");
               return remove(rec.id).then(function () {
+                if (rec.url === "/field/status") {
+                  try { pollFiches(); } catch (e) { /* noop */ }
+                }
                 // Toast de confirmation au flush (multipart photo, json scan).
                 // Pour les changements de statut, pas de label donc pas de toast.
                 if (rec.label && (rec.kind === "multipart"
                                   || rec.url && rec.url.indexOf("/scan/") !== -1
-                                  || rec.url && rec.url.indexOf("/comment") !== -1)) {
+                                  || rec.url && rec.url.indexOf("/comment") !== -1
+                                  || rec.url === "/field/sos")) {
                   toast(rec.label + " envoye (differe)", "ok");
                 }
               });
@@ -349,16 +365,51 @@
     };
   })();
 
+  // fetch avec delai maximal. Sur une 4G degradee, une requete peut rester
+  // pendante plus d'une minute sans jamais echouer : le changement de statut
+  // semblait "ne pas passer". Passe le delai, on abandonne (la requete part
+  // alors en file hors ligne ; les routes serveur sont idempotentes).
+  function fetchWithTimeout(url, opts, timeoutMs) {
+    if (typeof AbortController === "undefined") return fetch(url, opts);
+    var ctrl = new AbortController();
+    var o = Object.assign({}, opts || {}, { signal: ctrl.signal });
+    var timer = setTimeout(function () { ctrl.abort(); }, timeoutMs || 12000);
+    return fetch(url, o).then(function (r) {
+      clearTimeout(timer);
+      return r;
+    }, function (e) {
+      clearTimeout(timer);
+      throw e;
+    });
+  }
+
+  function newClientKey() {
+    try {
+      if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    } catch (e) { /* contexte non securise */ }
+    return "k" + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+  }
+
   // Helper: POST JSON avec fallback queue en cas d'echec reseau.
   // Renvoie Promise({ok:true, queued?:true, data?:{...}}) ou rejette si 401.
   function queuedJsonPost(url, body, label) {
     var payload = body || {};
+    function enqueue() {
+      // Un statut rejoue plus tard porte l'heure de sa saisie : le serveur
+      // l'ignore si l'etat a change depuis (liberation cockpit, cloture...).
+      var queuedBody = payload;
+      if (url === "/field/status") {
+        queuedBody = Object.assign({ queued_at: Date.now() }, payload);
+      }
+      return OfflineQueue.enqueue({ url: url, method: "POST", jsonBody: queuedBody, label: label })
+        .then(function () { return { ok: true, queued: true }; });
+    }
     function attemptFetch() {
-      return fetch(url, {
+      return fetchWithTimeout(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      }).then(function (r) {
+      }, 12000).then(function (r) {
         if (r.status === 401) { handleSessionLost(); return { ok: false, auth: true }; }
         return r.json().then(function (data) {
           return Object.assign({ _status: r.status }, data || {});
@@ -367,14 +418,8 @@
         });
       });
     }
-    if (!navigator.onLine) {
-      return OfflineQueue.enqueue({ url: url, method: "POST", jsonBody: payload, label: label })
-        .then(function () { return { ok: true, queued: true }; });
-    }
-    return attemptFetch().catch(function () {
-      return OfflineQueue.enqueue({ url: url, method: "POST", jsonBody: payload, label: label })
-        .then(function () { return { ok: true, queued: true }; });
-    });
+    if (!navigator.onLine) return enqueue();
+    return attemptFetch().catch(function () { return enqueue(); });
   }
 
   function updateOfflineBadge() {
@@ -2294,7 +2339,7 @@
 
   // Definition des options de statut affichees dans le modal
   var STATUS_OPTIONS = [
-    { status: "patrouille",       label: "Disponible",         desc: "En ronde, disponible",          dot: "s-patrouille" },
+    { status: "patrouille",       label: "Disponible",         desc: "Pret a intervenir",             dot: "s-patrouille" },
     { status: "intervention",     label: "Intervention",       desc: "Engagement sur le terrain",     dot: "s-intervention" },
     { status: "sur_place",        label: "ASL - Arrivee sur les lieux", desc: "Sur place, en attente", dot: "s-sur_place" },
     { status: "pause",            label: "Pause",              desc: "Indisponible temporairement",   dot: "s-pause" },
@@ -2345,6 +2390,8 @@
   }
 
   function openFinInterventionModal() {
+    // Categorie ou l'unite clot elle-meme (technique...) : issue + compte-rendu
+    if (state.selfClose && state.activeFicheId) return openFinishModal(state.activeFicheId);
     // Creer un modal inline pour le commentaire de fin d'inter
     var existing = $("fin-inter-modal");
     if (existing) existing.remove();
@@ -2404,86 +2451,94 @@
     document.body.appendChild(overlay);
   }
 
-  function setPatrolStatusFinInter(comment, onSuccess, onError) {
-    var payload = { status: "fin_intervention" };
-    if (comment) payload.comment = comment;
-    fetch("/field/status", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then(function (r) {
-        if (r.status === 401) { return handleSessionLost(); }
-        return r.json();
-      })
+  // Applique un statut localement. `statusChangedAt` sert de garde a
+  // pollFiches : une reponse de poll partie AVANT ce changement porte l'ancien
+  // statut et le remettait a l'ecran (le statut semblait "revenir en arriere"
+  // ou mettre un cycle de poll a s'afficher).
+  function applyLocalStatus(newStatus, ficheId) {
+    state.patrolStatus = newStatus;
+    state.patrolStatusSince = new Date().toISOString();
+    state.statusChangedAt = Date.now();
+    if (newStatus === "patrouille") state.activeFicheId = null;
+    else if (ficheId) state.activeFicheId = ficheId;
+    updateStatusBar();
+    refreshGpsProfile();
+    syncWakeLockWithStatus();
+    reconcileRoute();
+    // La cadence depend du statut : sortir de pause ne doit pas attendre la
+    // fin d'un cycle de 30 s deja programme.
+    if (state.fichesTimer) scheduleFichesPoll();
+    if (state.inboxTimer) scheduleInboxPoll();
+  }
+
+  // POST /field/status commun : statut + fiche eventuelle + commentaire.
+  // Passe par la file hors ligne ; le serveur ecarte les renvois en double
+  // et les statuts rejoues apres un changement plus recent.
+  function postPatrolStatus(newStatus, extra) {
+    var payload = Object.assign({ status: newStatus }, extra || {});
+    return queuedJsonPost("/field/status", payload, "statut " + newStatus)
       .then(function (data) {
-        if (!data) return;
-        if (data.ok) {
-          state.patrolStatus = "fin_intervention";
-          state.patrolStatusSince = new Date().toISOString();
-          updateStatusBar();
-          toast("Fin d'intervention signalee", "ok");
-          // Poster le commentaire dans la chronologie de la fiche si fourni
-          if (comment && state.activeFicheId) {
-            var fd = new FormData();
-            fd.append("comment", "Fin d'intervention : " + comment);
-            fetch("/field/my-fiches/" + encodeURIComponent(state.activeFicheId) + "/comment", {
-              method: "POST", body: fd,
-            }).catch(function () {});
-          }
-          if (onSuccess) onSuccess();
-        } else {
-          toast("Erreur : " + (data.error || data.message || "?"), "err");
-          if (onError) onError();
+        if (!data) return data;
+        if (data.queued) {
+          applyLocalStatus(newStatus, payload.fiche_id);
+          toast("Hors ligne : statut en attente", "warn");
+        } else if (data.ok) {
+          applyLocalStatus(data.status || newStatus, payload.fiche_id || data.active_fiche_id);
+          // Relecture immediate : bandeau, fiches et statut serveur alignes
+          // sans attendre le prochain cycle (jusqu'a 30 s).
+          pollFiches();
+        } else if (!data.auth) {
+          toast("Erreur : " + (data.message || data.error || "?"), "err");
+          pollFiches();
         }
-      })
-      .catch(function () {
-        toast("Erreur reseau", "err");
-        if (onError) onError();
+        return data;
+      });
+  }
+
+  function setPatrolStatusFinInter(comment, onSuccess, onError) {
+    // Le compte-rendu part avec le statut : le serveur l'ecrit dans la
+    // chronologie de la fiche dans la meme operation (il etait poste a part,
+    // hors file hors ligne, et se perdait sur reseau instable).
+    postPatrolStatus("fin_intervention", comment ? { comment: comment } : null)
+      .then(function (data) {
+        if (data && (data.ok || data.queued)) {
+          if (!data.queued) toast("Fin d'intervention signalee", "ok");
+          if (onSuccess) onSuccess();
+        } else if (onError) {
+          onError();
+        }
       });
   }
 
   function setPatrolStatus(newStatus) {
-    queuedJsonPost("/field/status", { status: newStatus }, "statut " + newStatus)
-      .then(function (data) {
-        if (!data) return;
-        if (data.queued) {
-          // Optimiste : on applique le statut localement, le serveur sera sync au flush
-          state.patrolStatus = newStatus;
-          state.patrolStatusSince = new Date().toISOString();
-          if (newStatus === "patrouille") state.activeFicheId = null;
-          updateStatusBar();
-          refreshGpsProfile();
-          syncWakeLockWithStatus();
-          toast("Hors ligne : statut en attente", "warn");
-          return;
-        }
-        if (data.ok) {
-          state.patrolStatus = newStatus;
-          state.patrolStatusSince = new Date().toISOString();
-          if (newStatus === "patrouille") state.activeFicheId = null;
-          updateStatusBar();
-          refreshGpsProfile();
-          syncWakeLockWithStatus();
-          toast(STATUS_META[newStatus].label, "ok");
-        } else if (!data.auth) {
-          toast("Erreur : " + (data.error || data.message || "?"), "err");
-        }
-      });
+    postPatrolStatus(newStatus).then(function (data) {
+      if (data && data.ok && !data.queued) toast(STATUS_META[newStatus].label, "ok");
+    });
   }
 
   // ----- Creation de fiche terrain -----
+  // legacyOnly : non propose aux tablettes sans categorie (liste historique a 4).
+  var FICHE_CREATE_CATEGORIES = [
+    { id: "PCO.Secours", label: "Secours", icon: "medical_services", color: "#DC2626" },
+    { id: "PCO.Securite", label: "Securite", icon: "security", color: "#7C3AED" },
+    { id: "PCO.Technique", label: "Technique", icon: "build", color: "#FF8C00" },
+    { id: "PCO.Flux", label: "Flux", icon: "directions_car", color: "#2563EB" },
+    { id: "PCO.Fourriere", label: "Fourriere", icon: "local_shipping", color: "#0891B2", legacyOnly: true },
+    { id: "PCO.Information", label: "Information", icon: "info", color: "#64748B", legacyOnly: true },
+    { id: "PCO.MainCourante", label: "Main courante", icon: "edit_note", color: "#475569", legacyOnly: true },
+  ];
+
   function openCreateFicheModal() {
     var modal = $("fiche-create-modal");
     if (!modal) return;
     var cats = $("fiche-create-cats");
-    if (cats && !cats.children.length) {
-      var pcoCategories = [
-        { id: "PCO.Secours", label: "Secours", icon: "medical_services", color: "#DC2626" },
-        { id: "PCO.Securite", label: "Securite", icon: "security", color: "#7C3AED" },
-        { id: "PCO.Technique", label: "Technique", icon: "build", color: "#FF8C00" },
-        { id: "PCO.Flux", label: "Flux", icon: "directions_car", color: "#2563EB" },
-      ];
+    if (cats) {
+      // Reconstruite a chaque ouverture : la categorie de la tablette peut
+      // changer cote admin pendant la session.
+      cats.innerHTML = "";
+      var pcoCategories = FICHE_CREATE_CATEGORIES.filter(function (c) {
+        return state.deviceCategory ? c.id === state.deviceCategory : !c.legacyOnly;
+      });
       pcoCategories.forEach(function (c) {
         var btn = document.createElement("button");
         btn.className = "fiche-cat-btn";
@@ -2511,9 +2566,14 @@
         });
       });
     }
-    // Reset form
-    state.ficheCreateCat = null;
-    if (cats) cats.querySelectorAll(".fiche-cat-btn").forEach(function (b) { b.classList.remove("selected"); });
+    // Reset form (categorie preselectionnee quand la tablette n'en a qu'une)
+    state.ficheCreateCat = state.deviceCategory || null;
+    // Cle d'idempotence : un renvoi (file hors ligne, reponse perdue) ne
+    // cree pas une seconde fiche identique.
+    state.ficheCreateToken = newClientKey();
+    if (cats) cats.querySelectorAll(".fiche-cat-btn").forEach(function (b) {
+      b.classList.toggle("selected", b.dataset.cat === state.ficheCreateCat);
+    });
     var txt = $("fiche-create-text");
     if (txt) txt.value = "";
     var msg = $("fiche-create-msg");
@@ -2546,6 +2606,7 @@
       category: state.ficheCreateCat,
       text: txt,
       niveau_urgence: state.ficheCreateUrgency || "UR",
+      client_token: state.ficheCreateToken || newClientKey(),
     };
     // Ajouter GPS si dispo
     if (state.meMarker) {
@@ -2570,13 +2631,11 @@
         }
         if (data.ok) {
           $("fiche-create-modal").hidden = true;
-          state.patrolStatus = "intervention";
-          state.activeFicheId = data.id;
           // Marquer la fiche comme deja vue : c'est l'agent lui-meme qui
           // vient de la creer, detectNewFiches ne doit pas declencher
           // l'alerte plein ecran "Nouvelle intervention dispatchee".
           if (data.id) state.seenFicheIds.add(data.id);
-          updateStatusBar();
+          applyLocalStatus("intervention", data.id);
           toast("Fiche creee - Intervention demarree", "ok");
           pollFiches();
         } else if (!data.auth) {
@@ -2617,7 +2676,10 @@
   // Trace un itineraire sur la carte avec le rendu "Waze" : glow large + trait
   // bleu + dash blanc anime qui indique le sens de circulation.
   // god=true => animation plus rapide (signal visuel d'intervention prioritaire).
-  function setRouteDestination(latlng, polylineEncoded, god) {
+  // ficheId : fiche a laquelle l'itineraire mene (null pour un POI ou un
+  // point libre). Le trace est efface automatiquement quand cette fiche est
+  // close, desaffectee, ou que l'agent sort de l'intervention.
+  function setRouteDestination(latlng, polylineEncoded, god, ficheId) {
     _stopRouteAnimation();
     if (state.routeLayer) {
       state.map.removeLayer(state.routeLayer);
@@ -2625,6 +2687,9 @@
     }
     state.routeDestination = latlng;
     state.routeIsGod = !!god;
+    state.routeFicheId = latlng ? (ficheId || null) : null;
+    var clearBtn = $("btn-route-clear");
+    if (clearBtn) clearBtn.hidden = !latlng;
     if (!latlng) return;
 
     var group = L.layerGroup();
@@ -2712,6 +2777,27 @@
         state.map.setView(latlng, 17);
       }
     } catch (e) { /* ignore */ }
+  }
+
+  function clearRoute() {
+    if (state.routeDestination || state.routeLayer) setRouteDestination(null);
+  }
+
+  // Un itineraire vers une intervention n'a plus de raison d'etre quand
+  // celle-ci est terminee : il restait affiche indefiniment (aucun code ne
+  // l'effacait, seul un rechargement de l'app le faisait disparaitre).
+  function reconcileRoute() {
+    if (!state.routeDestination || !state.routeFicheId) return;
+    var fid = state.routeFicheId;
+    var stillOpen = (state.fiches || []).some(function (f) { return f.id === fid; });
+    var st = state.patrolStatus;
+    var finished = st === "fin_intervention"
+      || (st === "patrouille" && state.activeFicheId !== fid);
+    // state.fiches n'est fiable qu'apres le premier poll
+    if ((state.fichesFirstPolled && !stillOpen) || finished) {
+      clearRoute();
+      toast("Itineraire efface (intervention terminee)", "ok");
+    }
   }
 
   // Decode une polyline encoded6 (precision 1e-6, format natif Valhalla).
@@ -2842,7 +2928,7 @@
     return overlay;
   }
 
-  function openItineraryMenu(latlng) {
+  function openItineraryMenu(latlng, ficheId) {
     if (!latlng || latlng.length < 2) return;
     var lat = latlng[0], lng = latlng[1];
 
@@ -2870,11 +2956,11 @@
         close();
         if (err) {
           toast("Itineraire indisponible: " + err);
-          setRouteDestination([lat, lng], null, god);
+          setRouteDestination([lat, lng], null, god, ficheId);
           return;
         }
         var isGod = (resp.mode === "god") || god;
-        setRouteDestination([lat, lng], resp.polyline, isGod);
+        setRouteDestination([lat, lng], resp.polyline, isGod, ficheId);
         var minutes = Math.max(1, Math.round((resp.duration_s || 0) / 60));
         var km = ((resp.distance_m || 0) / 1000).toFixed(1);
         var prefix = (resp.engine === "stub") ? "Estime " : "";
@@ -2894,7 +2980,7 @@
     if (isNaN(lat) || isNaN(lng)) return;
     var polyline = m.payload && m.payload.polyline;
     var god = !!(m.payload && m.payload.god);
-    setRouteDestination([lat, lng], polyline, god);
+    setRouteDestination([lat, lng], polyline, god, (m.payload && (m.payload.fiche_id || m.payload.pcorg_id)) || null);
   }
 
   // ---------------------------------------------------------------------
@@ -2913,15 +2999,25 @@
   }
 
   function pollFiches() {
-    fetch("/field/my-fiches", { headers: { "Accept": "application/json" } })
+    var pollStartedAt = Date.now();
+    fetchWithTimeout("/field/my-fiches", { headers: { "Accept": "application/json" }, cache: "no-store" }, 15000)
       .then(function (r) {
         if (r.status === 401) { return handleSessionLost(); }
         return r.json();
       })
       .then(function (data) {
         if (!data) return;
+        // Reponse partie avant un changement de statut local : elle decrit
+        // l'etat d'avant, on n'en retient pas le statut (le prochain poll,
+        // declenche juste apres le POST, portera le bon).
+        var staleStatus = (state.statusChangedAt || 0) >= pollStartedAt;
         var open = data.open || [];
         state.fiches = open;
+        // Categorie de la tablette (null = pas de restriction) : pilote les
+        // categories proposees a la creation de fiche et a l'envoi de photo.
+        if (data.hasOwnProperty("device_category")) state.deviceCategory = data.device_category || null;
+        state.selfClose = !!data.self_close;
+        if (data.hasOwnProperty("proposal")) handleProposal(data.proposal);
         renderFiches();
         updateMissionsBadge();
         var mPanel = $("missions-panel");
@@ -2933,8 +3029,8 @@
         state.fichesFirstPolled = true;
         // Sync statut et fiche active depuis le serveur
         var serverFicheId = data.active_fiche_id || null;
-        var statusChanged = data.device_status && data.device_status !== state.patrolStatus;
-        var ficheChanged = serverFicheId !== state.activeFicheId;
+        var statusChanged = !staleStatus && data.device_status && data.device_status !== state.patrolStatus;
+        var ficheChanged = !staleStatus && serverFicheId !== state.activeFicheId;
         // Dispatch : active_fiche_id a change vers une valeur non-null, apres le 1er poll
         var newDispatch = !wasFirstPoll && ficheChanged && serverFicheId;
         if (statusChanged) {
@@ -2964,6 +3060,7 @@
           refreshGpsProfile();
         }
         if (statusChanged) { refreshGpsProfile(); syncWakeLockWithStatus(); }
+        reconcileRoute();
 
         // Demande de flux video par le PC org : detection + reconciliation.
         // - status="requested" : afficher la modale de consentement.
@@ -3167,7 +3264,7 @@
       btnRoute.appendChild(rtTxt);
       actions.appendChild(btnRoute);
       btnRoute.addEventListener("click", function () {
-        openItineraryMenu([f.lat, f.lng]);
+        openItineraryMenu([f.lat, f.lng], f.id);
       });
     }
 
@@ -3198,18 +3295,350 @@
     });
   }
 
+  // Engagement sur une fiche precise. La reponse etait ignoree : l'agent
+  // voyait "Engagement confirme" meme en cas de refus ou de coupure, et la
+  // fiche liee n'etait pas transmise (le serveur gardait l'ancienne).
+  function engageOnFiche(f) {
+    return postPatrolStatus("intervention", { fiche_id: f.id }).then(function (data) {
+      if (data && data.ok && !data.queued) toast("Engagement confirme", "ok");
+      return data;
+    });
+  }
+
   function confirmFicheAckDirect(f) {
-    fetch("/field/status", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "intervention" }),
-    })
-      .then(function () {
-        state.patrolStatus = "intervention";
-        updateStatusBar();
-        toast("Engagement confirme", "ok");
-      })
-      .catch(function () { toast("Erreur engagement", "error"); });
+    engageOnFiche(f);
+  }
+
+  // ---------------------------------------------------------------------
+  // Proposition automatique (dispatch_auto) : une intervention est proposee
+  // a cette unite avec un compte a rebours. Accepter = engagement immediat ;
+  // refuser ou laisser passer le delai = la fiche part a l'unite suivante.
+  // Pas de file hors ligne : une acceptation rejouee plus tard n'aurait plus
+  // de sens (la fiche est deja partie ailleurs).
+  // ---------------------------------------------------------------------
+  var _prop = { id: null, overlay: null, timer: null, deadline: 0, answered: false };
+
+  function closeProposalOverlay() {
+    if (_prop.timer) { clearInterval(_prop.timer); _prop.timer = null; }
+    if (_prop.overlay) { try { _prop.overlay.remove(); } catch (e) {} }
+    _prop.overlay = null;
+  }
+
+  function handleProposal(p) {
+    if (!p) {
+      if (_prop.id && _prop.overlay && !_prop.answered) {
+        toast("Proposition expiree : transmise a une autre unite", "warn");
+      }
+      closeProposalOverlay();
+      _prop.id = null;
+      return;
+    }
+    if (p.fiche_id === _prop.id && _prop.overlay) return;
+    closeProposalOverlay();
+    _prop.id = p.fiche_id;
+    _prop.answered = false;
+    _prop.deadline = Date.now() + (Number(p.remaining_s) || 0) * 1000;
+    // La fiche arrivera dans les missions apres acceptation : pas d'alerte
+    // "nouvelle intervention" en double.
+    state.seenFicheIds.add(p.fiche_id);
+    showProposalOverlay(p);
+  }
+
+  function _fmtDistance(m) {
+    if (m == null) return "";
+    return m < 1000 ? (m + " m") : ((m / 1000).toFixed(1) + " km");
+  }
+
+  function showProposalOverlay(p) {
+    var st = ficheStyle(p.category);
+    var urgency = p.niveau_urgence || "";
+    var urgColor = FICHE_URGENCY_COLORS[urgency] || "#f59e0b";
+
+    var overlay = document.createElement("div");
+    overlay.className = "dispatch-alert-overlay";
+    overlay.setAttribute("role", "alertdialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-label", "Intervention proposee");
+
+    var box = document.createElement("div");
+    box.className = "dispatch-alert-box";
+    box.style.borderColor = st.color;
+
+    var header = document.createElement("div");
+    header.className = "dispatch-alert-header";
+    header.style.background = "linear-gradient(135deg, " + st.color + "cc, " + st.color + "88)";
+    var icon = _mkIcon(st.icon);
+    icon.classList.add("dispatch-alert-icon");
+    header.appendChild(icon);
+    var titleWrap = document.createElement("div");
+    var title = document.createElement("div");
+    title.className = "dispatch-alert-title";
+    title.textContent = "Intervention proposee" + (p.metier ? " - " + p.metier : "");
+    titleWrap.appendChild(title);
+    if (urgency) {
+      var urgBadge = document.createElement("span");
+      urgBadge.className = "dispatch-alert-urgency";
+      urgBadge.style.background = urgColor;
+      urgBadge.textContent = urgency + (FICHE_URGENCY_LABELS[urgency] ? " - " + FICHE_URGENCY_LABELS[urgency] : "");
+      titleWrap.appendChild(urgBadge);
+    }
+    header.appendChild(titleWrap);
+    box.appendChild(header);
+
+    var bodyEl = document.createElement("div");
+    bodyEl.className = "dispatch-alert-body";
+    var descEl = document.createElement("div");
+    descEl.className = "dispatch-alert-desc";
+    descEl.textContent = p.text || "(sans description)";
+    bodyEl.appendChild(descEl);
+    var infos = document.createElement("div");
+    infos.className = "dispatch-alert-infos";
+    if (p.distance_m != null) infos.appendChild(_mkInfoRow("near_me", "A " + _fmtDistance(p.distance_m) + " de vous"));
+    if (p.area) infos.appendChild(_mkInfoRow("place", p.area));
+    if (p.carroye) infos.appendChild(_mkInfoRow("grid_on", p.carroye));
+    if (infos.children.length) bodyEl.appendChild(infos);
+
+    // Compte a rebours : chiffre + barre qui se vide
+    var cd = document.createElement("div");
+    cd.style.cssText = "margin-top:12px;";
+    var cdText = document.createElement("div");
+    cdText.style.cssText = "font-size:15px;font-weight:700;text-align:center;margin-bottom:6px;";
+    var cdTrack = document.createElement("div");
+    cdTrack.style.cssText = "height:8px;border-radius:4px;background:rgba(148,163,184,.25);overflow:hidden;";
+    var cdBar = document.createElement("div");
+    cdBar.style.cssText = "height:100%;width:100%;background:" + st.color + ";transition:width .9s linear;";
+    cdTrack.appendChild(cdBar);
+    cd.appendChild(cdText);
+    cd.appendChild(cdTrack);
+    bodyEl.appendChild(cd);
+    box.appendChild(bodyEl);
+
+    var actions = document.createElement("div");
+    actions.className = "dispatch-alert-actions";
+    var btnAccept = document.createElement("button");
+    btnAccept.className = "dispatch-alert-btn dispatch-btn-engage";
+    btnAccept.style.background = "#16a34a";
+    btnAccept.appendChild(_mkIcon("check_circle"));
+    btnAccept.appendChild(document.createTextNode(" Accepter"));
+    var btnRefuse = document.createElement("button");
+    btnRefuse.className = "dispatch-alert-btn dispatch-btn-detail";
+    btnRefuse.appendChild(_mkIcon("close"));
+    btnRefuse.appendChild(document.createTextNode(" Refuser"));
+    actions.appendChild(btnAccept);
+    actions.appendChild(btnRefuse);
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    _prop.overlay = overlay;
+
+    var total = Math.max(1, _prop.deadline - Date.now());
+    function tickCountdown() {
+      var left = Math.max(0, _prop.deadline - Date.now());
+      cdText.textContent = "Reponse attendue : " + Math.ceil(left / 1000) + " s";
+      cdBar.style.width = Math.round(100 * left / total) + "%";
+      if (left <= 0) {
+        cdText.textContent = "Delai depasse";
+        btnAccept.disabled = true;
+        // Le serveur tranche ; le prochain poll fermera la fenetre.
+        pollFiches();
+      }
+    }
+    tickCountdown();
+    _prop.timer = setInterval(tickCountdown, 1000);
+
+    playDispatchAlarm();
+    try { if (navigator.vibrate) navigator.vibrate([300, 150, 300, 150, 600]); } catch (e) {}
+    bumpActivity();
+
+    function answer(kind) {
+      btnAccept.disabled = true;
+      btnRefuse.disabled = true;
+      _prop.answered = true;
+      var fid = p.fiche_id;
+      fetchWithTimeout("/field/proposal/" + encodeURIComponent(fid) + "/" + kind, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+      }, 10000).then(function (r) {
+        if (r.status === 401) { handleSessionLost(); return null; }
+        return r.json().catch(function () { return { ok: r.ok }; });
+      }).then(function (data) {
+        if (!data) return;
+        closeProposalOverlay();
+        if (kind === "accept") {
+          if (data.ok) {
+            applyLocalStatus("intervention", fid);
+            toast("Intervention acceptee", "ok");
+          } else {
+            toast(data.error === "unite_occupee" ? "Vous etes deja engage" : "Proposition expiree", "warn");
+          }
+        } else {
+          toast("Proposition refusee", "ok");
+        }
+        pollFiches();
+      }).catch(function () {
+        // Pas de reseau : on laisse la fenetre, le delai court toujours.
+        _prop.answered = false;
+        btnAccept.disabled = Date.now() >= _prop.deadline;
+        btnRefuse.disabled = false;
+        toast("Pas de reseau, reessayez", "err");
+      });
+    }
+    btnAccept.addEventListener("click", function () { answer("accept"); });
+    btnRefuse.addEventListener("click", function () { answer("refuse"); });
+  }
+
+  // ---------------------------------------------------------------------
+  // Fin d'intervention avec cloture par l'unite (categories self_close) :
+  // issue + compte-rendu obligatoire, photo conseillee. "Resolu" clot la
+  // fiche ; les autres issues la renvoient dans la file du service.
+  // ---------------------------------------------------------------------
+  var FINISH_OUTCOMES = [
+    { id: "resolu", label: "Resolu", icon: "check_circle", color: "#16a34a" },
+    { id: "partiel", label: "Resolu en partie", icon: "rule", color: "#ca8a04" },
+    { id: "materiel", label: "Besoin materiel / renfort", icon: "handyman", color: "#ea580c" },
+    { id: "impossible", label: "Impossible", icon: "block", color: "#dc2626" },
+  ];
+  var FINISH_REPORT_MIN = 5;
+
+  function openFinishModal(ficheId) {
+    var existing = $("finish-inter-modal");
+    if (existing) existing.remove();
+    var chosen = null;
+
+    var overlay = document.createElement("div");
+    overlay.className = "field-modal";
+    overlay.id = "finish-inter-modal";
+    var box = document.createElement("div");
+    box.className = "field-modal-box";
+
+    var header = document.createElement("div");
+    header.className = "field-modal-header";
+    var h2 = document.createElement("h2");
+    h2.textContent = "Terminer l'intervention";
+    header.appendChild(h2);
+    var closeBtn = document.createElement("button");
+    closeBtn.className = "icon-btn";
+    closeBtn.appendChild(_mkIcon("close"));
+    closeBtn.onclick = function () { overlay.remove(); };
+    header.appendChild(closeBtn);
+    box.appendChild(header);
+
+    var body = document.createElement("div");
+    body.className = "field-modal-body";
+    body.style.padding = "16px";
+
+    var lbl1 = document.createElement("div");
+    lbl1.style.cssText = "font-size:13px;color:#94a3b8;margin-bottom:8px;";
+    lbl1.textContent = "Resultat";
+    body.appendChild(lbl1);
+    var grid = document.createElement("div");
+    grid.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;";
+    var chips = [];
+    FINISH_OUTCOMES.forEach(function (o) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.style.cssText = "display:flex;align-items:center;gap:6px;min-height:48px;padding:8px 10px;"
+        + "border-radius:10px;border:2px solid rgba(148,163,184,.35);background:transparent;"
+        + "color:inherit;font-size:14px;font-weight:600;text-align:left;";
+      var ic = _mkIcon(o.icon);
+      ic.style.color = o.color;
+      b.appendChild(ic);
+      b.appendChild(document.createTextNode(o.label));
+      b.addEventListener("click", function () {
+        chosen = o.id;
+        chips.forEach(function (c) {
+          var on = c.dataset.id === chosen;
+          c.style.borderColor = on ? FINISH_OUTCOMES.find(function (x) { return x.id === c.dataset.id; }).color
+            : "rgba(148,163,184,.35)";
+          c.style.background = on ? "rgba(148,163,184,.15)" : "transparent";
+        });
+        photoHint.textContent = chosen === "resolu"
+          ? "Une photo du resultat est conseillee."
+          : "Une photo du probleme aidera le service a preparer la suite.";
+        refresh();
+      });
+      b.dataset.id = o.id;
+      chips.push(b);
+      grid.appendChild(b);
+    });
+    body.appendChild(grid);
+
+    var textarea = document.createElement("textarea");
+    textarea.className = "fiche-create-text";
+    textarea.rows = 4;
+    textarea.maxLength = 2000;
+    textarea.placeholder = "Compte-rendu (obligatoire) : ce qui a ete fait, ce qui reste a faire...";
+    textarea.setAttribute("autocapitalize", "sentences");
+    body.appendChild(textarea);
+
+    var photoRow = document.createElement("div");
+    photoRow.style.cssText = "display:flex;align-items:center;gap:10px;margin-top:12px;";
+    var photoBtn = document.createElement("button");
+    photoBtn.type = "button";
+    photoBtn.className = "field-camera-btn field-camera-btn-secondary";
+    photoBtn.appendChild(_mkIcon("add_a_photo"));
+    photoBtn.appendChild(document.createTextNode(" Photo"));
+    photoBtn.addEventListener("click", function () {
+      // La photo est jointe a la fiche ; la modale reste ouverte derriere.
+      openCameraModal({ ficheId: ficheId });
+    });
+    var photoHint = document.createElement("span");
+    photoHint.style.cssText = "font-size:12px;color:#94a3b8;";
+    photoHint.textContent = "Une photo est conseillee.";
+    photoRow.appendChild(photoBtn);
+    photoRow.appendChild(photoHint);
+    body.appendChild(photoRow);
+
+    var msg = document.createElement("div");
+    msg.className = "fiche-create-msg";
+    body.appendChild(msg);
+    box.appendChild(body);
+
+    var actions = document.createElement("div");
+    actions.className = "field-modal-actions";
+    actions.style.padding = "12px 16px";
+    var submitBtn = document.createElement("button");
+    submitBtn.className = "btn-confirm-ack";
+    submitBtn.appendChild(_mkIcon("task_alt"));
+    submitBtn.appendChild(document.createTextNode(" Terminer"));
+    actions.appendChild(submitBtn);
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    function refresh() {
+      submitBtn.disabled = !chosen || textarea.value.trim().length < FINISH_REPORT_MIN;
+    }
+    textarea.addEventListener("input", refresh);
+    refresh();
+
+    var ERRORS = {
+      compte_rendu_obligatoire: "Le compte-rendu est obligatoire.",
+      issue_invalide: "Choisissez un resultat.",
+      not_assigned: "Cette fiche ne vous est plus affectee.",
+      cloture_terrain_desactivee: "La cloture depuis le terrain n'est pas autorisee pour cette categorie.",
+      fiche_closee: "La fiche a deja ete close.",
+    };
+    submitBtn.addEventListener("click", function () {
+      submitBtn.disabled = true;
+      queuedJsonPost("/field/my-fiches/" + encodeURIComponent(ficheId) + "/finish",
+        { outcome: chosen, report: textarea.value.trim() }, "fin d'intervention")
+        .then(function (data) {
+          if (!data || data.auth) { refresh(); return; }
+          if (data.ok) {
+            overlay.remove();
+            applyLocalStatus("patrouille");
+            toast(data.queued ? "Hors ligne : fin d'intervention en attente"
+              : (chosen === "resolu" ? "Intervention terminee, fiche close" : "Fiche renvoyee au service"),
+              data.queued ? "warn" : "ok");
+            pollFiches();
+          } else {
+            msg.textContent = ERRORS[data.error] || ("Erreur : " + (data.error || "?"));
+            msg.className = "fiche-create-msg error";
+            refresh();
+          }
+        });
+    });
+    setTimeout(function () { try { textarea.focus(); } catch (e) {} }, 120);
   }
 
   function renderFiches() {
@@ -3539,7 +3968,7 @@
     addF("Bilan", cc.bilan);
     addF("Moyen", cc.moyen);
     addF("Destination", cc.destination);
-    addF("Patrouille", cc.patrouille);
+    addF("Unite engagee", cc.patrouille);
     addF("Operateur", d.operator);
     if (d.ts) {
       try { addF("Ouverture", new Date(d.ts).toLocaleString("fr-FR")); } catch (e) {}
@@ -3563,7 +3992,9 @@
       var timeline = document.createElement("div");
       timeline.className = "fd-timeline";
       history.forEach(function (entry) {
-        var isStatus = entry.text && entry.text.indexOf("Statut:") === 0;
+        // kind / status_to / body : decoration serveur (pcorg_history.py)
+        var kind = entry.kind || (entry.text && entry.text.indexOf("Statut:") === 0 ? "status" : "comment");
+        var isStatus = kind === "status" || kind === "system" || kind === "change";
         var ent = document.createElement("div");
         ent.className = "fd-chrono-entry" + (isStatus ? " fd-status-change" : "");
 
@@ -3587,12 +4018,29 @@
         head.appendChild(opSpan);
         ent.appendChild(head);
 
-        var txt = entry.text || entry.comment || "";
+        if (kind === "status" && entry.status_to) {
+          var stEl = document.createElement("div");
+          stEl.className = "fd-chrono-status" + (/^termin/i.test(entry.status_to) ? " closed" : "");
+          stEl.textContent = (entry.status_from ? entry.status_from + " → " : "") + entry.status_to;
+          ent.appendChild(stEl);
+        }
+        (entry.changes || []).forEach(function (c) {
+          var chEl = document.createElement("div");
+          chEl.className = "fd-chrono-change";
+          chEl.textContent = c.field + " : " + (c.old ? c.old + " → " : "") + (c.new || "(vide)");
+          ent.appendChild(chEl);
+        });
+        var txt = entry.body != null ? entry.body : (entry.text || entry.comment || "");
         if (txt) {
           var txtEl = document.createElement("div");
           txtEl.className = "fd-chrono-text";
           txtEl.textContent = txt;
           ent.appendChild(txtEl);
+        } else if (kind === "empty") {
+          var emEl = document.createElement("div");
+          emEl.className = "fd-chrono-empty";
+          emEl.textContent = "Mise a jour sans commentaire";
+          ent.appendChild(emEl);
         }
 
         // Photo thumbnail (vignette serveur si dispo, sinon original)
@@ -3734,7 +4182,7 @@
         var routeBtn = document.createElement("button");
         routeBtn.className = "btn-primary";
         routeBtn.innerHTML = "<span class='material-symbols-outlined' style='vertical-align:middle'>navigation</span> Itineraire";
-        routeBtn.onclick = function () { openItineraryMenu([lat, lng]); };
+        routeBtn.onclick = function () { openItineraryMenu([lat, lng], f.id); };
         actionsEl.appendChild(routeBtn);
       }
     }
@@ -3753,45 +4201,12 @@
 
   function confirmFicheAck(f, btn) {
     btn.disabled = true;
-    // 1) Change status to intervention
-    fetch("/field/status", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "intervention" }),
-    })
-      .then(function (r) {
-        if (r.status === 401) { return handleSessionLost(); }
-        return r.json();
-      })
-      .then(function (data) {
-        if (!data || !data.ok) {
-          toast("Erreur changement statut", "err");
-          btn.disabled = false;
-          return;
-        }
-        state.patrolStatus = "intervention";
-        state.activeFicheId = f.id;
-        updateStatusBar();
-        // 2) Add chronology entry
-        var fd = new FormData();
-        fd.append("comment", "Engagement confirme, deplacement vers le lieu de l'intervention");
-        return fetch("/field/my-fiches/" + encodeURIComponent(f.id) + "/comment", {
-          method: "POST",
-          body: fd,
-        });
-      })
-      .then(function (r) { if (r && r.json) return r.json(); })
-      .then(function (data) {
-        btn.disabled = false;
-        toast("Engagement confirme", "ok");
-        // Refresh fiche detail
-        $("fiche-detail-modal").hidden = true;
-        pollFiches();
-      })
-      .catch(function () {
-        btn.disabled = false;
-        toast("Erreur reseau", "err");
-      });
+    // Le serveur trace "Statut: Engagement confirme" dans la chronologie :
+    // le commentaire poste en plus doublait l'entree.
+    engageOnFiche(f).then(function (data) {
+      btn.disabled = false;
+      if (data && (data.ok || data.queued)) $("fiche-detail-modal").hidden = true;
+    });
   }
 
   // Envoi d'un commentaire texte seul (les photos passent par le modal
@@ -3851,6 +4266,7 @@
     { id: "PCO.Securite",     label: "Securite",     icon: "security" },
     { id: "PCO.Technique",    label: "Technique",    icon: "build" },
     { id: "PCO.Flux",         label: "Flux",         icon: "directions_car" },
+    { id: "PCO.Fourriere",    label: "Fourriere",    icon: "local_shipping" },
     { id: "PCO.Information",  label: "Information",  icon: "info" },
     { id: "PCO.MainCourante", label: "Main courante", icon: "edit_note" },
   ];
@@ -4216,8 +4632,13 @@
     var showChips = !_cam.attachToFiche;
     if (_cam.catRowEl) _cam.catRowEl.hidden = !showChips;
     if (_cam.urgRowEl) _cam.urgRowEl.hidden = !showChips;
+    // Une tablette categorisee ne cree de fiche que dans sa categorie ; une
+    // photo simplement envoyee au PC Org garde le choix libre.
+    var lockCat = !!state.deviceCategory && !_cam.targetFicheId && _cam.createFiche;
+    if (lockCat) _cam.selectedCategory = state.deviceCategory;
     if (_cam.catChipsEl) {
       Array.prototype.forEach.call(_cam.catChipsEl.children, function (c) {
+        c.hidden = lockCat && c.dataset.cat !== state.deviceCategory;
         c.classList.toggle("is-selected", c.dataset.cat === _cam.selectedCategory);
       });
     }
@@ -4456,7 +4877,7 @@
         refreshComposeChips();
       } else {
         _cam.createFiche = attachCb.checked;
-        refreshSendEnabled();
+        refreshComposeChips();
       }
     });
     var attachLabel = document.createElement("label");
@@ -5534,9 +5955,13 @@
         if (data && data.ok) {
           toast("Fiche cloturee", "ok");
           $("fiche-detail-modal").hidden = true;
-          state.patrolStatus = "patrouille";
-          state.activeFicheId = null;
-          updateStatusBar();
+          // Le serveur ne repasse en patrouille que si c'etait la fiche
+          // active : cloturer une ancienne fiche ne doit pas afficher
+          // "Disponible" pendant une autre intervention.
+          if (f.id === state.activeFicheId) {
+            applyLocalStatus("patrouille");
+          }
+          if (state.routeFicheId === f.id) clearRoute();
           pollFiches();
         } else {
           toast("Erreur : " + ((data && data.error) || "?"), "err");
@@ -5588,32 +6013,66 @@
         lat = ll.lat;
         lng = ll.lng;
       }
-      fetch("/field/sos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          lat: lat,
-          lng: lng,
-          battery: state.batteryPct || null,
-        }),
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          state.sosInFlight = false;
-          refreshGpsProfile();
-          if (data && data.ok) {
-            toast("SOS envoye au cockpit et a toutes les patrouilles", "warn");
-            // Vibration confirmation
-            try { if (navigator.vibrate) navigator.vibrate([300, 150, 300]); } catch (e) {}
-          } else {
-            toast("Echec SOS", "err");
-          }
-        })
-        .catch(function () {
-          state.sosInFlight = false;
-          refreshGpsProfile();
-          toast("Erreur reseau (SOS)", "err");
-        });
+      // Une cle par SOS, reutilisee a chaque renvoi : le serveur ne cree
+      // qu'une fiche, une alerte et une diffusion, meme si la requete part
+      // plusieurs fois. Avant, un "Erreur reseau" alors que la requete etait
+      // bien arrivee poussait l'agent a re-declencher : autant de SOS en
+      // double sur les postes, a des instants differents.
+      var body = {
+        sos_id: newClientKey(),
+        lat: lat,
+        lng: lng,
+        battery: state.batteryPct || null,
+      };
+      var RETRY_DELAYS = [2000, 5000, 10000];
+      var attempt = 0;
+
+      function done(ok, msg, kind) {
+        state.sosInFlight = false;
+        refreshGpsProfile();
+        toast(msg, kind);
+        if (ok) {
+          try { if (navigator.vibrate) navigator.vibrate([300, 150, 300]); } catch (e) {}
+        }
+      }
+
+      function send() {
+        fetchWithTimeout("/field/sos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }, 10000)
+          .then(function (r) {
+            if (r.status === 401) { handleSessionLost(); return { ok: false, auth: true }; }
+            if (r.status >= 500) throw new Error("server");
+            return r.json();
+          })
+          .then(function (data) {
+            if (data && data.ok) {
+              done(true, "SOS envoye au cockpit et aux equipes securite", "warn");
+            } else if (!(data && data.auth)) {
+              done(false, "Echec SOS : " + ((data && data.error) || "?"), "err");
+            } else {
+              state.sosInFlight = false;
+            }
+          })
+          .catch(function () {
+            if (attempt < RETRY_DELAYS.length) {
+              toast("Reseau instable : nouvel essai SOS...", "warn");
+              setTimeout(send, RETRY_DELAYS[attempt++]);
+              return;
+            }
+            // Dernier recours : file hors ligne, renvoyee au retour du reseau
+            // (meme cle, donc sans risque de doublon).
+            OfflineQueue.enqueue({ url: "/field/sos", method: "POST", jsonBody: body, label: "SOS" })
+              .then(function () {
+                done(false, "SOS en attente de reseau : il partira des le retour de la connexion. Utilisez aussi la radio.", "err");
+              }, function () {
+                done(false, "Erreur reseau (SOS) : utilisez la radio", "err");
+              });
+          });
+      }
+      send();
     });
   }
 
@@ -5630,7 +6089,7 @@
     msg.textContent = "Declencher un SOS ?";
     var sub = document.createElement("div");
     sub.className = "sos-confirm-sub";
-    sub.textContent = "Le cockpit et toutes les patrouilles seront alertes avec ta position GPS.";
+    sub.textContent = "Le cockpit, les equipes securite et ton equipe seront alertes avec ta position GPS.";
     var btnConfirm = document.createElement("button");
     btnConfirm.className = "sos-confirm-btn";
     btnConfirm.textContent = "CONFIRMER SOS";
@@ -5784,7 +6243,10 @@
   // et en statut actif ; ralenti sinon pour economiser la batterie et la data.
   function computePollInterval(kind) {
     var status = state.patrolStatus || "patrouille";
-    if (status === "pause" || status === "fin_intervention") return POLL_PAUSE_MS;
+    // Seule la pause ralentit. En fin d'intervention l'agent attend sa
+    // liberation par le cockpit : a 30 s de poll, il la voyait arriver
+    // jusqu'a une demi-minute apres le clic de l'operateur.
+    if (status === "pause") return POLL_PAUSE_MS;
     var lastAct = state.lastInteractionAt || 0;
     var idle = Date.now() - lastAct > IDLE_THRESHOLD_MS;
     if (idle) {
@@ -5794,7 +6256,7 @@
   }
 
   function pollInbox() {
-    fetch("/field/inbox", { headers: { "Accept": "application/json" } })
+    fetchWithTimeout("/field/inbox", { headers: { "Accept": "application/json" }, cache: "no-store" }, 15000)
       .then(function (r) {
         if (r.status === 401) { return handleSessionLost(); }
         return r.json();
@@ -5803,18 +6265,40 @@
         if (!data || !data.ok) return;
         state.inbox = data.messages || [];
         renderInbox();
+        syncSosPins();
         // Au tout premier poll, on marque tous les messages deja presents
         // comme "vus" sans rejouer leur UI (overlays SOS, modale message,
         // alarme sonore) : ils ne sont nouveaux que cote serveur, pas cote
         // agent qui vient de rouvrir son app.
+        // Exception : un SOS d'une autre patrouille non acquitte et non
+        // resolu. Une tablette qui redemarre (batterie, mise a jour) pendant
+        // un SOS ne le voyait jamais.
         if (!state.inboxFirstPolled) {
-          state.inbox.forEach(function (m) { state.seenIds.add(m.id); });
+          state.inbox.forEach(function (m) {
+            state.seenIds.add(m.id);
+            if (m.type === "sos_broadcast" && !m.ack_at && !m.sos_resolved) {
+              handleSosBroadcast(m);
+            }
+          });
           state.inboxFirstPolled = true;
           return;
         }
         detectNew();
       })
       .catch(function () { /* silent */ });
+  }
+
+  // Reperes SOS alignes sur l'inbox : retires quand la fiche SOS est close
+  // (sos_resolved) ou que le message a expire (1 h). Ils restaient sur la
+  // carte jusqu'au rechargement de l'app.
+  function syncSosPins() {
+    var live = {};
+    (state.inbox || []).forEach(function (m) {
+      if (m.type === "sos_broadcast" && !m.sos_resolved) live[m.id] = true;
+    });
+    Object.keys(_sosMarkers).forEach(function (id) {
+      if (!live[id]) removeSosPin(id);
+    });
   }
 
   function detectNew() {
@@ -5839,7 +6323,7 @@
     newOnes.forEach(function (m) {
       state.seenIds.add(m.id);
       if (m.type === "sos_broadcast") {
-        sosBroadcasts.push(m);
+        if (!m.sos_resolved) sosBroadcasts.push(m);
       } else {
         normalOnes.push(m);
         if (m.type === "route") handleRouteMessage(m);
@@ -6012,7 +6496,9 @@
     if (routeBtn) {
       routeBtn.hidden = !hasRoute;
       if (hasRoute) {
-        routeBtn.onclick = function () { openItineraryMenu(waypoints[0]); };
+        routeBtn.onclick = function () {
+          openItineraryMenu(waypoints[0], (m.payload && (m.payload.fiche_id || m.payload.pcorg_id)) || null);
+        };
       } else {
         routeBtn.onclick = null;
       }
@@ -6237,6 +6723,8 @@
   // ---------------------------------------------------------------------
   function wireUi() {
     $("btn-recenter").addEventListener("click", recenter);
+    var btnRouteClear = $("btn-route-clear");
+    if (btnRouteClear) btnRouteClear.addEventListener("click", clearRoute);
     $("btn-layers").addEventListener("click", cycleLayer);
     $("btn-grid").addEventListener("click", openLayersPanel);
     var btnGridFab = $("btn-grid-fab");
@@ -7005,6 +7493,11 @@
     function update() {
       var h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
       root.style.setProperty("--vvh", h + "px");
+      // iPhone : a l'ouverture du clavier, iOS fait defiler le viewport
+      // visuel (offsetTop > 0) au lieu de le reduire par le bas. Les modales
+      // (top: var(--vvt)) suivent, sinon leur haut sort de l'ecran.
+      var t = (window.visualViewport && window.visualViewport.offsetTop) || 0;
+      root.style.setProperty("--vvt", Math.max(0, t) + "px");
     }
     update();
     if (window.visualViewport) {

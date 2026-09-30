@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta name="theme-color" content="#1f2937">
+  <title>File du service -- COCKPIT</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dispatch_service.css') }}">
+</head>
+
+{#
+  File du service (/dispatch-service) : fiches a dispatcher et unites des
+  categories dont l'utilisateur est responsable (dispatch_auto.py). Le rendu
+  vit dans static/js/dispatch_service.js ; ce gabarit ne pose que la
+  structure et le contexte (categories gerees, roles).
+
+  La route ne passe que `user` (charge utile JWT) : les variables attendues
+  par _sidebar.html (user_roles, user_firstname...) en sont derivees ici.
+#}
+{% set _u = user or {} %}
+{% set user_roles = _u.get('roles') or [] %}
+{% set user_firstname = _u.get('firstname') or '' %}
+{% set user_lastname = _u.get('lastname') or '' %}
+{% set user_email = _u.get('email') or '' %}
+
+<body>
+<div class="app-layout ds-page">
+
+  {% set sidebar_active = '/dispatch-service' %}
+  {% include '_sidebar.html' %}
+
+  <div class="app-main single-col-page">
+
+    <header class="app-header">
+      <button class="header-burger" id="header-burger-btn" type="button" aria-label="Menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+      <div class="header-event-info">
+        <span class="material-symbols-outlined" style="font-size:22px;color:var(--brand);">assignment_ind</span>
+        <span class="header-event-name">File du service</span>
+        <span class="header-event-year ds-header-scope" id="ds-scope-label"></span>
+      </div>
+      <div class="header-spacer"></div>
+      <div class="header-actions ds-header-actions">
+        <span class="ds-live" id="ds-live" title="Actualisation automatique toutes les 5 s">
+          <span class="ds-live-dot"></span><span id="ds-live-text">--</span>
+        </span>
+        <button class="btn btn-secondary ds-icon-btn" id="ds-notif-btn" type="button" title="Alertes sonores et notifications">
+          <span class="material-symbols-outlined">notifications</span>
+        </button>
+        <button class="btn btn-primary ds-icon-btn" id="ds-refresh" type="button" title="Actualiser maintenant">
+          <span class="material-symbols-outlined">refresh</span>
+        </button>
+      </div>
+    </header>
+
+    <main id="ds-main" class="ds-main">
+
+      {% if not managed_categories %}
+      <section class="ds-empty-page">
+        <span class="material-symbols-outlined">assignment_ind</span>
+        <h2>Aucun service a gerer</h2>
+        <p>Cette page affiche la file d'attente des fiches pour les responsables de service
+          (Technique, Securite...). Vous n'etes responsable d'aucune categorie.</p>
+        <p>Pour y avoir acces, un administrateur doit vous ajouter comme <strong>responsable</strong>
+          dans <strong>Field dispatch &gt; Dispatch automatique</strong>, pour la ou les categories concernees.</p>
+        {% if user_is_admin %}
+        <p><a class="btn btn-primary" href="/field-dispatch">Ouvrir Field dispatch</a></p>
+        {% endif %}
+      </section>
+      {% else %}
+
+      <div class="ds-toolbar">
+        <div class="ds-scope">
+          <label>
+            <span>Evenement</span>
+            <select id="ds-event" class="form-input"></select>
+          </label>
+          <label>
+            <span>Annee</span>
+            <select id="ds-year" class="form-input"></select>
+          </label>
+        </div>
+        <nav class="ds-cats" id="ds-cats" role="tablist" aria-label="Categories"></nav>
+      </div>
+
+      <div class="ds-switch" id="ds-switch" role="tablist" aria-label="Vue">
+        <button type="button" class="ds-switch-btn active" data-pane="fiches">
+          <span class="material-symbols-outlined">assignment</span> Fiches <span class="ds-count" id="ds-switch-fiches">0</span>
+        </button>
+        <button type="button" class="ds-switch-btn" data-pane="units">
+          <span class="material-symbols-outlined">groups</span> Unites <span class="ds-count" id="ds-switch-units">0</span>
+        </button>
+      </div>
+
+      <div class="ds-message" id="ds-message" hidden></div>
+
+      <div class="ds-grid">
+        <div class="ds-pane ds-pane-fiches active" data-pane="fiches">
+
+          <section class="ds-section ds-section-queue">
+            <header class="ds-section-head">
+              <span class="material-symbols-outlined">pending_actions</span>
+              <h3>A traiter</h3>
+              <span class="ds-count" id="ds-count-queue">0</span>
+            </header>
+            <div class="ds-list" id="ds-list-queue"></div>
+          </section>
+
+          <section class="ds-section ds-section-proposing">
+            <header class="ds-section-head">
+              <span class="material-symbols-outlined">hourglass_top</span>
+              <h3>Proposition en cours</h3>
+              <span class="ds-count" id="ds-count-proposing">0</span>
+            </header>
+            <div class="ds-list" id="ds-list-proposing"></div>
+          </section>
+
+          <section class="ds-section ds-section-engaged">
+            <header class="ds-section-head">
+              <span class="material-symbols-outlined">directions_run</span>
+              <h3>Engagees</h3>
+              <span class="ds-count" id="ds-count-engaged">0</span>
+            </header>
+            <div class="ds-list" id="ds-list-engaged"></div>
+          </section>
+        </div>
+
+        <aside class="ds-pane ds-pane-units" data-pane="units">
+          <section class="ds-section">
+            <header class="ds-section-head">
+              <span class="material-symbols-outlined">groups</span>
+              <h3>Unites</h3>
+              <span class="ds-count" id="ds-count-units">0</span>
+            </header>
+            <div class="ds-list" id="ds-list-units"></div>
+          </section>
+        </aside>
+      </div>
+      {% endif %}
+    </main>
+  </div>
+</div>
+
+<!-- Selecteur d'unite (feuille du bas sur telephone, fenetre sur poste) -->
+<div class="ds-sheet-overlay" id="ds-picker" hidden>
+  <div class="ds-sheet" role="dialog" aria-modal="true" aria-labelledby="ds-picker-title">
+    <header class="ds-sheet-head">
+      <div>
+        <h3 id="ds-picker-title">Engager une unite</h3>
+        <div class="ds-sheet-sub" id="ds-picker-sub"></div>
+      </div>
+      <button type="button" class="ds-sheet-close" data-close aria-label="Fermer">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </header>
+    <div class="ds-sheet-body" id="ds-picker-list"></div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+  window.__userIsAdmin   = {{ "true" if (user_is_admin or "admin" in user_roles) else "false" }};
+  window.__userIsManager = {{ "true" if ("manager" in user_roles or "admin" in user_roles) else "false" }};
+  window.__dsManagedCategories = {{ (managed_categories or []) | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_reports.js') }}"></script>
+<script src="{{ url_for('static', filename='js/dispatch_service.js') }}"></script>
+</body>
+</html>

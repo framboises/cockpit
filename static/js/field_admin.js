@@ -34,6 +34,109 @@
     else console.log("[toast]", type, msg);
   }
 
+  // Categories de fiche d'une tablette (miroir de FIELD_CATEGORIES, field.py).
+  var FIELD_CATEGORIES = [
+    { id: "PCO.Secours", label: "Secours" },
+    { id: "PCO.Securite", label: "Securite" },
+    { id: "PCO.Technique", label: "Technique" },
+    { id: "PCO.Flux", label: "Flux" },
+    { id: "PCO.Fourriere", label: "Fourriere" },
+    { id: "PCO.Information", label: "Information" },
+    { id: "PCO.MainCourante", label: "Main courante" },
+  ];
+
+  function categoryLabel(id) {
+    var c = FIELD_CATEGORIES.find(function (x) { return x.id === id; });
+    return c ? c.label : (id || "aucune");
+  }
+
+  function fillCategorySelect(sel, emptyLabel, value) {
+    while (sel.firstChild) sel.removeChild(sel.firstChild);
+    var opt0 = document.createElement("option");
+    opt0.value = "";
+    opt0.textContent = emptyLabel;
+    sel.appendChild(opt0);
+    FIELD_CATEGORIES.forEach(function (c) {
+      var o = document.createElement("option");
+      o.value = c.id;
+      o.textContent = c.label;
+      sel.appendChild(o);
+    });
+    sel.value = value || "";
+  }
+
+  // ------------------------------------------------------------------
+  // Metiers (sous-classifications d'une categorie, dispatch automatique)
+  // ------------------------------------------------------------------
+  var metiersCache = {};  // category -> Promise<[labels]>
+
+  function fetchMetiers(category) {
+    if (!category) return Promise.resolve([]);
+    if (!metiersCache[category]) {
+      metiersCache[category] = apiGet("/api/dispatch/metiers?category=" + encodeURIComponent(category))
+        .then(function (data) { return (data && data.ok && data.metiers) || []; })
+        .catch(function () { delete metiersCache[category]; return []; });
+    }
+    return metiersCache[category];
+  }
+
+  function normMetier(s) {
+    return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+  }
+
+  // Remplit `box` de cases a cocher pour les metiers de `category`.
+  // `selected` : labels deja coches (compares sans accents ni casse). Les
+  // metiers selectionnes absents du referentiel restent affiches (coches).
+  function renderMetiersCheckboxes(box, category, selected) {
+    if (!box) return Promise.resolve();
+    var token = (box._metiersSeq = (box._metiersSeq || 0) + 1);
+    while (box.firstChild) box.removeChild(box.firstChild);
+    var info = document.createElement("span");
+    info.style.cssText = "color:var(--muted); font-size:12px;";
+    if (!category) {
+      info.textContent = "Choisir un groupe ou une categorie.";
+      box.appendChild(info);
+      return Promise.resolve();
+    }
+    info.textContent = "Chargement...";
+    box.appendChild(info);
+    return fetchMetiers(category).then(function (list) {
+      if (box._metiersSeq !== token) return;
+      while (box.firstChild) box.removeChild(box.firstChild);
+      var sel = (selected || []).slice();
+      var selNorm = sel.map(normMetier);
+      var all = list.slice();
+      sel.forEach(function (m) {
+        if (!all.some(function (x) { return normMetier(x) === normMetier(m); })) all.push(m);
+      });
+      if (!all.length) {
+        var empty = document.createElement("span");
+        empty.style.cssText = "color:var(--muted); font-size:12px;";
+        empty.textContent = "Aucun metier defini pour " + categoryLabel(category) + " (tous les metiers).";
+        box.appendChild(empty);
+        return;
+      }
+      all.forEach(function (m) {
+        var lab = document.createElement("label");
+        var cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.value = m;
+        cb.setAttribute("data-metier", "1");
+        cb.checked = selNorm.indexOf(normMetier(m)) >= 0;
+        lab.appendChild(cb);
+        lab.appendChild(document.createTextNode(m));
+        box.appendChild(lab);
+      });
+    });
+  }
+
+  function checkedMetiers(box) {
+    if (!box) return [];
+    return $$('input[data-metier]', box)
+      .filter(function (cb) { return cb.checked; })
+      .map(function (cb) { return cb.value; });
+  }
+
   // State
   var state = {
     beaconGroups: [],  // [{id, label, color, icon, pco_category}, ...]
@@ -357,7 +460,7 @@
     if (!tb) return;
     var firstHeader = document.querySelector("#field-devices-table thead th:nth-child(2)");
     var hasEventCol = !!(firstHeader && /evenement/i.test(firstHeader.textContent));
-    var colspan = hasEventCol ? 7 : 6;
+    var colspan = hasEventCol ? 8 : 7;
     var countEl = $("#field-admin-count");
     if (countEl) {
       countEl.textContent = state.devices.length
@@ -419,6 +522,58 @@
       tdGroup.appendChild(dot);
       tdGroup.appendChild(document.createTextNode(beaconGroupLabel(d.beacon_group_id)));
       tr.appendChild(tdGroup);
+
+      // Categorie : modifiable sur place. "" = celle du groupe (affichee).
+      var tdCat = document.createElement("td");
+      var catSel = document.createElement("select");
+      catSel.className = "form-input";
+      catSel.style.cssText = "font-size:12px; padding:2px 4px; height:26px; width:100%;";
+      var inherited = d.category ? null : d.category_effective;
+      fillCategorySelect(catSel, "Groupe (" + categoryLabel(inherited) + ")", d.category);
+      catSel.title = "Categorie effective : " + categoryLabel(d.category_effective);
+      catSel.addEventListener("change", function () {
+        catSel.disabled = true;
+        apiPost("/field/admin/devices/" + encodeURIComponent(d.id) + "/category",
+                { category: catSel.value })
+          .then(function (res) {
+            if (res.body && res.body.ok) {
+              _toast("success", d.name + " : categorie " + categoryLabel(res.body.category_effective));
+              loadDevices();
+            } else {
+              _toast("error", "Erreur : " + ((res.body && res.body.error) || "?"));
+              catSel.value = d.category || "";
+              catSel.disabled = false;
+            }
+          })
+          .catch(function () {
+            _toast("error", "Erreur reseau");
+            catSel.value = d.category || "";
+            catSel.disabled = false;
+          });
+      });
+      tdCat.appendChild(catSel);
+
+      // Metiers couverts (dispatch automatique) : vide = tous.
+      var metLine = document.createElement("div");
+      metLine.className = "field-dev-metiers";
+      var metTxt = document.createElement("span");
+      metTxt.className = "txt";
+      var devMetiers = Array.isArray(d.metiers) ? d.metiers : [];
+      metTxt.textContent = devMetiers.length ? devMetiers.join(", ") : "tous metiers";
+      metTxt.title = "Metiers : " + (devMetiers.length ? devMetiers.join(", ") : "tous");
+      metLine.appendChild(metTxt);
+      var metBtn = document.createElement("button");
+      metBtn.type = "button";
+      metBtn.title = "Modifier les metiers";
+      var metIc = document.createElement("span");
+      metIc.className = "material-symbols-outlined";
+      metIc.style.fontSize = "14px";
+      metIc.textContent = "edit";
+      metBtn.appendChild(metIc);
+      metBtn.addEventListener("click", function () { openMetiersModal(d); });
+      metLine.appendChild(metBtn);
+      tdCat.appendChild(metLine);
+      tr.appendChild(tdCat);
 
       var tdPos = document.createElement("td");
       if (d.last_position && d.last_position.lat != null) {
@@ -592,6 +747,71 @@
   }
 
   // ------------------------------------------------------------------
+  // Modal metiers d'une tablette
+  // ------------------------------------------------------------------
+  var metiersModalDevice = null;
+
+  function wireMetiersModalOnce(modal) {
+    if (modal._wired) return;
+    modal._wired = true;
+    $$("[data-close]", modal).forEach(function (b) {
+      b.addEventListener("click", closeMetiersModal);
+    });
+    modal.addEventListener("click", function (e) {
+      if (e.target === modal) closeMetiersModal();
+    });
+    var submit = $("#field-metiers-submit");
+    if (submit) submit.addEventListener("click", submitMetiers);
+  }
+
+  function openMetiersModal(d) {
+    var modal = $("#field-metiers-modal");
+    if (!modal) return;
+    wireMetiersModalOnce(modal);
+    metiersModalDevice = d;
+    var title = $("#field-metiers-title");
+    if (title) title.textContent = "Metiers - " + (d.name || "?");
+    var catEl = $("#field-metiers-cat");
+    if (catEl) {
+      catEl.textContent = d.category_effective
+        ? "Categorie : " + categoryLabel(d.category_effective)
+        : "Aucune categorie : choisir d'abord la categorie de la tablette.";
+    }
+    var submit = $("#field-metiers-submit");
+    if (submit) submit.disabled = !d.category_effective;
+    renderMetiersCheckboxes($("#field-metiers-list"), d.category_effective || "",
+                            Array.isArray(d.metiers) ? d.metiers : []);
+    modal.hidden = false;
+  }
+
+  function closeMetiersModal() {
+    var modal = $("#field-metiers-modal");
+    if (modal) modal.hidden = true;
+    metiersModalDevice = null;
+  }
+
+  function submitMetiers() {
+    var d = metiersModalDevice;
+    if (!d) return;
+    var submit = $("#field-metiers-submit");
+    if (submit) submit.disabled = true;
+    var metiers = checkedMetiers($("#field-metiers-list"));
+    apiPost("/field/admin/devices/" + encodeURIComponent(d.id) + "/metiers", { metiers: metiers })
+      .then(function (res) {
+        if (res.body && res.body.ok) {
+          var m = res.body.metiers || [];
+          _toast("success", (d.name || "Tablette") + " : " + (m.length ? m.join(", ") : "tous metiers"));
+          closeMetiersModal();
+          loadDevices();
+        } else {
+          _toast("error", "Erreur : " + ((res.body && res.body.error) || "?"));
+        }
+      })
+      .catch(function () { _toast("error", "Erreur reseau"); })
+      .then(function () { if (submit) submit.disabled = false; });
+  }
+
+  // ------------------------------------------------------------------
   // Pairings (codes actifs)
   // ------------------------------------------------------------------
   function loadPairings() {
@@ -709,11 +929,45 @@
     loadBeaconGroups();
     var form = $("#field-pair-form");
     if (form) form.reset();
+    var catSel = form && $('select[name="category"]', form);
+    var grpSel = form && $('select[name="beacon_group_id"]', form);
+    if (catSel) {
+      fillCategorySelect(catSel, "Celle du groupe", "");
+      if (grpSel && !grpSel._catWired) {
+        // Le choix d'un groupe propose sa categorie ; l'admin peut la changer.
+        grpSel.addEventListener("change", function () {
+          var g = state.beaconGroups.find(function (x) { return x.id === grpSel.value; });
+          catSel.value = (g && g.pco_category) || "";
+          refreshPairMetiers();
+        });
+        catSel.addEventListener("change", refreshPairMetiers);
+        grpSel._catWired = true;
+      }
+    }
+    refreshPairMetiers();
     var result = $("#field-pair-result");
     if (result) result.textContent = "";
     stopPairPoll();
     var modal = $("#field-pair-modal");
     if (modal) modal.hidden = false;
+  }
+
+  // Categorie effective du formulaire de pairing : celle choisie, sinon celle
+  // du groupe. Les metiers coches sont conserves si elle ne change pas.
+  function refreshPairMetiers() {
+    var form = $("#field-pair-form");
+    var box = $("#field-pair-metiers");
+    if (!form || !box) return;
+    var catSel = $('select[name="category"]', form);
+    var grpSel = $('select[name="beacon_group_id"]', form);
+    var cat = (catSel && catSel.value) || "";
+    if (!cat && grpSel && grpSel.value) {
+      var g = state.beaconGroups.find(function (x) { return x.id === grpSel.value; });
+      cat = (g && g.pco_category) || "";
+    }
+    var keep = box._metiersCat === cat ? checkedMetiers(box) : [];
+    box._metiersCat = cat;
+    renderMetiersCheckboxes(box, cat, keep);
   }
 
   function closePairModal() {
@@ -734,7 +988,9 @@
     var payload = {
       name: (fd.get("name") || "").toString().trim(),
       beacon_group_id: (fd.get("beacon_group_id") || "").toString(),
+      category: (fd.get("category") || "").toString(),
       notes: (fd.get("notes") || "").toString().trim(),
+      metiers: checkedMetiers($("#field-pair-metiers")),
       event: scope.event,
       year: scope.year,
     };
@@ -754,6 +1010,7 @@
             missing_beacon_group: "Groupe requis.",
             unknown_beacon_group: "Groupe introuvable.",
             beacon_group_disabled: "Groupe desactive.",
+            invalid_category: "Categorie inconnue.",
             name_conflict: "Ce nom est deja utilise par une balise Anoloc ou une tablette.",
           };
           _toast("error", map[err] || ("Erreur : " + err));

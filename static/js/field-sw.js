@@ -7,7 +7,7 @@
      - API (/field/*) : network-first, fallback silencieux offline
    ===================================================================== */
 
-const SW_VERSION = "field-sw-v35";
+const SW_VERSION = "field-sw-v38";
 const APP_SHELL_CACHE = "field-shell-" + SW_VERSION;
 const TILE_CACHE = "field-tiles-" + SW_VERSION;
 const API_CACHE = "field-api-" + SW_VERSION;
@@ -25,6 +25,8 @@ const APP_SHELL_URLS = [
   "/static/css/field_manuel.css",
   "/static/js/field.js",
   "/static/img/field-icon.svg",
+  "/static/img/field-icon-192.png",
+  "/static/js/field_install_hint.js",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
 ];
@@ -204,7 +206,8 @@ self.addEventListener("push", function (event) {
   var isSos = payload.type === "sos";
   var options = {
     body: payload.body || "",
-    icon: "/static/img/field-icon.svg",
+    // PNG : Android et iOS n'affichent pas d'icone SVG dans une notification
+    icon: "/static/img/field-icon-192.png",
     badge: "/static/img/field-icon.svg",
     tag: payload.tag || "field-push",
     renotify: true,
