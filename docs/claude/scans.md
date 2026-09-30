@@ -1,0 +1,398 @@
+<!-- Extrait de CLAUDE.md (racine du repo). Charge a la demande. -->
+
+## Chaîne scans (import Excel → base → rapport → analyse)
+
+La page `/scan-report` (admin) pilote toute la chaîne : déposer un export Excel de scans de billets, le rattacher aux entités cartographiques, écrire les documents `historique_controle`, régénérer le rapport HTML, et produire une analyse rédigée par Claude.
+
+Elle remplace un enchaînement manuel de 5 scripts (`import_zone_scans.py`, `import_porte_scans.py`, `import_uam_help.py`, `audit_staffing_mapping.py`, `import_staffing_to_scans.py`) qui contenaient des chemins absolus `/Users/framboises/...` et `DB_NAME = 'titan_dev'` en dur. **Ces scripts sont conservés mais ne sont plus le chemin nominal.**
+
+### Architecture
+
+| Module | Rôle |
+|--------|------|
+| `scan_import.py` | Parseur xlsx, résolveur de features, constructeurs des 3 documents, archivage |
+| `scan_report_build.py` | Adaptateur `complet` → contrat du gabarit HTML, génération du fichier |
+| `scan_staffing.py` | Effectifs Accueil/Sécurité dérivés du calendrier, sans aucune saisie |
+| `scan_analysis.py` | KPI agrégés, prompts, appel Claude, persistance |
+| `scan_mapping.py` | Correction du mapping après import, reconstruction depuis `complet` |
+| `scan_report.py` | Blueprint : routes, staging d'import, registre de jobs |
+| `static/js/scan_report.js` | IIFE autonome : modales, mapping manuel, barres de progression |
+
+Tous les modules reçoivent `db` en argument (`from app import db` donne `titan_dev` en dev, `titan` en prod, cf. `app.py:115`). **Ne jamais coder le nom de base en dur.**
+
+### Format Excel attendu
+
+Export Sirius hiérarchique (cf. `uploads/zone-complet-24HM-2024.xlsx`). Un modèle est téléchargeable depuis la page (`/scan-report/template.xlsx`), généré à la volée avec une feuille « Notice » et une feuille « Unités connues » alimentée depuis la base.
+
+- Ligne 1 : datetime, **uniquement sur la 1re colonne de chaque groupe fusionné**
+- Ligne 2 : sens `Entrée` | `Sortie` | **`Autre`**
+- Ligne 3 : `SPACE_CODE - Identifiant` (ignorée)
+- Colonnes A/B/C : zone | porte | device, avec report vers le bas
+- Lignes 4+ : entiers, pas de 15 min, **créneaux vides omis** (non zéro-remplis)
+- Colonne `Total` et ligne `zone == 'Total'` ignorées
+
+Un groupe fusionné fait 1, 2 ou 3 colonnes selon les sens présents : le datetime n'est donc **pas toujours porté par la colonne `Entrée`**. Le parseur propage le dernier datetime rencontré (`_build_column_map`).
+
+### Le sens « Autre »
+
+**Ce n'est pas une catégorie de scan mais une configuration de boîtier** : un PDA non paramétré en entrée/sortie. Sur 24H MOTOS 2024, 30 boîtiers scannent exclusivement en `Autre`, et `PORTE ANNEXE` (19 389 scans) comme `PORTE PANORAMA` (21 893) ont 100 % de leur trafic dans cette colonne.
+
+Conséquences, appliquées partout dans la chaîne :
+- **compté** dans `portes.scan_count` (total de passages, sens confondus)
+- **stocké à part** (`total_autre`) dans `complet`
+- **exclu du calcul de présents** : sans direction, aucun solde n'est calculable
+- **absent du rapport HTML** : le gabarit n'a que deux séries. La modale de régénération affiche le volume non représenté (`autre_scans_not_shown`)
+
+Les fichiers 2025 n'ont pas cette colonne : le parseur la traite comme optionnelle.
+
+### Les trois documents produits
+
+Tous dans `historique_controle`, index unique `(event, year, type)`, `year` en **int**, `event` = nom cockpit majuscules (`24H MOTOS`, jamais le slug `24h_du_mans`). Datetimes **naïfs, heure locale Paris**.
+
+| type | clé | granularité | sémantique |
+|------|-----|-------------|------------|
+| `complet` | `complet` | 15 min | **nouveau**. Une entrée par unité, `entree`/`sortie`/`autre` en **deltas par créneau**, `present` en cumul courant. Porte aussi `_id_feature`, `devices`, `uam_help`, `pda_renfort` |
+| `frequentation` | `data` | horaire | série **globale unique** (agrégat ENCEINTE GENERALE), `entree`/`sortie` **cumulés**, `present = entree - sortie` |
+| `portes` | `doors` | horaire | `[{name, doors_id, scans:[{id, timestamp (datetime BSON), scan_count}]}]`, `scan_count` = tous sens confondus |
+
+`data_15min` de `complet` **n'a pas de champ `id`** : l'uuid n'a aucune signification inter-collection et pèse 45 des 136 octets de chaque enregistrement. Un garde-fou refuse l'écriture au-delà de 12 Mo (limite BSON 16 Mo).
+
+`frequentation` porte en plus `source: 'scan_import'`, `excluded_autre`, `doors_without_direction` et `ignored_doors` — traçabilité de ce qui manque à la courbe de présents.
+
+### Fuseaux horaires
+
+**Toute la chaîne scans travaille en datetimes naïfs, heure locale Paris.** Aucun `Z`, aucun offset, nulle part. C'est la convention des documents déjà en base et de ce que lisent les autres logiciels.
+
+Vérifié sur l'ensemble des documents : `frequentation.data[].date` et `complet.data_15min[].date` sont des **chaînes ISO sans fuseau**, `portes.doors[].scans[].timestamp` des **datetimes BSON naïfs** — identique entre l'ancienne chaîne (collecte temps réel) et `scan_import`. Excel n'ayant pas de fuseau, openpyxl rend des datetimes naïfs : les créneaux entrent déjà dans la bonne convention.
+
+⚠️ **`parametrages.data.globalHoraires.race` est la seule source stockée en UTC, avec un `Z` final.** Elle ne parle pas la même langue que le reste :
+
+| Source | Exemple (24H MOTOS 2026) | Fuseau |
+|---|---|---|
+| `historique_controle.race` | `2026-04-18T15:00:00` | naïf Paris |
+| `parametrages.data.race` | `2026-04-18T15:00:00` | naïf Paris |
+| `parametrages.data.globalHoraires.race` | `2026-04-18T13:00:00.000Z` | **UTC** |
+
+`resolve_race` faisait un `str(raw)` sans conversion. Pour un couple déjà en base, le niveau 1 (`historique_controle`) répondait en premier et masquait le problème ; mais **la première édition importée d'un événement** — celle qui n'a pas encore de `historique_controle` — recevait la valeur UTC telle quelle : 2 h de décalage en été, 1 h en hiver, et un format avec `Z` inattendu en aval.
+
+`to_naive_paris_iso()` normalise désormais tout ce qui entre, y compris la date saisie à la main dans la modale. Une valeur déjà naïve est renvoyée **inchangée** — elle est par convention en heure de Paris, on ne lui applique aucune conversion. Vérifié idempotent sur les 30 valeurs `race` en base.
+
+Contrôle rapide : la course des 24H MOTOS tombe toujours **samedi 15h** — 2024, 2025 et 2026 renvoient bien `15:00:00`.
+
+Les lecteurs (`pcorg_summary._parse_race_dt`, `_parse_iso_dt`) savaient déjà gérer les deux formes (naïf → Paris, `Z` → UTC). Le défaut était côté écriture, pas lecture.
+
+### Rattachement aux entités cartographiques
+
+La clé durable est **`properties._id_feature`** (chaîne hexadécimale de 24 caractères). **Il n'existe pas de `id_feature`.** Présent sur 100 % des features de `portes`, `hospitalites`, `terrains`, `tribunes`.
+
+Résolveur à 3 niveaux, dans l'ordre :
+
+1. **Corrections manuelles** persistées dans `scan_feature_overrides`
+2. **Récolte** des documents `historique_controle{type:portes}` existants — 39 noms curatés, zéro ambiguïté, source la plus fiable car elle connaît les libellés historiques
+3. **Rapprochement normalisé** contre le GeoJSON (casse, accents, ponctuation ; strip des préfixes `AA `/`P `/`PARKING ` côté zones ; `ANCIEN 2025`/`NUMERO 2026` pour les tribunes)
+
+`canonical_porte()` replie en plus les variantes orthographiques des deux côtés : `PORTAIL`→`PORTE`, `VEHICULES`→`VEHICULE`, `PIETONS`→`PIETON`. C'est ce qui rattache `PORTAIL HOUX 5` à `PORTE HOUX 5`.
+
+Un rapprochement **multi-candidats est laissé non résolu** (`PORTE CIK` existe deux fois dans le GeoJSON) : l'UI propose alors les candidats et des suggestions par score de Jaccard.
+
+Sur 24H MOTOS 2024 : 14/19 unités résolues automatiquement, 17/19 après mapping manuel. `PORTE NORD CLUB` et `CONCENTRATION` n'ont aucune entité — ce sont des services, pas des lieux, et ils sont désormais marqués comme tels (voir ci-dessous).
+
+**Collection `(aucune)` — l'unité n'est pas un lieu.** `feature_source` distingue deux situations que le code confondait :
+
+| `feature_source` | Sens |
+|---|---|
+| `aucun` | rattachement **à faire** — signalé, proposé à chaque import |
+| `sans_lieu` | **décision** : guichet, service, renfort mobile. La question est tranchée |
+
+Sans cette distinction, `HELPDESK`, `LITIGE`, `UAM`, `SERI`, `PUNISHER`, `CONCENTRATION` remontaient « à localiser » à chaque import, alors qu'il n'y avait rien à localiser. Une unité `sans_lieu` ne reçoit ni candidats ni suggestions, sort du compteur « à localiser » et du filtre correspondant, et son liseré est neutre (bleu-gris) — surtout pas l'ambre du « à traiter ».
+
+Choisir `(aucune)` **efface le rattachement mémorisé** (`_id_feature: None` dans l'override), sinon il reviendrait au prochain import. Le choix est mémorisé dans les deux sens : repasser une unité de « sans lieu » à « à localiser » survit aussi.
+
+**La modale expose les 19 unités, pas seulement les non résolues.** Une résolution automatique peut se tromper, et la catégorie n'est qu'une proposition dans tous les cas. Un liseré à gauche de chaque ligne donne l'état — gris `proposé automatiquement`, vert `choix manuel`, ambre `non localisée` — et une case « N'afficher que les non localisées » réduit la liste sans rien perdre des choix déjà faits.
+
+### Catégorie d'unité
+
+`UNIT_CATEGORIES` dans `scan_import.py` : `porte`, `tribune`, `aire_accueil`, `parking`, `paddock`, `hospitalite`, `autre`. Proposée par `guess_category()`, **modifiable à l'import**, stockée sur chaque unité `complet` (`category` + `category_source`).
+
+Ce n'est **pas** le rattachement géographique, et les deux sont indépendants : une unité peut être localisée sans qu'on sache la classer, et l'inverse. La catégorie pilote trois choses dans le rapport :
+
+1. le regroupement de la liste latérale (`groupZones`)
+2. l'encadré « Vue par catégorie » du tableau de bord
+3. **la capacité retenue** — 650 personnes/h pour `tribune`, `paddock`, `hospitalite` ; 250 véhicules/h pour le reste — donc l'effectif recommandé
+
+⚠️ **Le nom du champ côté rapport est `zone_category`, pas `category`** : `category` est déjà pris dans le contrat du gabarit et vaut `'zone'` ou `'porte'`.
+
+Sans catégorie explicite (rapports générés avant, ou chemin de repli `parking_scans`), `guessCategoryFromName()` retombe sur les conventions de nommage 24H AUTOS (`TRIBUNE `, `AA `, `P `). C'est ce repli qui laissait `BEAUSEJOUR`, `KARTING SUD` et `PARKING OUEST` hors de toute catégorie, avec la capacité véhicule par défaut. Réimporter le classeur fixe la catégorie une fois pour toutes.
+
+`save_overrides` mémorise **une catégorie seule**, sans `_id_feature` : classer une zone ne suppose pas de savoir où elle se trouve. `resolve_features` **fusionne** le choix mémorisé et celui de l'UI plutôt que de remplacer, sinon choisir une catégorie effacerait un rattachement déjà connu.
+
+### Édition du mapping après import
+
+Bouton dédié dans le bandeau (`edit_location_alt`), à côté de « Régénérer ». Corrige entité, catégorie et exclusion **sans reprendre le classeur** : `scan_mapping.py` reconstruit les trois documents depuis `complet`, qui porte déjà les séries 15 min de chaque unité.
+
+Équivalence vérifiée chiffre par chiffre sur 24H MOTOS 2024 avant de brancher quoi que ce soit :
+
+- `frequentation` recalculé depuis `complet` : 151 enregistrements, **0 différent**, cumul final 131 975 / 107 259 identique
+- `portes` reconstruit : 13 portes, mêmes noms, mêmes `doors_id`, **280 516 scans** de part et d'autre
+
+L'ancien document est archivé (`archived_reason: 'edition_mapping'`), donc une correction reste annulable. La table est la même que celle de l'import — `renderMapRows` prend un contexte (`importCtx` / `mappingCtx`) qui porte la cible DOM et le stockage des choix.
+
+⚠️ **Ne fonctionne que pour les couples ayant un document `complet`.** 24H AUTOS 2025 tombe encore sur l'ancienne chaîne (`parking_scans`) : la route répond **404 `complet_absent`**. Il faut l'importer une fois.
+
+### Unités ignorées
+
+Une case « Ignorer » par ligne écarte l'unité : elle ne figure dans **aucun des trois documents** ni dans le rapport.
+
+⚠️ **L'unité reste dans `complet` avec son drapeau `ignored`**, ses séries conservées — elle n'est retirée que des documents dérivés et du rapport (`build_payload_from_complet` la saute). C'est ce qui rend l'exclusion **réversible** depuis l'éditeur de mapping, sans reprendre le classeur. La supprimer aurait perdu la donnée. Utile pour les guichets et services qui ne sont pas des points de passage (`HELPDESK`, `LITIGE`, `UAM`, `SERI`, `PUNISHER`).
+
+⚠️ **Écarter une porte modifie la série de l'enceinte générale**, donc la référence N-1 de toutes les comparaisons du cockpit. Ce n'est jamais anodin. La modale chiffre l'effet **en direct** pendant la saisie (« N unité(s) ignorée(s) — X scans exclus, dont Y portes : Z entrées retirées de la série de l'enceinte »), le redit après l'écriture, et le document `frequentation` garde la trace dans `ignored_doors`.
+
+Testé sur 24H MOTOS 2024 : ignorer `PORTE MUSEE` fait passer le cumul d'entrées de 131 975 à 127 692 (−4 283), `complet` de 19 à 17 unités et `portes` de 13 à 11.
+
+L'état est mémorisé **dans les deux sens** (`ignored: true` comme `false`) : réactiver une unité écartée doit survivre au prochain import, sinon elle disparaîtrait à nouveau sans que personne ne comprenne pourquoi.
+
+⚠️ `build_frequentation_doc` ne recevait pas `resolved` — il a fallu le lui passer pour qu'il connaisse les exclusions. Les deux autres constructeurs l'avaient déjà.
+
+### Archivage
+
+Toute réécriture **archive d'abord** l'ancien document dans `historique_controle_archive` (copie intégrale + `archived_at`, `archived_by`, `archived_reason`, `original_id`), puis remplace. Plusieurs générations coexistent, rien n'est jamais perdu.
+
+⚠️ **Réimporter dégrade potentiellement une référence N-1.** Le `frequentation` de 24H MOTOS 2024 issu de la collecte temps réel totalisait 166 328 entrées ; le xlsx en donne 131 975 (−20,7 %). Ces deux sources ne couvrent pas le même périmètre de portes, et ce document sert de comparaison N-1 à `pcorg_summary._find_hist_freq` et `app.py:2067`. La modale d'import affiche l'écart en rouge au-delà de 10 %.
+
+### Routes
+
+Toutes sur `scan_report_bp`, donc **admin-only** via `before_request` → `_check_admin()` (bypass `CODING=true`), et **CSRF actif** (ce blueprint n'est pas exempté).
+
+| Route | Rôle |
+|-------|------|
+| `GET /scan-report` | Page + iframe |
+| `GET /scan-report/static` | Sert le HTML généré |
+| `GET /scan-report/available` | Couples (event, year) disponibles, alimente la sidebar |
+| `GET /scan-report/template.xlsx` | Modèle Excel |
+| `GET /scan-report/features?collection=` | Inventaire d'une collection géo (mapping manuel) |
+| `GET /scan-report/mapping` | Mapping courant d'un couple, depuis `complet` |
+| `POST /scan-report/mapping` | Applique des corrections et reconstruit les trois documents |
+| `POST /scan-report/import/analyze` | multipart xlsx → aperçu + mapping, **sans rien écrire** |
+| `POST /scan-report/import/commit` | Écrit les 3 documents, archive l'existant |
+| `DELETE /scan-report/import/<token>` | Abandon, purge le fichier en attente |
+| `POST /scan-report/generate` | Régénère le rapport (job asynchrone) |
+| `GET /scan-report/generate/status?job=` | État d'un job (génération **et** analyse) |
+| `POST /scan-report/analysis/generate` | Analyse rédigée (`dry_run: true` = prompt sans appel API) |
+| `GET /scan-report/analysis/list` / `/<id>` | Historique et détail |
+
+Erreurs au format `{"ok": false, "error": "<code>"}` (convention `field.py:594`). **Ne pas utiliser `abort(404)`** : le handler 404 global (`app.py:700`) redirige vers `/`, ce qui casserait un appel XHR.
+
+### Import en deux temps
+
+`analyze` parse et garde le classeur en mémoire (`_STAGING`, TTL 30 min, 3 entrées max) ; `commit` rejoue avec le mapping corrigé. Le fichier source est conservé sous `uploads/scan_imports/<token>.xlsx` pour la traçabilité, et balayé sur la **date du fichier** — ce nettoyage survit donc à un redémarrage, contrairement au registre mémoire.
+
+⚠️ `_STAGING` et le registre de jobs supposent **un seul process**. Vrai sous waitress (même hypothèse que `analyse_ops.py:49`). Avec gunicorn multi-workers, il faudrait basculer le staging dans une collection Mongo à index TTL.
+
+### Régénération enchaînée
+
+Le rapport est un **fichier figé** : sans régénération il montre encore l'état d'avant. `import/commit` et `POST /scan-report/mapping` enchaînent donc la génération eux-mêmes (`start_generate_job`, extrait de la route `/generate`) et renvoient `regen_job` ; l'UI suit l'avancement dans le même panneau.
+
+Ce n'est pas la génération qui coûtait du temps — 219 à 415 ms — mais **l'oubli de régénérer**. Mesuré à 2 s de bout en bout après une correction de mapping.
+
+L'analyse rédigée reste active : son empreinte SHA-256 ne bouge que si les données qui l'alimentent ont changé. Corriger une catégorie ne touche pas la fréquentation → aucun appel au modèle. Écarter une porte la change → un appel, justifié.
+
+### Génération du rapport
+
+**`generate_parking_report.py` n'a subi que des modifications chirurgicales** : `main(event, year, output, db, progress_cb)`, extraction de `render_html()`, et `raise SystemExit` → `ReportGenerationError`. La constante `HTML_TEMPLATE` (~2 140 lignes, 90 % du fichier) et toutes les fonctions d'analyse sont **intactes**.
+
+`scan_report_build.py` fabrique des pseudo-documents au contrat attendu (`{zone, total_entree, total_sortie, intervals:[{ts, entree, sortie}]}`) et appelle les `serialize_zone` / `serialize_porte` existants. Repli automatique sur `parking_scans`/`porte_scans` si aucun `complet` n'existe — c'est ce qui garde 24H AUTOS 2025 reproductible à l'identique.
+
+Sortie : `reports/parking_report_<slug>_<year>.html`, écriture atomique (tmp + `os.replace`). Le dossier fait foi (`_list_reports()`), un rapport frais apparaît sans redémarrage. `LEGACY_REPORTS` ne sert plus qu'au repli sur `parking_report.html` à la racine.
+
+Les unités **sans aucun flux dirigé sont écartées du rapport** (elles ne produiraient qu'un onglet vide) ; la modale les nomme.
+
+### Effectifs
+
+**Entièrement dérivés, aucune saisie.** Calculés à chaque génération du rapport par `scan_staffing.attach_to_payload`, pour les deux chemins de génération. Un rapport régénéré reflète donc toujours le dernier planning en base.
+
+La chaîne de rattachement existe déjà et ne demande aucun arbitrage :
+
+```
+unité de scan → _id_feature → feature géo → post_numbers → shiftcode → calendrier_<année>_<événement>
+```
+
+Le calendrier porte `accueil_surete` (`A` / `S`) et `donnees_presences`, une liste de journées découpées en créneaux de 30 min avec `nombre_personnes`. **Accueil et sécurité se calculent exactement pareil** : la seule différence est la valeur de `accueil_surete`. Chaque bloc produit `count_op`, `agents_h_total`, `peak_simu`, `peak_simu_ts` et `hourly`.
+
+- un créneau vaut 30 min, d'où agents-h = `somme(nombre_personnes) × 0,5`
+- la courbe horaire retient le **maximum** des deux demi-heures, pas leur somme : c'est un effectif présent, pas un volume
+- `post_config` donne le détail par poste (`access_control`, `palpation`, `placier`, `controle_tripode`)
+
+Les unités du document `complet` portent déjà leur `_id_feature`. Celles issues de l'ancienne chaîne (`parking_scans`) n'en ont pas : `resolve_units_for_names` rejoue le résolveur de l'import, qui connaît les variantes orthographiques et les corrections manuelles.
+
+⚠️ **`attach_to_payload` est seule maîtresse du champ `staffing`** : elle l'efface d'abord sur toutes les unités. Sans ça, un reste de l'ancienne chaîne à validation manuelle survivrait avec ses compteurs à zéro, qui se lisent comme « personne n'était en poste ».
+
+⚠️ **Les `post_numbers` d'une feature ne sont pas filtrés par édition** — c'est une liste unique par lieu. Le filtrage se fait à la jointure : un poste absent du calendrier de l'année ne compte pas. C'est ce qui rend la liste réutilisable d'une édition à l'autre. Le rapport affiche `posts_matched / posts_total` quand les deux diffèrent.
+
+⚠️ **Aucun poste de sécurité n'est rattaché à une feature** (24H AUTOS 2025 : 119 `post_numbers` résolus, 119 en `A`, 0 en `S`). Les 255 postes `S` du calendrier sont découpés sur un autre axe (`zone` : « Portes », « Paddock », « Extérieur Bugatti »… ; `secteur` : « Ouest », « Houx »…). Le code est prêt — la sécurité apparaîtra dès que ces postes seront ajoutés aux `post_numbers` côté carto. En attendant le rapport écrit « aucun poste sécurité rattaché à ce lieu », jamais un zéro muet.
+
+⚠️ **Deux formats de calendrier coexistent.** Depuis 2025 : `shiftcode` + `donnees_presences`. En 2024 (`calendrier_2024_24hautos`, 2 826 docs) : colonnes Excel brutes (`'10h - 10h30'`, `'ACCUEIL / SÛRETE'`, `'N°'`), sans `shiftcode`. `load_calendar` lève `StaffingSourcesMissing` plutôt que de rendre des effectifs vides. Et **24H MOTOS 2024 n'a aucun calendrier** — ses effectifs sont donc absents, à juste titre.
+
+Un échec du calcul ne perd jamais le rapport : il est journalisé et `info['staffing']` porte l'erreur.
+
+### Aide UAM et renforts PDA
+
+Calculés **automatiquement à l'import** (logique portée depuis `import_uam_help.py`), car déductibles du seul classeur :
+
+- `uam_help` : un boîtier de la ligne `UAM` a scanné sur cette porte → du renfort mobile y est passé
+- `pda_renfort` : sur une porte à tripodes, un PDA non-UAM a servi → **débordement des tourniquets**, signal d'exploitation fort
+
+Nécessite le détail par boîtier, que l'agrégation par unité efface : le parseur conserve `device_hours` pour les seules portes d'enceinte.
+
+Sans ligne `UAM` dans le fichier (cas de 24H MOTOS 2024), `uam_help` est vide partout — ce n'est pas une anomalie.
+
+### Analyse rédigée (Claude)
+
+`scan_analysis.py` réutilise **`pcorg_summary.call_claude`** plutôt que le SDK `anthropic` : cette fonction porte déjà le retry exponentiel (429/503/529), le retry sur troncature, le prompt caching et la télémétrie d'usage.
+
+Modèle par défaut **`claude-sonnet-5-5`** (sorti le 28/09/2026, 2 $/10 $, dans `ALLOWED_MODELS` et `MODEL_PRICING_USD_PER_MTOK` de `pcorg_summary.py`). Des filtres de sécurité peuvent décliner une requête (`stop_reason: "refusal"`) : `_claude_stream_request` lève alors `ClaudeError("claude_refusal")` au lieu d'enregistrer un rapport vide.
+
+Le prompt ne contient **que des KPI agrégés** (~3 600 tokens), jamais les créneaux bruts. System prompt imposant un JSON strict à 7 clés : `synthese`, `pics_et_saturation`, `portes_critiques`, `zones_critiques`, `comparaison_n1`, `anomalies`, `recommandations`.
+
+Persistance dans `scan_analyses`, historisée (jamais écrasée) pour pouvoir comparer deux analyses.
+
+⚠️ **Le prompt avertit explicitement le modèle sur la provenance des données.** Chaque jeu porte un champ `source` (`scan_import` vs `collecte_temps_reel`) et le system prompt impose de présenter tout écart entre éditions de sources différentes comme potentiellement lié au changement de mesure, jamais comme une variation de fréquentation avérée. Sans cela, le modèle conclurait à une baisse de 24 % entre 2023 et 2024 qui n'est qu'un artefact.
+
+Si `ANTHROPIC_API_KEY` est vide → **503 `cle_api_absente`**. Le mode `dry_run` permet d'itérer sur le prompt sans consommer de tokens.
+
+### Vue Fréquentation
+
+Troisième onglet du rapport, à côté de **Zones** et **Portes** : un tableau de bord de la fréquentation de l'**enceinte générale**, jour par jour, comparé aux deux éditions précédentes et croisé avec la météo.
+
+Module de données : `scan_frequentation.py` (fonctions pures, `db` en argument). Le bloc est injecté dans le payload par `scan_report_build._build_frequentation()` sous `DATA.frequentation`, et rendu par `renderFrequentation()` dans `HTML_TEMPLATE`. La clé est lue défensivement (`DATA.frequentation || null`) : les rapports générés avant cette vue continuent de fonctionner, l'onglet affiche un message explicite.
+
+#### Alignement au jour de course
+
+Les éditions ne sont **jamais** comparées par date calendaire mais par **décalage au jour de course** (`J-5 … J+1`), résolu via `pcorg_summary._load_race_dt` (4 niveaux de repli — `race` manque sur tous les documents 2025). L'axe des abscisses est un `slot = offset * 24 + heure`, partagé par la courbe maîtresse et les deux bandeaux météo.
+
+C'est ce qui rend l'alignement gratuit : chaque édition d'un même événement produit le même squelette d'offsets (24H MOTOS `J-5(16h), J-4…J(24h), J+1(18h)` = 154 enregistrements tous les ans ; 24H AUTOS = 176).
+
+⚠️ **Le champ `race` ne désigne pas la même chose selon le millésime.** Jusqu'en 2024 il porte le **départ** (24H AUTOS 2024 : samedi 16h), en 2025 il porte l'**arrivée** (dimanche 14h). Aligner tel quel compare le samedi d'une édition au dimanche d'une autre — un décalage d'un jour entier sur toute la vue, invisible parce que les courbes restent plausibles.
+
+`_normalize_race_dates()` recale les éditions sur le **jour de semaine dominant** parmi celles chargées. C'est le seul invariant qui ne dépende pas du format de course : un événement annuel revient chaque année le même jour de semaine. En cas d'égalité, l'édition la plus ancienne fait référence (elle porte le champ d'origine, celui du départ). L'heuristique laisse GPF sur le dimanche et 24H AUTOS / MOTOS / CAMIONS / SBK / LMC sur le samedi.
+
+**`pcorg_summary._load_race_dt` n'est pas corrigé** : il sert aux résumés quotidiens en production, la normalisation reste locale à cette vue.
+
+#### Granularité : 15 min, pas l'heure
+
+**Le pic de présents est LA valeur de référence, et un échantillonnage à l'heure pile le manque.** La vue lisait le document `frequentation`, qui est horaire, alors que le KPI du tableau de bord lit du 15 min — d'où deux chiffres différents pour la même chose :
+
+| | horaire (avant) | 15 min (après) |
+|---|---|---|
+| 24H AUTOS 2025 | 138 600 à 16:00 | **142 622 à 16:15** (+4 022, 2,9 %) |
+| 24H MOTOS 2024 | 26 431 à 13:00 | **26 573 à 14:15** (+142) |
+
+`enclosure_series()` prend la source la plus fine disponible, dans cet ordre : `complet.data_15min` (agrégé sur les portes non ignorées) → `porte_scans.intervals` (ancienne chaîne, 15 min aussi) → `frequentation.data` (horaire, dernier recours). La granularité retenue est exposée dans `edition.granularity`.
+
+⚠️ **`porte_scans` est indexée sur le SLUG** (`24h_du_mans`), pas sur le nom cockpit. Sans l'alias, la requête ne remonte rien et on retombe silencieusement sur l'horaire.
+
+**Un slot vaut un quart d'heure** : `slot = offset * 96 + heure * 4 + minute // 15`. Une édition horaire tombe sur les multiples de 4, ce qui permet de superposer les deux granularités sur le même axe.
+
+⚠️ **`spanGaps` reste désactivé** — il masquerait les vraies coupures de mesure. Les éditions horaires seraient donc réduites à des points isolés : `bridgeHourlyGaps()` comble **uniquement** les intervalles d'exactement une heure. Une heure manquante (8 slots) reste un trou, comme il se doit.
+
+⚠️ Le solde peut être **légèrement négatif** en début de période (une sortie scannée avant toute entrée : −6 sur 24H AUTOS 2025). L'axe des présences est donc planché à zéro via `freqLineOptions(titre, {zeroFloor: true})` — surtout pas globalement, la température peut vraiment descendre sous zéro.
+
+#### Le pic de présents, pas les entrées
+
+Le **nombre de portes en service a changé d'une édition à l'autre** (24H AUTOS : 21 → 22 → 26 → 29). Le total d'entrées 2022 → 2023 bondit de +68 % : c'est la mesure, pas la foule.
+
+Conséquence appliquée partout : **le pic de présents est le KPI principal** (il ne dépend quasiment pas des portes ouvertes en marge), les entrées sont secondaires. Quand `entries_comparable` est faux, la vue affiche un encadré nommant le nombre de portes par édition, et le prompt Claude interdit de commenter les écarts d'entrées.
+
+#### Météo
+
+Collection **`donnees_meteo`** (13 000+ documents, 1990 → 2026, un par jour calendaire). ⚠️ `historique_meteo` est une *route Flask*, pas une collection.
+
+Clés disponibles, et rien d'autre : `Date`, `Température max (°C)`, `Température min (°C)`, `Précipitations (mm)`, `Ensoleillement (h)`. **Ni vent ni conditions** (le vent n'existe que dans `meteo_previsions`, qui sont des prévisions et ne remontent qu'à octobre 2024).
+
+Deux pièges traités par `load_weather` : les clés sont **accentuées** avec repli non accentué et `0` est une valeur légitime (sentinelle `_MISSING`, jamais `.get(k) or default`) ; quelques jours 2025/2026 portent un **`NaN` BSON réel** qui casse `jsonify` (`_clean_number` le replie sur `None`).
+
+#### Règles de visualisation
+
+- **Jamais de double axe.** Fréquentation et température sur deux échelles inventeraient une corrélation. La météo est dans des **bandeaux alignés sous la courbe**, partageant l'axe temporel.
+- Palette validée au script (`bun scripts/validate_palette.js … --mode dark --surface "#0f1620"`) : `#3987e5` (édition analysée), `#008300` (N-1), `#d55181` (N-2). Pire écart daltonisme ΔE 13,0 pour un seuil de 8. **La palette historique du rapport échoue** (`#4ade80` ↔ `#f87171`, ΔE 7,9 en deutéranopie) — hors périmètre, non corrigée.
+- L'année courante porte l'emphase par l'**épaisseur** (2,6px + aire à 10 %), pas par la couleur. Légende maison sous le titre : l'identité ne repose jamais sur la seule couleur.
+- La température est rendue en **marches** (`stepped: 'middle'`) : la mesure est journalière, une courbe lissée inventerait une variation intra-journalière.
+
+#### Perte de contrôle d'accès
+
+`access_control()` détecte les moments où l'enceinte cesse d'être comptée. Deux constats **distincts**, à ne pas confondre :
+
+- **`final_present`** — à la dernière mesure, N personnes sont encore comptées à l'intérieur. Leurs sorties n'ont jamais été enregistrées. C'est structurel : 70 à 94 % du pic selon les éditions (24H AUTOS 2025 : 107 089, soit 77 % du pic).
+- **`events`** — plages où la présence reste au-dessus de 25 % du pic alors que les scans tombent sous 20 % de l'attendu. `controle_non_tenu` quand les portes scannent encore un peu (l'évacuation après l'arrivée, portes ouvertes en grand) ; `mesure_absente` quand aucune donnée n'existe (24H AUTOS 2025 : jeudi 12/06 de 14h à 23h, 0 scan pour 74 024 présents).
+
+⚠️ **Le seuil est calibré par heure du jour, pas sur une médiane globale.** À 3 h du matin l'absence de scan est normale — les spectateurs dorment sur place. Une médiane globale ferait remonter toutes les nuits comme des pertes de contrôle.
+
+⚠️ **La série de présence s'arrête souvent avant celle des portes.** La dernière valeur connue est reportée, sinon la plage la plus intéressante — celle d'après l'arrivée — serait perdue.
+
+Le volume de scans vient de `historique_controle{type:portes}`, pas de `frequentation` : c'est la seule source qui couvre la période d'évacuation.
+
+#### Comparatif des unités entre éditions
+
+`compare_units()` répond à « quelles portes étaient ouvertes cette année et pas l'an dernier » : communes, apparues, disparues.
+
+⚠️ **Seules les portes sont comparables.** `historique_controle{type:portes}` est le seul inventaire par édition (276 unités sur 22 éditions) et il ne contient que des portes — vérifié, aucune hospitalité, tribune ni terrain. Les zones n'existent que pour l'édition courante (`parking_scans` 2025, `complet` 24H MOTOS 2024). La vue le dit explicitement plutôt que de laisser croire à un périmètre complet.
+
+Les unités sans `doors_id` sont classées `sans_lieu` : ce sont des services mobiles (UAM, HELPDESK, LITIGE, SERI, PUNISHER), pas des lieux de passage.
+
+⚠️ **La comparaison porte sur `_id_feature`, jamais sur le nom.** Les libellés changent d'une édition à l'autre — `PORTE HOUX` → `PORTE HOUX 5`, `PASSERELLE ANNEXE` → `PORTE ANNEXE`, `PORTE KARTING PIETON` → `…PIETONS` — pour le même `_id_feature`. Comparer les noms faisait lire 4 suppressions et 4 créations là où il n'y avait que des renommages : 17 portes communes annoncées vs 2023 au lieu de 21. Les renommages sont désormais listés à part (`renamed`), ni comme apparition ni comme disparition. Le nom ne sert de clé que pour les unités `sans_lieu`, qui n'ont pas de feature.
+
+#### Sortie de la vue Fréquentation
+
+`body.cat-freq` masque la recherche, la liste des unités, le sélecteur et le bouton Pics — la vue ne représente aucune liste d'unités. En sortir sans défaire cet état laissait **l'onglet allumé et la navigation escamotée** : le rapport paraissait bloqué sur Fréquentation.
+
+`exitFrequentation()` restaure la catégorie précédente (mémorisée dans `lastUnitCategory` à l'entrée) et est appelée par `showHome`, `showPeaksOverview`, `showZoneDay` et `selectZone` — tous les chemins de sortie.
+
+#### Jours de semaine sur l'axe
+
+L'axe porte deux lignes : le décalage au jour de course (`J-2`) **et** le jour de semaine (`jeu.`). La course tombant chaque année le même jour, un offset désigne toujours le même jour — et c'est en jours de semaine que raisonne l'exploitation. `FREQ_RACE_DATE` est posé au rendu depuis l'édition analysée ; `offsetWeekday()` en dérive le nom. L'infobulle et le prompt Claude reprennent la même convention.
+
+#### Jours non mesurés
+
+Les jours à zéro en début de période (24H MOTOS 2023 J-5, LMC 2022 J-4) sont des **capteurs pas encore actifs**, pas une fréquentation nulle. Portés par `measured: false`, affichés `--` avec la mention « aucune mesure ce jour », exclus des comparaisons et signalés comme tels au modèle.
+
+#### Éditions exclues
+
+`EXCLUDED_EDITIONS = {('GPE', 2022), ('GPE', 2023)}` : GPE 2023 a une date de course fausse (2023-09-09 pour des données d'octobre — l'alignement serait décalé de 28 jours) et GPE 2022 a un cumul d'entrées qui finit à 0. `SBK` et `SUPERBIKE` 2024 sont les mêmes 80 enregistrements sous deux noms, dédoublonnés via `event_aliases`.
+
+#### Analyse rédigée embarquée
+
+Le rapport est un **fichier HTML autonome, zéro appel réseau**. L'analyse est donc générée **à la génération du rapport**, jamais à l'ouverture — un appel par régénération, jamais un par lecture.
+
+`scan_analysis.generate_frequentation_analysis()` calcule une **empreinte SHA-256 des données envoyées au modèle** et réutilise l'analyse déjà en base si elle est identique. Une régénération pour une correction d'affichage ne consomme donc aucun token — c'est la seule économie qui compte vraiment, celle de l'appel qu'on ne fait pas. `force=True` la contourne.
+
+Le prompt ne contient **que les agrégats journaliers** (7 jours × 3 éditions + météo + insights, ~3 200 tokens) : jamais la courbe horaire, qui coûterait dix fois le prompt entier sans rien apporter. Contrat JSON strict à 6 clés : `synthese`, `dynamique_journaliere`, `controle_acces`, `comparaison_editions`, `effet_meteo`, `recommandations`.
+
+Sans `ANTHROPIC_API_KEY`, le rapport se génère **sans la section** (log en warning, `info.frequentation_analysis == 'absente'`) — jamais d'échec de génération. `POST /scan-report/generate` accepte `{"analysis": false}` pour couper l'analyse franchement, et la modale de régénération expose une case à cocher pour ça.
+
+⚠️ **L'appel au modèle est la seule étape lente de la génération.** Mesuré sur ce poste (sans clé API donc sans appel) : 219 ms pour 24H MOTOS 2024, 415 ms pour 24H AUTOS 2025, rendu HTML de 1,3 Mo compris. Avec la clé, l'appel `claude-sonnet-5` ajoute 30 à 90 s, doublés en cas de retry sur troncature, plus l'exponential backoff sur 429/503/529. Une régénération qui « prend des plombes » attend le modèle, rien d'autre. Le libellé de progression le nomme explicitement et un compteur de secondes tourne, pour ne pas lire l'attente comme un blocage.
+
+⚠️ **`pcorg_summary.call_claude` filtre les sections sur `section_keys`, par défaut les neuf clés du résumé pcorg.** Tout appelant qui impose un autre contrat JSON **doit** passer `section_keys`, sinon ses sections sont silencieusement remplacées par des sections pcorg vides. C'était le cas de `generate_scan_analysis` (5 sections sur 7 perdues) avant que le paramètre n'existe.
+
+### Collections créées
+
+| Collection | Contenu |
+|------------|---------|
+| `historique_controle_archive` | Générations remplacées, append-only, pas de TTL |
+| `scan_feature_overrides` | Choix manuels par nom de scan : `_id_feature`, `category`, `ignored` et/ou `no_location`. Index unique `(scan_name, kind, event, year)` |
+| `scan_analyses` | Analyses Claude historisées. `kind` vaut `scans` ou `frequentation` ; les documents antérieurs au champ sont des analyses de scans. Les analyses de fréquentation portent une `fingerprint` (réutilisation sans appel API) |
+
+### Pièges
+
+- **`year` doit être un `int`.** Un `str` créerait un doublon sous l'index unique au lieu de mettre à jour.
+- **`event` est le nom cockpit** (`24H MOTOS`), jamais le slug `24h_du_mans` de l'ancienne chaîne. `EVENT_ALIASES` ne sert plus qu'au repli sur les rapports historiques.
+- **Datetimes naïfs Paris.** Écrire de l'UTC décalerait silencieusement les données de 2 h en été. Seul `parametrages.data.globalHoraires.race` est en UTC avec un `Z` : tout ce qui entre passe par `scan_import.to_naive_paris_iso()`.
+- **`SystemExit` dérive de `BaseException`** : dans un thread de travail, un `except Exception` ne l'attrape pas, le thread meurt en silence et le job reste bloqué. Les workers attrapent `BaseException` et libèrent la cible dans un `finally`.
+- **Les noms d'unités viennent du classeur téléversé**, donc d'une source non maîtrisée. Toute interpolation dans du HTML côté JS doit passer par `esc()` — sinon un fichier avec une zone nommée `<img onerror=…>` exécute du script dans une page admin.
+- **`reports/` et `uploads/scan_imports/` sont dans `.gitignore`.** Un rapport pèse 0,3 à 1,2 Mo.
+- **`openpyxl` est désormais importé dans le process Flask** (et plus seulement par les scripts autonomes) : il est dans `requirements.txt`, avec `numpy` et `pandas` qui manquaient déjà (importés par `analyse_ops.py` au chargement — sans eux l'app ne démarre pas sur un environnement neuf).
+- **La météo est dans `donnees_meteo`, pas `historique_meteo`** (qui est une route Flask). Les clés sont accentuées, `0` est légitime, et quelques jours portent un `NaN` BSON réel.
+- **Les comparaisons entre éditions ne valent que sur le pic de présents.** Le nombre de portes en service a changé chaque année ; les totaux d'entrées comparés d'une édition à l'autre mesurent le dispositif, pas la foule.
+- **Le champ `race` porte le départ jusqu'en 2024 et l'arrivée en 2025.** Toute comparaison pluriannuelle qui l'utilise brut est décalée d'un jour sans que rien ne le signale.
+- **Un jour à zéro en début de période n'est pas une fréquentation nulle** mais un capteur pas encore actif. Le confondre ferait lire une chute inexistante.
+- **`call_claude` filtre les sections sur `section_keys`** (défaut : les neuf clés pcorg). Un nouveau contrat JSON sans ce paramètre perd toutes ses sections en silence.
+- **La catégorie d'une unité est choisie à l'import**, pas devinée du nom. Le repli par préfixe (`TRIBUNE`, `P `, `AA `, conventions 24H AUTOS) ne sert plus qu'aux rapports générés avant cette bascule et au chemin `parking_scans`. Un couple réimporté porte sa catégorie explicite, y compris pour les libellés hors convention (`BEAUSEJOUR`, `KARTING SUD`).
+- **Changer la catégorie change l'effectif recommandé**, puisqu'elle détermine la capacité (650 personnes/h vs 250 véhicules/h). Ce n'est pas un réglage d'affichage.
