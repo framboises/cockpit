@@ -729,12 +729,27 @@
         }
         mappingCtx.units = d.units || [];
         mappingCtx.categories = d.categories || [];
+        mappingCtx.live = !!d.live;
         refreshMappingCount();
-        notes.appendChild(note("info",
-          "Source : <strong>" + esc(d.source_file || "import") + "</strong>" +
-          (d.imported_at ? " du " + esc(d.imported_at.slice(0, 16)) : "") +
-          ". Les corrections reconstruisent les trois documents depuis " +
-          "<code>complet</code>, sans reprendre le classeur."));
+        // Edition live : unites lues dans l'archive du controle d'acces, aucun
+        // document a reecrire. La case << memoriser >> decide seulement de la
+        // portee des choix (tous les evenements ou cette edition seule).
+        var saveLbl = document.querySelector("#scan-mapping-save + span");
+        if (d.live) {
+          notes.appendChild(note("info",
+            "Source : <strong>controle d'acces live</strong> (archive HSH). " +
+            "Les corrections sont memorisees dans les choix de mapping, sans " +
+            "reecrire aucun document, puis le rapport est regenere."));
+          if (saveLbl) saveLbl.textContent =
+            "Appliquer aussi aux autres evenements et aux imports (sinon : cette edition seulement)";
+        } else {
+          notes.appendChild(note("info",
+            "Source : <strong>" + esc(d.source_file || "import") + "</strong>" +
+            (d.imported_at ? " du " + esc(d.imported_at.slice(0, 16)) : "") +
+            ". Les corrections reconstruisent les trois documents depuis " +
+            "<code>complet</code>, sans reprendre le classeur."));
+          if (saveLbl) saveLbl.textContent = "Memoriser ces choix pour les prochains imports";
+        }
         $("#scan-mapping-only-unresolved").checked = false;
         renderMapRows(mappingCtx);
         refreshIgnoreRecap(mappingCtx);
@@ -793,8 +808,12 @@
         return;
       }
       var lines = ["<strong>" + d.changed + " unite(s) modifiee(s).</strong>",
-        "Documents reecrits : " + esc((d.rewritten || []).join(", ")) +
-        " — les precedents sont archives.",
+        d.live
+          ? "Choix memorises (" + esc(d.overrides_saved || 0) + ", portee : " +
+            (d.overrides_scope === "global" ? "tous les evenements" : "cette edition") +
+            ") — aucun document reecrit, source controle d'acces live."
+          : "Documents reecrits : " + esc((d.rewritten || []).join(", ")) +
+            " — les precedents sont archives.",
         d.units + " unite(s) retenue(s)."];
       if (d.ignored && d.ignored.length) {
         lines.push("Ignorees : " + esc(d.ignored.join(", ")) + ".");
@@ -890,6 +909,9 @@
           if (r.source === "legacy") {
             lines.push("Source : ancienne chaine (aucun document " +
                        "<code>complet</code> importe pour ce couple).");
+          } else if (r.source === "live_controle") {
+            lines.push("Source : controle d'acces live (archive HSH, " +
+                       "construit en memoire, aucun document ecrit).");
           }
           $("#scan-regen-body").appendChild(note("ok", lines.join("<br>")));
 

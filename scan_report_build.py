@@ -7,9 +7,11 @@ Excel) et le contrat d'entree du gabarit HTML existant. Les fonctions
 appelees telles quelles : le gabarit (2 140 lignes) et toutes les fonctions
 d'analyse restent intacts.
 
-Deux sources possibles, dans cet ordre :
-  1. `historique_controle{type: "complet"}` — nouvelle chaine d'import
-  2. `parking_scans` / `porte_scans` — ancienne chaine
+Trois sources possibles, dans cet ordre :
+  1. l'archive du controle d'acces live (editions 2026 suivies en direct) :
+     pseudo `complet` construit EN MEMOIRE par live_scan_units, jamais ecrit
+  2. `historique_controle{type: "complet"}` — nouvelle chaine d'import
+  3. `parking_scans` / `porte_scans` — ancienne chaine
 
 Le repli garantit que le rapport historique reste reproductible a l'identique
 tant qu'aucun `complet` n'a ete importe pour ce couple.
@@ -110,9 +112,60 @@ def _legacy_enrichment(db, event, year):
     return by_name
 
 
+SOURCE_LIVE = 'live_controle'
+SOURCE_IMPORT = 'complet'
+SOURCE_LEGACY = 'legacy'
+
+
+def live_units_doc(db, event, year):
+    """Pseudo document `complet` construit en memoire depuis l'archive du
+    controle d'acces live, ou None si l'edition n'en a pas. Ne leve pas : une
+    archive illisible fait retomber sur l'import."""
+    try:
+        import live_scan_units
+        return live_scan_units.build_live_complet(db, event, int(year))
+    except Exception:
+        logger.warning('Unites live indisponibles pour %s %s', event, year,
+                       exc_info=True)
+        return None
+
+
+def resolve_units_doc(db, event, year):
+    """(document d'unites, source) pour une edition, ou (None, None).
+
+    Ordre : archive du controle d'acces live (editions 2026 suivies en
+    direct), puis `historique_controle{type: complet}` (import Excel). Le
+    document live n'existe QU'EN MEMOIRE : il n'est jamais ecrit dans
+    historique_controle, qui sert de reference N-1 a la TV, a la montre et
+    aux projections d'affluence.
+    """
+    doc = live_units_doc(db, event, year)
+    if doc is not None:
+        return doc, SOURCE_LIVE
+    doc = db['historique_controle'].find_one(
+        {'event': event, 'year': int(year), 'type': 'complet'})
+    if doc:
+        return doc, SOURCE_IMPORT
+    return None, None
+
+
+def source_label(doc, source):
+    """Libelle de provenance affiche dans l'en-tete du rapport."""
+    if source == SOURCE_LIVE:
+        return "controle d'acces live (archive HSH)"
+    if source == SOURCE_IMPORT:
+        name = (doc or {}).get('source_file')
+        return 'import Excel' + (' (%s)' % name if name else '')
+    return 'ancienne chaine (parking_scans / porte_scans)'
+
+
 def build_payload_from_complet(db, event, year, progress_cb=None,
-                               legacy_event=None, legacy_year=None):
+                               legacy_event=None, legacy_year=None,
+                               doc=None, source=SOURCE_IMPORT):
     """Construit le payload du gabarit depuis le document `complet`.
+
+    `doc` : document d'unites deja resolu (pseudo `complet` live en memoire,
+    cf. resolve_units_doc) ; a defaut, le `complet` importe est relu.
 
     Retourne (payload, info) ou `info` porte ce qui a ete ecarte, pour que
     l'UI puisse le dire plutot que de laisser un trou silencieux.
@@ -121,9 +174,11 @@ def build_payload_from_complet(db, event, year, progress_cb=None,
         if progress_cb:
             progress_cb(pct, msg)
 
-    _p(8, 'Lecture du document complet')
-    doc = db['historique_controle'].find_one(
-        {'event': event, 'year': int(year), 'type': 'complet'})
+    if doc is None:
+        _p(8, 'Lecture du document complet')
+        doc = db['historique_controle'].find_one(
+            {'event': event, 'year': int(year), 'type': 'complet'})
+        source = SOURCE_IMPORT
     if not doc:
         raise gpr.ReportGenerationError(
             'Aucun document complet pour %s/%s' % (event, year))
@@ -133,8 +188,11 @@ def build_payload_from_complet(db, event, year, progress_cb=None,
         raise gpr.ReportGenerationError(
             'Le document complet de %s/%s ne contient aucune unite' % (event, year))
 
-    enrichment = _legacy_enrichment(db, legacy_event or event,
-                                    legacy_year or int(year))
+    # Les renforts de l'ancienne chaine ne concernent que les imports : une
+    # edition live calcule les siens depuis ses propres boitiers.
+    enrichment = ({} if source == SOURCE_LIVE else
+                  _legacy_enrichment(db, legacy_event or event,
+                                     legacy_year or int(year)))
     tripodes_flag = gpr.load_tripodes_flag(db)
 
     zones, portes = [], []
@@ -216,14 +274,27 @@ def build_payload_from_complet(db, event, year, progress_cb=None,
         'generated_at': datetime.now().isoformat(timespec='seconds'),
         'zones': zones,
         'portes': portes,
+        # Provenance, affichee dans l'en-tete du tableau de bord.
+        'source': source,
+        'source_label': source_label(doc, source),
     }
     info = {
-        'source': 'complet',
+        'source': source,
+        'source_label': payload['source_label'],
         'zones': len(zones),
         'portes': len(portes),
         'omitted_units': omitted,
         'autre_scans_not_shown': autre_not_shown,
     }
+    live = doc.get('live') if source == SOURCE_LIVE else None
+    if live:
+        conv = live.get('conventions') or {}
+        payload['source_note'] = (
+            'Portes : %s. Zones : %s. Refus : %s.'
+            % (conv.get('portes'), conv.get('zones'), conv.get('refus')))
+        info['live'] = {k: live.get(k) for k in (
+            'window', 'direct', 'collections', 'tx_docs', 'refused_total',
+            'refused_detailed', 'excluded_areas')}
     return payload, info
 
 
@@ -232,7 +303,10 @@ def _build_frequentation(db, event, year, info, with_analysis=True,
     """Bloc frequentation, ou None. Un echec ici ne doit pas perdre le rapport."""
     import scan_frequentation
     try:
-        block = scan_frequentation.build_frequentation_block(db, event, year)
+        # Archive du controle d'acces live d'abord, import en repli, edition
+        # par edition (meme regle que le RETEX).
+        block = scan_frequentation.build_frequentation_block(
+            db, event, year, source_priority=scan_frequentation.LIVE_FIRST)
     except Exception:
         logger.warning('Bloc frequentation indisponible pour %s %s',
                        event, year, exc_info=True)
@@ -242,6 +316,8 @@ def _build_frequentation(db, event, year, info, with_analysis=True,
         return None
 
     info['frequentation_editions'] = [e['year'] for e in block['editions']]
+    info['frequentation_sources'] = {str(e['year']): e.get('source')
+                                     for e in block['editions']}
     info['entries_comparable'] = block.get('entries_comparable')
 
     # L'analyse est EMBARQUEE ici et pas appelee a l'ouverture : le rapport est
@@ -277,25 +353,41 @@ def generate(db, event, year, progress_cb=None, with_analysis=True,
              created_by=None):
     """Genere le rapport pour (event, year) et retourne un descriptif.
 
-    Utilise le document `complet` s'il existe, sinon retombe sur l'ancienne
-    chaine `parking_scans` / `porte_scans` via l'alias d'evenement — c'est ce
-    qui garde 24H AUTOS 2025 reproductible.
+    Source, par ordre de priorite : l'archive du controle d'acces live
+    (pseudo `complet` en memoire, live_scan_units), puis le document
+    `complet` importe, puis l'ancienne chaine `parking_scans` /
+    `porte_scans` via l'alias d'evenement — c'est ce qui garde 24H AUTOS 2025
+    reproductible.
     """
     def _p(pct, msg):
         if progress_cb:
             progress_cb(pct, msg)
 
     year = int(year)
-    try:
-        payload, info = build_payload_from_complet(db, event, year, progress_cb)
-    except gpr.ReportGenerationError:
-        _p(10, 'Pas de document complet, repli sur l\'ancienne chaine')
-        slug = _legacy_slug(event)
-        payload = gpr.build_payload_legacy(db, slug, year, progress_cb)
-        payload['event'] = event
-        info = {'source': 'legacy', 'zones': len(payload['zones']),
-                'portes': len(payload['portes']), 'omitted_units': [],
-                'autre_scans_not_shown': 0}
+    _p(5, 'Recherche de l\'archive du controle d\'acces live')
+    payload = info = None
+    doc = live_units_doc(db, event, year)
+    if doc is not None:
+        try:
+            payload, info = build_payload_from_complet(
+                db, event, year, progress_cb, doc=doc, source=SOURCE_LIVE)
+        except gpr.ReportGenerationError:
+            logger.warning('Archive live de %s %s inexploitable, repli sur '
+                           'l\'import', event, year, exc_info=True)
+    if payload is None:
+        try:
+            payload, info = build_payload_from_complet(db, event, year, progress_cb)
+        except gpr.ReportGenerationError:
+            _p(10, 'Pas de document complet, repli sur l\'ancienne chaine')
+            slug = _legacy_slug(event)
+            payload = gpr.build_payload_legacy(db, slug, year, progress_cb)
+            payload['event'] = event
+            payload['source'] = SOURCE_LEGACY
+            payload['source_label'] = source_label(None, SOURCE_LEGACY)
+            info = {'source': SOURCE_LEGACY, 'source_label': payload['source_label'],
+                    'zones': len(payload['zones']),
+                    'portes': len(payload['portes']), 'omitted_units': [],
+                    'autre_scans_not_shown': 0}
 
     # Effectifs : calcules ici, pour les deux chemins de generation. Derives du
     # calendrier via `_id_feature`, sans aucune saisie — un rapport regenere

@@ -838,6 +838,21 @@ HTML_TEMPLATE = r"""<!doctype html>
     border-radius: 8px; padding: 16px 20px 18px; margin-bottom: 22px;
     border-left: 3px solid var(--accent); }
   .analysis .a-overview { font-size: 14px; line-height: 1.55; margin: 0 0 6px; }
+  /* Repli des blocs d'analyse (makeFold) */
+  .analysis:has(> .fold:not([open])) { padding-top: 10px; padding-bottom: 10px; margin-bottom: 14px; }
+  .fold-summary { display: flex; align-items: baseline; gap: 10px; cursor: pointer;
+    list-style: none; user-select: none; }
+  .fold-summary::-webkit-details-marker { display: none; }
+  .fold-summary::before { content: '\25B8'; color: var(--muted); font-size: 12px;
+    transition: transform .15s ease; flex: none; }
+  .fold[open] > .fold-summary::before { transform: rotate(90deg); }
+  .fold-title { font-size: 11px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.6px; font-weight: 600; flex: none; }
+  .fold-preview { font-size: 13px; color: var(--text); opacity: .85; flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fold[open] > .fold-summary .fold-preview { display: none; }
+  .fold-hint { font-size: 11px; color: var(--accent); flex: none; margin-left: auto; }
+  .fold-body { margin-top: 10px; }
   .analysis h4 { font-size: 11px; color: var(--muted); text-transform: uppercase;
     letter-spacing: 0.6px; margin: 14px 0 6px; font-weight: 600; }
   .analysis ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.55; }
@@ -1219,6 +1234,43 @@ function el(tag, attrs, ...children) {
   return node;
 }
 
+// Blocs de texte repliables (analyse en tete des pages Zones / Portes,
+// analyse redigee de la Frequentation). Ils poussaient les graphiques sous la
+// ligne de flottaison. Replies par defaut, avec un apercu d'une ligne ; le
+// choix est memorise par type de bloc (localStorage, protege : le rapport peut
+// etre ouvert depuis un fichier ou un navigateur qui le refuse).
+const FOLD_PREFIX = 'scanrpt-fold-';
+function foldIsOpen(key) {
+  try { return localStorage.getItem(FOLD_PREFIX + key) === 'open'; } catch (e) { return false; }
+}
+function foldRemember(key, open) {
+  try { localStorage.setItem(FOLD_PREFIX + key, open ? 'open' : 'closed'); } catch (e) {}
+}
+function firstSentence(text, max) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  const m = t.match(/^.*?[.!?](\s|$)/);
+  const s = (m ? m[0] : t).trim();
+  return s.length > max ? s.slice(0, max - 1).trim() + '…' : s;
+}
+function makeFold(host, key, title, preview) {
+  const det = el('details', { class: 'fold' });
+  det.open = foldIsOpen(key);
+  det.appendChild(el('summary', { class: 'fold-summary' },
+    el('span', { class: 'fold-title' }, title),
+    preview ? el('span', { class: 'fold-preview' }, preview) : null,
+    el('span', { class: 'fold-hint' }, det.open ? 'Replier' : 'Deplier')));
+  const body = el('div', { class: 'fold-body' });
+  det.appendChild(body);
+  det.addEventListener('toggle', () => {
+    foldRemember(key, det.open);
+    const hint = det.querySelector('.fold-hint');
+    if (hint) hint.textContent = det.open ? 'Replier' : 'Deplier';
+  });
+  host.appendChild(det);
+  return body;
+}
+
 function kpiCard(label, value, sub, valueClass) {
   return el('div', { class: 'kpi' },
     el('div', { class: 'kpi-label' }, label),
@@ -1334,8 +1386,16 @@ function renderAnalysis(a, host, z) {
     host.replaceChildren(el('div', { class: 'a-empty' }, 'Pas assez de donnees pour generer une analyse.'));
     return;
   }
-  host.replaceChildren();
-  host.appendChild(el('p', { class: 'a-overview' }, reformatDatesInText(a.overview)));
+  const panel = host;
+  panel.replaceChildren();
+  const overview = reformatDatesInText(a.overview);
+  const nWarn = (a.warnings || []).length;
+  // Une seule cle pour toutes les zones et portes : replier une page replie
+  // les suivantes, on ne re-replie pas a chaque unite consultee.
+  host = makeFold(panel, 'unit-analysis',
+    'Analyse' + (nWarn ? ' · ' + nWarn + ' alerte' + (nWarn > 1 ? 's' : '') : ''),
+    firstSentence(overview, 160));
+  host.appendChild(el('p', { class: 'a-overview' }, overview));
 
   if (a.warnings && a.warnings.length) {
     a.warnings.forEach(w => {
@@ -2176,8 +2236,9 @@ function renderFreqAnalysis(host, f) {
     .filter(k => (sections[k] || '').trim());
   if (!order.length) return;
 
-  const box = el('div', { class: 'analysis' });
-  box.appendChild(el('h4', null, 'Analyse redigee'));
+  const panel = el('div', { class: 'analysis' });
+  const box = makeFold(panel, 'freq-analysis', 'Analyse redigee',
+    firstSentence(sections.synthese || sections[order[0]], 160));
   order.forEach(k => {
     const sec = el('div', { class: 'a-section' });
     if (k !== 'synthese') sec.appendChild(el('h4', null, FREQ_ANALYSIS_TITLES[k]));
@@ -2199,7 +2260,7 @@ function renderFreqAnalysis(host, f) {
     .filter(Boolean).join(' - ');
   if (meta) box.appendChild(el('div', { class: 'a-empty' },
     'Genere par ' + meta + '. Relire avant diffusion.'));
-  host.appendChild(box);
+  host.appendChild(panel);
 }
 
 function renderFrequentation() {
@@ -2263,7 +2324,8 @@ function renderFrequentation() {
     sw.style.height = ed.is_current ? '4px' : '2px';
     item.appendChild(sw);
     item.appendChild(document.createTextNode(
-      ed.year + (ed.is_current ? ' (edition analysee)' : '')));
+      ed.year + (ed.is_current ? ' (edition analysee)' : '') +
+      (ed.source === 'live_controle' ? ' - source : controle acces live' : '')));
     legend.appendChild(item);
   });
   main.appendChild(legend);
@@ -2276,6 +2338,15 @@ function renderFrequentation() {
       '). Les totaux d\'entrees ne sont donc pas comparables d\'une annee sur ' +
       'l\'autre : la comparaison porte sur le pic de presents, qui ne depend ' +
       'quasiment pas des portes ouvertes en marge.'));
+  }
+  const mixed = (f.insights || {}).mixed_sources;
+  if (mixed) {
+    main.appendChild(el('div', { class: 'freq-note' },
+      'Sources de mesure differentes (' +
+      Object.keys(mixed).sort().map(y => y + ' : ' + mixed[y]).join(', ') +
+      ') : live_controle = compteur de l\'enceinte (presents hors vehicules, ' +
+      'pic = plus haut releve), scan_import = somme des portes du classeur. ' +
+      'Un ecart entre ces editions peut venir de la mesure.'));
   }
 
   // Les analyses textuelles ouvrent la vue : on lit les conclusions, puis les
@@ -2379,7 +2450,15 @@ function renderHome() {
     ? 'Du ' + fmtDateFr(allDays[0]) + ' au ' + fmtDateFr(allDays[allDays.length - 1]) +
       ' \u00b7 ' + allDays.length + ' jours d\'activite'
     : '-';
-  main.appendChild(el('div', { class: 'subtitle' }, periodLbl));
+  // Provenance des donnees : archive du controle d'acces live ou import
+  // Excel. Les deux ne comptent pas exactement la meme chose (refus,
+  // vehicules), d'ou la note de conventions pour le live.
+  const srcLbl = DATA.source_label ? ' · Source : ' + DATA.source_label : '';
+  main.appendChild(el('div', { class: 'subtitle' }, periodLbl + srcLbl));
+  if (DATA.source_note) {
+    main.appendChild(el('div', { class: 'subtitle', style: 'font-size:11px;opacity:.75' },
+      DATA.source_note));
+  }
 
   // ============== Section 1 : Fréquentation enceinte ==============
   const agg = aggregatePortesEnceinte();

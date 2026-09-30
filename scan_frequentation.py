@@ -60,6 +60,18 @@ ACCESS_MIN_HOURS = 2            # une heure isolee n'est pas un evenement
 #              l'alignement serait decale de 28 jours
 EXCLUDED_EDITIONS = {('GPE', 2022), ('GPE', 2023)}
 
+# Sources de frequentation, par ordre de preference (parametre
+# `source_priority`). Le DEFAUT reste l'import seul : presents_etat.historique_n1
+# (TV, montre, N-1 du widget affluence) et le rapport matinal passent par ces
+# fonctions sans le parametre et ne doivent pas changer de chiffre.
+#   - 'scan_import'   : chaine historique_controle (complet -> porte_scans ->
+#                       frequentation), quelle que soit l'origine du document ;
+#   - 'live_controle' : archives du controle d'acces live (live_frequentation).
+SOURCE_IMPORT = 'scan_import'
+SOURCE_LIVE = 'live_controle'
+DEFAULT_SOURCE_PRIORITY = (SOURCE_IMPORT,)
+LIVE_FIRST = (SOURCE_LIVE, SOURCE_IMPORT)
+
 # Sentinelle : `0` est une valeur meteo legitime, donc `.get(k) or defaut`
 # effacerait les journees sans pluie. Meme precaution que analyse_ops.py:1054.
 _MISSING = object()
@@ -250,8 +262,13 @@ def presence_series(records, race_date):
     return out
 
 
-def enclosure_series(db, event, year):
+def enclosure_series(db, event, year, source_priority=DEFAULT_SOURCE_PRIORITY):
     """Serie de presence de l'enceinte, au pas le plus fin disponible.
+
+    `source_priority` contenant 'live_controle' AVANT 'scan_import' : la serie
+    rejouee du controle d'acces live (live_frequentation) est prise d'abord
+    quand l'edition a une archive live. Par defaut, import seul -- comportement
+    historique, inchange.
 
     Retourne (records, granularite) ou `records` a la meme forme que
     `frequentation.data` : {date, entree, sortie, present} en CUMULS.
@@ -263,6 +280,16 @@ def enclosure_series(db, event, year):
     142 622 au quart d'heure, soit 4 022 personnes (2,9 %). C'est ce qui
     faisait diverger le KPI de la page d'accueil et celui de cette vue.
     """
+    for src in source_priority:
+        if src == SOURCE_IMPORT:
+            break
+        if src == SOURCE_LIVE:
+            raw = _load_live(db, event, year)
+            if raw:
+                import live_frequentation
+                return live_frequentation.enclosure_records(raw)
+    if SOURCE_IMPORT not in source_priority:
+        return [], 'horaire'
     doc = db['historique_controle'].find_one(
         {'event': event, 'year': int(year), 'type': 'complet'})
     if doc:
@@ -475,12 +502,68 @@ def access_control(freq_doc, portes_doc):
     return out
 
 
-def load_editions(db, event, year, back=2):
+def _load_live(db, event, year):
+    """Edition rejouee depuis les archives du controle d'acces live, ou None.
+    Ne leve jamais : un echec retombe sur la source suivante."""
+    try:
+        import live_frequentation
+        return live_frequentation.load_live_edition(db, event, year)
+    except Exception:
+        logger.warning('Frequentation live indisponible pour %s %s', event, year,
+                       exc_info=True)
+        return None
+
+
+def _guarded_race_date(db, event, year):
+    """Date de course AVEC garde sur l'annee et alias (watch_peaks.resolve_race_dt).
+
+    `_race_date` rend pour LE MANS CLASSIC 2025 la course du 05/07/2026 (le
+    parametrages 2025 porte la date 2026) : alignee telle quelle, l'edition
+    tombait a J-369 et faisait basculer la normalisation du jour de semaine
+    de l'edition analysee. Il ignore aussi les sigles (LMC, SBK) de
+    historique_controle. Utilisee seulement hors du mode par defaut."""
+    try:
+        import watch_peaks
+        dt = watch_peaks.resolve_race_dt(db, event, year)
+    except Exception:
+        logger.warning('Date de course gardee illisible pour %s %s', event, year,
+                       exc_info=True)
+        return None
+    if dt is None:
+        return None
+    from zoneinfo import ZoneInfo
+    return dt.astimezone(ZoneInfo('Europe/Paris')).date()
+
+
+def _import_item(db, event, candidate, guard_year=False):
+    """Edition issue de historique_controle (chaine d'import), ou None.
+
+    guard_year=True (modes non par defaut) : une date de course hors de son
+    annee, ou introuvable, est resolue par _guarded_race_date."""
+    doc = _find_frequentation(db, event, candidate)
+    race = _race_date(db, event, candidate)
+    if guard_year and doc and (race is None or race.year != int(candidate)):
+        race = _guarded_race_date(db, event, candidate)
+    if doc and race:
+        records, granularity = enclosure_series(db, event, candidate)
+        return {'year': candidate, 'doc': doc, 'race': race,
+                'records': records, 'granularity': granularity}
+    if doc and not race:
+        logger.warning('Edition %s %s ignoree : date de course introuvable',
+                       event, candidate)
+    return None
+
+
+def load_editions(db, event, year, back=2, source_priority=DEFAULT_SOURCE_PRIORITY):
     """Edition courante + les `back` precedentes reellement exploitables.
 
     Retourne une liste [plus recente -> plus ancienne]. Une edition sans
     document `frequentation`, sans date de course, ou explicitement exclue est
     ignoree — sans faire echouer les autres.
+
+    `source_priority` s'applique A CHAQUE EDITION (l'analysee comme les
+    precedentes) : la premiere source disponible l'emporte. Par defaut,
+    import seul (comportement historique).
     """
     raw = []
     y = int(year)
@@ -489,15 +572,21 @@ def load_editions(db, event, year, back=2):
     # biennal, 24H CAMIONS n'a pas 2025).
     while len(raw) <= back and candidate > y - (back + 4):
         if (event, candidate) not in EXCLUDED_EDITIONS:
-            doc = _find_frequentation(db, event, candidate)
-            race = _race_date(db, event, candidate)
-            if doc and race:
-                records, granularity = enclosure_series(db, event, candidate)
-                raw.append({'year': candidate, 'doc': doc, 'race': race,
-                            'records': records, 'granularity': granularity})
-            elif doc and not race:
-                logger.warning('Edition %s %s ignoree : date de course introuvable',
-                               event, candidate)
+            item = None
+            for src in source_priority:
+                if src == SOURCE_IMPORT:
+                    item = _import_item(
+                        db, event, candidate,
+                        guard_year=tuple(source_priority) != DEFAULT_SOURCE_PRIORITY)
+                elif src == SOURCE_LIVE:
+                    live = _load_live(db, event, candidate)
+                    if live:
+                        item = {'year': candidate, 'race': live['race_date'],
+                                'live': live}
+                if item:
+                    break
+            if item:
+                raw.append(item)
         candidate -= 1
 
     races = _normalize_race_dates(event, raw)
@@ -506,6 +595,11 @@ def load_editions(db, event, year, back=2):
     editions = []
     for item in raw:
         race = races[item['year']]
+        if item.get('live') is not None:
+            import live_frequentation
+            editions.append(live_frequentation.to_edition(
+                db, item['live'], race, item['year'] == y, geo))
+            continue
         portes_doc = _portes_doc(db, event, item['year'])
         units = door_inventory(portes_doc, geo)
         editions.append({
@@ -786,9 +880,16 @@ def compute_insights(editions, weather):
 # Bloc injecte dans le payload du rapport
 # ---------------------------------------------------------------------------
 
-def build_frequentation_block(db, event, year, back=2):
-    """Bloc `DATA.frequentation`, ou None si l'edition courante est absente."""
-    editions = load_editions(db, event, year, back=back)
+def build_frequentation_block(db, event, year, back=2,
+                              source_priority=DEFAULT_SOURCE_PRIORITY):
+    """Bloc `DATA.frequentation`, ou None si l'edition courante est absente.
+
+    `source_priority=LIVE_FIRST` : archive du controle d'acces live d'abord,
+    import en repli, edition par edition (RETEX, rapport de scans). Le defaut
+    (import seul) est celui de tous les autres appelants.
+    """
+    editions = load_editions(db, event, year, back=back,
+                             source_priority=source_priority)
     if not editions or not any(e['is_current'] for e in editions):
         return None
 
@@ -798,7 +899,17 @@ def build_frequentation_block(db, event, year, back=2):
 
     current = next(e for e in editions if e['is_current'])
     measured = [d for d in current['days'] if d['measured']]
-    return {
+    extra = {}
+    if tuple(source_priority) != DEFAULT_SOURCE_PRIORITY:
+        by_year = {str(e['year']): e.get('source') for e in editions}
+        extra = {'source_priority': list(source_priority), 'sources_by_year': by_year}
+        # Compteur Area (live) et somme des portes du classeur (import) ne
+        # mesurent pas le meme perimetre : leurs entrees ne se comparent pas,
+        # quel que soit le nombre de portes.
+        if len({e.get('source') == SOURCE_LIVE for e in editions}) > 1:
+            insights['entries_comparable'] = False
+            insights['mixed_sources'] = by_year
+    block = {
         'event': event,
         'year': int(year),
         'editions': editions,
@@ -816,3 +927,5 @@ def build_frequentation_block(db, event, year, back=2):
         'entries_comparable': insights.get('entries_comparable'),
         'analysis': None,  # rempli a la generation si la cle API est presente
     }
+    block.update(extra)
+    return block

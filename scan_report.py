@@ -179,10 +179,21 @@ def _resolve_event_year():
 def scan_report_page():
     payload = getattr(request, 'user_payload', {})
     event, year, file_path = _resolve_event_year()
+    report_available = bool(file_path and os.path.isfile(file_path))
+    live_available = False
+    if not report_available:
+        # Ecran vide : dire qu'une archive live suffit, sans import.
+        try:
+            from app import db as app_db
+            import live_frequentation
+            live_available = live_frequentation.has_live_archive(app_db, event, int(year))
+        except Exception:
+            logger.warning('Detection de l\'archive live impossible', exc_info=True)
     return render_template(
         'scan_report.html',
         event=event, year=year,
-        report_available=bool(file_path and os.path.isfile(file_path)),
+        report_available=report_available,
+        live_available=live_available,
         user_roles=payload.get('roles', []),
         user_firstname=payload.get('firstname', ''),
         user_lastname=payload.get('lastname', ''),
@@ -200,7 +211,9 @@ def scan_report_static():
 
 @scan_report_bp.route('/scan-report/available')
 def scan_report_available():
-    """Couples (event, year) dont le fichier HTML existe reellement sur disque.
+    """Couples (event, year) dont le fichier HTML existe reellement sur disque,
+    plus les editions ayant une archive du controle d'acces live (rapport
+    generable sans import ; `generated_at` null tant qu'il n'est pas genere).
 
     Renvoie les noms d'evenement tels qu'affiches dans la sidebar cockpit (via
     EVENT_ALIASES) pour que le JS puisse marquer les options correspondantes,
@@ -234,6 +247,21 @@ def scan_report_available():
                 best[key] = {'event': name, 'year': rep['year'],
                              'generated_at': rep['generated_at'],
                              'size_kb': rep['size_kb']}
+    # Editions suivies par le controle d'acces live : leur rapport se construit
+    # depuis l'archive HSH, sans aucun import. On les liste meme sans rapport
+    # genere (`generated_at` null) pour qu'on sache qu'il suffit de regenerer.
+    live = set()
+    try:
+        import live_scan_units
+        live = {(e, str(y)) for e, y in live_scan_units.list_live_editions(app_db)}
+    except Exception:
+        logger.warning('Inventaire des editions live indisponible', exc_info=True)
+    for key, row in best.items():
+        row['source'] = 'live_controle' if key in live else None
+    for ev, yr in live:
+        if (ev, yr) not in best:
+            best[(ev, yr)] = {'event': ev, 'year': yr, 'generated_at': None,
+                              'size_kb': None, 'source': 'live_controle'}
     out = sorted(best.values(), key=lambda r: (r['event'], r['year']))
     return jsonify(out)
 
@@ -879,7 +907,7 @@ def scan_report_analysis_generate():
 
     if not pcorg_api_key_present():
         return _err('cle_api_absente', 503,
-                    detail='ANTHROPIC_API_KEY non configuree sur le serveur')
+                    detail='COCKPIT_ANTHROPIC_API_KEY non configuree sur le serveur')
 
     target = ('analysis', event, year)
     with _JOBS_LOCK:

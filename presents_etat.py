@@ -91,6 +91,34 @@ def principal_location(global_doc):
 # Debut de cumul d'un compteur
 # ----------------------------------------------------------------------
 
+def detect_resets(releves):
+    """Remises a zero d'un compteur : [instant de chaque remise], dans l'ordre.
+
+    `releves` : iterable (timestamp, entries) TRIE par timestamp. Une chute de
+    `entries` n'est retenue que si le releve suivant reste sous la valeur
+    d'avant la chute : une lecture fautive isolee (0 puis retour a la valeur
+    d'avant) n'est pas une remise a zero. Une chute sur le DERNIER releve est
+    retenue (rien ne la dement encore). Pur : partage par counter_baseline
+    (direct) et live_frequentation (archives)."""
+    resets = []
+    prev = None
+    pending = None  # (timestamp, entries avant la chute) : chute a confirmer
+    for ts, brut in releves:
+        e = _int(brut, None)
+        if e is None:
+            continue
+        if pending is not None:
+            if e < pending[1]:
+                resets.append(pending[0])
+            pending = None
+        if prev is not None and e < prev:
+            pending = (ts, prev)
+        prev = e
+    if pending is not None:
+        resets.append(pending[0])
+    return resets
+
+
 def counter_baseline(db, location_id, location_type, activation_ts):
     """Instant (UTC naif) depuis lequel le compteur cumule : derniere remise a
     zero (chute de `entries`) depuis l'activation du live-controle, sinon
@@ -106,27 +134,14 @@ def counter_baseline(db, location_id, location_type, activation_ts):
     if hit and maintenant - hit[0] < BASELINE_TTL:
         return hit[1]
 
-    baseline = activation_ts
     filtre = {"requested_location_id": str(location_id)}
     if location_type:
         filtre["requested_location_type"] = location_type
     if activation_ts:
         filtre["timestamp"] = {"$gte": activation_ts}
-    prev = None
-    pending = None  # (timestamp, entries avant la chute) : chute a confirmer
-    for s in db["data_access"].find(filtre, {"_id": 0, "timestamp": 1, "entries": 1}).sort("timestamp", 1):
-        e = _int(s.get("entries"), None)
-        if e is None:
-            continue
-        if pending is not None:
-            if e < pending[1]:
-                baseline = pending[0]
-            pending = None
-        if prev is not None and e < prev:
-            pending = (s["timestamp"], prev)
-        prev = e
-    if pending is not None:
-        baseline = pending[0]
+    curseur = db["data_access"].find(filtre, {"_id": 0, "timestamp": 1, "entries": 1}).sort("timestamp", 1)
+    resets = detect_resets((s["timestamp"], s.get("entries")) for s in curseur)
+    baseline = resets[-1] if resets else activation_ts
 
     _BASELINE_CACHE[cle] = (maintenant, baseline)
     return baseline
@@ -155,10 +170,18 @@ def fallback_start(now_utc=None):
 
 def checkpoint_parents(db):
     """{checkpoint_id: {id de zone (area / venue) en str}}."""
+    return parents_from_structure(db["hsh_structure"].find(
+        {"location_type": "Checkpoint"},
+        {"_id": 0, "location_id": 1, "parent_area": 1, "parent_venue": 1}))
+
+
+def parents_from_structure(docs):
+    """Documents de structure HSH (Checkpoint) -> {checkpoint_id: {id de zone}}.
+    Pur : sert au direct (hsh_structure) comme aux archives."""
     out = {}
-    for cp in db["hsh_structure"].find(
-            {"location_type": "Checkpoint"},
-            {"_id": 0, "location_id": 1, "parent_area": 1, "parent_venue": 1}):
+    for cp in docs:
+        if cp.get("location_type") not in (None, "Checkpoint"):
+            continue
         pids = set()
         for cle in ("parent_area", "parent_venue"):
             parent = cp.get(cle) or {}
@@ -253,26 +276,10 @@ class Vehicules:
                           for lid, b in zone_baselines(db, locations, activation_ts).items()}
         debut = min([self.repli] + list(self.baselines.values()))
         parents = checkpoint_parents(db)
-        evenements = {}
-        for agg in db["hsh_transactions_agg"].find(
-                {"tranche": {"$gte": debut.replace(tzinfo=timezone.utc)}},
-                {"_id": 0, "checkpoint_id": 1, "tranche": 1,
-                 "entrees_vehicules": 1, "sorties_vehicules": 1}):
-            zones = parents.get(agg.get("checkpoint_id"))
-            tr = _utc_naif(agg.get("tranche"))
-            if not zones or tr is None:
-                continue
-            delta = (agg.get("entrees_vehicules") or 0) - (agg.get("sorties_vehicules") or 0)
-            for z in zones:
-                evenements.setdefault(z, []).append((tr, delta))
-        self.prefix = {}
-        for z, evs in evenements.items():
-            evs.sort(key=lambda x: x[0])
-            cumul, run = [], 0
-            for _, d in evs:
-                run += d
-                cumul.append(run)
-            self.prefix[z] = ([e[0] for e in evs], cumul)
+        self.prefix = vehicle_prefixes(db["hsh_transactions_agg"].find(
+            {"tranche": {"$gte": debut.replace(tzinfo=timezone.utc)}},
+            {"_id": 0, "checkpoint_id": 1, "tranche": 1,
+             "entrees_vehicules": 1, "sorties_vehicules": 1}), parents)
 
     def presents_at(self, zone_id, at_dt, corr_veh=0, until_end=False):
         """Vehicules presents dans la zone au releve at_dt (UTC naif).
@@ -281,14 +288,49 @@ class Vehicules:
         entry = self.prefix.get(str(zone_id))
         if not entry or at_dt is None:
             return 0
-        times, cumul = entry
         debut = self.baselines.get(str(zone_id)) or self.repli
-        hi = len(times) if until_end else bisect.bisect_right(times, to_tranche_label(at_dt))
-        lo = bisect.bisect_left(times, debut)
-        if hi <= lo:
-            return 0
-        total = cumul[hi - 1] - (cumul[lo - 1] if lo > 0 else 0)
-        return max(total - (corr_veh or 0), 0)
+        return solde_vehicules(entry, debut,
+                               None if until_end else to_tranche_label(at_dt), corr_veh)
+
+
+def vehicle_prefixes(agg_docs, parents):
+    """Tranches hsh_transactions_agg (ou archive) -> {zone: (tranches triees,
+    cumul du solde vehicules)}. Pur : partage par Vehicules (direct) et
+    live_frequentation (archives). `tranche` reste dans son echelle (heure de
+    Paris etiquetee UTC), naive."""
+    evenements = {}
+    for agg in agg_docs:
+        zones = parents.get(agg.get("checkpoint_id"))
+        tr = _utc_naif(agg.get("tranche"))
+        if not zones or tr is None:
+            continue
+        delta = (agg.get("entrees_vehicules") or 0) - (agg.get("sorties_vehicules") or 0)
+        for z in zones:
+            evenements.setdefault(z, []).append((tr, delta))
+    prefix = {}
+    for z, evs in evenements.items():
+        evs.sort(key=lambda x: x[0])
+        cumul, run = [], 0
+        for _, d in evs:
+            run += d
+            cumul.append(run)
+        prefix[z] = ([e[0] for e in evs], cumul)
+    return prefix
+
+
+def solde_vehicules(entry, debut_label, at_label=None, corr_veh=0):
+    """Solde vehicules d'une zone sur les tranches [debut_label, at_label]
+    (echelle `tranche`) ; at_label None = sans borne haute. Moins corr_veh,
+    plancher 0 -- exactement Vehicules.presents_at."""
+    if not entry:
+        return 0
+    times, cumul = entry
+    hi = len(times) if at_label is None else bisect.bisect_right(times, at_label)
+    lo = bisect.bisect_left(times, debut_label)
+    if hi <= lo:
+        return 0
+    total = cumul[hi - 1] - (cumul[lo - 1] if lo > 0 else 0)
+    return max(total - (corr_veh or 0), 0)
 
 
 def serie_presents(db, location, debut_utc, fin_utc, global_doc=None, vehicules=None,

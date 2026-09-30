@@ -16,6 +16,11 @@ Equivalence verifiee sur 24H MOTOS 2024, chiffre par chiffre :
 ⚠ Ne fonctionne que pour les couples ayant un document `complet`. Ceux qui
 tombent encore sur l'ancienne chaine (`parking_scans`) doivent etre importes
 une fois. C'est le cas de 24H AUTOS 2025.
+
+Editions suivies par le controle d'acces live : les unites viennent de
+l'archive HSH (pseudo `complet` en memoire, live_scan_units). Une correction
+n'y reecrit AUCUN document : elle est seulement memorisee dans
+scan_feature_overrides (apply_mapping_live), puis le rapport est regenere.
 """
 
 import logging
@@ -36,6 +41,27 @@ class MappingError(Exception):
         self.code = code
         self.status = status
         self.detail = detail
+
+
+SOURCE_LIVE = 'live_controle'
+
+
+def _units_doc(db, event, year):
+    """(document d'unites, source) : archive live d'abord, `complet` sinon.
+
+    Une edition suivie par le controle d'acces live n'a pas besoin d'import :
+    ses unites sont construites en memoire depuis l'archive HSH
+    (scan_report_build.resolve_units_doc). Seules les editions sans archive
+    ni import levent `complet_absent`.
+    """
+    import scan_report_build
+    doc, source = scan_report_build.resolve_units_doc(db, event, year)
+    if not doc:
+        raise MappingError(
+            'complet_absent', 404,
+            'Aucun document complet pour %s %s : importer le classeur une '
+            'fois pour pouvoir editer le mapping.' % (event, year))
+    return doc, source
 
 
 def _complet_doc(db, event, year):
@@ -63,13 +89,15 @@ def _as_datetime(raw):
 # Lecture
 # ---------------------------------------------------------------------------
 
-def load_mapping(db, event, year):
+def load_mapping(db, event, year, doc=None, source=None):
     """Unites du document `complet`, avec candidats et suggestions.
 
     Meme forme que la reponse d'`import/analyze`, pour que l'UI puisse
-    reutiliser la table de mapping telle quelle.
+    reutiliser la table de mapping telle quelle. Pour une edition live, les
+    unites viennent de l'archive du controle d'acces (`live: true`).
     """
-    doc = _complet_doc(db, event, year)
+    if doc is None:
+        doc, source = _units_doc(db, event, year)
     geo = scan_import._load_geo_index(db)
 
     units = []
@@ -117,6 +145,9 @@ def load_mapping(db, event, year):
         'source_file': doc.get('source_file'),
         'imported_at': str(doc.get('imported_at') or ''),
         'race': doc.get('race'),
+        'source': source or 'complet',
+        'live': source == SOURCE_LIVE,
+        'source_label': doc.get('source_label'),
     }
 
 
@@ -231,10 +262,26 @@ def apply_mapping(db, event, year, changes, applied_by=None,
     de mapping reste annulable.
     """
     year = int(year)
-    doc = _complet_doc(db, event, year)
+    doc, source = _units_doc(db, event, year)
+    if source == SOURCE_LIVE:
+        return apply_mapping_live(db, event, year, changes, doc,
+                                  applied_by=applied_by,
+                                  save_overrides=save_overrides)
     units = doc.get('complet') or []
-    changes = changes or {}
+    touched, now_ignored, now_restored, overrides = _apply_changes(
+        units, changes)
+    return _rewrite_documents(db, event, year, doc, units, touched,
+                              now_ignored, now_restored, overrides,
+                              applied_by, save_overrides)
 
+
+def _apply_changes(units, changes):
+    """Applique `changes` aux unites (en place).
+
+    Retourne (touched, now_ignored, now_restored, overrides) ; `overrides`
+    porte, par (kind, name), les seuls champs modifies.
+    """
+    changes = changes or {}
     touched = 0
     now_ignored, now_restored = [], []
     overrides = {}
@@ -289,7 +336,12 @@ def apply_mapping(db, event, year, changes, applied_by=None,
 
         if changed:
             touched += 1
+    return touched, now_ignored, now_restored, overrides
 
+
+def _rewrite_documents(db, event, year, doc, units, touched, now_ignored,
+                       now_restored, overrides, applied_by, save_overrides):
+    """Reecrit complet / portes / frequentation (editions importees)."""
     if not touched:
         return {'changed': 0, 'units': len(retained(units)),
                 'ignored': [], 'restored': [], 'rewritten': []}
@@ -344,4 +396,79 @@ def apply_mapping(db, event, year, changes, applied_by=None,
         'rewritten': rewritten,
         'overrides_saved': saved,
         'enceinte_entree': freq[-1]['entree'] if freq else 0,
+    }
+
+
+def _full_state_override(unit):
+    """Etat complet d'une unite, au format de scan_import.save_overrides.
+
+    Un override CIBLE (event, year) remplace entierement l'override global
+    du meme nom a la resolution (scan_import._load_overrides) : n'y mettre
+    que le champ modifie effacerait, pour cette edition, un rattachement ou
+    une categorie memorises globalement. On y ecrit donc tout ce qui a ete
+    decide a la main.
+    """
+    out = {'ignored': bool(unit.get('ignored')),
+           'no_location': unit.get('feature_source') == 'sans_lieu'}
+    if unit.get('feature_source') == 'manuel' and unit.get('_id_feature'):
+        out['_id_feature'] = unit['_id_feature']
+        out['feature_collection'] = unit.get('feature_collection')
+    if unit.get('category_source') == 'manuel':
+        out['category'] = unit.get('category')
+    return out
+
+
+def apply_mapping_live(db, event, year, changes, doc, applied_by=None,
+                       save_overrides=False):
+    """Edition live : les choix ne vont QUE dans scan_feature_overrides.
+
+    Les unites d'une edition live sont reconstruites en memoire depuis
+    l'archive du controle d'acces a chaque generation : il n'y a aucun
+    document a reecrire, et surtout rien a ecrire dans historique_controle
+    (reference N-1 de la TV, de la montre et des projections). Le choix
+    << memoriser pour les prochains imports >> decide de la portee :
+    coche, override global (tous evenements et imports) ; decoche, override
+    cible sur ce couple (event, year).
+    """
+    year = int(year)
+    units = doc.get('complet') or []
+    touched, now_ignored, now_restored, _ = _apply_changes(units, changes)
+    if not touched:
+        return {'changed': 0, 'units': len(retained(units)), 'ignored': [],
+                'restored': [], 'rewritten': [], 'live': True}
+    if not retained(units):
+        raise MappingError(
+            'toutes_les_unites_ignorees', 400,
+            'Toutes les unites seraient ecartees : le rapport serait vide.')
+
+    touched_keys = {k for k in (changes or {})}
+    overrides = {}
+    for unit in units:
+        key = '%s|%s' % (unit.get('kind'), unit.get('name'))
+        if key not in touched_keys:
+            continue
+        val = _full_state_override(unit)
+        val['save'] = True
+        if not save_overrides:
+            val['event'] = event
+            val['year'] = year
+        overrides[(unit.get('kind'), unit.get('name'))] = val
+    try:
+        scan_import.ensure_indexes(db)
+    except Exception:
+        logger.warning('Creation des index scan_import impossible', exc_info=True)
+    saved = scan_import.save_overrides(db, overrides, created_by=applied_by)
+
+    enceinte = sum(int(u.get('total_entree') or 0) for u in retained(units)
+                   if u.get('kind') == 'porte')
+    return {
+        'changed': touched,
+        'units': len(retained(units)),
+        'ignored': sorted(now_ignored),
+        'restored': sorted(now_restored),
+        'rewritten': [],
+        'overrides_saved': saved,
+        'overrides_scope': 'global' if save_overrides else 'edition',
+        'live': True,
+        'enceinte_entree': enceinte,
     }

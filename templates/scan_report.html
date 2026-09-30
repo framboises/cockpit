@@ -12,7 +12,9 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 
   <style>
-    .app-layout { display: flex; height: 100vh; overflow: hidden; }
+    /* 100dvh : sur iPhone, 100vh inclut la zone sous la barre d'adresse de
+       Safari et coupait le bas de la page. */
+    .app-layout { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
     /* .scan-report-main complete .app-main (qui gere deja le margin-left de la
        sidebar fixe cockpit) : sans .app-main, l'iframe passe SOUS la sidebar et
        la masque. */
@@ -23,6 +25,16 @@
     .scan-report-header h1 { margin: 0; font-size: 18px; font-weight: 600;
       letter-spacing: 0.4px; }
     .scan-report-header .meta { color: #8aa0bd; font-size: 13px; }
+    /* En-tete sombre : le burger commun prend var(--text), illisible ici. */
+    .scan-report-header .header-burger { color: #e6ecf5; align-self: center; margin: -6px 0 -6px -8px; }
+    @media (max-width: 820px) {
+      .scan-report-header { padding: 10px 12px; gap: 6px 12px; align-items: center; }
+      .scan-report-header h1 { font-size: 16px; flex: 1; min-width: 0; }
+      .scan-report-header .meta { display: none; }
+      /* Les 5 actions debordaient a droite de l'ecran : elles passent sous le titre. */
+      .scan-report-header .scan-report-actions { flex-basis: 100%; margin-left: 0;
+        display: flex; flex-wrap: wrap; gap: 6px; }
+    }
     .scan-report-iframe { flex: 1; width: 100%; border: 0; min-height: 0; }
     /* --- Etat vide : circuit dessine, voiture en tour de chauffe --------- */
     .scan-report-empty { padding: 32px 40px; color: #8aa0bd;
@@ -274,6 +286,12 @@
   <!-- ===== MAIN ===== -->
   <main class="app-main scan-report-main">
     <div class="scan-report-header">
+      {# Sur mobile la sidebar est hors ecran, et son propre bouton avec elle :
+         ce burger (visible sous 820 px, branche par sidebar.js) est le seul
+         acces au choix de l'evenement et au retour a l'accueil. #}
+      <button class="header-burger" id="header-burger-btn" type="button" aria-label="Menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
       <h1>Rapport scans &mdash; {{ event|replace('_', ' ')|upper }} {{ year }}</h1>
       <span class="meta">analyse 15 min / horaire / quotidienne par zone et par porte</span>
       <div class="scan-report-actions">
@@ -325,11 +343,20 @@
       <div class="scan-empty-text">
         <p class="scan-empty-title">Aucun rapport pour
           <strong>{{ event }} {{ year }}</strong></p>
+        {% if live_available %}
+        <p class="scan-empty-hint">
+          Cette edition a une archive du controle d'acces live : aucun import
+          n'est necessaire. Generer le rapport avec le bouton
+          <span class="material-symbols-outlined">refresh</span>
+          en haut a droite.
+        </p>
+        {% else %}
         <p class="scan-empty-hint">
           Deposer un classeur de scans avec le bouton
           <span class="material-symbols-outlined">upload_file</span>
           en haut a droite, puis regenerer.
         </p>
+        {% endif %}
         <p class="scan-empty-egg" id="scan-empty-egg" hidden></p>
       </div>
     </div>
@@ -936,13 +963,27 @@
           host.textContent = 'Aucun rapport genere.';
           return;
         }
-        host.textContent = 'Disponible : ';
-        rows.forEach(function(r, i){
+        // Rapports generes d'un cote, editions live encore a generer de
+        // l'autre (archive du controle d'acces, aucun import necessaire).
+        var done = rows.filter(function(r){ return r.generated_at; });
+        var todo = rows.filter(function(r){ return !r.generated_at; });
+        host.textContent = done.length ? 'Disponible : ' : 'Aucun rapport genere.';
+        done.forEach(function(r, i){
           if (i) host.appendChild(document.createTextNode(', '));
           var b = document.createElement('b');
-          b.textContent = r.event + ' ' + r.year;
+          b.textContent = r.event + ' ' + r.year + (r.source === 'live_controle' ? ' (live)' : '');
           host.appendChild(b);
         });
+        if (todo.length) {
+          host.appendChild(document.createElement('br'));
+          host.appendChild(document.createTextNode('Archive live, a generer : '));
+          todo.forEach(function(r, i){
+            if (i) host.appendChild(document.createTextNode(', '));
+            var b = document.createElement('b');
+            b.textContent = r.event + ' ' + r.year;
+            host.appendChild(b);
+          });
+        }
       })
       .catch(function(err){ console.error('Erreur chargement disponibilite :', err); });
   })();
@@ -954,6 +995,8 @@
   window.__userIsManager = {{ "true" if ("manager" in user_roles or "admin" in user_roles) else "false" }};
 </script>
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_reports.js') }}"></script>
 </body>
 </html>
