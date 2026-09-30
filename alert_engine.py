@@ -14,7 +14,9 @@ import os
 import sys
 import math
 import logging
+import re
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 from pymongo import MongoClient
 from bson.objectid import ObjectId
@@ -132,21 +134,27 @@ def build_context(db, sim_time=None):
             best = p
             break
 
-    # Fallback : prendre le parametrage dont les dates sont les plus proches
+    # Fallback : le parametrage dont les dates sont les plus proches, a 7 jours
+    # au plus (montage, demontage, jours sans public). L'ancienne boucle
+    # refaisait le test min <= today <= max et ne trouvait jamais rien de plus.
     if not best:
-        for p in params:
+        try:
+            today_d = datetime.strptime(today_str, "%Y-%m-%d").date()
+        except ValueError:
+            today_d = None
+        best_gap = None
+        for p in params if today_d else []:
             gh = (p.get("data") or {}).get("globalHoraires")
             if not gh or not gh.get("dates"):
                 continue
-            dates = [d.get("date") for d in gh["dates"] if d.get("date")]
-            if not dates:
-                continue
-            # Si les dates sont dans le futur proche ou passe recent (7 jours)
-            min_d = min(dates)
-            max_d = max(dates)
-            if min_d <= today_str <= max_d:
-                best = p
-                break
+            for d in gh["dates"]:
+                try:
+                    dd = datetime.strptime(str(d.get("date") or "")[:10], "%Y-%m-%d").date()
+                except ValueError:
+                    continue
+                gap = abs((dd - today_d).days)
+                if gap <= 7 and (best_gap is None or gap < best_gap):
+                    best, best_gap = p, gap
 
     if best:
         gh = (best.get("data") or {}).get("globalHoraires", {})
@@ -568,12 +576,20 @@ def detect_meteo_threshold(definition, context):
 
     severity = "alerte" if max_val >= alert_threshold else "vigilance"
     slug = definition["slug"]
-    dedup = "%s-%s" % (slug, today_str)
+    dedup = "%s-%s-%s" % (slug, today_str, severity)
 
-    # Ne pas re-declencher si deja envoye aujourd'hui avec meme severite ou pire
-    existing = db["cockpit_active_alerts"].find_one({"dedup_key": dedup})
-    if existing:
+    # Une fois par jour et par niveau, aggravation comprise : une vigilance
+    # levee le matin n'empeche plus l'alerte de l'apres-midi. La memoire est
+    # dans l'etat du moteur, pas dans l'alerte active : celle-ci disparait au
+    # bout de 3 h (TTL), et la meme vigilance re-sonnait alors dans la journee.
+    rank = 2 if severity == "alerte" else 1
+    state_col = db["cockpit_alert_engine_state"]
+    state_key = "meteo-%s-%s" % (slug, today_str)
+    state = state_col.find_one({"_id": state_key}) or {}
+    if state.get("rank", 0) >= rank:
         return None
+    state_col.update_one({"_id": state_key},
+                         {"$set": {"rank": rank, "at": now}}, upsert=True)
 
     if field == "vent_rafale":
         title = "ALERTE VENT" if severity == "alerte" else "VIGILANCE VENT"
@@ -930,6 +946,12 @@ _URGENCY_LABELS = {
 
 _URGENCY_ICON = {"EU": "crisis_alert", "UA": "warning", "UR": "info", "IMP": "person"}
 
+_CATEGORY_LABELS = {
+    "PCO.Secours": "Secours", "PCO.Securite": "Securite", "PCO.Technique": "Technique",
+    "PCO.Flux": "Flux", "PCO.Fourriere": "Fourriere", "PCO.Information": "Information",
+    "PCO.MainCourante": "", "PCS.Information": "PCS Information", "PCS.Surete": "PCS Surete",
+}
+
 
 def detect_pcorg_urgency(definition, context):
     """Detecte les nouvelles fiches main courante correspondant a une
@@ -953,9 +975,15 @@ def detect_pcorg_urgency(definition, context):
     # Fiches recentes ouvertes avec un niveau d'urgence
     cutoff = now - timedelta(seconds=lookback)
     query = {
-        "category": {"$regex": "^" + category_prefix},
+        # Prefixe echappe : "PCO." matchait n'importe quel caractere apres PCO
+        "category": {"$regex": "^" + re.escape(category_prefix)},
         "niveau_urgence": {"$in": [k for k, v in _URGENCY_RANK.items() if v >= min_rank]},
         "status_code": {"$ne": 10},
+        # Fiche auto-creee par un SOS tablette : l'alerte "SOS TABLETTE" a deja
+        # ete levee par /field/sos. Sans cette exclusion, le moteur relevait
+        # une seconde alerte plein ecran "ALERTE SECOURS" pour le meme SOS, un
+        # cycle plus tard : le SOS semblait revenir, decale d'un poste a l'autre.
+        "content_category.field_sos": {"$ne": True},
         "$or": [
             {"ts": {"$gte": cutoff}},
             {"synced_at": {"$gte": cutoff}},
@@ -966,14 +994,27 @@ def detect_pcorg_urgency(definition, context):
     if not fiches:
         return None
 
+    # Memoire des fiches deja signalees (24 h). Sans elle, `synced_at` etant
+    # rafraichi a chaque modification SQL, une fiche redeclenchait l'alerte
+    # des que la precedente expirait (15 min).
+    seen_col = db["pcorg_alerted"]
+    try:
+        seen_col.create_index("at", expireAfterSeconds=24 * 3600)
+    except Exception:
+        pass
+
     results = []
     for f in fiches:
         sql_id = f.get("sql_id") or str(f.get("_id", ""))
         niveau = f.get("niveau_urgence", "")
-        dedup = "pcorg-urg-%s-%s" % (definition["slug"], sql_id)
+        # Le niveau fait partie de la cle : une aggravation (UR -> UA) realerte
+        dedup = "pcorg-urg-%s-%s-%s" % (definition["slug"], sql_id, niveau)
 
         if db["cockpit_active_alerts"].find_one({"dedup_key": dedup}):
             continue
+        if seen_col.find_one({"_id": dedup}):
+            continue
+        seen_col.update_one({"_id": dedup}, {"$set": {"at": now}}, upsert=True)
 
         cat = f.get("category", "")
         text = f.get("text") or f.get("text_full") or ""
@@ -985,8 +1026,14 @@ def detect_pcorg_urgency(definition, context):
         time_str = ""
         if f.get("time_local"):
             time_str = f["time_local"][:5]
+        elif isinstance(f.get("ts"), datetime):
+            ts_f = f["ts"] if f["ts"].tzinfo else f["ts"].replace(tzinfo=timezone.utc)
+            time_str = ts_f.astimezone(ZoneInfo("Europe/Paris")).strftime("%H:%M")
 
-        title = "MAIN COURANTE %s" % niveau
+        # Titre porteur de la categorie ("MAIN COURANTE FLUX") : le niveau est
+        # deja affiche en badge, la categorie n'apparaissait nulle part.
+        cat_label = _CATEGORY_LABELS.get(cat, cat.split(".")[-1])
+        title = ("MAIN COURANTE %s" % cat_label).upper().strip()
         msg_parts = []
         if text:
             msg_parts.append(text[:200])
@@ -1008,6 +1055,9 @@ def detect_pcorg_urgency(definition, context):
                 "sql_id": sql_id,
                 "category": cat,
                 "niveau_urgence": niveau,
+                "text": text[:200],
+                "zone": area_desc,
+                "operator": operator,
             },
             "dedup_key": dedup,
             "triggeredAt": now,
@@ -1015,6 +1065,525 @@ def detect_pcorg_urgency(definition, context):
         })
 
     return results if results else None
+
+
+# ---------------------------------------------------------------------------
+# Saturation porte prevue (door_saturation_forecast)
+# ---------------------------------------------------------------------------
+#
+# Source live : hsh_transactions_agg (live_controle.py), une ligne par
+# checkpoint (tripode, PDA) et par tranche de 5 min, avec gate_name. C'est le
+# seul debit PAR PORTE disponible en direct : data_access ne suit que des Area
+# (compteurs cumules, pas de porte).
+#
+# ATTENTION FUSEAUX : `tranche` est en HEURE DE PARIS etiquetee UTC (le champ
+# Handshake date_utc porte l'heure locale). On compare donc tout en heure de
+# Paris naive, jamais en UTC.
+#
+# Capacite d'une porte = somme des capacites de ses appareils actifs sur la
+# derniere heure (tripode ~900/h, PDA ~650/h : p99 mesure par appareil et par
+# tranche de 5 min sur les archives 2026, et 650/h/agent est la norme de la
+# chaine scans). Surchargeable porte par porte (params.capacities).
+#
+# Prevision : debit courant (15 min) x profil N-1 de la MEME porte, aligne sur
+# le jour de course (decalage arrondi a la semaine : la course revient chaque
+# annee le meme jour de semaine, ce qui neutralise le champ `race` qui porte
+# tantot le depart tantot l'arrivee). Sans N-1 exploitable : tendance lineaire
+# des 30 dernieres minutes, bornee.
+
+DOOR_SAT_SERVICES = ("HELPDESK", "UAM", "LITIGE", "SERI", "PUNISHER")
+DOOR_SAT_DEFAULTS = {
+    "horizon_min": 30,        # regarde jusqu'a 30 min devant
+    "threshold_pct": 90,      # % de la capacite qui declenche
+    "min_rate": 300,          # /h : en dessous, jamais d'alerte (nuit, portes calmes)
+    "window_min": 15,         # fenetre du debit courant
+    "trend_window_min": 30,   # fenetre de la tendance (repli sans N-1)
+    "max_growth": 3.0,        # borne du facteur de croissance prevu (profil N-1)
+    # Sans N-1 : extrapoler la tendance des 30 dernieres min ? Desactive par
+    # defaut : rejouee sur les 5 editions 2026, elle faisait passer la
+    # precision de 72 % a 55 % (1 alerte tendance sur 4 seulement suivie d'un
+    # depassement reel) pour 5 saturations de plus anticipees sur 17.
+    "trend_fallback": False,
+    "trend_max_growth": 1.5,  # borne de la tendance (bien plus bruitee que le N-1)
+    "min_n1_rate": 120,       # /h : en dessous, le profil N-1 est du bruit
+    "stale_min": 20,          # collecteur muet depuis plus longtemps -> rien
+    "dedup_min": 30,          # une alerte par porte par 30 min
+    "sens": "entrees",        # "entrees" ou "total" (entrees + sorties)
+    "device_capacity_h": {"tripode": 900, "pda": 650, "autre": 650},
+    "capacities": {},         # {"PORTE NORD PIETONS": 9000} : surcharge par porte
+    "doors": [],              # filtre (vide = toutes les portes)
+    "exclude": list(DOOR_SAT_SERVICES),
+}
+
+
+def _door_norm(name):
+    """Nom de porte comparable d'une edition a l'autre (casse, accents,
+    PORTAIL/PORTE, pluriels PIETONS/VEHICULES)."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(name or "")).encode("ascii", "ignore").decode("ascii")
+    s = re.sub(r"[^A-Z0-9]+", " ", s.upper()).strip()
+    words = []
+    for w in s.split():
+        w = {"PORTAIL": "PORTE", "PIETONS": "PIETON", "VEHICULES": "VEHICULE"}.get(w, w)
+        words.append(w)
+    return " ".join(words)
+
+
+def _device_kind(cp_name):
+    n = str(cp_name or "").upper()
+    if n.startswith("TRI"):
+        return "tripode"
+    if "PDA" in n:
+        return "pda"
+    return "autre"
+
+
+def _floor5(dt):
+    return dt.replace(minute=dt.minute - dt.minute % 5, second=0, microsecond=0)
+
+
+def _paris_label(now_utc):
+    """UTC conscient -> heure de Paris naive (echelle de `tranche`)."""
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
+    return now_utc.astimezone(ZoneInfo("Europe/Paris")).replace(tzinfo=None)
+
+
+def door_rate(buckets, end, window_min):
+    """Debit (/h) sur [end - window, end) a partir de {debut de tranche 5 min:
+    compte}. Une tranche absente vaut zero : le collecteur n'ecrit que les
+    tranches ou il y a eu un passage (la fraicheur est verifiee a part)."""
+    start = end - timedelta(minutes=window_min)
+    total = sum(v for t, v in buckets.items() if start <= t < end)
+    return total * 60.0 / window_min
+
+
+def door_trend_slope(buckets, end, trend_window_min):
+    """Pente (debit /h par minute) des moindres carres sur les tranches de
+    [end - trend_window, end). None s'il y a moins de 3 tranches."""
+    n = int(trend_window_min // 5)
+    if n < 3:
+        return None
+    xs, ys = [], []
+    for i in range(n):
+        t = end - timedelta(minutes=5 * (n - i))
+        xs.append(5.0 * i + 2.5)
+        ys.append(buckets.get(t, 0) * 12.0)
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    den = sum((x - mx) ** 2 for x in xs)
+    if den <= 0:
+        return None
+    return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / den
+
+
+def n1_window_rate(series, center, width_min):
+    """Debit N-1 (/h) moyen sur [center - w/2, center + w/2].
+
+    `series` = [(debut naif, duree_min, compte)], triee, sans trou (les
+    tranches vides valent 0, cf. load_n1_door_series). Le debit de chaque
+    tranche est pose en son MILIEU et interpole lineairement entre deux
+    milieux : une serie horaire lue en marches d'escalier faisait bondir le
+    rapport futur/courant a chaque changement d'heure (08:55 -> 09:05 : x3
+    sur une rampe d'ouverture), ce qui declenchait des alertes a HH:05.
+    Echantillonnage a la minute. None hors de la plage mesuree.
+    """
+    pts = sorted((start + timedelta(minutes=dur / 2.0), count * 60.0 / dur)
+                 for start, dur, count in series if dur)
+    if not pts:
+        return None
+    first_start = min(s for s, _, _ in series)
+    last_end = max(s + timedelta(minutes=d) for s, d, _ in series)
+    times = [p[0] for p in pts]
+
+    def _at(t):
+        if t < first_start or t > last_end:
+            return None
+        if t <= times[0]:
+            return pts[0][1]
+        if t >= times[-1]:
+            return pts[-1][1]
+        i = 1
+        while times[i] < t:
+            i += 1
+        (t0, r0), (t1, r1) = pts[i - 1], pts[i]
+        f = (t - t0).total_seconds() / max((t1 - t0).total_seconds(), 1.0)
+        return r0 + (r1 - r0) * f
+
+    n = max(int(width_min), 1)
+    a = center - timedelta(minutes=width_min / 2.0)
+    vals = [v for v in (_at(a + timedelta(minutes=k + 0.5)) for k in range(n)) if v is not None]
+    if not vals:
+        return None
+    return sum(vals) / len(vals)
+
+
+def _densify(points, dur):
+    """[(debut, compte)] -> [(debut, dur, compte)] sans trou entre le premier
+    et le dernier point : le collecteur n'ecrit pas les tranches vides, et
+    interpoler par-dessus un trou inventerait des passages."""
+    if not points:
+        return []
+    d = {}
+    for t, c in points:
+        d[t] = d.get(t, 0) + c
+    ts = sorted(d)
+    out, t = [], ts[0]
+    while t <= ts[-1]:
+        out.append((t, dur, d.get(t, 0)))
+        t += timedelta(minutes=dur)
+    return out
+
+
+def forecast_door(cur_rate, horizon_min, n1_now=None, n1_future=None, slope=None,
+                  lead_min=0.0, max_growth=3.0, min_n1_rate=120, trend_max_growth=None):
+    """Prevision du debit par pas de 5 min jusqu'a l'horizon.
+
+    n1_future : {minutes devant: debit N-1 aligne} ; utilise si n1_now est
+    exploitable (>= min_n1_rate). Sinon, tendance lineaire (slope, /h par
+    minute), `lead_min` etant l'ecart entre le centre de la fenetre mesuree et
+    maintenant. Rend (methode, [(minutes devant, debit prevu)]) ou (None, []).
+    """
+    steps = list(range(5, int(horizon_min) + 1, 5))
+    if cur_rate is None or cur_rate <= 0 or not steps:
+        return None, []
+    cap = cur_rate * max_growth
+    if n1_now is not None and n1_now >= min_n1_rate and n1_future:
+        out = []
+        for h in steps:
+            fut = n1_future.get(h)
+            if fut is None:
+                continue
+            ratio = min(max(fut / n1_now, 0.0), max_growth)
+            out.append((h, cur_rate * ratio))
+        if out:
+            return "profil_n1", out
+    if slope is not None:
+        tcap = cur_rate * (trend_max_growth if trend_max_growth is not None else max_growth)
+        return "tendance", [(h, min(max(cur_rate + slope * (h + lead_min), 0.0), tcap))
+                            for h in steps]
+    return None, []
+
+
+def _race_date(db, event, year):
+    """Date (Paris) de la course : historique_controle d'abord (plus fiable),
+    puis parametrages (globalHoraires.race est en UTC avec Z), puis le
+    dernier jour public."""
+    try:
+        year_int = int(year)
+    except (TypeError, ValueError):
+        return None
+
+    def _parse(raw):
+        if not raw:
+            return None
+        try:
+            if isinstance(raw, datetime):
+                dt = raw
+            else:
+                dt = datetime.fromisoformat(str(raw).strip().replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(ZoneInfo("Europe/Paris"))
+        return dt.date()
+
+    for h in db["historique_controle"].find(
+            {"event": event, "year": year_int, "race": {"$exists": True}}, {"race": 1}):
+        d = _parse(h.get("race"))
+        if d:
+            return d
+    doc = (db["parametrages"].find_one({"event": event, "year": str(year_int)},
+                                       {"data.race": 1, "data.globalHoraires": 1})
+           or db["parametrages"].find_one({"event": event, "year": year_int},
+                                          {"data.race": 1, "data.globalHoraires": 1}))
+    if doc:
+        data = doc.get("data") or {}
+        gh = data.get("globalHoraires") or {}
+        for raw in (gh.get("race"), data.get("race")):
+            d = _parse(raw)
+            if d:
+                return d
+        dates = sorted(str(x.get("date"))[:10] for x in (gh.get("dates") or []) if x.get("date"))
+        if dates:
+            return _parse(dates[-1])
+    return None
+
+
+def n1_day_offset(race_n, race_n1):
+    """Decalage N -> N-1 en jours, arrondi a la semaine entiere."""
+    if not race_n or not race_n1:
+        return None
+    days = (race_n - race_n1).days
+    return int(round(days / 7.0)) * 7
+
+
+def _event_aliases(db, event):
+    aliases = [event]
+    try:
+        ev = db["evenement"].find_one({"nom": event}, {"short": 1}) or {}
+        if ev.get("short") and ev["short"] not in aliases:
+            aliases.append(ev["short"])
+    except Exception:
+        pass
+    return aliases
+
+
+def _archive_tag(event, year):
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", str(event).strip()) + "_" + str(int(year))
+
+
+def load_n1_door_series(db, event, year_n1, start, end, sens="entrees"):
+    """{porte normalisee: [(debut, duree_min, compte)]} de l'edition N-1 sur
+    [start, end) (heure de Paris naive, deja decalee), ou ({}, None).
+
+    1. hsh_archive_tx_<event>_<annee> : meme source que le live (5 min,
+       entrees seules, memes noms de portes) -- existe pour les editions
+       archivees depuis 2026.
+    2. historique_controle{type: portes} : horaire, TOUS SENS confondus. Ne
+       sert qu'en profil (rapport futur/courant), jamais en valeur absolue.
+    """
+    coll = "hsh_archive_tx_" + _archive_tag(event, year_n1)
+    try:
+        has_archive = coll in db.list_collection_names()
+    except Exception:
+        has_archive = False
+    out = {}
+    if has_archive:
+        for d in db[coll].find({"tranche": {"$gte": start, "$lt": end}},
+                               {"gate_name": 1, "tranche": 1, "entrees": 1, "sorties": 1}):
+            t = d.get("tranche")
+            if not isinstance(t, datetime):
+                continue
+            v = int(d.get("entrees") or 0)
+            if sens == "total":
+                v += int(d.get("sorties") or 0)
+            key = _door_norm(d.get("gate_name"))
+            out.setdefault(key, {}).setdefault(t.replace(tzinfo=None), 0)
+            out[key][t.replace(tzinfo=None)] += v
+        if out:
+            return ({k: _densify(list(v.items()), 5) for k, v in out.items()},
+                    "hsh_archive_tx")
+    doc = db["historique_controle"].find_one(
+        {"type": "portes", "event": {"$in": _event_aliases(db, event)}, "year": int(year_n1)})
+    if not doc:
+        return {}, None
+    for door in doc.get("doors") or []:
+        key = _door_norm(door.get("name"))
+        pts = []
+        for s in door.get("scans") or []:
+            ts = s.get("timestamp")
+            if isinstance(ts, str):
+                try:
+                    ts = datetime.fromisoformat(ts)
+                except ValueError:
+                    continue
+            if not isinstance(ts, datetime):
+                continue
+            ts = ts.replace(tzinfo=None, minute=0, second=0, microsecond=0)
+            if ts + timedelta(hours=1) <= start or ts >= end:
+                continue
+            pts.append((ts, int(s.get("scan_count") or 0)))
+        if pts:
+            out[key] = _densify(pts, 60)
+    return out, ("historique_controle" if out else None)
+
+
+def detect_door_saturation_forecast(definition, context):
+    """Alerte AVANT qu'une porte ne sature : debit prevu >= threshold_pct de
+    sa capacite dans les horizon_min minutes.
+
+    Lecture seule. `context` peut porter `db` (tests, rejeu) et
+    `door_tx_source` = {collection, event, year} pour rejouer une edition
+    archivee (hsh_archive_tx_*) a une heure simulee (`now`).
+    """
+    db = context.get("db")
+    if db is None:
+        db = get_db()
+    now = context["now"]
+    slug = definition.get("slug") or "door-saturation"
+    p = dict(DOOR_SAT_DEFAULTS)
+    p.update(definition.get("params") or {})
+    try:
+        horizon = int(p["horizon_min"])
+        thr_pct = float(p["threshold_pct"])
+        min_rate = float(p["min_rate"])
+        window = int(p["window_min"])
+        trend_window = int(p["trend_window_min"])
+        max_growth = float(p["max_growth"])
+        min_n1 = float(p["min_n1_rate"])
+        stale = int(p["stale_min"])
+        dedup_min = int(p["dedup_min"])
+        trend_max = float(p["trend_max_growth"])
+        trend_on = bool(p["trend_fallback"])
+    except (TypeError, ValueError):
+        log.warning("door_saturation_forecast %s : parametres invalides", slug)
+        return None
+    sens = "total" if p.get("sens") == "total" else "entrees"
+    dev_cap = dict(DOOR_SAT_DEFAULTS["device_capacity_h"])
+    dev_cap.update(p.get("device_capacity_h") or {})
+    cap_over = {_door_norm(k): v for k, v in (p.get("capacities") or {}).items()}
+    only = {_door_norm(x) for x in (p.get("doors") or []) if x}
+    exclude = {_door_norm(x) for x in (p.get("exclude") or []) if x}
+
+    src = context.get("door_tx_source")
+    if src:
+        coll, event, year = src["collection"], src["event"], src.get("year")
+    else:
+        g = db["data_access"].find_one({"_id": "___GLOBAL___"}) or {}
+        if not g.get("live_controle_actif") or not g.get("evenement"):
+            return None
+        coll, event = "hsh_transactions_agg", g["evenement"]
+        year = context.get("year") or _paris_label(now).year
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        return None
+
+    now_label = _paris_label(now)
+    look = max(60, trend_window, window) + 10
+    q = {"tranche": {"$gte": now_label - timedelta(minutes=look), "$lt": now_label}}
+    if coll == "hsh_transactions_agg":
+        q["evenement"] = event
+    docs = list(db[coll].find(q, {"gate_name": 1, "checkpoint_name": 1, "tranche": 1,
+                                  "entrees": 1, "sorties": 1, "ok": 1, "erreurs": 1}))
+    tranches = [d["tranche"] for d in docs if isinstance(d.get("tranche"), datetime)]
+    if not tranches:
+        return None
+    latest = max(tranches)
+    # Fin de la derniere tranche reellement collectee : la tranche en cours
+    # n'est pas complete, et le collecteur peut avoir quelques minutes de retard.
+    end = min(_floor5(now_label), latest.replace(tzinfo=None) + timedelta(minutes=5))
+    if (now_label - end).total_seconds() > stale * 60:
+        return None
+    lead = (now_label - end).total_seconds() / 60.0 + window / 2.0
+
+    doors = {}
+    for d in docs:
+        t = d.get("tranche")
+        name = d.get("gate_name") or ""
+        if not isinstance(t, datetime) or not name:
+            continue
+        key = _door_norm(name)
+        if key in exclude or (only and key not in only):
+            continue
+        t = t.replace(tzinfo=None)
+        e = doors.setdefault(key, {"name": name, "buckets": {}, "devices": {}, "ok": 0, "err": 0})
+        v = int(d.get("entrees") or 0)
+        if sens == "total":
+            v += int(d.get("sorties") or 0)
+        e["buckets"][t] = e["buckets"].get(t, 0) + v
+        if t >= end - timedelta(minutes=60) and (d.get("ok") or d.get("erreurs")):
+            e["devices"][d.get("checkpoint_name") or "?"] = _device_kind(d.get("checkpoint_name"))
+        if t >= end - timedelta(minutes=window):
+            e["ok"] += int(d.get("ok") or 0)
+            e["err"] += int(d.get("erreurs") or 0)
+    if not doors:
+        return None
+
+    # Profil N-1 aligne sur le jour de course (decalage en semaines entieres)
+    n1, n1_source, offset = {}, None, None
+    race_n = _race_date(db, event, year)
+    race_n1 = None
+    for alias in _event_aliases(db, event):
+        race_n1 = _race_date(db, alias, year - 1)
+        if race_n1:
+            break
+    offset = n1_day_offset(race_n, race_n1)
+    if offset is not None:
+        shift = timedelta(days=offset)
+        n1, n1_source = load_n1_door_series(
+            db, event, year - 1,
+            end - timedelta(minutes=window) - shift - timedelta(minutes=60),
+            now_label + timedelta(minutes=horizon + 60) - shift, sens=sens)
+    else:
+        shift = None
+
+    results = []
+    for key, e in sorted(doors.items()):
+        cur = door_rate(e["buckets"], end, window)
+        if key in cap_over:
+            try:
+                capacity = float(cap_over[key])
+            except (TypeError, ValueError):
+                continue
+            cap_src = "param"
+        else:
+            capacity = float(sum(dev_cap.get(k, dev_cap.get("autre", 650))
+                                 for k in e["devices"].values()))
+            cap_src = "appareils"
+        if capacity <= 0 or cur <= 0:
+            continue
+        slope = door_trend_slope(e["buckets"], end, trend_window) if trend_on else None
+        n1_now, n1_future = None, {}
+        series = n1.get(key) if shift is not None else None
+        if series:
+            center_now = end - timedelta(minutes=window / 2.0) - shift
+            n1_now = n1_window_rate(series, center_now, window)
+            for h in range(5, horizon + 1, 5):
+                r = n1_window_rate(series, now_label + timedelta(minutes=h) - shift, window)
+                if r is not None:
+                    n1_future[h] = r
+        method, pred = forecast_door(cur, horizon, n1_now, n1_future, slope, lead,
+                                     max_growth, min_n1, trend_max)
+        thr = capacity * thr_pct / 100.0
+        hit = None
+        if cur >= thr and cur >= min_rate:
+            hit = (0, cur, "constate")
+        else:
+            for h, r in pred:
+                if r >= thr and r >= min_rate:
+                    hit = (h, r, method)
+                    break
+        if not hit:
+            continue
+        h, rate, meth = hit
+
+        since = now - timedelta(minutes=dedup_min)
+        if db["cockpit_active_alerts"].find_one({"definition_slug": slug, "actionData.door_key": key,
+                                                  "triggeredAt": {"$gte": since}}):
+            continue
+        at_label = now_label + timedelta(minutes=h)
+        at_str = at_label.strftime("%H:%M")
+        n_tri = sum(1 for k in e["devices"].values() if k == "tripode")
+        n_pda = sum(1 for k in e["devices"].values() if k == "pda")
+        err_pct = round(100.0 * e["err"] / (e["ok"] + e["err"]), 1) if (e["ok"] + e["err"]) else None
+        if h == 0:
+            msg = "%s : ~%d/h des maintenant (capacite %d/h)" % (e["name"], round(rate, -1), capacity)
+        else:
+            msg = "%s : ~%d/h prevu vers %s (capacite %d/h)" % (e["name"], round(rate, -1), at_str, capacity)
+        bucket30 = int(now.timestamp() // (dedup_min * 60))
+        results.append({
+            "definition_slug": slug,
+            "event": context.get("event", "") or event,
+            "year": str(context.get("year", "") or year),
+            "title": "SATURATION PORTE PREVUE",
+            "message": msg,
+            "timeStr": at_str,
+            "actionData": {
+                "door": e["name"],
+                "door_key": key,
+                "current_rate": int(round(cur)),
+                "predicted_rate": int(round(rate)),
+                "predicted_at": at_str,
+                "minutes_ahead": h,
+                "capacity": int(round(capacity)),
+                "capacity_source": cap_src,
+                "threshold_pct": thr_pct,
+                "devices": {"tripode": n_tri, "pda": n_pda, "total": len(e["devices"])},
+                "method": meth,
+                "n1_year": (year - 1) if n1_now is not None else None,
+                "n1_source": n1_source if n1_now is not None else None,
+                "n1_rate_now": int(round(n1_now)) if n1_now is not None else None,
+                "sens": sens,
+                "error_pct": err_pct,
+            },
+            "dedup_key": "door-sat-%s-%s-%d" % (slug, key.replace(" ", "_"), bucket30),
+            "triggeredAt": now,
+            "expiresAt": now + timedelta(minutes=30),
+        })
+        log.info("  door_saturation_forecast: %s", msg)
+    return results or None
 
 
 # ---------------------------------------------------------------------------
@@ -1032,6 +1601,7 @@ HANDLERS = {
     "checkpoint_error_burst": detect_checkpoint_error_burst,
     "meteo_rain_onset": detect_meteo_rain_onset,
     "pcorg_urgency": detect_pcorg_urgency,
+    "door_saturation_forecast": detect_door_saturation_forecast,
 }
 
 # ---------------------------------------------------------------------------
@@ -1054,6 +1624,47 @@ def upsert_active_alert(db, alert_doc):
         log.warning("Erreur upsert alerte (dedup=%s): %s", dedup, e)
 
 # ---------------------------------------------------------------------------
+# Historique (widget Alertes de l'accueil)
+# ---------------------------------------------------------------------------
+
+def sync_alert_history(db):
+    """Copie dans cockpit_alert_history chaque alerte active pas encore
+    historisee, quelle que soit sa source (ce moteur, SOS tablette, cameras
+    via cockpit_dispatch, mots-cles Alfred).
+
+    Avant, chaque poste postait sa propre copie au moment de l'afficher :
+    aucun poste ouvert = aucun historique, et le serveur dedoublonnait sur le
+    texte du message. Une entree par alerte (cle alert_id, index unique).
+    """
+    col = db["cockpit_active_alerts"]
+    hist = db["cockpit_alert_history"]
+    n = 0
+    for a in col.find({"historized": {"$ne": True}}).limit(200):
+        ad = a.get("actionData") or {}
+        try:
+            hist.update_one(
+                {"alert_id": str(a["_id"])},
+                {"$setOnInsert": {
+                    "alert_id": str(a["_id"]),
+                    "type": a.get("definition_slug") or "",
+                    "title": ad.get("title") or a.get("title") or "",
+                    "timeStr": a.get("timeStr") or "",
+                    "message": a.get("message") or "",
+                    "hasAction": bool(ad.get("pins")),
+                    "actionData": ad or None,
+                    "createdAt": a.get("triggeredAt") or datetime.now(timezone.utc),
+                }},
+                upsert=True,
+            )
+            col.update_one({"_id": a["_id"]}, {"$set": {"historized": True}})
+            n += 1
+        except Exception as e:
+            log.warning("Historisation alerte %s: %s", a.get("_id"), e)
+    if n:
+        log.info("  -> %d alerte(s) historisee(s)", n)
+
+
+# ---------------------------------------------------------------------------
 # Cycle principal
 # ---------------------------------------------------------------------------
 
@@ -1062,6 +1673,7 @@ def run_cycle(sim_time=None):
     defs = load_enabled_definitions(db)
     if not defs:
         log.info("Aucune definition d'alerte active")
+        sync_alert_history(db)
         return
 
     context = build_context(db, sim_time=sim_time)
@@ -1099,6 +1711,9 @@ def run_cycle(sim_time=None):
             wa_service.notify_batch(wa_batch)
         except Exception as e:
             log.warning("Erreur notification WhatsApp: %s", e)
+
+    # Historique : alertes de ce cycle et celles ecrites par les autres sources
+    sync_alert_history(db)
 
     # Nettoyage des etats de transition anciens (> 2 jours)
     cutoff = datetime.now(timezone.utc) - timedelta(days=2)

@@ -370,6 +370,7 @@
               <option value="checkpoint_reassign">Controle acces - reaffectation</option>
               <option value="checkpoint_error_burst">Controle acces - rafale erreurs</option>
               <option value="pcorg_urgency">Main courante - niveau urgence</option>
+              <option value="door_saturation_forecast">Controle acces - saturation porte prevue</option>
               <option value="anpr_watchlist" hidden>LAPI - plaque surveillee (deprecie, utiliser Camera Hikvision)</option>
             </select>
           </label>
@@ -378,6 +379,20 @@
           <label>Parametres (JSON)
             <textarea name="params" class="form-input" rows="3" placeholder='{"minutes_before": 30}'></textarea>
           </label>
+          <div id="params-door-help" class="form-hint" style="display:none; font-size:0.78rem; line-height:1.45; opacity:0.85; margin-top:6px;">
+            Debit par porte lu en direct dans le live controle (tranches de 5 min par tripode / PDA).
+            Alerte quand le debit PREVU d'une porte atteint <b>threshold_pct</b> % de sa capacite
+            dans les <b>horizon_min</b> minutes. Prevision = debit des 15 dernieres min x profil de la
+            meme porte l'an dernier au meme jour de course. Une porte deja a son seuil alerte aussi (&laquo; des maintenant &raquo;).<br>
+            <b>horizon_min</b> (30) ; <b>threshold_pct</b> (90) ; <b>min_rate</b> (300 /h, jamais d'alerte en dessous) ;
+            <b>window_min</b> (15) ; <b>trend_fallback</b> (false : sans N-1, extrapoler la tendance des 30 dernieres min,
+            plus d'alertes mais 1 sur 4 seulement confirmee au rejeu 2026) et <b>trend_max_growth</b> (1.5) ;
+            <b>max_growth</b> (3, borne du profil N-1) ; <b>sens</b> ("entrees" ou "total") ;
+            <b>device_capacity_h</b> ({"tripode": 900, "pda": 650}) : capacite = somme des appareils actifs sur 1 h ;
+            <b>capacities</b> ({"PORTE NORD PIETONS": 9000}) : surcharge par porte, en passages/h ;
+            <b>doors</b> ([] = toutes) ; <b>exclude</b> (guichets et services : HELPDESK, UAM, LITIGE...) ;
+            <b>dedup_min</b> (30) ; <b>stale_min</b> (20, collecteur muet = aucune alerte).
+          </div>
         </div>
         <div class="form-row" id="params-traffic-row" style="display:none;">
           <div style="display:flex; gap:12px; flex-wrap:wrap;">
@@ -526,6 +541,31 @@
         </div>
         <div class="form-row">
           <div class="field-block">
+            <div class="field-label">Mode d'affichage sur les postes</div>
+            <div class="field-help">
+              Bandeau : notification discrete, sans bloquer l'ecran. Plein ecran : a acquitter sur chaque poste.
+              Critique : plein ecran + signal sonore, jamais coupable par l'operateur ; le premier qui clique
+              "Je prends en compte" la retire des autres postes (et le note dans la fiche main courante liee).
+            </div>
+            <div id="display-mode-row" class="level-btn-row">
+              <button type="button" class="level-btn display-mode-btn" data-value="banner" style="--lc:#3b82f6;">
+                <span class="material-symbols-outlined level-btn-icon">notifications</span>
+                <span class="level-btn-label">Bandeau</span>
+              </button>
+              <button type="button" class="level-btn display-mode-btn selected" data-value="fullscreen" style="--lc:#f97316;">
+                <span class="material-symbols-outlined level-btn-icon">fullscreen</span>
+                <span class="level-btn-label">Plein ecran</span>
+              </button>
+              <button type="button" class="level-btn display-mode-btn" data-value="critical" style="--lc:#dc2626;">
+                <span class="material-symbols-outlined level-btn-icon">crisis_alert</span>
+                <span class="level-btn-label">Critique</span>
+              </button>
+            </div>
+            <input type="hidden" name="display_mode" value="fullscreen" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field-block">
             <div class="field-label">Groupes destinataires</div>
             <div class="field-help">
               Si aucun groupe n'est coche, l'alerte est envoyee a tous les utilisateurs.
@@ -574,6 +614,9 @@
       </form>
     </div>
     <div class="crud-modal-footer">
+      <button id="alert-def-modal-preview" class="btn btn-secondary" type="button" title="Afficher le rendu sur ce poste uniquement, sans rien envoyer" style="margin-right:auto; display:inline-flex; align-items:center; gap:6px;">
+        <span class="material-symbols-outlined" style="font-size:18px;">visibility</span> Apercu
+      </button>
       <button class="btn btn-secondary" data-close>Annuler</button>
       <button id="alert-def-modal-save" class="btn btn-primary">Enregistrer</button>
     </div>
@@ -613,6 +656,8 @@
 
 <!-- Scripts -->
 <script src="/static/js/toast.js"></script>
+<script>window.__alertPollerPreviewOnly = true;</script>
+<script src="/static/js/alert_poller.js"></script>
 <script src="/static/js/whatsapp_admin.js"></script>
 <script src="/static/js/alertes_admin.js"></script>
 <script>
@@ -621,5 +666,6 @@
 </script>
 <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_reports.js') }}"></script>
 </body>
 </html>

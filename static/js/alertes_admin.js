@@ -47,7 +47,19 @@
     "meteo_rain_onset": "Meteo - pluie imminente",
     "checkpoint_reassign": "Controle acces - reaffectation",
     "checkpoint_error_burst": "Controle acces - erreurs",
-    "pcorg_urgency": "Main courante - urgence"
+    "pcorg_urgency": "Main courante - urgence",
+    "door_saturation_forecast": "Controle acces - saturation prevue"
+  };
+
+  // Parametres par defaut proposes a la selection du type (editeur JSON brut,
+  // documente par #params-door-help). Miroir de DOOR_SAT_DEFAULTS
+  // (alert_engine.py) : le moteur complete de toute facon les cles absentes.
+  var DOOR_SAT_PARAMS_DEFAULT = {
+    horizon_min: 30, threshold_pct: 90, min_rate: 300, window_min: 15,
+    trend_fallback: false, trend_max_growth: 1.5, max_growth: 3,
+    sens: "entrees", device_capacity_h: { tripode: 900, pda: 650 },
+    capacities: {}, doors: [], exclude: ["HELPDESK", "UAM", "LITIGE", "SERI", "PUNISHER"],
+    dedup_min: 30
   };
 
   var allGroups = [];
@@ -102,6 +114,19 @@
       typeBadge.style.cssText = "font-size:0.72rem; padding:2px 8px; border-radius:10px; background:var(--surface-2); color:var(--text-secondary);";
       typeBadge.textContent = DETECTION_TYPE_LABELS[d.detection_type] || d.detection_type;
       tdType.appendChild(typeBadge);
+      var MODE_BADGES = {
+        banner: ["Bandeau", "#3b82f6"],
+        critical: ["Critique", "#dc2626"]
+      };
+      var mb = MODE_BADGES[d.slug === "field_sos" ? "critical" : d.display_mode];
+      if(mb){
+        var modeBadge = document.createElement("span");
+        modeBadge.className = "badge";
+        modeBadge.style.cssText = "font-size:0.68rem; padding:1px 6px; border-radius:8px; margin-left:4px; background:" + mb[1] + "22; color:" + mb[1] + ";";
+        modeBadge.textContent = mb[0];
+        modeBadge.title = "Mode d'affichage sur les postes";
+        tdType.appendChild(modeBadge);
+      }
       if(d.whatsapp && d.whatsapp.enabled){
         var waBadge = document.createElement("span");
         waBadge.className = "badge";
@@ -201,6 +226,7 @@
       form.querySelector('[name="detection_type"]').value = def.detection_type || "";
       form.querySelector('[name="params"]').value = def.params ? JSON.stringify(def.params, null, 2) : "";
       _setPriorityFromStored(def.priority != null ? def.priority : 3);
+      _selectDisplayMode(def.display_mode || "fullscreen");
       form.querySelector('[name="enabled"]').checked = !!def.enabled;
       populateGroupCheckboxes(def.groups || []);
       if(window.WaAdmin) WaAdmin.setDefValues(def.whatsapp || {});
@@ -212,6 +238,7 @@
       form.querySelector('[name="slug"]').disabled = false;
       form.querySelector('[name="params"]').value = "{}";
       _setPriorityFromStored(3);
+      _selectDisplayMode("fullscreen");
       form.querySelector('[name="enabled"]').checked = true;
       populateGroupCheckboxes([]);
       if(window.WaAdmin) WaAdmin.setDefValues({});
@@ -302,6 +329,15 @@
     } else {
       hideAll();
       rawRow.style.display = "";
+    }
+    var doorHelp = $("#params-door-help");
+    if (doorHelp) doorHelp.style.display = detectionType === "door_saturation_forecast" ? "" : "none";
+    if (detectionType === "door_saturation_forecast") {
+      var ta = $('[name="params"]', $("#alert-def-form"));
+      if (ta && (!params || !Object.keys(params).length)) {
+        ta.value = JSON.stringify(DOOR_SAT_PARAMS_DEFAULT, null, 2);
+      }
+      if (ta) ta.rows = 12;
     }
   }
 
@@ -519,6 +555,24 @@
     _selectPriorityButton(parseInt(btn.dataset.value, 10));
   });
 
+  // ── Mode d'affichage (bandeau / plein ecran / critique) ──
+
+  function _selectDisplayMode(value) {
+    if (["banner", "fullscreen", "critical"].indexOf(value) < 0) value = "fullscreen";
+    var hidden = $('[name="display_mode"]', $("#alert-def-form"));
+    if (hidden) hidden.value = value;
+    $$("#display-mode-row .display-mode-btn").forEach(function(btn) {
+      btn.classList.toggle("selected", btn.dataset.value === value);
+    });
+  }
+
+  document.addEventListener("click", function(e) {
+    var btn = e.target.closest(".display-mode-btn");
+    if (!btn) return;
+    e.preventDefault();
+    _selectDisplayMode(btn.dataset.value);
+  });
+
   function _collectPcorgParams() {
     var catSelect = $("#pcorg-param-category");
     return {
@@ -544,7 +598,8 @@
     slugInput.disabled = false;
   }
 
-  $("#alert-def-modal-save").addEventListener("click", function(){
+  // Lit le formulaire. Retourne {id, payload} ou null (erreur deja signalee).
+  function _collectDefForm(){
     var form = $("#alert-def-form");
     var id = form.querySelector('[name="_id"]').value;
     var detType = form.querySelector('[name="detection_type"]').value;
@@ -556,52 +611,74 @@
     } else if (detType === "camera_event") {
       params = _collectCameraParams();
       if (!params.event_types.length) {
-        if(typeof showToast === "function") showToast("Coche au moins un type d'evenement", "error");
-        return;
+        if(typeof showToast === "function") showToast("error", "Coche au moins un type d'evenement");
+        return null;
       }
       if (!params.cameras.length) {
-        if(typeof showToast === "function") showToast("Coche au moins une camera", "error");
-        return;
+        if(typeof showToast === "function") showToast("error", "Coche au moins une camera");
+        return null;
       }
     } else {
       try {
         params = JSON.parse(form.querySelector('[name="params"]').value || "{}");
       } catch(e){
-        if(typeof showToast === "function") showToast("JSON des parametres invalide", "error");
-        return;
+        if(typeof showToast === "function") showToast("error", "JSON des parametres invalide");
+        return null;
       }
     }
     var selectedGroups = [];
     $$("#alert-def-groups-checkboxes input[type=checkbox]:checked").forEach(function(cb){
       selectedGroups.push(cb.value);
     });
-    var payload = {
-      slug: form.querySelector('[name="slug"]').value.trim(),
-      name: form.querySelector('[name="name"]').value.trim(),
-      description: form.querySelector('[name="description"]').value.trim(),
-      icon: form.querySelector('[name="icon"]').value.trim(),
-      color: form.querySelector('[name="color"]').value,
-      detection_type: form.querySelector('[name="detection_type"]').value,
-      params: params,
-      priority: parseInt(form.querySelector('[name="priority"]').value) || 99,
-      enabled: form.querySelector('[name="enabled"]').checked,
-      groups: selectedGroups,
-      whatsapp: (window.WaAdmin) ? WaAdmin.getDefValues() : null
+    return {
+      id: id,
+      payload: {
+        slug: form.querySelector('[name="slug"]').value.trim(),
+        name: form.querySelector('[name="name"]').value.trim(),
+        description: form.querySelector('[name="description"]').value.trim(),
+        icon: form.querySelector('[name="icon"]').value.trim(),
+        color: form.querySelector('[name="color"]').value,
+        detection_type: detType,
+        params: params,
+        priority: parseInt(form.querySelector('[name="priority"]').value) || 99,
+        display_mode: form.querySelector('[name="display_mode"]').value || "fullscreen",
+        enabled: form.querySelector('[name="enabled"]').checked,
+        groups: selectedGroups,
+        whatsapp: (window.WaAdmin) ? WaAdmin.getDefValues() : null
+      }
     };
+  }
+
+  $("#alert-def-modal-save").addEventListener("click", function(){
+    var c = _collectDefForm();
+    if(!c) return;
+    var id = c.id, payload = c.payload;
     if(!payload.slug || !payload.name){
-      if(typeof showToast === "function") showToast("Slug et nom sont requis", "error");
+      if(typeof showToast === "function") showToast("error", "Slug et nom sont requis");
       return;
     }
     var p = id ? DefAPI.update(id, payload) : DefAPI.create(payload);
     p.then(function(res){
       if(res.error){
-        if(typeof showToast === "function") showToast(res.error, "error");
+        if(typeof showToast === "function") showToast("error", res.error);
         return;
       }
       closeDefModal();
       loadAll();
-      if(typeof showToast === "function") showToast(id ? "Alerte modifiee" : "Alerte creee", "success");
+      if(typeof showToast === "function") showToast("success", id ? "Alerte modifiee" : "Alerte creee");
     });
+  });
+
+  // Apercu : rendu reel de l'alerte sur CE poste, sans rien envoyer.
+  // C'est ce qui manquait pour voir qu'une nouvelle definition s'affichait mal.
+  $("#alert-def-modal-preview").addEventListener("click", function(){
+    var c = _collectDefForm();
+    if(!c) return;
+    if(!window.CockpitAlerts || !window.CockpitAlerts.preview){
+      if(typeof showToast === "function") showToast("error", "Apercu indisponible (alert_poller.js non charge)");
+      return;
+    }
+    window.CockpitAlerts.preview(c.payload);
   });
 
   // Fermeture modales
@@ -712,17 +789,17 @@
     var plate = form.querySelector('[name="plate"]').value.trim().toUpperCase().replace(/\s+/g, "-");
     var label = form.querySelector('[name="label"]').value.trim();
     if(!plate){
-      if(typeof showToast === "function") showToast("La plaque est requise", "error");
+      if(typeof showToast === "function") showToast("error", "La plaque est requise");
       return;
     }
     WatchAPI.create({plate: plate, label: label}).then(function(res){
       if(res.error){
-        if(typeof showToast === "function") showToast(res.error, "error");
+        if(typeof showToast === "function") showToast("error", res.error);
         return;
       }
       $("#plate-modal").hidden = true;
       loadAll();
-      if(typeof showToast === "function") showToast("Plaque ajoutee a la watchlist", "success");
+      if(typeof showToast === "function") showToast("success", "Plaque ajoutee a la watchlist");
     });
   });
 

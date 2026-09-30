@@ -1,42 +1,91 @@
 /**
- * alert_poller.js - Polling et affichage des alertes fullscreen.
+ * alert_poller.js - Polling et affichage des alertes de la centrale.
  * Script autonome, sans dependance a main.js.
- * Inclus sur TOUTES les pages de l'application.
  *
  * Logique : au premier poll (chargement de page), les alertes de moins
- * de 5 min sont affichees en fullscreen, les autres vont dans l'historique.
- * Les polls suivants affichent en fullscreen toute nouvelle alerte.
- * Les alertes simultanees sont mises en file d'attente (une a la fois).
+ * de 5 min sont affichees, les autres vont dans l'historique.
+ * Les polls suivants affichent toute nouvelle alerte.
+ * Les alertes plein ecran simultanees sont en file d'attente (une a la fois).
+ *
+ * Le rendu (couleur, icone, titre, mise en forme, mode d'affichage) est
+ * pilote par la DEFINITION de l'alerte (champ `meta` de /api/active-alerts),
+ * plus par des tables codees en dur : une alerte creee depuis l'admin avec
+ * un slug libre (ex. main-courante-flux) s'affichait sans en-tete ni bouton
+ * visible. Les tables ci-dessous ne servent plus que de repli.
+ *
+ * Modes d'affichage (definition.display_mode) :
+ *   banner     : notification discrete + historique, jamais de plein ecran
+ *   fullscreen : plein ecran a acquitter sur chaque poste
+ *   critical   : plein ecran + son + prise en compte partagee ; jamais muet
+ *
+ * API exposee : window.CockpitAlerts (meta, definitions, isMuted, setMuted,
+ * preview, explainWidget) et window.showCriticalAlert (compat).
+ * Sur la page d'admin, window.__alertPollerPreviewOnly = true desactive le
+ * polling : le script ne sert qu'a l'apercu.
  */
 (function() {
     "use strict";
 
-    var POLL_INTERVAL = 10000;
+    var PREVIEW_ONLY = !!window.__alertPollerPreviewOnly;
+    var POLL_INTERVAL = 5000;
     var GRACE_PERIOD_MS = 5 * 60 * 1000;
     var MAX_SEEN_IDS = 500;
+    var SEEN_KEY = "cockpit-seen-alerts";
     var _seenAlertIds = {};
     var _seenAlertCount = 0;
     var _firstPollDone = false;
+    var _pollInFlight = false;
 
-    // Restaurer les IDs vus depuis sessionStorage (survit aux changements de page)
+    // Deux memoires distinctes :
+    // - "vu" (sessionStorage, par onglet) : l'alerte a deja ete mise en file
+    //   dans CET onglet ;
+    // - "traite" (localStorage, tout le poste) : un operateur a clique sur un
+    //   bouton de l'alerte (Compris / Ignorer / Ouvrir). Au chargement d'une
+    //   page, une alerte recente deja traitee sur ce poste n'est plus remise
+    //   en plein ecran. Avant, chaque changement de page ou nouvel onglet
+    //   re-affichait les alertes de moins de 5 min : un SOS deja pris en
+    //   compte "revenait" plusieurs fois.
+    var DISMISSED_KEY = "cockpit-dismissed-alerts";
+    var DISMISSED_TTL_MS = 24 * 3600 * 1000;
     try {
-        var stored = sessionStorage.getItem("cockpit-seen-alerts");
+        var stored = sessionStorage.getItem(SEEN_KEY);
         if (stored) {
-            _seenAlertIds = JSON.parse(stored);
+            _seenAlertIds = JSON.parse(stored) || {};
             _seenAlertCount = Object.keys(_seenAlertIds).length;
         }
     } catch(e) {}
+
+    function _loadDismissed() {
+        try {
+            var raw = localStorage.getItem(DISMISSED_KEY);
+            return raw ? (JSON.parse(raw) || {}) : {};
+        } catch(e) { return {}; }
+    }
+    function _isDismissed(id) {
+        return !!(id && _loadDismissed()[id]);
+    }
+    function _markDismissed(id) {
+        if (!id) return;
+        var d = _loadDismissed();
+        var now = Date.now();
+        Object.keys(d).forEach(function(k) { if (now - d[k] > DISMISSED_TTL_MS) delete d[k]; });
+        d[id] = now;
+        try { localStorage.setItem(DISMISSED_KEY, JSON.stringify(d)); } catch(e) {}
+    }
     var _consecutiveErrors = 0;
 
     // --- File d'attente d'alertes ---
     var _alertQueue = [];
     var _alertOverlay = null;
+    var _currentItem = null;
 
+    // --- Replis (alertes sans definition, anciennes alertes) ---
     var ICON_MAP = {
         opening: "door_open", opened: "lock_open",
         closing: "door_front", closed: "lock",
         "traffic-cluster": "emergency",
         "anpr-watchlist": "local_police",
+        "meteo": "cloud",
         "meteo-vent": "air",
         "meteo-pluie": "umbrella",
         "meteo-pluie-imminente": "rainy",
@@ -53,28 +102,129 @@
         closing: "FERMETURE IMMINENTE", closed: "SITE FERME",
         "traffic-cluster": "ALERTE TRAFIC",
         "anpr-watchlist": "PLAQUE SURVEILLEE DETECTEE",
+        "meteo": "Meteo",
         "meteo-vent": "ALERTE VENT",
         "meteo-pluie": "ALERTE PLUIE",
         "meteo-pluie-imminente": "PLUIE IMMINENTE",
         "checkpoint-error-burst": "RAFALE ERREURS CHECKPOINT",
         "checkpoint-reassign": "CHANGEMENT AFFECTATION CHECKPOINT",
-        "pcorg-securite-ua": "ALERTE S\u00c9CURIT\u00c9",
+        "pcorg-securite-ua": "ALERTE SÉCURITÉ",
         "pcorg-secours-ua": "ALERTE SECOURS",
         "field_sos": "SOS TABLETTE",
         "field-sos": "SOS TABLETTE",
         "camera-event": "ALERTE CAMERA"
     };
+    var COLOR_MAP = {
+        opening: "#f59e0b", closing: "#f59e0b",
+        opened: "#22c55e", closed: "#ef4444",
+        "traffic-cluster": "#f97316",
+        "anpr-watchlist": "#dc2626",
+        "meteo": "#42a5f5",
+        "meteo-vent": "#f97316",
+        "meteo-pluie": "#42a5f5",
+        "meteo-pluie-imminente": "#42a5f5",
+        "checkpoint-reassign": "#8b5cf6",
+        "checkpoint-error-burst": "#dc2626",
+        "pcorg-secours-ua": "#dc2626",
+        "pcorg-securite-ua": "#ef4444",
+        "field_sos": "#dc2626",
+        "field-sos": "#dc2626"
+    };
+    var DISPLAY_MODES = { banner: 1, fullscreen: 1, critical: 1 };
+
+    function _isSosType(type) { return type === "field_sos" || type === "field-sos"; }
+
+    // --- Definitions (metadonnees par slug) ---
+    var _defs = {};           // slug -> meta serveur
+    var _defsList = null;     // definitions recues par l'utilisateur
+    var _defsWaiters = [];
+
+    function _rememberMeta(m) {
+        if (m && m.slug) _defs[m.slug] = m;
+    }
+
+    function meta(type, m) {
+        var d = m || _defs[type] || {};
+        var mode = DISPLAY_MODES[d.display_mode] ? d.display_mode : "fullscreen";
+        if (_isSosType(type)) mode = "critical";
+        return {
+            slug: type,
+            icon: d.icon || ICON_MAP[type] || "info",
+            color: d.color || COLOR_MAP[type] || "#6366f1",
+            name: d.name || TITLE_MAP[type] || type,
+            detection_type: d.detection_type || "",
+            display_mode: mode,
+            category: d.category || ""
+        };
+    }
+
+    function _isPcorg(type, m) {
+        return (m && m.detection_type === "pcorg_urgency") || type.indexOf("pcorg-") === 0;
+    }
+
+    function loadDefinitions(cb) {
+        if (_defsList) { if (cb) cb(_defsList); return; }
+        if (cb) _defsWaiters.push(cb);
+        if (_defsWaiters.length > 1) return;
+        fetch("/api/alert-definitions/mine", { credentials: "same-origin", cache: "no-store" })
+            .then(function(r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+            .then(function(list) {
+                _defsList = Array.isArray(list) ? list : [];
+                _defsList.forEach(_rememberMeta);
+            })
+            .catch(function() { _defsList = null; })
+            .then(function() {
+                var w = _defsWaiters; _defsWaiters = [];
+                w.forEach(function(fn) { try { fn(_defsList || []); } catch(e) {} });
+            });
+    }
+
+    // --- Preferences locales : alertes coupees sur ce poste ---
+    // On memorise les alertes COUPEES, plus une liste blanche : l'ancienne
+    // cle "cockpit-alert-prefs" listait 9 types actifs, et tout ce qui n'y
+    // figurait pas (secours, securite, flux, cameras...) devenait muet des
+    // qu'un operateur avait touche a une case. Une alerte critique ne peut
+    // jamais etre coupee.
+    var MUTED_KEY = "cockpit-alert-muted";
+    var LEGACY_PREFS_KEY = "cockpit-alert-prefs";
+    var LEGACY_PREF_IDS = ["opening", "opened", "closing", "closed", "traffic-cluster",
+        "anpr-watchlist", "meteo-vent", "meteo-pluie", "checkpoint-reassign"];
+
+    function _loadMuted() {
+        try {
+            var raw = localStorage.getItem(MUTED_KEY);
+            if (raw) return JSON.parse(raw) || [];
+            var legacy = localStorage.getItem(LEGACY_PREFS_KEY);
+            if (legacy) {
+                var active = JSON.parse(legacy) || [];
+                var muted = LEGACY_PREF_IDS.filter(function(id) { return active.indexOf(id) < 0; });
+                localStorage.setItem(MUTED_KEY, JSON.stringify(muted));
+                localStorage.removeItem(LEGACY_PREFS_KEY);
+                return muted;
+            }
+        } catch(e) {}
+        return [];
+    }
+    function isMuted(type, m) {
+        if (meta(type, m).display_mode === "critical") return false;
+        return _loadMuted().indexOf(type) >= 0;
+    }
+    function setMuted(type, muted) {
+        var list = _loadMuted().filter(function(x) { return x !== type; });
+        if (muted) list.push(type);
+        try { localStorage.setItem(MUTED_KEY, JSON.stringify(list)); } catch(e) {}
+    }
 
     // Labels urgence par type de categorie
     var URGENCY_LABELS_ALERT = {
-        SECOURS:  { EU: "D\u00e9tresse vitale", UA: "Urgence absolue", UR: "Urgence relative", IMP: "Impliqu\u00e9 m\u00e9dical" },
-        SECURITE: { EU: "Danger imm\u00e9diat", UA: "Incident grave", UR: "Incident en cours", IMP: "T\u00e9moin / impliqu\u00e9" },
-        MIXTE:    { EU: "Urgence extr\u00eame", UA: "Urgence prioritaire", UR: "Situation stable", IMP: "Impliqu\u00e9" }
+        SECOURS:  { EU: "Détresse vitale", UA: "Urgence absolue", UR: "Urgence relative", IMP: "Impliqué médical" },
+        SECURITE: { EU: "Danger immédiat", UA: "Incident grave", UR: "Incident en cours", IMP: "Témoin / impliqué" },
+        MIXTE:    { EU: "Urgence extrême", UA: "Urgence prioritaire", UR: "Situation stable", IMP: "Impliqué" }
     };
     var URGENCY_ENGAGE = {
-        EU: "Engagement imm\u00e9diat toutes ressources",
+        EU: "Engagement immédiat toutes ressources",
         UA: "Engagement prioritaire",
-        UR: "Engagement planifi\u00e9 selon ressources disponibles",
+        UR: "Engagement planifié selon ressources disponibles",
         IMP: "Suivi en main courante, aucun engagement d'urgence"
     };
     function _urgencyType(cat) {
@@ -85,21 +235,6 @@
     function _urgencyLabel(cat, level) {
         var t = _urgencyType(cat);
         return (URGENCY_LABELS_ALERT[t] || URGENCY_LABELS_ALERT.MIXTE)[level] || level;
-    }
-
-    // --- Preferences alertes (localStorage) ---
-    function _getAlertPrefs() {
-        try {
-            var stored = localStorage.getItem("cockpit-alert-prefs");
-            if (stored) return JSON.parse(stored);
-        } catch(e) {}
-        return null;
-    }
-
-    function isAlertMuted(type) {
-        var prefs = _getAlertPrefs();
-        if (!prefs) return false;
-        return prefs.indexOf(type) < 0;
     }
 
     // --- Formatage date/heure ---
@@ -122,36 +257,214 @@
         } catch(e) { return ""; }
     }
 
+    // Titre affiche : SOS et cameras ont un titre dynamique ; sinon le titre
+    // produit par la source, sinon le nom de la definition.
+    function _displayTitle(item) {
+        var ad = item.actionData || {};
+        if (_isSosType(item.type) && ad.device_name) return "SOS - " + ad.device_name;
+        if (ad.event_type && ad.event_label) {
+            return ad.event_label.toUpperCase() + (ad.camera_label ? " - " + ad.camera_label : "");
+        }
+        return ad.title || item.title || item.meta.name;
+    }
+
+    function _pushHistory(item) {
+        if (item.preview || typeof window._pushAlertHistory !== "function") return;
+        window._pushAlertHistory(item.type, item.meta.icon, _displayTitle(item),
+            fmtAlertDateTime(item.triggeredAt), item.message, item.onView,
+            item.alertId, item.meta.color);
+    }
+
     // --- File d'attente : empiler et afficher une par une ---
-    function enqueueAlert(type, triggeredAt, message, onView, actionData, alertId) {
-        // Historiser si la fonction existe (page index avec widget alertes)
-        var timeStr = fmtAlertDateTime(triggeredAt);
-        var ad = actionData || {};
-        // Pour les events camera, l'icone/titre proviennent du catalogue (actionData)
-        var displayIcon = ad.icon || ICON_MAP[type] || "info";
-        var displayTitle = ad.title || TITLE_MAP[type] || type;
-        if (typeof window._pushAlertHistory === "function") {
-            window._pushAlertHistory(type, displayIcon, displayTitle, timeStr, message, onView);
+    // extra : {title, meta, preview}
+    function enqueueAlert(type, triggeredAt, message, onView, actionData, alertId, extra) {
+        extra = extra || {};
+        if (extra.meta) _rememberMeta(extra.meta);
+        var m = meta(type, extra.meta);
+        var item = {
+            type: type, triggeredAt: triggeredAt, message: message || "", onView: onView,
+            actionData: actionData || {}, alertId: alertId || null,
+            title: extra.title || "", meta: m, preview: !!extra.preview
+        };
+        _pushHistory(item);
+
+        if (!item.preview && isMuted(type, m)) return;
+
+        if (m.display_mode === "banner") {
+            _showBanner(item);
+            return;
         }
 
-        if (isAlertMuted(type)) return;
+        var isCritical = m.display_mode === "critical";
+        if (isCritical) {
+            // Une alerte critique passe devant tout : un SOS ne doit pas
+            // attendre derriere une file d'alertes meteo ou trafic, ce qui le
+            // faisait apparaitre avec un decalage variable selon les postes.
+            // Entre critiques, l'ordre d'arrivee est conserve.
+            var pos = 0;
+            while (pos < _alertQueue.length && _alertQueue[pos].meta.display_mode === "critical") pos++;
+            _alertQueue.splice(pos, 0, item);
+            if (_alertOverlay && _currentItem && _currentItem.meta.display_mode !== "critical") {
+                _alertQueue.splice(pos + 1, 0, _currentItem);
+                _dismissCurrent(null);
+                return;
+            }
+        } else {
+            _alertQueue.push(item);
+        }
 
-        _alertQueue.push({ type: type, triggeredAt: triggeredAt, message: message, onView: onView, actionData: ad, alertId: alertId || null });
-
-        // Si pas d'overlay active, afficher la premiere
         if (!_alertOverlay) {
             _showNextAlert();
         } else {
-            // Mettre a jour le compteur sur l'overlay existante
             _updateCounter();
+        }
+    }
+
+    // --- Mode bandeau : notification discrete, sans plein ecran ---
+    function _showBanner(item) {
+        var text = _displayTitle(item) + (item.message ? " : " + item.message : "");
+        if (typeof window.showToast === "function") {
+            window.showToast("info", text, 9000);
+        }
+    }
+
+    // --- Prise en compte partagee (SOS et alertes critiques) ---
+    // Le premier operateur qui clique est enregistre cote serveur ; les autres
+    // postes voient au poll suivant (5 s max) qui a pris l'alerte, leur alarme
+    // s'arrete et l'alerte se ferme seule.
+    var _takenById = {};   // alertId -> {name, at}
+    var TAKEN_AUTOCLOSE_MS = 10000;
+
+    function _csrfToken() {
+        var m = document.querySelector("meta[name='csrf-token']");
+        return m ? m.getAttribute("content") : "";
+    }
+
+    function _takeLabel(item) {
+        return _isSosType(item.type) ? "Je prends en charge" : "Je prends en compte";
+    }
+
+    function _renderTaken(overlay, name, atIso, mine) {
+        if (!overlay || overlay._takenRendered) return;
+        overlay._takenRendered = true;
+        _stopAlarm();
+        var item = overlay._item || {};
+        var isSos = _isSosType(item.type);
+        var el = overlay._takenEl;
+        if (el) {
+            var at = fmtAlertDateTime(atIso);
+            el.textContent = mine
+                ? (isSos ? "Vous avez pris en charge ce SOS" : "Vous avez pris en compte cette alerte")
+                : (isSos ? "Pris en charge par " : "Prise en compte par ") + (name || "un operateur") + (at ? " a " + at : "");
+            el.style.display = "";
+        }
+        var box = overlay.querySelector(".critical-alert-box");
+        if (box) box.classList.add("alert-taken");
+        var row = overlay._btnRow;
+        if (row) {
+            row.textContent = "";
+            if (item.onView) {
+                var bv = document.createElement("button");
+                bv.className = "critical-alert-btn critical-alert-btn-secondary";
+                bv.textContent = _viewLabel(item);
+                bv.addEventListener("click", function() {
+                    _markDismissed(item.alertId);
+                    if (_alertOverlay === overlay) _dismissCurrent(item.onView);
+                });
+                row.appendChild(bv);
+            }
+            var bc = document.createElement("button");
+            bc.className = "critical-alert-btn";
+            bc.textContent = "Fermer";
+            bc.addEventListener("click", function() {
+                _markDismissed(item.alertId);
+                if (_alertOverlay === overlay) _dismissCurrent(null);
+            });
+            row.appendChild(bc);
+        }
+        if (!mine) {
+            setTimeout(function() {
+                if (_alertOverlay === overlay) {
+                    _markDismissed(item.alertId);
+                    _dismissCurrent(null);
+                }
+            }, TAKEN_AUTOCLOSE_MS);
+        }
+    }
+
+    function _toast(type, msg) {
+        if (typeof window.showToast === "function") window.showToast(type, msg);
+    }
+
+    function _takeAlert(overlay, item, btn) {
+        if (item.preview) {
+            _renderTaken(overlay, "", new Date().toISOString(), true);
+            return;
+        }
+        if (!item.alertId) return;
+        var label = _takeLabel(item);
+        btn.disabled = true;
+        btn.textContent = "Envoi...";
+        fetch("/api/active-alerts/" + encodeURIComponent(item.alertId) + "/take", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json", "X-CSRFToken": _csrfToken() },
+            body: "{}"
+        })
+            .then(function(r) {
+                return r.json().catch(function() { return {}; }).then(function(j) { return { status: r.status, json: j || {} }; });
+            })
+            .then(function(res) {
+                if (res.status === 200 && res.json.ok) {
+                    _takenById[item.alertId] = { name: res.json.taken_by_name, at: res.json.taken_at };
+                    _stopAlarm();
+                    _markDismissed(item.alertId);
+                    if (_alertOverlay === overlay) _dismissCurrent(item.onView || null);
+                    _toast("success", _isSosType(item.type)
+                        ? "SOS pris en charge : les autres postes sont prevenus"
+                        : "Alerte prise en compte : les autres postes sont prevenus");
+                    return;
+                }
+                if (res.status === 409 && res.json.error === "already_taken") {
+                    _takenById[item.alertId] = { name: res.json.taken_by_name, at: res.json.taken_at };
+                    _renderTaken(overlay, res.json.taken_by_name, res.json.taken_at, false);
+                    return;
+                }
+                btn.disabled = false;
+                btn.textContent = label;
+                _toast("error", "Prise en compte impossible (" + (res.json.error || res.status) + ")");
+            })
+            .catch(function() {
+                btn.disabled = false;
+                btn.textContent = label;
+                _toast("error", "Erreur reseau");
+            });
+    }
+
+    // Applique les prises en compte remontees par le poll : retire de la file
+    // les alertes deja prises, bascule l'alerte affichee.
+    function _applyTaken(alerts) {
+        alerts.forEach(function(a) {
+            if (a.taken_at) _takenById[a._id] = { name: a.taken_by_name, at: a.taken_at };
+        });
+        for (var i = _alertQueue.length - 1; i >= 0; i--) {
+            var q = _alertQueue[i];
+            if (q.alertId && _takenById[q.alertId]) _alertQueue.splice(i, 1);
+        }
+        _updateCounter();
+        if (_alertOverlay && _currentItem && _currentItem.alertId && _takenById[_currentItem.alertId]) {
+            var tk = _takenById[_currentItem.alertId];
+            _renderTaken(_alertOverlay, tk.name, tk.at, false);
         }
     }
 
     function _dismissCurrent(callback) {
         if (_alertOverlay) {
+            _stopAlarm();
             _alertOverlay.style.opacity = "0";
             var ov = _alertOverlay;
             _alertOverlay = null;
+            _currentItem = null;
             setTimeout(function() {
                 if (ov.parentNode) ov.parentNode.removeChild(ov);
                 if (callback) callback();
@@ -165,173 +478,158 @@
         if (!_alertOverlay) return;
         var badge = _alertOverlay.querySelector(".critical-alert-counter");
         if (_alertQueue.length > 0 && badge) {
-            badge.textContent = _alertQueue.length + " autre" + (_alertQueue.length > 1 ? "s" : "");
+            badge.textContent = _alertQueue.length + " autre" + (_alertQueue.length > 1 ? "s" : "") + " en attente";
             badge.style.display = "";
         } else if (badge) {
             badge.style.display = "none";
         }
     }
 
-    // --- Alarm sound via Web Audio API ---
-    var _sosAlarmTimer = null;
-    function _playSosAlarm() {
-        _stopSosAlarm();
+    // --- Signal sonore via Web Audio API ---
+    // SOS : sirene deux tons, 5 repetitions. Critique : double bip, 2 fois.
+    var _alarmTimer = null;
+    function _playAlarm(kind) {
+        _stopAlarm();
+        var isSos = kind === "sos";
         var playOnce = function() {
             try {
                 var ctx = new (window.AudioContext || window.webkitAudioContext)();
                 var t = ctx.currentTime;
-                // Two-tone siren pattern
                 var osc = ctx.createOscillator();
                 var gain = ctx.createGain();
-                osc.type = "square";
-                osc.frequency.setValueAtTime(880, t);
-                osc.frequency.setValueAtTime(660, t + 0.25);
-                osc.frequency.setValueAtTime(880, t + 0.5);
-                osc.frequency.setValueAtTime(660, t + 0.75);
-                osc.frequency.setValueAtTime(880, t + 1.0);
-                osc.frequency.setValueAtTime(660, t + 1.25);
-                gain.gain.setValueAtTime(0.6, t);
-                gain.gain.linearRampToValueAtTime(0, t + 1.5);
+                if (isSos) {
+                    osc.type = "square";
+                    for (var k = 0; k < 6; k++) osc.frequency.setValueAtTime(k % 2 ? 660 : 880, t + k * 0.25);
+                    gain.gain.setValueAtTime(0.6, t);
+                    gain.gain.linearRampToValueAtTime(0, t + 1.5);
+                } else {
+                    osc.type = "triangle";
+                    osc.frequency.setValueAtTime(1046, t);
+                    osc.frequency.setValueAtTime(784, t + 0.2);
+                    gain.gain.setValueAtTime(0.5, t);
+                    gain.gain.setValueAtTime(0, t + 0.18);
+                    gain.gain.setValueAtTime(0.5, t + 0.2);
+                    gain.gain.linearRampToValueAtTime(0, t + 0.5);
+                }
                 osc.connect(gain);
                 gain.connect(ctx.destination);
                 osc.start(t);
-                osc.stop(t + 1.5);
+                osc.stop(t + (isSos ? 1.5 : 0.5));
+                setTimeout(function() { try { ctx.close(); } catch(e) {} }, 2000);
             } catch(e) {}
         };
         playOnce();
-        // Repeat every 2s for 10s
         var count = 0;
-        _sosAlarmTimer = setInterval(function() {
+        var max = isSos ? 5 : 2;
+        _alarmTimer = setInterval(function() {
             count++;
-            if (count >= 5) { _stopSosAlarm(); return; }
+            if (count >= max) { _stopAlarm(); return; }
             playOnce();
         }, 2000);
     }
-    function _stopSosAlarm() {
-        if (_sosAlarmTimer) { clearInterval(_sosAlarmTimer); _sosAlarmTimer = null; }
+    function _stopAlarm() {
+        if (_alarmTimer) { clearInterval(_alarmTimer); _alarmTimer = null; }
+    }
+
+    function _viewLabel(item) {
+        var ad = item.actionData || {};
+        if (item.type === "anpr-watchlist") return "Voir sur LAPI";
+        if (item.type === "checkpoint-reassign") return "Voir Controle acces";
+        if (_isPcorg(item.type, item.meta) || _isSosType(item.type)) return "Ouvrir la fiche";
+        if (ad.event_type && ad.camera_path) return "Voir la camera";
+        return "Voir sur la carte";
+    }
+
+    function _el(tag, cls, text) {
+        var e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text != null) e.textContent = text;
+        return e;
+    }
+
+    function _addMessage(body, text) {
+        var el = _el("div", "critical-alert-message", text);
+        // Un texte de fiche peut faire 200 caracteres : en 1,4 rem gras il
+        // remplissait l'ecran.
+        if ((text || "").length > 90) el.classList.add("is-long");
+        body.appendChild(el);
     }
 
     function _showNextAlert() {
         if (_alertQueue.length === 0) return;
 
         var item = _alertQueue.shift();
+        _currentItem = item;
         var type = item.type;
+        var m = item.meta;
         var timeStr = fmtAlertDateTime(item.triggeredAt);
-
-        var overlay = document.createElement("div");
-        overlay.className = "critical-alert-overlay";
-        _alertOverlay = overlay;
-
-        var box = document.createElement("div");
-        box.className = "critical-alert-box alert-" + type;
-
-        var header = document.createElement("div");
-        header.className = "critical-alert-header";
-
-        var icon = document.createElement("span");
-        icon.className = "material-symbols-outlined critical-alert-icon";
-        var actionDataPre = item.actionData || {};
-        icon.textContent = actionDataPre.icon || ICON_MAP[type] || "info";
-
-        var title = document.createElement("div");
-        title.className = "critical-alert-title";
-        if ((type === "field_sos" || type === "field-sos") && actionDataPre.device_name) {
-            title.textContent = "SOS - " + actionDataPre.device_name;
-        } else if (actionDataPre.event_type && actionDataPre.event_label) {
-            // Alerte camera : titre dynamique selon le type d'event + camera
-            title.textContent = actionDataPre.event_label.toUpperCase() +
-                (actionDataPre.camera_label ? " - " + actionDataPre.camera_label : "");
-        } else {
-            title.textContent = TITLE_MAP[type] || type.toUpperCase();
-        }
-
-        header.appendChild(icon);
-        header.appendChild(title);
-
-        var body = document.createElement("div");
-        body.className = "critical-alert-body";
-
-        // Contenu specifique PCO : enrichi avec urgence + engagement + operateur
-        var isPco = type.indexOf("pcorg-") === 0;
-        var isFieldSos = (type === "field_sos" || type === "field-sos");
         var actionData = item.actionData || {};
+        var isFieldSos = _isSosType(type);
+        var isCritical = m.display_mode === "critical";
+        var isPco = _isPcorg(type, m);
         var isCameraEvent = !!actionData.event_type && !!actionData.camera_path;
 
+        var overlay = _el("div", "critical-alert-overlay");
+        _alertOverlay = overlay;
+        overlay._item = item;
+
+        var box = _el("div", "critical-alert-box alert-" + type);
+        box.style.setProperty("--alert-color", m.color);
+        if (isCritical) box.classList.add("alert-critical");
+        box.setAttribute("role", "alertdialog");
+        box.setAttribute("aria-modal", "true");
+
+        var header = _el("div", "critical-alert-header");
+        var icon = _el("span", "material-symbols-outlined critical-alert-icon", actionData.icon || m.icon);
+        var title = _el("div", "critical-alert-title", _displayTitle(item));
+        title.id = "critical-alert-title-" + Date.now();
+        box.setAttribute("aria-labelledby", title.id);
+        header.appendChild(icon);
+        header.appendChild(title);
+        if (item.preview) header.appendChild(_el("div", "critical-alert-preview-tag", "Apercu - aucune alerte envoyee"));
+
+        var body = _el("div", "critical-alert-body");
+
         if (isFieldSos) {
-            // Play alarm sound for SOS
-            _playSosAlarm();
-
-            // Gros message
-            var bigMsg = document.createElement("div");
-            bigMsg.className = "critical-alert-sos-big";
-            bigMsg.textContent = "Demande d assistance immediate";
-            body.appendChild(bigMsg);
-
-            // Bloc info : position / batterie / heure
-            var info = document.createElement("div");
-            info.className = "critical-alert-sos-info";
+            body.appendChild(_el("div", "critical-alert-sos-big", "Demande d assistance immediate"));
+            var info = _el("div", "critical-alert-sos-info");
             var hasPos = (typeof actionData.lat === "number" && typeof actionData.lng === "number");
-            var posTxt = hasPos
-                ? actionData.lat.toFixed(5) + ", " + actionData.lng.toFixed(5)
-                : "Position inconnue";
-            var batTxt = (typeof actionData.battery === "number") ? (Math.round(actionData.battery) + "%") : "?";
-            info.innerHTML =
-                "<div><span class='material-symbols-outlined'>place</span> " + posTxt + "</div>" +
-                "<div><span class='material-symbols-outlined'>battery_5_bar</span> " + batTxt + "</div>" +
-                "<div><span class='material-symbols-outlined'>schedule</span> " + timeStr + "</div>";
+            var rows = [
+                ["place", hasPos ? actionData.lat.toFixed(5) + ", " + actionData.lng.toFixed(5) : "Position inconnue"],
+                ["battery_5_bar", (typeof actionData.battery === "number") ? (Math.round(actionData.battery) + "%") : "?"],
+                ["schedule", timeStr]
+            ];
+            rows.forEach(function(r) {
+                var d = _el("div");
+                d.appendChild(_el("span", "material-symbols-outlined", r[0]));
+                d.appendChild(document.createTextNode(" " + r[1]));
+                info.appendChild(d);
+            });
             body.appendChild(info);
-        } else if (isPco && actionData.niveau_urgence && actionData.category) {
-            var urgLabel = _urgencyLabel(actionData.category, actionData.niveau_urgence);
+        } else if (isPco && actionData.niveau_urgence) {
+            var parts = (item.message || "").split(" — ");
+            var zone = actionData.zone || "";
+            var opName = actionData.operator || "";
+            parts.slice(1).forEach(function(p) {
+                if (!zone && p.indexOf("Zone : ") === 0) zone = p.slice(7);
+                if (!opName && p.indexOf("Operateur : ") === 0) opName = p.slice(12);
+            });
+
+            body.appendChild(_el("div",
+                "critical-alert-urgency-badge critical-alert-urgency-" + actionData.niveau_urgence,
+                actionData.niveau_urgence + " — " + _urgencyLabel(actionData.category, actionData.niveau_urgence)));
+            _addMessage(body, actionData.text || parts[0] || "");
+            if (zone) {
+                var zl = _el("div", "critical-alert-zone");
+                zl.appendChild(_el("span", "material-symbols-outlined", "place"));
+                zl.appendChild(document.createTextNode(" " + zone));
+                body.appendChild(zl);
+            }
             var engageDesc = URGENCY_ENGAGE[actionData.niveau_urgence] || "";
-
-            // Badge urgence
-            var urgBadge = document.createElement("div");
-            urgBadge.className = "critical-alert-urgency-badge critical-alert-urgency-" + actionData.niveau_urgence;
-            urgBadge.textContent = actionData.niveau_urgence + " \u2014 " + urgLabel;
-            body.appendChild(urgBadge);
-
-            // Description intervention
-            var pcoSub = document.createElement("div");
-            pcoSub.className = "critical-alert-message";
-            var msgText = (item.message || "").split(" \u2014 ")[0];
-            pcoSub.textContent = msgText;
-            body.appendChild(pcoSub);
-
-            // Engagement
-            if (engageDesc) {
-                var engEl = document.createElement("div");
-                engEl.className = "critical-alert-engage";
-                engEl.textContent = engageDesc;
-                body.appendChild(engEl);
-            }
-
-            // Operateur + heure en petite ligne
-            var metaLine = document.createElement("div");
-            metaLine.className = "critical-alert-meta";
-            var opParts = (item.message || "").split(" \u2014 ");
-            var opName = "";
-            for (var pi = 0; pi < opParts.length; pi++) {
-                if (opParts[pi].indexOf("Operateur") === 0) {
-                    opName = opParts[pi].replace("Operateur : ", "");
-                }
-            }
-            var metaText = timeStr;
-            if (opName) metaText += " \u2014 " + opName;
-            var userGroups = window.__userGroups;
-            if (userGroups && userGroups.length) {
-                var groupNames = userGroups.map(function(g) { return g.name; }).join(", ");
-                if (groupNames && opName) metaText += " (" + groupNames + ")";
-            }
-            metaLine.textContent = metaText;
-            body.appendChild(metaLine);
+            if (engageDesc) body.appendChild(_el("div", "critical-alert-engage", engageDesc));
+            body.appendChild(_el("div", "critical-alert-meta", timeStr + (opName ? " — saisie par " + opName : "")));
         } else if (isCameraEvent) {
-            // Alerte camera : message + snapshot + meta
-            var camSub = document.createElement("div");
-            camSub.className = "critical-alert-message";
-            camSub.textContent = item.message;
-            body.appendChild(camSub);
-
-            // Snapshot caméra (si disponible)
+            _addMessage(body, item.message);
             if (item.alertId && actionData.has_snapshot) {
                 var img = document.createElement("img");
                 img.className = "critical-alert-snapshot";
@@ -340,70 +638,58 @@
                 img.onerror = function(){ this.style.display = "none"; };
                 body.appendChild(img);
             }
-
-            var camMeta = document.createElement("div");
-            camMeta.className = "critical-alert-meta";
-            var metaTxt = timeStr;
-            if (actionData.camera_location) metaTxt += " — " + actionData.camera_location;
-            camMeta.textContent = metaTxt;
-            body.appendChild(camMeta);
+            body.appendChild(_el("div", "critical-alert-meta",
+                timeStr + (actionData.camera_location ? " — " + actionData.camera_location : "")));
         } else {
-            // Message standard (non PCO)
-            var stdSub = document.createElement("div");
-            stdSub.className = "critical-alert-message";
-            stdSub.textContent = item.message;
-            body.appendChild(stdSub);
-
-            var stdTime = document.createElement("div");
-            stdTime.className = "critical-alert-time";
-            stdTime.textContent = timeStr;
-            body.appendChild(stdTime);
+            _addMessage(body, item.message);
+            body.appendChild(_el("div", "critical-alert-time", timeStr));
         }
 
-        // Compteur d'alertes restantes
-        var counter = document.createElement("div");
-        counter.className = "critical-alert-counter";
-        if (_alertQueue.length > 0) {
-            counter.textContent = _alertQueue.length + " autre" + (_alertQueue.length > 1 ? "s" : "");
-        } else {
-            counter.style.display = "none";
+        // Explication IA : action secondaire, hors de la rangee de boutons
+        // (que _renderTaken remplace) ; jamais d'appel en apercu.
+        if (item.alertId || item.preview) {
+            body.appendChild(explainWidget(item.alertId, { preview: item.preview }));
         }
 
-        var btnRow = document.createElement("div");
-        btnRow.className = "critical-alert-btns";
+        // Zone "pris en compte par ..." (remplie par _renderTaken)
+        var takenEl = _el("div", "critical-alert-taken");
+        takenEl.style.display = "none";
+        body.appendChild(takenEl);
+        overlay._takenEl = takenEl;
 
-        if (item.onView) {
-            var btnIgnore = document.createElement("button");
-            btnIgnore.className = "critical-alert-btn critical-alert-btn-secondary";
-            btnIgnore.textContent = "Ignorer";
-            btnIgnore.addEventListener("click", function() {
-                if (isFieldSos) _stopSosAlarm();
-                _dismissCurrent(null);
-            });
+        var counter = _el("div", "critical-alert-counter");
+        counter.style.display = "none";
+
+        var btnRow = _el("div", "critical-alert-btns");
+        overlay._btnRow = btnRow;
+
+        var close = function(cb) {
+            _markDismissed(item.alertId);
+            _dismissCurrent(cb);
+        };
+
+        if (isCritical && (item.alertId || item.preview)) {
+            var btnIgnore = _el("button", "critical-alert-btn critical-alert-btn-secondary", "Ignorer");
+            btnIgnore.addEventListener("click", function() { close(null); });
             btnRow.appendChild(btnIgnore);
-
-            var btnView = document.createElement("button");
-            btnView.className = "critical-alert-btn";
-            var viewLabel = "Voir sur la carte";
-            if (type === "anpr-watchlist") viewLabel = "Voir sur LAPI";
-            else if (type === "checkpoint-reassign") viewLabel = "Voir Controle acces";
-            else if (isPco || isFieldSos) viewLabel = "Ouvrir la fiche";
-            else if (isCameraEvent) viewLabel = "Voir la camera";
-            btnView.textContent = viewLabel;
-            btnView.addEventListener("click", function() {
-                if (isFieldSos) _stopSosAlarm();
-                var cb = item.onView;
-                _dismissCurrent(cb);
-            });
+            if (item.onView) {
+                var btnOpen = _el("button", "critical-alert-btn critical-alert-btn-secondary", _viewLabel(item));
+                btnOpen.addEventListener("click", function() { close(item.onView); });
+                btnRow.appendChild(btnOpen);
+            }
+            var btnTake = _el("button", "critical-alert-btn", _takeLabel(item));
+            btnTake.addEventListener("click", function() { _takeAlert(overlay, item, btnTake); });
+            btnRow.appendChild(btnTake);
+        } else if (item.onView) {
+            var btnIgn = _el("button", "critical-alert-btn critical-alert-btn-secondary", "Ignorer");
+            btnIgn.addEventListener("click", function() { close(null); });
+            btnRow.appendChild(btnIgn);
+            var btnView = _el("button", "critical-alert-btn", _viewLabel(item));
+            btnView.addEventListener("click", function() { close(item.onView); });
             btnRow.appendChild(btnView);
         } else {
-            var btn = document.createElement("button");
-            btn.className = "critical-alert-btn";
-            btn.textContent = "Compris";
-            btn.addEventListener("click", function() {
-                if (isFieldSos) _stopSosAlarm();
-                _dismissCurrent(null);
-            });
+            var btn = _el("button", "critical-alert-btn", "Compris");
+            btn.addEventListener("click", function() { close(null); });
             btnRow.appendChild(btn);
         }
 
@@ -413,20 +699,27 @@
         box.appendChild(body);
         overlay.appendChild(box);
         document.body.appendChild(overlay);
+        _updateCounter();
+
+        if (isCritical) _playAlarm(isFieldSos ? "sos" : "critical");
+
+        // Alerte deja prise ailleurs au moment de l'affichage
+        if (item.alertId && _takenById[item.alertId]) {
+            var tk = _takenById[item.alertId];
+            _renderTaken(overlay, tk.name, tk.at, false);
+        }
 
         var focusBtn = overlay.querySelector(".critical-alert-btn:last-child");
         if (focusBtn) setTimeout(function() { focusBtn.focus(); }, 100);
     }
 
-    // Exposer globalement
-    window.showCriticalAlert = enqueueAlert; // (type, triggeredAt, message, onView, actionData)
-
     // --- Construction du callback "Voir" ---
     function _buildOnView(slug, a) {
         var fn = null;
-        if (slug === "traffic-cluster" && a.actionData && a.actionData.pins) {
+        var ad = a.actionData || null;
+        if (slug === "traffic-cluster" && ad && ad.pins) {
             fn = function() {
-                window._allAlertPinsData = a.actionData.pins;
+                window._allAlertPinsData = ad.pins;
                 if (window.CockpitMapView && window.CockpitMapView.switchView) {
                     window.CockpitMapView.switchView("map");
                     setTimeout(function() {
@@ -434,39 +727,31 @@
                     }, 400);
                 }
             };
-            fn._actionData = a.actionData;
         }
-        if (slug === "anpr-watchlist" && a.actionData && a.actionData.plate) {
+        if (slug === "anpr-watchlist" && ad && ad.plate) {
             fn = function() {
-                window.open("/anpr?plate=" + encodeURIComponent(a.actionData.plate), "_blank");
+                window.open("/anpr?plate=" + encodeURIComponent(ad.plate), "_blank");
             };
-            fn._actionData = a.actionData;
         }
         if (slug === "checkpoint-reassign") {
             fn = function() {
                 window.open("/live-controle", "_blank");
             };
-            fn._actionData = a.actionData || {};
         }
-        if (slug.indexOf("pcorg-") === 0 && a.actionData && a.actionData.pcorg_id) {
+        if (_isPcorg(slug, a.meta) && ad && ad.pcorg_id) {
             fn = function() {
                 if (window.PcorgUI && window.PcorgUI.openFiche) {
-                    window.PcorgUI.openFiche(a.actionData.pcorg_id);
+                    window.PcorgUI.openFiche(ad.pcorg_id);
                 }
             };
-            fn._actionData = a.actionData;
         }
         // Alerte camera : detection via actionData.event_type (slug est user-defined)
-        if (a.actionData && a.actionData.event_type && a.actionData.camera_path) {
-            var camAd = a.actionData;
+        if (ad && ad.event_type && ad.camera_path) {
             fn = function() {
-                var url = "/cameras?focus=" + encodeURIComponent(camAd.camera_path);
-                window.open(url, "_blank");
+                window.open("/cameras?focus=" + encodeURIComponent(ad.camera_path), "_blank");
             };
-            fn._actionData = camAd;
         }
-        if ((slug === "field_sos" || slug === "field-sos") && a.actionData) {
-            var ad = a.actionData;
+        if (_isSosType(slug) && ad) {
             fn = function() {
                 // Priorite : ouvrir la fiche PCO auto-creee si dispo, sinon centrer la carte
                 if (ad.pcorg_id && window.PcorgUI && window.PcorgUI.openFiche) {
@@ -481,20 +766,180 @@
                         if (window.CockpitMapView && window.CockpitMapView.flyTo) {
                             window.CockpitMapView.flyTo(ad.lat, ad.lng, 19);
                         } else if (window.CockpitMapView && window.CockpitMapView.getMap) {
-                            var m = window.CockpitMapView.getMap();
-                            if (m) m.setView([ad.lat, ad.lng], 19);
+                            var mp = window.CockpitMapView.getMap();
+                            if (mp) mp.setView([ad.lat, ad.lng], 19);
                         }
                     }, 400);
                 }
             };
-            fn._actionData = a.actionData;
         }
+        if (fn) fn._actionData = ad || {};
         return fn;
     }
 
+    // --- Explication par l'assistant IA (POST /api/alerts/<id>/explain) ---
+    // Bloc autonome (bouton + zone de resultat) reutilise par le plein ecran
+    // et par l'historique (main.js). Il ne bloque jamais l'acquittement : le
+    // bouton est hors de la rangee d'actions, que _renderTaken remplace.
+    // En apercu (page d'admin), aucun appel n'est fait.
+    var AAI_LABELS = [
+        ["contexte", "Contexte"],
+        ["cause_probable", "Cause probable"],
+        ["evolution", "Evolution"],
+        ["action_suggeree", "Action suggeree"],
+        ["confiance", "Confiance"]
+    ];
+    var AAI_MAX_RETRY = 20;
+
+    function _aaiRender(result, data, refreshFn) {
+        result.textContent = "";
+        var secs = data.sections || {};
+        AAI_LABELS.forEach(function(kv) {
+            var txt = secs[kv[0]];
+            if (!txt) return;
+            var row = _el("div", "aai-section aai-" + kv[0]);
+            row.appendChild(_el("div", "aai-label", kv[1]));
+            row.appendChild(_el("div", "aai-text", txt));
+            result.appendChild(row);
+        });
+        var foot = _el("div", "aai-foot");
+        var when = fmtAlertDateTime(data.created_at);
+        foot.appendChild(document.createTextNode(
+            "Assistant IA" + (when ? " - " + when : "") + (data.cached ? " (deja genere)" : "") +
+            " - a verifier sur le terrain"));
+        if (data.can_refresh && refreshFn) {
+            var rb = _el("button", "aai-refresh", "Actualiser");
+            rb.type = "button";
+            rb.addEventListener("click", function(e) { e.stopPropagation(); refreshFn(); });
+            foot.appendChild(rb);
+        }
+        result.appendChild(foot);
+    }
+
+    function _aaiRequest(alertId, refresh, btn, result, attempt) {
+        attempt = attempt || 0;
+        btn.disabled = true;
+        result.style.display = "";
+        if (attempt === 0) {
+            result.textContent = "";
+            var sp = _el("div", "aai-loading");
+            sp.appendChild(_el("span", "aai-spinner"));
+            sp.appendChild(document.createTextNode(" Analyse en cours..."));
+            result.appendChild(sp);
+        }
+        fetch("/api/alerts/" + encodeURIComponent(alertId) + "/explain" + (refresh ? "?refresh=1" : ""), {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json", "X-CSRFToken": _csrfToken() },
+            body: "{}"
+        })
+            .then(function(r) {
+                return r.json().catch(function() { return {}; }).then(function(j) { return { status: r.status, json: j || {} }; });
+            })
+            .then(function(res) {
+                if (res.status === 202 && attempt < AAI_MAX_RETRY) {
+                    // Un autre poste fait deja generer cette explication
+                    setTimeout(function() { _aaiRequest(alertId, false, btn, result, attempt + 1); },
+                               (res.json.retry_after_s || 3) * 1000);
+                    return;
+                }
+                btn.disabled = false;
+                if (res.status === 200 && res.json.ok) {
+                    btn.style.display = "none";
+                    _aaiRender(result, res.json, function() { _aaiRequest(alertId, true, btn, result, 0); });
+                    if (res.json.refresh_refused) {
+                        _toast("info", "Explication generee il y a moins de 2 min : pas de nouvelle analyse");
+                    }
+                    return;
+                }
+                var code = res.json.error || res.status;
+                var msg = code === "cle_api_absente" ? "Assistant IA non configure sur ce serveur"
+                    : code === "alerte_introuvable" ? "Alerte introuvable"
+                    : code === "en_cours" ? "Analyse toujours en cours, reessayez"
+                    : code === "budget_exceeded" ? "Budget IA atteint : explication indisponible"
+                    : "Explication indisponible (" + code + ")";
+                result.textContent = "";
+                result.appendChild(_el("div", "aai-error", msg));
+            })
+            .catch(function() {
+                btn.disabled = false;
+                result.textContent = "";
+                result.appendChild(_el("div", "aai-error", "Erreur reseau"));
+            });
+    }
+
+    // opts : {preview: bool, compact: bool}
+    function explainWidget(alertId, opts) {
+        opts = opts || {};
+        var wrap = _el("div", "aai-wrap" + (opts.compact ? " aai-compact" : ""));
+        var btn = _el("button", "aai-btn");
+        btn.type = "button";
+        btn.appendChild(_el("span", "material-symbols-outlined", "auto_awesome"));
+        btn.appendChild(document.createTextNode(" Expliquer"));
+        var result = _el("div", "aai-result");
+        result.style.display = "none";
+        btn.addEventListener("click", function(e) {
+            e.stopPropagation();
+            if (opts.preview || !alertId) {
+                _toast("info", "Apercu : l'explication n'est pas generee (aucun appel)");
+                return;
+            }
+            _aaiRequest(alertId, false, btn, result, 0);
+        });
+        result.addEventListener("click", function(e) { e.stopPropagation(); });
+        wrap.appendChild(btn);
+        wrap.appendChild(result);
+        return wrap;
+    }
+
+    // --- Apercu (page d'admin) ---
+    // Affiche une alerte factice avec le rendu reel d'une definition, sans
+    // rien ecrire nulle part : ni alerte active, ni historique, ni WhatsApp.
+    function preview(def) {
+        def = def || {};
+        var slug = def.slug || "apercu";
+        var m = {
+            slug: slug, name: def.name || slug, icon: def.icon, color: def.color,
+            detection_type: def.detection_type || "", display_mode: def.display_mode,
+            category: (def.params || {}).category || ""
+        };
+        var params = def.params || {};
+        var ad = {};
+        var message = def.description || "Exemple de message d'alerte";
+        var title = "";
+        if (def.detection_type === "pcorg_urgency") {
+            var lvl = params.min_level || "UA";
+            ad = { niveau_urgence: lvl, category: params.category || "PCO.", pcorg_id: null,
+                   text: "Exemple : texte de la fiche main courante", zone: "Zone d'exemple",
+                   operator: "Operateur PC" };
+            var catLabel = (params.category || "").split(".").pop();
+            title = ("MAIN COURANTE " + (catLabel || "")).toUpperCase().trim();
+            message = ad.text;
+        } else if (_isSosType(slug)) {
+            ad = { device_name: "Tablette exemple", lat: 47.9496, lng: 0.2076, battery: 64 };
+        } else if (def.detection_type === "door_saturation_forecast") {
+            title = "SATURATION PORTE PREVUE";
+            message = "PORTE EXEMPLE : ~3200/h prevu vers 10:05 (capacite 3250/h)";
+        }
+        var onView = (def.detection_type === "pcorg_urgency" || def.detection_type === "traffic_cluster")
+            ? function() {} : null;
+        enqueueAlert(slug, new Date().toISOString(), message, onView, ad, null,
+                     { title: title, meta: m, preview: true });
+    }
+
+    window.showCriticalAlert = enqueueAlert; // (type, triggeredAt, message, onView, actionData, alertId, extra)
+    window.CockpitAlerts = {
+        meta: meta,
+        definitions: loadDefinitions,
+        isMuted: isMuted,
+        setMuted: setMuted,
+        preview: preview,
+        explainWidget: explainWidget
+    };
+
     // --- Purge memoire des IDs vus ---
     function _persistSeen() {
-        try { sessionStorage.setItem("cockpit-seen-alerts", JSON.stringify(_seenAlertIds)); } catch(e) {}
+        try { sessionStorage.setItem(SEEN_KEY, JSON.stringify(_seenAlertIds)); } catch(e) {}
     }
 
     function _markSeen(id) {
@@ -514,9 +959,17 @@
         }
     }
 
+    function _enqueueFromApi(a) {
+        var slug = a.definition_slug || "";
+        enqueueAlert(slug, a.triggeredAt || "", a.message || "", _buildOnView(slug, a),
+                     a.actionData, a._id, { title: a.title || "", meta: a.meta || null });
+    }
+
     // --- Polling ---
     function pollActiveAlerts() {
-        fetch("/api/active-alerts")
+        if (_pollInFlight) return;
+        _pollInFlight = true;
+        fetch("/api/active-alerts", { cache: "no-store" })
             .then(function(r) {
                 if (!r.ok) throw new Error("HTTP " + r.status);
                 return r.json();
@@ -524,38 +977,40 @@
             .then(function(alerts) {
                 _consecutiveErrors = 0;
                 if (!Array.isArray(alerts)) return;
+                alerts.forEach(function(a) { _rememberMeta(a.meta); });
+                _applyTaken(alerts);
 
                 if (!_firstPollDone) {
-                    // Premier poll : alertes < 5 min -> fullscreen, les autres -> historique seulement
+                    // Premier poll : alertes < 5 min -> affichees, les autres -> historique seulement.
+                    // Une alerte deja vue dans cet onglet ou deja traitee sur ce poste
+                    // ne repasse pas en plein ecran.
                     _firstPollDone = true;
                     var now = Date.now();
-                    var recentAlerts = [];
-                    alerts.forEach(function(a) {
+                    alerts.slice().reverse().forEach(function(a) {
+                        var alreadyHandled = !!_seenAlertIds[a._id] || _isDismissed(a._id) || !!a.taken_at;
                         _markSeen(a._id);
                         var age = a.triggeredAt ? (now - new Date(a.triggeredAt).getTime()) : Infinity;
-                        if (age <= GRACE_PERIOD_MS) {
-                            recentAlerts.push(a);
-                        } else if (typeof window._pushAlertHistory === "function") {
+                        if (age <= GRACE_PERIOD_MS && !alreadyHandled) {
+                            _enqueueFromApi(a);
+                        } else {
                             var slug = a.definition_slug || "";
-                            window._pushAlertHistory(slug, ICON_MAP[slug] || "info", TITLE_MAP[slug] || slug, fmtAlertDateTime(a.triggeredAt), a.message || "", null);
+                            _pushHistory({
+                                type: slug, triggeredAt: a.triggeredAt, message: a.message || "",
+                                onView: null, actionData: a.actionData || {}, alertId: a._id,
+                                title: a.title || "", meta: meta(slug, a.meta)
+                            });
                         }
-                    });
-                    // Afficher en fullscreen les alertes recentes (< 5 min)
-                    recentAlerts.forEach(function(a) {
-                        var slug = a.definition_slug || "";
-                        var onView = _buildOnView(slug, a);
-                        enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, a.actionData, a._id);
                     });
                     return;
                 }
 
-                // Polls suivants : afficher en fullscreen uniquement les nouvelles
-                alerts.forEach(function(a) {
+                // Polls suivants : uniquement les nouvelles, dans l'ordre d'arrivee
+                alerts.slice().reverse().forEach(function(a) {
                     if (_seenAlertIds[a._id]) return;
                     _markSeen(a._id);
-                    var slug = a.definition_slug || "";
-                    var onView = _buildOnView(slug, a);
-                    enqueueAlert(slug, a.triggeredAt || "", a.message || "", onView, a.actionData, a._id);
+                    if (_isDismissed(a._id)) return;   // deja traitee dans un autre onglet du poste
+                    if (a.taken_at) return;            // deja prise en compte avant d'etre vue ici
+                    _enqueueFromApi(a);
                 });
             })
             .catch(function(err) {
@@ -563,11 +1018,23 @@
                 if (_consecutiveErrors >= 3) {
                     console.warn("[alert_poller] Polling alertes en echec (" + _consecutiveErrors + " erreurs consecutives)", err);
                 }
-            });
+            })
+            .then(function() { _pollInFlight = false; });
     }
 
+    if (PREVIEW_ONLY) return;
+
     document.addEventListener("DOMContentLoaded", function() {
+        loadDefinitions();
         pollActiveAlerts();
         setInterval(pollActiveAlerts, POLL_INTERVAL);
+        // Chrome ralentit les minuteries d'un onglet en arriere-plan jusqu'a
+        // une execution par minute : un poste dont l'onglet cockpit n'etait
+        // pas au premier plan voyait le SOS avec jusqu'a une minute de retard.
+        // Rattrapage immediat au retour sur l'onglet ou sur la fenetre.
+        document.addEventListener("visibilitychange", function() {
+            if (document.visibilityState === "visible") pollActiveAlerts();
+        });
+        window.addEventListener("focus", pollActiveAlerts);
     });
 })();

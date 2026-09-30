@@ -15,6 +15,7 @@ import base64
 import time
 import random
 import logging
+import threading
 from datetime import datetime, timezone, timedelta
 
 import requests
@@ -104,14 +105,186 @@ def verify_snapshot_signature(alert_id, exp, sig):
     return hmac.compare_digest(expected, str(sig))
 
 
+# ---------------------------------------------------------------------------
+# Circuit breaker PARTAGE
+# ---------------------------------------------------------------------------
+#
+# Le breaker vivait sur l'instance (self._consecutive_errors). Or une instance
+# est creee a chaque envoi Alfred et a chaque cycle alert_engine : le compteur
+# repartait de zero a chaque fois et n'atteignait jamais le seuil. Le breaker
+# ne s'ouvrait donc jamais, et un WAHA en panne (ou un numero en cours de
+# bannissement) etait relance sans fin.
+#
+# Deux niveaux :
+#   - memoire module (verrou) : partage par toutes les instances d'un process
+#     (Cockpit sous waitress = un seul process, plusieurs threads) ;
+#   - document Mongo cockpit_wa_config{_id: "wa_breaker"} : alert_engine est un
+#     process court relance toutes les 30 s, sans lui il repartirait de zero a
+#     chaque run. Relu au plus toutes les BREAKER_SYNC_SECONDS.
+#
+# Document separe de wa_config : l'enregistrement de la config admin ne doit
+# pas pouvoir ecraser (ni etre ecrase par) l'etat du breaker. Mongo
+# injoignable : on degrade sur la memoire seule, jamais d'exception.
+
+BREAKER_DOC_ID = "wa_breaker"
+BREAKER_SYNC_SECONDS = 15
+
+_BREAKER_LOCK = threading.Lock()
+_BREAKER = {"errors": 0, "open_until": None, "synced_at": 0.0}
+
+
+def _as_utc(dt):
+    """pymongo rend des datetimes naifs (UTC) : on les rend conscients."""
+    if isinstance(dt, datetime) and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt if isinstance(dt, datetime) else None
+
+
+def _breaker_col(db):
+    return db["cockpit_wa_config"]
+
+
+def _breaker_sync(db, force=False):
+    """Recharge l'etat depuis Mongo (au plus toutes les BREAKER_SYNC_SECONDS).
+
+    Mongo est la verite partagee entre process : un breaker ouvert par
+    alert_engine doit bloquer aussi les reponses Alfred de Cockpit.
+    """
+    with _BREAKER_LOCK:
+        if not force and (time.time() - _BREAKER["synced_at"]) < BREAKER_SYNC_SECONDS:
+            return
+        _BREAKER["synced_at"] = time.time()
+    try:
+        doc = _breaker_col(db).find_one({"_id": BREAKER_DOC_ID}) or {}
+    except Exception as e:
+        log.warning("WhatsApp breaker: lecture Mongo impossible (%s), memoire seule", e)
+        return
+    with _BREAKER_LOCK:
+        _BREAKER["errors"] = int(doc.get("consecutive_errors") or 0)
+        _BREAKER["open_until"] = _as_utc(doc.get("open_until"))
+
+
+def breaker_is_open(db):
+    """True si le breaker est ouvert. Le referme (memoire + Mongo) a expiration."""
+    _breaker_sync(db)
+    now = datetime.now(timezone.utc)
+    with _BREAKER_LOCK:
+        until = _BREAKER["open_until"]
+        if until is None:
+            return False
+        if now < until:
+            return True
+        _BREAKER["open_until"] = None
+        _BREAKER["errors"] = 0
+    log.info("Circuit breaker ferme (delai expire)")
+    try:
+        # Filtre sur l'echeance : si un autre process vient de le rouvrir
+        # (open_until plus lointain), on ne l'efface pas.
+        _breaker_col(db).update_one(
+            {"_id": BREAKER_DOC_ID, "open_until": {"$lte": now}},
+            {"$set": {"open_until": None, "consecutive_errors": 0, "updated_at": now}},
+        )
+    except Exception as e:
+        log.warning("WhatsApp breaker: fermeture Mongo impossible : %s", e)
+    return False
+
+
+def breaker_on_error(db):
+    """Compte une erreur d'envoi ; ouvre le breaker au seuil. Rend le compteur."""
+    now = datetime.now(timezone.utc)
+    with _BREAKER_LOCK:
+        _BREAKER["errors"] += 1
+        errors = _BREAKER["errors"]
+    try:
+        # $inc atomique : deux process qui echouent en meme temps s'additionnent
+        doc = _breaker_col(db).find_one_and_update(
+            {"_id": BREAKER_DOC_ID},
+            {"$inc": {"consecutive_errors": 1}, "$set": {"updated_at": now}},
+            upsert=True, return_document=True,  # ReturnDocument.AFTER == True
+        ) or {}
+        errors = max(errors, int(doc.get("consecutive_errors") or 0))
+        with _BREAKER_LOCK:
+            _BREAKER["errors"] = errors
+    except Exception as e:
+        log.warning("WhatsApp breaker: ecriture Mongo impossible : %s", e)
+    if errors >= CIRCUIT_BREAKER_THRESHOLD:
+        until = now + timedelta(minutes=CIRCUIT_BREAKER_PAUSE_MIN)
+        with _BREAKER_LOCK:
+            already = _BREAKER["open_until"] is not None and _BREAKER["open_until"] > now
+            if not already:
+                _BREAKER["open_until"] = until
+        if not already:
+            log.warning(
+                "Circuit breaker OUVERT: %d erreurs consecutives, pause %d min",
+                errors, CIRCUIT_BREAKER_PAUSE_MIN,
+            )
+            try:
+                _breaker_col(db).update_one(
+                    {"_id": BREAKER_DOC_ID},
+                    {"$set": {"open_until": until, "opened_at": now}},
+                    upsert=True,
+                )
+            except Exception as e:
+                log.warning("WhatsApp breaker: ouverture Mongo impossible : %s", e)
+    return errors
+
+
+def breaker_on_success(db):
+    """Remet le compteur a zero. N'ecrit en base que s'il y avait des erreurs
+    (sinon chaque envoi reussi couterait une ecriture inutile)."""
+    with _BREAKER_LOCK:
+        had_errors = _BREAKER["errors"] > 0
+        _BREAKER["errors"] = 0
+    if not had_errors:
+        return
+    try:
+        _breaker_col(db).update_one(
+            {"_id": BREAKER_DOC_ID},
+            {"$set": {"consecutive_errors": 0,
+                      "updated_at": datetime.now(timezone.utc)}},
+            upsert=True,
+        )
+    except Exception as e:
+        log.warning("WhatsApp breaker: reset Mongo impossible : %s", e)
+
+
+def _breaker_reset_memory():
+    """Remise a zero memoire (tests uniquement)."""
+    with _BREAKER_LOCK:
+        _BREAKER["errors"] = 0
+        _BREAKER["open_until"] = None
+        _BREAKER["synced_at"] = 0.0
+
+
+# Priorites des envois "directs" (hors alertes) : voir send_direct().
+PRIORITY_REPLY = "reply"      # reponse a quelqu'un qui vient de demander
+PRIORITY_INTERIM = "interim"  # phrase d'attente, confort pur
+PRIORITY_LOW = "low"          # message non sollicite (refus DM a un inconnu)
+
+# Seuils "proche des limites" pour les envois de confort : au-dela, on garde
+# le quota restant pour les vraies reponses et les alertes.
+NEAR_LIMIT_HOUR_RATIO = 0.8
+NEAR_LIMIT_DAY_RATIO = 0.9
+
+
 class WhatsAppService:
 
     def __init__(self, db):
         self.db = db
         self._config_cache = None
         self._config_ts = None
-        self._consecutive_errors = 0
-        self._circuit_open_until = None
+
+    # Compat : ces deux attributs etaient portes par l'instance. Ils lisent
+    # desormais l'etat partage du module (get_stats les expose a l'admin).
+    @property
+    def _consecutive_errors(self):
+        with _BREAKER_LOCK:
+            return _BREAKER["errors"]
+
+    @property
+    def _circuit_open_until(self):
+        with _BREAKER_LOCK:
+            return _BREAKER["open_until"]
 
     # ------------------------------------------------------------------
     # Config
@@ -248,7 +421,7 @@ class WhatsAppService:
                 timeout=(HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT),
             )
             if r.status_code in (200, 201):
-                self._consecutive_errors = 0
+                breaker_on_success(self.db)
                 data = r.json()
                 return data.get("id") or data.get("key", {}).get("id")
             log.warning("WAHA sendText status=%d body=%s", r.status_code, r.text[:200])
@@ -300,7 +473,7 @@ class WhatsAppService:
                 timeout=(HTTP_CONNECT_TIMEOUT, 30),
             )
             if r.status_code in (200, 201):
-                self._consecutive_errors = 0
+                breaker_on_success(self.db)
                 data = r.json() if r.content else {}
                 return data.get("id") or data.get("key", {}).get("id") or "sent"
             log.warning("WAHA sendImage status=%d body=%s", r.status_code, r.text[:200])
@@ -312,32 +485,16 @@ class WhatsAppService:
             return None
 
     def _on_send_error(self):
-        """Incremente le compteur d'erreurs et ouvre le circuit breaker si besoin."""
-        self._consecutive_errors += 1
-        if self._consecutive_errors >= CIRCUIT_BREAKER_THRESHOLD:
-            self._circuit_open_until = (
-                datetime.now(timezone.utc)
-                + timedelta(minutes=CIRCUIT_BREAKER_PAUSE_MIN)
-            )
-            log.warning(
-                "Circuit breaker OUVERT: %d erreurs consecutives, pause %d min",
-                self._consecutive_errors, CIRCUIT_BREAKER_PAUSE_MIN,
-            )
+        """Incremente le compteur d'erreurs (partage) et ouvre le breaker si besoin."""
+        breaker_on_error(self.db)
 
     # ------------------------------------------------------------------
     # Anti-ban checks
     # ------------------------------------------------------------------
 
     def _is_circuit_open(self):
-        """True si le circuit breaker est ouvert."""
-        if self._circuit_open_until is None:
-            return False
-        if datetime.now(timezone.utc) >= self._circuit_open_until:
-            log.info("Circuit breaker ferme (delai expire)")
-            self._circuit_open_until = None
-            self._consecutive_errors = 0
-            return False
-        return True
+        """True si le circuit breaker (partage process + Mongo) est ouvert."""
+        return breaker_is_open(self.db)
 
     def _is_quiet_hours(self):
         """True si on est dans les heures silencieuses (Europe/Paris)."""
@@ -407,8 +564,12 @@ class WhatsAppService:
         cfg = self.get_config()
         cooldown = cfg.get("global_cooldown_minutes", DEFAULT_GLOBAL_COOLDOWN)
         since = datetime.now(timezone.utc) - timedelta(minutes=cooldown)
+        # Les envois directs (reponses Alfred) sont exclus : ils comptent dans
+        # les plafonds horaire/journalier, mais une reponse Alfred dans un
+        # groupe ne doit pas y bloquer les alertes pendant 10 min.
         return self.db["cockpit_wa_send_history"].count_documents(
-            {"recipient_id": recipient_id, "sentAt": {"$gte": since}, "status": "sent"}
+            {"recipient_id": recipient_id, "sentAt": {"$gte": since},
+             "status": "sent", "source": {"$ne": "direct"}}
         ) == 0
 
     def _human_delay(self):
@@ -503,10 +664,15 @@ class WhatsAppService:
 
     def _record_send(self, alert_slug, alert_name, dedup_key,
                      recipient_type, recipient_id, recipient_name,
-                     message_text, status, waha_msg_id=None, error=None):
-        """Enregistre un envoi dans cockpit_wa_send_history."""
+                     message_text, status, waha_msg_id=None, error=None,
+                     source=None):
+        """Enregistre un envoi dans cockpit_wa_send_history.
+
+        source : None pour les alertes (historique), "direct" pour les envois
+        hors alertes (reponses Alfred) via send_direct().
+        """
         now = datetime.now(timezone.utc)
-        self.db["cockpit_wa_send_history"].insert_one({
+        doc = {
             "alert_slug": alert_slug,
             "alert_name": alert_name,
             "alert_dedup_key": dedup_key,
@@ -519,7 +685,99 @@ class WhatsAppService:
             "error": str(error)[:200] if error else None,
             "sentAt": now,
             "createdAt": now,
-        })
+        }
+        if source:
+            doc["source"] = source
+        self.db["cockpit_wa_send_history"].insert_one(doc)
+
+    # ------------------------------------------------------------------
+    # Envoi direct (reponses Alfred) -- soumis aux memes plafonds
+    # ------------------------------------------------------------------
+
+    def _count_sent_since(self, since):
+        return self.db["cockpit_wa_send_history"].count_documents(
+            {"sentAt": {"$gte": since}, "status": "sent"}
+        )
+
+    def send_direct(self, chat_id, text, priority=PRIORITY_REPLY,
+                    kind="alfred", recipient_name=""):
+        """Envoi texte hors alertes (Alfred). Rend le msg_id WAHA ou None.
+
+        Alfred appelait _send_text directement : ses reponses n'entraient pas
+        dans cockpit_wa_send_history, donc ni dans les plafonds anti-ban ni
+        dans les stats admin. Un echange soutenu pouvait faire depasser au
+        numero le volume que les plafonds sont censes proteger.
+
+        Regles selon la priorite :
+          - toutes : refus si breaker ouvert ou plafond JOURNALIER atteint
+            (plafond dur, protege le numero) ;
+          - reply : refus aussi au plafond horaire ; PAS de gate heures
+            silencieuses (quelqu'un vient de poser la question, il attend) ;
+          - interim / low : refus des qu'on approche des plafonds (80 % horaire,
+            90 % journalier) : le quota restant va aux vraies reponses ;
+          - low : refus en heures silencieuses (message non sollicite).
+        Le flag global `enabled` (notifications d'alertes) n'est volontairement
+        pas applique : il n'a jamais gate Alfred.
+
+        Chaque envoi tente est trace (status sent/error, source "direct").
+        Les refus ne sont que journalises (pas d'entree d'historique).
+        """
+        if not chat_id or not text:
+            return None
+        if self._is_circuit_open():
+            log.warning("WhatsApp direct (%s/%s) refuse : circuit breaker ouvert",
+                        kind, priority)
+            return None
+        cfg = self.get_config()
+        now = datetime.now(timezone.utc)
+        lim_h = int(cfg.get("rate_limit_per_hour", DEFAULT_RATE_LIMIT_HOUR) or 0)
+        lim_d = int(cfg.get("rate_limit_per_day", DEFAULT_RATE_LIMIT_DAY) or 0)
+        try:
+            n_h = self._count_sent_since(now - timedelta(hours=1))
+            n_d = self._count_sent_since(now - timedelta(hours=24))
+        except Exception as e:
+            # Sans comptage, on ne sait pas si on est sous le plafond : on
+            # laisse passer une reponse directe, pas un message de confort.
+            log.warning("WhatsApp direct : comptage impossible (%s)", e)
+            if priority != PRIORITY_REPLY:
+                return None
+            n_h = n_d = 0
+        if n_d >= lim_d:
+            log.warning("WhatsApp direct (%s/%s) refuse : plafond journalier %d atteint",
+                        kind, priority, lim_d)
+            return None
+        if priority == PRIORITY_REPLY:
+            if n_h >= lim_h:
+                log.warning("WhatsApp direct (%s) refuse : plafond horaire %d atteint",
+                            kind, lim_h)
+                return None
+        else:
+            if n_h >= lim_h * NEAR_LIMIT_HOUR_RATIO or n_d >= lim_d * NEAR_LIMIT_DAY_RATIO:
+                log.info("WhatsApp direct (%s/%s) saute : proche des plafonds (%d/%d h, %d/%d j)",
+                         kind, priority, n_h, lim_h, n_d, lim_d)
+                return None
+            if priority == PRIORITY_LOW and self._is_quiet_hours():
+                log.info("WhatsApp direct (%s/low) saute : heures silencieuses", kind)
+                return None
+
+        msg_id = self._send_text(chat_id, text)
+        try:
+            self._record_send(
+                alert_slug="direct:%s" % kind,
+                alert_name="Alfred" if kind.startswith("alfred") else kind,
+                dedup_key=None,
+                recipient_type="group" if str(chat_id).endswith("@g.us") else "dm",
+                recipient_id=chat_id,
+                recipient_name=recipient_name or chat_id,
+                message_text=text,
+                status="sent" if msg_id else "error",
+                waha_msg_id=msg_id,
+                error=None if msg_id else "Echec envoi WAHA",
+                source="direct",
+            )
+        except Exception as e:
+            log.warning("WhatsApp direct : historique non ecrit (%s)", e)
+        return msg_id or None
 
     # ------------------------------------------------------------------
     # Envoi haut niveau -- message test

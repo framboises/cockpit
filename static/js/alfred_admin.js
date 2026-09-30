@@ -193,7 +193,8 @@
     var btn = e.currentTarget;
     btn.disabled = true;
     apiPost("/api/alfred/summary/trigger/" + encodeURIComponent(chatId), {}).then(function (res) {
-      if (res.ok) { toast("success", "Resume lance, verifier dans ~1 min"); }
+      if (res.ok && res.body && res.body.already_running) { toast("info", "Un resume de ce groupe est deja en cours"); }
+      else if (res.ok) { toast("success", "Resume lance, verifier dans ~1 min"); }
       else { toast("error", "Echec : " + ((res.body && res.body.error) || res.status)); }
     }).finally(function () { btn.disabled = false; });
   }
