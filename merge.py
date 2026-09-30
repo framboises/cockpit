@@ -968,8 +968,10 @@ def _patch_vignette(existing: dict, new_v: dict) -> dict:
         # Le merge dit explicitement pas de todo -> on vide
         patched["todo"] = ""
 
-    # Remark : preserver si l'operateur l'a editee (origin manual-edit)
-    if existing.get("origin") == "manual-edit":
+    # Remark : preserver si l'operateur l'a editee (origin manual-edit, ou
+    # remark_manual pose par /update_timetable_event : l'origine d'une vignette
+    # du parametrage est reecrite a chaque merge, le drapeau, lui, survit)
+    if existing.get("origin") == "manual-edit" or existing.get("remark_manual"):
         pass  # garder la remark de l'operateur
     else:
         if "remark" in new_v:

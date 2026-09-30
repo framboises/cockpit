@@ -122,8 +122,11 @@
     });
   }
 
-  function _toast(msg) {
-    if (typeof window.showToast === "function") { window.showToast(msg); return; }
+  // showToast(type, message) : l'appel a un seul argument affichait un toast
+  // vide (le message etait pris pour le type)
+  function _toast(msg, type) {
+    if (!type) type = /^(Calcul|Envoi) itineraire:|^Aucun/.test(msg) ? "warning" : "info";
+    if (typeof window.showToast === "function") { window.showToast(type, msg); return; }
     if (typeof window.toast === "function") { window.toast(msg); return; }
     console.log("[routing]", msg);
   }
@@ -479,6 +482,8 @@
       to: STATE.to,
       waypoints: STATE.waypoints,
       god: !!STATE.god,
+      // La tablette efface le trace quand cette fiche est close
+      fiche_id: STATE.ficheId || null,
       title: "Itineraire (PC org)",
       body: "Itineraire envoye depuis le PC org. " +
         ((STATE.lastResult.distance_m / 1000).toFixed(1)) + " km, " +
@@ -493,7 +498,7 @@
         _toast("Envoi itineraire: " + err);
         return;
       }
-      _toast("Itineraire envoye a " + (STATE.deviceName || "la tablette"));
+      _toast("Itineraire envoye a " + (STATE.deviceName || "la tablette"), "success");
     }).catch(function (e) {
       if (btn) { btn.disabled = false; btn.classList.remove("loading"); }
       _toast("Envoi itineraire: " + ((e && e.message) || "reseau indisponible"));

@@ -1199,6 +1199,10 @@ async function fetchTimetable() {
 
             const sectionsByDate = {}; // Pour stocker les sections par date
 
+            // Donnees brutes pour la modale d'ajout (suggestions lieu/departement,
+            // detection de doublons, jours de l'evenement)
+            window._timetableRaw = data.data || {};
+
             if (data.data) {
                 // 👇 nettoie les paires open/close à 00:00 (même jour + minuit croisé)
                removeRedundantOpenClosePairs(data.data, { mode: 'all' });
@@ -1320,19 +1324,6 @@ function fetchParametrage() {
 }
 
 
-// Exemple de fonction pour ouvrir la modale détaillée pour un item
-function openTimetableItemModal(date, item) {
-    console.log("Ouverture de la modale pour la date", date, "et l'item :", item);
-    // Redirige vers le tiroir latéral droit si disponible
-    if (window.openEventDrawer) {
-        // On passe la date aussi (pratique pour l'affichage)
-        window.openEventDrawer({ ...item, date });
-        return;
-    }
-    // Fallback simple si le drawer n'est pas chargé
-    if (typeof showToast === "function") showToast("warning", "Details evenement indisponibles.");
-}
-
 // Rafraichit la timeline en conservant la position de scroll courante.
 // Sans ca, le rebuild complet du DOM ramene au premier jour de la timeline.
 function refreshTimetablePreservingScroll() {
@@ -1355,252 +1346,739 @@ window.fetchParametrage = fetchParametrage;
 window.openEventDrawer = openEventDrawer;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
-// FONCTION AJOUT
+// MODALE AJOUT / EDITION D'UNE VIGNETTE TIMETABLE
+// Point d'entree unique : window.openTimetableModal({ mode, date, item }).
+// Les vignettes issues du parametrage (param_id) n'ont que remarque et taches
+// modifiables : le merge reecrit les autres champs a chaque synchronisation.
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
-document.addEventListener('DOMContentLoaded', function(){
-    // Références aux éléments
-    const addEventButton = document.getElementById('add-event-button');
-    const addEventModal = document.getElementById('addEventModal');
-    const closeAddEvent = document.getElementById('closeAddEvent');
-    const cancelAddEvent = document.getElementById('cancelAddEvent');
-    const addEventForm = document.getElementById('addEventForm');
-    const categorySelect = document.getElementById('category');
+(function () {
+  const modal = document.getElementById('addEventModal');
+  const form  = document.getElementById('addEventForm');
+  if (!modal || !form) return;
 
-    // s'assurer que le champ hidden existe et réinitialiser pour une création
-    let prepHidden = addEventForm.querySelector('#prep-status-hidden');
-    if (!prepHidden) {
-      prepHidden = document.createElement('input');
-      prepHidden.type = 'hidden';
-      prepHidden.name = 'preparation_checked';
-      prepHidden.id = 'prep-status-hidden';
-      addEventForm.appendChild(prepHidden);
+  const $ = (id) => document.getElementById(id);
+  const F = {
+    date: $('event-date'), start: $('start-time'), end: $('end-time'), duration: $('duration'),
+    category: $('category'), activity: $('activity'), place: $('place'), department: $('department'),
+    remark: $('remark'), id: $('edit-id-hidden'), prep: $('prep-status-hidden'),
+  };
+  const UI = {
+    title: $('addEventTitle'), sub: $('tt-head-sub'), icon: $('tt-head-icon'), badges: $('tt-head-badges'),
+    banner: $('tt-param-banner'), days: $('tt-days'), dateWarn: $('tt-date-warning'),
+    timeNote: $('tt-time-note'), durAuto: $('duration-auto'), dupWarn: $('tt-dup-warning'),
+    counter: $('activity-counter'), todoCount: $('tt-todo-count'), todoList: $('event-todo-list'),
+    save: $('saveEvent'), saveNew: $('saveAndNewEvent'), cancel: $('cancelAddEvent'), close: $('closeAddEvent'),
+    catManager: $('category-manager'),
+  };
+  const TIME_NOTE_DEFAULT = 'Au moins une heure, début ou fin. TBC = heure à confirmer.';
+
+  const state = {
+    mode: 'add', item: null, locked: false, durationManual: false,
+    snapshot: '', saving: false, closeTimer: null, returnFocus: null,
+  };
+
+  // ------------------------------------------------------------------
+  // Heures
+  // ------------------------------------------------------------------
+  // "7:05", "07:05", "15h30", "7h", "7.30" -> "HH:MM" ; null si illisible
+  function normTime(raw) {
+    const s = String(raw || '').trim();
+    let m = s.match(/^(\d{1,2})\s*[:hH.]\s*(\d{2})$/);
+    let h, mi;
+    if (m) { h = +m[1]; mi = +m[2]; }
+    else if ((m = s.match(/^(\d{1,2})\s*[hH]$/))) { h = +m[1]; mi = 0; }
+    else return null;
+    if (mi > 59 || h > 24 || (h === 24 && mi !== 0)) return null;
+    return String(h).padStart(2, '0') + ':' + String(mi).padStart(2, '0');
+  }
+  const toMin = (hhmm) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
+  const fmtDur = (min) => String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0');
+
+  const tbcBtn = (input) => form.querySelector('.tt-tbc[data-for="' + input.id + '"]');
+  const isTbc  = (input) => tbcBtn(input)?.getAttribute('aria-pressed') === 'true';
+
+  function setTbc(input, on) {
+    const btn = tbcBtn(input);
+    if (btn) btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    input.closest('.tt-time')?.classList.toggle('is-tbc', !!on);
+    if (on) input.value = '';
+    input.disabled = !!on || state.locked;
+  }
+
+  // Remplit un champ heure depuis une valeur stockee. Renvoie la valeur
+  // d'origine si elle n'est pas representable (ex. "Matin"), sinon null.
+  function setTimeField(input, raw) {
+    const s = String(raw || '').trim();
+    if (s.toUpperCase() === 'TBC') { setTbc(input, true); return null; }
+    setTbc(input, false);
+    const n = normTime(s);
+    if (n === '24:00') { input.value = '23:59'; return null; }
+    input.value = n || '';
+    return (s && !n) ? s : null;
+  }
+  const getTime = (input) => isTbc(input) ? 'TBC' : (input.value || '');
+
+  function computedDuration() {
+    const s = getTime(F.start), e = getTime(F.end);
+    if (!/^\d{2}:\d{2}$/.test(s) || !/^\d{2}:\d{2}$/.test(e)) return null;
+    let d = toMin(e) - toMin(s);
+    const nextDay = d < 0;
+    if (nextDay) d += 1440;
+    return { value: fmtDur(d), nextDay };
+  }
+
+  function refreshTimeHelpers() {
+    const c = computedDuration();
+    if (!state.durationManual) F.duration.value = c ? c.value : '';
+    UI.durAuto.hidden = !(c && !state.durationManual);
+    if (!UI.timeNote.dataset.legacy) {
+      UI.timeNote.textContent = (c && c.nextDay)
+        ? 'La fin est avant le début : elle est comprise comme le lendemain.'
+        : TIME_NOTE_DEFAULT;
+      UI.timeNote.classList.toggle('tt-note-warn', !!(c && c.nextDay));
     }
-    prepHidden.value = ''; // pas de statut imposé à la création
+  }
 
-    // Fonction pour ouvrir la modale en ajoutant la classe "show"
-    function openModal(modal) {
-        modal.style.display = 'flex';
-        // Nettoyer les erreurs d'une session précédente + repositionner le scroll en haut
-        modal.querySelectorAll('.form-error').forEach(n => n.remove());
-        modal.querySelectorAll('.input-error').forEach(n => n.classList.remove('input-error'));
-        // Replier le gestionnaire de categories
-        modal.querySelector('#category-manager')?.setAttribute('hidden', '');
-        const body = modal.querySelector('.modal-body');
-        if (body) body.scrollTop = 0;
-        // Permettre la transition définie dans le CSS (opacity et scale)
-        setTimeout(() => {
-            modal.classList.add('show');
-            modal.querySelector('#event-date')?.focus();
-        }, 10);
+  // ------------------------------------------------------------------
+  // Jours de l'evenement, suggestions, doublons
+  // ------------------------------------------------------------------
+  const ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+
+  function eventRange() {
+    const gh = window.parametrage?.globalHoraires || window.parametrage?.data?.globalHoraires || {};
+    const a = gh.montage?.start ? new Date(gh.montage.start) : null;
+    const b = gh.demontage?.end ? new Date(gh.demontage.end) : null;
+    if (a && b && !isNaN(a) && !isNaN(b) && b >= a) return { start: ymd(a), end: ymd(b) };
+    return null;
+  }
+
+  function eventDays() {
+    const range = eventRange();
+    const days = new Set();
+    if (range) {
+      const d = new Date(range.start + 'T12:00:00');
+      const end = new Date(range.end + 'T12:00:00');
+      let guard = 0;
+      while (d <= end && guard++ < 62) { days.add(ymd(d)); d.setDate(d.getDate() + 1); }
     }
-    
-    // Fonction pour fermer la modale
-    function closeModal(modal) {
-        modal.classList.remove('show');
-        // Après la transition, masquer la modale
-        setTimeout(() => {
-            modal.style.display = 'none';
-        }, 300);
-    }
-    
-    // Ouvrir la modale lors du clic sur le bouton "Ajouter un événement"
-    addEventButton.addEventListener('click', async function(){
-      // Repartir sur un formulaire propre (sinon les valeurs d'une edition restent)
-      window.formMode = 'add';
-      window.editingItemId = null;
-      addEventForm.reset();
-      const idHidden = document.getElementById('edit-id-hidden');
-      if (idHidden) idHidden.value = '';
-      const prep = document.getElementById('prep-status-hidden');
-      if (prep) prep.value = '';
-      const title = addEventModal.querySelector('h3');
-      if (title) title.textContent = "Ajouter un événement à la Timetable";
+    Object.keys(window._timetableRaw || {}).forEach(k => /^\d{4}-\d{2}-\d{2}$/.test(k) && days.add(k));
+    Object.keys(window.publicDatesMap || {}).forEach(k => days.add(k));
+    return { range, list: Array.from(days).sort() };
+  }
 
-      await loadCategories();
-      refreshEventCategorySelect('');   // select trie, rien de pre-selectionne
-      if (window.populateEventTodoEditor) window.populateEventTodoEditor('');
-
-      openModal(addEventModal);
-    });
-    
-    // Fermer la modale au clic sur la croix ou le bouton Annuler
-    closeAddEvent.addEventListener('click', () => {
-        window.formMode = 'add';
-        window.editingItemId = null;
-        const title = addEventModal.querySelector('h3');
-        if (title) title.textContent = "Ajouter un événement à la Timetable";
-        closeModal(addEventModal);
-    });
-    cancelAddEvent.addEventListener('click', () => {
-        window.formMode = 'add';
-        window.editingItemId = null;
-        const title = addEventModal.querySelector('h3');
-        if (title) title.textContent = "Ajouter un événement à la Timetable";
-        closeModal(addEventModal);
-    });
-
-    // --- Gestionnaire de categories (ouvrir/fermer + ajouter) ---
-    const categoryManageBtn = document.getElementById('category-manage-btn');
-    const categoryManager   = document.getElementById('category-manager');
-    const catMgrAddBtn      = document.getElementById('cat-mgr-add-btn');
-    const catMgrInput       = document.getElementById('cat-mgr-input');
-
-    categoryManageBtn?.addEventListener('click', (e) => {
-        e.preventDefault();      // ne pas focaliser le select (bouton dans un <label>)
-        e.stopPropagation();
-        const open = categoryManager.hasAttribute('hidden');
-        if (open) {
-            categoryManager.removeAttribute('hidden');
-            loadCategoryManager();
-        } else {
-            categoryManager.setAttribute('hidden', '');
-        }
-    });
-    catMgrAddBtn?.addEventListener('click', addCategoryFromManager);
-    catMgrInput?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); addCategoryFromManager(); }
-    });
-
-    // --- Editeur de taches : bouton d'ajout d'une tache ---
-    document.getElementById('event-todo-add')?.addEventListener('click', () => {
-        const row = _addEventTodoRow('');
-        row?.querySelector('input')?.focus();
-    });
-
-    // Soumission du formulaire (ADD ou EDIT)
-    addEventForm.addEventListener('submit', function(e){
-        e.preventDefault();
-
-        const isEdit = (window.formMode === 'edit');
-        const endpoint = isEdit ? '/update_timetable_event' : '/add_timetable_event';
-
-        // === Validation renforcée ===
-        // Nettoyage des erreurs précédentes
-        document.querySelectorAll('#addEventForm .form-error').forEach(n => n.remove());
-        document.querySelectorAll('#addEventForm .input-error').forEach(n => n.classList.remove('input-error'));
-
-        const dateVal     = (document.getElementById('event-date').value || '').trim();
-        const startVal    = (document.getElementById('start-time').value || '').trim();
-        const endVal      = (document.getElementById('end-time').value   || '').trim();
-        const categoryVal = (document.getElementById('category').value   || '').trim();
-        const activityVal = (document.getElementById('activity').value   || '').trim();
-
-        let firstInvalid = null;
-        const markError = (id, msg) => {
-          const el = document.getElementById(id);
-          if (!el) return;
-          el.classList.add('input-error');
-          const err = document.createElement('div');
-          err.className = 'form-error';
-          err.textContent = msg;
-          el.closest('.form-group').appendChild(err);
-          if (!firstInvalid) firstInvalid = el;
-        };
-
-        if (!dateVal)               markError('event-date', 'La date est obligatoire.');
-        if (!categoryVal)           markError('category',   'La catégorie est obligatoire.');
-        if (!activityVal)           markError('activity',   "L'activité est obligatoire.");
-        if (!startVal && !endVal)   markError('start-time', 'Saisir au moins une heure (début ou fin).');
-
-        if (firstInvalid) {
-          firstInvalid.focus();
-          return; // stop submit
-        }
-
-        // Récupérer les valeurs du formulaire
-        const payload = {
-            event: window.selectedEvent || '24H MOTOS',
-            year: window.selectedYear || '2025',
-            date: document.getElementById('event-date').value,
-            start: document.getElementById('start-time').value,
-            end: document.getElementById('end-time').value,
-            duration: document.getElementById('duration').value,
-            category: document.getElementById('category').value,
-            activity: document.getElementById('activity').value,
-            place: document.getElementById('place').value,
-            department: document.getElementById('department').value,
-            remark: document.getElementById('remark').value,
-            todo: (typeof window.collectEventTodos === 'function' ? window.collectEventTodos() : ''),
-            type: "Timetable",
-            origin: isEdit ? "manual-edit" : "manual",
-            preparation_checked: (document.getElementById('prep-status-hidden')?.value ?? '')
-        };
-
-        // IDs pour décider si on UPDATE ou si on ADD
-        const editId      = (document.getElementById('edit-id-hidden')?.value || '').trim();
-        const editParamId = (document.getElementById('edit-param-hidden')?.value || '').trim();
-
-        // Ajouter les IDs au payload en mode édition
-        if (isEdit) {
-          if (editId)      payload._id = editId;
-        }
-
-        // Sécuriser l'endpoint : si on est en "edit" mais qu'on n'a ni _id ni param_id, on bascule en création
-        let finalEndpoint = endpoint;
-        if (isEdit && !editId) {
-          console.warn('[Timetable] Edit sans _id/param_id -> fallback création');
-          finalEndpoint   = '/add_timetable_event';
-          payload.origin  = 'manual';
-        }
-
-        // (facultatif mais utile)
-        console.debug('[Timetable submit]', { isEdit, finalEndpoint, payload });
-
-        fetch(finalEndpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': document.querySelector('meta[name=\"csrf-token\"]').getAttribute('content')
-            },
-            body: JSON.stringify(payload)
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                showDynamicFlashMessage(isEdit ? "Événement modifié avec succès" : "Événement ajouté avec succès", "success");
-                closeModal(addEventModal);
-
-                // Reset mode vers ADD et texte titre
-                window.formMode = 'add';
-                window.editingItemId = null;
-                const title = addEventModal.querySelector('h3');
-                if (title) title.textContent = "Ajouter un événement à la Timetable";
-
-                // Rafraîchir la timeline en conservant la position de scroll
-                // (fetchTimetable vide deja #event-list lui-meme)
-                refreshTimetablePreservingScroll();
-            } else {
-                showDynamicFlashMessage(data.message || "Erreur lors de l'enregistrement", "error");
-            }
-        })
-        .catch(err => {
-            console.error("Erreur lors de l'enregistrement:", err);
-            showDynamicFlashMessage("Erreur lors de l'enregistrement", "error");
+  function renderDays() {
+    const { range, list } = eventDays();
+    UI.days.innerHTML = '';
+    // Au-dela de trois semaines les puces n'aident plus : le calendrier suffit
+    if (!list.length || list.length > 21) { UI.days.hidden = true; }
+    else {
+      UI.days.hidden = false;
+      list.forEach(ds => {
+        const d = new Date(ds + 'T12:00:00');
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'tt-day tt-lockable' + (window.publicDatesMap?.[ds] ? ' is-public' : '');
+        b.dataset.date = ds;
+        b.title = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
+          + (window.publicDatesMap?.[ds] ? ' (ouvert au public)' : '');
+        const wd = document.createElement('span');
+        wd.className = 'tt-day-wd';
+        wd.textContent = d.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '');
+        const dn = document.createElement('span');
+        dn.className = 'tt-day-num';
+        dn.textContent = d.getDate();
+        b.append(wd, dn);
+        b.addEventListener('click', () => {
+          if (state.locked) return;
+          F.date.value = ds;
+          onDateChange();
         });
-    });
-    
-    // Reset commun (mode + titre) puis fermeture
-    function dismissAddEventModal() {
-        window.formMode = 'add';
-        window.editingItemId = null;
-        const title = addEventModal.querySelector('h3');
-        if (title) title.textContent = "Ajouter un événement à la Timetable";
-        closeModal(addEventModal);
+        UI.days.appendChild(b);
+      });
     }
+    return { range, list };
+  }
 
-    // Fermer la modale si l'utilisateur clique sur le fond (backdrop)
-    addEventModal.addEventListener('click', function(e){
-        if (e.target === addEventModal) dismissAddEventModal();
-    });
+  function onDateChange() {
+    UI.days.querySelectorAll('.tt-day').forEach(b => b.classList.toggle('is-active', b.dataset.date === F.date.value));
+    const range = eventRange();
+    const v = F.date.value;
+    const out = !!(range && v && (v < range.start || v > range.end));
+    UI.dateWarn.hidden = !out;
+    if (out) {
+      UI.dateWarn.textContent = 'Hors de la période de l\'événement (montage '
+        + new Date(range.start + 'T12:00:00').toLocaleDateString('fr-FR') + ' au démontage '
+        + new Date(range.end + 'T12:00:00').toLocaleDateString('fr-FR') + ').';
+    }
+    checkDuplicate();
+  }
 
-    // Fermer avec la touche Echap
-    document.addEventListener('keydown', function(e){
-        if (e.key === 'Escape' && addEventModal.classList.contains('show')) {
-            dismissAddEventModal();
-        }
+  // Valeurs deja utilisees dans la timetable : [[valeur, nb vignettes], ...]
+  const suggestions = { place: [], department: [] };
+
+  function fillSuggestions() {
+    const count = (field) => {
+      const freq = new Map();
+      Object.values(window._timetableRaw || {}).forEach(items => (items || []).forEach(it => {
+        const v = String(it?.[field] || '').trim();
+        if (v) freq.set(v, (freq.get(v) || 0) + 1);
+      }));
+      return Array.from(freq.entries())
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'fr'));
+    };
+    suggestions.place = count('place');
+    suggestions.department = count('department');
+  }
+
+  // ------------------------------------------------------------------
+  // Liste de suggestions maison (remplace <datalist>, dont le rendu est
+  // celui de l'autocompletion du navigateur). Placee en absolu dans
+  // .modal-content, ouverte vers le haut s'il n'y a pas la place dessous.
+  // ------------------------------------------------------------------
+  const SUGGEST_MAX = 8;
+  const suggestBox = document.createElement('div');
+  suggestBox.className = 'tt-suggest';
+  suggestBox.setAttribute('role', 'listbox');
+  suggestBox.hidden = true;
+  modal.querySelector('.modal-content').appendChild(suggestBox);
+  const sg = { input: null, field: null, items: [], active: -1 };
+
+  function closeSuggest() {
+    suggestBox.hidden = true;
+    sg.input?.setAttribute('aria-expanded', 'false');
+    sg.input = null;
+    sg.active = -1;
+  }
+
+  function placeSuggest() {
+    if (suggestBox.hidden || !sg.input) return;
+    const c = modal.querySelector('.modal-content').getBoundingClientRect();
+    const r = sg.input.getBoundingClientRect();
+    const m = 8, h = suggestBox.offsetHeight;
+    suggestBox.style.left = (r.left - c.left) + 'px';
+    suggestBox.style.width = r.width + 'px';
+    let top = r.bottom - c.top + 4;
+    if (top + h > c.height - m) top = Math.max(m, r.top - c.top - 4 - h);
+    suggestBox.style.top = top + 'px';
+  }
+
+  function renderSuggest() {
+    const input = sg.input;
+    if (!input) return;
+    const q = normText(input.value);
+    const all = suggestions[sg.field] || [];
+    // Correspondance en debut de mot d'abord, puis n'importe ou
+    const scored = [];
+    all.forEach(([v, n]) => {
+      const t = normText(v);
+      if (!q) { scored.push([v, n, 0]); return; }
+      const i = t.indexOf(q);
+      if (i < 0 || t === q) return;
+      scored.push([v, n, (i === 0 || t[i - 1] === ' ') ? 0 : 1]);
     });
-});
+    scored.sort((a, b) => a[2] - b[2] || b[1] - a[1]);
+    sg.items = scored.slice(0, SUGGEST_MAX);
+    sg.active = -1;
+
+    suggestBox.textContent = '';
+    if (!sg.items.length) { closeSuggest(); return; }
+    const head = document.createElement('div');
+    head.className = 'tt-suggest-head';
+    head.textContent = q ? 'Déjà utilisés' : 'Les plus utilisés';
+    suggestBox.appendChild(head);
+
+    sg.items.forEach(([v, n], idx) => {
+      const opt = document.createElement('div');
+      opt.className = 'tt-suggest-item';
+      opt.setAttribute('role', 'option');
+      opt.dataset.idx = idx;
+      const label = document.createElement('span');
+      label.className = 'tt-suggest-label';
+      // Surligne la partie saisie (sur le texte d'origine, meme longueur hors accents composes)
+      const t = normText(v), i = q ? t.indexOf(q) : -1;
+      if (i >= 0 && v.length === t.length) {
+        label.append(v.slice(0, i));
+        const mk = document.createElement('mark');
+        mk.textContent = v.slice(i, i + q.length);
+        label.append(mk, v.slice(i + q.length));
+      } else {
+        label.textContent = v;
+      }
+      const cnt = document.createElement('span');
+      cnt.className = 'tt-suggest-count';
+      cnt.textContent = n;
+      cnt.title = n + ' vignette(s)';
+      opt.append(label, cnt);
+      // mousedown : avant le blur de l'input
+      opt.addEventListener('mousedown', (e) => { e.preventDefault(); pickSuggest(idx); });
+      opt.addEventListener('mousemove', () => setActive(idx));
+      suggestBox.appendChild(opt);
+    });
+    suggestBox.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    placeSuggest();
+  }
+
+  function setActive(idx) {
+    sg.active = idx;
+    suggestBox.querySelectorAll('.tt-suggest-item').forEach((el, i) => {
+      el.classList.toggle('is-active', i === idx);
+      if (i === idx) el.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  function pickSuggest(idx) {
+    const it = sg.items[idx];
+    if (!it || !sg.input) return;
+    const input = sg.input;
+    input.value = it[0];
+    input.classList.remove('input-error');
+    closeSuggest();
+    input.focus();
+  }
+
+  function attachSuggest(input, field) {
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-expanded', 'false');
+    const open = () => { if (input.disabled) return; sg.input = input; sg.field = field; renderSuggest(); };
+    input.addEventListener('focus', open);
+    input.addEventListener('click', () => { if (suggestBox.hidden) open(); });
+    input.addEventListener('input', open);
+    input.addEventListener('blur', () => setTimeout(() => { if (sg.input === input) closeSuggest(); }, 120));
+    input.addEventListener('keydown', (e) => {
+      if (suggestBox.hidden || sg.input !== input) {
+        if (e.key === 'ArrowDown') { e.preventDefault(); open(); }
+        return;
+      }
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(sg.active + 1, sg.items.length - 1)); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(sg.active - 1, 0)); }
+      else if (e.key === 'Enter' && sg.active >= 0 && !e.ctrlKey && !e.metaKey) { e.preventDefault(); pickSuggest(sg.active); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSuggest(); }
+      else if (e.key === 'Tab') closeSuggest();
+    });
+  }
+  attachSuggest(F.place, 'place');
+  attachSuggest(F.department, 'department');
+  modal.querySelector('.modal-body')?.addEventListener('scroll', placeSuggest, { passive: true });
+  window.addEventListener('resize', placeSuggest);
+
+  const normText = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+  function checkDuplicate() {
+    const act = normText(F.activity.value);
+    const items = (window._timetableRaw || {})[F.date.value] || [];
+    const selfId = F.id.value;
+    const hit = act && items.find(it => it && String(it._id || '') !== selfId && normText(it.activity) === act);
+    UI.dupWarn.hidden = !hit;
+    if (hit) {
+      const h = [hit.start, hit.end].filter(x => x && x !== 'TBC').map(formatHHMM).join(' - ') || 'heure non précisée';
+      UI.dupWarn.textContent = 'Une vignette porte déjà ce nom ce jour-là (' + h + '). Vérifier qu\'il ne s\'agit pas d\'un doublon.';
+    }
+  }
+
+  function updateCounter() {
+    const n = F.activity.value.length;
+    UI.counter.textContent = n > 150 ? (n + ' / 200') : '';
+  }
+
+  // ------------------------------------------------------------------
+  // Taches
+  // ------------------------------------------------------------------
+  function updateTodoCount() {
+    const rows = Array.from(UI.todoList.querySelectorAll('.event-todo-row'))
+      .filter(r => (r.querySelector('input[type="text"]')?.value || '').trim());
+    const done = rows.filter(r => r.dataset.done === '1').length;
+    // A la creation, pas d'avancement a montrer : juste le nombre de taches
+    const add = modal.classList.contains('is-add');
+    UI.todoCount.textContent = !rows.length ? '' : (add ? String(rows.length) : (done + '/' + rows.length));
+    UI.todoCount.classList.toggle('is-complete', !add && rows.length > 0 && done === rows.length);
+  }
+  UI.todoList.addEventListener('input', updateTodoCount);
+  UI.todoList.addEventListener('change', updateTodoCount);
+  UI.todoList.addEventListener('click', () => setTimeout(updateTodoCount, 0));
+
+  // ------------------------------------------------------------------
+  // Etat du formulaire
+  // ------------------------------------------------------------------
+  function collect() {
+    return {
+      date: F.date.value,
+      start: getTime(F.start),
+      end: getTime(F.end),
+      duration: F.duration.value.trim(),
+      category: F.category.value,
+      activity: F.activity.value.trim(),
+      place: F.place.value.trim(),
+      department: F.department.value.trim(),
+      remark: F.remark.value,
+      todo: (typeof window.collectEventTodos === 'function' ? window.collectEventTodos() : ''),
+      preparation_checked: F.prep.value || '',
+    };
+  }
+  const takeSnapshot = () => { state.snapshot = JSON.stringify(collect()); };
+  const isDirty = () => JSON.stringify(collect()) !== state.snapshot;
+
+  function clearErrors() {
+    form.querySelectorAll('.form-error').forEach(n => n.remove());
+    form.querySelectorAll('.input-error').forEach(n => n.classList.remove('input-error'));
+  }
+
+  function markError(el, msg, focusList) {
+    el.classList.add('input-error');
+    const host = el.closest('.form-group');
+    if (host && !host.querySelector('.form-error')) {
+      const err = document.createElement('div');
+      err.className = 'form-error';
+      err.textContent = msg;
+      host.appendChild(err);
+    }
+    focusList.push(el);
+  }
+
+  function validate(v) {
+    clearErrors();
+    if (state.locked) return true;
+    const bad = [];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v.date)) markError(F.date, 'La date est obligatoire.', bad);
+    if (!v.start && !v.end) markError(F.start, 'Saisir au moins une heure (début ou fin), ou TBC.', bad);
+    if (!v.activity) markError(F.activity, 'L\'activité est obligatoire.', bad);
+    if (!v.category) markError(F.category, 'La catégorie est obligatoire.', bad);
+    if (v.duration && !/^\d{1,3}:\d{2}$/.test(v.duration)) markError(F.duration, 'Format hh:mm.', bad);
+    if (bad.length) { bad[0].focus(); return false; }
+    return true;
+  }
+
+  function setLocked(locked) {
+    state.locked = locked;
+    UI.banner.hidden = !locked;
+    modal.classList.toggle('is-locked', locked);
+    form.querySelectorAll('.tt-lockable').forEach(el => { el.disabled = locked; });
+    // Les champs heure en TBC restent desactives meme deverrouilles
+    [F.start, F.end].forEach(inp => { inp.disabled = locked || isTbc(inp); });
+    if (locked) closeCatManager();
+  }
+
+  function setSaving(on) {
+    state.saving = on;
+    modal.classList.toggle('is-saving', on);
+    [UI.save, UI.saveNew, UI.cancel].forEach(b => { if (b) b.disabled = on; });
+  }
+
+  function badge(text, cls, icon) {
+    const b = document.createElement('span');
+    b.className = 'tt-badge ' + (cls || '');
+    if (icon) {
+      const i = document.createElement('span');
+      i.className = 'material-symbols-outlined';
+      i.textContent = icon;
+      b.appendChild(i);
+    }
+    b.appendChild(document.createTextNode(text));
+    return b;
+  }
+
+  function renderHeader() {
+    const edit = state.mode === 'edit';
+    UI.title.textContent = edit ? 'Modifier l\'événement' : 'Nouvel événement';
+    UI.icon.textContent = edit ? 'edit_calendar' : 'event_available';
+    UI.sub.textContent = 'Timetable ' + (window.selectedEvent || '') + ' ' + (window.selectedYear || '');
+    UI.badges.innerHTML = '';
+    if (!edit) return;
+    const it = state.item || {};
+    if (state.locked) UI.badges.appendChild(badge('Paramétrage', 'is-param', 'lock'));
+    else if (it.origin === 'duplicate') UI.badges.appendChild(badge('Copie', 'is-copy', 'content_copy'));
+    else UI.badges.appendChild(badge('Saisie manuelle', 'is-manual', 'edit'));
+    const prep = String(it.preparation_checked || '').toLowerCase();
+    if (prep === 'true') UI.badges.appendChild(badge('Prête', 'is-ready', 'task_alt'));
+    else if (prep === 'progress') UI.badges.appendChild(badge('En préparation', 'is-progress', 'pending'));
+  }
+
+  // ------------------------------------------------------------------
+  // Ouverture / fermeture
+  // ------------------------------------------------------------------
+  function show() {
+    clearTimeout(state.closeTimer);
+    state.returnFocus = document.activeElement;
+    modal.style.display = 'flex';
+    const body = modal.querySelector('.modal-body');
+    if (body) body.scrollTop = 0;
+    requestAnimationFrame(() => {
+      modal.classList.add('show');
+      setTimeout(() => (state.locked ? F.remark : F.activity).focus(), 60);
+    });
+  }
+
+  function hide() {
+    closeSuggest();
+    closeCatManager();
+    modal.classList.remove('show');
+    state.closeTimer = setTimeout(() => { modal.style.display = 'none'; }, 250);
+    try { state.returnFocus?.focus?.(); } catch (e) {}
+  }
+
+  async function dismiss() {
+    if (state.saving || state.confirming) return;
+    if (isDirty()) {
+      state.confirming = true;
+      let ok = true;
+      try {
+        ok = (typeof showConfirmToast === 'function')
+          ? await showConfirmToast('Fermer sans enregistrer les modifications ?', { type: 'warning', okLabel: 'Fermer', cancelLabel: 'Continuer' })
+          : true;
+      } finally {
+        state.confirming = false;
+      }
+      if (!ok) return;
+    }
+    hide();
+  }
+
+  function defaultDate(list) {
+    const today = ymd(new Date());
+    if (list.includes(today)) return today;
+    const range = eventRange();
+    if (range && today >= range.start && today <= range.end) return today;
+    return list.find(d => d >= today) || list[0] || today;
+  }
+
+  window.openTimetableModal = async function (opts) {
+    opts = opts || {};
+    if (!window.selectedEvent || !window.selectedYear) {
+      showToast('error', 'Sélectionnez d\'abord un événement et une année.');
+      return;
+    }
+    const edit = opts.mode === 'edit' && opts.item;
+    const item = edit ? opts.item : null;
+    state.mode = edit ? 'edit' : 'add';
+    state.item = item;
+    state.durationManual = false;
+    delete UI.timeNote.dataset.legacy;
+
+    form.reset();
+    clearErrors();
+    closeCatManager();
+    closeSuggest();
+    // Cases "fait" des taches : seulement en modification (a la creation,
+    // aucune tache ne peut deja etre faite)
+    modal.classList.toggle('is-add', !edit);
+    F.id.value = edit ? String(item._id || '') : '';
+    F.prep.value = edit ? String(item.preparation_checked ?? '').toLowerCase() : '';
+
+    await loadCategories();
+    refreshEventCategorySelect(edit ? (item.category || '') : '');
+    fillSuggestions();
+    const { list } = renderDays();
+
+    // Verrouillage avant remplissage : setTimeField en tient compte
+    setLocked(!!(edit && item.param_id && (item.origin === 'parametrage' || item.origin === 'manual-edit')));
+
+    if (edit) {
+      F.date.value = String(opts.date || item.date || '').slice(0, 10);
+      const legacy = [setTimeField(F.start, item.start), setTimeField(F.end, item.end)];
+      F.activity.value = item.activity || '';
+      F.place.value = item.place || '';
+      F.department.value = item.department || '';
+      F.remark.value = item.remark || '';
+      if (window.populateEventTodoEditor) window.populateEventTodoEditor(item.todo || '');
+      const c = computedDuration();
+      const dur = String(item.duration || '').trim();
+      state.durationManual = !!dur && !(c && c.value === dur);
+      F.duration.value = dur;
+      if (legacy[0] || legacy[1]) {
+        UI.timeNote.dataset.legacy = '1';
+        UI.timeNote.classList.add('tt-note-warn');
+        UI.timeNote.textContent = 'Valeur d\'origine non reconnue : "'
+          + (legacy[0] ? 'début ' + legacy[0] : '') + (legacy[0] && legacy[1] ? ', ' : '')
+          + (legacy[1] ? 'fin ' + legacy[1] : '') + '". Ressaisir l\'heure au format hh:mm ou TBC.';
+      }
+    } else {
+      F.date.value = opts.date || defaultDate(list);
+      setTimeField(F.start, '');
+      setTimeField(F.end, '');
+      if (window.populateEventTodoEditor) window.populateEventTodoEditor('');
+    }
+    setLocked(state.locked);   // re-applique sur les champs heure TBC
+    UI.saveNew.hidden = !!edit;
+
+    refreshTimeHelpers();
+    onDateChange();
+    updateCounter();
+    updateTodoCount();
+    renderHeader();
+    takeSnapshot();
+    show();
+  };
+
+  // ------------------------------------------------------------------
+  // Enregistrement
+  // ------------------------------------------------------------------
+  async function submit(keepOpen) {
+    if (state.saving) return;
+    const v = collect();
+    if (!validate(v)) return;
+
+    const edit = state.mode === 'edit';
+    const payload = Object.assign({ event: window.selectedEvent, year: window.selectedYear }, v);
+    if (edit) payload._id = F.id.value;
+    if (edit && !payload._id) { showToast('error', 'Identifiant de la vignette manquant, impossible de modifier.'); return; }
+
+    setSaving(true);
+    try {
+      const res = await fetch(edit ? '/update_timetable_event' : '/add_timetable_event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _csrfToken() },
+        body: JSON.stringify(payload),
+      });
+      let data = {};
+      try { data = await res.json(); } catch (e) {}
+      if (!res.ok || !data.success) {
+        showToast('error', data.message || ('Enregistrement impossible (HTTP ' + res.status + ').'));
+        return;
+      }
+      showToast('success', edit ? 'Événement modifié.' : 'Événement ajouté.');
+      refreshTimetablePreservingScroll();
+
+      if (keepOpen && !edit) {
+        // Enchainer une saisie : on garde date, categorie, lieu, departement
+        F.activity.value = '';
+        F.remark.value = '';
+        setTimeField(F.start, '');
+        setTimeField(F.end, '');
+        state.durationManual = false;
+        if (window.populateEventTodoEditor) window.populateEventTodoEditor('');
+        // La vignette tout juste creee compte pour la detection de doublon
+        const raw = window._timetableRaw || (window._timetableRaw = {});
+        (raw[v.date] = raw[v.date] || []).push(Object.assign({ _id: data._id || '' }, v));
+        clearErrors();
+        refreshTimeHelpers();
+        checkDuplicate();
+        updateCounter();
+        updateTodoCount();
+        takeSnapshot();
+        F.activity.focus();
+      } else {
+        takeSnapshot();
+        hide();
+      }
+    } catch (e) {
+      showToast('error', 'Erreur réseau : événement non enregistré.');
+    } finally {
+      setSaving(false);
+      setLocked(state.locked);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Evenements
+  // ------------------------------------------------------------------
+  document.getElementById('add-event-button')?.addEventListener('click', () => window.openTimetableModal({ mode: 'add' }));
+
+  form.addEventListener('submit', (e) => { e.preventDefault(); submit(false); });
+  UI.saveNew.addEventListener('click', () => submit(true));
+  UI.cancel.addEventListener('click', dismiss);
+  UI.close.addEventListener('click', dismiss);
+  modal.addEventListener('mousedown', (e) => { if (e.target === modal) dismiss(); });
+
+  document.addEventListener('keydown', (e) => {
+    if (!modal.classList.contains('show')) return;
+    if (e.key === 'Escape') {
+      // Echap ferme d'abord le gestionnaire de categories s'il est ouvert
+      if (!UI.catManager.hasAttribute('hidden')) { e.preventDefault(); closeCatManager(); catBtn?.focus(); return; }
+      e.preventDefault();
+      dismiss();
+    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      submit(false);
+    }
+  });
+
+  form.querySelectorAll('.tt-tbc').forEach(btn => btn.addEventListener('click', () => {
+    const input = document.getElementById(btn.dataset.for);
+    const on = !isTbc(input);
+    setTbc(input, on);
+    if (!on) input.focus();
+    input.classList.remove('input-error');
+    delete UI.timeNote.dataset.legacy;
+    refreshTimeHelpers();
+  }));
+  [F.start, F.end].forEach(inp => inp.addEventListener('input', () => {
+    inp.classList.remove('input-error');
+    delete UI.timeNote.dataset.legacy;   // l'heure a ete ressaisie
+    refreshTimeHelpers();
+  }));
+  F.duration.addEventListener('input', () => {
+    state.durationManual = F.duration.value.trim() !== '';
+    refreshTimeHelpers();
+  });
+  F.date.addEventListener('change', onDateChange);
+  F.activity.addEventListener('input', () => { updateCounter(); checkDuplicate(); });
+  form.addEventListener('input', (e) => e.target.classList?.remove('input-error'));
+
+  // --- Gestionnaire de categories : popover flottant ---
+  // Positionne en absolu par rapport a .modal-content (qui porte un transform,
+  // donc sert de bloc conteneur) : il ne pousse pas le formulaire en hauteur.
+  const catBtn = document.getElementById('category-manage-btn');
+  const card = modal.querySelector('.modal-content');
+
+  function placeCatManager() {
+    if (UI.catManager.hasAttribute('hidden') || !catBtn) return;
+    const c = card.getBoundingClientRect();
+    const b = catBtn.getBoundingClientRect();
+    const pop = UI.catManager;
+    const w = pop.offsetWidth, h = pop.offsetHeight, m = 8;
+    let left = b.right - c.left - w;
+    left = Math.max(m, Math.min(left, c.width - w - m));
+    let top = b.bottom - c.top + 6;
+    if (top + h > c.height - m) {
+      const above = b.top - c.top - 6 - h;   // pas la place dessous : au-dessus
+      top = above >= m ? above : Math.max(m, c.height - h - m);
+    }
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+  }
+
+  function openCatManager() {
+    UI.catManager.removeAttribute('hidden');
+    catBtn?.setAttribute('aria-expanded', 'true');
+    placeCatManager();
+    loadCategoryManager().then(placeCatManager);
+    document.getElementById('cat-mgr-input')?.focus();
+  }
+
+  function closeCatManager() {
+    if (UI.catManager.hasAttribute('hidden')) return;
+    UI.catManager.setAttribute('hidden', '');
+    catBtn?.setAttribute('aria-expanded', 'false');
+  }
+
+  catBtn?.addEventListener('click', (e) => {
+    e.preventDefault();      // ne pas focaliser le select (bouton dans un <label>)
+    e.stopPropagation();
+    if (UI.catManager.hasAttribute('hidden')) openCatManager(); else closeCatManager();
+  });
+  document.getElementById('cat-mgr-close')?.addEventListener('click', () => { closeCatManager(); catBtn?.focus(); });
+  // Clic hors du popover : fermeture
+  document.addEventListener('mousedown', (e) => {
+    if (UI.catManager.hasAttribute('hidden')) return;
+    if (UI.catManager.contains(e.target) || catBtn?.contains(e.target)) return;
+    closeCatManager();
+  });
+  modal.querySelector('.modal-body')?.addEventListener('scroll', placeCatManager, { passive: true });
+  window.addEventListener('resize', placeCatManager);
+  document.getElementById('cat-mgr-add-btn')?.addEventListener('click', addCategoryFromManager);
+  document.getElementById('cat-mgr-input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); addCategoryFromManager(); }
+  });
+
+  // --- Editeur de taches : bouton d'ajout d'une tache ---
+  document.getElementById('event-todo-add')?.addEventListener('click', () => {
+    const row = _addEventTodoRow('');
+    row?.querySelector('input[type="text"]')?.focus();
+    updateTodoCount();
+  });
+})();
 
 /**************************************************************
  * DRAWER ÉVÉNEMENT (TODO + Préparation + Édition inline)
@@ -1881,6 +2359,10 @@ btnDel?.addEventListener('click', () => {
 //  - POST /add_timetable_event
 //  - POST /set_preparation_progress (optionnel utilisé ailleurs)
 //  - POST /set_preparation_ready   (optionnel)
+// Sauvegarde depuis le drawer : taches et statut de preparation (scope
+// "operator" : le serveur n'ecrit que remark/todo/preparation_checked, sans
+// revalider les horaires d'une vignette ancienne). Les autres champs sont
+// renvoyes tels quels, sans substitution, pour rester sans effet.
 function saveUpdate(dateStr, item, closeAfter = false) {
   if (!requireIdOrWarn(item)) return;
   const payload = {
@@ -1888,27 +2370,25 @@ function saveUpdate(dateStr, item, closeAfter = false) {
     year:       window.selectedYear,
     date:       dateStr,
     _id:        item._id,
-    start:      item.start || 'TBC',
-    end:        item.end || 'TBC',
-    duration:   item.duration || '',
-    category:   item.category || '',
-    activity:   item.activity || '',
-    place:      item.place || '',
-    department: item.department || '',
+    scope:      'operator',
+    start:      item.start ?? '',
+    end:        item.end ?? '',
+    duration:   item.duration ?? '',
+    category:   item.category ?? '',
+    activity:   item.activity ?? '',
+    place:      item.place ?? '',
+    department: item.department ?? '',
     remark:     item.remark || '',
     todo:       item.todo || '',
     preparation_checked: (item.preparation_checked ?? '').toString().toLowerCase()
   };
   fetch('/update_timetable_event', {
     method: 'POST',
-    headers: {
-      'Content-Type':'application/json',
-      'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-    },
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _csrfToken() },
     body: JSON.stringify(payload)
   })
-  .then(r=>r.json())
-  .then(res=>{
+  .then(r => r.json().catch(() => ({})))
+  .then(res => {
     if (res.success) {
       showDynamicFlashMessage("Mise à jour réussie", "success");
       refreshTimetablePreservingScroll(); // rafraîchir la liste sans perdre la position
@@ -1916,98 +2396,92 @@ function saveUpdate(dateStr, item, closeAfter = false) {
       // recharger la vue lecture avec l'objet mis à jour
       !_drawerCurrent || renderDrawerView();
     } else {
-      showDynamicFlashMessage("Erreur lors de l'enregistrement", "error");
+      showDynamicFlashMessage(res.message || "Erreur lors de l'enregistrement", "error");
     }
   })
-  .catch(()=> showDynamicFlashMessage("Erreur réseau", "error"));
+  .catch(() => showDynamicFlashMessage("Erreur réseau", "error"));
 }
 
 async function deleteCurrent() {
   const it = _drawerCurrent.item;
   if (!requireIdOrWarn(it)) return;
-  if (!it || !it._id) return;
-  if (typeof showConfirmToast === "function") {
-    const ok = await showConfirmToast("Supprimer definitivement cet evenement ?", { type: "error", okLabel: "Supprimer" });
-    if (!ok) return;
-  }
+  const ok = await showConfirmToast('Supprimer définitivement "' + (it.activity || 'cet événement') + '" ?',
+    { type: "error", okLabel: "Supprimer", cancelLabel: "Annuler" });
+  if (!ok) return;
 
-  const payload = {
-    event: window.selectedEvent,
-    year:  window.selectedYear,
-    date:  _drawerCurrent.date,
-    _id:   it._id,
-  };
-  fetch('/delete_timetable_event', {
-    method: 'POST',
-    headers: {
-      'Content-Type':'application/json',
-      'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-    },
-    body: JSON.stringify(payload)
-  })
-  .then(r=>r.json())
-  .then(res=>{
-    if (res.success) {
+  try {
+    const res = await fetch('/delete_timetable_event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _csrfToken() },
+      body: JSON.stringify({
+        event: window.selectedEvent,
+        year:  window.selectedYear,
+        date:  _drawerCurrent.date,
+        _id:   it._id,
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data.success) {
       showDynamicFlashMessage("Événement supprimé", "success");
-      fetchTimetable();
       closeEventDrawer();
+      refreshTimetablePreservingScroll();
     } else {
-      showDynamicFlashMessage("Suppression impossible", "error");
+      showDynamicFlashMessage(data.message || "Suppression impossible", "error");
     }
-  })
-  .catch(()=> showDynamicFlashMessage("Erreur réseau", "error"));
+  } catch (e) {
+    showDynamicFlashMessage("Erreur réseau", "error");
+  }
 }
 
-function duplicateCurrent() {
+// Duplication : demande la date cible (par defaut le meme jour). La copie est
+// une vignette manuelle, detachee du parametrage, taches decochees.
+async function duplicateCurrent() {
   const it = _drawerCurrent.item;
-  if (!it) return;
+  if (!requireIdOrWarn(it)) return;
+  const target = await showPromptToast('Dupliquer vers quelle date ?', {
+    defaultValue: _drawerCurrent.date, inputType: 'date', okLabel: 'Dupliquer'
+  });
+  if (target === null || target === undefined) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(target)) {
+    showDynamicFlashMessage("Date invalide", "error");
+    return;
+  }
 
-  const payload = {
-    event: window.selectedEvent,
-    year:  window.selectedYear,
-    date:  _drawerCurrent.date, // tu peux proposer une autre date via prompt si besoin
-    start: it.start || 'TBC',
-    end:   it.end   || 'TBC',
-    duration: it.duration || '',
-    category: it.category || '',
-    activity: (it.activity || '') + ' (copie)',
-    place: it.place || '',
-    department: it.department || '',
-    remark: it.remark || '',
-    type: "Timetable",
-    origin: "manual",
-    todo: it.todo || '',
-    preparation_checked: "" // on remet à blanc pour la copie
-  };
-
-  fetch('/add_timetable_event', {
-    method: 'POST',
-    headers: {
-      'Content-Type':'application/json',
-      'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-    },
-    body: JSON.stringify(payload)
-  })
-  .then(r=>r.json())
-  .then(res=>{
-    if (res.success) {
-      showDynamicFlashMessage("Événement dupliqué", "success");
-      fetchTimetable();
+  try {
+    const res = await fetch('/duplicate_timetable_event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _csrfToken() },
+      body: JSON.stringify({
+        event: window.selectedEvent,
+        year:  window.selectedYear,
+        date:  _drawerCurrent.date,
+        _id:   it._id,
+        target_date: target,
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data.success) {
+      showDynamicFlashMessage(target === _drawerCurrent.date
+        ? "Événement dupliqué"
+        : "Événement dupliqué au " + new Date(target + 'T12:00:00').toLocaleDateString('fr-FR'), "success");
+      refreshTimetablePreservingScroll();
     } else {
-      showDynamicFlashMessage("Erreur lors de la duplication", "error");
+      showDynamicFlashMessage(data.message || "Erreur lors de la duplication", "error");
     }
-  })
-  .catch(()=> showDynamicFlashMessage("Erreur réseau", "error"));
+  } catch (e) {
+    showDynamicFlashMessage("Erreur réseau", "error");
+  }
 }
 
 // ---- Chargement (et cache) des catégories ----
+// Cache par couple evenement/annee : changer d'evenement doit recharger la liste.
 async function loadCategories() {
+  const key = (window.selectedEvent || '') + '|' + (window.selectedYear || '');
   try {
-    if (Array.isArray(window.categories) && window.categories.length) {
+    if (Array.isArray(window.categories) && window.categories.length && window._categoriesKey === key) {
       return window.categories; // cache
     }
     if (!window.selectedEvent || !window.selectedYear) {
-      console.warn('[loadCategories] selectedEvent/year manquants');
       window.categories = [];
       return window.categories;
     }
@@ -2022,6 +2496,7 @@ async function loadCategories() {
     // Tri alphabetique insensible a la casse (le backend trie deja, filet de securite)
     list.sort((a, b) => String(a).localeCompare(String(b), 'fr', { sensitivity: 'base' }));
     window.categories = list;
+    window._categoriesKey = key;
     return window.categories;
   } catch (e) {
     console.error('[loadCategories] échec:', e);
@@ -2044,21 +2519,41 @@ function _addEventTodoRow(text, done) {
   const list = document.getElementById('event-todo-list');
   if (!list) return null;
   const row = document.createElement('div');
-  row.className = 'event-todo-row';
+  row.className = 'event-todo-row' + (done ? ' is-done' : '');
   row.dataset.done = done ? '1' : '';
+
+  const check = document.createElement('input');
+  check.type = 'checkbox';
+  check.className = 'event-todo-check';
+  check.checked = !!done;
+  check.title = 'Tâche faite';
+  check.addEventListener('change', () => {
+    row.dataset.done = check.checked ? '1' : '';
+    row.classList.toggle('is-done', check.checked);
+  });
 
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'form-input';
-  input.placeholder = 'Tâche...';
+  input.placeholder = 'Nouvelle tâche...';
+  input.maxLength = 300;
   input.value = text || '';
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       if (input.value.trim()) {
         const r = _addEventTodoRow('');
         row.after(r);
-        r.querySelector('input').focus();
+        r.querySelector('input[type="text"]').focus();
+      }
+    } else if (e.key === 'Backspace' && !input.value) {
+      // Ligne vide + retour arriere : on la retire et on remonte
+      const prev = row.previousElementSibling;
+      if (prev) {
+        e.preventDefault();
+        row.remove();
+        prev.querySelector('input[type="text"]')?.focus();
+        list.dispatchEvent(new Event('input'));
       }
     }
   });
@@ -2067,11 +2562,14 @@ function _addEventTodoRow(text, done) {
   rm.type = 'button';
   rm.className = 'event-todo-remove';
   rm.title = 'Supprimer la tâche';
-  rm.innerHTML = '<span class="material-symbols-outlined">close</span>';
+  rm.setAttribute('aria-label', 'Supprimer la tâche');
+  const icon = document.createElement('span');
+  icon.className = 'material-symbols-outlined';
+  icon.textContent = 'close';
+  rm.appendChild(icon);
   rm.addEventListener('click', () => row.remove());
 
-  row.appendChild(input);
-  row.appendChild(rm);
+  row.append(check, input, rm);
   list.appendChild(row);
   return row;
 }
@@ -2099,18 +2597,28 @@ window.collectEventTodos = function () {
 
 // ---- Gestionnaire de categories ----
 // Reconstruit le <select> depuis window.categories (deja trie), conserve la selection.
+// Une option vide "Choisir..." force un choix explicite a la creation ; une
+// categorie absente de la liste (vignette ancienne) est conservee telle quelle.
 function refreshEventCategorySelect(selected) {
   const sel = document.getElementById('category');
   if (!sel) return;
   const keep = (selected != null) ? selected : sel.value;
   sel.innerHTML = '';
-  (window.categories || []).forEach(cat => {
+  const ph = document.createElement('option');
+  ph.value = '';
+  ph.textContent = 'Choisir une catégorie...';
+  ph.disabled = true;
+  sel.appendChild(ph);
+  const cats = (window.categories || []).slice();
+  if (keep && !cats.includes(keep)) cats.push(keep);
+  cats.forEach(cat => {
     const o = document.createElement('option');
     o.value = cat;
     o.textContent = cat;
-    if (cat === keep) o.selected = true;
     sel.appendChild(o);
   });
+  sel.value = keep || '';
+  if (!keep) ph.selected = true;
 }
 
 async function loadCategoryManager() {
@@ -2210,85 +2718,10 @@ async function deleteCategoryOrphan(cat) {
 }
 
 async function openEditModalFromDrawer(dateStr, item) {
-  // 1) garantir qu'on a les catégories
-  const cats = await loadCategories().catch(()=>[]);
-
-  // 2) références
-  const addEventModal  = document.getElementById('addEventModal');
-  const addEventForm   = document.getElementById('addEventForm');
-  const titleEl        = addEventModal?.querySelector('h3');
-
-  // 3) passer en mode édition (utilisé par ton submit)
-  window.formMode = 'edit';
-  window.editingItemId = item._id || null;
-  if (titleEl) titleEl.textContent = "Modifier un événement de la Timetable";
-
-  // 4) remplir le select catégories
-  const categorySelect = document.getElementById('category');
-  if (categorySelect) {
-    categorySelect.innerHTML = '';
-    const source = (Array.isArray(cats) && cats.length) ? cats : (item.category ? [item.category] : []);
-    source.forEach(cat => {
-      const opt = document.createElement('option');
-      opt.value = cat;
-      opt.textContent = cat;
-      if (cat === item.category) opt.selected = true;
-      categorySelect.appendChild(opt);
-    });
-  }
-
-  // 5) pré-remplir tous les champs du formulaire
-  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v ?? ''; };
-  setVal('event-date',   dateStr || '');
-  setVal('start-time',   (item.start && item.start!=='TBC') ? formatHHMM(item.start) : '');
-  setVal('end-time',     (item.end   && item.end  !=='TBC') ? formatHHMM(item.end)   : '');
-  setVal('duration',     item.duration || '');
-  setVal('activity',     item.activity || '');
-  setVal('place',        item.place || '');
-  setVal('department',   item.department || '');
-  setVal('remark',       item.remark || '');
-
-  // Editeur de taches de la vignette
-  if (window.populateEventTodoEditor) window.populateEventTodoEditor(item.todo || '');
-
-  // 6) hidden _id (ID FIXE pour éviter toute ambiguïté)
-  let hidden = addEventForm.querySelector('#edit-id-hidden');
-  if (!hidden) {
-    hidden = document.createElement('input');
-    hidden.type = 'hidden';
-    hidden.name = '_id';
-    hidden.id   = 'edit-id-hidden';
-    addEventForm.appendChild(hidden);
-  }
-  hidden.value = item._id || '';
-
-   // hidden pour conserver le statut de préparation pendant l'édition
-  let prepHidden = addEventForm.querySelector('input[name="preparation_checked"]');
-  if (!prepHidden) {
-    prepHidden = document.createElement('input');
-    prepHidden.type = 'hidden';
-    prepHidden.name = 'preparation_checked';
-    prepHidden.id = 'prep-status-hidden';
-    addEventForm.appendChild(prepHidden);
-  }
-  prepHidden.value = (item.preparation_checked ?? '').toString().toLowerCase();
-
-  // 7) fermer le drawer AVANT d'ouvrir la modale (évite le warning ARIA)
+  // Fermer le drawer AVANT d'ouvrir la modale (evite le warning ARIA)
   closeEventDrawer();
-  // enlever le focus actuel pour ne pas "cacher" un élément focusable
   document.activeElement && document.activeElement.blur?.();
-
-  // 8) ouvrir la modale
-  const openModal = (modal)=>{
-    modal.style.display='flex';
-    modal.querySelectorAll('.form-error').forEach(n => n.remove());
-    modal.querySelectorAll('.input-error').forEach(n => n.classList.remove('input-error'));
-    modal.querySelector('#category-manager')?.setAttribute('hidden', '');
-    const body = modal.querySelector('.modal-body');
-    if (body) body.scrollTop = 0;
-    setTimeout(()=>modal.classList.add('show'),10);
-  };
-  openModal(addEventModal);
+  await window.openTimetableModal({ mode: 'edit', date: dateStr, item });
 }
 
 /******************************************************************

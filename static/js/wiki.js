@@ -173,6 +173,10 @@
       catMapGlobal = {};
       cats.forEach(function (c) { catMapGlobal[c.key] = { label: c.label, color: c.color }; });
       procs.forEach(function (p) { byCode[p.code] = p; });
+      // Une catégorie dont toutes les procédures sont en brouillon ne donne pas de filtre vide
+      var usedDoms = {};
+      procs.forEach(function (p) { usedDoms[p.dom] = true; });
+      cats = cats.filter(function (c) { return usedDoms[c.key]; });
       filtersEl.innerHTML =
         '<div class="wk-chip wk-on" data-dom="all" tabindex="0" role="button">Toutes</div>' +
         cats.map(function (c) {

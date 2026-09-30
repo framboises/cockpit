@@ -443,9 +443,11 @@
   window.__userIsManager = {{ "true" if ("manager" in user_roles or "admin" in user_roles) else "false" }};
 </script>
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 <script src="{{ url_for('static', filename='js/analyse_ops.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_reports.js') }}"></script>
 <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
 </body>
 </html>

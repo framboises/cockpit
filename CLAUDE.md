@@ -39,8 +39,8 @@ Pas de tests automatisés ni de linter configurés.
 | `JWT_SECRET` | Clé JWT | valeur dev (interdit en prod) |
 | `MONGO_URI` | URI MongoDB | `mongodb://localhost:27017/` |
 | `CODING` | `true` bypass l'auth en dev | `false` |
-| `ANTHROPIC_API_KEY` | Clé API Anthropic (Assistant IA — résumé pcorg) | — (route renvoie 503 si vide) |
-| `CLAUDE_MODEL` | Modèle Claude utilisé par l'Assistant IA | `claude-sonnet-4-6` |
+| `COCKPIT_ANTHROPIC_API_KEY` | Clé API Anthropic de Cockpit (clé console « cockpit-prod »). ⚠️ Seule lue : `ANTHROPIC_API_KEY` est volontairement ignorée (lue par tout script du même compte Windows, elle rendait la consommation indiscernable) | — (routes IA en 503 si vide) |
+| `CLAUDE_MODEL` | Modèle Claude utilisé par l'Assistant IA | `claude-sonnet-5-5` |
 | `CLAUDE_TIMEOUT_SECONDS` | Timeout HTTP appel Claude (entre 2 chunks SSE) | `120` |
 | `CLAUDE_MAX_TOKENS` | `max_tokens` envoyé à Claude | `16384` |
 | `CLAUDE_MAX_TOKENS_RETRY` | `max_tokens` du retry sur troncature `stop_reason=max_tokens` | `32000` |
@@ -54,6 +54,19 @@ Pas de tests automatisés ni de linter configurés.
 | `VALHALLA_URL` | URL du service Valhalla externe (calcul d'itinéraires) | `http://localhost:8002` |
 | `VALHALLA_TIMEOUT_SECONDS` | Timeout HTTP des appels Valhalla | `5` |
 | `ROUTING_WAZE_MAX_AGE_MIN` | Ancienneté max des alertes Waze prises en compte pour les pénalités | `30` |
+| `CLAUDE_EFFORT` | `output_config.effort` des rapports IA (modèles qui le supportent) | `medium` |
+| `RETEX_MAX_TOKENS` | `max_tokens` du RETEX de fin d'édition | `24000` |
+| `PCA_CREATE_TEXT_INDEX` | `0` interdit la création à la volée de l'index texte `pca_text` sur `pcorg` | `1` |
+| `WAHA_WEBHOOK_SECRET` | Secret HMAC des webhooks WAHA (`/api/wa/webhook`, SHA-512 attendu, SHA-1 tolérée avec avertissement) | — (vide : bypass en dev, **refus de tous les webhooks en prod**) |
+| `OLLAMA_URL` | URL Ollama (résumés périodiques Alfred) | `http://srv-safe-docker.aco.local:11434` |
+| `OLLAMA_MODEL` | Modèle Ollama des résumés | `alfred` |
+| `OLLAMA_TIMEOUT` | Timeout lecture d'un résumé (s) | `300` |
+| `OLLAMA_MAX_MESSAGES` | Nombre max de messages injectés dans le prompt de résumé | `400` |
+| `ALFRED_ASK_URL` | Wrapper tool-calling Alfred sur la VM (mentions) | `http://srv-safe-docker.aco.local:5005/alfred/ask` |
+| `ALFRED_ASK_SECRET` | Secret HMAC-SHA256 partagé avec le wrapper | — (mentions désactivées si vide) |
+| `ALFRED_ASK_TIMEOUT` | Timeout d'une question au wrapper (s) | `90` |
+| `ALFRED_FOLLOWUP_SECONDS` | Fenêtre de suite de conversation sans nouveau @alfred | `420` |
+| `ALFRED_DM_REFUSAL_COOLDOWN` | Délai min entre deux refus DM au même contact (s) | `3600` |
 
 ## Architecture
 
@@ -148,6 +161,8 @@ Toutes sous `/field/*` pour profiter de la whitelist d'auth Cockpit (`/field/*` 
 ### Sync MongoDB
 
 - `vision_sync.py` propage `device_id` et `device_name` des docs `immatriculations` Firestore vers `vision_immatriculations` (index `device_id` ajouté).
+- ⚠️ **Chaque lecture Firestore est facturée.** Jusqu'au 29/09/2026 le script relisait tout l'événement à chaque passage (10 719 docs × 288 passages/jour ≈ 3,1 M lectures, ~1,60 €/jour, ~25 €/mois alors que VISION ne servait plus). Désormais, dans la tâche planifiée « Collecte LHPI vision » (toutes les 5 min) : lecture incrémentale sur `date` (ISO UTC, triable en chaîne, recouvrement 15 min, index mono-champ automatique, pas d'index composite), puis contrôle `count()` sur l'événement (~11 lectures) qui déclenche une resync complète si Firestore compte plus de docs que la base (tablette hors ligne remontant des scans datés dans le passé). Resync complète aussi toutes les 24 h et à chaque changement d'événement ; blacklist au plus toutes les 60 min. État dans `vision_config{_id: "sync_state"}` (`date_cursor`, `last_full_at`, `last_full_key`, `last_blacklist_at`) : le supprimer force une resync complète.
+- ⚠️ **Le script doit finir par `os._exit`.** Les threads gRPC de `firebase_admin` gardaient le process vivant après « Sync terminee » ; avec `MultipleInstances = IgnoreNew`, la tâche restait bloquée jusqu'à sa limite de 72 h, puis repartait (d'où une facture visible certains jours seulement).
 
 ### Constantes
 
@@ -161,7 +176,7 @@ Sur la sidebar de `index.html`, `edit.html`, `analyse_ops.html`, le bouton **« 
 
 - **Module Python** : `pcorg_summary.py` — helpers purs (`compute_kpis`, `select_fiches_for_prompt`, `build_prompts`, `call_claude`, `save_summary`, `list_summaries`, `get_summary`, `delete_summary`, `generate_period_summary`). Appel HTTP direct à `https://api.anthropic.com/v1/messages` (pas de SDK `anthropic`), pattern calqué sur `traffic.py` (Waze).
 - **Routes** dans `app.py` (à côté des routes `/api/pcorg/*`) :
-  - `POST /api/pcorg/summary/generate` (`manager`) — body `{event, year, period_start, period_end, model?, dry_run?}` (ISO, datetime-local accepté → interprété en Europe/Paris). Court-circuite l'appel Claude si `kpis.total == 0` (sections "RAS"). `model` accepte une whitelist (`claude-sonnet-4-6`, `claude-sonnet-4-5`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-haiku-4-5`) sinon fallback `CLAUDE_MODEL`. `dry_run=true` retourne le prompt assemblé sans appeler Claude (itération rapide sans coût).
+  - `POST /api/pcorg/summary/generate` (`manager`) — body `{event, year, period_start, period_end, model?, dry_run?}` (ISO, datetime-local accepté → interprété en Europe/Paris). Court-circuite l'appel Claude si `kpis.total == 0` (sections "RAS"). `model` accepte une whitelist (`claude-sonnet-5-5`, `claude-sonnet-5`, `claude-sonnet-4-6`, `claude-sonnet-4-5`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-haiku-4-5`) sinon fallback `CLAUDE_MODEL`. `dry_run=true` retourne le prompt assemblé sans appeler Claude (itération rapide sans coût).
   - `GET /api/pcorg/summary/list?event=&year=` (`manager`) — liste légère (sans `kpis`/`sections`).
   - `GET /api/pcorg/summary/<id>` (`manager`) — détail complet.
   - `DELETE /api/pcorg/summary/<id>` (`admin`).
@@ -204,6 +219,21 @@ Le `system` impose un **JSON strict à 9 clés** (`synthese, faits_marquants, se
 - `ANTHROPIC_API_KEY` vide → **503** `{ok: false, error: "ANTHROPIC_API_KEY non configuree"}`.
 - Anthropic injoignable / timeout → **502** `{ok: false, error: "claude_unreachable"}`.
 - HTTP non-2xx Claude → **502** `{ok: false, error: "claude_http_<code>"}`.
+
+### Génération en tâche de fond, coûts et budget (septembre 2026)
+
+- `POST /api/pcorg/summary/generate` renvoie `202 {ok, job}` ; le front suit `GET /api/pcorg/summary/generate/status?job=` (étape, %, caractères/tokens reçus, secondes). Registre en mémoire (`start_summary_job`), un job par utilisateur, **suppose un seul process** (waitress). `dry_run` reste synchrone et gratuit (rétro N-1 lue en cache seulement). Le rapport matinal appelle toujours `generate_period_summary` en direct.
+- **Structured outputs** (`output_config.format`, schéma construit depuis `section_keys`) + `output_config.effort` (défaut `medium`, env `CLAUDE_EFFORT`), envoyés seulement aux modèles qui les supportent ; sur HTTP 400, second essai sans. Le parseur regex n'est plus qu'un filet.
+- ⚠️ Le thinking adaptatif (Sonnet 5.5) partage `max_tokens` et est facturé en sortie ; les `thinking_delta` ne servent qu'à la barre de progression. `stop_reason: "refusal"` lève `ClaudeError("claude_refusal")`.
+- Prompt caching gardé pour l'interactif, **désactivé** pour le rapport matinal, la rétro N-1 et l'analyse fréquentation (écriture +25 % jamais relue). La consigne de concision du retry sur troncature va dans le tour user.
+- **Corrections** : `sections_corrected.<section>` (la dernière l'emporte) ; UI et mail affichent ce texte avec « corrigé par X ». La note rétro N-1 n'apparaît jamais dans le mail.
+- **Coût** : formule unique `compute_cost_usd`. `input_tokens` EXCLUT les tokens cache. Tarifs vérifiés le 29/09/2026 (`PRICING_VERIFIED_ON`).
+- `record_ai_usage(db, feature, model, usage, meta)` journalise dans **`ai_usage_log`** les appels non stockés ailleurs. `/api/pcorg/summary/usage` agrège `pcorg_summaries`, `pcorg_n1_retros`, `scan_analyses` et `ai_usage_log` par fonction et par modèle. Ne pas journaliser deux fois un appel déjà stocké avec son `usage`.
+- **Budget** : `cockpit_settings._id="ai_budget"` `{monthly_usd, block_when_exceeded}` ; si bloquant et atteint, `check_ai_budget` lève `ClaudeError("budget_exceeded")` → 429. Vue « Coûts IA » (admin) dans la section Mémoire IA de `/edit`.
+- **Mémoire** : `scope.year` et `scope.phase` filtrent réellement (phase déduite de `globalHoraires`, inconnue → directives à phase exclues) ; directives de section groupées « Pour la section X ». Tri poids desc puis date desc.
+- **Édition précédente** : une seule définition, `find_previous_edition` (la plus récente antérieure ayant date de course et données), utilisée par les comparaisons, la rétro et les renforts portes.
+- Sélection des fiches non majeures : échantillon stratifié sur la période (12 tranches max). Cache rétro : clé arrondie à l'heure. `pcorg_morning_report.py --dry-run` = prompt seul, `--no-send` = génère sans mail.
+
 
 ## Exercices de crise — auth PIN animateur
 
@@ -694,7 +724,7 @@ Sans ligne `UAM` dans le fichier (cas de 24H MOTOS 2024), `uam_help` est vide pa
 
 `scan_analysis.py` réutilise **`pcorg_summary.call_claude`** plutôt que le SDK `anthropic` : cette fonction porte déjà le retry exponentiel (429/503/529), le retry sur troncature, le prompt caching et la télémétrie d'usage.
 
-Modèle par défaut **`claude-sonnet-5`** (ajouté à `ALLOWED_MODELS` et `MODEL_PRICING_USD_PER_MTOK` dans `pcorg_summary.py`). Tarif catalogue 3 $/15 $ déclaré ; un tarif d'introduction 2 $/10 $ court jusqu'au 31/08/2026, donc l'estimation de coût est majorée d'ici là.
+Modèle par défaut **`claude-sonnet-5-5`** (sorti le 28/09/2026, 2 $/10 $, dans `ALLOWED_MODELS` et `MODEL_PRICING_USD_PER_MTOK` de `pcorg_summary.py`). Des filtres de sécurité peuvent décliner une requête (`stop_reason: "refusal"`) : `_claude_stream_request` lève alors `ClaudeError("claude_refusal")` au lieu d'enregistrer un rapport vide.
 
 Le prompt ne contient **que des KPI agrégés** (~3 600 tokens), jamais les créneaux bruts. System prompt imposant un JSON strict à 7 clés : `synthese`, `pics_et_saturation`, `portes_critiques`, `zones_critiques`, `comparaison_n1`, `anomalies`, `recommandations`.
 
@@ -1270,6 +1300,278 @@ minutes perdues à chaque fois, toujours sur `monkeydo` (le simulateur met une
 Lancer `monkeyc` et `monkeydo` **au premier plan** et attendre le résultat
 dans la même invocation. Seul `connectiq` — le service graphique — se lance
 en arrière-plan, parce qu'il doit rester vivant.
+
+## Main courante (fiches PC Organisation, collection `pcorg`)
+
+Trois sources écrivent dans `pcorg` : la **synchro SQL** Prysm (`pcorg_sync.py` → `uploads/pcorg/sync_pcorg_sql.py`, toutes les 5 min, à sens unique SQL → Mongo, `_id = uuid5("sql|<sql_id>")`), **Cockpit** (`/api/pcorg/*` dans `app.py`, `server: "COCKPIT"`) et les **tablettes** (`field.py`). Interface : `static/js/pcorg.js` (petit bloc `#widget-comms`, panneau central `#pcorg-expanded-panel`, pins et menu clic droit de la carte, fiche, assistant de création).
+
+### `pcorg_history.py` — le module partagé
+
+Module pur (ni Flask ni Mongo propre) utilisé par `app.py`, `field.py` **et** la synchro. **Toute écriture dans la chronologie passe par `PH.append_entry`**, qui ajoute l'entrée à `comment_history` ET la ligne au champ texte `comment` en **une seule opération atomique** (pipeline d'update). L'ancien code lisait `comment`, concaténait en Python puis réécrivait : deux commentaires simultanés en perdaient un, et le commentaire tablette **remplaçait** tout le champ `comment`.
+
+### Fusion SQL ↔ Cockpit (option A : Cockpit l'emporte sur ce qu'il a modifié)
+
+⚠️ La synchro faisait un `$set` du document entier : la moindre réécriture Prysm effaçait la clôture, les commentaires, le véhicule engagé, la position et l'urgence saisis dans Cockpit. Désormais `write_merged()` relit chaque fiche et applique `PH.merge_sync_doc` :
+
+- **Chronologie** : entrées SQL re-parsées + entrées locales conservées, triées. Chaque entrée porte `origin` (`sql` / `cockpit` / `field`) ; pour les anciennes, `is_local()` reconnaît les écritures Cockpit (microsecondes dans `ts`), tablette (datetime BSON, `field:`) ou porteuses de photo/codes. `comment` est reconstruit, le texte Prysm brut est gardé dans `comment_sql`.
+- **Champs possédés** : chaque écriture Cockpit ajoute les champs touchés à `cockpit_owned` (`status`, `niveau_urgence`, `gps`, `text`, `category`, `area.desc`, `content_category.<clé>`, `ts`…) ; la synchro ne les écrase plus. Exception : si Prysm **clôt** après la dernière action Cockpit sur le statut (`cockpit_status_at`), SQL reprend la main sur le statut.
+- **Garde de concurrence** : toute écriture Cockpit incrémente `cockpit_rev` ; la synchro écrit avec le filtre `cockpit_rev` lu, et refusionne les fiches modifiées entre-temps.
+- **Base** : le script de synchro écrivait `titan` en dur (même lancé depuis le dev). Il suit maintenant `TITAN_ENV`, et `pcorg_sync.py` lui passe `--db` explicitement.
+
+`scripts/migrate_pcorg_history.py` (simulation par défaut, `--apply` pour écrire) applique une fois la fusion aux fiches SQL déjà en base.
+
+### Chronologie affichée
+
+`PH.decorate_history` (route `detail` et détail tablette) sépare dans chaque entrée la **ligne de statut** (`Statut: En cours -> Terminé`, rendue en pastille), les **lignes de modification Prysm** (`Texte: a -> b`, libellé en un seul mot) et le **commentaire libre** qui suit, rendu en texte normal. Avant, toute l'entrée était en italique grisé, motif de clôture compris. Il signale aussi les entrées vides (`kind: "empty"`, ~2 000 en base, Prysm en écrit sans texte) et **ajoute une clôture synthétique** (`synthetic: true`, depuis `close_ts` / `operator_close`) quand la fiche est close sans ligne de statut dans la chronologie (plus de la moitié des fiches closes). Horodatages normalisés en ISO Paris (trois formats coexistaient).
+
+⚠️ **Parseur du champ `comment`** : un en-tête exige date, heure ET virgule (`dd/mm/yyyy HH:MM:SS ,`) — une date citée dans le texte ne coupe plus l'entrée — et l'en-tête final sans saut de ligne est reconnu (l'ancienne regex le perdait sur ~2 900 fiches). Prysm colle parfois l'en-tête au texte précédent : pas d'ancrage en début de ligne.
+
+### Droits et validations (côté serveur)
+
+- Les **catégories autorisées par groupe** (`get_user_allowed_categories`) ne filtraient que le widget, côté navigateur : `live`, `stats`, `closed`, `search`, `detail` et toutes les écritures les appliquent maintenant (`_pcorg_cat_query`, `_pcorg_cat_allowed`).
+- Écritures refusées sur fiche close (commentaire, urgence, position, caméra) ; clôture et réouverture atomiques (filtre sur `status_code`).
+- `content_category` nettoyé (`_pcorg_clean_cc`) : pas de clé pointée ni `$`, pas de `field_created` / `field_sos` posés depuis Cockpit (ils ouvrent la clôture côté tablette). Position validée (bornes, NaN).
+- Création idempotente : `client_token` (un par ouverture de l'assistant) → même `_id`, un double clic ne crée plus deux fiches.
+- Suppression : archivée dans `pcorg_deleted` (qui, quand) avant `delete_one`, tablette libérée.
+
+### Routes ajoutées ou modifiées
+
+- `POST /api/pcorg/reopen/<id>` (droit `can_close_fiche`, **motif obligatoire**).
+- `POST /api/pcorg/close/<id>` accepte `{comment}` : motif consigné sous la ligne de statut.
+- `PUT /api/pcorg/update/<id>` n'écrit que les champs réellement modifiés, trace une entrée système `Fiche modifiee : …` avec `changes: [{field, old, new}]`, accepte `comment` (même opération) et `content_category_remove` (champs de l'ancienne catégorie). Changer de véhicule désengage l'ancienne tablette.
+- `POST /api/pcorg/update-gps/<id>` sert aussi à **déplacer** une fiche ; le client envoie `area_desc` et `carroye` recalculés, une entrée système trace le déplacement.
+- `GET /api/pcorg/closed` : pagination par curseur `before_ts` + `before_id` (l'offset glissait à chaque clôture : doublons et trous).
+- `GET /api/pcorg/search` cherche aussi dans la chronologie (`comment`), le carroyage et le n° SQL.
+
+### Interface (`pcorg.js`)
+
+- Pins mis à jour **par différence** (`pinSignature`) : la popup ouverte ne se ferme plus toutes les 60 s. Niveau d'urgence affiché sur le pin, contrôle de filtre de couche (masquer, catégories, EU/UA seulement ; `localStorage` `pcorg-map-filter`), lien liste ↔ carte (`setActiveFiche` : ligne et pin mis en évidence).
+- `ensureMapVisible()` : « Voir sur carte » depuis le panneau central laissait la zone centrale vide.
+- Édition : même modèle de source que la création (`buildSourceEditor`), même constructeur de champs (`buildCategoryFields`), commentaire facultatif. L'urgence modifiée en édition n'était jamais enregistrée (passée par valeur), et `carroye` / `texte` / `alerte` étaient vidés à chaque enregistrement (champs absents du formulaire).
+- Clic droit → véhicule → fiche complète : le véhicule était effacé par `resetCreateWizard`.
+- Carroyage résolu sur une grille chargée en mémoire (`sharedGridMeta`), plus sur celle affichée.
+- `apiCall()` ne rejette jamais : plus de bouton bloqué ni d'échec muet. Échap ferme fiche, assistant et modale GPS.
+
+### Jeton CSRF d'un onglet resté ouvert
+
+⚠️ Le jeton de `<meta name="csrf-token">` expire après `WTF_CSRF_TIME_LIMIT` (**1 h**, défaut Flask-WTF) : un onglet ancien échouait à la première écriture, souvent après un formulaire entièrement rempli. `static/js/csrf_refresh.js` (chargé après `toast.js` sur `index`, `edit`, `field_dispatch`, `analyse_ops`) renouvelle la balise via `GET /api/csrf-token` toutes les 15 min et au retour sur l'onglet. Le handler `CSRFError` renvoie `code: "csrf"` : `apiPost` (`main.js`) et `apiCall` (`pcorg.js`) renouvellent alors le jeton et **rejouent la requête une fois**. L'ouverture de l'assistant de création et de l'édition vérifie la session d'abord (`checkSessionBeforeForm`) et propose de recharger si l'**authentification** elle-même a expiré, avant la saisie plutôt qu'après. Tout module qui lit la balise `<meta>` au moment de l'appel (et non au chargement) en profite sans modification.
+
+## Tablettes Field — synchronisation avec le cockpit
+
+La tablette (`static/js/field.js`) ne reçoit rien en temps réel : elle **poll** `/field/my-fiches` (statut, fiche active) et `/field/inbox` (messages, SOS), et rejoue ses écritures ratées via une **file hors ligne** IndexedDB. Le cockpit poll `/api/active-alerts` (`alert_poller.js`, 5 s) et `/anoloc/live` (15 s). Toutes les règles ci-dessous découlent de ces deux faits.
+
+### Catégorie de la tablette
+
+Chaque tablette porte **une** catégorie de fiche (`field_devices.category`), choisie à l'appairage ou dans la table de `/field-dispatch` (`POST /field/admin/devices/<id>/category`). À défaut, elle hérite du `pco_category` de son groupe de balises (`_device_category`) ; sans l'un ni l'autre, aucune restriction (comportement historique). Effets :
+
+- `/field/my-fiches` ne rend que les fiches de cette catégorie, **plus** le propre SOS de la tablette (`content_category.field_sos`, toujours `PCO.Secours`) et sa fiche active (si le PC Org en change la catégorie après engagement, la tablette ne la perd pas).
+- Création de fiche (`/field/create-fiche`, `/field/photo/send` avec fiche) : `403 category_not_allowed` hors catégorie. Une photo simplement envoyée au PC Org garde le choix libre.
+- `/anoloc/vehicles-by-category` range chaque tablette sous **sa** catégorie (plus celle du groupe) : le PC Org ne la voit proposée que sur ces fiches.
+- SOS (`_sos_recipients`) : diffusé aux catégories `PCO.Securite`/`PCO.Secours`, à la catégorie de l'émetteur et aux tablettes sans catégorie ; jamais aux révoquées.
+
+⚠️ La liste des catégories existe en trois copies à garder alignées : `FIELD_CATEGORIES` (`field.py`), `FICHE_CREATE_CATEGORIES`/`CAM_CATEGORIES` (`field.js`) et `FIELD_CATEGORIES` (`field_admin.js`).
+
+### Dispatch automatique et file du service (`dispatch_auto.py`)
+
+Deux voies d'engagement coexistent. **Directe** : le PC Org (ou un responsable) choisit l'unité, comme avant. **Proposition automatique** : la fiche est proposée à l'unité disponible la plus proche, qui a `timeout_s` (30 s par défaut) pour **Accepter / Refuser** ; refus ou silence → unité suivante ; après `max_attempts` (3) ou faute de candidat → **file du service**, traitée par ses responsables sur `/dispatch-service` (utilisateurs cockpit, plusieurs par service).
+
+- **Déclenchement** par catégorie, réglable dans Field Dispatch (`cockpit_settings._id="field_dispatch"`, `GET/PUT /api/dispatch/config`) : `never` / `always` / `urgency` (niveaux IMP=1, UR=2, UA=3, EU=4). Défauts : Technique sur UA/EU, Sécurité toujours, Secours jamais. Points d'entrée : création et création rapide sans unité, modification (`/update`) d'une fiche sans unité, changement d'urgence (`/set-urgency`). Bouton « Proposer automatiquement » (`POST /api/dispatch/<id>/auto`) pour le reste.
+- **Candidats** (`find_candidates`) : même événement, même catégorie effective, statut `patrouille`, vue depuis < 15 min, pas de proposition en cours, **métier compatible** (`field_devices.metiers` choisis à l'appairage parmi les sous-classifications de la catégorie ; liste vide = tous ; comparaison sans accents : `Electricite` == `Electricité`, les deux existent dans `pcorg_lists`). Classement : position fraîche (< 5 min) d'abord, puis distance à vol d'oiseau.
+- ⚠️ **Un téléphone verrouillé ne remonte plus sa position** (application web) : la « plus proche » peut s'appuyer sur une position de plusieurs minutes, d'où le tri par fraîcheur avant distance. Sur iPhone, les notifications n'arrivent que si l'app est installée sur l'écran d'accueil.
+- **Une proposition à la fois par unité** : `field_devices.pending_proposal` réservé atomiquement. Passer en pause avec une proposition en attente vaut refus immédiat.
+- **Accepter = engagement** : `cc.patrouille`, `dispatch.state="assigned"`, statut `intervention`, `active_fiche_id` en une fois. Pas de file hors ligne pour la réponse (une acceptation rejouée plus tard n'a plus de sens).
+- **Engagement direct pendant une proposition** (`/api/pcorg/update` avec unité) : `on_manual_assign` annule la proposition. Clôture : `on_close`.
+- **Responsable** (`manual_assign`) : si l'unité est occupée, la fiche s'ajoute à ses missions **sans écraser** sa fiche active.
+- **Fin d'intervention par l'unité** (`self_close`, défaut Technique) : `POST /field/my-fiches/<id>/finish {outcome, report}`, compte-rendu obligatoire (≥ 5 caractères), photo conseillée. `resolu` clôt la fiche ; `partiel` / `materiel` / `impossible` la renvoient dans la file du service (`cc.patrouille` vidé). L'unité redevient disponible sans clic du PC Org. Rejouable (file hors ligne) : `deja_termine`.
+- **Horodatages** `pcorg.intervention` : `engaged_at`, `arrived_at` (ASL manuelle ou GPS), `done_at`, `outcome`, `report` — écrits une seule fois (`mark_step`), base des délais par métier.
+- État sur la fiche : `pcorg.dispatch` (`state`, `round`, `current`, `attempts[]`, `queued_at`, `queue_reason`, `assigned_by`). Chaque étape laisse une entrée système « Dispatch auto » dans la chronologie. `/api/pcorg/live` et `/detail` exposent `dispatch`.
+- **Planificateur** `DA.start_scheduler()` (tick 3 s, démarré dans le `__main__` d'`app.py` à côté d'Alfred et PMV) : propositions expirées (+ 4 s de grâce) → unité suivante. Suppose un seul process (waitress) ; les transitions restent atomiques (filtre sur l'état attendu).
+- Tests : `tests/test_dispatch_auto.py` contre un MongoDB **local réel** (base jetable `titan_test_dispatch_<pid>`, sautés sans Mongo) — les mises à jour conditionnelles et les pipelines de `pcorg_history` ne se simulent pas.
+
+### Contrôles d'accès
+
+- `/field/my-fiches/<id>/detail` : seulement une fiche affectée à la tablette, sa fiche active ou une fiche qu'elle a créée (`403 not_assigned`). Avant, toute tablette lisait toute fiche par son id.
+- `/field/photos/*` : tablette non révoquée (cookie `field_token`) ou utilisateur cockpit (JWT, n'importe quel rôle), `Cache-Control: private`. La route était publique (`/field/*` est hors portail).
+
+### Idempotence des actions tablette
+
+⚠️ **Une requête peut arriver au serveur et sa réponse se perdre** (4G). La file hors ligne ou l'agent la renvoient alors. `/field/sos` (`sos_id`) et `/field/create-fiche` (`client_token`) portent une clé générée côté tablette, réservée dans `field_client_requests` (`_id = "<device>|<kind>|<clé>"`, TTL 2 j) par `_claim_client_request` : un renvoi retrouve le résultat du premier envoi. Sans elle, un SOS rejoué créait une fiche, une alerte plein écran sur chaque poste et une diffusion à chaque tablette de plus. Une clé réservée sans résultat depuis plus de 60 s est reprise (premier envoi mort en route) ; une erreur Mongo sur la clé ne bloque **jamais** un SOS.
+
+`/field/status` ignore un renvoi du même statut (`unchanged: true`), sinon chaque retry ajoutait « Engagement confirmé » à la chronologie.
+
+### Statuts rejoués hors ligne
+
+⚠️ Un statut mis en file porte `queued_at` (epoch ms tablette). Le serveur répond **409 `stale_status`** s'il est antérieur à `status_since` : une tablette libérée par le cockpit repassait sinon en intervention au retour du réseau. La file le retire sans alarme et relance `pollFiches`.
+
+⚠️ **Une réponse de poll partie avant un changement local porte l'ancien statut.** `pollFiches` ignore statut et fiche active si `state.statusChangedAt >= début du poll` (posé par `applyLocalStatus`). Sans cette garde, le statut « revenait en arrière » un cycle. Tout changement de statut passe par `postPatrolStatus` (file hors ligne, relecture immédiate, recadence des polls).
+
+`fetchWithTimeout` (12 s) : une requête pendante ne bloque plus un changement de statut, elle part en file.
+
+### Engagement, ASL, fin d'intervention
+
+- L'engagement (« Prendre en charge », « Engagement ») envoie `fiche_id` : le serveur vérifie que la fiche est ouverte et affectée à la tablette (`403 not_assigned`, `409 fiche_indisponible`) et pose `active_fiche_id`. La chronologie reçoit **une** entrée, écrite par le serveur.
+- L'ASL automatique (GPS < 10 m) trace désormais la même entrée que l'ASL manuelle.
+- Le compte-rendu de fin d'intervention voyage **avec** le statut et s'écrit dans la chronologie côté serveur (il était posté à part, hors file hors ligne).
+- En `fin_intervention`, la tablette poll au rythme normal (l'agent attend sa libération) ; seule la `pause` ralentit à 30 s. `anoloc.js` relit immédiatement après « Libérer ».
+
+### SOS
+
+- **Un seul SOS par déclenchement** : clé `sos_id`, 3 renvois automatiques (2/5/10 s) avec la même clé, puis file hors ligne.
+- ⚠️ La fiche auto-créée (`PCO.Secours`, UA) est **exclue** de `alert_engine.detect_pcorg_urgency` (`content_category.field_sos`). Sans ça, le moteur levait une seconde alerte « ALERTE SECOURS » un cycle plus tard, décalée d'un poste à l'autre.
+- `alert_poller.js` : deux mémoires. **Vu** (sessionStorage, par onglet) et **traité** (localStorage, tout le poste, posé au clic sur un bouton de l'alerte, TTL 24 h). Au chargement d'une page, une alerte récente déjà traitée sur le poste ne repasse plus en plein écran — avant, chaque navigation dans les 5 min réaffichait le SOS. Ne pas partager le « vu » entre onglets : un onglet caché masquerait l'alerte à l'onglet visible.
+- Un SOS passe **devant** la file d'alertes (et interrompt une alerte non SOS) et n'est jamais filtré par les préférences locales. Poll immédiat au retour sur l'onglet : Chrome ralentit à 1/min les minuteries d'un onglet en arrière-plan.
+- Tablettes : `/field/inbox` marque `sos_resolved` quand la fiche SOS est close ; le repère carte est retiré. Au redémarrage de l'app, un SOS non acquitté et non résolu est réaffiché.
+
+### Inbox
+
+⚠️ `/field/inbox` rend les **200 plus récents** (tri décroissant puis inversé). Le tri croissant + `limit(200)` rendait les 200 plus anciens : au-delà de 200 messages sur 7 jours, plus aucun nouveau message n'arrivait.
+
+### Itinéraire
+
+`setRouteDestination(latlng, polyline, god, ficheId)` mémorise la fiche visée ; `reconcileRoute()` efface le tracé quand elle est close ou désaffectée, ou que l'agent passe en fin d'intervention / disponible. `/api/route/forward` transporte `fiche_id`. Bouton `#btn-route-clear` visible tant qu'un tracé est affiché. Avant, rien n'effaçait jamais un itinéraire.
+
+⚠️ `field-sw.js` sert `field.js` en **cache-first** : toute modification du JS tablette impose d'incrémenter `SW_VERSION`.
+
+### Prise en charge partagée d'un SOS
+
+`POST /api/active-alerts/<id>/take` (`user`, CSRF actif) : le premier opérateur qui clique « Je prends en charge » est posé sur l'alerte (`taken_at`, `taken_by`, `taken_by_name`) par un `find_one_and_update` conditionné à `taken_at` absent — **un seul gagnant**, les suivants reçoivent `409 already_taken` avec le nom. La route ajoute « SOS pris en charge par X » à la chronologie de la fiche SOS et prévient la tablette émettrice (message inbox + push).
+
+Côté postes (`alert_poller.js`), `/api/active-alerts` renvoie ces champs : au poll suivant (5 s max) l'alerte affichée passe en vert « Pris en charge par X à HH:MM », l'alarme s'arrête et elle se ferme seule après 10 s ; un SOS déjà pris est retiré de la file et n'est jamais affiché en plein écran sur un poste qui ne l'avait pas encore vu. Chez celui qui prend, l'alerte se ferme et la fiche s'ouvre.
+
+### Limite connue
+
+Pas de push temps réel vers les postes cockpit (choix assumé) : délai d'affichage d'un SOS et de sa prise en charge de 0 à 5 s selon le poste, plus si l'onglet est en arrière-plan (rattrapage au retour sur l'onglet).
+
+## Centrale d'alerte (`/admin/alertes`, plein écran des postes)
+
+Producteurs : `alert_engine.py` (tâche planifiée, 30 s), `/field/sos` (`field.py`), caméras (`PCA/SCRIPTS/cockpit_dispatch.py`), mots-clés Alfred. Tous écrivent dans `cockpit_active_alerts` (TTL sur `expiresAt`, clé `definition_slug`). Affichage : `static/js/alert_poller.js` (chargé par `index.html`, et par l'admin en mode aperçu).
+
+### Le rendu est piloté par la définition
+
+`/api/active-alerts` joint à chaque alerte un champ `meta` (`name`, `icon`, `color`, `detection_type`, `display_mode`) lu dans `cockpit_alert_definitions`. Le poller pose `--alert-color` sur la boîte ; **un seul bloc CSS générique** colore en-tête, bordure et bouton (teintes assombries par `color-mix` pour que le blanc reste lisible sur une couleur claire). Seul le SOS garde ses règles propres (animations).
+
+⚠️ Avant, tout était codé par slug (`ICON_MAP`, `TITLE_MAP`, un bloc CSS par slug, main courante détectée par le préfixe `pcorg-`). L'alerte `main-courante-flux`, créée depuis l'admin, sortait sans fond d'en-tête, avec un bouton blanc sur blanc, le titre brut « MAIN-COURANTE-FLUX » et sans bouton « Ouvrir la fiche ». **Ne jamais réintroduire de rendu par slug** : la mise en forme main courante se déclenche sur `detection_type === "pcorg_urgency"`. Les tables du poller ne servent plus que de repli.
+
+### Mode d'affichage (`display_mode` de la définition)
+
+| Mode | Effet |
+|---|---|
+| `banner` | toast + historique, jamais de plein écran |
+| `fullscreen` (défaut) | plein écran à acquitter sur chaque poste |
+| `critical` | plein écran + son + **prise en compte partagée** ; ne peut pas être coupé par l'opérateur |
+
+Le SOS est toujours `critical`. `POST /api/active-alerts/<id>/take` accepte le SOS et toute alerte `critical` (sinon `400 not_takeable`) : premier arrivé gagnant, les autres postes ferment l'alerte au poll suivant. Une alerte liée à une fiche (`actionData.pcorg_id`) reçoit une entrée de chronologie ; seul le SOS prévient la tablette.
+
+### Préférences locales
+
+`localStorage["cockpit-alert-muted"]` = liste des slugs **coupés** sur ce poste, construite depuis `/api/alert-definitions/mine`. ⚠️ L'ancienne clé `cockpit-alert-prefs` était une liste blanche figée de 9 types : toucher une case coupait en silence secours, sécurité, flux, caméras… Elle est migrée puis supprimée au premier chargement.
+
+### Historique
+
+Écrit par le moteur (`alert_engine.sync_alert_history`, à chaque cycle) : une entrée par alerte active (clé `alert_id`, index unique), toutes sources confondues. `POST /api/alert-history` est un no-op conservé pour les onglets restés sur l'ancien JS. Avant, chaque poste postait sa copie : aucun poste ouvert = aucun historique.
+
+### Moteur
+
+- Main courante : titre `MAIN COURANTE <CATÉGORIE>` ; `actionData` porte `text`, `zone`, `operator` (le poste ne redécoupe plus le message).
+- Météo : une alerte par jour **et par niveau**, mémorisée dans `cockpit_alert_engine_state` — l'aggravation vigilance → alerte sonne, la même vigilance ne re-sonne plus après le TTL de 3 h.
+- `build_context` : repli sur le paramétrage le plus proche à 7 jours (l'ancien « repli » refaisait le même test).
+
+### Aperçu
+
+Bouton « Aperçu » de la modale admin : `CockpitAlerts.preview(def)` affiche le rendu réel sur le poste de l'admin, sans rien écrire (ni alerte, ni historique, ni WhatsApp). À utiliser pour toute nouvelle définition.
+
+### Explication IA d'une alerte (`alert_ai.py`)
+
+`POST /api/alerts/<id>/explain` (user, CSRF actif) : alerte active, archivée ou historisée. Contexte propre au type (trafic : Waze autour des pins + relevés −90/+60 min ; main courante : fiche, chronologie, fiches même zone/catégorie 60 min ; météo ; checkpoint ; SOS : tablettes les plus proches ; caméra ; saturation porte), UN appel Claude (700 tokens, effort low, JSON 5 clés : `contexte, cause_probable, evolution, action_suggeree, confiance`, « donnée insuffisante » imposée). Cache `alert_explanations` (TTL 7 j) : clics simultanés → 202 `en_cours` ; `?refresh=1` refusé avant 2 min. UI `CockpitAlerts.explainWidget`, hors rangée de boutons (n'empêche jamais l'acquittement ni la prise en compte) ; jamais d'appel en aperçu admin.
+
+### Saturation porte prévue (`door_saturation_forecast`)
+
+Source live : `hsh_transactions_agg` (5 min par tripode/PDA, `gate_name`) ; ⚠️ `tranche` = heure de Paris étiquetée UTC. Aucune capacité en base : capacité = somme des appareils actifs sur 1 h (tripode 900/h, PDA 650/h = p99 mesuré 2026), surcharge `params.capacities`. Prévision = débit 15 min × profil N-1 de la même porte aligné au jour de course (décalage arrondi à la semaine). Série horaire N-1 interpolée entre milieux d'heure (lue en marches, elle faisait sonner à HH:05).
+Rejeu 2026 (5 éditions) : 33 alertes « constaté » toutes vraies ; 17 prévisions N-1, 5 confirmées (erreur médiane 21-31 %). La tendance seule (`trend_fallback`) est désactivée par défaut (1 sur 4 confirmée). Définition prod à créer désactivée, en mode `banner`. Mieux attendu en 2027 (archive 5 min comme N-1).
+
+## Alfred — agent IA WhatsApp (`alfred.py`)
+
+WAHA pousse les messages sur `POST /api/wa/webhook` (HMAC, exempté de CSRF). Par groupe (`wa_alfred_config`) : `listen` (ingestion `wa_inbound_messages`, TTL 14 j, gatée par le live-contrôle), `respond_mentions`, `summary_enabled`. Les mentions partent vers le wrapper `/alfred/ask` de la VM (boucle d'outils hors de ce repo) ; les résumés vers Ollama, via le scheduler 60 s du `__main__` d'`app.py`.
+
+- **Déclenchement** : `@alfred` explicite (le mot seul ne suffit plus), mention native (`alfred_lid`), suite de conversation 7 min, ou DM en liste blanche.
+- **Envois** : toujours par `WhatsAppService.send_direct`, tracés dans `cockpit_wa_send_history` (`source: "direct"`) et comptés dans les plafonds horaire/journalier. Réponse : ignore les heures silencieuses, refusée si breaker ouvert ou plafond atteint ; phrase d'attente et refus DM sautent dès 80 % du plafond horaire (90 % du journalier).
+- ⚠️ **Breaker partagé** : mémoire du module + `cockpit_wa_config{_id: "wa_breaker"}`, relu toutes les 15 s. Il était porté par l'instance, recréée à chaque envoi : il ne s'ouvrait jamais.
+- **Résumés** : un seul à la fois par groupe ; après échec, attente `min(intervalle, échecs × 5 min)`. « Résumer » ignore l'attente mais pas la garde (`already_running`). Rétention 180 j.
+- **Prompt de résumé** : transcription entre `<<<MESSAGES` et `MESSAGES>>>`, chevrons neutralisés, sauts de ligne aplatis ; heures en Paris. ⚠️ pymongo rend des datetimes naïfs UTC : jamais `astimezone()` sans `replace(tzinfo=utc)`.
+- **Webhook** : en prod, secret vide = tous les webhooks refusés. SHA-1 toléré avec avertissement, à retirer une fois vérifié côté WAHA.
+- **Évaluation** : chaque échange de mention dans `wa_alfred_exchanges` (TTL 90 j). Le durcissement du wrapper `/alfred/ask` se fait sur la VM.
+
+## Aide à la saisie et précédents des fiches (`pcorg_assist.py`)
+
+Blueprint `pcorg_assist_bp` (user, CSRF actif), consommé par `pcorg.js` (préfixe `pca*`).
+
+- **Suggestions** : `POST /api/pcorg/assist/suggest`, appelé par l'assistant de création dès 25 caractères (debounce 1,2 s, AbortController). Haiku 4.5, prompt bâti sur les référentiels de l'app (`CTX_DESCRIPTIONS`, `URGENCY_LABELS`, `pcorg_lists`) restreints aux catégories autorisées. ⚠️ Jamais appliquées d'office ; toute catégorie hors référentiel ou non autorisée est écartée (`validate_suggestion`). Cache 15 min, 4 appels simultanés max, échec silencieux.
+- **Doublons** : sans LLM, fiches du même event/year ouvertes ou de moins de 2 h ; TF-IDF + Jaccard, bonus zone et GPS ; la position seule ne suffit pas.
+- **Précédents** : bloc « Précédents » de la fiche, à la demande. Autres éditions (ou tous événements), préfiltre Mongo `$text` puis classement Python ; top 5 avec clôture et chronologie. 15-200 ms sur 30 000 fiches. « Synthèse IA » : 3-5 puces fondées uniquement sur les précédents, cache 30 j (`pcorg_precedent_syntheses`).
+- ⚠️ **Index texte `pca_text`** créé à la volée sur `pcorg` si AUCUN index texte n'existe (une collection n'en porte qu'un). `PCA_CREATE_TEXT_INDEX=0` le désactive.
+
+## Briefing de situation et RETEX de fin d'édition (`ai_reports.py`)
+
+UI `static/js/ai_reports.js` (modales injectées), boutons sidebar `.air-sidebar-btn` `data-air-open="briefing|retex"` — surtout PAS `.sidebar-ai`, que `ai_assistant.js` capture.
+
+- **Briefing** (`situation_briefing.py`, manager) : `build_context` lit 7 sources indépendantes (main courante, alertes, présents, trafic, météo, Field, timetable) ; une source en échec est marquée `indisponible`, jamais bloquante (~1 s). `{llm:false}` = contexte brut gratuit ; `{llm:true}` = job, contrat 5 clés (`situation, points_chauds, a_surveiller_6h, ressources, consignes_releve`). ⚠️ Un relevé compteur > 15 min est `releve_perime`, jamais « 0 présent ».
+- **Relève automatique** : `cockpit_settings._id="briefing_releve"` `{enabled, times, recipients}` ; tâche `scripts/install_briefing_task.ps1` (toutes les 15 min, **non installée**). Test sans coût : `python scripts/briefing_releve.py --force --no-llm --dry-run`.
+- **RETEX** (`edition_retex.py`, admin) : jeu de données complet d'une édition (< 2 s), 2 éditions précédentes, avertissements de comparabilité transmis au modèle. Collection `edition_retex` versionnée ; `GET /api/ai/retex/<id>/html` = page imprimable. ⚠️ `cockpit_alert_history` a un TTL de 7 j : au-delà, bloc alertes `indisponible`, jamais « 0 alerte ».
+
+## Fréquentation depuis le contrôle d'accès live (`live_frequentation.py`)
+
+Pour le RETEX et la vue Fréquentation du rapport de scans, l'**archive du contrôle d'accès live est la source primaire**, l'import Excel (`historique_controle`) le repli, **édition par édition** : `scan_frequentation.build_frequentation_block(..., source_priority=LIVE_FIRST)`. Le **défaut reste l'import seul** (`DEFAULT_SOURCE_PRIORITY`) : `presents_etat.historique_n1` (TV, montre, N-1 affluence) ne change pas de chiffre — vérifié à l'octet sur 10 éditions.
+
+- **Rejeu exact du dashboard** sur `hsh_archive_compteurs_*` / `hsh_archive_tx_*` / `hsh_archive_structure_*` : `presents = current − correction − véhicules`, véhicules cumulés depuis la remise à zéro précédant chaque relevé (`presents_etat.detect_resets`, `vehicle_prefixes`, `solde_vehicules`, partagés avec le direct). Pic = plus haut RELEVÉ. Vérifié : 24H CAMIONS 2026 = 49 975 à 19h15 et 37 501 à 13h06, identiques au dashboard.
+- ⚠️ **Les pics des rapports matinaux antérieurs à septembre 2026** (et des logs) sont le maximum BRUT du compteur, véhicules non retirés : +2 000 à +7 000 sur 24H AUTOS 2026. Le rejeu est la bonne référence.
+- ⚠️ **Le nom d'archive ment** (suffixe = année du clic, autre édition dedans) : seule la FENÊTRE course −10 j / +3 j fait foi. `has_live_archive` exige des tranches tx dans cette fenêtre, donc toutes les éditions ≤ 2025 retombent sur l'import.
+- ⚠️ **`___GLOBAL___` n'est pas archivé** par `hsh_archive_and_purge` : pour une édition archivée, Area 628, aucune correction, activation estimée (début de la série continue de relevés).
+- Relevés antérieurs à une remise à zéro survenue avant la fin du jour de course = fantômes, écartés ; jours `measured: false` avec `unmeasured_reason` (`compteur_non_remis_a_zero`, `compteur_fige`, `aucune_mesure`).
+- ⚠️ **Solde initial** : sans remise à zéro avant l'édition, tout est majoré (24H MOTOS 2026 : 8 916 au premier relevé, ~+7 300 vs import sur chaque pic). Signalé au modèle (`solde_initial_compteur`) et dans les réserves du RETEX.
+- Créneaux 15 min étiquetés à leur FIN (convention de l'import). Entrées de l'enceinte = compteur (passages valides) moins véhicules tx ; portes = gates HSH rattachées à l'Area 628 (les tx comptent aussi les scans refusés).
+- Sans relevé du compteur sur la période des scans (SUPERBIKE 2026) : repli `solde_scans` (solde des passages personnes).
+- Les éditions live et import ne se comparent pas sur les entrées (`entries_comparable=False`, `mixed_sources`) ; la source de chaque édition est donnée au modèle et affichée dans l'annexe du RETEX.
+- `hsh_archive_and_purge` copie aussi le `___GLOBAL___` (s'il désigne l'événement archivé) dans `hsh_archive_global_<tag>` (doc `_id: "global"`) ; le rejeu l'utilise si son activation tombe dans la fenêtre de l'édition. Rattrapé à la main pour 24H CAMIONS 2026 ; les archives antérieures n'en ont pas (estimation).
+
+## Momentus Elite — réservations commerciales (synchro + lieux)
+
+Momentus Elite (VenueOps) est l'outil de réservation des séminaires, réceptifs et hospitalités vendues. Instance **EU** (`auth-api.eu-venueops.com/token`, `api.eu-venueops.com`), identifiants **lecture seule** `MOMENTUS_CLIENT_ID` / `MOMENTUS_CLIENT_SECRET` (niveau Machine pour la tâche SYSTEM). Jeton ~23 h.
+
+- **Synchro** `momentus_sync.py` (tâche `scripts/install_momentus_task.ps1`, toutes les heures à HH:05) : incrémental sur `lastModifiedOn` (recouvrement 15 min) + fonctions J-2/J+45 ; import complet automatique si le dernier a plus de 20 h (seul moyen de voir une suppression). N'émet que des GET et le POST de recherche `/events/all`. Rien n'est jamais supprimé : `_sync.deleted_at`. Garde-fou : pas de réconciliation si l'API rend < 90 % de l'existant. Verrou dans `momentus_sync_state`, historique `momentus_sync_runs` (TTL 90 j), `cron_status.json`.
+- **Collections** : `momentus_events` (tel que rendu par l'API, espaces réservés inclus), `momentus_functions`, `momentus_venues`, `momentus_rooms`, `momentus_setup`, `momentus_lieux_mapping` (écrite par Groundmaster).
+- ⚠️ **`venueIds` est obligatoire** sur `/v1/events/all` ; `query-by-date-range` exige aussi `roomIds` (0 résultat avec une liste vide). Rien avant 2020.
+- ⚠️ **Les dates `start`/`end` d'un événement sont une enveloppe** (roulages et formations de février à décembre). Ce qui se passe un jour donné se lit dans `bookedSpaces` ou les fonctions (créneaux horaires).
+- ⚠️ **`usageType: moveIn` n'est PAS un montage** : c'est le mode de réservation par défaut (79 % des espaces des séminaires, 91 % des travaux ; le séminaire CPAM de 434 personnes y est en moveIn 8h30-17h). Affiché « réservé ». `event` (exploitation), `moveOut` (démontage) et `dark` (bloqué) sont des choix volontaires. Le vrai pilote de montage est dans `spaceUsageName` du détail `/v1/booked-spaces/{eventId}` (« Montage par Julien », « Régie Max »…), non synchronisé et rempli à ~60 %.
+- **Export Cowork** `scripts/export_cowork_activites.py` : JSON des 60 prochains jours (activités Momentus, grands événements Groundmaster, lieux avec coordonnées, résumé par jour, notice des limites) déposé chaque jour dans SharePoint SAFER / `COWORK/activites_site_60j.json` (Graph délégué, application Entra TITAN, cache `msal_cowork_cache.bin`, connexion initiale `--login`).
+- ⚠️ `momentus_events` embarque `contactRoles` (nom, mail, téléphone clients). Les API de lecture (`momentus_lieux.bookings_for_rooms`) n'en exposent rien, ni les montants.
+
+### Réservations par lieu de la carte
+
+Choix utilisateur : **information seulement, aucune alerte de conflit**. Pendant un grand événement, la plupart des réservations Momentus sur un lieu sont l'événement lui-même vu côté commercial (partenaire installé dans un Garden), pas un conflit.
+
+- **Trois apps, mêmes routes, mêmes fichiers partagés** (copies identiques, à reporter partout) : `momentus_lieux.py` (Cockpit, `../groundmaster/`, `../looker/`) et `static/js/momentus_lieu.js` (Cockpit, Looker ; `groundmaster/static/js/momentus-lieu.js`).
+- **Looker** : `looker/momentus_carte.py` (fabrique de blueprint, GET user) + bouton « Momentus » en haut à droite de la carte (`MomentusLieu.addLayerControl`) avec choix de période : aujourd'hui, demain, 7 j, 30 j, mois en cours, dates libres.
+- `momentus_lieux.py` (pur) : `lieu_payload(db, feature_id, from, to, event, year)` → période (dates, sinon montage → démontage du paramétrage, sinon aujourd'hui + 60 j), espaces rattachés, réservations avec phases fusionnées et créneaux horaires.
+- Routes `momentus_api.py` (user) : `GET /api/momentus/mapped`, `GET /api/momentus/lieu/<feature_id>`. Mêmes routes dans Groundmaster.
+- UI `static/js/momentus_lieu.js` (**copie identique** : `groundmaster/static/js/momentus-lieu.js`) : bouton « Réservations Momentus » dans la popup des lieux de la carte d'accueil (`map_view.generatePopup`), seulement si le lieu a un espace rattaché validé.
+- **Calque carte** (bouton `storefront` en bas à droite, `map_view.toggleMomentus`, `GET /api/momentus/carte`) : tous les lieux rattachés ayant au moins une réservation sur la période de l'événement sélectionné, **qu'ils soient activés ou non dans Groundmaster**. La carte normale n'affiche que les lieux activés pour l'événement : sans ce calque, un Garden occupé par un séminaire pendant les 24H Camions (non activé pour l'événement) restait invisible. Violet plein = réservation en cours aujourd'hui.
+- **La correspondance espace Momentus → `_id_feature` se fait dans Groundmaster** (`/momentus/lieux`, admin). Seuls les rattachements `valide` comptent : une proposition par nom identique peut être fausse (« Hunaudières » du PEC, une salle, contre le parking HUNAUDIERES).
+
+### Rapport de scans depuis l'archive live (`live_scan_units.py`)
+
+Pour une édition suivie par le contrôle d'accès live (2026 : 24H AUTOS, GPF, LMC, SUPERBIKE, 24H CAMIONS, 24H MOTOS), le rapport de scans est construit depuis l'archive HSH (tx + erreurs + structure) ; l'import Excel (`complet`) n'est que le repli, puis `parking_scans`. `scan_report_build.resolve_units_doc` porte cette priorité, utilisée par la génération, le mapping et l'analyse rédigée.
+
+- **Pseudo `complet` EN MÉMOIRE, jamais écrit** dans `historique_controle` (référence N-1 de la TV, de la montre, des projections). Même contrat que l'import, plus `source: live_controle`.
+- **Porte** = gate de l'Area enceinte (628) ; **zone** = l'AREA HSH (toutes ses gates agrégées), exactement la colonne « zone » de l'export. L'Area de la gate prime sur celle du checkpoint (PDA mobiles).
+- Catégorie devinée du nom d'Area (`category_source: hsh_area`) ; rattachement par `scan_import.resolve_features` (overrides, récolte, geojson), identique à l'import.
+- Créneaux 15 min étiquetés à leur FIN ; `tranche` et `date_utc` sont déjà en heure de Paris : aucune conversion.
+- ⚠️ **Refus exclus** via `hsh_archive_erreurs_*` (par checkpoint + 5 min, répartition au prorata si l'archive est incomplète). Les statuts 107 et 133 sont des passages (le compteur les compte).
+- **Portes : personnes seules** (véhicules exclus) ; **zones : véhicules inclus** si la catégorie est à flux véhicules. Écart cumulé à l'Excel sur 24H MOTOS 2026 : 18 691 contre 26 982 à 55 079 pour les autres conventions. ⚠️ L'Excel des zones compte aussi les refus (P OUEST 3 105 contre 2 473 valides).
+- Parkings foot M1/M2/M3 (Areas 1227/1229/1231) écartés par ID : le match du 19/09 tombe dans la fenêtre de 24H CAMIONS 2026.
+- **Mapping d'une édition live** : aucun document réécrit, seulement `scan_feature_overrides`, puis régénération. « Mémoriser » coché = override global, décoché = ciblé sur l'édition. On enregistre l'état complet de l'unité : un override ciblé remplace entièrement le global.
+- `/scan-report/available` liste les éditions live même sans rapport (`generated_at: null`). L'en-tête du rapport affiche la source et les conventions.
+- 24H MOTOS 2026 live contre import : portes +2,7 % au total, pic au même créneau sur 12 portes ; PORTE CIK +39 % et PORTE NORD VEHICULES +80 % restent inexpliquées (hypothèse : synchro tardive des PDA après l'export).
+- Génération (analyse désactivée) : 1,5 s (24H CAMIONS), 1,8 s (24H MOTOS), 6 s (24H AUTOS).
 
 ## PMV — remorques à panneau à message variable (`/pmv`)
 

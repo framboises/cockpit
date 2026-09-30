@@ -538,6 +538,8 @@ def forward_route():
         "via": data.get("waypoints") or [],
         "forced": True,
         "god": bool(data.get("god")),
+        # Fiche de destination : la tablette efface l'itineraire a sa cloture
+        "fiche_id": (str(data.get("fiche_id")).strip() or None) if data.get("fiche_id") else None,
     }
 
     title = (data.get("title") or "Itineraire").strip()[:120]

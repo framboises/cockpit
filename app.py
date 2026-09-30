@@ -21,7 +21,7 @@ from functools import wraps
 from zoneinfo import ZoneInfo
 from astral import LocationInfo
 from astral.sun import sun
-from pymongo import MongoClient
+from pymongo import MongoClient, ReturnDocument
 from werkzeug.utils import safe_join
 from bson.objectid import ObjectId
 from waitress import serve
@@ -41,6 +41,11 @@ from routing_overrides import routing_overrides_bp
 from cameras import cameras_bp
 from meteo import meteo_bp
 from pmv import pmv_bp
+from pcorg_assist import pcorg_assist_bp
+import dispatch_auto as DA
+from momentus_api import momentus_bp
+from ai_reports import ai_reports_bp
+from alert_ai import alert_ai_bp
 import pcorg_summary
 import pcorg_summary_mail
 import pcorg_ai_memory
@@ -93,7 +98,8 @@ csrf = CSRFProtect(app)
 @app.errorhandler(CSRFError)
 def handle_csrf_error(e):
     if request.path.startswith('/api/'):
-        return jsonify({"error": "CSRF token manquant ou invalide"}), 400
+        # code "csrf" : le front renouvelle son jeton (/api/csrf-token) et rejoue
+        return jsonify({"error": "CSRF token manquant ou invalide", "code": "csrf"}), 400
     return e.get_body(), 400
 
 # Validation stricte pour la clé secrète en production
@@ -132,6 +138,8 @@ COL_ANPR_WATCHLIST = db['cockpit_anpr_watchlist']
 COL_GROUPS.create_index("name", unique=True)
 COL_USER_GROUPS.create_index("user_id", unique=True)
 COL_ALERT_HISTORY.create_index("createdAt", expireAfterSeconds=7*24*3600)  # TTL 7 jours
+# Une entree d'historique par alerte active (ecrite par alert_engine.sync_alert_history)
+COL_ALERT_HISTORY.create_index("alert_id", unique=True, sparse=True)
 COL_ALERT_DEFS.create_index("slug", unique=True)
 COL_ACTIVE_ALERTS.create_index("expiresAt", expireAfterSeconds=0)  # TTL
 COL_ACTIVE_ALERTS.create_index("dedup_key", unique=True, sparse=True)
@@ -699,6 +707,23 @@ def index():
                            user_allowed_categories_json=json.dumps(get_user_allowed_categories(payload)),
                            user_can_close_fiche_json=json.dumps(_user_can_close_fiche(payload)))
 
+@app.route('/api/csrf-token', methods=['GET'])
+@role_required("user")
+def api_csrf_token():
+    """Jeton CSRF frais pour une page restee ouverte (static/js/csrf_refresh.js).
+
+    Le jeton de la balise <meta> expire apres WTF_CSRF_TIME_LIMIT (1 h par
+    defaut) : sans renouvellement, la premiere ecriture d'un onglet ancien
+    echouait, souvent apres un formulaire entierement rempli. generate_csrf()
+    re-signe le jeton de session avec un horodatage neuf.
+    """
+    from flask_wtf.csrf import generate_csrf
+    resp = jsonify({"csrf_token": generate_csrf(),
+                    "time_limit": app.config.get("WTF_CSRF_TIME_LIMIT", 3600)})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.errorhandler(404)
 def page_not_found(e):
     flash("La page demandée est introuvable. Veuillez contacter un administrateur.", "error")
@@ -1013,80 +1038,151 @@ def delete_timetable_category():
     return jsonify({"ok": True})
 
 # -------------------------------------------------------------------------------
+# Validation commune ajout / edition d'une vignette timetable
+# -------------------------------------------------------------------------------
+_TT_DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+_TT_TIME_RE = re.compile(r'^(\d{1,2})\s*[:hH.]\s*(\d{2})$')
+_TT_HOUR_RE = re.compile(r'^(\d{1,2})\s*[hH]$')
+_TT_TEXT_LIMITS = {
+    "activity": 200, "category": 120, "place": 200, "department": 120,
+    "duration": 20, "remark": 4000, "todo": 20000,
+}
+_TT_PREP_VALUES = {"", "non", "progress", "true"}
+
+# Champs ecrases par la synchronisation du parametrage (merge.PARAM_FIELDS) :
+# les modifier depuis la modale serait perdu au prochain merge.
+_TT_PARAM_MANAGED_FIELDS = (
+    "date", "start", "end", "duration", "activity",
+    "category", "place", "department",
+)
+
+
+def _tt_norm_time(raw):
+    """Normalise une heure : '' | 'TBC' | 'HH:MM'. Leve ValueError si illisible."""
+    s = str(raw or '').strip()
+    if not s:
+        return ''
+    if s.upper() == 'TBC':
+        return 'TBC'
+    m = _TT_TIME_RE.match(s)
+    if m:
+        h, mi = int(m.group(1)), int(m.group(2))
+    else:
+        m = _TT_HOUR_RE.match(s)
+        if not m:
+            raise ValueError(s)
+        h, mi = int(m.group(1)), 0
+    if mi > 59 or h > 24 or (h == 24 and mi != 0):
+        raise ValueError(s)
+    return f"{h:02d}:{mi:02d}"
+
+
+def _tt_is_param_managed(ev):
+    """Vignette generee par le parametrage (et donc reecrite par le merge)."""
+    return bool(ev.get("param_id")) and ev.get("origin") in ("parametrage", "manual-edit")
+
+
+def _tt_clean_payload(data):
+    """Valide et normalise les champs d'une vignette.
+
+    Retourne (fields, None) ou (None, message_erreur).
+    """
+    date = str(data.get('date') or '').strip()
+    if not _TT_DATE_RE.match(date):
+        return None, "Date invalide (format attendu AAAA-MM-JJ)."
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        return None, "Date invalide."
+
+    try:
+        start = _tt_norm_time(data.get('start'))
+    except ValueError:
+        return None, "Heure de debut invalide (format HH:MM ou TBC)."
+    try:
+        end = _tt_norm_time(data.get('end'))
+    except ValueError:
+        return None, "Heure de fin invalide (format HH:MM ou TBC)."
+    if not start and not end:
+        return None, "Renseigner au moins une heure (debut ou fin)."
+
+    fields = {"date": date, "start": start, "end": end}
+    for key, limit in _TT_TEXT_LIMITS.items():
+        val = data.get(key)
+        val = '' if val is None else str(val)
+        val = val.strip() if key not in ("remark", "todo") else val.rstrip()
+        if len(val) > limit:
+            return None, f"Champ '{key}' trop long ({limit} caracteres max)."
+        fields[key] = val
+    if not fields["activity"]:
+        return None, "L'activite est obligatoire."
+    if not fields["category"]:
+        return None, "La categorie est obligatoire."
+
+    prep = str(data.get('preparation_checked') or '').strip().lower()
+    fields["preparation_checked"] = prep if prep in _TT_PREP_VALUES else ''
+    return fields, None
+
+
+def _tt_event_year(data):
+    event_name = str(data.get('event') or '').strip()
+    year = str(data.get('year') or '').strip()
+    return event_name, year
+
+
+# -------------------------------------------------------------------------------
 # Route pour ajouter un événement dans la collection timetable
 # -------------------------------------------------------------------------------
 @app.route('/add_timetable_event', methods=['POST'])
 @role_required("user")
 def add_timetable_event():
     try:
-        data = request.get_json()
-        # Récupérer les valeurs envoyées
-        event_name = data.get('event')
-        year = data.get('year')
-        date = data.get('date')
-        event_details = {
-            "start": data.get('start', "TBC"),
-            "end": data.get('end', "TBC"),
-            "duration": data.get('duration', ""),
-            "category": data.get('category'),
-            "activity": data.get('activity'),
-            "place": data.get('place'),
-            "department": data.get('department'),
-            "type": data.get('type', "Timetable"),
-            "origin": data.get('origin', "manual"),
-            "remark": data.get('remark', ""),
-            "todo": data.get('todo', ""),  # texte multi-lignes (une tâche par ligne)
-            "preparation_checked": (data.get('preparation_checked') or "").lower()  # "", "progress", "true"
-        }
-        # Générer un identifiant unique pour l'événement
-        event_details["_id"] = str(ObjectId())
+        data = request.get_json(silent=True) or {}
+        event_name, year = _tt_event_year(data)
+        if not event_name or not year:
+            return jsonify({"success": False, "message": "Aucun evenement selectionne."}), 400
 
-        # Vérifier si un document pour cet event et cette année existe déjà
-        timetable_doc = db.timetable.find_one({"event": event_name, "year": year})
-        if timetable_doc:
-            # Si la date existe déjà, on ajoute l'événement à la liste
-            if date in timetable_doc.get('data', {}):
-                db.timetable.update_one(
-                    {"_id": timetable_doc["_id"]},
-                    {"$push": {f"data.{date}": event_details}}
-                )
-            else:
-                # Sinon, on crée la clé pour cette date avec une liste contenant l'événement
-                db.timetable.update_one(
-                    {"_id": timetable_doc["_id"]},
-                    {"$set": {f"data.{date}": [event_details]}}
-                )
-        else:
-            # Création d'un nouveau document pour cet événement et cette année
-            new_doc = {
-                "event": event_name,
-                "year": str(year),
-                "data": {
-                    date: [event_details]
-                }
-            }
-            db.timetable.insert_one(new_doc)
-        return jsonify({"success": True, "message": "Événement ajouté avec succès."})
+        fields, err = _tt_clean_payload(data)
+        if err:
+            return jsonify({"success": False, "message": err}), 400
+
+        date = fields.pop("date")
+        event_details = dict(fields)
+        event_details.update({
+            "_id": str(ObjectId()),
+            "type": "Timetable",
+            "origin": "manual",
+        })
+
+        # upsert : cree le document event/year s'il n'existe pas encore.
+        # $push cree la cle de date si elle est absente.
+        db.timetable.update_one(
+            {"event": event_name, "year": year},
+            {"$push": {f"data.{date}": event_details}, "$inc": {"version": 1}},
+            upsert=True,
+        )
+        return jsonify({"success": True, "message": "Événement ajouté avec succès.",
+                        "_id": event_details["_id"]})
     except Exception as e:
-        logger.error("Erreur lors de l'ajout de l'événement dans la timetable: " + str(e))
+        logger.error("Erreur lors de l'ajout de l'événement dans la timetable: %s", e, exc_info=True)
         return jsonify({"success": False, "message": "Erreur lors de l'ajout de l'événement."}), 500
-    
+
 # -------------------------------------------------------------------------------
 # Mettre à jour un événement (édition dans la liste imbriquée par date + _id)
 # payload attendu: { event, year, date, _id, start, end, duration, category, activity, place, department, remark }
+# Vignette issue du parametrage : seuls remark / todo / preparation_checked sont
+# modifiables (le merge reecrit les autres champs a chaque synchronisation).
 # -------------------------------------------------------------------------------
 @app.route('/update_timetable_event', methods=['POST'])
 @role_required("user")
 def update_timetable_event():
     try:
-        data = request.get_json() or {}
-        event_name = data.get('event')
-        year = str(data.get('year'))
-        target_date = data.get('date')  # peut être une nouvelle date
+        data = request.get_json(silent=True) or {}
+        event_name, year = _tt_event_year(data)
         ev_id = str(data.get('_id') or '')
 
-        if not all([event_name, year, target_date, ev_id]):
-            return jsonify({"success": False, "message": "Paramètres manquants (event/year/date/_id)."}), 400
+        if not all([event_name, year, ev_id]):
+            return jsonify({"success": False, "message": "Paramètres manquants (event/year/_id)."}), 400
 
         doc = db.timetable.find_one({"event": event_name, "year": year})
         if not doc:
@@ -1094,67 +1190,73 @@ def update_timetable_event():
 
         data_map = doc.get('data') or {}
 
-        # 1) Tente sous la date cible
-        events_list = data_map.get(target_date, [])
-        idx = next((i for i, ev in enumerate(events_list) if str(ev.get('_id')) == ev_id), None)
+        # Recherche par _id : d'abord sous la date annoncee, puis partout
+        hint_date = str(data.get('date') or '')
+        found_date, idx = None, None
+        search_order = ([hint_date] if hint_date in data_map else []) + \
+                       [d for d in data_map if d != hint_date]
+        for d in search_order:
+            j = next((i for i, ev in enumerate(data_map[d] or []) if str(ev.get('_id')) == ev_id), None)
+            if j is not None:
+                found_date, idx = d, j
+                break
 
-        # 2) Si pas trouvé, on cherche dans toutes les dates
-        found_date = target_date if idx is not None else None
         if idx is None:
-            for d, lst in data_map.items():
-                j = next((i for i, ev in enumerate(lst) if str(ev.get('_id')) == ev_id), None)
-                if j is not None:
-                    found_date, idx = d, j
-                    break
-
-        if idx is None or found_date is None:
             return jsonify({"success": False, "message": "Événement introuvable."}), 404
 
-        # Prépare les nouvelles valeurs
-        updated_fields = {
-            "start":               data.get("start", "TBC"),
-            "end":                 data.get("end", "TBC"),
-            "duration":            data.get("duration", ""),
-            "category":            data.get("category"),
-            "activity":            data.get("activity"),
-            "place":               data.get("place"),
-            "department":          data.get("department"),
-            "remark":              data.get("remark"),
-            "todo":                data.get("todo", ""),  # texte multi-lignes
-            "preparation_checked": (data.get("preparation_checked") or "").lower(),
-            "origin":              "manual-edit"
-        }
+        existing = data_map[found_date][idx]
 
-        # Si la date d'origine ≠ la date cible -> on déplace l'objet
+        # scope="operator" : mise a jour partielle envoyee par le drawer (taches,
+        # statut de preparation) sans revalider les horaires d'une vignette ancienne.
+        if _tt_is_param_managed(existing) or data.get("scope") == "operator":
+            # Champs operateur uniquement. L'origine reste inchangee.
+            remark = data.get("remark")
+            remark = existing.get("remark", "") if remark is None else str(remark).rstrip()
+            todo = data.get("todo")
+            todo = existing.get("todo", "") if todo is None else str(todo).rstrip()
+            if len(remark) > _TT_TEXT_LIMITS["remark"] or len(todo) > _TT_TEXT_LIMITS["todo"]:
+                return jsonify({"success": False, "message": "Remarque ou taches trop longues."}), 400
+            prep = str(data.get("preparation_checked", existing.get("preparation_checked", "")) or "").lower()
+            set_ops = {
+                f"data.{found_date}.{idx}.remark": remark,
+                f"data.{found_date}.{idx}.todo": todo,
+                f"data.{found_date}.{idx}.preparation_checked": prep if prep in _TT_PREP_VALUES else "",
+            }
+            if remark != (existing.get("remark") or ""):
+                # merge._patch_vignette conserve alors la remarque de l'operateur
+                set_ops[f"data.{found_date}.{idx}.remark_manual"] = True
+            db.timetable.update_one({"_id": doc["_id"]}, {"$set": set_ops, "$inc": {"version": 1}})
+            return jsonify({"success": True, "message": "Événement mis à jour.",
+                            "param_managed": _tt_is_param_managed(existing)})
+
+        fields, err = _tt_clean_payload(data)
+        if err:
+            return jsonify({"success": False, "message": err}), 400
+
+        target_date = fields.pop("date")
+        fields["origin"] = "manual-edit"
+
+        # Date changee -> on deplace l'objet mis a jour
         if found_date != target_date:
-            # on prend l'objet source, on le met à jour, puis on le push dans la target_date
-            src_event = data_map[found_date][idx]
-            for k, v in updated_fields.items():
-                if v is not None:
-                    src_event[k] = v
-
-            # supprime dans found_date
+            moved = dict(existing)
+            moved.update(fields)
             db.timetable.update_one(
                 {"_id": doc["_id"]},
-                {"$pull": {f"data.{found_date}": {"_id": ev_id}}}
+                {"$pull": {f"data.{found_date}": {"_id": existing.get("_id")}}}
             )
-            # push dans target_date (créé si absent)
             db.timetable.update_one(
                 {"_id": doc["_id"]},
-                {"$push": {f"data.{target_date}": src_event}}
+                {"$push": {f"data.{target_date}": moved}, "$inc": {"version": 1}}
+            )
+            # Une date videe ne doit pas laisser de section vide dans la timeline
+            db.timetable.update_one(
+                {"_id": doc["_id"], f"data.{found_date}": {"$size": 0}},
+                {"$unset": {f"data.{found_date}": ""}}
             )
             return jsonify({"success": True, "message": "Événement déplacé et mis à jour."})
 
-        # Sinon même date -> simple $set par index
-        set_ops = {}
-        for k, v in updated_fields.items():
-            if v is not None:
-                set_ops[f"data.{found_date}.{idx}.{k}"] = v
-
-        if not set_ops:
-            return jsonify({"success": False, "message": "Aucune donnée à mettre à jour."}), 400
-
-        db.timetable.update_one({"_id": doc["_id"]}, {"$set": set_ops})
+        set_ops = {f"data.{found_date}.{idx}.{k}": v for k, v in fields.items()}
+        db.timetable.update_one({"_id": doc["_id"]}, {"$set": set_ops, "$inc": {"version": 1}})
         return jsonify({"success": True, "message": "Événement mis à jour."})
 
     except Exception as e:
@@ -1185,6 +1287,11 @@ def delete_timetable_event():
         if res.modified_count == 0:
             return jsonify({"success": False, "message": "Aucune suppression effectuée (événement introuvable)."}), 404
 
+        db.timetable.update_one({"event": event_name, "year": year}, {"$inc": {"version": 1}})
+        db.timetable.update_one(
+            {"event": event_name, "year": year, f"data.{date}": {"$size": 0}},
+            {"$unset": {f"data.{date}": ""}}
+        )
         return jsonify({"success": True, "message": "Événement supprimé."})
     except Exception as e:
         logger.error("Erreur delete_timetable_event: %s", e)
@@ -1207,6 +1314,8 @@ def duplicate_timetable_event():
 
         if not all([event_name, year, date, ev_id, target_date]):
             return jsonify({"success": False, "message": "Paramètres manquants (event/year/date/_id/target_date)."}), 400
+        if not _TT_DATE_RE.match(str(target_date)):
+            return jsonify({"success": False, "message": "Date cible invalide (AAAA-MM-JJ)."}), 400
 
         doc = db.timetable.find_one({"event": event_name, "year": year})
         if not doc:
@@ -1220,10 +1329,18 @@ def duplicate_timetable_event():
         new_ev = dict(src)
         new_ev["_id"] = str(ObjectId())
         new_ev["origin"] = "duplicate"
+        new_ev["preparation_checked"] = ""
+        new_ev["todo"] = re.sub(r'\[[xX]\]', '[ ]', str(src.get("todo") or ""))
+        # La copie est une vignette manuelle : elle ne doit plus etre rattachee
+        # au parametrage (sinon le merge pourrait la prendre pour l'originale).
+        for k in ("param_id", "phase", "todos_type", "remark_manual"):
+            new_ev.pop(k, None)
+        if target_date == date:
+            new_ev["activity"] = f"{src.get('activity') or ''} (copie)".strip()
 
         db.timetable.update_one(
             {"_id": doc["_id"]},
-            {"$push": {f"data.{target_date}": new_ev}}
+            {"$push": {f"data.{target_date}": new_ev}, "$inc": {"version": 1}}
         )
         return jsonify({"success": True, "message": "Événement dupliqué.", "new_id": new_ev["_id"]})
     except Exception as e:
@@ -1819,6 +1936,21 @@ app.register_blueprint(cameras_bp)
 # PMV : pilotage des remorques a panneau a message variable (TCP 9520 vers les
 # routeurs 4G, cf. pmv.py). Page manager, CSRF ACTIF sur toutes les ecritures.
 app.register_blueprint(pmv_bp)
+# Aide a la saisie des fiches et precedents (pcorg_assist.py). Routes user,
+# CSRF ACTIF sur les POST (pcorg.js envoie X-CSRFToken via apiCall).
+app.register_blueprint(pcorg_assist_bp)
+# Dispatch des fiches vers les unites terrain (dispatch_auto.py) : proposition
+# automatique a l'unite la plus proche, file du service (/dispatch-service).
+# Routes user/admin, CSRF ACTIF sur les ecritures.
+app.register_blueprint(DA.dispatch_bp)
+# Reservations Momentus par lieu de la carte (momentus_api.py). GET user,
+# lecture seule des collections momentus_* (synchro momentus_sync.py).
+app.register_blueprint(momentus_bp)
+# Briefing de situation (manager) et RETEX de fin d'edition (admin), cf.
+# ai_reports.py. CSRF ACTIF sur les POST (ai_reports.js envoie X-CSRFToken).
+app.register_blueprint(ai_reports_bp)
+# Explication IA d'une alerte (alert_ai.py). Route user, CSRF ACTIF.
+app.register_blueprint(alert_ai_bp)
 # Alfred (agent IA WhatsApp via VM Linux + WAHA webhook). Le webhook POST
 # /api/wa/webhook est exempt de CSRF : WAHA ne sait pas envoyer un token CSRF,
 # l'authentification se fait par HMAC (header X-Webhook-Hmac, secret partage
@@ -3544,55 +3676,24 @@ def get_alert_history():
     if allowed_slugs is not None:
         query["type"] = {"$in": allowed_slugs}
     alerts = list(COL_ALERT_HISTORY.find(query).sort('createdAt', -1).limit(limit))
-    return jsonify([_pub(a) for a in alerts])
+    metas = _alert_def_metas()
+    out = []
+    for a in alerts:
+        a = _pub(a)
+        a['meta'] = metas.get(a.get('type'))
+        out.append(a)
+    return jsonify(out)
 
 @app.route('/api/alert-history', methods=['POST'])
 @role_required("user")
 @csrf.exempt
 def post_alert_history():
-    data = request.get_json(force=True) or {}
-    alert_type = data.get('type', '')
-    message = data.get('message', '')
-
-    # Verifier que l'utilisateur a le droit de voir ce type d'alerte
-    payload = getattr(request, 'user_payload', {})
-    allowed_slugs = _get_user_alert_slugs(payload)
-    if allowed_slugs is not None and alert_type not in allowed_slugs:
-        return jsonify({"ok": True, "filtered": True}), 200
-    now = datetime.now(timezone.utc)
-
-    # Deduplication adaptative selon le type d'alerte
-    # traffic-cluster : meme zone pendant 30 min (match sur type + lieu extrait du message)
-    # autres : meme type + message exact dans les 60 dernieres secondes
-    if alert_type == 'traffic-cluster':
-        dedup_query = {'type': alert_type, 'createdAt': {'$gte': now - timedelta(minutes=30)}}
-        # Affiner par lieu si present (texte apres " — " dans le message)
-        if '\u2014' in message:
-            zone = message.split('\u2014')[-1].strip()
-            if zone:
-                dedup_query['message'] = {'$regex': zone.replace('(', '\\(').replace(')', '\\)')}
-    else:
-        dedup_query = {
-            'type': alert_type,
-            'message': message,
-            'createdAt': {'$gte': now - timedelta(hours=1)}
-        }
-    existing = COL_ALERT_HISTORY.find_one(dedup_query)
-    if existing:
-        return jsonify(_pub(existing)), 200
-
-    doc = {
-        'type': alert_type,
-        'title': data.get('title', ''),
-        'timeStr': data.get('timeStr', ''),
-        'message': message,
-        'hasAction': bool(data.get('hasAction')),
-        'actionData': data.get('actionData'),
-        'createdAt': now,
-    }
-    ins = COL_ALERT_HISTORY.insert_one(doc)
-    doc['_id'] = str(ins.inserted_id)
-    return jsonify(doc), 201
+    # L'historique est ecrit par le moteur (alert_engine.sync_alert_history),
+    # une entree par alerte, qu'un poste soit ouvert ou non. Avant, chaque
+    # poste postait sa copie et le serveur dedoublonnait sur le texte : aucun
+    # poste ouvert = aucun historique, un message reformule = un doublon.
+    # Route conservee en no-op pour un onglet reste sur l'ancien JS.
+    return jsonify({"ok": True, "ignored": True}), 200
 
 # Gestion des groupes et utilisateurs cockpit
 ################################################################################
@@ -3829,7 +3930,7 @@ DETECTION_TYPES = {
     "traffic_cluster", "anpr_watchlist", "meteo_threshold",
     "checkpoint_reassign", "checkpoint_error_burst",
     "meteo_rain_onset", "pcorg_urgency",
-    "camera_event",
+    "camera_event", "door_saturation_forecast",
 }
 
 # Catalogue des Smart Events Hikvision exposes a la modale de creation d'alerte
@@ -3852,6 +3953,46 @@ CAMERA_EVENT_TYPES = [
     {"id": "anpr_watchlist",       "label": "Plaque surveillee (LAPI)",     "icon": "local_police",      "color": "#dc2626", "desc": "Plaque presente dans la watchlist LAPI."},
 ]
 CAMERA_EVENT_TYPE_IDS = {e["id"] for e in CAMERA_EVENT_TYPES}
+
+# Mode d'affichage d'une alerte sur les postes :
+#   banner     : notification discrete (toast) + historique, jamais de plein ecran
+#   fullscreen : plein ecran a acquitter sur chaque poste (comportement historique)
+#   critical   : plein ecran + signal sonore + prise en compte partagee (le
+#                premier operateur qui la prend la retire des autres postes)
+ALERT_DISPLAY_MODES = ("banner", "fullscreen", "critical")
+DEFAULT_ALERT_DISPLAY_MODE = "fullscreen"
+
+
+def _alert_def_meta(d):
+    """Ce dont un poste a besoin pour afficher une alerte de cette definition.
+
+    Le rendu (couleur, icone, titre, mise en forme) est pilote par la
+    definition et non plus par des tables codees en dur dans le JS : une
+    alerte creee depuis l'admin avec un slug libre (ex. main-courante-flux)
+    s'affichait sans en-tete ni bouton visible."""
+    slug = d.get("slug") or ""
+    mode = d.get("display_mode")
+    if mode not in ALERT_DISPLAY_MODES:
+        mode = DEFAULT_ALERT_DISPLAY_MODE
+    if slug in ("field_sos", "field-sos"):
+        mode = "critical"
+    return {
+        "slug": slug,
+        "name": d.get("name") or slug,
+        "icon": d.get("icon") or "notifications",
+        "color": d.get("color") or "#6366f1",
+        "detection_type": d.get("detection_type") or "",
+        "display_mode": mode,
+        "category": (d.get("params") or {}).get("category") or "",
+    }
+
+
+def _alert_def_metas():
+    """{slug: meta} de toutes les definitions (activees ou non : une alerte
+    active peut survivre quelques minutes a la desactivation de sa definition)."""
+    return {d.get("slug"): _alert_def_meta(d) for d in COL_ALERT_DEFS.find(
+        {}, {"slug": 1, "name": 1, "icon": 1, "color": 1, "detection_type": 1,
+             "display_mode": 1, "params.category": 1})}
 
 @app.route('/admin/alertes')
 @role_required("admin")
@@ -3898,6 +4039,7 @@ def create_alert_definition():
         'enabled': bool(data.get('enabled', True)),
         'groups': group_oids,
         'priority': int(data.get('priority', 99)),
+        'display_mode': data.get('display_mode') if data.get('display_mode') in ALERT_DISPLAY_MODES else DEFAULT_ALERT_DISPLAY_MODE,
         'createdAt': datetime.now(timezone.utc),
         'updatedAt': datetime.now(timezone.utc),
     }
@@ -3928,6 +4070,10 @@ def update_alert_definition(did):
         patch['params'] = data['params'] or {}
     if 'priority' in data:
         patch['priority'] = int(data.get('priority', 99))
+    if 'display_mode' in data:
+        if data['display_mode'] not in ALERT_DISPLAY_MODES:
+            return jsonify({"error": "Mode d'affichage invalide"}), 400
+        patch['display_mode'] = data['display_mode']
     if 'groups' in data:
         raw_groups = data['groups'] or []
         try:
@@ -3994,8 +4140,10 @@ def alfred_config_upsert(chat_id):
 @app.route('/api/alfred/summary/trigger/<path:chat_id>', methods=['POST'])
 @role_required("admin")
 def alfred_summary_trigger(chat_id):
-    alfred.trigger_summary_now(chat_id)
-    return jsonify({"ok": True, "triggered": True})
+    # trigger_summary_now rend False si un resume de ce groupe tourne deja
+    # (garde anti-chevauchement d'alfred.py).
+    started = alfred.trigger_summary_now(chat_id)
+    return jsonify({"ok": True, "triggered": bool(started), "already_running": not started})
 
 
 @app.route('/api/alfred/history/<path:chat_id>', methods=['DELETE'])
@@ -4163,6 +4311,19 @@ def _get_user_alert_slugs(payload):
             allowed_slugs.append(d["slug"])
     return allowed_slugs
 
+
+@app.route('/api/alert-definitions/mine', methods=['GET'])
+@role_required("user")
+def my_alert_definitions():
+    """Definitions activees que l'utilisateur recoit : alimente les
+    preferences locales (couper une alerte sur ce poste) et le rendu."""
+    payload = getattr(request, 'user_payload', {})
+    allowed = _get_user_alert_slugs(payload)
+    docs = COL_ALERT_DEFS.find({"enabled": True}).sort([('priority', 1), ('name', 1)])
+    return jsonify([_alert_def_meta(d) for d in docs
+                    if allowed is None or d.get("slug") in allowed])
+
+
 @app.route('/api/active-alerts', methods=['GET'])
 @role_required("user")
 def get_active_alerts():
@@ -4172,8 +4333,10 @@ def get_active_alerts():
     if allowed_slugs is not None:
         query["definition_slug"] = {"$in": allowed_slugs}
     docs = list(COL_ACTIVE_ALERTS.find(query).sort([('triggeredAt', -1)]).limit(50))
+    metas = _alert_def_metas() if docs else {}
     result = []
     for d in docs:
+        d['meta'] = metas.get(d.get('definition_slug'))
         d['_id'] = str(d['_id'])
         for k, v in d.items():
             if hasattr(v, 'isoformat'):
@@ -4186,6 +4349,93 @@ def get_active_alerts():
                 d[k] = str(v)
         result.append(d)
     return jsonify(result)
+
+
+@app.route('/api/active-alerts/<alert_id>/take', methods=['POST'])
+@role_required("user")
+def take_active_alert(alert_id):
+    """Prise en compte partagee d'une alerte critique (SOS tablette compris).
+
+    Le premier operateur qui clique "Je prends en charge / en compte" est
+    enregistre sur l'alerte (atomique : un seul gagnant). Les autres postes,
+    au poll suivant, ferment leur alerte et affichent qui l'a prise. Pour un
+    SOS, la tablette emettrice est prevenue ; pour toute alerte liee a une
+    fiche main courante, la fiche recoit une entree de chronologie.
+
+    Eligible : le SOS tablette et les alertes dont la definition est en mode
+    d'affichage "critical".
+    """
+    try:
+        oid = ObjectId(alert_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_id"}), 400
+    user = request.user_payload
+    cur = COL_ACTIVE_ALERTS.find_one({"_id": oid}, {"definition_slug": 1})
+    if not cur:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    slug = cur.get("definition_slug") or ""
+    allowed = _get_user_alert_slugs(user)
+    if allowed is not None and slug not in allowed:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    is_sos = slug in ("field_sos", "field-sos")
+    def_doc = COL_ALERT_DEFS.find_one({"slug": slug}) or {"slug": slug}
+    meta = _alert_def_meta(def_doc)
+    if not is_sos and meta["display_mode"] != "critical":
+        return jsonify({"ok": False, "error": "not_takeable"}), 400
+
+    name = _pcorg_operator(user) or user.get("email", "?")
+    now = datetime.now(timezone.utc)
+    doc = COL_ACTIVE_ALERTS.find_one_and_update(
+        {"_id": oid, "taken_at": {"$exists": False}},
+        {"$set": {"taken_at": now, "taken_by": user.get("email", ""), "taken_by_name": name}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if doc is None:
+        cur = COL_ACTIVE_ALERTS.find_one({"_id": oid}, {"taken_at": 1, "taken_by_name": 1})
+        if not cur:
+            return jsonify({"ok": False, "error": "not_found"}), 404
+        taken = cur.get("taken_at")
+        if isinstance(taken, datetime) and taken.tzinfo is None:
+            taken = taken.replace(tzinfo=timezone.utc)
+        # Deja pris par quelqu'un d'autre (ou par soi sur un autre poste)
+        return jsonify({"ok": False, "error": "already_taken",
+                        "taken_by_name": cur.get("taken_by_name"),
+                        "taken_at": taken.isoformat() if isinstance(taken, datetime) else None}), 409
+
+    ad = doc.get("actionData") or {}
+    heure = now.astimezone(ZoneInfo("Europe/Paris")).strftime("%H:%M")
+    if ad.get("pcorg_id"):
+        texte = ("SOS pris en charge par %s" % name) if is_sos else \
+            ("Alerte \"%s\" prise en compte par %s" % (meta["name"], name))
+        try:
+            PH.append_entry(db["pcorg"], ad["pcorg_id"],
+                            PH.make_entry(name, texte),
+                            inc_bounce=True)
+        except Exception:
+            logger.exception("Chronologie prise en compte alerte %s", alert_id)
+    if is_sos and ad.get("device_id"):
+        try:
+            db["field_messages"].insert_one({
+                "device_id": ObjectId(ad["device_id"]),
+                "device_name": ad.get("device_name"),
+                "event": doc.get("event"),
+                "year": doc.get("year"),
+                "type": "alert",
+                "title": "SOS pris en charge",
+                "body": "%s (PC org) a pris en charge votre SOS a %s." % (name, heure),
+                "priority": "high",
+                "from": user.get("email", ""),
+                "createdAt": now,
+                "expiresAt": now + timedelta(days=7),
+                "ack_at": None,
+            })
+            from field import send_push_to_device
+            send_push_to_device(db, ObjectId(ad["device_id"]), "SOS pris en charge",
+                                "%s (PC org) a pris en charge votre SOS." % name,
+                                url="/field", tag="field-sos-taken-" + str(alert_id))
+        except Exception:
+            logger.exception("Notification tablette prise en charge SOS %s", alert_id)
+    return jsonify({"ok": True, "taken_by_name": name, "taken_at": now.isoformat()})
 
 
 # ---------------------------------------------------------------------------
@@ -4661,25 +4911,90 @@ def run_merge_manual():
 # API Main courante (pcorg) — interventions PCO uniquement
 ################################################################################
 
-_COMMENT_RE = re.compile(
-    r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})\s*,\s*(.+?)\s*\n(.*?)(?=\d{2}/\d{2}/\d{4}|\Z)',
-    re.DOTALL,
-)
+import pcorg_history as PH  # noqa: E402  parsing, fusion SQL/Cockpit, chronologie
+from pymongo.errors import DuplicateKeyError  # noqa: E402
+
 
 def _parse_comment_history(comment):
-    if not comment:
-        return []
-    entries = []
-    for m in _COMMENT_RE.finditer(comment):
-        ts_raw, operator, text = m.group(1), m.group(2).strip(), m.group(3).strip()
-        try:
-            dt = datetime.strptime(ts_raw, "%d/%m/%Y %H:%M:%S")
-            dt = dt.replace(tzinfo=ZoneInfo("Europe/Paris"))
-            ts_iso = dt.isoformat()
-        except ValueError:
-            ts_iso = ts_raw
-        entries.append({"ts": ts_iso, "operator": operator, "text": text})
-    return entries
+    return PH.parse_comment(comment, origin="sql")
+
+
+def _pcorg_operator(user):
+    return f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
+
+
+def _pcorg_cat_query(payload):
+    """Filtre Mongo sur la categorie selon les droits du groupe.
+
+    Les categories autorisees n'etaient filtrees que dans le widget cote
+    navigateur : le panneau elargi, la recherche, le detail et toutes les
+    ecritures les ignoraient.
+    """
+    allowed = get_user_allowed_categories(payload)
+    if allowed is None:
+        return {"$regex": "^PCO"}
+    return {"$in": [c for c in allowed if c.startswith("PCO.")]}
+
+
+def _pcorg_cat_allowed(payload, category):
+    allowed = get_user_allowed_categories(payload)
+    return allowed is None or category in allowed
+
+
+def _pcorg_gps(lat, lon):
+    """Point GeoJSON valide, None si absent, ValueError si invalide."""
+    if lat is None or lon is None or lat == "" or lon == "":
+        return None
+    lat, lon = float(lat), float(lon)
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180) or lat != lat or lon != lon:
+        raise ValueError("coordonnees hors bornes")
+    return {"type": "Point", "coordinates": [lon, lat]}
+
+
+# Cles de content_category qu'un client Cockpit ne peut pas poser : elles
+# ouvrent des droits cote tablette (cloture depuis le terrain).
+_PCORG_CC_RESERVED = {"field_created", "field_sos", "photo_message_id"}
+PCORG_TEXT_MAX = 5000
+
+
+def _pcorg_clean_cc(cc):
+    if not isinstance(cc, dict):
+        return {}
+    out = {}
+    for k, v in cc.items():
+        k = str(k)
+        if not k or "." in k or k.startswith("$") or k in _PCORG_CC_RESERVED:
+            continue
+        if isinstance(v, str):
+            v = v.strip()[:PCORG_TEXT_MAX]
+        elif not isinstance(v, (bool, int, float, type(None))):
+            continue
+        out[k] = v
+    return out
+
+
+def _pcorg_is_closed(doc):
+    return (doc or {}).get("status_code") == 10
+
+
+_pcorg_indexes_ready = False
+
+
+def _pcorg_ensure_indexes():
+    """Index de la collection pcorg (crees jusque-la par la seule synchro SQL :
+    une base sans synchro, en dev, n'en avait aucun)."""
+    global _pcorg_indexes_ready
+    if _pcorg_indexes_ready:
+        return
+    try:
+        col = db["pcorg"]
+        col.create_index([("event", 1), ("year", 1), ("ts", 1)])
+        col.create_index([("event", 1), ("year", 1), ("category", 1)])
+        col.create_index([("event", 1), ("year", 1), ("status_code", 1), ("close_ts", -1)])
+        col.create_index([("event", 1), ("year", 1), ("sql_id", 1)])
+        _pcorg_indexes_ready = True
+    except Exception as e:
+        logger.warning("Index pcorg : %s", e)
 
 
 VALID_URGENCY_LEVELS = {"EU", "UA", "UR", "IMP"}
@@ -4710,10 +5025,28 @@ PCO_PROJECTION = {
     "_id": 1, "ts": 1, "close_ts": 1, "created_at": 1, "category": 1, "text": 1,
     "area": 1, "operator": 1, "severity": 1, "is_incident": 1,
     "gps": 1, "status_code": 1, "niveau_urgence": 1, "bounce_rev": 1,
+    "operator_close": 1, "server": 1,
     "content_category.sous_classification": 1,
     "content_category.patrouille": 1,
     "content_category.source_type": 1,
+    "dispatch.state": 1, "dispatch.current": 1, "dispatch.queue_reason": 1,
 }
+
+
+def _pcorg_dispatch_view(doc):
+    """Etat de dispatch lisible par le front (dispatch_auto) : proposition en
+    cours avec son echeance, mise en file et motif. None si jamais dispatchee."""
+    d = doc.get("dispatch") or {}
+    if not d.get("state"):
+        return None
+    cur = d.get("current") or {}
+    return {
+        "state": d.get("state"),
+        "current_device": cur.get("device_name"),
+        "expires_at": _dt_to_iso_utc(cur.get("expires_at")),
+        "queue_reason": d.get("queue_reason"),
+    }
+
 
 def _clean_operator(name):
     if not name:
@@ -4736,6 +5069,15 @@ def _dt_to_iso_utc(val):
     return val
 
 
+def _pcorg_close_iso(doc):
+    """Date de cloture, None si la fiche n'est pas close. Prysm pose une date
+    sentinelle (01/01/9000) sur les fiches ouvertes, affichee "01/01"."""
+    ct = doc.get("close_ts")
+    if doc.get("status_code") != 10 or (isinstance(ct, datetime) and ct.year >= 9000):
+        return None
+    return _dt_to_iso_utc(ct)
+
+
 def _pcorg_serialise(doc):
     """Aplatit un document pcorg pour le JSON frontend."""
     gps = doc.get("gps")
@@ -4745,13 +5087,14 @@ def _pcorg_serialise(doc):
     return {
         "id": str(doc["_id"]),
         "ts": _dt_to_iso_utc(doc.get("ts")),
-        "close_ts": _dt_to_iso_utc(doc.get("close_ts")),
+        "close_ts": _pcorg_close_iso(doc),
         "created_at": _dt_to_iso_utc(doc.get("created_at")),
         "category": doc.get("category"),
         "text": doc.get("text") or "",
         "area_id": area.get("id"),
         "area_desc": area.get("desc") or "",
         "operator": _clean_operator(doc.get("operator")),
+        "operator_close": _clean_operator(doc.get("operator_close")),
         "severity": doc.get("severity", 0),
         "is_incident": doc.get("is_incident", False),
         "status_code": doc.get("status_code", 0),
@@ -4763,6 +5106,7 @@ def _pcorg_serialise(doc):
         "server": doc.get("server"),
         "niveau_urgence": doc.get("niveau_urgence"),
         "bounce_rev": doc.get("bounce_rev", 0),
+        "dispatch": _pcorg_dispatch_view(doc),
     }
 
 
@@ -4781,7 +5125,8 @@ def pcorg_live():
     except ValueError:
         return jsonify({"error": "year invalide"}), 400
 
-    base = {"event": event, "year": year, "category": {"$regex": "^PCO"}}
+    _pcorg_ensure_indexes()
+    base = {"event": event, "year": year, "category": _pcorg_cat_query(request.user_payload)}
     col = db["pcorg"]
 
     open_docs = list(col.find(
@@ -4821,7 +5166,8 @@ def pcorg_stats():
         return jsonify({"error": "year invalide"}), 400
 
     pipeline = [
-        {"$match": {"event": event, "year": year, "category": {"$regex": "^PCO"}}},
+        {"$match": {"event": event, "year": year,
+                    "category": _pcorg_cat_query(request.user_payload)}},
         {"$group": {
             "_id": {
                 "cat": "$category",
@@ -4879,18 +5225,34 @@ def pcorg_closed_page():
 
     base = {
         "event": event, "year": year,
-        "category": {"$regex": "^PCO"}, "status_code": 10,
+        "category": _pcorg_cat_query(request.user_payload), "status_code": 10,
     }
     col = db["pcorg"]
-    cursor = col.find(base, PCO_PROJECTION).sort("close_ts", -1).skip(offset).limit(limit)
-    items = [_pcorg_serialise(d) for d in cursor]
     total = col.count_documents(base)
+
+    # Pagination par curseur (close_ts, _id) : l'offset glissait quand une
+    # fiche etait cloturee entre deux pages (doublons ou trous).
+    before_ts = PH.to_aware(request.args.get("before_ts"))
+    before_id = request.args.get("before_id") or ""
+    query = dict(base)
+    if before_ts is not None:
+        bt = before_ts.astimezone(timezone.utc).replace(tzinfo=None)
+        query["$or"] = [
+            {"close_ts": {"$lt": bt}},
+            {"close_ts": bt, "_id": {"$lt": before_id}},
+        ]
+        cursor = col.find(query, PCO_PROJECTION).sort([("close_ts", -1), ("_id", -1)]).limit(limit + 1)
+    else:
+        cursor = col.find(query, PCO_PROJECTION).sort([("close_ts", -1), ("_id", -1)]).skip(offset).limit(limit + 1)
+    docs = list(cursor)
+    has_more = len(docs) > limit
+    items = [_pcorg_serialise(d) for d in docs[:limit]]
     return jsonify({
         "items": items,
         "offset": offset,
         "limit": limit,
         "total": total,
-        "has_more": (offset + len(items)) < total,
+        "has_more": has_more,
     })
 
 
@@ -4916,21 +5278,22 @@ def pcorg_search():
         limit = 200
     limit = max(1, min(limit, 500))
 
-    base = {"event": event, "year": year, "category": {"$regex": "^PCO"}}
-    if status == "open":
-        base["status_code"] = {"$nin": [10]}
-    elif status == "closed":
-        base["status_code"] = 10
+    base = {"event": event, "year": year, "category": _pcorg_cat_query(request.user_payload)}
 
     rx = {"$regex": re.escape(q), "$options": "i"}
-    base["$or"] = [
+    or_clauses = [
         {"text": rx},
         {"category": rx},
         {"area.desc": rx},
         {"operator": rx},
         {"content_category.sous_classification": rx},
         {"content_category.patrouille": rx},
+        {"content_category.carroye": rx},
+        {"comment": rx},
     ]
+    if q.isdigit():
+        or_clauses.append({"sql_id": int(q)})
+    base["$or"] = or_clauses
 
     col = db["pcorg"]
     open_items = []
@@ -4962,14 +5325,19 @@ def pcorg_detail(doc_id):
     doc = db["pcorg"].find_one({"_id": doc_id})
     if not doc:
         return jsonify({"error": "introuvable"}), 404
+    if not _pcorg_cat_allowed(request.user_payload, doc.get("category")):
+        return jsonify({"error": "categorie non autorisee"}), 403
     gps = doc.get("gps")
     coords = gps.get("coordinates") if gps and isinstance(gps, dict) else None
     cc = doc.get("content_category") or {}
     area = doc.get("area") or {}
-    # comment_history : utiliser le champ stocke, sinon parser a la volee
+    # comment_history : utiliser le champ stocke, sinon parser a la volee.
+    # Decoree pour l'affichage : statut, modifications Prysm et commentaire
+    # separes, entrees vides signalees, cloture synthetique si absente.
     comment_history = doc.get("comment_history")
     if comment_history is None:
         comment_history = _parse_comment_history(doc.get("comment"))
+    comment_history = PH.decorate_history(comment_history, doc)
 
     # Resoudre le groupe cockpit de l'operateur
     operator_group = ""
@@ -5001,7 +5369,7 @@ def pcorg_detail(doc_id):
         "id": str(doc["_id"]),
         "sql_id": doc.get("sql_id"),
         "ts": _dt_to_iso_utc(doc.get("ts")),
-        "close_ts": _dt_to_iso_utc(doc.get("close_ts")),
+        "close_ts": _pcorg_close_iso(doc),
         "created_at": _dt_to_iso_utc(doc.get("created_at")),
         "category": doc.get("category"),
         "text": doc.get("text") or "",
@@ -5025,6 +5393,10 @@ def pcorg_detail(doc_id):
         "server": doc.get("server"),
         "niveau_urgence": doc.get("niveau_urgence"),
         "bounce_rev": doc.get("bounce_rev", 0),
+        "cockpit_owned": doc.get("cockpit_owned") or [],
+        "dispatch": _pcorg_dispatch_view(doc),
+        "intervention": {k: (_dt_to_iso_utc(v) if isinstance(v, datetime) else v)
+                         for k, v in (doc.get("intervention") or {}).items()},
     })
 
 
@@ -5038,6 +5410,7 @@ def _engage_field_device(patrouille_name, fiche_id, event, year, category="", te
         "name": patrouille_name,
         "event": str(event),
         "year": str(year),
+        "revoked": {"$ne": True},
     })
     if not device:
         return
@@ -5172,6 +5545,10 @@ def pcorg_create():
         return jsonify({"error": "event, year, category et text requis"}), 400
     if not category.startswith("PCO."):
         return jsonify({"error": "categorie invalide (doit commencer par PCO.)"}), 400
+    if not _pcorg_cat_allowed(request.user_payload, category):
+        return jsonify({"error": "categorie non autorisee pour votre groupe"}), 403
+    if len(text) > PCORG_TEXT_MAX:
+        return jsonify({"error": f"description trop longue (max {PCORG_TEXT_MAX} caracteres)"}), 400
     try:
         year = int(year)
     except ValueError:
@@ -5179,7 +5556,7 @@ def pcorg_create():
 
     now = datetime.now(ZoneInfo("Europe/Paris"))
     user = request.user_payload
-    operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
+    operator_name = _pcorg_operator(user)
 
     # Heure d'intervention (= ts) : par defaut 'maintenant', sinon antidatage/programmation
     intervention_ts, ts_err = _parse_intervention_ts(data.get("intervention_ts"))
@@ -5189,37 +5566,38 @@ def pcorg_create():
     ts_str = ts_dt.isoformat()
     created_at_str = now.isoformat()
 
-    lat = data.get("lat")
-    lon = data.get("lon")
-    gps = None
-    if lat is not None and lon is not None:
-        try:
-            gps = {"type": "Point", "coordinates": [float(lon), float(lat)]}
-        except (ValueError, TypeError):
-            pass
+    try:
+        gps = _pcorg_gps(data.get("lat"), data.get("lon"))
+    except (ValueError, TypeError):
+        return jsonify({"error": "position invalide"}), 400
 
     niveau_urgence = data.get("niveau_urgence")
     if niveau_urgence and niveau_urgence not in VALID_URGENCY_LEVELS:
         return jsonify({"error": "niveau_urgence invalide"}), 400
 
-    area_desc = data.get("area_desc", "")
-    content_cat = data.get("content_category") or {}
-    initial_comment = (data.get("comment") or "").strip()
+    area_desc = (data.get("area_desc") or "").strip()
+    content_cat = _pcorg_clean_cc(data.get("content_category"))
+    initial_comment = (data.get("comment") or "").strip()[:PCORG_TEXT_MAX]
 
-    # UUID base sur created_at (immuable) -> 2 fiches antidatees identiques restent uniques
-    doc_id = _pcorg_mk_uuid(event, year, created_at_str, category, text, "", str(user.get("email", "")))
+    # Jeton client (un par ouverture de l'assistant) : un double clic sur
+    # "Creer" rejoue la meme requete et retombe sur le meme _id au lieu de
+    # creer une seconde fiche. Sans jeton : UUID base sur created_at
+    # (immuable) -> 2 fiches antidatees identiques restent uniques.
+    client_token = str(data.get("client_token") or "").strip()[:64]
+    if client_token:
+        doc_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"pcorg-client|{user.get('email', '')}|{client_token}"))
+        if db["pcorg"].find_one({"_id": doc_id}, {"_id": 1}):
+            return jsonify({"ok": True, "id": doc_id, "duplicate": True})
+    else:
+        doc_id = _pcorg_mk_uuid(event, year, created_at_str, category, text, "", str(user.get("email", "")))
 
     # Build initial comment / comment_history (horodate sur ts d'intervention pour coherence chrono)
     comment_raw = ""
     comment_history = []
     if initial_comment:
-        ts_fmt = ts_dt.strftime("%d/%m/%Y %H:%M:%S")
-        comment_raw = f"{ts_fmt} , {operator_name}\n {initial_comment}\n"
-        comment_history.append({
-            "ts": ts_str,
-            "operator": operator_name,
-            "text": initial_comment,
-        })
+        entry = PH.make_entry(operator_name, initial_comment, ts=ts_dt)
+        comment_history.append(entry)
+        comment_raw = PH.render_comment(comment_history)
 
     doc = {
         "_id": doc_id,
@@ -5257,12 +5635,18 @@ def pcorg_create():
         "bounce_rev": 1,
     }
 
-    db["pcorg"].insert_one(doc)
+    try:
+        db["pcorg"].insert_one(doc)
+    except DuplicateKeyError:
+        return jsonify({"ok": True, "id": doc_id, "duplicate": True})
 
-    # Engager la tablette terrain si patrouille correspond
+    # Engager la tablette terrain si patrouille correspond, sinon proposition
+    # automatique si la categorie le demande (dispatch_auto)
     patr = content_cat.get("patrouille", "")
     if patr:
         _engage_field_device(patr, doc_id, event, year, category=category, text=text)
+    else:
+        DA.maybe_auto_start(db, doc_id)
 
     return jsonify({"ok": True, "id": doc_id})
 
@@ -5280,6 +5664,8 @@ def pcorg_quick_create():
         return jsonify({"error": "event, year, category et niveau_urgence requis"}), 400
     if not category.startswith("PCO."):
         return jsonify({"error": "categorie invalide"}), 400
+    if not _pcorg_cat_allowed(request.user_payload, category):
+        return jsonify({"error": "categorie non autorisee pour votre groupe"}), 403
     if niveau_urgence not in VALID_URGENCY_LEVELS:
         return jsonify({"error": "niveau_urgence invalide"}), 400
     try:
@@ -5298,18 +5684,14 @@ def pcorg_quick_create():
     now = datetime.now(ZoneInfo("Europe/Paris"))
     ts_str = now.isoformat()
     user = request.user_payload
-    operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
+    operator_name = _pcorg_operator(user)
 
-    lat = data.get("lat")
-    lon = data.get("lon")
     carroye = (data.get("carroye") or "").strip()
     area_desc = (data.get("area_desc") or "").strip()
-    gps = None
-    if lat is not None and lon is not None:
-        try:
-            gps = {"type": "Point", "coordinates": [float(lon), float(lat)]}
-        except (ValueError, TypeError):
-            pass
+    try:
+        gps = _pcorg_gps(data.get("lat"), data.get("lon"))
+    except (ValueError, TypeError):
+        return jsonify({"error": "position invalide"}), 400
 
     # Recuperer le(s) nom(s) de groupe de l'utilisateur
     group_name = ""
@@ -5330,13 +5712,17 @@ def pcorg_quick_create():
             group_name = "Admin"
 
     # Generer la description automatique
-    utype = _urgency_type(category)
-    label = URGENCY_LABELS.get(utype, URGENCY_LABELS["MIXTE"]).get(niveau_urgence, niveau_urgence)
     text = f"Cette fiche a ete generee en procedure d'urgence par {operator_name}"
     if group_name:
         text += f" du {group_name}"
 
-    doc_id = _pcorg_mk_uuid(event, year, ts_str, category, text, "", str(user.get("email", "")))
+    client_token = str(data.get("client_token") or "").strip()[:64]
+    if client_token:
+        doc_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"pcorg-client|{user.get('email', '')}|{client_token}"))
+        if db["pcorg"].find_one({"_id": doc_id}, {"_id": 1}):
+            return jsonify({"ok": True, "id": doc_id, "duplicate": True})
+    else:
+        doc_id = _pcorg_mk_uuid(event, year, ts_str, category, text, "", str(user.get("email", "")))
 
     patrouille = (data.get("patrouille") or "").strip()
     content_category = {}
@@ -5381,155 +5767,248 @@ def pcorg_quick_create():
         "bounce_rev": 1,
     }
 
-    db["pcorg"].insert_one(doc)
+    try:
+        db["pcorg"].insert_one(doc)
+    except DuplicateKeyError:
+        return jsonify({"ok": True, "id": doc_id, "duplicate": True})
 
-    # Engager la tablette terrain si patrouille correspond
+    # Engager la tablette terrain si patrouille correspond, sinon proposition
+    # automatique si la categorie le demande (dispatch_auto)
     if patrouille:
         _engage_field_device(patrouille, doc_id, event, year, category=category, text=text)
+    else:
+        DA.maybe_auto_start(db, doc_id)
 
     return jsonify({"ok": True, "id": doc_id})
+
+
+_PCORG_FIELD_LABELS = {
+    "text": "Description", "category": "Categorie", "area_desc": "Zone",
+    "niveau_urgence": "Urgence", "gps": "Position", "ts": "Heure d'intervention",
+}
+_PCORG_CC_LABELS = {
+    "sous_classification": "Sous-classification", "patrouille": "Vehicule engage",
+    "appelant": "Appelant", "carroye": "Carroye", "intervenant1": "Intervenant 1",
+    "intervenant2": "Intervenant 2", "service_contacte": "Service contacte",
+    "moyens_engages_niveau_1": "Moyens niv. 1", "moyens_engages_niveau_2": "Moyens niv. 2",
+    "source_type": "Source", "canal": "Canal", "canal_detail": "Detail canal",
+    "emetteur_interne": "Emetteur", "donneur_ordre": "Donneur d'ordre",
+    "telephone": "Telephone", "radio": "Radio", "texte": "Texte", "alerte": "Alerte",
+    "typedemande": "Type de demande", "decision": "Decision", "lieu": "Lieu",
+    "immat": "Immatriculation", "detailsvl": "Vehicule", "source_origine": "A la suite de",
+    "radio_canal": "Canal radio", "presentiel": "Presentiel", "mail": "Mail",
+}
+
+
+def _pcorg_fmt_val(v):
+    if v is None or v == "":
+        return ""
+    if isinstance(v, bool):
+        return "oui" if v else "non"
+    if isinstance(v, dict) and v.get("type") == "Point":
+        c = v.get("coordinates") or [None, None]
+        try:
+            return f"{float(c[1]):.5f}, {float(c[0]):.5f}"
+        except (TypeError, ValueError, IndexError):
+            return ""
+    return str(v)[:300]
+
+
+def _pcorg_urgency_label(category, niveau):
+    if not niveau:
+        return "Aucun"
+    labels = URGENCY_LABELS.get(_urgency_type(category), URGENCY_LABELS["MIXTE"])
+    return labels.get(niveau, niveau)
+
+
+def _pcorg_load_for_write(doc_id, need_open=True, projection=None):
+    """Charge une fiche pour ecriture et verifie les droits.
+    Retourne (doc, None) ou (None, reponse_erreur)."""
+    doc = db["pcorg"].find_one({"_id": doc_id}, projection)
+    if not doc:
+        return None, (jsonify({"error": "introuvable"}), 404)
+    if not _pcorg_cat_allowed(request.user_payload, doc.get("category")):
+        return None, (jsonify({"error": "categorie non autorisee pour votre groupe"}), 403)
+    if need_open and _pcorg_is_closed(doc):
+        return None, (jsonify({"error": "intervention close, non editable"}), 403)
+    return doc, None
+
+
+_PCORG_OPEN_FILTER = {"status_code": {"$ne": 10}}
 
 
 @app.route('/api/pcorg/update/<doc_id>', methods=['PUT'])
 @role_required("user")
 def pcorg_update(doc_id):
-    """Met a jour les champs d'une intervention (SQL ou COCKPIT)."""
-    doc = db["pcorg"].find_one(
-        {"_id": doc_id},
-        {"status_code": 1, "event": 1, "year": 1, "category": 1, "text": 1, "ts": 1},
-    )
-    if not doc:
-        return jsonify({"error": "introuvable"}), 404
-    if doc.get("status_code") == 10:
-        return jsonify({"error": "intervention close, non editable"}), 403
+    """Met a jour les champs d'une intervention (SQL ou COCKPIT).
 
-    data = request.get_json(force=True)
+    Chaque modification est tracee dans la chronologie (entree systeme avec
+    la liste des champs modifies, ancienne -> nouvelle valeur) et, pour une
+    fiche SQL, marquee comme possedee par Cockpit : la synchro ne l'ecrasera
+    plus. Seuls les champs reellement modifies sont ecrits.
+    """
+    doc, err = _pcorg_load_for_write(doc_id)
+    if err:
+        return err
+    data = request.get_json(force=True) or {}
+    user = request.user_payload
+    operator_name = _pcorg_operator(user)
 
-    sets = {}
-    # Champs de base
+    sets, owned, changes = {}, set(), []
+
+    def change(key, old, new, label=None):
+        changes.append({
+            "field": label or _PCORG_FIELD_LABELS.get(key, key),
+            "old": _pcorg_fmt_val(old), "new": _pcorg_fmt_val(new),
+        })
+
     if "text" in data:
         txt = (data["text"] or "").strip()
-        if txt:
+        if txt and txt != (doc.get("text") or ""):
+            if len(txt) > PCORG_TEXT_MAX:
+                return jsonify({"error": f"description trop longue (max {PCORG_TEXT_MAX})"}), 400
             sets["text"] = txt
             sets["text_full"] = txt
-    if "category" in data and data["category"]:
-        sets["category"] = data["category"]
-        sets["source"] = data["category"]
+            owned.update(["text", "text_full"])
+            change("text", doc.get("text"), txt)
+
+    new_cat = doc.get("category")
+    if data.get("category") and data["category"] != doc.get("category"):
+        new_cat = data["category"]
+        if not str(new_cat).startswith("PCO.") or new_cat not in ALL_PCO_CATEGORIES:
+            return jsonify({"error": "categorie invalide"}), 400
+        if not _pcorg_cat_allowed(user, new_cat):
+            return jsonify({"error": "categorie non autorisee pour votre groupe"}), 403
+        sets["category"] = new_cat
+        sets["source"] = new_cat
+        owned.update(["category", "source"])
+        change("category", (doc.get("category") or "").replace("PCO.", ""), new_cat.replace("PCO.", ""))
+
     if "area_desc" in data:
-        sets["area.desc"] = data["area_desc"]
+        new_area = (data.get("area_desc") or "").strip()
+        old_area = ((doc.get("area") or {}).get("desc")) or ""
+        if new_area != old_area:
+            sets["area.desc"] = new_area
+            owned.add("area.desc")
+            change("area_desc", old_area, new_area)
+
     if "niveau_urgence" in data:
-        nu = data["niveau_urgence"]
+        nu = data.get("niveau_urgence") or None
         if nu and nu not in VALID_URGENCY_LEVELS:
             return jsonify({"error": "niveau_urgence invalide"}), 400
-        sets["niveau_urgence"] = nu or None
+        if nu != (doc.get("niveau_urgence") or None):
+            sets["niveau_urgence"] = nu
+            owned.add("niveau_urgence")
+            change("niveau_urgence", _pcorg_urgency_label(new_cat, doc.get("niveau_urgence")),
+                   _pcorg_urgency_label(new_cat, nu))
 
-    # GPS
-    lat = data.get("lat")
-    lon = data.get("lon")
-    if lat is not None and lon is not None:
+    if "lat" in data and "lon" in data:
         try:
-            sets["gps"] = {"type": "Point", "coordinates": [float(lon), float(lat)]}
+            gps = _pcorg_gps(data.get("lat"), data.get("lon"))
         except (ValueError, TypeError):
-            pass
+            return jsonify({"error": "position invalide"}), 400
+        if gps and gps != doc.get("gps"):
+            sets["gps"] = gps
+            owned.add("gps")
+            change("gps", doc.get("gps"), gps)
 
-    # content_category : merge
-    cc_update = data.get("content_category")
-    if cc_update and isinstance(cc_update, dict):
-        for k, v in cc_update.items():
-            sets[f"content_category.{k}"] = v
+    old_cc = doc.get("content_category") or {}
+    cc_update = _pcorg_clean_cc(data.get("content_category"))
+    for k, v in cc_update.items():
+        old_v = old_cc.get(k)
+        if (old_v in (None, "", False) and v in (None, "", False)) or old_v == v:
+            continue
+        sets[f"content_category.{k}"] = v
+        owned.add(f"content_category.{k}")
+        # Drapeaux de compatibilite (derives du canal) : ecrits, pas traces
+        if k not in ("telephone", "radio", "presentiel", "mail", "radio_canal"):
+            change(k, old_v, v, label=_PCORG_CC_LABELS.get(k, k))
+        elif k == "radio_canal" and v:
+            change(k, old_v, v, label=_PCORG_CC_LABELS.get(k, k))
+    # Champs propres a l'ancienne categorie, a retirer lors d'un changement
+    removed = []
+    for k in data.get("content_category_remove") or []:
+        k = str(k)
+        if k in old_cc and "." not in k and not k.startswith("$") and k not in _PCORG_CC_RESERVED \
+                and k not in cc_update:
+            removed.append(k)
+            owned.add(f"content_category.{k}")
+            if old_cc.get(k) not in (None, "", False):
+                change(k, old_cc.get(k), "", label=_PCORG_CC_LABELS.get(k, k))
 
     # Heure d'intervention (ts) : antidatage / reprogrammation a posteriori
-    ts_history_entry = None
     if "intervention_ts" in data:
         new_ts, ts_err = _parse_intervention_ts(data.get("intervention_ts"))
         if ts_err:
             return jsonify({"error": ts_err}), 400
         if new_ts is None:
             return jsonify({"error": "intervention_ts requis"}), 400
-        old_ts = doc.get("ts")
-        if isinstance(old_ts, datetime) and old_ts.tzinfo is None:
-            old_ts = old_ts.replace(tzinfo=timezone.utc)
-        # Compare au format ISO pour eviter les micro-ecarts
-        if not isinstance(old_ts, datetime) or abs((new_ts - old_ts).total_seconds()) >= 60:
+        old_ts = PH.to_aware(doc.get("ts"))
+        if old_ts is None or abs((new_ts - old_ts).total_seconds()) >= 60:
             sets["ts"] = new_ts
             sets["timestamp_iso"] = new_ts.isoformat()
-            user = request.user_payload
-            operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
-            now = datetime.now(ZoneInfo("Europe/Paris"))
-            old_fmt = ""
-            if isinstance(old_ts, datetime):
-                old_local = old_ts.astimezone(ZoneInfo("Europe/Paris"))
-                old_fmt = old_local.strftime("%d/%m %Hh%M")
-            new_fmt = new_ts.strftime("%d/%m %Hh%M")
-            arrow = "->"
-            ts_history_entry = {
-                "ts": now.isoformat(),
-                "operator": operator_name,
-                "text": f"Heure d'intervention modifiee : {old_fmt} {arrow} {new_fmt}" if old_fmt
-                        else f"Heure d'intervention definie : {new_fmt}",
-                "system": True,
-            }
+            owned.update(["ts", "timestamp_iso"])
+            old_fmt = old_ts.astimezone(ZoneInfo("Europe/Paris")).strftime("%d/%m %Hh%M") if old_ts else ""
+            change("ts", old_fmt, new_ts.strftime("%d/%m %Hh%M"))
 
-    if not sets:
-        return jsonify({"error": "rien a mettre a jour"}), 400
+    comment = (data.get("comment") or "").strip()[:PCORG_TEXT_MAX]
+    if not sets and not removed and not comment:
+        return jsonify({"ok": True, "unchanged": True})
 
-    update_ops = {"$set": sets}
-    if ts_history_entry:
-        update_ops["$push"] = {"comment_history": ts_history_entry}
+    entries = []
+    if changes:
+        labels = ", ".join(dict.fromkeys(c["field"] for c in changes))
+        entries.append(PH.make_entry(operator_name, f"Fiche modifiee : {labels}",
+                                     system=True, changes=changes))
+    if comment:
+        entries.append(PH.make_entry(operator_name, comment))
 
-    db["pcorg"].update_one({"_id": doc_id}, update_ops)
+    for k in removed:
+        # Vide plutot que supprime : la valeur reste possedee par Cockpit,
+        # la synchro ne la fera pas reapparaitre
+        sets[f"content_category.{k}"] = None
+    n = PH.append_entry(db["pcorg"], doc_id, entries, set_fields=sets, owned=owned,
+                        inc_bounce=True, extra_filter=_PCORG_OPEN_FILTER)
+    if not n:
+        return jsonify({"error": "fiche close ou supprimee entre-temps"}), 409
 
-    # Si patrouille a ete modifie, engager la tablette terrain
-    new_patr = (cc_update or {}).get("patrouille", "")
-    if new_patr:
-        cat = sets.get("category") or doc.get("category", "")
-        txt = sets.get("text") or doc.get("text", "")
-        _engage_field_device(new_patr, doc_id, doc.get("event", ""), doc.get("year", ""),
-                             category=cat, text=txt)
+    # Vehicule : desengager l'ancien, engager le nouveau
+    old_p = old_cc.get("patrouille") or ""
+    new_p = cc_update.get("patrouille", old_p) or ""
+    if new_p != old_p:
+        if old_p:
+            _disengage_field_device(doc, doc_id)
+        if new_p:
+            _engage_field_device(new_p, doc_id, doc.get("event", ""), doc.get("year", ""),
+                                 category=new_cat, text=sets.get("text") or doc.get("text", ""))
+            # Engagement direct : annule une proposition automatique en cours
+            DA.on_manual_assign(db, doc_id, by=operator_name)
+    if not new_p:
+        # Urgence ou categorie changee sur une fiche sans unite
+        DA.maybe_auto_start(db, doc_id, trigger="modification")
 
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "changes": changes})
 
 
 @app.route('/api/pcorg/comment/<doc_id>', methods=['POST'])
 @role_required("user")
 def pcorg_add_comment(doc_id):
-    data = request.get_json(force=True)
+    data = request.get_json(force=True) or {}
     text = (data.get("text") or "").strip()
     if not text:
         return jsonify({"error": "text requis"}), 400
-
-    user = request.user_payload
-    operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
-    now = datetime.now(ZoneInfo("Europe/Paris"))
-    ts_fmt = now.strftime("%d/%m/%Y %H:%M:%S")
+    if len(text) > PCORG_TEXT_MAX:
+        return jsonify({"error": f"commentaire trop long (max {PCORG_TEXT_MAX})"}), 400
+    _doc, err = _pcorg_load_for_write(doc_id, projection={"status_code": 1, "category": 1})
+    if err:
+        return err
 
     photo_url = (data.get("photo") or "").strip() or None
-
-    comment_line = f"{ts_fmt} , {operator_name}\n {text}\n"
-    history_entry = {
-        "ts": now.isoformat(),
-        "operator": operator_name,
-        "text": text,
-    }
-    if photo_url:
-        history_entry["photo"] = photo_url
-
-    doc = db["pcorg"].find_one({"_id": doc_id}, {"comment": 1})
-    if not doc:
-        return jsonify({"error": "introuvable"}), 404
-
-    old_comment = doc.get("comment") or ""
-    new_comment = old_comment + comment_line if old_comment else comment_line
-
-    db["pcorg"].update_one(
-        {"_id": doc_id},
-        {
-            "$set": {"comment": new_comment},
-            "$push": {"comment_history": history_entry},
-            "$inc": {"bounce_rev": 1},
-        }
-    )
-    return jsonify({"ok": True, "entry": history_entry})
+    entry = PH.make_entry(_pcorg_operator(request.user_payload), text, photo=photo_url)
+    n = PH.append_entry(db["pcorg"], doc_id, entry, inc_bounce=True, extra_filter=_PCORG_OPEN_FILTER)
+    if not n:
+        return jsonify({"error": "fiche close ou supprimee entre-temps"}), 409
+    return jsonify({"ok": True, "entry": entry})
 
 
 @app.route('/api/pcorg/camera-capture', methods=['POST'])
@@ -5544,7 +6023,6 @@ def pcorg_camera_capture():
         return jsonify({"error": "cam_id requis"}), 400
 
     # Charger la camera depuis MongoDB
-    from bson.objectid import ObjectId
     from cameras import HIK_PASSWORD
     try:
         oid = ObjectId(cam_id)
@@ -5553,6 +6031,13 @@ def pcorg_camera_capture():
     cam_doc = db["cockpit_cameras"].find_one({"_id": oid})
     if not cam_doc:
         return jsonify({"error": "Camera introuvable"}), 404
+
+    fiche_doc = None
+    if fiche_id:
+        fiche_doc, err = _pcorg_load_for_write(
+            fiche_id, projection={"event": 1, "year": 1, "status_code": 1, "category": 1})
+        if err:
+            return err
 
     # Instancier et capturer
     from hik.hik_control import HikCamera
@@ -5568,26 +6053,21 @@ def pcorg_camera_capture():
         brand=cam_doc.get("brand", "hikvision"),
     )
 
-    import uuid as _uuid
-    photo_id = str(_uuid.uuid4())[:8]
+    photo_id = str(uuid.uuid4())[:8]
     ts = datetime.now(ZoneInfo("Europe/Paris"))
-    ts_fmt = ts.strftime("%d/%m/%Y %H:%M:%S")
     ts_file = ts.strftime("%Y%m%d_%H%M%S")
 
     # Si fiche fournie, on stocke avec event/year dans field_photos
     # Sinon on stocke dans un dossier generique
-    fiche_doc = None
-    if fiche_id:
-        fiche_doc = db["pcorg"].find_one({"_id": fiche_id}, {"event": 1, "year": 1})
-    event_name = (fiche_doc or {}).get("event", "cockpit")
-    year_val = str((fiche_doc or {}).get("year", ts.year))
+    event_name = re.sub(r"[^A-Za-z0-9 _-]", "_", str((fiche_doc or {}).get("event", "cockpit")))
+    year_val = re.sub(r"[^0-9A-Za-z_-]", "_", str((fiche_doc or {}).get("year", ts.year)))
     sub_dir = f"{event_name}/{year_val}"
 
     photos_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "uploads", "field_photos", event_name, year_val)
     os.makedirs(photos_dir, exist_ok=True)
 
-    safe_cam_name = cam_doc["name"].replace(" ", "_")[:20]
+    safe_cam_name = re.sub(r"[^A-Za-z0-9_-]", "_", cam_doc["name"])[:20]
     filename = f"{photo_id}_cam_{safe_cam_name}_{ts_file}.jpg"
     save_path = os.path.join(photos_dir, filename)
 
@@ -5609,27 +6089,10 @@ def pcorg_camera_capture():
     # Si fiche_id fourni, ajouter en commentaire
     result = {"ok": True, "photo": photo_url, "cam_name": cam_doc["name"]}
     if fiche_id and fiche_doc:
-        user = request.user_payload
-        operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
-        comment_text = f"Capture camera {cam_doc['name']}"
-        comment_line = f"{ts_fmt} , {operator_name}\n {comment_text}\n"
-        history_entry = {
-            "ts": ts.isoformat(),
-            "operator": operator_name,
-            "text": comment_text,
-            "photo": photo_url,
-        }
-        old = (db["pcorg"].find_one({"_id": fiche_id}, {"comment": 1}) or {}).get("comment", "")
-        new_comment = (old + comment_line) if old else comment_line
-        db["pcorg"].update_one(
-            {"_id": fiche_id},
-            {
-                "$set": {"comment": new_comment},
-                "$push": {"comment_history": history_entry},
-                "$inc": {"bounce_rev": 1},
-            }
-        )
-        result["entry"] = history_entry
+        entry = PH.make_entry(_pcorg_operator(request.user_payload),
+                              f"Capture camera {cam_doc['name']}", ts=ts, photo=photo_url)
+        PH.append_entry(db["pcorg"], fiche_id, entry, inc_bounce=True)
+        result["entry"] = entry
 
     return jsonify(result)
 
@@ -5637,23 +6100,45 @@ def pcorg_camera_capture():
 @app.route('/api/pcorg/update-gps/<doc_id>', methods=['POST'])
 @role_required("user")
 def pcorg_update_gps(doc_id):
-    data = request.get_json(force=True)
-    lat = data.get("lat")
-    lon = data.get("lon")
-    if lat is None or lon is None:
-        return jsonify({"error": "lat et lon requis"}), 400
+    """Pose ou deplace la position d'une fiche. Le client transmet la zone et
+    le carroyage recalcules au nouveau point (resolus cote carte)."""
+    data = request.get_json(force=True) or {}
     try:
-        lat = float(lat)
-        lon = float(lon)
+        gps = _pcorg_gps(data.get("lat"), data.get("lon"))
     except (ValueError, TypeError):
         return jsonify({"error": "lat/lon invalides"}), 400
+    if gps is None:
+        return jsonify({"error": "lat et lon requis"}), 400
+    doc, err = _pcorg_load_for_write(
+        doc_id, projection={"status_code": 1, "category": 1, "gps": 1, "area": 1,
+                            "content_category.carroye": 1})
+    if err:
+        return err
 
-    result = db["pcorg"].update_one(
-        {"_id": doc_id},
-        {"$set": {"gps": {"type": "Point", "coordinates": [lon, lat]}}}
-    )
-    if result.matched_count == 0:
-        return jsonify({"error": "introuvable"}), 404
+    sets, owned = {"gps": gps}, {"gps"}
+    changes = [{"field": "Position", "old": _pcorg_fmt_val(doc.get("gps")), "new": _pcorg_fmt_val(gps)}]
+    if "area_desc" in data:
+        new_area = (data.get("area_desc") or "").strip()
+        old_area = ((doc.get("area") or {}).get("desc")) or ""
+        if new_area != old_area:
+            sets["area.desc"] = new_area
+            owned.add("area.desc")
+            changes.append({"field": "Zone", "old": old_area, "new": new_area})
+    if "carroye" in data:
+        new_c = (data.get("carroye") or "").strip()
+        old_c = ((doc.get("content_category") or {}).get("carroye")) or ""
+        if new_c != old_c:
+            sets["content_category.carroye"] = new_c
+            owned.add("content_category.carroye")
+            changes.append({"field": "Carroye", "old": old_c, "new": new_c})
+
+    verb = "deplacee" if doc.get("gps") else "definie"
+    entry = PH.make_entry(_pcorg_operator(request.user_payload), f"Position {verb}",
+                          system=True, changes=changes)
+    n = PH.append_entry(db["pcorg"], doc_id, entry, set_fields=sets, owned=owned,
+                        inc_bounce=True, extra_filter=_PCORG_OPEN_FILTER)
+    if not n:
+        return jsonify({"error": "fiche close ou supprimee entre-temps"}), 409
     return jsonify({"ok": True})
 
 
@@ -5661,98 +6146,110 @@ def pcorg_update_gps(doc_id):
 @role_required("user")
 def pcorg_set_urgency(doc_id):
     """Change le niveau d'urgence et consigne l'action dans la chronologie."""
-    data = request.get_json(force=True)
-    niveau = data.get("niveau_urgence")
+    data = request.get_json(force=True) or {}
+    niveau = data.get("niveau_urgence") or None
     if niveau and niveau not in VALID_URGENCY_LEVELS:
         return jsonify({"error": "niveau_urgence invalide"}), 400
 
-    doc = db["pcorg"].find_one({"_id": doc_id}, {"niveau_urgence": 1, "category": 1})
-    if not doc:
-        return jsonify({"error": "introuvable"}), 404
+    doc, err = _pcorg_load_for_write(doc_id, projection={"niveau_urgence": 1, "category": 1, "status_code": 1})
+    if err:
+        return err
 
-    old_niveau = doc.get("niveau_urgence")
+    old_niveau = doc.get("niveau_urgence") or None
     if old_niveau == niveau:
         return jsonify({"ok": True, "unchanged": True})
 
-    user = request.user_payload
-    operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
-    now = datetime.now(ZoneInfo("Europe/Paris"))
-    ts_fmt = now.strftime("%d/%m/%Y %H:%M:%S")
-
     cat = doc.get("category", "")
-    utype = _urgency_type(cat)
-    labels = URGENCY_LABELS.get(utype, URGENCY_LABELS["MIXTE"])
-    old_label = labels.get(old_niveau, old_niveau or "Aucun")
-    new_label = labels.get(niveau, niveau or "Aucun") if niveau else "Aucun"
-    action_text = f"Niveau d'urgence : {old_label} \u2192 {new_label}"
-
-    comment_line = f"{ts_fmt} , {operator_name}\n {action_text}\n"
-    history_entry = {
-        "ts": now.isoformat(),
-        "operator": operator_name,
-        "text": action_text,
-    }
-
-    old_comment = (db["pcorg"].find_one({"_id": doc_id}, {"comment": 1}) or {}).get("comment") or ""
-    new_comment = old_comment + comment_line if old_comment else comment_line
-
-    db["pcorg"].update_one(
-        {"_id": doc_id},
-        {
-            "$set": {"niveau_urgence": niveau, "comment": new_comment},
-            "$push": {"comment_history": history_entry},
-            "$inc": {"bounce_rev": 1},
-        }
-    )
-    return jsonify({"ok": True, "entry": history_entry})
+    action_text = (f"Niveau d'urgence : {_pcorg_urgency_label(cat, old_niveau)} "
+                   f"→ {_pcorg_urgency_label(cat, niveau)}")
+    entry = PH.make_entry(_pcorg_operator(request.user_payload), action_text, system=True)
+    n = PH.append_entry(db["pcorg"], doc_id, entry, set_fields={"niveau_urgence": niveau},
+                        owned={"niveau_urgence"}, inc_bounce=True, extra_filter=_PCORG_OPEN_FILTER)
+    if not n:
+        return jsonify({"error": "fiche close ou supprimee entre-temps"}), 409
+    # Passage en UA/EU d'une fiche technique sans unite : proposition auto
+    DA.maybe_auto_start(db, doc_id, trigger="urgence")
+    return jsonify({"ok": True, "entry": entry})
 
 
 @app.route('/api/pcorg/close/<doc_id>', methods=['POST'])
 @role_required("user")
 def pcorg_close(doc_id):
+    """Cloture une fiche. Motif optionnel, consigne dans la meme entree que le
+    changement de statut (format Prysm : "Statut: En cours -> Termine\\nmotif"),
+    que l'affichage separe en pastille de statut + commentaire lisible."""
     if not _user_can_close_fiche(request.user_payload):
         return jsonify({"error": "Votre groupe n'autorise pas la cloture de fiches"}), 403
-    user = request.user_payload
-    operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
-    now = datetime.now(ZoneInfo("Europe/Paris"))
-    ts_str = now.strftime("%d/%m/%Y %H:%M:%S")
-
-    comment_line = f"{ts_str} , {operator_name} \n Statut: En cours -> Termine\n"
-    history_entry = {
-        "ts": now.isoformat(),
-        "operator": operator_name,
-        "text": "Statut: En cours -> Termine",
-    }
-
-    # Lire le comment existant pour le concatener
-    doc = db["pcorg"].find_one(
-        {"_id": doc_id, "status_code": {"$ne": 10}},
-        {"comment": 1, "content_category": 1, "event": 1, "year": 1}
-    )
-    if not doc:
+    data = request.get_json(silent=True) or {}
+    motif = (data.get("comment") or "").strip()[:PCORG_TEXT_MAX]
+    doc, err = _pcorg_load_for_write(
+        doc_id, need_open=False,
+        projection={"status_code": 1, "category": 1, "content_category": 1, "event": 1, "year": 1})
+    if err:
+        return err
+    if _pcorg_is_closed(doc):
         return jsonify({"error": "introuvable ou deja clos"}), 404
 
-    old_comment = doc.get("comment") or ""
-    new_comment = old_comment + comment_line if old_comment else comment_line
-
-    db["pcorg"].update_one(
-        {"_id": doc_id},
-        {
-            "$set": {
-                "close_ts": now,
-                "close_iso": now.isoformat(),
-                "status_code": 10,
-                "operator_close": operator_name,
-                "operator_id_close": user.get("email", ""),
-                "comment": new_comment,
-            },
-            "$push": {"comment_history": history_entry},
-        }
+    user = request.user_payload
+    operator_name = _pcorg_operator(user)
+    now = datetime.now(ZoneInfo("Europe/Paris"))
+    text = "Statut: En cours -> Terminé" + (f"\n{motif}" if motif else "")
+    entry = PH.make_entry(operator_name, text, ts=now)
+    n = PH.append_entry(
+        db["pcorg"], doc_id, entry,
+        set_fields={
+            "close_ts": now,
+            "close_iso": now.isoformat(),
+            "status_code": 10,
+            "operator_close": operator_name,
+            "operator_id_close": user.get("email", ""),
+            "cockpit_status_at": now,
+        },
+        owned={"status"}, inc_bounce=True, extra_filter=_PCORG_OPEN_FILTER,
     )
+    if not n:
+        # Deux clotures simultanees : la seconde ne pousse plus d'entree double
+        return jsonify({"error": "introuvable ou deja clos"}), 404
 
     # Auto-disengage: reset tablet to "patrouille" when cockpit closes fiche
     _disengage_field_device(doc, doc_id)
+    DA.on_close(db, doc_id)
 
+    return jsonify({"ok": True})
+
+
+@app.route('/api/pcorg/reopen/<doc_id>', methods=['POST'])
+@role_required("user")
+def pcorg_reopen(doc_id):
+    """Rouvre une fiche close (erreur de cloture, reprise d'intervention).
+    Motif obligatoire, meme droit que la cloture."""
+    if not _user_can_close_fiche(request.user_payload):
+        return jsonify({"error": "Votre groupe n'autorise pas la reouverture de fiches"}), 403
+    data = request.get_json(silent=True) or {}
+    motif = (data.get("comment") or "").strip()[:PCORG_TEXT_MAX]
+    if not motif:
+        return jsonify({"error": "motif requis"}), 400
+    doc, err = _pcorg_load_for_write(doc_id, need_open=False,
+                                     projection={"status_code": 1, "category": 1})
+    if err:
+        return err
+    if not _pcorg_is_closed(doc):
+        return jsonify({"error": "fiche deja ouverte"}), 409
+
+    now = datetime.now(ZoneInfo("Europe/Paris"))
+    entry = PH.make_entry(_pcorg_operator(request.user_payload),
+                          f"Statut: Terminé -> En cours\n{motif}", ts=now)
+    n = PH.append_entry(
+        db["pcorg"], doc_id, entry,
+        set_fields={
+            "status_code": 0, "close_ts": None, "close_iso": None,
+            "operator_close": None, "operator_id_close": None,
+            "cockpit_status_at": now,
+        },
+        owned={"status"}, inc_bounce=True, extra_filter={"status_code": 10},
+    )
+    if not n:
+        return jsonify({"error": "fiche deja ouverte"}), 409
     return jsonify({"ok": True})
 
 
@@ -5771,10 +6268,13 @@ def field_device_release():
     if not device_name or not event:
         return jsonify({"error": "device_name et event requis"}), 400
 
+    # Le nom n'est unique que parmi les tablettes non revoquees : sans ce
+    # filtre, une ancienne tablette revoquee du meme nom pouvait etre prise.
     device = db["field_devices"].find_one({
         "name": device_name,
         "event": str(event),
         "year": str(year),
+        "revoked": {"$ne": True},
     })
     if not device:
         return jsonify({"error": "device introuvable"}), 404
@@ -5789,9 +6289,8 @@ def field_device_release():
                         "message": "L'operateur n'a pas laisse de commentaire, vous devez en saisir un"}), 400
 
     user = request.user_payload
-    operator_name = f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
+    operator_name = _pcorg_operator(user)
     now = datetime.now(timezone.utc)
-    now_local = datetime.now(ZoneInfo("Europe/Paris"))
 
     # Remettre le device en patrouille
     db["field_devices"].update_one(
@@ -5817,27 +6316,13 @@ def field_device_release():
     # Ajouter un commentaire dans la fiche si active
     fiche_id = device.get("active_fiche_id")
     if fiche_id:
-        ts_fmt = now_local.strftime("%d/%m/%Y %H:%M:%S")
         release_text = f"Liberation de {device_name} par {operator_name}"
         if cockpit_comment:
             release_text += f" : {cockpit_comment}"
-        comment_line = f"{ts_fmt} , {operator_name}\n {release_text}\n"
-        history_entry = {
-            "ts": now_local.isoformat(),
-            "operator": operator_name,
-            "text": release_text,
-        }
-        old_doc = db["pcorg"].find_one({"_id": fiche_id}, {"comment": 1})
-        if old_doc:
-            old_comment = old_doc.get("comment") or ""
-            new_comment = old_comment + comment_line if old_comment else comment_line
-            db["pcorg"].update_one(
-                {"_id": fiche_id},
-                {
-                    "$set": {"comment": new_comment, "content_category.patrouille": ""},
-                    "$push": {"comment_history": history_entry},
-                },
-            )
+        entry = PH.make_entry(operator_name, release_text)
+        PH.append_entry(db["pcorg"], fiche_id, entry,
+                        set_fields={"content_category.patrouille": ""},
+                        owned={"content_category.patrouille"}, inc_bounce=True)
 
     return jsonify({"ok": True, "device_name": device_name})
 
@@ -5845,10 +6330,33 @@ def field_device_release():
 @app.route('/api/pcorg/delete/<doc_id>', methods=['DELETE'])
 @role_required("admin")
 def pcorg_delete(doc_id):
-    """Supprime une fiche d'intervention (admin uniquement)."""
+    """Supprime une fiche d'intervention (admin uniquement).
+
+    La fiche est d'abord archivee dans `pcorg_deleted` (qui, quand) : la
+    suppression etait physique et sans trace. La tablette qui la portait
+    comme fiche active est liberee.
+    """
+    doc = db["pcorg"].find_one({"_id": doc_id})
+    if not doc:
+        return jsonify({"error": "introuvable"}), 404
+    user = request.user_payload
+    archive = dict(doc)
+    archive["_id"] = str(uuid.uuid4())
+    archive["original_id"] = doc_id
+    archive["deleted_at"] = datetime.now(timezone.utc)
+    archive["deleted_by"] = user.get("email", "")
+    archive["deleted_by_name"] = _pcorg_operator(user)
+    db["pcorg_deleted"].insert_one(archive)
     result = db["pcorg"].delete_one({"_id": doc_id})
     if result.deleted_count == 0:
         return jsonify({"error": "introuvable"}), 404
+    try:
+        db["field_devices"].update_many(
+            {"active_fiche_id": doc_id},
+            {"$set": {"active_fiche_id": None}},
+        )
+    except Exception:
+        logger.exception("Liberation tablette apres suppression fiche %s", doc_id)
     return jsonify({"ok": True})
 
 
@@ -5961,6 +6469,10 @@ def pcorg_sync_control_get():
     """Retourne l'etat du controle de sync PC Organisation."""
     doc = db["pcorg_sync_config"].find_one({"_id": PCORG_SYNC_CONTROL_ID}) or {}
     doc.pop("_id", None)
+    # Le message d'erreur brut peut contenir des details SQL Server
+    payload = request.user_payload
+    if doc.get("last_error") and not (payload.get("app_role") == "admin" or payload.get("is_super_admin")):
+        doc["last_error"] = "erreur de synchronisation"
     for k in ("last_run", "last_success"):
         if hasattr(doc.get(k), "isoformat"):
             doc[k] = doc[k].isoformat()
@@ -5991,6 +6503,9 @@ def pcorg_force_sync():
     """Lance une synchronisation PC Organisation SQL -> MongoDB a la demande."""
     script = os.path.join(os.path.dirname(__file__), "pcorg_sync.py")
     python_exe = "E:\\TITAN\\production\\titan_prod\\Scripts\\python.exe"
+    if not os.path.exists(python_exe):
+        import sys as _sys
+        python_exe = _sys.executable
     data = request.get_json(force=True) if request.is_json else {}
     cmd = [python_exe, "-X", "utf8", script, "--force"]
     if data.get("full"):
@@ -6038,10 +6553,14 @@ def pcorg_summary_generate():
     le resume porte sur tous les evenements / toutes annees.
 
     Body params optionnels :
-    - model : override du modele Claude (whitelist : claude-sonnet-4-6,
+    - model : override du modele Claude (whitelist : claude-sonnet-5, claude-sonnet-4-6,
       claude-opus-4-7, claude-haiku-4-5, ...). Permet A/B test.
     - dry_run : si true, renvoie le prompt assemble sans appeler Claude
-      ni persister. Utile pour iterer sur le prompt.
+      ni persister (synchrone, reponse {ok, summary, dry_run}).
+
+    Hors dry_run, la generation part en tache de fond : reponse 202
+    {ok, job, already_running}, suivi par GET /api/pcorg/summary/generate/status.
+    429 {error: 'budget_exceeded'} si le budget IA mensuel bloquant est atteint.
     """
     data = request.get_json(silent=True) or {}
     all_events = bool(data.get("all_events"))
@@ -6074,26 +6593,50 @@ def pcorg_summary_generate():
     created_by_email = user.get("email", "") or ""
     created_by_name = (str(user.get("firstname", "") or "") + " " + str(user.get("lastname", "") or "")).strip()
 
-    try:
-        doc = pcorg_summary.generate_period_summary(
-            db, event, year, ts_start, ts_end, created_by_email, created_by_name,
-            as_of_utc=as_of_utc, model=model_override, dry_run=dry_run,
-        )
-    except pcorg_summary.ClaudeError as e:
-        msg = str(e)
-        if msg == "ANTHROPIC_API_KEY non configuree":
-            return jsonify({"ok": False, "error": msg}), 503
-        if msg == "claude_unreachable":
-            return jsonify({"ok": False, "error": msg}), 502
-        return jsonify({"ok": False, "error": msg}), 502
-    except Exception as e:
-        logger.exception("pcorg_summary_generate: erreur inattendue")
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-    # En dry_run, doc est deja un dict serialise (non persiste).
-    if dry_run and isinstance(doc, dict) and doc.get("dry_run"):
+    if dry_run:
+        # Synchrone : aucun appel Claude (retro N-1 lue en cache seulement).
+        try:
+            doc = pcorg_summary.generate_period_summary(
+                db, event, year, ts_start, ts_end, created_by_email, created_by_name,
+                as_of_utc=as_of_utc, model=model_override, dry_run=True,
+            )
+        except Exception as e:
+            logger.exception("pcorg_summary_generate (dry_run): erreur inattendue")
+            return jsonify({"ok": False, "error": str(e)}), 500
         return jsonify({"ok": True, "summary": doc, "dry_run": True})
-    return jsonify({"ok": True, "summary": pcorg_summary._serialize_summary(doc, light=False)})
+
+    # Generation reelle : 1 a 2 minutes d'appel Claude -> tache de fond, le
+    # client suit l'avancement via /api/pcorg/summary/generate/status?job=.
+    if not pcorg_summary.ANTHROPIC_API_KEY:
+        return jsonify({"ok": False, "error": "COCKPIT_ANTHROPIC_API_KEY non configuree"}), 503
+    try:
+        pcorg_summary.check_ai_budget(db)
+    except pcorg_summary.ClaudeError as e:
+        return jsonify({"ok": False, "error": str(e)}), 429
+    job_id, already = pcorg_summary.start_summary_job(
+        db,
+        {
+            "event": event, "year": year, "ts_start": ts_start, "ts_end": ts_end,
+            "created_by_email": created_by_email, "created_by_name": created_by_name,
+            "as_of_utc": as_of_utc, "model": model_override,
+        },
+        owner=created_by_email or "anonymous",
+    )
+    return jsonify({"ok": True, "job": job_id, "already_running": bool(already)}), 202
+
+
+@app.route('/api/pcorg/summary/generate/status', methods=['GET'])
+@role_required("manager")
+def pcorg_summary_generate_status():
+    """Avancement d'une generation : etape, volume recu, secondes ecoulees,
+    et le resume serialise une fois termine (status='done')."""
+    user = request.user_payload or {}
+    job = pcorg_summary.get_summary_job(
+        request.args.get("job"), owner=(user.get("email") or "anonymous"),
+    )
+    if not job:
+        return jsonify({"ok": False, "error": "job_inconnu"}), 404
+    return jsonify({"ok": True, **job})
 
 
 @app.route('/api/pcorg/summary/usage', methods=['GET'])
@@ -6136,74 +6679,59 @@ def pcorg_summary_usage():
         except (TypeError, ValueError):
             year = None
 
-    base_q = {"created_at": {"$gte": ts_from, "$lte": ts_to}}
-    if event:
-        base_q["event"] = event
-    if year is not None:
-        base_q["year"] = year
-
-    by_model = {}
-
-    def _add(model_name, usage_doc):
-        m = model_name or "unknown"
-        agg = by_model.setdefault(m, {
-            "input_tokens": 0, "output_tokens": 0,
-            "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
-            "calls": 0,
-        })
-        u = usage_doc or {}
-        agg["input_tokens"] += int(u.get("input_tokens") or 0)
-        agg["output_tokens"] += int(u.get("output_tokens") or 0)
-        agg["cache_creation_input_tokens"] += int(u.get("cache_creation_input_tokens") or 0)
-        agg["cache_read_input_tokens"] += int(u.get("cache_read_input_tokens") or 0)
-        agg["calls"] += 1
-
-    summaries_calls = 0
-    for d in db['pcorg_summaries'].find(base_q, {"model": 1, "usage": 1, "_id": 0}):
-        _add(d.get("model"), d.get("usage"))
-        summaries_calls += 1
-
-    retros_q = {"created_at": {"$gte": ts_from, "$lte": ts_to}}
-    if event:
-        retros_q["event"] = event
-    retros_calls = 0
-    for d in db['pcorg_n1_retros'].find(retros_q, {"model": 1, "usage": 1, "_id": 0}):
-        _add(d.get("model"), d.get("usage"))
-        retros_calls += 1
-
-    total_cost = 0.0
-    for m, agg in by_model.items():
-        pricing = pcorg_summary.MODEL_PRICING_USD_PER_MTOK.get(m)
-        if not pricing:
-            agg["estimated_cost_usd"] = None
-            continue
-        # Tokens input non-caches = input_tokens - cache_read_input_tokens
-        # (les cache_creation_input_tokens sont DEJA inclus dans input_tokens
-        # selon la doc Anthropic ; les cache_read le sont aussi).
-        non_cached_input = max(0, agg["input_tokens"]
-                               - agg["cache_creation_input_tokens"]
-                               - agg["cache_read_input_tokens"])
-        cost = (
-            non_cached_input / 1_000_000 * pricing["input"]
-            + agg["cache_creation_input_tokens"] / 1_000_000 * pricing["input"] * 1.25
-            + agg["cache_read_input_tokens"] / 1_000_000 * pricing["input"] * 0.10
-            + agg["output_tokens"] / 1_000_000 * pricing["output"]
-        )
-        agg["estimated_cost_usd"] = round(cost, 4)
-        total_cost += cost
+    # Cout centralise (pcorg_summary.compute_cost_usd) : input_tokens EXCLUT
+    # deja les tokens caches, les quatre compteurs s'additionnent. Sources :
+    # resumes, retros N-1, analyses scans/frequentation et ai_usage_log.
+    agg = pcorg_summary.aggregate_ai_usage(db, ts_from, ts_to, event=event, year=year)
+    try:
+        budget = pcorg_summary.ai_budget_status(db)
+    except Exception as e:
+        logger.warning("pcorg_summary_usage: budget illisible (%s)", e)
+        budget = None
 
     return jsonify({
         "ok": True,
         "from": ts_from.isoformat(),
         "to": ts_to.isoformat(),
         "filters": {"event": event, "year": year},
-        "summaries_calls": summaries_calls,
-        "retros_calls": retros_calls,
-        "by_model": by_model,
-        "total_estimated_cost_usd": round(total_cost, 4),
+        "summaries_calls": agg["counts"]["summaries"],
+        "retros_calls": agg["counts"]["retros"],
+        "scan_analyses_calls": agg["counts"]["scan_analyses"],
+        "logged_calls": agg["counts"]["log"],
+        "by_model": agg["by_model"],
+        "by_feature": agg["by_feature"],
+        "total_estimated_cost_usd": agg["total_estimated_cost_usd"],
+        "unknown_pricing_models": agg["unknown_pricing_models"],
+        "budget": budget,
         "pricing_table_usd_per_mtok": pcorg_summary.MODEL_PRICING_USD_PER_MTOK,
-        "pricing_note": "Cache : creation +25%% input, read -90%% input. Verifier claude.com/pricing.",
+        "pricing_verified_on": pcorg_summary.PRICING_VERIFIED_ON,
+        "pricing_note": ("cout = input x p_in + cache_creation x p_cache_write + "
+                         "cache_read x p_cache_read + output x p_out "
+                         "(input_tokens exclut les tokens caches)."),
     })
+
+
+@app.route('/api/pcorg/summary/budget', methods=['GET'])
+@role_required("admin")
+def pcorg_summary_budget_get():
+    """Budget IA mensuel + consommation du mois courant."""
+    return jsonify({"ok": True, **pcorg_summary.ai_budget_status(db)})
+
+
+@app.route('/api/pcorg/summary/budget', methods=['PUT'])
+@role_required("admin")
+def pcorg_summary_budget_set():
+    """Body : {monthly_usd: number|null, block_when_exceeded: bool}."""
+    data = request.get_json(silent=True) or {}
+    user = request.user_payload or {}
+    try:
+        pcorg_summary.set_ai_budget(
+            db, data.get("monthly_usd"), bool(data.get("block_when_exceeded")),
+            updated_by_email=user.get("email") or "",
+        )
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    return jsonify({"ok": True, **pcorg_summary.ai_budget_status(db)})
 
 
 @app.route('/api/pcorg/summary/list', methods=['GET'])
@@ -6467,6 +6995,16 @@ def pcorg_summary_feedback_add(summary_id):
     sender_email = user.get("email", "") or ""
     sender_name = (str(user.get("firstname", "") or "") + " " + str(user.get("lastname", "") or "")).strip()
 
+    # Validation AVANT toute ecriture : une directive creee pour un feedback
+    # ensuite refuse restait orpheline et active dans tous les prompts.
+    try:
+        pcorg_summary.validate_feedback(
+            section, kind, corrected_text=data.get("corrected_text"),
+            rule_text=data.get("rule_text"), rating=data.get("rating"),
+        )
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
     # Si l'utilisateur demande aussi la promotion en memoire, on cree d'abord
     # la directive pour avoir son id, puis on attache l'id au feedback.
     memory_doc = None
@@ -6515,12 +7053,20 @@ def pcorg_summary_feedback_add(summary_id):
             promoted_memory_id=str(memory_doc.get("_id")) if memory_doc else None,
         )
     except ValueError as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
+        updated, err = None, (str(e), 400)
     except Exception as e:
         logger.exception("add_feedback: erreur")
-        return jsonify({"ok": False, "error": str(e)}), 500
-    if not updated:
-        return jsonify({"ok": False, "error": "Resume introuvable"}), 404
+        updated, err = None, (str(e), 500)
+    else:
+        err = None if updated else ("Resume introuvable", 404)
+    if err:
+        # Filet : ne jamais laisser une directive sans son feedback.
+        if memory_doc:
+            try:
+                pcorg_ai_memory.delete_directive(db, memory_doc.get("_id"))
+            except Exception:
+                logger.warning("feedback: directive orpheline %s non supprimee", memory_doc.get("_id"))
+        return jsonify({"ok": False, "error": err[0]}), err[1]
 
     return jsonify({
         "ok": True,
@@ -6700,10 +7246,12 @@ def pcorg_ai_memory_suggest_rule():
             original_text=data.get("original_text"),
             corrected_text=data.get("corrected_text"),
             model=data.get("model"),
+            db=db,  # budget + journal ai_usage_log (feature 'suggest_rule')
+            by_email=(request.user_payload or {}).get("email") or "",
         )
     except pcorg_summary.ClaudeError as e:
         msg = str(e)
-        code = 503 if "ANTHROPIC_API_KEY" in msg else 502
+        code = 503 if "ANTHROPIC_API_KEY" in msg else (429 if msg == "budget_exceeded" else 502)
         return jsonify({"ok": False, "error": msg}), code
     except Exception as e:
         logger.exception("suggest_rule_from_comment: erreur")
@@ -6987,6 +7535,19 @@ def hsh_archive_and_purge():
         dest.insert_many(docs)
         counts["structure"] = len(docs)
         COL_HSH_STRUCTURE.delete_many({"evenement": evenement})
+
+    # 3b. Instantane du ___GLOBAL___ (compteur principal, corrections_compteurs /
+    # corrections_vehicules, activation). Sans lui, le rejeu des presents d'une
+    # edition archivee (live_frequentation.py) devait supposer zero correction et
+    # estimer l'activation. Copie seulement s'il designe bien cet evenement : le
+    # live-controle peut deja etre reconfigure pour l'edition suivante.
+    g = db.data_access.find_one({"_id": HSH_GLOBAL_ID})
+    if g and str(g.get("evenement") or "").strip() == evenement:
+        snap = dict(g)
+        snap["_id"] = "global"
+        snap["archived_at"] = datetime.now(timezone.utc)
+        db[f"hsh_archive_global_{archive_tag}"].replace_one({"_id": "global"}, snap, upsert=True)
+        counts["global"] = 1
 
     # 4. Archiver et purger data_access (compteurs) de cet evenement
     docs = list(db.data_access.find({
@@ -8333,6 +8894,11 @@ if __name__ == "__main__":
             alfred.start_scheduler()
         except Exception as e:
             logger.warning("Echec demarrage scheduler Alfred : %s", e)
+        # Dispatch automatique : propositions expirees -> unite suivante / file
+        try:
+            DA.start_scheduler()
+        except Exception as e:
+            logger.warning("Echec demarrage scheduler dispatch auto : %s", e)
         # Planificateur PMV (envois programmes aux remorques, cf. pmv.py)
         try:
             import pmv

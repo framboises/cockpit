@@ -195,7 +195,7 @@ function on(elOrId, event, handler) {
     if (addBtn && addBtn.style.display === "none" && sqAdd) sqAdd.style.display = "none";
 })();
 
-function apiPost(url, payload){
+function apiPost(url, payload, _retried){
     return fetch(url, {
         method: 'POST',
         headers: {
@@ -203,7 +203,13 @@ function apiPost(url, payload){
             'X-CSRFToken': (document.querySelector('meta[name="csrf-token"]')?.content) || ''
         },
         body: JSON.stringify(payload)
-    }).then(r => r.json());
+    }).then(r => r.json()).then(res => {
+        // Jeton CSRF expire (onglet ouvert > 1 h) : renouvele puis requete rejouee une fois
+        if (!_retried && res && res.code === 'csrf' && window.CockpitCsrf) {
+            return window.CockpitCsrf.refresh().then(st => st.ok ? apiPost(url, payload, true) : res);
+        }
+        return res;
+    });
 }
 
 function getCurrentEventYear() {
@@ -1066,19 +1072,15 @@ function findNextPublicDate(dates, afterISO) {
 // _pushAlertHistory est expose sur window pour que alert_poller.js puisse l'appeler
 
 // ---------- Historique d'alertes (widget droite) ----------
-var _alertIconMap = { opening: "door_open", opened: "lock_open", closing: "door_front", closed: "lock", "traffic-cluster": "emergency", "anpr-watchlist": "local_police", "meteo-vent": "air", "meteo-pluie": "umbrella", "meteo-pluie-imminente": "rainy", "meteo": "cloud", "checkpoint-reassign": "swap_horiz", "checkpoint-error-burst": "error" };
-var _alertColorMap = {
-    "opening": "#f59e0b", "closing": "#f59e0b",
-    "opened": "#22c55e", "closed": "#ef4444",
-    "traffic-cluster": "#f97316",
-    "anpr-watchlist": "#dc2626",
-    "meteo": "#42a5f5",
-    "meteo-vent": "#f97316",
-    "meteo-pluie": "#42a5f5",
-    "meteo-pluie-imminente": "#42a5f5",
-    "checkpoint-reassign": "#8b5cf6",
-    "checkpoint-error-burst": "#dc2626"
-};
+// Icone et couleur d'une alerte : une seule source, la definition (via
+// window.CockpitAlerts, alert_poller.js). Deux tables divergentes vivaient
+// ici et dans alert_poller.js ; celle-ci ignorait secours, securite, SOS et
+// cameras, affiches en violet par defaut dans l'historique.
+function _alertMeta(type, serverMeta) {
+    if (window.CockpitAlerts && window.CockpitAlerts.meta) return window.CockpitAlerts.meta(type, serverMeta);
+    var m = serverMeta || {};
+    return { icon: m.icon || "info", color: m.color || "#6366f1", name: m.name || type };
+}
 var _alertTypeColors = {ACCIDENT: "#e53935", JAM: "#f59e0b", HAZARD: "#f97316", ROAD_CLOSED: "#8b5cf6"};
 var _alertTypeLabels = {ACCIDENT: "accident", JAM: "ralentissement", HAZARD: "danger", ROAD_CLOSED: "route fermee"};
 
@@ -1094,12 +1096,16 @@ function _buildMapAction(pins) {
     };
 }
 
-function _renderAlertEntry(container, type, iconName, title, timeStr, message, onAction, dateStr, actionData) {
-    var color = _alertColorMap[type] || "#6366f1";
+function _renderAlertEntry(container, type, iconName, title, timeStr, message, onAction, dateStr, actionData, color, alertId, explainId) {
+    color = color || _alertMeta(type).color;
+    // Identifiant pour l'explication IA : l'id de l'alerte, sinon (anciennes
+    // entrees d'historique sans alert_id) l'id de l'entree elle-meme.
+    explainId = explainId || alertId;
 
     var entry = document.createElement("div");
     entry.className = "alert-history-entry";
     entry.setAttribute("data-type", type);
+    if (alertId) entry.setAttribute("data-alert-id", alertId);
     entry.style.borderLeftColor = color;
 
     // --- Header row (toujours visible) ---
@@ -1234,18 +1240,24 @@ function _renderAlertEntry(container, type, iconName, title, timeStr, message, o
         }
     }
 
-    // Bouton "Voir sur la carte"
+    // Bouton d'action ("Voir sur la carte", ou "Ouvrir la fiche" pour la main courante)
     if (onAction) {
+        var isFiche = !!(actionData && actionData.pcorg_id);
         var btn = document.createElement("button");
         btn.className = "alert-history-action";
         btn.style.color = color;
         var btnIco = document.createElement("span");
         btnIco.className = "material-symbols-outlined";
-        btnIco.textContent = "map";
+        btnIco.textContent = isFiche ? "description" : "map";
         btn.appendChild(btnIco);
-        btn.appendChild(document.createTextNode(" Voir sur la carte"));
+        btn.appendChild(document.createTextNode(isFiche ? " Ouvrir la fiche" : " Voir sur la carte"));
         btn.addEventListener("click", function(e) { e.stopPropagation(); onAction(); });
         detail.appendChild(btn);
+    }
+
+    // Bouton "Expliquer" (assistant IA), rendu par alert_poller.js
+    if (explainId && window.CockpitAlerts && window.CockpitAlerts.explainWidget) {
+        detail.appendChild(window.CockpitAlerts.explainWidget(explainId, { compact: true }));
     }
 
     entry.appendChild(detail);
@@ -1261,9 +1273,17 @@ function _renderAlertEntry(container, type, iconName, title, timeStr, message, o
     return entry;
 }
 
-window._pushAlertHistory = function _pushAlertHistory(type, iconName, title, timeStr, message, onAction) {
+function _alertHistoryHas(container, alertId) {
+    return !!(alertId && container.querySelector('.alert-history-entry[data-alert-id="' + String(alertId).replace(/"/g, "") + '"]'));
+}
+
+// Affichage seulement : l'historique en base est ecrit par le moteur
+// (alert_engine.sync_alert_history), une entree par alerte, qu'un poste soit
+// ouvert ou non. Avant, chaque poste postait sa propre copie.
+window._pushAlertHistory = function _pushAlertHistory(type, iconName, title, timeStr, message, onAction, alertId, color) {
     var container = document.getElementById("widget-right-3-body");
     if (!container) return;
+    if (_alertHistoryHas(container, alertId)) return;
 
     // Retirer le placeholder
     var placeholder = container.querySelector(".widget-placeholder");
@@ -1272,33 +1292,15 @@ window._pushAlertHistory = function _pushAlertHistory(type, iconName, title, tim
     var now = new Date();
     var dateStr = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
 
-    // Extraire actionData depuis le callback (attache par alerte.js)
+    // Extraire actionData depuis le callback (attache par alert_poller.js)
     var actionData = onAction && onAction._actionData ? onAction._actionData : null;
 
-    var entry = _renderAlertEntry(container, type, iconName, title, timeStr, message, onAction, dateStr, actionData);
+    var entry = _renderAlertEntry(container, type, iconName, title, timeStr, message, onAction, dateStr, actionData, color, alertId);
     container.insertBefore(entry, container.firstChild);
 
     while (container.children.length > 50) {
         container.removeChild(container.lastChild);
     }
-
-    // Persister en base (avec actionData pour reconstruire le bouton carte au reload)
-    var csrfMeta = document.querySelector('meta[name="csrf-token"]');
-    var headers = {"Content-Type": "application/json"};
-    if (csrfMeta) headers["X-CSRFToken"] = csrfMeta.getAttribute("content");
-    fetch("/api/alert-history", {
-        method: "POST",
-        headers: headers,
-        body: JSON.stringify({
-            type: type,
-            title: title,
-            timeStr: timeStr,
-            message: message,
-            hasAction: !!onAction,
-            actionData: actionData
-        })
-    }).catch(function() {});
-
     return entry;
 };
 
@@ -1318,7 +1320,9 @@ function _loadAlertHistory() {
             // pour que insertBefore mette le plus recent en haut
             for (var i = alerts.length - 1; i >= 0; i--) {
                 var a = alerts[i];
-                var iconName = _alertIconMap[a.type] || "info";
+                // Deja affichee par alert_poller (course entre les deux requetes)
+                if (_alertHistoryHas(container, a.alert_id)) continue;
+                var m = _alertMeta(a.type, a.meta);
                 var d = new Date(a.createdAt);
                 var dateStr = "";
                 if (!isNaN(d.getTime())) {
@@ -1334,14 +1338,20 @@ function _loadAlertHistory() {
                         : (p.day || "") + "/" + (p.month || "") + " " + (p.hour || "") + ":" + (p.minute || "");
                 }
 
-                // Reconstruire le callback "Voir sur la carte" depuis actionData
+                // Reconstruire le callback d'action depuis actionData
                 var actionData = a.actionData || null;
                 var onAction = null;
-                if (a.hasAction && actionData && actionData.pins && actionData.pins.length) {
+                if (actionData && actionData.pins && actionData.pins.length) {
                     onAction = _buildMapAction(actionData.pins);
+                } else if (actionData && actionData.pcorg_id) {
+                    onAction = (function(fid) {
+                        return function() {
+                            if (window.PcorgUI && window.PcorgUI.openFiche) window.PcorgUI.openFiche(fid);
+                        };
+                    })(actionData.pcorg_id);
                 }
 
-                var entry = _renderAlertEntry(container, a.type, iconName, a.title, a.timeStr, a.message, onAction, dateStr, actionData);
+                var entry = _renderAlertEntry(container, a.type, m.icon, a.title || m.name, a.timeStr, a.message, onAction, dateStr, actionData, m.color, a.alert_id, a.alert_id || a._id);
                 container.insertBefore(entry, container.firstChild);
             }
         })
@@ -1351,36 +1361,10 @@ function _loadAlertHistory() {
 document.addEventListener("DOMContentLoaded", _loadAlertHistory);
 
 // ---------- Preferences alertes personnelles ----------
-var ALERT_PREF_TYPES = [
-    {id: "opening", label: "Ouverture imminente"},
-    {id: "opened", label: "Site ouvert"},
-    {id: "closing", label: "Fermeture imminente"},
-    {id: "closed", label: "Site ferme"},
-    {id: "traffic-cluster", label: "Alerte trafic (cluster)"},
-    {id: "anpr-watchlist", label: "Plaque surveillee (LAPI)"},
-    {id: "meteo-vent", label: "Alerte vent fort"},
-    {id: "meteo-pluie", label: "Alerte pluie forte"},
-    {id: "checkpoint-reassign", label: "Changement affectation checkpoint"}
-];
-
-function _getAlertPrefs() {
-    try {
-        var stored = localStorage.getItem("cockpit-alert-prefs");
-        if (stored) return JSON.parse(stored);
-    } catch(e) {}
-    return null; // null = tout actif
-}
-
-function _setAlertPrefs(prefs) {
-    localStorage.setItem("cockpit-alert-prefs", JSON.stringify(prefs));
-}
-
-function isAlertMuted(type) {
-    var prefs = _getAlertPrefs();
-    if (!prefs) return false; // pas de prefs = tout actif
-    return prefs.indexOf(type) < 0; // pas dans la liste = mute
-}
-
+// Liste construite depuis les definitions que l'utilisateur recoit
+// (/api/alert-definitions/mine, via window.CockpitAlerts). L'ancienne liste
+// figee de 9 types servait de liste blanche : toucher une case coupait en
+// silence toutes les autres alertes (secours, securite, flux, cameras...).
 (function initAlertPrefsUI() {
     document.addEventListener("DOMContentLoaded", function() {
         var btn = document.getElementById("alert-prefs-btn");
@@ -1411,28 +1395,45 @@ function isAlertMuted(type) {
 
 function _renderAlertPrefs(dropdown) {
     dropdown.textContent = "";
-    var prefs = _getAlertPrefs();
-    // Si null, tout est actif -> initialiser avec tout
-    var activeIds = prefs || ALERT_PREF_TYPES.map(function(t) { return t.id; });
+    var CA = window.CockpitAlerts;
+    if (!CA) return;
+    var loading = document.createElement("div");
+    loading.className = "alert-pref-note";
+    loading.textContent = "Chargement...";
+    dropdown.appendChild(loading);
 
-    ALERT_PREF_TYPES.forEach(function(t) {
-        var label = document.createElement("label");
-        label.className = "alert-pref-item";
-        var cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.checked = activeIds.indexOf(t.id) >= 0;
-        cb.addEventListener("change", function() {
-            var current = _getAlertPrefs() || ALERT_PREF_TYPES.map(function(x) { return x.id; });
-            if (cb.checked) {
-                if (current.indexOf(t.id) < 0) current.push(t.id);
-            } else {
-                current = current.filter(function(x) { return x !== t.id; });
-            }
-            _setAlertPrefs(current);
+    CA.definitions(function(defs) {
+        dropdown.textContent = "";
+        if (!defs.length) {
+            var empty = document.createElement("div");
+            empty.className = "alert-pref-note";
+            empty.textContent = "Aucune alerte ne vous est destinee.";
+            dropdown.appendChild(empty);
+            return;
+        }
+        defs.forEach(function(d) {
+            var critical = d.display_mode === "critical";
+            var label = document.createElement("label");
+            label.className = "alert-pref-item" + (critical ? " is-locked" : "");
+            var cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.checked = critical || !CA.isMuted(d.slug, d);
+            cb.disabled = critical;
+            cb.addEventListener("change", function() { CA.setMuted(d.slug, !cb.checked); });
+            var ico = document.createElement("span");
+            ico.className = "material-symbols-outlined alert-pref-icon";
+            ico.style.color = d.color || "#6366f1";
+            ico.textContent = d.icon || "notifications";
+            label.appendChild(cb);
+            label.appendChild(ico);
+            label.appendChild(document.createTextNode(" " + (d.name || d.slug)));
+            if (critical) label.title = "Alerte critique : toujours affichee";
+            dropdown.appendChild(label);
         });
-        label.appendChild(cb);
-        label.appendChild(document.createTextNode(" " + t.label));
-        dropdown.appendChild(label);
+        var note = document.createElement("div");
+        note.className = "alert-pref-note";
+        note.textContent = "Reglage propre a ce poste. Les alertes critiques ne peuvent pas etre coupees.";
+        dropdown.appendChild(note);
     });
 }
 
@@ -1578,230 +1579,9 @@ function updateUpcomingEvents() {
     }
 }
 
-// ==================== DRAWER EVENEMENT ====================
-(function(){
-  const drawer    = document.getElementById('event-drawer');
-  const overlay   = document.getElementById('event-drawer-overlay');
-  const closeBtn  = document.getElementById('drawer-close');
-  const bodyEl    = document.getElementById('event-drawer-body');
-  const titleEl   = document.getElementById('drawer-title');
-
-  window.openEventDrawer = function(eventItem) {
-    if (!drawer || !bodyEl) return;
-
-    titleEl.textContent = eventItem?.activity || 'Evenement';
-
-    const fields = [
-      { label: 'Date', value: eventItem?.date },
-      { label: 'Heure', value: formatTimeRange(eventItem?.start, eventItem?.end) },
-      { label: 'Categorie', value: eventItem?.category },
-      { label: 'Lieu', value: eventItem?.place },
-      { label: 'Departement', value: eventItem?.department },
-      { label: 'Duree', value: eventItem?.duration },
-      { label: 'Remarque', value: eventItem?.remark }
-    ].filter(f => f.value && String(f.value).trim().length);
-
-    // Safe DOM construction — no innerHTML
-    bodyEl.textContent = '';
-    if (fields.length === 0) {
-      const empty = document.createElement('div');
-      empty.style.color = 'var(--muted)';
-      empty.textContent = 'Aucune information.';
-      bodyEl.appendChild(empty);
-    } else {
-      fields.forEach(f => {
-        const fieldDiv = document.createElement('div');
-        fieldDiv.className = 'field';
-
-        const labelDiv = document.createElement('div');
-        labelDiv.className = 'label';
-        labelDiv.textContent = f.label;
-
-        const valueDiv = document.createElement('div');
-        valueDiv.className = 'value';
-        valueDiv.textContent = String(f.value);
-
-        fieldDiv.appendChild(labelDiv);
-        fieldDiv.appendChild(valueDiv);
-        bodyEl.appendChild(fieldDiv);
-      });
-    }
-
-    drawer.dataset.itemId = eventItem?._id || '';
-    drawer.dataset.itemRaw = JSON.stringify(eventItem || {});
-
-    drawer.classList.add('open');
-    overlay?.classList.add('show');
-    drawer.setAttribute('aria-hidden', 'false');
-  };
-
-  window.closeEventDrawer = function() {
-    drawer?.classList.remove('open');
-    overlay?.classList.remove('show');
-    drawer?.setAttribute('aria-hidden', 'true');
-  };
-
-  function formatTimeRange(start, end){
-    if (!start && !end) return '';
-    const s = (start && start !== 'TBC') ? start : '\u2014';
-    const e = (end && end !== 'TBC') ? end   : '\u2014';
-    return `${s} - ${e}`;
-  }
-  function escapeHtml(s){
-    return s.replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  }
-
-  overlay?.addEventListener('click', window.closeEventDrawer);
-  closeBtn?.addEventListener('click', window.closeEventDrawer);
-
-  // Edit button
-  document.getElementById('drawer-edit')?.addEventListener('click', () => {
-    try {
-        const drawer = document.getElementById('event-drawer');
-        const item = JSON.parse(drawer.dataset.itemRaw || '{}');
-
-        const addEventModal = document.getElementById('addEventModal');
-        const addEventForm  = document.getElementById('addEventForm');
-
-        const fDate   = document.getElementById('event-date');
-        const fStart  = document.getElementById('start-time');
-        const fEnd    = document.getElementById('end-time');
-        const fDur    = document.getElementById('duration');
-        const fCat    = document.getElementById('category');
-        const fAct    = document.getElementById('activity');
-        const fPlace  = document.getElementById('place');
-        const fDept   = document.getElementById('department');
-        const fRemark = document.getElementById('remark');
-
-        if (!addEventModal || !addEventForm) {
-            showToast("error", "Modale d'edition introuvable.");
-            return;
-        }
-
-        window.formMode = 'edit';
-        window.editingItemId = item?._id || null;
-
-        let hiddenId = addEventForm.querySelector('input[name="_id"]');
-        if (!hiddenId) {
-            hiddenId = document.createElement('input');
-            hiddenId.type = 'hidden';
-            hiddenId.name = '_id';
-            addEventForm.appendChild(hiddenId);
-        }
-        hiddenId.value = window.editingItemId || '';
-
-        if (fDate)   fDate.value   = (item.date || '').slice(0,10);
-        if (fStart)  fStart.value  = (typeof formatHHMM === 'function' ? formatHHMM(item.start) : item.start) || '';
-        if (fEnd)    fEnd.value    = (typeof formatHHMM === 'function' ? formatHHMM(item.end)   : item.end)   || '';
-        if (fDur)    fDur.value    = item.duration|| '';
-        if (fCat)    fCat.value    = item.category|| '';
-        if (fAct)    fAct.value    = item.activity|| '';
-        if (fPlace)  fPlace.value  = item.place   || '';
-        if (fDept)   fDept.value   = item.department || '';
-        if (fRemark) fRemark.value = item.remark  || '';
-
-        const title = addEventModal.querySelector('h3');
-        if (title) title.textContent = "Modifier un evenement";
-
-        if (window.populateEventTodoEditor) window.populateEventTodoEditor(item.todo || '');
-
-        addEventModal.style.display = 'flex';
-        addEventModal.querySelectorAll('.form-error').forEach(n => n.remove());
-        addEventModal.querySelectorAll('.input-error').forEach(n => n.classList.remove('input-error'));
-        addEventModal.querySelector('#category-manager')?.setAttribute('hidden', '');
-        const _meb = addEventModal.querySelector('.modal-body');
-        if (_meb) _meb.scrollTop = 0;
-        setTimeout(() => addEventModal.classList.add('show'), 10);
-
-        if (window.closeEventDrawer) window.closeEventDrawer();
-
-    } catch(e){
-        console.error(e);
-        showToast("error", "Erreur a l'ouverture de l'edition");
-    }
-  });
-
-  // Duplicate button
-  document.getElementById('drawer-duplicate')?.addEventListener('click', async () => {
-    try {
-        const drawer = document.getElementById('event-drawer');
-        const item = JSON.parse(drawer.dataset.itemRaw || '{}');
-
-        if (!item?._id || !item?.date) {
-            showToast("error", "Evenement incomplet (id/date manquant).");
-            return;
-        }
-
-        const defaultDate = item.date;
-        const target = await showPromptToast("Dupliquer a la date (YYYY-MM-DD) :", { defaultValue: defaultDate, inputType: "date" });
-        if (target === null) return;
-
-        const re = /^\d{4}-\d{2}-\d{2}$/;
-        if (!re.test(target)) {
-            showToast("error", "Format de date invalide (YYYY-MM-DD).");
-            return;
-        }
-
-        const { event, year } = getCurrentEventYear();
-        if (!event || !year) {
-            showToast("error", "Selectionnez un evenement et une annee.");
-            return;
-        }
-
-        const payload = { event, year, date: item.date, _id: item._id, target_date: target };
-        const res = await apiPost('/duplicate_timetable_event', payload);
-        if (res?.success) {
-            showToast("success", "Evenement duplique.");
-            const eventList = document.getElementById("event-list");
-            if (eventList) eventList.textContent = "";
-            if (window.fetchTimetable) window.fetchTimetable();
-        } else {
-            showToast("error", res?.message || "Erreur lors de la duplication.");
-        }
-    } catch (e) {
-        console.error(e);
-        showToast("error", "Erreur inattendue lors de la duplication.");
-    }
-  });
-
-  // Delete button
-  document.getElementById('drawer-delete')?.addEventListener('click', async () => {
-    try {
-        const drawer = document.getElementById('event-drawer');
-        const item = JSON.parse(drawer.dataset.itemRaw || '{}');
-
-        if (!item?._id || !item?.date) {
-            showToast("error", "Evenement incomplet (id/date manquant).");
-            return;
-        }
-
-        const ok = await showConfirmToast("Confirmer la suppression de cet evenement ?", { type: "error", okLabel: "Supprimer", cancelLabel: "Annuler" });
-        if (!ok) return;
-
-        const { event, year } = getCurrentEventYear();
-        if (!event || !year) {
-            showToast("error", "Selectionnez un evenement et une annee.");
-            return;
-        }
-
-        const payload = { event, year, date: item.date, _id: item._id };
-        const res = await apiPost('/delete_timetable_event', payload);
-        if (res?.success) {
-            showToast("success", "Evenement supprime.");
-            if (window.closeEventDrawer) window.closeEventDrawer();
-            const eventList = document.getElementById("event-list");
-            if (eventList) eventList.textContent = "";
-            if (window.fetchTimetable) window.fetchTimetable();
-        } else {
-            showToast("error", res?.message || "Erreur lors de la suppression.");
-        }
-    } catch (e) {
-        console.error(e);
-        showToast("error", "Erreur inattendue lors de la suppression.");
-    }
-  });
-
-})();
+// Drawer evenement et modale d'ajout/edition : voir static/js/timeline.js
+// (openEventDrawer, openTimetableModal). Une ancienne copie vivait ici et
+// doublait les ecouteurs des boutons Modifier / Dupliquer / Supprimer.
 
 // showToast is now provided by toast.js
 // Legacy alias for any code still calling showDynamicFlashMessage

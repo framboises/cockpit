@@ -13,6 +13,13 @@ function normalizeToastType(t) {
 // showToast — notification simple auto-dismiss
 // --------------------------------------------------------------------------
 function showToast(type, message, duration) {
+  // Une douzaine d'appels (anpr, anoloc, meteo, carte, admin alertes...)
+  // passaient (message, type) : le toast affichait "error" ou "success" au
+  // lieu du message. On remet l'ordre quand il est manifestement inverse.
+  var TYPES = ["success", "warning", "error", "info"];
+  if (TYPES.indexOf(type) < 0 && TYPES.indexOf(message) >= 0) {
+    var tmp = type; type = message; message = tmp;
+  }
   type = normalizeToastType(type);
   if (duration === undefined) duration = 3500;
 

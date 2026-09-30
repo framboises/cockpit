@@ -318,6 +318,29 @@
       pmvCtrl.addTo(map);
     }
 
+    // Momentus : lieux rattaches (Groundmaster /momentus/lieux) ayant des
+    // reservations sur la periode, actives ou non pour l'evenement.
+    if (window.MomentusLieu) {
+      var momentusCtrl = L.control({ position: "bottomright" });
+      momentusCtrl.onAdd = function () {
+        var div = L.DomUtil.create("div", "leaflet-bar cockpit-measure-tools cockpit-momentus-ctrl");
+        var btn = document.createElement("button");
+        btn.className = "tile-btn";
+        btn.id = "map-momentus-btn";
+        btn.title = "Reservations Momentus (seminaires, receptifs, hospitalites vendues)";
+        var ico = document.createElement("span");
+        ico.className = "material-symbols-outlined";
+        ico.style.fontSize = "20px";
+        ico.textContent = "storefront";
+        btn.appendChild(ico);
+        div.appendChild(btn);
+        L.DomEvent.disableClickPropagation(div);
+        btn.addEventListener("click", toggleMomentus);
+        return div;
+      };
+      momentusCtrl.addTo(map);
+    }
+
     // Load portes names for search (always, regardless of layer visibility)
     loadPortesForSearch();
 
@@ -2032,6 +2055,12 @@
       }
     }
 
+    // --- Reservations Momentus (momentus_lieu.js), si le lieu a un espace rattache ---
+    var featureId = feature && feature.properties ? feature.properties._id_feature : null;
+    if (featureId && window.MomentusLieu) {
+      html += window.MomentusLieu.buttonHtml(featureId, name);
+    }
+
     return html;
   }
 
@@ -2734,6 +2763,97 @@
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // Momentus (cf. momentus_api.py, momentus_lieu.js) : lieux rattaches ayant au
+  // moins une reservation sur la periode de l'evenement selectionne (montage ->
+  // demontage), qu'ils soient actives ou non dans Groundmaster. Information
+  // seulement. Rafraichi toutes les 10 min (la synchro est horaire).
+  // ---------------------------------------------------------------------------
+  var _momentusVisible = false;
+  var _momentusLayer = null;
+  var _momentusTimer = null;
+  var MOMENTUS_COLOR = "#7c3aed";
+  var MOMENTUS_STATUS = { confirme: "Confirme", option: "Option", prospect: "Prospect" };
+  var MOMENTUS_PHASES = { reserve: "reserve", exploitation: "exploitation", demontage: "demontage", bloque: "bloque" };
+
+  function toggleMomentus() {
+    _momentusVisible = !_momentusVisible;
+    var btn = document.getElementById("map-momentus-btn");
+    if (btn) btn.classList.toggle("active", _momentusVisible);
+    if (_momentusVisible) {
+      if (!_momentusLayer) _momentusLayer = L.layerGroup().addTo(map);
+      loadMomentus();
+      _momentusTimer = setInterval(loadMomentus, 600000);
+    } else {
+      clearInterval(_momentusTimer);
+      _momentusTimer = null;
+      if (_momentusLayer) { map.removeLayer(_momentusLayer); _momentusLayer = null; }
+    }
+  }
+
+  function momentusDay(iso) {
+    var p = String(iso || "").split("-");
+    return p.length === 3 ? p[2] + "/" + p[1] : "";
+  }
+
+  function loadMomentus() {
+    if (!_momentusVisible || !_momentusLayer) return;
+    var ev = window.selectedEvent, yr = window.selectedYear;
+    var url = "/api/momentus/carte" + (ev && yr ? "?event=" + encodeURIComponent(ev) + "&year=" + encodeURIComponent(yr) : "");
+    fetch(url, { credentials: "same-origin" })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!_momentusLayer || !data || !data.ok) return;
+        _momentusLayer.clearLayers();
+        var periode = "du " + momentusDay(data.from) + " au " + momentusDay(data.to);
+        if (!data.lieux.length && typeof showToast === "function") {
+          showToast("Momentus : aucun lieu rattache reserve " + periode, "info");
+        }
+        data.lieux.forEach(function (l) {
+          var color = l.today ? MOMENTUS_COLOR : "#a78bfa";
+          if (l.geometry) {
+            var ring = l.geometry.type === "Polygon" ? l.geometry.coordinates[0] : l.geometry.coordinates[0][0];
+            L.polygon(ring.map(function (c) { return [c[1], c[0]]; }), {
+              color: color, weight: 2, dashArray: "6 4", fillColor: color, fillOpacity: 0.12, interactive: false
+            }).addTo(_momentusLayer);
+          }
+          var marker = L.marker([l.lat, l.lng], {
+            zIndexOffset: 500,
+            icon: L.divIcon({
+              className: "",
+              html: '<div class="rov-pin" style="background:' + color + ';position:relative;">' +
+                '<span class="material-symbols-outlined">storefront</span>' +
+                '<span style="position:absolute;top:-7px;right:-9px;background:#fff;color:' + MOMENTUS_COLOR +
+                ';border:1px solid ' + MOMENTUS_COLOR + ';border-radius:9px;font-size:10px;font-weight:700;' +
+                'min-width:16px;height:16px;line-height:14px;text-align:center;padding:0 3px;">' + l.count + "</span></div>",
+              iconSize: [28, 28],
+              iconAnchor: [14, 14]
+            })
+          });
+          var list = l.bookings.map(function (b) {
+            var phases = b.phases.map(function (p) { return MOMENTUS_PHASES[p] || p; }).join(", ");
+            return '<li style="margin:2px 0;"><strong>' + escapeHtml(b.name) + "</strong> " +
+              '<span style="color:var(--muted);font-size:0.75rem;">' + escapeHtml(MOMENTUS_STATUS[b.status] || b.status) +
+              " · " + momentusDay(b.start) + (b.end !== b.start ? "-" + momentusDay(b.end) : "") +
+              (phases ? " · " + escapeHtml(phases) : "") + "</span></li>";
+          }).join("");
+          var more = l.count > l.bookings.length ? '<div style="color:var(--muted);font-size:0.75rem;">+ ' +
+            (l.count - l.bookings.length) + " autre(s)</div>" : "";
+          marker.bindPopup(
+            '<div class="popup-content" style="min-width:230px;">' +
+            '<strong style="color:' + MOMENTUS_COLOR + ';">' + escapeHtml(l.name) + "</strong>" +
+            '<div style="color:var(--muted);font-size:0.78rem;">' + l.count + " reservation(s) Momentus " + periode +
+            (l.today ? " · <strong>" + l.today + " aujourd'hui</strong>" : "") + "</div>" +
+            '<ul style="margin:6px 0 0;padding-left:16px;font-size:0.8rem;">' + list + "</ul>" + more +
+            window.MomentusLieu.buttonHtml(l.feature_id, l.name) + "</div>",
+            { maxWidth: 320, className: "cockpit-popup" });
+          marker.bindTooltip(l.name + " · " + l.count + " resa Momentus", { direction: "top", offset: [0, -14] });
+          _momentusLayer.addLayer(marker);
+        });
+      })
+      .catch(function (err) { console.error("[MapView] Erreur Momentus:", err); });
+  }
+
   // ==========================================================================
   // WIRING
   // ==========================================================================
@@ -2745,6 +2865,8 @@
     var prefsPromise = prefsLoaded ? Promise.resolve() : loadMapPreferences();
     prefsPromise.then(function () {
       _origLoadEventMarkers();
+      // Changement d'evenement : la periode du calque Momentus suit
+      if (_momentusVisible) loadMomentus();
       // Delay to let fetches complete, then apply defaults + rebuild dropdown
       setTimeout(function () {
         applyDefaultVisibility();

@@ -35,13 +35,36 @@
     return (URGENCY_LABELS[urgencyType(cat)] || URGENCY_LABELS.MIXTE)[level] || level;
   }
 
+  function urgencyEnabledFor(cat, current) {
+    var u = (pcorgConfig && pcorgConfig.urgence_categories) || {};
+    return !!u[cat] || !!current;
+  }
+
   // ── State ──────────────────────────────────────────────────────────────────
   var refreshTimer = null;
   var lastData = null;
-  var expandedId = null;
   var pcorgMapLayer = null;
   var pcorgMarkers = {}; // {id: L.marker} pour ouvrir les popups programmatiquement
   var pickCallback = null;
+  var activeFicheId = null; // fiche mise en evidence (popup ouverte / fiche affichee)
+
+  // Lien carte <-> liste : met en evidence la ligne de la fiche dans le petit
+  // bloc et le panneau elargi, et le pin sur la carte.
+  function setActiveFiche(id) {
+    activeFicheId = id || null;
+    document.querySelectorAll(".pcorg-row.pcorg-row-active, .pcorg-exp-table tr.pcorg-row-active")
+      .forEach(function (el) { el.classList.remove("pcorg-row-active"); });
+    Object.keys(pcorgMarkers).forEach(function (mid) {
+      var el = pcorgMarkers[mid].getElement && pcorgMarkers[mid].getElement();
+      if (el) el.classList.toggle("pcorg-pin-active", mid === activeFicheId);
+    });
+    if (!activeFicheId) return;
+    document.querySelectorAll('.pcorg-row[data-id="' + activeFicheId + '"], .pcorg-exp-table tr[data-id="' + activeFicheId + '"]')
+      .forEach(function (el) {
+        el.classList.add("pcorg-row-active");
+        if (el.offsetParent) el.scrollIntoView({ block: "nearest" });
+      });
+  }
   // Bounce acknowledgement (localStorage per user)
   var ACK_STORAGE_KEY = "pcorg-pin-ack";
   function _loadAck() {
@@ -167,9 +190,86 @@
     return s;
   }
 
-  function txt(parent, text) {
-    parent.textContent = text;
-    return parent;
+  function escHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function csrfToken() {
+    return (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
+  }
+
+  // Appel API JSON (POST/PUT/DELETE) : ne rejette jamais. Une erreur reseau
+  // ou une reponse non JSON (redirection d'auth) donne {ok:false, error}.
+  // Avant, plusieurs appels n'avaient pas de .catch : bouton bloque desactive,
+  // aucun message.
+  //
+  // Jeton CSRF refuse (onglet ouvert depuis plus d'une heure) : le jeton est
+  // renouvele (csrf_refresh.js) et la requete rejouee UNE fois, sans que
+  // l'utilisateur perde sa saisie.
+  function apiCall(method, url, payload, _retried) {
+    var opts = { method: method, headers: { "X-CSRFToken": csrfToken() } };
+    if (payload !== undefined) {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(payload);
+    }
+    return fetch(url, opts)
+      .then(function (r) {
+        return r.json().catch(function () {
+          // Page HTML au lieu de JSON : redirection vers le portail
+          return { ok: false, error: "Session expiree : rechargez la page", session_expired: true };
+        });
+      })
+      .catch(function () { return { ok: false, error: "Erreur reseau" }; })
+      .then(function (res) {
+        if (!_retried && res && res.code === "csrf" && window.CockpitCsrf) {
+          return window.CockpitCsrf.refresh().then(function (st) {
+            if (st.ok) return apiCall(method, url, payload, true);
+            if (!st.expired) return res;
+            return { ok: false, error: "Session expiree : rechargez la page", session_expired: true };
+          });
+        }
+        return res;
+      });
+  }
+
+  // Avant d'ouvrir un formulaire : jeton frais, ou alerte immediate si la
+  // session a expire (plutot qu'apres avoir tout rempli)
+  function checkSessionBeforeForm() {
+    if (!window.CockpitCsrf) return;
+    window.CockpitCsrf.refresh().then(function (st) {
+      if (st.ok || !st.expired) return;
+      showConfirmToast("Votre session a expire : la fiche ne pourra pas etre enregistree. Recharger la page maintenant ?",
+        { okLabel: "Recharger", cancelLabel: "Plus tard", type: "warning" })
+        .then(function (ok) { if (ok) window.location.reload(); });
+    });
+  }
+
+  function randomToken() {
+    try {
+      var a = new Uint8Array(12);
+      window.crypto.getRandomValues(a);
+      return Array.prototype.map.call(a, function (b) { return ("0" + b.toString(16)).slice(-2); }).join("");
+    } catch (e) {
+      return String(Date.now()) + Math.random().toString(16).slice(2);
+    }
+  }
+
+  // "27/09 15:22" ; l'heure seule si le jour est aujourd'hui (withDate force)
+  function fmtDayTime(isoStr, withDate) {
+    if (!isoStr) return "";
+    var d = new Date(isoStr);
+    if (isNaN(d.getTime())) return "";
+    var hm = _pad2(d.getHours()) + ":" + _pad2(d.getMinutes());
+    if (!withDate && _isSameDay(d, new Date())) return hm;
+    return _pad2(d.getDate()) + "/" + _pad2(d.getMonth() + 1) + " " + hm;
+  }
+
+  function operatorLabel(op) {
+    op = op || "";
+    if (op.indexOf("field:") === 0) return "Tablette " + op.slice(6);
+    return op;
   }
 
   // ── Init ───────────────────────────────────────────────────────────────────
@@ -192,15 +292,32 @@
     loadPcorgConfig();
     loadCockpitUserNames();
     loadVehiclesByCategory();
+    ensureSharedGrid();
 
     setTimeout(refresh, 800);
     refreshTimer = setInterval(refresh, REFRESH_MS);
+    initWidgetFilter();
 
-    // Retry pending map pins once map is ready
+    // Echap ferme la fiche, l'assistant de creation et la modale GPS
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      if (_tsPopover || vehiclePicker || (_camPickerOverlay && _camPickerOverlay.classList.contains("show"))) return;
+      if (document.querySelector(".pcorg-autocomplete")) return;
+      if (document.querySelector("#toast-container .toast-confirm, #toast-container .toast-input")) return;
+      var gps = document.getElementById("pcorgGpsModal");
+      if (gps && gps.classList.contains("show")) { gps.classList.remove("show"); return; }
+      if (createModal && createModal.classList.contains("show")) { hideCreate(); return; }
+      if (detailModal && detailModal.classList.contains("show")) { hideFiche(); }
+    });
+
+    // Pins en attente de la carte (creee au premier passage en vue carte).
+    // Avant, ce timer s'arretait si le premier /live n'avait pas encore
+    // repondu : les pins n'apparaissaient qu'au refresh suivant (60 s).
     var pinRetry = setInterval(function () {
-      if (!pendingPins) { clearInterval(pinRetry); return; }
-      if (getMap()) { updateMapPins(pendingPins); clearInterval(pinRetry); }
-    }, 2000);
+      if (!getMap()) return;
+      clearInterval(pinRetry);
+      if (pendingPins) updateMapPins(pendingPins);
+    }, 1000);
 
     // Context menu on map
     buildContextMenu();
@@ -531,8 +648,7 @@
           if (isQuick) {
             quickCreate(ctxLat, ctxLon, vCat, vLevel, v.label);
           } else {
-            createPendingPatrouille = v.label;
-            openCreateFromContext(ctxLat, ctxLon, vCat, vLevel);
+            openCreateFromContext(ctxLat, ctxLon, vCat, vLevel, v.label);
           }
         }
         vBtn.addEventListener("click", function (ev) { if (!_ctxIsTouch) onVehPick(ev); });
@@ -553,7 +669,8 @@
       }
       noneBtn.addEventListener("click", function (ev) { if (!_ctxIsTouch) onNone(ev); });
       noneBtn.addEventListener("touchend", onNone);
-      vSub.appendChild(noneBtn);
+      // "Sans vehicule" en tete de liste
+      vSub.insertBefore(noneBtn, vSub.firstChild);
     });
 
     // Reset item animations
@@ -596,9 +713,13 @@
     }
   }
 
-  function openCreateFromContext(lat, lon, cat, urgency) {
+  function openCreateFromContext(lat, lon, cat, urgency, patrouille) {
+    checkSessionBeforeForm();
     resetCreateWizard();
     if (urgency) createSelectedUrgency = urgency;
+    // Pose APRES le reset : le vehicule choisi dans le menu clic droit etait
+    // efface par resetCreateWizard avant l'ouverture de l'assistant
+    if (patrouille) createPendingPatrouille = patrouille;
     showCreate();
     initCreateMap();
 
@@ -660,8 +781,7 @@
         if (isQuick) {
           quickCreate(lat, lon, cat, level, v.label);
         } else {
-          createPendingPatrouille = v.label;
-          openCreateFromContext(lat, lon, cat, level);
+          openCreateFromContext(lat, lon, cat, level, v.label);
         }
       }
       btn.addEventListener("click", function (e) { if (!_ctxIsTouch) onPick(e); });
@@ -684,7 +804,8 @@
     }
     noneBtn.addEventListener("click", function (e) { if (!_ctxIsTouch) onNone(e); });
     noneBtn.addEventListener("touchend", onNone);
-    vehiclePicker.appendChild(noneBtn);
+    // "Sans vehicule" en tete, juste sous le titre
+    vehiclePicker.insertBefore(noneBtn, list);
 
     document.body.appendChild(vehiclePicker);
 
@@ -734,37 +855,107 @@
       if (typeof showToast === "function") showToast("warning", "Evenement/annee non selectionnes");
       return;
     }
-    // Resolve carroyage from map grid data
-    var carroye = "";
-    if (window.CockpitMapView && window.CockpitMapView.getCellLabel) {
-      carroye = window.CockpitMapView.getCellLabel(lat, lon) || "";
-    }
-    // Resolve zone from POI polygons
-    var areaDesc = "";
-    if (window.CockpitMapView && window.CockpitMapView.findZoneAtPoint) {
-      areaDesc = window.CockpitMapView.findZoneAtPoint(lat, lon) || "";
-    }
     quickCreatePending = true;
     var payload = {
       event: ev, year: yr,
       category: cat, niveau_urgence: level,
       lat: lat, lon: lon,
-      carroye: carroye,
-      area_desc: areaDesc
+      // Carroyage resolu sur la grille chargee en memoire (et non plus sur
+      // celle affichee sur la carte : vide tant que la grille est masquee)
+      carroye: resolveCellLabel(lat, lon),
+      area_desc: resolveZone(lat, lon),
+      client_token: randomToken()
     };
     if (patrouille) payload.patrouille = patrouille;
-    apiPost("/api/pcorg/quick-create", payload).then(function (r) {
+    apiCall("POST", "/api/pcorg/quick-create", payload).then(function (r) {
       quickCreatePending = false;
       if (r.ok) {
-        if (typeof showToast === "function") showToast("success", urgencyLabel(cat, level) + " - fiche creee");
+        showToast("success", urgencyLabel(cat, level) + " - fiche creee");
         refresh();
       } else {
-        if (typeof showToast === "function") showToast("error", r.error || "Erreur");
+        showToast("error", r.error || "Erreur");
       }
-    }).catch(function () {
-      quickCreatePending = false;
-      if (typeof showToast === "function") showToast("error", "Erreur reseau");
     });
+  }
+
+  // ── Resolution zone / carroyage (partagee creation, rapide, deplacement) ──
+  var sharedGridMeta = null;
+  var sharedGridLoading = false;
+
+  function buildGridMeta(data) {
+    if (!data || !data.lines) return null;
+    var lines = data.lines;
+    var numCols = lines.num_cols || (lines.v_lines || []).length - 1;
+    var numRows = lines.num_rows || (lines.h_lines || []).length - 1;
+    var colOffset = lines.col_offset || 0;
+    var rowOffset = lines.row_offset || 0;
+    var cols = [];
+    for (var ci = 0; ci < numCols; ci++) {
+      var adj = ci - colOffset;
+      cols.push(adj >= 0 ? colLabel(adj) : null);
+    }
+    var rows = [];
+    for (var ri = 0; ri < numRows; ri++) {
+      var rn = ri + 1 - rowOffset;
+      rows.push(rn >= 1 ? rn : null);
+    }
+    return {
+      cols: cols, rows: rows,
+      hLines: lines.h_lines || [], vLines: lines.v_lines || [],
+      numCols: numCols, numRows: numRows,
+      colOffset: colOffset, rowOffset: rowOffset
+    };
+  }
+
+  function ensureSharedGrid(cb) {
+    if (sharedGridMeta) { if (cb) cb(); return; }
+    var mv = window.CockpitMapView;
+    if (mv && mv.getGridData && mv.getGridData()) {
+      sharedGridMeta = buildGridMeta(mv.getGridData());
+      if (cb) cb();
+      return;
+    }
+    if (sharedGridLoading) return;
+    sharedGridLoading = true;
+    fetch("/api/grid-ref")
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        sharedGridLoading = false;
+        sharedGridMeta = buildGridMeta(d);
+        if (cb) cb();
+      })
+      .catch(function () { sharedGridLoading = false; });
+  }
+
+  function gridCellFromMeta(m, lat, lon) {
+    if (!m) return null;
+    var col = null, row = null;
+    for (var ci = 0; ci < m.numCols; ci++) {
+      if (lon >= m.vLines[ci].lng && lon < m.vLines[ci + 1].lng) { col = ci; break; }
+    }
+    for (var ri = 0; ri < m.numRows; ri++) {
+      if (lat <= m.hLines[ri].lat && lat > m.hLines[ri + 1].lat) { row = ri; break; }
+    }
+    if (col === null || row === null) return null;
+    var colLbl = m.cols[col];
+    var rowLbl = m.rows[row];
+    if (!colLbl || !rowLbl) return null;
+    return colLbl + "" + rowLbl;
+  }
+
+  function resolveCellLabel(lat, lon) {
+    var label = gridCellFromMeta(sharedGridMeta, lat, lon);
+    if (!label && window.CockpitMapView && window.CockpitMapView.getCellLabel) {
+      label = window.CockpitMapView.getCellLabel(lat, lon);
+    }
+    return label || "";
+  }
+
+  function resolveZone(lat, lon) {
+    if (window.CockpitMapView && window.CockpitMapView.findZoneAtPoint) {
+      return window.CockpitMapView.findZoneAtPoint(lat, lon) || "";
+    }
+    return "";
   }
 
   // ── Tabs ───────────────────────────────────────────────────────────────────
@@ -802,14 +993,18 @@
     ]).then(function (results) {
       var data = results[0];
       var stats = results[1];
-      lastData = data;
-      // Filtrer par categories autorisees
+      if (!data || data.error) return;
+      // Filtrer par categories autorisees (le serveur filtre aussi desormais ;
+      // lastData est filtre pour que le panneau elargi et la carte ne voient
+      // jamais plus que le widget)
       var ac = window.__userAllowedCategories;
       var filterCat = ac ? function (it) { return ac.indexOf(it.category) !== -1; } : function () { return true; };
       var openFiltered = (data.open || []).filter(filterCat);
       var closedFiltered = (data.closed || []).filter(filterCat);
-      renderList(listOpen, openFiltered, false, placeholderOpen);
-      renderList(listClosed, closedFiltered, true, placeholderClosed);
+      data.open = openFiltered;
+      data.closed = closedFiltered;
+      lastData = data;
+      renderWidgetLists();
       // Stats: compte sur la collection complete (fallback aux items charges si l'endpoint echoue)
       var statsCounts = (stats && stats.counts) ? stats.counts : null;
       renderStats(openFiltered, closedFiltered, statsCounts);
@@ -818,6 +1013,44 @@
       updateMapPins(openFiltered);
       if (expPanel && expPanel.style.display !== "none") renderExpanded();
     }).catch(function (err) { console.error("[pcorg] refresh error", err); });
+  }
+
+  // ── Filtre texte du petit bloc (local, sur les fiches chargees) ──────────
+  var widgetFilterText = "";
+
+  function initWidgetFilter() {
+    [listOpen, listClosed].forEach(function (list) {
+      if (!list) return;
+      var wrap = mkEl("div", "pcorg-widget-filter");
+      wrap.appendChild(matIcon("search", "pcorg-widget-filter-ico"));
+      var inp = mkEl("input", "pcorg-widget-filter-input");
+      inp.type = "search";
+      inp.placeholder = "Filtrer (texte, zone, vehicule, n°)...";
+      inp.addEventListener("input", function () {
+        widgetFilterText = (inp.value || "").trim().toLowerCase();
+        // Un seul filtre pour les deux onglets
+        document.querySelectorAll(".pcorg-widget-filter-input").forEach(function (o) {
+          if (o !== inp) o.value = inp.value;
+        });
+        renderWidgetLists();
+      });
+      wrap.appendChild(inp);
+      list.insertBefore(wrap, list.firstChild);
+    });
+  }
+
+  function matchesWidgetFilter(it) {
+    if (!widgetFilterText) return true;
+    var hay = [it.text, it.category, it.sous_classification, it.area_desc, it.operator,
+      it.patrouille, it.niveau_urgence ? urgencyLabel(it.category, it.niveau_urgence) : ""]
+      .join(" ").toLowerCase();
+    return hay.indexOf(widgetFilterText) !== -1;
+  }
+
+  function renderWidgetLists() {
+    if (!lastData) return;
+    renderList(listOpen, (lastData.open || []).filter(matchesWidgetFilter), false, placeholderOpen);
+    renderList(listClosed, (lastData.closed || []).filter(matchesWidgetFilter), true, placeholderClosed);
   }
 
   // ── Render list ────────────────────────────────────────────────────────────
@@ -897,8 +1130,21 @@
           right.appendChild(rowBadge);
         }
       }
+      // Dispatch automatique : proposition en cours ou file du service
+      var dispSt = !isClosed && item.dispatch ? item.dispatch.state : null;
+      if (dispSt === "proposing" || dispSt === "queued") {
+        var dIco = matIcon(dispSt === "proposing" ? "hourglass_top" : "pending_actions",
+          "pcorg-row-disp pcorg-row-disp-" + dispSt);
+        dIco.title = dispSt === "proposing"
+          ? "Proposee a " + (item.dispatch.current_device || "une unite") + ", reponse attendue"
+          : "En file du service" + (item.dispatch.queue_reason ? " : " + item.dispatch.queue_reason : "");
+        right.appendChild(dIco);
+      }
       var timeEl = mkEl("span", "pcorg-row-time");
-      timeEl.textContent = isClosed ? shortTime(item.close_ts) : timeAgo(item.ts);
+      // Fiches closes : la date si ce n'est pas aujourd'hui (evenements sur
+      // plusieurs jours : "14:05" seul etait ambigu)
+      timeEl.textContent = isClosed ? fmtDayTime(item.close_ts) : timeAgo(item.ts);
+      if (isClosed && item.operator_close) timeEl.title = "Close par " + operatorLabel(item.operator_close);
       right.appendChild(timeEl);
 
       var gpsIcon = matIcon(item.lat != null ? "location_on" : "location_off",
@@ -911,12 +1157,13 @@
         })(item.id));
       } else {
         gpsIcon.title = "Voir sur la carte";
-        gpsIcon.addEventListener("click", (function (lat, lon) {
-          return function (e) { e.stopPropagation(); flyToPin(lat, lon); };
-        })(item.lat, item.lon));
+        gpsIcon.addEventListener("click", (function (lat, lon, id) {
+          return function (e) { e.stopPropagation(); flyToPin(lat, lon, id); };
+        })(item.lat, item.lon, item.id));
       }
       right.appendChild(gpsIcon);
       row.appendChild(right);
+      if (activeFicheId === item.id) row.classList.add("pcorg-row-active");
 
       row.addEventListener("click", (function (id, closed) {
         return function () { openDetailModal(id, closed); };
@@ -1044,10 +1291,8 @@
       return;
     }
     // Switch carte + fly + ouvrir popup
+    ensureMapVisible();
     var map = getMap();
-    if (window.CockpitMapView && window.CockpitMapView.currentView() !== "map") {
-      window.CockpitMapView.switchView("map");
-    }
     setTimeout(function () {
       if (!map) return;
       // Ouvrir le popup d'abord pour mesurer sa hauteur
@@ -1078,22 +1323,40 @@
     detailOverlay.classList.add("show");
   }
   function hideFiche() {
+    if (!detailModal) return;
     detailModal.classList.remove("show");
     detailOverlay.classList.remove("show");
+    detailModal.classList.remove("pca-over");
+    detailOverlay.classList.remove("pca-over");
     destroyMiniMap();
+    detailOpenId = null;
+    setActiveFiche(null);
   }
 
-  function openDetailModal(id, isClosed) {
+  var detailOpenId = null;
+
+  // opts.keepScroll : rechargement apres une action (commentaire, urgence...)
+  // sans remonter en haut de la fiche ni faire clignoter un "Chargement".
+  function openDetailModal(id, isClosed, opts) {
+    opts = opts || {};
     detailModal = detailModal || document.getElementById("pcorgDetailModal");
     detailOverlay = detailOverlay || document.getElementById("pcorgDetailOverlay");
     if (!detailModal) return;
     var body = document.getElementById("pcorg-fiche-body");
-    body.textContent = "";
-    var loading = mkEl("div", "widget-placeholder");
-    loading.appendChild(matIcon("hourglass_top"));
-    var lt = mkEl("span", ""); lt.textContent = "Chargement..."; loading.appendChild(lt);
-    body.appendChild(loading);
+    var scrollEl = detailModal.querySelector(".pcorg-fiche-modal") || body;
+    var keep = opts.keepScroll && detailOpenId === id && detailModal.classList.contains("show");
+    var prevScroll = keep ? body.scrollTop : 0;
+    var prevScrollModal = keep ? scrollEl.scrollTop : 0;
+    if (!keep) {
+      body.textContent = "";
+      var loading = mkEl("div", "widget-placeholder");
+      loading.appendChild(matIcon("hourglass_top"));
+      var lt = mkEl("span", ""); lt.textContent = "Chargement..."; loading.appendChild(lt);
+      body.appendChild(loading);
+    }
+    detailOpenId = id;
     showFiche();
+    setActiveFiche(id);
 
     // Wire close
     var closeBtn = document.getElementById("pcorgDetailClose");
@@ -1106,13 +1369,145 @@
         if (d.error) { body.textContent = d.error; return; }
         // Ack bounce for this user
         ackPin(id, d.bounce_rev || 0);
-        renderFiche(d, isClosed);
+        var mk = pcorgMarkers[id];
+        if (mk && mk.getElement && mk.getElement()) mk.getElement().classList.remove("pcorg-pin-bounce");
+        // Statut lu sur la fiche elle-meme, pas sur la liste d'ou vient le clic
+        renderFiche(d, d.status_code === 10);
+        if (keep) {
+          body.scrollTop = prevScroll;
+          scrollEl.scrollTop = prevScrollModal;
+        }
       })
       .catch(function () { body.textContent = "Erreur de chargement"; });
   }
 
+  function reloadFiche(id) {
+    if (detailOpenId === id && detailModal && detailModal.classList.contains("show")) {
+      openDetailModal(id, false, { keepScroll: true });
+    }
+  }
+
   function destroyMiniMap() {
     if (detailMiniMap) { detailMiniMap.remove(); detailMiniMap = null; }
+  }
+
+  // ── Dispatch automatique dans la fiche ─────────────────────────────────────
+  var DISPATCH_OUTCOMES = {
+    resolu: "Resolu", partiel: "Resolu partiellement",
+    materiel: "Besoin de materiel ou de renfort", impossible: "Intervention impossible"
+  };
+  var dispatchCountdownTimer = null;
+
+  function _dispDelay(fromIso, toIso) {
+    var a = fromIso ? new Date(fromIso).getTime() : NaN;
+    var b = toIso ? new Date(toIso).getTime() : NaN;
+    if (isNaN(a) || isNaN(b)) return "";
+    var m = Math.max(0, Math.round((b - a) / 60000));
+    return m < 60 ? m + " min" : Math.floor(m / 60) + " h " + _pad2(m % 60);
+  }
+
+  // Ligne d'etat du dispatch + bouton "Proposer automatiquement" + temps
+  // d'intervention. Rend null si rien a montrer.
+  function buildDispatchBlock(d, closed) {
+    if (dispatchCountdownTimer) { clearInterval(dispatchCountdownTimer); dispatchCountdownTimer = null; }
+    var disp = d.dispatch || null;
+    var inter = d.intervention || {};
+    var cc = d.content_category || {};
+    var hasUnit = !!String(cc.patrouille || d.patrouille || "").trim();
+    var state = disp ? disp.state : null;
+    var canPropose = !closed && !hasUnit && state !== "proposing";
+    var hasInter = !!(inter.engaged_at || inter.arrived_at || inter.done_at);
+    var showLine = state === "proposing" || state === "queued";
+    if (!showLine && !canPropose && !hasInter) return null;
+
+    var wrap = mkEl("div", "pcorg-dispatch");
+
+    if (state === "proposing") {
+      var line = mkEl("div", "pcorg-dispatch-line is-proposing");
+      line.appendChild(matIcon("hourglass_top"));
+      var txt = mkEl("span", "");
+      txt.textContent = disp.current_device ? "Proposee a " + disp.current_device : "Recherche automatique d'une unite...";
+      line.appendChild(txt);
+      if (disp.expires_at) {
+        var cd = mkEl("strong", "pcorg-dispatch-countdown");
+        line.appendChild(cd);
+        var exp = new Date(disp.expires_at).getTime();
+        var reloaded = false;
+        var upd = function () {
+          if (!cd.isConnected) { clearInterval(dispatchCountdownTimer); dispatchCountdownTimer = null; return; }
+          var left = Math.round((exp - Date.now()) / 1000);
+          cd.textContent = left > 0 ? left + " s" : "reponse attendue";
+          // Echeance passee : relire la fiche (unite suivante ou file du service)
+          if (left < -5 && !reloaded) {
+            reloaded = true;
+            clearInterval(dispatchCountdownTimer); dispatchCountdownTimer = null;
+            reloadFiche(d.id);
+          }
+        };
+        upd();
+        dispatchCountdownTimer = setInterval(upd, 1000);
+      }
+      wrap.appendChild(line);
+    } else if (state === "queued") {
+      var q = mkEl("div", "pcorg-dispatch-line is-queued");
+      q.appendChild(matIcon("pending_actions"));
+      var qt = mkEl("span", "");
+      qt.textContent = "En file du service" + (disp.queue_reason ? " : " + disp.queue_reason : "");
+      q.appendChild(qt);
+      wrap.appendChild(q);
+    }
+
+    if (canPropose) {
+      var btn = mkEl("button", "pcorg-dispatch-btn");
+      btn.type = "button";
+      btn.appendChild(matIcon("smart_toy"));
+      var bl = mkEl("span", "");
+      bl.textContent = "Proposer automatiquement";
+      btn.appendChild(bl);
+      btn.title = "Proposer la fiche a l'unite disponible la plus proche de la categorie";
+      btn.addEventListener("click", function () {
+        btn.disabled = true;
+        apiCall("POST", "/api/dispatch/" + encodeURIComponent(d.id) + "/auto", {}).then(function (res) {
+          btn.disabled = false;
+          if (!res || res.ok === false || res.error) {
+            var msgs = {
+              fiche_closee: "La fiche est close.", deja_engagee: "Une unite est deja engagee.",
+              deja_en_cours: "Une proposition est deja en cours.", forbidden: "Categorie non autorisee."
+            };
+            showToast("error", msgs[res && res.error] || (res && res.error) || "Echec de la proposition");
+          } else if (res.state === "queued") {
+            showToast("warning", "Aucune unite disponible : fiche mise en file du service");
+          } else {
+            showToast("success", "Proposition automatique lancee");
+          }
+          reloadFiche(d.id);
+        });
+      });
+      wrap.appendChild(btn);
+    }
+
+    if (hasInter) {
+      var times = mkEl("div", "pcorg-dispatch-times");
+      var add = function (label, iso, extra) {
+        if (!iso) return;
+        var it = mkEl("span", "");
+        var b = document.createElement("b");
+        b.textContent = label + " ";
+        it.appendChild(b);
+        it.appendChild(document.createTextNode(fmtDayTime(iso) + (extra ? " (" + extra + ")" : "")));
+        times.appendChild(it);
+      };
+      add("Engagement", inter.engaged_at, inter.device_name || "");
+      add("Arrivee", inter.arrived_at, _dispDelay(inter.engaged_at, inter.arrived_at));
+      add("Fin", inter.done_at, DISPATCH_OUTCOMES[inter.outcome] || inter.outcome || "");
+      if (inter.report) {
+        var rep = mkEl("span", "pcorg-dispatch-report");
+        rep.textContent = inter.report;
+        times.appendChild(rep);
+      }
+      wrap.appendChild(times);
+    }
+    return wrap;
   }
 
   function renderFiche(d, isClosed) {
@@ -1123,7 +1518,7 @@
     var header = document.getElementById("pcorg-fiche-header");
     header.style.background = st.color;
     header.querySelector(".pcorg-fiche-icon").textContent = st.icon;
-    header.querySelector(".pcorg-fiche-cat").textContent = d.category || "";
+    header.querySelector(".pcorg-fiche-cat").textContent = shortCat(d.category);
     header.querySelector(".pcorg-fiche-subcat").textContent = cc.sous_classification || cc.classification || cc.typedemande || "";
     header.querySelector(".pcorg-fiche-num").textContent = d.sql_id ? "N\u00b0 " + d.sql_id : "";
     var statusEl = header.querySelector(".pcorg-fiche-status");
@@ -1155,8 +1550,9 @@
       body.appendChild(desc);
     }
 
-    // Urgency level selector (only if not closed)
-    if (!isClosed && d.status_code !== 10) {
+    // Urgency level selector (only if not closed). Meme regle que la creation
+    // et l'edition : categories configurees, ou fiche portant deja un niveau.
+    if (!isClosed && d.status_code !== 10 && urgencyEnabledFor(d.category, d.niveau_urgence)) {
       var urgSec = mkEl("div", "pcorg-fiche-section");
       urgSec.textContent = "Niveau d'urgence";
       body.appendChild(urgSec);
@@ -1173,7 +1569,13 @@
     addField(fields, "Operateur", opDisplay);
     if (d.ts) addInterventionTsField(fields, d, isClosed);
     if (d.close_ts && d.status_code === 10) addField(fields, "Cloture", new Date(d.close_ts).toLocaleString("fr-FR"));
-    if (d.operator_close && d.operator_close !== d.operator) addField(fields, "Clos par", d.operator_close);
+    if (d.status_code === 10 && d.operator_close) addField(fields, "Clos par", operatorLabel(d.operator_close));
+    if (d.sql_id) {
+      var owned = d.cockpit_owned || [];
+      addField(fields, "Origine", owned.length
+        ? "Prysm, modifiee dans Cockpit (modifications conservees a la synchro)"
+        : "Prysm (synchro SQL)");
+    }
     addField(fields, "Zone", truncZone(d.area_desc));
     addSourceField(fields, cc);
     addField(fields, "Carroye", cc.carroye);
@@ -1203,8 +1605,9 @@
         fvStatusBadge.style.color = ficheDevSt.color;
         vBanner.appendChild(fvStatusBadge);
       }
-      // Bouton "Calculer itineraire" : ouvre la modale Routing (vehicule -> fiche)
-      if (window.RoutingModal && typeof window.RoutingModal.openForFiche === "function") {
+      // Bouton "Calculer itineraire" : ouvre la modale Routing (vehicule -> fiche).
+      // Sans position sur la fiche, il n'y a pas d'arrivee a calculer.
+      if (d.lat != null && window.RoutingModal && typeof window.RoutingModal.openForFiche === "function") {
         var rtBtn = mkEl("button", "pcorg-fiche-vehicle-route");
         rtBtn.type = "button";
         rtBtn.appendChild(matIcon("route", "pcorg-fiche-vehicle-route-ico"));
@@ -1218,6 +1621,11 @@
       }
       body.appendChild(vBanner);
     }
+
+    // Dispatch automatique (dispatch_auto.py) : proposition en cours, file du
+    // service, horodatages d'intervention
+    var dispBlock = buildDispatchBlock(d, isClosed || d.status_code === 10);
+    if (dispBlock) body.appendChild(dispBlock);
 
     // Mini map
     var mapDiv = mkEl("div", "pcorg-fiche-minimap");
@@ -1261,65 +1669,7 @@
       var chronoSec = mkEl("div", "pcorg-fiche-section");
       chronoSec.textContent = "Chronologie";
       body.appendChild(chronoSec);
-      var timeline = mkEl("div", "pcorg-fiche-timeline");
-      timeline.style.setProperty("--cat-color", st.color);
-      history.forEach(function (entry) {
-        var isStatus = entry.text && entry.text.indexOf("Statut:") === 0;
-        var ent = mkEl("div", "pcorg-chrono-entry" + (isStatus ? " status-change" : ""));
-        ent.style.setProperty("--dot-color", isStatus ? "var(--muted)" : st.color);
-        ent.querySelector || null; // noop
-        // dot color via border-color
-        var dotStyle = "border-color:" + (isStatus ? "var(--muted)" : st.color);
-        ent.setAttribute("style", "--dot-color:" + (isStatus ? "#94a3b8" : st.color));
-
-        var head = mkEl("div", "pcorg-chrono-head");
-        var tsEl = mkEl("span", "pcorg-chrono-ts");
-        try {
-          var dt = new Date(entry.ts);
-          tsEl.textContent = String(dt.getHours()).padStart(2, "0") + ":" +
-            String(dt.getMinutes()).padStart(2, "0");
-        } catch (e) { tsEl.textContent = entry.ts || ""; }
-        head.appendChild(tsEl);
-        var opEl = mkEl("span", "pcorg-chrono-op");
-        opEl.textContent = entry.operator || "";
-        head.appendChild(opEl);
-        ent.appendChild(head);
-
-        var entryText = entry.text || entry.comment || "";
-        if (entryText) {
-          var txt = mkEl("div", "pcorg-chrono-text");
-          txt.textContent = entryText;
-          ent.appendChild(txt);
-        }
-        if (entry.photo) {
-          var photoWrap = mkEl("div", "pcorg-chrono-photo-wrap");
-          var img = mkEl("img", "pcorg-chrono-photo");
-          img.src = entry.thumb || entry.photo;
-          img.alt = "Photo terrain";
-          img.loading = "lazy";
-          img.addEventListener("click", (function (full) {
-            return function () { openPhotoLightbox(full); };
-          })(entry.photo));
-          photoWrap.appendChild(img);
-          ent.appendChild(photoWrap);
-        }
-        if (entry.codes && entry.codes.length) {
-          var codesWrap = mkEl("div", "pcorg-chrono-codes");
-          entry.codes.forEach(function (c) {
-            var chip = mkEl("div", "pcorg-chrono-code");
-            var fmtEl = mkEl("span", "pcorg-chrono-code-fmt");
-            fmtEl.textContent = (c.format || "manual").toUpperCase();
-            var valEl = mkEl("span", "pcorg-chrono-code-val");
-            valEl.textContent = c.value || "";
-            chip.appendChild(fmtEl);
-            chip.appendChild(valEl);
-            codesWrap.appendChild(chip);
-          });
-          ent.appendChild(codesWrap);
-        }
-        timeline.appendChild(ent);
-      });
-      body.appendChild(timeline);
+      body.appendChild(renderChronology(history, st.color, { compact: false, refTs: d.ts }));
     }
 
     // Add comment form (only if not closed)
@@ -1343,19 +1693,15 @@
         openCameraPicker(function (camId, camName) {
           camBtn.disabled = true;
           showToast("info", "Capture " + camName + " en cours...");
-          apiPost("/api/pcorg/camera-capture", { cam_id: camId, fiche_id: d.id })
+          apiCall("POST", "/api/pcorg/camera-capture", { cam_id: camId, fiche_id: d.id })
             .then(function (r) {
               camBtn.disabled = false;
               if (r.ok) {
                 showToast("success", "Photo " + camName + " ajoutee");
-                openDetailModal(d.id, false);
+                reloadFiche(d.id);
               } else {
-                showToast("error", r.error || "Erreur capture");
+                showToast("error", r.error || "Camera injoignable ou erreur capture");
               }
-            })
-            .catch(function () {
-              camBtn.disabled = false;
-              showToast("error", "Camera injoignable ou erreur reseau");
             });
         });
       });
@@ -1368,44 +1714,54 @@
         var txt = commentInput.value.trim();
         if (!txt) return;
         commentBtn.disabled = true;
-        apiPost("/api/pcorg/comment/" + encodeURIComponent(d.id), { text: txt })
+        apiCall("POST", "/api/pcorg/comment/" + encodeURIComponent(d.id), { text: txt })
           .then(function (r) {
             commentBtn.disabled = false;
             if (r.ok) {
               commentInput.value = "";
               showToast("success", "Commentaire ajoute");
-              openDetailModal(d.id, false);
+              reloadFiche(d.id);
             } else {
+              // Le brouillon reste dans le champ
               showToast("error", r.error || "Erreur");
             }
           });
+      });
+      commentInput.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commentBtn.click(); }
       });
       commentBtns.appendChild(commentBtn);
       commentForm.appendChild(commentBtns);
       body.appendChild(commentForm);
     }
 
+    // Precedents (autres editions), charges a la demande
+    body.appendChild(pcaBuildPrecedentsBlock(d));
+
     // Actions
     var actions = mkEl("div", "pcorg-fiche-actions");
+    var ficheOpen = !isClosed && d.status_code !== 10;
     if (d.lat != null) {
       var btnMap = mkEl("button", "");
       btnMap.appendChild(matIcon("map"));
       btnMap.appendChild(document.createTextNode(" Voir sur carte"));
       btnMap.addEventListener("click", function () {
-        hideFiche(); flyToPin(d.lat, d.lon);
+        hideFiche(); flyToPin(d.lat, d.lon, d.id);
       });
       actions.appendChild(btnMap);
-    } else {
+    }
+    // Poser ou DEPLACER la position (avant : seulement si absente)
+    if (ficheOpen) {
       var btnGps = mkEl("button", "");
-      btnGps.appendChild(matIcon("add_location"));
-      btnGps.appendChild(document.createTextNode(" Ajouter position"));
+      btnGps.appendChild(matIcon(d.lat != null ? "edit_location_alt" : "add_location"));
+      btnGps.appendChild(document.createTextNode(d.lat != null ? " Deplacer" : " Ajouter position"));
       btnGps.addEventListener("click", function () {
-        hideFiche(); openGpsModal(d.id);
+        hideFiche(); openGpsModal(d.id, d.lat, d.lon);
       });
       actions.appendChild(btnGps);
     }
     // Edit button (not closed)
-    if (!isClosed && d.status_code !== 10) {
+    if (ficheOpen) {
       var btnEdit = mkEl("button", "");
       btnEdit.appendChild(matIcon("edit"));
       btnEdit.appendChild(document.createTextNode(" Editer"));
@@ -1423,6 +1779,14 @@
       });
       actions.appendChild(btnClose);
     }
+    // Reouverture (fiche close par erreur, reprise d'intervention)
+    if (d.status_code === 10 && (window.__userCanCloseFiche || window.__userIsAdmin)) {
+      var btnReopen = mkEl("button", "");
+      btnReopen.appendChild(matIcon("restart_alt"));
+      btnReopen.appendChild(document.createTextNode(" Rouvrir"));
+      btnReopen.addEventListener("click", function () { reopenIntervention(d.id); });
+      actions.appendChild(btnReopen);
+    }
     // Delete button (admin only)
     if (window.__userIsAdmin) {
       var btnDel = mkEl("button", "pcorg-btn-delete");
@@ -1439,93 +1803,480 @@
     body.appendChild(actions);
   }
 
+  // ── Chronologie (fiche et popup carte) ──────────────────────────────────
+  // Entrees decorees cote serveur (pcorg_history.decorate_history) :
+  //   kind        status | system | change | empty | comment
+  //   status_from / status_to   ligne "Statut: A -> B" extraite du texte
+  //   changes     [{field, old, new}] (modifications Prysm ou Cockpit)
+  //   body        commentaire libre, SANS les lignes systeme
+  //   synthetic   cloture reconstituee depuis close_ts / operator_close
+  // Avant, toute entree commencant par "Statut:" etait en italique grise,
+  // y compris le commentaire de cloture qui la suit : illisible.
+  function chronoTime(dt, withDate) {
+    var hm = _pad2(dt.getHours()) + ":" + _pad2(dt.getMinutes());
+    return withDate ? _pad2(dt.getDate()) + "/" + _pad2(dt.getMonth() + 1) + " " + hm : hm;
+  }
+
+  function renderChronology(history, color, opts) {
+    opts = opts || {};
+    var wrap = mkEl("div", "pcorg-fiche-timeline" + (opts.compact ? " pcorg-chrono-compact" : ""));
+    wrap.style.setProperty("--cat-color", color);
+    var today = new Date();
+    var prevDt = null;
+    history.forEach(function (entry) {
+      var kind = entry.kind || (entry.text && entry.text.indexOf("Statut:") === 0 ? "status" : "comment");
+      var closed = kind === "status" && /^termin/i.test(entry.status_to || "");
+      var reopened = kind === "status" && /^termin/i.test(entry.status_from || "");
+      var ent = mkEl("div", "pcorg-chrono-entry kind-" + kind
+        + (closed ? " is-closed" : "") + (reopened ? " is-reopened" : "")
+        + (entry.synthetic ? " is-synthetic" : ""));
+      ent.style.setProperty("--dot-color",
+        kind === "comment" ? color : (closed ? "#16a34a" : (reopened ? "#f59e0b" : "#94a3b8")));
+
+      // En-tete : heure (date au premier element et a chaque changement de
+      // jour, ou si ce n'est pas aujourd'hui) + operateur
+      var head = mkEl("div", "pcorg-chrono-head");
+      var tsEl = mkEl("span", "pcorg-chrono-ts");
+      var dt = entry.ts ? new Date(entry.ts) : null;
+      if (dt && !isNaN(dt.getTime())) {
+        var withDate = prevDt ? !_isSameDay(dt, prevDt) : !_isSameDay(dt, today);
+        tsEl.textContent = chronoTime(dt, withDate);
+        tsEl.title = dt.toLocaleString("fr-FR");
+        prevDt = dt;
+      } else {
+        tsEl.textContent = "--:--";
+        tsEl.title = "Heure inconnue";
+      }
+      head.appendChild(tsEl);
+      var opEl = mkEl("span", "pcorg-chrono-op");
+      opEl.textContent = operatorLabel(entry.operator) || (entry.synthetic ? "operateur non renseigne" : "");
+      head.appendChild(opEl);
+      ent.appendChild(head);
+
+      if (kind === "status" && entry.status_to) {
+        var pill = mkEl("span", "pcorg-chrono-status" + (closed ? " closed" : "") + (reopened ? " reopened" : ""));
+        pill.appendChild(matIcon(closed ? "check_circle" : (reopened ? "restart_alt" : "sync_alt")));
+        var pillTxt = mkEl("span", "");
+        pillTxt.textContent = (entry.status_from ? entry.status_from + " → " : "") + entry.status_to;
+        pill.appendChild(pillTxt);
+        if (entry.synthetic) pill.title = "Cloture enregistree sur la fiche, sans ligne de statut dans la chronologie";
+        ent.appendChild(pill);
+      }
+
+      var bodyText = entry.body != null ? entry.body : (entry.text || entry.comment || "");
+      if (kind === "system" && bodyText) {
+        var sys = mkEl("div", "pcorg-chrono-system");
+        sys.appendChild(matIcon("tune"));
+        var sysTxt = mkEl("span", ""); sysTxt.textContent = bodyText;
+        sys.appendChild(sysTxt);
+        ent.appendChild(sys);
+        bodyText = "";
+      }
+
+      var changes = entry.changes || [];
+      if (changes.length) {
+        var ul = mkEl("ul", "pcorg-chrono-changes");
+        changes.forEach(function (c) {
+          var li = document.createElement("li");
+          var f = document.createElement("b"); f.textContent = c.field;
+          li.appendChild(f);
+          li.appendChild(document.createTextNode(" : "));
+          if (c.old) {
+            var o = mkEl("span", "pcorg-chrono-old"); o.textContent = c.old;
+            li.appendChild(o);
+            li.appendChild(document.createTextNode(" → "));
+          }
+          var n = mkEl("span", "pcorg-chrono-new"); n.textContent = c["new"] || "(vide)";
+          li.appendChild(n);
+          ul.appendChild(li);
+        });
+        ent.appendChild(ul);
+      }
+
+      if (bodyText) {
+        var txtEl = mkEl("div", "pcorg-chrono-text");
+        txtEl.textContent = bodyText;
+        ent.appendChild(txtEl);
+      } else if (kind === "empty") {
+        var em = mkEl("div", "pcorg-chrono-empty");
+        em.textContent = "Mise a jour sans commentaire";
+        ent.appendChild(em);
+      }
+
+      var photos = (entry.photos && entry.photos.length) ? entry.photos
+        : (entry.photo ? [{ photo: entry.photo, thumb: entry.thumb }] : []);
+      if (photos.length) {
+        var photoWrap = mkEl("div", "pcorg-chrono-photo-wrap");
+        photos.forEach(function (p) {
+          var img = mkEl("img", "pcorg-chrono-photo");
+          img.src = p.thumb || p.photo;
+          img.alt = "Photo terrain";
+          img.loading = "lazy";
+          img.addEventListener("click", function (e) { e.stopPropagation(); openPhotoLightbox(p.photo); });
+          photoWrap.appendChild(img);
+        });
+        ent.appendChild(photoWrap);
+      }
+      if (entry.codes && entry.codes.length) {
+        var codesWrap = mkEl("div", "pcorg-chrono-codes");
+        entry.codes.forEach(function (c) {
+          var chip = mkEl("div", "pcorg-chrono-code");
+          var fmtEl = mkEl("span", "pcorg-chrono-code-fmt");
+          fmtEl.textContent = (c.format || "manual").toUpperCase();
+          var valEl = mkEl("span", "pcorg-chrono-code-val");
+          valEl.textContent = c.value || "";
+          chip.appendChild(fmtEl);
+          chip.appendChild(valEl);
+          codesWrap.appendChild(chip);
+        });
+        ent.appendChild(codesWrap);
+      }
+      wrap.appendChild(ent);
+    });
+    return wrap;
+  }
+
+  // ── Champs propres a chaque categorie (creation ET edition) ─────────────
+  // Un seul constructeur : la creation et l'edition dupliquaient la
+  // structure, les listes Fourriere et les helpers de champ.
+  var FOURRIERE_TYPES = ["Parking sauvage", "Pas de titre", "Mauvais titre (sticker ou badge)", "Stationnement genant", "Autre"];
+  var FOURRIERE_DECISIONS = ["Remorquage demande", "Sabot pose", "Avertissement", "Annule"];
+
+  // Cles de content_category portees par chaque categorie : au changement de
+  // categorie en edition, celles de l'ancienne sont videes (elles restaient
+  // attachees a la fiche et s'affichaient sous la nouvelle).
+  function catFieldKeys(cat) {
+    if (cat === "PCO.Secours" || cat === "PCO.Securite" || cat === "PCO.Technique") {
+      return ["sous_classification", "intervenant1", "intervenant2", "service_contacte"];
+    }
+    if (cat === "PCO.Flux") return ["sous_classification", "moyens_engages_niveau_1", "moyens_engages_niveau_2"];
+    if (cat === "PCO.Fourriere") return ["typedemande", "lieu", "detailsvl", "immat", "decision"];
+    return ["sous_classification"];
+  }
+
+  function addFormField(container, id, label, value, options, required) {
+    var grp = mkEl("div", "form-group");
+    var lbl = mkEl("label", ""); lbl.textContent = label; lbl.setAttribute("for", id);
+    if (required) {
+      var star = mkEl("span", ""); star.style.color = "var(--danger,#ef4444)"; star.textContent = " *";
+      lbl.appendChild(star);
+    }
+    grp.appendChild(lbl);
+    var el;
+    if (options && options.length) {
+      el = mkEl("select", "form-input");
+      var opt0 = mkEl("option", ""); opt0.value = ""; opt0.textContent = "-- Choisir --";
+      el.appendChild(opt0);
+      options.forEach(function (o) {
+        var opt = mkEl("option", ""); opt.value = o; opt.textContent = o;
+        el.appendChild(opt);
+      });
+      // Valeur courante absente de la liste (ancienne fiche, liste modifiee)
+      if (value && options.indexOf(value) === -1) {
+        var optC = mkEl("option", ""); optC.value = value; optC.textContent = value;
+        el.appendChild(optC);
+      }
+    } else {
+      el = mkEl("input", "form-input"); el.type = "text"; el.placeholder = label;
+    }
+    el.id = id;
+    el.value = value || "";
+    grp.appendChild(el);
+    container.appendChild(grp);
+    return el;
+  }
+
+  // hooks.urgency / hooks.comment sont inseres a leur place dans l'ordre
+  // propre a la categorie. Retourne { collect(): {cle: valeur}, requiresSous }.
+  function buildCategoryFields(container, cat, values, prefix, hooks) {
+    values = values || {};
+    hooks = hooks || {};
+    var subs = extractLabels((pcorgConfig.sous_classifications || {})[cat]);
+    var intervList = extractLabels(pcorgConfig.intervenants);
+    var serviceList = extractLabels(pcorgConfig.services);
+    var vehicleNames = (vehiclesByCategory[cat] || []).map(function (v) { return v.label; });
+    var ids = {};
+
+    function field(key, label, options, required) {
+      ids[key] = prefix + key;
+      addFormField(container, ids[key], label, values[key] || "", options && options.length ? options : null, required);
+    }
+    function sous() {
+      if (subs.length || values.sous_classification) field("sous_classification", "Sous-classification", subs, subs.length > 0);
+    }
+    function vehicle() {
+      if (vehicleNames.length || values.patrouille) field("patrouille", "Vehicule engage", vehicleNames);
+    }
+    function hook(name) { if (hooks[name]) hooks[name](container); }
+
+    if (cat === "PCO.Secours" || cat === "PCO.Securite" || cat === "PCO.Technique") {
+      sous(); hook("urgency"); hook("comment"); vehicle();
+      field("intervenant1", "Intervenant 1", intervList);
+      field("intervenant2", "Intervenant 2", intervList);
+      field("service_contacte", "Service contacte", serviceList);
+    } else if (cat === "PCO.Flux") {
+      sous(); hook("urgency"); hook("comment"); vehicle();
+      field("moyens_engages_niveau_1", "Moyens engages Niv.1", intervList);
+      field("moyens_engages_niveau_2", "Moyens engages Niv.2", intervList);
+    } else if (cat === "PCO.Fourriere") {
+      field("typedemande", "Type de demande", FOURRIERE_TYPES);
+      field("lieu", "Lieu");
+      field("detailsvl", "Vehicule (marque, couleur, modele)");
+      field("immat", "Immatriculation");
+      field("decision", "Decision", FOURRIERE_DECISIONS);
+      hook("comment"); vehicle();
+    } else {
+      sous(); hook("urgency"); hook("comment"); vehicle();
+    }
+
+    return {
+      requiresSous: subs.length > 0,
+      collect: function () {
+        var out = {};
+        Object.keys(ids).forEach(function (k) {
+          var el = document.getElementById(ids[k]);
+          if (el) out[k] = (el.value || "").trim();
+        });
+        return out;
+      }
+    };
+  }
+
+  // ── Source (qui a declenche la fiche) : editeur autonome pour l'edition ──
+  // Meme modele que la creation (source_type + qui + canal). L'edition
+  // n'offrait que l'ancien couple Appelant + Telephone/Radio : modifier la
+  // source d'une fiche recente ne changeait rien a l'affichage.
+  function buildSourceEditor(parent, cc) {
+    cc = cc || {};
+    var st = { src: cc.source_type || "", canal: cc.canal || "" };
+    if (!st.src && (cc.appelant || cc.telephone || cc.radio)) st.src = "externe";
+    if (!st.canal) {
+      if (cc.telephone) st.canal = "telephone";
+      else if (cc.radio) st.canal = "radio";
+      else if (cc.presentiel) st.canal = "presentiel";
+      else if (cc.mail) st.canal = "mail";
+    }
+    var sec = mkEl("div", "pcorg-fiche-section"); sec.textContent = "Source";
+    parent.appendChild(sec);
+    var tabs = mkEl("div", "pcorg-source-tabs");
+    var fields = mkEl("div", "pcorg-source-fields");
+    parent.appendChild(tabs);
+    parent.appendChild(fields);
+    _refreshSourceDatalists();
+
+    function whoValue(src) {
+      if (src === "externe") return cc.appelant || "";
+      if (src === "operateur") return cc.emetteur_interne || cc.appelant || "";
+      if (src === "hierarchie") return cc.donneur_ordre || cc.appelant || "";
+      return "";
+    }
+
+    function renderTabs() {
+      tabs.textContent = "";
+      SOURCE_TYPES.forEach(function (s) {
+        var b = mkEl("button", "pcorg-source-tab" + (s.id === st.src ? " selected" : ""));
+        b.type = "button";
+        b.style.setProperty("--src-color", s.color);
+        b.appendChild(matIcon(s.icon, "pcorg-source-tab-ico"));
+        var l = mkEl("span", "pcorg-source-tab-label"); l.textContent = s.label;
+        b.appendChild(l);
+        b.title = s.desc;
+        b.addEventListener("click", function () { st.src = s.id; renderTabs(); renderFields(); });
+        tabs.appendChild(b);
+      });
+    }
+
+    function renderFields() {
+      fields.textContent = "";
+      if (!st.src) return;
+      if (st.src === "initiative") {
+        addFormField(fields, "pcorg-edit-src-origine", "A la suite de (optionnel)", cc.source_origine || "");
+        return;
+      }
+      var labels = { externe: "Appelant", operateur: "Operateur emetteur", hierarchie: "Donneur d'ordre" };
+      var who = addFormField(fields, "pcorg-edit-src-who", labels[st.src], whoValue(st.src), null, true);
+      who.autocomplete = "off";
+      if (st.src === "operateur" || st.src === "hierarchie") {
+        attachAutocomplete(who, function () { return _sourceLists[st.src] || []; });
+      }
+      var grpC = mkEl("div", "form-group pcorg-source-subgrp");
+      var lblC = mkEl("label", ""); lblC.textContent = "Canal *";
+      grpC.appendChild(lblC);
+      var rowC = mkEl("div", "pcorg-canal-row");
+      var det = mkEl("div", "pcorg-canal-detail");
+      var detInp = mkEl("input", "form-input");
+      detInp.id = "pcorg-edit-src-canal-detail";
+      detInp.placeholder = "Canal radio (ex: 3, Secu, Maintenance...)";
+      detInp.value = cc.radio_canal || (typeof cc.radio === "string" ? cc.radio : "");
+      det.appendChild(detInp);
+      CANAUX.forEach(function (c) {
+        var b = mkEl("button", "pcorg-canal-btn" + (c.id === st.canal ? " selected" : ""));
+        b.type = "button";
+        b.appendChild(matIcon(c.icon, "pcorg-canal-btn-ico"));
+        var lab = mkEl("span", ""); lab.textContent = c.label;
+        b.appendChild(lab);
+        b.addEventListener("click", function () {
+          st.canal = c.id;
+          rowC.querySelectorAll(".pcorg-canal-btn").forEach(function (x) { x.classList.toggle("selected", x === b); });
+          det.style.display = c.id === "radio" ? "" : "none";
+        });
+        rowC.appendChild(b);
+      });
+      det.style.display = st.canal === "radio" ? "" : "none";
+      grpC.appendChild(rowC);
+      grpC.appendChild(det);
+      fields.appendChild(grpC);
+    }
+
+    renderTabs();
+    renderFields();
+
+    return {
+      // {ok, msg, cc} ; une fiche ancienne sans source peut rester sans source
+      collect: function () {
+        var out = {};
+        if (!st.src) return { ok: true, cc: out };
+        out.source_type = st.src;
+        if (st.src === "initiative") {
+          out.source_origine = getVal("pcorg-edit-src-origine");
+          out.canal = ""; out.telephone = false; out.radio = false; out.presentiel = false; out.mail = false;
+          return { ok: true, cc: out };
+        }
+        var who = getVal("pcorg-edit-src-who");
+        if (!who) return { ok: false, msg: "Indiquez qui est a l'origine de la fiche" };
+        if (!st.canal) return { ok: false, msg: "Selectionnez le canal" };
+        out.appelant = who;
+        if (st.src === "operateur") out.emetteur_interne = who;
+        if (st.src === "hierarchie") out.donneur_ordre = who;
+        out.canal = st.canal;
+        out.telephone = st.canal === "telephone";
+        out.presentiel = st.canal === "presentiel";
+        out.mail = st.canal === "mail";
+        if (st.canal === "radio") {
+          var detail = getVal("pcorg-edit-src-canal-detail");
+          out.radio = detail || true;
+          out.radio_canal = detail;
+        } else {
+          out.radio = false;
+          out.radio_canal = "";
+        }
+        return { ok: true, cc: out };
+      }
+    };
+  }
+
   // ── Edit mode on fiche ────────────────────────────────────────────────────
   function renderFicheEdit(d) {
-    var st = catStyle(d.category);
+    checkSessionBeforeForm();
     var cc = d.content_category || {};
     var body = document.getElementById("pcorg-fiche-body");
     body.textContent = "";
+    // Etat partage par les boutons : l'urgence etait passee PAR VALEUR au
+    // constructeur des champs, et le changement n'etait jamais envoye.
+    var state = { cat: d.category, urgency: d.niveau_urgence || "", spec: null };
 
     // Description
     var descSec = mkEl("div", "pcorg-fiche-section"); descSec.textContent = "Description"; body.appendChild(descSec);
     var descInput = mkEl("textarea", "form-input");
     descInput.id = "pcorg-edit-text"; descInput.rows = 2;
-    descInput.value = d.text_full || d.text || "";
+    descInput.value = d.text || "";
     body.appendChild(descInput);
 
-    // Category
+    // Categorie
     var catSec = mkEl("div", "pcorg-fiche-section"); catSec.textContent = "Categorie"; body.appendChild(catSec);
     var catContainer = mkEl("div", "pcorg-create-cats");
-    var editCat = d.category;
-    CATEGORY_ORDER.forEach(function (cat) {
+    var cats = CATEGORY_ORDER.slice();
+    if (cats.indexOf(d.category) === -1) cats.push(d.category);
+    function paintCats() {
+      catContainer.querySelectorAll(".pcorg-create-cat-btn").forEach(function (b) {
+        var c = b.getAttribute("data-cat");
+        var sel = c === state.cat;
+        var s = catStyle(c);
+        b.classList.toggle("selected", sel);
+        b.style.borderColor = sel ? s.color : "";
+        b.style.background = sel ? s.color : "";
+        var bico = b.querySelector(".material-symbols-outlined");
+        if (bico) bico.style.color = sel ? "#fff" : s.color;
+      });
+    }
+    cats.forEach(function (cat) {
       var s = catStyle(cat);
-      var btn = mkEl("button", "pcorg-create-cat-btn" + (cat === editCat ? " selected" : ""));
+      var btn = mkEl("button", "pcorg-create-cat-btn");
       btn.type = "button";
       btn.setAttribute("data-cat", cat);
-      if (cat === editCat) { btn.style.borderColor = s.color; btn.style.background = s.color; }
-      var ico = matIcon(s.icon);
-      ico.style.color = cat === editCat ? "#fff" : s.color;
-      btn.appendChild(ico);
+      btn.appendChild(matIcon(s.icon));
       var label = mkEl("span", ""); label.textContent = shortCat(cat); btn.appendChild(label);
       btn.addEventListener("click", function () {
-        editCat = cat;
-        var ns = catStyle(cat);
-        catContainer.querySelectorAll(".pcorg-create-cat-btn").forEach(function (b) {
-          var sel = b.getAttribute("data-cat") === cat;
-          b.classList.toggle("selected", sel);
-          b.style.borderColor = sel ? ns.color : "";
-          b.style.background = sel ? ns.color : "";
-          var bico = b.querySelector(".material-symbols-outlined");
-          if (bico) bico.style.color = sel ? "#fff" : catStyle(b.getAttribute("data-cat")).color;
-        });
+        if (state.cat === cat) return;
+        state.cat = cat;
+        paintCats();
         var hdr = document.getElementById("pcorg-fiche-header");
-        hdr.style.background = ns.color;
-        hdr.querySelector(".pcorg-fiche-icon").textContent = ns.icon;
-        hdr.querySelector(".pcorg-fiche-cat").textContent = cat;
-        // Rebuild specific fields
-        buildEditSpecificFields(editSpecContainer, cat, cc, editUrgency);
+        hdr.style.background = s.color;
+        hdr.querySelector(".pcorg-fiche-icon").textContent = s.icon;
+        hdr.querySelector(".pcorg-fiche-cat").textContent = shortCat(cat);
+        rebuildSpecific();
       });
       catContainer.appendChild(btn);
     });
     body.appendChild(catContainer);
+    paintCats();
 
-    // Appelant + contact
-    var editUrgency = d.niveau_urgence || "";
-    var infoSec = mkEl("div", "pcorg-fiche-section"); infoSec.textContent = "Informations"; body.appendChild(infoSec);
-    var grpApp = mkEl("div", "form-group");
-    var lblApp = mkEl("label", ""); lblApp.textContent = "Appelant"; lblApp.setAttribute("for", "pcorg-edit-appelant");
-    grpApp.appendChild(lblApp);
-    var inpApp = mkEl("input", "form-input"); inpApp.type = "text"; inpApp.id = "pcorg-edit-appelant";
-    inpApp.value = cc.appelant || "";
-    grpApp.appendChild(inpApp);
-    body.appendChild(grpApp);
+    var srcEditor = buildSourceEditor(body, cc);
 
-    var grpContact = mkEl("div", "form-group");
-    var lblCo = mkEl("label", ""); lblCo.textContent = "Contact via"; grpContact.appendChild(lblCo);
-    var coRow = mkEl("div", ""); coRow.style.cssText = "display:flex;gap:8px;";
-    var lblTel = mkEl("label", ""); lblTel.style.cssText = "font-size:0.78rem;display:flex;align-items:center;gap:4px";
-    var rdTel = mkEl("input", ""); rdTel.type = "radio"; rdTel.name = "pcorg-edit-contact"; rdTel.id = "pcorg-edit-tel"; rdTel.value = "telephone";
-    rdTel.checked = !!cc.telephone;
-    lblTel.appendChild(rdTel); lblTel.appendChild(document.createTextNode("Telephone"));
-    coRow.appendChild(lblTel);
-    var lblRad = mkEl("label", ""); lblRad.style.cssText = "font-size:0.78rem;display:flex;align-items:center;gap:4px";
-    var rdRad = mkEl("input", ""); rdRad.type = "radio"; rdRad.name = "pcorg-edit-contact"; rdRad.id = "pcorg-edit-radio"; rdRad.value = "radio";
-    rdRad.checked = !!cc.radio;
-    lblRad.appendChild(rdRad); lblRad.appendChild(document.createTextNode("Radio"));
-    coRow.appendChild(lblRad);
-    var inpCanal = mkEl("input", "form-input"); inpCanal.type = "text"; inpCanal.id = "pcorg-edit-radio-canal";
-    inpCanal.placeholder = "Canal..."; inpCanal.style.cssText = "flex:1;display:" + (cc.radio ? "" : "none");
-    inpCanal.value = (typeof cc.radio === "string") ? cc.radio : "";
-    rdRad.addEventListener("change", function () { inpCanal.style.display = rdRad.checked ? "" : "none"; });
-    rdTel.addEventListener("change", function () { if (rdTel.checked) inpCanal.style.display = "none"; });
-    coRow.appendChild(inpCanal);
-    grpContact.appendChild(coRow);
-    body.appendChild(grpContact);
+    var detSec = mkEl("div", "pcorg-fiche-section"); detSec.textContent = "Details"; body.appendChild(detSec);
+    var specContainer = mkEl("div", "");
+    body.appendChild(specContainer);
 
-    // Category-specific fields (includes urgency, action, vehicle in correct order)
-    var editSpecContainer = mkEl("div", "");
-    body.appendChild(editSpecContainer);
-    buildEditSpecificFields(editSpecContainer, editCat, cc, editUrgency);
+    function appendEditUrgency(container) {
+      if (!urgencyEnabledFor(state.cat, state.urgency)) return;
+      var grp = mkEl("div", "form-group");
+      var lbl = mkEl("label", ""); lbl.textContent = "Niveau d'urgence";
+      grp.appendChild(lbl);
+      var row = mkEl("div", "pcorg-create-cats");
+      function paint() {
+        row.textContent = "";
+        [""].concat(URGENCY_LEVELS).forEach(function (lvl) {
+          var sel = state.urgency === lvl;
+          var c = lvl ? URGENCY_COLORS[lvl] : "var(--muted)";
+          var b = mkEl("button", "pcorg-create-cat-btn pcorg-urg-choice" + (sel ? " selected" : ""));
+          b.type = "button";
+          if (sel) { b.style.borderColor = c; b.style.background = c; }
+          if (lvl) {
+            var dot = mkEl("span", "pcorg-urg-dot"); dot.style.background = c;
+            b.appendChild(dot);
+          }
+          var t = mkEl("span", ""); t.textContent = lvl ? urgencyLabel(state.cat, lvl) : "Aucun";
+          b.appendChild(t);
+          b.addEventListener("click", function () { state.urgency = lvl; paint(); });
+          row.appendChild(b);
+        });
+      }
+      paint();
+      grp.appendChild(row);
+      container.appendChild(grp);
+    }
+
+    var commentDraft = "";
+    function appendEditComment(container) {
+      var grp = mkEl("div", "form-group");
+      var lbl = mkEl("label", ""); lbl.setAttribute("for", "pcorg-edit-comment");
+      lbl.textContent = "Commentaire (optionnel)";
+      grp.appendChild(lbl);
+      var ta = mkEl("textarea", "form-input");
+      ta.id = "pcorg-edit-comment"; ta.rows = 2;
+      ta.placeholder = "Action realisee, motif de la modification... (les champs modifies sont traces automatiquement)";
+      ta.value = commentDraft;
+      ta.addEventListener("input", function () { commentDraft = ta.value; });
+      grp.appendChild(ta);
+      container.appendChild(grp);
+    }
+
+    function rebuildSpecific() {
+      specContainer.textContent = "";
+      state.spec = buildCategoryFields(specContainer, state.cat, cc, "pcorg-edit-",
+        { urgency: appendEditUrgency, comment: appendEditComment });
+    }
+    rebuildSpecific();
 
     // Save / Cancel
     var editActions = mkEl("div", "pcorg-fiche-actions");
@@ -1540,238 +2291,49 @@
     btnSave.appendChild(matIcon("save"));
     btnSave.appendChild(document.createTextNode(" Enregistrer"));
     btnSave.addEventListener("click", function () {
-      submitFicheEdit(d.id, editCat, cc, editUrgency);
+      submitFicheEdit(d, state, srcEditor, btnSave);
     });
     editActions.appendChild(btnSave);
     body.appendChild(editActions);
+    setTimeout(function () { descInput.focus(); }, 50);
   }
 
-  function buildEditSpecificFields(container, cat, cc, editUrgency) {
-    container.textContent = "";
-    var urgCats = (pcorgConfig && pcorgConfig.urgence_categories) || {};
-    var subs = extractLabels((pcorgConfig.sous_classifications || {})[cat]);
-    var intervList = extractLabels(pcorgConfig.intervenants);
-    var serviceList = extractLabels(pcorgConfig.services);
-    var vehicles = vehiclesByCategory[cat];
-
-    function appendEditUrgency() {
-      if (!urgCats[cat]) return;
-      var urgSec = mkEl("div", "pcorg-fiche-section"); urgSec.textContent = "Niveau d'urgence";
-      container.appendChild(urgSec);
-      var urgContainer = mkEl("div", "pcorg-create-cats");
-      urgContainer.id = "pcorg-edit-urgency-container";
-      function renderBtns() {
-        urgContainer.textContent = "";
-        var uType = urgencyType(cat);
-        var noneBtnU = mkEl("button", "pcorg-create-cat-btn" + (!editUrgency ? " selected" : ""));
-        noneBtnU.type = "button";
-        noneBtnU.style.cssText = !editUrgency ? "border-color:var(--muted);background:var(--muted);font-size:0.75rem" : "font-size:0.75rem";
-        noneBtnU.textContent = "Aucun";
-        noneBtnU.addEventListener("click", function () { editUrgency = ""; renderBtns(); });
-        urgContainer.appendChild(noneBtnU);
-        URGENCY_LEVELS.forEach(function (lvl) {
-          var c = URGENCY_COLORS[lvl];
-          var btnU = mkEl("button", "pcorg-create-cat-btn" + (editUrgency === lvl ? " selected" : ""));
-          btnU.type = "button";
-          if (editUrgency === lvl) { btnU.style.borderColor = c; btnU.style.background = c; }
-          var dotU = mkEl("span", ""); dotU.style.cssText = "width:8px;height:8px;border-radius:50%;background:" + c;
-          btnU.appendChild(dotU);
-          var lblU = mkEl("span", ""); lblU.style.fontSize = "0.72rem";
-          lblU.textContent = URGENCY_LABELS[uType][lvl];
-          btnU.appendChild(lblU);
-          btnU.addEventListener("click", function () { editUrgency = lvl; renderBtns(); });
-          urgContainer.appendChild(btnU);
-        });
-      }
-      renderBtns();
-      container.appendChild(urgContainer);
-    }
-
-    function appendEditComment() {
-      var actionSec = mkEl("div", "pcorg-fiche-section"); actionSec.textContent = "Action prise";
-      container.appendChild(actionSec);
-      var grpAction = mkEl("div", "form-group");
-      var lblAction = mkEl("label", "");
-      lblAction.textContent = "Consignez l'action ou la modification ";
-      var star = mkEl("span", ""); star.style.color = "var(--danger,#ef4444)"; star.textContent = "*";
-      lblAction.appendChild(star);
-      lblAction.setAttribute("for", "pcorg-edit-comment");
-      grpAction.appendChild(lblAction);
-      var inpAction = mkEl("textarea", "form-input");
-      inpAction.id = "pcorg-edit-comment"; inpAction.rows = 2;
-      inpAction.placeholder = "Action realisee, modification apportee...";
-      grpAction.appendChild(inpAction);
-      container.appendChild(grpAction);
-    }
-
-    function appendEditSousClassification() {
-      if (subs.length > 0) {
-        addEditSelect(container, "pcorg-edit-sous", "Sous-classification", subs, cc.sous_classification || "");
-      }
-    }
-
-    function appendEditVehicle() {
-      if (vehicles && vehicles.length > 0) {
-        var vehNames = vehicles.map(function (v) { return v.label; });
-        addEditSelect(container, "pcorg-edit-patrouille", "Vehicule engage", vehNames, cc.patrouille || "");
-      }
-    }
-
-    if (cat === "PCO.Secours" || cat === "PCO.Securite" || cat === "PCO.Technique") {
-      appendEditSousClassification();
-      appendEditUrgency();
-      appendEditComment();
-      appendEditVehicle();
-      if (intervList.length) {
-        addEditSelect(container, "pcorg-edit-interv1", "Intervenant 1", intervList, cc.intervenant1 || "");
-        addEditSelect(container, "pcorg-edit-interv2", "Intervenant 2", intervList, cc.intervenant2 || "");
-      } else {
-        addEditField(container, "pcorg-edit-interv1", "Intervenant 1", cc.intervenant1 || "");
-        addEditField(container, "pcorg-edit-interv2", "Intervenant 2", cc.intervenant2 || "");
-      }
-      if (serviceList.length) {
-        addEditSelect(container, "pcorg-edit-service", "Service contacte", serviceList, cc.service_contacte || "");
-      } else {
-        addEditField(container, "pcorg-edit-service", "Service contacte", cc.service_contacte || "");
-      }
-    } else if (cat === "PCO.Flux") {
-      appendEditSousClassification();
-      appendEditUrgency();
-      appendEditComment();
-      appendEditVehicle();
-      if (intervList.length) {
-        addEditSelect(container, "pcorg-edit-moyens1", "Moyens Niv.1", intervList, cc.moyens_engages_niveau_1 || "");
-        addEditSelect(container, "pcorg-edit-moyens2", "Moyens Niv.2", intervList, cc.moyens_engages_niveau_2 || "");
-      } else {
-        addEditField(container, "pcorg-edit-moyens1", "Moyens Niv.1", cc.moyens_engages_niveau_1 || "");
-        addEditField(container, "pcorg-edit-moyens2", "Moyens Niv.2", cc.moyens_engages_niveau_2 || "");
-      }
-    } else if (cat === "PCO.Fourriere") {
-      addEditSelect(container, "pcorg-edit-typedemande", "Type de demande",
-        ["Parking sauvage", "Pas de titre", "Mauvais titre (sticker ou badge)", "Stationnement genant", "Autre"],
-        cc.typedemande || "");
-      addEditField(container, "pcorg-edit-lieu", "Lieu", cc.lieu || "");
-      addEditField(container, "pcorg-edit-detailsvl", "Vehicule", cc.detailsvl || "");
-      addEditField(container, "pcorg-edit-immat", "Immatriculation", cc.immat || "");
-      addEditSelect(container, "pcorg-edit-decision", "Decision",
-        ["Remorquage demande", "Sabot pose", "Avertissement", "Annule"],
-        cc.decision || "");
-      appendEditComment();
-      appendEditVehicle();
-    } else {
-      // Information, MainCourante, autres
-      appendEditSousClassification();
-      appendEditUrgency();
-      appendEditComment();
-      appendEditVehicle();
-    }
-  }
-
-  function addEditField(container, id, label, value) {
-    var grp = mkEl("div", "form-group");
-    var lbl = mkEl("label", ""); lbl.textContent = label; lbl.setAttribute("for", id);
-    grp.appendChild(lbl);
-    var inp = mkEl("input", "form-input"); inp.type = "text"; inp.id = id;
-    inp.placeholder = label; inp.value = value || "";
-    grp.appendChild(inp);
-    container.appendChild(grp);
-  }
-
-  function addEditSelect(container, id, label, options, current) {
-    var grp = mkEl("div", "form-group");
-    var lbl = mkEl("label", ""); lbl.textContent = label; lbl.setAttribute("for", id);
-    grp.appendChild(lbl);
-    var sel = mkEl("select", "form-input"); sel.id = id;
-    var opt0 = mkEl("option", ""); opt0.value = ""; opt0.textContent = "-- Choisir --";
-    sel.appendChild(opt0);
-    options.forEach(function (o) {
-      var opt = mkEl("option", ""); opt.value = o; opt.textContent = o;
-      if (o === current) opt.selected = true;
-      sel.appendChild(opt);
-    });
-    // If current value not in list, add it
-    if (current && options.indexOf(current) === -1) {
-      var optC = mkEl("option", ""); optC.value = current; optC.textContent = current; optC.selected = true;
-      sel.appendChild(optC);
-    }
-    grp.appendChild(sel);
-    container.appendChild(grp);
-  }
-
-  function submitFicheEdit(id, editCat, origCc, editUrgency) {
-    var comment = (document.getElementById("pcorg-edit-comment").value || "").trim();
-    if (!comment) { showToast("warning", "L'action prise est obligatoire"); return; }
-
-    var text = (document.getElementById("pcorg-edit-text").value || "").trim();
+  function submitFicheEdit(d, state, srcEditor, btnSave) {
+    var text = getVal("pcorg-edit-text");
     if (!text) { showToast("warning", "La description est obligatoire"); return; }
+    var src = srcEditor.collect();
+    if (!src.ok) { showToast("warning", src.msg); return; }
+    var spec = state.spec.collect();
+    if (state.spec.requiresSous && !spec.sous_classification) {
+      showToast("warning", "La sous-classification est obligatoire");
+      return;
+    }
+    var cc = {};
+    Object.keys(src.cc).forEach(function (k) { cc[k] = src.cc[k]; });
+    Object.keys(spec).forEach(function (k) { cc[k] = spec[k]; });
 
-    var ccUpdate = {};
-    var appelant = (document.getElementById("pcorg-edit-appelant").value || "").trim();
-    ccUpdate.appelant = appelant;
-    var contactSel = document.querySelector('input[name="pcorg-edit-contact"]:checked');
-    ccUpdate.telephone = (contactSel && contactSel.value === "telephone") || false;
-    ccUpdate.radio = (contactSel && contactSel.value === "radio")
-      ? ((document.getElementById("pcorg-edit-radio-canal").value || "").trim() || true)
-      : false;
-
-    var sousEl = document.getElementById("pcorg-edit-sous");
-    if (sousEl) ccUpdate.sous_classification = sousEl.value;
-
-    function eVal(eid) { var e = document.getElementById(eid); return e ? e.value.trim() : ""; }
-
-    if (editCat === "PCO.Secours" || editCat === "PCO.Securite" || editCat === "PCO.Technique") {
-      ccUpdate.intervenant1 = eVal("pcorg-edit-interv1");
-      ccUpdate.intervenant2 = eVal("pcorg-edit-interv2");
-      ccUpdate.service_contacte = eVal("pcorg-edit-service");
-      ccUpdate.carroye = eVal("pcorg-edit-carroye");
-    } else if (editCat === "PCO.Information" || editCat === "PCO.MainCourante") {
-      ccUpdate.texte = eVal("pcorg-edit-texte");
-      if (editCat === "PCO.MainCourante") {
-        var alerteEl = document.getElementById("pcorg-edit-alerte");
-        ccUpdate.alerte = alerteEl ? alerteEl.checked : false;
-      }
-    } else if (editCat === "PCO.Fourriere") {
-      ccUpdate.lieu = eVal("pcorg-edit-lieu");
-      ccUpdate.detailsvl = eVal("pcorg-edit-detailsvl");
-      ccUpdate.immat = eVal("pcorg-edit-immat");
-      ccUpdate.typedemande = eVal("pcorg-edit-typedemande");
-      ccUpdate.decision = eVal("pcorg-edit-decision");
-    } else if (editCat === "PCO.Flux") {
-      ccUpdate.moyens_engages_niveau_1 = eVal("pcorg-edit-moyens1");
-      ccUpdate.moyens_engages_niveau_2 = eVal("pcorg-edit-moyens2");
+    var payload = {
+      text: text,
+      category: state.cat,
+      niveau_urgence: urgencyEnabledFor(state.cat, state.urgency) ? (state.urgency || null) : (d.niveau_urgence || null),
+      content_category: cc,
+      comment: getVal("pcorg-edit-comment")
+    };
+    if (state.cat !== d.category) {
+      var keep = catFieldKeys(state.cat);
+      payload.content_category_remove = catFieldKeys(d.category).filter(function (k) {
+        return keep.indexOf(k) === -1;
+      });
     }
 
-    // Patrouille
-    var patrEl = document.getElementById("pcorg-edit-patrouille");
-    if (patrEl) ccUpdate.patrouille = patrEl.value;
-
-    var payload = { text: text, category: editCat, content_category: ccUpdate, niveau_urgence: editUrgency || null };
-
-    // 1) Save fields, then 2) post comment
-    fetch("/api/pcorg/update/" + encodeURIComponent(id), {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CSRFToken": (document.querySelector('meta[name="csrf-token"]') || {}).content || ""
-      },
-      body: JSON.stringify(payload)
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (r) {
-        if (!r.ok) { showToast("error", r.error || "Erreur"); return; }
-        // Post the action prise as comment
-        return apiPost("/api/pcorg/comment/" + encodeURIComponent(id), { text: comment });
-      })
-      .then(function (r) {
-        if (!r) return;
-        if (r.ok) {
-          showToast("success", "Intervention mise a jour");
-          refresh();
-          openDetailModal(id, false);
-        } else {
-          showToast("error", r.error || "Erreur commentaire");
-        }
-      });
+    btnSave.disabled = true;
+    apiCall("PUT", "/api/pcorg/update/" + encodeURIComponent(d.id), payload).then(function (r) {
+      btnSave.disabled = false;
+      if (!r.ok) { showToast("error", r.error || "Erreur"); return; }
+      showToast("success", r.unchanged ? "Aucune modification" : "Fiche mise a jour");
+      refresh();
+      openDetailModal(d.id, false);
+    });
   }
 
   function addField(parent, label, value) {
@@ -1823,23 +2385,16 @@
           var dt = newDate || new Date();
           // datetime-local sans tz : le backend assume Europe/Paris si tzinfo absent
           var iso = _toLocalInputValue(dt) + ":00";
-          fetch("/api/pcorg/update/" + encodeURIComponent(d.id), {
-            method: "PUT",
-            headers: {
-              "Content-Type": "application/json",
-              "X-CSRFToken": (document.querySelector('meta[name="csrf-token"]') || {}).content || ""
-            },
-            body: JSON.stringify({ intervention_ts: iso })
-          }).then(function (r) { return r.json(); })
-          .then(function (r) {
-            if (r && r.ok) {
-              showToast("success", "Heure d'intervention mise a jour");
-              openDetailModal(d.id, false);
-              refresh();
-            } else {
-              showToast("error", (r && r.error) || "Erreur");
-            }
-          }).catch(function () { showToast("error", "Erreur reseau"); });
+          apiCall("PUT", "/api/pcorg/update/" + encodeURIComponent(d.id), { intervention_ts: iso })
+            .then(function (r) {
+              if (r && r.ok) {
+                showToast("success", "Heure d'intervention mise a jour");
+                reloadFiche(d.id);
+                refresh();
+              } else {
+                showToast("error", (r && r.error) || "Erreur");
+              }
+            });
         });
       });
       valWrap.appendChild(editBtn);
@@ -1973,14 +2528,15 @@
 
   // ── Change urgency level ────────────────────────────────────────────────────
   function setUrgencyLevel(id, level, category) {
-    apiPost("/api/pcorg/set-urgency/" + encodeURIComponent(id), { niveau_urgence: level || null })
+    apiCall("POST", "/api/pcorg/set-urgency/" + encodeURIComponent(id), { niveau_urgence: level || null })
       .then(function (r) {
         if (r.ok) {
           var label = level ? urgencyLabel(category, level) : "Aucun";
           showToast("success", "Urgence \u2192 " + label);
           refresh();
-          // Re-open detail modal to refresh
-          openDetailModal(id, false);
+          // Rafraichit la fiche seulement si elle est affichee : depuis la
+          // popup de la carte, on n'ouvre plus la grande fiche en prime
+          reloadFiche(id);
         } else {
           showToast("error", r.error || "Erreur");
         }
@@ -2018,20 +2574,26 @@
   }
 
   // ── Close intervention ─────────────────────────────────────────────────────
+  function removePin(id) {
+    var map = getMap();
+    if (map) map.closePopup();
+    if (pcorgMarkers[id] && pcorgMapLayer) {
+      pcorgMapLayer.removeLayer(pcorgMarkers[id]);
+      delete pcorgMarkers[id];
+    }
+  }
+
+  // Cloture avec motif (facultatif), consigne dans la meme entree que le
+  // changement de statut et affiche en texte normal sous la pastille
   function closeIntervention(id) {
-    showConfirmToast("Clore cette intervention ?").then(function (ok) {
-      if (!ok) return;
-      apiPost("/api/pcorg/close/" + encodeURIComponent(id), {})
+    showPromptToast("Clore cette intervention ? Motif / bilan (facultatif)",
+      { okLabel: "Clore", cancelLabel: "Annuler", type: "warning" }).then(function (motif) {
+      if (motif === null) return;
+      apiCall("POST", "/api/pcorg/close/" + encodeURIComponent(id), { comment: (motif || "").trim() })
         .then(function (r) {
           if (r.ok) {
             hideFiche();
-            // Retirer immediatement le pin de la carte
-            var map = getMap();
-            if (map) map.closePopup();
-            if (pcorgMarkers[id] && pcorgMapLayer) {
-              pcorgMapLayer.removeLayer(pcorgMarkers[id]);
-              delete pcorgMarkers[id];
-            }
+            removePin(id);
             showToast("success", "Intervention cloturee");
             refresh();
           } else {
@@ -2041,22 +2603,31 @@
     });
   }
 
+  function reopenIntervention(id) {
+    showPromptToast("Rouvrir cette intervention : motif (obligatoire)",
+      { okLabel: "Rouvrir", cancelLabel: "Annuler", type: "warning" }).then(function (motif) {
+      if (motif === null) return;
+      motif = (motif || "").trim();
+      if (!motif) { showToast("warning", "Le motif de reouverture est obligatoire"); return; }
+      apiCall("POST", "/api/pcorg/reopen/" + encodeURIComponent(id), { comment: motif })
+        .then(function (r) {
+          if (r.ok) {
+            showToast("success", "Intervention rouverte");
+            refresh();
+            openDetailModal(id, false);
+          } else {
+            showToast("error", r.error || "Erreur");
+          }
+        });
+    });
+  }
+
   function deleteIntervention(id) {
-    var csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
-    fetch("/api/pcorg/delete/" + encodeURIComponent(id), {
-      method: "DELETE",
-      headers: { "X-CSRFToken": csrf }
-    })
-      .then(function (r) { return r.json(); })
+    apiCall("DELETE", "/api/pcorg/delete/" + encodeURIComponent(id))
       .then(function (r) {
         if (r.ok) {
           hideFiche();
-          var map = getMap();
-          if (map) map.closePopup();
-          if (pcorgMarkers[id] && pcorgMapLayer) {
-            pcorgMapLayer.removeLayer(pcorgMarkers[id]);
-            delete pcorgMarkers[id];
-          }
+          removePin(id);
           showToast("success", "Intervention supprimee");
           refresh();
         } else {
@@ -2119,23 +2690,136 @@
     return null;
   }
 
+  function vehicleTipHtml(patrouille) {
+    var devInfo = window.getAnolocDeviceByLabel ? window.getAnolocDeviceByLabel(patrouille) : null;
+    var devSt = devInfo ? _resolveDeviceStatus(devInfo.device) : null;
+    var color = devSt ? devSt.color : "#94a3b8";
+    var label = devSt ? devSt.label : "";
+    // Nom echappe : il vient de SQL ou d'une saisie libre
+    return "<span class='veh-tip-name'>" + escHtml(patrouille) + "</span>"
+      + (label ? "<span class='veh-tip-status' style='color:" + color + "'><span class='veh-tip-dot' style='background:" + color + "'></span>" + escHtml(label) + "</span>" : "");
+  }
+
   function updateVehicleTooltips() {
     // Met a jour les tooltips des pins pcorg avec les statuts anoloc frais
     if (!pcorgMarkers) return;
     Object.keys(pcorgMarkers).forEach(function (id) {
       var marker = pcorgMarkers[id];
       if (!marker || !marker._pcorgPatrouille) return;
-      var patrouille = marker._pcorgPatrouille;
-      var devInfo = window.getAnolocDeviceByLabel ? window.getAnolocDeviceByLabel(patrouille) : null;
-      var devSt = devInfo ? _resolveDeviceStatus(devInfo.device) : null;
-      var color = devSt ? devSt.color : "#94a3b8";
-      var label = devSt ? devSt.label : "";
-      var tipHtml = "<span class='veh-tip-name'>" + patrouille + "</span>"
-        + (label ? "<span class='veh-tip-status' style='color:" + color + "'><span class='veh-tip-dot' style='background:" + color + "'></span>" + label + "</span>" : "");
-      if (marker.getTooltip()) {
-        marker.getTooltip().setContent(tipHtml);
+      if (marker.getTooltip()) marker.getTooltip().setContent(vehicleTipHtml(marker._pcorgPatrouille));
+    });
+  }
+
+  // ── Filtre de la couche carte (par poste, localStorage) ─────────────────
+  // Avant : la couche ne pouvait ni etre masquee ni filtree.
+  var MAP_FILTER_KEY = "pcorg-map-filter";
+  var mapFilter = loadMapFilter();
+  var mapFilterControl = null;
+  var lastPinItems = [];
+
+  function loadMapFilter() {
+    try {
+      var f = JSON.parse(localStorage.getItem(MAP_FILTER_KEY));
+      if (f && typeof f === "object") {
+        return { hidden: !!f.hidden, cats: f.cats || {}, urgentOnly: !!f.urgentOnly };
+      }
+    } catch (e) {}
+    return { hidden: false, cats: {}, urgentOnly: false };
+  }
+
+  function saveMapFilter() {
+    try { localStorage.setItem(MAP_FILTER_KEY, JSON.stringify(mapFilter)); } catch (e) {}
+  }
+
+  function mapFilterActive() {
+    if (mapFilter.hidden || mapFilter.urgentOnly) return true;
+    return Object.keys(mapFilter.cats).some(function (c) { return mapFilter.cats[c] === false; });
+  }
+
+  function passesMapFilter(item) {
+    if (mapFilter.cats[item.category] === false) return false;
+    if (mapFilter.urgentOnly && item.niveau_urgence !== "EU" && item.niveau_urgence !== "UA") return false;
+    return true;
+  }
+
+  function applyLayerVisibility(map) {
+    if (!pcorgMapLayer || !map) return;
+    if (mapFilter.hidden) {
+      if (map.hasLayer(pcorgMapLayer)) map.removeLayer(pcorgMapLayer);
+    } else if (!map.hasLayer(pcorgMapLayer)) {
+      pcorgMapLayer.addTo(map);
+    }
+  }
+
+  function addMapFilterControl(map) {
+    if (mapFilterControl) return;
+    var Ctl = L.Control.extend({
+      options: { position: "topleft" },
+      onAdd: function () {
+        var container = L.DomUtil.create("div", "pcorg-map-filter-ctrl");
+        var btn = L.DomUtil.create("a", "pcorg-map-filter-btn", container);
+        btn.href = "#";
+        btn.title = "Fiches main courante sur la carte";
+        btn.setAttribute("role", "button");
+        btn.appendChild(matIcon("filter_alt"));
+        var panel = L.DomUtil.create("div", "pcorg-map-filter-panel", container);
+        panel.style.display = "none";
+
+        function paintBtn() { container.classList.toggle("active", mapFilterActive()); }
+
+        function row(label, checked, onChange, color) {
+          var r = mkEl("label", "pcorg-map-filter-row");
+          var cb = mkEl("input", ""); cb.type = "checkbox"; cb.checked = checked;
+          cb.addEventListener("change", function () { onChange(cb.checked); });
+          r.appendChild(cb);
+          if (color) {
+            var dot = mkEl("span", "pcorg-map-filter-dot"); dot.style.background = color;
+            r.appendChild(dot);
+          }
+          var t = mkEl("span", ""); t.textContent = label;
+          r.appendChild(t);
+          panel.appendChild(r);
+        }
+
+        function renderPanel() {
+          panel.textContent = "";
+          var title = mkEl("div", "pcorg-map-filter-title"); title.textContent = "Main courante";
+          panel.appendChild(title);
+          function changed() { saveMapFilter(); paintBtn(); applyLayerVisibility(map); updateMapPins(lastPinItems); }
+          row("Afficher les fiches", !mapFilter.hidden, function (v) { mapFilter.hidden = !v; changed(); });
+          row("Urgences EU / UA seulement", mapFilter.urgentOnly, function (v) { mapFilter.urgentOnly = v; changed(); });
+          var sep = mkEl("div", "pcorg-map-filter-sep"); panel.appendChild(sep);
+          CATEGORY_ORDER.forEach(function (cat) {
+            row(shortCat(cat), mapFilter.cats[cat] !== false, function (v) {
+              if (v) delete mapFilter.cats[cat]; else mapFilter.cats[cat] = false;
+              changed();
+            }, catStyle(cat).color);
+          });
+        }
+
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.disableScrollPropagation(container);
+        L.DomEvent.on(btn, "click", function (e) {
+          L.DomEvent.preventDefault(e);
+          var open = panel.style.display === "none";
+          if (open) renderPanel();
+          panel.style.display = open ? "" : "none";
+        });
+        paintBtn();
+        return container;
       }
     });
+    mapFilterControl = new Ctl();
+    map.addControl(mapFilterControl);
+  }
+
+  // Signature d'affichage : un pin n'est recree que si ce qu'il montre a
+  // change. Avant, clearLayers() toutes les 60 s fermait la popup ouverte et
+  // perdait la chronologie chargee.
+  function pinSignature(item) {
+    return [item.lat, item.lon, item.category, item.niveau_urgence || "", item.patrouille || "",
+      item.text || "", item.sous_classification || "", item.area_desc || "", item.operator || "",
+      item.bounce_rev || 0, item.ts || "", (item.dispatch && item.dispatch.state) || ""].join("|");
   }
 
   function updateMapPins(openItems) {
@@ -2145,315 +2829,271 @@
       return;
     }
     pendingPins = null;
+    lastPinItems = openItems || [];
 
-    if (pcorgMapLayer) {
-      pcorgMapLayer.clearLayers();
-    } else {
-      pcorgMapLayer = L.layerGroup().addTo(map);
-    }
-    pcorgMarkers = {};
+    if (!pcorgMapLayer) pcorgMapLayer = L.layerGroup();
+    applyLayerVisibility(map);
     addIgnoreAllControl(map);
+    addMapFilterControl(map);
 
-    openItems.forEach(function (item) {
-      if (item.lat == null || item.lon == null) return;
-      var st = catStyle(item.category);
-
-      var pinOuter = document.createElement("div");
-      pinOuter.style.position = "relative";
-
-      var pulse = mkEl("div", "pcorg-pin-pulse");
-      pulse.style.borderColor = st.color;
-      pinOuter.appendChild(pulse);
-
-      var pin = mkEl("div", "pcorg-pin");
-      pin.style.background = st.color;
-      pin.appendChild(matIcon(st.icon));
-      pinOuter.appendChild(pin);
-
-      var icon = L.divIcon({
-        className: "",
-        html: pinOuter.outerHTML,
-        iconSize: [36, 36],
-        iconAnchor: [18, 36],
-        popupAnchor: [0, -38]
-      });
-
-      // Build popup
-      var popupDiv = mkEl("div", "pcorg-popup");
-
-      // Header bar
-      var popHeader = mkEl("div", "pcorg-popup-header");
-      popHeader.style.background = st.color;
-      var popIcon = matIcon(st.icon, "pcorg-popup-icon");
-      popHeader.appendChild(popIcon);
-      var popCat = mkEl("span", "pcorg-popup-cat");
-      popCat.textContent = shortCat(item.category);
-      popHeader.appendChild(popCat);
-      if (item.status_code !== 10) {
-        var popStatus = mkEl("span", "pcorg-popup-status");
-        popStatus.textContent = "EN COURS";
-        popHeader.appendChild(popStatus);
+    var seen = {};
+    lastPinItems.forEach(function (item) {
+      if (item.lat == null || item.lon == null || !passesMapFilter(item)) return;
+      seen[item.id] = true;
+      var sig = pinSignature(item);
+      var existing = pcorgMarkers[item.id];
+      if (existing && existing._pcorgSig === sig) {
+        var el = existing.getElement && existing.getElement();
+        if (el) el.classList.toggle("pcorg-pin-bounce", shouldBounce(item));
+        return;
       }
-      if (item.niveau_urgence) {
-        var popUrg = mkEl("span", "pcorg-popup-urgency");
-        popUrg.textContent = urgencyLabel(item.category, item.niveau_urgence);
-        popHeader.appendChild(popUrg);
-      }
-      popupDiv.appendChild(popHeader);
-
-      var popBody = mkEl("div", "pcorg-popup-body");
-
-      // Sous-classification
-      if (item.sous_classification) {
-        var scLine = mkEl("div", "pcorg-popup-subcat");
-        scLine.textContent = item.sous_classification;
-        popBody.appendChild(scLine);
-      }
-
-      // Description
-      if (item.text) {
-        var descLine = mkEl("div", "pcorg-popup-desc");
-        descLine.textContent = item.text;
-        popBody.appendChild(descLine);
-      }
-
-      // Vehicule engage (badge prominent with status)
-      if (item.patrouille) {
-        var popDevInfo = window.getAnolocDeviceByLabel ? window.getAnolocDeviceByLabel(item.patrouille) : null;
-        var popDevSt = popDevInfo ? _resolveDeviceStatus(popDevInfo.device) : null;
-        var vehBanner = mkEl("div", "pcorg-popup-vehicle");
-        var vehLeft = mkEl("div", "pcorg-popup-vehicle-left");
-        vehLeft.appendChild(matIcon("directions_car", "pcorg-popup-vehicle-icon"));
-        var vehNameWrap = mkEl("div", "");
-        var vehLabel = mkEl("span", "pcorg-popup-vehicle-label");
-        vehLabel.textContent = "Element engage";
-        vehNameWrap.appendChild(vehLabel);
-        var vehName = mkEl("strong", "pcorg-popup-vehicle-name");
-        vehName.textContent = item.patrouille;
-        vehNameWrap.appendChild(vehName);
-        vehLeft.appendChild(vehNameWrap);
-        vehBanner.appendChild(vehLeft);
-        if (popDevSt) {
-          var vehStatusBadge = mkEl("span", "pcorg-popup-vehicle-status");
-          var vehStDot = mkEl("span", "pcorg-popup-vehicle-dot");
-          vehStDot.style.background = popDevSt.color;
-          vehStatusBadge.appendChild(vehStDot);
-          vehStatusBadge.appendChild(document.createTextNode(popDevSt.label));
-          vehBanner.appendChild(vehStatusBadge);
-        }
-        popBody.appendChild(vehBanner);
-      }
-
-      // Info fields
-      var elapsedMs = item.ts ? Date.now() - new Date(item.ts).getTime() : 0;
-      var isOld = elapsedMs > 3600000; // > 1h
-
-      var popFields = mkEl("div", "pcorg-popup-fields");
-      if (truncZone(item.area_desc)) {
-        var zField = mkEl("div", "pcorg-popup-field");
-        zField.appendChild(matIcon("location_on", "pcorg-popup-fi"));
-        var zVal = mkEl("span", ""); zVal.textContent = truncZone(item.area_desc);
-        zField.appendChild(zVal);
-        popFields.appendChild(zField);
-      }
-      var opField = mkEl("div", "pcorg-popup-field");
-      opField.appendChild(matIcon("person", "pcorg-popup-fi"));
-      var opVal = mkEl("span", "pcorg-popup-op-val"); opVal.textContent = item.operator || "?";
-      opField.appendChild(opVal);
-      popFields.appendChild(opField);
-
-      // Heure de creation
-      var tsField = mkEl("div", "pcorg-popup-field");
-      tsField.appendChild(matIcon("event", "pcorg-popup-fi"));
-      var tsVal = mkEl("span", "");
-      tsVal.textContent = item.ts ? new Date(item.ts).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "?";
-      tsField.appendChild(tsVal);
-      popFields.appendChild(tsField);
-
-      // Duree
-      var durField = mkEl("div", "pcorg-popup-field");
-      durField.appendChild(matIcon("timer", "pcorg-popup-fi"));
-      var durVal = mkEl("span", isOld ? "pcorg-popup-old" : "");
-      durVal.textContent = timeAgo(item.ts);
-      durField.appendChild(durVal);
-      popFields.appendChild(durField);
-
-      popBody.appendChild(popFields);
-
-      // Specific details placeholder (loaded on popup open)
-      var specDiv = mkEl("div", "pcorg-popup-spec");
-      popBody.appendChild(specDiv);
-
-      // Chronology placeholder (loaded on popup open)
-      var chronoDiv = mkEl("div", "pcorg-popup-chrono");
-      chronoDiv.style.setProperty("--cat-color", st.color);
-      var chronoLoading = mkEl("div", "pcorg-popup-chrono-loading");
-      chronoLoading.textContent = "...";
-      chronoDiv.appendChild(chronoLoading);
-      popBody.appendChild(chronoDiv);
-
-      // Urgency selector in popup (compact, only if open)
-      if (item.status_code !== 10) {
-        popBody.appendChild(buildUrgencyButtons(item.niveau_urgence, item.category, item.id, true));
-      }
-
-      // Buttons row
-      var popBtns = mkEl("div", "pcorg-popup-btns");
-
-      var popBtn = mkEl("button", "pcorg-popup-btn");
-      popBtn.appendChild(matIcon("open_in_new"));
-      popBtn.appendChild(document.createTextNode(" Ouvrir la fiche"));
-      popBtn.addEventListener("click", (function (id) {
-        return function () { openDetailModal(id, false); };
-      })(item.id));
-      popBtns.appendChild(popBtn);
-
-      // Close intervention button
-      if (item.status_code !== 10 && (window.__userCanCloseFiche || window.__userIsAdmin)) {
-        var closePopBtn = mkEl("button", "pcorg-popup-btn pcorg-popup-btn-danger");
-        closePopBtn.appendChild(matIcon("check_circle"));
-        closePopBtn.appendChild(document.createTextNode(" Clore"));
-        closePopBtn.addEventListener("click", (function (id) {
-          return function () { closeIntervention(id); };
-        })(item.id));
-        popBtns.appendChild(closePopBtn);
-      }
-
-      popBody.appendChild(popBtns);
-      popupDiv.appendChild(popBody);
-
-      // Bounce animation based on bounce_rev vs user ack
-      var doBounce = shouldBounce(item);
-
-      var marker = L.marker([item.lat, item.lon], {
-        icon: icon,
-        bounceOnAdd: false
-      }).bindPopup(popupDiv, { className: "pcorg-popup-wrap", maxWidth: 440, minWidth: 380 })
-        .addTo(pcorgMapLayer);
-
-      // Tooltip vehicule engage (permanent, a droite du pin)
-      marker._pcorgPatrouille = item.patrouille || null;
-      if (item.patrouille) {
-        var tipDevInfo = window.getAnolocDeviceByLabel ? window.getAnolocDeviceByLabel(item.patrouille) : null;
-        var tipDevSt = tipDevInfo ? _resolveDeviceStatus(tipDevInfo.device) : null;
-        var tipColor = tipDevSt ? tipDevSt.color : "#94a3b8";
-        var tipLabel = tipDevSt ? tipDevSt.label : "";
-        var tipHtml = "<span class='veh-tip-name'>" + item.patrouille + "</span>"
-          + (tipLabel ? "<span class='veh-tip-status' style='color:" + tipColor + "'><span class='veh-tip-dot' style='background:" + tipColor + "'></span>" + tipLabel + "</span>" : "");
-        marker.bindTooltip(tipHtml, {
-          permanent: true,
-          direction: "right",
-          offset: [12, -18],
-          className: "pcorg-vehicle-tooltip",
-        });
-      }
-
+      var wasOpen = existing && existing.isPopupOpen && existing.isPopupOpen();
+      if (existing) pcorgMapLayer.removeLayer(existing);
+      var marker = buildPinMarker(item);
+      marker._pcorgSig = sig;
+      marker.addTo(pcorgMapLayer);
       pcorgMarkers[item.id] = marker;
-
-      if (doBounce) {
-        marker.getElement().classList.add("pcorg-pin-bounce");
-      }
-
-      // Pan map to center pin slightly below middle (room for popup above)
-      marker.on("click", function () {
-        var map = getMap();
-        if (!map) return;
-        var latlng = marker.getLatLng();
-        var px = map.latLngToContainerPoint(latlng);
-        var offsetY = map.getSize().y * 0.25; // shift pin 25% below center
-        var target = map.containerPointToLatLng([px.x, px.y - offsetY]);
-        map.panTo(target, { animate: true, duration: 0.3 });
-      });
-
-      // Lazy load details + chronology on popup open + ack bounce
-      marker.on("popupopen", (function (itemId, sDiv, cDiv, color, cat, itemRef, markerRef, opValEl) {
-        return function () {
-          // Ack: stop bounce for this user
-          ackPin(itemId, itemRef.bounce_rev || 0);
-          var el = markerRef.getElement();
-          if (el) el.classList.remove("pcorg-pin-bounce");
-          if (cDiv._loaded) return;
-          cDiv._loaded = true;
-          fetch("/api/pcorg/detail/" + encodeURIComponent(itemId))
-            .then(function (r) { return r.json(); })
-            .then(function (d) {
-              // Update operator with group
-              if (d.operator_group && opValEl) {
-                opValEl.textContent = (d.operator || "?") + " (" + d.operator_group + ")";
-              }
-              // Specific fields (fourriere etc.)
-              var cc = d.content_category || {};
-              var specs = [];
-              if (cat === "PCO.Fourriere") {
-                if (cc.typedemande) specs.push(["Demande", cc.typedemande]);
-                if (cc.detailsvl) specs.push(["Vehicule", cc.detailsvl]);
-                if (cc.immat) specs.push(["Immat", cc.immat]);
-                if (cc.decision) specs.push(["Decision", cc.decision]);
-              }
-              if (specs.length) {
-                var specGrid = mkEl("div", "pcorg-popup-spec-grid");
-                specs.forEach(function (s) {
-                  var lbl = mkEl("span", "pcorg-popup-spec-lbl"); lbl.textContent = s[0];
-                  specGrid.appendChild(lbl);
-                  var val = mkEl("span", "pcorg-popup-spec-val"); val.textContent = s[1];
-                  specGrid.appendChild(val);
-                });
-                sDiv.appendChild(specGrid);
-              }
-
-              cDiv.textContent = "";
-              var history = d.comment_history || [];
-              if (history.length === 0) {
-                cDiv.style.display = "none";
-                return;
-              }
-              history.forEach(function (entry) {
-                var isStatus = entry.text && entry.text.indexOf("Statut:") === 0;
-                var row = mkEl("div", "pcorg-popup-chrono-entry" + (isStatus ? " status" : ""));
-                var dot = mkEl("span", "pcorg-popup-chrono-dot");
-                dot.style.background = isStatus ? "#94a3b8" : color;
-                row.appendChild(dot);
-                var ts = mkEl("span", "pcorg-popup-chrono-ts");
-                try {
-                  var dt = new Date(entry.ts);
-                  ts.textContent = String(dt.getHours()).padStart(2, "0") + ":" + String(dt.getMinutes()).padStart(2, "0");
-                } catch (e) { ts.textContent = ""; }
-                row.appendChild(ts);
-                var op = mkEl("span", "pcorg-popup-chrono-op");
-                op.textContent = entry.operator || "";
-                row.appendChild(op);
-                if (entry.text) {
-                  var txt = mkEl("span", "pcorg-popup-chrono-text");
-                  txt.textContent = entry.text;
-                  row.appendChild(txt);
-                }
-                if (entry.photo) {
-                  var pImg = mkEl("img", "pcorg-popup-chrono-photo");
-                  pImg.src = entry.thumb || entry.photo;
-                  pImg.alt = "Photo";
-                  pImg.loading = "lazy";
-                  pImg.addEventListener("click", (function (full) {
-                    return function () { openPhotoLightbox(full); };
-                  })(entry.photo));
-                  row.appendChild(pImg);
-                }
-                if (entry.codes && entry.codes.length) {
-                  var codesEl = mkEl("span", "pcorg-popup-chrono-codes");
-                  entry.codes.forEach(function (c) {
-                    var chip = mkEl("span", "pcorg-popup-chrono-code");
-                    chip.textContent = (c.format || "manual").toUpperCase() + " " + (c.value || "");
-                    chip.title = c.value || "";
-                    codesEl.appendChild(chip);
-                  });
-                  row.appendChild(codesEl);
-                }
-                cDiv.appendChild(row);
-              });
-            })
-            .catch(function () { cDiv.textContent = ""; });
-        };
-      })(item.id, specDiv, chronoDiv, st.color, item.category, item, marker, opVal));
+      if (wasOpen && !mapFilter.hidden) marker.openPopup();
     });
+    Object.keys(pcorgMarkers).forEach(function (id) {
+      if (!seen[id]) {
+        pcorgMapLayer.removeLayer(pcorgMarkers[id]);
+        delete pcorgMarkers[id];
+      }
+    });
+  }
+
+  function buildPinMarker(item) {
+    var st = catStyle(item.category);
+
+    var pinOuter = document.createElement("div");
+    pinOuter.style.position = "relative";
+
+    var pulse = mkEl("div", "pcorg-pin-pulse");
+    pulse.style.borderColor = st.color;
+    pinOuter.appendChild(pulse);
+
+    var pin = mkEl("div", "pcorg-pin");
+    pin.style.background = st.color;
+    pin.appendChild(matIcon(st.icon));
+    pinOuter.appendChild(pin);
+
+    // Urgence visible sur le pin (avant : seulement dans la popup)
+    if (item.niveau_urgence && URGENCY_COLORS[item.niveau_urgence]) {
+      var urg = mkEl("span", "pcorg-pin-urg pcorg-pin-urg-" + item.niveau_urgence);
+      urg.style.background = URGENCY_COLORS[item.niveau_urgence];
+      urg.textContent = item.niveau_urgence;
+      pinOuter.appendChild(urg);
+    }
+
+    // Dispatch automatique en cours (proposition) ou en file du service
+    var pinDisp = item.status_code !== 10 && item.dispatch ? item.dispatch.state : null;
+    if (pinDisp === "proposing" || pinDisp === "queued") {
+      pinOuter.appendChild(matIcon(pinDisp === "proposing" ? "hourglass_top" : "pending_actions",
+        "pcorg-pin-disp pcorg-pin-disp-" + pinDisp));
+    }
+
+    var iconCls = "pcorg-pin-icon" + (shouldBounce(item) ? " pcorg-pin-bounce" : "")
+      + (item.id === activeFicheId ? " pcorg-pin-active" : "");
+    var icon = L.divIcon({
+      className: iconCls,
+      html: pinOuter.outerHTML,
+      iconSize: [36, 36],
+      iconAnchor: [18, 36],
+      popupAnchor: [0, -38]
+    });
+
+    // Build popup
+    var popupDiv = mkEl("div", "pcorg-popup");
+
+    // Header bar
+    var popHeader = mkEl("div", "pcorg-popup-header");
+    popHeader.style.background = st.color;
+    popHeader.appendChild(matIcon(st.icon, "pcorg-popup-icon"));
+    var popCat = mkEl("span", "pcorg-popup-cat");
+    popCat.textContent = shortCat(item.category);
+    popHeader.appendChild(popCat);
+    if (item.status_code !== 10) {
+      var popStatus = mkEl("span", "pcorg-popup-status");
+      popStatus.textContent = "EN COURS";
+      popHeader.appendChild(popStatus);
+    }
+    if (item.niveau_urgence) {
+      var popUrg = mkEl("span", "pcorg-popup-urgency");
+      popUrg.textContent = urgencyLabel(item.category, item.niveau_urgence);
+      popHeader.appendChild(popUrg);
+    }
+    popupDiv.appendChild(popHeader);
+
+    var popBody = mkEl("div", "pcorg-popup-body");
+
+    if (item.sous_classification) {
+      var scLine = mkEl("div", "pcorg-popup-subcat");
+      scLine.textContent = item.sous_classification;
+      popBody.appendChild(scLine);
+    }
+
+    if (item.text) {
+      var descLine = mkEl("div", "pcorg-popup-desc");
+      descLine.textContent = item.text;
+      popBody.appendChild(descLine);
+    }
+
+    // Vehicule engage (badge prominent with status)
+    if (item.patrouille) {
+      var popDevInfo = window.getAnolocDeviceByLabel ? window.getAnolocDeviceByLabel(item.patrouille) : null;
+      var popDevSt = popDevInfo ? _resolveDeviceStatus(popDevInfo.device) : null;
+      var vehBanner = mkEl("div", "pcorg-popup-vehicle");
+      var vehLeft = mkEl("div", "pcorg-popup-vehicle-left");
+      vehLeft.appendChild(matIcon("directions_car", "pcorg-popup-vehicle-icon"));
+      var vehNameWrap = mkEl("div", "");
+      var vehLabel = mkEl("span", "pcorg-popup-vehicle-label");
+      vehLabel.textContent = "Element engage";
+      vehNameWrap.appendChild(vehLabel);
+      var vehName = mkEl("strong", "pcorg-popup-vehicle-name");
+      vehName.textContent = item.patrouille;
+      vehNameWrap.appendChild(vehName);
+      vehLeft.appendChild(vehNameWrap);
+      vehBanner.appendChild(vehLeft);
+      if (popDevSt) {
+        var vehStatusBadge = mkEl("span", "pcorg-popup-vehicle-status");
+        var vehStDot = mkEl("span", "pcorg-popup-vehicle-dot");
+        vehStDot.style.background = popDevSt.color;
+        vehStatusBadge.appendChild(vehStDot);
+        vehStatusBadge.appendChild(document.createTextNode(popDevSt.label));
+        vehBanner.appendChild(vehStatusBadge);
+      }
+      popBody.appendChild(vehBanner);
+    }
+
+    // Info fields
+    var elapsedMs = item.ts ? Date.now() - new Date(item.ts).getTime() : 0;
+    var isOld = elapsedMs > 3600000; // > 1h
+
+    var popFields = mkEl("div", "pcorg-popup-fields");
+    if (truncZone(item.area_desc)) {
+      var zField = mkEl("div", "pcorg-popup-field");
+      zField.appendChild(matIcon("location_on", "pcorg-popup-fi"));
+      var zVal = mkEl("span", ""); zVal.textContent = truncZone(item.area_desc);
+      zField.appendChild(zVal);
+      popFields.appendChild(zField);
+    }
+    var opField = mkEl("div", "pcorg-popup-field");
+    opField.appendChild(matIcon("person", "pcorg-popup-fi"));
+    var opVal = mkEl("span", "pcorg-popup-op-val"); opVal.textContent = operatorLabel(item.operator) || "?";
+    opField.appendChild(opVal);
+    popFields.appendChild(opField);
+
+    var tsField = mkEl("div", "pcorg-popup-field");
+    tsField.appendChild(matIcon("event", "pcorg-popup-fi"));
+    var tsVal = mkEl("span", "");
+    tsVal.textContent = item.ts ? fmtDayTime(item.ts, true) : "?";
+    tsField.appendChild(tsVal);
+    popFields.appendChild(tsField);
+
+    var durField = mkEl("div", "pcorg-popup-field");
+    durField.appendChild(matIcon("timer", "pcorg-popup-fi"));
+    var durVal = mkEl("span", isOld ? "pcorg-popup-old" : "");
+    durVal.textContent = timeAgo(item.ts);
+    durField.appendChild(durVal);
+    popFields.appendChild(durField);
+
+    popBody.appendChild(popFields);
+
+    // Details et chronologie charges a l'ouverture
+    var specDiv = mkEl("div", "pcorg-popup-spec");
+    popBody.appendChild(specDiv);
+    var chronoDiv = mkEl("div", "pcorg-popup-chrono");
+    chronoDiv.style.setProperty("--cat-color", st.color);
+    var chronoLoading = mkEl("div", "pcorg-popup-chrono-loading");
+    chronoLoading.textContent = "...";
+    chronoDiv.appendChild(chronoLoading);
+    popBody.appendChild(chronoDiv);
+
+    // Urgence (compact) : memes categories que la fiche
+    if (item.status_code !== 10 && urgencyEnabledFor(item.category, item.niveau_urgence)) {
+      popBody.appendChild(buildUrgencyButtons(item.niveau_urgence, item.category, item.id, true));
+    }
+
+    var popBtns = mkEl("div", "pcorg-popup-btns");
+    var popBtn = mkEl("button", "pcorg-popup-btn");
+    popBtn.appendChild(matIcon("open_in_new"));
+    popBtn.appendChild(document.createTextNode(" Ouvrir la fiche"));
+    popBtn.addEventListener("click", function () { openDetailModal(item.id, false); });
+    popBtns.appendChild(popBtn);
+
+    if (item.status_code !== 10 && (window.__userCanCloseFiche || window.__userIsAdmin)) {
+      var closePopBtn = mkEl("button", "pcorg-popup-btn pcorg-popup-btn-danger");
+      closePopBtn.appendChild(matIcon("check_circle"));
+      closePopBtn.appendChild(document.createTextNode(" Clore"));
+      closePopBtn.addEventListener("click", function () { closeIntervention(item.id); });
+      popBtns.appendChild(closePopBtn);
+    }
+    popBody.appendChild(popBtns);
+    popupDiv.appendChild(popBody);
+
+    var marker = L.marker([item.lat, item.lon], { icon: icon, bounceOnAdd: false })
+      .bindPopup(popupDiv, { className: "pcorg-popup-wrap", maxWidth: 440, minWidth: 380 });
+
+    // Tooltip vehicule engage (permanent, a droite du pin)
+    marker._pcorgPatrouille = item.patrouille || null;
+    if (item.patrouille) {
+      marker.bindTooltip(vehicleTipHtml(item.patrouille), {
+        permanent: true,
+        direction: "right",
+        offset: [12, -18],
+        className: "pcorg-vehicle-tooltip",
+      });
+    }
+
+    // Pan map to center pin slightly below middle (room for popup above)
+    marker.on("click", function () {
+      var map = getMap();
+      if (!map) return;
+      var px = map.latLngToContainerPoint(marker.getLatLng());
+      var offsetY = map.getSize().y * 0.25; // shift pin 25% below center
+      map.panTo(map.containerPointToLatLng([px.x, px.y - offsetY]), { animate: true, duration: 0.3 });
+    });
+
+    marker.on("popupclose", function () {
+      if (activeFicheId === item.id && detailOpenId !== item.id) setActiveFiche(null);
+    });
+
+    // Lazy load details + chronology on popup open + ack bounce
+    marker.on("popupopen", function () {
+      ackPin(item.id, item.bounce_rev || 0);
+      var el = marker.getElement();
+      if (el) el.classList.remove("pcorg-pin-bounce");
+      setActiveFiche(item.id);
+      if (chronoDiv._loaded) return;
+      chronoDiv._loaded = true;
+      fetch("/api/pcorg/detail/" + encodeURIComponent(item.id))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.error) { chronoDiv.textContent = ""; return; }
+          if (d.operator_group) {
+            opVal.textContent = (operatorLabel(d.operator) || "?") + " (" + d.operator_group + ")";
+          }
+          var specs = buildSpecificFields(d.category, d.content_category || {});
+          if (specs.length) {
+            var specGrid = mkEl("div", "pcorg-popup-spec-grid");
+            specs.forEach(function (s) {
+              var lbl = mkEl("span", "pcorg-popup-spec-lbl"); lbl.textContent = s[0];
+              specGrid.appendChild(lbl);
+              var val = mkEl("span", "pcorg-popup-spec-val"); val.textContent = s[1];
+              specGrid.appendChild(val);
+            });
+            specDiv.appendChild(specGrid);
+          }
+          chronoDiv.textContent = "";
+          var history = d.comment_history || [];
+          if (!history.length) { chronoDiv.style.display = "none"; return; }
+          chronoDiv.appendChild(renderChronology(history, st.color, { compact: true, refTs: d.ts }));
+        })
+        .catch(function () { chronoDiv.textContent = ""; chronoDiv._loaded = false; });
+    });
+
+    return marker;
   }
 
   // ── Photo lightbox ─────────────────────────────────────────────────────
@@ -2480,17 +3120,39 @@
     document.body.appendChild(overlay);
   }
 
-  function flyToPin(lat, lon) {
-    var map = getMap();
-    if (!map) return;
-    if (window.CockpitMapView && window.CockpitMapView.currentView() !== "map") {
-      window.CockpitMapView.switchView("map");
+  // Affiche la carte, y compris depuis le panneau elargi : celui-ci masquait
+  // #map-main sans changer la vue courante, et switchView("map") n'etait
+  // alors pas appele -> centrage sur une carte invisible, zone vide.
+  function ensureMapVisible() {
+    var mv = window.CockpitMapView;
+    if (expPanel && expPanel.style.display !== "none") {
+      _expPreviousView = "map";
+      closeExpanded();
     }
+    if (mv && mv.currentView && mv.currentView() !== "map") mv.switchView("map");
+    var mapMain = document.getElementById("map-main");
+    if (mapMain && mapMain.style.display === "none") mapMain.style.display = "block";
+    var map = getMap();
+    if (map) setTimeout(function () { map.invalidateSize(); }, 50);
+  }
+
+  // id (optionnel) : ouvre la popup du pin et met la fiche en evidence
+  function flyToPin(lat, lon, id) {
+    ensureMapVisible();
     setTimeout(function () {
+      var map = getMap();
+      if (!map) return;
       var targetPoint = map.project([lat, lon], 17);
       targetPoint.y -= 100;
       var targetLatLng = map.unproject(targetPoint, 17);
       map.flyTo(targetLatLng, 17, { duration: 0.8 });
+      if (id) {
+        setActiveFiche(id);
+        map.once("moveend", function () {
+          var mk = pcorgMarkers[id];
+          if (mk && pcorgMapLayer && pcorgMapLayer.hasLayer(mk)) mk.openPopup();
+        });
+      }
     }, 300);
   }
 
@@ -2835,6 +3497,7 @@
 
     // Click "+" -> ouvrir la modale directement a l'etape 1
     btn.addEventListener("click", function () {
+      checkSessionBeforeForm();
       resetCreateWizard();
       showCreate();
       goToStep(1);
@@ -2858,7 +3521,11 @@
     nextBtn.addEventListener("click", function () {
       if (createStep === 1) {
         if (createLat === null) {
-          showToast("warning", "Positionnez l'intervention sur la carte");
+          // Position facultative (appel sans localisation precise) : elle
+          // pourra etre posee plus tard depuis la fiche
+          showConfirmToast("Aucune position. Continuer sans localiser la fiche ?",
+            { okLabel: "Continuer", cancelLabel: "Positionner", type: "warning" })
+            .then(function (ok) { if (ok) goToStep(2); });
           return;
         }
         goToStep(2);
@@ -2913,6 +3580,7 @@
     });
 
     buildCatButtons();
+    pcaInitAssist();
 
     form.addEventListener("submit", function (e) {
       e.preventDefault();
@@ -2926,6 +3594,9 @@
     createSelectedCat = "";
     createSelectedUrgency = "";
     createPendingPatrouille = "";
+    createFieldsCtl = null;
+    createClientToken = randomToken();
+    createSubmitting = false;
     createCarroye = "";
     createAreaDesc = "";
     createGrid100On = false;
@@ -2937,6 +3608,7 @@
     if (tsChipReset) updateTsChip(tsChipReset, null);
     createSource = "";
     createCanal = "";
+    pcaReset();
     document.querySelectorAll(".pcorg-source-tab").forEach(function (b) { b.classList.remove("selected"); });
     var srcFields = document.getElementById("pcorg-c-source-fields");
     if (srcFields) srcFields.textContent = "";
@@ -3043,28 +3715,8 @@
   function loadCreateGridSilent() {
     var doLoad = function (data) {
       createGridData = data;
-      if (!data || !data.lines) return;
-      var lines = data.lines;
-      var numCols = lines.num_cols || (lines.v_lines || []).length - 1;
-      var numRows = lines.num_rows || (lines.h_lines || []).length - 1;
-      var colOffset = lines.col_offset || 0;
-      var rowOffset = lines.row_offset || 0;
-      var cols = [];
-      for (var ci = 0; ci < numCols; ci++) {
-        var adj = ci - colOffset;
-        cols.push(adj >= 0 ? colLabel(adj) : null);
-      }
-      var rows = [];
-      for (var ri = 0; ri < numRows; ri++) {
-        var rn = ri + 1 - rowOffset;
-        rows.push(rn >= 1 ? rn : null);
-      }
-      createGridMeta = {
-        cols: cols, rows: rows,
-        hLines: lines.h_lines || [], vLines: lines.v_lines || [],
-        numCols: numCols, numRows: numRows,
-        colOffset: colOffset, rowOffset: rowOffset
-      };
+      createGridMeta = buildGridMeta(data);
+      if (createGridMeta && !sharedGridMeta) sharedGridMeta = createGridMeta;
     };
     if (window.CockpitMapView && window.CockpitMapView.getGridData && window.CockpitMapView.getGridData()) {
       doLoad(window.CockpitMapView.getGridData());
@@ -3110,16 +3762,14 @@
       } else {
         carrEl.textContent = "Hors zone";
       }
-    } else if (window.CockpitMapView && window.CockpitMapView.getCellLabel) {
-      var mainLabel = window.CockpitMapView.getCellLabel(lat, lon);
+    } else {
+      var mainLabel = resolveCellLabel(lat, lon);
       if (mainLabel) {
         createCarroye = mainLabel;
         carrEl.textContent = mainLabel;
       } else {
         carrEl.textContent = "--";
       }
-    } else {
-      carrEl.textContent = "--";
     }
 
     // Resolve zone from POI polygons
@@ -3148,20 +3798,7 @@
   }
 
   function resolveCreateGridCell(lat, lon) {
-    if (!createGridMeta) return null;
-    var m = createGridMeta;
-    var col = null, row = null;
-    for (var ci = 0; ci < m.numCols; ci++) {
-      if (lon >= m.vLines[ci].lng && lon < m.vLines[ci + 1].lng) { col = ci; break; }
-    }
-    for (var ri = 0; ri < m.numRows; ri++) {
-      if (lat <= m.hLines[ri].lat && lat > m.hLines[ri + 1].lat) { row = ri; break; }
-    }
-    if (col === null || row === null) return null;
-    var colLbl = m.cols[col];
-    var rowLbl = m.rows[row];
-    if (!colLbl || !rowLbl) return null;
-    return colLbl + "" + rowLbl;
+    return gridCellFromMeta(createGridMeta, lat, lon);
   }
 
   // ── Grid on create map ──────────────────────────────────────────────────────
@@ -3222,7 +3859,8 @@
       createMiniMap.removeLayer(createGridLayer);
       createGridLayer = null;
     }
-    createGridMeta = null;
+    // createGridMeta conserve : masquer la grille cassait la resolution du
+    // carroyage au clic suivant
   }
 
   function toggleCreateGrid25() {
@@ -3598,16 +4236,16 @@
   }
 
   var createSelectedUrgency = "";
+  var createFieldsCtl = null;   // retour de buildCategoryFields (collect)
+  var createClientToken = "";   // un par ouverture de l'assistant (anti double clic)
+  var createSubmitting = false;
 
   function buildSpecificCreateFields(cat) {
     var container = document.getElementById("pcorg-create-specific");
+    var prevComment = getVal("pcorg-c-comment");
     container.textContent = "";
 
     var urgCats = (pcorgConfig && pcorgConfig.urgence_categories) || {};
-    var subs = extractLabels((pcorgConfig.sous_classifications || {})[cat]);
-    var intervList = extractLabels(pcorgConfig.intervenants);
-    var serviceList = extractLabels(pcorgConfig.services);
-    var vehicles = vehiclesByCategory[cat];
     var urgRow; // shared by appendUrgency / updateUrgencyCreateBtns
 
     function appendUrgency() {
@@ -3691,7 +4329,7 @@
           camBtn.appendChild(matIcon("hourglass_top"));
           camBtn.appendChild(document.createTextNode(" Capture " + camName + "..."));
           // Capture sans fiche (pas encore creee)
-          apiPost("/api/pcorg/camera-capture", { cam_id: camId })
+          apiCall("POST", "/api/pcorg/camera-capture", { cam_id: camId })
             .then(function (r) {
               camBtn.disabled = false;
               if (r.ok) {
@@ -3741,94 +4379,19 @@
       container.appendChild(grp);
     }
 
-    function appendSousClassification() {
-      if (subs.length > 0) {
-        addCreateSelect(container, "pcorg-c-sous", "Sous-classification", subs);
-      }
+    // Champs de la categorie : constructeur commun avec l'edition. Les
+    // valeurs deja saisies survivent a un changement de categorie.
+    var prevValues = createFieldsCtl ? createFieldsCtl.collect() : {};
+    if (createPendingPatrouille) {
+      prevValues.patrouille = createPendingPatrouille;
+      createPendingPatrouille = "";
     }
-
-    function appendVehicle() {
-      if (vehicles && vehicles.length > 0) {
-        var vehNames = vehicles.map(function (v) { return v.label; });
-        addCreateSelect(container, "pcorg-c-patrouille", "Vehicule engage", vehNames);
-        if (createPendingPatrouille) {
-          var selEl = document.getElementById("pcorg-c-patrouille");
-          if (selEl) selEl.value = createPendingPatrouille;
-          createPendingPatrouille = "";
-        }
-      }
+    createFieldsCtl = buildCategoryFields(container, cat, prevValues, "pcorg-c-",
+      { urgency: appendUrgency, comment: appendComment });
+    if (prevComment) {
+      var ta = document.getElementById("pcorg-c-comment");
+      if (ta) ta.value = prevComment;
     }
-
-    // === Build fields in category-specific order ===
-    if (cat === "PCO.Secours" || cat === "PCO.Securite" || cat === "PCO.Technique") {
-      appendSousClassification();
-      appendUrgency();
-      appendComment();
-      appendVehicle();
-      if (intervList.length) {
-        addCreateSelect(container, "pcorg-c-interv1", "Intervenant 1", intervList);
-        addCreateSelect(container, "pcorg-c-interv2", "Intervenant 2", intervList);
-      } else {
-        addCreateField(container, "pcorg-c-interv1", "Intervenant 1");
-        addCreateField(container, "pcorg-c-interv2", "Intervenant 2");
-      }
-      if (serviceList.length) {
-        addCreateSelect(container, "pcorg-c-service", "Service contacte", serviceList);
-      } else {
-        addCreateField(container, "pcorg-c-service", "Service contacte");
-      }
-    } else if (cat === "PCO.Flux") {
-      appendSousClassification();
-      appendUrgency();
-      appendComment();
-      appendVehicle();
-      if (intervList.length) {
-        addCreateSelect(container, "pcorg-c-moyens1", "Moyens engages Niv.1", intervList);
-        addCreateSelect(container, "pcorg-c-moyens2", "Moyens engages Niv.2", intervList);
-      } else {
-        addCreateField(container, "pcorg-c-moyens1", "Moyens engages Niv.1");
-        addCreateField(container, "pcorg-c-moyens2", "Moyens engages Niv.2");
-      }
-    } else if (cat === "PCO.Fourriere") {
-      addCreateSelect(container, "pcorg-c-typedemande", "Type de demande",
-        ["Parking sauvage", "Pas de titre", "Mauvais titre (sticker ou badge)", "Stationnement genant", "Autre"]);
-      addCreateField(container, "pcorg-c-lieu", "Lieu");
-      addCreateField(container, "pcorg-c-detailsvl", "Vehicule (marque, couleur, modele)");
-      addCreateField(container, "pcorg-c-immat", "Immatriculation");
-      addCreateSelect(container, "pcorg-c-decision", "Decision",
-        ["Remorquage demande", "Sabot pose", "Avertissement", "Annule"]);
-      appendComment();
-      appendVehicle();
-    } else {
-      appendSousClassification();
-      appendUrgency();
-      appendComment();
-      appendVehicle();
-    }
-  }
-
-  function addCreateField(container, id, label) {
-    var grp = mkEl("div", "form-group");
-    var lbl = mkEl("label", ""); lbl.textContent = label; lbl.setAttribute("for", id);
-    grp.appendChild(lbl);
-    var inp = mkEl("input", "form-input"); inp.type = "text"; inp.id = id; inp.placeholder = label;
-    grp.appendChild(inp);
-    container.appendChild(grp);
-  }
-
-  function addCreateSelect(container, id, label, options) {
-    var grp = mkEl("div", "form-group");
-    var lbl = mkEl("label", ""); lbl.textContent = label; lbl.setAttribute("for", id);
-    grp.appendChild(lbl);
-    var sel = mkEl("select", "form-input"); sel.id = id;
-    var opt0 = mkEl("option", ""); opt0.value = ""; opt0.textContent = "-- Choisir --";
-    sel.appendChild(opt0);
-    options.forEach(function (o) {
-      var opt = mkEl("option", ""); opt.value = o; opt.textContent = o;
-      sel.appendChild(opt);
-    });
-    grp.appendChild(sel);
-    container.appendChild(grp);
   }
 
   function submitCreate() {
@@ -3838,9 +4401,10 @@
       showToast("warning", "L'action prise est obligatoire");
       return;
     }
+    if (createSubmitting) return;
+    var specValues = createFieldsCtl ? createFieldsCtl.collect() : {};
     // Validate sous-classification
-    var sousEl = document.getElementById("pcorg-c-sous");
-    if (sousEl && !sousEl.value) {
+    if (createFieldsCtl && createFieldsCtl.requiresSous && !specValues.sous_classification) {
       showToast("warning", "La sous-classification est obligatoire");
       return;
     }
@@ -3889,30 +4453,11 @@
     // Carroyage from step 1
     if (createCarroye) cc.carroye = createCarroye;
 
-    // Sous-classification
-    var sousEl = document.getElementById("pcorg-c-sous");
-    if (sousEl && sousEl.value) cc.sous_classification = sousEl.value;
-
-    // Category-specific
+    // Champs propres a la categorie (dont sous-classification et vehicule)
+    Object.keys(specValues).forEach(function (k) {
+      if (specValues[k]) cc[k] = specValues[k];
+    });
     var cat = createSelectedCat;
-    if (cat === "PCO.Secours" || cat === "PCO.Securite" || cat === "PCO.Technique") {
-      var i1 = getVal("pcorg-c-interv1"); if (i1) cc.intervenant1 = i1;
-      var i2 = getVal("pcorg-c-interv2"); if (i2) cc.intervenant2 = i2;
-      var svc = getVal("pcorg-c-service"); if (svc) cc.service_contacte = svc;
-    } else if (cat === "PCO.Fourriere") {
-      var lieu = getVal("pcorg-c-lieu"); if (lieu) cc.lieu = lieu;
-      var vl = getVal("pcorg-c-detailsvl"); if (vl) cc.detailsvl = vl;
-      var imm = getVal("pcorg-c-immat"); if (imm) cc.immat = imm;
-      var td = getVal("pcorg-c-typedemande"); if (td) cc.typedemande = td;
-      var dec = getVal("pcorg-c-decision"); if (dec) cc.decision = dec;
-    } else if (cat === "PCO.Flux") {
-      var m1 = getVal("pcorg-c-moyens1"); if (m1) cc.moyens_engages_niveau_1 = m1;
-      var m2 = getVal("pcorg-c-moyens2"); if (m2) cc.moyens_engages_niveau_2 = m2;
-    }
-
-    // Patrouille
-    var patr = getVal("pcorg-c-patrouille");
-    if (patr) cc.patrouille = patr;
 
     var payload = {
       event: ey.event,
@@ -3924,7 +4469,8 @@
       comment: getVal("pcorg-c-comment"),
       niveau_urgence: createSelectedUrgency || null,
       lat: createLat,
-      lon: createLon
+      lon: createLon,
+      client_token: createClientToken || randomToken()
     };
 
     if (createInterventionTs) {
@@ -3932,24 +4478,40 @@
     }
 
     var pendingPhoto = _createCameraPhoto;
+    var submitBtn = document.getElementById("pcorgCreateSubmit");
 
     function _doSubmit() {
-      apiPost("/api/pcorg/create", payload)
+      // Garde double clic : bouton desactive + jeton client (le serveur
+      // retombe sur la meme fiche si la requete est rejouee)
+      createSubmitting = true;
+      if (submitBtn) submitBtn.disabled = true;
+      apiCall("POST", "/api/pcorg/create", payload)
         .then(function (r) {
-          if (r.ok) {
-            // Si une photo camera etait jointe, l'attacher a la fiche creee
-            if (pendingPhoto && r.id) {
-              apiPost("/api/pcorg/comment/" + encodeURIComponent(r.id), {
-                text: "Capture camera " + pendingPhoto.cam_name,
-                photo: pendingPhoto.url
-              });
-            }
-            hideCreate();
-            showToast("success", "Intervention creee");
-            refresh();
-          } else {
+          if (!r.ok) {
+            createSubmitting = false;
+            if (submitBtn) submitBtn.disabled = false;
             showToast("error", r.error || "Erreur");
+            return null;
           }
+          // Photo camera jointe : attachee AVANT le rafraichissement
+          if (pendingPhoto && r.id && !r.duplicate) {
+            return apiCall("POST", "/api/pcorg/comment/" + encodeURIComponent(r.id), {
+              text: "Capture camera " + pendingPhoto.cam_name,
+              photo: pendingPhoto.url
+            }).then(function (rc) {
+              if (!rc.ok) showToast("warning", "Fiche creee, mais la photo n'a pas pu etre jointe");
+              return r;
+            });
+          }
+          return r;
+        })
+        .then(function (r) {
+          if (!r) return;
+          createSubmitting = false;
+          if (submitBtn) submitBtn.disabled = false;
+          hideCreate();
+          showToast("success", "Intervention creee");
+          refresh();
         });
     }
 
@@ -4003,10 +4565,22 @@
         showToast("warning", "Latitude et longitude requises");
         return;
       }
-      apiPost("/api/pcorg/update-gps/" + encodeURIComponent(id), {
-        lat: parseFloat(lat),
-        lon: parseFloat(lon)
+      var fLat = parseFloat(String(lat).replace(",", "."));
+      var fLon = parseFloat(String(lon).replace(",", "."));
+      if (isNaN(fLat) || isNaN(fLon) || Math.abs(fLat) > 90 || Math.abs(fLon) > 180) {
+        showToast("warning", "Coordonnees invalides");
+        return;
+      }
+      saveBtn.disabled = true;
+      // Zone et carroyage recalcules au nouveau point (avant : conserves,
+      // donc faux apres un deplacement)
+      apiCall("POST", "/api/pcorg/update-gps/" + encodeURIComponent(id), {
+        lat: fLat,
+        lon: fLon,
+        area_desc: resolveZone(fLat, fLon),
+        carroye: resolveCellLabel(fLat, fLon)
       }).then(function (r) {
+        saveBtn.disabled = false;
         if (r.ok) {
           modal.classList.remove("show");
           showToast("success", "Position enregistree");
@@ -4018,51 +4592,55 @@
     });
   }
 
-  function openGpsModal(id) {
+  function openGpsModal(id, lat, lon) {
     var modal = document.getElementById("pcorgGpsModal");
     if (!modal) return;
     document.getElementById("pcorg-gps-id").value = id;
-    document.getElementById("pcorg-gps-lat").value = "";
-    document.getElementById("pcorg-gps-lon").value = "";
+    document.getElementById("pcorg-gps-lat").value = lat != null ? Number(lat).toFixed(6) : "";
+    document.getElementById("pcorg-gps-lon").value = lon != null ? Number(lon).toFixed(6) : "";
     modal.classList.add("show");
   }
 
   // ── GPS pick on map ────────────────────────────────────────────────────────
+  var _gpsPickCleanup = null;
+
   function startGpsPick(callback) {
+    ensureMapVisible();
     var map = getMap();
     if (!map) {
       showToast("warning", "Carte non disponible");
       return;
     }
-    if (window.CockpitMapView && window.CockpitMapView.currentView() !== "map") {
-      window.CockpitMapView.switchView("map");
-    }
+    // Un seul mode "pointage" a la fois : relancer ne laisse plus d'ecouteur orphelin
+    if (_gpsPickCleanup) _gpsPickCleanup();
     pickCallback = callback;
     document.body.classList.add("pcorg-pick-active");
+    showToast("info", "Cliquez sur la carte pour placer le point (Echap pour annuler)");
 
-    if (typeof showToast === "function") {
-      showToast("Cliquez sur la carte pour placer le point", "info");
-    }
-
-    function onMapClick(e) {
+    function cleanup() {
       document.body.classList.remove("pcorg-pick-active");
       map.off("click", onMapClick);
-      map.off("keydown", onEsc);
-      if (pickCallback) {
-        pickCallback(e.latlng.lat, e.latlng.lng);
-        pickCallback = null;
-      }
+      document.removeEventListener("keydown", onEsc, true);
+      _gpsPickCleanup = null;
     }
+    function onMapClick(e) {
+      var cb = pickCallback;
+      pickCallback = null;
+      cleanup();
+      if (cb) cb(e.latlng.lat, e.latlng.lng);
+    }
+    // Sur le document (et non la carte) : Echap marche meme si la carte n'a pas le focus
     function onEsc(e) {
-      if (e.originalEvent && e.originalEvent.key === "Escape") {
-        document.body.classList.remove("pcorg-pick-active");
-        map.off("click", onMapClick);
-        map.off("keydown", onEsc);
-        pickCallback = null;
-      }
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      pickCallback = null;
+      cleanup();
+      var modal = document.getElementById("pcorgGpsModal");
+      if (modal) modal.classList.add("show");
     }
     map.on("click", onMapClick);
-    map.on("keydown", onEsc);
+    document.addEventListener("keydown", onEsc, true);
+    _gpsPickCleanup = cleanup;
   }
 
   // ── Expanded list panel (zone centrale, meme pattern que meteo) ──────────
@@ -4085,6 +4663,124 @@
   var expSearchTimer = null;
   var expSearchLoading = false;
 
+  // ── Colonnes du panneau elargi : largeurs redimensionnables ──────────────
+  // w = largeur par defaut (px) ; null = colonne elastique (prend le reste).
+  // Le tableau a une largeur minimale : en dessous, defilement horizontal
+  // (ecran de portable 15" : le tableau etait coupe sans pouvoir defiler).
+  var EXP_COLUMNS = [
+    { key: "status", label: "", title: "Statut", w: 34, fixed: true },
+    { key: "cat", label: "Categorie", w: 140 },
+    { key: "desc", label: "Description", w: null, min: 220 },
+    { key: "zone", label: "Zone", w: 120 },
+    { key: "op", label: "Operateur", w: 120 },
+    { key: "open", label: "Ouverture", w: 88 },
+    { key: "close", label: "Cloture", w: 88 },
+    { key: "loc", label: "", title: "Localiser", w: 36, fixed: true }
+  ];
+  var EXP_COLW_KEY = "pcorg-exp-colw";
+
+  function loadExpColWidths() {
+    try { return JSON.parse(localStorage.getItem(EXP_COLW_KEY)) || {}; } catch (e) { return {}; }
+  }
+  function saveExpColWidths(w) {
+    try { localStorage.setItem(EXP_COLW_KEY, JSON.stringify(w)); } catch (e) {}
+  }
+
+  function expColWidth(col, saved) {
+    return saved[col.key] || col.w;
+  }
+
+  function applyExpMinWidth(table, saved) {
+    var total = 0;
+    EXP_COLUMNS.forEach(function (c) {
+      var w = expColWidth(c, saved);
+      total += w || c.min || 200;
+    });
+    table.style.minWidth = total + "px";
+  }
+
+  function buildExpHeader(table) {
+    var saved = loadExpColWidths();
+    var thead = document.createElement("thead");
+    var headRow = document.createElement("tr");
+    EXP_COLUMNS.forEach(function (col) {
+      var th = document.createElement("th");
+      if (col.key === "status") th.className = "pcorg-exp-th-status";
+      th.textContent = col.label;
+      if (col.title) th.title = col.title;
+      var w = expColWidth(col, saved);
+      if (w) th.style.width = w + "px";
+      if (!col.fixed) {
+        // Poignee de redimensionnement (double-clic : largeur par defaut)
+        var handle = mkEl("span", "pcorg-exp-resize");
+        handle.title = "Glisser pour redimensionner, double-clic pour reinitialiser";
+        handle.addEventListener("pointerdown", function (e) {
+          e.preventDefault(); e.stopPropagation();
+          var startX = e.clientX;
+          var startW = th.getBoundingClientRect().width;
+          document.body.classList.add("pcorg-exp-resizing");
+          function onMove(ev) {
+            var nw = Math.max(50, Math.round(startW + ev.clientX - startX));
+            th.style.width = nw + "px";
+            var cur = loadExpColWidths();
+            cur[col.key] = nw;
+            applyExpMinWidth(table, cur);
+            th._pendingWidth = nw;
+          }
+          function onUp() {
+            document.removeEventListener("pointermove", onMove);
+            document.removeEventListener("pointerup", onUp);
+            document.body.classList.remove("pcorg-exp-resizing");
+            if (th._pendingWidth) {
+              var cur = loadExpColWidths();
+              cur[col.key] = th._pendingWidth;
+              saveExpColWidths(cur);
+              th._pendingWidth = null;
+            }
+          }
+          document.addEventListener("pointermove", onMove);
+          document.addEventListener("pointerup", onUp);
+        });
+        handle.addEventListener("dblclick", function (e) {
+          e.stopPropagation();
+          var cur = loadExpColWidths();
+          delete cur[col.key];
+          saveExpColWidths(cur);
+          th.style.width = col.w ? col.w + "px" : "";
+          applyExpMinWidth(table, cur);
+        });
+        handle.addEventListener("click", function (e) { e.stopPropagation(); });
+        th.appendChild(handle);
+      }
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+    applyExpMinWidth(table, saved);
+  }
+
+  // Filtre par categorie du panneau elargi (cree en JS, a cote de la recherche)
+  var expCatFilter = "";
+  var expCatSelect = null;
+
+  function ensureExpCatFilter() {
+    if (expCatSelect || !expSearch || !expSearch.parentNode) return;
+    expCatSelect = mkEl("select", "pcorg-exp-catfilter");
+    expCatSelect.title = "Filtrer par categorie";
+    var o0 = mkEl("option", ""); o0.value = ""; o0.textContent = "Toutes categories";
+    expCatSelect.appendChild(o0);
+    CATEGORY_ORDER.forEach(function (cat) {
+      var o = mkEl("option", ""); o.value = cat; o.textContent = shortCat(cat);
+      expCatSelect.appendChild(o);
+    });
+    expCatSelect.addEventListener("change", function () {
+      expCatFilter = expCatSelect.value;
+      if (expBody) expBody.scrollTop = 0;
+      renderExpanded();
+    });
+    expSearch.parentNode.insertBefore(expCatSelect, expSearch);
+  }
+
   function initExpandedPanel() {
     expPanel = document.getElementById("pcorg-expanded-panel");
     expBody = document.getElementById("pcorg-expanded-body");
@@ -4105,6 +4801,7 @@
         tabs.forEach(function (t) { t.classList.remove("active"); });
         tab.classList.add("active");
         expFilter = tab.getAttribute("data-filter");
+        if (expBody) expBody.scrollTop = 0;
         if (expSearchActive) {
           // relance la recherche serveur avec le nouveau filtre status
           triggerExpandedSearch(expSearchQuery, true);
@@ -4149,7 +4846,19 @@
   }
 
   function openExpanded() {
-    if (!expPanel || !lastData) return;
+    if (!expPanel) return;
+    if (!lastData) {
+      showToast("info", "Main courante en cours de chargement...");
+      refresh();
+      return;
+    }
+    // Tableau de bord controle d'acces : le fermer par son propre bouton
+    // (liberation des graphiques) pour ne pas empiler deux panneaux
+    var counters = document.getElementById("counters-panel");
+    if (counters && counters.style.display !== "none" && counters.style.display !== "") {
+      var cClose = document.getElementById("counters-panel-close");
+      if (cClose) cClose.click();
+    }
     var timeline = document.getElementById("timeline-main");
     var mapMain = document.getElementById("map-main");
     var meteoPanel = document.getElementById("meteo-panel");
@@ -4218,25 +4927,31 @@
   function loadMoreClosed() {
     var ey = (typeof getCurrentEventYear === "function") ? getCurrentEventYear() : {};
     if (!ey.event || !ey.year) return;
-    var baseLen = (lastData && lastData.closed ? lastData.closed.length : 0);
-    var offset = baseLen + expClosedExtra.length;
-    if (offset >= expClosedTotal) {
+    var loaded = allLoadedClosed();
+    if (loaded.length >= expClosedTotal) {
       expClosedHasMore = false;
       renderExpanded();
       return;
     }
+    // Pagination par curseur (derniere cloture chargee) : l'offset glissait
+    // a chaque nouvelle cloture et produisait doublons ou trous
+    var last = loaded[loaded.length - 1];
     expClosedLoading = true;
     renderExpanded();
     var url = "/api/pcorg/closed?event=" + encodeURIComponent(ey.event)
       + "&year=" + encodeURIComponent(ey.year)
-      + "&offset=" + offset
-      + "&limit=" + expClosedPageSize;
+      + "&limit=" + expClosedPageSize
+      + (last && last.close_ts
+        ? "&before_ts=" + encodeURIComponent(last.close_ts) + "&before_id=" + encodeURIComponent(last.id)
+        : "&offset=" + loaded.length);
     fetch(url, { cache: "no-store" })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         expClosedLoading = false;
         if (!data || !Array.isArray(data.items)) return;
-        expClosedExtra = expClosedExtra.concat(data.items);
+        var known = {};
+        allLoadedClosed().forEach(function (it) { known[it.id] = true; });
+        expClosedExtra = expClosedExtra.concat(data.items.filter(function (it) { return !known[it.id]; }));
         if (typeof data.total === "number") expClosedTotal = data.total;
         expClosedHasMore = !!data.has_more;
         renderExpanded();
@@ -4245,6 +4960,18 @@
         expClosedLoading = false;
         renderExpanded();
       });
+  }
+
+  // Fiches closes connues : page initiale (/live) + pages chargees, sans doublon
+  function allLoadedClosed() {
+    var seen = {};
+    var out = [];
+    ((lastData && lastData.closed) || []).concat(expClosedExtra || []).forEach(function (it) {
+      if (seen[it.id]) return;
+      seen[it.id] = true;
+      out.push(it);
+    });
+    return out;
   }
 
   function triggerExpandedSearch(q, force) {
@@ -4305,16 +5032,34 @@
       closedItems = (expSearchResults.closed || []).map(function (it) { it._open = false; return it; });
     } else {
       openItems = (lastData.open || []).map(function (it) { it._open = true; return it; });
-      var baseClosed = (lastData.closed || []).slice();
-      var allClosed = baseClosed.concat(expClosedExtra || []);
-      closedItems = allClosed.map(function (it) { it._open = false; return it; });
+      var openIds = {};
+      openItems.forEach(function (it) { openIds[it.id] = true; });
+      // Une fiche rouverte depuis ne figure plus parmi les closes
+      closedItems = allLoadedClosed().filter(function (it) { return !openIds[it.id]; })
+        .map(function (it) { it._open = false; return it; });
     }
 
     var items;
     if (expFilter === "open") items = openItems;
     else if (expFilter === "closed") items = closedItems;
     else items = openItems.concat(closedItems);
+    ensureExpCatFilter();
+    if (expCatFilter) {
+      items = items.filter(function (it) { return it.category === expCatFilter; });
+      openItems = openItems.filter(function (it) { return it.category === expCatFilter; });
+      closedItems = closedItems.filter(function (it) { return it.category === expCatFilter; });
+    }
+    // Tri : en cours d'abord, puis terminees ; dans chaque groupe, heure
+    // d'ouverture de la plus recente a la plus ancienne (les closes etaient
+    // triees par date de cloture)
+    function tsMs(it) { var t = it.ts ? new Date(it.ts).getTime() : NaN; return isNaN(t) ? -Infinity : t; }
+    items = items.slice().sort(function (a, b) {
+      if (a._open !== b._open) return a._open ? -1 : 1;
+      return tsMs(b) - tsMs(a);
+    });
 
+    // Le rafraichissement (60 s) ne ramene plus en haut du tableau
+    var prevScrollTop = expBody.scrollTop;
     expBody.textContent = "";
 
     // Bandeau loading recherche
@@ -4346,26 +5091,22 @@
     }
 
     var table = mkEl("table", "pcorg-exp-table");
-    var thead = document.createElement("thead");
-    var headRow = document.createElement("tr");
-    ["Statut", "Categorie", "Description", "Operateur", "Ouverture", "Cloture"].forEach(function (h) {
-      var th = document.createElement("th");
-      th.textContent = h;
-      headRow.appendChild(th);
-    });
-    thead.appendChild(headRow);
-    table.appendChild(thead);
+    buildExpHeader(table);
 
     var tbody = document.createElement("tbody");
     items.forEach(function (item) {
       var st = catStyle(item.category);
       var tr = document.createElement("tr");
+      tr.setAttribute("data-id", item.id);
+      if (activeFicheId === item.id) tr.classList.add("pcorg-row-active");
 
       // Statut
-      var tdStatus = document.createElement("td");
-      var statusBadge = mkEl("span", "pcorg-exp-status " + (item._open ? "open" : "closed"));
-      statusBadge.textContent = item._open ? "En cours" : "Termin\u00e9e";
-      tdStatus.appendChild(statusBadge);
+      // Statut en icone (le badge texte prenait une colonne de 90 px)
+      var tdStatus = mkEl("td", "pcorg-exp-td-status");
+      var statusIco = matIcon(item._open ? "radio_button_checked" : "check_circle",
+        "pcorg-exp-status-ico " + (item._open ? "open" : "closed"));
+      statusIco.title = item._open ? "En cours" : "Termin\u00e9e";
+      tdStatus.appendChild(statusIco);
       tr.appendChild(tdStatus);
 
       // Categorie
@@ -4402,12 +5143,25 @@
       descEl.textContent = item.text || "(sans description)";
       descEl.title = item.text || "";
       tdDesc.appendChild(descEl);
+      if (item.patrouille) {
+        var vehEl = mkEl("div", "pcorg-exp-veh");
+        vehEl.appendChild(matIcon("directions_car"));
+        vehEl.appendChild(document.createTextNode(" " + item.patrouille));
+        tdDesc.appendChild(vehEl);
+      }
       tr.appendChild(tdDesc);
+
+      // Zone
+      var tdZone = document.createElement("td");
+      var zoneEl = mkEl("span", "pcorg-exp-zone");
+      zoneEl.textContent = truncZone(item.area_desc);
+      tdZone.appendChild(zoneEl);
+      tr.appendChild(tdZone);
 
       // Operateur
       var tdOp = document.createElement("td");
       var opEl = mkEl("span", "pcorg-exp-operator");
-      opEl.textContent = item.operator || "";
+      opEl.textContent = operatorLabel(item.operator);
       tdOp.appendChild(opEl);
       tr.appendChild(tdOp);
 
@@ -4427,7 +5181,9 @@
       // Cloture
       var tdClose = document.createElement("td");
       var closeEl = mkEl("span", "pcorg-exp-time");
-      if (item.close_ts) {
+      // Fiche en cours : rien. Prysm renseigne une date de cloture par
+      // defaut sur les fiches ouvertes (affichee "01/01")
+      if (!item._open && item.close_ts) {
         var dClose = new Date(item.close_ts);
         closeEl.textContent = String(dClose.getDate()).padStart(2, "0") + "/" +
           String(dClose.getMonth() + 1).padStart(2, "0") + " " +
@@ -4437,8 +5193,23 @@
         closeEl.textContent = "-";
         closeEl.style.color = "var(--muted)";
       }
+      if (item.operator_close) closeEl.title = "Close par " + operatorLabel(item.operator_close);
       tdClose.appendChild(closeEl);
       tr.appendChild(tdClose);
+
+      // Localiser sur la carte (fiches ouvertes positionnees : seules elles ont un pin)
+      var tdLoc = document.createElement("td");
+      if (item._open && item.lat != null && item.lon != null) {
+        var locBtn = mkEl("button", "pcorg-exp-locate");
+        locBtn.type = "button";
+        locBtn.title = "Voir sur la carte";
+        locBtn.appendChild(matIcon("location_on"));
+        locBtn.addEventListener("click", (function (it) {
+          return function (e) { e.stopPropagation(); flyToPin(it.lat, it.lon, it.id); };
+        })(item));
+        tdLoc.appendChild(locBtn);
+      }
+      tr.appendChild(tdLoc);
 
       // Click -> open detail
       tr.addEventListener("click", (function (id, closed) {
@@ -4450,6 +5221,7 @@
 
     table.appendChild(tbody);
     expBody.appendChild(table);
+    expBody.scrollTop = prevScrollTop;
 
     // Footer: pagination cloturees (sauf en mode recherche serveur)
     if (!expSearchActive && expFilter !== "open") {
@@ -4603,8 +5375,370 @@
     }
   }
 
+  // ── Aide a la saisie (pcorg_assist.py) ─────────────────────────────────────
+  // Sous le champ Description de l'assistant de creation : suggestions de
+  // classement (IA, jamais appliquees d'office) et fiches similaires ouvertes
+  // ou recentes. Ne bloque ni la saisie ni l'enregistrement : toute erreur
+  // est silencieuse, une requete en cours est annulee des que le texte change.
+  var PCA_MIN_CHARS = 25;
+  var PCA_DEBOUNCE_MS = 1200;
+  var pca = { timer: null, ctrl: null, key: "", bar: null, res: null };
+
+  function pcaInitAssist() {
+    var ta = document.getElementById("pcorg-c-text");
+    if (!ta || pca.bar) return;
+    var bar = mkEl("div", "pca-bar");
+    bar.setAttribute("aria-live", "polite");
+    bar.hidden = true;
+    ta.parentNode.appendChild(bar);
+    pca.bar = bar;
+    ta.addEventListener("input", function () { pcaSchedule(PCA_DEBOUNCE_MS); });
+    ta.addEventListener("blur", function () { pcaSchedule(0); });
+  }
+
+  function pcaAbort() {
+    if (pca.timer) { clearTimeout(pca.timer); pca.timer = null; }
+    if (pca.ctrl) { try { pca.ctrl.abort(); } catch (e) {} pca.ctrl = null; }
+  }
+
+  function pcaReset() {
+    pcaAbort();
+    pca.key = "";
+    pca.res = null;
+    if (pca.bar) { pca.bar.textContent = ""; pca.bar.hidden = true; }
+  }
+
+  function pcaKey(text) {
+    var ey = (typeof getCurrentEventYear === "function") ? getCurrentEventYear() : {};
+    return { ey: ey, key: [text, ey.event || "", ey.year || ""].join("|") };
+  }
+
+  function pcaSchedule(delay) {
+    var ta = document.getElementById("pcorg-c-text");
+    if (!ta) return;
+    var text = ta.value.trim();
+    if (pca.timer) { clearTimeout(pca.timer); pca.timer = null; }
+    if (text.length < PCA_MIN_CHARS) { pcaReset(); return; }
+    var k = pcaKey(text);
+    if (k.key === pca.key) return;                       // deja demande ou affiche
+    if (pca.ctrl) { try { pca.ctrl.abort(); } catch (e) {} pca.ctrl = null; }
+    pca.timer = setTimeout(function () { pca.timer = null; pcaFetch(text); }, delay);
+  }
+
+  // POST JSON annulable (AbortController) ; rend null en cas d'erreur ou
+  // d'annulation. Jeton CSRF refuse : renouvele puis requete rejouee une fois.
+  function pcaPost(url, payload, ctrl, retried) {
+    var opts = {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken() },
+      body: JSON.stringify(payload)
+    };
+    if (ctrl) opts.signal = ctrl.signal;
+    return fetch(url, opts)
+      .then(function (r) { return r.json().catch(function () { return null; }); })
+      .catch(function () { return null; })
+      .then(function (res) {
+        if (!retried && res && res.code === "csrf" && window.CockpitCsrf && !(ctrl && ctrl.signal.aborted)) {
+          return window.CockpitCsrf.refresh().then(function (st) {
+            return st.ok ? pcaPost(url, payload, ctrl, true) : null;
+          }, function () { return null; });
+        }
+        return res;
+      });
+  }
+
+  function pcaFetch(text) {
+    var k = pcaKey(text);
+    if (!k.ey.event || !k.ey.year || k.key === pca.key) return;
+    var ctrl = window.AbortController ? new AbortController() : null;
+    pca.ctrl = ctrl;
+    pca.key = k.key;
+    var payload = {
+      text: text, event: k.ey.event, year: k.ey.year,
+      category: createSelectedCat || null,
+      area_desc: createAreaDesc || null
+    };
+    if (createLat != null && createLon != null) { payload.lat = createLat; payload.lng = createLon; }
+    pcaPost("/api/pcorg/assist/suggest", payload, ctrl).then(function (res) {
+      if (ctrl && pca.ctrl !== ctrl) return;              // requete depassee
+      pca.ctrl = null;
+      if (!res || res.ok !== true) { pca.key = ""; return; }
+      pca.res = res;
+      pcaRender();
+    });
+  }
+
+  function pcaChip(label, title, onApply) {
+    var chip = mkEl("span", "pca-chip");
+    var lbl = mkEl("span", "pca-chip-label");
+    lbl.textContent = label;
+    chip.appendChild(lbl);
+    if (title) chip.title = title;
+    if (onApply) {
+      var btn = mkEl("button", "pca-chip-apply");
+      btn.type = "button";
+      btn.textContent = "Appliquer";
+      btn.addEventListener("click", function (e) {
+        e.preventDefault(); e.stopPropagation();
+        try { onApply(); } catch (err) {}
+        pcaRender();
+      });
+      chip.appendChild(btn);
+    }
+    return chip;
+  }
+
+  function pcaSousSelect() { return document.getElementById("pcorg-c-sous_classification"); }
+
+  function pcaEnsureCategory(cat) {
+    if (!cat || CATEGORY_ORDER.indexOf(cat) === -1) return false;
+    if (createSelectedCat !== cat) selectCategory(cat);
+    return true;
+  }
+
+  function pcaRender() {
+    var bar = pca.bar, res = pca.res;
+    if (!bar) return;
+    bar.textContent = "";
+    if (!res) { bar.hidden = true; return; }
+    var s = res.suggestions;
+    var chips = [];
+    if (s) {
+      var pct = Math.round((s.confidence || 0) * 100);
+      if (s.category && CATEGORY_ORDER.indexOf(s.category) !== -1 && s.category !== createSelectedCat) {
+        chips.push(pcaChip("Categorie : " + shortCat(s.category) + " (" + pct + "%)", s.reason,
+          function () { pcaEnsureCategory(s.category); }));
+      }
+      var sousCat = s.sous_classification_category;
+      var sel = pcaSousSelect();
+      var sousDone = sel && createSelectedCat === sousCat && sel.value === s.sous_classification;
+      if (s.sous_classification && !sousDone && CATEGORY_ORDER.indexOf(sousCat) !== -1) {
+        chips.push(pcaChip("Sous-classification : " + s.sous_classification, s.reason, function () {
+          if (!pcaEnsureCategory(sousCat)) return;
+          var el = pcaSousSelect();
+          if (el) el.value = s.sous_classification;
+        }));
+      }
+      var urgCat = s.category || createSelectedCat;
+      var urgCats = (pcorgConfig && pcorgConfig.urgence_categories) || {};
+      if (s.niveau_urgence && s.niveau_urgence !== createSelectedUrgency && urgCat && urgCats[urgCat]) {
+        chips.push(pcaChip("Urgence : " + s.niveau_urgence + " - " + urgencyLabel(urgCat, s.niveau_urgence),
+          s.reason, function () {
+            if (!pcaEnsureCategory(urgCat)) return;
+            createSelectedUrgency = s.niveau_urgence;
+            buildSpecificCreateFields(createSelectedCat);  // valeurs deja saisies conservees
+          }));
+      }
+      if (s.zone) chips.push(pcaChip("Lieu cite : " + s.zone, "Lieu repere dans le texte (information)", null));
+    }
+    if (chips.length) {
+      var row = mkEl("div", "pca-row");
+      var tag = mkEl("span", "pca-tag");
+      tag.appendChild(matIcon("auto_awesome"));
+      tag.appendChild(document.createTextNode("Suggestion"));
+      if (s && s.reason) tag.title = s.reason;
+      row.appendChild(tag);
+      chips.forEach(function (c) { row.appendChild(c); });
+      bar.appendChild(row);
+    }
+    var dups = res.possible_duplicates || [];
+    if (dups.length) {
+      var warn = mkEl("div", "pca-dups");
+      var head = mkEl("div", "pca-dups-head");
+      head.appendChild(matIcon("content_copy"));
+      var ht = mkEl("span", "");
+      ht.textContent = dups.length + (dups.length > 1 ? " fiches similaires" : " fiche similaire")
+        + " (ouvertes ou saisies depuis moins de " + (res.duplicates_window_h || 2) + " h)";
+      head.appendChild(ht);
+      warn.appendChild(head);
+      dups.forEach(function (it) {
+        var b = mkEl("button", "pca-dup");
+        b.type = "button";
+        b.title = "Ouvrir la fiche";
+        var t = mkEl("span", "pca-dup-time");
+        t.textContent = fmtDayTime(it.ts) + (it.status_closed ? " (close)" : "");
+        b.appendChild(t);
+        var c = mkEl("span", "pca-dup-cat");
+        c.textContent = shortCat(it.category);
+        c.style.color = catStyle(it.category).color;
+        b.appendChild(c);
+        var x = mkEl("span", "pca-dup-text");
+        x.textContent = it.excerpt || "";
+        b.appendChild(x);
+        b.addEventListener("click", function (e) { e.preventDefault(); pcaOpenFiche(it.id); });
+        warn.appendChild(b);
+      });
+      bar.appendChild(warn);
+    }
+    bar.hidden = !bar.childNodes.length;
+  }
+
+  // La fiche s'ouvre AU-DESSUS de l'assistant de creation, sans le fermer
+  function pcaOpenFiche(id) {
+    var m = document.getElementById("pcorgDetailModal");
+    var o = document.getElementById("pcorgDetailOverlay");
+    if (m) m.classList.add("pca-over");
+    if (o) o.classList.add("pca-over");
+    openDetailModal(id, false);
+  }
+
+  // ── Precedents d'une fiche (autres editions) ──────────────────────────────
+  function pcaBuildPrecedentsBlock(d) {
+    var wrap = mkEl("details", "pca-prec");
+    var sum = document.createElement("summary");
+    sum.className = "pcorg-fiche-section pca-prec-summary";
+    sum.textContent = "Precedents";
+    wrap.appendChild(sum);
+
+    var tools = mkEl("div", "pca-prec-tools");
+    var scopeSel = mkEl("select", "form-input pca-prec-scope");
+    [["editions", "Autres editions de l'evenement"], ["all", "Tous les evenements"]].forEach(function (o) {
+      var opt = document.createElement("option");
+      opt.value = o[0]; opt.textContent = o[1];
+      scopeSel.appendChild(opt);
+    });
+    var go = mkEl("button", "pca-btn");
+    go.type = "button";
+    go.appendChild(matIcon("history"));
+    go.appendChild(document.createTextNode(" Rechercher"));
+    tools.appendChild(scopeSel);
+    tools.appendChild(go);
+    wrap.appendChild(tools);
+
+    var list = mkEl("div", "pca-prec-list");
+    wrap.appendChild(list);
+    var synth = mkEl("div", "pca-synth");
+    wrap.appendChild(synth);
+    var current = [];
+
+    function msg(el, text, cls) {
+      el.textContent = "";
+      var p = mkEl("div", "pca-msg" + (cls ? " " + cls : ""));
+      p.textContent = text;
+      el.appendChild(p);
+    }
+
+    go.addEventListener("click", function () {
+      go.disabled = true;
+      synth.textContent = "";
+      msg(list, "Recherche...");
+      var scope = scopeSel.value;
+      fetch("/api/pcorg/assist/similar/" + encodeURIComponent(d.id) + "?scope=" + encodeURIComponent(scope))
+        .then(function (r) { return r.json(); })
+        .catch(function () { return null; })
+        .then(function (res) {
+          go.disabled = false;
+          if (!res || res.ok !== true) { msg(list, "Recherche impossible", "pca-msg-err"); return; }
+          current = res.precedents || [];
+          renderList(scope);
+        });
+    });
+
+    function renderList(scope) {
+      list.textContent = "";
+      if (!current.length) {
+        msg(list, scope === "all" ? "Aucun precedent trouve." : "Aucun precedent dans les autres editions.");
+        return;
+      }
+      current.forEach(function (p) {
+        var card = mkEl("div", "pca-prec-item");
+        card.style.borderLeftColor = catStyle(p.category).color;
+        var top = mkEl("div", "pca-prec-top");
+        var ed = mkEl("strong", ""); ed.textContent = p.edition || "";
+        top.appendChild(ed);
+        var dt = mkEl("span", "pca-prec-date"); dt.textContent = fmtDayTime(p.ts, true);
+        top.appendChild(dt);
+        if (p.niveau_urgence && URGENCY_COLORS[p.niveau_urgence]) {
+          var u = mkEl("span", "pca-prec-urg");
+          u.textContent = p.niveau_urgence;
+          u.style.background = URGENCY_COLORS[p.niveau_urgence];
+          u.title = urgencyLabel(p.category, p.niveau_urgence);
+          top.appendChild(u);
+        }
+        var cat = mkEl("span", "pca-prec-cat");
+        cat.textContent = shortCat(p.category) + (p.sous_classification ? " / " + p.sous_classification : "");
+        top.appendChild(cat);
+        if (p.duration_min != null) {
+          var du = mkEl("span", "pca-prec-dur");
+          du.textContent = p.duration_min < 60 ? p.duration_min + " min"
+            : Math.floor(p.duration_min / 60) + " h " + _pad2(p.duration_min % 60);
+          du.title = "Duree d'ouverture de la fiche";
+          top.appendChild(du);
+        }
+        var open = mkEl("button", "pca-prec-open");
+        open.type = "button";
+        open.title = "Ouvrir cette fiche";
+        open.appendChild(matIcon("open_in_new"));
+        open.addEventListener("click", function () { openDetailModal(p.id, false); });
+        top.appendChild(open);
+        card.appendChild(top);
+        var tx = mkEl("div", "pca-prec-text"); tx.textContent = p.excerpt || "";
+        card.appendChild(tx);
+        if (p.closing_comment) {
+          var cl = mkEl("div", "pca-prec-close");
+          var clb = document.createElement("b"); clb.textContent = "Cloture : ";
+          cl.appendChild(clb);
+          cl.appendChild(document.createTextNode(p.closing_comment));
+          card.appendChild(cl);
+        } else if (p.last_entries && p.last_entries.length) {
+          var last = p.last_entries[p.last_entries.length - 1];
+          var le = mkEl("div", "pca-prec-close");
+          var leb = document.createElement("b"); leb.textContent = "Derniere action : ";
+          le.appendChild(leb);
+          le.appendChild(document.createTextNode(last.text || ""));
+          card.appendChild(le);
+        }
+        list.appendChild(card);
+      });
+      var sb = mkEl("button", "pca-btn");
+      sb.type = "button";
+      sb.appendChild(matIcon("auto_awesome"));
+      sb.appendChild(document.createTextNode(" Synthese IA"));
+      sb.title = "Resume ce qui a ete fait dans ces precedents (fonde uniquement sur ces fiches)";
+      sb.addEventListener("click", function () { runSynthesis(scope, sb); });
+      synth.textContent = "";
+      synth.appendChild(sb);
+    }
+
+    function runSynthesis(scope, btn) {
+      btn.disabled = true;
+      var wait = mkEl("div", "pca-msg"); wait.textContent = "Synthese en cours...";
+      synth.appendChild(wait);
+      apiCall("POST", "/api/pcorg/assist/similar/" + encodeURIComponent(d.id) + "/synthesis", {
+        scope: scope, precedent_ids: current.map(function (p) { return p.id; })
+      }).then(function (res) {
+        btn.disabled = false;
+        wait.remove();
+        if (!res || res.ok !== true) {
+          var e = mkEl("div", "pca-msg pca-msg-err");
+          e.textContent = res && res.error === "cle_api_absente" ? "Assistant IA non configure"
+            : (res && res.error === "budget_ia_depasse" ? "Budget IA mensuel depasse" : "Synthese indisponible");
+          synth.appendChild(e);
+          return;
+        }
+        btn.remove();
+        var box = mkEl("div", "pca-synth-box");
+        var h = mkEl("div", "pca-synth-head");
+        h.appendChild(matIcon("auto_awesome"));
+        h.appendChild(document.createTextNode(" Ce qui a ete fait"
+          + (res.fiabilite ? " (fiabilite " + res.fiabilite + ")" : "")));
+        box.appendChild(h);
+        var ul = document.createElement("ul");
+        (res.points || []).forEach(function (pt) {
+          var li = document.createElement("li"); li.textContent = pt; ul.appendChild(li);
+        });
+        box.appendChild(ul);
+        synth.appendChild(box);
+      });
+    }
+
+    return wrap;
+  }
+
   // ── Public API (pour alert_poller) ──────────────────────────────────────────
-  window.PcorgUI = { openFiche: function(id) { openDetailModal(id, false); } };
+  // openFiche rafraichit aussi la liste et la carte : une fiche ouverte depuis
+  // une alerte (SOS terrain) n'avait pas encore de pin
+  window.PcorgUI = { openFiche: function (id) { openDetailModal(id, false); refresh(); } };
 
   // ── Bootstrap ──────────────────────────────────────────────────────────────
   document.addEventListener("DOMContentLoaded", function () {

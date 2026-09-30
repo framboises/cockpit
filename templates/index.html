@@ -577,77 +577,146 @@
 <!-- Ajout evenement -->
 <div id="addEventModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="addEventTitle">
     <div class="modal-content">
-        <div class="modal-header">
-            <h3 id="addEventTitle">Ajouter un événement à la Timetable</h3>
-            <button type="button" class="modal-close" id="closeAddEvent" title="Fermer" aria-label="Fermer">
+        <div class="modal-header tt-head">
+            <div class="tt-head-icon" aria-hidden="true">
+                <span class="material-symbols-outlined" id="tt-head-icon">event_available</span>
+            </div>
+            <div class="tt-head-text">
+                <h3 id="addEventTitle">Nouvel événement</h3>
+                <p class="tt-head-sub" id="tt-head-sub"></p>
+            </div>
+            <div class="tt-head-badges" id="tt-head-badges"></div>
+            <button type="button" class="modal-close" id="closeAddEvent" title="Fermer (Echap)" aria-label="Fermer">
                 <span class="material-symbols-outlined">close</span>
             </button>
         </div>
-        <form id="addEventForm" novalidate>
+        <form id="addEventForm" novalidate autocomplete="off">
+            <input type="hidden" id="edit-id-hidden" name="_id" value="">
+            <input type="hidden" id="prep-status-hidden" name="preparation_checked" value="">
             <div class="modal-body">
-                <div class="form-group">
-                    <label for="event-date">Date <span class="req">*</span></label>
-                    <input type="date" id="event-date" name="date" required class="form-input">
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="start-time">Heure de début</label>
-                        <input type="text" id="start-time" name="start" placeholder="ex: 07:00 ou TBC" class="form-input">
-                    </div>
-                    <div class="form-group">
-                        <label for="end-time">Heure de fin</label>
-                        <input type="text" id="end-time" name="end" placeholder="ex: 20:00 ou TBC" class="form-input">
+                <div class="tt-banner tt-banner-lock" id="tt-param-banner" hidden>
+                    <span class="material-symbols-outlined">lock</span>
+                    <div>
+                        <strong>Vignette générée par le paramétrage.</strong>
+                        Date, horaires, activité, catégorie, lieu et département se modifient dans le paramétrage :
+                        ici ils seraient réécrits à la prochaine synchronisation. Remarques et tâches restent modifiables.
                     </div>
                 </div>
-                <p class="form-hint-row">Renseigner au moins une heure (début ou fin).</p>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="duration">Durée</label>
-                        <input type="text" id="duration" name="duration" placeholder="ex: 13:00" class="form-input">
+
+                <div class="tt-grid">
+                    <div class="tt-col">
+                        <section class="tt-section">
+                            <h4 class="tt-section-title"><span class="material-symbols-outlined">calendar_month</span>Quand</h4>
+                            <div class="form-group">
+                                <label for="event-date">Date <span class="req">*</span></label>
+                                <input type="date" id="event-date" name="date" required class="form-input tt-lockable">
+                                <div class="tt-days" id="tt-days" role="group" aria-label="Jours de l'événement"></div>
+                                <p class="tt-note tt-note-warn" id="tt-date-warning" hidden></p>
+                            </div>
+                            <div class="tt-time-row">
+                                <div class="form-group tt-time">
+                                    <label for="start-time">Début</label>
+                                    <div class="tt-time-ctrl">
+                                        <input type="time" id="start-time" name="start" class="form-input tt-lockable">
+                                        <button type="button" class="tt-tbc tt-lockable" data-for="start-time" aria-pressed="false" title="Heure à confirmer">TBC</button>
+                                    </div>
+                                </div>
+                                <span class="material-symbols-outlined tt-time-arrow" aria-hidden="true">arrow_forward</span>
+                                <div class="form-group tt-time">
+                                    <label for="end-time">Fin</label>
+                                    <div class="tt-time-ctrl">
+                                        <input type="time" id="end-time" name="end" class="form-input tt-lockable">
+                                        <button type="button" class="tt-tbc tt-lockable" data-for="end-time" aria-pressed="false" title="Heure à confirmer">TBC</button>
+                                    </div>
+                                </div>
+                                <div class="form-group tt-duration">
+                                    <label for="duration">Durée <span class="tt-auto" id="duration-auto" hidden>auto</span></label>
+                                    <input type="text" id="duration" name="duration" class="form-input tt-lockable" placeholder="hh:mm" maxlength="20" inputmode="numeric">
+                                </div>
+                            </div>
+                            <p class="tt-note" id="tt-time-note">Au moins une heure, début ou fin. TBC = heure à confirmer.</p>
+                        </section>
+
+                        <section class="tt-section">
+                            <h4 class="tt-section-title"><span class="material-symbols-outlined">label</span>Quoi</h4>
+                            <div class="form-group">
+                                <label for="activity">Activité <span class="req">*</span> <span class="tt-counter" id="activity-counter"></span></label>
+                                <input type="text" id="activity" name="activity" required class="form-input tt-lockable" placeholder="ex : Ouverture Porte Sud" maxlength="200">
+                                <p class="tt-note tt-note-warn" id="tt-dup-warning" hidden></p>
+                            </div>
+                            <div class="form-group">
+                                <label for="category">
+                                    Catégorie <span class="req">*</span>
+                                    <button type="button" id="category-manage-btn" class="field-link-btn tt-lockable" title="Gérer les catégories"
+                                            aria-haspopup="dialog" aria-expanded="false" aria-controls="category-manager">
+                                        <span class="material-symbols-outlined">tune</span>Gérer
+                                    </button>
+                                </label>
+                                <select id="category" name="category" required class="form-input tt-lockable"></select>
+                            </div>
+                            <!-- Popover flottant (position fixe, placee en JS) : ne pousse pas la modale -->
+                            <div id="category-manager" class="category-manager" role="dialog" aria-label="Gérer les catégories" hidden>
+                                <div class="cat-mgr-head">
+                                    <span>Catégories</span>
+                                    <button type="button" class="cat-mgr-close" id="cat-mgr-close" title="Fermer" aria-label="Fermer">
+                                        <span class="material-symbols-outlined">close</span>
+                                    </button>
+                                </div>
+                                <div class="cat-mgr-add">
+                                    <input type="text" id="cat-mgr-input" class="form-input" placeholder="Nouvelle catégorie" maxlength="120" autocomplete="off">
+                                    <button type="button" id="cat-mgr-add-btn" class="btn-mini">Ajouter</button>
+                                </div>
+                                <div id="cat-mgr-list" class="cat-mgr-list"></div>
+                                <p class="cat-mgr-hint">Seules les catégories sans vignette (0) peuvent être supprimées.</p>
+                            </div>
+                        </section>
+
+                        <section class="tt-section">
+                            <h4 class="tt-section-title"><span class="material-symbols-outlined">location_on</span>Où et qui</h4>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="place">Lieu</label>
+                                    <input type="text" id="place" name="place" class="form-input tt-lockable" maxlength="200" placeholder="ex : Porte Sud" autocomplete="off">
+                                </div>
+                                <div class="form-group">
+                                    <label for="department">Département</label>
+                                    <input type="text" id="department" name="department" class="form-input tt-lockable" maxlength="120" placeholder="ex : SAFE" autocomplete="off">
+                                </div>
+                            </div>
+                        </section>
                     </div>
-                    <div class="form-group">
-                        <label for="category">
-                            Catégorie <span class="req">*</span>
-                            <button type="button" id="category-manage-btn" class="field-link-btn" title="Gérer les catégories">Gérer</button>
-                        </label>
-                        <select id="category" name="category" required class="form-input"></select>
+
+                    <div class="tt-col tt-col-side">
+                        <section class="tt-section">
+                            <h4 class="tt-section-title"><span class="material-symbols-outlined">notes</span>Remarques</h4>
+                            <div class="form-group">
+                                <label for="remark" class="sr-only">Remarques</label>
+                                <textarea id="remark" name="remark" class="form-input" rows="4" maxlength="4000" placeholder="Consignes, contacts, points d'attention..."></textarea>
+                            </div>
+                        </section>
+                        <section class="tt-section tt-section-todo">
+                            <h4 class="tt-section-title">
+                                <span class="material-symbols-outlined">checklist</span>Tâches de préparation
+                                <span class="tt-count" id="tt-todo-count"></span>
+                            </h4>
+                            <div id="event-todo-list" class="event-todo-list"></div>
+                            <button type="button" id="event-todo-add" class="tt-add-task">
+                                <span class="material-symbols-outlined">add</span>Ajouter une tâche
+                            </button>
+                            <p class="tt-note">Entrée dans une tâche pour enchaîner la suivante.</p>
+                        </section>
                     </div>
-                </div>
-                <div id="category-manager" class="category-manager" hidden>
-                    <div class="cat-mgr-add">
-                        <input type="text" id="cat-mgr-input" class="form-input" placeholder="Nouvelle catégorie" maxlength="120" autocomplete="off">
-                        <button type="button" id="cat-mgr-add-btn" class="btn-mini">Ajouter</button>
-                    </div>
-                    <div id="cat-mgr-list" class="cat-mgr-list"></div>
-                    <p class="cat-mgr-hint">Seules les catégories sans vignette (0) peuvent être supprimées.</p>
-                </div>
-                <div class="form-group">
-                    <label for="activity">Activité <span class="req">*</span></label>
-                    <input type="text" id="activity" name="activity" required class="form-input" placeholder="ex: Ouverture Porte Sud">
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="place">Lieu</label>
-                        <input type="text" id="place" name="place" class="form-input">
-                    </div>
-                    <div class="form-group">
-                        <label for="department">Département</label>
-                        <input type="text" id="department" name="department" class="form-input">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label for="remark">Remarques</label>
-                    <textarea id="remark" name="remark" class="form-input"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>Tâches de préparation</label>
-                    <div id="event-todo-list" class="event-todo-list"></div>
-                    <button type="button" id="event-todo-add" class="btn-mini">+ Ajouter une tâche</button>
                 </div>
             </div>
-            <div class="modal-buttons">
-                <button type="button" class="cancel-btn" id="cancelAddEvent">Annuler</button>
-                <button type="submit" class="upload-btn">Enregistrer</button>
+            <div class="modal-buttons tt-foot">
+                <span class="tt-kbd-hint"><kbd>Ctrl</kbd> + <kbd>Entrée</kbd> pour enregistrer</span>
+                <div class="tt-foot-actions">
+                    <button type="button" class="cancel-btn" id="cancelAddEvent">Annuler</button>
+                    <button type="button" class="tt-btn-secondary" id="saveAndNewEvent" title="Garde la date, la catégorie, le lieu et le département">Enregistrer et nouveau</button>
+                    <button type="submit" class="upload-btn" id="saveEvent">
+                        <span class="tt-spinner" aria-hidden="true"></span><span class="tt-save-label">Enregistrer</span>
+                    </button>
+                </div>
             </div>
         </form>
     </div>
@@ -927,6 +996,7 @@ window.__userAllowedCategories = {{ user_allowed_categories_json|safe }};
 window.__userCanCloseFiche = {{ user_can_close_fiche_json|safe }};
 </script>
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
 <script src="{{ url_for('static', filename='js/alert_poller.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 <script src="{{ url_for('static', filename='js/alerte.js') }}"></script>
@@ -934,6 +1004,14 @@ window.__userCanCloseFiche = {{ user_can_close_fiche_json|safe }};
 <script src="{{ url_for('static', filename='js/meteo.js') }}"></script>
 <script src="{{ url_for('static', filename='js/meteo_avance.js') }}"></script>
 <script src="{{ url_for('static', filename='js/timeline.js') }}"></script>
+<script src="{{ url_for('static', filename='js/momentus_lieu.js') }}"></script>
+<script nonce="{{ nonce }}">
+if (window.MomentusLieu) {
+  MomentusLieu.currentEvent = function () {
+    return { event: window.selectedEvent, year: window.selectedYear };
+  };
+}
+</script>
 <script src="{{ url_for('static', filename='js/map_view.js') }}"></script>
 <script src="{{ url_for('static', filename='js/controle_access.js') }}"></script>
 <script src="{{ url_for('static', filename='js/controle_dashboard.js') }}"></script>
@@ -952,6 +1030,7 @@ window.__userCanCloseFiche = {{ user_can_close_fiche_json|safe }};
   });
 </script>
 <script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_reports.js') }}"></script>
 <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
 </body>
 </html>
