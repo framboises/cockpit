@@ -31,3 +31,7 @@ exports/
 # Journaux et trames du jumeau de remorque PMV (banc d essai local)
 docs/pmv/banc-essai/banc/
 docs/pmv/reference/banc/
+
+# Export Cowork (jeton Graph delegue + fichiers generes)
+msal_cowork_cache.bin
+msal_cowork_cache.bin.tmp
