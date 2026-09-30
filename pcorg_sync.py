@@ -144,6 +144,15 @@ def main():
 
     control = _get_control(db)
 
+    # Une synchro deja en cours (cron + force-sync simultanes) : ne pas
+    # doubler. Un drapeau bloque depuis plus de 10 min (crash) est ignore.
+    last_run = control.get("last_run")
+    if control.get("running") and isinstance(last_run, datetime) \
+            and datetime.now() - last_run < timedelta(minutes=10):
+        log.info("Sync deja en cours depuis %s. Sortie.", last_run)
+        client.close()
+        return
+
     # Verifier si la sync est activee (sauf si --force)
     if not force_mode and not control.get("actif", False):
         log.info("Sync PC Organisation desactivee. Sortie.")
@@ -165,7 +174,8 @@ def main():
         return
 
     # Lancer le script de sync comme sous-processus
-    cmd = [PYTHON_EXE, "-X", "utf8", SYNC_SCRIPT]
+    # --db explicite : le script ecrit dans la base dont on lit le controle
+    cmd = [PYTHON_EXE, "-X", "utf8", SYNC_SCRIPT, "--db", DB_NAME]
     if full_mode:
         cmd.append("--full")
 

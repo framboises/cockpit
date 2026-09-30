@@ -40,6 +40,10 @@ from pymongo import MongoClient, UpdateOne
 from lxml import etree
 from dateutil import parser as dtparser
 
+# Module partage avec Cockpit (racine du repo, deux niveaux au-dessus)
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+import pcorg_history  # noqa: E402
+
 # ─── Configuration ───────────────────────────────────────────────────────────
 
 SQL_HOST = "10.34.0.4"
@@ -50,7 +54,11 @@ SQL_TIMEOUT = 5
 KNOWN_DYNAMIC_PORT = "65422"
 
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-MONGO_DB = "titan"
+# Meme regle que app.py et pcorg_sync.py : "titan" en prod, "titan_dev"
+# sinon. Codee en dur a "titan", une synchro lancee depuis le dev ecrivait
+# dans la base de prod. Surchargeable par --db.
+_TITAN_ENV = os.getenv("TITAN_ENV", "dev").strip().lower()
+MONGO_DB = "titan" if _TITAN_ENV in {"prod", "production"} else "titan_dev"
 MONGO_COLLECTION = "pcorg"
 MONGO_SYNC_COLLECTION = "pcorg_sync_cursor"
 MONGO_PARAMETRAGES_COLLECTION = "parametrages"
@@ -471,36 +479,10 @@ def parse_gps(video_field):
     return None
 
 
-# Comment history parsing
-COMMENT_ENTRY_RE = re.compile(
-    r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})\s*,\s*(.+?)\s*\n(.*?)(?=\d{2}/\d{2}/\d{4}|\Z)',
-    re.DOTALL,
-)
-
-
 def parse_comment_history(comment):
-    """Parse le champ comment brut en liste d'entrees chronologiques.
-    Retourne [{"ts": "ISO", "operator": "Nom", "text": "message"}, ...]
-    """
-    if not comment:
-        return []
-    entries = []
-    for m in COMMENT_ENTRY_RE.finditer(comment):
-        ts_raw, operator, text = m.group(1), m.group(2).strip(), m.group(3).strip()
-        # Parse DD/MM/YYYY HH:MM:SS -> ISO
-        ts_iso = None
-        try:
-            dt = datetime.strptime(ts_raw, "%d/%m/%Y %H:%M:%S")
-            dt = dt.replace(tzinfo=PARIS_TZ)
-            ts_iso = dt.isoformat()
-        except ValueError:
-            ts_iso = ts_raw
-        entries.append({
-            "ts": ts_iso,
-            "operator": operator,
-            "text": text,
-        })
-    return entries
+    """Parse le champ comment brut en liste d'entrees chronologiques
+    (parseur partage : pcorg_history.parse_comment)."""
+    return pcorg_history.parse_comment(comment, origin="sql")
 
 
 # Regex extraction
@@ -833,7 +815,7 @@ def enrich_pcorg_config(mongo_db, pcorg_col):
     # Scanner les sous-classifications par categorie
     pipeline_sc = [
         {"$match": {"category": {"$regex": "^PCO"},
-                     "content_category.sous_classification": {"$ne": None, "$ne": ""}}},
+                     "content_category.sous_classification": {"$nin": [None, ""]}}},
         {"$group": {"_id": {"cat": "$category",
                             "sc": "$content_category.sous_classification"}}},
     ]
@@ -854,7 +836,7 @@ def enrich_pcorg_config(mongo_db, pcorg_col):
     for i in range(1, 6):
         field = f"content_category.intervenant{i}"
         pipeline_int = [
-            {"$match": {"category": {"$regex": "^PCO"}, field: {"$ne": None, "$ne": ""}}},
+            {"$match": {"category": {"$regex": "^PCO"}, field: {"$nin": [None, ""]}}},
             {"$group": {"_id": f"${field}"}},
         ]
         for row in pcorg_col.aggregate(pipeline_int):
@@ -868,7 +850,7 @@ def enrich_pcorg_config(mongo_db, pcorg_col):
     for field_name in ["content_category.moyens_engages_niveau_1",
                        "content_category.moyens_engages_niveau_2"]:
         pipeline_m = [
-            {"$match": {"category": {"$regex": "^PCO"}, field_name: {"$ne": None, "$ne": ""}}},
+            {"$match": {"category": {"$regex": "^PCO"}, field_name: {"$nin": [None, ""]}}},
             {"$group": {"_id": f"${field_name}"}},
         ]
         for row in pcorg_col.aggregate(pipeline_m):
@@ -881,7 +863,7 @@ def enrich_pcorg_config(mongo_db, pcorg_col):
     # Scanner les services contactes
     pipeline_svc = [
         {"$match": {"category": {"$regex": "^PCO"},
-                     "content_category.service_contacte": {"$ne": None, "$ne": ""}}},
+                     "content_category.service_contacte": {"$nin": [None, ""]}}},
         {"$group": {"_id": "$content_category.service_contacte"}},
     ]
     for row in pcorg_col.aggregate(pipeline_svc):
@@ -912,6 +894,48 @@ def enrich_pcorg_config(mongo_db, pcorg_col):
         print(f"  Config pcorg : aucune nouvelle valeur")
 
 
+def write_merged(pcorg_col, docs, max_attempts=3):
+    """Ecrit un lot de documents SQL en preservant les modifications Cockpit.
+
+    Avant : `$set` du document entier, qui effacait commentaires, cloture,
+    vehicule engage, position et urgence saisis dans Cockpit a chaque
+    reecriture de la ligne SQL. Desormais chaque document est fusionne avec
+    l'existant (pcorg_history.merge_sync_doc), et l'ecriture est gardee par
+    `cockpit_rev` : si Cockpit a modifie la fiche entre la lecture et
+    l'ecriture, le document est relu et refusionne.
+    Retourne le nombre de documents inseres ou modifies.
+    """
+    pending = dict(docs)
+    written = 0
+    for _attempt in range(max_attempts):
+        if not pending:
+            break
+        existing = {d["_id"]: d for d in pcorg_col.find({"_id": {"$in": list(pending)}})}
+        ops = []
+        expected_rev = {}
+        for _id, doc in pending.items():
+            ex = existing.get(_id)
+            merged = pcorg_history.merge_sync_doc(dict(doc), ex)
+            if ex is None:
+                ops.append(UpdateOne({"_id": _id}, {"$setOnInsert": merged}, upsert=True))
+            else:
+                rev = ex.get("cockpit_rev")
+                expected_rev[_id] = rev
+                ops.append(UpdateOne({"_id": _id, "cockpit_rev": rev}, {"$set": merged}))
+        res = pcorg_col.bulk_write(ops, ordered=False)
+        written += (res.upserted_count or 0) + (res.modified_count or 0)
+        if not expected_rev:
+            break
+        # Documents dont la garde n'a pas tenu (modifies par Cockpit entre-temps)
+        current = pcorg_col.find({"_id": {"$in": list(expected_rev)}}, {"cockpit_rev": 1})
+        stale = {d["_id"] for d in current if d.get("cockpit_rev") != expected_rev[d["_id"]]}
+        pending = {k: v for k, v in pending.items() if k in stale}
+    if pending:
+        print(f"  [WARN] {len(pending)} fiche(s) modifiee(s) en continu dans Cockpit, "
+              f"reportee(s) au prochain passage : {list(pending)[:5]}")
+    return written
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Sync PC Organisation : SQL Server → MongoDB (auto-attribution événement)"
@@ -925,17 +949,29 @@ def main():
         "--dry-run", action="store_true",
         help="Ne pas écrire en base, afficher le résumé",
     )
+    ap.add_argument("--db", default=None, help="Base MongoDB (défaut : selon TITAN_ENV)")
     args = ap.parse_args()
 
+    global MONGO_DB
+    if args.db:
+        MONGO_DB = args.db
+
     # ── Connexion SQL Server ──
+    # input() seulement en console : lance par le cron, il bloquait jusqu'au timeout
+    interactive = sys.stdin is not None and sys.stdin.isatty()
     sql_user = os.getenv("MSSQL_USER")
     if not sql_user:
+        if not interactive:
+            raise SystemExit("MSSQL_USER non défini")
         sql_user = input("MSSQL_USER non défini, login SQL : ").strip()
     sql_password = os.getenv("MSSQL_PASSWORD")
     if not sql_password:
+        if not interactive:
+            raise SystemExit("MSSQL_PASSWORD non défini")
         sql_password = input("Mot de passe SQL Server : ")
 
     # ── Connexion MongoDB ──
+    print(f"Base MongoDB : {MONGO_DB}")
     print("Connexion MongoDB...")
     mongo_client = MongoClient(args.mongo)
     mongo_db = mongo_client[MONGO_DB]
@@ -1005,8 +1041,8 @@ def main():
 
         batch_size = len(batch)
         total_sql += batch_size
-        ops = []
         batch_max_dw = None
+        batch_docs = {}
 
         for row in batch:
             # Determiner le(s) evenement(s) a partir de la date de creation
@@ -1017,20 +1053,18 @@ def main():
                 doc = transform_row(row, evt, yr)
                 cat_counts[doc.get("category", "?")] += 1
                 event_counts[f"{evt} {yr}"] += 1
-
-                if not args.dry_run:
-                    ops.append(UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True))
-                else:
-                    total_upserted += 1
+                # _id derive du seul sql_id : en cas de chevauchement
+                # d'evenements, le dernier l'emporte (un seul document)
+                batch_docs[doc["_id"]] = doc
 
             dw = row.get("DateWrite")
             if dw and (batch_max_dw is None or dw > batch_max_dw):
                 batch_max_dw = dw
 
-        # Upsert le lot
-        if not args.dry_run and ops:
-            res = pcorg_col.bulk_write(ops, ordered=False)
-            total_upserted += (res.upserted_count or 0) + (res.modified_count or 0)
+        if args.dry_run:
+            total_upserted += len(batch_docs)
+        elif batch_docs:
+            total_upserted += write_merged(pcorg_col, batch_docs)
 
         # Mise à jour du curseur après chaque lot (reprise possible)
         if batch_max_dw and (max_date_write is None or batch_max_dw > max_date_write):
