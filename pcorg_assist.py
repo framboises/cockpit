@@ -46,6 +46,7 @@ from functools import wraps
 
 from flask import Blueprint, jsonify, request
 
+import event_courant as EC
 import pcorg_history as PH
 import pcorg_summary
 
@@ -94,6 +95,12 @@ SUGGEST_CACHE_MAX = 256
 SUGGEST_MAX_PARALLEL = 4
 
 DUPLICATE_WINDOW_H = 2
+# Fiches OUVERTES candidates aux doublons : 7 jours. SAISON (une annee de
+# fiches) accumule des ouvertes oubliees qui n'ont plus rien de "doublon".
+DUPLICATE_OPEN_DAYS = 7
+# Precedents d'une fiche SAISON : on n'exclut que +/- 30 jours autour d'elle
+# (exclure tout SAISON/<annee> viderait le meme lieu sur l'annee).
+PRECEDENT_SAISON_EXCLUDE_DAYS = 30
 DUPLICATE_MAX_CANDIDATES = 500
 DUPLICATE_TOP = 3
 DUPLICATE_MIN_SCORE = 0.30
@@ -428,9 +435,11 @@ def _cat_filter(allowed):
 def query_duplicate_candidates(col, event, year, allowed, now_utc=None):
     now_utc = now_utc or datetime.now(timezone.utc)
     since = now_utc - timedelta(hours=DUPLICATE_WINDOW_H)
+    open_since = now_utc - timedelta(days=DUPLICATE_OPEN_DAYS)
     q = {
         "event": event, "year": year, "category": _cat_filter(allowed),
-        "$or": [{"status_code": {"$ne": 10}}, {"ts": {"$gte": since}}],
+        "$or": [{"status_code": {"$ne": 10}, "ts": {"$gte": open_since}},
+                {"ts": {"$gte": since}}],
     }
     return list(col.find(q, _DUP_PROJECTION).sort("ts", -1).limit(DUPLICATE_MAX_CANDIDATES))
 
@@ -715,9 +724,23 @@ def search_terms(text, max_terms=24):
 
 
 def scope_filter(doc, scope, allowed):
-    """Filtre Mongo des candidats : l'edition de la fiche est toujours exclue."""
+    """Filtre Mongo des candidats : l'edition de la fiche est toujours exclue.
+    SAISON (annee entiere) : seules les fiches SAISON a +/- 30 jours de la
+    fiche sont exclues, le reste de l'annee fournit des precedents."""
     event, year = doc.get("event"), doc.get("year")
     q = {"category": _cat_filter(allowed), "_id": {"$ne": doc.get("_id")}}
+    ts = doc.get("ts")
+    if EC.is_saison(event) and isinstance(ts, datetime):
+        if ts.tzinfo is not None:
+            ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+        delta = timedelta(days=PRECEDENT_SAISON_EXCLUDE_DAYS)
+        near = {"ts": {"$gte": ts - delta, "$lte": ts + delta}}
+        if scope == "all":
+            q["$nor"] = [{"event": event, **near}]
+        else:
+            q["event"] = event
+            q["$nor"] = [near]
+        return q
     if scope == "all":
         q["$nor"] = [{"event": event, "year": year}]
     else:

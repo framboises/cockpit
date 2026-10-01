@@ -645,11 +645,8 @@
             body.appendChild(_el("div", "critical-alert-time", timeStr));
         }
 
-        // Explication IA : action secondaire, hors de la rangee de boutons
-        // (que _renderTaken remplace) ; jamais d'appel en apercu.
-        if (item.alertId || item.preview) {
-            body.appendChild(explainWidget(item.alertId, { preview: item.preview }));
-        }
+        // Bouton "Expliquer" (IA) retire des alertes : chaque clic d'operateur
+        // consommait un appel au modele. explainWidget reste disponible.
 
         // Zone "pris en compte par ..." (remplie par _renderTaken)
         var takenEl = _el("div", "critical-alert-taken");

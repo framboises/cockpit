@@ -2528,9 +2528,47 @@
     { id: "PCO.MainCourante", label: "Main courante", icon: "edit_note", color: "#475569", legacyOnly: true },
   ];
 
-  function openCreateFicheModal() {
+  // Position imposee a la creation (appui long sur la carte) : remplace la
+  // position GPS de l'agent dans le payload. Materialisee par une epingle
+  // sur la carte tant que la modale est ouverte.
+  function setCreateFichePos(latlng) {
+    if (state.ficheCreatePosMarker) {
+      try { state.map.removeLayer(state.ficheCreatePosMarker); } catch (e) {}
+      state.ficheCreatePosMarker = null;
+    }
+    state.ficheCreatePos = latlng ? [latlng[0], latlng[1]] : null;
+    var note = $("fiche-create-pos");
+    if (note) note.hidden = !latlng;
+    if (!latlng || !state.map) return;
+    var txt = $("fiche-create-pos-text");
+    if (txt) {
+      var label = "Position : point choisi sur la carte";
+      if (state.gridOn && state.gridMeta) {
+        var cell = getCellLabelAt(latlng[0], latlng[1]);
+        if (cell.col !== null) label += " (" + (cell.colLabel || "") + (cell.rowLabel || "") + ")";
+      }
+      txt.textContent = label;
+    }
+    var icon = L.divIcon({
+      className: "",
+      html: "<div class='map-pick-marker'><span class='material-symbols-outlined'>push_pin</span></div>",
+      iconSize: [36, 36],
+      iconAnchor: [18, 34],
+    });
+    state.ficheCreatePosMarker = L.marker(latlng, { icon: icon, interactive: false, keyboard: false })
+      .addTo(state.map);
+  }
+
+  function closeCreateFicheModal() {
+    var modal = $("fiche-create-modal");
+    if (modal) modal.hidden = true;
+    setCreateFichePos(null);
+  }
+
+  function openCreateFicheModal(pos) {
     var modal = $("fiche-create-modal");
     if (!modal) return;
+    setCreateFichePos(Array.isArray(pos) && pos.length >= 2 ? pos : null);
     var cats = $("fiche-create-cats");
     if (cats) {
       // Reconstruite a chaque ouverture : la categorie de la tablette peut
@@ -2580,7 +2618,8 @@
     if (msg) { msg.textContent = ""; msg.className = "fiche-create-msg"; }
     modal.hidden = false;
     // Fix GPS one-shot pour s'assurer d'une position fraiche sur la fiche
-    forceOneShotPosition();
+    // (inutile quand le point a ete choisi sur la carte).
+    if (!state.ficheCreatePos) forceOneShotPosition();
     // Autofocus sur la description pour declencher immediatement le clavier
     if (txt) setTimeout(function () { try { txt.focus(); } catch (e) {} }, 120);
   }
@@ -2608,16 +2647,26 @@
       niveau_urgence: state.ficheCreateUrgency || "UR",
       client_token: state.ficheCreateToken || newClientKey(),
     };
-    // Ajouter GPS si dispo
-    if (state.meMarker) {
-      var ll = state.meMarker.getLatLng();
-      payload.lat = ll.lat;
-      payload.lng = ll.lng;
-    }
-    // Carroyage si grille active et position connue
-    if (state.gridOn && state.meMarker && state.gridMeta) {
-      var gridLabel = $("grid-crosshair-label");
-      if (gridLabel) payload.carroye = gridLabel.textContent;
+    if (state.ficheCreatePos) {
+      // Point choisi sur la carte (appui long) : prioritaire sur le GPS
+      payload.lat = state.ficheCreatePos[0];
+      payload.lng = state.ficheCreatePos[1];
+      if (state.gridOn && state.gridMeta) {
+        var pcell = getCellLabelAt(payload.lat, payload.lng);
+        if (pcell.col !== null) payload.carroye = (pcell.colLabel || "") + (pcell.rowLabel || "");
+      }
+    } else {
+      // Ajouter GPS si dispo
+      if (state.meMarker) {
+        var ll = state.meMarker.getLatLng();
+        payload.lat = ll.lat;
+        payload.lng = ll.lng;
+      }
+      // Carroyage si grille active et position connue
+      if (state.gridOn && state.meMarker && state.gridMeta) {
+        var gridLabel = $("grid-crosshair-label");
+        if (gridLabel) payload.carroye = gridLabel.textContent;
+      }
     }
 
     queuedJsonPost("/field/create-fiche", payload, "creation fiche")
@@ -2625,12 +2674,12 @@
         if (!data) return;
         if (btn) btn.disabled = false;
         if (data.queued) {
-          $("fiche-create-modal").hidden = true;
+          closeCreateFicheModal();
           toast("Hors ligne : fiche en attente de synchronisation", "warn");
           return;
         }
         if (data.ok) {
-          $("fiche-create-modal").hidden = true;
+          closeCreateFicheModal();
           // Marquer la fiche comme deja vue : c'est l'agent lui-meme qui
           // vient de la creer, detectNewFiches ne doit pas declencher
           // l'alerte plein ecran "Nouvelle intervention dispatchee".
@@ -3349,6 +3398,34 @@
     return m < 1000 ? (m + " m") : ((m / 1000).toFixed(1) + " km");
   }
 
+  // Duree de trajet estimee par le moteur d'itineraire (meme route et meme
+  // format que le calcul d'itineraire de la tablette), depuis la position
+  // courante vers la fiche proposee. Silencieux en cas d'echec.
+  function _fillProposalTravel(p, row) {
+    if (!row || !state.meMarker || p.lat == null || p.lng == null) return;
+    var me = state.meMarker.getLatLng();
+    var fid = p.fiche_id;
+    var span = row.querySelector("span:last-child");
+    fetchWithTimeout("/field/api/route", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ from: [me.lat, me.lng], to: [Number(p.lat), Number(p.lng)], god: false }),
+    }, 8000).then(function (r) {
+      if (!r.ok) return null;
+      return r.json().catch(function () { return null; });
+    }).then(function (j) {
+      // Fenetre fermee ou remplacee entre-temps : rien a faire
+      if (!j || j.ok === false || _prop.id !== fid || !row.isConnected) return;
+      if (j.duration_s == null && j.distance_m == null) return;
+      var minutes = Math.max(1, Math.round((Number(j.duration_s) || 0) / 60));
+      var km = ((Number(j.distance_m) || 0) / 1000).toFixed(1);
+      var prefix = j.engine === "stub" ? "Trajet estime : " : "Trajet : ";
+      if (span) span.textContent = " " + prefix + minutes + " min (" + km + " km)";
+      row.hidden = false;
+    }).catch(function () { /* pas de reseau / moteur injoignable : masque */ });
+  }
+
   function showProposalOverlay(p) {
     var st = ficheStyle(p.category);
     var urgency = p.niveau_urgence || "";
@@ -3396,7 +3473,15 @@
     if (p.distance_m != null) infos.appendChild(_mkInfoRow("near_me", "A " + _fmtDistance(p.distance_m) + " de vous"));
     if (p.area) infos.appendChild(_mkInfoRow("place", p.area));
     if (p.carroye) infos.appendChild(_mkInfoRow("grid_on", p.carroye));
-    if (infos.children.length) bodyEl.appendChild(infos);
+    // Temps de trajet calcule par le moteur d'itineraire : rempli plus tard,
+    // de facon asynchrone (jamais bloquant pour l'affichage ni le compte a
+    // rebours). Reste masque sans position ou en cas d'erreur.
+    var travelRow = _mkInfoRow("directions_car", "Trajet : calcul...");
+    travelRow.classList.add("dispatch-alert-travel");
+    travelRow.hidden = true;
+    infos.appendChild(travelRow);
+    bodyEl.appendChild(infos);
+    _fillProposalTravel(p, travelRow);
 
     // Compte a rebours : chiffre + barre qui se vide
     var cd = document.createElement("div");
@@ -3497,7 +3582,7 @@
     { id: "materiel", label: "Besoin materiel / renfort", icon: "handyman", color: "#ea580c" },
     { id: "impossible", label: "Impossible", icon: "block", color: "#dc2626" },
   ];
-  var FINISH_REPORT_MIN = 5;
+  var FINISH_REPORT_MIN = 3;   // = dispatch_auto.REPORT_MIN_CHARS
 
   function openFinishModal(ficheId) {
     var existing = $("finish-inter-modal");
@@ -3605,10 +3690,23 @@
     overlay.appendChild(box);
     document.body.appendChild(overlay);
 
+    // Ce qui manque est ecrit en toutes lettres : un bouton grise sans
+    // explication laissait croire a une panne ("fait" = 4 caracteres, refuse).
+    var need = document.createElement("div");
+    need.style.cssText = "font-size:12px;color:#f59e0b;text-align:right;padding:0 16px 10px;";
+    box.appendChild(need);
     function refresh() {
-      submitBtn.disabled = !chosen || textarea.value.trim().length < FINISH_REPORT_MIN;
+      var len = textarea.value.trim().length;
+      var missing = !chosen ? "Choisissez un resultat."
+        : len < FINISH_REPORT_MIN ? "Compte-rendu : encore " + (FINISH_REPORT_MIN - len) + " caractere(s)." : "";
+      submitBtn.disabled = !!missing;
+      need.textContent = missing;
     }
-    textarea.addEventListener("input", refresh);
+    // input + keyup + change : la dictee et les suggestions iOS ne declenchent
+    // pas toujours "input"
+    ["input", "keyup", "change", "compositionend"].forEach(function (ev) {
+      textarea.addEventListener(ev, refresh);
+    });
     refresh();
 
     var ERRORS = {
@@ -3764,6 +3862,313 @@
     } else {
       badge.hidden = true;
     }
+    _setTabCount("missions-tab-mine-count", n);
+  }
+
+  function _setTabCount(id, n) {
+    var el = $(id);
+    if (!el) return;
+    el.textContent = n > 99 ? "99+" : String(n);
+    el.hidden = !(n > 0);
+  }
+
+  // ---------------------------------------------------------------------
+  // Onglets du panneau Missions : "En cours" (fiches affectees a l'unite)
+  // et "Disponibles" (missions de sa categorie et de son metier sans unite
+  // engagee, que l'unite peut prendre elle-meme). Pas de file hors ligne
+  // pour l'engagement : il doit etre reel, tout de suite.
+  // ---------------------------------------------------------------------
+  var AVAIL_REFRESH_MS = 20000;
+  var _avail = { tab: "mine", timer: null, loading: false, missions: [], canTake: false, loaded: false, taking: null };
+
+  function missionsPanelOpen() {
+    var p = $("missions-panel");
+    return !!(p && !p.hidden);
+  }
+
+  function setMissionsTab(tab) {
+    _avail.tab = tab === "avail" ? "avail" : "mine";
+    var isAvail = _avail.tab === "avail";
+    var tMine = $("missions-tab-mine"), tAvail = $("missions-tab-avail");
+    if (tMine) { tMine.classList.toggle("active", !isAvail); tMine.setAttribute("aria-selected", String(!isAvail)); }
+    if (tAvail) { tAvail.classList.toggle("active", isAvail); tAvail.setAttribute("aria-selected", String(isAvail)); }
+    var lMine = $("missions-list"), lAvail = $("missions-avail-list");
+    if (lMine) lMine.hidden = isAvail;
+    if (lAvail) lAvail.hidden = !isAvail;
+    if (isAvail) {
+      if (_avail.loaded) renderAvailableMissions();
+      loadAvailableMissions();
+    } else {
+      renderMissionsList();
+    }
+    scheduleAvailRefresh();
+  }
+
+  // Rafraichissement toutes les 20 s, seulement panneau ouvert sur l'onglet
+  // Disponibles et application visible.
+  function scheduleAvailRefresh() {
+    if (_avail.timer) { clearTimeout(_avail.timer); _avail.timer = null; }
+    if (!missionsPanelOpen() || _avail.tab !== "avail") return;
+    _avail.timer = setTimeout(function () {
+      _avail.timer = null;
+      if (!missionsPanelOpen() || _avail.tab !== "avail") return;
+      if (document.visibilityState === "visible") loadAvailableMissions();
+      scheduleAvailRefresh();
+    }, AVAIL_REFRESH_MS);
+  }
+
+  function stopAvailRefresh() {
+    if (_avail.timer) { clearTimeout(_avail.timer); _avail.timer = null; }
+  }
+
+  function loadAvailableMissions() {
+    if (_avail.loading) return;
+    _avail.loading = true;
+    fetchWithTimeout("/field/available-missions", {
+      headers: { "Accept": "application/json" }, cache: "no-store",
+    }, 12000).then(function (r) {
+      if (r.status === 401) { handleSessionLost(); return null; }
+      return r.json().catch(function () { return null; });
+    }).then(function (data) {
+      _avail.loading = false;
+      if (!data || !data.ok) {
+        if (!_avail.loaded) renderAvailableMissions("Liste indisponible.");
+        return;
+      }
+      _avail.missions = data.missions || [];
+      _avail.canTake = !!data.can_take;
+      _avail.loaded = true;
+      _setTabCount("missions-tab-avail-count", _avail.missions.length);
+      if (missionsPanelOpen() && _avail.tab === "avail") renderAvailableMissions();
+    }).catch(function () {
+      _avail.loading = false;
+      if (!_avail.loaded) renderAvailableMissions("Pas de reseau.");
+    });
+  }
+
+  function _fmtAge(iso) {
+    if (!iso) return "";
+    var t = Date.parse(iso);
+    if (isNaN(t)) return "";
+    var min = Math.max(0, Math.round((Date.now() - t) / 60000));
+    if (min < 1) return "a l'instant";
+    if (min < 60) return "il y a " + min + " min";
+    var h = Math.floor(min / 60);
+    if (h < 24) return "il y a " + h + " h" + (min % 60 ? " " + _pad2(min % 60) : "");
+    return "il y a " + Math.floor(h / 24) + " j";
+  }
+
+  function renderAvailableMissions(errorText) {
+    var list = $("missions-avail-list");
+    if (!list) return;
+    while (list.firstChild) list.removeChild(list.firstChild);
+    if (errorText || !_avail.loaded) {
+      var info = document.createElement("div");
+      info.className = "inbox-empty";
+      info.textContent = errorText || "Chargement...";
+      list.appendChild(info);
+      return;
+    }
+    if (!_avail.canTake) {
+      var note = document.createElement("div");
+      note.className = "avail-note";
+      note.textContent = state.patrolStatus === "pause"
+        ? "En pause : repassez Disponible pour prendre une mission."
+        : "Vous etes deja engage : terminez l'intervention en cours pour prendre une mission.";
+      list.appendChild(note);
+    }
+    var items = _avail.missions || [];
+    if (items.length === 0) {
+      var empty = document.createElement("div");
+      empty.className = "inbox-empty";
+      empty.textContent = "Aucune mission disponible.";
+      list.appendChild(empty);
+      return;
+    }
+    var mePos = state.meMarker ? state.meMarker.getLatLng() : null;
+    items.forEach(function (f) {
+      var item = document.createElement("div");
+      item.className = "inbox-item mission-item avail-item";
+      if (f.proposed_to_me) item.classList.add("proposed");
+
+      var badge = document.createElement("div");
+      badge.className = "urgency-badge";
+      var urg = f.niveau_urgence || "?";
+      badge.textContent = urg;
+      badge.style.background = FICHE_URGENCY_COLORS[urg] || "#6b7280";
+      item.appendChild(badge);
+
+      var body = document.createElement("div");
+      body.className = "mission-body";
+
+      var cat = document.createElement("div");
+      cat.className = "mission-cat";
+      cat.textContent = f.metier || (f.category || "Intervention").replace("PCO.", "");
+      if (f.proposed_to_me) {
+        var chip = document.createElement("span");
+        chip.className = "avail-chip";
+        chip.textContent = "Proposee a vous";
+        cat.appendChild(chip);
+      } else if (f.dispatch_state === "proposed") {
+        var chip2 = document.createElement("span");
+        chip2.className = "avail-chip avail-chip-muted";
+        chip2.textContent = "Proposee a une autre unite";
+        cat.appendChild(chip2);
+      }
+      body.appendChild(cat);
+
+      var desc = document.createElement("div");
+      desc.className = "mission-desc";
+      desc.textContent = f.text || "(sans description)";
+      body.appendChild(desc);
+
+      var meta = document.createElement("div");
+      meta.className = "mission-meta";
+      function addMeta(txt) {
+        if (!txt) return;
+        var s = document.createElement("span");
+        s.textContent = txt;
+        meta.appendChild(s);
+      }
+      if (mePos && f.lat != null && f.lng != null) {
+        var d = haversineM(mePos.lat, mePos.lng, Number(f.lat), Number(f.lng));
+        addMeta(d < 1000 ? Math.round(d) + " m" : (d / 1000).toFixed(1) + " km");
+      }
+      addMeta(f.area);
+      addMeta(f.carroye);
+      addMeta(_fmtAge(f.ts));
+      if (meta.children.length) body.appendChild(meta);
+
+      var actions = document.createElement("div");
+      actions.className = "avail-actions";
+      function mkAct(icon, label, cls) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "avail-btn" + (cls ? " " + cls : "");
+        b.appendChild(_mkIcon(icon));
+        var l = document.createElement("span");
+        l.textContent = label;
+        b.appendChild(l);
+        return b;
+      }
+      if (_avail.canTake) {
+        var bTake = mkAct("front_hand", "M'engager", "avail-btn-take");
+        bTake.disabled = _avail.taking === f.id;
+        bTake.addEventListener("click", function (e) { e.stopPropagation(); takeAvailableMission(f, bTake); });
+        actions.appendChild(bTake);
+      }
+      if (f.lat != null && f.lng != null) {
+        var bRoute = mkAct("navigation", "Itineraire");
+        bRoute.addEventListener("click", function (e) {
+          e.stopPropagation();
+          openItineraryMenu([Number(f.lat), Number(f.lng)], null);
+        });
+        actions.appendChild(bRoute);
+        var bMap = mkAct("map", "Voir sur la carte");
+        bMap.addEventListener("click", function (e) {
+          e.stopPropagation();
+          showAvailableOnMap(f);
+        });
+        actions.appendChild(bMap);
+      }
+      body.appendChild(actions);
+      item.appendChild(body);
+      list.appendChild(item);
+    });
+  }
+
+  // Epingle temporaire sur la carte pour une mission disponible (elle n'est
+  // pas dans les fiches affectees, donc absente des marqueurs habituels).
+  function showAvailableOnMap(f) {
+    if (!state.map || f.lat == null || f.lng == null) return;
+    var p = $("missions-panel");
+    if (p) p.hidden = true;
+    stopAvailRefresh();
+    var ll = [Number(f.lat), Number(f.lng)];
+    if (state.availPreviewMarker) {
+      try { state.map.removeLayer(state.availPreviewMarker); } catch (e) {}
+      state.availPreviewMarker = null;
+    }
+    var st = ficheStyle(f.category);
+    var icon = L.divIcon({
+      className: "",
+      html: "<div class='avail-preview-marker' style='background:" + st.color + "'><span class='material-symbols-outlined'>"
+        + escapeHtml(st.icon) + "</span></div>",
+      iconSize: [34, 34],
+      iconAnchor: [17, 17],
+    });
+    var mk = L.marker(ll, { icon: icon, keyboard: false });
+    var pop = document.createElement("div");
+    pop.className = "avail-popup";
+    var t = document.createElement("div");
+    t.className = "avail-popup-title";
+    t.textContent = (f.niveau_urgence ? f.niveau_urgence + " - " : "") + (f.metier || (f.category || "").replace("PCO.", ""));
+    pop.appendChild(t);
+    var d = document.createElement("div");
+    d.className = "avail-popup-desc";
+    d.textContent = f.text || "(sans description)";
+    pop.appendChild(d);
+    mk.bindPopup(pop, { maxWidth: 260 });
+    mk.addTo(state.map);
+    state.availPreviewMarker = mk;
+    state.followMe = false;
+    try { updateFollowBtn(); } catch (e) { /* noop */ }
+    state.map.setView(ll, Math.max(state.map.getZoom(), 17), { animate: true });
+    setTimeout(function () { try { mk.openPopup(); } catch (e) {} }, 350);
+    // Retiree d'elle-meme apres 2 min
+    setTimeout(function () {
+      if (state.availPreviewMarker === mk) {
+        try { state.map.removeLayer(mk); } catch (e) {}
+        state.availPreviewMarker = null;
+      }
+    }, 120000);
+  }
+
+  var TAKE_ERRORS = {
+    deja_prise: "Mission deja prise par une autre unite",
+    unite_occupee: "Vous etes deja engage sur une intervention",
+    categorie_differente: "Mission hors de votre categorie",
+    metier_different: "Mission hors de votre metier",
+    evenement_different: "Mission d'un evenement termine ou non suivi",
+    fiche_closee: "Mission deja cloturee",
+  };
+
+  function takeAvailableMission(f, btn) {
+    if (_avail.taking) return;
+    if (!navigator.onLine) { toast("Pas de reseau", "err"); return; }
+    _avail.taking = f.id;
+    if (btn) btn.disabled = true;
+    fetchWithTimeout("/field/missions/" + encodeURIComponent(f.id) + "/take", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    }, 12000).then(function (r) {
+      if (r.status === 401) { handleSessionLost(); return null; }
+      return r.json().then(function (j) {
+        return Object.assign({ _status: r.status }, j || {});
+      }).catch(function () { return { ok: false, _status: r.status }; });
+    }).then(function (data) {
+      _avail.taking = null;
+      if (!data) return;
+      if (data.ok) {
+        var fid = data.active_fiche_id || f.id;
+        // Pas d'alerte "nouvelle intervention dispatchee" : l'agent vient de
+        // la prendre lui-meme.
+        state.seenFicheIds.add(fid);
+        applyLocalStatus(data.status || "intervention", fid);
+        toast("Mission prise en charge", "ok");
+        pollFiches();
+        setMissionsTab("mine");
+        loadAvailableMissions();
+        return;
+      }
+      toast(TAKE_ERRORS[data.error] || ("Impossible de prendre la mission (" + (data.error || data._status || "?") + ")"), "warn");
+      loadAvailableMissions();
+    }).catch(function () {
+      _avail.taking = null;
+      if (btn) btn.disabled = false;
+      toast("Pas de reseau", "err");
+    });
   }
 
   function renderMissionsList() {
@@ -6256,6 +6661,7 @@
   }
 
   function pollInbox() {
+    state.lastInboxPollAt = Date.now();
     fetchWithTimeout("/field/inbox", { headers: { "Accept": "application/json" }, cache: "no-store" }, 15000)
       .then(function (r) {
         if (r.status === 401) { return handleSessionLost(); }
@@ -6284,8 +6690,32 @@
           return;
         }
         detectNew();
+        refreshOpenThread();
       })
       .catch(function () { /* silent */ });
+  }
+
+  // Conversation ouverte : une reponse du PC Org arrivee depuis doit
+  // apparaitre dans le fil sans refermer / rouvrir la modale.
+  function refreshOpenThread() {
+    var ot = state.openThread;
+    if (!ot) return;
+    var modal = $("msg-modal");
+    if (!modal || modal.hidden || !ot.wrap || !ot.wrap.isConnected) { state.openThread = null; return; }
+    var total = 0, latest = "";
+    (state.inbox || []).forEach(function (m) {
+      if (m.id === ot.id || m.thread_id === ot.id) {
+        total++;
+        if ((m.created_at || "") > latest) latest = m.created_at || "";
+        if (m.id === ot.id && m.reply_count) total += Number(m.reply_count) || 0;
+      }
+    });
+    var sig = total + "|" + latest;
+    if (ot.sig === null) { ot.sig = sig; return; }
+    if (sig !== ot.sig) {
+      ot.sig = sig;
+      loadThread(ot.id, ot.wrap, ot.currentId);
+    }
   }
 
   // Reperes SOS alignes sur l'inbox : retires quand la fiche SOS est close
@@ -6525,8 +6955,11 @@
     if (m.reply_count > 0 || m.thread_id) {
       loadThread(threadMsgId, threadWrap, m.id);
     }
+    // Suivi du fil ouvert : relu a chaque poll inbox qui y apporte du neuf
+    state.openThread = { id: threadMsgId, wrap: threadWrap, currentId: m.id, sig: null };
 
     modal.hidden = false;
+    refreshOpenThread();   // memorise l'etat de depart du fil
     // Marquer comme lu des l'ouverture du modal
     if (!m.ack_at) {
       queuedJsonPost("/field/ack/" + encodeURIComponent(m.id), {}, "ack message")
@@ -6580,9 +7013,12 @@
   }
 
   function loadThread(threadMsgId, threadWrap, currentMsgId) {
-    fetch("/field/thread/" + encodeURIComponent(threadMsgId), {
+    // no-store : un fil de conversation ne doit jamais venir d'un cache
+    // (le service worker le servait en cache-first, voir field-sw.js).
+    fetchWithTimeout("/field/thread/" + encodeURIComponent(threadMsgId), {
       headers: { "Accept": "application/json" },
-    })
+      cache: "no-store",
+    }, 15000)
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (!data || !data.ok) return;
@@ -6744,9 +7180,16 @@
       var p = $("missions-panel");
       $("inbox-panel").hidden = true;
       p.hidden = !p.hidden;
-      if (!p.hidden) renderMissionsList();
+      if (!p.hidden) setMissionsTab(_avail.tab);
+      else stopAvailRefresh();
     });
-    $("missions-close").addEventListener("click", function () { $("missions-panel").hidden = true; });
+    $("missions-close").addEventListener("click", function () {
+      $("missions-panel").hidden = true;
+      stopAvailRefresh();
+    });
+    var tabMine = $("missions-tab-mine"), tabAvail = $("missions-tab-avail");
+    if (tabMine) tabMine.addEventListener("click", function () { setMissionsTab("mine"); });
+    if (tabAvail) tabAvail.addEventListener("click", function () { setMissionsTab("avail"); });
     $("btn-sos").addEventListener("click", triggerSos);
 
     // Bandeau engagement : fly-to button
@@ -6785,7 +7228,7 @@
     wireStatusOptions();
     // Fiche creation
     var ficheClose = $("fiche-create-close");
-    if (ficheClose) ficheClose.addEventListener("click", function () { $("fiche-create-modal").hidden = true; });
+    if (ficheClose) ficheClose.addEventListener("click", closeCreateFicheModal);
     var ficheSubmit = $("fiche-create-submit");
     if (ficheSubmit) ficheSubmit.addEventListener("click", submitCreateFiche);
 
@@ -6821,6 +7264,9 @@
       if (!b) return;
       b.addEventListener("click", function () { toggleMeasureTool(b.dataset.mode); });
     });
+    initMeasureToggle();
+    // Appui long / clic droit sur la carte : menu contextuel
+    initMapContextMenu();
 
     // Click sur la carte : si grille active, afficher le crosshair
     if (state.map) {
@@ -6886,6 +7332,220 @@
     if (!icon) return;
     var isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
     icon.textContent = isFs ? "fullscreen_exit" : "fullscreen";
+  }
+
+  // ---------------------------------------------------------------------
+  // Outils de mesure : groupe pliable. Un seul bouton affiche / masque les
+  // outils ; plie par defaut sur telephone, deplie sur tablette ; etat
+  // memorise (localStorage). Les boutons gardent leurs ids et leur logique.
+  // ---------------------------------------------------------------------
+  var MEASURE_OPEN_KEY = "field-measure-tools-open";
+
+  function isPhoneLayout() {
+    try { return window.matchMedia("(max-width: 600px), (max-height: 500px)").matches; }
+    catch (e) { return false; }
+  }
+
+  function setMeasureToolsOpen(open, persist) {
+    var box = $("measure-tools");
+    var btn = $("measure-toggle");
+    if (!box) return;
+    box.classList.toggle("collapsed", !open);
+    if (btn) {
+      btn.setAttribute("aria-expanded", String(!!open));
+      btn.setAttribute("aria-label", open ? "Masquer les outils de mesure" : "Afficher les outils de mesure");
+      btn.title = open ? "Masquer les outils" : "Outils de mesure";
+      var ic = btn.querySelector(".material-symbols-outlined");
+      if (ic) ic.textContent = open ? "close" : "straighten";
+    }
+    if (persist) {
+      try { localStorage.setItem(MEASURE_OPEN_KEY, open ? "1" : "0"); } catch (e) { /* stockage indisponible */ }
+    }
+  }
+
+  function initMeasureToggle() {
+    var btn = $("measure-toggle");
+    if (!btn) return;
+    var saved = null;
+    try { saved = localStorage.getItem(MEASURE_OPEN_KEY); } catch (e) { saved = null; }
+    var open = saved === "1" ? true : saved === "0" ? false : !isPhoneLayout();
+    setMeasureToolsOpen(open, false);
+    btn.addEventListener("click", function () {
+      var box = $("measure-tools");
+      var nowOpen = !!(box && box.classList.contains("collapsed"));
+      setMeasureToolsOpen(nowOpen, true);
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Appui long sur la carte (~600 ms au doigt, clic droit a la souris) :
+  // petit menu au point touche (creer une intervention ici / itineraire).
+  // Annule si le doigt bouge de plus de 10 px, au second doigt (pinch), au
+  // deplacement de la carte ou au toucher ailleurs.
+  // ---------------------------------------------------------------------
+  var LONG_PRESS_MS = 600;
+  var LONG_PRESS_TOLERANCE_PX = 10;
+  var _lp = { timer: null, x: 0, y: 0, fired: false, lastTouchAt: 0, openedAt: 0, menu: null, pin: null };
+
+  function _lpCancel() {
+    if (_lp.timer) { clearTimeout(_lp.timer); _lp.timer = null; }
+  }
+
+  function closeMapMenu() {
+    if (_lp.menu) { try { _lp.menu.remove(); } catch (e) {} _lp.menu = null; }
+    if (_lp.pin && state.map) { try { state.map.removeLayer(_lp.pin); } catch (e) {} }
+    _lp.pin = null;
+  }
+
+  function _lpIgnoredTarget(t) {
+    if (!t || !t.closest) return false;
+    return !!t.closest(".leaflet-marker-icon, .leaflet-popup, .leaflet-control, .map-measure-tools, "
+      + ".map-fab-group-tr, .map-fab, .poi-search-panel, .inbox-panel, .layers-panel, .map-ctx-menu");
+  }
+
+  function openMapMenuAt(clientX, clientY) {
+    if (!state.map || state.measureMode) return;
+    var now = Date.now();
+    if (now - _lp.openedAt < 800 && _lp.menu) return;  // doublon touch / contextmenu
+    closeMapMenu();
+    var mapEl = state.map.getContainer();
+    var rect = mapEl.getBoundingClientRect();
+    var px = clientX - rect.left, py = clientY - rect.top;
+    if (px < 0 || py < 0 || px > rect.width || py > rect.height) return;
+    var latlng = state.map.containerPointToLatLng([px, py]);
+    var ll = [latlng.lat, latlng.lng];
+    _lp.openedAt = now;
+    try { if (navigator.vibrate) navigator.vibrate(30); } catch (e) {}
+    // Le suivi de position recentrerait la carte sous le menu
+    if (state.followMe) { state.followMe = false; try { updateFollowBtn(); } catch (e) {} }
+
+    var pinIcon = L.divIcon({
+      className: "",
+      html: "<div class='map-pick-marker'><span class='material-symbols-outlined'>push_pin</span></div>",
+      iconSize: [36, 36],
+      iconAnchor: [18, 34],
+    });
+    _lp.pin = L.marker(latlng, { icon: pinIcon, interactive: false, keyboard: false }).addTo(state.map);
+
+    var menu = document.createElement("div");
+    menu.className = "map-ctx-menu";
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", "Actions sur ce point");
+
+    var head = document.createElement("div");
+    head.className = "map-ctx-head";
+    var headTxt = ll[0].toFixed(5) + ", " + ll[1].toFixed(5);
+    if (state.gridOn && state.gridMeta) {
+      var cell = getCellLabelAt(ll[0], ll[1]);
+      if (cell.col !== null) headTxt = "Carroyage " + (cell.colLabel || "") + (cell.rowLabel || "") + " - " + headTxt;
+    }
+    head.textContent = headTxt;
+    menu.appendChild(head);
+
+    function mkItem(icon, label, onClick) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "map-ctx-item";
+      b.setAttribute("role", "menuitem");
+      b.appendChild(_mkIcon(icon));
+      var s = document.createElement("span");
+      s.textContent = label;
+      b.appendChild(s);
+      b.addEventListener("click", function (e) {
+        e.stopPropagation();
+        closeMapMenu();
+        onClick();
+      });
+      menu.appendChild(b);
+      return b;
+    }
+    mkItem("add_location_alt", "Creer une intervention ici", function () {
+      openCreateFicheModal(ll);
+    });
+    mkItem("navigation", "Itineraire vers ce point", function () {
+      openItineraryMenu(ll, null);
+    });
+
+    var wrap = mapEl.parentNode || document.body;
+    wrap.appendChild(menu);
+    // Placement : a droite / sous le point, recale dans la carte
+    var wrapRect = wrap.getBoundingClientRect();
+    var mw = menu.offsetWidth || 240, mh = menu.offsetHeight || 140;
+    var x = clientX - wrapRect.left + 8, y = clientY - wrapRect.top + 8;
+    if (x + mw > wrapRect.width - 8) x = Math.max(8, clientX - wrapRect.left - mw - 8);
+    if (y + mh > wrapRect.height - 8) y = Math.max(8, clientY - wrapRect.top - mh - 8);
+    menu.style.left = Math.round(x) + "px";
+    menu.style.top = Math.round(y) + "px";
+    _lp.menu = menu;
+    bumpActivity();
+  }
+
+  function initMapContextMenu() {
+    if (!state.map) return;
+    var el = state.map.getContainer();
+
+    el.addEventListener("touchstart", function (e) {
+      _lp.lastTouchAt = Date.now();
+      _lp.fired = false;
+      _lpCancel();
+      if (!e.touches || e.touches.length !== 1) {         // pinch : jamais
+        if (_lp.menu) closeMapMenu();
+        return;
+      }
+      if (_lpIgnoredTarget(e.target)) return;
+      var t = e.touches[0];
+      _lp.x = t.clientX; _lp.y = t.clientY;
+      _lp.timer = setTimeout(function () {
+        _lp.timer = null;
+        _lp.fired = true;
+        openMapMenuAt(_lp.x, _lp.y);
+      }, LONG_PRESS_MS);
+    }, { passive: true });
+
+    el.addEventListener("touchmove", function (e) {
+      if (!_lp.timer) return;
+      if (!e.touches || e.touches.length !== 1) { _lpCancel(); return; }
+      var t = e.touches[0];
+      var dx = t.clientX - _lp.x, dy = t.clientY - _lp.y;
+      if (dx * dx + dy * dy > LONG_PRESS_TOLERANCE_PX * LONG_PRESS_TOLERANCE_PX) _lpCancel();
+    }, { passive: true });
+
+    el.addEventListener("touchend", function (e) {
+      _lp.lastTouchAt = Date.now();
+      _lpCancel();
+      // Appui long abouti : pas de "click" derriere (outil carroyage, etc.)
+      if (_lp.fired) {
+        _lp.fired = false;
+        if (e.cancelable) e.preventDefault();
+      }
+    }, { passive: false });
+
+    el.addEventListener("touchcancel", function () { _lpCancel(); _lp.fired = false; }, { passive: true });
+
+    // Clic droit (souris). Sur mobile, le navigateur emet aussi un
+    // "contextmenu" a l'appui long : on l'absorbe, le minuteur tactile
+    // s'en charge (sinon menu en double).
+    el.addEventListener("contextmenu", function (e) {
+      if (_lpIgnoredTarget(e.target)) return;
+      e.preventDefault();
+      if (Date.now() - _lp.lastTouchAt < 1500) return;
+      openMapMenuAt(e.clientX, e.clientY);
+    });
+
+    // Fermeture : deplacement / zoom de la carte, toucher ailleurs, Echap
+    // (pas "movestart" : le suivi GPS deplace la carte par programme)
+    state.map.on("dragstart zoomstart", function () { _lpCancel(); closeMapMenu(); });
+    el.addEventListener("wheel", function () { if (_lp.menu) closeMapMenu(); }, { passive: true });
+    document.addEventListener("pointerdown", function (e) {
+      if (!_lp.menu) return;
+      if (_lp.menu.contains(e.target)) return;
+      // Le doigt qui vient d'ouvrir le menu (tout juste relache) ne compte pas
+      if (Date.now() - _lp.openedAt < 250) return;
+      closeMapMenu();
+    }, true);
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && _lp.menu) closeMapMenu();
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -7223,6 +7883,52 @@
     document.addEventListener("gesturestart", function (e) { e.preventDefault(); });
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    initCatchUpTriggers();
+  }
+
+  // ---------------------------------------------------------------------
+  // Rattrapage immediat de l'inbox et des fiches. Le polling seul ne suffit
+  // pas : iOS gele les minuteries d'une PWA ecran verrouille ou en
+  // arriere-plan sans toujours emettre "visibilitychange", et Chrome les
+  // ralentit fortement. On relit donc tout de suite au retour sur l'app
+  // (focus, pageshow, reseau retrouve), a l'arrivee d'une notification push
+  // (message du service worker), et si le dernier poll est anormalement
+  // ancien au moindre toucher (minuterie gelee).
+  // ---------------------------------------------------------------------
+  var _lastCatchUpAt = 0;
+  function catchUpNow() {
+    if (_sessionLost) return;
+    if (document.visibilityState === "hidden") return;
+    var now = Date.now();
+    if (now - _lastCatchUpAt < 1500) return;
+    _lastCatchUpAt = now;
+    pollInbox();
+    scheduleInboxPoll();
+    pollFiches();
+    scheduleFichesPoll();
+  }
+
+  function initCatchUpTriggers() {
+    window.addEventListener("focus", catchUpNow);
+    window.addEventListener("online", catchUpNow);
+    window.addEventListener("pageshow", function (e) {
+      // Retour depuis le cache avant/arriere (bfcache) : l'etat JS est
+      // restaure mais les minuteries ont pu etre perdues.
+      if (e && e.persisted) catchUpNow();
+    });
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.addEventListener("message", function (ev) {
+        if (ev && ev.data && ev.data.type === "field-push") {
+          _lastCatchUpAt = 0;   // push : toujours relire
+          catchUpNow();
+        }
+      });
+    }
+    // Minuterie gelee : detecte au premier toucher suivant
+    document.addEventListener("pointerdown", function () {
+      var limit = Math.max(POLL_INBOX_IDLE_MS, POLL_PAUSE_MS) + 5000;
+      if (state.lastInboxPollAt && Date.now() - state.lastInboxPollAt > limit) catchUpNow();
+    }, { passive: true, capture: true });
   }
 
   // Suspension / reprise des consommateurs de batterie selon visibilite.
@@ -7245,8 +7951,14 @@
     acquireWakeLock();
     refreshGpsProfile();
     if (!state.clockTimer) startClock();
-    if (!state.inboxTimer) startInboxPoll();        // declenche un poll immediat
-    if (!state.fichesTimer) startFichesPoll();      // declenche un poll immediat
+    // Poll immediat dans tous les cas : si "hidden" n'a pas ete recu (iOS),
+    // les minuteries existent encore mais ont pu etre gelees longtemps.
+    _lastCatchUpAt = 0;
+    catchUpNow();
+    if (missionsPanelOpen() && _avail.tab === "avail") {
+      loadAvailableMissions();
+      scheduleAvailRefresh();
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -7367,11 +8079,21 @@
   // ---------------------------------------------------------------------
   var _wakeLock = null;
   var _wakeLockIdleTimer = null;
-  var WAKE_LOCK_IDLE_MS = 10 * 60 * 1000; // 10 minutes
+  // L'ecran allume est la seule facon pour une app web (iPhone surtout) de
+  // continuer a remonter sa position : ecran eteint = plus de GPS, et la
+  // "plus proche" du dispatch automatique se calcule sur une position perimee.
+  // Disponible : relache apres 1 h sans interaction (etait 10 min).
+  // Intervention / sur place : jamais relache tant que le statut dure.
+  var WAKE_LOCK_IDLE_MS = 60 * 60 * 1000; // 1 heure
 
   function wakeLockAllowedByStatus() {
     var s = state.patrolStatus;
     return s !== "pause" && s !== "fin_intervention";
+  }
+
+  function wakeLockNeverIdle() {
+    var s = state.patrolStatus;
+    return s === "intervention" || s === "sur_place";
   }
 
   function acquireWakeLock() {
@@ -7396,7 +8118,8 @@
   }
 
   function scheduleWakeLockRelease() {
-    if (_wakeLockIdleTimer) clearTimeout(_wakeLockIdleTimer);
+    if (_wakeLockIdleTimer) { clearTimeout(_wakeLockIdleTimer); _wakeLockIdleTimer = null; }
+    if (wakeLockNeverIdle()) return;   // en intervention : pas de relache sur inactivite
     _wakeLockIdleTimer = setTimeout(releaseWakeLock, WAKE_LOCK_IDLE_MS);
   }
 
@@ -7488,6 +8211,28 @@
   // soient pas masquees par le clavier virtuel. Sans ca, .field-modal
   // centrait sur le viewport layout (full ecran), donc la textarea de
   // creation de fiche se retrouvait derriere le clavier.
+  // Hauteur de l'application (--app-h), posee UNIQUEMENT en PWA iOS plein
+  // ecran (navigator.standalone). Avec status-bar-style black-translucent,
+  // WebKit calcule 100vh / 100dvh sans la barre d'etat : une bande vide de
+  // cette hauteur restait sous la barre d'actions. L'app installee occupe
+  // tout l'ecran : sa hauteur est celle de l'ecran dans l'orientation
+  // courante. Garde : seulement si la fenetre fait toute la largeur de
+  // l'ecran (pas d'iPad en Split View / Stage Manager). Ailleurs, le CSS
+  // reste sur 100dvh. Ne depend pas du clavier (screen ne bouge pas).
+  function computeAppHeight() {
+    try {
+      if (window.navigator.standalone !== true || !window.screen) return null;
+      var sw = window.screen.width, sh = window.screen.height;
+      if (!sw || !sh) return null;
+      var iw = window.innerWidth, ih = window.innerHeight;
+      var portrait = ih >= iw;
+      var fullW = portrait ? Math.min(sw, sh) : Math.max(sw, sh);
+      var fullH = portrait ? Math.max(sw, sh) : Math.min(sw, sh);
+      if (Math.abs(iw - fullW) > 2) return null;
+      return Math.max(ih, fullH);
+    } catch (e) { return null; }
+  }
+
   function initVisualViewport() {
     var root = document.documentElement;
     function update() {
@@ -7498,14 +8243,21 @@
       // (top: var(--vvt)) suivent, sinon leur haut sort de l'ecran.
       var t = (window.visualViewport && window.visualViewport.offsetTop) || 0;
       root.style.setProperty("--vvt", Math.max(0, t) + "px");
+      var appH = computeAppHeight();
+      if (appH) root.style.setProperty("--app-h", appH + "px");
+      else root.style.removeProperty("--app-h");
     }
     update();
     if (window.visualViewport) {
       window.visualViewport.addEventListener("resize", update);
       window.visualViewport.addEventListener("scroll", update);
-    } else {
-      window.addEventListener("resize", update);
     }
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", function () {
+      // iOS livre les nouvelles dimensions apres l'evenement
+      setTimeout(update, 250);
+      setTimeout(function () { if (state.map) state.map.invalidateSize(); }, 300);
+    });
     // Quand un input/textarea prend le focus dans une modale, on s'assure
     // qu'il est visible au-dessus du clavier (delai pour laisser le clavier
     // s'animer puis le visualViewport se mettre a jour).

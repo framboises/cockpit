@@ -5,9 +5,12 @@
      - tiles (/field/resources/tiles, unpkg, arcgis) : stale-while-revalidate
        avec limite (LRU approximative par purge FIFO)
      - API (/field/*) : network-first, fallback silencieux offline
+     - etat temps reel (fil de messages, missions disponibles, session) :
+       jamais intercepte, reseau direct
+     - app shell : correspondance EXACTE du chemin (plus de sous-chaine)
    ===================================================================== */
 
-const SW_VERSION = "field-sw-v38";
+const SW_VERSION = "field-sw-v42";
 const APP_SHELL_CACHE = "field-shell-" + SW_VERSION;
 const TILE_CACHE = "field-tiles-" + SW_VERSION;
 const API_CACHE = "field-api-" + SW_VERSION;
@@ -66,12 +69,29 @@ function isTileRequest(url) {
 }
 
 function isApiRequest(url) {
-  return /\/field\/(inbox|me|my-fiches|position|photos\/|resources\/(grid-ref|3p|gm-))/.test(url);
+  return /\/field\/(inbox|me|my-fiches|position|photos\/|pco-categories|resources\/(grid-ref|3p|gm-|map-bundle))/.test(url);
 }
 
+// Requetes a ne JAMAIS servir depuis un cache : etat temps reel (fil de
+// messages, missions disponibles, verification de session). On laisse le
+// navigateur faire la requete reseau normale.
+function isLiveRequest(url) {
+  return /\/field\/(thread\/|available-missions|denied\/check|status(\?|$)|push\/)/.test(url);
+}
+
+// Correspondance EXACTE du chemin (et de l'URL complete pour unpkg). L'ancien
+// test par sous-chaine ("/field" est dans la liste) classait TOUTE requete GET
+// contenant "/field" en app shell cache-first : /field/thread/<id> etait servi
+// depuis le cache pour toujours, d'ou des reponses du PC Org qui n'apparaissaient
+// jamais dans la conversation, meme apres l'envoi d'une reponse.
 function isShellRequest(url, request) {
   // Les navigations sont traitees a part (network-first dans le handler).
-  return APP_SHELL_URLS.some(function (u) { return url.indexOf(u) !== -1; });
+  var path = url;
+  try {
+    var u = new URL(url);
+    path = (u.origin === self.location.origin) ? u.pathname : (u.origin + u.pathname);
+  } catch (e) { /* url brute */ }
+  return APP_SHELL_URLS.indexOf(path) !== -1;
 }
 
 function isNavigationRequest(request) {
@@ -105,6 +125,9 @@ self.addEventListener("fetch", function (event) {
       return;
     }
   } catch (e) { return; }
+
+  // Etat temps reel : jamais de cache, reseau direct.
+  if (isLiveRequest(url)) return;
 
   // Tiles : stale-while-revalidate
   if (isTileRequest(url)) {
@@ -218,7 +241,19 @@ self.addEventListener("push", function (event) {
     requireInteraction: !!isSos,
     data: { url: payload.url || "/field", type: payload.type || null },
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  // Prevenir les pages ouvertes : elles relisent tout de suite l'inbox et
+  // les fiches au lieu d'attendre le prochain cycle de polling (qui peut
+  // etre ralenti ou gele par le navigateur quand l'app est en arriere-plan).
+  var notifyClients = clients.matchAll({ type: "window", includeUncontrolled: true })
+    .then(function (list) {
+      list.forEach(function (c) {
+        try { c.postMessage({ type: "field-push", pushType: payload.type || null }); } catch (e) { /* ignore */ }
+      });
+    }).catch(function () { /* ignore */ });
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(title, options),
+    notifyClients,
+  ]));
 });
 
 self.addEventListener("notificationclick", function (event) {

@@ -746,6 +746,96 @@ img { max-width: 100%; }
   border-radius: 999px;
 }
 
+/* "Evenement du jour : X" quand la selection n'est pas l'evenement en cours */
+.header-event-suggest {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 999px;
+  padding: 2px 10px 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.header-event-suggest:hover { background: #fde68a; }
+.header-event-suggest .material-symbols-outlined { font-size: 16px; }
+
+/* Epreuves simultanees : priorite choisie globalement par un admin */
+.header-event-priority {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: center;
+  margin-left: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #1e3a8a;
+  background: #dbeafe;
+  border: 1px solid #93c5fd;
+  border-radius: 999px;
+  padding: 2px 10px 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.header-event-priority.is-unchosen { color: #92400e; background: #fef3c7; border-color: #fcd34d; }
+.header-event-priority .material-symbols-outlined { font-size: 16px; }
+.header-event-priority-menu {
+  position: absolute;
+  z-index: 3000;
+  min-width: 260px;
+  max-width: 360px;
+  background: #fff;
+  color: #0f172a;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+  padding: 6px;
+}
+.header-event-priority-menu .hep-title { font-size: 0.72rem; font-weight: 700; color: #475569; padding: 4px 6px 6px; }
+.header-event-priority-menu .hep-item {
+  display: block; width: 100%; text-align: left;
+  font-size: 0.8rem; padding: 6px 8px; border: 0; border-radius: 6px;
+  background: transparent; color: inherit; cursor: pointer;
+}
+.header-event-priority-menu .hep-item:hover { background: #eff6ff; }
+.header-event-priority-menu .hep-item.is-current { font-weight: 700; color: #1d4ed8; }
+.header-event-priority-menu .hep-note { font-size: 0.7rem; color: #64748b; padding: 6px 6px 2px; border-top: 1px solid #e2e8f0; margin-top: 4px; }
+
+/* Main courante : fiches ouvertes anciennes non chargees (SAISON) */
+.pcorg-older-open {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 6px;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.pcorg-older-open:hover { color: var(--text); }
+.pcorg-older-open .material-symbols-outlined { font-size: 16px; }
+.pcorg-stats-period {
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-top: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+.pcorg-stats-period:hover { color: var(--text); }
+
 .header-separator {
   width: 1px;
   height: 24px;
@@ -3093,6 +3183,13 @@ select.hik-console-window-select.form-input {
   color: var(--muted);
   border: 1px solid var(--line);
   box-shadow: none;
+}
+
+/* SAISON : main courante permanente du site, pas de cycle montage/public */
+.status-saison {
+  background: linear-gradient(135deg, #0f766e, #14b8a6);
+  color: #fff;
+  box-shadow: 0 4px 20px rgba(20, 184, 166, 0.25);
 }
 
 @keyframes status-breathe {
@@ -8353,6 +8450,30 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .block-layout-item.unchecked {
   opacity: 0.35;
 }
+/* Bascule "seulement en SAISON" d'un bloc (fiche groupe) */
+.block-layout-item .block-saison-btn {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  min-height: 22px;
+  opacity: 0.55;
+}
+.block-layout-item .block-saison-btn:hover { opacity: 1; }
+.block-layout-item .block-saison-btn.is-on {
+  background: #1b0069;
+  border-color: #1b0069;
+  color: #fff;
+  opacity: 1;
+}
+/* Bloc de l'accueil masque car reserve a SAISON (main.js applySaisonOnlyBlocks) */
+.block-hidden-saison { display: none !important; }
 .block-fixed-row {
   display: flex;
   flex-wrap: wrap;
@@ -8375,6 +8496,71 @@ th span { font-size: 0.88rem; font-weight: 700; }
   height: 15px;
   cursor: pointer;
 }
+
+/* ---- Fiche groupe (Configuration > Groupes) ------------------------------
+   La regle commune .crud-modal-body label (flex en COLONNE) et le padding des
+   champs texte s'appliquaient aux cases a cocher : case au-dessus du texte,
+   options empilees. Ici : pastilles pour pages/categories, cartes pour les
+   droits, case toujours a gauche de son libelle. */
+#group-modal .crud-modal-dialog { max-width: 780px; }
+#group-modal .gform-section {
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+#group-modal .gform-title {
+  font-weight: 600; font-size: 0.88rem; color: var(--text);
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px;
+}
+#group-modal .gform-hint { font-weight: 400; font-size: 0.74rem; color: var(--muted); }
+#group-modal .gchip-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+#group-modal label.gchip {
+  flex-direction: row; align-items: center; gap: 6px;
+  padding: 5px 10px 5px 8px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--card);
+  font-weight: 500; font-size: 0.8rem;
+  cursor: pointer; user-select: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+#group-modal label.gchip:has(input:checked) {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 14%, var(--card));
+  color: var(--brand);
+}
+#group-modal label.gchip .material-symbols-outlined { font-size: 16px; }
+#group-modal .gchip-role {
+  font-size: 0.66rem; font-weight: 600; padding: 1px 6px; border-radius: 6px;
+  background: color-mix(in srgb, var(--muted) 18%, transparent); color: var(--muted);
+}
+#group-modal .gperm-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px;
+}
+#group-modal label.gperm {
+  flex-direction: row; align-items: flex-start; gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--card);
+  font-weight: 500; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+#group-modal label.gperm:has(input:checked) {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 9%, var(--card));
+}
+#group-modal .gperm-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#group-modal .gperm-name { font-size: 0.84rem; font-weight: 600; color: var(--text); }
+#group-modal .gperm-desc { font-size: 0.74rem; font-weight: 400; color: var(--muted); line-height: 1.35; }
+#group-modal label.gchip input[type="checkbox"],
+#group-modal label.gperm input[type="checkbox"],
+#group-modal .block-layout-item input[type="checkbox"],
+#group-modal .block-fixed-item input[type="checkbox"] {
+  width: 16px; height: 16px; padding: 0; margin: 0; flex: none;
+  accent-color: var(--brand); cursor: pointer;
+}
+#group-modal label.gperm input[type="checkbox"] { margin-top: 2px; }
+#group-modal .block-fixed-item { flex-direction: row; font-weight: 500; }
 .blocks-toggle-bar {
   display: flex;
   gap: 8px;
@@ -11419,6 +11605,15 @@ th span { font-size: 0.88rem; font-weight: 700; }
 
 /* Context menu — sub-menu (niveaux urgence) */
 .pcorg-ctx-item { position: relative; }
+/* Chaque item anime (transform) forme son propre plan d'empilement : les
+   items suivants passaient AU-DESSUS des sous-menus d'un item precedent
+   (visible quand le sous-menu vehicules bascule sur le menu principal).
+   L'item survole, ou ouvert au toucher, passe devant avec toute sa branche. */
+.pcorg-ctx-item:hover,
+.pcorg-ctx-item:has(> .pcorg-ctx-submenu.touch-open) { z-index: 2; }
+.pcorg-ctx-sub-item { position: relative; }
+.pcorg-ctx-sub-item:hover,
+.pcorg-ctx-sub-item:has(> .pcorg-ctx-veh-submenu.touch-open) { z-index: 2; }
 /* Bridge zone between category item and urgency submenu */
 .pcorg-ctx-item.has-submenu::after {
   content: "";
@@ -11532,6 +11727,12 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .pcorg-ctx-menu.flip-sub .pcorg-ctx-veh-submenu {
   left: auto; right: calc(100% + 6px);
 }
+/* Bascule mesuree par sous-menu (placeSubmenuX, pcorg.js) : la zone de
+   passage de la souris suit le cote ou s'ouvre le sous-menu. */
+.pcorg-ctx-menu .pcorg-ctx-item.has-submenu.pcorg-sub-left::after,
+.pcorg-ctx-menu .pcorg-ctx-sub-item.has-veh-submenu.pcorg-sub-left::after { right: auto; left: -10px; }
+.pcorg-ctx-menu .pcorg-ctx-item.has-submenu.pcorg-sub-right::after,
+.pcorg-ctx-menu .pcorg-ctx-sub-item.has-veh-submenu.pcorg-sub-right::after { left: auto; right: -10px; }
 .pcorg-ctx-veh-item {
   padding: 7px 10px; cursor: pointer;
   border-radius: 6px; font-size: 0.78rem; font-weight: 500;
@@ -12729,8 +12930,16 @@ th span { font-size: 0.88rem; font-weight: 700; }
   font-size: 14px;
   cursor: pointer;
   user-select: none;
+  /* Couleur explicite : en theme sombre le texte heritait d'un gris clair,
+     illisible sur ce fond rose pale. */
+  color: #7f1d1d;
+  font-weight: 600;
 }
 .routing-priority input[type="checkbox"] { margin: 0; transform: scale(1.2); accent-color: #dc2626; }
+/* Mode gyrophare actif : bloc rouge plein, impossible a manquer */
+.routing-priority:has(input:checked) { background: #dc2626; border-color: #b91c1c; color: #fff; }
+.routing-priority:has(input:checked) .material-symbols-outlined { color: #fff !important; }
+.routing-priority:has(input:checked) input[type="checkbox"] { accent-color: #fff; }
 .routing-priority .material-symbols-outlined { font-size: 18px; }
 .routing-btn-row {
   display: flex;

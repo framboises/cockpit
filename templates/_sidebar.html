@@ -48,35 +48,35 @@
     </div>
 
     <nav class="sidebar-nav">
-        <a href="/" class="{{ nav_class('/') }}">
+        {% if page_allowed is not defined or page_allowed('cockpit') %}<a href="/" class="{{ nav_class('/') }}">
             <span class="material-symbols-outlined">dashboard</span>
             <span class="label">Cockpit</span>
-        </a>
+        </a>{% endif %}
         {# Ces trois boutons ouvrent un onglet parametre par l'evenement et
            l'annee courants. sidebar.js les relit dans localStorage, donc ils
            fonctionnent aussi sur les pages sans selecteur. #}
-        <button type="button" class="nav-btn" id="doors-page-button">
+        {% if page_allowed is not defined or page_allowed('portes') %}<button type="button" class="nav-btn" id="doors-page-button">
             <span class="material-symbols-outlined">door_front</span>
             <span class="label">Portes</span>
-        </button>
-        <button type="button" class="nav-btn" id="parkings-page-button">
+        </button>{% endif %}
+        {% if page_allowed is not defined or page_allowed('parkings') %}<button type="button" class="nav-btn" id="parkings-page-button">
             <span class="material-symbols-outlined">local_parking</span>
             <span class="label">Parkings</span>
-        </button>
-        <button type="button" class="nav-btn" id="stats-page-button">
+        </button>{% endif %}
+        {% if page_allowed is not defined or page_allowed('statistiques') %}<button type="button" class="nav-btn" id="stats-page-button">
             <span class="material-symbols-outlined">insert_chart</span>
             <span class="label">Statistiques</span>
-        </button>
-        <a href="/wiki" class="{{ nav_class('/wiki') }}">
+        </button>{% endif %}
+        {% if page_allowed is not defined or page_allowed('wiki') %}<a href="/wiki" class="{{ nav_class('/wiki') }}">
             <span class="material-symbols-outlined">menu_book</span>
             <span class="label">Wiki procedures</span>
-        </a>
+        </a>{% endif %}
         {# File du service (dispatch_auto) : visible de tous, la page explique
            elle-meme comment devenir responsable d'une categorie. #}
-        <a href="/dispatch-service" class="{{ nav_class('/dispatch-service') }}" title="File du service : fiches a dispatcher vers les unites Field">
+        {% if page_allowed is not defined or page_allowed('dispatch') %}<a href="/dispatch-service" class="{{ nav_class('/dispatch-service') }}" title="File du service : fiches a dispatcher vers les unites Field">
             <span class="material-symbols-outlined">assignment_ind</span>
             <span class="label">File du service</span>
-        </a>
+        </a>{% endif %}
         {% if "manager" in user_roles %}
         {% if _ai %}
         {# Assistant IA (resume, briefing, RETEX : une modale a onglets). Bouton
@@ -84,71 +84,72 @@
            depliee. Lie par ai_assistant.js via data-ai-assistant. Reserve au
            manager : l'ouverture est refusee en dessous et /api/pcorg/summary/*
            est gate cote serveur. #}
-        <button type="button" class="nav-btn" data-ai-assistant title="Assistant IA : résumé, briefing de situation, RETEX">
+        {% if page_allowed is not defined or page_allowed('assistant_ia') %}<button type="button" class="nav-btn" data-ai-assistant title="Assistant IA : résumé, briefing de situation, RETEX">
             <span class="material-symbols-outlined">smart_toy</span>
             <span class="label">Assistant IA</span>
-        </button>
+        </button>{% endif %}
         {% endif %}
-        <a href="/circulation" class="nav-btn" target="_blank" rel="noopener" title="Tableau de bord circulation (TV poste de controle)">
+        {% if page_allowed is not defined or page_allowed('circulation') %}<a href="/circulation" class="nav-btn" target="_blank" rel="noopener" title="Tableau de bord circulation (TV poste de controle)">
             <span class="material-symbols-outlined">moving</span>
             <span class="label">Circulation</span>
-        </a>
-        <a href="/meteo-mur" class="nav-btn" target="_blank" rel="noopener" title="Mur meteo plein ecran (TV PC Organisation)">
+        </a>{% endif %}
+        {% if page_allowed is not defined or page_allowed('meteo_mur') %}<a href="/meteo-mur" class="nav-btn" target="_blank" rel="noopener" title="Mur meteo plein ecran (TV PC Organisation)">
             <span class="material-symbols-outlined">radar</span>
             <span class="label">Mur meteo</span>
-        </a>
-        <a href="/pmv" class="{{ nav_class('/pmv') }}" title="Panneaux a message variable (remorques)">
+        </a>{% endif %}
+        {% if page_allowed is not defined or page_allowed('pmv') %}<a href="/pmv" class="{{ nav_class('/pmv') }}" title="Panneaux a message variable (remorques)">
             <span class="material-symbols-outlined">signpost</span>
             <span class="label">PMV</span>
-        </a>
+        </a>{% endif %}
         {% endif %}
-        {% if "admin" in user_roles %}
-        <a href="/live-controle" class="{{ nav_class('/live-controle') }}">
+        {# Pages d'administration : role admin, ou accordees a un groupe
+           (app.ADMIN_PAGE_REGISTRY). Configuration reste reservee au role admin. #}
+        {% set _adm = "admin" in user_roles %}
+        {% if _adm or (admin_page_allowed is defined and admin_page_allowed('live_controle')) %}<a href="/live-controle" class="{{ nav_class('/live-controle') }}">
             <span class="material-symbols-outlined">sensors</span>
             <span class="label">Controle acces</span>
-        </a>
-        <a href="/field-dispatch" class="{{ nav_class('/field-dispatch') }}">
+        </a>{% endif %}
+        {% if _adm or (admin_page_allowed is defined and admin_page_allowed('field_dispatch')) %}<a href="/field-dispatch" class="{{ nav_class('/field-dispatch') }}">
             <span class="material-symbols-outlined">tablet_android</span>
             <span class="label">Field dispatch</span>
-        </a>
-        <a href="/config/todos" class="{{ nav_class('/config/todos') }}">
+        </a>{% endif %}
+        {% if _adm %}<a href="/config/todos" class="{{ nav_class('/config/todos') }}">
             <span class="material-symbols-outlined">settings</span>
             <span class="label">Configuration</span>
-        </a>
-        <a href="/scan-report" class="{{ nav_class('/scan-report') }}">
+        </a>{% endif %}
+        {% if _adm or (admin_page_allowed is defined and admin_page_allowed('scan_report')) %}<a href="/scan-report" class="{{ nav_class('/scan-report') }}">
             <span class="material-symbols-outlined">qr_code_scanner</span>
             <span class="label">Rapport scans</span>
-        </a>
-        <a href="/analyse-ops" class="{{ nav_class('/analyse-ops') }}">
+        </a>{% endif %}
+        {% if _adm or (admin_page_allowed is defined and admin_page_allowed('analyse_ops')) %}<a href="/analyse-ops" class="{{ nav_class('/analyse-ops') }}">
             <span class="material-symbols-outlined">biotech</span>
             <span class="label">Analyse Ops</span>
-        </a>
-        <a href="/anpr" class="{{ nav_class('/anpr') }}">
+        </a>{% endif %}
+        {% if _adm or (admin_page_allowed is defined and admin_page_allowed('lapi')) %}<a href="/anpr" class="{{ nav_class('/anpr') }}">
             <span class="material-symbols-outlined">directions_car</span>
             <span class="label">LAPI</span>
-        </a>
-        <a href="/admin/alertes" class="{{ nav_class('/admin/alertes') }}">
+        </a>{% endif %}
+        {% if _adm or (admin_page_allowed is defined and admin_page_allowed('alertes')) %}<a href="/admin/alertes" class="{{ nav_class('/admin/alertes') }}">
             <span class="material-symbols-outlined">notifications_active</span>
             <span class="label">Alertes</span>
-        </a>
-        <a href="/admin/wiki" class="{{ nav_class('/admin/wiki') }}">
+        </a>{% endif %}
+        {% if _adm or (admin_page_allowed is defined and admin_page_allowed('wiki_admin')) %}<a href="/admin/wiki" class="{{ nav_class('/admin/wiki') }}">
             <span class="material-symbols-outlined">edit_note</span>
             <span class="label">Wiki (admin)</span>
-        </a>
-        <a href="/cameras" class="{{ nav_class('/cameras') }}">
+        </a>{% endif %}
+        {% if _adm or (admin_page_allowed is defined and admin_page_allowed('cameras')) %}<a href="/cameras" class="{{ nav_class('/cameras') }}">
             <span class="material-symbols-outlined">videocam</span>
             <span class="label">Cameras</span>
-        </a>
-        <a href="/watch-admin" class="{{ nav_class('/watch-admin') }}">
+        </a>{% endif %}
+        {% if _adm or (admin_page_allowed is defined and admin_page_allowed('montre')) %}<a href="/watch-admin" class="{{ nav_class('/watch-admin') }}">
             <span class="material-symbols-outlined">watch</span>
             <span class="label">Montre</span>
-        </a>
-        {% if sidebar_routing_test %}
+        </a>{% endif %}
+        {% if sidebar_routing_test and _adm %}
         <button type="button" class="nav-btn" id="routing-test-button" title="Test itineraire (bac a sable Valhalla)">
             <span class="material-symbols-outlined">science</span>
             <span class="label">Test itineraire</span>
         </button>
-        {% endif %}
         {% endif %}
     </nav>
 

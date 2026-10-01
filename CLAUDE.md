@@ -132,4 +132,5 @@ Le detail de chaque domaine vit dans `docs/claude/`. **Lire le fichier concerne 
 - `docs/claude/ai-reports.md` : Briefing de situation et RETEX de fin d'edition (ai_reports.py)
 - `docs/claude/frequentation-live.md` : Frequentation depuis l'archive du controle d'acces live (live_frequentation.py)
 - `docs/claude/momentus.md` : Momentus Elite : synchro, reservations par lieu ; contient aussi le rapport de scans depuis l'archive live (live_scan_units.py)
+- `docs/claude/musee.md` : Musee des 24 Heures : bloc autonome de l'accueil, collecte HSH dediee (musee_collect.py), visiteurs du jour (compteurs entree seule), PDA mobile, configuration dans /live-controle onglet Musee (horaires par jour, perimetre HSH, aucune valeur en dur)
 - `docs/claude/pmv.md` : PMV (remorques Sigma 3000, JetFileII) : regles de dialogue NON NEGOCIABLES, securite, jobs

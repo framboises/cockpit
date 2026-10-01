@@ -22,6 +22,7 @@ from pymongo import MongoClient
 from bson.objectid import ObjectId
 
 from whatsapp import WhatsAppService
+import event_courant
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -118,53 +119,34 @@ def build_context(db, sim_time=None):
     except Exception:
         today_str = now.strftime("%Y-%m-%d")
 
-    # Chercher le parametrage dont les dates couvrent aujourd'hui
-    params = list(db["parametrages"].find(
-        {"data.globalHoraires.dates": {"$exists": True}},
-        {"event": 1, "year": 1, "data.globalHoraires": 1}
-    ))
-
-    best = None
-    for p in params:
-        gh = (p.get("data") or {}).get("globalHoraires")
-        if not gh or not gh.get("dates"):
-            continue
-        dates = [d.get("date") for d in gh["dates"] if d.get("date")]
-        if today_str in dates:
-            best = p
-            break
-
-    # Fallback : le parametrage dont les dates sont les plus proches, a 7 jours
-    # au plus (montage, demontage, jours sans public). L'ancienne boucle
-    # refaisait le test min <= today <= max et ne trouvait jamais rien de plus.
-    if not best:
-        try:
-            today_d = datetime.strptime(today_str, "%Y-%m-%d").date()
-        except ValueError:
-            today_d = None
-        best_gap = None
-        for p in params if today_d else []:
-            gh = (p.get("data") or {}).get("globalHoraires")
-            if not gh or not gh.get("dates"):
-                continue
-            for d in gh["dates"]:
-                try:
-                    dd = datetime.strptime(str(d.get("date") or "")[:10], "%Y-%m-%d").date()
-                except ValueError:
-                    continue
-                gap = abs((dd - today_d).days)
-                if gap <= 7 and (best_gap is None or gap < best_gap):
-                    best, best_gap = p, gap
-
-    if best:
-        gh = (best.get("data") or {}).get("globalHoraires", {})
-        ctx["event"] = best.get("event", "")
-        ctx["year"] = str(best.get("year", ""))
-        ctx["globalHoraires"] = gh
-        log.info("  Evenement actif: %s %s (dates couvrent %s)", ctx["event"], ctx["year"], today_str)
-    else:
+    # Evenement courant : source unique event_courant (epreuve active de
+    # montage.start a demontage.end, priorite jours publics puis course la plus
+    # proche ; SAISON en dehors). Remplace "le premier parametrage dont les
+    # dates contiennent aujourd'hui" (dependant de l'ordre Mongo) et le repli
+    # a 7 jours.
+    try:
+        acts = event_courant.active_events(db, now)
+    except Exception as e:
+        log.warning("  event_courant indisponible: %s", e)
+        acts = []
+    if not acts:
         log.info("  Aucun evenement actif pour la date %s", today_str)
+        return ctx
 
+    cur = acts[0]
+    ctx["event"] = cur["event"]
+    ctx["year"] = str(cur["year"])
+    ctx["event_kind"] = cur["kind"]  # "epreuve" | "saison"
+    ctx["phase"] = cur["phase"]      # public | montage | demontage | None (SAISON)
+    if cur["kind"] == "epreuve":
+        # Horaires publics de l'epreuve : seuls consommateurs, les detecteurs
+        # d'ouverture/fermeture. Jamais pour SAISON (pas de dates : detecteurs OFF).
+        p = db["parametrages"].find_one(
+            {"event": cur["event"], "year": {"$in": [str(cur["year"]), int(cur["year"])]}},
+            {"data.globalHoraires": 1})
+        ctx["globalHoraires"] = ((p or {}).get("data") or {}).get("globalHoraires") or {}
+    log.info("  Evenement courant: %s %s (%s, phase=%s, jour %s)",
+             ctx["event"], ctx["year"], ctx["event_kind"], ctx["phase"], today_str)
     return ctx
 
 # ---------------------------------------------------------------------------
@@ -214,6 +196,8 @@ def _find_schedule(public_dates, now_local):
 
 def detect_schedule_proximity(definition, context):
     """Detecte la proximite d'une ouverture ou fermeture de site."""
+    if context.get("event_kind") == "saison":
+        return None  # SAISON : pas d'horaires publics, detecteur OFF
     gh = context.get("globalHoraires")
     if not gh or not gh.get("dates"):
         return None
@@ -294,6 +278,8 @@ def detect_schedule_proximity(definition, context):
 
 def detect_schedule_transition(definition, context):
     """Detecte les transitions ouvert/ferme du site."""
+    if context.get("event_kind") == "saison":
+        return None  # SAISON : pas d'horaires publics, detecteur OFF
     gh = context.get("globalHoraires")
     if not gh or not gh.get("dates"):
         return None
@@ -1043,10 +1029,15 @@ def detect_pcorg_urgency(definition, context):
             msg_parts.append("Operateur : %s" % operator)
         msg = " — ".join(msg_parts) if msg_parts else "Nouvelle fiche %s" % cat
 
+        # Tag sur l'evenement de la FICHE (pas celui du contexte) : une fiche
+        # SAISON ou d'une epreuve secondaire active garde son rattachement.
+        f_event = f.get("event") or context.get("event", "")
+        f_year = f.get("year")
+        f_year = str(f_year) if f_year not in (None, "") else context.get("year", "")
         results.append({
             "definition_slug": definition["slug"],
-            "event": context.get("event", ""),
-            "year": context.get("year", ""),
+            "event": f_event,
+            "year": f_year,
             "title": title,
             "message": msg,
             "timeStr": time_str,
@@ -1111,9 +1102,70 @@ DOOR_SAT_DEFAULTS = {
     "sens": "entrees",        # "entrees" ou "total" (entrees + sorties)
     "device_capacity_h": {"tripode": 900, "pda": 650, "autre": 650},
     "capacities": {},         # {"PORTE NORD PIETONS": 9000} : surcharge par porte
+    # Facteur applique a la capacite theorique des appareils actifs, par
+    # porte : {"PORTE SUD": 0.72}. Appris sur les archives 5 min par
+    # scripts/replay_door_saturation.py (debit plafond reellement observe par
+    # appareil a cette porte). Une porte absente garde la capacite theorique.
+    "capacity_factors": {},
+    # "securite" : capacite = agents de securite prevus au planning x
+    # agent_rate_h (door_security.py, poste -> porte lu dans la bible). Seules
+    # les portes pietonnes dotees d'agents sont surveillees : le goulet est la
+    # palpation, pas le scan (rejeu 2026 : a la fiche "Renfort filtrage", la
+    # porte est a 101 % de sa capacite de securite et 15 % de sa capacite de
+    # scan). "scan" : capacite des appareils (comportement historique).
+    "capacity_mode": "scan",
+    "agent_rate_h": 350,      # personnes / h / agent de palpation
+    # Mode securite : une alerte par EPISODE. Pas de nouvelle alerte pour la
+    # porte avant `renotify_min`, sauf si le besoin s'aggrave (plus d'agents a
+    # ajouter). Rejeu 2026 : avec 30 min, une porte durablement sous-dotee
+    # (Porte Nord) sonnait toutes les demi-heures, 960 alertes sur 6 editions.
+    "renotify_min": 120,
+    # Re-alerter avant renotify_min si le besoin grandit ? Desactive : rejeu
+    # 2026, 461 alertes au lieu de 316 pour 5 points de rappel des fiches, et
+    # les aggravations annoncaient des besoins peu credibles (+10 a +23
+    # agents) la ou le planning ne refletait plus l'effectif reel.
+    "renotify_on_worse": False,
     "doors": [],              # filtre (vide = toutes les portes)
     "exclude": list(DOOR_SAT_SERVICES),
 }
+
+# Postes securite -> portes et agents prevus : bible + calendrier relus au
+# plus toutes les 10 min (le detecteur tourne a chaque cycle du moteur).
+_DOOR_SECU_CACHE = {}
+_DOOR_SECU_TTL_S = 600
+
+
+def _door_security_staffing(db, coll, event, year, now):
+    """{porte normalisee: {creneau 30 min: agents}} pour l'edition, en cache.
+
+    Les noms de portes servent au rapprochement bible -> controle d'acces : on
+    prend TOUTES les portes de l'edition (distinct), pas seulement celles de la
+    fenetre courante, sinon "Porte Nord - Acces Pietons" pourrait tomber sur
+    PORTE NORD VEHICULES faute de voir la porte pietonne.
+    """
+    import time
+    import door_security as DS
+    key = (coll, event, year)
+    hit = _DOOR_SECU_CACHE.get(key)
+    # Horloge REELLE, pas `now` : en rejeu, l'heure simulee avance de 5 min
+    # par cycle et rechargeait bible + planning tous les deux cycles.
+    if hit and time.monotonic() - hit[0] < _DOOR_SECU_TTL_S:
+        return hit[1]
+    try:
+        q = {"evenement": event} if coll == "hsh_transactions_agg" else {}
+        gates = [g for g in db[coll].distinct("gate_name", q) if g]
+        posts, _ = DS.load_door_posts(db, event, year, gates)
+        staffing = {_door_norm(g): v for g, v in DS.load_security_staffing(db, event, year, posts).items()}
+    except Exception:
+        log.warning("door_saturation_forecast : effectifs securite illisibles", exc_info=True)
+        staffing = {}
+    _DOOR_SECU_CACHE[key] = (time.monotonic(), staffing)
+    return staffing
+
+
+def _agents_at(staffing, key, t):
+    slot = t.replace(minute=0 if t.minute < 30 else 30, second=0, microsecond=0)
+    return (staffing.get(key) or {}).get(slot, 0)
 
 
 def _door_norm(name):
@@ -1416,19 +1468,33 @@ def detect_door_saturation_forecast(definition, context):
         dedup_min = int(p["dedup_min"])
         trend_max = float(p["trend_max_growth"])
         trend_on = bool(p["trend_fallback"])
+        agent_rate = float(p["agent_rate_h"])
     except (TypeError, ValueError):
         log.warning("door_saturation_forecast %s : parametres invalides", slug)
         return None
     sens = "total" if p.get("sens") == "total" else "entrees"
+    secu_mode = p.get("capacity_mode") == "securite"
     dev_cap = dict(DOOR_SAT_DEFAULTS["device_capacity_h"])
     dev_cap.update(p.get("device_capacity_h") or {})
     cap_over = {_door_norm(k): v for k, v in (p.get("capacities") or {}).items()}
+    cap_factor = {}
+    for k, v in (p.get("capacity_factors") or {}).items():
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if 0 < f <= 2:
+            cap_factor[_door_norm(k)] = f
     only = {_door_norm(x) for x in (p.get("doors") or []) if x}
     exclude = {_door_norm(x) for x in (p.get("exclude") or []) if x}
 
     src = context.get("door_tx_source")
     if src:
         coll, event, year = src["collection"], src["event"], src.get("year")
+    elif context.get("event_kind") == "saison":
+        # Hors epreuve (SAISON) : pas de flux public a prevoir. Skip explicite
+        # meme si ___GLOBAL___.live_controle_actif est reste a true.
+        return None
     else:
         g = db["data_access"].find_one({"_id": "___GLOBAL___"}) or {}
         if not g.get("live_controle_actif") or not g.get("evenement"):
@@ -1499,10 +1565,27 @@ def detect_door_saturation_forecast(definition, context):
     else:
         shift = None
 
+    staffing = {}
+    if secu_mode:
+        staffing = _door_security_staffing(db, coll, event, year, now)
+        if not staffing:
+            # Pas de bible ou de planning pour l'edition : s'abstenir, jamais
+            # retomber sur la capacite de scan (qui ne voit pas le goulet).
+            return None
+
     results = []
     for key, e in sorted(doors.items()):
         cur = door_rate(e["buckets"], end, window)
-        if key in cap_over:
+        agents_now = None
+        if secu_mode:
+            if key not in staffing:
+                continue  # porte sans poste de securite pieton
+            agents_now = _agents_at(staffing, key, now_label)
+            if not agents_now:
+                continue  # aucun agent prevu en ce moment : rien a comparer
+            capacity = agents_now * agent_rate
+            cap_src = "securite"
+        elif key in cap_over:
             try:
                 capacity = float(cap_over[key])
             except (TypeError, ValueError):
@@ -1512,6 +1595,9 @@ def detect_door_saturation_forecast(definition, context):
             capacity = float(sum(dev_cap.get(k, dev_cap.get("autre", 650))
                                  for k in e["devices"].values()))
             cap_src = "appareils"
+            if key in cap_factor:
+                capacity *= cap_factor[key]
+                cap_src = "appareils_calibre"
         if capacity <= 0 or cur <= 0:
             continue
         slope = door_trend_slope(e["buckets"], end, trend_window) if trend_on else None
@@ -1529,26 +1615,61 @@ def detect_door_saturation_forecast(definition, context):
         thr = capacity * thr_pct / 100.0
         hit = None
         if cur >= thr and cur >= min_rate:
-            hit = (0, cur, "constate")
+            hit = (0, cur, "constate", capacity, agents_now)
         else:
             for h, r in pred:
-                if r >= thr and r >= min_rate:
-                    hit = (h, r, method)
+                cap_h, ag_h = capacity, agents_now
+                if secu_mode:
+                    # Capacite AU MOMENT prevu : une fin de vacation fait
+                    # baisser l'effectif alors que le flux monte.
+                    ag_h = _agents_at(staffing, key, now_label + timedelta(minutes=h))
+                    if not ag_h:
+                        continue
+                    cap_h = ag_h * agent_rate
+                if r >= cap_h * thr_pct / 100.0 and r >= min_rate:
+                    hit = (h, r, method, cap_h, ag_h)
                     break
         if not hit:
             continue
-        h, rate, meth = hit
+        h, rate, meth, capacity, agents_hit = hit
+        agents_needed = None
+        if secu_mode and agent_rate > 0:
+            agents_needed = max(1, int(-(-rate // agent_rate)) - int(agents_hit or 0))
 
-        since = now - timedelta(minutes=dedup_min)
-        if db["cockpit_active_alerts"].find_one({"definition_slug": slug, "actionData.door_key": key,
-                                                  "triggeredAt": {"$gte": since}}):
-            continue
+        if secu_mode:
+            try:
+                renotify = int(p.get("renotify_min") or dedup_min)
+            except (TypeError, ValueError):
+                renotify = dedup_min
+            prev = db["cockpit_active_alerts"].find_one(
+                {"definition_slug": slug, "actionData.door_key": key,
+                 "triggeredAt": {"$gte": now - timedelta(minutes=max(renotify, dedup_min))}},
+                sort=[("triggeredAt", -1)])
+            if prev:
+                prev_need = ((prev.get("actionData") or {}).get("agents_needed") or 0)
+                recent = prev.get("triggeredAt")
+                if isinstance(recent, datetime) and recent.tzinfo is None:
+                    recent = recent.replace(tzinfo=timezone.utc)
+                too_soon = isinstance(recent, datetime) and now - recent < timedelta(minutes=dedup_min)
+                worse_ok = bool(p.get("renotify_on_worse")) and (agents_needed or 0) > prev_need
+                if too_soon or not worse_ok:
+                    continue
+        else:
+            since = now - timedelta(minutes=dedup_min)
+            if db["cockpit_active_alerts"].find_one({"definition_slug": slug, "actionData.door_key": key,
+                                                      "triggeredAt": {"$gte": since}}):
+                continue
         at_label = now_label + timedelta(minutes=h)
         at_str = at_label.strftime("%H:%M")
         n_tri = sum(1 for k in e["devices"].values() if k == "tripode")
         n_pda = sum(1 for k in e["devices"].values() if k == "pda")
         err_pct = round(100.0 * e["err"] / (e["ok"] + e["err"]), 1) if (e["ok"] + e["err"]) else None
-        if h == 0:
+        if secu_mode:
+            quand = "des maintenant" if h == 0 else "attendus vers %s" % at_str
+            msg = "%s : ~%d/h %s pour %d agent%s securite (%d/h) - prevoir +%d agent%s" % (
+                e["name"], round(rate, -1), quand, agents_hit, "s" if agents_hit > 1 else "",
+                capacity, agents_needed, "s" if agents_needed > 1 else "")
+        elif h == 0:
             msg = "%s : ~%d/h des maintenant (capacite %d/h)" % (e["name"], round(rate, -1), capacity)
         else:
             msg = "%s : ~%d/h prevu vers %s (capacite %d/h)" % (e["name"], round(rate, -1), at_str, capacity)
@@ -1557,7 +1678,7 @@ def detect_door_saturation_forecast(definition, context):
             "definition_slug": slug,
             "event": context.get("event", "") or event,
             "year": str(context.get("year", "") or year),
-            "title": "SATURATION PORTE PREVUE",
+            "title": "RENFORT SECURITE PORTE" if secu_mode else "SATURATION PORTE PREVUE",
             "message": msg,
             "timeStr": at_str,
             "actionData": {
@@ -1577,6 +1698,10 @@ def detect_door_saturation_forecast(definition, context):
                 "n1_rate_now": int(round(n1_now)) if n1_now is not None else None,
                 "sens": sens,
                 "error_pct": err_pct,
+                "capacity_mode": "securite" if secu_mode else "scan",
+                "security_agents": agents_hit if secu_mode else None,
+                "agents_needed": agents_needed,
+                "agent_rate_h": agent_rate if secu_mode else None,
             },
             "dedup_key": "door-sat-%s-%s-%d" % (slug, key.replace(" ", "_"), bucket30),
             "triggeredAt": now,

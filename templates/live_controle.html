@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/musee_admin.css') }}">
 </head>
 
 <body>
@@ -26,6 +27,15 @@
       <span id="hsh-admin-health" class="status-dot" style="margin-left:10px;" title=""></span>
       <span id="hsh-status-text" style="font-size:0.78rem; color:var(--muted); margin-left:8px;"></span>
       <div class="header-spacer"></div>
+      <!-- Onglets : Evenements (live controle) / Musee (configuration autonome) -->
+      <nav class="lc-tabs" role="tablist">
+        <button type="button" class="lc-tab active" data-lc-tab="evenement" role="tab">
+          <span class="material-symbols-outlined">sensors</span>Evenements
+        </button>
+        <button type="button" class="lc-tab" data-lc-tab="musee" role="tab">
+          <span class="material-symbols-outlined">museum</span>Musee
+        </button>
+      </nav>
     </header>
 
     <div id="main-content" class="hsh-page-grid">
@@ -179,6 +189,124 @@
 
     </div>
 
+    <!-- ============ Onglet Musee (musee_admin.js, /api/musee/*) ============
+         Independant du live controle : ni data_access, ni live_controle_actif. -->
+    <div id="musee-admin" class="hsh-page-grid musee-admin" hidden>
+
+      <div class="hsh-page-col">
+        <!-- Collecte -->
+        <section class="widget-card">
+          <header class="widget-header">
+            <h3>Compteur du musee</h3>
+            <span id="ma-badge" class="ma-badge"></span>
+          </header>
+          <div class="widget-body ma-body">
+            <div class="ma-row">
+              <label class="hsh-toggle-label">
+                <input type="checkbox" id="ma-enabled" class="hsh-toggle-input">
+                <span class="hsh-toggle-slider"></span>
+                <span>Collecte active</span>
+              </label>
+              <label class="hsh-toggle-label">
+                <input type="checkbox" id="ma-transactions" class="hsh-toggle-input">
+                <span class="hsh-toggle-slider"></span>
+                <span>Passages (transactions)</span>
+              </label>
+            </div>
+            <div id="ma-etat" class="ma-etat"></div>
+            <div class="ma-actions">
+              <button id="ma-test" class="btn btn-xs btn-secondary" type="button" title="Interroge la borne avec les valeurs du formulaire, sans rien enregistrer">
+                <span class="material-symbols-outlined">science</span>Tester
+              </button>
+              <button id="ma-reload" class="btn btn-xs btn-secondary" type="button" title="Annule les modifications non enregistrees">
+                <span class="material-symbols-outlined">undo</span>Recharger
+              </button>
+              <button id="ma-save" class="btn btn-xs btn-primary" type="button" disabled>
+                <span class="material-symbols-outlined">save</span>Enregistrer
+              </button>
+            </div>
+            <div id="ma-test-result" class="ma-test-result" hidden></div>
+          </div>
+        </section>
+
+        <!-- Horaires -->
+        <section class="widget-card">
+          <header class="widget-header">
+            <h3>Horaires d'ouverture</h3>
+            <span id="ma-today" class="ma-today"></span>
+          </header>
+          <div class="widget-body ma-body">
+            <div class="ma-sub">Horaires par defaut</div>
+            <div class="ma-row">
+              <label class="ma-field">Ouverture <input type="time" id="ma-ouv" class="hsh-select" step="60"></label>
+              <label class="ma-field">Fermeture <input type="time" id="ma-ferm" class="hsh-select" step="60"></label>
+            </div>
+            <div class="ma-sub">Par jour de la semaine</div>
+            <table class="ma-table" id="ma-semaine"><tbody></tbody></table>
+            <div class="ma-sub">
+              Dates exceptionnelles
+              <button id="ma-exc-add" class="btn btn-xs btn-secondary" type="button">
+                <span class="material-symbols-outlined">add</span>Ajouter
+              </button>
+            </div>
+            <div class="ma-hint">Prioritaires sur le jour de la semaine (jour ferme, nocturne...). Les dates passees peuvent etre supprimees.</div>
+            <table class="ma-table" id="ma-exceptions">
+              <thead><tr><th>Date</th><th>Regime</th><th>Ouverture</th><th>Fermeture</th><th>Libelle</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <div class="hsh-page-col">
+        <!-- Perimetre Handshake -->
+        <section class="widget-card">
+          <header class="widget-header">
+            <h3>Perimetre Handshake</h3>
+            <button id="ma-struct-refresh" class="btn btn-xs btn-secondary" type="button" style="margin-left:auto;" title="Relit l'inventaire de la borne">
+              <span class="material-symbols-outlined">refresh</span>Actualiser
+            </button>
+          </header>
+          <div class="widget-body ma-body">
+            <div id="ma-struct-source" class="ma-hint"></div>
+            <label class="ma-field ma-field-wide">Area du musee (perimetre des visiteurs)
+              <select id="ma-area" class="hsh-select"></select>
+            </label>
+            <div class="ma-hint">Les visiteurs sont comptes sur l'Area : compteur de l'Area et passages dont l'Area est celle-ci, quel que soit le checkpoint.</div>
+            <div class="ma-sub">Portes de l'Area</div>
+            <div id="ma-gates" class="ma-gates"></div>
+            <div class="ma-sub">Checkpoints</div>
+            <table class="ma-table" id="ma-cps">
+              <thead><tr><th title="Compteur releve et affiche dans la repartition">Inclus</th><th>Checkpoint</th><th>Nom affiche</th><th title="Sert aussi hors du musee : ses compteurs ne sont pas que du musee">Mobile</th><th>Vu</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <div class="ma-row">
+              <select id="ma-cp-add" class="hsh-select" style="flex:1; min-width:0;">
+                <option value="">Ajouter un checkpoint de l'inventaire...</option>
+              </select>
+            </div>
+            <div class="ma-hint">Pour un checkpoint que la structure ne rattache pas encore a l'Area (installation nouvelle, pas encore vue en transaction).</div>
+          </div>
+        </section>
+
+        <!-- Reglages avances -->
+        <section class="widget-card">
+          <details class="ma-advanced">
+            <summary class="widget-header"><h3>Reglages avances</h3></summary>
+            <div class="widget-body ma-body">
+              <label class="ma-field">Releve perime au-dela de (min)
+                <input type="number" id="ma-perime" class="hsh-select" min="1" max="1440" step="1">
+              </label>
+              <label class="ma-field ma-field-wide">Statuts de passage comptes (codes separes par des virgules)
+                <input type="text" id="ma-statuts" class="hsh-select" placeholder="0, 107, 133">
+              </label>
+              <div class="ma-hint" id="ma-statuts-hint"></div>
+            </div>
+          </details>
+        </section>
+      </div>
+    </div>
+
     <!-- Footer -->
     <footer class="app-footer">
         <span class="footer-text">TITAN &mdash; Techniques d'Integration Topographique avec Navigation</span>
@@ -209,6 +337,7 @@
 
 <script src="/static/js/toast.js"></script>
 <script src="/static/js/handshake_admin.js"></script>
+<script src="{{ url_for('static', filename='js/musee_admin.js') }}"></script>
 <script>
   window.__userIsAdmin   = {{ "true" if "admin" in user_roles else "false" }};
   window.__userIsManager = {{ "true" if ("manager" in user_roles or "admin" in user_roles) else "false" }};

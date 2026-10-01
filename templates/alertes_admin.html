@@ -384,6 +384,11 @@
             Alerte quand le debit PREVU d'une porte atteint <b>threshold_pct</b> % de sa capacite
             dans les <b>horizon_min</b> minutes. Prevision = debit des 15 dernieres min x profil de la
             meme porte l'an dernier au meme jour de course. Une porte deja a son seuil alerte aussi (&laquo; des maintenant &raquo;).<br>
+            <b>capacity_mode</b> : <b>"securite"</b> (recommande) = agents de securite prevus au planning x <b>agent_rate_h</b> (350 /h),
+            postes rattaches aux portes par la bible (BIBLER, zone PORTES) ; l'alerte indique le renfort a prevoir.
+            Seules les portes pietonnes dotees d'agents sont surveillees. <b>renotify_min</b> (120) : une alerte par episode et par porte ;
+            <b>renotify_on_worse</b> (false) : re-alerter si le besoin grandit.
+            <b>"scan"</b> = capacite des tripodes / PDA (le goulet reel est la palpation : rejeu 2026, 3 % des fiches de renfort anticipees).<br>
             <b>horizon_min</b> (30) ; <b>threshold_pct</b> (90) ; <b>min_rate</b> (300 /h, jamais d'alerte en dessous) ;
             <b>window_min</b> (15) ; <b>trend_fallback</b> (false : sans N-1, extrapoler la tendance des 30 dernieres min,
             plus d'alertes mais 1 sur 4 seulement confirmee au rejeu 2026) et <b>trend_max_growth</b> (1.5) ;

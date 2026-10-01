@@ -416,9 +416,20 @@ def _process_iso_range(start_iso, end_iso, open_activity, close_activity,
     return [open_v, close_v]
 
 
+def _is_saison(event) -> bool:
+    """SAISON (main courante permanente du site) : reconnu par son nom, jamais
+    par ses dates (cf. event_courant.py)."""
+    return str(event or "").strip().upper() == "SAISON"
+
+
 def process_global_horaires(global_data, event, year, db=None):
     """Traitement hardcode de globalHoraires."""
     vignettes = []
+    if _is_saison(event):
+        # Le montage et le demontage appartiennent aux epreuves, jamais a la
+        # saison : on ignore ces cles meme si une saisie les a remplies.
+        global_data = {k: v for k, v in (global_data or {}).items()
+                       if k not in ("montage", "demontage")}
 
     # center
     vignettes += _process_schedule_list(
@@ -1039,7 +1050,13 @@ def update_timetable_document(event, year, vignettes, db=None):
                 items.append(v)
 
     # Nettoyage des orphelines : supprimer les vignettes origin=parametrage
-    # dont l'ID n'est pas dans le set genere
+    # dont l'ID n'est pas dans le set genere. Les vignettes manuelles et
+    # origin=momentus (programme du site, momentus_timeline.py) ne sont JAMAIS
+    # supprimees ici. SAISON : d'anciennes vignettes montage/demontage du
+    # parametrage ne sont plus generees (filtre en amont), elles partent donc.
+    # ⚠️ Lecture-reecriture du document entier : une ecriture momentus
+    # concurrente (quelques ms, une fois par heure) peut etre perdue ; la
+    # synchro suivante la retablit.
     for date_key in list(data_field.keys()):
         items = data_field[date_key]
         data_field[date_key] = [

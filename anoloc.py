@@ -205,6 +205,33 @@ def _get_field_tablets_by_group(db, event, year):
     return by_group
 
 
+def _field_tablets_seeing_pair_by_group(db, event, year):
+    """Comme _get_field_tablets_by_group, mais pour les tablettes pouvant
+    porter une fiche de event/year (field.devices_seeing_pair_filter), hors
+    tablettes d'epreuve terminee pas encore balayees."""
+    if not event or not year:
+        return {}
+    by_group = {}
+    try:
+        import field as _F
+        q = {"revoked": {"$ne": True}}
+        q.update(_F.devices_seeing_pair_filter(db, event, year))
+        cursor = list(db["field_devices"].find(q))
+    except Exception:
+        return _get_field_tablets_by_group(db, event, year)
+    for t in cursor:
+        gid = t.get("beacon_group_id")
+        if not gid:
+            continue
+        try:
+            if _F._device_expired(db, t):
+                continue
+        except Exception:
+            pass
+        by_group.setdefault(gid, []).append(t)
+    return by_group
+
+
 def _tablet_to_device(tablet):
     """Convertit un field_devices doc en structure compatible anoloc devices."""
     last_pos = tablet.get("last_position") or {}
@@ -443,10 +470,12 @@ def anoloc_vehicles_by_category():
                     "label": dev_labels.get(dev_id, dev_id),
                 })
 
-    # Fusion tablettes Field (pour event/year donnes) - independante d anoloc enabled
+    # Fusion tablettes Field qui voient event/year (field.device_pairs : leur
+    # appairage + les evenements actifs ; une tablette SAISON est proposee sur
+    # une epreuve active) - independante d anoloc enabled
     event = request.args.get("event")
     year = request.args.get("year")
-    tablets_by_group = _get_field_tablets_by_group(db, event, year)
+    tablets_by_group = _field_tablets_seeing_pair_by_group(db, event, year)
     cat_by_group = {
         g["id"]: g.get("pco_category")
         for g in (config.get("beacon_groups", []) or [])

@@ -28,10 +28,18 @@ def _match(doc, flt):
             if not any(_match(doc, sub) for sub in cond):
                 return False
             continue
+        if key == "$and":
+            if not all(_match(doc, sub) for sub in cond):
+                return False
+            continue
         val = _get(doc, key)
         if isinstance(cond, dict):
             for op, arg in cond.items():
                 if op == "$ne" and val == arg:
+                    return False
+                if op == "$in" and val not in arg:
+                    return False
+                if op == "$exists" and (val is not None) != bool(arg):
                     return False
                 if op == "$regex" and not re.search(arg, str(val or "")):
                     return False
@@ -231,9 +239,68 @@ class TestCategorieTablette:
         # ni Flux 1, ni la tablette revoquee, ni l'emetteur
         assert names == ["Elec", "Libre", "Tech 2"]
 
+    def test_sos_entre_saison_et_epreuve(self, env):
+        """Les tablettes non revoquees dont les evenements vus croisent ceux de
+        l'emetteur sont prevenues : une tablette SAISON recoit le SOS d'une
+        tablette d'epreuve. Une tablette d'epreuve terminee (pas encore
+        balayee) ne le recoit plus."""
+        import event_courant as EC
+        EC.invalidate()
+        db = env_fake_app["db"]
+        db["field_devices"].docs.extend([
+            {"_id": "dev7", "name": "Saison Secu", "event": "SAISON", "year": "2025",
+             "category": "PCO.Securite", "revoked": False},
+            {"_id": "dev8", "name": "Ancienne", "event": "X", "year": "2025",
+             "category": "PCO.Securite", "revoked": False},
+        ])
+        db["parametrages"].docs.append({"event": "X", "year": "2025", "data": {"globalHoraires": {
+            "demontage": {"end": "2025-06-15"}}}})
+        sender = db["field_devices"].find_one({"_id": "dev1"})
+        names = sorted(d["name"] for d in field._sos_recipients(db, sender))
+        assert names == ["Elec", "Libre", "Saison Secu", "Tech 2"]
+        # Et dans l'autre sens : la tablette SAISON previent l'epreuve
+        saison = db["field_devices"].find_one({"_id": "dev7"})
+        assert "Tech 2" in [d["name"] for d in field._sos_recipients(db, saison)]
+
     def test_admin_change_categorie(self, env):
         env_fake_app["mod"].CODING = True
         rep = env.post("/field/admin/devices/%s/category" % ("0" * 24),
                        json={"category": "PCO.Inconnue"})
         assert rep.status_code == 400
         assert rep.get_json()["error"] == "invalid_category"
+
+
+class TestPushVapid:
+    def test_cle_pkcs8_lue_par_pywebpush(self, monkeypatch):
+        pytest.importorskip("py_vapid")
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives import serialization
+        pem = ec.generate_private_key(ec.SECP256R1()).private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+        monkeypatch.setattr(field, "_VAPID_PRIVATE_KEY", pem.decode("utf-8"))
+        monkeypatch.setattr(field, "_VAPID_SIGNER", None)
+        signer = field._vapid_signer()
+        # Le texte PEM passe tel quel echouait ("Could not deserialize key data")
+        assert signer.sign({"aud": "https://web.push.apple.com", "sub": "https://cockpit.lemans.org",
+                            "exp": 9999999999})
+
+    def test_contact_valide_pour_apple(self, monkeypatch):
+        monkeypatch.setattr(field, "VAPID_CONTACT_EMAIL", "dev@cockpit.local")
+        assert field._vapid_subject() == "https://cockpit.lemans.org"
+        monkeypatch.setattr(field, "VAPID_CONTACT_EMAIL", "pcorg@lemans.org")
+        assert field._vapid_subject() == "mailto:pcorg@lemans.org"
+
+
+class TestReactivationApresFinEvenement:
+    def test_tablette_reactivee_apres_la_fin_reste_active(self, env, monkeypatch):
+        from datetime import datetime, timedelta, timezone
+        fin = datetime(2026, 9, 30, 18, tzinfo=timezone.utc)
+        monkeypatch.setattr(field, "_event_end_datetime", lambda *a: fin)
+        dev = {"event": "E", "year": "2026"}
+        # reactivee apres la fin : choix explicite de l'admin, pas de revocation
+        dev["restoredAt"] = (fin + timedelta(hours=10)).replace(tzinfo=None)
+        assert field._restored_after_event_end(None, dev)
+        # reactivee avant la fin (ou jamais) : l'expiration automatique s'applique
+        dev["restoredAt"] = (fin - timedelta(days=1)).replace(tzinfo=None)
+        assert not field._restored_after_event_end(None, dev)
+        assert not field._restored_after_event_end(None, {"event": "E", "year": "2026"})

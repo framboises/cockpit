@@ -16,7 +16,10 @@ from pymongo.errors import PyMongoError
 import dispatch_auto as DA
 import field
 
-NOW = datetime(2026, 9, 30, 10, 0, 0, tzinfo=timezone.utc)
+# Heure reelle (et non une date figee) : les tests de routes passent par le
+# vrai `now` du serveur, et une date figee finissait par rendre les tablettes
+# de test "silencieuses depuis plus de 15 min", donc jamais proposees.
+NOW = datetime.now(timezone.utc).replace(microsecond=0)
 FICHE_LAT, FICHE_LNG = 47.95, 0.21
 
 
@@ -37,10 +40,10 @@ def db(monkeypatch):
 
 
 def _dev(db, name, meters_north=0, category="PCO.Technique", metiers=None,
-         status="patrouille", pos_age_s=30, seen_age_s=10):
+         status="patrouille", pos_age_s=30, seen_age_s=10, event="E", year="2026"):
     lat = FICHE_LAT + meters_north / 111_000.0
     doc = {
-        "_id": ObjectId(), "name": name, "event": "E", "year": "2026", "revoked": False,
+        "_id": ObjectId(), "name": name, "event": event, "year": year, "revoked": False,
         "category": category, "metiers": metiers or [], "status": status,
         "last_seen": NOW - timedelta(seconds=seen_age_s),
         "last_position": {"lat": lat, "lng": FICHE_LNG, "ts": NOW - timedelta(seconds=pos_age_s)},
@@ -49,9 +52,11 @@ def _dev(db, name, meters_north=0, category="PCO.Technique", metiers=None,
     return doc
 
 
-def _fiche(db, fid="f1", urgence="UA", metier="Electricite", category="PCO.Technique"):
+def _fiche(db, fid="f1", urgence="UA", metier="Electricite", category="PCO.Technique",
+           event="E", year=2026, ts=None):
     db["pcorg"].insert_one({
-        "_id": fid, "event": "E", "year": 2026, "category": category,
+        "_id": fid, "event": event, "year": year, "category": category,
+        "ts": ts or NOW,
         "text": "panne", "niveau_urgence": urgence, "status_code": 0,
         "gps": {"type": "Point", "coordinates": [FICHE_LNG, FICHE_LAT]},
         "content_category": {"sous_classification": metier},
@@ -97,7 +102,8 @@ class TestConfig:
         assert cfg["mode"] == "urgency"          # valeur invalide ignoree
         assert cfg["levels"] == ["EU"]
         assert cfg["timeout_s"] == 10            # borne basse
-        assert cfg["managers"] == ["a@b.fr"]
+        # Les responsables viennent des groupes cockpit, plus de la config
+        assert "managers" not in cfg
 
 
 class TestCandidats:
@@ -245,7 +251,7 @@ class TestFileEtFin:
 
     def test_fin_resolue_clot_la_fiche(self, db):
         dev = self._engaged(db)
-        assert DA.finish(db, "f1", dev, "resolu", "ok") == (False, "compte_rendu_obligatoire")
+        assert DA.finish(db, "f1", dev, "resolu", "ok") == (False, "compte_rendu_obligatoire")   # 2 car. < 3
         assert DA.finish(db, "f1", dev, "resolu", "Disjoncteur rearme", now=NOW) == (True, "ok")
         fiche = db["pcorg"].find_one({"_id": "f1"})
         assert fiche["status_code"] == 10
@@ -342,3 +348,166 @@ def test_reengagement_libere_l_ancienne_unite(db):
     old = db["field_devices"].find_one({"_id": a["_id"]})
     assert old["status"] == "patrouille" and old["active_fiche_id"] is None
     assert db["field_devices"].find_one({"_id": b["_id"]})["active_fiche_id"] == "f1"
+
+
+class TestLibreService:
+    def test_disponibles_filtrees_par_metier_et_unite(self, db):
+        elec = _dev(db, "Elec", 100, metiers=["Electricite"])
+        _fiche(db, "f1", metier="Electricite")
+        _fiche(db, "f2", metier="Sanitaire")
+        _fiche(db, "f3", metier="Electricite")
+        db["pcorg"].update_one({"_id": "f3"}, {"$set": {"content_category.patrouille": "Autre"}})
+        ids = [m["id"] for m in DA.available_for_device(db, db["field_devices"].find_one({"_id": elec["_id"]}))]
+        assert ids == ["f1"]
+
+    def test_prise_en_charge_puis_deja_prise(self, db):
+        a = _dev(db, "A", 100)
+        b = _dev(db, "B", 200)
+        _fiche(db)
+        assert DA.self_assign(db, "f1", a, now=NOW) == (True, "ok")
+        fiche = db["pcorg"].find_one({"_id": "f1"})
+        assert fiche["content_category"]["patrouille"] == "A"
+        assert fiche["dispatch"]["assigned_by"] == "libre-service"
+        assert db["field_devices"].find_one({"_id": a["_id"]})["status"] == "intervention"
+        assert DA.self_assign(db, "f1", b, now=NOW) == (False, "deja_prise")
+
+    def test_unite_occupee_refusee(self, db):
+        busy = _dev(db, "Occupe", 100, status="intervention")
+        _fiche(db)
+        assert DA.self_assign(db, "f1", busy) == (False, "unite_occupee")
+
+    def test_annule_la_proposition_faite_a_une_autre(self, db):
+        a = _dev(db, "A", 100)
+        b = _dev(db, "B", 900)
+        _fiche(db)
+        DA.start(db, "f1", now=NOW)
+        assert _state(db)["current"]["device_name"] == "A"
+        assert DA.self_assign(db, "f1", b, now=NOW) == (True, "ok")
+        assert db["field_devices"].find_one({"_id": a["_id"]})["pending_proposal"] is None
+        assert db["pcorg"].find_one({"_id": "f1"})["content_category"]["patrouille"] == "B"
+
+    def test_disponibles_plus_recentes_et_bornees_a_30_jours(self, db):
+        dev = _dev(db, "A", 100)
+        _fiche(db, "vieille", ts=NOW - timedelta(days=40))
+        db["pcorg"].insert_many([{
+            "_id": "r%03d" % i, "event": "E", "year": 2026, "category": "PCO.Technique",
+            "niveau_urgence": "UA", "status_code": 0, "ts": NOW - timedelta(days=1, minutes=i),
+            "content_category": {}, "comment_history": [],
+        } for i in range(301)])
+        _fiche(db, "neuve", ts=NOW - timedelta(minutes=5))
+        ids = [m["id"] for m in DA.available_for_device(db, dev, limit=500, now=NOW)]
+        # Avant : tri croissant + limit(300) -> les 300 plus anciennes, la
+        # fiche neuve n'apparaissait jamais.
+        assert ids[0] == "neuve"
+        assert "vieille" not in ids
+        assert len(ids) == 300
+
+
+# ---------------------------------------------------------------------------
+# SAISON et epreuves simultanees (event_courant + field.device_pairs)
+# ---------------------------------------------------------------------------
+
+import event_courant as EC  # noqa: E402
+
+
+def _epreuve_active(db, event="E", year="2026"):
+    db["parametrages"].insert_one({"event": event, "year": year, "data": {"globalHoraires": {
+        "montage": {"start": (NOW - timedelta(days=2)).isoformat()},
+        "demontage": {"end": (NOW + timedelta(days=3)).isoformat()},
+    }}})
+    EC.invalidate()
+
+
+def _cands(db, fid="f1"):
+    return [c["device"]["_id"] for c in DA.find_candidates(db, db["pcorg"].find_one({"_id": fid}), now=NOW)]
+
+
+class TestSaisonEtEpreuves:
+    def setup_method(self):
+        EC.invalidate()
+
+    def test_tablette_saison_candidate_sur_epreuve_active(self, db):
+        _epreuve_active(db)
+        sai = _dev(db, "Saison", 100, event="SAISON", year=str(EC.saison_year(NOW)))
+        _fiche(db)
+        assert _cands(db) == [sai["_id"]]
+        assert DA.manual_assign(db, "f1", sai, "Chef", now=NOW)[0]
+
+    def test_tablette_saison_ignoree_hors_fenetre_de_l_epreuve(self, db):
+        sai = _dev(db, "Saison", 100, event="SAISON", year=str(EC.saison_year(NOW)))
+        _fiche(db)                                   # E/2026 sans fenetre active
+        assert _cands(db) == []
+        assert DA.manual_assign(db, "f1", sai, "Chef", now=NOW) == (False, "unite_invalide")
+        assert DA.self_assign(db, "f1", sai, now=NOW) == (False, "evenement_different")
+
+    def test_tablette_saison_d_une_annee_passee_vaut_saison_courant(self, db):
+        yr = EC.saison_year(NOW)
+        old = _dev(db, "Vieille", 100, event="SAISON", year=str(yr - 1))
+        assert field.device_home_pair(old, NOW) == (EC.SAISON, yr)
+        _fiche(db, event=EC.SAISON, year=yr)
+        assert _cands(db) == [old["_id"]]
+        assert [m["id"] for m in DA.available_for_device(db, old, now=NOW)] == ["f1"]
+        assert DA.self_assign(db, "f1", old, now=NOW) == (True, "ok")
+
+    def test_tablette_saison_jamais_revoquee_automatiquement(self, db):
+        assert field._sweep_event_if_ended(db, "SAISON", "2020") is False
+
+    def test_homonyme_appairee_sur_l_epreuve_prioritaire(self, db):
+        _epreuve_active(db)
+        epr = _dev(db, "Secu 1", 100)
+        _dev(db, "Secu 1", 50, event="SAISON", year=str(EC.saison_year(NOW)))
+        _fiche(db)
+        # Les noms ne sont uniques que par appairage : la fiche "Secu 1" de
+        # l'epreuve appartient a la tablette de l'epreuve.
+        assert _cands(db) == [epr["_id"]]
+        assert field.find_device_for_fiche(db, "Secu 1", "E", 2026)["_id"] == epr["_id"]
+
+    def test_engagement_par_nom_trouve_la_tablette_saison(self, db):
+        _epreuve_active(db)
+        sai = _dev(db, "Patrouille 7", 100, event="SAISON", year=str(EC.saison_year(NOW)))
+        assert field.find_device_for_fiche(db, "Patrouille 7", "E", 2026)["_id"] == sai["_id"]
+        EC.invalidate()
+        db["parametrages"].delete_many({})
+        EC.invalidate()
+        assert field.find_device_for_fiche(db, "Patrouille 7", "E", 2026) is None
+
+    def test_file_du_service_sur_tous_les_evenements_actifs(self, db, monkeypatch):
+        import sys
+        import types
+        from flask import Flask
+        fake = types.ModuleType("app")
+        fake.role_required = lambda role: (lambda f: f)
+        fake._user_dispatch_categories = lambda u: ["PCO.Technique"]
+        fake._user_can_edit_fiche = lambda u: False
+        fake._user_can_create_fiche = lambda u: True
+        monkeypatch.setitem(sys.modules, "app", fake)
+        monkeypatch.setattr(DA, "_app_db", lambda: db)
+        app = Flask(__name__)
+        app.register_blueprint(DA.dispatch_bp)
+        client = app.test_client()
+
+        _epreuve_active(db)
+        yr = EC.saison_year(NOW)
+        _dev(db, "Saison", 100, event="SAISON", year=str(yr))
+        _fiche(db, "epr")
+        _fiche(db, "sai", event=EC.SAISON, year=yr)
+        _fiche(db, "sai_vieille", event=EC.SAISON, year=yr, ts=NOW - timedelta(days=45))
+        _fiche(db, "autre", event="Z", year=2026)
+
+        d = client.get("/api/dispatch/board").get_json()
+        assert sorted(f["id"] for f in d["fiches"]) == ["epr", "sai"]
+        assert d["older_open"] == 1 and d["multi_event"] is True
+        assert d["current"] == {"event": "E", "year": 2026}
+        assert [u["name"] for u in d["units"]] == ["Saison"]
+        # Filtre optionnel
+        d = client.get("/api/dispatch/board?event=E&year=2026").get_json()
+        assert [f["id"] for f in d["fiches"]] == ["epr"] and d["filtered"] is True
+
+    def test_creation_depuis_la_tablette_suit_la_bascule(self, db):
+        sai = _dev(db, "Saison", 100, event="SAISON", year=str(EC.saison_year(NOW)))
+        epr = _dev(db, "Epr", 100)
+        assert field.fiche_target_event(db, sai) == (EC.SAISON, EC.saison_year(NOW))
+        assert field.fiche_target_event(db, epr) == (EC.SAISON, EC.saison_year(NOW))
+        _epreuve_active(db)
+        assert field.fiche_target_event(db, sai) == ("E", 2026)
+        assert field.fiche_target_event(db, epr) == ("E", 2026)

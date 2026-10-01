@@ -7,13 +7,15 @@ import hmac
 import logging
 import uuid
 import subprocess
+import hashlib
+import time
 import jwt
 from datetime import datetime, timedelta, timezone
 
 # Third-party imports
 from flask import (
     Flask, Blueprint, jsonify, render_template, send_from_directory, request,
-    redirect, url_for, flash, session, abort, make_response
+    redirect, url_for, flash, session, abort, make_response, g
 )
 from flask_cors import CORS
 from flask_wtf.csrf import CSRFProtect, CSRFError
@@ -43,7 +45,9 @@ from meteo import meteo_bp
 from pmv import pmv_bp
 from pcorg_assist import pcorg_assist_bp
 import dispatch_auto as DA
+import event_courant as EC
 from momentus_api import momentus_bp
+from musee_api import musee_bp
 from ai_reports import ai_reports_bp
 from alert_ai import alert_ai_bp
 import pcorg_summary
@@ -188,6 +192,11 @@ COL_GROUPS.update_one(
     }},
     upsert=True
 )
+# Droit "Creer des fiches" (can_create_fiche) introduit le 30/09/2026 : tous
+# les groupes existants creaient deja, ils le recoivent une fois pour ne rien
+# retirer a personne. Un groupe cree ensuite part sans (droit explicite).
+COL_GROUPS.update_many({"can_create_fiche": {"$exists": False}},
+                       {"$set": {"can_create_fiche": True}})
 
 # Seed des definitions d'alertes
 _ALERT_SEEDS = [
@@ -407,7 +416,8 @@ def role_required(required_role):
                     "lastname": "WAYNE",
                     "email": "bruce@wayneenterprise.com"
                 }
-                if sim_level < ROLE_HIERARCHY.get(required_role, 0):
+                if sim_level < ROLE_HIERARCHY.get(required_role, 0) and not (
+                        required_role == "admin" and request_admin_grant(request.user_payload)):
                     flash(f"Acces interdit : cette fonctionnalite requiert un role '{required_role}'.", "error")
                     return redirect(request.referrer or "/")
                 return f(*args, **kwargs)
@@ -442,7 +452,12 @@ def role_required(required_role):
             effective_role = "admin" if is_super_admin else app_role
             max_user_role_level = ROLE_HIERARCHY.get(effective_role, 0)
 
-            if max_user_role_level < ROLE_HIERARCHY.get(required_role, 0):
+            # Page d'administration accordee par un groupe (ADMIN_PAGE_REGISTRY)
+            granted = (max_user_role_level < ROLE_HIERARCHY.get(required_role, 0)
+                       and required_role == "admin"
+                       and request_admin_grant(dict(payload, app_role=effective_role,
+                                                    is_super_admin=is_super_admin)))
+            if max_user_role_level < ROLE_HIERARCHY.get(required_role, 0) and not granted:
                 flash(f"Accès interdit : cette fonctionnalité requiert un rôle '{required_role}'.", "error")
                 return redirect(request.referrer or "/")
 
@@ -487,25 +502,174 @@ def role_required(required_role):
 
 BLOCK_REGISTRY = {
     "widget-traffic":   {"label": "Trafic",            "default_column": "left"},
-    "widget-comms":     {"label": "Communications",    "default_column": "left"},
+    # Libelles = titres affiches sur la page d'accueil (index.html), pour que
+    # la fiche d'un groupe parle le meme langage que l'ecran.
+    "widget-comms":     {"label": "Main courante",     "default_column": "left"},
     "widget-parkings":  {"label": "Temps d'acces",     "default_column": "left"},
     "status-card":      {"label": "Statut evenement",  "default_column": None},
-    "widget-counters":  {"label": "Compteurs",         "default_column": "right"},
-    "widget-right-1":   {"label": "Meteo detail",      "default_column": "right"},
+    "widget-counters":  {"label": "Controle d'acces",  "default_column": "right"},
+    "widget-musee":     {"label": "Musee",             "default_column": "right"},
+    "widget-right-1":   {"label": "Meteo",             "default_column": "right"},
     "widget-right-2":   {"label": "Affluence",         "default_column": "right"},
     "widget-right-3":   {"label": "Alertes",           "default_column": "right"},
-    "widget-right-4":   {"label": "Ressources",        "default_column": "right"},
+    "widget-right-4":   {"label": "Suivi GPS",         "default_column": "right"},
     "meteo-previsions": {"label": "Meteo bandeau",     "default_column": None},
     "timeline-main":    {"label": "Timeline",          "default_column": None},
     "map-main":         {"label": "Carte",             "default_column": None},
 }
 ALL_BLOCK_IDS = list(BLOCK_REGISTRY.keys())
+
+# Pages de la barre laterale qu'un groupe peut autoriser une par une
+# (cockpit_groups.allowed_pages : None = toutes). Le role reste exige EN PLUS :
+# une page manager n'est jamais ouverte a un simple user par un groupe. Les
+# pages admin n'y figurent pas : le role admin voit tout, les groupes ne le
+# restreignent pas. `paths` : prefixes controles cote serveur (avant_requete) ;
+# "/" est exact. Sans chemin (Assistant IA) : seul le bouton est masque.
+PAGE_REGISTRY = [
+    {"id": "cockpit",      "label": "Cockpit (accueil)",  "icon": "dashboard",       "role": "user",    "paths": ["/"]},
+    {"id": "portes",       "label": "Portes",             "icon": "door_front",      "role": "user",    "paths": ["/doors"]},
+    {"id": "parkings",     "label": "Parkings",           "icon": "local_parking",   "role": "user",    "paths": ["/terrains"]},
+    {"id": "statistiques", "label": "Statistiques",       "icon": "insert_chart",    "role": "user",    "paths": ["/general_stat"]},
+    {"id": "wiki",         "label": "Wiki procedures",    "icon": "menu_book",       "role": "user",    "paths": ["/wiki"]},
+    {"id": "dispatch",     "label": "File du service",    "icon": "assignment_ind",  "role": "user",    "paths": ["/dispatch-service", "/api/dispatch/board"]},
+    {"id": "assistant_ia", "label": "Assistant IA",       "icon": "smart_toy",       "role": "manager", "paths": []},
+    {"id": "circulation",  "label": "Circulation",        "icon": "moving",          "role": "manager", "paths": ["/circulation"]},
+    {"id": "meteo_mur",    "label": "Mur meteo",          "icon": "radar",           "role": "manager", "paths": ["/meteo-mur"]},
+    {"id": "pmv",          "label": "PMV",                "icon": "signpost",        "role": "manager", "paths": ["/pmv", "/api/pmv"]},
+]
+ALL_PAGE_IDS = [p["id"] for p in PAGE_REGISTRY]
+
+# Pages d'ADMINISTRATION accordables a un groupe (cockpit_groups.admin_pages),
+# TOUJOURS explicitement : un groupe sans restriction de pages n'en recoit
+# aucune. Chaque page embarque les routes admin qu'elle appelle, sinon elle
+# s'ouvrirait et tous ses appels echoueraient en 403. `(methode, prefixe)` =
+# prefixe accorde pour cette seule methode (lecture de la liste des groupes).
+# ⚠️ Configuration (/config/todos : groupes, utilisateurs, fusion...) n'y est
+# PAS : l'accorder permettrait a n'importe qui de se donner tous les droits.
+ADMIN_PAGE_REGISTRY = [
+    {"id": "live_controle",  "label": "Controle acces",  "icon": "sensors",
+     "paths": ["/live-controle", "/api/live-controle"]},
+    {"id": "field_dispatch", "label": "Field dispatch",  "icon": "tablet_android",
+     "paths": ["/field-dispatch", "/field/admin", "/api/alfred", "/api/whatsapp",
+               "/api/dispatch/config", "/api/admin/routing-overrides"]},
+    {"id": "scan_report",    "label": "Rapport scans",   "icon": "qr_code_scanner",
+     "paths": ["/scan-report"]},
+    {"id": "analyse_ops",    "label": "Analyse Ops",     "icon": "biotech",
+     "paths": ["/analyse-ops", "/api/analyse-ops"]},
+    {"id": "lapi",           "label": "LAPI",            "icon": "directions_car",
+     "paths": ["/anpr", "/api/anpr", "/api/anpr-watchlist"]},
+    {"id": "alertes",        "label": "Alertes",         "icon": "notifications_active",
+     "paths": ["/admin/alertes", "/api/alert-definitions", "/api/camera-event-types",
+               "/api/cameras-list", "/api/anpr-watchlist", "/api/hik-events-stream",
+               ("GET", "/api/groups")]},
+    {"id": "wiki_admin",     "label": "Wiki (admin)",    "icon": "edit_note",
+     "paths": ["/admin/wiki", "/api/wiki/admin"]},
+    {"id": "cameras",        "label": "Cameras",         "icon": "videocam",
+     "paths": ["/cameras", "/api/cameras"]},
+    {"id": "montre",         "label": "Montre",          "icon": "watch",
+     "paths": ["/watch-admin", "/api/v1/watch/admin"]},
+]
+ALL_ADMIN_PAGE_IDS = [p["id"] for p in ADMIN_PAGE_REGISTRY]
+
+
+def _path_matches(path, pref):
+    return path == pref or path.startswith(pref + "/")
+
+
+def _admin_pages_for_path(path, method):
+    """Pages d'administration dont releve ce chemin (plusieurs possibles :
+    la liste de surveillance LAPI sert a LAPI et a Alertes)."""
+    out = []
+    for p in ADMIN_PAGE_REGISTRY:
+        for spec in p["paths"]:
+            if isinstance(spec, tuple):
+                meth, pref = spec
+                if method != meth:
+                    continue
+            else:
+                pref = spec
+            if _path_matches(path, pref):
+                out.append(p["id"])
+                break
+    return out
+
+
+def _parse_admin_pages(raw):
+    if not isinstance(raw, list):
+        return []
+    return [p for p in ALL_ADMIN_PAGE_IDS if p in raw]
+
+
+def _page_for_path(path):
+    for p in PAGE_REGISTRY:
+        for pref in p["paths"]:
+            if pref == "/":
+                if path == "/":
+                    return p
+            elif path == pref or path.startswith(pref + "/"):
+                return p
+    return None
+
+
+def _parse_allowed_pages(raw):
+    """Liste de pages autorisees ; None si non-liste ou toutes cochees."""
+    if not isinstance(raw, list):
+        return None
+    pages = [p for p in ALL_PAGE_IDS if p in raw]
+    return None if len(pages) == len(ALL_PAGE_IDS) else pages
 MOVABLE_BLOCK_IDS = [bid for bid, info in BLOCK_REGISTRY.items() if info.get("default_column")]
 
 DEFAULT_LAYOUT = {
     "left":  [bid for bid, info in BLOCK_REGISTRY.items() if info.get("default_column") == "left"],
     "right": [bid for bid, info in BLOCK_REGISTRY.items() if info.get("default_column") == "right"],
 }
+
+def _admin_display_group():
+    return COL_GROUPS.find_one({"name": ADMIN_GROUP_NAME}) or {}
+
+
+def get_user_display_blocks(payload):
+    """Blocs AFFICHES sur l'accueil (set ou None = tous). Pour un admin : les
+    preferences d'affichage du groupe __admin__ (01/10/2026 ; avant, un admin
+    voyait toujours tout). Ce n'est PAS un droit : get_user_allowed_blocks reste
+    None pour un admin, qui garde l'acces a toutes les API de blocs."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        ab = _admin_display_group().get("allowed_blocks")
+        return set(ab) if ab else None
+    return get_user_allowed_blocks(payload)
+
+
+def _parse_saison_only_blocks(raw):
+    """Blocs 'seulement en SAISON' d'un groupe : liste d'IDs connus."""
+    if not isinstance(raw, list):
+        return []
+    return [b for b in raw if isinstance(b, str) and b in BLOCK_REGISTRY]
+
+
+def get_user_saison_only_blocks(payload):
+    """Blocs de l'accueil masques quand le poste est sur une epreuve (affiches
+    seulement sur SAISON). Reglage de la fiche groupe (bascule SAISON de chaque
+    bloc) ; admin : groupe __admin__. Plusieurs groupes : un bloc est reserve a
+    SAISON des qu'un de ses groupes le demande. Affichage seulement, pas un droit."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return list(_admin_display_group().get("saison_only_blocks") or [])
+    user_doc = db['users'].find_one({"email": payload.get("email", "")}, {"_id": 1})
+    groups = []
+    if user_doc:
+        ug = COL_USER_GROUPS.find_one({"user_id": user_doc["_id"]})
+        gids = (ug.get("groups") or []) if ug else []
+        if gids:
+            groups = list(COL_GROUPS.find({"_id": {"$in": gids}}, {"saison_only_blocks": 1}))
+    if not groups:
+        dg = COL_GROUPS.find_one({"name": DEFAULT_GROUP_NAME}, {"saison_only_blocks": 1})
+        groups = [dg] if dg else []
+    out = []
+    for g in groups:
+        for b in g.get("saison_only_blocks") or []:
+            if b not in out:
+                out.append(b)
+    return out
+
 
 def get_user_allowed_blocks(payload):
     """Retourne set() de block IDs autorises, ou None si aucune restriction."""
@@ -540,8 +704,12 @@ def _get_default_blocks():
     return set(ab)
 
 def get_user_block_layout(payload):
-    """Retourne dict {left: [...], right: [...]} ou None (= layout par defaut)."""
+    """Retourne dict {left: [...], right: [...]} ou None (= layout par defaut).
+    Admin : disposition du groupe __admin__ (reglable depuis /edit)."""
     if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        bl = _admin_display_group().get("block_layout")
+        if bl and isinstance(bl, dict) and ("left" in bl or "right" in bl):
+            return bl
         return None
     email = payload.get("email", "")
     user_doc = db['users'].find_one({"email": email}, {"_id": 1})
@@ -596,6 +764,217 @@ def _user_can_close_fiche(payload):
     if not group_ids:
         return False
     return COL_GROUPS.count_documents({"_id": {"$in": group_ids}, "can_close_fiche": True}) > 0
+
+def _user_group_docs(payload):
+    """Groupes cockpit de l'utilisateur (liste vide s'il n'en a aucun)."""
+    email = payload.get("email", "")
+    user_doc = db['users'].find_one({"email": email}, {"_id": 1}) if email else None
+    if not user_doc:
+        return []
+    ug = COL_USER_GROUPS.find_one({"user_id": user_doc["_id"]})
+    group_ids = (ug.get("groups") or []) if ug else []
+    if not group_ids:
+        return []
+    return list(COL_GROUPS.find({"_id": {"$in": group_ids}}))
+
+
+def _user_allowed_pages(payload):
+    """Pages de la barre laterale ouvertes a l'utilisateur (None = toutes).
+    Union des groupes ; un groupe sans restriction ouvre tout ; sans groupe,
+    celles du groupe par defaut. Admin : toutes."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return None
+    groups = _user_group_docs(payload)
+    if not groups:
+        dg = COL_GROUPS.find_one({"name": DEFAULT_GROUP_NAME}, {"allowed_pages": 1}) or {}
+        return dg.get("allowed_pages")
+    allowed = set()
+    for g in groups:
+        ap = g.get("allowed_pages")
+        if ap is None:
+            return None
+        allowed.update(ap)
+    return [p for p in ALL_PAGE_IDS if p in allowed]
+
+
+def _user_admin_pages(payload):
+    """Pages d'administration accordees a l'utilisateur par ses groupes
+    (sans groupe : celles du groupe par defaut). Toutes pour un admin."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return list(ALL_ADMIN_PAGE_IDS)
+    groups = _user_group_docs(payload)
+    if not groups:
+        dg = COL_GROUPS.find_one({"name": DEFAULT_GROUP_NAME}, {"admin_pages": 1}) or {}
+        groups = [dg]
+    granted = set()
+    for grp in groups:
+        granted.update(grp.get("admin_pages") or [])
+    return [p for p in ALL_ADMIN_PAGE_IDS if p in granted]
+
+
+def request_admin_grant(payload):
+    """Vrai si la requete courante vise une page d'administration accordee a
+    l'utilisateur par un de ses groupes. Appelee la ou le role admin est exige
+    (role_required, field.admin_required, _check_admin des blueprints, montre)
+    pour laisser passer un non-admin sur SES pages accordees seulement.
+    Exige un role cockpit : un compte sans acces a l'app ne passe jamais."""
+    if not payload or not payload.get("email"):
+        return False
+    role = (payload.get("roles_by_app") or {}).get(APP_KEY) or payload.get("app_role")
+    if not role and not payload.get("is_super_admin"):
+        return False
+    pages = _admin_pages_for_path(request.path, request.method)
+    if not pages:
+        return False
+    try:
+        granted = _user_admin_pages(payload)
+    except Exception:
+        return False
+    return any(p in granted for p in pages)
+
+
+def _request_payload_peek():
+    """Payload JWT de la requete courante sans rediriger (None si absent ou
+    invalide : la route elle-meme gerera l'authentification). Meme calcul de
+    role que role_required. Memorise dans g pour la requete."""
+    if hasattr(g, "_payload_peek"):
+        return g._payload_peek
+    payload = None
+    if CODING:
+        sim = request.args.get("as", "admin")
+        payload = {"email": "bruce@wayneenterprise.com",
+                   "app_role": sim if sim in ROLE_HIERARCHY else "admin", "is_super_admin": False}
+    else:
+        token = request.cookies.get("access_token")
+        if token:
+            try:
+                p = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+                is_sa = SUPER_ADMIN_ROLE in (p.get("global_roles") or [])
+                p["is_super_admin"] = is_sa
+                p["app_role"] = "admin" if is_sa else (p.get("roles_by_app") or {}).get(APP_KEY)
+                payload = p
+            except Exception:
+                payload = None
+    g._payload_peek = payload
+    return payload
+
+
+def _page_allowed_for_request(page_id):
+    payload = _request_payload_peek()
+    if payload is None:
+        return True
+    if not hasattr(g, "_allowed_pages"):
+        try:
+            g._allowed_pages = _user_allowed_pages(payload)
+        except Exception:
+            g._allowed_pages = None
+    allowed = g._allowed_pages
+    return allowed is None or page_id in allowed
+
+
+@app.before_request
+def _enforce_page_access():
+    """Pages autorisees par groupe (Configuration > Groupes > Pages). Ne
+    s'applique qu'aux chemins du registre PAGE_REGISTRY ; l'authentification
+    et le role restent l'affaire de role_required."""
+    page = _page_for_path(request.path)
+    if not page or _page_allowed_for_request(page["id"]):
+        return None
+    if request.path.startswith("/api/"):
+        return jsonify({"ok": False, "error": "page_non_autorisee"}), 403
+    allowed = g._allowed_pages or []
+    for p in PAGE_REGISTRY:
+        if p["id"] in allowed and p["paths"] and not p["paths"][0].startswith("/api/"):
+            if p["paths"][0] != request.path:
+                return redirect(p["paths"][0])
+    return ("<p style='font-family:sans-serif;padding:24px'>Aucune page Cockpit n'est "
+            "ouverte a votre groupe. Contactez un administrateur.</p>"), 403
+
+
+def _admin_page_allowed_for_request(page_id):
+    payload = _request_payload_peek()
+    if payload is None:
+        return False
+    if not hasattr(g, "_admin_pages"):
+        try:
+            g._admin_pages = _user_admin_pages(payload)
+        except Exception:
+            g._admin_pages = []
+    return page_id in g._admin_pages
+
+
+@app.context_processor
+def _inject_page_access():
+    """page_allowed('<id>') / admin_page_allowed('<id>') dans les gabarits
+    (barre laterale)."""
+    return {"page_allowed": _page_allowed_for_request,
+            "admin_page_allowed": _admin_page_allowed_for_request}
+
+
+def _user_dispatch_categories(payload):
+    """Categories dont l'utilisateur est responsable de service (page
+    /dispatch-service) : celles des groupes coches "Responsable de service",
+    toutes si le groupe ne restreint pas ses categories. Admin : toutes."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return list(ALL_PCO_CATEGORIES)
+    cats = []
+    for g in _user_group_docs(payload):
+        if not g.get("dispatch_manager"):
+            continue
+        allowed = g.get("allowed_categories")
+        for c in (allowed if allowed else ALL_PCO_CATEGORIES):
+            if c not in cats:
+                cats.append(c)
+    return cats
+
+
+def _pcorg_created_by(payload, doc):
+    """Vrai si la fiche a ete creee dans Cockpit par cet utilisateur."""
+    email = str(payload.get("email") or "").strip().lower()
+    return bool(email) and str((doc or {}).get("operator_id_create") or "").strip().lower() == email
+
+
+def _user_can_edit_fiche(payload, doc=None):
+    """Modifier les elements d'une fiche (description, categorie, urgence,
+    position...). Un groupe "Fiches en lecture seule" ne modifie que les
+    fiches creees par l'utilisateur lui-meme. Les droits des groupes
+    s'additionnent : un seul groupe sans lecture seule suffit.
+    Sans `doc` : droit general (affichage), sans l'exception "mes fiches"."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return True
+    groups = _user_group_docs(payload)
+    if not groups or any(not g.get("fiche_lecture_seule") for g in groups):
+        return True
+    return doc is not None and _pcorg_created_by(payload, doc)
+
+
+def _user_can_create_fiche(payload):
+    """Creer une fiche (assistant complet, creation rapide, File du service).
+    Droit de groupe `can_create_fiche` ; sans groupe, celui du groupe par
+    defaut. Les groupes anterieurs au droit l'ont recu a la migration."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return True
+    groups = _user_group_docs(payload)
+    if not groups:
+        default_group = COL_GROUPS.find_one({"name": DEFAULT_GROUP_NAME}, {"can_create_fiche": 1})
+        return bool((default_group or {}).get("can_create_fiche", True))
+    return any(g.get("can_create_fiche") for g in groups)
+
+
+_PCORG_CREATE_ERROR = ({"error": "Votre groupe ne permet pas de creer des fiches",
+                        "code": "creation_interdite"}, 403)
+
+
+def _user_can_close_fiche_cat(payload, category):
+    """Cloture : droit "Cloturer des fiches" de groupe, ou responsable de
+    service de la categorie de la fiche."""
+    return _user_can_close_fiche(payload) or category in _user_dispatch_categories(payload)
+
+
+_PCORG_READONLY_ERROR = ({"error": "Votre groupe ne permet de modifier que les fiches que "
+                                   "vous avez creees (sur les autres : action et cloture uniquement)",
+                          "code": "lecture_seule"}, 403)
+
 
 def _parse_allowed_categories(raw):
     if not isinstance(raw, list):
@@ -676,7 +1055,7 @@ def index():
     user_firstname = payload.get("firstname", "")
     user_lastname = payload.get("lastname", "")
     user_email = payload.get("email", "")
-    allowed = get_user_allowed_blocks(payload)
+    allowed = get_user_display_blocks(payload)
     allowed_blocks_json = json.dumps(list(allowed) if allowed is not None else None)
     # Recuperer les groupes (nom + couleur) de l'utilisateur pour les pillules header
     user_group_pills = []
@@ -702,10 +1081,14 @@ def index():
                            user_email=user_email,
                            allowed_blocks_json=allowed_blocks_json,
                            block_layout_json=block_layout_json,
+                           saison_only_blocks_json=json.dumps(get_user_saison_only_blocks(payload)),
                            user_groups_json=user_groups_json,
                            user_fiche_simplifiee_json=json.dumps(user_fiche_simplifiee),
                            user_allowed_categories_json=json.dumps(get_user_allowed_categories(payload)),
-                           user_can_close_fiche_json=json.dumps(_user_can_close_fiche(payload)))
+                           user_can_close_fiche_json=json.dumps(_user_can_close_fiche(payload)),
+                           user_can_edit_fiche_json=json.dumps(_user_can_edit_fiche(payload)),
+                           user_dispatch_categories_json=json.dumps(_user_dispatch_categories(payload)),
+                           user_can_create_fiche_json=json.dumps(_user_can_create_fiche(payload)))
 
 @app.route('/api/csrf-token', methods=['GET'])
 @role_required("user")
@@ -735,6 +1118,36 @@ def page_not_found(e):
 def get_events():
     events = list(db['evenement'].find({}, {'_id': 0, 'nom': 1}))
     return jsonify(events)
+
+
+@app.route('/api/event/current', methods=['GET'])
+@role_required("user")
+def api_event_current():
+    """Evenement du jour (epreuve active sinon SAISON) et liste des actifs.
+    Source unique : event_courant.py."""
+    return jsonify(EC.payload(db))
+
+
+@app.route('/api/event/priority', methods=['PUT'])
+@role_required("admin")
+def api_event_priority():
+    """Choix GLOBAL de l'epreuve prioritaire quand plusieurs sont actives.
+    Body {event, year}. Ne deplace aucune fiche : seules les nouvelles fiches,
+    la selection par defaut des postes et les rapports suivent ce choix."""
+    data = request.get_json(silent=True) or {}
+    event = (data.get("event") or "").strip()
+    try:
+        year = int(data.get("year"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "year_invalide"}), 400
+    if not event or EC.is_saison(event):
+        return jsonify({"ok": False, "error": "evenement_invalide"}), 400
+    if not any(w["event"] == event and int(w["year"]) == year for w in EC.windows(db)):
+        return jsonify({"ok": False, "error": "epreuve_inconnue"}), 404
+    user = getattr(request, "user_payload", None) or {}
+    who = " ".join(x for x in (user.get("firstname"), user.get("lastname")) if x) or user.get("email")
+    EC.set_priority(db, event, year, user=who)
+    return jsonify({"ok": True, **EC.payload(db)})
 
 # Route pour servir les tuiles locales
 @app.route('/tiles/<z>/<x>/<y>.png')
@@ -1946,6 +2359,10 @@ app.register_blueprint(DA.dispatch_bp)
 # Reservations Momentus par lieu de la carte (momentus_api.py). GET user,
 # lecture seule des collections momentus_* (synchro momentus_sync.py).
 app.register_blueprint(momentus_bp)
+# Bloc Musee de l'accueil (musee_api.py) : GET user + bloc widget-musee,
+# lecture seule des collections musee_* (collecte scripts/musee_collect.py,
+# autonome du live-controle).
+app.register_blueprint(musee_bp)
 # Briefing de situation (manager) et RETEX de fin d'edition (admin), cf.
 # ai_reports.py. CSRF ACTIF sur les POST (ai_reports.js envoie X-CSRFToken).
 app.register_blueprint(ai_reports_bp)
@@ -3637,7 +4054,7 @@ def field_dispatch_page():
 @app.route('/api/my-permissions', methods=['GET'])
 @role_required("user")
 def get_my_permissions():
-    allowed = get_user_allowed_blocks(request.user_payload)
+    allowed = get_user_display_blocks(request.user_payload)
     return jsonify({
         "allowed_blocks": list(allowed) if allowed is not None else None,
         "all_blocks": ALL_BLOCK_IDS
@@ -3650,6 +4067,17 @@ def get_block_registry():
         {"id": bid, "label": info["label"], "default_column": info.get("default_column")}
         for bid, info in BLOCK_REGISTRY.items()
     ])
+
+@app.route('/api/page-registry', methods=['GET'])
+@role_required("admin")
+def get_page_registry():
+    """Pages de la barre laterale autorisables par groupe (fiche groupe) :
+    pages courantes (role user/manager) puis pages d'administration (role
+    "admin", accord explicite)."""
+    pages = [{k: p[k] for k in ("id", "label", "icon", "role")} for p in PAGE_REGISTRY]
+    pages += [{"id": p["id"], "label": p["label"], "icon": p["icon"], "role": "admin"}
+              for p in ADMIN_PAGE_REGISTRY]
+    return jsonify(pages)
 
 @app.route('/api/pco-category-registry', methods=['GET'])
 @role_required("admin")
@@ -3838,8 +4266,14 @@ def create_group():
         'allowed_blocks': allowed_blocks,
         'traffic_alerts': traffic_alerts,
         'block_layout': block_layout,
+        'saison_only_blocks': _parse_saison_only_blocks(data.get('saison_only_blocks')),
         'fiche_simplifiee': bool(data.get('fiche_simplifiee', False)),
         'can_close_fiche': bool(data.get('can_close_fiche', False)),
+        'dispatch_manager': bool(data.get('dispatch_manager', False)),
+        'fiche_lecture_seule': bool(data.get('fiche_lecture_seule', False)),
+        'can_create_fiche': bool(data.get('can_create_fiche', False)),
+        'allowed_pages': _parse_allowed_pages(data.get('allowed_pages')),
+        'admin_pages': _parse_admin_pages(data.get('admin_pages')),
         'allowed_categories': _parse_allowed_categories(data.get('allowed_categories')),
         'createdAt': datetime.now(timezone.utc),
         'updatedAt': datetime.now(timezone.utc),
@@ -3865,7 +4299,9 @@ def update_group(gid):
         patch['description'] = (data['description'] or '').strip()
     if 'color' in data:
         patch['color'] = (data['color'] or '').strip()
-    if 'allowed_blocks' in data and not is_admin_grp:
+    # Groupe __admin__ : blocs et disposition = preferences d'AFFICHAGE des
+    # admins (get_user_display_blocks), sans effet sur leurs droits.
+    if 'allowed_blocks' in data:
         raw_blocks = data['allowed_blocks']
         if isinstance(raw_blocks, list):
             filtered = [b for b in raw_blocks if b in BLOCK_REGISTRY]
@@ -3878,7 +4314,9 @@ def update_group(gid):
             patch['traffic_alerts'] = [a for a in raw_alerts if isinstance(a, str)] or None
         else:
             patch['traffic_alerts'] = None
-    if 'block_layout' in data and not is_admin_grp:
+    if 'saison_only_blocks' in data:
+        patch['saison_only_blocks'] = _parse_saison_only_blocks(data['saison_only_blocks'])
+    if 'block_layout' in data:
         raw_layout = data['block_layout']
         if isinstance(raw_layout, dict):
             bl = {
@@ -3894,6 +4332,16 @@ def update_group(gid):
         patch['allowed_categories'] = _parse_allowed_categories(data.get('allowed_categories'))
     if 'can_close_fiche' in data:
         patch['can_close_fiche'] = bool(data.get('can_close_fiche', False))
+    if 'dispatch_manager' in data:
+        patch['dispatch_manager'] = bool(data.get('dispatch_manager', False))
+    if 'fiche_lecture_seule' in data:
+        patch['fiche_lecture_seule'] = bool(data.get('fiche_lecture_seule', False))
+    if 'can_create_fiche' in data:
+        patch['can_create_fiche'] = bool(data.get('can_create_fiche', False))
+    if 'allowed_pages' in data and not is_admin_grp:
+        patch['allowed_pages'] = _parse_allowed_pages(data.get('allowed_pages'))
+    if 'admin_pages' in data and not is_admin_grp:
+        patch['admin_pages'] = _parse_admin_pages(data.get('admin_pages'))
     if not patch:
         return jsonify({"error": "Rien a modifier"}), 400
     patch['updatedAt'] = datetime.now(timezone.utc)
@@ -4912,6 +5360,7 @@ def run_merge_manual():
 ################################################################################
 
 import pcorg_history as PH  # noqa: E402  parsing, fusion SQL/Cockpit, chronologie
+import pcorg_assist as PCA  # noqa: E402  search_terms / ensure_text_index (recherche $text)
 from pymongo.errors import DuplicateKeyError  # noqa: E402
 
 
@@ -4923,22 +5372,33 @@ def _pcorg_operator(user):
     return f"{user.get('firstname', '')} {user.get('lastname', '')}".strip()
 
 
-def _pcorg_cat_query(payload):
+# Fiches PC Securite (Prysm, PCS.*) : la main courante SAISON les affiche aussi
+# (01/10/2026) - hors epreuve ce sont la quasi-totalite des fiches. Un groupe
+# restreint les voit selon la categorie PCO equivalente.
+PCS_EQUIVALENT = {"PCS.Surete": "PCO.Securite", "PCS.Information": "PCO.Information"}
+
+
+def _pcorg_cat_query(payload, event=None):
     """Filtre Mongo sur la categorie selon les droits du groupe.
 
     Les categories autorisees n'etaient filtrees que dans le widget cote
     navigateur : le panneau elargi, la recherche, le detail et toutes les
-    ecritures les ignoraient.
+    ecritures les ignoraient. En SAISON, les fiches PCS.* sont incluses.
     """
+    with_pcs = EC.is_saison(event)
     allowed = get_user_allowed_categories(payload)
     if allowed is None:
-        return {"$regex": "^PCO"}
-    return {"$in": [c for c in allowed if c.startswith("PCO.")]}
+        return {"$regex": "^PC[OS]\\." if with_pcs else "^PCO"}
+    cats = [c for c in allowed if c.startswith("PCO.")]
+    if with_pcs:
+        cats += [pcs for pcs, pco in PCS_EQUIVALENT.items() if pco in allowed]
+    return {"$in": cats}
 
 
 def _pcorg_cat_allowed(payload, category):
     allowed = get_user_allowed_categories(payload)
-    return allowed is None or category in allowed
+    return (allowed is None or category in allowed
+            or PCS_EQUIVALENT.get(category) in allowed)
 
 
 def _pcorg_gps(lat, lon):
@@ -4992,6 +5452,11 @@ def _pcorg_ensure_indexes():
         col.create_index([("event", 1), ("year", 1), ("category", 1)])
         col.create_index([("event", 1), ("year", 1), ("status_code", 1), ("close_ts", -1)])
         col.create_index([("event", 1), ("year", 1), ("sql_id", 1)])
+        # SAISON (main courante permanente, une annee de fiches) : fiches
+        # ouvertes recentes (/live), empreinte bornee a 7 jours (/sig).
+        col.create_index([("event", 1), ("year", 1), ("status_code", 1), ("ts", 1)])
+        col.create_index([("ts", 1)])
+        col.create_index([("synced_at", 1)])
         _pcorg_indexes_ready = True
     except Exception as e:
         logger.warning("Index pcorg : %s", e)
@@ -5030,6 +5495,7 @@ PCO_PROJECTION = {
     "content_category.patrouille": 1,
     "content_category.source_type": 1,
     "dispatch.state": 1, "dispatch.current": 1, "dispatch.queue_reason": 1,
+    "operator_id_create": 1,
 }
 
 
@@ -5107,10 +5573,110 @@ def _pcorg_serialise(doc):
         "niveau_urgence": doc.get("niveau_urgence"),
         "bounce_rev": doc.get("bounce_rev", 0),
         "dispatch": _pcorg_dispatch_view(doc),
+        # Createur Cockpit (e-mail) : "lecture seule" permet d'editer ses fiches
+        "operator_id_create": doc.get("operator_id_create") or "",
     }
 
 
 PCORG_CLOSED_PAGE_SIZE = 100
+
+# SAISON = main courante permanente (une annee civile de fiches) : /live ne
+# rend que les fiches ouvertes des N derniers jours (+ le nombre des plus
+# anciennes) ; `all_open=1` les rend toutes, plafonnees.
+PCORG_SAISON_OPEN_DAYS = int(os.getenv("PCORG_SAISON_OPEN_DAYS", "30"))
+PCORG_ALL_OPEN_CAP = 1000
+# /sig ne lit que les fiches ouvertes ou touchees depuis N jours
+PCORG_SIG_WINDOW_DAYS = 7
+PCORG_STATS_PERIODS = ("today", "24h", "7d", "all")
+
+
+def _pcorg_open_years(event, year):
+    """Annees couvertes pour les fiches OUVERTES. SAISON de l'annee courante
+    inclut SAISON/<annee-1> : une fiche ouverte le 31/12 ne disparait pas au
+    changement d'annee."""
+    if EC.is_saison(event) and year == EC.saison_year():
+        return {"$in": [year, year - 1]}
+    return year
+
+
+def _pcorg_stats_period(event):
+    """(cle, since_utc|None, libelle) depuis ?since=ISO ou ?period=.
+    Defaut : aujourd'hui (jour de Paris) pour SAISON, tout pour une epreuve."""
+    now = datetime.now(timezone.utc)
+    since_raw = (request.args.get("since") or "").strip()
+    if since_raw:
+        dt = PH.to_aware(since_raw)
+        if dt is not None:
+            loc = dt.astimezone(PH.PARIS)
+            return "since", dt.astimezone(timezone.utc), "depuis le " + loc.strftime("%d/%m %H:%M")
+    period = (request.args.get("period") or "").strip().lower()
+    if period not in PCORG_STATS_PERIODS:
+        period = "today" if EC.is_saison(event) else "all"
+    if period == "today":
+        day0 = now.astimezone(PH.PARIS).replace(hour=0, minute=0, second=0, microsecond=0)
+        return period, day0.astimezone(timezone.utc), "aujourd'hui"
+    if period == "24h":
+        return period, now - timedelta(hours=24), "24 dernieres heures"
+    if period == "7d":
+        return period, now - timedelta(days=7), "7 derniers jours"
+    return "all", None, ("toute l'annee" if EC.is_saison(event) else "toute l'edition")
+
+
+_PCORG_SIG_CACHE = {}   # (event, year) -> (monotonic, sig)
+_PCORG_SIG_TTL = 2.0
+
+
+@app.route('/api/pcorg/sig', methods=['GET'])
+@role_required("user")
+def pcorg_signature():
+    """Empreinte legere de la main courante d'un evenement : les postes la
+    lisent toutes les 5 s et ne rechargent /live que si elle change. Sans elle,
+    une fiche close depuis une tablette restait affichee jusqu'a 60 s.
+    Couvre creation, suppression, cloture, commentaires (bounce_rev /
+    cockpit_rev incrementes a chaque ecriture Cockpit ou tablette) et la
+    synchro Prysm (synced_at). Cache 2 s partage entre les postes."""
+    event = request.args.get("event", "")
+    try:
+        year = int(request.args.get("year", ""))
+    except ValueError:
+        return jsonify({"error": "year invalide"}), 400
+    if not event:
+        return jsonify({"error": "event requis"}), 400
+    key = (event, year)
+    now_m = time.monotonic()
+    hit = _PCORG_SIG_CACHE.get(key)
+    if hit and now_m - hit[0] < _PCORG_SIG_TTL:
+        return jsonify({"sig": hit[1]})
+    _pcorg_ensure_indexes()
+    # Borne : fiches ouvertes, ou creees / resynchronisees depuis 7 jours.
+    # Sans elle, SAISON (une annee entiere) etait relue toutes les 2 s. Les
+    # ecritures Cockpit/tablette sont refusees sur fiche close (sauf
+    # reouverture, qui la remet dans "ouvertes") : rien n'echappe a la borne.
+    # Chaque branche du $or porte event/year pour rester indexee.
+    since = datetime.now(timezone.utc) - timedelta(days=PCORG_SIG_WINDOW_DAYS)
+    ey = {"event": event, "year": _pcorg_open_years(event, year)}
+    agg = list(db["pcorg"].aggregate([
+        {"$match": {"$or": [
+            {**ey, "status_code": {"$ne": 10}},
+            {**ey, "ts": {"$gte": since}},
+            {**ey, "synced_at": {"$gte": since}},
+        ]}},
+        {"$group": {
+            "_id": None,
+            "n": {"$sum": 1},
+            "closed": {"$sum": {"$cond": [{"$eq": ["$status_code", 10]}, 1, 0]}},
+            "br": {"$sum": {"$ifNull": ["$bounce_rev", 0]}},
+            "cr": {"$sum": {"$ifNull": ["$cockpit_rev", 0]}},
+            "sync": {"$max": "$synced_at"},
+        }},
+    ]))
+    a = agg[0] if agg else {}
+    raw = "%s|%s|%s|%s|%s" % (a.get("n", 0), a.get("closed", 0), a.get("br", 0), a.get("cr", 0), a.get("sync"))
+    sig = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+    _PCORG_SIG_CACHE[key] = (now_m, sig)
+    resp = jsonify({"sig": sig})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.route('/api/pcorg/live', methods=['GET'])
@@ -5126,13 +5692,29 @@ def pcorg_live():
         return jsonify({"error": "year invalide"}), 400
 
     _pcorg_ensure_indexes()
-    base = {"event": event, "year": year, "category": _pcorg_cat_query(request.user_payload)}
+    base = {"event": event, "year": year, "category": _pcorg_cat_query(request.user_payload, event)}
     col = db["pcorg"]
 
-    open_docs = list(col.find(
-        {**base, "status_code": {"$nin": [10]}},
-        PCO_PROJECTION
-    ).sort("ts", -1))
+    saison = EC.is_saison(event)
+    all_open = (request.args.get("all_open") or "").strip().lower() in ("1", "true", "yes")
+    older_open = 0
+    if saison:
+        # Main courante permanente : fiches ouvertes recentes seulement (les
+        # oubliees de l'annee s'accumulent), + SAISON/<annee-1> au changement
+        # d'annee. all_open=1 : toutes, plafonnees.
+        open_q = {**base, "year": _pcorg_open_years(event, year), "status_code": {"$nin": [10]}}
+        if all_open:
+            open_docs = list(col.find(open_q, PCO_PROJECTION).sort("ts", -1).limit(PCORG_ALL_OPEN_CAP))
+        else:
+            since = datetime.now(timezone.utc) - timedelta(days=PCORG_SAISON_OPEN_DAYS)
+            open_docs = list(col.find({**open_q, "ts": {"$gte": since}}, PCO_PROJECTION)
+                             .sort("ts", -1).limit(PCORG_ALL_OPEN_CAP))
+            older_open = col.count_documents({**open_q, "ts": {"$not": {"$gte": since}}})
+    else:
+        open_docs = list(col.find(
+            {**base, "status_code": {"$nin": [10]}},
+            PCO_PROJECTION
+        ).sort("ts", -1))
 
     closed_query = {**base, "status_code": 10}
     closed_docs = list(col.find(
@@ -5150,6 +5732,10 @@ def pcorg_live():
             "closed_total": closed_total,
         },
         "closed_page_size": PCORG_CLOSED_PAGE_SIZE,
+        # SAISON : fiches ouvertes plus anciennes que la fenetre, non rendues
+        "older_open": older_open,
+        "all_open": bool(saison and all_open),
+        "open_window_days": PCORG_SAISON_OPEN_DAYS if saison else None,
     })
 
 
@@ -5165,9 +5751,19 @@ def pcorg_stats():
     except ValueError:
         return jsonify({"error": "year invalide"}), 400
 
+    # Periode : ouvertes = toutes celles ouvertes maintenant ; closes = closes
+    # pendant la periode (close_ts). SAISON : aujourd'hui par defaut (un
+    # compteur annuel n'a pas de sens en exploitation courante).
+    period_key, since, period_label = _pcorg_stats_period(event)
+    cat_q = _pcorg_cat_query(request.user_payload, event)
+    open_clause = {"event": event, "year": _pcorg_open_years(event, year),
+                   "category": cat_q, "status_code": {"$ne": 10}}
+    closed_clause = {"event": event, "year": year, "category": cat_q, "status_code": 10}
+    if since is not None:
+        closed_clause["year"] = _pcorg_open_years(event, year)
+        closed_clause["close_ts"] = {"$gte": since}
     pipeline = [
-        {"$match": {"event": event, "year": year,
-                    "category": _pcorg_cat_query(request.user_payload)}},
+        {"$match": {"$or": [open_clause, closed_clause]}},
         {"$group": {
             "_id": {
                 "cat": "$category",
@@ -5198,6 +5794,12 @@ def pcorg_stats():
             "closed": total_closed,
             "all": total_open + total_closed,
         },
+        "period": {
+            "key": period_key,
+            "since": since.isoformat() if since else None,
+            "label": period_label,
+            "basis": "close_ts",
+        },
     })
 
 
@@ -5225,14 +5827,17 @@ def pcorg_closed_page():
 
     base = {
         "event": event, "year": year,
-        "category": _pcorg_cat_query(request.user_payload), "status_code": 10,
+        "category": _pcorg_cat_query(request.user_payload, event), "status_code": 10,
     }
     col = db["pcorg"]
-    total = col.count_documents(base)
-
     # Pagination par curseur (close_ts, _id) : l'offset glissait quand une
     # fiche etait cloturee entre deux pages (doublons ou trous).
     before_ts = PH.to_aware(request.args.get("before_ts"))
+    # Total : premiere page seulement (SAISON = une annee de fiches closes,
+    # recompter a chaque page de defilement ne sert a rien ; le client garde
+    # le total precedent quand il recoit null).
+    total = col.count_documents(base) if before_ts is None else None
+
     before_id = request.args.get("before_id") or ""
     query = dict(base)
     if before_ts is not None:
@@ -5278,8 +5883,43 @@ def pcorg_search():
         limit = 200
     limit = max(1, min(limit, 500))
 
-    base = {"event": event, "year": year, "category": _pcorg_cat_query(request.user_payload)}
+    base = {"event": event, "year": year, "category": _pcorg_cat_query(request.user_payload, event)}
+    col = db["pcorg"]
+    open_years = _pcorg_open_years(event, year)
 
+    # 1) Index texte (pca_text : text, sous-classification, zone ; cree par
+    # pcorg_assist) : SAISON porte une annee de fiches, un $regex sur
+    # `comment` les relit toutes. Le texte ignore la chronologie, l'operateur
+    # et le carroyage : sans resultat, ou pour un code (chiffres : n° SQL,
+    # carroyage), on retombe sur le $regex historique.
+    terms = [] if any(ch.isdigit() for ch in q) else PCA.search_terms(q)
+    if terms and PCA.ensure_text_index(col):
+        tq = {"$text": {"$search": " ".join(terms)}}
+        proj = dict(PCO_PROJECTION)
+        proj["score"] = {"$meta": "textScore"}
+        t_open, t_closed = [], []
+        try:
+            if status in ("all", "open"):
+                cur = col.find({**base, **tq, "year": open_years, "status_code": {"$nin": [10]}}, proj)
+                t_open = list(cur.sort([("score", {"$meta": "textScore"})]).limit(limit))
+            if status in ("all", "closed"):
+                cur = col.find({**base, **tq, "status_code": 10}, proj)
+                t_closed = list(cur.sort([("score", {"$meta": "textScore"})]).limit(limit))
+        except Exception as e:  # index texte supprime entre-temps, etc.
+            logger.warning("pcorg search $text : %s", e)
+            t_open, t_closed = [], []
+        if t_open or t_closed:
+            return jsonify({
+                "open": [_pcorg_serialise(d) for d in t_open],
+                "closed": [_pcorg_serialise(d) for d in t_closed],
+                "counts": {"open": len(t_open), "closed": len(t_closed)},
+                "q": q,
+                "status": status,
+                "limit": limit,
+                "method": "text",
+            })
+
+    # 2) Repli $regex (sous-chaine, tous champs y compris la chronologie)
     rx = {"$regex": re.escape(q), "$options": "i"}
     or_clauses = [
         {"text": rx},
@@ -5295,11 +5935,11 @@ def pcorg_search():
         or_clauses.append({"sql_id": int(q)})
     base["$or"] = or_clauses
 
-    col = db["pcorg"]
     open_items = []
     closed_items = []
     if status in ("all", "open"):
         open_q = dict(base)
+        open_q["year"] = open_years
         open_q["status_code"] = {"$nin": [10]}
         open_cur = col.find(open_q, PCO_PROJECTION).sort("ts", -1).limit(limit)
         open_items = [_pcorg_serialise(d) for d in open_cur]
@@ -5316,6 +5956,7 @@ def pcorg_search():
         "q": q,
         "status": status,
         "limit": limit,
+        "method": "regex",
     })
 
 
@@ -5394,6 +6035,7 @@ def pcorg_detail(doc_id):
         "niveau_urgence": doc.get("niveau_urgence"),
         "bounce_rev": doc.get("bounce_rev", 0),
         "cockpit_owned": doc.get("cockpit_owned") or [],
+        "operator_id_create": doc.get("operator_id_create") or "",
         "dispatch": _pcorg_dispatch_view(doc),
         "intervention": {k: (_dt_to_iso_utc(v) if isinstance(v, datetime) else v)
                          for k, v in (doc.get("intervention") or {}).items()},
@@ -5406,12 +6048,14 @@ def _engage_field_device(patrouille_name, fiche_id, event, year, category="", te
     son engagement via le bouton 'Engagement'."""
     if not patrouille_name or not fiche_id:
         return
-    device = db["field_devices"].find_one({
-        "name": patrouille_name,
-        "event": str(event),
-        "year": str(year),
-        "revoked": {"$ne": True},
-    })
+    # Tablette appairee sur l'evenement de la fiche d'abord, sinon une
+    # tablette d'un autre evenement qui le voit (SAISON pendant une epreuve
+    # active) : field.find_device_for_fiche / device_pairs.
+    try:
+        from field import find_device_for_fiche
+        device = find_device_for_fiche(db, patrouille_name, event, year)
+    except Exception:
+        device = None
     if not device:
         return
     now = datetime.now(timezone.utc)
@@ -5454,12 +6098,10 @@ def _disengage_field_device(doc, fiche_id):
         patrouille_name = cc.get("patrouille")
         if not patrouille_name:
             return
-        event = doc.get("event") or ""
-        year = doc.get("year") or ""
+        # active_fiche_id designe la tablette sans ambiguite, quel que soit
+        # son evenement d'appairage (tablette SAISON engagee sur une epreuve).
         device = db["field_devices"].find_one({
             "name": patrouille_name,
-            "event": str(event),
-            "year": str(year),
             "active_fiche_id": fiche_id,
         })
         if not device:
@@ -5536,6 +6178,8 @@ def _parse_intervention_ts(raw):
 @app.route('/api/pcorg/create', methods=['POST'])
 @role_required("user")
 def pcorg_create():
+    if not _user_can_create_fiche(request.user_payload):
+        return jsonify(_PCORG_CREATE_ERROR[0]), _PCORG_CREATE_ERROR[1]
     data = request.get_json(force=True)
     event = data.get("event", "")
     year = data.get("year", "")
@@ -5655,6 +6299,8 @@ def pcorg_create():
 @role_required("user")
 def pcorg_quick_create():
     """Creation rapide d'une fiche simplifiee (clic droit carte)."""
+    if not _user_can_create_fiche(request.user_payload):
+        return jsonify(_PCORG_CREATE_ERROR[0]), _PCORG_CREATE_ERROR[1]
     data = request.get_json(force=True)
     event = data.get("event", "")
     year = data.get("year", "")
@@ -5850,6 +6496,8 @@ def pcorg_update(doc_id):
     doc, err = _pcorg_load_for_write(doc_id)
     if err:
         return err
+    if not _user_can_edit_fiche(request.user_payload, doc):
+        return jsonify(_PCORG_READONLY_ERROR[0]), _PCORG_READONLY_ERROR[1]
     data = request.get_json(force=True) or {}
     user = request.user_payload
     operator_name = _pcorg_operator(user)
@@ -6111,9 +6759,11 @@ def pcorg_update_gps(doc_id):
         return jsonify({"error": "lat et lon requis"}), 400
     doc, err = _pcorg_load_for_write(
         doc_id, projection={"status_code": 1, "category": 1, "gps": 1, "area": 1,
-                            "content_category.carroye": 1})
+                            "content_category.carroye": 1, "operator_id_create": 1})
     if err:
         return err
+    if not _user_can_edit_fiche(request.user_payload, doc):
+        return jsonify(_PCORG_READONLY_ERROR[0]), _PCORG_READONLY_ERROR[1]
 
     sets, owned = {"gps": gps}, {"gps"}
     changes = [{"field": "Position", "old": _pcorg_fmt_val(doc.get("gps")), "new": _pcorg_fmt_val(gps)}]
@@ -6151,9 +6801,12 @@ def pcorg_set_urgency(doc_id):
     if niveau and niveau not in VALID_URGENCY_LEVELS:
         return jsonify({"error": "niveau_urgence invalide"}), 400
 
-    doc, err = _pcorg_load_for_write(doc_id, projection={"niveau_urgence": 1, "category": 1, "status_code": 1})
+    doc, err = _pcorg_load_for_write(doc_id, projection={"niveau_urgence": 1, "category": 1, "status_code": 1,
+                                                         "operator_id_create": 1})
     if err:
         return err
+    if not _user_can_edit_fiche(request.user_payload, doc):
+        return jsonify(_PCORG_READONLY_ERROR[0]), _PCORG_READONLY_ERROR[1]
 
     old_niveau = doc.get("niveau_urgence") or None
     if old_niveau == niveau:
@@ -6177,9 +6830,9 @@ def pcorg_set_urgency(doc_id):
 def pcorg_close(doc_id):
     """Cloture une fiche. Motif optionnel, consigne dans la meme entree que le
     changement de statut (format Prysm : "Statut: En cours -> Termine\\nmotif"),
-    que l'affichage separe en pastille de statut + commentaire lisible."""
-    if not _user_can_close_fiche(request.user_payload):
-        return jsonify({"error": "Votre groupe n'autorise pas la cloture de fiches"}), 403
+    que l'affichage separe en pastille de statut + commentaire lisible.
+    Droit : "Cloturer des fiches" de groupe, ou responsable de service de la
+    categorie de la fiche (verifie apres chargement, la categorie en depend)."""
     data = request.get_json(silent=True) or {}
     motif = (data.get("comment") or "").strip()[:PCORG_TEXT_MAX]
     doc, err = _pcorg_load_for_write(
@@ -6187,6 +6840,8 @@ def pcorg_close(doc_id):
         projection={"status_code": 1, "category": 1, "content_category": 1, "event": 1, "year": 1})
     if err:
         return err
+    if not _user_can_close_fiche_cat(request.user_payload, doc.get("category")):
+        return jsonify({"error": "Votre groupe n'autorise pas la cloture de fiches"}), 403
     if _pcorg_is_closed(doc):
         return jsonify({"error": "introuvable ou deja clos"}), 404
 
@@ -6223,8 +6878,6 @@ def pcorg_close(doc_id):
 def pcorg_reopen(doc_id):
     """Rouvre une fiche close (erreur de cloture, reprise d'intervention).
     Motif obligatoire, meme droit que la cloture."""
-    if not _user_can_close_fiche(request.user_payload):
-        return jsonify({"error": "Votre groupe n'autorise pas la reouverture de fiches"}), 403
     data = request.get_json(silent=True) or {}
     motif = (data.get("comment") or "").strip()[:PCORG_TEXT_MAX]
     if not motif:
@@ -6233,6 +6886,8 @@ def pcorg_reopen(doc_id):
                                      projection={"status_code": 1, "category": 1})
     if err:
         return err
+    if not _user_can_close_fiche_cat(request.user_payload, doc.get("category")):
+        return jsonify({"error": "Votre groupe n'autorise pas la reouverture de fiches"}), 403
     if not _pcorg_is_closed(doc):
         return jsonify({"error": "fiche deja ouverte"}), 409
 
@@ -6270,12 +6925,13 @@ def field_device_release():
 
     # Le nom n'est unique que parmi les tablettes non revoquees : sans ce
     # filtre, une ancienne tablette revoquee du meme nom pouvait etre prise.
-    device = db["field_devices"].find_one({
-        "name": device_name,
-        "event": str(event),
-        "year": str(year),
-        "revoked": {"$ne": True},
-    })
+    # Meme regle que l'engagement : appairee sur l'evenement d'abord, sinon
+    # une tablette qui le voit (SAISON pendant une epreuve active).
+    try:
+        from field import find_device_for_fiche
+        device = find_device_for_fiche(db, device_name, event, year)
+    except Exception:
+        device = None
     if not device:
         return jsonify({"error": "device introuvable"}), 404
 

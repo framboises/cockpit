@@ -15,13 +15,13 @@
   <div class="manuel-page">
 
     <header class="manuel-topbar">
-      <div style="display:flex; align-items:center; gap:10px;">
+      <div class="manuel-topbar-left">
+        <a href="/field" id="btn-back" class="back-btn back-btn-primary" aria-label="Retour a l application">&larr; Retour</a>
         <span class="logo">FIELD</span>
         <span class="title">Manuel operateur</span>
       </div>
-      <div style="display:flex; align-items:center; gap:8px;">
-        <button id="btn-print" class="back-btn" type="button" aria-label="Imprimer le manuel">Imprimer</button>
-        <a href="/field" class="back-btn" aria-label="Retour a l application">&larr; Retour</a>
+      <div class="manuel-topbar-right">
+        <button id="btn-print" class="back-btn btn-print" type="button" aria-label="Imprimer le manuel">Imprimer</button>
       </div>
     </header>
 
@@ -1611,6 +1611,32 @@
 
       window.addEventListener('scroll', update, { passive: true });
       update();
+    })();
+
+    // -----------------------------------------------------------------
+    // Bouton "Retour" : revient a l'application. Si on vient de /field,
+    // history.back() restaure la page telle quelle (carte, zoom) sans la
+    // recharger ; sinon (lien direct, onglet neuf) on navigue vers /field.
+    // -----------------------------------------------------------------
+    (function () {
+      var btn = document.getElementById('btn-back');
+      if (!btn) return;
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        var fromField = false;
+        try {
+          if (document.referrer) {
+            var ref = new URL(document.referrer);
+            fromField = ref.origin === window.location.origin
+              && (ref.pathname === '/field' || ref.pathname === '/field/');
+          }
+        } catch (err) { fromField = false; }
+        if (fromField && window.history.length > 1) {
+          window.history.back();
+        } else {
+          window.location.href = '/field';
+        }
+      });
     })();
 
     // -----------------------------------------------------------------

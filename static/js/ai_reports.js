@@ -663,8 +663,9 @@
         var tb = el("tbody");
         Object.keys(res.blocs || {}).forEach(function (k) {
           var b = res.blocs[k];
-          tb.appendChild(el("tr", { "class": b.statut === "ok" ? "" : "air-row-ko" }, [
-            el("td", { text: BLOC_LABELS[k] || k }), el("td", { text: b.statut }), el("td", { text: fmt(b.ms) }),
+          var na = b.statut === "non_applicable";
+          tb.appendChild(el("tr", { "class": (b.statut === "ok" || na) ? "" : "air-row-ko" }, [
+            el("td", { text: BLOC_LABELS[k] || k }), el("td", { text: na ? "non applicable" : b.statut }), el("td", { text: fmt(b.ms) }),
             el("td", { text: fmt(b.chars) }), el("td", { text: b.erreur || "" })]));
         });
         tbl.appendChild(tb);

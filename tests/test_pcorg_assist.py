@@ -139,6 +139,16 @@ class TestRankPrecedents:
         assert q_all["$nor"] == [{"event": "24H MOTOS", "year": 2026}]
         assert q_all["category"] == {"$in": ["PCO.Flux"]}
 
+    def test_scope_filter_saison_exclut_30_jours(self):
+        fiche = _doc("s", "x", event="SAISON", year=2026, ts=datetime(2026, 3, 15, 10, 0))
+        q = PA.scope_filter(fiche, "editions", None)
+        assert q["event"] == "SAISON" and "year" not in q
+        rng = q["$nor"][0]["ts"]
+        assert rng["$gte"] == datetime(2026, 2, 13, 10, 0)
+        assert rng["$lte"] == datetime(2026, 4, 14, 10, 0)
+        q_all = PA.scope_filter(fiche, "all", None)
+        assert q_all["$nor"][0]["event"] == "SAISON" and "ts" in q_all["$nor"][0]
+
     def test_closing_info_et_duree(self):
         doc = _doc("p", "Malaise", status_code=10,
                    close_ts=datetime(2026, 6, 13, 14, 45),

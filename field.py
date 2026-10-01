@@ -29,6 +29,7 @@ from functools import wraps
 
 import pcorg_history as PH
 import dispatch_auto as DA
+import event_courant as EC
 
 try:
     from PIL import Image, ImageOps
@@ -66,7 +67,7 @@ FIELD_COOKIE_PATH = "/field"
 # En dev, on genere les cles automatiquement dans vapid_private.pem.
 # En prod, definir VAPID_PRIVATE_KEY (contenu PEM) et VAPID_CONTACT_EMAIL.
 
-VAPID_CONTACT_EMAIL = os.getenv("VAPID_CONTACT_EMAIL", "dev@cockpit.local")
+VAPID_CONTACT_EMAIL = os.getenv("VAPID_CONTACT_EMAIL", "https://cockpit.lemans.org")
 _VAPID_PRIVATE_KEY = None
 _VAPID_PUBLIC_KEY_B64 = None
 
@@ -196,6 +197,12 @@ def send_push_notification(subscription_info, title, body, url=None, tag=None, p
         return False
     try:
         from pywebpush import webpush
+    except ImportError:
+        # pywebpush absent de l'environnement : AUCUNE notification ne part.
+        # C'etait le cas en production jusqu'au 01/10/2026, sans aucune trace.
+        logger.error("field: pywebpush non installe, notifications push impossibles")
+        return False
+    try:
         import json as _json
         payload = {"title": title, "body": body}
         if url:
@@ -207,23 +214,61 @@ def send_push_notification(subscription_info, title, body, url=None, tag=None, p
         webpush(
             subscription_info=subscription_info,
             data=_json.dumps(payload),
-            vapid_private_key=_VAPID_PRIVATE_KEY,
-            vapid_claims={"sub": "mailto:" + VAPID_CONTACT_EMAIL},
+            vapid_private_key=_vapid_signer(),
+            vapid_claims={"sub": _vapid_subject()},
             timeout=5,
         )
         return True
     except Exception as e:
-        logger.debug("field: push failed: %s", e)
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status in (404, 410):
+            # Abonnement expire (notifications retirees, appareil reinitialise)
+            return "expired"
+        logger.warning("field: push failed (%s): %s", status, e)
         return False
 
 
+_VAPID_SIGNER = None
+
+
+def _vapid_signer():
+    """Cle VAPID sous la forme attendue par pywebpush : une instance
+    py_vapid.Vapid. Passer le texte PEM tel quel echoue ("Could not
+    deserialize key data") : pywebpush le lit comme du DER en base64."""
+    global _VAPID_SIGNER
+    if _VAPID_SIGNER is None:
+        from py_vapid import Vapid
+        _VAPID_SIGNER = Vapid.from_pem(_VAPID_PRIVATE_KEY.encode("utf-8"))
+    return _VAPID_SIGNER
+
+
+def _vapid_subject():
+    """Contact VAPID ("sub") : une URL https ou un mailto. Apple refuse un
+    contact invalide (BadJwtToken) ; l'ancien defaut dev@cockpit.local en
+    etait un. Defaut : l'adresse du site."""
+    v = (VAPID_CONTACT_EMAIL or "").strip()
+    if v.startswith("https://") or v.startswith("mailto:"):
+        return v
+    if "@" in v and not v.endswith(".local"):
+        return "mailto:" + v
+    return "https://cockpit.lemans.org"
+
+
 def send_push_to_device(db, device_id, title, body, url=None, tag=None, push_type=None):
-    """Envoie un push a toutes les souscriptions d'un device."""
+    """Envoie un push a toutes les souscriptions d'un device. Les abonnements
+    expires sont supprimes. Retourne le nombre d'envois reussis."""
+    sent = 0
     subs = list(db["field_push_subs"].find({"device_id": device_id}))
     for sub in subs:
         info = sub.get("subscription")
-        if info:
-            send_push_notification(info, title, body, url=url, tag=tag, push_type=push_type)
+        if not info:
+            continue
+        res = send_push_notification(info, title, body, url=url, tag=tag, push_type=push_type)
+        if res == "expired":
+            db["field_push_subs"].delete_one({"_id": sub["_id"]})
+        elif res:
+            sent += 1
+    return sent
 
 
 # ---------------------------------------------------------------------------
@@ -430,9 +475,27 @@ def _event_demontage_ended(db, event, year):
     return is_ended
 
 
+def _restored_after_event_end(db, device):
+    """Vrai si un admin a reactive la tablette apres la fin de son evenement :
+    elle reste alors utilisable malgre l'expiration automatique. Sans cette
+    exception, la page /field renvoyait vers /field/denied (evenement termine)
+    et /field/denied vers /field (tablette non revoquee) : boucle infinie."""
+    restored = device.get("restoredAt")
+    if not isinstance(restored, datetime):
+        return False
+    if restored.tzinfo is None:
+        restored = restored.replace(tzinfo=timezone.utc)
+    end_dt = _event_end_datetime(db, device.get("event"), device.get("year"))
+    return bool(end_dt) and restored >= end_dt
+
+
 def _sweep_event_if_ended(db, event, year):
     """Si l'evenement est termine, revoke en bloc toutes ses tablettes
-    encore actives et retourne True. Idempotent via un flag cache."""
+    encore actives et retourne True. Idempotent via un flag cache.
+    SAISON n'a pas de fin : ses tablettes ne sont jamais revoquees
+    automatiquement (y compris au changement d'annee)."""
+    if EC.is_saison(event):
+        return False
     if not _event_demontage_ended(db, event, year):
         return False
     key = (str(event), str(year))
@@ -441,8 +504,15 @@ def _sweep_event_if_ended(db, event, year):
     if cached and cached[2]:
         return True
     try:
+        flt = {"event": event, "year": str(year), "revoked": {"$ne": True}}
+        end_dt = _event_end_datetime(db, event, year)
+        if end_dt:
+            # Une tablette reactivee par un admin APRES la fin de l'evenement
+            # est un choix explicite : on ne la revoque plus.
+            flt["$or"] = [{"restoredAt": {"$exists": False}}, {"restoredAt": None},
+                          {"restoredAt": {"$lt": end_dt}}]
         db["field_devices"].update_many(
-            {"event": event, "year": str(year), "revoked": {"$ne": True}},
+            flt,
             {"$set": {
                 "revoked": True,
                 "revoke_reason": "event_ended",
@@ -528,7 +598,8 @@ def field_token_required(f):
 
         # Auto-revocation si l'evenement est termine (demontage passe).
         # Le sweep se fait une seule fois par (event, year) grace au cache.
-        if _sweep_event_if_ended(db, device.get("event"), device.get("year")):
+        if (_sweep_event_if_ended(db, device.get("event"), device.get("year"))
+                and not _restored_after_event_end(db, device)):
             if _wants_json():
                 return jsonify({"error": "event_ended"}), 401
             return redirect("/field/denied")
@@ -606,25 +677,190 @@ def _clean_metiers(raw):
     return out[:40]
 
 
-def _sos_recipients(db, sender, event, year):
+# ---------------------------------------------------------------------------
+# Evenements vus par une tablette (SAISON et epreuves simultanees)
+#
+# Une tablette n'est plus liee a son seul appairage (event, year) : elle voit
+# les fiches de tous les evenements actifs (event_courant : epreuves en cours
+# + SAISON, + SAISON de l'annee precedente) en plus de son propre appairage.
+# Une tablette SAISON d'une annee passee vaut SAISON courant (pas de
+# re-appairage au 1er janvier).
+# ---------------------------------------------------------------------------
+
+_SAISON_RE = {"$regex": r"^\s*saison\s*$", "$options": "i"}
+
+
+def _pair_key(event, year):
+    """Cle de comparaison d'une paire, quel que soit le type de year."""
+    try:
+        y = str(int(year))
+    except (TypeError, ValueError):
+        y = str(year if year is not None else "")
+    ev = EC.SAISON if EC.is_saison(event) else str(event or "")
+    return (ev, y)
+
+
+def device_home_pair(device, now=None):
+    """Paire d'appairage (event, year:int) de la tablette. SAISON d'une annee
+    passee -> SAISON courant. None si l'appairage est incomplet."""
+    ev = (device or {}).get("event")
+    if not ev:
+        return None
+    if EC.is_saison(ev):
+        return (EC.SAISON, EC.saison_year(now))
+    try:
+        return (ev, int(device.get("year")))
+    except (TypeError, ValueError):
+        return None
+
+
+def device_pairs(db, device, now=None):
+    """[(event, year:int)] des evenements dont la tablette voit les fiches :
+    evenements actifs (avec SAISON N-1) plus son propre appairage."""
+    pairs = list(EC.active_pairs(db, now, include_previous_saison=True))
+    home = device_home_pair(device, now)
+    if home:
+        pairs.append(home)
+    out, seen = [], set()
+    for ev, yr in pairs:
+        k = _pair_key(ev, yr)
+        if k not in seen:
+            seen.add(k)
+            out.append((ev, yr))
+    return out
+
+
+def pair_in(pairs, event, year):
+    k = _pair_key(event, year)
+    return any(_pair_key(e, y) == k for e, y in pairs)
+
+
+def _home_filter(event, year, now=None):
+    """Filtre field_devices des tablettes dont la paire d'appairage (au sens
+    device_home_pair) est (event, year). None si aucune ne peut l'etre."""
+    if EC.is_saison(event):
+        try:
+            same = int(year) == EC.saison_year(now)
+        except (TypeError, ValueError):
+            same = False
+        return {"event": _SAISON_RE} if same else None
+    return EC.pairs_filter([(event, year)])
+
+
+def devices_seeing_pair_filter(db, event, year, now=None):
+    """Filtre field_devices (sans la revocation) des tablettes dont
+    device_pairs contient (event, year). Paire active : toutes."""
+    if pair_in(EC.active_pairs(db, now, include_previous_saison=True), event, year):
+        return {}
+    return _home_filter(event, year, now) or {"_id": {"$exists": False}}
+
+
+def _homonym_owns_pair(db, device, event, year, now=None):
+    """Vrai si une AUTRE tablette active du meme nom est appairee sur
+    (event, year) : les fiches de cette paire affectees a ce nom sont a elle
+    (les noms ne sont uniques que par appairage)."""
+    flt = _home_filter(event, year, now)
+    if not flt or not device.get("name"):
+        return False
+    q = {"name": device.get("name"), "_id": {"$ne": device.get("_id")},
+         "revoked": {"$ne": True}}
+    q.update(flt)
+    return db["field_devices"].find_one(q, {"_id": 1}) is not None
+
+
+def device_matches_pair(db, device, event, year, now=None, pairs=None):
+    """La tablette peut-elle etre rapprochee d'une fiche de (event, year) ?
+    Paire vue par la tablette, et pas reservee a une homonyme appairee dessus."""
+    if pairs is None:
+        pairs = device_pairs(db, device, now)
+    if not pair_in(pairs, event, year):
+        return False
+    home = device_home_pair(device, now)
+    if home and _pair_key(*home) == _pair_key(event, year):
+        return True
+    return not _homonym_owns_pair(db, device, event, year, now)
+
+
+def device_fiche_pairs(db, device, now=None):
+    """device_pairs moins les paires reservees a une homonyme."""
+    pairs = device_pairs(db, device, now)
+    return [p for p in pairs if device_matches_pair(db, device, p[0], p[1], now, pairs)]
+
+
+def find_device_for_fiche(db, name, event, year, now=None, extra=None):
+    """Tablette non revoquee nommee `name` qui peut porter une fiche de
+    (event, year) : celle appairee sur cette paire d'abord, sinon une
+    tablette d'un autre evenement qui la voit (SAISON pendant une epreuve)."""
+    if not name:
+        return None
+    base = {"name": name, "revoked": {"$ne": True}}
+    if extra:
+        base.update(extra)
+    home = _home_filter(event, year, now)
+    if home:
+        q = dict(base)
+        q.update(home)
+        dev = db["field_devices"].find_one(q, sort=[("last_seen", -1)])
+        if dev:
+            return dev
+    flt = devices_seeing_pair_filter(db, event, year, now)
+    q = dict(base)
+    q.update(flt)
+    for dev in db["field_devices"].find(q).sort("last_seen", -1).limit(10):
+        if _device_expired(db, dev):
+            continue
+        if device_matches_pair(db, dev, event, year, now):
+            return dev
+    return None
+
+
+def _device_expired(db, device):
+    """Tablette d'une epreuve terminee, pas encore balayee (le balayage est
+    paresseux : il n'a lieu qu'au prochain appel de la tablette). Jamais vrai
+    pour SAISON ni pour une tablette reactivee apres la fin."""
+    ev = device.get("event")
+    if not ev or EC.is_saison(ev):
+        return False
+    return (_event_demontage_ended(db, ev, device.get("year"))
+            and not _restored_after_event_end(db, device))
+
+
+def fiche_target_event(db, device, now=None):
+    """(event, year:int) d'une fiche creee depuis la tablette : son propre
+    evenement s'il s'agit d'une epreuve ACTIVE, sinon l'evenement courant."""
+    ev = (device or {}).get("event")
+    if ev and not EC.is_saison(ev) and EC.is_active(db, ev, device.get("year"), now):
+        return ev, int(device.get("year"))
+    return EC.current_event(db, now)
+
+
+def _sos_recipients(db, sender, event=None, year=None):
     """Tablettes a prevenir d'un SOS : equipes securite/secours, l'equipe de
-    l'emetteur et les tablettes sans categorie. Jamais les revoquees. Un
+    l'emetteur et les tablettes sans categorie, parmi toutes les tablettes
+    non revoquees dont les evenements vus croisent ceux de l'emetteur (une
+    tablette SAISON et une tablette d'epreuve active se previennent). Un
     electricien ne recoit plus l'alarme d'une patrouille a l'autre bout du
-    circuit."""
+    circuit. `event`/`year` : conserves pour compatibilite, inutilises."""
     group_cats = _group_categories(db)
     wanted = set(SOS_RESPONDER_CATEGORIES)
     sender_cat = _device_category(db, sender, group_cats)
     if sender_cat:
         wanted.add(sender_cat)
-    return [
-        o for o in db["field_devices"].find({
-            "event": event,
-            "year": year,
-            "_id": {"$ne": sender["_id"]},
-            "revoked": {"$ne": True},
-        }, {"_id": 1, "name": 1, "category": 1, "beacon_group_id": 1})
-        if _device_category(db, o, group_cats) in wanted | {None}
-    ]
+    sender_keys = {_pair_key(e, y) for e, y in device_pairs(db, sender)}
+    out = []
+    for o in db["field_devices"].find({
+        "_id": {"$ne": sender["_id"]},
+        "revoked": {"$ne": True},
+    }, {"_id": 1, "name": 1, "category": 1, "beacon_group_id": 1, "event": 1, "year": 1,
+        "restoredAt": 1}):
+        if _device_category(db, o, group_cats) not in wanted | {None}:
+            continue
+        if _device_expired(db, o):
+            continue
+        if not sender_keys & {_pair_key(e, y) for e, y in device_pairs(db, o)}:
+            continue
+        out.append(o)
+    return out
 
 
 def _pub_device(device):
@@ -1398,10 +1634,11 @@ def field_create_fiche():
 
     device = request.device
     name = device.get("name") or "?"
-    event = device.get("event")
-    year = device.get("year")
 
     db = _get_mongo_db()
+    # Evenement de la fiche : celui de la tablette si c'est une epreuve
+    # active, sinon l'evenement courant (bascule SAISON / epreuve).
+    event, year = fiche_target_event(db, device)
     device_category = _device_category(db, device)
     if device_category and category != device_category:
         return jsonify({"ok": False, "error": "category_not_allowed",
@@ -1594,6 +1831,27 @@ def field_proposal_refuse(fiche_id):
     (un refus rejoue apres expiration renvoie ok)."""
     DA.refuse(_get_mongo_db(), fiche_id, request.device)
     return jsonify({"ok": True})
+
+
+@field_bp.route("/field/available-missions", methods=["GET"])
+@field_token_required
+def field_available_missions():
+    """Missions de la categorie et du metier de l'unite, sans unite engagee :
+    onglet "Disponibles" (libre-service)."""
+    db = _get_mongo_db()
+    dev = db["field_devices"].find_one({"_id": request.device["_id"]}) or request.device
+    return jsonify({"ok": True, "missions": DA.available_for_device(db, dev),
+                    "can_take": (dev.get("status") or "patrouille") == "patrouille"})
+
+
+@field_bp.route("/field/missions/<fiche_id>/take", methods=["POST"])
+@field_token_required
+def field_take_mission(fiche_id):
+    """L'unite disponible s'engage elle-meme sur une mission."""
+    ok, code = DA.self_assign(_get_mongo_db(), fiche_id, request.device)
+    if not ok:
+        return jsonify({"ok": False, "error": code}), 409
+    return jsonify({"ok": True, "status": "intervention", "active_fiche_id": fiche_id})
 
 
 @field_bp.route("/field/my-fiches/<fiche_id>/finish", methods=["POST"])
@@ -1923,18 +2181,17 @@ def field_photo_send():
                 gps_point = {"type": "Point", "coordinates": [float(lng), float(lat)]}
             except (TypeError, ValueError):
                 pass
-        try:
-            year_int = int(device.get("year")) if device.get("year") is not None else None
-        except (TypeError, ValueError):
-            year_int = device.get("year")
+        # Evenement de la fiche : epreuve active de la tablette, sinon
+        # l'evenement courant (bascule SAISON / epreuve).
+        fiche_event, year_int = fiche_target_event(db, device)
         seed = "{}|{}|{}|{}|{}|field:{}".format(
-            device.get("event") or "", device.get("year") or "",
+            fiche_event or "", year_int or "",
             now_local.isoformat(), category, fiche_text, str(device["_id"])
         )
         fiche_id = str(_uuid.uuid5(_uuid.NAMESPACE_URL, seed))
         fiche_doc = {
             "_id": fiche_id,
-            "event": device.get("event"),
+            "event": fiche_event,
             "year": year_int,
             "ts": now,
             "timestamp_iso": now_local.isoformat(),
@@ -2455,7 +2712,14 @@ def admin_required(f):
         is_super_admin = SUPER_ADMIN_ROLE in (payload.get("global_roles") or [])
         app_role = (payload.get("roles_by_app") or {}).get(APP_KEY)
         if not is_super_admin and app_role != "admin":
-            return jsonify({"error": "admin_required"}), 403
+            # Page d'administration accordee par un groupe (Field dispatch)
+            from app import request_admin_grant
+            if not request_admin_grant(payload):
+                return jsonify({"error": "admin_required"}), 403
+            payload["app_role"] = app_role
+            payload["is_super_admin"] = False
+            request.admin_user = payload
+            return f(*args, **kwargs)
 
         payload["app_role"] = "admin" if is_super_admin else app_role
         payload["is_super_admin"] = is_super_admin
@@ -3398,6 +3662,13 @@ def _pub_message_admin(msg):
     return base
 
 
+def _no_store(resp):
+    """Les vues messages du cockpit sont relues en polling : aucune reponse
+    ne doit etre servie depuis un cache (navigateur ou proxy)."""
+    resp.headers["Cache-Control"] = "no-store, max-age=0"
+    return resp
+
+
 @field_bp.route("/field/admin/messages", methods=["GET"])
 @admin_required
 def field_admin_messages_list():
@@ -3422,7 +3693,7 @@ def field_admin_messages_list():
         limit = 100
     cursor = db["field_messages"].find(query).sort("createdAt", -1).limit(limit)
     messages = [_pub_message_admin(m) for m in cursor]
-    return jsonify({"ok": True, "messages": messages})
+    return _no_store(jsonify({"ok": True, "messages": messages}))
 
 
 @field_bp.route("/field/admin/messages/<msg_id>", methods=["DELETE"])
@@ -3501,7 +3772,7 @@ def field_admin_threads(device_id):
     # reverse sur last_at : on veut recent en haut, donc on trie avec une cle custom
     threads.sort(key=lambda t: t["last_at"] or "", reverse=True)
     threads.sort(key=lambda t: 0 if t["unread"] else 1)
-    return jsonify({"ok": True, "threads": threads})
+    return _no_store(jsonify({"ok": True, "threads": threads}))
 
 
 @field_bp.route("/field/admin/conversation/<device_id>", methods=["GET"])
@@ -3521,7 +3792,7 @@ def field_admin_conversation(device_id):
         "direction": "field_to_cockpit",
         "$or": [{"admin_read_at": None}, {"admin_read_at": {"$exists": False}}],
     })
-    return jsonify({"ok": True, "messages": messages, "unread_inbound": unread})
+    return _no_store(jsonify({"ok": True, "messages": messages, "unread_inbound": unread}))
 
 
 @field_bp.route("/field/admin/thread/<msg_id>/mark-read", methods=["POST"])
@@ -3588,7 +3859,7 @@ def field_admin_unread_by_device():
     for row in db["field_messages"].aggregate(pipeline):
         if row.get("_id"):
             out[str(row["_id"])] = row.get("count", 0)
-    return jsonify({"ok": True, "unread": out})
+    return _no_store(jsonify({"ok": True, "unread": out}))
 
 
 @field_bp.route("/field/admin/thread/<msg_id>", methods=["GET"])
@@ -3614,7 +3885,7 @@ def field_admin_thread(msg_id):
     }).sort("createdAt", 1)
 
     messages = [_pub_message_admin(m) for m in cursor]
-    return jsonify({"ok": True, "thread_id": str(thread_id), "messages": messages})
+    return _no_store(jsonify({"ok": True, "thread_id": str(thread_id), "messages": messages}))
 
 
 @field_bp.route("/field/admin/reply/<msg_id>", methods=["POST"])
@@ -3931,7 +4202,9 @@ def field_resources_gm_collection(collection_name):
 @field_token_required
 def field_my_fiches():
     """Retourne les fiches PCORG assignees a la tablette courante.
-    Match : event + year + content_category.patrouille == device.name."""
+    Match : content_category.patrouille == device.name, sur les evenements
+    vus par la tablette (device_fiche_pairs : evenements actifs + son
+    appairage, hors paires reservees a une homonyme)."""
     device = request.device
     event = device.get("event")
     year = device.get("year")
@@ -3941,32 +4214,27 @@ def field_my_fiches():
 
     db = _get_mongo_db()
 
-    # Le champ year en base est un int dans la collection pcorg
-    try:
-        year_val = int(year)
-    except (TypeError, ValueError):
-        year_val = year
-
     # Relire le device pour avoir le statut et la categorie frais (un admin
     # peut changer la categorie pendant que la tablette tourne).
     dev_fresh = db["field_devices"].find_one({"_id": device["_id"]}) or device
     device_category = _device_category(db, dev_fresh)
 
+    pairs = device_fiche_pairs(db, dev_fresh)
+    and_parts = [EC.pairs_filter(pairs)]
     base_query = {
-        "event": event,
-        "year": year_val,
         "content_category.patrouille": name,
         "category": {"$regex": "^PCO"},
+        "$and": and_parts,
     }
     if device_category:
         # Une tablette ne voit que les fiches de sa categorie. Exceptions :
         # son propre SOS (toujours PCO.Secours) et la fiche sur laquelle elle
         # est engagee, au cas ou le PC Org en changerait la categorie.
-        base_query["$or"] = [
+        and_parts.append({"$or": [
             {"category": device_category},
             {"content_category.field_sos": True},
             {"_id": dev_fresh.get("active_fiche_id") or "__none__"},
-        ]
+        ]})
 
     # Ouvertes : status_code != 10 (seule convention de cloture). L'ancien
     # $or sur close_ts nul remontait en "ouvertes" des fiches closes.
@@ -3987,6 +4255,8 @@ def field_my_fiches():
                 lng = lat = None
         return {
             "id": str(f.get("_id")),
+            "event": f.get("event"),
+            "year": f.get("year"),
             "category": f.get("category"),
             "text": f.get("text") or f.get("text_full"),
             "comment": f.get("comment") or "",
@@ -4083,8 +4353,11 @@ def field_my_fiche_detail(fiche_id):
     cc = fiche.get("content_category") or {}
     # Une tablette ne lit que ses fiches : affectee, active, ou creee par elle.
     # Avant, n'importe quelle tablette lisait n'importe quelle fiche par son id.
+    # Par le nom : seulement sur un evenement vu par la tablette et non reserve
+    # a une homonyme (les noms ne sont uniques que par appairage).
     readable = (
-        (name and cc.get("patrouille") == name)
+        (name and cc.get("patrouille") == name
+         and device_matches_pair(db, device, fiche.get("event"), fiche.get("year")))
         or str(device.get("active_fiche_id") or "") == str(fiche["_id"])
         or fiche.get("operator_id_create") == "field:" + str(device.get("_id"))
     )
@@ -4273,8 +4546,6 @@ def field_sos():
     Pas de note : le SOS doit etre le plus rapide possible (un tap + confirm)."""
     device = request.device
     name = device.get("name") or "?"
-    event = device.get("event")
-    year = device.get("year")
 
     data = request.get_json(silent=True) or {}
     try:
@@ -4293,6 +4564,13 @@ def field_sos():
     expires = now + timedelta(hours=24)
 
     db = _get_mongo_db()
+    # Fiche, alerte et diffusion rattachees a l'epreuve active de la tablette,
+    # sinon a l'evenement courant. Un SOS ne doit jamais echouer sur ce calcul.
+    try:
+        event, year = fiche_target_event(db, device)
+    except Exception as exc:
+        logger.warning("[field_sos] evenement courant indisponible: %s", exc)
+        event, year = device.get("event"), device.get("year")
 
     # Idempotence : la tablette renvoie le MEME sos_id tant qu'elle n'a pas
     # recu de confirmation (reseau 4G instable, file hors ligne, double tap).
@@ -4412,7 +4690,11 @@ def field_sos():
     })
 
     # 4) Broadcast SOS a toutes les autres tablettes du meme event/year
-    other_devices = _sos_recipients(db, device, event, year)
+    try:
+        other_devices = _sos_recipients(db, device)
+    except Exception as exc:
+        logger.warning("[field_sos] destinataires indisponibles: %s", exc)
+        other_devices = []
     sos_messages = []
     for other in other_devices:
         sos_messages.append({

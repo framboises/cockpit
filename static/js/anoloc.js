@@ -33,6 +33,17 @@
   var watcherId = "w-" + Math.random().toString(36).slice(2, 10) + "-" + Date.now();
   var lockKeepAliveTimer = null;
 
+  // --- Messages tablettes (compteurs non lus + conversation ouverte) ---
+  // Le cockpit ne recoit rien en temps reel : tout est relu en polling.
+  var UNREAD_POLL_MS = 12000;   // badges par tablette + total
+  var CONV_POLL_MS = 4000;      // conversation ouverte
+  var unreadByDevice = {};      // ObjectId tablette -> nb messages non lus
+  var unreadPrimed = false;     // 1re lecture = reference, pas de toast
+  var unreadDisabled = false;   // 403 : utilisateur sans droit Field
+  var lastUnreadToastAt = 0;
+  var convCtx = null;           // conversation affichee {overlay, deviceId, refresh}
+  var convPollTimer = null;
+
   // --- DOM helpers ---
   function el(tag, attrs, children) {
     var e = document.createElement(tag);
@@ -66,6 +77,18 @@
     buildPanel();
     refresh();
     refreshTimer = setInterval(refresh, REFRESH_MS);
+
+    // Messages entrants des tablettes : compteurs relus meme sans modale
+    // ouverte, suspendus onglet cache, relus des le retour sur l'onglet.
+    pollUnread();
+    setInterval(function () {
+      if (!document.hidden) pollUnread();
+    }, UNREAD_POLL_MS);
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) return;
+      pollUnread();
+      if (convCtx) convCtx.refresh();
+    });
 
     // Unlock device when tab closes (best-effort via sendBeacon)
     window.addEventListener("beforeunload", function () {
@@ -322,6 +345,19 @@
         if (devKindIcon) leftChildren.push(devKindIcon);
         leftChildren.push(devName);
         if (patrolBadge) leftChildren.push(patrolBadge);
+        var devUnread = dev.kind === "tablet" ? unreadCountFor(dev.id) : 0;
+        if (devUnread > 0) {
+          var unreadPill = buildUnreadPill(devUnread);
+          unreadPill.style.cursor = "pointer";
+          unreadPill.title = devUnread + " message(s) non lu(s) - ouvrir la conversation";
+          (function (d) {
+            unreadPill.addEventListener("click", function (e) {
+              e.stopPropagation();
+              openSendMessageModal(d);
+            });
+          })(dev);
+          leftChildren.push(unreadPill);
+        }
         var devRow = el("div", {className: "anoloc-dev-row"}, [
           el("div", {className: "anoloc-dev-left"}, leftChildren),
           devRight,
@@ -459,6 +495,14 @@
               var rawId = String(d.id || "");
               var deviceId = rawId.indexOf("field:") === 0 ? rawId.slice(6) : rawId;
               window.FieldAdmin.openCompose({ device_id: deviceId, device_name: d.name });
+            } else if (d && d.kind === "tablet") {
+              // Accueil : field_admin.js n'y est pas charge, window.FieldAdmin
+              // n'existe pas. On ouvre la conversation de la carte.
+              if (e.originalEvent) {
+                e.originalEvent.preventDefault();
+                e.originalEvent.stopPropagation();
+              }
+              openSendMessageModal(d);
             }
           });
 
@@ -516,6 +560,8 @@
       badge.textContent = "T";
       badge.title = "Tablette terrain";
       container.appendChild(badge);
+      var nUnread = unreadCountFor(dev.id);
+      if (nUnread > 0) container.appendChild(buildUnreadPill(nUnread));
     }
 
     return L.divIcon({
@@ -1233,6 +1279,176 @@
     return m ? m.content : "";
   }
 
+  // === Messages non lus (tablettes -> cockpit) ===
+  function unreadCountFor(anolocId) {
+    var mongoId = tabletMongoId(anolocId);
+    return mongoId ? (unreadByDevice[mongoId] || 0) : 0;
+  }
+
+  function buildUnreadPill(n) {
+    var pill = el("span", {className: "anoloc-unread-pill"}, [
+      materialIcon("chat", "font-size:11px;"),
+      document.createTextNode(n > 9 ? "9+" : String(n)),
+    ]);
+    pill.style.cssText = "display:inline-flex;align-items:center;gap:2px;margin-left:4px;"
+      + "padding:0 5px;height:16px;border-radius:8px;background:#dc2626;color:#fff;"
+      + "font-size:10px;font-weight:800;line-height:16px;white-space:nowrap;"
+      + "box-shadow:0 0 0 1px rgba(255,255,255,0.8);";
+    return pill;
+  }
+
+  function tabletLabel(mongoId) {
+    if (!lastData || !lastData.groups) return null;
+    var wanted = "field:" + mongoId;
+    var gids = Object.keys(lastData.groups);
+    for (var i = 0; i < gids.length; i++) {
+      var devs = lastData.groups[gids[i]].devices || [];
+      for (var j = 0; j < devs.length; j++) {
+        if (devs[j].id === wanted) return devs[j].label || devs[j].name || null;
+      }
+    }
+    return null;
+  }
+
+  function sameUnread(a, b) {
+    var ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    for (var i = 0; i < ka.length; i++) {
+      if (a[ka[i]] !== b[ka[i]]) return false;
+    }
+    return true;
+  }
+
+  function pollUnread() {
+    if (unreadDisabled) return;
+    fetch("/field/admin/unread-by-device", { cache: "no-store", credentials: "same-origin" })
+      .then(function (r) {
+        // 403 : pas de droit sur Field, inutile de reessayer toutes les 12 s.
+        if (r.status === 403) { unreadDisabled = true; return null; }
+        if (!r.ok) return null;
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data || !data.ok) return;
+        var next = data.unread || {};
+        var prev = unreadByDevice;
+        if (unreadPrimed) notifyNewInbound(prev, next);
+        unreadPrimed = true;
+        unreadByDevice = next;
+        if (!sameUnread(prev, next)) applyUnreadToUi();
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  // Toast discret quand un compteur augmente : jamais pour la tablette dont
+  // la conversation est ouverte (le message s'y affiche), au plus un toast
+  // toutes les 8 s (tablettes regroupees).
+  function notifyNewInbound(prev, next) {
+    var names = [];
+    Object.keys(next).forEach(function (did) {
+      if ((next[did] || 0) <= (prev[did] || 0)) return;
+      if (convCtx && convCtx.deviceId === did) return;
+      names.push(tabletLabel(did) || "une tablette");
+    });
+    if (!names.length) return;
+    var now = Date.now();
+    if (now - lastUnreadToastAt < 8000) return;
+    lastUnreadToastAt = now;
+    if (typeof window.showToast === "function") {
+      window.showToast("info", names.length === 1
+        ? "Nouveau message de " + names[0]
+        : "Nouveaux messages : " + names.join(", "), 6000);
+    }
+  }
+
+  function applyUnreadToUi() {
+    var total = 0;
+    Object.keys(unreadByDevice).forEach(function (k) { total += unreadByDevice[k] || 0; });
+    // Total dans l'en-tete du widget Suivi GPS (visible meme replie)
+    var hb = document.getElementById("anoloc-header-badge");
+    if (hb) {
+      var tot = document.getElementById("anoloc-header-unread");
+      if (total > 0) {
+        if (!tot) {
+          tot = buildUnreadPill(total);
+          tot.id = "anoloc-header-unread";
+          hb.appendChild(tot);
+        } else {
+          tot.lastChild.textContent = total > 9 ? "9+" : String(total);
+        }
+        tot.title = total + " message(s) tablette non lu(s)";
+      } else if (tot) {
+        tot.remove();
+      }
+    }
+    if (lastData) {
+      updatePanel(lastData);
+      updateMarkers(lastData);
+    }
+  }
+
+  function markThreadRead(threadId) {
+    fetch("/field/admin/thread/" + encodeURIComponent(threadId) + "/mark-read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": _csrfToken() },
+      body: "{}",
+      credentials: "same-origin",
+    })
+      .then(function () { pollUnread(); })
+      .catch(function () { /* silent */ });
+  }
+
+  // Une seule conversation suivie a la fois : rouvrir la modale remplace
+  // le suivi precedent, jamais deux timers.
+  function startConvPolling(ctx) {
+    stopConvPolling();
+    convCtx = ctx;
+    convPollTimer = setInterval(function () {
+      if (document.hidden || !convCtx) return;
+      convCtx.refresh();
+    }, CONV_POLL_MS);
+  }
+
+  function stopConvPolling() {
+    if (convPollTimer) { clearInterval(convPollTimer); convPollTimer = null; }
+    convCtx = null;
+  }
+
+  function buildThreadBubble(m) {
+    var isField = m.direction === "field_to_cockpit";
+    var bubble = el("div", {className: "anoloc-thread-bubble" + (isField ? " from-field" : " from-cockpit")});
+    if (m.title) {
+      bubble.appendChild(el("div", {className: "anoloc-thread-title", textContent: m.title}));
+    }
+    if (m.body) {
+      bubble.appendChild(el("div", {className: "anoloc-thread-text", textContent: m.body}));
+    }
+    var photoUrl = m.payload && m.payload.photo;
+    if (photoUrl) {
+      var img = el("img", {className: "anoloc-thread-photo"});
+      img.src = photoUrl;
+      bubble.appendChild(img);
+    }
+    var bubbleCodes = (m.payload && Array.isArray(m.payload.codes)) ? m.payload.codes : null;
+    if (bubbleCodes && bubbleCodes.length) {
+      var codesWrap = el("div", {className: "anoloc-thread-codes"});
+      bubbleCodes.forEach(function (c) {
+        var chipEl = el("div", {className: "anoloc-thread-code"});
+        chipEl.appendChild(el("span", {className: "anoloc-thread-code-fmt", textContent: (c.format || "manual").toUpperCase()}));
+        chipEl.appendChild(el("span", {className: "anoloc-thread-code-val", textContent: c.value || ""}));
+        codesWrap.appendChild(chipEl);
+      });
+      bubble.appendChild(codesWrap);
+    }
+    var metaEl = el("div", {className: "anoloc-thread-meta"});
+    var who = isField ? (m.device_name || "Tablette") : (m.from || "Cockpit");
+    var when = "";
+    try { when = new Date(m.created_at).toLocaleTimeString("fr-FR", {hour: "2-digit", minute: "2-digit"}); } catch (e) {}
+    metaEl.textContent = who + (when ? " - " + when : "");
+    bubble.appendChild(metaEl);
+    return bubble;
+  }
+
   function openSendMessageModal(dev) {
     var old = document.getElementById("anoloc-send-msg-modal");
     if (old) old.remove();
@@ -1252,7 +1468,14 @@
     var closeBtn = el("button", {className: "icon-btn anoloc-msg-close"}, [
       materialIcon("close"),
     ]);
-    closeBtn.addEventListener("click", function () { overlay.remove(); });
+    // ctx : conversation suivie par le polling (liste + fil ouvert)
+    var ctx = { overlay: overlay, deviceId: deviceId, threadPanel: null };
+    function closeOverlay() {
+      overlay.remove();
+      if (convCtx === ctx) stopConvPolling();
+      pollUnread();
+    }
+    closeBtn.addEventListener("click", closeOverlay);
     header.appendChild(headerLeft);
     header.appendChild(closeBtn);
     box.appendChild(header);
@@ -1281,20 +1504,40 @@
       if (content) rightPane.appendChild(content);
     }
 
+    function setActiveThread(threadId, panel) {
+      ctx.threadPanel = panel || null;
+      if (threadId) convList.dataset.activeThreadId = String(threadId);
+      else delete convList.dataset.activeThreadId;
+    }
+
+    function reloadList(silent) {
+      return loadConversations(deviceId, convList, function (id) { openThread(id); }, silent);
+    }
+
+    ctx.refresh = function () {
+      if (!overlay.isConnected) { if (convCtx === ctx) stopConvPolling(); return; }
+      reloadList(true);
+      if (ctx.threadPanel && typeof ctx.threadPanel._refreshThread === "function") {
+        ctx.threadPanel._refreshThread(false);
+      }
+    };
+
     function showEmpty() {
       var empty = el("div", {className: "anoloc-msg-empty-pane"}, [
         materialIcon("forum", "font-size:42px;color:#475569;margin-bottom:8px;"),
         el("div", {textContent: "Selectionne une conversation"}),
         el("div", {className: "anoloc-msg-empty-hint", textContent: "ou clique sur \"Nouveau\" pour ecrire."}),
       ]);
+      setActiveThread(null, null);
       showRight(empty);
     }
 
     function showNew() {
       var panel = el("div", {className: "anoloc-msg-new-panel"});
+      setActiveThread(null, null);
       buildNewMessagePanel(panel, deviceId, overlay, function () {
-        // apres envoi reussi : refresh la liste et revenir a l'etat vide
-        loadConversations(deviceId, convList, function (id) { openThread(id); });
+        // apres envoi reussi : refresh la liste
+        reloadList(true);
       });
       showRight(panel);
     }
@@ -1305,9 +1548,10 @@
         it.classList.toggle("is-active", it.dataset.threadId === String(threadId));
       });
       var panel = el("div", {className: "anoloc-msg-thread-panel"});
+      setActiveThread(threadId, panel);
       openThreadView(threadId, panel, overlay, deviceId, function () {
         // refresh liste sans rouvrir le thread
-        loadConversations(deviceId, convList, function (id) { openThread(id); });
+        reloadList(true);
       });
       showRight(panel);
     }
@@ -1330,10 +1574,11 @@
     // choisit explicitement une conversation OU clique sur "Nouveau" : pas
     // de pane droit qui clignote en "Chargement..." sans raison.
     showEmpty();
-    loadConversations(deviceId, convList, function (id) { openThread(id); });
+    reloadList(false);
+    startConvPolling(ctx);
 
     overlay.addEventListener("click", function (e) {
-      if (e.target === overlay) overlay.remove();
+      if (e.target === overlay) closeOverlay();
     });
   }
 
@@ -1454,69 +1699,75 @@
   // === Conversations panel ===
   // Remplit "listEl" avec la liste des threads pour un device.
   // onSelect(threadId) est appele quand l'utilisateur clique un thread.
-  function loadConversations(deviceId, listEl, onSelect) {
-    listEl.textContent = "";
-    listEl.appendChild(el("div", {className: "anoloc-msg-loading", textContent: "Chargement..."}));
+  // Source : /field/admin/threads/<device> (fils + compteur non lus admin),
+  // comme la console Field Dispatch. L'ancienne source (/field/admin/messages
+  // filtree event/year, 100 derniers messages) signalait les reponses par
+  // ack_at (lecture cote tablette), pas par la lecture cockpit.
+  // silent : polling, pas de "Chargement...", pas de redessin si rien n'a
+  // change, defilement conserve.
+  function loadConversations(deviceId, listEl, onSelect, silent) {
+    if (silent && listEl._busy) return Promise.resolve();
+    if (!silent) {
+      listEl._sig = null;
+      listEl.textContent = "";
+      listEl.appendChild(el("div", {className: "anoloc-msg-loading", textContent: "Chargement..."}));
+    }
+    listEl._busy = true;
 
-    var ey = (typeof getCurrentEventYear === "function") ? getCurrentEventYear() : {};
-    var qs = "?device_id=" + encodeURIComponent(deviceId);
-    if (ey.event) qs += "&event=" + encodeURIComponent(ey.event);
-    if (ey.year) qs += "&year=" + encodeURIComponent(ey.year);
-
-    fetch("/field/admin/messages" + qs, { headers: { "X-CSRFToken": _csrfToken() } })
+    return fetch("/field/admin/threads/" + encodeURIComponent(deviceId), {
+      cache: "no-store",
+      credentials: "same-origin",
+    })
       .then(function (r) { return r.json(); })
       .then(function (data) {
+        listEl._busy = false;
+        if (!listEl.isConnected) return;
+        if (!data || !data.ok) {
+          if (!silent) {
+            listEl.textContent = "";
+            listEl.appendChild(el("div", {className: "anoloc-msg-empty", textContent: "Erreur de chargement."}));
+          }
+          return;
+        }
+        var threads = data.threads || [];
+        var activeId = listEl.dataset.activeThreadId || "";
+        var sig = JSON.stringify(threads) + "|" + activeId;
+        if (silent && sig === listEl._sig) return;
+        listEl._sig = sig;
+        var scroll = listEl.scrollTop;
         listEl.textContent = "";
-        if (!data || !data.ok || !data.messages || data.messages.length === 0) {
+        if (threads.length === 0) {
           listEl.appendChild(el("div", {className: "anoloc-msg-empty", textContent: "Aucune conversation."}));
           return;
         }
-        // Grouper par thread : afficher les messages racines (sans thread_id)
-        var roots = [];
-        var replyMap = {};
-        data.messages.forEach(function (m) {
-          if (!m.thread_id) {
-            roots.push(m);
-          } else {
-            if (!replyMap[m.thread_id]) replyMap[m.thread_id] = 0;
-            replyMap[m.thread_id]++;
-          }
-        });
-        if (roots.length === 0) {
-          roots = data.messages;
-        }
-        // Tri : plus recent en premier
-        roots.sort(function (a, b) {
-          var ta = new Date(a.created_at || 0).getTime();
-          var tb = new Date(b.created_at || 0).getTime();
-          return tb - ta;
-        });
-        roots.forEach(function (m) {
-          var replies = m.reply_count || replyMap[m.id] || 0;
-          var row = el("div", {className: "anoloc-conv-item"});
-          row.dataset.threadId = String(m.id);
-          var titleEl = el("div", {className: "anoloc-conv-title", textContent: m.title || m.body || "(sans titre)"});
+        threads.forEach(function (t) {
+          var row = el("div", {className: "anoloc-conv-item" + (t.root_id === activeId ? " is-active" : "")});
+          row.dataset.threadId = String(t.root_id);
+          var title = (t.title && t.title !== "(sans titre)") ? t.title : (t.last_preview || t.title || "(sans titre)");
+          var titleEl = el("div", {className: "anoloc-conv-title", textContent: title});
           var meta = el("div", {className: "anoloc-conv-meta"});
           var when = "";
-          try { when = new Date(m.created_at).toLocaleString("fr-FR", {dateStyle: "short", timeStyle: "short"}); } catch (e) {}
+          try { when = new Date(t.last_at || t.created_at).toLocaleString("fr-FR", {dateStyle: "short", timeStyle: "short"}); } catch (e) {}
           meta.textContent = when;
-          if (replies > 0) {
-            var badge = el("span", {className: "anoloc-conv-replies", textContent: replies + " rep."});
-            meta.appendChild(badge);
+          if (t.reply_count > 0) {
+            meta.appendChild(el("span", {className: "anoloc-conv-replies", textContent: t.reply_count + " rep."}));
           }
-          var hasFieldReply = (data.messages || []).some(function (r) {
-            return (r.thread_id === m.id) && r.direction === "field_to_cockpit" && r.status === "sent";
-          });
-          if (hasFieldReply) row.classList.add("has-new-reply");
+          if (t.unread > 0) {
+            row.classList.add("has-new-reply");
+            meta.appendChild(buildUnreadPill(t.unread));
+          }
           row.appendChild(titleEl);
           row.appendChild(meta);
           row.addEventListener("click", function () {
-            if (typeof onSelect === "function") onSelect(m.id);
+            if (typeof onSelect === "function") onSelect(t.root_id);
           });
           listEl.appendChild(row);
         });
+        if (silent) listEl.scrollTop = scroll;
       })
       .catch(function () {
+        listEl._busy = false;
+        if (silent) return;
         listEl.textContent = "";
         listEl.appendChild(el("div", {className: "anoloc-msg-empty", textContent: "Erreur de chargement."}));
       });
@@ -1526,9 +1777,8 @@
     panel.textContent = "";
     panel.appendChild(el("div", {className: "anoloc-msg-loading", textContent: "Chargement..."}));
 
-    fetch("/field/admin/thread/" + encodeURIComponent(threadId), {
-      headers: { "X-CSRFToken": _csrfToken() },
-    })
+    var threadUrl = "/field/admin/thread/" + encodeURIComponent(threadId);
+    fetch(threadUrl, { cache: "no-store", credentials: "same-origin" })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         panel.textContent = "";
@@ -1539,47 +1789,47 @@
 
         // Thread bubbles
         var thread = el("div", {className: "anoloc-thread-bubbles"});
+        var seen = {};
         (data.messages || []).forEach(function (m) {
-          var isField = m.direction === "field_to_cockpit";
-          var bubble = el("div", {className: "anoloc-thread-bubble" + (isField ? " from-field" : " from-cockpit")});
-
-          if (m.title) {
-            var t = el("div", {className: "anoloc-thread-title", textContent: m.title});
-            bubble.appendChild(t);
-          }
-          if (m.body) {
-            var b = el("div", {className: "anoloc-thread-text", textContent: m.body});
-            bubble.appendChild(b);
-          }
-          var photoUrl = m.payload && m.payload.photo;
-          if (photoUrl) {
-            var img = el("img", {className: "anoloc-thread-photo"});
-            img.src = photoUrl;
-            bubble.appendChild(img);
-          }
-          var bubbleCodes = (m.payload && Array.isArray(m.payload.codes)) ? m.payload.codes : null;
-          if (bubbleCodes && bubbleCodes.length) {
-            var codesWrap = el("div", {className: "anoloc-thread-codes"});
-            bubbleCodes.forEach(function (c) {
-              var chipEl = el("div", {className: "anoloc-thread-code"});
-              var fmtSpan = el("span", {className: "anoloc-thread-code-fmt", textContent: (c.format || "manual").toUpperCase()});
-              var valSpan = el("span", {className: "anoloc-thread-code-val", textContent: c.value || ""});
-              chipEl.appendChild(fmtSpan);
-              chipEl.appendChild(valSpan);
-              codesWrap.appendChild(chipEl);
-            });
-            bubble.appendChild(codesWrap);
-          }
-          var metaEl = el("div", {className: "anoloc-thread-meta"});
-          var who = isField ? (m.device_name || "Tablette") : (m.from || "Cockpit");
-          var when = "";
-          try { when = new Date(m.created_at).toLocaleTimeString("fr-FR", {hour: "2-digit", minute: "2-digit"}); } catch (e) {}
-          metaEl.textContent = who + (when ? " - " + when : "");
-          bubble.appendChild(metaEl);
-          thread.appendChild(bubble);
+          if (m.id) seen[m.id] = true;
+          thread.appendChild(buildThreadBubble(m));
         });
         panel.appendChild(thread);
         thread.scrollTop = thread.scrollHeight;
+        // Le fil est affiche : ses messages entrants sont lus.
+        markThreadRead(threadId);
+
+        // Relecture incrementale (polling de la modale, apres une reponse) :
+        // n'ajoute que les messages nouveaux ; defilement conserve sauf si
+        // l'operateur etait deja en bas du fil (ou vient d'envoyer).
+        panel._refreshThread = function (forceScroll) {
+          if (!panel.isConnected) return;
+          if (panel._busy) {
+            // Relecture deja en vol : apres un envoi, on retente juste apres.
+            if (forceScroll) setTimeout(function () { panel._refreshThread(true); }, 600);
+            return;
+          }
+          panel._busy = true;
+          fetch(threadUrl, { cache: "no-store", credentials: "same-origin" })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              panel._busy = false;
+              if (!d || !d.ok || !panel.isConnected) return;
+              var atBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 60;
+              var added = 0;
+              var inbound = false;
+              (d.messages || []).forEach(function (m) {
+                if (!m.id || seen[m.id]) return;
+                seen[m.id] = true;
+                thread.appendChild(buildThreadBubble(m));
+                added++;
+                if (m.direction === "field_to_cockpit") inbound = true;
+              });
+              if (added && (atBottom || forceScroll)) thread.scrollTop = thread.scrollHeight;
+              if (inbound) markThreadRead(threadId);
+            })
+            .catch(function () { panel._busy = false; });
+        };
 
         // Reply form
         var replySection = el("div", {className: "anoloc-thread-reply"});
@@ -1635,11 +1885,18 @@
                 replyInput.value = "";
                 replyFileInput.value = "";
                 replyPreview.hidden = true;
-                openThreadView(threadId, panel, overlay, deviceId, onAfterReply);
+                // Ajout du message envoye sans reconstruire le fil (garde le
+                // focus de saisie), puis relecture de la liste.
+                panel._refreshThread(true);
                 if (typeof onAfterReply === "function") onAfterReply();
+              } else if (typeof window.showToast === "function") {
+                window.showToast("error", "Echec envoi : " + ((resp && resp.error) || "?"));
               }
             })
-            .catch(function () { replySendBtn.disabled = false; });
+            .catch(function () {
+              replySendBtn.disabled = false;
+              if (typeof window.showToast === "function") window.showToast("error", "Erreur reseau");
+            });
         });
         replyInput.addEventListener("keydown", function (e) {
           if (e.key === "Enter") { e.preventDefault(); replySendBtn.click(); }

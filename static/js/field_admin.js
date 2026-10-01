@@ -18,7 +18,10 @@
   }
 
   function apiGet(url) {
-    return fetch(url).then(function (r) { return r.json(); });
+    // no-store : les listes (messages, non lus, tablettes) sont relues en
+    // polling, une reponse servie depuis un cache figerait l'affichage.
+    return fetch(url, { cache: "no-store", credentials: "same-origin" })
+      .then(function (r) { return r.json(); });
   }
   function apiPost(url, data) {
     return fetch(url, { method: "POST", headers: jsonHeaders(), body: JSON.stringify(data || {}) })
@@ -269,8 +272,18 @@
       loadMessages();
     }, 30000);
 
-    // Poll leger des compteurs non-lus : plus frequent pour reactivite
-    setInterval(loadUnreadByDevice, 8000);
+    // Poll leger des compteurs non-lus (10 s), suspendu quand l'onglet est
+    // cache. init() ne tourne qu'une fois : pas de timer en double.
+    setInterval(function () {
+      if (!document.hidden) loadUnreadByDevice();
+    }, UNREAD_POLL_MS);
+    // Retour sur l'onglet : Chrome a ralenti les minuteries, on relit tout
+    // de suite (compteurs + conversation ouverte).
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) return;
+      loadUnreadByDevice();
+      pollConversation();
+    });
 
     // Reagir aux changements globaux event/year
     document.addEventListener("cockpit:scope-changed", function () {
@@ -924,9 +937,78 @@
     }, 2000);
   }
 
+  // ------------------------------------------------------------------
+  // Evenement d'appairage : par defaut l'evenement courant
+  // (/api/event/current : epreuve active, sinon SAISON), modifiable (autres
+  // evenements actifs, selection du header). Une tablette SAISON voit aussi
+  // les fiches des epreuves actives (field.device_pairs).
+  // ------------------------------------------------------------------
+  function loadCurrentEvent() {
+    return fetch("/api/event/current", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { state.eventCurrent = d || null; return d; })
+      .catch(function () { state.eventCurrent = null; return null; });
+  }
+
+  function renderPairEventChoice() {
+    var row = $("#field-pair-event-row");
+    if (!row) return;
+    var opts = [];
+    function add(ev, yr, suffix) {
+      if (!ev || !yr) return;
+      var key = ev + "|" + yr;
+      if (opts.some(function (o) { return o.key === key; })) return;
+      opts.push({ key: key, event: ev, year: String(yr), label: ev + " / " + yr + suffix });
+    }
+    var cur = state.eventCurrent || {};
+    if (cur.current) add(cur.current.event, cur.current.year, " (evenement courant)");
+    (cur.active || []).forEach(function (a) { add(a.event, a.year, " (actif)"); });
+    var s = currentScope();
+    add(s.event, s.year, " (selection du header)");
+
+    var prev = $("#field-pair-event");
+    var keepKey = (prev && state.pairEventTouched) ? prev.value : "";
+    row.textContent = "";
+    var lab = document.createElement("label");
+    lab.setAttribute("for", "field-pair-event");
+    lab.textContent = "Evenement";
+    row.appendChild(lab);
+    if (!opts.length) {
+      var none = document.createElement("p");
+      none.style.cssText = "font-size:12px; color:var(--muted); margin:0;";
+      none.textContent = "(aucun evenement)";
+      row.appendChild(none);
+      return;
+    }
+    var sel = document.createElement("select");
+    sel.id = "field-pair-event";
+    sel.className = "form-input";
+    opts.forEach(function (o) {
+      var op = document.createElement("option");
+      op.value = o.key;
+      op.textContent = o.label;
+      op.setAttribute("data-event", o.event);
+      op.setAttribute("data-year", o.year);
+      sel.appendChild(op);
+    });
+    if (keepKey && opts.some(function (o) { return o.key === keepKey; })) sel.value = keepKey;
+    sel.addEventListener("change", function () { state.pairEventTouched = true; });
+    row.appendChild(sel);
+  }
+
+  function pairScope() {
+    var sel = $("#field-pair-event");
+    var op = sel && sel.options[sel.selectedIndex];
+    if (op) return { event: op.getAttribute("data-event") || "", year: op.getAttribute("data-year") || "" };
+    return currentScope();
+  }
+
   function openPairModal() {
     refreshScopeUi();
     loadBeaconGroups();
+    state.pairEventTouched = false;
+    renderPairEventChoice();
+    loadCurrentEvent().then(renderPairEventChoice);
     var form = $("#field-pair-form");
     if (form) form.reset();
     var catSel = form && $('select[name="category"]', form);
@@ -980,9 +1062,9 @@
     var form = $("#field-pair-form");
     if (!form) return;
     var fd = new FormData(form);
-    var scope = currentScope();
+    var scope = pairScope();
     if (!scope.event || !scope.year) {
-      _toast("error", "Selectionne un evenement dans le header cockpit");
+      _toast("error", "Choisir l'evenement de la tablette");
       return;
     }
     var payload = {
@@ -1279,12 +1361,19 @@
   //   - thread : les messages d'un fil + zone de reply
   //   - new : formulaire pour creer un nouveau fil
   // ------------------------------------------------------------------
-  var convState = { device: null, view: "list", activeThreadId: null, pollTimer: null };
+  var CONV_POLL_MS = 4000;
+  var UNREAD_POLL_MS = 10000;
+  var convState = {
+    device: null, view: "list", activeThreadId: null, pollTimer: null,
+    renderedThreadId: null, seenMsgIds: {}, threadsSig: null,
+  };
 
   function openConversationModal(device) {
     convState.device = device;
     convState.view = "list";
     convState.activeThreadId = null;
+    convState.renderedThreadId = null;
+    convState.threadsSig = null;
     var modal = $("#field-conv-modal");
     if (!modal) return;
     wireConversationModalOnce(modal);
@@ -1292,12 +1381,19 @@
     switchConvView("list");
     loadThreads();
     modal.hidden = false;
+    // Un seul timer, meme si la modale est rouverte sans avoir ete fermee.
     if (convState.pollTimer) clearInterval(convState.pollTimer);
-    convState.pollTimer = setInterval(function () {
-      if (modal.hidden) return;
-      if (convState.view === "list") loadThreads(true);
-      else if (convState.view === "thread") loadThreadMessages(true);
-    }, 4000);
+    convState.pollTimer = setInterval(pollConversation, CONV_POLL_MS);
+  }
+
+  // Relit la vue affichee (liste des fils ou fil ouvert). Rien si la modale
+  // est fermee ou l'onglet cache.
+  function pollConversation() {
+    if (document.hidden) return;
+    var modal = $("#field-conv-modal");
+    if (!modal || modal.hidden || !convState.device) return;
+    if (convState.view === "list") loadThreads(true);
+    else if (convState.view === "thread") loadThreadMessages(true);
   }
 
   function closeConversationModal() {
@@ -1306,6 +1402,8 @@
     if (convState.pollTimer) { clearInterval(convState.pollTimer); convState.pollTimer = null; }
     convState.device = null;
     convState.activeThreadId = null;
+    convState.renderedThreadId = null;
+    convState.threadsSig = null;
     loadUnreadByDevice();
   }
 
@@ -1372,16 +1470,29 @@
     var box = $("#field-conv-threads");
     if (!box) return;
     if (!silent) {
+      convState.threadsSig = null;
       while (box.firstChild) box.removeChild(box.firstChild);
       var ph = document.createElement("div");
       ph.style.cssText = "text-align:center; color:var(--muted); padding:20px;";
       ph.textContent = "Chargement...";
       box.appendChild(ph);
     }
-    apiGet("/field/admin/threads/" + encodeURIComponent(convState.device.id))
+    var deviceId = convState.device.id;
+    apiGet("/field/admin/threads/" + encodeURIComponent(deviceId))
       .then(function (data) {
         if (!data || !data.ok) return;
-        renderThreadsList(data.threads || []);
+        // Reponse arrivee apres un changement de tablette ou de vue : ignoree.
+        if (!convState.device || convState.device.id !== deviceId) return;
+        if (convState.view !== "list") return;
+        var threads = data.threads || [];
+        // Rien de neuf : on ne redessine pas (pas de clignotement des
+        // vignettes ni de saut de defilement toutes les 4 s).
+        var sig = JSON.stringify(threads);
+        if (silent && sig === convState.threadsSig) return;
+        convState.threadsSig = sig;
+        var scroll = box.scrollTop;
+        renderThreadsList(threads);
+        if (silent) box.scrollTop = scroll;
       })
       .catch(function () { /* silent */ });
   }
@@ -1477,37 +1588,83 @@
     if (input) input.value = "";
   }
 
-  function loadThreadMessages(silent) {
-    if (!convState.activeThreadId) return;
+  // silent : polling, on n'ajoute que les messages nouveaux (pas de
+  // "Chargement...", defilement conserve sauf si l'operateur etait en bas).
+  // forceScroll : apres un envoi, on descend toujours au dernier message.
+  function loadThreadMessages(silent, forceScroll) {
+    var threadId = convState.activeThreadId;
+    if (!threadId) return;
     var list = $("#field-conv-thread-list");
     if (!list) return;
     if (!silent) {
+      convState.renderedThreadId = null;
       while (list.firstChild) list.removeChild(list.firstChild);
       var ph = document.createElement("div");
       ph.style.cssText = "text-align:center; color:var(--muted); padding:20px;";
       ph.textContent = "Chargement...";
       list.appendChild(ph);
     }
-    apiGet("/field/admin/thread/" + encodeURIComponent(convState.activeThreadId))
+    apiGet("/field/admin/thread/" + encodeURIComponent(threadId))
       .then(function (data) {
         if (!data || !data.ok) return;
-        renderThreadMessages(data.messages || []);
+        // L'operateur a change de fil pendant la requete : reponse perimee.
+        if (convState.activeThreadId !== threadId || convState.view !== "thread") return;
+        if (convState.renderedThreadId === threadId) {
+          appendNewThreadMessages(data.messages || [], !!forceScroll);
+        } else {
+          renderThreadMessages(data.messages || []);
+        }
       })
       .catch(function () { /* silent */ });
+  }
+
+  function appendNewThreadMessages(messages, forceScroll) {
+    var list = $("#field-conv-thread-list");
+    if (!list) return;
+    var body = $("#field-conv-thread-body");
+    var atBottom = !body || (body.scrollHeight - body.scrollTop - body.clientHeight < 60);
+    var added = 0;
+    var inbound = false;
+    messages.forEach(function (m) {
+      if (!m || !m.id || convState.seenMsgIds[m.id]) return;
+      convState.seenMsgIds[m.id] = true;
+      if (!added) {
+        var empty = list.querySelector("[data-conv-empty]");
+        if (empty) empty.remove();
+      }
+      list.appendChild(buildThreadBubble(m));
+      added++;
+      if (m.direction === "field_to_cockpit") inbound = true;
+    });
+    if (!added) return;
+    if (body && (atBottom || forceScroll)) body.scrollTop = body.scrollHeight;
+    // Le fil est sous les yeux de l'operateur : le message est lu.
+    if (inbound) markThreadRead(convState.activeThreadId);
   }
 
   function renderThreadMessages(messages) {
     var list = $("#field-conv-thread-list");
     if (!list) return;
     while (list.firstChild) list.removeChild(list.firstChild);
+    convState.renderedThreadId = convState.activeThreadId;
+    convState.seenMsgIds = {};
+    messages.forEach(function (m) { if (m && m.id) convState.seenMsgIds[m.id] = true; });
     if (messages.length === 0) {
       var empty = document.createElement("div");
+      empty.setAttribute("data-conv-empty", "1");
       empty.style.cssText = "text-align:center; color:var(--muted); padding:30px 20px;";
       empty.textContent = "Fil vide.";
       list.appendChild(empty);
       return;
     }
     messages.forEach(function (m) {
+      list.appendChild(buildThreadBubble(m));
+    });
+    var body = $("#field-conv-thread-body");
+    if (body) body.scrollTop = body.scrollHeight;
+  }
+
+  function buildThreadBubble(m) {
       var isInbound = m.direction === "field_to_cockpit";
       var bubble = document.createElement("div");
       bubble.style.cssText = "max-width:78%; padding:8px 12px; border-radius:12px; "
@@ -1563,10 +1720,7 @@
       meta.style.cssText = "font-size:10px; opacity:0.7; margin-top:4px; text-align:right;";
       meta.textContent = m.created_at ? formatRelative(m.created_at) : "";
       bubble.appendChild(meta);
-      list.appendChild(bubble);
-    });
-    var body = $("#field-conv-thread-body");
-    if (body) body.scrollTop = body.scrollHeight;
+      return bubble;
   }
 
   function sendReplyInThread() {
@@ -1589,7 +1743,7 @@
         sendBtn.disabled = false;
         if (data && data.ok) {
           input.value = "";
-          loadThreadMessages();
+          loadThreadMessages(true, true);
         } else {
           _toast("error", "Echec envoi : " + ((data && data.error) || "?"));
         }
@@ -1602,6 +1756,7 @@
 
   function markThreadRead(rootId) {
     apiPost("/field/admin/thread/" + encodeURIComponent(rootId) + "/mark-read", {})
+      .then(function () { loadUnreadByDevice(); })
       .catch(function () { /* silent */ });
   }
 
@@ -1646,18 +1801,56 @@
   }
 
   // Charge le nombre de messages non lus par tablette (pour badge dans la table)
+  var unreadPrimed = false;       // 1re lecture : reference, pas de toast
+  var lastUnreadToastAt = 0;
   function loadUnreadByDevice() {
     apiGet("/field/admin/unread-by-device")
       .then(function (data) {
         if (!data || !data.ok) return;
-        state.unreadByDevice = data.unread || {};
+        var next = data.unread || {};
+        if (unreadPrimed) notifyNewInbound(state.unreadByDevice || {}, next);
+        unreadPrimed = true;
+        state.unreadByDevice = next;
         // Rafraichir juste les badges sans recreer toute la table
         updateUnreadBadges();
       })
       .catch(function () { /* silent */ });
   }
 
+  // Toast discret quand un compteur augmente. Pas pour la tablette dont la
+  // conversation est ouverte (le message s'y affiche deja), et au plus un
+  // toast toutes les 8 s (regroupe les tablettes).
+  function notifyNewInbound(prev, next) {
+    var modal = $("#field-conv-modal");
+    var openId = (modal && !modal.hidden && convState.device) ? convState.device.id : null;
+    var names = [];
+    Object.keys(next).forEach(function (did) {
+      if ((next[did] || 0) <= (prev[did] || 0)) return;
+      if (did === openId) return;
+      var d = (state.devices || []).find(function (x) { return x.id === did; });
+      names.push(d ? d.name : "une tablette");
+    });
+    if (!names.length) return;
+    var now = Date.now();
+    if (now - lastUnreadToastAt < 8000) return;
+    lastUnreadToastAt = now;
+    _toast("info", names.length === 1
+      ? "Nouveau message de " + names[0]
+      : "Nouveaux messages : " + names.join(", "));
+  }
+
   function updateUnreadBadges() {
+    // Total global (en-tete "Tablettes enrolees")
+    var totalEl = $("#field-unread-total");
+    if (totalEl) {
+      var total = 0;
+      Object.keys(state.unreadByDevice || {}).forEach(function (k) {
+        total += (state.unreadByDevice[k] || 0);
+      });
+      totalEl.hidden = total === 0;
+      totalEl.textContent = total > 99 ? "99+" : String(total);
+      totalEl.title = total + " message(s) non lu(s)";
+    }
     var rows = document.querySelectorAll("#field-devices-tbody tr[data-device-id]");
     Array.prototype.forEach.call(rows, function (tr) {
       var did = tr.getAttribute("data-device-id");

@@ -152,7 +152,12 @@ def _check_admin():
     if isinstance(roles, str):
         roles = [roles]
     max_level = max((ROLE_HIERARCHY.get(r, 0) for r in roles), default=0)
-    if max_level < ROLE_HIERARCHY.get("admin", 3):
+    # super_admin global = admin partout (meme regle que role_required)
+    from app import SUPER_ADMIN_ROLE, request_admin_grant
+    if SUPER_ADMIN_ROLE in (payload.get("global_roles") or []):
+        max_level = ROLE_HIERARCHY.get("admin", 3)
+    # Page d'administration accordee par un groupe (app.ADMIN_PAGE_REGISTRY)
+    if max_level < ROLE_HIERARCHY.get("admin", 3) and not request_admin_grant(payload):
         return jsonify({"error": "Admin required"}), 403
     effective_role = "admin" if max_level >= ROLE_HIERARCHY.get("admin", 3) else (roles[0] if roles else "user")
     payload["roles"] = [r for r in ROLE_ORDER if ROLE_HIERARCHY.get(r, 0) <= ROLE_HIERARCHY.get(effective_role, 0)]

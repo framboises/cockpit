@@ -17,7 +17,7 @@
   var API = {
     analyse: "/api/meteo/analyse",
     vigilance: "/api/meteo/vigilance",
-    sequence: "/api/meteo/radar/sequence?heures=3",
+    sequence: "/api/meteo/radar/sequence?minutes=60",
     etat: "/api/meteo/etat"
   };
 
@@ -140,17 +140,51 @@
     }
   }
 
+  // Echelle de tools/Meteo/grille.py (PALETTE_MMH) : chaque couleur couvre
+  // [borne precedente, borne[. A modifier EN MEME TEMPS que la palette de
+  // rendu, sinon la legende ment sur les images.
+  var LEGENDE_RADAR = [
+    { de: 0.2, rgb: "150,210,255" },
+    { de: 1,   rgb: "100,170,255" },
+    { de: 2.5, rgb: "50,120,245" },
+    { de: 5,   rgb: "40,200,120" },
+    { de: 10,  rgb: "245,220,60" },
+    { de: 20,  rgb: "250,150,40" },
+    { de: 40,  rgb: "235,60,50" },
+    { de: 80,  rgb: "170,30,110" }
+  ];
+
+  function majBoutonsLecture() {
+    var enCours = !!radar.timer;
+    var play = document.getElementById("radar-play");
+    var pause = document.getElementById("radar-pause");
+    if (play) play.classList.toggle("active", enCours);
+    if (pause) pause.classList.toggle("active", !enCours);
+  }
+
   function jouer() {
     arreter();
     radar.timer = setInterval(function () { afficherImage(radar.index + 1); }, 550);
-    var b = document.getElementById("radar-play");
-    if (b) b.querySelector("span").textContent = "pause";
+    majBoutonsLecture();
   }
 
   function arreter() {
     if (radar.timer) { clearInterval(radar.timer); radar.timer = null; }
-    var b = document.getElementById("radar-play");
-    if (b) b.querySelector("span").textContent = "play_arrow";
+    majBoutonsLecture();
+  }
+
+  function construireLegende() {
+    var legende = el("div", "radar-legende");
+    legende.appendChild(el("span", "radar-legende-titre", "mm/h"));
+    var echelle = el("div", "radar-legende-echelle");
+    LEGENDE_RADAR.forEach(function (c) {
+      var case_ = el("div", "radar-legende-case");
+      case_.appendChild(el("span", "radar-legende-couleur")).style.background = "rgb(" + c.rgb + ")";
+      case_.appendChild(el("span", "radar-legende-valeur", String(c.de).replace(".", ",")));
+      echelle.appendChild(case_);
+    });
+    legende.appendChild(echelle);
+    return legende;
   }
 
   function basculerRadar() {
@@ -196,7 +230,14 @@
 
   function construireBarre() {
     var existante = document.getElementById("radar-barre");
-    if (existante) { existante.style.display = "flex"; return; }
+    if (existante) {
+      // La sequence est rechargee a chaque ouverture : son nombre d'images
+      // varie avec la fenetre glissante, le curseur doit suivre.
+      var c = existante.querySelector(".radar-curseur");
+      if (c) c.max = Math.max(0, radar.images.length - 1);
+      existante.style.display = "flex";
+      return;
+    }
 
     var conteneur = document.getElementById("cockpit-map");
     if (!conteneur) return;
@@ -206,10 +247,15 @@
 
     var play = el("button", "radar-btn");
     play.id = "radar-play";
+    play.title = "Lecture";
     play.appendChild(el("span", "material-symbols-outlined", "play_arrow"));
-    play.addEventListener("click", function () {
-      if (radar.timer) arreter(); else jouer();
-    });
+    play.addEventListener("click", jouer);
+
+    var pause = el("button", "radar-btn active");
+    pause.id = "radar-pause";
+    pause.title = "Pause";
+    pause.appendChild(el("span", "material-symbols-outlined", "pause"));
+    pause.addEventListener("click", arreter);
 
     var curseur = document.createElement("input");
     curseur.type = "range";
@@ -229,10 +275,18 @@
 
     var source = el("span", "radar-source", "Source : Meteo-France");
 
-    barre.appendChild(play);
-    barre.appendChild(curseur);
-    barre.appendChild(infos);
-    barre.appendChild(source);
+    var controles = el("div", "radar-ligne");
+    controles.appendChild(play);
+    controles.appendChild(pause);
+    controles.appendChild(curseur);
+    controles.appendChild(infos);
+
+    var bas = el("div", "radar-ligne radar-ligne-bas");
+    bas.appendChild(construireLegende());
+    bas.appendChild(source);
+
+    barre.appendChild(controles);
+    barre.appendChild(bas);
     conteneur.appendChild(barre);
 
     // Leaflet capte les evenements souris : sans cela, deplacer le curseur

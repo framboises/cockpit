@@ -90,6 +90,7 @@
             <section class="widget-card" style="margin-top:16px;">
                 <header class="widget-header">
                     <h3><span class="material-symbols-outlined" style="vertical-align:middle;">tablet</span> Tablettes enrolees</h3>
+                    <span id="field-unread-total" hidden style="margin-left:8px; min-width:20px; height:20px; padding:0 6px; background:#dc2626; color:#fff; font-size:11px; font-weight:800; border-radius:10px; line-height:20px; text-align:center;"></span>
                     <div id="field-admin-count" style="font-size:12px; color:var(--muted); margin-left:auto;"></div>
                 </header>
                 <div class="widget-body" id="field-admin-body">
@@ -144,6 +145,12 @@
                         nombre de propositions indique, la fiche passe dans la file du service,
                         traitee par ses responsables sur
                         <a href="/dispatch-service" style="color:var(--brand); font-weight:600;">/dispatch-service</a>.
+                    </p>
+                    <p style="font-size:12px; margin:0 0 12px; line-height:1.5; padding:8px 10px; border-radius:6px; background:rgba(37,99,235,0.08); color:var(--text);">
+                        <span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle; color:var(--brand);">group</span>
+                        Les responsables de service se definissent dans
+                        <a href="/edit" style="color:var(--brand); font-weight:600;">Configuration &gt; Groupes</a> :
+                        cocher 'Responsable de service' sur un groupe, ses categories determinent la file visible.
                     </p>
                     <div id="dispatch-cfg-list" class="dcfg-list">
                         <div style="text-align:center; color:var(--muted); padding:16px;">Chargement...</div>
@@ -934,17 +941,6 @@
   .dcfg-grid .form-input { font-size:12px; padding:4px 6px; }
   .dcfg-levels { display:flex; gap:10px; flex-wrap:wrap; align-items:center; font-size:12px; }
   .dcfg-levels label, .dcfg-grid label.dcfg-check { display:inline-flex; flex-direction:row; align-items:center; gap:4px; cursor:pointer; color:inherit; }
-  .dcfg-managers { margin-top:8px; font-size:12px; }
-  .dcfg-chips { display:flex; flex-wrap:wrap; gap:6px; margin:4px 0; }
-  .dcfg-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 4px 2px 8px; border-radius:12px; background:rgba(37,99,235,0.12); color:inherit; font-size:12px; }
-  .dcfg-chip small { color:var(--muted); }
-  .dcfg-chip button { border:none; background:transparent; cursor:pointer; font-size:14px; line-height:1; padding:0 4px; color:var(--muted); }
-  .dcfg-chip button:hover { color:#dc2626; }
-  .dcfg-ac { position:relative; max-width:360px; }
-  .dcfg-ac-list { position:absolute; z-index:50; left:0; right:0; top:100%; background:var(--card, #fff); border:1px solid var(--line); border-radius:6px; max-height:220px; overflow:auto; box-shadow:0 6px 18px rgba(0,0,0,0.15); }
-  .dcfg-ac-item { padding:6px 8px; cursor:pointer; font-size:12px; }
-  .dcfg-ac-item:hover, .dcfg-ac-item.is-active { background:rgba(37,99,235,0.12); }
-  .dcfg-ac-item small { color:var(--muted); margin-left:6px; }
   .dcfg-metiers-box { display:flex; flex-wrap:wrap; gap:6px 14px; padding:8px; border:1px solid var(--line); border-radius:6px; max-height:200px; overflow:auto; font-size:12px; }
   .dcfg-metiers-box label { display:inline-flex; align-items:center; gap:4px; cursor:pointer; }
   .field-dev-metiers { display:flex; align-items:center; gap:4px; margin-top:3px; font-size:11px; color:var(--muted); }

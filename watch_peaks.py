@@ -146,6 +146,11 @@ def edition_window(db, event, year):
     Mieux vaut ne rien rendre qu'une fenetre inventee : elle attraperait les
     releves de l'edition voisine.
     """
+    # SAISON (main courante permanente, sans dates) n'a jamais de fenetre de
+    # course : sans cette garde, une date de course saisie par erreur ou un
+    # historique_controle range sous SAISON lui en fabriquerait une.
+    if str(event or "").strip().upper() == "SAISON":
+        return None, None
     course = resolve_race_dt(db, event, year)
     if course is None:
         return None, None
@@ -292,7 +297,7 @@ def list_editions(db, now_utc=None):
     for doc in db["parametrages"].find({}, {"event": 1, "year": 1}):
         event = doc.get("event")
         annee = _ws._safe_int(doc.get("year"))
-        if not event or annee is None:
+        if not event or annee is None or str(event).strip().upper() == "SAISON":
             continue
         couples.add((event, annee))
 

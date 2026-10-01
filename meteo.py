@@ -85,6 +85,19 @@ def _db():
     return db
 
 
+def _iso_utc(valeur):
+    """Horodatage des grilles radar/PIAF, stocke en UTC naif par tools/Meteo.
+
+    Sans suffixe, new Date() cote navigateur le lit comme une heure LOCALE :
+    le radar s'affichait avec 2 h de retard en ete.
+    """
+    if valeur is None:
+        return None
+    if valeur.tzinfo is not None:
+        valeur = valeur.astimezone(timezone.utc).replace(tzinfo=None)
+    return valeur.isoformat() + "Z"
+
+
 def _config_doc():
     return _db()["parametrages"].find_one(
         {"event": "__GLOBAL__", "year": "__GLOBAL__"}) or {}
@@ -355,7 +368,7 @@ def analyse():
         "sol": sol,
         "sol_serie": list(reversed(sol_serie)),
         "radar": {
-            "valid_at": radar["valid_at"].isoformat() if radar else None,
+            "valid_at": _iso_utc(radar["valid_at"]) if radar else None,
             "max_mmh": radar.get("max_mmh") if radar else None,
             "png": f"/static/meteo/radar/{radar['png_path']}" if radar else None,
             "bbox": radar.get("bbox") if radar else None,
@@ -394,12 +407,15 @@ def sequence_radar():
     collecte, une fois, pour que les deux flux partagent la meme grille.
     """
     db = _db()
+    # Profondeur d'observation passee. Le radar sert a voir ce qui arrive :
+    # une heure suffit pour lire le deplacement des cellules, la suite est de
+    # la prevision PIAF.
     try:
-        heures = max(1, min(12, int(request.args.get("heures", 3))))
+        minutes = max(15, min(720, int(request.args.get("minutes", 60))))
     except ValueError:
-        heures = 3
+        minutes = 60
 
-    depuis = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=heures)
+    depuis = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=minutes)
     images = []
 
     for document in db["meteo_grilles"].find(
@@ -407,7 +423,7 @@ def sequence_radar():
             {"valeurs": 0}).sort("valid_at", 1):
         images.append({
             "flux": "observation",
-            "valid_at": document["valid_at"].isoformat(),
+            "valid_at": _iso_utc(document["valid_at"]),
             "url": f"/static/meteo/radar/{document['png_path']}",
             "max_mmh": document.get("max_mmh"),
         })
@@ -419,7 +435,7 @@ def sequence_radar():
                 {"valeurs": 0}).sort("echeance_min", 1):
             images.append({
                 "flux": "prevision",
-                "valid_at": document["valid_at"].isoformat(),
+                "valid_at": _iso_utc(document["valid_at"]),
                 "echeance_min": document.get("echeance_min"),
                 "url": f"/static/meteo/radar/{document['png_path']}",
                 "max_mmh": document.get("max_mmh"),

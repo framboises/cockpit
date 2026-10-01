@@ -124,6 +124,12 @@ def race_date(db, event, year, param=None):
 def edition_info(db, event, year, now_utc=None):
     now_utc = now_utc or datetime.now(timezone.utc)
     param = _param_doc(db, event, year)
+    if is_saison(event):
+        # SAISON : pas de dates (reconnue par son nom), fenetre = annee civile.
+        start, end = _saison_bounds(year, now_utc)
+        return {"event": event, "year": int(year), "race_date": None, "public_days": [],
+                "window_start": start, "window_end": end, "has_param": bool(param),
+                "saison": True}
     gh = (param.get("data") or {}).get("globalHoraires") or {}
     public_days = sorted({(d.get("date") if isinstance(d, dict) else str(d))[:10]
                           for d in gh.get("dates") or [] if d})
@@ -192,12 +198,29 @@ def _counter(items):
     return dict(sorted(out.items(), key=lambda kv: -kv[1]))
 
 
-def pcorg_stats(fiches, race_day=None, detail=True):
+def is_saison(event):
+    """SAISON = main courante permanente du site (reconnue par son NOM)."""
+    return str(event or "").strip().upper() == "SAISON"
+
+
+def _saison_bounds(year, now_utc=None):
+    """Annee civile (Paris) [1er janvier y, 1er janvier y+1[ plafonnee a now."""
+    now_utc = now_utc or datetime.now(timezone.utc)
+    start = datetime(int(year), 1, 1, tzinfo=TZ_PARIS).astimezone(timezone.utc)
+    end = datetime(int(year) + 1, 1, 1, tzinfo=TZ_PARIS).astimezone(timezone.utc)
+    return start, min(end, now_utc)
+
+
+def pcorg_stats(fiches, race_day=None, detail=True, group="day"):
     """Statistiques d'une edition a partir de ses fiches (pur, testable).
 
     race_day : date de course (Paris) pour l'offset J-x / J+x de chaque jour.
     detail=False : version reduite pour les editions de comparaison.
+    group="month" (SAISON) : `par_mois` remplace `par_jour` (365 lignes par
+    jour feraient exploser le prompt et n'ont pas de jour de course).
     """
+    if group == "month":
+        return _pcorg_stats_month(fiches, detail)
     by_day = {}
     hours = [0] * 24
     durations_by_cat = {}
@@ -269,15 +292,47 @@ def pcorg_stats(fiches, race_day=None, detail=True):
     return out
 
 
+def _pcorg_stats_month(fiches, detail=True):
+    """pcorg_stats regroupe par mois (SAISON) : agrege les jours en mois."""
+    out = pcorg_stats(fiches, None, detail=detail, group="day")
+    months = {}
+    for d in out.pop("par_jour", []):
+        m = months.setdefault(d["date"][:7], {"mois": d["date"][:7], "total": 0, "majeures": 0,
+                                              "jours_actifs": 0, "par_categorie": {}})
+        m["total"] += d["total"]
+        m["majeures"] += d["majeures"]
+        m["jours_actifs"] += 1
+        for cat, n in (d.get("par_categorie") or {}).items():
+            m["par_categorie"][cat] = m["par_categorie"].get(cat, 0) + n
+    rows = []
+    for k in sorted(months):
+        row = months[k]
+        row["par_categorie"] = dict(sorted(row["par_categorie"].items(), key=lambda kv: -kv[1]))
+        if not detail:
+            row.pop("par_categorie", None)
+        rows.append(row)
+    out["par_mois"] = rows
+    for f in out.get("fiches_majeures") or []:
+        f.pop("offset", None)
+    return out
+
+
 def block_main_courante(db, event, year, race_day):
     fiches = load_fiches(db, event, year)
     if not fiches:
         raise ValueError("aucune fiche main courante pour cette edition")
-    stats = pcorg_stats(fiches, race_day, detail=True)
+    if is_saison(event):
+        stats = pcorg_stats(fiches, None, detail=True, group="month")
+    else:
+        stats = pcorg_stats(fiches, race_day, detail=True)
     try:
-        kpis = _ps().compute_kpis(db, event, year,
-                                  datetime(2000, 1, 1, tzinfo=timezone.utc),
-                                  datetime(2100, 1, 1, tzinfo=timezone.utc))
+        # SAISON : compute_kpis filtre year in [y-1, y] (nuit du Nouvel An) ;
+        # on borne donc ts a l'annee civile pour ne compter que SAISON/<y>.
+        k0, k1 = ((_saison_bounds(year, datetime(2100, 1, 1, tzinfo=timezone.utc)))
+                  if is_saison(event) else
+                  (datetime(2000, 1, 1, tzinfo=timezone.utc),
+                   datetime(2100, 1, 1, tzinfo=timezone.utc)))
+        kpis = _ps().compute_kpis(db, event, year, k0, k1)
         stats["kpis_cockpit"] = {k: kpis.get(k) for k in (
             "total", "open", "closed", "avg_duration_min", "top_operators")}
     except Exception as exc:
@@ -297,7 +352,47 @@ def previous_years(db, event, year, limit=MAX_PREV_EDITIONS):
     return sorted(set(years), reverse=True)[:limit]
 
 
+def _same_doy(dt, year):
+    """Meme date/heure (Paris) transposee dans `year` (29/02 -> 28/02)."""
+    loc = dt.astimezone(TZ_PARIS).replace(tzinfo=None)
+    try:
+        loc = loc.replace(year=int(year))
+    except ValueError:
+        loc = loc.replace(year=int(year), day=28)
+    return loc.replace(tzinfo=TZ_PARIS).astimezone(timezone.utc)
+
+
+def block_comparaison_saison(db, event, year, now_utc=None):
+    """SAISON : annees precedentes par MOIS ; si l'annee courante est en cours,
+    les annees precedentes sont plafonnees au meme jour de l'annee (sinon on
+    compare 9 mois a 12)."""
+    now_utc = now_utc or datetime.now(timezone.utc)
+    _, cur_end = _saison_bounds(year, now_utc)
+    in_progress = cur_end < _saison_bounds(year, datetime(2100, 1, 1, tzinfo=timezone.utc))[1]
+    out = []
+    for y in previous_years(db, event, year):
+        fiches = load_fiches(db, event, y)
+        cap = None
+        if in_progress:
+            cap = _same_doy(cur_end, y)
+            fiches = [f for f in fiches if isinstance(f.get("ts"), datetime)
+                      and as_utc(f["ts"]) <= cap]
+        st = pcorg_stats(fiches, None, detail=False, group="month")
+        out.append({"annee": y, "plafonnee_au": paris_str(cap, "%d/%m") if cap else None,
+                    "total": st["total"], "majeures": st["majeures"],
+                    "par_categorie": st["par_categorie"], "par_urgence": st["par_urgence"],
+                    "duree_min": st["duree_min"], "sos_tablette": st["sos_tablette"],
+                    "par_mois": st["par_mois"]})
+    if not out:
+        raise ValueError("aucune annee SAISON precedente dans la main courante")
+    return {"editions": out,
+            "note": ("annee en cours : annees precedentes plafonnees au meme jour de l'annee"
+                     if in_progress else "annees civiles completes")}
+
+
 def block_comparaison(db, event, year):
+    if is_saison(event):
+        return block_comparaison_saison(db, event, year)
     out = []
     for y in previous_years(db, event, year):
         rd = race_date(db, event, y)
@@ -569,12 +664,62 @@ def _caveats(dataset):
     return notes
 
 
+SAISON_NON_APPLICABLE = {
+    "frequentation": "non applicable a SAISON : le controle d'acces ne compte que les epreuves "
+                     "(jours publics), pas l'exploitation courante du site",
+    "billetterie": "non applicable a SAISON : pas de billetterie ni de jours publics",
+    "meteo": "non applicable a SAISON : la meteo est rattachee aux jours publics d'une epreuve",
+    "alertes": "non applicable a SAISON : l'historique des alertes n'est conserve que 7 jours "
+               "(TTL), il ne couvre pas une annee",
+}
+
+
+def _non_applicable(raison):
+    return {"statut": "non_applicable", "erreur": raison, "ms": 0}
+
+
+def _build_saison(db, event, year, info, t0):
+    """RETEX SAISON : main courante par mois, comparaison aux annees SAISON
+    precedentes (plafonnees au meme jour si l'annee est en cours), Field.
+    Billetterie, meteo et alertes : non applicables (note explicite)."""
+    blocs = {
+        "main_courante": _run_source("main_courante", block_main_courante, db, event, year, None),
+        "comparaison_editions": _run_source("comparaison_editions", block_comparaison,
+                                            db, event, year),
+        "field": _run_source("field", block_field, db, event, year, None),
+    }
+    for name, raison in SAISON_NON_APPLICABLE.items():
+        blocs[name] = _non_applicable(raison)
+    dataset = {"edition": jsonable(dict(info)), "blocs": blocs}
+    notes = [
+        "SAISON = main courante permanente du site hors epreuves : pas de jour de course, "
+        "les periodes se comparent par MOIS et a dates calendaires egales, jamais par offset.",
+        "Les montages / demontages d'epreuves appartiennent a l'epreuve, pas a SAISON : "
+        "un creux d'activite SAISON pendant une epreuve est attendu.",
+        "Le volume de fiches main courante depend aussi des pratiques de saisie "
+        "(Prysm SQL, Cockpit, tablettes) : un ecart entre annees n'est pas forcement "
+        "un ecart d'activite.",
+    ]
+    cmp_ = blocs["comparaison_editions"]
+    if cmp_["statut"] == "ok" and cmp_["data"].get("note"):
+        notes.append("Comparaison : " + cmp_["data"]["note"] + ".")
+    dataset["avertissements"] = notes
+    dataset["blocs_indisponibles"] = [n for n, b in blocs.items()
+                                      if b["statut"] not in ("ok", "non_applicable")]
+    dataset["blocs_non_applicables"] = [n for n, b in blocs.items()
+                                        if b["statut"] == "non_applicable"]
+    dataset["duree_ms"] = int(round((time.perf_counter() - t0) * 1000))
+    return dataset
+
+
 def build(db, event, year, now_utc=None):
     """Jeu de donnees complet de l'edition. Ne leve pas pour un bloc."""
     t0 = time.perf_counter()
     year = int(year)
     info = edition_info(db, event, year, now_utc)
     rd = date.fromisoformat(info["race_date"]) if info["race_date"] else None
+    if is_saison(event):
+        return _build_saison(db, event, year, info, t0)
     blocs = {
         "main_courante": _run_source("main_courante", block_main_courante, db, event, year, rd),
         "comparaison_editions": _run_source("comparaison_editions", block_comparaison,
@@ -653,15 +798,35 @@ FORMAT DE SORTIE : un objet JSON strict, sans texte autour, avec exactement ces 
 - "recommandations_prochaine_edition" : puces "- " concretes et priorisees (dimensionnement, horaires, zones), chacune reliee a un constat chiffre."""
 
 
+SAISON_PROMPT_NOTE = """
+
+CAS SAISON (main courante permanente du site, hors epreuves) : l'"edition" est une annee civile, sans jour de course ni jours publics.
+- Pas d'offset : la "chronologie" se fait par MOIS (bloc main_courante.par_mois), et les annees se comparent mois par mois ou a dates calendaires egales (comparaison_editions.par_mois, plafonnee au meme jour si l'annee est en cours).
+- Un bloc dont "statut" vaut "non_applicable" n'est PAS une donnee manquante : ecris "non applicable a SAISON" dans la section concernee, sans en tirer de conclusion.
+- "frequentation" et "recommandations_prochaine_edition" portent sur l'exploitation courante du site (annee suivante), pas sur une epreuve."""
+
+
 def build_prompts(dataset):
+    def _bloc(b):
+        if b["statut"] == "ok":
+            return {"statut": "ok", "donnees": b.get("data")}
+        if b["statut"] == "non_applicable":
+            return {"statut": "non_applicable", "raison": b.get("erreur")}
+        return {"statut": "indisponible", "raison": b.get("erreur")}
+
     payload = {
         "edition": dataset.get("edition"),
         "avertissements": dataset.get("avertissements"),
-        "blocs": {n: ({"statut": "ok", "donnees": b.get("data")} if b["statut"] == "ok"
-                      else {"statut": "indisponible", "raison": b.get("erreur")})
-                  for n, b in (dataset.get("blocs") or {}).items()},
+        "blocs": {n: _bloc(b) for n, b in (dataset.get("blocs") or {}).items()},
     }
     ed = dataset.get("edition") or {}
+    if is_saison(ed.get("event")):
+        user = ("Donnees de SAISON %s (main courante permanente, annee civile, "
+                "fenetre %s -> %s).\n\n```json\n%s\n```\n\n"
+                "Redige le RETEX au format JSON demande."
+                % (ed.get("year"), ed.get("window_start"), ed.get("window_end"),
+                   json.dumps(payload, ensure_ascii=False, separators=(",", ":"))))
+        return SYSTEM_PROMPT + SAISON_PROMPT_NOTE, user
     user = ("Donnees de l'edition %s %s (date de course : %s).\n\n```json\n%s\n```\n\n"
             "Redige le RETEX au format JSON demande."
             % (ed.get("event"), ed.get("year"), ed.get("race_date"),
@@ -869,10 +1034,16 @@ def _annexes(dataset):
     mc = blocs.get("main_courante") or {}
     if mc.get("statut") == "ok":
         d = mc["data"]
-        parts.append("<h3>Main courante par jour</h3>")
-        parts.append(_table(["Date", "Jour", "Offset", "Fiches", "Majeures"],
-                            [[r["date"], r["jour"], _offset_label(r.get("offset")), r["total"],
-                              r["majeures"]] for r in d.get("par_jour") or []]))
+        if d.get("par_mois") is not None:
+            parts.append("<h3>Main courante par mois</h3>")
+            parts.append(_table(["Mois", "Fiches", "Majeures", "Jours actifs"],
+                                [[r["mois"], r["total"], r["majeures"], r.get("jours_actifs")]
+                                 for r in d.get("par_mois") or []]))
+        else:
+            parts.append("<h3>Main courante par jour</h3>")
+            parts.append(_table(["Date", "Jour", "Offset", "Fiches", "Majeures"],
+                                [[r["date"], r["jour"], _offset_label(r.get("offset")), r["total"],
+                                  r["majeures"]] for r in d.get("par_jour") or []]))
         parts.append("<h3>Par categorie</h3>")
         dur = d.get("duree_min_par_categorie") or {}
         parts.append(_table(["Categorie", "Fiches", "Duree mediane (min)", "Duree p90 (min)"],
@@ -933,6 +1104,12 @@ def _annexes(dataset):
         parts.append(_table(["Bloc", "Raison"],
                             [[BLOCK_LABELS.get(n, n), (blocs.get(n) or {}).get("erreur")]
                              for n in indispo]))
+    na = dataset.get("blocs_non_applicables") or []
+    if na:
+        parts.append("<h3>Blocs non applicables</h3>")
+        parts.append(_table(["Bloc", "Raison"],
+                            [[BLOCK_LABELS.get(n, n), (blocs.get(n) or {}).get("erreur")]
+                             for n in na]))
     return "".join(parts)
 
 

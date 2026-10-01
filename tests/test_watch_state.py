@@ -543,7 +543,7 @@ class FakePeaks:
     def list_editions(self, db, now_utc=None):
         return list(self._editions)
 
-    def cached_peak(self, db, event, year, now_utc=None):
+    def cached_peak(self, db, event, year, location_id=None, now_utc=None):
         self.demandes.append((event, year))
         return self._pics.get((event, year), (None, None))
 

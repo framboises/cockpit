@@ -245,9 +245,13 @@ def read_active_alerts(db, event, year, now_utc):
     porte aussi le niveau de gravite. Un filtre, pas deux.
 
     `event` et `year` restent dans la signature : ils ne servent plus a
-    filtrer, mais les retirer casserait les appelants sans rien gagner, et
-    ils redeviendront utiles le jour ou le moteur d'alertes resoudra
-    toujours son evenement.
+    filtrer, mais les retirer casserait les appelants sans rien gagner.
+
+    Depuis le 01/10/2026 le moteur resout TOUJOURS son evenement
+    (event_courant.current_event : epreuve active ou SAISON). On garde
+    pourtant l'absence de filtre : les alertes main courante portent
+    l'evenement de la FICHE (epreuve secondaire active, SAISON pendant une
+    bascule), et le cockpit ne filtre toujours pas son bandeau.
 
     `now_utc` est CONSCIENT du fuseau : alert_engine ecrit expiresAt en UTC
     conscient et pymongo le relit naif UTC. Le comparer a une heure locale
@@ -388,6 +392,10 @@ def build_state(db, now, now_utc=None, peaks=None, pages=None):
     pic = None
     pic_ts = None
 
+    # Pic sur le compteur PRINCIPAL choisi dans live-controle, pas sur le 628
+    # code en dur dans watch_peaks (DEFAULT_LOCATION_ID, repli seulement).
+    loc_pic = location_id or getattr(peaks, "DEFAULT_LOCATION_ID", "628")
+
     if peaks is not None and event is None:
         # On retient la premiere edition dont le pic est exploitable, pas
         # simplement la plus recente : nommer une edition sans savoir la
@@ -396,7 +404,7 @@ def build_state(db, now, now_utc=None, peaks=None, pages=None):
         # meme regle que /editions, qui omet ce qu'il ne sait pas mesurer.
         for edition in peaks.list_editions(db, now_utc=now_utc):
             candidat, instant = peaks.cached_peak(
-                db, edition["event"], edition["year"], now_utc=now_utc)
+                db, edition["event"], edition["year"], location_id=loc_pic, now_utc=now_utc)
             if candidat is None:
                 continue
             event = edition["event"]
@@ -411,7 +419,7 @@ def build_state(db, now, now_utc=None, peaks=None, pages=None):
     # fois l'edition close, il est definitif. Un seul couple de champs dans
     # les deux cas, pour que la montre n'ait pas deux facons de lire un pic.
     if pic is None and peaks is not None and event and year is not None:
-        pic, pic_ts = peaks.cached_peak(db, event, year, now_utc=now_utc)
+        pic, pic_ts = peaks.cached_peak(db, event, year, location_id=loc_pic, now_utc=now_utc)
 
     # Les quatre blocs des pages operationnelles. Chaque bloc dans son
     # propre try : une source qui tombe met SON bloc a null, jamais un 500

@@ -10,9 +10,21 @@
     "PCO.Flux":          { color: "#0d9488", icon: "swap_calls" },
     "PCO.Fourriere":     { color: "#6b7280", icon: "directions_car" },
     "PCO.Information":   { color: "#2563eb", icon: "info" },
-    "PCO.MainCourante":  { color: "#8b5cf6", icon: "edit_note" }
+    "PCO.MainCourante":  { color: "#8b5cf6", icon: "edit_note" },
+    // Fiches PC Securite (Prysm) : affichees en SAISON (main courante permanente)
+    "PCS.Surete":        { color: "#be123c", icon: "local_police" },
+    "PCS.Information":   { color: "#0284c7", icon: "info" }
   };
   var FALLBACK_STYLE = { color: "#94a3b8", icon: "description" };
+  // Categorie PCO equivalente d'une categorie PCS (droits des groupes)
+  var PCS_EQUIVALENT = { "PCS.Surete": "PCO.Securite", "PCS.Information": "PCO.Information" };
+  function isSaisonSelected() {
+    return String(window.selectedEvent || "").toUpperCase() === "SAISON";
+  }
+
+  // Mode creation seule (File du service) : cf. window.PcorgCreate en fin de fichier
+  var createOnlyMode = window.PCORG_CREATE_ONLY === true;
+  var createHooks = {};   // {categories, onCreated} fournis par PcorgCreate.open
 
   // ── Urgency levels ────────────────────────────────────────────────────────
   var URGENCY_LEVELS = ["EU", "UA", "UR", "IMP"];
@@ -27,7 +39,7 @@
 
   function urgencyType(cat) {
     if (cat === "PCO.Secours") return "SECOURS";
-    if (cat === "PCO.Securite") return "SECURITE";
+    if (cat === "PCO.Securite" || cat === "PCS.Surete") return "SECURITE";
     return "MIXTE";
   }
 
@@ -157,7 +169,9 @@
   }
 
   function shortCat(cat) {
-    return (cat || "").replace("PCO.", "");
+    cat = cat || "";
+    if (cat.indexOf("PCS.") === 0) return "PCS " + cat.slice(4);
+    return cat.replace("PCO.", "");
   }
 
   function truncZone(desc) {
@@ -272,6 +286,35 @@
     return op;
   }
 
+  // ── Detection de changement (clotures tablette, commentaires, synchro) ─────
+  // /api/pcorg/sig (empreinte legere, cache 2 s serveur) lue toutes les 5 s ;
+  // la liste complete n'est rechargee que si elle change. Avant : jusqu'a 60 s
+  // pour voir une fiche close depuis le terminal disparaitre.
+  var SIG_POLL_MS = 5000;
+  var lastSig = null;
+  function checkChanges() {
+    if (document.hidden) return;
+    var ey = (typeof getCurrentEventYear === "function") ? getCurrentEventYear() : {};
+    if (!ey.event || !ey.year) return;
+    var key = ey.event + "|" + ey.year;
+    fetch("/api/pcorg/sig?event=" + encodeURIComponent(ey.event) + "&year=" + encodeURIComponent(ey.year),
+          { cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.sig) return;
+        var sig = key + "#" + d.sig;
+        if (lastSig !== null && sig !== lastSig) refresh();
+        lastSig = sig;
+      })
+      .catch(function () {});
+  }
+  function startChangeWatch() {
+    setInterval(checkChanges, SIG_POLL_MS);
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) { refresh(); checkChanges(); }
+    });
+  }
+
   // ── Init ───────────────────────────────────────────────────────────────────
   function init() {
     if (window.isBlockAllowed && !window.isBlockAllowed("widget-comms")) return;
@@ -296,6 +339,7 @@
 
     setTimeout(refresh, 800);
     refreshTimer = setInterval(refresh, REFRESH_MS);
+    startChangeWatch();
     initWidgetFilter();
 
     // Echap ferme la fiche, l'assistant de creation et la modale GPS
@@ -429,7 +473,9 @@
       var submenu = mkEl("div", "pcorg-ctx-submenu");
       submenu.setAttribute("data-cat-sub", cat);
       var uType = urgencyType(cat);
-      URGENCY_LEVELS.forEach(function (level) {
+      // Menu de la carte : du plus faible (IMP) en haut au plus fort (EU) en
+      // bas. Copie inversee : URGENCY_LEVELS garde son ordre pour les autres usages.
+      URGENCY_LEVELS.slice().reverse().forEach(function (level) {
         var subItem = mkEl("div", "pcorg-ctx-sub-item");
         subItem.style.setProperty("--sub-color", URGENCY_COLORS[level]);
         var dot = mkEl("span", "pcorg-ctx-sub-dot");
@@ -482,6 +528,7 @@
               vehSubmenu.style.top = "auto";
               vehSubmenu.style.bottom = "-6px";
             }
+            placeSubmenuX(vehSubmenu, subItem);
           });
         });
 
@@ -512,6 +559,7 @@
             submenu.style.top = "auto";
             submenu.style.bottom = "-6px";
           }
+          placeSubmenuX(submenu, item);
         });
       });
 
@@ -564,6 +612,8 @@
 
   function onMapContextMenu(e) {
     if (e.originalEvent && e.originalEvent.preventDefault) e.originalEvent.preventDefault();
+    // Droit de groupe "Creer des fiches" : sans lui, pas de menu de creation
+    if (window.__userCanCreateFiche === false && !window.__userIsAdmin) return;
     _ctxIsTouch = !!(e._touch);
     ctxLat = e.latlng.lat;
     ctxLon = e.latlng.lng;
@@ -706,6 +756,29 @@
     });
   }
 
+  // Place un sous-menu du clic droit a droite ou a gauche de son parent selon
+  // la place REELLE a l'ecran. La bascule globale "flip-sub" ne regardait que
+  // le 1er niveau (240 px) : le sous-menu vehicules, un cran plus a droite,
+  // sortait de la fenetre. On repart du placement CSS, on mesure, et on
+  // bascule seulement ce sous-menu (avec sa zone de passage de la souris).
+  function placeSubmenuX(sub, owner) {
+    sub.style.left = "";
+    sub.style.right = "";
+    owner.classList.remove("pcorg-sub-left", "pcorg-sub-right");
+    var r = sub.getBoundingClientRect();
+    if (!r.width) return;
+    var margin = 8;
+    if (r.right > window.innerWidth - margin) {
+      sub.style.left = "auto";
+      sub.style.right = "calc(100% + 6px)";
+      owner.classList.add("pcorg-sub-left");
+    } else if (r.left < margin) {
+      sub.style.left = "calc(100% + 6px)";
+      sub.style.right = "auto";
+      owner.classList.add("pcorg-sub-right");
+    }
+  }
+
   function hideContextMenu() {
     if (ctxMenu) {
       ctxMenu.classList.remove("show");
@@ -714,8 +787,10 @@
   }
 
   function openCreateFromContext(lat, lon, cat, urgency, patrouille) {
+    createHooks = {};
     checkSessionBeforeForm();
     resetCreateWizard();
+    applyCreateCategoryFilter();
     if (urgency) createSelectedUrgency = urgency;
     // Pose APRES le reset : le vehicule choisi dans le menu clic droit etait
     // efface par resetCreateWizard avant l'ouverture de l'assistant
@@ -985,8 +1060,18 @@
       loadVehiclesByCategory();
     }
     refresh._vbcCounter = (refresh._vbcCounter || 0) + 1;
-    var liveUrl = "/api/pcorg/live?event=" + encodeURIComponent(ey.event) + "&year=" + encodeURIComponent(ey.year);
-    var statsUrl = "/api/pcorg/stats?event=" + encodeURIComponent(ey.event) + "&year=" + encodeURIComponent(ey.year);
+    // Changement d'evenement : on revient a la fenetre par defaut (SAISON :
+    // ouvertes des 30 derniers jours) et a la periode de stats par defaut
+    var eyKey = ey.event + "|" + ey.year;
+    if (eyKey !== liveScopeKey) {
+      liveScopeKey = eyKey;
+      loadAllOpen = false;
+      statsPeriod = "";
+    }
+    var liveUrl = "/api/pcorg/live?event=" + encodeURIComponent(ey.event) + "&year=" + encodeURIComponent(ey.year)
+      + (loadAllOpen ? "&all_open=1" : "");
+    var statsUrl = "/api/pcorg/stats?event=" + encodeURIComponent(ey.event) + "&year=" + encodeURIComponent(ey.year)
+      + (statsPeriod ? "&period=" + encodeURIComponent(statsPeriod) : "");
     Promise.all([
       fetch(liveUrl, { cache: "no-store" }).then(function (r) { return r.json(); }),
       fetch(statsUrl, { cache: "no-store" }).then(function (r) { return r.json(); }).catch(function () { return null; }),
@@ -998,7 +1083,9 @@
       // lastData est filtre pour que le panneau elargi et la carte ne voient
       // jamais plus que le widget)
       var ac = window.__userAllowedCategories;
-      var filterCat = ac ? function (it) { return ac.indexOf(it.category) !== -1; } : function () { return true; };
+      var filterCat = ac ? function (it) {
+        return ac.indexOf(it.category) !== -1 || ac.indexOf(PCS_EQUIVALENT[it.category]) !== -1;
+      } : function () { return true; };
       var openFiltered = (data.open || []).filter(filterCat);
       var closedFiltered = (data.closed || []).filter(filterCat);
       data.open = openFiltered;
@@ -1007,6 +1094,7 @@
       renderWidgetLists();
       // Stats: compte sur la collection complete (fallback aux items charges si l'endpoint echoue)
       var statsCounts = (stats && stats.counts) ? stats.counts : null;
+      lastStatsPeriod = (stats && stats.period) ? stats.period : null;
       renderStats(openFiltered, closedFiltered, statsCounts);
       syncTabHeights();
       updateBadge(openFiltered.length);
@@ -1047,10 +1135,48 @@
     return hay.indexOf(widgetFilterText) !== -1;
   }
 
+  // ── SAISON : fiches ouvertes anciennes (non chargees par defaut) ─────────
+  // /live ne rend que les ouvertes des N derniers jours pour SAISON (main
+  // courante permanente) et compte les autres dans `older_open`.
+  var loadAllOpen = false;
+  var liveScopeKey = "";
+  var statsPeriod = "";          // "" = defaut serveur (SAISON : aujourd'hui)
+  var lastStatsPeriod = null;
+  var STATS_PERIOD_CYCLE = ["today", "24h", "7d", "all"];
+
+  function renderOlderOpenHint() {
+    if (!listOpen) return;
+    var hint = listOpen.querySelector(".pcorg-older-open");
+    var n = (lastData && lastData.older_open) || 0;
+    if (!n || (lastData && lastData.all_open)) {
+      if (hint) hint.remove();
+      return;
+    }
+    if (!hint) {
+      hint = mkEl("div", "pcorg-older-open");
+      hint.addEventListener("click", function () {
+        loadAllOpen = true;
+        refresh();
+      });
+      var filter = listOpen.querySelector(".pcorg-widget-filter");
+      if (filter && filter.nextSibling) listOpen.insertBefore(hint, filter.nextSibling);
+      else listOpen.appendChild(hint);
+    }
+    hint.textContent = "";
+    hint.appendChild(matIcon("history", ""));
+    var days = (lastData && lastData.open_window_days) || 30;
+    var txt = mkEl("span", "");
+    txt.textContent = n + (n > 1 ? " fiches ouvertes" : " fiche ouverte") + " de plus de " + days
+      + " jours - afficher";
+    hint.appendChild(txt);
+    hint.title = "Fiches SAISON encore ouvertes, non chargees par defaut";
+  }
+
   function renderWidgetLists() {
     if (!lastData) return;
     renderList(listOpen, (lastData.open || []).filter(matchesWidgetFilter), false, placeholderOpen);
     renderList(listClosed, (lastData.closed || []).filter(matchesWidgetFilter), true, placeholderClosed);
+    renderOlderOpenHint();
   }
 
   // ── Render list ────────────────────────────────────────────────────────────
@@ -1200,13 +1326,26 @@
 
   var CATEGORY_ORDER = getAllowedCategories();
 
+  // Categories affichees (stats, filtre) : PCO autorisees + PCS equivalentes en
+  // SAISON. La creation reste limitee aux PCO (CATEGORY_ORDER).
+  function displayCategories() {
+    var cats = CATEGORY_ORDER.slice();
+    if (isSaisonSelected()) {
+      Object.keys(PCS_EQUIVALENT).forEach(function (pcs) {
+        if (CATEGORY_ORDER.indexOf(PCS_EQUIVALENT[pcs]) !== -1) cats.push(pcs);
+      });
+    }
+    return cats;
+  }
+
   function renderStats(openItems, closedItems, serverCounts) {
     if (!statsContainer) return;
     statsContainer.textContent = "";
+    var order = displayCategories();
 
     // Count per category
     var counts = {};
-    CATEGORY_ORDER.forEach(function (cat) { counts[cat] = { open: 0, closed: 0 }; });
+    order.forEach(function (cat) { counts[cat] = { open: 0, closed: 0 }; });
 
     if (serverCounts) {
       // Compte serveur sur la collection complete
@@ -1232,7 +1371,7 @@
 
     var grid = mkEl("div", "pcorg-stats-grid");
 
-    CATEGORY_ORDER.forEach(function (cat) {
+    order.forEach(function (cat) {
       var c = counts[cat];
       if (!c) c = { open: 0, closed: 0 };
       var st = catStyle(cat);
@@ -1264,6 +1403,21 @@
     });
 
     statsContainer.appendChild(grid);
+
+    // Periode appliquee par le serveur (SAISON : aujourd'hui par defaut).
+    // Clic : periode suivante (aujourd'hui -> 24 h -> 7 j -> tout).
+    if (serverCounts && lastStatsPeriod) {
+      var per = mkEl("div", "pcorg-stats-period");
+      per.textContent = "Ouvertes : toutes - Closes : " + (lastStatsPeriod.label || lastStatsPeriod.key);
+      per.title = "Changer la periode des fiches closes";
+      per.addEventListener("click", function () {
+        var curKey = (lastStatsPeriod && lastStatsPeriod.key) || "all";
+        var idx = STATS_PERIOD_CYCLE.indexOf(curKey);
+        statsPeriod = STATS_PERIOD_CYCLE[(idx + 1) % STATS_PERIOD_CYCLE.length];
+        refresh();
+      });
+      statsContainer.appendChild(per);
+    }
   }
 
   // ── Focus most recent intervention by category ─────────────────────────────
@@ -1556,7 +1710,7 @@
       var urgSec = mkEl("div", "pcorg-fiche-section");
       urgSec.textContent = "Niveau d'urgence";
       body.appendChild(urgSec);
-      body.appendChild(buildUrgencyButtons(d.niveau_urgence, d.category, d.id, false));
+      body.appendChild(buildUrgencyButtons(d.niveau_urgence, d.category, d.id, false, d));
     }
 
     // Info row (fields + mini map)
@@ -1751,7 +1905,7 @@
       actions.appendChild(btnMap);
     }
     // Poser ou DEPLACER la position (avant : seulement si absente)
-    if (ficheOpen) {
+    if (ficheOpen && canEditFiche(d)) {
       var btnGps = mkEl("button", "");
       btnGps.appendChild(matIcon(d.lat != null ? "edit_location_alt" : "add_location"));
       btnGps.appendChild(document.createTextNode(d.lat != null ? " Deplacer" : " Ajouter position"));
@@ -1760,8 +1914,8 @@
       });
       actions.appendChild(btnGps);
     }
-    // Edit button (not closed)
-    if (ficheOpen) {
+    // Edit button (not closed, groupe non "lecture seule")
+    if (ficheOpen && canEditFiche(d)) {
       var btnEdit = mkEl("button", "");
       btnEdit.appendChild(matIcon("edit"));
       btnEdit.appendChild(document.createTextNode(" Editer"));
@@ -1770,7 +1924,7 @@
       });
       actions.appendChild(btnEdit);
     }
-    if (!isClosed && d.status_code !== 10 && (window.__userCanCloseFiche || window.__userIsAdmin)) {
+    if (!isClosed && d.status_code !== 10 && canCloseFicheCat(d.category)) {
       var btnClose = mkEl("button", "pcorg-btn-danger");
       btnClose.appendChild(matIcon("check_circle"));
       btnClose.appendChild(document.createTextNode(" Clore"));
@@ -1780,7 +1934,7 @@
       actions.appendChild(btnClose);
     }
     // Reouverture (fiche close par erreur, reprise d'intervention)
-    if (d.status_code === 10 && (window.__userCanCloseFiche || window.__userIsAdmin)) {
+    if (d.status_code === 10 && canCloseFicheCat(d.category)) {
       var btnReopen = mkEl("button", "");
       btnReopen.appendChild(matIcon("restart_alt"));
       btnReopen.appendChild(document.createTextNode(" Rouvrir"));
@@ -2543,8 +2697,26 @@
       });
   }
 
-  function buildUrgencyButtons(currentLevel, category, ficheId, compact) {
+  // Droits de groupe (config > groupes) : "Fiches en lecture seule" retire la
+  // modification ; "Responsable de service" donne la cloture de ses categories.
+  // Le serveur applique les memes regles (403 sinon) : ceci n'est que l'affichage.
+  // `fiche` (facultatif) : une fiche creee par l'utilisateur reste modifiable
+  // meme en lecture seule (meme regle que _user_can_edit_fiche cote serveur).
+  function canEditFiche(fiche) {
+    if (window.__userCanEditFiche !== false || window.__userIsAdmin) return true;
+    var me = String(window.__userEmail || "").trim().toLowerCase();
+    var creator = String((fiche && fiche.operator_id_create) || "").trim().toLowerCase();
+    return !!me && creator === me;
+  }
+  function canCloseFicheCat(category) {
+    return !!(window.__userCanCloseFiche || window.__userIsAdmin
+      || (window.__userDispatchCategories || []).indexOf(category) >= 0);
+  }
+
+  function buildUrgencyButtons(currentLevel, category, ficheId, compact, fiche) {
     var container = mkEl("div", "pcorg-urgency-selector" + (compact ? " compact" : ""));
+    var editable = canEditFiche(fiche);
+    if (!editable) container.title = "Lecture seule : l'urgence ne peut pas etre modifiee";
     var levels = [
       { code: "EU", color: URGENCY_COLORS.EU },
       { code: "UA", color: URGENCY_COLORS.UA },
@@ -2564,8 +2736,9 @@
       var text = mkEl("span", "");
       text.textContent = lvl.code ? (compact ? lvl.code : urgencyLabel(category, lvl.code)) : (compact ? "\u2013" : "Aucun");
       btn.appendChild(text);
+      if (!editable) btn.disabled = true;
       btn.addEventListener("click", function () {
-        if (isActive) return;
+        if (isActive || !editable) return;
         setUrgencyLevel(ficheId, lvl.code, category);
       });
       container.appendChild(btn);
@@ -3012,7 +3185,7 @@
 
     // Urgence (compact) : memes categories que la fiche
     if (item.status_code !== 10 && urgencyEnabledFor(item.category, item.niveau_urgence)) {
-      popBody.appendChild(buildUrgencyButtons(item.niveau_urgence, item.category, item.id, true));
+      popBody.appendChild(buildUrgencyButtons(item.niveau_urgence, item.category, item.id, true, item));
     }
 
     var popBtns = mkEl("div", "pcorg-popup-btns");
@@ -3022,7 +3195,7 @@
     popBtn.addEventListener("click", function () { openDetailModal(item.id, false); });
     popBtns.appendChild(popBtn);
 
-    if (item.status_code !== 10 && (window.__userCanCloseFiche || window.__userIsAdmin)) {
+    if (item.status_code !== 10 && canCloseFicheCat(item.category)) {
       var closePopBtn = mkEl("button", "pcorg-popup-btn pcorg-popup-btn-danger");
       closePopBtn.appendChild(matIcon("check_circle"));
       closePopBtn.appendChild(document.createTextNode(" Clore"));
@@ -3487,7 +3660,11 @@
     var nextBtn = document.getElementById("pcorgCreateNext");
     var prevBtn = document.getElementById("pcorgCreatePrev");
     var form = document.getElementById("pcorgCreateForm");
-    if (!createModal || !btn) return;
+    // Le bouton "+" n'existe que sur l'accueil : en mode creation seule
+    // (File du service), l'assistant s'ouvre par window.PcorgCreate.open().
+    if (!createModal || (!btn && !createOnlyMode)) return;
+    // Droit de groupe "Creer des fiches" (le serveur refuse aussi : 403)
+    if (btn && window.__userCanCreateFiche === false && !window.__userIsAdmin) btn.style.display = "none";
 
     closeBtn.addEventListener("click", hideCreate);
     cancelBtn.addEventListener("click", hideCreate);
@@ -3496,12 +3673,9 @@
     buildSourceTabs();
 
     // Click "+" -> ouvrir la modale directement a l'etape 1
-    btn.addEventListener("click", function () {
-      checkSessionBeforeForm();
-      resetCreateWizard();
-      showCreate();
-      goToStep(1);
-      initCreateMap();
+    if (btn) btn.addEventListener("click", function () {
+      createHooks = {};
+      openCreateWizard();
     });
 
     // Chip horodatage (etape 2)
@@ -3586,6 +3760,27 @@
       e.preventDefault();
       submitCreate();
     });
+  }
+
+  function openCreateWizard() {
+    checkSessionBeforeForm();
+    resetCreateWizard();
+    applyCreateCategoryFilter();
+    showCreate();
+    goToStep(1);
+    initCreateMap();
+  }
+
+  // Categories proposees a l'etape 2 : toutes sur l'accueil, celles du
+  // service sur la File du service (createHooks.categories). Une seule :
+  // preselectionnee (l'etape 2 ne demande plus que la description).
+  function applyCreateCategoryFilter() {
+    var only = Array.isArray(createHooks.categories) && createHooks.categories.length
+      ? createHooks.categories : null;
+    document.querySelectorAll(".pcorg-create-cat-btn").forEach(function (b) {
+      b.style.display = (!only || only.indexOf(b.getAttribute("data-cat")) >= 0) ? "" : "none";
+    });
+    if (only && only.length === 1) selectCategory(only[0]);
   }
 
   function resetCreateWizard() {
@@ -4511,7 +4706,10 @@
           if (submitBtn) submitBtn.disabled = false;
           hideCreate();
           showToast("success", "Intervention creee");
-          refresh();
+          if (!createOnlyMode) refresh();
+          if (typeof createHooks.onCreated === "function") {
+            try { createHooks.onCreated(r.id); } catch (e) { /* page appelante */ }
+          }
         });
     }
 
@@ -4769,7 +4967,9 @@
     expCatSelect.title = "Filtrer par categorie";
     var o0 = mkEl("option", ""); o0.value = ""; o0.textContent = "Toutes categories";
     expCatSelect.appendChild(o0);
-    CATEGORY_ORDER.forEach(function (cat) {
+    CATEGORY_ORDER.concat(Object.keys(PCS_EQUIVALENT).filter(function (pcs) {
+      return CATEGORY_ORDER.indexOf(PCS_EQUIVALENT[pcs]) !== -1;
+    })).forEach(function (cat) {
       var o = mkEl("option", ""); o.value = cat; o.textContent = shortCat(cat);
       expCatSelect.appendChild(o);
     });
@@ -5740,8 +5940,40 @@
   // une alerte (SOS terrain) n'avait pas encore de pin
   window.PcorgUI = { openFiche: function (id) { openDetailModal(id, false); refresh(); } };
 
+  // ── Mode creation seule (File du service) ───────────────────────────────────
+  // La page pose window.PCORG_CREATE_ONLY = true avant de charger ce fichier et
+  // inclut _pcorg_create_modal.html : MEME assistant 3 etapes que l'accueil
+  // (position + carroyage, categorie, source, champs de categorie, vehicule,
+  // horodatage, suggestions), sans liste, pins, menu clic droit ni rafraichissement.
+  // PcorgCreate.open({categories: [...], onCreated: function (id) {}}).
+  function initCreateOnly() {
+    initCreateModal();
+    loadPcorgConfig();
+    loadCockpitUserNames();
+    loadVehiclesByCategory();
+    ensureSharedGrid();
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape" || !createModal || !createModal.classList.contains("show")) return;
+      if (_tsPopover || vehiclePicker || (_camPickerOverlay && _camPickerOverlay.classList.contains("show"))) return;
+      if (document.querySelector(".pcorg-autocomplete")) return;
+      if (document.querySelector("#toast-container .toast-confirm, #toast-container .toast-input")) return;
+      hideCreate();
+    });
+  }
+
+  window.PcorgCreate = {
+    open: function (opts) {
+      if (!createModal) return false;
+      createHooks = opts || {};
+      loadVehiclesByCategory();   // l'evenement a pu changer sur la page
+      openCreateWizard();
+      return true;
+    }
+  };
+
   // ── Bootstrap ──────────────────────────────────────────────────────────────
   document.addEventListener("DOMContentLoaded", function () {
+    if (createOnlyMode) { initCreateOnly(); return; }
     init();
     initExpandedPanel();
   });

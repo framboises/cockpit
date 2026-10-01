@@ -2,7 +2,7 @@
 
 ## Alfred — agent IA WhatsApp (`alfred.py`)
 
-WAHA pousse les messages sur `POST /api/wa/webhook` (HMAC, exempté de CSRF). Par groupe (`wa_alfred_config`) : `listen` (ingestion `wa_inbound_messages`, TTL 14 j, gatée par le live-contrôle), `respond_mentions`, `summary_enabled`. Les mentions partent vers le wrapper `/alfred/ask` de la VM (boucle d'outils hors de ce repo) ; les résumés vers Ollama, via le scheduler 60 s du `__main__` d'`app.py`.
+WAHA pousse les messages sur `POST /api/wa/webhook` (HMAC, exempté de CSRF). Par groupe (`wa_alfred_config`) : `listen` (ingestion `wa_inbound_messages`, TTL 14 j, **toute l'année depuis le 01/10/2026** : plus gatée par le live-contrôle, tag event/year = `event_courant.current_event`), `respond_mentions`, `summary_enabled`. Les mentions partent vers le wrapper `/alfred/ask` de la VM (boucle d'outils hors de ce repo) ; les résumés vers Ollama, via le scheduler 60 s du `__main__` d'`app.py`.
 
 - **Déclenchement** : `@alfred` explicite (le mot seul ne suffit plus), mention native (`alfred_lid`), suite de conversation 7 min, ou DM en liste blanche.
 - **Envois** : toujours par `WhatsAppService.send_direct`, tracés dans `cockpit_wa_send_history` (`source: "direct"`) et comptés dans les plafonds horaire/journalier. Réponse : ignore les heures silencieuses, refusée si breaker ouvert ou plafond atteint ; phrase d'attente et refus DM sautent dès 80 % du plafond horaire (90 % du journalier).

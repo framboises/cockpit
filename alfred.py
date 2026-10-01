@@ -917,10 +917,9 @@ def _is_listened(chat_id):
 # Etat live_controle (gate global d'ingestion)
 # ---------------------------------------------------------------------------
 
-# Le bouton "Live controle" de la page /live-controle pilote l'ingestion
-# Alfred. Quand il est OFF on n'enregistre rien et on ne declenche aucune
-# alerte. Quand il est ON, on stocke event/year sur chaque message pour
-# pouvoir les relier a un evenement.
+# Historique : le bouton "Live controle" pilotait l'ingestion Alfred (OFF = rien
+# d'enregistre). Depuis le 01/10/2026 Alfred ecoute toute l'annee ; on stocke
+# event/year (evenement du jour) sur chaque message.
 COL_DATA_ACCESS = "data_access"
 LIVE_GLOBAL_ID = "___GLOBAL___"
 
@@ -928,18 +927,30 @@ LIVE_GLOBAL_ID = "___GLOBAL___"
 def _live_controle_state():
     """Retourne (active, evenement, evenement_clean, year_str).
 
-    year derive de l'annee Paris courante (meme convention que la route
-    /api/live-controle/archive).
+    Depuis le 01/10/2026, Alfred ecoute TOUTE L'ANNEE (main courante
+    permanente SAISON) : `active` vaut toujours True, l'ingestion n'est plus
+    gatee par `live_controle_actif`. Seul le reglage `listen` de chaque groupe
+    (wa_alfred_config) decide. Le TAG event/year vient de
+    event_courant.current_event (epreuve active, sinon SAISON) : le libelle
+    ___GLOBAL___.evenement du live-controle derive et ne porte pas d'annee. En
+    cas d'echec de event_courant, repli sur l'ancien tag (libelle global +
+    annee Paris). `evenement_clean` reste celui du live-controle (metadonnee HSH).
     """
     db = _get_db()
     doc = db[COL_DATA_ACCESS].find_one(
         {"_id": LIVE_GLOBAL_ID},
-        {"live_controle_actif": 1, "evenement": 1, "evenement_clean": 1},
+        {"evenement": 1, "evenement_clean": 1},
     ) or {}
-    active = bool(doc.get("live_controle_actif"))
-    evenement = (doc.get("evenement") or "").strip()
+    active = True
     evenement_clean = (doc.get("evenement_clean") or "").strip()
-    year = str(datetime.now(TZ_PARIS).year) if active else ""
+    try:
+        import event_courant
+        ev, yr = event_courant.current_event(db)
+        return active, ev, evenement_clean, str(yr)
+    except Exception as exc:
+        log.warning("alfred: event_courant indisponible (%s), tag live-controle", exc)
+    evenement = (doc.get("evenement") or "").strip()
+    year = str(datetime.now(TZ_PARIS).year)
     return active, evenement, evenement_clean, year
 
 

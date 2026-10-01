@@ -700,25 +700,55 @@
           <div id="group-blocks-checkboxes" class="block-layout-grid"></div>
           <div id="group-blocks-fixed" class="block-fixed-row"></div>
         </div>
-        <div class="form-row" id="group-cat-row">
-          <label style="margin-bottom:4px">Categories main courante
-            <span style="font-size:0.72rem; color:var(--muted); font-weight:400; margin-left:6px;">aucune = toutes</span>
-          </label>
-          <div id="group-cats-checkboxes" style="display:flex; flex-wrap:wrap; gap:4px 12px;"></div>
+        <div class="form-row gform-section" id="group-pages-row">
+          <div class="gform-title">Pages accessibles
+            <span class="gform-hint">cochees = visibles et ouvertes ; le role (manager) reste exige en plus. Les pages admin ne dependent que du role admin.</span>
+          </div>
+          <div class="blocks-toggle-bar">
+            <button type="button" id="pages-check-all" class="btn btn-xs">Tout cocher</button>
+            <button type="button" id="pages-uncheck-all" class="btn btn-xs">Tout decocher</button>
+          </div>
+          <div id="group-pages-checkboxes" class="gchip-grid"></div>
+          <div class="gform-title" style="margin-top:6px;">Pages d'administration
+            <span class="gform-hint">a accorder explicitement : donne aussi les actions de la page (ex. Field dispatch = appairer et revoquer les tablettes, Montre = emettre des jetons). Configuration reste reservee aux admins.</span>
+          </div>
+          <div id="group-admin-pages-checkboxes" class="gchip-grid"></div>
         </div>
-        <div class="form-row" id="group-fs-row" style="padding-top:0;">
-          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.82rem;">
-            <input type="checkbox" name="fiche_simplifiee" style="accent-color:var(--accent);" />
-            Fiches simplifiees
-            <span style="font-size:0.72rem; color:var(--muted); font-weight:400;">(creation rapide clic droit)</span>
-          </label>
+        <div class="form-row gform-section" id="group-cat-row">
+          <div class="gform-title">Categories main courante
+            <span class="gform-hint">toutes cochees = aucune restriction</span>
+          </div>
+          <div id="group-cats-checkboxes" class="gchip-grid"></div>
         </div>
-        <div class="form-row" id="group-close-row" style="padding-top:0;">
-          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.82rem;">
-            <input type="checkbox" name="can_close_fiche" style="accent-color:var(--accent);" />
-            Cloturer des fiches
-            <span style="font-size:0.72rem; color:var(--muted); font-weight:400;">(permet de clore une intervention)</span>
-          </label>
+        <div class="form-row gform-section" id="group-rights-row">
+          <div class="gform-title">Droits sur les fiches</div>
+          <div class="gperm-grid">
+            <label class="gperm" id="group-create-row">
+              <input type="checkbox" name="can_create_fiche" />
+              <span class="gperm-text"><span class="gperm-name">Creer des fiches</span>
+                <span class="gperm-desc">Assistant de creation, clic droit carte, File du service.</span></span>
+            </label>
+            <label class="gperm" id="group-fs-row">
+              <input type="checkbox" name="fiche_simplifiee" />
+              <span class="gperm-text"><span class="gperm-name">Fiches simplifiees</span>
+                <span class="gperm-desc">Creation rapide au clic droit sur la carte.</span></span>
+            </label>
+            <label class="gperm" id="group-close-row">
+              <input type="checkbox" name="can_close_fiche" />
+              <span class="gperm-text"><span class="gperm-name">Cloturer des fiches</span>
+                <span class="gperm-desc">Clore et rouvrir les fiches de ses categories.</span></span>
+            </label>
+            <label class="gperm" id="group-dispatch-row">
+              <input type="checkbox" name="dispatch_manager" />
+              <span class="gperm-text"><span class="gperm-name">Responsable de service</span>
+                <span class="gperm-desc">File du service pour ses categories : engager, ajouter une action, cloturer.</span></span>
+            </label>
+            <label class="gperm" id="group-readonly-row">
+              <input type="checkbox" name="fiche_lecture_seule" />
+              <span class="gperm-text"><span class="gperm-name">Fiches en lecture seule</span>
+                <span class="gperm-desc">Modifie seulement les fiches qu'il a creees ; sur les autres, action et cloture uniquement.</span></span>
+            </label>
+          </div>
         </div>
       </form>
     </div>

@@ -274,7 +274,12 @@ def _admin_guard():
     is_super_admin = SUPER_ADMIN_ROLE in (payload.get("global_roles") or [])
     role = (payload.get("roles_by_app") or {}).get(APP_KEY)
     if not is_super_admin and role != "admin":
-        return jsonify({"ok": False, "error": "forbidden"}), 403
+        # Page Montre accordee par un groupe (app.ADMIN_PAGE_REGISTRY).
+        # Introuvable (module app reduit, tests) : on ferme.
+        import app as _app
+        grant = getattr(_app, "request_admin_grant", None)
+        if grant is None or not grant(payload):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
     return None
 
 

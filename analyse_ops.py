@@ -299,7 +299,12 @@ def _check_admin():
     if isinstance(roles, str):
         roles = [roles]
     max_level = max((ROLE_HIERARCHY.get(r, 0) for r in roles), default=0)
-    if max_level < ROLE_HIERARCHY.get("admin", 3):
+    # super_admin global = admin partout (meme regle que role_required)
+    from app import SUPER_ADMIN_ROLE, request_admin_grant
+    if SUPER_ADMIN_ROLE in (payload.get("global_roles") or []):
+        max_level = ROLE_HIERARCHY.get("admin", 3)
+    # Page d'administration accordee par un groupe (app.ADMIN_PAGE_REGISTRY)
+    if max_level < ROLE_HIERARCHY.get("admin", 3) and not request_admin_grant(payload):
         return jsonify({"error": "Admin required"}), 403
     effective_role = "admin" if max_level >= ROLE_HIERARCHY.get("admin", 3) else roles[0] if roles else "user"
     payload["roles"] = [r for r in ROLE_ORDER if ROLE_HIERARCHY.get(r, 0) <= ROLE_HIERARCHY.get(effective_role, 0)]
@@ -1209,10 +1214,27 @@ def _run_compute(event, year):
         comparative = {"years": [], "kpis_by_year": {}}
         try:
             other_year = year - 1 if isinstance(year, int) else None
+            other_q = {"event": event, "year": other_year}
+            capped_at = None
+            if other_year and str(event or "").strip().upper() == "SAISON":
+                # SAISON en cours : l'annee courante n'a que N jours ; N-1 est
+                # plafonnee au meme jour de l'annee (sinon 9 mois contre 12).
+                _paris = tz.gettz("Europe/Paris")
+                _now_p = datetime.now(_paris)
+                if _now_p.year == year:
+                    _loc = _now_p.replace(tzinfo=None)
+                    try:
+                        _cap = _loc.replace(year=other_year)
+                    except ValueError:
+                        _cap = _loc.replace(year=other_year, day=28)
+                    capped_at = _cap.replace(tzinfo=_paris).astimezone(timezone.utc)
+                    other_q["ts"] = {"$lte": capped_at}
             if other_year:
-                other_count = _col_pcorg.count_documents({"event": event, "year": other_year})
+                other_count = _col_pcorg.count_documents(other_q)
                 if other_count > 0:
-                    other_docs = list(_col_pcorg.find({"event": event, "year": other_year}))
+                    other_docs = list(_col_pcorg.find(other_q))
+                    if capped_at is not None:
+                        comparative["prev_capped_at"] = capped_at.isoformat()
                     odf = pd.DataFrame([_flatten_doc(d) for d in other_docs])
                     odf["delay_min"] = pd.to_numeric(odf["delay_min"], errors="coerce")
                     on_closed = int(pd.notna(odf["delay_min"]).sum())

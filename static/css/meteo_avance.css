@@ -11,9 +11,9 @@
   transform: translateX(-50%);
   z-index: 1000;
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 14px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px;
   border-radius: 10px;
   background: rgba(15, 22, 32, 0.88);
   backdrop-filter: blur(6px);
@@ -21,8 +21,12 @@
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
   color: #e6edf5;
   font-size: 0.8rem;
-  max-width: min(560px, 88%);
+  width: min(760px, 94%);
+  box-sizing: border-box;
 }
+
+.radar-ligne { display: flex; align-items: center; gap: 10px; }
+.radar-ligne-bas { justify-content: space-between; gap: 14px; flex-wrap: wrap; }
 
 .radar-btn {
   display: flex; align-items: center; justify-content: center;
@@ -32,9 +36,22 @@
   color: #7fb2f0;
 }
 .radar-btn:hover { background: rgba(57, 135, 229, 0.30); }
+/* Etat courant de la lecture : le bouton actif est plein. */
+.radar-btn.active { background: #3987e5; color: #fff; }
 .radar-btn .material-symbols-outlined { font-size: 19px; }
 
-.radar-curseur { flex: 1 1 130px; min-width: 90px; accent-color: #3987e5; cursor: pointer; }
+.radar-curseur { flex: 1 1 200px; min-width: 120px; accent-color: #3987e5; cursor: pointer; }
+
+/* Legende : une case par classe de la palette de rendu (grille.py). */
+.radar-legende { display: flex; align-items: flex-start; gap: 8px; flex: 1 1 360px; min-width: 0; }
+.radar-legende-titre { font-size: 0.68rem; color: #94a3b8; padding-top: 1px; white-space: nowrap; }
+.radar-legende-echelle { display: flex; flex: 1 1 auto; min-width: 0; }
+.radar-legende-case { flex: 1 1 0; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.radar-legende-couleur { display: block; height: 9px; }
+.radar-legende-case:first-child .radar-legende-couleur { border-radius: 3px 0 0 3px; }
+.radar-legende-case:last-child .radar-legende-couleur { border-radius: 0 3px 3px 0; }
+.radar-legende-valeur { font-size: 0.64rem; color: #94a3b8; line-height: 1; }
+.radar-legende-case:last-child .radar-legende-valeur::after { content: "+"; }
 
 .radar-infos { display: flex; flex-direction: column; gap: 1px; min-width: 128px; }
 .radar-heure { font-weight: 700; font-size: 0.92rem; line-height: 1.1; }
@@ -132,6 +149,7 @@
 @media (prefers-color-scheme: light) {
   .radar-barre { background: rgba(255, 255, 255, 0.94); color: #1e293b; }
   .radar-source { color: #64748b; }
+  .radar-legende-titre, .radar-legende-valeur { color: #475569; }
 }
 
 /* Origine du niveau affiche par la jauge de risque du widget Meteo.

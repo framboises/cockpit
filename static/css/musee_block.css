@@ -1,0 +1,35 @@
+/* Bloc Musee de l'accueil (musee_block.js). Reutilise .hsh-summary* de style.css. */
+
+#widget-musee .musee-statut {
+  font-size: 0.70rem; font-weight: 600; padding: 1px 8px; border-radius: 10px;
+  background: var(--line); color: var(--muted); white-space: nowrap;
+}
+#widget-musee .musee-statut-ouvert { background: var(--success-light); color: var(--success); }
+#widget-musee .musee-statut-avant_ouverture { background: var(--brand-light); color: var(--brand); }
+#widget-musee .musee-statut-ferme_jour { background: var(--danger-light); color: var(--danger); }
+#widget-musee .musee-statut-a_configurer { background: var(--brand-light); color: var(--brand); }
+#widget-musee .musee-perime { color: var(--danger); font-weight: 600; }
+#widget-musee .musee-val-perime { opacity: 0.55; }
+
+#widget-musee .musee-warn {
+  font-size: 0.75rem; color: var(--danger); background: var(--danger-light);
+  border-radius: 6px; padding: 4px 8px; margin-bottom: 8px;
+}
+
+#widget-musee .musee-comps { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+#widget-musee .musee-comp { font-size: 0.75rem; color: var(--muted); display: flex; gap: 6px; }
+#widget-musee .musee-comp-label { font-weight: 700; min-width: 28px; }
+
+#widget-musee .musee-chart { position: relative; height: 120px; margin-bottom: 8px; }
+
+#widget-musee .musee-cps { display: flex; flex-direction: column; gap: 4px; }
+#widget-musee .musee-cp {
+  display: grid; grid-template-columns: minmax(80px, 1.2fr) 2fr auto;
+  align-items: center; gap: 8px; font-size: 0.75rem;
+}
+#widget-musee .musee-cp-nom { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#widget-musee .musee-cp-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+#widget-musee .musee-cp-fill { display: block; height: 100%; background: var(--brand); }
+#widget-musee .musee-cp-n { font-weight: 600; min-width: 36px; text-align: right; }
+
+#widget-musee .musee-foot { font-size: 0.68rem; color: var(--muted); margin-top: 8px; }

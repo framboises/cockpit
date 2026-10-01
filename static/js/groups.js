@@ -23,6 +23,7 @@
 
   var blockRegistry = [];
   var catRegistry = [];
+  var pageRegistry = [];   // pages de la barre laterale autorisables par groupe
 
   var UserAPI = {
     list: function(){ return fetch("/api/cockpit-users").then(function(r){ return r.json(); }); },
@@ -73,6 +74,9 @@
 
   // --- Block layout UI (deux colonnes gauche/droite + visibilite) ---
 
+  // Blocs "seulement en SAISON" du groupe en cours d'edition
+  var editSaisonOnly = [];
+
   function _buildBlockItem(b, selectedBlocks, side){
     var item = el("div", {"class":"block-layout-item", "data-block-id": b.id});
     if(selectedBlocks && selectedBlocks.indexOf(b.id) < 0) item.classList.add("unchecked");
@@ -86,6 +90,13 @@
     var lbl = el("span", {"class":"block-label"}, b.label);
     item.appendChild(cb);
     item.appendChild(lbl);
+    // Bascule "seulement en SAISON" : le bloc est masque quand le poste est
+    // sur une epreuve (main courante permanente)
+    var saisonOnly = editSaisonOnly.indexOf(b.id) >= 0;
+    var sz = el("button", {"class":"block-saison-btn" + (saisonOnly ? " is-on" : ""), "data-action":"saison", type:"button",
+                           title: "Afficher ce bloc seulement en SAISON (masque pendant les epreuves)"});
+    sz.textContent = "SAISON";
+    item.appendChild(sz);
     // Bouton deplacement vers l'autre colonne
     var arrow = el("button", {"class":"block-move-btn", "data-action":"switch", type:"button", title: side === "left" ? "Deplacer a droite" : "Deplacer a gauche"});
     arrow.textContent = side === "left" ? "\u2192" : "\u2190";
@@ -100,7 +111,8 @@
     return item;
   }
 
-  function populateBlockCheckboxes(selectedBlocks, blockLayout){
+  function populateBlockCheckboxes(selectedBlocks, blockLayout, saisonOnlyBlocks){
+    editSaisonOnly = Array.isArray(saisonOnlyBlocks) ? saisonOnlyBlocks.slice() : [];
     var container = $("#group-blocks-checkboxes");
     var fixedContainer = $("#group-blocks-fixed");
     if(!container) return;
@@ -154,6 +166,11 @@
     // Delegation evenements — remplacer le handler precedent
     if(container._blockHandler) container.removeEventListener("click", container._blockHandler);
     container._blockHandler = function(e){
+      var sbtn = e.target.closest(".block-saison-btn");
+      if(sbtn){
+        sbtn.classList.toggle("is-on");
+        return;
+      }
       var btn = e.target.closest(".block-move-btn");
       if(!btn) return;
       var item = btn.closest(".block-layout-item");
@@ -205,6 +222,15 @@
     return checks.map(function(cb){ return cb.value; });
   }
 
+  function getSaisonOnlyBlocks(){
+    var container = $("#group-blocks-checkboxes");
+    if(!container) return [];
+    return $$('.block-layout-item', container).filter(function(it){
+      var b = it.querySelector(".block-saison-btn");
+      return b && b.classList.contains("is-on");
+    }).map(function(it){ return it.getAttribute("data-block-id"); });
+  }
+
   function getBlockLayout(){
     var container = $("#group-blocks-checkboxes");
     if(!container) return null;
@@ -225,17 +251,83 @@
     container.textContent = "";
     catRegistry.forEach(function(c){
       var label = document.createElement("label");
-      label.className = "block-checkbox-label";
+      label.className = "gchip";
       var cb = document.createElement("input");
       cb.type = "checkbox";
       cb.value = c.id;
       cb.name = "allowed_categories";
-      cb.style.accentColor = "var(--accent)";
       if(!selectedCats || selectedCats.indexOf(c.id) >= 0) cb.checked = true;
       label.appendChild(cb);
-      label.appendChild(document.createTextNode(" " + c.label));
+      label.appendChild(document.createTextNode(c.label));
       container.appendChild(label);
     });
+  }
+
+  // --- Pages de la barre laterale (allowed_pages : null = toutes) ---
+  function normalPages(){ return pageRegistry.filter(function(p){ return p.role !== "admin"; }); }
+  function adminPages(){ return pageRegistry.filter(function(p){ return p.role === "admin"; }); }
+
+  // Pages d'administration (admin_pages) : accord explicite, decochees par defaut
+  function populateAdminPageCheckboxes(granted){
+    var container = $("#group-admin-pages-checkboxes");
+    if(!container) return;
+    container.textContent = "";
+    adminPages().forEach(function(p){
+      var label = document.createElement("label");
+      label.className = "gchip";
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = p.id;
+      cb.name = "admin_pages";
+      cb.checked = Array.isArray(granted) && granted.indexOf(p.id) >= 0;
+      label.appendChild(cb);
+      var ic = document.createElement("span");
+      ic.className = "material-symbols-outlined";
+      ic.textContent = p.icon || "admin_panel_settings";
+      label.appendChild(ic);
+      label.appendChild(document.createTextNode(p.label));
+      container.appendChild(label);
+    });
+  }
+
+  function getSelectedAdminPages(){
+    return $$('input[name="admin_pages"]:checked', $("#group-form")).map(function(cb){ return cb.value; });
+  }
+
+  function populatePageCheckboxes(selectedPages){
+    var container = $("#group-pages-checkboxes");
+    if(!container) return;
+    container.textContent = "";
+    normalPages().forEach(function(p){
+      var label = document.createElement("label");
+      label.className = "gchip";
+      label.title = p.role === "manager" ? "Exige aussi le role manager" : "";
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = p.id;
+      cb.name = "allowed_pages";
+      if(!selectedPages || selectedPages.indexOf(p.id) >= 0) cb.checked = true;
+      label.appendChild(cb);
+      var ic = document.createElement("span");
+      ic.className = "material-symbols-outlined";
+      ic.textContent = p.icon || "article";
+      label.appendChild(ic);
+      label.appendChild(document.createTextNode(p.label));
+      if(p.role === "manager"){
+        var badge = document.createElement("span");
+        badge.className = "gchip-role";
+        badge.textContent = "manager";
+        label.appendChild(badge);
+      }
+      container.appendChild(label);
+    });
+  }
+
+  // null = toutes (aucune restriction) ; [] = aucune page
+  function getSelectedPages(){
+    var checks = $$('input[name="allowed_pages"]:checked', $("#group-form"));
+    if(checks.length === normalPages().length) return null;
+    return checks.map(function(cb){ return cb.value; });
   }
 
   function getSelectedCats(){
@@ -552,10 +644,24 @@
     var catRow = document.getElementById("group-cat-row");
     if(catRow) catRow.style.display = "";
     populateCatCheckboxes(null);
+    var pagesRow = document.getElementById("group-pages-row");
+    if(pagesRow) pagesRow.style.display = "";
+    populatePageCheckboxes(null);
+    populateAdminPageCheckboxes([]);
     var closeRow = document.getElementById("group-close-row");
     if(closeRow) closeRow.style.display = "";
     var closeCheck = groupForm.elements.can_close_fiche;
     if(closeCheck) closeCheck.checked = false;
+    ["group-dispatch-row", "group-readonly-row"].forEach(function(rid){
+      var row = document.getElementById(rid);
+      if(row) row.style.display = "";
+    });
+    if(groupForm.elements.dispatch_manager) groupForm.elements.dispatch_manager.checked = false;
+    if(groupForm.elements.fiche_lecture_seule) groupForm.elements.fiche_lecture_seule.checked = false;
+    // Nouveau groupe : pas de creation tant que l'admin ne l'accorde pas
+    var createRow = document.getElementById("group-create-row");
+    if(createRow) createRow.style.display = "";
+    if(groupForm.elements.can_create_fiche) groupForm.elements.can_create_fiche.checked = false;
     openGroupModal();
   });
 
@@ -573,19 +679,40 @@
     var allowedCats = getSelectedCats();
     var closeCheck = groupForm.elements.can_close_fiche;
     var payload = {name: name, description: description, color: color, allowed_blocks: allowed,
-                   block_layout: layout, fiche_simplifiee: !!(fsCheck && fsCheck.checked),
+                   block_layout: layout, saison_only_blocks: getSaisonOnlyBlocks(), fiche_simplifiee: !!(fsCheck && fsCheck.checked),
                    can_close_fiche: !!(closeCheck && closeCheck.checked),
+                   dispatch_manager: !!(groupForm.elements.dispatch_manager && groupForm.elements.dispatch_manager.checked),
+                   fiche_lecture_seule: !!(groupForm.elements.fiche_lecture_seule && groupForm.elements.fiche_lecture_seule.checked),
+                   can_create_fiche: !!(groupForm.elements.can_create_fiche && groupForm.elements.can_create_fiche.checked),
                    allowed_categories: allowedCats};
-    var promise = id ? GroupAPI.update(id, payload) : GroupAPI.create(payload);
-    promise.then(function(res){
-      if(res.error){
-        showToast("error", res.error);
-      } else {
-        closeGroupModal();
-        refreshAll();
-      }
-    });
+    var pagesRow = document.getElementById("group-pages-row");
+    var pagesShown = pagesRow && pagesRow.style.display !== "none";
+    if(pagesShown){
+      payload.allowed_pages = getSelectedPages();
+      payload.admin_pages = getSelectedAdminPages();
+    }
+
+    function send(){
+      var promise = id ? GroupAPI.update(id, payload) : GroupAPI.create(payload);
+      promise.then(onSaved);
+    }
+    // Aucune page cochee : les membres ne pourraient plus rien ouvrir
+    if(pagesShown && Array.isArray(payload.allowed_pages) && !payload.allowed_pages.length){
+      showConfirmToast("Aucune page cochee : les membres de ce groupe n'auront acces a aucune page (sauf via un autre groupe). Continuer ?",
+                       {type: "warning", okLabel: "Enregistrer"}).then(function(ok){ if(ok) send(); });
+      return;
+    }
+    send();
   });
+
+  function onSaved(res){
+    if(res.error){
+      showToast("error", res.error);
+    } else {
+      closeGroupModal();
+      refreshAll();
+    }
+  }
 
   groupsTbody.addEventListener("click", function(e){
     var btn = e.target.closest("button");
@@ -600,7 +727,7 @@
       var isDef = isDefaultGroup(g);
       var isAdm = isAdminGroup(g);
       var isSys = isDef || isAdm;
-      groupModalTitle.textContent = isDef ? "Blocs par defaut" : isAdm ? "Couleur Admin" : "Editer le groupe";
+      groupModalTitle.textContent = isDef ? "Blocs par defaut" : isAdm ? "Admin : couleur et affichage de l'accueil" : "Editer le groupe";
       groupForm.elements._id.value = g._id;
       groupForm.elements.name.value = g.name;
       groupForm.elements.description.value = g.description || "";
@@ -611,22 +738,42 @@
       if(formRows[0]) formRows[0].style.display = isSys ? "none" : "";       // Nom
       if(formRows[1]) formRows[1].style.display = isSys ? "none" : "";       // Description
       if(formRows[2]) formRows[2].style.display = isAdm ? "" : (isDef ? "none" : ""); // Couleur: visible pour admin et normal
-      if(formRows[3]) formRows[3].style.display = isAdm ? "none" : "";       // Blocs: cache pour admin
+      // Blocs : pour le groupe admin, preferences d'AFFICHAGE de l'accueil des
+      // admins (masquer/ordonner), sans effet sur leurs droits.
+      if(formRows[3]) formRows[3].style.display = "";
       // Fiche simplifiee (visible pour admin et groupes normaux, cache pour defaut)
       var fsRow = document.getElementById("group-fs-row");
       if(fsRow) fsRow.style.display = isDef ? "none" : "";
       var fsCheck = groupForm.elements.fiche_simplifiee;
       if(fsCheck) fsCheck.checked = !!(g.fiche_simplifiee);
-      populateBlockCheckboxes(g.allowed_blocks || null, g.block_layout || null);
+      populateBlockCheckboxes(g.allowed_blocks || null, g.block_layout || null, g.saison_only_blocks || []);
       // Categories
       var catRow = document.getElementById("group-cat-row");
       if(catRow) catRow.style.display = isAdm ? "none" : "";
       populateCatCheckboxes(g.allowed_categories || null);
+      // Pages : sans objet pour le groupe admin (le role admin voit tout)
+      var pagesRow = document.getElementById("group-pages-row");
+      if(pagesRow) pagesRow.style.display = isAdm ? "none" : "";
+      populatePageCheckboxes(Array.isArray(g.allowed_pages) ? g.allowed_pages : null);
+      populateAdminPageCheckboxes(g.admin_pages || []);
       // Cloture fiches
       var closeRow = document.getElementById("group-close-row");
       if(closeRow) closeRow.style.display = isDef ? "none" : "";
       var closeCheck = groupForm.elements.can_close_fiche;
       if(closeCheck) closeCheck.checked = !!(g.can_close_fiche);
+      // Responsable de service / lecture seule : sans objet pour les groupes
+      // systeme (admin = tous les droits, defaut = utilisateurs sans groupe)
+      ["group-dispatch-row", "group-readonly-row"].forEach(function(rid){
+        var row = document.getElementById(rid);
+        if(row) row.style.display = isSys ? "none" : "";
+      });
+      if(groupForm.elements.dispatch_manager) groupForm.elements.dispatch_manager.checked = !!(g.dispatch_manager);
+      if(groupForm.elements.fiche_lecture_seule) groupForm.elements.fiche_lecture_seule.checked = !!(g.fiche_lecture_seule);
+      // Creation : utile aussi pour le groupe par defaut (utilisateurs sans
+      // groupe) ; sans objet pour le groupe admin (tous les droits)
+      var createRow = document.getElementById("group-create-row");
+      if(createRow) createRow.style.display = isAdm ? "none" : "";
+      if(groupForm.elements.can_create_fiche) groupForm.elements.can_create_fiche.checked = g.can_create_fiche !== false;
       openGroupModal();
     }
 
@@ -658,6 +805,13 @@
       if(item) item.classList.add("unchecked");
     });
   });
+  function setAllPages(checked){
+    $$('input[name="allowed_pages"]', $("#group-form")).forEach(function(cb){ cb.checked = checked; });
+  }
+  var btnPagesAll = $("#pages-check-all");
+  var btnPagesNone = $("#pages-uncheck-all");
+  if(btnPagesAll) btnPagesAll.addEventListener("click", function(){ setAllPages(true); });
+  if(btnPagesNone) btnPagesNone.addEventListener("click", function(){ setAllPages(false); });
 
   // SQL default group select
   var sqlGroupSelect = $("#sql-default-group");
@@ -702,10 +856,12 @@
   // Initial load: fetch block registry + category registry then groups/users
   Promise.all([
     GroupAPI.registry().catch(function(){ return []; }),
-    fetch("/api/pco-category-registry").then(function(r){ return r.json(); }).catch(function(){ return []; })
+    fetch("/api/pco-category-registry").then(function(r){ return r.json(); }).catch(function(){ return []; }),
+    fetch("/api/page-registry").then(function(r){ return r.json(); }).catch(function(){ return []; })
   ]).then(function(results){
     blockRegistry = results[0];
     catRegistry = results[1];
+    pageRegistry = Array.isArray(results[2]) ? results[2] : [];
     refreshAll();
   });
 

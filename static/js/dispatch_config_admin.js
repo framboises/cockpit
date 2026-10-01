@@ -4,10 +4,13 @@
  *
  * Backend : dispatch_auto.py
  *   GET  /api/dispatch/config      -> {ok, categories:{cat:{mode, levels, timeout_s,
- *                                      max_attempts, self_close, managers[]}},
+ *                                      max_attempts, self_close}},
  *                                      updated_at, updated_by, urgency_levels, modes}
  *   PUT  /api/dispatch/config      -> meme forme
- *   GET  /api/dispatch/users?q=    -> {ok, users:[{email, name, service}]}
+ *
+ * Les responsables de service ne se reglent plus ici : ils se definissent par
+ * les GROUPES cockpit (case "Responsable de service" d'un groupe, dont les
+ * categories determinent la file visible sur /dispatch-service).
  */
 (function () {
   "use strict";
@@ -31,7 +34,6 @@
     cfg: null,          // {cat: {...}} en cours d'edition
     levels: DEFAULT_LEVELS,
     modes: ["never", "always", "urgency"],
-    names: {},          // email -> {name, service}
     saving: false,
   };
 
@@ -42,6 +44,7 @@
     else console.log("[toast]", type, msg);
   }
 
+  // Jeton CSRF lu au moment de l'appel (csrf_refresh.js renouvelle la balise)
   function headers() {
     var h = { "Content-Type": "application/json" };
     var m = $('meta[name="csrf-token"]');
@@ -54,6 +57,23 @@
       return r.json().catch(function () { return {}; }).then(function (j) {
         return { status: r.status, body: j || {} };
       });
+    });
+  }
+
+  /** Ecriture JSON ; rejoue une fois apres renouvellement si le jeton CSRF a expire. */
+  function writeJson(method, url, body, retried) {
+    return fetchJson(url, {
+      method: method,
+      credentials: "same-origin",
+      headers: headers(),
+      body: JSON.stringify(body || {}),
+    }).then(function (res) {
+      if (!retried && res.status === 400 && res.body && res.body.code === "csrf" && window.CockpitCsrf) {
+        return window.CockpitCsrf.refresh().then(function (st) {
+          return st && st.ok ? writeJson(method, url, body, true) : res;
+        });
+      }
+      return res;
     });
   }
 
@@ -89,7 +109,6 @@
         timeout_s: src.timeout_s != null ? src.timeout_s : 60,
         max_attempts: src.max_attempts != null ? src.max_attempts : 3,
         self_close: !!src.self_close,
-        managers: Array.isArray(src.managers) ? src.managers.slice() : [],
       };
     });
     return out;
@@ -110,7 +129,6 @@
         return;
       }
       applyServer(b);
-      resolveManagerNames();
     }).catch(function () {
       list.textContent = "";
       list.appendChild(el("div", { style: "color:#dc2626; padding:12px;" }, "Erreur reseau."));
@@ -131,29 +149,6 @@
     meta.textContent = b.updated_at
       ? "Modifie le " + fmtDate(b.updated_at) + (b.updated_by ? " par " + b.updated_by : "")
       : "Configuration par defaut (jamais enregistree)";
-  }
-
-  // Noms des responsables deja configures : une recherche par email inconnu.
-  function resolveManagerNames() {
-    if (!state.cfg) return;
-    var todo = [];
-    Object.keys(state.cfg).forEach(function (cat) {
-      state.cfg[cat].managers.forEach(function (m) {
-        if (!state.names[m] && todo.indexOf(m) < 0) todo.push(m);
-      });
-    });
-    if (!todo.length) return;
-    Promise.all(todo.map(function (email) {
-      return fetchJson("/api/dispatch/users?q=" + encodeURIComponent(email))
-        .then(function (res) { rememberUsers(res.body.users); })
-        .catch(function () {});
-    })).then(render);
-  }
-
-  function rememberUsers(users) {
-    (users || []).forEach(function (u) {
-      if (u && u.email) state.names[u.email.toLowerCase()] = { name: u.name || "", service: u.service || "" };
-    });
   }
 
   // ------------------------------------------------------------------
@@ -222,8 +217,6 @@
     closeLab.appendChild(document.createTextNode("L'unite peut clore la fiche (compte-rendu obligatoire)"));
     grid.appendChild(closeLab);
     card.appendChild(grid);
-
-    card.appendChild(renderManagers(c, cfg));
     return card;
   }
 
@@ -242,141 +235,6 @@
     return lab;
   }
 
-  function renderManagers(c, cfg) {
-    var wrap = el("div", { className: "dcfg-managers" });
-    wrap.appendChild(el("div", { style: "color:var(--muted);" }, "Responsables de service"));
-
-    var chips = el("div", { className: "dcfg-chips" });
-    function drawChips() {
-      chips.textContent = "";
-      if (!cfg.managers.length) {
-        chips.appendChild(el("span", { style: "color:var(--muted); font-style:italic;" }, "Aucun responsable"));
-        return;
-      }
-      cfg.managers.forEach(function (email) {
-        var info = state.names[email];
-        var chip = el("span", { className: "dcfg-chip" });
-        chip.title = email + (info && info.service ? " - " + info.service : "");
-        if (info && info.name) {
-          chip.appendChild(document.createTextNode(info.name + " "));
-          chip.appendChild(el("small", null, email));
-        } else {
-          chip.appendChild(document.createTextNode(email));
-        }
-        var x = el("button", { type: "button", "aria-label": "Retirer " + email }, "×");
-        x.addEventListener("click", function () {
-          var i = cfg.managers.indexOf(email);
-          if (i >= 0) cfg.managers.splice(i, 1);
-          drawChips();
-        });
-        chip.appendChild(x);
-        chips.appendChild(chip);
-      });
-    }
-    drawChips();
-    wrap.appendChild(chips);
-
-    wrap.appendChild(buildAutocomplete(c, function (u) {
-      var email = (u.email || "").toLowerCase();
-      if (!email) return;
-      state.names[email] = { name: u.name || "", service: u.service || "" };
-      if (cfg.managers.indexOf(email) < 0) cfg.managers.push(email);
-      drawChips();
-    }));
-    return wrap;
-  }
-
-  function buildAutocomplete(c, onPick) {
-    var box = el("div", { className: "dcfg-ac" });
-    var inp = el("input", {
-      type: "text", className: "form-input", autocomplete: "off",
-      placeholder: "Ajouter un responsable (nom ou email)...",
-      style: "font-size:12px; padding:4px 6px;",
-    });
-    inp.setAttribute("aria-label", "Ajouter un responsable " + c.label);
-    var menu = el("div", { className: "dcfg-ac-list" });
-    menu.hidden = true;
-    box.appendChild(inp);
-    box.appendChild(menu);
-
-    var timer = null;
-    var seq = 0;
-    var items = [];
-    var active = -1;
-
-    function close() { menu.hidden = true; active = -1; }
-
-    function pick(u) {
-      onPick(u);
-      inp.value = "";
-      close();
-      inp.focus();
-    }
-
-    function highlight() {
-      Array.prototype.forEach.call(menu.children, function (n, i) {
-        n.classList.toggle("is-active", i === active);
-      });
-    }
-
-    function draw(users) {
-      items = users;
-      active = -1;
-      menu.textContent = "";
-      if (!users.length) {
-        menu.appendChild(el("div", { className: "dcfg-ac-item", style: "color:var(--muted); cursor:default;" }, "Aucun utilisateur"));
-        menu.hidden = false;
-        return;
-      }
-      users.forEach(function (u) {
-        var it = el("div", { className: "dcfg-ac-item" });
-        it.appendChild(document.createTextNode(u.name || u.email));
-        it.appendChild(el("small", null, u.email + (u.service ? " - " + u.service : "")));
-        it.addEventListener("mousedown", function (e) { e.preventDefault(); pick(u); });
-        menu.appendChild(it);
-      });
-      menu.hidden = false;
-    }
-
-    function search() {
-      var q = inp.value.trim();
-      if (q.length < 2) { close(); return; }
-      var my = ++seq;
-      fetchJson("/api/dispatch/users?q=" + encodeURIComponent(q)).then(function (res) {
-        if (my !== seq) return;
-        var users = (res.body && res.body.users) || [];
-        rememberUsers(users);
-        draw(users);
-      }).catch(function () { if (my === seq) close(); });
-    }
-
-    inp.addEventListener("input", function () {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(search, 250);
-    });
-    inp.addEventListener("keydown", function (e) {
-      if (menu.hidden) {
-        if (e.key === "Enter") e.preventDefault();
-        return;
-      }
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        if (items.length) { active = (active + 1) % items.length; highlight(); }
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        if (items.length) { active = (active - 1 + items.length) % items.length; highlight(); }
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        if (active >= 0 && items[active]) pick(items[active]);
-        else if (items.length === 1) pick(items[0]);
-      } else if (e.key === "Escape") {
-        close();
-      }
-    });
-    inp.addEventListener("blur", function () { setTimeout(close, 150); });
-    return box;
-  }
-
   // ------------------------------------------------------------------
   // Enregistrement
   // ------------------------------------------------------------------
@@ -393,12 +251,16 @@
     var btn = $("#dispatch-cfg-save");
     state.saving = true;
     if (btn) btn.disabled = true;
-    fetchJson("/api/dispatch/config", {
-      method: "PUT",
-      credentials: "same-origin",
-      headers: headers(),
-      body: JSON.stringify({ categories: state.cfg }),
-    }).then(function (res) {
+    // Responsables de service : jamais envoyes (ils viennent des groupes)
+    var payload = {};
+    Object.keys(state.cfg).forEach(function (cat) {
+      var c = state.cfg[cat];
+      payload[cat] = {
+        mode: c.mode, levels: c.levels.slice(), timeout_s: c.timeout_s,
+        max_attempts: c.max_attempts, self_close: c.self_close,
+      };
+    });
+    writeJson("PUT", "/api/dispatch/config", { categories: payload }).then(function (res) {
       if (res.body && res.body.ok) {
         applyServer(res.body);
         toast("success", "Configuration du dispatch enregistree");

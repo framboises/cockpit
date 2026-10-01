@@ -68,6 +68,12 @@ def _match(doc, query):
                 elif op == "$ne":
                     if val == arg:
                         return False
+                elif op == "$regex":
+                    flags = re.I if "i" in (cond.get("$options") or "") else 0
+                    if not isinstance(val, str) or not re.search(arg, val, flags):
+                        return False
+                elif op == "$options":
+                    continue
                 else:
                     raise NotImplementedError(op)
         else:
@@ -99,6 +105,14 @@ class Coll:
 
     def count_documents(self, query=None):
         return len(self.find(query))
+
+    def distinct(self, field, query=None):
+        out = []
+        for d in self.find(query):
+            v, ok = _get(d, field)
+            if ok and v not in out:
+                out.append(v)
+        return out
 
     def insert_one(self, doc):
         self.writes += 1
@@ -409,3 +423,157 @@ class TestHandler:
 
     def test_enregistre_dans_handlers(self):
         assert AE.HANDLERS["door_saturation_forecast"] is AE.detect_door_saturation_forecast
+
+
+# ---------------------------------------------------------------------------
+# Capacite de securite : bible (poste -> porte) + planning (agents)
+# ---------------------------------------------------------------------------
+
+import door_security as DS  # noqa: E402
+
+GATES = ["PORTE NORD PIETONS", "PORTE NORD VEHICULES", "PORTE NORD BIS", "PORTE PANORAMA",
+         "P PANORAMA", "PORTE MUSEE", "ENTREE MUSEE", "PORTE CHATEAU", "PORTE EST", "PORTE SUD"]
+
+
+class TestMatchGate:
+    def test_pietons_prefere_a_vehicules(self):
+        assert DS.match_gate("Porte Nord - Accès Piétons", GATES) == "PORTE NORD PIETONS"
+
+    def test_plus_specifique(self):
+        assert DS.match_gate("Porte Nord bis - Accès Piétons", GATES) == "PORTE NORD BIS"
+
+    def test_prefere_porte_a_parking(self):
+        assert DS.match_gate("Porte Passerelle Panorama - Accès piétons", GATES) == "PORTE PANORAMA"
+        assert DS.match_gate("Porte Musée - Accès Piétons", GATES) == "PORTE MUSEE"
+
+    def test_nom_dans_la_seconde_partie(self):
+        assert DS.match_gate("Porte E16 - Porte Château", GATES) == "PORTE CHATEAU"
+
+    def test_inconnue(self):
+        assert DS.match_gate("Porte Hunaudière", GATES) is None
+
+
+def _bible(num, aff, zone="PORTES", metier="SECURITE", positioning=None, event="24H AUTOS", year=2026):
+    return {"event": event, "year": year,
+            "post": {"number": num, "metier": metier, "zone": zone, "affectation": aff, "active": True},
+            "fiche": {"positioning": positioning}}
+
+
+def _cal(num, slots, date="2026-06-13", flag="S"):
+    """slots = {"HH:MM": agents} ; le reste de la journee a 0."""
+    plages = [{"heure_debut": "%02d:%02d" % (m // 60, m % 60), "heure_fin": "",
+               "nombre_personnes": slots.get("%02d:%02d" % (m // 60, m % 60), 0)} for m in range(0, 1440, 30)]
+    return {"shiftcode": num, "accueil_surete": flag,
+            "donnees_presences": [{"date": date, "plages_horaires": plages}]}
+
+
+class TestLoadDoorPosts:
+    def test_filtres_zone_metier_pietons(self):
+        db = DB(bible=[
+            _bible(8720, "Porte Nord - Accès Piétons"),
+            _bible(8721, "Porte Nord - Accès Véhicules"),                      # vehicules
+            _bible(8164, "Paddock Nord - Accès Piétons", zone="PADDOCK"),       # pas une porte publique
+            _bible(1720, "Porte Nord - Accès Piétons", metier="ACCUEIL"),       # accueil
+            _bible(8760, "Porte Est", positioning="Couloir de contrôle avant le contrôle du billet"),
+        ])
+        posts, _ = DS.load_door_posts(db, "24H AUTOS", 2026, GATES)
+        assert posts == {8720: "PORTE NORD PIETONS", 8760: "PORTE EST"}
+
+    def test_repli_sur_la_bible_la_plus_recente_du_meme_evenement(self):
+        db = DB(bible=[_bible(8720, "Porte Nord - Accès Piétons", year=2025)])
+        posts, _ = DS.load_door_posts(db, "24H AUTOS", 2026, GATES)
+        assert posts == {8720: "PORTE NORD PIETONS"}
+
+    def test_autre_evenement_ignore(self):
+        db = DB(bible=[_bible(8720, "Porte Nord - Accès Piétons", event="GPF")])
+        assert DS.load_door_posts(db, "24H AUTOS", 2026, GATES) == ({}, [])
+
+    def test_agents_par_creneau(self):
+        db = DB(calendrier_2026_24hautos=[_cal(8720, {"10:00": 3, "10:30": 2}),
+                                          _cal(8720, {"10:00": 1}, flag="A")])  # accueil ignore
+        st = DS.load_security_staffing(db, "24H AUTOS", 2026, {8720: "PORTE NORD PIETONS"})
+        assert DS.agents_at(st, "PORTE NORD PIETONS", datetime(2026, 6, 13, 10, 20)) == 3
+        assert DS.agents_at(st, "PORTE NORD PIETONS", datetime(2026, 6, 13, 10, 45)) == 2
+        assert DS.security_capacity(st, "PORTE NORD PIETONS", datetime(2026, 6, 13, 11, 0)) is None
+
+
+SECU = {"slug": "door-sat", "params": {"capacity_mode": "securite"}}
+
+
+@pytest.fixture(autouse=False)
+def _clear_secu_cache():
+    AE._DOOR_SECU_CACHE.clear()
+    yield
+    AE._DOOR_SECU_CACHE.clear()
+
+
+def _secu_db(live, slots, n1_counts=None, post=8760, aff="Porte Est - Accès Piétons"):
+    db = _base_db(live, n1_counts=n1_counts)
+    db.cols["bible"] = Coll([_bible(post, aff)])
+    db.cols["calendrier_2026_24hautos"] = Coll([_cal(post, slots)])
+    return db
+
+
+@pytest.mark.usefixtures("_clear_secu_cache")
+class TestHandlerSecurite:
+    def test_constate_et_renfort_propose(self):
+        # 150 / 5 min = 1800/h pour 4 agents (1400/h) : +2 agents (ceil(1800/350) - 4)
+        db = _secu_db(_live_docs("PORTE EST", [150] * 12), {"09:30": 4, "10:00": 4, "10:30": 4})
+        res = AE.detect_door_saturation_forecast(SECU, {"now": _now(T0), "db": db})
+        assert res and len(res) == 1
+        a = res[0]
+        ad = a["actionData"]
+        assert a["title"] == "RENFORT SECURITE PORTE"
+        assert ad["capacity_mode"] == "securite" and ad["capacity_source"] == "securite"
+        assert ad["security_agents"] == 4 and ad["capacity"] == 1400
+        assert ad["agents_needed"] == 2
+        assert a["message"] == "PORTE EST : ~1800/h des maintenant pour 4 agents securite (1400/h) - prevoir +2 agents"
+
+    def test_scan_suffisant_mais_pas_la_securite(self):
+        # Meme debit : sous la capacite de SCAN (2 tripodes = 1800/h a 90 %
+        # = 1620) il y aurait deja une alerte ; ici 6 agents = 2100/h, rien.
+        db = _secu_db(_live_docs("PORTE EST", [120] * 12), {"09:30": 6, "10:00": 6, "10:30": 6})
+        assert AE.detect_door_saturation_forecast(SECU, {"now": _now(T0), "db": db}) is None
+
+    def test_fin_de_vacation_annoncee(self):
+        # Flux stable 1440/h, 5 agents (1750/h) jusqu'a 10h30 puis 3 (1050/h) :
+        # la baisse d'effectif est prevue, sans aucune hausse de flux.
+        db = _secu_db(_live_docs("PORTE EST", [120] * 12), {"09:30": 5, "10:00": 5, "10:30": 3},
+                      n1_counts={9: 1000, 10: 1000, 11: 1000})
+        res = AE.detect_door_saturation_forecast(SECU, {"now": _now(T0), "db": db})
+        assert res
+        ad = res[0]["actionData"]
+        assert ad["minutes_ahead"] == 30 and ad["security_agents"] == 3
+        assert ad["agents_needed"] == 2
+        assert "attendus vers 10:30 pour 3 agents securite (1050/h)" in res[0]["message"]
+
+    def test_porte_sans_poste_de_securite(self):
+        db = _secu_db(_live_docs("PORTE SUD", [150] * 12), {"10:00": 1})
+        assert AE.detect_door_saturation_forecast(SECU, {"now": _now(T0), "db": db}) is None
+
+    def test_aucun_agent_prevu_maintenant(self):
+        db = _secu_db(_live_docs("PORTE EST", [150] * 12), {"14:00": 2})
+        assert AE.detect_door_saturation_forecast(SECU, {"now": _now(T0), "db": db}) is None
+
+    def test_sans_bible_ni_planning_s_abstient(self):
+        # Jamais de repli sur la capacite de scan, qui ne voit pas le goulet
+        db = _base_db(_live_docs("PORTE EST", [150] * 12))
+        assert AE.detect_door_saturation_forecast(SECU, {"now": _now(T0), "db": db}) is None
+
+    def test_une_alerte_par_episode(self):
+        db = _secu_db(_live_docs("PORTE EST", [150] * 12), {"09:30": 4, "10:00": 4, "10:30": 4})
+        db["cockpit_active_alerts"].docs.append({
+            "definition_slug": "door-sat", "actionData": {"door_key": "PORTE EST", "agents_needed": 1},
+            "triggeredAt": (_now(T0) - timedelta(minutes=90)).replace(tzinfo=None)})
+        # 90 min < renotify_min (120) : rien, meme si le besoin a grandi (+2 > +1)
+        assert AE.detect_door_saturation_forecast(SECU, {"now": _now(T0), "db": db}) is None
+        d = {"slug": "door-sat", "params": {"capacity_mode": "securite", "renotify_on_worse": True}}
+        res = AE.detect_door_saturation_forecast(d, {"now": _now(T0), "db": db})
+        assert res and res[0]["actionData"]["agents_needed"] == 2
+
+    def test_nouvel_episode_apres_renotify(self):
+        db = _secu_db(_live_docs("PORTE EST", [150] * 12), {"09:30": 4, "10:00": 4, "10:30": 4})
+        db["cockpit_active_alerts"].docs.append({
+            "definition_slug": "door-sat", "actionData": {"door_key": "PORTE EST", "agents_needed": 5},
+            "triggeredAt": (_now(T0) - timedelta(minutes=150)).replace(tzinfo=None)})
+        assert AE.detect_door_saturation_forecast(SECU, {"now": _now(T0), "db": db})

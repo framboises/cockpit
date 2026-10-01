@@ -316,9 +316,14 @@ def src_main_courante(db, event, year, now_utc):
         raise ValueError("aucun evenement actif")
     col = db["pcorg"]
     base = {"event": event, "year": int(year)}
-    open_docs = list(col.find({**base, "status_code": {"$ne": STATUT_CLOS}}, _FICHE_PROJ))
+    # SAISON : les fiches ouvertes / recentes de SAISON/<y-1> restent visibles
+    # (nuit du Nouvel An, fiche ouverte en decembre). Le total reste l'annee.
+    live = dict(base)
+    if str(event).strip().upper() == "SAISON":
+        live["year"] = {"$in": [int(year) - 1, int(year)]}
+    open_docs = list(col.find({**live, "status_code": {"$ne": STATUT_CLOS}}, _FICHE_PROJ))
     since = now_utc - timedelta(hours=RECENT_HOURS)
-    recent = list(col.find({**base, "ts": {"$gte": since, "$lte": now_utc}}, _FICHE_PROJ))
+    recent = list(col.find({**live, "ts": {"$gte": since, "$lte": now_utc}}, _FICHE_PROJ))
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     recent.sort(key=lambda f: as_utc(f.get("ts")) or epoch, reverse=True)
     open_majors = sorted([f for f in open_docs if _is_major(f)],

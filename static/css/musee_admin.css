@@ -1,0 +1,87 @@
+/* Page /live-controle : onglets Evenements / Musee + formulaire du musee (musee_admin.js) */
+
+.lc-tabs { display: flex; gap: 4px; margin-left: 12px; }
+.lc-tab {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 12px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--card); color: var(--muted); font: inherit; font-size: 0.82rem;
+  cursor: pointer;
+}
+.lc-tab .material-symbols-outlined { font-size: 17px; }
+.lc-tab.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+.hsh-page #main-content.hsh-page-grid.lc-hidden { display: none !important; }
+
+.hsh-page .musee-admin {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 20px;
+}
+.hsh-page .musee-admin[hidden] { display: none; }
+@media (max-width: 900px) {
+  .hsh-page .musee-admin { grid-template-columns: 1fr; padding: 12px; }
+}
+
+.musee-admin .ma-body { display: flex; flex-direction: column; gap: 10px; font-size: 0.84rem; }
+.musee-admin .ma-row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.musee-admin .ma-sub {
+  display: flex; align-items: center; gap: 10px;
+  font-weight: 600; font-size: 0.80rem; color: var(--text); margin-top: 4px;
+}
+.musee-admin .ma-hint { font-size: 0.74rem; color: var(--muted); }
+.musee-admin .ma-field { display: flex; flex-direction: column; gap: 3px; font-size: 0.76rem; color: var(--muted); }
+.musee-admin .ma-field-wide { width: 100%; }
+.musee-admin .ma-field-wide .hsh-select { width: 100%; box-sizing: border-box; }
+.musee-admin .ma-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.musee-admin .btn .material-symbols-outlined { font-size: 16px; vertical-align: middle; margin-right: 3px; }
+
+.musee-admin .ma-badge, .musee-admin .ma-today {
+  margin-left: auto; font-size: 0.72rem; font-weight: 600; padding: 1px 8px; border-radius: 10px;
+  background: var(--line); color: var(--muted); white-space: nowrap;
+}
+.musee-admin .ma-badge.ok { background: var(--success-light); color: var(--success); }
+.musee-admin .ma-badge.warn { background: var(--danger-light); color: var(--danger); }
+
+.musee-admin .ma-etat { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 0.78rem; }
+.musee-admin .ma-etat dt { color: var(--muted); }
+.musee-admin .ma-etat dd { margin: 0; }
+.musee-admin .ma-etat .ma-err { color: var(--danger); font-weight: 600; }
+
+.musee-admin .ma-table { width: 100%; border-collapse: collapse; font-size: 0.80rem; }
+.musee-admin .ma-table th {
+  text-align: left; font-weight: 600; color: var(--muted); font-size: 0.72rem;
+  padding: 3px 4px; border-bottom: 1px solid var(--line);
+}
+.musee-admin .ma-table td { padding: 3px 4px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.musee-admin .ma-table .hsh-select { padding: 3px 6px; font-size: 0.78rem; }
+.musee-admin .ma-table input[type="text"].hsh-select { width: 100%; box-sizing: border-box; min-width: 90px; }
+.musee-admin .ma-table td.ma-day { font-weight: 600; width: 80px; }
+.musee-admin .ma-table tr.ma-past td { opacity: 0.55; }
+.musee-admin .ma-table tr.ma-off td.ma-cp-nom { opacity: 0.5; text-decoration: line-through; }
+.musee-admin .ma-icon-btn {
+  border: none; background: none; cursor: pointer; color: var(--muted); padding: 2px;
+}
+.musee-admin .ma-icon-btn:hover { color: var(--danger); }
+.musee-admin .ma-icon-btn .material-symbols-outlined { font-size: 18px; }
+.musee-admin .ma-tag {
+  display: inline-block; font-size: 0.68rem; padding: 0 6px; border-radius: 8px; margin: 1px 2px 1px 0;
+  background: var(--line); color: var(--muted); white-space: nowrap;
+}
+.musee-admin .ma-tag.warn { background: var(--danger-light); color: var(--danger); }
+.musee-admin .ma-tag.info { background: var(--brand-light); color: var(--brand); }
+.musee-admin .ma-small { font-size: 0.70rem; color: var(--muted); }
+
+.musee-admin .ma-gates { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.musee-admin .ma-gates label { display: inline-flex; align-items: center; gap: 4px; font-size: 0.80rem; }
+
+.musee-admin .ma-advanced summary { cursor: pointer; list-style: none; }
+.musee-admin .ma-advanced summary::-webkit-details-marker { display: none; }
+.musee-admin .ma-advanced summary h3::before { content: "\25B8  "; color: var(--muted); }
+.musee-admin .ma-advanced[open] summary h3::before { content: "\25BE  "; }
+
+.musee-admin .ma-test-result {
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 0.78rem;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.musee-admin .ma-test-result.ko { border-color: var(--danger); }
+.musee-admin .ma-test-result table { width: 100%; border-collapse: collapse; }
+.musee-admin .ma-test-result td { padding: 1px 4px; }
+.musee-admin .ma-test-result td.n { text-align: right; font-variant-numeric: tabular-nums; }

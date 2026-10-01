@@ -344,6 +344,7 @@ def route_client(monkeypatch):
     monkeypatch.setitem(sys.modules, "app", fake_app)
     caller, model_calls = _caller_factory()
     monkeypatch.setattr(AI, "call_model", caller)
+    monkeypatch.setattr(AI, "EXPLAIN_ENABLED", True)
     flask_app = Flask(__name__)
     flask_app.register_blueprint(AI.alert_ai_bp)
     return flask_app.test_client(), db, calls, model_calls
@@ -381,6 +382,13 @@ class TestRoute:
     def test_get_refuse(self, route_client):
         client = route_client[0]
         assert client.get("/api/alerts/%s/explain" % AID).status_code == 405
+
+    def test_coupee_par_defaut_sans_appel_au_modele(self, route_client, monkeypatch):
+        client, _db, _roles, model_calls = route_client
+        monkeypatch.setattr(AI, "EXPLAIN_ENABLED", False)
+        r = client.post("/api/alerts/%s/explain" % AID)
+        assert r.status_code == 410 and r.get_json() == {"ok": False, "error": "desactive"}
+        assert model_calls == []
 
     def test_id_inconnu_json_404(self, route_client):
         client = route_client[0]

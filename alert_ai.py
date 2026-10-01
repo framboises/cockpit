@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 
 alert_ai_bp = Blueprint("alert_ai", __name__)
 
+# Route /explain coupee par defaut (cout par clic operateur), cf. explain_route.
+EXPLAIN_ENABLED = __import__("os").getenv("ALERT_AI_EXPLAIN", "0").strip().lower() in ("1", "true", "yes")
+
 PARIS = ZoneInfo("Europe/Paris")
 COL_EXPLAIN = "alert_explanations"
 EXPLAIN_TTL_S = 7 * 24 * 3600
@@ -809,6 +812,11 @@ def _user_required(f):
 @alert_ai_bp.route("/api/alerts/<alert_id>/explain", methods=["POST"])
 @_user_required
 def explain_route(alert_id):
+    # Coupee par defaut : le bouton a ete retire des alertes (un appel au
+    # modele par clic d'operateur). Un onglet reste sur l'ancien JS ne doit
+    # plus pouvoir consommer. ALERT_AI_EXPLAIN=1 la reactive.
+    if not EXPLAIN_ENABLED:
+        return jsonify({"ok": False, "error": "desactive"}), 410
     from app import db, _get_user_alert_slugs
     payload = getattr(request, "user_payload", {}) or {}
     try:

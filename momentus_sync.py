@@ -514,6 +514,17 @@ def main(argv=None):
         db["momentus_sync_runs"].update_one({"_id": owner}, {"$set": {
             "status": "ok", "ended_at": _utcnow(), "duration_s": duration,
             "api_calls": api.calls, "stats": stats}})
+        # Programme du site dans la timeline SAISON (J-1 -> J+14). Un echec ici
+        # ne doit pas faire echouer la synchro, deja enregistree.
+        try:
+            import momentus_timeline
+            tl = momentus_timeline.sync_saison_timeline(db)
+            stats["timeline_saison"] = {"from": tl["from"], "to": tl["to"],
+                                        "items": sum(tl["per_day"].values()),
+                                        "days_changed": sum(d["days_changed"] for d in tl["docs"])}
+            db["momentus_sync_runs"].update_one({"_id": owner}, {"$set": {"stats": stats}})
+        except Exception:
+            log.exception("Timeline SAISON non mise a jour")
         msg = (f"{mode} : {stats.get('events', 0)} evenements, {stats.get('functions', 0)} fonctions, "
                f"{api.calls} appels, {duration} s")
         log.info("OK %s | %s", msg, json.dumps(stats, default=str))

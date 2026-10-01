@@ -146,6 +146,25 @@ N1_RETROS_COLLECTION = "pcorg_n1_retros"
 MORNING_REPORT_SETTINGS_ID = "morning_report"
 COCKPIT_SETTINGS_COLLECTION = "cockpit_settings"
 
+
+def is_saison(event):
+    """SAISON = main courante permanente (reconnue par son NOM, sans dates)."""
+    return str(event or "").strip().upper() == "SAISON"
+
+
+def _year_match(event, year):
+    """Valeur du filtre Mongo `year` sur pcorg.
+
+    Epreuve : int(year) (comportement historique, inchange).
+    SAISON : {$in: [y-1, y]} -- une periode a cheval sur la nuit du Nouvel An
+    contient des fiches SAISON/<y-1> ET SAISON/<y> ; ts borne deja la periode.
+    """
+    y = int(year)
+    if is_saison(event):
+        return {"$in": [y - 1, y]}
+    return y
+
+
 # Version du system prompt de base (incrementer manuellement quand on refond
 # le prompt). Permet de filtrer le dataset d'apprentissage par generation de
 # prompt -- utile si on veut exclure les vieux samples post-refonte.
@@ -573,6 +592,18 @@ def _aligned_prev_year_window(ts_start, ts_end, race_dt_n, race_dt_prev):
         race_dt_prev + timedelta(seconds=off_start),
         race_dt_prev + timedelta(seconds=off_end),
     )
+
+
+def _same_dates_prev_year(ts):
+    """Meme date/heure calendaire (heure de Paris) un an plus tot, en UTC.
+    29/02 -> 28/02. Sert au N-1 de SAISON (pas de course pour aligner)."""
+    t = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+    loc = t.astimezone(TZ_PARIS).replace(tzinfo=None)
+    try:
+        prev = loc.replace(year=loc.year - 1)
+    except ValueError:
+        prev = loc.replace(year=loc.year - 1, day=28)
+    return prev.replace(tzinfo=TZ_PARIS).astimezone(timezone.utc)
 
 
 PREV_EDITION_MAX_BACK = 5
@@ -1376,7 +1407,7 @@ def compute_kpis(db, event, year, ts_start, ts_end):
     if event:
         base["event"] = event
     if year is not None:
-        base["year"] = int(year)
+        base["year"] = _year_match(event, year)
     total = col.count_documents(base)
     closed = col.count_documents({**base, "status_code": 10})
     open_ = total - closed
@@ -1476,7 +1507,7 @@ def compute_compact_kpis(db, event, year, ts_start, ts_end):
     if event:
         base["event"] = event
     if year is not None:
-        base["year"] = int(year)
+        base["year"] = _year_match(event, year)
     total = col.count_documents(base)
     if total == 0:
         return {"total": 0, "closed": 0, "by_category": {}, "by_urgency": {}}
@@ -1530,6 +1561,24 @@ def compute_comparisons(db, event, year, ts_start, ts_end):
             "period_end": prev_end.isoformat(),
             "kpis": kpis,
         }
+
+    # SAISON : pas de course. N-1 = memes dates calendaires un an plus tot
+    # (SAISON/<y-1>), et non une edition alignee sur la course.
+    if event and year is not None and is_saison(event):
+        prev_start = _same_dates_prev_year(ts_start)
+        prev_end = _same_dates_prev_year(ts_end)
+        year_prev = int(year) - 1
+        kpis = compute_compact_kpis(db, event, year_prev, prev_start, prev_end)
+        out["prev_year_aligned"] = {
+            "label": "Annee precedente, memes dates calendaires (SAISON)",
+            "period_start": prev_start.isoformat(),
+            "period_end": prev_end.isoformat(),
+            "kpis": kpis,
+            "race_dt_n": None,
+            "race_dt_prev": None,
+            "year_prev": year_prev,
+        }
+        return out
 
     # Edition precedente alignee sur date de course : la plus recente edition
     # anterieure ayant des fiches (find_previous_edition), pas strictement N-1.
@@ -1684,7 +1733,7 @@ def select_fiches_n_minus_1(db, event, year_prev, ts_start, ts_end, max_fiches=2
     col = db[PCORG_COLLECTION]
     base = {
         "event": event,
-        "year": int(year_prev),
+        "year": _year_match(event, year_prev),
         "ts": {"$gte": ts_start, "$lte": ts_end},
     }
     majors = list(col.find({
@@ -1796,7 +1845,7 @@ def select_fiches_for_prompt(db, event, year, ts_start, ts_end, max_fiches=DEFAU
     if event:
         base["event"] = event
     if year is not None:
-        base["year"] = int(year)
+        base["year"] = _year_match(event, year)
     total = col.count_documents(base)
 
     major_filter = {
@@ -2073,10 +2122,12 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
                 "- Fenetre annee precedente (Europe/Paris) : "
                 + _iso_paris(prev_year["period_start"]) + " --> "
                 + _iso_paris(prev_year["period_end"]) + "\n"
-                "- Date course annee courante (Europe/Paris) : "
-                + _iso_paris(prev_year["race_dt_n"]) + "\n"
-                "- Date course annee precedente (Europe/Paris) : "
-                + _iso_paris(prev_year["race_dt_prev"]) + "\n"
+                + ((
+                    "- Date course annee courante (Europe/Paris) : "
+                    + _iso_paris(prev_year["race_dt_n"]) + "\n"
+                    "- Date course annee precedente (Europe/Paris) : "
+                    + _iso_paris(prev_year["race_dt_prev"]) + "\n"
+                ) if prev_year.get("race_dt_n") else "")
                 + json.dumps(prev_year["kpis"], ensure_ascii=False, indent=2, default=_json_default)
             )
 
@@ -2173,9 +2224,12 @@ def _build_retro_prompts(event, year_prev, ts_start, ts_end, kpis, fiches):
     system = (
         "Tu es un analyste retrospectif d'evenements (festival, course "
         "automobile). On te fournit les KPIs et un echantillon de fiches "
-        "d'incidents de l'edition precedente sur le meme creneau "
-        "operationnel (alignement par rapport a la date de course). "
-        "Ton objectif unique : produire une note retrospective qui aide "
+        + ("d'incidents de l'annee precedente (main courante permanente "
+           "SAISON) sur les memes dates calendaires. "
+           if is_saison(event) else
+           "d'incidents de l'edition precedente sur le meme creneau "
+           "operationnel (alignement par rapport a la date de course). ")
+        + "Ton objectif unique : produire une note retrospective qui aide "
         "les operateurs de l'edition courante a NE PAS REPETER les "
         "memes erreurs.\n"
         "\n"
@@ -3204,20 +3258,26 @@ def _saison_fallback(db, now_utc):
 
 
 def detect_active_event(db, now_utc=None):
-    """Devine l'evenement actuellement actif d'apres parametrages.
+    """(event, year:int) actuellement actif : delegue a event_courant.current_event
+    (source unique : epreuve active de montage.start a demontage.end, priorite
+    jours publics puis course la plus proche, SAISON/<annee civile> sinon ;
+    fenetres aberrantes > MAX_WINDOW_DAYS ignorees).
 
-    Logique alignee sur le bloc "live status" (static/js/main.js) :
-    un evenement est actif entre globalHoraires.montage.start et
-    globalHoraires.demontage.end.
-
-    - 1 seul candidat actif -> on le prend.
-    - Plusieurs candidats actifs (chevauchement) -> on prend celui dont
-      la date de course (globalHoraires.race) est la plus proche de now
-      (la course la plus "chaude").
-    - Aucun candidat actif -> fallback SAISON annee courante.
+    En cas d'echec du module, repli sur l'ancienne detection locale.
     """
     if now_utc is None:
         now_utc = datetime.now(timezone.utc)
+    try:
+        import event_courant
+        ev, yr = event_courant.current_event(db, now_utc)
+        return (ev, int(yr))
+    except Exception as e:
+        logger.warning("detect_active_event : event_courant indisponible (%s), repli local", e)
+    return _detect_active_event_legacy(db, now_utc)
+
+
+def _detect_active_event_legacy(db, now_utc):
+    """Ancienne detection (repli uniquement)."""
     candidates = []
     for doc in db["parametrages"].find(
         {},
@@ -3275,7 +3335,7 @@ def detect_event_phase(db, event, year, ts_start, ts_end):
     la periode tombe hors de l'edition : les directives scopees par phase ne
     sont alors pas injectees.
     """
-    if not event or year is None:
+    if not event or year is None or is_saison(event):
         return None
     try:
         year_int = int(year)

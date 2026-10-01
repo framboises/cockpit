@@ -50,6 +50,7 @@ from functools import wraps
 
 from flask import Blueprint, jsonify, render_template, request
 
+import event_courant as EC
 import pcorg_history as PH
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ OUTCOMES = {
     "materiel": "Besoin de materiel ou de renfort",
     "impossible": "Intervention impossible",
 }
-REPORT_MIN_CHARS = 5
+REPORT_MIN_CHARS = 3   # = FINISH_REPORT_MIN de field.js ("RAS", "ok")
 REPORT_MAX_CHARS = 2000
 
 # Delai de grace apres l'echeance : une acceptation partie a la derniere
@@ -79,6 +80,8 @@ CANDIDATE_MAX_SILENCE_S = 15 * 60
 FRESH_POSITION_S = 5 * 60
 TICK_S = 3
 BOT_OPERATOR = "Dispatch auto"
+# Fiches closes renvoyees a la File du service (section "Terminees")
+CLOSED_ON_BOARD = 100
 
 DEFAULT_CATEGORY = {
     "mode": "never",
@@ -86,7 +89,6 @@ DEFAULT_CATEGORY = {
     "timeout_s": 30,
     "max_attempts": 3,
     "self_close": False,
-    "managers": [],
 }
 DEFAULT_OVERRIDES = {
     "PCO.Technique": {"mode": "urgency", "levels": ["UA", "EU"], "self_close": True},
@@ -182,13 +184,9 @@ def _clean_category_cfg(raw, base):
                 pass
     if "self_close" in raw:
         out["self_close"] = bool(raw["self_close"])
-    if isinstance(raw.get("managers"), list):
-        seen = []
-        for m in raw["managers"]:
-            m = str(m or "").strip().lower()
-            if m and "@" in m and m not in seen:
-                seen.append(m)
-        out["managers"] = seen
+    # Les responsables de service ne sont plus une liste d'e-mails ici : ce
+    # sont les groupes coches "Responsable de service" (app._user_dispatch_categories).
+    out.pop("managers", None)
     return out
 
 
@@ -223,11 +221,16 @@ def category_config(cfg, category):
     return (cfg.get("categories") or {}).get(category) or dict(DEFAULT_CATEGORY)
 
 
-def managed_categories(cfg, email, is_admin=False):
-    if is_admin:
-        return list(CATEGORIES)
-    email = str(email or "").strip().lower()
-    return [c for c, v in (cfg.get("categories") or {}).items() if email and email in (v.get("managers") or [])]
+def managed_categories(payload):
+    """Categories de la file du service accessibles a l'utilisateur : celles
+    des groupes cockpit coches "Responsable de service" (config > groupes),
+    toutes pour un admin. En echec de resolution : aucune (on ferme)."""
+    try:
+        from app import _user_dispatch_categories
+        return [c for c in _user_dispatch_categories(payload) if c in CATEGORIES]
+    except Exception as e:
+        logger.warning("dispatch : categories du responsable indisponibles (%s)", e)
+        return []
 
 
 def wants_auto(cfg, fiche):
@@ -266,7 +269,9 @@ def _proposal_pending(device, now):
 def find_candidates(db, fiche, exclude_ids=(), now=None):
     """Unites a qui proposer la fiche, la meilleure en premier.
 
-    Eligibles : meme evenement, non revoquee, meme categorie, disponible
+    Eligibles : tablette qui voit l'evenement de la fiche (field.device_pairs :
+    evenements actifs + son appairage ; une tablette SAISON est candidate sur
+    une epreuve active), non revoquee, meme categorie, disponible
     (statut patrouille), vue depuis moins de 15 min, sans proposition en
     cours, metier compatible (une unite sans metier declare les couvre tous).
     Classement : position fraiche (< 5 min) d'abord, puis distance, puis
@@ -279,12 +284,11 @@ def find_candidates(db, fiche, exclude_ids=(), now=None):
     metier = (fiche.get("content_category") or {}).get("sous_classification")
     point = _fiche_point(fiche)
     group_cats = F._group_categories(db)
+    ev, yr = fiche.get("event"), fiche.get("year")
+    query = {"revoked": {"$ne": True}}
+    query.update(F.devices_seeing_pair_filter(db, ev, yr, now))
     out = []
-    for d in db["field_devices"].find({
-        "event": fiche.get("event"),
-        "year": _year_str(fiche.get("year")),
-        "revoked": {"$ne": True},
-    }):
+    for d in db["field_devices"].find(query):
         if str(d["_id"]) in exclude:
             continue
         if F._device_category(db, d, group_cats) != category:
@@ -297,6 +301,10 @@ def find_candidates(db, fiche, exclude_ids=(), now=None):
         if _proposal_pending(d, now):
             continue
         if not _device_metiers_ok(d, metier):
+            continue
+        # Evenement vu par la tablette, pas reserve a une homonyme, epreuve
+        # de la tablette pas terminee (balayage paresseux).
+        if F._device_expired(db, d) or not F.device_matches_pair(db, d, ev, yr, now):
             continue
         pos = d.get("last_position") or {}
         pos_ts = _aware(pos.get("ts"))
@@ -638,8 +646,7 @@ def manual_assign(db, fiche_id, device, by_name, now=None):
     if fiche.get("status_code") == 10:
         return False, "fiche_closee"
     F = _field()
-    if device.get("revoked") or device.get("event") != fiche.get("event") \
-            or _year_str(device.get("year")) != _year_str(fiche.get("year")):
+    if device.get("revoked") or not F.device_matches_pair(db, device, fiche.get("event"), fiche.get("year")):
         return False, "unite_invalide"
     if F._device_category(db, device) != fiche.get("category"):
         return False, "categorie_differente"
@@ -667,9 +674,10 @@ def manual_assign(db, fiche_id, device, by_name, now=None):
     if previous and previous != name:
         # Changement d'unite : l'ancienne, si c'etait sa fiche active,
         # redevient disponible (meme regle que la modification PC Org).
+        # active_fiche_id suffit a la designer, quel que soit son evenement
+        # (tablette SAISON engagee sur une epreuve).
         db["field_devices"].update_one(
-            {"name": previous, "event": fiche.get("event"), "year": _year_str(fiche.get("year")),
-             "revoked": {"$ne": True}, "active_fiche_id": fiche_id},
+            {"name": previous, "revoked": {"$ne": True}, "active_fiche_id": fiche_id},
             {"$set": {"status": "patrouille", "status_since": now, "active_fiche_id": None},
              "$push": {"status_history": {"status": "patrouille", "ts": now,
                                           "trigger": "service_reassign", "fiche_id": fiche_id}}},
@@ -688,6 +696,115 @@ def manual_assign(db, fiche_id, device, by_name, now=None):
     except Exception:
         pass
     return True, ("ajoutee_aux_missions" if busy else "ok")
+
+
+AVAILABLE_MAX_AGE_DAYS = 30
+
+
+def available_for_device(db, device, limit=100, now=None):
+    """Missions que l'unite peut prendre elle-meme (onglet "Disponibles" de
+    la tablette) : fiches ouvertes des evenements qu'elle voit
+    (field.device_pairs) et de sa categorie, sans unite engagee, de son metier
+    (unite sans metier : tous), creees depuis moins de 30 jours (SAISON
+    accumule toute l'annee). Les plus urgentes puis les plus recentes d'abord.
+
+    Avant : tri croissant + limit(300) -> on gardait les 300 PLUS ANCIENNES
+    fiches ouvertes, les nouvelles n'apparaissaient plus."""
+    F = _field()
+    now = now or _now()
+    cat = F._device_category(db, device)
+    if not cat:
+        return []
+    out = []
+    for f in db["pcorg"].find({
+        "$and": [
+            EC.pairs_filter(F.device_fiche_pairs(db, device, now)),
+            {"$or": [{"content_category.patrouille": {"$in": ["", None]}},
+                     {"content_category.patrouille": {"$exists": False}}]},
+        ],
+        "category": cat, "status_code": {"$ne": 10},
+        "ts": {"$gte": now - timedelta(days=AVAILABLE_MAX_AGE_DAYS)},
+    }).sort("ts", -1).limit(300):
+        cc = f.get("content_category") or {}
+        if not _device_metiers_ok(device, cc.get("sous_classification")):
+            continue
+        point = _fiche_point(f)
+        d = f.get("dispatch") or {}
+        cur = d.get("current") or {}
+        out.append({
+            "id": f["_id"],
+            "category": f.get("category"),
+            "text": f.get("text") or f.get("text_full") or "",
+            "niveau_urgence": f.get("niveau_urgence"),
+            "metier": cc.get("sous_classification"),
+            "area": (f.get("area") or {}).get("desc") if isinstance(f.get("area"), dict) else None,
+            "carroye": cc.get("carroye"),
+            "ts": _iso(f.get("ts")),
+            "lat": point[0] if point else None,
+            "lng": point[1] if point else None,
+            "dispatch_state": d.get("state"),
+            "proposed_to_me": cur.get("device_id") == str(device["_id"]),
+        })
+    rank = {"EU": 0, "UA": 1, "UR": 2, "IMP": 3}
+    out.sort(key=lambda x: rank.get(x["niveau_urgence"], 4))
+    return out[:limit]
+
+
+def self_assign(db, fiche_id, device, now=None):
+    """L'unite prend elle-meme une mission disponible (engagement immediat).
+    Retourne (ok, code). Une proposition automatique en cours vers une autre
+    unite est annulee ; si elle lui etait adressee, c'est une acceptation."""
+    now = now or _now()
+    fresh = db["field_devices"].find_one({"_id": device["_id"]}) or device
+    fiche = db["pcorg"].find_one({"_id": fiche_id})
+    if not fiche:
+        return False, "not_found"
+    if fiche.get("status_code") == 10:
+        return False, "fiche_closee"
+    cur = ((fiche.get("dispatch") or {}).get("current") or {})
+    if cur.get("device_id") == str(fresh["_id"]):
+        return accept(db, fiche_id, fresh, now=now)
+    if (fresh.get("status") or "patrouille") != "patrouille":
+        return False, "unite_occupee"
+    F = _field()
+    if not F.device_matches_pair(db, fresh, fiche.get("event"), fiche.get("year"), now):
+        return False, "evenement_different"
+    if F._device_category(db, fresh) != fiche.get("category"):
+        return False, "categorie_differente"
+    if not _device_metiers_ok(fresh, (fiche.get("content_category") or {}).get("sous_classification")):
+        return False, "metier_different"
+    name = fresh.get("name") or "?"
+    n = PH.append_entry(
+        db["pcorg"], fiche_id,
+        PH.make_entry("field:" + name, "Statut: Engagement confirme\nMission prise par l'unite (libre-service)",
+                      origin="field", ts=now),
+        set_fields={
+            "content_category.patrouille": name,
+            "dispatch.state": "assigned",
+            "dispatch.current": None,
+            "dispatch.assigned_at": now,
+            "dispatch.assigned_device_id": str(fresh["_id"]),
+            "dispatch.assigned_by": "libre-service",
+            "intervention.engaged_at": now,
+            "intervention.device_name": name,
+        },
+        owned={"content_category.patrouille"}, inc_bounce=True,
+        extra_filter={"status_code": {"$ne": 10},
+                      "$or": [{"content_category.patrouille": {"$in": ["", None]}},
+                              {"content_category.patrouille": {"$exists": False}}]},
+    )
+    if not n:
+        return False, "deja_prise"
+    if cur.get("device_id"):
+        _release_device(db, cur["device_id"], fiche_id)
+    db["field_devices"].update_one(
+        {"_id": fresh["_id"]},
+        {"$set": {"status": "intervention", "status_since": now,
+                  "active_fiche_id": fiche_id, "pending_proposal": None},
+         "$push": {"status_history": {"status": "intervention", "ts": now,
+                                      "trigger": "self_assign", "fiche_id": fiche_id}}},
+    )
+    return True, "ok"
 
 
 def finish(db, fiche_id, device, outcome, report, now=None):
@@ -902,8 +1019,70 @@ def _user_name(u):
 
 
 def _can_manage(db, category):
-    u = _user()
-    return category in managed_categories(get_config(db), u.get("email"), _is_admin(u))
+    return category in managed_categories(_user())
+
+
+SOURCE_LABELS = {
+    "initiative": "Initiative PC Org",
+    "externe": "Appel externe",
+    "operateur": "Operateur interne",
+    "hierarchie": "Hierarchie",
+}
+CANAL_LABELS = {"telephone": "telephone", "radio": "radio", "presentiel": "presentiel", "mail": "mail"}
+
+
+def _fiche_source(cc):
+    """Source de la fiche en clair (meme modele que l'assistant de creation)."""
+    st = cc.get("source_type") or ""
+    who = (cc.get("appelant") or cc.get("emetteur_interne") or cc.get("donneur_ordre")
+           or cc.get("source_origine") or "")
+    canal = cc.get("canal") or ""
+    if not canal:
+        if cc.get("telephone"):
+            canal = "telephone"
+        elif cc.get("radio"):
+            canal = "radio"
+    return {
+        "type": st,
+        "label": SOURCE_LABELS.get(st, ""),
+        "who": str(who) if who and who is not True else "",
+        "canal": CANAL_LABELS.get(canal, canal if isinstance(canal, str) else ""),
+        "radio_canal": cc.get("radio_canal") or "",
+    }
+
+
+def _last_action(history):
+    """Derniere action humaine de la chronologie (a defaut, la derniere entree)."""
+    hist = [e for e in (history or []) if isinstance(e, dict) and str(e.get("text") or "").strip()]
+    if not hist:
+        return None
+    human = [e for e in hist if not e.get("system")]
+    e = (human or hist)[-1]
+    text = str(e.get("text") or "").strip()
+    return {
+        "text": text[:400] + ("..." if len(text) > 400 else ""),
+        "operator": str(e.get("operator") or ""),
+        "ts": _iso(e.get("ts")) if isinstance(e.get("ts"), datetime) else (e.get("ts") or None),
+        "count": len(hist),
+    }
+
+
+# Projection de la file du service : pas de documents complets (la
+# chronologie d'une fiche SAISON peut etre longue) ; seules les dernieres
+# entrees servent a "Derniere action", le total vient de $size.
+BOARD_FICHE_PROJECTION = {
+    "event": 1, "year": 1, "operator": 1, "content_category": 1, "sql_id": 1,
+    "category": 1, "text": 1, "text_full": 1, "niveau_urgence": 1, "area": 1,
+    "ts": 1, "gps": 1, "status_code": 1, "close_ts": 1, "operator_close": 1,
+    "dispatch": 1, "intervention": 1,
+    "comment_history": {"$slice": -30},
+    "_hist_n": {"$size": {"$ifNull": ["$comment_history", []]}},
+}
+BOARD_DEVICE_PROJECTION = {
+    "name": 1, "event": 1, "year": 1, "category": 1, "beacon_group_id": 1,
+    "metiers": 1, "status": 1, "status_since": 1, "active_fiche_id": 1,
+    "last_seen": 1, "last_position": 1, "pending_proposal": 1, "restoredAt": 1,
+}
 
 
 def _pub_fiche(fiche, devices_by_name):
@@ -913,7 +1092,16 @@ def _pub_fiche(fiche, devices_by_name):
     point = _fiche_point(fiche)
     patr = cc.get("patrouille") or ""
     dev = devices_by_name.get(patr)
+    last_action = _last_action(fiche.get("comment_history"))
+    if last_action and isinstance(fiche.get("_hist_n"), int):
+        last_action["count"] = fiche["_hist_n"]
     return {
+        "event": fiche.get("event"),
+        "year": fiche.get("year"),
+        "operator": fiche.get("operator") or "",
+        "source": _fiche_source(cc),
+        "last_action": last_action,
+        "sql_id": fiche.get("sql_id"),
         "id": fiche["_id"],
         "category": fiche.get("category"),
         "text": fiche.get("text") or fiche.get("text_full") or "",
@@ -926,6 +1114,9 @@ def _pub_fiche(fiche, devices_by_name):
         "lng": point[1] if point else None,
         "patrouille": patr,
         "unit_status": (dev or {}).get("status"),
+        "status_code": fiche.get("status_code"),
+        "close_ts": _iso(fiche.get("close_ts")) if fiche.get("status_code") == 10 else None,
+        "operator_close": fiche.get("operator_close"),
         "dispatch": {
             "state": d.get("state"),
             "round": d.get("round"),
@@ -975,9 +1166,8 @@ def _pub_unit(db, d, now, group_cats):
 @dispatch_bp.route("/dispatch-service")
 @_role_required("user")
 def dispatch_service_page():
-    db = _app_db()
     u = _user()
-    cats = managed_categories(get_config(db), u.get("email"), _is_admin(u))
+    cats = managed_categories(u)
     return render_template("dispatch_service.html", managed_categories=cats,
                            user_is_admin=_is_admin(u), user=u)
 
@@ -989,7 +1179,7 @@ def dispatch_board():
     db = _app_db()
     u = _user()
     cfg = get_config(db)
-    cats = managed_categories(cfg, u.get("email"), _is_admin(u))
+    cats = managed_categories(u)
     if not cats:
         return _err("not_manager", 403)
     only = request.args.get("category")
@@ -997,28 +1187,94 @@ def dispatch_board():
         if only not in cats:
             return _err("not_manager", 403)
         cats = [only]
+    # Par defaut : tous les evenements actifs (epreuves en cours + SAISON, +
+    # SAISON N-1). event/year deviennent un filtre optionnel.
     event = request.args.get("event") or ""
     year = request.args.get("year") or ""
-    if not event or not year:
-        return _err("missing_event_year")
     now = _now()
-    group_cats = _field()._group_categories(db)
-    devices = [d for d in db["field_devices"].find({"event": event, "year": _year_str(year),
-                                                     "revoked": {"$ne": True}})]
-    units = [_pub_unit(db, d, now, group_cats) for d in devices]
-    units = [x for x in units if x["category"] in cats]
-    by_name = {d.get("name"): d for d in devices}
-    fiches = [_pub_fiche(f, by_name) for f in db["pcorg"].find({
-        "event": event, "year": _year_int(year), "category": {"$in": cats},
-        "status_code": {"$ne": 10},
-    }).sort("ts", -1).limit(300)]
+    F = _field()
+    active = EC.active_events(db, now)
+    if event and year:
+        pairs = [(event, _year_int(year))]
+    else:
+        pairs = EC.active_pairs(db, now, include_previous_saison=True)
+    pair_keys = {F._pair_key(e, y) for e, y in pairs}
+    group_cats = F._group_categories(db)
+    devices = []
+    for d in db["field_devices"].find({"revoked": {"$ne": True}}, BOARD_DEVICE_PROJECTION):
+        if F._device_expired(db, d):
+            continue
+        dp = F.device_pairs(db, d, now)
+        if pair_keys & {F._pair_key(e, y) for e, y in dp}:
+            devices.append(d)
+    units = []
+    for d in devices:
+        x = _pub_unit(db, d, now, group_cats)
+        if x["category"] in cats:
+            x["event"] = d.get("event")
+            x["year"] = d.get("year")
+            units.append(x)
+    by_name = {}
+    for d in devices:
+        # Homonymes (noms uniques par appairage seulement) : on garde la plus recente.
+        prev = by_name.get(d.get("name"))
+        if prev is None or (_aware(d.get("last_seen")) or datetime.min.replace(tzinfo=timezone.utc)) \
+                > (_aware(prev.get("last_seen")) or datetime.min.replace(tzinfo=timezone.utc)):
+            by_name[d.get("name")] = d
+    # SAISON accumule toute l'annee : fiches ouvertes bornees a 30 jours,
+    # les plus anciennes sont seulement comptees (older_open).
+    cutoff = now - timedelta(days=AVAILABLE_MAX_AGE_DAYS)
+    saison_pairs = [p for p in pairs if EC.is_saison(p[0])]
+    not_old_saison = {"$or": [{"event": {"$ne": EC.SAISON}}, {"ts": {"$gte": cutoff}}]}
+    open_q = {"$and": [EC.pairs_filter(pairs), not_old_saison],
+              "category": {"$in": cats}, "status_code": {"$ne": 10}}
+    fiches = [_pub_fiche(f, by_name) for f in db["pcorg"].find(open_q, BOARD_FICHE_PROJECTION)
+              .sort("ts", -1).limit(300)]
+    older_open = 0
+    if saison_pairs:
+        older_open = db["pcorg"].count_documents({
+            "$and": [EC.pairs_filter(saison_pairs), {"ts": {"$lt": cutoff}}],
+            "category": {"$in": cats}, "status_code": {"$ne": 10}})
+    # Section "Terminees" : les dernieres fiches closes des evenements affiches
+    closed = [_pub_fiche(f, by_name) for f in db["pcorg"].find({
+        "$and": [EC.pairs_filter(pairs)], "category": {"$in": cats},
+        "status_code": 10,
+    }, BOARD_FICHE_PROJECTION).sort("close_ts", -1).limit(CLOSED_ON_BOARD)]
+    shown = []
+    for e, y in pairs:
+        if any(F._pair_key(e, y) == F._pair_key(s["event"], s["year"]) for s in shown):
+            continue
+        shown.append({"event": e, "year": _year_int(y)})
+    try:
+        from app import _user_can_edit_fiche, _user_can_create_fiche
+        can_edit = bool(_user_can_edit_fiche(u))
+        can_create = bool(_user_can_create_fiche(u))
+    except Exception:
+        can_edit = can_create = False
     return jsonify({
         "ok": True,
         "now": _iso(now),
         "categories": cats,
         "config": {c: cfg["categories"][c] for c in cats},
+        # Droits sur les fiches depuis cette page : un responsable clot
+        # toujours les fiches de ses categories (et y ajoute des actions) ;
+        # la modification des elements initiaux n'y est jamais proposee.
+        "rights": {"can_close": True, "can_comment": True, "can_edit": can_edit,
+                   "can_create": can_create},
         "fiches": fiches,
+        "closed": closed,
         "units": units,
+        # Evenements affiches (filtre ou actifs), evenement courant (cible de
+        # "Nouvelle fiche" sans filtre) et fiches ouvertes SAISON non listees.
+        "events": shown,
+        "multi_event": len({F._pair_key(f.get("event"), f.get("year"))
+                            for f in fiches + closed}) > 1,
+        "current": {"event": active[0]["event"], "year": active[0]["year"]},
+        "active": [{"event": a["event"], "year": a["year"], "phase": a["phase"],
+                    "kind": a["kind"]} for a in active],
+        "filtered": bool(event and year),
+        "older_open": older_open,
+        "older_days": AVAILABLE_MAX_AGE_DAYS,
     })
 
 
@@ -1089,26 +1345,6 @@ def dispatch_config_put():
     cfg = save_config(db, request.get_json(silent=True) or {}, _user().get("email"))
     cfg["ok"] = True
     return jsonify(cfg)
-
-
-@dispatch_bp.route("/api/dispatch/users")
-@_role_required("admin")
-def dispatch_users():
-    """Utilisateurs cockpit (pour choisir les responsables de service)."""
-    import re as _re
-    db = _app_db()
-    q = (request.args.get("q") or "").strip()
-    flt = {"$or": [{"roles_by_app.cockpit": {"$exists": True}},
-                   {"global_roles": "super_admin"}]}
-    if q:
-        rx = {"$regex": _re.escape(q), "$options": "i"}
-        flt = {"$and": [flt, {"$or": [{"email": rx}, {"nom": rx}, {"prenom": rx}]}]}
-    users = [{
-        "email": (u.get("email") or "").lower(),
-        "name": ("%s %s" % (u.get("prenom") or "", u.get("nom") or "")).strip(),
-        "service": u.get("service") or "",
-    } for u in db["users"].find(flt, {"email": 1, "prenom": 1, "nom": 1, "service": 1}).limit(50)]
-    return jsonify({"ok": True, "users": [u for u in users if u["email"]]})
 
 
 @dispatch_bp.route("/api/dispatch/metiers")

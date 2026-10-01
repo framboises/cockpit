@@ -116,6 +116,10 @@
       <button class="tile-btn" id="measure-clear" aria-label="Effacer les mesures" title="Effacer" data-mode="clear">
         <span class="material-symbols-outlined" aria-hidden="true">delete_outline</span>
       </button>
+      <!-- Plier / deplier les outils (etat memorise, plie par defaut sur telephone) -->
+      <button class="tile-btn measure-toggle" id="measure-toggle" aria-label="Afficher les outils de mesure" aria-expanded="false" aria-controls="measure-tools" title="Outils de mesure">
+        <span class="material-symbols-outlined" aria-hidden="true">straighten</span>
+      </button>
     </div>
 
     <!-- Crosshair grille (cellule courante) -->
@@ -139,15 +143,28 @@
     </aside>
 
     <!-- Panneau latéral (missions) -->
-    <aside class="inbox-panel missions-panel" id="missions-panel" aria-label="Missions en cours" hidden>
+    <aside class="inbox-panel missions-panel" id="missions-panel" aria-label="Missions" hidden>
       <div class="inbox-header">
-        <h2 id="missions-panel-title">Missions en cours</h2>
+        <h2 id="missions-panel-title">Missions</h2>
         <button class="icon-btn" id="missions-close" aria-label="Fermer les missions" title="Fermer">
           <span class="material-symbols-outlined" aria-hidden="true">close</span>
         </button>
       </div>
-      <div class="inbox-list" id="missions-list">
+      <div class="missions-tabs" role="tablist" aria-label="Type de missions">
+        <button class="missions-tab active" id="missions-tab-mine" role="tab" aria-selected="true" aria-controls="missions-list" data-tab="mine">
+          En cours
+          <span class="missions-tab-count" id="missions-tab-mine-count" hidden>0</span>
+        </button>
+        <button class="missions-tab" id="missions-tab-avail" role="tab" aria-selected="false" aria-controls="missions-avail-list" data-tab="avail">
+          Disponibles
+          <span class="missions-tab-count" id="missions-tab-avail-count" hidden>0</span>
+        </button>
+      </div>
+      <div class="inbox-list" id="missions-list" role="tabpanel" aria-labelledby="missions-tab-mine">
         <div class="inbox-empty">Aucune mission.</div>
+      </div>
+      <div class="inbox-list" id="missions-avail-list" role="tabpanel" aria-labelledby="missions-tab-avail" hidden>
+        <div class="inbox-empty">Chargement...</div>
       </div>
     </aside>
 
@@ -275,6 +292,10 @@
         </button>
       </div>
       <div class="fiche-create-body">
+        <div class="fiche-create-pos" id="fiche-create-pos" hidden>
+          <span class="material-symbols-outlined" aria-hidden="true">push_pin</span>
+          <span id="fiche-create-pos-text">Position : point choisi sur la carte</span>
+        </div>
         <label class="fiche-create-label" id="fiche-create-cat-label">Categorie</label>
         <div class="fiche-create-cats" id="fiche-create-cats" role="radiogroup" aria-labelledby="fiche-create-cat-label"></div>
         <label class="fiche-create-label" id="fiche-create-urg-label">Niveau d'urgence</label>

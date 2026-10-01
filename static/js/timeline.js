@@ -1445,7 +1445,16 @@ window.openEventDrawer = openEventDrawer;
   // ------------------------------------------------------------------
   const ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 
+  // SAISON (main courante permanente, sans dates) : fenetre glissante de J-1
+  // a J+14, la meme que celle du programme Momentus (momentus_timeline.py).
+  const isSaison = () => String(window.selectedEvent || '').trim().toUpperCase() === 'SAISON';
+
   function eventRange() {
+    if (isSaison()) {
+      const a = new Date(); a.setDate(a.getDate() - 1);
+      const b = new Date(); b.setDate(b.getDate() + 14);
+      return { start: ymd(a), end: ymd(b), rolling: true };
+    }
     const gh = window.parametrage?.globalHoraires || window.parametrage?.data?.globalHoraires || {};
     const a = gh.montage?.start ? new Date(gh.montage.start) : null;
     const b = gh.demontage?.end ? new Date(gh.demontage.end) : null;
@@ -1462,8 +1471,12 @@ window.openEventDrawer = openEventDrawer;
       let guard = 0;
       while (d <= end && guard++ < 62) { days.add(ymd(d)); d.setDate(d.getDate() + 1); }
     }
-    Object.keys(window._timetableRaw || {}).forEach(k => /^\d{4}-\d{2}-\d{2}$/.test(k) && days.add(k));
-    Object.keys(window.publicDatesMap || {}).forEach(k => days.add(k));
+    // SAISON : la timetable couvre toute l'annee, seule la fenetre glissante
+    // donne des puces utiles (16 jours, sous le seuil de 21).
+    if (!range?.rolling) {
+      Object.keys(window._timetableRaw || {}).forEach(k => /^\d{4}-\d{2}-\d{2}$/.test(k) && days.add(k));
+      Object.keys(window.publicDatesMap || {}).forEach(k => days.add(k));
+    }
     return { range, list: Array.from(days).sort() };
   }
 
@@ -1504,7 +1517,8 @@ window.openEventDrawer = openEventDrawer;
     UI.days.querySelectorAll('.tt-day').forEach(b => b.classList.toggle('is-active', b.dataset.date === F.date.value));
     const range = eventRange();
     const v = F.date.value;
-    const out = !!(range && v && (v < range.start || v > range.end));
+    // SAISON : toute date est legitime, la fenetre ne sert qu'aux puces
+    const out = !!(range && !range.rolling && v && (v < range.start || v > range.end));
     UI.dateWarn.hidden = !out;
     if (out) {
       UI.dateWarn.textContent = 'Hors de la période de l\'événement (montage '

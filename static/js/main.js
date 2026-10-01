@@ -437,99 +437,417 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 });
 
-document.addEventListener('DOMContentLoaded', function () {
-    const eventSelect = document.getElementById('event-select');
-    const yearSelect  = document.getElementById('year-select');
+// ==========================================================================
+// SELECTION EVENEMENT / ANNEE
+//
+// Defaut = evenement du jour (/api/event/current, source unique
+// event_courant.py : epreuve active de montage.start a demontage.end, sinon
+// SAISON). Un choix MANUEL est garde 12 h ; au-dela, ou si la selection etait
+// automatique, la page suit l'evenement du jour. Un SAISON d'une annee passee
+// saute a l'annee courante. Stockage : `cockpit_sel` = {event, year, manual,
+// at} ; `cockpit_event` / `cockpit_year` restent ecrits (sidebar.js, pmv.js,
+// dispatch_service.js les relisent).
+// ==========================================================================
+var COCKPIT_SEL_KEY = 'cockpit_sel';
+var COCKPIT_MANUAL_TTL_MS = 12 * 3600 * 1000;
+var COCKPIT_FOLLOW_MS = 5 * 60 * 1000;
+// 2023 est la premiere edition dont on ait des donnees exploitables dans
+// historique_controle. Changer cette borne impose de la changer aussi dans
+// templates/scan_report.html, qui a sa propre copie du selecteur.
+var COCKPIT_START_YEAR = 2023;
+window.cockpitEventCurrent = null;   // dernier payload de /api/event/current
 
-    // Restore saved selections from localStorage
-    const savedEvent = localStorage.getItem('cockpit_event');
-    const savedYear  = localStorage.getItem('cockpit_year');
+function cockpitIsSaison(ev) {
+    return String(ev || '').trim().toUpperCase() === 'SAISON';
+}
 
-    // Populate event select
-    fetch('/get_events')
-    .then(response => response.json())
-    .then(eventsData => {
-        if (!eventSelect) return;
+function _cockpitReadSel() {
+    try {
+        var raw = localStorage.getItem(COCKPIT_SEL_KEY);
+        var s = raw ? JSON.parse(raw) : null;
+        if (s && s.event && s.year) return s;
+    } catch (e) {}
+    return null;
+}
 
-        let matched = false;
-        eventsData.forEach(item => {
-            const option = document.createElement('option');
-            option.value = item.nom;
-            option.textContent = item.nom;
-            eventSelect.appendChild(option);
+function _cockpitWriteSel(ev, yr, manual, at) {
+    try {
+        localStorage.setItem(COCKPIT_SEL_KEY, JSON.stringify({
+            event: ev, year: String(yr), manual: !!manual, at: at || Date.now()
+        }));
+        localStorage.setItem('cockpit_event', ev);
+        localStorage.setItem('cockpit_year', String(yr));
+    } catch (e) {}
+}
 
-            // Priority: localStorage > "24H AUTOS" > first item
-            if (savedEvent && item.nom === savedEvent) {
-                option.selected = true;
-                window.selectedEvent = item.nom;
-                matched = true;
-            }
-        });
+function _cockpitManualRecent(sel) {
+    return !!(sel && sel.manual && sel.at && (Date.now() - sel.at) < COCKPIT_MANUAL_TTL_MS);
+}
 
-        if (!matched) {
-            // Fallback to "24H AUTOS" if no saved preference
-            const fallback = Array.from(eventSelect.options).find(o => o.value === "24H AUTOS");
-            if (fallback) {
-                fallback.selected = true;
-                window.selectedEvent = fallback.value;
-            } else if (eventSelect.options.length > 0) {
-                eventSelect.selectedIndex = 0;
-                window.selectedEvent = eventSelect.options[0].value;
-            }
+function _cockpitSaisonYear(cur) {
+    var acts = (cur && cur.active) || [];
+    for (var i = 0; i < acts.length; i++) {
+        if (acts[i].kind === 'saison') return parseInt(acts[i].year, 10);
+    }
+    return new Date().getFullYear();
+}
+
+function fetchEventCurrent() {
+    return fetch('/api/event/current', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+            if (d && d.current) window.cockpitEventCurrent = d;
+            return (d && d.current) ? d : null;
+        })
+        .catch(function () { return null; });
+}
+
+// {event, year:int, manual, at} : choix manuel recent, sinon evenement du jour,
+// sinon (API indisponible) dernier choix connu.
+function _cockpitResolveSelection(cur) {
+    var sel = _cockpitReadSel();
+    var out;
+    if (_cockpitManualRecent(sel)) {
+        out = { event: sel.event, year: parseInt(sel.year, 10), manual: true, at: sel.at };
+    } else if (cur && cur.current) {
+        out = { event: cur.current.event, year: parseInt(cur.current.year, 10), manual: false, at: null };
+    } else {
+        var le = null, ly = null;
+        try { le = localStorage.getItem('cockpit_event'); ly = localStorage.getItem('cockpit_year'); } catch (e) {}
+        out = {
+            event: (sel && sel.event) || le || '24H AUTOS',
+            year: parseInt((sel && sel.year) || ly, 10) || new Date().getFullYear(),
+            manual: !!(sel && sel.manual), at: sel ? sel.at : null
+        };
+    }
+    var sy = _cockpitSaisonYear(cur);
+    if (cockpitIsSaison(out.event) && (!out.year || out.year < sy)) out.year = sy;
+    return out;
+}
+
+function _cockpitActiveEpreuves(cur) {
+    var names = [];
+    ((cur && cur.active) || []).forEach(function (a) {
+        if (a.kind === 'epreuve' && names.indexOf(a.event) === -1) names.push(a.event);
+    });
+    return names;
+}
+
+function _cockpitPopulateEvents(eventSelect, names, cur, selected) {
+    eventSelect.textContent = '';
+    var actives = _cockpitActiveEpreuves(cur);
+    if (selected && names.indexOf(selected) === -1) names = names.concat([selected]);
+    actives.forEach(function (n) { if (names.indexOf(n) === -1) names = names.concat([n]); });
+    function addOpt(parent, name, label) {
+        var o = document.createElement('option');
+        o.value = name;
+        o.textContent = label || name;
+        parent.appendChild(o);
+    }
+    if (actives.length) {
+        // Plusieurs epreuves actives : elles passent en tete (prioritaire d'abord)
+        var g1 = document.createElement('optgroup');
+        g1.label = 'En cours';
+        actives.forEach(function (n) { addOpt(g1, n); });
+        eventSelect.appendChild(g1);
+        var g2 = document.createElement('optgroup');
+        g2.label = 'Tous les evenements';
+        names.forEach(function (n) { if (actives.indexOf(n) === -1) addOpt(g2, n); });
+        eventSelect.appendChild(g2);
+    } else {
+        names.forEach(function (n) { addOpt(eventSelect, n); });
+    }
+}
+
+function _cockpitPopulateYears(yearSelect, selectedYear) {
+    yearSelect.textContent = '';
+    var currentYear = new Date().getFullYear();
+    var years = [];
+    for (var y = COCKPIT_START_YEAR; y <= currentYear + 1; y++) years.push(y);
+    if (selectedYear && years.indexOf(selectedYear) === -1) {
+        years.push(selectedYear);
+        years.sort();
+    }
+    years.forEach(function (y) {
+        var o = document.createElement('option');
+        o.value = y;
+        o.textContent = y;
+        yearSelect.appendChild(o);
+    });
+}
+
+// Applique une selection (selects + globals + stockage) et recharge la page.
+function cockpitApplySelection(ev, yr, manual, at, noReload) {
+    yr = parseInt(yr, 10);
+    var eventSelect = document.getElementById('event-select');
+    var yearSelect = document.getElementById('year-select');
+    if (eventSelect) {
+        var has = Array.prototype.some.call(eventSelect.options, function (o) { return o.value === ev; });
+        if (!has) {
+            var o = document.createElement('option');
+            o.value = ev;
+            o.textContent = ev;
+            eventSelect.appendChild(o);
         }
-
-        localStorage.setItem('cockpit_event', window.selectedEvent);
-    })
-    .catch(error => console.error('Erreur lors de la recuperation des evenements :', error));
-
-    // Populate year select
-    const currentYear = new Date().getFullYear();
-    // 2023 est la premiere edition dont on ait des donnees exploitables dans
-    // historique_controle. Changer cette borne impose de la changer aussi dans
-    // templates/scan_report.html, qui a sa propre copie du selecteur.
-    const startYear   = 2023;
+        eventSelect.value = ev;
+    }
     if (yearSelect) {
-        const preferredYear = savedYear ? parseInt(savedYear, 10) : currentYear;
+        var hasY = Array.prototype.some.call(yearSelect.options, function (o) { return parseInt(o.value, 10) === yr; });
+        if (!hasY) _cockpitPopulateYears(yearSelect, yr);
+        yearSelect.value = String(yr);
+    }
+    window.selectedEvent = ev;
+    window.selectedYear = yr;
+    _cockpitWriteSel(ev, yr, manual, at);
+    renderEventSuggest();
+    renderPriorityChip();
+    applySaisonOnlyBlocks();
+    if (!noReload) loadCockpitData();
+}
 
-        for (let year = startYear; year <= currentYear + 1; year++) {
-            const option = document.createElement('option');
-            option.value = year;
-            option.textContent = year;
-            if (year === preferredYear) {
-                option.selected = true;
-                window.selectedYear = year;
+// Bandeau discret "Evenement du jour : X" quand la selection n'est pas
+// l'evenement en cours : epreuve non active, ou SAISON alors qu'une epreuve
+// a pris la main (bascule). Une epreuve secondaire active ne declenche rien.
+function renderEventSuggest() {
+    var host = document.querySelector('.header-event-info');
+    if (!host) return;
+    var chip = document.getElementById('header-event-suggest');
+    var cur = window.cockpitEventCurrent;
+    var show = false;
+    if (cur && cur.current && window.selectedEvent) {
+        var selYr = parseInt(window.selectedYear, 10);
+        var c = cur.current;
+        var isCurrent = c.event === window.selectedEvent && parseInt(c.year, 10) === selYr;
+        var isActive = (cur.active || []).some(function (a) {
+            return a.event === window.selectedEvent && parseInt(a.year, 10) === selYr;
+        });
+        show = !isCurrent && (!isActive || (cockpitIsSaison(window.selectedEvent) && c.kind === 'epreuve'));
+    }
+    if (!show) {
+        if (chip) chip.remove();
+        return;
+    }
+    if (!chip) {
+        chip = document.createElement('button');
+        chip.type = 'button';
+        chip.id = 'header-event-suggest';
+        chip.className = 'header-event-suggest';
+        chip.addEventListener('click', function () {
+            var cc = window.cockpitEventCurrent && window.cockpitEventCurrent.current;
+            if (!cc) return;
+            cockpitApplySelection(cc.event, cc.year, false);
+            if (typeof showToast === 'function') showToast('info', 'Evenement du jour : ' + cc.event + ' ' + cc.year);
+        });
+        host.appendChild(chip);
+    }
+    chip.textContent = '';
+    var ico = document.createElement('span');
+    ico.className = 'material-symbols-outlined';
+    ico.textContent = 'swap_horiz';
+    chip.appendChild(ico);
+    var lbl = document.createElement('span');
+    lbl.textContent = 'Evenement du jour : ' + cur.current.event + ' ' + cur.current.year;
+    chip.appendChild(lbl);
+    chip.title = 'Basculer sur l\'evenement en cours';
+}
+
+// Blocs "seulement en SAISON" (fiche groupe, bascule SAISON de chaque bloc) :
+// masques avec leur onglet mobile quand la selection n'est pas SAISON. Classe
+// avec !important : les scripts des blocs peuvent poser style.display sans
+// annuler ce masquage.
+function applySaisonOnlyBlocks() {
+    var ids = window.__saisonOnlyBlocks;
+    if (!Array.isArray(ids) || !ids.length) return;
+    var hide = !cockpitIsSaison(window.selectedEvent);
+    ids.forEach(function (id) {
+        var w = document.getElementById(id);
+        if (w) w.classList.toggle('block-hidden-saison', hide);
+        document.querySelectorAll('.mb-tab[data-target="' + id + '"]').forEach(function (t) {
+            t.classList.toggle('block-hidden-saison', hide);
+        });
+    });
+}
+
+// Epreuves simultanees : pastille "N epreuves en cours". La priorite est un
+// choix GLOBAL d'un admin (PUT /api/event/priority) ; sans choix, l'epreuve
+// deja en cours garde la main (pastille ambre "priorite a choisir"). Changer
+// la priorite ne deplace aucune fiche existante.
+function renderPriorityChip() {
+    var host = document.querySelector('.header-event-info');
+    if (!host) return;
+    var cur = window.cockpitEventCurrent;
+    var chip = document.getElementById('header-event-priority');
+    var epreuves = ((cur && cur.active) || []).filter(function (a) { return a.kind === 'epreuve'; });
+    if (!cur || !cur.conflict || epreuves.length < 2) {
+        if (chip) chip.remove();
+        var m0 = document.getElementById('header-event-priority-menu');
+        if (m0) m0.remove();
+        return;
+    }
+    var isAdmin = window.__userIsAdmin === true || window.__userIsAdmin === 'true';
+    if (!chip) {
+        chip = document.createElement('button');
+        chip.type = 'button';
+        chip.id = 'header-event-priority';
+        chip.className = 'header-event-priority';
+        chip.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (window.__userIsAdmin === true || window.__userIsAdmin === 'true') togglePriorityMenu(chip);
+        });
+        host.appendChild(chip);
+    }
+    chip.classList.toggle('is-unchosen', !cur.priority_chosen);
+    chip.textContent = '';
+    var ico = document.createElement('span');
+    ico.className = 'material-symbols-outlined';
+    ico.textContent = 'call_split';
+    chip.appendChild(ico);
+    var lbl = document.createElement('span');
+    lbl.textContent = epreuves.length + ' epreuves en cours - prioritaire : ' + epreuves[0].event
+        + (cur.priority_chosen ? '' : ' (a choisir)');
+    chip.appendChild(lbl);
+    chip.title = (isAdmin ? 'Choisir l\'epreuve prioritaire (choix global, aucune fiche deplacee)'
+                          : 'Epreuve prioritaire choisie par un administrateur')
+        + '\n' + epreuves.map(function (a) { return a.event + ' ' + a.year + ' (' + (a.phase || '') + ')'; }).join('\n');
+}
+
+function togglePriorityMenu(anchor) {
+    var menu = document.getElementById('header-event-priority-menu');
+    if (menu) { menu.remove(); return; }
+    var cur = window.cockpitEventCurrent;
+    var epreuves = ((cur && cur.active) || []).filter(function (a) { return a.kind === 'epreuve'; });
+    menu = document.createElement('div');
+    menu.id = 'header-event-priority-menu';
+    menu.className = 'header-event-priority-menu';
+    var title = document.createElement('div');
+    title.className = 'hep-title';
+    title.textContent = 'Epreuve prioritaire (pour tous les postes)';
+    menu.appendChild(title);
+    epreuves.forEach(function (a, i) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'hep-item' + (i === 0 ? ' is-current' : '');
+        b.textContent = a.event + ' ' + a.year + (a.phase ? ' - ' + a.phase : '') + (i === 0 ? '  (prioritaire)' : '');
+        b.addEventListener('click', function () {
+            menu.remove();
+            if (i === 0 && cur.priority_chosen) return;
+            setEventPriority(a.event, a.year);
+        });
+        menu.appendChild(b);
+    });
+    var note = document.createElement('div');
+    note.className = 'hep-note';
+    note.textContent = 'Les nouvelles fiches, la selection par defaut et les rapports suivent ce choix. Aucune fiche existante n\'est deplacee.';
+    menu.appendChild(note);
+    var r = anchor.getBoundingClientRect();
+    menu.style.top = (r.bottom + window.scrollY + 4) + 'px';
+    menu.style.left = Math.max(8, r.left + window.scrollX) + 'px';
+    document.body.appendChild(menu);
+    setTimeout(function () {
+        document.addEventListener('click', function close(ev) {
+            if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', close); }
+        });
+    }, 0);
+}
+
+function setEventPriority(ev, yr) {
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    fetch('/api/event/priority', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': meta ? meta.getAttribute('content') : '' },
+        body: JSON.stringify({ event: ev, year: yr })
+    }).then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (d) {
+        if (!d || !d.ok) {
+            if (typeof showToast === 'function') showToast('error', 'Priorite non enregistree' + (d && d.error ? ' (' + d.error + ')' : ''));
+            return;
+        }
+        if (typeof showToast === 'function') showToast('success', 'Epreuve prioritaire : ' + ev + ' ' + yr);
+        window.cockpitEventCurrent = d;
+        renderPriorityChip();
+        // La page suit la nouvelle priorite si sa selection etait automatique
+        _cockpitFollowCurrent();
+    }).catch(function () {
+        if (typeof showToast === 'function') showToast('error', 'Priorite non enregistree (reseau)');
+    });
+}
+
+// Suivi de l'evenement du jour (accueil seulement : sur l'edition d'un
+// parametrage, une bascule automatique serait destructrice).
+function _cockpitFollowCurrent() {
+    fetchEventCurrent().then(function (cur) {
+        if (!cur) return;
+        var eventSelect = document.getElementById('event-select');
+        // Liste "En cours" a jour si les epreuves actives ont change
+        if (eventSelect && window._cockpitEventNames) {
+            var before = eventSelect.value;
+            _cockpitPopulateEvents(eventSelect, window._cockpitEventNames.slice(), cur, before);
+            eventSelect.value = before;
+        }
+        var sel = _cockpitReadSel();
+        if (!_cockpitManualRecent(sel)) {
+            var c = cur.current;
+            if (c.event !== window.selectedEvent || parseInt(c.year, 10) !== parseInt(window.selectedYear, 10)) {
+                cockpitApplySelection(c.event, c.year, false);
+                if (typeof showToast === 'function') showToast('info', 'Bascule sur l\'evenement du jour : ' + c.event + ' ' + c.year);
+                return;
             }
-            yearSelect.appendChild(option);
         }
+        renderEventSuggest();
+        renderPriorityChip();
+    });
+}
 
-        // If saved year was out of range, default to current
-        if (!window.selectedYear) {
-            yearSelect.value = currentYear;
-            window.selectedYear = currentYear;
-        }
+document.addEventListener('DOMContentLoaded', function () {
+    var eventSelect = document.getElementById('event-select');
+    var yearSelect  = document.getElementById('year-select');
 
-        localStorage.setItem('cockpit_year', window.selectedYear);
+    // Valeurs provisoires synchrones (scripts qui lisent window.selectedEvent
+    // au chargement) : remplacees des que l'evenement du jour est connu.
+    var prov = _cockpitReadSel();
+    try {
+        window.selectedEvent = (prov && prov.event) || localStorage.getItem('cockpit_event') || '';
+        window.selectedYear = parseInt((prov && prov.year) || localStorage.getItem('cockpit_year'), 10) || new Date().getFullYear();
+    } catch (e) {}
+    if (yearSelect) {
+        _cockpitPopulateYears(yearSelect, window.selectedYear);
+        yearSelect.value = String(window.selectedYear);
     }
 
-    // Change listeners — persist + auto-reload
+    var eventsP = fetch('/get_events')
+        .then(function (r) { return r.json(); })
+        .catch(function (error) {
+            console.error('Erreur lors de la recuperation des evenements :', error);
+            return [];
+        });
+
+    Promise.all([eventsP, fetchEventCurrent()]).then(function (res) {
+        var names = (res[0] || []).map(function (it) { return it.nom; }).filter(Boolean);
+        var cur = res[1];
+        window._cockpitEventNames = names.slice();
+        var sel = _cockpitResolveSelection(cur);
+        if (eventSelect) _cockpitPopulateEvents(eventSelect, names, cur, sel.event);
+        cockpitApplySelection(sel.event, sel.year, sel.manual, sel.at);
+        if (document.getElementById('status-card')) {
+            setInterval(_cockpitFollowCurrent, COCKPIT_FOLLOW_MS);
+        }
+    });
+
+    // Choix de l'utilisateur : manuel, garde 12 h
     if (eventSelect) {
         eventSelect.addEventListener('change', function () {
-            window.selectedEvent = this.value;
-            localStorage.setItem('cockpit_event', this.value);
-            loadCockpitData();
+            var yr = parseInt(window.selectedYear, 10);
+            // SAISON d'une annee passee : on saute a l'annee courante
+            var sy = _cockpitSaisonYear(window.cockpitEventCurrent);
+            if (cockpitIsSaison(this.value) && yr < sy) yr = sy;
+            cockpitApplySelection(this.value, yr, true);
         });
     }
     if (yearSelect) {
         yearSelect.addEventListener('change', function () {
-            window.selectedYear = parseInt(this.value, 10);
-            localStorage.setItem('cockpit_year', this.value);
-            loadCockpitData();
+            cockpitApplySelection(window.selectedEvent, this.value, true);
         });
     }
-
-    // Auto-load on startup after selects are populated
-    // Small delay to let event select fetch complete
-    setTimeout(loadCockpitData, 600);
 });
 
 // ==========================================================================
@@ -619,6 +937,15 @@ function updateEventStatus() {
         return;
     }
 
+    // SAISON : main courante permanente, sans dates (ni montage, ni jours
+    // publics) -> pas de cycle de vie a calculer.
+    if (cockpitIsSaison(window.selectedEvent)) {
+        window._statusParamData = null;
+        if (_statusTimer) { clearInterval(_statusTimer); _statusTimer = null; }
+        renderSaisonStatus();
+        return;
+    }
+
     // Fetch parametrage for status data
     fetch("/get_parametrage?event=" + encodeURIComponent(window.selectedEvent) + "&year=" + encodeURIComponent(window.selectedYear))
         .then(function (r) { return r.json(); })
@@ -695,7 +1022,18 @@ function getContinuousSegmentFor(todayISO, publicDates) {
     };
 }
 
+function renderSaisonStatus() {
+    var detail = "Saison " + (window.selectedYear || "");
+    var cur = window.cockpitEventCurrent && window.cockpitEventCurrent.current;
+    if (cur && cur.kind === "epreuve") detail = "Epreuve en cours : " + cur.event;
+    renderStatus("saison", "event_note", "Exploitation courante", detail);
+}
+
 function computeAndRenderStatus(paramData) {
+    if (cockpitIsSaison(window.selectedEvent)) {
+        renderSaisonStatus();
+        return;
+    }
     var gh = paramData.globalHoraires;
     if (!gh) {
         renderStatus("no-event", "info", "Pas de configuration", "Horaires non definis");
@@ -1255,10 +1593,7 @@ function _renderAlertEntry(container, type, iconName, title, timeStr, message, o
         detail.appendChild(btn);
     }
 
-    // Bouton "Expliquer" (assistant IA), rendu par alert_poller.js
-    if (explainId && window.CockpitAlerts && window.CockpitAlerts.explainWidget) {
-        detail.appendChild(window.CockpitAlerts.explainWidget(explainId, { compact: true }));
-    }
+    // Bouton "Expliquer" (IA) retire de l'historique : cout par clic operateur.
 
     entry.appendChild(detail);
 

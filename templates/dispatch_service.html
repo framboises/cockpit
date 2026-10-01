@@ -9,6 +9,9 @@
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dispatch_service.css') }}">
 </head>
@@ -50,6 +53,9 @@
         <span class="ds-live" id="ds-live" title="Actualisation automatique toutes les 5 s">
           <span class="ds-live-dot"></span><span id="ds-live-text">--</span>
         </span>
+        <button class="btn btn-primary ds-new-btn" id="ds-new-btn" type="button" title="Creer une fiche" aria-label="Nouvelle fiche" hidden>
+          <span class="material-symbols-outlined">add</span><span class="ds-new-btn-label">Nouvelle fiche</span>
+        </button>
         <button class="btn btn-secondary ds-icon-btn" id="ds-notif-btn" type="button" title="Alertes sonores et notifications">
           <span class="material-symbols-outlined">notifications</span>
         </button>
@@ -67,10 +73,12 @@
         <h2>Aucun service a gerer</h2>
         <p>Cette page affiche la file d'attente des fiches pour les responsables de service
           (Technique, Securite...). Vous n'etes responsable d'aucune categorie.</p>
-        <p>Pour y avoir acces, un administrateur doit vous ajouter comme <strong>responsable</strong>
-          dans <strong>Field dispatch &gt; Dispatch automatique</strong>, pour la ou les categories concernees.</p>
+        <p>Pour y avoir acces, un administrateur doit vous ajouter a un <strong>groupe</strong>
+          dont la case <strong>Responsable de service</strong> est cochee, dans
+          <strong>Configuration &gt; Groupes</strong> (page /edit). Les categories du groupe
+          determinent les fiches visibles dans la file.</p>
         {% if user_is_admin %}
-        <p><a class="btn btn-primary" href="/field-dispatch">Ouvrir Field dispatch</a></p>
+        <p><a class="btn btn-primary" href="/edit">Ouvrir la configuration des groupes</a></p>
         {% endif %}
       </section>
       {% else %}
@@ -108,6 +116,10 @@
               <span class="material-symbols-outlined">pending_actions</span>
               <h3>A traiter</h3>
               <span class="ds-count" id="ds-count-queue">0</span>
+              <div class="ds-sec-tools">
+                <button type="button" class="ds-sec-btn" data-sort="queue" title="Inverser l'ordre"></button>
+                <button type="button" class="ds-sec-btn" data-fold="queue" title="Deplier ou plier toutes les fiches"></button>
+              </div>
             </header>
             <div class="ds-list" id="ds-list-queue"></div>
           </section>
@@ -117,6 +129,10 @@
               <span class="material-symbols-outlined">hourglass_top</span>
               <h3>Proposition en cours</h3>
               <span class="ds-count" id="ds-count-proposing">0</span>
+              <div class="ds-sec-tools">
+                <button type="button" class="ds-sec-btn" data-sort="proposing" title="Inverser l'ordre"></button>
+                <button type="button" class="ds-sec-btn" data-fold="proposing" title="Deplier ou plier toutes les fiches"></button>
+              </div>
             </header>
             <div class="ds-list" id="ds-list-proposing"></div>
           </section>
@@ -126,8 +142,24 @@
               <span class="material-symbols-outlined">directions_run</span>
               <h3>Engagees</h3>
               <span class="ds-count" id="ds-count-engaged">0</span>
+              <div class="ds-sec-tools">
+                <button type="button" class="ds-sec-btn" data-sort="engaged" title="Inverser l'ordre"></button>
+                <button type="button" class="ds-sec-btn" data-fold="engaged" title="Deplier ou plier toutes les fiches"></button>
+              </div>
             </header>
             <div class="ds-list" id="ds-list-engaged"></div>
+          </section>
+          <section class="ds-section ds-section-done">
+            <header class="ds-section-head">
+              <span class="material-symbols-outlined">task_alt</span>
+              <h3>Terminees</h3>
+              <span class="ds-count" id="ds-count-done">0</span>
+              <div class="ds-sec-tools">
+                <button type="button" class="ds-sec-btn" data-sort="done" title="Inverser l'ordre"></button>
+                <button type="button" class="ds-sec-btn" data-fold="done" title="Deplier ou plier toutes les fiches"></button>
+              </div>
+            </header>
+            <div class="ds-list" id="ds-list-done"></div>
           </section>
         </div>
 
@@ -163,6 +195,92 @@
   </div>
 </div>
 
+<!-- Fiche en lecture seule + ajout d'action + cloture (contenu construit par dispatch_service.js) -->
+<div class="ds-sheet-overlay ds-fiche-overlay" id="ds-fiche" hidden>
+  <div class="ds-sheet ds-fiche-sheet" role="dialog" aria-modal="true" aria-labelledby="ds-fiche-title">
+    <header class="ds-sheet-head" id="ds-fiche-head">
+      <div>
+        <h3 id="ds-fiche-title">Fiche</h3>
+        <div class="ds-fiche-subcat" id="ds-fiche-subcat"></div>
+        <div class="ds-fiche-headline" id="ds-fiche-headline"></div>
+      </div>
+      <button type="button" class="ds-sheet-close" data-close aria-label="Fermer">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </header>
+    <div class="ds-sheet-body ds-fiche-body" id="ds-fiche-body"></div>
+    <footer class="ds-fiche-foot" id="ds-fiche-foot" hidden></footer>
+  </div>
+</div>
+
+<!-- Nouvelle fiche (POST /api/pcorg/create) : listes et etat remplis par dispatch_service.js -->
+<div class="ds-sheet-overlay ds-new-overlay" id="ds-new" hidden>
+  <div class="ds-sheet ds-new-sheet" role="dialog" aria-modal="true" aria-labelledby="ds-new-title">
+    <header class="ds-sheet-head">
+      <div>
+        <h3 id="ds-new-title">Nouvelle fiche</h3>
+        <div class="ds-sheet-sub" id="ds-new-sub"></div>
+      </div>
+      <button type="button" class="ds-sheet-close" data-close aria-label="Fermer">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </header>
+    <form class="ds-sheet-body ds-new-body" id="ds-new-form" novalidate autocomplete="off">
+      <div class="ds-nf-field" id="ds-nf-cat-wrap">
+        <label for="ds-nf-cat">Categorie</label>
+        <select id="ds-nf-cat" class="form-input ds-nf-input"></select>
+        <div class="ds-nf-fixed" id="ds-nf-cat-fixed" hidden></div>
+      </div>
+      <div class="ds-nf-field">
+        <label for="ds-nf-metier">Metier <span class="ds-nf-opt">(facultatif)</span></label>
+        <select id="ds-nf-metier" class="form-input ds-nf-input"></select>
+      </div>
+      <div class="ds-nf-field">
+        <span class="ds-nf-label" id="ds-nf-urg-label">Urgence</span>
+        <div class="ds-nf-urg" id="ds-nf-urg" role="radiogroup" aria-labelledby="ds-nf-urg-label"></div>
+        <div class="ds-nf-hint" id="ds-nf-auto-hint" hidden>
+          <span class="material-symbols-outlined">smart_toy</span>
+          <span>Sera proposee automatiquement a l'unite la plus proche</span>
+        </div>
+      </div>
+      <div class="ds-nf-field">
+        <label for="ds-nf-text">Description</label>
+        <textarea id="ds-nf-text" class="form-input ds-nf-input ds-nf-text" rows="4" maxlength="1000"
+                  placeholder="Ce qui se passe, ce qui est demande..."></textarea>
+        <div class="ds-nf-count" id="ds-nf-count">0 / 1000</div>
+      </div>
+      <div class="ds-nf-field">
+        <label for="ds-nf-area">Lieu / zone <span class="ds-nf-opt">(facultatif)</span></label>
+        <input id="ds-nf-area" class="form-input ds-nf-input" type="text" maxlength="200">
+      </div>
+      <div class="ds-nf-field">
+        <label for="ds-nf-caller">Appelant <span class="ds-nf-opt">(facultatif)</span></label>
+        <input id="ds-nf-caller" class="form-input ds-nf-input" type="text" maxlength="200">
+      </div>
+      <div class="ds-nf-field">
+        <span class="ds-nf-label">Position <span class="ds-nf-opt">(facultatif)</span></span>
+        <div class="ds-nf-pos">
+          <button type="button" class="btn btn-secondary ds-btn" id="ds-nf-geo">
+            <span class="material-symbols-outlined">my_location</span> Utiliser ma position
+          </button>
+          <button type="button" class="btn btn-secondary ds-btn" id="ds-nf-geo-clear" hidden>
+            <span class="material-symbols-outlined">location_off</span> Retirer la position
+          </button>
+          <span class="ds-nf-pos-state" id="ds-nf-pos-state"></span>
+        </div>
+      </div>
+    </form>
+    <footer class="ds-fiche-foot ds-new-foot">
+      <div class="ds-fiche-actions">
+        <button type="button" class="btn btn-secondary ds-btn" data-close>Annuler</button>
+        <button type="submit" form="ds-new-form" class="btn btn-primary ds-btn ds-nf-submit" id="ds-nf-submit" disabled>
+          <span class="material-symbols-outlined">add_task</span> Creer la fiche
+        </button>
+      </div>
+    </footer>
+  </div>
+</div>
+
 <div id="toast-container"></div>
 
 <script>
@@ -175,6 +293,13 @@
 <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ai_reports.js') }}"></script>
+{# Assistant de creation de fiche : le MEME que la carte de l'accueil
+   (pcorg.js en mode creation seule, cf. window.PcorgCreate). #}
+{% include '_pcorg_create_modal.html' %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script>window.PCORG_CREATE_ONLY = true;</script>
+<script src="{{ url_for('static', filename='js/pcorg.js') }}"></script>
 <script src="{{ url_for('static', filename='js/dispatch_service.js') }}"></script>
 </body>
 </html>

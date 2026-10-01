@@ -54,11 +54,14 @@
   // Parametres par defaut proposes a la selection du type (editeur JSON brut,
   // documente par #params-door-help). Miroir de DOOR_SAT_DEFAULTS
   // (alert_engine.py) : le moteur complete de toute facon les cles absentes.
+  // Mode "securite" propose par defaut : le goulet d'une porte est la
+  // palpation, pas le scan (rejeu 2026, docs/claude/alertes.md).
   var DOOR_SAT_PARAMS_DEFAULT = {
-    horizon_min: 30, threshold_pct: 90, min_rate: 300, window_min: 15,
-    trend_fallback: false, trend_max_growth: 1.5, max_growth: 3,
-    sens: "entrees", device_capacity_h: { tripode: 900, pda: 650 },
-    capacities: {}, doors: [], exclude: ["HELPDESK", "UAM", "LITIGE", "SERI", "PUNISHER"],
+    capacity_mode: "securite", agent_rate_h: 350,
+    horizon_min: 30, threshold_pct: 100, min_rate: 300, window_min: 15,
+    renotify_min: 120, renotify_on_worse: false,
+    trend_fallback: false, max_growth: 3,
+    sens: "entrees", doors: [], exclude: ["HELPDESK", "UAM", "LITIGE", "SERI", "PUNISHER"],
     dedup_min: 30
   };
 

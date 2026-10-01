@@ -22,6 +22,12 @@ Usage :
   python sync_pcorg_sql.py                # sync incrémental
   python sync_pcorg_sql.py --full         # resync complet
   python sync_pcorg_sql.py --dry-run      # simulation sans écriture
+  python sync_pcorg_sql.py --reassign     # recalcule event/year des fiches existantes
+
+Attribution (event_courant.py, meme regle que Cockpit) : UN evenement par
+message ; epreuves simultanees -> jour public puis course la plus proche ;
+hors fenetre -> SAISON/<annee de Paris>. Une fiche deja en base garde son
+event/year (sauf --reassign).
 """
 import sys
 import os
@@ -43,6 +49,9 @@ from dateutil import parser as dtparser
 # Module partage avec Cockpit (racine du repo, deux niveaux au-dessus)
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 import pcorg_history  # noqa: E402
+# Source unique des fenetres d'epreuve et de la priorite entre epreuves
+# simultanees (meme regle que Cockpit : /api/event/current, creation, tablettes)
+import event_courant  # noqa: E402
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -185,62 +194,21 @@ PLAGES_FALLBACK = [
 
 
 def charger_plages_evenements(mongo_client):
-    """Charge les plages [montage.start, demontage.end] depuis titan.parametrages.
-    Retourne une liste de dicts {"event", "year", "start", "end"} (datetimes aware).
+    """Fenetres des epreuves [montage.start, demontage.end] depuis parametrages.
+
+    Delegue a event_courant.windows (meme lecture que Cockpit) : SAISON (sans
+    dates, reconnu par son nom), documents techniques `__*` et fenetres de plus
+    de event_courant.MAX_WINDOW_DAYS jours (saisie aberrante, ex. 24H AUTOS
+    2024 avec un demontage date de 2026 : 760 jours qui aspiraient toutes les
+    fiches) sont ignores. Repli sur les jours publics si montage/demontage
+    manquent. Retourne des dicts {"event", "year", "start", "end",
+    "public_days", "race"} (datetimes UTC aware), dans l'ordre d'event_courant.
     """
-    col = mongo_client[MONGO_DB][MONGO_PARAMETRAGES_COLLECTION]
-    docs = col.find(
-        {"event": {"$ne": "__GLOBAL__"}, "year": {"$ne": "__GLOBAL__"}},
-        {"event": 1, "year": 1, "data.globalHoraires.montage.start": 1,
-         "data.globalHoraires.demontage.end": 1,
-         "data.globalHoraires.dates": 1},
-    )
-
-    plages = []
-    for doc in docs:
-        event = doc.get("event")
-        year_raw = doc.get("year")
-        if not event or not year_raw:
-            continue
-
-        # Normaliser year en int
-        try:
-            year = int(year_raw)
-        except (ValueError, TypeError):
-            print(f"  [WARN] Année invalide pour {event}: {year_raw}, ignoré")
-            continue
-
-        # Extraire les dates : montage/demontage en priorite, sinon dates publiques
-        gh = (doc.get("data") or {}).get("globalHoraires") or {}
-        montage_start_raw = (gh.get("montage") or {}).get("start")
-        demontage_end_raw = (gh.get("demontage") or {}).get("end")
-
-        start_dt, end_dt = None, None
-        if montage_start_raw and demontage_end_raw:
-            start_dt, _ = to_iso_dt(montage_start_raw)
-            end_dt, _ = to_iso_dt(demontage_end_raw)
-
-        # Fallback : min/max des dates d'ouverture publique
-        if not start_dt or not end_dt:
-            pub_dates = gh.get("dates") or []
-            date_strs = sorted(d.get("date") for d in pub_dates if d.get("date"))
-            if date_strs:
-                start_dt, _ = to_iso_dt(date_strs[0] + "T00:00:00")
-                end_dt, _ = to_iso_dt(date_strs[-1] + "T23:59:59")
-                if start_dt and end_dt:
-                    print(f"  [INFO] {event} {year} : fallback dates publiques "
-                          f"{date_strs[0]} -> {date_strs[-1]}")
-
-        if not start_dt or not end_dt:
-            print(f"  [WARN] Aucune date exploitable pour {event} {year}, ignore")
-            continue
-
-        plages.append({
-            "event": event,
-            "year": year,
-            "start": start_dt,
-            "end": end_dt,
-        })
+    global _PRIORITY_ORDER
+    db = mongo_client[MONGO_DB]
+    event_courant.invalidate()
+    plages = [dict(w) for w in event_courant.windows(db)]
+    _PRIORITY_ORDER = event_courant.load_priority_order(db)
 
     # Ajouter les plages en dur (si pas déjà couvertes par parametrages)
     existing = {(p["event"], p["year"]) for p in plages}
@@ -252,30 +220,45 @@ def charger_plages_evenements(mongo_client):
                 plages.append({
                     "event": fb["event"],
                     "year": fb["year"],
-                    "start": start_dt,
-                    "end": end_dt,
+                    "start": start_dt.astimezone(timezone.utc),
+                    "end": end_dt.astimezone(timezone.utc),
+                    "public_days": set(),
+                    "race": None,
                 })
 
-    # Trier par date de début
-    plages.sort(key=lambda p: p["start"])
+    # PAS de tri : a egalite de priorite (meme phase, pas d'heure de course),
+    # event_courant garde l'ordre de lecture des parametrages ; le conserver
+    # garantit la meme attribution que Cockpit. Tri pour l'affichage seulement.
     return plages
 
 
-def trouver_evenements(dt, plages):
-    """Pour un datetime donne, cherche dans quelles plages il tombe.
-    Retourne une liste de (event, year). Si hors plage -> [("SAISON", annee)].
-    Gere les chevauchements : un message peut appartenir a plusieurs evenements.
+_PRIORITY_ORDER = []  # ordre de priorite choisi dans Cockpit (charge avec les plages)
+
+
+def trouver_evenement(dt, plages):
+    """(event, year) d'UN message selon sa date de creation.
+
+    Meme regle que event_courant.active_events : parmi les epreuves dont la
+    fenetre contient `dt`, celle choisie prioritaire dans Cockpit
+    (cockpit_settings event_priority), a defaut celle dont la fenetre a commence
+    le plus tot. Hors de toute fenetre -> ("SAISON", annee de Paris).
+    Une fiche deja en base garde son evenement (pas de deplacement).
     """
     if dt is None:
-        return [("SAISON", None)]
-    matches = []
+        return event_courant.SAISON, event_courant.saison_year()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=PARIS_TZ)
+    dt = dt.astimezone(timezone.utc)
+    best = None
     for p in plages:
-        if p["start"] <= dt <= p["end"]:
-            matches.append((p["event"], p["year"]))
-    if not matches:
-        dt_local = dt.astimezone(PARIS_TZ) if dt.tzinfo else dt.replace(tzinfo=PARIS_TZ)
-        return [("SAISON", dt_local.year)]
-    return matches
+        if not (p["start"] <= dt <= p["end"]):
+            continue
+        score = event_courant.priority_key(p, _PRIORITY_ORDER)
+        if best is None or score < best[0]:
+            best = (score, p["event"], p["year"])
+    if best is None:
+        return event_courant.SAISON, event_courant.saison_year(dt)
+    return best[1], best[2]
 
 
 # ─── Helpers parsing (repris de import_pcorg_csv_to_mongo.py) ────────────────
@@ -894,7 +877,7 @@ def enrich_pcorg_config(mongo_db, pcorg_col):
         print(f"  Config pcorg : aucune nouvelle valeur")
 
 
-def write_merged(pcorg_col, docs, max_attempts=3):
+def write_merged(pcorg_col, docs, max_attempts=3, reassign=False, stats=None):
     """Ecrit un lot de documents SQL en preservant les modifications Cockpit.
 
     Avant : `$set` du document entier, qui effacait commentaires, cloture,
@@ -903,6 +886,11 @@ def write_merged(pcorg_col, docs, max_attempts=3):
     l'existant (pcorg_history.merge_sync_doc), et l'ecriture est gardee par
     `cockpit_rev` : si Cockpit a modifie la fiche entre la lecture et
     l'ecriture, le document est relu et refusionne.
+
+    event/year sont FIGES des que la fiche existe en base : une reecriture
+    Prysm (commentaire, cloture) ne la deplace plus d'un evenement a l'autre
+    quand un parametrage change (montage saisi apres coup, fenetre corrigee).
+    `reassign=True` (option --reassign) recalcule l'attribution.
     Retourne le nombre de documents inseres ou modifies.
     """
     pending = dict(docs)
@@ -916,6 +904,12 @@ def write_merged(pcorg_col, docs, max_attempts=3):
         for _id, doc in pending.items():
             ex = existing.get(_id)
             merged = pcorg_history.merge_sync_doc(dict(doc), ex)
+            if ex is not None and not reassign and ex.get("event"):
+                if (merged.get("event"), merged.get("year")) != (ex.get("event"), ex.get("year")):
+                    if stats is not None:
+                        stats["frozen"] = stats.get("frozen", 0) + 1
+                merged["event"] = ex.get("event")
+                merged["year"] = ex.get("year")
             if ex is None:
                 ops.append(UpdateOne({"_id": _id}, {"$setOnInsert": merged}, upsert=True))
             else:
@@ -950,6 +944,10 @@ def main():
         help="Ne pas écrire en base, afficher le résumé",
     )
     ap.add_argument("--db", default=None, help="Base MongoDB (défaut : selon TITAN_ENV)")
+    ap.add_argument(
+        "--reassign", action="store_true",
+        help="Recalculer event/year des fiches deja en base (par defaut figes)",
+    )
     args = ap.parse_args()
 
     global MONGO_DB
@@ -986,7 +984,7 @@ def main():
         print("  Les messages seront stockés avec event=None, year=None")
     else:
         print(f"  {len(plages)} événement(s) chargé(s) :")
-        for p in plages:
+        for p in sorted(plages, key=lambda p: p["start"]):
             print(f"    {p['event']} {p['year']} : "
                   f"{p['start'].strftime('%d/%m/%Y')} → {p['end'].strftime('%d/%m/%Y')}")
 
@@ -1004,6 +1002,8 @@ def main():
             pcorg_col.create_index([("event", 1), ("year", 1), ("category", 1)])
             pcorg_col.create_index([("event", 1), ("year", 1), ("area.id", 1)])
             pcorg_col.create_index([("event", 1), ("year", 1), ("sql_id", 1)])
+            # Nettoyage des doublons restreint aux sql_id du passage
+            pcorg_col.create_index([("sql_id", 1)])
             pcorg_col.create_index([("guid", 1)], sparse=True)
             pcorg_col.create_index([("gps", "2dsphere")], sparse=True)
         except Exception as e:
@@ -1030,6 +1030,8 @@ def main():
     max_date_write = last_date_write
     cat_counts = Counter()
     event_counts = Counter()
+    write_stats = {}
+    seen_sql_ids = set()
     offset = 0
 
     print(f"Récupération par lots de {SQL_BATCH_SIZE}...")
@@ -1045,17 +1047,16 @@ def main():
         batch_docs = {}
 
         for row in batch:
-            # Determiner le(s) evenement(s) a partir de la date de creation
+            # Un seul evenement par message, d'apres sa date de creation
+            # (priorite event_courant entre epreuves simultanees)
             ts_dt, _ = to_iso_dt(row.get("UserMessageDateCreate"))
-            evts = trouver_evenements(ts_dt, plages)
-
-            for evt, yr in evts:
-                doc = transform_row(row, evt, yr)
-                cat_counts[doc.get("category", "?")] += 1
-                event_counts[f"{evt} {yr}"] += 1
-                # _id derive du seul sql_id : en cas de chevauchement
-                # d'evenements, le dernier l'emporte (un seul document)
-                batch_docs[doc["_id"]] = doc
+            evt, yr = trouver_evenement(ts_dt, plages)
+            doc = transform_row(row, evt, yr)
+            cat_counts[doc.get("category", "?")] += 1
+            event_counts[f"{evt} {yr}"] += 1
+            batch_docs[doc["_id"]] = doc
+            if doc.get("sql_id") is not None:
+                seen_sql_ids.add(doc["sql_id"])
 
             dw = row.get("DateWrite")
             if dw and (batch_max_dw is None or dw > batch_max_dw):
@@ -1064,7 +1065,8 @@ def main():
         if args.dry_run:
             total_upserted += len(batch_docs)
         elif batch_docs:
-            total_upserted += write_merged(pcorg_col, batch_docs)
+            total_upserted += write_merged(pcorg_col, batch_docs,
+                                           reassign=args.reassign, stats=write_stats)
 
         # Mise à jour du curseur après chaque lot (reprise possible)
         if batch_max_dw and (max_date_write is None or batch_max_dw > max_date_write):
@@ -1100,24 +1102,32 @@ def main():
         print(f"    {cat}: {cnt}")
     if max_date_write:
         print(f"  Curseur DateWrite : {max_date_write}")
+    if write_stats.get("frozen"):
+        print(f"  Fiches gardees sur leur evenement d'origine (event/year figes) : "
+              f"{write_stats['frozen']}")
 
-    # Nettoyage des doublons SAISON (messages réattribués à un vrai événement)
-    if not args.dry_run:
-        dup_pipeline = [
-            {"$match": {"sql_id": {"$ne": None}}},
-            {"$group": {
-                "_id": "$sql_id", "count": {"$sum": 1},
-                "docs": {"$push": {"id": "$_id", "event": "$event"}},
-            }},
-            {"$match": {"count": {"$gt": 1}}},
-        ]
+    # Nettoyage des doublons SAISON (anciens _id non derives du sql_id, message
+    # present en SAISON ET dans une epreuve). Restreint aux sql_id du passage :
+    # l'ancien $group sur toute la collection relisait 30 000 fiches toutes
+    # les 5 minutes.
+    if not args.dry_run and seen_sql_ids:
+        ids = sorted(seen_sql_ids)
         saison_to_delete = []
-        for dup in pcorg_col.aggregate(dup_pipeline):
-            has_non_saison = any(d["event"] != "SAISON" for d in dup["docs"])
-            if has_non_saison:
-                for d in dup["docs"]:
-                    if d["event"] == "SAISON":
-                        saison_to_delete.append(d["id"])
+        for i in range(0, len(ids), 1000):
+            dup_pipeline = [
+                {"$match": {"sql_id": {"$in": ids[i:i + 1000]}}},
+                {"$group": {
+                    "_id": "$sql_id", "count": {"$sum": 1},
+                    "docs": {"$push": {"id": "$_id", "event": "$event"}},
+                }},
+                {"$match": {"count": {"$gt": 1}}},
+            ]
+            for dup in pcorg_col.aggregate(dup_pipeline):
+                has_non_saison = any(d.get("event") != "SAISON" for d in dup["docs"])
+                if has_non_saison:
+                    for d in dup["docs"]:
+                        if d.get("event") == "SAISON":
+                            saison_to_delete.append(d["id"])
         if saison_to_delete:
             res = pcorg_col.delete_many({"_id": {"$in": saison_to_delete}})
             print(f"  Doublons SAISON purges : {res.deleted_count}")
@@ -1126,12 +1136,10 @@ def main():
     if not args.dry_run:
         enrich_pcorg_config(mongo_db, pcorg_col)
 
-    # Comptage total en base
+    # Comptage total en base : estimation (metadonnees), plus de trois
+    # count_documents sur toute la collection a chaque passage.
     if not args.dry_run:
-        total = pcorg_col.count_documents({})
-        with_gps = pcorg_col.count_documents({"gps": {"$ne": None}})
-        with_event = pcorg_col.count_documents({"event": {"$ne": None}})
-        print(f"  Total en base : {total} docs ({with_event} attribués, {with_gps} avec GPS)")
+        print(f"  Total en base (estimation) : {pcorg_col.estimated_document_count()} docs")
 
     print(f"{'='*60}")
 
