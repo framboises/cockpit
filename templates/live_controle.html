@@ -289,6 +289,41 @@
           </div>
         </section>
 
+        <!-- Site - visites libres -->
+        <section class="widget-card">
+          <header class="widget-header">
+            <h3>Site - visites libres</h3>
+            <span id="ma-site-today" class="ma-today"></span>
+          </header>
+          <div class="widget-body ma-body">
+            <div class="ma-hint">Un billet musee donne acces libre au site : entrees ET sorties comptees sur les checkpoints ci-dessous, uniquement les jours de visites libres, dans leurs horaires (+/- la marge), et jamais pendant une epreuve (ces checkpoints servent alors au delestage).</div>
+            <div class="ma-row">
+              <label class="hsh-toggle-label">
+                <input type="checkbox" id="ma-site-enabled" class="hsh-toggle-input">
+                <span class="hsh-toggle-slider"></span>
+                <span>Comptage des visites libres</span>
+              </label>
+              <label class="ma-field">Marge avant / apres (min)
+                <input type="number" id="ma-site-marge" class="hsh-select" min="0" max="240" step="5">
+              </label>
+            </div>
+            <div class="ma-sub">Checkpoints du perimetre</div>
+            <table class="ma-table" id="ma-site-cps">
+              <thead><tr><th title="Compteur releve et compte">Inclus</th><th>Checkpoint</th><th>Nom affiche</th><th title="Utilise seulement si la transaction ne porte pas de sens">Sens</th><th>Vu sous</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <div class="ma-row">
+              <select id="ma-site-cp-add" class="hsh-select" style="flex:1; min-width:0;">
+                <option value="">Ajouter un checkpoint (toutes Areas)...</option>
+              </select>
+            </div>
+            <div class="ma-sub">Prochains jours de visites libres</div>
+            <div class="ma-hint">A saisir dans GroundMaster, jours publics de SAISON (lecture seule ici).</div>
+            <div id="ma-site-jours" class="ma-etat"></div>
+            <div id="ma-site-etat" class="ma-etat"></div>
+          </div>
+        </section>
+
         <!-- Reglages avances -->
         <section class="widget-card">
           <details class="ma-advanced">

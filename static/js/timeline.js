@@ -86,7 +86,10 @@ function buildPublicDatesMap(parametrage) {
       map[d.date] = {
         is24h: !!d.is24h || (d.openTime === "00:00" && (d.closeTime === "23:59" || d.closeTime === "24:00" || d.closeTime === "00:00")),
         openTime: d.openTime || "00:00",
-        closeTime: d.closeTime || "23:59"
+        closeTime: d.closeTime || "23:59",
+        // SAISON : types de visite du jour (import GroundMaster), absent = autorise
+        visite_libre: d.visite_libre !== false,
+        visite_guidee: d.visite_guidee !== false
       };
     }
   });
@@ -94,7 +97,20 @@ function buildPublicDatesMap(parametrage) {
 }
 
 // 🔹 Retourne {text, className} pour une date donnée (YYYY-MM-DD)
+// SAISON : les jours publics sont des jours de VISITES LIBRES (billet musee,
+// circuit en visite libre, 02/10/2026) : meme rendu, libelle adapte.
 function getPublicBannerForDateStr(dateStr) {
+  const b = _publicBannerForDateStr(dateStr);
+  if (String(window.selectedEvent || '').trim().toUpperCase() === 'SAISON' && b.className === 'banner-open') {
+    const e = window.publicDatesMap?.[dateStr] || {};
+    const lab = e.visite_libre === false ? 'VISITES GUIDEES'
+      : (e.visite_guidee === false ? 'VISITES LIBRES' : 'VISITES LIBRES ET GUIDEES');
+    b.text = b.text.replace('OUVERT AU PUBLIC', lab);
+  }
+  return b;
+}
+
+function _publicBannerForDateStr(dateStr) {
   const entry = window.publicDatesMap?.[dateStr];
   if (!entry) {
     return { text: "FERMÉ AU PUBLIC", className: "banner-closed" };
@@ -964,18 +980,110 @@ let _dayNavTooltip = null;
 
 const _DAY_NAMES_SHORT = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
 
+// Etat de l'infobulle du jour (une seule, partagee). SAISON : elle peut etre
+// "interactive" (survol de la barre des jours : la souris peut y entrer,
+// masquage differe) ou EPINGLEE (clic dans le calendrier, bouton epingle,
+// appui long) : elle reste ouverte, defile, et rien ne la remplace au survol
+// tant qu'on ne l'a pas fermee (croix, clic dehors, Echap).
+const SiTip = { pinned: false, interactive: false, timer: null, anchor: null, unpinnedAt: 0, unpinnedAnchor: null };
+// Seconde fenetre "Programme <client>" ouverte depuis le bloc seminaires
+const SiProg = { el: null, seq: 0, client: null, row: null, ds: null, cache: {} };
+
 function _getDayNavTooltip() {
   if (!_dayNavTooltip) {
     _dayNavTooltip = document.createElement('div');
     _dayNavTooltip.className = 'day-nav-tooltip';
+    _dayNavTooltip.addEventListener('mouseenter', _siTipCancelHide);
+    _dayNavTooltip.addEventListener('mouseleave', () => { if (SiTip.interactive && !SiTip.pinned) _siTipHideSoon(); });
     document.body.appendChild(_dayNavTooltip);
   }
   return _dayNavTooltip;
 }
 
+function _siTipCancelHide() {
+  clearTimeout(SiTip.timer);
+  SiTip.timer = null;
+}
+
+function _siTipHideSoon() {
+  _siTipCancelHide();
+  SiTip.timer = setTimeout(() => { SiTip.timer = null; if (!SiTip.pinned) _hideDayNavTooltip(true); }, 220);
+}
+
+function _siTipOutside(ev) {
+  const tip = _dayNavTooltip;
+  if (!SiTip.pinned || !tip || tip.contains(ev.target)) return;
+  if (SiProg.el && SiProg.el.contains(ev.target)) return;
+  // Programme ouvert : un clic hors des deux fenetres ferme d'abord le
+  // programme (l'infobulle du jour reste epinglee)
+  if (_siProgIsOpen()) { _siProgClose(); return; }
+  SiTip.unpinnedAnchor = SiTip.anchor && SiTip.anchor.contains(ev.target) ? SiTip.anchor : null;
+  SiTip.unpinnedAt = Date.now();
+  _hideDayNavTooltip(true);
+}
+
+function _siTipKeys(ev) {
+  if (ev.key !== 'Escape' || !SiTip.pinned) return;
+  // Echap ferme d'abord le programme client, puis l'infobulle epinglee,
+  // puis (Echap suivant) le calendrier dessous
+  ev.stopPropagation();
+  ev.preventDefault();
+  if (_siProgIsOpen()) {
+    const row = SiProg.row;
+    _siProgClose();
+    if (row && row.isConnected) row.focus({ preventScroll: true });
+    return;
+  }
+  _hideDayNavTooltip(true);
+}
+
+function _siTipPin() {
+  const tip = _getDayNavTooltip();
+  if (SiTip.pinned) return;
+  _siTipCancelHide();
+  SiTip.pinned = true;
+  SiTip.interactive = true;
+  tip.classList.add('si-pinned', 'si-interactive');
+  const btn = tip.querySelector('.si-tip-pin');
+  if (btn) _siTipPinBtn(btn, true);
+  document.addEventListener('pointerdown', _siTipOutside, true);
+  window.addEventListener('keydown', _siTipKeys, true);
+}
+
+function _siTipPinBtn(btn, pinned) {
+  btn.textContent = '';
+  const ic = document.createElement('span');
+  ic.className = 'material-symbols-outlined';
+  ic.textContent = pinned ? 'close' : 'push_pin';
+  btn.appendChild(ic);
+  btn.title = pinned ? 'Fermer (Echap)' : 'Epingler : garder ouvert';
+  btn.setAttribute('aria-label', btn.title);
+  btn.classList.toggle('is-close', pinned);
+}
+
+// Garde l'infobulle dans l'ecran : sous l'ancre, sinon au-dessus, sinon
+// collee en bas ; centree horizontalement sur l'ancre.
+function _siTipPlace(tip, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  const w = tip.offsetWidth || 300;
+  const h = tip.offsetHeight || 0;
+  const left = Math.min(Math.max(rect.left + rect.width / 2, w / 2 + 8), window.innerWidth - w / 2 - 8);
+  let top = rect.bottom + 6;
+  if (top + h > window.innerHeight - 8) {
+    top = rect.top - h - 6 >= 8 ? rect.top - h - 6 : Math.max(8, window.innerHeight - h - 8);
+  }
+  tip.style.left = left + 'px';
+  tip.style.top = top + 'px';
+  tip.style.transform = 'translateX(-50%) translateY(0)';
+}
+
 function _showDayNavTooltip(pill, lines) {
+  if (SiTip.pinned) return;
+  _siTipCancelHide();
+  SiTip.interactive = false;
   const tip = _getDayNavTooltip();
   tip.textContent = '';
+  tip.classList.remove('si-tip', 'si-interactive', 'si-pinned');
   lines.forEach(function(line) {
     var row = document.createElement('span');
     row.className = 'tt-row';
@@ -996,10 +1104,1739 @@ function _showDayNavTooltip(pill, lines) {
   tip.style.transform = 'translateX(-50%) translateY(0)';
 }
 
-function _hideDayNavTooltip() {
-  if (_dayNavTooltip) {
-    _dayNavTooltip.classList.remove('visible');
+// Sans force === true (appel depuis un mouseleave, qui passe l'evenement) :
+// une infobulle epinglee reste, une infobulle interactive part avec un delai
+// (le temps d'y entrer avec la souris).
+function _hideDayNavTooltip(force) {
+  if (force !== true) {
+    if (SiTip.pinned) return;
+    if (SiTip.interactive) { _siTipHideSoon(); return; }
   }
+  _siTipCancelHide();
+  _siProgClose();
+  if (SiTip.pinned) {
+    document.removeEventListener('pointerdown', _siTipOutside, true);
+    window.removeEventListener('keydown', _siTipKeys, true);
+  }
+  SiTip.pinned = false;
+  SiTip.interactive = false;
+  SiTip.anchor = null;
+  if (_dayNavTooltip) {
+    _dayNavTooltip.classList.remove('visible', 'si-pinned', 'si-interactive');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SAISON : indicateurs "d'un coup d'oeil" dans la barre des jours
+// (saison_indicateurs.py). Pastilles au-dessus du jour (visites libres /
+// guidees), points sous le jour a position FIXE (pistes, karting). Config
+// globale admin (Configuration > Indicateurs SAISON). Clic sur une pastille,
+// un point ou une entree de legende : met en avant les vignettes de
+// l'indicateur (les autres s'estompent), second clic : retire le filtre.
+// Tout le texte vient de Momentus : textContent uniquement.
+// ---------------------------------------------------------------------------
+const SaisonInd = {
+  cache: null,          // {key, at, data}
+  filter: null,         // id de l'indicateur filtre
+  seq: 0,
+  // Legende depliee (libelles complets) par defaut ; repliee = codes courts
+  // Legende repliee par defaut (une ligne de codes) ; depliee seulement si
+  // l'utilisateur l'a choisi (cle v2 : l'ancien defaut etait "depliee").
+  legendOpen: (function() { try { return localStorage.getItem('si_legend_open_v2') === '1'; } catch (e) { return false; } })(),
+};
+
+function _isSaisonSelected() {
+  return String(window.selectedEvent || '').trim().toUpperCase() === 'SAISON';
+}
+
+function _siColor(c) {
+  return /^#[0-9A-Fa-f]{6}$/.test(String(c || '')) ? c : '#64748b';
+}
+
+function _siTextColor(hex) {
+  const c = _siColor(hex);
+  const r = parseInt(c.slice(1, 3), 16), g = parseInt(c.slice(3, 5), 16), b = parseInt(c.slice(5, 7), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 > 150 ? '#111827' : '#ffffff';
+}
+
+function _siHours(d) {
+  if (d.is24h) return '24/24';
+  if (d.start && d.end) return d.start + '-' + d.end;
+  if (d.start) return 'des ' + d.start;
+  if (d.end) return "jusqu'a " + d.end;
+  return 'toute la journee';
+}
+
+function _siMarker(ind) {
+  const m = document.createElement('span');
+  const color = _siColor(ind.color);
+  if (ind.rank === 'pill') {
+    m.className = 'si-tag';
+    m.style.background = color;
+    m.style.color = _siTextColor(color);
+    m.textContent = ind.short;
+  } else {
+    m.className = 'si-dot';
+    m.style.background = color;
+  }
+  return m;
+}
+
+async function _siFetch(from, to) {
+  const key = from + '|' + to;
+  const c = SaisonInd.cache;
+  if (c && c.key === key && Date.now() - c.at < 60000) return c.data;
+  const r = await fetch('/api/saison/indicateurs?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to),
+                        { credentials: 'same-origin' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const data = await r.json();
+  if (!data || !data.ok) throw new Error((data && data.error) || 'reponse invalide');
+  SaisonInd.cache = { key, at: Date.now(), data };
+  return data;
+}
+
+function _siTeardown() {
+  ['si-legend', 'si-legend-btn', 'si-legend-pop', 'si-cal-btn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+  });
+  const bar = document.getElementById('day-nav-bar');
+  if (bar) bar.classList.remove('si-bar');
+  const list = document.getElementById('event-list');
+  if (list) {
+    list.classList.remove('si-filtering');
+    list.querySelectorAll('.si-hit, .si-dim').forEach(el => el.classList.remove('si-hit', 'si-dim'));
+  }
+}
+
+function _siDecorate(dates, pills) {
+  if (!_isSaisonSelected() || !dates.length) { _siTeardown(); return; }
+  const seq = ++SaisonInd.seq;
+  _siFetch(dates[0], dates[dates.length - 1]).then(data => {
+    if (seq !== SaisonInd.seq || !_isSaisonSelected()) return;
+    const inds = data.indicators || [];
+    if (!inds.length) { _siTeardown(); return; }
+    const byId = {};
+    inds.forEach(i => { byId[i.id] = i; });
+    const pillInds = inds.filter(i => i.rank === 'pill');
+    const dotInds = inds.filter(i => i.rank === 'dot');
+    SaisonInd.data = data;
+    if (SaisonInd.filter && !byId[SaisonInd.filter]) SaisonInd.filter = null;
+    const navBar = document.getElementById('day-nav-bar');
+    if (navBar) navBar.classList.add('si-bar');
+
+    dates.forEach(ds => {
+      const pill = pills[ds];
+      if (!pill) return;
+      const row = (data.days || {})[ds] || [];
+      const state = {};
+      row.forEach(x => { state[x.id] = x; });
+      pill.classList.add('si-day');
+      // Les pastilles VL/VG remplacent le point "public" historique
+      pill.querySelectorAll('.day-indicators, .si-tags, .si-dots').forEach(el => el.remove());
+
+      if (pillInds.length) {
+        const top = document.createElement('span');
+        top.className = 'si-tags';
+        pillInds.forEach(ind => {
+          const on = !!(state[ind.id] && state[ind.id].active);
+          const t = _siMarker(ind);
+          t.dataset.ind = ind.id;
+          if (!on) t.classList.add('si-off');
+          else t.addEventListener('click', ev => { ev.stopPropagation(); _siToggleFilter(ind.id, ds); });
+          t.setAttribute('aria-label', ind.label + (on ? '' : ' : non'));
+          top.appendChild(t);
+        });
+        pill.insertBefore(top, pill.firstChild);
+      }
+      if (dotInds.length) {
+        const bottom = document.createElement('span');
+        bottom.className = 'si-dots';
+        dotInds.forEach(ind => {
+          const on = !!(state[ind.id] && state[ind.id].active);
+          const slot = document.createElement('span');
+          slot.className = 'si-slot';
+          slot.dataset.ind = ind.id;
+          if (on) {
+            const dot = _siMarker(ind);
+            if ((state[ind.id].details || []).every(d => d.blackout)) dot.classList.add('si-blackout');
+            slot.appendChild(dot);
+            slot.classList.add('si-on');
+            slot.addEventListener('click', ev => { ev.stopPropagation(); _siToggleFilter(ind.id, ds); });
+          }
+          bottom.appendChild(slot);
+        });
+        pill.appendChild(bottom);
+      }
+      // Infobulle riche : branchee apres celle du jour public, elle la remplace.
+      // Interactive : la souris peut y entrer (bouton epingle).
+      const semDay = () => (((SaisonInd.data || {}).seminaires || {}).days || {})[ds] || null;
+      pill.addEventListener('mouseenter', () => _siShowTooltip(pill, ds, inds, state,
+        { interactive: true, sem: semDay(), semOn: !!(data.seminaires && data.seminaires.enabled) }));
+      pill.addEventListener('mouseleave', _hideDayNavTooltip);
+      // Tactile (iPhone) : pas de survol. Appui long (450 ms) = infobulle du
+      // jour EPINGLEE (defilable, croix ; un toucher dehors la ferme) ;
+      // l'appui court garde son effet (choisir le jour, filtrer par un point).
+      let lpTimer = null, lpShown = false;
+      pill.addEventListener('touchstart', () => {
+        lpShown = false;
+        clearTimeout(lpTimer);
+        lpTimer = setTimeout(() => {
+          lpShown = true;
+          _siShowTooltip(pill, ds, inds, state,
+            { pin: true, sem: semDay(), semOn: !!(data.seminaires && data.seminaires.enabled) });
+        }, 450);
+      }, { passive: true });
+      ['touchend', 'touchmove', 'touchcancel'].forEach(t => pill.addEventListener(t, ev => {
+        clearTimeout(lpTimer);
+        // Apres un appui long, on n'ouvre pas le jour en plus de l'infobulle
+        if (t === 'touchend' && lpShown && ev.cancelable) ev.preventDefault();
+      }, { passive: false }));
+    });
+    _siRenderLegend(inds);
+    _siRenderCalBtn();
+    _siApplyFilter();
+  }).catch(err => {
+    console.warn('[SAISON] indicateurs indisponibles :', err);
+  });
+}
+
+function _siScrollTo(target) {
+  let scrollEl = target.parentElement;
+  while (scrollEl && scrollEl !== document.body) {
+    const oy = getComputedStyle(scrollEl).overflowY;
+    if (oy === 'auto' || oy === 'scroll') break;
+    scrollEl = scrollEl.parentElement;
+  }
+  if (scrollEl && scrollEl !== document.body) {
+    const navBar = document.getElementById('day-nav-bar');
+    const navOffset = (navBar && getComputedStyle(navBar).position === 'sticky') ? navBar.offsetHeight : 0;
+    const offset = target.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop - navOffset;
+    scrollEl.scrollTo({ top: Math.max(0, offset - 4), behavior: 'smooth' });
+  } else {
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function _siFmtPers(n) {
+  return Number(n).toLocaleString('fr-FR') + ' pers.';
+}
+
+// Bloc "Seminaires" de l'infobulle du jour : metriques puis les plus gros
+// (tries par le serveur, liste COMPLETE : on en montre max_list, "+ N
+// autres" deplie / replie le reste sur place). Une ligne client = bouton :
+// ouvre la seconde fenetre "Programme <client>" (infobulle epinglee d'abord).
+function _siSemBlock(sem, ds) {
+  const block = document.createElement('div');
+  block.className = 'si-tip-ind si-tip-sem';
+  const title = document.createElement('div');
+  title.className = 'si-tip-title';
+  const ic = document.createElement('span');
+  ic.className = 'material-symbols-outlined si-tip-sem-ic';
+  ic.textContent = 'groups';
+  title.appendChild(ic);
+  const lab = document.createElement('span');
+  let txt = 'Seminaires (' + sem.count + ')';
+  if (sem.pers) txt += ' - ' + _siFmtPers(sem.pers) + (sem.pers_unknown ? ' connus' : '');
+  lab.textContent = txt;
+  title.appendChild(lab);
+  block.appendChild(title);
+  const items = sem.items || [];
+  // count - more = nombre montre d'emblee (max_list), que le serveur envoie
+  // la liste complete ou deja tronquee
+  const shown = Math.max(1, (sem.count || items.length) - (sem.more || 0));
+  const extras = [];
+  items.forEach((it, idx) => {
+    const line = document.createElement('div');
+    line.className = 'si-tip-line';
+    if (idx >= shown) { line.hidden = true; extras.push(line); }
+    if (it.client) {
+      line.classList.add('si-tip-click');
+      line.tabIndex = 0;
+      line.setAttribute('role', 'button');
+      line.dataset.client = it.client;
+      line.title = 'Tout le programme de ' + (it.account || it.event || 'ce client');
+      const open = ev => {
+        ev.stopPropagation();
+        if (ev.cancelable) ev.preventDefault();
+        _siProgToggle(it.client, it.account || it.event || '', ds, line);
+      };
+      line.addEventListener('click', open);
+      line.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') open(ev); });
+    }
+    const h = document.createElement('span');
+    h.className = 'si-tip-hours';
+    h.textContent = _siHours(it);
+    line.appendChild(h);
+    const t = document.createElement('span');
+    t.className = 'si-tip-text';
+    t.textContent = (it.event || '') + (it.place ? ' - ' + it.place : '');
+    if (it.type) t.title = it.type;
+    line.appendChild(t);
+    if (it.status === 'option') {
+      const o = document.createElement('span');
+      o.className = 'si-tip-flag';
+      o.textContent = 'option';
+      line.appendChild(o);
+    }
+    const p = document.createElement('span');
+    p.className = 'si-tip-flag si-tip-pers' + (it.status === 'option' ? ' after' : '');
+    p.textContent = it.pers ? it.pers + ' p.' : '? p.';
+    if (!it.pers) p.title = 'Effectif non renseigne dans Momentus';
+    line.appendChild(p);
+    block.appendChild(line);
+  });
+  if (extras.length) {
+    // Deplier / replier sur place (l'infobulle defile ; on l'epingle pour
+    // qu'elle ne parte pas pendant la lecture)
+    const m = document.createElement('button');
+    m.type = 'button';
+    m.className = 'si-tip-line si-tip-more si-tip-more-btn';
+    const label = () => {
+      const open = !extras[0].hidden;
+      m.textContent = open ? 'Replier' : '+ ' + extras.length + ' autre' + (extras.length > 1 ? 's' : '');
+      m.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    label();
+    m.addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (SiTip.interactive && !SiTip.pinned) _siTipPin();
+      const open = extras[0].hidden;
+      extras.forEach(l => { l.hidden = !open; });
+      label();
+      if (SiTip.anchor && _dayNavTooltip) _siTipPlace(_dayNavTooltip, SiTip.anchor);
+      if (open) extras[0].scrollIntoView({ block: 'nearest' });
+      _siProgPlace();
+    });
+    block.appendChild(m);
+  } else if (sem.more) {
+    const m = document.createElement('div');
+    m.className = 'si-tip-line si-tip-more';
+    m.textContent = '+ ' + sem.more + ' autre' + (sem.more > 1 ? 's' : '');
+    block.appendChild(m);
+  }
+  return block;
+}
+
+// ---------------------------------------------------------------------------
+// Seconde fenetre : tout le programme d'un client (GET /api/saison/client).
+// Ancree a cote de l'infobulle du jour (a droite, sinon a gauche) ; sur
+// telephone, panneau en bas d'ecran. L'infobulle du jour reste epinglee.
+// Echap / clic dehors ferment d'abord cette fenetre, puis l'infobulle.
+// Tout le texte vient de Momentus : textContent uniquement.
+// ---------------------------------------------------------------------------
+const _SI_PHASES = { reserve: 'espace reserve', exploitation: 'exploitation', demontage: 'demontage', bloque: 'bloque' };
+
+function _siProgIsOpen() {
+  return !!(SiProg.el && SiProg.el.classList.contains('open'));
+}
+
+function _siProgToggle(client, name, ds, row) {
+  if (_siProgIsOpen() && SiProg.client === client) { _siProgClose(); return; }
+  if (!SiTip.pinned) _siTipPin();   // la premiere fenetre reste ouverte
+  _siProgOpen(client, name, ds, row);
+}
+
+function _siProgClose() {
+  if (SiProg.row) SiProg.row.classList.remove('si-tip-sel');
+  SiProg.row = null;
+  SiProg.client = null;
+  SiProg.seq++;
+  if (SiProg.el) SiProg.el.classList.remove('open', 'si-prog-sheet');
+}
+
+function _siProgButton(icon, title, cls) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = cls;
+  b.title = title;
+  b.setAttribute('aria-label', title);
+  const ic = document.createElement('span');
+  ic.className = 'material-symbols-outlined';
+  ic.textContent = icon;
+  b.appendChild(ic);
+  return b;
+}
+
+function _siProgShell(name) {
+  let el = SiProg.el;
+  if (!el) {
+    el = SiProg.el = document.createElement('div');
+    el.className = 'si-prog';
+    el.setAttribute('role', 'dialog');
+    document.body.appendChild(el);
+  }
+  el.textContent = '';
+  el.setAttribute('aria-label', 'Programme ' + name);
+  const head = document.createElement('div');
+  head.className = 'si-prog-head';
+  const back = _siProgButton('arrow_back', 'Retour au jour', 'si-prog-back');
+  back.addEventListener('click', ev => { ev.stopPropagation(); _siProgClose(); });
+  head.appendChild(back);
+  const ttl = document.createElement('div');
+  ttl.className = 'si-prog-ttl';
+  const k = document.createElement('span');
+  k.className = 'si-prog-kicker';
+  k.textContent = 'Programme';
+  ttl.appendChild(k);
+  const n = document.createElement('span');
+  n.className = 'si-prog-name';
+  n.textContent = name || 'Client';
+  ttl.appendChild(n);
+  head.appendChild(ttl);
+  const close = _siProgButton('close', 'Fermer (Echap)', 'si-prog-close');
+  close.addEventListener('click', ev => { ev.stopPropagation(); _siProgClose(); });
+  head.appendChild(close);
+  el.appendChild(head);
+  const body = document.createElement('div');
+  body.className = 'si-prog-body';
+  el.appendChild(body);
+  return { el, head, ttl, name: n, body };
+}
+
+function _siProgDayLabel(ds) {
+  const d = new Date(ds + 'T00:00:00');
+  const s = d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function _siProgOpen(client, name, ds, row) {
+  if (SiProg.row) SiProg.row.classList.remove('si-tip-sel');
+  SiProg.client = client;
+  SiProg.row = row || null;
+  SiProg.ds = ds || null;
+  if (row) row.classList.add('si-tip-sel');
+  const shell = _siProgShell(name);
+  const msg = document.createElement('div');
+  msg.className = 'si-prog-msg';
+  msg.textContent = 'Chargement du programme...';
+  shell.body.appendChild(msg);
+  shell.el.classList.add('open');
+  _siProgPlace();
+  // Fenetre : J-7 -> J+90 (defaut serveur) ; jour clique hors de cette
+  // fenetre (calendrier lointain) : autour du jour clique
+  let qs = '';
+  if (ds) {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const d = new Date(ds + 'T00:00:00');
+    const diff = Math.round((d - today) / 86400000);
+    if (diff < -7 || diff > 90) {
+      qs = '&from=' + _siYmd(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 14))
+        + '&to=' + _siYmd(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 90));
+    }
+  }
+  const key = client + qs;
+  const seq = ++SiProg.seq;
+  const c = SiProg.cache[key];
+  const p = (c && Date.now() - c.at < 120000) ? Promise.resolve(c.data)
+    : fetch('/api/saison/client?client=' + encodeURIComponent(client) + qs, { credentials: 'same-origin' })
+      .then(r => r.json().catch(() => ({})).then(j => {
+        if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || ('HTTP ' + r.status));
+        SiProg.cache[key] = { at: Date.now(), data: j };
+        return j;
+      }));
+  p.then(data => {
+    if (seq !== SiProg.seq) return;
+    _siProgRender(shell, data, ds);
+    _siProgPlace();
+  }).catch(err => {
+    if (seq !== SiProg.seq) return;
+    shell.body.textContent = '';
+    const e = document.createElement('div');
+    e.className = 'si-prog-msg si-prog-err';
+    e.textContent = 'Programme indisponible (' + err.message + ')';
+    shell.body.appendChild(e);
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'si-prog-retry';
+    retry.textContent = 'Reessayer';
+    retry.addEventListener('click', ev => { ev.stopPropagation(); _siProgOpen(client, name, ds, row); });
+    shell.body.appendChild(retry);
+    _siProgPlace();
+  });
+}
+
+function _siProgRender(shell, data, ds) {
+  if (data.account) shell.name.textContent = data.account;
+  shell.el.setAttribute('aria-label', 'Programme ' + (data.account || ''));
+  const body = shell.body;
+  body.textContent = '';
+  const t = data.totals || {};
+  const meta = document.createElement('div');
+  meta.className = 'si-prog-meta';
+  const fmt = s => String(s || '').split('-').reverse().slice(0, 2).join('/');
+  let mt = 'Du ' + fmt(data.from) + ' au ' + fmt(data.to) + ' : ' + (t.days || 0) + ' jour' + (t.days > 1 ? 's' : '');
+  if (t.events) mt += ' · ' + t.events + ' resa';
+  if (t.max_pers) mt += ' · jusqu\'a ' + _siFmtPers(t.max_pers);
+  meta.textContent = mt;
+  shell.ttl.appendChild(meta);
+  const evs = data.events || [];
+  const multi = evs.length > 1;
+  const evName = {};
+  evs.forEach(e => { evName[e.id] = e.name; });
+  if (evs.length) {
+    const box = document.createElement('div');
+    box.className = 'si-prog-evs';
+    evs.forEach(e => {
+      const chip = document.createElement('span');
+      chip.className = 'si-prog-ev';
+      chip.textContent = e.name + (e.type ? ' · ' + e.type : '');
+      if (e.status === 'option') {
+        const o = document.createElement('em');
+        o.textContent = 'option';
+        chip.appendChild(o);
+      }
+      box.appendChild(chip);
+    });
+    body.appendChild(box);
+  }
+  const days = data.days || [];
+  if (!days.length) {
+    const m = document.createElement('div');
+    m.className = 'si-prog-msg';
+    m.textContent = 'Aucune reservation sur la periode.';
+    body.appendChild(m);
+    return;
+  }
+  const todayS = _siYmd(new Date());
+  let selEl = null;
+  days.forEach(day => {
+    const g = document.createElement('section');
+    g.className = 'si-prog-day' + (day.date === ds ? ' is-sel' : '') + (day.date < todayS ? ' is-past' : '');
+    const h = document.createElement('div');
+    h.className = 'si-prog-date';
+    const hd = document.createElement('span');
+    hd.textContent = _siProgDayLabel(day.date) + (day.date === todayS ? ' (aujourd\'hui)' : '');
+    h.appendChild(hd);
+    if (day.pers) {
+      const hp = document.createElement('span');
+      hp.className = 'si-prog-date-pers';
+      hp.textContent = _siShortPers(day.pers);
+      h.appendChild(hp);
+    }
+    g.appendChild(h);
+    (day.items || []).forEach(it => {
+      const ln = document.createElement('div');
+      ln.className = 'si-prog-line' + (it.kind === 'space' ? ' is-space' : '');
+      const hr = document.createElement('span');
+      hr.className = 'si-prog-hours';
+      hr.textContent = it.all_day && !it.start && !it.end ? 'journee'
+        : (it.start && it.start === it.end ? it.start : _siHours(it));
+      ln.appendChild(hr);
+      const main = document.createElement('span');
+      main.className = 'si-prog-main';
+      const nm = document.createElement('span');
+      nm.className = 'si-prog-fn';
+      nm.textContent = it.kind === 'space' ? (it.room || 'Espace') : (it.name || 'Fonction');
+      main.appendChild(nm);
+      const sub = it.kind === 'space'
+        ? [_SI_PHASES[it.phase] || 'espace reserve']
+        : [it.room, it.ftype];
+      if (multi && evName[it.event_id]) sub.push(evName[it.event_id]);
+      const subTxt = sub.filter(Boolean).join(' · ');
+      if (subTxt) {
+        const s = document.createElement('span');
+        s.className = 'si-prog-sub';
+        s.textContent = subTxt;
+        main.appendChild(s);
+      }
+      ln.appendChild(main);
+      if (it.pers) {
+        const pp = document.createElement('span');
+        pp.className = 'si-tip-flag si-tip-pers';
+        pp.textContent = it.pers + ' p.';
+        ln.appendChild(pp);
+      }
+      g.appendChild(ln);
+    });
+    body.appendChild(g);
+    if (day.date === ds) selEl = g;
+  });
+  // Le jour d'ou l'on vient en haut de la liste
+  if (selEl) body.scrollTop = Math.max(0, selEl.offsetTop - body.offsetTop - 4);
+}
+
+// A droite de l'infobulle du jour, sinon a gauche, sinon par-dessus (bord
+// droit) ; telephone (<= 600 px) : panneau en bas d'ecran.
+function _siProgPlace() {
+  const el = SiProg.el;
+  if (!el || !el.classList.contains('open')) return;
+  const sheet = window.innerWidth <= 600;
+  el.classList.toggle('si-prog-sheet', sheet);
+  if (sheet) {
+    el.style.left = el.style.top = '';
+    return;
+  }
+  const tip = _dayNavTooltip;
+  const r = tip && tip.classList.contains('visible') ? tip.getBoundingClientRect() : null;
+  const w = el.offsetWidth || 380;
+  const h = el.offsetHeight || 300;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  let left, top;
+  if (r) {
+    if (r.right + 8 + w <= vw - 8) left = r.right + 8;
+    else if (r.left - 8 - w >= 8) left = r.left - 8 - w;
+    else left = vw - w - 8;
+    top = r.top;
+  } else {
+    left = (vw - w) / 2;
+    top = 60;
+  }
+  top = Math.min(Math.max(8, top), Math.max(8, vh - h - 8));
+  el.style.left = Math.max(8, left) + 'px';
+  el.style.top = top + 'px';
+}
+window.addEventListener('resize', () => { if (_siProgIsOpen()) _siProgPlace(); });
+
+// opts : {interactive, pin, sem, semOn, eps, hint}
+//  - interactive : survol de la barre des jours (bouton epingle dans l'en-tete)
+//  - pin : ouvre directement epinglee (clic calendrier, appui long)
+//  - sem : seminaires du jour ({count, pers, items, more}) ; semOn : bloc actif
+//  - eps : epreuves du jour [{ep, pub}] (calendrier)
+//  - search : resultats de la recherche du calendrier pour ce jour
+function _siShowTooltip(pill, ds, inds, state, opts) {
+  opts = opts || {};
+  if (SiTip.pinned && !opts.pin) return;   // epinglee : le survol ne la remplace pas
+  if (SiTip.pinned) _hideDayNavTooltip(true);
+  _siTipCancelHide();
+  const tip = _getDayNavTooltip();
+  tip.textContent = '';
+  tip.scrollTop = 0;
+  tip.classList.add('si-tip');
+  tip.classList.remove('si-pinned');
+  SiTip.interactive = !!(opts.interactive || opts.pin);
+  tip.classList.toggle('si-interactive', SiTip.interactive);
+  SiTip.anchor = pill;
+  const d = new Date(ds + 'T00:00:00');
+  const head = document.createElement('div');
+  head.className = 'si-tip-head';
+  const headTxt = document.createElement('span');
+  headTxt.textContent = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+  head.appendChild(headTxt);
+  if (SiTip.interactive) {
+    const pb = document.createElement('button');
+    pb.type = 'button';
+    pb.className = 'si-tip-pin';
+    _siTipPinBtn(pb, false);
+    pb.addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (SiTip.pinned) _hideDayNavTooltip(true);
+      else _siTipPin();
+    });
+    head.appendChild(pb);
+  }
+  tip.appendChild(head);
+  if (opts.eps && opts.eps.length) {
+    // Epreuves du jour, juste sous la date
+    const box = document.createElement('div');
+    box.className = 'si-tip-eps';
+    opts.eps.forEach(({ ep, pub }) => {
+      const line = document.createElement('div');
+      line.className = 'si-tip-ep';
+      const sw = document.createElement('i');
+      sw.className = 'si-cal-ep-sw' + (pub ? '' : ' mont');
+      sw.style.setProperty('--ec', _siColor(ep.color));
+      line.appendChild(sw);
+      const t = document.createElement('span');
+      t.textContent = ep.event + ' ' + ep.year + ' : ' + (pub ? 'jour public' : 'montage / demontage');
+      line.appendChild(t);
+      box.appendChild(line);
+    });
+    tip.appendChild(box);
+  }
+  if (opts.search) tip.appendChild(_siSearchBlock(opts.search));
+  const off = [];
+  inds.forEach(ind => {
+    const st = state[ind.id];
+    if (!st || !st.active) { off.push(ind.label); return; }
+    const block = document.createElement('div');
+    block.className = 'si-tip-ind';
+    const title = document.createElement('div');
+    title.className = 'si-tip-title';
+    title.appendChild(_siMarker(ind));
+    const lab = document.createElement('span');
+    lab.textContent = ind.label;
+    title.appendChild(lab);
+    if (/^[a-z0-9_]{1,40}$/.test(ind.icon || '')) {
+      const ic = document.createElement('span');
+      ic.className = 'material-symbols-outlined si-tip-icon';
+      ic.textContent = ind.icon;
+      title.appendChild(ic);
+    }
+    block.appendChild(title);
+    const multiRoom = (ind.rooms || []).length > 1;
+    (st.details || []).forEach(det => {
+      const line = document.createElement('div');
+      line.className = 'si-tip-line';
+      const h = document.createElement('span');
+      h.className = 'si-tip-hours';
+      h.textContent = _siHours(det);
+      line.appendChild(h);
+      const t = document.createElement('span');
+      t.className = 'si-tip-text';
+      let txt = ind.source_type === 'visites' ? 'Site ouvert' : (det.event || '');
+      if (multiRoom && det.room) txt += ' - ' + det.room;
+      t.textContent = txt;
+      line.appendChild(t);
+      if (det.blackout) {
+        const b = document.createElement('span');
+        b.className = 'si-tip-flag si-flag-blackout';
+        b.textContent = 'bloqué';
+        b.title = 'Dates bloquees a la vente dans Momentus (epreuve, roulage)';
+        line.appendChild(b);
+      } else if (ind.source_type !== 'visites') {
+        const b = document.createElement('span');
+        b.className = 'si-tip-flag';
+        b.textContent = det.status === 'option' ? 'option' : 'reserve';
+        line.appendChild(b);
+      }
+      block.appendChild(line);
+    });
+    if (st.more) {
+      const m = document.createElement('div');
+      m.className = 'si-tip-line si-tip-more';
+      m.textContent = '+ ' + st.more + ' autre(s)';
+      block.appendChild(m);
+    }
+    tip.appendChild(block);
+  });
+  if (opts.sem && opts.sem.count) tip.appendChild(_siSemBlock(opts.sem, ds));
+  else if (opts.semOn) off.push('Seminaires');
+  if (off.length) {
+    const o = document.createElement('div');
+    o.className = 'si-tip-off';
+    o.textContent = 'Rien ce jour : ' + off.join(', ');
+    tip.appendChild(o);
+  }
+  const hint = document.createElement('div');
+  hint.className = 'si-tip-hint';
+  hint.textContent = opts.hint || (opts.pin ? 'Toucher dehors ou Echap : fermer'
+    : 'Clic sur une pastille ou un point : filtrer. Epingle : garder ouvert');
+  if (((opts.sem && opts.sem.count) || opts.search) && (opts.pin || SiTip.interactive)) {
+    hint.textContent += '. Clic sur un client : tout son programme';
+  }
+  tip.appendChild(hint);
+
+  tip.classList.add('visible');
+  if (opts.pin) _siTipPin();
+  _siTipPlace(tip, pill);
+}
+
+// Legende : un bouton au DEBUT de la barre des jours (colle a gauche quand
+// la barre defile), sans ligne supplementaire. Survol (ordinateur) ou clic
+// (tactile) : infobulle avec la legende complete, cliquable pour filtrer.
+// Filtre actif : le bouton prend sa couleur et un clic le retire.
+function _siRenderLegend(inds) {
+  const old = document.getElementById('si-legend');   // ancienne ligne (versions precedentes)
+  if (old) old.remove();
+  const bar = document.getElementById('day-nav-bar');
+  if (!bar) return;
+  let btn = document.getElementById('si-legend-btn');
+  if (!btn || btn.parentNode !== bar) {
+    if (btn) btn.remove();
+    btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'si-legend-btn';
+    btn.className = 'si-legend-btn';
+    bar.insertBefore(btn, bar.firstChild);
+    btn.addEventListener('mouseenter', () => { if (!SaisonInd.filter) _siShowLegendPop(btn, true); });
+    // Petit delai : le temps de passer du bouton a l'infobulle
+    btn.addEventListener('mouseleave', () => setTimeout(() => _siHideLegendPop(true), 180));
+    btn.addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (SaisonInd.filter) { _siToggleFilter(SaisonInd.filter, null); return; }
+      const pop = document.getElementById('si-legend-pop');
+      if (pop && pop.classList.contains('si-pinned')) _siHideLegendPop(false);
+      else _siShowLegendPop(btn, false);
+    });
+  }
+  SaisonInd._legendInds = inds;
+  btn.textContent = '';
+  const f = SaisonInd.filter ? inds.find(i => i.id === SaisonInd.filter) : null;
+  btn.classList.toggle('si-filter-on', !!f);
+  if (f) {
+    btn.style.setProperty('--si-c', f.color || '#1f2d3d');
+    const close = document.createElement('span');
+    close.className = 'material-symbols-outlined';
+    close.textContent = 'filter_alt_off';
+    btn.appendChild(close);
+    const t = document.createElement('span');
+    t.className = 'si-legend-btn-txt';
+    t.textContent = f.short + ' (' + _siCountHits() + ')';
+    btn.appendChild(t);
+    btn.title = 'Filtre : ' + f.label + ' - clic pour le retirer';
+  } else {
+    btn.style.removeProperty('--si-c');
+    const ic = document.createElement('span');
+    ic.className = 'material-symbols-outlined';
+    ic.textContent = 'info';
+    btn.appendChild(ic);
+    btn.title = 'Legende des indicateurs';
+  }
+  const pop = document.getElementById('si-legend-pop');
+  if (pop && pop.classList.contains('si-pinned')) _siShowLegendPop(btn, false);
+}
+
+function _siHideLegendPop(onlyHover) {
+  const pop = document.getElementById('si-legend-pop');
+  if (!pop) return;
+  if (onlyHover && (pop.classList.contains('si-pinned') || pop.classList.contains('si-hovered'))) return;
+  pop.remove();
+  document.removeEventListener('click', _siLegendOutside, true);
+}
+
+function _siLegendOutside(ev) {
+  const pop = document.getElementById('si-legend-pop');
+  const btn = document.getElementById('si-legend-btn');
+  if (pop && !pop.contains(ev.target) && (!btn || !btn.contains(ev.target))) _siHideLegendPop(false);
+}
+
+function _siShowLegendPop(btn, hover) {
+  const inds = SaisonInd._legendInds || [];
+  let pop = document.getElementById('si-legend-pop');
+  if (!pop) {
+    pop = document.createElement('div');
+    pop.id = 'si-legend-pop';
+    pop.className = 'si-legend-pop';
+    // Garder ouverte quand la souris passe du bouton a l'infobulle
+    pop.addEventListener('mouseenter', () => pop.classList.add('si-hovered'));
+    pop.addEventListener('mouseleave', () => { pop.classList.remove('si-hovered'); _siHideLegendPop(true); });
+    document.body.appendChild(pop);
+  }
+  if (!hover) {
+    pop.classList.add('si-pinned');
+    document.addEventListener('click', _siLegendOutside, true);
+  }
+  pop.textContent = '';
+  const head = document.createElement('div');
+  head.className = 'si-legend-pop-head';
+  head.textContent = 'Indicateurs du jour';
+  pop.appendChild(head);
+  ['pill', 'dot'].forEach(rank => {
+    const group = inds.filter(i => i.rank === rank);
+    if (!group.length) return;
+    const g = document.createElement('div');
+    g.className = 'si-legend-pop-group';
+    g.textContent = rank === 'pill' ? 'Au-dessus du jour' : 'Sous le jour (place fixe, gris = libre)';
+    pop.appendChild(g);
+    group.forEach(ind => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'si-legend-pop-row' + (SaisonInd.filter === ind.id ? ' active' : '');
+      row.appendChild(_siMarker(ind));
+      // Pastille : le code est deja ecrit dedans ; point : on l'ajoute
+      const code = document.createElement('b');
+      code.textContent = rank === 'dot' ? ind.short : '';
+      row.appendChild(code);
+      const lab = document.createElement('span');
+      lab.textContent = ind.label;
+      row.appendChild(lab);
+      row.title = (ind.rooms && ind.rooms.length ? 'Espaces Momentus : ' + ind.rooms.join(', ') + '. ' : '')
+        + 'Clic : filtrer la timeline';
+      row.addEventListener('click', ev => { ev.stopPropagation(); _siHideLegendPop(false); _siToggleFilter(ind.id, null); });
+      pop.appendChild(row);
+    });
+  });
+  const hint = document.createElement('div');
+  hint.className = 'si-legend-pop-hint';
+  hint.textContent = 'Survol ou appui long sur un jour : le detail. Clic sur un indicateur : filtre.';
+  pop.appendChild(hint);
+  const r = btn.getBoundingClientRect();
+  const w = pop.offsetWidth || 240;
+  pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
+  pop.style.top = (r.bottom + 6) + 'px';
+}
+
+// ------------------------------------------------------------------
+// Calendrier d'occupation (SAISON) : bouton en fin de barre des jours,
+// modale mois par mois. Une case = un jour : pastilles VL/VG en haut, puis
+// une BANDE par piste (ordre fixe, couleur = occupee, gris = libre, hachuree
+// = dates bloquees a la vente). Survol / appui long : le detail du jour.
+// ------------------------------------------------------------------
+const SiCal = { month: null, cache: {}, seq: 0 };
+
+function _siRenderCalBtn() {
+  const bar = document.getElementById('day-nav-bar');
+  if (!bar) return;
+  let btn = document.getElementById('si-cal-btn');
+  if (btn && btn.parentNode === bar && btn === bar.lastElementChild) return;
+  if (btn) btn.remove();
+  btn = document.createElement('button');
+  btn.type = 'button';
+  btn.id = 'si-cal-btn';
+  btn.className = 'si-cal-btn';
+  btn.title = 'Calendrier d\'occupation des pistes, mois par mois';
+  const ic = document.createElement('span');
+  ic.className = 'material-symbols-outlined';
+  ic.textContent = 'calendar_month';
+  btn.appendChild(ic);
+  btn.addEventListener('click', ev => { ev.stopPropagation(); _siOpenCal(); });
+  bar.appendChild(btn);
+}
+
+function _siYmd(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+// Lundi de la premiere ligne de la grille du mois
+function _siGridStart(y, m) {
+  const lead = (new Date(y, m, 1).getDay() + 6) % 7;   // lundi = 0
+  return new Date(y, m, 1 - lead);
+}
+
+async function _siFetchMonth(y, m) {
+  const key = y + '-' + m;
+  const c = SiCal.cache[key];
+  if (c && Date.now() - c.at < 120000) return c.data;
+  // Toute la grille de 6 semaines (jours du mois precedent et suivant compris)
+  const g0 = _siGridStart(y, m);
+  const from = _siYmd(g0);
+  const to = _siYmd(new Date(g0.getFullYear(), g0.getMonth(), g0.getDate() + 41));
+  const r = await fetch('/api/saison/indicateurs?from=' + from + '&to=' + to, { credentials: 'same-origin' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const data = await r.json();
+  if (!data || !data.ok) throw new Error((data && data.error) || 'reponse invalide');
+  SiCal.cache[key] = { at: Date.now(), data };
+  return data;
+}
+
+function _siOpenCal() {
+  _hideDayNavTooltip(true);
+  _siHideLegendPop(false);
+  if (!SiCal.month) {
+    const n = new Date();
+    SiCal.month = { y: n.getFullYear(), m: n.getMonth() };
+  }
+  let ov = document.getElementById('si-cal');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'si-cal';
+    ov.className = 'si-cal-overlay';
+    ov.innerHTML = '<div class="si-cal-modal" role="dialog" aria-label="Occupation du site">'
+      + '<div class="si-cal-head">'
+      + '<button type="button" class="si-cal-nav" data-nav="-1" title="Mois precedent"><span class="material-symbols-outlined">chevron_left</span></button>'
+      + '<div class="si-cal-title"></div>'
+      + '<span class="si-cal-qcount" hidden></span>'
+      + '<button type="button" class="si-cal-nav" data-nav="1" title="Mois suivant"><span class="material-symbols-outlined">chevron_right</span></button>'
+      + '<button type="button" class="si-cal-today">Aujourd\'hui</button>'
+      + '<div class="si-cal-search">'
+      + '<span class="material-symbols-outlined si-cal-qicon" aria-hidden="true">search</span>'
+      + '<input type="search" class="si-cal-qinput" placeholder="Client, lieu, epreuve..." autocomplete="off" spellcheck="false"'
+      + ' aria-label="Chercher un client, un lieu ou une epreuve sur toute la saison" aria-controls="si-cal-sres">'
+      + '<button type="button" class="si-cal-qclear" title="Effacer la recherche" aria-label="Effacer la recherche" hidden>'
+      + '<span class="material-symbols-outlined">close</span></button>'
+      + '<div class="si-cal-sres" id="si-cal-sres" role="listbox" aria-label="Jours trouves" hidden></div>'
+      + '</div>'
+      + '<button type="button" class="si-cal-close" title="Fermer (Echap)"><span class="material-symbols-outlined">close</span></button>'
+      + '</div><div class="si-cal-legend"></div><div class="si-cal-grid"></div></div>';
+    document.body.appendChild(ov);
+    _siCalSearchWire(ov);
+    ov.addEventListener('click', ev => {
+      if (ev.target === ov) { _siCloseCal(); return; }
+      if (!ev.target.closest('.si-cal-search')) _siCalResults(false);
+    });
+    ov.querySelector('.si-cal-close').addEventListener('click', _siCloseCal);
+    ov.querySelectorAll('.si-cal-nav').forEach(b => b.addEventListener('click', () => _siCalMove(Number(b.dataset.nav))));
+    ov.querySelector('.si-cal-today').addEventListener('click', () => {
+      _hideDayNavTooltip(true);
+      const n = new Date();
+      SiCal.month = { y: n.getFullYear(), m: n.getMonth() };
+      _siRenderCal();
+    });
+    // Glisser gauche / droite sur telephone : mois suivant / precedent
+    let x0 = null;
+    ov.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
+    ov.addEventListener('touchend', e => {
+      if (x0 === null) return;
+      const dx = e.changedTouches[0].clientX - x0;
+      x0 = null;
+      if (Math.abs(dx) > 60) _siCalMove(dx < 0 ? 1 : -1);
+    }, { passive: true });
+  }
+  document.addEventListener('keydown', _siCalKeys);
+  ov.classList.add('open');
+  _siRenderCal();
+}
+
+function _siCloseCal() {
+  const ov = document.getElementById('si-cal');
+  if (ov) ov.classList.remove('open');
+  _siCalResults(false);
+  _hideDayNavTooltip(true);
+  document.removeEventListener('keydown', _siCalKeys);
+}
+
+function _siCalKeys(e) {
+  const inInput = e.target && e.target.classList && e.target.classList.contains('si-cal-qinput');
+  if (e.key === 'Escape') {
+    // Echap efface d'abord la recherche, puis ferme le calendrier
+    if (SiCalQ.text) { e.preventDefault(); _siCalSearchClear(); return; }
+    _siCloseCal();
+  } else if (inInput) {
+    if (e.key === 'ArrowDown' || e.key === 'Enter') _siCalResultsKey(e);
+  } else if (e.key === 'ArrowLeft') _siCalMove(-1);
+  else if (e.key === 'ArrowRight') _siCalMove(1);
+}
+
+// Recherche active : les fleches sautent au mois precedent / suivant qui a
+// des jours trouves (sinon, mois voisin comme d'habitude).
+function _siCalMove(delta) {
+  _hideDayNavTooltip(true);
+  const tgt = _siCalQueryMonth(delta);
+  const d = tgt || new Date(SiCal.month.y, SiCal.month.m + delta, 1);
+  SiCal.month = { y: d.getFullYear(), m: d.getMonth() };
+  _siRenderCal();
+}
+
+function _siRenderCal() {
+  const ov = document.getElementById('si-cal');
+  if (!ov) return Promise.resolve();
+  const { y, m } = SiCal.month;
+  const title = new Date(y, m, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+  ov.querySelector('.si-cal-title').textContent = title.charAt(0).toUpperCase() + title.slice(1);
+  _siCalQueryHeader();
+  const grid = ov.querySelector('.si-cal-grid');
+  grid.classList.add('loading');
+  const seq = ++SiCal.seq;
+  return _siFetchMonth(y, m).then(data => {
+    if (seq !== SiCal.seq) return;
+    grid.classList.remove('loading');
+    _siDrawCal(ov, y, m, data);
+    _siCalApplyQuery();
+  }).catch(err => {
+    if (seq !== SiCal.seq) return;
+    grid.classList.remove('loading');
+    grid.textContent = 'Occupation indisponible (' + err.message + ')';
+  });
+}
+
+// ------------------------------------------------------------------
+// Recherche dans le calendrier (GET /api/saison/search) : client (nom
+// d'evenement, compte Momentus, type), lieu (espace reserve ou espace d'une
+// fonction), epreuve, visites, sur toute la saison (J-30 -> J+365). Jours
+// trouves en evidence, les autres estompes ; liste des resultats en
+// surimpression (la modale garde sa hauteur). textContent uniquement.
+// ------------------------------------------------------------------
+const SiCalQ = { text: '', norm: '', data: null, byDate: {}, err: null, loading: false, seq: 0, cache: {}, timer: null, active: -1 };
+
+const _SI_KIND_ICON = { client: 'business_center', lieu: 'location_on', epreuve: 'flag', visite: 'directions_walk' };
+const _SI_KIND_LABEL = { client: 'Client', lieu: 'Lieu', epreuve: 'Epreuve', visite: 'Visites' };
+
+function _siCalLoading(ov, on) {
+  ov.querySelector('.si-cal-search').classList.toggle('loading', on);
+  ov.querySelector('.si-cal-qicon').textContent = on ? 'progress_activity' : 'search';
+}
+
+function _siNormQ(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[<>"`]/g, ' ')
+    .split(/\s+/).filter(Boolean).join(' ');
+}
+
+function _siCalSearchWire(ov) {
+  const input = ov.querySelector('.si-cal-qinput');
+  const clear = ov.querySelector('.si-cal-qclear');
+  input.addEventListener('input', () => {
+    clear.hidden = !input.value;
+    clearTimeout(SiCalQ.timer);
+    SiCalQ.timer = setTimeout(() => _siCalSearchRun(input.value, false), 280);
+  });
+  input.addEventListener('focus', () => { if (SiCalQ.norm) _siCalResults(true); });
+  input.addEventListener('click', ev => { ev.stopPropagation(); if (SiCalQ.norm) _siCalResults(true); });
+  // Le glisser (changement de mois) ne doit pas partir de la liste
+  ov.querySelector('.si-cal-sres').addEventListener('touchstart', ev => ev.stopPropagation(), { passive: true });
+  ov.querySelector('.si-cal-sres').addEventListener('touchend', ev => ev.stopPropagation(), { passive: true });
+  clear.addEventListener('click', ev => { ev.stopPropagation(); _siCalSearchClear(); input.focus(); });
+}
+
+function _siCalSearchClear() {
+  const ov = document.getElementById('si-cal');
+  clearTimeout(SiCalQ.timer);
+  SiCalQ.seq++;
+  Object.assign(SiCalQ, { text: '', norm: '', data: null, byDate: {}, err: null, loading: false, active: -1 });
+  if (ov) {
+    ov.querySelector('.si-cal-qinput').value = '';
+    ov.querySelector('.si-cal-qclear').hidden = true;
+    _siCalLoading(ov, false);
+  }
+  _siCalResults(false);
+  _siCalQueryHeader();
+  _siCalApplyQuery();
+}
+
+// jump : apres les resultats, aller au mois du prochain jour trouve
+function _siCalSearchRun(raw, jump) {
+  const ov = document.getElementById('si-cal');
+  if (!ov) return;
+  const n = _siNormQ(raw);
+  SiCalQ.text = String(raw || '').trim();
+  if (n.length < 2) {
+    SiCalQ.seq++;
+    Object.assign(SiCalQ, { norm: '', data: null, byDate: {}, err: null, loading: false });
+    _siCalLoading(ov, false);
+    _siCalResults(!!SiCalQ.text);
+    _siCalQueryHeader();
+    _siCalApplyQuery();
+    return;
+  }
+  if (n === SiCalQ.norm && (SiCalQ.data || SiCalQ.loading)) { _siCalResults(true); return; }
+  SiCalQ.norm = n;
+  SiCalQ.err = null;
+  SiCalQ.loading = true;
+  SiCalQ.active = -1;
+  const seq = ++SiCalQ.seq;
+  _siCalLoading(ov, true);
+  _siCalResults(true);
+  const c = SiCalQ.cache[n];
+  const p = (c && Date.now() - c.at < 120000) ? Promise.resolve(c.data)
+    : fetch('/api/saison/search?q=' + encodeURIComponent(n), { credentials: 'same-origin' })
+      .then(r => r.json().catch(() => ({})).then(j => {
+        if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || ('HTTP ' + r.status));
+        SiCalQ.cache[n] = { at: Date.now(), data: j };
+        return j;
+      }));
+  p.then(data => {
+    if (seq !== SiCalQ.seq) return;
+    SiCalQ.data = data;
+    SiCalQ.byDate = {};
+    (data.days || []).forEach(d => { SiCalQ.byDate[d.date] = d; });
+  }).catch(err => {
+    if (seq !== SiCalQ.seq) return;
+    SiCalQ.data = null;
+    SiCalQ.byDate = {};
+    SiCalQ.err = err.message;
+  }).then(() => {
+    if (seq !== SiCalQ.seq) return;
+    SiCalQ.loading = false;
+    _siCalLoading(ov, false);
+    const s = SiCalQ.data && SiCalQ.data.summary;
+    const target = s && (s.next || s.first);
+    if (jump && target) {
+      const d = new Date(target + 'T00:00:00');
+      if (d.getFullYear() !== SiCal.month.y || d.getMonth() !== SiCal.month.m) {
+        SiCal.month = { y: d.getFullYear(), m: d.getMonth() };
+        _siRenderCal();
+      }
+    }
+    _siCalResults(true);
+    _siCalQueryHeader();
+    _siCalApplyQuery();
+  });
+}
+
+// Mois (Date du 1er) precedent / suivant qui a des jours trouves, ou null
+function _siCalQueryMonth(delta) {
+  const s = SiCalQ.data && SiCalQ.data.summary;
+  if (!s || !s.by_month) return null;
+  const cur = SiCal.month.y + '-' + String(SiCal.month.m + 1).padStart(2, '0');
+  const months = Object.keys(s.by_month).sort();
+  const pick = delta > 0 ? months.find(k => k > cur) : months.slice().reverse().find(k => k < cur);
+  if (!pick) return null;
+  return new Date(Number(pick.slice(0, 4)), Number(pick.slice(5, 7)) - 1, 1);
+}
+
+// "N jour(s) ce mois" a cote du titre ; libelles des fleches
+function _siCalQueryHeader() {
+  const ov = document.getElementById('si-cal');
+  if (!ov || !SiCal.month) return;
+  const badge = ov.querySelector('.si-cal-qcount');
+  const navs = ov.querySelectorAll('.si-cal-nav');
+  const d = SiCalQ.data;
+  if (!SiCalQ.norm || !d) {
+    badge.hidden = true;
+    navs.forEach(b => { b.title = Number(b.dataset.nav) < 0 ? 'Mois precedent' : 'Mois suivant'; b.classList.remove('si-cal-nav-q'); });
+    return;
+  }
+  const key = SiCal.month.y + '-' + String(SiCal.month.m + 1).padStart(2, '0');
+  const outWin = key < d.from.slice(0, 7) || key > d.to.slice(0, 7);
+  const n = (d.summary.by_month || {})[key] || 0;
+  badge.hidden = false;
+  badge.classList.toggle('is-zero', !n);
+  badge.textContent = outWin ? 'hors periode' : (n ? n + ' jour' + (n > 1 ? 's' : '') : 'aucun jour') + ' ce mois';
+  badge.title = outWin ? 'La recherche couvre du ' + _siFmtDay(d.from) + ' au ' + _siFmtDay(d.to)
+    : '« ' + SiCalQ.text + ' » : ' + n + ' jour(s) ce mois, ' + d.summary.days + ' sur la periode';
+  navs.forEach(b => {
+    const t = _siCalQueryMonth(Number(b.dataset.nav));
+    b.classList.toggle('si-cal-nav-q', !!t);
+    b.title = t ? (Number(b.dataset.nav) < 0 ? 'Mois precedent avec un resultat : ' : 'Mois suivant avec un resultat : ')
+      + t.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+      : (Number(b.dataset.nav) < 0 ? 'Mois precedent' : 'Mois suivant');
+  });
+}
+
+function _siFmtDay(ds) {
+  return String(ds || '').split('-').reverse().join('/');
+}
+
+// Cases : jours trouves en evidence, les autres estompes (voisins compris)
+function _siCalApplyQuery() {
+  const ov = document.getElementById('si-cal');
+  if (!ov) return;
+  const grid = ov.querySelector('.si-cal-grid');
+  const d = SiCalQ.data;
+  const on = !!(SiCalQ.norm && d);
+  grid.classList.toggle('si-cal-searching', on);
+  grid.querySelectorAll('.si-cal-cell').forEach(cell => {
+    const ds = cell.dataset.date;
+    const inWin = on && ds >= d.from && ds <= d.to;
+    const hit = on && !!SiCalQ.byDate[ds];
+    cell.classList.toggle('si-cal-hit', hit);
+    cell.classList.toggle('si-cal-miss', inWin && !hit);
+    cell.querySelectorAll('.si-cal-qn').forEach(x => x.remove());
+    // Pastille du nombre seulement s'il y a plusieurs resultats ce jour-la
+    // (le contour suffit pour un seul)
+    if (hit && SiCalQ.byDate[ds].count > 1) {
+      const day = SiCalQ.byDate[ds];
+      const k = document.createElement('span');
+      k.className = 'si-cal-qn';
+      k.textContent = day.count;
+      k.title = day.count + ' resultat(s) pour « ' + SiCalQ.text + ' »';
+      cell.appendChild(k);
+    }
+  });
+}
+
+function _siCalResults(show) {
+  const ov = document.getElementById('si-cal');
+  if (!ov) return;
+  const box = ov.querySelector('.si-cal-sres');
+  if (!show) { box.hidden = true; ov.querySelector('.si-cal-qinput').setAttribute('aria-expanded', 'false'); return; }
+  box.hidden = false;
+  ov.querySelector('.si-cal-qinput').setAttribute('aria-expanded', 'true');
+  _siCalRenderResults(box);
+}
+
+function _siCalMsg(box, txt, cls) {
+  const m = document.createElement('div');
+  m.className = 'si-cal-sres-msg' + (cls ? ' ' + cls : '');
+  m.textContent = txt;
+  box.appendChild(m);
+  return m;
+}
+
+function _siCalHitSub(h) {
+  const bits = [];
+  if (h.kind === 'epreuve') bits.push(h.phase === 'public' ? 'jour public' : 'montage / demontage');
+  if (h.account && h.account !== h.label) bits.push(h.account);
+  if (h.rooms && h.rooms.length) {
+    bits.push(h.rooms.slice(0, 2).join(', ') + (h.nrooms > 2 ? ' +' + (h.nrooms - 2) : ''));
+  }
+  if (h.kind !== 'epreuve') bits.push(_siHours(h));
+  if (h.pers) bits.push(h.pers + ' p.');
+  if (h.status === 'option') bits.push('option');
+  if (h.blackout) bits.push('bloque');
+  return bits.join(' · ');
+}
+
+function _siCalRenderResults(box) {
+  box.textContent = '';
+  SiCalQ.active = -1;
+  if (SiCalQ.norm.length < 2) {
+    _siCalMsg(box, 'Au moins 2 caracteres : nom du client, lieu (ex. Bugatti, Karting), epreuve, visites.');
+    return;
+  }
+  if (SiCalQ.loading) { _siCalMsg(box, 'Recherche sur toute la saison...', 'is-loading'); return; }
+  if (SiCalQ.err) { _siCalMsg(box, 'Recherche indisponible (' + SiCalQ.err + ')', 'is-err'); return; }
+  const d = SiCalQ.data;
+  if (!d) return;
+  const s = d.summary || {};
+  const head = document.createElement('div');
+  head.className = 'si-cal-sres-head';
+  head.textContent = s.days
+    ? s.days + ' jour' + (s.days > 1 ? 's' : '') + ' du ' + _siFmtDay(d.from) + ' au ' + _siFmtDay(d.to)
+    : 'Aucun jour trouve pour « ' + SiCalQ.text + ' » du ' + _siFmtDay(d.from) + ' au ' + _siFmtDay(d.to);
+  box.appendChild(head);
+  if (!s.days) return;
+  // A venir d'abord (du plus proche au plus lointain), puis les jours passes
+  const todayS = _siYmd(new Date());
+  const days = d.days || [];
+  const future = days.filter(x => x.date >= todayS);
+  const past = days.filter(x => x.date < todayS).reverse();
+  const curY = new Date().getFullYear();
+  let rows = 0;
+  const MAX_ROWS = 250;
+  const group = (list, label) => {
+    if (!list.length || rows >= MAX_ROWS) return;
+    if (label) {
+      const sep = document.createElement('div');
+      sep.className = 'si-cal-sres-sep';
+      sep.textContent = label;
+      box.appendChild(sep);
+    }
+    list.forEach(day => {
+      if (rows >= MAX_ROWS) return;
+      const dt = new Date(day.date + 'T00:00:00');
+      const opt = { weekday: 'short', day: 'numeric', month: 'short' };
+      if (dt.getFullYear() !== curY) opt.year = '2-digit';
+      const dl = dt.toLocaleDateString('fr-FR', opt);
+      day.hits.forEach((h, i) => {
+        if (rows >= MAX_ROWS) return;
+        rows++;
+        const row = document.createElement('div');
+        row.className = 'si-cal-sres-row k-' + h.kind + (i === 0 ? ' first' : '');
+        row.setAttribute('role', 'option');
+        row.tabIndex = -1;
+        const dd = document.createElement('span');
+        dd.className = 'si-cal-sres-date';
+        dd.textContent = i === 0 ? dl.charAt(0).toUpperCase() + dl.slice(1) : '';
+        row.appendChild(dd);
+        const ic = document.createElement('span');
+        ic.className = 'material-symbols-outlined si-cal-sres-ic';
+        ic.textContent = _SI_KIND_ICON[h.kind] || 'search';
+        ic.title = _SI_KIND_LABEL[h.kind] || '';
+        if (h.kind === 'epreuve' && h.color) ic.style.color = _siColor(h.color);
+        row.appendChild(ic);
+        const main = document.createElement('span');
+        main.className = 'si-cal-sres-main';
+        const t = document.createElement('span');
+        t.className = 'si-cal-sres-label';
+        t.textContent = h.label + (h.reservations > 1 ? ' (' + h.reservations + ' resa)' : '');
+        main.appendChild(t);
+        const sub = document.createElement('span');
+        sub.className = 'si-cal-sres-sub';
+        sub.textContent = _siCalHitSub(h);
+        main.appendChild(sub);
+        row.appendChild(main);
+        if (h.client && (h.kind === 'client' || h.kind === 'lieu')) {
+          const pb = _siProgButton('event_note', 'Tout le programme de ' + (h.account || h.label), 'si-cal-sres-prog');
+          pb.addEventListener('click', ev => { ev.stopPropagation(); _siCalGoto(day.date, h); });
+          row.appendChild(pb);
+        }
+        row.addEventListener('click', ev => { ev.stopPropagation(); _siCalGoto(day.date, null); });
+        box.appendChild(row);
+      });
+      if (day.more && rows < MAX_ROWS) {
+        const m = document.createElement('div');
+        m.className = 'si-cal-sres-more';
+        m.textContent = '+ ' + day.more + ' autre(s) ce jour-la';
+        box.appendChild(m);
+      }
+    });
+  };
+  group(future, past.length && future.length ? 'A venir' : '');
+  group(past, 'Jours passes');
+  if (rows >= MAX_ROWS || d.truncated) {
+    _siCalMsg(box, 'Liste tronquee : precisez la recherche.', 'is-foot');
+  }
+}
+
+function _siCalResultsKey(e) {
+  const ov = document.getElementById('si-cal');
+  const box = ov && ov.querySelector('.si-cal-sres');
+  if (!box) return;
+  const rows = Array.from(box.querySelectorAll('.si-cal-sres-row'));
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    clearTimeout(SiCalQ.timer);
+    const input = ov.querySelector('.si-cal-qinput');
+    if (SiCalQ.active >= 0 && rows[SiCalQ.active]) { rows[SiCalQ.active].click(); return; }
+    if (_siNormQ(input.value) !== SiCalQ.norm) { _siCalSearchRun(input.value, true); return; }
+    if (rows.length) rows[0].click();
+    return;
+  }
+  if (box.hidden) _siCalResults(true);
+  if (!rows.length) return;
+  e.preventDefault();
+  rows.forEach(r => r.classList.remove('active'));
+  SiCalQ.active = (SiCalQ.active + 1) % rows.length;
+  rows[SiCalQ.active].classList.add('active');
+  rows[SiCalQ.active].scrollIntoView({ block: 'nearest' });
+}
+
+// Aller au jour : mois du jour, infobulle du jour EPINGLEE ; hit client :
+// ouvre aussi la fenetre "Programme <client>"
+function _siCalGoto(ds, progHit) {
+  _siCalResults(false);
+  _hideDayNavTooltip(true);
+  const d = new Date(ds + 'T00:00:00');
+  const same = d.getFullYear() === SiCal.month.y && d.getMonth() === SiCal.month.m;
+  SiCal.month = { y: d.getFullYear(), m: d.getMonth() };
+  const p = same ? Promise.resolve() : _siRenderCal();
+  p.then(() => {
+    const ov = document.getElementById('si-cal');
+    const cell = ov && ov.querySelector('.si-cal-cell[data-date="' + ds + '"]');
+    if (!cell || !cell._siPin) return;
+    cell._siPin();
+    if (progHit && progHit.client) _siProgToggle(progHit.client, progHit.account || progHit.label || '', ds, null);
+  });
+}
+
+// Bloc "Recherche" de l'infobulle du jour (calendrier, recherche active)
+function _siSearchBlock(day) {
+  const block = document.createElement('div');
+  block.className = 'si-tip-ind si-tip-search';
+  const title = document.createElement('div');
+  title.className = 'si-tip-title';
+  const ic = document.createElement('span');
+  ic.className = 'material-symbols-outlined si-tip-sem-ic';
+  ic.textContent = 'search';
+  title.appendChild(ic);
+  const lab = document.createElement('span');
+  lab.textContent = '« ' + SiCalQ.text + ' » (' + day.count + ')';
+  title.appendChild(lab);
+  block.appendChild(title);
+  (day.hits || []).forEach(h => {
+    const line = document.createElement('div');
+    line.className = 'si-tip-line';
+    const hr = document.createElement('span');
+    hr.className = 'si-tip-hours';
+    hr.textContent = h.kind === 'epreuve' ? (h.phase === 'public' ? 'public' : 'montage') : _siHours(h);
+    line.appendChild(hr);
+    const t = document.createElement('span');
+    t.className = 'si-tip-text';
+    const where = (h.rooms || []).slice(0, 2).join(', ') + (h.nrooms > 2 ? ' +' + (h.nrooms - 2) : '');
+    t.textContent = h.label + (h.account && h.account !== h.label ? ' (' + h.account + ')' : '') + (where ? ' - ' + where : '');
+    line.appendChild(t);
+    const k = document.createElement('span');
+    k.className = 'si-tip-flag';
+    k.textContent = (_SI_KIND_LABEL[h.kind] || '').toLowerCase();
+    line.appendChild(k);
+    if (h.client && (h.kind === 'client' || h.kind === 'lieu')) {
+      line.classList.add('si-tip-click');
+      line.tabIndex = 0;
+      line.setAttribute('role', 'button');
+      line.title = 'Tout le programme de ' + (h.account || h.label);
+      const open = ev => {
+        ev.stopPropagation();
+        if (ev.cancelable) ev.preventDefault();
+        _siProgToggle(h.client, h.account || h.label || '', day.date, line);
+      };
+      line.addEventListener('click', open);
+      line.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') open(ev); });
+    }
+    block.appendChild(line);
+  });
+  if (day.more) {
+    const m = document.createElement('div');
+    m.className = 'si-tip-line si-tip-more';
+    m.textContent = '+ ' + day.more + ' autre(s)';
+    block.appendChild(m);
+  }
+  return block;
+}
+
+// Ouvre le calendrier avec une recherche (barre de recherche de la timeline)
+window.siOpenCalSearch = function(q) {
+  _siOpenCal();
+  const ov = document.getElementById('si-cal');
+  if (!ov) return;
+  const input = ov.querySelector('.si-cal-qinput');
+  input.value = String(q || '');
+  ov.querySelector('.si-cal-qclear').hidden = !input.value;
+  SiCalQ.norm = '';                // force la recherche
+  _siCalSearchRun(input.value, true);
+  try { input.focus({ preventScroll: true }); } catch (e) { input.focus(); }
+};
+
+function _siDrawCal(ov, y, m, data) {
+  const inds = data.indicators || [];
+  const pillInds = inds.filter(i => i.rank === 'pill');
+  const dotInds = inds.filter(i => i.rank === 'dot');
+  const days = data.days || {};
+  const semOn = !!(data.seminaires && data.seminaires.enabled);
+  const semDays = (semOn && data.seminaires.days) || {};
+  const todayS = _siYmd(new Date());
+  const monthPrefix = y + '-' + String(m + 1).padStart(2, '0');
+
+  // Legende + nombre de jours occupes dans le MOIS (pas les jours voisins
+  // affiches en transparence), par indicateur
+  const counts = {};
+  Object.keys(days).forEach(ds => {
+    if (ds.slice(0, 7) !== monthPrefix) return;
+    (days[ds] || []).forEach(x => { if (x.active) counts[x.id] = (counts[x.id] || 0) + 1; });
+  });
+  const lg = ov.querySelector('.si-cal-legend');
+  lg.textContent = '';
+  inds.forEach(ind => {
+    const it = document.createElement('span');
+    it.className = 'si-cal-leg';
+    it.appendChild(_siMarker(ind));
+    const t = document.createElement('span');
+    t.textContent = (ind.rank === 'dot' ? ind.short + ' ' : '') + ind.label;
+    it.appendChild(t);
+    const n = document.createElement('b');
+    n.textContent = (counts[ind.id] || 0) + ' j';
+    it.appendChild(n);
+    it.title = ind.label + ' : ' + (counts[ind.id] || 0) + ' jour(s) ce mois';
+    lg.appendChild(it);
+  });
+  if (semOn) {
+    let sDays = 0, sEv = 0;
+    Object.keys(semDays).forEach(ds => {
+      if (ds.slice(0, 7) !== monthPrefix || !semDays[ds].count) return;
+      sDays++;
+      sEv += semDays[ds].count;
+    });
+    const it = document.createElement('span');
+    it.className = 'si-cal-leg si-cal-leg-sem';
+    const ic = document.createElement('span');
+    ic.className = 'material-symbols-outlined';
+    ic.textContent = 'groups';
+    it.appendChild(ic);
+    const t = document.createElement('span');
+    t.textContent = 'Seminaires (nb · pers.)';
+    it.appendChild(t);
+    const n = document.createElement('b');
+    n.textContent = sDays + ' j';
+    it.appendChild(n);
+    it.title = 'Seminaires Momentus : ' + sDays + ' jour(s) ce mois, ' + sEv + ' journee(s)-evenement. '
+      + 'Dans la case : nombre d\'evenements et personnes attendues (effectifs Momentus connus).';
+    lg.appendChild(it);
+  }
+  const hatch = document.createElement('span');
+  hatch.className = 'si-cal-leg si-cal-leg-hint';
+  hatch.innerHTML = '<i class="si-cal-band si-cal-bloq" style="--c:#64748b"></i>bloqué à la vente';
+  lg.appendChild(hatch);
+
+  const grid = ov.querySelector('.si-cal-grid');
+  grid.textContent = '';
+  ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].forEach(w => {
+    const h = document.createElement('div');
+    h.className = 'si-cal-wd';
+    h.textContent = w;
+    grid.appendChild(h);
+  });
+  // Epreuves (montage -> demontage, jours publics) : une "voie" par epreuve,
+  // gardee d'un jour a l'autre pour que la barre soit continue. 2 voies
+  // visibles (hauteur fixe), au-dela "+N" dans la case.
+  const eps = data.epreuves || [];
+  const lanes = [];     // lanes[i] = date de fin de la derniere epreuve placee
+  const laneOf = {};
+  eps.forEach((ep, i) => {
+    let l = lanes.findIndex(end => end < ep.start);
+    if (l === -1) { l = lanes.length; lanes.push(ep.end); } else lanes[l] = ep.end;
+    laneOf[i] = l;
+  });
+  const EP_LANES = 2;
+  eps.forEach(ep => {
+    const it = document.createElement('span');
+    it.className = 'si-cal-leg si-cal-leg-ep';
+    const sw = document.createElement('i');
+    sw.className = 'si-cal-ep-sw';
+    sw.style.setProperty('--ec', _siColor(ep.color));
+    it.appendChild(sw);
+    const t = document.createElement('span');
+    t.textContent = ep.event;
+    it.appendChild(t);
+    it.title = ep.event + ' : ' + ep.start.split('-').reverse().join('/') + ' -> ' + ep.end.split('-').reverse().join('/')
+      + ' (fonce = jours publics, clair = montage / demontage)';
+    lg.insertBefore(it, hatch);
+  });
+
+  // 6 semaines pleines : les jours du mois precedent / suivant remplissent
+  // la premiere et la derniere ligne, en transparence (comme un calendrier).
+  const g0 = _siGridStart(y, m);
+  for (let i = 0; i < 42; i++) {
+    const dt = new Date(g0.getFullYear(), g0.getMonth(), g0.getDate() + i);
+    const d = dt.getDate();
+    const ds = _siYmd(dt);
+    const outside = dt.getMonth() !== m;
+    const state = {};
+    (days[ds] || []).forEach(x => { state[x.id] = x; });
+    const cell = document.createElement('div');
+    const wd = dt.getDay();
+    cell.className = 'si-cal-cell' + (ds === todayS ? ' si-cal-today-cell' : '')
+      + (ds < todayS ? ' si-cal-past' : '') + (wd === 0 || wd === 6 ? ' si-cal-we' : '')
+      + (outside ? ' si-cal-out' : '');
+    const top = document.createElement('div');
+    top.className = 'si-cal-top';
+    const num = document.createElement('span');
+    num.className = 'si-cal-num';
+    num.textContent = d;
+    top.appendChild(num);
+    pillInds.forEach(ind => {
+      if (state[ind.id] && state[ind.id].active) top.appendChild(_siMarker(ind));
+    });
+    cell.appendChild(top);
+    // Barres d'epreuves du jour (couleur de la collection evenement)
+    const epRow = document.createElement('div');
+    epRow.className = 'si-cal-eps';
+    const dayEps = [];
+    const slots = new Array(EP_LANES).fill(null);
+    let extra = 0;
+    eps.forEach((ep, i) => {
+      if (ds < ep.start || ds > ep.end) return;
+      const pub = (ep.public_days || []).indexOf(ds) !== -1;
+      dayEps.push({ ep, pub });
+      if (laneOf[i] < EP_LANES) slots[laneOf[i]] = { ep, pub };
+      else extra++;
+    });
+    slots.forEach(s => {
+      const b = document.createElement('span');
+      b.className = 'si-cal-ep';
+      if (s) {
+        b.classList.add(s.pub ? 'pub' : 'mont');
+        b.style.setProperty('--ec', _siColor(s.ep.color));
+        if (ds === s.ep.start) b.classList.add('first');
+        if (ds === s.ep.end) b.classList.add('last');
+        // Nom a chaque changement de phase : premier jour (montage), premier
+        // jour public, premier jour de demontage ; et en debut de semaine.
+        const pubs = s.ep.public_days || [];
+        const firstPub = pubs.length ? pubs[0] : null;
+        const prevDay = _siYmd(new Date(dt.getFullYear(), dt.getMonth(), dt.getDate() - 1));
+        const phaseStart = ds === firstPub || (!s.pub && pubs.indexOf(prevDay) !== -1);
+        if (ds === s.ep.start || wd === 1 || phaseStart) {
+          const lab = document.createElement('em');
+          lab.textContent = s.ep.short && s.ep.short.length <= 6 ? s.ep.short : s.ep.event;
+          b.appendChild(lab);
+        }
+      }
+      epRow.appendChild(b);
+    });
+    if (extra) {
+      const more = document.createElement('span');
+      more.className = 'si-cal-ep-more';
+      more.textContent = '+' + extra;
+      epRow.appendChild(more);
+    }
+    cell.appendChild(epRow);
+    const bands = document.createElement('div');
+    bands.className = 'si-cal-bands';
+    dotInds.forEach(ind => {
+      const st = state[ind.id];
+      const b = document.createElement('span');
+      b.className = 'si-cal-band';
+      if (st && st.active) {
+        b.classList.add('on');
+        b.style.setProperty('--c', _siColor(ind.color));
+        if ((st.details || []).length && st.details.every(x => x.blackout)) b.classList.add('si-cal-bloq');
+        const lab = document.createElement('em');
+        lab.textContent = ind.short;
+        lab.style.color = _siTextColor(ind.color);
+        b.appendChild(lab);
+      }
+      b.title = ind.label + (st && st.active ? ' : occupe' : ' : libre');
+      bands.appendChild(b);
+    });
+    cell.appendChild(bands);
+    // Seminaires : une ligne de metriques en haut de la case (hauteur fixe)
+    const sem = semDays[ds];
+    if (sem && sem.count) {
+      const sm = document.createElement('span');
+      sm.className = 'si-cal-sem';
+      const ic = document.createElement('span');
+      ic.className = 'material-symbols-outlined';
+      ic.textContent = 'groups';
+      sm.appendChild(ic);
+      const n = document.createElement('b');
+      n.textContent = sem.count;
+      sm.appendChild(n);
+      if (sem.pers) {
+        const p = document.createElement('span');
+        p.className = 'si-cal-sem-pers';
+        p.textContent = ' · ' + _siShortPers(sem.pers);
+        sm.appendChild(p);
+      }
+      sm.title = sem.count + ' seminaire(s)' + (sem.pers ? ', ' + _siFmtPers(sem.pers) : '');
+      top.insertBefore(sm, num.nextSibling);
+    }
+    cell.dataset.date = ds;
+    const showTip = pin => {
+      _siShowTooltip(cell, ds, inds, state, {
+        pin: !!pin, eps: dayEps, sem: sem || null, semOn,
+        search: (SiCalQ.norm && SiCalQ.byDate[ds]) || null,
+        hint: pin ? 'Clic dehors ou Echap : fermer' : 'Clic sur le jour : epingler le detail',
+      });
+    };
+    cell._siPin = () => showTip(true);
+    cell.addEventListener('mouseenter', () => showTip(false));
+    cell.addEventListener('mouseleave', _hideDayNavTooltip);
+    // Clic (souris) ou toucher : detail EPINGLE (reste ouvert, defile). Un
+    // second clic sur la meme case le ferme.
+    const pinHere = () => {
+      if (SiTip.unpinnedAnchor === cell && Date.now() - SiTip.unpinnedAt < 600) {
+        SiTip.unpinnedAnchor = null;
+        return;
+      }
+      showTip(true);
+    };
+    cell.addEventListener('click', pinHere);
+    let t0 = null;
+    cell.addEventListener('touchstart', ev => {
+      const t = ev.touches[0];
+      t0 = { x: t.clientX, y: t.clientY };
+    }, { passive: true });
+    cell.addEventListener('touchend', ev => {
+      const t = ev.changedTouches[0];
+      const moved = !t0 || Math.abs(t.clientX - t0.x) > 10 || Math.abs(t.clientY - t0.y) > 10;
+      t0 = null;
+      if (moved) return;                          // glissement (changement de mois)
+      if (ev.cancelable) ev.preventDefault();   // pas de clic emule en plus
+      pinHere();
+    });
+    grid.appendChild(cell);
+  }
+}
+
+// 420 -> '420 p.' ; 1250 -> '1,3k p.'
+function _siShortPers(n) {
+  if (n < 1000) return n + ' p.';
+  return (Math.round(n / 100) / 10).toLocaleString('fr-FR') + 'k p.';
+}
+
+function _siCountHits() {
+  const list = document.getElementById('event-list');
+  return list ? list.querySelectorAll('.event-item.si-hit').length : 0;
+}
+
+function _siToggleFilter(id, ds) {
+  _hideDayNavTooltip(true);
+  SaisonInd.filter = SaisonInd.filter === id ? null : id;
+  _siApplyFilter(ds);
+  const data = SaisonInd.data;
+  if (data) _siRenderLegend(data.indicators || []);
+}
+
+function _siItemMatches(item, ind, st) {
+  if (!item || !st || !st.active) return false;
+  if (ind.source_type === 'visites') {
+    const txt = ((item.activity || '') + ' ' + (item.remark || '')).toLowerCase();
+    return /au public|visite/.test(txt);
+  }
+  const eids = st.eids || [];
+  if (item.momentus_event_id && eids.indexOf(item.momentus_event_id) !== -1) {
+    // Meme evenement : seulement la vignette de l'espace de l'indicateur
+    // (un evenement peut reserver aussi des salles ailleurs ce jour-la).
+    const place = String(item.place || '').toLowerCase();
+    if (!place) return true;
+    return (ind.rooms || []).some(r => r && place.indexOf(String(r).trim().toLowerCase()) !== -1);
+  }
+  if (item.momentus_blackout_count) {
+    const rem = String(item.remark || '');
+    return (st.details || []).some(d => d.event && rem.indexOf(d.event) !== -1);
+  }
+  return false;
+}
+
+function _siApplyFilter(focusDay) {
+  const list = document.getElementById('event-list');
+  if (!list) return;
+  list.querySelectorAll('.si-hit, .si-dim').forEach(el => el.classList.remove('si-hit', 'si-dim'));
+  document.querySelectorAll('#day-nav-bar .si-sel').forEach(el => el.classList.remove('si-sel'));
+  const id = SaisonInd.filter;
+  const data = SaisonInd.data;
+  if (!id || !data || !_isSaisonSelected()) {
+    list.classList.remove('si-filtering');
+    return;
+  }
+  const ind = (data.indicators || []).find(i => i.id === id);
+  if (!ind) { SaisonInd.filter = null; list.classList.remove('si-filtering'); return; }
+  list.classList.add('si-filtering');
+  document.querySelectorAll('#day-nav-bar [data-ind="' + id + '"]').forEach(el => el.classList.add('si-sel'));
+  let first = null, firstOnDay = null;
+  list.querySelectorAll('.timetable-date-section').forEach(section => {
+    const ds = section.dataset.date;
+    const st = ((data.days || {})[ds] || []).find(x => x.id === id);
+    section.querySelectorAll('.event-item').forEach(el => {
+      let hit = false;
+      if (el.__itemData) hit = _siItemMatches(el.__itemData, ind, st);
+      else if (el.__clusterData) hit = (el.__clusterData.cluster.items || []).some(it => _siItemMatches(it, ind, st));
+      el.classList.add(hit ? 'si-hit' : 'si-dim');
+      if (hit && !first) first = el;
+      if (hit && focusDay && ds === focusDay && !firstOnDay) firstOnDay = el;
+    });
+  });
+  const target = firstOnDay || (focusDay ? list.querySelector('.timetable-date-section[data-date="' + focusDay + '"]') : first);
+  if (focusDay !== undefined && target) _siScrollTo(target);
 }
 
 function _buildDayNav(dates, sectionsByDate) {
@@ -1009,6 +2846,7 @@ function _buildDayNav(dates, sectionsByDate) {
 
   if (!dates.length) {
     bar.hidden = true;
+    _siTeardown();
     return;
   }
   bar.hidden = false;
@@ -1073,6 +2911,14 @@ function _buildDayNav(dates, sectionsByDate) {
         } else {
           tooltipLines.push({type: 'public', text: 'Public ' + entry.openTime + ' - ' + entry.closeTime});
         }
+        if (String(window.selectedEvent || '').trim().toUpperCase() === 'SAISON') {
+          // SAISON : jour de visites (libres = billet musee, circuit en visite
+          // libre ; guidees), selon les drapeaux importes depuis GroundMaster
+          const lab = entry.visite_libre && entry.visite_guidee ? 'Visites libres et guidees'
+            : (entry.visite_libre ? 'Visites libres' : 'Visites guidees');
+          tooltipLines[tooltipLines.length - 1].text = lab + ' '
+            + (entry.is24h ? '24/24' : entry.openTime + ' - ' + entry.closeTime);
+        }
       }
       if (isRace) {
         pill.classList.add('day-race');
@@ -1113,6 +2959,10 @@ function _buildDayNav(dates, sectionsByDate) {
 
   // Observer les sections visibles pour mettre a jour la pill active
   _setupDayNavObserver(sectionsByDate, pills);
+
+  // SAISON : pastilles / points d'indicateurs (asynchrone, sans effet ailleurs)
+  if (_isSaisonSelected()) _siDecorate(dates, pills);
+  else _siTeardown();
 }
 
 function _setupDayNavObserver(sectionsByDate, pills) {
@@ -1494,7 +3344,7 @@ window.openEventDrawer = openEventDrawer;
         b.className = 'tt-day tt-lockable' + (window.publicDatesMap?.[ds] ? ' is-public' : '');
         b.dataset.date = ds;
         b.title = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
-          + (window.publicDatesMap?.[ds] ? ' (ouvert au public)' : '');
+          + (window.publicDatesMap?.[ds] ? (isSaison() ? (window.publicDatesMap[ds].visite_libre === false ? ' (visites guidees)' : ' (visites libres)') : ' (ouvert au public)') : '');
         const wd = document.createElement('span');
         wd.className = 'tt-day-wd';
         wd.textContent = d.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '');
@@ -3211,7 +5061,8 @@ async function openEditModalFromDrawer(dateStr, item) {
 /* ============================================================
  * RECHERCHE TIMELINE
  *  - construit un index au rendu (items et items dans clusters)
- *  - filtre sur activity/category/place/remark
+ *  - filtre sur activity/client Momentus/category/place/remark
+ *  - SAISON : derniere ligne "Chercher sur toute la saison" (calendrier)
  *  - clic résultat -> scroll vers la carte (ou cluster + sous-ligne)
  * ============================================================ */
 
@@ -3280,34 +5131,78 @@ async function openEditModalFromDrawer(dateStr, item) {
   }
 
   // --- Rendu résultats
-  function renderResults(list){
+  // SAISON : la timeline n'affiche que J-1 -> J+14 ; une ligne en bas des
+  // resultats relance la recherche sur toute la saison dans le calendrier.
+  function seasonSearchable(q){
+    return typeof window.siOpenCalSearch === 'function'
+      && String(window.selectedEvent || '').trim().toUpperCase() === 'SAISON'
+      && N(q).trim().replace(/\s+/g, ' ').length >= 2;
+  }
+
+  function renderResults(list, q){
     const ul = document.getElementById('timeline-search-results');
     if (!ul) return;
-    ul.innerHTML = '';
-    if (!list.length) { ul.classList.remove('show'); return; }
+    ul.textContent = '';
+    const season = seasonSearchable(q || '');
+    if (!list.length && !season) { ul.classList.remove('show'); return; }
 
     // Limite d'affichage
     const MAX = 30;
     const sliced = list.slice(0, MAX);
 
+    // textContent : les titres viennent aussi de Momentus et des operateurs
     sliced.forEach(row => {
       const li = document.createElement('li');
       li.setAttribute('role', 'option');
       const title = row.title || 'Sans titre';
-      const meta  = [row.place, row.category].filter(Boolean).join(' • ');
-      li.innerHTML = `
-        <div>
-          <div class="tsr-title">${title}</div>
-          <div class="tsr-meta">${meta}${row.remark ? ' • ' + row.remark : ''}</div>
-        </div>
-        <div class="tsr-date">${row.date}</div>
-      `;
+      const client = row.client && N(row.client) !== N(title) ? row.client : '';
+      const meta  = [client, row.place, row.category].filter(Boolean).join(' • ');
+      const box = document.createElement('div');
+      const t = document.createElement('div');
+      t.className = 'tsr-title';
+      t.textContent = title;
+      box.appendChild(t);
+      const m = document.createElement('div');
+      m.className = 'tsr-meta';
+      m.textContent = meta + (row.remark ? ' • ' + row.remark : '');
+      box.appendChild(m);
+      li.appendChild(box);
+      const d = document.createElement('div');
+      d.className = 'tsr-date';
+      d.textContent = row.date;
+      li.appendChild(d);
       li.addEventListener('click', () => {
         ul.classList.remove('show');
         scrollToTimelineTarget(row);
       });
       ul.appendChild(li);
     });
+
+    if (season) {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      li.className = 'tsr-season';
+      const ic = document.createElement('span');
+      ic.className = 'material-symbols-outlined';
+      ic.textContent = 'calendar_month';
+      const box = document.createElement('div');
+      const t = document.createElement('div');
+      t.className = 'tsr-title';
+      t.textContent = 'Chercher « ' + String(q).trim() + ' » sur toute la saison';
+      box.appendChild(t);
+      const m = document.createElement('div');
+      m.className = 'tsr-meta';
+      m.textContent = (list.length ? '' : 'Rien dans les jours affiches. ')
+        + 'Client, lieu ou epreuve dans le calendrier d\'occupation';
+      box.appendChild(m);
+      li.appendChild(box);
+      li.appendChild(ic);
+      li.addEventListener('click', () => {
+        ul.classList.remove('show');
+        window.siOpenCalSearch(String(q).trim());
+      });
+      ul.appendChild(li);
+    }
 
     ul.classList.add('show');
   }
@@ -3325,7 +5220,7 @@ async function openEditModalFromDrawer(dateStr, item) {
     const matches = [];
     for (const r of TLIndex.rows) {
       if (activeDept && (r.department || '').trim().toLowerCase() !== activeDept) continue;
-      const blob = N([r.title, r.category, r.place, r.remark].filter(Boolean).join(' | '));
+      const blob = N([r.title, r.client, r.category, r.place, r.remark].filter(Boolean).join(' | '));
       const ok = toks.every(t => blob.includes(t));
       if (ok) matches.push(r);
     }
@@ -3352,7 +5247,7 @@ async function openEditModalFromDrawer(dateStr, item) {
       if (window.CockpitMapView && window.CockpitMapView.currentView && window.CockpitMapView.currentView() === "map") return;
       const q = input.value || '';
       const res = searchIndex(q);
-      renderResults(res);
+      renderResults(res, q);
     }, 140);
 
     input.addEventListener('input', doSearch);
@@ -3382,6 +5277,10 @@ async function openEditModalFromDrawer(dateStr, item) {
           if (res.length) {
             list.classList.remove('show');
             scrollToTimelineTarget(res[0]);
+          } else if (seasonSearchable(input.value || '')) {
+            // Rien dans les jours affiches : recherche sur toute la saison
+            list.classList.remove('show');
+            window.siOpenCalSearch(input.value.trim());
           }
         }
       } else if (e.key === 'Escape') {
@@ -3404,7 +5303,7 @@ async function openEditModalFromDrawer(dateStr, item) {
         // si une recherche est en cours, rafraîchir la liste
         if (input && input.value.trim()) {
           const res = searchIndex(input.value);
-          renderResults(res);
+          renderResults(res, input.value);
         }
       });
       sel._wired = true; // évite de brancher deux fois
@@ -3439,6 +5338,7 @@ async function openEditModalFromDrawer(dateStr, item) {
                 minute: getItemSortMinute(it),
                 kind: 'item',
                 title: (it.activity || '').split('/')[0].trim(),
+                client: it.momentus_client || '',
                 category: it.category || '',
                 place: (it.place || '').split('/')[0].trim(),
                 department: it.department || '',
@@ -3461,6 +5361,7 @@ async function openEditModalFromDrawer(dateStr, item) {
                   minute: getItemSortMinute(ch),
                   kind: 'cluster-child',
                   title: (ch.activity || '').split('/')[0].trim(),
+                  client: ch.momentus_client || '',
                   category: ch.category || '',
                   place: (ch.place || '').split('/')[0].trim(),
                   remark: ch.remark || '',

@@ -138,7 +138,11 @@ def race_moment(db, event, year):
     """(instant de course UTC conscient, origine) ou (None, None).
 
     watch_peaks.resolve_race_dt (garde sur l'annee + alias), sinon midi du
-    premier jour public (SUPERBIKE 2026 n'a aucune date de course saisie)."""
+    premier jour public (SUPERBIKE 2026 n'a aucune date de course saisie).
+    SAISON : jamais d'edition (ses jours publics sont des jours de visites
+    libres epars sur l'annee, 02/10/2026) -> (None, None)."""
+    if str(event or "").strip().upper() == "SAISON":
+        return None, None
     try:
         import watch_peaks
         dt = watch_peaks.resolve_race_dt(db, event, year)

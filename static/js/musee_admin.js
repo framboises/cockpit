@@ -41,6 +41,15 @@
   var elReload = document.getElementById("ma-reload");
   var elTest = document.getElementById("ma-test");
   var elTestRes = document.getElementById("ma-test-result");
+  var elSiteEnabled = document.getElementById("ma-site-enabled");
+  var elSiteMarge = document.getElementById("ma-site-marge");
+  var elSiteCps = document.querySelector("#ma-site-cps tbody");
+  var elSiteAdd = document.getElementById("ma-site-cp-add");
+  var elSiteJours = document.getElementById("ma-site-jours");
+  var elSiteEtat = document.getElementById("ma-site-etat");
+  var elSiteToday = document.getElementById("ma-site-today");
+  var SENS = [["mixte", "Entree et sortie"], ["entree", "Entree"], ["sortie", "Sortie"]];
+  var siteCps = [];           // [{id, nom, libelle, inclus, sens}] (ordre affiche)
 
   // --- Etat ---
   var loaded = false;
@@ -145,6 +154,7 @@
       server = d;
       fillForm(d.config);
       renderEtat();
+      renderSiteEtat();
       setDirty(false);
     }).catch(function () { showToast("error", "Configuration du musee indisponible"); });
   }
@@ -164,6 +174,7 @@
       }
       fillAreas();
       renderPerimeter();
+      renderSite();
     }).catch(function () {
       elRefresh.disabled = false;
       elSource.textContent = "Structure indisponible.";
@@ -204,6 +215,122 @@
     clear(elArea);              // l'Area enregistree prime sur une selection en cours
     fillAreas();
     renderPerimeter();
+
+    var s = c.site || { enabled: false, marge_min: server.defauts.site_marge_min, checkpoints: [] };
+    elSiteEnabled.checked = !!s.enabled;
+    elSiteMarge.value = s.marge_min;
+    siteCps = (s.checkpoints || []).map(function (cp) {
+      return { id: cp.id, nom: cp.nom, libelle: cp.libelle || "", inclus: cp.inclus !== false, sens: cp.sens || "mixte" };
+    });
+    renderSite();
+  }
+
+  // --- Site - visites libres ---------------------------------------------------
+
+  function cpAreas() {
+    // checkpoint id -> noms des Areas sous lesquelles la structure le connait
+    var map = {};
+    ((structure && structure.areas) || []).forEach(function (a) {
+      a.checkpoints.forEach(function (c) {
+        (map[c.id] = map[c.id] || []).push(a.nom);
+      });
+    });
+    return map;
+  }
+
+  function renderSite() {
+    clear(elSiteCps);
+    var areas = cpAreas();
+    if (!siteCps.length) {
+      var tr0 = el("tr"); var td0 = el("td", "ma-hint", "Aucun checkpoint : en ajouter un ci-dessous.");
+      td0.colSpan = 6; tr0.appendChild(td0); elSiteCps.appendChild(tr0);
+    }
+    siteCps.forEach(function (st, idx) {
+      var tr = el("tr");
+      tr.classList.toggle("ma-off", !st.inclus);
+      var inc = el("input"); inc.type = "checkbox"; inc.checked = st.inclus;
+      inc.addEventListener("change", function () { st.inclus = inc.checked; tr.classList.toggle("ma-off", !st.inclus); });
+      var td1 = el("td"); td1.appendChild(inc); tr.appendChild(td1);
+      var td2 = el("td", "ma-cp-nom");
+      td2.appendChild(el("div", null, st.nom));
+      td2.appendChild(el("div", "ma-small", "id " + st.id));
+      tr.appendChild(td2);
+      var lib = el("input", "hsh-select"); lib.type = "text"; lib.maxLength = 60; lib.value = st.libelle;
+      lib.placeholder = st.nom;
+      lib.addEventListener("input", function () { st.libelle = lib.value; });
+      var td3 = el("td"); td3.appendChild(lib); tr.appendChild(td3);
+      var sens = select(SENS, st.sens);
+      sens.addEventListener("change", function () { st.sens = sens.value; });
+      var td4 = el("td"); td4.appendChild(sens); tr.appendChild(td4);
+      var td5 = el("td", "ma-small", (areas[st.id] || []).join(", ") || (structure ? "hors structure" : ""));
+      tr.appendChild(td5);
+      var del = el("button", "ma-icon-btn"); del.type = "button"; del.title = "Retirer";
+      del.appendChild(icon("delete"));
+      del.addEventListener("click", function () { siteCps.splice(idx, 1); renderSite(); setDirty(true); });
+      var td6 = el("td"); td6.appendChild(del); tr.appendChild(td6);
+      elSiteCps.appendChild(tr);
+    });
+
+    while (elSiteAdd.options.length > 1) elSiteAdd.remove(1);
+    elSiteAdd.disabled = !structure;
+    if (structure) {
+      var dans = {};
+      siteCps.forEach(function (c) { dans[c.id] = true; });
+      (structure.checkpoints || []).forEach(function (c) {
+        if (dans[c.id]) return;
+        var a = areas[c.id];
+        var o = el("option", null, c.nom + " (" + c.id + ")" + (a ? " - " + a.join(", ") : "") +
+          (c.borne ? "" : " - absent de la borne"));
+        o.value = c.id;
+        elSiteAdd.appendChild(o);
+      });
+    }
+  }
+
+  elSiteAdd.addEventListener("change", function () {
+    var id = elSiteAdd.value;
+    if (!id) return;
+    var c = ((structure && structure.checkpoints) || []).filter(function (x) { return x.id === id; })[0];
+    siteCps.push({ id: id, nom: c ? c.nom : id, libelle: "", inclus: true, sens: "mixte" });
+    renderSite();
+    setDirty(true);
+  });
+
+  function jourLabel(iso) {
+    var p = iso.split("-");
+    var d = new Date(+p[0], +p[1] - 1, +p[2]);
+    return d.toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
+  }
+
+  function renderSiteEtat() {
+    var s = (server && server.site) || {};
+    clear(elSiteJours);
+    var jours = s.jours || [];
+    if (s.jours_erreur) {
+      elSiteJours.appendChild(el("div", "ma-err", "Jours publics SAISON illisibles : " + s.jours_erreur));
+    } else if (!jours.length) {
+      elSiteJours.appendChild(el("div", "ma-hint", "Aucun jour de visites libres a venir sur SAISON."));
+    } else {
+      var dl = el("dl", "ma-etat");
+      jours.forEach(function (j) {
+        dl.appendChild(el("dt", null, jourLabel(j.date)));
+        var txt = j.is24h ? "24h/24" : hh(j.ouverture) + " - " + hh(j.fermeture);
+        var dd = el("dd", j.epreuve ? "ma-err" : null,
+          txt + (j.epreuve ? " - epreuve " + j.epreuve + " en cours : non compte" : ""));
+        dl.appendChild(dd);
+      });
+      elSiteJours.appendChild(dl);
+    }
+    clear(elSiteEtat);
+    var dl2 = el("dl", "ma-etat");
+    function row(k, v, cls) { dl2.appendChild(el("dt", null, k)); dl2.appendChild(el("dd", cls || null, v)); }
+    row("Derniere collecte site", s.derniere_collecte_heure || "aucune");
+    row("Dernier releve site", s.dernier_releve_heure || "aucun");
+    if (s.derniere_erreur) row("Derniere erreur", s.derniere_erreur, "ma-err");
+    elSiteEtat.appendChild(dl2);
+    var t = s.aujourdhui;
+    elSiteToday.textContent = t ? "Aujourd'hui : " + t.libelle +
+      (t.fenetre && t.collecte ? " (comptage " + hh(t.fenetre.debut) + " - " + hh(t.fenetre.fin) + ")" : "") : "";
   }
 
   function renderSemaine(sem) {
@@ -503,7 +630,15 @@
     });
     var statuts = elStatuts.value.split(/[\s,;]+/).filter(function (x) { return x !== ""; });
     var per = parseInt(elPerime.value, 10);
+    var marge = parseInt(elSiteMarge.value, 10);
     return {
+      site: {
+        enabled: elSiteEnabled.checked,
+        marge_min: isNaN(marge) ? null : marge,
+        checkpoints: siteCps.map(function (s) {
+          return { id: s.id, nom: s.nom, libelle: (s.libelle || "").trim(), inclus: !!s.inclus, sens: s.sens };
+        })
+      },
       enabled: elEnabled.checked,
       transactions: elTx.checked,
       horaires: { ouverture: elOuv.value, fermeture: elFerm.value, semaine: semaine, exceptions: exceptions },
@@ -559,6 +694,24 @@
         t.appendChild(tr);
       });
       elTestRes.appendChild(t);
+    }
+    var sc = d.site_compteurs || {};
+    var se = d.site_erreurs || {};
+    var sids = Object.keys(sc).concat(Object.keys(se).filter(function (k) { return !sc[k]; }));
+    if (sids.length) {
+      elTestRes.appendChild(el("div", null, "Site - visites libres" +
+        (d.site_gate ? " : " + d.site_gate.libelle : "")));
+      var t2 = el("table");
+      sids.forEach(function (id) {
+        var tr = el("tr");
+        var c = sc[id];
+        function n(v) { return v === null || v === undefined ? "--" : Number(v).toLocaleString("fr-FR"); }
+        tr.appendChild(el("td", null, id));
+        tr.appendChild(el("td", null, c ? c.nom : "echec"));
+        tr.appendChild(el("td", "n", c ? "E " + n(c.entries) + " / S " + n(c.exits) : se[id]));
+        t2.appendChild(tr);
+      });
+      elTestRes.appendChild(t2);
     }
     var tx = d.transactions;
     if (tx) {

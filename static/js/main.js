@@ -937,12 +937,25 @@ function updateEventStatus() {
         return;
     }
 
-    // SAISON : main courante permanente, sans dates (ni montage, ni jours
-    // publics) -> pas de cycle de vie a calculer.
+    // SAISON : main courante permanente, ni montage ni demontage ni course ->
+    // pas de cycle de vie a calculer. Seuls les jours de VISITES LIBRES
+    // (globalHoraires.dates du parametrage SAISON, 02/10/2026) sont affiches.
     if (cockpitIsSaison(window.selectedEvent)) {
         window._statusParamData = null;
+        window._saisonPublicDates = [];
         if (_statusTimer) { clearInterval(_statusTimer); _statusTimer = null; }
         renderSaisonStatus();
+        var saisonKey = window.selectedEvent + "|" + window.selectedYear;
+        fetch("/get_parametrage?event=" + encodeURIComponent(window.selectedEvent) + "&year=" + encodeURIComponent(window.selectedYear))
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (saisonKey !== window.selectedEvent + "|" + window.selectedYear) return;
+                var gh = (data && data.globalHoraires) || {};
+                window._saisonPublicDates = Array.isArray(gh.dates) ? gh.dates : [];
+                renderSaisonStatus();
+            })
+            .catch(function () {});
+        _statusTimer = setInterval(renderSaisonStatus, 60000);
         return;
     }
 
@@ -1022,10 +1035,38 @@ function getContinuousSegmentFor(todayISO, publicDates) {
     };
 }
 
+function _saisonHour(t) {
+    // "10:00" -> "10h00"
+    return String(t || "").replace(":", "h");
+}
+
 function renderSaisonStatus() {
+    if (!cockpitIsSaison(window.selectedEvent)) return;
     var detail = "Saison " + (window.selectedYear || "");
     var cur = window.cockpitEventCurrent && window.cockpitEventCurrent.current;
-    if (cur && cur.kind === "epreuve") detail = "Epreuve en cours : " + cur.event;
+    var epreuve = !!(cur && cur.kind === "epreuve");
+    if (epreuve) detail = "Epreuve en cours : " + cur.event;
+    // Jour de visites libres (jours publics du parametrage SAISON). Pendant
+    // une epreuve active, c'est elle qui pilote le site : pas d'affichage.
+    var now = (window.TimelineClock && typeof window.TimelineClock.get === "function")
+        ? window.TimelineClock.get() : new Date();
+    var todayISO = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0")
+        + "-" + String(now.getDate()).padStart(2, "0");
+    var dates = window._saisonPublicDates || [];
+    var today = null;
+    for (var i = 0; i < dates.length; i++) {
+        if (dates[i] && String(dates[i].date || "").slice(0, 10) === todayISO) { today = dates[i]; break; }
+    }
+    if (today && !epreuve) {
+        var hours = today.is24h ? "24h/24"
+            : _saisonHour(today.openTime || "00:00") + "-" + _saisonHour(today.closeTime || "23:59");
+        // visite_libre / visite_guidee : import GroundMaster, absent = autorise
+        var libre = today.visite_libre !== false;
+        var guidee = today.visite_guidee !== false;
+        var lab = libre && guidee ? "Visites libres et guidees" : (libre ? "Visites libres" : "Visites guidees");
+        renderStatus("saison", "museum", lab + " aujourd'hui " + hours, detail);
+        return;
+    }
     renderStatus("saison", "event_note", "Exploitation courante", detail);
 }
 

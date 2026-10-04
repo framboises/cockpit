@@ -90,13 +90,24 @@ def lire_compteurs(sock, cfg, log=None):
 
 
 def lire_passages(sock, cfg, from_str, to_str, log=None, max_pages=MAX_PAGES_TX):
+    """Transactions de toute la borne sur [from, to], filtrees sur l'Area du
+    musee. Retourne (docs, dernier_horodatage_vu, plafonne, nb_lues)."""
+    res, max_date, plafonne, lues = lire_transactions(
+        sock, from_str, to_str, {"musee": lambda tx: M.passage_doc(tx, cfg["area_id"])},
+        log=log, max_pages=max_pages)
+    return res["musee"], max_date, plafonne, lues
+
+
+def lire_transactions(sock, from_str, to_str, filtres, log=None, max_pages=MAX_PAGES_TX):
     """Transactions de toute la borne sur [from, to] (heure LOCALE Paris, cf.
-    scan_import_hsh.collecter : From/To gardes a chaque page), filtrees sur
-    l'Area du musee. Retourne (docs, dernier_horodatage_vu, plafonne, nb_lues)."""
+    scan_import_hsh.collecter : From/To gardes a chaque page), une seule
+    lecture pour plusieurs perimetres. filtres = {nom: f(tx) -> doc | None}.
+    Retourne ({nom: [docs]}, dernier_horodatage_vu, plafonne, nb_lues)."""
     lc = _lc()
     log = log or _log
     sock.settimeout(lc.READ_TIMEOUT_TRANSACTIONS)
-    vus, docs = set(), []
+    vus = set()
+    res = {k: [] for k in filtres}
     cursor, page, plafonne = None, 0, False
     max_date = None
     while True:
@@ -116,19 +127,21 @@ def lire_passages(sock, cfg, from_str, to_str, log=None, max_pages=MAX_PAGES_TX)
             dp = tx.get("date_paris")
             if dp and (max_date is None or dp > max_date):
                 max_date = dp
-            d = M.passage_doc(tx, cfg["area_id"])
-            if d:
-                docs.append(d)
+            for nom, f in filtres.items():
+                d = f(tx)
+                if d:
+                    res[nom].append(d)
         if not txs or not nouveaux or not not_complete or max_txid is None:
             break
         if page >= max_pages:
             plafonne = True
             break
         cursor = str(max_txid)
-    log.info("  transactions %s -> %s : %d lues en %d page(s), %d au musee%s",
-             from_str[11:], to_str[11:], len(vus), page, len(docs),
+    log.info("  transactions %s -> %s : %d lues en %d page(s), %s%s",
+             from_str[11:], to_str[11:], len(vus), page,
+             ", ".join("%d %s" % (len(v), k) for k, v in res.items()),
              " (PLAFOND atteint)" if plafonne else "")
-    return docs, max_date, plafonne, len(vus)
+    return res, max_date, plafonne, len(vus)
 
 
 def lire_inventaire(timeout=20):
@@ -161,6 +174,10 @@ def tester(cfg, db=None, minutes=60, max_pages=5):
         sock = connect(essais=1)
         try:
             res["compteurs"], res["erreurs"] = lire_compteurs(sock, cfg)
+            site = cfg.get("site") or {}
+            if site.get("locations"):
+                c, e = lire_compteurs(sock, {"locations": site["locations"]})
+                res["site_compteurs"], res["site_erreurs"] = c, e
             if cfg.get("transactions"):
                 docs, _max, plafonne, lues = lire_passages(sock, cfg, from_str, to_str,
                                                            max_pages=max_pages)
@@ -192,4 +209,11 @@ def tester(cfg, db=None, minutes=60, max_pages=5):
                                   "statut": M.statut_ouverture(cfg, now_p)[1]}
         except Exception as exc:
             res["apercu_jour"] = {"erreur": str(exc)[:200]}
+        if (cfg.get("site") or {}).get("enabled"):
+            try:
+                g = M.site_gate_db(db, cfg)
+                res["site_gate"] = {"libelle": g["libelle"], "fenetre": g["fenetre"],
+                                    "collecte": g["collecte"]}
+            except Exception as exc:
+                res["site_gate"] = {"libelle": "erreur : %s" % str(exc)[:200]}
     return res

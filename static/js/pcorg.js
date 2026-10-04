@@ -11,9 +11,11 @@
     "PCO.Fourriere":     { color: "#6b7280", icon: "directions_car" },
     "PCO.Information":   { color: "#2563eb", icon: "info" },
     "PCO.MainCourante":  { color: "#8b5cf6", icon: "edit_note" },
-    // Fiches PC Securite (Prysm) : affichees en SAISON (main courante permanente)
-    "PCS.Surete":        { color: "#be123c", icon: "local_police" },
-    "PCS.Information":   { color: "#0284c7", icon: "info" }
+    // Fiches PC Securite (Prysm), affichees en SAISON : meme icone et meme
+    // couleur que la categorie PCO equivalente (on ne les distingue que par le
+    // libelle "PCS ...", cf. shortCat)
+    "PCS.Surete":        { color: "#ef4444", icon: "shield" },
+    "PCS.Information":   { color: "#2563eb", icon: "info" }
   };
   var FALLBACK_STYLE = { color: "#94a3b8", icon: "description" };
   // Categorie PCO equivalente d'une categorie PCS (droits des groupes)
@@ -1326,22 +1328,17 @@
 
   var CATEGORY_ORDER = getAllowedCategories();
 
-  // Categories affichees (stats, filtre) : PCO autorisees + PCS equivalentes en
-  // SAISON. La creation reste limitee aux PCO (CATEGORY_ORDER).
-  function displayCategories() {
-    var cats = CATEGORY_ORDER.slice();
-    if (isSaisonSelected()) {
-      Object.keys(PCS_EQUIVALENT).forEach(function (pcs) {
-        if (CATEGORY_ORDER.indexOf(PCS_EQUIVALENT[pcs]) !== -1) cats.push(pcs);
-      });
-    }
-    return cats;
+  // Compteurs par icone : une fiche PCS compte sous l'icone de sa categorie PCO
+  // equivalente (PCS Surete -> Securite, PCS Information -> Information). La
+  // difference est gardee partout ailleurs (libelle de la fiche, filtre).
+  function statCat(cat) {
+    return PCS_EQUIVALENT[cat] || cat;
   }
 
   function renderStats(openItems, closedItems, serverCounts) {
     if (!statsContainer) return;
     statsContainer.textContent = "";
-    var order = displayCategories();
+    var order = CATEGORY_ORDER;
 
     // Count per category
     var counts = {};
@@ -1349,21 +1346,22 @@
 
     if (serverCounts) {
       // Compte serveur sur la collection complete
-      Object.keys(serverCounts).forEach(function (cat) {
-        var c = serverCounts[cat] || {};
+      Object.keys(serverCounts).forEach(function (raw) {
+        var c = serverCounts[raw] || {};
+        var cat = statCat(raw);
         if (!counts[cat]) counts[cat] = { open: 0, closed: 0 };
-        counts[cat].open = c.open || 0;
-        counts[cat].closed = c.closed || 0;
+        counts[cat].open += c.open || 0;
+        counts[cat].closed += c.closed || 0;
       });
     } else {
       // Fallback: compte local sur les items charges
       openItems.forEach(function (item) {
-        var cat = item.category || "";
+        var cat = statCat(item.category || "");
         if (!counts[cat]) counts[cat] = { open: 0, closed: 0 };
         counts[cat].open++;
       });
       closedItems.forEach(function (item) {
-        var cat = item.category || "";
+        var cat = statCat(item.category || "");
         if (!counts[cat]) counts[cat] = { open: 0, closed: 0 };
         counts[cat].closed++;
       });
@@ -1427,7 +1425,7 @@
     var match = null;
     for (var i = 0; i < lastData.open.length; i++) {
       var item = lastData.open[i];
-      if (item.category === cat && item.lat != null && item.lon != null) {
+      if (statCat(item.category) === cat && item.lat != null && item.lon != null) {
         match = item;
         break; // deja triees par ts desc
       }
@@ -1435,7 +1433,7 @@
     if (!match) {
       // Pas de GPS, ouvrir la fiche de la plus recente sans GPS
       for (var j = 0; j < lastData.open.length; j++) {
-        if (lastData.open[j].category === cat) { match = lastData.open[j]; break; }
+        if (statCat(lastData.open[j].category) === cat) { match = lastData.open[j]; break; }
       }
       if (match) {
         openDetailModal(match.id, false);

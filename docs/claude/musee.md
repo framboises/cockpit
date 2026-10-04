@@ -2,7 +2,7 @@
 
 ## Musee des 24 Heures (bloc autonome de l'accueil)
 
-**Autonome du live-controle et de Waze.** Ne lit ni n'ecrit `data_access` (`___GLOBAL___`), `hsh_structure`, `hsh_transactions_agg`, ni `live_controle_actif`. N'ecrit que `musee_*` et `cockpit_settings._id="musee"` (depuis l'onglet Musee). Lit les archives `hsh_archive_structure_*` (relations parent / enfant, lecture seule).
+**Autonome du live-controle et de Waze.** Ne lit ni n'ecrit `data_access` (`___GLOBAL___`), `hsh_structure`, `hsh_transactions_agg`, ni `live_controle_actif`. N'ecrit que `musee_*` (dont `musee_site_*`) et `cockpit_settings._id="musee"` (depuis l'onglet Musee). Lit les archives `hsh_archive_structure_*` (relations parent / enfant, lecture seule) et, pour le perimetre « Site - visites libres », les `parametrages` via `event_courant` (jours publics SAISON, fenetres des epreuves).
 
 ```
 tache "Cockpit - Collecte Musee" (5 min, 24 h/24, scripts/install_musee_task.ps1)
@@ -60,10 +60,23 @@ Courbe horaire et repartition par checkpoint : transactions (heure exacte) quand
 
 - **Releve perime** : dernier releve > `releve_perime_min` -> `releve_perime: true`, l'UI grise la valeur et affiche « releve perime », **jamais 0** ; sans donnee : `--`.
 - **Comparaisons** : S-1 (meme jour de semaine) et N-1 (meme date) depuis `musee_jours` (total) + `compute_day(until=HH:MM)` (a meme heure, bornee a la fermeture du jour). `null` tant que la date n'a pas de donnees.
-- **Retention** : TTL 400 j sur `musee_releves.ts` et `musee_passages.ts` (N-1 a la meme date). `musee_jours` sans TTL.
+- **Retention** : TTL 400 j sur `musee_releves.ts`, `musee_passages.ts`, `musee_site_releves.ts`, `musee_site_passages.ts` (N-1 a la meme date). `musee_jours` et `musee_site_jours` sans TTL.
 - **Bloc** `widget-musee` dans `BLOCK_REGISTRY` (colonne droite) : un groupe a liste `allowed_blocks` explicite ne le voit qu'une fois coche dans sa fiche ; admin le voit toujours. Visible meme si `live_controle_actif` est faux. Payload : `horaires_jour` (pied « Ferme aujourd'hui (Noel) » ou horaires + libelle d'exception), `area_nom`. Une disposition de groupe anterieure au bloc le range sous le Controle d'acces (`musee_block.js`).
 - **Collecteur** : verrou `logs/musee_collect.lock` (msvcrt, libere a la mort du process), fin par `os._exit` (le client Mongo cree a l'import de `live_controle` garde des threads), logs `logs/musee_collect-YYYYMMDD.log`. Entre 00:00 et 00:15, l'agregat de la veille est fige. Une config modifiee est prise en compte a la collecte suivante (5 min max), sans redemarrage.
 - **Tests** : `tests/test_musee_config.py` (horaires par jour, base du compteur, validation, migration, structure).
+
+### Site - visites libres (second perimetre, 02/10/2026)
+
+Un billet musee donne acces libre au site : les visiteurs entrent ET sortent par des checkpoints choisis dans l'onglet Musee (n'importe quelle Area). En 2026 : `TRI-NORV-27/28` et `TRI-NORV-PMR-29` (749/750/751, Gate 937 PORTE NORD BIS, Area 628 ENCEINTE GENERALE) - **donnees, pas code** (cle `site` amorcee le 02/10/2026 par `scripts/musee_migrate_config.py --site-checkpoints 749,750,751 --site-marge 30`, idempotent : ne touche plus un doc qui porte `site`).
+
+- **Cle `site`** de `cockpit_settings.musee` : `{enabled, marge_min (0-240, defaut 30), checkpoints: [{id, nom, libelle, inclus, sens: mixte|entree|sortie}]}`. `sens` = indication utilisee SEULEMENT si la transaction n'a pas de sens (constat 02/10 : toutes en ont un). PUT sans cle `site` = inchangee. `validate_config` : ids Checkpoint de la structure, au moins un inclus si active.
+- **Quand compter** (`musee.site_gate` / `site_gate_db`) : jour public du parametrage **SAISON** (`event_courant.saison_public_days`, saisi dans GroundMaster, `globalHoraires.dates` openTime/closeTime/is24h) ET aucune epreuve active (`event_courant.is_saison_public_day` : montage -> demontage, bascule). ⚠️ Ces tripodes servent de **delestage de la porte Nord pendant les epreuves** : y compter serait compter des spectateurs. Fenetre = horaires -/+ `marge_min`, bornee a 00:00-23:59 (is24h = journee entiere). Raisons : `desactive`, `a_configurer`, `pas_jour_public`, `epreuve`, `saison_illisible`, `avant`, `ouvert`, `termine`.
+- **Collecteur** (meme tache, meme connexion) : un jour de visites libres hors epreuve, releve les compteurs du site **toute la journee** (le releve precedant le debut de fenetre = base) dans `musee_site_releves`, et filtre la MEME lecture de transactions (`musee_borne.lire_transactions`, plusieurs filtres) sur les **ids de checkpoint** (jamais l'Area : 628 couvre tout le site) -> `musee_site_passages` (`sens` E/S/?, `sens_source`). Fenetre transactions propre (`musee_site_jours.tx_depuis/tx_jusqu_a/tx_retard`), lecture unique depuis le plus ancien des deux curseurs. Sinon : log « Site visites libres : pas de collecte (raison) », rien n'est ecrit. `--dry-run` lit quand meme les compteurs du site (« lecture de controle »).
+- **Calcul** (`compute_site_day`) : entrees / sorties = increments `entries` / `exits` depuis la base (meme `cumul_compteur` robuste que le musee), limites a la fenetre ; repli transactions si leur couverture part d'avant la fenetre, sinon partiel annonce. `presents_now = max(entrees - sorties, 0)`, `presents_max` = pic de la serie (entrees et sorties d'un meme releve nettees ensemble). Agregat `musee_site_jours` (entrees, sorties, presents_now, presents_max, par_heure {HH: {entrees, sorties}}, par_checkpoint, source, fenetre).
+- ⚠️ Sur ces checkpoints `current` = entries + exits (pas des presents), et ils voient du passage hors visites libres (personnel : 47 transactions le 02/10 avant 11 h). Les jours publics comptent donc aussi ce passage.
+- **API** : `/api/musee/state.site` {visible, actif, dans_fenetre, raison, raison_libelle, horaires, fenetre, entrees, sorties, presents, presents_max, par_heure [{heure, entrees, sorties}], par_checkpoint, releve_perime...}. `visible` = active ET (jour de visites libres OU donnees du jour) ; valeurs `None` sans donnee (le bloc affiche `--`). Erreur de calcul du site -> `{visible:false, erreur}`, jamais d'impact sur le musee. `GET /api/musee/config.site` : prochains jours SAISON (avec l'epreuve qui les recouvre), etat du jour, derniere collecte. `POST /api/musee/test` lit aussi les compteurs du site (`site_compteurs`).
+- **Bloc** : partie compacte « Site - visites libres » sous les chiffres du musee (entrees, sorties, presents, pic, mini-courbe entrees/sorties). Le musee `enabled=false` masque tout (bloc et collecte).
+- **Tests** : `tests/test_musee_site.py`.
 
 ### Affichage seulement en SAISON
 

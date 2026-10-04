@@ -105,21 +105,49 @@ def main(argv=None):
         today = now_p.strftime("%Y-%m-%d")
         jour = db[M.COL_JOURS].find_one({"_id": today}, {"tx_depuis": 1, "tx_jusqu_a": 1}) or {}
 
+        # Site - visites libres : jour public SAISON et aucune epreuve active
+        # (sinon les checkpoints servent au delestage : spectateurs).
+        site = cfg["site"]
+        gate = M.site_gate_db(db, cfg, now)
+        site_actif = gate["collecte"]
+        if site["enabled"]:
+            log.info("Site visites libres : %s%s", gate["libelle"],
+                     (" (fenetre %s-%s)" % (gate["fenetre"]["debut"], gate["fenetre"]["fin"])
+                      if gate["fenetre"] else ""))
+            if not site_actif:
+                log.info("Site visites libres : pas de collecte (%s).", gate["raison"])
+        site_jour = (db[M.COL_SITE_JOURS].find_one({"_id": today}, {"tx_depuis": 1, "tx_jusqu_a": 1})
+                     or {}) if site_actif else {}
+
         # Fenetre transactions : depuis le dernier passage (chevauchement de
         # 10 min, dedoublonne par _id = transaction_id), sinon depuis minuit.
         debut_jour = today + "T00:00:00"
-        from_str = debut_jour
-        if jour.get("tx_jusqu_a"):
-            try:
-                prev = dt.datetime.strptime(jour["tx_jusqu_a"], "%Y-%m-%dT%H:%M:%S")
-                from_str = max(debut_jour, (prev - dt.timedelta(minutes=M.TX_RECOUVREMENT_MIN))
+
+        def _depuis(j):
+            if j.get("tx_jusqu_a"):
+                try:
+                    prev = dt.datetime.strptime(j["tx_jusqu_a"], "%Y-%m-%dT%H:%M:%S")
+                    return max(debut_jour, (prev - dt.timedelta(minutes=M.TX_RECOUVREMENT_MIN))
                                .strftime("%Y-%m-%dT%H:%M:%S"))
-            except ValueError:
-                pass
+                except ValueError:
+                    pass
+            return debut_jour
+
+        from_m = _depuis(jour)
+        from_s = _depuis(site_jour) if site_actif else None
+        filtres = {}
+        if cfg.get("transactions"):
+            filtres["musee"] = lambda tx: M.passage_doc(tx, cfg["area_id"])
+        if site_actif:
+            site_locs = {loc["id"]: loc for loc in site["locations"]}
+            filtres["site"] = lambda tx: M.site_passage_doc(tx, site_locs)
+        from_str = min(x for x in (from_m if "musee" in filtres else None, from_s) if x) \
+            if filtres else None
         to_str = now_p.strftime("%Y-%m-%dT%H:%M:%S")
 
         erreur = None
         compteurs, erreurs, passages = {}, {}, None
+        s_compteurs, s_erreurs, s_passages = {}, {}, None
         max_date, plafonne = None, False
         t0 = time.time()
         try:
@@ -128,10 +156,19 @@ def main(argv=None):
                 log.info("Borne %s - compteurs du musee (Area %s %s)", B.adresse(),
                          cfg["area_id"], cfg["area_nom"])
                 compteurs, erreurs = B.lire_compteurs(sock, cfg, log)
-                if cfg.get("transactions"):
+                # En dry-run, les compteurs du site sont lus meme hors jour de
+                # visites libres (verification), jamais ecrits.
+                if site["configure"] and (site_actif or args.dry_run):
+                    log.info("Compteurs du site (visites libres)%s",
+                             "" if site_actif else " - lecture de controle, non collectes")
+                    s_compteurs, s_erreurs = B.lire_compteurs(
+                        sock, {"locations": site["locations"]}, log)
+                if filtres:
                     try:
-                        passages, max_date, plafonne, _lues = B.lire_passages(
-                            sock, cfg, from_str, to_str, log)
+                        res, max_date, plafonne, _lues = B.lire_transactions(
+                            sock, from_str, to_str, filtres, log)
+                        passages = res.get("musee")
+                        s_passages = res.get("site")
                     except Exception as exc:
                         erreur = "transactions : %s" % exc
                         log.warning("Transactions en echec : %s", exc)
@@ -145,6 +182,10 @@ def main(argv=None):
         if args.dry_run:
             log.info("[dry-run] releve %s ; %s passages musee", compteurs,
                      len(passages) if passages is not None else "-")
+            if site["configure"]:
+                log.info("[dry-run] site : collecte=%s (%s) ; compteurs %s ; %s passages site",
+                         site_actif, gate["raison"], s_compteurs,
+                         len(s_passages) if s_passages is not None else "-")
             return 0
 
         if compteurs:
@@ -153,24 +194,52 @@ def main(argv=None):
             for d in passages:
                 db[M.COL_PASSAGES].update_one({"_id": d["_id"]}, {"$set": d}, upsert=True)
 
+        def _etat_tx(j, debut):
+            """tx_depuis / tx_jusqu_a / tx_retard apres une lecture reussie."""
+            e = {}
+            if debut == debut_jour and not j.get("tx_depuis"):
+                e["tx_depuis"] = "00:00:00"
+            elif not j.get("tx_depuis"):
+                # La lecture est partie de from_str (<= debut) : couverture reelle.
+                e["tx_depuis"] = from_str[11:]
+            # Plafond : on ne repart que du dernier passage vu, pas de trou.
+            e["tx_jusqu_a"] = (max_date.replace(" ", "T") if plafonne and max_date else to_str)
+            e["tx_retard"] = bool(plafonne)
+            return e
+
         etat = {"derniere_collecte": now, "derniere_erreur": erreur}
         if passages is not None:
-            if from_str == debut_jour and not jour.get("tx_depuis"):
-                etat["tx_depuis"] = "00:00:00"
-            elif not jour.get("tx_depuis"):
-                etat["tx_depuis"] = from_str[11:]
-            # Plafond : on ne repart que du dernier passage vu, pas de trou.
-            etat["tx_jusqu_a"] = (max_date.replace(" ", "T") if plafonne and max_date else to_str)
-            etat["tx_retard"] = bool(plafonne)
+            etat.update(_etat_tx(jour, from_str))
         db[M.COL_JOURS].update_one({"_id": today}, {"$set": etat}, upsert=True)
 
         day = M.save_day(db, today, cfg)
         # Premier passage apres minuit : fige l'agregat de la veille.
         if now_p.hour == 0 and now_p.minute < 15:
             M.save_day(db, M.shift_date(today, days=-1), cfg)
+            veille = M.shift_date(today, days=-1)
+            if site["configure"] and db[M.COL_SITE_JOURS].find_one({"_id": veille}, {"_id": 1}):
+                M.save_site_day(db, veille, cfg)
         log.info("Visiteurs du %s : %s (source %s, compteur %s, transactions %s)",
                  today, day["visiteurs"], day["source"], day["visiteurs_compteur"],
                  day["visiteurs_tx"])
+
+        if site_actif:
+            if s_compteurs:
+                db[M.COL_SITE_RELEVES].insert_one(M.build_releve(now, s_compteurs, s_erreurs))
+            for d in s_passages or []:
+                db[M.COL_SITE_PASSAGES].update_one({"_id": d["_id"]}, {"$set": d}, upsert=True)
+            s_etat = {"derniere_collecte": now, "fenetre": gate["fenetre"],
+                      "horaires": gate["horaires"],
+                      "derniere_erreur": erreur if (erreur or not s_compteurs) else None}
+            if not s_compteurs and not erreur:
+                s_etat["derniere_erreur"] = "compteurs du site : %s" % (s_erreurs or "aucune reponse")
+            if s_passages is not None:
+                s_etat.update(_etat_tx(site_jour, from_str))
+            db[M.COL_SITE_JOURS].update_one({"_id": today}, {"$set": s_etat}, upsert=True)
+            sday = M.save_site_day(db, today, cfg, gate["fenetre"])
+            log.info("Site visites libres du %s : entrees %s, sorties %s, presents %s "
+                     "(pic %s, source %s)", today, sday["entrees"], sday["sorties"],
+                     sday["presents_now"], sday["presents_max"], sday["source"])
         return 1 if erreur and not compteurs else 0
     except Exception as exc:
         log.exception("Erreur collecte musee : %s", exc)

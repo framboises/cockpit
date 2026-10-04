@@ -11,6 +11,9 @@
 #widget-musee .musee-perime { color: var(--danger); font-weight: 600; }
 #widget-musee .musee-val-perime { opacity: 0.55; }
 
+#widget-musee .musee-summary-site { padding-left: 10px; border-left: 2px solid var(--brand); }
+#widget-musee .musee-site-none { font-size: 0.70rem; color: var(--muted); margin: -2px 0 8px; }
+
 #widget-musee .musee-warn {
   font-size: 0.75rem; color: var(--danger); background: var(--danger-light);
   border-radius: 6px; padding: 4px 8px; margin-bottom: 8px;
@@ -33,3 +36,16 @@
 #widget-musee .musee-cp-n { font-weight: 600; min-width: 36px; text-align: right; }
 
 #widget-musee .musee-foot { font-size: 0.68rem; color: var(--muted); margin-top: 8px; }
+
+/* Site - visites libres (section site de /api/musee/state) */
+#widget-musee .musee-site { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px; }
+#widget-musee .musee-site-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  font-size: 0.78rem; font-weight: 700; margin-bottom: 6px;
+}
+#widget-musee .musee-site-etat { font-size: 0.68rem; font-weight: 500; color: var(--muted); text-align: right; }
+#widget-musee .musee-site-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 6px; }
+#widget-musee .musee-site-kpi { text-align: center; }
+#widget-musee .musee-site-kpi-v { font-size: 1.05rem; font-weight: 700; line-height: 1.2; }
+#widget-musee .musee-site-kpi-l { font-size: 0.65rem; color: var(--muted); }
+#widget-musee .musee-site-chart { position: relative; height: 90px; margin-bottom: 4px; }

@@ -76,6 +76,12 @@ def event_window(db, event, year):
     """(debut montage, fin demontage) du parametrage, en dates. None si absent."""
     if not event or not year:
         return None
+    if str(event).strip().upper() == "SAISON":
+        # SAISON n'a ni montage ni demontage ; ses jours publics sont des jours
+        # de visites libres epars sur l'annee (02/10/2026) : le repli sur les
+        # jours publics ferait une "fenetre" de janvier a decembre. None =
+        # periode par defaut (aujourd'hui + 60 j), comme avant.
+        return None
     try:
         years = [int(year), str(year)]
     except (TypeError, ValueError):

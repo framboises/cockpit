@@ -462,7 +462,10 @@ def src_presents(db, event, year, now_utc):
         except Exception as exc:
             att = None
             out["projection_erreur"] = str(exc)[:200]
-        if att:
+        if att and att.get("visites_libres"):
+            # SAISON : jours de visites libres (billet musee), sans billetterie
+            out["visites_libres"] = att["visites_libres"]
+        if att and att.get("slots"):
             slots = {s.get("slot"): s for s in att.get("slots") or []}
             today = slots.get("today") or {}
             yesterday = slots.get("yesterday") or {}

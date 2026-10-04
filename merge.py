@@ -439,11 +439,32 @@ def process_global_horaires(global_data, event, year, db=None):
     )
 
     # dates (au public)
-    vignettes += _process_schedule_list(
+    public_v = _process_schedule_list(
         global_data.get("dates", []),
         "au public", "General", "Controle",
         "Timetable", "dates", db=db
     )
+    if _is_saison(event):
+        # SAISON : les jours publics sont des jours de VISITES LIBRES (billet
+        # musee, circuit en visite libre, 02/10/2026). Vignette standard
+        # "Ouverture/Fermeture au public" (style timeline), libelle en remarque
+        # (une remarque saisie par un operateur reste prioritaire, cf. _patch_vignette).
+        # Types de visite du jour (import GroundMaster : visite_libre /
+        # visite_guidee, absent = autorise).
+        kinds = {}
+        for e in global_data.get("dates", []) or []:
+            if isinstance(e, dict) and e.get("date"):
+                libre = e.get("visite_libre") is not False
+                guidee = e.get("visite_guidee") is not False
+                kinds[str(e["date"])[:10]] = (
+                    "Visites libres et guidees" if libre and guidee
+                    else "Visites libres" if libre
+                    else "Visites guidees" if guidee else "")
+        for v in public_v:
+            if v.get("phase") == "open":
+                lab = kinds.get(str(v.get("date") or "")[:10], "Visites libres") or "Visites libres"
+                v["remark"] = (lab + ". " + v["remark"]).strip() if v.get("remark") else lab
+    vignettes += public_v
 
     # demontage
     dem = global_data.get("demontage") or {}

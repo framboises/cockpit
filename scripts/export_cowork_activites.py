@@ -184,9 +184,20 @@ def build_payload(db, days=60):
     # --- Grands evenements Groundmaster -------------------------------------
     cats = {c["_id"]: c for c in db["groundmaster_categories"].find({"_id": {"$in": list(GM_CATEGORIES)}})}
     evenements = []
+    visites_libres = {}
     for p in db["parametrages"].find({}, {"event": 1, "year": 1, "data": 1}):
         data = p.get("data") or {}
         gh = data.get("globalHoraires") or {}
+        if str(p.get("event") or "").strip().upper() == "SAISON":
+            # SAISON n'est pas un grand evenement : ses jours publics sont des
+            # jours de VISITES LIBRES du site (billet musee, 02/10/2026).
+            for x in gh.get("dates") or []:
+                dx = _day(x.get("date")) if isinstance(x, dict) else None
+                if dx and d_from <= dx <= d_to:
+                    visites_libres[dx.isoformat()] = {
+                        "date": dx.isoformat(), "ouverture": x.get("openTime"),
+                        "fermeture": x.get("closeTime"), "h24": bool(x.get("is24h"))}
+            continue
         m_start = _day((gh.get("montage") or {}).get("start"))
         m_end = _day((gh.get("montage") or {}).get("end"))
         dm_start = _day((gh.get("demontage") or {}).get("start"))
@@ -280,6 +291,7 @@ def build_payload(db, days=60):
         "donnees_momentus_du": last.isoformat() + "Z" if isinstance(last, datetime) else None,
         "notice": NOTICE,
         "grands_evenements": evenements,
+        "visites_libres": [visites_libres[k] for k in sorted(visites_libres)],
         "activites_momentus": activites,
         "jours": jours,
         "espaces_momentus": espaces,
@@ -297,6 +309,9 @@ NOTICE = {
                               "Synchronise toutes les heures.",
         "grands_evenements": "Groundmaster : parametrage des grands evenements (montage, jours publics, "
                              "demontage, lieux actives et leurs jours d'ouverture).",
+        "visites_libres": "Groundmaster (parametrage SAISON) : jours ou le public, muni d'un billet du musee, "
+                          "peut visiter librement le circuit, hors grands evenements. Horaires d'ouverture "
+                          "au public ; aucun effectif connu.",
     },
     "phases": {
         "reserve": "mode de reservation PAR DEFAUT dans Momentus (moveIn) : couvre aussi bien la journee du "

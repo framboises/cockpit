@@ -22,7 +22,9 @@ la timeline, avec `origin: "momentus"` :
   par (evenement, jour, phase, horaires), lieux regroupes, sans heure si la
   reservation est a la journee.
 - Titre = nom de l'evenement Momentus SEUL : jamais de contact client
-  (contactRoles), ni montant, ni nom de pilote.
+  (contactRoles), ni montant, ni nom de pilote. Le nom du COMPTE Momentus
+  (organisation cliente, `accountName`) est porte a part dans
+  `momentus_client` pour la recherche de la timeline (02/10/2026).
 - Ecartes : objets supprimes (_sync.deleted_at), evenements annules, perdus,
   prospects (espace non reserve) et blackouts.
 - Changement d'annee : les vignettes de janvier vont dans SAISON/<annee+1>.
@@ -50,7 +52,9 @@ SAISON = "SAISON"
 ORIGIN = "momentus"
 CATEGORY = "Momentus"
 DAYS_BEFORE = 1
-DAYS_AFTER = 14
+DAYS_AFTER = 14          # minimum ecrit (et fenetre d'affichage de la timeline)
+MAX_FUTURE_DAYS = 3 * 365  # meme borne que momentus_sync
+BLACKOUT_MAX = 3           # au-dela, les blackouts d'un jour sont regroupes
 KEEP_PAST_DAYS = 7
 PHASES = {"moveIn": "reserve", "event": "exploitation", "moveOut": "demontage", "dark": "bloque"}
 # Champs operateur preserves d'une synchro a l'autre
@@ -115,9 +119,66 @@ def paris_today(now=None):
     return now.astimezone(TZ_PARIS).date()
 
 
-def window(now=None):
+def _last_future_day(db, today):
+    """Dernier jour reserve dans Momentus (fonctions ou espaces), borne a
+    MAX_FUTURE_DAYS comme momentus_sync (une saisie en 2099 ne doit pas faire
+    parcourir 70 ans de jours)."""
+    cap = today + timedelta(days=MAX_FUTURE_DAYS)
+    best = today + timedelta(days=DAYS_AFTER)
+    fn = db["momentus_functions"].find_one(
+        {"_sync.deleted_at": None, "endDate": {"$lte": cap.isoformat()}},
+        {"endDate": 1}, sort=[("endDate", -1)])
+    d = _day(fn.get("endDate")) if fn else None
+    if d and d > best:
+        best = d
+    for ev in db["momentus_events"].aggregate([
+            {"$match": {"_sync.deleted_at": None, "bookedSpaces.endDate": {"$gte": today.isoformat()}}},
+            {"$unwind": "$bookedSpaces"},
+            {"$match": {"bookedSpaces.endDate": {"$lte": cap.isoformat()}}},
+            {"$group": {"_id": None, "m": {"$max": "$bookedSpaces.endDate"}}}]):
+        d = _day(ev.get("m"))
+        if d and d > best:
+            best = d
+    return min(best, cap)
+
+
+def window(now=None, db=None):
+    """Fenetre ecrite : la veille -> tout le futur reserve dans Momentus
+    (01/10/2026 : on aspire tout le futur ; l'AFFICHAGE de la timeline SAISON,
+    lui, reste borne a la veille -> J+14, cf. app.py /timetable)."""
     t = paris_today(now)
-    return t - timedelta(days=DAYS_BEFORE), t + timedelta(days=DAYS_AFTER)
+    end = _last_future_day(db, t) if db is not None else t + timedelta(days=DAYS_AFTER)
+    return t - timedelta(days=DAYS_BEFORE), end
+
+
+def _norm_name(s):
+    return " ".join(str(s or "").upper().split())
+
+
+def client_name(ev):
+    """Nom du compte Momentus (client) affichable, pour la recherche de la
+    timeline (`momentus_client`). Le nom de l'organisation seulement : jamais
+    les contacts (contactRoles)."""
+    return _clean(ev.get("accountName"), 120)
+
+
+def _epreuve_days(db, d_from, d_to):
+    """Jours (Paris, ISO) ou une epreuve Cockpit est active (montage ->
+    demontage, cf. event_courant.windows ; SAISON exclu par construction)."""
+    try:
+        import event_courant
+        wins = event_courant.windows(db)
+    except Exception:
+        return set()
+    days = set()
+    for w in wins:
+        a = w["start"].astimezone(TZ_PARIS).date()
+        b = w["end"].astimezone(TZ_PARIS).date()
+        x = max(a, d_from)
+        while x <= min(b, d_to):
+            days.add(x.isoformat())
+            x += timedelta(days=1)
+    return days
 
 
 def build_items(db, d_from, d_to):
@@ -125,15 +186,48 @@ def build_items(db, d_from, d_to):
     lo, hi = d_from.isoformat(), d_to.isoformat()
     mapping = {m["_id"]: m.get("feature_id") for m in db["momentus_lieux_mapping"].find(
         {"status": "valide", "feature_id": {"$nin": [None, ""]}}, {"feature_id": 1})}
+    # isBlackout n'est PAS une fermeture : Momentus le pose sur les epreuves
+    # sportives et roulages qui bloquent les espaces a la vente (1 267 des
+    # 1 347 blackouts sont des "Epreuve sportive" : IAME, roulages...). Les
+    # exclure faisait disparaitre IAME (karting, 04-11/10/2026) de la timeline.
+    # On les garde, sauf les jours ou une epreuve Cockpit est active : ce sont
+    # alors les installations de l'epreuve ("24HM HONDA"...), deja couvertes par
+    # la timeline de l'epreuve.
     q = {"_sync.deleted_at": None, "isCanceled": {"$ne": True}, "isLost": {"$ne": True},
-         "isProspect": {"$ne": True}, "isBlackout": {"$ne": True},
+         "isProspect": {"$ne": True},
          "bookedSpaces": {"$elemMatch": {"startDate": {"$lte": hi}, "endDate": {"$gte": lo}}}}
     proj = {"name": 1, "eventTypeName": 1, "bookedSpaces": 1, "isDefinite": 1, "isTentative": 1,
-            "isProspect": 1, "estimatedTotalAttendance": 1, "estimatedAttendance": 1}
+            "isProspect": 1, "isBlackout": 1, "estimatedTotalAttendance": 1, "estimatedAttendance": 1,
+            "accountName": 1}
     events = {e["_id"]: e for e in db["momentus_events"].find(q, proj)}
     out = defaultdict(list)
     if not events:
         return out
+    ep_days = _epreuve_days(db, d_from, d_to)
+    # Blackout "principal" : son nom est celui d'une epreuve Cockpit
+    # (collection evenement, ex. "24H MOTOS"). On le garde, et on masque les
+    # autres blackouts qui tombent dans ses dates : ce sont les installations
+    # de partenaires ("24HM HONDA"...), des dizaines par epreuve. Couvre les
+    # epreuves dont Cockpit n'a pas encore les dates (parametrage a venir).
+    noms_epreuves = {_norm_name(e.get("nom")) for e in db["evenement"].find({}, {"nom": 1})} - {"", "SAISON"}
+    main_ids, main_spans = set(), []
+    for ev in events.values():
+        if ev.get("isBlackout") and _norm_name(ev.get("name")) in noms_epreuves:
+            main_ids.add(ev["_id"])
+            days = [d for bs in ev.get("bookedSpaces") or []
+                    for d in (_day(bs.get("startDate")), _day(bs.get("endDate"))) if d]
+            if days:
+                main_spans.append((min(days).isoformat(), max(days).isoformat()))
+
+    def _skip(ev, ds):
+        # Les jours d'epreuve Cockpit (ep_days) ne masquent PLUS les blackouts
+        # (02/10/2026) : la timeline SAISON doit montrer les pistes reservees
+        # (IAME : circuits CIK, Alain Prost, Indy du 07 au 11/10). Le flot de
+        # partenaires est tenu par la regle du blackout principal et par le
+        # regroupement au-dela de BLACKOUT_MAX.
+        if not ev.get("isBlackout"):
+            return False
+        return ev["_id"] not in main_ids and any(a <= ds <= b for a, b in main_spans)
 
     # --- Fonctions (creneaux) ------------------------------------------------
     covered = set()   # (event_id, room_id, day) couverts par une fonction
@@ -172,6 +266,9 @@ def build_items(db, d_from, d_to):
         x = max(a, d_from)
         while x <= min(b, d_to):
             ds = x.isoformat()
+            if _skip(ev, ds):
+                x += timedelta(days=1)
+                continue
             covered.add((ev["_id"], fn.get("roomId"), ds))
             start = f_start if x == a else ""
             end = f_end if x == b else ""
@@ -187,6 +284,8 @@ def build_items(db, d_from, d_to):
                     "preparation_checked": "", "momentus_event_id": ev["_id"],
                     "momentus_status": _status(ev),
                 }
+                if client_name(ev):
+                    item["momentus_client"] = client_name(ev)
                 fid = mapping.get(fn.get("roomId"))
                 if fid:
                     item["feature_id"] = fid
@@ -213,7 +312,7 @@ def build_items(db, d_from, d_to):
             x = max(a, d_from)
             while x <= min(b, d_to):
                 ds = x.isoformat()
-                if (ev["_id"], bs.get("roomId"), ds) not in covered:
+                if not _skip(ev, ds) and (ev["_id"], bs.get("roomId"), ds) not in covered:
                     groups[(ds, phase, s if x == a else "", e if x == b else "")].append(
                         (_clean(bs.get("roomName")), bs.get("roomId")))
                 x += timedelta(days=1)
@@ -234,12 +333,36 @@ def build_items(db, d_from, d_to):
                 "type": "Timetable", "origin": ORIGIN, "remark": " | ".join(p for p in bits if p),
                 "preparation_checked": "", "momentus_event_id": ev["_id"], "momentus_phase": phase,
             }
+            if client_name(ev):
+                item["momentus_client"] = client_name(ev)
             if len(fids) == 1:
                 item["feature_id"] = fids[0]
             elif fids:
                 item["feature_ids"] = fids
             out[ds].append(item)
 
+    # Regroupement des blackouts : au-dela de BLACKOUT_MAX evenements bloques
+    # le meme jour (installations de partenaires d'une epreuve : "24HA
+    # MICHELIN", "24HA ALPINE"... jusqu'a 2 700 vignettes en juin 2027), une
+    # seule vignette resume. Le blackout "principal" (nom d'une epreuve
+    # Cockpit) reste a part.
+    for ds in list(out):
+        bl = [it for it in out[ds] if events.get(it.get("momentus_event_id"), {}).get("isBlackout")
+              and it.get("momentus_event_id") not in main_ids]
+        noms = sorted({it["activity"] for it in bl})
+        if len(noms) <= BLACKOUT_MAX:
+            continue
+        keep = [it for it in out[ds] if it not in bl]
+        keep.append({
+            "_id": _mk_id(f"blackout|{ds}"),
+            "date": ds, "start": "", "end": "", "duration": "",
+            "category": CATEGORY, "activity": f"Dates bloquees : {len(noms)} reservations d'epreuve",
+            "place": "", "department": "Epreuve sportive",
+            "type": "Timetable", "origin": ORIGIN,
+            "remark": ("Momentus | espaces bloques a la vente | " + ", ".join(noms))[:600],
+            "preparation_checked": "", "momentus_blackout_count": len(noms),
+        })
+        out[ds] = keep
     for ds in out:
         out[ds].sort(key=lambda it: (it["start"] or "99", it["activity"], it["place"]))
     return out
@@ -307,8 +430,9 @@ def _sync_year_doc(db, year, days, items_by_day, prune_before, dry_run):
 
 
 def sync_saison_timeline(db, now=None, dry_run=False):
-    """Ecrit la fenetre J-1 -> J+14 dans SAISON/<annee>. Rend un resume."""
-    d_from, d_to = window(now)
+    """Ecrit la veille -> tout le futur Momentus dans SAISON/<annee> (un doc par
+    annee civile). Rend un resume."""
+    d_from, d_to = window(now, db)
     items = build_items(db, d_from, d_to)
     prune_before = (paris_today(now) - timedelta(days=KEEP_PAST_DAYS)).isoformat()
     days_by_year = defaultdict(list)

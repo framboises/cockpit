@@ -667,7 +667,8 @@ def _caveats(dataset):
 SAISON_NON_APPLICABLE = {
     "frequentation": "non applicable a SAISON : le controle d'acces ne compte que les epreuves "
                      "(jours publics), pas l'exploitation courante du site",
-    "billetterie": "non applicable a SAISON : pas de billetterie ni de jours publics",
+    "billetterie": "non applicable a SAISON : pas de billetterie (ses jours publics sont des "
+                   "jours de visites libres sur billet musee, hors billetterie Cockpit)",
     "meteo": "non applicable a SAISON : la meteo est rattachee aux jours publics d'une epreuve",
     "alertes": "non applicable a SAISON : l'historique des alertes n'est conserve que 7 jours "
                "(TTL), il ne couvre pas une annee",
@@ -700,6 +701,17 @@ def _build_saison(db, event, year, info, t0):
         "(Prysm SQL, Cockpit, tablettes) : un ecart entre annees n'est pas forcement "
         "un ecart d'activite.",
     ]
+    # Jours publics de SAISON = jours de VISITES LIBRES (02/10/2026) : contexte
+    # seulement (nombre de jours), jamais une billetterie ni un alignement N-1.
+    try:
+        import event_courant as EC
+        n_vl = len(EC.saison_public_days(db, year))
+    except Exception:
+        n_vl = 0
+    if n_vl:
+        notes.append("%d jour(s) de visites libres (visiteurs sur billet musee, circuit en "
+                     "visite libre) saisis sur SAISON %s : contexte d'activite, sans "
+                     "billetterie ni comptage dedie." % (n_vl, year))
     cmp_ = blocs["comparaison_editions"]
     if cmp_["statut"] == "ok" and cmp_["data"].get("note"):
         notes.append("Comparaison : " + cmp_["data"]["note"] + ".")
@@ -800,7 +812,7 @@ FORMAT DE SORTIE : un objet JSON strict, sans texte autour, avec exactement ces 
 
 SAISON_PROMPT_NOTE = """
 
-CAS SAISON (main courante permanente du site, hors epreuves) : l'"edition" est une annee civile, sans jour de course ni jours publics.
+CAS SAISON (main courante permanente du site, hors epreuves) : l'"edition" est une annee civile, sans jour de course ni billetterie (ses eventuels jours publics sont des jours de visites libres sur billet musee : contexte seulement, voir les notes).
 - Pas d'offset : la "chronologie" se fait par MOIS (bloc main_courante.par_mois), et les annees se comparent mois par mois ou a dates calendaires egales (comparaison_editions.par_mois, plafonnee au meme jour si l'annee est en cours).
 - Un bloc dont "statut" vaut "non_applicable" n'est PAS une donnee manquante : ecris "non applicable a SAISON" dans la section concernee, sans en tirer de conclusion.
 - "frequentation" et "recommandations_prochaine_edition" portent sur l'exploitation courante du site (annee suivante), pas sur une epreuve."""

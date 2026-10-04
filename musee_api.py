@@ -10,8 +10,10 @@
   POST /api/musee/test       (admin, CSRF) dry-run du collecteur pour les valeurs
                              du formulaire (lecture seule, rien n'est enregistre).
 
-Ne lit que musee_*, cockpit_settings.musee et les archives
-hsh_archive_structure_* (relations parent / enfant) ; la borne n'est
+Ne lit que musee_* (dont musee_site_*), cockpit_settings.musee, les archives
+hsh_archive_structure_* (relations parent / enfant) et, pour le perimetre
+"Site - visites libres", les parametrages (jours publics SAISON et fenetres
+des epreuves, via event_courant, lecture seule) ; la borne n'est
 interrogee qu'en lecture (musee_borne.py, connexion propre). Independant du
 live-controle : ni data_access, ni hsh_structure, ni live_controle_actif.
 """
@@ -171,7 +173,7 @@ def _known(db, cfg):
     if cfg:
         for loc in cfg["locations"]:
             known.setdefault(loc["id"], {"type": loc["type"], "nom": loc["nom"]})
-        for cp in cfg["checkpoints"]:
+        for cp in cfg["checkpoints"] + cfg["site"]["checkpoints"]:
             known.setdefault(cp["id"], {"type": "Checkpoint", "nom": cp["nom"]})
     return known
 
@@ -209,7 +211,36 @@ def _form_doc(doc):
         "transactions": cfg["transactions"],
         "releve_perime_min": cfg["releve_perime_min"],
         "statuts_passage": cfg["statuts_passage"],
+        "site": {"enabled": cfg["site"]["enabled"], "marge_min": cfg["site"]["marge_min"],
+                 "checkpoints": cfg["site"]["checkpoints"]},
     }
+
+
+def _site_info(db, cfg, today):
+    """Onglet Musee : prochains jours de visites libres (SAISON, lecture
+    seule), etat du jour et derniere collecte du site."""
+    out = {"jours": [], "jours_erreur": None, "aujourdhui": None, "dernier_releve_heure": None,
+           "derniere_collecte_heure": None, "derniere_erreur": None}
+    try:
+        out["jours"] = M.site_prochains_jours(db, today)
+    except Exception as exc:
+        out["jours_erreur"] = str(exc)[:200]
+    if cfg:
+        try:
+            g = M.site_gate_db(db, cfg)
+            out["aujourdhui"] = {"libelle": g["libelle"], "raison": g["raison"],
+                                 "fenetre": g["fenetre"], "collecte": g["collecte"]}
+        except Exception as exc:
+            out["aujourdhui"] = {"libelle": "erreur : %s" % str(exc)[:200]}
+    last = db[M.COL_SITE_RELEVES].find_one({}, {"ts": 1}, sort=[("ts", -1)])
+    if last:
+        out["dernier_releve_heure"] = M.paris(last["ts"]).strftime("%d/%m %H:%M")
+    j = db[M.COL_SITE_JOURS].find_one({}, {"derniere_collecte": 1, "derniere_erreur": 1},
+                                      sort=[("derniere_collecte", -1)])
+    if j and j.get("derniere_collecte"):
+        out["derniere_collecte_heure"] = M.paris(j["derniere_collecte"]).strftime("%d/%m %H:%M")
+        out["derniere_erreur"] = j.get("derniere_erreur")
+    return out
 
 
 @musee_bp.route("/api/musee/config", methods=["GET"])
@@ -231,8 +262,11 @@ def api_get_config():
                             "statut": M.statut_ouverture(cfg, now_p)[1]}
                            if cfg and cfg["configure"] else None),
             "etat": M.etat_collecte(db),
+            "site": _site_info(db, cfg, today),
             "defauts": {"releve_perime_min": M.DEFAUT_RELEVE_PERIME_MIN,
-                        "statuts_passage": list(M.DEFAUT_STATUTS_PASSAGE)},
+                        "statuts_passage": list(M.DEFAUT_STATUTS_PASSAGE),
+                        "site_marge_min": M.DEFAUT_SITE_MARGE_MIN,
+                        "site_marge_max": M.SITE_MARGE_MAX},
         }))
     except Exception as e:
         logger.exception("musee config : %s", e)
@@ -255,8 +289,11 @@ def api_put_config():
         {"$set": doc,
          "$unset": {k: "" for k in ("ouverture", "fermeture", "jours_fermes", "area_id", "locations")}},
         upsert=True)
-    logger.info("musee config enregistree par %s : Area %s, %d checkpoint(s)",
-                doc["maj"]["par"], (doc.get("area") or {}).get("id"), len(doc["checkpoints"]))
+    logger.info("musee config enregistree par %s : Area %s, %d checkpoint(s), site %s",
+                doc["maj"]["par"], (doc.get("area") or {}).get("id"), len(doc["checkpoints"]),
+                ("%s, %d checkpoint(s)" % ("actif" if doc["site"]["enabled"] else "inactif",
+                                          len(doc["site"]["checkpoints"])))
+                if "site" in doc else "inchange")
     return jsonify({"ok": True})
 
 

@@ -4,7 +4,8 @@ maintenant ?". Module pur (ni Flask ni Mongo propre : `db` en argument).
 Regles (validees avec l'exploitation, 01/10/2026) :
 
 - SAISON est la main courante permanente du site. Son parametrage ne porte
-  AUCUNE date (ni montage, ni demontage, ni jours publics, ni course) : il est
+  ni montage, ni demontage, ni course ; depuis le 02/10/2026 il peut porter
+  des jours publics = jours de VISITES LIBRES (saison_public_days). Il est
   reconnu par son NOM, jamais par ses dates. Une annee civile = un SAISON/<annee>.
 - Une epreuve est active de montage.start a demontage.end : le montage et le
   demontage appartiennent a l'epreuve, pas a la saison.
@@ -100,6 +101,60 @@ def is_saison(event) -> bool:
     return str(event or "").strip().upper() == SAISON
 
 
+def saison_public_days(db, year):
+    """Jours de VISITES LIBRES du site (02/10/2026) : jours publics saisis dans
+    GroundMaster sur le parametrage SAISON/<annee> (globalHoraires.dates).
+    SAISON garde ses autres regles (ni montage, ni demontage, ni course : il est
+    reconnu par son nom, jamais par ses dates). Rend
+    {'YYYY-MM-DD': {'open': 'HH:MM', 'close': 'HH:MM', 'is24h': bool,
+                    'visite_libre': bool, 'visite_guidee': bool}}.
+
+    Chaque jour peut porter `visite_libre` / `visite_guidee` (import de
+    GroundMaster, 02/10/2026) ; absent = autorise. Par defaut, seuls les jours
+    ou la visite LIBRE est autorisee sont rendus ; `include_guidee_only=True`
+    rend aussi les jours de visites guidees seules (timeline)."""
+    return _saison_days(db, year, include_guidee_only=False)
+
+
+def saison_visit_days(db, year):
+    """Tous les jours publics SAISON (visite libre et/ou guidee)."""
+    return _saison_days(db, year, include_guidee_only=True)
+
+
+def _saison_days(db, year, include_guidee_only):
+    try:
+        y = int(year)
+    except (TypeError, ValueError):
+        return {}
+    proj = {"data.globalHoraires.dates": 1}
+    doc = (db["parametrages"].find_one({"event": SAISON, "year": str(y)}, proj)
+           or db["parametrages"].find_one({"event": SAISON, "year": y}, proj) or {})
+    out = {}
+    for d in ((doc.get("data") or {}).get("globalHoraires") or {}).get("dates") or []:
+        if not isinstance(d, dict) or not d.get("date"):
+            continue
+        libre = d.get("visite_libre") is not False
+        guidee = d.get("visite_guidee") is not False
+        if not libre and not (include_guidee_only and guidee):
+            continue
+        day = str(d["date"])[:10]
+        out[day] = {"open": d.get("openTime") or "00:00", "close": d.get("closeTime") or "23:59",
+                    "is24h": bool(d.get("is24h")), "visite_libre": libre, "visite_guidee": guidee}
+    return out
+
+
+def is_saison_public_day(db, day, now=None):
+    """(bool, horaires|None) : `day` ('YYYY-MM-DD') est un jour de visites libres
+    ET aucune epreuve n'est active a `now` (bascule : pendant une epreuve, les
+    tripodes de la porte Nord servent au delestage et comptent des spectateurs)."""
+    info = saison_public_days(db, day[:4]).get(day)
+    if not info:
+        return False, None
+    if any(a["kind"] == "epreuve" for a in active_events(db, now)):
+        return False, info
+    return True, info
+
+
 def _parse_dt(value):
     """ISO (avec Z = UTC, naif = Paris) ou datetime -> datetime UTC aware."""
     if value is None or value == "":
@@ -167,9 +222,21 @@ def _load_windows(db):
                           + timedelta(days=1)).astimezone(timezone.utc)
         if (end - start).days > MAX_WINDOW_DAYS or end <= start:
             # Saisie aberrante (ex. 24H AUTOS 2024 : demontage date de 2026,
-            # fenetre de 760 j) : l'epreuve resterait active deux ans.
-            logger.warning("event_courant: fenetre ignoree %s %s (%s -> %s)", ev, yr, start, end)
-            continue
+            # fenetre de 760 j ; 24H MOTOS 2027 : demontage date de 2026,
+            # avant le montage) : on se replie sur les jours publics plutot que
+            # de perdre l'epreuve ; sans jours publics, elle est ignoree.
+            fallback = None
+            if days:
+                fs = datetime.fromisoformat(min(days)).replace(tzinfo=TZ_PARIS).astimezone(timezone.utc)
+                fe = (datetime.fromisoformat(max(days)).replace(tzinfo=TZ_PARIS)
+                      + timedelta(days=1)).astimezone(timezone.utc)
+                if fe > fs and (fe - fs).days <= MAX_WINDOW_DAYS:
+                    fallback = (fs, fe)
+            logger.warning("event_courant: fenetre incoherente %s %s (%s -> %s), %s",
+                           ev, yr, start, end, "repli sur les jours publics" if fallback else "ignoree")
+            if not fallback:
+                continue
+            start, end = fallback
         race = _parse_dt(data.get("race") or gh.get("race"))
         wins.append({"event": ev, "year": yr, "start": start, "end": end,
                      "public_days": days, "race": race})

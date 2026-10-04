@@ -60,6 +60,8 @@ Un jour public N est rapproché du jour public N-1 de **même offset à la cours
 
 ### Autres consommateurs
 
+⚠️ **SAISON** : ses jours publics sont des jours de visites libres sans billetterie (cf. `main-courante.md`). `/get_affluence` et `/api/live-controle/counters-context` court-circuitent SAISON par son nom (réponse vide), `compute_attendance_block` ne rend aucun slot.
+
 `/api/live-controle/counters-context` (widget compteurs) recalcule le même `projection_ratio` avec les mêmes helpers — le garder aligné. `pcorg_summary.compute_attendance_block` calcule son propre bloc Billetterie & Fréquentation, indépendant, et n'utilise le N-1 que pour des ratios de pic (pas de comparaison de ventes) : il n'était pas affecté.
 
 ### Pièges

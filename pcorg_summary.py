@@ -927,6 +927,32 @@ def _find_hist_freq_prev(db, event, year_int):
     return None, None
 
 
+def saison_visites_libres(db, year, now_utc=None):
+    """Jours de VISITES LIBRES (jours publics du parametrage SAISON/<year>)
+    parmi hier / aujourd'hui / demain (heure de Paris). Rend
+    [{slot, date, open, close, is24h}] (vide si aucun)."""
+    import event_courant as EC
+    now_utc = now_utc or datetime.now(timezone.utc)
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
+    try:
+        days = EC.saison_public_days(db, year)
+    except Exception as exc:
+        logger.warning("saison_visites_libres : lecture impossible (%s)", exc)
+        return []
+    if not days:
+        return []
+    today = now_utc.astimezone(ZoneInfo("Europe/Paris")).date()
+    out = []
+    for slot, delta in (("yesterday", -1), ("today", 0), ("tomorrow", 1)):
+        ds = (today + timedelta(days=delta)).isoformat()
+        info = days.get(ds)
+        if info:
+            out.append({"slot": slot, "date": ds, "open": info["open"],
+                        "close": info["close"], "is24h": info["is24h"]})
+    return out
+
+
 def compute_attendance_block(db, event, year, now_utc=None):
     """Calcule le bloc Billetterie & Frequentation pour les 3 jours
     centres sur aujourd'hui : hier / aujourd'hui / demain.
@@ -937,6 +963,18 @@ def compute_attendance_block(db, event, year, now_utc=None):
     if not event or year is None:
         logger.info("attendance_block : skip (event=%s year=%s)", event, year)
         return None
+    if is_saison(event):
+        # SAISON : ses jours publics sont des jours de VISITES LIBRES (billet
+        # musee, 02/10/2026), sans billetterie ni course : pas de bloc
+        # billetterie (il sortait des zeros et un N-1 aligne sur rien).
+        # Seule la mention des jours de visites libres hier/aujourd'hui/demain
+        # subsiste ; `slots` vide = aucun rendu billetterie (mail, UI, briefing).
+        vl = saison_visites_libres(db, year, now_utc)
+        if not vl:
+            logger.info("attendance_block : skip (SAISON, pas de visites libres a J-1/J/J+1)")
+            return None
+        return {"event": event, "year": year, "saison": True, "slots": [],
+                "visites_libres": vl}
     try:
         year_int = int(year)
     except (TypeError, ValueError):
@@ -2152,6 +2190,17 @@ def build_prompts(event, year, ts_start, ts_end, kpis, fiches, truncated,
             "pic_prev_hour = heure du pic edition precedente, sert "
             "d'estimation pour le pic du jour) :\n"
             + json.dumps(att_payload, ensure_ascii=False, indent=2, default=_json_default)
+        )
+    if attendance and attendance.get("visites_libres"):
+        # SAISON : pas de billetterie, seulement les jours de visites libres
+        # (billet musee, circuit en visite libre) autour d'aujourd'hui.
+        parts.append(
+            "\n\nJours de visites libres du site (SAISON : visiteurs munis d'un "
+            "billet musee, circuit en visite libre ; aucune billetterie ni "
+            "course, ne cite aucun chiffre de billets ni de pic) - a mentionner "
+            "en une phrase au plus :\n"
+            + json.dumps(attendance["visites_libres"], ensure_ascii=False, indent=2,
+                         default=_json_default)
         )
     if n1_retro and n1_retro.get("text"):
         parts.append(

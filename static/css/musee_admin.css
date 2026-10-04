@@ -12,12 +12,18 @@
 
 .hsh-page #main-content.hsh-page-grid.lc-hidden { display: none !important; }
 
+/* padding-bas = hauteur du pied de page fixe (.single-col-page footer), sinon
+   le dernier bloc (Reglages avances) reste cache dessous sans pouvoir defiler.
+   flex-shrink 0 : dans la colonne flex de .app-main, l'onglet ne doit pas etre
+   compresse a la hauteur de l'ecran. */
 .hsh-page .musee-admin {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 20px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  padding: 16px 20px calc(var(--footer-gap, 56px) + 16px);
+  flex-shrink: 0; align-items: start;
 }
 .hsh-page .musee-admin[hidden] { display: none; }
 @media (max-width: 900px) {
-  .hsh-page .musee-admin { grid-template-columns: 1fr; padding: 12px; }
+  .hsh-page .musee-admin { grid-template-columns: 1fr; padding: 12px 12px calc(var(--footer-gap, 56px) + 12px); }
 }
 
 .musee-admin .ma-body { display: flex; flex-direction: column; gap: 10px; font-size: 0.84rem; }

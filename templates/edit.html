@@ -398,6 +398,41 @@
         </div>
       </section>
 
+      <!-- Section Indicateurs SAISON (barre des jours de la timeline) -->
+      <section class="widget-card" style="margin-top:16px;">
+        <header class="widget-header" data-collapsible data-section="saison-indicateurs">
+          <h3>Indicateurs SAISON (timeline)</h3>
+          <div style="display:flex; gap:6px; align-items:center; margin-left:auto; margin-right:8px;" onclick="event.stopPropagation()">
+            <span id="si-admin-status" style="font-size:0.78rem; color:var(--muted);"></span>
+            <button id="si-admin-reset" class="btn-icon" title="Revenir a la configuration par defaut (non enregistre)">
+              <span class="material-symbols-outlined">restart_alt</span>
+            </button>
+            <button id="si-admin-add" class="btn-icon" title="Ajouter un indicateur">
+              <span class="material-symbols-outlined">add</span>
+            </button>
+            <button id="si-admin-save" class="btn-icon" title="Enregistrer">
+              <span class="material-symbols-outlined">save</span>
+            </button>
+          </div>
+          <span class="material-symbols-outlined collapse-icon">expand_more</span>
+        </header>
+        <div class="widget-body collapsible" id="saison-indicateurs-body">
+          <p class="si-admin-intro">
+            Sur la timeline <strong>SAISON</strong> seulement, chaque jour de la barre de navigation porte des
+            <strong>pastilles</strong> (au-dessus du jour) et des <strong>points</strong> (dessous, a position fixe).
+            Source : jours de visites saisis dans GroundMaster, ou espaces Momentus reserves ce jour-la
+            (reservations confirmees, options et dates bloquees a la vente ; annulees, perdues et prospects exclues).
+            Configuration commune a tous les utilisateurs.
+          </p>
+          <div class="si-admin-preview">
+            <span class="si-admin-preview-label">Apercu</span>
+            <div id="si-admin-preview-cells" class="si-admin-preview-cells"></div>
+          </div>
+          <div id="si-admin-list" class="si-admin-list"></div>
+          <div id="si-admin-sem" class="si-admin-sem"></div>
+        </div>
+      </section>
+
       <!-- Section utilisateurs -->
       <section class="widget-card" style="margin-top:16px;">
         <header class="widget-header" data-collapsible data-section="users">
@@ -926,6 +961,7 @@
 <script src="/static/js/meteo_bbox.js"></script>
 <script src="/static/js/anoloc_admin.js"></script>
 <script src="/static/js/pcorg_config.js"></script>
+<script src="/static/js/saison_indicateurs_admin.js"></script>
 <script src="/static/js/main.js"></script>
 <script src="/static/js/ai_assistant.js"></script>
 <script src="/static/js/ai_reports.js"></script>

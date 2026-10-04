@@ -47,6 +47,7 @@ from pcorg_assist import pcorg_assist_bp
 import dispatch_auto as DA
 import event_courant as EC
 from momentus_api import momentus_bp
+from saison_indicateurs_api import saison_indicateurs_bp
 from musee_api import musee_bp
 from ai_reports import ai_reports_bp
 from alert_ai import alert_ai_bp
@@ -1189,6 +1190,17 @@ def get_timetable():
     
     if not timetable_doc:
         return jsonify({"error": "Aucune donnée trouvée pour cet événement et cette année."}), 404
+
+    # SAISON : le document porte tout le futur Momentus (momentus_timeline.py) ;
+    # la timeline n'affiche que la veille -> J+14 (choix exploitation 01/10/2026).
+    # Rapports et montre lisent la base directement, sans ce filtre.
+    if EC.is_saison(event) and isinstance(timetable_doc.get("data"), dict):
+        today = datetime.now(ZoneInfo("Europe/Paris")).date()
+        lo = (today - timedelta(days=1)).isoformat()
+        hi = (today + timedelta(days=14)).isoformat()
+        timetable_doc["data"] = {d: v for d, v in timetable_doc["data"].items()
+                                 if not re.match(r"^\d{4}-\d{2}-\d{2}$", d) or lo <= d <= hi}
+        timetable_doc["window"] = {"from": lo, "to": hi}
 
     return jsonify(timetable_doc)
 
@@ -2359,6 +2371,10 @@ app.register_blueprint(DA.dispatch_bp)
 # Reservations Momentus par lieu de la carte (momentus_api.py). GET user,
 # lecture seule des collections momentus_* (synchro momentus_sync.py).
 app.register_blueprint(momentus_bp)
+# Indicateurs de la barre des jours de la timeline SAISON (saison_indicateurs*.py) :
+# visites libres/guidees et pistes utilisees. GET user, PUT config admin
+# (CSRF ACTIF), configuration globale dans cockpit_settings.
+app.register_blueprint(saison_indicateurs_bp)
 # Bloc Musee de l'accueil (musee_api.py) : GET user + bloc widget-musee,
 # lecture seule des collections musee_* (collecte scripts/musee_collect.py,
 # autonome du live-controle).
@@ -2842,6 +2858,11 @@ def get_affluence():
     year = request.args.get("year")
     if not event or not year:
         return jsonify({"error": "Missing event or year"}), 400
+    # SAISON : ses jours publics sont des jours de visites libres (billet
+    # musee), sans billetterie ni course : aucune affluence previsionnelle.
+    # Reponse vide = widget masque (affluence.js).
+    if EC.is_saison(event):
+        return jsonify({"days": [], "total_ventes": None, "saison": True})
 
     # Charger parametrages complet (data + tickets a la racine)
     doc = db['parametrages'].find_one({'event': event, 'year': year}, {'_id': 0})
@@ -8330,7 +8351,8 @@ def hsh_get_counters_context():
     pic projete du jour + presents N-1 projetes au meme offset horaire."""
     event = request.args.get("event")
     year = request.args.get("year")
-    if not event or not year:
+    if not event or not year or EC.is_saison(event):
+        # SAISON (jours de visites libres sans billetterie ni course) : pas de projection
         return jsonify({})
 
     # --- Charger parametrages N ---
@@ -8694,8 +8716,17 @@ def hsh_get_dashboard():
         target_date = today_local
     target_day_start, target_day_end = _paris_day_bounds_utc(target_date)
 
+    # SAISON : ses jours publics sont les jours de VISITES LIBRES de toute
+    # l'annee (02/10/2026). Les prendre comme "jours de l'evenement" ferait
+    # partir la serie longue du premier de l'annee et calculer un pic par jour
+    # de visites depuis janvier : on garde J-6 -> J+7 autour du jour cible.
+    if event and EC.is_saison(event) and event_days:
+        lo_s = (target_date - timedelta(days=6)).isoformat()
+        hi_s = (target_date + timedelta(days=7)).isoformat()
+        event_days = sorted(d for d in event_days if lo_s <= str(d)[:10] <= hi_s)
+
     # Plage "totale collecte" = depuis le premier jour public (ou 4j avant today) jusqu'a maintenant
-    if event_days:
+    if event_days and not (event and EC.is_saison(event)):
         try:
             first_event_day = min(datetime.strptime(d, '%Y-%m-%d').date() for d in event_days)
             full_start, _ = _paris_day_bounds_utc(first_event_day)

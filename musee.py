@@ -38,6 +38,20 @@ Collections (toutes prefixees musee_, rien d'autre n'est ecrit) :
                   releases}                                       TTL 400 j
   musee_jours    {_id: date, visiteurs, source, par_heure{}, par_checkpoint{},
                   pic_heure, ... + etat de collecte tx_depuis / tx_jusqu_a}
+
+Second perimetre "Site - visites libres" (02/10/2026) : un billet musee donne
+acces libre au site ; les visiteurs entrent ET sortent par des checkpoints
+choisis (n'importe quelle Area, ex. la porte Nord bis de l'enceinte). Ces
+checkpoints servent de delestage pendant les epreuves : on ne compte QUE les
+jours publics du parametrage SAISON (event_courant.saison_public_days, saisis
+dans GroundMaster), dans leurs horaires +/- `site.marge_min`, et JAMAIS
+pendant une epreuve active. Document : cle `site`
+  site  {enabled, marge_min, checkpoints: [{id, nom, libelle, inclus, sens}]}
+        sens = mixte | entree | sortie (indication : sert si la transaction
+        ne porte pas de sens)
+Collections : musee_site_releves (compteurs entries ET exits, TTL 400 j),
+musee_site_passages (transactions des checkpoints, sens E/S, TTL 400 j),
+musee_site_jours (entrees, sorties, presents_now, presents_max, par_heure).
 """
 
 from __future__ import annotations
@@ -54,6 +68,9 @@ SCHEMA = 2
 COL_RELEVES = "musee_releves"
 COL_PASSAGES = "musee_passages"
 COL_JOURS = "musee_jours"
+COL_SITE_RELEVES = "musee_site_releves"
+COL_SITE_PASSAGES = "musee_site_passages"
+COL_SITE_JOURS = "musee_site_jours"
 
 RETENTION_JOURS = 400          # N-1 a la meme date reste comparable
 TX_RECOUVREMENT_MIN = 10       # chevauchement des fenetres transactions
@@ -66,6 +83,10 @@ TX_RECOUVREMENT_MIN = 10       # chevauchement des fenetres transactions
 DEFAUT_STATUTS_PASSAGE = ("0", "107", "133")
 DEFAUT_RELEVE_PERIME_MIN = 15
 DEFAUT_TRANSACTIONS = True
+DEFAUT_SITE_MARGE_MIN = 30         # sorties tardives / arrivees en avance
+SITE_MARGE_MAX = 240
+SITE_SENS = ("mixte", "entree", "sortie")
+SITE_LIBELLE = "Site - visites libres"
 
 JOURS = ("lun", "mar", "mer", "jeu", "ven", "sam", "dim")   # date.weekday()
 JOURS_LIBELLES = {"lun": "lundi", "mar": "mardi", "mer": "mercredi", "jeu": "jeudi",
@@ -208,6 +229,7 @@ def normalize_config(doc):
     perime = min(max(perime, 1), 1440)
     tx = d.get("transactions")
     return {
+        "site": normalize_site(d.get("site")),
         "configure": bool(area_id) and horaires_ok,
         "enabled": d.get("enabled", True) is not False,
         "horaires": horaires,
@@ -221,6 +243,35 @@ def normalize_config(doc):
         "releve_perime_s": perime * 60,
         "statuts_passage": statuts or list(DEFAUT_STATUTS_PASSAGE),
     }
+
+
+def normalize_site(raw):
+    """Cle `site` du document -> config de travail du perimetre visites libres
+    (tolerant). `configure` : active et au moins un checkpoint inclus.
+    `locations` : checkpoints inclus (lus par le collecteur)."""
+    s = raw if isinstance(raw, dict) else {}
+    try:
+        marge = int(s.get("marge_min", DEFAUT_SITE_MARGE_MIN))
+    except (TypeError, ValueError):
+        marge = DEFAUT_SITE_MARGE_MIN
+    marge = min(max(marge, 0), SITE_MARGE_MAX)
+    cps = []
+    vus = set()
+    for c in s.get("checkpoints") or []:
+        if not isinstance(c, dict) or not c.get("id") or str(c["id"]) in vus:
+            continue
+        vus.add(str(c["id"]))
+        sens = c.get("sens") if c.get("sens") in SITE_SENS else "mixte"
+        cps.append({"id": str(c["id"]), "nom": str(c.get("nom") or c["id"]),
+                    "libelle": str(c.get("libelle") or ""),
+                    "inclus": c.get("inclus", True) is not False, "sens": sens})
+    locations = [{"id": c["id"], "type": "Checkpoint", "nom": c["libelle"] or c["nom"],
+                  "role": "site", "mobile": False, "sens": c["sens"]}
+                 for c in cps if c["inclus"]]
+    enabled = s.get("enabled") is True
+    return {"enabled": enabled, "configure": enabled and bool(locations),
+            "marge_min": marge, "checkpoints": cps, "locations": locations,
+            "libelle": SITE_LIBELLE}
 
 
 def get_config(db):
@@ -401,6 +452,52 @@ def validate_config(payload, known=None):
         statuts = list(DEFAUT_STATUTS_PASSAGE)
     statuts = sorted(set(statuts), key=lambda s: int(s))
 
+    # --- Site - visites libres (optionnel : absent = inchange) -------------
+    site_doc = None
+    if "site" in payload:
+        site = payload.get("site")
+        if not isinstance(site, dict):
+            errs.append("site : objet attendu")
+        else:
+            s_enabled = site.get("enabled", False)
+            if not isinstance(s_enabled, bool):
+                errs.append("site : enabled booleen attendu")
+                s_enabled = False
+            marge = site.get("marge_min", DEFAUT_SITE_MARGE_MIN)
+            if isinstance(marge, bool) or not isinstance(marge, int) \
+                    or not 0 <= marge <= SITE_MARGE_MAX:
+                errs.append("site : marge entier de 0 a %d minutes" % SITE_MARGE_MAX)
+                marge = DEFAUT_SITE_MARGE_MIN
+            s_cps, s_seen = [], set()
+            raw = site.get("checkpoints") or []
+            if not isinstance(raw, list):
+                errs.append("site : checkpoints liste attendue")
+                raw = []
+            for c in raw:
+                cid = str((c or {}).get("id") or "") if isinstance(c, dict) else ""
+                if cid in s_seen:
+                    continue
+                if not _loc_ok(cid, "Checkpoint", "Site, checkpoint"):
+                    continue
+                s_seen.add(cid)
+                lib = c.get("libelle") or ""
+                if not isinstance(lib, str) or len(lib) > 60:
+                    errs.append("Site, checkpoint %s : nom affiche de 60 caracteres au plus" % cid)
+                    lib = ""
+                if "inclus" in c and not isinstance(c["inclus"], bool):
+                    errs.append("Site, checkpoint %s : inclus booleen attendu" % cid)
+                sens = c.get("sens", "mixte")
+                if sens not in SITE_SENS:
+                    errs.append("Site, checkpoint %s : sens %r inconnu (mixte, entree, sortie)"
+                                % (cid, sens))
+                    sens = "mixte"
+                nom = (known or {}).get(cid, {}).get("nom") or str(c.get("nom") or cid)
+                s_cps.append({"id": cid, "nom": nom[:80], "libelle": lib.strip(),
+                              "inclus": c.get("inclus", True) is not False, "sens": sens})
+            if s_enabled and not any(c["inclus"] for c in s_cps):
+                errs.append("site : au moins un checkpoint inclus pour activer les visites libres")
+            site_doc = {"enabled": s_enabled, "marge_min": marge, "checkpoints": s_cps}
+
     doc = {
         "schema": SCHEMA,
         "enabled": enabled,
@@ -413,6 +510,8 @@ def validate_config(payload, known=None):
         "releve_perime_min": perime,
         "statuts_passage": statuts,
     }
+    if site_doc is not None:
+        doc["site"] = site_doc
     return doc, errs
 
 
@@ -422,6 +521,10 @@ def ensure_indexes(db):
     db[COL_RELEVES].create_index("ts", expireAfterSeconds=ttl)
     db[COL_PASSAGES].create_index([("date", 1), ("heure", 1)])
     db[COL_PASSAGES].create_index("ts", expireAfterSeconds=ttl)
+    db[COL_SITE_RELEVES].create_index([("date", 1), ("ts", 1)])
+    db[COL_SITE_RELEVES].create_index("ts", expireAfterSeconds=ttl)
+    db[COL_SITE_PASSAGES].create_index([("date", 1), ("heure", 1)])
+    db[COL_SITE_PASSAGES].create_index("ts", expireAfterSeconds=ttl)
 
 
 # ---------------------------------------------------------------------------
@@ -558,6 +661,48 @@ def passage_doc(tx, area_id):
         "gate_id": _xid(tx.get("gate")),
         "gate_nom": (tx.get("gate") or {}).get("Name") or "",
         "area_id": str(area_id),
+        "status": str(tx.get("status")),
+        "releases": to_int(tx.get("releases")) or 1,
+    }
+
+
+def site_passage_doc(tx, locs_by_id):
+    """Transaction HSH -> doc musee_site_passages, ou None si le checkpoint
+    n'est pas un checkpoint inclus du perimetre visites libres. Filtre sur le
+    CHECKPOINT (l'Area de l'enceinte couvre tout le site). Sens : celui de la
+    transaction, sinon l'indication `sens` du checkpoint, sinon '?'."""
+    cp = tx.get("checkpoint") or {}
+    loc = locs_by_id.get(_xid(cp))
+    if not loc:
+        return None
+    tid = tx.get("transaction_id")
+    if not isinstance(tid, int):
+        return None
+    dp = tx.get("date_paris") or ""
+    try:
+        local = _dt.datetime.strptime(dp, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ_PARIS)
+    except ValueError:
+        return None
+    direction = tx.get("direction")
+    if direction == "Entree":
+        sens, src = "E", "transaction"
+    elif direction == "Sortie":
+        sens, src = "S", "transaction"
+    elif loc.get("sens") in ("entree", "sortie"):
+        sens, src = ("E" if loc["sens"] == "entree" else "S"), "indication"
+    else:
+        sens, src = "?", None
+    return {
+        "_id": tid,
+        "ts": local.astimezone(UTC),
+        "date": dp[:10],
+        "heure": dp[11:19],
+        "checkpoint_id": _xid(cp),
+        "checkpoint_nom": cp.get("Name") or "",
+        "gate_id": _xid(tx.get("gate")),
+        "area_id": _xid(tx.get("area")),
+        "sens": sens,
+        "sens_source": src,
         "status": str(tx.get("status")),
         "releases": to_int(tx.get("releases")) or 1,
     }
@@ -712,11 +857,11 @@ def cumul_compteur(series):
     return total, deltas, resets
 
 
-def _series(releves, loc_id):
+def _series(releves, loc_id, champ="entries"):
     out = []
     for r in releves:
         c = (r.get("compteurs") or {}).get(loc_id) or {}
-        e = c.get("entries")
+        e = c.get(champ)
         if isinstance(e, int):
             out.append((r["ts"], e))
     return out
@@ -848,6 +993,317 @@ def save_day(db, date_str, cfg):
 
 
 # ---------------------------------------------------------------------------
+# Site - visites libres (jours publics SAISON, hors epreuve)
+# ---------------------------------------------------------------------------
+
+def _min(hhmm):
+    h, m = (int(x) for x in hhmm.split(":"))
+    return h * 60 + m
+
+
+def _hhmm(minutes):
+    return "%02d:%02d" % divmod(minutes, 60)
+
+
+def site_fenetre(site, info):
+    """Fenetre de comptage d'un jour de visites libres : horaires SAISON
+    -/+ marge, bornee a la journee. info = {open, close, is24h}."""
+    if not info:
+        return None
+    if info.get("is24h"):
+        return {"debut": "00:00", "fin": "23:59"}
+    o = info.get("open") if hhmm_ok(info.get("open")) else "00:00"
+    c = info.get("close") if hhmm_ok(info.get("close")) else "23:59"
+    if c <= o:                       # fermeture apres minuit ou saisie bancale
+        c = "23:59"
+    m = int(site.get("marge_min") or 0)
+    return {"debut": _hhmm(max(_min(o) - m, 0)), "fin": _hhmm(min(_min(c) + m, 23 * 60 + 59))}
+
+
+def site_gate(site, now_p, info, epreuve):
+    """Faut-il collecter / compter le site maintenant ? Pur.
+
+    info    : horaires SAISON du jour ({open, close, is24h}) ou None (pas un
+              jour de visites libres).
+    epreuve : une epreuve est active (bascule : les checkpoints servent au
+              delestage, ce sont des spectateurs).
+    `collecte` : on releve toute la journee (la base du compteur est le releve
+    precedant le debut de la fenetre) ; `dans_fenetre` : on compte."""
+    date = now_p.strftime("%Y-%m-%d")
+    hm = now_p.strftime("%H:%M")
+    fen = site_fenetre(site, info) if info else None
+    g = {"date": date, "jour_public": info is not None,
+         "horaires": ({"ouverture": info.get("open"), "fermeture": info.get("close"),
+                       "is24h": bool(info.get("is24h"))} if info else None),
+         "fenetre": fen, "collecte": False, "dans_fenetre": False}
+    if not site.get("enabled"):
+        g.update(raison="desactive", libelle="Visites libres desactivees")
+    elif not site.get("configure"):
+        g.update(raison="a_configurer", libelle="Visites libres a configurer")
+    elif info is None:
+        g.update(raison="pas_jour_public", libelle="Pas de visites libres aujourd'hui")
+    elif epreuve:
+        g.update(raison="epreuve", libelle="Epreuve en cours : pas de comptage")
+    else:
+        g["collecte"] = True
+        if hm < fen["debut"]:
+            g.update(raison="avant", libelle="Visites libres a partir de %s"
+                     % info.get("open", fen["debut"]).replace(":", "h"))
+        elif hm > fen["fin"]:
+            g.update(raison="termine", libelle="Visites libres terminees")
+        else:
+            g.update(raison="ouvert", dans_fenetre=True,
+                     libelle="Visites libres %s - %s" % (
+                         (info.get("open") or fen["debut"]).replace(":", "h"),
+                         (info.get("close") or fen["fin"]).replace(":", "h")))
+    return g
+
+
+def site_gate_db(db, cfg, now=None):
+    """site_gate avec les jours publics SAISON et les epreuves actives
+    (event_courant.is_saison_public_day : False des qu'une epreuve est active)."""
+    now = as_utc(now) if now else now_utc()
+    now_p = now.astimezone(TZ_PARIS)
+    site = cfg["site"]
+    if not site["enabled"] or not site["configure"]:
+        return site_gate(site, now_p, None, False)
+    import event_courant
+    try:
+        ok, info = event_courant.is_saison_public_day(db, now_p.strftime("%Y-%m-%d"), now)
+    except Exception as exc:             # parametrage illisible : on ne compte pas
+        g = site_gate(site, now_p, None, False)
+        g.update(raison="saison_illisible", libelle="Jours publics SAISON illisibles (%s)" % str(exc)[:80])
+        return g
+    return site_gate(site, now_p, info, bool(info) and not ok)
+
+
+def site_prochains_jours(db, today, n=10):
+    """Prochains jours de visites libres saisis sur SAISON (lecture seule),
+    avec l'epreuve dont la fenetre les recouvre (ils ne seront pas comptes)."""
+    import event_courant
+    jours = {}
+    y = int(today[:4])
+    for annee in (y, y + 1):
+        jours.update(event_courant.saison_public_days(db, annee))
+    try:
+        wins = event_courant.windows(db)
+    except Exception:
+        wins = []
+    out = []
+    for d in sorted(k for k in jours if k >= today)[:n]:
+        info = jours[d]
+        o = info["open"] if hhmm_ok(info.get("open")) else "12:00"
+        t = paris_at(d, o).astimezone(UTC)
+        ep = next(("%s %s" % (w["event"], w["year"]) for w in wins if w["start"] <= t <= w["end"]), None)
+        out.append({"date": d, "ouverture": info.get("open"), "fermeture": info.get("close"),
+                    "is24h": bool(info.get("is24h")), "epreuve": ep})
+    return out
+
+
+def _running(events):
+    """[(cle_tri, heure 'HH:MM', +entrees, +sorties)] -> (presents_max, a quelle heure)."""
+    # Meme instant (releve ou seconde) : entrees et sorties nettees ensemble,
+    # sinon le pic serait gonfle par l'ordre de lecture des compteurs.
+    net = {}
+    for k, h, e, s in events:
+        slot = net.setdefault(k, [h, 0])
+        slot[1] += e - s
+    cur, best, best_h = 0, None, None
+    for _k, (h, d) in sorted(net.items(), key=lambda kv: kv[0]):
+        cur += d
+        if best is None or cur > best:
+            best, best_h = cur, h
+    return (max(best, 0), best_h) if best is not None else (None, None)
+
+
+def compute_site_day(db, date_str, cfg, fenetre=None):
+    """Entrees / sorties / presents du site pour une journee, dans la fenetre
+    (horaires SAISON +/- marge). Base du compteur : dernier releve AVANT le
+    debut de la fenetre (meme regle robuste que le musee : remise a zero,
+    lecture fautive isolee). Repli sur les transactions si la couverture part
+    d'avant la fenetre."""
+    site = cfg["site"]
+    jour = db[COL_SITE_JOURS].find_one({"_id": date_str}) or {}
+    fen = fenetre or jour.get("fenetre") or {"debut": "00:00", "fin": "23:59"}
+    start = paris_at(date_str, fen["debut"])
+    end = paris_at(date_str, fen["fin"]) + _dt.timedelta(seconds=59)
+    ids = {loc["id"]: loc for loc in site["locations"]}
+
+    releves = list(db[COL_SITE_RELEVES].find({"date": date_str},
+                                              {"ts": 1, "heure": 1, "compteurs": 1}).sort("ts", 1))
+    for r in releves:
+        r["ts"] = as_utc(r["ts"])
+    base_idx = None
+    for i, r in enumerate(releves):
+        if r["ts"] < start:
+            base_idx = i
+    avant = base_idx is not None
+    if base_idx is None and releves:
+        base_idx = 0
+    sub = [r for r in releves[base_idx:] if r["ts"] <= end] if base_idx is not None else []
+
+    c_e = c_s = 0
+    c_events, c_heure, c_cp = [], {}, {}
+    for cid, loc in ids.items():
+        slot = c_cp.setdefault(cid, {"nom": loc["nom"], "entrees": 0, "sorties": 0})
+        for champ, key in (("entries", "entrees"), ("exits", "sorties")):
+            tot, deltas, _r = cumul_compteur(_series(sub, cid, champ))
+            slot[key] += tot
+            for ts, d in deltas:
+                p = paris(ts)
+                c_events.append((ts, p.strftime("%H:%M"), d if key == "entrees" else 0,
+                                 d if key == "sorties" else 0))
+                hs = c_heure.setdefault(p.strftime("%H"), {"entrees": 0, "sorties": 0})
+                hs[key] += d
+            if key == "entrees":
+                c_e += tot
+            else:
+                c_s += tot
+
+    tx_depuis = jour.get("tx_depuis")
+    tx_complet = bool(tx_depuis) and tx_depuis <= fen["debut"] + ":00" and not jour.get("tx_retard")
+    statuts = set(cfg["statuts_passage"])
+    t_e = t_s = 0
+    t_events, t_heure, t_cp = [], {}, {}
+    h0, h1 = fen["debut"] + ":00", fen["fin"] + ":59"
+    for p in db[COL_SITE_PASSAGES].find({"date": date_str},
+                                        {"heure": 1, "checkpoint_id": 1, "sens": 1, "status": 1}):
+        h = p.get("heure") or ""
+        cid = p.get("checkpoint_id")
+        if cid not in ids or p.get("status") not in statuts or not h0 <= h <= h1:
+            continue
+        sens = p.get("sens")
+        if sens not in ("E", "S"):
+            continue
+        e, s = (1, 0) if sens == "E" else (0, 1)
+        t_e += e
+        t_s += s
+        t_events.append((h, h[:5], e, s))
+        hs = t_heure.setdefault(h[:2], {"entrees": 0, "sorties": 0})
+        hs["entrees"] += e
+        hs["sorties"] += s
+        slot = t_cp.setdefault(cid, {"nom": ids[cid]["nom"], "entrees": 0, "sorties": 0})
+        slot["entrees"] += e
+        slot["sorties"] += s
+
+    partiel = None
+    if len(sub) and avant:
+        source = "compteur"
+    elif tx_complet:
+        source = "transactions"
+    elif sub:
+        source = "compteur_partiel"
+        partiel = paris(sub[0]["ts"]).strftime("%H:%M")
+    elif t_events:
+        source = "transactions_partiel"
+        partiel = (tx_depuis or "")[:5] or None
+    else:
+        source = None
+
+    if source in ("compteur", "compteur_partiel"):
+        entrees, sorties, events = c_e, c_s, c_events
+    elif source:
+        entrees, sorties, events = t_e, t_s, t_events
+    else:
+        entrees = sorties = None
+        events = []
+    # Courbe et repartition : transactions (heure exacte) si completes.
+    if tx_complet:
+        par_heure, par_cp = t_heure, t_cp
+    elif sub:
+        par_heure, par_cp = c_heure, c_cp
+    else:
+        par_heure, par_cp = t_heure, t_cp
+    pmax, pmax_h = _running(events)
+    return {
+        "date": date_str,
+        "fenetre": fen,
+        "entrees": entrees,
+        "sorties": sorties,
+        "presents_now": max(entrees - sorties, 0) if source else None,
+        "presents_max": {"n": pmax, "heure": pmax_h} if pmax is not None else None,
+        "source": source,
+        "partiel_depuis": partiel,
+        "entrees_compteur": c_e if sub else None,
+        "sorties_compteur": c_s if sub else None,
+        "entrees_tx": t_e if (tx_complet or t_events) else None,
+        "sorties_tx": t_s if (tx_complet or t_events) else None,
+        "tx_complet": tx_complet,
+        "par_heure": dict(sorted(par_heure.items())),
+        "par_checkpoint": par_cp,
+        "nb_releves": len(releves),
+        "dernier_releve": releves[-1]["ts"] if releves else None,
+    }
+
+
+def save_site_day(db, date_str, cfg, fenetre=None):
+    day = compute_site_day(db, date_str, cfg, fenetre)
+    doc = {k: v for k, v in day.items() if k != "date"}
+    doc["date"] = date_str
+    doc["maj"] = now_utc()
+    db[COL_SITE_JOURS].update_one({"_id": date_str}, {"$set": doc}, upsert=True)
+    return day
+
+
+def build_site_state(db, cfg, now=None):
+    """Section `site` de /api/musee/state. `visible` : jour de visites libres
+    ou donnees du jour ; jamais de 0 invente (None sans donnee)."""
+    now = as_utc(now) if now else now_utc()
+    now_p = now.astimezone(TZ_PARIS)
+    today = now_p.strftime("%Y-%m-%d")
+    site = cfg["site"]
+    gate = site_gate_db(db, cfg, now)
+    out = {"visible": False, "libelle": site["libelle"], "actif": gate["collecte"],
+           "dans_fenetre": gate["dans_fenetre"], "jour_public": gate["jour_public"],
+           "raison": gate["raison"], "raison_libelle": gate["libelle"],
+           "horaires": gate["horaires"], "fenetre": gate["fenetre"]}
+    out["enabled"] = bool(site["enabled"] and site["configure"])
+    if not out["enabled"]:
+        return out
+    # Prochain jour de visites libres (bloc de l'accueil, hors jour de visite)
+    try:
+        nxt = [j for j in site_prochains_jours(db, today, n=5) if j["date"] > today and not j.get("epreuve")]
+        out["prochain"] = nxt[0] if nxt else None
+    except Exception:
+        out["prochain"] = None
+    jour = db[COL_SITE_JOURS].find_one({"_id": today}, {"fenetre": 1, "derniere_erreur": 1})
+    day = None
+    if gate["collecte"] or jour:
+        day = compute_site_day(db, today, cfg, gate["fenetre"] or (jour or {}).get("fenetre"))
+    a_donnees = bool(day and day["source"])
+    out["visible"] = bool(gate["jour_public"] or a_donnees)
+    if not out["visible"]:
+        return out
+    last = db[COL_SITE_RELEVES].find_one({"date": today}, {"ts": 1}, sort=[("ts", -1)])
+    last_ts = as_utc(last["ts"]) if last else None
+    age = int((now - last_ts).total_seconds()) if last_ts else None
+    fen = (day or {}).get("fenetre") or gate["fenetre"]
+    heures = set((day or {}).get("par_heure", {}).keys())
+    if fen:
+        heures |= set("%02d" % h for h in range(int(fen["debut"][:2]), int(fen["fin"][:2]) + 1))
+    ph = (day or {}).get("par_heure", {})
+    out.update({
+        "entrees": day["entrees"] if day else None,
+        "sorties": day["sorties"] if day else None,
+        "presents": day["presents_now"] if day else None,
+        "presents_max": day["presents_max"] if day else None,
+        "source": day["source"] if day else None,
+        "partiel_depuis": day["partiel_depuis"] if day else None,
+        "par_heure": ([{"heure": h, "entrees": ph.get(h, {}).get("entrees", 0),
+                        "sorties": ph.get(h, {}).get("sorties", 0)} for h in sorted(heures)]
+                      if a_donnees else []),
+        "par_checkpoint": ([{"id": k, "nom": v["nom"], "entrees": v["entrees"], "sorties": v["sorties"]}
+                            for k, v in (day or {}).get("par_checkpoint", {}).items()]
+                           if a_donnees else []),
+        "dernier_releve_heure": paris(last_ts).strftime("%H:%M") if last_ts else None,
+        "age_releve_s": age,
+        "releve_perime": bool(gate["dans_fenetre"] and (age is None or age > cfg["releve_perime_s"])),
+        "derniere_erreur": (jour or {}).get("derniere_erreur"),
+    })
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Etat pour l'API
 # ---------------------------------------------------------------------------
 
@@ -894,7 +1350,8 @@ def build_state(db, now=None, cfg=None):
         return {"ok": True, "configure": False,
                 "enabled": True if cfg is None else bool(cfg["enabled"]),
                 "date": today, "maintenant": now_p.strftime("%H:%M"),
-                "statut": "a_configurer", "statut_libelle": "A configurer"}
+                "statut": "a_configurer", "statut_libelle": "A configurer",
+                "site": {"visible": False}}
 
     statut, libelle = statut_ouverture(cfg, now_p)
     hj = horaires_du_jour(cfg, today)
@@ -963,4 +1420,15 @@ def build_state(db, now=None, cfg=None):
         "par_checkpoint": cps,
         "pic_heure": day["pic_heure"],
         "comparaisons": comp,
+        "site": _site_state_safe(db, cfg, now),
     }
+
+
+def _site_state_safe(db, cfg, now):
+    """La section site ne doit jamais casser l'etat du musee."""
+    try:
+        return build_site_state(db, cfg, now)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).exception("musee site state : %s", exc)
+        return {"visible": False, "erreur": str(exc)[:200]}

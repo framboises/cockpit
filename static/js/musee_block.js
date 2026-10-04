@@ -37,6 +37,7 @@
   })();
 
   var chart = null;
+  var siteChart = null;
   var timer = null;
 
   function el(tag, cls, text) {
@@ -141,7 +142,31 @@
     right.appendChild(el("div", "hsh-summary-label",
       d.pic_heure ? "Heure de pointe (" + fmt(d.pic_heure.n) + ")" : "Heure de pointe"));
     top.appendChild(right);
+
+    // Visiteurs en visite libre sur le site (billet musee, tripodes de la
+    // porte Nord bis) : chiffre de tete les jours de visites libres.
+    var s = d.site || {};
+    if (s.visible) {
+      var site = el("div", "musee-summary-site");
+      var sv = el("div", "hsh-summary-value", s.presents === null || s.presents === undefined ? "--" : fmt(s.presents));
+      if (s.releve_perime) sv.classList.add("musee-val-perime");
+      site.appendChild(sv);
+      site.appendChild(el("div", "hsh-summary-label", "En visite libre sur le site"));
+      site.title = "Entrees - sorties des tripodes du site depuis l'ouverture des visites libres";
+      top.appendChild(site);
+    }
     body.appendChild(top);
+    if (!s.visible && s.enabled) {
+      var p = s.prochain;
+      var txt = "Visites libres du site : aucune aujourd'hui";
+      if (p && p.date) {
+        var dt = new Date(p.date + "T12:00:00");
+        txt += " - prochaine le " + dt.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
+      } else {
+        txt += " - aucune date saisie (jours publics de SAISON dans GroundMaster)";
+      }
+      body.appendChild(el("div", "musee-site-none", txt));
+    }
 
     if (d.releve_perime) {
       var warn = el("div", "musee-warn");
@@ -187,6 +212,8 @@
       body.appendChild(list);
     }
 
+    renderSite(d.site);
+
     var hj = d.horaires_jour || {};
     var horaires = hj.ferme
       ? "Ferme aujourd'hui" + (hj.libelle ? " (" + hj.libelle + ")" : "")
@@ -194,6 +221,79 @@
         (hj.source === "exception" && hj.libelle ? " (" + hj.libelle + ")" : "");
     body.appendChild(el("div", "musee-foot",
       horaires + " - compteurs Handshake " + (d.area_nom || "")));
+  }
+
+  // Site - visites libres : seulement un jour de visites libres ou s'il y a
+  // des donnees du jour. Jamais de 0 invente : "--" sans donnee.
+  function renderSite(s) {
+    if (!s || !s.visible) {
+      if (siteChart) { siteChart.destroy(); siteChart = null; }
+      return;
+    }
+    var box = el("div", "musee-site");
+    var head = el("div", "musee-site-head");
+    head.appendChild(el("span", null, s.libelle || "Site - visites libres"));
+    var etat = s.raison_libelle || "";
+    if (s.releve_perime) etat += (etat ? " - " : "") + "releve perime";
+    else if (s.source === "compteur_partiel" || s.source === "transactions_partiel") {
+      etat += (etat ? " - " : "") + "depuis " + (s.partiel_depuis || "?") + " seulement";
+    }
+    var et = el("span", "musee-site-etat" + (s.releve_perime ? " musee-perime" : ""), etat);
+    if (s.dernier_releve_heure) et.title = "Dernier releve : " + s.dernier_releve_heure;
+    head.appendChild(et);
+    box.appendChild(head);
+
+    var kpis = el("div", "musee-site-kpis");
+    function kpi(v, label) {
+      var k = el("div", "musee-site-kpi");
+      var val = el("div", "musee-site-kpi-v", fmt(v));
+      if (s.releve_perime) val.classList.add("musee-val-perime");
+      k.appendChild(val);
+      k.appendChild(el("div", "musee-site-kpi-l", label));
+      kpis.appendChild(k);
+    }
+    kpi(s.entrees, "Entrees");
+    kpi(s.sorties, "Sorties");
+    kpi(s.presents, "Presents");
+    kpi(s.presents_max ? s.presents_max.n : null,
+      s.presents_max && s.presents_max.heure ? "Pic (" + s.presents_max.heure.replace(":", "h") + ")" : "Pic presents");
+    box.appendChild(kpis);
+
+    var rows = s.par_heure || [];
+    if (rows.some(function (r) { return r.entrees > 0 || r.sorties > 0; }) && typeof Chart !== "undefined") {
+      var wrap = el("div", "musee-site-chart");
+      var canvas = document.createElement("canvas");
+      wrap.appendChild(canvas);
+      box.appendChild(wrap);
+      body.appendChild(box);
+      var muted = cssVar("--muted", "#888");
+      if (siteChart) { siteChart.destroy(); siteChart = null; }
+      siteChart = new Chart(canvas.getContext("2d"), {
+        type: "bar",
+        data: {
+          labels: rows.map(function (r) { return r.heure + "h"; }),
+          datasets: [
+            { label: "Entrees", data: rows.map(function (r) { return r.entrees; }),
+              backgroundColor: cssVar("--brand", "#6366f1"), borderRadius: 2, maxBarThickness: 12 },
+            { label: "Sorties", data: rows.map(function (r) { return r.sorties; }),
+              backgroundColor: cssVar("--muted", "#999"), borderRadius: 2, maxBarThickness: 12 }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          plugins: { legend: { display: false },
+            tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + " : " + fmt(ctx.parsed.y); } } } },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: muted, font: { size: 9 } } },
+            y: { beginAtZero: true, grid: { color: "rgba(127,127,127,0.15)" },
+                 ticks: { color: muted, font: { size: 9 }, precision: 0 } }
+          }
+        }
+      });
+      return;
+    }
+    if (siteChart) { siteChart.destroy(); siteChart = null; }
+    body.appendChild(box);
   }
 
   function renderAConfigurer(d) {
