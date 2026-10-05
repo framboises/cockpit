@@ -35,3 +35,7 @@ docs/pmv/reference/banc/
 # Export Cowork (jeton Graph delegue + fichiers generes)
 msal_cowork_cache.bin
 msal_cowork_cache.bin.tmp
+
+# Journaux d'execution et verrous des taches planifiees (jamais versionnes)
+logs/
+*.log
