@@ -1,0 +1,6 @@
+2026-09-29 19:30:49 [MomentusSync] INFO Debut synchro full (base titan_dev)
+2026-09-29 19:32:22 [MomentusSync] INFO OK full : 5500 evenements, 8867 fonctions, 101 appels, 92.5 s | {"venues_new": 13, "venues": 13, "rooms_new": 309, "rooms": 309, "events": 5500, "events_new": 5500, "events_deleted": 0, "functions": 8867, "functions_window": ["2023-04-01", "2029-09-28"], "functions_new": 8867, "functions_deleted": 0}
+2026-09-29 19:32:47 [MomentusSync] INFO Debut synchro incremental (base titan_dev)
+2026-09-29 19:32:58 [MomentusSync] INFO OK incremental : 0 evenements, 512 fonctions, 16 appels, 10.7 s | {"venues_new": 0, "venues": 13, "rooms_new": 0, "rooms": 309, "since": "2026-09-29T17:15:49Z", "events": 0, "events_new": 0, "functions_deleted": 0, "functions": 512}
+2026-09-29 20:07:22 [MomentusSync] INFO Debut synchro full (base titan)
+2026-09-29 20:08:40 [MomentusSync] INFO OK full : 5500 evenements, 8867 fonctions, 101 appels, 78.2 s | {"venues_new": 13, "venues": 13, "rooms_new": 309, "rooms": 309, "events": 5500, "events_new": 5500, "events_deleted": 0, "functions": 8867, "functions_window": ["2023-04-01", "2029-09-28"], "functions_new": 8867, "functions_deleted": 0}

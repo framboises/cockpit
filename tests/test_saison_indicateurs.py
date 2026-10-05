@@ -555,3 +555,131 @@ def test_client_window_and_key_validation():
     # Meme cle que les seminaires
     assert SI.client_key({"accountId": "acc-1", "name": "X"}) == "acc-1"
     assert SI.client_key({"accountId": None, "name": "Gala  Été"}) == SI.parse_client("nom:Gala Ete")
+
+
+def test_client_for_event_planning_button():
+    """Bouton 'Planning du client' des vignettes : la cle client se deduit de
+    momentus_event_id (accountId, sinon nom d'evenement normalise)."""
+    db = FakeDB(momentus_events=[
+        {"_id": "event-1-A", "name": "ACME convention", "accountId": "account-9-A"},
+        {"_id": "event-2-A", "name": "Gala  Été", "accountId": None},
+    ])
+    assert SI.client_for_event(db, "event-1-A") == "account-9-A"
+    assert SI.client_for_event(db, " event-2-A ") == "nom:gala ete"
+    assert SI.client_for_event(db, "event-3-A") is None
+    for bad in ("", None, "event-1", "acc-1", "event-1-A'; x", "{\"$ne\": 1}", "event-12345678901-A"):
+        assert SI.parse_event_id(bad) is None, bad
+        assert SI.client_for_event(db, bad) is None, bad
+    assert SI.parse_event_id("event-45514-A") == "event-45514-A"
+
+
+def test_compte_de_service_aco_pas_regroupe():
+    # "ACO Sport" (compte de service) : ECOLE MOTO et FERRARI POZZI restent
+    # deux lignes ; un vrai client (meme accountId) reste fusionne.
+    a = _sem("e1", "ECOLE MOTO", "Seminaire", "r1", "2026-10-03", "2026-10-03", est=10, accountId="account-321-A", accountName="ACO Sport")
+    b = _sem("e2", "FERRARI POZZI", "Seminaire", "r2", "2026-10-03", "2026-10-03", est=20, accountId="account-321-A", accountName="ACO Sport")
+    res = SI.compute_seminaires(_db(events=[a, b]), D1, D1, SEM_CFG)["2026-10-03"]
+    assert res["count"] == 2
+    assert sorted(i["event"] for i in res["items"]) == ["ECOLE MOTO", "FERRARI POZZI"]
+    assert all(i["client"].startswith("nom:") and i["account"] != "ACO Sport" for i in res["items"])
+    assert SI.client_key({"accountId": "acc-9", "accountName": "SNCF", "name": "X"}) == "acc-9"
+    assert SI.client_key({"accountId": "account-9889-A", "accountName": "ACO Karting", "name": "IAME "}) == "nom:iame"
+
+
+# ---------------------------------------------------------------------------
+# Reservations en direct par l'ACO (compte de service) : gestion INTERNE
+# ---------------------------------------------------------------------------
+def _aco_db():
+    a = _sem("e1", "ECOLE MOTO", "Seminaire", "r1", "2026-10-03", "2026-10-03", est=10,
+             accountId="account-321-A", accountName="ACO Sport")
+    b = _sem("e2", "IAME", "Seminaire", "r2", "2026-10-03", "2026-10-03", est=50,
+             accountId="account-9889-A", accountName="ACO Karting")
+    c = _sem("e3", "Convention SNCF", "Seminaire", "r3", "2026-10-03", "2026-10-03", est=80,
+             accountId="acc-sncf", accountName="SNCF Reseau")
+    d = _sem("e4", "UPCITI", "Seminaire", "r4", "2026-10-03", "2026-10-03", est=20,
+             accountId="acc-up", accountName="Acomex Upciti")     # 'Aco' sans mot entier : pas ACO
+    return _db(events=[a, b, c, d])
+
+
+def test_compte_aco_flag():
+    assert SI.compte_aco({"accountName": " ACO Sport "}) == "ACO Sport"
+    assert SI.compte_aco({"accountName": "aco production evenements"}) == "aco production evenements"
+    for acc in ("SNCF Reseau", "Acomex Upciti", "", None, "Groupe ACO"):
+        assert SI.compte_aco({"accountName": acc}) == "", acc
+    assert SI.compte_aco({}) == "" and SI.compte_aco(None) == ""
+
+
+def test_interne_aco_dans_indicateurs():
+    db = _db(events=[_ev("event-1-A", "IAME", "room-107-A", "2026-10-03", "2026-10-03", accountName="ACO Karting"),
+                     _ev("event-2-A", "UPCITI", "room-833-A", "2026-10-03", "2026-10-03", accountName="UPCITI SAS")])
+    res = _by_id(SI.compute(db, D1, D1, SI.DEFAULT_INDICATORS)["2026-10-03"])
+    d = res["karting_cik"]["details"][0]
+    assert (d["interne_aco"], d["compte_aco"]) == (True, "ACO Karting")
+    d = res["bugatti"]["details"][0]
+    assert (d["interne_aco"], d["compte_aco"]) == (False, "")
+
+
+def test_interne_aco_dans_seminaires():
+    res = SI.compute_seminaires(_aco_db(), D1, D1, SEM_CFG)["2026-10-03"]
+    by = {i["event"]: i for i in res["items"]}
+    assert (by["ECOLE MOTO"]["interne_aco"], by["ECOLE MOTO"]["compte_aco"]) == (True, "ACO Sport")
+    assert (by["IAME"]["interne_aco"], by["IAME"]["compte_aco"]) == (True, "ACO Karting")
+    assert (by["Convention SNCF"]["interne_aco"], by["Convention SNCF"]["compte_aco"]) == (False, "")
+    assert by["UPCITI"]["interne_aco"] is False
+    # Regroupement inchange : client = evenement pour les comptes ACO
+    assert by["ECOLE MOTO"]["client"] == "nom:ecole moto" and by["Convention SNCF"]["client"] == "acc-sncf"
+
+
+def test_interne_aco_dans_recherche():
+    res = SI.search(_aco_db(), "ecole moto", S_FROM, S_TO, S_TODAY)
+    h = res["days"][0]["hits"][0]
+    assert (h["interne_aco"], h["compte_aco"]) == (True, "ACO Sport")
+    # Le nom du compte de service est cherchable ('aco sport')
+    assert SI.search(_aco_db(), "aco sport", S_FROM, S_TO, S_TODAY)["summary"]["hits"] == 1
+    h = SI.search(_aco_db(), "sncf", S_FROM, S_TO, S_TODAY)["days"][0]["hits"][0]
+    assert (h["interne_aco"], h["compte_aco"]) == (False, "")
+
+
+def test_interne_aco_dans_programme():
+    db = _aco_db()
+    res = SI.client_programme(db, "nom:iame", date(2026, 10, 1), date(2026, 10, 10))
+    assert res["account"] == "IAME" and (res["interne_aco"], res["compte_aco"]) == (True, "ACO Karting")
+    assert [(e["id"], e["interne_aco"], e["compte_aco"]) for e in res["events"]] == [("e2", True, "ACO Karting")]
+    res = SI.client_programme(db, "acc-sncf", date(2026, 10, 1), date(2026, 10, 10))
+    assert (res["interne_aco"], res["compte_aco"]) == (False, "")
+    assert res["events"][0]["interne_aco"] is False
+    vide = SI.client_programme(db, "acc-404", date(2026, 10, 1), date(2026, 10, 10))
+    assert vide["interne_aco"] is False and vide["compte_aco"] == ""
+
+
+class _SortList(list):
+    def sort(self, *a, **k):     # curseur Mongo .sort("_id", 1)
+        return self
+
+
+class _TlColl(FakeColl):
+    def find(self, query=None, projection=None):
+        return _SortList(copy.deepcopy(d) for d in self.docs)
+
+
+def test_interne_aco_dans_timeline_momentus():
+    import momentus_timeline as MT
+    evs = [_sem("event-1-A", "ECOLE MOTO", "Seminaire", "r1", "2026-10-03", "2026-10-03",
+                accountId="account-321-A", accountName="ACO Sport", isDefinite=True),
+           _sem("event-2-A", "Convention SNCF", "Seminaire", "r2", "2026-10-03", "2026-10-03",
+                accountId="acc-sncf", accountName="SNCF Reseau", isDefinite=True)]
+    fns = [dict(_fn("f1", "event-1-A", "r1", "2026-10-03", "09:00", "12:00"), name="Cours")]
+    db = FakeDB()
+    db.cols = {"momentus_events": _TlColl(evs), "momentus_functions": _TlColl(fns),
+               "momentus_lieux_mapping": _TlColl(), "evenement": _TlColl()}
+    items = MT.build_items(db, D1, D1)["2026-10-03"]
+    aco = [i for i in items if i["momentus_event_id"] == "event-1-A"]
+    sncf = [i for i in items if i["momentus_event_id"] == "event-2-A"]
+    assert aco and sncf
+    for i in aco:
+        assert i["momentus_interne"] is True and i["momentus_compte_aco"] == "ACO Sport"
+        assert i["remark"].startswith("Reserve en direct par l'ACO (gestion interne) - ACO Sport | Momentus")
+        assert i["momentus_client"] == "ECOLE MOTO"
+    for i in sncf:
+        assert "momentus_interne" not in i and "momentus_compte_aco" not in i
+        assert i["remark"].startswith("Momentus") and i["momentus_client"] == "SNCF Reseau"

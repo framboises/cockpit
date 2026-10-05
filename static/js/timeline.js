@@ -714,11 +714,13 @@ function createEventItem(date, item) {
             <div class="event-time">
                 <p class="time-info">${timeInfo}</p>
                 ${getCategoryChipHtml(item.category)}
+                ${_acoBadgeHtml(item)}
                 ${getAccessChipHtml(item)}
                 <p class="event-location">${fullPlace}</p>
                 ${prepHtml}
             </div>
             <div class="buttons-container">
+                ${_plCardBtnHtml(item)}
                 <button class="expand-btn">
                     <span class="material-icons">expand_more</span>
                 </button>
@@ -844,6 +846,8 @@ function createEventItem(date, item) {
         });
     }
 
+    _plWireCardBtn(eventItem.querySelector('.pl-open-btn'), item, date);
+
     // Rendre la vignette cliquable pour ouvrir la modale détaillée (en dehors du bouton d'extension)
     eventItem.addEventListener('click', function(e) {
     if (!e.target.closest(".expand-btn")) {
@@ -923,8 +927,10 @@ function createClusterItem(date, cluster) {
                   <div style="font-weight:700;">${title}</div>
                   <div style="opacity:.8; font-size:12px;">${place} ${hours?('• '+hours):''}</div>
                 </div>
+                ${_acoBadgeHtml(ch, true)}
                 ${getAccessChipHtml(ch)}
                 ${chip}
+                ${_plCardBtnHtml(ch, true)}
               </div>
             </li>`;
         }).join('')}
@@ -940,6 +946,8 @@ function createClusterItem(date, cluster) {
 
   // clic sur une sous-ligne -> ouvrir le drawer de l'item
   el.querySelectorAll('.cluster-line').forEach(li=>{
+    const it0 = cluster.items.find(x => String(x._id) === String(li.getAttribute('data-child-id')));
+    if (it0) _plWireCardBtn(li.querySelector('.pl-open-btn'), it0, date);
     li.addEventListener('click', ()=>{
       const id = li.getAttribute('data-child-id');
       const it = cluster.items.find(x => String(x._id) === String(id));
@@ -957,6 +965,95 @@ function createClusterItem(date, cluster) {
   });
 
   return el;
+}
+
+// Bouton "Planning du client" des vignettes Momentus (cartes et lignes de
+// regroupement). Jamais sur une vignette non Momentus ni sur le regroupement
+// des dates bloquees (pas d'evenement unique). Markup statique : le nom du
+// client n'est jamais injecte en HTML.
+function _plCardBtnHtml(item, small) {
+  if (!item || !item.momentus_event_id) return '';
+  return '<button type="button" class="pl-open-btn' + (small ? ' is-sm' : '') + '" title="Planning du client"'
+    + ' aria-label="Planning du client"><span class="material-symbols-outlined" aria-hidden="true">view_timeline</span>'
+    + (small ? '' : '<span class="pl-open-lbl">Planning</span>') + '</button>';
+}
+
+function _plWireCardBtn(btn, item, date) {
+  if (!btn) return;
+  btn.addEventListener('click', e => {
+    e.stopPropagation();   // ni le tiroir ni le depliage de la carte
+    e.preventDefault();
+    siOpenPlanning({ event: item.momentus_event_id }, item.momentus_client || (item.activity || '').split('/')[0].trim(), date, btn);
+  });
+  btn.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation(); });
+}
+
+// Badge "ACO interne" : reservation Momentus faite en direct par l'ACO sous
+// un compte de service ('ACO Sport', 'ACO Karting'...) = gestion INTERNE, pas
+// un client externe. Serveur : momentus_interne / momentus_compte_aco
+// (vignettes), interne_aco / compte_aco (seminaires, recherche, programme).
+// Telephone : icone + 'ACO' seulement (le mot 'interne' est masque en CSS).
+function _acoTip(compte) {
+  return "Reserve en direct par l'ACO" + (compte ? ' (' + compte + ')' : '') + ' : gestion interne';
+}
+
+function _acoEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function _acoIsInterne(x) {
+  return !!(x && (x.momentus_interne || x.interne_aco));
+}
+
+function _acoCompte(x) {
+  return (x && (x.momentus_compte_aco || x.compte_aco)) || '';
+}
+
+function _acoBadgeHtml(x, small) {
+  if (!_acoIsInterne(x)) return '';
+  const tip = _acoEsc(_acoTip(_acoCompte(x)));
+  return '<span class="aco-badge' + (small ? ' is-sm' : '') + '" title="' + tip + '" aria-label="' + tip + '">'
+    + '<span class="material-symbols-outlined" aria-hidden="true">apartment</span>'
+    + '<span class="aco-lbl">ACO</span><span class="aco-lbl-x"> interne</span></span>';
+}
+
+// Ligne "badge + Reservation directe ACO - gestion interne (<compte>)" sous
+// un titre (programme client, planning)
+function _acoNoteEl(x, cls) {
+  const b = _acoBadgeEl(x);
+  if (!b) return null;
+  const n = document.createElement('div');
+  n.className = 'aco-note' + (cls ? ' ' + cls : '');
+  n.appendChild(b);
+  const c = _acoCompte(x);
+  const s = document.createElement('span');
+  s.className = 'aco-note-txt';
+  s.textContent = 'Reservation directe ACO - gestion interne' + (c ? ' (' + c + ')' : '');
+  n.appendChild(s);
+  return n;
+}
+
+function _acoBadgeEl(x, small) {
+  if (!_acoIsInterne(x)) return null;
+  const b = document.createElement('span');
+  b.className = 'aco-badge' + (small ? ' is-sm' : '');
+  const tip = _acoTip(_acoCompte(x));
+  b.title = tip;
+  b.setAttribute('aria-label', tip);
+  const ic = document.createElement('span');
+  ic.className = 'material-symbols-outlined';
+  ic.setAttribute('aria-hidden', 'true');
+  ic.textContent = 'apartment';
+  b.appendChild(ic);
+  const l = document.createElement('span');
+  l.className = 'aco-lbl';
+  l.textContent = 'ACO';
+  b.appendChild(l);
+  const lx = document.createElement('span');
+  lx.className = 'aco-lbl-x';
+  lx.textContent = ' interne';
+  b.appendChild(lx);
+  return b;
 }
 
 // Fonction pour basculer l'affichage des détails (expand/collapse)
@@ -1014,6 +1111,7 @@ function _siTipOutside(ev) {
   const tip = _dayNavTooltip;
   if (!SiTip.pinned || !tip || tip.contains(ev.target)) return;
   if (SiProg.el && SiProg.el.contains(ev.target)) return;
+  if (_plIsOpen()) return;   // modale planning par-dessus : ne touche pas aux fenetres dessous
   // Programme ouvert : un clic hors des deux fenetres ferme d'abord le
   // programme (l'infobulle du jour reste epinglee)
   if (_siProgIsOpen()) { _siProgClose(); return; }
@@ -1023,7 +1121,7 @@ function _siTipOutside(ev) {
 }
 
 function _siTipKeys(ev) {
-  if (ev.key !== 'Escape' || !SiTip.pinned) return;
+  if (ev.key !== 'Escape' || !SiTip.pinned || _plIsOpen()) return;   // planning client : il gere Echap
   // Echap ferme d'abord le programme client, puis l'infobulle epinglee,
   // puis (Echap suivant) le calendrier dessous
   ev.stopPropagation();
@@ -1338,10 +1436,12 @@ function _siSemBlock(sem, ds) {
   const lab = document.createElement('span');
   let txt = 'Seminaires (' + sem.count + ')';
   if (sem.pers) txt += ' - ' + _siFmtPers(sem.pers) + (sem.pers_unknown ? ' connus' : '');
+  const items = sem.items || [];
+  const nInt = items.filter(_acoIsInterne).length;
+  if (nInt) txt += ' · dont ' + nInt + ' interne' + (nInt > 1 ? 's' : '') + ' ACO';
   lab.textContent = txt;
   title.appendChild(lab);
   block.appendChild(title);
-  const items = sem.items || [];
   // count - more = nombre montre d'emblee (max_list), que le serveur envoie
   // la liste complete ou deja tronquee
   const shown = Math.max(1, (sem.count || items.length) - (sem.more || 0));
@@ -1373,6 +1473,8 @@ function _siSemBlock(sem, ds) {
     t.textContent = (it.event || '') + (it.place ? ' - ' + it.place : '');
     if (it.type) t.title = it.type;
     line.appendChild(t);
+    const ab = _acoBadgeEl(it, true);
+    if (ab) line.appendChild(ab);
     if (it.status === 'option') {
       const o = document.createElement('span');
       o.className = 'si-tip-flag';
@@ -1569,7 +1671,20 @@ function _siProgRender(shell, data, ds) {
   if (t.events) mt += ' · ' + t.events + ' resa';
   if (t.max_pers) mt += ' · jusqu\'a ' + _siFmtPers(t.max_pers);
   meta.textContent = mt;
+  const an = _acoNoteEl(data, 'si-prog-aco');
+  if (an) shell.ttl.appendChild(an);
   shell.ttl.appendChild(meta);
+  if ((data.days || []).length) {
+    // Meme client dans la modale "Planning" (grille horaire par espace)
+    const client = SiProg.client;
+    const pb = _siProgButton('view_timeline', 'Ouvrir le planning (grille horaire par espace)', 'si-prog-plan');
+    pb.appendChild(document.createTextNode('Ouvrir le planning'));
+    pb.addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (client) siOpenPlanning({ client }, data.account || shell.name.textContent, ds || SiProg.ds, pb);
+    });
+    shell.ttl.appendChild(pb);
+  }
   const evs = data.events || [];
   const multi = evs.length > 1;
   const evName = {};
@@ -1688,6 +1803,659 @@ function _siProgPlace() {
 }
 window.addEventListener('resize', () => { if (_siProgIsOpen()) _siProgPlace(); });
 
+// ---------------------------------------------------------------------------
+// Planning d'un client (modale "Planning <client>", 05/10/2026)
+// Ouvert par le bouton 'view_timeline' des vignettes Momentus (cartes et
+// lignes de regroupement : momentus_event_id -> client cote serveur) ou par
+// "Ouvrir le planning" de la fenetre "Programme <client>". Donnees :
+// /api/saison/client (fenetre jour-7 -> jour+30). Vue JOUR : grille horaire,
+// une ligne par espace, blocs par fonction (couleur = categorie), puis
+// l'agenda (liste ordonnee) ; vue PLUSIEURS JOURS : une ligne par jour.
+// Texte Momentus en textContent uniquement.
+// ---------------------------------------------------------------------------
+const SiPlan = { el: null, modal: null, head: null, chips: null, body: null, seq: 0, src: null, name: '',
+  data: null, ds: null, view: 'day', opener: null, cache: {}, timer: null, grid: null, rz: null,
+  phoneView: (function() { try { return localStorage.getItem('pl_phone_view') || 'list'; } catch (e) { return 'list'; } })() };
+
+// Categories de couleur : type de fonction Momentus s'il est renseigne, sinon
+// mots-cles du nom de la fonction. Ordre = priorite. Couleur jamais seule :
+// libelle dans le bloc, legende, agenda.
+const _PL_CATS = [
+  { id: 'repas', label: 'Restauration', color: '#B45309', bg: '#FEF3C7',
+    re: /(dejeun|diner|dinatoire|cocktail|petit.?dej|restaura|repas|buffet|traiteur|pause|cafe|apero|aperitif|lunch|brunch|soiree|gala)/ },
+  { id: 'logistique', label: 'Montage / logistique', color: '#475569', bg: '#E2E8F0',
+    re: /(montage|installation|livraison|stickage|arrivee du staff|depart semi|materiel|amenagement|repetition|transformation|nettoyage|rangement|enlevement|finalisation)/ },
+  { id: 'visite', label: 'Visites', color: '#047857', bg: '#D1FAE5', re: /(visite|coulisses|musee)/ },
+  { id: 'piste', label: 'Piste / karting', color: '#B91C1C', bg: '#FEE2E2',
+    re: /(karting|kart\b|piste|roulage|bapteme|circuit|pilotage|drift|course|essais)/ },
+  { id: 'reunion', label: 'Pleniere / ateliers', color: '#1D4ED8', bg: '#DBEAFE',
+    re: /(pleniere|atelier|reunion|conference|forum|seminaire|accueil|ouverture|mot d|intervention|table ronde|keynote|formation|dedicace|participants|remise|convention|assemblee)/ },
+];
+const _PL_OTHER = { id: 'autre', label: 'Autre', color: '#7C3AED', bg: '#EDE9FE' };
+const _PL_SPACE = { id: 'espace', label: 'Espace reserve', color: '#64748B', bg: '#F1F5F9' };
+
+function _plIsOpen() {
+  return !!(SiPlan.el && SiPlan.el.classList.contains('open'));
+}
+
+function _plPhone() {
+  return window.innerWidth <= 600;
+}
+
+function _plNorm(s) {
+  return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+function _plCat(it) {
+  if (it.kind === 'space') return _PL_SPACE;
+  const t = _plNorm(it.ftype), n = _plNorm(it.name);
+  if (t) for (const c of _PL_CATS) if (c.re.test(t)) return c;
+  for (const c of _PL_CATS) if (c.re.test(n)) return c;
+  return _PL_OTHER;
+}
+
+function _plMin(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(hhmm || '');
+  return m ? Math.min(1440, Number(m[1]) * 60 + Number(m[2])) : null;
+}
+
+// Creneau d'une ligne du programme ce jour-la. Les fonctions sur plusieurs
+// jours n'ont l'heure de debut que le premier jour et celle de fin que le
+// dernier : contFrom = commence la veille, contTo = finit le lendemain.
+function _plSlot(it) {
+  if (it.all_day && !it.start && !it.end) return { allDay: true };
+  const s = _plMin(it.start), e = _plMin(it.end);
+  if (s === null && e === null) return { allDay: true, cont: true };
+  const r = { allDay: false, contFrom: s === null, contTo: e === null };
+  r.s = s === null ? 0 : s;
+  r.e = e === null ? 1440 : e;
+  if (r.e < r.s) { r.e = 1440; r.contTo = true; }
+  r.instant = !r.contFrom && !r.contTo && r.e === r.s;
+  return r;
+}
+
+function _plHoursTxt(x) {
+  const sl = x.sl, it = x.it;
+  if (sl.allDay) return sl.cont ? 'journee (suite)' : 'journee';
+  if (sl.instant) return it.start;
+  if (sl.contFrom) return '→ ' + it.end;
+  if (sl.contTo) return it.start + ' →';
+  return it.start + ' - ' + it.end;
+}
+
+function _plHoursLong(x) {
+  const sl = x.sl, it = x.it;
+  if (sl.contFrom && !sl.allDay) return "jusqu'a " + it.end + ' (commence la veille)';
+  if (sl.contTo && !sl.allDay) return 'des ' + it.start + ' (finit le lendemain)';
+  return _plHoursTxt(x);
+}
+
+function _plDayLabel(ds, long) {
+  const d = new Date(ds + 'T00:00:00');
+  const s = d.toLocaleDateString('fr-FR', long
+    ? { weekday: 'long', day: 'numeric', month: 'long' }
+    : { weekday: 'short', day: 'numeric', month: 'short' });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function _plRel(ds) {
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  const diff = Math.round((new Date(ds + 'T00:00:00') - t) / 86400000);
+  return diff === 0 ? "Aujourd'hui" : diff === 1 ? 'Demain' : diff === -1 ? 'Hier' : '';
+}
+
+function _plFmtMin(m) {
+  return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+}
+
+function _plEl(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+// Modele d'un jour : lignes (espaces), notes (fonctions sans espace a la
+// journee : informations de l'evenement), agenda, plage horaire de la grille.
+function _plDayModel(day) {
+  const rows = new Map();
+  const notes = [], agenda = [];
+  (day.items || []).forEach(it => {
+    const x = { it, sl: _plSlot(it), cat: _plCat(it) };
+    if (it.kind === 'function' && !it.room && x.sl.allDay) { notes.push(x); return; }
+    agenda.push(x);
+    const key = it.room || '';
+    let r = rows.get(key);
+    if (!r) { r = { room: it.room || '', none: !it.room, items: [], fn: false, first: 9999 }; rows.set(key, r); }
+    r.items.push(x);
+    if (it.kind === 'function') r.fn = true;
+    r.first = Math.min(r.first, x.sl.allDay || x.sl.contFrom ? -1 : x.sl.s);
+  });
+  const byFirst = (a, b) => (a.first - b.first) || a.room.localeCompare(b.room, 'fr');
+  const all = Array.from(rows.values());
+  const ordered = all.filter(r => r.fn && !r.none).sort(byFirst)
+    .concat(all.filter(r => r.none))
+    .concat(all.filter(r => !r.fn && !r.none).sort(byFirst));
+  let lo = Infinity, hi = -Infinity, flo = Infinity, fhi = -Infinity;
+  agenda.forEach(({ sl }) => {
+    if (sl.allDay) return;
+    if (!sl.contFrom) { lo = Math.min(lo, sl.s); hi = Math.max(hi, sl.s + (sl.instant ? 30 : 0)); flo = Math.min(flo, sl.s); fhi = Math.max(fhi, sl.s); }
+    if (!sl.contTo) { hi = Math.max(hi, sl.e); lo = Math.min(lo, sl.e - (sl.contFrom ? 60 : 0)); fhi = Math.max(fhi, sl.e); flo = Math.min(flo, sl.e); }
+  });
+  if (!isFinite(lo)) { lo = 8 * 60; hi = 20 * 60; }
+  let h0 = Math.max(0, Math.floor(lo / 60) - 1), h1 = Math.min(24, Math.ceil(hi / 60) + 1);
+  while (h1 - h0 < 8) { if (h1 < 24) h1++; if (h1 - h0 < 8 && h0 > 0) h0--; }
+  agenda.sort((a, b) => (b.sl.allDay - a.sl.allDay) || ((a.sl.s || 0) - (b.sl.s || 0))
+    || ((a.sl.e || 0) - (b.sl.e || 0)) || ((a.it.kind === 'space') - (b.it.kind === 'space')));
+  const rooms = new Set(agenda.map(x => x.it.room).filter(Boolean));
+  return { rows: ordered, notes, agenda, h0, h1, first: isFinite(flo) ? flo : null, last: isFinite(fhi) ? fhi : null, rooms: rooms.size };
+}
+
+function siOpenPlanning(src, name, ds, opener) {
+  if (!src || (!src.client && !src.event)) return;
+  SiPlan.src = src;
+  SiPlan.name = name || 'Client';
+  SiPlan.ds = ds || _siYmd(new Date());
+  SiPlan.view = 'day';
+  SiPlan.data = null;
+  SiPlan.opener = opener || document.activeElement;
+  _plShell();
+  _plMsg('Chargement du planning...');
+  const d = new Date(SiPlan.ds + 'T00:00:00');
+  const from = _siYmd(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 7));
+  const to = _siYmd(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 30));
+  const url = '/api/saison/client?' + (src.client ? 'client=' + encodeURIComponent(src.client)
+    : 'event=' + encodeURIComponent(src.event)) + '&from=' + from + '&to=' + to;
+  const seq = ++SiPlan.seq;
+  const c = SiPlan.cache[url];
+  const p = (c && Date.now() - c.at < 120000) ? Promise.resolve(c.data)
+    : fetch(url, { credentials: 'same-origin' }).then(r => r.json().catch(() => ({})).then(j => {
+      if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || ('HTTP ' + r.status));
+      SiPlan.cache[url] = { at: Date.now(), data: j };
+      return j;
+    }));
+  p.then(data => {
+    if (seq !== SiPlan.seq || !_plIsOpen()) return;
+    SiPlan.data = data;
+    const days = (data.days || []).map(x => x.date);
+    if (days.length && days.indexOf(SiPlan.ds) === -1) {
+      // Jour clique sans activite : jour de presence le plus proche (a venir d'abord)
+      SiPlan.ds = days.find(x => x >= SiPlan.ds) || days[days.length - 1];
+    }
+    _plRender();
+  }).catch(err => {
+    if (seq !== SiPlan.seq || !_plIsOpen()) return;
+    _plMsg('Planning indisponible (' + err.message + ')', true);
+    const retry = _plEl('button', 'pl-retry', 'Reessayer');
+    retry.type = 'button';
+    retry.addEventListener('click', () => siOpenPlanning(src, name, ds, SiPlan.opener));
+    SiPlan.body.appendChild(retry);
+  });
+}
+window.siOpenPlanning = siOpenPlanning;
+
+function _plShell() {
+  let ov = SiPlan.el;
+  if (!ov) {
+    ov = SiPlan.el = _plEl('div', 'pl-overlay');
+    const m = SiPlan.modal = _plEl('div', 'pl-modal');
+    m.setAttribute('role', 'dialog');
+    m.setAttribute('aria-modal', 'true');
+    m.setAttribute('aria-labelledby', 'pl-title');
+    ov.appendChild(m);
+    ov.addEventListener('mousedown', ev => { if (ev.target === ov) _plClose(); });
+    document.body.appendChild(ov);
+    window.addEventListener('resize', () => {
+      if (!_plIsOpen() || !SiPlan.data) return;
+      clearTimeout(SiPlan.rz);
+      SiPlan.rz = setTimeout(() => { if (_plIsOpen() && SiPlan.data) _plRenderBody(); }, 150);
+    });
+  }
+  const m = SiPlan.modal;
+  m.textContent = '';
+  const head = SiPlan.head = _plEl('div', 'pl-head');
+  const ttl = _plEl('div', 'pl-ttl');
+  ttl.appendChild(_plEl('span', 'pl-kicker', 'Planning du client'));
+  const h = _plEl('h2', 'pl-name', SiPlan.name);
+  h.id = 'pl-title';
+  ttl.appendChild(h);
+  ttl.appendChild(_plEl('div', 'pl-meta'));
+  head.appendChild(ttl);
+  const close = _siProgButton('close', 'Fermer (Echap)', 'pl-close');
+  close.addEventListener('click', _plClose);
+  head.appendChild(close);
+  m.appendChild(head);
+  SiPlan.chips = _plEl('div', 'pl-chips');
+  SiPlan.chips.setAttribute('role', 'toolbar');
+  SiPlan.chips.setAttribute('aria-label', 'Choix du jour');
+  m.appendChild(SiPlan.chips);
+  SiPlan.body = _plEl('div', 'pl-body');
+  m.appendChild(SiPlan.body);
+  if (!ov.classList.contains('open')) {
+    ov.classList.add('open');
+    document.body.classList.add('pl-lock');
+    window.addEventListener('keydown', _plKeys, true);
+    clearInterval(SiPlan.timer);
+    SiPlan.timer = setInterval(_plNowLine, 60000);
+  }
+  close.focus({ preventScroll: true });
+}
+
+function _plMsg(text, err) {
+  SiPlan.body.textContent = '';
+  SiPlan.body.appendChild(_plEl('div', 'pl-msg' + (err ? ' pl-err' : ''), text));
+}
+
+function _plClose() {
+  if (!SiPlan.el) return;
+  SiPlan.seq++;
+  SiPlan.el.classList.remove('open');
+  document.body.classList.remove('pl-lock');
+  window.removeEventListener('keydown', _plKeys, true);
+  clearInterval(SiPlan.timer);
+  SiPlan.timer = null;
+  SiPlan.grid = null;
+  const op = SiPlan.opener;
+  SiPlan.opener = null;
+  if (op && op.isConnected && typeof op.focus === 'function') op.focus({ preventScroll: true });
+}
+
+function _plKeys(e) {
+  if (!_plIsOpen()) return;
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    _plClose();
+    return;
+  }
+  if (e.key === 'Tab') {
+    const f = Array.from(SiPlan.modal.querySelectorAll('button, [href], [tabindex]:not([tabindex="-1"]), summary'))
+      .filter(x => x.offsetParent !== null);
+    if (!f.length) return;
+    const i = f.indexOf(document.activeElement);
+    if (e.shiftKey && (i <= 0)) { e.preventDefault(); f[f.length - 1].focus(); }
+    else if (!e.shiftKey && (i === -1 || i === f.length - 1)) { e.preventDefault(); f[0].focus(); }
+    e.stopImmediatePropagation();
+    return;
+  }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    e.stopImmediatePropagation();   // pas le calendrier dessous
+    if (e.target && e.target.closest && e.target.closest('.pl-frame')) return;   // defilement de la grille
+    if (SiPlan.view !== 'day' || !SiPlan.data) return;
+    e.preventDefault();
+    _plStep(e.key === 'ArrowLeft' ? -1 : 1);
+  }
+}
+
+function _plStep(delta) {
+  const days = (SiPlan.data.days || []).map(x => x.date);
+  const i = days.indexOf(SiPlan.ds);
+  const j = i + delta;
+  if (i === -1 || j < 0 || j >= days.length) return;
+  SiPlan.ds = days[j];
+  _plRender(true);
+}
+
+function _plRender(keepFocus) {
+  const data = SiPlan.data;
+  const name = data.account || SiPlan.name;
+  SiPlan.modal.querySelector('.pl-name').textContent = name;
+  // En-tete : types, statut, effectif max
+  const meta = SiPlan.modal.querySelector('.pl-meta');
+  meta.textContent = '';
+  // Reservation directe ACO (compte de service) : gestion interne
+  const oldNote = SiPlan.modal.querySelector('.pl-aco');
+  if (oldNote) oldNote.remove();
+  const note = _acoNoteEl(data, 'pl-aco');
+  if (note) meta.parentNode.insertBefore(note, meta);
+  const evs = data.events || [];
+  const types = Array.from(new Set(evs.map(e => e.type).filter(Boolean)));
+  if (types.length) meta.appendChild(_plEl('span', 'pl-tag', types.join(' · ')));
+  const opt = evs.filter(e => e.status === 'option').length;
+  if (evs.length) {
+    const st = opt === 0 ? 'confirme' : opt === evs.length ? 'option' : opt + ' option' + (opt > 1 ? 's' : '');
+    meta.appendChild(_plEl('span', 'pl-tag ' + (opt ? 'pl-tag-opt' : 'pl-tag-ok'), st));
+  }
+  if (evs.some(e => e.blackout)) meta.appendChild(_plEl('span', 'pl-tag pl-tag-opt', 'bloque a la vente'));
+  const t = data.totals || {};
+  if (t.max_pers) meta.appendChild(_plEl('span', 'pl-tag pl-tag-pers', "jusqu'a " + _siFmtPers(t.max_pers)));
+  if (evs.length > 1) meta.appendChild(_plEl('span', 'pl-tag', evs.length + ' reservations'));
+  // Puces des jours
+  const chips = SiPlan.chips;
+  chips.textContent = '';
+  const days = data.days || [];
+  const todayS = _siYmd(new Date());
+  if (days.length > 1) {
+    const all = _plEl('button', 'pl-chip pl-chip-all');
+    all.type = 'button';
+    all.appendChild(_plEl('span', 'material-symbols-outlined', 'calendar_view_week'));
+    all.appendChild(_plEl('span', null, 'Plusieurs jours (' + days.length + ')'));
+    all.setAttribute('aria-pressed', SiPlan.view === 'multi' ? 'true' : 'false');
+    all.addEventListener('click', () => { SiPlan.view = 'multi'; _plRender(true); });
+    chips.appendChild(all);
+  }
+  let selChip = null;
+  days.forEach(day => {
+    const b = _plEl('button', 'pl-chip' + (day.date < todayS ? ' is-past' : ''));
+    b.type = 'button';
+    const rel = _plRel(day.date);
+    if (rel) b.appendChild(_plEl('span', 'pl-chip-rel', rel));
+    b.appendChild(_plEl('span', null, _plDayLabel(day.date)));
+    const sel = SiPlan.view === 'day' && day.date === SiPlan.ds;
+    b.setAttribute('aria-pressed', sel ? 'true' : 'false');
+    if (sel) selChip = b;
+    b.addEventListener('click', () => { SiPlan.view = 'day'; SiPlan.ds = day.date; _plRender(true); });
+    chips.appendChild(b);
+  });
+  if (selChip) chips.scrollLeft = Math.max(0, selChip.offsetLeft - chips.clientWidth / 2 + selChip.offsetWidth / 2);
+  _plRenderBody();
+  if (keepFocus) {
+    const f = chips.querySelector('[aria-pressed="true"]');
+    if (f) f.focus({ preventScroll: true });
+  }
+}
+
+function _plRenderBody() {
+  const body = SiPlan.body;
+  body.textContent = '';
+  SiPlan.grid = null;
+  const days = SiPlan.data.days || [];
+  if (!days.length) {
+    _plMsg('Aucune reservation de ce client entre le ' + String(SiPlan.data.from).split('-').reverse().join('/')
+      + ' et le ' + String(SiPlan.data.to).split('-').reverse().join('/') + '.');
+    return;
+  }
+  if (SiPlan.view === 'multi') { _plRenderMulti(days); return; }
+  const day = days.find(d => d.date === SiPlan.ds) || days[0];
+  SiPlan.ds = day.date;
+  const model = _plDayModel(day);
+  // Resume du jour
+  const sum = _plEl('div', 'pl-daysum');
+  const rel = _plRel(day.date);
+  sum.appendChild(_plEl('span', 'pl-daysum-date', _plDayLabel(day.date, true) + (rel ? ' (' + rel.toLowerCase() + ')' : '')));
+  const bits = [];
+  if (model.first !== null) bits.push(_plFmtMin(model.first) + ' → ' + _plFmtMin(model.last));
+  if (model.rooms) bits.push(model.rooms + ' espace' + (model.rooms > 1 ? 's' : ''));
+  if (day.pers) bits.push(_siFmtPers(day.pers) + ' max');
+  sum.appendChild(_plEl('span', 'pl-daysum-info', bits.join(' · ')));
+  body.appendChild(sum);
+  const phone = _plPhone();
+  if (phone) {
+    const seg = _plEl('div', 'pl-seg');
+    seg.setAttribute('role', 'group');
+    seg.setAttribute('aria-label', 'Affichage');
+    [['list', 'view_agenda', 'Liste'], ['grid', 'view_timeline', 'Grille']].forEach(([id, ic, lbl]) => {
+      const b = _plEl('button', 'pl-seg-btn');
+      b.type = 'button';
+      b.appendChild(_plEl('span', 'material-symbols-outlined', ic));
+      b.appendChild(_plEl('span', null, lbl));
+      b.setAttribute('aria-pressed', SiPlan.phoneView === id ? 'true' : 'false');
+      b.addEventListener('click', () => {
+        SiPlan.phoneView = id;
+        try { localStorage.setItem('pl_phone_view', id); } catch (e) { /* stockage indisponible */ }
+        _plRenderBody();
+      });
+      seg.appendChild(b);
+    });
+    body.appendChild(seg);
+  }
+  const showGrid = !phone || SiPlan.phoneView === 'grid';
+  const showList = !phone || SiPlan.phoneView === 'list';
+  if (showGrid && model.rows.length) {
+    body.appendChild(_plGrid(model, day.date));
+    body.appendChild(_plLegend(model));
+  }
+  if (showList) body.appendChild(_plAgenda(model));
+  _plNowLine();
+}
+
+function _plLegend(model) {
+  const seen = new Map();
+  model.agenda.forEach(x => seen.set(x.cat.id, x.cat));
+  const lg = _plEl('div', 'pl-legend');
+  lg.setAttribute('aria-hidden', 'true');
+  _PL_CATS.concat([_PL_OTHER, _PL_SPACE]).forEach(c => {
+    if (!seen.has(c.id)) return;
+    const it = _plEl('span', 'pl-legend-it' + (c === _PL_SPACE ? ' is-space' : ''));
+    const sw = _plEl('span', 'pl-sw');
+    sw.style.setProperty('--c', c.color);
+    sw.style.setProperty('--bg', c.bg);
+    it.appendChild(sw);
+    it.appendChild(document.createTextNode(c.label));
+    lg.appendChild(it);
+  });
+  return lg;
+}
+
+function _plGrid(model, ds) {
+  const phone = _plPhone();
+  const roomW = phone ? 108 : 196;
+  const hours = model.h1 - model.h0;
+  const cs = getComputedStyle(SiPlan.body);
+  const avail = Math.max(240, SiPlan.body.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 8 - roomW);
+  const HW = Math.max(phone ? 64 : 58, Math.floor(avail / hours));
+  const MINW = phone ? 124 : 170;
+  const LANE = 46, BLK = 40, BAR = 20;
+  const trackW = hours * HW;
+  const lo = model.h0 * 60, hi = model.h1 * 60;
+  const X = m => (Math.max(lo, Math.min(hi, m)) - lo) / 60 * HW;
+  const frame = _plEl('div', 'pl-frame');
+  frame.tabIndex = 0;
+  frame.setAttribute('aria-label', 'Grille horaire (detail dans la liste ci-dessous)');
+  const grid = _plEl('div', 'pl-grid');
+  grid.style.width = (roomW + trackW) + 'px';
+  grid.style.setProperty('--room-w', roomW + 'px');
+  grid.style.setProperty('--hw', HW + 'px');
+  // Axe des heures
+  const axis = _plEl('div', 'pl-row pl-axis');
+  axis.appendChild(_plEl('div', 'pl-room pl-room-head', 'Espaces'));
+  const at = _plEl('div', 'pl-track');
+  at.style.width = trackW + 'px';
+  for (let h = model.h0; h <= model.h1; h++) {
+    const l = _plEl('span', 'pl-hour', (h === 24 ? 0 : h) + 'h');
+    l.style.left = ((h - model.h0) * HW) + 'px';
+    if (h === model.h0) l.classList.add('is-first');
+    if (h === model.h1) l.classList.add('is-last');
+    at.appendChild(l);
+  }
+  axis.appendChild(at);
+  grid.appendChild(axis);
+  model.rows.forEach(r => {
+    const row = _plEl('div', 'pl-row' + (r.fn ? '' : ' is-spaceonly'));
+    const rc = _plEl('div', 'pl-room' + (r.none ? ' is-none' : ''), r.none ? 'Sans espace precise' : r.room);
+    rc.title = r.none ? 'Fonctions sans espace precise dans Momentus' : r.room;
+    row.appendChild(rc);
+    const tr = _plEl('div', 'pl-track');
+    tr.style.width = trackW + 'px';
+    let y = 5;
+    r.items.filter(x => x.sl.allDay).forEach(x => {
+      const b = _plEl('div', 'pl-allday' + (x.it.kind === 'space' ? ' is-space' : ''));
+      b.style.top = y + 'px';
+      b.style.height = BAR + 'px';
+      b.style.setProperty('--c', x.cat.color);
+      b.style.setProperty('--bg', x.cat.bg);
+      const lbl = x.it.kind === 'space'
+        ? _plHoursTxt(x) + ' · ' + (_SI_PHASES[x.it.phase] || 'espace reserve')
+        : _plHoursTxt(x) + ' · ' + (x.it.name || 'Fonction');
+      b.appendChild(_plEl('span', 'pl-allday-lbl', lbl));
+      b.title = lbl + (x.it.kind !== 'space' && x.it.pers ? ' · ' + x.it.pers + ' pers.' : '');
+      tr.appendChild(b);
+      y += BAR + 4;
+    });
+    const timed = r.items.filter(x => !x.sl.allDay).sort((a, b) => (a.sl.s - b.sl.s) || (b.sl.e - a.sl.e));
+    const lanes = [];
+    timed.forEach(x => {
+      const left = X(x.sl.s);
+      const aw = Math.max(3, X(x.sl.e) - left);
+      const vw = Math.min(trackW, Math.max(aw, MINW));
+      const bl = Math.max(0, Math.min(left, trackW - vw));   // bloc decale si trop pres du bord droit
+      let lane = lanes.findIndex(end => end <= bl);
+      if (lane === -1) { lane = lanes.length; lanes.push(0); }
+      lanes[lane] = bl + vw + 4;
+      const b = _plEl('div', 'pl-blk' + (x.it.kind === 'space' ? ' is-space' : '') + (aw < vw ? ' is-short' : ''));
+      b.style.left = bl + 'px';
+      b.style.width = vw + 'px';
+      b.style.top = (y + lane * LANE) + 'px';
+      b.style.height = BLK + 'px';
+      b.style.setProperty('--c', x.cat.color);
+      b.style.setProperty('--bg', x.cat.bg);
+      const nm = x.it.kind === 'space' ? (_SI_PHASES[x.it.phase] || 'espace reserve') : (x.it.name || 'Fonction');
+      b.appendChild(_plEl('span', 'pl-blk-n', nm));
+      const sub = [_plHoursTxt(x)];
+      if (x.it.pers) sub.push(x.it.pers + ' p.');
+      if (x.it.ftype) sub.push(x.it.ftype);
+      b.appendChild(_plEl('span', 'pl-blk-t', sub.join(' · ')));
+      const bar = _plEl('span', 'pl-blk-bar');
+      bar.style.left = (left - bl) + 'px';
+      bar.style.width = aw + 'px';
+      b.appendChild(bar);
+      b.title = nm + '\n' + _plHoursLong(x) + (x.it.room ? '\n' + x.it.room : '')
+        + (x.it.ftype ? '\n' + x.it.ftype : '') + (x.it.pers ? '\n' + x.it.pers + ' pers.' : '');
+      tr.appendChild(b);
+    });
+    const h = Math.max(34, y + lanes.length * LANE + 1);
+    tr.style.height = h + 'px';
+    row.appendChild(tr);
+    grid.appendChild(row);
+  });
+  const now = _plEl('div', 'pl-now');
+  now.appendChild(_plEl('span', 'pl-now-lbl'));
+  now.hidden = true;
+  grid.appendChild(now);
+  frame.appendChild(grid);
+  // Libelles des barres 'journee' : restent visibles a droite de la colonne
+  // des espaces quand la grille defile
+  frame.addEventListener('scroll', () => grid.style.setProperty('--sx', frame.scrollLeft + 'px'), { passive: true });
+  SiPlan.grid = { ds, lo, hi, HW, roomW, now };
+  // Ouverture : la grille commence sur l'heure courante (aujourd'hui) si elle deborde
+  requestAnimationFrame(() => {
+    if (ds !== _siYmd(new Date()) || frame.scrollWidth <= frame.clientWidth) return;
+    const n = new Date();
+    const m = n.getHours() * 60 + n.getMinutes();
+    if (m > lo && m < hi) frame.scrollLeft = Math.max(0, (m - lo) / 60 * HW - (frame.clientWidth - roomW) / 3);
+  });
+  return frame;
+}
+
+function _plNowLine() {
+  const g = SiPlan.grid;
+  if (!g || !g.now.isConnected) return;
+  const n = new Date();
+  const m = n.getHours() * 60 + n.getMinutes();
+  const show = g.ds === _siYmd(n) && m >= g.lo && m <= g.hi;
+  g.now.hidden = !show;
+  if (!show) return;
+  g.now.style.left = (g.roomW + (m - g.lo) / 60 * g.HW) + 'px';
+  g.now.firstChild.textContent = _plFmtMin(m);
+}
+
+function _plAgenda(model) {
+  const wrap = _plEl('div', 'pl-agenda');
+  const fns = model.agenda.filter(x => x.it.kind !== 'space');
+  const sps = model.agenda.filter(x => x.it.kind === 'space');
+  const line = x => {
+    const li = _plEl('li', 'pl-ag-line' + (x.it.kind === 'space' ? ' is-space' : ''));
+    li.style.setProperty('--c', x.cat.color);
+    li.appendChild(_plEl('span', 'pl-ag-h', _plHoursTxt(x)));
+    const main = _plEl('span', 'pl-ag-main');
+    main.appendChild(_plEl('span', 'pl-ag-n', x.it.kind === 'space' ? (x.it.room || 'Espace') : (x.it.name || 'Fonction')));
+    const sub = x.it.kind === 'space'
+      ? [_SI_PHASES[x.it.phase] || 'espace reserve']
+      : [x.it.room || 'sans espace precise', x.it.ftype || (x.cat !== _PL_OTHER ? x.cat.label.toLowerCase() : '')];
+    if (x.sl.contFrom && !x.sl.allDay) sub.push('commence la veille');
+    if (x.sl.contTo && !x.sl.allDay) sub.push('finit le lendemain');
+    main.appendChild(_plEl('span', 'pl-ag-sub', sub.filter(Boolean).join(' · ')));
+    li.appendChild(main);
+    if (x.it.pers) li.appendChild(_plEl('span', 'pl-ag-p', x.it.pers + ' p.'));
+    return li;
+  };
+  if (fns.length) {
+    wrap.appendChild(_plEl('h3', 'pl-ag-ttl', 'Deroule de la journee'));
+    const ol = _plEl('ol', 'pl-ag-list');
+    fns.forEach(x => ol.appendChild(line(x)));
+    wrap.appendChild(ol);
+  }
+  if (sps.length) {
+    wrap.appendChild(_plEl('h3', 'pl-ag-ttl', 'Espaces reserves sans creneau (' + sps.length + ')'));
+    const ol = _plEl('ol', 'pl-ag-list');
+    sps.forEach(x => ol.appendChild(line(x)));
+    wrap.appendChild(ol);
+  }
+  if (model.notes.length) {
+    const det = _plEl('details', 'pl-notes');
+    det.appendChild(_plEl('summary', null, "Informations de l'evenement (" + model.notes.length + ')'));
+    const ul = _plEl('ul', 'pl-notes-list');
+    model.notes.forEach(x => ul.appendChild(_plEl('li', null, x.it.name + (x.it.pers ? ' · ' + x.it.pers + ' p.' : ''))));
+    det.appendChild(ul);
+    wrap.appendChild(det);
+  }
+  if (!fns.length && !sps.length && !model.notes.length) wrap.appendChild(_plEl('div', 'pl-msg', 'Rien ce jour-la.'));
+  return wrap;
+}
+
+function _plRenderMulti(days) {
+  const body = SiPlan.body;
+  const todayS = _siYmd(new Date());
+  const models = days.map(d => ({ day: d, m: _plDayModel(d) }));
+  // Echelle commune a tous les jours
+  const h0 = Math.min.apply(null, models.map(x => x.m.h0));
+  const h1 = Math.max.apply(null, models.map(x => x.m.h1));
+  body.appendChild(_plEl('div', 'pl-daysum',
+    days.length + ' jours de presence entre le ' + _plDayLabel(days[0].date) + ' et le ' + _plDayLabel(days[days.length - 1].date)
+    + ' · cliquer un jour pour son planning'));
+  const list = _plEl('div', 'pl-multi');
+  const head = _plEl('div', 'pl-mrow pl-mhead');
+  head.setAttribute('aria-hidden', 'true');
+  ['Jour', 'Horaires', 'Espaces', 'Effectif', 'Principales fonctions'].forEach((t, i) => head.appendChild(_plEl('span', 'pl-mc pl-mc' + i, t)));
+  const scale = _plEl('span', 'pl-mc pl-mc5 pl-mscale');
+  [h0, Math.round((h0 + h1) / 2), h1].forEach((h, i) => {
+    const l = _plEl('span', null, h + 'h');
+    l.style.left = (i * 50) + '%';
+    scale.appendChild(l);
+  });
+  head.appendChild(scale);
+  list.appendChild(head);
+  models.forEach(({ day, m }) => {
+    const b = _plEl('button', 'pl-mrow' + (day.date < todayS ? ' is-past' : '') + (day.date === todayS ? ' is-today' : ''));
+    b.type = 'button';
+    const c0 = _plEl('span', 'pl-mc pl-mc0');
+    const rel = _plRel(day.date);
+    c0.appendChild(_plEl('span', 'pl-m-date', _plDayLabel(day.date)));
+    if (rel) c0.appendChild(_plEl('span', 'pl-chip-rel', rel));
+    b.appendChild(c0);
+    b.appendChild(_plEl('span', 'pl-mc pl-mc1', m.first !== null ? _plFmtMin(m.first) + ' → ' + _plFmtMin(m.last) : 'journee'));
+    b.appendChild(_plEl('span', 'pl-mc pl-mc2', m.rooms ? m.rooms + ' esp.' : '-'));
+    b.appendChild(_plEl('span', 'pl-mc pl-mc3', day.pers ? _siShortPers(day.pers) : '-'));
+    const main = m.agenda.filter(x => x.it.kind === 'function')
+      .sort((a, z) => ((a.cat.id === 'logistique') - (z.cat.id === 'logistique')) || ((z.it.pers || 0) - (a.it.pers || 0)) || ((a.sl.s || 0) - (z.sl.s || 0)));
+    const names = [];
+    main.forEach(x => { if (names.length < 3 && names.indexOf(x.it.name) === -1) names.push(x.it.name); });
+    let txt = names.join(' · ');
+    if (!txt) {
+      const ph = Array.from(new Set(m.agenda.map(x => _SI_PHASES[x.it.phase]).filter(Boolean)));
+      txt = ph.length ? 'Espaces : ' + ph.join(', ') : 'Informations seulement';
+    }
+    b.appendChild(_plEl('span', 'pl-mc pl-mc4', txt));
+    // Mini frise : creneaux du jour sur l'echelle commune
+    const fr = _plEl('span', 'pl-mc pl-mc5 pl-mfrise');
+    fr.setAttribute('aria-hidden', 'true');
+    m.agenda.forEach(x => {
+      if (x.sl.allDay) return;
+      const a = Math.max(h0 * 60, x.sl.s), z = Math.min(h1 * 60, x.sl.e);
+      const seg = _plEl('span', 'pl-mseg' + (x.it.kind === 'space' ? ' is-space' : ''));
+      seg.style.left = ((a - h0 * 60) / ((h1 - h0) * 60) * 100) + '%';
+      seg.style.width = 'max(3px, ' + (Math.max(0, z - a) / ((h1 - h0) * 60) * 100) + '%)';
+      seg.style.setProperty('--c', x.cat.color);
+      fr.appendChild(seg);
+    });
+    b.appendChild(fr);
+    b.title = 'Voir le planning du ' + _plDayLabel(day.date, true);
+    b.addEventListener('click', () => { SiPlan.view = 'day'; SiPlan.ds = day.date; _plRender(true); });
+    list.appendChild(b);
+  });
+  body.appendChild(list);
+}
+
 // opts : {interactive, pin, sem, semOn, eps, hint}
 //  - interactive : survol de la barre des jours (bouton epingle dans l'en-tete)
 //  - pin : ouvre directement epinglee (clic calendrier, appui long)
@@ -1778,6 +2546,8 @@ function _siShowTooltip(pill, ds, inds, state, opts) {
       if (multiRoom && det.room) txt += ' - ' + det.room;
       t.textContent = txt;
       line.appendChild(t);
+      const ab = _acoBadgeEl(det, true);
+      if (ab) line.appendChild(ab);
       if (det.blackout) {
         const b = document.createElement('span');
         b.className = 'si-tip-flag si-flag-blackout';
@@ -2390,6 +3160,8 @@ function _siCalRenderResults(box) {
         const t = document.createElement('span');
         t.className = 'si-cal-sres-label';
         t.textContent = h.label + (h.reservations > 1 ? ' (' + h.reservations + ' resa)' : '');
+        const ab = _acoBadgeEl(h, true);
+        if (ab) t.insertBefore(ab, t.firstChild);   // en tete : jamais coupe par l'ellipse
         main.appendChild(t);
         const sub = document.createElement('span');
         sub.className = 'si-cal-sres-sub';
@@ -2486,6 +3258,8 @@ function _siSearchBlock(day) {
     const where = (h.rooms || []).slice(0, 2).join(', ') + (h.nrooms > 2 ? ' +' + (h.nrooms - 2) : '');
     t.textContent = h.label + (h.account && h.account !== h.label ? ' (' + h.account + ')' : '') + (where ? ' - ' + where : '');
     line.appendChild(t);
+    const ab = _acoBadgeEl(h, true);
+    if (ab) line.appendChild(ab);
     const k = document.createElement('span');
     k.className = 'si-tip-flag';
     k.textContent = (_SI_KIND_LABEL[h.kind] || '').toLowerCase();
@@ -5161,6 +5935,8 @@ async function openEditModalFromDrawer(dateStr, item) {
       const t = document.createElement('div');
       t.className = 'tsr-title';
       t.textContent = title;
+      const ab = _acoBadgeEl(row.aco, true);
+      if (ab) t.appendChild(ab);
       box.appendChild(t);
       const m = document.createElement('div');
       m.className = 'tsr-meta';
@@ -5339,6 +6115,7 @@ async function openEditModalFromDrawer(dateStr, item) {
                 kind: 'item',
                 title: (it.activity || '').split('/')[0].trim(),
                 client: it.momentus_client || '',
+                aco: it.momentus_interne ? it : null,
                 category: it.category || '',
                 place: (it.place || '').split('/')[0].trim(),
                 department: it.department || '',
@@ -5362,6 +6139,7 @@ async function openEditModalFromDrawer(dateStr, item) {
                   kind: 'cluster-child',
                   title: (ch.activity || '').split('/')[0].trim(),
                   client: ch.momentus_client || '',
+                  aco: ch.momentus_interne ? ch : null,
                   category: ch.category || '',
                   place: (ch.place || '').split('/')[0].trim(),
                   remark: ch.remark || '',

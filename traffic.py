@@ -182,7 +182,10 @@ def _jsonify_with_cache(payload, status):
 
 # --- Traffic payload: cache -> mongo -> waze api ---
 def _get_waze_trafic_payload():
-    url = 'https://www.waze.com/row-partnerhub-api/feeds-tvt/?id=1709107524427'
+    # Meme URL que le collecteur (looker/waze_collector.py) ; nouvelle forme
+    # depuis le 05/10/2026 (l'ancienne repond 404). Surchargeable : WAZE_TRAFIC_URL.
+    url = os.getenv('WAZE_TRAFIC_URL',
+                    'https://www.waze.com/row-partnerhub-api/feeds-tvt/fa96cebf-1625-4b4f-91a0-a5af6db60e49?id=1709107524427')
 
     # Tier 1: in-memory cache
     cached, cache_status = _cache_get("trafic")

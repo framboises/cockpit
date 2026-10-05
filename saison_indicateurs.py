@@ -417,7 +417,8 @@ def _momentus_details(db, room_to_inds, d_from, d_to):
                                                   "startDate": {"$lte": hi}, "endDate": {"$gte": lo}}}},
                  {"_id": {"$in": fn_eids}}]}
     proj = {"name": 1, "eventTypeName": 1, "bookedSpaces": 1, "isDefinite": 1, "isTentative": 1,
-            "isProspect": 1, "isBlackout": 1, "isCanceled": 1, "isLost": 1, "_sync": 1}
+            "isProspect": 1, "isBlackout": 1, "isCanceled": 1, "isLost": 1, "_sync": 1,
+            "accountName": 1}
     events = {}
     for ev in db["momentus_events"].find(q, proj):
         if not _excluded(ev):
@@ -433,6 +434,7 @@ def _momentus_details(db, room_to_inds, d_from, d_to):
                     "type": _clean(ev.get("eventTypeName"), 60), "room": _clean(room_name, 80),
                     "start": start, "end": end, "blackout": bool(ev.get("isBlackout")),
                     "status": _status(ev), "phase": phase, "_fn": phase == "",
+                    "interne_aco": bool(compte_aco(ev)), "compte_aco": compte_aco(ev),
                 }
             elif phase == "" or cur["_fn"] is False:
                 # Fonctions : plus tot debut / plus tard fin du jour
@@ -692,9 +694,11 @@ def compute_seminaires(db, d_from, d_to, cfg=None):
         m = merged.get((ds, ckey))
         if m is None:
             m = merged[(ds, ckey)] = {
-                "names": [], "account": _clean(ev.get("accountName")), "types": [],
-                "start": "", "end": "", "rooms": set(), "pers": None, "status": set(), "n": 0}
+                "names": [], "account": client_label(ev), "types": [],
+                "start": "", "end": "", "rooms": set(), "pers": None, "status": set(), "n": 0,
+                "compte_aco": ""}
         m["n"] += 1
+        m["compte_aco"] = m["compte_aco"] or compte_aco(ev)
         nm = _clean(ev.get("name")) or "Reservation Momentus"
         if nm not in m["names"]:
             m["names"].append(nm)
@@ -725,7 +729,9 @@ def compute_seminaires(db, d_from, d_to, cfg=None):
                            "status": "confirme" if st == {"confirme"} else ("option" if "option" in st else next(iter(st), "")),
                            "reservations": m["n"],
                            # Cle stable du client (route /api/saison/client) et nom affiche
-                           "client": ck, "account": m["account"] or m["names"][0]})
+                           "client": ck, "account": m["account"] or m["names"][0],
+                           # Reserve en direct par l'ACO (compte de service) : gestion interne
+                           "interne_aco": bool(m["compte_aco"]), "compte_aco": m["compte_aco"]})
     for ds in sorted(by_day):
         items = by_day[ds]
         items.sort(key=lambda it: (-(it["pers"] or 0), it["start"] or "99:99", it["event"].lower()))
@@ -738,13 +744,46 @@ def compute_seminaires(db, d_from, d_to, cfg=None):
     return out
 
 
+# Comptes de SERVICE de l'ACO dans Momentus ("ACO Sport", "ACO Karting",
+# "ACO Production Evenements"...) : les activites internes y sont saisies sans
+# client reel. Regrouper sur ce compte melangerait des activites sans rapport
+# (ECOLE MOTO, FERRARI POZZI et tous les roulages sous "ACO Sport") : pour ces
+# comptes, le "client" est l'evenement lui-meme (cle 'nom:').
+_ACO_ACCOUNT_RE = re.compile(r"^\s*aco\b", re.IGNORECASE)
+
+
+def is_service_account(account_name):
+    return bool(account_name) and bool(_ACO_ACCOUNT_RE.match(str(account_name)))
+
+
+def compte_aco(ev):
+    """Nom du compte de service ACO ('ACO Sport'...) si la reservation a ete
+    faite en direct par l'ACO (gestion INTERNE), sinon ''. Nom d'un service
+    interne, pas une donnee personnelle."""
+    acc = _clean((ev or {}).get("accountName"), 80)
+    return acc if is_service_account(acc) else ""
+
+
+INTERNE_ACO_LABEL = "Reserve en direct par l'ACO (gestion interne)"
+
+
 def client_key(ev):
-    """Cle stable d'un client Momentus : accountId, a defaut 'nom:' + nom
-    d'evenement normalise (meme regle que la fusion des seminaires)."""
+    """Cle stable d'un client Momentus : accountId, a defaut (ou pour un
+    compte de service ACO) 'nom:' + nom d'evenement normalise (meme regle que
+    la fusion des seminaires)."""
     acc = ev.get("accountId")
-    if isinstance(acc, str) and acc.strip():
+    if isinstance(acc, str) and acc.strip() and not is_service_account(ev.get("accountName")):
         return acc.strip()
     return "nom:" + norm_type(ev.get("name"))
+
+
+def client_label(ev):
+    """Nom affiche du client : le compte, sauf compte de service ACO (nom de
+    l'evenement)."""
+    acc = _clean(ev.get("accountName"))
+    if acc and not is_service_account(acc):
+        return acc
+    return _clean(ev.get("name")) or "Reservation Momentus"
 
 
 # ---------------------------------------------------------------------------
@@ -764,6 +803,26 @@ def parse_client(value):
         # Compare en Python seulement (jamais dans une requete Mongo)
         return "nom:" + n if n and len(n) <= 200 else None
     return s if _CLIENT_RE.match(s) else None
+
+
+_EVENT_RE = re.compile(r"^event-\d{1,10}-[A-Za-z]{1,3}$")
+
+
+def parse_event_id(value):
+    """Identifiant d'evenement Momentus valide ('event-123-A'), sinon None."""
+    s = str(value or "").strip()
+    return s if _EVENT_RE.match(s) else None
+
+
+def client_for_event(db, event_id):
+    """Cle client (cf. client_key) d'un evenement Momentus, pour le planning
+    ouvert depuis une vignette de la timeline (`momentus_event_id`). None si
+    l'identifiant est invalide ou l'evenement inconnu."""
+    s = parse_event_id(event_id)
+    if not s:
+        return None
+    ev = db["momentus_events"].find_one({"_id": s}, {"name": 1, "accountId": 1, "accountName": 1})
+    return client_key(ev) if ev else None
 
 
 def client_window(raw_from, raw_to, today):
@@ -799,7 +858,9 @@ def client_programme(db, client, d_from, d_to):
     base = {"_sync.deleted_at": None, "isCanceled": {"$ne": True}, "isLost": {"$ne": True},
             "isProspect": {"$ne": True}}
     if client.startswith("nom:"):
-        q = dict(base, **{"$or": [{"accountId": None}, {"accountId": ""}]})
+        # Sans compte, ou compte de service ACO (cle = nom de l'evenement)
+        q = dict(base, **{"$or": [{"accountId": None}, {"accountId": ""},
+                                  {"accountName": {"$regex": r"^\s*aco\b", "$options": "i"}}]})
     else:
         q = dict(base, accountId=client)
     events = {}
@@ -808,12 +869,16 @@ def client_programme(db, client, d_from, d_to):
             continue
         events[ev["_id"]] = ev
     out = {"client": client, "account": "", "from": lo, "to": hi, "events": [], "days": [],
-           "totals": {"days": 0, "events": 0, "max_pers": None}}
+           "totals": {"days": 0, "events": 0, "max_pers": None},
+           "interne_aco": False, "compte_aco": ""}
     if not events:
         return out
+    acos = sorted({compte_aco(ev) for ev in events.values()} - {""})
+    out["interne_aco"] = bool(acos)
+    out["compte_aco"] = " / ".join(acos[:2])
     accs = defaultdict(int)
     for ev in events.values():
-        a = _clean(ev.get("accountName"))
+        a = client_label(ev)
         if a:
             accs[a] += 1
     out["account"] = (max(accs.items(), key=lambda kv: (kv[1], kv[0]))[0] if accs
@@ -904,7 +969,8 @@ def client_programme(db, client, d_from, d_to):
         ev = events[eid]
         evs.append({"id": eid, "name": _clean(ev.get("name")) or "Reservation Momentus",
                     "type": _clean(ev.get("eventTypeName"), 60), "status": _status(ev),
-                    "blackout": bool(ev.get("isBlackout"))})
+                    "blackout": bool(ev.get("isBlackout")),
+                    "interne_aco": bool(compte_aco(ev)), "compte_aco": compte_aco(ev)})
     out["events"] = evs
     out["totals"] = {"days": len(out["days"]), "events": len(evs), "max_pers": max_pers}
     return out
@@ -1081,11 +1147,12 @@ def search(db, query, d_from, d_to, today=None):
         ck = client_key(ev)
         m = merged.get((ds, ck))
         if m is None:
-            m = merged[(ds, ck)] = {"names": [], "account": _clean(ev.get("accountName")), "types": [],
+            m = merged[(ds, ck)] = {"names": [], "account": client_label(ev), "types": [],
                                     "client_hit": False, "rooms": set(), "matched": set(),
                                     "s": "", "e": "", "pers": None, "status": set(), "blackout": True,
-                                    "n": 0}
+                                    "n": 0, "compte_aco": ""}
         m["n"] += 1
+        m["compte_aco"] = m["compte_aco"] or compte_aco(ev)
         nm = _clean(ev.get("name")) or "Reservation Momentus"
         if nm not in m["names"]:
             m["names"].append(nm)
@@ -1120,7 +1187,8 @@ def search(db, query, d_from, d_to, today=None):
             "nrooms": len(matched if kind == "lieu" else rooms), "matched": matched[:SEARCH_MAX_ROOMS],
             "start": m["s"], "end": m["e"], "pers": m["pers"], "reservations": m["n"],
             "status": "confirme" if st == {"confirme"} else ("option" if "option" in st else next(iter(st), "")),
-            "blackout": m["blackout"]})
+            "blackout": m["blackout"],
+            "interne_aco": bool(m["compte_aco"]), "compte_aco": m["compte_aco"]})
 
     # Epreuves Cockpit (fenetre montage -> demontage)
     for ep in epreuves(db, d_from, d_to):

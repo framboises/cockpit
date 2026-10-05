@@ -1,0 +1,26 @@
+ 
+=== Lancement 28-09-26  7:00:05,42 === 
+2026-09-28 07:00:06 [INFO] Fenetre analysee : 2026-09-27T05:00:00+00:00 -> 2026-09-28T05:00:00+00:00 (UTC)
+2026-09-28 07:00:06 [INFO] Evenement detecte : 24H CAMIONS 2026
+2026-09-28 07:00:06 [INFO] Generation du resume Claude (streaming)...
+2026-09-28 07:00:06 [INFO] Selection fiches : total=75 majors=1 others=74 selected=75 cut=0 capped=False
+2026-09-28 07:00:06 [INFO] Selection fiches : total=88 majors=0 others=80 selected=80 cut=8 capped=False
+2026-09-28 07:00:06 [INFO] attendance_block : 24H CAMIONS 2026 -> yesterday(public=True billets=45218 pic=37501@13h06 pic_prev=39547@12h30 proj=39233 d=-5%) | today(public=False billets=None pic=None@- pic_prev=None@- proj=None d=-%) | tomorrow(public=False billets=None pic=None@- pic_prev=None@- proj=None d=-%)
+2026-09-28 07:00:42 [INFO]   ... 823 chars recus (1 output tokens)
+2026-09-28 07:00:49 [INFO]   ... 1632 chars recus (1 output tokens)
+2026-09-28 07:00:55 [INFO]   ... 2443 chars recus (1 output tokens)
+2026-09-28 07:01:02 [INFO]   ... 3249 chars recus (1 output tokens)
+2026-09-28 07:01:09 [INFO]   ... 4053 chars recus (1 output tokens)
+2026-09-28 07:01:15 [INFO]   ... 4858 chars recus (1 output tokens)
+2026-09-28 07:01:21 [INFO]   ... 5659 chars recus (1 output tokens)
+2026-09-28 07:01:29 [INFO]   ... 6465 chars recus (1 output tokens)
+2026-09-28 07:01:35 [INFO]   ... 7280 chars recus (1 output tokens)
+2026-09-28 07:01:41 [INFO]   ... 8084 chars recus (1 output tokens)
+2026-09-28 07:01:47 [INFO]   ... 8900 chars recus (1 output tokens)
+2026-09-28 07:01:52 [INFO]   ... 9704 chars recus (1 output tokens)
+2026-09-28 07:01:57 [INFO]   ... 10508 chars recus (1 output tokens)
+2026-09-28 07:02:03 [INFO]   ... 11315 chars recus (1 output tokens)
+2026-09-28 07:02:06 [INFO] Resume genere : id=3f38a2e8a69b42649101e7713361ce7b fiches=75 tokens_in=32850 tokens_out=3939
+2026-09-28 07:02:06 [INFO] Destinataires inscrits au rapport matinal : 13
+2026-09-28 07:02:06 [INFO] Mail envoye a 13 destinataire(s) via 192.168.254.2
+=== Fin 28-09-26  7:02:06,89 (code retour 0) === 

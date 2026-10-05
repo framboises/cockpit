@@ -158,8 +158,38 @@ def _norm_name(s):
 def client_name(ev):
     """Nom du compte Momentus (client) affichable, pour la recherche de la
     timeline (`momentus_client`). Le nom de l'organisation seulement : jamais
-    les contacts (contactRoles)."""
-    return _clean(ev.get("accountName"), 120)
+    les contacts (contactRoles). Compte de SERVICE ACO ("ACO Sport", "ACO
+    Karting"...) : pas un client, on garde le nom de l'evenement (meme regle
+    que saison_indicateurs.client_key)."""
+    acc = _clean(ev.get("accountName"), 120)
+    if acc and re.match(r"^\s*aco\b", acc, re.IGNORECASE):
+        return _clean(ev.get("name"), 120)
+    return acc
+
+
+INTERNE_ACO_LABEL = "Reserve en direct par l'ACO (gestion interne)"
+
+
+def compte_aco(ev):
+    """Nom du compte de service ACO ("ACO Sport"...) si la reservation a ete
+    faite en direct par l'ACO (gestion INTERNE), sinon ''. Meme regle que
+    saison_indicateurs.is_service_account."""
+    acc = _clean(ev.get("accountName"), 80)
+    return acc if acc and re.match(r"^\s*aco\b", acc, re.IGNORECASE) else ""
+
+
+def _tag_interne(item, ev):
+    """Marque une vignette reservee en direct par l'ACO : drapeau + compte,
+    et mention en tete de la remarque (lisible dans toute vue texte)."""
+    acc = compte_aco(ev)
+    if acc:
+        item["momentus_interne"] = True
+        item["momentus_compte_aco"] = acc
+    return acc
+
+
+def _interne_bit(acc):
+    return f"{INTERNE_ACO_LABEL} - {acc}" if acc else ""
 
 
 def _epreuve_days(db, d_from, d_to):
@@ -286,6 +316,7 @@ def build_items(db, d_from, d_to):
                 }
                 if client_name(ev):
                     item["momentus_client"] = client_name(ev)
+                _tag_interne(item, ev)
                 fid = mapping.get(fn.get("roomId"))
                 if fid:
                     item["feature_id"] = fid
@@ -294,7 +325,8 @@ def build_items(db, d_from, d_to):
                 item["_detail"].append(d)
             x += timedelta(days=1)
     for item in fn_items.values():
-        bits = ["Momentus", item["momentus_status"]] + item.pop("_detail")
+        bits = [_interne_bit(item.get("momentus_compte_aco")), "Momentus",
+                item["momentus_status"]] + item.pop("_detail")
         item["remark"] = " | ".join(p for p in bits if p)[:600]
         out[item["date"]].append(item)
 
@@ -319,7 +351,7 @@ def build_items(db, d_from, d_to):
         for (ds, phase, s, e), rooms in groups.items():
             names = sorted({n for n, _ in rooms if n})
             fids = sorted({mapping[r] for _, r in rooms if mapping.get(r)})
-            bits = ["Momentus", _status(ev), f"espace {phase}"]
+            bits = [_interne_bit(compte_aco(ev)), "Momentus", _status(ev), f"espace {phase}"]
             if not s and not e:
                 bits.append("a la journee")
             att = ev.get("estimatedTotalAttendance") or ev.get("estimatedAttendance")
@@ -335,6 +367,7 @@ def build_items(db, d_from, d_to):
             }
             if client_name(ev):
                 item["momentus_client"] = client_name(ev)
+            _tag_interne(item, ev)
             if len(fids) == 1:
                 item["feature_id"] = fids[0]
             elif fids:

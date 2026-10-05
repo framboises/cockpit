@@ -6,7 +6,8 @@
   GET /api/saison/indicateurs/rooms       (admin) espaces Momentus groupes par site
   GET /api/saison/indicateurs/event-types (admin) types d'evenement Momentus (bloc seminaires)
   GET /api/saison/client?client=&from=&to= (user) programme d'un client (180 j max,
-                                          defaut J-7 -> J+90)
+                                          defaut J-7 -> J+90) ; `event=<id Momentus>`
+                                          a la place de `client` : client de l'evenement
   GET /api/saison/search?q=&from=&to=     (user) recherche client / lieu / epreuve /
                                           visites (400 j max, defaut J-30 -> J+365)
 
@@ -67,8 +68,21 @@ def api_indicateurs():
 @saison_indicateurs_bp.route("/api/saison/client", methods=["GET"])
 @_role_required("user")
 def api_client():
-    """Programme d'un client Momentus (cle `client` des seminaires)."""
-    client = SI.parse_client(request.args.get("client"))
+    """Programme d'un client Momentus (cle `client` des seminaires), ou du
+    client d'un evenement (`event=<momentus_event_id>`, bouton planning des
+    vignettes de la timeline)."""
+    if request.args.get("event") and not request.args.get("client"):
+        if not SI.parse_event_id(request.args.get("event")):
+            return _err("evenement_invalide")
+        try:
+            client = SI.client_for_event(_db(), request.args.get("event"))
+        except Exception as e:
+            logger.warning("saison programme client (evenement) : %s", e)
+            return _err("indisponible", 503)
+        if not client:
+            return _err("evenement_inconnu", 404)
+    else:
+        client = SI.parse_client(request.args.get("client"))
     if not client:
         return _err("client_invalide")
     from datetime import date
