@@ -662,6 +662,10 @@
     var createRow = document.getElementById("group-create-row");
     if(createRow) createRow.style.display = "";
     if(groupForm.elements.can_create_fiche) groupForm.elements.can_create_fiche.checked = false;
+    // Chat Alfred : option explicite, coupee a la creation
+    var alfredRow = document.getElementById("group-alfred-row");
+    if(alfredRow) alfredRow.style.display = "";
+    if(groupForm.elements.alfred_chat) groupForm.elements.alfred_chat.checked = false;
     openGroupModal();
   });
 
@@ -684,6 +688,7 @@
                    dispatch_manager: !!(groupForm.elements.dispatch_manager && groupForm.elements.dispatch_manager.checked),
                    fiche_lecture_seule: !!(groupForm.elements.fiche_lecture_seule && groupForm.elements.fiche_lecture_seule.checked),
                    can_create_fiche: !!(groupForm.elements.can_create_fiche && groupForm.elements.can_create_fiche.checked),
+                   alfred_chat: !!(groupForm.elements.alfred_chat && groupForm.elements.alfred_chat.checked),
                    allowed_categories: allowedCats};
     var pagesRow = document.getElementById("group-pages-row");
     var pagesShown = pagesRow && pagesRow.style.display !== "none";
@@ -774,6 +779,10 @@
       var createRow = document.getElementById("group-create-row");
       if(createRow) createRow.style.display = isAdm ? "none" : "";
       if(groupForm.elements.can_create_fiche) groupForm.elements.can_create_fiche.checked = g.can_create_fiche !== false;
+      // Chat Alfred : sans objet pour le groupe admin (toujours autorise)
+      var alfredRow = document.getElementById("group-alfred-row");
+      if(alfredRow) alfredRow.style.display = isAdm ? "none" : "";
+      if(groupForm.elements.alfred_chat) groupForm.elements.alfred_chat.checked = !!(g.alfred_chat);
       openGroupModal();
     }
 

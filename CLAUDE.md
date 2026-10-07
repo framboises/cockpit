@@ -67,6 +67,17 @@ Pas de tests automatisés ni de linter configurés.
 | `ALFRED_ASK_TIMEOUT` | Timeout d'une question au wrapper (s) | `90` |
 | `ALFRED_FOLLOWUP_SECONDS` | Fenêtre de suite de conversation sans nouveau @alfred | `420` |
 | `ALFRED_DM_REFUSAL_COOLDOWN` | Délai min entre deux refus DM au même contact (s) | `3600` |
+| `ALFRED_TOOLS_SECRET` | Secret HMAC des appels VM → Cockpit (`/api/alfred-tools/*`) et du jeton de portée du chat. Distinct d'`ALFRED_ASK_SECRET` | — (vide : outils refusés, chat sans portée) |
+| `ALFRED_TOOLS_UNSCOPED_SECRET` | Secret HMAC DISTINCT donnant la vue PC Org complète aux outils sans jeton de portée (chemin WhatsApp du wrapper). Ignoré s'il est égal à `ALFRED_TOOLS_SECRET` | — (vide : tout appel sans portée refusé) |
+| `ALFRED_CHAT_CONTEXT_MODE` | Contexte du chat vers le wrapper : `prefix` (ligne en tête du message), `field` (`channel` + `context`), `both` | `prefix` |
+| `ALFRED_CHAT_TIMEOUT` | Attente de la réponse du wrapper pour le chat (s), au-delà de son global de 180 s | `190` |
+| `ALFRED_CHAT_MAX_CONCURRENT` | Appels simultanés du chat vers la VM | `2` |
+| `ALFRED_CHAT_QUEUE_WAIT_S` | Attente max d'une place avant « Alfred très sollicité » (s) | `60` |
+| `ALFRED_CHAT_HISTORY` | Messages de la conversation envoyés au wrapper | `10` |
+| `ALFRED_CHAT_MAX_TOOL_HOPS` | `max_tool_hops` envoyé par le chat | `6` |
+| `ALFRED_CHAT_RATE_10MIN` | Questions max par opérateur sur 10 min | `40` |
+| `ALFRED_CHAT_RETENTION_DAYS` | Rétention (TTL) conversations, messages, appels d'outils | `90` |
+| `ALFRED_HEALTH_URL` | Sonde de santé du wrapper | dérivée d'`ALFRED_ASK_URL` (`/alfred/health`) |
 
 ## Architecture
 
@@ -128,7 +139,7 @@ Le detail de chaque domaine vit dans `docs/claude/`. **Lire le fichier concerne 
 - `docs/claude/main-courante.md` : Main courante pcorg : pcorg_history, fusion SQL/Cockpit, droits, CSRF d'onglet ancien, aide a la saisie (pcorg_assist)
 - `docs/claude/field.md` : Tablettes Field : categories, dispatch automatique, idempotence, statuts hors ligne, SOS
 - `docs/claude/alertes.md` : Centrale d'alerte : rendu pilote par la definition, display_mode, explication IA, saturation porte
-- `docs/claude/alfred.md` : Alfred (agent IA WhatsApp) : webhook WAHA, breaker, resumes Ollama
+- `docs/claude/alfred.md` : Alfred (agent IA WhatsApp) : webhook WAHA, breaker, resumes Ollama ; chat Alfred des operateurs (widget, outils exposes a la VM, jeton de portee). Brief du wrapper VM : `docs/alfred-vm-brief.md`
 - `docs/claude/ai-reports.md` : Briefing de situation et RETEX de fin d'edition (ai_reports.py)
 - `docs/claude/frequentation-live.md` : Frequentation depuis l'archive du controle d'acces live (live_frequentation.py)
 - `docs/claude/momentus.md` : Momentus Elite : synchro, reservations par lieu ; contient aussi le rapport de scans depuis l'archive live (live_scan_units.py)

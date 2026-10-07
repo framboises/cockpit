@@ -909,7 +909,8 @@ def _inject_page_access():
     """page_allowed('<id>') / admin_page_allowed('<id>') dans les gabarits
     (barre laterale)."""
     return {"page_allowed": _page_allowed_for_request,
-            "admin_page_allowed": _admin_page_allowed_for_request}
+            "admin_page_allowed": _admin_page_allowed_for_request,
+            "alfred_chat_allowed": _alfred_chat_allowed_for_request}
 
 
 def _user_dispatch_categories(payload):
@@ -927,6 +928,31 @@ def _user_dispatch_categories(payload):
             if c not in cats:
                 cats.append(c)
     return cats
+
+
+def user_can_alfred_chat(payload):
+    """Chat Alfred (widget flottant, alfred_chat.py) : option EXPLICITE d'un
+    groupe (`alfred_chat`), coupee par defaut. Sans groupe : celle du groupe
+    par defaut. Admin : toujours."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return True
+    groups = _user_group_docs(payload)
+    if not groups:
+        dg = COL_GROUPS.find_one({"name": DEFAULT_GROUP_NAME}, {"alfred_chat": 1}) or {}
+        groups = [dg]
+    return any(g.get("alfred_chat") for g in groups)
+
+
+def _alfred_chat_allowed_for_request():
+    payload = _request_payload_peek()
+    if not payload:
+        return False
+    if not hasattr(g, "_alfred_chat"):
+        try:
+            g._alfred_chat = user_can_alfred_chat(payload)
+        except Exception:
+            g._alfred_chat = False
+    return g._alfred_chat
 
 
 def _pcorg_created_by(payload, doc):
@@ -2391,6 +2417,15 @@ app.register_blueprint(alert_ai_bp)
 # CSRF (decorees @role_required("admin") dans les sections ad hoc).
 app.register_blueprint(alfred_bp)
 csrf.exempt(app.view_functions["alfred.wa_webhook"])
+# Chat Alfred des operateurs (alfred_chat.py) : widget flottant, option de
+# groupe `alfred_chat`. Routes /api/alfred-chat/* : CSRF ACTIF
+# (alfred_chat.js envoie X-CSRFToken). Routes /api/alfred-tools/* : appelees
+# par la VM, sans session ni jeton CSRF, authentifiees par HMAC
+# (ALFRED_TOOLS_SECRET) -> exemptees, comme le webhook WAHA.
+from alfred_chat import alfred_chat_bp
+app.register_blueprint(alfred_chat_bp)
+csrf.exempt(app.view_functions["alfred_chat.tools_manifest"])
+csrf.exempt(app.view_functions["alfred_chat.tools_call"])
 # Meteo : configuration de l'emprise de veille et lecture des grilles radar.
 # Les collecteurs vivent dans tools/Meteo/ et ne sont pas pilotes d'ici ; ce
 # blueprint expose la configuration qu'ils lisent, et l'etat de fraicheur des
@@ -4293,6 +4328,7 @@ def create_group():
         'dispatch_manager': bool(data.get('dispatch_manager', False)),
         'fiche_lecture_seule': bool(data.get('fiche_lecture_seule', False)),
         'can_create_fiche': bool(data.get('can_create_fiche', False)),
+        'alfred_chat': bool(data.get('alfred_chat', False)),
         'allowed_pages': _parse_allowed_pages(data.get('allowed_pages')),
         'admin_pages': _parse_admin_pages(data.get('admin_pages')),
         'allowed_categories': _parse_allowed_categories(data.get('allowed_categories')),
@@ -4359,6 +4395,8 @@ def update_group(gid):
         patch['fiche_lecture_seule'] = bool(data.get('fiche_lecture_seule', False))
     if 'can_create_fiche' in data:
         patch['can_create_fiche'] = bool(data.get('can_create_fiche', False))
+    if 'alfred_chat' in data and not is_admin_grp:
+        patch['alfred_chat'] = bool(data.get('alfred_chat', False))
     if 'allowed_pages' in data and not is_admin_grp:
         patch['allowed_pages'] = _parse_allowed_pages(data.get('allowed_pages'))
     if 'admin_pages' in data and not is_admin_grp:

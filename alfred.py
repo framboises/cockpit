@@ -733,13 +733,21 @@ def _ollama_generate(prompt, num_predict=400, temperature=0.2):
         return False, "ollama_unreachable"
 
 
-def _alfred_ask(prompt=None, max_tool_hops=5, messages=None):
+def _alfred_ask(prompt=None, max_tool_hops=5, messages=None, request_id=None,
+                is_new_mention=None, extra=None, timeout=None):
     """Appelle le wrapper /alfred/ask cote VM Linux pour une question avec
     tool calling. Retourne (ok, payload).
 
     Deux modes (mutuellement exclusifs) :
       - messages=[{role, content}, ...]  format conversation structuree (WhatsApp)
       - prompt="..."                     one-shot legacy (compat retro)
+
+    Options du chat Cockpit (alfred_chat.py), absentes du corps quand elles
+    valent None : le payload WhatsApp reste identique a l'octet pres.
+      - request_id      : identifiant trace des deux cotes (defaut : aleatoire)
+      - is_new_mention  : True coupe l'historique cote wrapper
+      - extra           : dict de cles supplementaires (channel, context...)
+      - timeout         : lecture (s), defaut ALFRED_ASK_TIMEOUT
 
     payload (ok=True)  : {"response": str, "tool_calls": [...], "model": str,
                           "hops": int, "duration_ms": int}
@@ -761,12 +769,17 @@ def _alfred_ask(prompt=None, max_tool_hops=5, messages=None):
 
     body = {
         "max_tool_hops": int(max_tool_hops),
-        "request_id": uuid.uuid4().hex[:12],
+        "request_id": request_id or uuid.uuid4().hex[:12],
     }
     if messages is not None:
         body["messages"] = messages
     else:
         body["prompt"] = prompt
+    if is_new_mention is not None:
+        body["is_new_mention"] = bool(is_new_mention)
+    for k, v in (extra or {}).items():
+        if k not in body and v is not None:
+            body[k] = v
     body_raw = json.dumps(body, ensure_ascii=False).encode("utf-8")
     ts = str(int(time.time()))
     msg = ts.encode("utf-8") + b"." + body_raw
@@ -782,7 +795,7 @@ def _alfred_ask(prompt=None, max_tool_hops=5, messages=None):
     try:
         r = requests.post(
             ALFRED_ASK_URL, data=body_raw, headers=headers,
-            timeout=(5, ALFRED_ASK_TIMEOUT),
+            timeout=(5, timeout or ALFRED_ASK_TIMEOUT),
         )
     except requests.RequestException as e:
         log.warning("alfred_ask: wrapper injoignable (%s) : %s", ALFRED_ASK_URL, e)
