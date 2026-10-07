@@ -27,6 +27,8 @@ Les questions du chat ajoutent des champs **optionnels** au corps de
     "event": "24H MOTOS", "year": "2026",   // evenement selectionne par l'operateur
     "page": "Cockpit", "path": "/",         // page ouverte
     "now": "2026-10-07T14:35+02:00",        // heure de Paris
+    "conversation_id": "9f2c...",           // stable sur toute la conversation, unique par operateur (cle de memoire du wrapper)
+    "turn_id": "a81b...",                   // id du message de reponse attendu (tracabilite)
     "scope": "eyJlIjoi....<hex>"            // jeton opaque signe par Cockpit, voir section 4
   }
 }

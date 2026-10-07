@@ -270,6 +270,25 @@ def test_message_perdu_expire(db):
     assert db[alfred_chat.COL_MESSAGES].docs[0]["status"] == "error"
 
 
+def test_id_de_conversation_envoye_au_wrapper(db, monkeypatch, secret):
+    db[alfred_chat.COL_MESSAGES].docs = [_msg("user", "Porte nord ?", minutes=0),
+                                         {"_id": "a1", "session_id": "s", "role": "assistant",
+                                          "content": "", "status": "queued",
+                                          "created_at": datetime(2026, 10, 7, 12, 1)}]
+    vu = {}
+
+    def fake_ask(**kw):
+        vu.update(kw)
+        return True, {"response": "ok", "tool_calls": [], "hops": 0, "model": "m",
+                      "duration_ms": 1}
+    monkeypatch.setattr(alfred_chat.alfred, "_alfred_ask", fake_ask)
+    monkeypatch.setattr(alfred_chat, "CONTEXT_MODE", "both")
+    alfred_chat._run_ask("a1", "s", {"user_name": "X"}, True, "tok")
+    ctx = vu["extra"]["context"]
+    assert ctx["conversation_id"] == "s" and ctx["turn_id"] == "a1"
+    assert ctx["scope"] == "tok"
+
+
 def test_erreurs_lisibles():
     assert "NTP" in alfred_chat._friendly_error("http_401")
     assert alfred_chat._friendly_error("global_timeout") == alfred_chat.ERREURS["global_timeout"]

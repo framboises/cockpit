@@ -408,6 +408,13 @@ def _run_ask(msg_id, session_id, ctx, is_new, scope):
                 "event": ctx.get("event"), "year": ctx.get("year"),
                 "page": ctx.get("page"), "path": ctx.get("path"),
                 "now": datetime.now(TZ_PARIS).isoformat(timespec="minutes"),
+                # Cle de memoire cote wrapper (resultats d'outils des tours
+                # precedents). Stable sur toute la conversation, unique par
+                # operateur : un hash du 1er message changerait des que
+                # l'historique glisse (6 messages gardes) et collisionnerait
+                # entre deux operateurs qui ouvrent par "Bonjour".
+                "conversation_id": session_id,
+                "turn_id": msg_id,
                 "scope": scope}}
         t0 = time.time()
         ok, res = alfred._alfred_ask(messages=messages, max_tool_hops=MAX_TOOL_HOPS,
