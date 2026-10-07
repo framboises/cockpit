@@ -110,6 +110,7 @@ _health_lock = threading.Lock()
 _indexes_done = False
 
 TOOL_LABELS = {
+    "cockpit_lieux": "Horaires lieux",
     "cockpit_situation": "Situation",
     "cockpit_main_courante_fiches": "Main courante",
     "cockpit_main_courante_fiche": "Fiche",

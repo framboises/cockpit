@@ -121,6 +121,7 @@ Outils disponibles (le manifeste fait foi) :
 
 | Outil | Contenu |
 |---|---|
+| `cockpit_lieux` | Horaires (plages continues par public) et infos de tous les lieux du parametrage + services ; `resume` a recopier tel quel. Remplace `query_parametrages` sur le canal cockpit |
 | `cockpit_situation` | Synthese en un appel : evenement, presents, trafic, meteo, alertes, compteurs et dernieres fiches MC, echeances 6 h |
 | `cockpit_main_courante_fiches` | Fiches filtrables (statut, categorie, urgence, texte, depuis_heures, limite) |
 | `cockpit_main_courante_fiche` | Detail d'une fiche + chronologie (par id ou numero Prysm) |

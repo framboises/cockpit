@@ -234,6 +234,6 @@
 {% if alfred_chat_allowed is defined and alfred_chat_allowed() %}
 <div id="alfred-chat-root" data-firstname="{{ user_firstname | default('', true) }}"></div>
 {# ?v= a incrementer a chaque modification du widget (cache navigateur). #}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/alfred_chat.css') }}?v=2">
-<script src="{{ url_for('static', filename='js/alfred_chat.js') }}?v=2" defer></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/alfred_chat.css') }}?v=3">
+<script src="{{ url_for('static', filename='js/alfred_chat.js') }}?v=3" defer></script>
 {% endif %}

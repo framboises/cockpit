@@ -510,7 +510,37 @@ def t_situation(db, args, ctx):
 # Registre (publie a la VM par GET /api/alfred-tools/manifest)
 # ---------------------------------------------------------------------------
 
+def t_lieux(db, args, ctx):
+    import alfred_lieux
+    return alfred_lieux.t_lieux(db, args, ctx)
+
+
 TOOLS = {
+    "cockpit_lieux": {
+        "fn": t_lieux,
+        "description": "Horaires d'ouverture et informations de TOUS les lieux de l'evenement : "
+                       "portes, parkings, campings, tribunes, boutiques, hospitalites, passerelles, "
+                       "sanitaires, et services (ouverture du site au public, centre medical, help "
+                       "desk, PC Orga, PC autorites, salle de presse). Plages continues deja "
+                       "calculees par public (organisation = accredites, public, VIP), ce qui est "
+                       "ouvert maintenant, capacites. A appeler pour TOUTE question d'horaire, "
+                       "d'ouverture ou de fermeture d'un lieu, y compris les questions de suite. "
+                       "Recopier le champ resume sans le reformuler.",
+        "parameters": {"type": "object", "properties": {
+            "nom": {"type": "string", "description": "nom du lieu tel que dit par l'operateur "
+                                                     "(ex. porte nord, parking Chinetti)"},
+            "type": {"type": "string", "enum": ["porte", "parking", "camping", "tribune",
+                                               "boutique", "hospitalite", "passerelle",
+                                               "sanitaire", "service"]},
+            "public": {"type": "string", "enum": ["organisation", "public", "vip", "tous"],
+                       "description": "accredites/staff = organisation ; defaut tous"},
+            "jour": {"type": "string", "description": "YYYY-MM-DD, aujourd'hui, demain ou un "
+                                                      "jour de la semaine (samedi)"},
+            "maintenant": {"type": "boolean", "description": "ouvert ou ferme a l'instant"},
+            "evenement": {"type": "string", "description": "seulement si l'operateur le cite"},
+            "annee": {"type": "string"},
+        }},
+    },
     "cockpit_situation": {
         "fn": t_situation,
         "description": "Synthese de la situation en cours en UN appel : evenement, presents, "
@@ -605,13 +635,46 @@ def manifest():
             for name, t in TOOLS.items()]
 
 
+# Plafond d'un resultat (~1 500 tokens). Le wrapper tronquait a 8 000
+# caracteres EN PLEIN JSON : le modele recevait un document invalide. On
+# reduit ici, proprement, en gardant `resume` et les champs courts.
+RESULT_MAX_CHARS = 5000
+
+
+def _borner(result):
+    import json as _json
+
+    def taille(o):
+        return len(_json.dumps(o, ensure_ascii=False, default=str))
+    if not isinstance(result, dict) or taille(result) <= RESULT_MAX_CHARS:
+        return result
+    out = dict(result)
+    # Retire d'abord les plus gros champs autres que resume, jusqu'a tenir
+    for k in sorted((k for k in out if k != "resume"), key=lambda k: -taille(out[k])):
+        if taille(out) <= RESULT_MAX_CHARS:
+            break
+        v = out[k]
+        if isinstance(v, list) and len(v) > 1:
+            while len(v) > 1 and taille(out) > RESULT_MAX_CHARS:
+                v = v[: max(1, len(v) // 2)]
+                out[k] = v
+            out["tronque"] = True
+        if taille(out) > RESULT_MAX_CHARS and k not in ("disponible",):
+            out.pop(k, None)
+            out["tronque"] = True
+    if taille(out) > RESULT_MAX_CHARS and isinstance(out.get("resume"), str):
+        out["resume"] = out["resume"][: RESULT_MAX_CHARS - 300] + " [...]"
+        out["tronque"] = True
+    return out
+
+
 def call(db, name, args, ctx):
     """Execute un outil. (ok, resultat). Ne leve jamais."""
     t = TOOLS.get(name)
     if not t:
         return False, {"error": "outil_inconnu", "outils": sorted(TOOLS)}
     try:
-        return True, t["fn"](db, args if isinstance(args, dict) else {}, ctx or {})
+        return True, _borner(t["fn"](db, args if isinstance(args, dict) else {}, ctx or {}))
     except Exception as exc:
         logger.exception("alfred_tools %s", name)
         return False, {"error": "erreur_outil", "detail": str(exc)[:200]}
