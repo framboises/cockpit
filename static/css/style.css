@@ -8757,35 +8757,34 @@ input:checked + .slider .slider-button::after {
     height: auto !important;
   }
 
-  /* --- Bottom nav : barre unique scrollable horizontalement.
-     L'encoche centrale est creusee dans le BACKGROUND via mask, les onglets
-     restent dans le flux et passent visuellement sous le FAB lors du scroll
-     (effet fluide, le FAB agit comme une fenetre opaque centree). */
+  /* --- Bottom nav : barre unique scrollable horizontalement (06/10/2026).
+     Le "+" est un ELEMENT de la barre (entre Carte et Main courante) : il a
+     sa propre place, aucun onglet ne passe dessous. Il deborde au-dessus de
+     la barre : la nav est plus haute que la barre visible (bande du haut
+     transparente et non cliquable), le fond de la barre est porte par
+     ::before sur les 56 px du bas. Centre a l'ouverture par main.js. */
   .mobile-bottom-nav {
     display: flex;
+    align-items: flex-end;
     position: fixed;
     left: 0;
     right: 0;
     bottom: 0;
-    height: calc(56px + env(safe-area-inset-bottom, 0px));
+    height: calc(76px + env(safe-area-inset-bottom, 0px));
     padding-bottom: env(safe-area-inset-bottom, 0px);
-    box-shadow: 0 -2px 12px rgba(0,0,0,0.35);
     z-index: 1200;
     overflow-x: auto;
-    overflow-y: visible;
+    overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    /* Le fond est un pseudo-element ::before pour pouvoir y appliquer le mask
-       sans masquer les onglets eux-memes (qui passent au-dessus du mask). */
     background: transparent;
+    pointer-events: none;           /* la bande transparente du haut laisse passer les clics */
     scroll-padding-left: 8px;
     scroll-padding-right: 8px;
   }
+  .mobile-bottom-nav > * { pointer-events: auto; }
   .mobile-bottom-nav::-webkit-scrollbar { display: none; }
 
-  /* Background avec encoche radiale : c'est lui qui forme la barre visible,
-     creusee au centre pour acueillir le FAB. Position fixed pour ne pas
-     scroller avec les onglets. */
   .mobile-bottom-nav::before {
     content: "";
     position: fixed;
@@ -8795,11 +8794,9 @@ input:checked + .slider .slider-button::after {
     height: calc(56px + env(safe-area-inset-bottom, 0px));
     background: var(--card);
     border-top: 1px solid var(--line);
+    box-shadow: 0 -2px 12px rgba(0,0,0,0.35);
     z-index: -1;
     pointer-events: none;
-    /* Encoche en U au top-center, rayon 36px (FAB 28 + 8 d'air) */
-    -webkit-mask-image: radial-gradient(circle 36px at 50% 0, transparent 98%, #000 100%);
-            mask-image: radial-gradient(circle 36px at 50% 0, transparent 98%, #000 100%);
   }
 
   .mb-tab {
@@ -8824,8 +8821,7 @@ input:checked + .slider .slider-button::after {
   }
   .mb-tab .material-symbols-outlined { font-size: 22px; }
   .mb-tab .mb-tab-label { font-size: 9.5px; }
-  /* Indicateur actif : barre courte sous l'icone (pas sur le top du nav, qui
-     ferait apparaitre une ligne sur le mask) */
+  /* Indicateur actif : barre courte sous l'icone */
   .mb-tab.is-active { color: var(--brand); }
   .mb-tab.is-active::after {
     content: "";
@@ -8844,42 +8840,97 @@ input:checked + .slider .slider-button::after {
   .mobile-bottom-nav > .mb-tab:first-of-type { margin-left: 6px; }
   .mobile-bottom-nav > .mb-tab:last-of-type { margin-right: 6px; }
 
-  /* FAB central : "+" pour creer une fiche d'intervention.
-     S'inscrit dans la notch radiale creusee dans le nav (rayon 34px).
-     Position fixed centre, plonge legerement dans l'encoche (effet immergé). */
+  /* "+" : rond qui deborde au-dessus de la barre, cercle de la couleur de la
+     barre autour (effet "creuse dans la barre"), dans le flux des onglets. */
   .mb-fab {
-    position: fixed;
-    bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-    left: 50%;
-    transform: translateX(-50%);
-    width: 56px;
-    height: 56px;
+    flex: 0 0 auto;
+    align-self: flex-end;
+    width: 62px;
+    height: 62px;
+    margin: 0 8px 8px;
     border-radius: 50%;
     background: var(--brand);
     color: #fff;
-    border: none;
-    box-shadow:
-      0 6px 16px rgba(0,0,0,0.35),
-      0 2px 6px rgba(0,0,0,0.25);
-    z-index: 1210;
+    border: 5px solid var(--card);
+    box-shadow: 0 -3px 8px rgba(0,0,0,0.12), 0 4px 10px rgba(37, 99, 235, 0.35);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     padding: 0;
-    transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1),
-                box-shadow 0.15s ease;
+    position: relative;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
   .mb-fab .material-symbols-outlined {
     font-size: 30px;
     font-weight: 700;
   }
-  .mb-fab:hover {
-    box-shadow:
-      0 8px 20px rgba(0,0,0,0.4),
-      0 3px 8px rgba(0,0,0,0.3);
+  .mb-fab:active { transform: scale(0.92); }
+
+  /* Mode fixe (main.js layoutNav) : tous les onglets visibles tiennent a
+     l'ecran, plus de defilement ; largeurs posees en ligne par le script. */
+  .mobile-bottom-nav.mb-fit { overflow-x: hidden; }
+  .mobile-bottom-nav.mb-fit > .mb-tab {
+    min-width: 0;
+    padding: 6px 2px;
+    margin: 0 !important;
   }
-  .mb-fab:active { transform: translateX(-50%) scale(0.92); }
+  .mobile-bottom-nav.mb-fit .mb-tab-label,
+  .mobile-bottom-nav.mb-car .mb-tab-label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Carrousel (plus de 4 onglets, main.js) : "+" fixe au centre, 4 onglets a
+     l'ecran positionnes par le script (transform), glisser du doigt,
+     indicateurs < > quand il reste des onglets caches. */
+  .mobile-bottom-nav.mb-car {
+    overflow: hidden;
+    touch-action: none;
+    padding-left: 0 !important;
+  }
+  .mobile-bottom-nav.mb-car > .mb-tab {
+    position: absolute;
+    left: 0;
+    bottom: env(safe-area-inset-bottom, 0px);
+    margin: 0 !important;
+    min-width: 0;
+    padding: 6px 2px;
+    will-change: transform, opacity;
+  }
+  .mobile-bottom-nav.mb-car.mb-anim > .mb-tab {
+    transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.28s ease, color 0.18s ease;
+  }
+  .mobile-bottom-nav.mb-car > .mb-fab {
+    position: absolute;
+    left: 50%;
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    margin: 0;
+    transform: translateX(-50%);
+    z-index: 2;
+  }
+  .mobile-bottom-nav.mb-car > .mb-fab:active { transform: translateX(-50%) scale(0.92); }
+  .mb-more { display: none; }
+  .mobile-bottom-nav.mb-car > .mb-more {
+    display: flex;
+    position: absolute;
+    bottom: env(safe-area-inset-bottom, 0px);
+    height: 56px;
+    width: 20px;
+    align-items: center;
+    justify-content: center;
+    color: var(--brand);
+    z-index: 3;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .mobile-bottom-nav.mb-car > .mb-more.is-on { opacity: 1; pointer-events: auto; }
+  .mobile-bottom-nav.mb-car > .mb-more .material-symbols-outlined { font-size: 20px; font-weight: 700; }
+  .mb-more-left  { left: 0;  background: linear-gradient(to right, var(--card) 45%, transparent); }
+  .mb-more-right { right: 0; background: linear-gradient(to left,  var(--card) 45%, transparent); }
 
   /* --- Searchbar : compacte sur 1 seule ligne (pas de wrap) --- */
   #timeline-searchbar { padding: 0; }
@@ -9116,6 +9167,41 @@ input:checked + .slider .slider-button::after {
   .pcorg-create-nav .pcorg-popup-btn .material-symbols-outlined { font-size: 22px; }
   .pcorg-create-nav-right { gap: 8px; }
   .pcorg-create-nav .pcorg-btn-primary { padding: 12px 22px; }
+
+  /* iPhone portrait (06/10/2026) : la regle generique ".modal-content
+     { width: 96vw }" laissait une bande vide a droite des modales fiche /
+     creation (374 px sur 390). Pleine largeur, et pied Annuler / Suivant
+     colle en bas de l'ecran (plus de grand vide blanc sous les boutons). */
+  .pcorg-fiche-modal .pcorg-fiche.modal-content,
+  .pcorg-create-wide .pcorg-fiche.modal-content {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  #pcorg-create-body {
+    display: flex;
+    flex-direction: column;
+    padding: 14px 16px 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Le pied est DANS le formulaire : le formulaire remplit le corps */
+  #pcorg-create-body > #pcorgCreateForm {
+    display: flex;
+    flex-direction: column;
+    flex: 1 0 auto;
+  }
+  #pcorg-create-body .pcorg-create-nav {
+    margin: auto -16px 0;          /* auto en haut : pousse le pied en bas */
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    gap: 10px;
+    box-shadow: 0 -4px 12px rgba(15, 23, 42, 0.06);
+  }
+  #pcorg-create-body .pcorg-create-nav > .pcorg-popup-btn { flex: 0 0 auto; }
+  #pcorg-create-body .pcorg-create-nav-right { flex: 1 1 auto; justify-content: flex-end; }
+  #pcorg-create-body .pcorg-create-nav-right .pcorg-btn-primary { flex: 1 1 auto; justify-content: center; max-width: 220px; }
+  /* Carte de l'etape 1 : occupe la hauteur disponible sans pousser le pied
+     hors de l'ecran (en-tete ~110 px, coordonnees ~110, pied ~76, marges) */
+  #pcorg-create-body .pcorg-create-map { height: calc(100dvh - 340px) !important; min-height: 240px; }
 
   /* === DETAIL FICHE : info-row en colonne, mini-carte pleine largeur === */
   .pcorg-fiche-info-row {
@@ -16417,4 +16503,102 @@ th span { font-size: 0.88rem; font-weight: 700; }
   .air-split { grid-template-columns: 1fr; }
   .air-modal { height: calc(100vh - 16px); }
   .air-overlay { padding: 8px; }
+}
+
+/* ==========================================================================
+   Evenements voisins (Antares, MSB, Le Mans FC) - voisins_sync.py
+   Antares : bleu ciel #56B4E9 / fonce #1d6fa5 ; stade : ardoise #4B5563.
+   ========================================================================== */
+/* Cartes de la timeline */
+.event-item.is-voisin { border-left: 5px solid var(--vz, #1d6fa5); background: linear-gradient(90deg, var(--vz-bg, rgba(86,180,233,0.12)), var(--card) 60%); }
+.event-item.is-voisin.vz-antares { --vz: #1d6fa5; --vz-bg: rgba(86,180,233,0.16); }
+.event-item.is-voisin.vz-stade { --vz: #374151; --vz-bg: rgba(75,85,99,0.14); }
+.event-item.is-voisin .vz-card-ic { color: var(--vz); font-size: 22px; }
+.event-item.is-voisin:not(.vz-flux) .event-title h5 { font-weight: 800; }
+.event-item.is-voisin.vz-flux { border-left-style: dashed; background: var(--card); opacity: 0.85; padding-top: 6px; padding-bottom: 6px; }
+.event-item.is-voisin.vz-flux .vz-card-ic { font-size: 18px; }
+.event-item.is-voisin.vz-flash { animation: vz-flash 1.6s ease-out 1; }
+@keyframes vz-flash { 0%, 30% { box-shadow: 0 0 0 3px var(--vz); } 100% { box-shadow: none; } }
+.vz-badge {
+  display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;
+  margin: 2px 4px 2px 0; padding: 1px 8px 1px 5px; border-radius: 999px;
+  font-size: 0.68rem; font-weight: 700; color: #fff; background: #1d6fa5; line-height: 1.5;
+}
+.vz-badge.vz-stade { background: #374151; }
+.vz-badge .material-symbols-outlined { font-size: 14px; }
+.vz-chip {
+  display: inline-block; margin: 2px 4px 2px 0; padding: 0 6px; border-radius: 4px;
+  font-size: 0.64rem; font-weight: 600; background: #e2e8f0; color: #1e293b;
+}
+.vz-chip.vz-tbc { background: #fef3c7; color: #92400e; }
+
+/* Barre des jours : pictogramme en coin du jour */
+.day-nav-pill.si-day { position: relative; }
+.si-vz-flags { position: absolute; top: 1px; right: 1px; display: flex; gap: 1px; pointer-events: auto; }
+.si-vz-flag {
+  width: 15px; height: 15px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--c); color: #fff; box-shadow: 0 0 0 1px #fff; cursor: pointer;
+}
+.si-vz-flag .material-symbols-outlined { font-size: 11px; line-height: 1; }
+.day-nav-pill.si-has-vz { border-color: #1d6fa5; }
+.day-nav-pill.active .si-vz-flag { box-shadow: 0 0 0 1px var(--brand); }
+
+/* Infobulle du jour : encadre "A cote du circuit" */
+.si-tip-vz { margin: 4px 0 6px; padding: 5px 7px 6px; border-radius: 7px; background: #eff6fb; border: 1px solid #b9dcf2; }
+.si-tip-vz-head { display: flex; align-items: center; gap: 4px; font-size: 0.66rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: #1d6fa5; }
+.si-tip-vz-head .material-symbols-outlined { font-size: 14px; }
+.si-tip-vz-line { display: flex; align-items: flex-start; gap: 6px; margin-top: 4px; padding-left: 6px; border-left: 3px solid var(--c); }
+.si-tip-vz-ic { font-size: 18px; color: var(--c); filter: brightness(0.75); }
+.si-tip-vz-main { min-width: 0; font-size: 0.74rem; line-height: 1.35; }
+.si-tip-vz-time { font-variant-numeric: tabular-nums; margin-right: 6px; }
+.si-tip-vz-title { font-weight: 700; }
+.si-tip-vz-sub { font-size: 0.68rem; color: var(--muted); }
+
+/* Calendrier : pastille voisins (pictogramme + heure) en haut de la case */
+.si-cal-cell.si-cal-has-vz { box-shadow: inset 0 3px 0 var(--vzc, #1d6fa5); }
+.si-cal-vzpill {
+  display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0;
+  padding: 0 5px 0 3px; border-radius: 999px; background: var(--c); color: #fff;
+  font-size: 0.62rem; font-weight: 700; line-height: 15px; font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 2px rgba(0,0,0,0.35);
+}
+.si-cal-vzpill .material-symbols-outlined { font-size: 11px; line-height: 1; }
+
+/* Bandeau en tete de la timeline */
+.vz-banner {
+  display: flex; flex-direction: column; align-items: stretch; gap: 4px; flex-shrink: 0;
+  margin: 4px 8px 6px; padding: 6px 8px; border-radius: 10px;
+  background: #eff6fb; border: 1px solid #b9dcf2;
+}
+.vz-banner-head { display: inline-flex; align-items: center; gap: 4px; font-size: 0.7rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: #1d6fa5; }
+.vz-banner-head .material-symbols-outlined { font-size: 16px; }
+.vz-banner-row { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; flex: 1; }
+.vz-ev {
+  width: auto; flex: 0 1 auto; margin: 0;
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%;
+  padding: 3px 10px 3px 6px; border-radius: 8px; border: 1px solid var(--line);
+  border-left: 4px solid #1d6fa5; background: var(--card); color: var(--text);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.vz-ev.vz-stade { border-left-color: #374151; }
+.vz-ev.is-today { box-shadow: 0 0 0 1px #1d6fa5; }
+.vz-ev.vz-stade.is-today { box-shadow: 0 0 0 1px #374151; }
+.vz-ev:hover, .vz-ev:focus-visible { background: #f8fafc; outline: none; }
+.vz-ev-ic { font-size: 20px; color: #1d6fa5; }
+.vz-ev.vz-stade .vz-ev-ic { color: #374151; }
+.vz-ev-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.vz-ev-l1 { display: flex; gap: 6px; align-items: baseline; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vz-ev-day { color: #b45309; font-weight: 800; }
+.vz-ev:not(.is-today) .vz-ev-day { color: var(--muted); font-weight: 700; }
+.vz-ev-time { font-variant-numeric: tabular-nums; }
+.vz-ev-title { overflow: hidden; text-overflow: ellipsis; }
+.vz-ev-l2 { font-size: 0.68rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 600px) {
+  .vz-banner { margin: 4px 6px; padding: 5px 6px; }
+  .vz-banner-head .vz-banner-lbl { display: none; }
+  .vz-ev { flex: 1 1 100%; }
+  .si-vz-flag { width: 12px; height: 12px; }
+  .si-vz-flag .material-symbols-outlined { font-size: 9px; }
+  .si-cal-vzpill { padding: 0 3px; font-size: 0; }
+  .si-cal-vzpill .material-symbols-outlined { font-size: 11px; }
 }

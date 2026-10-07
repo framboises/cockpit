@@ -769,12 +769,7 @@
 <!-- Toast container -->
 <div id="toast-container"></div>
 
-<!-- FAB central "+" (siblings du nav pour echapper a son overflow:hidden) -->
-<button class="mb-fab" id="mb-fab-add" type="button" aria-label="Nouvelle intervention">
-    <span class="material-symbols-outlined">add</span>
-</button>
-
-<!-- Bottom nav mobile (visible seulement <=820px) — barre unique scrollable, le FAB flotte par-dessus avec une encoche-mask. Les onglets glissent visuellement sous le FAB lors du scroll. -->
+<!-- Bottom nav mobile (visible seulement <=820px) — barre unique scrollable. Le "+" est un element de la barre (il a sa place entre les onglets, aucun onglet ne passe dessous) ; il deborde au-dessus de la barre et est centre a l'ouverture (main.js). -->
 <nav id="mobile-bottom-nav" class="mobile-bottom-nav" aria-label="Navigation mobile">
     <button class="mb-tab is-active" data-target="timeline" type="button">
         <span class="material-symbols-outlined">view_agenda</span>
@@ -783,6 +778,9 @@
     <button class="mb-tab" data-target="map" type="button">
         <span class="material-symbols-outlined">map</span>
         <span class="mb-tab-label">Carte</span>
+    </button>
+    <button class="mb-fab" id="mb-fab-add" type="button" aria-label="Nouvelle intervention">
+        <span class="material-symbols-outlined">add</span>
     </button>
     <button class="mb-tab" data-target="widget-comms" type="button">
         <span class="material-symbols-outlined">forum</span>

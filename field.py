@@ -666,6 +666,41 @@ def _device_category(db, device, group_cats=None):
     return group_cats.get(device.get("beacon_group_id"))
 
 
+def _beacon_groups(db):
+    """{beacon_group_id: groupe complet} depuis la config Anoloc."""
+    config = db["anoloc_config"].find_one({"_id": "global"}, {"beacon_groups": 1}) or {}
+    return {g.get("id"): g for g in config.get("beacon_groups", []) or [] if g.get("id")}
+
+
+def _device_declarant(db, device, groups=None):
+    """Mode declarant (07/10/2026) : drapeau `declarant` du GROUPE de balises
+    de la tablette (Configuration > Anoloc), jamais choisi a l'appairage.
+    Une tablette declarante depose des CONSTATS (collection `declarations`,
+    declarations.py : photos, description, position), jamais des fiches ;
+    un operateur habilite les transforme en fiche depuis /declarations.
+    Elle peut recevoir une destination du PC Org mais n'est JAMAIS une
+    unite : ni proposition automatique, ni libre-service, ni engagement,
+    ni SOS des autres."""
+    if not device:
+        return False
+    if groups is None:
+        groups = _beacon_groups(db)
+    return bool((groups.get(device.get("beacon_group_id")) or {}).get("declarant"))
+
+
+# Photos des declarants : gardees 1 an (constats de degats), sous un dossier
+# a part que la purge reconnait sans lire Mongo.
+DECLARANT_PHOTO_SUBDIR = "_declarant"
+FIELD_PHOTO_DECLARANT_TTL_DAYS = 365
+
+
+def _device_photo_sub_dir(db, device, declarant=None):
+    base = os.path.join(str(device.get("event") or "unknown"), str(device.get("year") or "unknown"))
+    if declarant is None:
+        declarant = _device_declarant(db, device)
+    return os.path.join(DECLARANT_PHOTO_SUBDIR, base) if declarant else base
+
+
 def _clean_metiers(raw):
     """Metiers d'une unite (libelles de sous-classification). Liste vide =
     tous les metiers de sa categorie."""
@@ -842,6 +877,7 @@ def _sos_recipients(db, sender, event=None, year=None):
     electricien ne recoit plus l'alarme d'une patrouille a l'autre bout du
     circuit. `event`/`year` : conserves pour compatibilite, inutilises."""
     group_cats = _group_categories(db)
+    groups = _beacon_groups(db)
     wanted = set(SOS_RESPONDER_CATEGORIES)
     sender_cat = _device_category(db, sender, group_cats)
     if sender_cat:
@@ -853,6 +889,9 @@ def _sos_recipients(db, sender, event=None, year=None):
         "revoked": {"$ne": True},
     }, {"_id": 1, "name": 1, "category": 1, "beacon_group_id": 1, "event": 1, "year": 1,
         "restoredAt": 1}):
+        # Un declarant garde son bouton SOS mais ne recoit pas ceux des autres
+        if _device_declarant(db, o, groups):
+            continue
         if _device_category(db, o, group_cats) not in wanted | {None}:
             continue
         if _device_expired(db, o):
@@ -1135,7 +1174,9 @@ def field_index():
         return resp
     if device.get("revoked"):
         return redirect("/field/denied")
-    return render_template("field.html", device=_pub_device(device))
+    pub = _pub_device(device)
+    pub["declarant"] = _device_declarant(db, device)
+    return render_template("field.html", device=pub)
 
 
 @field_bp.route("/field/denied", methods=["GET"])
@@ -1636,6 +1677,10 @@ def field_create_fiche():
     name = device.get("name") or "?"
 
     db = _get_mongo_db()
+    # Un declarant ne cree jamais de fiche : il depose un constat
+    # (/field/declarations), transforme en fiche par un operateur habilite.
+    if _device_declarant(db, device):
+        return jsonify({"ok": False, "error": "declarant"}), 403
     # Evenement de la fiche : celui de la tablette si c'est une epreuve
     # active, sinon l'evenement courant (bascule SAISON / epreuve).
     event, year = fiche_target_event(db, device)
@@ -2103,9 +2148,10 @@ def field_photo_send():
     if len(photo_files) > FIELD_PHOTO_MAX_PER_BATCH:
         return jsonify({"ok": False, "error": "too_many_photos"}), 400
 
-    event = device.get("event") or "unknown"
-    year = device.get("year") or "unknown"
-    sub_dir = os.path.join(str(event), str(year))
+    db = _get_mongo_db()
+    if should_create_fiche and _device_declarant(db, device):
+        return jsonify({"ok": False, "error": "declarant"}), 403
+    sub_dir = _device_photo_sub_dir(db, device)
 
     photos_meta = []
     for pf in photo_files:
@@ -2228,6 +2274,7 @@ def field_photo_send():
             "bounce_rev": 1,
         }
         db["pcorg"].insert_one(fiche_doc)
+    if fiche_id:
         db["field_devices"].update_one(
             {"_id": device["_id"]},
             {
@@ -2820,6 +2867,7 @@ def field_admin_beacon_groups():
             "color": g.get("color") or "#6366f1",
             "icon": g.get("icon") or "location_on",
             "pco_category": g.get("pco_category"),
+            "declarant": bool(g.get("declarant")),
             "disabled": g.get("enabled") is False,
         })
     resp = jsonify({"groups": groups})
@@ -2976,13 +3024,16 @@ def purge_old_photo_files(ttl_days=None):
     scanned = 0
     deleted = 0
     bytes_freed = 0
+    # Photos des declarants (constats de degats) : 1 an
+    decl_root = os.path.join(FIELD_PHOTOS_DIR, DECLARANT_PHOTO_SUBDIR) + os.sep
+    decl_cutoff = _now().timestamp() - (max(ttl_days, FIELD_PHOTO_DECLARANT_TTL_DAYS) * 86400)
     for root, dirs, files in os.walk(FIELD_PHOTOS_DIR):
         for fname in files:
             scanned += 1
             full = os.path.join(root, fname)
             try:
                 mtime = os.path.getmtime(full)
-                if mtime < cutoff:
+                if mtime < (decl_cutoff if full.startswith(decl_root) else cutoff):
                     size = os.path.getsize(full)
                     os.remove(full)
                     deleted += 1
@@ -4218,6 +4269,7 @@ def field_my_fiches():
     # peut changer la categorie pendant que la tablette tourne).
     dev_fresh = db["field_devices"].find_one({"_id": device["_id"]}) or device
     device_category = _device_category(db, dev_fresh)
+    declarant = _device_declarant(db, dev_fresh)
 
     pairs = device_fiche_pairs(db, dev_fresh)
     and_parts = [EC.pairs_filter(pairs)]
@@ -4226,7 +4278,11 @@ def field_my_fiches():
         "category": {"$regex": "^PCO"},
         "$and": and_parts,
     }
-    if device_category:
+    if declarant:
+        # Un declarant n'a pas de fiches (ses constats vivent dans
+        # `declarations`, /field/declarations) : seulement son propre SOS.
+        and_parts.append({"content_category.field_sos": True})
+    elif device_category:
         # Une tablette ne voit que les fiches de sa categorie. Exceptions :
         # son propre SOS (toujours PCO.Secours) et la fiche sur laquelle elle
         # est engagee, au cas ou le PC Org en changerait la categorie.
@@ -4324,10 +4380,11 @@ def field_my_fiches():
         "device_name": name,
         "device_category": device_category,
         "device_metiers": dev_fresh.get("metiers") or [],
+        "declarant": declarant,
         # Proposition automatique en attente de reponse (compte a rebours)
-        "proposal": DA.proposal_for_device(db, dev_fresh),
+        "proposal": None if declarant else DA.proposal_for_device(db, dev_fresh),
         # Cloture par l'unite autorisee pour sa categorie (fin avec issue)
-        "self_close": bool(device_category and DA.category_config(
+        "self_close": bool(not declarant and device_category and DA.category_config(
             DA.get_config(db), device_category).get("self_close")),
         "device_status": dev_fresh.get("status") or "patrouille",
         "active_fiche_id": dev_fresh.get("active_fiche_id"),
@@ -4457,9 +4514,7 @@ def field_my_fiche_comment_with_photo(fiche_id):
     # Handle photo uploads (multi)
     photos_meta = []
     if photo_files:
-        event = device.get("event") or "unknown"
-        year = device.get("year") or "unknown"
-        sub_dir = os.path.join(str(event), str(year))
+        sub_dir = _device_photo_sub_dir(db, device)
         for pf in photo_files:
             try:
                 url, thumb = _process_and_save_photo(pf, sub_dir)

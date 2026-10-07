@@ -10,7 +10,7 @@
      - app shell : correspondance EXACTE du chemin (plus de sous-chaine)
    ===================================================================== */
 
-const SW_VERSION = "field-sw-v42";
+const SW_VERSION = "field-sw-v44";
 const APP_SHELL_CACHE = "field-shell-" + SW_VERSION;
 const TILE_CACHE = "field-tiles-" + SW_VERSION;
 const API_CACHE = "field-api-" + SW_VERSION;

@@ -15,6 +15,17 @@ Chaque tablette porte **une** catégorie de fiche (`field_devices.category`), ch
 
 ⚠️ La liste des catégories existe en trois copies à garder alignées : `FIELD_CATEGORIES` (`field.py`), `FICHE_CREATE_CATEGORIES`/`CAM_CATEGORIES` (`field.js`) et `FIELD_CATEGORIES` (`field_admin.js`).
 
+### Mode déclarant (07/10/2026)
+
+Drapeau **du groupe de balises** (`anoloc_config.global.beacon_groups[].declarant`, case « Mode déclarant » de la modale de groupe dans `edit.html` / `anoloc_admin.js`). Jamais choisi à l'appairage : l'opérateur donne le groupe, le mode suit. Lu à chaud (`field._device_declarant(db, device, groups)`, via `beacon_group_id`) : décocher le groupe rend la tablette normale au poll suivant. Cas d'usage : cellule d'appui prestataire qui patrouille et signale dégâts / réparations.
+
+- **Jamais de fiche** : un déclarant dépose des **constats** (collection `declarations`, voir `declarations.md`). `/field/create-fiche` et `/field/photo/send` avec création de fiche → **403 `declarant`**. Un opérateur du droit « Traiter les constats terrain » les transforme en fiche depuis `/declarations`.
+- **Jamais une unité** : exclue de `find_candidates`, `available_for_device` (`[]`), `self_assign` / `manual_assign` (`unite_invalide`), des unités de `/api/dispatch/board` et de `/anoloc/vehicles-by-category`. Pas de proposition (`my-fiches.proposal = null`), pas de `self_close`. `/field/my-fiches` ne rend que son propre SOS (réponse `declarant: true`).
+- **SOS** : garde son bouton (son SOS part normalement), mais **ne reçoit pas** ceux des autres (`_sos_recipients`).
+- **Photos** sous `uploads/field_photos/_declarant/<event>/<year>/` (`_device_photo_sub_dir`), purgées à **365 jours** (`FIELD_PHOTO_DECLARANT_TTL_DAYS`) au lieu de 30, sans lire Mongo.
+- **Tablette** (`field.js`, `body.field-declarant`) : barre de statut, bandeau d'engagement, onglet « Disponibles » et bouton Caméra masqués ; bouton orange **« Déclarer »** (`#declare-modal` : photos via `<input capture>` réduites à 1920 px côté téléphone, description, priorité basse / normale / haute, position GPS ou appui long → `POST /field/declarations`) ; « Missions » devient **« Mes constats »** (`GET /field/declarations`, état Envoyé / Vu par le PC / Pris en charge / Traité / Classé), détail dans la modale de fiche avec complément texte + photo. Hors ligne : file d'attente (JSON ou multipart, idempotente par `client_token`). Messages et destinations envoyés par le PC Org inchangés. `FIELD_DEVICE.declarant` au chargement.
+- Tests : `TestModeDeclarant` (`test_field_access.py`), `TestDeclarant` (`test_dispatch_auto.py`), `test_declarations.py`.
+
 ### Dispatch automatique et file du service (`dispatch_auto.py`)
 
 Deux voies d'engagement coexistent. **Directe** : le PC Org (ou un responsable) choisit l'unité, comme avant. **Proposition automatique** : la fiche est proposée à l'unité disponible la plus proche, qui a `timeout_s` (30 s par défaut) pour **Accepter / Refuser** ; refus ou silence → unité suivante ; après `max_attempts` (3) ou faute de candidat → **file du service**, traitée par ses responsables sur `/dispatch-service` (utilisateurs cockpit, plusieurs par service).

@@ -134,6 +134,31 @@ class TestCandidats:
         assert names == ["LoinFrais", "PresMaisVieux"]
 
 
+class TestDeclarant:
+    """Groupe en mode declarant : ses tablettes ne sont jamais des unites."""
+
+    def _decl(self, db):
+        db["anoloc_config"].update_one({"_id": "global"}, {"$set": {"beacon_groups": [
+            {"id": "grp-cap", "pco_category": "PCO.Technique", "declarant": True}]}})
+        d = _dev(db, "Presta", 5, category=None)
+        db["field_devices"].update_one({"_id": d["_id"]}, {"$set": {"beacon_group_id": "grp-cap"}})
+        return db["field_devices"].find_one({"_id": d["_id"]})
+
+    def test_jamais_candidat(self, db):
+        self._decl(db)
+        _dev(db, "Tech", 300)
+        _fiche(db)
+        names = [c["device"]["name"] for c in DA.find_candidates(db, db["pcorg"].find_one({"_id": "f1"}), now=NOW)]
+        assert names == ["Tech"]
+
+    def test_ni_libre_service_ni_engagement(self, db):
+        dev = self._decl(db)
+        _fiche(db)
+        assert DA.available_for_device(db, dev, now=NOW) == []
+        assert DA.self_assign(db, "f1", dev, now=NOW) == (False, "unite_invalide")
+        assert DA.manual_assign(db, "f1", dev, "Resp", now=NOW) == (False, "unite_invalide")
+
+
 class TestTournee:
     def test_proposition_puis_acceptation(self, db):
         a = _dev(db, "A", 100)

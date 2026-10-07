@@ -85,8 +85,14 @@
   // ========================================================================
 
   var radar = {
-    couche: null, images: [], index: 0, timer: null, bornes: null, actif: false
+    couche: null, images: [], index: 0, timer: null, bornes: null, actif: false,
+    rafraichissement: null
   };
+
+  // La collecte pousse une observation et un run PIAF toutes les 5 minutes.
+  // Sans rechargement, un radar laisse ouvert finissait par ne montrer que du
+  // passe : les "previsions" chargees a l'ouverture etaient echues.
+  var RADAR_RAFRAICHISSEMENT_MS = 5 * 60 * 1000;
 
   function carte() {
     return (window.CockpitMapView && window.CockpitMapView.getMap)
@@ -101,6 +107,36 @@
         radar.bornes = [[d.bbox.south, d.bbox.west], [d.bbox.north, d.bbox.east]];
       }
       return d;
+    });
+  }
+
+  function indexDerniereObservation() {
+    var derniere = 0;
+    radar.images.forEach(function (im, i) { if (im.flux === "observation") derniere = i; });
+    return derniere;
+  }
+
+  function rafraichirSequence() {
+    if (!radar.actif) return;
+    var courante = radar.images[radar.index];
+    chargerSequence().then(function () {
+      if (!radar.actif || !radar.images.length) return;
+      // Meme instant et meme flux dans la nouvelle sequence : l'operateur qui
+      // regardait "+30 min" ne doit pas etre renvoye ailleurs. Si cet instant
+      // est sorti de la fenetre glissante, on se recale sur le present.
+      var cible = -1;
+      if (courante) {
+        radar.images.forEach(function (im, i) {
+          if (cible < 0 && im.flux === courante.flux && im.valid_at === courante.valid_at) cible = i;
+        });
+      }
+      var curseur = document.querySelector("#radar-barre .radar-curseur");
+      if (curseur) curseur.max = Math.max(0, radar.images.length - 1);
+      afficherImage(cible >= 0 ? cible : indexDerniereObservation());
+    }).catch(function (e) {
+      // On garde la sequence precedente : mieux vaut des images un peu
+      // anciennes qu'une carte qui se vide sur une erreur passagere.
+      console.warn("[Meteo] rafraichissement radar:", e);
     });
   }
 
@@ -192,6 +228,10 @@
     if (!m) { return; }
     if (radar.actif) {
       arreter();
+      if (radar.rafraichissement) {
+        clearInterval(radar.rafraichissement);
+        radar.rafraichissement = null;
+      }
       if (radar.couche) { m.removeLayer(radar.couche); radar.couche = null; }
       radar.actif = false;
       majBoutonRadar();
@@ -208,10 +248,10 @@
       construireBarre();
       // On demarre sur la derniere observation, pas sur la premiere image :
       // c'est l'instant present qui interesse, le passe se rejoue ensuite.
-      var derniereObs = 0;
-      radar.images.forEach(function (im, i) { if (im.flux === "observation") derniereObs = i; });
-      afficherImage(derniereObs);
+      afficherImage(indexDerniereObservation());
       majBoutonRadar();
+      if (radar.rafraichissement) clearInterval(radar.rafraichissement);
+      radar.rafraichissement = setInterval(rafraichirSequence, RADAR_RAFRAICHISSEMENT_MS);
     }).catch(function (e) {
       console.error("[Meteo] sequence radar:", e);
       if (window.showToast) window.showToast("Radar indisponible", "error");

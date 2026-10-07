@@ -69,6 +69,10 @@ class _Col:
     def find(self, flt=None, projection=None):
         return _Cursor(d for d in self.docs if _match(d, flt or {}))
 
+    def insert_one(self, doc):
+        self.docs.append(doc)
+        return types.SimpleNamespace(inserted_id=doc.get("_id"))
+
     def update_one(self, flt, update, **k):
         for d in self.docs:
             if _match(d, flt):
@@ -268,6 +272,94 @@ class TestCategorieTablette:
                        json={"category": "PCO.Inconnue"})
         assert rep.status_code == 400
         assert rep.get_json()["error"] == "invalid_category"
+
+
+class TestModeDeclarant:
+    """Groupe coche "mode declarant" : la tablette ne cree jamais de fiche
+    (elle depose des constats, cf. test_declarations.py), ne recoit pas les
+    SOS des autres et ne voit que son propre SOS dans ses fiches."""
+
+    @pytest.fixture
+    def decl(self, env, monkeypatch):
+        db = env_fake_app["db"]
+        db["anoloc_config"].docs[0]["beacon_groups"].append(
+            {"id": "grp-cap", "pco_category": "PCO.Technique", "declarant": True})
+        db["field_devices"].docs.append(dict(
+            {"event": "E", "year": "2026", "revoked": False},
+            _id="dev9", name="Presta 1", beacon_group_id="grp-cap",
+            status="patrouille", token_hash=field._hash_token("tok9")))
+        db["pcorg"].docs.extend([
+            {"_id": "d1", "event": "E", "year": 2026, "status_code": 1, "category": "PCO.Technique",
+             "text": "barriere", "operator_id_create": "field:dev9",
+             "content_category": {"declarant": "Presta 1", "field_created": True}},
+            # fiche d'un autre, meme categorie : jamais visible du declarant
+            {"_id": "d2", "event": "E", "year": 2026, "status_code": 1, "category": "PCO.Technique",
+             "text": "autre", "content_category": {}},
+        ])
+        started = []
+        monkeypatch.setattr(field.DA, "maybe_auto_start", lambda db, fid, **k: started.append(fid))
+        monkeypatch.setattr(field, "_claim_client_request", lambda *a: (True, None))
+        monkeypatch.setattr(field, "_finish_client_request", lambda *a, **k: None)
+        return env, db, started
+
+    def test_drapeau_lu_sur_le_groupe(self, decl):
+        _, db, _ = decl
+        devs = {d["_id"]: d for d in db["field_devices"].docs}
+        assert field._device_declarant(db, devs["dev9"]) is True
+        assert field._device_declarant(db, devs["dev1"]) is False
+
+    def test_ne_recoit_pas_les_sos_des_autres(self, decl):
+        _, db, _ = decl
+        sender = db["field_devices"].find_one({"_id": "dev1"})
+        names = [d["name"] for d in field._sos_recipients(db, sender)]
+        assert "Presta 1" not in names
+        # mais son propre SOS part bien vers les equipes
+        me = db["field_devices"].find_one({"_id": "dev9"})
+        assert "Tech 2" in [d["name"] for d in field._sos_recipients(db, me)]
+
+    def test_pas_de_fiches_sauf_son_sos(self, decl):
+        client, db, _ = decl
+        db["pcorg"].docs.append({"_id": "s9", "event": "E", "year": 2026, "status_code": 1,
+                                 "category": "PCO.Secours", "text": "SOS",
+                                 "content_category": {"patrouille": "Presta 1", "field_sos": True}})
+        db["pcorg"].docs.append({"_id": "x9", "event": "E", "year": 2026, "status_code": 1,
+                                 "category": "PCO.Technique", "text": "x",
+                                 "content_category": {"patrouille": "Presta 1"}})
+        _as_tablet(client, "tok9")
+        data = client.get("/field/my-fiches", headers=JSON).get_json()
+        assert data["declarant"] is True
+        assert data["proposal"] is None
+        assert [f["id"] for f in data["open"]] == ["s9"]
+
+    def test_creation_de_fiche_refusee(self, decl):
+        client, db, started = decl
+        _as_tablet(client, "tok9")
+        rep = client.post("/field/create-fiche", headers=JSON,
+                          json={"category": "PCO.Technique", "text": "eclairage HS"})
+        assert rep.status_code == 403
+        assert rep.get_json()["error"] == "declarant"
+        assert started == []
+
+    def test_photos_rangees_a_part(self, decl):
+        _, db, _ = decl
+        dev = db["field_devices"].find_one({"_id": "dev9"})
+        import os
+        assert field._device_photo_sub_dir(db, dev) == os.path.join("_declarant", "E", "2026")
+
+    def test_purge_garde_les_photos_declarant(self, env, tmp_path):
+        import os
+        import time
+        old = time.time() - 60 * 86400        # 60 jours
+        keep = tmp_path / "_declarant" / "E" / "2026"
+        keep.mkdir(parents=True)
+        (keep / "a.jpg").write_bytes(b"x")
+        gone = tmp_path / "E" / "2026" / "b.jpg"
+        gone.write_bytes(b"x")
+        for p in (keep / "a.jpg", gone):
+            os.utime(p, (old, old))
+        field.purge_old_photo_files()
+        assert (keep / "a.jpg").exists()
+        assert not gone.exists()
 
 
 class TestPushVapid:

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta name="theme-color" content="#1f2937">
+  <title>Constats terrain -- COCKPIT</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/declarations.css') }}">
+</head>
+
+{#
+  Constats terrain (/declarations, declarations.py) : constats deposes par les
+  tablettes Field en mode declarant (degats, problemes, demandes de
+  reparation). Voir la page = Pages accessibles du groupe ; suivre, classer,
+  transformer en fiche = droit "Traiter les constats terrain"
+  (can_convert_declaration). Rendu dans static/js/declarations.js.
+#}
+{% set _u = user or {} %}
+{% set user_roles = _u.get('roles') or [] %}
+{% set user_firstname = _u.get('firstname') or '' %}
+{% set user_lastname = _u.get('lastname') or '' %}
+{% set user_email = _u.get('email') or '' %}
+
+<body>
+<div class="app-layout dc-page">
+
+  {% set sidebar_active = '/declarations' %}
+  {% include '_sidebar.html' %}
+
+  <div class="app-main single-col-page">
+
+    <header class="app-header">
+      <button class="header-burger" id="header-burger-btn" type="button" aria-label="Menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+      <div class="header-event-info">
+        <span class="material-symbols-outlined" style="font-size:22px;color:#d97706;">report</span>
+        <span class="header-event-name">Constats terrain</span>
+      </div>
+      <div class="header-spacer"></div>
+      <div class="header-actions">
+        <span class="dc-live" id="dc-live" title="Actualisation automatique toutes les 15 s">
+          <span class="dc-live-dot"></span><span id="dc-live-text">--</span>
+        </span>
+        <button class="btn btn-primary dc-icon-btn" id="dc-refresh" type="button" title="Actualiser maintenant">
+          <span class="material-symbols-outlined">refresh</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="dc-main">
+      <div class="dc-toolbar">
+        <nav class="dc-tabs" id="dc-tabs" role="tablist" aria-label="Etat des constats">
+          <button type="button" class="dc-tab active" data-status="a_traiter">A traiter <span class="dc-count" id="dc-c-a_traiter">0</span></button>
+          <button type="button" class="dc-tab" data-status="transformee">Transformes <span class="dc-count" id="dc-c-transformee">0</span></button>
+          <button type="button" class="dc-tab" data-status="classee">Classes <span class="dc-count" id="dc-c-classee">0</span></button>
+          <button type="button" class="dc-tab" data-status="">Tous</button>
+        </nav>
+        <div class="dc-filters">
+          <div class="dc-search">
+            <span class="material-symbols-outlined">search</span>
+            <input type="search" id="dc-q" placeholder="Reference, texte, declarant, carroyage..." autocomplete="off">
+          </div>
+          <select id="dc-days" class="form-input" aria-label="Periode">
+            <option value="0">Toute periode</option>
+            <option value="7">7 derniers jours</option>
+            <option value="30" selected>30 derniers jours</option>
+            <option value="365">12 derniers mois</option>
+          </select>
+        </div>
+      </div>
+
+      {% if not can_treat %}
+      <div class="dc-readonly-note">
+        <span class="material-symbols-outlined">visibility</span>
+        Consultation seule : le suivi et la transformation en fiche sont reserves aux groupes autorises
+        (<em>Traiter les constats terrain</em>).
+      </div>
+      {% endif %}
+
+      <div class="dc-grid">
+        <section class="dc-list" id="dc-list" aria-live="polite"></section>
+        <section class="dc-map-wrap"><div id="dc-map"></div></section>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- Detail d'un constat -->
+<div class="dc-sheet-overlay" id="dc-detail" hidden>
+  <div class="dc-sheet" role="dialog" aria-modal="true" aria-labelledby="dc-d-title">
+    <header class="dc-sheet-head">
+      <div>
+        <h3 id="dc-d-title">Constat</h3>
+        <div class="dc-sheet-sub" id="dc-d-sub"></div>
+      </div>
+      <button type="button" class="dc-sheet-close" data-close aria-label="Fermer">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </header>
+    <div class="dc-sheet-body" id="dc-d-body"></div>
+    <div class="dc-sheet-foot" id="dc-d-foot"></div>
+  </div>
+</div>
+
+<div class="dc-lightbox" id="dc-lightbox" hidden>
+  <img id="dc-lightbox-img" alt="Photo du constat">
+  <button type="button" class="dc-lightbox-close" aria-label="Fermer la photo">
+    <span class="material-symbols-outlined">close</span>
+  </button>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+  window.__userIsAdmin = {{ "true" if user_is_admin else "false" }};
+  window.__dcCanTreat = {{ "true" if can_treat else "false" }};
+  window.__userCanCreateFiche = {{ "true" if can_create else "false" }};
+</script>
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+{# Transformation en fiche : MEME assistant que l'accueil (pcorg.js en mode
+   creation seule, cf. window.PcorgCreate), pre-rempli depuis le constat. #}
+{% include '_pcorg_create_modal.html' %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script>window.PCORG_CREATE_ONLY = true;</script>
+<script src="{{ url_for('static', filename='js/pcorg.js') }}"></script>
+<script src="{{ url_for('static', filename='js/declarations.js') }}"></script>
+</body>
+</html>

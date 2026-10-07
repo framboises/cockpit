@@ -481,8 +481,15 @@ def anoloc_vehicles_by_category():
         for g in (config.get("beacon_groups", []) or [])
         if g.get("enabled") is not False and g.get("pco_category")
     }
+    declarant_groups = {
+        g["id"] for g in (config.get("beacon_groups", []) or [])
+        if g.get("id") and g.get("declarant")
+    }
     for gid, tablets in tablets_by_group.items():
         if visible_groups is not None and gid not in visible_groups:
+            continue
+        # Groupe en mode declarant : ses tablettes ne sont jamais engageables
+        if gid in declarant_groups:
             continue
         for t in tablets:
             # Categorie choisie a l'appairage, a defaut celle du groupe : une

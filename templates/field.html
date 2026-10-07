@@ -233,6 +233,10 @@
       <span class="badge" id="missions-badge" aria-label="missions en attente" hidden>0</span>
       <span class="label">Missions</span>
     </button>
+    <button class="action-btn action-declare" id="btn-declare" aria-label="Declarer un probleme" title="Declarer">
+      <span class="material-symbols-outlined" aria-hidden="true">add_a_photo</span>
+      <span class="label">Declarer</span>
+    </button>
     <button class="action-btn" id="btn-camera" aria-label="Camera : photo ou scan" title="Camera">
       <span class="material-symbols-outlined" aria-hidden="true">photo_camera</span>
       <span class="label">Camera</span>
@@ -325,6 +329,51 @@
         <button class="btn-primary fiche-create-submit" id="fiche-create-submit">
           <span class="material-symbols-outlined" aria-hidden="true">add_circle</span>
           Creer la fiche
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal declaration (mode declarant) -->
+  <div class="field-modal" id="declare-modal" role="dialog" aria-modal="true" aria-labelledby="declare-title" hidden>
+    <div class="field-modal-box fiche-create-box declare-box">
+      <div class="field-modal-header">
+        <h2 id="declare-title">Nouveau constat</h2>
+        <button class="icon-btn" id="declare-close" aria-label="Fermer" title="Fermer">
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
+        </button>
+      </div>
+      <div class="fiche-create-body">
+        <label class="fiche-create-label">Photos</label>
+        <div class="declare-photos" id="declare-photos"></div>
+        <input type="file" id="declare-photo-input" accept="image/*" capture="environment" hidden>
+        <label class="fiche-create-label" for="declare-text">Ce que je constate</label>
+        <textarea class="fiche-create-text" id="declare-text" rows="3"
+          placeholder="Ex. : barriere arrachee, fuite d'eau, eclairage hors service..."
+          autocapitalize="sentences"></textarea>
+        <label class="fiche-create-label" id="declare-urg-label">Priorite</label>
+        <div class="fiche-create-urgency declare-urgency" id="declare-urgency" role="radiogroup" aria-labelledby="declare-urg-label">
+          <button type="button" class="urgency-btn" data-val="basse" role="radio" aria-checked="false">
+            <span class="urgency-btn-code" style="background:#6b7280" aria-hidden="true">&#9679;</span>
+            <span class="urgency-btn-desc">Peut attendre</span>
+          </button>
+          <button type="button" class="urgency-btn selected" data-val="normale" role="radio" aria-checked="true">
+            <span class="urgency-btn-code" style="background:#eab308" aria-hidden="true">&#9679;&#9679;</span>
+            <span class="urgency-btn-desc">A traiter rapidement</span>
+          </button>
+          <button type="button" class="urgency-btn" data-val="haute" role="radio" aria-checked="false">
+            <span class="urgency-btn-code" style="background:#f97316" aria-hidden="true">&#9679;&#9679;&#9679;</span>
+            <span class="urgency-btn-desc">Urgent, danger ou blocage</span>
+          </button>
+        </div>
+        <div class="declare-pos">
+          <span class="material-symbols-outlined" aria-hidden="true">my_location</span>
+          <span id="declare-pos-text">Ma position GPS</span>
+        </div>
+        <div class="fiche-create-msg" id="declare-msg" role="status" aria-live="polite"></div>
+        <button class="btn-primary fiche-create-submit" id="declare-submit">
+          <span class="material-symbols-outlined" aria-hidden="true">send</span>
+          Envoyer le constat
         </button>
       </div>
     </div>

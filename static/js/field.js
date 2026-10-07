@@ -2528,6 +2528,458 @@
     { id: "PCO.MainCourante", label: "Main courante", icon: "edit_note", color: "#475569", legacyOnly: true },
   ];
 
+  // ----- Mode declarant (07/10/2026) -----
+  // Drapeau du GROUPE de la tablette (Configuration > Anoloc). La tablette
+  // declare des fiches (photos prises sur le moment, description, urgence,
+  // position) et suit ses declarations ; plus de statut, de missions, de
+  // propositions ni de libre-service. Elle garde la carte, les messages
+  // (destinations envoyees par le PC Org) et le SOS.
+  var DECL_MAX_PHOTOS = 5;
+  var DECL_PHOTO_MAX_DIM = 1920;   // le serveur reduit aussi ; ici on epargne la 4G
+  var _decl = { photos: [], priority: "normale", pos: null, marker: null, sending: false };
+
+  function applyDeclarantMode() {
+    var on = !!state.declarant;
+    document.body.classList.toggle("field-declarant", on);
+    var lbl = document.querySelector("#btn-missions .label");
+    if (lbl) lbl.textContent = on ? "Mes constats" : "Missions";
+    var mb = $("btn-missions");
+    if (mb) mb.title = on ? "Mes constats" : "Missions";
+    var t = $("missions-panel-title");
+    if (t) t.textContent = on ? "Mes constats" : "Missions";
+    if (on) pollDeclarations(true);
+    if (on) {
+      if (_avail.tab === "avail") _avail.tab = "mine";
+      var sb = $("status-bar");
+      if (sb) sb.hidden = true;
+      var eb = $("engage-banner");
+      if (eb) eb.hidden = true;
+    } else {
+      var sb2 = $("status-bar");
+      if (sb2) sb2.hidden = false;
+    }
+  }
+
+  function declSetPos(latlng) {
+    if (_decl.marker) {
+      try { state.map.removeLayer(_decl.marker); } catch (e) {}
+      _decl.marker = null;
+    }
+    _decl.pos = latlng ? [latlng[0], latlng[1]] : null;
+    var txt = $("declare-pos-text");
+    if (txt) {
+      var label = _decl.pos ? "Point choisi sur la carte" : "Ma position GPS";
+      var p = _decl.pos || (state.meMarker ? [state.meMarker.getLatLng().lat, state.meMarker.getLatLng().lng] : null);
+      if (p && state.gridMeta) {
+        var cell = getCellLabelAt(p[0], p[1]);
+        if (cell.col !== null) label += " - " + (cell.colLabel || "") + (cell.rowLabel || "");
+      }
+      if (!p) label = "Position en attente du GPS (appui long sur la carte pour choisir un point)";
+      txt.textContent = label;
+    }
+    if (_decl.pos && state.map) {
+      _decl.marker = L.marker(_decl.pos, {
+        icon: L.divIcon({
+          className: "",
+          html: "<div class='map-pick-marker'><span class='material-symbols-outlined'>push_pin</span></div>",
+          iconSize: [36, 36], iconAnchor: [18, 34],
+        }),
+        interactive: false, keyboard: false,
+      }).addTo(state.map);
+    }
+  }
+
+  function declRenderPhotos() {
+    var wrap = $("declare-photos");
+    if (!wrap) return;
+    while (wrap.firstChild) wrap.removeChild(wrap.firstChild);
+    _decl.photos.forEach(function (p, i) {
+      var cell = document.createElement("div");
+      cell.className = "declare-thumb";
+      var img = document.createElement("img");
+      img.src = p.url;
+      img.alt = "Photo " + (i + 1);
+      cell.appendChild(img);
+      var rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "declare-thumb-rm";
+      rm.setAttribute("aria-label", "Retirer la photo " + (i + 1));
+      rm.appendChild(_mkIcon("close"));
+      rm.addEventListener("click", function () {
+        try { URL.revokeObjectURL(p.url); } catch (e) {}
+        _decl.photos.splice(i, 1);
+        declRenderPhotos();
+      });
+      cell.appendChild(rm);
+      wrap.appendChild(cell);
+    });
+    if (_decl.photos.length < DECL_MAX_PHOTOS) {
+      var add = document.createElement("button");
+      add.type = "button";
+      add.className = "declare-photo-add";
+      add.appendChild(_mkIcon("add_a_photo"));
+      var s = document.createElement("span");
+      s.textContent = _decl.photos.length ? "Autre photo" : "Prendre une photo";
+      add.appendChild(s);
+      add.addEventListener("click", function () { var inp = $("declare-photo-input"); if (inp) inp.click(); });
+      wrap.appendChild(add);
+    }
+  }
+
+  // Reduit la photo du telephone (souvent 4000 px, 3-6 Mo) avant envoi.
+  function declShrink(file) {
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        var w = img.naturalWidth, h = img.naturalHeight;
+        var k = Math.min(1, DECL_PHOTO_MAX_DIM / Math.max(w, h));
+        var c = document.createElement("canvas");
+        c.width = Math.round(w * k);
+        c.height = Math.round(h * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        c.toBlob(function (blob) { resolve(blob || file); }, "image/jpeg", 0.85);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+  }
+
+  function declOnFiles(ev) {
+    var files = Array.prototype.slice.call(ev.target.files || []);
+    ev.target.value = "";
+    files = files.slice(0, DECL_MAX_PHOTOS - _decl.photos.length);
+    Promise.all(files.map(declShrink)).then(function (blobs) {
+      blobs.forEach(function (b) { _decl.photos.push({ blob: b, url: URL.createObjectURL(b) }); });
+      declRenderPhotos();
+    });
+  }
+
+  function openDeclareModal(pos) {
+    var modal = $("declare-modal");
+    if (!modal) return;
+    _decl.photos.forEach(function (p) { try { URL.revokeObjectURL(p.url); } catch (e) {} });
+    _decl.photos = [];
+    _decl.priority = "normale";
+    _decl.token = newClientKey();
+    var urg = $("declare-urgency");
+    if (urg) urg.querySelectorAll(".urgency-btn").forEach(function (b) {
+      b.classList.toggle("selected", b.dataset.val === _decl.priority);
+      b.setAttribute("aria-checked", b.dataset.val === _decl.priority ? "true" : "false");
+    });
+    var txt = $("declare-text");
+    if (txt) txt.value = "";
+    var msg = $("declare-msg");
+    if (msg) { msg.textContent = ""; msg.className = "fiche-create-msg"; }
+    declSetPos(Array.isArray(pos) && pos.length >= 2 ? pos : null);
+    declRenderPhotos();
+    modal.hidden = false;
+    if (!_decl.pos) forceOneShotPosition();
+  }
+
+  // ----- Mes constats (tablette declarante) -----
+  var DECL_STATE_CLASS = { envoyee: "", vue: "", prise_en_charge: "is-taken", traitee: "is-done", classee: "is-done" };
+  var _declPollAt = 0;
+
+  function pollDeclarations(force) {
+    if (!state.declarant) return;
+    if (!force && Date.now() - _declPollAt < 8000) return;
+    _declPollAt = Date.now();
+    fetchWithTimeout("/field/declarations", { headers: { "Accept": "application/json" }, cache: "no-store" }, 15000)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.ok) return;
+        state.declarations = d.declarations || [];
+        var badge = $("missions-badge");
+        var active = state.declarations.filter(function (x) {
+          return x.field_state === "envoyee" || x.field_state === "vue" || x.field_state === "prise_en_charge";
+        }).length;
+        if (badge) { badge.textContent = String(active); badge.hidden = !active; }
+        var p = $("missions-panel");
+        if (p && !p.hidden) renderMissionsList();
+      })
+      .catch(function () {});
+  }
+
+  function renderDeclarationsList(list) {
+    var items = state.declarations || [];
+    if (!items.length) {
+      var empty = document.createElement("div");
+      empty.className = "inbox-empty";
+      empty.textContent = "Aucun constat. Touchez « Declarer » pour signaler un probleme.";
+      list.appendChild(empty);
+      return;
+    }
+    items.forEach(function (d) {
+      var item = document.createElement("div");
+      item.className = "inbox-item mission-item decl-item";
+      if (DECL_STATE_CLASS[d.field_state] === "is-done") item.classList.add("is-done");
+      var th = document.createElement("div");
+      th.className = "decl-item-thumb";
+      if (d.photos && d.photos.length) {
+        var img = document.createElement("img");
+        img.src = d.photos[0].thumb || d.photos[0].photo;
+        img.alt = "";
+        th.appendChild(img);
+      } else {
+        th.appendChild(_mkIcon("report"));
+      }
+      item.appendChild(th);
+      var body = document.createElement("div");
+      body.className = "mission-body";
+      var top = document.createElement("div");
+      top.className = "mission-cat";
+      top.textContent = d.ref || "Constat";
+      var st = document.createElement("span");
+      st.className = "decl-state " + (DECL_STATE_CLASS[d.field_state] || "");
+      st.textContent = d.field_state_label || "";
+      top.appendChild(st);
+      body.appendChild(top);
+      var desc = document.createElement("div");
+      desc.className = "mission-desc";
+      desc.textContent = d.text || "";
+      body.appendChild(desc);
+      var meta = document.createElement("div");
+      meta.className = "mission-meta";
+      var when = document.createElement("span");
+      when.textContent = d.created_at ? new Date(d.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+      meta.appendChild(when);
+      if (d.carroye) { var c = document.createElement("span"); c.textContent = d.carroye; meta.appendChild(c); }
+      body.appendChild(meta);
+      item.appendChild(body);
+      item.addEventListener("click", function () {
+        $("missions-panel").hidden = true;
+        if (d.lat != null && d.lng != null && state.map) {
+          state.map.setView([d.lat, d.lng], Math.max(state.map.getZoom(), 17), { animate: true });
+        }
+        showDeclarationModal(d.id);
+      });
+      list.appendChild(item);
+    });
+  }
+
+  // Detail d'un constat : reutilise la modale de detail de fiche.
+  function showDeclarationModal(id) {
+    var modal = $("fiche-detail-modal");
+    if (!modal) return;
+    var header = $("fiche-detail-header");
+    header.style.background = "linear-gradient(135deg, #d97706cc, #d9770688)";
+    $("fiche-detail-icon").textContent = "report";
+    $("fiche-detail-cat").textContent = "Constat";
+    var urgEl = $("fiche-detail-urgency");
+    urgEl.hidden = true;
+    var body = $("fiche-detail-body");
+    body.innerHTML = "<div class='fiche-detail-loading'>Chargement...</div>";
+    var actionsEl = $("fiche-detail-actions");
+    actionsEl.textContent = "";
+    modal.hidden = false;
+    fetch("/field/declarations/" + encodeURIComponent(id), { headers: { "Accept": "application/json" }, cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.ok) { body.innerHTML = "<div class='fiche-detail-loading'>Erreur chargement</div>"; return; }
+        $("fiche-detail-cat").textContent = "Constat " + (d.ref || "");
+        urgEl.textContent = d.field_state_label || "";
+        urgEl.style.background = DECL_STATE_CLASS[d.field_state] === "is-done" ? "#16a34a"
+          : (d.field_state === "prise_en_charge" ? "#2563eb" : "#d97706");
+        urgEl.hidden = false;
+        renderDeclarationDetail(d, body);
+      })
+      .catch(function () { body.innerHTML = "<div class='fiche-detail-loading'>Hors ligne</div>"; });
+  }
+
+  function renderDeclarationDetail(d, body) {
+    while (body.firstChild) body.removeChild(body.firstChild);
+    var desc = document.createElement("div");
+    desc.className = "fd-desc";
+    desc.style.borderLeftColor = "#d97706";
+    desc.textContent = d.text || "";
+    body.appendChild(desc);
+    if (d.status === "classee" && d.classed_reason) {
+      var cl = document.createElement("div");
+      cl.className = "fd-offline-note";
+      cl.textContent = "Classe par le PC : " + d.classed_reason;
+      body.appendChild(cl);
+    }
+    var sec = document.createElement("div");
+    sec.className = "fd-section";
+    sec.textContent = "Historique";
+    body.appendChild(sec);
+    (d.history || []).forEach(function (h) {
+      var ent = document.createElement("div");
+      ent.className = "decl-hist";
+      var meta = document.createElement("div");
+      meta.className = "decl-hist-meta";
+      meta.textContent = (h.ts ? new Date(h.ts).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "")
+        + (h.origin === "field" ? " - moi" : " - PC Organisation");
+      ent.appendChild(meta);
+      if (h.text) { var t = document.createElement("div"); t.textContent = h.text; ent.appendChild(t); }
+      if (h.photos && h.photos.length) {
+        var g = document.createElement("div");
+        g.className = "decl-hist-photos";
+        h.photos.forEach(function (p) {
+          var img = document.createElement("img");
+          img.src = p.thumb || p.photo;
+          img.alt = "Photo";
+          img.addEventListener("click", function () { openLightbox(p.photo); });
+          g.appendChild(img);
+        });
+        ent.appendChild(g);
+      }
+      body.appendChild(ent);
+    });
+    if (d.status === "classee") return;
+
+    // Complement : precision et / ou photo (ex. "apres reparation")
+    var sec2 = document.createElement("div");
+    sec2.className = "fd-section";
+    sec2.textContent = "Ajouter un complement";
+    body.appendChild(sec2);
+    var form = document.createElement("div");
+    form.className = "fd-comment-form";
+    var ta = document.createElement("textarea");
+    ta.className = "fd-comment-input";
+    ta.rows = 2;
+    ta.placeholder = "Precision, evolution...";
+    ta.setAttribute("autocapitalize", "sentences");
+    form.appendChild(ta);
+    var file = document.createElement("input");
+    file.type = "file";
+    file.accept = "image/*";
+    file.setAttribute("capture", "environment");
+    file.hidden = true;
+    var pending = [];
+    var pendingInfo = document.createElement("span");
+    pendingInfo.className = "decl-pending";
+    file.addEventListener("change", function (ev) {
+      var fl = Array.prototype.slice.call(ev.target.files || []).slice(0, DECL_MAX_PHOTOS - pending.length);
+      ev.target.value = "";
+      Promise.all(fl.map(declShrink)).then(function (blobs) {
+        pending = pending.concat(blobs);
+        pendingInfo.textContent = pending.length ? pending.length + " photo" + (pending.length > 1 ? "s" : "") : "";
+      });
+    });
+    form.appendChild(file);
+    var row = document.createElement("div");
+    row.className = "fd-action-row";
+    var photoBtn = document.createElement("button");
+    photoBtn.className = "fd-photo-btn";
+    photoBtn.appendChild(_mkIcon("add_a_photo"));
+    photoBtn.setAttribute("aria-label", "Ajouter une photo");
+    photoBtn.onclick = function () { file.click(); };
+    row.appendChild(photoBtn);
+    row.appendChild(pendingInfo);
+    var send = document.createElement("button");
+    send.className = "btn-primary fd-send-btn";
+    send.appendChild(_mkIcon("send"));
+    send.appendChild(document.createTextNode(" Envoyer"));
+    send.onclick = function () {
+      var txt = ta.value.trim();
+      if (!txt && !pending.length) { toast("Ecris un complement ou ajoute une photo", "err"); return; }
+      var fd = new FormData();
+      if (txt) fd.append("comment", txt);
+      pending.forEach(function (b, i) { fd.append("photos", b, "photo_" + (i + 1) + ".jpg"); });
+      send.disabled = true;
+      xhrUpload("/field/declarations/" + encodeURIComponent(d.id) + "/comment", fd, null).then(function (resp) {
+        send.disabled = false;
+        if (resp.status === 401) { handleSessionLost(); return; }
+        if (resp.status >= 200 && resp.status < 300 && resp.body && resp.body.ok) {
+          toast("Complement envoye", "ok");
+          showDeclarationModal(d.id);
+          pollDeclarations(true);
+        } else {
+          toast("Echec : " + ((resp.body && resp.body.error) || resp.status), "err");
+        }
+      }).catch(function () { send.disabled = false; toast("Pas de reseau, reessaie plus tard", "err"); });
+    };
+    row.appendChild(send);
+    form.appendChild(row);
+    body.appendChild(form);
+  }
+
+  function closeDeclareModal() {
+    var modal = $("declare-modal");
+    if (modal) modal.hidden = true;
+    declSetPos(null);
+  }
+
+  function declMsg(text) {
+    var msg = $("declare-msg");
+    if (msg) { msg.textContent = text; msg.className = "fiche-create-msg error"; }
+  }
+
+  // Un constat n'est jamais une fiche : POST /field/declarations
+  // (declarations.py). Un operateur habilite le transforme en fiche.
+  function submitDeclaration() {
+    if (_decl.sending) return;
+    var text = (($("declare-text") || {}).value || "").trim();
+    if (!text) { declMsg("Decris ce que tu constates."); return; }
+    var p = _decl.pos;
+    if (!p && state.meMarker) { var ll = state.meMarker.getLatLng(); p = [ll.lat, ll.lng]; }
+    var carroye = "";
+    if (p && state.gridMeta) {
+      var cell = getCellLabelAt(p[0], p[1]);
+      if (cell.col !== null) carroye = (cell.colLabel || "") + (cell.rowLabel || "");
+    }
+    var photos = _decl.photos.slice();
+    var token = _decl.token || newClientKey();
+    _decl.photos = [];   // les blobs restent tenus par `photos`
+    closeDeclareModal();
+
+    if (!photos.length) {
+      var payload = { text: text, priority: _decl.priority, client_token: token };
+      if (p) { payload.lat = p[0]; payload.lng = p[1]; }
+      if (carroye) payload.carroye = carroye;
+      queuedJsonPost("/field/declarations", payload, "constat").then(function (data) {
+        if (!data) return;
+        if (data.queued) { toast("Hors ligne : constat envoye des le retour du reseau", "warn"); return; }
+        if (data.ok) { toast("Constat " + (data.ref || "") + " envoye", "ok"); pollDeclarations(true); }
+        else toast("Echec : " + (data.error || "?"), "err");
+      });
+      return;
+    }
+
+    var fields = { text: text, priority: _decl.priority, client_token: token };
+    if (p) { fields.lat = String(p[0]); fields.lng = String(p[1]); }
+    if (carroye) fields.carroye = carroye;
+    var files = photos.map(function (ph, i) { return { blob: ph.blob, name: "photo_" + (i + 1) + ".jpg", fieldName: "photos" }; });
+    function release() { photos.forEach(function (ph) { try { URL.revokeObjectURL(ph.url); } catch (e) {} }); }
+    function queue() {
+      return OfflineQueue.enqueue({ url: "/field/declarations", method: "POST", kind: "multipart",
+                                    fields: fields, files: files, label: "constat" })
+        .then(function () { toast("Hors ligne : declaration envoyee des le retour du reseau", "warn"); })
+        .catch(function () { toast("Echec de l'envoi de la declaration", "err"); })
+        .then(release);
+    }
+    if (!navigator.onLine) { queue(); return; }
+    var fd = new FormData();
+    Object.keys(fields).forEach(function (k) { fd.append(k, fields[k]); });
+    files.forEach(function (f) { fd.append(f.fieldName, f.blob, f.name); });
+    _decl.sending = true;
+    bumpPhotoUploadPill(+1);
+    toast("Envoi du constat...", "ok");
+    xhrUpload("/field/declarations", fd, null).then(function (resp) {
+      _decl.sending = false;
+      bumpPhotoUploadPill(-1);
+      if (resp.status === 401) { release(); handleSessionLost(); return; }
+      var data = resp.body || {};
+      if (resp.status >= 200 && resp.status < 300 && data.ok) {
+        toast("Constat " + (data.ref || "") + " envoye (" + photos.length + " photo" + (photos.length > 1 ? "s" : "") + ")", "ok");
+        release();
+        pollDeclarations(true);
+      } else if (resp.status >= 500 || resp.status === 0) {
+        queue();
+      } else {
+        release();
+        toast("Echec : " + (data.error || resp.status), "err");
+      }
+    }).catch(function () {
+      _decl.sending = false;
+      bumpPhotoUploadPill(-1);
+      queue();
+    });
+  }
+
   // Position imposee a la creation (appui long sur la carte) : remplace la
   // position GPS de l'agent dans le payload. Materialisee par une epingle
   // sur la carte tant que la modale est ouverte.
@@ -3065,6 +3517,11 @@
         // Categorie de la tablette (null = pas de restriction) : pilote les
         // categories proposees a la creation de fiche et a l'envoi de photo.
         if (data.hasOwnProperty("device_category")) state.deviceCategory = data.device_category || null;
+        if (data.hasOwnProperty("declarant") && !!data.declarant !== !!state.declarant) {
+          state.declarant = !!data.declarant;     // groupe modifie par un admin
+          applyDeclarantMode();
+        }
+        if (state.declarant) pollDeclarations();
         state.selfClose = !!data.self_close;
         if (data.hasOwnProperty("proposal")) handleProposal(data.proposal);
         renderFiches();
@@ -3123,6 +3580,11 @@
   }
 
   function detectNewFiches(open) {
+    // Declarant : ce sont ses propres declarations, pas des missions recues
+    if (state.declarant) {
+      open.forEach(function (f) { state.seenFicheIds.add(f.id); });
+      return;
+    }
     var newOnes = [];
     open.forEach(function (f) {
       if (!state.seenFicheIds.has(f.id)) {
@@ -3855,6 +4317,7 @@
   function updateMissionsBadge() {
     var badge = $("missions-badge");
     if (!badge) return;
+    if (state.declarant) return;   // badge des constats : pollDeclarations
     var n = (state.fiches && state.fiches.length) || 0;
     if (n > 0) {
       badge.textContent = String(n);
@@ -4175,6 +4638,7 @@
     var list = $("missions-list");
     if (!list) return;
     while (list.firstChild) list.removeChild(list.firstChild);
+    if (state.declarant) { renderDeclarationsList(list); return; }
     var items = sortMissions(state.fiches || []);
     if (items.length === 0) {
       var empty = document.createElement("div");
@@ -4569,6 +5033,10 @@
 
     var cc = d.content_category || {};
     var isFieldCreated = cc.field_created || cc.field_sos;
+
+    // Declarant : pas d'engagement ni de cloture (c'est le service qui
+    // traite) ; il complete sa declaration via le commentaire / la photo.
+    if (state.declarant) return;
 
     // Route button only for fiches NOT created by this tablet (dispatched from cockpit)
     if (!isFieldCreated) {
@@ -7180,7 +7648,7 @@
       var p = $("missions-panel");
       $("inbox-panel").hidden = true;
       p.hidden = !p.hidden;
-      if (!p.hidden) setMissionsTab(_avail.tab);
+      if (!p.hidden) { setMissionsTab(_avail.tab); pollDeclarations(true); }
       else stopAvailRefresh();
     });
     $("missions-close").addEventListener("click", function () {
@@ -7191,6 +7659,26 @@
     if (tabMine) tabMine.addEventListener("click", function () { setMissionsTab("mine"); });
     if (tabAvail) tabAvail.addEventListener("click", function () { setMissionsTab("avail"); });
     $("btn-sos").addEventListener("click", triggerSos);
+
+    // Mode declarant
+    var btnDeclare = $("btn-declare");
+    if (btnDeclare) btnDeclare.addEventListener("click", function () { openDeclareModal(); });
+    var declClose = $("declare-close");
+    if (declClose) declClose.addEventListener("click", closeDeclareModal);
+    var declSubmit = $("declare-submit");
+    if (declSubmit) declSubmit.addEventListener("click", submitDeclaration);
+    var declInput = $("declare-photo-input");
+    if (declInput) declInput.addEventListener("change", declOnFiles);
+    var declUrg = $("declare-urgency");
+    if (declUrg) declUrg.querySelectorAll(".urgency-btn").forEach(function (b) {
+      b.addEventListener("click", function () {
+        _decl.priority = b.dataset.val;
+        declUrg.querySelectorAll(".urgency-btn").forEach(function (x) {
+          x.classList.toggle("selected", x === b);
+          x.setAttribute("aria-checked", x === b ? "true" : "false");
+        });
+      });
+    });
 
     // Bandeau engagement : fly-to button
     var engageGoto = $("engage-banner-goto");
@@ -7459,8 +7947,9 @@
       menu.appendChild(b);
       return b;
     }
-    mkItem("add_location_alt", "Creer une intervention ici", function () {
-      openCreateFicheModal(ll);
+    mkItem("add_location_alt", state.declarant ? "Declarer un probleme ici" : "Creer une intervention ici", function () {
+      if (state.declarant) openDeclareModal(ll);
+      else openCreateFicheModal(ll);
     });
     mkItem("navigation", "Itineraire vers ce point", function () {
       openItineraryMenu(ll, null);
@@ -7867,7 +8356,10 @@
     var dev = window.FIELD_DEVICE || {};
     state.patrolStatus = dev.status || "patrouille";
     state.activeFicheId = dev.active_fiche_id || null;
+    state.declarant = !!dev.declarant;
+    state.deviceCategory = dev.category || state.deviceCategory || null;
     updateStatusBar();
+    applyDeclarantMode();
     // Ressources carte : 3P et carroyage sont desactives par defaut.
     // Categories POI chargees pour le panneau Calques.
     loadPoiCategories();

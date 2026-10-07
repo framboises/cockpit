@@ -284,12 +284,15 @@ def find_candidates(db, fiche, exclude_ids=(), now=None):
     metier = (fiche.get("content_category") or {}).get("sous_classification")
     point = _fiche_point(fiche)
     group_cats = F._group_categories(db)
+    groups = F._beacon_groups(db)
     ev, yr = fiche.get("event"), fiche.get("year")
     query = {"revoked": {"$ne": True}}
     query.update(F.devices_seeing_pair_filter(db, ev, yr, now))
     out = []
     for d in db["field_devices"].find(query):
         if str(d["_id"]) in exclude:
+            continue
+        if F._device_declarant(db, d, groups):     # declarant : jamais une unite
             continue
         if F._device_category(db, d, group_cats) != category:
             continue
@@ -648,6 +651,8 @@ def manual_assign(db, fiche_id, device, by_name, now=None):
     F = _field()
     if device.get("revoked") or not F.device_matches_pair(db, device, fiche.get("event"), fiche.get("year")):
         return False, "unite_invalide"
+    if F._device_declarant(db, device):
+        return False, "unite_invalide"
     if F._device_category(db, device) != fiche.get("category"):
         return False, "categorie_differente"
     name = device.get("name") or "?"
@@ -713,7 +718,7 @@ def available_for_device(db, device, limit=100, now=None):
     F = _field()
     now = now or _now()
     cat = F._device_category(db, device)
-    if not cat:
+    if not cat or F._device_declarant(db, device):
         return []
     out = []
     for f in db["pcorg"].find({
@@ -767,6 +772,8 @@ def self_assign(db, fiche_id, device, now=None):
     if (fresh.get("status") or "patrouille") != "patrouille":
         return False, "unite_occupee"
     F = _field()
+    if F._device_declarant(db, fresh):
+        return False, "unite_invalide"
     if not F.device_matches_pair(db, fresh, fiche.get("event"), fiche.get("year"), now):
         return False, "evenement_different"
     if F._device_category(db, fresh) != fiche.get("category"):
@@ -1200,9 +1207,12 @@ def dispatch_board():
         pairs = EC.active_pairs(db, now, include_previous_saison=True)
     pair_keys = {F._pair_key(e, y) for e, y in pairs}
     group_cats = F._group_categories(db)
+    groups = F._beacon_groups(db)
     devices = []
     for d in db["field_devices"].find({"revoked": {"$ne": True}}, BOARD_DEVICE_PROJECTION):
         if F._device_expired(db, d):
+            continue
+        if F._device_declarant(db, d, groups):     # pas une unite engageable
             continue
         dp = F.device_pairs(db, d, now)
         if pair_keys & {F._pair_key(e, y) for e, y in dp}:

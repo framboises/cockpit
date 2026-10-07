@@ -533,6 +533,7 @@ PAGE_REGISTRY = [
     {"id": "statistiques", "label": "Statistiques",       "icon": "insert_chart",    "role": "user",    "paths": ["/general_stat"]},
     {"id": "wiki",         "label": "Wiki procedures",    "icon": "menu_book",       "role": "user",    "paths": ["/wiki"]},
     {"id": "dispatch",     "label": "File du service",    "icon": "assignment_ind",  "role": "user",    "paths": ["/dispatch-service", "/api/dispatch/board"]},
+    {"id": "declarations", "label": "Constats terrain",   "icon": "report",          "role": "user",    "paths": ["/declarations", "/api/declarations"]},
     {"id": "assistant_ia", "label": "Assistant IA",       "icon": "smart_toy",       "role": "manager", "paths": []},
     {"id": "circulation",  "label": "Circulation",        "icon": "moving",          "role": "manager", "paths": ["/circulation"]},
     {"id": "meteo_mur",    "label": "Mur meteo",          "icon": "radar",           "role": "manager", "paths": ["/meteo-mur"]},
@@ -986,6 +987,16 @@ def _user_can_create_fiche(payload):
         default_group = COL_GROUPS.find_one({"name": DEFAULT_GROUP_NAME}, {"can_create_fiche": 1})
         return bool((default_group or {}).get("can_create_fiche", True))
     return any(g.get("can_create_fiche") for g in groups)
+
+
+def _user_can_treat_declaration(payload):
+    """Constats terrain des tablettes declarantes (/declarations) : suivre,
+    annoter, classer, transformer en fiche. Droit de groupe explicite
+    `can_convert_declaration` (aucun groupe ne l'a par defaut) ; admin
+    toujours. Transformer exige EN PLUS de pouvoir creer la fiche."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return True
+    return any(g.get("can_convert_declaration") for g in _user_group_docs(payload))
 
 
 _PCORG_CREATE_ERROR = ({"error": "Votre groupe ne permet pas de creer des fiches",
@@ -2394,6 +2405,14 @@ app.register_blueprint(pcorg_assist_bp)
 # automatique a l'unite la plus proche, file du service (/dispatch-service).
 # Routes user/admin, CSRF ACTIF sur les ecritures.
 app.register_blueprint(DA.dispatch_bp)
+# Constats terrain des tablettes Field en mode declarant (declarations.py) :
+# depot depuis la tablette (cookie field_token -> CSRF exemptee sur ces deux
+# POST seulement), suivi et transformation en fiche sur /declarations
+# (routes user, CSRF ACTIF).
+from declarations import declarations_bp, field_declaration_create, field_declaration_comment
+app.register_blueprint(declarations_bp)
+csrf.exempt(field_declaration_create)
+csrf.exempt(field_declaration_comment)
 # Reservations Momentus par lieu de la carte (momentus_api.py). GET user,
 # lecture seule des collections momentus_* (synchro momentus_sync.py).
 app.register_blueprint(momentus_bp)
@@ -4328,6 +4347,7 @@ def create_group():
         'dispatch_manager': bool(data.get('dispatch_manager', False)),
         'fiche_lecture_seule': bool(data.get('fiche_lecture_seule', False)),
         'can_create_fiche': bool(data.get('can_create_fiche', False)),
+        'can_convert_declaration': bool(data.get('can_convert_declaration', False)),
         'alfred_chat': bool(data.get('alfred_chat', False)),
         'allowed_pages': _parse_allowed_pages(data.get('allowed_pages')),
         'admin_pages': _parse_admin_pages(data.get('admin_pages')),
@@ -4395,6 +4415,8 @@ def update_group(gid):
         patch['fiche_lecture_seule'] = bool(data.get('fiche_lecture_seule', False))
     if 'can_create_fiche' in data:
         patch['can_create_fiche'] = bool(data.get('can_create_fiche', False))
+    if 'can_convert_declaration' in data:
+        patch['can_convert_declaration'] = bool(data.get('can_convert_declaration', False))
     if 'alfred_chat' in data and not is_admin_grp:
         patch['alfred_chat'] = bool(data.get('alfred_chat', False))
     if 'allowed_pages' in data and not is_admin_grp:

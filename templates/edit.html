@@ -778,6 +778,11 @@
               <span class="gperm-text"><span class="gperm-name">Responsable de service</span>
                 <span class="gperm-desc">File du service pour ses categories : engager, ajouter une action, cloturer.</span></span>
             </label>
+            <label class="gperm" id="group-decl-row">
+              <input type="checkbox" name="can_convert_declaration" />
+              <span class="gperm-text"><span class="gperm-name">Traiter les constats terrain</span>
+                <span class="gperm-desc">Page Constats terrain : suivre, classer et transformer en fiche d'intervention les constats des tablettes declarantes.</span></span>
+            </label>
             <label class="gperm" id="group-readonly-row">
               <input type="checkbox" name="fiche_lecture_seule" />
               <span class="gperm-text"><span class="gperm-name">Fiches en lecture seule</span>
@@ -937,6 +942,15 @@
           </label>
           <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
             Les vehicules de ce groupe seront proposes lors de la creation d'interventions de cette categorie.
+          </p>
+        </div>
+        <div class="form-row">
+          <label style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" name="declarant" />
+            Mode declarant (tablettes Field)
+          </label>
+          <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
+            Les tablettes de ce groupe declarent des fiches (photos, description, position) et restent suivies sur la carte, mais ne sont jamais engagees : ni proposition, ni missions, ni SOS des autres. Le PC Org peut toujours leur envoyer une destination.
           </p>
         </div>
         <div class="form-row">

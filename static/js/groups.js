@@ -652,10 +652,11 @@
     if(closeRow) closeRow.style.display = "";
     var closeCheck = groupForm.elements.can_close_fiche;
     if(closeCheck) closeCheck.checked = false;
-    ["group-dispatch-row", "group-readonly-row"].forEach(function(rid){
+    ["group-dispatch-row", "group-readonly-row", "group-decl-row"].forEach(function(rid){
       var row = document.getElementById(rid);
       if(row) row.style.display = "";
     });
+    if(groupForm.elements.can_convert_declaration) groupForm.elements.can_convert_declaration.checked = false;
     if(groupForm.elements.dispatch_manager) groupForm.elements.dispatch_manager.checked = false;
     if(groupForm.elements.fiche_lecture_seule) groupForm.elements.fiche_lecture_seule.checked = false;
     // Nouveau groupe : pas de creation tant que l'admin ne l'accorde pas
@@ -688,6 +689,7 @@
                    dispatch_manager: !!(groupForm.elements.dispatch_manager && groupForm.elements.dispatch_manager.checked),
                    fiche_lecture_seule: !!(groupForm.elements.fiche_lecture_seule && groupForm.elements.fiche_lecture_seule.checked),
                    can_create_fiche: !!(groupForm.elements.can_create_fiche && groupForm.elements.can_create_fiche.checked),
+                   can_convert_declaration: !!(groupForm.elements.can_convert_declaration && groupForm.elements.can_convert_declaration.checked),
                    alfred_chat: !!(groupForm.elements.alfred_chat && groupForm.elements.alfred_chat.checked),
                    allowed_categories: allowedCats};
     var pagesRow = document.getElementById("group-pages-row");
@@ -768,10 +770,11 @@
       if(closeCheck) closeCheck.checked = !!(g.can_close_fiche);
       // Responsable de service / lecture seule : sans objet pour les groupes
       // systeme (admin = tous les droits, defaut = utilisateurs sans groupe)
-      ["group-dispatch-row", "group-readonly-row"].forEach(function(rid){
+      ["group-dispatch-row", "group-readonly-row", "group-decl-row"].forEach(function(rid){
         var row = document.getElementById(rid);
         if(row) row.style.display = isSys ? "none" : "";
       });
+      if(groupForm.elements.can_convert_declaration) groupForm.elements.can_convert_declaration.checked = !!(g.can_convert_declaration);
       if(groupForm.elements.dispatch_manager) groupForm.elements.dispatch_manager.checked = !!(g.dispatch_manager);
       if(groupForm.elements.fiche_lecture_seule) groupForm.elements.fiche_lecture_seule.checked = !!(g.fiche_lecture_seule);
       // Creation : utile aussi pour le groupe par defaut (utilisateurs sans

@@ -77,6 +77,10 @@
             <span class="material-symbols-outlined">assignment_ind</span>
             <span class="label">File du service</span>
         </a>{% endif %}
+        {% if page_allowed is not defined or page_allowed('declarations') %}<a href="/declarations" class="{{ nav_class('/declarations') }}" title="Constats terrain des tablettes declarantes (degats, reparations)">
+            <span class="material-symbols-outlined">report</span>
+            <span class="label">Constats terrain</span>
+        </a>{% endif %}
         {% if "manager" in user_roles %}
         {% if _ai %}
         {# Assistant IA (resume, briefing, RETEX : une modale a onglets). Bouton

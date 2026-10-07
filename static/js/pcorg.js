@@ -3747,6 +3747,11 @@
     document.getElementById("pcorg-create-grid100").addEventListener("click", function () {
       toggleCreateGrid100();
     });
+    var locBtn = document.getElementById("pcorg-create-locate");
+    if (locBtn && navigator.geolocation && window.isSecureContext !== false) {
+      locBtn.style.display = "";
+      locBtn.addEventListener("click", function () { createLocate(false); });
+    }
     document.getElementById("pcorg-create-grid25").addEventListener("click", function () {
       toggleCreateGrid25();
     });
@@ -3767,6 +3772,88 @@
     showCreate();
     goToStep(1);
     initCreateMap();
+    // Telephone : position GPS posee d'office (modifiable d'un clic sur la carte),
+    // sauf si l'appelant fournit deja la position (constat transforme en fiche)
+    var pfPos = createHooks.prefill && createHooks.prefill.lat != null;
+    if (isPhoneDevice() && !pfPos) createLocate(true);
+  }
+
+  // Telephone = ecran tactile (pointeur grossier) et etroit. Une tablette du
+  // PC ou un poste fixe ne se geolocalise pas d'office.
+  function isPhoneDevice() {
+    try {
+      return window.matchMedia("(pointer: coarse)").matches &&
+             window.matchMedia("(max-width: 820px)").matches;
+    } catch (e) { return false; }
+  }
+
+  // Geolocalisation de la fiche en cours de creation.
+  // auto=true (ouverture sur telephone) : ne remplace jamais une position
+  // deja choisie a la main, et ne place l'epingle QUE si la position tombe
+  // dans le carroyage du site (/api/grid-ref, aucun point ni rayon en dur) :
+  // hors carroyage ou carroyage indisponible = operateur pas sur place, rien
+  // n'est pose. Le bouton "Ma position" (auto=false) place toujours.
+  var CREATE_GEO_MAX_ACC_M = 150;  // precision GPS au-dela de laquelle on n'auto-place pas
+  var CREATE_GEO_GRID_WAIT_MS = 5000;  // attente max du carroyage apres la reponse GPS
+  var createGeoSeq = 0;
+  function createLocate(auto) {
+    if (!navigator.geolocation || window.isSecureContext === false) {
+      if (!auto) showToast("warning", "Geolocalisation indisponible sur cet appareil");
+      return;
+    }
+    var seq = ++createGeoSeq;
+    var btn = document.getElementById("pcorg-create-locate");
+    if (btn) btn.classList.add("active");
+    var info = document.getElementById("pcorg-create-map-info");
+    if (auto && info && createLat == null) {
+      info.innerHTML = "<span class='material-symbols-outlined'>my_location</span> Localisation en cours...";
+    }
+    function restoreInfo() {
+      if (info) info.innerHTML = "<span class='material-symbols-outlined'>touch_app</span> Cliquez sur la carte pour positionner l'intervention";
+    }
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      if (btn) btn.classList.remove("active");
+      restoreInfo();
+      // fiche fermee, autre demande lancee, ou etape 1 quittee entre-temps
+      if (seq !== createGeoSeq || !createModal.classList.contains("show") || createStep !== 1) return;
+      if (auto && createLat != null) return;     // position deja choisie a la main
+      var lat = pos.coords.latitude, lon = pos.coords.longitude;
+      var acc = Math.round(pos.coords.accuracy || 0);
+      var t0 = Date.now();
+      var apply = function () {
+        if (seq !== createGeoSeq || !createModal.classList.contains("show") || createStep !== 1) return;
+        if (auto && createLat != null) return;
+        // carte et carroyage pas encore prets : on attend un peu
+        if (!createMiniMap || (auto && !createGridMeta && Date.now() - t0 < CREATE_GEO_GRID_WAIT_MS)) {
+          setTimeout(apply, 150);
+          return;
+        }
+        if (auto) {
+          if (!createGridMeta) return;     // carroyage indisponible : on ne devine pas
+          if (!resolveCreateGridCell(lat, lon)) {
+            showToast("info", "Position GPS hors du carroyage du site : placez l'intervention sur la carte");
+            return;
+          }
+          if (acc > CREATE_GEO_MAX_ACC_M) {
+            showToast("info", "GPS imprecis (+/- " + acc + " m) : placez l'intervention sur la carte");
+            return;
+          }
+        }
+        setCreatePosition(lat, lon);
+        createMiniMap.setView([lat, lon], Math.max(createMiniMap.getZoom(), 18));
+        showToast("success", "Position GPS (+/- " + acc + " m) - touchez la carte pour corriger");
+      };
+      apply();
+    }, function (err) {
+      if (btn) btn.classList.remove("active");
+      restoreInfo();
+      if (seq !== createGeoSeq) return;
+      if (err && err.code === 1) {
+        showToast("warning", "Localisation refusee : autorisez-la dans les reglages du telephone");
+      } else if (!auto) {
+        showToast("warning", "Position GPS introuvable, placez l'intervention sur la carte");
+      }
+    }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 });
   }
 
   // Categories proposees a l'etape 2 : toutes sur l'accueil, celles du
@@ -3910,6 +3997,11 @@
       createGridData = data;
       createGridMeta = buildGridMeta(data);
       if (createGridMeta && !sharedGridMeta) sharedGridMeta = createGridMeta;
+      // position posee avant l'arrivee du carroyage (GPS du telephone) : on
+      // complete le carre maintenant
+      if (createGridMeta && createLat != null && !createCarroye && createMiniMap) {
+        setCreatePosition(createLat, createLon);
+      }
     };
     if (window.CockpitMapView && window.CockpitMapView.getGridData && window.CockpitMapView.getGridData()) {
       doLoad(window.CockpitMapView.getGridData());
@@ -5965,6 +6057,25 @@
       createHooks = opts || {};
       loadVehiclesByCategory();   // l'evenement a pu changer sur la page
       openCreateWizard();
+      // Pre-remplissage (constat terrain transforme en fiche, /declarations) :
+      // {lat, lon, text, urgency}. L'operateur garde la main sur tout.
+      var pf = createHooks.prefill;
+      if (pf) {
+        if (pf.urgency) createSelectedUrgency = pf.urgency;
+        var ta = document.getElementById("pcorg-c-text");
+        if (ta && pf.text) ta.value = pf.text;
+        if (pf.lat != null && pf.lon != null) {
+          var t0 = Date.now();
+          (function place() {
+            if (!createMiniMap) {
+              if (Date.now() - t0 < 5000) setTimeout(place, 100);
+              return;
+            }
+            setCreatePosition(pf.lat, pf.lon);
+            createMiniMap.setView([pf.lat, pf.lon], Math.max(createMiniMap.getZoom(), 17));
+          })();
+        }
+      }
       return true;
     }
   };

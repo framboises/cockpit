@@ -328,6 +328,7 @@
         var opt = document.createElement("option");
         opt.value = g.id;
         var label = g.label + (g.pco_category ? " (" + g.pco_category + ")" : "");
+        if (g.declarant) label += " - mode declarant";
         if (g.disabled) label += " [inactif]";
         opt.textContent = label;
         sel.appendChild(opt);

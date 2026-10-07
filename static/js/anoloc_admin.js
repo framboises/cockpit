@@ -270,6 +270,13 @@
       // Label
       var tdLabel = document.createElement("td");
       tdLabel.textContent = grp.label || grp.id;
+      if (grp.declarant) {
+        var decl = document.createElement("span");
+        decl.style.cssText = "margin-left:6px; font-size:10px; font-weight:700; padding:1px 6px; border-radius:4px; background:#fef3c7; color:#92400e;";
+        decl.textContent = "Declarant";
+        decl.title = "Mode declarant : tablettes Field qui declarent sans etre engagees";
+        tdLabel.appendChild(decl);
+      }
       tr.appendChild(tdLabel);
 
       // Devices count
@@ -340,6 +347,7 @@
       $('input[name="enabled"]', form).checked = grp.enabled !== false;
       var pcoCatSel = $('select[name="pco_category"]', form);
       if (pcoCatSel) pcoCatSel.value = grp.pco_category || "";
+      $('input[name="declarant"]', form).checked = !!grp.declarant;
     } else {
       title.textContent = "Nouveau groupe de balises";
       $('input[name="id"]', form).value = "";  // forcer id vide pour nouveau groupe
@@ -448,6 +456,7 @@
       device_labels: deviceLabels,
       enabled: enabled,
       pco_category: pcoCategory,
+      declarant: $('input[name="declarant"]', form).checked,
     };
 
     if (!config.beacon_groups) config.beacon_groups = [];

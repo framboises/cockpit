@@ -3330,3 +3330,72 @@ body[data-app-hidden="true"] *::after { animation-play-state: paused !important;
   .inbox-panel, .layers-panel { width: min(420px, 100%); border-left: 1px solid #1e293b; }
   .field-update-banner { bottom: calc(56px + env(safe-area-inset-bottom)); }
 }
+
+/* ---------------------------------------------------------------------
+   Mode declarant (07/10/2026) : drapeau du groupe de la tablette.
+   Plus de statut, de bandeau d'engagement, de missions disponibles ni de
+   camera libre : un gros bouton "Declarer" a la place.
+   --------------------------------------------------------------------- */
+.action-declare { display: none; }
+body.field-declarant #btn-camera,
+body.field-declarant #status-bar,
+body.field-declarant #engage-banner,
+body.field-declarant .missions-tabs,
+body.field-declarant #missions-avail-list { display: none !important; }
+body.field-declarant .field-actions .action-declare {
+  display: flex;
+  background: linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
+  border: 2px solid #fde68a;
+  color: #111827;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.35);
+}
+body.field-declarant .field-actions .action-declare .material-symbols-outlined { font-size: 30px; color: #111827; }
+body.field-declarant .field-actions .action-declare .label { color: #111827; font-weight: 800; font-size: 11px; }
+body.field-declarant .field-actions .action-declare:active { background: #b45309; transform: scale(0.96); }
+
+.declare-photos { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.declare-thumb { position: relative; width: 76px; height: 76px; border-radius: 10px; overflow: hidden; border: 1px solid #334155; }
+.declare-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.declare-thumb-rm {
+  position: absolute; top: 3px; right: 3px; width: 26px; height: 26px;
+  border-radius: 50%; border: none; background: rgba(15, 23, 42, 0.8); color: #fff;
+  display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer;
+}
+.declare-thumb-rm .material-symbols-outlined { font-size: 18px; }
+.declare-photo-add {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  min-width: 76px; height: 76px; padding: 0 10px; border-radius: 10px;
+  border: 2px dashed #f59e0b; background: rgba(245, 158, 11, 0.08); color: #fde68a;
+  font-family: inherit; font-size: 11px; font-weight: 700; cursor: pointer;
+}
+.declare-photo-add .material-symbols-outlined { font-size: 28px; color: #f59e0b; }
+.declare-photos:has(.declare-thumb) .declare-photo-add { min-width: 76px; }
+.declare-photos:not(:has(.declare-thumb)) .declare-photo-add { flex: 1; height: 96px; flex-direction: row; font-size: 15px; gap: 10px; }
+.declare-pos {
+  display: flex; align-items: center; gap: 8px; margin: 12px 0 4px;
+  padding: 8px 10px; border-radius: 8px; background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.35); color: #bfdbfe; font-size: 13px; font-weight: 600;
+}
+.declare-pos .material-symbols-outlined { font-size: 20px; color: #60a5fa; }
+.declare-urgency { flex-direction: column; }
+.fiche-create-cats[hidden], .fiche-create-label[hidden] { display: none !important; }
+.decl-state {
+  margin-left: 8px; font-size: 10px; font-weight: 800; padding: 1px 7px; border-radius: 999px;
+  background: rgba(245, 158, 11, 0.18); color: #fbbf24; vertical-align: middle; text-transform: uppercase;
+}
+.decl-state.is-done { background: rgba(34, 197, 94, 0.16); color: #4ade80; }
+.mission-item.is-done { opacity: 0.7; }
+
+/* Mes constats (tablette declarante) */
+.decl-item { align-items: center; }
+.decl-item-thumb {
+  flex: none; width: 52px; height: 52px; border-radius: 8px; overflow: hidden;
+  background: #1e293b; display: flex; align-items: center; justify-content: center; color: #f59e0b;
+}
+.decl-item-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.decl-state.is-taken { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
+.decl-hist { padding: 8px 10px; margin-bottom: 8px; border-left: 3px solid #d97706; background: rgba(148, 163, 184, 0.08); border-radius: 0 6px 6px 0; font-size: 14px; }
+.decl-hist-meta { font-size: 11px; color: #94a3b8; margin-bottom: 2px; }
+.decl-hist-photos { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.decl-hist-photos img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; }
+.decl-pending { font-size: 12px; color: #fbbf24; align-self: center; }

@@ -324,6 +324,164 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
 
+        // Le "+" reste au centre de l'ecran, au-dessus de la barre.
+        // - 4 onglets visibles ou moins (ceux du groupe de l'utilisateur) :
+        //   barre fixe, moitie des onglets de chaque cote du "+".
+        // - Au-dela : carrousel. 4 onglets a l'ecran (2 de chaque cote du "+"),
+        //   on fait glisser du doigt (ou on touche les indicateurs < >) ; l'onglet
+        //   qui change de cote passe derriere le "+" en fondu. Au repos, aucun
+        //   onglet n'est jamais sous le "+".
+        var mbNav = document.getElementById("mobile-bottom-nav");
+        var MB_VISIBLE = 4;      // onglets a l'ecran en carrousel
+        var MB_SLOT = 78;        // largeur reservee au "+" au centre (px)
+        var mbSig = "";
+        var car = { on: false, vis: [], i: 0, w: 0, max: 0 };
+        var moreL = null, moreR = null;
+
+        function mbMore(side) {
+            var el = document.createElement("span");
+            el.className = "mb-more mb-more-" + side;
+            el.setAttribute("role", "button");
+            el.setAttribute("aria-label", side === "left" ? "Onglets precedents" : "Onglets suivants");
+            el.innerHTML = '<span class="material-symbols-outlined">' +
+                (side === "left" ? "chevron_left" : "chevron_right") + "</span>";
+            el.addEventListener("click", function (ev) {
+                ev.stopPropagation();
+                carGo(car.i + (side === "left" ? -2 : 2), true);
+            });
+            mbNav.appendChild(el);
+            return el;
+        }
+
+        function carPlace(pos) {
+            var W = mbNav.clientWidth, w = car.w, mid = W / 2;
+            car.vis.forEach(function (t, j) {
+                var v = (j - pos) * w;
+                var c = v + w / 2;
+                // passage du cote droit : decalage progressif de la largeur du "+"
+                var x = v + MB_SLOT * Math.min(1, Math.max(0, (c - 1.5 * w) / w));
+                var cs = x + w / 2;
+                var op = Math.min(1, Math.max(0, (Math.abs(cs - mid) - 30) / (w / 2)));
+                op *= Math.min(1, Math.max(0, cs / (w / 2)));
+                op *= Math.min(1, Math.max(0, (W - cs) / (w / 2)));
+                t.style.transform = "translateX(" + x + "px)";
+                t.style.opacity = op;
+                t.style.visibility = op < 0.05 ? "hidden" : "";
+            });
+            if (moreL) moreL.classList.toggle("is-on", pos > 0.05);
+            if (moreR) moreR.classList.toggle("is-on", pos < car.max - 0.05);
+        }
+
+        function carGo(target, animate) {
+            car.i = Math.max(0, Math.min(car.max, Math.round(target)));
+            mbNav.classList.toggle("mb-anim", !!animate);
+            carPlace(car.i);
+        }
+
+        function carStop() {
+            car.on = false;
+            mbNav.classList.remove("mb-car", "mb-anim");
+            mbNav.querySelectorAll(".mb-tab").forEach(function (t) {
+                t.style.transform = ""; t.style.opacity = ""; t.style.visibility = ""; t.style.width = "";
+            });
+        }
+
+        function layoutNav() {
+            if (!fab || !mbNav || !mobileMQ.matches) return;
+            var all = Array.prototype.slice.call(mbNav.querySelectorAll(".mb-tab"));
+            var vis = all.filter(function (t) { return getComputedStyle(t).display !== "none"; });
+            var W = mbNav.clientWidth;
+            var sig = W + "|" + vis.map(function (t) { return t.dataset.target; }).join(",");
+            if (sig === mbSig) return;
+            mbSig = sig;
+            all.forEach(function (t) { t.style.flex = ""; });
+            mbNav.style.paddingLeft = "";
+            if (vis.length > MB_VISIBLE) {
+                mbNav.classList.remove("mb-fit");
+                if (!moreL) { moreL = mbMore("left"); moreR = mbMore("right"); }
+                car.on = true;
+                car.vis = vis;
+                car.w = (W - MB_SLOT) / MB_VISIBLE;
+                car.max = vis.length - MB_VISIBLE;
+                all.forEach(function (t) { t.style.width = car.w + "px"; });
+                mbNav.classList.add("mb-car");
+                // garder l'onglet actif a l'ecran
+                var act = vis.findIndex(function (t) { return t.classList.contains("is-active"); });
+                var start = car.i;
+                if (act >= 0 && (act < start || act >= start + MB_VISIBLE)) start = act - 1;
+                carGo(start, false);
+                return;
+            }
+            carStop();
+            var nLeft = Math.floor(vis.length / 2), nRight = vis.length - nLeft;
+            var side = (W - MB_SLOT) / 2;
+            var anchor = nLeft > 0 ? vis[nLeft - 1] : null;
+            if (anchor && anchor.nextSibling !== fab) mbNav.insertBefore(fab, anchor.nextSibling);
+            mbNav.classList.toggle("mb-fit", nLeft > 0);
+            if (nLeft > 0) {
+                vis.forEach(function (t, i) {
+                    t.style.flex = "0 0 " + (side / (i < nLeft ? nLeft : nRight)) + "px";
+                });
+            }
+            mbNav.scrollLeft = 0;
+        }
+
+        // Glisser du doigt sur la barre (carrousel)
+        if (mbNav) {
+            var drag = null, swallowClick = false;
+            mbNav.addEventListener("pointerdown", function (ev) {
+                if (!car.on || ev.target.closest(".mb-fab, .mb-more")) return;
+                drag = { x0: ev.clientX, i0: car.i, moved: false, id: ev.pointerId };
+            });
+            mbNav.addEventListener("pointermove", function (ev) {
+                if (!drag || ev.pointerId !== drag.id) return;
+                var dx = ev.clientX - drag.x0;
+                if (!drag.moved && Math.abs(dx) < 8) return;
+                if (!drag.moved) {
+                    drag.moved = true;
+                    mbNav.classList.remove("mb-anim");
+                    try { mbNav.setPointerCapture(drag.id); } catch (e) { /* rien */ }
+                }
+                var p = drag.i0 - dx / car.w;
+                // resistance au-dela des bords
+                if (p < 0) p = p / 3;
+                if (p > car.max) p = car.max + (p - car.max) / 3;
+                drag.pos = p;
+                carPlace(p);
+            });
+            function endDrag(ev) {
+                if (!drag || ev.pointerId !== drag.id) return;
+                if (drag.moved) {
+                    swallowClick = true;
+                    setTimeout(function () { swallowClick = false; }, 50);
+                    carGo(drag.pos != null ? drag.pos : car.i, true);
+                }
+                drag = null;
+            }
+            mbNav.addEventListener("pointerup", endDrag);
+            mbNav.addEventListener("pointercancel", endDrag);
+            // un glissement ne doit pas ouvrir l'onglet sous le doigt
+            mbNav.addEventListener("click", function (ev) {
+                if (swallowClick) { ev.stopPropagation(); ev.preventDefault(); swallowClick = false; }
+            }, true);
+        }
+        var mbRaf = 0;
+        function scheduleLayout() {
+            if (mbRaf) return;
+            mbRaf = requestAnimationFrame(function () { mbRaf = 0; layoutNav(); });
+        }
+        if (mbNav && window.MutationObserver) {
+            // Onglets masques/affiches apres coup (groupes, SAISON, musee)
+            new MutationObserver(scheduleLayout).observe(mbNav, {
+                subtree: true, attributes: true, attributeFilter: ["style", "class", "hidden"]
+            });
+        }
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleLayout);
+        window.addEventListener("load", scheduleLayout);
+        window.addEventListener("resize", scheduleLayout);
+        mobileMQ.addEventListener("change", scheduleLayout);
+        scheduleLayout();
+
         // Quand on sort du mode mobile, on nettoie tout
         mobileMQ.addEventListener("change", function (ev) {
             if (!ev.matches) {
