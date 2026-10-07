@@ -322,7 +322,10 @@ def test_seminaires_validation():
 
 def test_seminaires_seed_added_without_touching_indicators():
     db = _db()
-    db["cockpit_settings"].docs.append({"_id": SI.SETTINGS_ID, "indicators": copy.deepcopy(SI.DEFAULT_INDICATORS[:1])})
+    # voisins_seeded : sans lui, get_config ajoute une fois les indicateurs
+    # voisins (cf. test_voisins_sync), hors sujet ici.
+    db["cockpit_settings"].docs.append({"_id": SI.SETTINGS_ID, "voisins_seeded": True,
+                                        "indicators": copy.deepcopy(SI.DEFAULT_INDICATORS[:1])})
     assert SI.get_seminaires(db) == SI.DEFAULT_SEMINAIRES
     doc = db["cockpit_settings"].docs[0]
     assert doc["seminaires"] == SI.DEFAULT_SEMINAIRES

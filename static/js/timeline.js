@@ -674,6 +674,18 @@ function createEventItem(date, item) {
     } else {
         iconHtml = `<span class="material-icons">info</span>`;
     }
+    // Evenement voisin (Antares, MSB, Le Mans FC) : carte distincte, icone du
+    // type, badge du lieu ; les vignettes de flux (arrivees / sortie) sont
+    // plus discretes (cf. voisins_sync._vignettes).
+    const vz = item.origin === 'voisins';
+    if (vz) {
+        const ic = /^[a-z_]{1,40}$/.test(item.voisins_icon || '') ? item.voisins_icon : 'stadium';
+        const role = item.voisins_role || 'evenement';
+        iconHtml = `<span class="material-symbols-outlined vz-card-ic">${role === 'arrivees' ? 'login' : role === 'sortie' ? 'logout' : ic}</span>`;
+        eventItem.classList.add('is-voisin', item.voisins_venue === 'stade' ? 'vz-stade' : 'vz-antares');
+        if (role !== 'evenement') eventItem.classList.add('vz-flux');
+        else if (item.voisins_id) eventItem.dataset.vzId = item.voisins_id;
+    }
 
     const fullTitle = (item.activity || '').split('/')[0].trim();
     const fullPlace = (item.place || '').split('/')[0].trim();
@@ -713,7 +725,7 @@ function createEventItem(date, item) {
             </div>
             <div class="event-time">
                 <p class="time-info">${timeInfo}</p>
-                ${getCategoryChipHtml(item.category)}
+                ${vz ? _vzCardBadgeHtml(item) : getCategoryChipHtml(item.category)}
                 ${_acoBadgeHtml(item)}
                 ${getAccessChipHtml(item)}
                 <p class="event-location">${fullPlace}</p>
@@ -965,6 +977,19 @@ function createClusterItem(date, cluster) {
   });
 
   return el;
+}
+
+// Badge des vignettes voisins : lieu (+ "estime" pour les flux, "horaire a
+// confirmer" quand la LFP n'a pas fixe l'heure). Markup statique.
+function _vzCardBadgeHtml(item) {
+  const stade = item.voisins_venue === 'stade';
+  const role = item.voisins_role || 'evenement';
+  let html = '<span class="vz-badge ' + (stade ? 'vz-stade' : 'vz-antares') + '" title="Evenement voisin du circuit">'
+    + '<span class="material-symbols-outlined" aria-hidden="true">' + (stade ? 'sports_soccer' : 'stadium') + '</span>'
+    + (stade ? 'MMArena' : 'Antarès') + '</span>';
+  if (role !== 'evenement') html += '<span class="vz-chip">flux estimé</span>';
+  if (item.voisins_time_tbc) html += '<span class="vz-chip vz-tbc">horaire à confirmer</span>';
+  return html;
 }
 
 // Bouton "Planning du client" des vignettes Momentus (cartes et lignes de
@@ -1331,7 +1356,8 @@ function _siDecorate(dates, pills) {
       row.forEach(x => { state[x.id] = x; });
       pill.classList.add('si-day');
       // Les pastilles VL/VG remplacent le point "public" historique
-      pill.querySelectorAll('.day-indicators, .si-tags, .si-dots').forEach(el => el.remove());
+      pill.querySelectorAll('.day-indicators, .si-tags, .si-dots, .si-vz-flags').forEach(el => el.remove());
+      pill.classList.remove('si-has-vz');
 
       if (pillInds.length) {
         const top = document.createElement('span');
@@ -1365,6 +1391,28 @@ function _siDecorate(dates, pills) {
           bottom.appendChild(slot);
         });
         pill.appendChild(bottom);
+      }
+      // Evenement voisin ce jour-la : pictogramme en coin du jour (en plus
+      // du point), bien plus visible qu'un point de 7 px.
+      const vzOn = inds.filter(i => i.source_type === 'voisins' && state[i.id] && state[i.id].active);
+      if (vzOn.length) {
+        const flags = document.createElement('span');
+        flags.className = 'si-vz-flags';
+        vzOn.forEach(ind => {
+          const dets = state[ind.id].details || [];
+          const f = document.createElement('span');
+          f.className = 'si-vz-flag';
+          f.style.setProperty('--c', _siColor(ind.color));
+          const ic = document.createElement('span');
+          ic.className = 'material-symbols-outlined';
+          ic.textContent = /^[a-z_]{1,40}$/.test((dets[0] || {}).icon || '') ? dets[0].icon : (ind.icon || 'stadium');
+          f.appendChild(ic);
+          f.title = dets.map(d => (d.start || 'horaire a confirmer') + ' ' + d.event).join(' / ');
+          f.addEventListener('click', ev => { ev.stopPropagation(); _siToggleFilter(ind.id, ds); });
+          flags.appendChild(f);
+        });
+        pill.appendChild(flags);
+        pill.classList.add('si-has-vz');
       }
       // Infobulle riche : branchee apres celle du jour public, elle la remplace.
       // Interactive : la souris peut y entrer (bouton epingle).
@@ -2462,6 +2510,61 @@ function _plRenderMulti(days) {
 //  - sem : seminaires du jour ({count, pers, items, more}) ; semOn : bloc actif
 //  - eps : epreuves du jour [{ep, pub}] (calendrier)
 //  - search : resultats de la recherche du calendrier pour ce jour
+// Encadre "A cote du circuit" de l'infobulle du jour : evenements voisins
+// (Antares, MSB, Le Mans FC) avec heure, type et flux estimes. textContent
+// uniquement (titres venus de sites tiers).
+function _siVoisinsBlock(inds, state) {
+  const rows = [];
+  inds.forEach(ind => {
+    const st = state[ind.id];
+    if (ind.source_type !== 'voisins' || !st || !st.active) return;
+    (st.details || []).forEach(det => rows.push({ ind, det }));
+  });
+  if (!rows.length) return null;
+  rows.sort((a, b) => (a.det.start || '99').localeCompare(b.det.start || '99'));
+  const box = document.createElement('div');
+  box.className = 'si-tip-vz';
+  const h = document.createElement('div');
+  h.className = 'si-tip-vz-head';
+  const hi = document.createElement('span');
+  hi.className = 'material-symbols-outlined';
+  hi.textContent = 'warning';
+  h.appendChild(hi);
+  h.appendChild(document.createTextNode('À côté du circuit'));
+  box.appendChild(h);
+  rows.forEach(({ ind, det }) => {
+    const line = document.createElement('div');
+    line.className = 'si-tip-vz-line';
+    line.style.setProperty('--c', _siColor(ind.color));
+    const ic = document.createElement('span');
+    ic.className = 'material-symbols-outlined si-tip-vz-ic';
+    ic.textContent = /^[a-z_]{1,40}$/.test(det.icon || '') ? det.icon : 'stadium';
+    line.appendChild(ic);
+    const main = document.createElement('div');
+    main.className = 'si-tip-vz-main';
+    const top = document.createElement('div');
+    const tm = document.createElement('b');
+    tm.className = 'si-tip-vz-time';
+    tm.textContent = det.start || '--:--';
+    top.appendChild(tm);
+    const nm = document.createElement('span');
+    nm.className = 'si-tip-vz-title';
+    nm.textContent = det.event || '';
+    top.appendChild(nm);
+    main.appendChild(top);
+    const sub = document.createElement('div');
+    sub.className = 'si-tip-vz-sub';
+    const bits = [det.venue_label || ind.label, det.kind];
+    if (det.status === 'a confirmer') bits.push('horaire à confirmer');
+    else if (det.arrivals) bits.push('arrivées ~' + det.arrivals + ', fin ~' + det.end_est);
+    sub.textContent = bits.filter(Boolean).join(' · ');
+    main.appendChild(sub);
+    line.appendChild(main);
+    box.appendChild(line);
+  });
+  return box;
+}
+
 function _siShowTooltip(pill, ds, inds, state, opts) {
   opts = opts || {};
   if (SiTip.pinned && !opts.pin) return;   // epinglee : le survol ne la remplace pas
@@ -2512,11 +2615,14 @@ function _siShowTooltip(pill, ds, inds, state, opts) {
     });
     tip.appendChild(box);
   }
+  const vzBox = _siVoisinsBlock(inds, state);
+  if (vzBox) tip.appendChild(vzBox);
   if (opts.search) tip.appendChild(_siSearchBlock(opts.search));
   const off = [];
   inds.forEach(ind => {
     const st = state[ind.id];
     if (!st || !st.active) { off.push(ind.label); return; }
+    if (ind.source_type === 'voisins') return;   // encadre dedie en tete
     const block = document.createElement('div');
     block.className = 'si-tip-ind';
     const title = document.createElement('div');
@@ -3418,7 +3524,26 @@ function _siDrawCal(ov, y, m, data) {
     num.textContent = d;
     top.appendChild(num);
     pillInds.forEach(ind => {
-      if (state[ind.id] && state[ind.id].active) top.appendChild(_siMarker(ind));
+      if (state[ind.id] && state[ind.id].active && ind.source_type !== 'voisins') top.appendChild(_siMarker(ind));
+    });
+    // Evenements voisins : pastille pictogramme + heure en haut de la case
+    // (une bande en bas etait coupee par la hauteur fixe) + liseré de couleur.
+    inds.forEach(ind => {
+      const st = state[ind.id];
+      if (ind.source_type !== 'voisins' || !st || !st.active) return;
+      const dets = st.details || [];
+      const vp = document.createElement('span');
+      vp.className = 'si-cal-vzpill';
+      vp.style.setProperty('--c', _siColor(ind.color));
+      const ic = document.createElement('span');
+      ic.className = 'material-symbols-outlined';
+      ic.textContent = /^[a-z_]{1,40}$/.test((dets[0] || {}).icon || '') ? dets[0].icon : 'stadium';
+      vp.appendChild(ic);
+      vp.appendChild(document.createTextNode(((dets[0] || {}).start || '?') + (dets.length > 1 ? ' +' + (dets.length - 1) : '')));
+      vp.title = dets.map(x => (x.start || 'horaire a confirmer') + ' ' + x.event + ' (' + (x.venue_label || ind.label) + ')').join(' / ');
+      top.appendChild(vp);
+      cell.classList.add('si-cal-has-vz');
+      cell.style.setProperty('--vzc', _siColor(ind.color));
     });
     cell.appendChild(top);
     // Barres d'epreuves du jour (couleur de la collection evenement)
@@ -3466,6 +3591,7 @@ function _siDrawCal(ov, y, m, data) {
     const bands = document.createElement('div');
     bands.className = 'si-cal-bands';
     dotInds.forEach(ind => {
+      if (ind.source_type === 'voisins') return;   // pastille en haut de la case
       const st = state[ind.id];
       const b = document.createElement('span');
       b.className = 'si-cal-band';
@@ -3566,6 +3692,7 @@ function _siItemMatches(item, ind, st) {
     const txt = ((item.activity || '') + ' ' + (item.remark || '')).toLowerCase();
     return /au public|visite/.test(txt);
   }
+  if (ind.source_type === 'voisins') return item.voisins_venue === ind.venue;
   const eids = st.eids || [];
   if (item.momentus_event_id && eids.indexOf(item.momentus_event_id) !== -1) {
     // Meme evenement : seulement la vignette de l'espace de l'indicateur
@@ -6406,4 +6533,113 @@ async function openEditModalFromDrawer(dateStr, item) {
 
   if (window._timetableVersionPollTimer) clearInterval(window._timetableVersionPollTimer);
   window._timetableVersionPollTimer = setInterval(pollOnce, POLL_MS);
+})();
+
+// ============================================================================
+// Bandeau "A cote du circuit" : evenements voisins (Antares, MSB, Le Mans FC)
+// d'aujourd'hui et de demain, en tete de la timeline, QUELLE QUE SOIT
+// l'epreuve affichee (un concert a Antares pendant les 24H compte aussi).
+// GET /api/voisins (voisins_sync.py). Clic : la vignette si elle est affichee
+// (timeline SAISON), sinon rien. Texte des sites tiers en textContent.
+// ============================================================================
+(function () {
+  var REFRESH_MS = 10 * 60 * 1000;
+  var timer = null;
+
+  function el(tag, cls, txt) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (txt != null) e.textContent = txt;
+    return e;
+  }
+
+  function dayLabel(ds, today) {
+    if (ds === today) return "Aujourd'hui";
+    var t = new Date(today + 'T12:00:00');
+    t.setDate(t.getDate() + 1);
+    var tm = t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+    if (ds === tm) return 'Demain';
+    return new Date(ds + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+  }
+
+  function focusCard(id) {
+    var list = document.getElementById('event-list');
+    if (!list || !id) return false;
+    var card = null;
+    list.querySelectorAll('.event-item.is-voisin').forEach(function (c) {
+      if (!card && c.dataset.vzId === id) card = c;
+    });
+    if (!card) return false;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.remove('vz-flash');
+    void card.offsetWidth;
+    card.classList.add('vz-flash');
+    return true;
+  }
+
+  function render(data) {
+    var main = document.getElementById('timeline-main');
+    if (!main) return;
+    var box = document.getElementById('vz-banner');
+    var evs = (data && data.events) || [];
+    if (!evs.length) { if (box) box.remove(); return; }
+    if (!box) {
+      box = el('div', 'vz-banner');
+      box.id = 'vz-banner';
+      box.setAttribute('role', 'note');
+      box.setAttribute('aria-label', 'Evenements a cote du circuit');
+      main.insertBefore(box, main.firstChild);
+    }
+    box.textContent = '';
+    var head = el('span', 'vz-banner-head');
+    head.appendChild(el('span', 'material-symbols-outlined', 'warning'));
+    head.appendChild(el('span', 'vz-banner-lbl', 'À côté du circuit'));
+    box.appendChild(head);
+    var row = el('div', 'vz-banner-row');
+    evs.forEach(function (ev) {
+      var b = el('button', 'vz-ev ' + (ev.venue === 'stade' ? 'vz-stade' : 'vz-antares')
+        + (ev.date === data.today ? ' is-today' : ''));
+      b.type = 'button';
+      b.appendChild(el('span', 'material-symbols-outlined vz-ev-ic',
+        /^[a-z_]{1,40}$/.test(ev.icon || '') ? ev.icon : 'stadium'));
+      var txt = el('span', 'vz-ev-txt');
+      var l1 = el('span', 'vz-ev-l1');
+      l1.appendChild(el('b', 'vz-ev-day', dayLabel(ev.date, data.today)));
+      l1.appendChild(el('b', 'vz-ev-time', ev.time || 'heure à confirmer'));
+      l1.appendChild(el('span', 'vz-ev-title', ev.title));
+      txt.appendChild(l1);
+      var sub = [ev.venue_label, ev.kind];
+      if (ev.arrivals) sub.push('arrivées ~' + ev.arrivals + ', fin ~' + ev.end_est);
+      txt.appendChild(el('span', 'vz-ev-l2', sub.filter(Boolean).join(' · ')));
+      b.appendChild(txt);
+      b.title = ev.title + (ev.subtitle ? ' (' + ev.subtitle + ')' : '') + ' - ' + ev.venue_label
+        + (ev.arrivals ? '. Flux estimés : arrivées dès ~' + ev.arrivals + ', sortie vers ~' + ev.end_est : '');
+      b.addEventListener('click', function () {
+        if (!focusCard(ev.id) && typeof window.showToast === 'function') {
+          window.showToast('info', ev.title + ' - ' + ev.venue_label + ' : ' + (ev.time || 'heure à confirmer')
+            + ' (vignette visible dans la timeline SAISON)');
+        }
+      });
+      row.appendChild(b);
+    });
+    box.appendChild(row);
+  }
+
+  function load() {
+    if (document.hidden || !document.getElementById('timeline-main')) return;
+    fetch('/api/voisins', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (j && j.ok) render(j); })
+      .catch(function () { /* bandeau facultatif : jamais d'erreur visible */ });
+  }
+
+  function start() {
+    load();
+    if (timer) clearInterval(timer);
+    timer = setInterval(load, REFRESH_MS);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) load(); });
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
 })();

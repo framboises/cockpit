@@ -13,7 +13,11 @@ liste ordonnee d'indicateurs :
   {id, label, short (<= 4 car.), color "#RRGGBB", icon (material symbol),
    rank "pill"|"dot", enabled,
    source: {type: "momentus_rooms", room_ids: [...]}
-         | {type: "visites", kind: "libre"|"guidee"}}
+         | {type: "visites", kind: "libre"|"guidee"}
+         | {type: "voisins", venue: "antares"|"stade"}}
+Source "voisins" : evenements des voisins du circuit (Antares : spectacles et
+matchs du MSB ; stade MMArena : matchs du Mans FC), collection voisins_events
+alimentee par voisins_sync.py.
 
 Regles Momentus (comme momentus_timeline) : objets supprimes, evenements
 annules, perdus et prospects ecartes. Les BLACKOUTS COMPTENT (decision du
@@ -73,6 +77,20 @@ DEFAULT_INDICATORS = [
      "icon": "toys", "rank": "dot", "enabled": True,
      "source": {"type": "momentus_rooms", "room_ids": ["room-162-A"]}},
 ]
+
+# Evenements voisins (07/10/2026). Ajoutes UNE FOIS aux configurations
+# existantes (drapeau `voisins_seeded`) : un admin qui les retire ensuite
+# n'est jamais contredit.
+VOISINS_VENUES = ("antares", "stade")
+DEFAULT_VOISINS = [
+    {"id": "voisin_antares", "label": "Antares (spectacles, MSB)", "short": "ANT", "color": "#1F78B4",
+     "icon": "stadium", "rank": "dot", "enabled": True,
+     "source": {"type": "voisins", "venue": "antares"}},
+    {"id": "voisin_stade", "label": "Stade MMArena (Le Mans FC)", "short": "MMA", "color": "#4B5563",
+     "icon": "sports_soccer", "rank": "dot", "enabled": True,
+     "source": {"type": "voisins", "venue": "stade"}},
+]
+DEFAULT_INDICATORS += DEFAULT_VOISINS
 
 # Seminaires du site (bloc a part, pas un indicateur) : evenements Momentus
 # dont le type (normalise : casse, accents, espaces) est dans la liste.
@@ -218,6 +236,11 @@ def validate_config(raw):
                 errors.append(f"{where} : type de visite 'libre' ou 'guidee' attendu")
             else:
                 clean_src = {"type": "visites", "kind": src["kind"]}
+        elif src.get("type") == "voisins":
+            if src.get("venue") not in VOISINS_VENUES:
+                errors.append(f"{where} : lieu voisin 'antares' ou 'stade' attendu")
+            else:
+                clean_src = {"type": "voisins", "venue": src["venue"]}
         else:
             errors.append(f"{where} : type de source inconnu")
         if clean_src is not None:
@@ -270,6 +293,7 @@ def ensure_seed(db):
         {"_id": SETTINGS_ID},
         {"$setOnInsert": {"indicators": copy.deepcopy(DEFAULT_INDICATORS),
                           "seminaires": copy.deepcopy(DEFAULT_SEMINAIRES),
+                          "voisins_seeded": True,
                           "updated_at": datetime.now(timezone.utc), "updated_by": "seed"}},
         upsert=True)
     db["cockpit_settings"].update_one(
@@ -277,10 +301,30 @@ def ensure_seed(db):
         {"$set": {"seminaires": copy.deepcopy(DEFAULT_SEMINAIRES)}})
 
 
+def _seed_voisins(db, doc):
+    """Ajoute UNE FOIS les indicateurs voisins a une configuration anterieure
+    au 07/10/2026 (en fin de liste, sans depasser MAX_INDICATORS). Les
+    enregistrements admin posent le drapeau : un retrait est definitif."""
+    inds = doc.get("indicators")
+    if isinstance(inds, list):
+        have = {it.get("id") for it in inds if isinstance(it, dict)}
+        add = [copy.deepcopy(v) for v in DEFAULT_VOISINS if v["id"] not in have]
+        inds = inds + add[:max(0, MAX_INDICATORS - len(inds))]
+        clean, errors = validate_config(inds)
+        if not errors:
+            db["cockpit_settings"].update_one(
+                {"_id": SETTINGS_ID}, {"$set": {"indicators": clean, "voisins_seeded": True}})
+            return
+    db["cockpit_settings"].update_one({"_id": SETTINGS_ID}, {"$set": {"voisins_seeded": True}})
+
+
 def get_config(db, seed=True):
     doc = db["cockpit_settings"].find_one({"_id": SETTINGS_ID})
     if doc is None and seed:
         ensure_seed(db)
+        doc = db["cockpit_settings"].find_one({"_id": SETTINGS_ID})
+    elif doc is not None and seed and not doc.get("voisins_seeded"):
+        _seed_voisins(db, doc)
         doc = db["cockpit_settings"].find_one({"_id": SETTINGS_ID})
     inds = (doc or {}).get("indicators")
     if not isinstance(inds, list):
@@ -307,6 +351,7 @@ def save_config(db, raw, user=None, seminaires=None):
         clean, errs = validate_config(raw)
         errors += errs
         fields["indicators"] = clean
+        fields["voisins_seeded"] = True
     if seminaires is not None:
         sem, errs = validate_seminaires(seminaires)
         errors += errs
@@ -355,6 +400,8 @@ def public_indicators(db, indicators):
         p["source_type"] = src["type"]
         if src["type"] == "visites":
             p["kind"] = src["kind"]
+        elif src["type"] == "voisins":
+            p["venue"] = src["venue"]
         else:
             p["rooms"] = [names.get(r, r) for r in src["room_ids"]]
         out.append(p)
@@ -484,6 +531,23 @@ def _momentus_details(db, room_to_inds, d_from, d_to):
     return out
 
 
+def _voisins_details(db, venues, d_from, d_to):
+    """{(venue, 'YYYY-MM-DD'): [detail]} des evenements voisins actifs."""
+    out = defaultdict(list)
+    if not venues:
+        return out
+    import voisins_sync as VS
+    for d in VS.active_events(db, d_from, d_to, venues):
+        p = VS.public_event(d)
+        out[(d["venue"], d["date"])].append({
+            "event": _clean(p["title"]) or "Evenement", "room": "",
+            "kind": _clean(p["kind"], 40), "start": p["time"], "end": "",
+            "blackout": False, "status": "a confirmer" if p["time_tbc"] else "",
+            "phase": "", "voisin": True, "icon": p["icon"], "venue_label": p["venue_label"],
+            "arrivals": p["arrivals"], "end_est": p["end_est"], "subtitle": _clean(p["subtitle"])})
+    return out
+
+
 def compute(db, d_from, d_to, indicators=None):
     """{'YYYY-MM-DD': [{id, active, details, more, eids}]} dans l'ordre FIXE de
     la configuration (indicateurs actives seulement)."""
@@ -498,6 +562,8 @@ def compute(db, d_from, d_to, indicators=None):
     mom = _momentus_details(db, room_to_inds, d_from, d_to)
     need_visits = any(it["source"]["type"] == "visites" for it in inds)
     visits = _visit_days(db, d_from, d_to) if need_visits else {}
+    voisins = _voisins_details(db, {it["source"]["venue"] for it in inds
+                                    if it["source"]["type"] == "voisins"}, d_from, d_to)
 
     out = {}
     for x in _days(d_from, d_to):
@@ -515,6 +581,8 @@ def compute(db, d_from, d_to, indicators=None):
                         "room": "", "start": "" if info.get("is24h") else info.get("open") or "",
                         "end": "" if info.get("is24h") else info.get("close") or "",
                         "is24h": bool(info.get("is24h")), "blackout": False, "status": "", "phase": ""})
+            elif src["type"] == "voisins":
+                details = [dict(d) for d in voisins.get((src["venue"], ds), [])]
             else:
                 for d in mom.get((it["id"], ds), {}).values():
                     d = dict(d)

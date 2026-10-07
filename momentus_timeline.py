@@ -405,9 +405,10 @@ def _comparable(items):
     return sorted((sorted((k, str(v)) for k, v in it.items() if k not in OPERATOR_FIELDS) for it in items))
 
 
-def _sync_year_doc(db, year, days, items_by_day, prune_before, dry_run):
-    """Remplace les vignettes momentus des `days` (de l'annee `year`) du doc
-    SAISON/<year>. Rend des statistiques."""
+def _sync_year_doc(db, year, days, items_by_day, prune_before, dry_run, origin=ORIGIN):
+    """Remplace les vignettes `origin` (momentus par defaut ; aussi "voisins",
+    cf. voisins_sync.py) des `days` (de l'annee `year`) du doc SAISON/<year>.
+    Rend des statistiques."""
     col = db["timetable"]
     key = {"event": SAISON, "year": str(year)}
     doc = col.find_one(key, {"data": 1}) or {}
@@ -416,7 +417,7 @@ def _sync_year_doc(db, year, days, items_by_day, prune_before, dry_run):
     foreign_ids, operator = set(), {}
     for items in data.values():
         for it in items or []:
-            if it.get("origin") != ORIGIN:
+            if it.get("origin") != origin:
                 foreign_ids.add(str(it.get("_id")))
             elif it.get("remark_manual") or it.get("todo") or it.get("preparation_checked"):
                 operator[str(it.get("_id"))] = {k: it[k] for k in OPERATOR_FIELDS if k in it}
@@ -431,7 +432,7 @@ def _sync_year_doc(db, year, days, items_by_day, prune_before, dry_run):
             it = dict(it)
             it.update(operator.get(it["_id"], {}))
             new.append(it)
-        old = [it for it in data.get(ds) or [] if it.get("origin") == ORIGIN]
+        old = [it for it in data.get(ds) or [] if it.get("origin") == origin]
         stats["items"] += len(new)
         if _comparable(old) == _comparable(new) and all(
                 {k: o.get(k) for k in OPERATOR_FIELDS} == {k: n.get(k) for k in OPERATOR_FIELDS}
@@ -443,14 +444,14 @@ def _sync_year_doc(db, year, days, items_by_day, prune_before, dry_run):
         if new:
             pushes[ds] = new
     for ds, items in data.items():
-        if ds < prune_before and any(it.get("origin") == ORIGIN for it in items or []):
+        if ds < prune_before and any(it.get("origin") == origin for it in items or []):
             pulls.append(ds)
             stats["pruned_days"] += 1
 
     if dry_run or (not pulls and not pushes):
         return stats
     if pulls:
-        col.update_one(key, {"$pull": {f"data.{ds}": {"origin": ORIGIN} for ds in pulls}})
+        col.update_one(key, {"$pull": {f"data.{ds}": {"origin": origin} for ds in pulls}})
     upd = {"$inc": {"version": 1}}
     if pushes:
         upd["$push"] = {f"data.{ds}": {"$each": items} for ds, items in pushes.items()}

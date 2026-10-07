@@ -308,14 +308,21 @@
     main.appendChild(field("Affichage", rk, "si-admin-f-rank"));
 
     var srcType = (ind.source && ind.source.type) || "momentus_rooms";
-    var st = select([["momentus_rooms", "Espaces Momentus"], ["visites", "Jours de visites"]], srcType);
+    var st = select([["momentus_rooms", "Espaces Momentus"], ["visites", "Jours de visites"],
+                     ["voisins", "Evenements voisins"]], srcType);
     st.addEventListener("change", function () {
-      ind.source = st.value === "visites" ? { type: "visites", kind: "libre" } : { type: "momentus_rooms", room_ids: [] };
+      ind.source = st.value === "visites" ? { type: "visites", kind: "libre" }
+        : st.value === "voisins" ? { type: "voisins", venue: "antares" }
+        : { type: "momentus_rooms", room_ids: [] };
       setDirty(true); render();
     });
     main.appendChild(field("Source", st, "si-admin-f-src"));
 
-    if (srcType === "visites") {
+    if (srcType === "voisins") {
+      var vn = select([["antares", "Antares (spectacles, MSB)"], ["stade", "Stade MMArena (Le Mans FC)"]], ind.source.venue);
+      vn.addEventListener("change", function () { ind.source.venue = vn.value; setDirty(true); });
+      main.appendChild(field("Lieu", vn, "si-admin-f-kind"));
+    } else if (srcType === "visites") {
       var kd = select([["libre", "Visites libres"], ["guidee", "Visites guidees"]], ind.source.kind);
       kd.addEventListener("change", function () { ind.source.kind = kd.value; setDirty(true); });
       main.appendChild(field("Visites", kd, "si-admin-f-kind"));

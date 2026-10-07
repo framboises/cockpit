@@ -10,6 +10,8 @@
                                           a la place de `client` : client de l'evenement
   GET /api/saison/search?q=&from=&to=     (user) recherche client / lieu / epreuve /
                                           visites (400 j max, defaut J-30 -> J+365)
+  GET /api/voisins?from=&to=              (user) evenements voisins (Antares, MSB,
+                                          Le Mans FC), defaut aujourd'hui -> demain, 14 j max
 
 Calcul dans saison_indicateurs.py. Ni contacts ni montants dans les reponses.
 """
@@ -62,6 +64,34 @@ def api_indicateurs():
         return jsonify(SI.payload(_db(), a, b))
     except Exception as e:  # la timeline ne doit jamais casser pour un indicateur
         logger.warning("saison indicateurs : %s", e)
+        return _err("indisponible", 503)
+
+
+VOISINS_MAX_DAYS = 14
+
+
+@saison_indicateurs_bp.route("/api/voisins", methods=["GET"])
+@_role_required("user")
+def api_voisins():
+    """Evenements voisins (Antares, MSB, Le Mans FC) du jour et des jours
+    suivants, pour le bandeau de la timeline (toutes epreuves, pas seulement
+    SAISON). Defaut : aujourd'hui -> demain (heure de Paris), 14 j max."""
+    import voisins_sync as VS
+    today = VS.paris_today()
+    a = SI.parse_day(request.args.get("from")) if request.args.get("from") else today
+    b = SI.parse_day(request.args.get("to")) if request.args.get("to") else a + timedelta(days=1)
+    if not a or not b:
+        return _err("periode_invalide")
+    if b < a:
+        return _err("periode_invalide")
+    if b - a > timedelta(days=VOISINS_MAX_DAYS - 1):
+        return _err("periode_trop_longue")
+    try:
+        events = [VS.public_event(d) for d in VS.active_events(_db(), a, b)]
+        return jsonify({"ok": True, "from": a.isoformat(), "to": b.isoformat(),
+                        "today": today.isoformat(), "events": events})
+    except Exception as e:
+        logger.warning("voisins : %s", e)
         return _err("indisponible", 503)
 
 
