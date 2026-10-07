@@ -104,7 +104,22 @@ def test_accredites_est_l_organisation():
 
 def test_sans_public_les_trois_sont_donnes():
     r = lieux(nom="porte nord pietons")
-    assert "organisation :" in r["resume"] and "public :" in r["resume"] and "VIP :" in r["resume"]
+    assert "organisation (accrédités) :" in r["resume"]
+    assert "| public :" in r["resume"] and "VIP :" in r["resume"]
+
+
+def test_prod_accredites_en_texte_libre_donne_l_orga_pas_le_public():
+    # Constate le 07/10/2026 : le modele, force de choisir dans une enum,
+    # avait passe public="public" pour "accredites".
+    r = lieux(nom="porte nord pietons", public="accrédités")
+    assert r["public_demande"] == "organisation"
+    assert "organisation (accrédités) : lundi 21 septembre 2026" in r["resume"]
+    assert "07:00" not in r["resume"]
+
+
+def test_public_inconnu_donne_les_trois_avec_une_note():
+    r = lieux(nom="porte nord pietons", public="pompiers")
+    assert "note_public" in r and "| VIP :" in r["resume"]
 
 
 def test_publics_separes_par_barre_verticale():
@@ -161,8 +176,61 @@ def test_jour_vendredi_donne_la_plage_continue_qui_le_couvre():
 
 def test_maintenant():
     r = lieux(nom="porte nord pietons", maintenant=True)
-    assert "organisation : OUVERT jusqu'au dimanche 27 septembre 2026 à 21:00" in r["resume"]
+    assert ("organisation (accrédités) : OUVERT jusqu'au dimanche 27 septembre 2026 à 21:00"
+            in r["resume"])
     assert "public : FERMÉ, ouvre le samedi 26 septembre 2026 à 07:00" in r["resume"]
+
+
+def test_sans_nom_etat_a_l_instant_pendant_l_evenement():
+    r = lieux(type="porte")
+    assert r["vue"] == "etat_maintenant"
+    assert "PORTE NORD PIETONS (porte) : organisation (accrédités) jusqu'au dimanche" in r["resume"]
+    assert "PORTE EST" not in r["resume"]  # fermee a 10:00 le 25 : pas listee comme ouverte
+
+
+def test_prod_sans_nom_apres_l_evenement_rien_n_est_ouvert():
+    # Constate le 07/10/2026 : la liste des lieux avait ete lue comme "ouverts".
+    r = L.t_lieux(_db(), {}, CTX, now=datetime(2026, 10, 7, 20, 27))
+    assert r["lieux_ouverts"] == 0
+    assert "AUCUN lieu n'est ouvert : l'événement est terminé" in r["resume"]
+    assert "dernière fermeture le dimanche 27 septembre 2026 à 21:00" in r["resume"]
+
+
+def test_sans_nom_avant_l_evenement_prochaine_ouverture():
+    r = L.t_lieux(_db(), {}, CTX, now=datetime(2026, 9, 1, 8, 0))
+    assert "AUCUN lieu n'est ouvert. Prochaine ouverture : PORTE NORD PIETONS" in r["resume"]
+
+
+# --- Controle d'acces ---------------------------------------------------------
+
+def test_prod_tribune_controlee_lue_dans_daycontrol():
+    # Constate le 07/10/2026 : "controlee en temps reel via Cockpit", invente.
+    tri = dict(TRIBUNE, dates=[dict(e, dayControl="controle") for e in TRIBUNE["dates"]])
+    texte, info = L.controle_item(tri)
+    assert texte.startswith("contrôle d'accès : contrôlé le samedi 26 septembre 2026")
+    assert "moyen de contrôle non précisé" in texte
+    assert info["jours_controles"] == ["2026-09-26"]
+
+
+def test_controle_libre_creneaux_et_moyen():
+    item = {"controle": {"type": "PDA", "number": "3"}, "dates": [
+        {"date": "2026-09-25", "dayControl": "libre"},
+        {"date": "2026-09-26", "dayControl": "controle",
+         "dayControlSlots": [{"start": "06:00", "end": "14:00", "type": "controle"}]}]}
+    texte, _ = L.controle_item(item)
+    assert "accès libre (sans contrôle) le vendredi 25 septembre 2026" in texte
+    assert "le samedi 26 septembre 2026 : contrôlé de 06:00 à 14:00" in texte
+    assert "moyen de contrôle : PDA x3" in texte
+
+
+def test_controle_dans_le_resume_d_un_lieu():
+    r = lieux(nom="porte nord pietons")
+    assert "contrôle d'accès : contrôlé le lundi 21 septembre 2026" in r["resume"]
+
+
+def test_controle_non_renseigne():
+    texte, _ = L.controle_item({"dates": [{"date": "2026-09-26"}]})
+    assert texte == "contrôle d'accès non renseigné dans le paramétrage"
 
 
 def test_service_centre_medical():

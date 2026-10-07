@@ -522,18 +522,22 @@ TOOLS = {
                        "portes, parkings, campings, tribunes, boutiques, hospitalites, passerelles, "
                        "sanitaires, et services (ouverture du site au public, centre medical, help "
                        "desk, PC Orga, PC autorites, salle de presse). Plages continues deja "
-                       "calculees par public (organisation = accredites, public, VIP), ce qui est "
-                       "ouvert maintenant, capacites. A appeler pour TOUTE question d'horaire, "
-                       "d'ouverture ou de fermeture d'un lieu, y compris les questions de suite. "
-                       "Recopier le champ resume sans le reformuler.",
+                       "calculees par public (organisation = accredites, public, VIP), controle "
+                       "d'acces (controle ou libre, par jour), capacites. Sans nom : etat de tous "
+                       "les lieux a l'instant (ce qui est ouvert maintenant). A appeler pour TOUTE "
+                       "question d'horaire, d'ouverture, de fermeture ou de controle d'un lieu, y "
+                       "compris les questions de suite. Recopier le champ resume sans le "
+                       "reformuler ni le completer.",
         "parameters": {"type": "object", "properties": {
             "nom": {"type": "string", "description": "nom du lieu tel que dit par l'operateur "
                                                      "(ex. porte nord, parking Chinetti)"},
             "type": {"type": "string", "enum": ["porte", "parking", "camping", "tribune",
                                                "boutique", "hospitalite", "passerelle",
                                                "sanitaire", "service"]},
-            "public": {"type": "string", "enum": ["organisation", "public", "vip", "tous"],
-                       "description": "accredites/staff = organisation ; defaut tous"},
+            "public": {"type": "string",
+                       "description": "le mot de l'operateur TEL QUEL (accredites, orga, staff, "
+                                      "public, spectateurs, VIP...) : l'outil le traduit. Omettre "
+                                      "si non precise (les trois publics sont alors donnes)"},
             "jour": {"type": "string", "description": "YYYY-MM-DD, aujourd'hui, demain ou un "
                                                       "jour de la semaine (samedi)"},
             "maintenant": {"type": "boolean", "description": "ouvert ou ferme a l'instant"},

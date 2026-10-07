@@ -31,9 +31,13 @@ TZ_PARIS = ZoneInfo("Europe/Paris")
 
 PUBLICS = ("organisation", "public", "vip")
 CLE_COURTE = {"organisation": "orga", "public": "public", "vip": "vip"}
-LIBELLE = {"organisation": "organisation", "public": "public", "vip": "VIP", "tous": "horaires"}
-AU_PUBLIC = {"organisation": "à l'organisation", "public": "au public", "vip": "aux VIP",
-             "tous": ""}
+# "organisation (accrédités)" : l'operateur dit "accredites", le modele doit
+# retrouver ce mot dans le resume (constate : il avait annonce les horaires
+# du public comme ceux des accredites).
+LIBELLE = {"organisation": "organisation (accrédités)", "public": "public", "vip": "VIP",
+           "tous": "horaires"}
+AU_PUBLIC = {"organisation": "à l'organisation (accrédités)", "public": "au public",
+             "vip": "aux VIP", "tous": ""}
 
 # Synonymes des publics, compares normalises (minuscules, sans accents).
 SYNONYMES_PUBLIC = {
@@ -293,6 +297,51 @@ def _texte_maintenant(p, info, now):
     return "%s : FERMÉ, plus d'ouverture prévue" % lib
 
 
+def controle_item(item, jour=None):
+    """Controle d'acces : par jour (dayControl controle/libre, creneaux
+    dayControlSlots) et moyen du lieu (controle.type PDA/TRIPODE/VISUEL).
+    (texte, dict). Constate en prod : sans ce bloc, le modele a invente
+    "controlee en temps reel via Cockpit"."""
+    ctrl = item.get("controle") if isinstance(item.get("controle"), dict) else {}
+    moyen = str(ctrl.get("type") or "").strip()
+    nombre = str(ctrl.get("number") or "").strip()
+    controles, libres, creneaux = [], [], []
+    for e in item.get("dates") or []:
+        if not isinstance(e, dict):
+            continue
+        D = _date(e.get("date"))
+        if D is None or (jour is not None and D.date() != jour.date()):
+            continue
+        slots = [s for s in (e.get("dayControlSlots") or []) if isinstance(s, dict)]
+        if slots:
+            creneaux.append((D, ["%s de %s à %s" % ("contrôlé" if s.get("type") == "controle"
+                                                    else "accès libre", s.get("start"), s.get("end"))
+                                 for s in slots]))
+        elif e.get("dayControl") == "controle":
+            controles.append(D)
+        elif e.get("dayControl") == "libre":
+            libres.append(D)
+    morceaux = []
+    if controles:
+        morceaux.append("contrôlé le " + ", ".join(jour_fr(d) for d in controles))
+    if libres:
+        morceaux.append("accès libre (sans contrôle) le " + ", ".join(jour_fr(d) for d in libres))
+    for d, txt in creneaux:
+        morceaux.append("le %s : %s" % (jour_fr(d), ", ".join(txt)))
+    info = {"jours_controles": [d.date().isoformat() for d in controles],
+            "jours_libres": [d.date().isoformat() for d in libres],
+            "moyen": moyen or None, "nombre": nombre or None}
+    if not morceaux:
+        return "contrôle d'accès non renseigné dans le paramétrage", info
+    if moyen:
+        m = "moyen de contrôle : %s%s" % (moyen, (" x" + nombre) if nombre else "")
+    elif controles or creneaux:
+        m = "moyen de contrôle non précisé"
+    else:
+        m = ""
+    return "contrôle d'accès : " + " ; ".join(morceaux) + ((" (%s)" % m) if m else ""), info
+
+
 def _plages_json(info):
     return [{"debut": d.isoformat(timespec="minutes"), "fin": f.isoformat(timespec="minutes")}
             for d, f in info["plages"]]
@@ -505,18 +554,67 @@ def _decrire(lieu, publics, jour, maintenant, now, ev_lib):
     else:
         infos = plages_item(lieu["item"], publics)
         res["infos"] = _infos(lieu)
+    ctrl_txt = ""
+    if lieu["kind"] == "plages":
+        ctrl_txt, res["controle"] = controle_item(lieu["item"], jour if not maintenant else now)
+        ctrl_txt = " — " + ctrl_txt
     res["plages_continues"] = {p: _plages_json(i) for p, i in infos.items() if i["etat"] == "ok"}
     res["etat_par_public"] = {p: i["etat"] for p, i in infos.items()}
     if maintenant:
         lignes = [x for x in (_texte_maintenant(p, i, now) for p, i in infos.items()) if x]
-        return res, "%s — maintenant (%s %s) : %s." % (tete, jour_fr(now), now.strftime("%H:%M"),
-                                                      " | ".join(lignes))
+        return res, "%s — maintenant (%s %s) : %s%s." % (
+            tete, jour_fr(now), now.strftime("%H:%M"), " | ".join(lignes), ctrl_txt)
     if jour is not None:
         lignes = [_texte_jour(p, i, jour) for p, i in infos.items() if i["etat"] != "non_concerne"]
-        return res, "%s le %s — %s." % (tete, jour_fr(jour), " | ".join(lignes))
+        return res, "%s le %s — %s%s." % (tete, jour_fr(jour), " | ".join(lignes), ctrl_txt)
     blocs = [b for b in (_bloc_texte(p, i) for p, i in infos.items()) if b]
-    return res, "%s — horaires d'ouverture, plages continues par public — %s." % (
-        tete, " | ".join(blocs))
+    return res, "%s — horaires d'ouverture, plages continues par public — %s%s." % (
+        tete, " | ".join(blocs), ctrl_txt)
+
+
+def etat_maintenant(lieux, publics, now, ev_lib):
+    """Vue d'ensemble "qu'est-ce qui est ouvert ?" : lieux ouverts a l'instant,
+    sinon prochaines ouvertures, sinon "evenement termine". (resume, details).
+
+    Constate en prod (07/10/2026, deux semaines apres les 24H CAMIONS) : sans
+    cette vue, l'outil rendait la LISTE des lieux et le modele l'a lue comme
+    "ouverts maintenant". La reponse dit donc explicitement quand rien n'est
+    ouvert, et pourquoi."""
+    ouverts, prochaines, derniere_fin = [], [], None
+    for l in lieux:
+        if l["kind"] == "service":
+            infos = {"tous": {"plages": plages_service(l["item"]["liste"]), "etat": "ok"}}
+        else:
+            infos = plages_item(l["item"], publics)
+        ici = []
+        for p, i in infos.items():
+            for d, f in i["plages"]:
+                derniere_fin = f if derniere_fin is None or f > derniere_fin else derniere_fin
+                if d <= now < f:
+                    fin = ("%s à %s" % (jour_fr(f), f.strftime("%H:%M")) if f.hour or f.minute
+                           else "%s à minuit" % jour_fr(f - timedelta(days=1)))
+                    ici.append("%s jusqu'au %s" % (LIBELLE[p], fin))
+                elif d > now:
+                    prochaines.append((d, l["nom"], p))
+        if ici:
+            ouverts.append("%s (%s) : %s" % (l["nom"], l["categorie"], " ; ".join(ici)))
+    tete = "En ce moment (%s %s), %s :" % (jour_fr(now), now.strftime("%H:%M"), ev_lib)
+    if ouverts:
+        return "%s %d lieu(x) ouvert(s) sur %d.\n%s" % (tete, len(ouverts), len(lieux),
+                                                       "\n".join(ouverts)), len(ouverts)
+    if prochaines:
+        prochaines.sort()
+        d, nom, p = prochaines[0]
+        return ("%s AUCUN lieu n'est ouvert. Prochaine ouverture : %s (%s) le %s à %s."
+                % (tete, nom, LIBELLE[p], jour_fr(d), d.strftime("%H:%M"))), 0
+    if derniere_fin is not None and derniere_fin <= now:
+        if derniere_fin.hour or derniere_fin.minute:
+            quand = "le %s à %s" % (jour_fr(derniere_fin), derniere_fin.strftime("%H:%M"))
+        else:
+            quand = "le %s à minuit" % jour_fr(derniere_fin - timedelta(days=1))
+        return ("%s AUCUN lieu n'est ouvert : l'événement est terminé (dernière fermeture %s)."
+                % (tete, quand)), 0
+    return "%s aucun horaire d'ouverture n'est renseigné." % tete, 0
 
 
 def t_lieux(db, args, ctx, now=None):
@@ -561,14 +659,16 @@ def t_lieux(db, args, ctx, now=None):
                             nom, ev_lib, (" Lieux de type %s existants : %s." % (
                                 t, ", ".join(voisins))) if voisins else ""))
     else:
-        lieux = [l for l in cat if not type_ or l["categorie"] == type_]
-        if not maintenant:
-            return dict(base, trouve=False,
-                        lieux_disponibles=[{"nom": l["nom"], "categorie": l["categorie"]}
-                                           for l in lieux][:60],
-                        resume="Préciser le lieu. %d lieu(x)%s dans le paramétrage %s." % (
-                            len(lieux), (" de type %s" % type_) if type_ else "", ev_lib))
-        lieux = [l for l in lieux if l["kind"] in ("plages", "service")]
+        # Sans nom de lieu : TOUJOURS l'etat a l'instant ("qu'est-ce qui est
+        # ouvert ?"), jamais une simple liste de noms, que le modele lisait
+        # comme une liste de lieux ouverts.
+        lieux = [l for l in cat if (not type_ or l["categorie"] == type_)
+                 and l["kind"] in ("plages", "service")]
+        resume, n_ouverts = etat_maintenant(lieux, publics, now, ev_lib)
+        if len(resume) > RESUME_MAX:
+            resume = resume[:RESUME_MAX].rsplit("\n", 1)[0] + "\n[… préciser un type de lieu]"
+        return dict(base, trouve=True, vue="etat_maintenant", lieux_ouverts=n_ouverts,
+                    resume=resume)
 
     details, resumes = [], []
     for l in lieux:
