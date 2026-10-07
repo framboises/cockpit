@@ -197,7 +197,11 @@ if (typeof window.getCurrentEventYear !== "function") {
         radius: d.id === state.openId ? 11 : 8, color: "#fff", weight: 2,
         fillColor: m.color, fillOpacity: 0.95,
       }).addTo(state.layer);
-      mk.bindTooltip((d.ref || "") + " - " + (d.text || "").slice(0, 60));
+      // Un noeud et non une chaine : Leaflet injecte une chaine en innerHTML,
+      // et le texte vient d'une tablette declarant (XSS stockee sinon).
+      var tip = document.createElement("span");
+      tip.textContent = (d.ref || "") + " - " + (d.text || "").slice(0, 60);
+      mk.bindTooltip(tip);
       mk.on("click", function () { openDetail(d.id); });
       state.markers[d.id] = mk;
       pts.push([d.lat, d.lng]);
