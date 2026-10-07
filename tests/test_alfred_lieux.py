@@ -41,7 +41,7 @@ CHINETTI = {"id": "p1", "name": "CHINETTI", "access": {"orga": True, "public": T
             "capacite_theorique": 1200,
             "dates": [_j("2026-09-26", ("06:00", "23:59"), ("06:00", "23:59")),
                       _j("2026-09-27", ("00:00", "20:00"), ("00:00", "20:00"))]}
-TRIBUNE = {"id": "t1", "name": "SINGHER", "access": {"public": True, "vip": True},
+TRIBUNE = {"id": "t1", "name": "SINGHER", "numero": "13", "access": {"public": True, "vip": True},
            "dates": [{"date": "2026-09-26", "public": {"open": "08:30", "close": "22:30",
                                                        "closed": False, "open24h": False},
                       "vip": {"open": "08:30", "close": "22:30", "closed": False}}]}
@@ -159,9 +159,27 @@ def test_mot_de_type_hors_nom_filtre_la_categorie():
     assert r["lieux"][0]["infos"]["capacite_theorique"] == 1200
 
 
+def test_tribune_affichee_avec_son_numero():
+    r = lieux(nom="singher")
+    assert r["resume"].startswith("SINGHER (n°13) (tribune, 24H CAMIONS 2026)")
+    assert r["lieux"][0]["numero"] == "13"
+
+
+def test_tribune_trouvee_par_son_numero_comme_a_la_radio():
+    for q in ("tribune 13", "T13", "la 13", "tribune numéro 13", "singher"):
+        r = lieux(nom=q)
+        assert r.get("trouve") and r["lieux"][0]["nom"] == "SINGHER (n°13)", q
+
+
+def test_alias_numero_avec_zero_et_bis():
+    assert set(L._alias_numero("03 bis").split()) >= {"03", "3", "bis", "t03", "t3"}
+    assert "t13" in L._alias_numero("13").split()
+
+
 def test_lieu_inconnu_propose_les_lieux_du_meme_type():
     r = lieux(nom="porte du tertre")
-    assert r["trouve"] is False
+    # Jamais rapprochee de PORTE EST par le seul mot "porte"
+    assert r["trouve"] is False and "PORTE EST" not in str(r.get("lieux"))
     assert "PORTE NORD PIETONS" in r["lieux_du_meme_type"]
 
 
@@ -223,9 +241,16 @@ def test_controle_libre_creneaux_et_moyen():
     assert "moyen de contrôle : PDA x3" in texte
 
 
-def test_controle_dans_le_resume_d_un_lieu():
+def test_controle_dans_le_resume_d_un_lieu_jours_consecutifs_groupes():
     r = lieux(nom="porte nord pietons")
-    assert "contrôle d'accès : contrôlé le lundi 21 septembre 2026" in r["resume"]
+    assert ("contrôle d'accès : contrôlé du lundi 21 septembre 2026 au dimanche 27 septembre 2026"
+            in r["resume"])
+
+
+def test_jours_groupes():
+    d = lambda j: datetime(2026, 9, j)
+    assert L.jours_groupes([d(21), d(22), d(23), d(26)]) == (
+        "du lundi 21 septembre 2026 au mercredi 23 septembre 2026, le samedi 26 septembre 2026")
 
 
 def test_controle_non_renseigne():

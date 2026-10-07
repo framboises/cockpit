@@ -81,6 +81,8 @@ TYPES = {
 JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
 MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août",
         "septembre", "octobre", "novembre", "décembre"]
+MOTS_VIDES = {"le", "la", "les", "l", "de", "du", "des", "d", "a", "au", "aux", "n",
+              "no", "num", "numero", "nr"}
 VARIANTES_MAX = 3
 CANDIDATS_MAX = 15
 RESUME_MAX = 4500
@@ -297,6 +299,24 @@ def _texte_maintenant(p, info, now):
     return "%s : FERMÉ, plus d'ouverture prévue" % lib
 
 
+def jours_groupes(dates):
+    """'le samedi 26 septembre 2026' / 'du lundi 21 septembre 2026 au dimanche
+    27 septembre 2026' / plusieurs groupes separes par ', '."""
+    ds = sorted({d.date() for d in dates})
+    groupes, debut, prec = [], None, None
+    for d in ds:
+        if prec is not None and (d - prec).days == 1:
+            prec = d
+            continue
+        if debut is not None:
+            groupes.append((debut, prec))
+        debut = prec = d
+    if debut is not None:
+        groupes.append((debut, prec))
+    return ", ".join("le %s" % jour_fr(a) if a == b else "du %s au %s" % (jour_fr(a), jour_fr(b))
+                     for a, b in groupes)
+
+
 def controle_item(item, jour=None):
     """Controle d'acces : par jour (dayControl controle/libre, creneaux
     dayControlSlots) et moyen du lieu (controle.type PDA/TRIPODE/VISUEL).
@@ -323,9 +343,9 @@ def controle_item(item, jour=None):
             libres.append(D)
     morceaux = []
     if controles:
-        morceaux.append("contrôlé le " + ", ".join(jour_fr(d) for d in controles))
+        morceaux.append("contrôlé " + jours_groupes(controles))
     if libres:
-        morceaux.append("accès libre (sans contrôle) le " + ", ".join(jour_fr(d) for d in libres))
+        morceaux.append("accès libre (sans contrôle) " + jours_groupes(libres))
     for d, txt in creneaux:
         morceaux.append("le %s : %s" % (jour_fr(d), ", ".join(txt)))
     info = {"jours_controles": [d.date().isoformat() for d in controles],
@@ -351,15 +371,39 @@ def _plages_json(info):
 # Catalogue des lieux d'un parametrage
 # ---------------------------------------------------------------------------
 
+def _alias_numero(numero):
+    """Formes radio d'un numero de tribune : "13" -> 13, t13 ; "03" -> 03, 3,
+    t03, t3 ; "03 bis" -> 03 bis, 3 bis. Le numero vient du parametrage de
+    l'evenement : il change d'une edition a l'autre (STANDS : 52 aux 24H MOTOS,
+    34 au GP EXPLORER)."""
+    n = norm(numero)
+    if not n:
+        return ""
+    tete, _, reste = n.partition(" ")
+    formes = {n, "t" + tete}
+    if tete.isdigit() and tete != str(int(tete)):
+        court = str(int(tete))
+        formes |= {(court + " " + reste).strip(), "t" + court}
+    return " ".join(sorted(formes))
+
+
 def catalogue(data):
-    """Liste de {nom, categorie, kind, item}. kind : plages | service | activation | info."""
+    """Liste de {nom, categorie, kind, item[, brut, alias]}.
+    kind : plages | service | activation | info. Les tribunes numerotees
+    s'affichent "SINGHER (n°13)" : c'est ainsi que les operateurs les
+    designent a la radio, et "tribune 13" doit les retrouver."""
     out = []
     for cle, cat in RUBRIQUES:
         v = data.get(cle)
         for it in (v.values() if isinstance(v, dict) else (v or [])):
             if isinstance(it, dict) and it.get("name"):
-                out.append({"nom": str(it["name"]).strip(), "categorie": cat, "kind": "plages",
-                            "item": it})
+                brut = str(it["name"]).strip()
+                lieu = {"nom": brut, "categorie": cat, "kind": "plages", "item": it}
+                numero = str(it.get("numero") or "").strip()
+                if cat == "tribune" and numero:
+                    lieu.update(nom="%s (n°%s)" % (brut, numero), brut=brut,
+                                alias=_alias_numero(numero), numero=numero)
+                out.append(lieu)
     for cle, cat in RUBRIQUES_ACTIVATION:
         v = data.get(cle)
         for it in (v.values() if isinstance(v, dict) else (v or [])):
@@ -378,10 +422,15 @@ def catalogue(data):
     return out
 
 
+def _mots(l):
+    """Mots par lesquels on peut designer un lieu : nom affiche, nom brut, alias."""
+    return set(norm("%s %s %s" % (l["nom"], l.get("brut", ""), l.get("alias", ""))).split())
+
+
 def _vocabulaire(cat):
     vocab = set()
     for l in cat:
-        vocab.update(norm(l["nom"]).split())
+        vocab.update(_mots(l))
     return vocab
 
 
@@ -406,7 +455,9 @@ def trouver(cat, nom, type_=None):
     if not nom:
         return [], []
     vocab = _vocabulaire(cat)
-    mots = corriger_mots(nom, vocab)
+    # Mots vides retires ("la 13", "tribune numero 13") ; "la chapelle"
+    # reste trouve par "chapelle".
+    mots = [w for w in corriger_mots(nom, vocab) if w not in MOTS_VIDES] or corriger_mots(nom, vocab)
     # Un mot de type absent des noms ("parking chinetti") filtre la categorie
     for w in list(mots):
         if w in TYPES and w not in vocab:
@@ -415,21 +466,25 @@ def trouver(cat, nom, type_=None):
     if not mots:
         return [], [l["nom"] for l in cat][:CANDIDATS_MAX]
     q = " ".join(mots)
-    exacts = [l for l in cat if norm(l["nom"]) == q]
+    exacts = [l for l in cat if q in (norm(l["nom"]), norm(l.get("brut", "")))]
     if exacts:
         return exacts[:1], []
-    contenant = [l for l in cat if set(mots) <= set(norm(l["nom"]).split())]
+    contenant = [l for l in cat if set(mots) <= _mots(l)]
     if not contenant:
         contenant = [l for l in cat if q in norm(l["nom"])]
     if 1 <= len(contenant) <= VARIANTES_MAX:
         return contenant, []
     if len(contenant) > VARIANTES_MAX:
         return [], [l["nom"] for l in contenant][:CANDIDATS_MAX]
-    noms = {norm(l["nom"]): l for l in cat}
-    proches = difflib.get_close_matches(q, list(noms), n=3, cutoff=0.75)
+    # Approche, mais MOT A MOT : chaque mot de la requete doit ressembler a un
+    # mot du lieu. Sur le nom entier, "porte tertre" ressemblait a "porte est"
+    # (le mot commun suffisait) : reponse sur la mauvaise porte, sans le dire.
+    def proche(w, mots_lieu):
+        return any(difflib.SequenceMatcher(None, w, m).ratio() >= 0.75 for m in mots_lieu)
+    proches = [l for l in cat if all(proche(w, _mots(l)) for w in mots)]
     if len(proches) == 1:
-        return [noms[proches[0]]], []
-    return [], [noms[p]["nom"] for p in proches]
+        return proches, []
+    return [], [l["nom"] for l in proches][:CANDIDATS_MAX]
 
 
 # ---------------------------------------------------------------------------
@@ -536,6 +591,8 @@ def _infos(lieu):
 def _decrire(lieu, publics, jour, maintenant, now, ev_lib):
     tete = "%s (%s, %s)" % (lieu["nom"], lieu["categorie"], ev_lib)
     res = {"nom": lieu["nom"], "categorie": lieu["categorie"]}
+    if lieu.get("numero"):
+        res["numero"] = lieu["numero"]
     if lieu["kind"] == "info":
         res["infos"] = _infos(lieu)
         return res, "%s — pas d'horaires dans le paramétrage (informations seulement)." % tete

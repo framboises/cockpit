@@ -172,6 +172,7 @@ def test_call_transmet_la_portee_a_l_outil(client, secret, db, monkeypatch):
     assert vu["ctx"]["cat_query"] == {"$in": ["PCO.Flux"]}
     trace = db[alfred_chat.COL_TOOL_CALLS].docs[-1]
     assert trace["scoped"] is True and trace["email"] == "op@aco.fr"
+    assert "resolu" in trace
 
 
 @pytest.mark.parametrize("request_id", ["chat-abc", "wa-123", "", None])

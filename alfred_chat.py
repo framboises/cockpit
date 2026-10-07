@@ -733,12 +733,25 @@ def tools_call():
     t0 = time.time()
     ok, result = alfred_tools.call(db, name, args, ctx)
     ms = int((time.time() - t0) * 1000)
+    # Journal Cockpit, a recouper ligne a ligne avec celui du wrapper par
+    # request_id : arguments RECUS (pas ceux que le modele croit avoir passes)
+    # et ce que l'outil en a deduit (evenement, public, lieux trouves).
+    resolu = {k: result.get(k) for k in ("evenement", "annee", "public_demande", "trouve", "vue",
+                                          "lieux_ouverts") if isinstance(result, dict) and k in result}
+    if isinstance(result, dict) and isinstance(result.get("lieux"), list):
+        resolu["lieux"] = [x.get("nom") for x in result["lieux"] if isinstance(x, dict)][:6]
+    if isinstance(result, dict) and result.get("candidats"):
+        resolu["candidats"] = result["candidats"][:6]
+    logger.info("alfred-tools %s rid=%s auth=%s scoped=%s ok=%s %dms args=%s resolu=%s",
+                name, str(data.get("request_id") or "-")[:40], mode, bool(scope_token), ok, ms,
+                json.dumps(args, ensure_ascii=False, default=str)[:400],
+                json.dumps(resolu, ensure_ascii=False, default=str)[:400])
     try:
         db[COL_TOOL_CALLS].insert_one({
             "tool": name, "args": json.dumps(args, ensure_ascii=False, default=str)[:500],
             "request_id": str(data.get("request_id") or "")[:40] or None,
             "scoped": bool(scope_token), "auth": mode, "email": ctx.get("email"),
-            "ok": ok, "duration_ms": ms, "created_at": _now()})
+            "resolu": resolu, "ok": ok, "duration_ms": ms, "created_at": _now()})
     except Exception:
         pass
     status = 200 if ok else (404 if result.get("error") == "outil_inconnu" else 500)
