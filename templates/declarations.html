@@ -19,9 +19,12 @@
 {#
   Constats terrain (/declarations, declarations.py) : constats deposes par les
   tablettes Field en mode declarant (degats, problemes, demandes de
-  reparation). Voir la page = Pages accessibles du groupe ; suivre, classer,
-  transformer en fiche = droit "Traiter les constats terrain"
-  (can_convert_declaration). Rendu dans static/js/declarations.js.
+  reparation). Voir la page = Pages accessibles du groupe ; accuser
+  reception, annoter, classer, transformer en fiche = droit "Traiter les
+  constats terrain" (can_convert_declaration). Rendu : static/js/declarations.js.
+
+  Disposition : liste a gauche (filtres en tete), carte sur tout le reste,
+  detail en panneau lateral par-dessus la carte (feuille du bas sur telephone).
 #}
 {% set _u = user or {} %}
 {% set user_roles = _u.get('roles') or [] %}
@@ -35,85 +38,97 @@
   {% set sidebar_active = '/declarations' %}
   {% include '_sidebar.html' %}
 
-  <div class="app-main single-col-page">
+  <div class="app-main dc-app">
 
-    <header class="app-header">
+    <header class="app-header dc-header">
       <button class="header-burger" id="header-burger-btn" type="button" aria-label="Menu">
         <span class="material-symbols-outlined">menu</span>
       </button>
-      <div class="header-event-info">
-        <span class="material-symbols-outlined" style="font-size:22px;color:#d97706;">report</span>
-        <span class="header-event-name">Constats terrain</span>
-      </div>
+      <span class="material-symbols-outlined dc-header-ico">report</span>
+      <span class="header-event-name">Constats terrain</span>
+      <span class="dc-header-sub" id="dc-header-sub"></span>
       <div class="header-spacer"></div>
-      <div class="header-actions">
-        <span class="dc-live" id="dc-live" title="Actualisation automatique toutes les 15 s">
-          <span class="dc-live-dot"></span><span id="dc-live-text">--</span>
-        </span>
-        <button class="btn btn-primary dc-icon-btn" id="dc-refresh" type="button" title="Actualiser maintenant">
-          <span class="material-symbols-outlined">refresh</span>
-        </button>
-      </div>
+      <span class="dc-live" id="dc-live" title="Actualisation automatique toutes les 15 s">
+        <span class="dc-live-dot"></span><span id="dc-live-text">--</span>
+      </span>
+      <button class="dc-icon-btn" id="dc-refresh" type="button" title="Actualiser maintenant" aria-label="Actualiser">
+        <span class="material-symbols-outlined">refresh</span>
+      </button>
     </header>
 
-    <main class="dc-main">
-      <div class="dc-toolbar">
-        <nav class="dc-tabs" id="dc-tabs" role="tablist" aria-label="Etat des constats">
-          <button type="button" class="dc-tab active" data-status="a_traiter">A traiter <span class="dc-count" id="dc-c-a_traiter">0</span></button>
-          <button type="button" class="dc-tab" data-status="transformee">Transformes <span class="dc-count" id="dc-c-transformee">0</span></button>
-          <button type="button" class="dc-tab" data-status="classee">Classes <span class="dc-count" id="dc-c-classee">0</span></button>
-          <button type="button" class="dc-tab" data-status="">Tous</button>
-        </nav>
+    <main class="dc-main" id="dc-main">
+      <aside class="dc-side" aria-label="Constats">
         <div class="dc-filters">
-          <div class="dc-search">
-            <span class="material-symbols-outlined">search</span>
-            <input type="search" id="dc-q" placeholder="Reference, texte, declarant, carroyage..." autocomplete="off">
+          <div class="dc-seg" id="dc-tabs" role="tablist" aria-label="Etat des constats">
+            <button type="button" class="dc-seg-btn active" data-status="a_traiter">A traiter <b id="dc-c-a_traiter">0</b></button>
+            <button type="button" class="dc-seg-btn" data-status="transformee">En fiche <b id="dc-c-transformee">0</b></button>
+            <button type="button" class="dc-seg-btn" data-status="classee">Classes <b id="dc-c-classee">0</b></button>
+            <button type="button" class="dc-seg-btn" data-status="">Tous</button>
           </div>
-          <select id="dc-days" class="form-input" aria-label="Periode">
-            <option value="0">Toute periode</option>
-            <option value="7">7 derniers jours</option>
-            <option value="30" selected>30 derniers jours</option>
-            <option value="365">12 derniers mois</option>
-          </select>
+          <div class="dc-filter-row">
+            <label class="dc-search">
+              <span class="material-symbols-outlined">search</span>
+              <input type="search" id="dc-q" placeholder="Rechercher..." autocomplete="off" aria-label="Rechercher un constat">
+            </label>
+            <select id="dc-days" aria-label="Periode">
+              <option value="7">7 j</option>
+              <option value="30" selected>30 j</option>
+              <option value="365">1 an</option>
+              <option value="0">Tout</option>
+            </select>
+          </div>
+          {% if not can_treat %}
+          <div class="dc-readonly-note">
+            <span class="material-symbols-outlined">visibility</span>
+            Consultation seule (droit <em>Traiter les constats terrain</em> requis pour agir).
+          </div>
+          {% endif %}
         </div>
-      </div>
+        <div class="dc-list" id="dc-list" aria-live="polite"></div>
+      </aside>
 
-      {% if not can_treat %}
-      <div class="dc-readonly-note">
-        <span class="material-symbols-outlined">visibility</span>
-        Consultation seule : le suivi et la transformation en fiche sont reserves aux groupes autorises
-        (<em>Traiter les constats terrain</em>).
-      </div>
-      {% endif %}
+      <section class="dc-map-area">
+        <div id="dc-map"></div>
+        <div class="dc-map-legend" aria-hidden="true">
+          <span><i style="background:#dc2626"></i>Nouveau</span>
+          <span><i style="background:#d97706"></i>Recu</span>
+          <span><i style="background:#2563eb"></i>En fiche</span>
+          <span><i style="background:#64748b"></i>Classe</span>
+        </div>
+      </section>
 
-      <div class="dc-grid">
-        <section class="dc-list" id="dc-list" aria-live="polite"></section>
-        <section class="dc-map-wrap"><div id="dc-map"></div></section>
+      <!-- Panneau de detail (par-dessus la carte ; feuille sur telephone) -->
+        <div class="dc-panel" id="dc-panel" hidden role="dialog" aria-labelledby="dc-p-title">
+          <header class="dc-panel-head">
+            <div class="dc-panel-title">
+              <h3 id="dc-p-title">Constat</h3>
+              <div class="dc-panel-sub" id="dc-p-sub"></div>
+            </div>
+            <button type="button" class="dc-icon-btn" id="dc-p-preview" title="Apercu du constat (mail)" aria-label="Apercu du constat">
+              <span class="material-symbols-outlined">mail</span>
+            </button>
+            <button type="button" class="dc-icon-btn" id="dc-p-close" title="Fermer" aria-label="Fermer">
+              <span class="material-symbols-outlined">close</span>
+            </button>
+          </header>
+          <div class="dc-panel-body" id="dc-p-body"></div>
+          <div class="dc-panel-foot" id="dc-p-foot"></div>
+        </div>
+
+      <!-- Bascule Liste / Carte (telephone) -->
+      <div class="dc-mobile-switch" role="tablist" aria-label="Vue">
+        <button type="button" class="active" data-view="list"><span class="material-symbols-outlined">list</span> Liste</button>
+        <button type="button" data-view="map"><span class="material-symbols-outlined">map</span> Carte</button>
       </div>
     </main>
   </div>
 </div>
 
-<!-- Detail d'un constat -->
-<div class="dc-sheet-overlay" id="dc-detail" hidden>
-  <div class="dc-sheet" role="dialog" aria-modal="true" aria-labelledby="dc-d-title">
-    <header class="dc-sheet-head">
-      <div>
-        <h3 id="dc-d-title">Constat</h3>
-        <div class="dc-sheet-sub" id="dc-d-sub"></div>
-      </div>
-      <button type="button" class="dc-sheet-close" data-close aria-label="Fermer">
-        <span class="material-symbols-outlined">close</span>
-      </button>
-    </header>
-    <div class="dc-sheet-body" id="dc-d-body"></div>
-    <div class="dc-sheet-foot" id="dc-d-foot"></div>
-  </div>
-</div>
-
 <div class="dc-lightbox" id="dc-lightbox" hidden>
   <img id="dc-lightbox-img" alt="Photo du constat">
-  <button type="button" class="dc-lightbox-close" aria-label="Fermer la photo">
+  <button type="button" class="dc-lightbox-nav prev" id="dc-lb-prev" aria-label="Photo precedente"><span class="material-symbols-outlined">chevron_left</span></button>
+  <button type="button" class="dc-lightbox-nav next" id="dc-lb-next" aria-label="Photo suivante"><span class="material-symbols-outlined">chevron_right</span></button>
+  <button type="button" class="dc-lightbox-close" id="dc-lb-close" aria-label="Fermer la photo">
     <span class="material-symbols-outlined">close</span>
   </button>
 </div>

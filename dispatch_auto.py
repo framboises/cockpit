@@ -1035,7 +1035,8 @@ SOURCE_LABELS = {
     "operateur": "Operateur interne",
     "hierarchie": "Hierarchie",
 }
-CANAL_LABELS = {"telephone": "telephone", "radio": "radio", "presentiel": "presentiel", "mail": "mail"}
+CANAL_LABELS = {"telephone": "telephone", "radio": "radio", "presentiel": "presentiel", "mail": "mail",
+                "application": "application"}
 
 
 def _fiche_source(cc):

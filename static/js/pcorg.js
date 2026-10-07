@@ -250,6 +250,65 @@
       });
   }
 
+  // ── Photos prises sur le moment (07/10/2026) ──────────────────────────────
+  // Telephone : l'input ouvre l'appareil photo (capture), poste : choix de
+  // fichier. Reduite a 1920 px avant envoi (une photo de telephone pese
+  // 3-6 Mo), puis POST multipart /api/pcorg/photo/<id>.
+  var PHOTO_MAX_DIM = 1920, PHOTO_MAX_BATCH = 5;
+
+  function shrinkPhoto(file) {
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        var k = Math.min(1, PHOTO_MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
+        var c = document.createElement("canvas");
+        c.width = Math.round(img.naturalWidth * k);
+        c.height = Math.round(img.naturalHeight * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        c.toBlob(function (b) { resolve(b || file); }, "image/jpeg", 0.85);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+  }
+
+  // Ouvre le selecteur (appareil photo sur telephone) ; cb(blobs reduits)
+  function pickPhotos(cb, max) {
+    var inp = document.createElement("input");
+    inp.type = "file";
+    inp.accept = "image/*";
+    inp.multiple = true;
+    if (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) inp.setAttribute("capture", "environment");
+    inp.style.display = "none";
+    inp.addEventListener("change", function () {
+      var files = Array.prototype.slice.call(inp.files || []).slice(0, max || PHOTO_MAX_BATCH);
+      inp.remove();
+      if (!files.length) return;
+      Promise.all(files.map(shrinkPhoto)).then(cb);
+    });
+    document.body.appendChild(inp);
+    inp.click();
+  }
+
+  function uploadFichePhotos(ficheId, blobs, text, _retried) {
+    var fd = new FormData();
+    blobs.forEach(function (b, i) { fd.append("photos", b, "photo_" + (i + 1) + ".jpg"); });
+    if (text) fd.append("text", text);
+    return fetch("/api/pcorg/photo/" + encodeURIComponent(ficheId), {
+      method: "POST", headers: { "X-CSRFToken": csrfToken() }, body: fd,
+    })
+      .then(function (r) { return r.json().catch(function () { return { ok: false, error: "Session expiree : rechargez la page" }; }); })
+      .catch(function () { return { ok: false, error: "Erreur reseau" }; })
+      .then(function (res) {
+        if (!_retried && res && res.code === "csrf" && window.CockpitCsrf) {
+          return window.CockpitCsrf.refresh().then(function () { return uploadFichePhotos(ficheId, blobs, text, true); });
+        }
+        return res;
+      });
+  }
+
   // Avant d'ouvrir un formulaire : jeton frais, ou alerte immediate si la
   // session a expire (plutot qu'apres avoir tout rempli)
   function checkSessionBeforeForm() {
@@ -1859,6 +1918,28 @@
       });
       commentBtns.appendChild(camBtn);
 
+      // Photo prise sur le moment ; le texte saisi sert de legende
+      var photoBtn = mkEl("button", "pcorg-comment-cam");
+      photoBtn.appendChild(matIcon("add_a_photo"));
+      photoBtn.title = "Joindre une photo (appareil photo ou fichier)";
+      photoBtn.addEventListener("click", function () {
+        pickPhotos(function (blobs) {
+          photoBtn.disabled = true;
+          showToast("info", "Envoi de " + (blobs.length > 1 ? blobs.length + " photos" : "la photo") + "...");
+          uploadFichePhotos(d.id, blobs, commentInput.value.trim()).then(function (r) {
+            photoBtn.disabled = false;
+            if (r.ok) {
+              commentInput.value = "";
+              showToast("success", blobs.length > 1 ? "Photos ajoutees" : "Photo ajoutee");
+              reloadFiche(d.id);
+            } else {
+              showToast("error", r.error || "Erreur");
+            }
+          });
+        });
+      });
+      commentBtns.appendChild(photoBtn);
+
       var commentBtn = mkEl("button", "pcorg-comment-send");
       commentBtn.appendChild(matIcon("send"));
       commentBtn.title = "Envoyer";
@@ -3342,6 +3423,7 @@
   var createGrid25On = false;
   var createCarroye = "";
   var _createCameraPhoto = null; // {url, cam_name} si une capture camera est jointe
+  var _createPhotos = [];        // photos prises sur le moment (blobs reduits), envoyees apres creation
   var createInterventionTs = null; // Date|null : null = "maintenant" (defaut)
   var createSource = "";           // "initiative" | "externe" | "operateur" | "hierarchie"
   var createCanal = "";            // "telephone" | "radio" | "presentiel" | "mail"
@@ -3363,7 +3445,10 @@
     { id: "telephone",  label: "Téléphone", icon: "call" },
     { id: "radio",      label: "Radio",       icon: "radio" },
     { id: "presentiel", label: "Présentiel",  icon: "co_present" },
-    { id: "mail",       label: "Mail",        icon: "mail" }
+    { id: "mail",       label: "Mail",        icon: "mail" },
+    // Application : fiche issue d'un outil (constat terrain d'une tablette
+    // declarante transforme sur /declarations, etc.)
+    { id: "application", label: "Application", icon: "smartphone" }
   ];
   var CANAL_BY_ID = CANAUX.reduce(function (acc, c) { acc[c.id] = c; return acc; }, {});
 
@@ -3639,6 +3724,7 @@
     createGrid100On = false;
     createGrid25On = false;
     _createCameraPhoto = null;
+    _createPhotos = [];
   }
 
   function destroyCreateMap() {
@@ -4660,7 +4746,44 @@
         });
       });
       camRow.appendChild(camBtn);
+
+      // Photos prises sur le moment : jointes a la fiche juste apres sa creation
+      var phBtn = mkEl("button", "pcorg-create-cam-btn");
+      phBtn.type = "button";
+      phBtn.appendChild(matIcon("add_a_photo"));
+      phBtn.appendChild(document.createTextNode(" Joindre une photo"));
+      var phWrap = mkEl("div", "pcorg-create-photos");
+      function renderCreatePhotos() {
+        phWrap.textContent = "";
+        _createPhotos.forEach(function (p, i) {
+          var cell = mkEl("div", "pcorg-create-cam-preview");
+          var img = mkEl("img", "");
+          img.src = p.url;
+          img.alt = "Photo " + (i + 1);
+          cell.appendChild(img);
+          var rm = mkEl("button", "pcorg-create-cam-remove");
+          rm.type = "button";
+          rm.appendChild(matIcon("close"));
+          rm.addEventListener("click", function () {
+            try { URL.revokeObjectURL(p.url); } catch (e) { /* deja libere */ }
+            _createPhotos.splice(i, 1);
+            renderCreatePhotos();
+          });
+          cell.appendChild(rm);
+          phWrap.appendChild(cell);
+        });
+        phBtn.style.display = _createPhotos.length >= PHOTO_MAX_BATCH ? "none" : "";
+      }
+      phBtn.addEventListener("click", function () {
+        pickPhotos(function (blobs) {
+          blobs.forEach(function (b) { _createPhotos.push({ blob: b, url: URL.createObjectURL(b) }); });
+          renderCreatePhotos();
+        }, PHOTO_MAX_BATCH - _createPhotos.length);
+      });
+      camRow.appendChild(phBtn);
       grp.appendChild(camRow);
+      grp.appendChild(phWrap);
+      renderCreatePhotos();
       container.appendChild(grp);
     }
 
@@ -4763,6 +4886,7 @@
     }
 
     var pendingPhoto = _createCameraPhoto;
+    var pendingPhotos = _createPhotos.slice();
     var submitBtn = document.getElementById("pcorgCreateSubmit");
 
     function _doSubmit() {
@@ -4787,6 +4911,17 @@
               if (!rc.ok) showToast("warning", "Fiche creee, mais la photo n'a pas pu etre jointe");
               return r;
             });
+          }
+          return r;
+        })
+        .then(function (r) {
+          // Photos prises sur le moment
+          if (r && r.id && !r.duplicate && pendingPhotos.length) {
+            return uploadFichePhotos(r.id, pendingPhotos.map(function (p) { return p.blob; }), "")
+              .then(function (rp) {
+                if (!rp.ok) showToast("warning", "Fiche creee, mais les photos n'ont pas pu etre jointes : " + (rp.error || "erreur"));
+                return r;
+              });
           }
           return r;
         })
@@ -6064,6 +6199,15 @@
         if (pf.urgency) createSelectedUrgency = pf.urgency;
         var ta = document.getElementById("pcorg-c-text");
         if (ta && pf.text) ta.value = pf.text;
+        // Source : {source: "externe", appelant: "...", canal: "application"}
+        if (pf.source && SOURCE_BY_ID[pf.source]) {
+          selectSource(pf.source);
+          var who = document.getElementById(pf.source === "externe" ? "pcorg-c-appelant"
+            : pf.source === "operateur" ? "pcorg-c-emetteur"
+            : pf.source === "hierarchie" ? "pcorg-c-donneur" : "pcorg-c-source-origine");
+          if (who && pf.appelant) who.value = pf.appelant;
+          if (pf.canal && CANAL_BY_ID[pf.canal] && pf.source !== "initiative") selectCanal(pf.canal);
+        }
         if (pf.lat != null && pf.lon != null) {
           var t0 = Date.now();
           (function place() {

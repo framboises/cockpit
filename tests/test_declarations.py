@@ -153,6 +153,12 @@ class TestCockpit:
         did = _depose(env).get_json()["id"]
         det = env.client.get("/api/declarations/%s" % did).get_json()
         assert det["prefill"]["urgency"] == "UA" and det["prefill"]["lat"] == 47.95
+        # Source pre-remplie : externe / groupe declarant / canal application
+        assert (det["prefill"]["source"], det["prefill"]["appelant"], det["prefill"]["canal"]) == \
+            ("externe", "Cellule appui", "application")
+        # Choix d'evenement : SAISON toujours propose, defaut = evenement du constat
+        assert any(c["event"] == "SAISON" for c in det["event_choices"])
+        assert det["event_default"] == {"event": "SAISON", "year": 2026}
         # fiche creee par un autre operateur : refusee
         env.db["pcorg"].insert_one({"_id": "f-autre", "operator_id_create": "autre@aco.fr",
                                     "comment_history": [], "comment": "", "status_code": 0})

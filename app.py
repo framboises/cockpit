@@ -6740,6 +6740,46 @@ def pcorg_add_comment(doc_id):
     return jsonify({"ok": True, "entry": entry})
 
 
+@app.route('/api/pcorg/photo/<doc_id>', methods=['POST'])
+@role_required("user")
+def pcorg_add_photo(doc_id):
+    """Photo(s) prise(s) sur le moment (telephone, tablette, poste) jointe(s)
+    a la fiche, avec une legende facultative. Meme traitement que les photos
+    des tablettes Field (validation Pillow, EXIF retire, 1920 px, miniature),
+    rangees avec les captures cameras de l'evenement."""
+    import field as _F
+    files = [f for f in request.files.getlist("photos") if f and f.filename]
+    if not files:
+        return jsonify({"error": "photo requise"}), 400
+    if len(files) > _F.FIELD_PHOTO_MAX_PER_BATCH:
+        return jsonify({"error": f"{_F.FIELD_PHOTO_MAX_PER_BATCH} photos maximum"}), 400
+    text = (request.form.get("text") or "").strip()[:PCORG_TEXT_MAX]
+    doc, err = _pcorg_load_for_write(doc_id, projection={"status_code": 1, "category": 1, "event": 1, "year": 1})
+    if err:
+        return err
+    ev = re.sub(r"[^A-Za-z0-9 _-]", "_", str(doc.get("event") or "cockpit"))
+    yr = re.sub(r"[^0-9A-Za-z_-]", "_", str(doc.get("year") or datetime.now().year))
+    photos = []
+    for pf in files:
+        try:
+            url, thumb = _F._process_and_save_photo(pf, os.path.join(ev, yr))
+        except _F.PhotoUploadError as e:
+            msg = {"photo_too_large": "photo trop lourde (10 Mo max)",
+                   "invalid_photo_format": "format de photo non pris en charge"}.get(e.code, e.code)
+            return jsonify({"error": msg}), e.status
+        photos.append({"photo": url, "thumb": thumb})
+    if not text:
+        text = "Photo jointe" if len(photos) == 1 else "%d photos jointes" % len(photos)
+    entry = PH.make_entry(_pcorg_operator(request.user_payload), text)
+    entry["photos"] = photos
+    entry["photo"] = photos[0]["photo"]
+    entry["thumb"] = photos[0]["thumb"]
+    n = PH.append_entry(db["pcorg"], doc_id, entry, inc_bounce=True, extra_filter=_PCORG_OPEN_FILTER)
+    if not n:
+        return jsonify({"error": "fiche close ou supprimee entre-temps"}), 409
+    return jsonify({"ok": True, "photos": photos})
+
+
 @app.route('/api/pcorg/camera-capture', methods=['POST'])
 @role_required("user")
 def pcorg_camera_capture():

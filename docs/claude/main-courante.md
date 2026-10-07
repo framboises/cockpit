@@ -75,6 +75,10 @@ Le parametrage SAISON peut porter des **jours publics** saisis dans GroundMaster
 - Création idempotente : `client_token` (un par ouverture de l'assistant) → même `_id`, un double clic ne crée plus deux fiches.
 - Suppression : archivée dans `pcorg_deleted` (qui, quand) avant `delete_one`, tablette libérée.
 
+### Photos prises sur le moment (07/10/2026)
+
+`POST /api/pcorg/photo/<id>` (multipart `photos` 1-5 + `text` facultatif, fiche ouverte, droits d'écriture habituels) : même traitement que les photos Field (`field._process_and_save_photo` : Pillow, EXIF retiré, 1920 px, miniature), rangées sous `uploads/field_photos/<event>/<year>/` (purge 30 j comme les captures caméras), entrée de chronologie avec `photos`. `pcorg.js` : bouton « Joindre une photo » dans l'assistant (étape 3, envoi après création, comme la capture caméra) et icône photo dans « Consigner une action » de la fiche (le texte saisi sert de légende). Téléphone : l'input ouvre l'appareil photo (`capture`), poste : choix de fichier ; réduction à 1920 px côté navigateur avant envoi (`shrinkPhoto`).
+
 ### Routes ajoutées ou modifiées
 
 - `POST /api/pcorg/reopen/<id>` (droit `can_close_fiche`, **motif obligatoire**).

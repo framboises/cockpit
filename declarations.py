@@ -469,8 +469,28 @@ def declarations_detail(decl_id):
         "lat": out["lat"], "lon": out["lng"],
         "urgency": PRIORITY_TO_URGENCY.get(out["priority"]),
         "text": "%s - %s" % (out["ref"] or "Constat", out["text"]),
-        "event": d.get("event"), "year": d.get("year"),
+        # Source de la fiche : externe, l'appelant = le groupe declarant,
+        # canal "application" (constat depose depuis la tablette)
+        "source": "externe",
+        "appelant": d.get("group_label") or d.get("device_name") or "Constat terrain",
+        "canal": "application",
     }
+    # Evenement de la fiche, choisi par l'operateur au moment de transformer :
+    # l'epreuve active (si le probleme est traite pendant l'epreuve) ou SAISON
+    # en cours (traite apres). Proposition = l'evenement du constat.
+    import event_courant as EC
+    choices = []
+    try:
+        for a in EC.active_events(_db()):
+            choices.append({"event": a["event"], "year": a["year"], "kind": a.get("kind"),
+                            "phase": a.get("phase")})
+    except Exception as e:  # pragma: no cover - parametrages illisibles
+        logger.warning("declarations: evenements actifs : %s", e)
+    yr = _now().astimezone(timezone.utc).year
+    if not any(EC.is_saison(c["event"]) for c in choices):
+        choices.append({"event": EC.SAISON, "year": yr, "kind": "saison", "phase": None})
+    out["event_choices"] = choices
+    out["event_default"] = {"event": d.get("event"), "year": d.get("year")}
     return jsonify(dict(out, ok=True, can_treat=_can_treat(_user())))
 
 
@@ -485,7 +505,8 @@ def _set_status(db, decl_id, status, u, text, expect=None, extra=None):
 
 
 STATUS_TEXT = {
-    "en_suivi": "Constat pris en suivi",
+    # "Accuser reception" : le declarant voit "Vu par le PC" sur sa tablette
+    "en_suivi": "Reception du constat accusee par le PC",
     "nouvelle": "Constat remis en attente",
 }
 
@@ -507,7 +528,9 @@ def declarations_status(decl_id):
         d = _set_status(db, decl_id, "classee", u, "Classe sans suite : " + reason,
                         expect=("nouvelle", "en_suivi"), extra={"classed_reason": reason})
     elif status in STATUS_TEXT:
-        d = _set_status(db, decl_id, status, u, STATUS_TEXT[status],
+        cur = db[COL].find_one({"_id": decl_id}, {"status": 1}) or {}
+        text = "Constat rouvert" if cur.get("status") == "classee" else STATUS_TEXT[status]
+        d = _set_status(db, decl_id, status, u, text,
                         expect=("nouvelle", "en_suivi", "classee"), extra={"classed_reason": None})
     else:
         return _err("invalid_status")

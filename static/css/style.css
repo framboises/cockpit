@@ -12032,7 +12032,9 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .pcorg-comment-cam .material-symbols-outlined { font-size: 18px; }
 
 /* Create form camera button */
-.pcorg-create-cam-row { margin-top: 8px; }
+.pcorg-create-cam-row { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+.pcorg-create-photos { display: flex; gap: 8px; flex-wrap: wrap; }
+.pcorg-create-photos .pcorg-create-cam-preview img { width: 120px; height: 90px; object-fit: cover; }
 .pcorg-create-cam-btn {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 7px 14px; border-radius: 8px;

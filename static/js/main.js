@@ -696,6 +696,11 @@ function _cockpitPopulateEvents(eventSelect, names, cur, selected) {
     var actives = _cockpitActiveEpreuves(cur);
     if (selected && names.indexOf(selected) === -1) names = names.concat([selected]);
     actives.forEach(function (n) { if (names.indexOf(n) === -1) names = names.concat([n]); });
+    // "Tous les evenements" en ordre alphabetique. Le groupe "En cours" garde
+    // l'ordre de priorite de _cockpitActiveEpreuves (prioritaire d'abord).
+    names = names.slice().sort(function (a, b) {
+        return String(a).localeCompare(String(b), 'fr', { sensitivity: 'base', numeric: true });
+    });
     function addOpt(parent, name, label) {
         var o = document.createElement('option');
         o.value = name;
