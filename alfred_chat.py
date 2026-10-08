@@ -56,6 +56,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -127,6 +128,7 @@ TOOL_LABELS = {
     "cockpit_timeline": "Timeline",
     "cockpit_presents": "Presents",
     "cockpit_wiki_procedures": "Wiki",
+    "cockpit_reference": "Fiche réflexe",
     "cockpit_evenement": "Evenement",
 }
 
@@ -315,6 +317,7 @@ def _pub(m):
         "hops": m.get("hops"), "duration_ms": m.get("duration_ms"),
         "created_at": _iso(m.get("created_at")), "rating": m.get("rating"),
         "rating_motif": m.get("rating_motif"),
+        "liens": _liens_surs(m.get("liens")),
     }
 
 
@@ -403,6 +406,31 @@ def _clean_tool_calls(tcs):
     return out
 
 
+LIEN_RX = re.compile(r"^(/wiki#[A-Z]\d{2}|https://ul\.waze\.com/ul\?[A-Za-z0-9%._=&-]{1,400})$")
+
+
+def _liens_surs(liens):
+    """Boutons proposes par un outil (cockpit_reference) : liste blanche
+    stricte, jamais une URL libre (le texte vient de la base, pas du modele)."""
+    out = []
+    for x in liens or []:
+        if not isinstance(x, dict):
+            continue
+        url, lib = str(x.get("url") or ""), str(x.get("libelle") or "").strip()[:60]
+        if LIEN_RX.match(url) and lib and not any(o["url"] == url for o in out):
+            out.append({"url": url, "libelle": lib})
+    return out[:3]
+
+
+def _liens_du_tour(db, msg_id):
+    """Liens des outils appeles pendant ce tour (journal Cockpit, par request_id)."""
+    liens = []
+    for c in db[COL_TOOL_CALLS].find({"request_id": "chat-" + msg_id[:12], "liens": {"$ne": []}},
+                                     {"liens": 1}).sort("created_at", 1):
+        liens += c.get("liens") or []
+    return _liens_surs(liens)
+
+
 def _run_ask(msg_id, session_id, ctx, is_new, scope):
     db = _db()
     col = db[COL_MESSAGES]
@@ -445,6 +473,7 @@ def _run_ask(msg_id, session_id, ctx, is_new, scope):
                 "tool_calls": _clean_tool_calls(res.get("tool_calls")),
                 "hops": res.get("hops"), "model": res.get("model"),
                 "duration_ms": res.get("duration_ms") or int((time.time() - t0) * 1000),
+                "liens": _liens_du_tour(db, msg_id),
                 "finished_at": _now()}})
         else:
             code = res if not ok else "reponse_vide"
@@ -926,6 +955,7 @@ def tools_call():
             "request_id": str(data.get("request_id") or "")[:40] or None,
             "scoped": bool(scope_token), "auth": mode, "email": ctx.get("email"),
             "resolu": resolu, "ok": ok, "duration_ms": ms, "created_at": _now(),
+            "liens": _liens_surs(result.get("liens")) if isinstance(result, dict) else [],
             # Ce que le modele a lu, pour juger une reponse notee (page Retours).
             "resume": (str(result.get("resume") or result.get("error") or "")[:2000] or None)
                       if isinstance(result, dict) else None})

@@ -560,6 +560,11 @@ def t_main_courante(db, args, ctx):
     return alfred_main_courante.t_main_courante(db, args, ctx)
 
 
+def t_reference(db, args, ctx):
+    import alfred_reference
+    return alfred_reference.t_reference(db, args, ctx)
+
+
 TOOLS = {
     "cockpit_frequentation": {
         "fn": t_frequentation,
@@ -760,7 +765,34 @@ TOOLS = {
                        "meme calcul que l'accueil Cockpit.",
         "parameters": {"type": "object", "properties": {}},
     },
+    "cockpit_reference": {
+        "fn": t_reference,
+        "capacite": "les fiches réflexes du wiki PC Organisation : décrivez la situation, je retrouve la fiche et vous donne les questions à poser, les actions, ce qu'il faut consigner, avec un bouton pour ouvrir la fiche ; et la position d'un carré du carroyage",
+        "description": "Fiches reflexes du wiki PC Organisation (procedures validees) et carroyage "
+                       "du site. A appeler pour TOUTE situation d'incident ou question << que faire, "
+                       "comment gerer, quelle procedure >> (malaise, enfant perdu, rixe, vol, colis "
+                       "suspect, feu, panne, fourriere, ouverture d'acces...). COCKPIT identifie la "
+                       "fiche : passer dans situation les MOTS DE L'OPERATEUR tels quels, sans les "
+                       "resumer ni choisir de fiche. Resultat : guide de la fiche (questions a poser, "
+                       "actions, decisions, a consigner, piege), ou la question a poser pour "
+                       "departager deux fiches, ou << aucune fiche >>. Recopier le champ resume sans "
+                       "le reformuler ni le completer ; ne JAMAIS rediger une procedure soi-meme. "
+                       "Question de suite sur une fiche deja donnee (<< et s'il ne respire pas ? >>) : "
+                       "code de la fiche + situation = la question. carre : position d'un carre du "
+                       "carroyage (P5, AA12).",
+        "parameters": {"type": "object", "properties": {
+            "situation": {"type": "string", "description": "la situation ou la question de "
+                                                           "l'operateur, MOT POUR MOT"},
+            "code": {"type": "string", "description": "code d'une fiche (P01...) seulement s'il est "
+                                                      "cite, ou pour une question de suite sur la "
+                                                      "fiche deja donnee"},
+            "carre": {"type": "string", "description": "carre du carroyage cite (P5, AA12)"},
+        }},
+    },
+    # Remplace par cockpit_reference (identification par Cockpit) ; garde
+    # executable pour un wrapper qui l'appellerait encore.
     "cockpit_wiki_procedures": {
+        "masque": True,
         "fn": t_wiki,
         "capacite": "les procédures et fiches réflexes publiées du wiki PC Organisation",
         "description": "Procedures et fiches reflexes publiees du wiki PC Organisation "

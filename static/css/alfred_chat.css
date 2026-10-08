@@ -326,6 +326,24 @@
   padding: 0;
   text-decoration: underline;
 }
+/* Boutons proposes par un outil (fiche du wiki, itineraire) */
+.ac-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ac-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--ac-brand);
+  border-radius: 999px;
+  background: var(--ac-brand-light);
+  color: var(--ac-brand-strong);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.ac-link-btn:hover { background: var(--ac-brand); color: #fff; }
+.ac-link-btn:focus-visible { outline: none; box-shadow: var(--ac-focus); }
+.ac-link-btn .material-symbols-outlined, .ac-link-btn .material-icons { font-size: 16px; }
 .ac-fb-send {
   border: 0;
   border-radius: 8px;

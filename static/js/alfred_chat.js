@@ -37,6 +37,7 @@
     cockpit_main_courante_fiche: "description", cockpit_main_courante_compteurs: "tag",
     cockpit_trafic: "traffic", cockpit_meteo: "partly_cloudy_day", cockpit_alertes: "notifications",
     cockpit_timeline: "schedule", cockpit_presents: "groups", cockpit_wiki_procedures: "menu_book",
+    cockpit_reference: "menu_book",
     cockpit_evenement: "event"
   };
 
@@ -357,6 +358,24 @@
       renderRich(bubble, m.content);
     }
     col.appendChild(bubble);
+
+    // Boutons proposes par un outil (fiche du wiki, itineraire Waze). Liste
+    // blanche cote serveur ; reverifiee ici avant d'en faire un lien.
+    if (!isUser && !isErr && !pending && m.liens && m.liens.length) {
+      var lks = el("div", "ac-links");
+      m.liens.forEach(function (l) {
+        var url = String(l.url || "");
+        if (!/^(\/wiki#[A-Z]\d{2}|https:\/\/ul\.waze\.com\/ul\?)/.test(url)) return;
+        var a = el("a", "ac-link-btn");
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.appendChild(icon(url.indexOf("/wiki#") === 0 ? "menu_book" : "navigation"));
+        a.appendChild(document.createTextNode(String(l.libelle || "Ouvrir")));
+        lks.appendChild(a);
+      });
+      if (lks.childNodes.length) col.appendChild(lks);
+    }
 
     if (!pending) {
       var meta = el("div", "ac-meta");

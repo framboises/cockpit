@@ -1,0 +1,156 @@
+"""Outil Alfred cockpit_reference : Cockpit identifie la fiche (pas le
+modele), guide court, departage, aucune fiche, question de suite, carroyage,
+liens surs."""
+import json
+
+import alfred_reference as R
+import alfred_tools as AT
+from conftest import FakeDb
+
+
+def _f(code, titre, dom, situation, souscas, questions=(), conduite=(), details=(), flow=(),
+       status="published", **kw):
+    d = {"code": code, "titre": titre, "dom": dom, "situation": situation, "souscas": list(souscas),
+         "questions": list(questions), "conduite": list(conduite), "details": list(details),
+         "flow": list(flow), "consigner": kw.get("consigner", ""), "pieges": kw.get("pieges", ""),
+         "status": status}
+    return d
+
+
+P01 = _f("P01", "Secours à victime", "secours",
+         "Malaise, blessure, personne inconsciente ou en détresse.",
+         ["Malaise / perte de connaissance", "Blessure ou traumatisme"],
+         questions=["La personne est-elle consciente ? Respire-t-elle ?",
+                    "Où exactement (zone, carroyage, repère le plus proche) ?"],
+         conduite=["Qualifier l'état et localiser précisément.", "Engager le CMS sans délai."],
+         details=["Précise l'état d'emblée : conscient, inconscient mais respire, ne respire pas. "
+                  "C'est ce qui décide du niveau de moyens (CMS seul, ou CMS + Pompiers)."],
+         flow=[{"k": "start", "t": "Alerte secours"},
+               {"k": "ask", "t": "Gravité vitale ?", "y": "CMS + Pompiers, sécuriser", "n": "CMS seul"},
+               {"k": "end", "t": "Clôture sur confirmation"}],
+         consigner="Localisation exacte, horodatage.", pieges="Ne pas clôturer avant la prise en charge.")
+P05 = _f("P05", "Agression", "securite", "Une personne est agressée physiquement.",
+         ["Agression d'un spectateur", "Agression d'un agent"])
+P06 = _f("P06", "Altercation ou rixe", "securite", "Dispute ou bagarre entre plusieurs personnes.",
+         ["Bagarre entre groupes", "Altercation verbale"])
+P13 = _f("P13", "Panne sanitaire ou fuite d'eau", "technique",
+         "WC bouchés, fuite d'eau, sanitaires hors service.", ["WC hors service", "Fuite d'eau"])
+P17 = _f("P17", "Signalétique", "technique", "Panneau manquant, tombé ou erroné.",
+         ["Panneau tombé", "Fléchage erroné"])
+P26 = _f("P26", "Colis ou objet suspect", "securite", "Bagage ou objet abandonné.",
+         ["Sac abandonné", "Objet suspect"])
+P33 = _f("P33", "Personne à mobilité réduite (PMR)", "acces", "Accueil d'une personne PMR.",
+         ["Fauteuil roulant"], status="draft")
+
+
+def _db(fiches=(P01, P05, P06, P13, P17, P26, P33), grid=()):
+    return FakeDb(cockpit_wiki_procedures=list(fiches), grid_ref=list(grid))
+
+
+def ref(**args):
+    return R.t_reference(_db(), args, {})
+
+
+def test_cockpit_identifie_la_fiche_avec_les_mots_de_l_operateur():
+    for texte, code in (("un gars par terre près des WC de la tribune 13, il bouge plus", "P01"),
+                        ("une personne a fait un malaise", "P01"),
+                        ("bagarre devant la buvette", "P06"),
+                        ("deux types se tapent dessus", "P06"),
+                        ("un panneau de direction est tombé", "P17"),
+                        ("une valise seule devant l'entrée", "P26")):
+        r = ref(situation=texte)
+        assert r["vue"] == "fiche" and r["code"] == code, (texte, r.get("vue"), r.get("candidats"))
+
+
+def test_guide_court_redige_par_cockpit():
+    r = ref(situation="une personne a fait un malaise")
+    res = r["resume"]
+    assert res.startswith("Fiche P01 Secours à victime. (Si ce n'est pas la situation : la décrire autrement.)")
+    assert "À demander :\n1. La personne est-elle consciente ? Respire-t-elle ?\n2. Où exactement" in res
+    assert "À faire :\n1. Qualifier l'état et localiser précisément." in res
+    assert "Décision : Gravité vitale ? oui : CMS + Pompiers, sécuriser ; non : CMS seul." in res
+    assert "À consigner : Localisation exacte, horodatage." in res
+    assert "Attention : Ne pas clôturer avant la prise en charge." in res
+    assert r["liens"] == [{"libelle": "Ouvrir la fiche P01", "url": "/wiki#P01"}]
+
+
+def test_deux_fiches_proches_cockpit_ecrit_la_question():
+    r = ref(situation="une personne agressée lors d'une altercation")
+    assert r["vue"] == "ambigu" and set(r["candidats"]) == {"P05", "P06"}
+    assert "Question à poser à l'opérateur : « Est-ce plutôt" in r["resume"]
+    assert "Agression (P05)" in r["resume"] and "Altercation ou rixe (P06)" in r["resume"]
+    assert {l["url"] for l in r["liens"]} == {"/wiki#P05", "/wiki#P06"}
+
+
+def test_aucune_fiche_jamais_de_procedure_improvisee():
+    r = ref(situation="quel temps fera-t-il demain")
+    assert r["vue"] == "aucune" and not r.get("liens")
+    assert "Ne pas improviser de procédure" in r["resume"]
+    # Liste fermee pour que le modele choisisse, puis rappelle avec le code
+    assert any(c.startswith("P01 Secours à victime") for c in r["catalogue"])
+    assert "code=" in r["consigne"]
+
+
+def test_un_mot_de_lieu_seul_ne_retient_pas_une_fiche():
+    # << parking >> / << WC >> localisent, ils ne decrivent pas la situation
+    p18 = _f("P18", "Circulation et congestion", "flux", "Bouchon sur un parking ou une route.",
+             ["Parking saturé"])
+    db = _db(fiches=(P01, P13, p18))
+    assert R.t_reference(db, {"situation": "un chien errant sur le parking"}, {})["vue"] == "aucune"
+    assert R.t_reference(db, {"situation": "ça bouchonne au parking Bleu"}, {})["code"] == "P18"
+
+
+def test_brouillon_jamais_propose():
+    assert ref(situation="fauteuil roulant PMR")["vue"] == "aucune"
+    assert "P33" not in str(ref(situation="fauteuil roulant PMR")["catalogue"])
+    assert "Aucune fiche publiée P33" in ref(code="P33")["resume"]
+
+
+def test_code_cite_et_question_de_suite():
+    r = ref(code="p01")
+    assert r["vue"] == "fiche" and r["resume"].startswith("Fiche P01 Secours à victime.")
+    assert "Si ce n'est pas la situation" not in r["resume"]   # choisie par l'operateur
+    r = ref(code="P01", situation="et s'il ne respire pas ?")
+    assert r["vue"] == "precision"
+    assert "ne respire pas" in r["resume"] and "CMS + Pompiers" in r["resume"]
+    assert r["resume"].startswith("Sur la fiche P01 Secours à victime :")
+    # << fiche P05 >> dans la situation = code
+    assert ref(situation="donne-moi la fiche P05")["code"] == "P05"
+
+
+def test_carre_du_carroyage():
+    grid = [{"grid_ref": "P5", "latitude": 47.9641, "longitude": 0.1829,
+             "waze_url": "https://ul.waze.com/ul?ll=47.9641%2C0.1829&navigate=yes"}]
+    r = R.t_reference(_db(grid=grid), {"carre": "carré p 5"}, {})
+    assert r["trouve"] and "Carré P5" in r["resume"] and "47.96410, 0.18290" in r["resume"]
+    assert r["liens"][0]["url"].startswith("https://ul.waze.com/ul?")
+    r = R.t_reference(_db(grid=grid), {"carre": "ZZ999"}, {})
+    assert not r["trouve"] and "absent du carroyage" in r["resume"]
+
+
+def test_resultat_aucune_tient_sous_le_plafond_avec_30_fiches():
+    fiches = [_f("P%02d" % i, "Fiche numéro %d avec un titre assez long" % i, "securite", "Situation.",
+                 ["Sous-cas un assez long", "Sous-cas deux assez long", "Sous-cas trois", "Sous-cas quatre"])
+              for i in range(1, 31)]
+    r = R.t_reference(_db(fiches=fiches), {"situation": "quel temps demain"}, {})
+    borne = AT._borner(r)
+    assert len(borne["catalogue"]) == 30 and "consigne" in borne
+    assert len(json.dumps(borne, ensure_ascii=False)) <= AT.RESULT_MAX_CHARS
+
+
+def test_manifeste_reference_remplace_wiki():
+    noms = [t["function"]["name"] for t in AT.manifest()]
+    assert "cockpit_reference" in noms and "cockpit_wiki_procedures" not in noms
+    assert "cockpit_wiki_procedures" in AT.TOOLS
+    assert any("fiches réflexes" in s for s in AT.presentation()["sait_faire"])
+
+
+def test_liens_liste_blanche():
+    import alfred_chat as AC
+    ok = AC._liens_surs([{"url": "/wiki#P01", "libelle": "Ouvrir la fiche P01"},
+                         {"url": "https://ul.waze.com/ul?ll=47.9%2C0.1&navigate=yes", "libelle": "Waze"},
+                         {"url": "javascript:alert(1)", "libelle": "x"},
+                         {"url": "https://evil.example/wiki#P01", "libelle": "x"},
+                         {"url": "/wiki#P01\"><script>", "libelle": "x"},
+                         {"url": "/wiki#P01", "libelle": "doublon"}])
+    assert [l["url"] for l in ok] == ["/wiki#P01", "https://ul.waze.com/ul?ll=47.9%2C0.1&navigate=yes"]

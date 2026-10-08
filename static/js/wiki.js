@@ -191,6 +191,13 @@
       searchEl.addEventListener("input", apply);
       wireFilters();
       apply();
+      // Lien direct /wiki#P01 (bouton << Ouvrir la fiche >> d'Alfred)
+      function openFromHash() {
+        var code = decodeURIComponent((location.hash || "").slice(1)).toUpperCase();
+        if (/^[A-Z]\d{2}$/.test(code) && byCode[code]) openModal(code);
+      }
+      openFromHash();
+      window.addEventListener("hashchange", openFromHash);
     })
     .catch(function () {
       grid.innerHTML = '<div class="wk-empty">Erreur de chargement du wiki. Réessayez.</div>';
