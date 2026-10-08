@@ -502,7 +502,10 @@ def t_situation(db, args, ctx):
             mc = t_main_courante(db, {}, ctx)
         except Exception as exc:
             mc = _indisponible("main_courante", exc)
-    tl = t_timeline(db, {"heures": 6}, ctx)
+    try:
+        tl = t_agenda(db, {"quand": "prochaines 6 heures"}, ctx)
+    except Exception as exc:
+        tl = _indisponible("agenda", exc)
     ev = t_evenement(db, {}, ctx)
     pr = t_presents(db, {}, ctx)
     return {
@@ -526,7 +529,10 @@ def t_situation(db, args, ctx):
         "fiches_en_cours_les_plus_urgentes": [
             {k: f.get(k) for k in ("numero", "ouverte", "categorie", "urgence", "zone", "texte")
              if f.get(k)} for f in (mc.get("fiches") or [])[:5]],
-        "a_venir_6h": tl.get("vignettes", [])[:6] if tl.get("disponible") else "indisponible",
+        # Meme lecture que cockpit_agenda (prochaines 6 heures), journees entieres a part
+        "a_venir_6h": ([{k: v.get(k) for k in ("date", "debut", "fin", "activity", "place", "en_cours")}
+                        for v in tl.get("vignettes", []) if not v.get("journee")][:6]
+                       if tl.get("disponible") else "indisponible"),
     }
 
 
@@ -542,6 +548,11 @@ def t_lieux(db, args, ctx):
 def t_frequentation(db, args, ctx):
     import alfred_frequentation
     return alfred_frequentation.t_frequentation(db, args, ctx)
+
+
+def t_agenda(db, args, ctx):
+    import alfred_agenda
+    return alfred_agenda.t_agenda(db, args, ctx)
 
 
 def t_main_courante(db, args, ctx):
@@ -701,7 +712,32 @@ TOOLS = {
         "description": "Alertes actives de la centrale d'alerte Cockpit.",
         "parameters": {"type": "object", "properties": {}},
     },
+    "cockpit_agenda": {
+        "fn": t_agenda,
+        "capacite": "l'agenda du site : ce qui est prévu aujourd'hui, demain, ce week-end ou à une "
+                    "date (programme, ouvertures, réservations Momentus, matchs et spectacles "
+                    "voisins à Antarès), et la prochaine occurrence d'un sujet",
+        "description": "Agenda du site d'apres la timeline Cockpit : programme (montage, badges, "
+                       "ouvertures et fermetures factorisees), reservations Momentus (seminaires, "
+                       "roulages, visites), evenements voisins (matchs, concerts a Antares, avec "
+                       "arrivees et sortie du public). A appeler pour TOUTE question << qu'est-ce "
+                       "qui est prevu >>, << quoi de prevu demain / ce soir / ce week-end >>, << quand "
+                       "est le prochain match >>, << y a-t-il un seminaire >>, << quand commence le "
+                       "montage >>. Pour les horaires d'UN lieu (porte, parking, tribune), "
+                       "cockpit_lieux. Recopier le champ resume sans le reformuler ni le completer.",
+        "parameters": {"type": "object", "properties": {
+            "quand": {"type": "string", "description": "moment TEL QUEL : aujourd'hui, demain, ce "
+                                                       "soir, samedi, ce week-end, 18/10, "
+                                                       "prochaines 6 heures. Omettre = 12 prochaines heures"},
+            "quoi": {"type": "string", "description": "sujet TEL QUEL : match, Antares, seminaire, "
+                                                      "piste Maison Blanche, montage, ouverture..."},
+            "evenement": {"type": "string", "description": "seulement si l'operateur le cite"},
+            "annee": {"type": "string"},
+        }},
+    },
+    # Fusionne dans cockpit_agenda : retire du manifeste, toujours executable.
     "cockpit_timeline": {
+        "masque": True,
         "fn": t_timeline,
         "capacite": "les prochaines échéances de la timeline opérationnelle (ouvertures, fermetures, départs)",
         "description": "Prochaines echeances de la timeline operationnelle (ouvertures, "

@@ -117,6 +117,7 @@ TOOL_LABELS = {
     "cockpit_frequentation": "Fréquentation",
     "cockpit_situation": "Situation",
     "cockpit_main_courante": "Main courante",
+    "cockpit_agenda": "Agenda",
     "cockpit_main_courante_fiches": "Main courante",
     "cockpit_main_courante_fiche": "Fiche",
     "cockpit_main_courante_compteurs": "Compteurs MC",

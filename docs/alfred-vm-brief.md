@@ -127,7 +127,7 @@ Outils disponibles (le manifeste fait foi) :
 | `cockpit_trafic` | Verdict du mur circulation, accidents, temps et retard par axe |
 | `cockpit_meteo` | Mur meteo : actuel, pluie, vigilance, consignes, contraintes |
 | `cockpit_alertes` | Alertes actives de la centrale |
-| `cockpit_timeline` | Prochaines echeances (factorisees) |
+| `cockpit_agenda` | Ce qui est prevu d'apres la timeline : programme, ouvertures/fermetures factorisees, reservations Momentus (une ligne par client et par jour, options signalees), evenements voisins (une ligne avec arrivees et sortie du public). `quand` (« demain », « ce soir », « samedi », « ce week-end », « 18/10 » ; defaut 12 h) et `quoi` (« match », « Antares », « seminaire », « montage ») en mots de l'operateur ; sujet sans moment = prochaines occurrences. `resume` a recopier tel quel. Remplace `cockpit_timeline` (retire du manifeste, encore executable) |
 | `cockpit_frequentation` | Presents en direct (+ N-1 a la meme heure) et historique de toutes les editions : pic par jour, comparaison entre annees alignee sur le jour de course, reserves de mesure ; `resume` a recopier tel quel. Parametres en mots de l'operateur (`annee` « l'an dernier », `comparer_avec` « les 3 dernieres editions », `jour` « samedi »). Remplace `cockpit_presents` (retire du manifeste, encore executable) |
 | `cockpit_wiki_procedures` | Procedures / fiches reflexes publiees |
 | `cockpit_evenement` | Evenement(s) en cours et phase, + `contexte_evenements` (description, surnoms, note d'edition saisis en Configuration : pour comprendre, jamais une source de chiffres ou d'horaires) |
