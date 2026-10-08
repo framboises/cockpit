@@ -703,6 +703,39 @@ def etat_maintenant(lieux, publics, now, ev_lib):
     return "%s aucun horaire d'ouverture n'est renseigné." % tete, 0
 
 
+def etat_jour(lieux, publics, jour, ev_lib):
+    """Vue d'ensemble "les parkings ouvrent a quelle heure demain ?" : lieux
+    ouverts ce jour-la, regroupes par horaires identiques. Sans elle, l'outil
+    repondait sur l'instant present (signale par la VM le 08/10/2026)."""
+    J = jour.replace(hour=0, minute=0)
+    J1 = J + timedelta(days=1)
+    groupes, fermes, bornes = {}, 0, []
+    for l in lieux:
+        if l["kind"] == "service":
+            infos = {"tous": {"plages": plages_service(l["item"]["liste"]), "etat": "ok"}}
+        else:
+            infos = plages_item(l["item"], publics)
+        bornes += [x for i in infos.values() for pl in i["plages"] for x in pl]
+        lignes = [_texte_jour(p, i, jour) for p, i in infos.items()
+                  if i["etat"] == "ok" and any(d < J1 and f > J for d, f in i["plages"])]
+        if not lignes:
+            fermes += 1
+            continue
+        groupes.setdefault(" | ".join(lignes), []).append("%s (%s)" % (l["nom"], l["categorie"]))
+    tete = "Le %s, %s :" % (jour_fr(jour), ev_lib)
+    if not groupes:
+        if not bornes:
+            return "%s aucun horaire d'ouverture n'est renseigné." % tete, 0
+        return ("%s AUCUN lieu ouvert ce jour-là (sur %d). Horaires renseignés du %s au %s."
+                % (tete, len(lieux), jour_fr(min(bornes)), jour_fr(max(bornes) - timedelta(minutes=1)))), 0
+    n = sum(len(v) for v in groupes.values())
+    l = ["%s %d lieu(x) ouvert(s) sur %d%s." % (tete, n, len(lieux),
+                                               ", %d fermé(s) ce jour-là" % fermes if fermes else "")]
+    for texte, noms in sorted(groupes.items(), key=lambda x: -len(x[1])):
+        l.append("- %s : %s" % (", ".join(noms), texte))
+    return "\n".join(l), n
+
+
 def t_lieux(db, args, ctx, now=None):
     args = args or {}
     now = now or datetime.now(TZ_PARIS).replace(tzinfo=None, second=0, microsecond=0)
@@ -750,11 +783,15 @@ def t_lieux(db, args, ctx, now=None):
         # comme une liste de lieux ouverts.
         lieux = [l for l in cat if (not type_ or l["categorie"] == type_)
                  and l["kind"] in ("plages", "service")]
-        resume, n_ouverts = etat_maintenant(lieux, publics, now, ev_lib)
+        if jour is not None and not maintenant:
+            resume, n_ouverts = etat_jour(lieux, publics, jour, ev_lib)
+            vue = "etat_jour"
+        else:
+            resume, n_ouverts = etat_maintenant(lieux, publics, now, ev_lib)
+            vue = "etat_maintenant"
         if len(resume) > RESUME_MAX:
             resume = resume[:RESUME_MAX].rsplit("\n", 1)[0] + "\n[… préciser un type de lieu]"
-        return dict(base, trouve=True, vue="etat_maintenant", lieux_ouverts=n_ouverts,
-                    resume=resume)
+        return dict(base, trouve=True, vue=vue, lieux_ouverts=n_ouverts, resume=resume)
 
     details, resumes = [], []
     for l in lieux:

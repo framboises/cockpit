@@ -171,6 +171,15 @@ def test_tribune_trouvee_par_son_numero_comme_a_la_radio():
         assert r.get("trouve") and r["lieux"][0]["nom"] == "SINGHER (n°13)", q
 
 
+def test_type_et_jour_sans_nom_repond_pour_ce_jour():
+    r = lieux(type="parking", jour="26/09")
+    assert r["vue"] == "etat_jour"
+    assert r["resume"].startswith("Le samedi 26 septembre 2026, 24H CAMIONS 2026 :")
+    assert "CHINETTI (parking)" in r["resume"] and "En ce moment" not in r["resume"]
+    r = lieux(type="parking", jour="2026-10-15")
+    assert "AUCUN lieu ouvert ce jour-là" in r["resume"] and "Horaires renseignés du samedi 26 septembre" in r["resume"]
+
+
 def test_jour_en_jj_mm_ou_en_toutes_lettres():
     for j in ("26/09", "26 septembre", "le samedi 26 septembre"):
         r = lieux(nom="tribune 13", jour=j)
