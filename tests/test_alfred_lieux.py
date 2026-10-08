@@ -166,9 +166,15 @@ def test_tribune_affichee_avec_son_numero():
 
 
 def test_tribune_trouvee_par_son_numero_comme_a_la_radio():
-    for q in ("tribune 13", "T13", "la 13", "tribune numéro 13", "singher"):
+    for q in ("tribune 13", "T13", "la 13", "tribune numéro 13", "singher", "tribune 13 ouvrait"):
         r = lieux(nom=q)
         assert r.get("trouve") and r["lieux"][0]["nom"] == "SINGHER (n°13)", q
+
+
+def test_jour_en_jj_mm_ou_en_toutes_lettres():
+    for j in ("26/09", "26 septembre", "le samedi 26 septembre"):
+        r = lieux(nom="tribune 13", jour=j)
+        assert "le samedi 26 septembre 2026" in r["resume"], j
 
 
 def test_alias_numero_avec_zero_et_bis():

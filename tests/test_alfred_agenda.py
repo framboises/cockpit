@@ -55,10 +55,24 @@ def _db():
             _it("2026-10-11", "PTE", "09:00", "12:00", "Piste MAISON BLANCHE", "momentus",
                 department="Roulage Piste", momentus_status="option"),
         ],
+        "2026-10-16": [
+            _it("2026-10-16", "Arrivées du public Stade MMArena - Le Mans FC - Toulouse", "18:45", "20:45",
+                "Stade MMArena", "voisins", department="Flux public", voisins_id="f1", voisins_role="arrivees"),
+            _it("2026-10-16", "Le Mans FC - Toulouse (Stade MMArena)", "20:45", "22:40", "Stade MMArena",
+                "voisins", department="Football", voisins_id="f1", voisins_role="evenement"),
+        ],
+        "2026-10-18": [
+            _it("2026-10-18", "Arrivées du public Antarès - MSB - Bourg", "17:45", "19:00", "Antarès",
+                "voisins", department="Flux public", voisins_id="b1", voisins_role="arrivees"),
+            _it("2026-10-18", "MSB - Bourg (Antarès)", "19:00", "21:15", "Antarès", "voisins",
+                department="Basket", voisins_id="b1", voisins_role="evenement"),
+        ],
     }
     db["timetable"] = Col([
         {"event": "SAISON", "year": "2026", "data": saison},
-        {"event": "24H AUTOS", "year": "2026", "data": {"2026-05-11": [_it("2026-05-11", "Debut du montage", "06:00")]}},
+        {"event": "24H AUTOS", "year": "2026", "data": {
+            "2026-05-11": [_it("2026-05-11", "Debut du montage", "06:00")],
+            "2026-06-14": [_it("2026-06-14", "Début de la période de démontage", "20:00")]}},
         {"event": "24H AUTOS", "year": "2027", "data": {}},
     ])
     db["parametrages"] = Col([{"event": "24H AUTOS", "year": "2026"}, {"event": "24H AUTOS", "year": "2027"}])
@@ -98,13 +112,16 @@ def test_fenetre_par_defaut_en_cours_et_fermeture(monkeypatch):
     # Une ligne par client Momentus, creneaux et lieux regroupes, en cours
     assert res.count("FRANCE ARMOR") == 1
     assert "14:00-23:59 FRANCE ARMOR, P2A, Restaurant Karting (Séminaire) [en cours]" in res
-    assert "journée CRTI, Musée (Activités) [en cours]" in res
+    # Fenetre courte : les reservations a la journee sur une ligne
+    assert "- toute la journée : CRTI" in res and "journée CRTI, Musée" not in res
+    r = _run(monkeypatch, {"quand": "aujourd'hui"})
+    assert "journée CRTI, Musée (Activités)" in r["resume"]
     # Fermeture sans heure de debut : rendue a son heure de fin
     assert "19:00 Fermeture au public" in res
 
 
 def test_voisins_une_ligne_avec_le_public(monkeypatch):
-    r = _run(monkeypatch, {"quoi": "match à Antarès"})
+    r = _run(monkeypatch, {"quoi": "spectacle à Antarès"})
     assert r["vue"] == "recherche" and r["resolu"]["filtre"] == "événements voisins"
     assert "18:00-20:30 Antarès : DJADJA (arrivées du public dès 16:30, sortie jusqu'à 21:15)" in r["resume"]
     assert len(r["vignettes"]) == 1
@@ -122,6 +139,38 @@ def test_edition_suivante_sans_timeline(monkeypatch):
     r = _run(monkeypatch, {"quoi": "montage", "evenement": "les 24 heures"})
     assert r["resolu"]["annee"] == 2026 and r["resolu"]["edition_passee"]
     assert "06:00 Debut du montage" in r["resume"] and "passée" in r["resume"]
+    # << montage >> ne prend pas << demontage >>
+    assert "démontage" not in r["resume"]
+
+
+def test_match_sport_seul_et_prochaine_occurrence(monkeypatch):
+    r = _run(monkeypatch, {"quoi": "match Antarès"})
+    res = r["resume"]
+    assert "MSB - Bourg" in res and "DJADJA" not in res and "Le Mans FC" not in res
+    assert "arrivées du public dès 17:45" in res
+    assert "Prochaine occurrence : dimanche 18/10 19:00-21:15 MSB - Bourg" in res
+    r = _run(monkeypatch, {"quoi": "match"})
+    assert "Le Mans FC - Toulouse" in r["resume"] and "MSB" in r["resume"] and "DJADJA" not in r["resume"]
+    r = _run(monkeypatch, {"quoi": "concert à Antarès"})
+    assert "DJADJA" in r["resume"] and "MSB" not in r["resume"]
+
+
+def test_le_mans_fc_cite_en_evenement_ambigu(monkeypatch):
+    import alfred_evenements
+    monkeypatch.setattr(alfred_evenements, "resoudre_nom",
+                        lambda db, t: (None, ["LE MANS CLASSIC", "LE MANS FC - LILLE"]))
+    r = _run(monkeypatch, {"evenement": "Le Mans", "quoi": "FC joue domicile"})
+    assert r["vue"] == "recherche"
+    assert "Le Mans FC - Toulouse" in r["resume"] and "arrivées du public dès 18:45" in r["resume"]
+    assert "MSB" not in r["resume"]
+
+
+def test_seminaires_et_non_confirmees(monkeypatch):
+    r = _run(monkeypatch, {"quoi": "séminaires", "quand": "aujourd'hui"})
+    assert "FRANCE ARMOR" in r["resume"] and "CRTI" not in r["resume"]
+    r = _run(monkeypatch, {"quoi": "réservations pas encore confirmées", "quand": "cette semaine"})
+    assert "PTE" in r["resume"] and "FRANCE ARMOR" not in r["resume"]
+    assert r["resolu"]["filtre"] == "réservations non confirmées (option)"
 
 
 def test_rien_et_moment_incompris(monkeypatch):

@@ -33,7 +33,8 @@ MOIS = ["janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet", "aout",
 
 FAMILLES = [
     ("voisins", ("voisin", "voisins", "antares", "match", "matchs", "concert", "concerts",
-                 "spectacle", "spectacles", "msb", "mmarena", "basket", "foot")),
+                 "spectacle", "spectacles", "msb", "mmarena", "basket", "foot", "football",
+                 "fc", "stade", "domicile")),
     ("momentus", ("reservation", "reservations", "seminaire", "seminaires", "momentus",
                   "location", "locations", "privatisation", "roulage", "roulages", "client", "clients")),
     ("ouvertures", ("ouverture", "ouvertures", "fermeture", "fermetures")),
@@ -269,30 +270,80 @@ def _regrouper_voisins(vs):
     return res
 
 
+VIDES = {"le", "la", "les", "de", "du", "des", "un", "une", "a", "au", "aux", "sur", "pour",
+         "quand", "quel", "quelle", "quels", "quelles", "est", "prochain", "prochaine", "prochains",
+         "y", "il", "ya", "apres", "avant", "ce", "cette", "joue", "jouent", "ne", "pas", "encore",
+         "en", "et", "ou", "qui", "quoi", "se", "passe"}
+# Nature d'un evenement voisin (department de la vignette principale)
+SPORTS = ("basket", "football", "sport")
+SOUS_VOISINS = [
+    (("match", "matchs", "sport"), lambda v: _norm(v["department"]) in SPORTS),
+    (("foot", "football", "fc", "stade", "mmarena"), lambda v: _norm(v["department"]) == "football"),
+    (("basket", "msb"), lambda v: _norm(v["department"]) == "basket"),
+    (("concert", "concerts", "spectacle", "spectacles"),
+     lambda v: _norm(v["department"]) not in SPORTS),
+    (("antares",), lambda v: "antares" in _norm(v["place"])),
+]
+SOUS_MOMENTUS = [
+    (("seminaire", "seminaires"), "seminaire"),
+    (("roulage", "roulages"), "roulage"),
+]
+MOTS_OPTION = ("option", "options", "confirme", "confirmee", "confirmes", "confirmees")
+
+
+def _contient(w, t):
+    """Mot (ou son singulier) au DEBUT d'un mot du texte : << montage >> ne
+    prend pas << demontage >> (constate le 08/10/2026 sur les 24h autos)."""
+    if re.search(r"\b" + re.escape(w), t):
+        return True
+    return len(w) > 3 and w.endswith("s") and re.search(r"\b" + re.escape(w[:-1]), t) is not None
+
+
 def _filtrer(vs, quoi):
     """(vignettes, libelle) : famille (match, seminaire, ouvertures) ou mots."""
     n = _norm(quoi)
     if not n:
         return vs, None
     mots = set(n.split())
+    if mots & set(MOTS_OPTION):
+        # << non confirmees >> : les options Momentus, quel que soit le reste
+        return [v for v in vs if v["famille"] == "momentus" and v["option"]], \
+            "réservations non confirmées (option)"
     for fam, cles in FAMILLES:
-        if mots & set(cles):
-            reste = [w for w in mots - set(cles) if len(w) > 2 and w not in ("les", "des", "une", "quel", "quels", "prochain", "prochains", "prochaine")]
-            r = [v for v in vs if v["famille"] == fam]
+        if not mots & set(cles):
+            continue
+        r = [v for v in vs if v["famille"] == fam]
+        if fam == "voisins":
+            # Filtre sur la vignette principale, puis on garde tout le groupe
+            # (arrivees et sortie du public) de chaque evenement retenu
+            mains = [v for v in r if v.get("_role") not in ("arrivees", "sortie")]
+            for cles_s, pred in SOUS_VOISINS:
+                if mots & set(cles_s):
+                    mains = [v for v in mains if pred(v)]
+            reste = [w for w in mots - set(cles) - VIDES - {"mans"} if len(w) > 2]
             if reste:
-                r2 = [v for v in r if all(w in _norm(" ".join((v["activity"], v["place"], v["department"]))) for w in reste)]
-                r = r2 or r
-            if fam == "voisins" and "antares" in mots:
-                r = [v for v in r if "antares" in _norm(v["activity"] + " " + v["place"])] or r
+                mains = [v for v in mains if any(_contient(w, _norm(v["activity"])) for w in reste)] or mains
+            ids, garde = {v.get("_vid") for v in mains}, {id(v) for v in mains}
+            r = [v for v in r if id(v) in garde or (v.get("_vid") and v.get("_vid") in ids)]
             return r, LIBELLE_FAMILLE[fam]
-    vides = {"le", "la", "les", "de", "du", "des", "un", "une", "a", "au", "aux", "sur", "pour",
-             "quand", "quel", "quelle", "quels", "est", "prochain", "prochaine", "y", "il", "ya"}
-    mots = [w for w in n.split() if w not in vides and len(w) > 1]
+        lib = LIBELLE_FAMILLE[fam]
+        if fam == "momentus":
+            for cles_s, dep in SOUS_MOMENTUS:
+                if mots & set(cles_s):
+                    r = [v for v in r if dep in _norm(v["department"])]
+                    lib = "réservations Momentus (%s)" % dep.replace("seminaire", "séminaires")
+        reste = [w for w in mots - set(cles) - VIDES if len(w) > 2]
+        if reste:
+            r2 = [v for v in r if all(_contient(w, _norm(" ".join((v["activity"], v["place"], v["department"]))))
+                                      for w in reste)]
+            r = r2 or r
+        return r, lib
+    mots = [w for w in n.split() if w not in VIDES and len(w) > 1]
     if not mots:
         return vs, None
     def ok(v):
         t = _norm(" ".join((v["activity"], v["place"], v["department"], v.get("remarque") or "")))
-        return all(w in t or (len(w) > 3 and w.endswith("s") and w[:-1] in t) for w in mots)
+        return all(_contient(w, t) for w in mots)
     return [v for v in vs if ok(v)], "« %s »" % quoi
 
 
@@ -376,6 +427,14 @@ def t_agenda(db, args, ctx, now=None):
 
     f = fenetre(args.get("quand"), now)
     paires, resolu, cands = _paires(db, args, ctx, now, annee_hint=f[0].year if f else None)
+    # << Le Mans FC joue quand >> : le modele passe << Le Mans >> en evenement
+    # (ambigu : LE MANS CLASSIC, LE MANS FC - X...) ; c'est une question sur
+    # les evenements voisins (constate le 08/10/2026)
+    if paires is None and set(_norm("%s %s" % (args.get("evenement"), args.get("quoi"))).split()) \
+            & set(dict(FAMILLES)["voisins"]):
+        args = dict(args, quoi=("%s %s" % (args.get("evenement"), args.get("quoi") or "")).strip(),
+                    evenement="")
+        paires, resolu, cands = _paires(db, args, ctx, now, annee_hint=f[0].year if f else None)
     if paires is None:
         return {"disponible": True, "vue": "evenement_ambigu", "candidats": cands, "resolu": resolu,
                 "resume": ("Événement « %s » non reconnu." % resolu.get("evenement_cite")) +
@@ -437,12 +496,26 @@ def t_agenda(db, args, ctx, now=None):
                 "momentus": "réservations Momentus", "voisins": "événements voisins"}
         l.append("Dont : " + ", ".join("%s %d" % (noms[k], n) for k, n in rep.items()) + ".")
         plusieurs = len({v["evenement"] for v in vs}) > 1
+        if recherche:
+            v0 = vs[0]
+            dj = datetime.strptime(v0["date"], "%Y-%m-%d").replace(tzinfo=TZ_PARIS)
+            l.append("Prochaine occurrence : %s %s" % (_libelle_jour(dj, p), _ligne(v0, plusieurs)[2:]))
+        # Fenetre courte (ce soir, prochaines heures) : les reservations a la
+        # journee, deja en cours, tiennent sur une ligne par jour ; le detail
+        # noyait les creneaux horaires (constate le 08/10/2026)
+        courte = not recherche and (fin - debut) <= timedelta(hours=FENETRE_DEFAUT_H)
         jour_courant = None
         for v in vs[:LISTE_MAX]:
             if v["date"] != jour_courant:
                 jour_courant = v["date"]
                 dj = datetime.strptime(jour_courant, "%Y-%m-%d").replace(tzinfo=TZ_PARIS)
                 l.append(_libelle_jour(dj, p)[:1].upper() + _libelle_jour(dj, p)[1:] + " :")
+                if courte:
+                    js = [x for x in vs[:LISTE_MAX] if x["date"] == jour_courant and x["journee"]]
+                    if js:
+                        l.append("- toute la journée : " + ", ".join(dict.fromkeys(x["activity"] for x in js)))
+            if courte and v["journee"]:
+                continue
             l.append(_ligne(v, plusieurs))
         if len(vs) > LISTE_MAX:
             l.append("... et %d autre(s) vignette(s) (préciser un moment ou un sujet)." % (len(vs) - LISTE_MAX))

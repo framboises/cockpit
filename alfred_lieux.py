@@ -83,6 +83,7 @@ MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août
         "septembre", "octobre", "novembre", "décembre"]
 MOTS_VIDES = {"le", "la", "les", "l", "de", "du", "des", "d", "a", "au", "aux", "n",
               "no", "num", "numero", "nr"}
+MOTS_HORAIRE = re.compile(r"^(ouvr|ferm|horaire|heure|quand|est$|sera|etait|demain|aujourd|ce$|soir|matin)")
 VARIANTES_MAX = 3
 CANDIDATS_MAX = 15
 RESUME_MAX = 4500
@@ -484,6 +485,13 @@ def trouver(cat, nom, type_=None):
     proches = [l for l in cat if all(proche(w, _mots(l)) for w in mots)]
     if len(proches) == 1:
         return proches, []
+    # Un verbe glisse dans le nom par le modele ("tribune 13 ouvrait", constate
+    # en prod le 08/10/2026) : nouvel essai sans ces mots. Seulement des mots
+    # d'horaire : "porte du tertre" ne doit pas devenir "porte".
+    if not proches:
+        parasites = [w for w in mots if w not in vocab and MOTS_HORAIRE.match(w)]
+        if parasites and len(parasites) < len(mots):
+            return trouver(cat, " ".join(w for w in mots if w not in parasites))
     return [], [l["nom"] for l in proches][:CANDIDATS_MAX]
 
 
@@ -562,6 +570,22 @@ def resoudre_jour(raw, now, dates_evenement):
     d = _date(raw)
     if d:
         return d
+    # << 26/09 >>, << 26 septembre >> : l'annee de l'evenement si la date en fait partie
+    mois = ["janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet", "aout",
+            "septembre", "octobre", "novembre", "decembre"]
+    m = re.search(r"\b(\d{1,2}) (\d{1,2})\b", s)
+    jm = (int(m.group(1)), int(m.group(2))) if m else None
+    m = re.search(r"\b(\d{1,2}) (%s)\b" % "|".join(mois), s)
+    if m:
+        jm = (int(m.group(1)), mois.index(m.group(2)) + 1)
+    if jm and 1 <= jm[1] <= 12:
+        dans_ev = [x for x in dates_evenement if (x.day, x.month) == jm]
+        if dans_ev:
+            return dans_ev[0].replace(hour=0, minute=0, second=0, microsecond=0)
+        try:
+            return now.replace(month=jm[1], day=jm[0], hour=0, minute=0, second=0, microsecond=0)
+        except ValueError:
+            pass
     for i, j in enumerate(JOURS):
         if s.startswith(j):
             cands = sorted(x for x in dates_evenement if x.weekday() == i)
