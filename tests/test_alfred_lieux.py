@@ -189,6 +189,27 @@ def test_horaires_du_musee_depuis_sa_configuration():
     assert "non configurés" in L.t_lieux(_db(), {"nom": "musée"}, CTX, now=NOW)["resume"]
 
 
+def test_visites_libres_et_guidees_par_jour():
+    from conftest import FakeDb
+    saison = {"event": "SAISON", "year": "2026", "data": {"globalHoraires": {"dates": [
+        {"date": "2026-11-05", "openTime": "10:00", "closeTime": "19:00"},
+        {"date": "2026-11-06", "openTime": "10:00", "closeTime": "19:00",
+         "visite_libre": True, "visite_guidee": False}]}}}
+    db = FakeDb(parametrages=[saison])
+    now = datetime(2026, 11, 5, 9, 0)
+    r = L.t_lieux(db, {"nom": "visites"}, {}, now=now)
+    assert r["vue"] == "visites"
+    res = r["resume"]
+    assert "le jeudi 5 novembre 2026 : ouvert aux visites de 10:00 à 19:00, libres et guidées" in res
+    assert "En ce moment (09:00) : FERMÉ, ouvre à 10:00" in res
+    assert "vendredi 06/11 : ouvert aux visites de 10:00 à 19:00 : visites libres seulement (pas de visites guidées)" in res
+    assert "du samedi 07/11 au jeudi 12/11 : pas de visites" in res
+    r = L.t_lieux(db, {"nom": "visites guidées", "jour": "2026-10-20"}, {}, now=now)
+    assert "pas de visites" in r["resume"] and "Prochain jour de visites : le jeudi 5 novembre 2026" in r["resume"]
+    # Les visites du musee restent au musee
+    assert not L.demande_visites("visite du musée")
+
+
 def test_type_et_jour_sans_nom_repond_pour_ce_jour():
     r = lieux(type="parking", jour="26/09")
     assert r["vue"] == "etat_jour"

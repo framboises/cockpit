@@ -586,7 +586,7 @@ TOOLS = {
     },
     "cockpit_lieux": {
         "fn": t_lieux,
-        "capacite": "les horaires et infos des lieux : portes, parkings, campings, tribunes, boutiques, hospitalités, services (centre médical, PC...), par public, et ce qui est ouvert maintenant ; les horaires du musée",
+        "capacite": "les horaires et infos des lieux : portes, parkings, campings, tribunes, boutiques, hospitalités, services (centre médical, PC...), par public, et ce qui est ouvert maintenant ; les horaires du musée ; les jours de visites du site (libres ou guidées)",
         "description": "Horaires d'ouverture et informations de TOUS les lieux de l'evenement : "
                        "portes, parkings, campings, tribunes, boutiques, hospitalites, passerelles, "
                        "sanitaires, et services (ouverture du site au public, centre medical, help "
@@ -596,7 +596,9 @@ TOOLS = {
                        "les lieux a l'instant (ce qui est ouvert maintenant), ou le jour donne si "
                        "jour est rempli. nom=\"musee\" : horaires du Musee des 24 Heures (propres "
                        "au musee, quel que soit l'evenement : le jour, l'etat a l'instant, les 7 "
-                       "jours suivants). A appeler pour TOUTE "
+                       "jours suivants). nom=\"visites\" (ou \"visites libres\", \"visites "
+                       "guidees\") : le site est-il ouvert aux visites ce jour-la, libres et/ou "
+                       "guidees, horaires, 7 jours suivants, prochain jour de visites. A appeler pour TOUTE "
                        "question d'horaire, d'ouverture, de fermeture ou de controle d'un lieu, y "
                        "compris les questions de suite. Recopier le champ resume sans le "
                        "reformuler ni le completer.",

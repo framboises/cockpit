@@ -779,9 +779,88 @@ def horaires_musee(db, jour, now):
     return "\n".join(l), {"jour": j0.strftime("%Y-%m-%d"), "horaires": h}
 
 
+def demande_visites(nom):
+    """Visites du site (libres / guidees), pas le musee."""
+    mots = set(norm(nom).split())
+    return any(w.startswith("visite") for w in mots) and "musee" not in mots
+
+
+def _visites_txt(info):
+    if not info:
+        return "pas de visites (jour non ouvert au public)"
+    h = "24 h/24" if info.get("is24h") else "de %s à %s" % (info.get("open"), info.get("close"))
+    sortes = [s for s, k in (("libres", "visite_libre"), ("guidées", "visite_guidee")) if info.get(k)]
+    if len(sortes) == 2:
+        return "ouvert aux visites %s, libres et guidées" % h
+    if not sortes:
+        return "ouvert %s, sans visite autorisée" % h
+    return "ouvert aux visites %s : visites %s seulement (pas de visites %s)" % (
+        h, sortes[0], "guidées" if sortes[0] == "libres" else "libres")
+
+
+def horaires_visites(db, jour, now):
+    """(resume, details) : jours publics du parametrage SAISON (GroundMaster),
+    drapeaux visite_libre / visite_guidee (event_courant.saison_visit_days)."""
+    import event_courant
+    j0 = (jour or now).replace(hour=0, minute=0, second=0, microsecond=0)
+    jours = {}
+    for y in (j0.year, j0.year + 1):
+        jours.update(event_courant.saison_visit_days(db, y))
+    if not jours:
+        return ("Visites du site : aucun jour public saisi dans le paramétrage SAISON "
+                "(GroundMaster)."), {"configure": False}
+    try:
+        fenetres = event_courant.windows(db)
+    except Exception:
+        fenetres = []
+
+    def epreuve(d):
+        k = d.strftime("%Y-%m-%d")
+        return [w.get("event") for w in fenetres or []
+                if str(w.get("start"))[:10] <= k <= str(w.get("end"))[:10]]
+
+    k0 = j0.strftime("%Y-%m-%d")
+    info = jours.get(k0)
+    l = ["Visites du site, le %s : %s." % (jour_fr(j0), _visites_txt(info))]
+    ep = epreuve(j0)
+    if ep:
+        l.append("Ce jour-là : %s (montage à démontage)." % ", ".join(ep))
+    if info and j0.date() == now.date() and not info.get("is24h"):
+        hm = now.strftime("%H:%M")
+        l.append("En ce moment (%s) : %s." % (hm, "FERMÉ, ouvre à %s" % info["open"] if hm < info["open"]
+                                              else "OUVERT jusqu'à %s" % info["close"] if hm < info["close"]
+                                              else "FERMÉ depuis %s" % info["close"]))
+    suite = [(j0 + timedelta(days=i)) for i in range(1, 8)]
+    txts = [_visites_txt(jours.get(d.strftime("%Y-%m-%d"))) for d in suite]
+    if len(set(txts)) == 1:
+        l.append("Les 7 jours suivants : %s, tous les jours." % txts[0])
+    else:
+        # Jours consecutifs au meme regime regroupes : << du mardi 03/11 au jeudi 05/11 : ... >>
+        runs = []
+        for d, t in zip(suite, txts):
+            if runs and runs[-1][2] == t:
+                runs[-1][1] = d
+            else:
+                runs.append([d, d, t])
+        lib = lambda d: "%s %s" % (JOURS[d.weekday()], d.strftime("%d/%m"))
+        l.append("Les 7 jours suivants : " + " ; ".join(
+            ("%s : %s" % (lib(a), t)) if a == b else ("du %s au %s : %s" % (lib(a), lib(b), t))
+            for a, b, t in runs) + ".")
+    if not any(jours.get(d.strftime("%Y-%m-%d")) for d in [j0] + suite):
+        prochain = next((k for k in sorted(jours) if k > k0), None)
+        if prochain:
+            l.append("Prochain jour de visites : le %s, %s." % (jour_fr(_date(prochain)), _visites_txt(jours[prochain])))
+    return "\n".join(l), {"jour": k0, "visites": info}
+
+
 def t_lieux(db, args, ctx, now=None):
     args = args or {}
     now = now or datetime.now(TZ_PARIS).replace(tzinfo=None, second=0, microsecond=0)
+    if demande_visites(args.get("nom")):
+        jour = resoudre_jour(args.get("jour"), now, []) if args.get("jour") else None
+        resume, det = horaires_visites(db, jour, now)
+        return {"disponible": True, "trouve": True, "vue": "visites", "lieu": "Visites du site",
+                "visites": det, "resume": resume}
     if demande_musee(args.get("nom")):
         # Independant de l'evenement : le musee a ses propres horaires
         jour = resoudre_jour(args.get("jour"), now, []) if args.get("jour") else None
