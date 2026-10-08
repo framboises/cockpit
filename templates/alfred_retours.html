@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>COCKPIT — Retours Alfred</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/alfred_retours.css') }}?v=1">
+</head>
+
+<body>
+<div class="app-layout">
+
+  {% set sidebar_active = '/alfred-retours' %}
+  {% include '_sidebar.html' %}
+
+  <div class="app-main single-col-page">
+    <header class="app-header">
+      <span class="header-title" style="display:flex; align-items:center; gap:8px;">
+        <span class="material-symbols-outlined" style="font-size:22px;">reviews</span>
+        Retours Alfred
+      </span>
+      <div class="header-spacer"></div>
+      <a id="ar-export" href="/api/alfred-chat/retours/export" class="ar-btn" title="Export pseudonymisé (sans nom ni e-mail d'opérateur), une ligne JSON par échange">
+        <span class="material-symbols-outlined">download</span> Export JSONL
+      </a>
+    </header>
+
+    <div id="main-content">
+      <div class="ar-page">
+        <p class="ar-intro">
+          Chaque pouce posé par un opérateur dans le chat fige ici l'échange complet : conversation,
+          outils appelés et ce que Cockpit leur a répondu. Ces retours ne sont pas purgés à 90 jours.
+          Pour un pouce bas : identifier la cause (outil Cockpit, prompt ou modèle côté VM, question hors champ),
+          écrire la réponse attendue, puis marquer traité. L'export alimente le corpus de tests de la VM.
+        </p>
+
+        <div class="ar-kpis" id="ar-kpis"></div>
+
+        <div class="ar-filters">
+          <label>Note
+            <select id="ar-f-rating">
+              <option value="-1" selected>Pouce bas</option>
+              <option value="1">Pouce haut</option>
+              <option value="">Tous</option>
+            </select>
+          </label>
+          <label>Statut
+            <select id="ar-f-statut">
+              <option value="nouveau" selected>À traiter</option>
+              <option value="traite">Traités</option>
+              <option value="ignore">Ignorés</option>
+              <option value="">Tous</option>
+            </select>
+          </label>
+          <label>Motif
+            <select id="ar-f-motif">
+              <option value="">Tous</option>
+              {% for k, v in motifs.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}
+            </select>
+          </label>
+        </div>
+
+        <div id="ar-list" class="ar-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script>
+  window.__userIsAdmin   = {{ "true" if "admin" in user_roles else "false" }};
+  window.__userIsManager = {{ "true" if ("manager" in user_roles or "admin" in user_roles) else "false" }};
+</script>
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+<script src="{{ url_for('static', filename='js/alfred_retours.js') }}?v=1"></script>
+</body>
+</html>

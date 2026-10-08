@@ -125,6 +125,10 @@
             <span class="material-symbols-outlined">hub</span>
             <span class="label">Applications liees</span>
         </a>{% endif %}
+        {% if _adm %}<a href="/alfred-retours" class="{{ nav_class('/alfred-retours') }}" title="Pouces et motifs des operateurs sur les reponses d'Alfred">
+            <span class="material-symbols-outlined">reviews</span>
+            <span class="label">Retours Alfred</span>
+        </a>{% endif %}
         {% if _adm or (admin_page_allowed is defined and admin_page_allowed('scan_report')) %}<a href="/scan-report" class="{{ nav_class('/scan-report') }}">
             <span class="material-symbols-outlined">qr_code_scanner</span>
             <span class="label">Rapport scans</span>
@@ -238,6 +242,6 @@
 {% if alfred_chat_allowed is defined and alfred_chat_allowed() %}
 <div id="alfred-chat-root" data-firstname="{{ user_firstname | default('', true) }}"></div>
 {# ?v= a incrementer a chaque modification du widget (cache navigateur). #}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/alfred_chat.css') }}?v=4">
-<script src="{{ url_for('static', filename='js/alfred_chat.js') }}?v=4" defer></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/alfred_chat.css') }}?v=5">
+<script src="{{ url_for('static', filename='js/alfred_chat.js') }}?v=5" defer></script>
 {% endif %}

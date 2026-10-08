@@ -267,6 +267,78 @@
 .ac-mini:hover { background: var(--ac-surface-2); color: var(--ac-text); }
 .ac-mini.is-on { color: var(--ac-brand); }
 .ac-mini .material-symbols-outlined { font-size: 15px; }
+
+/* Motif du pouce bas */
+.ac-fb {
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--ac-border);
+  border-radius: 12px;
+  background: var(--ac-card);
+  font-size: 12px;
+  color: var(--ac-text);
+}
+.ac-fb.is-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: var(--ac-muted);
+  font-size: 11px;
+}
+.ac-fb.is-done .material-symbols-outlined { font-size: 14px; color: var(--ac-danger); }
+.ac-fb-title { font-weight: 600; margin-bottom: 8px; }
+.ac-fb-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ac-fb-chip {
+  border: 1px solid var(--ac-border);
+  background: var(--ac-card);
+  color: var(--ac-text);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ac-fb-chip:hover { border-color: var(--ac-brand); }
+.ac-fb-chip.is-on { background: var(--ac-brand); border-color: var(--ac-brand); color: #fff; }
+.ac-fb-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--ac-border);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ac-text);
+  background: var(--ac-card);
+}
+.ac-fb-input:focus, .ac-fb-chip:focus-visible, .ac-fb-send:focus-visible { outline: none; box-shadow: var(--ac-focus); }
+.ac-fb-acts { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 8px; }
+.ac-fb-link {
+  border: 0;
+  background: transparent;
+  color: var(--ac-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+.ac-fb-send {
+  border: 0;
+  border-radius: 8px;
+  background: var(--ac-brand);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+.ac-fb-send:hover { background: var(--ac-brand-hover); }
+.ac-fb-send:disabled { opacity: 0.45; cursor: default; }
 .ac-retry {
   margin-top: 8px;
   border: 1px solid rgba(220, 38, 38, 0.35);

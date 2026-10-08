@@ -156,6 +156,32 @@ affiche sous la reponse comme sources ("Trafic", "Main courante"...).
 `request_id` commence par `chat-` pour le widget : le garder dans les logs
 pour recouper avec Cockpit (`alfred_chat_messages`, `alfred_tool_calls`).
 
+**Trace complete par requete, a conserver sur la VM** (c'est elle seule qui
+voit ce que le modele a reellement lu) :
+
+- `request_id`, `conversation_id`, `turn_id`, horodatage, canal ;
+- modele : nom ET digest Ollama (`ollama show --modelfile` / `/api/tags`),
+  parametres (temperature, `num_ctx`, top_p...) ;
+- version du prompt systeme (hash ou numero) et hash du manifeste d'outils ;
+- messages **exacts** envoyes a Ollama a chaque tour (systeme, historique
+  tronque, messages `tool`), sortie brute de chaque tour (raisonnement Qwen3
+  dans un champ separe), chaque appel d'outil avec les arguments generes et
+  le resultat **tel que transmis au modele** (apres troncature) ;
+- interventions des garde-fous (reponse reecrite, refus, boucle coupee) ;
+- reponse finale, durees par tour, erreurs.
+
+Pas de TTL court sur cette collection (un an au moins) : les retours des
+operateurs pointent vers elle par `request_id`. Elle contient des fiches PC
+Org et des noms : elle ne quitte pas la VM.
+
+**Retours des operateurs** : `GET /api/alfred-tools/retours?depuis=<ISO UTC>`
+(meme signature HMAC que `/manifest`, corps vide) rend les retours crees ou
+modifies depuis cette date, pseudonymises : note (+1, -1, ou `null` si le
+pouce a ete retire : effacer le cas), motif, commentaire, statut admin,
+`reponse_attendue`, conversation, appels d'outils vus par Cockpit. Garder
+`jusqu_a` de la reponse comme prochain `depuis`. Joindre par `request_id` a
+la trace VM pour obtenir l'exemple complet.
+
 ## 3. Exemple de client Python (VM -> Cockpit)
 
 ```python

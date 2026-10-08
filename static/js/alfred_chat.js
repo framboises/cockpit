@@ -390,6 +390,7 @@
         meta.appendChild(acts);
       }
       col.appendChild(meta);
+      if (!isUser && !isErr && !readOnly && m.rating === -1) col.appendChild(feedbackBox(m));
     }
     row.appendChild(col);
     return row;
@@ -557,17 +558,90 @@
     });
   }
 
+  // Motifs du pouce bas (memes cles que alfred_retours.MOTIFS)
+  var MOTIFS = [
+    ["faux", "Faux"], ["incomplet", "Incomplet"], ["pas_compris", "Question mal comprise"],
+    ["mauvais_evenement", "Mauvais événement ou date"], ["trop_long", "Trop long ou confus"],
+    ["autre", "Autre"]
+  ];
+
+  function feedbackBox(m) {
+    var box = el("div", "ac-fb");
+    if (m.rating_motif || m._fbSkip) {
+      var lib = m.rating_motif;
+      MOTIFS.forEach(function (x) { if (x[0] === lib) lib = x[1]; });
+      box.className = "ac-fb is-done";
+      box.appendChild(icon("flag"));
+      box.appendChild(document.createTextNode(lib ? "Signalé : " + lib : "Signalé"));
+      if (!m.rating_motif) {
+        var add = el("button", "ac-fb-link", "Préciser");
+        add.type = "button";
+        add.addEventListener("click", function () { m._fbSkip = false; rerender(); });
+        box.appendChild(add);
+      }
+      return box;
+    }
+    box.appendChild(el("div", "ac-fb-title", "Qu'est-ce qui ne va pas ?"));
+    var chips = el("div", "ac-fb-chips");
+    var choisi = null;
+    var envoyer = el("button", "ac-fb-send", "Envoyer");
+    envoyer.type = "button"; envoyer.disabled = true;
+    MOTIFS.forEach(function (x) {
+      var c = el("button", "ac-fb-chip", x[1]);
+      c.type = "button";
+      c.addEventListener("click", function () {
+        choisi = x[0];
+        Array.prototype.forEach.call(chips.children, function (n) { n.classList.toggle("is-on", n === c); });
+        envoyer.disabled = false;
+      });
+      chips.appendChild(c);
+    });
+    box.appendChild(chips);
+    var txt = el("input", "ac-fb-input");
+    txt.type = "text"; txt.maxLength = 500;
+    txt.placeholder = "Ce qui était attendu (facultatif)";
+    txt.addEventListener("keydown", function (e) {
+      e.stopPropagation();
+      if (e.key === "Enter" && choisi) { e.preventDefault(); envoyer.click(); }
+    });
+    box.appendChild(txt);
+    var acts = el("div", "ac-fb-acts");
+    var passer = el("button", "ac-fb-link", "Passer");
+    passer.type = "button";
+    passer.addEventListener("click", function () { m._fbSkip = true; rerender(); });
+    envoyer.addEventListener("click", function () {
+      if (!choisi) return;
+      envoyer.disabled = true;
+      api("POST", "/feedback/" + encodeURIComponent(m.id),
+          { rating: -1, motif: choisi, comment: txt.value }).then(function (j) {
+        if (!j || !j.ok) { envoyer.disabled = false; return; }
+        m.rating_motif = choisi;
+        replaceMessage(m);
+        rerender();
+        if (window.showToast) window.showToast("success", "Merci, le retour est transmis pour amélioration.");
+      });
+    });
+    acts.appendChild(passer); acts.appendChild(envoyer);
+    box.appendChild(acts);
+    return box;
+  }
+
+  function rerender() {
+    if (state.view !== "chat") return;
+    var top = body.scrollTop;
+    render();
+    body.scrollTop = top;
+  }
+
   function rate(m, rating) {
     api("POST", "/feedback/" + encodeURIComponent(m.id), { rating: rating }).then(function (j) {
       if (!j || !j.ok) return;
       m.rating = rating || null;
+      m.rating_motif = null; m._fbSkip = false;
       replaceMessage(m);
-      if (state.view === "chat") {
-        var top = body.scrollTop;
-        render();
-        body.scrollTop = top;
-      }
-      if (rating === -1 && window.showToast) window.showToast("info", "Merci, la reponse est signalee pour amelioration.");
+      rerender();
+      var fb = rating === -1 ? body.querySelector(".ac-fb:not(.is-done)") : null;
+      if (fb && fb.scrollIntoView) fb.scrollIntoView({ block: "nearest", behavior: "smooth" });
     });
   }
 

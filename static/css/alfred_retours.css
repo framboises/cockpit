@@ -1,0 +1,107 @@
+/* Page admin Retours Alfred (/alfred-retours) : jetons de style.css */
+.ar-page { max-width: 1100px; margin: 0 auto; padding: 16px 20px 40px; }
+.ar-intro { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0 0 14px; }
+
+.ar-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--line); background: var(--card); color: var(--text);
+  border-radius: 8px; padding: 6px 12px; font: inherit; font-size: 13px;
+  cursor: pointer; text-decoration: none;
+}
+.ar-btn:hover { border-color: var(--brand); }
+.ar-btn .material-symbols-outlined { font-size: 18px; }
+.ar-btn.is-primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+.ar-btn.is-primary:hover { background: var(--brand-hover, #1d4ed8); }
+.ar-btn.is-danger { color: var(--danger, #dc2626); margin-left: auto; }
+.ar-btn.is-danger:hover { border-color: var(--danger, #dc2626); }
+
+.ar-kpis { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.ar-kpi {
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  padding: 10px 14px; min-width: 120px;
+}
+.ar-kpi-v { font-size: 22px; font-weight: 600; color: var(--text); }
+.ar-kpi-l { font-size: 12px; color: var(--muted); }
+.ar-kpi.is-warn .ar-kpi-v { color: var(--danger, #dc2626); }
+.ar-kpi.is-ok .ar-kpi-v { color: var(--success, #16a34a); }
+.ar-kpi-motifs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1; }
+
+.ar-filters { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 14px; }
+.ar-filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.ar-filters select {
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px;
+  background: var(--card); color: var(--text); font: inherit; font-size: 13px; min-width: 160px;
+}
+
+.ar-list { display: flex; flex-direction: column; gap: 10px; }
+.ar-empty { color: var(--muted); font-size: 13px; padding: 20px 0; text-align: center; }
+.ar-card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  border-left: 3px solid var(--line); overflow: hidden;
+}
+.ar-card.is-neg { border-left-color: var(--danger, #dc2626); }
+.ar-card.is-pos { border-left-color: var(--success, #16a34a); }
+.ar-head {
+  width: 100%; display: flex; align-items: flex-start; gap: 12px; text-align: left;
+  border: 0; background: transparent; padding: 12px 14px; font: inherit; color: inherit; cursor: pointer;
+}
+.ar-head:hover { background: var(--brand-light, rgba(37, 99, 235, 0.06)); }
+.ar-head:focus-visible { outline: none; box-shadow: inset var(--focus-ring, 0 0 0 3px rgba(37, 99, 235, 0.25)); }
+.ar-thumb { font-size: 20px; color: var(--muted); margin-top: 2px; }
+.ar-card.is-neg .ar-thumb { color: var(--danger, #dc2626); }
+.ar-card.is-pos .ar-thumb { color: var(--success, #16a34a); }
+.ar-head-main { flex: 1; min-width: 0; }
+.ar-q { font-weight: 600; font-size: 14px; color: var(--text); }
+.ar-meta { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.ar-fb { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; }
+.ar-com { color: var(--text); font-style: italic; }
+.ar-rep {
+  margin-top: 6px; font-size: 13px; color: var(--muted); white-space: pre-wrap;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.ar-card.is-open .ar-rep { display: none; }
+
+.ar-tag {
+  display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 9px;
+  font-size: 11px; font-weight: 500; background: var(--brand-light, rgba(37, 99, 235, 0.10));
+  color: var(--brand-strong, #1e40af); white-space: nowrap;
+}
+.ar-tag.is-motif, .ar-tag.is-err { background: var(--danger-light, rgba(220, 38, 38, 0.10)); color: var(--danger, #dc2626); }
+.ar-statut { flex: none; margin-top: 2px; }
+.ar-statut.is-nouveau { background: rgba(245, 158, 11, 0.14); color: #b45309; }
+.ar-statut.is-traite { background: rgba(22, 163, 74, 0.12); color: var(--success, #16a34a); }
+.ar-statut.is-ignore { background: rgba(96, 114, 134, 0.12); color: var(--muted); }
+
+.ar-detail { border-top: 1px solid var(--line); padding: 12px 14px 14px 46px; display: flex; flex-direction: column; gap: 14px; }
+.ar-sec-t { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 6px; }
+.ar-conv { display: flex; flex-direction: column; gap: 6px; }
+.ar-msg { border-radius: 10px; padding: 8px 10px; font-size: 13px; max-width: 85%; }
+.ar-msg.is-user { align-self: flex-end; background: var(--brand-light, rgba(37, 99, 235, 0.10)); }
+.ar-msg.is-bot { align-self: flex-start; background: #f6f8fb; border: 1px solid var(--line); }
+.ar-msg-r { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 2px; }
+.ar-msg-c { white-space: pre-wrap; color: var(--text); overflow-wrap: anywhere; }
+.ar-tools { display: flex; flex-direction: column; gap: 8px; }
+.ar-tool { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.ar-tool.is-err { border-color: var(--danger, #dc2626); }
+.ar-tool-h { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.ar-k { display: block; font-size: 11px; color: var(--muted); margin: 6px 0 2px; }
+.ar-pre {
+  margin: 0; padding: 6px 8px; border-radius: 6px; background: #f6f8fb; font-size: 12px;
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto;
+  font-family: ui-monospace, Consolas, monospace; color: var(--text);
+}
+.ar-muted { color: var(--muted); font-size: 12px; margin: 0; }
+.ar-tech { font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+.ar-form { display: flex; flex-direction: column; }
+.ar-input {
+  border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; font: inherit; font-size: 13px;
+  background: var(--card); color: var(--text); resize: vertical;
+}
+.ar-input:focus { outline: none; box-shadow: var(--focus-ring, 0 0 0 3px rgba(37, 99, 235, 0.25)); }
+.ar-acts { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 6px; }
+
+@media (max-width: 700px) {
+  .ar-page { padding: 12px 16px 30px; }
+  .ar-detail { padding-left: 14px; }
+  .ar-msg { max-width: 100%; }
+}

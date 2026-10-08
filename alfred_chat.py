@@ -9,7 +9,9 @@ CHAT (session Cockpit, role user + drapeau de groupe `alfred_chat`)
   POST /api/alfred-chat/ask             pose une question (CSRF) -> id du message
   GET  /api/alfred-chat/message/<id>    suivi d'une reponse (polling)
   POST /api/alfred-chat/new             nouvelle conversation (CSRF)
-  POST /api/alfred-chat/feedback/<id>   pouce haut / bas (CSRF)
+  POST /api/alfred-chat/feedback/<id>   pouce haut / bas + motif (CSRF), fige
+                                        l'echange dans alfred_chat_retours (sans TTL)
+  GET  /alfred-retours                  page admin des retours (+ API /retours, export JSONL)
   GET  /api/alfred-chat/sessions        conversations passees de l'operateur
   GET  /api/alfred-chat/session/<id>    relire une conversation passee
   GET  /api/alfred-chat/health          sante du wrapper (cache 20 s)
@@ -29,6 +31,7 @@ OUTILS (appeles par la VM, HMAC ALFRED_TOOLS_SECRET, sans session)
 
   GET  /api/alfred-tools/manifest       definitions tool-calling (format Ollama)
   POST /api/alfred-tools/call           {tool, args, scope?, request_id?}
+  GET  /api/alfred-tools/retours?depuis= retours des operateurs (corpus VM)
 
   Recette de signature identique a /alfred/ask, dans l'autre sens :
   X-Alfred-Timestamp + X-Alfred-Signature = "sha256=" + HMAC(secret,
@@ -299,6 +302,7 @@ def _pub(m):
         "sources": _sources(m.get("tool_calls")),
         "hops": m.get("hops"), "duration_ms": m.get("duration_ms"),
         "created_at": _iso(m.get("created_at")), "rating": m.get("rating"),
+        "rating_motif": m.get("rating_motif"),
     }
 
 
@@ -587,14 +591,27 @@ def chat_feedback(mid):
         rating = 0
     if rating not in (-1, 0, 1):
         return jsonify({"ok": False, "error": "note_invalide"}), 400
-    r = db[COL_MESSAGES].update_one(
-        {"_id": str(mid), "user_email": email, "role": "assistant"},
-        {"$set": {"rating": rating or None,
-                  "rating_comment": str(data.get("comment") or "")[:500] or None,
-                  "rated_at": _now()}})
-    if not r.matched_count:
+    import alfred_retours as AR
+    motif = str(data.get("motif") or "").strip() or None
+    if motif and (rating != -1 or motif not in AR.MOTIFS):
+        return jsonify({"ok": False, "error": "motif_invalide"}), 400
+    m = db[COL_MESSAGES].find_one_and_update(
+        {"_id": str(mid), "user_email": email, "role": "assistant", "status": "done"},
+        {"$set": {"rating": rating or None, "rating_motif": motif,
+                  "rating_comment": str(data.get("comment") or "").strip()[:AR.COMMENTAIRE_MAX] or None,
+                  "rated_at": _now()}},
+        return_document=True)
+    if not m:
         return jsonify({"ok": False, "error": "introuvable"}), 404
-    return jsonify({"ok": True})
+    # Instantane hors purge 90 j : c'est lui que lit la page Retours Alfred.
+    try:
+        if rating:
+            AR.figer(db, m)
+        else:
+            AR.retirer(db, m["_id"])
+    except Exception:
+        logger.exception("alfred_chat : instantane du retour %s", mid)
+    return jsonify({"ok": True, "message": _pub(m), "motifs": AR.MOTIFS})
 
 
 @alfred_chat_bp.route("/api/alfred-chat/sessions", methods=["GET"])
@@ -685,6 +702,64 @@ def contexte_enregistrer():
 
 
 # ---------------------------------------------------------------------------
+# Retours des operateurs (page admin /alfred-retours)
+# ---------------------------------------------------------------------------
+
+@alfred_chat_bp.route("/alfred-retours", methods=["GET"])
+@_role_required("admin")
+def retours_page():
+    from flask import render_template
+    import alfred_retours as AR
+    p = getattr(request, "user_payload", {}) or {}
+    return render_template("alfred_retours.html", user_roles=p.get("roles", []),
+                           motifs=AR.MOTIFS)
+
+
+@alfred_chat_bp.route("/api/alfred-chat/retours", methods=["GET"])
+@_role_required("admin")
+def retours_liste():
+    import alfred_retours as AR
+    db = _db()
+    AR.rattraper(db)
+    q = AR.filtre(request.args.get("rating"), request.args.get("statut"),
+                  request.args.get("motif"))
+    docs = db[AR.COLLECTION].find(q).sort("rated_at", -1).limit(300)
+    return jsonify({"ok": True, "retours": [AR.publier(d) for d in docs if d.get("rating")],
+                    "compteurs": AR.compteurs(db), "motifs": AR.MOTIFS, "statuts": AR.STATUTS})
+
+
+@alfred_chat_bp.route("/api/alfred-chat/retours/<rid>", methods=["POST"])
+@_role_required("admin")
+def retours_traiter(rid):
+    import alfred_retours as AR
+    email, name, _p = _me()
+    doc, err = AR.traiter(_db(), rid, request.get_json(silent=True) or {}, name or email)
+    if err:
+        return jsonify({"ok": False, "error": err}), 404 if err == "introuvable" else 400
+    return jsonify({"ok": True, "retour": AR.publier(doc)})
+
+
+@alfred_chat_bp.route("/api/alfred-chat/retours/<rid>/supprimer", methods=["POST"])
+@_role_required("admin")
+def retours_supprimer(rid):
+    import alfred_retours as AR
+    r = _db()[AR.COLLECTION].delete_one({"_id": str(rid)})
+    return jsonify({"ok": bool(r.deleted_count)}), 200 if r.deleted_count else 404
+
+
+@alfred_chat_bp.route("/api/alfred-chat/retours/export", methods=["GET"])
+@_role_required("admin")
+def retours_export():
+    from flask import Response
+    import alfred_retours as AR
+    q = AR.filtre(request.args.get("rating"), request.args.get("statut"),
+                  request.args.get("motif"))
+    nom = "alfred_retours_%s.jsonl" % datetime.now(TZ_PARIS).strftime("%Y%m%d_%H%M")
+    return Response("".join(AR.exporter(_db(), q)), mimetype="application/x-ndjson",
+                    headers={"Content-Disposition": "attachment; filename=%s" % nom})
+
+
+# ---------------------------------------------------------------------------
 # Routes outils (VM -> Cockpit)
 # ---------------------------------------------------------------------------
 
@@ -754,6 +829,30 @@ def tools_manifest():
     return jsonify({"ok": True, "tools": alfred_tools.manifest()})
 
 
+@alfred_chat_bp.route("/api/alfred-tools/retours", methods=["GET"])
+def tools_retours():
+    """Synchro du corpus cote VM : retours crees ou modifies depuis `depuis`
+    (ISO, UTC), export pseudonymise, pouces retires inclus (note null).
+    Meme signature que /manifest (corps vide)."""
+    refus, _mode = _tools_auth()
+    if refus:
+        return refus
+    import alfred_retours as AR
+    q = {}
+    depuis = str(request.args.get("depuis") or "").strip()
+    if depuis:
+        try:
+            d = datetime.fromisoformat(depuis.replace("Z", "+00:00"))
+        except ValueError:
+            return jsonify({"ok": False, "error": "depuis_invalide"}), 400
+        if d.tzinfo:
+            d = d.astimezone(timezone.utc).replace(tzinfo=None)
+        q["maj_at"] = {"$gte": d}
+    jusqu_a = datetime.now(timezone.utc)
+    lignes = [json.loads(x) for x in AR.exporter(_db(), q, annules=True)]
+    return jsonify({"ok": True, "retours": lignes, "jusqu_a": jusqu_a.isoformat()})
+
+
 @alfred_chat_bp.route("/api/alfred-tools/call", methods=["POST"])
 def tools_call():
     refus, mode = _tools_auth()
@@ -809,7 +908,10 @@ def tools_call():
             "tool": name, "args": json.dumps(args, ensure_ascii=False, default=str)[:500],
             "request_id": str(data.get("request_id") or "")[:40] or None,
             "scoped": bool(scope_token), "auth": mode, "email": ctx.get("email"),
-            "resolu": resolu, "ok": ok, "duration_ms": ms, "created_at": _now()})
+            "resolu": resolu, "ok": ok, "duration_ms": ms, "created_at": _now(),
+            # Ce que le modele a lu, pour juger une reponse notee (page Retours).
+            "resume": (str(result.get("resume") or result.get("error") or "")[:2000] or None)
+                      if isinstance(result, dict) else None})
     except Exception:
         pass
     status = 200 if ok else (404 if result.get("error") == "outil_inconnu" else 500)
