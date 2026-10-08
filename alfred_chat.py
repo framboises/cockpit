@@ -247,7 +247,7 @@ def read_scope(token, now=None):
         return None
     return {"email": d.get("e"), "event": d.get("ev"), "year": d.get("yr"),
             "cat_query": d.get("c"), "alert_slugs": d.get("a"),
-            "mc_tout": bool(d.get("mt"))}
+            "mc_tout": bool(d.get("mt")), "admin": bool(d.get("mt"))}
 
 
 def _scope_for(payload, event, year):

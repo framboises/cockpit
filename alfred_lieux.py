@@ -736,9 +736,58 @@ def etat_jour(lieux, publics, jour, ev_lib):
     return "\n".join(l), n
 
 
+MOTS_MUSEE = {"musee", "le", "la", "du", "des", "de", "24", "h", "heures", "automobile"}
+
+
+def demande_musee(nom):
+    """Le musee lui-meme (pas << porte musee >>) : ses horaires ne sont pas dans
+    le parametrage mais dans /live-controle onglet Musee (cockpit_settings)."""
+    mots = set(norm(nom).split())
+    return "musee" in mots and mots <= MOTS_MUSEE
+
+
+def horaires_musee(db, jour, now):
+    """(resume, details) depuis la configuration du musee (musee.py)."""
+    import musee
+    cfg = musee.get_config(db)
+    if not cfg or not (cfg.get("horaires") or {}).get("ouverture"):
+        return ("Musée des 24 Heures : horaires non configurés dans Cockpit "
+                "(/live-controle, onglet Musée)."), {"configure": False}
+
+    def txt(d):
+        h = musee.horaires_du_jour(cfg, d.strftime("%Y-%m-%d"))
+        lib = " (%s)" % h["libelle"] if h.get("libelle") else ""
+        if h["ferme"]:
+            return "fermé" + lib, h
+        return "ouvert de %s à %s%s" % (h["ouverture"], h["fermeture"], lib), h
+
+    j0 = (jour or now).replace(hour=0, minute=0, second=0, microsecond=0)
+    t, h = txt(j0)
+    l = ["Musée des 24 Heures, le %s : %s." % (jour_fr(j0), t)]
+    if j0.date() == now.date() and not h["ferme"]:
+        hm = now.strftime("%H:%M")
+        etat = ("FERMÉ, ouvre à %s" % h["ouverture"] if hm < h["ouverture"] else
+                "OUVERT jusqu'à %s" % h["fermeture"] if hm < h["fermeture"] else
+                "FERMÉ depuis %s" % h["fermeture"])
+        l.append("En ce moment (%s) : %s." % (hm, etat))
+    suite = [(j0 + timedelta(days=i), txt(j0 + timedelta(days=i))[0]) for i in range(1, 8)]
+    if len({s for _, s in suite}) == 1:
+        l.append("Les 7 jours suivants : %s tous les jours." % suite[0][1])
+    else:
+        l.append("Les 7 jours suivants : " + " ; ".join(
+            "%s %s %s" % (JOURS[d.weekday()], d.strftime("%d/%m"), s) for d, s in suite) + ".")
+    return "\n".join(l), {"jour": j0.strftime("%Y-%m-%d"), "horaires": h}
+
+
 def t_lieux(db, args, ctx, now=None):
     args = args or {}
     now = now or datetime.now(TZ_PARIS).replace(tzinfo=None, second=0, microsecond=0)
+    if demande_musee(args.get("nom")):
+        # Independant de l'evenement : le musee a ses propres horaires
+        jour = resoudre_jour(args.get("jour"), now, []) if args.get("jour") else None
+        resume, det = horaires_musee(db, jour, now)
+        return {"disponible": True, "trouve": True, "vue": "musee", "lieu": "Musée des 24 Heures",
+                "musee": det, "resume": resume}
     event, year, doc = resoudre_evenement(db, args, ctx, now)
     if not doc:
         return {"disponible": False, "evenement": event, "annee": year,

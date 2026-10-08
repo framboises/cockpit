@@ -158,6 +158,19 @@ def _famille(it):
     return "programme"
 
 
+# Noms des clients Momentus : admins seulement (decision d'exploitation du
+# 08/10/2026). Restent visibles les activites de l'ACO elle-meme.
+DEPARTEMENTS_SANS_CLIENT = ("interne", "travaux")
+
+
+def _masquer_client(v):
+    if v["famille"] != "momentus" or any(d in _norm(v["department"]) for d in DEPARTEMENTS_SANS_CLIENT):
+        return
+    v["_client"] = v["activity"]
+    v["_masque"] = True
+    v["activity"] = "Réservation " + (v["department"].lower() or "Momentus")
+
+
 def _vignettes(doc, debut, fin):
     """Vignettes du doc qui touchent [debut, fin] (Paris)."""
     out = []
@@ -213,7 +226,7 @@ def _regrouper_momentus(vs):
         if v["famille"] != "momentus":
             out.append(v)
             continue
-        k = (v["date"], v["activity"], v["department"], v["evenement"])
+        k = (v["date"], v.get("_client") or v["activity"], v["department"], v["evenement"])
         g = groupes.get(k)
         if g is None:
             g = groupes[k] = dict(v, _lieux=[v["place"]] if v["place"] else [])
@@ -355,7 +368,7 @@ def _ligne(v, plusieurs_ev):
     s = "- %s %s" % (h, v["activity"])
     if v["place"] and _norm(v["place"]) not in _norm(v["activity"]):
         s += ", " + v["place"]
-    if v["famille"] == "momentus" and v["department"]:
+    if v["famille"] == "momentus" and v["department"] and not v.get("_masque"):
         s += " (%s)" % v["department"]
     if v["option"]:
         s += " [option, non confirmé]"
@@ -467,6 +480,11 @@ def t_agenda(db, args, ctx, now=None):
             vs += _vignettes(d, debut, fin)
         else:
             sans_doc.append("%s %s" % (ev, yr))
+    admin = bool((ctx or {}).get("admin") or (ctx or {}).get("mc_tout"))
+    if not admin:
+        # Avant le filtre : un nom de client ne se cherche pas non plus
+        for v in vs:
+            _masquer_client(v)
     vs, filtre = _filtrer(vs, quoi)
     if filtre:
         resolu["filtre"] = filtre
@@ -475,7 +493,7 @@ def t_agenda(db, args, ctx, now=None):
     # Factorisation des ouvertures/fermetures simultanees, comme l'ecran
     vs = PS._factorize_upcoming(vs)
     for v in vs:
-        for k in ("_t", "_vid", "_role"):
+        for k in ("_t", "_vid", "_role", "_client"):
             v.pop(k, None)
     if recherche:
         vs = vs[:10]
@@ -513,7 +531,11 @@ def t_agenda(db, args, ctx, now=None):
                 if courte:
                     js = [x for x in vs[:LISTE_MAX] if x["date"] == jour_courant and x["journee"]]
                     if js:
-                        l.append("- toute la journée : " + ", ".join(dict.fromkeys(x["activity"] for x in js)))
+                        nb = {}
+                        for x in js:
+                            nb[x["activity"]] = nb.get(x["activity"], 0) + 1
+                        l.append("- toute la journée : " + ", ".join(
+                            a + (" (×%d)" % n if n > 1 else "") for a, n in nb.items()))
             if courte and v["journee"]:
                 continue
             l.append(_ligne(v, plusieurs))

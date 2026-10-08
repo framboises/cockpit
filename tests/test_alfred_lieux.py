@@ -47,7 +47,7 @@ TRIBUNE = {"id": "t1", "name": "SINGHER", "numero": "13", "access": {"public": T
                       "vip": {"open": "08:30", "close": "22:30", "closed": False}}]}
 
 
-def _db():
+def _db(**autres):
     data = {
         "portesHoraires": {"a1": NORD_PIETONS, "a2": NORD_VL, "a3": EST},
         "parkingsHoraires": [CHINETTI],
@@ -59,7 +59,7 @@ def _db():
             {"date": "2026-09-26", "openTime": "00:00", "closeTime": "23:59", "is24h": True},
             {"date": "2026-09-27", "openTime": "00:00", "closeTime": "19:30"}]},
     }
-    return FakeDb(parametrages=[{"event": "24H CAMIONS", "year": "2026", "data": data}])
+    return FakeDb(parametrages=[{"event": "24H CAMIONS", "year": "2026", "data": data}], **autres)
 
 
 def lieux(**args):
@@ -169,6 +169,24 @@ def test_tribune_trouvee_par_son_numero_comme_a_la_radio():
     for q in ("tribune 13", "T13", "la 13", "tribune numéro 13", "singher", "tribune 13 ouvrait"):
         r = lieux(nom=q)
         assert r.get("trouve") and r["lieux"][0]["nom"] == "SINGHER (n°13)", q
+
+
+def test_horaires_du_musee_depuis_sa_configuration():
+    db = _db(cockpit_settings=[{"_id": "musee", "schema": 2, "enabled": True, "horaires": {
+        "ouverture": "10:00", "fermeture": "19:00", "semaine": {"lun": {"ferme": True}},
+        "exceptions": [{"date": "2026-09-27", "ferme": True, "libelle": "24H CAMIONS"}]}}])
+    r = L.t_lieux(db, {"nom": "musée"}, CTX, now=datetime(2026, 9, 25, 9, 30))
+    assert r["vue"] == "musee"
+    res = r["resume"]
+    assert "le vendredi 25 septembre 2026 : ouvert de 10:00 à 19:00" in res
+    assert "En ce moment (09:30) : FERMÉ, ouvre à 10:00" in res
+    assert "dimanche 27/09 fermé (24H CAMIONS)" in res and "lundi 28/09 fermé" in res
+    r = L.t_lieux(db, {"nom": "le musée des 24 heures", "jour": "27/09"}, CTX, now=NOW)
+    assert "le dimanche 27 septembre 2026 : fermé (24H CAMIONS)" in r["resume"]
+    # La porte du musee reste un lieu du parametrage
+    assert not L.demande_musee("porte musée")
+    # Sans configuration : le dire
+    assert "non configurés" in L.t_lieux(_db(), {"nom": "musée"}, CTX, now=NOW)["resume"]
 
 
 def test_type_et_jour_sans_nom_repond_pour_ce_jour():

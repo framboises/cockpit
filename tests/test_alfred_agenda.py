@@ -79,10 +79,23 @@ def _db():
     return db
 
 
-def _run(monkeypatch, args):
+def _run(monkeypatch, args, ctx=None):
     import event_courant
     monkeypatch.setattr(event_courant, "active_pairs", lambda db, **k: [("SAISON", 2026)])
-    return A.t_agenda(_db(), args, {}, now=NOW)
+    return A.t_agenda(_db(), args, {"admin": True} if ctx is None else ctx, now=NOW)
+
+
+def test_clients_momentus_masques_sauf_admin(monkeypatch):
+    r = _run(monkeypatch, {"quand": "aujourd'hui"}, ctx={})
+    res = r["resume"]
+    assert "FRANCE ARMOR" not in res and "CRTI" not in res
+    assert "14:00-23:59 Réservation séminaire, P2A, Restaurant Karting\n" in res
+    assert "FRANCE ARMOR" not in str(r["vignettes"])
+    # Un nom de client ne se cherche pas
+    assert "FRANCE ARMOR" not in _run(monkeypatch, {"quoi": "france armor"}, ctx={})["resume"]
+    # Voie WhatsApp (sans portee) : masque aussi
+    assert "FRANCE ARMOR" not in _run(monkeypatch, {}, ctx={"sans_main_courante": True})["resume"]
+    assert "FRANCE ARMOR" in _run(monkeypatch, {"quand": "aujourd'hui"})["resume"]
 
 
 def test_fenetres():
