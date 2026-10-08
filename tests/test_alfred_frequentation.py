@@ -53,7 +53,8 @@ EDITIONS = {"24H CAMIONS": [C2026, C2025, C2024], "SUPERBIKE": [SBK2026, SBK2025
 
 def _db(contextes=()):
     return FakeDb(
-        evenement=[{"nom": "24H CAMIONS", "short": "24HC"}, {"nom": "24H MOTOS", "short": "24HM"},
+        evenement=[{"nom": "24H AUTOS", "short": "24HA"},
+                   {"nom": "24H CAMIONS", "short": "24HC"}, {"nom": "24H MOTOS", "short": "24HM"},
                    {"nom": "SUPERBIKE", "short": "SBK"}, {"nom": "LE MANS CLASSIC", "short": "LMC"},
                    {"nom": "LE MANS FC - LORIENT", "short": "LMFCFCLORIENT"},
                    {"nom": "LE MANS FC - LYON", "short": "LMFCOL"},
@@ -94,6 +95,13 @@ def test_resoudre_nom_mots_sigles_et_surnoms():
     assert AE.resoudre_nom(db, "les gros de l'an dernier")[0] == "24H CAMIONS"
     assert AE.resoudre_nom(db, "motos")[0] == "24H MOTOS"
     assert AE.resoudre_nom(db, "la classic")[0] == "LE MANS CLASSIC"
+
+
+def test_resoudre_nom_forme_la_plus_precise_gagne():
+    db = _db([{"event": "24H AUTOS", "surnoms": ["les 24 heures"]}])
+    assert AE.resoudre_nom(db, "les 24h motos de l'an dernier")[0] == "24H MOTOS"
+    assert AE.resoudre_nom(db, "pic des 24h camions")[0] == "24H CAMIONS"
+    assert AE.resoudre_nom(db, "monde aux 24 heures hier")[0] == "24H AUTOS"
 
 
 def test_resoudre_nom_ambigu_rend_les_candidats():

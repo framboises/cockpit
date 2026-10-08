@@ -91,11 +91,18 @@ def resoudre_nom(db, texte, cat=None):
     exacts = [e["nom"] for e in cat if any(norm(f) == q for f in formes(e) if f)]
     if len(exacts) == 1:
         return exacts[0], []
-    # 2. Un surnom ou un sigle CONTENU dans la phrase (<< les 24h camions de l'an dernier >>)
+    # 2. Un surnom ou un sigle CONTENU dans la phrase (<< les 24h camions de l'an dernier >>).
+    # La forme la plus precise l'emporte : << les 24h motos >> contient le surnom
+    # << les 24 heures >> (24H AUTOS) ET le nom 24H MOTOS, c'est le second.
     qm = _mots(q)
-    contenus = [e["nom"] for e in cat
-                if any(f and _mots(f) and _mots(f) <= qm for f in formes(e))]
-    if len(set(contenus)) == 1:
+    portee = {}
+    for e in cat:
+        n = max((len(_mots(f)) for f in formes(e) if f and _mots(f) and _mots(f) <= qm), default=0)
+        if n:
+            portee[e["nom"]] = max(n, portee.get(e["nom"], 0))
+    best = max(portee.values(), default=0)
+    contenus = [nom for nom, n in portee.items() if n == best]
+    if len(contenus) == 1:
         return contenus[0], []
     # 3. Les mots de la question contenus dans le nom (<< camions >> -> 24H CAMIONS)
     sous = [e["nom"] for e in cat if qm and qm <= _mots(e["nom"])]
