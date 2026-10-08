@@ -495,11 +495,13 @@ def t_situation(db, args, ctx):
     tr = t_trafic(db, {}, ctx)
     me = t_meteo(db, {}, ctx)
     al = t_alertes(db, {}, ctx)
-    mc = t_main_courante_compteurs(db, {}, ctx)
+    try:
+        mc = t_main_courante(db, {}, ctx)
+    except Exception as exc:
+        mc = _indisponible("main_courante", exc)
     tl = t_timeline(db, {"heures": 6}, ctx)
     ev = t_evenement(db, {}, ctx)
     pr = t_presents(db, {}, ctx)
-    ouvertes_urg = t_main_courante_fiches(db, {"statut": "en_cours", "limite": 5}, ctx)
     return {
         "disponible": True,
         "heure": datetime.now(TZ_PARIS).strftime("%d/%m %H:%M"),
@@ -515,8 +517,11 @@ def t_situation(db, args, ctx):
         "alertes": ({"nombre": al.get("nombre"),
                      "dernieres": [a["titre"] for a in al.get("alertes", [])[:5]]}
                     if al.get("disponible") else "indisponible"),
-        "main_courante": (mc.get("total") if mc.get("disponible") else "indisponible"),
-        "dernieres_fiches_en_cours": ouvertes_urg.get("fiches", []),
+        # Meme lecture que cockpit_main_courante sans parametre
+        "main_courante": (mc.get("compteurs") if mc.get("disponible") else "indisponible"),
+        "fiches_en_cours_les_plus_urgentes": [
+            {k: f.get(k) for k in ("numero", "ouverte", "categorie", "urgence", "zone", "texte")
+             if f.get(k)} for f in (mc.get("fiches") or [])[:5]],
         "a_venir_6h": tl.get("vignettes", [])[:6] if tl.get("disponible") else "indisponible",
     }
 
@@ -535,9 +540,15 @@ def t_frequentation(db, args, ctx):
     return alfred_frequentation.t_frequentation(db, args, ctx)
 
 
+def t_main_courante(db, args, ctx):
+    import alfred_main_courante
+    return alfred_main_courante.t_main_courante(db, args, ctx)
+
+
 TOOLS = {
     "cockpit_frequentation": {
         "fn": t_frequentation,
+        "capacite": "la fréquentation : personnes présentes en direct, pics par jour et comparaison entre éditions, alignée sur le jour de course",
         "description": "Frequentation du site : personnes presentes EN DIRECT (meme calcul que "
                        "l'accueil et la TV, avec l'ecart a la meme heure l'an dernier), et "
                        "HISTORIQUE de toutes les editions d'un evenement : pic de presents par "
@@ -560,6 +571,7 @@ TOOLS = {
     },
     "cockpit_lieux": {
         "fn": t_lieux,
+        "capacite": "les horaires et infos des lieux : portes, parkings, campings, tribunes, boutiques, hospitalités, services (centre médical, PC...), par public, et ce qui est ouvert maintenant",
         "description": "Horaires d'ouverture et informations de TOUS les lieux de l'evenement : "
                        "portes, parkings, campings, tribunes, boutiques, hospitalites, passerelles, "
                        "sanitaires, et services (ouverture du site au public, centre medical, help "
@@ -589,13 +601,43 @@ TOOLS = {
     },
     "cockpit_situation": {
         "fn": t_situation,
+        "capacite": "un point de situation général en une fois (fréquentation, trafic, météo, alertes, main courante, échéances)",
         "description": "Synthese de la situation en cours en UN appel : evenement, presents, "
                        "trafic, meteo, alertes, compteurs et dernieres fiches main courante, "
                        "echeances des 6 prochaines heures. A appeler en premier pour toute "
                        "question generale (ou en est-on, point de situation, briefing).",
         "parameters": {"type": "object", "properties": {}},
     },
+    "cockpit_main_courante": {
+        "fn": t_main_courante,
+        "capacite": "la main courante PC Organisation : point de situation des fiches en cours, "
+                    "détail et chronologie d'une fiche, recherche par catégorie, urgence, mot ou "
+                    "période (cette nuit, depuis 2 h, hier)",
+        "description": "Main courante PC Organisation (fiches). SANS parametre : point de situation "
+                       "(fiches en cours, les plus urgentes d'abord, compteurs du jour et de la "
+                       "derniere heure). Avec `fiche` : detail et chronologie d'une fiche. Avec "
+                       "`periode`, `categorie`, `urgence`, `texte` : fiches correspondantes. A "
+                       "appeler pour TOUTE question sur les fiches, interventions, incidents, "
+                       "evenements de la nuit, ce qui est en cours. Recopier le champ resume sans "
+                       "le reformuler ni le completer ; ne jamais inventer de fiche.",
+        "parameters": {"type": "object", "properties": {
+            "fiche": {"type": "string", "description": "numero de fiche cite par l'operateur"},
+            "periode": {"type": "string", "description": "expression TELLE QUELLE : cette nuit, "
+                                                          "depuis 2h, derniere heure, hier, ce matin"},
+            "categorie": {"type": "string", "description": "mot de l'operateur TEL QUEL : secours, "
+                                                            "secu, surete, technique, flux, info..."},
+            "urgence": {"type": "string", "description": "urgentes, detresse vitale, EU, UA, UR, "
+                                                          "implique"},
+            "texte": {"type": "string", "description": "mot cherche (lieu, objet, nom de porte...)"},
+            "statut": {"type": "string", "description": "en cours (defaut), closes, toutes"},
+            "evenement": {"type": "string", "description": "seulement si l'operateur le cite"},
+            "annee": {"type": "string"},
+        }},
+    },
+    # Fusionnes dans cockpit_main_courante : retires du manifeste, toujours
+    # executables pour un wrapper qui les appellerait encore.
     "cockpit_main_courante_fiches": {
+        "masque": True,
         "fn": t_main_courante_fiches,
         "description": "Liste des fiches de la main courante PC Organisation, les plus recentes "
                        "d'abord, filtrables.",
@@ -613,6 +655,7 @@ TOOLS = {
         }},
     },
     "cockpit_main_courante_fiche": {
+        "masque": True,
         "fn": t_main_courante_fiche,
         "description": "Detail d'une fiche main courante avec sa chronologie d'actions.",
         "parameters": {"type": "object", "properties": {
@@ -621,6 +664,7 @@ TOOLS = {
         }},
     },
     "cockpit_main_courante_compteurs": {
+        "masque": True,
         "fn": t_main_courante_compteurs,
         "description": "Compteurs main courante : fiches en cours, closes et creees aujourd'hui, "
                        "par categorie.",
@@ -628,23 +672,27 @@ TOOLS = {
     },
     "cockpit_trafic": {
         "fn": t_trafic,
+        "capacite": "le trafic routier autour du site (Waze) : verdict, accidents, temps par axe",
         "description": "Etat du trafic routier (Waze) : verdict global identique au mur "
                        "circulation, accidents en zone, temps et retard par axe.",
         "parameters": {"type": "object", "properties": {}},
     },
     "cockpit_meteo": {
         "fn": t_meteo,
+        "capacite": "la météo du site : conditions actuelles, prochaine pluie, vigilance, consignes",
         "description": "Meteo du site identique au mur meteo : conditions actuelles, prochaine "
                        "pluie, vigilance, consignes et contraintes (vent, chaleur, orage, sol).",
         "parameters": {"type": "object", "properties": {}},
     },
     "cockpit_alertes": {
         "fn": t_alertes,
+        "capacite": "les alertes actives de la centrale d'alerte Cockpit",
         "description": "Alertes actives de la centrale d'alerte Cockpit.",
         "parameters": {"type": "object", "properties": {}},
     },
     "cockpit_timeline": {
         "fn": t_timeline,
+        "capacite": "les prochaines échéances de la timeline opérationnelle (ouvertures, fermetures, départs)",
         "description": "Prochaines echeances de la timeline operationnelle (ouvertures, "
                        "fermetures, departs...), factorisees.",
         "parameters": {"type": "object", "properties": {
@@ -662,6 +710,7 @@ TOOLS = {
     },
     "cockpit_wiki_procedures": {
         "fn": t_wiki,
+        "capacite": "les procédures et fiches réflexes publiées du wiki PC Organisation",
         "description": "Procedures et fiches reflexes publiees du wiki PC Organisation "
                        "(conduite a tenir, acteurs, pieges).",
         "parameters": {"type": "object", "properties": {
@@ -670,6 +719,7 @@ TOOLS = {
     },
     "cockpit_evenement": {
         "fn": t_evenement,
+        "capacite": "l'événement en cours, sa phase et sa description",
         "description": "Evenement(s) en cours et leur phase (montage, course, demontage, SAISON).",
         "parameters": {"type": "object", "properties": {}},
     },
@@ -682,6 +732,42 @@ def manifest():
              "function": {"name": name, "description": t["description"],
                           "parameters": t["parameters"]}}
             for name, t in TOOLS.items() if not t.get("masque")]
+
+
+def presentation():
+    """Qui est Alfred et ce qu'il sait faire, pour les questions << qui es-tu,
+    que sais-tu faire >>. Tiree du registre : un outil ajoute ou retire
+    met la presentation a jour sans toucher au prompt de la VM."""
+    sait = [t["capacite"] for t in TOOLS.values() if t.get("capacite") and not t.get("masque")]
+    texte = ("Je suis Alfred, l'assistant du PC Organisation, intégré à Cockpit. Je lis les mêmes "
+             "données que les écrans de Cockpit, en temps réel, et je peux vous donner :\n"
+             + "\n".join("- " + s for s in sait)
+             + "\nJe suis en lecture seule : je ne crée ni ne modifie aucune fiche et je n'envoie "
+               "rien. Je ne donne ni immatriculations ni coordonnées personnelles. Je ne vois que "
+               "les catégories de main courante de votre groupe. Si une donnée manque, je le dis "
+               "au lieu de l'estimer. Pour signaler une réponse fausse : le pouce bas sous la "
+               "réponse.")
+    return {
+        "nom": "Alfred",
+        "role": "assistant du PC Organisation, intégré à Cockpit (circuits du Mans)",
+        "sait_faire": sait,
+        "ne_fait_pas": [
+            "créer, modifier ou clore une fiche, envoyer un message ou agir sur un équipement",
+            "donner des immatriculations (LAPI) ou des coordonnées personnelles",
+            "voir les catégories de main courante hors du périmètre du groupe de l'opérateur",
+            "estimer une donnée absente",
+        ],
+        "exemples": [
+            "Fais-moi un point de situation.",
+            "Qu'est-ce qui s'est passé cette nuit en main courante ?",
+            "Combien de monde sur site ? Et l'an dernier à la même heure ?",
+            "La porte Nord ouvre à quelle heure pour les accrédités ?",
+            "Quelle météo pour les prochaines heures ?",
+        ],
+        "texte": texte,
+        "consigne": "Pour << qui es-tu >>, << que sais-tu faire >>, << aide >> : repondre a "
+                    "partir de `texte` sans appeler d'outil, sans promettre autre chose.",
+    }
 
 
 # Plafond d'un resultat (~1 500 tokens). Le wrapper tronquait a 8 000

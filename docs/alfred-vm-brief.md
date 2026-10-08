@@ -123,9 +123,7 @@ Outils disponibles (le manifeste fait foi) :
 |---|---|
 | `cockpit_lieux` | Horaires (plages continues par public) et infos de tous les lieux du parametrage + services ; `resume` a recopier tel quel. Remplace `query_parametrages` sur le canal cockpit |
 | `cockpit_situation` | Synthese en un appel : evenement, presents, trafic, meteo, alertes, compteurs et dernieres fiches MC, echeances 6 h |
-| `cockpit_main_courante_fiches` | Fiches filtrables (statut, categorie, urgence, texte, depuis_heures, limite) |
-| `cockpit_main_courante_fiche` | Detail d'une fiche + chronologie (par id ou numero Prysm) |
-| `cockpit_main_courante_compteurs` | En cours / closes / creees aujourd'hui par categorie |
+| `cockpit_main_courante` | Sans parametre : point de situation (fiches en cours, plus urgentes d'abord, compteurs du jour et de la derniere heure, fiches oubliees de plus de 30 j comptees a part). `fiche` : detail + chronologie. `periode` (« cette nuit », « depuis 2h », « hier »), `categorie` (« secu », « surete », « medical »), `urgence` (« urgentes », « EU »), `texte`, `statut` en mots de l'operateur. Telephones, e-mails et immatriculations masques. `resume` a recopier tel quel. Remplace `cockpit_main_courante_fiches` / `_fiche` / `_compteurs` (retires du manifeste, encore executables) |
 | `cockpit_trafic` | Verdict du mur circulation, accidents, temps et retard par axe |
 | `cockpit_meteo` | Mur meteo : actuel, pluie, vigilance, consignes, contraintes |
 | `cockpit_alertes` | Alertes actives de la centrale |
@@ -133,6 +131,13 @@ Outils disponibles (le manifeste fait foi) :
 | `cockpit_frequentation` | Presents en direct (+ N-1 a la meme heure) et historique de toutes les editions : pic par jour, comparaison entre annees alignee sur le jour de course, reserves de mesure ; `resume` a recopier tel quel. Parametres en mots de l'operateur (`annee` « l'an dernier », `comparer_avec` « les 3 dernieres editions », `jour` « samedi »). Remplace `cockpit_presents` (retire du manifeste, encore executable) |
 | `cockpit_wiki_procedures` | Procedures / fiches reflexes publiees |
 | `cockpit_evenement` | Evenement(s) en cours et phase, + `contexte_evenements` (description, surnoms, note d'edition saisis en Configuration : pour comprendre, jamais une source de chiffres ou d'horaires) |
+
+**Presentation d'Alfred** : le manifeste porte aussi `presentation`
+(`nom`, `role`, `sait_faire`, `ne_fait_pas`, `exemples`, `texte`,
+`consigne`), tiree du registre des outils : elle suit les ajouts et retraits
+d'outils sans toucher au prompt. L'injecter dans le prompt systeme du canal
+cockpit ; pour « qui es-tu », « que sais-tu faire », « aide », repondre a
+partir de `texte`, sans appel d'outil et sans promettre autre chose.
 
 **Regle de priorite** a mettre dans le prompt : pour ces sujets, utiliser
 les outils `cockpit_*` plutot que des requetes Mongo directes. Les chiffres

@@ -116,6 +116,7 @@ TOOL_LABELS = {
     "cockpit_lieux": "Horaires lieux",
     "cockpit_frequentation": "Fréquentation",
     "cockpit_situation": "Situation",
+    "cockpit_main_courante": "Main courante",
     "cockpit_main_courante_fiches": "Main courante",
     "cockpit_main_courante_fiche": "Fiche",
     "cockpit_main_courante_compteurs": "Compteurs MC",
@@ -826,7 +827,8 @@ def tools_manifest():
     refus, _mode = _tools_auth()
     if refus:
         return refus
-    return jsonify({"ok": True, "tools": alfred_tools.manifest()})
+    return jsonify({"ok": True, "tools": alfred_tools.manifest(),
+                    "presentation": alfred_tools.presentation()})
 
 
 @alfred_chat_bp.route("/api/alfred-tools/retours", methods=["GET"])

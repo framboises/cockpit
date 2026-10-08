@@ -33,7 +33,7 @@
   ];
 
   var SOURCE_ICONS = {
-    cockpit_lieux: "door_front", cockpit_frequentation: "groups", cockpit_situation: "radar", cockpit_main_courante_fiches: "assignment",
+    cockpit_lieux: "door_front", cockpit_frequentation: "groups", cockpit_situation: "radar", cockpit_main_courante: "assignment", cockpit_main_courante_fiches: "assignment",
     cockpit_main_courante_fiche: "description", cockpit_main_courante_compteurs: "tag",
     cockpit_trafic: "traffic", cockpit_meteo: "partly_cloudy_day", cockpit_alertes: "notifications",
     cockpit_timeline: "schedule", cockpit_presents: "groups", cockpit_wiki_procedures: "menu_book",
