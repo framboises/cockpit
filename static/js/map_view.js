@@ -11,6 +11,7 @@
   let mapReady = false;
   let currentView = "timeline"; // "timeline" | "map"
   const categoryLayers = {};
+  let _markersGen = 0; // generation du dernier loadEventMarkers (voir ce dernier)
   let gmCategories = [];
   let tileLayerOSM = null;
   let tileLayerSatACO = null;
@@ -1682,6 +1683,11 @@
     // Clear existing
     clearAllLayers();
 
+    // Le rendu est asynchrone (fetch parametrage, GeoJSON, couleurs) : sans
+    // generation, un chargement precedent encore en vol ajoutait ses couches
+    // apres ce clearAllLayers, et elles s'empilaient sur la carte.
+    var gen = ++_markersGen;
+
     var cacheKey = ev + ":" + yr;
     var useCache = _preloadCache.key === cacheKey && _preloadCache.paramData;
 
@@ -1691,7 +1697,7 @@
       gmCategories = _preloadCache.gmCategories || [];
       if (!paramData || typeof paramData !== "object") return;
       gmCategories.forEach(function (cat) {
-        renderCategoryLayer(cat, paramData);
+        renderCategoryLayer(cat, paramData, gen);
       });
     } else {
       // Fallback: fetch classique
@@ -1702,11 +1708,12 @@
           .then(function (r) { return r.json(); })
           .catch(function () { return []; })
       ]).then(function (results) {
+        if (gen !== _markersGen) return;
         var paramData = results[0];
         gmCategories = results[1] || [];
         if (!paramData || typeof paramData !== "object") return;
         gmCategories.forEach(function (cat) {
-          renderCategoryLayer(cat, paramData);
+          renderCategoryLayer(cat, paramData, gen);
         });
       }).catch(function (err) {
         console.error("[MapView] Erreur chargement:", err);
@@ -1718,7 +1725,7 @@
   // RENDER CATEGORY LAYER
   // ==========================================================================
 
-  function renderCategoryLayer(catConfig, paramData) {
+  function renderCategoryLayer(catConfig, paramData, gen) {
     var catId = catConfig._id;
     var collection = catConfig.collection;
     var icon = catConfig.icon || "place";
@@ -1755,7 +1762,14 @@
       : fetch("/gm_collection_data/" + encodeURIComponent(collection)).then(function (r) { return r.json(); });
 
     geoPromise.then(function (geojson) {
+        if (gen !== _markersGen) return; // chargement depasse par un plus recent
         var features = geojson.features || geojson || [];
+
+        // Une meme categorie ne doit jamais avoir deux groupes : l'ancien,
+        // ecrase dans categoryLayers, restait sur la carte hors de portee de
+        // clearAllLayers.
+        var ancien = categoryLayers[catId];
+        if (ancien && ancien.group) map.removeLayer(ancien.group);
 
         var layerGroup = L.layerGroup().addTo(map);
         var hasRouteColors = !!(sc.hasRouteColor);
@@ -1799,6 +1813,7 @@
           }
 
           colorPromise.then(function (color) {
+            if (gen !== _markersGen) return;
             // Track route colors for this category
             if (itemRouteColor) {
               categoryLayers[catId].routeColors[itemRouteColor] = color;
@@ -2962,20 +2977,9 @@
       });
     }
 
-    // Reload markers when event/year changes
-    var eventSelect = document.getElementById("event-select");
-    var yearSelect = document.getElementById("year-select");
-
-    if (eventSelect) {
-      eventSelect.addEventListener("change", function () {
-        if (currentView === "map") loadEventMarkers();
-      });
-    }
-    if (yearSelect) {
-      yearSelect.addEventListener("change", function () {
-        if (currentView === "map") loadEventMarkers();
-      });
-    }
+    // Pas d'ecouteur event/year-select ici : main.js (cockpitApplySelection ->
+    // loadCockpitData -> CockpitMapView.reload) recharge deja la carte. Un
+    // second appel lance en parallele faisait s'empiler les deux rendus.
   });
 
   // --- Map autocomplete ---
