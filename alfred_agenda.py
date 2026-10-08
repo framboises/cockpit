@@ -345,11 +345,13 @@ def _filtrer(vs, quoi):
                 if mots & set(cles_s):
                     r = [v for v in r if dep in _norm(v["department"])]
                     lib = "réservations Momentus (%s)" % dep.replace("seminaire", "séminaires")
-        reste = [w for w in mots - set(cles) - VIDES if len(w) > 2]
+        reste = [w for w in mots - set(cles) - VIDES - {"vient", "viennent", "client", "clients"} if len(w) > 2]
         if reste:
-            r2 = [v for v in r if all(_contient(w, _norm(" ".join((v["activity"], v["place"], v["department"]))))
-                                      for w in reste)]
-            r = r2 or r
+            # Pas de repli sur toute la famille : << client France Armor >> sans
+            # resultat listait toutes les reservations (constate le 08/10/2026)
+            r = [v for v in r if all(_contient(w, _norm(" ".join((v["activity"], v["place"], v["department"]))))
+                                     for w in reste)]
+            lib += ", « %s »" % " ".join(sorted(reste))
         return r, lib
     mots = [w for w in n.split() if w not in VIDES and len(w) > 1]
     if not mots:
@@ -517,7 +519,12 @@ def t_agenda(db, args, ctx, now=None):
         if recherche:
             v0 = vs[0]
             dj = datetime.strptime(v0["date"], "%Y-%m-%d").replace(tzinfo=TZ_PARIS)
-            l.append("Prochaine occurrence : %s %s" % (_libelle_jour(dj, p), _ligne(v0, plusieurs)[2:]))
+            if resolu.get("edition_passee"):
+                # La ligne est recopiee seule par le modele : elle porte l'avertissement
+                l.append("Édition %s PASSÉE (la suivante n'a pas encore de timeline), première occurrence : le %s %s"
+                         % (paires[0][1], dj.strftime("%d/%m/%Y"), _ligne(v0, plusieurs)[2:]))
+            else:
+                l.append("Prochaine occurrence : %s %s" % (_libelle_jour(dj, p), _ligne(v0, plusieurs)[2:]))
         # Fenetre courte (ce soir, prochaines heures) : les reservations a la
         # journee, deja en cours, tiennent sur une ligne par jour ; le detail
         # noyait les creneaux horaires (constate le 08/10/2026)
@@ -545,6 +552,11 @@ def t_agenda(db, args, ctx, now=None):
         l.append("Rien de prévu dans les %d prochains jours pour ce sujet." % RECHERCHE_JOURS)
     else:
         l.append("Rien de prévu sur ce créneau dans la timeline.")
+    if not vs and filtre and not admin:
+        # Un nom de client cherche par un operateur : ne pas laisser croire
+        # qu'il n'y a rien, sans dire s'il y a quelque chose
+        l.append("Les noms des clients Momentus ne sont pas communiqués : si c'est un client, "
+                 "demander à un administrateur.")
     resume = "\n".join(l)
     if len(resume) > RESUME_MAX:
         resume = resume[: RESUME_MAX - 40].rsplit("\n", 1)[0] + "\n[liste coupée]"

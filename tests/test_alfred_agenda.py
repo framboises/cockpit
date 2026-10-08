@@ -91,8 +91,11 @@ def test_clients_momentus_masques_sauf_admin(monkeypatch):
     assert "FRANCE ARMOR" not in res and "CRTI" not in res
     assert "14:00-23:59 Réservation séminaire, P2A, Restaurant Karting\n" in res
     assert "FRANCE ARMOR" not in str(r["vignettes"])
-    # Un nom de client ne se cherche pas
+    # Un nom de client ne se cherche pas, et rien ne remplace la reponse
     assert "FRANCE ARMOR" not in _run(monkeypatch, {"quoi": "france armor"}, ctx={})["resume"]
+    r = _run(monkeypatch, {"quoi": "vient client France Armor"}, ctx={})
+    assert r["vignettes"] == [] and "Réservation" not in r["resume"]
+    assert "ne sont pas communiqués" in r["resume"]
     # Voie WhatsApp (sans portee) : masque aussi
     assert "FRANCE ARMOR" not in _run(monkeypatch, {}, ctx={"sans_main_courante": True})["resume"]
     assert "FRANCE ARMOR" in _run(monkeypatch, {"quand": "aujourd'hui"})["resume"]
@@ -154,6 +157,9 @@ def test_edition_suivante_sans_timeline(monkeypatch):
     assert "06:00 Debut du montage" in r["resume"] and "passée" in r["resume"]
     # << montage >> ne prend pas << demontage >>
     assert "démontage" not in r["resume"]
+    # Jamais << Prochaine occurrence >> pour une date passee
+    assert "Prochaine occurrence" not in r["resume"]
+    assert "Édition 2026 PASSÉE (la suivante n'a pas encore de timeline), première occurrence : le 11/05/2026 06:00 Debut du montage" in r["resume"]
 
 
 def test_match_sport_seul_et_prochaine_occurrence(monkeypatch):
