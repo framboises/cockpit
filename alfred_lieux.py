@@ -508,8 +508,13 @@ def resoudre_evenement(db, args, ctx, now):
     event = None
     if ev_arg:
         q = norm(ev_arg)
-        event = next((n for n in noms if norm(n) == q), None) or next(
-            (n for n in noms if q in norm(n)), None)
+        event = next((n for n in noms if norm(n) == q), None)
+        if not event:
+            # Sigles et surnoms saisis en Configuration (alfred_evenements)
+            import alfred_evenements
+            ev, _ = alfred_evenements.resoudre_nom(db, ev_arg)
+            event = ev if ev in noms else None
+        event = event or next((n for n in noms if q in norm(n)), None)
     if not event:
         ce = str((ctx or {}).get("event") or "")
         if ce and norm(ce) != "saison":

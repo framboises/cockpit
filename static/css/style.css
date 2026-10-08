@@ -16604,3 +16604,37 @@ th span { font-size: 0.88rem; font-weight: 700; }
   .si-cal-vzpill { padding: 0 3px; font-size: 0; }
   .si-cal-vzpill .material-symbols-outlined { font-size: 11px; }
 }
+
+/* Configuration > Contexte des evenements (Alfred) : alfred_contexte_admin.js */
+.aec-intro { margin: 0 0 12px; font-size: .85rem; color: var(--muted); line-height: 1.5; }
+.aec-list { display: flex; flex-direction: column; gap: 6px; }
+.aec-row { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
+.aec-row.is-open { box-shadow: var(--shadow-sm); }
+.aec-head {
+  width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  border: 0; background: transparent; cursor: pointer; text-align: left; color: var(--text);
+  font-size: .9rem;
+}
+.aec-head:hover { background: var(--bg); border-radius: var(--radius-md); }
+.aec-name { font-weight: 600; }
+.aec-short { font-size: .75rem; color: var(--muted); }
+.aec-badge {
+  margin-left: auto; padding: 1px 8px; border-radius: 999px; font-size: .72rem; font-weight: 600;
+  background: var(--bg); color: var(--muted);
+}
+.aec-badge.is-on { background: var(--success-light); color: var(--success); }
+.aec-chev { font-size: 20px !important; color: var(--muted); transition: transform .15s ease; }
+.aec-row.is-open .aec-chev { transform: rotate(180deg); }
+.aec-body { padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+.aec-field { display: flex; flex-direction: column; gap: 4px; position: relative; }
+.aec-label { font-size: .78rem; font-weight: 600; color: var(--muted); }
+.aec-desc { resize: vertical; min-height: 84px; font-family: inherit; }
+.aec-count { align-self: flex-end; font-size: .72rem; color: var(--muted); }
+.aec-count.is-over { color: var(--danger); }
+.aec-note { flex-direction: row; align-items: center; gap: 8px; }
+.aec-note .form-input { flex: 1; min-width: 0; }
+.aec-year { width: 44px; font-size: .8rem; font-weight: 600; color: var(--muted); }
+.aec-foot { display: flex; align-items: center; gap: 10px; }
+.aec-meta { font-size: .75rem; color: var(--muted); }
+.aec-save { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.aec-save .material-symbols-outlined { font-size: 18px; }

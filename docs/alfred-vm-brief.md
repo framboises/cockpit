@@ -130,9 +130,9 @@ Outils disponibles (le manifeste fait foi) :
 | `cockpit_meteo` | Mur meteo : actuel, pluie, vigilance, consignes, contraintes |
 | `cockpit_alertes` | Alertes actives de la centrale |
 | `cockpit_timeline` | Prochaines echeances (factorisees) |
-| `cockpit_presents` | Presents sur site (meme calcul que l'accueil) |
+| `cockpit_frequentation` | Presents en direct (+ N-1 a la meme heure) et historique de toutes les editions : pic par jour, comparaison entre annees alignee sur le jour de course, reserves de mesure ; `resume` a recopier tel quel. Parametres en mots de l'operateur (`annee` « l'an dernier », `comparer_avec` « les 3 dernieres editions », `jour` « samedi »). Remplace `cockpit_presents` (retire du manifeste, encore executable) |
 | `cockpit_wiki_procedures` | Procedures / fiches reflexes publiees |
-| `cockpit_evenement` | Evenement(s) en cours et phase |
+| `cockpit_evenement` | Evenement(s) en cours et phase, + `contexte_evenements` (description, surnoms, note d'edition saisis en Configuration : pour comprendre, jamais une source de chiffres ou d'horaires) |
 
 **Regle de priorite** a mettre dans le prompt : pour ces sujets, utiliser
 les outils `cockpit_*` plutot que des requetes Mongo directes. Les chiffres

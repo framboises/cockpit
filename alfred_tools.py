@@ -193,13 +193,27 @@ def _fiche(doc, detail=False):
 def t_evenement(db, args, ctx):
     """Evenement(s) en cours et phase."""
     try:
+        import alfred_evenements
         import event_courant
         p = event_courant.payload(db)
-        return {"disponible": True,
-                "evenement_courant": p.get("current"),
-                "evenements_actifs": p.get("active"),
-                "selection_operateur": {"evenement": (ctx or {}).get("event"),
-                                        "annee": (ctx or {}).get("year")}}
+        out = {"disponible": True,
+               "evenement_courant": p.get("current"),
+               "evenements_actifs": p.get("active"),
+               "selection_operateur": {"evenement": (ctx or {}).get("event"),
+                                       "annee": (ctx or {}).get("year")}}
+        # Description saisie en Configuration : pour comprendre, pas pour citer
+        vus, contextes = set(), []
+        paires = [((ctx or {}).get("event"), (ctx or {}).get("year"))] + [
+            (a.get("event"), a.get("year")) for a in p.get("active") or []]
+        for ev, yr in paires:
+            if ev and ev not in vus:
+                vus.add(ev)
+                c = alfred_evenements.contexte(db, ev, yr)
+                if c:
+                    contextes.append(c)
+        if contextes:
+            out["contexte_evenements"] = contextes
+        return out
     except Exception as exc:
         return _indisponible("evenement", exc)
 
@@ -490,6 +504,7 @@ def t_situation(db, args, ctx):
         "disponible": True,
         "heure": datetime.now(TZ_PARIS).strftime("%d/%m %H:%M"),
         "evenement": ev.get("evenement_courant"),
+        "contexte_evenements": ev.get("contexte_evenements"),
         "presents": pr.get("presents") if pr.get("disponible") else pr.get("motif", "indisponible"),
         "trafic": ({"verdict": tr.get("verdict"), "accidents": tr.get("accidents_en_zone"),
                     "axes_charges": [a for a in tr.get("axes", []) if a["etat"] not in ("fluide",)][:4]}
@@ -515,7 +530,34 @@ def t_lieux(db, args, ctx):
     return alfred_lieux.t_lieux(db, args, ctx)
 
 
+def t_frequentation(db, args, ctx):
+    import alfred_frequentation
+    return alfred_frequentation.t_frequentation(db, args, ctx)
+
+
 TOOLS = {
+    "cockpit_frequentation": {
+        "fn": t_frequentation,
+        "description": "Frequentation du site : personnes presentes EN DIRECT (meme calcul que "
+                       "l'accueil et la TV, avec l'ecart a la meme heure l'an dernier), et "
+                       "HISTORIQUE de toutes les editions d'un evenement : pic de presents par "
+                       "jour et son heure, entrees, comparaison entre annees alignee sur le jour "
+                       "de course. A appeler pour TOUTE question de presents, affluence, monde, "
+                       "pic, frequentation ou comparaison d'annees. Recopier le champ resume sans "
+                       "le reformuler ni le completer (reserves comprises).",
+        "parameters": {"type": "object", "properties": {
+            "evenement": {"type": "string", "description": "evenement tel que dit par l'operateur "
+                                                           "(les camions, le Mans Classic, SBK...). "
+                                                           "Omettre s'il n'en cite pas"},
+            "annee": {"type": "string", "description": "annee ou expression de l'operateur TELLE "
+                                                       "QUELLE : 2025, l'an dernier, il y a deux ans"},
+            "comparer_avec": {"type": "string", "description": "si l'operateur veut comparer : "
+                                                               "annees (2023, 2024), l'an dernier, "
+                                                               "les 3 dernieres editions, toutes"},
+            "jour": {"type": "string", "description": "jour vise : samedi, jour de course, "
+                                                      "veille, J-1, YYYY-MM-DD, aujourd'hui"},
+        }},
+    },
     "cockpit_lieux": {
         "fn": t_lieux,
         "description": "Horaires d'ouverture et informations de TOUS les lieux de l'evenement : "
@@ -609,7 +651,10 @@ TOOLS = {
             "heures": {"type": "integer", "description": "fenetre en heures, 1 a 48, defaut 12"},
         }},
     },
+    # Fusionne dans cockpit_frequentation : retire du manifeste, toujours
+    # executable pour un wrapper qui l'appellerait encore.
     "cockpit_presents": {
+        "masque": True,
         "fn": t_presents,
         "description": "Nombre de personnes presentes sur site (controle d'acces live), "
                        "meme calcul que l'accueil Cockpit.",
@@ -636,7 +681,7 @@ def manifest():
     return [{"type": "function",
              "function": {"name": name, "description": t["description"],
                           "parameters": t["parameters"]}}
-            for name, t in TOOLS.items()]
+            for name, t in TOOLS.items() if not t.get("masque")]
 
 
 # Plafond d'un resultat (~1 500 tokens). Le wrapper tronquait a 8 000

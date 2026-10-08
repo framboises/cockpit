@@ -111,6 +111,7 @@ _indexes_done = False
 
 TOOL_LABELS = {
     "cockpit_lieux": "Horaires lieux",
+    "cockpit_frequentation": "Fréquentation",
     "cockpit_situation": "Situation",
     "cockpit_main_courante_fiches": "Main courante",
     "cockpit_main_courante_fiche": "Fiche",
@@ -629,6 +630,61 @@ def chat_health():
 
 
 # ---------------------------------------------------------------------------
+# Contexte des evenements (page Configuration, admin)
+# ---------------------------------------------------------------------------
+
+@alfred_chat_bp.route("/api/alfred-chat/contextes", methods=["GET"])
+@_role_required("admin")
+def contextes_liste():
+    import alfred_evenements as AE
+    db = _db()
+    docs = AE.contextes(db)
+    annees = {}
+    for d in db["parametrages"].find({}, {"event": 1, "year": 1}):
+        if d.get("event") and str(d.get("year") or "").isdigit():
+            annees.setdefault(d["event"], set()).add(str(d["year"]))
+    out = []
+    for e in AE.catalogue(db):
+        if AE.norm(e["nom"]) == "saison":
+            continue
+        c = docs.get(e["nom"]) or {}
+        out.append({"event": e["nom"], "short": e.get("short"),
+                    "description": c.get("description") or "",
+                    "surnoms": c.get("surnoms") or [],
+                    "editions": c.get("editions") or {},
+                    "annees": sorted(annees.get(e["nom"], set()), reverse=True),
+                    "updated_at": _iso(c.get("updated_at")), "updated_by": c.get("updated_by")})
+    out.sort(key=lambda x: (not (x["description"] or x["surnoms"]), x["event"]))
+    return jsonify({"ok": True, "evenements": out,
+                    "limites": {"description": AE.DESCRIPTION_MAX, "note": AE.NOTE_MAX,
+                                "surnoms": AE.SURNOMS_MAX}})
+
+
+@alfred_chat_bp.route("/api/alfred-chat/contexte", methods=["POST"])
+@_role_required("admin")
+def contexte_enregistrer():
+    import alfred_evenements as AE
+    db = _db()
+    data = request.get_json(silent=True) or {}
+    noms = {e["nom"] for e in AE.catalogue(db)}
+    if str(data.get("event") or "").strip() not in noms:
+        return jsonify({"ok": False, "error": "evenement_inconnu"}), 400
+    doc, err = AE.nettoyer(data)
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+    conflits = AE.conflits_surnoms(db, doc)
+    if conflits:
+        return jsonify({"ok": False, "error": "surnom_deja_pris", "conflits": conflits}), 409
+    email, name, _p = _me()
+    doc, err = AE.enregistrer(db, data, auteur=name or email)
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+    doc.pop("_id", None)
+    doc["updated_at"] = _iso(doc.get("updated_at"))
+    return jsonify({"ok": True, "contexte": doc})
+
+
+# ---------------------------------------------------------------------------
 # Routes outils (VM -> Cockpit)
 # ---------------------------------------------------------------------------
 
@@ -742,6 +798,8 @@ def tools_call():
         resolu["lieux"] = [x.get("nom") for x in result["lieux"] if isinstance(x, dict)][:6]
     if isinstance(result, dict) and result.get("candidats"):
         resolu["candidats"] = result["candidats"][:6]
+    if isinstance(result, dict) and isinstance(result.get("resolu"), dict):
+        resolu.update(result["resolu"])   # cockpit_frequentation : vue, annees, jour
     logger.info("alfred-tools %s rid=%s auth=%s scoped=%s ok=%s %dms args=%s resolu=%s",
                 name, str(data.get("request_id") or "-")[:40], mode, bool(scope_token), ok, ms,
                 json.dumps(args, ensure_ascii=False, default=str)[:400],
