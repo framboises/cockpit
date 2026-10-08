@@ -192,7 +192,8 @@ def test_vue_complete_exige_le_secret_distinct(client, unscoped, db, monkeypatch
     body = json.dumps({"tool": "cockpit_stub"}).encode()
     r = client.post("/api/alfred-tools/call", data=body, headers=_sign(body, secret=UNSCOPED))
     assert r.status_code == 200
-    assert vu["ctx"] == {}
+    # Aucun perimetre operateur, et jamais de main courante sur ce chemin
+    assert vu["ctx"] == {"sans_main_courante": True}
     assert db[alfred_chat.COL_TOOL_CALLS].docs[-1]["auth"] == "unscoped"
     # Le meme corps signe avec le secret normal reste refuse
     r = client.post("/api/alfred-tools/call", data=body, headers=_sign(body))

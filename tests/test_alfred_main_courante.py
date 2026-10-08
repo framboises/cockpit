@@ -220,3 +220,48 @@ def test_manifeste_et_presentation():
     assert p["nom"] == "Alfred" and len(p["sait_faire"]) == len(noms)
     assert any("main courante" in s for s in p["sait_faire"])
     assert "lecture seule" in p["texte"]
+
+
+# ---------------------------------------------------------------------------
+# Jamais de main courante par la vue complete (WhatsApp)
+# ---------------------------------------------------------------------------
+
+def test_vue_complete_sans_main_courante(monkeypatch):
+    import json
+    from flask import Flask
+    import alfred_chat
+    noms = [t["function"]["name"] for t in AT.manifest(sans_main_courante=True)]
+    assert "cockpit_main_courante" not in noms and "cockpit_meteo" in noms
+
+    monkeypatch.setattr(alfred_chat, "_db", lambda: _db())
+    monkeypatch.setattr(alfred_chat, "_ensure_indexes", lambda db: None)
+    vus = []
+    monkeypatch.setattr(alfred_chat.alfred_tools, "call",
+                        lambda db, name, args, ctx: (vus.append(ctx) or True, {"ok": 1}))
+    app = Flask(__name__)
+
+    def appel(tool, mode, scope=None):
+        monkeypatch.setattr(alfred_chat, "_tools_auth", lambda: (None, mode))
+        body = {"tool": tool, "args": {}}
+        if scope:
+            body["scope"] = scope
+        with app.test_request_context(data=json.dumps(body), method="POST",
+                                      content_type="application/json"):
+            r = alfred_chat.tools_call()
+        return r[1] if isinstance(r, tuple) else 200
+
+    for t in AT.OUTILS_MAIN_COURANTE:
+        assert appel(t, "unscoped") == 403
+    assert not vus
+    assert appel("cockpit_situation", "unscoped") == 200
+    assert vus[-1] == {"sans_main_courante": True}
+
+    monkeypatch.setattr(AT, "t_trafic", lambda *a: {"disponible": False})
+    monkeypatch.setattr(AT, "t_meteo", lambda *a: {"disponible": False})
+    monkeypatch.setattr(AT, "t_alertes", lambda *a: {"disponible": False})
+    monkeypatch.setattr(AT, "t_timeline", lambda *a: {"disponible": False})
+    monkeypatch.setattr(AT, "t_evenement", lambda *a: {})
+    monkeypatch.setattr(AT, "t_presents", lambda *a: {"disponible": False})
+    s = AT.t_situation(_db(), {}, {"sans_main_courante": True})
+    assert s["main_courante"] == "non consultable sur ce canal"
+    assert s["fiches_en_cours_les_plus_urgentes"] == []

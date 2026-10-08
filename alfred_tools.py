@@ -495,10 +495,13 @@ def t_situation(db, args, ctx):
     tr = t_trafic(db, {}, ctx)
     me = t_meteo(db, {}, ctx)
     al = t_alertes(db, {}, ctx)
-    try:
-        mc = t_main_courante(db, {}, ctx)
-    except Exception as exc:
-        mc = _indisponible("main_courante", exc)
+    if (ctx or {}).get("sans_main_courante"):
+        mc = {"disponible": False}
+    else:
+        try:
+            mc = t_main_courante(db, {}, ctx)
+        except Exception as exc:
+            mc = _indisponible("main_courante", exc)
     tl = t_timeline(db, {"heures": 6}, ctx)
     ev = t_evenement(db, {}, ctx)
     pr = t_presents(db, {}, ctx)
@@ -518,7 +521,8 @@ def t_situation(db, args, ctx):
                      "dernieres": [a["titre"] for a in al.get("alertes", [])[:5]]}
                     if al.get("disponible") else "indisponible"),
         # Meme lecture que cockpit_main_courante sans parametre
-        "main_courante": (mc.get("compteurs") if mc.get("disponible") else "indisponible"),
+        "main_courante": ("non consultable sur ce canal" if (ctx or {}).get("sans_main_courante")
+                          else mc.get("compteurs") if mc.get("disponible") else "indisponible"),
         "fiches_en_cours_les_plus_urgentes": [
             {k: f.get(k) for k in ("numero", "ouverte", "categorie", "urgence", "zone", "texte")
              if f.get(k)} for f in (mc.get("fiches") or [])[:5]],
@@ -726,12 +730,20 @@ TOOLS = {
 }
 
 
-def manifest():
+# La main courante ne sort jamais par la vue complete sans jeton (chemin
+# WhatsApp du wrapper) : un groupe WhatsApp n'a pas les droits d'un
+# operateur. Bloque ICI aussi, pour tenir meme si le wrapper changeait.
+OUTILS_MAIN_COURANTE = {"cockpit_main_courante", "cockpit_main_courante_fiches",
+                        "cockpit_main_courante_fiche", "cockpit_main_courante_compteurs"}
+
+
+def manifest(sans_main_courante=False):
     """Definitions au format tool-calling OpenAI/Ollama."""
     return [{"type": "function",
              "function": {"name": name, "description": t["description"],
                           "parameters": t["parameters"]}}
-            for name, t in TOOLS.items() if not t.get("masque")]
+            for name, t in TOOLS.items() if not t.get("masque")
+            and not (sans_main_courante and name in OUTILS_MAIN_COURANTE)]
 
 
 def presentation():

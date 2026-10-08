@@ -824,10 +824,10 @@ def _tools_auth():
 
 @alfred_chat_bp.route("/api/alfred-tools/manifest", methods=["GET"])
 def tools_manifest():
-    refus, _mode = _tools_auth()
+    refus, mode = _tools_auth()
     if refus:
         return refus
-    return jsonify({"ok": True, "tools": alfred_tools.manifest(),
+    return jsonify({"ok": True, "tools": alfred_tools.manifest(sans_main_courante=mode == "unscoped"),
                     "presentation": alfred_tools.presentation()})
 
 
@@ -882,7 +882,11 @@ def tools_call():
         if ctx is None:
             return jsonify({"ok": False, "error": "scope_invalide"}), 403
     elif mode == "unscoped":
-        ctx = {}
+        # Vue complete (WhatsApp) : jamais de main courante, cf. alfred_tools
+        if name in alfred_tools.OUTILS_MAIN_COURANTE:
+            return jsonify({"ok": False, "error": "hors_canal",
+                            "message": "La main courante n'est pas consultable sur ce canal."}), 403
+        ctx = {"sans_main_courante": True}
     else:
         return jsonify({"ok": False, "error": "scope_requis"}), 403
     db = _db()
