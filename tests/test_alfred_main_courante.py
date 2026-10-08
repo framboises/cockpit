@@ -265,3 +265,13 @@ def test_vue_complete_sans_main_courante(monkeypatch):
     s = AT.t_situation(_db(), {}, {"sans_main_courante": True})
     assert s["main_courante"] == "non consultable sur ce canal"
     assert s["fiches_en_cours_les_plus_urgentes"] == []
+
+
+def test_mot_range_dans_le_mauvais_champ(monkeypatch):
+    # Vu en direct : le modele a envoye urgence="secours"
+    r = _run(monkeypatch, {"urgence": "secours"})
+    assert r["resolu"]["categorie"] == "Secours" and [f["numero"] for f in r["fiches"]] == [2]
+    r = _run(monkeypatch, {"urgence": "bizarre"})
+    assert "Non compris, ignoré : urgence « bizarre »" in r["resume"]
+    r = _run(monkeypatch, {"periode": "a la saint glinglin"})
+    assert r["vue"] == "point" and "période « a la saint glinglin »" in r["resume"]

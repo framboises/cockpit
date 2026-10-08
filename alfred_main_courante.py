@@ -386,7 +386,15 @@ def t_main_courante(db, args, ctx, now=None):
     libelle_per = " + ".join("%s %s" % p for p in paires)
     resolu["perimetre"] = libelle_per
 
-    # 3. Filtres
+    # 3. Filtres. Le modele range parfois un mot dans le mauvais champ
+    # (urgence: "secours") : on le recupere plutot que de l'ignorer en silence.
+    incompris = []
+    args = dict(args)
+    if args.get("urgence") and not urgences_demandees(args["urgence"]):
+        if categorie_demandee(args["urgence"]) and not args.get("categorie"):
+            args["categorie"] = args.pop("urgence")
+        else:
+            incompris.append("urgence « %s »" % str(args.pop("urgence"))[:40])
     cat = categorie_demandee(args.get("categorie"))
     if cat == "":
         return {"disponible": True, "vue": "liste", "fiches": [], "resolu": resolu,
@@ -412,6 +420,9 @@ def t_main_courante(db, args, ctx, now=None):
         resolu["periode"] = per[2]
     elif args.get("periode"):
         resolu["periode_non_comprise"] = str(args["periode"])[:60]
+        incompris.append("période « %s »" % resolu["periode_non_comprise"])
+    if incompris:
+        resolu["non_compris"] = incompris
     if statut == "en_cours":
         flt["$and"].append({"status_code": {"$ne": STATUT_CLOS}})
     elif statut == "closes":
@@ -443,6 +454,8 @@ def t_main_courante(db, args, ctx, now=None):
         par_urg = _repartition(docs, lambda d: URGENCES.get(d.get("niveau_urgence")))
         fiches = [fiche_courte(d, now) for d in recentes[:LISTE_DATA_MAX]]
         l = ["Main courante %s, %s." % (libelle_per, heure)]
+        if incompris:
+            l.append("Non compris, ignoré : %s." % ", ".join(incompris))
         if not docs:
             l.append("Aucune fiche en cours.")
         else:
@@ -484,8 +497,8 @@ def t_main_courante(db, args, ctx, now=None):
             {"en_cours": "en cours", "closes": "closes", "toutes": "ouvertes ou closes"}[statut]]
     l = ["Main courante %s, %s. Fiches %s : %d." % (
         libelle_per, heure, ", ".join(c for c in crit if c), len(docs))]
-    if resolu.get("periode_non_comprise"):
-        l.append("Période « %s » non comprise : aucune borne de temps appliquée." % resolu["periode_non_comprise"])
+    if incompris:
+        l.append("Non compris, ignoré : %s." % ", ".join(incompris))
     if docs:
         l.append("Par catégorie : %s." % _txt_rep(_repartition(docs, _cat)))
         if per:

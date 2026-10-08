@@ -609,7 +609,9 @@ TOOLS = {
         "description": "Synthese de la situation en cours en UN appel : evenement, presents, "
                        "trafic, meteo, alertes, compteurs et dernieres fiches main courante, "
                        "echeances des 6 prochaines heures. A appeler en premier pour toute "
-                       "question generale (ou en est-on, point de situation, briefing).",
+                       "question generale (ou en est-on, point de situation, briefing). Photo de "
+                       "l'instant seulement : pour une periode passee (cette nuit, depuis 2 h) ou "
+                       "toute question de fiches, appeler cockpit_main_courante avec `periode`.",
         "parameters": {"type": "object", "properties": {}},
     },
     "cockpit_main_courante": {
@@ -622,8 +624,12 @@ TOOLS = {
                        "derniere heure). Avec `fiche` : detail et chronologie d'une fiche. Avec "
                        "`periode`, `categorie`, `urgence`, `texte` : fiches correspondantes. A "
                        "appeler pour TOUTE question sur les fiches, interventions, incidents, "
-                       "evenements de la nuit, ce qui est en cours. Recopier le champ resume sans "
-                       "le reformuler ni le completer ; ne jamais inventer de fiche.",
+                       "urgences en cours, ce qui s'est passe (cette nuit, depuis 2 h, hier : "
+                       "TOUJOURS passer `periode`), ce qui est en cours, << y a-t-il quelque chose "
+                       "sur X >> (`texte`). Passer `evenement` des que l'operateur en cite un (les "
+                       "24h camions). Un numero de fiche cite va dans `fiche`. Recopier le champ "
+                       "resume sans le reformuler ni le completer ; ne jamais inventer de fiche. "
+                       "Ne cree ni ne modifie aucune fiche.",
         "parameters": {"type": "object", "properties": {
             "fiche": {"type": "string", "description": "numero de fiche cite par l'operateur"},
             "periode": {"type": "string", "description": "expression TELLE QUELLE : cette nuit, "
