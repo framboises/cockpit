@@ -78,7 +78,8 @@
   background: rgba(15, 23, 42, .78); color: #fff; font-size: .68rem; font-weight: 700; text-align: center;
 }
 .dc-card-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
-.dc-card-top { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.dc-card-top { display: flex; align-items: center; gap: 4px 5px; min-width: 0; flex-wrap: wrap; }
+.dc-list { overflow-x: hidden; }
 .dc-ref { font-weight: 700; font-size: .84rem; white-space: nowrap; }
 .dc-when { margin-left: auto; font-size: .72rem; color: var(--muted); white-space: nowrap; }
 .dc-chip {
@@ -89,6 +90,8 @@
 .dc-text { font-size: .86rem; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .dc-meta { display: flex; gap: 8px; flex-wrap: wrap; font-size: .72rem; color: var(--muted); }
 .dc-carroye { font-weight: 700; color: var(--text); }
+.dc-event-tag { font-weight: 700; color: #0f766e; }
+#dc-event { max-width: 150px; }
 .dc-nopos { font-style: italic; }
 
 /* ---------- carte ---------- */
@@ -146,6 +149,24 @@ body:has(.ac-fab) .dc-panel { bottom: 92px; }
 .dc-tl-photos { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
 .dc-tl-photos .dc-gal-item { width: 72px; }
 
+.dc-compose { display: flex; flex-direction: column; gap: 6px; }
+.dc-compose-kind { display: flex; gap: 4px; }
+.dc-compose-kind button {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--card); color: var(--muted);
+  font: inherit; font-size: .76rem; font-weight: 600; cursor: pointer;
+}
+.dc-compose-kind button .material-symbols-outlined { font-size: 16px; }
+.dc-compose-kind button.active { border-color: #7c3aed; background: #f5f3ff; color: #6d28d9; }
+.dc-compose-kind button.active:last-child { border-color: #ca8a04; background: #fefce8; color: #a16207; }
+.dc-note.is-message .dc-note-send { background: #7c3aed; }
+.dc-note.is-message .dc-note-input:focus { border-color: #7c3aed; }
+.dc-tl-row.is-message { background: #f5f3ff; border-left-color: #7c3aed; margin-left: 24px; }
+.dc-tl-row.is-reply { background: #fff7ed; margin-right: 24px; }
+.dc-tl-tag.is-msg { color: #6d28d9; }
+.dc-tl-tag.is-reply { color: #c2410c; }
+.dc-card.has-reply { background: #f5f3ff; }
+.dc-chip.is-pending { font-weight: 600; }
 .dc-note { display: flex; gap: 6px; align-items: flex-end; }
 .dc-note-input {
   flex: 1; resize: none; min-height: 38px; max-height: 120px;

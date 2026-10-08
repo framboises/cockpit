@@ -1327,6 +1327,17 @@
           : "En file du service" + (item.dispatch.queue_reason ? " : " + item.dispatch.queue_reason : "");
         right.appendChild(dIco);
       }
+      // Ticket lie dans une application externe (Friday...) ; resolu = a cloturer
+      if (item.integrations) {
+        Object.keys(item.integrations).forEach(function (k) {
+          var t = item.integrations[k];
+          var attn = t.attention === "resolved" && !isClosed;
+          var iIco = matIcon(attn ? "task_alt" : "hub", "pcorg-row-integ" + (attn ? " is-attention" : ""));
+          iIco.title = (t.label || k) + " " + (t.ref || "") + " : " + (t.status_label || t.status || "") +
+            (attn ? " - resolu, a cloturer" : "");
+          right.appendChild(iIco);
+        });
+      }
       var timeEl = mkEl("span", "pcorg-row-time");
       // Fiches closes : la date si ce n'est pas aujourd'hui (evenements sur
       // plusieurs jours : "14:05" seul etait ambigu)
@@ -1617,6 +1628,54 @@
     return m < 60 ? m + " min" : Math.floor(m / 60) + " h " + _pad2(m % 60);
   }
 
+  // Tickets lies dans des applications externes (integrations.py, ex. Friday
+  // du service informatique) : reference, statut, agent. Ticket resolu =
+  // "a cloturer" : jamais de cloture automatique, l'operateur clot lui-meme.
+  function buildIntegrationsBlock(d, closed) {
+    var integ = d.integrations || null;
+    if (!integ) return null;
+    var keys = Object.keys(integ);
+    if (!keys.length) return null;
+    var wrap = mkEl("div", "pcorg-integ");
+    keys.forEach(function (k) {
+      var t = integ[k];
+      var row = mkEl("div", "pcorg-integ-row" + (t.attention === "resolved" && !closed ? " is-attention" : ""));
+      row.appendChild(matIcon(t.attention === "resolved" ? "task_alt" : "hub"));
+      var txt = mkEl("div", "pcorg-integ-txt");
+      var head = mkEl("div", "");
+      var strong = mkEl("strong", "");
+      strong.textContent = (t.label || k) + " " + (t.ref || "");
+      if (t.url) {
+        var a = mkEl("a", "");
+        a.href = t.url;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.appendChild(strong);
+        head.appendChild(a);
+      } else {
+        head.appendChild(strong);
+      }
+      var st = mkEl("span", "pcorg-integ-status");
+      st.textContent = t.status_label || t.status || "";
+      head.appendChild(st);
+      txt.appendChild(head);
+      var sub = mkEl("div", "pcorg-integ-sub");
+      var parts = [];
+      if (t.agent) parts.push("Agent : " + t.agent);
+      if (t.attention === "resolved" && !closed) parts.push("Resolu" + (t.resolved_by ? " par " + t.resolved_by : "") + " : a cloturer");
+      sub.textContent = parts.join(" - ");
+      if (parts.length) txt.appendChild(sub);
+      if (t.resolution) {
+        var res = mkEl("div", "pcorg-integ-res");
+        res.textContent = t.resolution;
+        txt.appendChild(res);
+      }
+      row.appendChild(txt);
+      wrap.appendChild(row);
+    });
+    return wrap;
+  }
+
   // Ligne d'etat du dispatch + bouton "Proposer automatiquement" + temps
   // d'intervention. Rend null si rien a montrer.
   function buildDispatchBlock(d, closed) {
@@ -1837,6 +1896,8 @@
     // service, horodatages d'intervention
     var dispBlock = buildDispatchBlock(d, isClosed || d.status_code === 10);
     if (dispBlock) body.appendChild(dispBlock);
+    var integBlock = buildIntegrationsBlock(d, isClosed || d.status_code === 10);
+    if (integBlock) body.appendChild(integBlock);
 
     // Mini map
     var mapDiv = mkEl("div", "pcorg-fiche-minimap");

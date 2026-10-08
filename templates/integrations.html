@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>Applications liees -- COCKPIT</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/integrations.css') }}">
+</head>
+{#
+  Applications liees (/integrations, admin, integrations.py) : applications
+  externes (Friday du service informatique...) qui recoivent des fiches de
+  Cockpit selon des regles categorie / sous-classification et renvoient le
+  suivi de leurs tickets. Rendu : static/js/integrations_admin.js.
+#}
+{% set _u = user or {} %}
+{% set user_roles = _u.get('roles') or [] %}
+{% set user_firstname = _u.get('firstname') or '' %}
+{% set user_lastname = _u.get('lastname') or '' %}
+{% set user_email = _u.get('email') or '' %}
+<body>
+<div class="app-layout">
+  {% set sidebar_active = '/integrations' %}
+  {% include '_sidebar.html' %}
+  <div class="app-main single-col-page">
+    <header class="app-header">
+      <button class="header-burger" id="header-burger-btn" type="button" aria-label="Menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+      <span class="material-symbols-outlined" style="font-size:22px;color:#4f46e5;">hub</span>
+      <span class="header-event-name">Applications liees</span>
+      <div class="header-spacer"></div>
+      <button class="btn btn-primary" id="ig-new" type="button">
+        <span class="material-symbols-outlined">add</span> Nouvelle application
+      </button>
+    </header>
+    <main class="ig-main">
+      <p class="ig-intro">
+        Chaque application recoit les fiches des categories ou sous-classifications choisies et renvoie
+        le suivi de ses tickets (statut, agent, notes, photos, resolution), visible dans la fiche.
+        <strong>Une application externe ne cloture jamais une fiche</strong> : un ticket resolu affiche
+        <em>A cloturer</em> et l'operateur clot lui-meme.
+      </p>
+      <div id="ig-list" class="ig-list"></div>
+    </main>
+  </div>
+</div>
+
+<div class="ig-overlay" id="ig-edit" hidden>
+  <div class="ig-sheet" role="dialog" aria-modal="true" aria-labelledby="ig-edit-title">
+    <header class="ig-sheet-head">
+      <h3 id="ig-edit-title">Application</h3>
+      <button type="button" class="ig-close" data-close aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
+    </header>
+    <div class="ig-sheet-body">
+      <div class="ig-grid2">
+        <label>Identifiant <span class="ig-hint">(minuscules, ex. friday)</span>
+          <input id="ig-f-id" class="form-input" maxlength="31" autocomplete="off"></label>
+        <label>Nom affiche
+          <input id="ig-f-label" class="form-input" maxlength="60" placeholder="Friday (service informatique)"></label>
+      </div>
+      <label>Adresse de reception de l'application <span class="ig-hint">(https, hote autorise par COCKPIT_INTEG_ALLOWED_HOSTS sur le serveur)</span>
+        <input id="ig-f-url" class="form-input" maxlength="300" placeholder="https://friday.lemans.org/api/integrations/cockpit/events"></label>
+      <label>Variable d'environnement du secret partage <span class="ig-hint">(32 caracteres min., jamais saisi ici)</span>
+        <input id="ig-f-secret" class="form-input" maxlength="80" placeholder="COCKPIT_INTEG_FRIDAY_SECRET"></label>
+      <div class="ig-rules-head">
+        <span>Fiches envoyees</span>
+        <span class="ig-hint">categorie entiere, ou seulement certaines sous-classifications</span>
+      </div>
+      <div id="ig-rules" class="ig-rules"></div>
+      <label class="ig-check"><input type="checkbox" id="ig-f-enabled"> Active
+        <span class="ig-hint">(a l'activation, seules les fiches creees ensuite sont envoyees)</span></label>
+    </div>
+    <div class="ig-sheet-foot">
+      <button type="button" class="btn btn-secondary" data-close>Annuler</button>
+      <button type="button" class="btn btn-primary" id="ig-save">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+<script>window.__cockpitPublicUrl = {{ (public_url or '') | tojson }};</script>
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+<script src="{{ url_for('static', filename='js/integrations_admin.js') }}"></script>
+</body>
+</html>

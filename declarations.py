@@ -196,6 +196,10 @@ def _pub(d, fiche=None, full=False):
         "fiche": _fiche_summary(fiche),
         "classed_reason": d.get("classed_reason"),
         "history_count": len(d.get("history") or []),
+        # Discussion PC <-> declarant : messages non lus de chaque cote
+        "field_unread": int(d.get("field_unread") or 0),
+        "cockpit_unread": int(d.get("cockpit_unread") or 0),
+        "last_message_at": _iso(d.get("last_message_at")),
         "report_state": (d.get("report") or {}).get("state") or "none",
     }
     st_key, st_label = _field_state(d, fiche)
@@ -259,7 +263,9 @@ def field_declaration_create():
     except F.PhotoUploadError as e:
         return jsonify({"ok": False, "error": e.code}), e.status
 
-    event, year = F.fiche_target_event(db, device)
+    # Le constat appartient a l'evenement de la tablette (son appairage ;
+    # SAISON d'une annee passee -> SAISON courant), a defaut l'evenement courant.
+    event, year = F.device_home_pair(device) or F.fiche_target_event(db, device)
     try:
         year_int = int(year)
     except (TypeError, ValueError):
@@ -330,8 +336,12 @@ def field_declaration_detail(decl_id):
         return jsonify({"ok": False, "error": "not_found"}), 404
     fiche = _fiches_by_id(db, [d.get("fiche_id")]).get(d.get("fiche_id"))
     out = _pub(d, fiche, full=True)
-    # Le declarant ne lit pas les notes internes du PC
-    out["history"] = [h for h in out["history"] if h["origin"] == "field" or h["kind"] == "status"]
+    # Le declarant ne lit pas les notes internes du PC (messages et statuts oui)
+    out["history"] = [h for h in out["history"]
+                      if h["origin"] == "field" or h["kind"] in ("status", "message")]
+    # Ouvrir le constat = lire les messages du PC
+    if d.get("field_unread"):
+        db[COL].update_one({"_id": decl_id}, {"$set": {"field_unread": 0}})
     return jsonify(dict(out, ok=True))
 
 
@@ -359,8 +369,12 @@ def field_declaration_comment(decl_id):
         photos = _save_photos(db, device, files)
     except F.PhotoUploadError as e:
         return jsonify({"ok": False, "error": e.code}), e.status
+    now = _now()
     upd = {"$push": {"history": _entry("field:" + (device.get("name") or "?"), text, "field",
-                                       kind="complement", photos=photos)}}
+                                       kind="complement", photos=photos, ts=now)},
+           # Signale la reponse sur la page Constats terrain
+           "$inc": {"cockpit_unread": 1},
+           "$set": {"last_message_at": now, "field_unread": 0}}
     if photos:
         upd["$push"]["photos"] = {"$each": photos}
     db[COL].update_one({"_id": decl_id}, upd)
@@ -436,6 +450,13 @@ def declarations_list():
         days = 0
     if days > 0:
         q["created_at"] = {"$gte": _now() - timedelta(days=days)}
+    ev = (request.args.get("event") or "").strip()
+    if ev:
+        q["event"] = ev
+        try:
+            q["year"] = int(request.args.get("year"))
+        except (TypeError, ValueError):
+            pass
     search = (request.args.get("q") or "").strip()
     if search:
         rx = {"$regex": re.escape(search[:80]), "$options": "i"}
@@ -443,15 +464,25 @@ def declarations_list():
                     {"group_label": rx}, {"history.text": rx}]
     docs = list(db[COL].find(q, {"history": 0}).sort("created_at", DESCENDING).limit(LIST_MAX))
     fiches = _fiches_by_id(db, [d.get("fiche_id") for d in docs])
+    # Compteurs des onglets : sur l'evenement filtre (tous sinon)
+    evq = {k: q[k] for k in ("event", "year") if k in q}
     counts = {s: 0 for s in STATUSES}
-    for row in db[COL].aggregate([{"$group": {"_id": "$status", "n": {"$sum": 1}}}]):
+    for row in db[COL].aggregate([{"$match": evq}, {"$group": {"_id": "$status", "n": {"$sum": 1}}}]):
         if row["_id"] in counts:
             counts[row["_id"]] = row["n"]
+    counts["reponses"] = db[COL].count_documents(dict(evq, cockpit_unread={"$gt": 0}))
+    # Evenements presents (filtre de la page), les plus recents d'abord
+    events = [{"event": r["_id"]["event"], "year": r["_id"]["year"], "count": r["n"]}
+              for r in db[COL].aggregate([
+                  {"$group": {"_id": {"event": "$event", "year": "$year"}, "n": {"$sum": 1},
+                              "last": {"$max": "$created_at"}}},
+                  {"$sort": {"last": -1}}]) if r["_id"].get("event")]
     return jsonify({
         "ok": True,
         "now": _iso(_now()),
         "can_treat": _can_treat(_user()),
         "counts": counts,
+        "events": events,
         "declarations": [_pub(d, fiches.get(d.get("fiche_id"))) for d in docs],
     })
 
@@ -465,6 +496,9 @@ def declarations_detail(decl_id):
         return _err("not_found", 404)
     fiche = _fiches_by_id(db, [d.get("fiche_id")]).get(d.get("fiche_id"))
     out = _pub(d, fiche, full=True)
+    # Un operateur habilite qui ouvre le constat lit les reponses du declarant
+    if d.get("cockpit_unread") and _can_treat(_user()):
+        db[COL].update_one({"_id": decl_id}, {"$set": {"cockpit_unread": 0}})
     out["prefill"] = {
         "lat": out["lat"], "lon": out["lng"],
         "urgency": PRIORITY_TO_URGENCY.get(out["priority"]),
@@ -553,6 +587,55 @@ def declarations_note(decl_id):
     if not res.matched_count:
         return _err("not_found", 404)
     return jsonify({"ok": True})
+
+
+MESSAGE_MAX = 1000
+
+
+def _device_oid(device_id):
+    from bson import ObjectId
+    try:
+        return ObjectId(str(device_id))
+    except Exception:
+        return device_id
+
+
+@declarations_bp.route("/api/declarations/<decl_id>/message", methods=["POST"])
+@_role_required("user")
+def declarations_message(decl_id):
+    """Message du PC au declarant (demande de precision...) : visible dans le
+    constat sur la tablette, notification push, reponse par le complement
+    du constat. Possible tant que le constat n'est pas classe."""
+    u = _user()
+    if not _can_treat(u):
+        return _err("forbidden", 403)
+    text = _clean_text((request.get_json(silent=True) or {}).get("text"), MESSAGE_MAX)
+    if not text:
+        return _err("empty_text")
+    db = _db()
+    now = _now()
+    d = db[COL].find_one_and_update(
+        {"_id": decl_id, "status": {"$ne": "classee"}},
+        {"$push": {"history": _entry(_user_name(u), text, "cockpit", kind="message", ts=now)},
+         "$inc": {"field_unread": 1},
+         "$set": {"last_message_at": now, "cockpit_unread": 0}},
+        return_document=ReturnDocument.AFTER)
+    if not d:
+        if db[COL].find_one({"_id": decl_id}, {"_id": 1}):
+            return _err("classee", 409)
+        return _err("not_found", 404)
+    # Ecrire au declarant vaut accuse de reception d'un constat nouveau
+    if d.get("status") == "nouvelle":
+        _set_status(db, decl_id, "en_suivi", u, STATUS_TEXT["en_suivi"], expect=("nouvelle",))
+    pushed = 0
+    try:
+        pushed = F.send_push_to_device(
+            db, _device_oid(d.get("device_id")),
+            title="PC Organisation - constat " + (d.get("ref") or ""),
+            body=text[:140], url="/field?constat=" + decl_id, tag="constat-" + decl_id)
+    except Exception as e:  # push indisponible : le message reste visible a l'ouverture
+        logger.warning("declarations: push %s : %s", decl_id, e)
+    return jsonify({"ok": True, "pushed": pushed})
 
 
 @declarations_bp.route("/api/declarations/<decl_id>/link", methods=["POST"])

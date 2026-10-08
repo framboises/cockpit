@@ -121,6 +121,10 @@
             <span class="material-symbols-outlined">settings</span>
             <span class="label">Configuration</span>
         </a>{% endif %}
+        {% if _adm %}<a href="/integrations" class="{{ nav_class('/integrations') }}" title="Applications externes connectees (Friday...)">
+            <span class="material-symbols-outlined">hub</span>
+            <span class="label">Applications liees</span>
+        </a>{% endif %}
         {% if _adm or (admin_page_allowed is defined and admin_page_allowed('scan_report')) %}<a href="/scan-report" class="{{ nav_class('/scan-report') }}">
             <span class="material-symbols-outlined">qr_code_scanner</span>
             <span class="label">Rapport scans</span>

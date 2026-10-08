@@ -2413,6 +2413,11 @@ from declarations import declarations_bp, field_declaration_create, field_declar
 app.register_blueprint(declarations_bp)
 csrf.exempt(field_declaration_create)
 csrf.exempt(field_declaration_comment)
+# Applications externes (integrations.py) : Friday... Point d'entree signe
+# HMAC sans session (CSRF exemptee sur lui seul), page admin /integrations.
+from integrations import integrations_bp, inbound_events as _integ_inbound
+app.register_blueprint(integrations_bp)
+csrf.exempt(_integ_inbound)
 # Reservations Momentus par lieu de la carte (momentus_api.py). GET user,
 # lecture seule des collections momentus_* (synchro momentus_sync.py).
 app.register_blueprint(momentus_bp)
@@ -5577,7 +5582,30 @@ PCO_PROJECTION = {
     "content_category.source_type": 1,
     "dispatch.state": 1, "dispatch.current": 1, "dispatch.queue_reason": 1,
     "operator_id_create": 1,
+    "integrations": 1,
 }
+
+
+def _pcorg_integrations_view(doc):
+    """Tickets lies dans des applications externes (integrations.py) :
+    {id: {label, ref, url, status, status_label, agent, attention, ...}}."""
+    out = {}
+    raw = doc.get("integrations") or {}
+    if not isinstance(raw, dict) or not raw:
+        return None
+    labels = {c["_id"]: c.get("label") or c["_id"]
+              for c in db["integrations"].find({"_id": {"$in": list(raw.keys())}}, {"label": 1})}
+    for k, v in raw.items():
+        if not isinstance(v, dict) or not v.get("linked"):
+            continue
+        out[k] = {
+            "label": labels.get(k, k), "ref": v.get("ref"), "url": v.get("url"),
+            "status": v.get("status"), "status_label": v.get("status_label"),
+            "agent": v.get("agent"), "attention": v.get("attention"),
+            "resolution": v.get("resolution"), "resolved_by": v.get("resolved_by"),
+            "updated_at": _dt_to_iso_utc(v.get("updated_at")),
+        }
+    return out or None
 
 
 def _pcorg_dispatch_view(doc):
@@ -5654,6 +5682,7 @@ def _pcorg_serialise(doc):
         "niveau_urgence": doc.get("niveau_urgence"),
         "bounce_rev": doc.get("bounce_rev", 0),
         "dispatch": _pcorg_dispatch_view(doc),
+        "integrations": _pcorg_integrations_view(doc) if doc.get("integrations") else None,
         # Createur Cockpit (e-mail) : "lecture seule" permet d'editer ses fiches
         "operator_id_create": doc.get("operator_id_create") or "",
     }
@@ -6120,6 +6149,8 @@ def pcorg_detail(doc_id):
         "dispatch": _pcorg_dispatch_view(doc),
         "intervention": {k: (_dt_to_iso_utc(v) if isinstance(v, datetime) else v)
                          for k, v in (doc.get("intervention") or {}).items()},
+        "integrations": _pcorg_integrations_view(doc) if doc.get("integrations") else None,
+        "declaration_ref": doc.get("declaration_ref"),
     })
 
 
@@ -9686,6 +9717,12 @@ if __name__ == "__main__":
             DA.start_scheduler()
         except Exception as e:
             logger.warning("Echec demarrage scheduler dispatch auto : %s", e)
+        # Applications externes (integrations.py) : balayage + file d'envoi signee
+        try:
+            import integrations as INTEG
+            INTEG.start_worker()
+        except Exception as e:
+            logger.warning("Echec demarrage connecteur applications externes : %s", e)
         # Planificateur PMV (envois programmes aux remorques, cf. pmv.py)
         try:
             import pmv

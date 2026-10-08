@@ -130,6 +130,7 @@ def render_email_html(constat, summary=None):
         pos = "%.5f, %.5f" % (constat["lat"], constat["lng"])
     rows = "".join([
         _row("Reference", constat.get("ref")),
+        _row("Evenement", "%s %s" % (constat.get("event") or "", constat.get("year") or "")),
         _row("Date", constat.get("created_at")),
         _row("Declarant", "%s (%s)" % (constat.get("declarant") or "?", constat.get("group") or "")),
         _row("Priorite", pr),
@@ -168,6 +169,8 @@ def render_email_html(constat, summary=None):
         '<tr><td style="padding:22px 24px 4px;"><div style="font-size:12px;letter-spacing:1px;color:#d97706;'
         'font-weight:bold;text-transform:uppercase;">Constat terrain</div>'
         '<div style="font-size:20px;font-weight:bold;color:#0f172a;margin-top:4px;">' + e(constat.get("ref") or "")
+        + '<span style="font-size:14px;font-weight:normal;color:#64748b;"> &middot; '
+        + e("%s %s" % (constat.get("event") or "", constat.get("year") or "")) + '</span>'
         + '</div></td></tr>'
         + summary_html
         + '<tr><td style="padding:16px 24px 0;"><div style="font-size:15px;line-height:1.5;color:#0f172a;'

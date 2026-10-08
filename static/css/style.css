@@ -16605,6 +16605,29 @@ th span { font-size: 0.88rem; font-weight: 700; }
   .si-cal-vzpill .material-symbols-outlined { font-size: 11px; }
 }
 
+/* Tickets lies dans des applications externes (integrations.py : Friday...) */
+.pcorg-integ { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.pcorg-integ-row {
+  display: flex; gap: 10px; align-items: flex-start; padding: 8px 12px;
+  border-radius: 10px; background: #eef2ff; border: 1px solid #c7d2fe; font-size: .86rem;
+}
+.pcorg-integ-row > .material-symbols-outlined { color: #4f46e5; font-size: 20px; }
+.pcorg-integ-row.is-attention { background: #fff7ed; border-color: #fdba74; }
+.pcorg-integ-row.is-attention > .material-symbols-outlined { color: #ea580c; }
+.pcorg-integ-txt { min-width: 0; flex: 1; }
+.pcorg-integ-txt a { color: inherit; text-decoration: none; }
+.pcorg-integ-txt a:hover strong { text-decoration: underline; }
+.pcorg-integ-status {
+  margin-left: 8px; padding: 1px 8px; border-radius: 999px; font-size: .72rem; font-weight: 700;
+  background: rgba(79, 70, 229, .12); color: #4338ca;
+}
+.pcorg-integ-row.is-attention .pcorg-integ-status { background: rgba(234, 88, 12, .14); color: #c2410c; }
+.pcorg-integ-sub { color: var(--muted); font-size: .78rem; margin-top: 2px; }
+.pcorg-integ-row.is-attention .pcorg-integ-sub { color: #c2410c; font-weight: 600; }
+.pcorg-integ-res { margin-top: 4px; font-size: .82rem; white-space: pre-wrap; }
+.pcorg-row-integ { font-size: 15px !important; color: #6366f1; }
+.pcorg-row-integ.is-attention { color: #ea580c; }
+
 /* Configuration > Contexte des evenements (Alfred) : alfred_contexte_admin.js */
 .aec-intro { margin: 0 0 12px; font-size: .85rem; color: var(--muted); line-height: 1.5; }
 .aec-list { display: flex; flex-direction: column; gap: 6px; }

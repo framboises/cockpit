@@ -112,6 +112,24 @@ class TestTablette:
         assert b["duplicate"] is True and b["id"] == a["id"]
         assert env.db["declarations"].count_documents({}) == 1
 
+    def test_evenement_de_la_tablette_et_filtre(self, env):
+        # Tablette appairee sur une epreuve : le constat y est rattache
+        env.db["field_devices"].update_one({"_id": "dev-cap"}, {"$set": {"event": "24H MOTOS", "year": "2027"}})
+        did = _depose(env, client_token="tok-ev-123456").get_json()["id"]
+        d = env.db["declarations"].find_one({"_id": did})
+        assert (d["event"], d["year"]) == ("24H MOTOS", 2027)
+        # Tablette SAISON d'une annee passee -> SAISON courant
+        env.db["field_devices"].update_one({"_id": "dev-cap"}, {"$set": {"event": "SAISON", "year": "2020"}})
+        did2 = _depose(env, client_token="tok-ev-654321").get_json()["id"]
+        d2 = env.db["declarations"].find_one({"_id": did2})
+        assert d2["event"] == "SAISON" and d2["year"] == datetime.now(timezone.utc).year
+        lst = env.client.get("/api/declarations?event=24H%20MOTOS&year=2027").get_json()
+        assert [x["id"] for x in lst["declarations"]] == [did]
+        assert lst["counts"]["nouvelle"] == 1
+        assert {(e["event"], e["year"]) for e in lst["events"]} == {("24H MOTOS", 2027), ("SAISON", d2["year"])}
+        html = env.client.get("/api/declarations/%s/report/preview" % did).get_data(as_text=True)
+        assert "24H MOTOS 2027" in html
+
     def test_tablette_normale_refusee(self, env):
         _as(env.client, "tok-tech")
         rep = env.client.post("/field/declarations", json={"text": "x"})
@@ -181,6 +199,42 @@ class TestCockpit:
         # Deja transforme : un second rattachement est refuse
         rep = env.client.post("/api/declarations/%s/link" % did, json={"fiche_id": "f1"})
         assert rep.status_code == 409
+
+    def test_discussion_avec_le_declarant(self, env, monkeypatch):
+        pushes = []
+        monkeypatch.setattr(field, "send_push_to_device",
+                            lambda db, dev_id, **k: pushes.append((dev_id, k)) or 1)
+        did = _depose(env).get_json()["id"]
+        # Droit requis
+        env.who["treat"] = False
+        assert env.client.post("/api/declarations/%s/message" % did, json={"text": "?"}).status_code == 403
+        env.who["treat"] = True
+        rep = env.client.post("/api/declarations/%s/message" % did,
+                              json={"text": "La barriere est-elle encore au sol ?"})
+        assert rep.status_code == 200 and rep.get_json()["pushed"] == 1
+        # Ecrire au declarant vaut accuse de reception
+        assert env.db["declarations"].find_one({"_id": did})["status"] == "en_suivi"
+        assert pushes[0][0] == "dev-cap"
+        assert pushes[0][1]["url"] == "/field?constat=" + did
+        # Cote tablette : non lu, visible dans le detail (pas les notes internes)
+        env.client.post("/api/declarations/%s/note" % did, json={"text": "note PC"})
+        _as(env.client, "tok-cap")
+        lst = env.client.get("/field/declarations").get_json()["declarations"]
+        assert lst[0]["field_unread"] == 1
+        det = env.client.get("/field/declarations/%s" % did).get_json()
+        kinds = [h["kind"] for h in det["history"]]
+        assert "message" in kinds and "note" not in kinds
+        assert env.client.get("/field/declarations").get_json()["declarations"][0]["field_unread"] == 0
+        # Reponse du declarant -> signalee au PC, lue a l'ouverture
+        env.client.post("/field/declarations/%s/comment" % did, json={"comment": "Oui, toujours"})
+        lst = env.client.get("/api/declarations?status=a_traiter").get_json()
+        assert lst["counts"]["reponses"] == 1 and lst["declarations"][0]["cockpit_unread"] == 1
+        env.client.get("/api/declarations/%s" % did)
+        assert env.client.get("/api/declarations").get_json()["counts"]["reponses"] == 0
+        # Constat classe : plus de message
+        env.client.post("/api/declarations/%s/status" % did, json={"status": "classee", "reason": "regle"})
+        rep = env.client.post("/api/declarations/%s/message" % did, json={"text": "x"})
+        assert rep.status_code == 409 and rep.get_json()["error"] == "classee"
 
     def test_apercu_constat_et_envoi_a_finaliser(self, env):
         did = _depose(env).get_json()["id"]

@@ -6,7 +6,7 @@ Cas d'usage : cellule d'appui prestataire qui patrouille et signale dégâts, pr
 
 ### Données — collection `declarations`
 
-`_id` (uuid), `ref` (« C-2026-0001 », séquence par année dans `declarations_seq`), `event` / `year` (= `field.fiche_target_event` au dépôt), `created_at`, `device_id`, `device_name`, `group_id`, `group_label`, `text`, `priority` (`basse` | `normale` | `haute`), `gps {lat, lng}`, `carroye`, `photos [{photo, thumb, ts}]`, `history [{ts, by, origin: field|cockpit, kind: declaration|complement|note|status, text, photos?}]`, `status`, `status_at`, `status_by`, `fiche_id`, `converted_at/by`, `classed_reason`, `report {state}`, `client_token`.
+`_id` (uuid), `ref` (« C-2026-0001 », séquence par année dans `declarations_seq`), `event` / `year` (= **événement d'appairage de la tablette**, `field.device_home_pair` : SAISON d'une année passée → SAISON courant ; à défaut `fiche_target_event`. Affiché sur la page, la tablette et le mail ; filtre « événement » de la page = `?event=&year=`, liste des événements présents dans `events` de `/api/declarations`, compteurs des onglets restreints à l'événement filtré), `created_at`, `device_id`, `device_name`, `group_id`, `group_label`, `text`, `priority` (`basse` | `normale` | `haute`), `gps {lat, lng}`, `carroye`, `photos [{photo, thumb, ts}]`, `history [{ts, by, origin: field|cockpit, kind: declaration|complement|note|status, text, photos?}]`, `status`, `status_at`, `status_by`, `fiche_id`, `converted_at/by`, `classed_reason`, `report {state}`, `client_token`.
 
 Cycle : `nouvelle` → `en_suivi` → `transformee` (fiche liée) | `classee` (motif obligatoire, réouvrable). Côté tablette (`_field_state`) : Envoyé / Vu par le PC / Pris en charge / **Traité** (fiche liée close) / Classé. Les notes internes du PC ne sont pas montrées au déclarant.
 
@@ -19,6 +19,13 @@ Cycle : `nouvelle` → `en_suivi` → `transformee` (fiche liée) | `classee` (m
 ### Page (`declarations.js`)
 
 Liste à gauche (segments À traiter / En fiche / Classés / Tous, recherche, période), carte sur tout le reste, détail en **panneau latéral** par-dessus la carte (feuille plein écran sur téléphone, bascule Liste / Carte). Note interne = champ toujours visible en pied de panneau (Ctrl+Entrée), « Classer » = formulaire de motif en place : plus de `showPromptToast`. « **Accuser réception** » (statut `en_suivi`, ex « Prendre en suivi ») : le déclarant voit « Vu par le PC ». Photos en visionneuse avec flèches.
+
+### Discussion PC ↔ déclarant (07/10/2026)
+
+- **PC → déclarant** : `POST /api/declarations/<id>/message {text}` (droit traiter, refusé `409 classee` sur un constat classé). Entrée `kind: "message"` (origin cockpit, **visible du déclarant**, contrairement à `note`), `$inc field_unread`, `last_message_at`, et **push** `field.send_push_to_device` (titre « PC Organisation - constat C-… », `url=/field?constat=<id>`, `device_id` reconverti en ObjectId comme dans `field_push_subs`). Réponse `pushed` = nombre d'envois (0 : pas d'abonnement, le message reste visible à l'ouverture). Écrire à un constat `nouvelle` vaut **accusé de réception** (`en_suivi`).
+- **Déclarant → PC** : le complément du constat (`/field/declarations/<id>/comment`) incrémente `cockpit_unread`. Ouvrir le constat remet à zéro `field_unread` (tablette, GET détail) / `cockpit_unread` (Cockpit, GET détail par un opérateur habilité). `counts.reponses` = constats avec réponse non lue (en-tête de la page, badge violet « Réponse » sur la carte de liste).
+- **Cockpit** : constat ouvert relu toutes les 6 s (`refreshDetail`, signature statut / nb d'entrées / fiche close / non lus), re-rendu seulement s'il a changé, brouillon et focus conservés ; pas de relecture pendant un formulaire (classer, choix d'événement). Un seul champ en pied de panneau, bascule « Au déclarant » (violet, défaut) / « Note interne » (jaune). Messages et réponses en bulles dans la chronologie.
+- **Tablette** : badge violet sur « Mes constats » (nombre de messages non lus, prioritaire sur le nombre de constats en cours), puce « Message du PC », vibration + toast à l'arrivée (`declNotifyNew`), conversation rafraîchie si le constat est ouvert ; le formulaire devient « Répondre au PC ». Notification touchée : `/field?constat=<id>` ouvre le constat (`state.pendingConstat`) ; app déjà ouverte : `field-sw.js` poste `field-open-url` au client avant le focus. `/field/declarations` est en réseau seul (`isLiveRequest`). `SW_VERSION` v45.
 
 ### Transformation en fiche
 

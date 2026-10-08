@@ -2695,11 +2695,50 @@
         var active = state.declarations.filter(function (x) {
           return x.field_state === "envoyee" || x.field_state === "vue" || x.field_state === "prise_en_charge";
         }).length;
-        if (badge) { badge.textContent = String(active); badge.hidden = !active; }
+        // Messages du PC non lus : prioritaires sur le badge
+        var unread = state.declarations.filter(function (x) { return x.field_unread > 0; });
+        var nUnread = unread.reduce(function (s, x) { return s + x.field_unread; }, 0);
+        if (badge) {
+          badge.textContent = String(nUnread || active);
+          badge.hidden = !(nUnread || active);
+          badge.classList.toggle("is-msg", nUnread > 0);
+        }
+        declNotifyNew(unread);
         var p = $("missions-panel");
         if (p && !p.hidden) renderMissionsList();
+        // Constat ouvert depuis une notification (/field?constat=<id>)
+        if (state.pendingConstat) {
+          var want = state.pendingConstat;
+          state.pendingConstat = null;
+          if (state.declarations.some(function (x) { return x.id === want; })) showDeclarationModal(want);
+        }
       })
       .catch(function () {});
+  }
+
+  // Nouveau message du PC sur un constat : alerte dans l'application (la
+  // notification push couvre l'application fermee).
+  var _declUnreadSeen = null;   // {id: nb non lus deja signales}
+  function declNotifyNew(unread) {
+    var first = _declUnreadSeen === null;
+    var seen = _declUnreadSeen || {};
+    var fresh = unread.filter(function (x) { return x.field_unread > (seen[x.id] || 0); });
+    _declUnreadSeen = {};
+    unread.forEach(function (x) { _declUnreadSeen[x.id] = x.field_unread; });
+    if (!fresh.length) return;
+    var openId = state.declOpenId;
+    var modal = $("fiche-detail-modal");
+    if (openId && modal && !modal.hidden && fresh.some(function (x) { return x.id === openId; })) {
+      showDeclarationModal(openId);   // conversation ouverte : on la rafraichit
+      return;
+    }
+    if (first && !state.pendingConstat) {
+      toast("Message du PC sur " + (fresh.length > 1 ? fresh.length + " constats" : "le constat " + (fresh[0].ref || "")), "warn");
+      return;
+    }
+    try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch (e) { /* non supporte */ }
+    var x = fresh[0];
+    toast("Le PC vous ecrit sur " + (x.ref || "un constat") + " - ouvrez Mes constats", "warn");
   }
 
   function renderDeclarationsList(list) {
@@ -2735,6 +2774,13 @@
       st.className = "decl-state " + (DECL_STATE_CLASS[d.field_state] || "");
       st.textContent = d.field_state_label || "";
       top.appendChild(st);
+      if (d.field_unread > 0) {
+        var mg = document.createElement("span");
+        mg.className = "decl-state is-msg";
+        mg.textContent = "Message du PC";
+        top.appendChild(mg);
+        item.classList.add("has-msg");
+      }
       body.appendChild(top);
       var desc = document.createElement("div");
       desc.className = "mission-desc";
@@ -2745,6 +2791,7 @@
       var when = document.createElement("span");
       when.textContent = d.created_at ? new Date(d.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
       meta.appendChild(when);
+      if (d.event) { var ev = document.createElement("span"); ev.textContent = d.event + " " + (d.year || ""); meta.appendChild(ev); }
       if (d.carroye) { var c = document.createElement("span"); c.textContent = d.carroye; meta.appendChild(c); }
       body.appendChild(meta);
       item.appendChild(body);
@@ -2763,6 +2810,7 @@
   function showDeclarationModal(id) {
     var modal = $("fiche-detail-modal");
     if (!modal) return;
+    state.declOpenId = id;
     var header = $("fiche-detail-header");
     header.style.background = "linear-gradient(135deg, #d97706cc, #d9770688)";
     $("fiche-detail-icon").textContent = "report";
@@ -2778,12 +2826,14 @@
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (!d || !d.ok) { body.innerHTML = "<div class='fiche-detail-loading'>Erreur chargement</div>"; return; }
-        $("fiche-detail-cat").textContent = "Constat " + (d.ref || "");
+        $("fiche-detail-cat").textContent = "Constat " + (d.ref || "") + (d.event ? " - " + d.event + " " + (d.year || "") : "");
         urgEl.textContent = d.field_state_label || "";
         urgEl.style.background = DECL_STATE_CLASS[d.field_state] === "is-done" ? "#16a34a"
           : (d.field_state === "prise_en_charge" ? "#2563eb" : "#d97706");
         urgEl.hidden = false;
         renderDeclarationDetail(d, body);
+        // Ouvert = messages lus cote serveur : on rafraichit le badge
+        if (d.field_unread) { if (_declUnreadSeen) delete _declUnreadSeen[d.id]; pollDeclarations(true); }
       })
       .catch(function () { body.innerHTML = "<div class='fiche-detail-loading'>Hors ligne</div>"; });
   }
@@ -2805,13 +2855,15 @@
     sec.className = "fd-section";
     sec.textContent = "Historique";
     body.appendChild(sec);
+    var hasMsg = false;
     (d.history || []).forEach(function (h) {
       var ent = document.createElement("div");
-      ent.className = "decl-hist";
+      ent.className = "decl-hist" + (h.kind === "message" ? " is-msg" : "") + (h.origin === "field" ? " is-me" : "");
+      if (h.kind === "message") hasMsg = true;
       var meta = document.createElement("div");
       meta.className = "decl-hist-meta";
       meta.textContent = (h.ts ? new Date(h.ts).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "")
-        + (h.origin === "field" ? " - moi" : " - PC Organisation");
+        + (h.origin === "field" ? " - moi" : h.kind === "message" ? " - PC Organisation (" + (h.by || "") + ")" : " - PC Organisation");
       ent.appendChild(meta);
       if (h.text) { var t = document.createElement("div"); t.textContent = h.text; ent.appendChild(t); }
       if (h.photos && h.photos.length) {
@@ -2833,14 +2885,14 @@
     // Complement : precision et / ou photo (ex. "apres reparation")
     var sec2 = document.createElement("div");
     sec2.className = "fd-section";
-    sec2.textContent = "Ajouter un complement";
+    sec2.textContent = hasMsg ? "Repondre au PC" : "Ajouter un complement";
     body.appendChild(sec2);
     var form = document.createElement("div");
     form.className = "fd-comment-form";
     var ta = document.createElement("textarea");
     ta.className = "fd-comment-input";
     ta.rows = 2;
-    ta.placeholder = "Precision, evolution...";
+    ta.placeholder = hasMsg ? "Votre reponse (vous pouvez joindre une photo)..." : "Precision, evolution...";
     ta.setAttribute("autocapitalize", "sentences");
     form.appendChild(ta);
     var file = document.createElement("input");
@@ -4728,6 +4780,7 @@
   function showFicheModal(f) {
     var modal = $("fiche-detail-modal");
     if (!modal) return;
+    state.declOpenId = null;   // la modale montre une fiche, plus un constat
     var st = ficheStyle(f.category);
 
     // Header
@@ -8358,6 +8411,14 @@
     state.activeFicheId = dev.active_fiche_id || null;
     state.declarant = !!dev.declarant;
     state.deviceCategory = dev.category || state.deviceCategory || null;
+    // Ouverture depuis la notification d'un message du PC : /field?constat=<id>
+    try {
+      var qc = new URLSearchParams(location.search).get("constat");
+      if (qc) {
+        state.pendingConstat = qc;
+        history.replaceState(null, "", location.pathname);
+      }
+    } catch (e) { /* URL non standard */ }
     updateStatusBar();
     applyDeclarantMode();
     // Ressources carte : 3P et carroyage sont desactives par defaut.
@@ -8413,6 +8474,11 @@
         if (ev && ev.data && ev.data.type === "field-push") {
           _lastCatchUpAt = 0;   // push : toujours relire
           catchUpNow();
+        }
+        // Notification touchee alors que l'app etait deja ouverte
+        if (ev && ev.data && ev.data.type === "field-open-url") {
+          var m = /[?&]constat=([^&#]+)/.exec(ev.data.url || "");
+          if (m) { state.pendingConstat = decodeURIComponent(m[1]); pollDeclarations(true); }
         }
       });
     }

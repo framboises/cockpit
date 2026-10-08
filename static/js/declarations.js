@@ -68,7 +68,8 @@ if (typeof window.getCurrentEventYear !== "function") {
   var ERRORS = {
     forbidden: "Votre groupe ne permet pas de traiter les constats.",
     motif_requis: "Indiquez le motif du classement.",
-    empty_text: "La note est vide.",
+    empty_text: "Le texte est vide.",
+    classee: "Le constat est classe : rouvrez-le pour ecrire au declarant.",
     etat_incompatible: "Le constat a change d'etat entre-temps.",
     fiche_non_creee_par_vous: "La fiche doit etre creee par vous.",
     fiche_deja_rattachee: "Cette fiche est deja rattachee a un autre constat.",
@@ -92,7 +93,8 @@ if (typeof window.getCurrentEventYear !== "function") {
     if (state.loading) return;
     state.loading = true;
     var qs = "?status=" + encodeURIComponent(state.status) + "&days=" + state.days +
-             (state.q ? "&q=" + encodeURIComponent(state.q) : "");
+             (state.q ? "&q=" + encodeURIComponent(state.q) : "") +
+             (state.event ? "&event=" + encodeURIComponent(state.event.event) + "&year=" + state.event.year : "");
     fetch("/api/declarations" + qs, { credentials: "same-origin", cache: "no-store" })
       .then(function (r) { return r.json(); })
       .then(function (d) {
@@ -104,12 +106,33 @@ if (typeof window.getCurrentEventYear !== "function") {
         $("dc-c-a_traiter").textContent = (c.nouvelle || 0) + (c.en_suivi || 0);
         $("dc-c-transformee").textContent = c.transformee || 0;
         $("dc-c-classee").textContent = c.classee || 0;
-        $("dc-header-sub").textContent = c.nouvelle ? c.nouvelle + " nouveau" + (c.nouvelle > 1 ? "x" : "") : "";
+        var sub = [];
+        if (c.nouvelle) sub.push(c.nouvelle + " nouveau" + (c.nouvelle > 1 ? "x" : ""));
+        if (c.reponses) sub.push(c.reponses + " reponse" + (c.reponses > 1 ? "s" : ""));
+        $("dc-header-sub").textContent = sub.join(" - ");
+        renderEventFilter(d.events || []);
         renderList();
         renderMap();
         setLive(true);
       })
       .catch(function () { state.loading = false; setLive(false); });
+  }
+
+  // Filtre evenement : evenements presents dans les constats (appairage des
+  // tablettes), la selection est conservee d'un rafraichissement a l'autre.
+  function renderEventFilter(events) {
+    var sel = $("dc-event");
+    var cur = state.event ? state.event.event + "|" + state.event.year : "";
+    var sig = events.map(function (e) { return e.event + "|" + e.year + "|" + e.count; }).join(",");
+    if (sel._sig === sig) return;
+    sel._sig = sig;
+    while (sel.options.length > 1) sel.remove(1);
+    events.forEach(function (e) {
+      var o = el("option", "", eventLabel(e) + " (" + e.count + ")");
+      o.value = e.event + "|" + e.year;
+      sel.appendChild(o);
+    });
+    sel.value = cur;
   }
 
   function setLive(ok) {
@@ -165,10 +188,17 @@ if (typeof window.getCurrentEventYear !== "function") {
       top.appendChild(el("span", "dc-ref", d.ref || ""));
       top.appendChild(statusChip(d));
       if (d.priority === "haute") top.appendChild(chip("Urgent", PRIORITY_META.haute.color));
+      if (d.cockpit_unread) {
+        top.appendChild(chip(d.cockpit_unread > 1 ? d.cockpit_unread + " reponses" : "Reponse", "#7c3aed"));
+        card.classList.add("has-reply");
+      } else if (d.field_unread) {
+        top.appendChild(chip("Message non lu", "#64748b", "is-pending"));
+      }
       top.appendChild(el("span", "dc-when", fmtDate(d.created_at)));
       body.appendChild(top);
       body.appendChild(el("div", "dc-text", d.text));
       var meta = el("div", "dc-meta");
+      if (d.event) meta.appendChild(el("span", "dc-event-tag", eventLabel(d)));
       meta.appendChild(el("span", "", d.group_label || d.device_name || ""));
       if (d.carroye) meta.appendChild(el("span", "dc-carroye", d.carroye));
       if (d.lat == null) meta.appendChild(el("span", "dc-nopos", "sans position"));
@@ -256,6 +286,34 @@ if (typeof window.getCurrentEventYear !== "function") {
       .catch(function () { $("dc-p-body").textContent = "Erreur de chargement."; });
   }
 
+  // Rafraichissement du constat ouvert (reponse du declarant, changement
+  // d'etat par un autre operateur) sans perdre le brouillon en cours.
+  function detailSig(x) {
+    return [x.status, (x.history || []).length, x.fiche && x.fiche.closed, x.field_unread].join("|");
+  }
+  function refreshDetail() {
+    var id = state.openId;
+    if (!id || state.mode || document.hidden || !state.detail) return;
+    fetch("/api/declarations/" + encodeURIComponent(id), { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (state.openId !== id || state.mode || !d || !d.ok) return;
+        if (state.detail && detailSig(state.detail) === detailSig(d)) return;
+        var ta = document.querySelector("#dc-p-foot .dc-note-input");
+        var draft = ta ? ta.value : "";
+        var focused = ta && document.activeElement === ta;
+        var body = $("dc-p-body");
+        var atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
+        state.detail = d;
+        renderDetail();
+        var nta = document.querySelector("#dc-p-foot .dc-note-input");
+        if (nta && draft) nta.value = draft;
+        if (nta && focused) nta.focus();
+        if (atBottom) body.scrollTop = body.scrollHeight;
+      })
+      .catch(function () {});
+  }
+
   function section(title) { return el("div", "dc-sec", title); }
 
   function photoGrid(photos, cls) {
@@ -283,6 +341,7 @@ if (typeof window.getCurrentEventYear !== "function") {
     body.textContent = "";
 
     var head = el("div", "dc-d-head");
+    if (d.event) head.appendChild(chip(eventLabel(d), "#0f766e"));
     head.appendChild(statusChip(d));
     var pm = PRIORITY_META[d.priority] || PRIORITY_META.normale;
     head.appendChild(chip(pm.label, pm.color));
@@ -315,11 +374,15 @@ if (typeof window.getCurrentEventYear !== "function") {
     body.appendChild(section("Chronologie"));
     var tl = el("div", "dc-timeline");
     (d.history || []).forEach(function (h) {
-      var row = el("div", "dc-tl-row dc-tl-" + (h.origin || "cockpit") + (h.kind === "note" ? " is-note" : ""));
+      var row = el("div", "dc-tl-row dc-tl-" + (h.origin || "cockpit") +
+        (h.kind === "note" ? " is-note" : "") + (h.kind === "message" ? " is-message" : "") +
+        (h.origin === "field" && h.kind === "complement" ? " is-reply" : ""));
       var meta = el("div", "dc-tl-meta");
       meta.appendChild(el("span", "", fmtDate(h.ts)));
       meta.appendChild(el("span", "dc-tl-by", (h.by || "").replace(/^field:/, "Tablette ")));
       if (h.kind === "note") meta.appendChild(el("span", "dc-tl-tag", "note interne"));
+      if (h.kind === "message") meta.appendChild(el("span", "dc-tl-tag is-msg", "message au declarant"));
+      if (h.origin === "field" && h.kind === "complement") meta.appendChild(el("span", "dc-tl-tag is-reply", "reponse du declarant"));
       row.appendChild(meta);
       if (h.text) row.appendChild(el("div", "dc-tl-text", h.text));
       if (h.photos && h.photos.length && h.kind !== "declaration") row.appendChild(photoGrid(h.photos, "dc-tl-photos"));
@@ -343,35 +406,62 @@ if (typeof window.getCurrentEventYear !== "function") {
     if (state.mode === "event") { foot.appendChild(eventForm(d)); return; }
 
     if (d.status !== "classee") {
-      var note = el("div", "dc-note");
+      // Un seul champ : message au declarant (notification sur sa tablette,
+      // il repond depuis son constat) ou note interne du PC.
+      var kind = state.composeKind || "message";
+      var compose = el("div", "dc-compose");
+      var sw = el("div", "dc-compose-kind");
+      [["message", "Au declarant", "chat"], ["note", "Note interne", "edit_note"]].forEach(function (k) {
+        var b = el("button", k[0] === kind ? "active" : "");
+        b.type = "button";
+        b.appendChild(icon(k[2]));
+        b.appendChild(el("span", "", k[1]));
+        b.addEventListener("click", function () {
+          state.composeKind = k[0];
+          var keep = ta.value;
+          renderFoot();
+          var nta = document.querySelector("#dc-p-foot .dc-note-input");
+          if (nta) { nta.value = keep; nta.focus(); }
+        });
+        sw.appendChild(b);
+      });
+      compose.appendChild(sw);
+      var note = el("div", "dc-note" + (kind === "message" ? " is-message" : ""));
       var ta = el("textarea", "dc-note-input");
       ta.rows = 1;
-      ta.placeholder = "Note interne (non visible du declarant)...";
+      ta.placeholder = kind === "message"
+        ? "Message au declarant (notifie sur sa tablette)..."
+        : "Note interne (non visible du declarant)...";
       ta.addEventListener("input", function () {
         ta.style.height = "auto";
         ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
       });
       var send = el("button", "dc-note-send");
       send.type = "button";
-      send.title = "Ajouter la note";
+      send.title = kind === "message" ? "Envoyer au declarant" : "Ajouter la note";
       send.appendChild(icon("send"));
-      function submitNote() {
+      function submitText() {
         var t = ta.value.trim();
         if (!t) return;
         send.disabled = true;
-        post("/api/declarations/" + encodeURIComponent(d.id) + "/note", { text: t }).then(function (r) {
+        post("/api/declarations/" + encodeURIComponent(d.id) + "/" + kind, { text: t }).then(function (r) {
           send.disabled = false;
           if (!r.ok) { toast("error", errMsg(r)); return; }
+          if (kind === "message") {
+            toast("success", r.pushed ? "Message envoye, le declarant est notifie"
+              : "Message envoye (pas de notification possible : il le verra a l'ouverture de l'application)");
+          }
           openDetail(d.id);
         });
       }
-      send.addEventListener("click", submitNote);
+      send.addEventListener("click", submitText);
       ta.addEventListener("keydown", function (e) {
-        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitNote(); }
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitText(); }
       });
       note.appendChild(ta);
       note.appendChild(send);
-      foot.appendChild(note);
+      compose.appendChild(note);
+      foot.appendChild(compose);
     }
 
     var bar = el("div", "dc-actions");
@@ -540,6 +630,12 @@ if (typeof window.getCurrentEventYear !== "function") {
       clearTimeout(qTimer);
       qTimer = setTimeout(function () { state.q = e.target.value.trim(); state.fitted = false; load(); }, 350);
     });
+    $("dc-event").addEventListener("change", function (e) {
+      var v = e.target.value;
+      state.event = v ? { event: v.split("|")[0], year: v.split("|")[1] } : null;
+      state.fitted = false;
+      load();
+    });
     $("dc-days").addEventListener("change", function (e) {
       state.days = parseInt(e.target.value, 10) || 0;
       state.fitted = false;
@@ -580,5 +676,7 @@ if (typeof window.getCurrentEventYear !== "function") {
     initMap();
     load();
     setInterval(function () { if (!document.hidden) load(); }, REFRESH_MS);
+    // Conversation ouverte : relue plus souvent que la liste
+    setInterval(refreshDetail, 6000);
   });
 })();

@@ -10,7 +10,7 @@
      - app shell : correspondance EXACTE du chemin (plus de sous-chaine)
    ===================================================================== */
 
-const SW_VERSION = "field-sw-v44";
+const SW_VERSION = "field-sw-v46";
 const APP_SHELL_CACHE = "field-shell-" + SW_VERSION;
 const TILE_CACHE = "field-tiles-" + SW_VERSION;
 const API_CACHE = "field-api-" + SW_VERSION;
@@ -76,7 +76,7 @@ function isApiRequest(url) {
 // messages, missions disponibles, verification de session). On laisse le
 // navigateur faire la requete reseau normale.
 function isLiveRequest(url) {
-  return /\/field\/(thread\/|available-missions|denied\/check|status(\?|$)|push\/)/.test(url);
+  return /\/field\/(thread\/|available-missions|denied\/check|status(\?|$)|push\/|declarations)/.test(url);
 }
 
 // Correspondance EXACTE du chemin (et de l'URL complete pour unpkg). L'ancien
@@ -264,6 +264,8 @@ self.addEventListener("notificationclick", function (event) {
       // Focus un onglet existant si possible
       for (var i = 0; i < list.length; i++) {
         if (list[i].url.indexOf("/field") !== -1 && "focus" in list[i]) {
+          // App deja ouverte : lui transmettre la cible (constat a ouvrir...)
+          try { list[i].postMessage({ type: "field-open-url", url: url }); } catch (e) { /* ancien client */ }
           return list[i].focus();
         }
       }

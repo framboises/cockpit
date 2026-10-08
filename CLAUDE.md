@@ -58,6 +58,9 @@ Pas de tests automatisés ni de linter configurés.
 | `RETEX_MAX_TOKENS` | `max_tokens` du RETEX de fin d'édition | `24000` |
 | `PCA_CREATE_TEXT_INDEX` | `0` interdit la création à la volée de l'index texte `pca_text` sur `pcorg` | `1` |
 | `WAHA_WEBHOOK_SECRET` | Secret HMAC des webhooks WAHA (`/api/wa/webhook`, SHA-512 attendu, SHA-1 tolérée avec avertissement) | — (vide : bypass en dev, **refus de tous les webhooks en prod**) |
+| `COCKPIT_INTEG_<ID>_SECRET` | Secret HMAC partagé avec une application liée (`integrations.py`, ex. `COCKPIT_INTEG_FRIDAY_SECRET`), 32 caractères min. | — (liaison inactive si absent) |
+| `COCKPIT_INTEG_ALLOWED_HOSTS` | Hôtes autorisés pour les envois vers les applications liées (virgules, ex. `friday.lemans.org`) ; https obligatoire, jamais loopback / link-local (anti-SSRF) | — (aucun envoi possible si vide) |
+| `COCKPIT_PUBLIC_URL` | Adresse de Cockpit vue des applications liées (liens signés des photos) | `PUBLIC_BASE_URL` |
 | `OLLAMA_URL` | URL Ollama (résumés périodiques Alfred) | `http://srv-safe-docker.aco.local:11434` |
 | `OLLAMA_MODEL` | Modèle Ollama des résumés | `alfred` |
 | `OLLAMA_TIMEOUT` | Timeout lecture d'un résumé (s) | `300` |
@@ -147,4 +150,5 @@ Le detail de chaque domaine vit dans `docs/claude/`. **Lire le fichier concerne 
 - `docs/claude/voisins.md` : Evenements voisins (Antares, MSB, Le Mans FC) : sources publiques, voisins_events, timeline SAISON, indicateurs du calendrier
 - `docs/claude/musee.md` : Musee des 24 Heures : bloc autonome de l'accueil, collecte HSH dediee (musee_collect.py), visiteurs du jour (compteurs entree seule), PDA mobile, configuration dans /live-controle onglet Musee (horaires par jour, perimetre HSH, aucune valeur en dur)
 - `docs/claude/declarations.md` : Constats terrain des tablettes Field en mode declarant (page /declarations, transformation en fiche, droit can_convert_declaration, envoi mail + resume IA prepare)
+- `docs/claude/integrations.md` : Applications liees (Friday du service informatique...) : regles d'envoi par categorie / sous-classification, file signee HMAC, evenements entrants, JAMAIS de cloture externe. Note pour le service informatique : `docs/integrations/friday-note-service-informatique.md`
 - `docs/claude/pmv.md` : PMV (remorques Sigma 3000, JetFileII) : regles de dialogue NON NEGOCIABLES, securite, jobs
