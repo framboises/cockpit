@@ -275,3 +275,23 @@ def test_mot_range_dans_le_mauvais_champ(monkeypatch):
     assert "Non compris, ignoré : urgence « bizarre »" in r["resume"]
     r = _run(monkeypatch, {"periode": "a la saint glinglin"})
     assert r["vue"] == "point" and "période « a la saint glinglin »" in r["resume"]
+
+
+def test_admin_voit_tout_le_pc(monkeypatch):
+    import event_courant
+    import alfred_chat
+    monkeypatch.setattr(event_courant, "active_pairs",
+                        lambda db, include_previous_saison=False: [("IAME", 2026), ("SAISON", 2026)])
+    # Operateur (regle de l'ecran, IAME en PCO seulement) : la seule fiche PCO d'IAME
+    monkeypatch.setattr(AT, "_event_pairs", lambda db, c: [("IAME", 2026)])
+    r = M.t_main_courante(_db(), {}, {"cat_query": {"$regex": "^PCO"}}, now=NOW)
+    assert r["compteurs"]["en_cours"] == 1 and r["fiches"][0]["numero"] == 6
+    # Admin : epreuve + SAISON, PCO et PCS
+    r = M.t_main_courante(_db(), {}, {"cat_query": {"$regex": "^PC[OS]\\."}, "mc_tout": True}, now=NOW)
+    assert r["compteurs"]["en_cours"] == 5 and r["resolu"]["vue_admin"]
+    # Le drapeau voyage signe dans le jeton, jamais revendique par la VM
+    monkeypatch.setattr(alfred_chat, "TOOLS_SECRET", "s" * 40)
+    tok = alfred_chat.make_scope("a@b.fr", "IAME", "2026", {"$regex": "^PC[OS]\\."}, None, mc_tout=True)
+    assert alfred_chat.read_scope(tok)["mc_tout"] is True
+    tok = alfred_chat.make_scope("a@b.fr", "IAME", "2026", {"$regex": "^PCO"}, None)
+    assert alfred_chat.read_scope(tok)["mc_tout"] is False

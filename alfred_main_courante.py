@@ -202,6 +202,10 @@ def perimetre(db, args, ctx, now):
     import alfred_tools as AT
     cite = str(args.get("evenement") or "").strip()
     if not cite:
+        if (ctx or {}).get("mc_tout"):
+            # Admin (jeton signe) : tout le PC, epreuves actives + SAISON
+            import event_courant
+            return event_courant.active_pairs(db, include_previous_saison=True), {"vue_admin": True}, []
         return AT._event_pairs(db, ctx), {}, []
     import alfred_evenements
     nom, cands = alfred_evenements.resoudre_nom(db, cite)

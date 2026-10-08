@@ -212,12 +212,16 @@ def _unb64(s):
     return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
 
-def make_scope(email, event, year, cat_query, alert_slugs, now=None):
+def make_scope(email, event, year, cat_query, alert_slugs, now=None, mc_tout=False):
+    """mc_tout : main courante de tout le PC (epreuve + SAISON, PCO et PCS),
+    reserve aux admins ; sinon la regle de l'ecran pour l'evenement choisi."""
     if not TOOLS_SECRET:
         return None
-    body = json.dumps({"e": email, "ev": event, "yr": year, "c": cat_query,
-                       "a": alert_slugs, "x": int((now or time.time()) + SCOPE_TTL_S)},
-                      separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    d = {"e": email, "ev": event, "yr": year, "c": cat_query,
+         "a": alert_slugs, "x": int((now or time.time()) + SCOPE_TTL_S)}
+    if mc_tout:
+        d["mt"] = 1
+    body = json.dumps(d, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     sig = hmac.new(TOOLS_SECRET.encode("utf-8"), body, hashlib.sha256).hexdigest()
     return _b64(body) + "." + sig
 
@@ -241,21 +245,27 @@ def read_scope(token, now=None):
     if int(d.get("x") or 0) < (now or time.time()):
         return None
     return {"email": d.get("e"), "event": d.get("ev"), "year": d.get("yr"),
-            "cat_query": d.get("c"), "alert_slugs": d.get("a")}
+            "cat_query": d.get("c"), "alert_slugs": d.get("a"),
+            "mc_tout": bool(d.get("mt"))}
 
 
 def _scope_for(payload, event, year):
     """Portee de l'operateur, calculee avec les helpers de droits d'app.py."""
     from app import _get_user_alert_slugs, _pcorg_cat_query
+    # Main courante : un operateur voit ce que montre l'ecran pour l'evenement
+    # choisi ; un ADMIN voit tout le PC (epreuve + SAISON, PCO et PCS),
+    # decision d'exploitation du 08/10/2026.
+    admin = "admin" in (payload.get("roles") or [])
     try:
-        cat_q = _pcorg_cat_query(payload, event)
+        cat_q = {"$regex": "^PC[OS]\\."} if admin else _pcorg_cat_query(payload, event)
     except Exception:
         cat_q = {"$in": []}  # droit illisible : rien plutot que tout
     try:
         slugs = _get_user_alert_slugs(payload)
     except Exception:
         slugs = []
-    return make_scope((payload.get("email") or "").lower(), event, year, cat_q, slugs)
+    return make_scope((payload.get("email") or "").lower(), event, year, cat_q, slugs,
+                      mc_tout=admin)
 
 
 # ---------------------------------------------------------------------------
