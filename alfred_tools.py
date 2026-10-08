@@ -628,7 +628,8 @@ TOOLS = {
                        "TOUJOURS passer `periode`), ce qui est en cours, << y a-t-il quelque chose "
                        "sur X >> (`texte`). Passer `evenement` des que l'operateur en cite un (les "
                        "24h camions). Un numero de fiche cite va dans `fiche`. Recopier le champ "
-                       "resume sans le reformuler ni le completer ; ne jamais inventer de fiche. "
+                       "resume sans le reformuler ni le completer ; pour un resume court (<< resume "
+                       "la nuit >>), recopier le champ synthese (3 lignes) ; ne jamais inventer de fiche. "
                        "Ne cree ni ne modifie aucune fiche.",
         "parameters": {"type": "object", "properties": {
             "fiche": {"type": "string", "description": "numero de fiche cite par l'operateur"},

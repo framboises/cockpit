@@ -295,3 +295,27 @@ def test_admin_voit_tout_le_pc(monkeypatch):
     assert alfred_chat.read_scope(tok)["mc_tout"] is True
     tok = alfred_chat.make_scope("a@b.fr", "IAME", "2026", {"$regex": "^PCO"}, None)
     assert alfred_chat.read_scope(tok)["mc_tout"] is False
+
+
+def test_synthese_trois_lignes(monkeypatch):
+    r = _run(monkeypatch, {"periode": "aujourd'hui"})
+    l = r["synthese"].split("\n")
+    assert len(l) == 3
+    assert l[0].startswith("4 fiche(s) :") and "1 close(s), 3 en cours" in l[0]
+    assert l[1].startswith("Urgences : n°2") and "urgence absolue" in l[1]
+    assert "06 12" not in r["synthese"]
+
+
+def test_edition_terminee_cherche_aussi_les_closes(monkeypatch):
+    import alfred_evenements
+    import event_courant
+    db = _db()
+    db["pcorg"].docs.append(_fiche(7, "PCO.Flux", _t(10, jours=12), "UA", clos=True,
+                                   close_ts=_t(11, jours=12), texte="Giratoire", event="24H CAMIONS"))
+    db["parametrages"] = Col([{"event": "24H CAMIONS", "year": "2026"}])
+    monkeypatch.setattr(alfred_evenements, "resoudre_nom", lambda db, t: ("24H CAMIONS", []))
+    monkeypatch.setattr(event_courant, "active_pairs",
+                        lambda db, include_previous_saison=False: [("IAME", 2026)])
+    r = M.t_main_courante(db, {"evenement": "24h camions", "urgence": "UA"}, {}, now=NOW)
+    assert r["resolu"]["edition_terminee"] and r["resolu"]["statut"] == "toutes"
+    assert [f["numero"] for f in r["fiches"]] == [7]

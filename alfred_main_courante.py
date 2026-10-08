@@ -222,7 +222,53 @@ def perimetre(db, args, ctx, now):
     paires = [(nom, yr)]
     if _norm(nom) == "saison":
         paires.append((nom, yr - 1))
-    return paires, {"evenement": nom, "annee": yr}, []
+    resolu = {"evenement": nom, "annee": yr}
+    # Edition terminee (<< les urgences pendant les 24h camions >>) : ses fiches
+    # sont closes, chercher seulement les en cours rendrait toujours 0.
+    try:
+        import event_courant
+        actives = {(e, int(y)) for e, y in event_courant.active_pairs(db, include_previous_saison=True)}
+        if (nom, yr) not in actives:
+            resolu["edition_terminee"] = True
+    except Exception:
+        pass
+    return paires, resolu, []
+
+
+def _synthese(docs, now):
+    """Trois lignes pretes a recopier pour << resume >> : le modele resumait
+    mal une longue liste (heures melangees entre fiches, clotures inventees)."""
+    if not docs:
+        return "Aucune fiche."
+    closes = sum(1 for d in docs if d.get("status_code") == STATUT_CLOS)
+    l1 = "%d fiche(s) : %s ; %d close(s), %d en cours." % (
+        len(docs), _txt_rep(_repartition(docs, _cat)), closes, len(docs) - closes)
+    urg = sorted((d for d in docs if d.get("niveau_urgence") in ("EU", "UA", "UR")), key=_tri_urgence)
+    if urg:
+        l2 = "Urgences : " + " ; ".join(
+            "%s %s %s (%s)" % ("n°%s" % d["sql_id"] if d.get("sql_id") else "fiche sans n°", _hm(d.get("ts"), now) or "",
+                                  _court(d.get("text_full") or d.get("text"), 70),
+                                  URGENCES[d["niveau_urgence"]]) for d in urg[:3])
+        if len(urg) > 3:
+            l2 += " ; et %d autre(s)" % (len(urg) - 3)
+        l2 += "."
+    else:
+        l2 = "Aucune détresse vitale ni urgence absolue ou relative."
+    groupes = {}
+    vides = {"de", "du", "des", "la", "le", "les", "et", "a", "au", "aux", "d", "l", "en", "pour", "sur", "bt"}
+    for d in docs:
+        mots = [w[:-1] if len(w) > 3 and w.endswith("s") else w
+                for w in _norm(d.get("text_full") or d.get("text")).split() if w not in vides]
+        cle = " ".join(mots[:2]) or "sans texte"
+        g = groupes.setdefault(cle, {"n": 0, "label": " ".join(str(d.get("text") or "").split()[:3])})
+        g["n"] += 1
+    top = [g for g in sorted(groupes.values(), key=lambda g: -g["n"]) if g["n"] > 1][:4]
+    if top:
+        l3 = "Principalement : " + ", ".join(
+            "%s (%d)" % ((g["label"][:1].upper() + g["label"][1:]) or "Sans texte", g["n"]) for g in top) + "."
+    else:
+        l3 = "Fiches de natures variées, sans série."
+    return "\n".join([l1, l2, l3])
 
 
 def _filtre(db, ctx, paires):
@@ -418,7 +464,8 @@ def t_main_courante(db, args, ctx, now=None):
                                     {"comment": rx}, {"content_category.sous_classification": rx}]})
         resolu["texte"] = texte
     per = periode_demandee(args.get("periode"), now)
-    statut = statut_demande(args.get("statut")) or ("toutes" if per else "en_cours")
+    statut = statut_demande(args.get("statut")) or (
+        "toutes" if per or resolu.get("edition_terminee") else "en_cours")
     if per:
         flt["$and"].append({"ts": {"$gte": _naif(per[0]), "$lt": _naif(per[1])}})
         resolu["periode"] = per[2]
@@ -488,7 +535,8 @@ def t_main_courante(db, args, ctx, now=None):
                               "ouvertes_aujourdhui": jour_ouv, "closes_aujourdhui": jour_clo,
                               "ouvertes_derniere_heure": h_ouv, "closes_derniere_heure": h_clo,
                               "anciennes_sans_activite": anciennes},
-                "fiches": fiches, "resume": _borne("\n".join(l))}
+                "fiches": fiches, "resume": _borne("\n".join(l)),
+                "synthese": _synthese(recentes, now)}
 
     # 5. Liste filtree
     if per:
@@ -511,4 +559,4 @@ def t_main_courante(db, args, ctx, now=None):
         if len(docs) > LISTE_MAX:
             l.append("... et %d autre(s) non détaillée(s)." % (len(docs) - LISTE_MAX))
     return {"disponible": True, "vue": "liste", "resolu": resolu, "total": len(docs),
-            "fiches": fiches, "resume": _borne("\n".join(l))}
+            "fiches": fiches, "resume": _borne("\n".join(l)), "synthese": _synthese(docs, now)}
