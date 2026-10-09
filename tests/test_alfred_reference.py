@@ -13,7 +13,7 @@ def _f(code, titre, dom, situation, souscas, questions=(), conduite=(), details=
     d = {"code": code, "titre": titre, "dom": dom, "situation": situation, "souscas": list(souscas),
          "questions": list(questions), "conduite": list(conduite), "details": list(details),
          "flow": list(flow), "consigner": kw.get("consigner", ""), "pieges": kw.get("pieges", ""),
-         "status": status}
+         "status": status, "acteurs": kw.get("acteurs", "")}
     return d
 
 
@@ -28,7 +28,8 @@ P01 = _f("P01", "Secours à victime", "secours",
          flow=[{"k": "start", "t": "Alerte secours"},
                {"k": "ask", "t": "Gravité vitale ?", "y": "CMS + Pompiers, sécuriser", "n": "CMS seul"},
                {"k": "end", "t": "Clôture sur confirmation"}],
-         consigner="Localisation exacte, horodatage.", pieges="Ne pas clôturer avant la prise en charge.")
+         consigner="Localisation exacte, horodatage.", pieges="Ne pas clôturer avant la prise en charge.",
+         acteurs="CMS, Pompiers si gravité.")
 P05 = _f("P05", "Agression", "securite", "Une personne est agressée physiquement.",
          ["Agression d'un spectateur", "Agression d'un agent"])
 P06 = _f("P06", "Altercation ou rixe", "securite", "Dispute ou bagarre entre plusieurs personnes.",
@@ -82,6 +83,13 @@ def test_mode_dialogue_fiche_structuree_pour_le_modele():
     assert f["a_faire"][1] == "Engager le CMS sans délai."
     assert f["decisions"] == ["Gravité vitale ? oui : CMS + Pompiers, sécuriser ; non : CMS seul."]
     assert f["a_consigner"] and f["attention"] and f["precisions"]
+    assert f["deroule"] == ["DECISION Gravité vitale ? oui : CMS + Pompiers, sécuriser ; non : CMS seul."]
+    assert f["acteurs"] == "CMS, Pompiers si gravité."
+    p16 = dict(P17, code="P16", flow=[{"k": "start", "t": "Demande"}, {"k": "act", "t": "Qualifier"},
+                                      {"k": "engage", "t": "Tango : pose"}, {"k": "watch", "t": "Caméra"},
+                                      {"k": "end", "t": "Clôture"}])
+    d = R.t_reference(_db(fiches=(p16,)), {"code": "P16"}, {})["fiche"]["deroule"]
+    assert d == ["Qualifier", "Engager : Tango : pose", "Surveiller : Caméra"]
     assert "AUCUN moyen" in r["consigne"] and "resume" in r["consigne"]
     # Live VM 09/10 : << il bouge plus >> pris pour << gravite vitale : oui >>
     assert "par deduction" in r["consigne"] and "ne dit pas s'il respire" in r["consigne"]

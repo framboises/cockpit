@@ -212,6 +212,23 @@ def _decisions(flow, prefixe=""):
     return out
 
 
+ETAPES = {"act": "", "engage": "Engager : ", "watch": "Surveiller : "}
+
+
+def _deroule(flow):
+    """Le logigramme dans l'ordre (actions, engagements, decisions), sans
+    debut ni fin : le modele sait OU en est la fiche, pas seulement quoi
+    decider."""
+    out = []
+    for n in flow or []:
+        k, t = n.get("k"), (n.get("t") or "").strip()
+        if k in ETAPES and t:
+            out.append(ETAPES[k] + t)
+        elif k in ("ask", "fork"):
+            out += ["DECISION " + d for d in _decisions([n])]
+    return out
+
+
 def lien(p):
     return {"libelle": "Ouvrir la fiche %s" % p["code"], "url": "/wiki#%s" % p["code"]}
 
@@ -276,6 +293,9 @@ def structure(p):
             "a_demander": [q for q in p.get("questions") or [] if q],
             "a_faire": [c for c in p.get("conduite") or [] if c],
             "decisions": _decisions(p.get("flow")),
+            "deroule": _deroule(p.get("flow")),
+            # Les services que la fiche autorise a engager (et a quelle condition)
+            "acteurs": str(p.get("acteurs") or ""),
             "precisions": details,
             "a_consigner": p.get("consigner") or "",
             "attention": p.get("pieges") or ""}
