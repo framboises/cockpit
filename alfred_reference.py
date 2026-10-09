@@ -43,6 +43,7 @@ cas procedure procedures fiche fiches wiki reflexe reflexes conduite tenir gerer
 quelqu personne gens monsieur madame pres cote vers chez entre sans sous apres avant encore deja
 quel quelle quels quelles fera sera serait temps heure heures demain aujourd hui soir matin nuit tot
 tard maintenant minute minutes besoin trop beaucoup peu
+juste deux trois gars mec mecs type types donner dedans dehors vu voit
 """.split())
 
 # Mots de terrain -> mots des fiches. Les declencheurs sont normalises (sans
@@ -51,7 +52,8 @@ tard maintenant minute minutes besoin trop beaucoup peu
 SYNONYMES = [
     ("bagarre bagarres baston bastons rixe rixes bagarrent battent battre echauffouree embrouille "
      "tapent battent bastonnent castagne", "altercation rixe"),
-    ("frappe frapper frappee tabasse tabasser coups agresse agressee agresseur agresser",
+    # Sans << coups >> : << des coups de pied dans la barriere >> est une degradation
+    ("frappe frapper frappee tabasse tabasser agresse agressee agresseur agresser",
      "agression"),
     # Sans << tombe >> ni << chute >> : << un panneau est tombe >> n'est pas un secours
     ("malaise inconscient inconsciente evanoui evanouie blesse blessee blesses blessure respire "
@@ -69,7 +71,8 @@ SYNONYMES = [
     ("bruit bruits musique tapage sono nuisance nuisances", "nuisances sonores tapage"),
     ("courant electricite electrique disjoncte disjoncteur coupure eclairage lumiere noir",
      "panne electrique"),
-    ("fuite fuites inondation inonde canalisation sanitaire sanitaires", "panne sanitaire fuite eau"),
+    # Sans << sanitaires >> : lieu autant que panne (<< odeur de brule dans les sanitaires >> = feu)
+    ("fuite fuites inondation inonde canalisation", "panne sanitaire fuite eau"),
     ("tripode tripodes scanner scanners scan lecteur douchette informatique",
      "controle acces panne tripode scanner"),
     ("faux fraude fraudeur fraudeurs contrefait contrefacon bracelet revendu prete", "fraude"),
@@ -90,8 +93,10 @@ SYNONYMES = [
     ("panneau panneaux fleche fleches signaletique", "signaletique"),
     ("filtrage renfort renforts queue attente", "renfort filtrage"),
     ("reglement interdit interdite refus bouteille verre", "non respect reglement"),
-    ("sabotage malveillance sectionne coupe coupes cable cables camera cameras",
-     "malveillance dispositif"),
+    # Sans << camera >> : << on a vu a la camera >> (levee de doute) n'est pas
+    # un sabotage (live 09/10 : une degradation partait en P04)
+    ("sabotage malveillance sectionne sectionnes coupe coupes cable cables", "malveillance dispositif"),
+    ("engueulent engueule engueulade dispute disputent grabuge insultent insulte", "altercation rixe"),
     ("ouvrir ouvre ouverture fermer ferme fermeture avancer retarder cadencer cadencement",
      "ouverture fermeture cadencement"),
 ]
@@ -104,6 +109,9 @@ LIEUX = set("""parking parkings tribune tribunes porte portes village camping ca
 pistes zone zones entree entrees sortie sorties buvette bar bars stand stands wc toilette toilettes
 aire aires route routes rond point rocade site enceinte gradin gradins pelouse fan virage virages
 musee boutique boutiques restaurant hospitalite tente parvis allee passerelle tunnel""".split())
+# Mots d'indice, traites comme les lieux (jamais suffisants seuls) : << une
+# odeur de gaz >> donnait Panne sanitaire par le seul mot << odeur >>.
+LIEUX |= {"odeur", "odeurs", "probleme", "problemes", "souci", "soucis"}
 
 
 def _norm(s):

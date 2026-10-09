@@ -156,6 +156,15 @@ def test_un_mot_de_lieu_seul_ne_retient_pas_une_fiche():
     assert R.t_reference(db, {"situation": "ça bouchonne au parking Bleu"}, {})["code"] == "P18"
 
 
+def test_live_09_10_formulations_d_operateurs():
+    assert ref(situation="Juste deux gars qui s'engueulent")["code"] == "P06"
+    assert ref(situation="Il y a du grabuge au camping")["code"] == "P06"
+    # << odeur >> seul ne designe pas une panne sanitaire
+    p13 = dict(P13, situation="WC bouchés, fuite d'eau, odeur, sanitaires hors service.")
+    assert R.t_reference(_db(fiches=(P01, p13)), {"situation": "Une odeur de gaz près des stands"},
+                         {})["vue"] == "aucune"
+
+
 def test_brouillon_jamais_propose():
     assert ref(situation="fauteuil roulant PMR")["vue"] == "aucune"
     assert "P33" not in str(ref(situation="fauteuil roulant PMR")["catalogue"])
