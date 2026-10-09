@@ -129,6 +129,7 @@ TOOL_LABELS = {
     "cockpit_presents": "Presents",
     "cockpit_wiki_procedures": "Wiki",
     "cockpit_reference": "Fiche réflexe",
+    "cockpit_precedents": "Cas passés",
     "cockpit_evenement": "Evenement",
 }
 

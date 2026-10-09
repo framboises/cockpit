@@ -565,6 +565,11 @@ def t_reference(db, args, ctx):
     return alfred_reference.t_reference(db, args, ctx)
 
 
+def t_precedents(db, args, ctx):
+    import alfred_precedents
+    return alfred_precedents.t_precedents(db, args, ctx)
+
+
 TOOLS = {
     "cockpit_frequentation": {
         "fn": t_frequentation,
@@ -793,6 +798,23 @@ TOOLS = {
             "carre": {"type": "string", "description": "carre du carroyage cite (P5, AA12)"},
         }},
     },
+    "cockpit_precedents": {
+        "fn": t_precedents,
+        "capacite": "les cas passés de la main courante proches d'une situation : combien, sur quelles éditions, quels moyens ont été engagés, en combien de temps, et comment les 3 plus proches se sont terminés",
+        "description": "Cas PASSES de la main courante (autres editions, fiches closes) proches d'une "
+                       "situation : nombre, editions, moyens engages (comptes par Cockpit), duree "
+                       "jusqu'a la cloture, et les 3 cas les plus proches avec leur issue. A appeler "
+                       "quand l'operateur demande << est-ce deja arrive, comment on avait fait, cas "
+                       "similaires, precedents, d'habitude ca se passe comment, l'an dernier >>. "
+                       "Ce n'est PAS la conduite a tenir (cockpit_reference) ni la main courante de "
+                       "l'edition en cours (cockpit_main_courante). situation = les mots de "
+                       "l'operateur. Recopier resume tel quel, n'en tirer aucune consigne.",
+        "parameters": {"type": "object", "properties": {
+            "situation": {"type": "string", "description": "la situation a rapprocher, MOT POUR MOT"},
+            "evenement": {"type": "string", "description": "seulement si l'operateur limite a un "
+                                                           "evenement (24H, Le Mans Classic, GPF...)"},
+        }, "required": ["situation"]},
+    },
     # Remplace par cockpit_reference (identification par Cockpit) ; garde
     # executable pour un wrapper qui l'appellerait encore.
     "cockpit_wiki_procedures": {
@@ -818,7 +840,8 @@ TOOLS = {
 # WhatsApp du wrapper) : un groupe WhatsApp n'a pas les droits d'un
 # operateur. Bloque ICI aussi, pour tenir meme si le wrapper changeait.
 OUTILS_MAIN_COURANTE = {"cockpit_main_courante", "cockpit_main_courante_fiches",
-                        "cockpit_main_courante_fiche", "cockpit_main_courante_compteurs"}
+                        "cockpit_main_courante_fiche", "cockpit_main_courante_compteurs",
+                        "cockpit_precedents"}
 
 
 def manifest(sans_main_courante=False):

@@ -38,6 +38,7 @@
     cockpit_trafic: "traffic", cockpit_meteo: "partly_cloudy_day", cockpit_alertes: "notifications",
     cockpit_timeline: "schedule", cockpit_presents: "groups", cockpit_wiki_procedures: "menu_book",
     cockpit_reference: "menu_book",
+    cockpit_precedents: "history",
     cockpit_evenement: "event"
   };
 
