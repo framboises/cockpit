@@ -143,7 +143,7 @@ regles reglees regler resolu resolus traite traites traitee traiter passe passes
 arrivee arrives arrivees arriver arrivait cas similaire similaires semblable semblables precedent
 precedents habitude habituellement dhabitude d generalement souvent fois autre autres an annee dernier
 derniere dernieres derniers edition editions avant sur les des la le du de au aux un une ca cela
-s se etre y en il elle t on avez""".split())
+s se etre y en il elle t on avez c l j n m""".split())
 
 
 def nettoyer(texte, evenement=""):

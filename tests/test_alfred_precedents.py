@@ -115,6 +115,7 @@ def test_la_question_entiere_est_reduite_a_la_situation():
     # Live 09/10 : la VM passe la phrase entiere de l'operateur
     assert P.nettoyer("Comment on avait géré les bagarres au camping ?") == "bagarres camping"
     assert P.nettoyer("Est-ce qu'on a déjà eu des colis suspects ?") == "colis suspects"
+    assert P.nettoyer("Les odeurs de gaz, c'est déjà arrivé ?") == "odeurs gaz"
     assert P.nettoyer("Les tripodes en panne sur les 24H, ça s'était réglé comment ?",
                       "24H") == "tripodes panne"
     assert P.nettoyer("Un spectateur fait un malaise en tribune 13") == "spectateur malaise tribune 13"
