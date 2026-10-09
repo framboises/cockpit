@@ -407,7 +407,9 @@ def _clean_tool_calls(tcs):
     return out
 
 
-LIEN_RX = re.compile(r"^(/wiki#[A-Z]\d{2}|https://ul\.waze\.com/ul\?[A-Za-z0-9%._=&-]{1,400})$")
+# /#carte=lat,lng,nom;... : reperes poses sur la carte de l'accueil (portails)
+LIEN_RX = re.compile(r"^(/wiki#[A-Z]\d{2}|https://ul\.waze\.com/ul\?[A-Za-z0-9%._=&-]{1,400}"
+                     r"|/#carte=(?:-?\d{1,3}\.\d{1,7},-?\d{1,3}\.\d{1,7},[A-Za-z0-9%._~-]{0,120};?){1,25})$")
 
 
 def _liens_surs(liens):

@@ -856,6 +856,10 @@ def horaires_visites(db, jour, now):
 def t_lieux(db, args, ctx, now=None):
     args = args or {}
     now = now or datetime.now(TZ_PARIS).replace(tzinfo=None, second=0, microsecond=0)
+    if str(args.get("portail") or "").strip() or str(args.get("autour") or "").strip():
+        # Portails / portillons / acces piste (couche 3P, hors parametrage)
+        import alfred_portails
+        return alfred_portails.t_portails(db, args)
     if demande_visites(args.get("nom")):
         jour = resoudre_jour(args.get("jour"), now, []) if args.get("jour") else None
         resume, det = horaires_visites(db, jour, now)

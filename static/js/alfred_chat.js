@@ -49,6 +49,82 @@
     unread: 0, loaded: false, archive: null
   };
 
+  // ---------- reperes sur la carte de l'accueil (portails, cockpit_lieux) ----------
+
+  // Meme forme que la liste blanche serveur (alfred_chat.LIEN_RX)
+  var RX_CARTE = /^\/?#carte=((?:-?\d{1,3}\.\d{1,7},-?\d{1,3}\.\d{1,7},[A-Za-z0-9%._~-]{0,120};?){1,25})$/;
+  var carteCalque = null, carteMinuteur = null;
+
+  function parseCarte(url) {
+    var m = RX_CARTE.exec(String(url || ""));
+    if (!m) return null;
+    var pts = [];
+    m[1].split(";").forEach(function (s) {
+      if (!s) return;
+      var p = s.split(",");
+      var nom = "";
+      try { nom = decodeURIComponent(p[2] || ""); } catch (e) { nom = ""; }
+      var lat = parseFloat(p[0]), lng = parseFloat(p[1]);
+      if (isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+        pts.push({ lat: lat, lng: lng, nom: nom.slice(0, 40) });
+      }
+    });
+    return pts.length ? pts : null;
+  }
+
+  function carteDisponible() {
+    return !!(window.CockpitMapView && window.L && document.getElementById("cockpit-map"));
+  }
+
+  function montrerSurCarte(points, essais) {
+    var V = window.CockpitMapView;
+    if (!carteDisponible()) return;
+    if (V.currentView && V.currentView() !== "map" && V.switchView) V.switchView("map");
+    var carte = V.getMap && V.getMap();
+    if (!carte) {
+      // La carte se cree au premier affichage : on attend jusqu'a ~10 s
+      if ((essais || 0) < 40) setTimeout(function () { montrerSurCarte(points, (essais || 0) + 1); }, 250);
+      return;
+    }
+    if (carteCalque) { carte.removeLayer(carteCalque); }
+    if (carteMinuteur) { clearTimeout(carteMinuteur); }
+    carteCalque = L.layerGroup();
+    points.forEach(function (p, i) {
+      var mk = L.circleMarker([p.lat, p.lng], {
+        radius: i === 0 ? 11 : 8, color: "#ffffff", weight: 2,
+        fillColor: "#e5484d", fillOpacity: 0.95
+      });
+      // textContent : le nom vient de la base, jamais injecte en HTML
+      var etiquette = document.createElement("span");
+      etiquette.textContent = p.nom || "";
+      mk.bindTooltip(etiquette, { permanent: points.length <= 12, direction: "top", offset: [0, -8] });
+      carteCalque.addLayer(mk);
+    });
+    carteCalque.addTo(carte);
+    setTimeout(function () {
+      carte.invalidateSize();
+      if (points.length === 1) carte.setView([points[0].lat, points[0].lng], 19);
+      else carte.fitBounds(L.latLngBounds(points.map(function (p) { return [p.lat, p.lng]; })),
+                           { padding: [60, 60], maxZoom: 19 });
+    }, 150);
+    // Les reperes s'effacent seuls au bout de 10 minutes
+    carteMinuteur = setTimeout(function () {
+      if (carteCalque) { carte.removeLayer(carteCalque); carteCalque = null; }
+    }, 600000);
+  }
+
+  // Ouvert depuis un bouton d'une autre page : /#carte=... sur l'accueil
+  (function () {
+    var pts = parseCarte(location.hash);
+    if (!pts) return;
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* rien */ }
+    var attendre = function (n) {
+      if (carteDisponible()) montrerSurCarte(pts);
+      else if (n < 40) setTimeout(function () { attendre(n + 1); }, 250);
+    };
+    attendre(0);
+  })();
+
   // ---------- utilitaires ----------
 
   function lsGet() {
@@ -366,13 +442,24 @@
       var lks = el("div", "ac-links");
       m.liens.forEach(function (l) {
         var url = String(l.url || "");
-        if (!/^(\/wiki#[A-Z]\d{2}|https:\/\/ul\.waze\.com\/ul\?)/.test(url)) return;
+        var points = parseCarte(url);
+        if (!points && !/^(\/wiki#[A-Z]\d{2}|https:\/\/ul\.waze\.com\/ul\?)/.test(url)) return;
         var a = el("a", "ac-link-btn");
         a.href = url;
         a.target = "_blank";
         a.rel = "noopener noreferrer";
-        a.appendChild(icon(url.indexOf("/wiki#") === 0 ? "menu_book" : "navigation"));
+        a.appendChild(icon(points ? "map" : url.indexOf("/wiki#") === 0 ? "menu_book" : "navigation"));
         a.appendChild(document.createTextNode(String(l.libelle || "Ouvrir")));
+        if (points) {
+          // Carte de l'accueil sur cette page : on y pose les reperes ; sinon
+          // l'accueil s'ouvre dans un onglet et les pose a son chargement
+          a.addEventListener("click", function (ev) {
+            if (carteDisponible()) {
+              ev.preventDefault();
+              montrerSurCarte(points);
+            }
+          });
+        }
         lks.appendChild(a);
       });
       if (lks.childNodes.length) col.appendChild(lks);

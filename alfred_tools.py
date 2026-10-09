@@ -596,7 +596,7 @@ TOOLS = {
     },
     "cockpit_lieux": {
         "fn": t_lieux,
-        "capacite": "les horaires et infos des lieux : portes, parkings, campings, tribunes, boutiques, hospitalités, services (centre médical, PC...), par public, et ce qui est ouvert maintenant ; les horaires du musée ; les jours de visites du site (libres ou guidées)",
+        "capacite": "les horaires et infos des lieux : portes, parkings, campings, tribunes, boutiques, hospitalités, services (centre médical, PC...), par public, et ce qui est ouvert maintenant ; les horaires du musée ; les jours de visites du site (libres ou guidées) ; les portails, portillons et accès piste : où est tel portail (verrou, largeur, carré), ou ceux autour d'un lieu, avec un bouton pour les voir sur la carte",
         "description": "Horaires d'ouverture et informations de TOUS les lieux de l'evenement : "
                        "portes, parkings, campings, tribunes, boutiques, hospitalites, passerelles, "
                        "sanitaires, et services (ouverture du site au public, centre medical, help "
@@ -610,8 +610,14 @@ TOOLS = {
                        "guidees\") : le site est-il ouvert aux visites ce jour-la, libres et/ou "
                        "guidees, horaires, 7 jours suivants, prochain jour de visites. A appeler pour TOUTE "
                        "question d'horaire, d'ouverture, de fermeture ou de controle d'un lieu, y "
-                       "compris les questions de suite. Recopier le champ resume sans le "
-                       "reformuler ni le completer.",
+                       "compris les questions de suite. PORTAILS / PORTILLONS / ACCES PISTE (couche "
+                       "3P de la carte, hors horaires) : portail=<nom> pour un portail precis (<< ou "
+                       "est le portail ACT 2 >> : nature, acces, verrou, largeur, carre) ; "
+                       "autour=<lieu> pour ceux a proximite d'un lieu (porte, tribune, parking, aire, "
+                       "passerelle, sanitaire, giratoire, carre, ou un autre portail), avec portail="
+                       "<< portails >> / << portillons >> / << acces piste >> pour filtrer et rayon en "
+                       "metres si l'operateur le dit. Cockpit ajoute les boutons << Voir sur la carte >> "
+                       "et Waze. Recopier le champ resume sans le reformuler ni le completer.",
         "parameters": {"type": "object", "properties": {
             "nom": {"type": "string", "description": "nom du lieu tel que dit par l'operateur "
                                                      "(ex. porte nord, parking Chinetti)"},
@@ -627,6 +633,14 @@ TOOLS = {
             "maintenant": {"type": "boolean", "description": "ouvert ou ferme a l'instant"},
             "evenement": {"type": "string", "description": "seulement si l'operateur le cite"},
             "annee": {"type": "string"},
+            "portail": {"type": "string", "description": "nom d'un portail / portillon / acces piste "
+                                                         "(ACT 2, AP 106 Bis, T52 1) TEL QUEL, ou la "
+                                                         "nature cherchee (portails, portillons, "
+                                                         "acces piste) avec autour"},
+            "autour": {"type": "string", "description": "lieu de reference pour les portails a "
+                                                        "proximite, tel que dit (porte nord, tribune "
+                                                        "13, P3B, carre P5)"},
+            "rayon": {"type": "integer", "description": "metres, seulement si l'operateur le dit"},
         }},
     },
     "cockpit_situation": {
