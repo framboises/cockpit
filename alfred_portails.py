@@ -24,6 +24,7 @@ from urllib.parse import quote
 
 RAYON_DEFAUT = 150       # m autour d'un point
 RAYON_SURFACE = 50       # m autour d'une aire / d'un parking (dedans = 0 m)
+MEME_ENDROIT_M = 200     # deux couches dont les lieux sont a moins de 200 m : le meme endroit
 RAYON_MAX = 600
 LISTE_MAX = 15
 CARTE_MAX = 25           # points envoyes au bouton carte
@@ -356,6 +357,12 @@ def trouver_lieu(db, texte):
     tete = [l for s, l in notes if s == top]
     if len({l["type"] for l in tete}) == 1 and len(tete) <= 4:
         return tete, []
+    # Types differents mais meme endroit (<< Module Sportif >> batiment et
+    # hospitalite, << Helpdesk >> batiment et aire) : un seul lieu
+    if len(tete) <= 4:
+        centres = [centre(l) for l in tete]
+        if all(distance_m(a, b) <= MEME_ENDROIT_M for a in centres for b in centres):
+            return tete, []
     return [], tete[:6]
 
 
@@ -522,6 +529,14 @@ def t_portails(db, args):
         return {"disponible": True, "vue": "portail_vide", "trouve": False,
                 "resume": "Préciser le nom du portail (ex. ACT 2, AP 106 Bis) ou le lieu autour "
                           "duquel chercher (porte Nord, P3B, tribune 13, carré P5)."}
+    # << dans un rayon de 300 m du Module Sportif >> passe parfois tel quel
+    # dans `autour` (live 09/10) : le rayon en est retire, et repris s'il manque
+    m_r = re.search(r"(?i)(?:dans\s+un\s+rayon\s+de\s+|a\s+|à\s+)?(\d{2,4})\s*(?:m|metres|mètres)\b\s*"
+                    r"(?:autour\s+)?(?:du|de\s+la|de\s+l'|des|de)?\s*", autour)
+    if m_r:
+        if not args.get("rayon"):
+            args = dict(args, rayon=m_r.group(1))
+        autour = (autour[:m_r.start()] + " " + autour[m_r.end():]).strip()
     try:
         rayon = max(30, min(int(float(args.get("rayon") or RAYON_DEFAUT)), RAYON_MAX))
     except (TypeError, ValueError):

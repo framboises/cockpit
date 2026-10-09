@@ -120,6 +120,21 @@ def test_nature_et_rayon(db):
     assert [p["nom"] for p in r["portails"]] == ["ACT 2"]
 
 
+def test_rayon_glisse_dans_autour(db):
+    # Live 09/10 : << autour: "300 m du Module Sportif" >>
+    r = P.t_portails(db, {"autour": "300 m du Welcome Center", "rayon": 300})
+    assert r["vue"] == "autour" and r["lieu"] == "Welcome Center" and r["rayon_m"] == 300
+    r = P.t_portails(db, {"autour": "dans un rayon de 40 m de la porte nord"})
+    assert r["rayon_m"] == 40 and r["lieu"].startswith("Porte Nord")
+
+
+def test_meme_endroit_dans_deux_couches_un_seul_lieu(db):
+    db["hospitalites"].docs.append({"features": [{"geometry": _pt(0.20852, 47.95329),
+                                                  "properties": {"NOM": "WELCOME CENTER"}}]})
+    r = P.fiche_lieu(db, "Welcome Center")
+    assert r["vue"] == "lieu_carte" and len(r["lieux"]) == 2
+
+
 def test_t52_est_la_tribune_et_le_carre_seulement_s_il_est_dit(db):
     r = P.t_portails(db, {"autour": "T52"})
     assert r["lieu"].startswith("Tribune 52") and [p["nom"] for p in r["portails"]][0] == "T52 1"

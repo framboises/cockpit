@@ -914,8 +914,8 @@ def t_lieux(db, args, ctx, now=None):
             # horaires, plutot qu'un << aucun lieu >>
             carte = alfred_portails.fiche_lieu(db, nom)
             if carte and carte.get("trouve"):
-                carte["resume"] = ("Pas d'horaires pour « %s » dans le paramétrage %s (lieu hors "
-                                   "paramétrage). Sur la carte :\n" % (nom, ev_lib)) + carte["resume"]
+                carte["resume"] = ("Pas d'horaires pour « %s » dans le paramétrage %s. Sur la "
+                                   "carte :\n" % (nom, ev_lib)) + carte["resume"]
                 return dict(base, **carte)
             # Aucun : proposer les lieux du meme type (mot de type dans la
             # requete, ou parametre type), pour un "vous pensez a... ?"
