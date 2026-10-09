@@ -39,6 +39,34 @@ BASE = dict(
     terrains=[{"features": [{"geometry": {"type": "Polygon", "coordinates": [[
         [0.2060, 47.9550], [0.2080, 47.9550], [0.2080, 47.9560], [0.2060, 47.9560], [0.2060, 47.9550]]]},
         "properties": {"Name": "P9 D"}}]}],
+    mp=[{"features": [{"geometry": {"type": "MultiPoint", "coordinates": [[0.24151, 47.92690]]},
+                       "properties": {"name": "MP17", "description": "Zone 5"}},
+                      {"geometry": {"type": "MultiPoint", "coordinates": [[0.20711, 47.94925]]},
+                       "properties": {"name": "MP35b", "description": "Zone 9"}}]}],
+    campements_commissaires=[{"features": [
+        {"geometry": {"type": "Polygon", "coordinates": [[[0.2200, 47.9233], [0.2202, 47.9233],
+                                                          [0.2202, 47.9235], [0.2200, 47.9233]]]},
+         "properties": {"Name": "CC25", "description": "Intérieur Indianapolis"}},
+        {"geometry": {"type": "Polygon", "coordinates": [[[0.2116, 47.9470], [0.2118, 47.9470],
+                                                          [0.2118, 47.9472], [0.2116, 47.9470]]]},
+         "properties": {"Name": "C11", "description": "Entrée par la Porte sud"}},
+        {"geometry": {"type": "Polygon", "coordinates": [[[0.2321, 47.9440], [0.2323, 47.9440],
+                                                          [0.2323, 47.9442], [0.2321, 47.9440]]]},
+         "properties": {"Name": "CC11", "description": "1ère chicane"}}]}],
+    giratoires=[{"features": [{"geometry": {"type": "MultiPoint", "coordinates": [[0.18587, 47.92936]]},
+                               "properties": {"name": "Giratoire de l'oeuf"}}]}],
+    passerelles=[{"features": [{"geometry": _pt(0.20972, 47.94758),
+                                "properties": {"Nom": "HOUX", "type": "permanente", "PMR": "non",
+                                               "fermeture": "iloq"}}]}],
+    Virages=[{"features": [{"geometry": _pt(0.21544, 47.95893),
+                            "properties": {"NAME": "V4", "DESCRIPTION": "La chapelle"}}]}],
+    batiment=[{"features": [
+        {"geometry": {"type": "Polygon", "coordinates": [[[0.2084, 47.9532], [0.2086, 47.9532],
+                                                          [0.2086, 47.9534], [0.2084, 47.9532]]]},
+         "properties": {"name": "Welcome Center", "building": "yes"}},
+        {"geometry": {"type": "Polygon", "coordinates": [[[0.2300, 47.9300], [0.2302, 47.9300],
+                                                          [0.2302, 47.9302], [0.2300, 47.9300]]]},
+         "properties": {"name": "Maison Mme DUPONT", "building": "yes"}}]}],
     grid_ref=[{"grid_ref": "Z17", "latitude": 47.95320, "longitude": 0.19630},
               {"grid_ref": "T52", "latitude": 47.9000, "longitude": 0.1000}],
 )
@@ -106,11 +134,14 @@ def test_dans_une_aire_distance_nulle_et_rayon_reduit(db):
 
 
 def test_repli_sur_le_champ_acces(db):
+    r = P.t_portails(db, {"autour": "Actisud"})
+    assert r["vue"] == "acces" and [p["nom"] for p in r["portails"]] == ["ACT 2"]
+    # << Welcome >> est sur la carte (batiment Welcome Center) : par distance
     r = P.t_portails(db, {"autour": "Welcome"})
-    assert r["vue"] == "acces" and [p["nom"] for p in r["portails"]] == ["WEL 1"]
+    assert r["vue"] == "autour" and r["lieu"] == "Welcome Center" and "WEL 1" in [p["nom"] for p in r["portails"]]
     # << portail du Houx >> : un lieu, pas un nom de portail
     r = P.t_portails(db, {"portail": "portail du Houx"})
-    assert r["vue"] == "acces" and [p["nom"] for p in r["portails"]] == ["HOU 1"]
+    assert r["vue"] in ("acces", "autour") and "HOU 1" in [p["nom"] for p in r["portails"]]
 
 
 def test_lieu_inconnu_jamais_invente(db):
@@ -121,6 +152,41 @@ def test_lieu_inconnu_jamais_invente(db):
 def test_cockpit_lieux_aiguille_vers_les_portails(db):
     r = AL.t_lieux(db, {"portail": "ACT 2"}, {})
     assert r["vue"] == "portail"
+
+
+def test_situer_les_lieux_de_la_carte(db):
+    cas = {"poste commissaire MP17": ("Poste commissaire MP17", "Zone 5"),
+           "MP 35 bis": ("Poste commissaire MP35b", "Zone 9"),
+           "campement CC25": ("Campement commissaires CC25", "Intérieur Indianapolis"),
+           "giratoire de l'oeuf": ("Giratoire de l'oeuf", None),
+           "rond point de l'oeuf": ("Giratoire de l'oeuf", None),
+           "passerelle du houx": ("Passerelle Houx", "fermeture : iloq"),
+           "virage V4": ("V4 La chapelle", None),
+           "Welcome Center": ("Welcome Center", None)}
+    for texte, (nom, info) in cas.items():
+        r = P.fiche_lieu(db, texte)
+        assert r and r["vue"] == "lieu_carte" and r["lieux"][0]["nom"] == nom, (texte, r)
+        if info:
+            assert info in r["resume"]
+        assert AC._liens_surs(r["liens"])[0]["url"].startswith("/#carte=")
+    # C11 et CC11 sont deux campements distincts
+    assert [x["nom"] for x in P.fiche_lieu(db, "C11")["lieux"]] == ["Campement commissaires C11"]
+    assert P.fiche_lieu(db, "nulle part") is None
+
+
+def test_batiment_au_nom_d_une_personne_ignore(db):
+    assert not any(l["type"] == "bâtiment" and "DUPONT" in l["nom"] for l in P.repertoire(db))
+    r = P.fiche_lieu(db, "Maison Mme DUPONT")
+    assert r is None or "DUPONT" not in r["resume"]
+
+
+def test_cockpit_lieux_situer_et_repli_hors_parametrage(db):
+    r = AL.t_lieux(db, {"situer": "MP17"}, {})
+    assert r["vue"] == "lieu_carte"
+    db["parametrages"].docs.append({"event": "24H AUTOS", "year": "2026", "data": {}})
+    r = AL.t_lieux(db, {"nom": "campement CC25"}, {"event": "24H AUTOS", "year": "2026"})
+    assert r["vue"] == "lieu_carte" and r["resume"].startswith("Pas d'horaires pour « campement CC25 »")
+    assert "CC25" in r["resume"] and r["liens"]
 
 
 def test_liste_blanche_carte():

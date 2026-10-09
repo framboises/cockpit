@@ -856,10 +856,18 @@ def horaires_visites(db, jour, now):
 def t_lieux(db, args, ctx, now=None):
     args = args or {}
     now = now or datetime.now(TZ_PARIS).replace(tzinfo=None, second=0, microsecond=0)
+    import alfred_portails
     if str(args.get("portail") or "").strip() or str(args.get("autour") or "").strip():
         # Portails / portillons / acces piste (couche 3P, hors parametrage)
-        import alfred_portails
         return alfred_portails.t_portails(db, args)
+    if str(args.get("situer") or "").strip():
+        # << Ou est... >> : un lieu des couches de la carte (postes commissaires,
+        # campements, giratoires, batiments, virages...), sans horaires
+        r = alfred_portails.fiche_lieu(db, str(args["situer"]).strip())
+        return r or {"disponible": True, "vue": "lieu_inconnu", "trouve": False,
+                     "resume": "Lieu « %s » introuvable sur la carte (portes, tribunes, parkings, aires, "
+                               "passerelles, sanitaires, postes de secours, postes et campements commissaires, "
+                               "giratoires, virages, bâtiments). Le préciser." % args["situer"]}
     if demande_visites(args.get("nom")):
         jour = resoudre_jour(args.get("jour"), now, []) if args.get("jour") else None
         resume, det = horaires_visites(db, jour, now)
@@ -901,6 +909,14 @@ def t_lieux(db, args, ctx, now=None):
                 return dict(base, trouve=False, candidats=candidats,
                             resume="Plusieurs lieux correspondent à « %s » : %s. Demander lequel."
                                    % (nom, ", ".join(candidats)))
+            # Absent du parametrage mais sur la carte (poste commissaire,
+            # campement, giratoire, virage, batiment...) : sa position, sans
+            # horaires, plutot qu'un << aucun lieu >>
+            carte = alfred_portails.fiche_lieu(db, nom)
+            if carte and carte.get("trouve"):
+                carte["resume"] = ("Pas d'horaires pour « %s » dans le paramétrage %s (lieu hors "
+                                   "paramétrage). Sur la carte :\n" % (nom, ev_lib)) + carte["resume"]
+                return dict(base, **carte)
             # Aucun : proposer les lieux du meme type (mot de type dans la
             # requete, ou parametre type), pour un "vous pensez a... ?"
             t = type_ or next((TYPES[w] for w in norm(nom).split() if w in TYPES), None)

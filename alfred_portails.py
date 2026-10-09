@@ -124,13 +124,25 @@ def portails(db):
     return out
 
 
-def _ajoute(out, nom, type_, alias, geom=None, pts=None):
+def _ajoute(out, nom, type_, alias, geom=None, pts=None, infos=None):
     p, a = _points(geom) if geom else (pts or [], [])
     if not p and not a:
         return
     noms = [nom] + [x for x in alias if x]
     out.append({"nom": nom, "type": type_, "cles": {norm(x) for x in noms if norm(x)},
-                "points": p, "anneaux": a})
+                "points": p, "anneaux": a, "infos": [i for i in (infos or []) if i]})
+
+
+def _num(v):
+    try:
+        n = int(float(str(v).replace(",", ".")))
+        return n if n > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+# Nom d'un batiment OpenStreetMap qui designe une personne (<< Maison Mme X >>)
+_RX_PERSONNE = re.compile(r"\b(M\.|Mr|Mme|Mlle|Monsieur|Madame|Mademoiselle)\b")
 
 
 def repertoire(db):
@@ -141,48 +153,119 @@ def repertoire(db):
         return hit[1]
     out = []
     for f in _features(db, "portes"):
-        n = str((f.get("properties") or {}).get("Name") or "").strip()
+        p = f.get("properties") or {}
+        n = str(p.get("Name") or "").strip()
         if n:
-            _ajoute(out, n.title(), "porte", [n, re.sub(r"^PORTE\s+", "", n)], f.get("geometry"))
+            d = str(p.get("description") or "").strip()
+            _ajoute(out, n.title(), "porte", [n, re.sub(r"^PORTE\s+", "", n)], f.get("geometry"),
+                    infos=["accès %s" % d.lower() if d else ""])
     for f in _features(db, "tribunes"):
         p = f.get("properties") or {}
         num = str(p.get("NUMERO 2026") or "").strip().lstrip("0")
         nom = str(p.get("NOM") or "").strip()
         if num or nom:
             alias = [nom, "tribune " + nom] + (["T" + num, "T " + num, "tribune " + num] if num else [])
-            _ajoute(out, ("Tribune %s %s" % (num, nom.title())).strip(), "tribune", alias, f.get("geometry"))
+            cap = _num(p.get("CAPACITE REELLE")) or _num(p.get("CAPACITE HOMOLOGATION"))
+            _ajoute(out, ("Tribune %s %s" % (num, nom.title())).strip(), "tribune", alias, f.get("geometry"),
+                    infos=[str(p.get("TYPE") or "").lower(), "capacité %d places" % cap if cap else "",
+                           "%s accès" % p["NB ACCES"] if _num(p.get("NB ACCES")) else ""])
     for f in _features(db, "terrains"):
-        n = str((f.get("properties") or {}).get("Name") or "").strip()
+        p = f.get("properties") or {}
+        n = str(p.get("Name") or "").strip()
         if n:
             alias = [n, n.replace(" ", ""), "parking " + n, "aire " + n, "aa " + n]
             _ajoute(out, n.title() if not re.match(r"^P\d", n) else n, "parking ou aire", alias,
+                    f.get("geometry"), infos=[str(p.get("description") or "").strip()])
+    for f in _features(db, "passerelles"):
+        p = f.get("properties") or {}
+        n = str(p.get("Nom") or "").strip()
+        if n:
+            _ajoute(out, "Passerelle " + n.title(), "passerelle", [n, "passerelle " + n], f.get("geometry"),
+                    infos=[str(p.get("type") or ""), "PMR : %s" % p["PMR"] if p.get("PMR") else "",
+                           "fermeture : %s" % p["fermeture"] if p.get("fermeture") else ""])
+    for f in _features(db, "sanitaires"):
+        p = f.get("properties") or {}
+        n = str(p.get("Nom") or "").strip()
+        if n:
+            _ajoute(out, "Sanitaire " + n, "sanitaire",
+                    [n, "sanitaire " + n, n.replace("WC", "WC "), "wc " + n.lower().replace("wc", "")],
+                    f.get("geometry"),
+                    infos=["%s WC" % p["WC"] if _num(p.get("WC")) else "",
+                           "%s douches" % p["Douches"] if _num(p.get("Douches")) else "",
+                           "PMR" if _num(p.get("PMR")) else "",
+                           "gestionnaire %s" % p["Gestionnaire"] if p.get("Gestionnaire") else ""])
+    for f in _features(db, "hospitalites"):
+        p = f.get("properties") or {}
+        n = str(p.get("NOM") or "").strip()
+        if n:
+            _ajoute(out, n, "hospitalité", [n, "hospitalite " + n], f.get("geometry"),
+                    infos=["capacité %d" % _num(p.get("CAPACITE")) if _num(p.get("CAPACITE")) else "",
+                           "parking %s" % p["PARKING"] if p.get("PARKING") else ""])
+    for f in _features(db, "Boutiques"):
+        p = f.get("properties") or {}
+        n = str(p.get("nom") or "").strip()
+        if n:
+            _ajoute(out, "Boutique " + n, "boutique", [n, "boutique " + n], f.get("geometry"),
+                    infos=[str(p.get("type") or "")])
+    for f in _features(db, "postesecours"):
+        p = f.get("properties") or {}
+        n = str(p.get("Nom") or "").strip()
+        if n:
+            _ajoute(out, "Poste de secours " + n.title(), "poste de secours",
+                    [n, "poste de secours " + n, "ps " + n], f.get("geometry"),
+                    infos=["zone %s" % p["Zone"].lower() if p.get("Zone") else "",
+                           str(p.get("Description") or "").strip()])
+    for f in _features(db, "giratoires"):
+        n = str((f.get("properties") or {}).get("name") or "").strip()
+        if n:
+            court = re.sub(r"(?i)^giratoire\s+(d[eu]s?\s+|de la\s+|de l'|d')?", "", n)
+            _ajoute(out, n, "giratoire", [n, court, "rond point " + court, "giratoire " + court],
                     f.get("geometry"))
-    for col, cle, type_, prefixe in (("passerelles", "Nom", "passerelle", "passerelle "),
-                                     ("sanitaires", "Nom", "sanitaire", "sanitaire "),
-                                     ("hospitalites", "NOM", "hospitalité", ""),
-                                     ("Boutiques", "nom", "boutique", "boutique "),
-                                     ("postesecours", "Nom", "poste de secours", "poste de secours "),
-                                     ("giratoires", "name", "giratoire", "")):
-        for f in _features(db, col):
-            n = str((f.get("properties") or {}).get(cle) or "").strip()
-            if n:
-                alias = [n, prefixe + n]
-                if col == "sanitaires":
-                    alias += [n.replace("WC", "WC "), "wc " + n.lower().replace("wc", "")]
-                if col == "giratoires":
-                    alias.append(re.sub(r"(?i)^giratoire\s+(d[eu]s?|de la|de l')?\s*", "", n))
-                    alias.append("rond point " + alias[-1])
-                _ajoute(out, (prefixe + n).strip().capitalize() if prefixe else n, type_, alias,
-                        f.get("geometry"))
     for f in _features(db, "Virages"):
         p = f.get("properties") or {}
         n, d = str(p.get("NAME") or "").strip(), str(p.get("DESCRIPTION") or "").strip()
         if n:
-            _ajoute(out, "%s %s" % (n, d), "virage", [n, d, "virage " + d], f.get("geometry"))
+            _ajoute(out, "%s %s" % (n, d), "virage", [n, d, "virage " + d, "virage " + n], f.get("geometry"))
     for f in _features(db, "box_numerotation"):
         n = str((f.get("properties") or {}).get("Numero") or "").strip()
         if n:
             _ajoute(out, "Box " + n, "box", ["box " + n, "stand " + n], f.get("geometry"))
+    # Postes commissaires (couche << mp >> de la carte : MP17, MP17b)
+    for f in _features(db, "mp"):
+        p = f.get("properties") or {}
+        n = str(p.get("name") or "").strip()
+        m = re.match(r"(?i)^MP\s*(\d+)\s*(b|bis)?$", n)
+        if n:
+            num = (m.group(1) + (" bis" if m.group(2) else "")) if m else n
+            alias = [n, "mp " + num, "poste commissaire " + num, "poste " + n,
+                     "poste commissaire " + n] + (["mp%sb" % m.group(1)] if m and m.group(2) else [])
+            _ajoute(out, "Poste commissaire " + n, "poste commissaire", alias, f.get("geometry"),
+                    infos=[str(p.get("description") or "").strip().lower().capitalize()])
+    # Campements commissaires (CC25, C11...) : surfaces
+    for f in _features(db, "campements_commissaires"):
+        p = f.get("properties") or {}
+        n = str(p.get("Name") or "").strip()
+        if n:
+            d = str(p.get("description") or "").strip()
+            d = "" if d.lower() == "none" else d
+            # C11 et CC11 sont deux campements : chacun garde son prefixe
+            m = re.match(r"(?i)^(C{1,2})\s*(\d+)(.*)$", n)
+            alias = [n, "campement " + n, "campement commissaires " + n]
+            if m:
+                alias += [m.group(1) + " " + m.group(2) + m.group(3), "campement " + m.group(2) + m.group(3)]
+            _ajoute(out, "Campement commissaires " + n, "campement commissaires", alias + [d],
+                    f.get("geometry"), infos=[d])
+    # Batiments (OpenStreetMap) : seulement ceux qui ont un nom, jamais une
+    # personne (<< Maison Mme X >>)
+    for f in _features(db, "batiment"):
+        p = f.get("properties") or {}
+        n = str(p.get("name") or "").strip()
+        if n and not _RX_PERSONNE.search(n):
+            usage = {"grandstand": "tribune", "hangar": "hangar", "retail": "commerce",
+                     "service": "service", "school": "école"}.get(str(p.get("building") or ""), "")
+            cap = _num(p.get("capacity")) or _num(p.get("capacite"))
+            _ajoute(out, n, "bâtiment", [n, "batiment " + n], f.get("geometry"),
+                    infos=[usage, "capacité %d" % cap if cap else ""])
     deja = {k for l in out if l["type"] == "parking ou aire" for k in l["cles"]}
     for d in db["refparkings"].find({}, {"name": 1, "gps": 1}):
         m = re.match(r"\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)", str(d.get("gps") or ""))
@@ -220,7 +303,11 @@ MOTS_TYPE = {"porte": "porte", "portes": "porte", "tribune": "tribune", "tribune
              "aa": "parking ou aire", "camping": "parking ou aire", "sanitaire": "sanitaire",
              "sanitaires": "sanitaire", "wc": "sanitaire", "giratoire": "giratoire", "rond": "giratoire",
              "boutique": "boutique", "box": "box", "virage": "virage", "hospitalite": "hospitalité",
-             "poste": "poste de secours"}
+             "poste": "poste de secours", "secours": "poste de secours", "commissaire": "poste commissaire",
+             "commissaires": "poste commissaire", "mp": "poste commissaire",
+             "campement": "campement commissaires", "campements": "campement commissaires",
+             "batiment": "bâtiment", "batiments": "bâtiment", "giratoires": "giratoire",
+             "passerelles": "passerelle", "virages": "virage"}
 
 
 def trouver_lieu(db, texte):
@@ -235,6 +322,8 @@ def trouver_lieu(db, texte):
     types = {MOTS_TYPE[w] for w in q if w in MOTS_TYPE}
     if "poste" in q and "secours" not in q:
         types.discard("poste de secours")
+    if "campement" in q or "campements" in q:
+        types.discard("poste commissaire")     # << campement commissaires >>
     rep = repertoire(db)
     if types and any(l["type"] in types for l in rep):
         rep = [l for l in rep if l["type"] in types]
@@ -344,6 +433,43 @@ def fiche_portail(db, p):
     l.append("Boutons : « Voir sur la carte » et « Itinéraire Waze ».")
     return {"disponible": True, "vue": "portail", "trouve": True, "portail": dict(p, carre=carre),
             "liens": [lien_carte([p], "Voir %s sur la carte" % p["nom"]), lien_waze(p)],
+            "resume": "\n".join(l)}
+
+
+def centre(lieu):
+    """Point representatif : le point, ou le centre des sommets d'une surface."""
+    if lieu["points"]:
+        return lieu["points"][0]
+    sommets = [v for a in lieu["anneaux"] for v in a]
+    return (sum(v[0] for v in sommets) / len(sommets), sum(v[1] for v in sommets) / len(sommets))
+
+
+def fiche_lieu(db, texte):
+    """<< Ou est le poste commissaire MP17 / le campement CC25 / le giratoire
+    de l'oeuf ? >> : un lieu des couches de la carte, sa nature, ce que la
+    couche en dit, son carre, et les boutons carte et Waze. None si inconnu."""
+    lieux, candidats = trouver_lieu(db, texte)
+    if not lieux:
+        if candidats:
+            return {"disponible": True, "vue": "lieu_ambigu", "trouve": False,
+                    "candidats": [c["nom"] for c in candidats],
+                    "resume": "Plusieurs lieux de la carte pour « %s » : %s. Lequel ?" % (
+                        texte, ", ".join("%s (%s)" % (c["nom"], c["type"]) for c in candidats))}
+        return None
+    l, pts = [], []
+    for x in lieux:
+        la, lo = centre(x)
+        carre = carre_de(db, la, lo)
+        infos = ", ".join(x["infos"])
+        l.append("%s (%s%s) : %scentre à %.5f, %.5f%s." % (
+            x["nom"], x["type"], ", %s" % infos if infos else "", "surface, " if x["anneaux"] else "",
+            la, lo, ", carré %s" % carre if carre else ""))
+        pts.append({"nom": x["nom"], "lat": la, "lng": lo})
+    l.append("Boutons : « Voir sur la carte » et « Itinéraire Waze ».")
+    return {"disponible": True, "vue": "lieu_carte", "trouve": True,
+            "lieux": [{"nom": x["nom"], "type": x["type"], "infos": x["infos"]} for x in lieux],
+            "liens": [lien_carte(pts, ("Voir %s sur la carte" % pts[0]["nom"]) if len(pts) == 1
+                                 else "Voir les %d sur la carte" % len(pts)), lien_waze(pts[0])],
             "resume": "\n".join(l)}
 
 

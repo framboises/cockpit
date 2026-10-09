@@ -596,7 +596,7 @@ TOOLS = {
     },
     "cockpit_lieux": {
         "fn": t_lieux,
-        "capacite": "les horaires et infos des lieux : portes, parkings, campings, tribunes, boutiques, hospitalités, services (centre médical, PC...), par public, et ce qui est ouvert maintenant ; les horaires du musée ; les jours de visites du site (libres ou guidées) ; les portails, portillons et accès piste : où est tel portail (verrou, largeur, carré), ou ceux autour d'un lieu, avec un bouton pour les voir sur la carte",
+        "capacite": "les horaires et infos des lieux : portes, parkings, campings, tribunes, boutiques, hospitalités, services (centre médical, PC...), par public, et ce qui est ouvert maintenant ; les horaires du musée ; les jours de visites du site (libres ou guidées) ; les portails, portillons et accès piste : où est tel portail (verrou, largeur, carré), ou ceux autour d'un lieu ; où se trouve un lieu de la carte (poste ou campement commissaires, poste de secours, giratoire, passerelle, virage, bâtiment), avec un bouton pour le voir sur la carte",
         "description": "Horaires d'ouverture et informations de TOUS les lieux de l'evenement : "
                        "portes, parkings, campings, tribunes, boutiques, hospitalites, passerelles, "
                        "sanitaires, et services (ouverture du site au public, centre medical, help "
@@ -616,8 +616,12 @@ TOOLS = {
                        "autour=<lieu> pour ceux a proximite d'un lieu (porte, tribune, parking, aire, "
                        "passerelle, sanitaire, giratoire, carre, ou un autre portail), avec portail="
                        "<< portails >> / << portillons >> / << acces piste >> pour filtrer et rayon en "
-                       "metres si l'operateur le dit. Cockpit ajoute les boutons << Voir sur la carte >> "
-                       "et Waze. Recopier le champ resume sans le reformuler ni le completer.",
+                       "metres si l'operateur le dit. OU EST UN LIEU (<< ou est le poste commissaire "
+                       "MP17, le campement CC25, le giratoire de l'oeuf, la passerelle du Houx, le "
+                       "poste de secours Dunlop, le virage V4, le Welcome Center >>) : situer=<lieu> "
+                       "(nature, infos de la carte, carre). Un nom absent du parametrage donne aussi "
+                       "sa position. Cockpit ajoute les boutons << Voir sur la carte >> et Waze. "
+                       "Recopier le champ resume sans le reformuler ni le completer.",
         "parameters": {"type": "object", "properties": {
             "nom": {"type": "string", "description": "nom du lieu tel que dit par l'operateur "
                                                      "(ex. porte nord, parking Chinetti)"},
@@ -641,6 +645,11 @@ TOOLS = {
                                                         "proximite, tel que dit (porte nord, tribune "
                                                         "13, P3B, carre P5)"},
             "rayon": {"type": "integer", "description": "metres, seulement si l'operateur le dit"},
+            "situer": {"type": "string", "description": "lieu a situer sur la carte, tel que dit "
+                                                        "(poste commissaire MP17, campement CC25, "
+                                                        "giratoire de l'oeuf, passerelle du Houx, "
+                                                        "poste de secours Dunlop, virage V4, "
+                                                        "batiment Welcome Center)"},
         }},
     },
     "cockpit_situation": {
