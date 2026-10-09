@@ -273,6 +273,20 @@ def _deroule(flow):
     return out
 
 
+def _a_la_fin(flow):
+    """Etapes a donner quand l'affaire est reglee : celles qui suivent la
+    derniere decision du logigramme, et la fin (live 09/10 : << A la
+    decouverte, faire raccompagner... >> ne sortait qu'une fois sur deux)."""
+    flow = flow or []
+    dern = max([i for i, n in enumerate(flow) if n.get("k") in ("ask", "fork")], default=-1)
+    out = []
+    for n in flow[dern + 1:]:
+        k, t = n.get("k"), (n.get("t") or "").strip()
+        if t and (k in ETAPES or k == "end"):
+            out.append(t)
+    return out
+
+
 def lien(p):
     return {"libelle": "Ouvrir la fiche %s" % p["code"], "url": "/wiki#%s" % p["code"]}
 
@@ -319,7 +333,8 @@ CONSIGNE_DIALOGUE = (
     "5) A sa reponse, donner l'action ou la decision correspondante de la fiche ; si la fiche n'est "
     "plus dans la conversation, rappeler cockpit_reference avec code + situation = sa reponse. "
     "6) Phrases courtes, style radio, reformulation libre, mais AUCUN moyen, service, numero, delai "
-    "ou action qui ne figure pas dans la fiche. 7) Situation traitee : rappeler a_consigner et attention. "
+    "ou action qui ne figure pas dans la fiche. 7) Situation traitee : donner les etapes de a_la_fin, "
+    "puis rappeler a_consigner et attention. "
     "Le bouton << Ouvrir la fiche >> est ajoute par Cockpit, ne pas ecrire de lien. "
     "En cas de doute : recopier resume tel quel.")
 
@@ -339,6 +354,7 @@ def structure(p):
             "a_faire": [c for c in p.get("conduite") or [] if c],
             "decisions": _decisions(p.get("flow")),
             "deroule": _deroule(p.get("flow")),
+            "a_la_fin": _a_la_fin(p.get("flow")),
             # Les services que la fiche autorise a engager (et a quelle condition)
             "acteurs": str(p.get("acteurs") or ""),
             "precisions": details,

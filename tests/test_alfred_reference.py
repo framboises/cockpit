@@ -92,6 +92,21 @@ def test_mode_dialogue_fiche_structuree_pour_le_modele():
     assert d == ["Qualifier", "Engager : Tango : pose", "Surveiller : Caméra"]
 
 
+def test_a_la_fin_les_etapes_apres_la_derniere_decision():
+    # Live 09/10 : << A la decouverte, faire raccompagner >> sortait une fois sur deux
+    flow = [{"k": "start", "t": "Signalement"}, {"k": "engage", "t": "Appel général radio"},
+            {"k": "ask", "t": "Enfant ou personne vulnérable ?", "y": "Fiche Secours", "n": "Sécurité"},
+            {"k": "engage", "t": "À la découverte : patrouille, raccompagner"},
+            {"k": "end", "t": "Confirmer la réunification"}]
+    p = dict(P01, code="P02", flow=flow)
+    f = R.t_reference(_db(fiches=(p,)), {"code": "P02"}, {})["fiche"]
+    assert f["a_la_fin"] == ["À la découverte : patrouille, raccompagner", "Confirmer la réunification"]
+    assert "a_la_fin" in R.CONSIGNE_DIALOGUE
+    # Sans decision : tout le deroule est << a la fin >>, la fin comprise
+    p = dict(P01, flow=[{"k": "act", "t": "Faire"}, {"k": "end", "t": "Clore"}])
+    assert R.structure(p)["a_la_fin"] == ["Faire", "Clore"]
+
+
 def test_embranchement_chaque_reponse_avec_ses_actions():
     # Logigrammes reecrits le 09/10/2026 : decisions objectives a plusieurs reponses
     fork = {"k": "fork", "t": "Que constate-t-on sur la personne ?", "branches": [
