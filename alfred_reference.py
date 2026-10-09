@@ -10,12 +10,17 @@ situation, precisions, avec des synonymes de terrain) et rend :
 - deux ou trois fiches proches : la question a poser a l'operateur, redigee
   ici, pour les departager ;
 - aucune : le dire, et ne JAMAIS improviser de procedure.
-Le modele recopie `resume`. Pas de dialogue pas a pas mene par le modele.
+Mode dialogue (09/10/2026) : une fiche identifiee porte aussi `fiche`, ses
+elements separes (a_demander, a_faire, decisions, precisions...) et une
+`consigne` : le modele mene l'echange (ordre, questions deja connues
+sautees, une ou deux a la fois) sans rien ajouter qui ne soit dans la fiche.
+`resume` (guide complet) reste le repli a recopier en cas de doute.
 
 Seules les fiches PUBLIEES sont lues (un brouillon n'est pas valide).
 Lecture seule.
 """
 
+import json
 import math
 import re
 import unicodedata
@@ -236,6 +241,52 @@ def guide(p, identifiee=False):
     return "\n".join(l)
 
 
+PRECISIONS_MAX_CHARS = 1500
+TAILLE_MAX = 4700             # marge sous alfred_tools.RESULT_MAX_CHARS (5000)
+
+CONSIGNE_DIALOGUE = (
+    "Mener l'echange avec l'operateur a partir du champ fiche, et de lui SEUL. "
+    "1) Nommer la fiche en premier (<< Fiche P01 Secours a victime >>) pour qu'il puisse corriger. "
+    "2) Ne pas redemander ce qu'il a deja dit (<< il bouge plus >> : l'etat est connu). "
+    "3) Une action urgente de a_faire ou une decision vitale se dit tout de suite, avant les questions. "
+    "4) Poser au plus deux questions a la fois, tirees de a_demander, les plus utiles d'abord. "
+    "5) A sa reponse, donner l'action ou la decision correspondante de la fiche ; si la fiche n'est "
+    "plus dans la conversation, rappeler cockpit_reference avec code + situation = sa reponse. "
+    "6) Phrases courtes, style radio, reformulation libre, mais AUCUN moyen, service, numero, delai "
+    "ou action qui ne figure pas dans la fiche. 7) Situation traitee : rappeler a_consigner et attention. "
+    "Le bouton << Ouvrir la fiche >> est ajoute par Cockpit, ne pas ecrire de lien. "
+    "En cas de doute : recopier resume tel quel.")
+
+
+def structure(p):
+    """La fiche en elements separes, pour que le modele mene l'echange
+    (ordre, questions deja connues sautees) sans rien inventer."""
+    details, n = [], 0
+    for d in p.get("details") or []:
+        if d and n + len(d) <= PRECISIONS_MAX_CHARS:
+            details.append(d)
+            n += len(d)
+    return {"code": p["code"], "titre": p.get("titre") or "",
+            "situation": p.get("situation") or "",
+            "sous_cas": [x for x in p.get("souscas") or [] if x],
+            "a_demander": [q for q in p.get("questions") or [] if q],
+            "a_faire": [c for c in p.get("conduite") or [] if c],
+            "decisions": _decisions(p.get("flow")),
+            "precisions": details,
+            "a_consigner": p.get("consigner") or "",
+            "attention": p.get("pieges") or ""}
+
+
+def _dialogue(res, p, identifiee=False):
+    res.update({"mode": "dialogue", "fiche": structure(p), "consigne": CONSIGNE_DIALOGUE,
+                "identifiee_par_cockpit": identifiee})
+    # Sous le plafond d'un resultat (alfred_tools._borner retirerait la fiche
+    # entiere) : les precisions cedent d'abord, une a une
+    while len(json.dumps(res, ensure_ascii=False)) > TAILLE_MAX and res["fiche"]["precisions"]:
+        res["fiche"]["precisions"].pop()
+    return res
+
+
 def precision(p, texte):
     """Question de suite sur une fiche (<< et s'il ne respire pas ? >>) : les
     phrases de la fiche les plus proches, mot pour mot. None si rien.
@@ -317,11 +368,12 @@ def t_reference(db, args, ctx=None):
         ph = precision(p, reste) if reste and requete(reste) else None
         if ph:
             res["vue"] = "precision"
+            res["passages"] = ph
             res["resume"] = ("Sur la fiche %s %s : %s\nFiche complète : bouton « Ouvrir la fiche %s »."
                              % (code, p.get("titre"), " ".join(ph), code))
         else:
             res["resume"] = guide(p)
-        return res
+        return _dialogue(res, p)
     if not texte:
         return {"disponible": True, "vue": "sommaire", "trouve": False,
                 "resume": "Préciser la situation (ce qui se passe, en mots simples). Fiches publiées : "
@@ -359,9 +411,9 @@ def t_reference(db, args, ctx=None):
                 "candidats": [p["code"] for s, p in proches],
                 "liens": [lien(p) for s, p in proches], "resume": "\n".join(l)}
     p = proches[0][1]
-    return {"disponible": True, "vue": "fiche", "trouve": True, "code": p["code"],
-            "titre": p.get("titre"), "score": top, "liens": [lien(p)],
-            "resume": guide(p, identifiee=True)}
+    return _dialogue({"disponible": True, "vue": "fiche", "trouve": True, "code": p["code"],
+                      "titre": p.get("titre"), "score": top, "liens": [lien(p)],
+                      "resume": guide(p, identifiee=True)}, p, identifiee=True)
 
 
 def catalogue(fiches):

@@ -74,6 +74,35 @@ def test_guide_court_redige_par_cockpit():
     assert r["liens"] == [{"libelle": "Ouvrir la fiche P01", "url": "/wiki#P01"}]
 
 
+def test_mode_dialogue_fiche_structuree_pour_le_modele():
+    r = ref(situation="une personne a fait un malaise")
+    assert r["mode"] == "dialogue" and r["identifiee_par_cockpit"] is True
+    f = r["fiche"]
+    assert f["code"] == "P01" and f["a_demander"][0].startswith("La personne est-elle consciente")
+    assert f["a_faire"][1] == "Engager le CMS sans délai."
+    assert f["decisions"] == ["Gravité vitale ? oui : CMS + Pompiers, sécuriser ; non : CMS seul."]
+    assert f["a_consigner"] and f["attention"] and f["precisions"]
+    assert "AUCUN moyen" in r["consigne"] and "resume" in r["consigne"]
+    # Code cite / question de suite : la fiche suit aussi, pour continuer l'echange
+    r = ref(code="P01", situation="et s'il ne respire pas ?")
+    assert r["vue"] == "precision" and r["fiche"]["code"] == "P01" and r["passages"]
+    assert ref(code="P01")["identifiee_par_cockpit"] is False
+    # Ni departage ni << aucune >> : pas de fiche a derouler
+    assert "fiche" not in ref(situation="une personne agressée lors d'une altercation")
+    assert "fiche" not in ref(situation="quel temps fera-t-il demain")
+
+
+def test_fiche_longue_les_precisions_cedent_avant_la_fiche():
+    long = dict(P01, details=["Précision numéro %d " % i + "x" * 280 for i in range(5)],
+                questions=["Question %d assez longue pour peser dans le résultat ?" % i + "y" * 150
+                           for i in range(6)])
+    db = _db(fiches=(long,))
+    ok, r = AT.call(db, "cockpit_reference", {"code": "P01", "situation": "précision numéro"}, {})
+    assert ok and "fiche" in r and not r.get("tronque")
+    assert len(r["fiche"]["precisions"]) < 5
+    assert len(json.dumps(r, ensure_ascii=False)) <= AT.RESULT_MAX_CHARS
+
+
 def test_deux_fiches_proches_cockpit_ecrit_la_question():
     r = ref(situation="une personne agressée lors d'une altercation")
     assert r["vue"] == "ambigu" and set(r["candidats"]) == {"P05", "P06"}
