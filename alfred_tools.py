@@ -767,6 +767,9 @@ TOOLS = {
     },
     "cockpit_reference": {
         "fn": t_reference,
+        # Mode dialogue : fiche decoupee + resume complet (repli). Le wrapper
+        # ne montre au modele que fiche + consigne (~3 000 car.).
+        "max_chars": 7000,
         "capacite": "les fiches réflexes du wiki PC Organisation : décrivez la situation, je retrouve la fiche et vous donne les questions à poser, les actions, ce qu'il faut consigner, avec un bouton pour ouvrir la fiche ; et la position d'un carré du carroyage",
         "description": "Fiches reflexes du wiki PC Organisation (procedures validees) et carroyage "
                        "du site. A appeler pour TOUTE situation d'incident ou question << que faire, "
@@ -869,8 +872,9 @@ def presentation():
 RESULT_MAX_CHARS = 5000
 
 
-def _borner(result):
+def _borner(result, plafond=RESULT_MAX_CHARS):
     import json as _json
+    RESULT_MAX_CHARS = plafond   # noqa: N806 (meme nom, plafond propre a l'outil)
 
     def taille(o):
         return len(_json.dumps(o, ensure_ascii=False, default=str))
@@ -902,7 +906,8 @@ def call(db, name, args, ctx):
     if not t:
         return False, {"error": "outil_inconnu", "outils": sorted(TOOLS)}
     try:
-        return True, _borner(t["fn"](db, args if isinstance(args, dict) else {}, ctx or {}))
+        return True, _borner(t["fn"](db, args if isinstance(args, dict) else {}, ctx or {}),
+                             t.get("max_chars", RESULT_MAX_CHARS))
     except Exception as exc:
         logger.exception("alfred_tools %s", name)
         return False, {"error": "erreur_outil", "detail": str(exc)[:200]}

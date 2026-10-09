@@ -1873,6 +1873,12 @@ def main():
     for p in PROCEDURES:
         doc = build_doc(p, now)
         existing = col_pro.find_one({"code": doc["code"]})
+        if existing and not args.overwrite and int(existing.get("version") or 1) > 1:
+            # Fiche editee en prod (admin wiki, reecriture des decisions du
+            # 09/10/2026) : le contenu embarque ici est plus ancien, ne pas
+            # l'ecraser
+            print("  conservee (editee en prod, v%s) : %s" % (existing.get("version"), doc["code"]))
+            continue
         if existing:
             patch = dict(doc)
             if not args.overwrite:

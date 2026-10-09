@@ -205,10 +205,18 @@ def _decisions(flow, prefixe=""):
             out.append("%s%s oui : %s ; non : %s." % (prefixe, n["t"].rstrip(), n.get("y") or "-",
                                                       n.get("n") or "-"))
         elif n.get("k") == "fork" and n.get("branches"):
-            labels = [b.get("label") for b in n["branches"] if b.get("label")]
-            if labels:
-                out.append("%s%s : %s." % (prefixe, (n.get("t") or "Selon le cas").rstrip(" :"),
-                                           " / ".join(labels)))
+            # Chaque reponse avec SES actions : << Ne respire pas : Pompiers en
+            # plus du CMS, Patrouille : securiser ; Consciente : CMS seul. >>
+            cas = []
+            for b in n["branches"]:
+                if not b.get("label"):
+                    continue
+                actes = [("Engager " if x.get("k") == "engage" else "") + x["t"].strip()
+                         for x in b.get("flow") or [] if x.get("t") and x.get("k") != "fork"]
+                cas.append("%s : %s" % (b["label"].strip(), ", ".join(actes)) if actes else b["label"].strip())
+            if cas:
+                out.append("%s%s %s." % (prefixe, (n.get("t") or "Selon le cas").rstrip(" :"),
+                                         " ; ".join(cas)))
     return out
 
 
@@ -224,8 +232,10 @@ def _deroule(flow):
         k, t = n.get("k"), (n.get("t") or "").strip()
         if k in ETAPES and t:
             out.append(ETAPES[k] + t)
-        elif k in ("ask", "fork"):
-            out += ["DECISION " + d for d in _decisions([n])]
+        elif k in ("ask", "fork") and t:
+            # La question seule : ses reponses et actions sont dans `decisions`
+            # (sans doublon, la fiche tient sous le plafond d'un resultat)
+            out.append("DECISION (voir decisions) : " + t)
     return out
 
 
@@ -259,7 +269,7 @@ def guide(p, identifiee=False):
 
 
 PRECISIONS_MAX_CHARS = 1500
-TAILLE_MAX = 4700             # marge sous alfred_tools.RESULT_MAX_CHARS (5000)
+TAILLE_MAX = 6700             # marge sous le plafond de l'outil (alfred_tools : max_chars 7000)
 
 CONSIGNE_DIALOGUE = (
     "Mener l'echange avec l'operateur a partir du champ fiche, et de lui SEUL. "
@@ -270,7 +280,8 @@ CONSIGNE_DIALOGUE = (
     "3) Une action urgente de a_faire se dit tout de suite, avant les questions. "
     "Ne JAMAIS trancher une decision (oui / non, une branche) par deduction : seulement si les mots "
     "de l'operateur repondent a la question de la decision ; sinon poser cette question. "
-    "4) Poser au plus deux questions a la fois, tirees de a_demander, les plus utiles d'abord. "
+    "4) Poser au plus deux questions a la fois : d'abord la question d'une DECISION du deroule "
+    "encore sans reponse, puis celles de a_demander. "
     "5) A sa reponse, donner l'action ou la decision correspondante de la fiche ; si la fiche n'est "
     "plus dans la conversation, rappeler cockpit_reference avec code + situation = sa reponse. "
     "6) Phrases courtes, style radio, reformulation libre, mais AUCUN moyen, service, numero, delai "

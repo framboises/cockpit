@@ -83,13 +83,28 @@ def test_mode_dialogue_fiche_structuree_pour_le_modele():
     assert f["a_faire"][1] == "Engager le CMS sans délai."
     assert f["decisions"] == ["Gravité vitale ? oui : CMS + Pompiers, sécuriser ; non : CMS seul."]
     assert f["a_consigner"] and f["attention"] and f["precisions"]
-    assert f["deroule"] == ["DECISION Gravité vitale ? oui : CMS + Pompiers, sécuriser ; non : CMS seul."]
+    assert f["deroule"] == ["DECISION (voir decisions) : Gravité vitale ?"]
     assert f["acteurs"] == "CMS, Pompiers si gravité."
     p16 = dict(P17, code="P16", flow=[{"k": "start", "t": "Demande"}, {"k": "act", "t": "Qualifier"},
                                       {"k": "engage", "t": "Tango : pose"}, {"k": "watch", "t": "Caméra"},
                                       {"k": "end", "t": "Clôture"}])
     d = R.t_reference(_db(fiches=(p16,)), {"code": "P16"}, {})["fiche"]["deroule"]
     assert d == ["Qualifier", "Engager : Tango : pose", "Surveiller : Caméra"]
+
+
+def test_embranchement_chaque_reponse_avec_ses_actions():
+    # Logigrammes reecrits le 09/10/2026 : decisions objectives a plusieurs reponses
+    fork = {"k": "fork", "t": "Que constate-t-on sur la personne ?", "branches": [
+        {"label": "Ne répond pas ou ne respire pas",
+         "flow": [{"k": "engage", "t": "Pompiers en plus du CMS"}, {"k": "engage", "t": "Patrouille : sécuriser"}]},
+        {"label": "Consciente, répond", "flow": [{"k": "act", "t": "CMS seul"}]}]}
+    p = dict(P01, flow=[{"k": "start", "t": "Alerte"}, fork, {"k": "end", "t": "Clôture"}])
+    r = R.t_reference(_db(fiches=(p,)), {"code": "P01"}, {})
+    attendu = ("Que constate-t-on sur la personne ? Ne répond pas ou ne respire pas : Engager Pompiers "
+               "en plus du CMS, Engager Patrouille : sécuriser ; Consciente, répond : CMS seul.")
+    assert r["fiche"]["decisions"] == [attendu]
+    assert r["fiche"]["deroule"] == ["DECISION (voir decisions) : Que constate-t-on sur la personne ?"]
+    assert "Décision : " + attendu in r["resume"]
     assert "AUCUN moyen" in r["consigne"] and "resume" in r["consigne"]
     # Live VM 09/10 : << il bouge plus >> pris pour << gravite vitale : oui >>
     assert "par deduction" in r["consigne"] and "ne dit pas s'il respire" in r["consigne"]
@@ -104,13 +119,15 @@ def test_mode_dialogue_fiche_structuree_pour_le_modele():
 
 def test_fiche_longue_les_precisions_cedent_avant_la_fiche():
     long = dict(P01, details=["Précision numéro %d " % i + "x" * 280 for i in range(5)],
-                questions=["Question %d assez longue pour peser dans le résultat ?" % i + "y" * 150
+                questions=["Question %d assez longue pour peser dans le résultat ?" % i + "y" * 450
                            for i in range(6)])
     db = _db(fiches=(long,))
     ok, r = AT.call(db, "cockpit_reference", {"code": "P01", "situation": "précision numéro"}, {})
     assert ok and "fiche" in r and not r.get("tronque")
     assert len(r["fiche"]["precisions"]) < 5
-    assert len(json.dumps(r, ensure_ascii=False)) <= AT.RESULT_MAX_CHARS
+    assert len(json.dumps(r, ensure_ascii=False)) <= AT.TOOLS["cockpit_reference"]["max_chars"]
+    # Les autres outils gardent le plafond commun
+    assert AT._borner({"resume": "x", "gros": ["y" * 100] * 80})["tronque"]
 
 
 def test_deux_fiches_proches_cockpit_ecrit_la_question():
