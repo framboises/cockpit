@@ -312,7 +312,7 @@ def guide(p, identifiee=False):
         l.append("À consigner : %s" % p["consigner"])
     if p.get("pieges"):
         l.append("Attention : %s" % p["pieges"])
-    l.append("Fiche complète : bouton « Ouvrir la fiche %s »." % p["code"])
+    # Pas de ligne << bouton Ouvrir la fiche >> : le widget l'affiche deja
     return "\n".join(l)
 
 
@@ -422,9 +422,7 @@ def t_carre(db, raw):
         liens.append({"libelle": "Itinéraire Waze vers %s" % ref, "url": d["waze_url"]})
     return {"disponible": True, "vue": "carre", "trouve": True, "carre": ref,
             "latitude": round(lat, 6), "longitude": round(lng, 6), "liens": liens,
-            "resume": "Carré %s (carroyage 100 m du site) : centre à %.5f, %.5f.%s"
-                      % (ref, lat, lng, " Itinéraire : bouton « Itinéraire Waze vers %s »." % ref
-                         if liens else "")}
+            "resume": "Carré %s (carroyage 100 m du site) : centre à %.5f, %.5f." % (ref, lat, lng)}
 
 
 # ---------------------------------------------------------------------------
@@ -454,8 +452,7 @@ def t_reference(db, args, ctx=None):
         if ph:
             res["vue"] = "precision"
             res["passages"] = ph
-            res["resume"] = ("Sur la fiche %s %s : %s\nFiche complète : bouton « Ouvrir la fiche %s »."
-                             % (code, p.get("titre"), " ".join(ph), code))
+            res["resume"] = "Sur la fiche %s %s : %s" % (code, p.get("titre"), " ".join(ph))
         else:
             res["resume"] = guide(p)
         return _dialogue(res, p)

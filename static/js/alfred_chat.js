@@ -72,6 +72,79 @@
     return pts.length ? pts : null;
   }
 
+  // Meme liste blanche que le serveur (alfred_chat.PHOTO_RX)
+  var RX_PHOTO_MINI = /^\/api\/3p\/photo\/thumb\/[A-Za-z0-9_.-]{1,120}\.(jpe?g|png|webp)$/i;
+  var RX_PHOTO_ORIG = /^\/api\/3p\/photo\/original\/[A-Za-z0-9_.-]{1,120}\.(jpe?g|png|webp)$/i;
+
+  function ouvrirPhoto(url, nom) {
+    if (!RX_PHOTO_ORIG.test(url)) return;
+    // Visionneuse de la couche 3P de la carte (map_view.js), si chargee
+    if (typeof window._open3pLightbox === "function") { window._open3pLightbox(url, nom); return; }
+    window.open(url, "_blank", "noopener");
+  }
+
+  // Couche 3P (meme source que la carte : /api/3p), indexee par nom, chargee
+  // une fois a la premiere demande
+  var cache3p = null, attente3p = [];
+  function charger3p(cb) {
+    if (cache3p) { cb(cache3p); return; }
+    attente3p.push(cb);
+    if (attente3p.length > 1) return;
+    fetch("/api/3p", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : { features: [] }; })
+      .catch(function () { return { features: [] }; })
+      .then(function (d) {
+        cache3p = {};
+        (d.features || []).forEach(function (f) {
+          var nom = String(((f || {}).properties || {}).Nom || "").trim();
+          if (nom) cache3p[nom] = f.properties;
+        });
+        var cbs = attente3p; attente3p = [];
+        cbs.forEach(function (c) { c(cache3p); });
+      });
+  }
+
+  // Meme contenu que le popup de la couche 3P de map_view.js, construit en
+  // DOM (textContent) : rien de la base n'est interprete comme du HTML
+  function popup3p(p) {
+    var box = document.createElement("div");
+    box.className = "portes-popup";
+    var t = document.createElement("strong");
+    t.textContent = p.Nom || "";
+    box.appendChild(t);
+    function ligne(txt, style) {
+      if (!txt) return;
+      var d = document.createElement("div");
+      d.style.cssText = style;
+      d.textContent = txt;
+      box.appendChild(d);
+    }
+    ligne(p.Nature, "color:var(--brand);font-size:0.82rem;font-weight:600;");
+    var det = [];
+    if (p["Accès"]) det.push(p["Accès"]);
+    if (p.Zone) det.push(p.Zone);
+    if (p["Extérieur/Intérieur"]) det.push(p["Extérieur/Intérieur"]);
+    if (p["Largeur (cm)"]) det.push("L: " + p["Largeur (cm)"] + " cm");
+    if (p["Hauteur (cm)"]) det.push("H: " + p["Hauteur (cm)"] + " cm");
+    if (p.Verrous) det.push(p.Verrous);
+    ligne(det.join(" • "), "color:var(--muted);font-size:0.80rem;");
+    ligne(p.Commentaires, "color:var(--muted);font-size:0.78rem;font-style:italic;margin-top:3px;");
+    var nomPhoto = String(p.Photos || "");
+    if (/^[A-Za-z0-9_.-]{1,120}\.(jpe?g|png|webp)$/i.test(nomPhoto)) {
+      var img = document.createElement("img");
+      img.className = "portes-thumb";
+      img.src = "/api/3p/photo/thumb/" + nomPhoto;
+      img.alt = p.Nom || "";
+      img.style.cursor = "zoom-in";
+      img.onerror = function () { img.style.display = "none"; };
+      img.addEventListener("click", function () {
+        ouvrirPhoto("/api/3p/photo/original/" + nomPhoto, p.Nom || "");
+      });
+      box.appendChild(img);
+    }
+    return box;
+  }
+
   function carteDisponible() {
     return !!(window.CockpitMapView && window.L && document.getElementById("cockpit-map"));
   }
@@ -89,6 +162,7 @@
     if (carteCalque) { carte.removeLayer(carteCalque); }
     if (carteMinuteur) { clearTimeout(carteMinuteur); }
     carteCalque = L.layerGroup();
+    var reperes = [];
     points.forEach(function (p, i) {
       var mk = L.circleMarker([p.lat, p.lng], {
         radius: i === 0 ? 11 : 8, color: "#ffffff", weight: 2,
@@ -99,8 +173,18 @@
       etiquette.textContent = p.nom || "";
       mk.bindTooltip(etiquette, { permanent: points.length <= 12, direction: "top", offset: [0, -8] });
       carteCalque.addLayer(mk);
+      reperes.push({ point: p, marqueur: mk });
     });
     carteCalque.addTo(carte);
+    // Portails : la fenetre complete de la couche 3P (infos + photo)
+    charger3p(function (parNom) {
+      reperes.forEach(function (r, i) {
+        var f = parNom[r.point.nom];
+        if (!f) return;
+        r.marqueur.bindPopup(popup3p(f), { maxWidth: 260 });
+        if (points.length === 1 && i === 0) setTimeout(function () { r.marqueur.openPopup(); }, 400);
+      });
+    });
     setTimeout(function () {
       carte.invalidateSize();
       if (points.length === 1) carte.setView([points[0].lat, points[0].lng], 19);
@@ -463,6 +547,29 @@
         lks.appendChild(a);
       });
       if (lks.childNodes.length) col.appendChild(lks);
+    }
+
+    // Photos des portails : vignettes ; clic = visionneuse de la carte si
+    // elle est sur la page, sinon la photo dans un onglet
+    if (!isUser && !isErr && !pending && m.photos && m.photos.length) {
+      var phs = el("div", "ac-photos");
+      m.photos.forEach(function (p) {
+        var mini = String(p.miniature || ""), orig = String(p.original || "");
+        if (!RX_PHOTO_MINI.test(mini) || !RX_PHOTO_ORIG.test(orig)) return;
+        var b = el("button", "ac-photo");
+        b.type = "button";
+        b.title = "Agrandir la photo";
+        var img = document.createElement("img");
+        img.src = mini;
+        img.alt = String(p.libelle || "Photo");
+        img.loading = "lazy";
+        img.onerror = function () { b.style.display = "none"; };
+        b.appendChild(img);
+        b.appendChild(el("span", null, String(p.libelle || "")));
+        b.addEventListener("click", function () { ouvrirPhoto(orig, String(p.libelle || "")); });
+        phs.appendChild(b);
+      });
+      if (phs.childNodes.length) col.appendChild(phs);
     }
 
     if (!pending) {

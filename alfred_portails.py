@@ -17,6 +17,7 @@ Lecture seule. Aucun code de cadenas n'est stocke dans la collection
 """
 
 import math
+import os
 import re
 import time
 import unicodedata
@@ -97,6 +98,29 @@ def _points(geom):
     return pts, anneaux
 
 
+# Photos des portails : meme dossier que /api/3p/photo/* (app.LOOKER_MEDIA)
+MEDIA_3P = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "looker", "static", "img", "media")
+_RX_PHOTO = re.compile(r"^[A-Za-z0-9_.-]{1,120}\.(jpe?g|png|webp)$", re.I)
+
+
+def _photo(nom):
+    """Nom de fichier si sa miniature existe (636 sur 638 au 09/10/2026), sinon None."""
+    nom = str(nom or "").strip()
+    if not _RX_PHOTO.match(nom) or not os.path.isfile(os.path.join(MEDIA_3P, "thumbnails", nom)):
+        return None
+    return nom
+
+
+def photos_de(points, n=4):
+    """Vignettes pour le chat (liste blanche alfred_chat.PHOTO_RX)."""
+    out = []
+    for p in points:
+        if p.get("photo") and len(out) < n:
+            out.append({"libelle": p["nom"], "miniature": "/api/3p/photo/thumb/" + p["photo"],
+                        "original": "/api/3p/photo/original/" + p["photo"]})
+    return out
+
+
 def portails(db):
     """Les points 3P, en cache 10 min (une seule FeatureCollection)."""
     k = ("3p", id(db))
@@ -119,6 +143,7 @@ def portails(db):
             "hauteur": str(p.get("Hauteur (cm)") or "").strip(),
             "commentaire": str(p.get("Commentaires") or "").strip(),
             "virage": str(p.get("Virage/Secteur") or "").strip(),
+            "photo": _photo(p.get("Photos")),
             "lat": pts[0][0], "lng": pts[0][1],
         })
     _CACHE[k] = (time.time(), out)
@@ -437,10 +462,11 @@ def fiche_portail(db, p):
     if p["commentaire"]:
         l.append("Note : %s." % p["commentaire"].rstrip("."))
     l.append("Position : %.5f, %.5f%s." % (p["lat"], p["lng"], ", carré %s" % carre if carre else ""))
-    l.append("Boutons : « Voir sur la carte » et « Itinéraire Waze ».")
+    # Pas de ligne << Boutons : ... >> : le widget les affiche deja sous la
+    # reponse (remarque de l'exploitation, 09/10/2026)
     return {"disponible": True, "vue": "portail", "trouve": True, "portail": dict(p, carre=carre),
             "liens": [lien_carte([p], "Voir %s sur la carte" % p["nom"]), lien_waze(p)],
-            "resume": "\n".join(l)}
+            "photos": photos_de([p]), "resume": "\n".join(l)}
 
 
 def centre(lieu):
@@ -472,7 +498,6 @@ def fiche_lieu(db, texte):
             x["nom"], x["type"], ", %s" % infos if infos else "", "surface, " if x["anneaux"] else "",
             la, lo, ", carré %s" % carre if carre else ""))
         pts.append({"nom": x["nom"], "lat": la, "lng": lo})
-    l.append("Boutons : « Voir sur la carte » et « Itinéraire Waze ».")
     return {"disponible": True, "vue": "lieu_carte", "trouve": True,
             "lieux": [{"nom": x["nom"], "type": x["type"], "infos": x["infos"]} for x in lieux],
             "liens": [lien_carte(pts, ("Voir %s sur la carte" % pts[0]["nom"]) if len(pts) == 1
@@ -582,7 +607,8 @@ def t_portails(db, args):
                     "portails": [{"nom": p["nom"], "nature": p["nature"], "verrou": p["verrou"]}
                                  for p in par_acces[:LISTE_MAX]],
                     "liens": [lien_carte(par_acces, "Voir les %d sur la carte" % min(len(par_acces), CARTE_MAX))],
-                    "resume": "\n".join(l + ["Bouton « Voir sur la carte »."])}
+                    "photos": photos_de(par_acces),
+                    "resume": "\n".join(l)}
         if candidats:
             return {"disponible": True, "vue": "lieu_ambigu", "trouve": False,
                     "candidats": [c["nom"] for c in candidats],
@@ -622,11 +648,10 @@ def t_portails(db, args):
             ", %s" % p["verrou"] if p["verrou"] else ""))
     if len(proches) > LISTE_MAX:
         l.append("… et %d autres (réduire le rayon ou préciser la nature)." % (len(proches) - LISTE_MAX))
-    l.append("Bouton « Voir sur la carte » : les %d points." % min(len(proches), CARTE_MAX))
     pts = [p for d, p in proches]
     return {"disponible": True, "vue": "autour", "trouve": True, "lieu": ref, "rayon_m": rayon,
             "portails": [{"nom": p["nom"], "nature": p["nature"], "acces": p["acces"], "distance_m": round(d),
                           "verrou": p["verrou"]} for d, p in proches[:LISTE_MAX]],
             "liens": [lien_carte(pts, "Voir les %d sur la carte" % min(len(pts), CARTE_MAX)),
                       lien_waze(pts[0])],
-            "resume": "\n".join(l)}
+            "photos": photos_de(pts), "resume": "\n".join(l)}

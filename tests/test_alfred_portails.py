@@ -204,6 +204,38 @@ def test_cockpit_lieux_situer_et_repli_hors_parametrage(db):
     assert "CC25" in r["resume"] and r["liens"]
 
 
+def test_photo_du_portail_si_la_miniature_existe(db, tmp_path, monkeypatch):
+    (tmp_path / "thumbnails").mkdir()
+    (tmp_path / "thumbnails" / "ACT_2.jpeg").write_bytes(b"x")
+    monkeypatch.setattr(P, "MEDIA_3P", str(tmp_path))
+    db["3p"].docs[0]["features"][0]["properties"]["Photos"] = "ACT_2.jpeg"
+    db["3p"].docs[0]["features"][1]["properties"]["Photos"] = "absente.jpeg"     # pas de miniature
+    db["3p"].docs[0]["features"][2]["properties"]["Photos"] = "../../etc/passwd"
+    P._CACHE.clear()
+    r = P.t_portails(db, {"portail": "ACT 2"})
+    assert AC._photos_sures(r["photos"]) == [{"libelle": "ACT 2", "miniature": "/api/3p/photo/thumb/ACT_2.jpeg",
+                                              "original": "/api/3p/photo/original/ACT_2.jpeg"}]
+    assert P.t_portails(db, {"portail": "PON 7"})["photos"] == []
+    assert P.t_portails(db, {"portail": "PON 8"})["photos"] == []
+
+
+def test_liste_blanche_photos():
+    ok = AC._photos_sures([
+        {"miniature": "/api/3p/photo/thumb/a1.jpg", "original": "/api/3p/photo/original/a1.jpg", "libelle": "A"},
+        {"miniature": "/api/3p/photo/thumb/../x.jpg", "original": "/api/3p/photo/original/x.jpg"},
+        {"miniature": "https://evil.example/a.jpg", "original": "/api/3p/photo/original/a.jpg"},
+        {"miniature": "/api/3p/photo/original/b.jpg", "original": "/api/3p/photo/original/b.jpg"},
+        {"miniature": "/api/3p/photo/thumb/c.svg", "original": "/api/3p/photo/original/c.svg"}])
+    assert [p["miniature"] for p in ok] == ["/api/3p/photo/thumb/a1.jpg"]
+
+
+def test_les_reponses_ne_decrivent_pas_les_boutons(db):
+    # Les boutons s'affichent sous la reponse : inutile de les ecrire
+    for a in ({"portail": "ACT 2"}, {"autour": "porte nord"}, {"autour": "Actisud"}):
+        assert "outon" not in P.t_portails(db, a)["resume"]
+    assert "outon" not in P.fiche_lieu(db, "MP17")["resume"]
+
+
 def test_liste_blanche_carte():
     ok = AC._liens_surs([{"url": "/#carte=47.95,0.2,ACT%202;47.96,0.21,PON%207", "libelle": "Voir"},
                          {"url": "/#carte=47.95,0.2,<script>", "libelle": "x"},

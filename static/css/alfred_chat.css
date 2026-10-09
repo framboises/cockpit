@@ -344,6 +344,17 @@
 .ac-link-btn:hover { background: var(--ac-brand); color: #fff; }
 .ac-link-btn:focus-visible { outline: none; box-shadow: var(--ac-focus); }
 .ac-link-btn .material-symbols-outlined, .ac-link-btn .material-icons { font-size: 16px; }
+/* Photos des portails (cockpit_lieux) : vignettes sous la reponse */
+.ac-photos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ac-photo {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 0; border: 1px solid var(--ac-border, #d0d7e2); border-radius: 8px;
+  background: transparent; cursor: zoom-in; overflow: hidden; width: 96px;
+}
+.ac-photo img { display: block; width: 96px; height: 72px; object-fit: cover; }
+.ac-photo span { font-size: 11px; padding: 0 4px 3px; color: var(--ac-muted, #5b6b80);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 92px; }
+.ac-photo:focus-visible { outline: none; box-shadow: var(--ac-focus); }
 .ac-fb-send {
   border: 0;
   border-radius: 8px;

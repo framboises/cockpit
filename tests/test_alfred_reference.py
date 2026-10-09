@@ -73,6 +73,7 @@ def test_guide_court_redige_par_cockpit():
     assert "À consigner : Localisation exacte, horodatage." in res
     assert "Attention : Ne pas clôturer avant la prise en charge." in res
     assert r["liens"] == [{"libelle": "Ouvrir la fiche P01", "url": "/wiki#P01"}]
+    assert "outon" not in res     # le bouton s'affiche sous la reponse, inutile de l'ecrire
 
 
 def test_mode_dialogue_fiche_structuree_pour_le_modele():

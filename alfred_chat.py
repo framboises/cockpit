@@ -319,6 +319,7 @@ def _pub(m):
         "created_at": _iso(m.get("created_at")), "rating": m.get("rating"),
         "rating_motif": m.get("rating_motif"),
         "liens": _liens_surs(m.get("liens")),
+        "photos": _photos_sures(m.get("photos")),
     }
 
 
@@ -425,6 +426,33 @@ def _liens_surs(liens):
     return out[:3]
 
 
+# Photos des portails (couche 3P) : servies par /api/3p/photo/*, nom de
+# fichier sur (ce que contient la collection : hexa, lettres, _ . -)
+PHOTO_RX = re.compile(r"^/api/3p/photo/(thumb|original)/[A-Za-z0-9_.-]{1,120}\.(jpe?g|png|webp)$", re.I)
+PHOTOS_MAX = 4
+
+
+def _photos_sures(photos):
+    out = []
+    for x in photos or []:
+        if not isinstance(x, dict):
+            continue
+        mini, orig = str(x.get("miniature") or ""), str(x.get("original") or "")
+        lib = str(x.get("libelle") or "").strip()[:60]
+        if (PHOTO_RX.match(mini) and "/thumb/" in mini and PHOTO_RX.match(orig) and "/original/" in orig
+                and not any(o["miniature"] == mini for o in out)):
+            out.append({"miniature": mini, "original": orig, "libelle": lib})
+    return out[:PHOTOS_MAX]
+
+
+def _photos_du_tour(db, msg_id):
+    photos = []
+    for c in db[COL_TOOL_CALLS].find({"request_id": "chat-" + msg_id[:12], "photos": {"$ne": []}},
+                                     {"photos": 1}).sort("created_at", 1):
+        photos += c.get("photos") or []
+    return _photos_sures(photos)
+
+
 def _liens_du_tour(db, msg_id):
     """Liens des outils appeles pendant ce tour (journal Cockpit, par request_id)."""
     liens = []
@@ -477,6 +505,7 @@ def _run_ask(msg_id, session_id, ctx, is_new, scope):
                 "hops": res.get("hops"), "model": res.get("model"),
                 "duration_ms": res.get("duration_ms") or int((time.time() - t0) * 1000),
                 "liens": _liens_du_tour(db, msg_id),
+                "photos": _photos_du_tour(db, msg_id),
                 "finished_at": _now()}})
         else:
             code = res if not ok else "reponse_vide"
@@ -959,6 +988,7 @@ def tools_call():
             "scoped": bool(scope_token), "auth": mode, "email": ctx.get("email"),
             "resolu": resolu, "ok": ok, "duration_ms": ms, "created_at": _now(),
             "liens": _liens_surs(result.get("liens")) if isinstance(result, dict) else [],
+            "photos": _photos_sures(result.get("photos")) if isinstance(result, dict) else [],
             # Ce que le modele a lu, pour juger une reponse notee (page Retours).
             "resume": (str(result.get("resume") or result.get("error") or "")[:2000] or None)
                       if isinstance(result, dict) else None})
