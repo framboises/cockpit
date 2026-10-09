@@ -83,6 +83,8 @@ def test_mode_dialogue_fiche_structuree_pour_le_modele():
     assert f["decisions"] == ["Gravité vitale ? oui : CMS + Pompiers, sécuriser ; non : CMS seul."]
     assert f["a_consigner"] and f["attention"] and f["precisions"]
     assert "AUCUN moyen" in r["consigne"] and "resume" in r["consigne"]
+    # Live VM 09/10 : << il bouge plus >> pris pour << gravite vitale : oui >>
+    assert "par deduction" in r["consigne"] and "ne dit pas s'il respire" in r["consigne"]
     # Code cite / question de suite : la fiche suit aussi, pour continuer l'echange
     r = ref(code="P01", situation="et s'il ne respire pas ?")
     assert r["vue"] == "precision" and r["fiche"]["code"] == "P01" and r["passages"]
