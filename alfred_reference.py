@@ -77,6 +77,8 @@ SYNONYMES = [
      "circulation congestion"),
     ("gare garee garees stationne stationnee stationnement fourriere enlevement",
      "stationnement fourriere"),
+    # Live 09/10 : << une voiture arretee en pleine voie >> donnait Accident
+    ("arrete arretee arretes arretees immobilise immobilisee", "vehicule bloquant stationnement genant"),
     ("cle cles clef clefs autorisation", "demande acces cle autorisation"),
     ("escorte escorter convoi cortege", "escorte convoi"),
     ("accident collision accroche percute renverse renversee", "accident circulation"),
