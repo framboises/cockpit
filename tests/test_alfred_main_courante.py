@@ -263,8 +263,8 @@ def test_vue_complete_sans_main_courante(monkeypatch):
     monkeypatch.setattr(AT, "t_evenement", lambda *a: {})
     monkeypatch.setattr(AT, "t_presents", lambda *a: {"disponible": False})
     s = AT.t_situation(_db(), {}, {"sans_main_courante": True})
-    assert s["main_courante"] == "non consultable sur ce canal"
-    assert s["fiches_en_cours_les_plus_urgentes"] == []
+    assert "Main courante : non consultable sur ce canal." in s["resume"]
+    assert "En tête de liste" not in s["resume"]
 
 
 def test_mot_range_dans_le_mauvais_champ(monkeypatch):

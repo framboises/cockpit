@@ -396,20 +396,12 @@ def t_meteo(db, args, ctx):
 
 
 def t_alertes(db, args, ctx):
-    """Alertes actives de la centrale (filtrees sur les slugs de l'operateur)."""
+    """Alertes actives (masque : cockpit_situation sujet=alertes). Meme
+    lecture que la situation : jamais d'alerte LAPI, plaques masquees."""
     try:
-        now = datetime.now(timezone.utc)
-        q = {"expiresAt": {"$gt": now}}
-        slugs = (ctx or {}).get("alert_slugs")
-        if slugs is not None:
-            q["definition_slug"] = {"$in": list(slugs)}
-        docs = list(db["cockpit_active_alerts"].find(q).sort("triggeredAt", -1).limit(20))
-        return {"disponible": True, "nombre": len(docs), "alertes": [
-            {"titre": d.get("title"), "message": _court(d.get("message"), 300),
-             "declenchee": _paris(d.get("triggeredAt")),
-             "expire": _paris(d.get("expiresAt"), avec_date=False),
-             "type": d.get("definition_slug")}
-            for d in docs]}
+        import alfred_situation
+        al = alfred_situation.alertes_actives(db, ctx)
+        return {"disponible": True, "nombre": len(al), "alertes": al[:20]}
     except Exception as exc:
         return _indisponible("alertes", exc)
 
@@ -488,10 +480,15 @@ def t_wiki(db, args, ctx):
 
 
 def t_situation(db, args, ctx):
-    """Synthese en un appel : le premier outil a appeler pour << ou en est-on >>.
+    """Point de situation redige par Cockpit (alfred_situation), vues
+    `alertes` et `evenement` comprises."""
+    import alfred_situation
+    return alfred_situation.t_situation(db, args, ctx)
 
-    Un petit modele local enchaine mal six outils ; un seul appel qui rend
-    l'essentiel de chaque source lui evite des sauts et des oublis."""
+
+def t_situation_brute(db, args, ctx):
+    """Ancienne synthese (donnees brutes, redigees par le modele) : gardee
+    pour comparaison, plus appelee."""
     tr = t_trafic(db, {}, ctx)
     me = t_meteo(db, {}, ctx)
     al = t_alertes(db, {}, ctx)
@@ -654,14 +651,21 @@ TOOLS = {
     },
     "cockpit_situation": {
         "fn": t_situation,
-        "capacite": "un point de situation général en une fois (fréquentation, trafic, météo, alertes, main courante, échéances)",
-        "description": "Synthese de la situation en cours en UN appel : evenement, presents, "
-                       "trafic, meteo, alertes, compteurs et dernieres fiches main courante, "
-                       "echeances des 6 prochaines heures. A appeler en premier pour toute "
-                       "question generale (ou en est-on, point de situation, briefing). Photo de "
-                       "l'instant seulement : pour une periode passee (cette nuit, depuis 2 h) ou "
-                       "toute question de fiches, appeler cockpit_main_courante avec `periode`.",
-        "parameters": {"type": "object", "properties": {}},
+        "capacite": "un point de situation général en une fois (fréquentation, trafic, météo, alertes, main courante, échéances) ; les alertes actives de la centrale ; l'événement en cours, sa phase, ses dates et sa description",
+        "description": "Situation en cours en UN appel, redigee par Cockpit. Sans parametre : point "
+                       "de situation (evenement, presents, trafic, meteo, alertes, main courante, "
+                       "6 prochaines heures) : a appeler pour toute question generale (ou en est-on, "
+                       "point de situation, briefing). sujet=\"alertes\" : les alertes actives de la "
+                       "centrale (y a-t-il des alertes, quelles alertes). sujet=\"evenement\" : "
+                       "evenement(s) en cours, phase, dates, public, description (quel evenement, "
+                       "on est en quelle phase). Photo de l'instant seulement : pour une periode "
+                       "passee (cette nuit, depuis 2 h) ou toute question de fiches, appeler "
+                       "cockpit_main_courante. Recopier le champ resume sans le reformuler ni le "
+                       "completer.",
+        "parameters": {"type": "object", "properties": {
+            "sujet": {"type": "string", "enum": ["alertes", "evenement"],
+                      "description": "omettre pour le point de situation general"},
+        }},
     },
     "cockpit_main_courante": {
         "fn": t_main_courante,
@@ -744,7 +748,10 @@ TOOLS = {
                        "pluie, vigilance, consignes et contraintes (vent, chaleur, orage, sol).",
         "parameters": {"type": "object", "properties": {}},
     },
+    # Remplaces par cockpit_situation (sujet=alertes / sujet=evenement) ;
+    # gardes executables pour un wrapper qui les appellerait encore.
     "cockpit_alertes": {
+        "masque": True,
         "fn": t_alertes,
         "capacite": "les alertes actives de la centrale d'alerte Cockpit",
         "description": "Alertes actives de la centrale d'alerte Cockpit.",
@@ -851,6 +858,7 @@ TOOLS = {
         }},
     },
     "cockpit_evenement": {
+        "masque": True,
         "fn": t_evenement,
         "capacite": "l'événement en cours, sa phase et sa description",
         "description": "Evenement(s) en cours et leur phase (montage, course, demontage, SAISON).",
