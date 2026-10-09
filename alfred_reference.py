@@ -26,7 +26,10 @@ import re
 import unicodedata
 
 COL = "cockpit_wiki_procedures"
-SEUIL_MIN = 3.0          # score minimal d'une fiche retenue
+# Score minimal d'une fiche retenue. 6 (et non 3) d'apres 5 800 vraies phrases
+# de main courante : -1,8 pt de bonnes fiches, -6,3 pts de mauvaises, devenues
+# << aucune >> (sans danger : le modele recoit alors le catalogue).
+SEUIL_MIN = 6.0
 RATIO_AMBIGU = 0.75      # une 2e fiche a >= 75 % du score de la 1re : demander
 CANDIDATS_MAX = 3
 
@@ -44,6 +47,7 @@ quelqu personne gens monsieur madame pres cote vers chez entre sans sous apres a
 quel quelle quels quelles fera sera serait temps heure heures demain aujourd hui soir matin nuit tot
 tard maintenant minute minutes besoin trop beaucoup peu
 juste deux trois gars mec mecs type types donner dedans dehors vu voit
+demande demandes intervention presence arrivee mise place suite niveau ete securite
 """.split())
 
 # Mots de terrain -> mots des fiches. Les declencheurs sont normalises (sans
@@ -59,17 +63,33 @@ SYNONYMES = [
     ("malaise inconscient inconsciente evanoui evanouie blesse blessee blesses blessure respire "
      "respirer saigne saignement cardiaque convulse bouge pale sent vomit vomi douleur",
      "secours victime malaise blessure"),
+    # Vraies fiches de main courante (verification du 09/10/2026)
+    ("chute chuter entorse fracture cheville genou epaule deboite deboitee luxation tordue plaie "
+     "coupure ouvert suicide comate transi samu smur ambulance hypothermie secours pci masculin "
+     "feminin vomissement vomissements", "secours victime blessure"),
+    ("attouchement attouchements exhibition exhibitionniste denude denudee voyeur sexuel sexuelle",
+     "agression comportement sexuel"),
+    ("coule coulent bouche bouchee bouches bouchees fosse debordement", "panne sanitaire fuite"),
+    ("forcage squat squatte squattee squatteurs", "intrusion acces force"),
+    ("table tables chaise chaises", "logistique materiel"),
+    ("drift rodeo dangereuse dangereusement", "non respect reglement"),
+    ("rupteur rupteurs cone cones run runs burn burns casque casques pocket", "non respect reglement"),
+    ("menace menacant menacante menaces marteau couteau machette", "altercation rixe arme"),
+    ("escaladent escalade escaladee grimpent enjambe", "intrusion acces"),
     ("perdu perdue egare egaree gamin gamine gosse gosses enfant enfants disparu disparue "
-     "cherche recherche fugue retrouve fille fils", "enfant perdu recherche"),
+     "cherche recherche fugue retrouve", "enfant perdu recherche"),
     ("feu fumee fumees flamme flammes brule incendie", "incendie feu"),
-    ("vole voleur voleurs volee voles pickpocket portefeuille arrache arrachage", "vol"),
+    # << vol >> seul pese autant pour Drone (<< vol de drone >>) : << objet plainte >> departage
+    ("vol vols vole voleur voleurs volee voles pickpocket portefeuille arrache arrachage",
+     "vol objet plainte"),
     ("colis sac sacs bagage valise abandonne abandonnee suspect suspecte", "colis objet suspect"),
     ("bourre bourree ivre ivres saoul alcool alcoolise alcoolisee drogue drogues stupefiants defonce",
      "ivresse stupefiants"),
     ("drone drones survol survole volant", "drone survol"),
     ("talkie talkies gilet gilets materiel logistique livraison manque", "logistique materiel"),
     ("bruit bruits musique tapage sono nuisance nuisances", "nuisances sonores tapage"),
-    ("courant electricite electrique disjoncte disjoncteur coupure eclairage lumiere noir",
+    ("courant electricite electrique disjoncte disjoncteur coupure eclairage eclairages lumiere "
+     "lumieres noir",
      "panne electrique"),
     # Sans << sanitaires >> : lieu autant que panne (<< odeur de brule dans les sanitaires >> = feu)
     ("fuite fuites inondation inonde canalisation", "panne sanitaire fuite eau"),
@@ -111,7 +131,11 @@ aire aires route routes rond point rocade site enceinte gradin gradins pelouse f
 musee boutique boutiques restaurant hospitalite tente parvis allee passerelle tunnel""".split())
 # Mots d'indice, traites comme les lieux (jamais suffisants seuls) : << une
 # odeur de gaz >> donnait Panne sanitaire par le seul mot << odeur >>.
-LIEUX |= {"odeur", "odeurs", "probleme", "problemes", "souci", "soucis"}
+LIEUX |= {"odeur", "odeurs", "probleme", "problemes", "souci", "soucis",
+          # Main courante reelle : << Nettoyage poubelle >> donnait Incendie,
+          # << Demande d'intervention au Portail 3 >> Intrusion
+          "poubelle", "poubelles", "portail", "portails", "portillon", "portillons", "agent", "agents",
+          "patrouille", "patrouilles", "groupe", "individu", "individus", "spectateur", "spectateurs"}
 
 
 def _norm(s):
