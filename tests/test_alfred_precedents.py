@@ -93,6 +93,10 @@ def test_donnees_personnelles_masquees():
     for fuite in ("Dupont", "06 12", "AB-123-CD", "Beausmenil", "Tony", "Batist", "a.b@c.fr"):
         assert fuite not in t, (fuite, t)
     assert "Police" in t and "Porte Nord" in t and "8 ans" in t
+    t = P.masquer("information transmise à Florent DUPONT, prise de service de MARAND Ulysse, "
+                  "porte NORD, appel CMS Panorama")
+    assert "DUPONT" not in t and "MARAND" not in t and "Ulysse" not in t, t
+    assert "porte NORD" in t and "CMS Panorama" in t
 
 
 def test_aucun_cas_et_situation_vide(monkeypatch):
@@ -105,6 +109,21 @@ def test_aucun_cas_et_situation_vide(monkeypatch):
 def test_peu_de_cas_pas_de_tendance(monkeypatch):
     r, _ = _run([_fiche(1, "Homme inconscient tribune", ["CMS"])], monkeypatch)
     assert "Peu de cas comparables" in r["resume"] and "Durée médiane" not in r["resume"]
+
+
+def test_la_question_entiere_est_reduite_a_la_situation():
+    # Live 09/10 : la VM passe la phrase entiere de l'operateur
+    assert P.nettoyer("Comment on avait géré les bagarres au camping ?") == "bagarres camping"
+    assert P.nettoyer("Est-ce qu'on a déjà eu des colis suspects ?") == "colis suspects"
+    assert P.nettoyer("Les tripodes en panne sur les 24H, ça s'était réglé comment ?",
+                      "24H") == "tripodes panne"
+    assert P.nettoyer("Un spectateur fait un malaise en tribune 13") == "spectateur malaise tribune 13"
+    # La recherche porte sur l'incident : un lieu seul ramenait << vol tribune 13 >>
+    assert P.coeur("spectateur malaise tribune 13 bouge plus").split()[0] == "malaise"
+    assert "bouge" not in P.coeur("spectateur malaise tribune 13 bouge plus")
+    assert "congestion" not in P.coeur("bouchonne parking bleu")
+    assert "congestion" in P.coeur("bouchonne parking bleu", synonymes=True)
+    assert P.coeur("tribune 13") == "tribune 13"
 
 
 def test_evenement_limite_la_recherche(monkeypatch):

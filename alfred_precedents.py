@@ -62,9 +62,30 @@ _PAS_UN_NOM = {"Police", "Pompiers", "Gendarmerie", "Patrouille", "Porte", "Trib
                "Service", "Sécurité", "Securite", "Reflex", "Proguard", "Aeneas", "Le", "La", "Les"}
 
 
+# << Florent DUPONT >>, << MARAND Ulysse >>, << SOUARE ABDOUL Karim >> : prenom
+# + NOM en capitales, dans un sens ou dans l'autre
+_RX_PRENOM_NOM = re.compile(
+    r"\b(?:[A-ZÀ-Ý][a-zà-ÿ'-]{2,}\s+[A-ZÀ-Ý]{3,}(?:\s+[A-ZÀ-Ý]{3,})?"
+    r"|[A-ZÀ-Ý]{3,}(?:\s+[A-ZÀ-Ý]{3,})?\s+[A-ZÀ-Ý][a-zà-ÿ'-]{2,})\b")
+
+
+def _prenom_nom(m):
+    mots = m.group(0).split()
+    # << Porte NORD >>, << Zone EST >>, << Cam CMS >> : pas une personne
+    if any(w in _PAS_UN_NOM or w in _SIGLES for w in mots):
+        return m.group(0)
+    return "[nom]"
+
+
+_SIGLES = {"CMS", "CMP", "SERI", "PCA", "PCO", "PCS", "ACO", "BPS", "PDA", "NORD", "SUD", "EST", "OUEST",
+           "HOUX", "AA", "RAS", "SAMU", "SMUR", "SDIS", "OPV", "VIP", "PMR", "MCLAREN", "KTM", "BMW", "AENEAS",
+           "TERANGA", "PROGUARD", "SKIDATA", "WC", "CIK", "LMC", "GPF", "IAME", "FIA", "DSE", "RD", "PS"}
+
+
 def masquer(texte):
     import alfred_main_courante as AM
     t = _RX_CIVILITE.sub("[nom]", AM.masquer(texte))
+    t = _RX_PRENOM_NOM.sub(_prenom_nom, t)
     t = _RX_INITIALE.sub("[nom]", t)
     t = _RX_PRENOM_AGE.sub(lambda m: m.group(0) if m.group(0) in _PAS_UN_NOM else "[prénom]", t)
     return _RX_APRES.sub(lambda m: m.group(0) if m.group(3) in _PAS_UN_NOM
@@ -113,6 +134,63 @@ def _duree_txt(mins):
     return "%d h %02d" % (h, m) if h < 48 else "%d j" % (h // 24)
 
 
+# Mots de la QUESTION, pas de la situation : la VM passe la phrase entiere
+# (live 09/10 : << Comment on avait gere les bagarres au camping ? >> ne
+# trouvait rien, << bagarre au camping >> 15 cas).
+MOTS_QUESTION = set("""est ce qu que quoi on nous vous ils a avait avaient avons ete etait etaient deja eu
+eus fait faits faire fallu comment combien quand pourquoi gere geree geres gerees gerer regle reglee
+regles reglees regler resolu resolus traite traites traitee traiter passe passes passait arrive
+arrivee arrives arrivees arriver arrivait cas similaire similaires semblable semblables precedent
+precedents habitude habituellement dhabitude d generalement souvent fois autre autres an annee dernier
+derniere dernieres derniers edition editions avant sur les des la le du de au aux un une ca cela
+s se etre y en il elle t on avez""".split())
+
+
+def nettoyer(texte, evenement=""):
+    """La situation sans les mots de la question ni l'evenement cite."""
+    import pcorg_assist as PA
+    ev = set(PA.fold(evenement).split())
+    mots = [w for w in re.findall(r"[\wÀ-ÿ'-]+", texte)
+            if PA.fold(w).replace("'", " ").split()
+            and not all(x in MOTS_QUESTION or x in ev for x in PA.fold(w).replace("'", " ").split())]
+    return " ".join(mots).strip()
+
+
+# Indices d'etat qui ne nomment pas l'incident : << il bouge plus >> ramenait
+# des portails qui << bougent avec le vent >>
+INDICES = {"bouge", "bougent", "bouger", "plus", "encore", "toujours", "rien", "vraiment", "beaucoup",
+           "derriere", "devant", "dessous", "dessus", "face", "proche", "proximite"}
+INDICES_FICHES = {"odeur", "odeurs", "probleme", "problemes", "souci", "soucis", "poubelle", "poubelles",
+                  "portail", "portails", "portillon", "portillons"}
+
+
+def coeur(texte, synonymes=False):
+    """Les mots de l'INCIDENT, sans lieux, numeros ni mots d'indice : << un
+    spectateur fait un malaise en tribune 13 >> cherchait aussi << tribune 13 >>
+    et ramenait un vol en tribune 13. Vide : le texte entier."""
+    import alfred_reference as R
+    import pcorg_assist as PA
+    # Les LIEUX seulement : les mots d'indice des fiches reflexes (odeur,
+    # poubelle...) decrivent ici l'incident (<< odeur de gaz >> sans << odeur >>
+    # tombait sous le seuil)
+    lieux = R.LIEUX - INDICES_FICHES
+    garde = [w for w in texte.split()
+             if not any(t.isdigit() or t in lieux or t in R.VIDES or t in INDICES
+                        for t in PA.fold(w).split() or [""])]
+    if not synonymes:
+        return " ".join(garde) or texte
+    # Second essai seulement (moins de 3 cas) : synonymes de terrain des fiches
+    # reflexes. << ca bouchonne >> ne trouvait rien (les fiches disent
+    # << congestion >>) ; en premier essai, << chien perdu >> ramenait des
+    # enfants perdus par << perdu >> -> << enfant perdu recherche >>.
+    plies = set(PA.fold(" ".join(garde)).split())
+    ajouts = []
+    for decl, ajout in R.SYNONYMES:
+        if plies & set(decl.split()):
+            ajouts += [w for w in ajout.split() if w not in plies and w not in ajouts]
+    return " ".join(garde + ajouts) or texte
+
+
 def _requete(db, texte, ctx, evenement):
     q = {"category": (ctx or {}).get("cat_query") or {"$regex": "^PC[OS]\\."},
          "status_code": STATUT_CLOS}
@@ -133,7 +211,8 @@ def t_precedents(db, args, ctx=None):
     if ctx.get("sans_main_courante"):
         return {"disponible": True, "vue": "refus",
                 "resume": "Les cas passés de la main courante ne sont pas consultables sur ce canal."}
-    texte = str(args.get("situation") or "").strip()[:300]
+    evenement = str(args.get("evenement") or "").strip()
+    texte = nettoyer(str(args.get("situation") or "").strip()[:300], evenement)
     if not PA.tokenize(texte):
         return {"disponible": True, "vue": "vide",
                 "resume": "Préciser la situation à rapprocher des cas passés (ce qui se passe, où)."}
@@ -141,13 +220,24 @@ def t_precedents(db, args, ctx=None):
     if not PA.ensure_text_index(col):
         return {"disponible": False, "source": "precedents",
                 "resume": "Recherche des cas passés indisponible (index texte absent). Ne pas l'estimer."}
-    evenement = str(args.get("evenement") or "").strip()
     q = _requete(db, texte, ctx, evenement)
-    q["$text"] = {"$search": " ".join(PA.search_terms(texte))}
     proj = dict(PROJECTION)
     proj["score"] = {"$meta": "textScore"}
-    cands = list(col.find(q, proj).sort([("score", {"$meta": "textScore"})]).limit(CANDIDATS_MAX))
-    ranked = PA.rank_precedents({"text": texte}, cands, top=RETENUS, min_text=TEXTE_MIN)
+
+    def chercher(incident):
+        qq = dict(q)
+        qq["$text"] = {"$search": " ".join(PA.search_terms(incident))}
+        cands = list(col.find(qq, proj).sort([("score", {"$meta": "textScore"})]).limit(CANDIDATS_MAX))
+        return PA.rank_precedents({"text": incident}, cands, top=RETENUS, min_text=TEXTE_MIN)
+
+    incident = coeur(texte)
+    ranked = chercher(incident)
+    if len(ranked) < 3:
+        large = coeur(texte, synonymes=True)
+        if large != incident:
+            autre = chercher(large)
+            if len(autre) > len(ranked):
+                ranked = autre
     portee = "autres éditions" + (" de « %s »" % evenement if evenement else "") + ", fiches closes"
     if not ranked:
         return {"disponible": True, "vue": "aucun", "trouves": 0,
@@ -195,7 +285,7 @@ def t_precedents(db, args, ctx=None):
         texte, portee, n, "s" if n > 1 else "",
         ", ".join("%s (%d)" % e for e in editions.most_common(4)))]
     if moyens:
-        l.append("Moyens engagés sur ces %d cas : %s." % (n, ", ".join(
+        l.append("Moyens engagés sur %s : %s." % ("ces %d cas" % n if n > 1 else "ce cas", ", ".join(
             "%s %d" % m for m in moyens.most_common(6))))
     else:
         l.append("Moyens engagés : non renseignés sur ces fiches.")
