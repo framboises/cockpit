@@ -536,6 +536,7 @@
         if (item.type === "anpr-watchlist") return "Voir sur LAPI";
         if (item.type === "checkpoint-reassign") return "Voir Controle acces";
         if (_isPcorg(item.type, item.meta) || _isSosType(item.type)) return "Ouvrir la fiche";
+        if (ad.episode_id) return "Ouvrir dans Detection";
         if (ad.event_type && ad.camera_path) return "Voir la camera";
         return "Voir sur la carte";
     }
@@ -545,6 +546,66 @@
         if (cls) e.className = cls;
         if (text != null) e.textContent = text;
         return e;
+    }
+
+    // --- Intrusion (page Detection) : type de cible, zones, photos ---
+    var TARGET_TAGS = {
+        human: ["directions_walk", "Pieton"],
+        vehicle: ["directions_car", "Vehicule"]
+    };
+    function _intrusionTags(ad) {
+        var row = _el("div", "critical-alert-intrusion");
+        var t = TARGET_TAGS[ad.target_type] || ["help", "Autre cible"];
+        var chip = _el("span", "critical-alert-target is-" + (ad.target_type || "other"));
+        chip.appendChild(_el("span", "material-symbols-outlined", t[0]));
+        chip.appendChild(document.createTextNode(t[1]));
+        row.appendChild(chip);
+        (ad.zones || []).forEach(function(z) {
+            var zc = _el("span", "critical-alert-zone-chip");
+            zc.appendChild(_el("span", "material-symbols-outlined", "pentagon"));
+            zc.appendChild(document.createTextNode(z));
+            row.appendChild(zc);
+        });
+        return row;
+    }
+    // Les photos de l'intrusion arrivent encore apres l'alerte (une par
+    // message de la camera) : bandeau de vignettes relu a l'affichage puis
+    // 10 s plus tard. Sans le droit "Detection", l'appel echoue en silence et
+    // seule la premiere photo reste affichee.
+    function _intrusionPhotos(overlay, body, mainImg, episodeId) {
+        var strip = _el("div", "critical-alert-thumbs");
+        strip.style.display = "none";
+        mainImg.insertAdjacentElement("afterend", strip);
+        var current = null;
+        function load() {
+            if (!overlay.isConnected) return;
+            fetch("/api/detection/episodes/" + encodeURIComponent(episodeId), { credentials: "same-origin" })
+                .then(function(r) { return r.ok ? r.json() : null; })
+                .then(function(ep) {
+                    var photos = (ep && ep.photos) || [];
+                    if (photos.length < 2) return;
+                    strip.textContent = "";
+                    strip.style.display = "";
+                    photos.forEach(function(p, i) {
+                        var th = document.createElement("img");
+                        th.src = p.thumb || p.photo;
+                        th.alt = "Photo " + (i + 1);
+                        if ((current || photos[0].photo) === p.photo) th.classList.add("is-on");
+                        th.addEventListener("click", function() {
+                            current = p.photo;
+                            mainImg.src = p.photo;
+                            mainImg.style.display = "";
+                            Array.prototype.forEach.call(strip.children, function(c) { c.classList.toggle("is-on", c === th); });
+                        });
+                        strip.appendChild(th);
+                    });
+                    strip.appendChild(_el("span", "critical-alert-thumbs-n", photos.length + " photos"));
+                })
+                .catch(function() {});
+        }
+        // La fenetre est inseree dans la page juste apres : premier essai differe
+        setTimeout(load, 50);
+        setTimeout(load, 10000);
     }
 
     function _addMessage(body, text) {
@@ -630,6 +691,8 @@
             body.appendChild(_el("div", "critical-alert-meta", timeStr + (opName ? " — saisie par " + opName : "")));
         } else if (isCameraEvent) {
             _addMessage(body, item.message);
+            var isIntrusion = !!actionData.episode_id;
+            if (isIntrusion) body.appendChild(_intrusionTags(actionData));
             if (item.alertId && actionData.has_snapshot) {
                 var img = document.createElement("img");
                 img.className = "critical-alert-snapshot";
@@ -637,6 +700,7 @@
                 img.alt = "Snapshot " + (actionData.camera_label || actionData.camera_path || "");
                 img.onerror = function(){ this.style.display = "none"; };
                 body.appendChild(img);
+                if (isIntrusion && !item.preview) _intrusionPhotos(overlay, body, img, actionData.episode_id);
             }
             body.appendChild(_el("div", "critical-alert-meta",
                 timeStr + (actionData.camera_location ? " — " + actionData.camera_location : "")));
@@ -746,6 +810,12 @@
         if (ad && ad.event_type && ad.camera_path) {
             fn = function() {
                 window.open("/cameras?focus=" + encodeURIComponent(ad.camera_path), "_blank");
+            };
+        }
+        // Intrusion (page Detection) : ouvre la fiche de l'intrusion
+        if (ad && ad.episode_id) {
+            fn = function() {
+                window.open("/detection?episode=" + encodeURIComponent(ad.episode_id), "_blank");
             };
         }
         if (_isSosType(slug) && ad) {
@@ -914,6 +984,11 @@
             message = ad.text;
         } else if (_isSosType(slug)) {
             ad = { device_name: "Tablette exemple", lat: 47.9496, lng: 0.2076, battery: 64 };
+        } else if (def.detection_type === "detection_intrusion") {
+            ad = { event_type: "fielddetection", event_label: "Intrusion de zone", camera_path: "/exemple",
+                   camera_label: "Camera d'exemple", target_type: "human", zones: ["Zone d'exemple"],
+                   episode_id: "000000000000000000000000" };
+            message = "Pieton detecte sur Camera d'exemple (zone Zone d'exemple)";
         } else if (def.detection_type === "door_saturation_forecast") {
             title = "SATURATION PORTE PREVUE";
             message = "PORTE EXEMPLE : ~3200/h prevu vers 10:05 (capacite 3250/h)";

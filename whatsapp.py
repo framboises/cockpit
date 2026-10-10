@@ -66,6 +66,15 @@ def _cockpit_public_base():
     return (os.environ.get("COCKPIT_PUBLIC_URL", "https://cockpit.lemans.org")).rstrip("/")
 
 
+def _detection_link(alert_doc):
+    """Lien vers la fiche d'une intrusion (page Detection, connexion Cockpit
+    requise) pour les alertes "Detection - intrusion" ; vide sinon."""
+    ep = str((alert_doc.get("actionData") or {}).get("episode_id") or "")
+    if not ep or not all(c in "0123456789abcdef" for c in ep) or len(ep) != 24:
+        return ""
+    return "%s/detection?episode=%s" % (_cockpit_public_base(), ep)
+
+
 def sign_snapshot_url(alert_id, ttl_days=None):
     """Genere une URL publique signee pour le snapshot d'une alerte.
 
@@ -620,6 +629,9 @@ class WhatsAppService:
             name = definition.get("name", alert_doc.get("title", "Alerte"))
             msg = alert_doc.get("message", "")
             text = "%s %s\n%s\n\n%s" % (prefix, name, time_str, msg)
+            link = _detection_link(alert_doc)
+            if link:
+                text += "\nVoir l'intrusion : " + link
             if include_snapshot_urls:
                 action_data = alert_doc.get("actionData") or {}
                 if action_data.get("has_snapshot") and alert_doc.get("_id"):
@@ -630,6 +642,9 @@ class WhatsAppService:
             lines = []
             for alert_doc, definition in alerts_with_defs:
                 line = "- %s" % self._format_single_alert(alert_doc, definition)
+                link = _detection_link(alert_doc)
+                if link:
+                    line += " - " + link
                 if include_snapshot_urls:
                     action_data = alert_doc.get("actionData") or {}
                     if action_data.get("has_snapshot") and alert_doc.get("_id"):

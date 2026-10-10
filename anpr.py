@@ -1,10 +1,15 @@
 # anpr.py -- Blueprint LAPI / ANPR (Lecture Automatique de Plaques)
 import os
 import re
+import time
+import socket
 import logging
+from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import quote
+from zoneinfo import ZoneInfo
 from datetime import datetime, timezone, timedelta
-from flask import Blueprint, jsonify, request, render_template, Response, send_file, abort
-from pymongo import MongoClient, DESCENDING, ASCENDING
+from flask import Blueprint, jsonify, request, render_template, Response, send_file
+from pymongo import MongoClient, DESCENDING
 from bson.objectid import ObjectId
 import gridfs
 
@@ -291,6 +296,60 @@ COLOR_HEX = {
     "argent": "#c0c0c0",
 }
 
+COLOR_FR = {
+    "white": "Blanc", "black": "Noir", "gray": "Gris", "blue": "Bleu",
+    "red": "Rouge", "green": "Vert", "yellow": "Jaune", "brown": "Marron",
+    "pink": "Rose", "cyan": "Cyan", "purple": "Violet",
+}
+
+# ---------------------------------------------------------------------------
+# Reglages de la page de controle
+# ---------------------------------------------------------------------------
+PARIS = ZoneInfo("Europe/Paris")
+HIK_IMAGE_DIR = "E:/TITAN/production/hik_images"
+# Vignettes : dossier "_t" a cote de l'image d'origine, donc dans le dossier du
+# jour (purge par ecoutehik2 avec lui). Les originaux font ~800 Ko.
+THUMB_DIR_NAME = "_t"
+THUMB_BOX = (480, 360)
+
+# Sante des voies. Une voie sans lecture depuis LANE_MUTE_MIN est testee sur le
+# reseau (connexion TCP au port web de la camera, sans identifiant) :
+#   - ne repond pas                   -> "offline" (alimentation, cable, switch)
+#   - repond, d'autres voies lisent   -> "noread"  (camera en ligne qui n'envoie
+#                                        plus rien : configuration a verifier)
+#   - repond, aucune voie ne lit      -> "idle"    (nuit, circuit ferme)
+LANE_OK_MIN = 15
+LANE_MUTE_MIN = 30
+# Test reseau : au plus une fois par minute et par camera, seulement quand la
+# page est ouverte (appel de la vue d'ensemble) et seulement pour les voies
+# silencieuses.
+PROBE_PORT = 80
+PROBE_TIMEOUT_S = 1.0
+PROBE_TTL_S = 60
+# Taux d'illisibles au-dela duquel la lecture de la voie est signalee degradee
+LANE_UNREAD_WARN = 0.30
+LANE_UNREAD_MIN_N = 20
+
+# Periodes proposees : pas des barres d'activite
+PERIODS = {
+    "1h": timedelta(minutes=5),
+    "today": timedelta(hours=1),
+    "24h": timedelta(hours=1),
+    "7d": timedelta(hours=6),
+}
+
+VISION_CACHE_TTL_S = 120
+
+# Confusions courantes de lecture (recherche tolerante)
+_OCR_TWINS = {
+    "0": "0ODQ", "O": "0ODQ", "D": "D0O", "Q": "Q0O",
+    "1": "1I", "I": "1I",
+    "8": "8B", "B": "B8",
+    "5": "5S", "S": "S5",
+    "2": "2Z", "Z": "Z2",
+    "6": "6G", "G": "G6",
+}
+
 # ---------------------------------------------------------------------------
 # MongoDB (lazy init)
 # ---------------------------------------------------------------------------
@@ -302,563 +361,285 @@ _col_site_counter = None
 _col_vision_imm = None
 _col_vision_bl = None
 _col_vision_cfg = None
+_col_watchlist = None
 
 
 def _ensure_db():
     global _db, _col_anpr, _fs, _col_camera_config, _col_site_counter
-    global _col_vision_imm, _col_vision_bl, _col_vision_cfg
+    global _col_vision_imm, _col_vision_bl, _col_vision_cfg, _col_watchlist
     if _db is not None:
         return
     uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
     titan_env = os.getenv("TITAN_ENV", "dev").strip().lower()
     db_name = "titan" if titan_env in {"prod", "production"} else "titan_dev"
     client = MongoClient(uri)
-    dev_mode = os.getenv("TITAN_ENV", "dev") != "prod"
-    _db = client["titan_dev" if dev_mode else "titan"]
-    _col_anpr = _db["hik_anpr"]
-    _fs = gridfs.GridFS(_db, collection="hik_images")
-    _col_camera_config = _db["anpr_camera_config"]
-    _col_site_counter = _db["anpr_site_counter"]
-    _col_vision_imm = _db["vision_immatriculations"]
-    _col_vision_bl = _db["vision_blacklist"]
-    _col_vision_cfg = _db["vision_config"]
+    db = client[db_name]
+    _col_anpr = db["hik_anpr"]
+    _fs = gridfs.GridFS(db, collection="hik_images")
+    _col_camera_config = db["anpr_camera_config"]
+    _col_site_counter = db["anpr_site_counter"]
+    _col_vision_imm = db["vision_immatriculations"]
+    _col_vision_bl = db["vision_blacklist"]
+    _col_vision_cfg = db["vision_config"]
+    _col_watchlist = db["cockpit_anpr_watchlist"]
 
-    # Index
     _col_anpr.create_index([("event_dt", DESCENDING)])
     _col_anpr.create_index([("license_plate", 1)])
     _col_anpr.create_index([("camera_path", 1), ("event_dt", DESCENDING)])
+    # Flux en direct : nouveaux passages par ordre de reception
+    _col_anpr.create_index([("received_at", DESCENDING)])
     _col_camera_config.create_index("camera_path", unique=True)
+    _db = db
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _utc(dt):
+    """Datetime Mongo (naif = UTC) -> datetime UTC avec fuseau."""
+    if not isinstance(dt, datetime):
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
+
+def _iso(dt):
+    dt = _utc(dt)
+    return dt.isoformat().replace("+00:00", "Z") if dt else None
+
+
+def _parse_iso(value):
+    """ISO -> UTC. Une heure sans fuseau est une heure de Paris (saisie)."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=PARIS)
+    return dt.astimezone(timezone.utc)
+
+
+def _norm_plate(plate):
+    """Plaque normalisee : majuscules, lettres et chiffres seulement."""
+    return re.sub(r"[^A-Z0-9]", "", (plate or "").strip().upper())
+
+
+def _tolerant_regex(norm, anchored=False):
+    """Motif tolerant aux confusions de lecture (0/O/D, 1/I, 8/B...)."""
+    body = "".join(
+        "[" + _OCR_TWINS[ch] + "]" if ch in _OCR_TWINS else re.escape(ch)
+        for ch in norm
+    )
+    return "^" + body + "$" if anchored else body
 
 
 def _brand(logo_id):
-    return BRAND_MAP.get(logo_id, "Autre")
+    name = BRAND_MAP.get(logo_id or 0, "")
+    return "" if name in ("Others", "Unknown") else name
 
 
-def _get_cam_configs():
-    """Return {camera_path: config_doc} dict, cached per-request."""
-    return {c["camera_path"]: c for c in _col_camera_config.find()}
+def _default_label(path):
+    return path.replace("/", "").replace("lapi", "LAPI ").strip() or path
 
 
-def _resolve_direction(raw_direction, camera_path, cam_configs):
-    """Resolve raw forward/reverse into entry/exit using camera config."""
-    cfg = cam_configs.get(camera_path, {})
-    fwd_role = cfg.get("forward_role", "entry")  # default: forward = entry
-    if raw_direction == "forward":
-        return "entry" if fwd_role == "entry" else "exit"
-    elif raw_direction == "reverse":
-        return "exit" if fwd_role == "entry" else "entry"
+def _resolve_dir(raw, forward_role):
+    if raw == "forward":
+        return "entry" if forward_role == "entry" else "exit"
+    if raw == "reverse":
+        return "exit" if forward_role == "entry" else "entry"
     return "unknown"
 
 
-def _serialize(doc, cam_configs=None):
-    """Serialize a single ANPR document for JSON."""
-    if cam_configs is None:
-        cam_configs = _get_cam_configs()
-    raw_dir = doc.get("direction", "")
-    camera = doc.get("camera_path", "")
+def _raw_dir(target, forward_role):
+    """Direction brute de la camera correspondant a entry/exit."""
+    if target == "entry":
+        return "forward" if forward_role == "entry" else "reverse"
+    return "reverse" if forward_role == "entry" else "forward"
+
+
+def _cameras():
+    """Cameras connues (donnees + configuration), triees par chemin."""
+    cfgs = {c["camera_path"]: c for c in _col_camera_config.find()}
+    paths = set(cfgs) | {p for p in _col_anpr.distinct("camera_path") if p}
+    out = []
+    for path in sorted(paths):
+        cfg = cfgs.get(path, {})
+        out.append({
+            "path": path,
+            "label": cfg.get("label") or _default_label(path),
+            "forward_role": cfg.get("forward_role", "entry"),
+            "enabled": cfg.get("enabled", True),
+            "lieu": cfg.get("lieu", ""),
+        })
+    return out
+
+
+def _dir_conditions(cams, target, camera=None):
+    return [
+        {"camera_path": c["path"], "direction": _raw_dir(target, c["forward_role"])}
+        for c in cams if not camera or c["path"] == camera
+    ]
+
+
+def _period(code, day=None):
+    """(code, debut UTC aligne sur le pas, fin UTC, pas, nombre de barres).
+
+    code "day" + day "AAAA-MM-JJ" : journee de Paris (consultation d'un jour passe).
+    """
+    now = datetime.now(timezone.utc)
+    if code == "day":
+        try:
+            d = datetime.strptime(day or "", "%Y-%m-%d").replace(tzinfo=PARIS)
+        except ValueError:
+            code = "today"
+        else:
+            start = d.astimezone(timezone.utc)
+            end = (d + timedelta(days=1)).astimezone(timezone.utc)
+            return "day", start, min(end, now), timedelta(hours=1), 24
+    if code not in PERIODS:
+        code = "today"
+    step = PERIODS[code]
+    if code == "1h":
+        start = now - timedelta(hours=1)
+        start = start.replace(minute=start.minute - start.minute % 5, second=0, microsecond=0)
+    elif code == "24h":
+        start = (now - timedelta(hours=24)).replace(minute=0, second=0, microsecond=0)
+    elif code == "7d":
+        start = (now - timedelta(days=7)).replace(minute=0, second=0, microsecond=0)
+        start -= timedelta(hours=start.hour % 6)
+    else:
+        start = datetime.now(PARIS).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    bars = max(1, int(-(-(now - start) // step)))
+    return code, start, now, step, bars
+
+
+def _watch_map():
+    """{plaque normalisee: entree de watchlist}."""
+    out = {}
+    for w in _col_watchlist.find({}, {"plate": 1, "label": 1, "enabled": 1}):
+        norm = _norm_plate(w.get("plate"))
+        if norm:
+            out[norm] = {"id": str(w["_id"]), "label": w.get("label", ""),
+                         "enabled": bool(w.get("enabled", True))}
+    return out
+
+
+_probe_cache = {}  # ip -> (instant monotonic, joignable, horodatage UTC du test)
+
+
+def _probe_one(ip):
+    try:
+        with socket.create_connection((ip, PROBE_PORT), timeout=PROBE_TIMEOUT_S):
+            return True
+    except OSError:
+        return False
+
+
+def _reachability(ips):
+    """{ip: (joignable, horodatage)} ; tests en parallele, resultat garde PROBE_TTL_S."""
+    now_m = time.monotonic()
+    stale = [ip for ip in set(ips) if ip and (ip not in _probe_cache
+                                             or now_m - _probe_cache[ip][0] >= PROBE_TTL_S)]
+    if stale:
+        with ThreadPoolExecutor(max_workers=min(8, len(stale))) as pool:
+            results = list(pool.map(_probe_one, stale))
+        at = datetime.now(timezone.utc)
+        for ip, ok in zip(stale, results):
+            _probe_cache[ip] = (time.monotonic(), ok, at)
+    return {ip: (_probe_cache[ip][1], _probe_cache[ip][2]) for ip in ips if ip in _probe_cache}
+
+
+_vision_cache = {"at": 0.0, "key": None, "event": None, "map": {}, "seen": 0}
+
+
+def _vision_active():
+    cfg = _col_vision_cfg.find_one({"_id": "current"})
+    if not cfg or not cfg.get("evenement"):
+        return None
+    return {"evenement": cfg["evenement"], "annee": cfg.get("annee")}
+
+
+def _vision_map():
+    """(evenement actif, {plaque: {lieu, billets}}, plaques deja lues par la LAPI).
+
+    Cache court : ~10 000 fiches par evenement, lues au plus toutes les 2 min.
+    """
+    event = _vision_active()
+    key = (event["evenement"], event["annee"]) if event else None
+    c = _vision_cache
+    if c["key"] == key and time.monotonic() - c["at"] < VISION_CACHE_TTL_S:
+        return c["event"], c["map"], c["seen"]
+    vmap = {}
+    seen = 0
+    if event:
+        for d in _col_vision_imm.find(event, {"plaque_norm": 1, "lieu": 1, "billets": 1}):
+            norm = d.get("plaque_norm")
+            if norm:
+                vmap[norm] = {"lieu": d.get("lieu", ""), "billets": len(d.get("billets") or [])}
+        if vmap:
+            seen = len(_col_anpr.distinct("license_plate", {"license_plate": {"$in": list(vmap)}}))
+    _vision_cache.update({"at": time.monotonic(), "key": key, "event": event, "map": vmap, "seen": seen})
+    return event, vmap, seen
+
+
+def _image_urls(doc):
+    path = doc.get("vehicle_image_path")
+    if path:
+        q = quote(path)
+        return "/api/anpr/image/" + q, "/api/anpr/thumb/" + q
+    oid = doc.get("vehicle_image_id")
+    if oid:
+        url = "/api/anpr/image/" + str(oid)
+        return url, url
+    return None, None
+
+
+def _item(doc, cams_by_path, watch, vmap):
+    """Passage LAPI pour l'interface."""
+    plate = doc.get("license_plate", "")
+    norm = _norm_plate(plate) if plate != "UNKNOWN" else ""
+    path = doc.get("camera_path", "")
+    cam = cams_by_path.get(path, {})
+    color = doc.get("vehicle_color", "")
+    vtype = doc.get("vehicle_type", "")
+    img, thumb = _image_urls(doc)
+    plate_img = doc.get("plate_image_path")
     return {
         "id": str(doc["_id"]),
-        "plate": doc.get("license_plate", ""),
-        "original_plate": doc.get("original_plate", ""),
-        "confidence": doc.get("confidence", 0),
-        "color": doc.get("vehicle_color", ""),
-        "color_hex": COLOR_HEX.get(doc.get("vehicle_color", ""), "#888"),
-        "type": doc.get("vehicle_type", ""),
-        "type_label": VEHICLE_TYPE_LABELS.get(doc.get("vehicle_type", ""), doc.get("vehicle_type", "")),
-        "brand": _brand(doc.get("vehicle_logo", 0)),
-        "brand_id": doc.get("vehicle_logo", 0),
-        "camera": camera,
-        "direction": raw_dir,
-        "resolved_dir": _resolve_direction(raw_dir, camera, cam_configs),
-        "event_dt": (doc["event_dt"].replace(tzinfo=timezone.utc).isoformat() if doc["event_dt"].tzinfo is None else doc["event_dt"].isoformat()) if isinstance(doc.get("event_dt"), datetime) else str(doc.get("event_dt", "")),
-        "plate_image_id": str(doc["plate_image_id"]) if doc.get("plate_image_id") else None,
-        "vehicle_image_id": str(doc["vehicle_image_id"]) if doc.get("vehicle_image_id") else None,
-        "plate_image_path": doc.get("plate_image_path"),
-        "vehicle_image_path": doc.get("vehicle_image_path"),
-        "list_name": doc.get("vehicle_list_name", ""),
+        "plate": plate,
+        "unread": plate == "UNKNOWN",
+        "conf": doc.get("confidence", 0) or 0,
+        "color": color,
+        "color_hex": COLOR_HEX.get(color, ""),
+        "color_label": COLOR_FR.get(color, ""),
+        "brand": _brand(doc.get("vehicle_logo")),
+        "type": VEHICLE_TYPE_LABELS.get(vtype, vtype if vtype != "unknown" else ""),
+        "camera": path,
+        "cam_label": cam.get("label") or _default_label(path),
+        "dir": _resolve_dir(doc.get("direction", ""), cam.get("forward_role", "entry")),
+        "dt": _iso(doc.get("event_dt")),
+        "allow": doc.get("vehicle_list_name") == "allowList",
+        "img": img,
+        "thumb": thumb,
+        "plate_img": "/api/anpr/image/" + quote(plate_img) if plate_img else None,
+        "watch": watch.get(norm) if norm else None,
+        "vision": vmap.get(norm) if norm else None,
     }
 
 
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
-
-@anpr_bp.route("/anpr")
-def anpr_page():
-    payload = getattr(request, "user_payload", {})
-    user_roles = payload.get("roles", [])
-    return render_template(
-        "anpr.html",
-        user_roles=user_roles,
-        user_firstname=payload.get("firstname", ""),
-        user_lastname=payload.get("lastname", ""),
-        user_email=payload.get("email", ""),
-    )
+def _safe_image_path(rel):
+    safe = os.path.normpath(rel)
+    if ".." in safe or os.path.isabs(safe):
+        return None
+    full = os.path.abspath(os.path.join(HIK_IMAGE_DIR, safe))
+    if not full.startswith(os.path.abspath(HIK_IMAGE_DIR) + os.sep):
+        return None
+    return full
 
 
-@anpr_bp.route("/api/anpr/search")
-def anpr_search():
-    """Search ANPR records with filters, pagination."""
-    _ensure_db()
-    cam_cfgs = _get_cam_configs()
-    query = {}
-
-    # Plate search (partial match)
-    plate = request.args.get("plate", "").strip().upper()
-    if plate:
-        query["license_plate"] = {"$regex": plate, "$options": "i"}
-
-    # Exclude UNKNOWN plates unless explicitly searching
-    if not plate:
-        query["license_plate"] = {"$ne": "UNKNOWN"}
-
-    # Color filter
-    color = request.args.get("color", "").strip()
-    if color:
-        query["vehicle_color"] = color
-
-    # Type filter
-    vtype = request.args.get("type", "").strip()
-    if vtype:
-        query["vehicle_type"] = vtype
-
-    # Brand filter
-    brand = request.args.get("brand", "").strip()
-    if brand:
-        # Reverse lookup brand -> logo IDs
-        logo_ids = [k for k, v in BRAND_MAP.items() if v == brand]
-        if logo_ids:
-            query["vehicle_logo"] = {"$in": logo_ids}
-
-    # Camera filter
-    camera = request.args.get("camera", "").strip()
-    if camera:
-        query["camera_path"] = camera
-
-    # Direction filter (resolved with camera config)
-    direction = request.args.get("direction", "").strip()
-    if direction in ("entry", "exit"):
-        # Get camera configs
-        configs = {c["camera_path"]: c for c in _col_camera_config.find()}
-        entry_cameras = []
-        exit_cameras = []
-        for path, cfg in configs.items():
-            fwd = cfg.get("forward_role", "entry")
-            if fwd == "entry":
-                entry_cameras.append(path)
-                # backward = exit (implicit)
-            else:
-                exit_cameras.append(path)
-
-        if direction == "entry":
-            # forward on entry cameras OR reverse on exit cameras
-            dir_conds = []
-            if entry_cameras:
-                dir_conds.append({"camera_path": {"$in": entry_cameras}, "direction": "forward"})
-                dir_conds.append({"camera_path": {"$in": entry_cameras}, "direction": {"$ne": "forward"}})
-            if exit_cameras:
-                dir_conds.append({"camera_path": {"$in": exit_cameras}, "direction": {"$ne": "forward"}})
-            # Simplify: entry = forward on entry_cams + reverse on exit_cams
-            dir_conds = []
-            if entry_cameras:
-                dir_conds.append({"camera_path": {"$in": entry_cameras}, "direction": "forward"})
-            if exit_cameras:
-                dir_conds.append({"camera_path": {"$in": exit_cameras}, "direction": "reverse"})
-            if dir_conds:
-                query["$or"] = dir_conds
-        elif direction == "exit":
-            dir_conds = []
-            if entry_cameras:
-                dir_conds.append({"camera_path": {"$in": entry_cameras}, "direction": "reverse"})
-            if exit_cameras:
-                dir_conds.append({"camera_path": {"$in": exit_cameras}, "direction": "forward"})
-            if dir_conds:
-                query["$or"] = dir_conds
-
-    # Date range
-    date_from = request.args.get("from", "").strip()
-    date_to = request.args.get("to", "").strip()
-    if date_from or date_to:
-        dt_filter = {}
-        if date_from:
-            try:
-                dt_filter["$gte"] = datetime.fromisoformat(date_from)
-            except ValueError:
-                pass
-        if date_to:
-            try:
-                dt_filter["$lte"] = datetime.fromisoformat(date_to)
-            except ValueError:
-                pass
-        if dt_filter:
-            query["event_dt"] = dt_filter
-
-    # Confidence min
-    conf_min = request.args.get("conf_min", "").strip()
-    if conf_min:
-        try:
-            query["confidence"] = {"$gte": int(conf_min)}
-        except ValueError:
-            pass
-
-    # If ANPR-specific filters are active, skip Vision results
-    has_anpr_filter = any([color, vtype, brand, camera, direction, conf_min])
-
-    # Source filter: "", "anpr", "vision", "cross"
-    source_filter = request.args.get("source", "").strip()
-    if has_anpr_filter and source_filter == "":
-        source_filter = "anpr"
-
-    # For "cross" mode: find plates present in both ANPR and Vision
-    cross_plates = None
-    if source_filter == "cross":
-        # Get all distinct normalized ANPR plates
-        anpr_plates_raw = _col_anpr.distinct("license_plate", query)
-        anpr_norms = set(_normalize_plate(p) for p in anpr_plates_raw if p and p != "UNKNOWN")
-        # Get all Vision normalized plates
-        vision_norms = set(d["plaque_norm"] for d in _col_vision_imm.find({}, {"plaque_norm": 1}) if d.get("plaque_norm"))
-        # Intersection
-        cross_norms = anpr_norms & vision_norms
-        cross_plates = cross_norms
-
-    # Pagination
-    page = max(1, int(request.args.get("page", 1)))
-    per_page = min(100, int(request.args.get("per_page", 50)))
-
-    # Collect ANPR results
-    anpr_results = []
-    anpr_total = 0
-    if source_filter not in ("vision",):
-        if cross_plates is not None:
-            # Only ANPR records matching cross plates
-            if cross_plates:
-                query["license_plate"] = {"$in": [re.compile(n, re.IGNORECASE) for n in cross_plates]}
-            else:
-                query["license_plate"] = {"$in": []}
-        anpr_total = _col_anpr.count_documents(query)
-        docs = list(_col_anpr.find(query).sort("event_dt", DESCENDING).limit(500))
-        for d in docs:
-            r = _serialize(d, cam_cfgs)
-            r["source"] = "anpr"
-            anpr_results.append(r)
-
-    # Collect Vision results
-    vision_results = []
-    vision_total = 0
-    if source_filter not in ("anpr",):
-        vq = {}
-        if plate:
-            vq["plaque_norm"] = {"$regex": _normalize_plate(plate), "$options": "i"}
-        if cross_plates is not None:
-            if cross_plates:
-                vq["plaque_norm"] = {"$in": list(cross_plates)}
-            else:
-                vq["plaque_norm"] = {"$in": []}
-        # Apply date filter on Vision date field (ISO string)
-        if date_from:
-            vq.setdefault("date", {})
-            vq["date"]["$gte"] = date_from
-        if date_to:
-            vq.setdefault("date", {})
-            vq["date"]["$lte"] = date_to
-
-        vision_total = _col_vision_imm.count_documents(vq)
-        vdocs = list(_col_vision_imm.find(vq).sort("date", -1).limit(500))
-        for vd in vdocs:
-            v_couleur = vd.get("couleur", "")
-            vision_results.append({
-                "id": str(vd["_id"]),
-                "source": "vision",
-                "plate": vd.get("plaque", ""),
-                "original_plate": vd.get("plaque", ""),
-                "confidence": 0,
-                "color": v_couleur,
-                "color_hex": COLOR_HEX.get(v_couleur, "") if v_couleur else "",
-                "type": "",
-                "type_label": vd.get("modele", ""),
-                "brand": vd.get("marque", ""),
-                "brand_id": 0,
-                "camera": "",
-                "direction": "",
-                "resolved_dir": "",
-                "event_dt": vd.get("date", ""),
-                "plate_image_id": None,
-                "vehicle_image_id": None,
-                "plate_image_path": None,
-                "vehicle_image_path": None,
-                "list_name": "",
-                "lieu": vd.get("lieu", ""),
-                "billets": vd.get("billets", []),
-                "billets_count": len(vd.get("billets", [])),
-                "commentaire": vd.get("commentaire", ""),
-                "photo_vehicule": vd.get("photo_vehicule", ""),
-            })
-
-    # Merge and sort by date descending
-    merged = anpr_results + vision_results
-    merged.sort(key=lambda r: r.get("event_dt", "") or "", reverse=True)
-
-    total = anpr_total + vision_total
-    skip = (page - 1) * per_page
-    page_results = merged[skip:skip + per_page]
-
-    return jsonify({
-        "total": total,
-        "page": page,
-        "per_page": per_page,
-        "pages": max(1, (total + per_page - 1) // per_page),
-        "results": page_results,
-    })
-
-
-@anpr_bp.route("/api/anpr/stats")
-def anpr_stats():
-    """Aggregate statistics for the dashboard."""
-    _ensure_db()
-
-    # Base query (exclude unknowns for stats)
-    base_match = {"license_plate": {"$ne": "UNKNOWN"}}
-
-    date_from = request.args.get("from", "").strip()
-    date_to = request.args.get("to", "").strip()
-    if date_from or date_to:
-        dt_filter = {}
-        if date_from:
-            try:
-                dt_filter["$gte"] = datetime.fromisoformat(date_from)
-            except ValueError:
-                pass
-        if date_to:
-            try:
-                dt_filter["$lte"] = datetime.fromisoformat(date_to)
-            except ValueError:
-                pass
-        if dt_filter:
-            base_match["event_dt"] = dt_filter
-
-    pipeline_total = [{"$match": base_match}, {"$count": "n"}]
-    total_res = list(_col_anpr.aggregate(pipeline_total))
-    total = total_res[0]["n"] if total_res else 0
-
-    pipeline_unique = [
-        {"$match": base_match},
-        {"$group": {"_id": "$license_plate"}},
-        {"$count": "n"},
-    ]
-    unique_res = list(_col_anpr.aggregate(pipeline_unique))
-    unique_plates = unique_res[0]["n"] if unique_res else 0
-
-    # By color
-    pipeline_color = [
-        {"$match": base_match},
-        {"$group": {"_id": "$vehicle_color", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
-    ]
-    by_color = {d["_id"]: d["count"] for d in _col_anpr.aggregate(pipeline_color) if d["_id"]}
-
-    # By brand (top 15)
-    pipeline_brand = [
-        {"$match": base_match},
-        {"$group": {"_id": "$vehicle_logo", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
-        {"$limit": 15},
-    ]
-    by_brand = [{"brand": _brand(d["_id"]), "count": d["count"]}
-                for d in _col_anpr.aggregate(pipeline_brand)]
-
-    # By type
-    pipeline_type = [
-        {"$match": base_match},
-        {"$group": {"_id": "$vehicle_type", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
-    ]
-    by_type = [{"type": d["_id"], "label": VEHICLE_TYPE_LABELS.get(d["_id"], d["_id"]), "count": d["count"]}
-               for d in _col_anpr.aggregate(pipeline_type) if d["_id"]]
-
-    # By camera
-    pipeline_camera = [
-        {"$match": base_match},
-        {"$group": {"_id": "$camera_path", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
-    ]
-    by_camera = {d["_id"]: d["count"] for d in _col_anpr.aggregate(pipeline_camera) if d["_id"]}
-
-    # Hourly distribution
-    pipeline_hourly = [
-        {"$match": base_match},
-        {"$group": {"_id": {"$hour": "$event_dt"}, "count": {"$sum": 1}}},
-        {"$sort": {"_id": 1}},
-    ]
-    by_hour = {d["_id"]: d["count"] for d in _col_anpr.aggregate(pipeline_hourly)}
-
-    # Allowlist count
-    pipeline_allow = [
-        {"$match": {**base_match, "vehicle_list_name": "allowList"}},
-        {"$count": "n"},
-    ]
-    allow_res = list(_col_anpr.aggregate(pipeline_allow))
-    allowlist_count = allow_res[0]["n"] if allow_res else 0
-
-    # Avg confidence
-    pipeline_conf = [
-        {"$match": {**base_match, "confidence": {"$gt": 0}}},
-        {"$group": {"_id": None, "avg": {"$avg": "$confidence"}}},
-    ]
-    conf_res = list(_col_anpr.aggregate(pipeline_conf))
-    avg_confidence = round(conf_res[0]["avg"], 1) if conf_res else 0
-
-    return jsonify({
-        "total": total,
-        "unique_plates": unique_plates,
-        "allowlist_count": allowlist_count,
-        "avg_confidence": avg_confidence,
-        "by_color": by_color,
-        "by_brand": by_brand,
-        "by_type": by_type,
-        "by_camera": by_camera,
-        "by_hour": by_hour,
-        "color_hex": COLOR_HEX,
-    })
-
-
-@anpr_bp.route("/api/anpr/live")
-def anpr_live():
-    """Last N detections for live feed (ANPR + Vision merged)."""
-    _ensure_db()
-    cam_cfgs = _get_cam_configs()
-    n = min(50, int(request.args.get("n", 20)))
-
-    # ANPR detections
-    anpr_docs = list(_col_anpr.find({"license_plate": {"$ne": "UNKNOWN"}}).sort("event_dt", DESCENDING).limit(n))
-    results = []
-    for d in anpr_docs:
-        r = _serialize(d, cam_cfgs)
-        r["source"] = "anpr"
-        results.append(r)
-
-    # Vision detections (recent, same window)
-    vq = {}
-    vf = _vision_active_filter()
-    if vf:
-        vq.update(vf)
-    vdocs = list(_col_vision_imm.find(vq).sort("date", -1).limit(n))
-    for vd in vdocs:
-        v_couleur = vd.get("couleur", "")
-        results.append({
-            "id": str(vd["_id"]),
-            "source": "vision",
-            "plate": vd.get("plaque", ""),
-            "original_plate": vd.get("plaque", ""),
-            "confidence": 0,
-            "color": v_couleur,
-            "color_hex": COLOR_HEX.get(v_couleur, "") if v_couleur else "",
-            "type": "",
-            "type_label": vd.get("modele", ""),
-            "brand": vd.get("marque", ""),
-            "brand_id": 0,
-            "camera": "",
-            "direction": "",
-            "resolved_dir": "",
-            "event_dt": vd.get("date", ""),
-            "plate_image_id": None,
-            "vehicle_image_id": None,
-            "plate_image_path": None,
-            "vehicle_image_path": None,
-            "list_name": "",
-            "lieu": vd.get("lieu", ""),
-            "billets": vd.get("billets", []),
-            "billets_count": len(vd.get("billets", [])),
-            "commentaire": vd.get("commentaire", ""),
-            "photo_vehicule": vd.get("photo_vehicule", ""),
-        })
-
-    # Sort all by date descending, take top N
-    results.sort(key=lambda r: r.get("event_dt", "") or "", reverse=True)
-    return jsonify(results[:n])
-
-
-@anpr_bp.route("/api/anpr/plate/<plate>")
-def anpr_plate_history(plate):
-    """All detections for a given plate (ANPR + Vision)."""
-    _ensure_db()
-    cam_cfgs = _get_cam_configs()
-    plate = plate.strip().upper()
-    norm = _normalize_plate(plate)
-
-    records = []
-
-    # ANPR detections
-    docs = list(_col_anpr.find({"license_plate": plate}).sort("event_dt", DESCENDING).limit(200))
-    for d in docs:
-        r = _serialize(d, cam_cfgs)
-        r["source"] = "anpr"
-        records.append(r)
-
-    # Vision entries (matching normalized plate)
-    if norm:
-        vdocs = list(_col_vision_imm.find({"plaque_norm": norm}))
-        for vd in vdocs:
-            v_couleur = vd.get("couleur", "")
-            records.append({
-                "source": "vision",
-                "event_dt": vd.get("date", ""),
-                "camera": "",
-                "color": v_couleur,
-                "color_hex": COLOR_HEX.get(v_couleur, "") if v_couleur else "",
-                "resolved_dir": "",
-                "lieu": vd.get("lieu", ""),
-                "billets_count": len(vd.get("billets", [])),
-                "marque": vd.get("marque", ""),
-                "modele": vd.get("modele", ""),
-                "evenement": vd.get("evenement", ""),
-                "annee": vd.get("annee", 0),
-            })
-
-    # Sort all by date descending
-    records.sort(key=lambda r: r.get("event_dt", "") or "", reverse=True)
-
-    return jsonify({
-        "plate": plate,
-        "count": len(records),
-        "records": records,
-    })
-
-
-HIK_IMAGE_DIR = "E:/TITAN/production/hik_images"
-
-
-@anpr_bp.route("/api/anpr/image/<path:image_ref>")
-def anpr_image(image_ref):
-    """Sert une image : chemin disque (nouveau) ou ObjectId GridFS (ancien)."""
-    _ensure_db()
-
-    # Nouveau format : chemin relatif sur disque
-    if "/" in image_ref:
-        safe = os.path.normpath(image_ref)
-        if ".." in safe:
-            abort(400)
-        full_path = os.path.join(HIK_IMAGE_DIR, safe)
-        if not os.path.abspath(full_path).startswith(os.path.abspath(HIK_IMAGE_DIR)):
-            abort(400)
-        if os.path.isfile(full_path):
-            resp = send_file(full_path, mimetype="image/jpeg")
-            resp.headers["Cache-Control"] = "public, max-age=86400"
-            return resp
-
-    # Ancien format : ObjectId GridFS
-    else:
-        try:
-            oid = ObjectId(image_ref)
-            grid_file = _fs.get(oid)
-            return Response(
-                grid_file.read(),
-                mimetype="image/jpeg",
-                headers={"Cache-Control": "public, max-age=86400"},
-            )
-        except Exception:
-            pass
-
-    # Fallback : pixel transparent 1x1
+def _blank_png():
     return Response(
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
         b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00"
@@ -869,368 +650,425 @@ def anpr_image(image_ref):
 
 
 # ---------------------------------------------------------------------------
-# Camera config
+# Page
 # ---------------------------------------------------------------------------
 
-@anpr_bp.route("/api/anpr/cameras")
-def anpr_cameras():
-    """Get camera list with config."""
-    _ensure_db()
-    # Get distinct cameras from data
-    cameras = _col_anpr.distinct("camera_path")
-    configs = {c["camera_path"]: c for c in _col_camera_config.find()}
-
-    result = []
-    for cam in sorted(cameras):
-        cfg = configs.get(cam, {})
-        result.append({
-            "camera_path": cam,
-            "label": cfg.get("label", cam.replace("/", "").replace("lapi", "LAPI ")),
-            "forward_role": cfg.get("forward_role", "entry"),
-            "enabled": cfg.get("enabled", True),
-            "lieu": cfg.get("lieu", ""),
-        })
-    return jsonify(result)
-
-
-@anpr_bp.route("/api/anpr/cameras/config", methods=["POST"])
-def anpr_cameras_config():
-    """Update camera configuration."""
-    _ensure_db()
-    data = request.get_json()
-    if not data or "camera_path" not in data:
-        return jsonify({"error": "camera_path required"}), 400
-
-    _col_camera_config.update_one(
-        {"camera_path": data["camera_path"]},
-        {"$set": {
-            "camera_path": data["camera_path"],
-            "label": data.get("label", ""),
-            "forward_role": data.get("forward_role", "entry"),
-            "enabled": data.get("enabled", True),
-            "lieu": data.get("lieu", ""),
-        }},
-        upsert=True,
+@anpr_bp.route("/anpr")
+def anpr_page():
+    payload = getattr(request, "user_payload", {})
+    return render_template(
+        "anpr.html",
+        user_roles=payload.get("roles", []),
+        user_firstname=payload.get("firstname", ""),
+        user_lastname=payload.get("lastname", ""),
+        user_email=payload.get("email", ""),
     )
-    return jsonify({"ok": True})
 
 
-@anpr_bp.route("/api/anpr/flow")
-def anpr_flow():
-    """Entries vs exits over time (15-min buckets)."""
+# ---------------------------------------------------------------------------
+# Vue d'ensemble : sante des voies, flux, sur site, plaques surveillees
+# ---------------------------------------------------------------------------
+
+@anpr_bp.route("/api/anpr/overview")
+def anpr_overview():
     _ensure_db()
+    code, start, end, step, bars = _period(request.args.get("period", "today"), request.args.get("date"))
+    now = datetime.now(timezone.utc)
+    # Pas de borne haute en direct : l'horloge d'une camera peut avancer un peu
+    window = {"$gte": start, "$lt": end} if code == "day" else {"$gte": start}
+    cams = _cameras()
+    by_path = {c["path"]: c for c in cams}
 
-    base_match = {"license_plate": {"$ne": "UNKNOWN"}}
-    date_from = request.args.get("from", "").strip()
-    date_to = request.args.get("to", "").strip()
-    if date_from:
-        try:
-            base_match.setdefault("event_dt", {})["$gte"] = datetime.fromisoformat(date_from)
-        except ValueError:
-            pass
-    if date_to:
-        try:
-            base_match.setdefault("event_dt", {})["$lte"] = datetime.fromisoformat(date_to)
-        except ValueError:
-            pass
+    if step < timedelta(hours=1):
+        trunc = {"$dateTrunc": {"date": "$event_dt", "unit": "minute", "binSize": 5}}
+    else:
+        trunc = {"$dateTrunc": {"date": "$event_dt", "unit": "hour"}}
 
-    # Get camera configs for entry/exit resolution
-    configs = {c["camera_path"]: c for c in _col_camera_config.find()}
+    def blank():
+        return {"count": 0, "unread": 0, "entries": 0, "exits": 0, "spark": [0] * bars}
 
-    # Build per-camera direction classification
-    entry_match = []
-    exit_match = []
-    for cam in _col_anpr.distinct("camera_path"):
-        cfg = configs.get(cam, {})
-        fwd_role = cfg.get("forward_role", "entry")
-        if fwd_role == "entry":
-            entry_match.append({"camera_path": cam, "direction": "forward"})
-            exit_match.append({"camera_path": cam, "direction": "reverse"})
+    lanes = {c["path"]: blank() for c in cams}
+    flow_in, flow_out = [0] * bars, [0] * bars
+    for r in _col_anpr.aggregate([
+        {"$match": {"event_dt": window}},
+        {"$group": {
+            "_id": {"c": "$camera_path", "d": "$direction",
+                    "u": {"$eq": ["$license_plate", "UNKNOWN"]}, "t": trunc},
+            "n": {"$sum": 1},
+        }},
+    ]):
+        k, n = r["_id"], r["n"]
+        lane = lanes.setdefault(k["c"], blank())
+        lane["count"] += n
+        if k["u"]:
+            lane["unread"] += n
+        d = _resolve_dir(k["d"], by_path.get(k["c"], {}).get("forward_role", "entry"))
+        if d == "entry":
+            lane["entries"] += n
+        elif d == "exit":
+            lane["exits"] += n
+        t = _utc(k["t"])
+        i = min(bars - 1, max(0, int((t - start) // step))) if t else 0
+        lane["spark"][i] += n
+        if d == "entry":
+            flow_in[i] += n
+        elif d == "exit":
+            flow_out[i] += n
+
+    # Derniere lecture par voie (index camera_path + event_dt)
+    last = {}
+    for c in cams:
+        doc = _col_anpr.find_one({"camera_path": c["path"]}, sort=[("event_dt", DESCENDING)],
+                                 projection={"event_dt": 1, "ip_address": 1})
+        plate_doc = _col_anpr.find_one({"camera_path": c["path"], "license_plate": {"$ne": "UNKNOWN"}},
+                                       sort=[("event_dt", DESCENDING)],
+                                       projection={"event_dt": 1, "license_plate": 1})
+        last[c["path"]] = (_utc(doc.get("event_dt")) if doc else None,
+                           plate_doc.get("license_plate") if plate_doc else "",
+                           (doc or {}).get("ip_address", ""))
+
+    def age_min(path):
+        dt = last.get(path, (None, "", ""))[0]
+        return (now - dt).total_seconds() / 60 if dt else None
+
+    def silent(path):
+        age = age_min(path)
+        return age is None or age > LANE_MUTE_MIN
+
+    # Test reseau des seules cameras silencieuses (adresse IP lue dans leurs passages)
+    reach = _reachability([last[c["path"]][2] for c in cams if c["enabled"] and silent(c["path"])])
+
+    lane_list = []
+    for c in cams:
+        if not c["enabled"]:
+            continue
+        s = lanes.get(c["path"], blank())
+        age = age_min(c["path"])
+        ip = last[c["path"]][2]
+        others_active = any(
+            not silent(o["path"]) for o in cams if o["enabled"] and o["path"] != c["path"]
+        )
+        probe = reach.get(ip) if silent(c["path"]) else None
+        if age is not None and age <= LANE_OK_MIN:
+            status = "ok"
+        elif probe is not None and not probe[0]:
+            status = "offline"
+        elif silent(c["path"]) and others_active:
+            status = "noread"
         else:
-            exit_match.append({"camera_path": cam, "direction": "forward"})
-            entry_match.append({"camera_path": cam, "direction": "reverse"})
+            status = "idle"
+        unread_rate = s["unread"] / s["count"] if s["count"] else 0
+        lane_list.append({
+            "path": c["path"], "label": c["label"], "status": status, "ip": ip,
+            "reach": {"ok": probe[0], "at": _iso(probe[1])} if probe else None,
+            "last_dt": _iso(last[c["path"]][0]), "last_plate": last[c["path"]][1],
+            "count": s["count"], "unread": s["unread"],
+            "read_warn": s["count"] >= LANE_UNREAD_MIN_N and unread_rate > LANE_UNREAD_WARN,
+            "entries": s["entries"], "exits": s["exits"], "spark": s["spark"],
+        })
 
-    def bucket_pipeline(dir_conditions):
-        if not dir_conditions:
-            return []
-        return list(_col_anpr.aggregate([
-            {"$match": {**base_match, "$or": dir_conditions}},
-            {"$group": {
-                "_id": {
-                    "$dateTrunc": {"date": "$event_dt", "unit": "minute", "binSize": 15}
-                },
-                "count": {"$sum": 1},
-            }},
-            {"$sort": {"_id": 1}},
-        ]))
+    # Plaques de la periode : uniques, surveillees, connues de Vision
+    watch = _watch_map()
+    vision_event, vmap, vision_seen_all = _vision_map()
+    plates = list(_col_anpr.aggregate([
+        {"$match": {"event_dt": window, "license_plate": {"$ne": "UNKNOWN"}}},
+        {"$group": {"_id": "$license_plate", "n": {"$sum": 1}, "last": {"$max": "$event_dt"}}},
+    ]))
+    watch_hits = []
+    vision_seen = 0
+    for p in plates:
+        norm = _norm_plate(p["_id"])
+        if norm in vmap:
+            vision_seen += 1
+        w = watch.get(norm)
+        if w and w["enabled"]:
+            watch_hits.append({"plate": p["_id"], "label": w["label"], "n": p["n"], "last": _iso(p["last"])})
+    watch_hits.sort(key=lambda h: h["last"] or "", reverse=True)
 
-    entries = bucket_pipeline(entry_match)
-    exits = bucket_pipeline(exit_match)
+    # Repartition des vehicules de la periode
+    facets = next(_col_anpr.aggregate([
+        {"$match": {"event_dt": window, "license_plate": {"$ne": "UNKNOWN"}}},
+        {"$facet": {
+            "brands": [{"$group": {"_id": "$vehicle_logo", "n": {"$sum": 1}}}, {"$sort": {"n": -1}}, {"$limit": 12}],
+            "types": [{"$group": {"_id": "$vehicle_type", "n": {"$sum": 1}}}, {"$sort": {"n": -1}}],
+            "colors": [{"$group": {"_id": "$vehicle_color", "n": {"$sum": 1}}}, {"$sort": {"n": -1}}],
+        }},
+    ]), {"brands": [], "types": [], "colors": []})
+    brands = [{"label": _brand(b["_id"]), "n": b["n"]} for b in facets["brands"] if _brand(b["_id"])][:6]
+    types = [{"label": VEHICLE_TYPE_LABELS.get(t["_id"], t["_id"]), "n": t["n"]}
+             for t in facets["types"] if t["_id"] and t["_id"] != "unknown"]
+    colors = [{"label": COLOR_FR.get(c["_id"], c["_id"]), "hex": COLOR_HEX.get(c["_id"], "#888"), "n": c["n"]}
+              for c in facets["colors"] if c["_id"] and c["_id"] != "unknown"]
 
+    # Vehicules sur site : entrees - sorties depuis la remise a zero
+    reset = _col_site_counter.find_one({"_id": "reset"})
+    reset_at = _utc(reset["reset_at"]) if reset else datetime(2000, 1, 1, tzinfo=timezone.utc)
+    on_in = on_out = 0
+    for r in _col_anpr.aggregate([
+        {"$match": {"event_dt": {"$gte": reset_at}}},
+        {"$group": {"_id": {"c": "$camera_path", "d": "$direction"}, "n": {"$sum": 1}}},
+    ]):
+        d = _resolve_dir(r["_id"]["d"], by_path.get(r["_id"]["c"], {}).get("forward_role", "entry"))
+        if d == "entry":
+            on_in += r["n"]
+        elif d == "exit":
+            on_out += r["n"]
+
+    total = sum(l["count"] for l in lanes.values())
+    unread = sum(l["unread"] for l in lanes.values())
     return jsonify({
-        "entries": [{"t": d["_id"].isoformat(), "n": d["count"]} for d in entries],
-        "exits": [{"t": d["_id"].isoformat(), "n": d["count"]} for d in exits],
+        "now": _iso(now),
+        "period": {"code": code, "from": _iso(start), "to": _iso(end),
+                   "step_min": int(step.total_seconds() // 60), "bars": bars},
+        "lanes": lane_list,
+        "totals": {
+            "passages": total, "unread": unread, "plates": len(plates),
+            "entries": sum(flow_in), "exits": sum(flow_out),
+        },
+        "flow": {"in": flow_in, "out": flow_out},
+        "onsite": {"value": max(0, on_in - on_out), "entries": on_in, "exits": on_out, "reset_at": _iso(reset_at)},
+        "watch": {"listed": sum(1 for w in watch.values() if w["enabled"]), "hits": watch_hits[:20]},
+        "vision": {
+            "event": vision_event, "fiches": len(vmap),
+            "seen_period": vision_seen, "seen_all": vision_seen_all,
+        },
+        "mix": {"brands": brands, "types": types, "colors": colors},
     })
 
 
 # ---------------------------------------------------------------------------
-# On-site vehicle counter (entries - exits since last reset)
+# Passages : flux en direct, filtres, recherche (pagination par curseur)
 # ---------------------------------------------------------------------------
 
-def _count_direction(cam_configs, since, target_dir):
-    """Count detections resolved as 'entry' or 'exit' since a given datetime."""
-    match_conds = []
-    for cam_path, cfg in cam_configs.items():
-        fwd_role = cfg.get("forward_role", "entry")
-        if target_dir == "entry":
-            raw = "forward" if fwd_role == "entry" else "reverse"
-        else:
-            raw = "reverse" if fwd_role == "entry" else "forward"
-        match_conds.append({"camera_path": cam_path, "direction": raw})
-
-    # Also include cameras with no config (default forward=entry)
-    all_cams = _col_anpr.distinct("camera_path")
-    for cam in all_cams:
-        if cam not in cam_configs:
-            raw = "forward" if target_dir == "entry" else "reverse"
-            match_conds.append({"camera_path": cam, "direction": raw})
-
-    if not match_conds:
-        return 0
-
-    base = {"license_plate": {"$ne": "UNKNOWN"}, "event_dt": {"$gte": since}}
-    pipeline = [
-        {"$match": {**base, "$or": match_conds}},
-        {"$count": "n"},
-    ]
-    res = list(_col_anpr.aggregate(pipeline))
-    return res[0]["n"] if res else 0
-
-
-@anpr_bp.route("/api/anpr/onsite")
-def anpr_onsite():
-    """Vehicles currently on site = entries - exits since last reset."""
+@anpr_bp.route("/api/anpr/passages")
+def anpr_passages():
     _ensure_db()
-    cam_configs = _get_cam_configs()
+    a = request.args
+    cams = _cameras()
+    by_path = {c["path"]: c for c in cams}
+    watch = _watch_map()
+    _event, vmap, _seen = _vision_map()
 
-    # Get reset timestamp (or epoch if never reset)
-    doc = _col_site_counter.find_one({"_id": "reset"})
-    reset_at = doc["reset_at"] if doc else datetime(2000, 1, 1)
+    query = {}
+    conds = []
+    q = _norm_plate(a.get("q", ""))
+    if q:
+        # Recherche : tout l'historique, tolerante aux confusions de lecture
+        query["license_plate"] = {"$regex": _tolerant_regex(q)}
+    else:
+        code, start, end, _step, _bars = _period(a.get("period", "today"), a.get("date"))
+        query["event_dt"] = {"$gte": start, "$lt": end} if code == "day" else {"$gte": start}
+        query["license_plate"] = "UNKNOWN" if a.get("unread") == "1" else {"$ne": "UNKNOWN"}
 
-    entries = _count_direction(cam_configs, reset_at, "entry")
-    exits = _count_direction(cam_configs, reset_at, "exit")
-    on_site = max(0, entries - exits)
+    camera = a.get("camera", "").strip()
+    if camera:
+        query["camera_path"] = camera
+    direction = a.get("dir", "")
+    if direction in ("entry", "exit"):
+        conds.append({"$or": _dir_conditions(cams, direction, camera or None) or [{"_id": None}]})
+    if a.get("watch") == "1":
+        conds.append({"license_plate": {"$in": [p for p, w in watch.items() if w["enabled"]]}})
+    if a.get("vision") == "1":
+        conds.append({"license_plate": {"$in": list(vmap)}})
+
+    base = dict(query)
+    if conds:
+        base["$and"] = list(conds)
+
+    try:
+        limit = max(1, min(200, int(a.get("limit", 60))))
+    except ValueError:
+        limit = 60
+
+    after = _parse_iso(a.get("after", ""))
+    before = a.get("before", "")
+    final = dict(base)
+    extra = []
+    sort = [("event_dt", DESCENDING), ("_id", DESCENDING)]
+    if after:
+        # Direct : passages recus apres le dernier vu
+        extra.append({"received_at": {"$gt": after}})
+        sort = [("received_at", DESCENDING)]
+    elif before:
+        b_dt, _, b_id = before.partition("|")
+        b_dt = _parse_iso(b_dt)
+        try:
+            b_oid = ObjectId(b_id)
+        except Exception:
+            b_oid = None
+        if b_dt and b_oid:
+            extra.append({"$or": [{"event_dt": {"$lt": b_dt}}, {"event_dt": b_dt, "_id": {"$lt": b_oid}}]})
+    if extra:
+        final["$and"] = list(conds) + extra
+
+    docs = list(_col_anpr.find(final).sort(sort).limit(limit + 1))
+    has_more = len(docs) > limit and not after
+    docs = docs[:limit]
+
+    total = None
+    if not after and not before:
+        try:
+            total = _col_anpr.count_documents(base, maxTimeMS=4000)
+        except Exception:
+            total = None
+
+    received = [_utc(d.get("received_at")) for d in docs if d.get("received_at")]
+    received_max = max(received) if received else None
+    if not after and received_max is None:
+        received_max = datetime.now(timezone.utc)
+
+    nxt = None
+    if has_more and docs:
+        last_doc = docs[-1]
+        nxt = "%s|%s" % (_iso(last_doc.get("event_dt")), last_doc["_id"])
 
     return jsonify({
-        "on_site": on_site,
-        "entries": entries,
-        "exits": exits,
-        "reset_at": reset_at.isoformat() if isinstance(reset_at, datetime) else str(reset_at),
+        "items": [_item(d, by_path, watch, vmap) for d in docs],
+        "total": total,
+        "next": nxt,
+        "received_max": _iso(received_max),
     })
 
+
+# ---------------------------------------------------------------------------
+# Fiche plaque : passages, sejours, lectures proches, Vision, watchlist
+# ---------------------------------------------------------------------------
+
+@anpr_bp.route("/api/anpr/plate/<path:plate>")
+def anpr_plate(plate):
+    _ensure_db()
+    raw = (plate or "").strip().upper()
+    norm = _norm_plate(raw)
+    if not norm:
+        return jsonify({"error": "Plaque invalide"}), 400
+    cams = _cameras()
+    by_path = {c["path"]: c for c in cams}
+    watch = _watch_map()
+    _event, vmap, _seen = _vision_map()
+
+    match = {"license_plate": {"$in": sorted({raw, norm})}}
+    count = _col_anpr.count_documents(match)
+    docs = list(_col_anpr.find(match).sort("event_dt", DESCENDING).limit(300))
+    items = [_item(d, by_path, watch, vmap) for d in docs]
+
+    # Sejours : une entree ouvre, la sortie suivante ferme
+    stays = []
+    open_in = None
+    for it in reversed(items):
+        if it["dir"] == "entry":
+            if open_in:
+                stays.append({"in": open_in, "out": None})
+            open_in = it["dt"]
+        elif it["dir"] == "exit":
+            stays.append({"in": open_in, "out": it["dt"]})
+            open_in = None
+    if open_in:
+        stays.append({"in": open_in, "out": None, "open": True})
+    stays.reverse()
+
+    # Lectures proches (meme longueur, confusions de lecture), hors la plaque elle-meme
+    similar = []
+    if len(norm) >= 5:
+        rx = _tolerant_regex(norm, anchored=True)
+        for r in _col_anpr.aggregate([
+            {"$match": {"license_plate": {"$regex": rx}}},
+            {"$group": {"_id": "$license_plate", "n": {"$sum": 1}, "last": {"$max": "$event_dt"}}},
+            {"$sort": {"n": -1}},
+            {"$limit": 9},
+        ]):
+            if _norm_plate(r["_id"]) != norm:
+                similar.append({"plate": r["_id"], "n": r["n"], "last": _iso(r["last"])})
+
+    vision = []
+    for v in _col_vision_imm.find({"plaque_norm": norm}).sort("date", DESCENDING).limit(10):
+        vision.append({
+            "evenement": v.get("evenement", ""), "annee": v.get("annee"),
+            "lieu": v.get("lieu", ""), "billets": v.get("billets") or [],
+            "date": v.get("date", ""), "marque": v.get("marque", ""),
+            "modele": v.get("modele", ""), "couleur": v.get("couleur", ""),
+            "commentaire": v.get("commentaire", ""),
+            "photo": v.get("photo_vehicule", ""),
+        })
+    bl = _col_vision_bl.find_one({"plaque_norm": norm})
+
+    by_cam = {}
+    for it in items:
+        by_cam[it["cam_label"]] = by_cam.get(it["cam_label"], 0) + 1
+
+    return jsonify({
+        "plate": docs[0]["license_plate"] if docs else raw,
+        "norm": norm,
+        "count": count,
+        "first": items[-1]["dt"] if items else None,
+        "last": items[0]["dt"] if items else None,
+        "on_site": bool(items) and items[0]["dir"] == "entry",
+        "by_camera": by_cam,
+        "items": items,
+        "stays": stays[:30],
+        "similar": similar[:8],
+        "vision": vision,
+        "blacklist": {"raison": bl.get("raison", ""), "date_ajout": bl.get("date_ajout", "")} if bl else None,
+        "watch": watch.get(norm),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Images : originale (disque ou ancien GridFS) et vignette
+# ---------------------------------------------------------------------------
+
+@anpr_bp.route("/api/anpr/image/<path:image_ref>")
+def anpr_image(image_ref):
+    """Sert une image : chemin disque (nouveau) ou ObjectId GridFS (ancien)."""
+    _ensure_db()
+    if "/" in image_ref:
+        full = _safe_image_path(image_ref)
+        if full and os.path.isfile(full):
+            return send_file(full, mimetype="image/jpeg", max_age=86400)
+    else:
+        try:
+            grid_file = _fs.get(ObjectId(image_ref))
+            return Response(grid_file.read(), mimetype="image/jpeg",
+                            headers={"Cache-Control": "public, max-age=86400"})
+        except Exception:
+            pass
+    return _blank_png()
+
+
+@anpr_bp.route("/api/anpr/thumb/<path:rel>")
+def anpr_thumb(rel):
+    """Vignette JPEG (~25 Ko) generee a la demande puis gardee sur disque."""
+    full = _safe_image_path(rel)
+    if not full or not os.path.isfile(full):
+        return _blank_png()
+    folder, name = os.path.split(full)
+    thumb_dir = os.path.join(folder, THUMB_DIR_NAME)
+    thumb = os.path.join(thumb_dir, name)
+    if not os.path.isfile(thumb):
+        try:
+            from PIL import Image
+            os.makedirs(thumb_dir, exist_ok=True)
+            with Image.open(full) as im:
+                im.draft("RGB", (THUMB_BOX[0] * 2, THUMB_BOX[1] * 2))
+                small = im.convert("RGB")
+                small.thumbnail(THUMB_BOX)
+                tmp = "%s.%s.tmp" % (thumb, os.urandom(4).hex())
+                small.save(tmp, "JPEG", quality=72, optimize=True)
+                os.replace(tmp, thumb)
+        except Exception as e:
+            logger.warning("Vignette LAPI impossible pour %s : %s", rel, e)
+            return send_file(full, mimetype="image/jpeg", max_age=86400)
+    return send_file(thumb, mimetype="image/jpeg", max_age=7 * 86400)
+
+
+# ---------------------------------------------------------------------------
+# Configuration des cameras : page Cameras (cameras.py, usage LAPI), qui
+# tient anpr_camera_config a jour (chemin, libelle, sens, parking, affichage).
+# ---------------------------------------------------------------------------
 
 @anpr_bp.route("/api/anpr/onsite/reset", methods=["POST"])
 def anpr_onsite_reset():
-    """Reset the on-site counter to 0 (stores current timestamp)."""
+    """Remet le compteur de vehicules sur site a zero (horodatage courant)."""
     _ensure_db()
     now = datetime.now(timezone.utc)
-    _col_site_counter.update_one(
-        {"_id": "reset"},
-        {"$set": {"reset_at": now}},
-        upsert=True,
-    )
-    return jsonify({"ok": True, "reset_at": now.isoformat()})
-
-
-# ---------------------------------------------------------------------------
-# Vision cross-reference (reads from MongoDB synced by vision_sync.py)
-# ---------------------------------------------------------------------------
-
-def _normalize_plate(plate):
-    """Normalize plate: uppercase, alphanumeric only."""
-    return re.sub(r"[^A-Z0-9]", "", (plate or "").strip().upper())
-
-
-def _vision_active_filter():
-    """Return the event/year filter for the active Vision event, or None."""
-    cfg = _col_vision_cfg.find_one({"_id": "current"})
-    if not cfg or not cfg.get("evenement"):
-        return None
-    return {"evenement": cfg["evenement"], "annee": cfg["annee"]}
-
-
-@anpr_bp.route("/api/anpr/vision/lookup/<plate>")
-def anpr_vision_lookup(plate):
-    """Look up a single plate in Vision synced data."""
-    _ensure_db()
-    norm = _normalize_plate(plate)
-    if not norm:
-        return jsonify({"found": False})
-
-    vf = _vision_active_filter()
-    if not vf:
-        return jsonify({"found": False, "reason": "no_config"})
-
-    doc = _col_vision_imm.find_one({"plaque_norm": norm, **vf})
-    if doc:
-        return jsonify({
-            "found": True,
-            "plaque": doc.get("plaque", ""),
-            "lieu": doc.get("lieu", ""),
-            "billets": doc.get("billets", []),
-            "commentaire": doc.get("commentaire", ""),
-            "date": doc.get("date", ""),
-            "evenement": doc.get("evenement", ""),
-            "annee": doc.get("annee", 0),
-            "photo_vehicule": doc.get("photo_vehicule", ""),
-            "couleur": doc.get("couleur", ""),
-            "marque": doc.get("marque", ""),
-            "modele": doc.get("modele", ""),
-        })
-
-    # Check blacklist
-    bl = _col_vision_bl.find_one({"plaque_norm": norm})
-    blacklisted = None
-    if bl:
-        blacklisted = {"raison": bl.get("raison", ""), "date_ajout": bl.get("date_ajout", "")}
-
-    return jsonify({"found": False, "blacklisted": blacklisted})
-
-
-@anpr_bp.route("/api/anpr/vision/batch")
-def anpr_vision_batch():
-    """Batch lookup of plates in Vision. Returns {plate: info} for matches."""
-    _ensure_db()
-    plates_raw = request.args.get("plates", "").split(",")
-    plates_raw = [p.strip() for p in plates_raw if p.strip()][:100]
-    if not plates_raw:
-        return jsonify({})
-
-    vf = _vision_active_filter()
-    if not vf:
-        return jsonify({})
-
-    # Build norm -> original plate mapping
-    norm_map = {}
-    for p in plates_raw:
-        norm = _normalize_plate(p)
-        if norm:
-            norm_map.setdefault(norm, p)
-
-    if not norm_map:
-        return jsonify({})
-
-    # Single query for all norms
-    docs = _col_vision_imm.find({"plaque_norm": {"$in": list(norm_map.keys())}, **vf})
-    results = {}
-    for doc in docs:
-        orig = norm_map.get(doc["plaque_norm"])
-        if orig:
-            results[orig] = {
-                "lieu": doc.get("lieu", ""),
-                "billets_count": len(doc.get("billets", [])),
-                "commentaire": doc.get("commentaire", ""),
-            }
-
-    return jsonify(results)
-
-
-@anpr_bp.route("/api/anpr/vision/search")
-def anpr_vision_search():
-    """Search Vision plates and cross-reference with ANPR detections."""
-    _ensure_db()
-
-    query = {}
-    evt = request.args.get("evenement", "").strip()
-    annee = request.args.get("annee", "").strip()
-    if evt:
-        query["evenement"] = evt
-    if annee:
-        try:
-            query["annee"] = int(annee)
-        except ValueError:
-            pass
-
-    lieu = request.args.get("lieu", "").strip()
-    if lieu:
-        query["lieu"] = lieu
-    search_plate = request.args.get("plate", "").strip().upper()
-    if search_plate:
-        query["plaque_norm"] = {"$regex": _normalize_plate(search_plate)}
-
-    docs = list(_col_vision_imm.find(query).sort("date", -1))
-
-    results = []
-    for doc in docs:
-        norm = doc.get("plaque_norm", "")
-        # Count ANPR detections for this plate (using regex to match normalized)
-        anpr_count = _col_anpr.count_documents(
-            {"license_plate": {"$regex": norm, "$options": "i"}}
-        ) if norm else 0
-
-        results.append({
-            "plaque": doc.get("plaque", ""),
-            "lieu": doc.get("lieu", ""),
-            "billets": doc.get("billets", []),
-            "commentaire": doc.get("commentaire", ""),
-            "date": doc.get("date", ""),
-            "photo_vehicule": doc.get("photo_vehicule", ""),
-            "anpr_detections": anpr_count,
-        })
-
-    # Sort: matched first
-    results.sort(key=lambda x: x["anpr_detections"], reverse=True)
-    return jsonify({"results": results, "total": len(results)})
-
-
-@anpr_bp.route("/api/anpr/vision/stats")
-def anpr_vision_stats():
-    """Cross-reference statistics between Vision and ANPR.
-    Optional query params: evenement, annee (filter by event/year).
-    """
-    _ensure_db()
-
-    # Optional event/year filter
-    filt = {}
-    evt = request.args.get("evenement", "").strip()
-    annee = request.args.get("annee", "").strip()
-    if evt:
-        filt["evenement"] = evt
-    if annee:
-        try:
-            filt["annee"] = int(annee)
-        except ValueError:
-            pass
-
-    docs = list(_col_vision_imm.find(filt, {"plaque_norm": 1, "lieu": 1}))
-    vision_total = len(docs)
-    matched = 0
-    by_lieu = {}
-    by_lieu_all = {}
-
-    # Get all distinct ANPR normalized plates for fast lookup
-    anpr_norms = set(_normalize_plate(p) for p in _col_anpr.distinct("license_plate") if p and p != "UNKNOWN")
-
-    for doc in docs:
-        norm = doc.get("plaque_norm", "")
-        lieu = doc.get("lieu", "")
-        by_lieu_all[lieu] = by_lieu_all.get(lieu, 0) + 1
-        if norm and norm in anpr_norms:
-            matched += 1
-            by_lieu[lieu] = by_lieu.get(lieu, 0) + 1
-
-    # List of available events
-    events = list(_col_vision_imm.aggregate([
-        {"$group": {"_id": {"evenement": "$evenement", "annee": "$annee"}, "count": {"$sum": 1}}},
-        {"$sort": {"_id.annee": -1, "_id.evenement": 1}},
-    ]))
-    events_list = [{"evenement": e["_id"]["evenement"], "annee": e["_id"]["annee"], "count": e["count"]} for e in events]
-
-    return jsonify({
-        "vision_total": vision_total,
-        "matched": matched,
-        "unmatched": vision_total - matched,
-        "by_lieu": by_lieu,
-        "by_lieu_all": by_lieu_all,
-        "events": events_list,
-    })
+    _col_site_counter.update_one({"_id": "reset"}, {"$set": {"reset_at": now}}, upsert=True)
+    return jsonify({"ok": True, "reset_at": _iso(now)})

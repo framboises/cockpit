@@ -16,3 +16,5 @@ openpyxl>=3.1.0
 # un environnement fraichement installe.
 numpy>=1.24.0
 pandas>=2.0.0
+# Lecture du journal XML des cameras Axis License Plate Verifier (anpr_lpv.py)
+defusedxml>=0.7.1

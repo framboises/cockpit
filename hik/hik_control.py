@@ -32,6 +32,7 @@ import os
 import re
 import time
 import getpass
+from urllib.parse import unquote_plus
 
 try:
     import keyring
@@ -102,7 +103,7 @@ class HikCamera:
     # Infos camera
     ############################################################################
 
-    def get_device_info(self):
+    def get_device_info(self, raise_errors=False):
         """Recupere les informations de la camera (multi-marques)."""
         dispatch = {
             "hikvision": self._info_hik,
@@ -118,6 +119,8 @@ class HikCamera:
             info["_brand"] = self.brand
             return info
         except Exception as e:
+            if raise_errors:
+                raise
             return {"_brand": self.brand, "_error": str(e)}
 
     def _info_hik(self):
@@ -133,79 +136,84 @@ class HikCamera:
 
     def _info_dahua(self):
         r = self._get("/cgi-bin/magicBox.cgi?action=getSystemInfo")
-        info = {}
-        for line in r.text.strip().split("\n"):
-            parts = line.strip().split("=", 1)
-            if len(parts) == 2:
-                info[parts[0].strip()] = parts[1].strip()
-        return info
-
-    def _info_bosch(self):
-        info = {}
-        # Utiliser ONVIF GetDeviceInformation (fonctionne sur Bosch)
+        info = self._kv(r)
+        # Memes cles que l'ISAPI Hikvision (lues par la page Cameras)
+        info["model"] = info.get("deviceType", "")
         try:
-            soap = '''<?xml version="1.0" encoding="utf-8"?>
-<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
-<s:Body><GetDeviceInformation xmlns="http://www.onvif.org/ver10/device/wsdl"/>
-</s:Body></s:Envelope>'''
-            r = requests.post(
-                self._url("/onvif/device_service"), data=soap,
-                headers={"Content-Type": "application/soap+xml"},
-                auth=self.auth, timeout=self.timeout,
-            )
-            if r.status_code == 200:
-                for tag in ["Manufacturer", "Model", "FirmwareVersion", "SerialNumber", "HardwareId"]:
-                    m = re.search(rf'<[^:]*:?{tag}>([^<]*)</', r.text)
-                    if m:
-                        info[tag] = m.group(1)
+            v = self._kv(self._get("/cgi-bin/magicBox.cgi?action=getSoftwareVersion")).get("version", "")
+            info["firmwareVersion"] = v.split(",")[0]
         except Exception:
             pass
-        if not info:
-            try:
-                r = requests.get(f"{self.base_url}/", auth=self.auth, timeout=self.timeout)
-                info["http_status"] = r.status_code
-                info["server"] = r.headers.get("Server", "?")
-            except Exception:
-                pass
         return info
 
-    def _info_hanwha(self):
-        r = self._get("/stw-cgi/system.cgi?msubmenu=deviceinfo&action=view")
+    @staticmethod
+    def _kv(r):
+        """Reponse texte cle=valeur (Dahua CGI, Hanwha SUNAPI), decodee en UTF-8."""
         info = {}
-        for line in r.text.strip().split("\n"):
+        for line in r.content.decode("utf-8", "replace").strip().splitlines():
             parts = line.strip().split("=", 1)
             if len(parts) == 2:
                 info[parts[0].strip()] = parts[1].strip()
+        return info
+
+    def _hanwha_get(self, path):
+        """Requete SUNAPI : les erreurs arrivent en HTTP 200 avec un corps "NG"."""
+        r = self._get(path)
+        body = r.content.decode("utf-8", "replace").strip()
+        if body.startswith("NG"):
+            m = re.search(r"Error Code:\s*(\d+)", body)
+            err = RuntimeError("Refus SUNAPI (code %s)" % (m.group(1) if m else "?"))
+            err.code = m.group(1) if m else ""
+            raise err
+        return r
+
+    def _info_bosch(self):
+        # ONVIF GetDeviceInformation, authentification Digest (compte "service",
+        # verifie sur les AUTODOME 5000i et MIC 7000i, firmwares 6.41 a 7.90)
+        r = self._onvif("/onvif/device_service",
+                        '<GetDeviceInformation xmlns="http://www.onvif.org/ver10/device/wsdl"/>')
+        info = {}
+        for tag in ["Manufacturer", "Model", "FirmwareVersion", "SerialNumber", "HardwareId"]:
+            m = re.search(rf'<[^>]*?:?{tag}>([^<]*)</', r)
+            if m:
+                info[tag] = m.group(1)
+        # Memes cles que l'ISAPI Hikvision (lues par la page Cameras)
+        info["model"] = info.get("Model", "")
+        info["firmwareVersion"] = info.get("FirmwareVersion", "")
+        return info
+
+    def _onvif(self, service, body):
+        """Requete SOAP ONVIF (Digest). Leve une erreur si la camera refuse."""
+        env = ('<?xml version="1.0" encoding="utf-8"?>'
+               '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">'
+               '<s:Body>%s</s:Body></s:Envelope>' % body)
+        r = requests.post(
+            self._url(service), data=env,
+            headers={"Content-Type": "application/soap+xml; charset=utf-8"},
+            auth=self.auth, timeout=self.timeout,
+        )
+        if r.status_code == 401:
+            raise RuntimeError("Identifiants refuses par la camera (HTTP 401)")
+        if r.status_code != 200 or "Fault>" in r.text:
+            m = re.search(r'<[^>]*?:?Text[^>]*>([^<]*)</', r.text)
+            raise RuntimeError("Refus ONVIF (HTTP %d)%s" % (r.status_code, " : " + m.group(1) if m else ""))
+        return r.text
+
+    def _info_hanwha(self):
+        info = self._kv(self._hanwha_get("/stw-cgi/system.cgi?msubmenu=deviceinfo&action=view"))
+        info["model"] = info.get("Model", "")
+        info["firmwareVersion"] = info.get("FirmwareVersion", "")
         return info
 
     def _info_axis(self):
-        info = {}
+        # VAPIX param.cgi : present des firmwares 5.x (2014) aux 11.x, en Digest
+        info = self._kv(self._get("/axis-cgi/param.cgi?action=list&group=Brand"))
         try:
-            r = self._get("/axis-cgi/basicdeviceinfo.cgi")
-            # Peut etre XML ou key=value
-            if "<" in r.text:
-                xml = self._strip_ns(r.text)
-                root = ET.fromstring(xml)
-                for child in root.iter():
-                    tag = re.sub(r'\{[^}]*\}', '', child.tag)
-                    if child.text and child.text.strip():
-                        info[tag] = child.text.strip()
-            else:
-                for line in r.text.strip().split("\n"):
-                    parts = line.strip().split("=", 1)
-                    if len(parts) == 2:
-                        info[parts[0].strip()] = parts[1].strip()
+            info.update(self._kv(self._get("/axis-cgi/param.cgi?action=list&group=Properties.Firmware")))
         except Exception:
             pass
-        if not info:
-            try:
-                r = self._get("/axis-cgi/param.cgi?action=list&group=Brand")
-                for line in r.text.strip().split("\n"):
-                    parts = line.strip().split("=", 1)
-                    if len(parts) == 2:
-                        info[parts[0].strip()] = parts[1].strip()
-            except Exception:
-                pass
+        info["model"] = info.get("root.Brand.ProdShortName") or info.get("root.Brand.ProdNbr", "")
+        info["firmwareVersion"] = info.get("root.Properties.Firmware.Version", "")
         return info
 
     def get_ptz_status(self):
@@ -229,8 +237,11 @@ class HikCamera:
     # Presets (multi-marques)
     ############################################################################
 
-    def list_presets(self):
-        """Liste tous les presets configures (multi-marques)."""
+    def list_presets(self, raise_errors=False):
+        """Liste tous les presets configures (multi-marques).
+
+        raise_errors : remonte l'erreur au lieu de renvoyer une liste vide
+        (Cockpit doit distinguer "aucun preset" de "camera injoignable")."""
         dispatch = {
             "hikvision": self._list_presets_hik,
             "dahua":     self._list_presets_dahua,
@@ -243,9 +254,11 @@ class HikCamera:
         try:
             return fn()
         except Exception:
+            if raise_errors:
+                raise
             return []
 
-    def goto_preset(self, preset_id):
+    def goto_preset(self, preset_id, raise_errors=False):
         """Deplace la camera vers un preset (multi-marques)."""
         dispatch = {
             "hikvision": self._goto_preset_hik,
@@ -259,6 +272,8 @@ class HikCamera:
         try:
             return fn(preset_id)
         except Exception:
+            if raise_errors:
+                raise
             return False
 
     def set_preset(self, preset_id, name=""):
@@ -305,7 +320,8 @@ class HikCamera:
         presets = []
         for preset in root.findall("PTZPreset"):
             pid = preset.findtext("id", "0")
-            name = preset.findtext("presetName", "")
+            # Noms poses par SeeTec encodes comme une URL ("*+Vue+Nord+%28Po")
+            name = unquote_plus(preset.findtext("presetName", ""))
             enabled = preset.findtext("enabled", "false")
             if enabled == "true" or name:
                 presets.append({"id": int(pid), "name": name, "enabled": enabled == "true"})
@@ -318,22 +334,23 @@ class HikCamera:
     # --- Dahua CGI ---
     def _list_presets_dahua(self):
         r = self._get(f"/cgi-bin/ptz.cgi?action=getPresets&channel={self.channel - 1}")
-        presets = []
-        for line in r.text.strip().split("\n"):
-            line = line.strip()
-            # Format: presets[0].Index=1 / presets[0].Name=xxx
-            m = re.match(r'presets\[(\d+)\]\.(\w+)=(.*)', line)
+        # Format : presets[0].Index=1 / .Name=xxx / .PresetFunction=None / .Type=0
+        rows = {}
+        for k, v in self._kv(r).items():
+            m = re.match(r'presets\[(\d+)\]\.(\w+)$', k)
             if m:
-                idx = int(m.group(1))
-                key = m.group(2)
-                val = m.group(3)
-                while len(presets) <= idx:
-                    presets.append({"id": 0, "name": "", "enabled": True})
-                if key == "Index":
-                    presets[idx]["id"] = int(val)
-                elif key == "Name":
-                    presets[idx]["name"] = val
-        return [p for p in presets if p["name"]]
+                rows.setdefault(int(m.group(1)), {})[m.group(2)] = v
+        presets = []
+        for row in rows.values():
+            # PresetFunction autre que None = preset de fonction (pas une vue)
+            if row.get("PresetFunction", "None") not in ("None", ""):
+                continue
+            try:
+                pid = int(row.get("Index", ""))
+            except ValueError:
+                continue
+            presets.append({"id": pid, "name": row.get("Name") or "Preset %d" % pid, "enabled": True})
+        return sorted(presets, key=lambda p: p["id"])
 
     def _goto_preset_dahua(self, preset_id):
         r = self._get(f"/cgi-bin/ptz.cgi?action=start&channel={self.channel-1}&code=GotoPreset&arg1=0&arg2={preset_id}&arg3=0")
@@ -341,111 +358,72 @@ class HikCamera:
 
     # --- Bosch ONVIF ---
     def _bosch_get_profile_token(self):
-        """Recupere le premier ProfileToken ONVIF de la camera Bosch."""
-        soap = '''<?xml version="1.0" encoding="utf-8"?>
-<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
-            xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-<s:Body><trt:GetProfiles/></s:Body></s:Envelope>'''
-        r = requests.post(
-            self._url("/onvif/media_service"), data=soap,
-            headers={"Content-Type": "application/soap+xml"},
-            auth=self.auth, timeout=self.timeout,
-        )
-        tokens = re.findall(r'token="([^"]+)"', r.text)
+        """Premier ProfileToken ONVIF (media) de la camera Bosch."""
+        r = self._onvif("/onvif/media_service", '<GetProfiles xmlns="http://www.onvif.org/ver10/media/wsdl"/>')
+        tokens = re.findall(r'<[^>]*?:?Profiles\b[^>]*?\btoken="([^"]+)"', r)
         return tokens[0] if tokens else "0"
 
     def _list_presets_bosch(self):
-        token = self._bosch_get_profile_token()
-        soap = f'''<?xml version="1.0" encoding="utf-8"?>
-<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
-            xmlns:ptz="http://www.onvif.org/ver20/ptz/wsdl">
-<s:Body>
-<ptz:GetPresets>
-<ptz:ProfileToken>{token}</ptz:ProfileToken>
-</ptz:GetPresets>
-</s:Body></s:Envelope>'''
-        r = requests.post(
-            self._url("/onvif/ptz_service"), data=soap,
-            headers={"Content-Type": "application/soap+xml"},
-            auth=self.auth, timeout=self.timeout,
-        )
         import html
+        token = self._bosch_get_profile_token()
+        r = self._onvif("/onvif/ptz_service",
+                        '<GetPresets xmlns="http://www.onvif.org/ver20/ptz/wsdl"><ProfileToken>%s</ProfileToken></GetPresets>' % token)
         presets = []
-        for m in re.finditer(r'token="([^"]+)"[^>]*>.*?<[^:]*:?Name>([^<]*)</[^:]*:?Name>', r.text, re.DOTALL):
-            pid = m.group(1)
-            name = html.unescape(html.unescape(m.group(2)))  # double unescape pour &amp;amp;
-            if name:
-                try:
-                    presets.append({"id": int(pid), "name": name, "enabled": True})
-                except ValueError:
-                    presets.append({"id": 0, "name": f"{pid}: {name}", "enabled": True})
-        return presets
+        for m in re.finditer(r'<[^>]*?:?Preset\b[^>]*?\btoken="([^"]+)"[^>]*>(.*?)</[^>]*?:?Preset>', r, re.DOTALL):
+            n = re.search(r'<[^>]*?:?Name>([^<]*)</', m.group(2))
+            name = html.unescape(html.unescape(n.group(1))).strip() if n else ""  # double unescape pour &amp;amp;
+            try:
+                pid = int(m.group(1))
+            except ValueError:
+                continue
+            presets.append({"id": pid, "name": name or "Preset %d" % pid, "enabled": True})
+        return sorted(presets, key=lambda p: p["id"])
 
     def _goto_preset_bosch(self, preset_id):
         token = self._bosch_get_profile_token()
-        soap = f'''<?xml version="1.0" encoding="utf-8"?>
-<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
-            xmlns:ptz="http://www.onvif.org/ver20/ptz/wsdl">
-<s:Body>
-<ptz:GotoPreset>
-<ptz:ProfileToken>{token}</ptz:ProfileToken>
-<ptz:PresetToken>{preset_id}</ptz:PresetToken>
-</ptz:GotoPreset>
-</s:Body></s:Envelope>'''
-        r = requests.post(
-            self._url("/onvif/ptz_service"), data=soap,
-            headers={"Content-Type": "application/soap+xml"},
-            auth=self.auth, timeout=self.timeout,
-        )
-        return r.status_code == 200 and "Fault" not in r.text
+        self._onvif("/onvif/ptz_service",
+                    '<GotoPreset xmlns="http://www.onvif.org/ver20/ptz/wsdl"><ProfileToken>%s</ProfileToken>'
+                    '<PresetToken>%d</PresetToken></GotoPreset>' % (token, int(preset_id)))
+        return True
 
     # --- Hanwha/Samsung Wisenet STW-CGI ---
     def _list_presets_hanwha(self):
-        presets = []
+        # SUNAPI : ptzconfig.cgi (ptzcontrol.cgi repond "Action Not Found" en view).
+        # Format : Channel.0.Preset.1.Name=Parking
         try:
-            r = self._get(f"/stw-cgi/ptzcontrol.cgi?msubmenu=preset&action=view&Channel={self.channel - 1}")
-            # Format: Preset.0.Name=xxx / Preset.0.Number=1
-            data = {}
-            for line in r.text.strip().split("\n"):
-                m = re.match(r'Preset\.(\d+)\.(\w+)=(.*)', line.strip())
-                if m:
-                    idx = int(m.group(1))
-                    key = m.group(2)
-                    val = m.group(3)
-                    if idx not in data:
-                        data[idx] = {}
-                    data[idx][key] = val
-            for idx in sorted(data.keys()):
-                d = data[idx]
-                name = d.get("Name", "")
-                pid = int(d.get("Number", d.get("Index", idx)))
-                if name:
-                    presets.append({"id": pid, "name": name, "enabled": True})
-        except Exception:
-            pass
-        return presets
+            r = self._hanwha_get(f"/stw-cgi/ptzconfig.cgi?msubmenu=preset&action=view&Channel={self.channel - 1}")
+        except RuntimeError as e:
+            if getattr(e, "code", "") == "608":  # camera fixe : pas de PTZ
+                return []
+            raise
+        presets = []
+        for k, v in self._kv(r).items():
+            m = re.match(r'Channel\.\d+\.Preset\.(\d+)\.Name$', k)
+            if m:
+                presets.append({"id": int(m.group(1)), "name": v or "Preset %s" % m.group(1), "enabled": True})
+        return sorted(presets, key=lambda p: p["id"])
 
     def _goto_preset_hanwha(self, preset_id):
-        r = self._get(f"/stw-cgi/ptzcontrol.cgi?msubmenu=preset&action=move&Channel={self.channel - 1}&Preset={preset_id}")
-        return r.status_code == 200
+        self._hanwha_get(f"/stw-cgi/ptzcontrol.cgi?msubmenu=preset&action=control&Channel={self.channel - 1}&Preset={int(preset_id)}")
+        return True
 
     # --- Axis VAPIX ---
     def _list_presets_axis(self):
+        # Format : presetposno1=name1 ; "PTZ disabled" sur les cameras fixes (liste vide)
+        r = self._get(f"/axis-cgi/com/ptz.cgi?query=presetposall&camera={self.channel}")
         presets = []
-        try:
-            r = self._get("/axis-cgi/com/ptz.cgi?query=presetposall")
-            # Format: presetposno1=name1\npresetposno2=name2
-            for line in r.text.strip().split("\n"):
-                m = re.match(r'presetposno(\d+)=(.*)', line.strip())
-                if m:
-                    presets.append({"id": int(m.group(1)), "name": m.group(2), "enabled": True})
-        except Exception:
-            pass
-        return presets
+        for k, v in self._kv(r).items():
+            m = re.match(r'presetposno(\d+)$', k)
+            if m:
+                presets.append({"id": int(m.group(1)), "name": v or "Preset %s" % m.group(1), "enabled": True})
+        return sorted(presets, key=lambda p: p["id"])
 
     def _goto_preset_axis(self, preset_id):
-        r = self._get(f"/axis-cgi/com/ptz.cgi?gotoserverpresetno={preset_id}")
-        return r.status_code == 200
+        r = self._get(f"/axis-cgi/com/ptz.cgi?gotoserverpresetno={int(preset_id)}&camera={self.channel}")
+        # Succes = 204 sans contenu ; une erreur VAPIX arrive en 200 avec "Error"
+        if "error" in r.content.decode("utf-8", "replace").lower():
+            raise RuntimeError("Refus VAPIX : %s" % r.content[:120].decode("utf-8", "replace").strip())
+        return True
 
     ############################################################################
     # Patrouilles
@@ -548,14 +526,23 @@ class HikCamera:
     ############################################################################
 
     def capture_image(self, save_path=None):
-        """Capture une image depuis la camera."""
+        """Capture une image depuis la camera (Hikvision ISAPI, Bosch, Dahua, Hanwha)."""
+        path = {
+            "bosch": f"/snap.jpg?JpegCam={self.channel}",
+            "dahua": f"/cgi-bin/snapshot.cgi?channel={self.channel}",
+            "hanwha": f"/stw-cgi/video.cgi?msubmenu=snapshot&action=view&Channel={self.channel - 1}",
+            "axis": f"/axis-cgi/jpg/image.cgi?camera={self.channel}",
+        }.get(self.brand, f"/ISAPI/Streaming/channels/{self.channel}01/picture")
         r = requests.get(
-            self._url(f"/ISAPI/Streaming/channels/{self.channel}01/picture"),
+            self._url(path),
             auth=self.auth,
             timeout=self.timeout,
             stream=True,
         )
         r.raise_for_status()
+        if not r.headers.get("Content-Type", "").startswith("image/"):
+            # Hanwha et Dahua repondent parfois 200 avec un texte d'erreur
+            raise RuntimeError("La camera n'a pas renvoye d'image : %s" % r.content[:120].decode("utf-8", "replace").strip())
 
         if save_path is None:
             ts = time.strftime("%Y%m%d_%H%M%S")

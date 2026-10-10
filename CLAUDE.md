@@ -80,6 +80,7 @@ Pas de tests automatisés ni de linter configurés.
 | `ALFRED_CHAT_MAX_TOOL_HOPS` | `max_tool_hops` envoyé par le chat | `6` |
 | `ALFRED_CHAT_RATE_10MIN` | Questions max par opérateur sur 10 min | `40` |
 | `ALFRED_CHAT_RETENTION_DAYS` | Rétention (TTL) conversations, messages, appels d'outils | `90` |
+| `COCKPIT_CAMERA_KEY` | Cle maitre (32 octets base64) des mots de passe cameras chiffres (`camera_secrets.py`). Variable utilisateur du compte de Cockpit | — (identifiants et pilotage cameras indisponibles) |
 | `ALFRED_HEALTH_URL` | Sonde de santé du wrapper | dérivée d'`ALFRED_ASK_URL` (`/alfred/health`) |
 
 ## Architecture
@@ -152,3 +153,5 @@ Le detail de chaque domaine vit dans `docs/claude/`. **Lire le fichier concerne 
 - `docs/claude/declarations.md` : Constats terrain des tablettes Field en mode declarant (page /declarations, transformation en fiche, droit can_convert_declaration, envoi mail + resume IA prepare)
 - `docs/claude/integrations.md` : Applications liees (Friday du service informatique...) : regles d'envoi par categorie / sous-classification, file signee HMAC, evenements entrants, JAMAIS de cloture externe. Note pour le service informatique : `docs/integrations/friday-note-service-informatique.md`
 - `docs/claude/pmv.md` : PMV (remorques Sigma 3000, JetFileII) : regles de dialogue NON NEGOCIABLES, securite, jobs
+- `docs/claude/cameras.md` : Cameras : page de configuration unique (appareils, canaux, usages LAPI / detection), profils d'identifiants chiffres (COCKPIT_CAMERA_KEY), import SeeTec, etat reseau
+- `docs/claude/detection.md` : Detection : intrusions (fielddetection) du recepteur Hik (episodes, photos 1 an), carte et zones, filtres cible / zone de la centrale d'alertes

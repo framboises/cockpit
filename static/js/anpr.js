@@ -1,775 +1,1086 @@
 /* =========================================================================
-   ANPR / LAPI -- Frontend (2-column layout, tabbed right panel)
+   LAPI -- poste de controle des plaques (page /anpr, API anpr.py)
+
+   - Bandeau des voies : sante de chaque camera (active / calme / muette),
+     activite de la periode, vehicules sur site.
+   - Flux des passages : direct (nouveaux passages par ordre de reception),
+     filtres, recherche tolerante sur tout l'historique, pagination par curseur.
+   - Panneau de droite : synthese de la periode, ou fiche de la plaque
+     (photo, presence, sejours, lectures proches, Vision, watchlist).
+   Les listes affichent des vignettes (~25 Ko) ; la photo d'origine (~800 Ko)
+   n'est chargee que dans la fiche.
    ========================================================================= */
 (function () {
     "use strict";
 
-    var CSRF = document.querySelector('meta[name="csrf-token"]')?.content || "";
     var API = {
-        search:  "/api/anpr/search",
-        stats:   "/api/anpr/stats",
-        live:    "/api/anpr/live",
-        plate:   "/api/anpr/plate/",
-        image:   "/api/anpr/image/",
-        cameras: "/api/anpr/cameras",
-        camCfg:  "/api/anpr/cameras/config",
-        onsite:  "/api/anpr/onsite",
+        overview: "/api/anpr/overview",
+        passages: "/api/anpr/passages",
+        plate: "/api/anpr/plate/",
         onsiteReset: "/api/anpr/onsite/reset",
-        visionLookup: "/api/anpr/vision/lookup/",
-        visionBatch:  "/api/anpr/vision/batch",
-        visionSearch: "/api/anpr/vision/search",
-        visionStats:  "/api/anpr/vision/stats",
+        watchlist: "/api/anpr-watchlist",
+    };
+    var LIVE_MS = 5000;
+    var OVERVIEW_MS = 15000;
+    var OVERVIEW_PAST_MS = 60000;
+    var PAGE = 60;
+    var TZ = "Europe/Paris";
+    var PERIOD_LABEL = { "1h": "la derniere heure", "today": "aujourd'hui", "24h": "les dernieres 24 h", "7d": "les 7 derniers jours" };
+    // Etats calcules par anpr.py (test reseau des voies silencieuses)
+    var LANE_STATE = {
+        ok: { label: "Active", icon: "sensors" },
+        idle: { label: "Calme", icon: "bedtime" },
+        noread: { label: "Sans lecture", icon: "visibility_off" },
+        offline: { label: "Hors ligne", icon: "wifi_off" },
     };
 
-    function imgUrl(r, type) {
-        var path = r[type + "_image_path"];
-        var id   = r[type + "_image_id"];
-        if (path) return API.image + encodeURIComponent(path);
-        if (id)   return API.image + encodeURIComponent(id);
-        return null;
-    }
+    var S = {
+        period: "today", date: "", q: "", dir: "", camera: "", watch: false, vision: false, unread: false,
+        items: [], ids: {}, next: null, total: null, receivedMax: null,
+        loading: false, seq: 0, pending: [],
+        overview: null, overviewError: false,
+        detail: null, detailItem: null, selectedNorm: null, selectedId: null, sideMode: "summary",
+    };
 
-    function qs(s, r) { return (r || document).querySelector(s); }
-    function qsa(s, r) { return (r || document).querySelectorAll(s); }
-    function mk(tag, cls, txt) {
+    /* ------------------------------------------------------------------ */
+    /* Utilitaires                                                         */
+    /* ------------------------------------------------------------------ */
+    function $(id) { return document.getElementById(id); }
+    function el(tag, cls, text) {
         var e = document.createElement(tag);
         if (cls) e.className = cls;
-        if (txt !== undefined) e.textContent = txt;
+        if (text !== undefined && text !== null) e.textContent = text;
         return e;
     }
-    async function get(url) { var r = await fetch(url); if (!r.ok) throw r.status; return r.json(); }
-    async function post(url, b) {
-        var r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF }, body: JSON.stringify(b) });
-        if (!r.ok) throw r.status; return r.json();
+    function icon(name, cls) { return el("span", "material-symbols-outlined" + (cls ? " " + cls : ""), name); }
+    function csrf() { var m = document.querySelector('meta[name="csrf-token"]'); return m ? m.content : ""; }
+
+    function getJSON(url, signal) {
+        return fetch(url, { credentials: "same-origin", signal: signal }).then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.json();
+        });
     }
-
-    var COLOR_FR = { white:"Blanc", black:"Noir", gray:"Gris", blue:"Bleu", red:"Rouge", green:"Vert", yellow:"Jaune", brown:"Marron", pink:"Rose", cyan:"Cyan" };
-    function hex(c) { return { white:"#ddd", black:"#1a1a2e", gray:"#6b7280", blue:"#3b82f6", red:"#ef4444", green:"#22c55e", yellow:"#eab308", brown:"#92400e", pink:"#ec4899", cyan:"#06b6d4" }[c] || "#888"; }
-
-    function fmtDt(iso) { if (!iso) return "--"; var d = new Date(iso); return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"}) + " " + d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit",second:"2-digit"}); }
-    function fmtTm(iso) { if (!iso) return "--"; return new Date(iso).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit",second:"2-digit"}); }
-
-    function animVal(el, end) {
-        var s = parseInt(el.textContent) || 0; if (s === end) { el.textContent = end; return; }
-        var d = end - s, dur = Math.min(600, Math.abs(d) * 8), t0 = null;
-        function step(ts) { if (!t0) t0 = ts; var p = Math.min(1, (ts - t0) / dur); el.textContent = Math.round(s + d * (1 - Math.pow(1 - p, 3))); if (p < 1) requestAnimationFrame(step); }
-        requestAnimationFrame(step);
-    }
-
-    Chart.defaults.font.family = "'Outfit',sans-serif";
-    Chart.defaults.font.size = 11;
-    Chart.defaults.color = "#607286";
-    Chart.defaults.plugins.legend.display = false;
-    Chart.defaults.animation.duration = 500;
-
-    var LIEU_COLORS = { "Ouest": "#f97316", "Panorama": "#dc2626", "Houx": "#166534" };
-    function mkLieuPill(lieu) {
-        if (!lieu) return null;
-        var pill = mk("span", "anpr-lieu-pill");
-        pill.textContent = lieu;
-        pill.style.cssText = "font-size:0.65rem; padding:1px 6px; border-radius:9px; font-weight:600; margin-left:5px; color:#fff; background:" + (LIEU_COLORS[lieu] || "#6b7280") + ";";
-        return pill;
-    }
-
-    var charts = {}, page = 1, statsLoaded = false, searchLoaded = false, lastLiveTop = null;
-    var visionStatsLoaded = false;
-    var _watchlistPlates = {};  // plate -> {_id, label, enabled}
-
-    function loadWatchlist() {
-        fetch("/api/anpr-watchlist").then(function(r){ return r.json(); }).then(function(list){
-            _watchlistPlates = {};
-            (list || []).forEach(function(w){
-                _watchlistPlates[w.plate] = w;
+    function send(method, url, body) {
+        return fetch(url, {
+            method: method, credentials: "same-origin",
+            headers: { "Content-Type": "application/json", "X-CSRFToken": csrf() },
+            body: body ? JSON.stringify(body) : undefined,
+        }).then(function (r) {
+            return r.json().catch(function () { return {}; }).then(function (j) {
+                if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+                return j;
             });
-        }).catch(function(){});
-    }
-
-    function isWatched(plate) {
-        return !!_watchlistPlates[(plate || "").toUpperCase().replace(/\s+/g, "-")];
-    }
-
-    function addToWatchlist(plate, label) {
-        var normalPlate = (plate || "").toUpperCase().replace(/\s+/g, "-");
-        return fetch("/api/anpr-watchlist", {
-            method: "POST",
-            headers: {"Content-Type": "application/json", "X-CSRFToken": CSRF},
-            body: JSON.stringify({plate: normalPlate, label: label || ""})
-        }).then(function(r){ return r.json(); }).then(function(res){
-            if(!res.error){
-                _watchlistPlates[normalPlate] = res;
-                if(typeof showToast === "function") showToast("Plaque " + normalPlate + " ajoutee a la watchlist", "success");
-            } else {
-                if(typeof showToast === "function") showToast(res.error, "warning");
-            }
-            return res;
         });
     }
+    function toast(type, msg) { if (typeof showToast === "function") showToast(type, msg); }
 
-    function removeFromWatchlist(plate) {
-        var normalPlate = (plate || "").toUpperCase().replace(/\s+/g, "-");
-        var w = _watchlistPlates[normalPlate];
-        if(!w) return Promise.resolve();
-        return fetch("/api/anpr-watchlist/" + w._id, {
-            method: "DELETE",
-            headers: {"X-CSRFToken": CSRF}
-        }).then(function(r){ return r.json(); }).then(function(){
-            delete _watchlistPlates[normalPlate];
-            if(typeof showToast === "function") showToast("Plaque " + normalPlate + " retiree de la watchlist", "success");
-        });
+    function normPlate(p) { return String(p || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); }
+    // Plaque SIV (AB123CD) affichee AB-123-CD ; le reste tel quel
+    function fmtPlate(p) {
+        var m = /^([A-Z]{2})(\d{3})([A-Z]{2})$/.exec(p || "");
+        return m ? m[1] + "-" + m[2] + "-" + m[3] : (p || "");
     }
-
-    /* ---- init ---- */
-    function init() {
-        loadWatchlist();
-        buildChips();
-        loadKPIs();
-        loadOnsite();
-        loadLive();
-        loadSearch();
-        searchLoaded = true;
-        bind();
-        setInterval(loadLive, 5000);
-        setInterval(loadOnsite, 15000);
+    function nf(n) { return (n || 0).toLocaleString("fr-FR"); }
+    function fmtTime(iso) { return iso ? new Date(iso).toLocaleTimeString("fr-FR", { timeZone: TZ, hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "--"; }
+    function fmtHM(iso) { return iso ? new Date(iso).toLocaleTimeString("fr-FR", { timeZone: TZ, hour: "2-digit", minute: "2-digit" }) : "--"; }
+    function fmtDay(iso) { return iso ? new Date(iso).toLocaleDateString("fr-FR", { timeZone: TZ, weekday: "short", day: "2-digit", month: "2-digit" }) : ""; }
+    function fmtDate(iso) { return iso ? new Date(iso).toLocaleDateString("fr-FR", { timeZone: TZ, day: "2-digit", month: "2-digit", year: "numeric" }) : ""; }
+    function fmtDT(iso) { return iso ? fmtDate(iso) + " " + fmtHM(iso) : "--"; }
+    function dayKey(iso) { return iso ? new Date(iso).toLocaleDateString("fr-CA", { timeZone: TZ }) : ""; }
+    function isToday(iso) { return dayKey(iso) === dayKey(new Date().toISOString()); }
+    function ago(iso) {
+        if (!iso) return "jamais";
+        var s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+        if (s < 60) return "il y a " + Math.round(s) + " s";
+        if (s < 3600) return "il y a " + Math.round(s / 60) + " min";
+        if (s < 86400) return "il y a " + Math.round(s / 3600) + " h";
+        var d = Math.round(s / 86400);
+        return "il y a " + d + " jour" + (d > 1 ? "s" : "");
     }
-
-    /* ---- color chips (circles) ---- */
-    function buildChips() {
-        var c = qs("#anpr-color-chips");
-        ["white","black","gray","blue","red","green","yellow","brown","pink","cyan"].forEach(function (col) {
-            var btn = mk("button", "anpr-color-chip");
-            btn.dataset.color = col;
-            btn.title = COLOR_FR[col];
-            btn.style.setProperty("--chip-color", hex(col));
-            btn.style.background = hex(col);
-            btn.addEventListener("click", function () {
-                var was = btn.classList.contains("active");
-                qsa(".anpr-color-chip.active").forEach(function (b) { b.classList.remove("active"); });
-                if (!was) btn.classList.add("active");
-                page = 1; loadSearch();
-            });
-            c.appendChild(btn);
-        });
+    function fmtDur(ms) {
+        if (ms == null || ms < 0) return "";
+        var m = Math.round(ms / 60000);
+        if (m < 60) return m + " min";
+        var h = Math.floor(m / 60), r = m % 60;
+        if (h < 48) return h + " h " + (r < 10 ? "0" : "") + r;
+        return Math.round(h / 24) + " j";
     }
-
-    /* ---- KPIs ---- */
-    async function loadKPIs() {
-        try {
-            var d = await get(API.stats);
-            animVal(qs("#kpi-total"), d.total);
-            animVal(qs("#kpi-unique"), d.unique_plates);
-            animVal(qs("#kpi-allowlist"), d.allowlist_count);
-            qs("#kpi-confidence").textContent = d.avg_confidence + "%";
-            window._anprStats = d;
-            fillFilters(d);
-        } catch (e) { console.error("KPI", e); }
-        // Vision KPI
-        try {
-            var vs = await get(API.visionStats);
-            animVal(qs("#kpi-vision-matched"), vs.matched);
-            window._visionStats = vs;
-        } catch (e) { /* Vision not configured, hide KPI */ qs("#kpi-vision-matched").textContent = "--"; }
+    function plateBadge(p, xl) {
+        var unread = !p || p === "UNKNOWN";
+        var b = el("span", "lp-plate" + (unread ? " is-unread" : "") + (xl ? " lp-plate-xl" : ""));
+        b.appendChild(el("span", "", unread ? "illisible" : fmtPlate(p)));
+        return b;
     }
-
-    function fillFilters(d) {
-        var ts = qs("#anpr-filter-type"), bs = qs("#anpr-filter-brand"), cs = qs("#anpr-filter-camera");
-        if (ts.options.length <= 1) (d.by_type || []).forEach(function (t) { ts.appendChild(new Option(t.label, t.type)); });
-        if (bs.options.length <= 1) (d.by_brand || []).forEach(function (b) { bs.appendChild(new Option(b.brand, b.brand)); });
-        if (cs.options.length <= 1) Object.keys(d.by_camera || {}).sort().forEach(function (c) { cs.appendChild(new Option(c, c)); });
+    function badge(cls, ic, text, title) {
+        var b = el("span", "lp-badge " + cls);
+        if (ic) b.appendChild(icon(ic));
+        b.appendChild(document.createTextNode(text));
+        if (title) b.title = title;
+        return b;
     }
-
-    /* ---- on-site counter ---- */
-    async function loadOnsite() {
-        try {
-            var d = await get(API.onsite);
-            animVal(qs("#kpi-onsite"), d.on_site);
-        } catch (e) { console.error("Onsite", e); }
+    function dirChip(dir) {
+        var d = dir === "entry" ? ["login", "Entree"] : dir === "exit" ? ["logout", "Sortie"] : ["help", "Sens ?"];
+        var c = el("span", "lp-dir lp-dir-" + (dir || "unknown"));
+        c.appendChild(icon(d[0]));
+        c.appendChild(document.createTextNode(d[1]));
+        return c;
     }
-
-    /* ---- tabs ---- */
-    function switchTab(tab) {
-        qsa("[data-anpr-tab]").forEach(function (b) { b.classList.toggle("active", b.dataset.anprTab === tab); });
-        qsa(".anpr-tab-pane").forEach(function (p) { p.classList.toggle("active", p.id === "pane-" + tab); });
-        if (tab === "stats" && !statsLoaded) { statsLoaded = true; loadStats(); }
-        if (tab === "search" && !searchLoaded) { searchLoaded = true; loadSearch(); }
-        if (tab === "stats") setTimeout(function () { Object.values(charts).forEach(function (c) { if (c) c.resize(); }); }, 60);
-    }
-
-    function switchStatsSub(sub) {
-        qsa("[data-stats-sub]").forEach(function (b) { b.classList.toggle("active", b.dataset.statsSub === sub); });
-        qsa(".anpr-stats-subpane").forEach(function (p) { p.classList.toggle("active", p.id === "stats-sub-" + sub); });
-        if (sub === "vision" && !visionStatsLoaded) { visionStatsLoaded = true; loadVisionStats(); }
-        if (sub === "anpr") setTimeout(function () { Object.values(charts).forEach(function (c) { if (c) c.resize(); }); }, 60);
-        if (sub === "vision") setTimeout(function () { ["visionLieux", "visionCross"].forEach(function (k) { if (charts[k]) charts[k].resize(); }); }, 60);
-    }
-
-    /* ---- stats ---- */
-    async function loadStats() {
-        try {
-            var d = window._anprStats || (await get(API.stats));
-            mkChart("colors", "#chart-colors", "doughnut", colorData(d.by_color), { cutout: "60%", plugins: { legend: { display: true, position: "right", labels: { boxWidth: 10, padding: 6, font: { size: 10 } } } } });
-            mkChart("brands", "#chart-brands", "bar", brandData(d.by_brand), { indexAxis: "y", scales: { x: { grid: { display: false } }, y: { grid: { display: false }, ticks: { font: { size: 10 } } } } });
-            mkChart("hourly", "#chart-hourly", "line", hourData(d.by_hour), { scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.04)" } } }, plugins: { legend: { display: false } } });
-            mkChart("types", "#chart-types", "doughnut", typeData(d.by_type), { cutout: "55%", plugins: { legend: { display: true, position: "right", labels: { boxWidth: 10, padding: 6, font: { size: 10 } } } } });
-            mkChart("cameras", "#chart-cameras", "bar", camData(d.by_camera), { scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.04)" } } } });
-        } catch (e) { console.error("Stats", e); }
-    }
-
-    function mkChart(key, sel, type, data, opts) {
-        if (charts[key]) charts[key].destroy();
-        charts[key] = new Chart(qs(sel), { type: type, data: data, options: Object.assign({ responsive: true, maintainAspectRatio: false }, opts) });
-    }
-    function colorData(m) { var l = [], v = [], b = []; Object.keys(m || {}).forEach(function (c) { l.push(COLOR_FR[c] || c); v.push(m[c]); b.push(hex(c)); }); return { labels: l, datasets: [{ data: v, backgroundColor: b, borderWidth: 1.5, borderColor: "#fff" }] }; }
-    function brandData(m) { var l = [], v = []; (m || []).slice(0, 10).forEach(function (b) { l.push(b.brand); v.push(b.count); }); return { labels: l, datasets: [{ data: v, backgroundColor: "rgba(37,99,235,0.7)", borderRadius: 3, borderSkipped: false }] }; }
-    function hourData(m) { var l = [], v = []; for (var h = 0; h < 24; h++) { l.push(h + "h"); v.push((m || {})[h] || 0); } return { labels: l, datasets: [{ data: v, borderColor: "#2563eb", backgroundColor: "rgba(37,99,235,0.06)", fill: true, tension: 0.4, pointRadius: 2, pointHoverRadius: 5, borderWidth: 2 }] }; }
-    function typeData(m) { var l = [], v = [], bg = ["#2563eb","#7c3aed","#ec4899","#f59e0b","#10b981","#6366f1","#06b6d4"]; (m || []).forEach(function (t) { l.push(t.label); v.push(t.count); }); return { labels: l, datasets: [{ data: v, backgroundColor: bg.slice(0, l.length), borderWidth: 1.5, borderColor: "#fff" }] }; }
-    function camData(m) { var l = [], v = [], bg = ["#2563eb","#7c3aed","#ec4899","#f59e0b","#10b981"]; Object.keys(m || {}).sort().forEach(function (c) { l.push(c); v.push(m[c]); }); return { labels: l, datasets: [{ data: v, backgroundColor: bg.slice(0, l.length), borderRadius: 4, borderSkipped: false }] }; }
-
-    /* ---- search / table ---- */
-    var sourceFilter = "";  // "", "vision", "anpr"
-
-    async function loadSearch() {
-        var p = new URLSearchParams(); p.set("page", page); p.set("per_page", 50);
-        var plate = qs("#anpr-filter-plate")?.value?.trim(); if (plate) p.set("plate", plate);
-        var ac = qs(".anpr-color-chip.active"); if (ac) p.set("color", ac.dataset.color);
-        var v;
-        v = qs("#anpr-filter-type")?.value; if (v) p.set("type", v);
-        v = qs("#anpr-filter-brand")?.value; if (v) p.set("brand", v);
-        v = qs("#anpr-filter-camera")?.value; if (v) p.set("camera", v);
-        v = qs("#anpr-filter-from")?.value; if (v) p.set("from", v);
-        v = qs("#anpr-filter-to")?.value; if (v) p.set("to", v);
-        if (sourceFilter) p.set("source", sourceFilter);
-        try {
-            var d = await get(API.search + "?" + p.toString());
-            renderTable(d.results);
-            qs("#anpr-result-count").textContent = d.total + " resultat" + (d.total !== 1 ? "s" : "");
-            renderPag(d.page, d.pages);
-        } catch (e) { console.error("Search", e); }
-    }
-
-    function renderTable(rows) {
-        var tb = qs("#anpr-table-body"); tb.textContent = "";
-        if (!rows || !rows.length) { var tr = document.createElement("tr"); var td = mk("td", "anpr-empty", "Aucun resultat"); td.setAttribute("colspan", "11"); tr.appendChild(td); tb.appendChild(tr); return; }
-        rows.forEach(function (r) { tb.appendChild(mkRow(r)); });
-    }
-
-    function mkRow(r) {
-        var isVision = r.source === "vision";
-        var tr = document.createElement("tr"); tr.className = "anpr-row" + (isVision ? " anpr-row-vision" : "");
-        // img
-        var tdi = document.createElement("td"); tdi.className = "anpr-td-img";
-        if (isVision) {
-            if (r.photo_vehicule) { var im = document.createElement("img"); im.className = "anpr-thumb"; im.src = r.photo_vehicule; im.loading = "lazy"; tdi.appendChild(im); }
-            else { var ne = mk("div", "anpr-thumb-empty"); ne.appendChild(mk("span", "material-symbols-outlined", "confirmation_number")); ne.style.color = "#f59e0b"; tdi.appendChild(ne); }
+    function thumb(item, cls) {
+        var t = el("div", "lp-thumb" + (cls ? " " + cls : ""));
+        if (item && item.thumb) {
+            var im = document.createElement("img");
+            im.loading = "lazy"; im.decoding = "async"; im.alt = "";
+            im.src = item.thumb;
+            im.addEventListener("error", function () { t.textContent = ""; t.appendChild(icon("no_photography")); });
+            t.appendChild(im);
         } else {
-            var vehicleUrl = imgUrl(r, "vehicle");
-            if (vehicleUrl) { var im2 = document.createElement("img"); im2.className = "anpr-thumb"; im2.src = vehicleUrl; im2.loading = "lazy"; tdi.appendChild(im2); }
-            else { var ne2 = mk("div", "anpr-thumb-empty"); ne2.appendChild(mk("span", "material-symbols-outlined", "no_photography")); tdi.appendChild(ne2); }
+            t.appendChild(icon("no_photography"));
         }
-        tr.appendChild(tdi);
-        // plate
-        var tdp = document.createElement("td"); tdp.appendChild(mk("span", "anpr-plate-badge" + (r.list_name === "allowList" ? " anpr-plate-allow" : ""), r.plate));
-        if (isVision && r.lieu) { var pill = mkLieuPill(r.lieu); if (pill) tdp.appendChild(pill); }
-        if(isWatched(r.plate)){ var wi = mk("span","material-symbols-outlined"); wi.style.cssText="font-size:13px;color:#dc2626;margin-left:4px;vertical-align:middle;"; wi.textContent="visibility"; wi.title="Plaque surveillee"; tdp.appendChild(wi); }
-        tr.appendChild(tdp);
-        // source
-        var tds = document.createElement("td");
-        var srcBadge = mk("span", "anpr-source-badge anpr-source-" + (isVision ? "vision" : "anpr"), isVision ? "Vision" : "ANPR");
-        tds.appendChild(srcBadge);
-        tr.appendChild(tds);
-        // conf
-        tr.appendChild(mk("td", "anpr-conf anpr-conf-" + (r.confidence >= 90 ? "high" : r.confidence >= 60 ? "med" : "low"), isVision ? "" : r.confidence + "%"));
-        // color (ANPR english or Vision french)
-        var tdc = document.createElement("td");
-        if (r.color_hex) { var dot = mk("span", "anpr-color-dot"); dot.style.background = r.color_hex; tdc.appendChild(dot); tdc.appendChild(document.createTextNode(" " + (COLOR_FR[r.color] || r.color || ""))); }
-        tr.appendChild(tdc);
-        tr.appendChild(mk("td", "", r.brand || ""));
-        tr.appendChild(mk("td", "", r.type_label || ""));
-        tr.appendChild(mk("td", "", isVision ? "" : r.camera));
-        // dir
-        var tdd = document.createElement("td");
-        if (isVision) { tdd.textContent = "--"; tdd.style.opacity = "0.3"; }
-        else {
-            var rd = r.resolved_dir || "unknown";
-            var ds = mk("span", "anpr-dir anpr-dir-" + rd);
-            var di = mk("span", "material-symbols-outlined"); di.style.fontSize = "14px";
-            di.textContent = rd === "entry" ? "login" : rd === "exit" ? "logout" : "help";
-            ds.appendChild(di);
-            ds.appendChild(document.createTextNode(rd === "entry" ? " Entree" : rd === "exit" ? " Sortie" : " ?"));
-            tdd.appendChild(ds);
-        }
-        tr.appendChild(tdd);
-        tr.appendChild(mk("td", "", fmtDt(r.event_dt)));
-        // divers
-        var tdDiv = document.createElement("td");
-        if (isVision) {
-            var parts = [];
-            if (r.lieu) parts.push(r.lieu);
-            if (r.billets_count) parts.push(r.billets_count + " billet(s)");
-            if (r.commentaire) parts.push(r.commentaire);
-            tdDiv.textContent = parts.join(" · ") || "--";
-            tdDiv.style.fontSize = "0.8rem";
-        }
-        tr.appendChild(tdDiv);
-        tr.addEventListener("click", function () { openDetail(r); });
-        return tr;
+        return t;
+    }
+    function svgEl(tag, attrs) {
+        var e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+        Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+        return e;
+    }
+    function isLivePeriod() { return S.period !== "day"; }
+
+    /* ------------------------------------------------------------------ */
+    /* Vue d'ensemble : voies, en direct, synthese                         */
+    /* ------------------------------------------------------------------ */
+    function periodParams() {
+        var p = new URLSearchParams();
+        p.set("period", S.period);
+        if (S.period === "day") p.set("date", S.date);
+        return p;
     }
 
-    function renderPag(pg, pages) {
-        var c = qs("#anpr-pagination"); c.textContent = ""; if (pages <= 1) return;
-        function btn(l, p, act, dis) { var b = mk("button", "anpr-page-btn" + (act ? " active" : ""), l); if (dis) b.disabled = true; else b.addEventListener("click", function () { page = p; loadSearch(); }); return b; }
-        function ib(icon, p, dis) { var b = document.createElement("button"); b.className = "anpr-page-btn"; if (dis) b.disabled = true; else b.addEventListener("click", function () { page = p; loadSearch(); }); var i = mk("span", "material-symbols-outlined", icon); i.style.fontSize = "14px"; b.appendChild(i); return b; }
-        c.appendChild(ib("chevron_left", pg - 1, pg <= 1));
-        var s = Math.max(1, pg - 2), e = Math.min(pages, pg + 2);
-        if (s > 1) { c.appendChild(btn("1", 1)); if (s > 2) c.appendChild(mk("span", "anpr-page-dots", "...")); }
-        for (var i = s; i <= e; i++) c.appendChild(btn(String(i), i, i === pg));
-        if (e < pages) { if (e < pages - 1) c.appendChild(mk("span", "anpr-page-dots", "...")); c.appendChild(btn(String(pages), pages)); }
-        c.appendChild(ib("chevron_right", pg + 1, pg >= pages));
-    }
-
-    /* ---- live feed ---- */
-    async function loadLive() {
-        try {
-            var rows = await get(API.live + "?n=50");
-            renderFeed(rows);
-            // Enrich ANPR items with Vision lieu pills only if feed was rebuilt
-            if (_feedRebuilt) enrichFeedWithVision(rows);
-        } catch (e) { console.error("Live", e); }
-    }
-
-    var _feedRebuilt = false;
-    function renderFeed(rows) {
-        _feedRebuilt = false;
-        if (!rows || !rows.length) return;
-        // Skip rebuild if nothing changed
-        var topId = rows[0].id;
-        if (topId === lastLiveTop) return;
-        var prevTop = lastLiveTop;
-        lastLiveTop = topId;
-        _feedRebuilt = true;
-        var c = qs("#anpr-live-feed"); c.textContent = "";
-        (rows || []).forEach(function (r, i) {
-            var isVision = r.source === "vision";
-            var isNew = prevTop !== null && r.id === topId;
-            var itemCls = "anpr-feed-item" + (isNew ? " anpr-feed-new" : "") + (isVision ? " anpr-feed-item-vision" : "");
-            var item = mk("div", itemCls);
-
-            // Thumbnail with source badge overlay
-            var th = mk("div", "anpr-feed-thumb");
-            var srcBadge = mk("span", "anpr-feed-source " + (isVision ? "anpr-feed-source-vision" : "anpr-feed-source-anpr"), isVision ? "VISION" : "LAPI");
-            th.appendChild(srcBadge);
-            if (isVision && r.photo_vehicule) {
-                var im = document.createElement("img"); im.src = r.photo_vehicule; im.loading = "lazy"; th.appendChild(im);
-            } else {
-                var feedVehicleUrl = imgUrl(r, "vehicle");
-                if (feedVehicleUrl) { var im2 = document.createElement("img"); im2.src = feedVehicleUrl; im2.loading = "lazy"; th.appendChild(im2); }
-                else th.appendChild(mk("span", "material-symbols-outlined", isVision ? "confirmation_number" : "directions_car"));
-            }
-            item.appendChild(th);
-
-            // Info: plate + meta
-            var info = mk("div", "anpr-feed-info");
-            var plateBadge = mk("span", "anpr-plate-badge anpr-plate-sm" + (r.list_name === "allowList" ? " anpr-plate-allow" : ""), r.plate);
-            info.appendChild(plateBadge);
-            if (isWatched(r.plate)) {
-                var wIcon = mk("span", "material-symbols-outlined");
-                wIcon.style.cssText = "font-size:12px; color:#dc2626; margin-top:2px;";
-                wIcon.textContent = "visibility";
-                wIcon.title = "Plaque surveillee";
-                info.appendChild(wIcon);
-            }
-            var meta = mk("span", "anpr-feed-meta");
-            if (r.color_hex) {
-                var dot = mk("span", "anpr-color-dot"); dot.style.background = r.color_hex; dot.style.width = "6px"; dot.style.height = "6px"; meta.appendChild(dot);
-            }
-            if (isVision) {
-                var desc = [r.brand, r.type_label].filter(Boolean).join(" ");
-                meta.appendChild(document.createTextNode(" " + (desc || "Vision")));
-            } else {
-                meta.appendChild(document.createTextNode(" " + r.brand));
-            }
-            info.appendChild(meta);
-            item.appendChild(info);
-
-            // Footer: camera/lieu + time
-            var right = mk("div", "anpr-feed-right");
-            if (isVision && r.lieu) {
-                var lieuPill = mkLieuPill(r.lieu);
-                if (lieuPill) right.appendChild(lieuPill);
-            } else if (r.camera) {
-                right.appendChild(mk("span", "anpr-feed-cam", r.camera));
-            }
-            right.appendChild(mk("span", "anpr-feed-time", fmtTm(r.event_dt)));
-            item.appendChild(right);
-
-            item.addEventListener("click", function () { openDetail(r); });
-            c.appendChild(item);
+    function loadOverview() {
+        return getJSON(API.overview + "?" + periodParams().toString()).then(function (ov) {
+            S.overview = ov; S.overviewError = false;
+            renderLanes(ov);
+            fillCameraSelect(ov.lanes);
+            renderLive();
+            if (S.sideMode === "summary") renderSummary(ov);
+        }).catch(function (e) {
+            console.error("LAPI overview", e);
+            S.overviewError = true;
+            renderLive();
         });
     }
 
-    /* ---- Vision batch enrichment ---- */
-    function enrichWithVision(rows, rowSelector) {
-        var plates = (rows || []).map(function (r) { return r.plate; }).filter(function (p) { return p && p !== "UNKNOWN"; });
-        if (!plates.length) return;
-        var unique = plates.filter(function (v, i, a) { return a.indexOf(v) === i; });
-        get(API.visionBatch + "?plates=" + unique.join(",")).then(function (visionData) {
-            if (!visionData || !Object.keys(visionData).length) return;
-            var els = qsa(rowSelector);
-            els.forEach(function (el, i) {
-                var r = rows[i];
-                if (!r || !visionData[r.plate]) return;
-                var badge = el.querySelector(".anpr-plate-badge");
-                if (!badge) return;
-                var pill = mkLieuPill(visionData[r.plate].lieu);
-                if (pill) badge.parentNode.insertBefore(pill, badge.nextSibling);
-            });
-        }).catch(function () {});
+    function renderLive() {
+        var box = $("lp-live"), txt = $("lp-live-text");
+        box.className = "lp-live";
+        if (S.overviewError) { box.classList.add("is-error"); txt.textContent = "Hors ligne"; return; }
+        var ov = S.overview;
+        if (!ov) return;
+        if (S.period === "day") { box.classList.add("is-past"); txt.textContent = "Journee du " + fmtDate(ov.period.from); return; }
+        var newest = null, anyOk = false;
+        (ov.lanes || []).forEach(function (l) {
+            if (l.status === "ok") anyOk = true;
+            if (l.last_dt && (!newest || l.last_dt > newest)) newest = l.last_dt;
+        });
+        if (anyOk) { box.classList.add("is-ok"); txt.textContent = "En direct - derniere lecture " + ago(newest); }
+        else { box.classList.add("is-idle"); txt.textContent = newest ? "Aucune lecture depuis " + ago(newest).replace("il y a ", "") : "Aucune lecture"; }
+        box.title = "Lectures recues par le recepteur des cameras (service HikRecepteur, port 8000)";
     }
 
-    function enrichFeedWithVision(rows) {
-        // Only enrich ANPR items -- Vision items already have their lieu pill
-        var anprPlates = (rows || []).filter(function (r) { return r.source !== "vision"; }).map(function (r) { return r.plate; }).filter(function (p) { return p && p !== "UNKNOWN"; });
-        if (!anprPlates.length) return;
-        var unique = anprPlates.filter(function (v, i, a) { return a.indexOf(v) === i; });
-        get(API.visionBatch + "?plates=" + unique.join(",")).then(function (visionData) {
-            if (!visionData || !Object.keys(visionData).length) return;
-            qsa(".anpr-feed-item", qs("#anpr-live-feed")).forEach(function (item, i) {
-                var r = rows[i];
-                if (!r || r.source === "vision" || !visionData[r.plate]) return;
-                var badge = item.querySelector(".anpr-plate-badge");
-                if (!badge) return;
-                var pill = mkLieuPill(visionData[r.plate].lieu);
-                if (pill) badge.parentNode.insertBefore(pill, badge.nextSibling);
-            });
-        }).catch(function () {});
+    function spark(values) {
+        var n = values.length || 1, max = Math.max.apply(null, values.concat([1]));
+        var svg = svgEl("svg", { "class": "lp-spark", viewBox: "0 0 " + n + " 26", preserveAspectRatio: "none", "aria-hidden": "true" });
+        values.forEach(function (v, i) {
+            if (!v) return;
+            var h = Math.max(1.5, 26 * v / max);
+            svg.appendChild(svgEl("rect", { x: i + 0.12, y: 26 - h, width: 0.76, height: h, rx: 0.2 }));
+        });
+        return svg;
     }
 
-    /* ---- detail modal ---- */
-    function openDetail(r) {
-        var isVision = r.source === "vision";
-        var imgDiv = qs("#anpr-modal-image"); imgDiv.textContent = "";
+    function renderLanes(ov) {
+        var box = $("lp-lanes");
+        box.textContent = "";
 
-        // Main image: ANPR vehicle image or Vision photo
-        var mainImgUrl = isVision ? r.photo_vehicule : imgUrl(r, "vehicle");
-        if (mainImgUrl) {
-            var im = document.createElement("img"); im.src = mainImgUrl;
-            im.style.cssText = "max-width:100%;max-height:300px;object-fit:contain;border-radius:8px;";
-            imgDiv.appendChild(im);
+        // Vehicules sur site
+        var site = el("div", "lp-tile lp-tile-site");
+        var sh = el("div", "lp-tile-head");
+        sh.appendChild(icon("local_parking"));
+        sh.appendChild(el("span", "lp-tile-name", "Sur site"));
+        var rb = el("button", "lp-tile-reset");
+        rb.type = "button"; rb.title = "Remettre le compteur a zero"; rb.setAttribute("aria-label", rb.title);
+        rb.appendChild(icon("restart_alt"));
+        rb.addEventListener("click", resetOnsite);
+        sh.appendChild(rb);
+        site.appendChild(sh);
+        var sb = el("div", "lp-tile-big");
+        sb.appendChild(el("span", "lp-tile-n", nf(ov.onsite.value)));
+        sb.appendChild(el("span", "lp-tile-unit", "vehicules"));
+        site.appendChild(sb);
+        site.appendChild(el("div", "lp-tile-meta", "Entrees - sorties depuis le " + fmtDT(ov.onsite.reset_at)));
+        var ses = el("div", "lp-tile-meta");
+        ses.appendChild(el("span", "lp-in", nf(ov.onsite.entries) + " entrees"));
+        ses.appendChild(document.createTextNode(" / "));
+        ses.appendChild(el("span", "lp-out", nf(ov.onsite.exits) + " sorties"));
+        site.appendChild(ses);
+        box.appendChild(site);
+
+        (ov.lanes || []).forEach(function (l) {
+            var st = LANE_STATE[l.status] || LANE_STATE.idle;
+            var t = el("div", "lp-tile is-" + l.status);
+            t.tabIndex = 0;
+            t.setAttribute("role", "button");
+            t.title = laneTip(l) + "\nClic : filtrer les passages sur cette voie.";
+            if (S.camera === l.path) t.style.boxShadow = "var(--focus-ring)";
+            var hd = el("div", "lp-tile-head");
+            hd.appendChild(el("span", "lp-tile-name", l.label));
+            var stb = el("span", "lp-tile-state");
+            stb.appendChild(icon(st.icon));
+            stb.lastChild.style.fontSize = "13px";
+            stb.appendChild(document.createTextNode(st.label));
+            hd.appendChild(stb);
+            t.appendChild(hd);
+            var big = el("div", "lp-tile-big");
+            big.appendChild(el("span", "lp-tile-n", nf(l.count)));
+            big.appendChild(el("span", "lp-tile-unit", "passage" + (l.count > 1 ? "s" : "")));
+            var es = el("span", "lp-tile-es");
+            es.appendChild(el("span", "lp-in", "+" + nf(l.entries)));
+            es.appendChild(el("span", "lp-out", "-" + nf(l.exits)));
+            es.title = "Entrees / sorties sur la periode";
+            big.appendChild(es);
+            t.appendChild(big);
+            var meta = el("div", "lp-tile-meta");
+            meta.appendChild(document.createTextNode((l.last_dt ? "Lu " + ago(l.last_dt) : "Jamais lu") + (l.last_plate ? " - " : "")));
+            if (l.last_plate) meta.appendChild(el("b", "", fmtPlate(l.last_plate)));
+            t.appendChild(meta);
+            if (l.read_warn) {
+                var pct = Math.round(100 * l.unread / Math.max(1, l.count));
+                t.appendChild(el("div", "lp-tile-warn", "Lecture degradee : " + pct + " % illisibles"));
+            }
+            t.appendChild(spark(l.spark || []));
+            function pick() {
+                S.camera = S.camera === l.path ? "" : l.path;
+                $("lp-camera").value = S.camera;
+                renderLanes(S.overview);
+                loadList(true);
+            }
+            t.addEventListener("click", pick);
+            t.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+            box.appendChild(t);
+        });
+    }
+
+    function laneTip(l) {
+        var silence = l.last_dt ? ago(l.last_dt).replace("il y a ", "") : "toujours";
+        var test = l.reach ? " (test reseau de " + fmtHM(l.reach.at) + (l.ip ? ", " + l.ip : "") + ")" : "";
+        if (l.status === "offline") return "Hors ligne : la camera ne repond pas sur le reseau" + test + ". Verifier l'alimentation, le cable ou le switch.";
+        if (l.status === "noread") return "Sans lecture depuis " + silence + " alors que d'autres voies lisent. La camera repond sur le reseau" + test + " : verifier sa configuration (hote d'alarme HTTP vers le recepteur, lecture de plaques).";
+        if (l.status === "idle") return "Calme : pas de lecture depuis " + silence + ", comme les autres voies (pas de trafic)" + (l.reach ? ". Camera joignable" + test : "") + ".";
+        return "Active : derniere lecture " + ago(l.last_dt) + ".";
+    }
+
+    function fillCameraSelect(lanes) {
+        var sel = $("lp-camera");
+        var keep = S.camera;
+        var sig = (lanes || []).map(function (l) { return l.path + "=" + l.label; }).join("|");
+        if (sel.dataset.sig === sig) return;
+        sel.dataset.sig = sig;
+        while (sel.options.length > 1) sel.remove(1);
+        (lanes || []).forEach(function (l) { sel.appendChild(new Option(l.label, l.path)); });
+        sel.value = keep;
+    }
+
+    function resetOnsite() {
+        showConfirmToast("Remettre le compteur de vehicules sur site a zero ? Les entrees et sorties seront recomptees a partir de maintenant.", { okLabel: "Remettre a zero", type: "warning" }).then(function (ok) {
+            if (!ok) return;
+            send("POST", API.onsiteReset).then(function () {
+                toast("success", "Compteur sur site remis a zero");
+                loadOverview();
+            }).catch(function (e) { toast("error", "Remise a zero impossible : " + e.message); });
+        });
+    }
+
+    /* ---- Synthese (panneau de droite) ---- */
+    function section(title, ic, aside) {
+        var s = el("section");
+        var h = el("h4", "lp-sec-title");
+        h.appendChild(icon(ic));
+        h.appendChild(document.createTextNode(title));
+        if (aside) h.appendChild(el("em", "", aside));
+        s.appendChild(h);
+        return s;
+    }
+    function kpi(n, label) {
+        var k = el("div", "lp-kpi");
+        k.appendChild(el("div", "lp-kpi-n", n));
+        k.appendChild(el("div", "lp-kpi-l", label));
+        return k;
+    }
+    function bars(list, colorOf) {
+        var wrap = el("div", "lp-bars");
+        var max = Math.max.apply(null, list.map(function (x) { return x.n; }).concat([1]));
+        list.forEach(function (x) {
+            var row = el("div", "lp-bar");
+            var l = el("span", "lp-bar-l");
+            if (x.hex) { var d = el("span", "lp-dot"); d.style.background = x.hex; l.appendChild(d); }
+            l.appendChild(document.createTextNode(x.label));
+            row.appendChild(l);
+            var tr = el("div", "lp-bar-t"), i = el("i");
+            i.style.width = Math.max(2, 100 * x.n / max) + "%";
+            if (colorOf) i.style.setProperty("--c", colorOf(x));
+            tr.appendChild(i);
+            row.appendChild(tr);
+            row.appendChild(el("span", "lp-bar-n", nf(x.n)));
+            wrap.appendChild(row);
+        });
+        return wrap;
+    }
+
+    function flowChart(ov) {
+        var fin = ov.flow.in || [], fout = ov.flow.out || [], n = fin.length || 1;
+        var max = Math.max.apply(null, fin.concat(fout).concat([1]));
+        var W = 400, H = 120, mid = 52, top = 4, bottom = 100, bw = W / n;
+        var svg = svgEl("svg", { "class": "lp-flow", viewBox: "0 0 " + W + " " + H, preserveAspectRatio: "none", role: "img", "aria-label": "Entrees et sorties par intervalle" });
+        svg.appendChild(svgEl("line", { x1: 0, x2: W, y1: mid, y2: mid }));
+        var step = ov.period.step_min * 60000, t0 = new Date(ov.period.from).getTime();
+        var labelEvery = Math.max(1, Math.ceil(n / 8));
+        for (var i = 0; i < n; i++) {
+            var hi = (mid - top) * (fin[i] || 0) / max, ho = (bottom - mid) * (fout[i] || 0) / max;
+            var x = i * bw + bw * 0.12, w = bw * 0.76;
+            var tip = fmtDay(new Date(t0 + i * step).toISOString()) + " " + fmtHM(new Date(t0 + i * step).toISOString()) + " : " + (fin[i] || 0) + " entrees, " + (fout[i] || 0) + " sorties";
+            if (hi) { var r1 = svgEl("rect", { "class": "in", x: x, y: mid - hi, width: w, height: hi, rx: 1 }); r1.appendChild(svgEl("title")).textContent = tip; svg.appendChild(r1); }
+            if (ho) { var r2 = svgEl("rect", { "class": "out", x: x, y: mid, width: w, height: ho, rx: 1 }); r2.appendChild(svgEl("title")).textContent = tip; svg.appendChild(r2); }
+            if (i % labelEvery === 0) {
+                var d = new Date(t0 + i * step).toISOString();
+                var lbl = ov.period.step_min >= 360 ? fmtDay(d).split(" ")[0] + " " + fmtHM(d).slice(0, 2) + "h" : fmtHM(d);
+                var tx = svgEl("text", { x: i * bw + 1, y: H - 4 });
+                tx.textContent = lbl;
+                svg.appendChild(tx);
+            }
+        }
+        return svg;
+    }
+
+    function renderSummary(ov) {
+        if (!ov) return;
+        $("lp-side-title").textContent = S.period === "day" ? "Synthese du " + fmtDate(ov.period.from) : "Synthese - " + PERIOD_LABEL[S.period];
+        var body = $("lp-side-body");
+        var keepScroll = body.scrollTop;
+        body.textContent = "";
+        var t = ov.totals;
+
+        var s1 = section("Periode", "summarize");
+        var k = el("div", "lp-kpis");
+        k.appendChild(kpi(nf(t.passages), "passages"));
+        k.appendChild(kpi(nf(t.plates), "plaques differentes"));
+        var ke = kpi(nf(t.entries), "entrees"); ke.firstChild.classList.add("lp-in"); k.appendChild(ke);
+        var ks = kpi(nf(t.exits), "sorties"); ks.firstChild.classList.add("lp-out"); k.appendChild(ks);
+        var pct = t.passages ? Math.round(100 * t.unread / t.passages) : 0;
+        k.appendChild(kpi(nf(t.unread) + (t.passages ? " (" + pct + " %)" : ""), "plaques illisibles"));
+        k.appendChild(kpi(nf(ov.watch.listed), "plaques en surveillance"));
+        s1.appendChild(k);
+        body.appendChild(s1);
+
+        var s2 = section("Activite", "bar_chart", ov.period.step_min < 60 ? "par " + ov.period.step_min + " min" : "par " + (ov.period.step_min / 60) + " h");
+        if (t.passages) {
+            s2.appendChild(flowChart(ov));
+            var lg = el("div", "lp-legend");
+            var a = el("span"); var ia = el("i"); ia.style.background = "#22c55e"; a.appendChild(ia); a.appendChild(document.createTextNode("Entrees")); lg.appendChild(a);
+            var b = el("span"); var ib = el("i"); ib.style.background = "#fb923c"; b.appendChild(ib); b.appendChild(document.createTextNode("Sorties")); lg.appendChild(b);
+            s2.appendChild(lg);
         } else {
-            var nd = mk("div", "anpr-modal-no-image");
-            nd.appendChild(mk("span", "material-symbols-outlined", isVision ? "confirmation_number" : "no_photography"));
-            var p = document.createElement("p"); p.textContent = "Image non disponible"; nd.appendChild(p); imgDiv.appendChild(nd);
+            s2.appendChild(el("p", "lp-note", "Aucun passage sur la periode."));
         }
-        if (!isVision) {
-            var modalPlateUrl = imgUrl(r, "plate");
-            if (modalPlateUrl) { var pd = mk("div", "anpr-modal-plate-img"); var pi = document.createElement("img"); pi.src = modalPlateUrl; pd.appendChild(pi); imgDiv.appendChild(pd); }
-        }
+        body.appendChild(s2);
 
-        var info = qs("#anpr-modal-info"); info.textContent = "";
-        info.appendChild(mk("div", "anpr-modal-plate" + (r.list_name === "allowList" ? " anpr-plate-allow" : ""), r.plate));
-        var det = mk("div", "anpr-modal-details");
-
-        if (isVision) {
-            // Vision-specific details
-            var billetsTxt = (r.billets && r.billets.length) ? r.billets.length + " billet(s): " + r.billets.join(", ") : "Aucun billet";
-            var vehTxt = [r.color, r.brand, r.type_label].filter(function(v){ return v; }).join(" ");
-            [
-                { i: "confirmation_number", t: "Source: Vision" },
-                vehTxt ? { i: "directions_car", t: vehTxt, c: r.color_hex } : null,
-                r.lieu ? { i: "location_on", t: "Parking: " + r.lieu } : null,
-                { i: "receipt_long", t: billetsTxt },
-                r.commentaire ? { i: "chat", t: r.commentaire } : null,
-                { i: "schedule", t: fmtDt(r.event_dt) },
-            ].forEach(function (row) {
-                if (!row) return;
-                var d = mk("div", "anpr-detail-row");
-                d.appendChild(mk("span", "material-symbols-outlined", row.i));
-                if (row.c) { var dt = mk("span", "anpr-color-dot"); dt.style.background = row.c; d.appendChild(dt); }
-                d.appendChild(document.createTextNode(row.t)); det.appendChild(d);
+        var s3 = section("Plaques surveillees vues", "local_police", ov.watch.hits.length ? String(ov.watch.hits.length) : "");
+        if (ov.watch.hits.length) {
+            var hl = el("div", "lp-hits");
+            ov.watch.hits.forEach(function (h) {
+                var bt = el("button", "lp-hit");
+                bt.type = "button";
+                bt.appendChild(plateBadge(h.plate));
+                bt.appendChild(el("span", "lp-hit-l", h.label || "Sans libelle"));
+                bt.appendChild(el("span", "lp-hit-t", (h.n > 1 ? h.n + " passages, " : "") + (isToday(h.last) ? fmtHM(h.last) : fmtDT(h.last))));
+                bt.addEventListener("click", function () { openPlate(h.plate); });
+                hl.appendChild(bt);
             });
+            s3.appendChild(hl);
         } else {
-            // ANPR-specific details
-            [{ i: "palette", c: r.color_hex, t: COLOR_FR[r.color] || r.color }, { i: "directions_car", t: r.brand }, { i: "category", t: r.type_label }, { i: "videocam", t: r.camera }, { i: "schedule", t: fmtDt(r.event_dt) }, { i: "speed", t: "Confiance: " + r.confidence + "%" },
-             r.list_name === "allowList" ? { i: "verified", t: "Liste autorisee", cls: "anpr-detail-allow" } : null
-            ].forEach(function (row) {
-                if (!row) return;
-                var d = mk("div", "anpr-detail-row" + (row.cls ? " " + row.cls : ""));
-                d.appendChild(mk("span", "material-symbols-outlined", row.i));
-                if (row.c) { var dt = mk("span", "anpr-color-dot"); dt.style.background = row.c; d.appendChild(dt); }
-                d.appendChild(document.createTextNode(row.t)); det.appendChild(d);
-            });
+            s3.appendChild(el("p", "lp-note", ov.watch.listed
+                ? "Aucune des " + ov.watch.listed + " plaques surveillees n'est passee sur la periode."
+                : "Aucune plaque en surveillance. Ouvrez une plaque et choisissez Surveiller : chaque passage declenche une alerte Cockpit."));
         }
-        info.appendChild(det);
+        body.appendChild(s3);
 
-        // Bouton watchlist
-        if(r.plate && r.plate !== "UNKNOWN"){
-            var watchBtn = mk("button", "anpr-watchlist-btn");
-            var watched = isWatched(r.plate);
-            var wbi = mk("span", "material-symbols-outlined");
-            wbi.textContent = watched ? "visibility_off" : "visibility";
-            wbi.style.fontSize = "16px";
-            watchBtn.appendChild(wbi);
-            watchBtn.appendChild(document.createTextNode(watched ? " Retirer de la watchlist" : " Surveiller cette plaque"));
-            watchBtn.style.cssText = "margin-top:12px; display:flex; align-items:center; gap:6px; padding:8px 14px; border-radius:8px; border:1px solid " + (watched ? "#ef444444" : "#3b82f644") + "; background:" + (watched ? "#ef444411" : "#3b82f611") + "; color:" + (watched ? "#ef4444" : "#3b82f6") + "; cursor:pointer; font-size:0.85rem; font-weight:500;";
-            watchBtn.addEventListener("click", function(){
-                if(isWatched(r.plate)){
-                    removeFromWatchlist(r.plate).then(function(){ openDetail(r); });
-                } else {
-                    addToWatchlist(r.plate).then(function(){ openDetail(r); });
+        var v = ov.vision || {};
+        var s4 = section(v.event ? "Vision - " + v.event.evenement + " " + v.event.annee : "Vision", "confirmation_number");
+        if (v.event) {
+            var kv = el("div", "lp-kpis");
+            kv.appendChild(kpi(nf(v.fiches), "vehicules enregistres"));
+            kv.appendChild(kpi(nf(v.seen_period), "vus par la LAPI sur la periode"));
+            s4.appendChild(kv);
+            s4.appendChild(el("p", "lp-note", nf(v.seen_all) + " vehicules enregistres dans Vision ont deja ete lus au moins une fois par la LAPI."));
+        } else {
+            s4.appendChild(el("p", "lp-note", "Aucun evenement Vision actif."));
+        }
+        body.appendChild(s4);
+
+        var mix = ov.mix || {};
+        if ((mix.types || []).length) {
+            var s5 = section("Vehicules", "directions_car");
+            s5.appendChild(bars(mix.types.slice(0, 6)));
+            if ((mix.colors || []).length) { var sp = el("div"); sp.style.height = "12px"; s5.appendChild(sp); s5.appendChild(bars(mix.colors.slice(0, 6), function (x) { return x.hex; })); }
+            if ((mix.brands || []).length) { var sp2 = el("div"); sp2.style.height = "12px"; s5.appendChild(sp2); s5.appendChild(bars(mix.brands, function () { return "#64748b"; })); }
+            body.appendChild(s5);
+        }
+        body.scrollTop = keepScroll;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Flux des passages                                                   */
+    /* ------------------------------------------------------------------ */
+    function listParams() {
+        var p = S.q ? new URLSearchParams() : periodParams();
+        if (S.q) p.set("q", S.q);
+        if (S.dir) p.set("dir", S.dir);
+        if (S.camera) p.set("camera", S.camera);
+        if (S.watch) p.set("watch", "1");
+        if (S.vision) p.set("vision", "1");
+        if (S.unread && !S.q) p.set("unread", "1");
+        return p;
+    }
+
+    var listAbort = null;
+    function loadList(reset) {
+        var list = $("lp-list");
+        if (reset) {
+            S.seq++;
+            if (listAbort) listAbort.abort();
+            S.items = []; S.ids = {}; S.next = null; S.total = null; S.pending = [];
+            $("lp-new-btn").classList.remove("show");
+            list.textContent = "";
+            for (var i = 0; i < 6; i++) list.appendChild(el("div", "lp-skel"));
+            list.scrollTop = 0;
+        } else if (!S.next || S.loading) {
+            return;
+        }
+        var seq = S.seq;
+        var p = listParams();
+        p.set("limit", PAGE);
+        if (!reset) p.set("before", S.next);
+        S.loading = true;
+        listAbort = new AbortController();
+        getJSON(API.passages + "?" + p.toString(), listAbort.signal).then(function (d) {
+            if (seq !== S.seq) return;
+            if (reset) {
+                list.textContent = "";
+                S.total = d.total;
+                S.receivedMax = d.received_max;
+            }
+            S.next = d.next;
+            appendItems(d.items);
+            renderCount();
+            renderMore();
+        }).catch(function (e) {
+            if (e.name === "AbortError" || seq !== S.seq) return;
+            console.error("LAPI passages", e);
+            list.textContent = "";
+            var em = el("div", "lp-empty");
+            em.appendChild(icon("cloud_off"));
+            em.appendChild(el("div", "", "Chargement impossible. Nouvel essai a la prochaine actualisation."));
+            list.appendChild(em);
+        }).then(function () { if (seq === S.seq) S.loading = false; });
+    }
+
+    function appendItems(items) {
+        var list = $("lp-list");
+        var sentinel = $("lp-more");
+        var frag = document.createDocumentFragment();
+        items.forEach(function (it) {
+            if (S.ids[it.id]) return;
+            S.ids[it.id] = it;
+            S.items.push(it);
+            frag.appendChild(row(it));
+        });
+        if (sentinel) list.insertBefore(frag, sentinel); else list.appendChild(frag);
+        if (!S.items.length) {
+            var em = el("div", "lp-empty");
+            em.appendChild(icon(S.q ? "search_off" : "no_crash"));
+            em.appendChild(el("div", "", S.q ? "Aucune plaque ne correspond a " + fmtPlate(S.q) + "." : "Aucun passage pour ces criteres."));
+            if (!S.q && isLivePeriod()) em.appendChild(el("div", "lp-note", "Les nouveaux passages apparaitront ici automatiquement."));
+            list.appendChild(em);
+        }
+    }
+
+    function prependItems(items) {
+        var list = $("lp-list");
+        var empty = list.querySelector(".lp-empty");
+        if (empty) empty.remove();
+        var frag = document.createDocumentFragment();
+        var fresh = [];
+        items.forEach(function (it) {
+            if (S.ids[it.id]) return;
+            S.ids[it.id] = it;
+            fresh.push(it);
+            var r = row(it);
+            r.classList.add("is-new");
+            frag.appendChild(r);
+        });
+        S.items = fresh.concat(S.items);
+        list.insertBefore(frag, list.firstChild);
+        if (S.total != null) S.total += fresh.length;
+        renderCount();
+    }
+
+    function row(it) {
+        var r = el("button", "lp-row" + (it.watch && it.watch.enabled ? " is-watch" : "") + (it.id === S.selectedId ? " is-open" : ""));
+        r.type = "button";
+        r.dataset.id = it.id;
+        r.appendChild(thumb(it));
+
+        var who = el("div", "lp-who");
+        var top = el("div", "lp-who-top");
+        top.appendChild(plateBadge(it.plate));
+        if (it.watch && it.watch.enabled) top.appendChild(badge("lp-badge-watch", "local_police", "Surveillee", it.watch.label || ""));
+        if (it.vision) top.appendChild(badge("lp-badge-vision", "confirmation_number", it.vision.lieu || "Vision", "Enregistre dans Vision" + (it.vision.billets ? " - " + it.vision.billets + " billet(s)" : "")));
+        if (it.allow) top.appendChild(badge("lp-badge-allow", "verified", "Autorisee", "Liste autorisee de la camera"));
+        who.appendChild(top);
+        var veh = el("div", "lp-veh");
+        if (it.color_hex) { var dot = el("span", "lp-dot"); dot.style.background = it.color_hex; veh.appendChild(dot); }
+        veh.appendChild(document.createTextNode([it.color_label, it.brand, it.type].filter(Boolean).join(" - ") || "Vehicule"));
+        who.appendChild(veh);
+        r.appendChild(who);
+
+        var where = el("div", "lp-where");
+        where.appendChild(el("span", "lp-lane", it.cam_label));
+        where.appendChild(dirChip(it.dir));
+        r.appendChild(where);
+
+        var when = el("div", "lp-when");
+        // Sens en icone sur telephone (colonne voie masquee)
+        var wd = el("div", "lp-when-dir " + (it.dir === "entry" ? "lp-in" : it.dir === "exit" ? "lp-out" : ""));
+        wd.appendChild(icon(it.dir === "entry" ? "login" : it.dir === "exit" ? "logout" : "help"));
+        wd.title = it.cam_label;
+        when.appendChild(wd);
+        when.appendChild(el("div", "lp-when-t", fmtTime(it.dt)));
+        when.appendChild(el("div", "lp-when-d", isToday(it.dt) ? ago(it.dt) : fmtDay(it.dt)));
+        r.appendChild(when);
+
+        var conf = el("div", "lp-conf");
+        if (!it.unread) {
+            conf.appendChild(document.createTextNode(it.conf + " %"));
+            var m = el("div", "lp-meter"), mi = el("i");
+            mi.style.width = Math.max(4, Math.min(100, it.conf)) + "%";
+            mi.style.setProperty("--m", it.conf >= 90 ? "#16a34a" : it.conf >= 70 ? "#f59e0b" : "#dc2626");
+            m.appendChild(mi);
+            conf.appendChild(m);
+            conf.title = "Confiance de lecture";
+        }
+        r.appendChild(conf);
+
+        r.addEventListener("click", function () {
+            if (it.unread) openPassage(it); else openPlate(it.plate, it);
+        });
+        return r;
+    }
+
+    function renderCount() {
+        var c = $("lp-count");
+        c.textContent = "";
+        var n = S.total != null ? S.total : S.items.length;
+        c.appendChild(el("b", "", nf(n)));
+        var txt = " passage" + (n > 1 ? "s" : "");
+        if (S.q) txt += " pour " + fmtPlate(S.q) + " (tout l'historique, lecture tolerante)";
+        else if (S.period === "day") txt += " le " + S.date.split("-").reverse().join("/");
+        else txt += " " + PERIOD_LABEL[S.period];
+        if (S.unread && !S.q) txt += " - plaques illisibles";
+        c.appendChild(document.createTextNode(txt));
+    }
+
+    function renderMore() {
+        var list = $("lp-list");
+        var m = $("lp-more");
+        if (!S.next) { if (m) m.remove(); return; }
+        if (!m) {
+            m = el("div", "lp-more");
+            m.id = "lp-more";
+            m.appendChild(el("div", "lp-spinner"));
+            list.appendChild(m);
+            moreObserver.observe(m);
+        } else {
+            list.appendChild(m);
+        }
+    }
+    var moreObserver = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) { if (e.isIntersecting) loadList(false); });
+    }, { root: document.getElementById("lp-list"), rootMargin: "400px" });
+
+    /* Direct : passages recus depuis le dernier vu */
+    function pollLive() {
+        if (document.hidden || !isLivePeriod() || S.q || !S.receivedMax || S.loading) return;
+        var seq = S.seq;
+        var p = listParams();
+        p.set("after", S.receivedMax);
+        p.set("limit", 100);
+        getJSON(API.passages + "?" + p.toString()).then(function (d) {
+            if (seq !== S.seq) return;
+            if (d.received_max && d.received_max > S.receivedMax) S.receivedMax = d.received_max;
+            var items = (d.items || []).filter(function (it) { return !S.ids[it.id]; });
+            if (!items.length) return;
+            var list = $("lp-list");
+            if (list.scrollTop < 60 && !S.pending.length) {
+                prependItems(items);
+            } else {
+                S.pending = items.concat(S.pending);
+                var b = $("lp-new-btn");
+                b.textContent = S.pending.length + " nouveau" + (S.pending.length > 1 ? "x" : "") + " passage" + (S.pending.length > 1 ? "s" : "");
+                b.classList.add("show");
+            }
+        }).catch(function () { /* l'indicateur d'etat passe par la vue d'ensemble */ });
+    }
+    function flushPending() {
+        var items = S.pending; S.pending = [];
+        $("lp-new-btn").classList.remove("show");
+        $("lp-list").scrollTop = 0;
+        if (items.length) prependItems(items);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Fiche plaque                                                        */
+    /* ------------------------------------------------------------------ */
+    function markOpen() {
+        Array.prototype.forEach.call(document.querySelectorAll(".lp-row.is-open"), function (r) { r.classList.remove("is-open"); });
+        if (!S.selectedId) return;
+        var r = document.querySelector('.lp-row[data-id="' + S.selectedId + '"]');
+        if (r) r.classList.add("is-open");
+    }
+
+    function openSide(mode) {
+        S.sideMode = mode;
+        $("lp-side-back").hidden = mode === "summary";
+        $("lp-side").classList.add("is-open");
+    }
+
+    function showSummary() {
+        S.sideMode = "summary"; S.detail = null; S.selectedNorm = null; S.selectedId = null;
+        $("lp-side-back").hidden = true;
+        markOpen();
+        if (S.overview) renderSummary(S.overview);
+        var u = new URL(location.href);
+        if (u.searchParams.has("plate")) { u.searchParams.delete("plate"); history.replaceState(null, "", u.toString()); }
+    }
+
+    function closeSide() {
+        $("lp-side").classList.remove("is-open");
+        if (S.sideMode !== "summary") showSummary();
+    }
+
+    var plateAbort = null;
+    function openPlate(plate, item) {
+        var norm = normPlate(plate);
+        if (!norm) return;
+        S.selectedNorm = norm;
+        S.selectedId = item ? item.id : null;
+        S.detailItem = item || null;
+        markOpen();
+        openSide("plate");
+        $("lp-side-title").textContent = "";
+        $("lp-side-title").appendChild(plateBadge(norm));
+        var body = $("lp-side-body");
+        body.textContent = "";
+        body.scrollTop = 0;
+        body.appendChild(el("div", "lp-skel"));
+        body.appendChild(el("div", "lp-skel"));
+        var u = new URL(location.href);
+        u.searchParams.set("plate", norm);
+        history.replaceState(null, "", u.toString());
+        if (plateAbort) plateAbort.abort();
+        plateAbort = new AbortController();
+        getJSON(API.plate + encodeURIComponent(norm), plateAbort.signal).then(function (d) {
+            if (S.selectedNorm !== norm) return;
+            S.detail = d;
+            renderPlate(d);
+        }).catch(function (e) {
+            if (e.name === "AbortError") return;
+            body.textContent = "";
+            body.appendChild(el("p", "lp-note", "Fiche indisponible (" + e.message + ")."));
+        });
+    }
+
+    function photoBlock(it) {
+        var ph = el("div", "lp-d-photo");
+        if (it && it.img) {
+            var im = document.createElement("img");
+            im.alt = "Photo du passage";
+            im.src = it.thumb || it.img;
+            // Vignette tout de suite, original des qu'il est charge
+            if (it.thumb && it.img !== it.thumb) {
+                var full = new Image();
+                full.onload = function () { im.src = it.img; };
+                full.src = it.img;
+            }
+            ph.appendChild(im);
+            ph.addEventListener("click", function () { openLightbox(it.img); });
+            ph.title = "Agrandir";
+        } else {
+            ph.appendChild(icon("no_photography"));
+        }
+        if (it) {
+            ph.appendChild(el("div", "lp-d-photo-cap", it.cam_label + " - " + (it.dir === "entry" ? "Entree" : it.dir === "exit" ? "Sortie" : "Sens inconnu") + " - " + fmtTime(it.dt) + " " + fmtDate(it.dt)));
+        }
+        return ph;
+    }
+
+    function renderPlate(d) {
+        var body = $("lp-side-body");
+        body.textContent = "";
+        var current = S.detailItem && S.detailItem.plate && normPlate(S.detailItem.plate) === d.norm ? S.detailItem : (d.items[0] || null);
+
+        var top = el("div", "lp-d-top");
+        var pr = el("div", "lp-d-plate-row");
+        pr.appendChild(plateBadge(d.plate, true));
+        if (d.watch && d.watch.enabled) pr.appendChild(badge("lp-badge-watch", "local_police", "Surveillee", d.watch.label || ""));
+        if (current && current.allow) pr.appendChild(badge("lp-badge-allow", "verified", "Autorisee"));
+        top.appendChild(pr);
+        var photoWrap = el("div");
+        photoWrap.appendChild(photoBlock(current));
+        top.appendChild(photoWrap);
+        if (current && current.plate_img) {
+            var pi = document.createElement("img");
+            pi.className = "lp-d-plateimg"; pi.src = current.plate_img; pi.alt = "Plaque lue";
+            top.appendChild(pi);
+        }
+        if (current && !current.unread) {
+            var vehTxt = [current.color_label, current.brand, current.type].filter(Boolean).join(" - ");
+            if (vehTxt) {
+                var vl = el("div", "lp-veh");
+                if (current.color_hex) { var dt = el("span", "lp-dot"); dt.style.background = current.color_hex; vl.appendChild(dt); }
+                vl.appendChild(document.createTextNode(vehTxt + " (lecture camera, confiance " + current.conf + " %)"));
+                top.appendChild(vl);
+            }
+        }
+
+        var acts = el("div", "lp-d-actions");
+        var wb = el("button", "lp-btn lp-btn-watch" + (d.watch ? " is-on" : ""));
+        wb.type = "button";
+        wb.appendChild(icon(d.watch ? "notifications_off" : "local_police"));
+        wb.appendChild(document.createTextNode(d.watch ? "Ne plus surveiller" : "Surveiller"));
+        wb.title = d.watch ? "Retirer de la liste de surveillance" : "Chaque passage de cette plaque declenchera une alerte Cockpit";
+        wb.addEventListener("click", function () { toggleWatch(d); });
+        acts.appendChild(wb);
+        var cb = el("button", "lp-btn");
+        cb.type = "button";
+        cb.appendChild(icon("content_copy"));
+        cb.appendChild(document.createTextNode("Copier"));
+        cb.addEventListener("click", function () {
+            if (navigator.clipboard) navigator.clipboard.writeText(d.plate).then(function () { toast("success", "Plaque copiee"); });
+        });
+        acts.appendChild(cb);
+        var fb = el("button", "lp-btn");
+        fb.type = "button";
+        fb.appendChild(icon("filter_alt"));
+        fb.appendChild(document.createTextNode("Tous ses passages"));
+        fb.title = "Afficher les passages de cette plaque dans la liste";
+        fb.addEventListener("click", function () { setQuery(d.norm); });
+        acts.appendChild(fb);
+        top.appendChild(acts);
+        body.appendChild(top);
+
+        if (d.blacklist) {
+            var al = el("div", "lp-alert");
+            al.appendChild(icon("gpp_bad"));
+            al.appendChild(document.createTextNode("Liste noire Vision" + (d.blacklist.raison ? " : " + d.blacklist.raison : "")));
+            body.appendChild(al);
+        }
+
+        if (d.items.length) {
+            var pres = el("div", "lp-presence " + (d.on_site ? "is-in" : "is-out"));
+            pres.appendChild(icon(d.on_site ? "where_to_vote" : "history"));
+            var last = d.items[0];
+            pres.appendChild(document.createTextNode(d.on_site
+                ? "Probablement sur site : entree " + (isToday(last.dt) ? "a " + fmtHM(last.dt) : "le " + fmtDT(last.dt)) + " (" + last.cam_label + "), " + ago(last.dt)
+                : (last.dir === "exit" ? "Sortie " : "Dernier passage ") + (isToday(last.dt) ? "a " + fmtHM(last.dt) : "le " + fmtDT(last.dt)) + " (" + last.cam_label + ")"));
+            body.appendChild(pres);
+
+            var f = el("div", "lp-facts");
+            f.appendChild(kpi(nf(d.count), "passage" + (d.count > 1 ? "s" : "")));
+            f.appendChild(kpi(fmtDate(d.first), "premier passage"));
+            f.appendChild(kpi(d.stays.length ? String(d.stays.length) : "0", "sejour" + (d.stays.length > 1 ? "s" : "")));
+            body.appendChild(f);
+        } else {
+            body.appendChild(el("p", "lp-note", "Aucun passage LAPI pour cette plaque."));
+        }
+
+        if (d.similar.length) {
+            var ss = section("Lectures proches", "spellcheck", "erreurs de lecture possibles");
+            var sl = el("div", "lp-similar");
+            d.similar.forEach(function (s) {
+                var b = el("button");
+                b.type = "button";
+                b.title = s.n + " passage(s), dernier le " + fmtDT(s.last);
+                b.appendChild(plateBadge(s.plate));
+                b.appendChild(document.createTextNode("x" + s.n));
+                b.addEventListener("click", function () { openPlate(s.plate); });
+                sl.appendChild(b);
+            });
+            ss.appendChild(sl);
+            body.appendChild(ss);
+        }
+
+        if (d.vision.length) {
+            var sv = section("Vision", "confirmation_number");
+            d.vision.forEach(function (v) {
+                var card = el("div", "lp-vision");
+                if (v.photo) {
+                    var vi = document.createElement("img");
+                    vi.loading = "lazy"; vi.alt = "Photo Vision"; vi.src = v.photo;
+                    vi.addEventListener("click", function () { openLightbox(v.photo); });
+                    card.appendChild(vi);
                 }
+                var vb = el("div", "lp-vision-b");
+                vb.appendChild(el("b", "", v.evenement + " " + (v.annee || "") + (v.lieu ? " - parking " + v.lieu : "")));
+                var vveh = [v.couleur, v.marque, v.modele].filter(Boolean).join(" ");
+                if (vveh) vb.appendChild(el("span", "", vveh));
+                vb.appendChild(el("span", "", (v.billets.length ? v.billets.length + " billet(s) : " + v.billets.join(", ") : "Aucun billet")));
+                vb.appendChild(el("span", "lp-note", "Enregistre le " + fmtDT(v.date)));
+                if (v.commentaire) vb.appendChild(el("span", "", v.commentaire));
+                card.appendChild(vb);
+                sv.appendChild(card);
             });
-            info.appendChild(watchBtn);
+            body.appendChild(sv);
         }
 
-        // Vision cross-reference section (always, for any plate)
-        var visionDiv = qs("#anpr-modal-vision");
-        visionDiv.style.display = "none";
-        visionDiv.textContent = "";
-
-        var hist = qs("#anpr-modal-history"); hist.textContent = "";
-        var ld = mk("div", "anpr-history-loading"); ld.appendChild(mk("div", "anpr-spinner")); ld.appendChild(document.createTextNode(" Chargement...")); hist.appendChild(ld);
-        qs("#anpr-modal").style.display = "flex"; document.body.style.overflow = "hidden";
-
-        if (r.plate && r.plate !== "UNKNOWN") {
-            // Always load Vision data
-            get(API.visionLookup + encodeURIComponent(r.plate)).then(function (v) {
-                visionDiv.textContent = "";
-                if (v.found) {
-                    visionDiv.style.display = "";
-                    var title = mk("div", "anpr-vision-title");
-                    title.appendChild(mk("span", "material-symbols-outlined", "confirmation_number"));
-                    title.appendChild(document.createTextNode(" Vision \u2014 " + v.evenement + " " + v.annee));
-                    visionDiv.appendChild(title);
-                    var vVehTxt = [v.couleur, v.marque, v.modele].filter(function(x){ return x; }).join(" ");
-                    var vrows = [
-                        vVehTxt ? { i: "directions_car", t: vVehTxt } : null,
-                        { i: "location_on", t: "Parking: " + v.lieu },
-                        { i: "receipt_long", t: v.billets.length + " billet(s)" + (v.billets.length ? ": " + v.billets.join(", ") : "") },
-                        { i: "event", t: "Enregistre le " + fmtDt(v.date) },
-                    ];
-                    if (v.commentaire) vrows.push({ i: "chat", t: v.commentaire });
-                    vrows.forEach(function (row) {
-                        var d = mk("div", "anpr-detail-row");
-                        d.appendChild(mk("span", "material-symbols-outlined", row.i));
-                        d.appendChild(document.createTextNode(row.t));
-                        visionDiv.appendChild(d);
-                    });
-                    if (!isVision && v.photo_vehicule) {
-                        var pDiv = mk("div", ""); var pImg = document.createElement("img");
-                        pImg.src = v.photo_vehicule; pImg.style.cssText = "max-width:100%;max-height:150px;object-fit:contain;border-radius:6px;margin-top:8px;";
-                        pDiv.appendChild(pImg); visionDiv.appendChild(pDiv);
-                    }
-                } else if (v.blacklisted) {
-                    visionDiv.style.display = "";
-                    var warn = mk("div", "anpr-vision-blacklist");
-                    warn.appendChild(mk("span", "material-symbols-outlined", "gpp_bad"));
-                    warn.appendChild(document.createTextNode(" BLACKLIST Vision: " + v.blacklisted.raison));
-                    visionDiv.appendChild(warn);
-                }
-            }).catch(function () {});
-
-            // Load unified history (ANPR + Vision)
-            get(API.plate + encodeURIComponent(r.plate)).then(function (data) {
-                hist.textContent = "";
-                if (!data.count || data.count === 0) { hist.appendChild(mk("div", "anpr-history-empty", "Aucun passage")); return; }
-                var nAnpr = data.records.filter(function(h){ return h.source === "anpr"; }).length;
-                var nVision = data.records.filter(function(h){ return h.source === "vision"; }).length;
-                var label = data.count + " evenement(s)";
-                if (nAnpr && nVision) label += " (" + nAnpr + " ANPR, " + nVision + " Vision)";
-                var t = mk("div", "anpr-history-title"); t.appendChild(mk("span", "material-symbols-outlined", "history")); t.appendChild(document.createTextNode(" " + label)); hist.appendChild(t);
-                var list = mk("div", "anpr-history-list");
-                data.records.forEach(function (h) {
-                    var it = mk("div", "anpr-history-item");
-                    if (h.source === "vision") {
-                        // Vision entry
-                        var vBadge = mk("span", "anpr-source-badge anpr-source-vision", "Vision");
-                        it.appendChild(vBadge);
-                        if (h.color_hex) { var vdt = mk("span", "anpr-color-dot"); vdt.style.background = h.color_hex; it.appendChild(vdt); }
-                        it.appendChild(mk("span", "", fmtDt(h.event_dt)));
-                        if (h.lieu) it.appendChild(mk("span", "anpr-feed-cam", h.lieu));
-                        var vInfo = [h.marque, h.modele].filter(function(x){ return x; }).join(" ");
-                        if (vInfo) it.appendChild(mk("span", "", vInfo));
-                        if (h.billets_count) it.appendChild(mk("span", "", h.billets_count + " billet(s)"));
-                    } else {
-                        // ANPR detection
-                        var dt = mk("span", "anpr-color-dot"); dt.style.background = h.color_hex; it.appendChild(dt);
-                        it.appendChild(mk("span", "", fmtDt(h.event_dt))); it.appendChild(mk("span", "anpr-feed-cam", h.camera));
-                        var hrd = h.resolved_dir || "unknown";
-                        var ds = mk("span", "anpr-dir anpr-dir-" + hrd); var di = mk("span", "material-symbols-outlined"); di.style.fontSize = "14px";
-                        di.textContent = hrd === "entry" ? "login" : hrd === "exit" ? "logout" : "help";
-                        ds.appendChild(di); ds.appendChild(document.createTextNode(hrd === "entry" ? " E" : hrd === "exit" ? " S" : "")); it.appendChild(ds);
-                    }
-                    list.appendChild(it);
-                }); hist.appendChild(list);
-            }).catch(function () { hist.textContent = ""; hist.appendChild(mk("div", "anpr-history-empty", "Erreur")); });
-        } else { hist.textContent = ""; }
-    }
-
-    function closeModal(id) { qs("#" + id).style.display = "none"; document.body.style.overflow = ""; }
-
-    /* ---- camera config ---- */
-    async function openCamCfg() {
-        var modal = qs("#anpr-config-modal"), body = qs("#anpr-config-body");
-        body.textContent = ""; body.appendChild(mk("div", "anpr-spinner")); modal.style.display = "flex";
-        try {
-            var cams = await get(API.cameras); body.textContent = "";
-            cams.forEach(function (cam) {
-                var row = mk("div", "anpr-cam-config-row");
-                // Left: icon + label + path
-                var nd = mk("div", "anpr-cam-config-name");
-                nd.appendChild(mk("span", "material-symbols-outlined", "videocam"));
-                var li = document.createElement("input"); li.type = "text"; li.className = "anpr-cam-label"; li.value = cam.label; li.dataset.path = cam.camera_path;
-                nd.appendChild(li);
-                nd.appendChild(mk("span", "anpr-cam-path", cam.camera_path));
-                row.appendChild(nd);
-                // Right: direction + lieu
-                var rd = mk("div", "anpr-cam-config-role");
-                rd.appendChild(mk("label", "", "Direction"));
-                var sel = document.createElement("select"); sel.className = "anpr-cam-role"; sel.dataset.path = cam.camera_path;
-                var o1 = new Option("Entree", "entry"), o2 = new Option("Sortie", "exit");
-                if (cam.forward_role === "exit") o2.selected = true; else o1.selected = true;
-                sel.appendChild(o1); sel.appendChild(o2); rd.appendChild(sel);
-                rd.appendChild(mk("label", "", "Lieu Vision"));
-                var lieuSel = document.createElement("select"); lieuSel.className = "anpr-cam-lieu"; lieuSel.dataset.path = cam.camera_path;
-                ["", "Ouest", "Panorama", "Houx"].forEach(function (l) { var opt = new Option(l || "---", l); if (cam.lieu === l) opt.selected = true; lieuSel.appendChild(opt); });
-                rd.appendChild(lieuSel);
-                row.appendChild(rd); body.appendChild(row);
+        if (d.stays.length) {
+            var st = section("Sejours", "timelapse", "entree puis sortie");
+            var sl2 = el("div", "lp-stays");
+            d.stays.slice(0, 12).forEach(function (s) {
+                var r = el("div", "lp-stay" + (s.open ? " is-open" : ""));
+                r.appendChild(el("span", "", s.in ? fmtDay(s.in) + " " + fmtHM(s.in) : "entree non vue"));
+                r.appendChild(icon("arrow_forward"));
+                r.appendChild(el("span", "", s.out ? fmtDay(s.out) + " " + fmtHM(s.out) : (s.open ? "en cours" : "sortie non vue")));
+                var dur = s.in && s.out ? fmtDur(new Date(s.out) - new Date(s.in)) : (s.open && s.in ? fmtDur(Date.now() - new Date(s.in)) : "");
+                r.appendChild(el("span", "lp-stay-d", dur));
+                sl2.appendChild(r);
             });
-            var sb = mk("button", "btn btn-primary", "Enregistrer"); sb.style.marginTop = "12px";
-            sb.addEventListener("click", async function () {
-                var rows = qsa(".anpr-cam-config-row");
-                for (var i = 0; i < rows.length; i++) { var pa = rows[i].querySelector(".anpr-cam-role").dataset.path; await post(API.camCfg, { camera_path: pa, label: rows[i].querySelector(".anpr-cam-label").value, forward_role: rows[i].querySelector(".anpr-cam-role").value, lieu: rows[i].querySelector(".anpr-cam-lieu").value, enabled: true }); }
-                closeModal("anpr-config-modal"); loadKPIs();
-            }); body.appendChild(sb);
-        } catch (e) { body.textContent = ""; body.appendChild(mk("div", "anpr-history-empty", "Erreur")); }
-    }
+            st.appendChild(sl2);
+            body.appendChild(st);
+        }
 
-    /* ---- Vision stats sub-tab ---- */
-    var visionEventsPopulated = false;
-
-    async function loadVisionStats(eventFilter) {
-        try {
-            // Build query string
-            var qs_str = "";
-            if (eventFilter) {
-                var parts = eventFilter.split("|");
-                qs_str = "?evenement=" + encodeURIComponent(parts[0]) + "&annee=" + encodeURIComponent(parts[1]);
-            }
-
-            var vs = await get(API.visionStats + qs_str);
-
-            // Populate event select (once)
-            if (!visionEventsPopulated && vs.events && vs.events.length) {
-                visionEventsPopulated = true;
-                var sel = qs("#vision-event-filter");
-                vs.events.forEach(function (e) {
-                    sel.appendChild(new Option(e.evenement + " " + e.annee + " (" + e.count + ")", e.evenement + "|" + e.annee));
+        if (d.items.length) {
+            var tl = section("Passages", "history", d.count > d.items.length ? d.items.length + " derniers sur " + nf(d.count) : "");
+            var list = el("div", "lp-timeline");
+            d.items.forEach(function (it) {
+                var b = el("button", "lp-tl" + (current && it.id === current.id ? " is-current" : ""));
+                b.type = "button";
+                b.appendChild(thumb(it));
+                var m = el("div", "lp-tl-m");
+                m.appendChild(el("span", "lp-lane", it.cam_label));
+                m.appendChild(dirChip(it.dir));
+                b.appendChild(m);
+                var t = el("div", "lp-tl-t");
+                t.appendChild(el("div", "", fmtTime(it.dt)));
+                t.appendChild(el("div", "lp-when-d", fmtDay(it.dt) + " " + (it.dt ? new Date(it.dt).toLocaleDateString("fr-FR", { timeZone: TZ, year: "2-digit" }) : "")));
+                b.appendChild(t);
+                b.addEventListener("click", function () {
+                    S.detailItem = it;
+                    photoWrap.textContent = "";
+                    photoWrap.appendChild(photoBlock(it));
+                    Array.prototype.forEach.call(list.querySelectorAll(".lp-tl.is-current"), function (x) { x.classList.remove("is-current"); });
+                    b.classList.add("is-current");
+                    body.scrollTo({ top: 0, behavior: "smooth" });
                 });
-            }
-
-            // KPIs
-            animVal(qs("#kpi-v-total"), vs.vision_total);
-            animVal(qs("#kpi-v-matched"), vs.matched);
-            animVal(qs("#kpi-v-unmatched"), vs.unmatched);
-
-            // Repartition par lieu (all) - doughnut
-            var lieuxAll = vs.by_lieu_all || {};
-            var laLabels = Object.keys(lieuxAll), laValues = laLabels.map(function (k) { return lieuxAll[k]; });
-            var laBg = laLabels.map(function (k) { return LIEU_COLORS[k] || "#6b7280"; });
-            mkChart("visionLieuxAll", "#chart-vision-lieux-all", "doughnut",
-                { labels: laLabels, datasets: [{ data: laValues, backgroundColor: laBg, borderWidth: 1.5, borderColor: "#fff" }] },
-                { cutout: "60%", plugins: { legend: { display: true, position: "right", labels: { boxWidth: 10, padding: 6, font: { size: 10 } } } } }
-            );
-
-            // Croisement par lieu - bar
-            var lieux = vs.by_lieu || {};
-            var ll = Object.keys(lieux), lv = ll.map(function (k) { return lieux[k]; });
-            var lbg = ll.map(function (k) { return LIEU_COLORS[k] || "#6b7280"; });
-            mkChart("visionCross", "#chart-vision-cross", "bar",
-                { labels: ll, datasets: [{ label: "Croisees ANPR", data: lv, backgroundColor: lbg, borderRadius: 4, borderSkipped: false }] },
-                { scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.04)" } } } }
-            );
-
-            // Vision search table
-            var sd = await get(API.visionSearch + qs_str);
-            qs("#vision-result-count").textContent = sd.total + " fiche(s) Vision";
-            var tb = qs("#vision-table-body"); tb.textContent = "";
-            (sd.results || []).forEach(function (r) {
-                var tr = document.createElement("tr"); tr.className = "anpr-row";
-                var tdp = document.createElement("td"); tdp.appendChild(mk("span", "anpr-plate-badge", r.plaque)); tr.appendChild(tdp);
-                var tdl = document.createElement("td"); var pill = mkLieuPill(r.lieu); if (pill) tdl.appendChild(pill); else tdl.textContent = r.lieu || "--"; tr.appendChild(tdl);
-                tr.appendChild(mk("td", "", r.billets ? r.billets.length + " billet(s)" : "0"));
-                tr.appendChild(mk("td", "", fmtDt(r.date)));
-                var tda = document.createElement("td");
-                if (r.anpr_detections > 0) {
-                    var badge = mk("span", "", r.anpr_detections + " detection(s)");
-                    badge.style.cssText = "color:#22c55e;font-weight:600;";
-                    tda.appendChild(badge);
-                } else { tda.textContent = "Aucune"; tda.style.opacity = "0.4"; }
-                tr.appendChild(tda);
-                tr.addEventListener("click", function () {
-                    qs("#anpr-filter-plate").value = r.plaque;
-                    switchTab("search"); page = 1; loadSearch();
-                });
-                tb.appendChild(tr);
+                list.appendChild(b);
             });
-        } catch (e) { console.error("VisionStats", e); }
+            tl.appendChild(list);
+            body.appendChild(tl);
+        }
     }
 
-    /* ---- events ---- */
-    function bind() {
-        // Tabs
-        qsa("[data-anpr-tab]").forEach(function (b) { b.addEventListener("click", function () { switchTab(b.dataset.anprTab); }); });
-        // Stats sub-tabs
-        qsa("[data-stats-sub]").forEach(function (b) { b.addEventListener("click", function () { switchStatsSub(b.dataset.statsSub); }); });
-        // Vision event filter
-        qs("#vision-event-filter")?.addEventListener("change", function () {
-            visionStatsLoaded = false;
-            loadVisionStats(this.value);
-        });
-        // Default: activate search tab on first click (lazy)
-        // Refresh
-        qs("#anpr-refresh-btn")?.addEventListener("click", function () { window._anprStats = null; statsLoaded = false; searchLoaded = false; loadKPIs(); loadOnsite(); loadLive(); switchTab(qs("[data-anpr-tab].active")?.dataset.anprTab || "search"); });
-        qs("#anpr-config-btn")?.addEventListener("click", openCamCfg);
-        // Expand toggle (right panel full width)
-        qs("#anpr-expand-toggle")?.addEventListener("click", function () {
-            var body = qs(".anpr-body");
-            var btn = this;
-            body.classList.toggle("anpr-expand-right");
-            var expanded = body.classList.contains("anpr-expand-right");
-            btn.classList.toggle("active", expanded);
-            btn.querySelector(".material-symbols-outlined").textContent = expanded ? "fullscreen_exit" : "fullscreen";
-            btn.title = expanded ? "Reduire" : "Plein ecran";
-        });
-        // On-site reset
-        qs("#anpr-reset-onsite")?.addEventListener("click", function () {
-            showConfirmToast("Remettre le compteur de vehicules sur site a zero ?", { okLabel: "Reinitialiser", type: "warning" }).then(function (ok) {
+    function openPassage(it) {
+        S.selectedNorm = null; S.selectedId = it.id; S.detail = null;
+        markOpen();
+        openSide("passage");
+        $("lp-side-title").textContent = "Plaque illisible";
+        var body = $("lp-side-body");
+        body.textContent = "";
+        body.appendChild(photoBlock(it));
+        var vehTxt = [it.color_label, it.brand, it.type].filter(Boolean).join(" - ");
+        if (vehTxt) body.appendChild(el("div", "lp-veh", vehTxt));
+        body.appendChild(el("p", "lp-note", "La camera a detecte un vehicule sans parvenir a lire la plaque. Agrandissez la photo pour la lire, puis tapez-la dans la recherche."));
+    }
+
+    function toggleWatch(d) {
+        if (d.watch) {
+            showConfirmToast("Ne plus surveiller " + fmtPlate(d.plate) + " ?", { okLabel: "Retirer", type: "warning" }).then(function (ok) {
                 if (!ok) return;
-                post(API.onsiteReset, {}).then(function () { loadOnsite(); });
+                send("DELETE", API.watchlist + "/" + encodeURIComponent(d.watch.id)).then(function () {
+                    toast("success", fmtPlate(d.plate) + " n'est plus surveillee");
+                    refreshAfterWatch(d);
+                }).catch(function (e) { toast("error", e.message); });
+            });
+            return;
+        }
+        showPromptToast("Surveiller " + fmtPlate(d.plate) + " : chaque passage declenchera une alerte Cockpit. Motif (facultatif) :", { okLabel: "Surveiller", placeholder: "Ex. vehicule signale" }).then(function (label) {
+            if (label === null) return;
+            send("POST", API.watchlist, { plate: d.norm, label: (label || "").trim() }).then(function () {
+                toast("success", fmtPlate(d.plate) + " est sous surveillance");
+                refreshAfterWatch(d);
+            }).catch(function (e) { toast("error", e.message); });
+        });
+    }
+    function refreshAfterWatch(d) {
+        openPlate(d.norm, S.detailItem);
+        loadOverview();
+        loadList(true);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Visionneuse                                                         */
+    /* ------------------------------------------------------------------ */
+    function openLightbox(src) {
+        $("lp-lightbox-img").src = src;
+        $("lp-lightbox").hidden = false;
+    }
+    function closeLightbox() {
+        $("lp-lightbox").hidden = true;
+        $("lp-lightbox-img").removeAttribute("src");
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Filtres, recherche, periode                                         */
+    /* ------------------------------------------------------------------ */
+    function setQuery(q) {
+        var input = $("lp-q");
+        input.value = q;
+        onQueryInput(true);
+    }
+    var qTimer = null;
+    function onQueryInput(now) {
+        var input = $("lp-q");
+        var norm = normPlate(input.value);
+        $("lp-search").classList.toggle("has-value", !!input.value);
+        clearTimeout(qTimer);
+        var run = function () {
+            var q = norm.length >= 2 ? norm : "";
+            if (q === S.q) return;
+            S.q = q;
+            document.body.classList.toggle("lp-searching", !!q);
+            loadList(true);
+        };
+        if (now === true) run(); else qTimer = setTimeout(run, 250);
+    }
+
+    function setPeriod(code, date) {
+        S.period = code;
+        S.date = date || "";
+        Array.prototype.forEach.call(document.querySelectorAll("#lp-period button"), function (b) {
+            b.classList.toggle("active", b.dataset.period === code);
+        });
+        $("lp-date").classList.toggle("active", code === "day");
+        if (code !== "day") $("lp-date").value = "";
+        loadOverview();
+        if (!S.q) loadList(true);
+        restartTimers();
+    }
+
+    function toggleChip(id, key) {
+        S[key] = !S[key];
+        $(id).classList.toggle("active", S[key]);
+        $(id).setAttribute("aria-pressed", S[key] ? "true" : "false");
+        loadList(true);
+    }
+
+    function bind() {
+        Array.prototype.forEach.call(document.querySelectorAll("#lp-period button"), function (b) {
+            b.addEventListener("click", function () { setPeriod(b.dataset.period); });
+        });
+        var di = $("lp-date");
+        di.max = new Date().toLocaleDateString("fr-CA", { timeZone: TZ });
+        di.addEventListener("change", function () {
+            if (di.value) setPeriod("day", di.value); else setPeriod("today");
+        });
+        Array.prototype.forEach.call(document.querySelectorAll("#lp-dir button"), function (b) {
+            b.addEventListener("click", function () {
+                S.dir = b.dataset.dir;
+                Array.prototype.forEach.call(document.querySelectorAll("#lp-dir button"), function (x) { x.classList.toggle("active", x === b); });
+                loadList(true);
             });
         });
-        // Search
-        var pt; qs("#anpr-filter-plate")?.addEventListener("input", function () { clearTimeout(pt); pt = setTimeout(function () { page = 1; loadSearch(); }, 350); });
-        ["#anpr-filter-type","#anpr-filter-brand","#anpr-filter-camera","#anpr-filter-from","#anpr-filter-to"].forEach(function (s) { qs(s)?.addEventListener("change", function () { page = 1; loadSearch(); }); });
-        qs("#anpr-filter-vision")?.addEventListener("click", function () {
-            var lbl = qs("#anpr-filter-vision-label");
-            if (sourceFilter === "") { sourceFilter = "vision"; this.classList.add("active"); lbl.textContent = "Vision"; }
-            else if (sourceFilter === "vision") { sourceFilter = "anpr"; lbl.textContent = "ANPR"; }
-            else if (sourceFilter === "anpr") { sourceFilter = "cross"; lbl.textContent = "Croisees"; }
-            else { sourceFilter = ""; this.classList.remove("active"); lbl.textContent = "Source"; }
-            page = 1; loadSearch();
+        $("lp-camera").addEventListener("change", function () {
+            S.camera = this.value;
+            if (S.overview) renderLanes(S.overview);
+            loadList(true);
         });
-        qs("#anpr-filter-reset")?.addEventListener("click", function () {
-            qs("#anpr-filter-plate").value = ""; qs("#anpr-filter-type").value = ""; qs("#anpr-filter-brand").value = ""; qs("#anpr-filter-camera").value = ""; qs("#anpr-filter-from").value = ""; qs("#anpr-filter-to").value = "";
-            sourceFilter = ""; qs("#anpr-filter-vision")?.classList.remove("active"); var vl = qs("#anpr-filter-vision-label"); if (vl) vl.textContent = "Source";
-            qsa(".anpr-color-chip.active").forEach(function (b) { b.classList.remove("active"); }); page = 1; loadSearch();
+        $("lp-f-watch").addEventListener("click", function () { toggleChip("lp-f-watch", "watch"); });
+        $("lp-f-vision").addEventListener("click", function () { toggleChip("lp-f-vision", "vision"); });
+        $("lp-f-unread").addEventListener("click", function () { toggleChip("lp-f-unread", "unread"); });
+
+        var q = $("lp-q");
+        q.addEventListener("input", function () { onQueryInput(false); });
+        q.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                onQueryInput(true);
+                var norm = normPlate(q.value);
+                if (norm.length >= 4) openPlate(norm);
+            } else if (e.key === "Escape") {
+                q.value = ""; onQueryInput(true); q.blur();
+            }
         });
-        // Modals
-        qs("#anpr-modal-close")?.addEventListener("click", function () { closeModal("anpr-modal"); });
-        qs("#anpr-config-modal-close")?.addEventListener("click", function () { closeModal("anpr-config-modal"); });
-        qs("#anpr-modal")?.addEventListener("click", function (e) { if (e.target === this) closeModal("anpr-modal"); });
-        qs("#anpr-config-modal")?.addEventListener("click", function (e) { if (e.target === this) closeModal("anpr-config-modal"); });
-        document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closeModal("anpr-modal"); closeModal("anpr-config-modal"); } });
-        // Repli de la barre laterale : static/js/sidebar.js.
+        $("lp-q-clear").addEventListener("click", function (e) { e.preventDefault(); q.value = ""; onQueryInput(true); q.focus(); });
+
+        $("lp-new-btn").addEventListener("click", flushPending);
+        $("lp-list").addEventListener("scroll", function () {
+            if (this.scrollTop < 20 && S.pending.length) flushPending();
+        }, { passive: true });
+
+        $("lp-side-back").addEventListener("click", showSummary);
+        $("lp-side-close").addEventListener("click", closeSide);
+        $("lp-summary-btn").addEventListener("click", function () { showSummary(); openSide("summary"); });
+
+
+        $("lp-lightbox").addEventListener("click", closeLightbox);
+
+        document.addEventListener("keydown", function (e) {
+            var tag = (e.target && e.target.tagName) || "";
+            var typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (e.target && e.target.isContentEditable);
+            if (e.key === "/" && !typing) { e.preventDefault(); q.focus(); q.select(); }
+            if (e.key === "Escape" && !typing) {
+                if (!$("lp-lightbox").hidden) closeLightbox();
+                else if (S.sideMode !== "summary" || $("lp-side").classList.contains("is-open")) closeSide();
+            }
+        });
+        document.addEventListener("visibilitychange", function () {
+            if (!document.hidden) { loadOverview(); pollLive(); }
+        });
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Minuteries                                                          */
+    /* ------------------------------------------------------------------ */
+    var timers = [];
+    function restartTimers() {
+        timers.forEach(clearInterval);
+        timers = [
+            setInterval(function () { if (!document.hidden) loadOverview(); }, isLivePeriod() ? OVERVIEW_MS : OVERVIEW_PAST_MS),
+            setInterval(pollLive, LIVE_MS),
+            setInterval(renderLive, 5000),
+        ];
+    }
+
+    function init() {
+        bind();
+        var plate = new URLSearchParams(location.search).get("plate");
+        loadOverview();
+        if (plate) {
+            $("lp-q").value = normPlate(plate);
+            $("lp-search").classList.add("has-value");
+            S.q = normPlate(plate).length >= 2 ? normPlate(plate) : "";
+            openPlate(plate);
+        }
+        loadList(true);
+        restartTimers();
     }
 
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();

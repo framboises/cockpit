@@ -1,261 +1,142 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>COCKPIT — LAPI</title>
-    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta name="theme-color" content="#1f2937">
+  <title>LAPI -- COCKPIT</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/anpr.css') }}">
 </head>
+
+{#
+  LAPI (/anpr, anpr.py) : poste de controle des plaques lues par les cameras
+  Hikvision de la Porte Sud (recepteur ecoutehik2.py -> titan.hik_anpr).
+  Bandeau des voies (sante, activite, sur site), flux des passages en direct
+  avec recherche tolerante, panneau de droite : synthese de la periode ou
+  fiche de la plaque. Lien profond : /anpr?plate=AB123CD (alerte watchlist).
+  Rendu : static/js/anpr.js.
+#}
 
 <body>
 <div class="app-layout">
 
-    <!-- ===== SIDEBAR ===== -->
-    {% set sidebar_active = '/anpr' %}
-    {% include '_sidebar.html' %}
+  {% set sidebar_active = '/anpr' %}
+  {% include '_sidebar.html' %}
 
-    <!-- ===== MAIN ===== -->
-    <div class="app-main">
+  <div class="app-main lp-app">
 
-        <header class="app-header">
-            <div class="header-event-info">
-                <span class="material-symbols-outlined" style="font-size:22px;color:var(--brand);">directions_car</span>
-                <span class="header-event-name">LAPI</span>
-                <span class="header-event-year" style="opacity:.6;">Surveillance vehicules</span>
-            </div>
-            <div class="header-spacer"></div>
-            <div class="header-actions" style="gap:10px;">
-                <div class="anpr-live-badge"><span class="anpr-pulse"></span> LIVE</div>
-                <button class="btn btn-primary" id="anpr-refresh-btn" style="display:flex;align-items:center;gap:5px;">
-                    <span class="material-symbols-outlined" style="font-size:17px;">refresh</span> Actualiser
-                </button>
-                <button class="btn" id="anpr-config-btn" style="display:flex;align-items:center;gap:5px;">
-                    <span class="material-symbols-outlined" style="font-size:17px;">videocam</span> Cameras
-                </button>
-            </div>
-        </header>
+    <header class="app-header lp-header">
+      <button class="header-burger" id="header-burger-btn" type="button" aria-label="Menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+      <span class="material-symbols-outlined lp-header-ico">directions_car</span>
+      <span class="header-event-name">LAPI</span>
+      <span class="lp-header-sub">Lecture de plaques</span>
+      <span class="lp-live" id="lp-live" title="Etat de la reception des lectures">
+        <span class="lp-live-dot"></span><span id="lp-live-text">Connexion...</span>
+      </span>
+      <div class="header-spacer"></div>
+      <div class="lp-seg lp-period" id="lp-period" role="tablist" aria-label="Periode">
+        <button type="button" data-period="1h">1 h</button>
+        <button type="button" data-period="today" class="active">Aujourd'hui</button>
+        <button type="button" data-period="24h">24 h</button>
+        <button type="button" data-period="7d">7 j</button>
+      </div>
+      <input type="date" class="lp-date" id="lp-date" title="Consulter un jour passe" aria-label="Jour">
+      <button class="lp-icon-btn lp-only-narrow" id="lp-summary-btn" type="button" title="Synthese de la periode">
+        <span class="material-symbols-outlined">insights</span>
+      </button>
+      {# Configuration des cameras LAPI : page Cameras (usage LAPI), seule page de configuration #}
+      <a class="lp-icon-btn" href="/cameras?usage=anpr" title="Configurer les cameras LAPI (page Cameras)">
+        <span class="material-symbols-outlined">videocam</span><span class="lp-btn-label">Cameras</span>
+      </a>
+    </header>
 
-        <!-- Scrollable content -->
-        <div id="main-content" class="anpr-page">
+    <main class="lp-main">
 
-            <!-- KPIs -->
-            <div class="anpr-kpis">
-                <div class="anpr-kpi anpr-kpi-onsite">
-                    <span class="material-symbols-outlined" style="font-size:18px;color:var(--brand);">local_parking</span>
-                    <span class="anpr-kpi-n" id="kpi-onsite">--</span>
-                    <span class="anpr-kpi-l">Sur site</span>
-                    <button class="anpr-reset-btn" id="anpr-reset-onsite" title="Remettre a zero">
-                        <span class="material-symbols-outlined" style="font-size:14px;">restart_alt</span>
-                    </button>
-                </div>
-                <div class="anpr-kpi"><span class="anpr-kpi-n" id="kpi-total">--</span><span class="anpr-kpi-l">Detections</span></div>
-                <div class="anpr-kpi"><span class="anpr-kpi-n" id="kpi-unique">--</span><span class="anpr-kpi-l">Plaques uniques</span></div>
-                <div class="anpr-kpi"><span class="anpr-kpi-n" id="kpi-allowlist">--</span><span class="anpr-kpi-l">Liste autorisee</span></div>
-                <div class="anpr-kpi"><span class="anpr-kpi-n" id="kpi-confidence">--%</span><span class="anpr-kpi-l">Confiance moy.</span></div>
-                <div class="anpr-kpi anpr-kpi-vision">
-                    <span class="material-symbols-outlined" style="font-size:18px;color:#f59e0b;">confirmation_number</span>
-                    <span class="anpr-kpi-n" id="kpi-vision-matched">--</span>
-                    <span class="anpr-kpi-l">Vision croisees</span>
-                </div>
-            </div>
+      <section class="lp-lanes" id="lp-lanes" aria-label="Voies">
+        <div class="lp-skel" style="flex:1"></div>
+      </section>
 
-            <!-- 2-column body -->
-            <div class="anpr-body">
-
-                <!-- LEFT: Live feed -->
-                <section class="widget-card anpr-col-left">
-                    <div class="widget-header">
-                        <h3><span class="material-symbols-outlined">stream</span> Temps reel</h3>
-                        <span class="anpr-pulse-sm"></span>
-                    </div>
-                    <div class="widget-body anpr-feed-scroll" id="anpr-live-feed"></div>
-                </section>
-
-                <!-- RIGHT: Tabs (Recherche / Statistiques) -->
-                <section class="widget-card anpr-col-right">
-                    <div class="widget-header">
-                        <h3><span class="material-symbols-outlined">manage_search</span> Analyse</h3>
-                        <div class="widget-tabs">
-                            <button class="widget-tab active" data-anpr-tab="search">Recherche</button>
-                            <button class="widget-tab" data-anpr-tab="stats">Statistiques</button>
-                        </div>
-                        <button class="anpr-expand-toggle" id="anpr-expand-toggle" title="Plein ecran">
-                            <span class="material-symbols-outlined">fullscreen</span>
-                        </button>
-                    </div>
-
-                    <!-- Tab: Recherche -->
-                    <div class="anpr-tab-pane active" id="pane-search">
-                        <div class="anpr-search-bar">
-                            <span class="material-symbols-outlined">search</span>
-                            <input type="text" id="anpr-filter-plate" placeholder="Rechercher une plaque..." autocomplete="off" spellcheck="false">
-                        </div>
-                        <div class="anpr-filters">
-                            <div class="anpr-color-chips" id="anpr-color-chips"></div>
-                            <select id="anpr-filter-type"><option value="">Type</option></select>
-                            <select id="anpr-filter-brand"><option value="">Marque</option></select>
-                            <select id="anpr-filter-camera"><option value="">Camera</option></select>
-                            <input type="datetime-local" id="anpr-filter-from" title="Du">
-                            <input type="datetime-local" id="anpr-filter-to" title="Au">
-                            <button class="anpr-filter-vision" id="anpr-filter-vision" title="Filtrer par source (clic: Vision / ANPR / Tout)">
-                                <span class="material-symbols-outlined" style="font-size:16px;">confirmation_number</span>
-                                <span id="anpr-filter-vision-label">Source</span>
-                            </button>
-                            <button class="anpr-filter-reset" id="anpr-filter-reset" title="Reset filtres">
-                                <span class="material-symbols-outlined">filter_alt_off</span>
-                            </button>
-                        </div>
-                        <div class="anpr-results-head">
-                            <span class="anpr-results-count" id="anpr-result-count">--</span>
-                            <div class="anpr-pagination" id="anpr-pagination"></div>
-                        </div>
-                        <div class="anpr-table-scroll">
-                            <table class="anpr-table" id="anpr-table">
-                                <thead>
-                                    <tr>
-                                        <th></th>
-                                        <th>Plaque</th>
-                                        <th>Source</th>
-                                        <th>%</th>
-                                        <th>Couleur</th>
-                                        <th>Marque</th>
-                                        <th>Type</th>
-                                        <th>Camera</th>
-                                        <th>Dir</th>
-                                        <th>Date</th>
-                                        <th>Divers</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="anpr-table-body"></tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <!-- Tab: Statistiques -->
-                    <div class="anpr-tab-pane" id="pane-stats">
-                        <div class="anpr-stats-subtabs">
-                            <button class="anpr-stats-subtab active" data-stats-sub="anpr">ANPR</button>
-                            <button class="anpr-stats-subtab" data-stats-sub="vision">Vision</button>
-                        </div>
-
-                        <!-- Sub-tab: ANPR stats (existing) -->
-                        <div class="anpr-stats-subpane active" id="stats-sub-anpr">
-                            <div class="anpr-stats-grid">
-                                <div class="anpr-stat-box anpr-stat-wide">
-                                    <div class="anpr-stat-title">Distribution horaire</div>
-                                    <div class="anpr-stat-chart"><canvas id="chart-hourly"></canvas></div>
-                                </div>
-                                <div class="anpr-stat-box">
-                                    <div class="anpr-stat-title">Couleurs</div>
-                                    <div class="anpr-stat-chart"><canvas id="chart-colors"></canvas></div>
-                                </div>
-                                <div class="anpr-stat-box">
-                                    <div class="anpr-stat-title">Top marques</div>
-                                    <div class="anpr-stat-chart"><canvas id="chart-brands"></canvas></div>
-                                </div>
-                                <div class="anpr-stat-box">
-                                    <div class="anpr-stat-title">Types</div>
-                                    <div class="anpr-stat-chart"><canvas id="chart-types"></canvas></div>
-                                </div>
-                                <div class="anpr-stat-box">
-                                    <div class="anpr-stat-title">Cameras</div>
-                                    <div class="anpr-stat-chart"><canvas id="chart-cameras"></canvas></div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Sub-tab: Vision stats (new) -->
-                        <div class="anpr-stats-subpane" id="stats-sub-vision">
-                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
-                                <select id="vision-event-filter" style="padding:5px 10px;border-radius:6px;border:1px solid var(--line);font-family:inherit;font-size:0.8rem;">
-                                    <option value="">Tous les evenements</option>
-                                </select>
-                            </div>
-                            <div class="anpr-kpis" style="margin-bottom:16px;">
-                                <div class="anpr-kpi"><span class="anpr-kpi-n" id="kpi-v-total">--</span><span class="anpr-kpi-l">Fiches Vision</span></div>
-                                <div class="anpr-kpi" style="border-left:3px solid #22c55e;"><span class="anpr-kpi-n" id="kpi-v-matched">--</span><span class="anpr-kpi-l">Croisees ANPR</span></div>
-                                <div class="anpr-kpi" style="border-left:3px solid #ef4444;"><span class="anpr-kpi-n" id="kpi-v-unmatched">--</span><span class="anpr-kpi-l">Non detectees</span></div>
-                            </div>
-                            <div class="anpr-stats-grid">
-                                <div class="anpr-stat-box">
-                                    <div class="anpr-stat-title">Repartition par lieu (tous)</div>
-                                    <div class="anpr-stat-chart"><canvas id="chart-vision-lieux-all"></canvas></div>
-                                </div>
-                                <div class="anpr-stat-box">
-                                    <div class="anpr-stat-title">Croisement par lieu</div>
-                                    <div class="anpr-stat-chart"><canvas id="chart-vision-cross"></canvas></div>
-                                </div>
-                            </div>
-                            <div class="anpr-results-head" style="margin-top:12px;">
-                                <span class="anpr-results-count" id="vision-result-count">--</span>
-                            </div>
-                            <div class="anpr-table-scroll">
-                                <table class="anpr-table" id="vision-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Plaque</th>
-                                            <th>Lieu</th>
-                                            <th>Billets</th>
-                                            <th>Date</th>
-                                            <th>Detections ANPR</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="vision-table-body"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-            </div>
+      <section class="lp-stream" aria-label="Passages">
+        <div class="lp-toolbar">
+          <label class="lp-search" id="lp-search">
+            <span class="material-symbols-outlined">search</span>
+            <input type="text" id="lp-q" placeholder="Plaque, meme partielle (tolere 0/O, 8/B, 1/I...)" autocomplete="off" spellcheck="false" aria-label="Rechercher une plaque">
+            <span class="lp-kbd" title="Raccourci clavier">/</span>
+            <button type="button" class="lp-search-clear" id="lp-q-clear" aria-label="Effacer la recherche">
+              <span class="material-symbols-outlined">close</span>
+            </button>
+          </label>
+          <div class="lp-seg" id="lp-dir" role="tablist" aria-label="Sens">
+            <button type="button" data-dir="" class="active">Tous</button>
+            <button type="button" data-dir="entry">Entrees</button>
+            <button type="button" data-dir="exit">Sorties</button>
+          </div>
+          <select class="lp-select" id="lp-camera" aria-label="Voie">
+            <option value="">Toutes les voies</option>
+          </select>
+          <button type="button" class="lp-chip" id="lp-f-watch" style="--chip:#dc2626" title="Seulement les plaques surveillees">
+            <span class="material-symbols-outlined">local_police</span>Surveillees
+          </button>
+          <button type="button" class="lp-chip" id="lp-f-vision" style="--chip:#b45309" title="Seulement les plaques enregistrees dans Vision (evenement actif)">
+            <span class="material-symbols-outlined">confirmation_number</span>Vision
+          </button>
+          <button type="button" class="lp-chip" id="lp-f-unread" style="--chip:#475569" title="Passages dont la plaque n'a pas ete lue">
+            <span class="material-symbols-outlined">help</span>Illisibles
+          </button>
         </div>
+        <div class="lp-list-head">
+          <span id="lp-count">--</span>
+          <button type="button" class="lp-new-btn" id="lp-new-btn">Nouveaux passages</button>
+        </div>
+        <div class="lp-list" id="lp-list" aria-live="polite"></div>
+      </section>
 
-        <!-- Footer -->
-        <footer class="app-footer">
-            <span class="footer-text">TITAN &mdash; Techniques d'Integration Topographique avec Navigation</span>
-        </footer>
+      <aside class="lp-side" id="lp-side" aria-label="Detail">
+        <div class="lp-side-head">
+          <button type="button" class="lp-icon-btn" id="lp-side-back" title="Retour a la synthese" hidden>
+            <span class="material-symbols-outlined">arrow_back</span>
+          </button>
+          <h3 id="lp-side-title">Synthese</h3>
+          <button type="button" class="lp-icon-btn" id="lp-side-close" title="Fermer" aria-label="Fermer">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+        <div class="lp-side-body" id="lp-side-body"></div>
+      </aside>
 
-    </div>
+    </main>
+
+    {# Pied de page commun : laisse la place a la bulle de l'assistant IA
+       (bas droite), qui sinon masque le bas de la liste et du panneau. #}
+    <footer class="app-footer">
+      <span class="footer-text">TITAN &mdash; Techniques d'Integration Topographique avec Navigation</span>
+    </footer>
+  </div>
 </div>
 
-<!-- Detail modal -->
-<div class="anpr-modal-overlay" id="anpr-modal" style="display:none;">
-    <div class="anpr-modal">
-        <button class="anpr-modal-close" id="anpr-modal-close"><span class="material-symbols-outlined">close</span></button>
-        <div class="anpr-modal-body">
-            <div class="anpr-modal-image" id="anpr-modal-image"></div>
-            <div class="anpr-modal-info" id="anpr-modal-info"></div>
-        </div>
-        <div class="anpr-vision-section" id="anpr-modal-vision" style="display:none;"></div>
-        <div class="anpr-modal-history" id="anpr-modal-history"></div>
-    </div>
-</div>
-
-<!-- Camera config modal -->
-<div class="anpr-modal-overlay" id="anpr-config-modal" style="display:none;">
-    <div class="anpr-modal anpr-modal-sm">
-        <button class="anpr-modal-close" id="anpr-config-modal-close"><span class="material-symbols-outlined">close</span></button>
-        <h3 style="margin:0 0 16px;display:flex;align-items:center;gap:8px;">
-            <span class="material-symbols-outlined">videocam</span> Configuration des cameras
-        </h3>
-        <div id="anpr-config-body"></div>
-    </div>
+<div class="lp-lightbox" id="lp-lightbox" hidden>
+  <img id="lp-lightbox-img" alt="Photo du vehicule">
+  <button type="button" id="lp-lightbox-close" aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
 </div>
 
 <div id="toast-container"></div>
-<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
-<script src="{{ url_for('static', filename='js/anpr.js') }}"></script>
+
 <script>
   window.__userIsAdmin   = {{ "true" if "admin" in user_roles else "false" }};
   window.__userIsManager = {{ "true" if ("manager" in user_roles or "admin" in user_roles) else "false" }};
 </script>
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
 <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+<script src="{{ url_for('static', filename='js/anpr.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ai_reports.js') }}"></script>
 </body>

@@ -152,18 +152,6 @@
   .radar-legende-titre, .radar-legende-valeur { color: #475569; }
 }
 
-/* Origine du niveau affiche par la jauge de risque du widget Meteo.
-   Un shield orange n'appelle pas la meme reaction selon qu'il vient d'un
-   seuil interne ou d'un bulletin officiel opposable : la jauge doit le dire. */
-.meteo-risk-source {
-  display: block;
-  font-size: 0.66rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--muted);
-  margin-top: 1px;
-}
-
 /* ==========================================================================
    MODE DASHBOARD DU BLOC ANALYSE METEO
    Le panneau occupe par defaut la seule colonne centrale (grid-column 2/3).

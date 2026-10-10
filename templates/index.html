@@ -463,10 +463,27 @@
                         </button>
                     </header>
                     <div class="widget-body" id="widget-right-1-body">
-                        <!-- Jauge risque -->
-                        <div class="meteo-risk-gauge" id="meteo-risk-gauge">
-                            <span class="material-symbols-outlined meteo-risk-icon">shield</span>
-                            <span class="meteo-risk-label" id="meteo-risk-label">Chargement...</span>
+                        <!-- Deux blocs distincts : nos seuils sur la prevision du
+                             circuit, et la vigilance officielle Meteo-France. -->
+                        <div class="meteo-duo">
+                            <div class="meteo-tuile" id="meteo-tuile-local" data-level="none">
+                                <div class="meteo-tuile-tete">
+                                    <span class="material-symbols-outlined meteo-tuile-icone">shield</span>
+                                    <span class="meteo-tuile-titre">Circuit</span>
+                                </div>
+                                <div class="meteo-tuile-valeur" id="meteo-local-valeur">--</div>
+                                <div class="meteo-tuile-detail" id="meteo-local-detail"></div>
+                                <div class="meteo-tuile-pied">Seuils Cockpit, reste de la journee</div>
+                            </div>
+                            <div class="meteo-tuile" id="meteo-tuile-vigi" data-level="none">
+                                <div class="meteo-tuile-tete">
+                                    <span class="material-symbols-outlined meteo-tuile-icone">verified</span>
+                                    <span class="meteo-tuile-titre">Meteo-France</span>
+                                </div>
+                                <div class="meteo-tuile-valeur" id="meteo-vigi-valeur">--</div>
+                                <div class="meteo-tuile-detail" id="meteo-vigi-detail"></div>
+                                <div class="meteo-tuile-pied" id="meteo-vigi-pied">Vigilance officielle, Sarthe</div>
+                            </div>
                         </div>
                         <!-- Snapshot conditions actuelles -->
                         <div class="meteo-snapshot" id="meteo-snapshot">

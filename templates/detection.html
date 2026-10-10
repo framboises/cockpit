@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta name="theme-color" content="#1f2937">
+  {# Ajout a l'ecran d'accueil (iPhone) : plein ecran, barre d'etat sombre #}
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="COCKPIT">
+  <title>COCKPIT - Detection</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/detection.css') }}">
+</head>
+
+{#
+  Detection (/detection, detection.py) : poste de controle des intrusions
+  remontees par les cameras (usage "Detection d'intrusion" de la page Cameras).
+  Carte (cameras placees, zones dessinees), flux des intrusions en direct
+  (filtres pieton / vehicule, zone, camera, statut ; regroupement), fiche
+  avec photos et cible encadree, traitement (vue, cloturee). Photos 1 an.
+  Rendu : static/js/detection.js. Detail : docs/claude/detection.md.
+#}
+
+<body class="dt-body dt-view-list">
+<div class="app-layout">
+
+  {% set sidebar_active = '/detection' %}
+  {% include '_sidebar.html' %}
+
+  <div class="app-main dt-app">
+
+    <header class="app-header dt-header">
+      <button class="header-burger" id="header-burger-btn" type="button" aria-label="Menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+      <span class="material-symbols-outlined dt-header-ico">directions_walk</span>
+      <span class="header-event-name">Detection</span>
+      <span class="dt-live" id="dt-live"><span class="dt-live-dot"></span><span id="dt-live-text">Connexion...</span></span>
+      <div class="header-spacer"></div>
+      <div class="dt-seg" id="dt-period" role="tablist" aria-label="Periode">
+        <button type="button" data-period="1h">1 h</button>
+        <button type="button" data-period="today" class="active">Aujourd'hui</button>
+        <button type="button" data-period="24h">24 h</button>
+        <button type="button" data-period="7d">7 j</button>
+      </div>
+      <input type="date" class="dt-date" id="dt-date" title="Consulter un jour passe" aria-label="Jour">
+      <button class="dt-icon-btn dt-only-phone" id="dt-refresh-btn" type="button" title="Actualiser" aria-label="Actualiser">
+        <span class="material-symbols-outlined">refresh</span>
+      </button>
+      <button class="dt-btn" id="dt-edit-btn" type="button" title="Placer les cameras et dessiner les zones">
+        <span class="material-symbols-outlined">edit_location_alt</span><span class="dt-btn-label">Configurer</span>
+      </button>
+    </header>
+
+    <section class="dt-kpis" id="dt-kpis" aria-label="Synthese"></section>
+    <main class="dt-main">
+      <section class="dt-map-area">
+        <div id="dt-map"></div>
+        <div class="dt-map-legend" aria-hidden="true">
+          <span><i class="dt-lg-human"></i>Pieton</span>
+          <span><i class="dt-lg-vehicle"></i>Vehicule</span>
+          <span><i class="dt-lg-active"></i>En cours</span>
+        </div>
+
+        <!-- Fiche d'une intrusion (par-dessus la carte) -->
+        <div class="dt-detail" id="dt-detail" hidden role="dialog" aria-labelledby="dt-detail-title">
+          <header class="dt-detail-head">
+            <h3 id="dt-detail-title">Intrusion</h3>
+            <button type="button" class="dt-icon-btn" id="dt-detail-close" aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
+          </header>
+          <div class="dt-detail-body" id="dt-detail-body"></div>
+          <div class="dt-detail-foot" id="dt-detail-foot"></div>
+        </div>
+
+        <!-- Configuration de la carte (mode edition) -->
+        <div class="dt-config" id="dt-config" hidden>
+          <header class="dt-detail-head">
+            <h3>Configuration de la carte</h3>
+            <button type="button" class="dt-icon-btn" id="dt-config-close" aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
+          </header>
+          <div class="dt-detail-body" id="dt-config-body"></div>
+        </div>
+      </section>
+
+      <aside class="dt-feed" aria-label="Intrusions">
+        {# Telephone : filtres replies derriere ce bouton #}
+        <button type="button" class="dt-filters-toggle dt-only-phone" id="dt-filters-toggle" aria-expanded="false">
+          <span class="material-symbols-outlined">tune</span><span>Filtres</span><b id="dt-filters-n"></b>
+          <span class="material-symbols-outlined dt-chev">expand_more</span>
+        </button>
+        <div class="dt-filters" id="dt-filters">
+          <div class="dt-seg" id="dt-type" role="tablist" aria-label="Cible">
+            <button type="button" data-type="" class="active">Toutes</button>
+            <button type="button" data-type="human"><span class="material-symbols-outlined">directions_walk</span>Pietons</button>
+            <button type="button" data-type="vehicle"><span class="material-symbols-outlined">directions_car</span>Vehicules</button>
+          </div>
+          <div class="dt-filter-row">
+            <select class="dt-select" id="dt-group" aria-label="Groupe"><option value="">Tous les groupes</option></select>
+            <select class="dt-select" id="dt-zone" aria-label="Zone"><option value="">Toutes les zones</option></select>
+          </div>
+          <div class="dt-filter-row">
+            <select class="dt-select" id="dt-camera" aria-label="Camera"><option value="">Toutes les cameras</option></select>
+          </div>
+          <div class="dt-filter-row">
+            <select class="dt-select" id="dt-status" aria-label="Statut">
+              <option value="open">A traiter</option>
+              <option value="new">Nouvelles</option>
+              <option value="">Toutes</option>
+              <option value="closed">Cloturees</option>
+            </select>
+            <select class="dt-select" id="dt-groupby" aria-label="Regroupement">
+              <option value="">Chronologique</option>
+              <option value="group">Par groupe</option>
+              <option value="zone">Par zone</option>
+              <option value="camera">Par camera</option>
+              <option value="type">Par type de cible</option>
+            </select>
+          </div>
+        </div>
+        <div class="dt-feed-head">
+          <span id="dt-count">--</span>
+          <button type="button" class="dt-link-btn" id="dt-seen-all" title="Marquer comme vues toutes les nouvelles intrusions affichees">Tout marquer vu</button>
+        </div>
+        <div class="dt-list" id="dt-list" aria-live="polite"></div>
+      </aside>
+
+      {# Telephone : onglet Groupes (activation d'un geste) #}
+      <section class="dt-armpanel" id="dt-armpanel" aria-label="Activation des groupes"></section>
+    </main>
+
+    {# Telephone : barre d'onglets du bas #}
+    <nav class="dt-tabs" id="dt-tabs" aria-label="Vues">
+      <button type="button" data-view="list" class="active"><span class="material-symbols-outlined">notifications</span><span>Intrusions</span><b class="dt-tab-badge" id="dt-tab-list-n" hidden></b></button>
+      <button type="button" data-view="map"><span class="material-symbols-outlined">map</span><span>Carte</span><b class="dt-tab-badge is-alert" id="dt-tab-map-n" hidden></b></button>
+      <button type="button" data-view="groups"><span class="material-symbols-outlined">shield_lock</span><span>Groupes</span></button>
+    </nav>
+
+    <footer class="app-footer">
+      <span class="footer-text">TITAN &mdash; Techniques d'Integration Topographique avec Navigation</span>
+    </footer>
+  </div>
+</div>
+
+{# Groupe et planning : semaines types (grille au quart d'heure), exceptions,
+   jours feries, calendrier mensuel (detection.js, openPlan) #}
+<dialog class="dt-plan" id="dt-plan" aria-labelledby="dt-plan-title">
+  <header class="dt-plan-head">
+    <h3 id="dt-plan-title">Groupe</h3>
+    <span class="dt-plan-state" id="dt-plan-state"></span>
+    <button type="button" class="dt-icon-btn" id="dt-plan-close" aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
+  </header>
+  <div class="dt-plan-body">
+    <aside class="dt-plan-side" id="dt-plan-side"></aside>
+    <section class="dt-plan-main">
+      <div class="dt-seg dt-plan-tabs" id="dt-plan-tabs" role="tablist">
+        <button type="button" data-tab="weeks" class="active"><span class="material-symbols-outlined">calendar_view_week</span>Semaines types</button>
+        <button type="button" data-tab="exceptions"><span class="material-symbols-outlined">event_busy</span>Exceptions</button>
+        <button type="button" data-tab="calendar"><span class="material-symbols-outlined">calendar_month</span>Calendrier</button>
+      </div>
+      <div class="dt-plan-pane" id="dt-plan-pane"></div>
+    </section>
+  </div>
+  <div class="dt-plan-foot">
+    <button type="button" class="dt-btn dt-btn-danger" id="dt-plan-delete"><span class="material-symbols-outlined">delete</span>Supprimer le groupe</button>
+    <span class="dt-plan-msg" id="dt-plan-msg"></span>
+    <button type="button" class="dt-btn" id="dt-plan-cancel">Annuler</button>
+    <button type="button" class="dt-btn dt-btn-primary" id="dt-plan-save">Enregistrer</button>
+  </div>
+</dialog>
+
+<div class="dt-lightbox" id="dt-lightbox" hidden>
+  <div class="dt-lightbox-frame" id="dt-lightbox-frame"></div>
+  <span class="dt-swipe-hint dt-only-phone">Glisser pour changer de photo</span>
+  <button type="button" id="dt-lightbox-close" aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+  window.__userIsAdmin   = {{ "true" if "admin" in user_roles else "false" }};
+  window.__userIsManager = {{ "true" if ("manager" in user_roles or "admin" in user_roles) else "false" }};
+</script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+<script src="{{ url_for('static', filename='js/detection.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai_reports.js') }}"></script>
+</body>
+</html>

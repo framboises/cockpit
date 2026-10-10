@@ -19,66 +19,109 @@ function fetchMeteoWidgetSummary() {
     .catch(function(err) { console.error("Erreur widget meteo:", err); });
 }
 
-function renderMeteoWidget(data) {
-  // Jauge de risque
-  var gauge = document.getElementById('meteo-risk-gauge');
-  if (gauge) {
-    gauge.setAttribute('data-level', data.risk_level);
-    var icon = gauge.querySelector('.meteo-risk-icon');
-    if (icon) {
-      if (data.risk_level === 'green') icon.textContent = 'shield';
-      else if (data.risk_level === 'orange') icon.textContent = 'warning';
-      else icon.textContent = 'crisis_alert';
-    }
-    var label = document.getElementById('meteo-risk-label');
-    if (label) label.textContent = data.risk_label;
+// Deux blocs, deux sources, jamais melangees sous un meme libelle. L'ancienne
+// jauge unique affichait un shield orange "Vigilance" (nos seuils) au-dessus de
+// "Vigilance vert" (Meteo-France) : deux "vigilances" sans rapport, lues comme
+// une contradiction.
+var METEO_CAUSES = {
+  wind: { libelle: 'Rafales', unite: ' km/h' },
+  rain: { libelle: 'Pluie', unite: ' mm/h' },
+  heat: { libelle: 'Chaleur', unite: ' C' },
+  cold: { libelle: 'Gel', unite: ' C' }
+};
+var METEO_VIGI_NIVEAU = { vert: 'green', jaune: 'yellow', orange: 'orange', rouge: 'red' };
+var METEO_VIGI_RANG = ['vert', 'jaune', 'orange', 'rouge'];
 
-    // La vigilance Meteo-France prime sur les seuils internes (calcul dans
-    // app.py). On dit ici D'OU vient le niveau affiche : un shield orange
-    // n'appelle pas la meme reaction selon qu'il vient d'un seuil maison ou
-    // d'un bulletin officiel opposable.
-    var v = data.vigilance;
-    var source = document.getElementById('meteo-risk-source');
-    if (!source && gauge) {
-      source = document.createElement('span');
-      source.id = 'meteo-risk-source';
-      source.className = 'meteo-risk-source';
-      gauge.appendChild(source);
-    }
-    if (source) {
-      // Le niveau est TOUJOURS affiche, vert compris. Ne rien montrer quand
-      // tout va bien empeche de distinguer "vigilance verte" de "vigilance
-      // non surveillee" -- or c'est justement ce qu'un operateur doit pouvoir
-      // verifier d'un coup d'oeil.
-      var COUL = { vert: '#22c55e', jaune: '#e0b400', orange: '#f59628', rouge: '#dc3232' };
-      if (v && v.perime) {
-        source.textContent = 'Vigilance perimee';
-        source.style.color = '#dc3232';
-        source.title = 'Bulletin Meteo-France du ' + (v.update_time || '?') +
-          ' -- sa validite publiee est passee, il n eleve plus le niveau';
-      } else if (v && v.retard_collecte) {
-        // Encore valide, mais plus confirme depuis un cycle de publication :
-        // le niveau reste celui-ci, sa fraicheur ne peut plus etre affirmee.
-        source.textContent = 'Vigilance ' + v.couleur + ' non rafraichie';
-        source.style.color = '#f59628';
-        source.title = 'Bulletin Meteo-France du ' + (v.update_time || '?') +
-          (v.age_h != null ? ' -- ' + v.age_h + ' h sans actualisation' : '') +
-          ' -- verifier la tache de collecte';
-      } else if (v && v.couleur) {
-        source.textContent = 'Vigilance ' + v.couleur;
-        source.style.color = COUL[v.couleur] || 'var(--muted)';
-        source.title = 'Meteo-France, bulletin du ' + (v.update_time || '?') +
-          (v.valide_jusqua
-            ? ', valide jusqu a ' + String(v.valide_jusqua).slice(11, 16) + ' UTC' : '') +
-          (v.age_h != null ? ' (il y a ' + v.age_h + ' h)' : '');
-      } else {
-        // Distinct du vert : ici on ne SAIT pas, faute de bulletin collecte.
-        source.textContent = 'Vigilance indisponible';
-        source.style.color = 'var(--muted)';
-        source.title = 'Aucun bulletin en base -- verifier la tache de collecte';
-      }
-    }
+function _meteoCauseTexte(c) {
+  var d = METEO_CAUSES[c.type] || { libelle: c.type, unite: '' };
+  var t = d.libelle + ' ' + c.pic + d.unite + ' vers ' + c.pic_heure;
+  if (c.des && c.des !== c.pic_heure) t += ' (des ' + c.des + ')';
+  return t;
+}
+
+function _meteoHeureLocale(iso) {
+  var d = iso ? new Date(iso) : null;
+  if (!d || isNaN(d)) return null;
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+function _meteoTuile(id, niveau, icone, valeur, detail, info) {
+  var tuile = document.getElementById(id);
+  if (!tuile) return null;
+  tuile.setAttribute('data-level', niveau);
+  var ic = tuile.querySelector('.meteo-tuile-icone');
+  if (ic && icone) ic.textContent = icone;
+  tuile.querySelector('.meteo-tuile-valeur').textContent = valeur;
+  tuile.querySelector('.meteo-tuile-detail').textContent = detail || '';
+  if (info) tuile.title = info; else tuile.removeAttribute('title');
+  return tuile;
+}
+
+function _renderMeteoLocal(local) {
+  if (!local) { _meteoTuile('meteo-tuile-local', 'none', 'help', '--', '', null); return; }
+  var th = local.seuils || {};
+  var info = 'Nos seuils, appliques a la prevision horaire du circuit pour le reste de la journee :\n' +
+    '- rafales >= ' + th.wind_warn + ' km/h (alerte >= ' + th.wind_alert + ')\n' +
+    '- pluie >= ' + th.rain_warn + ' mm/h (alerte >= ' + th.rain_alert + ')\n' +
+    '- chaleur >= ' + th.temp_hot + ' C, gel <= ' + th.temp_cold + ' C\n' +
+    'Independant de la vigilance Meteo-France.';
+  var causes = local.causes || [];
+  if (local.niveau === 'green' || !causes.length) {
+    _meteoTuile('meteo-tuile-local', 'green', 'check_circle', 'RAS', 'Aucun seuil franchi', info);
+    return;
   }
+  var detail = _meteoCauseTexte(causes[0]);
+  if (causes.length > 1) detail += ' +' + (causes.length - 1);
+  info += '\n\nAujourd hui :\n' + causes.map(function (c) { return '- ' + _meteoCauseTexte(c); }).join('\n');
+  if (local.niveau === 'red') {
+    _meteoTuile('meteo-tuile-local', 'red', 'crisis_alert', 'Alerte', detail, info);
+  } else {
+    _meteoTuile('meteo-tuile-local', 'orange', 'warning', 'A surveiller', detail, info);
+  }
+}
+
+function _renderMeteoVigilance(v) {
+  var pied = document.getElementById('meteo-vigi-pied');
+  // Le niveau est TOUJOURS affiche, vert compris : "vigilance verte" doit se
+  // distinguer d'un coup d'oeil de "vigilance non surveillee".
+  if (!v || !v.couleur) {
+    _meteoTuile('meteo-tuile-vigi', 'none', 'help', 'Indisponible', 'Aucun bulletin collecte',
+      'Aucun bulletin en base -- verifier la tache de collecte');
+    if (pied) pied.textContent = 'Vigilance officielle, Sarthe';
+    return;
+  }
+  var heure = _meteoHeureLocale(v.update_time);
+  if (pied) pied.textContent = 'Vigilance officielle' + (heure ? ', bulletin ' + heure : '');
+  var info = 'Vigilance Meteo-France, Sarthe. Bulletin du ' + (v.update_time || '?') +
+    (v.valide_jusqua ? ', valide jusqu a ' + String(v.valide_jusqua).slice(11, 16) + ' UTC' : '') +
+    (v.age_h != null ? ' (il y a ' + v.age_h + ' h)' : '') + '.';
+
+  if (v.perime) {
+    _meteoTuile('meteo-tuile-vigi', 'stale', 'history', 'Perimee', 'Bulletin hors validite',
+      info + '\nSa validite publiee est passee : il n eleve plus le niveau. Verifier la collecte.');
+    return;
+  }
+
+  var couleur = v.couleur;
+  var detail = (v.phenomenes && v.phenomenes.length) ? v.phenomenes.join(', ') : 'Aucun phenomene';
+  // Ce qui est annonce plus tard reste a sa place : en complement, jamais
+  // comme etat courant.
+  if (METEO_VIGI_RANG.indexOf(v.couleur_max) > METEO_VIGI_RANG.indexOf(couleur)) {
+    detail += ' - a venir : ' + v.couleur_max +
+      ((v.phenomenes_max && v.phenomenes_max.length) ? ' (' + v.phenomenes_max.join(', ') + ')' : '');
+  }
+  if (v.retard_collecte) {
+    detail = 'Non rafraichie' + (v.age_h != null ? ' depuis ' + v.age_h + ' h' : '');
+    info += '\nPlus confirme depuis un cycle de publication : le niveau reste celui-ci. Verifier la collecte.';
+  }
+  _meteoTuile('meteo-tuile-vigi', METEO_VIGI_NIVEAU[couleur] || 'none',
+    couleur === 'vert' ? 'verified' : 'warning',
+    couleur === 'vert' ? 'Verte' : couleur.charAt(0).toUpperCase() + couleur.slice(1), detail, info);
+}
+
+function renderMeteoWidget(data) {
+  _renderMeteoLocal(data.local);
+  _renderMeteoVigilance(data.vigilance);
 
   // Snapshot conditions actuelles
   var c = data.current;

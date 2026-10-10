@@ -361,6 +361,7 @@
         <div class="form-row">
           <label>Type de detection
             <select name="detection_type" class="form-input" required>
+              <option value="detection_intrusion">Detection - intrusion (groupes de cameras)</option>
               <option value="camera_event">Camera Hikvision - Smart Event</option>
               <option value="schedule_proximity">Horaire - proximite (X min avant)</option>
               <option value="schedule_transition">Horaire - transition (ouv/ferm)</option>
@@ -442,6 +443,26 @@
             </p>
           </div>
         </div>
+        <div class="form-row" id="params-detection-row" style="display:none;">
+          <div class="field-block">
+            <div class="field-label">Groupes de cameras (page Detection)</div>
+            <div class="field-help">L'alerte part pour une intrusion detectee par une camera du groupe, uniquement quand le groupe est active (programme horaire defini dans la page Detection). Une seule alerte par intrusion, avec la photo.</div>
+            <div id="det-groups-grid" class="checklist checklist-wide"></div>
+          </div>
+          <div class="field-block" style="margin-top:14px;">
+            <div class="field-label">Ou cameras individuelles</div>
+            <div id="det-channels-grid" class="checklist checklist-wide"></div>
+          </div>
+          <div class="field-block" style="margin-top:14px;">
+            <div class="field-label">Cibles et zones</div>
+            <div class="field-help">Rien de coche = toutes les cibles / toutes les zones.</div>
+            <div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px;">
+              <label class="toggle-inline" style="padding:0;"><input type="checkbox" class="det-target-type" value="human" /><span>Pietons</span></label>
+              <label class="toggle-inline" style="padding:0;"><input type="checkbox" class="det-target-type" value="vehicle" /><span>Vehicules</span></label>
+            </div>
+            <div id="det-zones-grid" class="checklist" style="margin-top:8px;"></div>
+          </div>
+        </div>
         <div class="form-row" id="params-camera-row" style="display:none;">
           <div class="field-block">
             <div class="field-label">Types d'evenements detectes</div>
@@ -452,6 +473,15 @@
             <div class="field-label">Cameras surveillees</div>
             <div class="field-help">Au moins une camera doit etre cochee. La liste est filtree sur les cameras activees dans /admin/cameras.</div>
             <div id="camera-event-cameras-grid" class="checklist"></div>
+          </div>
+          <div class="field-block" style="margin-top:14px;">
+            <div class="field-label">Intrusions : cibles et zones</div>
+            <div class="field-help">Pour les intrusions (zone, ligne, entree / sortie de zone). Rien de coche = toutes les cibles / toutes les zones. Zones : celles dessinees dans la page Detection.</div>
+            <div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px;">
+              <label class="toggle-inline" style="padding:0;"><input type="checkbox" class="camera-target-type" value="human" /><span>Pietons</span></label>
+              <label class="toggle-inline" style="padding:0;"><input type="checkbox" class="camera-target-type" value="vehicle" /><span>Vehicules</span></label>
+            </div>
+            <div id="camera-event-zones-grid" class="checklist" style="margin-top:8px;"></div>
           </div>
           <div class="field-block" style="margin-top:14px;">
             <div class="field-label">Filtres et anti-spam</div>

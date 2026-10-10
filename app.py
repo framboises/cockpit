@@ -41,6 +41,7 @@ from crise_auth import crise_auth_bp
 from routing import routing_bp
 from routing_overrides import routing_overrides_bp
 from cameras import cameras_bp
+from detection import detection_bp
 from meteo import meteo_bp
 from pmv import pmv_bp
 from pcorg_assist import pcorg_assist_bp
@@ -567,7 +568,9 @@ ADMIN_PAGE_REGISTRY = [
     {"id": "wiki_admin",     "label": "Wiki (admin)",    "icon": "edit_note",
      "paths": ["/admin/wiki", "/api/wiki/admin"]},
     {"id": "cameras",        "label": "Cameras",         "icon": "videocam",
-     "paths": ["/cameras", "/api/cameras"]},
+     "paths": ["/cameras", "/api/cameras", "/api/camera-profiles"]},
+    {"id": "detection",      "label": "Detection",       "icon": "directions_walk",
+     "paths": ["/detection", "/api/detection"]},
     {"id": "montre",         "label": "Montre",          "icon": "watch",
      "paths": ["/watch-admin", "/api/v1/watch/admin"]},
 ]
@@ -2192,34 +2195,62 @@ def get_meteo_widget_summary():
 
         if gust >= th['wind_alert']:
             alerts.append({'type': 'wind', 'icon': 'air', 'severity': 'red',
-                           'message': f'Rafales {gust} km/h a {heure}'})
+                           'message': f'Rafales {gust} km/h a {heure}',
+                           'value': gust, 'heure': heure})
             max_severity = 'red'
         elif gust >= th['wind_warn']:
             alerts.append({'type': 'wind', 'icon': 'air', 'severity': 'orange',
-                           'message': f'Rafales {gust} km/h a {heure}'})
+                           'message': f'Rafales {gust} km/h a {heure}',
+                           'value': gust, 'heure': heure})
             if max_severity != 'red':
                 max_severity = 'orange'
 
         if rain >= th['rain_alert']:
             alerts.append({'type': 'rain', 'icon': 'umbrella', 'severity': 'red',
-                           'message': f'Pluie forte {rain} mm a {heure}'})
+                           'message': f'Pluie forte {rain} mm a {heure}',
+                           'value': rain, 'heure': heure})
             max_severity = 'red'
         elif rain >= th['rain_warn']:
             alerts.append({'type': 'rain', 'icon': 'umbrella', 'severity': 'orange',
-                           'message': f'Pluie {rain} mm a {heure}'})
+                           'message': f'Pluie {rain} mm a {heure}',
+                           'value': rain, 'heure': heure})
             if max_severity != 'red':
                 max_severity = 'orange'
 
         if temp >= th['temp_hot']:
             alerts.append({'type': 'heat', 'icon': 'thermostat', 'severity': 'orange',
-                           'message': f'Canicule {temp}C a {heure}'})
+                           'message': f'Canicule {temp}C a {heure}',
+                           'value': temp, 'heure': heure})
             if max_severity == 'green':
                 max_severity = 'orange'
         elif temp <= th['temp_cold']:
             alerts.append({'type': 'cold', 'icon': 'ac_unit', 'severity': 'orange',
-                           'message': f'Gel {temp}C a {heure}'})
+                           'message': f'Gel {temp}C a {heure}',
+                           'value': temp, 'heure': heure})
             if max_severity == 'green':
                 max_severity = 'orange'
+
+    # Niveau des seuils Cockpit SEUL, avant que la vigilance ne s'en mele : le
+    # widget l'affiche dans son propre bloc. Melanger les deux sous un meme
+    # libelle donnait un shield orange "Vigilance" au-dessus de "Vigilance
+    # vert" -- deux "vigilances" qui n'avaient rien a voir.
+    local_severity = max_severity
+    rang_sev = {'green': 0, 'orange': 1, 'red': 2}
+    causes = {}
+    for a in alerts:
+        c = causes.get(a['type'])
+        if c is None:
+            causes[a['type']] = c = {'type': a['type'], 'icon': a['icon'],
+                                     'severity': a['severity'], 'des': a['heure'],
+                                     'pic': a['value'], 'pic_heure': a['heure']}
+        if rang_sev[a['severity']] > rang_sev[c['severity']]:
+            c['severity'] = a['severity']
+        # Le gel s'aggrave vers le bas, tout le reste vers le haut
+        pire = a['value'] < c['pic'] if a['type'] == 'cold' else a['value'] > c['pic']
+        if pire:
+            c['pic'], c['pic_heure'] = a['value'], a['heure']
+    local_causes = sorted(causes.values(),
+                          key=lambda c: (-rang_sev[c['severity']], c['des']))
 
     # Deduplication : garder la pire alerte par type
     seen_types = {}
@@ -2309,7 +2340,12 @@ def get_meteo_widget_summary():
         'alerts': deduped_alerts,
         'risk_level': max_severity,
         'risk_label': label,
-        'vigilance': vigilance_info
+        'vigilance': vigilance_info,
+        'local': {
+            'niveau': local_severity,
+            'causes': local_causes,
+            'seuils': th,
+        },
     })
 
 
@@ -2395,6 +2431,8 @@ csrf.exempt(app.view_functions["routing.field_route"])
 # Toutes routes admin, CSRF conserve.
 app.register_blueprint(routing_overrides_bp)
 app.register_blueprint(cameras_bp)
+# Detection : intrusions des cameras (episodes du recepteur, carte, zones)
+app.register_blueprint(detection_bp)
 # PMV : pilotage des remorques a panneau a message variable (TCP 9520 vers les
 # routeurs 4G, cf. pmv.py). Page manager, CSRF ACTIF sur toutes les ecritures.
 app.register_blueprint(pmv_bp)
@@ -4465,6 +4503,9 @@ DETECTION_TYPES = {
     "checkpoint_reassign", "checkpoint_error_burst",
     "meteo_rain_onset", "pcorg_urgency",
     "camera_event", "door_saturation_forecast",
+    # Page Detection : intrusions des groupes / canaux (cockpit_dispatch,
+    # une alerte par intrusion, activation par programme horaire du groupe)
+    "detection_intrusion",
 }
 
 # Catalogue des Smart Events Hikvision exposes a la modale de creation d'alerte
@@ -4761,7 +4802,10 @@ def list_anpr_watchlist():
 @role_required("admin")
 def add_anpr_watchlist():
     data = request.get_json(force=True) or {}
-    plate = (data.get('plate') or '').strip().upper().replace(' ', '-')
+    # Meme forme que les lectures des cameras (AB123CD) : une plaque saisie
+    # "AB-123-CD" ne correspondait jamais au passage reel (comparaison exacte
+    # dans cockpit_dispatch.dispatch_anpr_watchlist).
+    plate = re.sub(r'[^A-Z0-9]', '', (data.get('plate') or '').strip().upper())
     if not plate:
         return jsonify({"error": "La plaque est requise"}), 400
     if COL_ANPR_WATCHLIST.find_one({"plate": plate}):
@@ -4997,22 +5041,20 @@ def list_cameras_for_alert_def():
     result = []
     seen_paths = set()
 
-    # 1) cockpit_cameras (champ camera_path si explicitement renseigne)
+    # 1) cockpit_cameras : seuls les appareils qui ont un chemin d'envoi
+    #    (page Cameras) emettent des evenements vers le recepteur
     for d in db['cockpit_cameras'].find(
-        {"enabled": True},
-        {"name": 1, "location": 1, "ip": 1, "tags": 1, "camera_path": 1}
-    ).sort([("location", 1), ("name", 1)]):
+        {"enabled": {"$ne": False}, "camera_path": {"$nin": ["", None]}},
+        {"name": 1, "location": 1, "site": 1, "ip": 1, "tags": 1, "camera_path": 1}
+    ).sort([("site", 1), ("name", 1)]):
         cp = d.get("camera_path") or ""
-        if not cp:
-            # Fallback : si pas de camera_path, on utilise /<name>
-            cp = "/" + (d.get("name") or str(d["_id"])).strip("/")
         if cp in seen_paths:
             continue
         seen_paths.add(cp)
         result.append({
             "_id": str(d["_id"]),
             "name": d.get("name", ""),
-            "location": d.get("location", ""),
+            "location": d.get("location", "") or d.get("site", ""),
             "ip": d.get("ip", ""),
             "tags": d.get("tags", []) or [],
             "camera_path": cp,
@@ -6823,7 +6865,7 @@ def pcorg_camera_capture():
         return jsonify({"error": "cam_id requis"}), 400
 
     # Charger la camera depuis MongoDB
-    from cameras import HIK_PASSWORD
+    from cameras import make_hik_camera
     try:
         oid = ObjectId(cam_id)
     except Exception:
@@ -6839,19 +6881,13 @@ def pcorg_camera_capture():
         if err:
             return err
 
-    # Instancier et capturer
-    from hik.hik_control import HikCamera
-    password = cam_doc.get("password", "") or HIK_PASSWORD
-    cam = HikCamera(
-        name=cam_doc["name"],
-        ip=cam_doc["ip"],
-        port=cam_doc.get("port", 80),
-        user=cam_doc.get("user", "admin"),
-        password=password,
-        channel=cam_doc.get("channel", 1),
-        protocol=cam_doc.get("protocol", "http"),
-        brand=cam_doc.get("brand", "hikvision"),
-    )
+    # Instancier et capturer (identifiants : profil chiffre, cf. cameras.py)
+    try:
+        cam = make_hik_camera(cam_doc, data.get("channel"))
+    except PermissionError as e:  # camera de piste : jamais pilotee (cameras.is_piste_device)
+        return jsonify({"error": str(e)}), 403
+    except Exception as e:
+        return jsonify({"error": "Identifiants camera indisponibles : %s" % e}), 503
 
     photo_id = str(uuid.uuid4())[:8]
     ts = datetime.now(ZoneInfo("Europe/Paris"))
@@ -6871,11 +6907,11 @@ def pcorg_camera_capture():
     filename = f"{photo_id}_cam_{safe_cam_name}_{ts_file}.jpg"
     save_path = os.path.join(photos_dir, filename)
 
+    from cameras import call_camera, camera_error
     try:
-        cam.capture_image(save_path)
+        call_camera(cam_doc, lambda: cam.capture_image(save_path))
     except Exception as e:
-        logger.exception("Camera capture failed for fiche %s, cam %s", fiche_id, cam_id)
-        return jsonify({"error": f"Capture echouee: {e}"}), 500
+        return jsonify({"error": "Capture echouee : %s" % camera_error(cam_doc, e, "Capture main courante")}), 502
 
     photo_url = f"/field/photos/{sub_dir}/{filename}"
 

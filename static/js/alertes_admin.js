@@ -38,6 +38,7 @@
   };
 
   var DETECTION_TYPE_LABELS = {
+    "detection_intrusion": "Detection - intrusion",
     "camera_event": "Camera Hik - Smart Event",
     "schedule_proximity": "Horaire - proximite",
     "schedule_transition": "Horaire - transition",
@@ -298,6 +299,7 @@
     var pcorgRow = $("#params-pcorg-row");
     var trafficRow = $("#params-traffic-row");
     var cameraRow = $("#params-camera-row");
+    var detectionRow = $("#params-detection-row");
     if (!rawRow || !pcorgRow || !trafficRow || !cameraRow) return;
 
     var hideAll = function(){
@@ -305,6 +307,7 @@
       pcorgRow.style.display = "none";
       trafficRow.style.display = "none";
       cameraRow.style.display = "none";
+      if (detectionRow) detectionRow.style.display = "none";
     };
 
     if (detectionType === "pcorg_urgency") {
@@ -323,6 +326,10 @@
       var thresholdEl = $("#traffic-param-threshold");
       if (radiusEl) radiusEl.value = (tp.radius_m != null) ? tp.radius_m : 500;
       if (thresholdEl) thresholdEl.value = (tp.threshold != null) ? tp.threshold : 10;
+    } else if (detectionType === "detection_intrusion" && detectionRow) {
+      hideAll();
+      detectionRow.style.display = "";
+      _renderDetectionParams(params || {});
     } else if (detectionType === "camera_event") {
       hideAll();
       cameraRow.style.display = "";
@@ -466,6 +473,115 @@
     if (cdEl) cdEl.value = String(Math.round((params.cooldown_per_camera_s != null ? params.cooldown_per_camera_s : 300) / 60));
     var minConfEl = $("#camera-min-confidence");
     if (minConfEl) minConfEl.value = String(params.min_confidence != null ? params.min_confidence : 0);
+    var targets = params.target_types || [];
+    $$(".camera-target-type").forEach(function(cb){ cb.checked = targets.indexOf(cb.value) >= 0; });
+    _renderZonesGrid(params.zones || []);
+  }
+
+  // ============================================================
+  // Section "detection_intrusion" : groupes / cameras de la page Detection
+  // ============================================================
+  var _detectionConfig = null;
+  function _detCheck(grid, items, selected, colorOf) {
+    grid.textContent = "";
+    if (!items.length) {
+      var empty = document.createElement("div");
+      empty.className = "checklist-empty";
+      empty.textContent = "Rien a afficher (a configurer dans la page Detection).";
+      grid.appendChild(empty);
+      return;
+    }
+    items.forEach(function(it){
+      var lbl = document.createElement("label");
+      lbl.className = "checklist-item";
+      var cb = document.createElement("input");
+      cb.type = "checkbox"; cb.value = it.value; cb.checked = selected.indexOf(it.value) >= 0;
+      var dot = document.createElement("span");
+      dot.className = "checklist-item-dot"; dot.style.background = colorOf(it);
+      // Nom au-dessus, detail en dessous : sur une seule ligne, le detail
+      // ("13 camera(s) - Inactive...") ne laissait plus de place au nom
+      var box = document.createElement("span");
+      box.className = "checklist-item-text";
+      var txt = document.createElement("span");
+      txt.className = "checklist-item-label"; txt.textContent = it.label;
+      box.appendChild(txt);
+      if (it.sub) {
+        var sub = document.createElement("span");
+        sub.className = "checklist-item-sub"; sub.textContent = it.sub;
+        box.appendChild(sub);
+      }
+      lbl.title = it.title || (it.label + (it.sub ? "\n" + it.sub : ""));
+      lbl.appendChild(cb); lbl.appendChild(dot); lbl.appendChild(box);
+      grid.appendChild(lbl);
+    });
+  }
+  function _renderDetectionParams(params) {
+    var targets = params.target_types || [];
+    $$(".det-target-type").forEach(function(cb){ cb.checked = targets.indexOf(cb.value) >= 0; });
+    function draw() {
+      var c = _detectionConfig || {groups: [], channels: [], zones: []};
+      _detCheck($("#det-groups-grid"), (c.groups || []).map(function(g){
+        return {value: g._id, label: g.name, color: g.color, sub: g.members.length + " camera(s) - " + (g.state_label || "")};
+      }), params.groups || [], function(it){ return it.color || "#d97706"; });
+      _detCheck($("#det-channels-grid"), (c.channels || []).map(function(ch){
+        // Nom du canal en premier (c'est lui qui distingue les capteurs d'une
+        // meme camera), appareil et site en dessous ; tout au survol
+        var label = ch.channel_name && ch.channel_name !== ch.camera_name ? ch.channel_name : ch.camera_name;
+        return {value: ch.key, label: label,
+                sub: [ch.camera_name !== label ? ch.camera_name : "", ch.site || ""].filter(Boolean).join(" - "),
+                title: (ch.channel_name && ch.channel_name !== ch.camera_name ? ch.camera_name + " - " + ch.channel_name : ch.camera_name) + (ch.camera_path ? " (" + ch.camera_path + ")" : "") + (ch.site ? "\n" + ch.site : "")};
+      }), params.channels || [], function(){ return "#64748b"; });
+      _detCheck($("#det-zones-grid"), (c.zones || []).map(function(z){
+        return {value: z._id, label: z.name, color: z.color};
+      }), params.zones || [], function(it){ return it.color || "#d97706"; });
+    }
+    if (_detectionConfig) return draw();
+    fetch("/api/detection/config").then(function(r){ return r.ok ? r.json() : {}; })
+      .then(function(d){ _detectionConfig = d || {}; draw(); })
+      .catch(function(){ _detectionConfig = {}; draw(); });
+  }
+  function _collectDetectionParams() {
+    function checked(sel){ return $$(sel + " input[type=checkbox]:checked").map(function(cb){ return cb.value; }); }
+    return {
+      groups: checked("#det-groups-grid"),
+      channels: checked("#det-channels-grid"),
+      zones: checked("#det-zones-grid"),
+      target_types: $$(".det-target-type:checked").map(function(cb){ return cb.value; })
+    };
+  }
+
+  // Zones de la page Detection (filtre des intrusions). Liste vide si la page
+  // Detection n'est pas accessible a cet utilisateur.
+  var _detectionZones = null;
+  function _renderZonesGrid(selected) {
+    var grid = $("#camera-event-zones-grid");
+    if (!grid) return;
+    function draw() {
+      grid.textContent = "";
+      if (!_detectionZones || !_detectionZones.length) {
+        var empty = document.createElement("div");
+        empty.className = "checklist-empty";
+        empty.textContent = "Aucune zone (a dessiner dans la page Detection).";
+        grid.appendChild(empty);
+        return;
+      }
+      _detectionZones.forEach(function(z){
+        var lbl = document.createElement("label");
+        lbl.className = "checklist-item";
+        var cb = document.createElement("input");
+        cb.type = "checkbox"; cb.value = z._id; cb.checked = selected.indexOf(z._id) >= 0;
+        var dot = document.createElement("span");
+        dot.className = "checklist-item-dot"; dot.style.background = z.color || "#d97706";
+        var txt = document.createElement("span");
+        txt.className = "checklist-item-label"; txt.textContent = z.name;
+        lbl.appendChild(cb); lbl.appendChild(dot); lbl.appendChild(txt);
+        grid.appendChild(lbl);
+      });
+    }
+    if (_detectionZones) return draw();
+    fetch("/api/detection/config").then(function(r){ return r.ok ? r.json() : {zones: []}; })
+      .then(function(d){ _detectionZones = d.zones || []; draw(); })
+      .catch(function(){ _detectionZones = []; draw(); });
   }
 
   function _collectCameraParams() {
@@ -496,7 +612,9 @@
         end: twEnd ? twEnd.value : "06:00"
       },
       cooldown_per_camera_s: cdMin * 60,
-      min_confidence: minConf
+      min_confidence: minConf,
+      target_types: $$(".camera-target-type:checked").map(function(cb){ return cb.value; }),
+      zones: $$("#camera-event-zones-grid input[type=checkbox]:checked").map(function(cb){ return cb.value; })
     };
   }
 
@@ -611,6 +729,12 @@
       params = _collectPcorgParams();
     } else if (detType === "traffic_cluster") {
       params = _collectTrafficParams();
+    } else if (detType === "detection_intrusion") {
+      params = _collectDetectionParams();
+      if (!params.groups.length && !params.channels.length) {
+        if(typeof showToast === "function") showToast("error", "Coche au moins un groupe ou une camera");
+        return null;
+      }
     } else if (detType === "camera_event") {
       params = _collectCameraParams();
       if (!params.event_types.length) {
