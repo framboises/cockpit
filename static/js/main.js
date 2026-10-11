@@ -663,6 +663,9 @@ function fetchEventCurrent() {
 // {event, year:int, manual, at} : choix manuel recent, sinon evenement du jour,
 // sinon (API indisponible) dernier choix connu.
 function _cockpitResolveSelection(cur) {
+    // Poste operateur ouvert : son evenement, pour toute la duree du poste
+    var post = window.__operatorPost;
+    if (post && post.event) return { event: post.event, year: parseInt(post.year, 10), manual: true, at: Date.now() };
     var sel = _cockpitReadSel();
     var out;
     if (_cockpitManualRecent(sel)) {
@@ -766,6 +769,22 @@ function cockpitApplySelection(ev, yr, manual, at, noReload) {
     renderPriorityChip();
     applySaisonOnlyBlocks();
     if (!noReload) loadCockpitData();
+}
+
+// Poste operateur (operateur_poste.js) : l'evenement du poste est impose et
+// les selecteurs evenement / annee sont figes jusqu'a la fin du poste.
+function cockpitLockToPost(post) {
+    window.__operatorPost = post || null;
+    var locked = !!(post && post.event);
+    ['event-select', 'year-select'].forEach(function (id) {
+        var s = document.getElementById(id);
+        if (!s) return;
+        s.disabled = locked;
+        s.title = locked ? 'Evenement du poste (changer d\'evenement = fin de poste)' : '';
+    });
+    if (locked && (post.event !== window.selectedEvent || parseInt(post.year, 10) !== parseInt(window.selectedYear, 10))) {
+        cockpitApplySelection(post.event, post.year, true);
+    }
 }
 
 // Bandeau discret "Evenement du jour : X" quand la selection n'est pas
@@ -948,7 +967,7 @@ function _cockpitFollowCurrent() {
             eventSelect.value = before;
         }
         var sel = _cockpitReadSel();
-        if (!_cockpitManualRecent(sel)) {
+        if (!_cockpitManualRecent(sel) && !window.__operatorPost) {
             var c = cur.current;
             if (c.event !== window.selectedEvent || parseInt(c.year, 10) !== parseInt(window.selectedYear, 10)) {
                 cockpitApplySelection(c.event, c.year, false);
@@ -991,6 +1010,7 @@ document.addEventListener('DOMContentLoaded', function () {
         var sel = _cockpitResolveSelection(cur);
         if (eventSelect) _cockpitPopulateEvents(eventSelect, names, cur, sel.event);
         cockpitApplySelection(sel.event, sel.year, sel.manual, sel.at);
+        if (window.__operatorPost) cockpitLockToPost(window.__operatorPost);
         if (document.getElementById('status-card')) {
             setInterval(_cockpitFollowCurrent, COCKPIT_FOLLOW_MS);
         }

@@ -4,6 +4,9 @@
   PUT /api/operator/settings  (admin) couche de zones + propriete de nom (CSRF ACTIF)
   GET /api/operator/zones     (user)  zones de la couche choisie (GeoJSON)
   GET /api/operator/metiers   (user)  metiers de Bibler
+  GET /api/operator/post      (user)  {required, post} : poste ouvert du compte
+  GET /api/operator/options   (user)  evenements en cours, zones, metiers
+  POST /api/operator/post     (user)  prise de poste + fiche (CSRF ACTIF)
 
 Logique dans operateurs.py ; plan : docs/claude/operateurs.md.
 """
@@ -92,3 +95,49 @@ def api_zones():
 @_role_required("user")
 def api_metiers():
     return jsonify({"ok": True, "metiers": OP.metiers(_db())})
+
+
+def _payload():
+    return getattr(request, "user_payload", {}) or {}
+
+
+@operateurs_bp.route("/api/operator/post", methods=["GET"])
+@_role_required("user")
+def api_post_get():
+    from app import user_is_operator
+    db = _db()
+    payload = _payload()
+    post = OP.open_post(db, OP.user_id_for(db, payload.get("email")))
+    return jsonify({"ok": True, "required": user_is_operator(payload),
+                    "post": OP.public_post(post)})
+
+
+@operateurs_bp.route("/api/operator/options", methods=["GET"])
+@_role_required("user")
+def api_options():
+    return jsonify({"ok": True, **OP.options(_db())})
+
+
+@operateurs_bp.route("/api/operator/post", methods=["POST"])
+@_role_required("user")
+def api_post_take():
+    from app import user_is_operator
+    db = _db()
+    payload = _payload()
+    if not user_is_operator(payload):
+        return _err("pas_operateur", 403)
+    user_id = OP.user_id_for(db, payload.get("email"))
+    if not user_id:
+        return _err("utilisateur_inconnu", 403)
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return _err("json_attendu")
+    choice, err = OP.validate_choice(db, body.get("event"), body.get("year"),
+                                     body.get("zones"), body.get("metier_id"))
+    if err:
+        return _err(err)
+    post, created = OP.take_post(db, payload, user_id, choice)
+    if created:
+        logger.info("Prise de poste %s : %s %s, zones %s, metier %s", payload.get("email"),
+                    choice["event"], choice["year"], choice["zones_labels"], choice["metier_label"])
+    return jsonify({"ok": True, "created": created, "post": OP.public_post(post)})

@@ -1,8 +1,20 @@
 # Operateurs : prise de poste, zones, metiers, ciblage des alertes
 
-Statut (11/10/2026) : etape 1 faite (case Operateur des groupes, section
-Configuration "Zones et metiers", `operateurs.py` + `operateurs_api.py`).
-Etapes 2 a 6 a faire.
+Statut (11/10/2026) :
+- etape 1 faite : case Operateur des groupes, section Configuration "Zones
+  et metiers", `operateurs.py` + `operateurs_api.py` ;
+- etape 2 faite : `user_is_operator` (app.py), fenetre bloquante
+  `static/js/operateur_poste.js` sur l'accueil, `POST /api/operator/post`,
+  fiche "Prise de poste" cloturee (PCO.Information / "Service", tag
+  `poste_operateur`, `operator_post_id`), reprise du poste ouvert, evenement
+  impose et selecteurs figes (`cockpitLockToPost`, main.js), pastille
+  "Poste" dans l'en-tete ;
+- etapes 3 a 6 a faire.
+
+Pas de fiches "Pause" / "Retour de pause" (arbitrage du 11/10/2026).
+Friday : les regles portent sur categorie + sous-classification exacte
+(`integrations.py`), sans exclusion ; pour envoyer Information SAUF
+"Service", lister les autres sous-classifications d'Information.
 
 ## Besoin
 
@@ -128,8 +140,7 @@ heure si rien ne se passe sur le terrain).
   (critiques / SOS, alertes sans localisation) et le repli "tout le groupe".
 - Bouton "Je reprends" (ou ouverture de Cockpit, avec proposition de
   reprendre) : statut `active`, zones de nouveau couvertes.
-- Fiches "Pause" et "Retour de pause" (cloturees), comme les autres
-  (proposition, a confirmer).
+- Pas de fiche pour la pause ni le retour (arbitrage du 11/10/2026).
 
 ## Fiche main courante
 

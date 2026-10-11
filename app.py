@@ -783,6 +783,14 @@ def _user_group_docs(payload):
     return list(COL_GROUPS.find({"_id": {"$in": group_ids}}))
 
 
+def user_is_operator(payload):
+    """Prise de poste obligatoire (docs/claude/operateurs.md) : un des groupes
+    de l'utilisateur est marque `operateur`. Jamais pour un admin."""
+    if payload.get("is_super_admin") or payload.get("app_role") == "admin":
+        return False
+    return any(g.get("operateur") for g in _user_group_docs(payload))
+
+
 def _user_allowed_pages(payload):
     """Pages de la barre laterale ouvertes a l'utilisateur (None = toutes).
     Union des groupes ; un groupe sans restriction ouvre tout ; sans groupe,
@@ -1117,7 +1125,14 @@ def index():
     user_fiche_simplifiee = _user_can_fiche_simplifiee(payload)
     block_layout = get_user_block_layout(payload)
     block_layout_json = json.dumps(block_layout)
+    # Prise de poste operateur : poste ouvert repris tel quel, sinon fenetre
+    # bloquante (operateur_poste.js)
+    operator_required = user_is_operator(payload)
+    operator_post = OPER.public_post(OPER.open_post(db, OPER.user_id_for(db, user_email))) \
+        if operator_required else None
     return render_template("index.html", user_roles=user_roles, user_apps=user_apps,
+                           operator_required=operator_required,
+                           operator_post=operator_post,
                            user_firstname=user_firstname, user_lastname=user_lastname,
                            user_email=user_email,
                            allowed_blocks_json=allowed_blocks_json,
@@ -2466,7 +2481,13 @@ app.register_blueprint(saison_indicateurs_bp)
 # Prise de poste operateur (operateurs*.py, docs/claude/operateurs.md) :
 # zones = couche Looker lue en direct, metiers = Bibler. CSRF ACTIF.
 from operateurs_api import operateurs_bp
+import operateurs as OPER
 app.register_blueprint(operateurs_bp)
+try:
+    OPER.ensure_indexes(db)
+    OPER.ensure_sous_classification(db)
+except Exception as _exc:
+    logging.getLogger(__name__).warning("Operateurs : init impossible (%s)", _exc)
 # Bloc Musee de l'accueil (musee_api.py) : GET user + bloc widget-musee,
 # lecture seule des collections musee_* (collecte scripts/musee_collect.py,
 # autonome du live-controle).

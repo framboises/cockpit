@@ -12,9 +12,21 @@ Plan complet : docs/claude/operateurs.md.
 
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
+import event_courant as EC
+import pcorg_history as PH
+
+PARIS = ZoneInfo("Europe/Paris")
 SETTINGS_ID = "operateurs"
+COL_POSTS = "cockpit_operator_posts"
+# Fiches de poste : PCO.Information, sous-classification dediee (filtrable
+# dans les regles Friday et les vues comme toute sous-classification)
+FICHE_CATEGORY = "PCO.Information"
+FICHE_SOUS_CLASSIFICATION = "Service"
+FICHE_TAG = "poste_operateur"
 POLYGON_TYPES = ("Polygon", "MultiPolygon")
 _LAYER_GEOMETRY_TYPES = ("polygon", "multipolygon")
 _ZONES_TTL_S = 60
@@ -157,3 +169,213 @@ def metiers(db):
     """Metiers de Bibler (`bible_structure`) : [{id, label}]."""
     return [{"id": str(d["_id"]), "label": str(d.get("metier") or d["_id"])}
             for d in db["bible_structure"].find({}, {"_id": 1, "metier": 1}).sort("metier", 1)]
+
+
+# ---------------------------------------------------------------------------
+# Postes
+# ---------------------------------------------------------------------------
+# Un poste est rattache au COMPTE (pas au navigateur) : tant qu'il est ouvert
+# (`open: true`, statut active ou pause), toute ouverture de Cockpit le
+# reprend sans nouvelle prise de poste ni nouvelle fiche. Index unique
+# partiel sur {user_id} quand open = true : un seul poste ouvert par compte.
+
+def ensure_indexes(db):
+    col = db[COL_POSTS]
+    col.create_index([("user_id", 1)], unique=True, name="uniq_open_post",
+                     partialFilterExpression={"open": True})
+    col.create_index([("open", 1), ("status", 1)], name="open_status")
+    col.create_index([("started_at", -1)], name="started_desc")
+
+
+def ensure_sous_classification(db):
+    """Cree la sous-classification "Service" de PCO.Information si absente."""
+    cfg = db["pcorg_config"]
+    doc = cfg.find_one({"_id": "pcorg_lists"}, {"sous_classifications": 1}) or {}
+    items = ((doc.get("sous_classifications") or {}).get(FICHE_CATEGORY)) or []
+    if any(str((i or {}).get("label") or "").strip().lower() == FICHE_SOUS_CLASSIFICATION.lower()
+           for i in items if isinstance(i, dict)):
+        return
+    cfg.update_one({"_id": "pcorg_lists"},
+                   {"$push": {f"sous_classifications.{FICHE_CATEGORY}":
+                              {"id": uuid.uuid4().hex[:8], "label": FICHE_SOUS_CLASSIFICATION}}},
+                   upsert=True)
+
+
+def user_id_for(db, email):
+    if not email:
+        return None
+    u = db["users"].find_one({"email": email}, {"_id": 1})
+    return u["_id"] if u else None
+
+
+def open_post(db, user_id):
+    return db[COL_POSTS].find_one({"user_id": user_id, "open": True}) if user_id else None
+
+
+def public_post(post):
+    if not post:
+        return None
+    return {
+        "id": str(post["_id"]),
+        "event": post.get("event"), "year": post.get("year"),
+        "zones": post.get("zones") or [], "zones_labels": post.get("zones_labels") or [],
+        "metier_id": post.get("metier_id"), "metier_label": post.get("metier_label"),
+        "status": post.get("status"),
+        "started_at": _iso(post.get("started_at")),
+        "pause_since": _iso(post.get("pause_since")),
+    }
+
+
+def _iso(dt):
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(PARIS).isoformat()
+
+
+def options(db):
+    """Choix proposes a la prise de poste."""
+    evs = [{"event": a["event"], "year": int(a["year"]), "kind": a["kind"], "phase": a.get("phase")}
+           for a in EC.active_events(db)]
+    zs = zones(db)
+    return {"events": evs, "zones": zs, "zones_configured": bool(get_settings(db)["zones_collection"]),
+            "metiers": metiers(db)}
+
+
+def validate_choice(db, event, year, zone_ids, metier_id):
+    """Retourne ({event, year, zones, zones_labels, metier_id, metier_label}, erreur)."""
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        return None, "annee_invalide"
+    if not EC.is_active(db, event, year):
+        return None, "evenement_non_en_cours"
+    zone_ids = [str(z) for z in (zone_ids or []) if z]
+    zone_ids = list(dict.fromkeys(zone_ids))
+    by_id = {z["id"]: z for z in zones(db)}
+    if by_id:
+        if not zone_ids:
+            return None, "zone_requise"
+        unknown = [z for z in zone_ids if z not in by_id]
+        if unknown:
+            return None, "zone_inconnue"
+    else:
+        zone_ids = []
+    mets = {m["id"]: m for m in metiers(db)}
+    if mets:
+        if metier_id not in mets:
+            return None, "metier_requis"
+    else:
+        metier_id = None
+    return {"event": event, "year": year, "zones": zone_ids,
+            "zones_labels": [by_id[z]["label"] for z in zone_ids],
+            "metier_id": metier_id,
+            "metier_label": mets[metier_id]["label"] if metier_id else None}, None
+
+
+def _operator_name(user):
+    return f"{user.get('firstname', '')} {user.get('lastname', '')}".strip() or user.get("email", "")
+
+
+def create_fiche(db, post, kind, text, user, now=None):
+    """Fiche Information "Service" de la main courante, cloturee des sa
+    creation (simple trace). `_id` deterministe (poste + type + horodatage
+    a la seconde) : un double envoi ne cree pas deux fiches. Pas de dispatch
+    automatique."""
+    now = now or datetime.now(PARIS)
+    operator = _operator_name(user)
+    email = user.get("email", "")
+    doc_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                            f"poste-operateur|{post['_id']}|{kind}|{now.strftime('%Y%m%d%H%M%S')}"))
+    history = [PH.make_entry(operator, text, ts=now),
+               PH.make_entry(operator, "Statut: En cours -> Terminé", ts=now)]
+    doc = {
+        "_id": doc_id,
+        "event": post["event"],
+        "year": int(post["year"]),
+        "ts": now,
+        "timestamp_iso": now.isoformat(),
+        "created_at": now,
+        "close_ts": now,
+        "close_iso": now.isoformat(),
+        "category": FICHE_CATEGORY,
+        "source": FICHE_CATEGORY,
+        "text": text,
+        "text_full": text,
+        "comment": PH.render_comment(history),
+        "comment_history": history,
+        "operator": operator,
+        "operator_id_create": email,
+        "operator_close": operator,
+        "operator_id_close": email,
+        "status_code": 10,
+        "severity": 0,
+        "niveau_urgence": None,
+        "is_incident": False,
+        "area": {"id": None, "desc": ", ".join(post.get("zones_labels") or [])} if post.get("zones_labels") else None,
+        "gps": None,
+        "group": None,
+        "content_category": {"sous_classification": FICHE_SOUS_CLASSIFICATION},
+        "extracted": {"phones": None, "plates": None},
+        "tags": [FICHE_TAG],
+        "operator_post_id": str(post["_id"]),
+        "operator_post_kind": kind,
+        "synced_at": None,
+        "sql_id": None,
+        "guid": None,
+        "server": "COCKPIT",
+        "bounce_rev": 1,
+    }
+    try:
+        db["pcorg"].insert_one(doc)
+    except Exception as exc:  # DuplicateKeyError : double envoi, fiche deja la
+        if "duplicate key" not in str(exc).lower():
+            raise
+    return doc_id
+
+
+def _describe(choice):
+    parts = []
+    if choice.get("zones_labels"):
+        parts.append("Zones : " + ", ".join(choice["zones_labels"]))
+    if choice.get("metier_label"):
+        parts.append("Metier : " + choice["metier_label"])
+    return " - ".join(parts)
+
+
+def take_post(db, user, user_id, choice):
+    """Prise de poste. Retourne (post, created). Un poste deja ouvert est
+    renvoye tel quel (reprise, aucune fiche)."""
+    existing = open_post(db, user_id)
+    if existing:
+        return existing, False
+    now = datetime.now(PARIS)
+    post = {
+        "user_id": user_id,
+        "email": user.get("email", ""),
+        "name": _operator_name(user),
+        **choice,
+        "status": "active",
+        "open": True,
+        "started_at": now,
+        "ended_at": None,
+        "end_reason": None,
+        "pause_since": None,
+        "history": [],
+    }
+    try:
+        ins = db[COL_POSTS].insert_one(post)
+    except Exception as exc:  # deux onglets en meme temps : l'autre a gagne
+        if "duplicate key" not in str(exc).lower():
+            raise
+        return open_post(db, user_id), False
+    post["_id"] = ins.inserted_id
+    text = "Prise de poste - " + post["name"]
+    desc = _describe(choice)
+    if desc:
+        text += " - " + desc
+    fiche_id = create_fiche(db, post, "prise", text, user, now=now)
+    db[COL_POSTS].update_one({"_id": post["_id"]},
+                             {"$push": {"history": {"at": now, "type": "prise", "fiche_id": fiche_id}}})
+    return post, True

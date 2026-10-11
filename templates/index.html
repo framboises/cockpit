@@ -918,11 +918,14 @@ window.__userCanEditFiche = {{ user_can_edit_fiche_json|default('true')|safe }};
 window.__userDispatchCategories = {{ user_dispatch_categories_json|default('[]')|safe }};
 window.__userEmail = {{ (user_email or '')|tojson }};
 window.__userCanCreateFiche = {{ user_can_create_fiche_json|default('true')|safe }};
+window.__operatorRequired = {{ (operator_required or false)|tojson }};
+window.__operatorPost = {{ (operator_post or none)|tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
 <script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
 <script src="{{ url_for('static', filename='js/alert_poller.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script src="{{ url_for('static', filename='js/operateur_poste.js') }}"></script>
 <script src="{{ url_for('static', filename='js/alerte.js') }}"></script>
 <script src="{{ url_for('static', filename='js/traffic.js') }}"></script>
 <script src="{{ url_for('static', filename='js/meteo.js') }}"></script>
