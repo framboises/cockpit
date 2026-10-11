@@ -10,7 +10,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="COCKPIT">
-  <title>COCKPIT - Detection</title>
+  <title>COCKPIT - IA</title>
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
@@ -22,7 +22,12 @@
 </head>
 
 {#
-  Detection (/detection, detection.py) : poste de controle des intrusions
+  Page IA (/detection). Trois modes (selecteur de l'en-tete, ia_capture.js) :
+  Intrusions (ci-dessous), Trafic (cameras en Capture IA : paires de photos
+  prises par la tache planifiee capture_ia.py, vehicules analyses par l'IA
+  locale) et Galerie (avis et cadres des operateurs pour entrainer l'IA).
+
+  Intrusions (detection.py) : poste de controle des intrusions
   remontees par les cameras (usage "Detection d'intrusion" de la page Cameras).
   Carte (cameras placees, zones dessinees), flux des intrusions en direct
   (filtres pieton / vehicule, zone, camera, statut ; regroupement), fiche
@@ -30,7 +35,7 @@
   Rendu : static/js/detection.js. Detail : docs/claude/detection.md.
 #}
 
-<body class="dt-body dt-view-list">
+<body class="dt-body dt-view-list ia-mode-intrusions">
 <div class="app-layout">
 
   {% set sidebar_active = '/detection' %}
@@ -42,21 +47,29 @@
       <button class="header-burger" id="header-burger-btn" type="button" aria-label="Menu">
         <span class="material-symbols-outlined">menu</span>
       </button>
-      <span class="material-symbols-outlined dt-header-ico">directions_walk</span>
-      <span class="header-event-name">Detection</span>
-      <span class="dt-live" id="dt-live"><span class="dt-live-dot"></span><span id="dt-live-text">Connexion...</span></span>
+      <span class="material-symbols-outlined dt-header-ico">psychology</span>
+      <span class="header-event-name">IA</span>
+      <div class="dt-seg ia-modes" id="ia-modes" role="tablist" aria-label="Mode">
+        <button type="button" data-mode="carte"><span class="material-symbols-outlined">map</span><span>Carte</span></button>
+        <button type="button" data-mode="intrusions" class="active"><span class="material-symbols-outlined">directions_walk</span><span>Intrusions</span></button>
+        <button type="button" data-mode="trafic"><span class="material-symbols-outlined">traffic</span><span>Trafic</span></button>
+        <button type="button" data-mode="foule"><span class="material-symbols-outlined">groups</span><span>Foule</span></button>
+        <button type="button" data-mode="secours"><span class="material-symbols-outlined">personal_injury</span><span>Secours</span></button>
+        <button type="button" data-mode="galerie"><span class="material-symbols-outlined">photo_library</span><span>Galerie</span></button>
+      </div>
+      <span class="dt-live ia-only-intrusions" id="dt-live"><span class="dt-live-dot"></span><span id="dt-live-text">Connexion...</span></span>
       <div class="header-spacer"></div>
-      <div class="dt-seg" id="dt-period" role="tablist" aria-label="Periode">
+      <div class="dt-seg ia-only-intrusions" id="dt-period" role="tablist" aria-label="Periode">
         <button type="button" data-period="1h">1 h</button>
         <button type="button" data-period="today" class="active">Aujourd'hui</button>
         <button type="button" data-period="24h">24 h</button>
         <button type="button" data-period="7d">7 j</button>
       </div>
-      <input type="date" class="dt-date" id="dt-date" title="Consulter un jour passe" aria-label="Jour">
+      <input type="date" class="dt-date ia-only-intrusions" id="dt-date" title="Consulter un jour passe" aria-label="Jour">
       <button class="dt-icon-btn dt-only-phone" id="dt-refresh-btn" type="button" title="Actualiser" aria-label="Actualiser">
         <span class="material-symbols-outlined">refresh</span>
       </button>
-      <button class="dt-btn" id="dt-edit-btn" type="button" title="Placer les cameras et dessiner les zones">
+      <button class="dt-btn ia-only-intrusions" id="dt-edit-btn" type="button" title="Placer les cameras et dessiner les zones">
         <span class="material-symbols-outlined">edit_location_alt</span><span class="dt-btn-label">Configurer</span>
       </button>
     </header>
@@ -109,6 +122,19 @@
           </div>
           <div class="dt-filter-row">
             <select class="dt-select" id="dt-camera" aria-label="Camera"><option value="">Toutes les cameras</option></select>
+            <select class="dt-select" id="dt-ai" aria-label="Verification IA">
+              <option value="">IA : toutes</option>
+              <option value="filtered">Filtrees par l'IA (sans alerte)</option>
+              <option value="alerted">Alertes envoyees</option>
+              <option value="voted">Avec mon avis</option>
+            </select>
+          </div>
+          <div class="dt-filter-row">
+            <select class="dt-select" id="dt-planning" aria-label="Planning">
+              <option value="">Dans le planning</option>
+              <option value="off">Hors planning (sans alerte)</option>
+              <option value="all">Planning : toutes</option>
+            </select>
           </div>
           <div class="dt-filter-row">
             <select class="dt-select" id="dt-status" aria-label="Statut">
@@ -136,6 +162,111 @@
       {# Telephone : onglet Groupes (activation d'un geste) #}
       <section class="dt-armpanel" id="dt-armpanel" aria-label="Activation des groupes"></section>
     </main>
+
+    {# Mode Carte (ouverture) : toutes les cameras placees, usages et etats (ia_capture.js) #}
+    <section class="ia-pane ia-pane-map" id="ia-carte" hidden aria-label="Carte des cameras">
+      <div class="ia-gmap-bar">
+        <div class="dt-seg" id="ia-gmap-filter" role="tablist" aria-label="Cameras affichees">
+          <button type="button" data-f="all" class="active">Toutes</button>
+          <button type="button" data-f="ia"><span class="material-symbols-outlined">psychology</span>Surveillees par l'IA</button>
+          <button type="button" data-f="intrusion"><span class="material-symbols-outlined">directions_walk</span>Intrusion</button>
+          <button type="button" data-f="traffic"><span class="material-symbols-outlined">traffic</span>Trafic</button>
+          <button type="button" data-f="crowd"><span class="material-symbols-outlined">groups</span>Foule</button>
+          <button type="button" data-f="secours"><span class="material-symbols-outlined">personal_injury</span>Secours</button>
+        </div>
+        <span class="ia-toolbar-help" id="ia-gmap-count"></span>
+      </div>
+      <div id="ia-gmap"></div>
+      {# Volet de detail d'une camera (clic sur la carte) #}
+      <aside class="dt-detail ia-gdetail" id="ia-gdetail" hidden role="dialog" aria-labelledby="ia-gdetail-title">
+        <header class="dt-detail-head">
+          <h3 id="ia-gdetail-title">Camera</h3>
+          <button type="button" class="dt-icon-btn" id="ia-gdetail-close" aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
+        </header>
+        <div class="dt-detail-body" id="ia-gdetail-body"></div>
+      </aside>
+      <div class="ia-gmap-legend" aria-hidden="true">
+        <span><i class="lg-cam"></i>Camera</span>
+        <span><i class="lg-intr"></i>Detection d'intrusion</span>
+        <span><i class="lg-traffic"></i>Trafic (couleur = etat)</span>
+        <span><i class="lg-traffic lg-crowd"></i>Foule (couleur = niveau)</span>
+        <span><i class="lg-alert"></i>Intrusion a traiter aujourd'hui</span>
+      </div>
+    </section>
+
+    {# Mode Trafic : cameras en analyse du trafic (ia_capture.js) #}
+    <section class="ia-pane" id="ia-trafic" hidden aria-label="Trafic">
+      <div class="ia-toolbar">
+        <div class="dt-seg" id="ia-trafic-hours" role="tablist" aria-label="Historique">
+          <button type="button" data-hours="6">6 h</button>
+          <button type="button" data-hours="24" class="active">24 h</button>
+          <button type="button" data-hours="168">7 j</button>
+        </div>
+        <span class="ia-toolbar-help">Paires de photos prises par la tache planifiee "Cockpit - Capture IA", vehicules analyses par l'IA locale.</span>
+        <div class="header-spacer"></div>
+        <button type="button" class="ia-switch" id="ia-trafic-switch" data-purpose="traffic" hidden></button>
+        <button type="button" class="dt-btn dt-btn-primary" id="ia-trafic-add"><span class="material-symbols-outlined">add_a_photo</span>Ajouter une camera</button>
+      </div>
+      <div class="ia-trafic-list" id="ia-trafic-list"></div>
+    </section>
+
+    {# Mode Foule : cameras en analyse de foule (densite par zone, ia_capture.js) #}
+    <section class="ia-pane" id="ia-foule" hidden aria-label="Foule">
+      <div class="ia-toolbar">
+        <div class="dt-seg" id="ia-foule-hours" role="tablist" aria-label="Historique">
+          <button type="button" data-hours="6">6 h</button>
+          <button type="button" data-hours="24" class="active">24 h</button>
+          <button type="button" data-hours="168">7 j</button>
+        </div>
+        <span class="ia-toolbar-help">Une photo par camera prise par la tache planifiee "Cockpit - Capture IA", personnes estimees par zone par l'IA locale.</span>
+        <div class="header-spacer"></div>
+        <button type="button" class="ia-switch" id="ia-foule-switch" data-purpose="crowd" hidden></button>
+        <button type="button" class="dt-btn dt-btn-primary" id="ia-foule-add"><span class="material-symbols-outlined">add_a_photo</span>Ajouter une camera</button>
+      </div>
+      <div class="ia-trafic-list" id="ia-foule-list"></div>
+    </section>
+
+    {# Mode Secours : personnes au sol (squelette, posture, duree ; ia_capture.js) #}
+    <section class="ia-pane" id="ia-secours" hidden aria-label="Secours">
+      <div class="ia-toolbar">
+        <div class="dt-seg" id="ia-secours-hours" role="tablist" aria-label="Historique">
+          <button type="button" data-hours="6">6 h</button>
+          <button type="button" data-hours="24" class="active">24 h</button>
+          <button type="button" data-hours="168">7 j</button>
+        </div>
+        <span class="ia-toolbar-help">Une photo par camera prise par la tache planifiee "Cockpit - Capture IA" ; l'IA locale repere le squelette de chaque personne et signale celles qui sont au sol, et depuis quand. Alertes : regle "Personne au sol" de la centrale d'alertes.</span>
+        <div class="header-spacer"></div>
+        <button type="button" class="ia-switch" id="ia-secours-switch" data-purpose="secours" hidden></button>
+        <button type="button" class="dt-btn dt-btn-primary" id="ia-secours-add"><span class="material-symbols-outlined">add_a_photo</span>Ajouter une camera</button>
+      </div>
+      <div class="ia-trafic-list" id="ia-secours-list"></div>
+    </section>
+
+    {# Mode Galerie : avis et cadres pour entrainer l'IA (ia_capture.js) #}
+    <section class="ia-pane" id="ia-galerie" hidden aria-label="Galerie">
+      <div class="ia-toolbar">
+        <div class="dt-seg" id="ia-gal-source" role="tablist" aria-label="Source">
+          <button type="button" data-source="all" class="active">Tout</button>
+          <button type="button" data-source="intrusions"><span class="material-symbols-outlined">directions_walk</span>Intrusions</button>
+          <button type="button" data-source="traffic"><span class="material-symbols-outlined">traffic</span>Trafic</button>
+          <button type="button" data-source="crowd"><span class="material-symbols-outlined">groups</span>Foule</button>
+          <button type="button" data-source="secours"><span class="material-symbols-outlined">personal_injury</span>Secours</button>
+        </div>
+        {# A revoir : seulement les photos utiles a l'apprentissage (changement d'etat,
+           cas rare, desaccord, personne allongee...) + un tirage de controle #}
+        <div class="dt-seg" id="ia-gal-mode" role="tablist" aria-label="Photos proposees">
+          <button type="button" data-gmode="revoir" class="active" title="Seulement les photos sans avis qui apprennent quelque chose a l'IA, les plus utiles d'abord"><span class="material-symbols-outlined">school</span>A revoir</button>
+          <button type="button" data-gmode="todo" title="Toutes les photos sans avis, les plus recentes d'abord">Sans avis</button>
+          <button type="button" data-gmode="all" title="Toutes les photos">Tout</button>
+        </div>
+        <span class="ia-toolbar-help" id="ia-gal-count"></span>
+        <div class="header-spacer"></div>
+        <button type="button" class="dt-btn" id="ia-gal-allyes" title="Marquez d'abord les erreurs (Non), puis validez d'un clic toutes les autres photos affichees sans avis"><span class="material-symbols-outlined">done_all</span>Oui a tout le reste</button>
+      </div>
+      <div class="ia-train" id="ia-gal-train" hidden></div>
+      <div class="ia-gal-grid" id="ia-gal-grid"></div>
+      <div class="ia-gal-more"><button type="button" class="dt-btn" id="ia-gal-more" hidden>Plus de photos</button></div>
+    </section>
 
     {# Telephone : barre d'onglets du bas #}
     <nav class="dt-tabs" id="dt-tabs" aria-label="Vues">
@@ -195,6 +326,7 @@
 <script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
 <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
 <script src="{{ url_for('static', filename='js/detection.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ia_capture.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ai_assistant.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ai_reports.js') }}"></script>
 </body>

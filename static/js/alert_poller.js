@@ -568,44 +568,96 @@
         });
         return row;
     }
-    // Les photos de l'intrusion arrivent encore apres l'alerte (une par
-    // message de la camera) : bandeau de vignettes relu a l'affichage puis
-    // 10 s plus tard. Sans le droit "Detection", l'appel echoue en silence et
-    // seule la premiere photo reste affichee.
-    function _intrusionPhotos(overlay, body, mainImg, episodeId) {
+    // Photo de l'intrusion, avec un cadre sur la cible detectee (souvent
+    // minuscule : un oiseau fait 20 px). Source : le snapshot de l'alerte, puis
+    // les photos de l'episode, qui arrivent encore apres l'alerte (une par
+    // message de la camera) : relu a l'affichage puis 10 s plus tard. Le
+    // snapshot de l'alerte peut manquer (alerte expiree) : la photo de
+    // l'episode prend alors le relais. Sans le droit "Detection", l'appel a
+    // l'episode echoue en silence et seul le snapshot reste. L'apercu admin
+    // montre la derniere intrusion reelle.
+    function _intrusionPhotos(overlay, body, item) {
+        var ad = item.actionData || {};
+        var shot = _el("div", "critical-alert-shot");
+        var mainImg = document.createElement("img");
+        mainImg.className = "critical-alert-snapshot";
+        mainImg.alt = "Photo " + (ad.camera_label || ad.camera_path || "");
+        var box = _el("div", "critical-alert-target-box");
+        box.style.display = "none";
+        shot.style.display = "none";
+        shot.appendChild(mainImg);
+        shot.appendChild(box);
+        body.appendChild(shot);
         var strip = _el("div", "critical-alert-thumbs");
         strip.style.display = "none";
-        mainImg.insertAdjacentElement("afterend", strip);
-        var current = null;
+        body.appendChild(strip);
+
+        var current = null;   // photo affichee (URL), null = snapshot de l'alerte
+        function setBox(rect) {
+            if (!rect || !(rect.w > 0) || !(rect.h > 0)) { box.style.display = "none"; return; }
+            box.style.left = (rect.x * 100) + "%";
+            box.style.top = (rect.y * 100) + "%";
+            box.style.width = (rect.w * 100) + "%";
+            box.style.height = (rect.h * 100) + "%";
+            box.style.display = "";
+        }
+        function show(src, rect) {
+            mainImg.src = src;
+            shot.style.display = "";
+            setBox(rect);
+        }
+        mainImg.onload = function() { shot.style.display = ""; };
+        mainImg.onerror = function() {
+            shot.style.display = "none";
+            if (!current) load();
+        };
+        if (item.alertId && ad.has_snapshot) show("/api/hik-snapshot/" + encodeURIComponent(item.alertId), null);
+
+        function render(photos) {
+            if (!photos.length) return;
+            if (!current || shot.style.display === "none") {
+                // Le snapshot de l'alerte est la premiere photo de l'episode :
+                // on la reprend depuis l'episode, qui porte le cadre de la cible
+                current = photos[0].photo;
+                show(photos[0].photo, photos[0].rect);
+            }
+            if (photos.length < 2) return;
+            strip.textContent = "";
+            strip.style.display = "";
+            photos.forEach(function(p, i) {
+                var th = document.createElement("img");
+                th.src = p.thumb || p.photo;
+                th.alt = "Photo " + (i + 1);
+                if (current === p.photo) th.classList.add("is-on");
+                th.addEventListener("click", function() {
+                    current = p.photo;
+                    show(p.photo, p.rect);
+                    Array.prototype.forEach.call(strip.children, function(c) { c.classList.toggle("is-on", c === th); });
+                });
+                strip.appendChild(th);
+            });
+            strip.appendChild(_el("span", "critical-alert-thumbs-n", photos.length + " photos"));
+        }
         function load() {
             if (!overlay.isConnected) return;
-            fetch("/api/detection/episodes/" + encodeURIComponent(episodeId), { credentials: "same-origin" })
+            var url = item.preview ? "/api/detection/episodes?limit=1"
+                                   : "/api/detection/episodes/" + encodeURIComponent(ad.episode_id);
+            fetch(url, { credentials: "same-origin" })
                 .then(function(r) { return r.ok ? r.json() : null; })
                 .then(function(ep) {
-                    var photos = (ep && ep.photos) || [];
-                    if (photos.length < 2) return;
-                    strip.textContent = "";
-                    strip.style.display = "";
-                    photos.forEach(function(p, i) {
-                        var th = document.createElement("img");
-                        th.src = p.thumb || p.photo;
-                        th.alt = "Photo " + (i + 1);
-                        if ((current || photos[0].photo) === p.photo) th.classList.add("is-on");
-                        th.addEventListener("click", function() {
-                            current = p.photo;
-                            mainImg.src = p.photo;
-                            mainImg.style.display = "";
-                            Array.prototype.forEach.call(strip.children, function(c) { c.classList.toggle("is-on", c === th); });
-                        });
-                        strip.appendChild(th);
-                    });
-                    strip.appendChild(_el("span", "critical-alert-thumbs-n", photos.length + " photos"));
+                    if (!ep || !overlay.isConnected) return;
+                    if (item.preview) {
+                        var last = (ep.items || [])[0];
+                        render(last && last.photo ? [{ photo: last.photo, thumb: last.thumb, rect: last.rect }] : []);
+                    } else {
+                        render(ep.photos || []);
+                    }
                 })
                 .catch(function() {});
         }
         // La fenetre est inseree dans la page juste apres : premier essai differe
         setTimeout(load, 50);
-        setTimeout(load, 10000);
+        if (!item.preview) setTimeout(load, 10000);
     }
 
     function _addMessage(body, text) {
@@ -693,14 +745,15 @@
             _addMessage(body, item.message);
             var isIntrusion = !!actionData.episode_id;
             if (isIntrusion) body.appendChild(_intrusionTags(actionData));
-            if (item.alertId && actionData.has_snapshot) {
+            if (isIntrusion) {
+                _intrusionPhotos(overlay, body, item);
+            } else if (item.alertId && actionData.has_snapshot) {
                 var img = document.createElement("img");
                 img.className = "critical-alert-snapshot";
                 img.src = "/api/hik-snapshot/" + encodeURIComponent(item.alertId);
                 img.alt = "Snapshot " + (actionData.camera_label || actionData.camera_path || "");
                 img.onerror = function(){ this.style.display = "none"; };
                 body.appendChild(img);
-                if (isIntrusion && !item.preview) _intrusionPhotos(overlay, body, img, actionData.episode_id);
             }
             body.appendChild(_el("div", "critical-alert-meta",
                 timeStr + (actionData.camera_location ? " — " + actionData.camera_location : "")));

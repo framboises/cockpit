@@ -472,10 +472,26 @@ def verdict_global(comptes, pire_severite):
 _ID_COURANT = "latest"
 
 
+# Itineraires crees dans Waze UNIQUEMENT pour etre lies a une camera de la
+# page IA (etiquette "[cam:133]" ou "[cam:133.2]" dans le nom, cf.
+# capture_ia.WAZE_TAG) : ignores partout ailleurs dans Cockpit (mur, montre,
+# briefing, alertes...). Seule la Capture IA les lit.
+_ETIQUETTE_CAMERA = re.compile(r"\[\s*cam\s*:?\s*\d+(?:\s*[.\-/]\s*\d+)?\s*\]", re.I)
+
+
+def est_route_camera(route):
+    return isinstance(route, dict) and bool(_ETIQUETTE_CAMERA.search(route.get("name") or ""))
+
+
+def sans_routes_camera(routes):
+    """Itineraires sans ceux reserves aux cameras."""
+    return [r for r in routes or [] if not est_route_camera(r)]
+
+
 def lire_routes(db):
-    """Itineraires du releve Waze courant."""
+    """Itineraires du releve Waze courant (hors itineraires reserves aux cameras)."""
     doc = db["waze_trafic"].find_one({"_id": _ID_COURANT}) or {}
-    return ((doc.get("data") or {}).get("routes")) or []
+    return sans_routes_camera(((doc.get("data") or {}).get("routes")) or [])
 
 
 def lire_alertes(db):

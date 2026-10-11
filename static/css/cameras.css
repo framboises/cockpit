@@ -200,6 +200,53 @@
   .cm-role-params, .cm-profile { grid-template-columns: 1fr; }
 }
 
+/* ---------- filtres (bureau : en ligne dans la barre) ---------- */
+.cm-filters { display: contents; }
+.cm-filters-reset, .cm-filters-done { display: none; }
+.cm-mnav-badge {
+  position: absolute; top: 5px; left: calc(50% + 6px); min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
+  background: var(--brand); color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
+}
+.cm-mnav-badge[hidden] { display: none; }
+
+/* ---------- telephone : barre du bas (style.css .mobile-bottom-nav),
+   recherche seule en haut, filtres en volet ouvert par "Filtres", carte
+   plein ecran ---------- */
+@media (max-width: 820px) {
+  .cm-header > .cm-btn { display: none; }
+  .cm-mnav .mb-tab.is-on { color: var(--brand); }
+  .cm-main { padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)); }
+  .cm-toolbar { flex-wrap: nowrap; padding: 6px 10px; gap: 8px; }
+  .cm-search { flex: 1 1 auto; height: 36px; }
+  .cm-count { font-size: .72rem; }
+  .cm-filters { display: none; }
+  /* Volet des filtres : sous la recherche, en liste ; sur la carte, par-dessus */
+  .cm-app.is-filters-open .cm-toolbar { flex-wrap: wrap; }
+  .cm-app.is-filters-open .cm-filters {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex-basis: 100%; padding-top: 2px;
+  }
+  .cm-app.is-filters-open .cm-filters .cm-select { width: 100%; min-width: 0; height: 40px; }
+  .cm-app.is-filters-open .cm-filters-reset,
+  .cm-app.is-filters-open .cm-filters-done { display: inline-flex; justify-content: center; height: 40px; }
+  .cm-app.is-map .cm-toolbar { display: none; }
+  .cm-app.is-map.is-filters-open .cm-toolbar {
+    display: flex; position: absolute; top: 0; left: 0; right: 0; z-index: 1150;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, .2);
+  }
+  .cm-list-area { position: relative; }
+  /* Carte : barre d'actions compacte en haut */
+  .cm-map-bar { top: 8px; left: 8px; right: 8px; max-width: none; gap: 6px; padding: 6px 8px; font-size: .76rem; }
+  .cm-map-bar .cm-btn { height: 32px; padding: 0 9px; font-size: .76rem; }
+  #cm-capture-all-label { display: none; }
+  /* Bulle Alfred au-dessus de la barre du bas */
+  body .ac-fab { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); right: 12px; width: 48px; height: 48px; }
+  /* Fiche et selection au-dessus de la barre du bas */
+  .cm-drawer { z-index: 1300; width: 100vw; }
+  .cm-drawer-foot { padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px)); }
+  .cm-bulk { padding: 6px 10px; }
+  .cm-bulk .cm-bulk-sep { display: none; }
+}
+
 /* ---------- carte des cameras ---------- */
 #cm-map-btn.is-on { background: var(--brand); border-color: var(--brand); color: #fff; }
 .cm-map-area { flex: 1; min-height: 0; position: relative; }
@@ -229,6 +276,11 @@
 .cm-tip-shot { height: 169px; border-radius: 12px 12px 0 0; background: #0f172a; display: flex; align-items: center; justify-content: center; overflow: hidden; margin-bottom: 8px; }
 .cm-tip-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cm-tip-noshot { color: #94a3b8; font-size: .8rem; }
+/* Enregistreur : une vignette par canal */
+.cm-tip-shot.cm-tip-grid { height: auto; display: grid; grid-template-columns: repeat(2, 1fr); gap: 2px; align-items: stretch; }
+.cm-tip-cell { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: #0f172a; }
+.cm-tip-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cm-tip-cell span { position: absolute; left: 3px; bottom: 3px; max-width: calc(100% - 6px); padding: 0 5px; border-radius: 999px; background: rgba(15, 23, 42, .75); color: #fff; font-size: .62rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cm-tip b { display: block; padding: 0 12px; font-size: .92rem; }
 .cm-tip-line { padding: 1px 12px; font-size: .78rem; }
 .cm-tip-muted { color: var(--muted); }

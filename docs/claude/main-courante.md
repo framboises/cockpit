@@ -97,6 +97,10 @@ Le parametrage SAISON peut porter des **jours publics** saisis dans GroundMaster
 - Carroyage résolu sur une grille chargée en mémoire (`sharedGridMeta`), plus sur celle affichée.
 - `apiCall()` ne rejette jamais : plus de bouton bloqué ni d'échec muet. Échap ferme fiche, assistant et modale GPS.
 
+### Capture caméra jointe à une fiche
+
+Sélecteur `openCameraPicker(callback, origin)` (`pcorg.js`) : liste `GET /api/pcorg/cameras` (droits `user`, comme `POST /api/pcorg/camera-capture` ; `/api/cameras` est réservé aux admins et laissait le sélecteur vide pour les opérateurs). `origin` = position de la fiche (`d.lat/d.lon` en détail, `createLat/createLon` à la création) : caméras triées de la plus proche à la plus lointaine, distance affichée, caméras sans position GPS ensuite. Recherche (nom, numéro, IP, lieu, sans accents), Entrée = première caméra. Détail côté serveur : `docs/claude/cameras.md` (caméras de piste jamais proposées).
+
 ### Jeton CSRF d'un onglet resté ouvert
 
 ⚠️ Le jeton de `<meta name="csrf-token">` expire après `WTF_CSRF_TIME_LIMIT` (**1 h**, défaut Flask-WTF) : un onglet ancien échouait à la première écriture, souvent après un formulaire entièrement rempli. `static/js/csrf_refresh.js` (chargé après `toast.js` sur `index`, `edit`, `field_dispatch`, `analyse_ops`) renouvelle la balise via `GET /api/csrf-token` toutes les 15 min et au retour sur l'onglet. Le handler `CSRFError` renvoie `code: "csrf"` : `apiPost` (`main.js`) et `apiCall` (`pcorg.js`) renouvellent alors le jeton et **rejouent la requête une fois**. L'ouverture de l'assistant de création et de l'édition vérifie la session d'abord (`checkSessionBeforeForm`) et propose de recharger si l'**authentification** elle-même a expiré, avant la saisie plutôt qu'après. Tout module qui lit la balise `<meta>` au moment de l'appel (et non au chargement) en profite sans modification.

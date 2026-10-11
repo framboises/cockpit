@@ -178,8 +178,8 @@ def _utilisateur():
 
 
 def _ip_client():
-    fwd = request.headers.get("X-Forwarded-For", "")
-    return fwd.split(",")[0].strip() if fwd else (request.remote_addr or "")
+    # IP reelle posee par waitress (proxy de confiance IIS, cf. app.py)
+    return request.remote_addr or ""
 
 
 def _audit(action, resultat, panneau=None, duree_s=None, detail=None, user=None, ip=None):

@@ -1975,7 +1975,7 @@
                 showToast("error", r.error || "Camera injoignable ou erreur capture");
               }
             });
-        });
+        }, { lat: d.lat, lon: d.lon });  // cameras les plus proches de la fiche en tete
       });
       commentBtns.appendChild(camBtn);
 
@@ -4804,7 +4804,7 @@
               camBtn.appendChild(document.createTextNode(" Joindre une capture camera"));
               showToast("error", "Camera injoignable ou erreur reseau");
             });
-        });
+        }, { lat: createLat, lon: createLon });  // position posee a l'etape 1, si elle existe
       });
       camRow.appendChild(camBtn);
 
@@ -5745,12 +5745,34 @@
   }
 
   // ── Camera picker ──────────────────────────────────────────────────────────
+  // Liste : /api/pcorg/cameras (droits "user" comme la capture ; /api/cameras
+  // est reserve aux admins). Si la fiche a une position, les cameras sont
+  // triees de la plus proche a la plus lointaine (GPS de la couche carto
+  // `cameras`, par IP) ; les cameras sans position suivent par ordre alpha.
+  // Recherche sur nom, numero, IP et lieu, sans accents.
   var _camPickerOverlay = null;
   var _camPickerCallback = null;
   var _camPickerCache = null;
+  var _camPickerOrigin = null;
 
-  function openCameraPicker(callback) {
+  function camNorm(s) {
+    return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  }
+  function camDistM(lat1, lon1, lat2, lon2) {
+    var R = 6371000, rad = Math.PI / 180;
+    var dLat = (lat2 - lat1) * rad, dLon = (lon2 - lon1) * rad;
+    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+  function camFmtDist(m) {
+    return m < 1000 ? (Math.round(m / 10) * 10) + " m" : (m / 1000).toFixed(1).replace(".", ",") + " km";
+  }
+
+  // origin : {lat, lon} de la fiche (facultatif)
+  function openCameraPicker(callback, origin) {
     _camPickerCallback = callback;
+    _camPickerOrigin = (origin && origin.lat != null && origin.lon != null) ? origin : null;
 
     if (!_camPickerOverlay) {
       var overlay = mkEl("div", "pcorg-cam-picker-overlay");
@@ -5768,6 +5790,28 @@
       header.appendChild(closeBtn);
       panel.appendChild(header);
 
+      var search = mkEl("label", "pcorg-cam-picker-search");
+      search.appendChild(matIcon("search"));
+      var q = mkEl("input", "");
+      q.type = "search"; q.id = "pcorg-cam-picker-q"; q.autocomplete = "off";
+      q.placeholder = "Rechercher : nom, numero, IP, lieu";
+      q.setAttribute("aria-label", "Rechercher une camera");
+      q.addEventListener("input", renderCameraList);
+      q.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") { e.stopPropagation(); closeCameraPicker(); }
+        if (e.key === "Enter") {  // Entree = premiere camera de la liste
+          e.preventDefault();
+          var first = document.querySelector("#pcorg-cam-picker-list .pcorg-cam-picker-item");
+          if (first) first.click();
+        }
+      });
+      search.appendChild(q);
+      panel.appendChild(search);
+
+      var hint = mkEl("div", "pcorg-cam-picker-hint");
+      hint.id = "pcorg-cam-picker-hint";
+      panel.appendChild(hint);
+
       var list = mkEl("div", "pcorg-cam-picker-list");
       list.id = "pcorg-cam-picker-list";
       panel.appendChild(list);
@@ -5777,8 +5821,14 @@
       _camPickerOverlay = overlay;
     }
 
+    var qi = document.getElementById("pcorg-cam-picker-q");
+    qi.value = "";
     _camPickerOverlay.classList.add("show");
     loadCameraList();
+    // Clavier physique : saisie directe ; sur tablette on n'ouvre pas le clavier d'office
+    if (window.matchMedia && window.matchMedia("(pointer: fine)").matches) {
+      setTimeout(function () { qi.focus(); }, 60);
+    }
   }
 
   function closeCameraPicker() {
@@ -5788,27 +5838,64 @@
 
   function loadCameraList() {
     var list = document.getElementById("pcorg-cam-picker-list");
+    if (_camPickerCache) { renderCameraList(); return; }
     list.textContent = "";
+    document.getElementById("pcorg-cam-picker-hint").textContent = "";
     var loading = mkEl("div", "pcorg-cam-picker-loading");
     loading.textContent = "Chargement...";
     list.appendChild(loading);
+    fetch("/api/pcorg/cameras", { credentials: "same-origin" })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (cameras) {
+        _camPickerCache = Array.isArray(cameras) ? cameras : [];
+        renderCameraList();
+      })
+      .catch(function () {
+        list.textContent = "";
+        var err = mkEl("div", "pcorg-cam-picker-empty");
+        err.textContent = "Erreur de chargement";
+        list.appendChild(err);
+      });
+  }
 
-    var doRender = function (cameras) {
-      list.textContent = "";
-      if (!cameras || !cameras.length) {
-        var empty = mkEl("div", "pcorg-cam-picker-empty");
-        empty.textContent = "Aucune camera disponible";
-        list.appendChild(empty);
-        return;
-      }
-      cameras.forEach(function (cam) {
-        if (!cam.enabled) return;
+  function renderCameraList() {
+    var list = document.getElementById("pcorg-cam-picker-list");
+    var hint = document.getElementById("pcorg-cam-picker-hint");
+    if (!list || !_camPickerCache) return;
+    var o = _camPickerOrigin;
+    var terms = camNorm(document.getElementById("pcorg-cam-picker-q").value).split(/\s+/).filter(Boolean);
+    var cams = _camPickerCache.map(function (c) {
+      var dist = (o && c.lat != null && c.lon != null) ? camDistM(o.lat, o.lon, c.lat, c.lon) : null;
+      return { cam: c, dist: dist, hay: camNorm([c.name, c.ip, c.location].join(" ")) };
+    }).filter(function (x) {
+      return terms.every(function (t) { return x.hay.indexOf(t) >= 0; });
+    });
+    cams.sort(function (a, b) {
+      if (a.dist != null && b.dist != null) return a.dist - b.dist;
+      if (a.dist != null) return -1;
+      if (b.dist != null) return 1;
+      return camNorm(a.cam.name) < camNorm(b.cam.name) ? -1 : 1;
+    });
+    hint.textContent = o
+      ? "Les plus proches de la fiche en premier"
+      : "Fiche sans position : ordre alphabetique";
+
+    list.textContent = "";
+    if (!cams.length) {
+      var empty = mkEl("div", "pcorg-cam-picker-empty");
+      empty.textContent = terms.length ? "Aucune camera ne correspond" : "Aucune camera disponible";
+      list.appendChild(empty);
+      return;
+    }
+    cams.forEach(function (x) {
+        var cam = x.cam;
         var item = mkEl("div", "pcorg-cam-picker-item");
         item.dataset.id = cam._id;
 
         var thumb = mkEl("div", "pcorg-cam-picker-thumb");
         var img = mkEl("img", "");
-        img.src = "/api/cameras/" + encodeURIComponent(cam._id) + "/snapshot";
+        img.loading = "lazy";
+        img.src = "/api/pcorg/cameras/" + encodeURIComponent(cam._id) + "/snapshot";
         img.alt = "";
         img.addEventListener("error", function () { img.style.display = "none"; placeholder.style.display = ""; });
         img.addEventListener("load", function () { img.style.display = "block"; placeholder.style.display = "none"; });
@@ -5826,6 +5913,11 @@
         meta.textContent = cam.ip + (cam.location ? " - " + cam.location : "");
         info.appendChild(name);
         info.appendChild(meta);
+        if (x.dist != null) {
+          var dist = mkEl("span", "pcorg-cam-picker-dist");
+          dist.textContent = camFmtDist(x.dist);
+          info.appendChild(dist);
+        }
 
         var arrow = matIcon("chevron_right");
         arrow.style.cssText = "color:var(--muted);font-size:20px;";
@@ -5841,24 +5933,7 @@
         });
 
         list.appendChild(item);
-      });
-    };
-
-    if (_camPickerCache) {
-      doRender(_camPickerCache);
-    } else {
-      fetch("/api/cameras").then(function (r) { return r.json(); })
-        .then(function (cameras) {
-          _camPickerCache = cameras;
-          doRender(cameras);
-        })
-        .catch(function () {
-          list.textContent = "";
-          var err = mkEl("div", "pcorg-cam-picker-empty");
-          err.textContent = "Erreur de chargement";
-          list.appendChild(err);
-        });
-    }
+    });
   }
 
   // ── Aide a la saisie (pcorg_assist.py) ─────────────────────────────────────

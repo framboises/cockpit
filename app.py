@@ -569,7 +569,7 @@ ADMIN_PAGE_REGISTRY = [
      "paths": ["/admin/wiki", "/api/wiki/admin"]},
     {"id": "cameras",        "label": "Cameras",         "icon": "videocam",
      "paths": ["/cameras", "/api/cameras", "/api/camera-profiles"]},
-    {"id": "detection",      "label": "Detection",       "icon": "directions_walk",
+    {"id": "detection",      "label": "IA (intrusions, trafic)", "icon": "psychology",
      "paths": ["/detection", "/api/detection"]},
     {"id": "montre",         "label": "Montre",          "icon": "watch",
      "paths": ["/watch-admin", "/api/v1/watch/admin"]},
@@ -4506,6 +4506,16 @@ DETECTION_TYPES = {
     # Page Detection : intrusions des groupes / canaux (cockpit_dispatch,
     # une alerte par intrusion, activation par programme horaire du groupe)
     "detection_intrusion",
+    # Page IA, analyse du trafic : ralenti / bouchon mesure sur les cameras
+    # en analyse du trafic (capture_ia.py cree l'alerte, tache planifiee)
+    "traffic_camera",
+    # Page IA : vehicule arrete trop longtemps dans une zone "stationnement
+    # interdit" (duree max par zone, capture_ia.py cree l'alerte)
+    "parking_camera",
+    # Page IA : foule trop dense dans une zone (personnes / m2, capture_ia.py)
+    "crowd_camera",
+    # Page IA, mode Secours : personne au sol (squelette, capture_ia.py)
+    "secours_camera",
 }
 
 # Catalogue des Smart Events Hikvision exposes a la modale de creation d'alerte
@@ -5100,6 +5110,10 @@ def get_hik_snapshot(alert_id):
     if not doc:
         # Tentative aussi sur l'historique au cas ou l'alerte a expire
         doc = db['cockpit_active_alerts_archive'].find_one({"_id": oid}, {"actionData": 1})
+    if not doc:
+        # Une alerte camera expire au bout de 10 min (expiresAt) : une fenetre
+        # affichee plus tard (poste en veille, onglet rouvert) perdait sa photo.
+        doc = COL_ALERT_HISTORY.find_one({"alert_id": alert_id}, {"actionData": 1})
     if not doc:
         return jsonify({"error": "Alerte introuvable"}), 404
     snap = (doc.get("actionData") or {}).get("snapshot_path") or ""
@@ -6851,6 +6865,28 @@ def pcorg_add_photo(doc_id):
     if not n:
         return jsonify({"error": "fiche close ou supprimee entre-temps"}), 409
     return jsonify({"ok": True, "photos": photos})
+
+
+@app.route('/api/pcorg/cameras', methods=['GET'])
+@role_required("user")
+def pcorg_cameras():
+    """Cameras capturables pour le selecteur de la main courante (avec GPS).
+    /api/cameras est reserve aux admins (page Cameras) : les operateurs
+    passent par ici, avec les memes droits que la capture."""
+    from cameras import capture_camera_list
+    return jsonify(capture_camera_list())
+
+
+@app.route('/api/pcorg/cameras/<cam_id>/snapshot', methods=['GET'])
+@role_required("user")
+def pcorg_camera_snapshot(cam_id):
+    """Vignette (derniere capture) d'une camera pour le selecteur."""
+    from flask import send_file
+    from cameras import latest_snapshot_path
+    path = latest_snapshot_path(cam_id)
+    if not path:
+        return "", 204
+    return send_file(path, mimetype="image/jpeg", max_age=30)
 
 
 @app.route('/api/pcorg/camera-capture', methods=['POST'])
@@ -9772,4 +9808,13 @@ if __name__ == "__main__":
         app.run(debug=True, use_reloader=True, host="127.0.0.1", port=PORT)
     else:
         logger.warning(f"[PROD] Running TITAN Home on port {PORT}")
-        serve(app, host="0.0.0.0", port=PORT)
+        # IIS (ARR) relaie depuis 127.0.0.1 et ajoute l'IP reelle du client en
+        # DERNIER dans X-Forwarded-For. Sans proxy de confiance, waitress
+        # supprime cet en-tete et toutes les requetes semblent venir de
+        # 127.0.0.1. Ici : seul 127.0.0.1 est cru, et seulement sa derniere
+        # valeur (les precedentes viennent du client, falsifiables) ->
+        # request.remote_addr = vraie IP du client. Connexion directe au port
+        # 4008 : en-tete supprime, adresse de la connexion. Utiliser
+        # request.remote_addr, jamais l'en-tete (10/10/2026).
+        serve(app, host="0.0.0.0", port=PORT, trusted_proxy="127.0.0.1",
+              trusted_proxy_headers={"x-forwarded-for"}, trusted_proxy_count=1)

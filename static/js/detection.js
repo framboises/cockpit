@@ -38,7 +38,7 @@
     var PERIOD_LABEL = { "1h": "la derniere heure", today: "aujourd'hui", "24h": "les dernieres 24 h", "7d": "les 7 derniers jours" };
 
     var S = {
-        period: "today", date: "", type: "", zone: "", camera: "", status: "open", groupBy: "", grp: "",
+        period: "today", date: "", type: "", zone: "", camera: "", status: "open", ai: "", planning: "", groupBy: "", grp: "",
         config: { channels: [], zones: [], groups: [] }, overview: null, items: [], next: null, seq: 0,
         openId: null, edit: false, placing: null, drawing: null, editZone: null, editGroup: null, pollN: 0,
     };
@@ -208,7 +208,7 @@
             var mk = L.marker([dv.map.lat, dv.map.lng], { icon: camIcon({ armed: armedAny }, st), draggable: S.edit, zIndexOffset: 500 });
             var label = dv.name + (dv.channels.length > 1 ? " (" + dv.channels.length + " canaux)" : " - " + dv.channels[0].channel_name);
             mk.bindTooltip(el("span", "", label + (st ? " : " + st.n + " intrusion(s)" : "") +
-                (!armedAny ? " - desactivee (" + dropped + " detection(s) ignoree(s) aujourd'hui)" : !armedAll ? " - certains canaux desactives" : "")), { className: "dt-tip", direction: "top", offset: [0, -16] });
+                (!armedAny ? " - hors planning (" + dropped + " detection(s) gardee(s) sans alerte aujourd'hui)" : !armedAll ? " - certains canaux desactives" : "")), { className: "dt-tip", direction: "top", offset: [0, -16] });
             mk.on("click", function () {
                 if (S.edit) return;
                 S.camera = S.camera === dv.key ? "" : dv.key;
@@ -226,7 +226,13 @@
         });
     }
 
+    // Carte cachee (page ouverte en mode Trafic / Galerie / Carte globale) :
+    // taille nulle, un cadrage donnerait la Terre entiere. On le refait des
+    // que la carte redevient visible (IADetection.refresh).
+    var needFit = false;
     function fitAll() {
+        if (!$("dt-map").offsetWidth) { needFit = true; return; }
+        needFit = false;
         var pts = [];
         S.config.channels.forEach(function (c) { if (c.map) pts.push([c.map.lat, c.map.lng]); });
         S.config.zones.forEach(function (z) { (z.polygon || []).forEach(function (p) { pts.push(p); }); });
@@ -243,6 +249,8 @@
         if (S.grp) p.set("group", S.grp);
         if (S.camera) p.set("camera", S.camera);
         if (S.status) p.set("status", S.status);
+        if (S.ai) p.set("ai", S.ai);
+        if (S.planning) p.set("planning", S.planning);
         return p;
     }
 
@@ -392,7 +400,7 @@
     }
 
     function updateFilterCount() {
-        var n = [S.type, S.grp, S.zone, S.camera].filter(Boolean).length + (S.status !== "open" ? 1 : 0) + (S.period !== "today" ? 1 : 0);
+        var n = [S.type, S.grp, S.zone, S.camera, S.ai, S.planning].filter(Boolean).length + (S.status !== "open" ? 1 : 0) + (S.period !== "today" ? 1 : 0);
         $("dt-filters-n").textContent = n ? String(n) : "";
     }
 
@@ -471,7 +479,7 @@
             h.appendChild(el("b", "", g.name));
             h.appendChild(stateChip(g));
             c.appendChild(h);
-            c.appendChild(el("div", "dt-arm-label", g.state_label + (!g.armed && g.dropped_today ? " - " + g.dropped_today + " detection(s) ignoree(s) aujourd'hui" : "")));
+            c.appendChild(el("div", "dt-arm-label", g.state_label + (!g.armed && g.dropped_today ? " - " + g.dropped_today + " detection(s) hors planning aujourd'hui (gardees sans alerte)" : "")));
             var acts = el("div", "dt-arm-actions");
             var on = el("button", "dt-btn is-arm"); on.type = "button";
             on.appendChild(icon("notifications_active")); on.appendChild(document.createTextNode("Activer " + armDur + " h"));
@@ -523,6 +531,274 @@
 
 
     /* ---------------- flux ---------------- */
+    /* ---------------- verification IA locale ---------------- */
+    var AI_LABEL = { personne: "une personne", vehicule: "un vehicule", velo: "un velo", oiseau: "un oiseau",
+                     animal: "un animal", objet: "un objet", rien: "rien", panneau: "un panneau",
+                     branche: "des branches", reflet: "un reflet", sol: "un sol vide", grillage: "un grillage" };
+    var AI_NAME = { personne: "Personne", vehicule: "Vehicule", velo: "Velo", oiseau: "Oiseau", animal: "Animal",
+                    panneau: "Panneau", branche: "Branches", reflet: "Reflet", sol: "Sol vide", grillage: "Grillage", objet: "Objet" };
+    var AI_COLOR = { personne: "#16a34a", vehicule: "#2563eb", velo: "#16a34a" };
+    // Cadres trouves par le detecteur de l'IA sur cette photo (hors "objet",
+    // trop vague : un frisbee pour une corneille)
+    function aiBoxes(p) {
+        return ((p.ai && p.ai.detections) || []).filter(function (d) { return d.box && d.category !== "objet" && d.conf >= 0.2; });
+    }
+    // r : portion de la photo affichee (zoom), en fractions
+    function aiBoxEl(d, r) {
+        var bx = el("div", "dt-box dt-box-ai");
+        bx.style.left = ((d.box.x - r.x) / r.w * 100) + "%"; bx.style.top = ((d.box.y - r.y) / r.h * 100) + "%";
+        bx.style.width = (d.box.w / r.w * 100) + "%"; bx.style.height = (d.box.h / r.h * 100) + "%";
+        bx.style.setProperty("--bc", AI_COLOR[d.category] || "#7c3aed");
+        bx.appendChild(el("span", "dt-box-tag", "IA voit : " + (AI_NAME[d.category] || d.category).toLowerCase() + " " + Math.round(d.conf * 100) + " %"));
+        return bx;
+    }
+    var LABEL_CAT = {
+        personne: { label: "Personne", icon: "directions_walk", color: "#16a34a" },
+        vehicule: { label: "Vehicule", icon: "directions_car", color: "#2563eb" },
+    };
+    // Cadres poses par l'operateur (verite terrain pour l'entrainement)
+    function labelBoxEl(b, r, by) {
+        var c = LABEL_CAT[b.category] || LABEL_CAT.personne;
+        var bx = el("div", "dt-box dt-box-label");
+        bx.style.left = ((b.x - r.x) / r.w * 100) + "%"; bx.style.top = ((b.y - r.y) / r.h * 100) + "%";
+        bx.style.width = (b.w / r.w * 100) + "%"; bx.style.height = (b.h / r.h * 100) + "%";
+        bx.style.setProperty("--bc", c.color);
+        var t = el("span", "dt-box-tag", "verifie : " + c.label.toLowerCase());
+        if (by) t.title = "Indique par " + by;
+        bx.appendChild(t);
+        return bx;
+    }
+
+    // Editeur : l'operateur dessine ou est la personne / le vehicule sur une
+    // photo (souris ou doigt), plusieurs cadres possibles, loupe pour les
+    // petites cibles. "Rien sur cette photo" enregistre une liste vide.
+    function openAnnotator(ep, idx, onSaved) {
+        var p = ep.photos[idx];
+        var boxes = ((p.label && p.label.boxes) || []).map(function (b) { return { x: b.x, y: b.y, w: b.w, h: b.h, category: b.category }; });
+        var cat = "personne", zoomed = false, nat = null;
+        var ov = el("div", "dt-annot");
+        var panel = el("div", "dt-annot-panel");
+        ov.appendChild(panel);
+        var head = el("div", "dt-annot-head");
+        head.appendChild(el("b", "", "Ou est la cible ?"));
+        head.appendChild(el("span", "", "Choisis Personne ou Vehicule, puis trace un cadre autour avec la souris ou le doigt. Plusieurs cadres possibles ; touche un cadre pour le supprimer."));
+        panel.appendChild(head);
+
+        var tools = el("div", "dt-annot-tools");
+        var seg = el("div", "dt-annot-cats");
+        Object.keys(LABEL_CAT).forEach(function (k) {
+            var b = el("button", "dt-annot-cat"); b.type = "button"; b.dataset.cat = k;
+            b.style.setProperty("--cc", LABEL_CAT[k].color);
+            b.appendChild(icon(LABEL_CAT[k].icon)); b.appendChild(el("span", "", LABEL_CAT[k].label));
+            b.addEventListener("click", function () { cat = k; syncTools(); });
+            seg.appendChild(b);
+        });
+        tools.appendChild(seg);
+        var zb = el("button", "dt-btn"); zb.type = "button";
+        zb.addEventListener("click", function () { zoomed = !zoomed; layout(); syncTools(); });
+        if (p.rect) tools.appendChild(zb);
+        panel.appendChild(tools);
+
+        var stage = el("div", "dt-annot-stage");
+        var im = document.createElement("img"); im.alt = ""; im.draggable = false;
+        var layer = el("div", "dt-annot-layer");
+        stage.appendChild(im); stage.appendChild(layer);
+        panel.appendChild(stage);
+
+        var foot = el("div", "dt-annot-foot");
+        var none = el("button", "dt-btn"); none.type = "button";
+        none.appendChild(icon("block")); none.appendChild(document.createTextNode("Rien sur cette photo"));
+        var cancel = el("button", "dt-btn"); cancel.type = "button"; cancel.textContent = "Annuler";
+        var save = el("button", "dt-btn dt-btn-primary"); save.type = "button";
+        foot.appendChild(none); foot.appendChild(el("span", "dt-annot-sp")); foot.appendChild(cancel); foot.appendChild(save);
+        panel.appendChild(foot);
+
+        function region() {
+            if (!zoomed || !p.rect || !nat) return { x: 0, y: 0, w: 1, h: 1 };
+            return zoomRegion(p.rect, nat.w / nat.h, nat.w / nat.h);
+        }
+        function layout() {
+            if (!nat) return;
+            var r = region();
+            var ratio = (r.w * nat.w) / (r.h * nat.h);
+            var maxW = Math.min(window.innerWidth - 48, 1200), maxH = window.innerHeight - 260;
+            var w = Math.min(maxW, maxH * ratio);
+            stage.style.width = w + "px"; stage.style.height = (w / ratio) + "px";
+            im.style.width = (100 / r.w) + "%";
+            im.style.left = (-r.x / r.w * 100) + "%";
+            im.style.top = (-r.y / r.h * 100) + "%";
+            draw();
+        }
+        function draw(tmp) {
+            var r = region();
+            layer.textContent = "";
+            boxes.concat(tmp ? [tmp] : []).forEach(function (b, i) {
+                var bx = labelBoxEl(b, r);
+                if (b !== tmp) {
+                    bx.classList.add("is-editable");
+                    bx.title = "Supprimer ce cadre";
+                    bx.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+                    bx.addEventListener("click", function (e) { e.stopPropagation(); boxes.splice(i, 1); draw(); syncTools(); });
+                }
+                layer.appendChild(bx);
+            });
+        }
+        function syncTools() {
+            Array.prototype.forEach.call(seg.children, function (b) { b.classList.toggle("is-on", b.dataset.cat === cat); });
+            zb.textContent = "";
+            zb.appendChild(icon(zoomed ? "zoom_out" : "zoom_in"));
+            zb.appendChild(document.createTextNode(zoomed ? "Vue entiere" : "Loupe sur la cible"));
+            save.textContent = boxes.length ? "Enregistrer (" + boxes.length + " cadre" + (boxes.length > 1 ? "s" : "") + ")" : "Enregistrer";
+            save.disabled = !boxes.length;
+        }
+        // Dessin : coordonnees ramenees a la photo entiere (0-1)
+        var start = null;
+        function pt(e) {
+            var b = stage.getBoundingClientRect(), r = region();
+            var fx = Math.min(1, Math.max(0, (e.clientX - b.left) / b.width));
+            var fy = Math.min(1, Math.max(0, (e.clientY - b.top) / b.height));
+            return { x: r.x + fx * r.w, y: r.y + fy * r.h };
+        }
+        function rectOf(a, b) {
+            return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y), category: cat };
+        }
+        stage.addEventListener("pointerdown", function (e) {
+            if (e.button !== undefined && e.button !== 0) return;
+            start = pt(e);
+            stage.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        });
+        stage.addEventListener("pointermove", function (e) { if (start) draw(rectOf(start, pt(e))); });
+        stage.addEventListener("pointerup", function (e) {
+            if (!start) return;
+            var b = rectOf(start, pt(e));
+            start = null;
+            if (b.w > 0.004 && b.h > 0.004) boxes.push(b);
+            draw(); syncTools();
+        });
+        stage.addEventListener("pointercancel", function () { start = null; draw(); });
+
+        function close() { window.removeEventListener("resize", layout); document.removeEventListener("keydown", onKey, true); ov.remove(); }
+        function onKey(e) { if (e.key === "Escape") { e.stopPropagation(); close(); } }
+        function submit(list) {
+            save.disabled = none.disabled = true;
+            send("POST", API.episodes + "/" + ep.id + "/photos/" + idx + "/label", { photo: p.photo, boxes: list }).then(function (r) {
+                p.label = r.label;
+                if (r.ai) ep.ai = r.ai;
+                toast("success", list.length ? "Cible enregistree, merci : elle servira a entrainer l'IA" : "Enregistre : rien sur cette photo");
+                close();
+                if (onSaved) onSaved(r);
+            }).catch(function (e) { save.disabled = none.disabled = false; toast("error", e.message); });
+        }
+        save.addEventListener("click", function () { submit(boxes); });
+        none.addEventListener("click", function () { submit([]); });
+        cancel.addEventListener("click", close);
+        ov.addEventListener("click", function (e) { if (e.target === ov) close(); });
+        window.addEventListener("resize", layout);
+        document.addEventListener("keydown", onKey, true);
+        im.addEventListener("load", function () { nat = { w: im.naturalWidth, h: im.naturalHeight }; layout(); });
+        im.src = p.photo;
+        syncTools();
+        document.body.appendChild(ov);
+    }
+    // Re-rend le bloc "Verification IA" de la fiche ouverte et la carte de la liste
+    function refreshAi(ep) {
+        var old = document.querySelector("#dt-detail-body .dt-ai");
+        if (old && S.openId === ep.id) old.replaceWith(aiPanel(ep));
+        S.items.forEach(function (x) { if (x.id === ep.id) x.ai = ep.ai; });
+        renderList();
+    }
+    function pct(x) { return x != null ? " (" + Math.round(x * 100) + " %)" : ""; }
+    // Ce que l'IA voit le plus probablement : le pourcentage le plus haut,
+    // detecteur (personne / vehicule) ou avis (oiseau, panneau...), quelle que
+    // soit la decision. ai : verdict d'episode {label, conf, guess} ou resultat
+    // d'une photo {detections, guess}
+    function aiTop(ai) {
+        if (!ai) return null;
+        var c = [];
+        if (ai.label && ai.label !== "rien" && ai.conf) c.push({ label: ai.label, p: ai.conf });
+        (ai.detections || []).forEach(function (d) { if (d.category !== "objet") c.push({ label: d.category, p: d.conf }); });
+        if (ai.guess && ai.guess[0]) c.push({ label: ai.guess[0].label, p: ai.guess[0].p });
+        c.sort(function (a, b) { return b.p - a.p; });
+        return c[0] || null;
+    }
+    function aiBadge(ai) {
+        if (!ai || !ai.status) return null;
+        var t = aiTop(ai);
+        var lab = t ? (AI_NAME[t.label] || t.label).toLowerCase() + " " + Math.round(t.p * 100) + " %" : "rien";
+        if (ai.status === "filtered") return badge("dt-b-ai-filtered", "filter_alt", "Filtree IA : " + lab);
+        if (ai.status === "confirmed") return badge("dt-b-ai-confirmed", "verified", "IA : " + lab);
+        return badge("dt-b-ai-unverified", "help", "Non verifiee");
+    }
+    // Verdict + avis de l'operateur (pouce). Les avis servent a regler le
+    // seuil du filtre et a constituer un jeu d'entrainement.
+    function aiPanel(ep) {
+        var ai = ep.ai || {};
+        var box = el("div", "dt-ai" + (ai.status ? " is-" + ai.status : ""));
+        var v = el("div", "dt-ai-verdict");
+        var txt, top = aiTop(ai);
+        var seen = top ? (AI_LABEL[top.label] || top.label) + pct(top.p) : "rien";
+        if (ai.status === "filtered") {
+            v.appendChild(icon("filter_alt"));
+            txt = "Filtree : l'IA voit surtout " + seen + ", pas de personne ni de vehicule. Aucune alerte envoyee.";
+        } else if (ai.status === "confirmed") {
+            v.appendChild(icon("verified"));
+            txt = "Confirmee : l'IA voit surtout " + seen +
+                (top && top.label !== ai.label ? ", et detecte " + (AI_LABEL[ai.label] || ai.label) + pct(ai.real_conf || ai.conf) : "") +
+                (ep.armed === false ? ". Hors planning : pas d'alerte." : ". Alerte envoyee.");
+        } else {
+            v.appendChild(icon("help"));
+            txt = "Non verifiee" + (ai.reason ? " (" + ai.reason + ")" : "") +
+                (ep.armed === false ? ". Hors planning : pas d'alerte." : " : alerte envoyee sans verification.");
+        }
+        if (ai.status === "filtered" && ep.armed === false) txt = txt.replace("Aucune alerte envoyee.", "Hors planning : pas d'alerte de toute facon.");
+        v.appendChild(el("span", "", txt));
+        box.appendChild(v);
+        if (ai.guess && ai.guess.length) {
+            var gl = el("div", "dt-ai-guess");
+            gl.appendChild(el("span", "", "Selon l'IA :"));
+            ai.guess.slice(0, 3).forEach(function (gs, i) {
+                if (i && gs.p < 0.03) return;
+                gl.appendChild(el("span", "chip" + (i ? "" : " is-top"), (AI_NAME[gs.label] || gs.label) + " " + Math.round(gs.p * 100) + " %"));
+            });
+            box.appendChild(gl);
+        }
+        if (!ai.status) return box;
+        var vote = el("div", "dt-ai-vote");
+        vote.appendChild(el("span", "dt-ai-vote-q", "L'IA a-t-elle raison ? Ton avis sert a l'entrainer."));
+        var row = el("div", "dt-thumbs");
+        vote.appendChild(row);
+        [["up", "thumb_up", "Bien vu"], ["down", "thumb_down", "Erreur"]].forEach(function (o) {
+            var b = el("button", "dt-thumb-btn is-" + o[0] + (ai.vote === o[0] ? " is-on" : "")); b.type = "button";
+            b.setAttribute("aria-pressed", ai.vote === o[0] ? "true" : "false");
+            b.title = o[0] === "up" ? "L'IA a raison" : "L'IA s'est trompee";
+            b.appendChild(icon(o[1])); b.appendChild(el("span", "", o[2]));
+            b.addEventListener("click", function () {
+                var nv = ai.vote === o[0] ? null : o[0];  // second clic : retire l'avis
+                send("POST", API.episodes + "/" + ep.id + "/ai-vote", { vote: nv }).then(function (r) {
+                    ep.ai = r.ai;
+                    refreshAi(ep);
+                    toast("success", nv ? "Avis enregistre, merci" : "Avis retire");
+                }).catch(function (e) { toast("error", e.message); });
+            });
+            row.appendChild(b);
+        });
+        if (ai.vote && ai.vote_by) vote.appendChild(el("span", "dt-ai-vote-by", "Avis de " + ai.vote_by + " " + ago(ai.vote_at)));
+        // Erreur sur une intrusion filtree : montrer ou etait la cible
+        if (ai.vote === "down" && ep.photos && ep.photos.length) {
+            var lb = el("button", "dt-btn dt-btn-primary dt-annot-open"); lb.type = "button";
+            lb.appendChild(icon("ads_click"));
+            lb.appendChild(document.createTextNode("Indiquer ou est la personne ou le vehicule"));
+            lb.addEventListener("click", function () {
+                var i = gallery && gallery.ep === ep ? gallery.idx : ep.photos.length - 1;
+                openAnnotator(ep, i, function () { if (gallery && gallery.ep === ep) gallery.render(); refreshAi(ep); });
+            });
+            vote.appendChild(lb);
+        }
+        box.appendChild(vote);
+        return box;
+    }
+
     function card(ep) {
         var k = kind(ep.types);
         var c = el("button", "dt-card" + (ep.status === "new" ? " is-new" : "") + (ep.active ? " is-active" : "") +
@@ -542,6 +818,9 @@
         ep.types.forEach(function (t) { var s = TYPE[t] || TYPE.other; top.appendChild(badge(s.cls, s.icon, s.label)); });
         if (ep.active) top.appendChild(badge("dt-b-active", "emergency", "En cours"));
         else if (ep.status !== "seen") top.appendChild(badge("dt-b-" + ep.status, null, STATUS[ep.status]));
+        if (ep.armed === false) top.appendChild(badge("dt-b-offplan", "schedule", "Hors planning"));
+        var ab = aiBadge(ep.ai);
+        if (ab) top.appendChild(ab);
         top.appendChild(el("span", "dt-card-time", fmtTime(ep.started_at)));
         b.appendChild(top);
         b.appendChild(el("div", "dt-card-where", ep.camera_name + (ep.channel_name ? " - " + ep.channel_name : "")));
@@ -613,6 +892,20 @@
     }
 
     /* ---------------- fiche ---------------- */
+    // Etiquette du cadre de la camera : ce que dit la camera ET ce que voit
+    // l'IA (son pourcentage le plus haut), cote a cote
+    function boxTag(p) {
+        var tag = el("span", "dt-box-tag", "camera : " + (BOX_LABEL[p.type] || "objet"));
+        var top = aiTop(p.ai);
+        var tip = "Ce que la camera a cru voir" + (p.target_id ? " (cible " + p.target_id + ")" : "");
+        if (p.ai) {
+            var lab = top ? (AI_NAME[top.label] || top.label).toLowerCase() + " " + Math.round(top.p * 100) + " %" : "rien";
+            tag.appendChild(el("b", "dt-box-tag-ai", "IA : " + lab));
+            tip += ", et ce que voit l'IA (son pourcentage le plus haut)";
+        }
+        tag.title = tip + ". Le cadre en pointilles = ce que detecte l'IA.";
+        return tag;
+    }
     function photoView(p, ep, big) {
         var wrap = el("div", "dt-photo");
         var im = document.createElement("img");
@@ -625,11 +918,15 @@
             bx.style.left = (p.rect.x * 100) + "%"; bx.style.top = (p.rect.y * 100) + "%";
             bx.style.width = (p.rect.w * 100) + "%"; bx.style.height = (p.rect.h * 100) + "%";
             bx.style.setProperty("--bc", (TYPE[p.type] || TYPE.other).color);
-            var tag = el("span", "dt-box-tag", BOX_LABEL[p.type] || "objet");
-            if (p.target_id) tag.title = "Cible " + p.target_id;
-            bx.appendChild(tag);
+            bx.appendChild(boxTag(p));
             wrap.appendChild(bx);
         }
+        aiBoxes(p).forEach(function (d) {
+            wrap.appendChild(aiBoxEl(d, { x: 0, y: 0, w: 1, h: 1 }));
+        });
+        ((p.label && p.label.boxes) || []).forEach(function (b) {
+            wrap.appendChild(labelBoxEl(b, { x: 0, y: 0, w: 1, h: 1 }, p.label.by));
+        });
         wrap.appendChild(el("div", "dt-photo-cap", (TYPE[p.type] || TYPE.other).label + " - " + fmtTime(p.at)));
         return wrap;
     }
@@ -665,10 +962,11 @@
             bx.style.left = ((p.rect.x - r.x) / r.w * 100) + "%"; bx.style.top = ((p.rect.y - r.y) / r.h * 100) + "%";
             bx.style.width = (p.rect.w / r.w * 100) + "%"; bx.style.height = (p.rect.h / r.h * 100) + "%";
             bx.style.setProperty("--bc", (TYPE[p.type] || TYPE.other).color);
-            var tag = el("span", "dt-box-tag", BOX_LABEL[p.type] || "objet");
-            bx.appendChild(tag);
+            bx.appendChild(boxTag(p));
             if ((p.rect.y - r.y) / r.h < 0.08) bx.classList.add("tag-inside");
             z.appendChild(bx);
+            aiBoxes(p).forEach(function (d) { z.appendChild(aiBoxEl(d, r)); });
+            ((p.label && p.label.boxes) || []).forEach(function (b) { z.appendChild(labelBoxEl(b, r, p.label.by)); });
             z.appendChild(el("span", "dt-zoom-x", "x" + Math.max(1, Math.round(1 / r.w * 10) / 10)));
         });
         im.src = p.photo;
@@ -679,8 +977,8 @@
     // Galerie d'une intrusion : photo de scene + zoom cible, fleches,
     // compteur, bandeau de vignettes, touches fleches gauche / droite.
     var gallery = null;
-    function buildGallery(photos, start) {
-        var g = { photos: photos, idx: start, root: el("div", "dt-gallery") };
+    function buildGallery(photos, start, ep) {
+        var g = { photos: photos, idx: start, root: el("div", "dt-gallery"), ep: ep || null };
         var stage = el("div", "dt-stage");
         var side = el("div", "dt-zoom-wrap");
         var strip = photos.length > 1 ? el("div", "dt-strip") : null;
@@ -708,9 +1006,50 @@
             zv.addEventListener("click", function () { openLightbox(photos, g.idx, "zoom"); });
             side.appendChild(zv);
             var info = el("div", "dt-zoom-info");
-            info.appendChild(el("b", "", "Zoom " + (BOX_LABEL[p.type] || "cible")));
+            info.appendChild(el("b", "", "Zoom sur la cible signalee"));
             info.appendChild(el("span", "", fmtTime(p.at) + (p.target_id ? " - cible " + p.target_id : "")));
             if (!p.rect) info.appendChild(el("span", "", "Pas de cadre fourni par la camera"));
+            var pa = p.ai;
+            // Qui dit quoi : la camera (cadre orange) contre l'IA (pointilles)
+            info.appendChild(el("span", "", "La camera a signale : " + (BOX_LABEL[p.type] || "une cible")));
+            if (pa) {
+                var det = (pa.detections || []).filter(function (d) { return d.category !== "objet"; })[0];
+                var real = pa.decision === "confirmed" || (pa.real_conf || 0) >= 0.3;
+                var top = aiTop(pa);  // pourcentage le plus haut de l'IA, quel qu'il soit
+                var concl = el("span", "dt-ai-concl " + (real ? "is-real" : "is-false"));
+                concl.textContent = "L'IA voit surtout : " + (top ? (AI_NAME[top.label] || top.label).toLowerCase() + " (" + Math.round(top.p * 100) + " %)" : "rien") +
+                    (real ? " - intrusion confirmee" : " - fausse alerte probable");
+                info.appendChild(concl);
+                info.appendChild(el("span", "", "Detecteur IA : " + (det ? (AI_NAME[det.category] || det.category) + " " + Math.round(det.conf * 100) + " %" : "ni personne ni vehicule")));
+                if (pa.guess && pa.guess.length) {
+                    var gl = el("div", "dt-ai-guess");
+                    gl.appendChild(el("span", "", "Selon l'IA :"));
+                    pa.guess.slice(0, 3).forEach(function (gs, i) {
+                        if (i && gs.p < 0.03) return;
+                        gl.appendChild(el("span", "chip" + (i ? "" : " is-top"), (AI_NAME[gs.label] || gs.label) + " " + Math.round(gs.p * 100) + " %"));
+                    });
+                    info.appendChild(gl);
+                }
+            }
+            if (p.label) {
+                var nb = { personne: 0, vehicule: 0 };
+                p.label.boxes.forEach(function (b) { nb[b.category] = (nb[b.category] || 0) + 1; });
+                var parts = [];
+                if (nb.personne) parts.push(nb.personne + " personne" + (nb.personne > 1 ? "s" : ""));
+                if (nb.vehicule) parts.push(nb.vehicule + " vehicule" + (nb.vehicule > 1 ? "s" : ""));
+                info.appendChild(el("span", "dt-label-sum", "Verifie" + (p.label.by ? " par " + p.label.by : "") + " : " +
+                    (parts.length ? parts.join(", ") : "rien sur cette photo")));
+            }
+            if (g.ep) {
+                var ab = el("button", "dt-btn dt-annot-open"); ab.type = "button";
+                ab.appendChild(icon("ads_click"));
+                ab.appendChild(document.createTextNode(p.label ? "Corriger les cadres" : "Indiquer personne / vehicule"));
+                ab.addEventListener("click", function () {
+                    var i = g.idx;
+                    openAnnotator(g.ep, i, function () { g.render(); refreshAi(g.ep); });
+                });
+                info.appendChild(ab);
+            }
             side.appendChild(info);
             if (strip) Array.prototype.forEach.call(strip.children, function (b, i) { b.classList.toggle("is-current", i === g.idx); });
         };
@@ -756,7 +1095,7 @@
             gallery = null;
             if (ep.photos.length) {
                 // Galerie : derniere photo affichee d'abord (la plus recente)
-                gallery = buildGallery(ep.photos, ep.photos.length - 1);
+                gallery = buildGallery(ep.photos, ep.photos.length - 1, ep);
                 body.appendChild(gallery.root);
             } else {
                 body.appendChild(el("p", "dt-help", "Pas de photo : activez l'envoi de l'image dans les reglages de la detection sur la camera."));
@@ -769,6 +1108,12 @@
                 var d = el("div", "dt-fact"); d.appendChild(el("b", "", f[0])); d.appendChild(el("span", "", f[1])); facts.appendChild(d);
             });
             body.appendChild(facts);
+            if (ep.ai) {
+                var aiSec = el("div");
+                aiSec.appendChild(el("h4", "dt-sec", "Verification IA"));
+                aiSec.appendChild(aiPanel(ep));
+                body.appendChild(aiSec);
+            }
 
             var where = el("div");
             where.appendChild(el("h4", "dt-sec", "Ou"));
@@ -809,7 +1154,8 @@
                     send("POST", API.status, { ids: [ep.id], status: a[0], note: note.value }).then(function () {
                         toast("success", "Intrusion " + STATUS[a[0]].toLowerCase());
                         refreshAll();
-                        openDetail(ep.id);
+                        // Cloturee : le traitement est fini, on ferme le volet
+                        if (a[0] === "closed") closeDetail(); else openDetail(ep.id);
                     }).catch(function (e) { toast("error", e.message); });
                 });
                 acts.appendChild(b);
@@ -1566,7 +1912,10 @@
         (g._id ? send("PUT", API.groups + "/" + g._id, body) : send("POST", API.groups, body)).then(function () {
             toast("success", "Groupe enregistre");
             $("dt-plan").close();
-            return loadConfig().then(function () { if (S.edit) renderConfig(); refreshAll(); });
+            return loadConfig().then(function () {
+                if (S.edit) renderConfig(); refreshAll();
+                document.dispatchEvent(new CustomEvent("ia:groups-changed"));
+            });
         }).catch(function (e) { toast("error", e.message); }).then(function () { btn.disabled = false; });
     }
 
@@ -1709,6 +2058,8 @@
         $("dt-zone").addEventListener("change", function () { S.zone = this.value; updateFilterCount(); refreshAll(); });
         $("dt-camera").addEventListener("change", function () { S.camera = this.value; updateFilterCount(); refreshAll(); });
         $("dt-status").addEventListener("change", function () { S.status = this.value; updateFilterCount(); refreshAll(); });
+        $("dt-ai").addEventListener("change", function () { S.ai = this.value; updateFilterCount(); refreshAll(); });
+        $("dt-planning").addEventListener("change", function () { S.planning = this.value; updateFilterCount(); refreshAll(); });
         $("dt-groupby").addEventListener("change", function () { S.groupBy = this.value; renderList(); });
         $("dt-group").addEventListener("change", function () { S.grp = this.value; updateFilterCount(); refreshAll(); });
         // Telephone : onglets, filtres replies, actualisation, glisser dans la visionneuse
@@ -1786,5 +2137,33 @@
         document.addEventListener("visibilitychange", function () { if (!document.hidden) poll(); });
     }
 
+    // Pour la page IA (ia_capture.js : trafic, galerie) : plannings (groupes)
+    // et fiche d'une intrusion
+    window.IADetection = {
+        config: function () { return S.config; },
+        reloadConfig: function () { return loadConfig(); },
+        openGroup: function (gid, members) {
+            var g = (S.config.groups || []).filter(function (x) { return x._id === gid; })[0];
+            if (!g) { g = newGroupDraft(); g.members = members || []; }
+            openPlan(g);
+        },
+        // Filtre "camera" du mode Intrusions (cle "<id>:*" = tous les canaux)
+        filterCamera: function (key) {
+            var sel = $("dt-camera"), id = String(key || "").split(":")[0];
+            // Appareil a un seul canal : son option est "<id>:<canal>"
+            var opt = sel && Array.prototype.filter.call(sel.options, function (o) { return o.value.indexOf(id + ":") === 0; })[0];
+            S.camera = opt ? opt.value : (key || "");
+            if (sel) sel.value = S.camera;
+            updateFilterCount();
+        },
+        openEpisode: function (id) { setView("list"); this.refresh(); openDetail(id); },
+        refresh: function () {
+            refreshAll();
+            if (!map) return;
+            map.invalidateSize();
+            if (needFit) fitAll();
+            setTimeout(function () { map.invalidateSize(); }, 50);
+        },
+    };
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
 })();

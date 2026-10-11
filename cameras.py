@@ -159,6 +159,25 @@ ROLE_TYPES = [
         "desc": "Intrusions dans les zones de la camera (pietons, vehicules) : page Detection.",
         "needs_path": True, "params": [],
     },
+    {
+        # Analyse du trafic : paire de photos a intervalle regulier analysee par
+        # l'IA locale (bouchons). Prise par la tache planifiee "Cockpit -
+        # Capture IA" (capture_ia.py), JAMAIS par Cockpit. Reglage depuis la
+        # page IA ; les alertes passent par la centrale d'alertes (regle
+        # "Trafic - ralenti / bouchon"), pas par l'usage.
+        "type": "capture", "label": "Analyse IA (trafic / foule / secours)", "icon": "traffic", "color": "#7c3aed",
+        "desc": "Photos a intervalle regulier analysees par l'IA : bouchons, foule trop dense ou personne au sol (page IA, alertes par la centrale).",
+        "needs_path": False,
+        "params": [
+            {"key": "purpose", "label": "Analyse", "kind": "select", "default": "traffic",
+             "options": [["traffic", "Trafic (bouchons)"], ["crowd", "Foule (trop de monde)"], ["secours", "Secours (personne au sol)"]]},
+            {"key": "interval_min", "label": "Une mesure toutes les", "kind": "select", "default": "3",
+             "options": [["1", "1 min"], ["2", "2 min"], ["3", "3 min"], ["5", "5 min"], ["10", "10 min"], ["15", "15 min"]]},
+            {"key": "gap_s", "label": "Intervalle entre les 2 paires", "kind": "select", "default": "8",
+             "options": [["5", "5 s"], ["8", "8 s"], ["10", "10 s"], ["15", "15 s"], ["20", "20 s"]]},
+            {"key": "preset", "label": "Preset a rappeler avant (vide = aucun)", "kind": "text", "default": ""},
+        ],
+    },
 ]
 ROLE_INDEX = {r["type"]: r for r in ROLE_TYPES}
 
@@ -529,6 +548,50 @@ def cameras_page():
 # ---------------------------------------------------------------------------
 # Appareils
 # ---------------------------------------------------------------------------
+# Cameras proposees a la main courante (liste ET vignettes : meme filtre)
+_CAPTURE_QUERY = {"enabled": {"$ne": False}, "brand": {"$in": sorted(CONTROLLABLE_BRANDS)},
+                  "credential_profile_id": {"$ne": None}}
+
+
+def capture_camera_list():
+    """Cameras dont la main courante peut joindre une capture (route
+    /api/pcorg/cameras d'app.py, droits "user" comme la capture) : actives,
+    marque pilotable, profil d'identifiants, jamais de piste. Position GPS lue
+    dans la couche carto `cameras` (FeatureCollection, propriete IP) pour
+    proposer les plus proches de la fiche en tete du selecteur."""
+    _ensure_db()
+    pos = {}
+    layer = _db["cameras"].find_one({"type": "FeatureCollection"}, {"features.geometry": 1, "features.properties.IP": 1}) or {}
+    for f in layer.get("features") or []:
+        ip = ((f.get("properties") or {}).get("IP") or "").strip()
+        coords = (f.get("geometry") or {}).get("coordinates") or []
+        if ip and len(coords) >= 2:
+            pos.setdefault(ip, (coords[1], coords[0]))
+    out = []
+    for d in _col_cameras.find(_CAPTURE_QUERY, {"name": 1, "ip": 1, "location": 1, "site": 1, "group_path": 1, "model": 1}).sort("name", 1):
+        if is_piste_device(d):
+            continue
+        p = pos.get(d.get("ip"))
+        out.append({"_id": str(d["_id"]), "name": d.get("name", ""), "ip": d.get("ip", ""),
+                    "location": d.get("location") or d.get("site", ""),
+                    "lat": p[0] if p else None, "lon": p[1] if p else None})
+    return out
+
+
+def latest_snapshot_path(cam_id, channel=None):
+    """Derniere capture (vignette) d'une camera proposee a la main courante,
+    ou None. Meme filtre que capture_camera_list : un operateur ne peut pas
+    lire la capture d'une camera hors liste (piste, desactivee...)."""
+    if not re.match(r"^[0-9a-f]{24}$", cam_id or ""):
+        return None
+    _ensure_db()
+    d = _col_cameras.find_one(dict(_CAPTURE_QUERY, _id=ObjectId(cam_id)), {"ip": 1, "group_path": 1, "model": 1})
+    if not d or is_piste_device(d):
+        return None
+    path = os.path.join(UPLOAD_DIR, _snapshot_name(cam_id, channel))
+    return path if os.path.isfile(path) else None
+
+
 @cameras_bp.route("/api/cameras", methods=["GET"])
 def list_cameras():
     """Tous les appareils (toutes marques). Tableau : format attendu aussi par
@@ -693,11 +756,18 @@ def cameras_map():
             unplaced += 1
             continue
         pub = _pub_device(d, profiles)
+        # Derniere capture de chaque canal (vignettes de la bulle)
+        snaps = {}
+        for c in pub["channels"]:
+            f = os.path.join(UPLOAD_DIR, _snapshot_name(pub["_id"], c["no"]))
+            if os.path.isfile(f):
+                snaps[str(c["no"])] = _iso(datetime.fromtimestamp(os.path.getmtime(f), timezone.utc))
         snap = os.path.join(UPLOAD_DIR, _snapshot_name(pub["_id"], None))
         pub.update({
             "lat": pos["lat"], "lng": pos["lng"], "map_source": source,
             "geo_type": (geo or {}).get("type", ""),
             "snap_at": _iso(datetime.fromtimestamp(os.path.getmtime(snap), timezone.utc)) if os.path.isfile(snap) else None,
+            "snaps": snaps,
         })
         out.append(pub)
     return jsonify({"cameras": out, "unplaced": unplaced})
@@ -890,28 +960,40 @@ _capture_job = {"running": False}
 _capture_lock = threading.Lock()
 
 
-def _capture_one(doc):
-    cam = make_hik_camera(doc)
+def _capture_one(doc, no=None):
+    cam = make_hik_camera(doc, no)
     cam_id = str(doc["_id"])
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     save_path = os.path.join(UPLOAD_DIR, "%s_ch%d_%s.jpg" % (cam_id, cam.channel, time.strftime("%Y%m%d_%H%M%S")))
     call_camera(doc, lambda: cam.capture_image(save_path))
-    shutil.copy2(save_path, os.path.join(UPLOAD_DIR, _snapshot_name(cam_id, None)))
+    shutil.copy2(save_path, os.path.join(UPLOAD_DIR, _snapshot_name(cam_id, cam.channel)))
+
+
+def _capture_channels(doc):
+    """Numeros des canaux actifs d'un appareil (au moins le 1er)."""
+    nos = [int(c.get("no", i + 1)) for i, c in enumerate(doc.get("channels") or []) if c.get("enabled", True) is not False]
+    return nos or [1]
 
 
 def _run_capture_job(docs):
+    # Un appareil a la fois par thread, ses canaux l'un apres l'autre : un
+    # enregistreur a 5 cameras n'est pas sollicite 5 fois en meme temps
     def one(doc):
-        try:
-            _capture_one(doc)
-            ok, err = True, ""
-        except Exception as e:
-            ok, err = False, camera_error(doc, e, "Capture de masse")
-        with _capture_lock:
-            _capture_job["done"] += 1
-            if ok:
-                _capture_job["ok"] += 1
-            else:
-                _capture_job["failed"].append({"id": str(doc["_id"]), "name": doc.get("name", ""), "error": err})
+        nos = _capture_channels(doc)
+        for no in nos:
+            try:
+                _capture_one(doc, no)
+                ok, err = True, ""
+            except Exception as e:
+                ok, err = False, camera_error(doc, e, "Capture de masse")
+            with _capture_lock:
+                _capture_job["done"] += 1
+                if ok:
+                    _capture_job["ok"] += 1
+                else:
+                    _capture_job["failed"].append({"id": str(doc["_id"]), "channel": no,
+                                                   "name": doc.get("name", "") + (" (canal %d)" % no if len(nos) > 1 else ""),
+                                                   "error": err})
     try:
         with ThreadPoolExecutor(max_workers=CAPTURE_ALL_WORKERS) as pool:
             list(pool.map(one, docs))
@@ -924,8 +1006,9 @@ def _run_capture_job(docs):
 
 @cameras_bp.route("/api/cameras/capture-all", methods=["GET", "POST"])
 def capture_all():
-    """POST {ids} : capture le premier canal de chaque appareil pilotable
-    (jamais les cameras de piste) ; GET : progression."""
+    """POST {ids} : capture chaque canal actif de chaque appareil pilotable
+    (jamais les cameras de piste) ; GET : progression (total / done en
+    canaux)."""
     if request.method == "GET":
         with _capture_lock:
             return jsonify(dict(_capture_job, failed=list(_capture_job.get("failed") or [])))
@@ -943,11 +1026,12 @@ def capture_all():
         if _capture_job.get("running"):
             return jsonify({"error": "Une capture de masse est deja en cours"}), 409
         _capture_job.clear()
-        _capture_job.update({"running": True, "total": len(docs), "done": 0, "ok": 0, "failed": [],
+        total = sum(len(_capture_channels(d)) for d in docs)
+        _capture_job.update({"running": True, "total": total, "devices": len(docs), "done": 0, "ok": 0, "failed": [],
                              "skipped": skipped, "started_at": _iso(datetime.now(timezone.utc)), "finished_at": None})
     threading.Thread(target=_run_capture_job, args=(docs,), daemon=True, name="capture-all").start()
-    logger.info("Capture de masse lancee : %d camera(s), %d ignoree(s)", len(docs), skipped)
-    return jsonify({"ok": True, "total": len(docs), "skipped": skipped}), 202
+    logger.info("Capture de masse lancee : %d camera(s), %d canal(aux), %d ignoree(s)", len(docs), total, skipped)
+    return jsonify({"ok": True, "total": total, "devices": len(docs), "skipped": skipped}), 202
 
 
 # ---------------------------------------------------------------------------
@@ -1092,9 +1176,27 @@ def camera_action(cam_id):
         return jsonify({"error": camera_error(doc, e, "Essuie-glace")}), 502
 
 
+# Canaux sans PTZ (objectif fixe : la camera repond 403 / 404 sur
+# /ISAPI/PTZCtrl/channels/<n>/presets) : retenus 24 h pour ne plus la
+# solliciter a chaque ouverture de fiche (ex. 151 Technoparc, canal 2).
+_NO_PTZ = {}
+NO_PTZ_TTL_S = 86400
+
+
 def _view_presets(doc, cam):
-    """Presets de vue rappelables (sans les presets de fonction Hikvision)."""
-    presets = cam.list_presets(raise_errors=True)
+    """Presets de vue rappelables (sans les presets de fonction Hikvision).
+    Canal sans PTZ : liste vide, sans avertissement."""
+    key = (str(doc.get("_id")), cam.channel)
+    if time.time() - _NO_PTZ.get(key, 0) < NO_PTZ_TTL_S:
+        return []
+    try:
+        presets = cam.list_presets(raise_errors=True)
+    except requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code in (403, 404):
+            _NO_PTZ[key] = time.time()
+            logger.info("Camera %s canal %s : pas de PTZ (HTTP %s), aucun preset", doc.get("name"), cam.channel, e.response.status_code)
+            return []
+        raise
     if doc.get("brand") == "hikvision":
         presets = [p for p in presets if p["id"] not in HIK_RESERVED_PRESETS]
     return presets

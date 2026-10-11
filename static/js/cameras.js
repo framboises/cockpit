@@ -203,6 +203,10 @@
         $("cm-table-wrap").hidden = isMap;
         $("cm-map-btn").classList.toggle("is-on", isMap);
         $("cm-map-btn").setAttribute("aria-pressed", isMap ? "true" : "false");
+        document.querySelector(".cm-app").classList.toggle("is-map", isMap);
+        Array.prototype.forEach.call(document.querySelectorAll("#cm-mnav [data-mnav]"), function (b) {
+            b.classList.toggle("is-active", b.dataset.mnav === v);
+        });
         try { localStorage.setItem("cockpit-cameras-view", v); } catch (e) {}
         if (!isMap) return;
         initCamMap();
@@ -234,6 +238,10 @@
     }
     function placed(list) { return list.filter(function (c) { return M.pos[c._id]; }); }
     function capturable(c) { return c.enabled && c.controllable && c.credential_profile_id; }
+    // Canaux actifs captures par "Capturer" (meme regle que cameras._capture_channels)
+    function activeChannels(c) {
+        return (c.channels || []).filter(function (ch) { return ch.enabled !== false; }).length || 1;
+    }
     function fitPins() {
         var pts = placed(filtered()).map(function (c) { return [M.pos[c._id].lat, M.pos[c._id].lng]; });
         // Cadrage sur le site : les cameras lointaines (boutique de Paris)
@@ -260,8 +268,29 @@
         box.appendChild(stl);
         box.appendChild(el("div", "cm-tip-line cm-tip-muted", (p.snap_at ? "Capture " + ago(p.snap_at) : "Jamais capturee") +
             " - position " + (p.map_source === "manual" ? "placee a la main" : "couche GPS")));
+        // Plusieurs canaux (enregistreur) : une vignette par canal capture
+        var snaps = p.snaps || {};
+        var multi = chs.filter(function (ch) { return snaps[ch.no]; });
+        if (chs.length > 1 && multi.length > 1) {
+            shot.className = "cm-tip-shot cm-tip-grid";
+            shot.textContent = "";
+        }
         box._loadShot = function () {
-            if (!p.snap_at || box._shotLoaded) return;
+            if (box._shotLoaded) return;
+            if (chs.length > 1 && multi.length > 1) {
+                box._shotLoaded = true;
+                multi.forEach(function (ch) {
+                    var cell = el("div", "cm-tip-cell");
+                    var im = document.createElement("img");
+                    im.alt = ch.name || "Canal " + ch.no;
+                    im.src = API.list + "/" + c._id + "/snapshot?channel=" + ch.no + "&t=" + encodeURIComponent(snaps[ch.no]);
+                    cell.appendChild(im);
+                    cell.appendChild(el("span", "", ch.name || "Canal " + ch.no));
+                    shot.appendChild(cell);
+                });
+                return;
+            }
+            if (!p.snap_at) return;
             box._shotLoaded = true;
             var im = document.createElement("img");
             im.alt = "Derniere capture";
@@ -297,13 +326,14 @@
         var key = JSON.stringify(S.f);
         if (key !== M.lastKey) { M.lastKey = key; fitPins(); }
         var n = pins.filter(capturable).length;
+        var nch = pins.filter(capturable).reduce(function (a, c) { return a + activeChannels(c); }, 0);
         $("cm-map-count").textContent = pins.length + " camera(s) sur la carte" +
             (list.length > pins.length ? ", " + (list.length - pins.length) + " sans position" : "");
         if (!M.job || !M.job.running) {
-            $("cm-capture-all-label").textContent = "Capturer les " + n + " camera(s)";
+            $("cm-capture-all-label").textContent = "Capturer les " + n + " camera(s)" + (nch > n ? " (" + nch + " canaux)" : "");
             $("cm-capture-all").disabled = !n || !S.meta.key_ok;
         }
-        $("cm-capture-all").title = "Capture du premier canal de chaque camera pilotable de la carte (jamais les cameras de piste)";
+        $("cm-capture-all").title = "Capture de chaque canal actif des cameras pilotables de la carte, canal apres canal sur un meme enregistreur (jamais les cameras de piste)";
     }
 
     // Correction de position : ecrit dans la couche GPS titan.cameras (tous les
@@ -373,10 +403,12 @@
         var ids = placed(filtered()).filter(capturable).map(function (c) { return c._id; });
         if (!ids.length) return;
         var cell = placed(filtered()).filter(function (c) { return capturable(c) && c.cellular; }).length;
-        confirmToast("Capturer " + ids.length + " camera(s) ?" + (cell ? " Dont " + cell + " en 4G, qui peuvent mettre jusqu'a une minute a se reveiller." : ""), "Capturer").then(function (ok) {
+        var nch = placed(filtered()).filter(capturable).reduce(function (a, c) { return a + activeChannels(c); }, 0);
+        confirmToast("Capturer " + ids.length + " camera(s)" + (nch > ids.length ? ", soit " + nch + " canaux" : "") + " ?" +
+            (cell ? " Dont " + cell + " en 4G, qui peuvent mettre jusqu'a une minute a se reveiller." : ""), "Capturer").then(function (ok) {
             if (!ok) return;
             send("POST", "/api/cameras/capture-all", { ids: ids }).then(function (r) {
-                toast("info", "Capture lancee : " + r.total + " camera(s)" + (r.skipped ? ", " + r.skipped + " ignoree(s)" : ""));
+                toast("info", "Capture lancee : " + r.devices + " camera(s), " + r.total + " canal(aux)" + (r.skipped ? ", " + r.skipped + " ignoree(s)" : ""));
                 pollCaptureAll();
             }).catch(function (e) { toast("error", e.message); });
         });
@@ -391,7 +423,7 @@
             bar.hidden = false;
             $("cm-map-progress-fill").style.width = Math.round(100 * j.done / j.total) + "%";
             var fails = (j.failed || []).length;
-            $("cm-map-progress-text").textContent = (j.running ? "Capture " : "Derniere capture : ") + j.done + " / " + j.total +
+            $("cm-map-progress-text").textContent = (j.running ? "Capture " : "Derniere capture : ") + j.done + " / " + j.total + " canaux" +
                 (fails ? " - " + fails + " echec(s)" : "") + (j.running ? "" : " (" + ago(j.finished_at) + ")");
             $("cm-map-progress-text").title = (j.failed || []).map(function (f) { return f.name + " : " + f.error; }).join("\n");
             $("cm-capture-all").disabled = !!j.running;
@@ -656,6 +688,10 @@
                 res.className = "cm-result"; res.textContent = "Test en cours...";
                 send("POST", API.list + "/" + c._id + "/test").then(function (r) {
                     if (r.ok) {
+                        // Le serveur a deja enregistre modele et firmware : on les reporte dans
+                        // le formulaire, sinon un "Enregistrer" ulterieur les ecrase par du vide
+                        if (r.info.model) { d.model = r.info.model; iModel.value = r.info.model; }
+                        if (r.info.firmwareVersion) { d.firmware = r.info.firmwareVersion; iFw.value = r.info.firmwareVersion; }
                         res.className = "cm-result is-ok";
                         res.textContent = "Connexion reussie : " + [r.info.model, r.info.firmwareVersion].filter(Boolean).join(", ");
                         if (r.channels_added && r.channels_added.length) {
@@ -869,6 +905,14 @@
     function saveDrawer() {
         var d = S.draft;
         if (!d) return;
+        // Appareil a canal unique renomme : le canal portait l'ancien nom, il suit
+        // (c'est ce nom qu'affichent l'apercu et le selecteur de capture)
+        var orig = S.openId ? S.cams.filter(function (x) { return x._id === S.openId; })[0] : null;
+        if (orig && d.channels.length === 1 && d.name !== orig.name
+            && (d.channels[0].name || "") === (orig.channels && orig.channels[0] ? orig.channels[0].name || "" : "")
+            && (!d.channels[0].name || d.channels[0].name === orig.name)) {
+            d.channels[0].name = d.name;
+        }
         var payload = {
             name: d.name, ip: d.ip, port: d.port, protocol: d.protocol, brand: d.brand, model: d.model,
             firmware: d.firmware, site: d.site, location: d.location, notes: d.notes, enabled: d.enabled !== false,
@@ -891,11 +935,7 @@
             toast("success", "Camera enregistree" + (gs && (gs.updated || gs.created)
                 ? " - couche GPS : " + gs.updated + " point(s) mis a jour" + (gs.created ? ", " + gs.created + " cree(s)" : "") : ""));
             if (S.view === "map") loadMapData().then(render);
-            S.openId = c._id;
-            return load().then(function () {
-                var fresh = S.cams.filter(function (x) { return x._id === c._id; })[0];
-                if (fresh) openDrawer(fresh);
-            });
+            return load().then(closeDrawer);
         }).catch(function (e) { toast("error", e.message); }).then(function () { btn.disabled = false; });
     }
 
@@ -958,6 +998,14 @@
     }
 
     /* ---------------- evenements ---------------- */
+    // Nombre de filtres actifs sur l'onglet "Filtres" de la barre du bas
+    function mnavBadge() {
+        var n = ["site", "brand", "usage", "state"].filter(function (k) { return S.f[k]; }).length;
+        var b = $("cm-mnav-badge");
+        if (!b) return;
+        b.hidden = !n;
+        b.textContent = n || "";
+    }
     function bind() {
         var qt = null;
         $("cm-q").addEventListener("input", function () {
@@ -966,7 +1014,29 @@
             qt = setTimeout(function () { S.f.q = v.trim(); render(); }, 150);
         });
         [["cm-f-site", "site"], ["cm-f-brand", "brand"], ["cm-f-usage", "usage"], ["cm-f-state", "state"]].forEach(function (x) {
-            $(x[0]).addEventListener("change", function () { S.f[x[1]] = this.value; render(); });
+            $(x[0]).addEventListener("change", function () { S.f[x[1]] = this.value; render(); mnavBadge(); });
+        });
+        // Telephone : barre du bas (les boutons du haut y passent) et volet des filtres
+        var app = document.querySelector(".cm-app");
+        function setFilters(open) {
+            app.classList.toggle("is-filters-open", open);
+            document.querySelector('#cm-mnav [data-mnav="filters"]').classList.toggle("is-on", open);
+        }
+        Array.prototype.forEach.call(document.querySelectorAll("#cm-mnav [data-mnav]"), function (b) {
+            b.addEventListener("click", function () {
+                var a = b.dataset.mnav;
+                if (a === "list" || a === "map") { setFilters(false); if (S.view !== a) setView(a); }
+                else if (a === "filters") setFilters(!app.classList.contains("is-filters-open"));
+                else if (a === "add") { setFilters(false); openDrawer(null); }
+                else if (a === "profiles") openProfiles();
+            });
+        });
+        $("cm-filters-done").addEventListener("click", function () { setFilters(false); });
+        $("cm-filters-reset").addEventListener("click", function () {
+            [["cm-f-site", "site"], ["cm-f-brand", "brand"], ["cm-f-usage", "usage"], ["cm-f-state", "state"]].forEach(function (x) {
+                $(x[0]).value = ""; S.f[x[1]] = "";
+            });
+            render(); mnavBadge();
         });
         Array.prototype.forEach.call(document.querySelectorAll("#cm-table th[data-sort]"), function (th) {
             th.addEventListener("click", function () {
@@ -1013,7 +1083,7 @@
         bind();
         var usage = new URLSearchParams(location.search).get("usage");
         load().then(function () {
-            if (usage) { S.f.usage = usage; $("cm-f-usage").value = usage; render(); }
+            if (usage) { S.f.usage = usage; $("cm-f-usage").value = usage; render(); mnavBadge(); }
             loadReach();
             var v = null;
             try { v = localStorage.getItem("cockpit-cameras-view"); } catch (e) {}

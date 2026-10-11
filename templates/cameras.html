@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <meta name="theme-color" content="#1f2937">
-  <title>Cameras -- COCKPIT</title>
+  <title>COCKPIT</title>
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
@@ -59,11 +59,13 @@
 
     <main class="cm-main">
       <section class="cm-list-area">
-        <div class="cm-toolbar">
+        <div class="cm-toolbar" id="cm-toolbar">
           <label class="cm-search">
             <span class="material-symbols-outlined">search</span>
             <input type="search" id="cm-q" placeholder="Nom, IP, modele, chemin..." autocomplete="off" aria-label="Rechercher une camera">
           </label>
+          {# Telephone : filtres replies, ouverts par "Filtres" de la barre du bas #}
+          <div class="cm-filters">
           <select class="cm-select" id="cm-f-site" aria-label="Site"><option value="">Tous les sites</option></select>
           <select class="cm-select" id="cm-f-brand" aria-label="Marque"><option value="">Toutes les marques</option></select>
           <select class="cm-select" id="cm-f-usage" aria-label="Usage">
@@ -77,6 +79,9 @@
             <option value="disabled">Desactivees</option>
             <option value="noprofile">Sans identifiants</option>
           </select>
+          <button type="button" class="cm-btn cm-filters-reset" id="cm-filters-reset"><span class="material-symbols-outlined">filter_alt_off</span>Effacer</button>
+          <button type="button" class="cm-btn cm-btn-primary cm-filters-done" id="cm-filters-done">OK</button>
+          </div>
           <span class="cm-count" id="cm-count"></span>
         </div>
 
@@ -155,6 +160,26 @@
     <footer class="app-footer">
       <span class="footer-text">TITAN &mdash; Techniques d'Integration Topographique avec Navigation</span>
     </footer>
+
+    {# Telephone (<= 820 px) : barre du bas comme l'accueil ; les boutons du haut et les filtres y passent #}
+    <nav class="mobile-bottom-nav cm-mnav" id="cm-mnav" aria-label="Navigation mobile">
+      <button class="mb-tab is-active" data-mnav="list" type="button">
+        <span class="material-symbols-outlined">view_list</span><span class="mb-tab-label">Liste</span>
+      </button>
+      <button class="mb-tab" data-mnav="map" type="button">
+        <span class="material-symbols-outlined">map</span><span class="mb-tab-label">Carte</span>
+      </button>
+      <button class="mb-fab" data-mnav="add" type="button" aria-label="Ajouter une camera">
+        <span class="material-symbols-outlined">add</span>
+      </button>
+      <button class="mb-tab" data-mnav="filters" type="button">
+        <span class="material-symbols-outlined">tune</span><span class="mb-tab-label">Filtres</span>
+        <span class="cm-mnav-badge" id="cm-mnav-badge" hidden></span>
+      </button>
+      <button class="mb-tab" data-mnav="profiles" type="button">
+        <span class="material-symbols-outlined">key</span><span class="mb-tab-label">Identifiants</span>
+      </button>
+    </nav>
   </div>
 </div>
 

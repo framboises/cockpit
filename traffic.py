@@ -9,7 +9,7 @@ import threading
 import time
 import requests
 
-from trafic_etat import agreger_terrains, classify_congestion, parse_route_name
+from trafic_etat import agreger_terrains, classify_congestion, parse_route_name, sans_routes_camera
 
 traffic_bp = Blueprint('traffic', __name__)
 
@@ -182,6 +182,15 @@ def _jsonify_with_cache(payload, status):
 
 # --- Traffic payload: cache -> mongo -> waze api ---
 def _get_waze_trafic_payload():
+    """Releve Waze SANS les itineraires reserves aux cameras de la page IA
+    (etiquette [cam:N] dans le nom) : ils ne servent qu'a la Capture IA."""
+    data, status = _get_waze_trafic_payload_raw()
+    if isinstance(data, dict) and isinstance(data.get("routes"), list):
+        data = dict(data, routes=sans_routes_camera(data["routes"]))
+    return data, status
+
+
+def _get_waze_trafic_payload_raw():
     # Meme URL que le collecteur (looker/waze_collector.py) ; nouvelle forme
     # depuis le 05/10/2026 (l'ancienne repond 404). Surchargeable : WAZE_TRAFIC_URL.
     url = os.getenv('WAZE_TRAFIC_URL',

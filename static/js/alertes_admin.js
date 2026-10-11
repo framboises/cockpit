@@ -39,6 +39,10 @@
 
   var DETECTION_TYPE_LABELS = {
     "detection_intrusion": "Detection - intrusion",
+    "traffic_camera": "Trafic - analyse camera",
+    "parking_camera": "Stationnement interdit - camera",
+    "crowd_camera": "Foule dense - camera",
+    "secours_camera": "Personne au sol - camera",
     "camera_event": "Camera Hik - Smart Event",
     "schedule_proximity": "Horaire - proximite",
     "schedule_transition": "Horaire - transition",
@@ -300,6 +304,7 @@
     var trafficRow = $("#params-traffic-row");
     var cameraRow = $("#params-camera-row");
     var detectionRow = $("#params-detection-row");
+    var trafficCamRow = $("#params-trafficcam-row");
     if (!rawRow || !pcorgRow || !trafficRow || !cameraRow) return;
 
     var hideAll = function(){
@@ -308,6 +313,7 @@
       trafficRow.style.display = "none";
       cameraRow.style.display = "none";
       if (detectionRow) detectionRow.style.display = "none";
+      if (trafficCamRow) trafficCamRow.style.display = "none";
     };
 
     if (detectionType === "pcorg_urgency") {
@@ -330,6 +336,24 @@
       hideAll();
       detectionRow.style.display = "";
       _renderDetectionParams(params || {});
+    } else if ((detectionType === "traffic_camera" || detectionType === "parking_camera" || detectionType === "crowd_camera" ||
+                detectionType === "secours_camera") && trafficCamRow) {
+      hideAll();
+      trafficCamRow.style.display = "";
+      // Stationnement : memes cameras, la duree est portee par chaque zone.
+      // Foule : niveau declencheur ; mesures consecutives et delai communs.
+      // Secours : etat (au sol / immobile) et duree au sol minimale.
+      var park = detectionType === "parking_camera", crowd = detectionType === "crowd_camera";
+      var secours = detectionType === "secours_camera";
+      $("#tc-traffic-fields").style.display = park ? "none" : "";
+      $("#tc-min-state").closest("label").style.display = (crowd || secours) ? "none" : "";
+      $("#tc-crowd-fields").style.display = crowd ? "" : "none";
+      $("#tc-secours-fields").style.display = secours ? "" : "none";
+      $("#tc-help-traffic").style.display = (park || crowd || secours) ? "none" : "";
+      $("#tc-help-parking").style.display = park ? "" : "none";
+      $("#tc-help-crowd").style.display = crowd ? "" : "none";
+      $("#tc-help-secours").style.display = secours ? "" : "none";
+      _renderTrafficCamParams(params || {}, crowd ? "crowd" : secours ? "secours" : "traffic");
     } else if (detectionType === "camera_event") {
       hideAll();
       cameraRow.style.display = "";
@@ -540,6 +564,39 @@
       .then(function(d){ _detectionConfig = d || {}; draw(); })
       .catch(function(){ _detectionConfig = {}; draw(); });
   }
+  // Section "traffic_camera" : cameras en analyse du trafic (page IA)
+  function _renderTrafficCamParams(params, purpose) {
+    $("#tc-min-state").value = params.min_state === "ralenti" ? "ralenti" : "bouchon";
+    $("#tc-min-level").value = params.min_level === "charge" ? "charge" : "trop";
+    $("#tc-consecutive").value = params.consecutive != null ? params.consecutive : (purpose === "traffic" ? 2 : 1);
+    $("#tc-cooldown").value = params.cooldown_min != null ? params.cooldown_min : 30;
+    $("#tc-secours-state").value = params.min_state === "sol" ? "sol" : "immobile";
+    $("#tc-secours-min").value = params.min_minutes != null ? params.min_minutes : 0;
+    var grid = $("#tc-channels-grid");
+    grid.textContent = "";
+    fetch("/api/detection/capture/cameras").then(function(r){ return r.ok ? r.json() : {cameras: []}; })
+      .catch(function(){ return {cameras: []}; })
+      .then(function(d){
+        // Cameras du meme type d'analyse (trafic, foule ou secours)
+        _detCheck(grid, (d.cameras || []).filter(function(c){
+          var p = (c.role || {}).purpose;
+          return (p === "crowd" || p === "secours" ? p : "traffic") === purpose;
+        }).map(function(c){
+          return {value: c.key, label: c.camera_name,
+                  sub: (c.channel_name && c.channel_name !== c.camera_name ? c.channel_name + " - " : "") +
+                       (purpose === "traffic" ? "une paire" : "une photo") + " toutes les " + (c.role || {}).interval_min + " min" + (c.cellular ? " (4G)" : "")};
+        }), params.channels || [], function(){ return "#7c3aed"; });
+      });
+  }
+  function _collectTrafficCamParams() {
+    function num(id, def, lo, hi){ var v = parseInt($(id).value, 10); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : def; }
+    return {
+      channels: $$("#tc-channels-grid input[type=checkbox]:checked").map(function(cb){ return cb.value; }),
+      min_state: $("#tc-min-state").value,
+      consecutive: num("#tc-consecutive", 2, 1, 10),
+      cooldown_min: num("#tc-cooldown", 30, 0, 1440)
+    };
+  }
   function _collectDetectionParams() {
     function checked(sel){ return $$(sel + " input[type=checkbox]:checked").map(function(cb){ return cb.value; }); }
     return {
@@ -733,6 +790,21 @@
       params = _collectDetectionParams();
       if (!params.groups.length && !params.channels.length) {
         if(typeof showToast === "function") showToast("error", "Coche au moins un groupe ou une camera");
+        return null;
+      }
+    } else if (detType === "traffic_camera" || detType === "parking_camera" || detType === "crowd_camera" || detType === "secours_camera") {
+      params = _collectTrafficCamParams();
+      if (detType === "parking_camera") params = {channels: params.channels};
+      if (detType === "crowd_camera") params = {channels: params.channels, min_level: $("#tc-min-level").value,
+                                                consecutive: params.consecutive, cooldown_min: params.cooldown_min};
+      if (detType === "secours_camera") {
+        var smin = parseInt($("#tc-secours-min").value, 10);
+        params = {channels: params.channels, min_state: $("#tc-secours-state").value === "sol" ? "sol" : "immobile",
+                  min_minutes: Number.isFinite(smin) ? Math.min(120, Math.max(0, smin)) : 0,
+                  consecutive: params.consecutive, cooldown_min: params.cooldown_min};
+      }
+      if (!params.channels.length) {
+        if(typeof showToast === "function") showToast("error", "Coche au moins une camera");
         return null;
       }
     } else if (detType === "camera_event") {

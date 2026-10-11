@@ -85,6 +85,8 @@
       }
       fact("Envoi vers", it.outbound_url, true);
       fact("Hotes autorises (serveur)", (it.allowed_hosts || []).join(", ") || "aucun : COCKPIT_INTEG_ALLOWED_HOSTS vide", true);
+      fact("IP sources admises en reception (" + it.allowed_ips_env + ")",
+        (it.allowed_ips || []).join(", ") || "aucune : toute requete entrante refusee", true);
       fact("Reception (a donner a l'application)", (window.__cockpitPublicUrl || "<adresse de Cockpit>") + it.inbound_path, true);
       fact("Fiches envoyees", (it.rules || []).map(ruleLabel).join(" ; ") || "aucune regle");
       fact("Fiches partagees / liees", it.shared + " / " + it.linked);

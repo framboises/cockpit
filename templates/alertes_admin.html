@@ -362,6 +362,10 @@
           <label>Type de detection
             <select name="detection_type" class="form-input" required>
               <option value="detection_intrusion">Detection - intrusion (groupes de cameras)</option>
+              <option value="traffic_camera">Trafic - ralenti / bouchon (analyse camera)</option>
+              <option value="parking_camera">Stationnement interdit (analyse camera)</option>
+              <option value="crowd_camera">Foule dense (analyse camera)</option>
+              <option value="secours_camera">Personne au sol (analyse camera)</option>
               <option value="camera_event">Camera Hikvision - Smart Event</option>
               <option value="schedule_proximity">Horaire - proximite (X min avant)</option>
               <option value="schedule_transition">Horaire - transition (ouv/ferm)</option>
@@ -461,6 +465,54 @@
               <label class="toggle-inline" style="padding:0;"><input type="checkbox" class="det-target-type" value="vehicle" /><span>Vehicules</span></label>
             </div>
             <div id="det-zones-grid" class="checklist" style="margin-top:8px;"></div>
+          </div>
+        </div>
+        <div class="form-row" id="params-trafficcam-row" style="display:none;">
+          <div class="field-block">
+            <div class="field-label">Cameras en analyse du trafic (page IA)</div>
+            <div class="field-help" id="tc-help-traffic">Une paire de photos est analysee a chaque mesure (rythme et planning regles dans la page IA, mode Trafic). L'alerte part avec la photo, une seule fois par episode de ralentissement ou de bouchon.</div>
+            <div class="field-help" id="tc-help-parking" style="display:none;">Alerte quand un vehicule reste arrete dans une zone "Stationnement interdit" plus longtemps que la duree de la zone (zones et durees dessinees dans la page IA, mode Trafic, "Zones de mesure"). Une alerte par vehicule stationne, avec la photo. Precision : le rythme des mesures de la camera.</div>
+            <div class="field-help" id="tc-help-crowd" style="display:none;">Une photo est analysee a chaque mesure : personnes estimees dans chaque zone "Foule", rapportees a sa surface (personnes / m2). Niveaux : charge (2 p/m2 par defaut), trop de monde (4 p/m2), reglables par zone dans la page IA. L'alerte part avec la photo, une fois par episode.</div>
+            <div class="field-help" id="tc-help-secours" style="display:none;">Une photo est analysee a chaque mesure (page IA, mode Secours) : squelette de chaque personne, posture. "Au sol" = allongee sur une photo ; "Au sol, immobile" = toujours allongee au meme endroit sur la photo suivante (bien moins de fausses alertes : pelouses, personnes qui s'assoient). Seules comptent les personnes dans les zones "Secours" de la camera (sans zone : toute l'image). L'alerte part avec la photo et le cadre de la personne, une fois par episode.</div>
+            <div id="tc-channels-grid" class="checklist checklist-wide"></div>
+          </div>
+          <div class="field-block" style="margin-top:14px; display:none;" id="tc-secours-fields">
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+              <label>Declencher a partir de
+                <select id="tc-secours-state" class="form-input" style="width:220px;">
+                  <option value="immobile">Au sol, immobile (2 photos)</option>
+                  <option value="sol">Au sol (des la 1re photo)</option>
+                </select>
+              </label>
+              <label>Au sol depuis au moins (min)
+                <input id="tc-secours-min" type="number" min="0" max="120" value="0" class="form-input" style="width:110px;" />
+              </label>
+            </div>
+          </div>
+          <div class="field-block" style="margin-top:14px; display:none;" id="tc-crowd-fields">
+            <label>Declencher a partir de
+              <select id="tc-min-level" class="form-input" style="width:190px;">
+                <option value="trop">Trop de monde</option>
+                <option value="charge">Charge (ou trop de monde)</option>
+              </select>
+            </label>
+          </div>
+          <div class="field-block" style="margin-top:14px;" id="tc-traffic-fields">
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+              <label>Declencher a partir de
+                <select id="tc-min-state" class="form-input" style="width:190px;">
+                  <option value="bouchon">Bouchon</option>
+                  <option value="ralenti">Ralenti (ou bouchon)</option>
+                </select>
+              </label>
+              <label>Mesures consecutives
+                <input id="tc-consecutive" type="number" min="1" max="10" value="2" class="form-input" style="width:110px;" />
+              </label>
+              <label>Pas de nouvelle alerte avant (min)
+                <input id="tc-cooldown" type="number" min="0" max="1440" value="30" class="form-input" style="width:110px;" />
+              </label>
+            </div>
+            <div class="field-help" style="margin-top:6px;">Exemple : une paire toutes les 3 min et 2 mesures consecutives = alerte 3 a 6 min apres le debut du bouchon. L'episode se termine a la premiere mesure redevenue normale.</div>
           </div>
         </div>
         <div class="form-row" id="params-camera-row" style="display:none;">

@@ -42,10 +42,13 @@ function cibles(...textes) {
 }
 
 print("### lecture des snapshots ###");
+// Itineraires reserves aux cameras de la page IA ([cam:133] dans le nom) : exclus
+const ROUTE_CAMERA = /\[\s*cam\s*:?\s*\d+(?:\s*[.\-\/]\s*\d+)?\s*\]/i;
 const snaps = d.waze_trafic_history.find(
   { fetched_at: { $gte: BORNE_MIN, $lt: BORNE_MAX } }
 ).sort({ fetched_at: 1 }).toArray()
   .filter(s => JOURS.some(([, f, t]) => s.fetched_at >= f && s.fetched_at < t));
+for (const s of snaps) s.data.routes = (s.data.routes || []).filter(r => !ROUTE_CAMERA.test(r.name || ""));
 print("  trafic : " + snaps.length + " snapshots");
 
 // ---------- mapping itineraire -> rues (union sur les 2 jours) ----------

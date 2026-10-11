@@ -86,9 +86,8 @@ def _ensure_indexes(db):
 
 
 def _client_ip():
-    return request.headers.get(
-        "X-Forwarded-For", request.remote_addr or "0.0.0.0"
-    ).split(",")[0].strip()
+    # IP reelle posee par waitress (proxy de confiance IIS, cf. app.py)
+    return request.remote_addr or "0.0.0.0"
 
 
 def _maintenant():

@@ -46,7 +46,10 @@ def env(monkeypatch, tmp_path):
     app = Flask(__name__)
     app.config["TESTING"] = True
     app.register_blueprint(I.integrations_bp)
-    yield db, app.test_client()
+    monkeypatch.setenv("COCKPIT_INTEG_FRIDAY_ALLOWED_IPS", "192.168.254.53, 10.99.0.0/24")
+    tc = app.test_client()
+    tc.environ_base["REMOTE_ADDR"] = "192.168.254.53"     # connexion directe depuis Friday
+    yield db, tc
     client.drop_database(name)
 
 
@@ -63,12 +66,15 @@ def _cfg(db):
     return I.get_config(db, "friday")
 
 
-def _post(client, ev, ev_id="e1", secret=SECRET, ts=None):
+def _post(client, ev, ev_id="e1", secret=SECRET, ts=None, remote=None, xff=None):
     body = json.dumps(ev).encode("utf-8")
     ts = ts or int(time.time())
-    return client.post("/api/integrations/friday/events", data=body, headers={
-        "Content-Type": "application/json", "X-Event-Id": ev_id,
-        "X-Signature-Timestamp": str(ts), "X-Signature": I.sign(secret, ts, body)})
+    headers = {"Content-Type": "application/json", "X-Event-Id": ev_id,
+               "X-Signature-Timestamp": str(ts), "X-Signature": I.sign(secret, ts, body)}
+    if xff is not None:
+        headers["X-Forwarded-For"] = xff
+    kw = {"environ_overrides": {"REMOTE_ADDR": remote}} if remote else {}
+    return client.post("/api/integrations/friday/events", data=body, headers=headers, **kw)
 
 
 class TestRegles:
@@ -261,6 +267,47 @@ class TestEntrant:
         before = db["integration_outbox"].count_documents({"fiche_id": "f1"})
         I.scan_integration(db, _cfg(db), "https://cockpit.test")
         assert db["integration_outbox"].count_documents({"fiche_id": "f1"}) == before
+
+    def test_filtrage_ip_source(self, env, monkeypatch):
+        db, client = env
+        self._shared(db)
+        ev = {"type": "ticket.linked", "fiche_id": "f1", "ref": "INC-1"}
+        # connexion directe d'une IP non listee : refusee avant la signature
+        r = _post(client, ev, "a1", remote="192.168.254.99")
+        assert r.status_code == 403 and r.get_json()["error"] == "ip_non_autorisee"
+        # reseau CIDR admis
+        assert _post(client, ev, "a2", remote="10.99.0.7").status_code == 200
+        # requete locale (127.0.0.1) : jamais admise
+        assert _post(client, ev, "a5", remote="127.0.0.1").status_code == 403
+
+    def test_ip_reelle_derriere_iis(self, env, monkeypatch):
+        """Chaine reelle : middleware de waitress regle comme serve() en prod."""
+        from waitress.proxy_headers import proxy_headers_middleware
+        db, client = env
+        self._shared(db)
+        app = client.application
+        app.wsgi_app = proxy_headers_middleware(app.wsgi_app, trusted_proxy="127.0.0.1",
+                                                trusted_proxy_count=1,
+                                                trusted_proxy_headers={"x-forwarded-for"})
+        ev = {"type": "ticket.linked", "fiche_id": "f1", "ref": "INC-1"}
+        # IIS ajoute l'IP reelle en dernier, avec le port
+        assert _post(client, ev, "b1", remote="127.0.0.1", xff="192.168.254.53:51234").status_code == 200
+        # valeur falsifiee par le client devant celle d'IIS : ignoree
+        r = _post(client, ev, "b2", remote="127.0.0.1", xff="192.168.254.53, 192.168.254.99:5000")
+        assert r.status_code == 403
+        # connexion directe d'une autre IP : en-tete supprime, pas de contournement
+        assert _post(client, ev, "b3", remote="192.168.254.99", xff="192.168.254.53").status_code == 403
+        # ferme par defaut : variable absente = tout refuse
+        monkeypatch.delenv("COCKPIT_INTEG_FRIDAY_ALLOWED_IPS")
+        assert _post(client, ev, "a7").status_code == 403
+
+    def test_photo_ip_non_autorisee(self, env, tmp_path):
+        db, client = env
+        (tmp_path / "SAISON" / "2026").mkdir(parents=True)
+        (tmp_path / "SAISON" / "2026" / "a.jpg").write_bytes(b"jpg")
+        url = I.signed_photo_url(_cfg(db), "https://cockpit.test", "/field/photos/SAISON/2026/a.jpg")
+        path = url.split("https://cockpit.test", 1)[1]
+        assert client.get(path, environ_overrides={"REMOTE_ADDR": "192.168.1.20"}).status_code == 404
 
     def test_photo_signee(self, env, tmp_path):
         db, client = env

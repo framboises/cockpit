@@ -60,6 +60,7 @@ Pas de tests automatisés ni de linter configurés.
 | `WAHA_WEBHOOK_SECRET` | Secret HMAC des webhooks WAHA (`/api/wa/webhook`, SHA-512 attendu, SHA-1 tolérée avec avertissement) | — (vide : bypass en dev, **refus de tous les webhooks en prod**) |
 | `COCKPIT_INTEG_<ID>_SECRET` | Secret HMAC partagé avec une application liée (`integrations.py`, ex. `COCKPIT_INTEG_FRIDAY_SECRET`), 32 caractères min. | — (liaison inactive si absent) |
 | `COCKPIT_INTEG_ALLOWED_HOSTS` | Hôtes autorisés pour les envois vers les applications liées (virgules, ex. `friday.lemans.org`) ; https obligatoire, jamais loopback / link-local (anti-SSRF) | — (aucun envoi possible si vide) |
+| `COCKPIT_INTEG_<ID>_ALLOWED_IPS` | IP sources admises (adresses ou CIDR, virgules) sur l'entrant et les photos signées d'une application liée, nom dérivé de son `secret_env` (ex. `COCKPIT_INTEG_FRIDAY_ALLOWED_IPS=192.168.254.53`) | — (**tout refusé** si vide) |
 | `COCKPIT_PUBLIC_URL` | Adresse de Cockpit vue des applications liées (liens signés des photos) | `PUBLIC_BASE_URL` |
 | `OLLAMA_URL` | URL Ollama (résumés périodiques Alfred) | `http://srv-safe-docker.aco.local:11434` |
 | `OLLAMA_MODEL` | Modèle Ollama des résumés | `alfred` |
@@ -154,4 +155,4 @@ Le detail de chaque domaine vit dans `docs/claude/`. **Lire le fichier concerne 
 - `docs/claude/integrations.md` : Applications liees (Friday du service informatique...) : regles d'envoi par categorie / sous-classification, file signee HMAC, evenements entrants, JAMAIS de cloture externe. Note pour le service informatique : `docs/integrations/friday-note-service-informatique.md`
 - `docs/claude/pmv.md` : PMV (remorques Sigma 3000, JetFileII) : regles de dialogue NON NEGOCIABLES, securite, jobs
 - `docs/claude/cameras.md` : Cameras : page de configuration unique (appareils, canaux, usages LAPI / detection), profils d'identifiants chiffres (COCKPIT_CAMERA_KEY), import SeeTec, etat reseau
-- `docs/claude/detection.md` : Detection : intrusions (fielddetection) du recepteur Hik (episodes, photos 1 an), carte et zones, filtres cible / zone de la centrale d'alertes
+- `docs/claude/detection.md` : Page IA (/detection) : intrusions (fielddetection) du recepteur Hik (episodes, photos 1 an, verification IA locale GPU, avis et cadres des operateurs), carte et zones, filtres de la centrale d'alertes ; Trafic, Foule et Secours / personnes au sol (Capture IA, tache planifiee capture_ia.py) ; Galerie d'entrainement

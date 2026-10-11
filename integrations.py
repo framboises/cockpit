@@ -34,6 +34,8 @@ en-tetes X-Event-Id, X-Signature-Timestamp (secondes epoch, +/- 300 s),
 X-Signature ("sha256=<hex>"). Rejeu : X-Event-Id unique (integration_inbox,
 TTL 30 j). Photos sortantes : URL signee a duree limitee
 (/api/integrations/<id>/photo?p=&exp=&sig=), aucune session.
+Entrant et photos : IP source obligatoirement listee dans
+<secret_env sans _SECRET>_ALLOWED_IPS (ferme par defaut, voir client_ip).
 """
 import base64
 import hashlib
@@ -179,6 +181,72 @@ def get_secret(cfg):
     name = (cfg or {}).get("secret_env") or default_secret_env((cfg or {}).get("_id") or "")
     val = os.getenv(name, "") or ""
     return val if len(val) >= SECRET_MIN_LEN else None
+
+
+# ---------------------------------------------------------------------------
+# Filtrage des IP sources de l'entrant (10/10/2026)
+# ---------------------------------------------------------------------------
+# Les routes sans session (evenements entrants, photos signees) n'acceptent
+# que les IP listees dans <secret_env sans _SECRET>_ALLOWED_IPS (ex.
+# COCKPIT_INTEG_FRIDAY_ALLOWED_IPS="192.168.254.53"), adresses ou reseaux
+# CIDR separes par des virgules. Liste fixee sur le serveur, hors de portee
+# de l'interface. FERME PAR DEFAUT : variable absente ou vide = tout refuse.
+# Verifie AVANT la signature.
+#
+# IP du client = request.remote_addr. IIS (ARR) relaie vers waitress depuis
+# 127.0.0.1 et AJOUTE l'IP reelle en DERNIER dans X-Forwarded-For ; waitress
+# (trusted_proxy=127.0.0.1, count 1, cf. serve() dans app.py) en tire
+# remote_addr, port retire, sans lire les valeurs precedentes (falsifiables).
+# Connexion directe au port 4008 : adresse de la connexion. Une requete locale
+# reste 127.0.0.1, jamais dans la liste : refusee. Ne jamais lire l'en-tete ici.
+
+def allowed_ips_env(cfg):
+    name = (cfg or {}).get("secret_env") or default_secret_env((cfg or {}).get("_id") or "")
+    if name.endswith("_SECRET"):
+        name = name[:-len("_SECRET")]
+    return name + "_ALLOWED_IPS"
+
+
+def allowed_networks(cfg):
+    import ipaddress
+    nets = []
+    for part in (os.getenv(allowed_ips_env(cfg), "") or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(part, strict=False))
+        except ValueError:
+            logger.warning("integrations : %s contient une valeur invalide (%s), ignoree",
+                           allowed_ips_env(cfg), part)
+    return nets
+
+
+def _parse_ip(raw):
+    """'1.2.3.4', '1.2.3.4:5678', '[::1]:5678', '::1' -> ip_address ou None."""
+    import ipaddress
+    s = str(raw or "").strip()
+    if s.startswith("["):
+        s = s[1:].split("]", 1)[0]
+    elif s.count(":") == 1:
+        s = s.split(":", 1)[0]
+    try:
+        ip = ipaddress.ip_address(s.split("%", 1)[0])
+    except ValueError:
+        return None
+    return getattr(ip, "ipv4_mapped", None) or ip
+
+
+def client_ip():
+    return _parse_ip(request.remote_addr)
+
+
+def source_allowed(cfg):
+    """(ok, ip_texte) : l'IP du client est-elle autorisee pour cette application ?"""
+    ip = client_ip()
+    if ip is None:
+        return False, "?"
+    return any(ip.version == n.version and ip in n for n in allowed_networks(cfg)), str(ip)
 
 
 def list_configs(db):
@@ -695,6 +763,10 @@ def inbound_events(integ_id):
     cfg = get_config(db, integ_id) if ID_RE.match(integ_id or "") else None
     if not cfg or not cfg.get("enabled"):
         return jsonify({"ok": False, "error": "integration_inconnue_ou_inactive"}), 404
+    ip_ok, ip = source_allowed(cfg)
+    if not ip_ok:
+        logger.warning("integrations %s : IP source refusee (%s)", integ_id, ip)
+        return jsonify({"ok": False, "error": "ip_non_autorisee"}), 403
     secret = get_secret(cfg)
     if not secret:
         return jsonify({"ok": False, "error": "secret_non_configure"}), 503
@@ -738,6 +810,11 @@ def signed_photo(integ_id):
     db = _app_db()
     cfg = get_config(db, integ_id) if ID_RE.match(integ_id or "") else None
     secret = get_secret(cfg) if cfg and cfg.get("enabled") else None
+    if secret:
+        ip_ok, ip = source_allowed(cfg)
+        if not ip_ok:
+            logger.warning("integrations %s : photo, IP source refusee (%s)", integ_id, ip)
+            abort(404)
     rel = request.args.get("p") or ""
     try:
         exp = int(request.args.get("exp") or 0)
@@ -793,6 +870,8 @@ def _pub_cfg(db, cfg):
         "enabled_at": _iso(cfg.get("enabled_at")),
         "inbound_path": "/api/integrations/%s/events" % cfg["_id"],
         "allowed_hosts": sorted(allowed_hosts()),
+        "allowed_ips_env": allowed_ips_env(cfg),
+        "allowed_ips": [str(n) for n in allowed_networks(cfg)],
         "shared": db[COL_LINKS].count_documents({"integration": cfg["_id"], "in_scope": True}),
         "linked": db["pcorg"].count_documents({"integrations.%s.linked" % cfg["_id"]: True}),
         "outbox": stats,

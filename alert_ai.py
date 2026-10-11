@@ -289,7 +289,7 @@ def ctx_traffic(db, alert, definition, now):
                     {"fetched_at": win},
                     {"fetched_at": 1, "data.routes": 1}).sort("fetched_at", 1):
                 pts = {a["nom"]: a["currentTime"] for a in trafic_etat.axes_mur(
-                    (h.get("data") or {}).get("routes")) if a["nom"] in names}
+                    trafic_etat.sans_routes_camera((h.get("data") or {}).get("routes"))) if a["nom"] in names}
                 serie.append({"heure": _paris(h.get("fetched_at")), "temps_s": pts})
             out["evolution_axes"] = serie[-8:]
     except Exception as exc:

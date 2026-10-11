@@ -2642,6 +2642,16 @@ img { max-width: 100%; }
 .critical-alert-target.is-vehicle { background: #dbeafe; color: #1d4ed8; }
 .critical-alert-target.is-other { background: #e5e7eb; color: #374151; }
 .critical-alert-zone-chip { background: #fef3c7; color: #92400e; font-weight: 600; }
+/* Photo + cadre de la cible : le conteneur epouse l'image (fit-content),
+   les % du cadre sont donc ceux de la photo. Le contour deborde de 5 px :
+   une cible de 20 px (oiseau) reste visible. */
+.critical-alert-shot { position: relative; width: fit-content; max-width: 100%; margin: 12px auto; }
+.critical-alert-shot .critical-alert-snapshot { margin: 0; }
+.critical-alert-target-box {
+  position: absolute; pointer-events: none; border-radius: 3px;
+  outline: 2px solid #ef4444; outline-offset: 5px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .6), 0 0 0 9px rgba(0, 0, 0, .25);
+}
 .critical-alert-thumbs { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; margin: -4px 0 8px; }
 .critical-alert-thumbs img {
   width: 72px; height: 54px; object-fit: cover; border-radius: 6px; cursor: pointer;
@@ -12155,6 +12165,28 @@ th span { font-size: 0.88rem; font-weight: 700; }
   transition: background 0.15s;
 }
 .pcorg-cam-picker-close:hover { background: rgba(220,38,38,.1); color: var(--danger); }
+
+.pcorg-cam-picker-search {
+  display: flex; align-items: center; gap: 8px;
+  margin: 10px 14px 4px; padding: 0 10px; height: 38px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--bg);
+  color: var(--muted); cursor: text;
+}
+.pcorg-cam-picker-search:focus-within { border-color: var(--brand, #2563eb); }
+.pcorg-cam-picker-search .material-symbols-outlined { font-size: 20px; }
+.pcorg-cam-picker-search input {
+  flex: 1; min-width: 0; height: 100%; border: none; outline: none;
+  background: transparent; color: var(--text); font: inherit; font-size: 0.86rem;
+}
+.pcorg-cam-picker-hint {
+  padding: 2px 18px 4px; font-size: 0.7rem; color: var(--muted);
+}
+.pcorg-cam-picker-hint:empty { display: none; }
+.pcorg-cam-picker-dist {
+  display: inline-block; margin-top: 3px; padding: 1px 7px; border-radius: 999px;
+  font-size: 0.68rem; font-weight: 600;
+  background: var(--brand-light, rgba(37,99,235,.08)); color: var(--brand, #2563eb);
+}
 
 .pcorg-cam-picker-list {
   flex: 1; overflow-y: auto; padding: 6px 0;

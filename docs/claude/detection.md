@@ -104,7 +104,10 @@ ayant la page "Detection". Les canaux visibles sont ceux qui ont l'usage
   les photos de l'intrusion (`/api/detection/episodes/<id>`, relu a
   l'affichage et 10 s apres ; sans droit Detection : premiere photo seule),
   bouton "Ouvrir dans Detection" -> `/detection?episode=<id>` (ouvre la
-  fiche). Apercu admin du type compris.
+  fiche). Apercu admin du type compris (derniere intrusion reelle). Cadre
+  rouge sur la cible (`rect` de la photo). Photo relue dans
+  `cockpit_alert_history` (`alert_id`) quand l'alerte active a expire (10 min),
+  sinon reprise de l'episode.
 - WhatsApp (`whatsapp.py`, appele par le recepteur) : photo envoyee en
   image (sendImage) avec le texte en legende, plus le lien
   `<COCKPIT_PUBLIC_URL>/detection?episode=<id>` (`_detection_link`).
@@ -114,6 +117,412 @@ PIEGE corrige le 09/10/2026 : le catalogue declare `fieldDetection` mais les
 cameras envoient `fielddetection` ; la comparaison des types est desormais
 insensible a la casse dans `cockpit_dispatch.dispatch_alert` (avant, une regle
 "Intrusion de zone" ne pouvait jamais se declencher).
+
+## Verification IA locale (filtre des fausses intrusions)
+
+Les cameras classent "pieton" des oiseaux, panneaux, reflets, branches (cibles
+de 20 px). Avant l'alerte, chaque photo d'intrusion est verifiee sur le GPU
+du serveur (NVIDIA L4), sans service en ligne ni cout.
+
+- Service NSSM `IntrusionVerifier` (`scripts/intrusion_verifier.py`, venv
+  `titan_prod` partage avec Tagger, 127.0.0.1:4011, log
+  `PCA\SCRIPTS\logs\intrusion_verifier.log`). YOLO11m COCO de Tagger
+  (`tagger\models\analytics\ground\yolo11m.pt`) charge UNE fois et garde en
+  memoire ; zoom x4 autour du cadre de la cible (160 px min.) ; 20-75 ms.
+  YOLO DECIDE (personne / vehicule, cadres `box` normalises sur la photo
+  entiere). SigLIP2 so400m de Tagger (`photo_embedder_siglip`, textes
+  encodes une fois) EXPLIQUE seulement (`guess` : oiseau, panneau, branche,
+  reflet, sol, grillage...) : il voit parfois "grillage" sur une personne
+  derriere une cloture, il ne doit jamais decider. YOLO-World teste et
+  ecarte (corneille -> personne 21 %). ~150 ms au total.
+  `GET /health`, `POST /verify {photo, rect}`.
+- Recepteur : `intrusions.verify_photo` apres `record_intrusion`, appele par
+  `ecoutehik2.py`. Personne / vehicule / velo >= `min_conf` -> alerte ; sinon
+  `ai_filtered` : ni alerte ni WhatsApp, l'intrusion et ses photos restent.
+  Service muet, photo absente ou filtre coupe : l'alerte PART (jamais
+  d'intrusion ratee a cause du filtre). Une photo confirmee suffit pour
+  l'episode (verdict `confirmed` > `unverified` > `filtered`, jamais ecrase).
+- Annotation operateur (verite terrain) : bouton "Indiquer personne /
+  vehicule" sous le zoom (et "Indiquer ou est..." quand l'avis est Erreur) ->
+  editeur plein ecran (souris / doigt, plusieurs cadres, loupe sur la cible,
+  "Rien sur cette photo" = liste vide). `POST
+  /api/detection/episodes/<id>/photos/<idx>/label {photo (url, controle
+  409), boxes: [{x,y,w,h,category: personne|vehicule}]}` -> `photos.<idx>.label
+  {boxes, by, at}`. Sur une intrusion filtree sans avis, poser une personne /
+  un vehicule pose l'avis "down" (`auto: "annotation"`). Cadres "verifie :
+  ..." en trait plein epais sur la photo et le zoom.
+- Hors planning (depuis le 10/10/2026) : les intrusions ne sont PLUS jetees.
+  Photo, episode et verification IA comme les autres, `armed: false` sur
+  l'episode (absent = dans le planning ; passe a true si le planning demarre
+  pendant l'intrusion), JAMAIS d'alerte. `detection_dropped` compte toujours
+  ces messages par jour. Page : filtre `planning` ("" = planning seul, defaut ;
+  `off` ; `all`), badge "Hors planning". But : les traiter et entrainer le
+  modele. Volume a surveiller (photos 1 an, ~250 Ko).
+- Reglage : `cockpit_settings` `_id: "detection_ai_filter"` `{enabled
+  (defaut true), min_conf (defaut 0.3)}`, relu toutes les 60 s sans
+  redemarrage.
+- Episode : `ai {status, label, conf, real_conf, min_conf, photo, guess, ms,
+  model, at}` (label = avis SigLIP en tete si filtree), `ai_checks`, par photo
+  `photos.$.ai {decision, real_conf, detections, guess}` (cadres "IA : oiseau
+  73 %" en pointilles sur la photo et le zoom, a cote du cadre "camera :
+  personne"), avis operateur `ai_vote {vote: up|down, by, at}`
+  (`POST /api/detection/episodes/<id>/ai-vote`, `vote: null` retire).
+- Page : badge "Filtree IA : <label>" / "IA : <label>" / "Non verifiee",
+  filtre `ai=filtered|alerted|voted`, bloc "Verification IA" avec pouces dans
+  la fiche. Les avis (photo + cadre + verdict + avis) servent a regler le seuil
+  et a constituer un jeu d'entrainement ; aucun reentrainement automatique.
+- Teste le 10/10/2026 sur 13 photos : personnes 0,82-0,88, voiture 0,74 ;
+  oiseaux, panneau, reflet, branche -> rien ou oiseau. La corneille posee sur
+  un panneau sort en "frisbee" 0,47 (label "objet") : filtree.
+- Complement cote camera : taille minimale de cible par zone,
+  `/ISAPI/Smart/channels/<canal>/calibrations/fielddetection` (FilterSize
+  MinTargetSize / MaxTargetSize, normalise 0-1000), dessinable dans
+  l'interface web ; a 0 par defaut (aucun filtre).
+
+## Page IA : modes Carte / Intrusions / Trafic / Foule / Secours / Galerie (depuis le 10/10/2026)
+
+La page `/detection` est devenue la page "IA" (menu "IA", icone
+`psychology`). Selecteur de mode dans l'en-tete (`ia_capture.js`) : Carte |
+Intrusions | Trafic | Foule | Galerie (Trafic et Foule SEPARES : memes
+donnees `GET /api/detection/capture/cameras`, filtrees par `purpose`).
+OUVERTURE SUR LA CARTE GLOBALE (`?mode=`
+pour un lien direct ; `?episode=` reste en mode Intrusions). Le mode
+Intrusions est l'ecran historique (detection.js). Sa carte, creee cachee,
+se recadre quand elle redevient visible (`needFit`, sinon vue de la Terre).
+
+Carte globale : `GET /api/detection/global-map` = toutes les cameras placees
+(`_device_position`), usages (intrusion, trafic, LAPI), etat du trafic,
+intrusions du jour (dans le planning : total, non filtrees, a traiter).
+Pins : logo pour TOUTES les cameras (videocam gris, intrusion orange,
+trafic = couleur de l'etat, LAPI bleu, piste sombre avec cadenas), pastille
+rouge = intrusions a traiter ; filtres Toutes / Surveillees par l'IA /
+Intrusion / Trafic. Clic = VOLET DE DETAIL a droite (`GET
+/api/detection/global-map/<id>`) : usages, marque / modele (IP pour les
+admins), derniere capture (`/api/pcorg/cameras/<id>/snapshot`), trafic de
+chaque canal (derniere paire, zones), 6 dernieres intrusions (clic = fiche),
+canaux et usages avec "Analyser le trafic" par canal, liens LAPI / Cameras.
+
+Zones : dessiner, modifier ou supprimer une zone RECALCULE l'historique de
+la camera (14 jours, `capture_ia.recompute_zones`, vehicules gardes) ;
+avant, l'historique restait calcule sur l'image entiere (Technoparc rouge).
+
+Intrusions : "Cloturer" ferme le volet de la fiche. detection.js expose
+`window.IADetection` (config, openGroup = editeur de planning, openEpisode).
+
+### Capture IA (trafic, bouchons)
+- Usage de canal `capture`, libelle "Analyse du trafic"
+  (`cameras.ROLE_TYPES`) : `interval_min` (defaut 3), `gap_s` (intervalle
+  entre les 2 paires, defaut 8 ; mis a 8 sur Antares et Technoparc),
+  `preset` (facultatif : rappele a CHAQUE mesure, les operateurs voient la
+  camera bouger), `purpose` (traffic). Regle depuis le mode Trafic (ou la page
+  Cameras). JAMAIS de reglage de la camera (resolution, flux) : photos
+  pleine taille par l'interface web.
+- Capture : `capture_ia.py`, tache planifiee "Cockpit - Capture IA" TOUTES
+  LES MINUTES sous le compte de Cockpit (`scripts/capture_ia.bat`,
+  `scripts/install_capture_ia_task.ps1`, mot de passe Windows demande),
+  JAMAIS dans Cockpit. Verrou `logs/capture_ia.lock`, journal
+  `logs/capture_ia-AAAAMMJJ.log`. Ne prend que les canaux dus
+  (`ia_capture_state.last_try`) et dans leur planning (`channel_armed` :
+  memes groupes que les intrusions ; sans groupe = 24 h/24). 8 cameras en
+  parallele, reveil 4G par `call_camera`. Jamais les cameras de piste.
+  `--force` (toutes), `--dry-run` (n'ecrit pas en base).
+- Mesure DEPUIS LE 10/10/2026 (`method: "flux"`) : DEUX PAIRES, images a
+  0 / 1 s puis `gap_s` / `gap_s` + 1 s (`grab_frames`). Flux RTSP principal
+  (OpenCV FFMPEG, TCP, `grab()` puis `retrieve()` des seules images
+  retenues, horodatage du flux = ecarts exacts) si le port 554 repond, sinon
+  photos enchainees (`source: "photos"`, Antares : ~2 s par photo, ecarts
+  reels ~0/2/8/10 s). URL avec mot de passe : JAMAIS journalisee. Technoparc
+  accepte le flux pendant qu'un operateur le regarde (verifie le 10/10/2026
+  15:49) ; un seul "453 Not Enough Bandwidth" vu, quand deux connexions de
+  Cockpit ont demarre a la meme seconde (essai + tache) -> repli photos
+  (ne pas tester pendant la tache). Detection des 4 images (`/detect`).
+  `classify_pair` : vitesse de chaque vehicule de la 1re image d'une paire
+  en LONGUEURS DE VEHICULE PAR SECONDE (`_track` : meme place couleur >= 0,6,
+  ou voisin couleur >= 0,85, a moins de 3 longueurs/s), verifiee sur l'image
+  de l'autre paire : < 0,15 (`STOP_V`) et toujours la quasi immobile =
+  `arrete`, a peu avance = `lent` (file au pas), reparti = `bref` (cede le
+  passage, compte comme ROULANT) ; < 0,3 (`SLOW_V`) = `lent` ; sinon ou pas
+  retrouve = `roule`. MEME PLACE = meme image : en plus de la couleur, la
+  correlation des pixels (`_ncc`, gris 32x32, max du meme rectangle et de
+  chaque cadre) doit atteindre 0,8 (`STILL_NCC`) ; sinon une voiture qui
+  roule remplacee par une autre au meme endroit passait pour immobile
+  (Antares 16:31, voiture aux velos -> C3 grise : "arret bref"). Garees
+  0,88-0,99, faux immobiles -0,26-0,70. Vitesse = deplacement du centre.
+  `vehicles_a` = 1re paire, `vehicles_b` = 2e paire (verifiee 8 s plus
+  tot), `vehicles_a2` / `vehicles_b2` = 2e image de chaque paire (statut du
+  jumeau, `autre` si relie a aucun), `speed`, `pair_s`, `source`, 4 `photos`
+  (`HHMMSS_a..d.jpg`). Essai sur 22 mesures par camera : voiture qui circule
+  0,7-2, garee 0,00 ; seuil lent a 0,6 = faux "ralenti" (voitures au loin
+  qui arrivent de face, cedez-le-passage). Aucun bouchon reel encore vu :
+  detection du bouchon a valider au premier embouteillage.
+- Par zone (`ia_capture_zones`, polygones 0-1 dessines sur la photo ; sans
+  zone : image entiere) : etat sur les vehicules DES DEUX PAIRES ; moins de
+  3 vehicules par image en moyenne = fluide ; >= 60 % arretes = bouchon ;
+  >= 60 % arretes + lents = ralenti. Comptes affiches : 1re paire. Etat
+  camera = pire zone.
+- Mesures AVANT le 10/10/2026 (`method` absent) : photo A, photo B `gap_s`
+  plus tard ; chaque vehicule de A `arrete` / `deplace` / `parti`, de B
+  `suivi` / `arrive` (`match_vehicles`, garde pour ces mesures).
+- Zones de STATIONNEMENT INTERDIT (`ia_capture_zones.kind =
+  "stationnement"`, `max_min` 1-1440, rouge ; les zones "trafic" sont
+  `kind` absent ou "trafic") : hors calcul de l'etat du trafic.
+  `capture_ia.parking_metrics` : vehicules ARRETES (meme cadre sur A et B)
+  dans la zone, puis remontee des mesures precedentes (6 h max, IoU >= 0,5)
+  tant que le vehicule est a la meme place ; un trou > 3 rythmes (hors
+  planning, panne) arrete la remontee. Precision = rythme des mesures. Un
+  vehicule deja la au debut de l'historique compte depuis la 1re mesure.
+  Alerte : regle `parking_camera` ("Stationnement interdit (analyse
+  camera)", `params.channels`) -> `dispatch_parking`, UNE alerte par
+  vehicule stationne (zone + heure d'arrivee, `ia_capture_state.
+  parking_alerted`). Teste le 10/10/2026 hors ligne sur Technoparc (voitures
+  du trottoir : 11 min).
+- Classement A/B : `arrete` si IoU >= 0,5, ou si le cadre voisin est a moins
+  d'un tiers de la taille du vehicule (le cadre d'un petit vehicule gare
+  "tremble" : avant, 4 voitures garees sortaient "deplacees").
+- RESSEMBLANCE EXIGEE (`match_vehicles(va, vb, ims)`, histogramme couleur
+  4x4x4 du coeur du cadre, intersection) : meme place >= 0,6
+  (`SAME_SPOT_COLOR`), deplace >= 0,85 (`MOVED_COLOR`). Sans elle, la seule
+  position reliait deux voitures DIFFERENTES (Antares 10/10/2026 : rouge ->
+  grise, blanche -> noire ; 111 faux "deplace" et 21 faux "arrete", etat
+  "ralenti" invente). Mesure : vraies voitures garees 0,76-0,97, voitures
+  differentes 0,13-0,80 (deux noires 0,78). Historique reapparie le
+  10/10/2026. Photo B : gris = MEME vehicule que sur A, bleu = arrive.
+- Stockage : `ia_capture_samples` (photos `hik_images/captures/AAAA/MM/JJ/
+  <id>_ch<n>/HHMMSS_a..d.jpg` en 1920 px q80 + `_t/` vignettes), purge
+  apres `CAPTURE_RETENTION_DAYS` (30) SAUF les mesures avec avis (`vote`) ou
+  annotation (`label`) : jeu d'entrainement. Etat : `ia_capture_state`
+  (`state`, `streak`, `last_error`, `planning`).
+- INTERRUPTEUR GENERAL (10/10/2026) : bouton "Captures en marche / a
+  l'arret" dans les barres Trafic et Foule (`PUT
+  /api/detection/capture/switch {purpose: traffic|crowd, on}`, document
+  `ia_capture_state._switch`, renvoye dans `capture/cameras` -> `switch`).
+  A l'arret : `capture_ia.capture_enabled` saute tous les canaux de la
+  fonction (meme `--force`), donc ni photo, ni mesure, ni alerte ;
+  "Mesurer maintenant" refuse (409). Absent = en marche. La purge et les
+  statistiques continuent. 4G (11/10/2026) : `_switch.<fonction>.cell`
+  (absent = incluses) ; faux = seules les cameras filaires sont mesurees
+  (`cameras.is_cellular` : IP publique), data 4G preservee ; bouton "4G
+  incluses / exclues" a cote de l'interrupteur (cache sans camera 4G dans
+  la fonction), bandeau orange, puce "4G en pause" ; "Mesurer maintenant"
+  refuse sur une 4G exclue. PUT `switch {purpose, on?, cell?}` ecrit en
+  `$set` pointe (un champ n'efface pas l'autre).
+- QUATRE NIVEAUX (10/10/2026) : fluide / DENSE / ralenti / bouchon
+  (`STATE_ORDER` 0-3). Mouvement (`state_motion`) : arretes >= 60 % =
+  bouchon, arretes + lents >= 60 % = ralenti, >= 30 % ET >= 6 vehicules par
+  image (`DENSE_MIN_VEH` ; sinon 1 lent sur 3 faisait "dense") = dense.
+  NOMBRE DE VEHICULES APPRIS PAR ZONE / TRACE : avis de l'operateur sur
+  chaque zone d'une mesure (boutons "Vrai niveau" sous la zone, mode
+  Trafic ; `POST /api/detection/capture/samples/<id>/zone-vote`, garde dans
+  `ia_capture_samples.zone_votes.<zone>` avec `veh` = vehicules par image,
+  `state_motion`, `waze_ratio`...). `learn_levels` : seuil d'un niveau =
+  milieu entre le 80e centile des avis en dessous et le 20e centile des
+  avis a ce niveau ou au-dessus (>= 2 avis de chaque cote), croissant ;
+  garde sur la zone (`ia_capture_zones.levels {dense, ralenti, bouchon,
+  votes, agree}`). Etat final = le PIRE du mouvement et du nombre
+  (`_apply_levels`). Limite : un avis "fluide" ne corrige pas un faux
+  ralenti du mouvement (seuls les nombres sont appris). Avis -> historique
+  du jour recalcule. Mesures avec avis de zone : jamais purgees. Alertes
+  trafic inchangees (ralenti / bouchon). GALERIE : carte compacte (photo +
+  "juste ?" global + "Niveau par trace : x/y donne(s)") ; les traces (nom
+  pres du depart, fleche a l'arrivee) et le "Vrai niveau" PAR trace sont
+  dans l'AGRANDISSEMENT (choix de l'utilisateur : cartes trop chargees
+  sinon). `/api/detection/gallery` donne `zones` / `zone_votes` ; "sans avis"
+  = ni `vote` ni `zone_votes` ; "Oui a tout le reste" = avis global
+  seulement. Le detail `samples/<id>` porte `trace` sur chaque vehicule
+  (`assign_traces` avec les traces ACTUELS, non stocke) : pastille a la
+  couleur du trace dans les photos. COMPTEUR du jeu d'entrainement en tete
+  de galerie (`GET /api/detection/gallery/stats`, recharge avec la
+  galerie) : avis oui / non par source, photos d'intrusion annotees (cadres
+  ou "rien") vers `TRAIN_TARGET_PHOTOS` = 300 (objectif avant un
+  re-entrainement du detecteur, qui N'EXISTE PAS encore), avis par trace.
+- STATISTIQUES (`ia_capture_stats`, GARDEES SANS LIMITE, contrairement aux
+  mesures) : une ligne par camera, canal, zone trafic (`image` sans zone) et
+  quart d'heure (`slot` UTC ; `day`, `dow` 0 = lundi, `hm` en heure de
+  Paris). Champs : `samples`, `images`, `veh_max` (max de vehicules sur UNE
+  image), `veh_sum` (somme des moyennes par image -> moyenne = veh_sum /
+  samples), `measured` / `stopped` / `slow` (vehicules mesures, 1re image de
+  chaque paire), `speed_sum` / `speed_n` (longueurs/s, deux paires),
+  `states.{fluide,ralenti,bouchon}`. `capture_ia.add_stats` a chaque mesure
+  (une fois : `in_stats` sur la mesure) ; rattrapage `capture_ia.py
+  --stats-backfill`. Nombre de vehicules = REMPLISSAGE, pas un debit. Zone
+  redessinee : les quarts d'heure deja comptes ne sont PAS recalcules
+  (l'historique au-dela de 30 jours n'existe plus ailleurs).
+- WAZE CROISE : itineraires Waze (flux partenaire, `waze_trafic` latest,
+  historique `waze_trafic_history` garde 1 an par TTL, ~1 releve / 16 min)
+  lies a un canal trafic, PLUSIEURS possibles : choisis dans le mode Trafic
+  (bouton "Itineraires Waze", tries par distance au trace ; `ia_capture_links`
+  "<camera_id>:<canal>" `{waze_routes: [id]}`) OU etiquetes dans leur nom
+  Waze `[cam:133]` (tous les canaux) / `[cam:133.2]` (un canal) : numero =
+  debut du nom de la camera (`capture_ia.waze_tagged`). Ces itineraires
+  etiquetes sont IGNORES PARTOUT AILLEURS (mur, /trafic/*, montre, briefing,
+  explication IA des alertes, export CSV) : `trafic_etat.sans_routes_camera`,
+  applique dans `traffic._get_waze_trafic_payload` et
+  `trafic_etat.lire_routes`. Recommande : creer
+  dans Waze des itineraires COURTS sur les segments vus par la camera, avec
+  l'etiquette (un itineraire de plusieurs km dit peu sur ce qui se passe
+  devant la camera : Antares 10/10 17:25, "Leroy Merlin -> Tertre rouge"
+  x1,69 mais troncon devant la camera x1,14). SENS DE CIRCULATION :
+  ITINERAIRE TRACE sur la photo (`ia_capture_zones.kind = "itineraire"`,
+  `line` = points du DEPART a l'ARRIVEE, `waze_route` / `waze_name`
+  facultatifs ; editeur "Zones de mesure", type par defaut en trafic). Un
+  vehicule appartient au trace le plus proche (centre a moins de 0,7 x sa
+  taille + 0,01, distances corrigees 16:9) S'IL VA DANS LE SENS du trace
+  quand il bouge (`move` = deplacement du centre sur la paire, fractions/s,
+  pose par `classify_pair` ; cosinus >= -0,2) : deux sens colles sont
+  separes (test : 146/146 vehicules au bon trace face a un trace inverse
+  voisin). Les traces comptent comme des zones trafic (etat, alertes,
+  statistiques : `capture_ia.measure_targets`). L'itineraire Waze d'un trace
+  est lie d'office et ne va que sur la ligne de ce trace dans
+  `ia_capture_stats` (`route_zones` : ancien choix par zone, plus propose).
+  Zone creee / modifiee / supprimee : `rebuild` des statistiques par la
+  tache. `waze_for_sample` : par
+  itineraire lie temps / temps habituel (`ratio`), `jam` 0-4, et le
+  sous-itineraire Waze le plus proche de la camera (<= 150 m, `sub`) ;
+  signalements Waze a moins de 400 m (`alerts` par type). Garde sur la
+  mesure (`waze`) et dans `ia_capture_stats` (`waze_n`, `waze.<id>.{n,
+  time_sum, hist_sum, ratio_sum, ratio_max, jam_max, sub_n, sub_ratio_sum,
+  sub_ratio_max, name, sub_name}`, `waze_alerts.<type>` max). Releve Waze a
+  plus de 20 min de la mesure : ignore. Liens changes (page IA) ou etiquette
+  apparue / retiree dans Waze (`ia_capture_links.tagged`) : `rebuild` ->
+  la tache refait les quarts d'heure encore couverts par des mesures
+  (`rebuild_stats`), jamais Cockpit.
+- Volume 4G sans toucher aux reglages : ~950 Ko par photo (Dahua 2560x1440),
+  deux paires (4 photos) / 3 min = ~1,8 Go/jour/camera. Le port RTSP (554)
+  des routeurs 4G n'est pas ouvert : photos enchainees.
+- Alertes trafic : PAR LA CENTRALE D'ALERTES uniquement (pas de reglage
+  sur l'usage). Type de regle `traffic_camera` ("Trafic - ralenti /
+  bouchon") : `params {channels: ["<camera_id>:<canal>"], min_state:
+  bouchon|ralenti, consecutive (2), cooldown_min (30)}`. Creees par
+  `capture_ia.dispatch_traffic` (tache planifiee) au format du recepteur
+  (`cockpit_active_alerts`, photo A en `snapshot_path`, `camera_path`
+  "capture:<cle>", WhatsApp de la regle). Une alerte par episode et par
+  regle (`ia_capture_state.alert_episodes`), fermee a la premiere mesure
+  sous le seuil. JAMAIS d'alerte pour une camera SANS ZONE (vehicules gares
+  = faux bouchon : 151 Giratoire Technoparc, 10/10/2026) ; pastille "Zones
+  a dessiner" dans le mode Trafic.
+- API (`ia_capture.py`, blueprint de la page) : `GET/POST
+  /api/detection/capture/cameras`, `PUT/DELETE .../<cid>/<ch>`, `POST
+  .../now` (prochain passage de la tache), `GET .../presets` (lecture),
+  `GET /api/detection/capture/samples?key=&hours=`, `GET .../samples/<id>`,
+  `POST .../samples/<id>/feedback {vote, state}`, zones CRUD
+  `/api/detection/capture/zones`, `POST /api/detection/groups/<gid>/member
+  {camera_id, channel, member}` (n'ecrase pas le reste du groupe).
+- `_detection_channels` inclut les canaux en capture (`modes`) : ils
+  peuvent entrer dans un groupe (planning) et apparaissent sur la carte.
+
+### Foule (trop de monde dans une zone)
+- Meme usage `capture`, `purpose: "crowd"` ("Analyse IA (trafic / foule)") :
+  UNE photo toutes les `interval_min` (5 par defaut), gardee en pleine
+  taille (4096 px max, q85 : les personnes au fond sont minuscules).
+- Modele : ZIP-B NWPU-Crowd (Yiming-M/EBC-ZIP, MIT, 2025, suite de
+  CLIP-EBC), poids UNIQUES dans `tagger\models\analytics\crowd\zip\`
+  (code `code\ZIP-main`, poids `weights_nwpu_b\ebc_b_best\best_mae.pth`).
+  Charge par le service IntrusionVerifier (`POST /density {photo, zones}` :
+  fenetres 672 px, normalisation CLIP, comptes par polygone, carte reduite
+  27 x 48 pour l'affichage, + YOLO personnes pour info).
+  PIEGE ultralytics : `classes` passe a `predict` RESTE sur le predicteur
+  pour les appels suivants. `/density` passe `classes=[0]` : `/verify` et
+  `/detect` passent donc `classes=None`. Oublie le 10/10/2026 : de 12 h 18
+  a 13 h 40 (Paris), plus aucun vehicule vu par le trafic et une intrusion
+  vehicule (Tertre Rouge) filtree a tort. Dependances
+  ajoutees au venv titan_prod le 10/10/2026 : open_clip_torch, peft
+  (accelerate), sans changer torch. Reseau CLIP de base telecharge une
+  fois (cache HF du compte du service). Chargement ~35 s au demarrage.
+- Tagger utilise le MEME modele : export TorchScript
+  `tagger\scripts\crowd\export_zip_model.py` ->
+  `aerial_density\crowd_density_zip_nwpu_b_torchscript(_cuda).pt`
+  (entree ImageNet convertie en CLIP dans le modele), prefere par
+  `tagger\app.py` s'il existe (version `crowd_density_zip_nwpu_b_v1`).
+  PIEGE Tagger (pre-existant) : tuiles 1024 sans recouvrement, la derniere
+  recalee sur le bord : la bande commune est comptee deux fois (photo 1080
+  px de haut : ~2 rangees presque superposees).
+- Zones `kind: "foule"` : `surface_m2` (saisie ou mesuree sur la vue
+  aerienne IGN dans le dialogue, aire geodesique), `seuil_charge` (2
+  p/m2), `seuil_trop` (4 p/m2), `geo`. Niveau = personnes / surface :
+  normal / charge / trop ; sans surface : "inconnu" (compte seul). Recalcul
+  de l'historique depuis la carte reduite quand une zone change.
+- Alerte : regle `crowd_camera` ("Foule dense (analyse camera)") `params
+  {channels, min_level: charge|trop, consecutive (1), cooldown_min (30)}`,
+  `capture_ia.dispatch_crowd`, une alerte par episode.
+- Carte globale : pin FOULE = carre arrondi (trafic = rond), couleur du
+  niveau ; volet de detail : "Analyser le trafic" / "Analyser la foule".
+- Cameras pilotes (10/10/2026) : C06 - Portiques canal 1 (interieur
+  musee ; le canal 2 thermique ne cadre pas les portiques) et 221 - P1A
+  (canal 2 de "220 - P1A - Village", panorama 3632 x 1632), filaires, RTSP
+  ouvert.
+
+### Secours (personne au sol) -- depuis le 11/10/2026
+- Usage capture `purpose: "secours"` (3e option de l'usage "Analyse IA"
+  de la page Cameras ; un canal = UNE fonction : trafic, foule OU secours).
+  Une photo toutes les `interval_min` (5 par defaut), `capture_ia.capture_secours`.
+- Modele : yolo11m-pose (Ultralytics, 17 points COCO), telecharge le
+  11/10/2026 dans `tagger/models/analytics/ground/yolo11m-pose.pt` (Tagger
+  n'avait aucun modele de pose). Charge par IntrusionVerifier (`POST /pose
+  {photo}` -> `persons [{conf, box, kpts}]`, `size`) ; imgsz 1920 conf 0.2
+  (en 1280, la moitie des personnes de ~100 px manquaient). ~140 ms.
+- Posture decidee par `capture_ia.posture` (reglable sans redemarrer le
+  service) : axe epaules (ou tete) -> chevilles (ou genoux, hanches) en
+  pixels ; >= 60 degres de la verticale = "allonge", <= 35 = "vertical"
+  (debout OU assis), entre = "incline" ; sans points, cadre >= 1,6 fois
+  plus large que haut = allonge. Compte (`counted`) si allonge, conf >= 0,4
+  et dans une zone "secours" (sans zone : toute l'image).
+- Etat : "rien" / "sol" (allonge sur cette photo) / "immobile" (deja
+  allonge au meme endroit sur la photo precedente, < 3 intervalles :
+  centres a moins d'une taille de cadre ; `since` repris, `lying_min`).
+  Mesure : `persons_pose`, `lying`, `lying_min`, `total`.
+- Essai du 11/10/2026 : 34 personnes debout (Foule, intrusions) toutes
+  "vertical" ; personnes tournees de 75-90 degres : 15/17 "allonge" (conf
+  >= 0,4). Pas encore de vraie photo de personne au sol.
+- ALERTES (11/10/2026) : regle "Personne au sol (analyse camera)" de la
+  centrale (`detection_type: "secours_camera"`, params `channels`,
+  `min_state` sol | immobile (defaut immobile), `min_minutes`,
+  `consecutive`, `cooldown_min`). `capture_ia.dispatch_secours` : une alerte
+  par episode et par regle (photo + `box` de la 1re personne au sol,
+  `secours_state`, `lying`, `lying_min`), episode ferme a la 1re photo sans
+  personne au sol, `secours_episodes` dans `ia_capture_state`. Teste sur
+  base factice (1 alerte par episode, cooldown respecte). Creee desactivee
+  par l'operateur ; sans regle : observation. `recompute_zones` saute les
+  mesures secours (duree enchainee d'une photo a l'autre). Les regles
+  trafic / foule ne proposent pas ces cameras (et inversement).
+- Page IA : mode "Secours" (liste, interrupteur `secours`, Ajouter), carte
+  globale (filtre Secours, pin `personal_injury` prioritaire quand
+  quelqu'un est au sol), galerie (source `secours`, avis Oui / Non avec
+  vrai etat rien / sol / immobile), zones de type "secours".
+
+### Galerie (entrainement)
+A REVOIR (11/10/2026, mode par defaut) : tout actif = des milliers de
+photos par jour, presque toutes identiques a la precedente. Chaque mesure
+recoit `review {score, reasons}` (`capture_ia.review_of`, apres insertion,
+`set_review` ; rattrapage `capture_ia.py --review-backfill`) :
+changement d'etat vs la mesure precedente du canal (+3), trafic
+ralenti / bouchon (+2) ou dense (+1), zone ou mouvement et nombre
+(`state_motion` / `state_count`) different (+2), Waze >= x1,5 mais IA
+fluide ou Waze <= x1,1 mais IA ralenti / bouchon (+3) ; foule trop (+2),
+a +-20 % d'une capacite (+2) ; secours personne allongee (+4), penchee
+(+1), immobile (+2). Score 0 : tirage de controle 1 sur 40
+(`REVIEW_AUDIT`) pour mesurer la justesse du reste sans biais.
+Intrusions : `_intrusion_review` a la lecture (toutes celles jugees par
+l'IA, douteuses d'abord). `mode=revoir` : sans avis ET score >= 1, tri
+score puis date, pagination `offset` (le front ne compte que les cartes
+encore sans avis) ; `mode=todo` / `all` comme avant (`before`). `counts
+{revoir, todo}` affiches. Au 11/10/2026 : 49 mesures sur 1 131 a revoir
+(~4 %). Index `review.score, at`.
+PURGE (11/10/2026) : sans avis ET sans interet (`review.score` 0, tirage de
+controle exclu puisqu'il a un score) supprimees apres 7 jours
+(`CAPTURE_LOW_INTEREST_DAYS`), les autres sans avis apres 30
+(`CAPTURE_RETENTION_DAYS`), jamais celles annotees. Trafic : seulement si
+deja dans `ia_capture_stats` (`in_stats`), qui restent sans limite. Mesures
+sans `review` (avant le rattrapage) : regle des 30 jours.
+`GET /api/detection/gallery?source=all|intrusions|traffic|crowd|secours&mode=revoir|todo|all&before=&offset=`
+(`captures` = trafic + foule) : intrusions (photo de couverture, verdict
+IA, pouces) et captures (etat, "juste ? oui / non -> vrai etat")
+melangees, plus recentes d'abord, filtre "sans avis". Clic sur une
+intrusion : fiche en mode Intrusions (cadres). Bouton "Oui a tout le
+reste" : l'operateur marque d'abord les erreurs (Non), puis valide d'un
+clic les photos AFFICHEES encore sans avis (hors intrusions non verifiees
+et niveaux "inconnu"), un appel par photo.
+Pourcentage affiche (fiche, badge, galerie) : le PLUS HAUT de l'IA,
+detecteur ou avis SigLIP, quelle que soit la decision ("l'IA voit surtout").
 
 ## Telephone (<= 820 px, point de rupture de la charte)
 

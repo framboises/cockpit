@@ -138,9 +138,8 @@ def _now():
 
 
 def _client_ip():
-    fwd = request.headers.get("X-Forwarded-For", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    # IP reelle posee par waitress (proxy de confiance IIS, cf. app.py) ;
+    # jamais l'en-tete X-Forwarded-For (falsifiable : contournerait le lockout)
     return request.remote_addr or "?"
 
 

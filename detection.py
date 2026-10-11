@@ -148,15 +148,20 @@ def _device_position(db, d):
 
 
 def _detection_channels(db):
-    """Canaux ayant l'usage detection d'intrusion (page Cameras)."""
+    """Canaux surveilles par la page IA : detection d'intrusion (alertes de la
+    camera) et Capture IA (photos prises par la tache planifiee). Les deux
+    peuvent entrer dans un groupe (planning). modes : ["alerte", "capture"]."""
     out = []
-    for d in db["cockpit_cameras"].find({"channels.roles.type": "fielddetection"},
+    for d in db["cockpit_cameras"].find({"channels.roles.type": {"$in": ["fielddetection", "capture"]}},
                                         {"name": 1, "site": 1, "camera_path": 1, "channels": 1, "enabled": 1, "ip": 1, "map": 1}):
         pos, source, geo = _device_position(db, d)
         for ch in d.get("channels") or []:
-            if not any(r.get("type") == "fielddetection" for r in ch.get("roles") or []):
+            types = {r.get("type") for r in ch.get("roles") or []}
+            modes = (["alerte"] if "fielddetection" in types else []) + (["capture"] if "capture" in types else [])
+            if not modes:
                 continue
             out.append({
+                "modes": modes,
                 "key": "%s:%s" % (d["_id"], ch.get("no")),
                 "camera_id": str(d["_id"]), "camera_name": d.get("name", ""),
                 "channel": ch.get("no"), "channel_name": ch.get("name") or "Canal %s" % ch.get("no"),
@@ -252,6 +257,23 @@ def _zones_of(ep, zones):
     return out
 
 
+def _pub_ai(ep):
+    """Verdict de la verification IA locale (recepteur + service
+    IntrusionVerifier) et avis de l'operateur (pouce). None si non verifiee."""
+    ai, vote = ep.get("ai") or {}, ep.get("ai_vote") or {}
+    if not ai and not vote:
+        return None
+    return {"status": ai.get("status"), "label": ai.get("label"), "conf": ai.get("conf"),
+            "real_conf": ai.get("real_conf"), "reason": ai.get("reason"), "guess": ai.get("guess") or [],
+            "vote": vote.get("vote"), "vote_by": vote.get("by", ""), "vote_at": _iso(vote.get("at"))}
+
+
+def _pub_label(lb):
+    if not lb:
+        return None
+    return {"boxes": lb.get("boxes") or [], "by": lb.get("by", ""), "at": _iso(lb.get("at"))}
+
+
 def _pub_episode(ep, zones, now, full=False):
     zs = _zones_of(ep, zones)
     last, start = _utc(ep.get("last_at")), _utc(ep.get("started_at"))
@@ -274,10 +296,14 @@ def _pub_episode(ep, zones, now, full=False):
         "status": ep.get("status", "new"),
         "status_by": ep.get("status_by", ""), "status_at": _iso(ep.get("status_at")),
         "note": ep.get("note", ""),
+        "ai": _pub_ai(ep),
+        # Hors planning : gardee sans alerte (champ absent = dans le planning)
+        "armed": ep.get("armed") is not False,
     }
     if full:
         item["photos"] = [{"photo": _img(p.get("photo")), "thumb": _img(p.get("thumb")), "at": _iso(p.get("at")),
-                           "type": p.get("type"), "rect": p.get("rect"), "target_id": p.get("target_id")}
+                           "type": p.get("type"), "rect": p.get("rect"), "target_id": p.get("target_id"),
+                           "ai": p.get("ai"), "label": _pub_label(p.get("label"))}
                           for p in ep.get("photos") or []]
         item["region_polygon"] = ep.get("region_polygon") or []
         item["resolution"] = ep.get("resolution")
@@ -297,6 +323,21 @@ def _episode_query(args, zones):
         q["status"] = {"$ne": "closed"}
     elif st in STATUSES:
         q["status"] = st
+    # Planning : "" = intrusions du planning seulement (defaut, les hors
+    # planning peuvent etre nombreuses en journee), "off" = hors planning,
+    # "all" = toutes
+    pl = args.get("planning", "")
+    if pl == "off":
+        q["armed"] = False
+    elif pl != "all":
+        q["armed"] = {"$ne": False}
+    ai = args.get("ai", "")
+    if ai == "filtered":
+        q["ai.status"] = "filtered"
+    elif ai == "alerted":
+        q["ai.status"] = {"$ne": "filtered"}
+    elif ai == "voted":
+        q["ai_vote.vote"] = {"$in": AI_VOTES}
     cam = args.get("camera", "")
     if cam and ":" in cam:
         cid, ch = cam.split(":", 1)
@@ -739,12 +780,86 @@ def set_status():
     return jsonify({"ok": True, "modified": res.modified_count})
 
 
+AI_VOTES = ["up", "down"]
+
+
+@detection_bp.route("/api/detection/episodes/<eid>/ai-vote", methods=["POST"])
+def set_ai_vote(eid):
+    """Avis de l'operateur sur le verdict de l'IA : {vote: "up" (l'IA a
+    raison) | "down" (l'IA s'est trompee) | null (retire)}. Ces avis servent a
+    mesurer le filtre, ajuster son seuil et constituer un jeu d'entrainement
+    (photo + cadre + verdict + avis)."""
+    db = _ensure_db()
+    vote = (request.get_json(silent=True) or {}).get("vote")
+    if vote is not None and vote not in AI_VOTES:
+        return jsonify({"error": "Avis invalide"}), 400
+    oid = _oid(eid)
+    upd = ({"$set": {"ai_vote": {"vote": vote, "by": _who(), "at": datetime.now(timezone.utc)}}}
+           if vote else {"$unset": {"ai_vote": ""}})
+    res = db["hik_intrusions"].update_one({"_id": oid}, upd) if oid else None
+    if not res or not res.matched_count:
+        return jsonify({"error": "Intrusion introuvable"}), 404
+    ep = db["hik_intrusions"].find_one({"_id": oid}, {"ai": 1, "ai_vote": 1})
+    return jsonify({"ok": True, "ai": _pub_ai(ep)})
+
+
+LABEL_CATEGORIES = ["personne", "vehicule"]
+
+
+def _clip01(v):
+    try:
+        return min(1.0, max(0.0, float(v)))
+    except (TypeError, ValueError):
+        return None
+
+
+@detection_bp.route("/api/detection/episodes/<eid>/photos/<int:idx>/label", methods=["POST"])
+def set_photo_label(eid, idx):
+    """Annotation de l'operateur sur UNE photo : ou est la personne / le
+    vehicule. {photo: <url de la photo, controle>, boxes: [{x, y, w, h,
+    category: personne|vehicule}]} ; boxes vide = "rien sur cette photo".
+    Cadres normalises 0-1 sur la photo entiere (comme rect). Sert au
+    reentrainement (verite terrain) ; ne change pas le statut de l'intrusion.
+    Si l'IA avait filtre l'intrusion et qu'on indique une personne ou un
+    vehicule, l'avis "Erreur" est pose (s'il n'y a pas deja d'avis)."""
+    db = _ensure_db()
+    oid = _oid(eid)
+    ep = db["hik_intrusions"].find_one({"_id": oid}, {"photos.photo": 1, "ai.status": 1, "ai_vote": 1}) if oid else None
+    if not ep:
+        return jsonify({"error": "Intrusion introuvable"}), 404
+    photos = ep.get("photos") or []
+    data = request.get_json(silent=True) or {}
+    if idx < 0 or idx >= len(photos) or _img(photos[idx].get("photo")) != data.get("photo"):
+        return jsonify({"error": "Photo introuvable (la liste a change, rouvrez la fiche)"}), 409
+    boxes = []
+    for b in (data.get("boxes") or [])[:20]:
+        x, y, w, h = (_clip01(b.get(k)) for k in ("x", "y", "w", "h"))
+        if None in (x, y, w, h) or w < 0.002 or h < 0.002 or b.get("category") not in LABEL_CATEGORIES:
+            return jsonify({"error": "Cadre invalide"}), 400
+        boxes.append({"x": round(x, 4), "y": round(y, 4), "w": round(min(w, 1 - x), 4),
+                      "h": round(min(h, 1 - y), 4), "category": b["category"]})
+    now = datetime.now(timezone.utc)
+    label = {"boxes": boxes, "by": _who(), "at": now}
+    upd = {"$set": {"photos.%d.label" % idx: label}}
+    if boxes and (ep.get("ai") or {}).get("status") == "filtered" and not (ep.get("ai_vote") or {}).get("vote"):
+        upd["$set"]["ai_vote"] = {"vote": "down", "by": _who(), "at": now, "auto": "annotation"}
+    db["hik_intrusions"].update_one({"_id": oid}, upd)
+    ep = db["hik_intrusions"].find_one({"_id": oid}, {"ai": 1, "ai_vote": 1})
+    return jsonify({"ok": True, "label": {**label, "at": _iso(now)}, "ai": _pub_ai(ep)})
+
+
 @detection_bp.route("/api/detection/image/<path:rel>")
 def image(rel):
     safe = os.path.normpath(rel)
-    if ".." in safe or os.path.isabs(safe) or not safe.replace("\\", "/").startswith("intrusions/"):
+    # intrusions/ (recepteur) et captures/ (Capture IA, capture_ia.py)
+    if ".." in safe or os.path.isabs(safe) or not safe.replace("\\", "/").startswith(("intrusions/", "captures/")):
         abort(400)
     full = os.path.abspath(os.path.join(HIK_IMAGE_DIR, safe))
     if not full.startswith(os.path.abspath(HIK_IMAGE_DIR) + os.sep) or not os.path.isfile(full):
         abort(404)
     return send_file(full, mimetype="image/jpeg", max_age=7 * 86400)
+
+
+# Capture IA (trafic) et galerie d'entrainement : routes dans ia_capture.py,
+# sur ce meme blueprint (memes droits que la page)
+import ia_capture  # noqa: E402,F401

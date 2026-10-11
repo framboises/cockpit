@@ -21,8 +21,11 @@ la page LAPI renvoie ici (`/cameras?usage=anpr`).
       `visible`). Miroir automatique vers `anpr_camera_config`
       (`_sync_anpr_config`), toujours lu par `anpr.py` et
       `cockpit_dispatch.py` : ne JAMAIS editer `anpr_camera_config` a la main.
-    - `fielddetection` : detection d'intrusion (page Detection,
+    - `fielddetection` : detection d'intrusion (page IA, mode Intrusions,
       `docs/claude/detection.md`).
+    - `capture` : Capture IA (trafic) : paires de photos prises par la tache
+      planifiee `capture_ia.py`, reglees dans la page IA, mode Trafic
+      (`docs/claude/detection.md`). Pas de chemin d'envoi.
 - `cam_credential_profiles` : `{name, user, secret, note}`. `secret` =
   AES-256-GCM (`camera_secrets.py`, format `v1:<nonce>:<chiffre>`, AAD fixe).
 
@@ -185,10 +188,22 @@ partagee avec d'autres outils) :
   ecriture : `_sync_layer(doc, doc, dry=True)` ; au 09/10/2026 elle ne
   touchait que 179 (nom de canal) et 042 (4 canaux sans point).
 
-Capture de masse : `POST /api/cameras/capture-all {ids}` (premier canal de
-chaque appareil actif, pilotable, avec profil ; JAMAIS les cameras de piste),
-`GET` = progression. Une seule a la fois (409), 8 en parallele dans un thread
-dedie (les threads Waitress ne sont pas occupes), `call_camera` (reveil 4G).
+Capture de masse : `POST /api/cameras/capture-all {ids}` (CHAQUE CANAL ACTIF
+de chaque appareil actif, pilotable, avec profil, depuis le 11/10/2026 ;
+JAMAIS les cameras de piste), `GET` = progression (`total` / `done` en
+canaux, `devices`). Une seule a la fois (409), 8 appareils en parallele dans
+un thread dedie (les threads Waitress ne sont pas occupes), les canaux d'un
+meme appareil L'UN APRES L'AUTRE (un enregistreur n'est pas sollicite 5 fois
+a la fois), `call_camera` (reveil 4G). Vignette par canal :
+`<id>_latest.jpg` (canal 1) / `<id>_ch<N>_latest.jpg` ; `/api/cameras/map`
+donne `snaps {no: date}` et la bulle de la carte montre une vignette par
+canal capture.
+
+Telephone (<= 820 px) : barre du bas `.mobile-bottom-nav` de style.css
+(Liste, Carte, "+" Ajouter, Filtres avec pastille du nombre de filtres
+actifs, Identifiants) ; boutons du haut masques ; seule la recherche reste en
+haut, les 4 filtres s'ouvrent en volet ("Filtres", par-dessus la carte en
+mode carte) ; la carte prend toute la hauteur.
 
 ## Etat reseau
 
@@ -210,9 +225,14 @@ laisser trainer.
 
 ## Pieges
 
-- `GET /api/cameras` doit rester un TABLEAU d'appareils (`_id, name, ip,
-  enabled, location`) : le selecteur de camera de la main courante (pcorg.js)
-  le lit tel quel.
+- `GET /api/cameras` (TABLEAU d'appareils) est reserve aux admins (blueprint
+  `cameras_bp`). Le selecteur de camera de la main courante (pcorg.js) lit
+  `GET /api/pcorg/cameras` (app.py, droits "user" comme la capture) :
+  `cameras.capture_camera_list()` = actives, marque pilotable, profil
+  d'identifiants, hors piste, avec `lat`/`lon` pris dans la couche carto
+  `cameras` (FeatureCollection, propriete `IP`). Vignettes :
+  `/api/pcorg/cameras/<id>/snapshot`. Une camera absente de la carte reste
+  proposee, apres les autres (ordre alphabetique).
 - `/api/cameras-list` (centrale d'alertes) ne liste que les appareils qui ont
   un `camera_path` (+ chemins LAPI) : sans chemin, aucun evenement n'arrive.
 - Le recepteur (`E:\TITAN\production\PCA\SCRIPTS\ecoutehik2.py`, service
