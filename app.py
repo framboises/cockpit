@@ -2463,6 +2463,10 @@ app.register_blueprint(momentus_bp)
 # visites libres/guidees et pistes utilisees. GET user, PUT config admin
 # (CSRF ACTIF), configuration globale dans cockpit_settings.
 app.register_blueprint(saison_indicateurs_bp)
+# Prise de poste operateur (operateurs*.py, docs/claude/operateurs.md) :
+# zones = couche Looker lue en direct, metiers = Bibler. CSRF ACTIF.
+from operateurs_api import operateurs_bp
+app.register_blueprint(operateurs_bp)
 # Bloc Musee de l'accueil (musee_api.py) : GET user + bloc widget-musee,
 # lecture seule des collections musee_* (collecte scripts/musee_collect.py,
 # autonome du live-controle).
@@ -4392,6 +4396,7 @@ def create_group():
         'can_create_fiche': bool(data.get('can_create_fiche', False)),
         'can_convert_declaration': bool(data.get('can_convert_declaration', False)),
         'alfred_chat': bool(data.get('alfred_chat', False)),
+        'operateur': bool(data.get('operateur', False)),
         'allowed_pages': _parse_allowed_pages(data.get('allowed_pages')),
         'admin_pages': _parse_admin_pages(data.get('admin_pages')),
         'allowed_categories': _parse_allowed_categories(data.get('allowed_categories')),
@@ -4462,6 +4467,9 @@ def update_group(gid):
         patch['can_convert_declaration'] = bool(data.get('can_convert_declaration', False))
     if 'alfred_chat' in data and not is_admin_grp:
         patch['alfred_chat'] = bool(data.get('alfred_chat', False))
+    # Prise de poste operateur (docs/claude/operateurs.md) : jamais pour les admins
+    if 'operateur' in data and not is_admin_grp:
+        patch['operateur'] = bool(data.get('operateur', False))
     if 'allowed_pages' in data and not is_admin_grp:
         patch['allowed_pages'] = _parse_allowed_pages(data.get('allowed_pages'))
     if 'admin_pages' in data and not is_admin_grp:

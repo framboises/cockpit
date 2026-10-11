@@ -1,6 +1,8 @@
 # Operateurs : prise de poste, zones, metiers, ciblage des alertes
 
-Statut : PLAN valide (11/10/2026), implementation non commencee.
+Statut (11/10/2026) : etape 1 faite (case Operateur des groupes, section
+Configuration "Zones et metiers", `operateurs.py` + `operateurs_api.py`).
+Etapes 2 a 6 a faire.
 
 ## Besoin
 
@@ -209,8 +211,15 @@ Nouvelle section "Zones et metiers" :
 - carte de la couche : renommer / retracer une zone ecrit dans la collection
   Looker (`features.$.properties.*`, `features.$.geometry` par
   `_id_feature`), donc visible immediatement dans Looker ;
-- ATTENTION : refuser les couches alimentees par un import automatique
-  (sinon l'import ecrase les modifications) ;
+- les modes GroundMaster des couches (`schedule`, `addable_schedule`,
+  `activation`, source `collection`) ne reimportent rien depuis l'exterieur :
+  pas de risque d'ecrasement constate au 11/10/2026 ;
+- features sans `_id_feature` ignorees (signalees dans l'admin ; ex. couche
+  Cadastre entiere) ;
+- ATTENTION polygones imbriques : la couche "Competences" (56 polygones)
+  melange Departements, Secteurs et Lots qui se recouvrent. Un point peut
+  tomber dans plusieurs zones : la resolution d'une alerte (etape 4) doit
+  le gerer (toutes les zones contenant le point, ou filtre sur un niveau) ;
 - liste des metiers lus dans `bible_structure` (lecture seule, edites dans
   Bibler) ;
 - postes actifs.

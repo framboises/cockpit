@@ -4535,6 +4535,27 @@ button.pl-mrow:hover, button.pl-mrow:focus-visible { background: #eff6ff; }
 #event-list.si-filtering .event-item.si-dim { opacity: 0.25; filter: grayscale(0.7); }
 #event-list.si-filtering .event-item.si-hit { box-shadow: 0 0 0 2px #1f2d3d, var(--shadow-md); }
 
+/* Admin (Configuration > Zones et metiers, operateurs) */
+.op-admin-form { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.op-admin-form .form-input { height: 30px; font-size: 0.8rem; padding: 3px 8px; min-width: 220px; }
+.op-admin-info { font-size: 0.78rem; color: var(--muted); align-self: center; }
+.op-admin-info.is-warn { color: var(--warning); }
+.op-admin-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr); gap: 12px; }
+.op-admin-map { height: 380px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.op-admin-side { max-height: 380px; overflow-y: auto; }
+.op-admin-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.op-admin-chip {
+  font-size: 0.74rem;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--brand-light);
+  color: var(--brand-strong);
+  cursor: default;
+}
+.op-admin-chip.is-hover { background: var(--brand-strong); color: #fff; }
+.op-admin-tip { font-size: 0.75rem; font-weight: 600; }
+@media (max-width: 820px) { .op-admin-grid { grid-template-columns: 1fr; } }
+
 /* Admin (Configuration > Indicateurs SAISON) */
 .si-admin-intro { font-size: 0.82rem; color: var(--muted); margin: 0 0 12px; line-height: 1.5; }
 .si-admin-preview {

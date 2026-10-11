@@ -667,6 +667,9 @@
     var alfredRow = document.getElementById("group-alfred-row");
     if(alfredRow) alfredRow.style.display = "";
     if(groupForm.elements.alfred_chat) groupForm.elements.alfred_chat.checked = false;
+    var operRow = document.getElementById("group-operateur-row");
+    if(operRow) operRow.style.display = "";
+    if(groupForm.elements.operateur) groupForm.elements.operateur.checked = false;
     openGroupModal();
   });
 
@@ -691,6 +694,7 @@
                    can_create_fiche: !!(groupForm.elements.can_create_fiche && groupForm.elements.can_create_fiche.checked),
                    can_convert_declaration: !!(groupForm.elements.can_convert_declaration && groupForm.elements.can_convert_declaration.checked),
                    alfred_chat: !!(groupForm.elements.alfred_chat && groupForm.elements.alfred_chat.checked),
+                   operateur: !!(groupForm.elements.operateur && groupForm.elements.operateur.checked),
                    allowed_categories: allowedCats};
     var pagesRow = document.getElementById("group-pages-row");
     var pagesShown = pagesRow && pagesRow.style.display !== "none";
@@ -786,6 +790,10 @@
       var alfredRow = document.getElementById("group-alfred-row");
       if(alfredRow) alfredRow.style.display = isAdm ? "none" : "";
       if(groupForm.elements.alfred_chat) groupForm.elements.alfred_chat.checked = !!(g.alfred_chat);
+      // Operateur : sans objet pour le groupe admin (jamais de prise de poste)
+      var operRow = document.getElementById("group-operateur-row");
+      if(operRow) operRow.style.display = isAdm ? "none" : "";
+      if(groupForm.elements.operateur) groupForm.elements.operateur.checked = !!(g.operateur);
       openGroupModal();
     }
 

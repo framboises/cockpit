@@ -433,6 +433,48 @@
         </div>
       </section>
 
+      <!-- Section Zones et metiers (prise de poste operateur, docs/claude/operateurs.md) -->
+      <section class="widget-card" style="margin-top:16px;">
+        <header class="widget-header" data-collapsible data-section="operateurs">
+          <h3>Zones et metiers (operateurs)</h3>
+          <div style="display:flex; gap:6px; align-items:center; margin-left:auto; margin-right:8px;" onclick="event.stopPropagation()">
+            <span id="op-admin-status" style="font-size:0.78rem; color:var(--muted);"></span>
+            <button id="op-admin-save" class="btn-icon" title="Enregistrer">
+              <span class="material-symbols-outlined">save</span>
+            </button>
+          </div>
+          <span class="material-symbols-outlined collapse-icon">expand_more</span>
+        </header>
+        <div class="widget-body collapsible" id="operateurs-body">
+          <p class="si-admin-intro">
+            Les membres d'un groupe <strong>Operateur</strong> prennent leur poste a l'arrivee : evenement, zone(s), metier.
+            Les <strong>zones</strong> sont les polygones d'une couche <strong>Looker</strong>, lue en direct (une zone modifiee
+            dans Looker l'est immediatement ici). Les <strong>metiers</strong> viennent de <strong>Bibler</strong>.
+            Seules les alertes sont ciblees ; aucun autre droit n'est restreint.
+          </p>
+          <div class="op-admin-form">
+            <label class="si-admin-field">
+              <span class="si-admin-field-label">Couche de zones (Looker)</span>
+              <select id="op-admin-layer" class="form-input"></select>
+            </label>
+            <label class="si-admin-field">
+              <span class="si-admin-field-label">Propriete servant de nom</span>
+              <select id="op-admin-label" class="form-input"></select>
+            </label>
+            <span id="op-admin-layer-info" class="op-admin-info"></span>
+          </div>
+          <div class="op-admin-grid">
+            <div id="op-admin-map" class="op-admin-map"></div>
+            <div class="op-admin-side">
+              <div class="si-admin-field-label">Zones</div>
+              <div id="op-admin-zones" class="op-admin-chips"></div>
+              <div class="si-admin-field-label" style="margin-top:12px;">Metiers (Bibler, lecture seule)</div>
+              <div id="op-admin-metiers" class="op-admin-chips"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Section utilisateurs -->
       <section class="widget-card" style="margin-top:16px;">
         <header class="widget-header" data-collapsible data-section="users">
@@ -820,6 +862,16 @@
             </label>
           </div>
         </div>
+        <div class="form-row gform-section" id="group-operateur-row">
+          <div class="gform-title">Poste</div>
+          <div class="gperm-grid">
+            <label class="gperm">
+              <input type="checkbox" name="operateur" />
+              <span class="gperm-text"><span class="gperm-name">Operateur</span>
+                <span class="gperm-desc">Prise de poste obligatoire a l'arrivee (evenement, zones, metier). Les alertes sont ciblees sur ses zones et son metier ; aucun autre droit n'est restreint.</span></span>
+            </label>
+          </div>
+        </div>
       </form>
     </div>
     <div class="crud-modal-footer">
@@ -1006,6 +1058,7 @@
 <script src="/static/js/anoloc_admin.js"></script>
 <script src="/static/js/pcorg_config.js"></script>
 <script src="/static/js/saison_indicateurs_admin.js"></script>
+<script src="/static/js/operateurs_admin.js"></script>
 <script src="/static/js/main.js"></script>
 <script src="/static/js/ai_assistant.js"></script>
 <script src="/static/js/ai_reports.js"></script>
