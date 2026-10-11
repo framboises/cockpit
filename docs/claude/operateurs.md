@@ -9,7 +9,16 @@ Statut (11/10/2026) :
   `poste_operateur`, `operator_post_id`), reprise du poste ouvert, evenement
   impose et selecteurs figes (`cockpitLockToPost`, main.js), pastille
   "Poste" dans l'en-tete ;
-- etapes 3 a 6 a faire.
+- etape 3 faite : menu de la pastille Poste (changer de zone / metier,
+  pause / reprise, fin de poste), fiches "Changement de zone" et "Fin de
+  poste" (duree, "Cloture par X" si admin, "Deconnexion"), postes ouverts +
+  "Cloturer le poste" dans Configuration, rafraichissement du poste toutes
+  les 60 s (poste ferme ailleurs -> nouvelle prise de poste), retour sur
+  Cockpit en pause -> proposition de reprendre. Deconnexion : le lien de la
+  barre laterale (sidebar.js) appelle `POST /api/operator/post/end
+  {reason: "logout"}` apres confirmation ; la route GET `/logout_redirect`
+  reste SANS effet de bord (une page tierce pourrait la declencher) ;
+- etapes 4 a 6 a faire.
 
 Pas de fiches "Pause" / "Retour de pause" (arbitrage du 11/10/2026).
 Friday : les regles portent sur categorie + sous-classification exacte

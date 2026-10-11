@@ -130,9 +130,43 @@
     });
   }
 
+  // Deconnexion volontaire = fin du poste operateur s'il y en a un ouvert
+  // (docs/claude/operateurs.md). POST protege CSRF : la route GET
+  // /logout_redirect reste sans effet de bord.
+  function brancherDeconnexion() {
+    var lien = document.querySelector('a[href="/logout_redirect"]');
+    if (!lien) return;
+    lien.addEventListener("click", function (e) {
+      e.preventDefault();
+      var partir = function () { window.location.href = "/logout_redirect"; };
+      var meta = document.querySelector('meta[name="csrf-token"]');
+      fetch("/api/operator/post", { credentials: "same-origin", cache: "no-store" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d || !d.post) { partir(); return; }
+          // Sans conteneur de toasts, showConfirmToast repond "non" : on ne
+          // doit pas bloquer la deconnexion pour autant
+          var ok = typeof window.showConfirmToast === "function" && document.getElementById("toast-container")
+            ? window.showConfirmToast("Vous deconnecter termine votre poste (fiche \"Fin de poste\" dans la main courante). Continuer ?",
+                                      { type: "warning", okLabel: "Me deconnecter", cancelLabel: "Annuler" })
+            : Promise.resolve(true);
+          return ok.then(function (go) {
+            if (!go) return;
+            return fetch("/api/operator/post/end", {
+              method: "POST", credentials: "same-origin",
+              headers: { "Content-Type": "application/json", "X-CSRFToken": meta ? meta.getAttribute("content") : "" },
+              body: JSON.stringify({ reason: "logout" })
+            }).catch(function () {}).then(partir);
+          });
+        })
+        .catch(partir);
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     publierContexte();
     brancherRepli();
     brancherRaccourcis();
+    brancherDeconnexion();
   });
 })();

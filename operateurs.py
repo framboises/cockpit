@@ -379,3 +379,112 @@ def take_post(db, user, user_id, choice):
     db[COL_POSTS].update_one({"_id": post["_id"]},
                              {"$push": {"history": {"at": now, "type": "prise", "fiche_id": fiche_id}}})
     return post, True
+
+
+def validate_zones_metier(db, zone_ids, metier_id):
+    """Comme validate_choice sans l'evenement (changement en cours de poste :
+    l'evenement du poste reste celui de la prise de poste)."""
+    zone_ids = list(dict.fromkeys(str(z) for z in (zone_ids or []) if z))
+    by_id = {z["id"]: z for z in zones(db)}
+    if by_id:
+        if not zone_ids:
+            return None, "zone_requise"
+        if any(z not in by_id for z in zone_ids):
+            return None, "zone_inconnue"
+    else:
+        zone_ids = []
+    mets = {m["id"]: m for m in metiers(db)}
+    if mets:
+        if metier_id not in mets:
+            return None, "metier_requis"
+    else:
+        metier_id = None
+    return {"zones": zone_ids, "zones_labels": [by_id[z]["label"] for z in zone_ids],
+            "metier_id": metier_id,
+            "metier_label": mets[metier_id]["label"] if metier_id else None}, None
+
+
+def change_zones(db, post, user, choice):
+    """Changement de zones et/ou de metier sans fin de poste. Fiche
+    "Changement de zone" cloturee. Retourne le poste a jour (None si le poste
+    a ete ferme entre-temps)."""
+    if choice["zones"] == (post.get("zones") or []) and choice["metier_id"] == post.get("metier_id"):
+        return post
+    now = datetime.now(PARIS)
+    updated = db[COL_POSTS].find_one_and_update(
+        {"_id": post["_id"], "open": True}, {"$set": choice}, return_document=True)
+    if not updated:
+        return None
+    parts = []
+    old_z, new_z = post.get("zones_labels") or [], choice["zones_labels"]
+    if old_z != new_z:
+        parts.append("Zones : " + (", ".join(old_z) or "aucune") + " -> " + (", ".join(new_z) or "aucune"))
+    if post.get("metier_id") != choice["metier_id"]:
+        parts.append("Metier : " + (post.get("metier_label") or "aucun") + " -> " + (choice["metier_label"] or "aucun"))
+    text = "Changement de zone - " + updated["name"] + (" - " + " - ".join(parts) if parts else "")
+    fiche_id = create_fiche(db, updated, "zones", text, user, now=now)
+    db[COL_POSTS].update_one({"_id": post["_id"]}, {"$push": {"history": {
+        "at": now, "type": "zones", "fiche_id": fiche_id,
+        "from": {"zones": post.get("zones") or [], "metier_id": post.get("metier_id")},
+        "to": {"zones": choice["zones"], "metier_id": choice["metier_id"]}}}})
+    return updated
+
+
+def set_pause(db, post, pause):
+    """Pause DECLAREE (jamais deduite) : ses zones sortent du routage des
+    alertes. Pas de fiche. Retourne le poste a jour (None si ferme)."""
+    now = datetime.now(PARIS)
+    want, other = ("pause", "active") if pause else ("active", "pause")
+    updated = db[COL_POSTS].find_one_and_update(
+        {"_id": post["_id"], "open": True, "status": other},
+        {"$set": {"status": want, "pause_since": now if pause else None},
+         "$push": {"history": {"at": now, "type": "pause" if pause else "retour"}}},
+        return_document=True)
+    if updated:
+        return updated
+    return db[COL_POSTS].find_one({"_id": post["_id"], "open": True})
+
+
+def _duration(start, end):
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    mins = max(0, int((end - start).total_seconds() // 60))
+    h, m = divmod(mins, 60)
+    return f"{h} h {m:02d}" if h else f"{m} min"
+
+
+def end_post(db, post, user, reason, by_admin=False):
+    """Fin de poste : fiche "Fin de poste" cloturee, poste ferme. `user` =
+    celui qui ferme (l'operateur, ou l'admin pour une cloture admin).
+    Retourne True si c'est cet appel qui a ferme le poste."""
+    now = datetime.now(PARIS)
+    closed = db[COL_POSTS].find_one_and_update(
+        {"_id": post["_id"], "open": True},
+        {"$set": {"status": "ended", "ended_at": now, "end_reason": reason, "pause_since": None,
+                  "ended_by": user.get("email", "")},
+         "$unset": {"open": ""}},
+        return_document=True)
+    if not closed:
+        return False
+    text = "Fin de poste - " + closed["name"]
+    desc = _describe(closed)
+    if desc:
+        text += " - " + desc
+    text += " - Duree : " + _duration(closed["started_at"], now)
+    if by_admin:
+        text += " - Cloture par " + _operator_name(user)
+    elif reason == "logout":
+        text += " - Deconnexion"
+    fiche_id = create_fiche(db, closed, "fin", text, user, now=now)
+    db[COL_POSTS].update_one({"_id": closed["_id"]}, {"$push": {"history": {
+        "at": now, "type": "fin", "fiche_id": fiche_id, "reason": reason}}})
+    return True
+
+
+def list_open_posts(db):
+    out = []
+    for p in db[COL_POSTS].find({"open": True}).sort("started_at", 1):
+        pub = public_post(p)
+        pub.update({"name": p.get("name"), "email": p.get("email")})
+        out.append(pub)
+    return out

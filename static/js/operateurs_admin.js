@@ -141,8 +141,60 @@
       .catch(function (e) { toast("error", "Zones : chargement impossible (" + e.message + ")"); });
   }
 
+  // --- Postes ouverts -----------------------------------------------------
+  var postsEl = document.getElementById("op-admin-posts");
+  function fmt(iso) {
+    return iso ? new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "";
+  }
+  function renderPosts(list) {
+    postsEl.textContent = "";
+    if (!list.length) { postsEl.appendChild(el("span", "si-admin-empty", "Aucun poste ouvert.")); return; }
+    list.forEach(function (p) {
+      var row = el("div", "op-admin-post");
+      row.appendChild(el("span", "op-admin-post-name", p.name || p.email));
+      var paused = p.status === "pause";
+      row.appendChild(el("span", "op-admin-post-state" + (paused ? " is-pause" : ""),
+        paused ? "En pause depuis " + fmt(p.pause_since) : "En poste"));
+      var det = p.event + " " + p.year + " - depuis " + fmt(p.started_at);
+      if ((p.zones_labels || []).length) det += " - " + p.zones_labels.join(", ");
+      if (p.metier_label) det += " - " + p.metier_label;
+      row.appendChild(el("span", "op-admin-post-detail", det));
+      var b = el("button", "btn btn-sm btn-danger", "Cloturer le poste");
+      b.type = "button";
+      b.addEventListener("click", function () {
+        var go = typeof window.showConfirmToast === "function"
+          ? window.showConfirmToast("Cloturer le poste de " + (p.name || p.email) + " ? Une fiche \"Fin de poste\" est ajoutee a la main courante.",
+                                    { type: "warning", okLabel: "Cloturer", cancelLabel: "Annuler" })
+          : Promise.resolve(true);
+        go.then(function (ok) {
+          if (!ok) return;
+          fetch("/api/operator/posts/" + encodeURIComponent(p.id) + "/end", {
+            method: "POST", credentials: "same-origin",
+            headers: { "Content-Type": "application/json", "X-CSRFToken": csrf() }, body: "{}"
+          }).then(function (r) { return r.json().catch(function () { return {}; }); })
+            .then(function (d) {
+              toast(d.ok ? "success" : "error", d.ok ? "Poste cloture" : "Cloture refusee (" + (d.error || "?") + ")");
+              loadPosts();
+            }).catch(function (e) { toast("error", "Erreur : " + e.message); });
+        });
+      });
+      row.appendChild(b);
+      postsEl.appendChild(row);
+    });
+  }
+  function loadPosts() {
+    getJSON("/api/operator/posts")
+      .then(function (d) { renderPosts(d.posts || []); })
+      .catch(function (e) { toast("error", "Postes : chargement impossible (" + e.message + ")"); });
+  }
+  document.getElementById("op-admin-posts-refresh").addEventListener("click", function (e) {
+    e.stopPropagation();
+    loadPosts();
+  });
+
   // --- Chargement --------------------------------------------------------
   function load() {
+    loadPosts();
     getJSON("/api/operator/settings")
       .then(function (d) {
         state.layers = d.layers || [];

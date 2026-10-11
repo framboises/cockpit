@@ -7,6 +7,13 @@
   GET /api/operator/post      (user)  {required, post} : poste ouvert du compte
   GET /api/operator/options   (user)  evenements en cours, zones, metiers
   POST /api/operator/post     (user)  prise de poste + fiche (CSRF ACTIF)
+  POST /api/operator/post/zones   (user)  changement de zones / metier + fiche
+  POST /api/operator/post/pause   (user)  pause declaree (pas de fiche)
+  POST /api/operator/post/resume  (user)  retour de pause (pas de fiche)
+  POST /api/operator/post/end     (user)  fin de poste + fiche ; {reason: "logout"}
+                                          depuis le lien de deconnexion
+  GET  /api/operator/posts        (admin) postes ouverts
+  POST /api/operator/posts/<id>/end (admin) cloture d'un poste + fiche
 
 Logique dans operateurs.py ; plan : docs/claude/operateurs.md.
 """
@@ -141,3 +148,88 @@ def api_post_take():
         logger.info("Prise de poste %s : %s %s, zones %s, metier %s", payload.get("email"),
                     choice["event"], choice["year"], choice["zones_labels"], choice["metier_label"])
     return jsonify({"ok": True, "created": created, "post": OP.public_post(post)})
+
+
+def _my_open_post():
+    """(db, payload, post ouvert) de l'utilisateur courant, post None sinon."""
+    db = _db()
+    payload = _payload()
+    return db, payload, OP.open_post(db, OP.user_id_for(db, payload.get("email")))
+
+
+@operateurs_bp.route("/api/operator/post/zones", methods=["POST"])
+@_role_required("user")
+def api_post_zones():
+    db, payload, post = _my_open_post()
+    if not post:
+        return _err("aucun_poste", 404)
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return _err("json_attendu")
+    choice, err = OP.validate_zones_metier(db, body.get("zones"), body.get("metier_id"))
+    if err:
+        return _err(err)
+    updated = OP.change_zones(db, post, payload, choice)
+    if not updated:
+        return _err("aucun_poste", 404)
+    return jsonify({"ok": True, "post": OP.public_post(updated)})
+
+
+def _pause(pause):
+    db, payload, post = _my_open_post()
+    if not post:
+        return _err("aucun_poste", 404)
+    updated = OP.set_pause(db, post, pause)
+    if not updated:
+        return _err("aucun_poste", 404)
+    return jsonify({"ok": True, "post": OP.public_post(updated)})
+
+
+@operateurs_bp.route("/api/operator/post/pause", methods=["POST"])
+@_role_required("user")
+def api_post_pause():
+    return _pause(True)
+
+
+@operateurs_bp.route("/api/operator/post/resume", methods=["POST"])
+@_role_required("user")
+def api_post_resume():
+    return _pause(False)
+
+
+@operateurs_bp.route("/api/operator/post/end", methods=["POST"])
+@_role_required("user")
+def api_post_end():
+    db, payload, post = _my_open_post()
+    if not post:
+        # Lien de deconnexion d'un non-operateur : rien a fermer
+        return jsonify({"ok": True, "ended": False})
+    body = request.get_json(silent=True) or {}
+    reason = "logout" if body.get("reason") == "logout" else "fin_de_poste"
+    ended = OP.end_post(db, post, payload, reason)
+    if ended:
+        logger.info("Fin de poste %s (%s)", payload.get("email"), reason)
+    return jsonify({"ok": True, "ended": ended})
+
+
+@operateurs_bp.route("/api/operator/posts", methods=["GET"])
+@_role_required("admin")
+def api_posts_list():
+    return jsonify({"ok": True, "posts": OP.list_open_posts(_db())})
+
+
+@operateurs_bp.route("/api/operator/posts/<post_id>/end", methods=["POST"])
+@_role_required("admin")
+def api_posts_end(post_id):
+    from bson import ObjectId
+    if not ObjectId.is_valid(post_id):
+        return _err("id_invalide")
+    db = _db()
+    post = db[OP.COL_POSTS].find_one({"_id": ObjectId(post_id), "open": True})
+    if not post:
+        return _err("aucun_poste", 404)
+    payload = _payload()
+    ended = OP.end_post(db, post, payload, "admin", by_admin=True)
+    if ended:
+        logger.info("Poste de %s cloture par %s", post.get("email"), payload.get("email"))
+    return jsonify({"ok": True, "ended": ended})
