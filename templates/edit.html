@@ -233,19 +233,110 @@
         </div>
       </section>
 
-      <!-- Section Anoloc GPS -->
+      <!-- Section Balises GPS (sources Anoloc et Teltonika, groupes communs) -->
       <section class="widget-card" style="margin-top:16px;">
         <header class="widget-header" data-collapsible data-section="anoloc">
-          <h3>Balises GPS (Anoloc)</h3>
+          <h3>Balises GPS</h3>
           <span class="material-symbols-outlined collapse-icon">expand_more</span>
         </header>
         <div class="widget-body collapsible" id="anoloc-body">
+
+          <!-- Interrupteur general : carte, compteurs, centrale d'alerte -->
+          <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; padding:10px; border:1px solid var(--line); border-radius:var(--radius-sm);">
+            <span class="material-symbols-outlined" style="font-size:22px; color:var(--brand);">satellite_alt</span>
+            <div style="flex:1;">
+              <div style="font-size:13px; font-weight:600;">Balises GPS actives</div>
+              <div style="font-size:11px; color:var(--muted);">Carte, compteurs et alertes des groupes de balises, quelle que soit la source (Anoloc ou Teltonika). La collecte Anoloc a son propre interrupteur plus bas.</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="anoloc-enabled" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <!-- B) Groupes de balises (communs aux deux sources) -->
+          <h4 style="margin:12px 0 8px; font-size:13px; color:var(--muted);">Groupes de balises</h4>
+          <p style="font-size:11px; color:var(--muted); margin:0 0 8px;">
+            Un groupe peut melanger des balises Anoloc et Teltonika : carte, traces, main courante, dispatch et alertes les traitent de la meme facon.
+          </p>
+          <div style="margin-bottom:8px;">
+            <button id="anoloc-add-group" class="btn btn-xs btn-primary">
+              <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">add</span> Ajouter un groupe
+            </button>
+          </div>
+          <div class="table-responsive">
+            <table id="anoloc-groups-table" class="table table-striped table-hover" style="font-size:12px;">
+              <thead>
+                <tr>
+                  <th style="width:40px;">Couleur</th>
+                  <th style="width:40px;">Icone</th>
+                  <th>Label</th>
+                  <th>Balises</th>
+                  <th style="width:50px;">Actif</th>
+                  <th style="width:60px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <!-- C) Visibilite par groupe cockpit -->
+          <h4 style="margin:16px 0 8px; font-size:13px; color:var(--muted);">Visibilite par groupe cockpit</h4>
+          <p style="font-size:11px; color:var(--muted); margin-bottom:8px;">
+            Cochez les groupes de balises que chaque groupe d'utilisateurs peut voir. Si aucun n'est coche, le groupe voit tout.
+          </p>
+          <div class="table-responsive">
+            <table id="anoloc-vis-table" class="table anoloc-vis-table" style="font-size:12px;">
+              <thead><tr id="anoloc-vis-header"><th>Groupe cockpit</th></tr></thead>
+              <tbody id="anoloc-vis-body"></tbody>
+            </table>
+          </div>
+          <button id="anoloc-save-vis" class="btn btn-xs btn-primary" style="margin-top:6px;">Sauvegarder visibilite</button>
+
+          <!-- Source Teltonika -->
+          <h4 style="margin:22px 0 8px; font-size:14px; border-top:1px solid var(--line); padding-top:14px;">
+            <span class="material-symbols-outlined" style="font-size:18px; vertical-align:middle;">sensors</span> Source Teltonika
+          </h4>
+          <div id="tlt-sources" class="tlt-sources"></div>
+          <div class="tlt-subtitle">Periodes d'emission par defaut</div>
+          <p style="font-size:11px; color:var(--muted); margin:0 0 6px;">
+            Une balise est hors ligne apres 3 periodes sans message : periode en mouvement si son dernier message disait "en mouvement", sinon periode a l'arret. Modifiable balise par balise.
+          </p>
+          <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
+            <label style="font-size:12px;">A l'arret (s)
+              <input id="tlt-period-stop" type="number" min="10" class="form-input" style="width:110px;" />
+            </label>
+            <label style="font-size:12px;">En mouvement (s)
+              <input id="tlt-period-move" type="number" min="10" class="form-input" style="width:110px;" />
+            </label>
+            <button id="tlt-save-periods" class="btn btn-xs btn-primary">Enregistrer</button>
+          </div>
+          <div class="tlt-subtitle">Parc Teltonika</div>
+          <div style="margin-bottom:8px;">
+            <button id="tlt-add-device" class="btn btn-xs btn-primary">
+              <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">add</span> Ajouter une balise
+            </button>
+          </div>
+          <div id="tlt-unknown"></div>
+          <div class="table-responsive">
+            <table id="tlt-devices-table" class="table table-striped table-hover" style="font-size:12px;">
+              <thead>
+                <tr><th>Nom</th><th>IMEI</th><th>Modele</th><th>Groupe(s)</th><th>Etat</th><th>Batterie</th><th>Dernier message</th><th style="width:90px;">Actions</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <!-- Source Anoloc -->
+          <h4 style="margin:22px 0 8px; font-size:14px; border-top:1px solid var(--line); padding-top:14px;">
+            <span class="material-symbols-outlined" style="font-size:18px; vertical-align:middle;">cloud</span> Source Anoloc
+          </h4>
 
           <!-- 0) Collecte live -->
           <div class="anoloc-live-control" style="display:flex; align-items:center; gap:12px; margin-bottom:16px; padding:10px; border:1px solid var(--line); border-radius:var(--radius-sm);">
             <span class="material-symbols-outlined" id="anoloc-collect-icon" style="font-size:22px; color:var(--muted);">cell_tower</span>
             <div style="flex:1;">
-              <div style="font-size:13px; font-weight:600;">Collecte des positions GPS</div>
+              <div style="font-size:13px; font-weight:600;">Collecte Anoloc</div>
               <div style="font-size:11px; color:var(--muted);" id="anoloc-collect-status">Chargement...</div>
             </div>
             <label class="toggle-switch">
@@ -293,53 +384,14 @@
               <input id="anoloc-password" type="password" class="form-input" placeholder="********" />
             </div>
             <div style="display:flex; gap:6px; align-items:flex-end;">
-              <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
-                <input id="anoloc-enabled" type="checkbox" /> Active
-              </label>
               <button id="anoloc-test-btn" class="btn btn-xs">Tester</button>
               <button id="anoloc-save-creds" class="btn btn-xs btn-primary">Sauvegarder</button>
+              <button id="anoloc-fetch-devices" class="btn btn-xs" title="Recharger la liste des balises depuis Anoloc">
+                <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">cloud_download</span> Charger devices
+              </button>
             </div>
           </div>
           <div id="anoloc-test-result" style="font-size:12px; margin-bottom:12px;"></div>
-
-          <!-- B) Groupes de balises -->
-          <h4 style="margin:12px 0 8px; font-size:13px; color:var(--muted);">Groupes de balises</h4>
-          <div style="margin-bottom:8px;">
-            <button id="anoloc-add-group" class="btn btn-xs btn-primary">
-              <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">add</span> Ajouter un groupe
-            </button>
-            <button id="anoloc-fetch-devices" class="btn btn-xs" title="Charger les devices depuis Anoloc">
-              <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">cloud_download</span> Charger devices
-            </button>
-          </div>
-          <div class="table-responsive">
-            <table id="anoloc-groups-table" class="table table-striped table-hover" style="font-size:12px;">
-              <thead>
-                <tr>
-                  <th style="width:40px;">Couleur</th>
-                  <th style="width:40px;">Icone</th>
-                  <th>Label</th>
-                  <th>Devices</th>
-                  <th style="width:50px;">Actif</th>
-                  <th style="width:60px;">Actions</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-
-          <!-- C) Visibilite par groupe cockpit -->
-          <h4 style="margin:16px 0 8px; font-size:13px; color:var(--muted);">Visibilite par groupe cockpit</h4>
-          <p style="font-size:11px; color:var(--muted); margin-bottom:8px;">
-            Cochez les groupes de balises que chaque groupe d'utilisateurs peut voir. Si aucun n'est coche, le groupe voit tout.
-          </p>
-          <div class="table-responsive">
-            <table id="anoloc-vis-table" class="table anoloc-vis-table" style="font-size:12px;">
-              <thead><tr id="anoloc-vis-header"><th>Groupe cockpit</th></tr></thead>
-              <tbody id="anoloc-vis-body"></tbody>
-            </table>
-          </div>
-          <button id="anoloc-save-vis" class="btn btn-xs btn-primary" style="margin-top:6px;">Sauvegarder visibilite</button>
 
         </div>
       </section>
@@ -433,6 +485,23 @@
         </div>
       </section>
 
+      <!-- Section Operateurs en poste (postes ouverts, docs/claude/operateurs.md) -->
+      <section class="widget-card" style="margin-top:16px;">
+        <header class="widget-header" data-collapsible data-section="operateurs-postes">
+          <h3>Operateurs en poste</h3>
+          <div style="display:flex; gap:6px; align-items:center; margin-left:auto; margin-right:8px;" onclick="event.stopPropagation()">
+            <span id="op-admin-posts-count" class="op-admin-count"></span>
+            <button id="op-admin-posts-refresh" class="btn-icon" title="Actualiser">
+              <span class="material-symbols-outlined">refresh</span>
+            </button>
+          </div>
+          <span class="material-symbols-outlined collapse-icon">expand_more</span>
+        </header>
+        <div class="widget-body collapsible" id="operateurs-postes-body">
+          <div id="op-admin-posts" class="op-admin-posts"></div>
+        </div>
+      </section>
+
       <!-- Section Zones et metiers (prise de poste operateur, docs/claude/operateurs.md) -->
       <section class="widget-card" style="margin-top:16px;">
         <header class="widget-header" data-collapsible data-section="operateurs">
@@ -472,13 +541,6 @@
               <div id="op-admin-metiers" class="op-admin-chips"></div>
             </div>
           </div>
-          <div class="op-admin-posts-head">
-            <span class="si-admin-field-label">Postes ouverts</span>
-            <button id="op-admin-posts-refresh" class="btn-icon" title="Actualiser">
-              <span class="material-symbols-outlined">refresh</span>
-            </button>
-          </div>
-          <div id="op-admin-posts" class="op-admin-posts"></div>
         </div>
       </section>
 
@@ -888,6 +950,41 @@
   </div>
 </div>
 
+<!-- Modal — Dupliquer un groupe -->
+<div id="group-dup-modal" class="crud-modal" hidden>
+  <div class="crud-modal-dialog" style="max-width:460px;">
+    <div class="crud-modal-header">
+      <h3 id="group-dup-title">Dupliquer le groupe</h3>
+      <button class="crud-modal-close" data-close>&times;</button>
+    </div>
+    <div class="crud-modal-body">
+      <form id="group-dup-form">
+        <input type="hidden" name="_id" />
+        <div class="form-row">
+          <label>Nom du nouveau groupe
+            <input name="name" required class="form-input" />
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Description
+            <input name="description" class="form-input" />
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Couleur
+            <input name="color" type="color" value="#6366f1" class="form-input" style="width:60px; height:36px; padding:2px; cursor:pointer;" />
+          </label>
+        </div>
+        <p class="muted" style="font-size:0.8rem; margin:0;">Tous les parametres sont copies (blocs, pages, categories, droits, alertes recues, operateur). Les membres ne sont pas copies.</p>
+      </form>
+    </div>
+    <div class="crud-modal-footer">
+      <button class="btn btn-secondary" data-close>Annuler</button>
+      <button id="group-dup-save" class="btn btn-primary">Dupliquer</button>
+    </div>
+  </div>
+</div>
+
 <!-- CRUD Modal — Merge Config -->
 <div id="merge-modal" class="crud-modal" hidden>
   <div class="crud-modal-dialog" style="max-width:560px;">
@@ -1000,9 +1097,16 @@
           </label>
         </div>
         <div class="form-row">
-          <label>Devices Anoloc</label>
+          <label>Balises Teltonika</label>
           <p style="font-size:11px; color:var(--muted); margin:2px 0 6px;">
-            Selectionnez les devices a inclure dans ce groupe. Cliquez "Charger devices" si la liste est vide.
+            Balises du parc Teltonika (section Source Teltonika).
+          </p>
+          <div id="tlt-devices-checkboxes" style="max-height:160px; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius-sm); padding:6px;"></div>
+        </div>
+        <div class="form-row">
+          <label>Balises Anoloc</label>
+          <p style="font-size:11px; color:var(--muted); margin:2px 0 6px;">
+            Liste lue chez Anoloc ("Charger devices"). Une balise deja dans le groupe reste cochee meme si Anoloc ne repond pas.
           </p>
           <div id="anoloc-devices-checkboxes" style="max-height:200px; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius-sm); padding:6px;"></div>
         </div>
@@ -1034,6 +1138,15 @@
         </div>
         <div class="form-row">
           <label style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" name="route_piste" />
+            Acces piste dans les itineraires (tablettes Field)
+          </label>
+          <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">
+            Les tablettes de ce groupe peuvent calculer un itineraire qui emprunte la piste (dans le sens de course, ou dans les deux sens en intervention prioritaire). Sans cette case, l'option n'est pas proposee.
+          </p>
+        </div>
+        <div class="form-row">
+          <label style="display:flex; align-items:center; gap:8px;">
             <input type="checkbox" name="enabled" checked />
             Actif
           </label>
@@ -1043,6 +1156,80 @@
     <div class="crud-modal-footer">
       <button class="btn btn-secondary" data-close>Annuler</button>
       <button id="anoloc-group-modal-save" class="btn btn-primary">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- CRUD Modal - balise Teltonika -->
+<div id="tlt-device-modal" class="crud-modal" hidden>
+  <div class="crud-modal-dialog">
+    <div class="crud-modal-header">
+      <h3 id="tlt-device-modal-title">Nouvelle balise Teltonika</h3>
+      <button class="crud-modal-close" data-close>&times;</button>
+    </div>
+    <div class="crud-modal-body">
+      <form id="tlt-device-form">
+        <div class="form-row">
+          <label>IMEI (15 chiffres, etiquette de la balise)
+            <input name="imei" required inputmode="numeric" class="form-input" placeholder="866107086018948" />
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Nom (affiche sur la carte et dans la main courante)
+            <input name="label" required class="form-input" placeholder="ex. Medical 12" />
+          </label>
+        </div>
+        <div class="form-row" style="display:flex; gap:12px; flex-wrap:wrap;">
+          <label style="flex:1;">Modele
+            <input name="model" class="form-input" value="ATC700" />
+          </label>
+          <label style="flex:1;">Mise en service
+            <input name="commissioned_at" type="date" class="form-input" />
+          </label>
+        </div>
+        <div class="form-row" style="display:flex; gap:12px; flex-wrap:wrap;">
+          <label style="flex:1;">Periode a l'arret (s, vide = defaut)
+            <input name="period_stop_s" type="number" min="10" class="form-input" />
+          </label>
+          <label style="flex:1;">Periode en mouvement (s, vide = defaut)
+            <input name="period_move_s" type="number" min="10" class="form-input" />
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Notes
+            <input name="notes" class="form-input" />
+          </label>
+        </div>
+        <div class="form-row">
+          <label style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" name="enabled" checked />
+            Active (refusee par le recepteur si decochee)
+          </label>
+        </div>
+        <p style="font-size:11px; color:var(--muted);">Le rattachement a un groupe se fait dans la fenetre du groupe.</p>
+      </form>
+    </div>
+    <div class="crud-modal-footer">
+      <button class="btn btn-secondary" data-close>Annuler</button>
+      <button id="tlt-device-modal-save" class="btn btn-primary">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal - derniers messages d'une balise Teltonika -->
+<div id="tlt-messages-modal" class="crud-modal" hidden>
+  <div class="crud-modal-dialog" style="max-width:900px;">
+    <div class="crud-modal-header">
+      <h3 id="tlt-messages-title">Derniers messages</h3>
+      <button class="crud-modal-close" data-close>&times;</button>
+    </div>
+    <div class="crud-modal-body">
+      <div class="table-responsive">
+        <table class="table table-striped" style="font-size:11px;">
+          <thead><tr><th>Horodatage balise</th><th>Ecart</th><th>Recu</th><th>Source</th><th>Fix</th><th>Vitesse</th><th>Mouvement</th><th>Batterie</th><th>Position</th></tr></thead>
+          <tbody id="tlt-messages-body"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
@@ -1063,6 +1250,7 @@
 <script src="/static/js/map_defaults.js"></script>
 <script src="/static/js/meteo_bbox.js"></script>
 <script src="/static/js/anoloc_admin.js"></script>
+<script src="/static/js/teltonika_admin.js"></script>
 <script src="/static/js/pcorg_config.js"></script>
 <script src="/static/js/saison_indicateurs_admin.js"></script>
 <script src="/static/js/operateurs_admin.js"></script>

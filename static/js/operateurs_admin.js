@@ -146,7 +146,26 @@
   function fmt(iso) {
     return iso ? new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "";
   }
+  var countEl = document.getElementById("op-admin-posts-count");
+  // Duree depuis une date ISO : "45 min", "2 h 05"
+  function since(iso) {
+    if (!iso) return "";
+    var m = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
+    if (m < 60) return m + " min";
+    var mm = m % 60;
+    return Math.floor(m / 60) + " h " + (mm < 10 ? "0" : "") + mm;
+  }
+  function renderCount(list) {
+    if (!countEl) return;
+    var paused = list.filter(function (p) { return p.status === "pause"; }).length;
+    var n = list.length - paused;
+    countEl.textContent = list.length
+      ? n + " en poste" + (paused ? " - " + paused + " en pause" : "")
+      : "Personne en poste";
+    countEl.classList.toggle("is-empty", !list.length);
+  }
   function renderPosts(list) {
+    renderCount(list);
     postsEl.textContent = "";
     if (!list.length) { postsEl.appendChild(el("span", "si-admin-empty", "Aucun poste ouvert.")); return; }
     list.forEach(function (p) {
@@ -154,10 +173,10 @@
       row.appendChild(el("span", "op-admin-post-name", p.name || p.email));
       var paused = p.status === "pause";
       row.appendChild(el("span", "op-admin-post-state" + (paused ? " is-pause" : ""),
-        paused ? "En pause depuis " + fmt(p.pause_since) : "En poste"));
-      var det = p.event + " " + p.year + " - depuis " + fmt(p.started_at);
+        paused ? "En pause depuis " + since(p.pause_since) : "En poste depuis " + since(p.started_at)));
+      var det = p.event + " " + p.year + " - prise de poste " + fmt(p.started_at);
       if ((p.zones_labels || []).length) det += " - " + p.zones_labels.join(", ");
-      if (p.metier_label) det += " - " + p.metier_label;
+      if ((p.metiers_labels || []).length) det += " - " + p.metiers_labels.join(", ");
       row.appendChild(el("span", "op-admin-post-detail", det));
       var b = el("button", "btn btn-sm btn-danger", "Cloturer le poste");
       b.type = "button";
@@ -182,15 +201,17 @@
       postsEl.appendChild(row);
     });
   }
-  function loadPosts() {
+  function loadPosts(quiet) {
     getJSON("/api/operator/posts")
       .then(function (d) { renderPosts(d.posts || []); })
-      .catch(function (e) { toast("error", "Postes : chargement impossible (" + e.message + ")"); });
+      .catch(function (e) { if (!quiet) toast("error", "Postes : chargement impossible (" + e.message + ")"); });
   }
   document.getElementById("op-admin-posts-refresh").addEventListener("click", function (e) {
     e.stopPropagation();
     loadPosts();
   });
+  // Liste tenue a jour (prises, pauses et fins de poste des operateurs)
+  setInterval(function () { if (!document.hidden) loadPosts(true); }, 60000);
 
   // --- Chargement --------------------------------------------------------
   function load() {

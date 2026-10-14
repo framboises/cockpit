@@ -96,15 +96,17 @@
                 <div class="widget-body" id="field-admin-body">
                     <div class="table-responsive">
                         <table id="field-devices-table" class="table table-striped table-hover" style="font-size:13px; width:100%; max-width:2400px; table-layout:fixed;">
+                            <!-- Noms courts : colonne Nom bornee, la place restante va aux
+                                 colonnes de donnees ; Actions dimensionnee pour 4 boutons. -->
                             <colgroup>
-                                <col style="width:auto; min-width:200px;">
-                                <col style="width:160px;">
-                                <col style="width:140px;">
-                                <col style="width:160px;">
-                                <col style="width:180px;">
-                                <col style="width:160px;">
-                                <col style="width:92px;">
-                                <col style="width:140px;">
+                                <col style="width:15%;">
+                                <col style="width:13%;">
+                                <col style="width:15%;">
+                                <col style="width:20%;">
+                                <col style="width:16%;">
+                                <col style="width:12%;">
+                                <col style="width:72px;">
+                                <col style="width:164px;">
                             </colgroup>
                             <thead>
                                 <tr>
@@ -216,60 +218,6 @@
                                 <tr><td colspan="8" style="text-align:center; color:var(--muted); padding:16px;">Chargement...</td></tr>
                             </tbody>
                         </table>
-                    </div>
-                </div>
-            </section>
-
-            <!-- ===================================================== -->
-            <!-- Section Routing overrides : corrections carte Valhalla -->
-            <!-- ===================================================== -->
-
-            <section class="widget-card" style="margin-top:24px; border-top:3px solid #7c3aed;">
-                <header class="widget-header">
-                    <h3><span class="material-symbols-outlined" style="vertical-align:middle; color:#7c3aed;">edit_location</span> Carte routing &mdash; corrections terrain</h3>
-                    <div id="rov-count" style="font-size:12px; color:var(--muted); margin-left:auto;"></div>
-                </header>
-                <div class="widget-body">
-                    <p style="font-size:12px; color:var(--muted); margin:0 0 12px;">
-                        Marquer les portails reellement fermes, les routes barrees ou les passages a forcer ouverts.
-                        Les blocages sont appliques au calcul d'itineraire en temps reel (cache 30 s).
-                        Les passages a forcer ouverts sont inventoriees pour le futur patch OSM (rebuild des tuiles).
-                    </p>
-                    <div class="rov-toolbar">
-                        <button id="rov-btn-point" class="btn rov-btn" data-mode="block_point">
-                            <span class="material-symbols-outlined" style="font-size:16px;">block</span>
-                            Bloquer un point
-                        </button>
-                        <button id="rov-btn-polygon" class="btn rov-btn" data-mode="block_polygon">
-                            <span class="material-symbols-outlined" style="font-size:16px;">draw</span>
-                            Bloquer une zone
-                        </button>
-                        <button id="rov-btn-open" class="btn rov-btn" data-mode="force_open">
-                            <span class="material-symbols-outlined" style="font-size:16px;">door_open</span>
-                            Forcer passable
-                        </button>
-                        <button id="rov-btn-cancel" class="btn btn-secondary" hidden>
-                            <span class="material-symbols-outlined" style="font-size:16px;">close</span>
-                            Annuler
-                        </button>
-                        <div id="rov-hint" class="rov-hint" hidden></div>
-                    </div>
-                    <div class="rov-layout">
-                        <div id="rov-map" class="rov-map"></div>
-                        <aside class="rov-list">
-                            <div class="rov-list-header">
-                                <strong>Corrections existantes</strong>
-                                <select id="rov-filter" class="form-input" style="font-size:12px; padding:4px;">
-                                    <option value="all">Toutes</option>
-                                    <option value="block_point">Points bloques</option>
-                                    <option value="block_polygon">Zones bloquees</option>
-                                    <option value="force_open">A forcer passable</option>
-                                </select>
-                            </div>
-                            <ul id="rov-items" class="rov-items">
-                                <li class="rov-empty">Chargement...</li>
-                            </ul>
-                        </aside>
                     </div>
                 </div>
             </section>
@@ -449,66 +397,6 @@
         </div>
         <div class="crud-modal-footer">
             <button class="btn btn-secondary" data-close>Fermer</button>
-        </div>
-    </div>
-</div>
-
-<!-- CRUD Modal — Routing override edit -->
-<div id="rov-edit-modal" class="crud-modal" hidden>
-    <div class="crud-modal-dialog">
-        <div class="crud-modal-header">
-            <h3 id="rov-edit-title">Nouvelle correction</h3>
-            <button class="crud-modal-close" data-close>&times;</button>
-        </div>
-        <div class="crud-modal-body">
-            <form id="rov-edit-form">
-                <input type="hidden" name="id">
-                <input type="hidden" name="type">
-                <div class="form-row">
-                    <label>Libelle (visible par les operateurs)
-                        <input name="label" required maxlength="200" placeholder="ex. Portail Bugatti Sud" class="form-input" />
-                    </label>
-                </div>
-                <div class="form-row">
-                    <label>Champ d'application
-                        <select name="scope" class="form-input">
-                            <option value="all">Tous les itineraires</option>
-                            <option value="normal_only">Mode normal seulement (laisser passer en intervention)</option>
-                            <option value="god_only">Intervention seulement</option>
-                        </select>
-                    </label>
-                </div>
-                <div class="form-row">
-                    <label>Expiration (optionnel)
-                        <input name="expires_at" type="datetime-local" class="form-input" />
-                    </label>
-                    <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">Apres cette date, la correction est ignoree automatiquement.</p>
-                </div>
-                <div class="form-row">
-                    <label>OSM ref (optionnel)
-                        <input name="osm_ref" maxlength="120" placeholder="ex. node/1234567890" class="form-input" />
-                    </label>
-                    <p style="font-size:11px; color:var(--muted); margin:2px 0 0;">Lien vers l'element OSM concerne (utile pour le futur patch).</p>
-                </div>
-                <div class="form-row">
-                    <label>Notes
-                        <textarea name="notes" maxlength="2000" rows="2" placeholder="contexte, raison terrain..." class="form-input"></textarea>
-                    </label>
-                </div>
-                <div class="form-row" id="rov-active-row" hidden>
-                    <label style="display:flex; align-items:center; gap:8px;">
-                        <input type="checkbox" name="active" checked>
-                        Correction active
-                    </label>
-                </div>
-            </form>
-        </div>
-        <div class="crud-modal-footer">
-            <button id="rov-edit-delete" class="btn btn-secondary" style="color:#dc2626; margin-right:auto;" hidden>
-                Supprimer
-            </button>
-            <button class="btn btn-secondary" data-close>Annuler</button>
-            <button id="rov-edit-submit" class="btn btn-primary" style="background:#7c3aed;">Enregistrer</button>
         </div>
     </div>
 </div>
@@ -947,6 +835,9 @@
   .field-dev-metiers span.txt { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
   .field-dev-metiers button { border:none; background:transparent; cursor:pointer; padding:0; color:var(--muted); display:inline-flex; }
   .field-dev-metiers button:hover { color:var(--brand); }
+  /* Une ligne par tablette : texte coupe avec "..." (texte complet au survol) */
+  #field-devices-table td { vertical-align:middle; }
+  #field-devices-table td.fd-one-line { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 </style>
 
 <!-- Toast container -->
@@ -963,7 +854,6 @@
 <script src="{{ url_for('static', filename='js/field_admin.js') }}"></script>
 <script src="{{ url_for('static', filename='js/dispatch_config_admin.js') }}"></script>
 <script src="{{ url_for('static', filename='js/vision_admin.js') }}"></script>
-<script src="{{ url_for('static', filename='js/routing_overrides_admin.js') }}"></script>
 <script src="{{ url_for('static', filename='js/alfred_admin.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 

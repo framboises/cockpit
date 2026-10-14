@@ -53,6 +53,11 @@ Pas de tests automatisés ni de linter configurés.
 | `CRISE_PIN_LOCKOUT_DURATION_MIN` | Durée du lockout après dépassement du seuil | `60` |
 | `VALHALLA_URL` | URL du service Valhalla externe (calcul d'itinéraires) | `http://localhost:8002` |
 | `VALHALLA_TIMEOUT_SECONDS` | Timeout HTTP des appels Valhalla | `5` |
+| `VALHALLA_ADMIN_URL` | Service valhalla-admin (saisons, épreuves, chargement des scénarios) | même hôte que `VALHALLA_URL`, port `8003` |
+| `VALHALLA_ADMIN_API_KEY` | Clé `X-Api-Key` du service valhalla-admin (`VALHALLA_ADMIN_API_KEY` du `.env` du serveur Valhalla) | — (page `/admin/itineraire` inerte, calculs inchangés) |
+| `WAZE_FEED_USER` / `WAZE_FEED_PASSWORD` | Basic auth du flux de fermetures relu par Waze (`/public/waze/closures.xml`), à déclarer dans le Partner Hub | — (flux en 503) |
+| `WAZE_GEOCODE_TOKEN` | Jeton Reverse Geocoding Waze (Partner Hub > Toolbox > Partner feed) pour vérifier les noms de rue | — (vérification indisponible) |
+| `VALHALLA_ADMIN_TIMEOUT_SECONDS` | Timeout des appels valhalla-admin (60 s minimum pour `/features`) | `15` |
 | `ROUTING_WAZE_MAX_AGE_MIN` | Ancienneté max des alertes Waze prises en compte pour les pénalités | `30` |
 | `CLAUDE_EFFORT` | `output_config.effort` des rapports IA (modèles qui le supportent) | `medium` |
 | `RETEX_MAX_TOKENS` | `max_tokens` du RETEX de fin d'édition | `24000` |
@@ -83,6 +88,9 @@ Pas de tests automatisés ni de linter configurés.
 | `ALFRED_CHAT_RETENTION_DAYS` | Rétention (TTL) conversations, messages, appels d'outils | `90` |
 | `COCKPIT_CAMERA_KEY` | Cle maitre (32 octets base64) des mots de passe cameras chiffres (`camera_secrets.py`). Variable utilisateur du compte de Cockpit | — (identifiants et pilotage cameras indisponibles) |
 | `ALFRED_HEALTH_URL` | Sonde de santé du wrapper | dérivée d'`ALFRED_ASK_URL` (`/alfred/health`) |
+| `BALISES_INGEST_SECRET` | Secret HMAC partagé avec le récepteur Teltonika (`/api/balises/ingest`, `/api/balises/whitelist`), 32 caractères min. Aussi dans l'environnement du service `BalisesRecepteur` | — (ingestion refusée, 503) |
+| `BALISES_INGEST_ALLOWED_IPS` | IP sources admises sur l'ingestion des balises | `127.0.0.1,::1` |
+| `FLESPI_TOKEN` | Jeton flespi de la relève transitoire (`flespi_poller.py`), environnement du compte de la tâche | — (relève flespi en erreur) |
 
 ## Architecture
 
@@ -133,10 +141,11 @@ static/libs/    → Bibliothèques tierces (Leaflet)
 
 Le detail de chaque domaine vit dans `docs/claude/`. **Lire le fichier concerne AVANT de modifier le code du domaine** : il porte les pieges verifies, les conventions de donnees et les regles non negociables (PMV notamment).
 
+- `docs/claude/waze.md` : Publication des fermetures du moteur d'itineraire vers Waze for Cities (flux CIFS public en Basic auth, horaires, desynchronisation avec les regles, jamais de flux vide sur panne)
 - `docs/claude/vision.md` : Integration Vision (tablettes scan billets vehicule, JWT RS256, CORS, sync Firestore facturee)
 - `docs/claude/ia-resume-pcorg.md` : Assistant IA : resume de periode pcorg, rapport matinal, couts et budget IA, prompt caching
 - `docs/claude/crise.md` : Exercices de crise : auth PIN animateur, sessions JWT, anti-bruteforce
-- `docs/claude/routing.md` : Routing Valhalla : modes auto/god, overrides admin, patches OSM
+- `docs/claude/routing.md` : Routing Valhalla : 4 modes (normal, piste, god, god + piste) et leurs recettes, regles saison / epreuve du service valhalla-admin, page /admin/itineraire (chargement des scenarios), acces piste par groupe de balises
 - `docs/claude/affluence.md` : Affluence previsionnelle : panier ticketing, ventes_prev vs ventes_prev_final, projections
 - `docs/claude/scans.md` : Chaine scans : import Excel, historique_controle, rapport HTML, vue Frequentation, analyse Claude
 - `docs/claude/presents.md` : Presents sur site (presents_etat.py) : remises a zero, pics, serie N-1
@@ -157,3 +166,4 @@ Le detail de chaque domaine vit dans `docs/claude/`. **Lire le fichier concerne 
 - `docs/claude/cameras.md` : Cameras : page de configuration unique (appareils, canaux, usages LAPI / detection), profils d'identifiants chiffres (COCKPIT_CAMERA_KEY), import SeeTec, etat reseau
 - `docs/claude/operateurs.md` : Prise de poste operateur (groupe Operateur, zones = couche Looker lue en direct, metiers = Bibler, fiches de poste en main courante, pause declaree jamais deduite, ciblage des alertes par zone / metier)
 - `docs/claude/detection.md` : Page IA (/detection) : intrusions (fielddetection) du recepteur Hik (episodes, photos 1 an, verification IA locale GPU, avis et cadres des operateurs), carte et zones, filtres de la centrale d'alertes ; Trafic, Foule et Secours / personnes au sol (Capture IA, tache planifiee capture_ia.py) ; Galerie d'entrainement
+- `docs/claude/balises.md` : Balises GPS : groupes communs (anoloc_config.beacon_groups), sources Anoloc et Teltonika (recepteur TCP maison Codec 8/8E sous svc-balises, releve flespi transitoire), ingestion idempotente, regle en ligne/GPS par source, TTL 10 mois des positions, alertes balises de la centrale (vitesse, zones, arret, muette, batterie, mouvement)

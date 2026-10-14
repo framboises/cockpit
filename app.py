@@ -39,7 +39,8 @@ from field import field_bp
 from vision_admin import vision_admin_bp
 from crise_auth import crise_auth_bp
 from routing import routing_bp
-from routing_overrides import routing_overrides_bp
+from valhalla_admin import valhalla_admin_bp
+from waze_feed import waze_feed_bp
 from cameras import cameras_bp
 from detection import detection_bp
 from meteo import meteo_bp
@@ -554,7 +555,7 @@ ADMIN_PAGE_REGISTRY = [
      "paths": ["/live-controle", "/api/live-controle"]},
     {"id": "field_dispatch", "label": "Field dispatch",  "icon": "tablet_android",
      "paths": ["/field-dispatch", "/field/admin", "/api/alfred", "/api/whatsapp",
-               "/api/dispatch/config", "/api/admin/routing-overrides"]},
+               "/api/dispatch/config"]},
     {"id": "scan_report",    "label": "Rapport scans",   "icon": "qr_code_scanner",
      "paths": ["/scan-report"]},
     {"id": "analyse_ops",    "label": "Analyse Ops",     "icon": "biotech",
@@ -573,6 +574,8 @@ ADMIN_PAGE_REGISTRY = [
      "paths": ["/detection", "/api/detection"]},
     {"id": "montre",         "label": "Montre",          "icon": "watch",
      "paths": ["/watch-admin", "/api/v1/watch/admin"]},
+    {"id": "itineraire",     "label": "Moteur d'itineraire", "icon": "alt_route",
+     "paths": ["/admin/itineraire", "/api/admin/itineraire"]},
 ]
 ALL_ADMIN_PAGE_IDS = [p["id"] for p in ADMIN_PAGE_REGISTRY]
 
@@ -2441,10 +2444,13 @@ csrf.exempt(vision_admin_bp)
 # conservent leur CSRF.
 app.register_blueprint(routing_bp)
 csrf.exempt(app.view_functions["routing.field_route"])
-# Routing overrides : corrections admin pour la carte (portails fermes,
-# routes barrees...). Fusionne avec les penalites Waze dans routing._compute().
+# Moteur d'itineraire (/admin/itineraire) : saisons, epreuves et chargement
+# des scenarios du service valhalla-admin (relais signe par la cle API).
 # Toutes routes admin, CSRF conserve.
-app.register_blueprint(routing_overrides_bp)
+app.register_blueprint(valhalla_admin_bp)
+# Fermetures publiees vers Waze for Cities : flux CIFS public relu par Waze
+# (/public/waze/closures.xml, Basic auth) + administration dans la page.
+app.register_blueprint(waze_feed_bp)
 app.register_blueprint(cameras_bp)
 # Detection : intrusions des cameras (episodes du recepteur, carte, zones)
 app.register_blueprint(detection_bp)
@@ -2471,6 +2477,16 @@ csrf.exempt(field_declaration_comment)
 from integrations import integrations_bp, inbound_events as _integ_inbound
 app.register_blueprint(integrations_bp)
 csrf.exempt(_integ_inbound)
+# Balises Teltonika (balises_api.py) : recepteur TCP local -> ingestion signee
+# HMAC, sans session (CSRF exemptee). Index + TTL 10 mois des positions.
+from balises_api import balises_bp
+import balises_core as _balises_core
+app.register_blueprint(balises_bp)
+csrf.exempt(balises_bp)
+try:
+    _balises_core.ensure_indexes(db)
+except Exception as _e:
+    logging.getLogger("balises").warning("index balises : %s", _e)
 # Reservations Momentus par lieu de la carte (momentus_api.py). GET user,
 # lecture seule des collections momentus_* (synchro momentus_sync.py).
 app.register_blueprint(momentus_bp)
@@ -4521,6 +4537,44 @@ def delete_group(gid):
     COL_USER_GROUPS.update_many({}, {"$pull": {"groups": oid}})
     return jsonify({"ok": True})
 
+@app.route('/api/groups/<gid>/duplicate', methods=['POST'])
+@role_required("admin")
+def duplicate_group(gid):
+    """Copie un groupe avec tous ses parametres (y compris ceux absents du
+    formulaire) sous un nouveau nom et une nouvelle couleur. La copie recoit
+    les memes alertes que l'original (definitions d'alertes) ; les membres ne
+    sont pas copies."""
+    if not ObjectId.is_valid(gid):
+        return jsonify({"error": "ID invalide"}), 400
+    src = COL_GROUPS.find_one({"_id": ObjectId(gid)})
+    if not src:
+        return jsonify({"error": "Groupe introuvable"}), 404
+    if src.get("name") in SYSTEM_GROUP_NAMES:
+        return jsonify({"error": "Les groupes systeme ne peuvent pas etre dupliques"}), 400
+    if not request.is_json:
+        return jsonify({"error": "JSON requis"}), 415
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({"error": "Le nom est requis"}), 400
+    if COL_GROUPS.find_one({"name": name}):
+        return jsonify({"error": "Un groupe avec ce nom existe deja"}), 409
+    doc = {k: v for k, v in src.items() if k not in ("_id", "is_default")}
+    doc['name'] = name
+    doc['color'] = (data.get('color') or src.get('color') or '#6366f1').strip()
+    if 'description' in data:
+        doc['description'] = (data.get('description') or '').strip()
+    now = datetime.now(timezone.utc)
+    doc['createdAt'] = now
+    doc['updatedAt'] = now
+    ins = COL_GROUPS.insert_one(doc)
+    alerts = COL_ALERT_DEFS.update_many({"groups": src["_id"]},
+                                        {"$addToSet": {"groups": ins.inserted_id}})
+    doc['_id'] = ins.inserted_id
+    out = _pub(doc)
+    out['alerts_copied'] = alerts.modified_count
+    return jsonify(out), 201
+
 ################################################################################
 # Centrale d'Alerte - Definitions & Watchlist ANPR
 ################################################################################
@@ -4545,6 +4599,9 @@ DETECTION_TYPES = {
     "crowd_camera",
     # Page IA, mode Secours : personne au sol (squelette, capture_ia.py)
     "secours_camera",
+    # Groupes de balises GPS, Anoloc et Teltonika (beacon_alerts.py, moteur)
+    "beacon_speed", "beacon_zone", "beacon_stopped",
+    "beacon_silent", "beacon_battery", "beacon_movement",
 }
 
 # Catalogue des Smart Events Hikvision exposes a la modale de creation d'alerte
@@ -7290,7 +7347,7 @@ def _migrate_pcorg_config():
     # Migrer sous_classifications
     sc = doc.get("sous_classifications") or {}
     for cat, items in sc.items():
-        if items and isinstance(items[0], str):
+        if items and isinstance(items, list) and isinstance(items[0], str):
             sc[cat] = [_make_item(s) for s in items]
             changed = True
     # Migrer intervenants

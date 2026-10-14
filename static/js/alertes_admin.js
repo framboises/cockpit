@@ -53,7 +53,13 @@
     "checkpoint_reassign": "Controle acces - reaffectation",
     "checkpoint_error_burst": "Controle acces - erreurs",
     "pcorg_urgency": "Main courante - urgence",
-    "door_saturation_forecast": "Controle acces - saturation prevue"
+    "door_saturation_forecast": "Controle acces - saturation prevue",
+    "beacon_speed": "Balises GPS - vitesse",
+    "beacon_zone": "Balises GPS - zone",
+    "beacon_stopped": "Balises GPS - arret prolonge",
+    "beacon_silent": "Balises GPS - muette",
+    "beacon_battery": "Balises GPS - batterie",
+    "beacon_movement": "Balises GPS - mouvement"
   };
 
   // Parametres par defaut proposes a la selection du type (editeur JSON brut,
@@ -307,6 +313,7 @@
     var trafficCamRow = $("#params-trafficcam-row");
     if (!rawRow || !pcorgRow || !trafficRow || !cameraRow) return;
 
+    var beaconRow = $("#params-beacon-row");
     var hideAll = function(){
       rawRow.style.display = "none";
       pcorgRow.style.display = "none";
@@ -314,9 +321,14 @@
       cameraRow.style.display = "none";
       if (detectionRow) detectionRow.style.display = "none";
       if (trafficCamRow) trafficCamRow.style.display = "none";
+      if (beaconRow) beaconRow.style.display = "none";
     };
 
-    if (detectionType === "pcorg_urgency") {
+    if (BEACON_KINDS[detectionType] && beaconRow) {
+      hideAll();
+      beaconRow.style.display = "";
+      _renderBeaconParams(detectionType, params || {});
+    } else if (detectionType === "pcorg_urgency") {
       hideAll();
       pcorgRow.style.display = "";
       var p = params || {};
@@ -373,6 +385,178 @@
       }
       if (ta) ta.rows = 12;
     }
+  }
+
+  // ============================================================
+  // Section "Balises GPS" (beacon_*) - beacon_alerts.py
+  // ============================================================
+
+  var BEACON_KINDS = {
+    beacon_speed: "speed", beacon_zone: "zone", beacon_stopped: "stopped",
+    beacon_silent: "silent", beacon_battery: "battery", beacon_movement: "movement"
+  };
+  var BEACON_HELP = {
+    speed: "Alerte quand une balise depasse la vitesse sur N points consecutifs (un point isole est souvent un saut GPS). Une alerte par episode.",
+    zone: "Alerte quand une balise entre et/ou sort d'une des zones cochees (une zone confirmee par N points consecutifs : le GPS d'une balise immobile oscille de plusieurs dizaines de metres). Activer la regle n'alerte pas sur les balises deja dedans.",
+    stopped: "Alerte quand une balise en ligne reste dans le meme rayon plus longtemps que la duree. Avec des zones cochees : seulement si elle s'est arretee dans l'une d'elles (ex. voie pompiers).",
+    silent: "Alerte quand une balise en ligne devient muette. Automatique : Anoloc apres 30 min sans vraie trame, Teltonika apres 3 periodes d'emission (a l'arret ou en mouvement selon son dernier message, voir Configuration > Balises GPS).",
+    battery: "Alerte quand la batterie passe sous le seuil (hors charge). Re-armee quand la batterie remonte de 5 points ou passe en charge.",
+    movement: "Alerte quand une balise passe de l'arret au mouvement (Teltonika : capteur de mouvement ; Anoloc : statut ou vitesse)."
+  };
+  var _beaconGroups = null, _beaconLayers = null, _beaconZones = {}, _beaconZoneLabels = {};
+
+  function _beaconCheck(container, value, label, checked, color) {
+    var lbl = document.createElement("label");
+    lbl.className = "checklist-item";
+    var cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = value;
+    cb.checked = !!checked;
+    lbl.appendChild(cb);
+    if (color) {
+      var dot = document.createElement("span");
+      dot.className = "checklist-item-dot";
+      dot.style.background = color;
+      lbl.appendChild(dot);
+    }
+    var txt = document.createElement("span");
+    txt.className = "checklist-item-label";
+    txt.textContent = label;
+    lbl.appendChild(txt);
+    container.appendChild(lbl);
+  }
+
+  function _setNum(id, v, dflt) {
+    var el = $(id);
+    if (el) el.value = (v != null && v !== "") ? v : (dflt != null ? dflt : "");
+  }
+
+  function _renderBeaconParams(dt, p) {
+    var kind = BEACON_KINDS[dt];
+    $$("#params-beacon-row [data-bp]").forEach(function (el) {
+      el.style.display = el.getAttribute("data-bp").split(" ").indexOf(kind) >= 0 ? "" : "none";
+    });
+    $("#beacon-help").textContent = BEACON_HELP[kind] || "";
+    _setNum("#bp-max-kmh", p.max_kmh, 50);
+    _setNum("#bp-consecutive", p.consecutive, 2);
+    _setNum("#bp-max-min", p.max_min, 20);
+    _setNum("#bp-radius", p.radius_m, 50);
+    _setNum("#bp-after-min", p.after_min, "");
+    _setNum("#bp-threshold", p.threshold_pct, 20);
+    _setNum("#bp-min-speed", p.min_speed_kmh, 5);
+    _setNum("#bp-cooldown", p.cooldown_min, 10);
+    $("#bp-event").value = p.event || "both";
+    $("#bp-zones-help").textContent = kind === "zone"
+      ? "Choisir la couche puis cocher les zones (rien de coche = toutes les zones de la couche)."
+      : "Facultatif : sans couche, l'arret prolonge est surveille partout.";
+
+    var grid = $("#beacon-groups-grid");
+    var drawGroups = function () {
+      grid.textContent = "";
+      (_beaconGroups || []).forEach(function (g) {
+        _beaconCheck(grid, g.id, g.label || g.id, (p.groups || []).indexOf(g.id) >= 0, g.color);
+      });
+      if (!(_beaconGroups || []).length) grid.textContent = "Aucun groupe de balises configure.";
+    };
+    if (_beaconGroups) drawGroups();
+    else fetch("/anoloc/config").then(function (r) { return r.json(); }).then(function (cfg) {
+      _beaconGroups = ((cfg && cfg.beacon_groups) || []).filter(function (g) { return g.enabled !== false; });
+      drawGroups();
+    }).catch(function () { grid.textContent = "Groupes indisponibles."; });
+
+    var sel = $("#bp-layer");
+    var drawLayers = function () {
+      sel.textContent = "";
+      var none = document.createElement("option");
+      none.value = "";
+      none.textContent = kind === "zone" ? "-- Choisir une couche --" : "-- Aucune (partout) --";
+      sel.appendChild(none);
+      (_beaconLayers || []).forEach(function (l) {
+        var o = document.createElement("option");
+        o.value = l.collection;
+        o.textContent = l.label + " (" + l.n_zones + " zones)";
+        sel.appendChild(o);
+      });
+      sel.value = p.zones_collection || "";
+      _drawBeaconZones(sel.value, p.zone_ids || []);
+    };
+    sel.onchange = function () { _drawBeaconZones(sel.value, []); };
+    if (_beaconLayers) drawLayers();
+    else fetch("/api/operator/settings").then(function (r) { return r.json(); }).then(function (d) {
+      _beaconLayers = (d && d.layers) || [];
+      drawLayers();
+    }).catch(function () { _beaconLayers = []; drawLayers(); });
+  }
+
+  function _drawBeaconZones(collection, selected) {
+    var grid = $("#bp-zones-grid");
+    grid.textContent = "";
+    if (!collection) return;
+    var draw = function (zones) {
+      grid.textContent = "";
+      zones.forEach(function (z) {
+        _beaconZoneLabels[z.id] = z.label;
+        _beaconCheck(grid, z.id, z.label, selected.indexOf(z.id) >= 0);
+      });
+      if (!zones.length) grid.textContent = "Aucune zone identifiee dans cette couche.";
+    };
+    if (_beaconZones[collection]) { draw(_beaconZones[collection]); return; }
+    grid.textContent = "Chargement...";
+    fetch("/api/operator/zones?collection=" + encodeURIComponent(collection))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        _beaconZones[collection] = (d && d.zones) || [];
+        draw(_beaconZones[collection]);
+      }).catch(function () { grid.textContent = "Zones indisponibles."; });
+  }
+
+  function _intVal(id, dflt) {
+    var v = parseInt(($(id) || {}).value, 10);
+    return Number.isFinite(v) ? v : dflt;
+  }
+
+  function _collectBeaconParams(dt) {
+    var kind = BEACON_KINDS[dt];
+    var groups = $$("#beacon-groups-grid input:checked").map(function (cb) { return cb.value; });
+    var p = { groups: groups };
+    if (kind === "speed") {
+      p.max_kmh = _intVal("#bp-max-kmh", 50);
+      p.consecutive = _intVal("#bp-consecutive", 2);
+      p.cooldown_min = _intVal("#bp-cooldown", 10);
+    } else if (kind === "zone") {
+      p.consecutive = _intVal("#bp-consecutive", 2);
+      p.event = $("#bp-event").value || "both";
+    } else if (kind === "stopped") {
+      p.max_min = _intVal("#bp-max-min", 20);
+      p.radius_m = _intVal("#bp-radius", 50);
+    } else if (kind === "silent") {
+      var a = parseInt($("#bp-after-min").value, 10);
+      p.after_min = Number.isFinite(a) && a > 0 ? a : null;
+    } else if (kind === "battery") {
+      p.threshold_pct = _intVal("#bp-threshold", 20);
+    } else if (kind === "movement") {
+      p.min_speed_kmh = _intVal("#bp-min-speed", 5);
+      p.cooldown_min = _intVal("#bp-cooldown", 10);
+    }
+    if (kind === "zone" || kind === "stopped") {
+      var coll = $("#bp-layer").value || "";
+      if (kind === "zone" && !coll) {
+        if (typeof showToast === "function") showToast("error", "Choisis une couche de zones");
+        return null;
+      }
+      if (coll) {
+        var ids = $$("#bp-zones-grid input:checked").map(function (cb) { return cb.value; });
+        var labels = {};
+        var all = _beaconZones[coll] || [];
+        (ids.length ? ids : all.map(function (z) { return z.id; })).forEach(function (id) {
+          labels[id] = _beaconZoneLabels[id] || id;
+        });
+        p.zones_collection = coll;
+        p.zone_ids = ids;
+        p.zone_labels = labels;
+      }
+    }
+    return p;
   }
 
   // ============================================================
@@ -807,6 +991,9 @@
         if(typeof showToast === "function") showToast("error", "Coche au moins une camera");
         return null;
       }
+    } else if (BEACON_KINDS[detType]) {
+      params = _collectBeaconParams(detType);
+      if (!params) return null;
     } else if (detType === "camera_event") {
       params = _collectCameraParams();
       if (!params.event_types.length) {

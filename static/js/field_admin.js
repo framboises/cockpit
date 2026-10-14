@@ -383,6 +383,22 @@
       head.appendChild(title);
       card.appendChild(head);
 
+      // Lien RTSP fixe du slot, a declarer une fois dans le VMS (Qonify)
+      if (slot.rtsp_url) {
+        var rtsp = document.createElement("code");
+        rtsp.textContent = slot.rtsp_url;
+        rtsp.title = "Lien RTSP fixe a declarer dans le VMS (cliquer pour copier)";
+        rtsp.style.cssText = "display:block;margin:4px 0;font-size:10px;word-break:break-all;user-select:all;cursor:copy;color:var(--muted);";
+        rtsp.addEventListener("click", function () {
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(slot.rtsp_url).then(function () {
+              if (typeof window.showToast === "function") window.showToast("success", "Lien RTSP copie");
+            }).catch(function () {});
+          }
+        });
+        card.appendChild(rtsp);
+      }
+
       var info = document.createElement("div");
       info.className = "field-stream-slot-info";
       if (slot.free) {
@@ -430,13 +446,48 @@
         killBtn.style.cssText = "padding:4px 8px;font-size:11px;background:#dc2626;color:#fff;border:none;";
         killBtn.textContent = "Couper";
         killBtn.addEventListener("click", function () {
-          if (!window.confirm("Couper ce flux ?")) return;
-          fetch("/field/admin/stream/" + encodeURIComponent(slot.stream.stream_id) + "/end", {
-            method: "POST",
-            headers: jsonHeaders(),
-          }).then(loadStreamSlots);
+          var ask = typeof window.showConfirmToast === "function" && document.getElementById("toast-container")
+            ? window.showConfirmToast("Couper ce flux ?", { type: "warning", okLabel: "Couper", cancelLabel: "Annuler" })
+            : Promise.resolve(window.confirm("Couper ce flux ?"));
+          ask.then(function (ok) {
+            if (!ok) return;
+            fetch("/field/admin/stream/" + encodeURIComponent(slot.stream.stream_id) + "/end", {
+              method: "POST",
+              headers: jsonHeaders(),
+            }).then(loadStreamSlots);
+          });
         });
         actions.appendChild(killBtn);
+      } else if (slot.free) {
+        // Mire de test : valide le lien RTSP dans VLC / Qonify sans tablette
+        var mireBtn = document.createElement("button");
+        mireBtn.className = "btn btn-xs";
+        mireBtn.style.cssText = "padding:4px 8px;font-size:11px;";
+        mireBtn.textContent = "Mire de test";
+        mireBtn.title = "Diffuse une image de test sur ce lien RTSP (15 min max)";
+        mireBtn.addEventListener("click", function () {
+          mireBtn.disabled = true;
+          fetch("/field/admin/stream/slot/" + encodeURIComponent(slot.slot_index) + "/test-pattern", {
+            method: "POST",
+            headers: jsonHeaders(),
+          }).then(function (r) {
+            return r.json().catch(function () { return {}; });
+          }).then(function (data) {
+            if (typeof window.showToast !== "function") return;
+            if (data && data.ok) {
+              window.showToast("success", "Mire lancee sur " + (data.slot_label || "l'emplacement"));
+            } else if (data && data.error === "ffmpeg_missing") {
+              window.showToast("error", "ffmpeg absent du serveur : " + (data.ffmpeg_path || ""));
+            } else if (data && data.error === "slot_busy") {
+              window.showToast("warning", "Emplacement deja occupe");
+            } else {
+              window.showToast("error", "Mire impossible a lancer");
+            }
+          }).catch(function () {
+            if (typeof window.showToast === "function") window.showToast("error", "Mire impossible a lancer");
+          }).then(loadStreamSlots);
+        });
+        actions.appendChild(mireBtn);
       }
       card.appendChild(actions);
 
@@ -514,14 +565,17 @@
       nameSpan.textContent = d.name || "-";
       nameSpan.style.fontWeight = "600";
       tdName.appendChild(nameSpan);
+      tdName.className = "fd-one-line";
+      tdName.title = d.name || "";
       tr.appendChild(tdName);
 
       if (hasEventCol) {
         var tdEvent = document.createElement("td");
-        tdEvent.style.whiteSpace = "nowrap";
+        tdEvent.className = "fd-one-line";
         tdEvent.style.color = "var(--muted)";
         tdEvent.style.fontSize = "12px";
         tdEvent.textContent = (d.event || "-") + (d.year ? " / " + d.year : "");
+        tdEvent.title = tdEvent.textContent;
         tr.appendChild(tdEvent);
       }
 
@@ -535,6 +589,8 @@
       dot.style.marginRight = "5px";
       tdGroup.appendChild(dot);
       tdGroup.appendChild(document.createTextNode(beaconGroupLabel(d.beacon_group_id)));
+      tdGroup.className = "fd-one-line";
+      tdGroup.title = beaconGroupLabel(d.beacon_group_id);
       tr.appendChild(tdGroup);
 
       // Categorie : modifiable sur place. "" = celle du groupe (affichee).
@@ -590,6 +646,9 @@
       tr.appendChild(tdCat);
 
       var tdPos = document.createElement("td");
+      tdPos.className = "fd-one-line";
+      tdPos.style.fontSize = "12px";
+      tdPos.style.fontVariantNumeric = "tabular-nums";
       if (d.last_position && d.last_position.lat != null) {
         tdPos.textContent = d.last_position.lat.toFixed(5) + ", " + d.last_position.lng.toFixed(5);
       } else {
@@ -599,9 +658,13 @@
 
       var tdSeen = document.createElement("td");
       tdSeen.textContent = d.last_seen ? formatRelative(d.last_seen) : "-";
+      tdSeen.className = "fd-one-line";
+      tdSeen.title = tdSeen.textContent;
       tr.appendChild(tdSeen);
 
       var tdBat = document.createElement("td");
+      tdBat.className = "fd-one-line";
+      tdBat.style.textAlign = "center";
       if (d.last_position && d.last_position.battery != null) {
         tdBat.textContent = d.last_position.battery + "%";
       } else {
@@ -612,15 +675,17 @@
       var tdAct = document.createElement("td");
       tdAct.style.whiteSpace = "nowrap";
       tdAct.style.textAlign = "right";
+      tdAct.style.paddingLeft = "4px";
+      tdAct.style.paddingRight = "6px";
       var actWrap = document.createElement("div");
-      actWrap.style.cssText = "display:inline-flex; gap:4px; align-items:center;";
+      actWrap.style.cssText = "display:inline-flex; gap:3px; align-items:center; flex-wrap:nowrap;";
       tdAct.appendChild(actWrap);
 
       function mkActionBtn(icon, title, extraClass, onClick) {
         var b = document.createElement("button");
         b.className = "btn btn-xs" + (extraClass ? " " + extraClass : "");
         b.title = title;
-        b.style.cssText = "width:32px; height:28px; padding:0; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto;";
+        b.style.cssText = "width:30px; height:28px; padding:0; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto;";
         var ic = document.createElement("span");
         ic.className = "material-symbols-outlined";
         ic.style.fontSize = "16px";

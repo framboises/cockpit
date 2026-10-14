@@ -1,8 +1,8 @@
 // routing_test.js - Bac a sable de test pour le moteur Valhalla.
 // Modale legere accessible depuis la sidebar admin de l'index : permet de
-// poser un point A et un point B sur la carte, basculer le mode god, et
-// observer la polyline + ETA. Affiche aussi les overrides admin actifs en
-// transparence pour valider qu'ils sont bien appliques.
+// poser un point A et un point B sur la carte, basculer le mode god et
+// l'acces piste, et observer la polyline + ETA (avec evitements Waze, comme
+// la modale fiche). Comparaison des 4 modes : testeur de /admin/itineraire.
 //
 // 100% independant de routing.js (qui pilote la modale fiche/device avec
 // envoi a la tablette). Aucun fiche_id, aucun device, aucun forward.
@@ -16,11 +16,11 @@
   var S = {
     overlay: null,
     map: null,
-    overridesLayer: null,
     routeLayer: null,
     from: null,
     to: null,
     god: false,
+    piste: false,
     pickMode: "A",
     lastResult: null,
     routeAnimFrame: null,
@@ -97,7 +97,7 @@
   }
 
   function toast(msg) {
-    if (typeof window.showToast === "function") return window.showToast(msg);
+    if (typeof window.showToast === "function") return window.showToast("warning", msg);
     console.log("[routing-test]", msg);
   }
 
@@ -162,6 +162,11 @@
       + '      <span class="material-symbols-outlined" style="color:#dc2626;">emergency</span>'
       + '      <span>Mode intervention (god)</span>'
       + '    </label>'
+      + '    <label class="routing-priority">'
+      + '      <input type="checkbox" id="rt-piste">'
+      + '      <span class="material-symbols-outlined" style="color:#2563eb;">sports_motorsports</span>'
+      + '      <span>Acces piste</span>'
+      + '    </label>'
       + '    <div class="routing-btn-row">'
       + '      <button id="rt-pick-a" class="routing-btn routing-btn-secondary">'
       + '        <span class="material-symbols-outlined">trip_origin</span><span>Repositionner A</span>'
@@ -212,10 +217,7 @@
     ).addTo(S.map);
     S.map.fitBounds(CIRCUIT_BBOX);
 
-    S.overridesLayer = L.layerGroup().addTo(S.map);
     S.routeLayer = L.layerGroup().addTo(S.map);
-
-    loadOverrides();
 
     S.map.on("click", function (e) {
       if (S.pickMode === "A") {
@@ -233,42 +235,6 @@
     });
 
     setTimeout(function () { if (S.map) S.map.invalidateSize(); }, 50);
-  }
-
-  function loadOverrides() {
-    fetch("/api/routing-overrides/active", { credentials: "same-origin" })
-      .then(function (r) { return r.json(); })
-      .then(function (j) {
-        if (!j || j.ok === false || !S.overridesLayer) return;
-        (j.items || []).forEach(renderOverride);
-      })
-      .catch(function () { /* silencieux */ });
-  }
-
-  function renderOverride(it) {
-    var color = it.type === "force_open" ? "#16a34a" : "#dc2626";
-    var iconName = it.type === "force_open" ? "door_open" : "block";
-    var label = (it.label || "(sans libelle)")
-      + (it.scope === "god_only" ? " (intervention seule)"
-        : it.scope === "normal_only" ? " (normal seul)" : "");
-    if (it.type === "block_point" || it.type === "force_open") {
-      if (it.lat == null || it.lon == null) return;
-      L.marker([it.lat, it.lon], {
-        icon: L.divIcon({
-          className: "",
-          html: "<div class='rov-pin' style='background:" + color + "; opacity:0.85; width:22px; height:22px;'>"
-            + "<span class='material-symbols-outlined' style='font-size:13px;'>" + iconName + "</span></div>",
-          iconSize: [22, 22], iconAnchor: [11, 11],
-        }),
-      }).bindTooltip(label).addTo(S.overridesLayer);
-    } else if (it.type === "block_polygon") {
-      var ring = (it.coords || []).map(function (c) { return [c[1], c[0]]; });
-      if (ring.length < 3) return;
-      L.polygon(ring, {
-        color: color, fillColor: color,
-        fillOpacity: 0.15, weight: 1.5, opacity: 0.7,
-      }).bindTooltip(label).addTo(S.overridesLayer);
-    }
   }
 
   function render() {
@@ -336,8 +302,11 @@
       box.appendChild(pill("ETA", fmtMin(S.lastResult.duration_s)));
       box.appendChild(pill("Moteur", S.lastResult.engine || "?",
         S.lastResult.engine === "stub" ? "#9ca3af" : "#16a34a"));
-      box.appendChild(pill("Mode", S.lastResult.mode || "auto",
-        S.lastResult.mode === "god" ? "#dc2626" : "#2563eb"));
+      box.appendChild(pill("Mode", S.lastResult.mode || "normal",
+        S.lastResult.god ? "#dc2626" : "#2563eb"));
+      if (S.lastResult.uses_raceway) {
+        box.appendChild(pill("Piste", "empruntee", "#2563eb"));
+      }
       if (S.lastResult.waze_avoided > 0) {
         box.appendChild(pill("Waze", S.lastResult.waze_avoided + " evite", "#f59e0b"));
       }
@@ -363,10 +332,11 @@
     }
     var btn = document.getElementById("rt-recalc");
     if (btn) btn.disabled = true;
-    api("/api/route", { from: S.from, to: S.to, god: !!S.god }).then(function (resp) {
+    api("/api/route", { from: S.from, to: S.to, god: !!S.god, piste: !!S.piste }).then(function (resp) {
       if (btn) btn.disabled = false;
       if (!resp.ok || !resp.body || resp.body.ok === false) {
         var err = (resp.body && resp.body.error) || ("Erreur " + resp.status);
+        if (err === "no_route") err = "aucun chemin praticable dans ce mode";
         toast("Calcul: " + err);
         S.lastResult = null;
         render();
@@ -389,6 +359,10 @@
 
     document.getElementById("rt-god").addEventListener("change", function (e) {
       S.god = !!e.target.checked;
+      if (S.from && S.to) recalc();
+    });
+    document.getElementById("rt-piste").addEventListener("change", function (e) {
+      S.piste = !!e.target.checked;
       if (S.from && S.to) recalc();
     });
     document.getElementById("rt-pick-a").addEventListener("click", function () {
@@ -437,11 +411,11 @@
     }
     S.overlay = null;
     S.map = null;
-    S.overridesLayer = null;
     S.routeLayer = null;
     S.from = null;
     S.to = null;
     S.god = false;
+    S.piste = false;
     S.pickMode = "A";
     S.lastResult = null;
   }

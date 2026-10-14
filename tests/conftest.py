@@ -92,6 +92,13 @@ class FakeCollection:
             nouveau.update(valeurs)
             self.docs.append(nouveau)
 
+    def insert_one(self, doc):
+        """Ajoute le document tel quel (meme objet, comme pymongo qui y pose
+        `_id`) et rend un objet portant `inserted_id`."""
+        doc.setdefault("_id", "fake-%d" % len(self.docs))
+        self.docs.append(doc)
+        return type("InsertOneResult", (), {"inserted_id": doc["_id"]})()
+
     def delete_many(self, query=None):
         restants = [d for d in self.docs if d not in self._matching(query)]
         self.docs = restants

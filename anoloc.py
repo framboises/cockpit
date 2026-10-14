@@ -25,7 +25,18 @@ import requests
 import string
 import unicodedata
 
+import balises_core as B
+import balises_trace as _balises_trace
+
 anoloc_bp = Blueprint("anoloc", __name__)
+
+
+def _iso(dt):
+    if isinstance(dt, datetime):
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+    return ""
 
 ANOLOC_API_BASE_DEFAULT = "https://app.lemans.anoloc.io/api/v3"
 USER_AGENT = "COCKPIT-TITAN/1.0"
@@ -294,8 +305,10 @@ def anoloc_live():
 
     visible_groups = _get_user_visible_groups(config)
 
-    # Lire anoloc_latest (positions connues)
+    # Lire anoloc_latest (positions connues, toutes sources)
     latest_docs = {doc["_id"]: doc for doc in db["anoloc_latest"].find()}
+    tlt_devices = B.devices_by_id(db)
+    tlt_settings = B.get_settings(db)
 
     # Construire les groupes a partir de la config (pas seulement anoloc_latest)
     # enabled par defaut si le champ est absent (retrocompatibilite)
@@ -331,26 +344,12 @@ def anoloc_live():
         for dev_id in grp_cfg.get("anoloc_device_ids", []):
             doc = latest_docs.get(dev_id)
             if doc:
-                # Device avec position connue
-                collected_at = doc.get("collected_at")
-                online = False
-                # Online = status Anoloc != offline ET derniere vraie frame < 30 min
-                status = doc.get("status", "offline")
-                online = status != "offline"
-                last_real = doc.get("last_real_at")
-                if online and last_real:
-                    if last_real.tzinfo is None:
-                        last_real = last_real.replace(tzinfo=timezone.utc)
-                    if (datetime.now(timezone.utc) - last_real).total_seconds() > 1800:
-                        online = False  # pas de vraie frame depuis 30 min
-
-                # Deriver gps_fix depuis last_real_at (< 5 min = signal GPS)
-                gps_fix = doc.get("gps_fix", 0)
-                if last_real and online:
-                    real_age = (datetime.now(timezone.utc) - last_real).total_seconds()
-                    gps_fix = 1 if real_age < 300 else 0
-
-                groups[out_key]["devices"].append({
+                # En ligne / GPS : une regle par source (balises_core.device_state).
+                # Anoloc : statut != offline et vraie trame < 30 min, GPS < 5 min.
+                # Teltonika : dernier message < 3 periodes attendues, GPS = fix
+                # du dernier message.
+                st = B.device_state(doc, device=tlt_devices.get(dev_id), settings=tlt_settings)
+                entry = {
                     "id": dev_id,
                     "label": doc.get("label", dev_id),
                     "lat": doc.get("lat"),
@@ -359,12 +358,22 @@ def anoloc_live():
                     "heading": doc.get("heading", 0),
                     "status": doc.get("status", "offline"),
                     "battery_pct": doc.get("battery_pct"),
-                    "gps_fix": gps_fix,
-                    "sent_at": doc.get("sent_at", "").isoformat() if isinstance(doc.get("sent_at"), datetime) else str(doc.get("sent_at", "")),
-                    "last_real_at": doc.get("last_real_at", "").isoformat() if isinstance(doc.get("last_real_at"), datetime) else "",
-                    "collected_at": doc.get("collected_at", "").isoformat() if isinstance(doc.get("collected_at"), datetime) else "",
-                    "online": online,
-                })
+                    "gps_fix": st["gps_fix"],
+                    "sent_at": _iso(doc.get("sent_at")) or str(doc.get("sent_at") or ""),
+                    "last_real_at": _iso(doc.get("last_real_at")),
+                    "collected_at": _iso(doc.get("collected_at")),
+                    "online": st["online"],
+                    "source": B.source_of(dev_id),
+                }
+                if B.is_teltonika_id(dev_id):
+                    entry.update({
+                        "last_msg_at": _iso(doc.get("last_msg_at")),
+                        "charging": doc.get("charging"),
+                        "battery_voltage": doc.get("battery_voltage"),
+                        "gsm_level": doc.get("gsm_level"),
+                        "movement": doc.get("movement"),
+                    })
+                groups[out_key]["devices"].append(entry)
             else:
                 # Device configure mais jamais collecte — utiliser le label sauvegarde
                 dev_labels = grp_cfg.get("device_labels") or {}
@@ -380,6 +389,7 @@ def anoloc_live():
                     "sent_at": "",
                     "collected_at": "",
                     "online": False,
+                    "source": B.source_of(dev_id),
                 })
 
     # Fusion des tablettes Field filtrees par event/year (rendering mixte)
@@ -417,7 +427,7 @@ def anoloc_trail():
         {"lat": 1, "lng": 1, "speed": 1, "collected_at": 1, "_id": 0},
     ).sort("collected_at", 1)
 
-    points = []
+    points, track = [], []
     for doc in cursor:
         lat = doc.get("lat")
         lng = doc.get("lng")
@@ -428,10 +438,24 @@ def anoloc_trail():
             "lat": lat,
             "lng": lng,
             "speed": doc.get("speed", 0),
-            "ts": ts.isoformat() if isinstance(ts, datetime) else str(ts or ""),
+            "ts": _iso(ts) if isinstance(ts, datetime) else str(ts or ""),
         })
+        if isinstance(ts, datetime):
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            track.append({"lat": lat, "lng": lng, "t": ts.timestamp()})
 
-    return jsonify({"ok": True, "device_id": device_id, "minutes": minutes, "points": points})
+    # Trace recalee sur les voies (affichage seul) ; les tablettes (pietons
+    # possibles) restent en trait direct
+    match = not device_id.startswith("field:")
+    try:
+        segments, matching = _balises_trace.build_segments(track, match=match)
+    except Exception:
+        logger.exception("recalage de la trace %s", device_id)
+        segments, matching = _balises_trace.build_segments(track, match=False)
+
+    return jsonify({"ok": True, "device_id": device_id, "minutes": minutes, "points": points,
+                    "segments": segments, "matching": matching})
 
 
 @anoloc_bp.route("/anoloc/vehicles-by-category")
@@ -522,6 +546,8 @@ def anoloc_status():
 
     visible_groups = _get_user_visible_groups(config)
     docs = list(db["anoloc_latest"].find())
+    tlt_devices = B.devices_by_id(db)
+    tlt_settings = B.get_settings(db)
     beacon_groups_map = {
         g["id"]: g for g in config.get("beacon_groups", []) if g.get("enabled") is not False
     }
@@ -545,14 +571,8 @@ def anoloc_status():
                 "total": 0,
             }
 
-        status = doc.get("status", "offline")
-        is_online = status != "offline"
-        last_real = doc.get("last_real_at")
-        if is_online and last_real:
-            if last_real.tzinfo is None:
-                last_real = last_real.replace(tzinfo=timezone.utc)
-            if (datetime.now(timezone.utc) - last_real).total_seconds() > 1800:
-                is_online = False
+        is_online = B.device_state(doc, device=tlt_devices.get(doc.get("_id")),
+                                   settings=tlt_settings)["online"]
         if is_online:
             groups[grp_id]["online"] += 1
         else:
@@ -734,6 +754,16 @@ def anoloc_config_save():
         seen_ids.add(gid)
         deduped_groups.append(g)
 
+    # Balises Teltonika : libelle de reference = parc (balises_devices), recopie
+    # dans device_labels (main courante, collisions de noms Field)
+    tlt = B.devices_by_id(db)
+    for g in deduped_groups:
+        labels = dict(g.get("device_labels") or {})
+        for did in g.get("anoloc_device_ids") or []:
+            if B.is_teltonika_id(did) and did in tlt:
+                labels[did] = tlt[did].get("label") or did
+        g["device_labels"] = labels
+
     update = {
         "api_base": data.get("api_base", existing.get("api_base", "")),
         "login": data.get("login", existing.get("login", "")),
@@ -862,3 +892,160 @@ def anoloc_remote_devices():
         return jsonify({"ok": False, "error": f"HTTP {status}", "detail": body}), 400
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Balises Teltonika (parc, reglages, sources) - admin
+# Plan : docs/claude/balises.md. Ingestion : balises_core / balises_api.
+# ---------------------------------------------------------------------------
+
+def _pub_tlt_device(d, latest, settings, groups_by_dev):
+    st = B.device_state(latest, device=d, settings=settings) if latest else None
+    stop_s, move_s = B.device_periods(d, settings)
+    return {
+        "id": d["_id"],
+        "imei": d.get("imei"),
+        "label": d.get("label"),
+        "model": d.get("model") or "",
+        "enabled": bool(d.get("enabled")),
+        "commissioned_at": _iso(d.get("commissioned_at")),
+        "period_stop_s": d.get("period_stop_s"),
+        "period_move_s": d.get("period_move_s"),
+        "effective_period_stop_s": stop_s,
+        "effective_period_move_s": move_s,
+        "notes": d.get("notes") or "",
+        "groups": groups_by_dev.get(d["_id"], []),
+        "online": bool(st and st["online"]),
+        "gps_fix": (st or {}).get("gps_fix", 0),
+        "last_msg_at": _iso((latest or {}).get("last_msg_at")),
+        "last_pos_at": _iso((latest or {}).get("last_pos_at")),
+        "battery_pct": (latest or {}).get("battery_pct"),
+        "charging": (latest or {}).get("charging"),
+        "movement": (latest or {}).get("movement"),
+        "ingest_source": (latest or {}).get("ingest_source"),
+    }
+
+
+@anoloc_bp.route("/anoloc/teltonika", methods=["GET"])
+def teltonika_overview():
+    err = _require_admin()
+    if err:
+        return err
+    db = _get_mongo_db()
+    settings = B.get_settings(db)
+    latest = {d["_id"]: d for d in db[B.COL_LATEST].find({"_id": {"$regex": "^tlt:"}})}
+    cfg = db["anoloc_config"].find_one({"_id": "global"}, {"beacon_groups": 1}) or {}
+    groups_by_dev = {}
+    for g in cfg.get("beacon_groups") or []:
+        for did in g.get("anoloc_device_ids") or []:
+            groups_by_dev.setdefault(did, []).append(g.get("label") or g.get("id"))
+    devices = [_pub_tlt_device(d, latest.get(d["_id"]), settings, groups_by_dev)
+               for d in B.list_devices(db)]
+    fl = db[B.COL_CONFIG].find_one({"_id": "flespi"}) or {}
+    rx = db[B.COL_CONFIG].find_one({"_id": "ingest:teltonika-tcp"}) or {}
+    unknown = [{"imei": u["_id"], "count": u.get("count"), "source": u.get("source"),
+                "last_seen": _iso(u.get("last_seen"))}
+               for u in db[B.COL_UNKNOWN].find({}).sort("last_seen", -1).limit(20)]
+    return jsonify({
+        "devices": devices,
+        "settings": settings,
+        "flespi": {
+            "enabled": bool(fl.get("enabled")),
+            "channel_id": fl.get("channel_id") or "",
+            "token_present": bool(os.getenv("FLESPI_TOKEN", "").strip()),
+            "last_run": _iso(fl.get("last_run")),
+            "last_error": fl.get("last_error"),
+            "last_stats": fl.get("last_stats"),
+        },
+        "receiver": {
+            "secret_present": len(os.getenv("BALISES_INGEST_SECRET", "") or "") >= 32,
+            "last_post_at": _iso(rx.get("last_post_at")),
+            "last_stats": rx.get("last_stats"),
+        },
+        "unknown": unknown,
+    })
+
+
+@anoloc_bp.route("/anoloc/teltonika/device", methods=["POST"])
+def teltonika_device_save():
+    err = _require_admin()
+    if err:
+        return err
+    db = _get_mongo_db()
+    doc, error = B.save_device(db, request.get_json(force=True) or {})
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
+    return jsonify({"ok": True, "id": doc["_id"]})
+
+
+@anoloc_bp.route("/anoloc/teltonika/device/<imei>", methods=["DELETE"])
+def teltonika_device_delete(imei):
+    err = _require_admin()
+    if err:
+        return err
+    imei = B.clean_imei(imei)
+    if not imei:
+        return jsonify({"ok": False, "error": "imei_invalide"}), 400
+    B.delete_device(_get_mongo_db(), imei)
+    return jsonify({"ok": True})
+
+
+@anoloc_bp.route("/anoloc/teltonika/settings", methods=["POST"])
+def teltonika_settings_save():
+    """Periodes d'emission par defaut et source flespi (transitoire). Le
+    jeton flespi reste dans l'environnement (FLESPI_TOKEN), jamais ici."""
+    err = _require_admin()
+    if err:
+        return err
+    db = _get_mongo_db()
+    data = request.get_json(force=True) or {}
+    upd = {}
+    for k in ("period_stop_s", "period_move_s"):
+        if k in data:
+            try:
+                upd[k] = max(10, min(int(data[k]), 24 * 3600))
+            except (TypeError, ValueError):
+                return jsonify({"ok": False, "error": "periode_invalide"}), 400
+    if upd:
+        db[B.COL_CONFIG].update_one({"_id": "teltonika"}, {"$set": upd}, upsert=True)
+    fl = {}
+    if "flespi_enabled" in data:
+        fl["enabled"] = bool(data["flespi_enabled"])
+    if "flespi_channel_id" in data:
+        ch = str(data["flespi_channel_id"] or "").strip()
+        if ch and not ch.isdigit():
+            return jsonify({"ok": False, "error": "canal_invalide"}), 400
+        fl["channel_id"] = ch
+    if fl:
+        db[B.COL_CONFIG].update_one({"_id": "flespi"}, {"$set": fl}, upsert=True)
+    return jsonify({"ok": True})
+
+
+@anoloc_bp.route("/anoloc/teltonika/messages", methods=["GET"])
+def teltonika_messages():
+    """Derniers messages recus d'une balise (diagnostic : cadence reelle a
+    l'arret / en mouvement, fix, batterie, source)."""
+    err = _require_admin()
+    if err:
+        return err
+    imei = B.clean_imei(request.args.get("imei"))
+    if not imei:
+        return jsonify({"ok": False, "error": "imei_invalide"}), 400
+    try:
+        limit = max(1, min(int(request.args.get("limit", 50)), 500))
+    except (TypeError, ValueError):
+        limit = 50
+    db = _get_mongo_db()
+    docs = list(db[B.COL_MESSAGES].find({"imei": imei}).sort("ts", -1).limit(limit))
+    out = []
+    for i, d in enumerate(docs):
+        prev = docs[i + 1]["ts"] if i + 1 < len(docs) else None
+        out.append({
+            "ts": _iso(d.get("ts")), "received_at": _iso(d.get("received_at")),
+            "ts_valid": d.get("ts_valid"), "source": d.get("source"),
+            "position_valid": d.get("position_valid"), "lat": d.get("lat"), "lng": d.get("lng"),
+            "speed": d.get("speed"), "battery_pct": d.get("battery_pct"),
+            "movement": d.get("movement"),
+            "interval_s": (d["ts"] - prev).total_seconds() if prev else None,
+        })
+    return jsonify({"ok": True, "imei": imei, "messages": out})

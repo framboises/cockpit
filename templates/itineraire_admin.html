@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>Moteur d'itineraire -- COCKPIT</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/itineraire_admin.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/itineraire_guide.css') }}">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+</head>
+{#
+  Moteur d'itineraire (/admin/itineraire, valhalla_admin.py) : regles terrain
+  du moteur Valhalla (portails, voies ouvertes / interdites / fermees, sens,
+  vitesses, piste) par saison et par epreuve, et chargement du scenario
+  saison + epreuve dans le graphe. Rendu : static/js/itineraire_admin.js.
+#}
+{% set _u = user or {} %}
+{% set user_roles = _u.get('roles') or [] %}
+{% set user_firstname = _u.get('firstname') or '' %}
+{% set user_lastname = _u.get('lastname') or '' %}
+{% set user_email = _u.get('email') or '' %}
+<body>
+<div class="app-layout">
+  {% set sidebar_active = '/admin/itineraire' %}
+  {% include '_sidebar.html' %}
+  <div class="app-main single-col-page">
+    <header class="app-header">
+      <button class="header-burger" id="header-burger-btn" type="button" aria-label="Menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+      <span class="material-symbols-outlined" style="font-size:22px;color:#2563eb;">alt_route</span>
+      <span class="header-event-name">Moteur d'itineraire</span>
+      <div class="header-spacer"></div>
+      <button class="btn btn-primary" id="it-open-load" type="button">
+        <span class="material-symbols-outlined">upload</span> Charger un scenario
+      </button>
+    </header>
+    <main class="it-main">
+      {% if not configured %}
+      <div class="it-alert is-error">
+        <span class="material-symbols-outlined">key_off</span>
+        <div>La cle <code>VALHALLA_ADMIN_API_KEY</code> n'est pas posee sur le serveur Cockpit : l'administration du moteur est indisponible.
+          Les itineraires continuent d'etre calcules sur le scenario deja charge.</div>
+      </div>
+      {% endif %}
+
+      <!-- E1 : tableau de bord -->
+      <section class="it-dash" id="it-dash">
+        <div class="it-dash-main">
+          <div class="it-k">Scenario charge</div>
+          <div class="it-scenario" id="it-scenario">Chargement...</div>
+          <div class="it-sub" id="it-scenario-meta"></div>
+        </div>
+        <div class="it-dash-side">
+          <div class="it-health" id="it-health"></div>
+        </div>
+      </section>
+      <div class="it-alert is-warn" id="it-pending" hidden>
+        <span class="material-symbols-outlined">sync_problem</span>
+        <div><strong>Modifications non appliquees.</strong> <span id="it-pending-txt"></span>
+          Elles n'auront aucun effet tant que le scenario n'est pas recharge.</div>
+        <button type="button" class="btn btn-secondary" id="it-pending-load">Recharger</button>
+      </div>
+
+      <nav class="it-tabs" role="tablist">
+        <button type="button" class="it-tab is-active" data-tab="carte" role="tab">
+          <span class="material-symbols-outlined">map</span> Carte</button>
+        <button type="button" class="it-tab" data-tab="seasons" role="tab">
+          <span class="material-symbols-outlined">calendar_month</span> Saisons</button>
+        <button type="button" class="it-tab" data-tab="events" role="tab">
+          <span class="material-symbols-outlined">flag</span> Epreuves</button>
+        <button type="button" class="it-tab" data-tab="waze" role="tab">
+          <span class="material-symbols-outlined">campaign</span> Waze</button>
+        <button type="button" class="it-tab" data-tab="guide" role="tab">
+          <span class="material-symbols-outlined">menu_book</span> Guide</button>
+      </nav>
+
+      <!-- Fermetures publiees vers Waze (waze_feed.py) -->
+      <section class="it-pane" data-pane="waze" hidden>
+        <div class="it-waze-cfg" id="it-wz-cfg"></div>
+        <div class="it-pane-head">
+          <p class="it-intro">Fermetures envoyees aux conducteurs Waze, avec leurs horaires. Pour en creer une : onglet Carte, selectionner les troncons fermes, bouton <strong>Publier sur Waze</strong> dans la bulle.</p>
+          <button type="button" class="btn btn-secondary" id="it-wz-refresh"><span class="material-symbols-outlined">sync</span> Actualiser</button>
+        </div>
+        <div class="it-table-wrap"><table class="it-table" id="it-wz-list"></table></div>
+      </section>
+
+      <!-- Guide utilisateur (fragment templates/_itineraire_guide.html) -->
+      <section class="it-pane" data-pane="guide" hidden>
+        {% include '_itineraire_guide.html' ignore missing %}
+      </section>
+
+      <!-- Carte de travail : regles a la souris + test de trajet -->
+      <section class="it-pane" data-pane="carte">
+        <div class="it-ed-bar">
+          <label>Saison
+            <select id="it-m-season" class="form-input"></select></label>
+          <label>Epreuve
+            <select id="it-m-event" class="form-input"></select></label>
+          <div class="it-ed-search">
+            <input id="it-m-q" class="form-input" placeholder="Chercher une voie (nom)" autocomplete="off">
+            <div class="it-ed-results" id="it-m-results" hidden></div>
+          </div>
+          <button type="button" class="btn btn-secondary it-m-testbtn" id="it-m-test">
+            <span class="material-symbols-outlined">science</span> Tester un trajet</button>
+        </div>
+        <div class="it-m-sub">
+          <div id="it-m-editing" class="it-m-editing"></div>
+          <div class="it-ed-layers">
+            <label><input type="checkbox" id="it-m-minor" checked> Chemins pietons et velos</label>
+            <label><input type="checkbox" id="it-m-barriers" checked> Barrieres et portails (en zoomant)</label>
+          </div>
+        </div>
+        <div class="it-ed-mapwrap">
+          <div id="it-m-map" class="it-map it-map-big"></div>
+          <div class="it-ed-zoomhint" id="it-m-zoomhint" hidden>Zoomer pour afficher les voies</div>
+          <div class="it-m-help">Clic : choisir une voie ou un portail &middot; Maj+clic : plusieurs troncons &middot; Echap : annuler</div>
+          <aside class="it-bubble" id="it-m-bubble" hidden></aside>
+          <div class="it-legend">
+            <span><i class="lg-line" style="background:#dc2626"></i>ferme</span>
+            <span><i class="lg-line" style="background:#f59e0b"></i>interdit (VL / pieton / velo)</span>
+            <span><i class="lg-line" style="background:#16a34a"></i>ouvert</span>
+            <span><i class="lg-line" style="background:#2563eb"></i>piste</span>
+            <span><i class="lg-line" style="background:#7c3aed"></i>sens / vitesse</span>
+            <span><i class="lg-line lg-hatch"></i>interdit OSM</span>
+            <span><i class="lg-line lg-dash"></i>regle de l'epreuve</span>
+          </div>
+        </div>
+        <details class="it-m-rulesbox">
+          <summary>Regles du document (<span id="it-m-rules-count">0</span>)</summary>
+          <div class="it-ed-rules" id="it-m-rules"></div>
+        </details>
+      </section>
+
+      <!-- E2 / E3 : listes -->
+      <section class="it-pane" data-pane="seasons" hidden>
+        <div class="it-pane-head">
+          <p class="it-intro">Regles permanentes d'une annee. Dupliquer la saison precedente pour demarrer la suivante.</p>
+          <button type="button" class="btn btn-primary" data-new="seasons"><span class="material-symbols-outlined">add</span> Nouvelle saison</button>
+        </div>
+        <div class="it-table-wrap"><table class="it-table" id="it-seasons"></table></div>
+      </section>
+      <section class="it-pane" data-pane="events" hidden>
+        <div class="it-pane-head">
+          <p class="it-intro">Regles d'un evenement : elles l'emportent sur la saison, champ par champ, et se combinent avec n'importe quelle saison. Le Mans Classic : dupliquer les 24 Heures puis ajuster.</p>
+          <button type="button" class="btn btn-primary" data-new="events"><span class="material-symbols-outlined">add</span> Nouvelle epreuve</button>
+        </div>
+        <div class="it-table-wrap"><table class="it-table" id="it-events"></table></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<!-- E5 : chargement d'un scenario -->
+<div class="it-overlay" id="it-load" hidden>
+  <div class="it-sheet" role="dialog" aria-modal="true" aria-labelledby="it-load-title">
+    <header class="it-sheet-head">
+      <h3 id="it-load-title">Charger un scenario</h3>
+      <button type="button" class="it-close" data-close aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
+    </header>
+    <div class="it-sheet-body">
+      <div id="it-load-form">
+        <div class="it-grid2">
+          <label>Saison <span class="it-hint">(obligatoire)</span>
+            <select id="it-load-season" class="form-input"></select></label>
+          <label>Epreuve
+            <select id="it-load-event" class="form-input"></select></label>
+        </div>
+        <div class="it-alert is-warn">
+          <span class="material-symbols-outlined">warning</span>
+          <div><strong>Valhalla sera indisponible environ 30 secondes pour toutes les applications.</strong>
+            En cas d'echec, le scenario precedent est restaure automatiquement.</div>
+        </div>
+        <label class="it-check"><input type="checkbox" id="it-load-confirm"> J'ai compris, charger maintenant</label>
+      </div>
+      <div id="it-load-progress" hidden>
+        <div class="it-load-state" id="it-load-state"></div>
+        <ol class="it-steps" id="it-load-steps"></ol>
+        <div id="it-load-result"></div>
+      </div>
+    </div>
+    <div class="it-sheet-foot">
+      <button type="button" class="btn btn-secondary" data-close>Fermer</button>
+      <button type="button" class="btn btn-primary" id="it-load-go" disabled>Charger</button>
+    </div>
+  </div>
+</div>
+
+<!-- Creation / modification d'une saison ou d'une epreuve -->
+<div class="it-overlay" id="it-doc" hidden>
+  <div class="it-sheet" role="dialog" aria-modal="true" aria-labelledby="it-doc-title">
+    <header class="it-sheet-head">
+      <h3 id="it-doc-title">Saison</h3>
+      <button type="button" class="it-close" data-close aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
+    </header>
+    <div class="it-sheet-body">
+      <label>Nom
+        <input id="it-doc-name" class="form-input" maxlength="120" placeholder="Saison 2027"></label>
+      <div class="it-grid2" data-for="seasons">
+        <label>Annee
+          <input id="it-doc-year" class="form-input" type="number" min="2000" max="2100"></label>
+      </div>
+      <div class="it-grid2" data-for="events">
+        <label>Debut <span class="it-hint">(informatif)</span>
+          <input id="it-doc-start" class="form-input" type="date"></label>
+        <label>Fin <span class="it-hint">(informatif)</span>
+          <input id="it-doc-end" class="form-input" type="date"></label>
+      </div>
+      <label>Description
+        <textarea id="it-doc-desc" class="form-input" rows="2" maxlength="1000"></textarea></label>
+      <div class="it-grid2" data-settings>
+        <label>Vitesse des voies de service sans vitesse OSM (km/h)
+          <input id="it-doc-svc" class="form-input" type="number" min="5" max="130"></label>
+        <label>Vitesse sur la piste, modes piste (km/h)
+          <input id="it-doc-race" class="form-input" type="number" min="5" max="130"></label>
+      </div>
+      <p class="it-hint" data-for="events">Vitesses vides : celles de la saison s'appliquent.</p>
+    </div>
+    <div class="it-sheet-foot">
+      <button type="button" class="btn btn-secondary" data-close>Annuler</button>
+      <button type="button" class="btn btn-primary" id="it-doc-save">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Publication d'une fermeture vers Waze -->
+<div class="it-overlay" id="it-waze" hidden>
+  <div class="it-sheet" role="dialog" aria-modal="true" aria-labelledby="it-wz-title">
+    <header class="it-sheet-head">
+      <h3 id="it-wz-title">Publier sur Waze</h3>
+      <button type="button" class="it-close" data-close aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
+    </header>
+    <div class="it-sheet-body">
+      <div class="it-sub" id="it-wz-summary"></div>
+      <label>Nom de la rue <span class="it-hint">(doit correspondre au nom sur la carte Waze aux deux bouts)</span>
+        <input id="it-wz-street" class="form-input" maxlength="120"></label>
+      <div class="it-wz-check">
+        <button type="button" class="btn btn-secondary" id="it-wz-check"><span class="material-symbols-outlined">fact_check</span> Verifier le nom Waze</button>
+        <div id="it-wz-check-res" class="it-hint"></div>
+      </div>
+      <label>Message aux conducteurs <span class="it-hint" id="it-wz-desc-count">0 / 40</span>
+        <input id="it-wz-desc" class="form-input" maxlength="40" placeholder="24 Heures du Mans : route fermee"></label>
+      <div id="it-wz-dir-wrap">
+        <div class="it-k">Sens ferme</div>
+        <label class="it-check"><input type="radio" name="it-wz-dir" value="BOTH_DIRECTIONS" checked> Les deux sens</label>
+        <label class="it-check"><input type="radio" name="it-wz-dir" value="ONE_DIRECTION"> Un seul sens : celui des fleches bleues sur la carte</label>
+        <button type="button" class="btn btn-secondary" id="it-wz-flip" hidden><span class="material-symbols-outlined">swap_horiz</span> Inverser le sens</button>
+      </div>
+      <div>
+        <div class="it-k">Plages horaires (heure de Paris)</div>
+        <table class="it-table it-wz-slots"><tbody id="it-wz-slots"></tbody></table>
+        <button type="button" class="btn btn-secondary" id="it-wz-add"><span class="material-symbols-outlined">add</span> Ajouter une plage</button>
+        <p class="it-hint">Une plage deja commencee ne peut plus changer de debut (regle Waze) : seule sa fin se modifie.</p>
+      </div>
+      <div class="it-alert is-warn"><span class="material-symbols-outlined">campaign</span>
+        <div>Publier envoie la fermeture a <strong>tous les conducteurs Waze</strong> pendant les plages choisies, quelques minutes apres. Waze ne fait aucune exception pour les vehicules de secours.</div></div>
+    </div>
+    <div class="it-sheet-foot">
+      <button type="button" class="btn btn-secondary" data-close>Annuler</button>
+      <button type="button" class="btn btn-secondary" id="it-wz-draft">Enregistrer en brouillon</button>
+      <button type="button" class="btn btn-primary" id="it-wz-publish"><span class="material-symbols-outlined">campaign</span> Publier</button>
+    </div>
+  </div>
+</div>
+
+<!-- E6 : historique -->
+<div class="it-overlay" id="it-hist" hidden>
+  <div class="it-sheet it-sheet-wide" role="dialog" aria-modal="true" aria-labelledby="it-hist-title">
+    <header class="it-sheet-head">
+      <h3 id="it-hist-title">Historique</h3>
+      <button type="button" class="it-close" data-close aria-label="Fermer"><span class="material-symbols-outlined">close</span></button>
+    </header>
+    <div class="it-sheet-body">
+      <div class="it-hist-bar">
+        <label>Version A <select id="it-hist-a" class="form-input"></select></label>
+        <label>Version B <select id="it-hist-b" class="form-input"></select></label>
+        <button type="button" class="btn btn-secondary" id="it-hist-restore">
+          <span class="material-symbols-outlined">history</span> Restaurer la version A</button>
+      </div>
+      <div id="it-hist-diff"></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+<script>window.__itModeLabels = {{ mode_labels | tojson }};</script>
+<script src="{{ url_for('static', filename='js/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/csrf_refresh.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+<script src="{{ url_for('static', filename='js/itineraire_admin.js') }}"></script>
+</body>
+</html>

@@ -87,7 +87,10 @@ def ensure_indexes(db):
     db["anoloc_positions"].create_index(
         [("device_id", 1), ("collected_at", -1)]
     )
-    db["anoloc_positions"].create_index("collected_at")
+    # TTL 10 mois, commun a toutes les sources (balises_core) : un
+    # create_index("collected_at") sans l'option leverait IndexOptionsConflict
+    import balises_core
+    balises_core.ensure_positions_ttl(db)
     db["anoloc_logs"].create_index("ts", expireAfterSeconds=7 * 24 * 3600)  # TTL 7 jours
 
 

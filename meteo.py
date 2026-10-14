@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, request
 
-# admin_required vient de field.py comme dans routing_overrides.py : il fait
+# admin_required vient de field.py comme dans valhalla_admin.py : il fait
 # ses propres imports depuis app a l'appel, ce qui evite l'import circulaire
 # (app importe ce module pour enregistrer le blueprint).
 from field import admin_required

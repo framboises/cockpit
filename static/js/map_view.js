@@ -176,7 +176,7 @@
     // Tile switcher control (safe DOM construction)
     var tileBtn = L.control({ position: "topright" });
     tileBtn.onAdd = function () {
-      var div = L.DomUtil.create("div", "leaflet-bar cockpit-tile-switcher");
+      var div = L.DomUtil.create("div", "leaflet-bar cockpit-tile-switcher cockpit-tile-ctrl");
       var btn = document.createElement("button");
       btn.className = "tile-btn";
       btn.title = "Changer de fond de carte";
@@ -348,7 +348,7 @@
     // Measurement tools control (bottom right)
     var measureCtrl = L.control({ position: "bottomright" });
     measureCtrl.onAdd = function () {
-      var div = L.DomUtil.create("div", "leaflet-bar cockpit-measure-tools");
+      var div = L.DomUtil.create("div", "leaflet-bar cockpit-measure-tools cockpit-measure-ctrl");
       var tools = [
         { id: "measure-line", icon: "straighten", title: "Mesurer une distance", mode: "line" },
         { id: "measure-area", icon: "square_foot", title: "Mesurer une aire", mode: "area" },
@@ -375,7 +375,79 @@
     };
     measureCtrl.addTo(map);
 
+    setupMapTools();
+
     mapReady = true;
+  }
+
+  // Trop de boutons (les colonnes se chevauchaient sur telephone).
+  // Repartition, sur tous les ecrans :
+  // - GAUCHE (navigation / outils de carte), en haut : zoom, recentrer,
+  //   plein ecran, fond de carte, carroyage ; mesures pliees derriere un
+  //   bouton "Mesures" ;
+  // - DROITE (ce qui est affiche), pliee derriere un bouton "oeil" :
+  //   preferences, portes, PMV, Momentus, filtre et "ignorer" main courante
+  //   (ces deux-la sont ajoutes plus tard par pcorg.js : observes).
+  var LEFT_TOOLS = [".cockpit-recenter-ctrl", ".cockpit-fullscreen-ctrl", ".cockpit-tile-ctrl",
+                    ".cockpit-grid-ctrl", ".cockpit-grid25-ctrl"];
+  var RIGHT_DATA = [".cockpit-prefs-ctrl", ".cockpit-portes-ctrl", ".cockpit-pmv-ctrl",
+                    ".cockpit-momentus-ctrl", ".pcorg-map-filter-ctrl", ".pcorg-ignore-all-ctrl"];
+
+  function setupMapTools() {
+    var container = map.getContainer();
+    var corner = function (sel) { return container.querySelector(sel); };
+    var tl = corner(".leaflet-top.leaflet-left"), tr = corner(".leaflet-top.leaflet-right");
+    if (!tl || !tr) return;
+
+    function toggleBtn(cls, stateCls, iconOff, titleOff, titleOn) {
+      var div = L.DomUtil.create("div", "leaflet-bar leaflet-control cockpit-tile-switcher " + cls);
+      var btn = document.createElement("button");
+      btn.className = "tile-btn";
+      btn.type = "button";
+      var ico = document.createElement("span");
+      ico.className = "material-symbols-outlined";
+      ico.style.fontSize = "20px";
+      btn.appendChild(ico);
+      div.appendChild(btn);
+      L.DomEvent.disableClickPropagation(div);
+      div.render = function () {
+        var open = container.classList.contains(stateCls);
+        ico.textContent = open ? "close" : iconOff;
+        btn.title = open ? titleOn : titleOff;
+        btn.classList.toggle("active", open);
+      };
+      btn.addEventListener("click", function () {
+        container.classList.toggle(stateCls);
+        div.render();
+      });
+      return div;
+    }
+    var layersBtn = toggleBtn("cockpit-mobile-tools-toggle", "tools-open", "visibility",
+                              "Ce qui est affiche sur la carte", "Replier");
+    var measureBtn = toggleBtn("cockpit-mobile-measure-toggle", "measures-open", "straighten",
+                               "Outils de mesure", "Replier les mesures");
+    L.DomEvent.disableScrollPropagation(tl);
+
+    function find(sel) { return container.querySelector(".leaflet-control-container " + sel); }
+
+    function placeMobile() {
+      LEFT_TOOLS.forEach(function (s) { var el = find(s); if (el) tl.appendChild(el); });
+      tl.appendChild(measureBtn);
+      var m = find(".cockpit-measure-ctrl");
+      if (m) tl.appendChild(m);
+      tr.insertBefore(layersBtn, tr.firstChild);
+      RIGHT_DATA.forEach(function (s) { var el = find(s); if (el) tr.appendChild(el); });
+    }
+    placeMobile();
+    layersBtn.render();
+    measureBtn.render();
+    // Boutons main courante ajoutes plus tard (pcorg.js) en haut a gauche
+    if (window.MutationObserver) {
+      new MutationObserver(function () {
+        var late = RIGHT_DATA.some(function (s) { var el = find(s); return el && el.parentNode !== tr; });
+        if (late) placeMobile();
+      }).observe(tl, { childList: true });
+    }
   }
 
   // ==========================================================================

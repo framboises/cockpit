@@ -1,115 +1,97 @@
 # =============================================================================
 # Configuration mediamtx pour streaming Field -> PC org -> VMS Qonify
 # =============================================================================
+# NE PAS copier ce fichier a la main : scripts/deploy_mediamtx.ps1 le copie
+# dans E:\TITAN\production\mediamtx en y injectant la cle __MEDIAMTX_AUTH_KEY__ (variable
+# machine MEDIAMTX_AUTH_HMAC_KEY, la meme que celle lue par Cockpit), verifie
+# la config puis redemarre le service.
+#
 # Architecture pool de slots fixes :
 #   - 3 paths declares statiquement : field-1, field-2, field-3
-#   - Cockpit alloue dynamiquement un slot par stream request
+#   - Cockpit alloue dynamiquement un slot par demande de flux
 #   - Qonify est configure UNE FOIS avec les 3 URLs RTSP stables
-#   - Les hooks valident les tokens via le webhook /field/api/stream/auth
+#   - Chaque publication / lecture est autorisee par Cockpit (authMethod http)
 #
 # RGPD :
-#   - record: no force partout (decision actee, pas d'enregistrement serveur)
+#   - record: no sur tous les paths (pas d'enregistrement serveur)
 #   - audio coupe cote tablette via getUserMedia({audio: false})
 # =============================================================================
 
-# Niveau de logs (debug pendant la mise en place, info en prod)
 logLevel: info
 logDestinations: [stdout]
 
-# Pas de stockage de l'API mediamtx, pas de monitoring exterieur
-api: no
+# -----------------------------------------------------------------------------
+# Authentification : mediamtx demande a Cockpit avant CHAQUE publication ou
+# lecture. Appel direct a Waitress en local (pas via IIS ni le nom public :
+# le serveur ne sait pas se joindre par son IP publique, pas de hairpin NAT).
+# Cockpit exige l'appel depuis 127.0.0.1 ET la cle k.
+# -----------------------------------------------------------------------------
+authMethod: http
+authHTTPAddress: http://127.0.0.1:4008/field/api/stream/auth?k=__MEDIAMTX_AUTH_KEY__
+authHTTPExclude:
+  - action: api
+  - action: metrics
+  - action: pprof
+
+# API locale (127.0.0.1 seulement) : Cockpit y lit l'etat reel des paths
+# (tablette encore connectee ?) et coupe un flux arrete depuis le PC org.
+api: yes
+apiAddress: 127.0.0.1:9997
 metrics: no
 pprof: no
-
-# NB: l'option globale `record: no` n'existe plus en mediamtx >=1.5.
-# Le `record: no` dans `pathDefaults` (plus bas) force la non-recording par path.
+playback: no
 
 # -----------------------------------------------------------------------------
-# RTSP : sortie consommee par Qonify et tout VMS classique (port 8554)
+# RTSP : sortie consommee par Qonify (port 8554/TCP)
+# TCP seul : un VMS qui tente l'UDP est refuse proprement et rebascule en TCP
+# (un seul port a ouvrir, pas de flux RTP UDP bloque en silence).
 # -----------------------------------------------------------------------------
 rtsp: yes
 rtspAddress: :8554
-# NB: ex-rtspTransports, renomme `protocols` en mediamtx >=1.5
-protocols: [tcp, udp]
-# Auth gere via runOnRead webhook ; pas d'auth interne mediamtx pour simplifier
+protocols: [tcp]
+encryption: "no"
 
 # -----------------------------------------------------------------------------
-# WebRTC : ingest WHIP depuis tablette, egress WHEP vers PC org (port 8889)
+# WebRTC : ingest WHIP depuis la tablette, lecture WHEP depuis le PC org.
+# Signalisation HTTP sur 127.0.0.1:8889 uniquement : exposee par IIS sous
+# https://cockpit.lemans.org/webrtc/ (regle ReverseProxyToMediamtxWebRTC).
+# Media en UDP 8189 direct entre la tablette / le PC org et ce serveur.
 # -----------------------------------------------------------------------------
 webrtc: yes
-webrtcAddress: :8889
-webrtcEncryption: no  # TLS termine en amont par le reverse proxy nginx
+webrtcAddress: 127.0.0.1:8889
+webrtcEncryption: no  # TLS termine par IIS
 webrtcAllowOrigin: '*'
-
-# CRITIQUE en production derriere un reverse proxy : annoncer le hostname
-# public ET l'IP LAN interne dans les ICE candidates, pour que :
-#  - les tablettes en 4G / Wi-Fi externe puissent joindre mediamtx via le
-#    NAT public (89.127.253.6:8189/UDP doit etre forwarde vers ce serveur),
-#  - les PC org sur le LAN ACO puissent joindre directement 10.24.0.251:8189
-#    sans dependre du hairpin NAT (qui n'est pas activé sur ce site).
+webrtcLocalUDPAddress: :8189
+# Les IP des interfaces (VLAN24 10.24.0.251, DMZ 192.168.254.35) sont
+# annoncees automatiquement. On ajoute l'IP publique (NAT 8189/UDP vers ce
+# serveur) pour les tablettes en 4G.
+webrtcIPsFromInterfaces: yes
 webrtcAdditionalHosts:
-  - cockpit.lemans.org
-  - 10.24.0.251
+  - 89.127.253.6
 
-# -----------------------------------------------------------------------------
-# RTMP : non utilise (tablette ne pousse pas en RTMP), garde au cas ou
-# -----------------------------------------------------------------------------
+# Protocoles inutilises : fermes
 rtmp: no
-
-# -----------------------------------------------------------------------------
-# HLS : optionnel, garde pour fallback PC org si WHEP ne marche pas
-# -----------------------------------------------------------------------------
-hls: yes
-hlsAddress: :8888
-hlsAllowOrigin: '*'
-hlsAlwaysRemux: no
+hls: no
+srt: no
 
 # -----------------------------------------------------------------------------
 # Defauts appliques a tous les paths
 # -----------------------------------------------------------------------------
 pathDefaults:
-  source: publisher              # ingest WebRTC dynamique
+  source: publisher
   maxReaders: 10                 # PC org + Qonify + marge
-  sourceOnDemand: no             # path actif en permanence (slot ouvert)
-  record: no                     # double protection RGPD
-
-  # Webhook auth quand la tablette ouvre la session WebRTC (path ready).
-  # Cockpit valide le publish_token et met a jour last_publish_at.
-  # NB: mediamtx >=1.5 utilise runOnReady (l'ancien nom runOnPublish a ete supprime).
-  runOnReady: >
-    curl -fsS -X POST
-    -H "Content-Type: application/json"
-    -H "X-Mediamtx-Auth: $$MEDIAMTX_AUTH_HMAC_KEY"
-    -d "{\"action\":\"publish\",\"path\":\"$MTX_PATH\",\"query\":\"$MTX_QUERY\"}"
-    https://cockpit.lemans.org/field/api/stream/auth
-  runOnReadyRestart: no
-
-  # Webhook quand la tablette ferme la peer connection : libere le slot.
-  # NB: ex-runOnUnpublish, renomme runOnNotReady en mediamtx >=1.5.
-  runOnNotReady: >
-    curl -fsS -X POST
-    -H "Content-Type: application/json"
-    -H "X-Mediamtx-Auth: $$MEDIAMTX_AUTH_HMAC_KEY"
-    -d "{\"action\":\"unpublish\",\"path\":\"$MTX_PATH\",\"query\":\"$MTX_QUERY\"}"
-    https://cockpit.lemans.org/field/api/stream/auth
-
-  # Webhook auth pour READ (PC org WHEP ou Qonify RTSP).
-  # Cockpit valide que view_token correspond bien au slot (path field-N).
-  runOnRead: >
-    curl -fsS -X POST
-    -H "Content-Type: application/json"
-    -H "X-Mediamtx-Auth: $$MEDIAMTX_AUTH_HMAC_KEY"
-    -d "{\"action\":\"read\",\"path\":\"$MTX_PATH\",\"query\":\"$MTX_QUERY\"}"
-    https://cockpit.lemans.org/field/api/stream/auth
-  runOnReadRestart: no
+  record: no                     # RGPD : jamais d'enregistrement
+  overridePublisher: yes         # un nouveau flux remplace l'ancien sur le slot
 
 # -----------------------------------------------------------------------------
-# 3 slots fixes : field-1, field-2, field-3
-# Les view_token (stables) seront connus de Qonify (config 1 fois) et passes
-# en query string. Les publish_token (jetables) sont remis a la tablette par
-# Cockpit a chaque acceptation de stream.
+# 3 slots fixes. Les view_token (stables, en base field_stream_slots) sont
+# connus de Qonify ; les publish_token (jetables) sont remis a la tablette
+# par Cockpit a chaque acceptation.
 # -----------------------------------------------------------------------------
 paths:
   field-1:
   field-2:
   field-3:
+  # Flux "PC org uniquement" : un path prive par flux (live-<stream_id>),
+  # jamais declare dans le VMS. Cockpit y refuse toute lecture RTSP.
+  '~^live-[0-9a-f]{24}$':

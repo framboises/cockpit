@@ -50,7 +50,8 @@
     evenement_non_en_cours: "Cet evenement n'est plus en cours.",
     zone_requise: "Choisissez au moins une zone.",
     zone_inconnue: "Une zone choisie n'existe plus, rechargez la liste.",
-    metier_requis: "Choisissez votre metier.",
+    metier_requis: "Choisissez au moins un metier.",
+    metier_inconnu: "Un metier choisi n'existe plus, rechargez la liste.",
     pas_operateur: "Votre groupe ne demande pas de prise de poste.",
     utilisateur_inconnu: "Compte introuvable dans la base des utilisateurs.",
     aucun_poste: "Aucun poste ouvert : il a peut-etre ete cloture."
@@ -78,13 +79,14 @@
     chip.appendChild(icon(paused ? "coffee" : "badge"));
     var zones = p.zones_labels || [];
     var txt = paused ? "En pause" : (zones.length ? (zones.length > 2 ? zones.slice(0, 2).join(", ") + " +" + (zones.length - 2) : zones.join(", ")) : "Poste");
-    if (!paused && p.metier_label) txt += " - " + p.metier_label;
+    var mets = p.metiers_labels || [];
+    if (!paused && mets.length) txt += " - " + (mets.length > 1 ? mets.length + " metiers" : mets[0]);
     chip.appendChild(el("span", "operator-post-chip-text", txt));
     chip.appendChild(icon("expand_more"));
     var started = p.started_at ? new Date(p.started_at) : null;
     chip.title = "Poste : " + p.event + " " + p.year
       + (zones.length ? "\nZones : " + zones.join(", ") : "")
-      + (p.metier_label ? "\nMetier : " + p.metier_label : "")
+      + (mets.length ? "\nMetier" + (mets.length > 1 ? "s" : "") + " : " + mets.join(", ") : "")
       + (started ? "\nDepuis " + started.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "")
       + (paused ? "\nEn pause : vos alertes de zone partent vers les autres operateurs" : "");
   }
@@ -103,7 +105,8 @@
     var head = el("div", "operator-post-menu-head");
     head.appendChild(el("strong", null, p.event + " " + p.year));
     if ((p.zones_labels || []).length) head.appendChild(el("div", null, "Zones : " + p.zones_labels.join(", ")));
-    if (p.metier_label) head.appendChild(el("div", null, "Metier : " + p.metier_label));
+    var mets = p.metiers_labels || [];
+    if (mets.length) head.appendChild(el("div", null, "Metier" + (mets.length > 1 ? "s" : "") + " : " + mets.join(", ")));
     menu.appendChild(head);
     function item(ic, label, fn, cls) {
       var b = el("button", "operator-post-menu-item" + (cls ? " " + cls : ""));
@@ -113,7 +116,7 @@
       b.addEventListener("click", function () { closeMenu(); fn(); });
       menu.appendChild(b);
     }
-    item("edit_location_alt", "Changer de zone / metier", function () { openModal("zones"); });
+    item("edit_location_alt", "Changer de zone / metiers", function () { openModal("zones"); });
     if (p.status === "pause") item("play_arrow", "Je reprends", function () { doPause(false); });
     else item("coffee", "Je pars en pause", function () { doPause(true); });
     item("logout", "Fin de poste", doEnd, "is-danger");
@@ -172,10 +175,10 @@
     if (document.getElementById("operator-post-overlay")) return;
     var current = window.__operatorPost;
     var isZones = mode === "zones";
-    state = { opts: null, event: null, zones: {}, metier: null, map: null, polys: {}, group: null, busy: false };
+    state = { opts: null, event: null, zones: {}, metiers: {}, map: null, polys: {}, group: null, busy: false };
     if (isZones && current) {
       (current.zones || []).forEach(function (z) { state.zones[z] = true; });
-      state.metier = current.metier_id || null;
+      (current.metiers || []).forEach(function (m) { state.metiers[m] = true; });
     }
     var overlay = el("div", "operator-post-overlay");
     overlay.id = "operator-post-overlay";
@@ -184,10 +187,10 @@
     var head = el("div", "operator-post-head");
     head.appendChild(icon(isZones ? "edit_location_alt" : "badge"));
     var ht = el("div");
-    ht.appendChild(el("div", "operator-post-title", isZones ? "Changer de zone / metier" : "Prise de poste"));
+    ht.appendChild(el("div", "operator-post-title", isZones ? "Changer de zone / metiers" : "Prise de poste"));
     ht.appendChild(el("div", "operator-post-sub", isZones
       ? "Le poste continue. Une fiche \"Changement de zone\" est ajoutee a la main courante."
-      : "Indiquez l'evenement, vos zones et votre metier. Une fiche \"Prise de poste\" est ajoutee a la main courante."));
+      : "Indiquez l'evenement, vos zones et vos metiers. Une fiche \"Prise de poste\" est ajoutee a la main courante."));
     head.appendChild(ht);
     box.appendChild(head);
     var body = el("div", "operator-post-body");
@@ -219,7 +222,7 @@
       var msg = "";
       if (!isZones && !state.event) msg = "Choisissez l'evenement.";
       else if (o.zones.length && !Object.keys(state.zones).length) msg = "Choisissez au moins une zone.";
-      else if (o.metiers.length && !state.metier) msg = "Choisissez votre metier.";
+      else if (o.metiers.length && !Object.keys(state.metiers).length) msg = "Choisissez au moins un metier.";
       err.textContent = msg;
       go.disabled = !!msg || state.busy;
     }
@@ -232,6 +235,9 @@
         var known = {};
         d.zones.forEach(function (z) { known[z.id] = true; });
         Object.keys(state.zones).forEach(function (id) { if (!known[id]) delete state.zones[id]; });
+        var knownM = {};
+        d.metiers.forEach(function (m) { knownM[m.id] = true; });
+        Object.keys(state.metiers).forEach(function (id) { if (!knownM[id]) delete state.metiers[id]; });
         body.textContent = "";
         if (!isZones) {
           if (d.events.length) state.event = d.events[0];
@@ -254,7 +260,7 @@
       check();
       go.textContent = "Envoi...";
       var url = isZones ? "/api/operator/post/zones" : "/api/operator/post";
-      var payload = { zones: Object.keys(state.zones), metier_id: state.metier };
+      var payload = { zones: Object.keys(state.zones), metiers: Object.keys(state.metiers) };
       if (!isZones) { payload.event = state.event.event; payload.year = state.event.year; }
       post(url, payload).then(function (res) {
         if (!res.ok) {
@@ -321,11 +327,25 @@
   }
 
   function sectionMetiers(metiers, check) {
-    var s = section("Metier", "work");
-    s.appendChild(radios(metiers, "op-metier",
-      function (m) { return m.id === state.metier; },
-      function (m) { state.metier = m.id; check(); },
-      function (m) { return m.label; }));
+    // Plusieurs metiers possibles : cases a cocher
+    var s = section("Metier(s)", "work");
+    var box = el("div", "operator-post-options");
+    metiers.forEach(function (m) {
+      var on = !!state.metiers[m.id];
+      var l = el("label", "operator-post-option" + (on ? " is-on" : ""));
+      var c = document.createElement("input");
+      c.type = "checkbox";
+      c.checked = on;
+      c.addEventListener("change", function () {
+        if (c.checked) state.metiers[m.id] = true; else delete state.metiers[m.id];
+        l.classList.toggle("is-on", c.checked);
+        check();
+      });
+      l.appendChild(c);
+      l.appendChild(el("span", "operator-post-option-main", m.label));
+      box.appendChild(l);
+    });
+    s.appendChild(box);
     return s;
   }
 
@@ -342,11 +362,16 @@
     var count = el("span", "operator-post-zone-count");
     var none = el("button", "btn btn-sm", "Aucune");
     none.type = "button";
+    var all = el("button", "btn btn-sm", "Tout cocher");
+    all.type = "button";
     tools.appendChild(count);
+    tools.appendChild(all);
     tools.appendChild(none);
     var list = el("div", "operator-post-zone-list");
+    var hint = el("div", "operator-post-zone-hint");
     side.appendChild(search);
     side.appendChild(tools);
+    side.appendChild(hint);
     side.appendChild(list);
     grid.appendChild(mapEl);
     grid.appendChild(side);
@@ -360,12 +385,46 @@
       var n = Object.keys(state.zones).length;
       count.textContent = n ? n + " zone" + (n > 1 ? "s" : "") + " choisie" + (n > 1 ? "s" : "") : "Aucune zone choisie";
     }
-    function set(id, on) {
+    // Carte lisible : recherche en cours -> zones trouvees + zones choisies ;
+    // sinon, des la premiere zone choisie -> zones choisies seulement ;
+    // sinon toutes. Les plus grandes restent dessous (ordre de "sorted").
+    var sorted = [];
+    var query = "";
+    function visible(id) {
+      if (state.zones[id]) return true;
+      if (query) return boxes[id] && boxes[id].key.indexOf(query) !== -1;
+      return !Object.keys(state.zones).length;
+    }
+    function refreshMap(fit) {
+      var n = Object.keys(state.zones).length;
+      hint.textContent = n && !query ? "Carte : zones choisies seulement. Recherchez pour en ajouter." : "";
+      refreshAllBtn();
+      if (!state.group) return;
+      state.group.clearLayers();
+      sorted.forEach(function (z) { if (visible(z.id)) state.group.addLayer(state.polys[z.id]); });
+      if (fit && state.group.getLayers().length) {
+        state.map.fitBounds(state.group.getBounds(), { padding: [10, 10], maxZoom: 18 });
+      }
+    }
+    function set(id, on, batch) {
       if (on) state.zones[id] = true; else delete state.zones[id];
       if (boxes[id]) { boxes[id].input.checked = on; boxes[id].row.classList.toggle("is-on", on); }
       if (state.polys[id]) state.polys[id].setStyle(styleFor(on));
+      if (batch) return;
       refreshCount();
+      refreshMap(false);
       check();
+    }
+    // Zones de la liste affichee (toutes, ou celles de la recherche)
+    function filtered() {
+      return Object.keys(boxes).filter(function (id) { return !query || boxes[id].key.indexOf(query) !== -1; });
+    }
+    function refreshAllBtn() {
+      var ids = filtered();
+      var allOn = ids.length && ids.every(function (id) { return state.zones[id]; });
+      all.textContent = (allOn ? "Tout decocher" : "Tout cocher") + (query ? " (" + ids.length + ")" : "");
+      all.disabled = !ids.length;
+      all.setAttribute("data-on", allOn ? "1" : "");
     }
     zones.forEach(function (z) {
       var on = !!state.zones[z.id];
@@ -380,13 +439,27 @@
       boxes[z.id] = { input: c, row: row, key: norm(z.label) };
     });
     refreshCount();
+    refreshMap(false);
+    var fitTimer = null;
     search.addEventListener("input", function () {
       var q = norm(search.value.trim());
+      query = q;
       Object.keys(boxes).forEach(function (id) {
         boxes[id].row.style.display = !q || boxes[id].key.indexOf(q) !== -1 ? "" : "none";
       });
+      refreshMap(false);
+      // Recadrage sur les zones trouvees une fois la saisie posee
+      clearTimeout(fitTimer);
+      fitTimer = setTimeout(function () { refreshMap(true); }, 400);
     });
     none.addEventListener("click", function () { Object.keys(state.zones).forEach(function (id) { set(id, false); }); });
+    all.addEventListener("click", function () {
+      var on = !all.getAttribute("data-on");
+      filtered().forEach(function (id) { set(id, on, true); });
+      refreshCount();
+      refreshMap(false);
+      check();
+    });
 
     if (typeof L !== "undefined") {
       setTimeout(function () {
@@ -394,16 +467,16 @@
         L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "OSM", maxNativeZoom: 19, maxZoom: 22 }).addTo(state.map);
         var group = L.featureGroup().addTo(state.map);
         // Les plus grandes zones dessous : une petite zone incluse reste cliquable
-        zones.slice().sort(function (a, b) { return area(b.geometry) - area(a.geometry); }).forEach(function (z) {
+        sorted = zones.slice().sort(function (a, b) { return area(b.geometry) - area(a.geometry); });
+        sorted.forEach(function (z) {
           var p = L.geoJSON(z.geometry, { style: styleFor(!!state.zones[z.id]) });
           p.bindTooltip(z.label, { sticky: true });
           p.on("click", function () { set(z.id, !state.zones[z.id]); });
-          p.addTo(group);
           state.polys[z.id] = p;
         });
         state.group = group;
         state.map.invalidateSize();
-        if (group.getLayers().length) state.map.fitBounds(group.getBounds(), { padding: [10, 10] });
+        refreshMap(true);
       }, 0);
     }
     return s;

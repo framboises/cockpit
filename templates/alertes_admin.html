@@ -376,6 +376,12 @@
               <option value="checkpoint_error_burst">Controle acces - rafale erreurs</option>
               <option value="pcorg_urgency">Main courante - niveau urgence</option>
               <option value="door_saturation_forecast">Controle acces - saturation porte prevue</option>
+              <option value="beacon_speed">Balises GPS - exces de vitesse</option>
+              <option value="beacon_zone">Balises GPS - entree / sortie de zone</option>
+              <option value="beacon_stopped">Balises GPS - arret prolonge</option>
+              <option value="beacon_silent">Balises GPS - balise muette</option>
+              <option value="beacon_battery">Balises GPS - batterie faible</option>
+              <option value="beacon_movement">Balises GPS - mise en mouvement</option>
               <option value="anpr_watchlist" hidden>LAPI - plaque surveillee (deprecie, utiliser Camera Hikvision)</option>
             </select>
           </label>
@@ -513,6 +519,55 @@
               </label>
             </div>
             <div class="field-help" style="margin-top:6px;">Exemple : une paire toutes les 3 min et 2 mesures consecutives = alerte 3 a 6 min apres le debut du bouchon. L'episode se termine a la premiere mesure redevenue normale.</div>
+          </div>
+        </div>
+        <div class="form-row" id="params-beacon-row" style="display:none;">
+          <div class="field-block">
+            <div class="field-label">Groupes de balises surveilles</div>
+            <div class="field-help">Balises Anoloc et Teltonika des groupes coches (Configuration &gt; Balises GPS). Rien de coche = tous les groupes actifs. Les tablettes Field ne sont pas concernees.</div>
+            <div id="beacon-groups-grid" class="checklist checklist-wide"></div>
+          </div>
+          <div class="field-help" id="beacon-help" style="margin-top:10px;"></div>
+          <div class="field-block" style="margin-top:10px;">
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+              <label data-bp="speed">Vitesse max (km/h)
+                <input id="bp-max-kmh" type="number" min="1" value="50" class="form-input" style="width:110px;" />
+              </label>
+              <label data-bp="speed zone">Points consecutifs
+                <input id="bp-consecutive" type="number" min="1" max="10" value="2" class="form-input" style="width:110px;" />
+              </label>
+              <label data-bp="zone">Declencher sur
+                <select id="bp-event" class="form-input" style="width:170px;">
+                  <option value="both">Entree et sortie</option>
+                  <option value="enter">Entree seulement</option>
+                  <option value="exit">Sortie seulement</option>
+                </select>
+              </label>
+              <label data-bp="stopped">Immobile depuis (min)
+                <input id="bp-max-min" type="number" min="1" value="20" class="form-input" style="width:110px;" />
+              </label>
+              <label data-bp="stopped">Rayon d'immobilite (m)
+                <input id="bp-radius" type="number" min="20" value="50" class="form-input" style="width:110px;" />
+              </label>
+              <label data-bp="silent">Muette apres (min, vide = automatique)
+                <input id="bp-after-min" type="number" min="1" class="form-input" style="width:110px;" />
+              </label>
+              <label data-bp="battery">Seuil batterie (%)
+                <input id="bp-threshold" type="number" min="1" max="100" value="20" class="form-input" style="width:110px;" />
+              </label>
+              <label data-bp="movement">Vitesse de mouvement Anoloc (km/h)
+                <input id="bp-min-speed" type="number" min="1" value="5" class="form-input" style="width:110px;" />
+              </label>
+              <label data-bp="speed movement">Pas de nouvelle alerte avant (min)
+                <input id="bp-cooldown" type="number" min="0" max="1440" value="10" class="form-input" style="width:110px;" />
+              </label>
+            </div>
+          </div>
+          <div class="field-block" style="margin-top:12px;" data-bp="zone stopped">
+            <div class="field-label">Zones (couche polygones de Looker)</div>
+            <div class="field-help" id="bp-zones-help"></div>
+            <select id="bp-layer" class="form-input" style="max-width:360px; margin-top:6px;"></select>
+            <div id="bp-zones-grid" class="checklist checklist-wide" style="margin-top:8px;"></div>
           </div>
         </div>
         <div class="form-row" id="params-camera-row" style="display:none;">

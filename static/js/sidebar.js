@@ -106,7 +106,7 @@
       if (!barre.classList.contains("mobile-open")) return;
       // Un clic dans la barre la laisse ouverte, sauf sur un lien de
       // navigation : la page va changer, la garder ouverte n'a pas de sens.
-      if (e.target.closest("#sidebar") && !e.target.closest(".sidebar-nav .nav-btn")) return;
+      if (e.target.closest("#sidebar") && !e.target.closest(".sidebar-nav .nav-btn:not(.nav-group-toggle)")) return;
       if (e.target.closest("#sidebarToggle, #header-burger-btn, #hamburger-button")) return;
       fermerMobile();
     });
@@ -114,6 +114,93 @@
     mobile.addEventListener("change", function (ev) {
       if (!ev.matches) fermerMobile();
     });
+  }
+
+  // ------------------------------------------------------------------
+  // Groupes de menus (_sidebar.html nav_group)
+  //
+  // Menu deplie (PC) et telephone : le groupe s'ouvre / se replie sur place,
+  // etat memorise par groupe. Menu replie (PC, icones seules) : le sous-menu
+  // s'ouvre en volet a droite des icones (position fixe : la nav defile et
+  // couperait un volet absolu), ferme par un clic ailleurs ou Echap. Le
+  // groupe de la page courante est toujours ouvert.
+  // ------------------------------------------------------------------
+
+  var CLE_GROUPE = "sidebar-group-";
+
+  function brancherGroupes() {
+    var barre = document.getElementById("sidebar");
+    if (!barre) return;
+    var groupes = Array.prototype.slice.call(barre.querySelectorAll(".nav-group"));
+    if (!groupes.length) return;
+    var mobile = window.matchMedia(SEUIL_MOBILE);
+
+    function enVolet() {
+      return !mobile.matches && barre.classList.contains("collapsed");
+    }
+    function memoire(g, v) {
+      try {
+        if (v === undefined) return localStorage.getItem(CLE_GROUPE + g.getAttribute("data-group"));
+        localStorage.setItem(CLE_GROUPE + g.getAttribute("data-group"), v ? "1" : "0");
+      } catch (e) {}
+      return null;
+    }
+    function bouton(g) { return g.querySelector(".nav-group-toggle"); }
+
+    function poser(g, ouvert) {
+      g.classList.toggle("is-open", ouvert);
+      bouton(g).setAttribute("aria-expanded", ouvert ? "true" : "false");
+    }
+    function fermerVolets() {
+      groupes.forEach(function (g) {
+        if (!g.classList.contains("is-flyout")) return;
+        g.classList.remove("is-flyout");
+        bouton(g).setAttribute("aria-expanded", g.classList.contains("is-open") ? "true" : "false");
+        var liste = g.querySelector(".nav-group-items");
+        liste.style.top = "";
+        liste.style.left = "";
+      });
+    }
+    function ouvrirVolet(g) {
+      var dejaOuvert = g.classList.contains("is-flyout");
+      fermerVolets();
+      if (dejaOuvert) return;
+      g.classList.add("is-flyout");
+      bouton(g).setAttribute("aria-expanded", "true");
+      var liste = g.querySelector(".nav-group-items");
+      var r = bouton(g).getBoundingClientRect();
+      liste.style.left = (barre.getBoundingClientRect().right + 6) + "px";
+      liste.style.top = r.top + "px";
+      // Reste dans l'ecran si le groupe est bas dans la barre
+      var h = liste.getBoundingClientRect().height;
+      var max = window.innerHeight - h - 8;
+      if (r.top > max) liste.style.top = Math.max(8, max) + "px";
+    }
+
+    groupes.forEach(function (g) {
+      var m = memoire(g);
+      poser(g, g.classList.contains("has-active") || m === "1");
+      bouton(g).addEventListener("click", function (e) {
+        e.stopPropagation();
+        if (enVolet()) { ouvrirVolet(g); return; }
+        var ouvert = !g.classList.contains("is-open");
+        poser(g, ouvert);
+        memoire(g, ouvert);
+      });
+    });
+
+    document.addEventListener("click", function (e) {
+      if (!e.target.closest(".nav-group.is-flyout .nav-group-items")) fermerVolets();
+      else if (e.target.closest(".nav-btn")) fermerVolets();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") fermerVolets();
+    });
+    window.addEventListener("resize", fermerVolets);
+    // Repli / depli de la barre ou passage telephone : plus de volet
+    new MutationObserver(fermerVolets).observe(barre, { attributes: true, attributeFilter: ["class"] });
+    var nav = barre.querySelector(".sidebar-nav");
+    if (nav) nav.addEventListener("scroll", fermerVolets, { passive: true });
   }
 
   // ------------------------------------------------------------------
@@ -166,6 +253,7 @@
   document.addEventListener("DOMContentLoaded", function () {
     publierContexte();
     brancherRepli();
+    brancherGroupes();
     brancherRaccourcis();
     brancherDeconnexion();
   });

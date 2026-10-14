@@ -1,0 +1,339 @@
+/* Guide utilisateur du moteur d'itineraire (onglet Guide de /admin/itineraire).
+   Toutes les regles sont prefixees .itg : aucun effet hors du guide. */
+
+.itg {
+  --itg-ferme: #dc2626;
+  --itg-interdit: #f59e0b;
+  --itg-ouvert: #16a34a;
+  --itg-piste: #2563eb;
+  --itg-sens: #7c3aed;
+  --itg-osm: #94a3b8;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 8px 4px 40px;
+  color: var(--text, inherit);
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+
+.itg *,
+.itg *::before,
+.itg *::after { box-sizing: border-box; }
+
+.itg h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 34px 0 12px;
+  padding-bottom: 6px;
+  font-size: 1.25rem;
+  border-bottom: 1px solid var(--line);
+  scroll-margin-top: 80px;
+}
+.itg h2 .material-symbols-outlined { color: var(--itg-piste); }
+.itg h3 { margin: 22px 0 8px; font-size: 1.05rem; scroll-margin-top: 80px; }
+.itg h4 { margin: 16px 0 6px; font-size: .95rem; }
+.itg p { margin: 8px 0; }
+.itg ul, .itg ol { margin: 8px 0; padding-left: 22px; }
+.itg li { margin: 3px 0; }
+.itg a { color: var(--itg-piste); }
+.itg strong { font-weight: 600; }
+
+/* En-tete */
+.itg-hero {
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+.itg-hero h1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 6px;
+  font-size: 1.45rem;
+}
+.itg-hero p { margin: 4px 0; color: var(--muted); }
+
+/* Sommaire */
+.itg-toc {
+  margin: 16px 0 0;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+}
+.itg-toc-title { margin: 0 0 6px; font-weight: 600; }
+.itg-toc ol { columns: 2; column-gap: 32px; margin: 0; }
+.itg-toc li { break-inside: avoid; }
+.itg-toc a { text-decoration: none; }
+.itg-toc a:hover { text-decoration: underline; }
+.itg-toc ul { margin: 2px 0 4px; padding-left: 16px; font-size: .92em; }
+
+/* Libelles de l'interface et touches */
+.itg-ui {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: .9em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.itg-kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--card);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: .85em;
+  text-align: center;
+}
+
+/* Grille de cartes */
+.itg-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+.itg-card {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+}
+.itg-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+.itg-card-title .material-symbols-outlined { color: var(--itg-piste); font-size: 22px; }
+.itg-card p { margin: 4px 0; }
+
+/* Schema des couches */
+.itg-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0;
+}
+.itg-flow-box {
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  text-align: center;
+  font-weight: 600;
+}
+.itg-flow-box small { display: block; font-weight: 400; color: var(--muted); font-size: .8em; }
+.itg-flow-arrow { color: var(--muted); font-size: 1.3em; }
+.itg-flow-box.itg-flow-result { border-color: var(--itg-piste); box-shadow: inset 0 0 0 1px var(--itg-piste); }
+
+/* Encadres */
+.itg-note, .itg-warn, .itg-tip, .itg-danger {
+  display: flex;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: var(--card);
+}
+.itg-note > .material-symbols-outlined,
+.itg-warn > .material-symbols-outlined,
+.itg-tip > .material-symbols-outlined,
+.itg-danger > .material-symbols-outlined { flex: 0 0 auto; margin-top: 1px; }
+.itg-note { border-left-color: var(--itg-piste); }
+.itg-note > .material-symbols-outlined { color: var(--itg-piste); }
+.itg-warn { border-left-color: var(--itg-interdit); background: rgba(245, 158, 11, .08); }
+.itg-warn > .material-symbols-outlined { color: var(--itg-interdit); }
+.itg-tip { border-left-color: var(--itg-ouvert); background: rgba(22, 163, 74, .07); }
+.itg-tip > .material-symbols-outlined { color: var(--itg-ouvert); }
+.itg-danger { border-left-color: var(--itg-ferme); background: rgba(220, 38, 38, .07); }
+.itg-danger > .material-symbols-outlined { color: var(--itg-ferme); }
+.itg-note p, .itg-warn p, .itg-tip p, .itg-danger p { margin: 0 0 4px; }
+.itg-note p:last-child, .itg-warn p:last-child, .itg-tip p:last-child, .itg-danger p:last-child { margin-bottom: 0; }
+
+/* Tableaux */
+.itg-table-wrap { overflow-x: auto; margin: 12px 0; }
+.itg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .92em;
+}
+.itg-table th, .itg-table td {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.itg-table th { background: var(--bg); font-weight: 600; }
+.itg-table td.itg-c { text-align: center; }
+.itg-yes { color: var(--itg-ouvert); font-weight: 700; }
+.itg-no { color: var(--itg-ferme); font-weight: 700; }
+.itg-mid { color: var(--muted); }
+
+/* Legende de la carte */
+.itg-legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; margin: 12px 0; }
+.itg-legend-item { display: flex; align-items: center; gap: 10px; }
+.itg-line {
+  flex: 0 0 52px;
+  height: 0;
+  border-top: 5px solid var(--itg-osm);
+  border-radius: 3px;
+}
+.itg-line.itg-l-ferme { border-top-color: var(--itg-ferme); }
+.itg-line.itg-l-interdit { border-top-color: var(--itg-interdit); }
+.itg-line.itg-l-ouvert { border-top-color: var(--itg-ouvert); }
+.itg-line.itg-l-piste { border-top-color: var(--itg-piste); }
+.itg-line.itg-l-sens { border-top-color: var(--itg-sens); }
+.itg-line.itg-l-osm { border-top: 4px dotted var(--itg-osm); }
+.itg-line.itg-l-event { border-top: 5px dashed var(--itg-ferme); }
+.itg-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  vertical-align: -1px;
+}
+.itg-dot.itg-d-ferme { background: var(--itg-ferme); }
+.itg-dot.itg-d-interdit { background: var(--itg-interdit); }
+.itg-dot.itg-d-ouvert { background: var(--itg-ouvert); }
+.itg-dot.itg-d-piste { background: var(--itg-piste); }
+.itg-dot.itg-d-sens { background: var(--itg-sens); }
+.itg-dot.itg-d-white { background: #fff; border: 2px solid #334155; }
+.itg-picto {
+  display: inline-flex;
+  gap: 2px;
+  padding: 1px 5px;
+  border-radius: 10px;
+  background: var(--itg-interdit);
+  color: #fff;
+}
+.itg-picto .material-symbols-outlined { font-size: 15px; }
+
+/* Etiquettes de mode et d'action */
+.itg-tag {
+  display: inline-block;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: .82em;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+}
+.itg-tag.itg-t-ferme { background: var(--itg-ferme); }
+.itg-tag.itg-t-interdit { background: var(--itg-interdit); }
+.itg-tag.itg-t-ouvert { background: var(--itg-ouvert); }
+.itg-tag.itg-t-piste { background: var(--itg-piste); }
+.itg-tag.itg-t-sens { background: var(--itg-sens); }
+.itg-tag.itg-t-grey { background: #64748b; }
+
+/* Fiches repliables */
+.itg-fiche {
+  margin: 10px 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+}
+.itg-fiche > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+.itg-fiche > summary::-webkit-details-marker { display: none; }
+.itg-fiche > summary::after {
+  content: "expand_more";
+  margin-left: auto;
+  font-family: "Material Symbols Outlined";
+  font-size: 22px;
+  font-weight: 400;
+  color: var(--muted);
+  transition: transform .15s;
+}
+.itg-fiche[open] > summary::after { transform: rotate(180deg); }
+.itg-fiche > summary .material-symbols-outlined { color: var(--itg-piste); }
+.itg-fiche[open] > summary { border-bottom: 1px solid var(--line); }
+.itg-fiche-body { padding: 6px 18px 14px; }
+.itg-fiche-sub { display: block; font-weight: 400; color: var(--muted); font-size: .88em; }
+
+.itg-fiche.itg-fiche-main { border-color: var(--itg-sens); box-shadow: 0 0 0 1px var(--itg-sens); }
+.itg-fiche.itg-fiche-main > summary .material-symbols-outlined { color: var(--itg-sens); }
+
+/* Etapes numerotees */
+.itg-steps {
+  counter-reset: itg-step;
+  margin: 10px 0;
+  padding: 0;
+  list-style: none;
+}
+.itg-steps > li {
+  position: relative;
+  margin: 0 0 8px;
+  padding: 8px 12px 8px 46px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.itg-steps > li::before {
+  counter-increment: itg-step;
+  content: counter(itg-step);
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--itg-piste);
+  color: #fff;
+  font-weight: 700;
+  font-size: .85em;
+  line-height: 26px;
+  text-align: center;
+}
+.itg-fiche-main .itg-steps > li::before { background: var(--itg-sens); }
+
+/* Schemas SVG */
+.itg-figure {
+  margin: 12px 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+.itg-figure svg { display: block; width: 100%; height: auto; max-height: 150px; }
+.itg-figure figcaption { margin-top: 6px; color: var(--muted); font-size: .85em; text-align: center; }
+.itg-svg-text { fill: var(--muted); font-size: 12px; font-family: inherit; }
+
+/* FAQ */
+.itg-faq { margin: 8px 0; border-bottom: 1px solid var(--line); }
+.itg-faq > summary { padding: 9px 2px; cursor: pointer; font-weight: 600; }
+.itg-faq > div { padding: 0 4px 10px 18px; }
+
+.itg-muted { color: var(--muted); }
+.itg-top { margin-top: 28px; font-size: .85em; text-align: right; }
+.itg-top a { color: var(--muted); }
+
+@media (max-width: 720px) {
+  .itg { font-size: 14px; padding: 4px 0 30px; }
+  .itg-grid, .itg-legend { grid-template-columns: 1fr; }
+  .itg-toc ol { columns: 1; }
+  .itg-hero { padding: 14px; }
+  .itg-hero h1 { font-size: 1.2rem; }
+  .itg-fiche-body { padding: 4px 12px 12px; }
+  .itg-steps > li { padding-left: 42px; }
+  .itg-ui { white-space: normal; }
+}

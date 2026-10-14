@@ -1,5 +1,12 @@
 # Valhalla — VM dédiée
 
+> ⚠️ **Historique (avant le 13/10/2026).** Le graphe est désormais construit et
+> rechargé par le service **valhalla-admin** de la VM (port 8003) à partir des
+> saisons / épreuves éditées dans Cockpit (`/admin/itineraire`, voir
+> `docs/claude/routing.md`). Le patch `patch_aco_speeds.py` (maxspeed=40 sur les
+> voies de service) est remplacé par le réglage `service_default_maxspeed` de la
+> saison : ne plus l'appliquer à la main, il serait écrasé au prochain chargement.
+
 Cockpit utilise un service Valhalla auto-hébergé pour le calcul d'itinéraires
 (blueprint `routing.py`, modale Cockpit, tablette Field). Le service tourne
 sur une **VM Linux dédiée**, pas dans le `docker-compose.yml` de Cockpit.

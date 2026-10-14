@@ -3380,7 +3380,8 @@
 
   // Calcule un itineraire ACO (serveur Valhalla cote Cockpit) puis le trace.
   // god=true => mode prioritaire (ignore sens interdits + bouchons).
-  function _computeAcoRoute(toLatLng, god, callback) {
+  // piste=true => voies de la piste autorisees (groupe coche "Acces piste").
+  function _computeAcoRoute(toLatLng, god, piste, callback) {
     if (!state.meMarker) {
       callback("Position GPS inconnue");
       return;
@@ -3394,6 +3395,7 @@
         from: [me.lat, me.lng],
         to: [toLatLng[0], toLatLng[1]],
         god: !!god,
+        piste: !!piste,
       }),
     })
       .then(function (r) {
@@ -3466,6 +3468,25 @@
     prio.appendChild(prioTxt);
     body.appendChild(prio);
 
+    // Acces piste : seulement si le groupe de balises de la tablette l'accorde
+    if (state.routePiste) {
+      var pst = document.createElement("label");
+      pst.className = "itinerary-priority";
+      var cbP = document.createElement("input");
+      cbP.type = "checkbox";
+      cbP.id = "itinerary-piste-cb";
+      var pstIcon = document.createElement("span");
+      pstIcon.className = "material-symbols-outlined";
+      pstIcon.style.color = "#2563eb";
+      pstIcon.textContent = "sports_motorsports";
+      var pstTxt = document.createElement("span");
+      pstTxt.textContent = "Acces piste";
+      pst.appendChild(cbP);
+      pst.appendChild(pstIcon);
+      pst.appendChild(pstTxt);
+      body.appendChild(pst);
+    }
+
     var btnAco = mkBtn("aco", "route", "Calculer l'itineraire", "itinerary-btn-aco");
     body.appendChild(btnAco);
 
@@ -3497,27 +3518,31 @@
     var btnAco = overlay.querySelector("[data-action='aco']");
     var btnCancel = overlay.querySelector("[data-action='cancel']");
     var cbPriority = overlay.querySelector("#itinerary-priority-cb");
+    var cbPiste = overlay.querySelector("#itinerary-piste-cb");
     var btnAcoLabel = btnAco.querySelector(".itinerary-btn-label");
 
     btnCancel.addEventListener("click", close);
     btnAco.addEventListener("click", function () {
       var god = !!(cbPriority && cbPriority.checked);
+      var piste = !!(cbPiste && cbPiste.checked);
       btnAco.disabled = true;
       btnAco.classList.add("loading");
       if (btnAcoLabel) btnAcoLabel.textContent = "Calcul en cours...";
-      _computeAcoRoute([lat, lng], god, function (err, resp) {
+      _computeAcoRoute([lat, lng], god, piste, function (err, resp) {
         close();
         if (err) {
-          toast("Itineraire indisponible: " + err);
+          var msg = err === "no_route" ? "aucun chemin praticable"
+            : err === "piste_not_allowed" ? "acces piste non autorise" : err;
+          toast("Itineraire indisponible: " + msg);
           setRouteDestination([lat, lng], null, god, ficheId);
           return;
         }
-        var isGod = (resp.mode === "god") || god;
+        var isGod = (resp.mode === "god") || !!resp.god || god;
         setRouteDestination([lat, lng], resp.polyline, isGod, ficheId);
         var minutes = Math.max(1, Math.round((resp.duration_s || 0) / 60));
         var km = ((resp.distance_m || 0) / 1000).toFixed(1);
         var prefix = (resp.engine === "stub") ? "Estime " : "";
-        var modeTag = isGod ? " [prioritaire]" : "";
+        var modeTag = (isGod ? " [prioritaire]" : "") + (resp.uses_raceway ? " [par la piste]" : "");
         toast(prefix + km + " km - " + minutes + " min" + modeTag);
       });
     });
@@ -3574,6 +3599,8 @@
           applyDeclarantMode();
         }
         if (state.declarant) pollDeclarations();
+        // Acces piste des itineraires : case du groupe de balises, lue a chaud
+        if (data.hasOwnProperty("route_piste")) state.routePiste = !!data.route_piste;
         state.selfClose = !!data.self_close;
         if (data.hasOwnProperty("proposal")) handleProposal(data.proposal);
         renderFiches();
@@ -6568,6 +6595,8 @@
     overlayPreview: null,
     pc: null,
     localStream: null,
+    composer: null,
+    overlayRotateHint: null,
     chronoTimer: null,
     deadline: 0,
     slotLabel: null,
@@ -6708,6 +6737,11 @@
       .catch(function (err) {
         _stream.state = "idle";
         _stream.streamId = null;
+        if (_stream.pc) {
+          try { _stream.pc.close(); } catch (e) {}
+          _stream.pc = null;
+        }
+        _releaseStreamMedia();
         toast("Flux impossible : " + (err.message || "?"), "err");
         try {
           fetch("/field/stream/" + encodeURIComponent(streamId) + "/end", { method: "POST" });
@@ -6717,23 +6751,36 @@
 
   function startStreamPublish(info) {
     var maxSec = info.max_duration_s || 300;
+    // Envoi vers un lien Qonify : le mur d'images n'a que des tuiles paysage,
+    // une image portrait de telephone y etait deformee -> on compose toujours
+    // un 16:9 (voir _compose169). PC org uniquement : image d'origine.
+    var toVms = info.slot_index !== null && info.slot_index !== undefined;
     return navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: { ideal: "environment" },
-        width: { ideal: 854 },
-        height: { ideal: 480 },
+        width: { ideal: toVms ? 1280 : 854 },
+        height: { ideal: toVms ? 720 : 480 },
         frameRate: { ideal: 24 },
       },
       audio: false,  // RGPD : pas de captation audio jamais
     }).then(function (mediaStream) {
       _stream.localStream = mediaStream;
+      return toVms ? _compose169(mediaStream) : null;
+    }).then(function (composer) {
+      _stream.composer = composer;
+      var sendStream = composer ? composer.stream : _stream.localStream;
       var pc = new RTCPeerConnection({
         iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
       });
       _stream.pc = pc;
-      mediaStream.getTracks().forEach(function (t) { pc.addTrack(t, mediaStream); });
+      sendStream.getTracks().forEach(function (t) {
+        var tr = pc.addTransceiver(t, { direction: "sendonly", streams: [sendStream] });
+        _preferH264(tr);
+      });
       pc.oniceconnectionstatechange = function () {
         var st = pc.iceConnectionState;
+        _streamDiag("ice", st);
+        if (st === "failed" || st === "disconnected" || st === "connected") _streamDiagPairs(pc, st);
         if (st === "failed" || st === "disconnected") {
           // Laisse 5s de marge pour reconnexion automatique
           setTimeout(function () {
@@ -6743,7 +6790,9 @@
           }, 5000);
         }
       };
-      return pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false })
+      // Bilan des paires ICE 8 s apres l'envoi, meme sans changement d'etat
+      setTimeout(function () { if (_stream.pc === pc) _streamDiagPairs(pc, "t+8s"); }, 8000);
+      return pc.createOffer()
         .then(function (offer) { return pc.setLocalDescription(offer); })
         .then(function () { return _whipPublish(info.whip_url, pc); });
     }).then(function () {
@@ -6751,30 +6800,174 @@
     });
   }
 
+  // Compose l'image camera dans un cadre 16:9 fixe (1280x720) : une image
+  // portrait est centree sur un fond flou (la meme image agrandie), une image
+  // paysage remplit le cadre. Le flou est obtenu en reduisant l'image a 32x18
+  // puis en l'agrandissant (lissage), bien moins couteux que ctx.filter, absent
+  // des Safari iOS anciens. Sans canvas.captureStream : null, image d'origine.
+  // La video source est dans le DOM (invisible) : iOS ne rafraichit pas les
+  // images d'une video detachee.
+  function _compose169(cameraStream) {
+    var W = 1280, H = 720, FPS = 24;
+    var canvas = document.createElement("canvas");
+    if (!canvas.captureStream) return Promise.resolve(null);
+    canvas.width = W;
+    canvas.height = H;
+    var ctx = canvas.getContext("2d");
+    var small = document.createElement("canvas");
+    small.width = 32;
+    small.height = 18;
+    var sctx = small.getContext("2d");
+    var video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.setAttribute("playsinline", "");
+    video.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none;";
+    video.srcObject = cameraStream;
+    document.body.appendChild(video);
+
+    var composer = { stream: null, timer: null, portrait: false };
+    function draw() {
+      var vw = video.videoWidth, vh = video.videoHeight;
+      if (!vw || !vh) return;
+      composer.portrait = vh > vw;
+      var scale = Math.min(W / vw, H / vh);
+      var dw = vw * scale, dh = vh * scale;
+      if (dw < W - 2 || dh < H - 2) {
+        // Fond : image en "cover" tres reduite puis agrandie = flou, assombrie
+        var cs = Math.max(32 / vw, 18 / vh);
+        sctx.drawImage(video, (32 - vw * cs) / 2, (18 - vh * cs) / 2, vw * cs, vh * cs);
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(small, 0, 0, W, H);
+        ctx.fillStyle = "rgba(0,0,0,0.45)";
+        ctx.fillRect(0, 0, W, H);
+      }
+      ctx.drawImage(video, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    }
+    composer.stop = function () {
+      if (composer.timer) { clearInterval(composer.timer); composer.timer = null; }
+      try { if (composer.stream) composer.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+      try { video.srcObject = null; video.remove(); } catch (e) {}
+    };
+    return video.play().catch(function () {}).then(function () {
+      draw();
+      composer.timer = setInterval(draw, Math.round(1000 / FPS));
+      composer.stream = canvas.captureStream(FPS);
+      return composer;
+    });
+  }
+
+  // Bandeau "tournez le telephone" de l'overlay : seulement vers Qonify et
+  // tant que la camera est en portrait.
+  function _updateRotateHint() {
+    var hint = _stream.overlayRotateHint;
+    if (!hint) return;
+    hint.style.display = (_stream.composer && _stream.composer.portrait) ? "flex" : "none";
+  }
+
+  // Diagnostic ICE remonte a Cockpit (field_streams.diag + log serveur) :
+  // candidats echanges et paires testees, pour savoir si la tablette envoie
+  // bien son UDP vers l'IP publique du serveur. Best effort, jamais bloquant.
+  function _streamDiag(event, detail) {
+    var sid = _stream.streamId;
+    if (!sid) return;
+    try {
+      fetch("/field/stream/" + encodeURIComponent(sid) + "/diag", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event: event, detail: detail }),
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
+  function _sdpCandidates(sdp) {
+    return String(sdp || "").split(/\r?\n/).filter(function (l) {
+      return l.indexOf("a=candidate") === 0;
+    });
+  }
+
+  function _streamDiagPairs(pc, label) {
+    if (!pc.getStats) return;
+    pc.getStats().then(function (stats) {
+      var cands = {};
+      stats.forEach(function (r) {
+        if (r.type === "local-candidate" || r.type === "remote-candidate") {
+          cands[r.id] = (r.candidateType || "?") + " " + (r.protocol || "") + " "
+            + (r.address || r.ip || "?") + ":" + (r.port || "?");
+        }
+      });
+      var lines = [];
+      stats.forEach(function (r) {
+        if (r.type !== "candidate-pair") return;
+        lines.push((r.state || "?") + " | " + (cands[r.localCandidateId] || r.localCandidateId)
+          + " -> " + (cands[r.remoteCandidateId] || r.remoteCandidateId)
+          + " | req " + (r.requestsSent || 0) + " / resp " + (r.responsesReceived || 0)
+          + " | recu req " + (r.requestsReceived || 0));
+      });
+      _streamDiag("pairs " + label, lines.length ? lines : ["aucune paire"]);
+    }).catch(function () {});
+  }
+
+  // Le flux est relu en RTSP par le VMS (Qonify), qui ne decode que le H264 :
+  // on ne propose que H264 (baseline packetization-mode=1 en tete) au lieu du
+  // VP8 que Chrome choisit par defaut. Sans encodeur H264 sur la tablette, on
+  // garde les codecs par defaut (la modale PC org marchera, pas le VMS).
+  function _preferH264(transceiver) {
+    if (!transceiver.setCodecPreferences) return;
+    var sources = [];
+    try { if (window.RTCRtpSender && RTCRtpSender.getCapabilities) sources.push(RTCRtpSender.getCapabilities("video")); } catch (e) {}
+    try { if (window.RTCRtpReceiver && RTCRtpReceiver.getCapabilities) sources.push(RTCRtpReceiver.getCapabilities("video")); } catch (e) {}
+    function rank(c) {
+      var f = c.sdpFmtpLine || "";
+      return (f.indexOf("packetization-mode=1") >= 0 ? 0 : 2) + (f.indexOf("profile-level-id=42e01f") >= 0 ? 0 : 1);
+    }
+    for (var i = 0; i < sources.length; i++) {
+      var codecs = (sources[i] && sources[i].codecs) || [];
+      var h264 = codecs.filter(function (c) { return /^video\/h264$/i.test(c.mimeType); });
+      if (!h264.length) continue;
+      h264.sort(function (a, b) { return rank(a) - rank(b); });
+      var extras = codecs.filter(function (c) { return /^video\/(rtx|red|ulpfec)$/i.test(c.mimeType); });
+      try {
+        transceiver.setCodecPreferences(h264.concat(extras));
+        return;
+      } catch (e) { /* liste refusee par ce navigateur : essai suivant */ }
+    }
+    console.warn("[field] H264 indisponible : flux en codec par defaut, illisible par le VMS");
+  }
+
   // WHIP minimal : POST application/sdp, recoit application/sdp en reponse.
   function _whipPublish(whipUrl, pc) {
     return new Promise(function (resolve, reject) {
       // Attendre la fin de l'ICE gathering (pour eviter trickle qui n'est
       // pas requis par WHIP cote mediamtx, plus simple).
-      function onGather() {
-        if (pc.iceGatheringState === "complete") {
-          pc.removeEventListener("icegatheringstatechange", onGather);
-          fetch(whipUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/sdp" },
-            body: pc.localDescription.sdp,
-          }).then(function (r) {
-            if (!r.ok) return r.text().then(function (txt) { throw new Error("whip_" + r.status + ":" + txt); });
-            return r.text();
-          }).then(function (answerSdp) {
-            return pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
-          }).then(resolve).catch(reject);
-        }
+      // Un seul POST : un 2e (failsafe apres un gathering deja fini) ouvrait
+      // une 2e session mediamtx qui remplacait la 1re, alors que la tablette
+      // gardait la reponse de la 1re -> "deadline exceeded", jamais d'image.
+      var sent = false;
+      function send() {
+        if (sent) return;
+        sent = true;
+        pc.removeEventListener("icegatheringstatechange", onGather);
+        _streamDiag("offre", _sdpCandidates(pc.localDescription && pc.localDescription.sdp));
+        fetch(whipUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/sdp" },
+          body: pc.localDescription.sdp,
+        }).then(function (r) {
+          if (!r.ok) return r.text().then(function (txt) { throw new Error("whip_" + r.status + ":" + txt); });
+          return r.text();
+        }).then(function (answerSdp) {
+          _streamDiag("reponse", _sdpCandidates(answerSdp));
+          return pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+        }).then(resolve).catch(reject);
       }
-      if (pc.iceGatheringState === "complete") onGather();
+      function onGather() {
+        if (pc.iceGatheringState === "complete") send();
+      }
+      if (pc.iceGatheringState === "complete") send();
       else pc.addEventListener("icegatheringstatechange", onGather);
-      // Failsafe : forcer apres 3s meme si gathering incomplete
-      setTimeout(onGather, 3000);
+      // Failsafe : envoyer apres 3s meme si gathering incomplete
+      setTimeout(send, 3000);
     });
   }
 
@@ -6809,8 +7002,26 @@
     preview.muted = true;
     preview.playsInline = true;
     preview.setAttribute("playsinline", "");
-    if (_stream.localStream) preview.srcObject = _stream.localStream;
+    // Avec la composition 16:9, l'agent voit exactement ce que recoit Qonify
+    var previewStream = _stream.composer ? _stream.composer.stream : _stream.localStream;
+    if (previewStream) preview.srcObject = previewStream;
+    if (_stream.composer) {
+      preview.style.width = "160px";
+      preview.style.height = "90px";
+      preview.style.objectFit = "contain";
+    }
     overlay.appendChild(preview);
+
+    var rotateHint = document.createElement("div");
+    rotateHint.className = "field-stream-rotate-hint";
+    rotateHint.style.cssText = "position:absolute;left:16px;right:16px;"
+      + "bottom:calc(84px + env(safe-area-inset-bottom));"
+      + "background:rgba(15,23,42,0.88);color:#f1f5f9;padding:10px 14px;border-radius:10px;"
+      + "font-size:14px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;";
+    rotateHint.appendChild(_camIcon("screen_rotation"));
+    rotateHint.appendChild(document.createTextNode(" Tournez le telephone : image plein ecran sur le mur"));
+    rotateHint.style.display = "none";
+    overlay.appendChild(rotateHint);
 
     var stopBtn = document.createElement("button");
     stopBtn.className = "field-stream-stop";
@@ -6824,6 +7035,7 @@
     _stream.overlayChrono = chrono;
     _stream.overlayStopBtn = stopBtn;
     _stream.overlayPreview = preview;
+    _stream.overlayRotateHint = rotateHint;
     _stream.deadline = Date.now() + (maxSec * 1000);
     tickStreamChrono();
     _stream.chronoTimer = setInterval(tickStreamChrono, 1000);
@@ -6835,8 +7047,21 @@
     var m = Math.floor(remaining / 60);
     var s = remaining % 60;
     _stream.overlayChrono.textContent = m + ":" + (s < 10 ? "0" + s : s);
+    _updateRotateHint();
     if (remaining <= 0) {
       stopStreamPublish("auto_timeout");
+    }
+  }
+
+  // Coupe la composition 16:9 et la camera (voyant camera du telephone eteint)
+  function _releaseStreamMedia() {
+    if (_stream.composer) {
+      try { _stream.composer.stop(); } catch (e) {}
+      _stream.composer = null;
+    }
+    if (_stream.localStream) {
+      try { _stream.localStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+      _stream.localStream = null;
     }
   }
 
@@ -6849,10 +7074,7 @@
       try { _stream.pc.close(); } catch (e) {}
       _stream.pc = null;
     }
-    if (_stream.localStream) {
-      try { _stream.localStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
-      _stream.localStream = null;
-    }
+    _releaseStreamMedia();
     if (_stream.overlay) {
       try { _stream.overlay.remove(); } catch (e) {}
     }
@@ -6860,6 +7082,7 @@
     _stream.overlayChrono = null;
     _stream.overlayStopBtn = null;
     _stream.overlayPreview = null;
+    _stream.overlayRotateHint = null;
     _stream.streamId = null;
     _stream.slotLabel = null;
     if (sid) {
@@ -8410,6 +8633,7 @@
     state.patrolStatus = dev.status || "patrouille";
     state.activeFicheId = dev.active_fiche_id || null;
     state.declarant = !!dev.declarant;
+    state.routePiste = !!dev.route_piste;
     state.deviceCategory = dev.category || state.deviceCategory || null;
     // Ouverture depuis la notification d'un message du PC : /field?constat=<id>
     try {

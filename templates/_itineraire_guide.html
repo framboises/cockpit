@@ -1,0 +1,667 @@
+{# Guide utilisateur du moteur d'itineraire, inclus dans l'onglet Guide de /admin/itineraire.
+   Fragment sans script ; styles dans static/css/itineraire_guide.css (prefixe .itg). #}
+<div class="itg" id="itg-top">
+
+  <header class="itg-hero">
+    <h1><span class="material-symbols-outlined">menu_book</span>Guide du moteur d'itinéraire</h1>
+    <p>Cette page règle la façon dont toutes les applications calculent leurs itinéraires autour du circuit : portails, voies fermées ou interdites, sens uniques, routes passées en piste.</p>
+    <p>Elle se pilote entièrement à la souris. Aucun identifiant ni code à saisir.</p>
+
+    <nav class="itg-toc" aria-label="Sommaire du guide">
+      <p class="itg-toc-title">Sommaire</p>
+      <ol>
+        <li><a href="#itg-essentiel">L'essentiel en 2 minutes</a></li>
+        <li><a href="#itg-modes">Les modes de calcul</a></li>
+        <li><a href="#itg-carte">Lire et utiliser la carte</a></li>
+        <li><a href="#itg-bulle">La bulle d'action, section par section</a></li>
+        <li><a href="#itg-fiches">Fiches pratiques</a>
+          <ul>
+            <li><a href="#itg-f-acces">Fermer, interdire, ouvrir</a></li>
+            <li><a href="#itg-f-portail">Poser un portail</a></li>
+            <li><a href="#itg-prefecture">Plan de circulation préfecture</a></li>
+            <li><a href="#itg-f-piste">Passer une route en piste</a></li>
+            <li><a href="#itg-f-documents">Saisons et épreuves</a></li>
+            <li><a href="#itg-f-charger">Charger et vérifier</a></li>
+            <li><a href="#itg-f-historique">Revenir en arrière</a></li>
+          </ul>
+        </li>
+        <li><a href="#itg-priorite">Saison, épreuve : qui gagne ?</a></li>
+        <li><a href="#itg-pieges">Bonnes pratiques et pièges</a></li>
+        <li><a href="#itg-faq">Questions fréquentes</a></li>
+      </ol>
+    </nav>
+  </header>
+
+  <!-- ============================================================ -->
+  <h2 id="itg-essentiel"><span class="material-symbols-outlined">bolt</span>L'essentiel en 2 minutes</h2>
+
+  <div class="itg-flow" aria-label="Couches du scenario">
+    <div class="itg-flow-box">Données OSM<small>la carte d'origine, jamais modifiée</small></div>
+    <span class="itg-flow-arrow">→</span>
+    <div class="itg-flow-box">Saison<small>règles permanentes de l'année</small></div>
+    <span class="itg-flow-arrow">→</span>
+    <div class="itg-flow-box">Épreuve<small>facultative, règles d'un événement</small></div>
+    <span class="itg-flow-arrow">=</span>
+    <div class="itg-flow-box itg-flow-result">Scénario chargé<small>ce que les applications utilisent</small></div>
+  </div>
+
+  <div class="itg-grid">
+    <div class="itg-card">
+      <p class="itg-card-title"><span class="material-symbols-outlined">layers</span>1. Trois couches</p>
+      <p>La carte OSM sert de base. La <strong>saison</strong> porte ce qui est vrai toute l'année (un portail toujours fermé, un plan de circulation permanent). L'<strong>épreuve</strong> porte ce qui ne vaut que pendant un événement (24 Heures, Le Mans Classic...). Saison + épreuve = le <strong>scénario</strong>.</p>
+    </div>
+    <div class="itg-card">
+      <p class="itg-card-title"><span class="material-symbols-outlined">upload</span>2. Rien n'est effectif avant chargement</p>
+      <p>Modifier une saison ou une épreuve ne change <strong>aucun</strong> itinéraire. Les modifications ne s'appliquent qu'au clic sur <span class="itg-ui">Charger un scenario</span>. Le bandeau <span class="itg-ui">Modifications non appliquees</span> le rappelle.</p>
+    </div>
+    <div class="itg-card">
+      <p class="itg-card-title"><span class="material-symbols-outlined">swap_vert</span>3. L'épreuve gagne sur la saison</p>
+      <p>Si la saison et l'épreuve ont chacune une règle sur la même voie, l'épreuve l'emporte, réglage par réglage (accès, sens, vitesse...). Ce que l'épreuve ne précise pas reste celui de la saison.</p>
+    </div>
+    <div class="itg-card">
+      <p class="itg-card-title"><span class="material-symbols-outlined">mouse</span>4. Tout se fait à la souris</p>
+      <p>Cliquer une voie ou un portail sur la carte, choisir l'action dans la bulle à droite, <span class="itg-ui">Appliquer</span>. Puis charger le scénario et tester un trajet.</p>
+    </div>
+  </div>
+
+  <div class="itg-note">
+    <span class="material-symbols-outlined">devices</span>
+    <div>
+      <p><strong>Toutes</strong> les applications qui calculent des itinéraires (Cockpit, tablettes Field, montres...) utilisent le scénario chargé. Une règle bien posée vaut donc partout, sans rien régler ailleurs.</p>
+      <p>Sur les tablettes, l'accès à la piste se donne par <strong>groupe de balises</strong> : case <span class="itg-ui">Acces piste dans les itineraires</span> dans Configuration, groupes de balises.</p>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="itg-modes"><span class="material-symbols-outlined">alt_route</span>Les modes de calcul</h2>
+
+  <p>Chaque demande d'itinéraire choisit un mode. Le même scénario sert aux quatre modes ; ce qui change, c'est ce que chacun a le droit d'emprunter.</p>
+
+  <div class="itg-table-wrap">
+    <table class="itg-table">
+      <thead>
+        <tr>
+          <th>Mode</th>
+          <th>Pour qui</th>
+          <th>Piste</th>
+          <th>Sens uniques</th>
+          <th>Passages <span class="itg-tag itg-t-interdit">interdits</span><br><span class="itg-mid">(règle ou OSM)</span></th>
+          <th>Passages <span class="itg-tag itg-t-ferme">fermés</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Normal</strong></td>
+          <td>Public, logistique</td>
+          <td class="itg-c"><span class="itg-no">non</span></td>
+          <td class="itg-c">respectés</td>
+          <td class="itg-c"><span class="itg-no">non</span></td>
+          <td class="itg-c"><span class="itg-no">non</span></td>
+        </tr>
+        <tr>
+          <td><strong>Normal + piste</strong></td>
+          <td>Véhicules autorisés en piste</td>
+          <td class="itg-c"><span class="itg-yes">oui</span>, dans le sens de course</td>
+          <td class="itg-c">respectés</td>
+          <td class="itg-c"><span class="itg-no">non</span></td>
+          <td class="itg-c"><span class="itg-no">non</span></td>
+        </tr>
+        <tr>
+          <td><strong>Intervention (god)</strong></td>
+          <td>Sécurité, secours, organisation</td>
+          <td class="itg-c"><span class="itg-no">non</span></td>
+          <td class="itg-c"><strong>ignorés</strong></td>
+          <td class="itg-c"><span class="itg-yes">oui</span> (interdits VL)</td>
+          <td class="itg-c"><span class="itg-no">non</span></td>
+        </tr>
+        <tr>
+          <td><strong>Intervention + piste</strong></td>
+          <td>Sécurité en piste</td>
+          <td class="itg-c"><span class="itg-yes">oui</span>, dans les deux sens</td>
+          <td class="itg-c"><strong>ignorés</strong></td>
+          <td class="itg-c"><span class="itg-yes">oui</span> (interdits VL)</td>
+          <td class="itg-c"><span class="itg-no">non</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Piétons et vélos</h3>
+  <p>Les itinéraires piétons et vélos suivent eux aussi les règles du scénario. Ils n'ont pas de mode intervention et ne passent <strong>jamais</strong> sur la piste.</p>
+  <div class="itg-table-wrap">
+    <table class="itg-table">
+      <thead>
+        <tr><th>Profil</th><th>Piste</th><th>Sens uniques</th><th>Passage <span class="itg-tag itg-t-interdit">interdit</span></th><th>Passage <span class="itg-tag itg-t-ferme">fermé</span></th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Piéton</strong></td><td class="itg-c"><span class="itg-no">non</span></td><td class="itg-c">non concerné</td><td>bloqué si « Pietons » est coché</td><td class="itg-c"><span class="itg-no">bloqué</span></td></tr>
+        <tr><td><strong>Vélo</strong></td><td class="itg-c"><span class="itg-no">non</span></td><td class="itg-c">respectés</td><td>bloqué si « Velos » est coché</td><td class="itg-c"><span class="itg-no">bloqué</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="itg-tip">
+    <span class="material-symbols-outlined">lightbulb</span>
+    <p>Pour retenir : <span class="itg-tag itg-t-interdit">Interdire</span> les VL laisse passer les véhicules d'intervention. <span class="itg-tag itg-t-ferme">Fermer</span> ne laisse passer <strong>personne</strong>, intervention comprise. Un sens unique bloque le public et les vélos, jamais l'intervention.</p>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="itg-carte"><span class="material-symbols-outlined">map</span>Lire et utiliser la carte</h2>
+
+  <h3>Que modifie-t-on ?</h3>
+  <p>En haut de l'onglet <span class="itg-ui">Carte</span>, deux sélecteurs :</p>
+  <ul>
+    <li><span class="itg-ui">Saison</span> : la saison de travail (ou de référence).</li>
+    <li><span class="itg-ui">Epreuve</span> : <span class="itg-ui">Aucune (modifier la saison)</span> pour modifier la saison ; une épreuve pour modifier cette épreuve (la saison choisie sert alors de référence pour l'affichage).</li>
+  </ul>
+  <p>Le badge <span class="itg-ui">Vous modifiez la saison X (vN)</span> ou <span class="itg-ui">Vous modifiez l'epreuve X (vN)</span> indique toujours le document qui recevra vos clics, avec sa version et son nombre de règles. <strong>Le regarder avant chaque modification.</strong></p>
+
+  <h3>Les couleurs</h3>
+  <div class="itg-legend">
+    <div class="itg-legend-item"><span class="itg-line itg-l-ferme"></span><span><strong>Rouge</strong> : fermé à tous</span></div>
+    <div class="itg-legend-item"><span class="itg-line itg-l-interdit"></span><span><strong>Orange</strong> : interdit à certains, avec une pastille <span class="itg-picto"><span class="material-symbols-outlined">directions_car</span><span class="material-symbols-outlined">directions_walk</span><span class="material-symbols-outlined">directions_bike</span></span> des catégories interdites</span></div>
+    <div class="itg-legend-item"><span class="itg-line itg-l-ouvert"></span><span><strong>Vert</strong> : ouvert à tous (malgré OSM)</span></div>
+    <div class="itg-legend-item"><span class="itg-line itg-l-piste"></span><span><strong>Bleu</strong> : piste (flèches de sens en zoomant)</span></div>
+    <div class="itg-legend-item"><span class="itg-line itg-l-sens"></span><span><strong>Violet</strong> : règle de sens ou de vitesse</span></div>
+    <div class="itg-legend-item"><span class="itg-line itg-l-osm"></span><span><strong>Gris pointillé</strong> : interdit dans OSM, sans règle</span></div>
+    <div class="itg-legend-item"><span class="itg-line itg-l-event"></span><span><strong>Tirets</strong> : la règle vient de l'épreuve (trait plein = saison)</span></div>
+    <div class="itg-legend-item"><span class="itg-line"></span><span>Couleur neutre : voie ordinaire, sans règle</span></div>
+  </div>
+
+  <h3>Afficher plus ou moins</h3>
+  <ul>
+    <li><span class="itg-ui">Chemins pietons et velos</span> : affiche les petits chemins (masqués par défaut pour alléger).</li>
+    <li><span class="itg-ui">Barrieres et portails (en zoomant)</span> : les portails apparaissent à partir d'un zoom assez fort. Ceux qui portent une règle sont toujours visibles.</li>
+  </ul>
+
+  <h3 id="itg-selection">Sélectionner</h3>
+  <p class="itg-muted">L'aide en haut de la carte le rappelle : « Clic : choisir une voie ou un portail · Maj+clic : plusieurs troncons · Echap : annuler ».</p>
+  <div class="itg-table-wrap">
+    <table class="itg-table">
+      <thead><tr><th>Geste</th><th>Effet</th></tr></thead>
+      <tbody>
+        <tr><td>Clic sur une voie ou un portail</td><td>Sélectionne cet objet seul et ouvre la bulle d'action.</td></tr>
+        <tr><td><span class="itg-kbd">Maj</span> + clic (ou <span class="itg-kbd">Ctrl</span> + clic)</td><td>Ajoute ou retire un tronçon de la sélection.</td></tr>
+        <tr><td><span class="itg-ui">Chercher une voie (nom)</span></td><td>Une ligne par rue. Cliquer une ligne sélectionne <strong>tous</strong> les tronçons de cette rue.</td></tr>
+        <tr><td><span class="itg-kbd">Echap</span> ou clic dans le vide</td><td>Annule la sélection.</td></tr>
+        <tr><td>Clic sur un <span class="itg-dot itg-d-white"></span> point blanc (une seule voie sélectionnée)</td><td>Propose <span class="itg-ui">Poser un portail ici</span>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="itg-note">
+    <span class="material-symbols-outlined">info</span>
+    <p>Une rue est découpée dans OSM en plusieurs <strong>tronçons</strong> (à chaque carrefour, changement de revêtement...). Une règle s'applique à des tronçons entiers : pour traiter toute une rue, sélectionner tous ses tronçons (recherche par nom ou <span class="itg-kbd">Maj</span> + clic).</p>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="itg-bulle"><span class="material-symbols-outlined">tune</span>La bulle d'action, section par section</h2>
+
+  <p>La bulle s'ouvre à droite de la carte dès qu'un objet est sélectionné. En haut : le nom de la voie (ou <span class="itg-ui">Barriere (gate)</span>, ou <span class="itg-ui">N objets selectionnes</span>), un lien vers la fiche OSM, et les règles déjà en place (<span class="itg-ui">Saison : ...</span>, <span class="itg-ui">Epreuve : ...</span>).</p>
+  <p>Dans chaque section, <span class="itg-ui">inchange</span> signifie « ne pas toucher à ce réglage ». On peut ainsi modifier le sens d'une rue sans toucher à son accès.</p>
+
+  <div class="itg-grid">
+    <div class="itg-card">
+      <p class="itg-card-title"><span class="material-symbols-outlined">block</span>Acces</p>
+      <ul>
+        <li><span class="itg-ui">Ouvrir</span> : tout le monde passe, même si OSM l'interdit. Un chemin piéton ouvert ne devient pas une route pour autant.</li>
+        <li><span class="itg-ui">Interdire</span> : cocher au moins une case <span class="itg-ui">Vehicules (VL)</span>, <span class="itg-ui">Pietons</span>, <span class="itg-ui">Velos</span> (aucune n'est pré-cochée). Pour les VL, l'intervention passe quand même.</li>
+        <li><span class="itg-ui">Fermer</span> : personne ne passe, intervention comprise.</li>
+        <li><span class="itg-ui">Retirer l'acces</span> : supprime la règle d'accès de ce document.</li>
+      </ul>
+    </div>
+    <div class="itg-card">
+      <p class="itg-card-title"><span class="material-symbols-outlined">sports_score</span>Piste <span class="itg-muted">(voies)</span></p>
+      <ul>
+        <li><span class="itg-ui">Devient piste</span> : route fermée au public, aux piétons et aux vélos, empruntable seulement en mode piste. Choisir le sens de course (flèches bleues, <span class="itg-ui">Inverser le sens</span>).</li>
+        <li><span class="itg-ui">N'est plus piste</span> : la piste devient une voie ordinaire.</li>
+        <li><span class="itg-ui">Suivre OSM</span> : retire la règle de piste.</li>
+      </ul>
+    </div>
+    <div class="itg-card">
+      <p class="itg-card-title"><span class="material-symbols-outlined">swap_horiz</span>Sens de circulation <span class="itg-muted">(voies)</span></p>
+      <ul>
+        <li><span class="itg-ui">Sens unique</span> : des flèches bleues apparaissent le long de la sélection ; le sens montré est le <strong>seul</strong> autorisé. <span class="itg-ui">Inverser le sens</span> les retourne.</li>
+        <li><span class="itg-ui">Double sens</span> : les deux sens autorisés, même si OSM indique un sens unique.</li>
+        <li><span class="itg-ui">Suivre OSM</span> : retire la règle de sens.</li>
+      </ul>
+      <p>Détail complet dans la fiche <a href="#itg-prefecture">Plan de circulation préfecture</a>.</p>
+    </div>
+    <div class="itg-card">
+      <p class="itg-card-title"><span class="material-symbols-outlined">edit_note</span>Motif et options</p>
+      <ul>
+        <li><span class="itg-ui">Motif</span> : texte affiché dans Cockpit (« Arrêté préfectoral 24h 2026 », « Portail condamné »...). En sélection multiple, vide = inchangé.</li>
+        <li><span class="itg-ui">Plus d'options (vitesse, tags)</span> : vitesse de 5 à 130 km/h (vide = inchangé, 0 = retirer) ; tags OSM forcés (mode expert, à éviter) ; tags OSM d'origine en lecture.</li>
+      </ul>
+    </div>
+  </div>
+
+  <p><span class="itg-ui">Appliquer</span> écrit toute la sélection en une seule fois (une nouvelle version du document). <span class="itg-ui">Supprimer la regle</span> / <span class="itg-ui">Supprimer les regles</span> retire entièrement les règles de ce document sur la sélection. Rappel affiché sous les boutons : « Effet sur les itinéraires au prochain chargement du scénario. »</p>
+
+  <!-- ============================================================ -->
+  <h2 id="itg-fiches"><span class="material-symbols-outlined">checklist</span>Fiches pratiques</h2>
+  <p class="itg-muted">Cliquer un titre pour déplier la fiche. Dans toutes les fiches, commencer par vérifier le badge « Vous modifiez... » en haut de la carte.</p>
+
+  <!-- Fiche acces -->
+  <details class="itg-fiche" id="itg-f-acces">
+    <summary><span class="material-symbols-outlined">do_not_disturb_on</span><span>Fermer, interdire, ouvrir une voie ou un portail<span class="itg-fiche-sub">Les trois actions d'accès, et laquelle choisir</span></span></summary>
+    <div class="itg-fiche-body">
+      <h4>Choisir l'action</h4>
+      <div class="itg-table-wrap">
+        <table class="itg-table">
+          <thead><tr><th>Situation terrain</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr><td>Portail cadenassé, route barrée à tous, y compris secours</td><td><span class="itg-tag itg-t-ferme">Fermer</span></td></tr>
+            <tr><td>Route interdite au public, mais les véhicules de sécurité / secours / organisation passent</td><td><span class="itg-tag itg-t-interdit">Interdire</span> + <span class="itg-ui">Vehicules (VL)</span></td></tr>
+            <tr><td>Zone technique interdite aux piétons et aux vélos, voitures autorisées</td><td><span class="itg-tag itg-t-interdit">Interdire</span> + <span class="itg-ui">Pietons</span> + <span class="itg-ui">Velos</span></td></tr>
+            <tr><td>Voie privée dans OSM (gris pointillé) mais utilisable en réalité</td><td><span class="itg-tag itg-t-ouvert">Ouvrir</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h4>Pas à pas</h4>
+      <ol class="itg-steps">
+        <li>Choisir le document : saison (épreuve <span class="itg-ui">Aucune (modifier la saison)</span>) pour une règle permanente, ou l'épreuve concernée.</li>
+        <li>Cliquer la voie ou le portail. Pour une rue entière : <span class="itg-ui">Chercher une voie (nom)</span>, ou <span class="itg-kbd">Maj</span> + clic sur chaque tronçon. Pour voir les portails : cocher <span class="itg-ui">Barrieres et portails (en zoomant)</span> et zoomer.</li>
+        <li>Dans <span class="itg-ui">Acces</span>, cliquer <span class="itg-ui">Fermer</span>, <span class="itg-ui">Interdire</span> ou <span class="itg-ui">Ouvrir</span>. Pour <span class="itg-ui">Interdire</span>, cocher au moins une catégorie.</li>
+        <li>Saisir un <span class="itg-ui">Motif</span> clair (qui, pourquoi, référence).</li>
+        <li><span class="itg-ui">Appliquer</span>. La voie change de couleur (rouge, orange ou vert).</li>
+        <li>Charger le scénario quand toutes les modifications sont faites (fiche <a href="#itg-f-charger">Charger et vérifier</a>).</li>
+      </ol>
+      <div class="itg-warn">
+        <span class="material-symbols-outlined">warning</span>
+        <p>Un <strong>portail</strong> fermé bloque tout le passage par ce point. Fermer une <strong>voie</strong> bloque tout le tronçon, y compris pour rejoindre une adresse située dessus.</p>
+      </div>
+      <p>Pour annuler : sélectionner l'objet, <span class="itg-ui">Retirer l'acces</span> puis <span class="itg-ui">Appliquer</span>, ou <span class="itg-ui">Supprimer la regle</span> pour tout retirer.</p>
+    </div>
+  </details>
+
+  <!-- Fiche portail -->
+  <details class="itg-fiche" id="itg-f-portail">
+    <summary><span class="material-symbols-outlined">fence</span><span>Poser un portail n'importe où sur une voie<span class="itg-fiche-sub">Barrière temporaire, barrièrage d'événement, plot</span></span></summary>
+    <div class="itg-fiche-body">
+      <ol class="itg-steps">
+        <li>Cliquer <strong>une seule</strong> voie (pas de <span class="itg-kbd">Maj</span> + clic). Ses points apparaissent en <span class="itg-dot itg-d-white"></span> blanc.</li>
+        <li>Cliquer le point blanc le plus proche de l'emplacement réel, puis <span class="itg-ui">Poser un portail ici</span>. Cockpit retrouve tout seul le point OSM correspondant.</li>
+        <li>La bulle passe sur ce point : choisir <span class="itg-ui">Fermer</span> ou <span class="itg-ui">Interdire</span> (avec les catégories), saisir un motif, <span class="itg-ui">Appliquer</span>.</li>
+        <li>Le point devient un portail : il reste visible à tous les zooms puisqu'il porte une règle.</li>
+      </ol>
+      <div class="itg-danger">
+        <span class="material-symbols-outlined">dangerous</span>
+        <div>
+          <p><strong>Piège des croisements.</strong> Si le point choisi est un croisement, Cockpit prévient. Fermer ce point coupe <strong>toutes</strong> les voies qui s'y croisent, y compris l'autre route et la piste.</p>
+          <p>Pour barrer une seule direction : choisir un point blanc juste avant le croisement, ou fermer les <strong>tronçons d'accès</strong> de part et d'autre, jamais le point du croisement lui-même.</p>
+        </div>
+      </div>
+      <p class="itg-muted">S'il n'y a pas de point blanc à l'endroit exact, prendre le plus proche : l'itinéraire n'a besoin que de couper la voie entre deux carrefours.</p>
+    </div>
+  </details>
+
+  <!-- Fiche prefecture -->
+  <details class="itg-fiche itg-fiche-main" id="itg-prefecture" open>
+    <summary><span class="material-symbols-outlined">gavel</span><span>Intégrer un plan de circulation préfecture<span class="itg-fiche-sub">Sens uniques, inversions de sens, sens interdits, fermetures, retour au double sens</span></span></summary>
+    <div class="itg-fiche-body">
+
+      <p>Un arrêté de circulation se traduit en quelques gestes sur la carte. Le tableau ci-dessous fait la correspondance, les étapes détaillées suivent.</p>
+
+      <h4 id="itg-pref-table">Traduire l'arrêté</h4>
+      <div class="itg-table-wrap">
+        <table class="itg-table">
+          <thead><tr><th>Ce que dit l'arrêté</th><th>Section de la bulle</th><th>Choix</th></tr></thead>
+          <tbody>
+            <tr><td>« Rue X mise en sens unique de A vers B »</td><td><span class="itg-ui">Sens de circulation</span></td><td><span class="itg-ui">Sens unique</span>, flèches de A vers B</td></tr>
+            <tr><td>« Inversion du sens de circulation rue X »</td><td><span class="itg-ui">Sens de circulation</span></td><td><span class="itg-ui">Sens unique</span> puis <span class="itg-ui">Inverser le sens</span> jusqu'au nouveau sens</td></tr>
+            <tr><td>« Sens interdit rue X depuis B »</td><td><span class="itg-ui">Sens de circulation</span></td><td><span class="itg-ui">Sens unique</span>, flèches dans le sens <strong>autorisé</strong> (vers B)</td></tr>
+            <tr><td>« Mise en double sens rue X »</td><td><span class="itg-ui">Sens de circulation</span></td><td><span class="itg-ui">Double sens</span></td></tr>
+            <tr><td>« Route barrée, sauf véhicules de secours et de sécurité »</td><td><span class="itg-ui">Acces</span></td><td><span class="itg-ui">Interdire</span> + <span class="itg-ui">Vehicules (VL)</span></td></tr>
+            <tr><td>« Route barrée à toute circulation »</td><td><span class="itg-ui">Acces</span></td><td><span class="itg-ui">Fermer</span></td></tr>
+            <tr><td>« Voie réservée aux piétons »</td><td><span class="itg-ui">Acces</span></td><td><span class="itg-ui">Interdire</span> + <span class="itg-ui">Vehicules (VL)</span> (+ <span class="itg-ui">Velos</span> si besoin)</td></tr>
+            <tr><td>« Vitesse limitée à 30 km/h »</td><td><span class="itg-ui">Plus d'options (vitesse, tags)</span></td><td>Vitesse : 30</td></tr>
+            <tr><td>Fin de la mesure</td><td>Section concernée</td><td><span class="itg-ui">Suivre OSM</span> / <span class="itg-ui">Retirer l'acces</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <figure class="itg-figure">
+        <svg viewBox="0 0 600 120" role="img" aria-label="Sens unique : les fleches montrent le seul sens autorise">
+          <defs>
+            <marker id="itg-arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/>
+            </marker>
+          </defs>
+          <line x1="40" y1="45" x2="560" y2="45" stroke="#7c3aed" stroke-width="10" stroke-linecap="round"/>
+          <line x1="90" y1="45" x2="150" y2="45" stroke="#2563eb" stroke-width="3" marker-end="url(#itg-arrow)"/>
+          <line x1="250" y1="45" x2="310" y2="45" stroke="#2563eb" stroke-width="3" marker-end="url(#itg-arrow)"/>
+          <line x1="410" y1="45" x2="470" y2="45" stroke="#2563eb" stroke-width="3" marker-end="url(#itg-arrow)"/>
+          <circle cx="200" cy="45" r="4" fill="#fff" stroke="#334155" stroke-width="1.5"/>
+          <circle cx="360" cy="45" r="4" fill="#fff" stroke="#334155" stroke-width="1.5"/>
+          <text x="40" y="85" class="itg-svg-text">A</text>
+          <text x="552" y="85" class="itg-svg-text">B</text>
+          <text x="150" y="105" class="itg-svg-text">3 tronçons OSM, un seul choix : de A vers B autorisé, de B vers A interdit</text>
+        </svg>
+        <figcaption>Les flèches bleues montrent le seul sens autorisé. L'autre sens devient un sens interdit.</figcaption>
+      </figure>
+
+      <h4 id="itg-pref-sensunique">Mettre une rue en sens unique</h4>
+      <ol class="itg-steps">
+        <li>Choisir le document (voir « Où ranger le plan » plus bas) et vérifier le badge « Vous modifiez... ».</li>
+        <li>Taper le nom de la rue dans <span class="itg-ui">Chercher une voie (nom)</span> et cliquer la ligne : tous les tronçons sont sélectionnés. Si seule une partie de la rue est concernée, sélectionner plutôt les tronçons un par un avec <span class="itg-kbd">Maj</span> + clic.</li>
+        <li>Dans <span class="itg-ui">Sens de circulation</span>, cliquer <span class="itg-ui">Sens unique</span>. Des flèches bleues apparaissent tout le long de la sélection.</li>
+        <li>Si les flèches vont dans le mauvais sens, cliquer <span class="itg-ui">Inverser le sens</span>. Un seul choix suffit pour toute la rue : Cockpit déduit tout seul le sens de chaque tronçon, même si les tronçons OSM sont tracés dans des sens différents.</li>
+        <li>Saisir le <span class="itg-ui">Motif</span>, par exemple « Arrêté préfectoral 24h 2026 ».</li>
+        <li><span class="itg-ui">Appliquer</span>. La rue passe en violet ; en zoomant, une flèche sur chaque tronçon rappelle le sens autorisé.</li>
+      </ol>
+
+      <h4 id="itg-pref-inverser">Inverser le sens d'une rue déjà en sens unique</h4>
+      <ol class="itg-steps">
+        <li>Sélectionner tous les tronçons de la rue.</li>
+        <li>Un seul tronçon déjà réglé dans ce document : <span class="itg-ui">Sens unique</span> est déjà actif et les flèches bleues montrent le sens <strong>actuel</strong>. Plusieurs tronçons : cliquer <span class="itg-ui">Sens unique</span> ; les flèches partent alors du sens de tracé du premier tronçon sélectionné, pas forcément du sens actuel.</li>
+        <li>Cliquer <span class="itg-ui">Inverser le sens</span> si besoin pour que les flèches montrent le <strong>nouveau</strong> sens, celui de l'arrêté, puis motif et <span class="itg-ui">Appliquer</span>.</li>
+      </ol>
+      <div class="itg-note">
+        <span class="material-symbols-outlined">visibility</span>
+        <p>Toujours se fier aux flèches affichées, pas au sens supposé d'OSM : ce que montrent les flèches au moment d'<span class="itg-ui">Appliquer</span> est ce qui sera enregistré.</p>
+      </div>
+
+      <h4 id="itg-pref-interdit">Créer un sens interdit</h4>
+      <p>Un sens interdit est un sens unique vu de l'autre côté. « Sens interdit à l'entrée de la rue X depuis B » = sens unique de la rue X <strong>vers</strong> B.</p>
+      <ol class="itg-steps">
+        <li>Sélectionner le ou les tronçons concernés (souvent seulement le premier tronçon après l'entrée interdite).</li>
+        <li><span class="itg-ui">Sens unique</span>, flèches orientées dans le sens <strong>qui reste autorisé</strong> (vers B, donc en sortant par l'entrée interdite).</li>
+        <li>Motif, <span class="itg-ui">Appliquer</span>.</li>
+      </ol>
+
+      <h4 id="itg-pref-double">Remettre une rue en double sens</h4>
+      <p>Pour une rue en sens unique dans OSM que l'arrêté passe en double sens : sélectionner ses tronçons, <span class="itg-ui">Double sens</span>, motif, <span class="itg-ui">Appliquer</span>.</p>
+
+      <h4 id="itg-pref-osm">Rendre une rue à OSM</h4>
+      <p>Quand la mesure prend fin : sélectionner les tronçons, <span class="itg-ui">Suivre OSM</span> dans <span class="itg-ui">Sens de circulation</span> (et <span class="itg-ui">Retirer l'acces</span> si une fermeture accompagnait la mesure), <span class="itg-ui">Appliquer</span>. Ou <span class="itg-ui">Supprimer les regles</span> pour tout retirer d'un coup.</p>
+      <div class="itg-warn">
+        <span class="material-symbols-outlined">warning</span>
+        <div>
+          <p><strong>Dans une épreuve</strong>, <span class="itg-ui">Suivre OSM</span> retire la règle de <em>l'épreuve</em> : si la saison a elle-même un sens unique sur cette rue, c'est lui qui s'applique de nouveau, pas OSM.</p>
+          <p>Pour annuler pendant une épreuve un sens unique posé dans la saison, choisir <span class="itg-ui">Double sens</span> dans l'épreuve.</p>
+        </div>
+      </div>
+
+      <h4 id="itg-pref-fermer">Fermer une rue</h4>
+      <p>Voir la fiche <a href="#itg-f-acces">Fermer, interdire, ouvrir</a> : <span class="itg-ui">Fermer</span> si même les secours ne passent pas, <span class="itg-ui">Interdire</span> + <span class="itg-ui">Vehicules (VL)</span> s'ils passent. Pour une coupure ponctuelle (barrière au milieu d'une rue), poser plutôt un portail (fiche <a href="#itg-f-portail">Poser un portail</a>).</p>
+
+      <h4 id="itg-pref-troncons">Une rue en plusieurs tronçons</h4>
+      <ul>
+        <li><strong>Toute la rue</strong> : <span class="itg-ui">Chercher une voie (nom)</span>, une ligne = tous ses tronçons.</li>
+        <li><strong>Une partie de la rue</strong> : clic sur le premier tronçon, puis <span class="itg-kbd">Maj</span> + clic sur les suivants. <span class="itg-kbd">Maj</span> + clic sur un tronçon déjà pris le retire.</li>
+        <li>Le titre de la bulle indique <span class="itg-ui">N objets selectionnes</span> : vérifier que le nombre est plausible.</li>
+        <li>Un tronçon OSM ne se coupe pas en deux : si le sens interdit commence au milieu d'un tronçon, la règle couvre tout le tronçon.</li>
+      </ul>
+
+      <h4 id="itg-pref-verifier">Vérifier, charger, tester</h4>
+      <ol class="itg-steps">
+        <li>Sur la carte, les rues traitées apparaissent en <span class="itg-tag itg-t-sens">violet</span> (sens), <span class="itg-tag itg-t-ferme">rouge</span> ou <span class="itg-tag itg-t-interdit">orange</span> (accès). En tirets si la règle est dans l'épreuve.</li>
+        <li>Ouvrir <span class="itg-ui">Regles du document (N)</span> sous la carte : relire la liste, cliquer une règle pour zoomer dessus.</li>
+        <li>Une fois tout le plan saisi, <span class="itg-ui">Charger un scenario</span> (fiche <a href="#itg-f-charger">Charger et vérifier</a>).</li>
+        <li><span class="itg-ui">Tester un trajet</span> à travers la zone : en <strong>Normal</strong>, l'itinéraire doit respecter les sens uniques et contourner les fermetures.</li>
+      </ol>
+
+      <div class="itg-note">
+        <span class="material-symbols-outlined">emergency</span>
+        <p>En <strong>Intervention (god)</strong>, l'itinéraire peut emprunter un sens unique à contresens : <strong>c'est voulu</strong>. Les véhicules de secours ne sont pas bloqués par les sens uniques. Seul <span class="itg-ui">Fermer</span> les arrête. Les piétons ne sont pas concernés par les sens uniques ; les vélos les respectent.</p>
+      </div>
+
+      <h4 id="itg-pref-ranger">Où ranger le plan : saison ou épreuve ?</h4>
+      <div class="itg-table-wrap">
+        <table class="itg-table">
+          <thead><tr><th>Type de mesure</th><th>Document</th><th>Exemple</th></tr></thead>
+          <tbody>
+            <tr><td>Plan <strong>permanent</strong>, valable toute l'année</td><td><strong>Saison</strong></td><td>Sens unique définitif d'une voie de service, portail condamné</td></tr>
+            <tr><td>Plan <strong>d'événement</strong>, valable pendant l'arrêté</td><td><strong>Épreuve</strong></td><td>Sens uniques et fermetures de l'arrêté 24 Heures</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Ainsi, en chargeant la saison seule après l'événement, le plan d'événement disparaît sans rien défaire à la main. Et l'année suivante, la duplication de l'épreuve reprend tout le plan, à ajuster selon le nouvel arrêté.</p>
+
+      <div class="itg-tip">
+        <span class="material-symbols-outlined">lightbulb</span>
+        <p>Rapporter dans le motif la référence de l'arrêté (numéro, date) : la liste des règles devient alors la traduction lisible de l'arrêté, et le travail de l'année suivante se limite à comparer les deux textes.</p>
+      </div>
+    </div>
+  </details>
+
+  <!-- Fiche piste -->
+  <details class="itg-fiche" id="itg-f-piste">
+    <summary><span class="material-symbols-outlined">sports_score</span><span>Passer une route en piste (D338 pendant les 24 Heures)<span class="itg-fiche-sub">Sens de course, portion piétonnisée, traversées à niveau</span></span></summary>
+    <div class="itg-fiche-body">
+      <p>Dans OSM, les portions publiques du grand circuit (D338 Tertre Rouge → Hunaudières → Mulsanne, D140 / D139 Mulsanne → Arnage) sont des routes ordinaires. Pendant une épreuve sur le grand circuit, elles doivent devenir piste.</p>
+      <h4>Pas à pas</h4>
+      <ol class="itg-steps">
+        <li>Choisir l'<strong>épreuve</strong> (24 Heures, Le Mans Classic...), jamais la saison : en dehors de l'événement, la D338 est une route publique.</li>
+        <li>Sélectionner tous les tronçons de la portion : <span class="itg-kbd">Maj</span> + clic tronçon par tronçon de Tertre Rouge à Mulsanne (la recherche par nom peut ramener des tronçons hors circuit : à contrôler).</li>
+        <li>Dans <span class="itg-ui">Piste</span>, cliquer <span class="itg-ui">Devient piste</span>. Des flèches <strong>bleues</strong> apparaissent.</li>
+        <li>Vérifier qu'elles suivent le <strong>sens de course</strong> (Tertre Rouge vers Mulsanne). Sinon <span class="itg-ui">Inverser le sens</span>. Cockpit calcule le sens de chaque tronçon, même tracés dans des sens différents.</li>
+        <li>Motif (« D338 en piste, 24h 2026 »), <span class="itg-ui">Appliquer</span>. La portion passe en bleu.</li>
+      </ol>
+      <p>Effet : la route est fermée au public, aux piétons et aux vélos ; seuls les modes piste l'empruntent. <strong>Normal + piste</strong> uniquement dans le sens de course, <strong>Intervention + piste</strong> dans les deux sens.</p>
+      <div class="itg-note">
+        <span class="material-symbols-outlined">info</span>
+        <p>Avec <span class="itg-ui">Devient piste</span>, c'est le sens de course de la section Piste qui s'applique ; la section <span class="itg-ui">Sens de circulation</span> n'a pas à être remplie. Une voie qui est déjà une piste dans OSM n'a pas besoin de sens.</p>
+      </div>
+
+      <h4>Piétonniser une portion de piste</h4>
+      <p>Exemple : une portion du Bugatti ouverte aux piétons pendant un événement.</p>
+      <ol class="itg-steps">
+        <li>Sélectionner les tronçons de piste concernés (dans l'épreuve).</li>
+        <li><span class="itg-ui">Piste</span> : <span class="itg-ui">N'est plus piste</span>.</li>
+        <li><span class="itg-ui">Acces</span> : <span class="itg-ui">Interdire</span> + <span class="itg-ui">Vehicules (VL)</span>. Les piétons passent, les VL publics sont détournés, l'intervention passe toujours.</li>
+        <li>Motif, <span class="itg-ui">Appliquer</span>.</li>
+      </ol>
+      <p class="itg-muted">Pour n'y laisser passer aucun véhicule, même d'intervention, il faut forcer des tags en mode expert : se faire accompagner.</p>
+
+      <h4>Traversées à niveau</h4>
+      <p>Une route qui croise la portion devenue piste reste <strong>traversable</strong>. Pour l'empêcher, fermer (<span class="itg-ui">Fermer</span>) les <strong>tronçons d'accès</strong> de la route de part et d'autre du croisement. Ne jamais fermer le point du croisement : cela couperait aussi la piste.</p>
+    </div>
+  </details>
+
+  <!-- Fiche saisons / epreuves -->
+  <details class="itg-fiche" id="itg-f-documents">
+    <summary><span class="material-symbols-outlined">event</span><span>Préparer une saison, créer une épreuve, créer Le Mans Classic<span class="itg-fiche-sub">Onglets Saisons et Epreuves</span></span></summary>
+    <div class="itg-fiche-body">
+      <p>Les onglets <span class="itg-ui">Saisons</span> et <span class="itg-ui">Epreuves</span> listent les documents : nom, année ou dates, nombre de règles, version, dernière modification, badge <span class="itg-ui">chargee</span>. Sur chaque ligne :</p>
+      <ul>
+        <li><strong>Éditer sur la carte</strong> : ouvre la carte sur ce document.</li>
+        <li><strong>Renommer / réglages</strong> : nom, année ou dates, et deux vitesses : celle des voies de service sans vitesse OSM, celle de la piste en modes piste. Dans une épreuve, laisser vide = reprendre la valeur de la saison.</li>
+        <li><strong>Dupliquer</strong> : copie complète, règles comprises.</li>
+        <li><strong>Historique</strong> : versions successives (fiche <a href="#itg-f-historique">Revenir en arrière</a>).</li>
+        <li><strong>Supprimer</strong> : impossible tant que le document est chargé.</li>
+      </ul>
+
+      <h4>Nouvelle saison (chaque année)</h4>
+      <ol class="itg-steps">
+        <li>Onglet <span class="itg-ui">Saisons</span>, ligne de la saison en cours, <strong>Dupliquer</strong>.</li>
+        <li>Accepter le nom proposé (par exemple « Saison 2027 », année suivante) ou l'ajuster.</li>
+        <li>Éditer sur la carte pour ajouter, modifier ou retirer les règles qui changent.</li>
+        <li>Charger le nouveau scénario au moment voulu (début d'année, hors période critique).</li>
+      </ol>
+
+      <h4>Nouvelle épreuve</h4>
+      <ol class="itg-steps">
+        <li>Onglet <span class="itg-ui">Epreuves</span>, <span class="itg-ui">Nouvelle epreuve</span> : nom et dates (les dates sont informatives, elles ne déclenchent rien).</li>
+        <li>Éditer sur la carte : fermetures, plan de circulation, route en piste...</li>
+        <li>La charger avec la saison voulue avant l'événement ; la retirer (charger la saison avec <span class="itg-ui">Aucune epreuve</span>) après.</li>
+      </ol>
+      <p>Une épreuve ne dépend pas d'une saison : la même épreuve se charge avec n'importe quelle saison.</p>
+
+      <h4>Le Mans Classic à partir des 24 Heures</h4>
+      <ol class="itg-steps">
+        <li>Onglet <span class="itg-ui">Epreuves</span>, ligne « 24 Heures du Mans », <strong>Dupliquer</strong> : la copie s'appelle « ... (copie) ».</li>
+        <li><strong>Renommer / réglages</strong> : nom « Le Mans Classic 20xx » et ses dates.</li>
+        <li>Éditer sur la carte et ajuster uniquement les différences (portails, parkings, plan préfecture propre à l'événement).</li>
+      </ol>
+      <div class="itg-tip">
+        <span class="material-symbols-outlined">lightbulb</span>
+        <p>La liste des tronçons de la D338 et le plan de circulation se constituent une fois ; ensuite on les reprend chaque année par duplication.</p>
+      </div>
+    </div>
+  </details>
+
+  <!-- Fiche chargement -->
+  <details class="itg-fiche" id="itg-f-charger">
+    <summary><span class="material-symbols-outlined">upload</span><span>Charger le scénario et vérifier<span class="itg-fiche-sub">Le seul moment où les modifications prennent effet</span></span></summary>
+    <div class="itg-fiche-body">
+      <div class="itg-danger">
+        <span class="material-symbols-outlined">schedule</span>
+        <p>Pendant un chargement, le calcul d'itinéraires est <strong>indisponible environ 30 secondes pour toutes les applications</strong> (Cockpit, tablettes, montres). Charger hors période critique, jamais en pleine intervention.</p>
+      </div>
+      <ol class="itg-steps">
+        <li>Bouton bleu <span class="itg-ui">Charger un scenario</span> en haut de la page.</li>
+        <li>Choisir la saison (obligatoire) et l'épreuve, ou <span class="itg-ui">Aucune epreuve</span>.</li>
+        <li>Lire l'avertissement « Valhalla sera indisponible environ 30 secondes pour toutes les applications », cocher <span class="itg-ui">J'ai compris, charger maintenant</span>, puis <span class="itg-ui">Charger</span>.</li>
+        <li>Suivre les étapes affichées (mises à jour toutes les 3 secondes).</li>
+        <li><strong>Succès</strong> : 4 trajets de contrôle s'affichent (un par mode). Vérifier qu'ils sont cohérents (distances, temps, passage par la piste dans les modes piste).</li>
+        <li>Le bandeau <span class="itg-ui">Scenario charge</span> affiche la saison, l'épreuve, leur version, la date et l'auteur. Le badge <span class="itg-ui">Valhalla pret</span> doit être présent.</li>
+        <li>Faire un ou deux <span class="itg-ui">Tester un trajet</span> à travers les zones modifiées.</li>
+      </ol>
+      <p><strong>Échec</strong> : le message indique que le scénario précédent est toujours actif. Rien n'est perdu, les applications continuent avec l'ancien scénario. Lire le message, corriger, recharger.</p>
+
+      <h4>Tester un trajet</h4>
+      <ol class="itg-steps">
+        <li>Onglet <span class="itg-ui">Carte</span>, bouton <span class="itg-ui">Tester un trajet</span>.</li>
+        <li>Cliquer le départ, puis l'arrivée.</li>
+        <li>Les 4 modes sont calculés : <strong>Normal</strong>, <strong>Normal + piste</strong>, <strong>Intervention (god)</strong>, <strong>Intervention + piste</strong>, avec distance, temps et indicateur « piste ». Des cases permettent de masquer un mode pour y voir plus clair.</li>
+      </ol>
+      <div class="itg-warn">
+        <span class="material-symbols-outlined">warning</span>
+        <p>Le test utilise le scénario <strong>chargé</strong>, pas les modifications en cours. Si le bandeau <span class="itg-ui">Modifications non appliquees</span> est affiché, le test ne les voit pas encore : cliquer <span class="itg-ui">Recharger</span> d'abord.</p>
+      </div>
+    </div>
+  </details>
+
+  <!-- Fiche historique -->
+  <details class="itg-fiche" id="itg-f-historique">
+    <summary><span class="material-symbols-outlined">history</span><span>Revenir en arrière<span class="itg-fiche-sub">Historique, comparaison, restauration</span></span></summary>
+    <div class="itg-fiche-body">
+      <p>Chaque <span class="itg-ui">Appliquer</span> crée une nouvelle version du document. Toutes les versions sont conservées.</p>
+      <ol class="itg-steps">
+        <li>Onglet <span class="itg-ui">Saisons</span> ou <span class="itg-ui">Epreuves</span>, ligne du document, <strong>Historique</strong>.</li>
+        <li>Choisir <span class="itg-ui">Version A</span> et <span class="itg-ui">Version B</span> : la comparaison montre les règles ajoutées, modifiées et supprimées, et les réglages.</li>
+        <li>Pour revenir à une version : la mettre en <span class="itg-ui">Version A</span> puis <span class="itg-ui">Restaurer la version A</span>. Cela crée une <strong>nouvelle</strong> version identique à l'ancienne : rien n'est effacé, on peut encore revenir.</li>
+        <li>Recharger le scénario pour que la restauration prenne effet.</li>
+      </ol>
+    </div>
+  </details>
+
+  <!-- ============================================================ -->
+  <h2 id="itg-priorite"><span class="material-symbols-outlined">compare_arrows</span>Saison, épreuve : qui gagne ?</h2>
+  <p>Pour un même objet, l'épreuve remplace la saison <strong>réglage par réglage</strong>. Ce que l'épreuve ne règle pas reste celui de la saison.</p>
+  <div class="itg-table-wrap">
+    <table class="itg-table">
+      <thead><tr><th>Saison</th><th>Épreuve</th><th>Pendant l'épreuve</th></tr></thead>
+      <tbody>
+        <tr><td>Interdire VL</td><td>Ouvrir</td><td>Ouvert à tous</td></tr>
+        <tr><td>Sens unique, 30 km/h</td><td>Fermer</td><td>Fermé (sens et vitesse sans objet)</td></tr>
+        <tr><td>Sens unique</td><td>Vitesse 20 km/h</td><td>Sens unique de la saison <strong>et</strong> 20 km/h</td></tr>
+        <tr><td>Interdire VL</td><td>Interdire Piétons</td><td><strong>Piétons seuls</strong> interdits : les VL repassent !</td></tr>
+        <tr><td>Interdire VL</td><td>Interdire VL + Piétons</td><td>VL et piétons interdits</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="itg-danger">
+    <span class="material-symbols-outlined">priority_high</span>
+    <p>Les cases <span class="itg-ui">Vehicules (VL)</span> / <span class="itg-ui">Pietons</span> / <span class="itg-ui">Velos</span> de l'épreuve <strong>remplacent</strong> celles de la saison, elles ne s'ajoutent pas. Pour garder l'interdiction de la saison, la recocher dans l'épreuve. La ligne <span class="itg-ui">Saison : ...</span> en haut de la bulle montre ce que la saison interdit déjà.</p>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="itg-pieges"><span class="material-symbols-outlined">verified</span>Bonnes pratiques et pièges</h2>
+  <div class="itg-grid">
+    <div class="itg-card">
+      <p class="itg-card-title"><span class="material-symbols-outlined">schedule</span>Charger hors pointe</p>
+      <p>30 secondes sans itinéraire pour tout le monde. Regrouper les modifications et charger une fois, au calme.</p>
+    </div>
+    <div class="itg-card">
+      <p class="itg-card-title"><span class="material-symbols-outlined">edit_note</span>Un motif à chaque règle</p>
+      <p>Le motif est affiché dans Cockpit et sert de mémoire l'année suivante. Mettre la raison et la référence (arrêté, demande).</p>
+    </div>
+    <div class="itg-card">
+      <p class="itg-card-title"><span class="material-symbols-outlined">call_split</span>Jamais un croisement</p>
+      <p>Fermer le point d'un croisement coupe toutes les voies qui s'y rejoignent, piste comprise. Fermer les tronçons d'accès.</p>
+    </div>
+    <div class="itg-card">
+      <p class="itg-card-title"><span class="material-symbols-outlined">checklist</span>Les cases ne se cumulent pas</p>
+      <p>Interdire dans l'épreuve remplace la liste de la saison. Recocher ce qui doit rester interdit.</p>
+    </div>
+    <div class="itg-card">
+      <p class="itg-card-title"><span class="material-symbols-outlined">route</span>Tester après chargement</p>
+      <p>Un ou deux trajets à travers chaque zone modifiée, en Normal et en Intervention.</p>
+    </div>
+    <div class="itg-card">
+      <p class="itg-card-title"><span class="material-symbols-outlined">layers</span>Le bon document</p>
+      <p>Permanent dans la saison, événementiel dans l'épreuve. Vérifier le badge « Vous modifiez... » avant chaque <span class="itg-ui">Appliquer</span>.</p>
+    </div>
+    <div class="itg-card">
+      <p class="itg-card-title"><span class="material-symbols-outlined">history</span>Une modification = une version</p>
+      <p>Chaque <span class="itg-ui">Appliquer</span> crée une version. Sélectionner toute la rue et appliquer une fois plutôt que tronçon par tronçon : l'historique reste lisible.</p>
+    </div>
+    <div class="itg-card">
+      <p class="itg-card-title"><span class="material-symbols-outlined">gpp_maybe</span>Fermer avec prudence</p>
+      <p><span class="itg-ui">Fermer</span> bloque aussi les secours. Pour une interdiction au public, préférer <span class="itg-ui">Interdire</span> + VL.</p>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="itg-faq"><span class="material-symbols-outlined">help</span>Questions fréquentes</h2>
+
+  <details class="itg-faq">
+    <summary>Ma règle n'a aucun effet sur les itinéraires.</summary>
+    <div><p>Le scénario n'a sans doute pas été rechargé. Si le bandeau <span class="itg-ui">Modifications non appliquees</span> est visible, cliquer <span class="itg-ui">Recharger</span>. Vérifier aussi que la règle est dans le document chargé (bonne saison, bonne épreuve : voir le bandeau <span class="itg-ui">Scenario charge</span>).</p></div>
+  </details>
+
+  <details class="itg-faq">
+    <summary>« Tester un trajet » ignore ma modification.</summary>
+    <div><p>C'est normal : le test se fait sur le scénario <strong>chargé</strong>. Charger d'abord, tester ensuite.</p></div>
+  </details>
+
+  <details class="itg-faq">
+    <summary>Le véhicule de secours passe dans un sens interdit ou une voie interdite.</summary>
+    <div><p>C'est voulu. Le mode Intervention ignore les sens uniques et passe là où les VL sont interdits. Pour arrêter aussi les secours, il faut <span class="itg-ui">Fermer</span>.</p></div>
+  </details>
+
+  <details class="itg-faq">
+    <summary>Je ne vois pas les portails.</summary>
+    <div><p>Cocher <span class="itg-ui">Barrieres et portails (en zoomant)</span> et zoomer davantage. Les portails qui portent une règle restent visibles à tous les zooms.</p></div>
+  </details>
+
+  <details class="itg-faq">
+    <summary>Je ne trouve pas un petit chemin.</summary>
+    <div><p>Cocher <span class="itg-ui">Chemins pietons et velos</span>.</p></div>
+  </details>
+
+  <details class="itg-faq">
+    <summary>Un message d'erreur s'affiche au moment d'Appliquer.</summary>
+    <div><p>Le service vérifie chaque règle et explique en français ce qui ne va pas (par exemple « Interdire » sans aucune case cochée, ou une route qui devient piste sans sens de course). Lire le message, corriger le choix, <span class="itg-ui">Appliquer</span> de nouveau.</p></div>
+  </details>
+
+  <details class="itg-faq">
+    <summary>Message « modifié par X entre-temps ».</summary>
+    <div><p>Quelqu'un a modifié le même document depuis que vous l'avez ouvert. La page relit le document à jour et propose de réappliquer votre modification par-dessus. Vérifier que la modification de l'autre personne ne contredit pas la vôtre, puis accepter.</p></div>
+  </details>
+
+  <details class="itg-faq">
+    <summary>Je ne peux pas supprimer une saison ou une épreuve.</summary>
+    <div><p>Elle est chargée (badge <span class="itg-ui">chargee</span>). Charger un autre scénario, puis supprimer.</p></div>
+  </details>
+
+  <details class="itg-faq">
+    <summary>Le chargement a échoué.</summary>
+    <div><p>Le scénario précédent a été restauré automatiquement : les applications fonctionnent comme avant. Lire le message, corriger, recharger. Si l'échec se répète, prévenir l'administrateur système.</p></div>
+  </details>
+
+  <details class="itg-faq">
+    <summary>Une partie de la rue est restée en double sens.</summary>
+    <div><p>Un tronçon a été oublié dans la sélection. Ouvrir <span class="itg-ui">Regles du document (N)</span> pour voir les tronçons traités, sélectionner celui qui manque et appliquer le même sens.</p></div>
+  </details>
+
+  <details class="itg-faq">
+    <summary>Une tablette ne propose pas la case piste.</summary>
+    <div><p>L'accès piste se donne par groupe de balises : case <span class="itg-ui">Acces piste dans les itineraires</span> dans Configuration, groupes de balises.</p></div>
+  </details>
+
+  <p class="itg-top"><a href="#itg-top">Haut du guide ↑</a></p>
+</div>

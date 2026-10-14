@@ -140,14 +140,22 @@ def api_post_take():
     if not isinstance(body, dict):
         return _err("json_attendu")
     choice, err = OP.validate_choice(db, body.get("event"), body.get("year"),
-                                     body.get("zones"), body.get("metier_id"))
+                                     body.get("zones"), _metiers_of(body))
     if err:
         return _err(err)
     post, created = OP.take_post(db, payload, user_id, choice)
     if created:
-        logger.info("Prise de poste %s : %s %s, zones %s, metier %s", payload.get("email"),
-                    choice["event"], choice["year"], choice["zones_labels"], choice["metier_label"])
+        logger.info("Prise de poste %s : %s %s, zones %s, metiers %s", payload.get("email"),
+                    choice["event"], choice["year"], choice["zones_labels"], choice["metiers_labels"])
     return jsonify({"ok": True, "created": created, "post": OP.public_post(post)})
+
+
+def _metiers_of(body):
+    """Metiers envoyes : `metiers` (liste), ou l'ancien `metier_id` (un seul,
+    onglet ouvert avant la mise a jour)."""
+    if "metiers" in body:
+        return body.get("metiers") if isinstance(body.get("metiers"), list) else []
+    return body.get("metier_id")
 
 
 def _my_open_post():
@@ -166,7 +174,7 @@ def api_post_zones():
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
         return _err("json_attendu")
-    choice, err = OP.validate_zones_metier(db, body.get("zones"), body.get("metier_id"))
+    choice, err = OP.validate_zones_metier(db, body.get("zones"), _metiers_of(body))
     if err:
         return _err(err)
     updated = OP.change_zones(db, post, payload, choice)

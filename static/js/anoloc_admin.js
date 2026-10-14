@@ -72,6 +72,12 @@
       });
     }
 
+    // Interrupteur general des balises GPS (toutes sources) : enregistre tout de suite
+    var enabledToggle = $("#anoloc-enabled");
+    if (enabledToggle) enabledToggle.addEventListener("change", saveConfig);
+    // Parc Teltonika modifie (teltonika_admin.js) : libelles et compteurs des groupes
+    document.addEventListener("teltonika:changed", loadConfig);
+
     // Visibility save
     var saveVisBtn = $("#anoloc-save-vis");
     if (saveVisBtn) saveVisBtn.addEventListener("click", saveVisibility);
@@ -277,12 +283,24 @@
         decl.title = "Mode declarant : tablettes Field qui declarent sans etre engagees";
         tdLabel.appendChild(decl);
       }
+      if (grp.route_piste) {
+        var pst = document.createElement("span");
+        pst.style.cssText = "margin-left:6px; font-size:10px; font-weight:700; padding:1px 6px; border-radius:4px; background:#dbeafe; color:#1e40af;";
+        pst.textContent = "Piste";
+        pst.title = "Itineraires par la piste autorises aux tablettes Field du groupe";
+        tdLabel.appendChild(pst);
+      }
       tr.appendChild(tdLabel);
 
       // Devices count
       var tdDevices = document.createElement("td");
-      var devCount = (grp.anoloc_device_ids || []).length;
-      tdDevices.textContent = devCount + " device" + (devCount !== 1 ? "s" : "");
+      var ids = grp.anoloc_device_ids || [];
+      var nTlt = ids.filter(isTeltonikaId).length;
+      var nAno = ids.length - nTlt;
+      var parts = [];
+      if (nAno) parts.push(nAno + " Anoloc");
+      if (nTlt) parts.push(nTlt + " Teltonika");
+      tdDevices.textContent = parts.length ? parts.join(" + ") : "aucune";
       tr.appendChild(tdDevices);
 
       // Enabled
@@ -348,6 +366,7 @@
       var pcoCatSel = $('select[name="pco_category"]', form);
       if (pcoCatSel) pcoCatSel.value = grp.pco_category || "";
       $('input[name="declarant"]', form).checked = !!grp.declarant;
+      $('input[name="route_piste"]', form).checked = !!grp.route_piste;
     } else {
       title.textContent = "Nouveau groupe de balises";
       $('input[name="id"]', form).value = "";  // forcer id vide pour nouveau groupe
@@ -371,42 +390,83 @@
     editingGroupIdx = null;
   }
 
+  function isTeltonikaId(id) { return String(id || "").indexOf("tlt:") === 0; }
+  function isFieldId(id) { return String(id || "").indexOf("field:") === 0; }
+
+  function checkboxRow(prefix, value, label, sub, checked) {
+    var row = document.createElement("div");
+    row.className = "anoloc-device-checkbox-row";
+    var cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.id = prefix + value;
+    cb.value = value;
+    cb.checked = checked;
+    row.appendChild(cb);
+    var lbl = document.createElement("label");
+    lbl.setAttribute("for", prefix + value);
+    lbl.textContent = label;
+    row.appendChild(lbl);
+    if (sub) {
+      var s = document.createElement("span");
+      s.className = "anoloc-device-imei";
+      s.textContent = sub;
+      row.appendChild(s);
+    }
+    return row;
+  }
+
+  function emptyNote(container, text) {
+    var msg = document.createElement("p");
+    msg.style.cssText = "font-size:11px; color:var(--muted); margin:4px;";
+    msg.textContent = text;
+    container.appendChild(msg);
+  }
+
   function populateDeviceCheckboxes(grp) {
+    var selectedIds = (grp && grp.anoloc_device_ids) || [];
+    var savedLabels = (grp && grp.device_labels) || {};
+
+    // Teltonika : parc local
+    var tltBox = $("#tlt-devices-checkboxes");
+    if (tltBox) {
+      tltBox.textContent = "";
+      emptyNote(tltBox, "Chargement...");
+      apiGet("/anoloc/teltonika").then(function (data) {
+        tltBox.textContent = "";
+        var devs = (data && data.devices) || [];
+        if (!devs.length) { emptyNote(tltBox, "Aucune balise Teltonika dans le parc."); return; }
+        devs.forEach(function (d) {
+          var others = (d.groups || []).filter(function (g) { return !grp || g !== grp.label; });
+          var sub = d.imei + (others.length ? " - deja dans " + others.join(", ") : "");
+          tltBox.appendChild(checkboxRow("tlt-dev-", d.id, d.label || d.imei, sub,
+                                         selectedIds.indexOf(d.id) !== -1));
+        });
+      }).catch(function () {
+        tltBox.textContent = "";
+        emptyNote(tltBox, "Parc Teltonika indisponible.");
+      });
+    }
+
+    // Anoloc : liste distante + balises deja dans le groupe (toujours
+    // affichees : avec l'API Anoloc en panne, enregistrer le groupe les
+    // effacait toutes)
     var container = $("#anoloc-devices-checkboxes");
     if (!container) return;
     container.textContent = "";
-
-    var selectedIds = (grp && grp.anoloc_device_ids) || [];
-
-    if (remoteDevices.length === 0) {
-      var msg = document.createElement("p");
-      msg.style.cssText = "font-size:11px; color:var(--muted); margin:4px;";
-      msg.textContent = "Aucun device charge. Cliquez 'Charger devices' d'abord.";
-      container.appendChild(msg);
-      return;
-    }
-
+    var shown = {};
     remoteDevices.forEach(function (dev) {
-      var row = document.createElement("div");
-      row.className = "anoloc-device-checkbox-row";
-      var cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.id = "anoloc-dev-" + dev.id;
-      cb.value = dev.id;
-      cb.checked = selectedIds.indexOf(dev.id) !== -1;
-      row.appendChild(cb);
-      var lbl = document.createElement("label");
-      lbl.setAttribute("for", "anoloc-dev-" + dev.id);
-      lbl.textContent = dev.label || dev.id;
-      row.appendChild(lbl);
-      if (dev.imei) {
-        var imeiSpan = document.createElement("span");
-        imeiSpan.className = "anoloc-device-imei";
-        imeiSpan.textContent = dev.imei;
-        row.appendChild(imeiSpan);
-      }
-      container.appendChild(row);
+      shown[dev.id] = true;
+      container.appendChild(checkboxRow("anoloc-dev-", dev.id, dev.label || dev.id, dev.imei || "",
+                                        selectedIds.indexOf(dev.id) !== -1));
     });
+    selectedIds.forEach(function (id) {
+      if (shown[id] || isTeltonikaId(id) || isFieldId(id)) return;
+      container.appendChild(checkboxRow("anoloc-dev-", id, savedLabels[id] || id,
+                                        "non lu chez Anoloc", true));
+    });
+    if (!container.children.length) {
+      emptyNote(container, "Aucune balise Anoloc chargee. Cliquez 'Charger devices' dans Source Anoloc.");
+    }
   }
 
   function saveBeaconGroup() {
@@ -420,17 +480,27 @@
     var color = $('input[name="color"]', form).value || "#6366f1";
     var enabled = $('input[name="enabled"]', form).checked;
 
-    // Collect selected device IDs + build label map
+    // Collect selected device IDs + build label map (Anoloc et Teltonika ;
+    // les libelles Teltonika sont recalcules par le serveur depuis le parc)
+    var prevGrp = editingGroupIdx !== null && config.beacon_groups ? config.beacon_groups[editingGroupIdx] : null;
+    var prevLabels = (prevGrp && prevGrp.device_labels) || {};
     var deviceIds = [];
     var deviceLabels = {};
-    $$('#anoloc-devices-checkboxes input[type="checkbox"]:checked').forEach(function (cb) {
+    $$('#anoloc-devices-checkboxes input[type="checkbox"]:checked, #tlt-devices-checkboxes input[type="checkbox"]:checked').forEach(function (cb) {
       deviceIds.push(cb.value);
-      // Trouver le label depuis remoteDevices
+      deviceLabels[cb.value] = prevLabels[cb.value] || cb.value;
       for (var i = 0; i < remoteDevices.length; i++) {
         if (remoteDevices[i].id === cb.value) {
           deviceLabels[cb.value] = remoteDevices[i].label || cb.value;
           break;
         }
+      }
+    });
+    // Les tablettes Field ne passent jamais par ces cases : les conserver
+    ((prevGrp && prevGrp.anoloc_device_ids) || []).forEach(function (id) {
+      if (isFieldId(id) && deviceIds.indexOf(id) === -1) {
+        deviceIds.push(id);
+        if (prevLabels[id]) deviceLabels[id] = prevLabels[id];
       }
     });
 
@@ -457,6 +527,7 @@
       enabled: enabled,
       pco_category: pcoCategory,
       declarant: $('input[name="declarant"]', form).checked,
+      route_piste: $('input[name="route_piste"]', form).checked,
     };
 
     if (!config.beacon_groups) config.beacon_groups = [];

@@ -6,12 +6,14 @@
 #     (voir scripts/build_valhalla_tiles.sh).
 #   - Penalites Waze : on lit la collection waze_alerts (alimentee par traffic.py)
 #     et on convertit les alertes recentes en avoid_locations / exclude_polygons.
-#   - Mode god (gyrophare / intervention prioritaire) : costing "auto" mais
-#     avec costing_options.ignore_oneways / ignore_restrictions / ignore_access
-#     / ignore_closures et penalites portails / acces prive a zero. Conserve
-#     la vitesse vehicule tout en autorisant sens interdits, portails fermes,
-#     acces prives, voies de service. Equivalent moderne du hack "bicycle"
-#     historique, sans la penalite de vitesse vehicule.
+#   - Quatre modes (normal, normal_piste, god, god_piste) : chacun est une
+#     "recette" (costing + costing_options) fusionnee dans la requete. Les
+#     regles terrain (portails, voies ouvertes / interdites / fermees, sens,
+#     vitesses, piste) sont dans le GRAPHE, chargees par le service
+#     valhalla-admin (saison + epreuve, cf. valhalla_admin.py) : rien a
+#     envoyer a la requete. Les profils taxi / bus / motorcycle sont
+#     detournes par ce mecanisme. ⚠️ Jamais ignore_access : il fait echouer
+#     les calculs et rouvrirait les passages "fermer".
 #   - Fallback stub : si Valhalla est injoignable, retourne une polyline droite
 #     entre les points avec un ETA estime par haversine (utile en dev avant
 #     deploiement de Valhalla, et comme garde-fou en prod).
@@ -21,13 +23,13 @@
 #   - POST /api/route              (Cockpit operateur, auth admin)
 #   - POST /api/route/forward      (Cockpit -> push itineraire vers tablette)
 
+from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, jsonify, request
 from datetime import datetime, timezone, timedelta
 import os
 import math
 import logging
 import requests
-from bson.objectid import ObjectId
 
 # Reutilise les helpers generiques de field.py (auth, mongo, message dispatch).
 from field import (
@@ -36,12 +38,10 @@ from field import (
     _get_mongo_db,
     _now,
     _resolve_targets,
+    _device_route_piste,
     INBOX_MESSAGE_TTL_SECONDS,
 )
-
-# Overrides edites par l'admin (portails fermes, routes barrees...).
-# Fusionnes avec les penalites Waze dans _compute().
-from routing_overrides import get_active_overrides_for_compute
+import valhalla_admin as VA
 
 
 routing_bp = Blueprint("routing", __name__)
@@ -54,24 +54,6 @@ logger = logging.getLogger("routing")
 
 VALHALLA_URL = os.getenv("VALHALLA_URL", "http://localhost:8002").rstrip("/")
 VALHALLA_TIMEOUT = int(os.getenv("VALHALLA_TIMEOUT_SECONDS", "5"))
-
-# Costing options injectees en mode god (intervention prioritaire). On reste
-# sur "auto" pour conserver les vitesses vehicule mais on neutralise toutes
-# les restrictions civiles : sens uniques, acces prives, portails, voies de
-# service, fermetures. Equivalent moderne d'un costing "emergency" custom,
-# sans dependance a une recompilation Valhalla.
-ROUTING_GOD_COSTING_OPTIONS = {
-    "ignore_oneways": True,
-    "ignore_restrictions": True,
-    "ignore_access": True,
-    "ignore_closures": True,
-    "gate_cost": 0,
-    "gate_penalty": 0,
-    "private_access_penalty": 0,
-    "service_penalty": 0,
-    "use_tracks": 1.0,
-    "use_living_streets": 1.0,
-}
 
 # Anciennete max d'une alerte Waze pour qu'elle soit prise en compte
 WAZE_MAX_AGE_MINUTES = int(os.getenv("ROUTING_WAZE_MAX_AGE_MIN", "30"))
@@ -263,7 +245,7 @@ def _build_avoid_locations(alerts):
 # Appel Valhalla
 # ---------------------------------------------------------------------------
 
-def _call_valhalla(from_pt, to_pt, waypoints, god, avoids):
+def _call_valhalla(from_pt, to_pt, waypoints, mode, avoids):
     locations = [{"lat": from_pt[0], "lon": from_pt[1], "type": "break"}]
     for wp in (waypoints or []):
         ll = _parse_latlng(wp)
@@ -273,27 +255,20 @@ def _call_valhalla(from_pt, to_pt, waypoints, god, avoids):
 
     payload = {
         "locations": locations,
-        "costing": "auto",
         "directions_options": {"units": "kilometers"},
         "id": "cockpit-routing",
     }
-    if god:
-        payload["costing_options"] = {"auto": dict(ROUTING_GOD_COSTING_OPTIONS)}
+    payload.update(VA.route_recipe(mode))
 
+    # Evitements Waze : modes normaux seulement (le god passe dans les bouchons)
     avoid_locations = []
     exclude_polygons = []
-    if not god and avoids:
+    if not VA.mode_is_god(mode) and avoids:
         for a in avoids:
             if a["penalty_s"] >= HARD_AVOID_PENALTY_THRESHOLD:
                 avoid_locations.append({"lat": a["lat"], "lon": a["lon"]})
             else:
                 exclude_polygons.append(_circle_polygon(a["lat"], a["lon"], radius_m=80))
-
-    # Overrides admin (toujours appliques selon leur scope, y compris en god
-    # si scope=all ou god_only - cf. routing_overrides.get_active_overrides_for_compute).
-    ov_avoid, ov_polys = get_active_overrides_for_compute(god)
-    avoid_locations.extend(ov_avoid)
-    exclude_polygons.extend(ov_polys)
 
     if avoid_locations:
         payload["avoid_locations"] = avoid_locations
@@ -303,6 +278,11 @@ def _call_valhalla(from_pt, to_pt, waypoints, god, avoids):
     try:
         url = VALHALLA_URL + "/route"
         r = requests.post(url, json=payload, timeout=VALHALLA_TIMEOUT)
+        # 400 = Valhalla a repondu mais aucun chemin (passage ferme, point hors
+        # reseau...) : un trait droit ferait croire a un itineraire praticable
+        if r.status_code == 400:
+            logger.info("routing: aucun chemin (%s): %s", mode, r.text[:200])
+            return None, "no_route"
         r.raise_for_status()
         return r.json(), None
     except requests.exceptions.RequestException as e:
@@ -336,11 +316,15 @@ def _format_valhalla_response(resp, mode):
         "duration_s": duration_s,
         "eta_iso": (datetime.now(timezone.utc) + timedelta(seconds=duration_s)).isoformat(),
         "mode": mode,
+        "god": VA.mode_is_god(mode),
+        "piste": VA.mode_has_piste(mode),
+        # Peages reels neutralises : has_toll = "emprunte la piste"
+        "uses_raceway": bool(summary.get("has_toll")),
         "engine": "valhalla",
     }
 
 
-def _stub_route(from_pt, to_pt, waypoints, god):
+def _stub_route(from_pt, to_pt, waypoints, mode):
     """Fallback : trace un trait droit + ETA estime par haversine."""
     pts = [from_pt]
     for wp in (waypoints or []):
@@ -351,6 +335,7 @@ def _stub_route(from_pt, to_pt, waypoints, god):
     distance = 0.0
     for i in range(len(pts) - 1):
         distance += _haversine_m(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1])
+    god = VA.mode_is_god(mode)
     speed_kmh = STUB_SPEED_GOD_KMH if god else STUB_SPEED_NORMAL_KMH
     speed_mps = speed_kmh * 1000.0 / 3600.0
     duration = distance / speed_mps if speed_mps > 0 else 0
@@ -359,19 +344,25 @@ def _stub_route(from_pt, to_pt, waypoints, god):
         "distance_m": int(distance),
         "duration_s": int(duration),
         "eta_iso": (datetime.now(timezone.utc) + timedelta(seconds=duration)).isoformat(),
-        "mode": "god" if god else "auto",
+        "mode": mode,
+        "god": god,
+        "piste": VA.mode_has_piste(mode),
+        "uses_raceway": False,
         "engine": "stub",
     }
 
 
-def _compute(from_pt, to_pt, waypoints, god):
+def _compute(from_pt, to_pt, waypoints, mode):
+    god = VA.mode_is_god(mode)
     avoids = [] if god else _build_avoid_locations(_get_recent_waze_alerts())
-    resp, err = _call_valhalla(from_pt, to_pt, waypoints, god, avoids)
+    resp, err = _call_valhalla(from_pt, to_pt, waypoints, mode, avoids)
+    if err == "no_route":
+        return None, "no_route"
     if resp is None:
-        out = _stub_route(from_pt, to_pt, waypoints, god)
+        out = _stub_route(from_pt, to_pt, waypoints, mode)
         out["waze_avoided"] = len(avoids)
         return out, None
-    out = _format_valhalla_response(resp, mode=("god" if god else "auto"))
+    out = _format_valhalla_response(resp, mode=mode)
     if out is None:
         return None, "no_route"
     out["waze_avoided"] = len(avoids)
@@ -429,7 +420,11 @@ def _resolve_fiche_endpoints(db, fiche_id):
 def field_route():
     """Calcul d'itineraire pour la tablette Field.
 
-    Body JSON : {from: [lat,lng], to: [lat,lng], waypoints?: [...], god?: bool}
+    Body JSON : {from: [lat,lng], to: [lat,lng], waypoints?: [...], god?: bool,
+                 piste?: bool}
+    La piste n'est accordee qu'aux tablettes d'un groupe de balises coche
+    "Acces piste" (lu a chaud) : sinon la demande est refusee, jamais
+    degradee en silence (le conducteur croirait avoir un trajet piste).
     """
     data = request.get_json(silent=True) or {}
     from_pt = _parse_latlng(data.get("from"))
@@ -437,8 +432,10 @@ def field_route():
     if not from_pt or not to_pt:
         return jsonify({"ok": False, "error": "invalid_coordinates"}), 400
     waypoints = data.get("waypoints") or []
-    god = bool(data.get("god"))
-    out, err = _compute(from_pt, to_pt, waypoints, god)
+    mode = VA.resolve_mode(data)
+    if VA.mode_has_piste(mode) and not _device_route_piste(_get_mongo_db(), request.device):
+        return jsonify({"ok": False, "error": "piste_not_allowed"}), 403
+    out, err = _compute(from_pt, to_pt, waypoints, mode)
     if err:
         return jsonify({"ok": False, "error": err}), 502
     out["ok"] = True
@@ -451,8 +448,9 @@ def cockpit_route():
     """Calcul d'itineraire pour Cockpit.
 
     Body JSON :
-      - Forme directe : {from: [lat,lng], to: [lat,lng], waypoints?, god?}
-      - Forme fiche   : {fiche_id: "...", waypoints?, god?}
+      - Forme directe : {from: [lat,lng], to: [lat,lng], waypoints?, god?, piste?}
+      - Forme fiche   : {fiche_id: "...", waypoints?, god?, piste?}
+      (ou mode: normal | normal_piste | god | god_piste a la place de god/piste)
         => from = field_devices.last_position de la patrouille engagee
         => to   = pcorg.gps de la fiche
     """
@@ -481,8 +479,7 @@ def cockpit_route():
     if not from_pt or not to_pt:
         return jsonify({"ok": False, "error": "invalid_coordinates"}), 400
     waypoints = data.get("waypoints") or []
-    god = bool(data.get("god"))
-    out, err = _compute(from_pt, to_pt, waypoints, god)
+    out, err = _compute(from_pt, to_pt, waypoints, VA.resolve_mode(data))
     if err:
         return jsonify({"ok": False, "error": err}), 502
     out["ok"] = True
@@ -494,6 +491,36 @@ def cockpit_route():
         out["event"] = event
         out["year"] = year
     return jsonify(out)
+
+
+@routing_bp.route("/api/admin/itineraire/route-test", methods=["POST"])
+@admin_required
+def route_test_all_modes():
+    """Testeur du moteur (/admin/itineraire) : A -> B dans les 4 modes, sur
+    le scenario charge, sans evitement Waze ni repli trait droit.
+
+    Body JSON : {from: [lat,lng], to: [lat,lng]}
+    """
+    data = request.get_json(silent=True) or {}
+    from_pt = _parse_latlng(data.get("from"))
+    to_pt = _parse_latlng(data.get("to"))
+    if not from_pt or not to_pt:
+        return jsonify({"ok": False, "error": "invalid_coordinates"}), 400
+
+    def one(mode):
+        resp, err = _call_valhalla(from_pt, to_pt, [], mode, [])
+        if resp is None:
+            return {"mode": mode, "ok": False, "error": err or "no_route"}
+        out = _format_valhalla_response(resp, mode=mode)
+        if out is None:
+            return {"mode": mode, "ok": False, "error": "no_route"}
+        out["ok"] = True
+        out["costing"] = VA.route_recipe(mode).get("costing")
+        return out
+
+    with ThreadPoolExecutor(max_workers=len(VA.ROUTE_MODES)) as pool:
+        results = list(pool.map(one, VA.ROUTE_MODES))
+    return jsonify({"ok": True, "results": results})
 
 
 @routing_bp.route("/api/route/forward", methods=["POST"])
@@ -538,6 +565,7 @@ def forward_route():
         "via": data.get("waypoints") or [],
         "forced": True,
         "god": bool(data.get("god")),
+        "piste": bool(data.get("piste")),
         # Fiche de destination : la tablette efface l'itineraire a sa cloture
         "fiche_id": (str(data.get("fiche_id")).strip() or None) if data.get("fiche_id") else None,
     }

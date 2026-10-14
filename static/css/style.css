@@ -336,6 +336,71 @@ img { max-width: 100%; }
   box-sizing: border-box;
 }
 
+/* Groupes de menus repliables (_sidebar.html nav_group, sidebar.js
+   brancherGroupes) : en-tete + sous-liens decales sous un filet */
+.nav-group { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
+.nav-group-toggle .label { flex: 1 1 auto; }
+.nav-group-caret {
+  font-size: 20px !important;
+  width: 20px !important;
+  margin-left: auto;
+  color: #64748b;
+  transition: transform 0.2s ease;
+}
+.nav-group.is-open > .nav-group-toggle .nav-group-caret { transform: rotate(180deg); }
+.nav-group.has-active > .nav-group-toggle { color: #93c5fd; }
+.nav-group-items { display: none; flex-direction: column; gap: 2px; }
+.nav-group.is-open > .nav-group-items {
+  display: flex;
+  margin-left: 22px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(148, 163, 184, 0.18);
+}
+.nav-group-items .nav-btn { padding-top: 8px; padding-bottom: 8px; font-size: 0.85rem; }
+.nav-group-items .nav-btn .material-symbols-outlined { font-size: 20px; }
+
+@media (min-width: 821px) {
+  /* Menu replie (icones seules) : pas de sous-liens sur place ; l'en-tete
+     ouvre un volet a droite, avec les libelles */
+  .sidebar.collapsed .nav-group-caret { display: none; }
+  .sidebar.collapsed .nav-group.is-open > .nav-group-items { display: none; }
+  .sidebar.collapsed .nav-group.has-active > .nav-group-toggle { background: var(--sidebar-active); }
+  .sidebar.collapsed .nav-group.is-flyout > .nav-group-items {
+    display: flex;
+    position: fixed;
+    z-index: 950;
+    min-width: 220px;
+    margin: 0;
+    padding: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: var(--radius-sm);
+    background: var(--sidebar-bg);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  }
+  .sidebar.collapsed .nav-group.is-flyout > .nav-group-items::before {
+    content: attr(data-title);
+    padding: 6px 10px 8px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: #64748b;
+  }
+  .sidebar.collapsed .nav-group.is-flyout > .nav-group-items .nav-btn {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 9px 12px;
+  }
+  .sidebar.collapsed .nav-group.is-flyout > .nav-group-items .nav-btn .label {
+    max-width: none;
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
+  .sidebar.collapsed .nav-group.is-flyout > .nav-group-toggle { background: rgba(148, 163, 184, 0.16); color: #e2e8f0; }
+}
+
 /* Sidebar panel (selectors) */
 .sidebar-panel {
   padding: 12px 14px;
@@ -2025,23 +2090,45 @@ img { max-width: 100%; }
   margin-left: 6px;
 }
 
-/* Push Leaflet top-right controls down to clear grid column headers */
+/* Boutons de la carte (map_view.js setupMapTools), tout en haut :
+   - gauche : navigation et outils de carte ; mesures pliees ("Mesures") ;
+     defile si la colonne depasse la carte ;
+   - droite : ce qui est affiche, plie derriere le bouton "oeil". Pas
+     d'overflow a droite : le panneau du filtre main courante deborde. */
+#cockpit-map .leaflet-top.leaflet-left,
 #cockpit-map .leaflet-top.leaflet-right {
-  top: 30px;
-  right: 10px;
+  top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-#cockpit-map .leaflet-bottom.leaflet-right {
-  right: 10px;
-}
-/* Push Leaflet bottom-left controls right to clear grid row headers */
-#cockpit-map .leaflet-bottom.leaflet-left {
-  left: 32px;
-}
-/* Push Leaflet top-left (zoom +/-) down and right to clear both headers */
 #cockpit-map .leaflet-top.leaflet-left {
-  top: 30px;
-  left: 32px;
+  left: 10px;
+  align-items: flex-start;
+  max-height: calc(100% - 60px); /* laisse l'indicateur de zoom (bas gauche) */
+  overflow-y: auto;
+  scrollbar-width: none;
 }
+#cockpit-map .leaflet-top.leaflet-left::-webkit-scrollbar { display: none; }
+#cockpit-map .leaflet-top.leaflet-right { right: 10px; align-items: flex-end; }
+#cockpit-map .leaflet-top.leaflet-left > .leaflet-control,
+#cockpit-map .leaflet-top.leaflet-right > .leaflet-control { float: none; margin: 0 !important; }
+#cockpit-map:not(.tools-open) .leaflet-top.leaflet-right > .leaflet-control:not(.cockpit-mobile-tools-toggle),
+#cockpit-map:not(.measures-open) .leaflet-top.leaflet-left > .cockpit-measure-ctrl {
+  display: none !important;
+}
+#cockpit-map .cockpit-mobile-tools-toggle .tile-btn.active,
+#cockpit-map .cockpit-mobile-measure-toggle .tile-btn.active { background: var(--brand); color: #fff; }
+/* Filtre main courante a droite : son panneau s'ouvre vers la gauche */
+#cockpit-map .leaflet-right .pcorg-map-filter-panel { left: auto; right: 44px; }
+#cockpit-map .leaflet-bottom.leaflet-right { right: 10px; }
+#cockpit-map .leaflet-bottom.leaflet-left { left: 10px; }
+/* Carroyage affiche : ses en-tetes occupent le haut (30 px) et la gauche
+   (32 px), les boutons se decalent juste ce qu'il faut */
+#cockpit-map:has(#grid-sticky-wrap) .leaflet-top.leaflet-left,
+#cockpit-map:has(#grid-sticky-wrap) .leaflet-top.leaflet-right { top: 34px; }
+#cockpit-map:has(#grid-sticky-wrap) .leaflet-top.leaflet-left,
+#cockpit-map:has(#grid-sticky-wrap) .leaflet-bottom.leaflet-left { left: 36px; }
 /* Normalize all leaflet-bar margin so our gap controls spacing */
 #cockpit-map .leaflet-bar {
   margin: 0 !important;
@@ -4574,6 +4661,8 @@ body.operator-post-open { overflow: hidden; }
 .operator-post-zone-side .form-input { height: 30px; font-size: 0.82rem; padding: 3px 8px; }
 .operator-post-zone-tools { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .operator-post-zone-count { font-size: 0.78rem; color: var(--muted); }
+.operator-post-zone-hint { font-size: 0.74rem; color: var(--muted); font-style: italic; }
+.operator-post-zone-hint:empty { display: none; }
 .operator-post-zone-list { overflow-y: auto; flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 4px; }
 .operator-post-zone { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; font-size: 0.84rem; cursor: pointer; }
 .operator-post-zone.is-on { background: #f0fdf4; font-weight: 600; }
@@ -4639,6 +4728,9 @@ body.operator-post-open { overflow: hidden; }
 .op-admin-post-state { font-size: 0.72rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: #dcfce7; color: #166534; }
 .op-admin-post-state.is-pause { background: #fef3c7; color: #92400e; }
 .op-admin-post-detail { color: var(--muted); flex: 1; min-width: 200px; }
+.op-admin-count { font-size: 0.75rem; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: #dcfce7; color: #166534; white-space: nowrap; }
+.op-admin-count.is-empty { background: transparent; color: var(--muted); font-weight: 400; }
+.op-admin-count:empty { display: none; }
 @media (max-width: 820px) { .op-admin-grid { grid-template-columns: 1fr; } }
 
 /* Admin (Configuration > Indicateurs SAISON) */
@@ -8794,6 +8886,10 @@ input:checked + .slider .slider-button::after {
   .sidebar.mobile-open .nav-btn {
     width: 100%; padding: 10px 16px; justify-content: flex-start; gap: 12px;
   }
+  /* Groupes de menus : cibles tactiles confortables, sous-liens decales */
+  .sidebar.mobile-open .nav-group-toggle { min-height: 46px; }
+  .sidebar.mobile-open .nav-group-items .nav-btn { min-height: 44px; padding: 10px 12px; }
+  .sidebar.mobile-open .nav-group.is-open > .nav-group-items { margin-left: 26px; }
   .sidebar.mobile-open .sidebar-panel {
     opacity: 1; pointer-events: auto; padding: 12px 14px; height: auto;
   }
@@ -9049,6 +9145,13 @@ input:checked + .slider .slider-button::after {
     font-weight: 700;
   }
   .mb-fab:active { transform: scale(0.92); }
+
+  /* Bulle de l'assistant (Alfred) au-dessus de la barre du bas (56 px +
+     zone de securite iPhone) au lieu de la recouvrir */
+  body:has(.mobile-bottom-nav) .ac-fab {
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    right: 12px;
+  }
 
   /* Mode fixe (main.js layoutNav) : tous les onglets visibles tiennent a
      l'ecran, plus de defilement ; largeurs posees en ligne par le script. */
@@ -9623,10 +9726,10 @@ input:checked + .slider .slider-button::after {
     padding-bottom: calc(56px + 8px + env(safe-area-inset-bottom, 0px)) !important;
   }
 
-  /* Controles Leaflet : decaler pour qu'ils ne touchent ni la searchbar
-     flottante (top) ni le bord du conteneur (bottom). */
+  /* Controles Leaflet : tout en haut aussi (la recherche flottante est entre
+     les deux colonnes), a distance du bord du conteneur en bas. */
   #cockpit-map .leaflet-top.leaflet-left,
-  #cockpit-map .leaflet-top.leaflet-right { top: 60px; }
+  #cockpit-map .leaflet-top.leaflet-right { top: 10px; gap: 3px; }
   #cockpit-map .leaflet-top.leaflet-left { left: 10px; }
   #cockpit-map .leaflet-top.leaflet-right { right: 10px; }
   #cockpit-map .leaflet-bottom.leaflet-left { left: 10px; bottom: 10px; }
@@ -9645,10 +9748,10 @@ input:checked + .slider .slider-button::after {
   body.map-view #timeline-searchbar {
     position: absolute;
     top: 10px;
-    left: 10px;
-    right: 10px;
+    left: 56px;  /* entre les colonnes de boutons de la carte (gauche / droite) */
+    right: 56px;
     width: auto !important;
-    max-width: calc(100vw - 20px) !important;
+    max-width: calc(100vw - 112px) !important;
     grid-row: auto !important;
     z-index: 500;
     background: var(--card);
@@ -10986,6 +11089,16 @@ th span { font-size: 0.88rem; font-weight: 700; }
   color: #fff;
   border-color: transparent;
 }
+.anoloc-trail-raw {
+  display: flex; align-items: center;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.anoloc-trail-raw.active { background: #475569; color: #fff; border-color: transparent; }
 
 /* Trail tooltip on time dots */
 .anoloc-trail-tooltip {
@@ -11381,6 +11494,17 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .anoloc-vis-table td { padding: 4px 8px; }
 .anoloc-vis-table th { padding: 4px 8px; font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; }
 #anoloc-groups-table th { white-space: nowrap; }
+
+/* ===== Balises GPS > Source Teltonika (teltonika_admin.js) ===== */
+.tlt-sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.tlt-source-card { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px; }
+.tlt-subtitle { font-size: 13px; color: var(--muted); font-weight: 600; margin: 10px 0 6px; }
+.tlt-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; color: #fff; white-space: nowrap; }
+.tlt-on { background: #22c55e; }
+.tlt-ko { background: #ef4444; }
+.tlt-off { background: #9ca3af; }
+.tlt-unknown-row { font-size: 12px; padding: 6px 8px; margin-bottom: 6px; border: 1px dashed #f59e0b; border-radius: var(--radius-sm); }
+#tlt-devices-table th { white-space: nowrap; }
 
 /* ===== Main courante PCO — Expanded panel (zone centrale) ===== */
 .pcorg-expanded-panel {
@@ -14053,129 +14177,7 @@ th span { font-size: 0.88rem; font-weight: 700; }
 .pcorg-fiche-vehicle-route:hover { background: #dbeafe; }
 .pcorg-fiche-vehicle-route-ico { font-size: 16px; }
 
-/* ==========================================================================
-   Routing overrides — editeur admin de carte (corrections Valhalla)
-   ========================================================================== */
-.rov-toolbar {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-bottom: 12px;
-}
-.rov-btn {
-  background: #fff;
-  border: 1px solid #d4d4d8;
-  color: #18181b;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 100ms ease;
-}
-.rov-btn:hover { background: #f4f4f5; border-color: #7c3aed; }
-.rov-btn.active {
-  background: #7c3aed;
-  color: #fff;
-  border-color: #7c3aed;
-  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
-}
-.rov-hint {
-  font-size: 12px;
-  color: #7c3aed;
-  background: #f5f3ff;
-  padding: 4px 10px;
-  border-radius: 4px;
-  border-left: 3px solid #7c3aed;
-  margin-left: auto;
-}
-.rov-layout {
-  display: grid;
-  grid-template-columns: 1fr 280px;
-  gap: 12px;
-  min-height: 480px;
-}
-.rov-map {
-  height: 560px;
-  border-radius: 8px;
-  border: 1px solid #d4d4d8;
-  overflow: hidden;
-}
-.rov-cursor-cross,
-.rov-cursor-cross .leaflet-grab,
-.rov-cursor-cross .leaflet-interactive { cursor: crosshair !important; }
-
-.rov-list {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid #e4e4e7;
-  border-radius: 8px;
-  background: #fafafa;
-  overflow: hidden;
-}
-.rov-list-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  background: #fff;
-  border-bottom: 1px solid #e4e4e7;
-  font-size: 13px;
-}
-.rov-list-header select { flex: 1; }
-.rov-items {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  flex: 1;
-}
-.rov-item {
-  padding: 10px 12px;
-  border-left: 3px solid #d4d4d8;
-  border-bottom: 1px solid #e4e4e7;
-  cursor: pointer;
-  transition: background 100ms ease;
-}
-.rov-item:hover { background: #f4f4f5; }
-.rov-item.rov-inactive { opacity: 0.55; }
-.rov-item-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-.rov-item-head strong {
-  font-size: 13px;
-  color: #18181b;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.rov-badge {
-  font-size: 10px;
-  padding: 2px 6px;
-  background: #e4e4e7;
-  color: #52525b;
-  border-radius: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  flex-shrink: 0;
-}
-.rov-item-meta {
-  font-size: 11px;
-  color: #71717a;
-}
-.rov-empty {
-  padding: 16px;
-  text-align: center;
-  font-size: 12px;
-  color: #71717a;
-}
+/* Pastille ronde de la carte (PMV, cameras... dans map_view.js) */
 .rov-pin {
   width: 28px; height: 28px;
   border-radius: 50%;
@@ -14186,13 +14188,6 @@ th span { font-size: 0.88rem; font-weight: 700; }
   color: #fff;
 }
 .rov-pin .material-symbols-outlined { font-size: 16px; }
-
-@media (max-width: 1100px) {
-  .rov-layout {
-    grid-template-columns: 1fr;
-  }
-  .rov-list { max-height: 280px; }
-}
 
 /* Hint contextuel de la modale test routing */
 .rt-hint {

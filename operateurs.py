@@ -189,16 +189,23 @@ def ensure_indexes(db):
 
 def ensure_sous_classification(db):
     """Cree la sous-classification "Service" de PCO.Information si absente."""
+    # La cle "PCO.Information" contient un point : un chemin
+    # "sous_classifications.PCO.Information" creerait un objet imbrique
+    # "PCO" (ce qui bloquait _migrate_pcorg_config au demarrage). On reecrit
+    # donc l'objet sous_classifications entier.
     cfg = db["pcorg_config"]
-    doc = cfg.find_one({"_id": "pcorg_lists"}, {"sous_classifications": 1}) or {}
-    items = ((doc.get("sous_classifications") or {}).get(FICHE_CATEGORY)) or []
+    doc = cfg.find_one({"_id": "pcorg_lists"}, {"sous_classifications": 1})
+    if not doc:
+        return
+    sc = dict(doc.get("sous_classifications") or {})
+    items = sc.get(FICHE_CATEGORY)
+    items = list(items) if isinstance(items, list) else []
     if any(str((i or {}).get("label") or "").strip().lower() == FICHE_SOUS_CLASSIFICATION.lower()
            for i in items if isinstance(i, dict)):
         return
-    cfg.update_one({"_id": "pcorg_lists"},
-                   {"$push": {f"sous_classifications.{FICHE_CATEGORY}":
-                              {"id": uuid.uuid4().hex[:8], "label": FICHE_SOUS_CLASSIFICATION}}},
-                   upsert=True)
+    items.append({"id": uuid.uuid4().hex[:8], "label": FICHE_SOUS_CLASSIFICATION})
+    sc[FICHE_CATEGORY] = items
+    cfg.update_one({"_id": "pcorg_lists"}, {"$set": {"sous_classifications": sc}})
 
 
 def user_id_for(db, email):
@@ -212,14 +219,27 @@ def open_post(db, user_id):
     return db[COL_POSTS].find_one({"user_id": user_id, "open": True}) if user_id else None
 
 
+def post_metiers(post):
+    """(ids, libelles) des metiers d'un poste. Plusieurs metiers possibles
+    (`metiers` / `metiers_labels`) ; un poste ouvert avant ce changement porte
+    encore `metier_id` / `metier_label` (un seul)."""
+    if not post:
+        return [], []
+    if "metiers" in post:
+        return list(post.get("metiers") or []), list(post.get("metiers_labels") or [])
+    mid = post.get("metier_id")
+    return ([mid], [post.get("metier_label") or mid]) if mid else ([], [])
+
+
 def public_post(post):
     if not post:
         return None
+    m_ids, m_labels = post_metiers(post)
     return {
         "id": str(post["_id"]),
         "event": post.get("event"), "year": post.get("year"),
         "zones": post.get("zones") or [], "zones_labels": post.get("zones_labels") or [],
-        "metier_id": post.get("metier_id"), "metier_label": post.get("metier_label"),
+        "metiers": m_ids, "metiers_labels": m_labels,
         "status": post.get("status"),
         "started_at": _iso(post.get("started_at")),
         "pause_since": _iso(post.get("pause_since")),
@@ -243,35 +263,18 @@ def options(db):
             "metiers": metiers(db)}
 
 
-def validate_choice(db, event, year, zone_ids, metier_id):
-    """Retourne ({event, year, zones, zones_labels, metier_id, metier_label}, erreur)."""
+def validate_choice(db, event, year, zone_ids, metier_ids):
+    """Retourne ({event, year, zones, zones_labels, metiers, metiers_labels}, erreur)."""
     try:
         year = int(year)
     except (TypeError, ValueError):
         return None, "annee_invalide"
     if not EC.is_active(db, event, year):
         return None, "evenement_non_en_cours"
-    zone_ids = [str(z) for z in (zone_ids or []) if z]
-    zone_ids = list(dict.fromkeys(zone_ids))
-    by_id = {z["id"]: z for z in zones(db)}
-    if by_id:
-        if not zone_ids:
-            return None, "zone_requise"
-        unknown = [z for z in zone_ids if z not in by_id]
-        if unknown:
-            return None, "zone_inconnue"
-    else:
-        zone_ids = []
-    mets = {m["id"]: m for m in metiers(db)}
-    if mets:
-        if metier_id not in mets:
-            return None, "metier_requis"
-    else:
-        metier_id = None
-    return {"event": event, "year": year, "zones": zone_ids,
-            "zones_labels": [by_id[z]["label"] for z in zone_ids],
-            "metier_id": metier_id,
-            "metier_label": mets[metier_id]["label"] if metier_id else None}, None
+    zm, err = validate_zones_metier(db, zone_ids, metier_ids)
+    if err:
+        return None, err
+    return {"event": event, "year": year, **zm}, None
 
 
 def _operator_name(user):
@@ -339,8 +342,9 @@ def _describe(choice):
     parts = []
     if choice.get("zones_labels"):
         parts.append("Zones : " + ", ".join(choice["zones_labels"]))
-    if choice.get("metier_label"):
-        parts.append("Metier : " + choice["metier_label"])
+    labels = post_metiers(choice)[1]
+    if labels:
+        parts.append(("Metiers : " if len(labels) > 1 else "Metier : ") + ", ".join(labels))
     return " - ".join(parts)
 
 
@@ -381,9 +385,9 @@ def take_post(db, user, user_id, choice):
     return post, True
 
 
-def validate_zones_metier(db, zone_ids, metier_id):
-    """Comme validate_choice sans l'evenement (changement en cours de poste :
-    l'evenement du poste reste celui de la prise de poste)."""
+def validate_zones_metier(db, zone_ids, metier_ids):
+    """Zones et metiers choisis (sans l'evenement : en cours de poste,
+    l'evenement reste celui de la prise de poste). Un ou plusieurs metiers."""
     zone_ids = list(dict.fromkeys(str(z) for z in (zone_ids or []) if z))
     by_id = {z["id"]: z for z in zones(db)}
     if by_id:
@@ -393,40 +397,50 @@ def validate_zones_metier(db, zone_ids, metier_id):
             return None, "zone_inconnue"
     else:
         zone_ids = []
+    if isinstance(metier_ids, str):
+        metier_ids = [metier_ids]
+    metier_ids = list(dict.fromkeys(str(m) for m in (metier_ids or []) if m))
     mets = {m["id"]: m for m in metiers(db)}
     if mets:
-        if metier_id not in mets:
+        if not metier_ids:
             return None, "metier_requis"
+        if any(m not in mets for m in metier_ids):
+            return None, "metier_inconnu"
+        # Ordre de Bibler, independant de l'ordre des clics
+        metier_ids = [m for m in mets if m in metier_ids]
     else:
-        metier_id = None
+        metier_ids = []
     return {"zones": zone_ids, "zones_labels": [by_id[z]["label"] for z in zone_ids],
-            "metier_id": metier_id,
-            "metier_label": mets[metier_id]["label"] if metier_id else None}, None
+            "metiers": metier_ids,
+            "metiers_labels": [mets[m]["label"] for m in metier_ids]}, None
 
 
 def change_zones(db, post, user, choice):
-    """Changement de zones et/ou de metier sans fin de poste. Fiche
+    """Changement de zones et/ou de metiers sans fin de poste. Fiche
     "Changement de zone" cloturee. Retourne le poste a jour (None si le poste
     a ete ferme entre-temps)."""
-    if choice["zones"] == (post.get("zones") or []) and choice["metier_id"] == post.get("metier_id"):
+    old_m, old_ml = post_metiers(post)
+    if choice["zones"] == (post.get("zones") or []) and choice["metiers"] == old_m:
         return post
     now = datetime.now(PARIS)
     updated = db[COL_POSTS].find_one_and_update(
-        {"_id": post["_id"], "open": True}, {"$set": choice}, return_document=True)
+        {"_id": post["_id"], "open": True},
+        {"$set": choice, "$unset": {"metier_id": "", "metier_label": ""}}, return_document=True)
     if not updated:
         return None
     parts = []
     old_z, new_z = post.get("zones_labels") or [], choice["zones_labels"]
     if old_z != new_z:
         parts.append("Zones : " + (", ".join(old_z) or "aucune") + " -> " + (", ".join(new_z) or "aucune"))
-    if post.get("metier_id") != choice["metier_id"]:
-        parts.append("Metier : " + (post.get("metier_label") or "aucun") + " -> " + (choice["metier_label"] or "aucun"))
+    if old_m != choice["metiers"]:
+        parts.append("Metiers : " + (", ".join(old_ml) or "aucun") + " -> "
+                     + (", ".join(choice["metiers_labels"]) or "aucun"))
     text = "Changement de zone - " + updated["name"] + (" - " + " - ".join(parts) if parts else "")
     fiche_id = create_fiche(db, updated, "zones", text, user, now=now)
     db[COL_POSTS].update_one({"_id": post["_id"]}, {"$push": {"history": {
         "at": now, "type": "zones", "fiche_id": fiche_id,
-        "from": {"zones": post.get("zones") or [], "metier_id": post.get("metier_id")},
-        "to": {"zones": choice["zones"], "metier_id": choice["metier_id"]}}}})
+        "from": {"zones": post.get("zones") or [], "metiers": old_m},
+        "to": {"zones": choice["zones"], "metiers": choice["metiers"]}}}})
     return updated
 
 

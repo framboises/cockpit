@@ -428,6 +428,9 @@
       btnEdit.appendChild(el("span", {"class":"material-symbols-outlined"}, isSys ? "tune" : "edit"));
       tdActions.appendChild(btnEdit);
       if(!isSys){
+        var btnDup = el("button", {"class":"btn-icon", "data-action":"duplicate-group", title:"Dupliquer"});
+        btnDup.appendChild(el("span", {"class":"material-symbols-outlined"}, "content_copy"));
+        tdActions.appendChild(btnDup);
         var btnDel = el("button", {"class":"btn-icon btn-icon-danger", "data-action":"delete-group", title:"Supprimer"});
         btnDel.appendChild(el("span", {"class":"material-symbols-outlined"}, "delete"));
         tdActions.appendChild(btnDel);
@@ -797,6 +800,11 @@
       openGroupModal();
     }
 
+    if(action === "duplicate-group"){
+      var src = currentGroups.find(function(gr){ return gr._id === id; });
+      if(src) openDupModal(src);
+    }
+
     if(action === "delete-group"){
       showConfirmToast("Supprimer ce groupe ?", {type:"error", okLabel:"Supprimer"}).then(function(ok){
         if(!ok) return;
@@ -807,6 +815,46 @@
       });
     }
   });
+
+  // --- Dupliquer un groupe (copie serveur de tous les parametres) ---
+  var dupModal = $("#group-dup-modal");
+  var dupForm = $("#group-dup-form");
+  function closeDupModal(){ dupModal.setAttribute("hidden", ""); }
+  function openDupModal(g){
+    $("#group-dup-title").textContent = "Dupliquer le groupe " + g.name;
+    dupForm.elements._id.value = g._id;
+    dupForm.elements.name.value = g.name + " (copie)";
+    dupForm.elements.description.value = g.description || "";
+    dupForm.elements.color.value = g.color || "#6366f1";
+    dupModal.removeAttribute("hidden");
+    dupForm.elements.name.focus();
+    dupForm.elements.name.select();
+  }
+  if(dupModal){
+    $$("[data-close]", dupModal).forEach(function(b){ b.addEventListener("click", closeDupModal); });
+    dupModal.addEventListener("click", function(e){ if(e.target === dupModal) closeDupModal(); });
+    dupForm.addEventListener("submit", function(e){ e.preventDefault(); $("#group-dup-save").click(); });
+    $("#group-dup-save").addEventListener("click", function(){
+      var name = (dupForm.elements.name.value || "").trim();
+      if(!name){ showToast("warning", "Le nom est requis."); return; }
+      var btn = this;
+      btn.disabled = true;
+      fetch("/api/groups/" + encodeURIComponent(dupForm.elements._id.value) + "/duplicate", {
+        method: "POST", headers: jsonHeaders(),
+        body: JSON.stringify({name: name, color: dupForm.elements.color.value,
+                              description: (dupForm.elements.description.value || "").trim()})
+      }).then(function(r){ return r.json().catch(function(){ return {error: "HTTP " + r.status}; }); })
+        .then(function(res){
+          btn.disabled = false;
+          if(res.error){ showToast("error", res.error); return; }
+          closeDupModal();
+          var n = res.alerts_copied || 0;
+          showToast("success", "Groupe " + res.name + " cree" + (n ? " (" + n + " alerte" + (n > 1 ? "s" : "") + " associee" + (n > 1 ? "s" : "") + ")" : ""));
+          refreshAll();
+        })
+        .catch(function(e){ btn.disabled = false; showToast("error", "Erreur : " + e.message); });
+    });
+  }
 
   // Block check all / uncheck all
   var btnCheckAll = $("#blocks-check-all");

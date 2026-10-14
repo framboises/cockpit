@@ -740,7 +740,6 @@ def gallery_stats():
     })
 
 
-@detection_bp.route("/api/detection/gallery")
 def _intrusion_review(e):
     """Interet d'une intrusion pour l'apprentissage (calcule a la lecture :
     elles sont peu nombreuses). Toutes celles verifiees par l'IA comptent ;

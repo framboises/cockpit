@@ -1729,6 +1729,16 @@ HANDLERS = {
     "door_saturation_forecast": detect_door_saturation_forecast,
 }
 
+# Groupes de balises GPS (beacon_alerts.py) : vitesse, zones, arret prolonge,
+# muette, batterie, mise en mouvement - Anoloc et Teltonika confondus. Import
+# protege : un probleme de ce module ne doit pas arreter les autres alertes.
+try:
+    import beacon_alerts as _beacon_alerts
+    for _dt in _beacon_alerts.DETECTION_TYPES:
+        HANDLERS[_dt] = _beacon_alerts.make_handler(_dt, get_db)
+except Exception as _e:  # pragma: no cover
+    log.error("beacon_alerts indisponible : %s", _e)
+
 # ---------------------------------------------------------------------------
 # Upsert alerte active
 # ---------------------------------------------------------------------------

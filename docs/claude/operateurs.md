@@ -18,6 +18,10 @@ Statut (11/10/2026) :
   barre laterale (sidebar.js) appelle `POST /api/operator/post/end
   {reason: "logout"}` apres confirmation ; la route GET `/logout_redirect`
   reste SANS effet de bord (une page tierce pourrait la declencher) ;
+- plusieurs metiers par poste (11/10/2026) : `metiers` / `metiers_labels`
+  (ordre de Bibler) ; un poste ouvert avant porte encore `metier_id` /
+  `metier_label`, lu par `post_metiers()` et migre au premier changement.
+  L'API accepte `metiers: []` (ou l'ancien `metier_id`, onglet non recharge) ;
 - etapes 4 a 6 a faire.
 
 Pas de fiches "Pause" / "Retour de pause" (arbitrage du 11/10/2026).
@@ -28,7 +32,7 @@ Friday : les regles portent sur categorie + sous-classification exacte
 ## Besoin
 
 Un groupe peut etre marque "Operateur". A son arrivee sur Cockpit, un membre
-de ce groupe doit prendre son poste : evenement, zone(s), metier. Ce poste :
+de ce groupe doit prendre son poste : evenement, zone(s), metier(s). Ce poste :
 
 - fixe l'evenement affiche pendant toute la duree du poste ;
 - cree automatiquement une fiche Information "Prise de poste" (cloturee) dans
@@ -50,6 +54,7 @@ aussi de contexte pour l'assistant IA plus tard.
 | Synchro zones | Aucune copie : lecture / ecriture directes dans la collection de la couche (meme base que Looker). Zones designees par `properties._id_feature`, jamais par leur nom |
 | Metiers | Lus en direct dans `bible_structure` (Bibler) : `_id` (ex. `metier_securite`) + `metier` (ex. `SECURITE`). Niveau metier seulement |
 | Multi-zone | Oui, plusieurs zones par poste |
+| Multi-metier | Oui, un ou plusieurs metiers par poste (au moins un si Bibler en a) |
 | Metier et alertes | Chaque definition d'alerte declare ses metiers (`metiers: []` vide = tous) |
 | Zone non couverte | Operateurs de la zone couverte la plus proche, quel que soit le metier |
 | SOS / critiques | Jamais filtres par zone (filtre groupe seulement, comme aujourd'hui) |
@@ -89,7 +94,7 @@ l'evenement et le metier, et aucun filtre de zone ne s'applique.
   _id, user_id (ObjectId users), email, name,
   event, year,
   zones: ["<_id_feature>", ...], zones_labels: [...],   // labels figes pour l'historique
-  metier_id, metier_label,
+  metiers: ["metier_..."], metiers_labels: [...],       // ordre de Bibler
   status: "active" | "pause" | "ended",
   started_at, ended_at, end_reason: "fin_de_poste" | "logout" | "admin",
   pause_since,                         // null hors pause
@@ -194,7 +199,8 @@ poste actif :
 3. Zone de l'alerte inconnue : livree (comportement actuel).
 4. Sinon, destinataires = postes `active` (pas en pause) dont l'utilisateur
    est dans les groupes de la definition :
-   a. postes couvrant la zone de l'alerte ET metier dans `def.metiers` ;
+   a. postes couvrant la zone de l'alerte ET ayant au moins un metier dans
+      `def.metiers` (`def.metiers` vide = tous) ;
    b. sinon postes couvrant la zone, tout metier ;
    c. sinon postes de la zone couverte la plus proche, tout metier ;
    d. sinon (aucun poste en service nulle part) : tout le groupe.

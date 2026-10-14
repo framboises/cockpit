@@ -1098,7 +1098,27 @@ function toggleDetails(e, button) {
 // Day navigation bar
 // ---------------------------------------------------------------------------
 let _dayNavObserver = null;
+let _dayNavPills = {};
+let _dayNavPinned = null;   // jour impose a la puce active (voir _dayNavPin)
+let _dayNavOpenedKey = null; // evenement|annee deja positionne a l'ouverture
 let _dayNavTooltip = null;
+
+// Survol d'une puce de la barre des jours : l'infobulle n'apparait qu'apres
+// ce delai (sinon elle s'ouvre a chaque passage de souris). Un seul minuteur
+// partage : en SAISON, l'infobulle riche (branchee en dernier) l'emporte.
+const DAY_NAV_HOVER_DELAY_MS = 1500;
+let _dayNavHoverTimer = null;
+
+function _dayNavHoverLater(fn) {
+  clearTimeout(_dayNavHoverTimer);
+  _dayNavHoverTimer = setTimeout(() => { _dayNavHoverTimer = null; fn(); }, DAY_NAV_HOVER_DELAY_MS);
+}
+
+function _dayNavHoverLeave(ev) {
+  clearTimeout(_dayNavHoverTimer);
+  _dayNavHoverTimer = null;
+  _hideDayNavTooltip(ev);
+}
 
 const _DAY_NAMES_SHORT = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
 
@@ -1417,9 +1437,9 @@ function _siDecorate(dates, pills) {
       // Infobulle riche : branchee apres celle du jour public, elle la remplace.
       // Interactive : la souris peut y entrer (bouton epingle).
       const semDay = () => (((SaisonInd.data || {}).seminaires || {}).days || {})[ds] || null;
-      pill.addEventListener('mouseenter', () => _siShowTooltip(pill, ds, inds, state,
-        { interactive: true, sem: semDay(), semOn: !!(data.seminaires && data.seminaires.enabled) }));
-      pill.addEventListener('mouseleave', _hideDayNavTooltip);
+      pill.addEventListener('mouseenter', () => _dayNavHoverLater(() => _siShowTooltip(pill, ds, inds, state,
+        { interactive: true, sem: semDay(), semOn: !!(data.seminaires && data.seminaires.enabled) })));
+      pill.addEventListener('mouseleave', _dayNavHoverLeave);
       // Tactile (iPhone) : pas de survol. Appui long (450 ms) = infobulle du
       // jour EPINGLEE (defilable, croix ; un toucher dehors la ferme) ;
       // l'appui court garde son effet (choisir le jour, filtrer par un point).
@@ -3829,34 +3849,33 @@ function _buildDayNav(dates, sectionsByDate) {
         tooltipLines.push({type: 'race', text: 'Jour de course'});
       }
       pill.appendChild(dotsRow);
-      pill.addEventListener('mouseenter', function() { _showDayNavTooltip(pill, tooltipLines); });
-      pill.addEventListener('mouseleave', _hideDayNavTooltip);
+      pill.addEventListener('mouseenter', function() { _dayNavHoverLater(() => _showDayNavTooltip(pill, tooltipLines)); });
+      pill.addEventListener('mouseleave', _dayNavHoverLeave);
     }
 
     pill.addEventListener('click', () => {
       const section = sectionsByDate[dateStr];
       if (!section) return;
-      // Trouver le scroll container reel (varie selon le viewport :
-      // .timeline-container en desktop, #timeline-main en mobile via la MQ)
-      let scrollEl = section.parentElement;
-      while (scrollEl && scrollEl !== document.body) {
-        const oy = getComputedStyle(scrollEl).overflowY;
-        if (oy === 'auto' || oy === 'scroll') break;
-        scrollEl = scrollEl.parentElement;
-      }
-      if (scrollEl && scrollEl !== document.body) {
-        const navBar = document.getElementById('day-nav-bar');
-        const navOffset = (navBar && getComputedStyle(navBar).position === 'sticky') ? navBar.offsetHeight : 0;
-        const offset = section.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop - navOffset;
-        scrollEl.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' });
-      } else {
-        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
+      _dayNavPin(dateStr);
+      _dayNavScrollTo(section, 'smooth');
     });
 
     bar.appendChild(pill);
     pills[dateStr] = pill;
   });
+
+  // Ouverture d'un evenement : la timeline commence au jour courant (la
+  // veille reste au-dessus). Pas aux rafraichissements suivants, pour ne
+  // pas deplacer l'operateur ; la ligne "maintenant" gere son propre defilement.
+  const navKey = window.selectedEvent + '|' + window.selectedYear;
+  if (navKey !== _dayNavOpenedKey) {
+    _dayNavOpenedKey = navKey;
+    const today = _siYmd(new Date());
+    if (sectionsByDate[today] && !window.NowLineController?._enabled) {
+      _dayNavPinned = today;
+      _dayNavScrollTo(sectionsByDate[today], 'instant');
+    }
+  }
 
   // Observer les sections visibles pour mettre a jour la pill active
   _setupDayNavObserver(sectionsByDate, pills);
@@ -3864,6 +3883,25 @@ function _buildDayNav(dates, sectionsByDate) {
   // SAISON : pastilles / points d'indicateurs (asynchrone, sans effet ailleurs)
   if (_isSaisonSelected()) _siDecorate(dates, pills);
   else _siTeardown();
+}
+
+function _dayNavScrollTo(section, behavior) {
+  // Trouver le scroll container reel (varie selon le viewport :
+  // .timeline-container en desktop, #timeline-main en mobile via la MQ)
+  let scrollEl = section.parentElement;
+  while (scrollEl && scrollEl !== document.body) {
+    const oy = getComputedStyle(scrollEl).overflowY;
+    if (oy === 'auto' || oy === 'scroll') break;
+    scrollEl = scrollEl.parentElement;
+  }
+  if (scrollEl && scrollEl !== document.body) {
+    const navBar = document.getElementById('day-nav-bar');
+    const navOffset = (navBar && getComputedStyle(navBar).position === 'sticky') ? navBar.offsetHeight : 0;
+    const offset = section.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop - navOffset;
+    scrollEl.scrollTo({ top: Math.max(0, offset), behavior });
+  } else {
+    section.scrollIntoView({ behavior, block: 'start' });
+  }
 }
 
 function _setupDayNavObserver(sectionsByDate, pills) {
@@ -3907,6 +3945,10 @@ function _setupDayNavObserver(sectionsByDate, pills) {
       }
     }
 
+    // Jour courant impose par la ligne "maintenant" tant que l'operateur
+    // n'a pas defile lui-meme
+    if (_dayNavPinned && pills[_dayNavPinned]) bestDate = _dayNavPinned;
+
     // Mettre a jour les pills
     Object.entries(pills).forEach(([date, pill]) => {
       pill.classList.toggle('active', date === bestDate);
@@ -3925,6 +3967,30 @@ function _setupDayNavObserver(sectionsByDate, pills) {
   Object.values(sectionsByDate).forEach(section => {
     _dayNavObserver.observe(section);
   });
+  _dayNavPills = pills;
+  _dayNavApplyPin();
+
+  // Defilement par l'operateur : la puce suit de nouveau la section visible
+  if (!container._dayNavUnpinBound) {
+    container._dayNavUnpinBound = true;
+    const unpin = () => { _dayNavPinned = null; };
+    ['wheel', 'touchmove', 'keydown'].forEach(t => container.addEventListener(t, unpin, { passive: true }));
+  }
+}
+
+// La ligne "maintenant" fait defiler jusqu'au jour courant, mais la veille
+// (souvent courte) reste plus visible en proportion : la puce active serait
+// la veille. On impose le jour courant jusqu'au premier defilement manuel.
+function _dayNavPin(date) {
+  _dayNavPinned = date || null;
+  _dayNavApplyPin();
+}
+
+function _dayNavApplyPin() {
+  const pill = _dayNavPinned && _dayNavPills[_dayNavPinned];
+  if (!pill) return;
+  Object.entries(_dayNavPills).forEach(([date, p]) => p.classList.toggle('active', date === _dayNavPinned));
+  pill.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
 }
 
 // Fonction pour recuperer et afficher le timetable dans la timeline
@@ -5750,6 +5816,7 @@ async function openEditModalFromDrawer(dateStr, item) {
       let target = map.find(x => x.iso === nowYMD);
       const todayFound = !!target;
       this._lineEl.style.display = '';
+      _dayNavPin(todayFound ? nowYMD : null);
 
       if (!todayFound) {
         const allBefore = map.every(x => x.iso < nowYMD);

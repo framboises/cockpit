@@ -19,7 +19,8 @@
   // --- Trail state ---
   var trailPolylines = {};    // deviceId -> L.polyline
   var trailDecorators = {};   // deviceId -> [L.circleMarker] (time dots)
-  var activeTrails = {};      // deviceId -> {minutes, color, groupId}
+  var activeTrails = {};      // deviceId -> {minutes, color, groupId, raw}
+  var lastTrailData = {};     // deviceId -> derniere reponse /anoloc/trail
   var TRAIL_DURATIONS = [
     { label: "30 min", value: 30 },
     { label: "1h", value: 60 },
@@ -523,6 +524,7 @@
         // Also remove trail and lock if device disappeared
         removeTrail(devId);
         delete activeTrails[devId];
+        delete lastTrailData[devId];
         if (lockedDeviceId === devId) unlockDevice(devId);
       }
     });
@@ -666,38 +668,62 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (!data || !data.ok) return;
-        renderTrail(deviceId, data.points, color, groupId);
+        if (!activeTrails[deviceId]) return; // masquee entre-temps
+        lastTrailData[deviceId] = data;
+        renderTrail(deviceId, data, color, groupId);
       })
       .catch(function () { /* silent */ });
   }
 
-  function renderTrail(deviceId, points, color, groupId) {
+  // Trace recalee sur les voies (segments m=true, trait plein) ; les
+  // troncons devines (hors voirie connue, rupture, Valhalla indisponible)
+  // en pointilles. "Points GPS" superpose le brut pour verifier.
+  function renderTrail(deviceId, data, color, groupId) {
     removeTrail(deviceId);
-    if (!points || points.length < 2) return;
+    var points = data.points || [];
+    if (points.length < 2) return;
 
     var mapObj = window.CockpitMapView && window.CockpitMapView.getMap
       ? window.CockpitMapView.getMap() : null;
     if (!mapObj) return;
 
-    var latlngs = points.map(function (p) { return [p.lat, p.lng]; });
+    color = color || "#6366f1";
+    var showRaw = !!(activeTrails[deviceId] && activeTrails[deviceId].raw);
+    var group = L.featureGroup();
+    var segments = data.segments && data.segments.length ? data.segments
+      : [{ m: false, c: points.map(function (p) { return [p.lat, p.lng]; }) }];
 
-    // Main polyline
-    var line = L.polyline(latlngs, {
-      color: color || "#6366f1",
-      weight: 3,
-      opacity: 0.7,
-      dashArray: "8,6",
-      lineJoin: "round",
+    segments.forEach(function (s) {
+      if (!s.c || s.c.length < 2) return;
+      if (s.m) {
+        L.polyline(s.c, { color: color, weight: 4, opacity: 0.85, lineJoin: "round", lineCap: "round" }).addTo(group);
+      } else {
+        L.polyline(s.c, { color: color, weight: 3, opacity: 0.6, dashArray: "6,8", lineJoin: "round" }).addTo(group);
+      }
     });
+
+    if (showRaw) {
+      L.polyline(points.map(function (p) { return [p.lat, p.lng]; }), {
+        color: "#475569", weight: 1.5, opacity: 0.8, dashArray: "2,4",
+      }).addTo(group);
+      points.forEach(function (p) {
+        var raw = L.circleMarker([p.lat, p.lng], {
+          radius: 2.5, color: "#475569", fillColor: "#ffffff", fillOpacity: 1, weight: 1.5,
+        });
+        raw.bindTooltip(trailTime(p.ts, true), { direction: "top", className: "anoloc-trail-tooltip" });
+        raw.addTo(group);
+      });
+    }
 
     // Layer group: use the device's group layer or add directly to map
     var layer = anolocLayers[groupId];
     if (layer) {
-      line.addTo(layer);
+      group.addTo(layer);
     } else {
-      line.addTo(mapObj);
+      group.addTo(mapObj);
     }
-    trailPolylines[deviceId] = line;
+    trailPolylines[deviceId] = group;
+    if (showRaw) return;
 
     // Time dots every ~10 points (or at least 5 dots)
     var dots = [];
@@ -717,17 +743,21 @@
       });
       // Tooltip with time
       if (p.ts) {
-        try {
-          var dt = new Date(p.ts);
-          var ts = String(dt.getHours()).padStart(2, "0") + ":" + String(dt.getMinutes()).padStart(2, "0");
-          dot.bindTooltip(ts, { direction: "top", className: "anoloc-trail-tooltip" });
-        } catch (e) { /* ignore */ }
+        dot.bindTooltip(trailTime(p.ts, false), { direction: "top", className: "anoloc-trail-tooltip" });
       }
       if (layer) dot.addTo(layer);
       else dot.addTo(mapObj);
       dots.push(dot);
     }
     trailDecorators[deviceId] = dots;
+  }
+
+  function trailTime(iso, withSeconds) {
+    var dt = new Date(iso);
+    if (isNaN(dt.getTime())) return "";
+    var s = String(dt.getHours()).padStart(2, "0") + ":" + String(dt.getMinutes()).padStart(2, "0");
+    if (withSeconds) s += ":" + String(dt.getSeconds()).padStart(2, "0");
+    return s;
   }
 
   function removeTrail(deviceId) {
@@ -745,9 +775,10 @@
     if (activeTrails[deviceId]) {
       removeTrail(deviceId);
       delete activeTrails[deviceId];
+      delete lastTrailData[deviceId];
       return false;
     }
-    activeTrails[deviceId] = { minutes: minutes, color: color, groupId: groupId };
+    activeTrails[deviceId] = { minutes: minutes, color: color, groupId: groupId, raw: false };
     fetchTrail(deviceId, minutes, color, groupId);
     return true;
   }
@@ -873,6 +904,29 @@
       ]));
     }
 
+    // Teltonika : charge, signal GSM, dernier message (la position peut
+    // etre plus ancienne : un message sans fix ne la met pas a jour)
+    if (dev.source === "teltonika") {
+      if (dev.charging) {
+        popup.appendChild(el("div", {className: "anoloc-popup-row"}, [
+          materialIcon("battery_charging_full", "font-size:16px;vertical-align:middle;margin-right:4px;color:#22c55e"),
+          "En charge",
+        ]));
+      }
+      if (dev.gsm_level != null) {
+        popup.appendChild(el("div", {className: "anoloc-popup-row"}, [
+          "Signal GSM: ", el("strong", {textContent: Math.round(dev.gsm_level) + "%"}),
+        ]));
+      }
+      if (dev.last_msg_at) {
+        try {
+          popup.appendChild(el("div", {className: "anoloc-popup-row anoloc-popup-time"}, [
+            "Dernier message: " + new Date(dev.last_msg_at).toLocaleString("fr-FR"),
+          ]));
+        } catch (e) { /* ignore */ }
+      }
+    }
+
     // Last real position
     if (dev.last_real_at) {
       try {
@@ -939,8 +993,27 @@
       }
     });
 
+    // Points GPS bruts superposes (verification du recalage)
+    var rawBtn = el("button", {
+      className: "anoloc-trail-raw" + (isActive && activeTrails[dev.id].raw ? " active" : ""),
+      title: "Afficher les positions GPS brutes",
+    }, [materialIcon("scatter_plot", "font-size:15px;vertical-align:middle;")]);
+    rawBtn.style.display = isActive ? "" : "none";
+    rawBtn.addEventListener("click", function () {
+      var t = activeTrails[dev.id];
+      if (!t) return;
+      t.raw = !t.raw;
+      rawBtn.className = "anoloc-trail-raw" + (t.raw ? " active" : "");
+      if (lastTrailData[dev.id]) renderTrail(dev.id, lastTrailData[dev.id], t.color, t.groupId);
+    });
+    trailBtn.addEventListener("click", function () {
+      rawBtn.style.display = activeTrails[dev.id] ? "" : "none";
+      rawBtn.className = "anoloc-trail-raw";
+    });
+
     trailSection.appendChild(durationSelect);
     trailSection.appendChild(trailBtn);
+    trailSection.appendChild(rawBtn);
     popup.appendChild(trailSection);
 
     // Lock/follow button
@@ -1016,28 +1089,125 @@
   }
 
   // === Demande de flux video (bouton popup carte) ===
+  // L'operateur choisit d'abord la destination : PC org uniquement (rien dans
+  // Qonify) ou l'un des liens RTSP fixes "Camera terrain N".
   function requestStreamForDevice(dev) {
+    openStreamTargetChooser(dev);
+  }
+
+  function streamToast(type, msg) {
+    if (typeof window.showToast === "function") window.showToast(type, msg);
+  }
+
+  function openStreamTargetChooser(dev) {
+    var existing = document.getElementById("anoloc-stream-target");
+    if (existing) existing.remove();
+    var overlay = el("div", { className: "anoloc-msg-overlay", id: "anoloc-stream-target" });
+    var box = el("div", { className: "anoloc-msg-box", style: "max-width:460px" });
+    var hdr = el("div", { className: "anoloc-msg-header" });
+    hdr.appendChild(el("div", { className: "anoloc-msg-header-left" }, [
+      materialIcon("videocam", "font-size:20px;color:#dc2626;"),
+      el("span", { textContent: "Flux video - " + (dev.label || dev.id) }),
+    ]));
+    var closeB = el("button", { className: "icon-btn anoloc-msg-close" }, [materialIcon("close")]);
+    closeB.addEventListener("click", function () { overlay.remove(); });
+    hdr.appendChild(closeB);
+    box.appendChild(hdr);
+    var body = el("div", { className: "anoloc-msg-body" });
+    body.appendChild(el("p", { textContent: "Ou envoyer la video ?", style: "margin:0 0 6px;font-weight:600;" }));
+    var list = el("div", { textContent: "Chargement...", style: "color:var(--muted);" });
+    body.appendChild(list);
+    box.appendChild(body);
+    overlay.appendChild(box);
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+
+    function option(icon, title, sub, busy, onPick) {
+      var b = el("button", {
+        type: "button",
+        style: "display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:10px;margin-top:6px;"
+          + "border:1px solid " + (busy ? "#f59e0b" : "var(--line)") + ";border-radius:8px;"
+          + "background:transparent;color:inherit;cursor:pointer;font:inherit;",
+      });
+      b.appendChild(materialIcon(icon, "font-size:22px;color:" + (busy ? "#f59e0b" : "#64748b") + ";"));
+      var txt = el("div", { style: "flex:1;" });
+      txt.appendChild(el("div", { textContent: title, style: "font-weight:600;" }));
+      txt.appendChild(el("div", { textContent: sub, style: "font-size:12px;color:var(--muted);" }));
+      b.appendChild(txt);
+      b.addEventListener("click", onPick);
+      return b;
+    }
+
+    function pick(target, replace) {
+      overlay.remove();
+      sendStreamRequest(dev, target, replace);
+    }
+
+    function render(slots) {
+      list.textContent = "";
+      list.style.color = "";
+      list.appendChild(option("desktop_windows", "PC org uniquement",
+        "Visible ici seulement, pas envoye dans Qonify", false,
+        function () { pick("none", false); }));
+      if (!slots) {
+        list.appendChild(option("videocam", "Premier lien Qonify libre",
+          "Etat des liens indisponible", false,
+          function () { pick("auto", false); }));
+        return;
+      }
+      slots.forEach(function (slot) {
+        var label = slot.slot_label || ("Camera terrain " + (slot.slot_index + 1));
+        var busyName = !slot.free && slot.stream ? (slot.stream.device_name || "?") : null;
+        list.appendChild(option("videocam", label + " (Qonify)",
+          busyName ? "Occupe : " + busyName + " - sera remplace" : "Libre",
+          !!busyName,
+          function () {
+            if (!busyName) { pick(slot.slot_index, false); return; }
+            var ask = typeof window.showConfirmToast === "function" && document.getElementById("toast-container")
+              ? window.showConfirmToast("Remplacer " + busyName + " sur " + label + " ?",
+                  { type: "warning", okLabel: "Remplacer", cancelLabel: "Annuler" })
+              : Promise.resolve(window.confirm("Remplacer " + busyName + " sur " + label + " ?"));
+            ask.then(function (ok) { if (ok) pick(slot.slot_index, true); });
+          }));
+      });
+    }
+
+    fetch("/field/admin/streams/active", { headers: { "X-CSRFToken": _csrfToken() } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { render(d && d.ok && d.slots ? d.slots : null); })
+      .catch(function () { render(null); });
+  }
+
+  function sendStreamRequest(dev, target, replace) {
     var rawId = String(dev.id || "");
     var deviceId = rawId.indexOf("field:") === 0 ? rawId.slice(6) : rawId;
 
     fetch("/field/admin/device/" + encodeURIComponent(deviceId) + "/stream-request", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-CSRFToken": _csrfToken() },
+      body: JSON.stringify({ target: target, replace: !!replace }),
     }).then(function (r) {
       return r.json().then(function (d) { return { status: r.status, data: d }; });
     }).then(function (resp) {
+      var err = resp.data && resp.data.error;
       if (resp.status >= 200 && resp.status < 300 && resp.data && resp.data.ok) {
         openStreamViewerModal(resp.data.stream_id, dev.label || dev.id);
-      } else if (resp.status === 409 && resp.data && resp.data.error === "pool_full") {
+      } else if (resp.status === 409 && err === "pool_full") {
         showStreamPoolFullModal(resp.data.active_slots || []);
-      } else if (resp.status === 409 && resp.data && resp.data.error === "device_busy") {
+      } else if (resp.status === 409 && err === "slot_busy") {
+        // Pris entre-temps par un autre operateur : on repropose le choix
+        streamToast("warning", (resp.data.slot_label || "Ce lien") + " vient d'etre occupe");
+        openStreamTargetChooser(dev);
+      } else if (resp.status === 409 && err === "private_full") {
+        streamToast("warning", "Trop de flux PC org en cours (" + (resp.data.max || "?") + " max)");
+      } else if (resp.status === 409 && err === "device_busy") {
         // Une demande deja en cours pour cette tablette : reouvrir la modale.
         openStreamViewerModal(resp.data.stream_id, dev.label || dev.id);
       } else {
-        alert("Echec demande flux : " + ((resp.data && resp.data.error) || resp.status));
+        streamToast("error", "Echec demande flux : " + (err || resp.status));
       }
     }).catch(function () {
-      alert("Erreur reseau (demande flux)");
+      streamToast("error", "Erreur reseau (demande flux)");
     });
   }
 
@@ -1139,7 +1309,8 @@
 
     var footer = el("div", { className: "anoloc-stream-footer" });
     var rtspWrap = el("div", { className: "anoloc-stream-rtsp", style: "display:none" });
-    rtspWrap.appendChild(el("span", { className: "anoloc-stream-rtsp-label", textContent: "Visible aussi dans Qonify : " }));
+    var rtspLabel = el("span", { className: "anoloc-stream-rtsp-label", textContent: "Visible aussi dans Qonify : " });
+    rtspWrap.appendChild(rtspLabel);
     var rtspSlot = el("strong", { className: "anoloc-stream-rtsp-slot", textContent: "" });
     rtspWrap.appendChild(rtspSlot);
     footer.appendChild(rtspWrap);
@@ -1175,13 +1346,14 @@
             playbackStarted = true;
             statusEl.style.display = "none";
             videoEl.hidden = false;
-            rtspSlot.textContent = d.slot_label || "";
+            if (d.private) {
+              rtspLabel.textContent = "PC org uniquement, ";
+              rtspSlot.textContent = "pas envoye dans Qonify";
+            } else {
+              rtspSlot.textContent = d.slot_label || "";
+            }
             rtspWrap.style.display = "";
-            startWhepPlayback(d.whep_url, videoEl).catch(function (e) {
-              statusEl.style.display = "";
-              statusEl.textContent = "Erreur lecture flux : " + (e && e.message || "?");
-              videoEl.hidden = true;
-            });
+            playWithRetry(d.whep_url, 0);
           } else if (d.status === "declined") {
             ended = true; teardown();
             statusEl.style.display = "";
@@ -1198,6 +1370,33 @@
     }
     poll();
     poller = setInterval(poll, 1000);
+
+    // "accepted" arrive avant que la tablette publie (camera, ICE) : mediamtx
+    // repond 404 tant que personne ne publie. On reessaie toutes les 2 s
+    // pendant 60 s au lieu d'abandonner au premier essai.
+    function playWithRetry(whepUrl, attempt) {
+      if (ended) return;
+      startWhepPlayback(whepUrl, videoEl).then(function () {
+        statusEl.style.display = "none";
+        videoEl.hidden = false;
+      }).catch(function (e) {
+        if (ended) return;
+        if (pc) { try { pc.close(); } catch (x) {} pc = null; }
+        var msg = (e && e.message) || "?";
+        if (msg === "WHEP 404" && attempt < 30) {
+          statusEl.style.display = "";
+          statusEl.textContent = "Connexion a la camera de la tablette...";
+          videoEl.hidden = true;
+          setTimeout(function () { playWithRetry(whepUrl, attempt + 1); }, 2000);
+          return;
+        }
+        statusEl.style.display = "";
+        statusEl.textContent = msg === "WHEP 404"
+          ? "Aucune image recue de la tablette (reseau UDP 8189 ?)"
+          : "Erreur lecture flux : " + msg;
+        videoEl.hidden = true;
+      });
+    }
 
     function startWhepPlayback(whepUrl, video) {
       pc = new RTCPeerConnection({ iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }] });
