@@ -556,7 +556,10 @@ def api_check_street():
         first = waze_street_names(float(pts[0][0]), float(pts[0][1]))
         last = waze_street_names(float(pts[-1][0]), float(pts[-1][1]))
     except (requests.RequestException, ValueError, TypeError, IndexError) as e:
-        logger.warning("waze_feed: geocodage inverse Waze indisponible: %s", e)
+        # jamais l'exception brute : son message porte l'URL, jeton compris
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        logger.warning("waze_feed: geocodage inverse Waze indisponible: %s (HTTP %s)",
+                       type(e).__name__, status)
         return jsonify({"detail": "Service de noms de rue Waze indisponible"}), 502
     common = [n for n in first if _fold(n) in [_fold(x) for x in last]]
     fs = _fold(street)
