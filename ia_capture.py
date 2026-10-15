@@ -9,6 +9,7 @@
 #   ia_capture_samples    une mesure = une paire de photos analysee
 #   ia_capture_state      etat courant par canal ("<camera_id>:<canal>")
 #   ia_capture_zones      zones dessinees sur l'image (polygones 0-1)
+import os
 from datetime import datetime, timedelta, timezone
 
 from bson.objectid import ObjectId
@@ -663,10 +664,41 @@ def global_map_detail(cid):
     now = datetime.now(timezone.utc)
     payload = getattr(request, "user_payload", {}) or {}
     is_admin = "admin" in (payload.get("roles") or [])
+    day0 = now.astimezone(arming.PARIS).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    # Intrusions du jour par canal : dans le planning (vraies intrusions),
+    # a traiter, hors planning (gardees pour l'entrainement, jamais comptees)
+    istats = {}
+    for r in db["hik_intrusions"].aggregate([
+            {"$match": {"camera_id": d["_id"], "started_at": {"$gte": day0.replace(tzinfo=None)}}},
+            {"$group": {"_id": "$channel",
+                        "armed": {"$sum": {"$cond": [{"$ne": ["$armed", False]}, 1, 0]}},
+                        "open": {"$sum": {"$cond": [{"$and": [{"$ne": ["$armed", False]}, {"$eq": [{"$ifNull": ["$status", "new"]}, "new"]}]}, 1, 0]}},
+                        "offplan": {"$sum": {"$cond": [{"$eq": ["$armed", False]}, 1, 0]}}}}]):
+        istats[r["_id"]] = {"armed": r["armed"], "open": r["open"], "offplan": r["offplan"]}
     chans = []
     for ch in d.get("channels") or []:
         types = [r.get("type") for r in ch.get("roles") or []]
-        item = {"no": ch.get("no"), "name": ch.get("name", ""), "roles": types}
+        item = {"no": ch.get("no"), "name": ch.get("name", ""), "roles": types,
+                "intrusions": istats.get(ch.get("no")) or {"armed": 0, "open": 0, "offplan": 0}}
+        # Image du canal : la plus recente entre la capture de la page Cameras,
+        # la derniere photo d'intrusion et la derniere photo de Capture IA
+        cand = []
+        sp = cameras.latest_snapshot_path(str(d["_id"]), ch.get("no"))
+        if sp:
+            cand.append((datetime.fromtimestamp(os.path.getmtime(sp), timezone.utc),
+                         "/api/pcorg/cameras/%s/snapshot?channel=%s" % (d["_id"], ch.get("no")), "capture"))
+        li = db["hik_intrusions"].find_one({"camera_id": d["_id"], "channel": ch.get("no"), "photos.0": {"$exists": True}},
+                                           {"photos": {"$slice": -1}, "started_at": 1}, sort=[("started_at", -1)])
+        if li and li.get("photos"):
+            cand.append((_utc(li["photos"][-1].get("at")) or _utc(li.get("started_at")), _img(li["photos"][-1].get("photo")), "intrusion"))
+        ls = db["ia_capture_samples"].find_one({"camera_id": d["_id"], "channel": ch.get("no")}, {"photos": 1, "at": 1},
+                                               sort=[("at", -1)])
+        if ls and ls.get("photos"):
+            cand.append((_utc(ls.get("at")), _img((ls["photos"][0] or {}).get("photo")), "ia"))
+        cand = [c for c in cand if c[0] and c[1]]
+        if cand:
+            at, url, src = max(cand, key=lambda c: c[0])
+            item["image"] = {"url": url, "at": _iso(at), "source": src}
         role = _capture_role(ch)
         if role:
             key = _key(d["_id"], ch.get("no"))
@@ -678,15 +710,18 @@ def global_map_detail(cid):
                                "last": _pub_sample(last, full=True) if last else None}
         chans.append(item)
     zones = _zones(db)
+    # Dernieres intrusions DANS le planning, et dernieres hors planning a part
     eps = [_pub_episode(e, zones, now) for e in db["hik_intrusions"].find(
-        {"camera_id": d["_id"]}, {"targets": 0}).sort("started_at", DESCENDING).limit(6)]
+        {"camera_id": d["_id"], "armed": {"$ne": False}}, {"targets": 0}).sort("started_at", DESCENDING).limit(8)]
+    eps_off = [_pub_episode(e, zones, now) for e in db["hik_intrusions"].find(
+        {"camera_id": d["_id"], "armed": False}, {"targets": 0}).sort("started_at", DESCENDING).limit(8)]
     snap = cameras.latest_snapshot_path(str(d["_id"]))
     out = {
         "id": str(d["_id"]), "name": d.get("name", ""), "site": d.get("site", ""), "location": d.get("location", ""),
         "brand": d.get("brand", ""), "model": d.get("model", ""), "enabled": d.get("enabled", True),
         "cellular": cameras.is_cellular(d), "piste": cameras.is_piste_device(d),
         "pilotable": d.get("brand") in cameras.CONTROLLABLE_BRANDS and not cameras.is_piste_device(d),
-        "camera_path": d.get("camera_path", ""), "channels": chans, "episodes": eps,
+        "camera_path": d.get("camera_path", ""), "channels": chans, "episodes": eps, "episodes_off": eps_off,
         "snapshot": ("/api/pcorg/cameras/%s/snapshot" % d["_id"]) if snap else None,
         "is_admin": is_admin,
     }
@@ -723,6 +758,12 @@ def gallery_stats():
         lab["with_boxes" if b else "empty"] += 1
         for x in b:
             lab["boxes"][x.get("category")] = lab["boxes"].get(x.get("category"), 0) + 1
+    # Reponses photo par photo (une photo = une cible de la camera)
+    lab["truths"] = {}
+    for r in I.aggregate([{"$match": {"photos.truth": {"$exists": True}}}, {"$unwind": "$photos"},
+                          {"$match": {"photos.truth": {"$exists": True}}},
+                          {"$group": {"_id": "$photos.truth.truth", "n": {"$sum": 1}}}]):
+        lab["truths"][r["_id"]] = r["n"]
     names = {str(z["_id"]): z.get("name", "") for z in db["ia_capture_zones"].find({"kind": {"$nin": ["stationnement", "foule"]}}, {"name": 1})}
     traces = {}
     for r in S.aggregate([{"$match": {"zone_votes": {"$exists": True, "$ne": {}}}},
@@ -834,6 +875,7 @@ def gallery():
                 "thumb": _img(cover.get("thumb")), "photo": _img(cover.get("photo")), "photos_n": len(ph),
                 "rect": cover.get("rect"), "ai": _pub_ai(e), "armed": e.get("armed") is not False,
                 "labeled": any(p.get("label") for p in ph), "review": rv,
+                "answered_n": sum(1 for p in ph if p.get("truth")),
             })
     if source in ("all", "captures", "traffic", "crowd", "secours"):
         base = _gallery_capture_q(source, cam)

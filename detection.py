@@ -265,7 +265,9 @@ def _pub_ai(ep):
         return None
     return {"status": ai.get("status"), "label": ai.get("label"), "conf": ai.get("conf"),
             "real_conf": ai.get("real_conf"), "reason": ai.get("reason"), "guess": ai.get("guess") or [],
-            "vote": vote.get("vote"), "vote_by": vote.get("by", ""), "vote_at": _iso(vote.get("at"))}
+            "by": ai.get("by"),  # "detecteur" ou "detecteur+avis" (verificateur du 14/10/2026)
+            "vote": vote.get("vote"), "truth": vote.get("truth"), "note": vote.get("note", ""),
+            "vote_by": vote.get("by", ""), "vote_at": _iso(vote.get("at"))}
 
 
 def _pub_label(lb):
@@ -303,7 +305,8 @@ def _pub_episode(ep, zones, now, full=False):
     if full:
         item["photos"] = [{"photo": _img(p.get("photo")), "thumb": _img(p.get("thumb")), "at": _iso(p.get("at")),
                            "type": p.get("type"), "rect": p.get("rect"), "target_id": p.get("target_id"),
-                           "ai": p.get("ai"), "label": _pub_label(p.get("label"))}
+                           "ai": p.get("ai"), "label": _pub_label(p.get("label")),
+                           "truth": _pub_truth(p.get("truth"))}
                           for p in ep.get("photos") or []]
         item["region_polygon"] = ep.get("region_polygon") or []
         item["resolution"] = ep.get("resolution")
@@ -690,9 +693,15 @@ def overview():
         types = ep.get("target_types") or ["other"]
         kind = "human" if "human" in types else "vehicle" if "vehicle" in types else "other"
         totals[kind] += 1
-        totals[ep.get("status", "new")] = totals.get(ep.get("status", "new"), 0) + 1
+        # Hors planning : ce n'est pas une intrusion au sens propre (personne
+        # n'est cense etre absent), jamais "en cours" ni "a traiter" dans les
+        # compteurs ; l'episode reste listable pour l'entrainement
+        armed = ep.get("armed") is not False
+        status = ep.get("status", "new")
+        if armed or status != "new":
+            totals[status] = totals.get(status, 0) + 1
         last = _utc(ep.get("last_at"))
-        active = bool(last and (now - last).total_seconds() < EPISODE_GAP_S)
+        active = armed and bool(last and (now - last).total_seconds() < EPISODE_GAP_S)
         totals["active"] += active
         i = min(bars - 1, max(0, int((_utc(ep["started_at"]) - start) // step)))
         flow[kind][i] += 1
@@ -700,13 +709,13 @@ def overview():
         c = by_channel.setdefault(key, {"n": 0, "active": False, "new": 0, "last": None})
         c["n"] += 1
         c["active"] = c["active"] or active
-        c["new"] += ep.get("status", "new") == "new"
+        c["new"] += armed and status == "new"
         c["last"] = max(filter(None, [c["last"], _iso(last)]), default=None)
         for z in _zones_of(ep, zones):
             zz = by_zone.setdefault(str(z["_id"]), {"n": 0, "active": False, "new": 0, "human": 0, "vehicle": 0})
             zz["n"] += 1
             zz["active"] = zz["active"] or active
-            zz["new"] += ep.get("status", "new") == "new"
+            zz["new"] += armed and status == "new"
             if kind in ("human", "vehicle"):
                 zz[kind] += 1
     return jsonify({
@@ -781,26 +790,155 @@ def set_status():
 
 
 AI_VOTES = ["up", "down"]
+# Ce qu'est vraiment la cible signalee par la camera (pilules de l'IA
+# cliquables) ; les trois premieres sont de vraies intrusions
+AI_TRUTHS = ["personne", "vehicule", "velo", "animal", "oiseau", "panneau", "branche", "reflet", "sol",
+             "grillage", "rien"]
+AI_TRUTH_REAL = {"personne", "vehicule", "velo"}
 
 
 @detection_bp.route("/api/detection/episodes/<eid>/ai-vote", methods=["POST"])
 def set_ai_vote(eid):
-    """Avis de l'operateur sur le verdict de l'IA : {vote: "up" (l'IA a
-    raison) | "down" (l'IA s'est trompee) | null (retire)}. Ces avis servent a
-    mesurer le filtre, ajuster son seuil et constituer un jeu d'entrainement
-    (photo + cadre + verdict + avis)."""
+    """Avis de l'operateur sur la cible signalee par la camera.
+    {truth: personne|vehicule|...|rien, note?} : ce que c'est vraiment
+    (pilule cliquee) ; le pouce `vote` en est deduit (up = l'IA a eu raison,
+    filtrer ou alerter). {vote: up|down} reste accepte (anciens avis),
+    {vote: null} ou {truth: null} retire l'avis. Sert a mesurer le filtre et
+    a constituer le jeu d'entrainement (photo + cadre + verite)."""
     db = _ensure_db()
-    vote = (request.get_json(silent=True) or {}).get("vote")
-    if vote is not None and vote not in AI_VOTES:
-        return jsonify({"error": "Avis invalide"}), 400
+    data = request.get_json(silent=True) or {}
     oid = _oid(eid)
-    upd = ({"$set": {"ai_vote": {"vote": vote, "by": _who(), "at": datetime.now(timezone.utc)}}}
-           if vote else {"$unset": {"ai_vote": ""}})
-    res = db["hik_intrusions"].update_one({"_id": oid}, upd) if oid else None
-    if not res or not res.matched_count:
+    ep = db["hik_intrusions"].find_one({"_id": oid}, {"ai.status": 1, "ai.photo": 1}) if oid else None
+    if not ep:
         return jsonify({"error": "Intrusion introuvable"}), 404
+    truth, vote = data.get("truth"), data.get("vote")
+    if truth in AI_TRUTHS and (ep.get("ai") or {}).get("photo"):
+        # La photo qui a decide du verdict recoit la meme reponse (si elle n'en a pas)
+        db["hik_intrusions"].update_one(
+            {"_id": oid, "photos": {"$elemMatch": {"photo": ep["ai"]["photo"], "truth": {"$exists": False}}}},
+            {"$set": {"photos.$.truth": {"truth": truth, "by": _who(), "at": datetime.now(timezone.utc), "auto": "episode"}}})
+    if "truth" in data:
+        if truth is not None and truth not in AI_TRUTHS:
+            return jsonify({"error": "Avis invalide"}), 400
+        if truth:
+            status = (ep.get("ai") or {}).get("status")
+            alerted = status != "filtered"
+            vote = "up" if (truth in AI_TRUTH_REAL) == alerted else "down"
+    elif vote is not None and vote not in AI_VOTES:
+        return jsonify({"error": "Avis invalide"}), 400
+    if vote:
+        doc = {"vote": vote, "by": _who(), "at": datetime.now(timezone.utc)}
+        if truth:
+            doc["truth"] = truth
+            note = (data.get("note") or "").strip()[:300]
+            if note:
+                doc["note"] = note
+        upd = {"$set": {"ai_vote": doc}}
+    else:
+        upd = {"$unset": {"ai_vote": ""}}
+    db["hik_intrusions"].update_one({"_id": oid}, upd)
     ep = db["hik_intrusions"].find_one({"_id": oid}, {"ai": 1, "ai_vote": 1})
     return jsonify({"ok": True, "ai": _pub_ai(ep)})
+
+
+def _photo_at(ep, idx, url):
+    """Photo idx de l'episode, controlee par son url (la liste peut avoir
+    grandi depuis l'ouverture de la fiche). None si elle ne correspond pas."""
+    photos = ep.get("photos") or []
+    if idx < 0 or idx >= len(photos) or _img(photos[idx].get("photo")) != url:
+        return None
+    return photos[idx]
+
+
+@detection_bp.route("/api/detection/episodes/<eid>/photos/<int:idx>/truth", methods=["POST"])
+def set_photo_truth(eid, idx):
+    """Ce qu'est vraiment la cible signalee sur UNE photo (une photo = une
+    cible de la camera). {photo: <url, controle>, truth: personne|...|rien|null,
+    note?}. Le pouce de la photo est deduit de la decision IA de la photo
+    (s'il y en a une). Si c'est la photo qui a decide du verdict de
+    l'episode et que l'episode n'a pas d'avis, l'avis d'episode suit."""
+    db = _ensure_db()
+    oid = _oid(eid)
+    ep = db["hik_intrusions"].find_one({"_id": oid}, {"photos": 1, "ai": 1, "ai_vote": 1}) if oid else None
+    if not ep:
+        return jsonify({"error": "Intrusion introuvable"}), 404
+    data = request.get_json(silent=True) or {}
+    p = _photo_at(ep, idx, data.get("photo"))
+    if not p:
+        return jsonify({"error": "Photo introuvable (la liste a change, rouvrez la fiche)"}), 409
+    truth = data.get("truth")
+    if truth is not None and truth not in AI_TRUTHS:
+        return jsonify({"error": "Avis invalide"}), 400
+    now = datetime.now(timezone.utc)
+    upd, doc = {}, None
+    if truth:
+        doc = {"truth": truth, "by": _who(), "at": now}
+        note = (data.get("note") or "").strip()[:300]
+        if note:
+            doc["note"] = note
+        dec = (p.get("ai") or {}).get("decision")
+        if dec in ("confirmed", "filtered"):
+            doc["vote"] = "up" if (truth in AI_TRUTH_REAL) == (dec == "confirmed") else "down"
+        upd["$set"] = {"photos.%d.truth" % idx: doc}
+    else:
+        upd["$unset"] = {"photos.%d.truth" % idx: ""}
+    ai, ev = ep.get("ai") or {}, ep.get("ai_vote") or {}
+    if ai.get("photo") == p.get("photo") and ai.get("status") in ("confirmed", "filtered") \
+            and (not ev or ev.get("auto") == "photo"):
+        if truth:
+            alerted = ai.get("status") != "filtered"
+            upd.setdefault("$set", {})["ai_vote"] = {
+                "vote": "up" if (truth in AI_TRUTH_REAL) == alerted else "down", "truth": truth,
+                "by": _who(), "at": now, "auto": "photo"}
+        else:
+            upd.setdefault("$unset", {})["ai_vote"] = ""
+    db["hik_intrusions"].update_one({"_id": oid}, upd)
+    ep = db["hik_intrusions"].find_one({"_id": oid}, {"ai": 1, "ai_vote": 1})
+    return jsonify({"ok": True, "truth": _pub_truth(doc), "ai": _pub_ai(ep)})
+
+
+def _pub_truth(t):
+    if not t:
+        return None
+    return {"truth": t.get("truth"), "note": t.get("note", ""), "vote": t.get("vote"),
+            "by": t.get("by", ""), "at": _iso(t.get("at"))}
+
+
+VERIFIER_URL = os.getenv("INTRUSION_VERIFIER_URL", "http://127.0.0.1:4011/verify")
+
+
+@detection_bp.route("/api/detection/episodes/<eid>/photos/<int:idx>/verify", methods=["POST"])
+def verify_photo(eid, idx):
+    """Passe UNE photo au verificateur IA local (IntrusionVerifier) quand le
+    recepteur ne l'a pas fait : il s'arrete a la premiere photo confirmee.
+    Donne a l'operateur l'avis de l'IA sur chaque cible ; ne change ni le
+    verdict de l'episode ni les alertes. {photo: <url, controle>}."""
+    import json
+    import urllib.request
+    db = _ensure_db()
+    oid = _oid(eid)
+    ep = db["hik_intrusions"].find_one({"_id": oid}, {"photos": 1}) if oid else None
+    if not ep:
+        return jsonify({"error": "Intrusion introuvable"}), 404
+    p = _photo_at(ep, idx, (request.get_json(silent=True) or {}).get("photo"))
+    if not p:
+        return jsonify({"error": "Photo introuvable (la liste a change, rouvrez la fiche)"}), 409
+    if p.get("ai"):
+        return jsonify({"ok": True, "ai": p["ai"]})
+    try:
+        req = urllib.request.Request(VERIFIER_URL, data=json.dumps({"photo": p.get("photo"), "rect": p.get("rect")}).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            res = json.load(r)
+    except Exception as e:
+        return jsonify({"error": "Verification IA indisponible (%s)" % e}), 503
+    min_conf = float((db["cockpit_settings"].find_one({"_id": "detection_ai_filter"}) or {}).get("min_conf") or 0.3)
+    real = float(res.get("real_conf") or 0)
+    ai = {"decision": "confirmed" if real >= min_conf else "filtered", "real_conf": real,
+          "detections": res.get("detections") or [], "guess": res.get("guess") or [], "on_demand": True}
+    db["hik_intrusions"].update_one({"_id": oid, "photos.%d.photo" % idx: p.get("photo")},
+                                    {"$set": {"photos.%d.ai" % idx: ai}})
+    return jsonify({"ok": True, "ai": ai})
 
 
 LABEL_CATEGORIES = ["personne", "vehicule"]

@@ -227,6 +227,22 @@
 .dt-ai-guess .chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 999px;
   background: #f5f3ff; color: #6d28d9; font-size: .74rem; font-weight: 600; }
 .dt-ai-guess .chip.is-top { background: #7c3aed; color: #fff; }
+/* Avis de l'operateur : pilules cliquables (ce qu'est vraiment la cible).
+   Propositions de l'IA en violet clair, autres categories en gris, choix en plein */
+.dt-truths { gap: 6px; }
+button.chip.dt-truth { border: 1px solid #d6d3f5; font: inherit; font-size: .78rem; font-weight: 600; padding: 4px 10px;
+  background: var(--card); color: var(--muted); cursor: pointer; min-height: 30px; }
+button.chip.dt-truth.is-ai { background: #f5f3ff; color: #6d28d9; border-color: #ddd6fe; }
+button.chip.dt-truth:hover { border-color: #7c3aed; color: #6d28d9; }
+button.chip.dt-truth.is-on { background: #16a34a; border-color: #16a34a; color: #fff; }
+.dt-truth-note { display: flex; gap: 6px; }
+.dt-truth-note input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--text); font: inherit; font-size: .82rem; }
+/* Filtree alors que l'avis IA voit une personne / un vehicule : a verifier */
+.dt-b-ai-doubt { --b: #d97706; }
+.dt-ai.is-doubt { border-color: #fcd34d; }
+.dt-ai.is-doubt .dt-ai-verdict > .material-symbols-outlined { color: #d97706; }
+.dt-ai-concl.is-doubt { color: #b45309; background: #fef3c7; }
 /* Cible collee au haut de l'image : etiquette a l'interieur du cadre */
 .dt-box.tag-inside .dt-box-tag { bottom: auto; top: 0; border-radius: 0 0 2px 0; }
 .dt-photo-cap { position: absolute; left: 8px; top: 8px; padding: 3px 8px; border-radius: 6px; background: rgba(15, 23, 42, .75); color: #fff; font-size: .72rem; font-weight: 600; line-height: 1.4; }
@@ -252,6 +268,10 @@
 .dt-strip { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
 .dt-strip button { flex: none; width: 92px; height: 69px; padding: 0; border: 2px solid transparent; border-radius: 7px; overflow: hidden; background: #e2e8f0; cursor: pointer; }
 .dt-strip button.is-current { border-color: var(--brand); }
+.dt-strip button { position: relative; }
+.dt-strip button.is-answered::after { content: "\2713"; position: absolute; top: 3px; right: 3px; width: 18px; height: 18px;
+  border-radius: 50%; background: #16a34a; color: #fff; font-size: 12px; line-height: 18px; text-align: center; font-weight: 700; }
+.dt-photo-truth { margin-top: 4px; padding-top: 8px; border-top: 1px dashed var(--line); }
 .dt-strip img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .dt-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .dt-fact { padding: 8px 10px; border-radius: 9px; background: var(--bg); }
@@ -596,11 +616,41 @@ body:not(.ia-mode-intrusions) .dt-tabs { display: none !important; }
 .ia-gd-img { position: relative; border-radius: 10px; overflow: hidden; background: #0f172a; min-height: 40px; }
 .ia-gd-img img { display: block; width: 100%; height: auto; }
 .ia-gd-img .ia-meta { padding: 12px; color: #cbd5e1; }
-.ia-gd-eps { display: flex; flex-direction: column; gap: 6px; }
-.ia-gd-ep { display: flex; align-items: center; gap: 10px; padding: 5px; border: 1px solid var(--line); border-radius: 9px; background: var(--card); font: inherit; text-align: left; cursor: pointer; }
-.ia-gd-ep:hover { background: var(--bg); }
-.ia-gd-ep img { width: 64px; height: 48px; object-fit: cover; border-radius: 6px; background: #000; flex: none; }
-.ia-gd-ep-tx { display: flex; flex-direction: column; gap: 2px; font-size: .8rem; min-width: 0; }
+.ia-gd-img a { display: block; cursor: zoom-in; }
+/* Onglets des canaux au-dessus de l'image (pastille = intrusions du jour dans le planning) */
+.ia-gd-tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: thin; margin-bottom: -6px; }
+.ia-gd-tab { display: inline-flex; align-items: center; gap: 5px; flex: none; border: 1px solid var(--line); background: var(--card);
+  color: var(--muted); border-radius: 8px; padding: 5px 10px; font: inherit; font-size: .78rem; font-weight: 600; cursor: pointer; }
+.ia-gd-tab.is-on { background: var(--text); border-color: var(--text); color: var(--card); }
+.ia-gd-tab-n { background: #dc2626; color: #fff; border-radius: 999px; padding: 0 6px; font-size: .7rem; line-height: 1.5; }
+/* Compteurs du jour (cliquables : ouvrent la liste filtree) */
+.ia-gd-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.ia-gd-kpi { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 8px 10px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--card); font: inherit; text-align: left; cursor: pointer; }
+.ia-gd-kpi:hover { background: var(--bg); }
+.ia-gd-kpi b { font-size: 1.35rem; line-height: 1.1; }
+.ia-gd-kpi span { font-size: .72rem; color: var(--muted); }
+.ia-gd-kpi.is-armed b { color: #d97706; }
+.ia-gd-kpi.is-open b { color: #dc2626; }
+.ia-gd-kpi.is-off b { color: #0369a1; }
+.ia-gd-kpi.is-zero b { color: var(--muted); }
+.ia-gd-seg { align-self: flex-start; }
+/* Dernieres intrusions : grille de vignettes */
+.ia-gd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+.ia-gd-grid > .ia-meta { grid-column: 1 / -1; }
+.ia-gd-ep { display: flex; flex-direction: column; gap: 3px; padding: 4px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--card); font: inherit; font-size: .78rem; text-align: left; cursor: pointer; min-width: 0; }
+.ia-gd-ep:hover { border-color: #d97706; }
+.ia-gd-ep > b, .ia-gd-ep > .ia-meta { padding: 0 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ia-gd-ep-img { position: relative; display: flex; align-items: center; justify-content: center; aspect-ratio: 16 / 9;
+  border-radius: 6px; overflow: hidden; background: #0f172a; color: #64748b; }
+.ia-gd-ep-img img { width: 100%; height: 100%; object-fit: cover; }
+.ia-gd-ep-new { position: absolute; top: 5px; right: 5px; width: 9px; height: 9px; border-radius: 50%; background: #dc2626; box-shadow: 0 0 0 2px #fff; }
+/* Canaux : section repliee */
+.ia-gd-chans > summary { cursor: pointer; list-style: none; }
+.ia-gd-chans > summary::-webkit-details-marker { display: none; }
+.ia-gd-chans > summary::after { content: "expand_more"; font-family: "Material Symbols Outlined"; font-size: 18px; margin-left: auto; }
+.ia-gd-chans[open] > summary::after { content: "expand_less"; }
 .dt-btn.ia-btn-sm { height: 26px; padding: 0 8px; font-size: .72rem; }
 .dt-btn.ia-btn-sm .material-symbols-outlined { font-size: 15px; }
 .ia-pop { display: flex; flex-direction: column; gap: 6px; font-size: .8rem; }
@@ -742,6 +792,12 @@ body:not(.ia-mode-intrusions) .dt-tabs { display: none !important; }
 .ia-gal-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; font-size: .78rem; }
 .ia-gal-title { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ia-gal-verdict { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.ia-gal-truths { display: flex; flex-wrap: wrap; gap: 4px; }
+.ia-truth { border: 1px solid #ddd6fe; background: #f5f3ff; color: #6d28d9; border-radius: 999px; padding: 3px 9px;
+  font: inherit; font-size: .74rem; font-weight: 600; cursor: pointer; min-height: 28px; }
+.ia-truth:hover { border-color: #7c3aed; }
+.ia-truth.is-on { background: #16a34a; border-color: #16a34a; color: #fff; }
+.ia-truth.is-other { background: var(--card); color: var(--muted); border-color: var(--line); }
 .ia-gal-thumbs { display: flex; gap: 6px; }
 .ia-gal-thumbs .dt-thumb-btn { height: 36px; font-size: .78rem; }
 .ia-gal-thumbs .dt-thumb-btn .material-symbols-outlined { font-size: 19px; }

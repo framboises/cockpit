@@ -19,6 +19,7 @@ service ne repond pas.
     -> {real_conf, label, conf, detections: [{class, category, conf, box}],
         guess: [{label, p}], ms, model}
        box = cadre normalise (0-1) sur la PHOTO ENTIERE, comme rect.
+  POST /embed    empreintes SigLIP du cadrage serre (entrainement de nuit)
   POST /detect   vehicules et personnes sur l'image entiere (Trafic)
   POST /density  personnes par zone, carte de densite ZIP-B (Foule)
   POST /pose     squelette de chaque personne, yolo11m-pose (Secours)
@@ -41,9 +42,17 @@ IMAGES_ROOT = os.path.abspath(os.getenv("HIK_IMAGES_ROOT", r"E:\TITAN\production
 MODELS = r"E:\TITAN\production\tagger\models\analytics"
 MODEL_PATH = os.getenv("INTRUSION_VERIFIER_MODEL", os.path.join(MODELS, "ground", "yolo11m.pt"))
 SIGLIP_PATH = os.getenv("INTRUSION_VERIFIER_SIGLIP", os.path.join(MODELS, "photo_embedder_siglip"))
-# Zoom : 4 fois la cible, 160 px au moins (une cible de 20 px garde du contexte)
-ZOOM, ZOOM_MIN_PX = 4.0, 160
-MIN_CONF = 0.15  # detections renvoyees ; le seuil d'alerte est cote recepteur
+# Deux cadrages autour de la cible, on garde le meilleur (mesure du 14/10/2026
+# sur 284 intrusions filtrees, ~220 etaient de vraies personnes / vehicules :
+# un carre de 160 px agrandi a 640 devient flou et YOLO ne voit plus rien) :
+#   (zoom, cote min. en px, imgsz) : large avec contexte, et petit sans agrandir
+FRAMINGS = ((8.0, 320, 640), (4.0, 160, 320))
+MIN_CONF = 0.1  # detections renvoyees ; le seuil d'alerte est cote recepteur
+# SigLIP seul ne decide jamais, mais s'il voit une personne / un vehicule
+# (>= SIG_REAL) et que YOLO en devine un (>= SIG_YOLO_MIN), on retient l'avis
+# SigLIP comme confiance (vehicules eblouis par leurs phares, silhouettes
+# de 30 px). 0 fausse alerte validee par l'operateur reclassee au test.
+SIG_REAL, SIG_YOLO_MIN = 0.6, 0.1
 
 # Classes COCO -> categorie
 CATEGORY = {
@@ -154,22 +163,66 @@ def _photo_path(rel):
     return full
 
 
-def _zoom_box(im, rect):
+def _zoom_box(im, rect, zoom, min_px):
     W, H = im.size
     if not rect or not rect.get("w") or not rect.get("h"):
         return (0, 0, W, H)
     cx, cy = (rect["x"] + rect["w"] / 2) * W, (rect["y"] + rect["h"] / 2) * H
-    half = max(ZOOM_MIN_PX, rect["w"] * W * ZOOM, rect["h"] * H * ZOOM) / 2
+    half = max(min_px, rect["w"] * W * zoom, rect["h"] * H * zoom) / 2
     return (max(0, int(cx - half)), max(0, int(cy - half)), min(W, int(cx + half)), min(H, int(cy + half)))
+
+
+# Avis appris sur les reponses des operateurs (scripts/intrusion_training.py,
+# niveau 2) : remplace les phrases toutes faites quand il existe. Relu a
+# chaud (date du fichier, controlee toutes les 30 s) : pas de redemarrage.
+HEAD_PATH = os.getenv("INTRUSION_VERIFIER_HEAD", os.path.join(MODELS, "intrusion_head", "head.json"))
+_HEAD = {"checked": 0.0, "mtime": None, "W": None, "b": None, "version": None}
+
+
+def _head():
+    now = time.time()
+    if now - _HEAD["checked"] < 30:
+        return _HEAD if _HEAD["W"] is not None else None
+    _HEAD["checked"] = now
+    try:
+        mt = os.path.getmtime(HEAD_PATH)
+    except OSError:
+        _HEAD.update(mtime=None, W=None, b=None, version=None)
+        return None
+    if mt != _HEAD["mtime"]:
+        _HEAD["mtime"] = mt
+        try:
+            import json
+            with open(HEAD_PATH, encoding="utf-8") as f:
+                h = json.load(f)
+            if h.get("keys") != list(GUESSES):
+                raise ValueError("categories differentes de GUESSES")
+            _HEAD.update(W=torch.tensor(h["W"], device=DEVICE), b=torch.tensor(h["b"], device=DEVICE),
+                         version=h.get("version"))
+            log.info("Avis appris charge : version %s (%s exemples)", h.get("version"), h.get("n"))
+        except Exception as e:
+            _HEAD.update(W=None, b=None, version=None)
+            log.warning("Avis appris illisible (%s) : phrases d'origine", e)
+    return _HEAD if _HEAD["W"] is not None else None
+
+
+def _sig_feature(crop):
+    with torch.no_grad():
+        ii = SIG_PROC(images=crop, return_tensors="pt").to(DEVICE)
+        return _feat(SIG.get_image_features(**ii))
 
 
 def _guess(crop):
     if SIG is None:
         return []
+    f = _sig_feature(crop)
+    h = _head()
     with torch.no_grad():
-        ii = SIG_PROC(images=crop, return_tensors="pt").to(DEVICE)
-        f = _feat(SIG.get_image_features(**ii))
-        p = torch.softmax((f @ SIG_TEXT.T)[0] * SIG.logit_scale.exp(), -1).cpu().tolist()
+        if h:
+            logits = (f @ h["W"].T)[0] * SIG.logit_scale.exp() + h["b"]
+        else:
+            logits = (f @ SIG_TEXT.T)[0] * SIG.logit_scale.exp()
+        p = torch.softmax(logits, -1).cpu().tolist()
     keys = list(GUESSES)
     return [{"label": k, "p": round(v, 3)} for k, v in sorted(zip(keys, p), key=lambda x: -x[1])[:4]]
 
@@ -179,7 +232,36 @@ def health():
     return jsonify({"ok": True, "device": DEVICE, "model": os.path.basename(MODEL_PATH),
                     "siglip": os.path.basename(SIGLIP_PATH) if SIG is not None else None,
                     "density": "ZIP-B NWPU" if DENSITY is not None else None,
-                    "pose": os.path.basename(POSE_PATH) if POSE is not None else None, **_STATS})
+                    "pose": os.path.basename(POSE_PATH) if POSE is not None else None,
+                    "head": (_head() or {}).get("version"), **_STATS})
+
+
+@app.post("/embed")
+def embed():
+    """Empreintes SigLIP du cadrage serre (le meme que l'avis de /verify),
+    pour l'entrainement de nuit. {"items": [{photo, rect}] (32 max)} ->
+    {"features": [[...] | null], "keys", "text": empreintes des phrases,
+    "scale"}. Ne change rien au service."""
+    if SIG is None:
+        return jsonify({"error": "SigLIP indisponible"}), 503
+    items = ((request.get_json(silent=True) or {}).get("items") or [])[:32]
+    zoom, min_px, _ = FRAMINGS[-1]
+    out = []
+    for it in items:
+        path = _photo_path(it.get("photo"))
+        if not path:
+            out.append(None)
+            continue
+        try:
+            im = Image.open(path).convert("RGB")
+            with _LOCK:
+                f = _sig_feature(im.crop(_zoom_box(im, it.get("rect"), zoom, min_px)))
+            out.append([round(v, 5) for v in f[0].cpu().tolist()])
+        except Exception as e:
+            log.warning("Empreinte impossible (%s) : %s", it.get("photo"), e)
+            out.append(None)
+    return jsonify({"features": out, "keys": list(GUESSES), "text": SIG_TEXT.cpu().tolist(),
+                    "scale": float(SIG.logit_scale.exp())})
 
 
 @app.post("/verify")
@@ -189,41 +271,73 @@ def verify():
     if not path:
         return jsonify({"error": "photo introuvable"}), 404
     t = time.time()
+    dets = []
     try:
         im = Image.open(path).convert("RGB")
         W, H = im.size
-        x0, y0, x1, y1 = _zoom_box(im, data.get("rect"))
-        crop = im.crop((x0, y0, x1, y1))
         with _LOCK:
-            res = MODEL.predict(crop, imgsz=640, device=DEVICE, conf=MIN_CONF, classes=None, verbose=False)[0]
-            guess = _guess(crop)
+            for i, (zoom, min_px, size) in enumerate(FRAMINGS):
+                x0, y0, x1, y1 = _zoom_box(im, data.get("rect"), zoom, min_px)
+                crop = im.crop((x0, y0, x1, y1))
+                res = MODEL.predict(crop, imgsz=size, device=DEVICE, conf=MIN_CONF, classes=None, verbose=False)[0]
+                for b in res.boxes:
+                    bx0, by0, bx1, by1 = [float(v) for v in b.xyxy[0]]
+                    name = res.names[int(b.cls)]
+                    dets.append({"class": name, "category": CATEGORY.get(name, "objet"), "conf": round(float(b.conf), 3),
+                                 "box": {"x": round((x0 + bx0) / W, 4), "y": round((y0 + by0) / H, 4),
+                                         "w": round((bx1 - bx0) / W, 4), "h": round((by1 - by0) / H, 4)}})
+                if i == len(FRAMINGS) - 1:
+                    guess = _guess(crop)  # SigLIP sur le cadrage serre (zoom x4)
     except Exception as e:
         _STATS["errors"] += 1
         log.warning("Verification impossible (%s) : %s", data.get("photo"), e)
         return jsonify({"error": str(e)}), 500
-    dets = []
-    for b in res.boxes:
-        bx0, by0, bx1, by1 = [float(v) for v in b.xyxy[0]]
-        name = res.names[int(b.cls)]
-        dets.append({"class": name, "category": CATEGORY.get(name, "objet"), "conf": round(float(b.conf), 3),
-                     "box": {"x": round((x0 + bx0) / W, 4), "y": round((y0 + by0) / H, 4),
-                             "w": round((bx1 - bx0) / W, 4), "h": round((by1 - by0) / H, 4)}})
-    dets.sort(key=lambda d: -d["conf"])
+    dets = _dedupe(sorted(dets, key=lambda d: -d["conf"]))
     real = [d for d in dets if d["category"] in REAL]
     best = real[0] if real else (dets[0] if dets else None)
+    yolo_real = real[0]["conf"] if real else 0.0
+    real_conf, by = yolo_real, "detecteur"
+    sig = [g for g in guess if g["label"] in ("personne", "vehicule")]
+    sig_p = sum(g["p"] for g in sig)
+    if yolo_real >= SIG_YOLO_MIN and sig_p >= SIG_REAL and sig_p > yolo_real:
+        real_conf, by = round(sig_p, 3), "detecteur+avis"
+    label = best["category"] if best else "rien"
+    if by != "detecteur" and sig:
+        label = max(sig, key=lambda g: g["p"])["label"]
     _STATS["checks"] += 1
     out = {
-        "real_conf": real[0]["conf"] if real else 0.0,
-        "label": best["category"] if best else "rien",
-        "conf": best["conf"] if best else 0.0,
+        "real_conf": real_conf,
+        "yolo_conf": yolo_real,
+        "by": by,
+        "label": label,
+        "conf": real_conf if real_conf else (best["conf"] if best else 0.0),
         "detections": dets[:6],
         "guess": guess,
         "ms": round((time.time() - t) * 1000),
         "model": os.path.basename(MODEL_PATH),
+        "head": _HEAD["version"] if _HEAD["W"] is not None else None,
     }
-    log.info("%s -> %s %.2f (personne/vehicule %.2f) avis %s %d ms", data.get("photo"), out["label"], out["conf"],
-             out["real_conf"], ", ".join("%s %d%%" % (g["label"], g["p"] * 100) for g in guess[:2]), out["ms"])
+    log.info("%s -> %s %.2f (personne/vehicule %.2f, %s) avis %s %d ms", data.get("photo"), out["label"], out["conf"],
+             out["real_conf"], by, ", ".join("%s %d%%" % (g["label"], g["p"] * 100) for g in guess[:2]), out["ms"])
     return jsonify(out)
+
+
+def _iou(a, b):
+    ix = max(0.0, min(a["x"] + a["w"], b["x"] + b["w"]) - max(a["x"], b["x"]))
+    iy = max(0.0, min(a["y"] + a["h"], b["y"] + b["h"]) - max(a["y"], b["y"]))
+    inter = ix * iy
+    union = a["w"] * a["h"] + b["w"] * b["h"] - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _dedupe(dets):
+    """Les deux cadrages voient souvent le meme objet : garde la meilleure
+    confiance par objet (meme categorie, cadres qui se recouvrent)."""
+    keep = []
+    for d in dets:
+        if not any(k["category"] == d["category"] and _iou(k["box"], d["box"]) > 0.5 for k in keep):
+            keep.append(d)
+    return keep
 
 
 VEHICLES = {"car", "truck", "bus", "motorcycle", "bicycle"}

@@ -90,6 +90,8 @@
     function fmtTime(iso) { return iso ? new Date(iso).toLocaleTimeString("fr-FR", { timeZone: TZ, hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "--"; }
     function fmtHM(iso) { return iso ? new Date(iso).toLocaleTimeString("fr-FR", { timeZone: TZ, hour: "2-digit", minute: "2-digit" }) : "--"; }
     function fmtDay(iso) { return iso ? new Date(iso).toLocaleDateString("fr-FR", { timeZone: TZ, weekday: "short", day: "2-digit", month: "2-digit" }) : ""; }
+    function dayKey(iso) { return new Date(iso).toLocaleDateString("fr-FR", { timeZone: TZ }); }
+    function isToday(iso) { return !!iso && dayKey(iso) === dayKey(new Date().toISOString()); }
     function ago(iso) {
         if (!iso) return "";
         var s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
@@ -246,13 +248,39 @@
                     d.channels.length > 1 ? d.channels.length + " canaux" : ""].filter(Boolean);
         if (info.length) body.appendChild(el("div", "ia-meta", info.join(" - ")));
 
-        // Derniere image connue
+        // Image : un onglet par canal qui en a une (capture de la page Cameras,
+        // sinon derniere photo d'intrusion ou de Capture IA)
+        var withImg = d.channels.filter(function (ch) { return ch.image; });
         var img = el("div", "ia-gd-img");
-        if (d.snapshot) {
-            var im = document.createElement("img"); im.alt = "Derniere capture"; im.src = d.snapshot + "?t=" + Date.now();
-            img.appendChild(im);
-            img.appendChild(el("span", "ia-shot-cap", "Derniere capture"));
-        } else img.appendChild(el("div", "ia-meta", "Pas de capture recente de cette camera."));
+        var tabs = withImg.length > 1 ? el("div", "ia-gd-tabs") : null;
+        var SRC = { capture: "capture", intrusion: "photo d'intrusion", ia: "photo Capture IA" };
+        function showImg(ch) {
+            img.textContent = "";
+            var a = document.createElement("a"); a.href = ch.image.url; a.target = "_blank"; a.rel = "noopener"; a.title = "Ouvrir en grand";
+            var im = document.createElement("img"); im.alt = "Image du canal " + ch.no;
+            im.src = ch.image.url + (ch.image.source === "capture" ? (ch.image.url.indexOf("?") < 0 ? "?" : "&") + "t=" + Date.now() : "");
+            a.appendChild(im);
+            img.appendChild(a);
+            img.appendChild(el("span", "ia-shot-cap", (d.channels.length > 1 ? (ch.name || "Canal " + ch.no) + " - " : "") +
+                SRC[ch.image.source] + " " + ago(ch.image.at)));
+            if (tabs) Array.prototype.forEach.call(tabs.children, function (b) { b.classList.toggle("is-on", b.dataset.no === String(ch.no)); });
+        }
+        if (withImg.length) {
+            if (tabs) {
+                withImg.forEach(function (ch) {
+                    var b = el("button", "ia-gd-tab"); b.type = "button"; b.dataset.no = String(ch.no);
+                    var n = ch.intrusions.armed;
+                    b.appendChild(document.createTextNode(ch.name && ch.name !== d.name ? ch.name : "Canal " + ch.no));
+                    if (n) b.appendChild(el("b", "ia-gd-tab-n", String(n)));
+                    b.title = n ? n + " intrusion(s) dans le planning aujourd'hui" : "";
+                    b.addEventListener("click", function () { showImg(ch); });
+                    tabs.appendChild(b);
+                });
+                body.appendChild(tabs);
+            }
+            // Canal le plus actif en premier (intrusions du jour), sinon le premier
+            showImg(withImg.slice().sort(function (a, b) { return b.intrusions.armed - a.intrusions.armed; })[0]);
+        } else img.appendChild(el("div", "ia-meta", "Aucune image de cette camera : lancez une capture depuis la page Cameras."));
         body.appendChild(img);
 
         // Trafic (canaux en analyse)
@@ -277,38 +305,75 @@
             body.appendChild(s);
         });
 
-        // Intrusions recentes
-        if (c.intrusion || d.episodes.length) {
-            var si = section("Intrusions", "directions_walk");
-            si.appendChild(el("div", "ia-meta", "Aujourd'hui : " + c.intrusions_today + " intrusion(s), " + c.intrusions_real +
-                " non filtree(s) par l'IA, " + c.intrusions_open + " a traiter"));
-            var list = el("div", "ia-gd-eps");
-            d.episodes.forEach(function (ep) {
-                var r = el("button", "ia-gd-ep"); r.type = "button";
-                if (ep.thumb) { var ti = document.createElement("img"); ti.src = ep.thumb; ti.alt = ""; ti.loading = "lazy"; r.appendChild(ti); }
-                var tx = el("span", "ia-gd-ep-tx");
-                tx.appendChild(el("b", "", fmtDay(ep.started_at) + " " + fmtTime(ep.started_at)));
-                var ai = ep.ai || {};
-                tx.appendChild(el("span", "ia-meta", (ep.channel_name || "") + (ai.status === "filtered" ? " - filtree IA : " + (AI_NAME[ai.label] || ai.label) :
-                    ai.status === "confirmed" ? " - IA : " + (AI_NAME[ai.label] || ai.label) : "") + (ep.status === "closed" ? " - cloturee" : "")));
-                r.appendChild(tx);
-                r.addEventListener("click", function () {
-                    setMode("intrusions");
-                    if (window.IADetection) window.IADetection.openEpisode(ep.id);
-                });
-                list.appendChild(r);
-            });
-            if (!d.episodes.length) list.appendChild(el("div", "ia-meta", "Aucune intrusion enregistree."));
-            si.appendChild(list);
-            si.appendChild(btn("filter_alt", "Toutes les intrusions de cette camera", function () {
-                if (window.IADetection) window.IADetection.filterCamera(c.id + ":*");
+        // Intrusions : compteurs du jour (cliquables) puis dernieres photos.
+        // Une intrusion au sens propre n'existe que DANS le planning ; le hors
+        // planning est a part (entrainement), jamais compte comme alerte
+        if (c.intrusion || d.episodes.length || d.episodes_off.length) {
+            var si = section("Intrusions aujourd'hui", "directions_walk");
+            var tot = { armed: 0, open: 0, offplan: 0 };
+            d.channels.forEach(function (ch) { ["armed", "open", "offplan"].forEach(function (k) { tot[k] += ch.intrusions[k]; }); });
+            function openList(planning) {
+                if (window.IADetection) window.IADetection.filterCamera(c.id + ":*", planning);
                 setMode("intrusions");
-            }));
+                if (window.IADetection) window.IADetection.refresh();
+            }
+            var kp = el("div", "ia-gd-kpis");
+            [[tot.armed, "dans le planning", "", "is-armed"], [tot.open, "a traiter", "", "is-open"],
+             [tot.offplan, "hors planning", "off", "is-off"]].forEach(function (k) {
+                var b = el("button", "ia-gd-kpi " + k[3] + (k[0] ? "" : " is-zero")); b.type = "button";
+                b.appendChild(el("b", "", String(k[0])));
+                b.appendChild(el("span", "", k[1]));
+                b.title = "Voir la liste";
+                b.addEventListener("click", function () { openList(k[2]); });
+                kp.appendChild(b);
+            });
+            si.appendChild(kp);
+            var seg = el("div", "dt-seg ia-gd-seg");
+            var grid = el("div", "ia-gd-grid");
+            function showEps(off) {
+                Array.prototype.forEach.call(seg.children, function (b, i) { b.classList.toggle("active", (i === 1) === off); });
+                grid.textContent = "";
+                var list = off ? d.episodes_off : d.episodes;
+                list.forEach(function (ep) {
+                    var r = el("button", "ia-gd-ep"); r.type = "button";
+                    var th = el("span", "ia-gd-ep-img");
+                    if (ep.thumb) { var ti = document.createElement("img"); ti.src = ep.thumb; ti.alt = ""; ti.loading = "lazy"; th.appendChild(ti); }
+                    else th.appendChild(icon("no_photography"));
+                    if (ep.status === "new" && !off) th.appendChild(el("i", "ia-gd-ep-new", ""));
+                    r.appendChild(th);
+                    var ai = ep.ai || {};
+                    var lab = ai.truth ? "Avis : " + (AI_NAME[ai.truth] || ai.truth)
+                        : ai.status === "filtered" ? "Filtree : " + (AI_NAME[ai.label] || ai.label || "rien")
+                        : ai.status === "confirmed" ? "IA : " + (AI_NAME[ai.label] || ai.label) : "Non verifiee";
+                    r.appendChild(el("b", "", (isToday(ep.started_at) ? "" : fmtDay(ep.started_at) + " ") + fmtTime(ep.started_at)));
+                    r.appendChild(el("span", "ia-meta", (d.channels.length > 1 && ep.channel_name ? ep.channel_name + " - " : "") + lab));
+                    r.title = "Ouvrir la fiche de l'intrusion";
+                    r.addEventListener("click", function () {
+                        if (window.IADetection) window.IADetection.filterCamera(c.id + ":*", off ? "off" : "");
+                        setMode("intrusions");
+                        if (window.IADetection) window.IADetection.openEpisode(ep.id);
+                    });
+                    grid.appendChild(r);
+                });
+                if (!list.length) grid.appendChild(el("div", "ia-meta", off ? "Aucune detection hors planning." : "Aucune intrusion dans le planning."));
+            }
+            [["Dernieres dans le planning", false], ["Dernieres hors planning", true]].forEach(function (o) {
+                var b = el("button", "", o[0]); b.type = "button";
+                b.addEventListener("click", function () { showEps(o[1]); });
+                seg.appendChild(b);
+            });
+            si.appendChild(seg);
+            si.appendChild(grid);
+            showEps(!d.episodes.length && d.episodes_off.length > 0);
             body.appendChild(si);
         }
 
-        // Canaux et usages
-        var sc = section("Canaux", "videocam");
+        // Canaux et usages : replie (reglages, rarement utile en exploitation)
+        var sc = el("details", "ia-gd-sec ia-gd-chans");
+        var sum = el("summary", "dt-sec");
+        sum.appendChild(icon("videocam"));
+        sum.appendChild(document.createTextNode("Canaux et usages (" + d.channels.length + ")"));
+        sc.appendChild(sum);
         d.channels.forEach(function (ch) {
             var r = el("div", "ia-group");
             r.appendChild(el("span", "", ch.no + " - " + (ch.name || "Canal " + ch.no)));
@@ -1706,22 +1771,48 @@
             }
             if (!it.armed) verdict.appendChild(chip("is-off", "schedule", "Hors planning"));
             if (it.labeled) verdict.appendChild(chip("", "ads_click", "Cadres poses"));
-            var row = el("div", "ia-gal-thumbs");
-            [["up", "thumb_up", "Bien vu"], ["down", "thumb_down", "Erreur"]].forEach(function (o) {
-                var bt = el("button", "dt-thumb-btn is-" + o[0] + (ai.vote === o[0] ? " is-on" : "")); bt.type = "button";
-                bt.appendChild(icon(o[1])); bt.appendChild(el("span", "", o[2]));
+            // Avis = clic sur ce qu'est vraiment la cible : les 3 propositions de
+            // l'IA (+ personne / vehicule si absents) ; "Autre" ouvre la fiche
+            var row = el("div", "ia-gal-truths");
+            var props = (ai.guess || []).filter(function (g) { return g.p >= 0.03; }).slice(0, 3).map(function (g) { return g.label; });
+            ["personne", "vehicule"].forEach(function (l) { if (props.indexOf(l) < 0) props.push(l); });
+            if (ai.truth && props.indexOf(ai.truth) < 0) props.unshift(ai.truth);
+            var pc = {};
+            (ai.guess || []).forEach(function (g) { pc[g.label] = g.p; });
+            props.forEach(function (l) {
+                var on = ai.truth === l;
+                var bt = el("button", "ia-truth" + (on ? " is-on" : "")); bt.type = "button";
+                bt.textContent = (AI_NAME[l] || l) + (pc[l] >= 0.03 ? " " + Math.round(pc[l] * 100) + " %" : "");
+                bt.title = on ? "Retirer mon avis" : "C'est ca";
                 bt.addEventListener("click", function () {
-                    var nv = ai.vote === o[0] ? null : o[0];
-                    send("POST", API.episodes + "/" + it.id + "/ai-vote", { vote: nv }).then(function (r) {
+                    var nv = on ? null : l;
+                    send("POST", API.episodes + "/" + it.id + "/ai-vote", { truth: nv }).then(function (r) {
                         it.ai = r.ai;
                         card.replaceWith(galItem(it));
                         toast("success", nv ? "Avis enregistre, merci" : "Avis retire");
-                        if (nv === "down") toast("info", "Ouvrez la photo pour indiquer ou est la personne ou le vehicule");
                     }).catch(function (e) { toast("error", e.message); });
                 });
                 row.appendChild(bt);
             });
+            var other = el("button", "ia-truth is-other", "Autre..."); other.type = "button";
+            other.title = "Ouvrir la fiche : toutes les reponses, commentaire, cadres";
+            other.addEventListener("click", function () {
+                setMode("intrusions");
+                if (window.IADetection) window.IADetection.openEpisode(it.id);
+            });
+            row.appendChild(other);
             b.appendChild(row);
+            if (ai.vote && !ai.truth) b.appendChild(el("div", "ia-meta", "Ancien avis : " + (ai.vote === "up" ? "bien vu" : "erreur")));
+            if (it.photos_n > 1) {
+                // Une photo = une cible : la reponse photo par photo se donne dans la fiche
+                var pp = el("button", "ia-truth is-other", it.photos_n + " cibles : " + (it.answered_n || 0) + "/" + it.photos_n + " repondues, repondre photo par photo");
+                pp.type = "button";
+                pp.addEventListener("click", function () {
+                    setMode("intrusions");
+                    if (window.IADetection) window.IADetection.openEpisode(it.id);
+                });
+                b.appendChild(pp);
+            }
             if (ai.vote) markDone();
             imgBox.title = "Ouvrir la fiche (cadres, toutes les photos)";
             imgBox.addEventListener("click", function () {

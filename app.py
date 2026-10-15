@@ -6969,7 +6969,11 @@ def pcorg_camera_snapshot(cam_id):
     """Vignette (derniere capture) d'une camera pour le selecteur."""
     from flask import send_file
     from cameras import latest_snapshot_path
-    path = latest_snapshot_path(cam_id)
+    try:  # ?channel=N : capture de ce canal (page IA, volet d'une camera)
+        channel = int(request.args.get("channel") or 1)
+    except ValueError:
+        channel = 1
+    path = latest_snapshot_path(cam_id, channel)
     if not path:
         return "", 204
     return send_file(path, mimetype="image/jpeg", max_age=30)

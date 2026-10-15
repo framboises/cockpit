@@ -134,8 +134,20 @@ du serveur (NVIDIA L4), sans service en ligne ni cout.
   encodes une fois) EXPLIQUE seulement (`guess` : oiseau, panneau, branche,
   reflet, sol, grillage...) : il voit parfois "grillage" sur une personne
   derriere une cloture, il ne doit jamais decider. YOLO-World teste et
-  ecarte (corneille -> personne 21 %). ~150 ms au total.
+  ecarte (corneille -> personne 21 %). ~350 ms au total.
   `GET /health`, `POST /verify {photo, rect}`.
+- CORRIGE le 14/10/2026 : sur 284 intrusions filtrees, ~220 etaient de vraies
+  personnes / vehicules (cibles de 15-40 px sur des photos 1600x900). Cause :
+  un carre de 160 px agrandi a 640 devient flou, YOLO ne voit plus rien.
+  Desormais DEUX cadrages (`FRAMINGS` : zoom x8 / 320 px min. a imgsz 640, et
+  zoom x4 / 160 px a imgsz 320, sans agrandir), detections fusionnees
+  (`_dedupe`). Et si SigLIP voit personne + vehicule >= 0,6 alors que YOLO en
+  devine un >= 0,1, `real_conf` = score SigLIP (`by: "detecteur+avis"`,
+  `yolo_conf` = score YOLO brut) : vehicules eblouis par leurs phares. Mesure :
+  186 vraies cibles recuperees, 0 des 29 fausses alertes validees par
+  l'operateur reclassee. Tout est dans le service : le recepteur n'a pas
+  change (il compare toujours `real_conf` a `min_conf`). Le recepteur ne
+  recopie pas `by` dans `ai` (seul le script de reverification l'ecrit).
 - Recepteur : `intrusions.verify_photo` apres `record_intrusion`, appele par
   `ecoutehik2.py`. Personne / vehicule / velo >= `min_conf` -> alerte ; sinon
   `ai_filtered` : ni alerte ni WhatsApp, l'intrusion et ses photos restent.
@@ -165,12 +177,59 @@ du serveur (NVIDIA L4), sans service en ligne ni cout.
   model, at}` (label = avis SigLIP en tete si filtree), `ai_checks`, par photo
   `photos.$.ai {decision, real_conf, detections, guess}` (cadres "IA : oiseau
   73 %" en pointilles sur la photo et le zoom, a cote du cadre "camera :
-  personne"), avis operateur `ai_vote {vote: up|down, by, at}`
-  (`POST /api/detection/episodes/<id>/ai-vote`, `vote: null` retire).
-- Page : badge "Filtree IA : <label>" / "IA : <label>" / "Non verifiee",
-  filtre `ai=filtered|alerted|voted`, bloc "Verification IA" avec pouces dans
-  la fiche. Les avis (photo + cadre + verdict + avis) servent a regler le seuil
+  personne"), avis operateur `ai_vote {vote: up|down, truth?, note?, by, at}`
+  (`POST /api/detection/episodes/<id>/ai-vote`).
+- Avis = PILULES CLIQUABLES (depuis le 14/10/2026, demande de l'utilisateur) :
+  "Qu'est-ce que la cible signalee (cadre orange) ?" ; les propositions de
+  SigLIP avec leur pourcentage puis les autres categories (`AI_TRUTHS` :
+  personne, vehicule, velo, animal, oiseau, panneau, branche, reflet, sol,
+  grillage, rien). `{truth, note?}` : le pouce `vote` est DEDUIT (up si
+  "vraie intrusion" = "alerte partie"), commentaire facultatif (300 car.).
+  `{truth: null}` / `{vote: null}` retire ; `{vote}` seul reste accepte
+  (anciens avis, "Oui a tout" de la galerie). Galerie : 3 propositions +
+  personne / vehicule + "Autre..." (ouvre la fiche). Seul le cadre orange
+  compte : les vehicules gares vus par l'IA autour ne sont que du decor.
+- "A verifier" (badge orange, `aiDoubt`) : filtree alors que SigLIP voit une
+  personne / un vehicule >= 0,5. Jamais "fausse alerte probable" dans ce cas.
+- Hors planning (`armed: false`) : JAMAIS compte "en cours" ni "a traiter"
+  (`overview` : totals, by_channel, by_zone ; badges des cartes). Une
+  intrusion au sens propre n'existe que pendant le planning.
+- Page : badge "Filtree IA : <label>" / "A verifier" / "IA : <label>" /
+  "Non verifiee", filtre `ai=filtered|alerted|voted`, bloc "Verification IA"
+  avec pilules dans la fiche. Les avis (photo + cadre + verdict + avis) servent a regler le seuil
   et a constituer un jeu d'entrainement ; aucun reentrainement automatique.
+- Reponse PHOTO PAR PHOTO (15/10/2026) : une photo = une cible de la camera
+  (verifie : 6467 photos pour 6425 targetID sur 3 jours), et un episode peut
+  en cumuler 30. `photos.N.truth {truth, note, vote?, by, at}` via
+  `POST /api/detection/episodes/<id>/photos/<idx>/truth` ({photo} controle,
+  409 si la liste a change) ; pilules sous le zoom de la galerie, passage
+  auto a la photo suivante sans reponse, coche verte sur les vignettes.
+  Lien avec l'avis d'episode : la photo qui a decide (`ai.photo`) alimente
+  `ai_vote` (auto "photo") tant que l'operateur n'a pas repondu sur
+  l'episode ; l'inverse remplit la photo si elle n'a pas de reponse.
+- ENTRAINEMENT DE NUIT (15/10/2026) : `scripts/intrusion_training.py`, tache
+  "Cockpit - Entrainement IA intrusions" 03:30 (`intrusion_training.bat`).
+  Exemples = une photo : reponse photo > cadres poses (vide = rien) > avis
+  d'intrusion sur `ai.photo` (sans `truth`, vrai/faux deduit du pouce).
+  Niveau 2 (des 150 reponses precises, 3 categories >= 10, 30 nouvelles) :
+  couche lineaire sur les empreintes SigLIP (`POST /embed` du verificateur,
+  meme cadrage serre que l'avis), partant des phrases (rappel L2). Validation
+  croisee 5 x 80/20 ; installee si +3 points, pas plus d'intrusions ratees,
+  personne / vehicule jamais -5 points. `head.json` dans
+  `tagger\models\analytics\intrusion_head\`, relu A CHAUD par le
+  verificateur (mtime / 30 s), ancien en `head.prev.json`, `--rollback`.
+  ATTENTION : l'avis entre dans la decision (regle detecteur+avis).
+  Niveau 1 (des 80 reponses dont 15 vraies et 15 fausses, 20 nouvelles) :
+  seuil `detection_ai_filter.min_conf` minimisant 5 x ratees + fausses, borne
+  0,15-0,60, 0,10 max par nuit (`min_conf_prev` garde). Etat et historique :
+  `cockpit_settings` `detection_ai_training` (`seen_truth` / `seen_total`).
+  Rapport mail (SMTP 192.168.254.2, safe@lemans.org, `INTRUSION_TRAINING_MAIL_TO`)
+  a chaque analyse, point d'avancement le lundi sinon. `--dry-run`, `--force`.
+  PIEGE : la tache en S4U echoue (LogonUserS4U, compte de domaine) : compte
+  avec mot de passe (comme Capture IA) ou SYSTEM.
+- Le recepteur ne verifie plus apres la premiere photo confirmee : la fiche
+  fait analyser a l'affichage chaque photo sans `ai` (`POST .../photos/<idx>/verify`,
+  ~200 ms, `ai.on_demand: true`). Ne change NI le verdict d'episode NI les alertes.
 - Teste le 10/10/2026 sur 13 photos : personnes 0,82-0,88, voiture 0,74 ;
   oiseaux, panneau, reflet, branche -> rien ou oiseau. La corneille posee sur
   un panneau sort en "frisbee" 0,47 (label "objet") : filtree.
@@ -198,9 +257,30 @@ trafic = couleur de l'etat, LAPI bleu, piste sombre avec cadenas), pastille
 rouge = intrusions a traiter ; filtres Toutes / Surveillees par l'IA /
 Intrusion / Trafic. Clic = VOLET DE DETAIL a droite (`GET
 /api/detection/global-map/<id>`) : usages, marque / modele (IP pour les
-admins), derniere capture (`/api/pcorg/cameras/<id>/snapshot`), trafic de
-chaque canal (derniere paire, zones), 6 dernieres intrusions (clic = fiche),
-canaux et usages avec "Analyser le trafic" par canal, liens LAPI / Cameras.
+admins), trafic de chaque canal (derniere paire, zones), liens LAPI /
+Cameras. Refait le 14/10/2026 :
+- Image : un onglet par canal (pastille rouge = intrusions du jour dans le
+  planning), la PLUS RECENTE entre capture de la page Cameras
+  (`/api/pcorg/cameras/<id>/snapshot?channel=N`), derniere photo
+  d'intrusion et derniere photo Capture IA (`channels[].image {url, at,
+  source}`) ; clic = ouvrir en grand.
+- Intrusions du jour : 3 compteurs cliquables "dans le planning", "a
+  traiter" (planning seul), "hors planning" (`channels[].intrusions {armed,
+  open, offplan}`) qui ouvrent la liste filtree (camera + planning,
+  `IADetection.filterCamera(key, planning)`) ; vignettes des 8 dernieres
+  dans le planning (`episodes`) / hors planning (`episodes_off`).
+- Canaux et usages ("Analyser le trafic"...) dans une section repliee.
+- PIEGE : un canal qui envoie des intrusions SANS usage "Detection
+  d'intrusion" dans la page Cameras (901 canal 1 au 14/10/2026) ne peut pas
+  etre mis dans un groupe de planning, donc il est arme 24 h/24
+  (`detection_arming.channel_armed` : hors de tout groupe = actif). Idem
+  d'un chemin camera inconnu de Cockpit (/camera-restaurant, `camera_id`
+  absent).
+- Plusieurs photos par intrusion : un episode regroupe TOUTES les detections
+  du canal tant qu'il n'y a pas 30 s de silence (`HIK_INTRUSION_GAP_S`), 30
+  photos max., une par cible (`target_id`) : un VL puis un pieton = un seul
+  episode. Une fois l'episode confirme, les photos suivantes ne sont plus
+  verifiees par l'IA.
 
 Zones : dessiner, modifier ou supprimer une zone RECALCULE l'historique de
 la camera (14 jours, `capture_ia.recompute_zones`, vehicules gardes) ;
