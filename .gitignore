@@ -41,3 +41,5 @@ msal_cowork_cache.bin.tmp
 # Journaux d'execution et verrous des taches planifiees (jamais versionnes)
 logs/
 *.log
+
+graphify-out/
