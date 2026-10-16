@@ -793,11 +793,12 @@ body:not(.ia-mode-intrusions) .dt-tabs { display: none !important; }
 .ia-gal-title { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ia-gal-verdict { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .ia-gal-truths { display: flex; flex-wrap: wrap; gap: 4px; }
-.ia-truth { border: 1px solid #ddd6fe; background: #f5f3ff; color: #6d28d9; border-radius: 999px; padding: 3px 9px;
-  font: inherit; font-size: .74rem; font-weight: 600; cursor: pointer; min-height: 28px; }
-.ia-truth:hover { border-color: #7c3aed; }
-.ia-truth.is-on { background: #16a34a; border-color: #16a34a; color: #fff; }
-.ia-truth.is-other { background: var(--card); color: var(--muted); border-color: var(--line); }
+/* Pilules des intrusions (galerie) : .ia-truth est le bloc "Vrai niveau" du trafic */
+.ia-itruth { border: 1px solid #ddd6fe; background: #f5f3ff; color: #6d28d9; border-radius: 999px; padding: 3px 9px;
+  font: inherit; font-size: .74rem; font-weight: 600; cursor: pointer; min-height: 28px; max-width: 100%; text-align: left; }
+.ia-itruth:hover { border-color: #7c3aed; }
+.ia-itruth.is-on { background: #16a34a; border-color: #16a34a; color: #fff; }
+.ia-itruth.is-other { background: var(--card); color: var(--muted); border-color: var(--line); }
 .ia-gal-thumbs { display: flex; gap: 6px; }
 .ia-gal-thumbs .dt-thumb-btn { height: 36px; font-size: .78rem; }
 .ia-gal-thumbs .dt-thumb-btn .material-symbols-outlined { font-size: 19px; }

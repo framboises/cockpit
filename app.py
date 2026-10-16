@@ -9885,6 +9885,13 @@ if __name__ == "__main__":
             INTEG.start_worker()
         except Exception as e:
             logger.warning("Echec demarrage connecteur applications externes : %s", e)
+        # Intrusions arrivees sans photo : capture du canal par Cockpit
+        try:
+            import detection as DET
+            import detection_snapshot
+            detection_snapshot.start_worker(DET._ensure_db)
+        except Exception as e:
+            logger.warning("Echec demarrage capture des intrusions sans photo : %s", e)
         # Planificateur PMV (envois programmes aux remorques, cf. pmv.py)
         try:
             import pmv

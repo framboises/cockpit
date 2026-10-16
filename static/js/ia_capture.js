@@ -1781,7 +1781,7 @@
             (ai.guess || []).forEach(function (g) { pc[g.label] = g.p; });
             props.forEach(function (l) {
                 var on = ai.truth === l;
-                var bt = el("button", "ia-truth" + (on ? " is-on" : "")); bt.type = "button";
+                var bt = el("button", "ia-itruth" + (on ? " is-on" : "")); bt.type = "button";
                 bt.textContent = (AI_NAME[l] || l) + (pc[l] >= 0.03 ? " " + Math.round(pc[l] * 100) + " %" : "");
                 bt.title = on ? "Retirer mon avis" : "C'est ca";
                 bt.addEventListener("click", function () {
@@ -1794,7 +1794,7 @@
                 });
                 row.appendChild(bt);
             });
-            var other = el("button", "ia-truth is-other", "Autre..."); other.type = "button";
+            var other = el("button", "ia-itruth is-other", "Autre..."); other.type = "button";
             other.title = "Ouvrir la fiche : toutes les reponses, commentaire, cadres";
             other.addEventListener("click", function () {
                 setMode("intrusions");
@@ -1805,7 +1805,7 @@
             if (ai.vote && !ai.truth) b.appendChild(el("div", "ia-meta", "Ancien avis : " + (ai.vote === "up" ? "bien vu" : "erreur")));
             if (it.photos_n > 1) {
                 // Une photo = une cible : la reponse photo par photo se donne dans la fiche
-                var pp = el("button", "ia-truth is-other", it.photos_n + " cibles : " + (it.answered_n || 0) + "/" + it.photos_n + " repondues, repondre photo par photo");
+                var pp = el("button", "ia-itruth is-other", it.photos_n + " cibles : " + (it.answered_n || 0) + "/" + it.photos_n + " repondues, repondre photo par photo");
                 pp.type = "button";
                 pp.addEventListener("click", function () {
                     setMode("intrusions");

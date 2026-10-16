@@ -168,6 +168,12 @@
 .cm-snap { position: relative; border-radius: 10px; overflow: hidden; background: #0f172a; aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center; color: #64748b; }
 .cm-snap img { width: 100%; height: 100%; object-fit: contain; cursor: zoom-in; }
 .cm-snap .material-symbols-outlined { font-size: 34px; }
+.cm-snap-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; margin-top: 6px; }
+.cm-snap-tile { position: relative; padding: 0; border: 2px solid transparent; border-radius: 8px; overflow: hidden; background: #0f172a; aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center; color: #64748b; cursor: pointer; }
+.cm-snap-tile img { width: 100%; height: 100%; object-fit: cover; }
+.cm-snap-tile .material-symbols-outlined { font-size: 22px; }
+.cm-snap-tile.is-current { border-color: var(--accent, #6366f1); }
+.cm-snap-tile-no { position: absolute; top: 3px; left: 3px; min-width: 18px; padding: 0 5px; border-radius: 9px; background: rgba(15, 23, 42, .8); color: #fff; font-size: .7rem; font-weight: 700; line-height: 18px; }
 
 /* Profils d'identifiants */
 .cm-dialog { border: none; border-radius: 14px; padding: 0; width: min(760px, calc(100vw - 24px)); box-shadow: var(--shadow-lg); color: var(--text); }

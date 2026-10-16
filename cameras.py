@@ -187,6 +187,39 @@ UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads", "camera_snapshot
 PROBE_TIMEOUT_S = 1.0
 PROBE_TTL_S = 60
 _probe_cache = {}
+# Une seule vague de tests a la fois : les pages ouvertes pendant une vague
+# attendent son resultat au lieu d'en relancer une (rafale de pages)
+_probe_lock = threading.Lock()
+
+# Capture manuelle : une seule a la fois par camera et un delai minimum
+# entre deux (clics en boucle ou script)
+CAPTURE_MIN_INTERVAL_S = 3
+# Condition : la capture de masse attend qu'un appareil se libere (la capture
+# manuelle, elle, refuse tout de suite)
+_capture_guard = threading.Condition()
+_capture_busy = set()
+_capture_last = {}
+CAPTURE_WAIT_S = 120
+
+
+def _device_acquire(ip, wait):
+    """Reserve l'appareil (une capture a la fois par IP). wait=False : refus
+    immediat s'il est occupe ; sinon attente jusqu'a CAPTURE_WAIT_S."""
+    with _capture_guard:
+        if not wait:
+            if ip in _capture_busy:
+                return False
+        elif not _capture_guard.wait_for(lambda: ip not in _capture_busy, timeout=CAPTURE_WAIT_S):
+            return False
+        _capture_busy.add(ip)
+        return True
+
+
+def _device_release(ip, channel):
+    with _capture_guard:
+        _capture_busy.discard(ip)
+        _capture_last[(ip, channel)] = time.monotonic()
+        _capture_guard.notify_all()
 
 # Cameras 4G (routeur cellulaire, IP publique) : le modem s'endort sans trafic
 # et met jusqu'a une trentaine de secondes a se reveiller. Connexion plus
@@ -720,16 +753,18 @@ def reachability():
     """{id: {ok, at}} pour les appareils actifs ; resultat garde 1 min par IP."""
     _ensure_db()
     docs = list(_col_cameras.find({"enabled": {"$ne": False}}, {"ip": 1, "port": 1}))
-    now_m = time.monotonic()
-    stale = list({(d["ip"], d.get("port", 80)) for d in docs
-                  if (d["ip"], d.get("port", 80)) not in _probe_cache
-                  or now_m - _probe_cache[(d["ip"], d.get("port", 80))][0] >= PROBE_TTL_S})
-    if stale:
-        with ThreadPoolExecutor(max_workers=48) as pool:
-            results = list(pool.map(lambda t: _probe(*t), stale))
-        at = datetime.now(timezone.utc)
-        for key, ok in zip(stale, results):
-            _probe_cache[key] = (time.monotonic(), ok, at)
+    with _probe_lock:
+        # Calcule sous le verrou : une page qui attendait trouve le cache frais
+        now_m = time.monotonic()
+        stale = list({(d["ip"], d.get("port", 80)) for d in docs
+                      if (d["ip"], d.get("port", 80)) not in _probe_cache
+                      or now_m - _probe_cache[(d["ip"], d.get("port", 80))][0] >= PROBE_TTL_S})
+        if stale:
+            with ThreadPoolExecutor(max_workers=48) as pool:
+                results = list(pool.map(lambda t: _probe(*t), stale))
+            at = datetime.now(timezone.utc)
+            for key, ok in zip(stale, results):
+                _probe_cache[key] = (time.monotonic(), ok, at)
     out = {}
     for d in docs:
         hit = _probe_cache.get((d["ip"], d.get("port", 80)))
@@ -956,7 +991,10 @@ def place_device(doc, lat, lng):
 # Une seule capture de masse a la fois, dans ses propres threads : elle ne
 # monopolise pas les threads du serveur web (une camera 4G peut prendre 1 min).
 CAPTURE_ALL_WORKERS = 8
+# Delai minimum entre la fin d'une capture de masse et le lancement suivant
+CAPTURE_ALL_COOLDOWN_S = 120
 _capture_job = {"running": False}
+_capture_all_end = [-1e9]
 _capture_lock = threading.Lock()
 
 
@@ -980,12 +1018,19 @@ def _run_capture_job(docs):
     # enregistreur a 5 cameras n'est pas sollicite 5 fois en meme temps
     def one(doc):
         nos = _capture_channels(doc)
+        ip = doc.get("ip")
         for no in nos:
-            try:
-                _capture_one(doc, no)
-                ok, err = True, ""
-            except Exception as e:
-                ok, err = False, camera_error(doc, e, "Capture de masse")
+            # Attend son tour si une capture manuelle occupe l'appareil
+            if not _device_acquire(ip, wait=True):
+                ok, err = False, "Camera occupee par une autre capture"
+            else:
+                try:
+                    _capture_one(doc, no)
+                    ok, err = True, ""
+                except Exception as e:
+                    ok, err = False, camera_error(doc, e, "Capture de masse")
+                finally:
+                    _device_release(ip, no)
             with _capture_lock:
                 _capture_job["done"] += 1
                 if ok:
@@ -1001,6 +1046,7 @@ def _run_capture_job(docs):
         with _capture_lock:
             _capture_job["running"] = False
             _capture_job["finished_at"] = _iso(datetime.now(timezone.utc))
+            _capture_all_end[0] = time.monotonic()
         logger.info("Capture de masse terminee : %d/%d", _capture_job["ok"], _capture_job["total"])
 
 
@@ -1025,6 +1071,9 @@ def capture_all():
     with _capture_lock:
         if _capture_job.get("running"):
             return jsonify({"error": "Une capture de masse est deja en cours"}), 409
+        wait = CAPTURE_ALL_COOLDOWN_S - (time.monotonic() - _capture_all_end[0])
+        if wait > 0:
+            return jsonify({"error": "Derniere capture de masse trop recente : patienter %d s" % max(1, round(wait))}), 429
         _capture_job.clear()
         total = sum(len(_capture_channels(d)) for d in docs)
         _capture_job.update({"running": True, "total": total, "devices": len(docs), "done": 0, "ok": 0, "failed": [],
@@ -1132,6 +1181,16 @@ def capture_snapshot(cam_id):
         return err
     channel = _channel_arg()
     cam = make_hik_camera(doc, channel)
+    # Une capture a la fois par appareil (IP), delai par canal : les canaux
+    # d'un enregistreur se capturent a la suite sans attendre
+    ip, key = doc.get("ip"), (doc.get("ip"), cam.channel)
+    with _capture_guard:
+        if ip in _capture_busy:
+            return jsonify({"error": "Capture deja en cours sur cette camera"}), 429
+        wait = CAPTURE_MIN_INTERVAL_S - (time.monotonic() - _capture_last.get(key, -1e9))
+        if wait > 0:
+            return jsonify({"error": "Patienter %d s avant une nouvelle capture" % max(1, round(wait))}), 429
+        _capture_busy.add(ip)
     try:
         os.makedirs(UPLOAD_DIR, exist_ok=True)
         save_path = os.path.join(UPLOAD_DIR, "%s_ch%d_%s.jpg" % (cam_id, cam.channel, time.strftime("%Y%m%d_%H%M%S")))
@@ -1141,6 +1200,8 @@ def capture_snapshot(cam_id):
             return Response(f.read(), mimetype="image/jpeg")
     except Exception as e:
         return jsonify({"error": camera_error(doc, e, "Capture")}), 502
+    finally:
+        _device_release(ip, cam.channel)
 
 
 @cameras_bp.route("/api/cameras/<cam_id>/snapshot", methods=["GET"])

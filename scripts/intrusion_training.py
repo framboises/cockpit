@@ -112,6 +112,8 @@ def collect(db):
     for e in db["hik_intrusions"].find(q, {"photos": 1, "ai": 1, "ai_vote": 1, "camera_name": 1}):
         cam = e.get("camera_name", "")
         for p in e.get("photos") or []:
+            if p.get("snapshot"):
+                continue  # capture de Cockpit apres l'alerte : le cadre ne colle plus forcement
             truth = (p.get("truth") or {}).get("truth")
             src = "photo"
             if not truth and p.get("label"):

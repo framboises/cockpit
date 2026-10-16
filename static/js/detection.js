@@ -1044,7 +1044,9 @@
         ((p.label && p.label.boxes) || []).forEach(function (b) {
             wrap.appendChild(labelBoxEl(b, { x: 0, y: 0, w: 1, h: 1 }, p.label.by));
         });
-        wrap.appendChild(el("div", "dt-photo-cap", (TYPE[p.type] || TYPE.other).label + " - " + fmtTime(p.at)));
+        wrap.appendChild(el("div", "dt-photo-cap", p.snapshot
+            ? "Capture Cockpit, " + Math.round(p.snap_delay_s || 0) + " s apres l'alerte (camera sans photo) : la cible a pu bouger"
+            : (TYPE[p.type] || TYPE.other).label + " - " + fmtTime(p.at)));
         return wrap;
     }
 

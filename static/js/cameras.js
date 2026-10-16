@@ -570,10 +570,11 @@
     }
 
     /* ---------------- pilotage ---------------- */
-    function capture(c, channel, target) {
+    function capture(c, channel, target, onDone) {
         toast("info", c.cellular ? "Camera 4G : reveil et capture, jusqu'a une minute..." : "Capture en cours...");
         send("POST", API.list + "/" + c._id + "/capture" + (channel ? "?channel=" + channel : "")).then(function (blob) {
             var url = URL.createObjectURL(blob);
+            if (onDone) onDone(url);
             if (target) { target.textContent = ""; target.appendChild(snapImg(url)); }
             else openLightbox(url);
             toast("success", "Capture reussie");
@@ -824,8 +825,11 @@
             var sCh = sel(d.channels.map(function (ch) { return [ch.no, ch.no + " - " + (ch.name || "Canal " + ch.no)]; }), d.channels[0].no);
             sCh.style.cssText = "height:34px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:.82rem;padding:0 8px;flex:1;min-width:0;";
             bar.appendChild(sCh);
+            // Canaux actifs : "Capturer" les prend tous d'un coup (un clic par canal sinon)
+            var capChs = d.channels.filter(function (ch) { return ch.enabled !== false; }).map(function (ch) { return +ch.no; });
+            if (!capChs.length) capChs = [+d.channels[0].no];
             var cap = el("button", "cm-btn"); cap.type = "button"; cap.disabled = !S.meta.key_ok || !c.credential_profile_id;
-            cap.appendChild(icon("photo_camera")); cap.appendChild(document.createTextNode("Capturer"));
+            cap.appendChild(icon("photo_camera")); cap.appendChild(document.createTextNode(capChs.length > 1 ? "Capturer les " + capChs.length + " canaux" : "Capturer"));
             bar.appendChild(cap);
             if (c.wiper) {
                 var wb = el("button", "cm-btn"); wb.type = "button"; wb.disabled = cap.disabled;
@@ -866,7 +870,7 @@
                     gb.disabled = true;
                     send("POST", API.list + "/" + c._id + "/preset", { preset: +sPre.value, channel: +sCh.value }).then(function () {
                         toast("success", "Vue demandee : " + label + ". Capture dans quelques secondes...");
-                        setTimeout(function () { capture(c, +sCh.value, snap); gb.disabled = false; }, 4000);
+                        setTimeout(function () { var no = +sCh.value; capture(c, no, snap, function (url) { setTile(no, url); }); gb.disabled = false; }, 4000);
                     }).catch(function (e) { toast("error", e.message); gb.disabled = false; });
                 });
             });
@@ -883,11 +887,74 @@
                 im.src = url + (url.indexOf("?") < 0 ? "?" : "&") + "t=" + Date.now();
                 snap.appendChild(im);
             }
-            sCh.addEventListener("change", function () { showLatest(); loadPresets(); });
-            cap.addEventListener("click", function () { capture(c, +sCh.value, snap); });
+            // Vignettes des autres canaux : derniere capture de chacun, clic = canal choisi
+            var tiles = el("div", "cm-snap-tiles"), tileOf = {};
+            function snapUrl(no) {
+                return API.list + "/" + c._id + "/snapshot" + (no !== 1 ? "?channel=" + no : "");
+            }
+            function setTile(no, url) {
+                var t = tileOf[no];
+                if (!t) return;
+                var old = t.querySelector("img, .material-symbols-outlined");
+                var im = document.createElement("img");
+                im.alt = "Canal " + no;
+                im.addEventListener("error", function () { im.replaceWith(icon("no_photography")); });
+                im.src = url;
+                if (old) old.replaceWith(im); else t.insertBefore(im, t.firstChild);
+            }
+            function markTiles() {
+                Object.keys(tileOf).forEach(function (no) { tileOf[no].classList.toggle("is-current", +no === +sCh.value); });
+            }
+            if (capChs.length > 1) {
+                capChs.forEach(function (no) {
+                    var ch = d.channels.filter(function (x) { return +x.no === no; })[0] || {};
+                    var t = el("button", "cm-snap-tile"); t.type = "button";
+                    t.title = no + " - " + (ch.name || "Canal " + no);
+                    t.appendChild(el("span", "cm-snap-tile-no", String(no)));
+                    t.addEventListener("click", function () {
+                        sCh.value = no;
+                        sCh.dispatchEvent(new Event("change"));
+                    });
+                    tileOf[no] = t;
+                    tiles.appendChild(t);
+                    setTile(no, snapUrl(no) + (no !== 1 ? "&" : "?") + "t=" + Date.now());
+                });
+                markTiles();
+            }
+            function captureAll() {
+                cap.disabled = true;
+                var done = 0, fails = [];
+                toast("info", (c.cellular ? "Camera 4G : reveil, puis " : "") + "capture des " + capChs.length + " canaux...");
+                // Un canal apres l'autre : la camera ne recoit jamais plusieurs demandes a la fois
+                capChs.reduce(function (p, no) {
+                    return p.then(function () {
+                        return send("POST", API.list + "/" + c._id + "/capture" + (no !== 1 ? "?channel=" + no : "")).then(function (blob) {
+                            var url = URL.createObjectURL(blob);
+                            done++;
+                            setTile(no, url);
+                            if (+sCh.value === no) { snap.textContent = ""; snap.appendChild(snapImg(url)); }
+                        }).catch(function (e) {
+                            var msg = e.message || "Camera injoignable";
+                            if (/timed out|timeout/i.test(msg)) msg = "delai depasse";
+                            fails.push(no + " (" + msg + ")");
+                        });
+                    });
+                }, Promise.resolve()).then(function () {
+                    cap.disabled = false;
+                    if (!fails.length) toast("success", "Capture reussie sur les " + done + " canaux");
+                    else if (done) toast("warning", done + " canal(aux) capture(s), echec : " + fails.join(", "));
+                    else toast("error", "Aucune capture : " + fails.join(", "));
+                });
+            }
+            sCh.addEventListener("change", function () { showLatest(); loadPresets(); markTiles(); });
+            cap.addEventListener("click", function () {
+                if (capChs.length > 1) captureAll();
+                else capture(c, +sCh.value, snap);
+            });
             showLatest();
             loadPresets();
             s5.appendChild(snap);
+            if (capChs.length > 1) s5.appendChild(tiles);
             // Apercu en tete de fiche : visible sans faire defiler
             body.insertBefore(s5, body.firstChild);
         }

@@ -306,7 +306,9 @@ def _pub_episode(ep, zones, now, full=False):
         item["photos"] = [{"photo": _img(p.get("photo")), "thumb": _img(p.get("thumb")), "at": _iso(p.get("at")),
                            "type": p.get("type"), "rect": p.get("rect"), "target_id": p.get("target_id"),
                            "ai": p.get("ai"), "label": _pub_label(p.get("label")),
-                           "truth": _pub_truth(p.get("truth"))}
+                           "truth": _pub_truth(p.get("truth")),
+                           # Capture de Cockpit (camera sans photo, detection_snapshot.py)
+                           "snapshot": bool(p.get("snapshot")), "snap_delay_s": p.get("snap_delay_s")}
                           for p in ep.get("photos") or []]
         item["region_polygon"] = ep.get("region_polygon") or []
         item["resolution"] = ep.get("resolution")

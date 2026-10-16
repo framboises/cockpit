@@ -48,7 +48,9 @@ la page LAPI renvoie ici (`/cameras?usage=anpr`).
 Marques pilotables : `CONTROLLABLE_BRANDS` (hikvision, bosch, dahua, hanwha,
 axis ; les thermiques HM-TD sont classees hikvision). Actions exposees :
 capture par canal (`/capture?channel=n`, derniere capture servie par
-`/snapshot?channel=n`), test de connexion (met a jour modele et firmware),
+`/snapshot?channel=n` ; une seule capture a la fois par IP et
+`CAPTURE_MIN_INTERVAL_S` = 3 s entre deux captures d'un meme canal, sinon
+429 ; la fiche capture tous les canaux actifs a la suite), test de connexion (met a jour modele et firmware),
 presets (`GET /presets`, `POST /preset {preset, channel}`), essuie-glace
 (`WIPER_BRANDS` = hikvision seulement). Vivotek, Uniview et interphones
 generiques sont geres (inventaire, identifiants, usages) mais pas pilotes.
@@ -191,7 +193,11 @@ partagee avec d'autres outils) :
 Capture de masse : `POST /api/cameras/capture-all {ids}` (CHAQUE CANAL ACTIF
 de chaque appareil actif, pilotable, avec profil, depuis le 11/10/2026 ;
 JAMAIS les cameras de piste), `GET` = progression (`total` / `done` en
-canaux, `devices`). Une seule a la fois (409), 8 appareils en parallele dans
+canaux, `devices`). Une seule a la fois (409), puis `CAPTURE_ALL_COOLDOWN_S`
+= 120 s apres la fin avant d'en relancer une (429). Elle partage la reservation
+par IP de la capture manuelle (`_device_acquire` / `_device_release`) : elle
+attend qu'un appareil occupe se libere (120 s max), la capture manuelle refuse
+tout de suite. 8 appareils en parallele dans
 un thread dedie (les threads Waitress ne sont pas occupes), les canaux d'un
 meme appareil L'UN APRES L'AUTRE (un enregistreur n'est pas sollicite 5 fois
 a la fois), `call_camera` (reveil 4G). Vignette par canal :
@@ -209,7 +215,9 @@ mode carte) ; la carte prend toute la hauteur.
 
 `GET /api/cameras/reachability` : connexion TCP au port de chaque appareil
 actif, sans identifiant, 48 en parallele, resultat garde 60 s par IP. Meme
-principe que les voies de la page LAPI (`anpr._reachability`).
+principe que les voies de la page LAPI (`anpr._reachability`). Une seule
+vague de tests a la fois (`_probe_lock`) : une rafale de pages ouvertes
+attend la vague en cours et relit son cache au lieu d'en relancer une.
 
 ## Import SeeTec
 

@@ -207,6 +207,17 @@ du serveur (NVIDIA L4), sans service en ligne ni cout.
   Lien avec l'avis d'episode : la photo qui a decide (`ai.photo`) alimente
   `ai_vote` (auto "photo") tant que l'operateur n'a pas repondu sur
   l'episode ; l'inverse remplit la photo si elle n'a pas de reponse.
+- INTRUSIONS SANS PHOTO (15/10/2026) : certaines cameras envoient
+  `pictures: 0` (131 Porte Est : 12/12 episodes sur 7 jours ; envoi de
+  l'image non coche cote camera, on n'y touche pas). `detection_snapshot.py`
+  (thread de Cockpit, lance avec les workers dans app.py) : episode cree il
+  y a moins de 2 min sans photo -> reserve `snap {state}` (pending / ok /
+  skipped / error) puis GET ISAPI picture du canal (lecture seule, jamais
+  de piste, marque pilotable + profil requis) ; rangee comme le recepteur,
+  `photos[].snapshot: true` + `snap_delay_s`, cadre = celui du 1er message.
+  Dans Cockpit et pas dans le recepteur : seul le compte de Cockpit a
+  COCKPIT_CAMERA_KEY (le recepteur tourne en SYSTEM). Exclues de
+  l'entrainement (la cible a pu bouger).
 - ENTRAINEMENT DE NUIT (15/10/2026) : `scripts/intrusion_training.py`, tache
   "Cockpit - Entrainement IA intrusions" 03:30 (`intrusion_training.bat`).
   Exemples = une photo : reponse photo > cadres poses (vide = rien) > avis
