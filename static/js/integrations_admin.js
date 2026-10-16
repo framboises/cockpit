@@ -214,10 +214,15 @@
       create: { enabled: $("ig-f-create").checked, category: $("ig-f-create-cat").value,
         sous_classification: $("ig-f-create-sc").value || null, max_per_hour: parseInt($("ig-f-create-max").value, 10) || 20 },
     };
-    if (body.create.enabled && !(state.editing && state.editing.create && state.editing.create.enabled) &&
-        !window.confirm("Autoriser " + (body.label || id) + " a creer des fiches dans la main courante ?\n\n" +
-          "Categorie imposee : " + body.create.category + (body.create.sous_classification ? " > " + body.create.sous_classification : "") +
-          "\nMaximum : " + body.create.max_per_hour + " fiche(s) par heure.")) return;
+    var granting = body.create.enabled && !(state.editing && state.editing.create && state.editing.create.enabled);
+    if (!granting) return send(body);
+    window.showConfirmToast("Autoriser " + (body.label || id) + " a creer des fiches dans la main courante ? " +
+      "Categorie imposee : " + body.create.category + (body.create.sous_classification ? " > " + body.create.sous_classification : "") +
+      ", maximum " + body.create.max_per_hour + " fiche(s) par heure.",
+      { type: "warning", okLabel: "Autoriser", cancelLabel: "Annuler" }).then(function (ok) { if (ok) send(body); });
+  }
+
+  function send(body) {
     api("POST", "/api/integrations-admin", body).then(function (r) {
       if (!r.ok) {
         var msg = {
