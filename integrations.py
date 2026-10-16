@@ -23,7 +23,17 @@ Principe
   dans `pcorg.integrations.<id>` (badge sur la fiche).
 * JAMAIS de cloture depuis une application externe : une resolution pose
   `attention: "resolved"` (badge "A cloturer") ; l'operateur clot lui-meme.
-* Une application ne peut agir QUE sur les fiches qui lui ont ete envoyees.
+* Une application ne peut agir QUE sur les fiches qui lui ont ete envoyees
+  (ou qu'elle a creees, voir ci-dessous).
+* CREATION de fiches (16/10/2026, premier usage : SignManager, incidents de
+  signaletique) : DESACTIVEE par defaut, accordee application par application
+  par un admin reel (page /integrations). L'admin fixe la categorie et la
+  sous-classification : l'application ne les choisit jamais. Quota horaire,
+  pas de niveau d'urgence, pas de champs reserves (tablettes, dispatch), pas
+  de cloture ; identifiant de fiche derive de la reference de l'application
+  (une nouvelle tentative ne cree jamais de doublon). La fiche creee est liee
+  a l'application, qui ne peut agir que sur elle (notes, photos, statut,
+  resolution) comme sur un ticket.
 
 Securite
 --------
@@ -76,6 +86,14 @@ HTTP_TIMEOUT_S = 10
 INBOUND_MAX_BYTES = 20 * 1024 * 1024
 SECRET_MIN_LEN = 32
 ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
+
+CREATE_MAX_PER_HOUR_DEFAULT = 20
+CREATE_MAX_PER_HOUR_CAP = 200
+CREATE_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$")
+CARROYE_RE = re.compile(r"^[A-Z]{1,2}\d{1,3}$")
+# Emprise admise pour la position d'une fiche creee par une application
+# (France metropolitaine) : une position aberrante est ignoree, pas refusee.
+GPS_BOUNDS = (41.0, 51.5, -5.5, 10.0)
 
 STATUS_LABELS_DEFAULT = {
     "open": "Ouvert", "in_progress": "En cours", "escalated": "Escalade",
@@ -273,6 +291,23 @@ def clean_rules(raw):
         seen.add(key)
         out.append({"category": cat, "sous_classification": sc})
     return out
+
+
+def clean_create(raw):
+    """Droit de creation de fiches : {enabled, category, sous_classification,
+    max_per_hour}. Invalide ou incomplet = desactive."""
+    raw = raw if isinstance(raw, dict) else {}
+    cat = str(raw.get("category") or "").strip()
+    if not cat.startswith("PCO.") or len(cat) > 40:
+        cat = ""
+    sc = str(raw.get("sous_classification") or "").strip()[:80] or None
+    try:
+        n = int(raw.get("max_per_hour") or CREATE_MAX_PER_HOUR_DEFAULT)
+    except (TypeError, ValueError):
+        n = CREATE_MAX_PER_HOUR_DEFAULT
+    n = max(1, min(CREATE_MAX_PER_HOUR_CAP, n))
+    return {"enabled": bool(raw.get("enabled")) and bool(cat), "category": cat or None,
+            "sous_classification": sc, "max_per_hour": n}
 
 
 def fiche_matches(cfg, fiche):
@@ -568,6 +603,7 @@ def ensure_indexes(db):
         db[COL_OUTBOX].create_index([("integration", 1), ("created_at", DESCENDING)])
         db[COL_OUTBOX].create_index("sent_at", expireAfterSeconds=30 * 24 * 3600)
         db[COL_LINKS].create_index([("integration", 1), ("updated_at", DESCENDING)])
+        db["pcorg"].create_index([("created_by_integration", 1), ("created_at", DESCENDING)], sparse=True)
         db[COL_INBOX].create_index("received_at", expireAfterSeconds=30 * 24 * 3600)
     except Exception as e:  # pragma: no cover
         logger.debug("integrations index : %s", e)
@@ -667,9 +703,97 @@ def _save_photo(db, cfg, fiche, data):
     return {"photo": url, "thumb": thumb}
 
 
+def _gps(lat, lon):
+    try:
+        lat, lon = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return None
+    s, n, w, e = GPS_BOUNDS
+    if not (s <= lat <= n and w <= lon <= e):
+        return None
+    return {"type": "Point", "coordinates": [round(lon, 7), round(lat, 7)]}
+
+
+def create_fiche(db, cfg, ev):
+    """fiche.create : uniquement si un admin l'a accorde a cette application,
+    dans la categorie / sous-classification qu'il a fixees."""
+    import event_courant as EC
+    cr = cfg.get("create") or {}
+    if not cr.get("enabled") or not cr.get("category"):
+        return 403, {"ok": False, "error": "creation_non_autorisee"}
+    ref = _clean(ev.get("ref"), 40)
+    if not CREATE_REF_RE.match(ref):
+        return 400, {"ok": False, "error": "ref_invalide"}
+    integ = cfg["_id"]
+    fid = str(uuid.uuid5(uuid.NAMESPACE_URL, "integration-create|%s|%s" % (integ, ref)))
+    if db["pcorg"].find_one({"_id": fid}, {"_id": 1}):
+        return 200, {"ok": True, "fiche_id": fid, "duplicate": True}
+    text = _clean(ev.get("text"), 4000)
+    if not text:
+        return 400, {"ok": False, "error": "texte_requis"}
+    now_utc = _now()
+    quota = int(cr.get("max_per_hour") or CREATE_MAX_PER_HOUR_DEFAULT)
+    if db["pcorg"].count_documents({"created_by_integration": integ,
+                                    "created_at": {"$gte": now_utc - timedelta(hours=1)}}) >= quota:
+        logger.warning("integrations %s : quota de creation atteint (%d/h)", integ, quota)
+        return 429, {"ok": False, "error": "quota_depasse"}
+    url = _clean(ev.get("url"), 300)
+    if not re.match(r"^https?://", url):
+        url = None
+    agent = _clean(ev.get("agent"), 80)
+    lieu = _clean(ev.get("lieu"), 200)
+    carroye = _clean(ev.get("carroye"), 8).upper()
+    cc = {"source_type": "externe", "canal": "application", "application": True,
+          "appelant": cfg.get("label") or integ}
+    if cr.get("sous_classification"):
+        cc["sous_classification"] = cr["sous_classification"]
+    if CARROYE_RE.match(carroye):
+        cc["carroye"] = carroye
+    event, year = EC.current_event(db)
+    now = PH.now_paris()
+    author = _author(cfg, agent)
+    entry = PH.make_entry(author, "Fiche creee par %s (reference %s)" % (cfg.get("label") or integ, ref),
+                          origin="integration:" + integ, ts=now)
+    doc = {
+        "_id": fid, "event": event, "year": int(year),
+        "ts": now, "timestamp_iso": now.isoformat(), "created_at": now,
+        "close_ts": None, "close_iso": None,
+        "category": cr["category"], "source": cr["category"],
+        "text": text, "text_full": text,
+        "comment": PH.render_comment([entry]), "comment_history": [entry],
+        "operator": author, "operator_id_create": "integration:" + integ,
+        "operator_close": None, "operator_id_close": None,
+        "status_code": 0, "severity": 0, "niveau_urgence": None, "is_incident": False,
+        "area": {"id": None, "desc": lieu} if lieu else None,
+        "gps": _gps(ev.get("lat"), ev.get("lon")),
+        "group": None, "content_category": cc,
+        "extracted": {"phones": None, "plates": None},
+        "tags": ["integration:" + integ],
+        "synced_at": None, "sql_id": None, "guid": None, "server": "COCKPIT", "bounce_rev": 1,
+        "created_by_integration": integ,
+        "integrations": {integ: {"linked": True, "ref": ref, "url": url, "status": "open",
+                                 "status_label": _status_label(cfg, "open"), "agent": agent or None,
+                                 "attention": None, "linked_at": now_utc, "updated_at": now_utc}},
+    }
+    try:
+        db["pcorg"].insert_one(doc)
+    except DuplicateKeyError:
+        return 200, {"ok": True, "fiche_id": fid, "duplicate": True}
+    # Lien : l'application pourra agir sur CETTE fiche (notes, photos, statut,
+    # resolution). Hors perimetre d'envoi tant qu'aucune regle ne la couvre.
+    db[COL_LINKS].update_one({"_id": "%s|%s" % (integ, fid)}, {
+        "$set": {"integration": integ, "fiche_id": fid, "updated_at": now_utc},
+        "$setOnInsert": {"created_by_app": True, "in_scope": False, "sent_hash": None,
+                         "sent_entries": 1, "sent_status": "open", "first_sent_at": None}}, upsert=True)
+    logger.info("integrations %s : fiche %s creee (ref %s)", integ, fid, ref)
+    return 201, {"ok": True, "fiche_id": fid, "event": event, "year": int(year)}
+
+
 def handle_event(db, cfg, ev):
     """Applique un evenement entrant. Retourne (status_http, corps)."""
     etype = _clean(ev.get("type"), 40)
+    if etype == "fiche.create":
+        return create_fiche(db, cfg, ev)
     fiche_id = _clean(ev.get("fiche_id"), 80)
     if not fiche_id:
         return 400, {"ok": False, "error": "fiche_id_requis"}
@@ -866,6 +990,12 @@ def _pub_cfg(db, cfg):
         "secret_env": cfg.get("secret_env") or default_secret_env(cfg["_id"]),
         "secret_ok": bool(get_secret(cfg)),
         "rules": cfg.get("rules") or [],
+        "create": clean_create(cfg.get("create")),
+        "create_enabled_by": (cfg.get("create") or {}).get("enabled_by"),
+        "create_enabled_at": _iso((cfg.get("create") or {}).get("enabled_at")),
+        "created_last_hour": db["pcorg"].count_documents({
+            "created_by_integration": cfg["_id"], "created_at": {"$gte": _now() - timedelta(hours=1)}}),
+        "created_total": db["pcorg"].count_documents({"created_by_integration": cfg["_id"]}),
         "status_labels": cfg.get("status_labels") or {},
         "enabled_at": _iso(cfg.get("enabled_at")),
         "inbound_path": "/api/integrations/%s/events" % cfg["_id"],
@@ -935,6 +1065,19 @@ def admin_save():
         doc["status_labels"] = {_clean(k, 30): _clean(v, 60) for k, v in labels.items() if k}
     if enabled and not cur.get("enabled"):
         doc["enabled_at"] = _now()
+    # Droit de creation de fiches : accorde explicitement, trace (qui, quand)
+    create = clean_create(data.get("create"))
+    prev = clean_create(cur.get("create"))
+    if create["enabled"] and not prev["enabled"]:
+        create["enabled_at"] = _now()
+        create["enabled_by"] = doc["updated_by"]
+    elif create["enabled"]:
+        create["enabled_at"] = (cur.get("create") or {}).get("enabled_at")
+        create["enabled_by"] = (cur.get("create") or {}).get("enabled_by")
+    doc["create"] = create
+    if create["enabled"] != prev["enabled"]:
+        logger.warning("integrations %s : creation de fiches %s par %s", integ_id,
+                       "ACCORDEE" if create["enabled"] else "retiree", doc["updated_by"])
     db[COL_CFG].update_one({"_id": integ_id}, {"$set": doc, "$setOnInsert": {"created_at": _now()}}, upsert=True)
     return jsonify({"ok": True, "integration": _pub_cfg(db, get_config(db, integ_id))})
 

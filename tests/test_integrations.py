@@ -318,3 +318,81 @@ class TestEntrant:
         assert client.get(path).status_code == 200
         assert client.get(path.replace("sig=", "sig=0")).status_code == 404
         assert client.get("/api/integrations/friday/photo?p=SAISON/2026/a.jpg&exp=9999999999&sig=abc").status_code == 404
+
+
+class TestCreation:
+    """fiche.create : droit accorde par un admin, categorie imposee, quota,
+    idempotence, cloisonnement (l'application n'agit que sur ses fiches)."""
+
+    EV = {"type": "fiche.create", "ref": "INC-2026-0001", "text": "Panneau KD42 VIOLET abime au poteau E104",
+          "lieu": "Poteau E104 - Le Mans", "lat": 47.98278, "lon": 0.22, "carroye": "ab12", "agent": "Camille Martin",
+          "url": "https://signmanager.test/incidents?ref=INC-2026-0001",
+          # tentatives d'elargissement, toutes ignorees :
+          "category": "PCO.Secours", "niveau_urgence": "EU", "status_code": 10,
+          "content_category": {"field_created": True, "patrouille": "VL1"}}
+
+    def _grant(self, db, **kw):
+        create = dict({"enabled": True, "category": "PCO.Technique", "sous_classification": "Signaletique",
+                       "max_per_hour": 3}, **kw)
+        db["integrations"].update_one({"_id": "friday"}, {"$set": {"create": create}})
+
+    def test_refusee_par_defaut(self, env):
+        db, client = env
+        r = _post(client, self.EV)
+        assert r.status_code == 403 and r.get_json()["error"] == "creation_non_autorisee"
+        assert db["pcorg"].count_documents({}) == 0
+
+    def test_creation_cloisonnee(self, env, monkeypatch):
+        db, client = env
+        import event_courant as EC
+        monkeypatch.setattr(EC, "current_event", lambda d: ("24H AUTOS", 2026))
+        self._grant(db)
+        r = _post(client, self.EV)
+        assert r.status_code == 201, r.get_json()
+        fid = r.get_json()["fiche_id"]
+        f = db["pcorg"].find_one({"_id": fid})
+        assert f["category"] == "PCO.Technique" and f["content_category"]["sous_classification"] == "Signaletique"
+        assert f["niveau_urgence"] is None and f["status_code"] == 0
+        assert "field_created" not in f["content_category"] and "patrouille" not in f["content_category"]
+        assert f["content_category"]["carroye"] == "AB12" and f["content_category"]["canal"] == "application"
+        assert f["gps"]["coordinates"] == [0.22, 47.98278] and f["event"] == "24H AUTOS"
+        assert f["operator"] == "Friday - Camille Martin" and f["operator_id_create"] == "integration:friday"
+        assert f["integrations"]["friday"]["linked"] is True and f["bounce_rev"] == 1
+        # Rejeu (meme reference, autre event id) : pas de doublon
+        r = _post(client, self.EV, ev_id="e2")
+        assert r.status_code == 200 and r.get_json()["duplicate"] and r.get_json()["fiche_id"] == fid
+        # L'application peut suivre SA fiche : note, resolution (jamais de cloture)
+        assert _post(client, {"type": "ticket.note", "fiche_id": fid, "text": "Equipe envoyee"}, ev_id="e3").status_code == 200
+        assert _post(client, {"type": "ticket.resolved", "fiche_id": fid, "resolution": "Remplace"}, ev_id="e4").status_code == 200
+        f = db["pcorg"].find_one({"_id": fid})
+        assert f["status_code"] == 0 and f["integrations"]["friday"]["attention"] == "resolved"
+        # ... mais pas une fiche d'autrui
+        _fiche(db, "autre", cat="PCO.Secours", sc="Malaise")
+        assert _post(client, {"type": "ticket.note", "fiche_id": "autre", "text": "x"}, ev_id="e5").status_code == 404
+
+    def test_quota_et_validation(self, env, monkeypatch):
+        db, client = env
+        import event_courant as EC
+        monkeypatch.setattr(EC, "current_event", lambda d: ("SAISON", 2026))
+        self._grant(db)
+        assert _post(client, dict(self.EV, ref="../x"), ev_id="v1").status_code == 400
+        assert _post(client, dict(self.EV, ref="R1", text=""), ev_id="v2").status_code == 400
+        far = _post(client, dict(self.EV, ref="R0", lat=10, lon=10, url="javascript:alert(1)"), ev_id="v3")
+        f = db["pcorg"].find_one({"_id": far.get_json()["fiche_id"]})
+        assert f["gps"] is None and f["integrations"]["friday"]["url"] is None
+        for i in (1, 2):
+            assert _post(client, dict(self.EV, ref="R%d" % i), ev_id="q%d" % i).status_code == 201
+        r = _post(client, dict(self.EV, ref="R9"), ev_id="q9")
+        assert r.status_code == 429 and r.get_json()["error"] == "quota_depasse"
+
+    def test_ip_et_signature_toujours_exigees(self, env):
+        db, client = env
+        self._grant(db)
+        assert _post(client, self.EV, remote="10.0.0.1").status_code == 403
+        assert _post(client, self.EV, secret="x" * 40, ev_id="s2").status_code == 401
+        assert db["pcorg"].count_documents({}) == 0
+
+    def test_clean_create(self):
+        assert I.clean_create({"enabled": True, "category": "Secours"})["enabled"] is False
+        assert I.clean_create({"enabled": True, "category": "PCO.Technique", "max_per_hour": 9999})["max_per_hour"] == I.CREATE_MAX_PER_HOUR_CAP
+        assert I.clean_create(None)["enabled"] is False

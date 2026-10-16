@@ -40,3 +40,6 @@
 @media (max-width: 820px) {
   .ig-facts, .ig-grid2 { grid-template-columns: 1fr; }
 }
+.ig-create { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px dashed rgba(220, 38, 38, .45); border-radius: 10px; }
+.ig-create > label { display: flex; flex-direction: column; gap: 4px; font-size: .84rem; font-weight: 600; }
+.ig-create > label.ig-check { flex-direction: row; align-items: center; gap: 8px; }

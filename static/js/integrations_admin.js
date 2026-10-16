@@ -90,6 +90,12 @@
       fact("Reception (a donner a l'application)", (window.__cockpitPublicUrl || "<adresse de Cockpit>") + it.inbound_path, true);
       fact("Fiches envoyees", (it.rules || []).map(ruleLabel).join(" ; ") || "aucune regle");
       fact("Fiches partagees / liees", it.shared + " / " + it.linked);
+      var cr = it.create || {};
+      fact("Creation de fiches", cr.enabled
+        ? "ACCORDEE : " + ruleLabel({ category: cr.category, sous_classification: cr.sous_classification }) +
+          " - " + it.created_last_hour + "/" + cr.max_per_hour + " dans l'heure, " + it.created_total + " au total" +
+          (it.create_enabled_by ? " - accordee par " + it.create_enabled_by + " le " + fmt(it.create_enabled_at) : "")
+        : "non autorisee");
       fact("File d'envoi", it.outbox.pending + " en attente, " + it.outbox.failed + " en echec");
       if (it.last_error) fact("Derniere erreur", fmt(it.last_error_at) + " - " + it.last_error);
       card.appendChild(grid);
@@ -164,6 +170,28 @@
     return out;
   }
 
+  function fillCreate(cr) {
+    cr = cr || {};
+    var cat = $("ig-f-create-cat"), sc = $("ig-f-create-sc");
+    cat.textContent = "";
+    CATEGORIES.forEach(function (c) {
+      var o = el("option", "", c[1]); o.value = c[0]; if (c[0] === (cr.category || "PCO.Technique")) o.selected = true; cat.appendChild(o);
+    });
+    function fillSc() {
+      sc.textContent = "";
+      var none = el("option", "", "(aucune)"); none.value = ""; sc.appendChild(none);
+      (state.sousClass[cat.value] || []).forEach(function (s) {
+        var name = typeof s === "string" ? s : (s && (s.label || s.name)) || "";
+        if (!name) return;
+        var o = el("option", "", name); o.value = name; if (name === cr.sous_classification) o.selected = true; sc.appendChild(o);
+      });
+    }
+    cat.onchange = function () { cr = {}; fillSc(); };
+    fillSc();
+    $("ig-f-create").checked = !!cr.enabled;
+    $("ig-f-create-max").value = cr.max_per_hour || 20;
+  }
+
   function openEdit(it) {
     state.editing = it || null;
     $("ig-edit-title").textContent = it ? "Modifier " + it.label : "Nouvelle application";
@@ -174,6 +202,7 @@
     $("ig-f-secret").value = it ? it.secret_env : "";
     $("ig-f-enabled").checked = it ? it.enabled : false;
     renderRules(it ? it.rules || [] : []);
+    fillCreate(it ? it.create : null);
     $("ig-edit").hidden = false;
   }
 
@@ -182,7 +211,13 @@
     var body = {
       id: id, label: $("ig-f-label").value.trim(), outbound_url: $("ig-f-url").value.trim(),
       secret_env: $("ig-f-secret").value.trim(), enabled: $("ig-f-enabled").checked, rules: collectRules(),
+      create: { enabled: $("ig-f-create").checked, category: $("ig-f-create-cat").value,
+        sous_classification: $("ig-f-create-sc").value || null, max_per_hour: parseInt($("ig-f-create-max").value, 10) || 20 },
     };
+    if (body.create.enabled && !(state.editing && state.editing.create && state.editing.create.enabled) &&
+        !window.confirm("Autoriser " + (body.label || id) + " a creer des fiches dans la main courante ?\n\n" +
+          "Categorie imposee : " + body.create.category + (body.create.sous_classification ? " > " + body.create.sous_classification : "") +
+          "\nMaximum : " + body.create.max_per_hour + " fiche(s) par heure.")) return;
     api("POST", "/api/integrations-admin", body).then(function (r) {
       if (!r.ok) {
         var msg = {

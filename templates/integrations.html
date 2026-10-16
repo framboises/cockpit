@@ -73,6 +73,22 @@
         <span class="ig-hint">categorie entiere, ou seulement certaines sous-classifications</span>
       </div>
       <div id="ig-rules" class="ig-rules"></div>
+      <div class="ig-rules-head">
+        <span>Creation de fiches par l'application</span>
+        <span class="ig-hint">desactivee par defaut ; categorie imposee ici, jamais choisie par l'application</span>
+      </div>
+      <div class="ig-create">
+        <label class="ig-check"><input type="checkbox" id="ig-f-create"> Autoriser cette application a creer des fiches
+          <span class="ig-hint">(sans urgence, sans cloture ; elle n'agit ensuite que sur ses propres fiches)</span></label>
+        <div class="ig-grid2">
+          <label>Categorie imposee
+            <select id="ig-f-create-cat" class="form-input"></select></label>
+          <label>Sous-classification imposee
+            <select id="ig-f-create-sc" class="form-input"></select></label>
+        </div>
+        <label>Maximum de fiches creees par heure <span class="ig-hint">(au-dela : refus, journalise)</span>
+          <input id="ig-f-create-max" class="form-input" type="number" min="1" max="200" value="20"></label>
+      </div>
       <label class="ig-check"><input type="checkbox" id="ig-f-enabled"> Active
         <span class="ig-hint">(a l'activation, seules les fiches creees ensuite sont envoyees)</span></label>
     </div>
